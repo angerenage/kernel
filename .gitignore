@@ -1,0 +1,35 @@
+# Build directories
+build*/
+*/build*/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+*.swo
+*.bak
+*.old
+
+# Test and coverage outputs
+*.gcda
+*.gcno
+*.gcov
+coverage/
+*.profraw
+*.profdata
+
+# IDEs / editors
+.vscode/
+.idea/
+*.code-workspace
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+
+# Python / scripts cache
+__pycache__/
+*.pyc
+
+# Generated docs or artifacts
+docs/generated/
+doc/html/
