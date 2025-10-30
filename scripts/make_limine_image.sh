@@ -12,6 +12,8 @@ Required arguments:
   --builddir    Meson build directory used for caching helper assets.
 
 Optional arguments:
+  --update-limine
+                Refresh the cached Limine clone before building.
   -h, --help    Show this help and exit.
 EOF
 }
@@ -42,6 +44,7 @@ KERNEL_PATH=""
 CONFIG_PATH=""
 OUTPUT_PATH=""
 BUILD_DIR=""
+UPDATE_LIMINE=0
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -60,6 +63,10 @@ while [[ $# -gt 0 ]]; do
 		--builddir)
 			BUILD_DIR="$2"
 			shift 2
+			;;
+		--update-limine)
+			UPDATE_LIMINE=1
+			shift 1
 			;;
 		-h|--help)
 			usage
@@ -92,28 +99,72 @@ cache_dir="${BUILD_DIR}/limine-cache"
 limine_root="${cache_dir}/limine"
 mkdir -p "$cache_dir"
 
-rm -rf "$limine_root"
-log "cloning latest Limine from ${LIMINE_REPO}"
-git clone --depth=1 "$LIMINE_REPO" "$limine_root"
-
-log "preparing Limine build system"
-(
-	cd "$limine_root"
-	if [[ -x ./bootstrap ]]; then
-		./bootstrap
-	fi
-	./configure \
-		--enable-bios \
-		--enable-bios-cd \
-		--enable-uefi-x86-64 \
-		--enable-uefi-cd
+required_assets=(
+	"limine-bios.sys"
+	"limine-bios-cd.bin"
+	"limine-uefi-cd.bin"
 )
 
-log "building Limine utilities"
-make -C "$limine_root"
+if (( UPDATE_LIMINE )); then
+	log "refreshing cached Limine repository at ${limine_root}"
+	rm -rf "$limine_root"
+fi
+
+if [[ ! -d "${limine_root}/.git" ]]; then
+	if [[ -e "$limine_root" ]]; then
+		log "removing stale Limine cache at ${limine_root}"
+		rm -rf "$limine_root"
+	fi
+	log "cloning Limine from ${LIMINE_REPO}"
+	git clone --depth=1 "$LIMINE_REPO" "$limine_root"
+else
+	log "using cached Limine repository at ${limine_root}"
+fi
 
 deploy_tool=""
 limine_bin="${limine_root}/bin"
+limine_build_stamp="${limine_root}/.limine-build-stamp"
+needs_limine_build=0
+
+if [[ ! -f "$limine_build_stamp" ]]; then
+	needs_limine_build=1
+fi
+
+asset_probe_dir="$limine_root"
+if [[ -d "$limine_bin" ]]; then
+	asset_probe_dir="$limine_bin"
+fi
+
+if (( ! needs_limine_build )); then
+	for asset in "${required_assets[@]}"; do
+		if [[ ! -f "${asset_probe_dir}/${asset}" ]]; then
+			needs_limine_build=1
+			break
+		fi
+	done
+fi
+
+if (( needs_limine_build )); then
+	log "preparing Limine build system"
+	(
+		cd "$limine_root"
+		if [[ -x ./bootstrap ]]; then
+			./bootstrap
+		fi
+		./configure \
+			--enable-bios \
+			--enable-bios-cd \
+			--enable-uefi-x86-64 \
+			--enable-uefi-cd
+	)
+
+	log "building Limine utilities"
+	make -C "$limine_root"
+	touch "$limine_build_stamp"
+else
+	log "using cached Limine build artifacts"
+fi
+
 if [[ -x "${limine_bin}/limine-deploy" ]]; then
 	deploy_tool="${limine_bin}/limine-deploy"
 elif [[ -x "${limine_root}/limine-deploy" ]]; then
@@ -125,12 +176,6 @@ elif [[ -x "${limine_root}/limine" ]]; then
 else
 	error "no Limine deployment utility found after build (expected limine or limine-deploy)"
 fi
-
-required_assets=(
-	"limine-bios.sys"
-	"limine-bios-cd.bin"
-	"limine-uefi-cd.bin"
-)
 
 asset_dir="$limine_root"
 if [[ -d "$limine_bin" ]]; then

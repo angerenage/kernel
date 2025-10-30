@@ -7,6 +7,7 @@ MEMORY {
 
 PHDRS {
 	text PT_LOAD FLAGS(0x5);
+	rodata PT_LOAD FLAGS(0x4);
 	data PT_LOAD FLAGS(0x6);
 }
 
@@ -29,11 +30,9 @@ SECTIONS {
 		*(.text*)
 	} > virt AT> phys :text
 
-	.rodata : ALIGN(16) {
+	.rodata : ALIGN(0x1000) {
 		*(.rodata*)
-	} > virt AT> phys :text
-
-	. = ALIGN(0x1000);
+	} > virt AT> phys :rodata
 
 	.data : ALIGN(0x1000) {
 		*(.data*)

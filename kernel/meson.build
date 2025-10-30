@@ -14,10 +14,21 @@ kernel_ld_args = [
 ]
 kernel_ld_args += platform_kernel_link_args
 
-kernel_inc = include_directories('include')
+kernel_inc = include_directories('include', '../')
 
 kernel_objs = [
 	'src/init.c',
+	'src/requests.c',
+	'libk/stdio/utils.c',
+	'libk/stdio/putchar.c',
+	'libk/stdio/puts.c',
+	'libk/stdio/printf.c',
+	'libk/stdio/sprintf.c',
+	'libk/string/memcmp.c',
+	'libk/string/memcpy.c',
+	'libk/string/memmove.c',
+	'libk/string/memset.c',
+	'libk/string/strlen.c',
 ] + platform_kernel_objects
 
 kernel_elf = executable('kernel.elf',
