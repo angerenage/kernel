@@ -22,7 +22,7 @@ limine_config = files('boot/limine.conf')
 
 limine_image = custom_target('limine_image',
 	input : kernel_elf,
-	output : 'limine.iso',
+	output : 'kernel.iso',
 	command : [
 		bash,
 		limine_script[0],
