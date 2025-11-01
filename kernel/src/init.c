@@ -6,8 +6,8 @@
 
 #include "requests.h"
 
-static __attribute__((noreturn))
-void hcf(void) {
+__attribute__((noreturn))
+static void hcf(void) {
 	printf("kernel: hcf\n");
 	__asm__ volatile("cli");
 	for (;;) {
@@ -38,8 +38,8 @@ void kernel_main(void) {
 			uint32_t blue  = 64;
 
 			uint8_t*  pixel_addr = (uint8_t*)(uintptr_t)fb->address + (size_t)y * fb->pitch + (size_t)x * (fb->bpp / 8);
-			uint32_t* pixel		 = (uint32_t*)pixel_addr;
-			*pixel				 = (red << 16) | (green << 8) | blue;
+			uint32_t* pixel      = (uint32_t*)pixel_addr;
+			*pixel               = (red << 16) | (green << 8) | blue;
 		}
 	}
 
@@ -55,9 +55,9 @@ void kernel_main(void) {
 		if (entry->type == 1) total_mem += entry->length;
 
 		printf("  base: 0x%p, length: 0x%p, type: %u\n",
-			   (void*)(uintptr_t)entry->base,
-			   (void*)(uintptr_t)entry->length,
-			   (unsigned)entry->type);
+		       (void*)(uintptr_t)entry->base,
+		       (void*)(uintptr_t)entry->length,
+		       (unsigned)entry->type);
 	}
 
 	printf("kernel: total memory: %u MB\n", (unsigned)(total_mem / (1024 * 1024)));

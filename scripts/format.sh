@@ -117,16 +117,16 @@ apply_attribute_breaks() {
 	log "enforcing newline after __attribute__(...)"
 
 	if command -v perl >/dev/null 2>&1; then
-		# Perl (handles nested parentheses):
-		#   (__attribute__\(\((?>[^()]+|(?1))*\)\))  capture balanced __attribute__((...))
-		#   \s+  whitespace before the next token
-		#   replace by same + newline
+		# Perl (handles nested parentheses via named recursion):
+		#   (?<attr>__attribute__(?&P)) capture balanced __attribute__((...))
+		#   (?(DEFINE)(?<P>\((?:[^()]+|(?&P))*\))) defines the recursive rule
+		#   \s+  whitespace before the next token, replaced by newline
 		if (( DRY_RUN )); then
 			printf '%s\0' "${FILES[@]}" | xargs -0 -n 50 echo perl -0777 -pe \
-				"'s/(__attribute__\\(\\((?>[^()]+|(?1))*\\)\\))\\s+/\\1\\n/g' -i"
+				"'s{(?<attr>__attribute__(?&P))\\s+(?(DEFINE)(?<P>\\((?:[^()]+|(?&P))*\\)))}{$+{attr}\\n}g' -i"
 		else
 			printf '%s\0' "${FILES[@]}" | xargs -0 -n 50 perl -0777 -pe \
-				's/(__attribute__\(\((?>[^()]+|(?1))*\)\))\s+/\1\n/g' -i
+				's{(?<attr>__attribute__(?&P))\s+(?(DEFINE)(?<P>\((?:[^()]+|(?&P))*\)))}{$+{attr}\n}g' -i
 		fi
 	elif command -v sed >/dev/null 2>&1; then
 		# sed fallback (does not handle nested parens perfectly, but fine for common cases)

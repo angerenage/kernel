@@ -38,7 +38,7 @@ static void emit_padding(void (*emit)(char, void*), void* ctx, int count, char p
 }
 
 static void emit_unsigned_number(void (*emit)(char, void*), void* ctx, unsigned long long value, unsigned base,
-								 bool uppercase, int width, char pad) {
+                                 bool uppercase, int width, char pad) {
 	char   buffer[32];
 	size_t idx = 0;
 
@@ -69,11 +69,11 @@ static void emit_unsigned_number(void (*emit)(char, void*), void* ctx, unsigned 
 }
 
 static void emit_signed_number(void (*emit)(char, void*), void* ctx, long long value, int width, bool zero_pad) {
-	char			   pad		 = zero_pad ? '0' : ' ';
-	bool			   negative	 = value < 0;
+	char               pad       = zero_pad ? '0' : ' ';
+	bool               negative  = value < 0;
 	unsigned long long magnitude = (unsigned long long)(negative ? -value : value);
-	char			   buffer[32];
-	size_t			   idx = 0;
+	char               buffer[32];
+	size_t             idx = 0;
 
 	if (magnitude == 0) {
 		buffer[idx++] = '0';
@@ -87,7 +87,7 @@ static void emit_signed_number(void (*emit)(char, void*), void* ctx, long long v
 	}
 
 	int total_digits = (int)idx + (negative ? 1 : 0);
-	int padding		 = width - total_digits;
+	int padding      = width - total_digits;
 
 	if (negative && pad == '0') {
 		emit('-', ctx);
@@ -137,33 +137,33 @@ void format_emit(void (*emit)(char, void*), void* ctx, const char* format, va_li
 			continue;
 		}
 
-		++format;
+		format++;
 		if (*format == '%') {
 			emit('%', ctx);
-			++format;
+			format++;
 			continue;
 		}
 
 		bool zero_pad = false;
-		int	 width	  = 0;
+		int  width    = 0;
 
 		if (*format == '0') {
 			zero_pad = true;
-			++format;
+			format++;
 		}
 
 		while (*format >= '0' && *format <= '9') {
 			width = width * 10 + (*format - '0');
-			++format;
+			format++;
 		}
 
 		int length = 0;
 		if (*format == 'l') {
-			++format;
+			format++;
 			length = 1;
 			if (*format == 'l') {
 				length = 2;
-				++format;
+				format++;
 			}
 		}
 

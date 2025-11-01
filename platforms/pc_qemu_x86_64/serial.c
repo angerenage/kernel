@@ -54,7 +54,7 @@ void hal_serial_write_char(char ch) {
 }
 
 void hal_serial_write(const char* data, size_t length) {
-	for (size_t i = 0; i < length; ++i) {
+	for (size_t i = 0; i < length; i++) {
 		hal_serial_write_char(data[i]);
 	}
 }

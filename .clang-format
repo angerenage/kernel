@@ -1,5 +1,5 @@
 BasedOnStyle: LLVM
-UseTab: Always
+UseTab: AlignWithSpaces
 IndentWidth: 4
 TabWidth: 4
 ContinuationIndentWidth: 4
