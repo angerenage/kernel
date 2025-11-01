@@ -1,14 +1,13 @@
 #include <stdarg.h>
-
 #include <stdio.h>
 
 #include "utils.h"
 
-void sprintf(char *buffer, const char *__restrict format, ...) {
+void sprintf(char* buffer, const char* __restrict format, ...) {
 	if (!buffer) return;
 
 	struct buffer_ctx ctx = {
-		.ptr = buffer,
+		.ptr   = buffer,
 		.index = 0,
 	};
 

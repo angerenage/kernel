@@ -1,9 +1,8 @@
 #include "utils.h"
 
+#include <hal/serial.h>
 #include <stdbool.h>
 #include <stdint.h>
-
-#include <hal/serial.h>
 
 void serial_out_char(char ch) {
 	if (ch == '\n') {
@@ -12,17 +11,17 @@ void serial_out_char(char ch) {
 	hal_serial_write_char(ch);
 }
 
-void serial_emit_adapter(char ch, void *ctx) {
+void serial_emit_adapter(char ch, void* ctx) {
 	(void)ctx;
 	serial_out_char(ch);
 }
 
-void buffer_emit_adapter(char ch, void *context) {
-	struct buffer_ctx *buf = context;
+void buffer_emit_adapter(char ch, void* context) {
+	struct buffer_ctx* buf = context;
 	buf->ptr[buf->index++] = ch;
 }
 
-static void emit_string(void (*emit)(char, void *), void *ctx, const char *str) {
+static void emit_string(void (*emit)(char, void*), void* ctx, const char* str) {
 	if (!str) {
 		str = "(null)";
 	}
@@ -32,33 +31,28 @@ static void emit_string(void (*emit)(char, void *), void *ctx, const char *str) 
 	}
 }
 
-static void emit_padding(void (*emit)(char, void *), void *ctx, int count, char pad) {
+static void emit_padding(void (*emit)(char, void*), void* ctx, int count, char pad) {
 	while (count-- > 0) {
 		emit(pad, ctx);
 	}
 }
 
-static void emit_unsigned_number(
-	void (*emit)(char, void *),
-	void *ctx,
-	unsigned long long value,
-	unsigned base,
-	bool uppercase,
-	int width,
-	char pad)
-{
-	char buffer[32];
+static void emit_unsigned_number(void (*emit)(char, void*), void* ctx, unsigned long long value, unsigned base,
+								 bool uppercase, int width, char pad) {
+	char   buffer[32];
 	size_t idx = 0;
 
 	if (value == 0) {
 		buffer[idx++] = '0';
-	} else {
+	}
+	else {
 		while (value > 0) {
 			unsigned digit = value % base;
 			value /= base;
 			if (digit < 10) {
 				buffer[idx++] = (char)('0' + digit);
-			} else {
+			}
+			else {
 				buffer[idx++] = (char)((uppercase ? 'A' : 'a') + (digit - 10));
 			}
 		}
@@ -74,22 +68,17 @@ static void emit_unsigned_number(
 	}
 }
 
-static void emit_signed_number(
-	void (*emit)(char, void *),
-	void *ctx,
-	long long value,
-	int width,
-	bool zero_pad)
-{
-	char pad = zero_pad ? '0' : ' ';
-	bool negative = value < 0;
+static void emit_signed_number(void (*emit)(char, void*), void* ctx, long long value, int width, bool zero_pad) {
+	char			   pad		 = zero_pad ? '0' : ' ';
+	bool			   negative	 = value < 0;
 	unsigned long long magnitude = (unsigned long long)(negative ? -value : value);
-	char buffer[32];
-	size_t idx = 0;
+	char			   buffer[32];
+	size_t			   idx = 0;
 
 	if (magnitude == 0) {
 		buffer[idx++] = '0';
-	} else {
+	}
+	else {
 		while (magnitude > 0) {
 			unsigned digit = magnitude % 10u;
 			magnitude /= 10u;
@@ -98,7 +87,7 @@ static void emit_signed_number(
 	}
 
 	int total_digits = (int)idx + (negative ? 1 : 0);
-	int padding = width - total_digits;
+	int padding		 = width - total_digits;
 
 	if (negative && pad == '0') {
 		emit('-', ctx);
@@ -118,7 +107,7 @@ static void emit_signed_number(
 	}
 }
 
-static unsigned long long read_unsigned(va_list *args, int length) {
+static unsigned long long read_unsigned(va_list* args, int length) {
 	switch (length) {
 	case 2:
 		return va_arg(*args, unsigned long long);
@@ -129,7 +118,7 @@ static unsigned long long read_unsigned(va_list *args, int length) {
 	}
 }
 
-static long long read_signed(va_list *args, int length) {
+static long long read_signed(va_list* args, int length) {
 	switch (length) {
 	case 2:
 		return va_arg(*args, long long);
@@ -141,7 +130,7 @@ static long long read_signed(va_list *args, int length) {
 }
 
 // Minimal printf-format parser; supports width and zero padding for integers.
-void format_emit(void (*emit)(char, void *), void *ctx, const char *format, va_list *args) {
+void format_emit(void (*emit)(char, void*), void* ctx, const char* format, va_list* args) {
 	while (*format) {
 		if (*format != '%') {
 			emit(*format++, ctx);
@@ -156,7 +145,7 @@ void format_emit(void (*emit)(char, void *), void *ctx, const char *format, va_l
 		}
 
 		bool zero_pad = false;
-		int width = 0;
+		int	 width	  = 0;
 
 		if (*format == '0') {
 			zero_pad = true;
@@ -186,7 +175,7 @@ void format_emit(void (*emit)(char, void *), void *ctx, const char *format, va_l
 			break;
 		}
 		case 's': {
-			const char *str = va_arg(*args, const char *);
+			const char* str = va_arg(*args, const char*);
 			emit_string(emit, ctx, str);
 			break;
 		}
@@ -208,7 +197,7 @@ void format_emit(void (*emit)(char, void *), void *ctx, const char *format, va_l
 			break;
 		}
 		case 'p': {
-			uintptr_t value = (uintptr_t)va_arg(*args, void *);
+			uintptr_t value = (uintptr_t)va_arg(*args, void*);
 			emit('0', ctx);
 			emit('x', ctx);
 			emit_unsigned_number(emit, ctx, value, 16u, false, width ? width : (int)(sizeof(uintptr_t) * 2), '0');

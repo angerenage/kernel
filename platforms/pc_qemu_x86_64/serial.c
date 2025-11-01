@@ -1,8 +1,7 @@
-#include <stdbool.h>
-#include <stdint.h>
-#include <stddef.h>
-
 #include <hal/serial.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #define COM1_BASE 0x3F8
 
@@ -54,7 +53,7 @@ void hal_serial_write_char(char ch) {
 	outb(COM1_BASE, (uint8_t)ch);
 }
 
-void hal_serial_write(const char *data, size_t length) {
+void hal_serial_write(const char* data, size_t length) {
 	for (size_t i = 0; i < length; ++i) {
 		hal_serial_write_char(data[i]);
 	}

@@ -2,7 +2,7 @@ BasedOnStyle: LLVM
 UseTab: Always
 IndentWidth: 4
 TabWidth: 4
-ContinuationIndentWidth: 8
+ContinuationIndentWidth: 4
 ColumnLimit: 120
 IncludeBlocks: Regroup
 NamespaceIndentation: Inner
@@ -11,14 +11,22 @@ AlignConsecutiveAssignments: Consecutive
 AlignConsecutiveDeclarations: Consecutive
 DerivePointerAlignment: false
 PointerAlignment: Left
-AllowShortIfStatementsOnASingleLine: true
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
 AllowShortLoopsOnASingleLine: true
 AllowShortFunctionsOnASingleLine: InlineOnly
 BreakBeforeTernaryOperators: true
+BreakBeforeBraces: Custom
+BraceWrapping:
+  BeforeElse: true
+AlignArrayOfStructures: Right
+Cpp11BracedListStyle: true
+BinPackArguments: false
 
 IncludeCategories:
   - Regex: '^<.*>'
     Priority: 1
-  - Regex: '^".*"'
+  - Regex: '^<hal/.*>'
     Priority: 2
+  - Regex: '^".*"'
+    Priority: 3
 SortIncludes: true
