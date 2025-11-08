@@ -2,6 +2,7 @@
 
 #include <hal/serial.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 void serial_out_char(char ch) {
@@ -157,7 +158,8 @@ void format_emit(void (*emit)(char, void*), void* ctx, const char* format, va_li
 			format++;
 		}
 
-		int length = 0;
+		int  length      = 0;
+		bool length_size = false;
 		if (*format == 'l') {
 			format++;
 			length = 1;
@@ -165,6 +167,10 @@ void format_emit(void (*emit)(char, void*), void* ctx, const char* format, va_li
 				length = 2;
 				format++;
 			}
+		}
+		else if (*format == 'z') {
+			length_size = true;
+			format++;
 		}
 
 		char spec = *format ? *format++ : '\0';
@@ -181,18 +187,39 @@ void format_emit(void (*emit)(char, void*), void* ctx, const char* format, va_li
 		}
 		case 'd':
 		case 'i': {
-			long long value = read_signed(args, length);
+			long long value;
+			if (length_size) {
+				ptrdiff_t diff_value = va_arg(*args, ptrdiff_t);
+				value                = (long long)diff_value;
+			}
+			else {
+				value = read_signed(args, length);
+			}
 			emit_signed_number(emit, ctx, value, width, zero_pad);
 			break;
 		}
 		case 'u': {
-			unsigned long long value = read_unsigned(args, length);
+			unsigned long long value;
+			if (length_size) {
+				size_t size_value = va_arg(*args, size_t);
+				value             = (unsigned long long)size_value;
+			}
+			else {
+				value = read_unsigned(args, length);
+			}
 			emit_unsigned_number(emit, ctx, value, 10u, false, width, zero_pad ? '0' : ' ');
 			break;
 		}
 		case 'x':
 		case 'X': {
-			unsigned long long value = read_unsigned(args, length);
+			unsigned long long value;
+			if (length_size) {
+				size_t size_value = va_arg(*args, size_t);
+				value             = (unsigned long long)size_value;
+			}
+			else {
+				value = read_unsigned(args, length);
+			}
 			emit_unsigned_number(emit, ctx, value, 16u, spec == 'X', width, zero_pad ? '0' : ' ');
 			break;
 		}
