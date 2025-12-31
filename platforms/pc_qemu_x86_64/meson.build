@@ -4,7 +4,6 @@ platform_kernel_c_args += [
 
 platform_kernel_objects += [
 	nasm_elf64.process(files('entry.asm')),
-	files('serial.c'),
-	files('memory/mm.c'),
-	files('memory/early_alloc.c'),
+	files('hal/hcf.c'),
+	files('hal/serial.c'),
 ]

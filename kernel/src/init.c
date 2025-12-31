@@ -1,12 +1,12 @@
-#include <hal/early_alloc.h>
-#include <hal/mm.h>
+#include <core/early_alloc.h>
+#include <core/mm.h>
+#include <hal/hcf.h>
 #include <hal/serial.h>
+#include <kernel/requests.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
-
-#include "requests.h"
 
 static bool is_aligned_uintptr(uintptr_t p, size_t align) {
 	return (align == 0) ? true : ((p & (align - 1)) == 0);
@@ -17,15 +17,6 @@ static void dump_bytes(const char* label, const void* p, size_t n) {
 	printf("%s @ %p: ", label, p);
 	for (size_t i = 0; i < n; i++) printf("%02x ", (unsigned)b[i]);
 	printf("\n");
-}
-
-__attribute__((noreturn))
-static void hcf(void) {
-	printf("kernel: hcf\n");
-	__asm__ volatile("cli");
-	for (;;) {
-		__asm__ volatile("hlt");
-	}
 }
 
 __attribute__((noreturn))
@@ -85,7 +76,7 @@ void kernel_main(void) {
 
 	printf("kernel: total memory: %u MB\n", (unsigned)(total_mem / (1024 * 1024)));
 
-	if (!early_init(memmap_req.response, hhdm_req.response->offset)) {
+	if (!early_init(memmap_req.response, hhdm_req.response->offset, mem_range_type_from_limine)) {
 		printf("kernel: early_init failed\n");
 		hcf();
 	}

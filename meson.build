@@ -11,6 +11,7 @@ platform_kernel_objects = []
 platform_kernel_c_args = []
 platform_kernel_link_args = []
 
+subdir('core')
 subdir('platforms/' + platform)
 subdir('kernel')
 
