@@ -57,10 +57,8 @@ static inline bool align_up_u64(uint64_t v, uint64_t a, uint64_t* out) {
 	return true;
 }
 
-bool early_init(const struct limine_memmap_response* memmap_resp, uintptr_t direct_map_offset,
-                enum mem_range_type (*type_from_platform)(uint64_t type)) {
+bool early_init(const struct limine_memmap_response* memmap_resp, uintptr_t direct_map_offset) {
 	if (!memmap_resp || !memmap_resp->entry_count || !memmap_resp->entries) return false;
-	if (!type_from_platform) return false;
 
 	boot_info.direct_map_offset = direct_map_offset;
 	boot_info.range_count       = (size_t)memmap_resp->entry_count;
@@ -111,7 +109,7 @@ bool early_init(const struct limine_memmap_response* memmap_resp, uintptr_t dire
 	boot_info.ranges = (struct mem_range*)hhdm_phys_to_virt(cursor);
 	for (uint64_t i = 0; i < memmap_resp->entry_count; i++) {
 		struct limine_memmap_entry* e = memmap_resp->entries[i];
-		boot_info.ranges[i]           = (struct mem_range){e->base, e->length, type_from_platform(e->type)};
+		boot_info.ranges[i]           = (struct mem_range){e->base, e->length, mem_range_type_from_limine(e->type)};
 		if (add_overflow_u64(cursor, (uint64_t)sizeof(struct mem_range), &cursor)) return false;
 	}
 

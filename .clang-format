@@ -25,8 +25,12 @@ BinPackArguments: false
 IncludeCategories:
   - Regex: '^<.*>'
     Priority: 1
-  - Regex: '^<hal/.*>'
+  - Regex: '^<core/.*>'
     Priority: 2
-  - Regex: '^".*"'
+  - Regex: '^<kernel/.*>'
     Priority: 3
+  - Regex: '^<hal/.*>'
+    Priority: 4
+  - Regex: '^".*"'
+    Priority: 5
 SortIncludes: true

@@ -1,6 +1,6 @@
 project('kernel', 'c',
 	version : '0.1.0',
-	default_options : ['warning_level=2', 'buildtype=debug', 'b_pie=false']
+	default_options : ['warning_level=2', 'buildtype=debug']
 )
 
 platform = get_option('platform')
@@ -14,6 +14,7 @@ platform_kernel_link_args = []
 subdir('core')
 subdir('platforms/' + platform)
 subdir('kernel')
+subdir('test')
 
 alias_target('kernel', [kernel_elf])
 
