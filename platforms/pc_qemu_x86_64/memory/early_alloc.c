@@ -5,8 +5,10 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #define PAGE_SIZE 0x1000ull
+#define EARLY_DEFAULT_ALIGN 16ull
 
 struct early_arena {
 	uint64_t base;
@@ -40,6 +42,12 @@ static inline bool mul_overflow_u64(uint64_t a, uint64_t b, uint64_t* out) {
 	if (a && b > UINT64_MAX / a) return true;
 	*out = a * b;
 	return false;
+}
+
+static inline uint64_t normalize_align(size_t align) {
+	uint64_t a = (uint64_t)align;
+	if (a == 0) a = EARLY_DEFAULT_ALIGN;
+	return a;
 }
 
 static inline bool align_up_u64(uint64_t v, uint64_t a, uint64_t* out) {
@@ -145,4 +153,36 @@ bool early_init(const struct limine_memmap_response* memmap_resp, uintptr_t dire
 	}
 
 	return true;
+}
+
+void* early_alloc(size_t size, size_t align) {
+	uint64_t a = normalize_align(align);
+
+	if (a == 0 || (a & (a - 1)) != 0) return NULL;
+
+	uint64_t aligned;
+	if (!align_up_u64(early_arena->cursor, a, &aligned)) return NULL;
+
+	uint64_t new_cursor;
+	if (add_overflow_u64(aligned, (uint64_t)size, &new_cursor)) return NULL;
+
+	if (new_cursor > early_arena->end) return NULL;
+
+	early_arena->cursor = new_cursor;
+	return hhdm_phys_to_virt(aligned);
+}
+
+void* early_calloc(size_t nmemb, size_t size, size_t align) {
+	uint64_t total;
+	if (mul_overflow_u64((uint64_t)nmemb, (uint64_t)size, &total)) return NULL;
+
+	void* p = early_alloc((size_t)total, align);
+	if (!p) return NULL;
+
+	memset(p, 0, (size_t)total);
+	return p;
+}
+
+uint64_t early_remaining_bytes(void) {
+	return early_arena->end - early_arena->cursor;
 }
