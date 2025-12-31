@@ -2,6 +2,8 @@
 
 #include <limine.h>
 
+struct mm_boot_info boot_info;
+
 const char* mem_range_type_str(enum mem_range_type type) {
 	switch (type) {
 	case MEM_RANGE_USABLE:

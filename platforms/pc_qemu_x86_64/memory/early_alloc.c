@@ -9,31 +9,52 @@
 #define PAGE_SIZE 0x1000ull
 
 struct early_arena {
-	uintptr_t base;
-	uintptr_t end;
-	uintptr_t cursor;
+	uint64_t base;
+	uint64_t end;
+	uint64_t cursor;
 };
 
 static struct early_arena* scratch_arena = NULL;
 static struct early_arena* early_arena   = NULL;
-static uint64_t            hhdm_offset;
 
 static inline void* hhdm_phys_to_virt(uint64_t phys) {
-	return (void*)(uintptr_t)(phys + hhdm_offset);
+	return (void*)(uintptr_t)(phys + boot_info.direct_map_offset);
 }
 
-static inline uint64_t align_up_u64(uint64_t v, uint64_t a) {
-    return (v + (a - 1)) & ~(a - 1);
+static inline bool add_overflow_u64(uint64_t a, uint64_t b, uint64_t* out) {
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_add_overflow)
+	return __builtin_add_overflow(a, b, out);
+#endif
+#endif
+	*out = a + b;
+	return *out < a;
 }
 
-static inline uint64_t align_down_u64(uint64_t v, uint64_t a) {
-    return v & ~(a - 1);
+static inline bool mul_overflow_u64(uint64_t a, uint64_t b, uint64_t* out) {
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_mul_overflow)
+	return __builtin_mul_overflow(a, b, out);
+#endif
+#endif
+	if (a && b > UINT64_MAX / a) return true;
+	*out = a * b;
+	return false;
+}
+
+static inline bool align_up_u64(uint64_t v, uint64_t a, uint64_t* out) {
+	uint64_t tmp;
+	if (!a || (a & (a - 1))) return false;
+	if (add_overflow_u64(v, a - 1, &tmp)) return false;
+	*out = tmp & ~(a - 1);
+	return true;
 }
 
 bool early_init(const struct limine_memmap_response* memmap_resp, uintptr_t direct_map_offset) {
 	if (!memmap_resp || !memmap_resp->entry_count || !memmap_resp->entries) return false;
 
-	hhdm_offset = direct_map_offset;
+	boot_info.direct_map_offset = direct_map_offset;
+	boot_info.range_count       = (size_t)memmap_resp->entry_count;
 
 	uint64_t best_base = 0, best_end = 0, best_len = 0;
 	uint64_t second_base = 0, second_end = 0, second_len = 0;
@@ -42,24 +63,23 @@ bool early_init(const struct limine_memmap_response* memmap_resp, uintptr_t dire
 
 		if (e->type != LIMINE_MEMMAP_USABLE) continue;
 		if (e->length < PAGE_SIZE) continue;
-		if (e->base > UINT64_MAX - e->length) continue;
 
-		uint64_t base = align_up_u64(e->base, PAGE_SIZE);
-		uint64_t end  = align_down_u64(e->base + e->length, PAGE_SIZE);
-		if (end <= base) continue;
+		uint64_t end;
+		if (add_overflow_u64(e->base, e->length, &end)) continue;
+		if (end <= e->base) continue;
 
-		uint64_t len = end - base;
+		uint64_t len = end - e->base;
 		if (len > best_len) {
 			second_base = best_base;
 			second_end  = best_end;
 			second_len  = best_len;
 
-			best_base = base;
+			best_base = e->base;
 			best_end  = end;
 			best_len  = len;
 		}
 		else if (len > second_len) {
-			second_base = base;
+			second_base = e->base;
 			second_end  = end;
 			second_len  = len;
 		}
@@ -67,23 +87,54 @@ bool early_init(const struct limine_memmap_response* memmap_resp, uintptr_t dire
 
 	if (best_len == 0) return false;
 
-	if (second_len) {
-		struct early_arena* arena = (struct early_arena*)hhdm_phys_to_virt(second_base);
-		arena[0].base             = best_base;
-		arena[0].end              = best_end;
-		arena[0].cursor           = best_base;
-		early_arena               = &arena[0];
+	uint64_t cursor;
+	if (!align_up_u64(best_base, (uint64_t)_Alignof(struct mem_range), &cursor)) return false;
 
-		arena[1].base   = second_base;
-		arena[1].end    = second_end;
-		arena[1].cursor = second_base + PAGE_SIZE;
-		scratch_arena   = &arena[1];
+	uint64_t ranges_bytes64;
+	if (mul_overflow_u64(memmap_resp->entry_count, (uint64_t)sizeof(struct mem_range), &ranges_bytes64)) return false;
+
+	if (cursor > best_end) return false;
+	if (ranges_bytes64 > best_end - cursor) {
+		printf("Not enough memory to store memmap.\n");
+		return false;
+	}
+
+	boot_info.ranges = (struct mem_range*)hhdm_phys_to_virt(cursor);
+	for (uint64_t i = 0; i < memmap_resp->entry_count; i++) {
+		struct limine_memmap_entry* e = memmap_resp->entries[i];
+		boot_info.ranges[i]           = (struct mem_range){e->base, e->length, mem_range_type_from_limine(e->type)};
+		if (add_overflow_u64(cursor, (uint64_t)sizeof(struct mem_range), &cursor)) return false;
+	}
+
+	if (second_len) {
+		uint64_t arenas_ptr;
+		if (!align_up_u64(second_base, (uint64_t)_Alignof(struct early_arena), &arenas_ptr)) return false;
+
+		struct early_arena* arena = (struct early_arena*)hhdm_phys_to_virt(arenas_ptr);
+
+		if (add_overflow_u64(arenas_ptr, 2ull * (uint64_t)sizeof(struct early_arena), &arenas_ptr)) return false;
+		if (arenas_ptr > second_end) {
+			printf("Not enough memory to store early arenas.\n");
+			return false;
+		}
+
+		arena[0]    = (struct early_arena){best_base, best_end, cursor};
+		early_arena = &arena[0];
+
+		arena[1]      = (struct early_arena){second_base, second_end, arenas_ptr};
+		scratch_arena = &arena[1];
 	}
 	else {
-		early_arena         = (struct early_arena*)hhdm_phys_to_virt(best_base);
-		early_arena->base   = best_base;
-		early_arena->end    = best_end;
-		early_arena->cursor = best_base + PAGE_SIZE;
+		if (!align_up_u64(cursor, (uint64_t)_Alignof(struct early_arena), &cursor)) return false;
+		early_arena = (struct early_arena*)hhdm_phys_to_virt(cursor);
+
+		if (add_overflow_u64(cursor, (uint64_t)sizeof(struct early_arena), &cursor)) return false;
+		if (cursor > best_end) {
+			printf("Not enough memory to store early arena.\n");
+			return false;
+		}
+
+		*early_arena = (struct early_arena){best_base, best_end, cursor};
 	}
 
 	if (early_arena != NULL) {
