@@ -1,10 +1,10 @@
+#include "early_alloc_test.h"
+
 #include <core/mm.h>
 #include <limine.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-
-#define KiB(x) ((size_t)(x) * 1024u)
 
 bool is_aligned_uintptr(uintptr_t p, size_t align) {
 	return (align == 0) ? true : ((p & (align - 1)) == 0);

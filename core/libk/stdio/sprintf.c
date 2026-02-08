@@ -1,8 +1,8 @@
-#include <stdarg.h>
 #include <stdio.h>
-#include <stdio/utils.h>
 
-void sprintf(char* buffer, const char* __restrict format, ...) {
+#include "utils.h"
+
+void sprintf(char* buffer, const char* restrict format, ...) {
 	if (!buffer) return;
 
 	struct buffer_ctx ctx = {

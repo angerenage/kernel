@@ -1,7 +1,6 @@
 #pragma once
 
 #include <core/mm.h>
-#include <criterion/criterion.h>
 #include <limine.h>
 #include <stdbool.h>
 #include <stddef.h>

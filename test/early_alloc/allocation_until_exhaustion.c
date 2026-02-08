@@ -1,4 +1,4 @@
-#include "early_alloc.h"
+#include "early_alloc_test.h"
 
 Test(early_alloc, allocation_until_exhaustion) {
 	_Alignas(4096) uint8_t arena[KiB(1024)];

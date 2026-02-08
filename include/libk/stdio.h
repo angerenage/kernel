@@ -6,5 +6,5 @@
 
 void putchar(char);
 void puts(const char*);
-void printf(const char* __restrict format, ...);
-void sprintf(char* buffer, const char* __restrict format, ...);
+void printf(const char* restrict format, ...);
+void sprintf(char* buffer, const char* restrict format, ...);

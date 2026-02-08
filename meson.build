@@ -5,6 +5,10 @@ project('kernel', 'c',
 
 platform = get_option('platform')
 
+freestanding_c_args = [
+	'-ffreestanding', '-fno-builtin', '-nostdinc',
+]
+
 subdir('toolchain/meson')
 
 platform_kernel_objects = []
