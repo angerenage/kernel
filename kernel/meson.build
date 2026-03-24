@@ -1,7 +1,6 @@
 linker_file = meson.current_source_dir() + '/linker.ld'
 
 kernel_c_args = freestanding_c_args + [
-	'-mno-red-zone', '-mcmodel=kernel',
 	'-fno-pic', '-fno-pie',
 ]
 kernel_c_args += platform_kernel_c_args

@@ -14,6 +14,7 @@ subdir('toolchain/meson')
 platform_kernel_objects = []
 platform_kernel_c_args = []
 platform_kernel_link_args = []
+platform_limine_arch = ''
 
 subdir('core')
 subdir('platforms/' + platform)
@@ -32,6 +33,7 @@ limine_image = custom_target('limine_image',
 	command : [
 		bash,
 		limine_script[0],
+		'--arch', platform_limine_arch,
 		'--kernel', '@INPUT@',
 		'--config', limine_config[0],
 		'--output', '@OUTPUT@',

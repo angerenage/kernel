@@ -1,7 +1,21 @@
-nasm = find_program('nasm', required : true)
+clang = find_program('clang', required : true)
 
-# ELF64 (64 bits) for kernel
-nasm_elf64 = generator(nasm,
+clang_x86_64_elf = generator(clang,
 	output : ['@BASENAME@.o'],
-	arguments : ['-f','elf64','-o','@OUTPUT@','@INPUT@']
+	arguments : ['--target=x86_64-elf', '-c', '-x', 'assembler', '-o', '@OUTPUT@', '@INPUT@']
+)
+
+clang_aarch64_elf = generator(clang,
+	output : ['@BASENAME@.o'],
+	arguments : ['--target=aarch64-elf', '-c', '-x', 'assembler', '-o', '@OUTPUT@', '@INPUT@']
+)
+
+clang_riscv64_elf = generator(clang,
+	output : ['@BASENAME@.o'],
+	arguments : ['--target=riscv64-elf', '-c', '-x', 'assembler', '-o', '@OUTPUT@', '@INPUT@']
+)
+
+clang_loongarch64_elf = generator(clang,
+	output : ['@BASENAME@.o'],
+	arguments : ['--target=loongarch64-unknown-elf', '-c', '-x', 'assembler', '-o', '@OUTPUT@', '@INPUT@']
 )
