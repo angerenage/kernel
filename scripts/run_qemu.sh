@@ -3,11 +3,18 @@ set -euo pipefail
 
 usage() {
 	cat <<'EOF'
-Usage: run_qemu.sh --arch <arch> --builddir <path> [-- <extra qemu args>]
+Usage: run_qemu.sh --arch <arch> [--builddir <path>] [--debug] [--debug-port <port>] [-- <extra qemu args>]
 
 Required arguments:
   --arch        Target architecture (x86_64, aarch64, riscv64, loongarch64).
+
+Optional arguments:
   --builddir    Meson build directory containing kernel.iso.
+                Defaults to build-<arch>.
+  --debug       Start QEMU paused with a GDB stub on localhost and enable
+                QEMU debug logging in the build directory.
+  --debug-port  TCP port to use for the GDB stub in --debug mode.
+                Defaults to 1234.
 
 Optional environment:
   QEMU_FIRMWARE_DIR
@@ -78,6 +85,17 @@ resolve_cmd() {
 	return 1
 }
 
+default_builddir_for_arch() {
+	case "$1" in
+		x86_64|aarch64|riscv64|loongarch64)
+			printf 'build-%s\n' "$1"
+			;;
+		*)
+			error "unsupported architecture: $1"
+			;;
+	esac
+}
+
 find_firmware() {
 	local qemu_bin="$1"
 	local firmware_name="$2"
@@ -115,6 +133,8 @@ find_firmware() {
 
 TARGET_ARCH=""
 BUILD_DIR=""
+DEBUG_MODE=0
+DEBUG_PORT=1234
 EXTRA_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -125,6 +145,14 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--builddir)
 			BUILD_DIR="$2"
+			shift 2
+			;;
+		--debug)
+			DEBUG_MODE=1
+			shift 1
+			;;
+		--debug-port)
+			DEBUG_PORT="$2"
 			shift 2
 			;;
 		--)
@@ -143,11 +171,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$TARGET_ARCH" ]] || error "missing required argument --arch"
-[[ -n "$BUILD_DIR" ]] || error "missing required argument --builddir"
+
+if [[ -z "$BUILD_DIR" ]]; then
+	BUILD_DIR="$(default_builddir_for_arch "$TARGET_ARCH")"
+fi
 
 BUILD_DIR="$(abspath "$BUILD_DIR")"
 ISO_PATH="${BUILD_DIR}/kernel.iso"
-[[ -f "$ISO_PATH" ]] || error "kernel ISO not found: $ISO_PATH"
+[[ -f "$ISO_PATH" ]] || error "kernel ISO not found: $ISO_PATH (use --builddir <path> if you are not using the default build-${TARGET_ARCH} directory)"
+DEBUG_LOG_PATH="${BUILD_DIR}/qemu-${TARGET_ARCH}.debug.log"
 
 firmware_name=""
 firmware_vars_name=""
@@ -173,7 +205,7 @@ case "$TARGET_ARCH" in
 			-M virt
 			-cpu cortex-a72
 			-m 2G
-			-device ramfb
+			-device virtio-gpu-pci
 			-device qemu-xhci
 			-device usb-kbd
 			-device usb-mouse
@@ -191,7 +223,7 @@ case "$TARGET_ARCH" in
 			-M virt,acpi=off,pflash0=pflash0,pflash1=pflash1
 			-cpu rv64
 			-m 2G
-			-device ramfb
+			-device virtio-gpu-pci
 			-device qemu-xhci
 			-device usb-kbd
 			-device usb-mouse
@@ -208,7 +240,7 @@ case "$TARGET_ARCH" in
 			-M virt
 			-cpu la464
 			-m 2G
-			-device ramfb
+			-device virtio-gpu-pci
 			-device qemu-xhci
 			-device usb-kbd
 			-device usb-mouse
@@ -243,6 +275,15 @@ if [[ -n "$firmware_name" ]]; then
 	fi
 fi
 
+if (( DEBUG_MODE )); then
+	qemu_args+=(
+		-S
+		-gdb "tcp:127.0.0.1:${DEBUG_PORT}"
+		-d guest_errors,int,cpu_reset
+		-D "$DEBUG_LOG_PATH"
+	)
+fi
+
 if [[ "$qemu_bin" == *.exe ]]; then
 	ISO_PATH="$(to_native_path "$ISO_PATH")"
 	for ((i = 0; i < ${#qemu_args[@]}; i++)); do
@@ -262,6 +303,20 @@ if [[ "$qemu_bin" == *.exe ]]; then
 			qemu_args[1]="$firmware_path"
 		fi
 	fi
+
+	if (( DEBUG_MODE )); then
+		DEBUG_LOG_PATH="$(to_native_path "$DEBUG_LOG_PATH")"
+		for ((i = 0; i < ${#qemu_args[@]}; i++)); do
+			if [[ "${qemu_args[i]}" == "-D" ]]; then
+				qemu_args[i + 1]="$DEBUG_LOG_PATH"
+				break
+			fi
+		done
+	fi
+fi
+
+if (( DEBUG_MODE )); then
+	echo "run_qemu.sh: debug mode enabled (gdb stub on tcp:127.0.0.1:${DEBUG_PORT}, log: ${DEBUG_LOG_PATH})" >&2
 fi
 
 exec "$qemu_bin" "${qemu_args[@]}" "${EXTRA_ARGS[@]}"

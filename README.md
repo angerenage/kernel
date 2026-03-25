@@ -30,7 +30,16 @@ For the non-`x86_64` targets, QEMU also needs UEFI firmware. The bundled filenam
 
 ## Configure
 
-From the repository root, configure the architecture you want to build:
+The recommended entry point is the build helper:
+
+```sh
+bash scripts/build.sh --arch x86_64 --setup
+bash scripts/build.sh --all --setup
+```
+
+When no architecture is provided, the helper exits with guidance to use either `--arch <arch>` or `--all`.
+
+If you prefer calling Meson directly, configure the architecture you want to build from the repository root:
 
 ```sh
 meson setup build-x86_64 --cross-file toolchain/x86_64-elf.ini -Dplatform=pc_qemu_x86_64
@@ -50,7 +59,23 @@ meson setup build-loongarch64 --reconfigure --cross-file toolchain/loongarch64-e
 
 ## Compile
 
-Build everything for the configured target:
+To configure and compile in one command:
+
+```sh
+bash scripts/build.sh --arch x86_64
+bash scripts/build.sh --arch riscv64 -sc
+bash scripts/build.sh --all
+bash scripts/build.sh --all -sc
+```
+
+To compile only already-configured build directories:
+
+```sh
+bash scripts/build.sh --arch x86_64 --compile
+bash scripts/build.sh --all --compile
+```
+
+If you prefer calling Meson directly, build everything for the configured target:
 
 ```sh
 meson compile -C build-x86_64
@@ -75,10 +100,22 @@ This produces:
 You can launch the kernel in QEMU with the generated ISO using the helper script:
 
 ```sh
-bash scripts/run_qemu.sh --arch x86_64 --builddir build-x86_64
-bash scripts/run_qemu.sh --arch aarch64 --builddir build-aarch64
-bash scripts/run_qemu.sh --arch riscv64 --builddir build-riscv64
-bash scripts/run_qemu.sh --arch loongarch64 --builddir build-loongarch64
+bash scripts/run_qemu.sh --arch x86_64
+bash scripts/run_qemu.sh --arch aarch64
+bash scripts/run_qemu.sh --arch riscv64
+bash scripts/run_qemu.sh --arch loongarch64
+```
+
+If you use a non-standard build directory, override it explicitly:
+
+```sh
+bash scripts/run_qemu.sh --arch x86_64 --builddir out/kernel-x86_64
+```
+
+If you want to launch QEMU in debug mode, you can simply use the `--debug` flag and use `--debug-port` to specify a custom port if you don't want to use the default `1234`:
+
+```sh
+meson test -C build-x86_64 --debug --debug-port 4321
 ```
 
 ## Run the Tests
@@ -100,6 +137,7 @@ meson test -C build-x86_64 early_alloc --print-errorlogs
 - The default platform is `pc_qemu_x86_64`.
 - The available Meson platforms are `pc_qemu_x86_64`, `pc_qemu_aarch64`, `pc_qemu_riscv64`, and `pc_qemu_loongarch64`.
 - The test binaries are built natively, while the kernel is cross-compiled with the selected file in `toolchain/`.
+- `scripts/build.sh` supports `--arch <arch>` for one target and `--all` to configure and/or compile every supported target in one run.
 - The Limine helper script clones Limine into the build directory the first time the ISO target is built.
 - The `virt` machines for non-`x86_64` targets need explicit edk2 firmware. `scripts/run_qemu.sh` locates the matching firmware image automatically, or you can point it at one with `QEMU_FIRMWARE_DIR`.
 - The non-`x86_64` targets are UEFI-only in this repository; BIOS ISO deployment remains `x86_64`-only.
