@@ -265,6 +265,10 @@ if [[ -n "$firmware_name" ]]; then
 		firmware_vars_template="$(find_firmware "$qemu_bin" "$firmware_vars_name")" || error \
 			"firmware '${firmware_vars_name}' not found; set QEMU_FIRMWARE_DIR or install the edk2 firmware package"
 		firmware_vars_path="${BUILD_DIR}/${firmware_vars_name}"
+		if [[ ! -f "$firmware_vars_path" ]]; then
+			cat "$firmware_vars_template" > "$firmware_vars_path"
+		fi
+		chmod u+w "$firmware_vars_path" 2>/dev/null || true
 		qemu_args=(
 			-blockdev "node-name=pflash0,driver=file,read-only=on,filename=${firmware_path}"
 			-blockdev "node-name=pflash1,driver=file,filename=${firmware_vars_path}"

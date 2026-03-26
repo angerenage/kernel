@@ -141,4 +141,3 @@ meson test -C build-x86_64 early_alloc --print-errorlogs
 - The Limine helper script clones Limine into the build directory the first time the ISO target is built.
 - The `virt` machines for non-`x86_64` targets need explicit edk2 firmware. `scripts/run_qemu.sh` locates the matching firmware image automatically, or you can point it at one with `QEMU_FIRMWARE_DIR`.
 - The non-`x86_64` targets are UEFI-only in this repository; BIOS ISO deployment remains `x86_64`-only.
-- The non-`x86_64` serial HAL is currently a stub, so those builds are expected to render through the framebuffer first rather than print early serial logs.

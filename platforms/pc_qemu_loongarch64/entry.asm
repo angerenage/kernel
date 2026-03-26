@@ -4,6 +4,12 @@
 
 _start:
 	la.local $sp, stack_top
+
+	# LoongArch kernels here are built with the hard-float ABI, so FP must be
+	# enabled before entering C.
+	li.w $t0, 1
+	csrwr $t0, 0x2
+
 	bl kernel_main
 
 1:

@@ -6,6 +6,15 @@ _start:
 	adrp x0, stack_top
 	add x0, x0, :lo12:stack_top
 	mov sp, x0
+
+	// Enable FP/SIMD at EL1 before entering C so variadic code can spill q-regs.
+	mrs x0, cpacr_el1
+	orr x0, x0, #(3 << 20)
+	msr cpacr_el1, x0
+	isb
+	msr fpcr, xzr
+	msr fpsr, xzr
+
 	bl kernel_main
 
 1:
