@@ -18,21 +18,32 @@ void kernel_main(void) {
 		hcf();
 	}
 
-	if (!fb_req.response || fb_req.response->framebuffer_count < 1) {
-		printf("kernel: framebuffer request failed\n");
-		hcf();
+	if (!fb_req.response || fb_req.response->framebuffer_count < 1 || !fb_req.response->framebuffers) {
+		printf("kernel: no framebuffer available, continuing in headless mode\n");
 	}
-	struct limine_framebuffer* fb = fb_req.response->framebuffers[0];
+	else {
+		struct limine_framebuffer* fb = fb_req.response->framebuffers[0];
 
-	for (int x = 0; x < (int)fb->width; x++) {
-		for (int y = 0; y < (int)fb->height; y++) {
-			uint32_t red   = (uint32_t)x * 255 / (uint32_t)fb->width;
-			uint32_t green = (uint32_t)y * 255 / (uint32_t)fb->height;
-			uint32_t blue  = 64;
+		if (!fb || !fb->address) {
+			printf("kernel: framebuffer response invalid, continuing in headless mode\n");
+		}
+		else {
+			for (int x = 0; x < (int)fb->width; x++) {
+				for (int y = 0; y < (int)fb->height; y++) {
+					uint32_t red   = (uint32_t)x * 255 / (uint32_t)fb->width;
+					uint32_t green = (uint32_t)y * 255 / (uint32_t)fb->height;
+					uint32_t blue  = 64;
 
-			uint8_t*  pixel_addr = (uint8_t*)(uintptr_t)fb->address + (size_t)y * fb->pitch + (size_t)x * (fb->bpp / 8);
-			uint32_t* pixel      = (uint32_t*)pixel_addr;
-			*pixel               = (red << 16) | (green << 8) | blue;
+					uint8_t*  pixel_addr = (uint8_t*)(uintptr_t)fb->address + (size_t)y * fb->pitch + (size_t)x * (fb->bpp / 8);
+					uint32_t* pixel      = (uint32_t*)pixel_addr;
+					*pixel               = (red << 16) | (green << 8) | blue;
+				}
+			}
+
+			printf("kernel: framebuffer initialized (%ux%u, %u bpp)\n",
+			       (unsigned)fb->width,
+			       (unsigned)fb->height,
+			       (unsigned)fb->bpp);
 		}
 	}
 
