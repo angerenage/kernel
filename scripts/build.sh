@@ -14,7 +14,7 @@ Usage: build.sh (--arch <arch> | --all) [--setup|-s] [--compile|-c] [-sc] [--rec
 
 Target selection:
   --arch <arch>  Build a single architecture (x86_64, aarch64, riscv64, loongarch64).
-  --all          Build every supported architecture.
+  --all          Build every supported architecture in parallel.
 
 Actions:
   --setup|-s        Configure Meson build directories.
@@ -39,6 +39,12 @@ error() {
 
 log() {
 	echo "[build] $*"
+}
+
+log_arch() {
+	local arch="$1"
+	shift
+	echo "[build:${arch}] $*"
 }
 
 need_cmd() {
@@ -106,7 +112,7 @@ setup_arch() {
 		)
 	fi
 
-	log "configuring ${arch} in ${build_dir}"
+	log_arch "$arch" "configuring in ${build_dir}"
 	meson "${meson_args[@]}"
 }
 
@@ -116,8 +122,55 @@ compile_arch() {
 
 	[[ -d "$build_dir" ]] || error "build directory not found for ${arch}: ${build_dir}; run with --setup or use --all to configure every target first"
 
-	log "compiling ${arch} from ${build_dir}"
+	log_arch "$arch" "compiling from ${build_dir}"
 	meson compile -C "$build_dir"
+}
+
+run_arch() {
+	local arch="$1"
+
+	if (( DO_SETUP )); then
+		setup_arch "$arch"
+	fi
+
+	if (( DO_COMPILE )); then
+		compile_arch "$arch"
+	fi
+}
+
+run_arches_in_parallel() {
+	local -a pids=()
+	local -a running_arches=()
+	local arch
+	local pid
+	local idx
+	local status
+	local failed=0
+
+	for arch in "$@"; do
+		(
+			run_arch "$arch"
+		) &
+		pid="$!"
+		pids+=( "$pid" )
+		running_arches+=( "$arch" )
+		log_arch "$arch" "started background job ${pid}"
+	done
+
+	for idx in "${!pids[@]}"; do
+		pid="${pids[$idx]}"
+		arch="${running_arches[$idx]}"
+
+		if wait "$pid"; then
+			log_arch "$arch" "finished successfully"
+		else
+			status=$?
+			echo "build.sh: ${arch} failed with exit code ${status}" >&2
+			failed=1
+		fi
+	done
+
+	(( failed == 0 )) || exit 1
 }
 
 TARGET_ARCH=""
@@ -200,12 +253,10 @@ else
 	selected_arches=("$TARGET_ARCH")
 fi
 
-for arch in "${selected_arches[@]}"; do
-	if (( DO_SETUP )); then
-		setup_arch "$arch"
-	fi
-
-	if (( DO_COMPILE )); then
-		compile_arch "$arch"
-	fi
-done
+if (( ALL_ARCHES )); then
+	run_arches_in_parallel "${selected_arches[@]}"
+else
+	for arch in "${selected_arches[@]}"; do
+		run_arch "$arch"
+	done
+fi

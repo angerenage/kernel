@@ -11,15 +11,19 @@ Options:
   --root <dir>             Root directory to scan (default: .)
   --ext <glob>             File glob to include (repeatable). Defaults:
                              *.c *.h
-  --exclude <glob>         Path pattern to exclude (repeatable). Examples:
+  --exclude <glob>         Path pattern to exclude (repeatable). Matches
+                           root-relative paths, absolute paths, or basenames.
+                           Examples:
                              --exclude '*/limine.h'
+                             --exclude test
+                             --exclude=platforms/pc_qemu_x86_64
   --clang-format <path>    Path to clang-format binary (default: clang-format)
   --dry-run                Print commands instead of modifying files
   -h, --help               Show this help and exit
 
 Notes:
 - Perl is preferred for the attribute rewrite (handles nested parentheses). Falls back to sed if Perl is absent.
-- Exclusions are applied as -not -path globs to find(1).
+- `build-*` directories and `include/limine.h` are skipped by default.
 EOF
 }
 
@@ -51,18 +55,27 @@ DRY_RUN=0
 
 # Defaults (can be added-to via --ext)
 EXTS=( "*.c" "*.h" )
-EXCLUDES=()
+EXCLUDES=( "include/limine.h" )
+PRUNE_DIRS=( "build-*" )
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 		--root)
 			ROOT="$2"; shift 2 ;;
+		--root=*)
+			ROOT="${1#*=}"; shift 1 ;;
 		--ext)
 			EXTS+=( "$2" ); shift 2 ;;
+		--ext=*)
+			EXTS+=( "${1#*=}" ); shift 1 ;;
 		--exclude)
 			EXCLUDES+=( "$2" ); shift 2 ;;
+		--exclude=*)
+			EXCLUDES+=( "${1#*=}" ); shift 1 ;;
 		--clang-format)
 			CLANG_FORMAT_BIN="$2"; shift 2 ;;
+		--clang-format=*)
+			CLANG_FORMAT_BIN="${1#*=}"; shift 1 ;;
 		--dry-run)
 			DRY_RUN=1; shift 1 ;;
 		-h|--help)
@@ -82,22 +95,74 @@ need_cmd "$CLANG_FORMAT_BIN" || true	# nicer error later if missing
 # Build find expression
 build_find_args() {
 	local -n _args=$1
-	_args=( "$ROOT" -type f "(" )
+	_args=( "$ROOT" )
+	if (( ${#PRUNE_DIRS[@]} > 0 )); then
+		_args+=( "(" -type d "(" )
+		for i in "${!PRUNE_DIRS[@]}"; do
+			(( i > 0 )) && _args+=( -o )
+			_args+=( -name "${PRUNE_DIRS[$i]}" )
+		done
+		_args+=( ")" -prune ")" -o )
+	fi
+	_args+=( -type f "(" )
 	for i in "${!EXTS[@]}"; do
 		(( i > 0 )) && _args+=( -o )
 		_args+=( -name "${EXTS[$i]}" )
 	done
-	_args+=( ")" )
+	_args+=( ")" -print0 )
+}
+
+relative_path() {
+	local path="$1"
+
+	case "$path" in
+		"$ROOT") printf '.\n' ;;
+		"$ROOT"/*) printf '%s\n' "${path#"$ROOT"/}" ;;
+		*) printf '%s\n' "$path" ;;
+	esac
+}
+
+matches_exclude() {
+	local path="$1"
+	local rel
+	local base
+	local ex
+
+	rel="$(relative_path "$path")"
+	base="${path##*/}"
+
 	for ex in "${EXCLUDES[@]}"; do
-		_args+=( -not -path "$ex" )
+		if [[ "$path" == $ex || "$rel" == $ex || "$base" == $ex ]]; then
+			return 0
+		fi
+
+		if [[ "$path" == $ex/* || "$rel" == $ex/* ]]; then
+			return 0
+		fi
 	done
+
+	return 1
 }
 
 gather_files() {
 	local args=()
+	local unsorted_files=()
+	local file
+
 	build_find_args args
-	# shellcheck disable=SC2207
-	FILES=( $(find "${args[@]}" -print0 | xargs -0 -I{} printf '%s\n' "{}" | sort) )
+	while IFS= read -r -d '' file; do
+		if matches_exclude "$file"; then
+			continue
+		fi
+		unsorted_files+=( "$file" )
+	done < <(find "${args[@]}")
+
+	if (( ${#unsorted_files[@]} == 0 )); then
+		FILES=()
+		return 0
+	fi
+
+	mapfile -t FILES < <(printf '%s\n' "${unsorted_files[@]}" | sort)
 }
 
 run_clang_format() {
