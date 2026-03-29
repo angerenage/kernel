@@ -185,3 +185,38 @@ void* early_calloc(size_t nmemb, size_t size, size_t align) {
 uint64_t early_remaining_bytes(void) {
 	return early_arena->end - early_arena->cursor;
 }
+
+size_t early_reserved_range_count(void) {
+	size_t count = 0;
+
+	if (early_arena != NULL && early_arena->cursor > early_arena->base) count++;
+	if (scratch_arena != NULL && scratch_arena->cursor > scratch_arena->base) count++;
+
+	return count;
+}
+
+bool early_reserved_range(size_t index, struct early_reserved_range* out) {
+	if (!out) return false;
+
+	if (early_arena != NULL && early_arena->cursor > early_arena->base) {
+		if (index == 0) {
+			*out = (struct early_reserved_range){
+				.base = (uintptr_t)early_arena->base,
+				.end  = (uintptr_t)early_arena->cursor,
+			};
+			return true;
+		}
+
+		index--;
+	}
+
+	if (scratch_arena != NULL && scratch_arena->cursor > scratch_arena->base && index == 0) {
+		*out = (struct early_reserved_range){
+			.base = (uintptr_t)scratch_arena->base,
+			.end  = (uintptr_t)scratch_arena->cursor,
+		};
+		return true;
+	}
+
+	return false;
+}

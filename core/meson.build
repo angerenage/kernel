@@ -13,6 +13,7 @@ core_libk_sources = files(
 
 core_kernel_sources = files(
 	'memory/early_alloc.c',
+	'memory/pmm.c',
 	'mm/boot_info.c',
 )
 

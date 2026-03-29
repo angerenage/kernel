@@ -24,6 +24,15 @@ test_suites = [
 		),
 		'suites': ['unit', 'memory'],
 	},
+	{
+		'name': 'pmm',
+		'sources': files(
+			'pmm/pmm_test.c',
+			'pmm/basic.c',
+			'pmm/contiguous.c',
+		),
+		'suites': ['unit', 'memory'],
+	},
 ]
 
 foreach t : test_suites

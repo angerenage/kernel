@@ -1,5 +1,6 @@
 #include <core/early_alloc.h>
 #include <core/mm.h>
+#include <core/pmm.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
 #include <hal/serial.h>
@@ -11,11 +12,14 @@
 
 __attribute__((noreturn))
 void kernel_main(void) {
+	// Setting up serial for early debug output
 	hal_serial_init();
 	printf("kernel: entering kernel_main\n");
 
+	// Setting up interrupts
 	hal_interrupts_init();
 
+	// Checking limine responses and printing memory map
 	if (!supports_limine_base_revision()) {
 		printf("kernel: unsupported limine base revision\n");
 		hcf();
@@ -80,10 +84,22 @@ void kernel_main(void) {
 
 	printf("kernel: total memory: %u MB\n", (unsigned)(total_mem / (1024 * 1024)));
 
+	// Setting up the early memory allocator
 	if (!early_init(memmap_req.response, hhdm_req.response->offset)) {
 		printf("kernel: early_init failed\n");
 		hcf();
 	}
+
+	// Setting up the page allocator
+	if (!pmm_init()) {
+		printf("kernel: pmm_init failed\n");
+		hcf();
+	}
+
+	printf("kernel: pmm initialized with %zu usable ranges, %zu/%zu pages free\n",
+	       pmm_managed_range_count(),
+	       pmm_free_page_count(),
+	       pmm_total_page_count());
 
 	hcf();
 }
