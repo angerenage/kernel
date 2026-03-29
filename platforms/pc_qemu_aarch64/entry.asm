@@ -5,7 +5,9 @@
 _start:
 	adrp x0, stack_top
 	add x0, x0, :lo12:stack_top
+	msr spsel, #1
 	mov sp, x0
+	msr daifset, #0xf
 
 	// Enable FP/SIMD at EL1 before entering C so variadic code can spill q-regs.
 	mrs x0, cpacr_el1

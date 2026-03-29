@@ -4,6 +4,8 @@
 
 _start:
 	la sp, stack_top
+	csrci sstatus, 2
+	csrw sie, zero
 	call kernel_main
 
 1:

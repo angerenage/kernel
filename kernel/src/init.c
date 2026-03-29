@@ -1,6 +1,7 @@
 #include <core/early_alloc.h>
 #include <core/mm.h>
 #include <hal/hcf.h>
+#include <hal/interrupts.h>
 #include <hal/serial.h>
 #include <kernel/requests.h>
 #include <stdbool.h>
@@ -12,6 +13,8 @@ __attribute__((noreturn))
 void kernel_main(void) {
 	hal_serial_init();
 	printf("kernel: entering kernel_main\n");
+
+	hal_interrupts_init();
 
 	if (!supports_limine_base_revision()) {
 		printf("kernel: unsupported limine base revision\n");
@@ -34,9 +37,10 @@ void kernel_main(void) {
 					uint32_t green = (uint32_t)y * 255 / (uint32_t)fb->height;
 					uint32_t blue  = 64;
 
-					uint8_t*  pixel_addr = (uint8_t*)(uintptr_t)fb->address + (size_t)y * fb->pitch + (size_t)x * (fb->bpp / 8);
-					uint32_t* pixel      = (uint32_t*)pixel_addr;
-					*pixel               = (red << 16) | (green << 8) | blue;
+					uint8_t* pixel_addr =
+						(uint8_t*)(uintptr_t)fb->address + (size_t)y * fb->pitch + (size_t)x * (fb->bpp / 8);
+					uint32_t* pixel = (uint32_t*)pixel_addr;
+					*pixel          = (red << 16) | (green << 8) | blue;
 				}
 			}
 

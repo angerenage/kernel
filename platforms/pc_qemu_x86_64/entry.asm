@@ -7,6 +7,7 @@
 _start:
 	lea rsp, [rip + stack_top]
 	mov rbp, rsp
+	cli
 
 	# Enable SSE/FPU usage before calling into C.
 	mov rax, cr0

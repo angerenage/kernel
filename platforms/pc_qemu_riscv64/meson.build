@@ -6,6 +6,8 @@ platform_kernel_c_args += [
 
 platform_kernel_objects += [
 	clang_riscv64_elf.process(files('entry.asm')),
+	clang_riscv64_elf.process(files('interrupts.asm')),
 	files('hal/hcf.c'),
+	files('hal/interrupts.c'),
 	files('hal/serial.c'),
 ]
