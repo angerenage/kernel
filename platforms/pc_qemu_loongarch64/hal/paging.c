@@ -111,6 +111,11 @@ static inline void loongarch_tlb_flush_all(void) {
 	__asm__ volatile("invtlb 0x0, $r0, $r0" ::: "memory");
 }
 
+static inline void loongarch_page_table_sync(void) {
+	__asm__ volatile("dbar 0\n\t"
+	                 "ibar 0" ::: "memory");
+}
+
 static inline bool loongarch_upper_half(uintptr_t virt) {
 	return ((uint64_t)virt >> (palen_bits - 1u)) != 0;
 }
@@ -146,7 +151,7 @@ static bool loongarch_walk_to_leaf(uintptr_t virt, bool create, uint64_t** out_t
 		size_t   index = (size_t)((virt >> shifts[level]) & 0x1ffu);
 		uint64_t entry = table[index];
 
-		if ((entry & LOONGARCH_PTE_P) == 0) {
+		if (entry == 0) {
 			uintptr_t next_phys = 0;
 			uint64_t* next_table;
 
@@ -155,7 +160,7 @@ static bool loongarch_walk_to_leaf(uintptr_t virt, bool create, uint64_t** out_t
 
 			next_table = (uint64_t*)hhdm_phys_to_virt(next_phys);
 			memset(next_table, 0, PMM_PAGE_SIZE);
-			table[index] = loongarch_entry_from_phys(next_phys) | LOONGARCH_PTE_P | LOONGARCH_PTE_W;
+			table[index] = loongarch_entry_from_phys(next_phys);
 			entry        = table[index];
 		}
 		else if ((entry & LOONGARCH_PTE_G) != 0) {
@@ -215,7 +220,7 @@ bool hal_paging_map(uintptr_t virt, uintptr_t phys, uint64_t flags) {
 	if ((table[index] & LOONGARCH_PTE_P) != 0) return false;
 
 	table[index] = loongarch_entry_from_phys(phys) | loongarch_common_flags(flags);
-	loongarch_tlb_flush_all();
+	loongarch_page_table_sync();
 	return true;
 }
 
@@ -229,6 +234,7 @@ bool hal_paging_unmap(uintptr_t virt) {
 	if ((table[index] & LOONGARCH_PTE_P) == 0) return false;
 
 	table[index] = 0;
+	loongarch_page_table_sync();
 	loongarch_tlb_flush_all();
 	return true;
 }

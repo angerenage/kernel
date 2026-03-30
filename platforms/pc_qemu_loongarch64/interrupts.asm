@@ -1,8 +1,33 @@
 .section .text
 .global loongarch64_exception_entry
+.global loongarch64_tlb_refill_entry
+.global loongarch64_machine_error_entry
 .extern loongarch64_handle_exception
 
 .equ LOONGARCH64_EXCEPTION_FRAME_SIZE, 288
+.equ LOONGARCH64_CSR_PGD, 0x1b
+.equ LOONGARCH64_CSR_TLBRSAVE, 0x8c
+
+.equ NS16550_BASE_PHYS, 0x1fe001e0
+.equ NS16550_THR, 0
+.equ NS16550_LSR, 5
+.equ NS16550_LSR_THRE, 0x20
+
+.macro loongarch64_puts label
+	la.local $t0, \label
+	li.w $t1, NS16550_BASE_PHYS
+1:
+	ld.bu $t2, $t0, 0
+	beqz $t2, 3f
+2:
+	ld.bu $t3, $t1, NS16550_LSR
+	andi $t3, $t3, NS16550_LSR_THRE
+	beqz $t3, 2b
+	st.b $t2, $t1, NS16550_THR
+	addi.d $t0, $t0, 1
+	b 1b
+3:
+.endm
 
 .balign 4096
 loongarch64_exception_entry:
@@ -55,5 +80,30 @@ loongarch64_exception_entry:
 
 1:
 	b 1b
+
+.balign 4096
+loongarch64_tlb_refill_entry:
+	csrwr $t0, LOONGARCH64_CSR_TLBRSAVE
+
+	csrrd $t0, LOONGARCH64_CSR_PGD
+	lddir $t0, $t0, 3
+	lddir $t0, $t0, 2
+	lddir $t0, $t0, 1
+	ldpte $t0, 0
+	ldpte $t0, 1
+	tlbfill
+
+	csrrd $t0, LOONGARCH64_CSR_TLBRSAVE
+	ertn
+
+.balign 4096
+loongarch64_machine_error_entry:
+	loongarch64_puts loongarch64_machine_error_msg
+0:
+	b 0b
+
+.section .rodata
+loongarch64_machine_error_msg:
+	.asciz "kernel: loongarch64 machine error\n"
 
 .section .note.GNU-stack,"",@progbits
