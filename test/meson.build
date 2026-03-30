@@ -33,6 +33,15 @@ test_suites = [
 		),
 		'suites': ['unit', 'memory'],
 	},
+	{
+		'name': 'vaddr_alloc',
+		'sources': files(
+			'vaddr_alloc/vaddr_alloc_test.c',
+			'vaddr_alloc/basic.c',
+			'vaddr_alloc/alignment.c',
+		),
+		'suites': ['unit', 'memory'],
+	},
 ]
 
 foreach t : test_suites

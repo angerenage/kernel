@@ -9,5 +9,6 @@ platform_kernel_objects += [
 	clang_loongarch64_elf.process(files('interrupts.asm')),
 	files('hal/hcf.c'),
 	files('hal/interrupts.c'),
+	files('hal/paging.c'),
 	files('hal/serial.c'),
 ]

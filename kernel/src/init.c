@@ -1,8 +1,10 @@
 #include <core/early_alloc.h>
 #include <core/mm.h>
 #include <core/pmm.h>
+#include <core/vmm.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
+#include <hal/paging.h>
 #include <hal/serial.h>
 #include <kernel/requests.h>
 #include <stdbool.h>
@@ -100,6 +102,13 @@ void kernel_main(void) {
 	       pmm_managed_range_count(),
 	       pmm_free_page_count(),
 	       pmm_total_page_count());
+
+	if (!vmm_init()) {
+		printf("kernel: vmm_init failed\n");
+		hcf();
+	}
+
+	printf("kernel: vmm initialized for heap window 0x%p (%zu pages)\n", (void*)vmm_heap_base(), vmm_heap_page_count());
 
 	hcf();
 }

@@ -14,7 +14,12 @@ core_libk_sources = files(
 core_kernel_sources = files(
 	'memory/early_alloc.c',
 	'memory/pmm.c',
+	'memory/vaddr_alloc.c',
 	'mm/boot_info.c',
 )
 
-core_sources = core_libk_sources + core_kernel_sources
+core_kernel_runtime_sources = core_kernel_sources + files(
+	'memory/vmm.c',
+)
+
+core_sources = core_libk_sources + core_kernel_runtime_sources
