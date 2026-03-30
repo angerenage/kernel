@@ -2,6 +2,7 @@
 #include <core/math.h>
 #include <core/mm.h>
 #include <core/pmm.h>
+#include <core/spinlock.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -22,6 +23,7 @@ static size_t            managed_range_count = 0;
 static size_t            total_page_count    = 0;
 static size_t            free_page_count     = 0;
 static bool              initialized         = false;
+static struct spinlock   pmm_lock            = SPINLOCK_INIT;
 
 static inline size_t bitmap_word_count(size_t page_count) {
 	return (page_count + BITS_PER_WORD - 1u) / BITS_PER_WORD;
@@ -122,29 +124,43 @@ bool pmm_init(void) {
 	size_t usable_pages  = 0;
 	size_t range_index   = 0;
 
+	spinlock_lock(&pmm_lock);
+
 	ranges              = NULL;
 	managed_range_count = 0;
 	total_page_count    = 0;
 	free_page_count     = 0;
 	initialized         = false;
 
-	if (!boot_info.ranges || boot_info.range_count == 0) return false;
+	if (!boot_info.ranges || boot_info.range_count == 0) {
+		spinlock_unlock(&pmm_lock);
+		return false;
+	}
 
 	for (size_t i = 0; i < boot_info.range_count; i++) {
 		uintptr_t base;
 		size_t    page_count;
 
 		if (!usable_page_range(&boot_info.ranges[i], &base, &page_count)) continue;
-		if (usable_pages > PMM_SIZE_MAX - page_count) return false;
+		if (usable_pages > PMM_SIZE_MAX - page_count) {
+			spinlock_unlock(&pmm_lock);
+			return false;
+		}
 
 		usable_ranges++;
 		usable_pages += page_count;
 	}
 
-	if (usable_ranges == 0 || usable_pages == 0) return false;
+	if (usable_ranges == 0 || usable_pages == 0) {
+		spinlock_unlock(&pmm_lock);
+		return false;
+	}
 
 	ranges = early_calloc(usable_ranges, sizeof(struct pmm_range), _Alignof(struct pmm_range));
-	if (!ranges) return false;
+	if (!ranges) {
+		spinlock_unlock(&pmm_lock);
+		return false;
+	}
 
 	managed_range_count = usable_ranges;
 	total_page_count    = usable_pages;
@@ -160,7 +176,10 @@ bool pmm_init(void) {
 
 		words  = bitmap_word_count(page_count);
 		bitmap = early_calloc(words, sizeof(uint64_t), _Alignof(uint64_t));
-		if (!bitmap) return false;
+		if (!bitmap) {
+			spinlock_unlock(&pmm_lock);
+			return false;
+		}
 
 		ranges[range_index++] = (struct pmm_range){
 			.base       = base,
@@ -173,7 +192,10 @@ bool pmm_init(void) {
 	for (size_t i = 0; i < early_reserved_range_count(); i++) {
 		struct early_reserved_range reserved;
 
-		if (!early_reserved_range(i, &reserved)) return false;
+		if (!early_reserved_range(i, &reserved)) {
+			spinlock_unlock(&pmm_lock);
+			return false;
+		}
 
 		for (size_t j = 0; j < managed_range_count; j++) {
 			reserve_pages(&ranges[j], reserved.base, reserved.end);
@@ -181,6 +203,7 @@ bool pmm_init(void) {
 	}
 
 	initialized = true;
+	spinlock_unlock(&pmm_lock);
 	return true;
 }
 
@@ -188,6 +211,7 @@ bool pmm_alloc_pages(size_t count, uintptr_t* out_phys) {
 	if (out_phys) *out_phys = 0;
 
 	if (!initialized || !out_phys || count == 0) return false;
+	spinlock_lock(&pmm_lock);
 
 	for (size_t i = 0; i < managed_range_count; i++) {
 		size_t start_page;
@@ -202,9 +226,11 @@ bool pmm_alloc_pages(size_t count, uintptr_t* out_phys) {
 		ranges[i].free_pages -= count;
 		free_page_count -= count;
 		*out_phys = ranges[i].base + start_page * (uintptr_t)PMM_PAGE_SIZE;
+		spinlock_unlock(&pmm_lock);
 		return true;
 	}
 
+	spinlock_unlock(&pmm_lock);
 	return false;
 }
 
@@ -216,20 +242,30 @@ bool pmm_free_pages(uintptr_t phys, size_t count) {
 	if ((phys & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	if (mul_overflow_u64((uint64_t)count, PMM_PAGE_SIZE, &span)) return false;
 	if (add_overflow_u64((uint64_t)phys, span, &end)) return false;
+	spinlock_lock(&pmm_lock);
 
 	for (size_t i = 0; i < managed_range_count; i++) {
 		uint64_t range_span;
 		uint64_t range_end;
 		size_t   first_page;
 
-		if (mul_overflow_u64((uint64_t)ranges[i].page_count, PMM_PAGE_SIZE, &range_span)) return false;
-		if (add_overflow_u64((uint64_t)ranges[i].base, range_span, &range_end)) return false;
+		if (mul_overflow_u64((uint64_t)ranges[i].page_count, PMM_PAGE_SIZE, &range_span)) {
+			spinlock_unlock(&pmm_lock);
+			return false;
+		}
+		if (add_overflow_u64((uint64_t)ranges[i].base, range_span, &range_end)) {
+			spinlock_unlock(&pmm_lock);
+			return false;
+		}
 		if ((uint64_t)phys < (uint64_t)ranges[i].base || end > range_end) continue;
 
 		first_page = (size_t)(((uint64_t)phys - (uint64_t)ranges[i].base) / PMM_PAGE_SIZE);
 
 		for (size_t page = 0; page < count; page++) {
-			if (!bitmap_test(ranges[i].bitmap, first_page + page)) return false;
+			if (!bitmap_test(ranges[i].bitmap, first_page + page)) {
+				spinlock_unlock(&pmm_lock);
+				return false;
+			}
 		}
 
 		for (size_t page = 0; page < count; page++) {
@@ -238,20 +274,37 @@ bool pmm_free_pages(uintptr_t phys, size_t count) {
 
 		ranges[i].free_pages += count;
 		free_page_count += count;
+		spinlock_unlock(&pmm_lock);
 		return true;
 	}
 
+	spinlock_unlock(&pmm_lock);
 	return false;
 }
 
 size_t pmm_managed_range_count(void) {
-	return managed_range_count;
+	size_t count;
+
+	spinlock_lock(&pmm_lock);
+	count = managed_range_count;
+	spinlock_unlock(&pmm_lock);
+	return count;
 }
 
 size_t pmm_total_page_count(void) {
-	return total_page_count;
+	size_t count;
+
+	spinlock_lock(&pmm_lock);
+	count = total_page_count;
+	spinlock_unlock(&pmm_lock);
+	return count;
 }
 
 size_t pmm_free_page_count(void) {
-	return free_page_count;
+	size_t count;
+
+	spinlock_lock(&pmm_lock);
+	count = free_page_count;
+	spinlock_unlock(&pmm_lock);
+	return count;
 }

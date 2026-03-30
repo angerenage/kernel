@@ -1,6 +1,7 @@
 #include <core/kheap.h>
 #include <core/math.h>
 #include <core/pmm.h>
+#include <core/spinlock.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -28,6 +29,7 @@ static kheap_grow_fn       grow_callback;
 static size_t              total_bytes;
 static size_t              free_bytes;
 static bool                initialized;
+static struct spinlock     kheap_lock = SPINLOCK_INIT;
 
 static inline size_t block_size(const struct kheap_block* block) {
 	return block->size_and_flags & KHEAP_SIZE_MASK;
@@ -180,16 +182,24 @@ static bool ensure_fit(size_t block_bytes, struct kheap_block** out_block) {
 }
 
 bool kheap_init_with_grower(kheap_grow_fn grow_fn) {
+	spinlock_lock(&kheap_lock);
 	free_list     = NULL;
 	grow_callback = grow_fn;
 	total_bytes   = 0;
 	free_bytes    = 0;
 	initialized   = false;
 
-	if (!grow_callback) return false;
-	if (!grow_heap(kheap_min_block_size)) return false;
+	if (!grow_callback) {
+		spinlock_unlock(&kheap_lock);
+		return false;
+	}
+	if (!grow_heap(kheap_min_block_size)) {
+		spinlock_unlock(&kheap_lock);
+		return false;
+	}
 
 	initialized = true;
+	spinlock_unlock(&kheap_lock);
 	return true;
 }
 
@@ -205,12 +215,25 @@ void* kmalloc(size_t size) {
 	size_t              remainder_bytes;
 
 	if (!initialized || size == 0) return NULL;
-	if (!align_up_size(size, KHEAP_ALIGN, &payload_bytes)) return NULL;
-	if (add_overflow_size(kheap_header_size + kheap_footer_size, payload_bytes, &block_bytes)) return NULL;
-	if (!align_up_size(block_bytes, KHEAP_ALIGN, &block_bytes)) return NULL;
+	spinlock_lock(&kheap_lock);
+	if (!align_up_size(size, KHEAP_ALIGN, &payload_bytes)) {
+		spinlock_unlock(&kheap_lock);
+		return NULL;
+	}
+	if (add_overflow_size(kheap_header_size + kheap_footer_size, payload_bytes, &block_bytes)) {
+		spinlock_unlock(&kheap_lock);
+		return NULL;
+	}
+	if (!align_up_size(block_bytes, KHEAP_ALIGN, &block_bytes)) {
+		spinlock_unlock(&kheap_lock);
+		return NULL;
+	}
 	if (block_bytes < kheap_min_block_size) block_bytes = kheap_min_block_size;
 
-	if (!ensure_fit(block_bytes, &block)) return NULL;
+	if (!ensure_fit(block_bytes, &block)) {
+		spinlock_unlock(&kheap_lock);
+		return NULL;
+	}
 
 	remove_free_block(block);
 	remainder_bytes = block_size(block) - block_bytes;
@@ -227,21 +250,28 @@ void* kmalloc(size_t size) {
 	}
 
 	free_bytes -= block_bytes;
-	return (uint8_t*)block + kheap_header_size;
+	void* ptr = (uint8_t*)block + kheap_header_size;
+	spinlock_unlock(&kheap_lock);
+	return ptr;
 }
 
 void kfree(void* ptr) {
 	struct kheap_block* block;
 
 	if (!initialized || ptr == NULL) return;
+	spinlock_lock(&kheap_lock);
 
 	block = (struct kheap_block*)((uint8_t*)ptr - kheap_header_size);
-	if (!block_used(block)) return;
+	if (!block_used(block)) {
+		spinlock_unlock(&kheap_lock);
+		return;
+	}
 
 	mark_block(block, block_size(block), false);
 	free_bytes += block_size(block);
 	block = coalesce_block(block);
 	insert_free_block(block);
+	spinlock_unlock(&kheap_lock);
 }
 
 void* kcalloc(size_t nmemb, size_t size) {
@@ -281,9 +311,19 @@ void* krealloc(void* ptr, size_t size) {
 }
 
 size_t kheap_total_bytes(void) {
-	return total_bytes;
+	size_t total;
+
+	spinlock_lock(&kheap_lock);
+	total = total_bytes;
+	spinlock_unlock(&kheap_lock);
+	return total;
 }
 
 size_t kheap_free_bytes(void) {
-	return free_bytes;
+	size_t free_now;
+
+	spinlock_lock(&kheap_lock);
+	free_now = free_bytes;
+	spinlock_unlock(&kheap_lock);
+	return free_now;
 }

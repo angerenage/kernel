@@ -1,5 +1,6 @@
 test_inc = include_directories('../include')
 criterion = dependency('criterion', native: true, required: true)
+threads = dependency('threads', native: true)
 
 test_common_c_args = ['--coverage']
 test_common_link_args = ['--coverage']
@@ -30,6 +31,7 @@ test_suites = [
 			'pmm/pmm_test.c',
 			'pmm/basic.c',
 			'pmm/contiguous.c',
+			'pmm/concurrency.c',
 		),
 		'suites': ['unit', 'memory'],
 	},
@@ -39,6 +41,7 @@ test_suites = [
 			'vaddr_alloc/vaddr_alloc_test.c',
 			'vaddr_alloc/basic.c',
 			'vaddr_alloc/alignment.c',
+			'vaddr_alloc/concurrency.c',
 		),
 		'suites': ['unit', 'memory'],
 	},
@@ -48,6 +51,7 @@ test_suites = [
 			'kheap/kheap_test.c',
 			'kheap/basic.c',
 			'kheap/calloc_realloc.c',
+			'kheap/concurrency.c',
 			'kheap/growth.c',
 		),
 		'suites': ['unit', 'memory'],
@@ -60,7 +64,7 @@ foreach t : test_suites
 		sources: t['sources'],
 		native: true,
 		include_directories: test_inc,
-		dependencies: [criterion],
+		dependencies: [criterion, threads],
 		link_with: core_test_lib,
 		c_args: test_common_c_args,
 		link_args: test_common_link_args,

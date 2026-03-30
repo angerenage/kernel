@@ -1,6 +1,7 @@
 #include <core/early_alloc.h>
 #include <core/math.h>
 #include <core/pmm.h>
+#include <core/spinlock.h>
 #include <core/vaddr_alloc.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -18,6 +19,7 @@ static struct vaddr_region* spare_regions;
 static size_t               total_pages;
 static size_t               free_pages;
 static bool                 initialized;
+static struct spinlock      vaddr_lock = SPINLOCK_INIT;
 
 static struct vaddr_region* alloc_region(void) {
 	struct vaddr_region* region;
@@ -43,19 +45,35 @@ static void recycle_region(struct vaddr_region* region) {
 bool vaddr_alloc_init(uintptr_t base, size_t page_count) {
 	uint64_t span;
 
+	spinlock_lock(&vaddr_lock);
 	region_list   = NULL;
 	spare_regions = NULL;
 	total_pages   = 0;
 	free_pages    = 0;
 	initialized   = false;
 
-	if ((base & (PMM_PAGE_SIZE - 1u)) != 0) return false;
-	if (page_count == 0) return false;
-	if (mul_overflow_u64((uint64_t)page_count, PMM_PAGE_SIZE, &span)) return false;
-	if ((uint64_t)base + span <= (uint64_t)base) return false;
+	if ((base & (PMM_PAGE_SIZE - 1u)) != 0) {
+		spinlock_unlock(&vaddr_lock);
+		return false;
+	}
+	if (page_count == 0) {
+		spinlock_unlock(&vaddr_lock);
+		return false;
+	}
+	if (mul_overflow_u64((uint64_t)page_count, PMM_PAGE_SIZE, &span)) {
+		spinlock_unlock(&vaddr_lock);
+		return false;
+	}
+	if ((uint64_t)base + span <= (uint64_t)base) {
+		spinlock_unlock(&vaddr_lock);
+		return false;
+	}
 
 	region_list = alloc_region();
-	if (!region_list) return false;
+	if (!region_list) {
+		spinlock_unlock(&vaddr_lock);
+		return false;
+	}
 
 	*region_list = (struct vaddr_region){
 		.base       = base,
@@ -67,6 +85,7 @@ bool vaddr_alloc_init(uintptr_t base, size_t page_count) {
 	total_pages = page_count;
 	free_pages  = page_count;
 	initialized = true;
+	spinlock_unlock(&vaddr_lock);
 	return true;
 }
 
@@ -82,10 +101,20 @@ bool vaddr_alloc_reserve(size_t count, size_t align_pages, uintptr_t* out_base) 
 	if (out_base) *out_base = 0;
 
 	if (!initialized || !out_base || count == 0) return false;
+	spinlock_lock(&vaddr_lock);
 	if (align_pages == 0) align_pages = 1;
-	if ((align_pages & (align_pages - 1u)) != 0) return false;
-	if (count > free_pages) return false;
-	if (mul_overflow_u64((uint64_t)align_pages, PMM_PAGE_SIZE, &align_bytes)) return false;
+	if ((align_pages & (align_pages - 1u)) != 0) {
+		spinlock_unlock(&vaddr_lock);
+		return false;
+	}
+	if (count > free_pages) {
+		spinlock_unlock(&vaddr_lock);
+		return false;
+	}
+	if (mul_overflow_u64((uint64_t)align_pages, PMM_PAGE_SIZE, &align_bytes)) {
+		spinlock_unlock(&vaddr_lock);
+		return false;
+	}
 
 	for (region = region_list; region != NULL; region = region->next) {
 		uint64_t             region_end;
@@ -122,12 +151,16 @@ bool vaddr_alloc_reserve(size_t count, size_t align_pages, uintptr_t* out_base) 
 			region->free = false;
 			free_pages -= count;
 			*out_base = region->base;
+			spinlock_unlock(&vaddr_lock);
 			return true;
 		}
 
 		if (prefix_pages == 0) {
 			suffix_region_node = alloc_region();
-			if (!suffix_region_node) return false;
+			if (!suffix_region_node) {
+				spinlock_unlock(&vaddr_lock);
+				return false;
+			}
 
 			next_region        = region->next;
 			region->base       = (uintptr_t)aligned_base;
@@ -144,17 +177,22 @@ bool vaddr_alloc_reserve(size_t count, size_t align_pages, uintptr_t* out_base) 
 
 			free_pages -= count;
 			*out_base = region->base;
+			spinlock_unlock(&vaddr_lock);
 			return true;
 		}
 
 		alloc_region_node = alloc_region();
-		if (!alloc_region_node) return false;
+		if (!alloc_region_node) {
+			spinlock_unlock(&vaddr_lock);
+			return false;
+		}
 
 		suffix_region_node = NULL;
 		if (suffix_pages != 0) {
 			suffix_region_node = alloc_region();
 			if (!suffix_region_node) {
 				recycle_region(alloc_region_node);
+				spinlock_unlock(&vaddr_lock);
 				return false;
 			}
 		}
@@ -182,9 +220,11 @@ bool vaddr_alloc_reserve(size_t count, size_t align_pages, uintptr_t* out_base) 
 
 		free_pages -= count;
 		*out_base = alloc_region_node->base;
+		spinlock_unlock(&vaddr_lock);
 		return true;
 	}
 
+	spinlock_unlock(&vaddr_lock);
 	return false;
 }
 
@@ -194,6 +234,7 @@ bool vaddr_alloc_release(uintptr_t base, size_t count) {
 
 	if (!initialized || count == 0) return false;
 	if ((base & (PMM_PAGE_SIZE - 1u)) != 0) return false;
+	spinlock_lock(&vaddr_lock);
 
 	for (region = region_list; region != NULL; prev = region, region = region->next) {
 		if (region->base != base) continue;
@@ -216,16 +257,28 @@ bool vaddr_alloc_release(uintptr_t base, size_t count) {
 			recycle_region(region);
 		}
 
+		spinlock_unlock(&vaddr_lock);
 		return true;
 	}
 
+	spinlock_unlock(&vaddr_lock);
 	return false;
 }
 
 size_t vaddr_alloc_total_page_count(void) {
-	return total_pages;
+	size_t count;
+
+	spinlock_lock(&vaddr_lock);
+	count = total_pages;
+	spinlock_unlock(&vaddr_lock);
+	return count;
 }
 
 size_t vaddr_alloc_free_page_count(void) {
-	return free_pages;
+	size_t count;
+
+	spinlock_lock(&vaddr_lock);
+	count = free_pages;
+	spinlock_unlock(&vaddr_lock);
+	return count;
 }
