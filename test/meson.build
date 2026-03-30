@@ -42,6 +42,16 @@ test_suites = [
 		),
 		'suites': ['unit', 'memory'],
 	},
+	{
+		'name': 'kheap',
+		'sources': files(
+			'kheap/kheap_test.c',
+			'kheap/basic.c',
+			'kheap/calloc_realloc.c',
+			'kheap/growth.c',
+		),
+		'suites': ['unit', 'memory'],
+	},
 ]
 
 foreach t : test_suites

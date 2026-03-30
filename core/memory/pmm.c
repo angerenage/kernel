@@ -1,4 +1,5 @@
 #include <core/early_alloc.h>
+#include <core/math.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <limits.h>
@@ -21,41 +22,6 @@ static size_t            managed_range_count = 0;
 static size_t            total_page_count    = 0;
 static size_t            free_page_count     = 0;
 static bool              initialized         = false;
-
-static inline bool add_overflow_u64(uint64_t a, uint64_t b, uint64_t* out) {
-#if defined(__has_builtin)
-#if __has_builtin(__builtin_add_overflow)
-	return __builtin_add_overflow(a, b, out);
-#endif
-#endif
-	*out = a + b;
-	return *out < a;
-}
-
-static inline bool mul_overflow_u64(uint64_t a, uint64_t b, uint64_t* out) {
-#if defined(__has_builtin)
-#if __has_builtin(__builtin_mul_overflow)
-	return __builtin_mul_overflow(a, b, out);
-#endif
-#endif
-	if (a && b > UINT64_MAX / a) return true;
-	*out = a * b;
-	return false;
-}
-
-static inline bool align_up_u64(uint64_t value, uint64_t align, uint64_t* out) {
-	uint64_t tmp;
-
-	if (!align || (align & (align - 1u))) return false;
-	if (add_overflow_u64(value, align - 1u, &tmp)) return false;
-
-	*out = tmp & ~(align - 1u);
-	return true;
-}
-
-static inline uint64_t align_down_u64(uint64_t value, uint64_t align) {
-	return value & ~(align - 1u);
-}
 
 static inline size_t bitmap_word_count(size_t page_count) {
 	return (page_count + BITS_PER_WORD - 1u) / BITS_PER_WORD;

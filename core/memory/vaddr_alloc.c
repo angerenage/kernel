@@ -1,4 +1,5 @@
 #include <core/early_alloc.h>
+#include <core/math.h>
 #include <core/pmm.h>
 #include <core/vaddr_alloc.h>
 #include <stdbool.h>
@@ -17,37 +18,6 @@ static struct vaddr_region* spare_regions;
 static size_t               total_pages;
 static size_t               free_pages;
 static bool                 initialized;
-
-static inline bool add_overflow_u64(uint64_t a, uint64_t b, uint64_t* out) {
-#if defined(__has_builtin)
-#if __has_builtin(__builtin_add_overflow)
-	return __builtin_add_overflow(a, b, out);
-#endif
-#endif
-	*out = a + b;
-	return *out < a;
-}
-
-static inline bool mul_overflow_u64(uint64_t a, uint64_t b, uint64_t* out) {
-#if defined(__has_builtin)
-#if __has_builtin(__builtin_mul_overflow)
-	return __builtin_mul_overflow(a, b, out);
-#endif
-#endif
-	if (a && b > UINT64_MAX / a) return true;
-	*out = a * b;
-	return false;
-}
-
-static inline bool align_up_u64(uint64_t value, uint64_t align, uint64_t* out) {
-	uint64_t tmp;
-
-	if (!align || (align & (align - 1u)) != 0) return false;
-	if (add_overflow_u64(value, align - 1u, &tmp)) return false;
-
-	*out = tmp & ~(align - 1u);
-	return true;
-}
 
 static struct vaddr_region* alloc_region(void) {
 	struct vaddr_region* region;

@@ -1,4 +1,5 @@
 #include <core/early_alloc.h>
+#include <core/math.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -20,41 +21,6 @@ static struct early_arena* early_arena   = NULL;
 
 static inline void* hhdm_phys_to_virt(uint64_t phys) {
 	return (void*)(uintptr_t)(phys + boot_info.direct_map_offset);
-}
-
-static inline bool add_overflow_u64(uint64_t a, uint64_t b, uint64_t* out) {
-#if defined(__has_builtin)
-#if __has_builtin(__builtin_add_overflow)
-	return __builtin_add_overflow(a, b, out);
-#endif
-#endif
-	*out = a + b;
-	return *out < a;
-}
-
-static inline bool mul_overflow_u64(uint64_t a, uint64_t b, uint64_t* out) {
-#if defined(__has_builtin)
-#if __has_builtin(__builtin_mul_overflow)
-	return __builtin_mul_overflow(a, b, out);
-#endif
-#endif
-	if (a && b > UINT64_MAX / a) return true;
-	*out = a * b;
-	return false;
-}
-
-static inline uint64_t normalize_align(size_t align) {
-	uint64_t a = (uint64_t)align;
-	if (a == 0) a = EARLY_DEFAULT_ALIGN;
-	return a;
-}
-
-static inline bool align_up_u64(uint64_t v, uint64_t a, uint64_t* out) {
-	uint64_t tmp;
-	if (!a || (a & (a - 1))) return false;
-	if (add_overflow_u64(v, a - 1, &tmp)) return false;
-	*out = tmp & ~(a - 1);
-	return true;
 }
 
 bool early_init(const struct limine_memmap_response* memmap_resp, uintptr_t direct_map_offset) {
@@ -155,7 +121,7 @@ bool early_init(const struct limine_memmap_response* memmap_resp, uintptr_t dire
 }
 
 void* early_alloc(size_t size, size_t align) {
-	uint64_t a = normalize_align(align);
+	uint64_t a = normalize_align_u64(align, EARLY_DEFAULT_ALIGN);
 
 	if (a == 0 || (a & (a - 1)) != 0) return NULL;
 

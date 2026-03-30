@@ -1,4 +1,5 @@
 #include <core/early_alloc.h>
+#include <core/kheap.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/vmm.h>
@@ -109,6 +110,13 @@ void kernel_main(void) {
 	}
 
 	printf("kernel: vmm initialized for heap window 0x%p (%zu pages)\n", (void*)vmm_heap_base(), vmm_heap_page_count());
+
+	if (!kheap_init()) {
+		printf("kernel: kheap_init failed\n");
+		hcf();
+	}
+
+	printf("kernel: kheap initialized with %zu/%zu bytes free\n", kheap_free_bytes(), kheap_total_bytes());
 
 	hcf();
 }

@@ -1,3 +1,4 @@
+#include <core/math.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <hal/paging.h>
@@ -36,16 +37,6 @@ static inline void x86_invlpg(uintptr_t virt) {
 
 static inline uintptr_t hhdm_phys_to_virt(uintptr_t phys) {
 	return phys + boot_info.direct_map_offset;
-}
-
-static inline bool add_overflow_u64(uint64_t a, uint64_t b, uint64_t* out) {
-#if defined(__has_builtin)
-#if __has_builtin(__builtin_add_overflow)
-	return __builtin_add_overflow(a, b, out);
-#endif
-#endif
-	*out = a + b;
-	return *out < a;
 }
 
 static inline uint64_t x86_leaf_flags(uint64_t flags) {
