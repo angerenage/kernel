@@ -1,4 +1,3 @@
-#include <core/early_alloc.h>
 #include <core/math.h>
 #include <core/mm.h>
 #include <core/pmm.h>
@@ -7,6 +6,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #define BITS_PER_WORD (sizeof(uint64_t) * 8u)
 #define PMM_SIZE_MAX ((size_t)-1)
@@ -18,12 +18,32 @@ struct pmm_range {
 	uint64_t* bitmap;
 };
 
+struct pmm_init_range {
+	uintptr_t base;
+	size_t    page_count;
+	size_t    bitmap_words;
+};
+
+struct pmm_bootstrap_cursor {
+	uintptr_t base;
+	uintptr_t end;
+};
+
+struct pmm_reserved_span {
+	uintptr_t base;
+	uintptr_t end;
+};
+
 static struct pmm_range* ranges              = NULL;
 static size_t            managed_range_count = 0;
 static size_t            total_page_count    = 0;
 static size_t            free_page_count     = 0;
 static bool              initialized         = false;
 static struct spinlock   pmm_lock            = SPINLOCK_INIT;
+
+static inline void* hhdm_phys_to_virt(uintptr_t phys) {
+	return (void*)(uintptr_t)(phys + boot_info.direct_map_offset);
+}
 
 static inline size_t bitmap_word_count(size_t page_count) {
 	return (page_count + BITS_PER_WORD - 1u) / BITS_PER_WORD;
@@ -41,17 +61,17 @@ static inline void bitmap_clear(uint64_t* bitmap, size_t bit) {
 	bitmap[bit / BITS_PER_WORD] &= ~(1ull << (bit % BITS_PER_WORD));
 }
 
-static bool usable_page_range(const struct mem_range* source, uintptr_t* out_base, size_t* out_pages) {
+static bool usable_page_range(const struct limine_memmap_entry* source, uintptr_t* out_base, size_t* out_pages) {
 	uint64_t end;
 	uint64_t aligned_base;
 	uint64_t aligned_end;
 	uint64_t page_count64;
 
 	if (!source || !out_base || !out_pages) return false;
-	if (source->type != MEM_RANGE_USABLE) return false;
+	if (source->type != LIMINE_MEMMAP_USABLE) return false;
 	if (source->length < PMM_PAGE_SIZE) return false;
-	if (add_overflow_u64((uint64_t)source->base, (uint64_t)source->length, &end)) return false;
-	if (!align_up_u64((uint64_t)source->base, PMM_PAGE_SIZE, &aligned_base)) return false;
+	if (add_overflow_u64(source->base, source->length, &end)) return false;
+	if (!align_up_u64(source->base, PMM_PAGE_SIZE, &aligned_base)) return false;
 
 	aligned_end = align_down_u64(end, PMM_PAGE_SIZE);
 	if (aligned_end <= aligned_base) return false;
@@ -62,6 +82,33 @@ static bool usable_page_range(const struct mem_range* source, uintptr_t* out_bas
 	*out_base  = (uintptr_t)aligned_base;
 	*out_pages = (size_t)page_count64;
 	return true;
+}
+
+static bool bootstrap_alloc(struct pmm_bootstrap_cursor* cursors, size_t cursor_count, size_t size, size_t align,
+                            uintptr_t* out_base, struct pmm_reserved_span* out_reserved) {
+	uint64_t normalized_align = normalize_align_u64(align, 1u);
+
+	if (!cursors || !out_base || !out_reserved || size == 0 || normalized_align == 0) return false;
+
+	for (size_t i = 0; i < cursor_count; i++) {
+		uint64_t aligned_base;
+		uint64_t alloc_end;
+
+		if (!align_up_u64((uint64_t)cursors[i].base, normalized_align, &aligned_base)) continue;
+		if (aligned_base < (uint64_t)cursors[i].base || aligned_base > (uint64_t)cursors[i].end) continue;
+		if (add_overflow_u64(aligned_base, (uint64_t)size, &alloc_end)) continue;
+		if (alloc_end > (uint64_t)cursors[i].end) continue;
+
+		*out_base     = (uintptr_t)aligned_base;
+		*out_reserved = (struct pmm_reserved_span){
+			.base = cursors[i].base,
+			.end  = (uintptr_t)alloc_end,
+		};
+		cursors[i].base = (uintptr_t)alloc_end;
+		return true;
+	}
+
+	return false;
 }
 
 static void reserve_pages(struct pmm_range* range, uintptr_t reserved_base, uintptr_t reserved_end) {
@@ -119,10 +166,14 @@ static bool find_contiguous_free(const struct pmm_range* range, size_t count, si
 	return false;
 }
 
-bool pmm_init(void) {
-	size_t usable_ranges = 0;
-	size_t usable_pages  = 0;
-	size_t range_index   = 0;
+bool pmm_init(const struct limine_memmap_response* memmap_resp, uintptr_t direct_map_offset) {
+	size_t                   usable_ranges  = 0;
+	size_t                   usable_pages   = 0;
+	size_t                   range_index    = 0;
+	size_t                   reserved_count = 0;
+	size_t                   ranges_bytes;
+	uintptr_t                ranges_phys = 0;
+	struct pmm_reserved_span ranges_reserved;
 
 	spinlock_lock(&pmm_lock);
 
@@ -132,16 +183,18 @@ bool pmm_init(void) {
 	free_page_count     = 0;
 	initialized         = false;
 
-	if (!boot_info.ranges || boot_info.range_count == 0) {
+	if (!memmap_resp || memmap_resp->entry_count == 0 || !memmap_resp->entries) {
 		spinlock_unlock(&pmm_lock);
 		return false;
 	}
 
-	for (size_t i = 0; i < boot_info.range_count; i++) {
+	boot_info.direct_map_offset = direct_map_offset;
+
+	for (size_t i = 0; i < memmap_resp->entry_count; i++) {
 		uintptr_t base;
 		size_t    page_count;
 
-		if (!usable_page_range(&boot_info.ranges[i], &base, &page_count)) continue;
+		if (!usable_page_range(memmap_resp->entries[i], &base, &page_count)) continue;
 		if (usable_pages > PMM_SIZE_MAX - page_count) {
 			spinlock_unlock(&pmm_lock);
 			return false;
@@ -156,49 +209,86 @@ bool pmm_init(void) {
 		return false;
 	}
 
-	ranges = early_calloc(usable_ranges, sizeof(struct pmm_range), _Alignof(struct pmm_range));
-	if (!ranges) {
+	struct pmm_init_range       init_ranges[usable_ranges];
+	struct pmm_bootstrap_cursor bootstrap_cursors[usable_ranges];
+	struct pmm_reserved_span    reserved_spans[usable_ranges + 1u];
+
+	for (size_t i = 0; i < memmap_resp->entry_count; i++) {
+		uintptr_t base;
+		size_t    page_count;
+		uint64_t  span;
+
+		if (!usable_page_range(memmap_resp->entries[i], &base, &page_count)) continue;
+		if (mul_overflow_u64((uint64_t)page_count, PMM_PAGE_SIZE, &span)) {
+			spinlock_unlock(&pmm_lock);
+			return false;
+		}
+
+		init_ranges[range_index] = (struct pmm_init_range){
+			.base         = base,
+			.page_count   = page_count,
+			.bitmap_words = bitmap_word_count(page_count),
+		};
+		bootstrap_cursors[range_index] = (struct pmm_bootstrap_cursor){
+			.base = base,
+			.end  = base + (uintptr_t)span,
+		};
+		range_index++;
+	}
+
+	if (mul_overflow_size(usable_ranges, sizeof(struct pmm_range), &ranges_bytes)) {
 		spinlock_unlock(&pmm_lock);
 		return false;
 	}
+	if (!bootstrap_alloc(bootstrap_cursors,
+	                     usable_ranges,
+	                     ranges_bytes,
+	                     _Alignof(struct pmm_range),
+	                     &ranges_phys,
+	                     &ranges_reserved)) {
+		spinlock_unlock(&pmm_lock);
+		return false;
+	}
+
+	ranges = (struct pmm_range*)hhdm_phys_to_virt(ranges_phys);
+	memset(ranges, 0, ranges_bytes);
+	reserved_spans[reserved_count++] = ranges_reserved;
 
 	managed_range_count = usable_ranges;
 	total_page_count    = usable_pages;
 	free_page_count     = usable_pages;
 
-	for (size_t i = 0; i < boot_info.range_count; i++) {
-		uintptr_t base;
-		size_t    page_count;
-		size_t    words;
-		uint64_t* bitmap;
+	for (size_t i = 0; i < usable_ranges; i++) {
+		size_t                   bitmap_bytes;
+		uintptr_t                bitmap_phys = 0;
+		struct pmm_reserved_span bitmap_reserved;
+		uint64_t*                bitmap;
 
-		if (!usable_page_range(&boot_info.ranges[i], &base, &page_count)) continue;
-
-		words  = bitmap_word_count(page_count);
-		bitmap = early_calloc(words, sizeof(uint64_t), _Alignof(uint64_t));
-		if (!bitmap) {
+		if (mul_overflow_size(init_ranges[i].bitmap_words, sizeof(uint64_t), &bitmap_bytes)) {
+			spinlock_unlock(&pmm_lock);
+			return false;
+		}
+		if (!bootstrap_alloc(
+				bootstrap_cursors, usable_ranges, bitmap_bytes, _Alignof(uint64_t), &bitmap_phys, &bitmap_reserved)) {
 			spinlock_unlock(&pmm_lock);
 			return false;
 		}
 
-		ranges[range_index++] = (struct pmm_range){
-			.base       = base,
-			.page_count = page_count,
-			.free_pages = page_count,
+		bitmap = (uint64_t*)hhdm_phys_to_virt(bitmap_phys);
+		memset(bitmap, 0, bitmap_bytes);
+
+		ranges[i] = (struct pmm_range){
+			.base       = init_ranges[i].base,
+			.page_count = init_ranges[i].page_count,
+			.free_pages = init_ranges[i].page_count,
 			.bitmap     = bitmap,
 		};
+		reserved_spans[reserved_count++] = bitmap_reserved;
 	}
 
-	for (size_t i = 0; i < early_reserved_range_count(); i++) {
-		struct early_reserved_range reserved;
-
-		if (!early_reserved_range(i, &reserved)) {
-			spinlock_unlock(&pmm_lock);
-			return false;
-		}
-
+	for (size_t i = 0; i < reserved_count; i++) {
 		for (size_t j = 0; j < managed_range_count; j++) {
-			reserve_pages(&ranges[j], reserved.base, reserved.end);
+			reserve_pages(&ranges[j], reserved_spans[i].base, reserved_spans[i].end);
 		}
 	}
 

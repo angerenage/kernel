@@ -43,7 +43,7 @@ Examples:
   bash scripts/run.sh --arch riscv64 --debug
   bash scripts/run.sh --all
   bash scripts/run.sh --test
-  bash scripts/run.sh -t --test-name early_alloc
+  bash scripts/run.sh -t --test-name pmm
 EOF
 }
 

@@ -35,15 +35,6 @@ test_suites = [
 		'suites': ['unit', 'base'],
 	},
 	{
-		'name': 'early_alloc',
-		'sources': files(
-			'early_alloc/early_alloc_test.c',
-			'early_alloc/basic_allocations.c',
-			'early_alloc/allocation_until_exhaustion.c',
-		),
-		'suites': ['unit', 'memory'],
-	},
-	{
 		'name': 'pmm',
 		'sources': files(
 			'pmm/pmm_test.c',

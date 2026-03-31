@@ -1,6 +1,5 @@
 #pragma once
 
-#include <core/early_alloc.h>
 #include <core/pmm.h>
 #include <criterion/criterion.h>
 #include <limine.h>

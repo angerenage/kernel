@@ -134,7 +134,7 @@ bash scripts/run.sh --arch x86_64 --debug --debug-port 4321
 If you only want a specific test suite:
 
 ```sh
-bash scripts/run.sh -t --test-name early_alloc
+bash scripts/run.sh -t --test-name pmm
 ```
 
 You can still use the narrower QEMU-only helper directly if you want:

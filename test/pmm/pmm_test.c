@@ -31,6 +31,5 @@ void init_test_pmm(uint8_t* arena, size_t arena_size) {
 	};
 
 	cr_assert_geq(arena_size, KiB(128), "test arena is too small");
-	cr_assert(early_init(&resp, 0), "early_init failed");
-	cr_assert(pmm_init(), "pmm_init failed");
+	cr_assert(pmm_init(&resp, 0), "pmm_init failed");
 }

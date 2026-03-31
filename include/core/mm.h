@@ -23,9 +23,7 @@ struct mem_range {
 };
 
 struct mm_boot_info {
-	struct mem_range* ranges;
-	size_t            range_count;
-	uintptr_t         direct_map_offset;
+	uintptr_t direct_map_offset;
 };
 
 extern struct mm_boot_info boot_info;

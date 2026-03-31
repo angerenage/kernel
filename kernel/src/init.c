@@ -1,4 +1,3 @@
-#include <core/early_alloc.h>
 #include <core/kheap.h>
 #include <core/mm.h>
 #include <core/pmm.h>
@@ -79,7 +78,7 @@ void kernel_main(void) {
 			total_mem += entry->length;
 		}
 
-		printf("  base: 0x%p, length: 0x%p, type: %s\n",
+		printf("  base: %p, length: %p, type: %s\n",
 		       (void*)(uintptr_t)entry->base,
 		       (void*)(uintptr_t)entry->length,
 		       mem_range_type_str(range_type));
@@ -87,14 +86,8 @@ void kernel_main(void) {
 
 	printf("kernel: total memory: %u MB\n", (unsigned)(total_mem / (1024 * 1024)));
 
-	// Setting up the early memory allocator
-	if (!early_init(memmap_req.response, hhdm_req.response->offset)) {
-		printf("kernel: early_init failed\n");
-		hcf();
-	}
-
 	// Setting up the page allocator
-	if (!pmm_init()) {
+	if (!pmm_init(memmap_req.response, hhdm_req.response->offset)) {
 		printf("kernel: pmm_init failed\n");
 		hcf();
 	}

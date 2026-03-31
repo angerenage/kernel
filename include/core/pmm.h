@@ -1,12 +1,13 @@
 #pragma once
 
+#include <limine.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #define PMM_PAGE_SIZE 0x1000ull
 
-bool pmm_init(void);
+bool pmm_init(const struct limine_memmap_response* memmap_resp, uintptr_t direct_map_offset);
 
 bool pmm_alloc_pages(size_t count, uintptr_t* out_phys);
 bool pmm_free_pages(uintptr_t phys, size_t count);

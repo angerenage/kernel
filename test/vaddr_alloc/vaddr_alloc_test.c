@@ -1,6 +1,5 @@
 #include "vaddr_alloc_test.h"
 
-#include <core/early_alloc.h>
 #include <core/pmm.h>
 
 void init_test_vaddr_alloc(uint8_t* arena, size_t arena_size, uintptr_t base, size_t page_count) {
@@ -15,7 +14,6 @@ void init_test_vaddr_alloc(uint8_t* arena, size_t arena_size, uintptr_t base, si
 			 .entries     = entries,
     };
 
-	cr_assert(early_init(&resp, 0), "early_init failed");
-	cr_assert(pmm_init(), "pmm_init failed");
+	cr_assert(pmm_init(&resp, 0), "pmm_init failed");
 	cr_assert(vaddr_alloc_init(base, page_count), "vaddr_alloc_init failed");
 }
