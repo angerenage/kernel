@@ -10,7 +10,7 @@ readonly ARCHES=(
 
 usage() {
 	cat <<'EOF'
-Usage: build.sh (--arch <arch> | --all) [--setup|-s] [--compile|-c] [-sc] [--reconfigure]
+Usage: build.sh (--arch <arch> | --all) [--setup|-s] [--compile|-c] [-sc] [--reconfigure] [--no-tests]
 
 Target selection:
   --arch <arch>  Build a single architecture (x86_64, aarch64, riscv64, loongarch64).
@@ -22,6 +22,7 @@ Actions:
                     When neither --setup nor --compile is passed, both are run.
   -sc            Short form for running both setup and compile.
   --reconfigure  Force Meson reconfiguration for existing build directories.
+  --no-tests     Configure Meson with -Dtests=false.
 
 Examples:
   bash scripts/build.sh --arch x86_64
@@ -100,6 +101,7 @@ setup_arch() {
 		"$build_dir"
 		"--cross-file" "$cross_file"
 		"-Dplatform=${platform}"
+		"-Dtests=$( (( BUILD_TESTS )) && printf true || printf false )"
 	)
 
 	if (( RECONFIGURE )) || [[ -d "$build_dir" ]]; then
@@ -109,6 +111,7 @@ setup_arch() {
 			"--reconfigure"
 			"--cross-file" "$cross_file"
 			"-Dplatform=${platform}"
+			"-Dtests=$( (( BUILD_TESTS )) && printf true || printf false )"
 		)
 	fi
 
@@ -178,6 +181,7 @@ ALL_ARCHES=0
 DO_SETUP=0
 DO_COMPILE=0
 RECONFIGURE=0
+BUILD_TESTS=1
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -213,6 +217,10 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--reconfigure)
 			RECONFIGURE=1
+			shift
+			;;
+		--no-tests)
+			BUILD_TESTS=0
 			shift
 			;;
 		-h|--help)

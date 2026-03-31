@@ -20,7 +20,10 @@ subdir('base')
 subdir('core')
 subdir('platforms/' + platform)
 subdir('kernel')
-subdir('test')
+
+if get_option('tests')
+	subdir('test')
+endif
 
 alias_target('kernel', [kernel_elf])
 

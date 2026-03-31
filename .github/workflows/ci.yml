@@ -30,11 +30,10 @@ jobs:
             llvm \
             meson \
             ninja-build \
-            pkg-config \
-            libcriterion-dev
+            pkg-config
 
       - name: Configure
-        run: bash scripts/build.sh --arch "${{ matrix.arch }}" --setup
+        run: bash scripts/build.sh --arch "${{ matrix.arch }}" --setup --no-tests
 
       - name: Compile kernel
         # Only compile the kernel, iso is not generated to save time

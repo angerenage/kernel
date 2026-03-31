@@ -18,11 +18,12 @@ Make sure these tools are available on your `PATH`:
 - `qemu-system-riscv64`
 - `qemu-system-loongarch64`
 - `pkg-config`
-- Criterion (`criterion`)
 - `git`
 - `bash`
 - `make`
 - `xorriso`
+
+If you want to build and run the native test targets, you also need Criterion (`criterion`).
 
 On Windows, the ISO generation step depends on Unix-style tools (`bash`, `make`, `xorriso`). In practice, this project is easiest to build from an MSYS2 or similar shell environment with those tools installed.
 
@@ -35,9 +36,11 @@ The recommended entry point is the build helper:
 ```sh
 bash scripts/build.sh --arch x86_64 --setup
 bash scripts/build.sh --all --setup
+bash scripts/build.sh --arch x86_64 --setup --no-tests
 ```
 
 When no architecture is provided, the helper exits with guidance to use either `--arch <arch>` or `--all`.
+Use `--no-tests` if you want a kernel-only configure without native test dependencies installed.
 
 If you prefer calling Meson directly, configure the architecture you want to build from the repository root:
 
@@ -148,6 +151,7 @@ bash scripts/run_qemu.sh --arch loongarch64
 - The default platform is `pc_qemu_x86_64`.
 - The available Meson platforms are `pc_qemu_x86_64`, `pc_qemu_aarch64`, `pc_qemu_riscv64`, and `pc_qemu_loongarch64`.
 - The test binaries are built natively, while the kernel is cross-compiled with the selected file in `toolchain/`.
+- `-Dtests=false` skips configuring the native Criterion test targets. `scripts/build.sh --no-tests` is the helper equivalent.
 - `scripts/build.sh` supports `--arch <arch>` for one target and `--all` to configure and/or compile every supported target in one parallel run.
 - `scripts/run.sh` has two exclusive modes: test mode with `--test`/`-t`, and QEMU mode otherwise.
 - The Limine helper script clones Limine into the build directory the first time the ISO target is built.
