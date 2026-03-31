@@ -5,6 +5,16 @@ threads = dependency('threads', native: true)
 test_common_c_args = ['--coverage']
 test_common_link_args = ['--coverage']
 
+base_test_lib = static_library(
+	'base_test_lib',
+	base_sources,
+	include_directories: test_inc,
+	native: true,
+	c_args: test_common_c_args,
+	link_args: test_common_link_args,
+	install: false,
+)
+
 core_test_lib = static_library(
 	'core_test_lib',
 	base_sources + core_kernel_sources,
@@ -16,6 +26,14 @@ core_test_lib = static_library(
 )
 
 test_suites = [
+	{
+		'name': 'base_string',
+		'sources': files(
+			'base/string_test.c',
+		),
+		'link_with': base_test_lib,
+		'suites': ['unit', 'base'],
+	},
 	{
 		'name': 'early_alloc',
 		'sources': files(
@@ -65,7 +83,7 @@ foreach t : test_suites
 		native: true,
 		include_directories: test_inc,
 		dependencies: [criterion, threads],
-		link_with: core_test_lib,
+		link_with: t.get('link_with', core_test_lib),
 		c_args: test_common_c_args,
 		link_args: test_common_link_args,
 		install: false,
