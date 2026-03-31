@@ -16,6 +16,7 @@ platform_kernel_c_args = []
 platform_kernel_link_args = []
 platform_limine_arch = ''
 
+subdir('base')
 subdir('core')
 subdir('platforms/' + platform)
 subdir('kernel')

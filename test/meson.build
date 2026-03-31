@@ -7,7 +7,7 @@ test_common_link_args = ['--coverage']
 
 core_test_lib = static_library(
 	'core_test_lib',
-	core_kernel_sources,
+	base_sources + core_kernel_sources,
 	include_directories: test_inc,
 	native: true,
 	c_args: test_common_c_args,

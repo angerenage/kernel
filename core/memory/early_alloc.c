@@ -4,7 +4,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <string.h>
 
 #define PAGE_SIZE 0x1000ull
@@ -68,7 +67,6 @@ bool early_init(const struct limine_memmap_response* memmap_resp, uintptr_t dire
 
 	if (cursor > best_end) return false;
 	if (ranges_bytes64 > best_end - cursor) {
-		printf("Not enough memory to store memmap.\n");
 		return false;
 	}
 
@@ -87,7 +85,6 @@ bool early_init(const struct limine_memmap_response* memmap_resp, uintptr_t dire
 
 		if (add_overflow_u64(arenas_ptr, 2ull * (uint64_t)sizeof(struct early_arena), &arenas_ptr)) return false;
 		if (arenas_ptr > second_end) {
-			printf("Not enough memory to store early arenas.\n");
 			return false;
 		}
 
@@ -103,18 +100,10 @@ bool early_init(const struct limine_memmap_response* memmap_resp, uintptr_t dire
 
 		if (add_overflow_u64(cursor, (uint64_t)sizeof(struct early_arena), &cursor)) return false;
 		if (cursor > best_end) {
-			printf("Not enough memory to store early arena.\n");
 			return false;
 		}
 
 		*early_arena = (struct early_arena){best_base, best_end, cursor};
-	}
-
-	if (early_arena != NULL) {
-		printf("early_arena = {.base = 0x%lx, .end = 0x%lx}\n", early_arena->base, early_arena->end);
-	}
-	if (scratch_arena != NULL) {
-		printf("scratch_arena = {.base = 0x%lx, .end = 0x%lx}\n", scratch_arena->base, scratch_arena->end);
 	}
 
 	return true;

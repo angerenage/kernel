@@ -1,10 +1,10 @@
 #include <stdio.h>
 
-#include "utils.h"
+#include "../format/format.h"
 
 void printf(const char* restrict format, ...) {
 	va_list args;
 	va_start(args, format);
-	format_emit(serial_emit_adapter, NULL, format, &args);
+	format_to_serial(format, &args);
 	va_end(args);
 }
