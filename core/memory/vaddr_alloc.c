@@ -1,56 +1,62 @@
-#include <core/early_alloc.h>
 #include <core/math.h>
+#include <core/mm.h>
 #include <core/pmm.h>
 #include <core/spinlock.h>
 #include <core/vaddr_alloc.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
-struct vaddr_region {
-	uintptr_t            base;
-	size_t               page_count;
-	bool                 free;
-	struct vaddr_region* next;
-};
+static uintptr_t       alloc_base;
+static uint64_t*       alloc_bitmap;
+static uintptr_t       alloc_bitmap_phys;
+static size_t          alloc_bitmap_pages;
+static size_t          total_pages;
+static size_t          free_pages;
+static bool            initialized;
+static struct spinlock vaddr_lock = SPINLOCK_INIT;
 
-static struct vaddr_region* region_list;
-static struct vaddr_region* spare_regions;
-static size_t               total_pages;
-static size_t               free_pages;
-static bool                 initialized;
-static struct spinlock      vaddr_lock = SPINLOCK_INIT;
-
-static struct vaddr_region* alloc_region(void) {
-	struct vaddr_region* region;
-
-	if (spare_regions != NULL) {
-		region        = spare_regions;
-		spare_regions = spare_regions->next;
-		region->next  = NULL;
-		return region;
-	}
-
-	region = early_calloc(1, sizeof(*region), _Alignof(struct vaddr_region));
-	return region;
+static inline size_t bitmap_word_count(size_t page_count) {
+	return (page_count + 63u) / 64u;
 }
 
-static void recycle_region(struct vaddr_region* region) {
-	if (!region) return;
+static inline void* hhdm_phys_to_virt(uintptr_t phys) {
+	return (void*)(uintptr_t)(phys + boot_info.direct_map_offset);
+}
 
-	region->next  = spare_regions;
-	spare_regions = region;
+static inline bool bitmap_test(const uint64_t* bitmap, size_t bit) {
+	return (bitmap[bit / 64u] & (1ull << (bit % 64u))) != 0;
+}
+
+static inline void bitmap_set(uint64_t* bitmap, size_t bit) {
+	bitmap[bit / 64u] |= 1ull << (bit % 64u);
+}
+
+static inline void bitmap_clear(uint64_t* bitmap, size_t bit) {
+	bitmap[bit / 64u] &= ~(1ull << (bit % 64u));
 }
 
 bool vaddr_alloc_init(uintptr_t base, size_t page_count) {
-	uint64_t span;
+	uint64_t  span;
+	uint64_t  bitmap_span;
+	size_t    words;
+	size_t    bitmap_bytes;
+	size_t    bitmap_pages;
+	uintptr_t bitmap_phys = 0;
 
 	spinlock_lock(&vaddr_lock);
-	region_list   = NULL;
-	spare_regions = NULL;
-	total_pages   = 0;
-	free_pages    = 0;
-	initialized   = false;
+	if (initialized && alloc_bitmap_pages != 0) {
+		(void)pmm_free_pages(alloc_bitmap_phys, alloc_bitmap_pages);
+	}
+
+	alloc_base         = 0;
+	alloc_bitmap       = NULL;
+	alloc_bitmap_phys  = 0;
+	alloc_bitmap_pages = 0;
+	total_pages        = 0;
+	free_pages         = 0;
+	initialized        = false;
 
 	if ((base & (PMM_PAGE_SIZE - 1u)) != 0) {
 		spinlock_unlock(&vaddr_lock);
@@ -69,18 +75,32 @@ bool vaddr_alloc_init(uintptr_t base, size_t page_count) {
 		return false;
 	}
 
-	region_list = alloc_region();
-	if (!region_list) {
+	words = bitmap_word_count(page_count);
+	if (mul_overflow_size(words, sizeof(uint64_t), &bitmap_bytes)) {
 		spinlock_unlock(&vaddr_lock);
 		return false;
 	}
 
-	*region_list = (struct vaddr_region){
-		.base       = base,
-		.page_count = page_count,
-		.free       = true,
-		.next       = NULL,
-	};
+	bitmap_pages = (bitmap_bytes + (size_t)PMM_PAGE_SIZE - 1u) / (size_t)PMM_PAGE_SIZE;
+	if (bitmap_pages == 0) {
+		spinlock_unlock(&vaddr_lock);
+		return false;
+	}
+	if (!pmm_alloc_pages(bitmap_pages, &bitmap_phys)) {
+		spinlock_unlock(&vaddr_lock);
+		return false;
+	}
+	if (mul_overflow_u64((uint64_t)bitmap_pages, PMM_PAGE_SIZE, &bitmap_span)) {
+		(void)pmm_free_pages(bitmap_phys, bitmap_pages);
+		spinlock_unlock(&vaddr_lock);
+		return false;
+	}
+
+	alloc_base         = base;
+	alloc_bitmap_phys  = bitmap_phys;
+	alloc_bitmap_pages = bitmap_pages;
+	alloc_bitmap       = (uint64_t*)hhdm_phys_to_virt(bitmap_phys);
+	memset(alloc_bitmap, 0, (size_t)bitmap_span);
 
 	total_pages = page_count;
 	free_pages  = page_count;
@@ -94,9 +114,7 @@ bool vaddr_alloc_is_initialized(void) {
 }
 
 bool vaddr_alloc_reserve(size_t count, size_t align_pages, uintptr_t* out_base) {
-	struct vaddr_region* region;
-	uint64_t             align_bytes;
-	uint64_t             aligned_base;
+	size_t start_page;
 
 	if (out_base) *out_base = 0;
 
@@ -111,115 +129,33 @@ bool vaddr_alloc_reserve(size_t count, size_t align_pages, uintptr_t* out_base) 
 		spinlock_unlock(&vaddr_lock);
 		return false;
 	}
-	if (mul_overflow_u64((uint64_t)align_pages, PMM_PAGE_SIZE, &align_bytes)) {
-		spinlock_unlock(&vaddr_lock);
-		return false;
-	}
 
-	for (region = region_list; region != NULL; region = region->next) {
-		uint64_t             region_end;
-		uint64_t             alloc_end;
-		uint64_t             prefix_pages64;
-		uint64_t             suffix_pages64;
-		size_t               prefix_pages;
-		size_t               suffix_pages;
-		struct vaddr_region* alloc_region_node;
-		struct vaddr_region* suffix_region_node;
-		struct vaddr_region* next_region;
+	for (start_page = 0; start_page + count <= total_pages;) {
+		size_t aligned_page = start_page;
+		bool   fit          = true;
 
-		if (!region->free || region->page_count < count) continue;
-		if (!mul_overflow_u64((uint64_t)region->page_count, PMM_PAGE_SIZE, &region_end)) {
-			region_end += (uint64_t)region->base;
-		}
-		else {
+		if ((aligned_page & (align_pages - 1u)) != 0) {
+			aligned_page = (aligned_page + align_pages - 1u) & ~(align_pages - 1u);
+			start_page   = aligned_page;
 			continue;
 		}
 
-		if (!align_up_u64((uint64_t)region->base, align_bytes, &aligned_base)) continue;
-
-		if (aligned_base < (uint64_t)region->base || aligned_base >= region_end) continue;
-		if (mul_overflow_u64((uint64_t)count, PMM_PAGE_SIZE, &alloc_end)) continue;
-		if (add_overflow_u64(aligned_base, alloc_end, &alloc_end)) continue;
-		if (alloc_end > region_end) continue;
-
-		prefix_pages64 = (aligned_base - (uint64_t)region->base) / PMM_PAGE_SIZE;
-		suffix_pages64 = (region_end - alloc_end) / PMM_PAGE_SIZE;
-		prefix_pages   = (size_t)prefix_pages64;
-		suffix_pages   = (size_t)suffix_pages64;
-
-		if (prefix_pages == 0 && suffix_pages == 0) {
-			region->free = false;
-			free_pages -= count;
-			*out_base = region->base;
-			spinlock_unlock(&vaddr_lock);
-			return true;
-		}
-
-		if (prefix_pages == 0) {
-			suffix_region_node = alloc_region();
-			if (!suffix_region_node) {
-				spinlock_unlock(&vaddr_lock);
-				return false;
-			}
-
-			next_region        = region->next;
-			region->base       = (uintptr_t)aligned_base;
-			region->page_count = count;
-			region->free       = false;
-			region->next       = suffix_region_node;
-
-			*suffix_region_node = (struct vaddr_region){
-				.base       = (uintptr_t)alloc_end,
-				.page_count = suffix_pages,
-				.free       = true,
-				.next       = next_region,
-			};
-
-			free_pages -= count;
-			*out_base = region->base;
-			spinlock_unlock(&vaddr_lock);
-			return true;
-		}
-
-		alloc_region_node = alloc_region();
-		if (!alloc_region_node) {
-			spinlock_unlock(&vaddr_lock);
-			return false;
-		}
-
-		suffix_region_node = NULL;
-		if (suffix_pages != 0) {
-			suffix_region_node = alloc_region();
-			if (!suffix_region_node) {
-				recycle_region(alloc_region_node);
-				spinlock_unlock(&vaddr_lock);
-				return false;
+		for (size_t page = 0; page < count; page++) {
+			if (bitmap_test(alloc_bitmap, aligned_page + page)) {
+				start_page = aligned_page + page + 1u;
+				fit        = false;
+				break;
 			}
 		}
 
-		next_region        = region->next;
-		region->page_count = prefix_pages;
-		region->next       = alloc_region_node;
+		if (!fit) continue;
 
-		*alloc_region_node = (struct vaddr_region){
-			.base       = (uintptr_t)aligned_base,
-			.page_count = count,
-			.free       = false,
-			.next       = next_region,
-		};
-
-		if (suffix_region_node != NULL) {
-			*suffix_region_node = (struct vaddr_region){
-				.base       = (uintptr_t)alloc_end,
-				.page_count = suffix_pages,
-				.free       = true,
-				.next       = next_region,
-			};
-			alloc_region_node->next = suffix_region_node;
+		for (size_t page = 0; page < count; page++) {
+			bitmap_set(alloc_bitmap, aligned_page + page);
 		}
 
 		free_pages -= count;
-		*out_base = alloc_region_node->base;
+		*out_base = alloc_base + aligned_page * (uintptr_t)PMM_PAGE_SIZE;
 		spinlock_unlock(&vaddr_lock);
 		return true;
 	}
@@ -229,40 +165,40 @@ bool vaddr_alloc_reserve(size_t count, size_t align_pages, uintptr_t* out_base) 
 }
 
 bool vaddr_alloc_release(uintptr_t base, size_t count) {
-	struct vaddr_region* region;
-	struct vaddr_region* prev = NULL;
+	size_t start_page;
+	size_t end_page;
 
 	if (!initialized || count == 0) return false;
 	if ((base & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	spinlock_lock(&vaddr_lock);
 
-	for (region = region_list; region != NULL; prev = region, region = region->next) {
-		if (region->base != base) continue;
-		if (region->free || region->page_count != count) return false;
-
-		region->free = true;
-		free_pages += count;
-
-		if (region->next != NULL && region->next->free) {
-			struct vaddr_region* next_region = region->next;
-
-			region->page_count += next_region->page_count;
-			region->next = next_region->next;
-			recycle_region(next_region);
-		}
-
-		if (prev != NULL && prev->free) {
-			prev->page_count += region->page_count;
-			prev->next = region->next;
-			recycle_region(region);
-		}
-
+	if (base < alloc_base) {
 		spinlock_unlock(&vaddr_lock);
-		return true;
+		return false;
 	}
 
+	start_page = (size_t)((base - alloc_base) / (uintptr_t)PMM_PAGE_SIZE);
+	end_page   = start_page + count;
+
+	if (start_page >= total_pages || end_page > total_pages || end_page < start_page) {
+		spinlock_unlock(&vaddr_lock);
+		return false;
+	}
+
+	for (size_t page = start_page; page < end_page; page++) {
+		if (!bitmap_test(alloc_bitmap, page)) {
+			spinlock_unlock(&vaddr_lock);
+			return false;
+		}
+	}
+
+	for (size_t page = start_page; page < end_page; page++) {
+		bitmap_clear(alloc_bitmap, page);
+	}
+
+	free_pages += count;
 	spinlock_unlock(&vaddr_lock);
-	return false;
+	return true;
 }
 
 size_t vaddr_alloc_total_page_count(void) {
