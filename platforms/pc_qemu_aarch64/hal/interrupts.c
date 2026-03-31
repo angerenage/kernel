@@ -1,5 +1,4 @@
 #include <hal/hcf.h>
-#include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -12,8 +11,6 @@ struct aarch64_exception_frame {
 	uint64_t elr;
 	uint64_t spsr;
 };
-
-extern char aarch64_exception_vectors[];
 
 static const char* const vector_names[16] = {
 	"current EL, SP0, sync",
@@ -173,18 +170,6 @@ static const char* aarch64_abort_target_el(uint64_t ec) {
 	default:
 		return "unknown EL";
 	}
-}
-
-void hal_interrupts_init(void) {
-	uintptr_t vectors = (uintptr_t)aarch64_exception_vectors;
-
-	__asm__ volatile("msr vbar_el1, %0\n\t"
-	                 "isb"
-	                 :
-	                 : "r"(vectors)
-	                 : "memory");
-
-	printf("kernel: aarch64 vectors installed\n");
 }
 
 __attribute__((noreturn))

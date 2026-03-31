@@ -1,5 +1,4 @@
 #include <hal/hcf.h>
-#include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -42,8 +41,6 @@ struct riscv64_exception_frame {
 	uint64_t sstatus;
 	uint64_t reserved;
 };
-
-extern void riscv64_exception_entry(void);
 
 static const char* riscv64_interrupt_name(uint64_t code) {
 	switch (code) {
@@ -89,18 +86,6 @@ static const char* riscv64_exception_name(uint64_t code) {
 	default:
 		return "Reserved/custom exception";
 	}
-}
-
-void hal_interrupts_init(void) {
-	uintptr_t entry    = (uintptr_t)riscv64_exception_entry;
-	uintptr_t zero     = 0;
-	uintptr_t sie_mask = 1u << 1;
-
-	__asm__ volatile("csrw stvec, %0" : : "r"(entry) : "memory");
-	__asm__ volatile("csrw sie, %0" : : "r"(zero) : "memory");
-	__asm__ volatile("csrc sstatus, %0" : : "r"(sie_mask) : "memory");
-
-	printf("kernel: riscv64 trap vector installed\n");
 }
 
 __attribute__((noreturn))

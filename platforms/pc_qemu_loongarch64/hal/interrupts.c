@@ -1,14 +1,6 @@
 #include <hal/hcf.h>
-#include <hal/interrupts.h>
-#include <kernel/requests.h>
-#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
-
-#define LOONGARCH64_CSR_ECFG 0x4u
-#define LOONGARCH64_CSR_EENTRY 0xcu
-#define LOONGARCH64_CSR_TLBRENTRY 0x88u
-#define LOONGARCH64_CSR_MERRENTRY 0x94u
 
 struct loongarch64_exception_frame {
 	uint64_t gpr[32];
@@ -17,19 +9,6 @@ struct loongarch64_exception_frame {
 	uint64_t badv;
 	uint64_t reserved;
 };
-
-extern void loongarch64_exception_entry(void);
-extern void loongarch64_tlb_refill_entry(void);
-extern void loongarch64_machine_error_entry(void);
-
-static uintptr_t loongarch64_kernel_virt_to_phys(const void* ptr) {
-	if (exec_addr_req.response == NULL) {
-		return 0;
-	}
-
-	return (uintptr_t)(exec_addr_req.response->physical_base +
-	                   ((uint64_t)(uintptr_t)ptr - exec_addr_req.response->virtual_base));
-}
 
 static const char* loongarch64_ecode_name(uint64_t ecode, uint64_t esubcode) {
 	(void)esubcode;
@@ -88,28 +67,6 @@ static const char* loongarch64_ecode_name(uint64_t ecode, uint64_t esubcode) {
 	default:
 		return "Reserved";
 	}
-}
-
-void hal_interrupts_init(void) {
-	uintptr_t exception_entry = (uintptr_t)loongarch64_exception_entry;
-	uintptr_t tlbr_entry      = loongarch64_kernel_virt_to_phys((const void*)loongarch64_tlb_refill_entry);
-	uintptr_t merr_entry      = loongarch64_kernel_virt_to_phys((const void*)loongarch64_machine_error_entry);
-	uintptr_t zero            = 0;
-
-	if (exec_addr_req.response == NULL || tlbr_entry == 0 || merr_entry == 0) {
-		printf("kernel: loongarch64 kernel address response missing for trap setup\n");
-		hcf();
-	}
-
-	__asm__ volatile("csrwr %0, %1" : : "r"(zero), "i"(LOONGARCH64_CSR_ECFG) : "memory");
-	__asm__ volatile("csrwr %0, %1" : : "r"(exception_entry), "i"(LOONGARCH64_CSR_EENTRY) : "memory");
-	__asm__ volatile("csrwr %0, %1" : : "r"(tlbr_entry), "i"(LOONGARCH64_CSR_TLBRENTRY) : "memory");
-	__asm__ volatile("csrwr %0, %1" : : "r"(merr_entry), "i"(LOONGARCH64_CSR_MERRENTRY) : "memory");
-
-	printf("kernel: loongarch64 trap entries installed (eentry=%p tlbrentry=%p merrentry=%p)\n",
-	       (void*)exception_entry,
-	       (void*)tlbr_entry,
-	       (void*)merr_entry);
 }
 
 __attribute__((noreturn))

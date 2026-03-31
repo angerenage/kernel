@@ -2,10 +2,11 @@
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/vmm.h>
+#include <hal/clock.h>
 #include <hal/hcf.h>
-#include <hal/interrupts.h>
 #include <hal/serial.h>
 #include <kernel/requests.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -14,6 +15,53 @@ static __attribute__((noreturn))
 void boot_fail(const char* message) {
 	printf("%s\n", message);
 	hcf();
+}
+
+#define KERNEL_TIMER_HZ 100u
+
+static volatile uint64_t boot_timer_ticks;
+static uint64_t          boot_timer_origin_ticks;
+static uint64_t          boot_timer_reported_seconds;
+static uint32_t          boot_timer_frequency_hz;
+static bool              boot_timer_started;
+
+static void boot_clock_tick(void* ctx) {
+	(void)ctx;
+
+	boot_timer_ticks++;
+}
+
+static void boot_run_timer_counter(void) {
+	hal_clock_init();
+	if (!hal_clock_start(KERNEL_TIMER_HZ, boot_clock_tick, NULL)) {
+		printf("kernel: boot clock unavailable\n");
+		return;
+	}
+	boot_timer_frequency_hz = hal_clock_frequency();
+	if (boot_timer_frequency_hz == 0u) {
+		printf("kernel: boot clock frequency unavailable\n");
+		hal_clock_stop();
+		return;
+	}
+
+	for (;;) {
+		uint64_t ticks = boot_timer_ticks;
+		if (ticks == 0u) continue;
+
+		if (!boot_timer_started) {
+			boot_timer_started          = true;
+			boot_timer_origin_ticks     = ticks;
+			boot_timer_reported_seconds = 0u;
+			printf("\r\033[2Kkernel: uptime 0 s");
+			continue;
+		}
+
+		uint64_t elapsed_seconds = (ticks - boot_timer_origin_ticks) / boot_timer_frequency_hz;
+		if (elapsed_seconds != boot_timer_reported_seconds) {
+			boot_timer_reported_seconds = elapsed_seconds;
+			printf("\r\033[2Kkernel: uptime %llu s", elapsed_seconds);
+		}
+	}
 }
 
 static void boot_log_framebuffer(void) {
@@ -93,8 +141,6 @@ void kernel_main(void) {
 	hal_serial_init();
 	printf("kernel: entering kernel_main\n");
 
-	hal_interrupts_init();
-
 	if (!supports_limine_base_revision()) {
 		boot_fail("kernel: unsupported limine base revision");
 	}
@@ -108,6 +154,8 @@ void kernel_main(void) {
 	boot_log_framebuffer();
 	boot_log_memory_map(memmap_req.response);
 	kernel_init_memory(memmap_req.response, hhdm_req.response->offset);
+
+	boot_run_timer_counter();
 
 	hcf();
 }

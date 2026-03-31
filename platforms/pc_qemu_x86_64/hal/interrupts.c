@@ -1,8 +1,12 @@
 #include <hal/hcf.h>
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 
-struct x86_64_idt_entry {
+#include "interrupts_private.h"
+
+struct idt_entry {
 	uint16_t offset_low;
 	uint16_t selector;
 	uint8_t  ist;
@@ -12,38 +16,16 @@ struct x86_64_idt_entry {
 	uint32_t reserved;
 } __attribute__((packed));
 
-struct x86_64_idtr {
+struct idtr {
 	uint16_t limit;
 	uint64_t base;
 } __attribute__((packed));
 
-struct x86_64_interrupt_frame {
-	uint64_t rax;
-	uint64_t rbx;
-	uint64_t rcx;
-	uint64_t rdx;
-	uint64_t rbp;
-	uint64_t rdi;
-	uint64_t rsi;
-	uint64_t r8;
-	uint64_t r9;
-	uint64_t r10;
-	uint64_t r11;
-	uint64_t r12;
-	uint64_t r13;
-	uint64_t r14;
-	uint64_t r15;
-	uint64_t vector;
-	uint64_t error_code;
-	uint64_t rip;
-	uint64_t cs;
-	uint64_t rflags;
-};
-
 extern void (*x86_64_interrupt_stub_table[])(void);
 
-static struct x86_64_idt_entry idt[256];
-static uint16_t                kernel_code_selector;
+static struct idt_entry idt[256];
+static uint16_t         kernel_code_selector;
+static bool             traps_ready;
 
 static const char* const exception_names[32] = {
 	"Divide Error",
@@ -80,24 +62,21 @@ static const char* const exception_names[32] = {
 	"Reserved",
 };
 
-static uint16_t current_code_selector(void) {
-	uint16_t selector;
+static void interrupt_send_eoi(unsigned vector) {
+	if (vector < X86_IRQ_BASE || vector >= X86_IRQ_BASE + X86_IRQ_COUNT) return;
 
-	__asm__ volatile("mov %%cs, %0" : "=r"(selector));
-	return selector;
-}
+	if (apic_is_active()) {
+		apic_send_eoi();
+		return;
+	}
 
-static uint64_t read_cr2(void) {
-	uint64_t value;
-
-	__asm__ volatile("mov %%cr2, %0" : "=r"(value));
-	return value;
+	pic_send_eoi(vector);
 }
 
 static void idt_set_entry(unsigned vector, void (*handler)(void)) {
 	uint64_t address = (uint64_t)(uintptr_t)handler;
 
-	idt[vector] = (struct x86_64_idt_entry){
+	idt[vector] = (struct idt_entry){
 		.offset_low      = (uint16_t)(address & 0xffffu),
 		.selector        = kernel_code_selector,
 		.ist             = 0u,
@@ -108,26 +87,43 @@ static void idt_set_entry(unsigned vector, void (*handler)(void)) {
 	};
 }
 
-void hal_interrupts_init(void) {
+void interrupts_init_traps(void) {
+	if (traps_ready) return;
+
 	kernel_code_selector = current_code_selector();
 
 	for (unsigned vector = 0; vector < 256; vector++) {
 		idt_set_entry(vector, x86_64_interrupt_stub_table[vector]);
 	}
 
-	struct x86_64_idtr idtr = {
+	struct idtr idtr = {
 		.limit = (uint16_t)(sizeof(idt) - 1u),
 		.base  = (uint64_t)(uintptr_t)idt,
 	};
 
 	__asm__ volatile("lidt %0" : : "m"(idtr));
+	pic_init();
 
+	traps_ready = true;
 	printf("kernel: x86_64 idt installed (cs=0x%04x)\n", kernel_code_selector);
 }
 
-__attribute__((noreturn))
-void x86_64_handle_interrupt(const struct x86_64_interrupt_frame* frame) {
+void interrupts_enable(void) {
+	__asm__ volatile("sti" : : : "memory");
+}
+
+void interrupts_disable(void) {
+	__asm__ volatile("cli" : : : "memory");
+}
+
+void x86_64_handle_interrupt(const struct interrupt_frame* frame) {
 	unsigned long long vector = frame->vector;
+
+	if (vector >= X86_IRQ_BASE && vector < X86_IRQ_BASE + X86_IRQ_COUNT) {
+		bool handled = clock_handle_irq((unsigned)vector);
+		interrupt_send_eoi((unsigned)vector);
+		if (handled) return;
+	}
 
 	if (vector < 32u) {
 		printf("kernel: exception %llu (%s)\n", vector, exception_names[vector]);

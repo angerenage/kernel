@@ -29,6 +29,13 @@ volatile struct limine_hhdm_request hhdm_req = {
 	.revision = 0,
 };
 
+/* RSDP request */
+__attribute__((used, section(".limine_requests")))
+volatile struct limine_rsdp_request rsdp_req = {
+	.id       = LIMINE_RSDP_REQUEST,
+	.revision = 0,
+};
+
 /* Executable address */
 __attribute__((used, section(".limine_requests")))
 volatile struct limine_kernel_address_request exec_addr_req = {
