@@ -1,6 +1,6 @@
 .section .text
-.global aarch64_exception_vectors
-.extern aarch64_handle_exception
+.global exception_vectors
+.extern handle_exception
 
 .equ AARCH64_EXCEPTION_FRAME_SIZE, 288
 
@@ -20,7 +20,7 @@ aarch64_vector_\index:
 .endm
 
 .balign 2048
-aarch64_exception_vectors:
+exception_vectors:
 	VECTOR_SLOT 0
 	VECTOR_SLOT 1
 	VECTOR_SLOT 2
@@ -89,10 +89,27 @@ aarch64_exception_common:
 	str x1, [sp, #280]
 
 	mov x0, sp
-	bl aarch64_handle_exception
+	bl handle_exception
 
-1:
-	wfe
-	b 1b
+	ldp x1, x2, [sp, #8]
+	ldp x3, x4, [sp, #24]
+	ldp x5, x6, [sp, #40]
+	ldp x7, x8, [sp, #56]
+	ldp x9, x10, [sp, #72]
+	ldp x11, x12, [sp, #88]
+	ldp x13, x14, [sp, #104]
+	ldp x15, x16, [sp, #120]
+	ldp x17, x18, [sp, #136]
+	ldp x19, x20, [sp, #152]
+	ldp x21, x22, [sp, #168]
+	ldp x23, x24, [sp, #184]
+	ldp x25, x26, [sp, #200]
+	ldp x27, x28, [sp, #216]
+	ldp x29, x30, [sp, #232]
+	ldr x0, [sp]
+
+	add sp, sp, #AARCH64_EXCEPTION_FRAME_SIZE
+	add sp, sp, #16
+	eret
 
 .section .note.GNU-stack,"",%progbits

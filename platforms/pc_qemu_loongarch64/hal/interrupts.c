@@ -2,15 +2,9 @@
 #include <stdint.h>
 #include <stdio.h>
 
-struct loongarch64_exception_frame {
-	uint64_t gpr[32];
-	uint64_t estat;
-	uint64_t era;
-	uint64_t badv;
-	uint64_t reserved;
-};
+#include "interrupts_private.h"
 
-static const char* loongarch64_ecode_name(uint64_t ecode, uint64_t esubcode) {
+static const char* ecode_name(uint64_t ecode, uint64_t esubcode) {
 	(void)esubcode;
 
 	switch (ecode) {
@@ -69,16 +63,21 @@ static const char* loongarch64_ecode_name(uint64_t ecode, uint64_t esubcode) {
 	}
 }
 
-__attribute__((noreturn))
-void loongarch64_handle_exception(const struct loongarch64_exception_frame* frame) {
-	uint64_t is_pending = frame->estat & 0x1fffu;
-	uint64_t ecode      = (frame->estat >> 16) & 0x3fu;
-	uint64_t esubcode   = (frame->estat >> 22) & 0x1ffu;
+void handle_exception(const struct exception_frame* frame) {
+	uint64_t is_pending;
+	uint64_t ecode;
+	uint64_t esubcode;
+
+	if (clock_handle_irq(frame)) return;
+
+	is_pending = frame->estat & 0x1fffu;
+	ecode      = (frame->estat >> 16) & 0x3fu;
+	esubcode   = (frame->estat >> 22) & 0x1ffu;
 
 	printf("kernel: loongarch64 exception ecode=0x%02llx esubcode=0x%03llx (%s)\n",
 	       ecode,
 	       esubcode,
-	       loongarch64_ecode_name(ecode, esubcode));
+	       ecode_name(ecode, esubcode));
 	printf("  estat=0x%016llx era=0x%016llx badv=0x%016llx is=0x%04llx\n",
 	       frame->estat,
 	       frame->era,

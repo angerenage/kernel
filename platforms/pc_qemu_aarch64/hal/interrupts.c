@@ -3,14 +3,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-struct aarch64_exception_frame {
-	uint64_t x[31];
-	uint64_t vector;
-	uint64_t esr;
-	uint64_t far;
-	uint64_t elr;
-	uint64_t spsr;
-};
+#include "interrupts_private.h"
 
 static const char* const vector_names[16] = {
 	"current EL, SP0, sync",
@@ -31,7 +24,7 @@ static const char* const vector_names[16] = {
 	"lower EL, AArch32, SError",
 };
 
-static const char* aarch64_ec_name(uint64_t ec) {
+static const char* ec_name(uint64_t ec) {
 	switch (ec) {
 	case 0x00:
 		return "Unknown";
@@ -76,15 +69,15 @@ static const char* aarch64_ec_name(uint64_t ec) {
 	}
 }
 
-static bool aarch64_is_instruction_abort(uint64_t ec) {
+static bool is_instruction_abort(uint64_t ec) {
 	return ec == 0x20 || ec == 0x21;
 }
 
-static bool aarch64_is_data_abort(uint64_t ec) {
+static bool is_data_abort(uint64_t ec) {
 	return ec == 0x24 || ec == 0x25;
 }
 
-static const char* aarch64_abort_dfsc_name(uint64_t dfsc) {
+static const char* abort_dfsc_name(uint64_t dfsc) {
 	switch (dfsc) {
 	case 0x00:
 		return "Address size fault, level 0";
@@ -159,7 +152,7 @@ static const char* aarch64_abort_dfsc_name(uint64_t dfsc) {
 	}
 }
 
-static const char* aarch64_abort_target_el(uint64_t ec) {
+static const char* abort_target_el(uint64_t ec) {
 	switch (ec) {
 	case 0x20:
 	case 0x24:
@@ -172,15 +165,19 @@ static const char* aarch64_abort_target_el(uint64_t ec) {
 	}
 }
 
-__attribute__((noreturn))
-void aarch64_handle_exception(const struct aarch64_exception_frame* frame) {
-	uint64_t ec  = (frame->esr >> 26) & 0x3fu;
-	uint64_t iss = frame->esr & 0x01ffffffu;
+void handle_exception(const struct exception_frame* frame) {
+	uint64_t ec;
+	uint64_t iss;
+
+	if (clock_handle_irq(frame)) return;
+
+	ec  = (frame->esr >> 26) & 0x3fu;
+	iss = frame->esr & 0x01ffffffu;
 
 	printf("kernel: aarch64 exception %s\n", vector_names[frame->vector & 0xfu]);
-	printf("  esr=0x%016llx ec=0x%02llx (%s) far=0x%016llx\n", frame->esr, ec, aarch64_ec_name(ec), frame->far);
+	printf("  esr=0x%016llx ec=0x%02llx (%s) far=0x%016llx\n", frame->esr, ec, ec_name(ec), frame->far);
 
-	if (aarch64_is_instruction_abort(ec) || aarch64_is_data_abort(ec)) {
+	if (is_instruction_abort(ec) || is_data_abort(ec)) {
 		uint64_t dfsc  = iss & 0x3fu;
 		bool     s1ptw = ((iss >> 7) & 1u) != 0;
 		bool     cm    = ((iss >> 8) & 1u) != 0;
@@ -188,12 +185,12 @@ void aarch64_handle_exception(const struct aarch64_exception_frame* frame) {
 		bool     fnv   = ((iss >> 10) & 1u) != 0;
 
 		printf("  abort=%s target=%s dfsc=0x%02llx (%s)\n",
-		       aarch64_is_data_abort(ec) ? "data" : "instruction",
-		       aarch64_abort_target_el(ec),
+		       is_data_abort(ec) ? "data" : "instruction",
+		       abort_target_el(ec),
 		       dfsc,
-		       aarch64_abort_dfsc_name(dfsc));
+		       abort_dfsc_name(dfsc));
 
-		if (aarch64_is_data_abort(ec)) {
+		if (is_data_abort(ec)) {
 			bool write = ((iss >> 6) & 1u) != 0;
 			printf("  access=%s s1ptw=%s cache_maint=%s ext_abort=%s far_valid=%s\n",
 			       write ? "write" : "read",

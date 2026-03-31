@@ -1,8 +1,8 @@
 .section .text
-.global loongarch64_exception_entry
-.global loongarch64_tlb_refill_entry
-.global loongarch64_machine_error_entry
-.extern loongarch64_handle_exception
+.global exception_entry
+.global tlb_refill_entry
+.global machine_error_entry
+.extern handle_exception
 
 .equ LOONGARCH64_EXCEPTION_FRAME_SIZE, 288
 .equ LOONGARCH64_CSR_PGD, 0x1b
@@ -30,7 +30,7 @@
 .endm
 
 .balign 4096
-loongarch64_exception_entry:
+exception_entry:
 	addi.d $sp, $sp, -LOONGARCH64_EXCEPTION_FRAME_SIZE
 
 	st.d $r0, $sp, 0
@@ -76,13 +76,44 @@ loongarch64_exception_entry:
 	st.d $r0, $sp, 280
 
 	addi.d $a0, $sp, 0
-	bl loongarch64_handle_exception
+	bl handle_exception
 
-1:
-	b 1b
+	ld.d $r1, $sp, 8
+	ld.d $r2, $sp, 16
+	ld.d $r4, $sp, 32
+	ld.d $r5, $sp, 40
+	ld.d $r6, $sp, 48
+	ld.d $r7, $sp, 56
+	ld.d $r8, $sp, 64
+	ld.d $r9, $sp, 72
+	ld.d $r10, $sp, 80
+	ld.d $r11, $sp, 88
+	ld.d $r13, $sp, 104
+	ld.d $r14, $sp, 112
+	ld.d $r15, $sp, 120
+	ld.d $r16, $sp, 128
+	ld.d $r17, $sp, 136
+	ld.d $r18, $sp, 144
+	ld.d $r19, $sp, 152
+	ld.d $r20, $sp, 160
+	ld.d $r21, $sp, 168
+	ld.d $r22, $sp, 176
+	ld.d $r23, $sp, 184
+	ld.d $r24, $sp, 192
+	ld.d $r25, $sp, 200
+	ld.d $r26, $sp, 208
+	ld.d $r27, $sp, 216
+	ld.d $r28, $sp, 224
+	ld.d $r29, $sp, 232
+	ld.d $r30, $sp, 240
+	ld.d $r31, $sp, 248
+	ld.d $r12, $sp, 96
+
+	addi.d $sp, $sp, LOONGARCH64_EXCEPTION_FRAME_SIZE
+	ertn
 
 .balign 4096
-loongarch64_tlb_refill_entry:
+tlb_refill_entry:
 	csrwr $t0, LOONGARCH64_CSR_TLBRSAVE
 
 	csrrd $t0, LOONGARCH64_CSR_PGD
@@ -97,7 +128,7 @@ loongarch64_tlb_refill_entry:
 	ertn
 
 .balign 4096
-loongarch64_machine_error_entry:
+machine_error_entry:
 	loongarch64_puts loongarch64_machine_error_msg
 0:
 	b 0b

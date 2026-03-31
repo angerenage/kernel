@@ -113,7 +113,8 @@ static inline void loongarch_tlb_flush_all(void) {
 
 static inline void loongarch_page_table_sync(void) {
 	__asm__ volatile("dbar 0\n\t"
-	                 "ibar 0" ::: "memory");
+	                 "ibar 0" ::
+	                     : "memory");
 }
 
 static inline bool loongarch_upper_half(uintptr_t virt) {

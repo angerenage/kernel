@@ -3,46 +3,9 @@
 #include <stdint.h>
 #include <stdio.h>
 
-struct riscv64_exception_frame {
-	uint64_t ra;
-	uint64_t sp;
-	uint64_t gp;
-	uint64_t tp;
-	uint64_t t0;
-	uint64_t t1;
-	uint64_t t2;
-	uint64_t s0;
-	uint64_t s1;
-	uint64_t a0;
-	uint64_t a1;
-	uint64_t a2;
-	uint64_t a3;
-	uint64_t a4;
-	uint64_t a5;
-	uint64_t a6;
-	uint64_t a7;
-	uint64_t s2;
-	uint64_t s3;
-	uint64_t s4;
-	uint64_t s5;
-	uint64_t s6;
-	uint64_t s7;
-	uint64_t s8;
-	uint64_t s9;
-	uint64_t s10;
-	uint64_t s11;
-	uint64_t t3;
-	uint64_t t4;
-	uint64_t t5;
-	uint64_t t6;
-	uint64_t scause;
-	uint64_t sepc;
-	uint64_t stval;
-	uint64_t sstatus;
-	uint64_t reserved;
-};
+#include "interrupts_private.h"
 
-static const char* riscv64_interrupt_name(uint64_t code) {
+static const char* interrupt_name(uint64_t code) {
 	switch (code) {
 	case 1:
 		return "Supervisor software interrupt";
@@ -55,7 +18,7 @@ static const char* riscv64_interrupt_name(uint64_t code) {
 	}
 }
 
-static const char* riscv64_exception_name(uint64_t code) {
+static const char* exception_name(uint64_t code) {
 	switch (code) {
 	case 0:
 		return "Instruction address misaligned";
@@ -88,15 +51,19 @@ static const char* riscv64_exception_name(uint64_t code) {
 	}
 }
 
-__attribute__((noreturn))
-void riscv64_handle_exception(const struct riscv64_exception_frame* frame) {
-	bool     is_interrupt = (frame->scause >> 63) != 0;
-	uint64_t code         = frame->scause & ~(1ull << 63);
+void handle_exception(const struct exception_frame* frame) {
+	bool     is_interrupt;
+	uint64_t code;
+
+	if (clock_handle_irq(frame)) return;
+
+	is_interrupt = (frame->scause >> 63) != 0;
+	code         = frame->scause & ~(1ull << 63);
 
 	printf("kernel: riscv64 %s %llu (%s)\n",
 	       is_interrupt ? "interrupt" : "exception",
 	       code,
-	       is_interrupt ? riscv64_interrupt_name(code) : riscv64_exception_name(code));
+	       is_interrupt ? interrupt_name(code) : exception_name(code));
 	printf("  scause=0x%016llx sepc=0x%016llx stval=0x%016llx sstatus=0x%016llx\n",
 	       frame->scause,
 	       frame->sepc,
