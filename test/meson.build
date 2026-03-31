@@ -25,6 +25,16 @@ core_test_lib = static_library(
 	install: false,
 )
 
+kernel_test_lib = static_library(
+	'kernel_test_lib',
+	base_sources + core_sources + files('../kernel/src/memory/vmm.c'),
+	include_directories: test_inc,
+	native: true,
+	c_args: test_common_c_args,
+	link_args: test_common_link_args,
+	install: false,
+)
+
 test_suites = [
 	{
 		'name': 'base_string',
@@ -63,6 +73,17 @@ test_suites = [
 			'kheap/concurrency.c',
 			'kheap/growth.c',
 		),
+		'suites': ['unit', 'memory'],
+	},
+	{
+		'name': 'vmm',
+		'sources': files(
+			'vmm/vmm_test.c',
+			'vmm/mock_paging.c',
+			'vmm/basic.c',
+			'vmm/rollback.c',
+		),
+		'link_with': kernel_test_lib,
 		'suites': ['unit', 'memory'],
 	},
 ]
