@@ -6,8 +6,4 @@ core_kernel_sources = files(
 	'mm/boot_info.c',
 )
 
-core_kernel_runtime_sources = core_kernel_sources + files(
-	'memory/kheap_vmm.c',
-)
-
-core_sources = core_kernel_runtime_sources
+core_sources = core_kernel_sources

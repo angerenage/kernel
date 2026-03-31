@@ -25,10 +25,14 @@ kernel_libk_sources = files(
 	'libk/stdio/puts.c',
 )
 
-kernel_objs = base_sources + core_sources + kernel_format_sources + kernel_libk_sources + platform_kernel_objects + [
+kernel_memory_sources = files(
+	'src/memory/kheap_vmm.c',
+	'src/memory/vmm.c',
+)
+
+kernel_objs = base_sources + core_sources + kernel_format_sources + kernel_libk_sources + kernel_memory_sources + platform_kernel_objects + [
 	'src/init.c',
 	'src/requests.c',
-	'src/memory/vmm.c',
 ]
 
 kernel_elf = executable('kernel.elf',
