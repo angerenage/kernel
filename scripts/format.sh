@@ -9,6 +9,7 @@ Run clang-format on selected source files, then enforce a newline after __attrib
 
 Options:
   --root <dir>             Root directory to scan (default: .)
+  --staged                 Format staged Git *.c/*.h files from the current repo
   --ext <glob>             File glob to include (repeatable). Defaults:
                              *.c *.h
   --exclude <glob>         Path pattern to exclude (repeatable). Matches
@@ -52,6 +53,7 @@ abspath() {
 ROOT="."
 CLANG_FORMAT_BIN="clang-format"
 DRY_RUN=0
+STAGED_ONLY=0
 
 # Defaults (can be added-to via --ext)
 EXTS=( "*.c" "*.h" )
@@ -64,6 +66,8 @@ while [[ $# -gt 0 ]]; do
 			ROOT="$2"; shift 2 ;;
 		--root=*)
 			ROOT="${1#*=}"; shift 1 ;;
+		--staged)
+			STAGED_ONLY=1; shift 1 ;;
 		--ext)
 			EXTS+=( "$2" ); shift 2 ;;
 		--ext=*)
@@ -90,7 +94,6 @@ ROOT="$(abspath "$ROOT")"
 
 need_cmd find
 need_cmd xargs
-need_cmd "$CLANG_FORMAT_BIN" || true	# nicer error later if missing
 
 # Build find expression
 build_find_args() {
@@ -165,6 +168,40 @@ gather_files() {
 	mapfile -t FILES < <(printf '%s\n' "${unsorted_files[@]}" | sort)
 }
 
+gather_staged_files() {
+	local git_root
+	local path
+	local file
+	local unsorted_files=()
+
+	need_cmd git
+	git_root="$(git -C "$ROOT" rev-parse --show-toplevel 2>/dev/null)" || error "--staged requires a Git working tree"
+	ROOT="$git_root"
+
+	while IFS= read -r -d '' path; do
+		case "$path" in
+			*.c|*.h) ;;
+			*) continue ;;
+		esac
+
+		file="${git_root}/${path}"
+		[[ -f "$file" ]] || continue
+
+		if matches_exclude "$file"; then
+			continue
+		fi
+
+		unsorted_files+=( "$file" )
+	done < <(git -C "$git_root" diff --cached --name-only --diff-filter=ACMR -z)
+
+	if (( ${#unsorted_files[@]} == 0 )); then
+		FILES=()
+		return 0
+	fi
+
+	mapfile -t FILES < <(printf '%s\n' "${unsorted_files[@]}" | sort -u)
+}
+
 run_clang_format() {
 	[[ ${#FILES[@]} -eq 0 ]] && return 0
 	need_cmd "$CLANG_FORMAT_BIN"
@@ -220,7 +257,12 @@ apply_attribute_breaks() {
 }
 
 # --- main ---
-gather_files
+if (( STAGED_ONLY )); then
+	gather_staged_files
+else
+	gather_files
+fi
+
 echo "Found ${#FILES[@]} file(s)."
 
 if (( ${#FILES[@]} > 0 )); then

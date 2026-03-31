@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    name: Build (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - x86_64
+          - aarch64
+          - riscv64
+          - loongarch64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            lld \
+            llvm \
+            meson \
+            ninja-build \
+            pkg-config \
+            libcriterion-dev
+
+      - name: Configure
+        run: bash scripts/build.sh --arch "${{ matrix.arch }}" --setup
+
+      - name: Compile kernel
+        # Only compile the kernel, iso is not generated to save time
+        run: meson compile -C "build-${{ matrix.arch }}" kernel
+
+  test:
+    name: Native tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            lld \
+            llvm \
+            meson \
+            ninja-build \
+            pkg-config \
+            libcriterion-dev
+
+      - name: Configure x86_64 build
+        run: bash scripts/build.sh --arch x86_64 --setup
+
+      - name: Run tests
+        run: bash scripts/run.sh --test

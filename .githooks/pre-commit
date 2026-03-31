@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+mapfile -d '' staged_files < <(git diff --cached --name-only --diff-filter=ACMR -z -- '*.c' '*.h')
+
+if (( ${#staged_files[@]} == 0 )); then
+	exit 0
+fi
+
+declare -A staged_lookup=()
+partially_staged=()
+
+for file in "${staged_files[@]}"; do
+	staged_lookup["$file"]=1
+done
+
+while IFS= read -r -d '' file; do
+	if [[ -n "${staged_lookup["$file"]:-}" ]]; then
+		partially_staged+=( "$file" )
+	fi
+done < <(git diff --name-only -z -- '*.c' '*.h')
+
+if (( ${#partially_staged[@]} > 0 )); then
+	echo "pre-commit: refusing to auto-format partially staged files:" >&2
+	printf '  %s\n' "${partially_staged[@]}" >&2
+	echo "pre-commit: stage or stash the remaining hunks, then commit again." >&2
+	exit 1
+fi
+
+bash scripts/format.sh --staged
+git add -- "${staged_files[@]}"

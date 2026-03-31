@@ -153,3 +153,4 @@ bash scripts/run_qemu.sh --arch loongarch64
 - The Limine helper script clones Limine into the build directory the first time the ISO target is built.
 - The `virt` machines for non-`x86_64` targets need explicit edk2 firmware. `scripts/run.sh` and `scripts/run_qemu.sh` locate the matching firmware image automatically, or you can point one of them at it with `QEMU_FIRMWARE_DIR`.
 - The non-`x86_64` targets are UEFI-only in this repository; BIOS ISO deployment remains `x86_64`-only.
+- A repo-managed pre-commit hook template lives in `.githooks/pre-commit`. Install it into your local `.git/hooks` with `bash scripts/install-hooks.sh`. It formats staged `*.c` and `*.h` files before commit and aborts if one of them is only partially staged.
