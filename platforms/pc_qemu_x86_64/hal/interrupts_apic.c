@@ -67,6 +67,8 @@ struct x86_acpi_madt_lapic_addr_override {
 static bool              apic_active;
 static volatile uint8_t* lapic_mmio;
 static volatile uint8_t* ioapic_mmio;
+static bool              apic_irq_route_valid[X86_IRQ_COUNT];
+static uint32_t          apic_irq_route_index[X86_IRQ_COUNT];
 
 static uintptr_t hhdm_phys_to_virt(uintptr_t phys) {
 	return phys + (uintptr_t)hhdm_req.response->offset;
@@ -256,8 +258,33 @@ bool apic_route_isa_irq(unsigned irq, unsigned vector) {
 	ioapic_write((uint8_t)(X86_IOAPIC_REDIR_BASE + ioapic_index * 2u + 1u), lapic_id << 24);
 	ioapic_write((uint8_t)(X86_IOAPIC_REDIR_BASE + ioapic_index * 2u), (uint32_t)redir);
 
+	if (irq < X86_IRQ_COUNT) {
+		apic_irq_route_valid[irq] = true;
+		apic_irq_route_index[irq] = ioapic_index;
+	}
+
 	apic_active = true;
 	printf("kernel: x86_64 ioapic routed irq%u to vector %u (gsi=%u, lapic=%u)\n", irq, vector, routed_gsi, lapic_id);
+	return true;
+}
+
+bool apic_set_isa_irq_mask(unsigned irq, bool masked) {
+	uint32_t ioapic_index;
+	uint8_t  low_reg;
+	uint32_t low_value;
+
+	if (irq >= X86_IRQ_COUNT || !apic_active || !apic_irq_route_valid[irq]) return false;
+
+	ioapic_index = apic_irq_route_index[irq];
+	low_reg      = (uint8_t)(X86_IOAPIC_REDIR_BASE + ioapic_index * 2u);
+	low_value    = ioapic_read(low_reg);
+	if (masked) {
+		low_value |= (uint32_t)X86_IOAPIC_REDIR_MASK;
+	}
+	else {
+		low_value &= ~(uint32_t)X86_IOAPIC_REDIR_MASK;
+	}
+	ioapic_write(low_reg, low_value);
 	return true;
 }
 

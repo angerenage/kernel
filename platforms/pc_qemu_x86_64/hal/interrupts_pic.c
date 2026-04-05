@@ -40,6 +40,26 @@ void pic_init(void) {
 	pic_mask_all();
 }
 
+void pic_mask_irq(unsigned irq) {
+	uint16_t port;
+	uint8_t  mask;
+	unsigned line;
+
+	if (irq >= X86_IRQ_COUNT) return;
+
+	if (irq < 8u) {
+		port = X86_PIC1_DATA;
+		line = irq;
+	}
+	else {
+		port = X86_PIC2_DATA;
+		line = irq - 8u;
+	}
+
+	mask = (uint8_t)(inb(port) | (1u << line));
+	outb(port, mask);
+}
+
 void pic_unmask_irq(unsigned irq) {
 	uint16_t port;
 	uint8_t  mask;

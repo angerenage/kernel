@@ -4,6 +4,7 @@
 #include <core/vmm.h>
 #include <hal/clock.h>
 #include <hal/hcf.h>
+#include <hal/interrupts.h>
 #include <hal/serial.h>
 #include <kernel/requests.h>
 #include <stdbool.h>
@@ -140,6 +141,8 @@ __attribute__((noreturn))
 void kernel_main(void) {
 	hal_serial_init();
 	printf("kernel: entering kernel_main\n");
+
+	hal_interrupts_init();
 
 	if (!supports_limine_base_revision()) {
 		boot_fail("kernel: unsupported limine base revision");

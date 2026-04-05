@@ -35,6 +35,7 @@
 #define X86_IOAPIC_REDIR_BASE 0x10u
 #define X86_IOAPIC_REDIR_POLARITY_LOW (1ull << 13)
 #define X86_IOAPIC_REDIR_TRIGGER_LEVEL (1ull << 15)
+#define X86_IOAPIC_REDIR_MASK (1ull << 16)
 #define X86_ACPI_MADT_TYPE_IO_APIC 1u
 #define X86_ACPI_MADT_TYPE_INTERRUPT_SOURCE_OVERRIDE 2u
 #define X86_ACPI_MADT_TYPE_LAPIC_ADDR_OVERRIDE 5u
@@ -67,15 +68,13 @@ struct interrupt_frame {
 };
 
 void pic_init(void);
+void pic_mask_irq(unsigned irq);
 void pic_unmask_irq(unsigned irq);
 void pic_send_eoi(unsigned vector);
 bool pit_init(uint32_t frequency_hz, uint32_t* actual_frequency_hz);
 
 bool apic_route_isa_irq(unsigned irq, unsigned vector);
+bool apic_set_isa_irq_mask(unsigned irq, bool masked);
 bool apic_is_active(void);
 void apic_send_eoi(void);
-
-void interrupts_init_traps(void);
-void interrupts_enable(void);
-void interrupts_disable(void);
 bool clock_handle_irq(unsigned vector);

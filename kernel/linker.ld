@@ -32,15 +32,19 @@ SECTIONS {
 
 	.rodata : ALIGN(0x1000) {
 		*(.rodata*)
+		*(.srodata*)
+		*(.sdata2*)
 	} > virt AT> phys :rodata
 
 	.data : ALIGN(0x1000) {
 		*(.data*)
+		*(.sdata*)
 	} > virt AT> phys :data
 
 	.bss : ALIGN(0x1000) {
 		__bss_start = .;
 		*(.bss*)
+		*(.sbss*)
 		*(COMMON)
 		__bss_end = .;
 	} > virt AT> phys :data

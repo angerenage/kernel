@@ -1,9 +1,36 @@
 #include <hal/hcf.h>
+#include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 
 #include "interrupts_private.h"
+
+static bool interrupts_initialized;
+
+extern char exception_vectors[];
+
+static inline void mask_irqs(void) {
+	__asm__ volatile("msr daifset, #2" : : : "memory");
+}
+
+void hal_interrupts_init(void) {
+	uintptr_t vectors;
+
+	if (interrupts_initialized) return;
+
+	vectors = (uintptr_t)exception_vectors;
+	mask_irqs();
+
+	__asm__ volatile("msr vbar_el1, %0\n\t"
+	                 "isb"
+	                 :
+	                 : "r"(vectors)
+	                 : "memory");
+
+	interrupts_initialized = true;
+	printf("kernel: aarch64 vectors installed\n");
+}
 
 static const char* const vector_names[16] = {
 	"current EL, SP0, sync",

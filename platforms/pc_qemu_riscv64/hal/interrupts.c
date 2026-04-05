@@ -1,9 +1,42 @@
 #include <hal/hcf.h>
+#include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 
 #include "interrupts_private.h"
+
+extern void exception_entry(void);
+
+static bool interrupts_initialized;
+
+static inline uint64_t read_sie(void) {
+	uint64_t value;
+	__asm__ volatile("csrr %0, sie" : "=r"(value));
+	return value;
+}
+
+static inline void write_sie(uint64_t value) {
+	__asm__ volatile("csrw sie, %0" : : "r"(value) : "memory");
+}
+
+void hal_interrupts_init(void) {
+	uintptr_t entry;
+	uint64_t  sie;
+
+	if (interrupts_initialized) return;
+
+	entry = (uintptr_t)exception_entry;
+	sie   = read_sie();
+	sie &= ~(1ull << 5);
+
+	__asm__ volatile("csrw stvec, %0" : : "r"(entry) : "memory");
+	write_sie(sie);
+	__asm__ volatile("csrc sstatus, %0" : : "r"(1ull << 1) : "memory");
+
+	interrupts_initialized = true;
+	printf("kernel: riscv64 trap vector installed\n");
+}
 
 static const char* interrupt_name(uint64_t code) {
 	switch (code) {

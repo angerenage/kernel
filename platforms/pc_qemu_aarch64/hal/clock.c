@@ -37,8 +37,6 @@ static uint64_t            clock_next_deadline;
 static volatile uint8_t*   gicd_mmio;
 static volatile uint8_t*   gicc_mmio;
 
-extern char exception_vectors[];
-
 static inline uintptr_t phys_to_virt(uintptr_t phys) {
 	return (uintptr_t)(hhdm_req.response->offset + phys);
 }
@@ -150,23 +148,11 @@ static void program_next_deadline(void) {
 }
 
 void hal_clock_init(void) {
-	uintptr_t vectors;
-
 	if (clock_initialized) return;
-
-	vectors = (uintptr_t)exception_vectors;
-	mask_irqs();
-
-	__asm__ volatile("msr vbar_el1, %0\n\t"
-	                 "isb"
-	                 :
-	                 : "r"(vectors)
-	                 : "memory");
 
 	write_timer_control(0u);
 
 	clock_initialized = true;
-	printf("kernel: aarch64 vectors installed\n");
 }
 
 bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* ctx) {

@@ -1,4 +1,5 @@
 #include <hal/hcf.h>
+#include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -62,8 +63,20 @@ static const char* const exception_names[32] = {
 	"Reserved",
 };
 
+static bool is_external_irq(unsigned long long vector) {
+	return vector >= X86_IRQ_BASE && vector < X86_IRQ_BASE + X86_IRQ_COUNT;
+}
+
+static void interrupts_enable(void) {
+	__asm__ volatile("sti" : : : "memory");
+}
+
+static void interrupts_disable(void) {
+	__asm__ volatile("cli" : : : "memory");
+}
+
 static void interrupt_send_eoi(unsigned vector) {
-	if (vector < X86_IRQ_BASE || vector >= X86_IRQ_BASE + X86_IRQ_COUNT) return;
+	if (!is_external_irq(vector)) return;
 
 	if (apic_is_active()) {
 		apic_send_eoi();
@@ -87,9 +100,10 @@ static void idt_set_entry(unsigned vector, void (*handler)(void)) {
 	};
 }
 
-void interrupts_init_traps(void) {
+void hal_interrupts_init(void) {
 	if (traps_ready) return;
 
+	interrupts_disable();
 	kernel_code_selector = current_code_selector();
 
 	for (unsigned vector = 0; vector < 256; vector++) {
@@ -103,23 +117,16 @@ void interrupts_init_traps(void) {
 
 	__asm__ volatile("lidt %0" : : "m"(idtr));
 	pic_init();
+	interrupts_enable();
 
 	traps_ready = true;
 	printf("kernel: x86_64 idt installed (cs=0x%04x)\n", kernel_code_selector);
 }
 
-void interrupts_enable(void) {
-	__asm__ volatile("sti" : : : "memory");
-}
-
-void interrupts_disable(void) {
-	__asm__ volatile("cli" : : : "memory");
-}
-
 void x86_64_handle_interrupt(const struct interrupt_frame* frame) {
 	unsigned long long vector = frame->vector;
 
-	if (vector >= X86_IRQ_BASE && vector < X86_IRQ_BASE + X86_IRQ_COUNT) {
+	if (is_external_irq(vector)) {
 		bool handled = clock_handle_irq((unsigned)vector);
 		interrupt_send_eoi((unsigned)vector);
 		if (handled) return;

@@ -6,7 +6,6 @@
 
 #include "interrupts_private.h"
 
-#define RISCV64_SSTATUS_SIE (1ull << 1)
 #define RISCV64_SIE_STIE (1ull << 5)
 #define RISCV64_SCAUSE_INTERRUPT (1ull << 63)
 #define RISCV64_SCAUSE_CODE_MASK ((1ull << 63) - 1u)
@@ -29,8 +28,6 @@ static uint32_t            clock_frequency_hz;
 static uint64_t            clock_interval_ticks;
 static uint64_t            clock_next_deadline;
 
-extern void exception_entry(void);
-
 static inline uint64_t read_time(void) {
 	uint64_t value;
 	__asm__ volatile("csrr %0, time" : "=r"(value));
@@ -48,11 +45,11 @@ static inline void write_sie(uint64_t value) {
 }
 
 static inline void enable_interrupts(void) {
-	__asm__ volatile("csrs sstatus, %0" : : "r"(RISCV64_SSTATUS_SIE) : "memory");
+	__asm__ volatile("csrs sstatus, %0" : : "r"(1ull << 1) : "memory");
 }
 
 static inline void disable_interrupts(void) {
-	__asm__ volatile("csrc sstatus, %0" : : "r"(RISCV64_SSTATUS_SIE) : "memory");
+	__asm__ volatile("csrc sstatus, %0" : : "r"(1ull << 1) : "memory");
 }
 
 static struct sbi_ret sbi_call1(unsigned long arg0, unsigned long fid, unsigned long eid) {
@@ -85,21 +82,9 @@ static void program_next_deadline(void) {
 }
 
 void hal_clock_init(void) {
-	uintptr_t entry;
-	uint64_t  sie;
-
 	if (clock_initialized) return;
 
-	entry = (uintptr_t)exception_entry;
-	sie   = read_sie();
-	sie &= ~RISCV64_SIE_STIE;
-
-	__asm__ volatile("csrw stvec, %0" : : "r"(entry) : "memory");
-	write_sie(sie);
-	disable_interrupts();
-
 	clock_initialized = true;
-	printf("kernel: riscv64 trap vector installed\n");
 }
 
 bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* ctx) {
