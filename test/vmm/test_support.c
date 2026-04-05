@@ -1,6 +1,7 @@
-#include "vmm_test.h"
+#include "test_support.h"
 
 #include <core/pmm.h>
+#include <core/vmm.h>
 #include <limine.h>
 
 void init_test_vmm(uint8_t* arena, size_t arena_size) {

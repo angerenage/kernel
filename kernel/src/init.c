@@ -127,7 +127,7 @@ static void kernel_init_memory(const struct limine_memmap_response* memmap_resp,
 		boot_fail("kernel: vmm_init failed");
 	}
 
-	printf("kernel: vmm initialized for heap window %p (%zu pages)\n", (void*)vmm_heap_base(), vmm_heap_page_count());
+	printf("kernel: vmm initialized for window %p (%zu pages)\n", (void*)vmm_window_base(), vmm_window_page_count());
 
 	if (!kheap_init()) {
 		boot_fail("kernel: kheap_init failed");

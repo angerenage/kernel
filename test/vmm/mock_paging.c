@@ -1,7 +1,7 @@
 #include <core/pmm.h>
 #include <hal/paging.h>
 
-#include "vmm_test.h"
+#include "test_support.h"
 
 #define MOCK_PAGING_MAX_MAPPINGS 1024u
 
@@ -14,6 +14,7 @@ struct mock_mapping {
 
 static struct mock_mapping mappings[MOCK_PAGING_MAX_MAPPINGS];
 static size_t              fail_after_maps = (size_t)-1;
+static size_t              fail_map_budget = (size_t)-1;
 static size_t              successful_maps;
 static bool                initialized;
 
@@ -26,12 +27,19 @@ void mock_paging_reset(void) {
 	}
 
 	fail_after_maps = (size_t)-1;
+	fail_map_budget = (size_t)-1;
 	successful_maps = 0;
 	initialized     = false;
 }
 
 void mock_paging_fail_after(size_t maps) {
 	fail_after_maps = maps;
+	fail_map_budget = (size_t)-1;
+}
+
+void mock_paging_fail_once_after(size_t maps) {
+	fail_after_maps = maps;
+	fail_map_budget = 1;
 }
 
 size_t mock_paging_mapping_count(void) {
@@ -68,7 +76,18 @@ bool hal_paging_map(uintptr_t virt, uintptr_t phys, uint64_t flags) {
 	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	if ((phys & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	if (find_mapping(virt) != NULL) return false;
-	if (successful_maps >= fail_after_maps) return false;
+	if (successful_maps >= fail_after_maps) {
+		if (fail_map_budget != (size_t)-1) {
+			if (fail_map_budget == 0) {
+				fail_after_maps = (size_t)-1;
+			}
+			else {
+				fail_map_budget--;
+				if (fail_map_budget == 0) fail_after_maps = (size_t)-1;
+			}
+		}
+		return false;
+	}
 
 	for (size_t i = 0; i < MOCK_PAGING_MAX_MAPPINGS; i++) {
 		if (mappings[i].present) continue;

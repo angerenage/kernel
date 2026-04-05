@@ -78,10 +78,9 @@ test_suites = [
 	{
 		'name': 'vmm',
 		'sources': files(
-			'vmm/vmm_test.c',
+			'vmm/test_support.c',
 			'vmm/mock_paging.c',
 			'vmm/basic.c',
-			'vmm/rollback.c',
 		),
 		'link_with': kernel_test_lib,
 		'suites': ['unit', 'memory'],
