@@ -99,44 +99,87 @@ default_builddir_for_arch() {
 
 find_firmware() {
 	local qemu_bin="$1"
-	local qemu_dir
+	local target_arch="$2"
 	local candidate
-	local -a search_dirs=()
 	local firmware_name
+	local candidate_dir
 
-	shift
-	qemu_dir="$(cd "$(dirname "$qemu_bin")" && pwd)"
-
-	if [[ -n "${QEMU_FIRMWARE_DIR:-}" ]]; then
-		search_dirs+=("$QEMU_FIRMWARE_DIR")
-	fi
-
-	search_dirs+=(
-		"${qemu_dir}/share"
-		"${qemu_dir}/../share"
-		/usr/share/AAVMF
-		/usr/share/qemu-efi-aarch64
-		/usr/share/qemu-efi-riscv64
-		/usr/share/qemu-efi-loongarch64
-		/usr/share/qemu
-		/usr/share
-		/usr/local/share/qemu
-		/usr/local/share
-		/mingw64/share/qemu
-		/mingw64/share
-	)
+	shift 2
 
 	for firmware_name in "$@"; do
-		for candidate_dir in "${search_dirs[@]}"; do
+		while IFS= read -r candidate_dir; do
 			candidate="${candidate_dir}/${firmware_name}"
 			if [[ -f "$candidate" ]]; then
 				printf '%s\n' "$candidate"
 				return 0
 			fi
-		done
+		done < <(firmware_search_dirs "$qemu_bin" "$target_arch" "$firmware_name")
 	done
 
 	return 1
+}
+
+firmware_arch_dir_suffixes() {
+	case "$1" in
+		aarch64)
+			printf '%s\n' "AAVMF" "qemu-efi-aarch64"
+			;;
+		riscv64)
+			printf '%s\n' "qemu-efi-riscv64"
+			;;
+		loongarch64)
+			printf '%s\n' "qemu-efi-loongarch64"
+			;;
+	esac
+}
+
+firmware_name_requires_arch_dir() {
+	case "$1" in
+		QEMU_EFI.fd)
+			return 0
+			;;
+		*)
+			return 1
+			;;
+	esac
+}
+
+firmware_search_dirs() {
+	local qemu_bin="$1"
+	local target_arch="$2"
+	local firmware_name="$3"
+	local qemu_dir
+	local base_dir
+	local suffix
+	local -a arch_dir_suffixes=()
+
+	qemu_dir="$(cd "$(dirname "$qemu_bin")" && pwd)"
+	mapfile -t arch_dir_suffixes < <(firmware_arch_dir_suffixes "$target_arch")
+
+	if [[ -n "${QEMU_FIRMWARE_DIR:-}" ]]; then
+		printf '%s\n' "$QEMU_FIRMWARE_DIR"
+		for suffix in "${arch_dir_suffixes[@]}"; do
+			printf '%s\n' "${QEMU_FIRMWARE_DIR}/${suffix}"
+		done
+	fi
+
+	if ! firmware_name_requires_arch_dir "$firmware_name"; then
+		printf '%s\n' \
+			"${qemu_dir}/share" \
+			"${qemu_dir}/../share" \
+			/usr/share/qemu \
+			/usr/share \
+			/usr/local/share/qemu \
+			/usr/local/share \
+			/mingw64/share/qemu \
+			/mingw64/share
+	fi
+
+	for base_dir in "${qemu_dir}/share" "${qemu_dir}/../share" /usr/share /usr/local/share /mingw64/share; do
+		for suffix in "${arch_dir_suffixes[@]}"; do
+			printf '%s\n' "${base_dir}/${suffix}"
+		done
+	done
 }
 
 TARGET_ARCH=""
@@ -275,11 +318,11 @@ esac
 qemu_bin="$(resolve_cmd "$qemu_name")" || error "required tool '$qemu_name' not found in PATH"
 
 if (( ${#firmware_names[@]} > 0 )); then
-	firmware_path="$(find_firmware "$qemu_bin" "${firmware_names[@]}")" || error \
+	firmware_path="$(find_firmware "$qemu_bin" "$TARGET_ARCH" "${firmware_names[@]}")" || error \
 		"firmware '${firmware_names[*]}' not found; set QEMU_FIRMWARE_DIR or install the edk2 firmware package"
 
 	if [[ "$TARGET_ARCH" == "riscv64" ]]; then
-		firmware_vars_template="$(find_firmware "$qemu_bin" "${firmware_vars_names[@]}")" || error \
+		firmware_vars_template="$(find_firmware "$qemu_bin" "$TARGET_ARCH" "${firmware_vars_names[@]}")" || error \
 			"firmware '${firmware_vars_names[*]}' not found; set QEMU_FIRMWARE_DIR or install the edk2 firmware package"
 		firmware_vars_path="${BUILD_DIR}/${firmware_vars_names[0]}"
 		if [[ ! -f "$firmware_vars_path" ]]; then

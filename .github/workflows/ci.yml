@@ -124,11 +124,23 @@ jobs:
 
           if [ "${{ matrix.arch }}" = "x86_64" ]; then
             sudo apt-get install -y nasm
-          elif [ "${{ matrix.arch }}" = "riscv64" ]; then
-            sudo apt-get install -y qemu-efi-riscv64
-          elif [ "${{ matrix.arch }}" = "loongarch64" ]; then
-            sudo apt-get install -y qemu-efi-loongarch64
           fi
+
+      - name: Fetch RISC-V firmware
+        if: matrix.arch == 'riscv64'
+        run: |
+          sudo apt-get install -y qemu-efi-riscv64
+
+      - name: Fetch LoongArch firmware
+        if: matrix.arch == 'loongarch64'
+        run: |
+          set -euxo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/firmware/loongarch64"
+          wget -O /tmp/qemu-efi-loongarch64.deb \
+            http://deb.debian.org/debian/pool/main/e/edk2/qemu-efi-loongarch64_2025.02-8+deb13u1_all.deb
+          dpkg-deb -x /tmp/qemu-efi-loongarch64.deb "$GITHUB_WORKSPACE/firmware/loongarch64"
+          test -f "$GITHUB_WORKSPACE/firmware/loongarch64/usr/share/qemu-efi-loongarch64/QEMU_EFI.fd"
+          test -f "$GITHUB_WORKSPACE/firmware/loongarch64/usr/share/qemu-efi-loongarch64/QEMU_VARS.fd"
 
       - name: Build selftest image
         run: |
@@ -141,4 +153,6 @@ jobs:
             --kernel-selftests-autorun
 
       - name: Run in-kernel selftests
+        env:
+          QEMU_FIRMWARE_DIR: ${{ matrix.arch == 'loongarch64' && format('{0}/firmware/loongarch64/usr/share/qemu-efi-loongarch64', github.workspace) || '' }}
         run: bash scripts/run.sh --kernel-selftest --arch "${{ matrix.arch }}" --timeout 45
