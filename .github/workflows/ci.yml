@@ -82,12 +82,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install dependencies
+        # Set clang-19 as the default clang version because otherwise loongarch64 kernel will fail to compile
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            clang \
-            lld \
-            llvm \
             meson \
             ninja-build \
             pkg-config \
@@ -96,7 +94,37 @@ jobs:
             make \
             automake \
             git \
-            mtools
+            mtools \
+            clang-19 \
+            lld-19 \
+            llvm-19 \
+            llvm-19-tools
+
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-19 100
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-19 100
+          sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-19 100
+          sudo update-alternatives --install /usr/bin/llvm-ar llvm-ar /usr/bin/llvm-ar-19 100
+          sudo update-alternatives --install /usr/bin/llvm-ranlib llvm-ranlib /usr/bin/llvm-ranlib-19 100
+          sudo update-alternatives --install /usr/bin/llvm-strip llvm-strip /usr/bin/llvm-strip-19 100
+          sudo update-alternatives --install /usr/bin/llvm-objcopy llvm-objcopy /usr/bin/llvm-objcopy-19 100
+          sudo update-alternatives --install /usr/bin/llvm-objdump llvm-objdump /usr/bin/llvm-objdump-19 100
+          sudo update-alternatives --install /usr/bin/llvm-readelf llvm-readelf /usr/bin/llvm-readelf-19 100
+          sudo update-alternatives --install /usr/bin/llvm-nm llvm-nm /usr/bin/llvm-nm-19 100
+
+          sudo update-alternatives --set clang /usr/bin/clang-19
+          sudo update-alternatives --set clang++ /usr/bin/clang++-19
+          sudo update-alternatives --set ld.lld /usr/bin/ld.lld-19
+          sudo update-alternatives --set llvm-ar /usr/bin/llvm-ar-19
+          sudo update-alternatives --set llvm-ranlib /usr/bin/llvm-ranlib-19
+          sudo update-alternatives --set llvm-strip /usr/bin/llvm-strip-19
+          sudo update-alternatives --set llvm-objcopy /usr/bin/llvm-objcopy-19
+          sudo update-alternatives --set llvm-objdump /usr/bin/llvm-objdump-19
+          sudo update-alternatives --set llvm-readelf /usr/bin/llvm-readelf-19
+          sudo update-alternatives --set llvm-nm /usr/bin/llvm-nm-19
+
+          if [ "${{ matrix.arch }}" = "x86_64" ]; then
+            sudo apt install -y nasm
+          fi
 
       - name: Build selftest image
         run: |
