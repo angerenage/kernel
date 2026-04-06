@@ -236,11 +236,13 @@ case "$TARGET_ARCH" in
 			-M virt,acpi=off,pflash0=pflash0,pflash1=pflash1
 			-cpu rv64
 			-m 2G
+			-device virtio-scsi-pci,id=scsi0
+			-drive "file=${ISO_PATH},format=raw,media=cdrom,if=none,id=cdrom0,readonly=on"
+			-device scsi-cd,drive=cdrom0,bootindex=1
 			-device virtio-gpu-pci
 			-device qemu-xhci
 			-device usb-kbd
 			-device usb-mouse
-			-cdrom "$ISO_PATH"
 			-serial stdio
 			-no-reboot
 			-no-shutdown
@@ -253,11 +255,13 @@ case "$TARGET_ARCH" in
 			-M virt
 			-cpu la464
 			-m 2G
+			-device virtio-scsi-pci,id=scsi0
+			-drive "file=${ISO_PATH},format=raw,media=cdrom,if=none,id=cdrom0,readonly=on"
+			-device scsi-cd,drive=cdrom0,bootindex=1
 			-device virtio-gpu-pci
 			-device qemu-xhci
 			-device usb-kbd
 			-device usb-mouse
-			-cdrom "$ISO_PATH"
 			-serial stdio
 			-no-reboot
 			-no-shutdown
@@ -311,6 +315,9 @@ if [[ "$qemu_bin" == *.exe ]]; then
 		if [[ "${qemu_args[i]}" == "-cdrom" ]]; then
 			qemu_args[i + 1]="$ISO_PATH"
 			break
+		fi
+		if [[ "${qemu_args[i]}" == file=* ]]; then
+			qemu_args[i]="file=${ISO_PATH},${qemu_args[i]#file=${BUILD_DIR}/kernel.iso,}"
 		fi
 	done
 
