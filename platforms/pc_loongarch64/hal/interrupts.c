@@ -1,3 +1,4 @@
+#include <core/cpu.h>
 #include <core/vmm.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
@@ -16,11 +17,11 @@
 #define LOONGARCH64_CSR_MERRENTRY 0x94u
 #define LOONGARCH64_EXCEPTION_STACK_SIZE 0x4000u
 
-static bool interrupts_initialized;
-_Alignas(16) uint8_t loongarch64_exception_stack[LOONGARCH64_EXCEPTION_STACK_SIZE];
-uintptr_t loongarch64_exception_stack_top =
-	(uintptr_t)(loongarch64_exception_stack + sizeof(loongarch64_exception_stack));
-uintptr_t loongarch64_exception_stack_bottom = (uintptr_t)loongarch64_exception_stack;
+static bool global_ready;
+static bool local_ready[64];
+_Alignas(16) uint8_t loongarch64_exception_stack[64][LOONGARCH64_EXCEPTION_STACK_SIZE];
+uintptr_t loongarch64_exception_stack_top;
+uintptr_t loongarch64_exception_stack_bottom;
 
 extern void exception_entry(void);
 extern void tlb_refill_entry(void);
@@ -57,21 +58,33 @@ static inline void csrwr(uint64_t value, unsigned csr) {
 	}
 }
 
-bool hal_interrupts_init(void) {
+bool hal_interrupts_init_global(void) {
+	if (exec_addr_req.response == NULL) {
+		printf("kernel: loongarch64 kernel address response missing for trap setup\n");
+		return false;
+	}
+
+	global_ready = true;
+	return true;
+}
+
+bool hal_interrupts_init_local(struct cpu* cpu) {
 	uintptr_t trap_entry;
 	uintptr_t tlbr_entry;
 	uintptr_t merr_entry;
 
-	if (interrupts_initialized) return true;
+	if (!global_ready || cpu == NULL || cpu->index >= 64u) return false;
+	if (local_ready[cpu->index]) return true;
 
 	trap_entry = (uintptr_t)exception_entry;
 	tlbr_entry = kernel_virt_to_phys((const void*)tlb_refill_entry);
 	merr_entry = kernel_virt_to_phys((const void*)machine_error_entry);
 
-	if (exec_addr_req.response == NULL || tlbr_entry == 0 || merr_entry == 0) {
-		printf("kernel: loongarch64 kernel address response missing for trap setup\n");
+	if (tlbr_entry == 0 || merr_entry == 0) {
 		return false;
 	}
+	loongarch64_exception_stack_bottom = (uintptr_t)loongarch64_exception_stack[cpu->index];
+	loongarch64_exception_stack_top    = loongarch64_exception_stack_bottom + LOONGARCH64_EXCEPTION_STACK_SIZE;
 
 	csrwr(0u, LOONGARCH64_CSR_ECFG);
 	csrwr(trap_entry, LOONGARCH64_CSR_EENTRY);
@@ -79,12 +92,15 @@ bool hal_interrupts_init(void) {
 	csrwr(tlbr_entry, LOONGARCH64_CSR_TLBRENTRY);
 	csrwr(merr_entry, LOONGARCH64_CSR_MERRENTRY);
 
-	interrupts_initialized = true;
-	printf("kernel: loongarch64 trap entries installed (eentry=%p tlbrentry=%p merrentry=%p exc_sp=%p)\n",
-	       (void*)trap_entry,
-	       (void*)tlbr_entry,
-	       (void*)merr_entry,
-	       (void*)loongarch64_exception_stack_top);
+	local_ready[cpu->index] = true;
+	cpu_interrupts_set_ready(cpu, true);
+	printf(
+		"kernel: loongarch64 local trap entries installed on cpu%zu (eentry=%p tlbrentry=%p merrentry=%p exc_sp=%p)\n",
+		cpu->index,
+		(void*)trap_entry,
+		(void*)tlbr_entry,
+		(void*)merr_entry,
+		(void*)loongarch64_exception_stack_top);
 	return true;
 }
 
@@ -156,13 +172,20 @@ void handle_exception(const struct exception_frame* frame) {
 	uint64_t ecode;
 	uint64_t esubcode;
 
-	if (clock_handle_irq(frame)) return;
+	cpu_enter_exception();
+	if (clock_handle_irq(frame)) {
+		cpu_leave_exception();
+		return;
+	}
 
 	is_pending = frame->estat & 0x1fffu;
 	ecode      = (frame->estat >> 16) & 0x3fu;
 	esubcode   = (frame->estat >> 22) & 0x1ffu;
 
-	if (is_page_invalid_exception(ecode) && vmm_resolve_page_fault(frame->badv)) return;
+	if (is_page_invalid_exception(ecode) && vmm_resolve_page_fault(frame->badv)) {
+		cpu_leave_exception();
+		return;
+	}
 
 	printf("kernel: loongarch64 exception ecode=0x%02llx esubcode=0x%03llx (%s)\n",
 	       ecode,

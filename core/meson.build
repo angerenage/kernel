@@ -1,4 +1,5 @@
 core_kernel_sources = files(
+	'cpu.c',
 	'memory/kheap.c',
 	'memory/pmm.c',
 	'memory/vaddr_alloc.c',

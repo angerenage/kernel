@@ -1,3 +1,4 @@
+#include <core/cpu.h>
 #include <core/kheap.h>
 #include <core/mm.h>
 #include <core/pmm.h>
@@ -14,6 +15,9 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+
+extern uint8_t stack_bottom[];
+extern uint8_t stack_top[];
 
 static __attribute__((noreturn))
 void boot_fail(const char* message) {
@@ -145,9 +149,19 @@ void kernel_main(void) {
 	hal_serial_init();
 	printf("kernel: entering kernel_main\n");
 
-	if (!hal_interrupts_init()) {
-		boot_fail("kernel: hal_interrupts_init failed");
+	if (!cpu_topology_init_bootstrap((uintptr_t)stack_bottom, (uintptr_t)stack_top)) {
+		boot_fail("kernel: cpu_topology_init_bootstrap failed");
 	}
+	cpu_bind_current(cpu_bsp());
+	(void)cpu_set_state(cpu_bsp(), CPU_STATE_STARTING);
+
+	if (!hal_interrupts_init_global()) {
+		boot_fail("kernel: hal_interrupts_init_global failed");
+	}
+	if (!hal_interrupts_init_local(cpu_current())) {
+		boot_fail("kernel: hal_interrupts_init_local failed");
+	}
+	(void)cpu_set_state(cpu_current(), CPU_STATE_ONLINE);
 
 	if (!supports_limine_base_revision()) {
 		boot_fail("kernel: unsupported limine base revision");

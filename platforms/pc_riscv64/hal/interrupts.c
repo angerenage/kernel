@@ -1,3 +1,4 @@
+#include <core/cpu.h>
 #include <core/vmm.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
@@ -11,10 +12,11 @@
 
 extern void exception_entry(void);
 
-static bool interrupts_initialized;
-_Alignas(16) uint8_t riscv64_exception_stack[RISCV64_EXCEPTION_STACK_SIZE];
-uintptr_t riscv64_exception_stack_top    = (uintptr_t)(riscv64_exception_stack + sizeof(riscv64_exception_stack));
-uintptr_t riscv64_exception_stack_bottom = (uintptr_t)riscv64_exception_stack;
+static bool global_ready;
+static bool local_ready[64];
+_Alignas(16) uint8_t riscv64_exception_stack[64][RISCV64_EXCEPTION_STACK_SIZE];
+uintptr_t riscv64_exception_stack_top;
+uintptr_t riscv64_exception_stack_bottom;
 struct riscv64_exception_entry_state {
 	uintptr_t old_sp;
 	uintptr_t saved_t1;
@@ -36,23 +38,33 @@ static inline void write_sie(uint64_t value) {
 	__asm__ volatile("csrw sie, %0" : : "r"(value) : "memory");
 }
 
-bool hal_interrupts_init(void) {
+bool hal_interrupts_init_global(void) {
+	global_ready = true;
+	return true;
+}
+
+bool hal_interrupts_init_local(struct cpu* cpu) {
 	uintptr_t entry;
 	uint64_t  sie;
 
-	if (interrupts_initialized) return true;
+	if (!global_ready || cpu == NULL || cpu->index >= 64u) return false;
+	if (local_ready[cpu->index]) return true;
 
 	entry = (uintptr_t)exception_entry;
 	sie   = read_sie();
 	sie &= ~(1ull << 5);
+	riscv64_exception_stack_bottom = (uintptr_t)riscv64_exception_stack[cpu->index];
+	riscv64_exception_stack_top    = riscv64_exception_stack_bottom + RISCV64_EXCEPTION_STACK_SIZE;
 
 	__asm__ volatile("csrw stvec, %0" : : "r"(entry) : "memory");
 	write_sscratch((uint64_t)(uintptr_t)&riscv64_exception_entry_state);
 	write_sie(sie);
 	__asm__ volatile("csrc sstatus, %0" : : "r"(1ull << 1) : "memory");
 
-	interrupts_initialized = true;
-	printf("kernel: riscv64 trap vector installed (exc_sp=0x%016llx)\n",
+	local_ready[cpu->index] = true;
+	cpu_interrupts_set_ready(cpu, true);
+	printf("kernel: riscv64 local trap vector installed on cpu%zu (exc_sp=0x%016llx)\n",
+	       cpu->index,
 	       (unsigned long long)riscv64_exception_stack_top);
 	return true;
 }
@@ -111,12 +123,19 @@ void handle_exception(const struct exception_frame* frame) {
 	bool     is_interrupt;
 	uint64_t code;
 
-	if (clock_handle_irq(frame)) return;
+	cpu_enter_exception();
+	if (clock_handle_irq(frame)) {
+		cpu_leave_exception();
+		return;
+	}
 
 	is_interrupt = (frame->scause >> 63) != 0;
 	code         = frame->scause & ~(1ull << 63);
 
-	if (!is_interrupt && is_page_fault_exception(code) && vmm_resolve_page_fault(frame->stval)) return;
+	if (!is_interrupt && is_page_fault_exception(code) && vmm_resolve_page_fault(frame->stval)) {
+		cpu_leave_exception();
+		return;
+	}
 
 	printf("kernel: riscv64 %s %llu (%s)\n",
 	       is_interrupt ? "interrupt" : "exception",

@@ -1,3 +1,4 @@
+#include <core/cpu.h>
 #include <core/vmm.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
@@ -60,11 +61,12 @@ struct tss64 {
 extern void (*x86_64_interrupt_stub_table[])(void);
 
 static struct idt_entry idt[256];
-static uint64_t         gdt[5];
-static struct tss64     x86_tss;
-static _Alignas(16) uint8_t x86_exception_stack[X86_EXCEPTION_STACK_SIZE];
+static uint64_t         gdt[64][5];
+static struct tss64     x86_tss[64];
+static _Alignas(16) uint8_t x86_exception_stack[64][X86_EXCEPTION_STACK_SIZE];
+static bool     local_ready[64];
 static uint16_t kernel_code_selector;
-static bool     traps_ready;
+static bool     global_ready;
 
 static const char* const exception_names[32] = {
 	"Divide Error",
@@ -124,10 +126,10 @@ static void interrupt_send_eoi(unsigned vector) {
 	pic_send_eoi(vector);
 }
 
-static void x86_load_segments_and_tss(void) {
+static void x86_load_segments_and_tss(size_t cpu_index) {
 	struct gdtr gdtr = {
-		.limit = (uint16_t)(sizeof(gdt) - 1u),
-		.base  = (uint64_t)(uintptr_t)gdt,
+		.limit = (uint16_t)(sizeof(gdt[cpu_index]) - 1u),
+		.base  = (uint64_t)(uintptr_t)gdt[cpu_index],
 	};
 	uint16_t tss_selector = X86_GDT_TSS_SELECTOR;
 
@@ -148,25 +150,25 @@ static void x86_load_segments_and_tss(void) {
 		: "rax", "memory");
 }
 
-static void x86_setup_exception_stack(void) {
+static void x86_setup_exception_stack(size_t cpu_index) {
 	uint64_t base;
 	uint64_t limit;
 
-	gdt[0] = 0u;
-	gdt[1] = 0x00af9a000000ffffull;
-	gdt[2] = 0x00af92000000ffffull;
+	gdt[cpu_index][0] = 0u;
+	gdt[cpu_index][1] = 0x00af9a000000ffffull;
+	gdt[cpu_index][2] = 0x00af92000000ffffull;
 
-	memset(&x86_tss, 0, sizeof(x86_tss));
-	x86_tss.ist1       = (uint64_t)(uintptr_t)(x86_exception_stack + sizeof(x86_exception_stack));
-	x86_tss.iomap_base = (uint16_t)sizeof(x86_tss);
+	memset(&x86_tss[cpu_index], 0, sizeof(x86_tss[cpu_index]));
+	x86_tss[cpu_index].ist1       = (uint64_t)(uintptr_t)(x86_exception_stack[cpu_index] + X86_EXCEPTION_STACK_SIZE);
+	x86_tss[cpu_index].iomap_base = (uint16_t)sizeof(x86_tss[cpu_index]);
 
-	base   = (uint64_t)(uintptr_t)&x86_tss;
-	limit  = (uint64_t)(sizeof(x86_tss) - 1u);
-	gdt[3] = (limit & 0xffffu) | ((base & 0xffffull) << 16) | (((base >> 16) & 0xffull) << 32) |
-	         ((uint64_t)0x89u << 40) | (((limit >> 16) & 0x0full) << 48) | (((base >> 24) & 0xffull) << 56);
-	gdt[4] = base >> 32;
+	base              = (uint64_t)(uintptr_t)&x86_tss[cpu_index];
+	limit             = (uint64_t)(sizeof(x86_tss[cpu_index]) - 1u);
+	gdt[cpu_index][3] = (limit & 0xffffu) | ((base & 0xffffull) << 16) | (((base >> 16) & 0xffull) << 32) |
+	                    ((uint64_t)0x89u << 40) | (((limit >> 16) & 0x0full) << 48) | (((base >> 24) & 0xffull) << 56);
+	gdt[cpu_index][4] = base >> 32;
 
-	x86_load_segments_and_tss();
+	x86_load_segments_and_tss(cpu_index);
 }
 
 static void idt_set_entry(unsigned vector, void (*handler)(void)) {
@@ -183,11 +185,9 @@ static void idt_set_entry(unsigned vector, void (*handler)(void)) {
 	};
 }
 
-bool hal_interrupts_init(void) {
-	if (traps_ready) return true;
-
+bool hal_interrupts_init_global(void) {
+	if (global_ready) return true;
 	interrupts_disable();
-	x86_setup_exception_stack();
 	kernel_code_selector = X86_GDT_KERNEL_CODE_SELECTOR;
 
 	for (unsigned vector = 0; vector < 256; vector++) {
@@ -201,12 +201,30 @@ bool hal_interrupts_init(void) {
 
 	__asm__ volatile("lidt %0" : : "m"(idtr));
 	pic_init();
+	global_ready = true;
+	printf("kernel: x86_64 interrupt globals installed (cs=0x%04x)\n", kernel_code_selector);
+	return true;
+}
+
+bool hal_interrupts_init_local(struct cpu* cpu) {
+	struct idtr idtr = {
+		.limit = (uint16_t)(sizeof(idt) - 1u),
+		.base  = (uint64_t)(uintptr_t)idt,
+	};
+
+	if (!global_ready || cpu == NULL || cpu->index >= 64u) return false;
+	if (local_ready[cpu->index]) return true;
+
+	interrupts_disable();
+	x86_setup_exception_stack(cpu->index);
+	__asm__ volatile("lidt %0" : : "m"(idtr));
 	interrupts_enable();
 
-	traps_ready = true;
-	printf("kernel: x86_64 idt installed (cs=0x%04x ist=0x%llx)\n",
-	       kernel_code_selector,
-	       (unsigned long long)x86_tss.ist1);
+	local_ready[cpu->index] = true;
+	cpu_interrupts_set_ready(cpu, true);
+	printf("kernel: x86_64 local interrupts ready on cpu%zu (ist=0x%016llx)\n",
+	       cpu->index,
+	       (unsigned long long)x86_tss[cpu->index].ist1);
 	return true;
 }
 
@@ -214,15 +232,20 @@ void x86_64_handle_interrupt(const struct interrupt_frame* frame) {
 	unsigned long long vector = frame->vector;
 	uint64_t           fault_addr;
 
+	cpu_enter_exception();
 	if (is_external_irq(vector)) {
 		bool handled = clock_handle_irq((unsigned)vector);
 		interrupt_send_eoi((unsigned)vector);
-		if (handled) return;
+		if (handled) {
+			cpu_leave_exception();
+			return;
+		}
 	}
 
 	fault_addr = vector == 14u ? read_cr2() : 0;
 	if (vector == 14u && x86_page_fault_is_not_present(frame->error_code) &&
 	    vmm_resolve_page_fault((uintptr_t)fault_addr)) {
+		cpu_leave_exception();
 		return;
 	}
 

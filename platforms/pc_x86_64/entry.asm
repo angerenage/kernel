@@ -2,6 +2,8 @@
 
 .section .text
 .global _start
+.global stack_bottom
+.global stack_top
 .extern kernel_main
 
 _start:

@@ -1,3 +1,4 @@
+#include <core/cpu.h>
 #include <core/vmm.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
@@ -9,10 +10,11 @@
 
 #define AARCH64_EXCEPTION_STACK_SIZE 0x4000u
 
-static bool interrupts_initialized;
-_Alignas(16) uint8_t aarch64_exception_stack[AARCH64_EXCEPTION_STACK_SIZE];
-uintptr_t aarch64_exception_stack_top    = (uintptr_t)(aarch64_exception_stack + sizeof(aarch64_exception_stack));
-uintptr_t aarch64_exception_stack_bottom = (uintptr_t)aarch64_exception_stack;
+static bool global_ready;
+static bool local_ready[64];
+_Alignas(16) uint8_t aarch64_exception_stack[64][AARCH64_EXCEPTION_STACK_SIZE];
+uintptr_t aarch64_exception_stack_top;
+uintptr_t aarch64_exception_stack_bottom;
 
 extern char exception_vectors[];
 
@@ -20,13 +22,21 @@ static inline void mask_irqs(void) {
 	__asm__ volatile("msr daifset, #2" : : : "memory");
 }
 
-bool hal_interrupts_init(void) {
+bool hal_interrupts_init_global(void) {
+	global_ready = true;
+	return true;
+}
+
+bool hal_interrupts_init_local(struct cpu* cpu) {
 	uintptr_t vectors;
 
-	if (interrupts_initialized) return true;
+	if (!global_ready || cpu == NULL || cpu->index >= 64u) return false;
+	if (local_ready[cpu->index]) return true;
 
 	vectors = (uintptr_t)exception_vectors;
 	mask_irqs();
+	aarch64_exception_stack_bottom = (uintptr_t)aarch64_exception_stack[cpu->index];
+	aarch64_exception_stack_top    = aarch64_exception_stack_bottom + AARCH64_EXCEPTION_STACK_SIZE;
 
 	__asm__ volatile("msr vbar_el1, %0\n\t"
 	                 "isb"
@@ -34,8 +44,11 @@ bool hal_interrupts_init(void) {
 	                 : "r"(vectors)
 	                 : "memory");
 
-	interrupts_initialized = true;
-	printf("kernel: aarch64 vectors installed (exc_sp=0x%016llx)\n", (unsigned long long)aarch64_exception_stack_top);
+	local_ready[cpu->index] = true;
+	cpu_interrupts_set_ready(cpu, true);
+	printf("kernel: aarch64 local vectors installed on cpu%zu (exc_sp=0x%016llx)\n",
+	       cpu->index,
+	       (unsigned long long)aarch64_exception_stack_top);
 	return true;
 }
 
@@ -204,7 +217,11 @@ static const char* abort_target_el(uint64_t ec) {
 }
 
 void handle_exception(const struct exception_frame* frame) {
-	if (clock_handle_irq(frame)) return;
+	cpu_enter_exception();
+	if (clock_handle_irq(frame)) {
+		cpu_leave_exception();
+		return;
+	}
 
 	uint64_t ec  = (frame->esr >> 26) & 0x3fu;
 	uint64_t iss = frame->esr & 0x01ffffffu;
@@ -215,7 +232,10 @@ void handle_exception(const struct exception_frame* frame) {
 	bool     ea    = ((iss >> 9) & 1u) != 0;
 	bool     fnv   = ((iss >> 10) & 1u) != 0;
 
-	if (!fnv && is_translation_fault(dfsc) && vmm_resolve_page_fault(frame->far)) return;
+	if (!fnv && is_translation_fault(dfsc) && vmm_resolve_page_fault(frame->far)) {
+		cpu_leave_exception();
+		return;
+	}
 
 	printf("kernel: aarch64 exception %s\n", vector_names[frame->vector & 0xfu]);
 	printf("  esr=0x%016llx ec=0x%02llx (%s) far=0x%016llx\n", frame->esr, ec, ec_name(ec), frame->far);
