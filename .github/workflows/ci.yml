@@ -123,9 +123,9 @@ jobs:
           sudo update-alternatives --set llvm-nm /usr/bin/llvm-nm-19
 
           if [ "${{ matrix.arch }}" = "x86_64" ]; then
-            sudo apt install -y nasm
-          else if [ "${{ matrix.arch }}" = "riscv64" ]; then
-            sudo apt install -y qemu-efi-riscv64
+            sudo apt-get install -y nasm
+          elif [ "${{ matrix.arch }}" = "riscv64" ]; then
+            sudo apt-get install -y qemu-efi-riscv64
           fi
 
       - name: Build selftest image
