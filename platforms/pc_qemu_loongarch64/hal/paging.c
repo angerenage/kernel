@@ -222,6 +222,7 @@ bool hal_paging_map(uintptr_t virt, uintptr_t phys, uint64_t flags) {
 
 	table[index] = loongarch_entry_from_phys(phys) | loongarch_common_flags(flags);
 	loongarch_page_table_sync();
+	loongarch_tlb_flush_all();
 	return true;
 }
 

@@ -60,11 +60,11 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 		return false;
 	}
 
-	const char* route_name = clock_enable_timer_irq();
 	clock_handler          = handler;
 	clock_context          = ctx;
 	clock_running          = true;
 	clock_frequency_hz     = actual_frequency_hz;
+	const char* route_name = clock_enable_timer_irq();
 	printf("kernel: x86_64 clock started (requested=%u Hz, actual=%u Hz, source=pit, route=%s)\n",
 	       frequency_hz,
 	       clock_frequency_hz,
