@@ -37,10 +37,14 @@ The recommended entry point is the build helper:
 bash scripts/build.sh --arch x86_64 --setup
 bash scripts/build.sh --all --setup
 bash scripts/build.sh --arch x86_64 --setup --no-tests
+bash scripts/build.sh --arch x86_64 --setup --kernel-selftests
+bash scripts/build.sh --arch x86_64 --setup --kernel-selftests --kernel-selftests-autorun
 ```
 
 When no architecture is provided, the helper exits with guidance to use either `--arch <arch>` or `--all`.
 Use `--no-tests` if you want a kernel-only configure without native test dependencies installed.
+Use `--kernel-selftests` to compile in-kernel selftest suites into the kernel.
+Use `--kernel-selftests-autorun` to also inject `kernel.selftest=1` into the generated image so that booting the ISO runs the in-kernel tests automatically.
 
 If you prefer calling Meson directly, configure the architecture you want to build from the repository root:
 
@@ -67,6 +71,7 @@ To configure and compile in one command:
 ```sh
 bash scripts/build.sh --arch x86_64
 bash scripts/build.sh --arch riscv64 -sc
+bash scripts/build.sh --arch x86_64 --kernel-selftests --kernel-selftests-autorun
 bash scripts/build.sh --all
 bash scripts/build.sh --all -sc
 ```
@@ -111,6 +116,7 @@ bash scripts/run.sh --arch riscv64
 bash scripts/run.sh --arch loongarch64
 bash scripts/run.sh --test
 bash scripts/run.sh -t
+bash scripts/run.sh --kernel-selftest --arch x86_64
 ```
 
 If you want to launch QEMU for every supported target, the helper does that sequentially in one command:
@@ -131,6 +137,13 @@ If you want to launch QEMU in debug mode, use `--debug` and optionally `--debug-
 bash scripts/run.sh --arch x86_64 --debug --debug-port 4321
 ```
 
+If you want a headless non-interactive selftest run that exits with success or failure, use:
+
+```sh
+bash scripts/build.sh --arch x86_64 --kernel-selftests --kernel-selftests-autorun --no-tests
+bash scripts/run.sh --kernel-selftest --arch x86_64 --timeout 45
+```
+
 If you only want a specific test suite:
 
 ```sh
@@ -146,14 +159,42 @@ bash scripts/run_qemu.sh --arch riscv64
 bash scripts/run_qemu.sh --arch loongarch64
 ```
 
+## In-Kernel Selftests
+
+The hosted Criterion tests under `test/` remain the right place for fast native unit coverage. For checks that must run inside the live kernel after boot-time memory initialization, there is now a small in-kernel selftest runner.
+
+Build-time control is split into two flags:
+
+- `--kernel-selftests` compiles the in-kernel selftest suites into the kernel binary
+- `--kernel-selftests-autorun` writes `kernel.selftest=1` into the generated image command line so they run automatically on boot
+
+The kernel runs selftests immediately after `pmm`, `vmm`, and `kheap` initialization, prints per-test results to serial, and emits a final `kernel: selftests result: PASS` or `FAIL` marker for automation.
+
+The first in-kernel example is a `kheap` smoke test that:
+
+- allocates two blocks from the real kernel heap
+- checks alignment and free-space accounting
+- frees and reallocates to verify block reuse
+- restores the heap state before continuing
+
+To add more in-kernel tests:
+
+- define one or more `struct kernel_selftest_case` entries in a new source file under `kernel/test/selftests/`
+- export a `const struct kernel_selftest_suite`
+- register that suite in [`kernel/test/selftest.c`](/c:/Users/anger/Code/kernel/new/kernel/test/selftest.c)
+
+Use the assertion macros in [`include/kernel/selftest.h`](/c:/Users/anger/Code/kernel/new/include/kernel/selftest.h). For tests that allocate or lock resources, prefer the `_GOTO` variants so cleanup still runs on failure.
+
 ## Notes
 
 - The default platform is `pc_qemu_x86_64`.
 - The available Meson platforms are `pc_qemu_x86_64`, `pc_qemu_aarch64`, `pc_qemu_riscv64`, and `pc_qemu_loongarch64`.
 - The test binaries are built natively, while the kernel is cross-compiled with the selected file in `toolchain/`.
 - `-Dtests=false` skips configuring the native Criterion test targets. `scripts/build.sh --no-tests` is the helper equivalent.
+- `-Dkernel_selftests=true` compiles in-kernel selftest code into the kernel. `scripts/build.sh --kernel-selftests` is the helper equivalent.
+- `-Dkernel_selftests_autorun=true` injects `kernel.selftest=1` into the generated image. `scripts/build.sh --kernel-selftests-autorun` is the helper equivalent.
 - `scripts/build.sh` supports `--arch <arch>` for one target and `--all` to configure and/or compile every supported target in one parallel run.
-- `scripts/run.sh` has two exclusive modes: test mode with `--test`/`-t`, and QEMU mode otherwise.
+- `scripts/run.sh` has three modes: test mode with `--test`/`-t`, kernel selftest mode with `--kernel-selftest`, and QEMU mode otherwise.
 - The Limine helper script clones Limine into the build directory the first time the ISO target is built.
 - The `virt` machines for non-`x86_64` targets need explicit edk2 firmware. `scripts/run.sh` and `scripts/run_qemu.sh` locate the matching firmware image automatically, or you can point one of them at it with `QEMU_FIRMWARE_DIR`.
 - The non-`x86_64` targets are UEFI-only in this repository; BIOS ISO deployment remains `x86_64`-only.

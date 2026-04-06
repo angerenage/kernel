@@ -7,6 +7,9 @@
 #include <hal/interrupts.h>
 #include <hal/serial.h>
 #include <kernel/requests.h>
+#if KERNEL_SELFTESTS_ENABLED
+#include <kernel/selftest.h>
+#endif
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -159,6 +162,11 @@ void kernel_main(void) {
 	boot_log_framebuffer();
 	boot_log_memory_map(memmap_req.response);
 	kernel_init_memory(memmap_req.response, hhdm_req.response->offset);
+#if KERNEL_SELFTESTS_ENABLED
+	if (kernel_selftests_requested() && !kernel_selftests_run()) {
+		boot_fail("kernel: selftests failed");
+	}
+#endif
 
 	boot_run_timer_counter();
 

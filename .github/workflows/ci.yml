@@ -64,3 +64,41 @@ jobs:
 
       - name: Run tests
         run: bash scripts/run.sh --test
+
+  kernel-selftests:
+    name: Kernel selftests (x86_64)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            lld \
+            llvm \
+            meson \
+            ninja-build \
+            pkg-config \
+            qemu-system-x86 \
+            xorriso \
+            make \
+            git
+
+      - name: Configure x86_64 selftest image
+        run: |
+          bash scripts/build.sh \
+            --arch x86_64 \
+            --setup \
+            --no-tests \
+            --kernel-selftests \
+            --kernel-selftests-autorun
+
+      - name: Build x86_64 selftest image
+        run: meson compile -C build-x86_64 image
+
+      - name: Run in-kernel selftests
+        run: bash scripts/run.sh --kernel-selftest --arch x86_64 --timeout 45

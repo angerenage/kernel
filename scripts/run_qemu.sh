@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
 	cat <<'EOF'
-Usage: run_qemu.sh --arch <arch> [--builddir <path>] [--debug] [--debug-port <port>] [-- <extra qemu args>]
+Usage: run_qemu.sh --arch <arch> [--builddir <path>] [--headless] [--debug] [--debug-port <port>] [-- <extra qemu args>]
 
 Required arguments:
   --arch        Target architecture (x86_64, aarch64, riscv64, loongarch64).
@@ -11,6 +11,7 @@ Required arguments:
 Optional arguments:
   --builddir    Meson build directory containing kernel.iso.
                 Defaults to build-<arch>.
+  --headless    Disable graphical display and keep serial on stdio.
   --debug       Start QEMU paused with a GDB stub on localhost and enable
                 QEMU debug logging in the build directory.
   --debug-port  TCP port to use for the GDB stub in --debug mode.
@@ -135,6 +136,7 @@ TARGET_ARCH=""
 BUILD_DIR=""
 DEBUG_MODE=0
 DEBUG_PORT=1234
+HEADLESS=0
 EXTRA_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -149,6 +151,10 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--debug)
 			DEBUG_MODE=1
+			shift 1
+			;;
+		--headless)
+			HEADLESS=1
 			shift 1
 			;;
 		--debug-port)
@@ -286,6 +292,10 @@ if (( DEBUG_MODE )); then
 		-d guest_errors,int,cpu_reset
 		-D "$DEBUG_LOG_PATH"
 	)
+fi
+
+if (( HEADLESS )); then
+	qemu_args+=(-display none)
 fi
 
 if [[ "$qemu_bin" == *.exe ]]; then

@@ -29,6 +29,13 @@ volatile struct limine_hhdm_request hhdm_req = {
 	.revision = 0,
 };
 
+/* Executable command line */
+__attribute__((used, section(".limine_requests")))
+volatile struct limine_executable_cmdline_request cmdline_req = {
+	.id       = LIMINE_EXECUTABLE_CMDLINE_REQUEST,
+	.revision = 0,
+};
+
 /* RSDP request */
 __attribute__((used, section(".limine_requests")))
 volatile struct limine_rsdp_request rsdp_req = {

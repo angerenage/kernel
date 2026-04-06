@@ -7,3 +7,13 @@ option('tests',
 	type : 'boolean',
 	value : true,
 	description : 'Build native test targets.')
+
+option('kernel_selftests',
+	type : 'boolean',
+	value : false,
+	description : 'Compile in-kernel selftest suites into the kernel binary.')
+
+option('kernel_selftests_autorun',
+	type : 'boolean',
+	value : false,
+	description : 'Append kernel.selftest=1 to the generated boot image command line.')
