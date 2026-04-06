@@ -99,11 +99,12 @@ default_builddir_for_arch() {
 
 find_firmware() {
 	local qemu_bin="$1"
-	local firmware_name="$2"
 	local qemu_dir
 	local candidate
 	local -a search_dirs=()
+	local firmware_name
 
+	shift
 	qemu_dir="$(cd "$(dirname "$qemu_bin")" && pwd)"
 
 	if [[ -n "${QEMU_FIRMWARE_DIR:-}" ]]; then
@@ -113,6 +114,10 @@ find_firmware() {
 	search_dirs+=(
 		"${qemu_dir}/share"
 		"${qemu_dir}/../share"
+		/usr/share/AAVMF
+		/usr/share/qemu-efi-aarch64
+		/usr/share/qemu-efi-riscv64
+		/usr/share/qemu-efi-loongarch64
 		/usr/share/qemu
 		/usr/share
 		/usr/local/share/qemu
@@ -121,12 +126,14 @@ find_firmware() {
 		/mingw64/share
 	)
 
-	for candidate_dir in "${search_dirs[@]}"; do
-		candidate="${candidate_dir}/${firmware_name}"
-		if [[ -f "$candidate" ]]; then
-			printf '%s\n' "$candidate"
-			return 0
-		fi
+	for firmware_name in "$@"; do
+		for candidate_dir in "${search_dirs[@]}"; do
+			candidate="${candidate_dir}/${firmware_name}"
+			if [[ -f "$candidate" ]]; then
+				printf '%s\n' "$candidate"
+				return 0
+			fi
+		done
 	done
 
 	return 1
@@ -187,8 +194,8 @@ ISO_PATH="${BUILD_DIR}/kernel.iso"
 [[ -f "$ISO_PATH" ]] || error "kernel ISO not found: $ISO_PATH (use --builddir <path> if you are not using the default build-${TARGET_ARCH} directory)"
 DEBUG_LOG_PATH="${BUILD_DIR}/qemu-${TARGET_ARCH}.debug.log"
 
-firmware_name=""
-firmware_vars_name=""
+firmware_names=()
+firmware_vars_names=()
 qemu_name=""
 qemu_bin=""
 qemu_args=()
@@ -206,7 +213,7 @@ case "$TARGET_ARCH" in
 		;;
 	aarch64)
 		qemu_name="qemu-system-aarch64"
-		firmware_name="edk2-aarch64-code.fd"
+		firmware_names=("edk2-aarch64-code.fd" "AAVMF_CODE.fd" "QEMU_EFI.fd")
 		qemu_args=(
 			-M virt
 			-cpu cortex-a72
@@ -223,8 +230,8 @@ case "$TARGET_ARCH" in
 		;;
 	riscv64)
 		qemu_name="qemu-system-riscv64"
-		firmware_name="edk2-riscv-code.fd"
-		firmware_vars_name="edk2-riscv-vars.fd"
+		firmware_names=("edk2-riscv-code.fd" "RISCV_VIRT_CODE.fd")
+		firmware_vars_names=("edk2-riscv-vars.fd" "RISCV_VIRT_VARS.fd")
 		qemu_args=(
 			-M virt,acpi=off,pflash0=pflash0,pflash1=pflash1
 			-cpu rv64
@@ -241,7 +248,7 @@ case "$TARGET_ARCH" in
 		;;
 	loongarch64)
 		qemu_name="qemu-system-loongarch64"
-		firmware_name="edk2-loongarch64-code.fd"
+		firmware_names=("edk2-loongarch64-code.fd" "LOONGARCH_VIRT_CODE.fd" "QEMU_EFI.fd")
 		qemu_args=(
 			-M virt
 			-cpu la464
@@ -263,14 +270,14 @@ esac
 
 qemu_bin="$(resolve_cmd "$qemu_name")" || error "required tool '$qemu_name' not found in PATH"
 
-if [[ -n "$firmware_name" ]]; then
-	firmware_path="$(find_firmware "$qemu_bin" "$firmware_name")" || error \
-		"firmware '${firmware_name}' not found; set QEMU_FIRMWARE_DIR or install the edk2 firmware package"
+if (( ${#firmware_names[@]} > 0 )); then
+	firmware_path="$(find_firmware "$qemu_bin" "${firmware_names[@]}")" || error \
+		"firmware '${firmware_names[*]}' not found; set QEMU_FIRMWARE_DIR or install the edk2 firmware package"
 
 	if [[ "$TARGET_ARCH" == "riscv64" ]]; then
-		firmware_vars_template="$(find_firmware "$qemu_bin" "$firmware_vars_name")" || error \
-			"firmware '${firmware_vars_name}' not found; set QEMU_FIRMWARE_DIR or install the edk2 firmware package"
-		firmware_vars_path="${BUILD_DIR}/${firmware_vars_name}"
+		firmware_vars_template="$(find_firmware "$qemu_bin" "${firmware_vars_names[@]}")" || error \
+			"firmware '${firmware_vars_names[*]}' not found; set QEMU_FIRMWARE_DIR or install the edk2 firmware package"
+		firmware_vars_path="${BUILD_DIR}/${firmware_vars_names[0]}"
 		if [[ ! -f "$firmware_vars_path" ]]; then
 			cat "$firmware_vars_template" > "$firmware_vars_path"
 		fi
@@ -307,7 +314,7 @@ if [[ "$qemu_bin" == *.exe ]]; then
 		fi
 	done
 
-	if [[ -n "$firmware_name" ]]; then
+	if (( ${#firmware_names[@]} > 0 )); then
 		firmware_path="$(to_native_path "$firmware_path")"
 		if [[ "$TARGET_ARCH" == "riscv64" ]]; then
 			firmware_vars_path="$(to_native_path "$firmware_vars_path")"

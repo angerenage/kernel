@@ -66,8 +66,16 @@ jobs:
         run: bash scripts/run.sh --test
 
   kernel-selftests:
-    name: Kernel selftests (x86_64)
+    name: Kernel selftests (${{ matrix.arch }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - x86_64
+          - aarch64
+          - riscv64
+          - loongarch64
 
     steps:
       - name: Checkout
@@ -83,22 +91,21 @@ jobs:
             meson \
             ninja-build \
             pkg-config \
-            qemu-system-x86 \
+            qemu-system \
             xorriso \
             make \
-            git
+            git \
+            mtools
 
-      - name: Configure x86_64 selftest image
+      - name: Build selftest image
         run: |
           bash scripts/build.sh \
-            --arch x86_64 \
+            --arch "${{ matrix.arch }}" \
             --setup \
+            --compile \
             --no-tests \
             --kernel-selftests \
             --kernel-selftests-autorun
 
-      - name: Build x86_64 selftest image
-        run: meson compile -C build-x86_64 image
-
       - name: Run in-kernel selftests
-        run: bash scripts/run.sh --kernel-selftest --arch x86_64 --timeout 45
+        run: bash scripts/run.sh --kernel-selftest --arch "${{ matrix.arch }}" --timeout 45
