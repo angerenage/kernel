@@ -139,6 +139,8 @@ Test(vmm, resolves_page_faults_for_lazy_heap_allocations) {
 	cr_assert(hal_paging_query((uintptr_t)base + PMM_PAGE_SIZE, NULL, &flags),
 	          "fault resolution did not map the faulting address");
 	cr_assert_eq(flags, (uint64_t)VMM_PROT_WRITE, "fault resolution applied incorrect mapping flags");
+	cr_assert(!vmm_resolve_page_fault((uintptr_t)base + PMM_PAGE_SIZE),
+	          "fault resolution unexpectedly retried an already-present heap page");
 	cr_assert(vmm_query_id(alloc_id, &info), "vmm_query_id failed after fault resolution");
 	cr_assert_eq(info.state, VMM_STATE_PARTIAL, "fault resolution did not leave the heap allocation partially mapped");
 	cr_assert_eq(info.first_phys, 0, "fault resolution unexpectedly reported backing for the untouched first page");

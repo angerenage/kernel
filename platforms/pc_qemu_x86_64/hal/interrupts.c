@@ -8,6 +8,10 @@
 
 #include "interrupts_private.h"
 
+static bool x86_page_fault_is_not_present(uint64_t error_code) {
+	return (error_code & 0x1u) == 0;
+}
+
 struct idt_entry {
 	uint16_t offset_low;
 	uint16_t selector;
@@ -135,7 +139,10 @@ void x86_64_handle_interrupt(const struct interrupt_frame* frame) {
 	}
 
 	fault_addr = vector == 14u ? read_cr2() : 0;
-	if (vector == 14u && vmm_resolve_page_fault((uintptr_t)fault_addr)) return;
+	if (vector == 14u && x86_page_fault_is_not_present(frame->error_code) &&
+	    vmm_resolve_page_fault((uintptr_t)fault_addr)) {
+		return;
+	}
 
 	if (vector < 32u) {
 		printf("kernel: exception %llu (%s)\n", vector, exception_names[vector]);

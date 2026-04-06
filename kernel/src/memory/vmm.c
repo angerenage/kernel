@@ -643,9 +643,12 @@ bool vmm_protect(vmm_id_t id, vmm_prot_t new_prot) {
 
 bool vmm_resolve_page_fault(uintptr_t addr) {
 	struct vmm_alloc_record* allocation;
+	uintptr_t                page_base;
 	bool                     ok = false;
 
 	if (!initialized) return false;
+	page_base = addr & ~(uintptr_t)(PMM_PAGE_SIZE - 1u);
+	if (hal_paging_query(page_base, NULL, NULL)) return false;
 
 	spinlock_lock(&vmm_lock);
 	allocation = find_allocation_containing_locked(addr);
