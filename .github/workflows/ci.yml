@@ -94,6 +94,7 @@ jobs:
             qemu-system \
             xorriso \
             make \
+            automake \
             git \
             mtools
 
