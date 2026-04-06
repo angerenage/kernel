@@ -1,3 +1,5 @@
+#include <core/lock.h>
+#include <core/spinlock.h>
 #include <hal/clock.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -24,6 +26,7 @@ static void*               clock_context;
 static bool                clock_initialized;
 static bool                clock_running;
 static uint32_t            clock_frequency_hz;
+static struct spinlock     clock_lock = SPINLOCK_INIT_CLASS("clock_lock", SPINLOCK_ORDER_CLOCK, SPINLOCK_FLAG_IRQSAVE);
 
 static inline uint32_t cpucfg_word(unsigned word) {
 	uint64_t value;
@@ -84,25 +87,51 @@ static uint64_t timer_frequency_hz(void) {
 }
 
 void hal_clock_init(void) {
-	if (clock_initialized) return;
+	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
+
+	if (clock_initialized) {
+		spinlock_unlock_irqrestore(&clock_lock, state);
+		return;
+	}
 	csrwr(0u, LOONGARCH64_CSR_TCFG);
 	csrwr(LOONGARCH64_TICLR_CLEAR, LOONGARCH64_CSR_TICLR);
 
 	clock_initialized = true;
+	spinlock_unlock_irqrestore(&clock_lock, state);
 }
 
 bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* ctx) {
-	uint64_t timer_hz;
-	uint64_t interval_ticks;
-	uint64_t ecfg;
-	uint64_t crmd;
+	uint64_t         timer_hz;
+	uint64_t         interval_ticks;
+	uint64_t         ecfg;
+	uint64_t         crmd;
+	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
 
-	if (!clock_initialized || frequency_hz == 0u || handler == NULL) return false;
+	if (!clock_initialized || frequency_hz == 0u || handler == NULL) {
+		spinlock_unlock_irqrestore(&clock_lock, state);
+		return false;
+	}
 
-	if (clock_running) hal_clock_stop();
+	if (clock_running) {
+		csrwr(0u, LOONGARCH64_CSR_TCFG);
+		csrwr(LOONGARCH64_TICLR_CLEAR, LOONGARCH64_CSR_TICLR);
+		ecfg = csrrd(LOONGARCH64_CSR_ECFG);
+		ecfg &= ~LOONGARCH64_TIMER_INT_MASK;
+		csrwr(ecfg, LOONGARCH64_CSR_ECFG);
+		crmd = csrrd(LOONGARCH64_CSR_CRMD);
+		crmd &= ~LOONGARCH64_CRMD_IE;
+		csrwr(crmd, LOONGARCH64_CSR_CRMD);
+		clock_running      = false;
+		clock_frequency_hz = 0u;
+		clock_handler      = NULL;
+		clock_context      = NULL;
+	}
 
 	timer_hz = timer_frequency_hz();
-	if (timer_hz == 0u) return false;
+	if (timer_hz == 0u) {
+		spinlock_unlock_irqrestore(&clock_lock, state);
+		return false;
+	}
 
 	interval_ticks = timer_hz / frequency_hz;
 	if (interval_ticks < LOONGARCH64_TIMER_MIN_INTERVAL) interval_ticks = LOONGARCH64_TIMER_MIN_INTERVAL;
@@ -127,18 +156,28 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 	printf("kernel: loongarch64 clock started (requested=%u Hz, actual=%u Hz, source=csr timer)\n",
 	       frequency_hz,
 	       clock_frequency_hz);
+	spinlock_unlock_irqrestore(&clock_lock, state);
 	return true;
 }
 
 uint32_t hal_clock_frequency(void) {
-	return clock_frequency_hz;
+	uint32_t         hz;
+	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
+
+	hz = clock_frequency_hz;
+	spinlock_unlock_irqrestore(&clock_lock, state);
+	return hz;
 }
 
 void hal_clock_stop(void) {
-	uint64_t ecfg;
-	uint64_t crmd;
+	uint64_t         ecfg;
+	uint64_t         crmd;
+	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
 
-	if (!clock_initialized) return;
+	if (!clock_initialized) {
+		spinlock_unlock_irqrestore(&clock_lock, state);
+		return;
+	}
 
 	csrwr(0u, LOONGARCH64_CSR_TCFG);
 	csrwr(LOONGARCH64_TICLR_CLEAR, LOONGARCH64_CSR_TICLR);
@@ -155,6 +194,7 @@ void hal_clock_stop(void) {
 	clock_frequency_hz = 0u;
 	clock_handler      = NULL;
 	clock_context      = NULL;
+	spinlock_unlock_irqrestore(&clock_lock, state);
 }
 
 bool clock_handle_irq(const struct exception_frame* frame) {

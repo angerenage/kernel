@@ -1,3 +1,4 @@
+#include <core/lock.h>
 #include <core/math.h>
 #include <core/mm.h>
 #include <core/pmm.h>
@@ -39,7 +40,7 @@ static size_t            managed_range_count = 0;
 static size_t            total_page_count    = 0;
 static size_t            free_page_count     = 0;
 static bool              initialized         = false;
-static struct spinlock   pmm_lock            = SPINLOCK_INIT;
+static struct spinlock   pmm_lock = SPINLOCK_INIT_CLASS("pmm_lock", SPINLOCK_ORDER_PMM, SPINLOCK_FLAG_ALLOW_EXCEPTION);
 
 static inline void* hhdm_phys_to_virt(uintptr_t phys) {
 	return (void*)(uintptr_t)(phys + boot_info.direct_map_offset);

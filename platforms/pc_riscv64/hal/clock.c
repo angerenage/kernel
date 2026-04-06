@@ -1,3 +1,5 @@
+#include <core/lock.h>
+#include <core/spinlock.h>
 #include <hal/clock.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -27,6 +29,7 @@ static bool                clock_running;
 static uint32_t            clock_frequency_hz;
 static uint64_t            clock_interval_ticks;
 static uint64_t            clock_next_deadline;
+static struct spinlock     clock_lock = SPINLOCK_INIT_CLASS("clock_lock", SPINLOCK_ORDER_CLOCK, SPINLOCK_FLAG_IRQSAVE);
 
 static inline uint64_t read_time(void) {
 	uint64_t value;
@@ -82,18 +85,40 @@ static void program_next_deadline(void) {
 }
 
 void hal_clock_init(void) {
-	if (clock_initialized) return;
+	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
+
+	if (clock_initialized) {
+		spinlock_unlock_irqrestore(&clock_lock, state);
+		return;
+	}
 
 	clock_initialized = true;
+	spinlock_unlock_irqrestore(&clock_lock, state);
 }
 
 bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* ctx) {
-	uint64_t interval_ticks;
-	uint64_t sie;
+	uint64_t         interval_ticks;
+	uint64_t         sie;
+	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
 
-	if (!clock_initialized || frequency_hz == 0u || handler == NULL) return false;
+	if (!clock_initialized || frequency_hz == 0u || handler == NULL) {
+		spinlock_unlock_irqrestore(&clock_lock, state);
+		return false;
+	}
 
-	if (clock_running) hal_clock_stop();
+	if (clock_running) {
+		sie = read_sie();
+		sie &= ~RISCV64_SIE_STIE;
+		write_sie(sie);
+		disable_interrupts();
+		(void)set_timer(UINT64_MAX);
+		clock_running        = false;
+		clock_frequency_hz   = 0u;
+		clock_interval_ticks = 0u;
+		clock_next_deadline  = 0u;
+		clock_handler        = NULL;
+		clock_context        = NULL;
+	}
 
 	interval_ticks = RISCV64_QEMU_VIRT_TIMEBASE_HZ / frequency_hz;
 	if (interval_ticks == 0u) interval_ticks = 1u;
@@ -106,7 +131,18 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 	clock_running        = true;
 
 	if (!set_timer(clock_next_deadline)) {
-		hal_clock_stop();
+		sie = read_sie();
+		sie &= ~RISCV64_SIE_STIE;
+		write_sie(sie);
+		disable_interrupts();
+		(void)set_timer(UINT64_MAX);
+		clock_running        = false;
+		clock_frequency_hz   = 0u;
+		clock_interval_ticks = 0u;
+		clock_next_deadline  = 0u;
+		clock_handler        = NULL;
+		clock_context        = NULL;
+		spinlock_unlock_irqrestore(&clock_lock, state);
 		return false;
 	}
 
@@ -118,17 +154,27 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 	printf("kernel: riscv64 clock started (requested=%u Hz, actual=%u Hz, source=sbi time)\n",
 	       frequency_hz,
 	       clock_frequency_hz);
+	spinlock_unlock_irqrestore(&clock_lock, state);
 	return true;
 }
 
 uint32_t hal_clock_frequency(void) {
-	return clock_frequency_hz;
+	uint32_t         hz;
+	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
+
+	hz = clock_frequency_hz;
+	spinlock_unlock_irqrestore(&clock_lock, state);
+	return hz;
 }
 
 void hal_clock_stop(void) {
-	uint64_t sie;
+	uint64_t         sie;
+	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
 
-	if (!clock_initialized) return;
+	if (!clock_initialized) {
+		spinlock_unlock_irqrestore(&clock_lock, state);
+		return;
+	}
 
 	sie = read_sie();
 	sie &= ~RISCV64_SIE_STIE;
@@ -142,6 +188,7 @@ void hal_clock_stop(void) {
 	clock_next_deadline  = 0u;
 	clock_handler        = NULL;
 	clock_context        = NULL;
+	spinlock_unlock_irqrestore(&clock_lock, state);
 }
 
 bool clock_handle_irq(const struct exception_frame* frame) {

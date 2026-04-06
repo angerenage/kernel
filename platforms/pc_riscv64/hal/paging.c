@@ -1,5 +1,7 @@
+#include <core/lock.h>
 #include <core/mm.h>
 #include <core/pmm.h>
+#include <core/spinlock.h>
 #include <hal/paging.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -18,8 +20,10 @@
 #define RISCV_SATP_MODE_SV48 9ull
 #define RISCV_SATP_MODE_SV57 10ull
 
-static bool initialized;
-static int  paging_levels;
+static bool            initialized;
+static int             paging_levels;
+static struct spinlock paging_lock =
+	SPINLOCK_INIT_CLASS("paging_lock", SPINLOCK_ORDER_PAGING, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
 
 static inline uint64_t riscv_read_satp(void) {
 	uint64_t value;
@@ -95,7 +99,8 @@ static bool riscv_walk_to_leaf(uintptr_t virt, bool create, uint64_t** out_table
 }
 
 bool hal_paging_init(void) {
-	uint64_t satp = riscv_read_satp();
+	uint64_t         satp  = riscv_read_satp();
+	struct irq_state state = spinlock_lock_irqsave(&paging_lock);
 
 	switch (satp >> 60) {
 	case RISCV_SATP_MODE_SV39:
@@ -108,57 +113,84 @@ bool hal_paging_init(void) {
 		paging_levels = 5;
 		break;
 	default:
+		spinlock_unlock_irqrestore(&paging_lock, state);
 		return false;
 	}
 
 	initialized = riscv_root_table() != NULL;
+	spinlock_unlock_irqrestore(&paging_lock, state);
 	return initialized;
 }
 
 bool hal_paging_map(uintptr_t virt, uintptr_t phys, uint64_t flags) {
-	uint64_t* table = NULL;
-	size_t    index = 0;
+	uint64_t*        table = NULL;
+	size_t           index = 0;
+	struct irq_state state;
 
 	if (!initialized) return false;
 	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	if ((phys & (PMM_PAGE_SIZE - 1u)) != 0) return false;
-	if (!riscv_walk_to_leaf(virt, true, &table, &index)) return false;
-	if ((table[index] & RISCV_PTE_V) != 0) return false;
+	state = spinlock_lock_irqsave(&paging_lock);
+	if (!riscv_walk_to_leaf(virt, true, &table, &index)) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
+	if ((table[index] & RISCV_PTE_V) != 0) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
 
 	table[index] = riscv_pte_from_phys(phys) | riscv_leaf_flags(flags);
 	riscv_tlb_flush(virt);
+	spinlock_unlock_irqrestore(&paging_lock, state);
 	return true;
 }
 
 bool hal_paging_unmap(uintptr_t virt) {
-	uint64_t* table = NULL;
-	size_t    index = 0;
+	uint64_t*        table = NULL;
+	size_t           index = 0;
+	struct irq_state state;
 
 	if (!initialized) return false;
 	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
-	if (!riscv_walk_to_leaf(virt, false, &table, &index)) return false;
-	if ((table[index] & RISCV_PTE_V) == 0) return false;
+	state = spinlock_lock_irqsave(&paging_lock);
+	if (!riscv_walk_to_leaf(virt, false, &table, &index)) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
+	if ((table[index] & RISCV_PTE_V) == 0) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
 
 	table[index] = 0;
 	riscv_tlb_flush(virt);
+	spinlock_unlock_irqrestore(&paging_lock, state);
 	return true;
 }
 
 bool hal_paging_query(uintptr_t virt, uintptr_t* out_phys, uint64_t* out_flags) {
-	uint64_t* table = NULL;
-	size_t    index = 0;
-	uint64_t  entry;
-	uint64_t  flags = 0;
+	uint64_t*        table = NULL;
+	size_t           index = 0;
+	uint64_t         entry;
+	uint64_t         flags = 0;
+	struct irq_state state;
 
 	if (out_phys) *out_phys = 0;
 	if (out_flags) *out_flags = 0;
 
 	if (!initialized) return false;
-	if (!riscv_walk_to_leaf(virt, false, &table, &index)) return false;
+	state = spinlock_lock_irqsave(&paging_lock);
+	if (!riscv_walk_to_leaf(virt, false, &table, &index)) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
 
 	entry = table[index];
-	if ((entry & RISCV_PTE_V) == 0) return false;
-	if ((entry & (RISCV_PTE_R | RISCV_PTE_W | RISCV_PTE_X)) == 0) return false;
+	if ((entry & RISCV_PTE_V) == 0 || (entry & (RISCV_PTE_R | RISCV_PTE_W | RISCV_PTE_X)) == 0) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
 
 	if (out_phys) *out_phys = riscv_pte_to_phys(entry) | (virt & (PMM_PAGE_SIZE - 1u));
 	if ((entry & RISCV_PTE_W) != 0) flags |= HAL_PAGE_WRITE;
@@ -166,5 +198,6 @@ bool hal_paging_query(uintptr_t virt, uintptr_t* out_phys, uint64_t* out_flags) 
 	if ((entry & RISCV_PTE_G) != 0) flags |= HAL_PAGE_GLOBAL;
 	if (out_flags) *out_flags = flags;
 
+	spinlock_unlock_irqrestore(&paging_lock, state);
 	return true;
 }

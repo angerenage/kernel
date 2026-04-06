@@ -5,6 +5,7 @@ kernel_c_args = freestanding_c_args + [
 ]
 kernel_c_args += platform_kernel_c_args
 kernel_c_args += '-DKERNEL_SELFTESTS_ENABLED=' + (kernel_selftests ? '1' : '0')
+kernel_c_args += '-DCORE_LOCK_DEBUG=' + (kernel_selftests ? '1' : '0')
 kernel_ld_args = [
 	'-nostdlib',
 	'-Wl,-z,max-page-size=0x1000',

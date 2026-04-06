@@ -1,4 +1,5 @@
 #include <core/kheap.h>
+#include <core/lock.h>
 #include <core/math.h>
 #include <core/pmm.h>
 #include <core/spinlock.h>
@@ -29,7 +30,7 @@ static kheap_grow_fn       grow_callback;
 static size_t              total_bytes;
 static size_t              free_bytes;
 static bool                initialized;
-static struct spinlock     kheap_lock = SPINLOCK_INIT;
+static struct spinlock     kheap_lock = SPINLOCK_INIT_CLASS("kheap_lock", SPINLOCK_ORDER_KHEAP, SPINLOCK_FLAG_NONE);
 
 static inline size_t block_size(const struct kheap_block* block) {
 	return block->size_and_flags & KHEAP_SIZE_MASK;
@@ -113,7 +114,7 @@ static struct kheap_block* coalesce_block(struct kheap_block* block) {
 	return block;
 }
 
-static bool add_arena(void* base, size_t size_bytes) {
+static bool add_arena_locked(void* base, size_t size_bytes) {
 	struct kheap_block* prologue;
 	struct kheap_block* free_block;
 	struct kheap_block* epilogue;
@@ -152,10 +153,16 @@ static bool grow_heap(size_t min_block_size) {
 	if (grow_pages < KHEAP_DEFAULT_GROW_PAGES) grow_pages = KHEAP_DEFAULT_GROW_PAGES;
 
 	if (!grow_callback(grow_pages, &region)) return false;
-	return add_arena(region, grow_pages * PMM_PAGE_SIZE);
+	spinlock_lock(&kheap_lock);
+	if (!add_arena_locked(region, grow_pages * PMM_PAGE_SIZE)) {
+		spinlock_unlock(&kheap_lock);
+		return false;
+	}
+	spinlock_unlock(&kheap_lock);
+	return true;
 }
 
-static struct kheap_block* find_fit(size_t block_bytes) {
+static struct kheap_block* find_fit_locked(size_t block_bytes) {
 	struct kheap_block* block = free_list;
 
 	while (block != NULL) {
@@ -164,21 +171,6 @@ static struct kheap_block* find_fit(size_t block_bytes) {
 	}
 
 	return NULL;
-}
-
-static bool ensure_fit(size_t block_bytes, struct kheap_block** out_block) {
-	struct kheap_block* block;
-
-	if (!out_block) return false;
-
-	block = find_fit(block_bytes);
-	while (block == NULL) {
-		if (!grow_heap(block_bytes)) return false;
-		block = find_fit(block_bytes);
-	}
-
-	*out_block = block;
-	return true;
 }
 
 bool kheap_init_with_grower(kheap_grow_fn grow_fn) {
@@ -193,11 +185,11 @@ bool kheap_init_with_grower(kheap_grow_fn grow_fn) {
 		spinlock_unlock(&kheap_lock);
 		return false;
 	}
-	if (!grow_heap(kheap_min_block_size)) {
-		spinlock_unlock(&kheap_lock);
-		return false;
-	}
+	spinlock_unlock(&kheap_lock);
 
+	if (!grow_heap(kheap_min_block_size)) return false;
+
+	spinlock_lock(&kheap_lock);
 	initialized = true;
 	spinlock_unlock(&kheap_lock);
 	return true;
@@ -215,24 +207,23 @@ void* kmalloc(size_t size) {
 	size_t              remainder_bytes;
 
 	if (!initialized || size == 0) return NULL;
-	spinlock_lock(&kheap_lock);
 	if (!align_up_size(size, KHEAP_ALIGN, &payload_bytes)) {
-		spinlock_unlock(&kheap_lock);
 		return NULL;
 	}
 	if (add_overflow_size(kheap_header_size + kheap_footer_size, payload_bytes, &block_bytes)) {
-		spinlock_unlock(&kheap_lock);
 		return NULL;
 	}
 	if (!align_up_size(block_bytes, KHEAP_ALIGN, &block_bytes)) {
-		spinlock_unlock(&kheap_lock);
 		return NULL;
 	}
 	if (block_bytes < kheap_min_block_size) block_bytes = kheap_min_block_size;
 
-	if (!ensure_fit(block_bytes, &block)) {
+	for (;;) {
+		spinlock_lock(&kheap_lock);
+		block = find_fit_locked(block_bytes);
+		if (block != NULL) break;
 		spinlock_unlock(&kheap_lock);
-		return NULL;
+		if (!grow_heap(block_bytes)) return NULL;
 	}
 
 	remove_free_block(block);

@@ -1,5 +1,7 @@
+#include <core/lock.h>
 #include <core/mm.h>
 #include <core/pmm.h>
+#include <core/spinlock.h>
 #include <hal/paging.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -30,10 +32,12 @@
 #define LOONGARCH_PTE_NX (1ull << 62)
 #define LOONGARCH_PTE_RPLV (1ull << 63)
 
-static bool     initialized;
-static uint64_t phys_mask;
-static unsigned palen_bits;
-static unsigned valen_bits;
+static bool            initialized;
+static uint64_t        phys_mask;
+static unsigned        palen_bits;
+static unsigned        valen_bits;
+static struct spinlock paging_lock =
+	SPINLOCK_INIT_CLASS("paging_lock", SPINLOCK_ORDER_PAGING, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
 
 static inline uint64_t loongarch_csrrd(unsigned csr) {
 	uint64_t value;
@@ -177,19 +181,24 @@ static bool loongarch_walk_to_leaf(uintptr_t virt, bool create, uint64_t** out_t
 }
 
 bool hal_paging_init(void) {
-	uint32_t cpucfg1 = loongarch_cpucfg_word(1u);
-	uint64_t crmd;
-	uint64_t pwcl;
-	uint64_t pwch;
+	uint32_t         cpucfg1 = loongarch_cpucfg_word(1u);
+	uint64_t         crmd;
+	uint64_t         pwcl;
+	uint64_t         pwch;
+	struct irq_state state = spinlock_lock_irqsave(&paging_lock);
 
 	palen_bits = ((cpucfg1 >> 4) & 0xffu) + 1u;
 	valen_bits = ((cpucfg1 >> 12) & 0xffu) + 1u;
-	if (((cpucfg1 >> 2) & 1u) == 0) return false;
-	if (palen_bits < 40 || palen_bits > 60) return false;
-	if (valen_bits < 40 || valen_bits > 48) return false;
+	if (((cpucfg1 >> 2) & 1u) == 0 || palen_bits < 40 || palen_bits > 60 || valen_bits < 40 || valen_bits > 48) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
 
 	phys_mask = (((1ull << palen_bits) - 1u) & ~(uint64_t)(PMM_PAGE_SIZE - 1u));
-	if ((loongarch_csrrd(LOONGARCH_CSR_PGDH) & phys_mask) == 0) return false;
+	if ((loongarch_csrrd(LOONGARCH_CSR_PGDH) & phys_mask) == 0) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
 
 	pwcl = (12ull << 0) | (9ull << 5) | (21ull << 10) | (9ull << 15) | (30ull << 20) | (9ull << 25);
 	pwch = (39ull << 0) | (9ull << 6);
@@ -207,55 +216,81 @@ bool hal_paging_init(void) {
 	loongarch_csrwr(crmd, LOONGARCH_CSR_CRMD);
 
 	initialized = true;
+	spinlock_unlock_irqrestore(&paging_lock, state);
 	return true;
 }
 
 bool hal_paging_map(uintptr_t virt, uintptr_t phys, uint64_t flags) {
-	uint64_t* table = NULL;
-	size_t    index = 0;
+	uint64_t*        table = NULL;
+	size_t           index = 0;
+	struct irq_state state;
 
 	if (!initialized) return false;
 	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	if ((phys & (PMM_PAGE_SIZE - 1u)) != 0) return false;
-	if (!loongarch_walk_to_leaf(virt, true, &table, &index)) return false;
-	if ((table[index] & LOONGARCH_PTE_P) != 0) return false;
+	state = spinlock_lock_irqsave(&paging_lock);
+	if (!loongarch_walk_to_leaf(virt, true, &table, &index)) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
+	if ((table[index] & LOONGARCH_PTE_P) != 0) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
 
 	table[index] = loongarch_entry_from_phys(phys) | loongarch_common_flags(flags);
 	loongarch_page_table_sync();
 	loongarch_tlb_flush_all();
+	spinlock_unlock_irqrestore(&paging_lock, state);
 	return true;
 }
 
 bool hal_paging_unmap(uintptr_t virt) {
-	uint64_t* table = NULL;
-	size_t    index = 0;
+	uint64_t*        table = NULL;
+	size_t           index = 0;
+	struct irq_state state;
 
 	if (!initialized) return false;
 	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
-	if (!loongarch_walk_to_leaf(virt, false, &table, &index)) return false;
-	if ((table[index] & LOONGARCH_PTE_P) == 0) return false;
+	state = spinlock_lock_irqsave(&paging_lock);
+	if (!loongarch_walk_to_leaf(virt, false, &table, &index)) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
+	if ((table[index] & LOONGARCH_PTE_P) == 0) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
 
 	table[index] = 0;
 	loongarch_page_table_sync();
 	loongarch_tlb_flush_all();
+	spinlock_unlock_irqrestore(&paging_lock, state);
 	return true;
 }
 
 bool hal_paging_query(uintptr_t virt, uintptr_t* out_phys, uint64_t* out_flags) {
-	uint64_t* table = NULL;
-	size_t    index = 0;
-	uint64_t  entry;
-	uint64_t  flags = 0;
+	uint64_t*        table = NULL;
+	size_t           index = 0;
+	uint64_t         entry;
+	uint64_t         flags = 0;
+	struct irq_state state;
 
 	if (out_phys) *out_phys = 0;
 	if (out_flags) *out_flags = 0;
 
 	if (!initialized) return false;
-	if (!loongarch_walk_to_leaf(virt, false, &table, &index)) return false;
+	state = spinlock_lock_irqsave(&paging_lock);
+	if (!loongarch_walk_to_leaf(virt, false, &table, &index)) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
 
 	entry = table[index];
-	if ((entry & LOONGARCH_PTE_P) == 0) return false;
-	if ((entry & LOONGARCH_PTE_V) == 0) return false;
+	if ((entry & LOONGARCH_PTE_P) == 0 || (entry & LOONGARCH_PTE_V) == 0) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
 
 	if (out_phys) *out_phys = loongarch_entry_to_phys(entry) | (virt & (PMM_PAGE_SIZE - 1u));
 	if ((entry & LOONGARCH_PTE_W) != 0) flags |= HAL_PAGE_WRITE;
@@ -264,5 +299,6 @@ bool hal_paging_query(uintptr_t virt, uintptr_t* out_phys, uint64_t* out_flags) 
 	if ((((entry >> LOONGARCH_PTE_MAT_SHIFT) & 0x3u) != LOONGARCH_CRMD_CC)) flags |= HAL_PAGE_NO_CACHE;
 	if (out_flags) *out_flags = flags;
 
+	spinlock_unlock_irqrestore(&paging_lock, state);
 	return true;
 }

@@ -1,3 +1,4 @@
+#include <core/lock.h>
 #include <core/math.h>
 #include <core/mm.h>
 #include <core/pmm.h>
@@ -15,7 +16,7 @@ static size_t          alloc_bitmap_pages;
 static size_t          total_pages;
 static size_t          free_pages;
 static bool            initialized;
-static struct spinlock vaddr_lock = SPINLOCK_INIT;
+static struct spinlock vaddr_lock = SPINLOCK_INIT_CLASS("vaddr_lock", SPINLOCK_ORDER_VADDR, SPINLOCK_FLAG_NONE);
 
 static inline size_t bitmap_word_count(size_t page_count) {
 	return (page_count + 63u) / 64u;

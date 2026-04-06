@@ -2,7 +2,7 @@ test_inc = include_directories('../include')
 criterion = dependency('criterion', native: true, required: true)
 threads = dependency('threads', native: true)
 
-test_common_c_args = ['--coverage']
+test_common_c_args = ['--coverage', '-DCORE_LOCK_DEBUG=1']
 test_common_link_args = ['--coverage']
 
 base_test_lib = static_library(

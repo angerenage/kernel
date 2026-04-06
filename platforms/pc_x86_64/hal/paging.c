@@ -1,6 +1,8 @@
+#include <core/lock.h>
 #include <core/math.h>
 #include <core/mm.h>
 #include <core/pmm.h>
+#include <core/spinlock.h>
 #include <hal/paging.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -17,7 +19,9 @@
 #define X86_CR4_LA57 (1ull << 12)
 #define X86_PHYS_MASK 0x000ffffffffff000ull
 
-static bool initialized;
+static bool            initialized;
+static struct spinlock paging_lock =
+	SPINLOCK_INIT_CLASS("paging_lock", SPINLOCK_ORDER_PAGING, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
 
 static inline uint64_t x86_read_cr3(void) {
 	uint64_t value;
@@ -96,54 +100,83 @@ static bool x86_walk_to_leaf(uintptr_t virt, bool create, uint64_t** out_table, 
 }
 
 bool hal_paging_init(void) {
+	struct irq_state state = spinlock_lock_irqsave(&paging_lock);
+
 	initialized = x86_root_table() != NULL;
+	spinlock_unlock_irqrestore(&paging_lock, state);
 	return initialized;
 }
 
 bool hal_paging_map(uintptr_t virt, uintptr_t phys, uint64_t flags) {
-	uint64_t* table = NULL;
-	size_t    index = 0;
+	uint64_t*        table = NULL;
+	size_t           index = 0;
+	struct irq_state state;
 
 	if (!initialized) return false;
 	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	if ((phys & (PMM_PAGE_SIZE - 1u)) != 0) return false;
-	if (!x86_walk_to_leaf(virt, true, &table, &index)) return false;
-	if ((table[index] & X86_PTE_PRESENT) != 0) return false;
+	state = spinlock_lock_irqsave(&paging_lock);
+	if (!x86_walk_to_leaf(virt, true, &table, &index)) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
+	if ((table[index] & X86_PTE_PRESENT) != 0) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
 
 	table[index] = (uint64_t)phys | x86_leaf_flags(flags);
 	x86_invlpg(virt);
+	spinlock_unlock_irqrestore(&paging_lock, state);
 	return true;
 }
 
 bool hal_paging_unmap(uintptr_t virt) {
-	uint64_t* table = NULL;
-	size_t    index = 0;
+	uint64_t*        table = NULL;
+	size_t           index = 0;
+	struct irq_state state;
 
 	if (!initialized) return false;
 	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
-	if (!x86_walk_to_leaf(virt, false, &table, &index)) return false;
-	if ((table[index] & X86_PTE_PRESENT) == 0) return false;
+	state = spinlock_lock_irqsave(&paging_lock);
+	if (!x86_walk_to_leaf(virt, false, &table, &index)) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
+	if ((table[index] & X86_PTE_PRESENT) == 0) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
 
 	table[index] = 0;
 	x86_invlpg(virt);
+	spinlock_unlock_irqrestore(&paging_lock, state);
 	return true;
 }
 
 bool hal_paging_query(uintptr_t virt, uintptr_t* out_phys, uint64_t* out_flags) {
-	uint64_t* table = NULL;
-	size_t    index = 0;
-	uint64_t  entry;
-	uint64_t  page_offset = virt & (PMM_PAGE_SIZE - 1u);
-	uint64_t  flags       = 0;
+	uint64_t*        table = NULL;
+	size_t           index = 0;
+	uint64_t         entry;
+	uint64_t         page_offset = virt & (PMM_PAGE_SIZE - 1u);
+	uint64_t         flags       = 0;
+	struct irq_state state;
 
 	if (out_phys) *out_phys = 0;
 	if (out_flags) *out_flags = 0;
 
 	if (!initialized) return false;
-	if (!x86_walk_to_leaf(virt, false, &table, &index)) return false;
+	state = spinlock_lock_irqsave(&paging_lock);
+	if (!x86_walk_to_leaf(virt, false, &table, &index)) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
 
 	entry = table[index];
-	if ((entry & X86_PTE_PRESENT) == 0) return false;
+	if ((entry & X86_PTE_PRESENT) == 0) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
 
 	if ((entry & X86_PTE_WRITE) != 0) flags |= HAL_PAGE_WRITE;
 	if ((entry & X86_PTE_NX) == 0) flags |= HAL_PAGE_EXEC;
@@ -152,10 +185,14 @@ bool hal_paging_query(uintptr_t virt, uintptr_t* out_phys, uint64_t* out_flags) 
 
 	if (out_phys) {
 		uint64_t phys;
-		if (add_overflow_u64(entry & X86_PHYS_MASK, page_offset, &phys)) return false;
+		if (add_overflow_u64(entry & X86_PHYS_MASK, page_offset, &phys)) {
+			spinlock_unlock_irqrestore(&paging_lock, state);
+			return false;
+		}
 		*out_phys = (uintptr_t)phys;
 	}
 	if (out_flags) *out_flags = flags;
 
+	spinlock_unlock_irqrestore(&paging_lock, state);
 	return true;
 }

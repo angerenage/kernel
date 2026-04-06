@@ -1,43 +1,52 @@
 #pragma once
 
+#include <core/lock.h>
+#include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stdint.h>
 
 struct spinlock {
 	uint32_t state;
+#if CORE_LOCK_DEBUG
+	const char* name;
+	uint32_t    order;
+	uint32_t    flags;
+	uint32_t    owner_cpu;
+#endif
 };
 
-#define SPINLOCK_INIT                                                                                                  \
+#if CORE_LOCK_DEBUG
+#define SPINLOCK_INIT_CLASS(lock_name, lock_order, lock_flags)                                                         \
+	{                                                                                                                  \
+		.state     = 0u,                                                                                               \
+		.name      = lock_name,                                                                                        \
+		.order     = (lock_order),                                                                                     \
+		.flags     = (lock_flags),                                                                                     \
+		.owner_cpu = 0u,                                                                                               \
+	}
+#else
+#define SPINLOCK_INIT_CLASS(lock_name, lock_order, lock_flags)                                                         \
 	{                                                                                                                  \
 		.state = 0u,                                                                                                   \
 	}
-
-static inline void spinlock_init(struct spinlock* lock) {
-	lock->state = 0u;
-}
-
-static inline void spinlock_relax(void) {
-#if defined(PLATFORM_PC_X86_64)
-	__asm__ volatile("pause");
-#elif defined(PLATFORM_PC_AARCH64)
-	__asm__ volatile("yield");
-#else
-	__asm__ volatile("" ::: "memory");
 #endif
-}
 
-static inline bool spinlock_try_lock(struct spinlock* lock) {
-	return __atomic_exchange_n(&lock->state, 1u, __ATOMIC_ACQUIRE) == 0u;
-}
+#define SPINLOCK_INIT SPINLOCK_INIT_CLASS(NULL, SPINLOCK_ORDER_NONE, SPINLOCK_FLAG_NONE)
 
-static inline void spinlock_lock(struct spinlock* lock) {
-	while (!spinlock_try_lock(lock)) {
-		while (__atomic_load_n(&lock->state, __ATOMIC_RELAXED) != 0u) {
-			spinlock_relax();
-		}
-	}
-}
+enum spinlock_debug_check {
+	SPINLOCK_DEBUG_CHECK_OK = 0,
+	SPINLOCK_DEBUG_CHECK_REENTRANT,
+	SPINLOCK_DEBUG_CHECK_ORDER,
+	SPINLOCK_DEBUG_CHECK_IRQSAVE_REQUIRED,
+	SPINLOCK_DEBUG_CHECK_EXCEPTION_DISALLOWED,
+};
 
-static inline void spinlock_unlock(struct spinlock* lock) {
-	__atomic_store_n(&lock->state, 0u, __ATOMIC_RELEASE);
-}
+void                      spinlock_init(struct spinlock* lock);
+void                      spinlock_init_class(struct spinlock* lock, const char* name, uint32_t order, uint32_t flags);
+void                      spinlock_relax(void);
+enum spinlock_debug_check spinlock_debug_check_acquire(const struct spinlock* lock);
+bool                      spinlock_try_lock(struct spinlock* lock);
+void                      spinlock_lock(struct spinlock* lock);
+void                      spinlock_unlock(struct spinlock* lock);
+struct irq_state          spinlock_lock_irqsave(struct spinlock* lock);
+void                      spinlock_unlock_irqrestore(struct spinlock* lock, struct irq_state state);

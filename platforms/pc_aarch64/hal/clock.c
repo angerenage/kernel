@@ -1,3 +1,5 @@
+#include <core/lock.h>
+#include <core/spinlock.h>
 #include <hal/clock.h>
 #include <hal/paging.h>
 #include <kernel/requests.h>
@@ -36,6 +38,7 @@ static uint64_t            clock_interval_ticks;
 static uint64_t            clock_next_deadline;
 static volatile uint8_t*   gicd_mmio;
 static volatile uint8_t*   gicc_mmio;
+static struct spinlock     clock_lock = SPINLOCK_INIT_CLASS("clock_lock", SPINLOCK_ORDER_CLOCK, SPINLOCK_FLAG_IRQSAVE);
 
 static inline uintptr_t phys_to_virt(uintptr_t phys) {
 	return (uintptr_t)(hhdm_req.response->offset + phys);
@@ -148,24 +151,49 @@ static void program_next_deadline(void) {
 }
 
 void hal_clock_init(void) {
-	if (clock_initialized) return;
+	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
+
+	if (clock_initialized) {
+		spinlock_unlock_irqrestore(&clock_lock, state);
+		return;
+	}
 
 	write_timer_control(0u);
 
 	clock_initialized = true;
+	spinlock_unlock_irqrestore(&clock_lock, state);
 }
 
 bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* ctx) {
-	uint64_t counter_hz;
-	uint64_t interval_ticks;
+	uint64_t         counter_hz;
+	uint64_t         interval_ticks;
+	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
 
-	if (!clock_initialized || frequency_hz == 0u || handler == NULL) return false;
+	if (!clock_initialized || frequency_hz == 0u || handler == NULL) {
+		spinlock_unlock_irqrestore(&clock_lock, state);
+		return false;
+	}
 
-	if (clock_running) hal_clock_stop();
-	if (!gic_init()) return false;
+	if (clock_running) {
+		mask_irqs();
+		write_timer_control(0u);
+		clock_running        = false;
+		clock_frequency_hz   = 0u;
+		clock_interval_ticks = 0u;
+		clock_next_deadline  = 0u;
+		clock_handler        = NULL;
+		clock_context        = NULL;
+	}
+	if (!gic_init()) {
+		spinlock_unlock_irqrestore(&clock_lock, state);
+		return false;
+	}
 
 	counter_hz = read_counter_frequency();
-	if (counter_hz == 0u) return false;
+	if (counter_hz == 0u) {
+		spinlock_unlock_irqrestore(&clock_lock, state);
+		return false;
+	}
 
 	interval_ticks = counter_hz / frequency_hz;
 	if (interval_ticks == 0u) interval_ticks = 1u;
@@ -184,15 +212,26 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 	printf("kernel: aarch64 clock started (requested=%u Hz, actual=%u Hz, source=generic timer)\n",
 	       frequency_hz,
 	       clock_frequency_hz);
+	spinlock_unlock_irqrestore(&clock_lock, state);
 	return true;
 }
 
 uint32_t hal_clock_frequency(void) {
-	return clock_frequency_hz;
+	uint32_t         hz;
+	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
+
+	hz = clock_frequency_hz;
+	spinlock_unlock_irqrestore(&clock_lock, state);
+	return hz;
 }
 
 void hal_clock_stop(void) {
-	if (!clock_initialized) return;
+	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
+
+	if (!clock_initialized) {
+		spinlock_unlock_irqrestore(&clock_lock, state);
+		return;
+	}
 
 	mask_irqs();
 	write_timer_control(0u);
@@ -203,6 +242,7 @@ void hal_clock_stop(void) {
 	clock_next_deadline  = 0u;
 	clock_handler        = NULL;
 	clock_context        = NULL;
+	spinlock_unlock_irqrestore(&clock_lock, state);
 }
 
 bool clock_handle_irq(const struct exception_frame* frame) {

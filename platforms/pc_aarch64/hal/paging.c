@@ -1,5 +1,7 @@
+#include <core/lock.h>
 #include <core/mm.h>
 #include <core/pmm.h>
+#include <core/spinlock.h>
 #include <hal/paging.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -32,8 +34,10 @@
 #define AARCH64_TCR_TG1_4K 2ull
 #define AARCH64_DEVICE_ATTR (2ull << 2)
 
-static bool     initialized;
-static uint64_t normal_attrs_template;
+static bool            initialized;
+static uint64_t        normal_attrs_template;
+static struct spinlock paging_lock =
+	SPINLOCK_INIT_CLASS("paging_lock", SPINLOCK_ORDER_PAGING, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
 
 struct aarch64_walk_params {
 	uint64_t root_phys;
@@ -195,64 +199,90 @@ static uint64_t aarch64_leaf_flags(uint64_t flags) {
 }
 
 bool hal_paging_init(void) {
-	uint64_t entry;
-	unsigned shift;
+	uint64_t         entry;
+	unsigned         shift;
+	struct irq_state state = spinlock_lock_irqsave(&paging_lock);
 
 	initialized           = false;
 	normal_attrs_template = 0;
 
-	if (!aarch64_query_entry((uintptr_t)&hal_paging_init, &entry, &shift)) return false;
+	if (!aarch64_query_entry((uintptr_t)&hal_paging_init, &entry, &shift)) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
 	(void)shift;
 
 	normal_attrs_template = entry & (AARCH64_LOWER_MASK | AARCH64_UPPER_MASK);
 	initialized           = true;
+	spinlock_unlock_irqrestore(&paging_lock, state);
 	return true;
 }
 
 bool hal_paging_map(uintptr_t virt, uintptr_t phys, uint64_t flags) {
-	uint64_t* table = NULL;
-	size_t    index = 0;
-	unsigned  shift = 0;
+	uint64_t*        table = NULL;
+	size_t           index = 0;
+	unsigned         shift = 0;
+	struct irq_state state;
 
 	if (!initialized) return false;
 	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	if ((phys & (PMM_PAGE_SIZE - 1u)) != 0) return false;
-	if (!aarch64_lookup_entry(virt, true, &table, &index, &shift)) return false;
-	if ((table[index] & AARCH64_DESC_VALID) != 0) return false;
-	if (shift != 12) return false;
+	state = spinlock_lock_irqsave(&paging_lock);
+	if (!aarch64_lookup_entry(virt, true, &table, &index, &shift)) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
+	if ((table[index] & AARCH64_DESC_VALID) != 0 || shift != 12) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
 
 	table[index] = ((uint64_t)phys & AARCH64_ADDR_MASK) | aarch64_leaf_flags(flags);
 	aarch64_tlb_flush_all();
+	spinlock_unlock_irqrestore(&paging_lock, state);
 	return true;
 }
 
 bool hal_paging_unmap(uintptr_t virt) {
-	uint64_t* table = NULL;
-	size_t    index = 0;
-	unsigned  shift = 0;
+	uint64_t*        table = NULL;
+	size_t           index = 0;
+	unsigned         shift = 0;
+	struct irq_state state;
 
 	if (!initialized) return false;
 	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
-	if (!aarch64_lookup_entry(virt, false, &table, &index, &shift)) return false;
-	if ((table[index] & AARCH64_DESC_VALID) == 0) return false;
-	if (shift != 12) return false;
+	state = spinlock_lock_irqsave(&paging_lock);
+	if (!aarch64_lookup_entry(virt, false, &table, &index, &shift)) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
+	if ((table[index] & AARCH64_DESC_VALID) == 0 || shift != 12) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
 
 	table[index] = 0;
 	aarch64_tlb_flush_all();
+	spinlock_unlock_irqrestore(&paging_lock, state);
 	return true;
 }
 
 bool hal_paging_query(uintptr_t virt, uintptr_t* out_phys, uint64_t* out_flags) {
-	uint64_t entry;
-	uint64_t flags = 0;
-	unsigned shift;
-	uint64_t page_mask;
+	uint64_t         entry;
+	uint64_t         flags = 0;
+	unsigned         shift;
+	uint64_t         page_mask;
+	struct irq_state state;
 
 	if (out_phys) *out_phys = 0;
 	if (out_flags) *out_flags = 0;
 
 	if (!initialized) return false;
-	if (!aarch64_query_entry(virt, &entry, &shift)) return false;
+	state = spinlock_lock_irqsave(&paging_lock);
+	if (!aarch64_query_entry(virt, &entry, &shift)) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
 
 	page_mask = (1ull << shift) - 1u;
 	if (out_phys) *out_phys = (uintptr_t)((entry & AARCH64_ADDR_MASK) | ((uint64_t)virt & page_mask));
@@ -263,5 +293,6 @@ bool hal_paging_query(uintptr_t virt, uintptr_t* out_phys, uint64_t* out_flags) 
 	if ((entry & AARCH64_ATTR_MASK) == AARCH64_DEVICE_ATTR) flags |= HAL_PAGE_NO_CACHE;
 	if (out_flags) *out_flags = flags;
 
+	spinlock_unlock_irqrestore(&paging_lock, state);
 	return true;
 }
