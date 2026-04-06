@@ -33,6 +33,8 @@ kernel_memory_sources = files(
 
 kernel_selftest_sources = files(
 	'test/selftest.c',
+	'test/selftests/pmm.c',
+	'test/selftests/vmm.c',
 	'test/selftests/kheap.c',
 )
 
