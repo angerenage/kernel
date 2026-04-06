@@ -124,6 +124,8 @@ jobs:
 
           if [ "${{ matrix.arch }}" = "x86_64" ]; then
             sudo apt install -y nasm
+          else if [ "${{ matrix.arch }}" = "riscv64" ]; then
+            sudo apt install -y qemu-efi-riscv64
           fi
 
       - name: Build selftest image
