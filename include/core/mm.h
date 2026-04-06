@@ -28,5 +28,4 @@ struct mm_boot_info {
 
 extern struct mm_boot_info boot_info;
 
-const char*         mem_range_type_str(enum mem_range_type type);
-enum mem_range_type mem_range_type_from_limine(uint64_t type);
+const char* mem_range_type_str(enum mem_range_type type);

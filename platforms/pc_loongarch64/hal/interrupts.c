@@ -2,7 +2,7 @@
 #include <core/vmm.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
-#include <kernel/requests.h>
+#include <kernel/boot.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -28,12 +28,10 @@ extern void tlb_refill_entry(void);
 extern void machine_error_entry(void);
 
 static inline uintptr_t kernel_virt_to_phys(const void* ptr) {
-	if (exec_addr_req.response == NULL) {
-		return 0;
-	}
+	struct kernel_boot_address_space address_space;
 
-	return (uintptr_t)(exec_addr_req.response->physical_base +
-	                   ((uint64_t)(uintptr_t)ptr - exec_addr_req.response->virtual_base));
+	if (!kernel_boot_address_space_get(&address_space)) return 0u;
+	return address_space.physical_base + ((uint64_t)(uintptr_t)ptr - address_space.virtual_base);
 }
 
 static inline void csrwr(uint64_t value, unsigned csr) {
@@ -82,7 +80,9 @@ void irq_enable_local(void) {
 }
 
 bool hal_interrupts_init_global(void) {
-	if (exec_addr_req.response == NULL) {
+	struct kernel_boot_address_space address_space;
+
+	if (!kernel_boot_address_space_get(&address_space)) {
 		printf("kernel: loongarch64 kernel address response missing for trap setup\n");
 		return false;
 	}

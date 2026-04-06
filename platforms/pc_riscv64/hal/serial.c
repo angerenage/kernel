@@ -1,5 +1,5 @@
 #include <hal/serial.h>
-#include <kernel/requests.h>
+#include <kernel/boot.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -38,11 +38,10 @@ static uint64_t serial_page_tables[4][512] __attribute__((aligned(4096)));
 static size_t   serial_page_table_count;
 
 static inline uint64_t kernel_virt_to_phys(const void* ptr) {
-	if (exec_addr_req.response == NULL) {
-		return 0;
-	}
+	struct kernel_boot_address_space address_space;
 
-	return exec_addr_req.response->physical_base + ((uint64_t)(uintptr_t)ptr - exec_addr_req.response->virtual_base);
+	if (!kernel_boot_address_space_get(&address_space)) return 0u;
+	return address_space.physical_base + ((uint64_t)(uintptr_t)ptr - address_space.virtual_base);
 }
 
 static inline uint64_t riscv_pte_from_phys(uint64_t phys) {
@@ -54,11 +53,10 @@ static inline uint64_t riscv_pte_to_phys(uint64_t pte) {
 }
 
 static inline uintptr_t hhdm_phys_to_virt(uint64_t phys) {
-	if (hhdm_req.response == NULL) {
-		return 0;
-	}
+	struct kernel_boot_address_space address_space;
 
-	return (uintptr_t)(hhdm_req.response->offset + phys);
+	if (!kernel_boot_address_space_get(&address_space)) return 0u;
+	return address_space.direct_map_offset + phys;
 }
 
 static inline void riscv_tlb_flush_all(void) {
@@ -70,7 +68,9 @@ static bool serial_map_uart_hhdm(void) {
 		return true;
 	}
 
-	if (hhdm_req.response == NULL || exec_addr_req.response == NULL) {
+	struct kernel_boot_address_space address_space;
+
+	if (!kernel_boot_address_space_get(&address_space)) {
 		return false;
 	}
 
@@ -98,7 +98,7 @@ static bool serial_map_uart_hhdm(void) {
 		return false;
 	}
 
-	uint64_t  uart_virt = hhdm_req.response->offset + NS16550_BASE_PHYS;
+	uint64_t  uart_virt = address_space.direct_map_offset + NS16550_BASE_PHYS;
 	uint64_t* table     = (uint64_t*)(uintptr_t)hhdm_phys_to_virt(root_phys);
 	if (table == NULL) {
 		return false;

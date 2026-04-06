@@ -1,8 +1,8 @@
 #pragma once
 
+#include <core/mm.h>
 #include <core/vaddr_alloc.h>
 #include <criterion/criterion.h>
-#include <limine.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>

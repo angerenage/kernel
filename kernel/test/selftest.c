@@ -1,4 +1,4 @@
-#include <kernel/requests.h>
+#include <kernel/boot.h>
 #include <kernel/selftest.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -57,10 +57,9 @@ bool kernel_selftests_requested(void) {
 	const char* cmdline;
 	const char* cursor;
 
-	if (!cmdline_req.response || !cmdline_req.response->cmdline) return false;
-
-	cmdline = cmdline_req.response->cmdline;
-	cursor  = cmdline;
+	cmdline = kernel_boot_cmdline();
+	if (cmdline == NULL) return false;
+	cursor = cmdline;
 
 	while (*cursor != '\0') {
 		const char* token_start;

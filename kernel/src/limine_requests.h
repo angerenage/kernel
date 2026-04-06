@@ -3,7 +3,7 @@
 #include <limine.h>
 #include <stdbool.h>
 
-bool supports_limine_base_revision(void);
+bool kernel_limine_protocol_supported(void);
 
 extern volatile struct limine_framebuffer_request fb_req;
 extern volatile struct LIMINE_MP(request) mp_req;

@@ -32,7 +32,6 @@ struct cpu {
 	uint32_t       exception_depth;
 	uintptr_t      boot_stack_base;
 	uintptr_t      boot_stack_top;
-	void*          limine_mp_info;
 #if CORE_LOCK_DEBUG
 	uint32_t lock_depth;
 	uint32_t lock_order_stack[CPU_DEBUG_LOCK_DEPTH];
@@ -53,7 +52,6 @@ struct cpu_init_info {
 	enum cpu_role role;
 	uintptr_t     boot_stack_base;
 	uintptr_t     boot_stack_top;
-	void*         limine_mp_info;
 };
 
 bool cpu_topology_init(const struct cpu_init_info* init_info, size_t cpu_count, size_t bsp_index);

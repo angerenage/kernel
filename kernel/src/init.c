@@ -7,8 +7,8 @@
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
 #include <hal/serial.h>
+#include <kernel/boot.h>
 #include <kernel/cpu_boot.h>
-#include <kernel/requests.h>
 #if KERNEL_SELFTESTS_ENABLED
 #include <kernel/selftest.h>
 #endif
@@ -74,56 +74,49 @@ static void boot_run_timer_counter(void) {
 }
 
 static void boot_log_framebuffer(void) {
-	if (!fb_req.response || fb_req.response->framebuffer_count < 1 || !fb_req.response->framebuffers) {
+	struct kernel_boot_framebuffer fb;
+
+	if (!kernel_boot_framebuffer_get(&fb)) {
 		printf("kernel: no framebuffer available, continuing in headless mode\n");
 		return;
 	}
 
-	struct limine_framebuffer* fb = fb_req.response->framebuffers[0];
-	if (!fb || !fb->address) {
-		printf("kernel: framebuffer response invalid, continuing in headless mode\n");
-		return;
-	}
+	printf(
+		"kernel: framebuffer available (%ux%u, %u bpp)\n", (unsigned)fb.width, (unsigned)fb.height, (unsigned)fb.bpp);
 
-	printf("kernel: framebuffer available (%ux%u, %u bpp)\n",
-	       (unsigned)fb->width,
-	       (unsigned)fb->height,
-	       (unsigned)fb->bpp);
-
-	for (uint32_t x = 0; x < fb->width; x++) {
-		for (uint32_t y = 0; y < fb->height; y++) {
-			uint32_t red        = x * 255u / fb->width;
-			uint32_t green      = y * 255u / fb->height;
-			uint32_t blue       = 64u;
-			uint8_t* pixel_addr = (uint8_t*)(uintptr_t)fb->address + (size_t)y * fb->pitch + (size_t)x * (fb->bpp / 8u);
-			uint32_t* pixel     = (uint32_t*)pixel_addr;
+	for (uint32_t x = 0; x < fb.width; x++) {
+		for (uint32_t y = 0; y < fb.height; y++) {
+			uint32_t  red        = x * 255u / (uint32_t)fb.width;
+			uint32_t  green      = y * 255u / (uint32_t)fb.height;
+			uint32_t  blue       = 64u;
+			uint8_t*  pixel_addr = (uint8_t*)fb.address + (size_t)y * fb.pitch + (size_t)x * ((size_t)fb.bpp / 8u);
+			uint32_t* pixel      = (uint32_t*)pixel_addr;
 
 			*pixel = (red << 16) | (green << 8) | blue;
 		}
 	}
 }
 
-static void boot_log_memory_map(const struct limine_memmap_response* memmap_resp) {
+static void boot_log_memory_map(const struct mem_range* memory_map, size_t range_count) {
 	uint64_t total_mem = 0;
 
 	printf("kernel: memory map entries:\n");
-	for (uint64_t i = 0; i < memmap_resp->entry_count; i++) {
-		struct limine_memmap_entry* entry      = memmap_resp->entries[i];
-		enum mem_range_type         range_type = mem_range_type_from_limine(entry->type);
+	for (size_t i = 0; i < range_count; i++) {
+		const struct mem_range* entry = &memory_map[i];
 
-		if (range_type == MEM_RANGE_USABLE) total_mem += entry->length;
+		if (entry->type == MEM_RANGE_USABLE) total_mem += entry->length;
 
 		printf("  base: %p, length: %p, type: %s\n",
-		       (void*)(uintptr_t)entry->base,
+		       (void*)entry->base,
 		       (void*)(uintptr_t)entry->length,
-		       mem_range_type_str(range_type));
+		       mem_range_type_str(entry->type));
 	}
 
 	printf("kernel: total memory: %u MB\n", (unsigned)(total_mem / (1024 * 1024)));
 }
 
-static void kernel_init_memory(const struct limine_memmap_response* memmap_resp, uintptr_t direct_map_offset) {
-	if (!pmm_init(memmap_resp, direct_map_offset)) {
+static void kernel_init_memory(const struct mem_range* memory_map, size_t range_count, uintptr_t direct_map_offset) {
+	if (!pmm_init(memory_map, range_count, direct_map_offset)) {
 		boot_fail("kernel: pmm_init failed");
 	}
 
@@ -147,6 +140,15 @@ static void kernel_init_memory(const struct limine_memmap_response* memmap_resp,
 
 __attribute__((noreturn))
 void kernel_main(void) {
+	size_t                           memory_map_count = 0u;
+	const struct mem_range*          memory_map       = NULL;
+	struct kernel_boot_address_space boot_address_space;
+
+	if (!kernel_boot_init()) {
+		hal_serial_init();
+		boot_fail("kernel: kernel_boot_init failed");
+	}
+
 	hal_serial_init();
 	printf("kernel: entering kernel_main\n");
 
@@ -164,19 +166,17 @@ void kernel_main(void) {
 	}
 	(void)cpu_set_state(cpu_current(), CPU_STATE_ONLINE);
 
-	if (!supports_limine_base_revision()) {
-		boot_fail("kernel: unsupported limine base revision");
-	}
-	if (!memmap_req.response || memmap_req.response->entry_count < 1) {
-		boot_fail("kernel: memory map request failed");
-	}
-	if (!hhdm_req.response) {
-		boot_fail("kernel: hhdm request failed");
-	}
+	if (!kernel_boot_protocol_supported()) boot_fail("kernel: boot protocol unavailable");
+	memory_map = kernel_boot_memmap(&memory_map_count);
+	if (memory_map == NULL || memory_map_count == 0u) boot_fail("kernel: memory map unavailable");
+	if (!kernel_boot_address_space_get(&boot_address_space)) boot_fail("kernel: boot address space unavailable");
 
 	boot_log_framebuffer();
-	boot_log_memory_map(memmap_req.response);
-	kernel_init_memory(memmap_req.response, hhdm_req.response->offset);
+	boot_log_memory_map(memory_map, memory_map_count);
+	kernel_init_memory(memory_map, memory_map_count, boot_address_space.direct_map_offset);
+	if (!kernel_boot_cpu_mp_supported()) {
+		printf("kernel: SMP boot hooks unavailable on this platform, continuing with the BSP only\n");
+	}
 	if (!kernel_cpu_boot_start_aps()) {
 		boot_fail("kernel: kernel_cpu_boot_start_aps failed");
 	}

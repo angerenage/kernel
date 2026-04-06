@@ -1,5 +1,5 @@
 #include <hal/paging.h>
-#include <kernel/requests.h>
+#include <kernel/boot.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -70,8 +70,21 @@ static volatile uint8_t* ioapic_mmio;
 static bool              apic_irq_route_valid[X86_IRQ_COUNT];
 static uint32_t          apic_irq_route_index[X86_IRQ_COUNT];
 
+static bool boot_address_space(struct kernel_boot_address_space* out) {
+	return kernel_boot_address_space_get(out);
+}
+
+static bool boot_address_space_available(void) {
+	struct kernel_boot_address_space address_space;
+
+	return boot_address_space(&address_space);
+}
+
 static uintptr_t hhdm_phys_to_virt(uintptr_t phys) {
-	return phys + (uintptr_t)hhdm_req.response->offset;
+	struct kernel_boot_address_space address_space;
+
+	if (!boot_address_space(&address_space)) return 0u;
+	return phys + address_space.direct_map_offset;
 }
 
 static bool map_mmio_page(uintptr_t phys) {
@@ -104,9 +117,11 @@ static bool acpi_checksum_valid(const void* table, size_t length) {
 }
 
 static const struct x86_acpi_sdt_header* acpi_find_table(const char signature[4]) {
-	if (!rsdp_req.response || !rsdp_req.response->address || !hhdm_req.response) return NULL;
+	uintptr_t rsdp_address;
 
-	const struct x86_acpi_rsdp* rsdp        = (const struct x86_acpi_rsdp*)(uintptr_t)rsdp_req.response->address;
+	if (!kernel_boot_rsdp_address(&rsdp_address) || !boot_address_space_available()) return NULL;
+
+	const struct x86_acpi_rsdp* rsdp        = (const struct x86_acpi_rsdp*)rsdp_address;
 	size_t                      rsdp_length = rsdp->revision >= 2u ? (size_t)rsdp->length : 20u;
 
 	if (!acpi_checksum_valid(rsdp, rsdp_length)) return NULL;
@@ -180,7 +195,7 @@ static bool lapic_init(uintptr_t lapic_phys) {
 	if (lapic_phys == 0u) {
 		lapic_phys = (uintptr_t)(apic_base & X86_IA32_APIC_BASE_ADDR_MASK);
 	}
-	if (lapic_phys == 0u || !hhdm_req.response) return false;
+	if (lapic_phys == 0u || !boot_address_space_available()) return false;
 	if (!map_mmio_page(lapic_phys)) return false;
 
 	lapic_mmio = (volatile uint8_t*)hhdm_phys_to_virt(lapic_phys);

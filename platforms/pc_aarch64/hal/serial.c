@@ -1,5 +1,5 @@
 #include <hal/serial.h>
-#include <kernel/requests.h>
+#include <kernel/boot.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -45,11 +45,10 @@ static uint64_t ttbr0_l1[512] __attribute__((aligned(4096)));
 static uint64_t ttbr0_l2[512] __attribute__((aligned(4096)));
 
 static inline uint64_t kernel_virt_to_phys(const void* ptr) {
-	if (exec_addr_req.response == NULL) {
-		return 0;
-	}
+	struct kernel_boot_address_space address_space;
 
-	return exec_addr_req.response->physical_base + ((uint64_t)(uintptr_t)ptr - exec_addr_req.response->virtual_base);
+	if (!kernel_boot_address_space_get(&address_space)) return 0u;
+	return address_space.physical_base + ((uint64_t)(uintptr_t)ptr - address_space.virtual_base);
 }
 
 static inline void serial_tlb_flush_all(void) {

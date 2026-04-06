@@ -33,7 +33,6 @@ bool cpu_topology_init(const struct cpu_init_info* init_info, size_t cpu_count, 
 			.exception_depth   = 0u,
 			.boot_stack_base   = init_info[i].boot_stack_base,
 			.boot_stack_top    = init_info[i].boot_stack_top,
-			.limine_mp_info    = init_info[i].limine_mp_info,
 		};
 	}
 
@@ -55,7 +54,6 @@ bool cpu_topology_init_bootstrap(uintptr_t boot_stack_base, uintptr_t boot_stack
 		.role            = CPU_ROLE_BSP,
 		.boot_stack_base = boot_stack_base,
 		.boot_stack_top  = boot_stack_top,
-		.limine_mp_info  = NULL,
 	};
 
 	return cpu_topology_init(&init_info, 1u, 0u);

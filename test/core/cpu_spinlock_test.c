@@ -27,7 +27,6 @@ Test(cpu, topology_initializes_from_generic_descriptors) {
          .role            = CPU_ROLE_AP,
          .boot_stack_base = 0x210000u,
          .boot_stack_top  = 0x214000u,
-         .limine_mp_info  = (void*)0x1000u,
 		 },
 		{
          .index           = 1u,
@@ -36,7 +35,6 @@ Test(cpu, topology_initializes_from_generic_descriptors) {
          .role            = CPU_ROLE_BSP,
          .boot_stack_base = 0x200000u,
          .boot_stack_top  = 0x204000u,
-         .limine_mp_info  = (void*)0x2000u,
 		 },
 		{
          .index           = 2u,
@@ -45,7 +43,6 @@ Test(cpu, topology_initializes_from_generic_descriptors) {
          .role            = CPU_ROLE_AP,
          .boot_stack_base = 0x220000u,
          .boot_stack_top  = 0x224000u,
-         .limine_mp_info  = (void*)0x3000u,
 		 },
 	};
 	struct cpu_topology* topology;
@@ -70,7 +67,6 @@ Test(cpu, topology_initializes_from_generic_descriptors) {
 	cr_assert_eq(bsp->processor_id, 11u, "cpu_bsp processor id mismatch");
 	cr_assert_eq(bsp->boot_stack_base, 0x200000u, "BSP boot stack base mismatch");
 	cr_assert_eq(bsp->boot_stack_top, 0x204000u, "BSP boot stack top mismatch");
-	cr_assert_eq(bsp->limine_mp_info, (void*)0x2000u, "BSP opaque boot pointer mismatch");
 	cr_assert_not_null(ap0, "first AP lookup failed");
 	cr_assert_not_null(ap2, "second AP lookup failed");
 	cr_assert_eq(ap0->role, CPU_ROLE_AP, "CPU0 should be marked as an AP");

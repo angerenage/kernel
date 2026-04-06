@@ -62,14 +62,14 @@ static inline void bitmap_clear(uint64_t* bitmap, size_t bit) {
 	bitmap[bit / BITS_PER_WORD] &= ~(1ull << (bit % BITS_PER_WORD));
 }
 
-static bool usable_page_range(const struct limine_memmap_entry* source, uintptr_t* out_base, size_t* out_pages) {
+static bool usable_page_range(const struct mem_range* source, uintptr_t* out_base, size_t* out_pages) {
 	uint64_t end;
 	uint64_t aligned_base;
 	uint64_t aligned_end;
 	uint64_t page_count64;
 
 	if (!source || !out_base || !out_pages) return false;
-	if (source->type != LIMINE_MEMMAP_USABLE) return false;
+	if (source->type != MEM_RANGE_USABLE) return false;
 	if (source->length < PMM_PAGE_SIZE) return false;
 	if (add_overflow_u64(source->base, source->length, &end)) return false;
 	if (!align_up_u64(source->base, PMM_PAGE_SIZE, &aligned_base)) return false;
@@ -167,7 +167,7 @@ static bool find_contiguous_free(const struct pmm_range* range, size_t count, si
 	return false;
 }
 
-bool pmm_init(const struct limine_memmap_response* memmap_resp, uintptr_t direct_map_offset) {
+bool pmm_init(const struct mem_range* memory_map, size_t range_count, uintptr_t direct_map_offset) {
 	size_t                   usable_ranges  = 0;
 	size_t                   usable_pages   = 0;
 	size_t                   range_index    = 0;
@@ -184,18 +184,18 @@ bool pmm_init(const struct limine_memmap_response* memmap_resp, uintptr_t direct
 	free_page_count     = 0;
 	initialized         = false;
 
-	if (!memmap_resp || memmap_resp->entry_count == 0 || !memmap_resp->entries) {
+	if (memory_map == NULL || range_count == 0u) {
 		spinlock_unlock(&pmm_lock);
 		return false;
 	}
 
 	boot_info.direct_map_offset = direct_map_offset;
 
-	for (size_t i = 0; i < memmap_resp->entry_count; i++) {
+	for (size_t i = 0; i < range_count; i++) {
 		uintptr_t base;
 		size_t    page_count;
 
-		if (!usable_page_range(memmap_resp->entries[i], &base, &page_count)) continue;
+		if (!usable_page_range(&memory_map[i], &base, &page_count)) continue;
 		if (usable_pages > PMM_SIZE_MAX - page_count) {
 			spinlock_unlock(&pmm_lock);
 			return false;
@@ -214,12 +214,12 @@ bool pmm_init(const struct limine_memmap_response* memmap_resp, uintptr_t direct
 	struct pmm_bootstrap_cursor bootstrap_cursors[usable_ranges];
 	struct pmm_reserved_span    reserved_spans[usable_ranges + 1u];
 
-	for (size_t i = 0; i < memmap_resp->entry_count; i++) {
+	for (size_t i = 0; i < range_count; i++) {
 		uintptr_t base;
 		size_t    page_count;
 		uint64_t  span;
 
-		if (!usable_page_range(memmap_resp->entries[i], &base, &page_count)) continue;
+		if (!usable_page_range(&memory_map[i], &base, &page_count)) continue;
 		if (mul_overflow_u64((uint64_t)page_count, PMM_PAGE_SIZE, &span)) {
 			spinlock_unlock(&pmm_lock);
 			return false;

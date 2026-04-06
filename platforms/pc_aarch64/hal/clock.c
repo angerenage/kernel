@@ -2,7 +2,7 @@
 #include <core/spinlock.h>
 #include <hal/clock.h>
 #include <hal/paging.h>
-#include <kernel/requests.h>
+#include <kernel/boot.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -41,7 +41,10 @@ static volatile uint8_t*   gicc_mmio;
 static struct spinlock     clock_lock = SPINLOCK_INIT_CLASS("clock_lock", SPINLOCK_ORDER_CLOCK, SPINLOCK_FLAG_IRQSAVE);
 
 static inline uintptr_t phys_to_virt(uintptr_t phys) {
-	return (uintptr_t)(hhdm_req.response->offset + phys);
+	struct kernel_boot_address_space address_space;
+
+	if (!kernel_boot_address_space_get(&address_space)) return 0u;
+	return address_space.direct_map_offset + phys;
 }
 
 static inline uint32_t mmio_read32(volatile uint8_t* base, uint32_t offset) {
@@ -95,9 +98,8 @@ static bool map_mmio_page(uintptr_t phys) {
 	uintptr_t page_virt;
 	uintptr_t existing_phys = 0;
 
-	if (hhdm_req.response == NULL) return false;
-
 	page_virt = phys_to_virt(page_phys);
+	if (page_virt == 0u) return false;
 	if (hal_paging_query(page_virt, &existing_phys, NULL)) return true;
 
 	return hal_paging_map(page_virt, page_phys, HAL_PAGE_WRITE | HAL_PAGE_GLOBAL | HAL_PAGE_NO_CACHE);

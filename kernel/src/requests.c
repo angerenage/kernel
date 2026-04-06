@@ -1,4 +1,4 @@
-#include <kernel/requests.h>
+#include "limine_requests.h"
 
 #define LIMINE_TARGET_BASE_REVISION 6
 
@@ -64,6 +64,6 @@ volatile struct limine_kernel_address_request exec_addr_req = {
 __attribute__((used, section(".limine_requests_end_marker")))
 static volatile LIMINE_REQUESTS_END_MARKER;
 
-bool supports_limine_base_revision(void) {
+bool kernel_limine_protocol_supported(void) {
 	return LIMINE_BASE_REVISION_SUPPORTED != 0;
 }
