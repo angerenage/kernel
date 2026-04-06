@@ -7,7 +7,12 @@
 
 #include "interrupts_private.h"
 
+#define AARCH64_EXCEPTION_STACK_SIZE 0x4000u
+
 static bool interrupts_initialized;
+_Alignas(16) uint8_t aarch64_exception_stack[AARCH64_EXCEPTION_STACK_SIZE];
+uintptr_t aarch64_exception_stack_top    = (uintptr_t)(aarch64_exception_stack + sizeof(aarch64_exception_stack));
+uintptr_t aarch64_exception_stack_bottom = (uintptr_t)aarch64_exception_stack;
 
 extern char exception_vectors[];
 
@@ -15,10 +20,10 @@ static inline void mask_irqs(void) {
 	__asm__ volatile("msr daifset, #2" : : : "memory");
 }
 
-void hal_interrupts_init(void) {
+bool hal_interrupts_init(void) {
 	uintptr_t vectors;
 
-	if (interrupts_initialized) return;
+	if (interrupts_initialized) return true;
 
 	vectors = (uintptr_t)exception_vectors;
 	mask_irqs();
@@ -30,7 +35,8 @@ void hal_interrupts_init(void) {
 	                 : "memory");
 
 	interrupts_initialized = true;
-	printf("kernel: aarch64 vectors installed\n");
+	printf("kernel: aarch64 vectors installed (exc_sp=0x%016llx)\n", (unsigned long long)aarch64_exception_stack_top);
+	return true;
 }
 
 static const char* const vector_names[16] = {

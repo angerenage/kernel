@@ -11,10 +11,16 @@
 
 #define LOONGARCH64_CSR_ECFG 0x4u
 #define LOONGARCH64_CSR_EENTRY 0xcu
+#define LOONGARCH64_CSR_SAVE1 0x31u
 #define LOONGARCH64_CSR_TLBRENTRY 0x88u
 #define LOONGARCH64_CSR_MERRENTRY 0x94u
+#define LOONGARCH64_EXCEPTION_STACK_SIZE 0x4000u
 
 static bool interrupts_initialized;
+_Alignas(16) uint8_t loongarch64_exception_stack[LOONGARCH64_EXCEPTION_STACK_SIZE];
+uintptr_t loongarch64_exception_stack_top =
+	(uintptr_t)(loongarch64_exception_stack + sizeof(loongarch64_exception_stack));
+uintptr_t loongarch64_exception_stack_bottom = (uintptr_t)loongarch64_exception_stack;
 
 extern void exception_entry(void);
 extern void tlb_refill_entry(void);
@@ -37,6 +43,9 @@ static inline void csrwr(uint64_t value, unsigned csr) {
 	case LOONGARCH64_CSR_EENTRY:
 		__asm__ volatile("csrwr %0, 0xc" : : "r"(value) : "memory");
 		break;
+	case LOONGARCH64_CSR_SAVE1:
+		__asm__ volatile("csrwr %0, 0x31" : : "r"(value) : "memory");
+		break;
 	case LOONGARCH64_CSR_TLBRENTRY:
 		__asm__ volatile("csrwr %0, 0x88" : : "r"(value) : "memory");
 		break;
@@ -48,12 +57,12 @@ static inline void csrwr(uint64_t value, unsigned csr) {
 	}
 }
 
-void hal_interrupts_init(void) {
+bool hal_interrupts_init(void) {
 	uintptr_t trap_entry;
 	uintptr_t tlbr_entry;
 	uintptr_t merr_entry;
 
-	if (interrupts_initialized) return;
+	if (interrupts_initialized) return true;
 
 	trap_entry = (uintptr_t)exception_entry;
 	tlbr_entry = kernel_virt_to_phys((const void*)tlb_refill_entry);
@@ -61,19 +70,22 @@ void hal_interrupts_init(void) {
 
 	if (exec_addr_req.response == NULL || tlbr_entry == 0 || merr_entry == 0) {
 		printf("kernel: loongarch64 kernel address response missing for trap setup\n");
-		hcf();
+		return false;
 	}
 
 	csrwr(0u, LOONGARCH64_CSR_ECFG);
 	csrwr(trap_entry, LOONGARCH64_CSR_EENTRY);
+	csrwr(loongarch64_exception_stack_top, LOONGARCH64_CSR_SAVE1);
 	csrwr(tlbr_entry, LOONGARCH64_CSR_TLBRENTRY);
 	csrwr(merr_entry, LOONGARCH64_CSR_MERRENTRY);
 
 	interrupts_initialized = true;
-	printf("kernel: loongarch64 trap entries installed (eentry=%p tlbrentry=%p merrentry=%p)\n",
+	printf("kernel: loongarch64 trap entries installed (eentry=%p tlbrentry=%p merrentry=%p exc_sp=%p)\n",
 	       (void*)trap_entry,
 	       (void*)tlbr_entry,
-	       (void*)merr_entry);
+	       (void*)merr_entry,
+	       (void*)loongarch64_exception_stack_top);
+	return true;
 }
 
 static const char* ecode_name(uint64_t ecode, uint64_t esubcode) {

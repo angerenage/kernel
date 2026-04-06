@@ -142,7 +142,9 @@ void kernel_main(void) {
 	hal_serial_init();
 	printf("kernel: entering kernel_main\n");
 
-	hal_interrupts_init();
+	if (!hal_interrupts_init()) {
+		boot_fail("kernel: hal_interrupts_init failed");
+	}
 
 	if (!supports_limine_base_revision()) {
 		boot_fail("kernel: unsupported limine base revision");

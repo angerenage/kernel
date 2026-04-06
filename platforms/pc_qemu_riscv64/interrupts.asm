@@ -1,21 +1,56 @@
 .section .text
 .global exception_entry
 .extern handle_exception
+.extern riscv64_exception_entry_state
+.extern riscv64_exception_stack_bottom
+.extern riscv64_exception_stack_top
 
 .equ RISCV64_EXCEPTION_FRAME_SIZE, 288
+.equ RISCV64_EXCEPTION_META_SIZE, 8
 
 .balign 4
 exception_entry:
+	csrrw t0, sscratch, t0
+	sd sp, 0(t0)
+	sd t1, 8(t0)
+	sd t2, 16(t0)
+	csrr t1, sscratch
+	sd t1, 24(t0)
+	la t1, riscv64_exception_entry_state
+	csrw sscratch, t1
+
+	la t1, riscv64_exception_stack_bottom
+	ld t1, 0(t1)
+	bltu sp, t1, .Lriscv64_switch_stack
+	la t1, riscv64_exception_stack_top
+	ld t1, 0(t1)
+	bgeu sp, t1, .Lriscv64_switch_stack
+
+	addi sp, sp, -RISCV64_EXCEPTION_META_SIZE
+	sd zero, 0(sp)
+	j .Lriscv64_frame
+
+.Lriscv64_switch_stack:
+	la t1, riscv64_exception_stack_top
+	ld sp, 0(t1)
+	addi sp, sp, -RISCV64_EXCEPTION_META_SIZE
+	ld t1, 0(t0)
+	sd t1, 0(sp)
+
+.Lriscv64_frame:
 	addi sp, sp, -RISCV64_EXCEPTION_FRAME_SIZE
 
 	sd ra, 0(sp)
-	sd t0, 32(sp)
-	addi t0, sp, RISCV64_EXCEPTION_FRAME_SIZE
-	sd t0, 8(sp)
+	ld t1, RISCV64_EXCEPTION_FRAME_SIZE + 0(sp)
+	sd t1, 8(sp)
 	sd gp, 16(sp)
 	sd tp, 24(sp)
+	ld t1, 24(t0)
+	sd t1, 32(sp)
+	ld t1, 8(t0)
 	sd t1, 40(sp)
-	sd t2, 48(sp)
+	ld t1, 16(t0)
+	sd t1, 48(sp)
 	sd s0, 56(sp)
 	sd s1, 64(sp)
 	sd a0, 72(sp)
@@ -57,8 +92,6 @@ exception_entry:
 	ld ra, 0(sp)
 	ld gp, 16(sp)
 	ld tp, 24(sp)
-	ld t1, 40(sp)
-	ld t2, 48(sp)
 	ld s0, 56(sp)
 	ld s1, 64(sp)
 	ld a0, 72(sp)
@@ -79,17 +112,32 @@ exception_entry:
 	ld s9, 192(sp)
 	ld s10, 200(sp)
 	ld s11, 208(sp)
-	ld t3, 216(sp)
-	ld t4, 224(sp)
-	ld t5, 232(sp)
-	ld t6, 240(sp)
+	csrr t3, sscratch
+	ld t0, 32(sp)
+	sd t0, 24(t3)
 	ld t0, 272(sp)
 	csrw sstatus, t0
 	ld t0, 256(sp)
 	csrw sepc, t0
-	ld t0, 32(sp)
+	ld t1, 40(sp)
+	ld t2, 48(sp)
+	ld t3, 216(sp)
+	ld t4, 224(sp)
+	ld t5, 232(sp)
+	ld t6, 240(sp)
 
 	addi sp, sp, RISCV64_EXCEPTION_FRAME_SIZE
+	ld t0, 0(sp)
+	beqz t0, .Lriscv64_restore_same_stack
+	mv sp, t0
+	j .Lriscv64_restore_t0
+
+.Lriscv64_restore_same_stack:
+	addi sp, sp, RISCV64_EXCEPTION_META_SIZE
+
+.Lriscv64_restore_t0:
+	csrr t0, sscratch
+	ld t0, 24(t0)
 	sret
 
 .section .note.GNU-stack,"",@progbits

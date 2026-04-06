@@ -3,8 +3,12 @@
 .global tlb_refill_entry
 .global machine_error_entry
 .extern handle_exception
-
 .equ LOONGARCH64_EXCEPTION_FRAME_SIZE, 288
+.equ LOONGARCH64_EXCEPTION_META_SIZE, 24
+.equ LOONGARCH64_CSR_SAVE0, 0x30
+.equ LOONGARCH64_CSR_SAVE1, 0x31
+.equ LOONGARCH64_CSR_SAVE2, 0x32
+.equ LOONGARCH64_CSR_SAVE3, 0x33
 .equ LOONGARCH64_CSR_PGD, 0x1b
 .equ LOONGARCH64_CSR_TLBRSAVE, 0x8c
 
@@ -31,14 +35,35 @@
 
 .balign 4096
 exception_entry:
+	csrwr $sp, LOONGARCH64_CSR_SAVE0
+	csrwr $t0, LOONGARCH64_CSR_SAVE2
+	csrwr $t1, LOONGARCH64_CSR_SAVE3
+
+	csrrd $t0, LOONGARCH64_CSR_SAVE1
+	li.w $t1, -0x4000
+	add.d $t1, $t0, $t1
+	bltu $sp, $t1, 0f
+	bgeu $sp, $t0, 0f
+	addi.d $sp, $sp, -LOONGARCH64_EXCEPTION_META_SIZE
+	st.d $r0, $sp, 0
+	b 1f
+0:
+	addi.d $sp, $t0, 0
+	addi.d $sp, $sp, -LOONGARCH64_EXCEPTION_META_SIZE
+	csrrd $t0, LOONGARCH64_CSR_SAVE0
+	st.d $t0, $sp, 0
+1:
+	csrrd $t0, LOONGARCH64_CSR_SAVE2
+	st.d $t0, $sp, 8
+	csrrd $t0, LOONGARCH64_CSR_SAVE3
+	st.d $t0, $sp, 16
 	addi.d $sp, $sp, -LOONGARCH64_EXCEPTION_FRAME_SIZE
 
 	st.d $r0, $sp, 0
 	st.d $r1, $sp, 8
 	st.d $r2, $sp, 16
-	st.d $r12, $sp, 96
-	addi.d $r12, $sp, LOONGARCH64_EXCEPTION_FRAME_SIZE
-	st.d $r12, $sp, 24
+	csrrd $t0, LOONGARCH64_CSR_SAVE0
+	st.d $t0, $sp, 24
 	st.d $r4, $sp, 32
 	st.d $r5, $sp, 40
 	st.d $r6, $sp, 48
@@ -47,7 +72,10 @@ exception_entry:
 	st.d $r9, $sp, 72
 	st.d $r10, $sp, 80
 	st.d $r11, $sp, 88
-	st.d $r13, $sp, 104
+	ld.d $t0, $sp, LOONGARCH64_EXCEPTION_FRAME_SIZE + 8
+	st.d $t0, $sp, 96
+	ld.d $t0, $sp, LOONGARCH64_EXCEPTION_FRAME_SIZE + 16
+	st.d $t0, $sp, 104
 	st.d $r14, $sp, 112
 	st.d $r15, $sp, 120
 	st.d $r16, $sp, 128
@@ -88,7 +116,6 @@ exception_entry:
 	ld.d $r9, $sp, 72
 	ld.d $r10, $sp, 80
 	ld.d $r11, $sp, 88
-	ld.d $r13, $sp, 104
 	ld.d $r14, $sp, 112
 	ld.d $r15, $sp, 120
 	ld.d $r16, $sp, 128
@@ -107,9 +134,19 @@ exception_entry:
 	ld.d $r29, $sp, 232
 	ld.d $r30, $sp, 240
 	ld.d $r31, $sp, 248
+	ld.d $r13, $sp, 104
 	ld.d $r12, $sp, 96
 
 	addi.d $sp, $sp, LOONGARCH64_EXCEPTION_FRAME_SIZE
+	ld.d $t0, $sp, 0
+	beqz $t0, 2f
+	addi.d $sp, $t0, 0
+	b 3f
+2:
+	addi.d $sp, $sp, LOONGARCH64_EXCEPTION_META_SIZE
+3:
+	csrrd $t1, LOONGARCH64_CSR_SAVE3
+	csrrd $t0, LOONGARCH64_CSR_SAVE2
 	ertn
 
 .balign 4096

@@ -1,3 +1,5 @@
 #pragma once
 
-void hal_interrupts_init(void);
+#include <stdbool.h>
+
+bool hal_interrupts_init(void);
