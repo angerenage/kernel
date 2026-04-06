@@ -126,6 +126,8 @@ jobs:
             sudo apt-get install -y nasm
           elif [ "${{ matrix.arch }}" = "riscv64" ]; then
             sudo apt-get install -y qemu-efi-riscv64
+          elif [ "${{ matrix.arch }}" = "loongarch64" ]; then
+            sudo apt-get install -y qemu-efi-loongarch64
           fi
 
       - name: Build selftest image
