@@ -58,6 +58,29 @@ static inline void csrwr(uint64_t value, unsigned csr) {
 	}
 }
 
+bool irq_enabled(void) {
+	uint64_t crmd;
+
+	__asm__ volatile("csrrd %0, 0x0" : "=r"(crmd));
+	return (crmd & (1u << 2)) != 0;
+}
+
+void irq_disable_local(void) {
+	uint64_t crmd;
+
+	__asm__ volatile("csrrd %0, 0x0" : "=r"(crmd));
+	crmd &= ~(1u << 2);
+	__asm__ volatile("csrwr %0, 0x0" : : "r"(crmd) : "memory");
+}
+
+void irq_enable_local(void) {
+	uint64_t crmd;
+
+	__asm__ volatile("csrrd %0, 0x0" : "=r"(crmd));
+	crmd |= 1u << 2;
+	__asm__ volatile("csrwr %0, 0x0" : : "r"(crmd) : "memory");
+}
+
 bool hal_interrupts_init_global(void) {
 	if (exec_addr_req.response == NULL) {
 		printf("kernel: loongarch64 kernel address response missing for trap setup\n");
@@ -94,13 +117,15 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 
 	local_ready[cpu->index] = true;
 	cpu_interrupts_set_ready(cpu, true);
-	printf(
-		"kernel: loongarch64 local trap entries installed on cpu%zu (eentry=%p tlbrentry=%p merrentry=%p exc_sp=%p)\n",
-		cpu->index,
-		(void*)trap_entry,
-		(void*)tlbr_entry,
-		(void*)merr_entry,
-		(void*)loongarch64_exception_stack_top);
+	if (cpu->role == CPU_ROLE_BSP) {
+		printf("kernel: loongarch64 local trap entries installed on cpu%zu (eentry=%p tlbrentry=%p merrentry=%p "
+		       "exc_sp=%p)\n",
+		       cpu->index,
+		       (void*)trap_entry,
+		       (void*)tlbr_entry,
+		       (void*)merr_entry,
+		       (void*)loongarch64_exception_stack_top);
+	}
 	return true;
 }
 

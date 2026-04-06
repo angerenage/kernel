@@ -7,6 +7,7 @@
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
 #include <hal/serial.h>
+#include <kernel/cpu_boot.h>
 #include <kernel/requests.h>
 #if KERNEL_SELFTESTS_ENABLED
 #include <kernel/selftest.h>
@@ -149,10 +150,10 @@ void kernel_main(void) {
 	hal_serial_init();
 	printf("kernel: entering kernel_main\n");
 
-	if (!cpu_topology_init_bootstrap((uintptr_t)stack_bottom, (uintptr_t)stack_top)) {
-		boot_fail("kernel: cpu_topology_init_bootstrap failed");
+	if (!kernel_cpu_boot_init((uintptr_t)stack_bottom, (uintptr_t)stack_top)) {
+		boot_fail("kernel: kernel_cpu_boot_init failed");
 	}
-	cpu_bind_current(cpu_bsp());
+	kernel_cpu_boot_bind_current(cpu_bsp());
 	(void)cpu_set_state(cpu_bsp(), CPU_STATE_STARTING);
 
 	if (!hal_interrupts_init_global()) {
@@ -176,6 +177,10 @@ void kernel_main(void) {
 	boot_log_framebuffer();
 	boot_log_memory_map(memmap_req.response);
 	kernel_init_memory(memmap_req.response, hhdm_req.response->offset);
+	if (!kernel_cpu_boot_start_aps()) {
+		boot_fail("kernel: kernel_cpu_boot_start_aps failed");
+	}
+	printf("kernel: cpu topology %zu present, %zu online\n", cpu_count(), cpu_online_count());
 #if KERNEL_SELFTESTS_ENABLED
 	if (kernel_selftests_requested() && !kernel_selftests_run()) {
 		boot_fail("kernel: selftests failed");

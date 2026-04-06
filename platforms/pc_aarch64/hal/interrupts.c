@@ -18,8 +18,19 @@ uintptr_t aarch64_exception_stack_bottom;
 
 extern char exception_vectors[];
 
-static inline void mask_irqs(void) {
+bool irq_enabled(void) {
+	uint64_t daif;
+
+	__asm__ volatile("mrs %0, daif" : "=r"(daif));
+	return (daif & (1u << 7)) == 0;
+}
+
+void irq_disable_local(void) {
 	__asm__ volatile("msr daifset, #2" : : : "memory");
+}
+
+void irq_enable_local(void) {
+	__asm__ volatile("msr daifclr, #2" : : : "memory");
 }
 
 bool hal_interrupts_init_global(void) {
@@ -34,7 +45,7 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 	if (local_ready[cpu->index]) return true;
 
 	vectors = (uintptr_t)exception_vectors;
-	mask_irqs();
+	irq_disable_local();
 	aarch64_exception_stack_bottom = (uintptr_t)aarch64_exception_stack[cpu->index];
 	aarch64_exception_stack_top    = aarch64_exception_stack_bottom + AARCH64_EXCEPTION_STACK_SIZE;
 
@@ -46,9 +57,11 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 
 	local_ready[cpu->index] = true;
 	cpu_interrupts_set_ready(cpu, true);
-	printf("kernel: aarch64 local vectors installed on cpu%zu (exc_sp=0x%016llx)\n",
-	       cpu->index,
-	       (unsigned long long)aarch64_exception_stack_top);
+	if (cpu->role == CPU_ROLE_BSP) {
+		printf("kernel: aarch64 local vectors installed on cpu%zu (exc_sp=0x%016llx)\n",
+		       cpu->index,
+		       (unsigned long long)aarch64_exception_stack_top);
+	}
 	return true;
 }
 

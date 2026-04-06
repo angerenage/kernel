@@ -15,6 +15,17 @@ volatile struct limine_framebuffer_request fb_req = {
 	.revision = 0,
 };
 
+/* Multiprocessor request */
+__attribute__((used, section(".limine_requests")))
+volatile struct LIMINE_MP(request) mp_req = {
+#if LIMINE_API_REVISION >= 1
+	.id = LIMINE_MP_REQUEST,
+#else
+	.id = LIMINE_SMP_REQUEST,
+#endif
+	.revision = 0,
+};
+
 /* Memory map request */
 __attribute__((used, section(".limine_requests")))
 volatile struct limine_memmap_request memmap_req = {

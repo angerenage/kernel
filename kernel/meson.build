@@ -34,12 +34,14 @@ kernel_memory_sources = files(
 
 kernel_selftest_sources = files(
 	'test/selftest.c',
+	'test/selftests/cpu.c',
 	'test/selftests/pmm.c',
 	'test/selftests/vmm.c',
 	'test/selftests/kheap.c',
 )
 
 kernel_objs = base_sources + core_sources + kernel_format_sources + kernel_libk_sources + kernel_memory_sources + platform_kernel_objects + [
+	'src/cpu_boot.c',
 	'src/init.c',
 	'src/requests.c',
 ]

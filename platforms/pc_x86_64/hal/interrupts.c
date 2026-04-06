@@ -107,11 +107,18 @@ static bool is_external_irq(unsigned long long vector) {
 	return vector >= X86_IRQ_BASE && vector < X86_IRQ_BASE + X86_IRQ_COUNT;
 }
 
-static void interrupts_enable(void) {
+bool irq_enabled(void) {
+	uint64_t flags;
+
+	__asm__ volatile("pushfq\n\tpopq %0" : "=r"(flags));
+	return (flags & (1ull << 9)) != 0;
+}
+
+void irq_enable_local(void) {
 	__asm__ volatile("sti" : : : "memory");
 }
 
-static void interrupts_disable(void) {
+void irq_disable_local(void) {
 	__asm__ volatile("cli" : : : "memory");
 }
 
@@ -187,7 +194,7 @@ static void idt_set_entry(unsigned vector, void (*handler)(void)) {
 
 bool hal_interrupts_init_global(void) {
 	if (global_ready) return true;
-	interrupts_disable();
+	irq_disable_local();
 	kernel_code_selector = X86_GDT_KERNEL_CODE_SELECTOR;
 
 	for (unsigned vector = 0; vector < 256; vector++) {
@@ -215,16 +222,20 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 	if (!global_ready || cpu == NULL || cpu->index >= 64u) return false;
 	if (local_ready[cpu->index]) return true;
 
-	interrupts_disable();
+	irq_disable_local();
 	x86_setup_exception_stack(cpu->index);
 	__asm__ volatile("lidt %0" : : "m"(idtr));
-	interrupts_enable();
+	if (cpu->role == CPU_ROLE_BSP) {
+		irq_enable_local();
+	}
 
 	local_ready[cpu->index] = true;
 	cpu_interrupts_set_ready(cpu, true);
-	printf("kernel: x86_64 local interrupts ready on cpu%zu (ist=0x%016llx)\n",
-	       cpu->index,
-	       (unsigned long long)x86_tss[cpu->index].ist1);
+	if (cpu->role == CPU_ROLE_BSP) {
+		printf("kernel: x86_64 local interrupts ready on cpu%zu (ist=0x%016llx)\n",
+		       cpu->index,
+		       (unsigned long long)x86_tss[cpu->index].ist1);
+	}
 	return true;
 }
 

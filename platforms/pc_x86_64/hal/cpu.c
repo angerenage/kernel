@@ -31,3 +31,7 @@ void hal_cpu_local_bind(void* ptr) {
 
 	__asm__ volatile("wrmsr" : : "c"(X86_64_MSR_GS_BASE), "a"(lo), "d"(hi) : "memory");
 }
+
+void hal_cpu_park(void) {
+	__asm__ volatile("hlt" : : : "memory");
+}

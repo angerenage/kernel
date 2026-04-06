@@ -5,7 +5,8 @@
 
 bool supports_limine_base_revision(void);
 
-extern volatile struct limine_framebuffer_request        fb_req;
+extern volatile struct limine_framebuffer_request fb_req;
+extern volatile struct LIMINE_MP(request) mp_req;
 extern volatile struct limine_memmap_request             memmap_req;
 extern volatile struct limine_hhdm_request               hhdm_req;
 extern volatile struct limine_rsdp_request               rsdp_req;

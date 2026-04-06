@@ -46,6 +46,17 @@ struct cpu_topology {
 	size_t      bsp_index;
 };
 
+struct cpu_init_info {
+	size_t        index;
+	uint64_t      processor_id;
+	uint64_t      arch_id;
+	enum cpu_role role;
+	uintptr_t     boot_stack_base;
+	uintptr_t     boot_stack_top;
+	void*         limine_mp_info;
+};
+
+bool cpu_topology_init(const struct cpu_init_info* init_info, size_t cpu_count, size_t bsp_index);
 bool cpu_topology_init_bootstrap(uintptr_t boot_stack_base, uintptr_t boot_stack_top);
 
 struct cpu_topology* cpu_topology_get(void);
@@ -62,6 +73,7 @@ bool     cpu_is_bsp(void);
 size_t   cpu_count(void);
 size_t   cpu_online_count(void);
 
-void cpu_enter_exception(void);
-void cpu_leave_exception(void);
-bool cpu_irq_in_exception(void);
+void           cpu_enter_exception(void);
+void           cpu_leave_exception(void);
+bool           cpu_irq_in_exception(void);
+enum cpu_state cpu_state_get(const struct cpu* cpu);

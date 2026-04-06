@@ -8,8 +8,10 @@
 extern const struct kernel_selftest_suite kernel_pmm_selftest_suite;
 extern const struct kernel_selftest_suite kernel_vmm_selftest_suite;
 extern const struct kernel_selftest_suite kernel_kheap_selftest_suite;
+extern const struct kernel_selftest_suite kernel_cpu_selftest_suite;
 
 static const struct kernel_selftest_suite* const kernel_selftest_suites[] = {
+	&kernel_cpu_selftest_suite,
 	&kernel_pmm_selftest_suite,
 	&kernel_vmm_selftest_suite,
 	&kernel_kheap_selftest_suite,

@@ -248,6 +248,7 @@ case "$TARGET_ARCH" in
 		qemu_name="qemu-system-x86_64"
 		qemu_args=(
 			-M q35
+			-smp 4
 			-cdrom "$ISO_PATH"
 			-serial stdio
 			-no-reboot
@@ -259,6 +260,7 @@ case "$TARGET_ARCH" in
 		firmware_names=("edk2-aarch64-code.fd" "AAVMF_CODE.fd" "QEMU_EFI.fd")
 		qemu_args=(
 			-M virt
+			-smp 4
 			-cpu cortex-a72
 			-m 2G
 			-device virtio-gpu-pci
@@ -277,6 +279,7 @@ case "$TARGET_ARCH" in
 		firmware_vars_names=("edk2-riscv-vars.fd" "RISCV_VIRT_VARS.fd")
 		qemu_args=(
 			-M virt,acpi=off,pflash0=pflash0,pflash1=pflash1
+			-smp 4
 			-cpu rv64
 			-m 2G
 			-device virtio-scsi-pci,id=scsi0
@@ -296,6 +299,7 @@ case "$TARGET_ARCH" in
 		firmware_names=("edk2-loongarch64-code.fd" "LOONGARCH_VIRT_CODE.fd" "QEMU_EFI.fd")
 		qemu_args=(
 			-M virt
+			-smp 4
 			-cpu la464
 			-m 2G
 			-device virtio-scsi-pci,id=scsi0

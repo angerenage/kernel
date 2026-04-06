@@ -15,3 +15,7 @@ void* hal_cpu_local_current(void) {
 void hal_cpu_local_bind(void* ptr) {
 	__asm__ volatile("addi.d $tp, %0, 0" : : "r"((uintptr_t)ptr) : "memory");
 }
+
+void hal_cpu_park(void) {
+	__asm__ volatile("idle 0" : : : "memory");
+}

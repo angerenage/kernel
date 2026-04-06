@@ -18,3 +18,7 @@ void* hal_cpu_local_current(void) {
 void hal_cpu_local_bind(void* ptr) {
 	__asm__ volatile("msr tpidr_el1, %0" : : "r"((uint64_t)(uintptr_t)ptr) : "memory");
 }
+
+void hal_cpu_park(void) {
+	__asm__ volatile("wfe" : : : "memory");
+}

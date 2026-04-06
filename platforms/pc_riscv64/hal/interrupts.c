@@ -38,6 +38,21 @@ static inline void write_sie(uint64_t value) {
 	__asm__ volatile("csrw sie, %0" : : "r"(value) : "memory");
 }
 
+bool irq_enabled(void) {
+	uint64_t sstatus;
+
+	__asm__ volatile("csrr %0, sstatus" : "=r"(sstatus));
+	return (sstatus & (1ull << 1)) != 0;
+}
+
+void irq_disable_local(void) {
+	__asm__ volatile("csrc sstatus, %0" : : "r"(1ull << 1) : "memory");
+}
+
+void irq_enable_local(void) {
+	__asm__ volatile("csrs sstatus, %0" : : "r"(1ull << 1) : "memory");
+}
+
 bool hal_interrupts_init_global(void) {
 	global_ready = true;
 	return true;
@@ -59,13 +74,15 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 	__asm__ volatile("csrw stvec, %0" : : "r"(entry) : "memory");
 	write_sscratch((uint64_t)(uintptr_t)&riscv64_exception_entry_state);
 	write_sie(sie);
-	__asm__ volatile("csrc sstatus, %0" : : "r"(1ull << 1) : "memory");
+	irq_disable_local();
 
 	local_ready[cpu->index] = true;
 	cpu_interrupts_set_ready(cpu, true);
-	printf("kernel: riscv64 local trap vector installed on cpu%zu (exc_sp=0x%016llx)\n",
-	       cpu->index,
-	       (unsigned long long)riscv64_exception_stack_top);
+	if (cpu->role == CPU_ROLE_BSP) {
+		printf("kernel: riscv64 local trap vector installed on cpu%zu (exc_sp=0x%016llx)\n",
+		       cpu->index,
+		       (unsigned long long)riscv64_exception_stack_top);
+	}
 	return true;
 }
 
