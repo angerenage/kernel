@@ -9,7 +9,7 @@ static bool kheap_vmm_grow(size_t page_count, void** out_base) {
 		.align_pages = 1,
 		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_GLOBAL,
 		.kind        = VMM_KIND_HEAP,
-		.map_flags   = 0,
+		.map_flags   = VMM_MAP_LAZY,
 	};
 
 	return vmm_alloc(&params, NULL, out_base);

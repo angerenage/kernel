@@ -1,3 +1,4 @@
+#include <core/vmm.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
 #include <kernel/requests.h>
@@ -134,6 +135,10 @@ static const char* ecode_name(uint64_t ecode, uint64_t esubcode) {
 	}
 }
 
+static bool is_page_invalid_exception(uint64_t ecode) {
+	return ecode >= 0x1u && ecode <= 0x3u;
+}
+
 void handle_exception(const struct exception_frame* frame) {
 	uint64_t is_pending;
 	uint64_t ecode;
@@ -144,6 +149,8 @@ void handle_exception(const struct exception_frame* frame) {
 	is_pending = frame->estat & 0x1fffu;
 	ecode      = (frame->estat >> 16) & 0x3fu;
 	esubcode   = (frame->estat >> 22) & 0x1ffu;
+
+	if (is_page_invalid_exception(ecode) && vmm_resolve_page_fault(frame->badv)) return;
 
 	printf("kernel: loongarch64 exception ecode=0x%02llx esubcode=0x%03llx (%s)\n",
 	       ecode,

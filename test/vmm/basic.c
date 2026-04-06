@@ -108,6 +108,126 @@ Test(vmm, supports_lazy_map_unmap_remap_and_reprotect) {
 	cr_assert_eq(pmm_free_page_count(), free_before, "lazy allocation free leaked physical pages");
 }
 
+Test(vmm, resolves_page_faults_for_lazy_heap_allocations) {
+	_Alignas(4096) uint8_t  arena[KiB(256)];
+	struct vmm_alloc_params params = {
+		.page_count  = 2,
+		.align_pages = 1,
+		.prot        = VMM_PROT_READ | VMM_PROT_WRITE,
+		.kind        = VMM_KIND_HEAP,
+		.map_flags   = VMM_MAP_LAZY,
+	};
+	struct vmm_info info;
+	vmm_id_t        alloc_id = VMM_ID_INVALID;
+	void*           base     = NULL;
+	uintptr_t       phys     = 0;
+	uint64_t        flags    = 0;
+	size_t          free_before;
+
+	init_test_vmm(arena, sizeof(arena));
+	free_before = pmm_free_page_count();
+
+	cr_assert(vmm_alloc(&params, &alloc_id, &base), "lazy vmm_alloc failed");
+	cr_assert(vmm_resolve_page_fault((uintptr_t)base + PMM_PAGE_SIZE),
+	          "vmm_resolve_page_fault failed for lazy reserved allocation");
+	cr_assert_eq(mock_paging_mapping_count(), 1, "fault resolution mapped more than the faulting page");
+	cr_assert_lt(pages_consumed_since(free_before),
+	             params.page_count + 1u,
+	             "fault resolution allocated backing for the entire heap allocation");
+	cr_assert(!hal_paging_query((uintptr_t)base, NULL, NULL),
+	          "fault resolution unexpectedly mapped a non-faulting heap page");
+	cr_assert(hal_paging_query((uintptr_t)base + PMM_PAGE_SIZE, NULL, &flags),
+	          "fault resolution did not map the faulting address");
+	cr_assert_eq(flags, (uint64_t)VMM_PROT_WRITE, "fault resolution applied incorrect mapping flags");
+	cr_assert(vmm_query_id(alloc_id, &info), "vmm_query_id failed after fault resolution");
+	cr_assert_eq(info.state, VMM_STATE_PARTIAL, "fault resolution did not leave the heap allocation partially mapped");
+	cr_assert_eq(info.first_phys, 0, "fault resolution unexpectedly reported backing for the untouched first page");
+
+	cr_assert(vmm_resolve_page_fault((uintptr_t)base), "vmm_resolve_page_fault failed for the first heap page");
+	cr_assert_eq(mock_paging_mapping_count(), 2, "second fault resolution did not map the remaining heap page");
+	cr_assert_geq(pages_consumed_since(free_before),
+	              params.page_count,
+	              "second fault resolution did not allocate the remaining heap backing");
+	cr_assert(hal_paging_query((uintptr_t)base, &phys, NULL),
+	          "second fault resolution did not map the first heap page");
+	cr_assert_eq(phys & (PMM_PAGE_SIZE - 1u), 0, "heap fault resolution returned an unaligned physical page");
+	cr_assert(vmm_query_id(alloc_id, &info), "vmm_query_id failed after resolving every heap page");
+	cr_assert_eq(info.state, VMM_STATE_MAPPED, "heap allocation did not become fully mapped");
+
+	cr_assert(vmm_free(alloc_id), "vmm_free failed after fault resolution");
+	cr_assert_eq(mock_paging_mapping_count(), 0, "fault resolution cleanup leaked mappings");
+	cr_assert_eq(pmm_free_page_count(), free_before, "fault resolution cleanup leaked physical pages");
+}
+
+Test(vmm, resolves_page_faults_for_lazy_stack_allocations) {
+	_Alignas(4096) uint8_t  arena[KiB(256)];
+	struct vmm_alloc_params params = {
+		.page_count  = 3,
+		.align_pages = 1,
+		.prot        = VMM_PROT_READ | VMM_PROT_WRITE,
+		.kind        = VMM_KIND_STACK,
+		.map_flags   = VMM_MAP_LAZY,
+	};
+	struct vmm_info info;
+	vmm_id_t        alloc_id = VMM_ID_INVALID;
+	void*           base     = NULL;
+	uint64_t        flags    = 0;
+	size_t          free_before;
+
+	init_test_vmm(arena, sizeof(arena));
+	free_before = pmm_free_page_count();
+
+	cr_assert(vmm_alloc(&params, &alloc_id, &base), "lazy stack vmm_alloc failed");
+	cr_assert(vmm_resolve_page_fault((uintptr_t)base + 2u * (uintptr_t)PMM_PAGE_SIZE),
+	          "vmm_resolve_page_fault failed for lazy stack allocation");
+	cr_assert_eq(mock_paging_mapping_count(), 1, "stack fault resolution mapped more than the faulting page");
+	cr_assert_lt(pages_consumed_since(free_before),
+	             params.page_count + 1u,
+	             "stack fault resolution allocated backing for the entire stack allocation");
+	cr_assert(!hal_paging_query((uintptr_t)base, NULL, NULL),
+	          "stack fault resolution unexpectedly mapped the base page");
+	cr_assert(!hal_paging_query((uintptr_t)base + PMM_PAGE_SIZE, NULL, NULL),
+	          "stack fault resolution unexpectedly mapped the middle page");
+	cr_assert(hal_paging_query((uintptr_t)base + 2u * (uintptr_t)PMM_PAGE_SIZE, NULL, &flags),
+	          "stack fault resolution did not map the faulting address");
+	cr_assert_eq(flags, (uint64_t)VMM_PROT_WRITE, "stack fault resolution applied incorrect mapping flags");
+	cr_assert(vmm_query_id(alloc_id, &info), "vmm_query_id failed after stack fault resolution");
+	cr_assert_eq(info.kind, VMM_KIND_STACK, "fault resolution changed the stack allocation kind");
+	cr_assert_eq(
+		info.state, VMM_STATE_PARTIAL, "stack fault resolution did not leave the stack allocation partially mapped");
+
+	cr_assert(vmm_free(alloc_id), "vmm_free failed after stack fault resolution");
+	cr_assert_eq(mock_paging_mapping_count(), 0, "stack fault resolution cleanup leaked mappings");
+	cr_assert_eq(pmm_free_page_count(), free_before, "stack fault resolution cleanup leaked physical pages");
+}
+
+Test(vmm, refuses_page_fault_resolution_for_non_lazy_allocations) {
+	_Alignas(4096) uint8_t  arena[KiB(256)];
+	struct vmm_alloc_params params = {
+		.page_count  = 1,
+		.align_pages = 1,
+		.prot        = VMM_PROT_READ | VMM_PROT_WRITE,
+		.kind        = VMM_KIND_GENERIC,
+	};
+	vmm_id_t alloc_id = VMM_ID_INVALID;
+	void*    base     = NULL;
+	size_t   free_before;
+
+	init_test_vmm(arena, sizeof(arena));
+	free_before = pmm_free_page_count();
+
+	cr_assert(vmm_alloc(&params, &alloc_id, &base), "eager vmm_alloc failed");
+	cr_assert(vmm_unmap(alloc_id, false), "vmm_unmap(false) failed for eager allocation");
+	cr_assert(!vmm_resolve_page_fault((uintptr_t)base),
+	          "vmm_resolve_page_fault unexpectedly remapped a non-lazy allocation");
+	cr_assert_eq(mock_paging_mapping_count(), 0, "non-lazy fault resolution changed live mappings");
+	cr_assert(!vmm_resolve_page_fault((uintptr_t)base + KiB(128)),
+	          "vmm_resolve_page_fault unexpectedly succeeded for an unknown address");
+
+	cr_assert(vmm_free(alloc_id), "vmm_free failed after rejected fault resolution");
+	cr_assert_eq(pmm_free_page_count(), free_before, "rejected fault resolution leaked physical pages");
+}
+
 Test(vmm, rolls_back_partial_mappings_on_eager_map_failure) {
 	_Alignas(4096) uint8_t  arena[KiB(256)];
 	struct vmm_alloc_params params = {

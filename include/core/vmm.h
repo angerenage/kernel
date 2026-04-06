@@ -34,6 +34,7 @@ enum vmm_kind {
 
 enum vmm_state {
 	VMM_STATE_RESERVED = 0,
+	VMM_STATE_PARTIAL,
 	VMM_STATE_MAPPED,
 };
 
@@ -72,6 +73,7 @@ bool vmm_is_initialized(void);
  * Creates a tracked virtual allocation.
  * - With VMM_MAP_LAZY: reserve only, state starts RESERVED.
  * - Without VMM_MAP_LAZY: pages are allocated + mapped immediately.
+ * - Lazy allocations may move through RESERVED -> PARTIAL -> MAPPED.
  */
 bool vmm_alloc(const struct vmm_alloc_params* params, vmm_id_t* out_id, void** out_base);
 
@@ -83,6 +85,9 @@ bool vmm_free_at(void* base);
 bool vmm_map(vmm_id_t id);
 bool vmm_unmap(vmm_id_t id, bool release_phys);
 bool vmm_protect(vmm_id_t id, vmm_prot_t new_prot);
+
+/* Resolve a page fault by materializing a lazy reserved allocation if possible. */
+bool vmm_resolve_page_fault(uintptr_t addr);
 
 /* Query the allocation owning an address or an id. */
 bool vmm_query(void* addr, struct vmm_info* out_info);

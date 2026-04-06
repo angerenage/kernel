@@ -1,3 +1,4 @@
+#include <core/vmm.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
 #include <stdbool.h>
@@ -104,6 +105,10 @@ static bool is_data_abort(uint64_t ec) {
 	return ec == 0x24 || ec == 0x25;
 }
 
+static bool is_translation_fault(uint64_t dfsc) {
+	return dfsc >= 0x04 && dfsc <= 0x07;
+}
+
 static const char* abort_dfsc_name(uint64_t dfsc) {
 	switch (dfsc) {
 	case 0x00:
@@ -193,24 +198,23 @@ static const char* abort_target_el(uint64_t ec) {
 }
 
 void handle_exception(const struct exception_frame* frame) {
-	uint64_t ec;
-	uint64_t iss;
-
 	if (clock_handle_irq(frame)) return;
 
-	ec  = (frame->esr >> 26) & 0x3fu;
-	iss = frame->esr & 0x01ffffffu;
+	uint64_t ec  = (frame->esr >> 26) & 0x3fu;
+	uint64_t iss = frame->esr & 0x01ffffffu;
+
+	uint64_t dfsc  = iss & 0x3fu;
+	bool     s1ptw = ((iss >> 7) & 1u) != 0;
+	bool     cm    = ((iss >> 8) & 1u) != 0;
+	bool     ea    = ((iss >> 9) & 1u) != 0;
+	bool     fnv   = ((iss >> 10) & 1u) != 0;
+
+	if (!fnv && is_translation_fault(dfsc) && vmm_resolve_page_fault(frame->far)) return;
 
 	printf("kernel: aarch64 exception %s\n", vector_names[frame->vector & 0xfu]);
 	printf("  esr=0x%016llx ec=0x%02llx (%s) far=0x%016llx\n", frame->esr, ec, ec_name(ec), frame->far);
 
 	if (is_instruction_abort(ec) || is_data_abort(ec)) {
-		uint64_t dfsc  = iss & 0x3fu;
-		bool     s1ptw = ((iss >> 7) & 1u) != 0;
-		bool     cm    = ((iss >> 8) & 1u) != 0;
-		bool     ea    = ((iss >> 9) & 1u) != 0;
-		bool     fnv   = ((iss >> 10) & 1u) != 0;
-
 		printf("  abort=%s target=%s dfsc=0x%02llx (%s)\n",
 		       is_data_abort(ec) ? "data" : "instruction",
 		       abort_target_el(ec),

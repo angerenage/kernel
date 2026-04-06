@@ -13,18 +13,22 @@
 #define VMM_WINDOW_BASE 0xffffffffa0000000ull
 #define VMM_WINDOW_SIZE 0x40000000ull
 #define VMM_INITIAL_ALLOCATION_CAPACITY 16u
+#define VMM_PAGE_ENTRY_MAPPED (uintptr_t)1u
+#define VMM_PAGE_ENTRY_ROLLBACK_KEEP (uintptr_t)2u
+#define VMM_PAGE_ENTRY_ROLLBACK_SKIP (uintptr_t)4u
 
 struct vmm_alloc_record {
-	vmm_id_t       id;
-	uintptr_t      base;
-	size_t         page_count;
-	vmm_prot_t     prot;
-	enum vmm_kind  kind;
-	enum vmm_state state;
-	uintptr_t*     phys_pages;
-	uintptr_t      phys_array_phys;
-	size_t         phys_array_page_count;
-	bool           used;
+	vmm_id_t      id;
+	uintptr_t     base;
+	size_t        page_count;
+	vmm_prot_t    prot;
+	enum vmm_kind kind;
+	uint64_t      map_flags;
+	size_t        mapped_page_count;
+	uintptr_t*    phys_pages;
+	uintptr_t     phys_array_phys;
+	size_t        phys_array_page_count;
+	bool          used;
 };
 
 static struct vmm_alloc_record* allocations;
@@ -46,6 +50,32 @@ static inline uint64_t vmm_prot_to_hal_flags(vmm_prot_t prot) {
 
 static inline bool vmm_prot_is_valid(vmm_prot_t prot) {
 	return (prot & ~VMM_PROT_VALID_MASK) == 0;
+}
+
+static inline uintptr_t page_entry_phys(uintptr_t entry) {
+	return entry & ~(uintptr_t)(PMM_PAGE_SIZE - 1u);
+}
+
+static inline uintptr_t page_entry_flags(uintptr_t entry) {
+	return entry & (uintptr_t)(PMM_PAGE_SIZE - 1u);
+}
+
+static inline bool page_entry_has_backing(uintptr_t entry) {
+	return page_entry_phys(entry) != 0;
+}
+
+static inline bool page_entry_is_mapped(uintptr_t entry) {
+	return (page_entry_flags(entry) & VMM_PAGE_ENTRY_MAPPED) != 0;
+}
+
+static inline uintptr_t make_page_entry(uintptr_t phys, uintptr_t flags) {
+	return page_entry_phys(phys) | flags;
+}
+
+static enum vmm_state allocation_state_locked(const struct vmm_alloc_record* allocation) {
+	if (!allocation || allocation->mapped_page_count == 0) return VMM_STATE_RESERVED;
+	if (allocation->mapped_page_count == allocation->page_count) return VMM_STATE_MAPPED;
+	return VMM_STATE_PARTIAL;
 }
 
 static bool alloc_metadata_buffer(size_t bytes, void** out_virt, uintptr_t* out_phys, size_t* out_pages) {
@@ -147,7 +177,34 @@ static void release_allocation_backing_locked(struct vmm_alloc_record* allocatio
 	if (!allocation || !allocation->phys_pages) return;
 
 	for (size_t page = 0; page < allocation->page_count; page++) {
-		(void)pmm_free_pages(allocation->phys_pages[page], 1);
+		uintptr_t phys = page_entry_phys(allocation->phys_pages[page]);
+
+		if (phys != 0) (void)pmm_free_pages(phys, 1);
+	}
+
+	free_metadata_buffer(allocation->phys_array_phys, allocation->phys_array_page_count);
+	allocation->phys_pages            = NULL;
+	allocation->phys_array_phys       = 0;
+	allocation->phys_array_page_count = 0;
+	allocation->mapped_page_count     = 0;
+}
+
+static bool ensure_backing_array_locked(struct vmm_alloc_record* allocation) {
+	size_t bytes;
+
+	if (!allocation) return false;
+	if (allocation->phys_pages != NULL) return true;
+	if (mul_overflow_size(allocation->page_count, sizeof(uintptr_t), &bytes)) return false;
+
+	return alloc_metadata_buffer(
+		bytes, (void**)&allocation->phys_pages, &allocation->phys_array_phys, &allocation->phys_array_page_count);
+}
+
+static void release_empty_backing_array_locked(struct vmm_alloc_record* allocation) {
+	if (!allocation || !allocation->phys_pages || allocation->mapped_page_count != 0) return;
+
+	for (size_t page = 0; page < allocation->page_count; page++) {
+		if (page_entry_has_backing(allocation->phys_pages[page])) return;
 	}
 
 	free_metadata_buffer(allocation->phys_array_phys, allocation->phys_array_page_count);
@@ -156,145 +213,215 @@ static void release_allocation_backing_locked(struct vmm_alloc_record* allocatio
 	allocation->phys_array_page_count = 0;
 }
 
-static void restore_mapped_pages_locked(const struct vmm_alloc_record* allocation, size_t mapped_pages, vmm_prot_t prot,
-                                        bool replace_existing) {
+static void restore_live_mappings_locked(const struct vmm_alloc_record* allocation, vmm_prot_t prot,
+                                         bool replace_existing) {
 	uint64_t flags;
 
 	if (!allocation || !allocation->phys_pages) return;
 	flags = vmm_prot_to_hal_flags(prot);
 
-	for (size_t page = 0; page < mapped_pages; page++) {
+	for (size_t page = 0; page < allocation->page_count; page++) {
+		uintptr_t entry         = allocation->phys_pages[page];
 		uintptr_t virt          = allocation->base + page * (uintptr_t)PMM_PAGE_SIZE;
 		uintptr_t existing_phys = 0;
+		uintptr_t phys;
+
+		if (!page_entry_is_mapped(entry)) continue;
+		phys = page_entry_phys(entry);
 
 		if (hal_paging_query(virt, &existing_phys, NULL)) {
 			if (!replace_existing) continue;
-			if ((existing_phys & ~(uintptr_t)(PMM_PAGE_SIZE - 1u)) != allocation->phys_pages[page]) continue;
+			if ((existing_phys & ~(uintptr_t)(PMM_PAGE_SIZE - 1u)) != phys) continue;
 			(void)hal_paging_unmap(virt);
 		}
-		(void)hal_paging_map(virt, allocation->phys_pages[page], flags);
+		(void)hal_paging_map(virt, phys, flags);
 	}
 }
 
-static bool map_allocation_locked(struct vmm_alloc_record* allocation) {
-	uintptr_t* phys_pages                 = allocation ? allocation->phys_pages : NULL;
-	uintptr_t  phys_array_phys            = 0;
-	size_t     phys_array_page_count      = 0;
-	size_t     newly_allocated_phys_pages = 0;
-	bool       owns_new_backing           = false;
-	uint64_t   flags;
+static bool map_page_locked(struct vmm_alloc_record* allocation, size_t page_index) {
+	uintptr_t entry;
+	uintptr_t phys;
+	uintptr_t virt;
+	uintptr_t existing_phys  = 0;
+	bool      allocated_phys = false;
 
-	if (!allocation || allocation->state != VMM_STATE_RESERVED) return false;
+	if (!allocation || page_index >= allocation->page_count) return false;
+	if (!ensure_backing_array_locked(allocation)) return false;
 
-	flags = vmm_prot_to_hal_flags(allocation->prot);
+	entry = allocation->phys_pages[page_index];
+	if (page_entry_is_mapped(entry)) return true;
 
-	if (!phys_pages) {
-		size_t bytes;
-
-		if (mul_overflow_size(allocation->page_count, sizeof(uintptr_t), &bytes)) return false;
-		if (!alloc_metadata_buffer(bytes, (void**)&phys_pages, &phys_array_phys, &phys_array_page_count)) return false;
-
-		owns_new_backing = true;
-		for (size_t page = 0; page < allocation->page_count; page++) {
-			if (!pmm_alloc_pages(1, &phys_pages[page])) {
-				for (size_t allocated = 0; allocated < newly_allocated_phys_pages; allocated++) {
-					(void)pmm_free_pages(phys_pages[allocated], 1);
-				}
-				free_metadata_buffer(phys_array_phys, phys_array_page_count);
-				return false;
-			}
-			newly_allocated_phys_pages++;
-		}
+	phys = page_entry_phys(entry);
+	if (phys == 0) {
+		if (!pmm_alloc_pages(1, &phys)) return false;
+		entry          = make_page_entry(phys, page_entry_flags(entry));
+		allocated_phys = true;
 	}
 
-	for (size_t page = 0; page < allocation->page_count; page++) {
-		uintptr_t virt = allocation->base + page * (uintptr_t)PMM_PAGE_SIZE;
-
-		if (!hal_paging_map(virt, phys_pages[page], flags)) {
-			for (size_t mapped = 0; mapped < page; mapped++) {
-				uintptr_t rollback_virt = allocation->base + mapped * (uintptr_t)PMM_PAGE_SIZE;
-
-				(void)hal_paging_unmap(rollback_virt);
-			}
-			if (owns_new_backing) {
-				for (size_t allocated = 0; allocated < newly_allocated_phys_pages; allocated++) {
-					(void)pmm_free_pages(phys_pages[allocated], 1);
-				}
-				free_metadata_buffer(phys_array_phys, phys_array_page_count);
-			}
+	virt = allocation->base + page_index * (uintptr_t)PMM_PAGE_SIZE;
+	if (hal_paging_query(virt, &existing_phys, NULL)) {
+		if ((existing_phys & ~(uintptr_t)(PMM_PAGE_SIZE - 1u)) != phys) {
+			if (allocated_phys) (void)pmm_free_pages(phys, 1);
+			release_empty_backing_array_locked(allocation);
 			return false;
 		}
+		allocation->phys_pages[page_index] = make_page_entry(phys, page_entry_flags(entry) | VMM_PAGE_ENTRY_MAPPED);
+		allocation->mapped_page_count++;
+		return true;
 	}
 
-	if (owns_new_backing) {
-		allocation->phys_pages            = phys_pages;
-		allocation->phys_array_phys       = phys_array_phys;
-		allocation->phys_array_page_count = phys_array_page_count;
+	if (!hal_paging_map(virt, phys, vmm_prot_to_hal_flags(allocation->prot))) {
+		if (allocated_phys) (void)pmm_free_pages(phys, 1);
+		release_empty_backing_array_locked(allocation);
+		return false;
 	}
 
-	allocation->state = VMM_STATE_MAPPED;
+	allocation->phys_pages[page_index] = make_page_entry(phys, page_entry_flags(entry) | VMM_PAGE_ENTRY_MAPPED);
+	allocation->mapped_page_count++;
 	return true;
 }
 
-static bool unmap_allocation_locked(struct vmm_alloc_record* allocation, bool release_phys) {
-	size_t unmapped_pages = 0;
-
-	if (!allocation || allocation->state != VMM_STATE_MAPPED || !allocation->phys_pages) return false;
+static bool map_allocation_locked(struct vmm_alloc_record* allocation) {
+	if (!allocation) return false;
+	if (allocation->page_count == 0) return false;
+	if (allocation_state_locked(allocation) == VMM_STATE_MAPPED) return true;
 
 	for (size_t page = 0; page < allocation->page_count; page++) {
-		uintptr_t virt = allocation->base + page * (uintptr_t)PMM_PAGE_SIZE;
-		uintptr_t phys = 0;
+		uintptr_t entry;
 
+		if (!ensure_backing_array_locked(allocation)) goto rollback;
+
+		entry = allocation->phys_pages[page];
+		if (page_entry_is_mapped(entry)) {
+			allocation->phys_pages[page] = entry | VMM_PAGE_ENTRY_ROLLBACK_SKIP;
+			continue;
+		}
+		if (page_entry_has_backing(entry)) {
+			allocation->phys_pages[page] =
+				make_page_entry(page_entry_phys(entry), page_entry_flags(entry) | VMM_PAGE_ENTRY_ROLLBACK_KEEP);
+		}
+		if (!map_page_locked(allocation, page)) goto rollback;
+	}
+
+	for (size_t page = 0; page < allocation->page_count; page++) {
+		if (!allocation->phys_pages) break;
+		allocation->phys_pages[page] &= ~(VMM_PAGE_ENTRY_ROLLBACK_KEEP | VMM_PAGE_ENTRY_ROLLBACK_SKIP);
+	}
+	return true;
+
+rollback:
+	if (allocation->phys_pages != NULL) {
+		for (size_t page = 0; page < allocation->page_count; page++) {
+			uintptr_t entry = allocation->phys_pages[page];
+
+			if ((page_entry_flags(entry) & VMM_PAGE_ENTRY_ROLLBACK_SKIP) != 0) {
+				allocation->phys_pages[page] &= ~VMM_PAGE_ENTRY_ROLLBACK_SKIP;
+				continue;
+			}
+			if (!page_entry_is_mapped(entry)) continue;
+			if ((page_entry_flags(entry) & VMM_PAGE_ENTRY_ROLLBACK_KEEP) != 0) {
+				(void)hal_paging_unmap(allocation->base + page * (uintptr_t)PMM_PAGE_SIZE);
+				allocation->phys_pages[page] = make_page_entry(page_entry_phys(entry), 0);
+				allocation->mapped_page_count--;
+				continue;
+			}
+
+			(void)hal_paging_unmap(allocation->base + page * (uintptr_t)PMM_PAGE_SIZE);
+			(void)pmm_free_pages(page_entry_phys(entry), 1);
+			allocation->phys_pages[page] = 0;
+			allocation->mapped_page_count--;
+		}
+	}
+	release_empty_backing_array_locked(allocation);
+	return false;
+}
+
+static bool map_allocation_for_fault_locked(struct vmm_alloc_record* allocation, uintptr_t fault_addr) {
+	size_t    page_index;
+	uintptr_t entry = 0;
+
+	if (!allocation || (allocation->map_flags & (uint64_t)VMM_MAP_LAZY) == 0) return false;
+	if ((uint64_t)fault_addr < (uint64_t)allocation->base) return false;
+
+	page_index = ((uintptr_t)fault_addr - allocation->base) / (uintptr_t)PMM_PAGE_SIZE;
+	if (page_index >= allocation->page_count) return false;
+	if (allocation->phys_pages != NULL) entry = allocation->phys_pages[page_index];
+	if (page_entry_is_mapped(entry)) return false;
+	return map_page_locked(allocation, page_index);
+}
+
+static bool unmap_allocation_locked(struct vmm_alloc_record* allocation, bool release_phys) {
+	if (!allocation || allocation->mapped_page_count == 0 || !allocation->phys_pages) return false;
+
+	for (size_t page = 0; page < allocation->page_count; page++) {
+		uintptr_t entry = allocation->phys_pages[page];
+		uintptr_t virt  = allocation->base + page * (uintptr_t)PMM_PAGE_SIZE;
+		uintptr_t phys  = 0;
+
+		if (!page_entry_is_mapped(entry)) continue;
 		if (!hal_paging_query(virt, &phys, NULL)) {
-			restore_mapped_pages_locked(allocation, unmapped_pages, allocation->prot, false);
+			restore_live_mappings_locked(allocation, allocation->prot, false);
 			return false;
 		}
-		if ((phys & ~(uintptr_t)(PMM_PAGE_SIZE - 1u)) != allocation->phys_pages[page]) {
-			restore_mapped_pages_locked(allocation, unmapped_pages, allocation->prot, false);
+		if ((phys & ~(uintptr_t)(PMM_PAGE_SIZE - 1u)) != page_entry_phys(entry)) {
+			restore_live_mappings_locked(allocation, allocation->prot, false);
 			return false;
 		}
 		if (!hal_paging_unmap(virt)) {
-			restore_mapped_pages_locked(allocation, unmapped_pages, allocation->prot, false);
+			restore_live_mappings_locked(allocation, allocation->prot, false);
 			return false;
 		}
-		unmapped_pages++;
 	}
 
-	allocation->state = VMM_STATE_RESERVED;
-	if (release_phys) release_allocation_backing_locked(allocation);
+	for (size_t page = 0; page < allocation->page_count; page++) {
+		uintptr_t entry = allocation->phys_pages[page];
+
+		if (!page_entry_is_mapped(entry)) continue;
+		allocation->phys_pages[page] =
+			make_page_entry(page_entry_phys(entry), page_entry_flags(entry) & ~VMM_PAGE_ENTRY_MAPPED);
+	}
+
+	allocation->mapped_page_count = 0;
+	if (release_phys) {
+		release_allocation_backing_locked(allocation);
+		return true;
+	}
 	return true;
 }
 
 static bool protect_allocation_locked(struct vmm_alloc_record* allocation, vmm_prot_t new_prot) {
-	size_t     remapped_pages = 0;
-	vmm_prot_t old_prot;
-	uint64_t   new_flags;
+	vmm_prot_t     old_prot;
+	uint64_t       new_flags;
+	enum vmm_state old_state;
 
 	if (!allocation) return false;
 	if (allocation->prot == new_prot) return true;
 
-	old_prot = allocation->prot;
-	if (allocation->state == VMM_STATE_RESERVED) {
+	old_prot  = allocation->prot;
+	old_state = allocation_state_locked(allocation);
+	if (old_state == VMM_STATE_RESERVED) {
 		allocation->prot = new_prot;
 		return true;
 	}
-	if (allocation->state != VMM_STATE_MAPPED || !allocation->phys_pages) return false;
+	if (!allocation->phys_pages) return false;
 
 	new_flags = vmm_prot_to_hal_flags(new_prot);
 
 	for (size_t page = 0; page < allocation->page_count; page++) {
-		uintptr_t virt = allocation->base + page * (uintptr_t)PMM_PAGE_SIZE;
-		uintptr_t phys = allocation->phys_pages[page];
+		uintptr_t entry = allocation->phys_pages[page];
+		uintptr_t virt  = allocation->base + page * (uintptr_t)PMM_PAGE_SIZE;
+		uintptr_t phys;
 
+		if (!page_entry_is_mapped(entry)) continue;
+		phys = page_entry_phys(entry);
 		if (!hal_paging_unmap(virt)) {
-			restore_mapped_pages_locked(allocation, remapped_pages, old_prot, true);
+			restore_live_mappings_locked(allocation, old_prot, true);
 			return false;
 		}
 		if (!hal_paging_map(virt, phys, new_flags)) {
-			restore_mapped_pages_locked(allocation, page + 1u, old_prot, true);
+			restore_live_mappings_locked(allocation, old_prot, true);
 			return false;
 		}
-		remapped_pages++;
 	}
 
 	allocation->prot = new_prot;
@@ -310,8 +437,8 @@ static void fill_allocation_info_locked(const struct vmm_alloc_record* allocatio
 		.page_count = allocation->page_count,
 		.prot       = allocation->prot,
 		.kind       = allocation->kind,
-		.state      = allocation->state,
-		.first_phys = allocation->phys_pages ? allocation->phys_pages[0] : 0,
+		.state      = allocation_state_locked(allocation),
+		.first_phys = allocation->phys_pages ? page_entry_phys(allocation->phys_pages[0]) : 0,
 	};
 }
 
@@ -320,11 +447,11 @@ static void reset_allocations_locked(void) {
 		for (size_t i = 0; i < allocations_capacity; i++) {
 			if (!allocations[i].used) continue;
 
-			if (allocations[i].state == VMM_STATE_MAPPED) {
+			if (allocations[i].phys_pages != NULL) {
 				for (size_t page = 0; page < allocations[i].page_count; page++) {
 					uintptr_t virt = allocations[i].base + page * (uintptr_t)PMM_PAGE_SIZE;
 
-					(void)hal_paging_unmap(virt);
+					if (page_entry_is_mapped(allocations[i].phys_pages[page])) (void)hal_paging_unmap(virt);
 				}
 			}
 			release_allocation_backing_locked(&allocations[i]);
@@ -408,7 +535,7 @@ bool vmm_alloc(const struct vmm_alloc_params* params, vmm_id_t* out_id, void** o
 		.page_count = params->page_count,
 		.prot       = params->prot,
 		.kind       = params->kind,
-		.state      = VMM_STATE_RESERVED,
+		.map_flags  = params->map_flags,
 		.used       = true,
 	};
 
@@ -437,7 +564,7 @@ bool vmm_free(vmm_id_t id) {
 		spinlock_unlock(&vmm_lock);
 		return false;
 	}
-	if (allocation->state == VMM_STATE_MAPPED && !unmap_allocation_locked(allocation, false)) {
+	if (allocation->mapped_page_count != 0 && !unmap_allocation_locked(allocation, false)) {
 		spinlock_unlock(&vmm_lock);
 		return false;
 	}
@@ -461,7 +588,7 @@ bool vmm_free_at(void* base) {
 		spinlock_unlock(&vmm_lock);
 		return false;
 	}
-	if (allocation->state == VMM_STATE_MAPPED && !unmap_allocation_locked(allocation, false)) {
+	if (allocation->mapped_page_count != 0 && !unmap_allocation_locked(allocation, false)) {
 		spinlock_unlock(&vmm_lock);
 		return false;
 	}
@@ -510,6 +637,19 @@ bool vmm_protect(vmm_id_t id, vmm_prot_t new_prot) {
 	spinlock_lock(&vmm_lock);
 	allocation = find_allocation_by_id_locked(id);
 	ok         = protect_allocation_locked(allocation, new_prot);
+	spinlock_unlock(&vmm_lock);
+	return ok;
+}
+
+bool vmm_resolve_page_fault(uintptr_t addr) {
+	struct vmm_alloc_record* allocation;
+	bool                     ok = false;
+
+	if (!initialized) return false;
+
+	spinlock_lock(&vmm_lock);
+	allocation = find_allocation_containing_locked(addr);
+	ok         = map_allocation_for_fault_locked(allocation, addr);
 	spinlock_unlock(&vmm_lock);
 	return ok;
 }

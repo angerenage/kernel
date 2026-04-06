@@ -1,3 +1,4 @@
+#include <core/vmm.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
 #include <stdbool.h>
@@ -84,6 +85,10 @@ static const char* exception_name(uint64_t code) {
 	}
 }
 
+static bool is_page_fault_exception(uint64_t code) {
+	return code == 12u || code == 13u || code == 15u;
+}
+
 void handle_exception(const struct exception_frame* frame) {
 	bool     is_interrupt;
 	uint64_t code;
@@ -92,6 +97,8 @@ void handle_exception(const struct exception_frame* frame) {
 
 	is_interrupt = (frame->scause >> 63) != 0;
 	code         = frame->scause & ~(1ull << 63);
+
+	if (!is_interrupt && is_page_fault_exception(code) && vmm_resolve_page_fault(frame->stval)) return;
 
 	printf("kernel: riscv64 %s %llu (%s)\n",
 	       is_interrupt ? "interrupt" : "exception",

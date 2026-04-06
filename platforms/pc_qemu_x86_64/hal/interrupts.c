@@ -1,3 +1,4 @@
+#include <core/vmm.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
 #include <stdbool.h>
@@ -125,12 +126,16 @@ void hal_interrupts_init(void) {
 
 void x86_64_handle_interrupt(const struct interrupt_frame* frame) {
 	unsigned long long vector = frame->vector;
+	uint64_t           fault_addr;
 
 	if (is_external_irq(vector)) {
 		bool handled = clock_handle_irq((unsigned)vector);
 		interrupt_send_eoi((unsigned)vector);
 		if (handled) return;
 	}
+
+	fault_addr = vector == 14u ? read_cr2() : 0;
+	if (vector == 14u && vmm_resolve_page_fault((uintptr_t)fault_addr)) return;
 
 	if (vector < 32u) {
 		printf("kernel: exception %llu (%s)\n", vector, exception_names[vector]);
@@ -142,7 +147,7 @@ void x86_64_handle_interrupt(const struct interrupt_frame* frame) {
 	if (vector == 14u) {
 		printf("  error=0x%016llx cr2=0x%016llx rip=0x%016llx cs=0x%016llx rflags=0x%016llx\n",
 		       frame->error_code,
-		       read_cr2(),
+		       fault_addr,
 		       frame->rip,
 		       frame->cs,
 		       frame->rflags);
