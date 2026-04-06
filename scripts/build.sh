@@ -72,10 +72,10 @@ cross_file_for_arch() {
 
 platform_for_arch() {
 	case "$1" in
-		x86_64) printf '%s\n' "pc_qemu_x86_64" ;;
-		aarch64) printf '%s\n' "pc_qemu_aarch64" ;;
-		riscv64) printf '%s\n' "pc_qemu_riscv64" ;;
-		loongarch64) printf '%s\n' "pc_qemu_loongarch64" ;;
+		x86_64) printf '%s\n' "pc_x86_64" ;;
+		aarch64) printf '%s\n' "pc_aarch64" ;;
+		riscv64) printf '%s\n' "pc_riscv64" ;;
+		loongarch64) printf '%s\n' "pc_loongarch64" ;;
 		*) error "unsupported architecture: $1" ;;
 	esac
 }

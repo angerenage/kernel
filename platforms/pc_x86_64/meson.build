@@ -1,7 +1,7 @@
 platform_limine_arch = 'x86_64'
 
 platform_kernel_c_args += [
-	'-DPLATFORM_PC_QEMU_X86_64',
+	'-DPLATFORM_PC_X86_64',
 	'-mno-red-zone',
 	'-mcmodel=kernel',
 ]

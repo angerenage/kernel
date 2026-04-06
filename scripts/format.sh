@@ -17,7 +17,7 @@ Options:
                            Examples:
                              --exclude '*/limine.h'
                              --exclude test
-                             --exclude=platforms/pc_qemu_x86_64
+                             --exclude=platforms/pc_x86_64
   --clang-format <path>    Path to clang-format binary (default: clang-format)
   --dry-run                Print commands instead of modifying files
   -h, --help               Show this help and exit

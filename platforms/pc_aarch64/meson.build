@@ -1,7 +1,7 @@
 platform_limine_arch = 'aarch64'
 
 platform_kernel_c_args += [
-	'-DPLATFORM_PC_QEMU_AARCH64',
+	'-DPLATFORM_PC_AARCH64',
 ]
 
 platform_kernel_objects += [

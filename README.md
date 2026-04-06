@@ -49,19 +49,19 @@ Use `--kernel-selftests-autorun` to also inject `kernel.selftest=1` into the gen
 If you prefer calling Meson directly, configure the architecture you want to build from the repository root:
 
 ```sh
-meson setup build-x86_64 --cross-file toolchain/x86_64-elf.ini -Dplatform=pc_qemu_x86_64
-meson setup build-aarch64 --cross-file toolchain/aarch64-elf.ini -Dplatform=pc_qemu_aarch64
-meson setup build-riscv64 --cross-file toolchain/riscv64-elf.ini -Dplatform=pc_qemu_riscv64
-meson setup build-loongarch64 --cross-file toolchain/loongarch64-elf.ini -Dplatform=pc_qemu_loongarch64
+meson setup build-x86_64 --cross-file toolchain/x86_64-elf.ini -Dplatform=pc_x86_64
+meson setup build-aarch64 --cross-file toolchain/aarch64-elf.ini -Dplatform=pc_aarch64
+meson setup build-riscv64 --cross-file toolchain/riscv64-elf.ini -Dplatform=pc_riscv64
+meson setup build-loongarch64 --cross-file toolchain/loongarch64-elf.ini -Dplatform=pc_loongarch64
 ```
 
 If the build directory already exists and you want to reconfigure it:
 
 ```sh
-meson setup build-x86_64 --reconfigure --cross-file toolchain/x86_64-elf.ini -Dplatform=pc_qemu_x86_64
-meson setup build-aarch64 --reconfigure --cross-file toolchain/aarch64-elf.ini -Dplatform=pc_qemu_aarch64
-meson setup build-riscv64 --reconfigure --cross-file toolchain/riscv64-elf.ini -Dplatform=pc_qemu_riscv64
-meson setup build-loongarch64 --reconfigure --cross-file toolchain/loongarch64-elf.ini -Dplatform=pc_qemu_loongarch64
+meson setup build-x86_64 --reconfigure --cross-file toolchain/x86_64-elf.ini -Dplatform=pc_x86_64
+meson setup build-aarch64 --reconfigure --cross-file toolchain/aarch64-elf.ini -Dplatform=pc_aarch64
+meson setup build-riscv64 --reconfigure --cross-file toolchain/riscv64-elf.ini -Dplatform=pc_riscv64
+meson setup build-loongarch64 --reconfigure --cross-file toolchain/loongarch64-elf.ini -Dplatform=pc_loongarch64
 ```
 
 ## Compile
@@ -187,8 +187,9 @@ Use the assertion macros in [`include/kernel/selftest.h`](/c:/Users/anger/Code/k
 
 ## Notes
 
-- The default platform is `pc_qemu_x86_64`.
-- The available Meson platforms are `pc_qemu_x86_64`, `pc_qemu_aarch64`, `pc_qemu_riscv64`, and `pc_qemu_loongarch64`.
+- The default platform is `pc_x86_64`.
+- The available Meson platforms are `pc_x86_64`, `pc_aarch64`, `pc_riscv64`, and `pc_loongarch64`.
+- These platform names describe the kernel target rather than the emulator; the same binaries are intended to be usable on matching hardware, while `scripts/run.sh` and `scripts/run_qemu.sh` remain QEMU launch helpers.
 - The test binaries are built natively, while the kernel is cross-compiled with the selected file in `toolchain/`.
 - `-Dtests=false` skips configuring the native Criterion test targets. `scripts/build.sh --no-tests` is the helper equivalent.
 - `-Dkernel_selftests=true` compiles in-kernel selftest code into the kernel. `scripts/build.sh --kernel-selftests` is the helper equivalent.

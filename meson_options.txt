@@ -1,6 +1,6 @@
 option('platform',
 	type : 'string',
-	value : 'pc_qemu_x86_64',
+	value : 'pc_x86_64',
 	description : 'Target platform (subdir under platforms/) to configure kernel build.')
 
 option('tests',

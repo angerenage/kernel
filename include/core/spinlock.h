@@ -17,9 +17,9 @@ static inline void spinlock_init(struct spinlock* lock) {
 }
 
 static inline void spinlock_relax(void) {
-#if defined(PLATFORM_PC_QEMU_X86_64)
+#if defined(PLATFORM_PC_X86_64)
 	__asm__ volatile("pause");
-#elif defined(PLATFORM_PC_QEMU_AARCH64)
+#elif defined(PLATFORM_PC_AARCH64)
 	__asm__ volatile("yield");
 #else
 	__asm__ volatile("" ::: "memory");
