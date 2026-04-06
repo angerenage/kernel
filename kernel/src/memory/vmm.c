@@ -19,10 +19,13 @@
 
 struct vmm_alloc_record {
 	vmm_id_t      id;
+	uintptr_t     reserved_base;
 	uintptr_t     base;
+	size_t        reserved_page_count;
 	size_t        page_count;
 	vmm_prot_t    prot;
 	enum vmm_kind kind;
+	size_t        guard_pages;
 	uint64_t      map_flags;
 	size_t        mapped_page_count;
 	uintptr_t*    phys_pages;
@@ -50,6 +53,10 @@ static inline uint64_t vmm_prot_to_hal_flags(vmm_prot_t prot) {
 
 static inline bool vmm_prot_is_valid(vmm_prot_t prot) {
 	return (prot & ~VMM_PROT_VALID_MASK) == 0;
+}
+
+static inline bool allocation_is_stack_locked(const struct vmm_alloc_record* allocation) {
+	return allocation != NULL && allocation->kind == VMM_KIND_STACK;
 }
 
 static inline uintptr_t page_entry_phys(uintptr_t entry) {
@@ -200,6 +207,17 @@ static bool ensure_backing_array_locked(struct vmm_alloc_record* allocation) {
 		bytes, (void**)&allocation->phys_pages, &allocation->phys_array_phys, &allocation->phys_array_page_count);
 }
 
+static bool stack_fault_is_valid_locked(const struct vmm_alloc_record* allocation, size_t page_index) {
+	size_t next_page;
+
+	if (!allocation_is_stack_locked(allocation)) return true;
+	if (page_index >= allocation->page_count) return false;
+	if (allocation->mapped_page_count >= allocation->page_count) return false;
+
+	next_page = allocation->page_count - allocation->mapped_page_count - 1u;
+	return page_index == next_page;
+}
+
 static void release_empty_backing_array_locked(struct vmm_alloc_record* allocation) {
 	if (!allocation || !allocation->phys_pages || allocation->mapped_page_count != 0) return;
 
@@ -345,6 +363,7 @@ static bool map_allocation_for_fault_locked(struct vmm_alloc_record* allocation,
 
 	page_index = ((uintptr_t)fault_addr - allocation->base) / (uintptr_t)PMM_PAGE_SIZE;
 	if (page_index >= allocation->page_count) return false;
+	if (!stack_fault_is_valid_locked(allocation, page_index)) return false;
 	if (allocation->phys_pages != NULL) entry = allocation->phys_pages[page_index];
 	if (page_entry_is_mapped(entry)) return false;
 	return map_page_locked(allocation, page_index);
@@ -432,13 +451,14 @@ static void fill_allocation_info_locked(const struct vmm_alloc_record* allocatio
 	if (!allocation || !out_info) return;
 
 	*out_info = (struct vmm_info){
-		.id         = allocation->id,
-		.base       = (void*)allocation->base,
-		.page_count = allocation->page_count,
-		.prot       = allocation->prot,
-		.kind       = allocation->kind,
-		.state      = allocation_state_locked(allocation),
-		.first_phys = allocation->phys_pages ? page_entry_phys(allocation->phys_pages[0]) : 0,
+		.id          = allocation->id,
+		.base        = (void*)allocation->base,
+		.page_count  = allocation->page_count,
+		.prot        = allocation->prot,
+		.kind        = allocation->kind,
+		.guard_pages = allocation->guard_pages,
+		.state       = allocation_state_locked(allocation),
+		.first_phys  = allocation->phys_pages ? page_entry_phys(allocation->phys_pages[0]) : 0,
 	};
 }
 
@@ -498,8 +518,11 @@ bool vmm_is_initialized(void) {
 
 bool vmm_alloc(const struct vmm_alloc_params* params, vmm_id_t* out_id, void** out_base) {
 	struct vmm_alloc_record* allocation;
-	uintptr_t                base = 0;
+	uintptr_t                reserved_base = 0;
+	uintptr_t                base          = 0;
 	size_t                   align_pages;
+	size_t                   guard_pages;
+	size_t                   reserved_page_count;
 
 	if (out_id) *out_id = VMM_ID_INVALID;
 	if (out_base) *out_base = NULL;
@@ -510,37 +533,51 @@ bool vmm_alloc(const struct vmm_alloc_params* params, vmm_id_t* out_id, void** o
 
 	align_pages = params->align_pages != 0 ? params->align_pages : VMM_MIN_ALIGN_PAGES;
 	if ((align_pages & (align_pages - 1u)) != 0) return false;
+	guard_pages = 0;
+	if (params->kind == VMM_KIND_STACK) {
+		guard_pages = params->guard_pages != 0 ? params->guard_pages : VMM_STACK_DEFAULT_GUARD_PAGES;
+		if ((guard_pages % align_pages) != 0) return false;
+	}
+	else if (params->guard_pages != 0) {
+		return false;
+	}
+	if (add_overflow_size(params->page_count, guard_pages, &reserved_page_count)) return false;
+	if (reserved_page_count == 0) return false;
 
 	spinlock_lock(&vmm_lock);
-	if (!vaddr_alloc_reserve(params->page_count, align_pages, &base)) {
+	if (!vaddr_alloc_reserve(reserved_page_count, align_pages, &reserved_base)) {
 		spinlock_unlock(&vmm_lock);
 		return false;
 	}
+	base = reserved_base + guard_pages * (uintptr_t)PMM_PAGE_SIZE;
 	if (!ensure_allocation_capacity_locked()) {
-		(void)vaddr_alloc_release(base, params->page_count);
+		(void)vaddr_alloc_release(reserved_base, reserved_page_count);
 		spinlock_unlock(&vmm_lock);
 		return false;
 	}
 
 	allocation = find_free_allocation_slot_locked();
 	if (!allocation) {
-		(void)vaddr_alloc_release(base, params->page_count);
+		(void)vaddr_alloc_release(reserved_base, reserved_page_count);
 		spinlock_unlock(&vmm_lock);
 		return false;
 	}
 
 	*allocation = (struct vmm_alloc_record){
-		.id         = next_allocation_id++,
-		.base       = base,
-		.page_count = params->page_count,
-		.prot       = params->prot,
-		.kind       = params->kind,
-		.map_flags  = params->map_flags,
-		.used       = true,
+		.id                  = next_allocation_id++,
+		.reserved_base       = reserved_base,
+		.base                = base,
+		.reserved_page_count = reserved_page_count,
+		.page_count          = params->page_count,
+		.prot                = params->prot,
+		.kind                = params->kind,
+		.guard_pages         = guard_pages,
+		.map_flags           = params->map_flags,
+		.used                = true,
 	};
 
 	if ((params->map_flags & VMM_MAP_LAZY) == 0 && !map_allocation_locked(allocation)) {
-		(void)vaddr_alloc_release(base, params->page_count);
+		(void)vaddr_alloc_release(reserved_base, reserved_page_count);
 		memset(allocation, 0, sizeof(*allocation));
 		spinlock_unlock(&vmm_lock);
 		return false;
@@ -570,7 +607,7 @@ bool vmm_free(vmm_id_t id) {
 	}
 
 	release_allocation_backing_locked(allocation);
-	(void)vaddr_alloc_release(allocation->base, allocation->page_count);
+	(void)vaddr_alloc_release(allocation->reserved_base, allocation->reserved_page_count);
 	memset(allocation, 0, sizeof(*allocation));
 	allocation_count--;
 	spinlock_unlock(&vmm_lock);
@@ -594,7 +631,7 @@ bool vmm_free_at(void* base) {
 	}
 
 	release_allocation_backing_locked(allocation);
-	(void)vaddr_alloc_release(allocation->base, allocation->page_count);
+	(void)vaddr_alloc_release(allocation->reserved_base, allocation->reserved_page_count);
 	memset(allocation, 0, sizeof(*allocation));
 	allocation_count--;
 	spinlock_unlock(&vmm_lock);

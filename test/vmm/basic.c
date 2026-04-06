@@ -168,6 +168,7 @@ Test(vmm, resolves_page_faults_for_lazy_stack_allocations) {
 		.align_pages = 1,
 		.prot        = VMM_PROT_READ | VMM_PROT_WRITE,
 		.kind        = VMM_KIND_STACK,
+		.guard_pages = 1,
 		.map_flags   = VMM_MAP_LAZY,
 	};
 	struct vmm_info info;
@@ -180,6 +181,9 @@ Test(vmm, resolves_page_faults_for_lazy_stack_allocations) {
 	free_before = pmm_free_page_count();
 
 	cr_assert(vmm_alloc(&params, &alloc_id, &base), "lazy stack vmm_alloc failed");
+	cr_assert(!vmm_query((uint8_t*)base - PMM_PAGE_SIZE, &info), "stack guard page was exposed as a normal allocation");
+	cr_assert(!vmm_resolve_page_fault((uintptr_t)base + 1u * (uintptr_t)PMM_PAGE_SIZE),
+	          "stack fault resolution unexpectedly skipped the top page");
 	cr_assert(vmm_resolve_page_fault((uintptr_t)base + 2u * (uintptr_t)PMM_PAGE_SIZE),
 	          "vmm_resolve_page_fault failed for lazy stack allocation");
 	cr_assert_eq(mock_paging_mapping_count(), 1, "stack fault resolution mapped more than the faulting page");
@@ -195,8 +199,18 @@ Test(vmm, resolves_page_faults_for_lazy_stack_allocations) {
 	cr_assert_eq(flags, (uint64_t)VMM_PROT_WRITE, "stack fault resolution applied incorrect mapping flags");
 	cr_assert(vmm_query_id(alloc_id, &info), "vmm_query_id failed after stack fault resolution");
 	cr_assert_eq(info.kind, VMM_KIND_STACK, "fault resolution changed the stack allocation kind");
+	cr_assert_eq(info.guard_pages, params.guard_pages, "stack fault resolution changed guard page tracking");
 	cr_assert_eq(
 		info.state, VMM_STATE_PARTIAL, "stack fault resolution did not leave the stack allocation partially mapped");
+	cr_assert(!vmm_resolve_page_fault((uintptr_t)base - PMM_PAGE_SIZE),
+	          "stack fault resolution unexpectedly mapped the guard page");
+	cr_assert(!vmm_resolve_page_fault((uintptr_t)base),
+	          "stack fault resolution unexpectedly skipped to the lowest usable page");
+	cr_assert(vmm_resolve_page_fault((uintptr_t)base + PMM_PAGE_SIZE),
+	          "stack fault resolution failed for the next growth page");
+	cr_assert(vmm_resolve_page_fault((uintptr_t)base), "stack fault resolution failed for the final usable page");
+	cr_assert(vmm_query_id(alloc_id, &info), "vmm_query_id failed after full stack growth");
+	cr_assert_eq(info.state, VMM_STATE_MAPPED, "stack allocation did not become fully mapped");
 
 	cr_assert(vmm_free(alloc_id), "vmm_free failed after stack fault resolution");
 	cr_assert_eq(mock_paging_mapping_count(), 0, "stack fault resolution cleanup leaked mappings");
@@ -326,4 +340,25 @@ Test(vmm, rejects_invalid_protection_masks) {
 	cr_assert_eq(flags, (uint64_t)VMM_PROT_WRITE, "rejected protect changed the live mapping");
 
 	cr_assert(vmm_free(alloc_id), "vmm_free failed after invalid protection tests");
+}
+
+Test(vmm, rejects_guard_pages_for_non_stack_allocations) {
+	_Alignas(4096) uint8_t  arena[KiB(256)];
+	struct vmm_alloc_params params = {
+		.page_count  = 2,
+		.align_pages = 1,
+		.prot        = VMM_PROT_READ | VMM_PROT_WRITE,
+		.kind        = VMM_KIND_HEAP,
+		.guard_pages = 1,
+	};
+	vmm_id_t alloc_id = VMM_ID_INVALID;
+	void*    base     = NULL;
+
+	init_test_vmm(arena, sizeof(arena));
+
+	cr_assert(!vmm_alloc(&params, &alloc_id, &base),
+	          "vmm_alloc unexpectedly accepted guard pages for a heap allocation");
+	cr_assert_eq(alloc_id, VMM_ID_INVALID, "failed guard-page validation changed the allocation id");
+	cr_assert_null(base, "failed guard-page validation changed the allocation base");
+	cr_assert_eq(vmm_count(), 0, "failed guard-page validation left tracked allocations behind");
 }

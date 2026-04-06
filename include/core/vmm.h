@@ -6,6 +6,7 @@
 
 #define VMM_ID_INVALID 0ull
 #define VMM_MIN_ALIGN_PAGES 1u
+#define VMM_STACK_DEFAULT_GUARD_PAGES 1u
 
 typedef uint64_t vmm_id_t;
 typedef uint64_t vmm_prot_t;
@@ -43,7 +44,7 @@ enum vmm_map_flags {
 };
 
 struct vmm_alloc_params {
-	/* Number of pages to reserve (must be > 0). */
+	/* Number of usable pages to reserve (must be > 0). */
 	size_t page_count;
 	/* Virtual alignment in pages (power of two, 1 means page aligned). */
 	size_t align_pages;
@@ -51,6 +52,8 @@ struct vmm_alloc_params {
 	vmm_prot_t prot;
 	/* Logical purpose for diagnostics and policy checks. */
 	enum vmm_kind kind;
+	/* Stack-only guard area below the usable range; defaults to 1 page when zero. */
+	size_t guard_pages;
 	/* Optional map policy flags (e.g. lazy map). */
 	uint64_t map_flags;
 };
@@ -61,6 +64,7 @@ struct vmm_info {
 	size_t         page_count;
 	vmm_prot_t     prot;
 	enum vmm_kind  kind;
+	size_t         guard_pages;
 	enum vmm_state state;
 	uintptr_t      first_phys;
 };
@@ -74,6 +78,7 @@ bool vmm_is_initialized(void);
  * - With VMM_MAP_LAZY: reserve only, state starts RESERVED.
  * - Without VMM_MAP_LAZY: pages are allocated + mapped immediately.
  * - Lazy allocations may move through RESERVED -> PARTIAL -> MAPPED.
+ * - STACK allocations reserve extra guard pages below the returned base.
  */
 bool vmm_alloc(const struct vmm_alloc_params* params, vmm_id_t* out_id, void** out_base);
 
