@@ -7,14 +7,21 @@ static size_t   grow_capacity;
 static size_t   grow_offset;
 
 static bool test_grow(size_t page_count, void** out_base) {
-	size_t bytes = page_count * PMM_PAGE_SIZE;
+	size_t bytes  = page_count * PMM_PAGE_SIZE;
+	size_t offset = 0;
 
 	if (out_base) *out_base = NULL;
-	if (!out_base || bytes > grow_capacity - grow_offset) return false;
+	if (!out_base) return false;
 
-	*out_base = grow_base + grow_offset;
-	grow_offset += bytes;
-	return true;
+	for (;;) {
+		offset = __atomic_load_n(&grow_offset, __ATOMIC_ACQUIRE);
+		if (bytes > grow_capacity - offset) return false;
+		if (__atomic_compare_exchange_n(
+				&grow_offset, &offset, offset + bytes, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+			*out_base = grow_base + offset;
+			return true;
+		}
+	}
 }
 
 void init_test_kheap(uint8_t* arena, size_t arena_size) {
@@ -23,7 +30,7 @@ void init_test_kheap(uint8_t* arena, size_t arena_size) {
 
 	grow_base     = arena;
 	grow_capacity = arena_size;
-	grow_offset   = 0;
+	__atomic_store_n(&grow_offset, 0u, __ATOMIC_RELEASE);
 
 	cr_assert(kheap_init_with_grower(test_grow), "kheap_init_with_grower failed");
 }
