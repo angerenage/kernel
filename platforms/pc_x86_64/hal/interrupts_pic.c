@@ -99,7 +99,7 @@ bool pit_init(uint32_t frequency_hz, uint32_t* actual_frequency_hz) {
 	divisor = X86_PIT_INPUT_HZ / frequency_hz;
 	if (divisor == 0u || divisor > 0xffffu) return false;
 
-	outb(X86_PIT_COMMAND, 0x36u);
+	outb(X86_PIT_COMMAND, 0x34u);
 	outb(X86_PIT_CHANNEL0, (uint8_t)(divisor & 0xffu));
 	outb(X86_PIT_CHANNEL0, (uint8_t)((divisor >> 8) & 0xffu));
 	if (actual_frequency_hz != NULL) {
