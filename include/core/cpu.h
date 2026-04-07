@@ -21,12 +21,15 @@ enum cpu_state {
 #define CPU_DEBUG_LOCK_DEPTH 8u
 #endif
 
+struct thread;
+
 struct cpu {
 	size_t         index;
 	uint64_t       processor_id;
 	uint64_t       arch_id;
 	enum cpu_role  role;
 	enum cpu_state state;
+	struct thread* current_thread;
 	bool           interrupts_ready;
 	uint32_t       irq_disable_depth;
 	uint32_t       exception_depth;

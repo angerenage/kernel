@@ -2,6 +2,7 @@
 #include <core/kheap.h>
 #include <core/mm.h>
 #include <core/pmm.h>
+#include <core/sched.h>
 #include <core/vmm.h>
 #include <hal/clock.h>
 #include <hal/hcf.h>
@@ -38,9 +39,24 @@ static void boot_clock_tick(void* ctx) {
 	(void)ctx;
 
 	boot_timer_ticks++;
+	if (boot_timer_frequency_hz == 0u) return;
+
+	if (!boot_timer_started) {
+		boot_timer_started          = true;
+		boot_timer_origin_ticks     = boot_timer_ticks;
+		boot_timer_reported_seconds = 0u;
+		printf("\r\033[2Kkernel: uptime 0 s");
+		return;
+	}
+
+	uint64_t elapsed_seconds = (boot_timer_ticks - boot_timer_origin_ticks) / boot_timer_frequency_hz;
+	if (elapsed_seconds != boot_timer_reported_seconds) {
+		boot_timer_reported_seconds = elapsed_seconds;
+		printf("\r\033[2Kkernel: uptime %llu s", elapsed_seconds);
+	}
 }
 
-static void boot_run_timer_counter(void) {
+static void boot_start_timer_counter(void) {
 	hal_clock_init();
 	if (!hal_clock_start(KERNEL_TIMER_HZ, boot_clock_tick, NULL)) {
 		printf("kernel: boot clock unavailable\n");
@@ -51,25 +67,6 @@ static void boot_run_timer_counter(void) {
 		printf("kernel: boot clock frequency unavailable\n");
 		hal_clock_stop();
 		return;
-	}
-
-	for (;;) {
-		uint64_t ticks = boot_timer_ticks;
-		if (ticks == 0u) continue;
-
-		if (!boot_timer_started) {
-			boot_timer_started          = true;
-			boot_timer_origin_ticks     = ticks;
-			boot_timer_reported_seconds = 0u;
-			printf("\r\033[2Kkernel: uptime 0 s");
-			continue;
-		}
-
-		uint64_t elapsed_seconds = (ticks - boot_timer_origin_ticks) / boot_timer_frequency_hz;
-		if (elapsed_seconds != boot_timer_reported_seconds) {
-			boot_timer_reported_seconds = elapsed_seconds;
-			printf("\r\033[2Kkernel: uptime %llu s", elapsed_seconds);
-		}
 	}
 }
 
@@ -177,6 +174,9 @@ void kernel_main(void) {
 	if (!kernel_boot_cpu_mp_supported()) {
 		printf("kernel: SMP boot hooks unavailable on this platform, continuing with the BSP only\n");
 	}
+	if (!sched_init()) {
+		boot_fail("kernel: sched_init failed");
+	}
 	if (!kernel_cpu_boot_start_aps()) {
 		boot_fail("kernel: kernel_cpu_boot_start_aps failed");
 	}
@@ -187,7 +187,6 @@ void kernel_main(void) {
 	}
 #endif
 
-	boot_run_timer_counter();
-
-	hcf();
+	boot_start_timer_counter();
+	sched_enter_idle();
 }

@@ -50,6 +50,13 @@ test_suites = [
 		'suites': ['unit', 'base'],
 	},
 	{
+		'name': 'sched',
+		'sources': files(
+			'core/sched_test.c',
+		),
+		'suites': ['unit', 'core'],
+	},
+	{
 		'name': 'cpu_spinlock',
 		'sources': files(
 			'core/cpu_spinlock_test.c',

@@ -1,4 +1,5 @@
 #include <core/cpu.h>
+#include <core/sched.h>
 #include <core/spinlock.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>
@@ -32,9 +33,7 @@ static void kernel_cpu_mp_entry(size_t cpu_index, void* arg) {
 		}
 	}
 	(void)cpu_set_state(cpu, CPU_STATE_ONLINE);
-	for (;;) {
-		hal_cpu_park();
-	}
+	sched_enter_idle();
 }
 
 bool kernel_cpu_boot_init(uintptr_t boot_stack_base, uintptr_t boot_stack_top) {
