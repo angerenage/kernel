@@ -11,6 +11,7 @@
 typedef uint64_t vmm_id_t;
 typedef uint64_t vmm_prot_t;
 
+/* Protection bits understood by the virtual memory manager. READ is tracked for policy/metadata too. */
 enum vmm_prot_flag {
 	VMM_PROT_NONE     = 0,
 	VMM_PROT_WRITE    = 1u << 0,
@@ -33,6 +34,7 @@ enum vmm_kind {
 	VMM_KIND_KERNEL_DATA,
 };
 
+/* Mapping state of a tracked allocation. */
 enum vmm_state {
 	VMM_STATE_RESERVED = 0,
 	VMM_STATE_PARTIAL,
@@ -43,6 +45,7 @@ enum vmm_map_flags {
 	VMM_MAP_LAZY = 1u << 0,
 };
 
+/* Parameters for one tracked virtual allocation. */
 struct vmm_alloc_params {
 	/* Number of usable pages to reserve (must be > 0). */
 	size_t page_count;
@@ -58,6 +61,7 @@ struct vmm_alloc_params {
 	uint64_t map_flags;
 };
 
+/* Public snapshot of one tracked allocation. */
 struct vmm_info {
 	vmm_id_t       id;
 	void*          base;
@@ -69,8 +73,10 @@ struct vmm_info {
 	uintptr_t      first_phys;
 };
 
-/* Initializes paging + the VMM window. Re-initializing resets tracked allocations. */
+/* Initialize the paging backend and reserve the kernel's managed virtual window. Re-initializing resets metadata. */
 bool vmm_init(void);
+
+/* Return whether vmm_init() completed successfully. */
 bool vmm_is_initialized(void);
 
 /*
@@ -82,22 +88,35 @@ bool vmm_is_initialized(void);
  */
 bool vmm_alloc(const struct vmm_alloc_params* params, vmm_id_t* out_id, void** out_base);
 
-/* Destroy allocation metadata and unmap/free any mapped backing pages. */
+/* Destroy allocation metadata and unmap/free any mapped backing pages owned by the allocation. */
 bool vmm_free(vmm_id_t id);
+
+/* Same as vmm_free(), but looks the allocation up by its base virtual address. */
 bool vmm_free_at(void* base);
 
-/* Transition an allocation between RESERVED and MAPPED. */
+/* Materialize all pages in an allocation that is still wholly or partly reserved. */
 bool vmm_map(vmm_id_t id);
+
+/* Remove all live mappings from an allocation, optionally releasing its physical backing pages as well. */
 bool vmm_unmap(vmm_id_t id, bool release_phys);
+
+/* Change the protection flags on every currently mapped page in an allocation. */
 bool vmm_protect(vmm_id_t id, vmm_prot_t new_prot);
 
-/* Resolve a page fault by materializing a lazy reserved allocation if possible. */
+/* Resolve a not-present fault by mapping the page that belongs to a lazy reservation, if policy allows it. */
 bool vmm_resolve_page_fault(uintptr_t addr);
 
-/* Query the allocation owning an address or an id. */
+/* Query the tracked allocation that owns a virtual address. */
 bool vmm_query(void* addr, struct vmm_info* out_info);
+
+/* Query an allocation by its stable VMM identifier. */
 bool vmm_query_id(vmm_id_t id, struct vmm_info* out_info);
 
+/* Base virtual address of the managed VMM window. */
 uintptr_t vmm_window_base(void);
-size_t    vmm_window_page_count(void);
-size_t    vmm_count(void);
+
+/* Size of the managed VMM window in pages. */
+size_t vmm_window_page_count(void);
+
+/* Number of live tracked allocations. */
+size_t vmm_count(void);

@@ -2,6 +2,14 @@
 
 #include <stdint.h>
 
+/*
+ * Lock-class metadata shared by spinlock debug builds.
+ *
+ * Ordering values are monotonically increasing acquisition classes. When
+ * CORE_LOCK_DEBUG is enabled, taking locks out of order or without the required
+ * irq-save discipline traps immediately.
+ */
+
 enum spinlock_order {
 	SPINLOCK_ORDER_NONE         = 0u,
 	SPINLOCK_ORDER_CPU_TOPOLOGY = 10u,
@@ -14,6 +22,7 @@ enum spinlock_order {
 	SPINLOCK_ORDER_KHEAP        = 70u,
 };
 
+/* Extra behavioral requirements that debug builds validate on lock acquisition. */
 enum spinlock_flags {
 	SPINLOCK_FLAG_NONE            = 0u,
 	SPINLOCK_FLAG_IRQSAVE         = 1u << 0,
