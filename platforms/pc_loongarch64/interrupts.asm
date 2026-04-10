@@ -4,7 +4,6 @@
 .global machine_error_entry
 .extern handle_exception
 .equ LOONGARCH64_EXCEPTION_FRAME_SIZE, 288
-.equ LOONGARCH64_EXCEPTION_META_SIZE, 24
 .equ LOONGARCH64_CSR_SAVE0, 0x30
 .equ LOONGARCH64_CSR_SAVE1, 0x31
 .equ LOONGARCH64_CSR_SAVE2, 0x32
@@ -44,19 +43,10 @@ exception_entry:
 	add.d $t1, $t0, $t1
 	bltu $sp, $t1, 0f
 	bgeu $sp, $t0, 0f
-	addi.d $sp, $sp, -LOONGARCH64_EXCEPTION_META_SIZE
-	st.d $r0, $sp, 0
 	b 1f
 0:
 	addi.d $sp, $t0, 0
-	addi.d $sp, $sp, -LOONGARCH64_EXCEPTION_META_SIZE
-	csrrd $t0, LOONGARCH64_CSR_SAVE0
-	st.d $t0, $sp, 0
 1:
-	csrrd $t0, LOONGARCH64_CSR_SAVE2
-	st.d $t0, $sp, 8
-	csrrd $t0, LOONGARCH64_CSR_SAVE3
-	st.d $t0, $sp, 16
 	addi.d $sp, $sp, -LOONGARCH64_EXCEPTION_FRAME_SIZE
 
 	st.d $r0, $sp, 0
@@ -72,9 +62,9 @@ exception_entry:
 	st.d $r9, $sp, 72
 	st.d $r10, $sp, 80
 	st.d $r11, $sp, 88
-	ld.d $t0, $sp, LOONGARCH64_EXCEPTION_FRAME_SIZE + 8
+	csrrd $t0, LOONGARCH64_CSR_SAVE2
 	st.d $t0, $sp, 96
-	ld.d $t0, $sp, LOONGARCH64_EXCEPTION_FRAME_SIZE + 16
+	csrrd $t0, LOONGARCH64_CSR_SAVE3
 	st.d $t0, $sp, 104
 	st.d $r14, $sp, 112
 	st.d $r15, $sp, 120
@@ -137,16 +127,7 @@ exception_entry:
 	ld.d $r13, $sp, 104
 	ld.d $r12, $sp, 96
 
-	addi.d $sp, $sp, LOONGARCH64_EXCEPTION_FRAME_SIZE
-	ld.d $t0, $sp, 0
-	beqz $t0, 2f
-	addi.d $sp, $t0, 0
-	b 3f
-2:
-	addi.d $sp, $sp, LOONGARCH64_EXCEPTION_META_SIZE
-3:
-	csrrd $t1, LOONGARCH64_CSR_SAVE3
-	csrrd $t0, LOONGARCH64_CSR_SAVE2
+	ld.d $sp, $sp, 24
 	ertn
 
 .balign 4096
