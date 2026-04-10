@@ -6,6 +6,34 @@ This project uses Meson to:
 - build a bootable Limine ISO image
 - build and run native Criterion tests
 
+## Code Layout
+
+The tree is split by role:
+
+- `base/`: freestanding leaf code with no HAL or boot dependencies
+- `core/`: reusable kernel services designed to stay testable in hosted mode
+- `kernel/`: integration and orchestration code that turns the core services into a running kernel
+- `platforms/<platform>/hal/`: platform-specific HAL implementations
+- `test/`: hosted tests and mocks used by those tests
+
+The practical distinction between `core` and `kernel` is:
+
+- `core` contains service-level logic such as locking, CPU state, scheduling, PMM, VMM, and heap management, it should expose behavior that can be exercised outside the live kernel by replacing platform-facing dependencies with mocks
+- `kernel` contains the code that assembles, sequences, and drives those services inside the real kernel, it is where long-lived orchestration and kernel-specific policy live
+
+The HAL split is:
+
+- `include/hal/` declares the contracts that isolate platform-specific operations
+- `platforms/<platform>/hal/` provides the concrete implementations of those contracts
+- `core` may include and call the HAL contracts, but it should not contain code that is itself tied to one concrete platform implementation
+
+Hosted testing works by linking `core` against mocks instead of the real platform HAL:
+
+- generic HAL mocks live in `test/mocks/hal/`
+- subsystem-specific mocks stay next to the tests that use them, such as the paging mock in `test/vmm/`
+
+That is how `core` can use HAL-defined operations while still remaining testable on a normal hosted system.
+
 ## Prerequisites
 
 Make sure these tools are available on your `PATH`:

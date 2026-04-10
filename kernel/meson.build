@@ -27,11 +27,6 @@ kernel_libk_sources = files(
 	'libk/stdio/puts.c',
 )
 
-kernel_memory_sources = files(
-	'src/memory/kheap_vmm.c',
-	'src/memory/vmm.c',
-)
-
 kernel_selftest_sources = files(
 	'test/selftest.c',
 	'test/selftests/cpu.c',
@@ -40,11 +35,12 @@ kernel_selftest_sources = files(
 	'test/selftests/kheap.c',
 )
 
-kernel_objs = base_sources + core_sources + kernel_format_sources + kernel_libk_sources + kernel_memory_sources + platform_kernel_objects + [
-	'src/boot.c',
-	'src/cpu_boot.c',
+kernel_objs = base_sources + core_sources + kernel_format_sources + kernel_libk_sources + platform_kernel_objects + [
+	'src/boot/boot.c',
+	'src/boot/cpu_boot.c',
 	'src/init.c',
-	'src/requests.c',
+	'src/kheap.c',
+	'src/boot/requests.c',
 ]
 if kernel_selftests
 	kernel_objs += kernel_selftest_sources

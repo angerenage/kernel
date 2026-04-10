@@ -15,24 +15,14 @@ base_test_lib = static_library(
 	install: false,
 )
 
-hosted_test_sources = files(
-	'hosted/cpu.c',
-	'hosted/interrupts.c',
+hal_mock_sources = files(
+	'mocks/hal/cpu.c',
+	'mocks/hal/interrupts.c',
 )
 
 core_test_lib = static_library(
 	'core_test_lib',
-	base_sources + core_kernel_sources + hosted_test_sources,
-	include_directories: test_inc,
-	native: true,
-	c_args: test_common_c_args,
-	link_args: test_common_link_args,
-	install: false,
-)
-
-kernel_test_lib = static_library(
-	'kernel_test_lib',
-	base_sources + core_sources + hosted_test_sources + files('../kernel/src/memory/vmm.c'),
+	base_sources + core_sources + hal_mock_sources,
 	include_directories: test_inc,
 	native: true,
 	c_args: test_common_c_args,
@@ -101,7 +91,7 @@ test_suites = [
 			'vmm/mock_paging.c',
 			'vmm/basic.c',
 		),
-		'link_with': kernel_test_lib,
+		'link_with': core_test_lib,
 		'suites': ['unit', 'memory'],
 	},
 ]

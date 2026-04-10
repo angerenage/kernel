@@ -26,7 +26,6 @@ static const size_t kheap_sentinel_size  = 48u;
 static const size_t kheap_min_block_size = 64u;
 
 static struct kheap_block* free_list;
-static kheap_grow_fn       grow_callback;
 static size_t              total_bytes;
 static size_t              free_bytes;
 static bool                initialized;
@@ -146,13 +145,11 @@ static bool grow_heap(size_t min_block_size) {
 	size_t request_bytes;
 	size_t grow_pages;
 
-	if (!grow_callback) return false;
-
 	request_bytes = min_block_size + 2u * kheap_sentinel_size;
 	grow_pages    = (request_bytes + PMM_PAGE_SIZE - 1u) / PMM_PAGE_SIZE;
 	if (grow_pages < KHEAP_DEFAULT_GROW_PAGES) grow_pages = KHEAP_DEFAULT_GROW_PAGES;
 
-	if (!grow_callback(grow_pages, &region)) return false;
+	if (!kheap_grow_pages(grow_pages, &region)) return false;
 	spinlock_lock(&kheap_lock);
 	if (!add_arena_locked(region, grow_pages * PMM_PAGE_SIZE)) {
 		spinlock_unlock(&kheap_lock);
@@ -173,18 +170,12 @@ static struct kheap_block* find_fit_locked(size_t block_bytes) {
 	return NULL;
 }
 
-bool kheap_init_with_grower(kheap_grow_fn grow_fn) {
+bool kheap_init(void) {
 	spinlock_lock(&kheap_lock);
-	free_list     = NULL;
-	grow_callback = grow_fn;
-	total_bytes   = 0;
-	free_bytes    = 0;
-	initialized   = false;
-
-	if (!grow_callback) {
-		spinlock_unlock(&kheap_lock);
-		return false;
-	}
+	free_list   = NULL;
+	total_bytes = 0;
+	free_bytes  = 0;
+	initialized = false;
 	spinlock_unlock(&kheap_lock);
 
 	if (!grow_heap(kheap_min_block_size)) return false;

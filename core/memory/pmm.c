@@ -41,6 +41,31 @@ static size_t            total_page_count    = 0;
 static size_t            free_page_count     = 0;
 static bool              initialized         = false;
 static struct spinlock   pmm_lock = SPINLOCK_INIT_CLASS("pmm_lock", SPINLOCK_ORDER_PMM, SPINLOCK_FLAG_ALLOW_EXCEPTION);
+struct mm_boot_info      boot_info;
+
+const char* mem_range_type_str(enum mem_range_type type) {
+	switch (type) {
+	case MEM_RANGE_USABLE:
+		return "usable";
+	case MEM_RANGE_RESERVED:
+		return "reserved";
+	case MEM_RANGE_ACPI_RECLAIMABLE:
+		return "acpi_reclaimable";
+	case MEM_RANGE_ACPI_NVS:
+		return "acpi_nvs";
+	case MEM_RANGE_BAD_MEMORY:
+		return "bad_memory";
+	case MEM_RANGE_BOOTLOADER_RECLAIMABLE:
+		return "bootloader_reclaimable";
+	case MEM_RANGE_KERNEL_AND_MODULES:
+		return "kernel_and_modules";
+	case MEM_RANGE_FRAMEBUFFER:
+		return "framebuffer";
+	case MEM_RANGE_OTHER:
+		return "other";
+	}
+	return "unknown";
+}
 
 static inline void* hhdm_phys_to_virt(uintptr_t phys) {
 	return (void*)(uintptr_t)(phys + boot_info.direct_map_offset);
