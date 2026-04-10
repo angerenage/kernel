@@ -10,13 +10,14 @@
 #include <hal/serial.h>
 #include <kernel/boot.h>
 #include <kernel/cpu_boot.h>
-#if KERNEL_SELFTESTS_ENABLED
-#include <kernel/selftest.h>
-#endif
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+
+#if KERNEL_SELFTESTS_ENABLED
+#include "../test/selftest.h"
+#endif
 
 extern uint8_t stack_bottom[];
 extern uint8_t stack_top[];

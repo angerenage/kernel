@@ -1,6 +1,7 @@
 #include <core/cpu.h>
 #include <kernel/cpu_boot.h>
-#include <kernel/selftest.h>
+
+#include "../selftest.h"
 
 static void kernel_selftest_cpu_topology_is_consistent(struct kernel_selftest_context* ctx) {
 	struct cpu_topology* topology = cpu_topology_get();

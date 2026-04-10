@@ -1,9 +1,10 @@
 #include <core/mm.h>
 #include <core/pmm.h>
-#include <kernel/selftest.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include "../selftest.h"
 
 static inline volatile uint64_t* kernel_selftest_pmm_phys_to_virt(uintptr_t phys) {
 	return (volatile uint64_t*)(uintptr_t)(phys + boot_info.direct_map_offset);

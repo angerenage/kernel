@@ -1,9 +1,10 @@
 #include <core/pmm.h>
 #include <core/vmm.h>
 #include <hal/paging.h>
-#include <kernel/selftest.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include "../selftest.h"
 
 static void kernel_selftest_vmm_allocates_queries_and_frees_mapped_ranges(struct kernel_selftest_context* ctx) {
 	struct vmm_alloc_params params = {

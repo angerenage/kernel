@@ -1,5 +1,6 @@
+#include "selftest.h"
+
 #include <kernel/boot.h>
-#include <kernel/selftest.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>

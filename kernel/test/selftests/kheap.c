@@ -1,8 +1,9 @@
 #include <core/kheap.h>
-#include <kernel/selftest.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include "../selftest.h"
 
 static void kernel_selftest_kheap_allocates_and_restores(struct kernel_selftest_context* ctx) {
 	size_t free_before;
