@@ -75,7 +75,7 @@ Test(sched, init_creates_per_cpu_idle_threads) {
 	reset_test_state();
 }
 
-Test(sched, run_queue_is_fifo_and_falls_back_to_idle) {
+Test(sched, runnable_threads_yield_in_fifo_order) {
 	const struct thread_create_params first_params = {
 		.name              = "first",
 		.entry             = sched_test_thread_entry,
@@ -94,34 +94,106 @@ Test(sched, run_queue_is_fifo_and_falls_back_to_idle) {
 		.preferred_cpu     = NULL,
 		.detached          = false,
 	};
-	struct thread  first;
-	struct thread  second;
-	struct thread* next;
+	struct thread first;
+	struct thread second;
 
 	init_bound_bootstrap_cpu();
 	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
 
 	cr_assert(thread_init(&first, &first_params), "thread_init failed for first thread");
 	cr_assert(thread_init(&second, &second_params), "thread_init failed for second thread");
 
-	cr_assert(sched_enqueue(cpu_current(), &first), "failed to enqueue first thread");
-	cr_assert(sched_enqueue(cpu_current(), &second), "failed to enqueue second thread");
+	cr_assert(sched_make_runnable(&first), "failed to make first thread runnable");
+	cr_assert(sched_make_runnable(&second), "failed to make second thread runnable");
 	cr_assert_eq(sched_run_queue_depth(cpu_current()), 2u, "run queue depth mismatch after enqueue");
 
-	next = sched_dequeue_next(cpu_current());
-	cr_assert_eq(next, &first, "scheduler did not preserve FIFO order for first dequeue");
-	cr_assert_eq(next->state, THREAD_STATE_RUNNING, "first dequeued thread not marked running");
-	cr_assert_eq(next->cpu, cpu_current(), "first dequeued thread bound to wrong CPU");
-	cr_assert_eq(sched_run_queue_depth(cpu_current()), 1u, "run queue depth mismatch after first dequeue");
+	sched_yield();
+	cr_assert_eq(sched_current_thread(), &first, "idle CPU should dispatch first runnable thread");
+	cr_assert_eq(first.state, THREAD_STATE_RUNNING, "first thread should be running after first yield");
+	cr_assert_eq(first.cpu, cpu_current(), "first thread bound to wrong CPU");
+	cr_assert_eq(sched_run_queue_depth(cpu_current()), 1u, "run queue depth mismatch after first dispatch");
 
-	next = sched_dequeue_next(cpu_current());
-	cr_assert_eq(next, &second, "scheduler did not preserve FIFO order for second dequeue");
-	cr_assert_eq(next->state, THREAD_STATE_RUNNING, "second dequeued thread not marked running");
-	cr_assert_eq(sched_run_queue_depth(cpu_current()), 0u, "run queue depth mismatch after second dequeue");
+	sched_yield();
+	cr_assert_eq(sched_current_thread(), &second, "yield should advance to the next runnable thread");
+	cr_assert_eq(second.state, THREAD_STATE_RUNNING, "second thread should be running after second yield");
+	cr_assert_eq(sched_run_queue_depth(cpu_current()), 1u, "run queue depth mismatch after second dispatch");
+	cr_assert(thread_is_queued(&first), "first thread should have been re-queued behind second");
 
-	next = sched_dequeue_next(cpu_current());
-	cr_assert_eq(next, sched_idle_thread(cpu_current()), "empty run queue should fall back to idle thread");
-	cr_assert(!sched_enqueue(cpu_current(), next), "idle thread must not be enqueued");
+	cr_assert(sched_remove_runnable(&first), "sched_remove_runnable should unlink the queued thread");
+	cr_assert(!thread_is_queued(&first), "removed runnable thread should no longer be queued");
+	cr_assert_eq(sched_run_queue_depth(cpu_current()), 0u, "run queue should be empty after removing first");
+
+	sched_yield();
+	cr_assert_eq(sched_current_thread(), &second, "single runnable thread should keep the CPU after yielding");
+	cr_assert_eq(second.state, THREAD_STATE_RUNNING, "second thread should still be running");
+	cr_assert_eq(sched_run_queue_depth(cpu_current()), 0u, "single-thread yield should leave run queue empty");
+	cr_assert(!sched_make_runnable(sched_idle_thread(cpu_current())), "idle thread must not be runnable");
+
+	reset_test_state();
+}
+
+Test(sched, block_and_wake_preserve_wait_queue_fifo_order) {
+	const struct thread_create_params first_params = {
+		.name              = "first_waiter",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x320000u,
+		.kernel_stack_top  = 0x324000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	const struct thread_create_params second_params = {
+		.name              = "second_waiter",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x330000u,
+		.kernel_stack_top  = 0x334000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	struct thread            first;
+	struct thread            second;
+	struct thread_wait_queue wait_queue;
+
+	init_bound_bootstrap_cpu();
+	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
+	thread_wait_queue_init(&wait_queue);
+
+	cr_assert(thread_init(&first, &first_params), "thread_init failed for first waiter");
+	cr_assert(thread_init(&second, &second_params), "thread_init failed for second waiter");
+	cr_assert(sched_make_runnable(&first), "failed to make first waiter runnable");
+	cr_assert(sched_make_runnable(&second), "failed to make second waiter runnable");
+
+	sched_yield();
+	cr_assert_eq(sched_current_thread(), &first, "first waiter should run first");
+
+	sched_block_current(&wait_queue, THREAD_BLOCK_JOIN);
+	cr_assert_eq(first.state, THREAD_STATE_BLOCKED, "first waiter should be blocked");
+	cr_assert_eq(first.block_reason, THREAD_BLOCK_JOIN, "first waiter block reason mismatch");
+	cr_assert_eq(thread_wait_queue_depth(&wait_queue), 1u, "wait queue should contain first waiter");
+	cr_assert_eq(sched_current_thread(), &second, "second waiter should be dispatched next");
+
+	sched_block_current(&wait_queue, THREAD_BLOCK_SLEEP);
+	cr_assert_eq(second.state, THREAD_STATE_BLOCKED, "second waiter should be blocked");
+	cr_assert_eq(second.block_reason, THREAD_BLOCK_SLEEP, "second waiter block reason mismatch");
+	cr_assert_eq(thread_wait_queue_depth(&wait_queue), 2u, "wait queue should contain both waiters");
+	cr_assert_eq(
+		sched_current_thread(), sched_idle_thread(cpu_current()), "idle thread should run with no runnable work");
+	cr_assert_eq(sched_run_queue_depth(cpu_current()), 0u, "run queue should be empty while both waiters sleep");
+
+	cr_assert_eq(sched_wake_all(&wait_queue), 2u, "sched_wake_all should wake both waiters");
+	cr_assert_eq(thread_wait_queue_depth(&wait_queue), 0u, "wait queue should be empty after wake_all");
+	cr_assert_eq(sched_run_queue_depth(cpu_current()), 2u, "both waiters should be runnable after wake_all");
+	cr_assert_eq(first.state, THREAD_STATE_READY, "first waiter should be READY after wake");
+	cr_assert_eq(second.state, THREAD_STATE_READY, "second waiter should be READY after wake");
+
+	sched_yield();
+	cr_assert_eq(sched_current_thread(), &first, "wake_all should preserve FIFO order for first waiter");
+
+	sched_yield();
+	cr_assert_eq(sched_current_thread(), &second, "yield should rotate to the second waiter");
 
 	reset_test_state();
 }
