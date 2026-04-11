@@ -47,6 +47,13 @@ test_suites = [
 		'suites': ['unit', 'core'],
 	},
 	{
+		'name': 'thread',
+		'sources': files(
+			'core/thread_test.c',
+		),
+		'suites': ['unit', 'core'],
+	},
+	{
 		'name': 'cpu_spinlock',
 		'sources': files(
 			'core/cpu_spinlock_test.c',

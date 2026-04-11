@@ -18,6 +18,10 @@ static void reset_test_state(void) {
 	hal_cpu_local_bind(NULL);
 }
 
+static void sched_test_thread_entry(void* arg) {
+	(void)arg;
+}
+
 Test(sched, init_creates_per_cpu_idle_threads) {
 	const struct cpu_init_info init_info[] = {
 		{
@@ -72,6 +76,24 @@ Test(sched, init_creates_per_cpu_idle_threads) {
 }
 
 Test(sched, run_queue_is_fifo_and_falls_back_to_idle) {
+	const struct thread_create_params first_params = {
+		.name              = "first",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x300000u,
+		.kernel_stack_top  = 0x304000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	const struct thread_create_params second_params = {
+		.name              = "second",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x310000u,
+		.kernel_stack_top  = 0x314000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
 	struct thread  first;
 	struct thread  second;
 	struct thread* next;
@@ -79,8 +101,8 @@ Test(sched, run_queue_is_fifo_and_falls_back_to_idle) {
 	init_bound_bootstrap_cpu();
 	cr_assert(sched_init(), "sched_init failed");
 
-	thread_init(&first, "first", 0x300000u, 0x304000u);
-	thread_init(&second, "second", 0x310000u, 0x314000u);
+	cr_assert(thread_init(&first, &first_params), "thread_init failed for first thread");
+	cr_assert(thread_init(&second, &second_params), "thread_init failed for second thread");
 
 	cr_assert(sched_enqueue(cpu_current(), &first), "failed to enqueue first thread");
 	cr_assert(sched_enqueue(cpu_current(), &second), "failed to enqueue second thread");
