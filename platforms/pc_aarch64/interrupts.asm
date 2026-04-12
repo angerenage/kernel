@@ -14,8 +14,8 @@
 
 .macro VECTOR_ENTRY index
 aarch64_vector_\index:
-	msr tpidr_el1, x16
-	msr tpidrro_el0, x17
+	sub sp, sp, #16
+	stp x16, x17, [sp]
 
 	mov x17, sp
 	adrp x16, aarch64_exception_stack_bottom
@@ -27,7 +27,7 @@ aarch64_vector_\index:
 	cmp x17, x16
 	b.hs 0f
 	sub sp, sp, #AARCH64_EXCEPTION_META_SIZE
-	str xzr, [sp]
+	str x17, [sp]
 	b 1f
 0:
 	adrp x16, aarch64_exception_stack_top
@@ -46,10 +46,10 @@ aarch64_vector_\index:
 	stp x10, x11, [sp, #80]
 	stp x12, x13, [sp, #96]
 	stp x14, x15, [sp, #112]
-	mrs x16, tpidr_el1
+	ldr x16, [sp, #AARCH64_EXCEPTION_FRAME_SIZE]
+	ldp x16, x17, [x16]
 	str x16, [sp, #128]
-	mrs x16, tpidrro_el0
-	str x16, [sp, #136]
+	str x17, [sp, #136]
 	stp x18, x19, [sp, #144]
 	stp x20, x21, [sp, #160]
 	stp x22, x23, [sp, #176]
@@ -93,10 +93,9 @@ aarch64_vector_\index:
 
 	add sp, sp, #AARCH64_EXCEPTION_FRAME_SIZE
 	ldr x16, [sp]
-	add sp, sp, #AARCH64_EXCEPTION_META_SIZE
-	cbz x16, 2f
 	mov sp, x16
-2:
+	ldp x16, x17, [sp]
+	add sp, sp, #16
 	eret
 .endm
 
