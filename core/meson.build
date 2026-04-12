@@ -4,6 +4,7 @@ core_sources = files(
 	'sched.c',
 	'spinlock.c',
 	'thread.c',
+	'kthread.c',
 	'memory/kheap.c',
 	'memory/pmm.c',
 	'memory/vaddr_alloc.c',

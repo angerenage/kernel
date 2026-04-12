@@ -46,6 +46,14 @@ test_suites = [
 		),
 		'suites': ['unit', 'core'],
 	},
+
+	{
+		'name': 'kthread',
+		'sources': files(
+			'core/kthread_test.c',
+		),
+		'suites': ['unit', 'core'],
+	},
 	{
 		'name': 'thread',
 		'sources': files(
