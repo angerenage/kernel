@@ -255,34 +255,51 @@ void sched_yield(void) {
 	sched_dispatch_next(cpu);
 }
 
-void sched_block_current(struct thread_wait_queue* queue, enum thread_block_reason reason) {
-	struct irq_state irq_state;
-	struct cpu*      cpu = cpu_current();
-	struct thread*   current;
-	bool             queued;
+bool sched_block_current_locked(struct thread_wait_queue* queue, enum thread_block_reason reason,
+                                struct irq_state queue_irq_state) {
+	struct cpu*    cpu = cpu_current();
+	struct thread* current;
+	bool           queued;
 
-	if (queue == NULL || cpu == NULL) return;
+	if (queue == NULL) return false;
+	if (cpu == NULL) {
+		spinlock_unlock_irqrestore(&queue->lock, queue_irq_state);
+		return false;
+	}
 
 	current = cpu->current_thread;
 	if (current == NULL) {
+		spinlock_unlock_irqrestore(&queue->lock, queue_irq_state);
 		(void)sched_start_cpu(cpu);
-		return;
+		return false;
 	}
-	if (thread_is_idle(current) || thread_is_terminated(current)) return;
+	if (thread_is_idle(current) || thread_is_terminated(current)) {
+		spinlock_unlock_irqrestore(&queue->lock, queue_irq_state);
+		return false;
+	}
 
 	if (reason == THREAD_BLOCK_NONE) reason = THREAD_BLOCK_WAIT_QUEUE;
 
 	thread_mark_blocked(current, reason);
-	irq_state = spinlock_lock_irqsave(&queue->lock);
-	queued    = sched_wait_queue_enqueue_locked(queue, current);
-	spinlock_unlock_irqrestore(&queue->lock, irq_state);
+	queued = sched_wait_queue_enqueue_locked(queue, current);
+	spinlock_unlock_irqrestore(&queue->lock, queue_irq_state);
 
 	if (!queued) {
 		thread_mark_running(current, cpu);
-		return;
+		return false;
 	}
 
 	sched_dispatch_next(cpu);
+	return true;
+}
+
+void sched_block_current(struct thread_wait_queue* queue, enum thread_block_reason reason) {
+	struct irq_state irq_state;
+
+	if (queue == NULL) return;
+
+	irq_state = spinlock_lock_irqsave(&queue->lock);
+	(void)sched_block_current_locked(queue, reason, irq_state);
 }
 
 bool sched_wake_one(struct thread_wait_queue* queue) {

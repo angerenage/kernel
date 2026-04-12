@@ -38,6 +38,14 @@ void sched_yield(void);
 /* Block the current thread on queue until another CPU or event source wakes it. */
 void sched_block_current(struct thread_wait_queue* queue, enum thread_block_reason reason);
 
+/*
+ * Block the current thread on queue while the caller already holds queue->lock
+ * via spinlock_lock_irqsave(). The caller must pass the saved irq state for
+ * queue->lock so the scheduler can enqueue atomically before releasing it.
+ */
+bool sched_block_current_locked(struct thread_wait_queue* queue, enum thread_block_reason reason,
+                                struct irq_state queue_irq_state);
+
 /* Wake one blocked waiter from queue and make it runnable again. */
 bool sched_wake_one(struct thread_wait_queue* queue);
 

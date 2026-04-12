@@ -1,6 +1,7 @@
 core_sources = files(
 	'cpu.c',
 	'irq.c',
+	'mutex.c',
 	'sched.c',
 	'spinlock.c',
 	'thread.c',

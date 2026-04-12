@@ -40,6 +40,13 @@ test_suites = [
 		'suites': ['unit', 'base'],
 	},
 	{
+		'name': 'mutex',
+		'sources': files(
+			'core/mutex_test.c',
+		),
+		'suites': ['unit', 'core'],
+	},
+	{
 		'name': 'sched',
 		'sources': files(
 			'core/sched_test.c',

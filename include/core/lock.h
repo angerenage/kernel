@@ -13,6 +13,7 @@
 enum spinlock_order {
 	SPINLOCK_ORDER_NONE         = 0u,
 	SPINLOCK_ORDER_CPU_TOPOLOGY = 10u,
+	SPINLOCK_ORDER_MUTEX        = 12u,
 	SPINLOCK_ORDER_SCHED        = 15u,
 	SPINLOCK_ORDER_CLOCK        = 20u,
 	SPINLOCK_ORDER_VMM          = 30u,
