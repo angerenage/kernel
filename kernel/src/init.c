@@ -22,8 +22,8 @@
 extern uint8_t stack_bottom[];
 extern uint8_t stack_top[];
 
-static __attribute__((noreturn))
-void boot_fail(const char* message) {
+__attribute__((noreturn))
+static void boot_fail(const char* message) {
 	printf("%s\n", message);
 	hcf();
 }

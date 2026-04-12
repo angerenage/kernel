@@ -45,10 +45,12 @@ bool sched_wake_one(struct thread_wait_queue* queue);
 size_t sched_wake_all(struct thread_wait_queue* queue);
 
 /* Publish the current thread's final exit status, wake joiners, and never return. */
-void sched_exit_current(thread_exit_code_t exit_code) __attribute__((noreturn));
+__attribute__((noreturn))
+void sched_exit_current(thread_exit_code_t exit_code);
 
 /* Return the current run-queue depth for a CPU. */
 size_t sched_run_queue_depth(struct cpu* cpu);
 
 /* Enter the CPU's idle loop and never return. */
-void sched_enter_idle(void) __attribute__((noreturn));
+__attribute__((noreturn))
+void sched_enter_idle(void);
