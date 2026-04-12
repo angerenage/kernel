@@ -40,9 +40,9 @@ Test(thread, init_populates_extended_descriptor_fields) {
 	cr_assert_eq(thread.block_reason, THREAD_BLOCK_NONE, "new thread should not start blocked");
 	cr_assert_eq(thread.kernel_stack_base, params.kernel_stack_base, "stack base mismatch");
 	cr_assert_eq(thread.kernel_stack_top, params.kernel_stack_top, "stack top mismatch");
-	cr_assert_eq(
-		thread.context.instruction_pointer, (uintptr_t)thread_test_entry, "initial instruction pointer mismatch");
-	cr_assert_eq(thread.context.stack_pointer, params.kernel_stack_top, "initial stack pointer mismatch");
+	cr_assert_neq(thread.context.instruction_pointer, 0u, "initial instruction pointer should be populated");
+	cr_assert(thread.context.stack_pointer <= params.kernel_stack_top, "initial stack pointer should stay in range");
+	cr_assert(thread.context.stack_pointer > params.kernel_stack_base, "initial stack pointer should stay in range");
 	cr_assert_eq(thread.entry, thread_test_entry, "entry pointer mismatch");
 	cr_assert_eq(thread.arg, &arg, "thread arg mismatch");
 	cr_assert(thread_is_joinable(&thread), "fresh non-detached thread should be joinable");

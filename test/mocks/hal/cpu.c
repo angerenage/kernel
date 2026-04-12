@@ -1,4 +1,5 @@
 #include <hal/cpu.h>
+#include <stddef.h>
 
 static _Thread_local void* hosted_cpu_local_ptr;
 
@@ -12,6 +13,23 @@ void* hal_cpu_local_current(void) {
 
 void hal_cpu_local_bind(void* ptr) {
 	hosted_cpu_local_ptr = ptr;
+}
+
+bool hal_cpu_thread_context_init(struct thread_context* context, uintptr_t stack_base, uintptr_t stack_top,
+                                 uintptr_t entry_pc, uintptr_t entry_arg) {
+	if (context == NULL || entry_pc == 0u || stack_top <= stack_base) return false;
+
+	*context = (struct thread_context){
+		.instruction_pointer = entry_pc,
+		.stack_pointer       = stack_top,
+	};
+	context->spill[0] = entry_arg;
+	return true;
+}
+
+void hal_cpu_context_switch(struct thread_context* current, const struct thread_context* next) {
+	(void)current;
+	(void)next;
 }
 
 void hal_cpu_park(void) {

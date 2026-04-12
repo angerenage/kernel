@@ -1,6 +1,7 @@
 #pragma once
 
 #include <core/spinlock.h>
+#include <hal/cpu.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -41,12 +42,6 @@ enum thread_block_reason {
 	THREAD_BLOCK_JOIN,
 	THREAD_BLOCK_SLEEP,
 	THREAD_BLOCK_PARKED,
-};
-
-/* Execution context fields tracked by scheduler bootstrap/switch code. */
-struct thread_context {
-	uintptr_t instruction_pointer;
-	uintptr_t stack_pointer;
 };
 
 /* Parameters used to initialize a non-idle thread descriptor. */

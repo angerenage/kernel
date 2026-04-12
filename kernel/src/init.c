@@ -1,5 +1,6 @@
 #include <core/cpu.h>
 #include <core/kheap.h>
+#include <core/kthread.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/sched.h>
@@ -29,12 +30,29 @@ static void boot_fail(const char* message) {
 }
 
 #define KERNEL_TIMER_HZ 100u
+#define KERNEL_BOOTSTRAP_THREAD_STACK_PAGES 4u
 
 static volatile uint64_t boot_timer_ticks;
 static uint64_t          boot_timer_origin_ticks;
 static uint64_t          boot_timer_reported_seconds;
 static uint32_t          boot_timer_frequency_hz;
 static bool              boot_timer_started;
+
+static void kernel_bootstrap_worker_entry(void* arg) {
+	(void)arg;
+
+	printf("kernel: bootstrap worker running on cpu%zu\n", cpu_index());
+
+	void* block = kmalloc(128u);
+	if (block == NULL) {
+		printf("kernel: bootstrap worker heap allocation failed\n");
+		return;
+	}
+
+	printf("kernel: bootstrap worker allocated 128 bytes at %p\n", block);
+	kfree(block);
+	printf("kernel: bootstrap worker completed\n");
+}
 
 static void boot_clock_tick(void* ctx) {
 	(void)ctx;
@@ -136,6 +154,61 @@ static void kernel_init_memory(const struct mem_range* memory_map, size_t range_
 	printf("kernel: kheap initialized with %zu/%zu bytes free\n", kheap_free_bytes(), kheap_total_bytes());
 }
 
+static void kernel_run_bootstrap_worker(void) {
+	struct vmm_alloc_params stack_params = {
+		.page_count  = KERNEL_BOOTSTRAP_THREAD_STACK_PAGES,
+		.align_pages = 1u,
+		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_GLOBAL,
+		.kind        = VMM_KIND_STACK,
+		.guard_pages = VMM_STACK_DEFAULT_GUARD_PAGES,
+		.map_flags   = 0u,
+	};
+	struct thread_create_params thread_params;
+	struct thread               worker;
+	struct cpu*                 cpu      = cpu_current();
+	vmm_id_t                    stack_id = VMM_ID_INVALID;
+	void*                       stack_base;
+
+	if (!sched_start_cpu(cpu)) {
+		boot_fail("kernel: sched_start_cpu failed for bootstrap worker");
+	}
+
+	if (!vmm_alloc(&stack_params, &stack_id, &stack_base)) {
+		boot_fail("kernel: bootstrap worker stack allocation failed");
+	}
+
+	thread_params = (struct thread_create_params){
+		.name              = "bootstrap/worker",
+		.entry             = kernel_bootstrap_worker_entry,
+		.arg               = NULL,
+		.kernel_stack_base = (uintptr_t)stack_base,
+		.kernel_stack_top  = (uintptr_t)stack_base + KERNEL_BOOTSTRAP_THREAD_STACK_PAGES * (uintptr_t)PMM_PAGE_SIZE,
+		.preferred_cpu     = cpu,
+		.detached          = false,
+	};
+
+	if (!kthread_create(&worker, &thread_params)) {
+		printf("kernel: runtime thread bootstrap not implemented on this platform yet\n");
+		(void)vmm_free(stack_id);
+		return;
+	}
+	if (!kthread_start(&worker)) {
+		boot_fail("kernel: bootstrap worker failed to start");
+	}
+
+	printf("kernel: starting bootstrap worker on cpu%zu\n", cpu->index);
+	sched_yield();
+
+	if (!thread_is_terminated(&worker)) {
+		boot_fail("kernel: bootstrap worker returned without exiting");
+	}
+	printf("kernel: bootstrap worker exited with code %llu\n", (unsigned long long)worker.exit_code);
+
+	if (!vmm_free(stack_id)) {
+		boot_fail("kernel: bootstrap worker stack reclaim failed");
+	}
+}
+
 __attribute__((noreturn))
 void kernel_main(void) {
 	size_t                           memory_map_count = 0u;
@@ -182,6 +255,7 @@ void kernel_main(void) {
 		boot_fail("kernel: kernel_cpu_boot_start_aps failed");
 	}
 	printf("kernel: cpu topology %zu present, %zu online\n", cpu_count(), cpu_online_count());
+	kernel_run_bootstrap_worker();
 #if KERNEL_SELFTESTS_ENABLED
 	if (kernel_selftests_requested() && !kernel_selftests_run()) {
 		boot_fail("kernel: selftests failed");

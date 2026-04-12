@@ -1,3 +1,4 @@
+#include <core/sched.h>
 #include <core/thread.h>
 
 static void thread_reset_links(struct thread* thread) {
@@ -6,6 +7,14 @@ static void thread_reset_links(struct thread* thread) {
 	thread->run_queue_next  = NULL;
 	thread->wait_queue_next = NULL;
 	thread->flags &= ~THREAD_FLAG_QUEUED;
+}
+
+__attribute__((noreturn))
+static void thread_entry_bootstrap(void* ctx) {
+	struct thread* thread = (struct thread*)ctx;
+
+	if (thread != NULL && thread->entry != NULL) thread->entry(thread->arg);
+	sched_exit_current(0u);
 }
 
 bool thread_init(struct thread* thread, const struct thread_create_params* params) {
@@ -33,7 +42,11 @@ bool thread_init(struct thread* thread, const struct thread_create_params* param
 		.wait_queue_next = NULL,
 	};
 	thread_wait_queue_init(&thread->join_wait_queue);
-	return true;
+	return hal_cpu_thread_context_init(&thread->context,
+	                                   params->kernel_stack_base,
+	                                   params->kernel_stack_top,
+	                                   (uintptr_t)thread_entry_bootstrap,
+	                                   (uintptr_t)thread);
 }
 
 void thread_init_idle(struct thread* thread, struct cpu* cpu, const char* name) {

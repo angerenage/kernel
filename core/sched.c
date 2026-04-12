@@ -129,10 +129,22 @@ static struct thread* sched_select_next(struct cpu* cpu) {
 }
 
 static void sched_dispatch_next(struct cpu* cpu) {
-	struct thread* next = sched_select_next(cpu);
+	struct thread* next;
+	struct thread* previous;
 
-	if (cpu == NULL || next == NULL) return;
+	if (cpu == NULL) return;
+
+	previous = cpu->current_thread;
+	next     = sched_select_next(cpu);
+	if (next == NULL) return;
+
+	if (previous == next) {
+		sched_set_current(cpu, next);
+		return;
+	}
+
 	sched_set_current(cpu, next);
+	if (previous != NULL) hal_cpu_context_switch(&previous->context, &next->context);
 }
 
 static bool sched_make_runnable_on_cpu(struct cpu* cpu, struct thread* thread, bool allow_current) {
@@ -347,6 +359,11 @@ void sched_enter_idle(void) {
 	}
 
 	for (;;) {
+		if (sched_run_queue_depth(cpu) != 0u) {
+			sched_yield();
+			continue;
+		}
+
 		hal_cpu_park();
 	}
 }
