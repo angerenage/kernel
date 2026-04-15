@@ -1,6 +1,7 @@
 .section .text
 .global exception_vectors
 .extern handle_exception
+.extern aarch64_maybe_preempt_on_interrupt_exit
 .extern aarch64_exception_stack_bottom
 .extern aarch64_exception_stack_top
 
@@ -72,6 +73,7 @@ aarch64_vector_\index:
 
 	mov x0, sp
 	bl handle_exception
+	bl aarch64_maybe_preempt_on_interrupt_exit
 
 	ldp x0, x1, [sp, #0]
 	ldp x2, x3, [sp, #16]

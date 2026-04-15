@@ -1,4 +1,5 @@
 #include <core/cpu.h>
+#include <core/sched.h>
 #include <core/vmm.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
@@ -227,6 +228,10 @@ static const char* abort_target_el(uint64_t ec) {
 	default:
 		return "unknown EL";
 	}
+}
+
+void aarch64_maybe_preempt_on_interrupt_exit(void) {
+	(void)sched_handle_interrupt_exit();
 }
 
 void handle_exception(const struct exception_frame* frame) {

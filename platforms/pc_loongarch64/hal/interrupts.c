@@ -1,4 +1,5 @@
 #include <core/cpu.h>
+#include <core/sched.h>
 #include <core/vmm.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
@@ -190,6 +191,10 @@ static const char* ecode_name(uint64_t ecode, uint64_t esubcode) {
 
 static bool is_page_invalid_exception(uint64_t ecode) {
 	return ecode >= 0x1u && ecode <= 0x3u;
+}
+
+void loongarch64_maybe_preempt_on_interrupt_exit(void) {
+	(void)sched_handle_interrupt_exit();
 }
 
 void handle_exception(const struct exception_frame* frame) {

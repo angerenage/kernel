@@ -1,4 +1,5 @@
 #include <core/cpu.h>
+#include <core/sched.h>
 #include <core/vmm.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
@@ -134,6 +135,10 @@ static const char* exception_name(uint64_t code) {
 
 static bool is_page_fault_exception(uint64_t code) {
 	return code == 12u || code == 13u || code == 15u;
+}
+
+void riscv64_maybe_preempt_on_interrupt_exit(void) {
+	(void)sched_handle_interrupt_exit();
 }
 
 void handle_exception(const struct exception_frame* frame) {

@@ -3,6 +3,7 @@
 .global tlb_refill_entry
 .global machine_error_entry
 .extern handle_exception
+.extern loongarch64_maybe_preempt_on_interrupt_exit
 .equ LOONGARCH64_EXCEPTION_FRAME_SIZE, 288
 .equ LOONGARCH64_CSR_SAVE0, 0x30
 .equ LOONGARCH64_CSR_SAVE1, 0x31
@@ -95,6 +96,7 @@ exception_entry:
 
 	addi.d $a0, $sp, 0
 	bl handle_exception
+	bl loongarch64_maybe_preempt_on_interrupt_exit
 
 	ld.d $r1, $sp, 8
 	ld.d $r2, $sp, 16

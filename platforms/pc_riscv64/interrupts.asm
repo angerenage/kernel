@@ -1,6 +1,7 @@
 .section .text
 .global exception_entry
 .extern handle_exception
+.extern riscv64_maybe_preempt_on_interrupt_exit
 .extern riscv64_exception_entry_state
 .extern riscv64_exception_stack_bottom
 .extern riscv64_exception_stack_top
@@ -88,6 +89,7 @@ exception_entry:
 
 	mv a0, sp
 	call handle_exception
+	call riscv64_maybe_preempt_on_interrupt_exit
 
 	ld ra, 0(sp)
 	ld gp, 16(sp)

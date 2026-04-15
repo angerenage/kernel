@@ -1,4 +1,5 @@
 #include <core/cpu.h>
+#include <core/sched.h>
 #include <core/vmm.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
@@ -237,6 +238,10 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 		       (unsigned long long)x86_tss[cpu->index].ist1);
 	}
 	return true;
+}
+
+void x86_64_maybe_preempt_on_interrupt_exit(void) {
+	(void)sched_handle_interrupt_exit();
 }
 
 void x86_64_handle_interrupt(const struct interrupt_frame* frame) {
