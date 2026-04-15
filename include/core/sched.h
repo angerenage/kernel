@@ -56,6 +56,15 @@ void sched_block_current(struct thread_wait_queue* queue, enum thread_block_reas
 bool sched_block_current_locked(struct thread_wait_queue* queue, enum thread_block_reason reason,
                                 struct irq_state queue_irq_state);
 
+/*
+ * Block the current thread on queue until another CPU wakes it or the scheduler
+ * tick reaches deadline_tick.
+ * Returns true when the thread was signaled via the
+ * queue, or false when the timeout expired (or setup failed).
+ */
+bool sched_block_current_until_locked(struct thread_wait_queue* queue, enum thread_block_reason reason,
+                                      uint64_t deadline_tick, struct irq_state queue_irq_state);
+
 /* Wake one blocked waiter from queue and make it runnable again. */
 bool sched_wake_one(struct thread_wait_queue* queue);
 

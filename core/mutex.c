@@ -1,5 +1,7 @@
+#include <core/math.h>
 #include <core/mutex.h>
 #include <core/sched.h>
+#include <hal/clock.h>
 
 static __attribute__((noreturn))
 void mutex_trap(void) {
@@ -61,6 +63,72 @@ void mutex_lock(struct mutex* mutex) {
 		if (!sched_block_current_locked(&mutex->waiters, THREAD_BLOCK_MUTEX, wait_state)) {
 			irq_restore(mutex_state);
 			mutex_trap();
+		}
+		irq_restore(mutex_state);
+	}
+}
+
+bool mutex_timed_lock(struct mutex* mutex, uint64_t timeout_ms) {
+	struct thread* current;
+	uint32_t       timer_hz;
+	uint64_t       sleep_ticks;
+	uint64_t       deadline_tick;
+
+	if (mutex == NULL) return false;
+
+	current = sched_current_thread();
+	if (current == NULL) mutex_trap();
+
+	if (timeout_ms == 0u) {
+		struct irq_state state;
+
+		state = spinlock_lock_irqsave(&mutex->lock);
+		if (mutex->owner == NULL) {
+			mutex->owner = current;
+			spinlock_unlock_irqrestore(&mutex->lock, state);
+			return true;
+		}
+		if (mutex->owner == current) {
+			spinlock_unlock_irqrestore(&mutex->lock, state);
+			mutex_trap();
+		}
+		spinlock_unlock_irqrestore(&mutex->lock, state);
+		return false;
+	}
+
+	timer_hz = hal_clock_frequency();
+	if (timer_hz == 0u) return false;
+
+	if (mul_overflow_u64(timeout_ms, (uint64_t)timer_hz, &sleep_ticks) ||
+	    add_overflow_u64(sleep_ticks, 999u, &sleep_ticks)) {
+		sleep_ticks = UINT64_MAX;
+	}
+	else {
+		sleep_ticks /= 1000u;
+	}
+	if (sleep_ticks == 0u) sleep_ticks = 1u;
+	if (add_overflow_u64(sched_tick_count(), sleep_ticks, &deadline_tick)) return false;
+
+	for (;;) {
+		struct irq_state mutex_state;
+		struct irq_state wait_state;
+
+		mutex_state = spinlock_lock_irqsave(&mutex->lock);
+		if (mutex->owner == NULL) {
+			mutex->owner = current;
+			spinlock_unlock_irqrestore(&mutex->lock, mutex_state);
+			return true;
+		}
+		if (mutex->owner == current) {
+			spinlock_unlock_irqrestore(&mutex->lock, mutex_state);
+			mutex_trap();
+		}
+
+		wait_state = spinlock_lock_irqsave(&mutex->waiters.lock);
+		spinlock_unlock(&mutex->lock);
+		if (!sched_block_current_until_locked(&mutex->waiters, THREAD_BLOCK_MUTEX, deadline_tick, wait_state)) {
+			irq_restore(mutex_state);
+			return false;
 		}
 		irq_restore(mutex_state);
 	}

@@ -40,10 +40,12 @@ bool thread_init(struct thread* thread, const struct thread_create_params* param
 		.entry              = params->entry,
 		.arg                = params->arg,
 		.exit_code          = 0u,
+		.blocked_queue      = NULL,
 		.run_queue_next     = NULL,
 		.wait_queue_next    = NULL,
 		.sleep_queue_next   = NULL,
 		.wake_deadline_tick = 0u,
+		.wait_status        = THREAD_WAIT_STATUS_NONE,
 	};
 	thread_wait_queue_init(&thread->join_wait_queue);
 	return hal_cpu_thread_context_init(&thread->context,
@@ -69,10 +71,12 @@ void thread_init_idle(struct thread* thread, struct cpu* cpu, const char* name) 
 		.entry              = NULL,
 		.arg                = NULL,
 		.exit_code          = 0u,
+		.blocked_queue      = NULL,
 		.run_queue_next     = NULL,
 		.wait_queue_next    = NULL,
 		.sleep_queue_next   = NULL,
 		.wake_deadline_tick = 0u,
+		.wait_status        = THREAD_WAIT_STATUS_NONE,
 	};
 	thread_wait_queue_init(&thread->join_wait_queue);
 }
@@ -129,8 +133,9 @@ void thread_mark_ready(struct thread* thread, struct cpu* cpu) {
 	if (thread == NULL) return;
 
 	thread_reset_links(thread);
-	thread->cpu          = cpu;
-	thread->block_reason = THREAD_BLOCK_NONE;
+	thread->cpu           = cpu;
+	thread->blocked_queue = NULL;
+	thread->block_reason  = THREAD_BLOCK_NONE;
 	if (!thread_is_idle(thread) && !thread_is_terminated(thread)) thread->state = THREAD_STATE_READY;
 }
 
@@ -138,8 +143,9 @@ void thread_mark_running(struct thread* thread, struct cpu* cpu) {
 	if (thread == NULL) return;
 
 	thread_reset_links(thread);
-	thread->cpu          = cpu;
-	thread->block_reason = THREAD_BLOCK_NONE;
+	thread->cpu           = cpu;
+	thread->blocked_queue = NULL;
+	thread->block_reason  = THREAD_BLOCK_NONE;
 	if (!thread_is_idle(thread) && !thread_is_terminated(thread)) thread->state = THREAD_STATE_RUNNING;
 }
 
@@ -147,7 +153,9 @@ void thread_mark_blocked(struct thread* thread, enum thread_block_reason reason)
 	if (thread == NULL) return;
 
 	thread_reset_links(thread);
-	thread->block_reason = reason;
+	thread->blocked_queue = NULL;
+	thread->wait_status   = THREAD_WAIT_STATUS_NONE;
+	thread->block_reason  = reason;
 	if (!thread_is_idle(thread) && !thread_is_terminated(thread)) thread->state = THREAD_STATE_BLOCKED;
 }
 
@@ -155,17 +163,21 @@ void thread_mark_exiting(struct thread* thread, thread_exit_code_t exit_code) {
 	if (thread == NULL || thread_is_idle(thread)) return;
 
 	thread_reset_links(thread);
-	thread->block_reason = THREAD_BLOCK_NONE;
-	thread->exit_code    = exit_code;
-	thread->state        = THREAD_STATE_EXITING;
+	thread->blocked_queue = NULL;
+	thread->wait_status   = THREAD_WAIT_STATUS_NONE;
+	thread->block_reason  = THREAD_BLOCK_NONE;
+	thread->exit_code     = exit_code;
+	thread->state         = THREAD_STATE_EXITING;
 }
 
 void thread_mark_zombie(struct thread* thread) {
 	if (thread == NULL || thread_is_idle(thread)) return;
 
 	thread_reset_links(thread);
-	thread->block_reason = THREAD_BLOCK_NONE;
-	thread->state        = THREAD_STATE_ZOMBIE;
+	thread->blocked_queue = NULL;
+	thread->wait_status   = THREAD_WAIT_STATUS_NONE;
+	thread->block_reason  = THREAD_BLOCK_NONE;
+	thread->state         = THREAD_STATE_ZOMBIE;
 }
 
 void thread_wait_queue_init(struct thread_wait_queue* queue) {

@@ -20,6 +20,9 @@ bool mutex_try_lock(struct mutex* mutex);
 /* Sleep until the mutex becomes available, then acquire it for the current thread. */
 void mutex_lock(struct mutex* mutex);
 
+/* Try to acquire the mutex before timeout_ms elapses. Returns false on timeout or invalid input. */
+bool mutex_timed_lock(struct mutex* mutex, uint64_t timeout_ms);
+
 /* Release the mutex. Returns false when the current thread is not the owner. */
 bool mutex_unlock(struct mutex* mutex);
 

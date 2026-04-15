@@ -252,3 +252,57 @@ Test(sched, sleep_until_tick_blocks_and_wakes_on_deadline) {
 
 	reset_test_state();
 }
+
+Test(sched, wake_one_skips_stale_timed_out_waiters) {
+	const struct thread_create_params stale_params = {
+		.name              = "stale_waiter",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x360000u,
+		.kernel_stack_top  = 0x364000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	const struct thread_create_params live_params = {
+		.name              = "live_waiter",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x370000u,
+		.kernel_stack_top  = 0x374000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	struct thread            stale;
+	struct thread            live;
+	struct thread_wait_queue wait_queue;
+
+	init_bound_bootstrap_cpu();
+	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
+	thread_wait_queue_init(&wait_queue);
+
+	cr_assert(thread_init(&stale, &stale_params), "thread_init failed for stale waiter");
+	cr_assert(thread_init(&live, &live_params), "thread_init failed for live waiter");
+
+	thread_mark_blocked(&stale, THREAD_BLOCK_MUTEX);
+	stale.blocked_queue   = &wait_queue;
+	stale.wait_status     = THREAD_WAIT_STATUS_TIMED_OUT;
+	stale.wait_queue_next = &live;
+
+	thread_mark_blocked(&live, THREAD_BLOCK_JOIN);
+	live.wait_queue_next = NULL;
+
+	wait_queue.head  = &stale;
+	wait_queue.tail  = &live;
+	wait_queue.depth = 2u;
+
+	cr_assert(sched_wake_one(&wait_queue),
+	          "sched_wake_one should skip the stale timed waiter and wake the live waiter");
+	cr_assert_eq(wait_queue.depth, 0u, "wait queue should be empty after consuming stale and live entries");
+	cr_assert_null(wait_queue.head, "wait queue head should clear after wake");
+	cr_assert_null(wait_queue.tail, "wait queue tail should clear after wake");
+	cr_assert_eq(live.state, THREAD_STATE_READY, "live waiter should become ready");
+	cr_assert_eq(sched_run_queue_depth(cpu_current()), 1u, "live waiter should be queued to run");
+
+	reset_test_state();
+}

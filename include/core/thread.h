@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 struct cpu;
+struct thread_wait_queue;
 
 /* Thread entry function used for first-run bootstrap. */
 typedef void (*thread_entry_t)(void* arg);
@@ -45,6 +46,14 @@ enum thread_block_reason {
 	THREAD_BLOCK_PARKED,
 };
 
+/* Resolution state for waits that are armed against both a wait queue and a timeout. */
+enum thread_wait_status {
+	THREAD_WAIT_STATUS_NONE = 0,
+	THREAD_WAIT_STATUS_PENDING,
+	THREAD_WAIT_STATUS_SIGNALED,
+	THREAD_WAIT_STATUS_TIMED_OUT,
+};
+
 /* Parameters used to initialize a non-idle thread descriptor. */
 struct thread_create_params {
 	const char*    name;
@@ -66,23 +75,25 @@ struct thread_wait_queue {
 
 /* Core thread descriptor shared by scheduler, wait queues, and higher-level thread wrappers. */
 struct thread {
-	const char*              name;
-	struct cpu*              cpu;
-	struct cpu*              preferred_cpu;
-	enum thread_state        state;
-	enum thread_block_reason block_reason;
-	uint32_t                 flags;
-	uintptr_t                kernel_stack_base;
-	uintptr_t                kernel_stack_top;
-	struct thread_context    context;
-	thread_entry_t           entry;
-	void*                    arg;
-	thread_exit_code_t       exit_code;
-	struct thread_wait_queue join_wait_queue;
-	struct thread*           run_queue_next;
-	struct thread*           wait_queue_next;
-	struct thread*           sleep_queue_next;
-	uint64_t                 wake_deadline_tick;
+	const char*               name;
+	struct cpu*               cpu;
+	struct cpu*               preferred_cpu;
+	enum thread_state         state;
+	enum thread_block_reason  block_reason;
+	uint32_t                  flags;
+	uintptr_t                 kernel_stack_base;
+	uintptr_t                 kernel_stack_top;
+	struct thread_context     context;
+	thread_entry_t            entry;
+	void*                     arg;
+	thread_exit_code_t        exit_code;
+	struct thread_wait_queue  join_wait_queue;
+	struct thread_wait_queue* blocked_queue;
+	struct thread*            run_queue_next;
+	struct thread*            wait_queue_next;
+	struct thread*            sleep_queue_next;
+	uint64_t                  wake_deadline_tick;
+	uint32_t                  wait_status;
 };
 
 /* FIFO run queue protected by a spinlock. */

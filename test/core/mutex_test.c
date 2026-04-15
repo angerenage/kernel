@@ -4,6 +4,7 @@
 #include <core/sched.h>
 #include <core/thread.h>
 #include <criterion/criterion.h>
+#include <hal/clock.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>
 
@@ -138,5 +139,66 @@ Test(mutex, contended_lock_blocks_and_wakes_waiter) {
 	cr_assert(mutex_unlock(&mutex), "waiter should be able to release the mutex");
 	cr_assert(!mutex_is_locked(&mutex), "mutex should end unlocked");
 
+	reset_test_state();
+}
+
+Test(mutex, timed_lock_zero_timeout_acquires_without_sleeping) {
+	struct mutex mutex;
+
+	init_bound_bootstrap_cpu();
+	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
+
+	mutex_init(&mutex);
+	cr_assert(mutex_timed_lock(&mutex, 0u), "zero-timeout timed lock should acquire an unlocked mutex");
+	cr_assert(mutex_is_owned_by_current(&mutex), "current thread should own the mutex after timed lock");
+	cr_assert(mutex_unlock(&mutex), "mutex_unlock should release the timed lock");
+
+	reset_test_state();
+}
+
+Test(mutex, timed_lock_zero_timeout_times_out_when_contended) {
+	const struct thread_create_params owner_params = {
+		.name              = "mutex_owner",
+		.entry             = mutex_test_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x380000u,
+		.kernel_stack_top  = 0x384000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	const struct thread_create_params waiter_params = {
+		.name              = "mutex_waiter",
+		.entry             = mutex_test_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x390000u,
+		.kernel_stack_top  = 0x394000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	struct mutex  mutex;
+	struct thread owner;
+	struct thread waiter;
+
+	init_bound_bootstrap_cpu();
+	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
+	cr_assert(hal_clock_start(1000u, NULL, NULL), "hal_clock_start failed");
+
+	mutex_init(&mutex);
+	cr_assert(kthread_create(&owner, &owner_params), "owner kthread_create failed");
+	cr_assert(kthread_create(&waiter, &waiter_params), "waiter kthread_create failed");
+
+	sched_set_current(cpu_current(), &owner);
+	cr_assert(mutex_try_lock(&mutex), "owner should acquire the mutex");
+
+	sched_set_current(cpu_current(), &waiter);
+	cr_assert(!mutex_timed_lock(&mutex, 0u), "zero-timeout timed lock should fail while another thread owns the mutex");
+	cr_assert_eq(mutex_owner(&mutex), &owner, "failed timed lock must not change ownership");
+	cr_assert_eq(mutex_waiter_count(&mutex), 0u, "zero-timeout timed lock should not enqueue a waiter");
+
+	sched_set_current(cpu_current(), &owner);
+	cr_assert(mutex_unlock(&mutex), "owner should still be able to unlock");
+	hal_clock_stop();
 	reset_test_state();
 }
