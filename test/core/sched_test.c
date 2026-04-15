@@ -197,3 +197,58 @@ Test(sched, block_and_wake_preserve_wait_queue_fifo_order) {
 
 	reset_test_state();
 }
+
+Test(sched, sleep_until_tick_blocks_and_wakes_on_deadline) {
+	const struct thread_create_params sleeper_params = {
+		.name              = "sleeper",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x340000u,
+		.kernel_stack_top  = 0x344000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	const struct thread_create_params worker_params = {
+		.name              = "worker",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x350000u,
+		.kernel_stack_top  = 0x354000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	struct thread sleeper;
+	struct thread worker;
+	uint64_t      deadline_tick;
+
+	init_bound_bootstrap_cpu();
+	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
+
+	cr_assert(thread_init(&sleeper, &sleeper_params), "thread_init failed for sleeper thread");
+	cr_assert(thread_init(&worker, &worker_params), "thread_init failed for worker thread");
+	cr_assert(sched_make_runnable(&sleeper), "failed to make sleeper runnable");
+	cr_assert(sched_make_runnable(&worker), "failed to make worker runnable");
+
+	sched_yield();
+	cr_assert_eq(sched_current_thread(), &sleeper, "sleeper should dispatch first");
+
+	deadline_tick = sched_tick_count() + 2u;
+	cr_assert(sched_sleep_until_tick(deadline_tick), "sched_sleep_until_tick failed");
+	cr_assert_eq(sleeper.state, THREAD_STATE_BLOCKED, "sleeper should block while sleeping");
+	cr_assert_eq(sleeper.block_reason, THREAD_BLOCK_SLEEP, "sleeper block reason should be sleep");
+	cr_assert_eq(sched_current_thread(), &worker, "worker should run after sleeper blocks");
+	cr_assert_eq(sched_run_queue_depth(cpu_current()), 0u, "run queue should be empty after dispatching worker");
+
+	sched_tick();
+	cr_assert_eq(sched_run_queue_depth(cpu_current()), 0u, "sleeper should not wake before deadline");
+
+	sched_tick();
+	cr_assert_eq(sleeper.state, THREAD_STATE_READY, "sleeper should be ready after deadline");
+	cr_assert_eq(sched_run_queue_depth(cpu_current()), 1u, "sleeper should be queued after wake");
+
+	sched_yield();
+	cr_assert_eq(sched_current_thread(), &sleeper, "sleeper should run after being woken");
+
+	reset_test_state();
+}

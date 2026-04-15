@@ -2,6 +2,7 @@
 
 #include <core/thread.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 /*
  * Higher-level kernel-thread helpers layered on top of core thread and
@@ -19,6 +20,9 @@ bool kthread_start(struct thread* thread);
 
 /* Yield the current thread's CPU slot to the next runnable thread. */
 void kthread_yield(void);
+
+/* Sleep for at least ms milliseconds using the kernel periodic timer source. */
+bool kthread_sleep_ms(uint64_t ms);
 
 /* Block until target exits (or is already exited), then publish its exit code. */
 bool kthread_join(struct thread* target, thread_exit_code_t* out_exit_code);

@@ -3,6 +3,7 @@
 #include <core/thread.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 struct cpu;
 
@@ -34,6 +35,15 @@ bool sched_remove_runnable(struct thread* thread);
 
 /* Yield the current CPU so another runnable thread may be dispatched. */
 void sched_yield(void);
+
+/* Return the scheduler's monotonic tick counter. */
+uint64_t sched_tick_count(void);
+
+/* Block the current thread until tick_count reaches or exceeds deadline_tick. */
+bool sched_sleep_until_tick(uint64_t deadline_tick);
+
+/* Advance scheduler timers and wake any sleep-deadline waiters that are now due. */
+void sched_tick(void);
 
 /* Block the current thread on queue until another CPU or event source wakes it. */
 void sched_block_current(struct thread_wait_queue* queue, enum thread_block_reason reason);

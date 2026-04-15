@@ -81,6 +81,8 @@ struct thread {
 	struct thread_wait_queue join_wait_queue;
 	struct thread*           run_queue_next;
 	struct thread*           wait_queue_next;
+	struct thread*           sleep_queue_next;
+	uint64_t                 wake_deadline_tick;
 };
 
 /* FIFO run queue protected by a spinlock. */

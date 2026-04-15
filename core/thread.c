@@ -4,8 +4,10 @@
 static void thread_reset_links(struct thread* thread) {
 	if (thread == NULL) return;
 
-	thread->run_queue_next  = NULL;
-	thread->wait_queue_next = NULL;
+	thread->run_queue_next     = NULL;
+	thread->wait_queue_next    = NULL;
+	thread->sleep_queue_next   = NULL;
+	thread->wake_deadline_tick = 0u;
 	thread->flags &= ~THREAD_FLAG_QUEUED;
 }
 
@@ -35,11 +37,13 @@ bool thread_init(struct thread* thread, const struct thread_create_params* param
 					  .instruction_pointer = (uintptr_t)params->entry,
 					  .stack_pointer       = params->kernel_stack_top,
 					  },
-		.entry           = params->entry,
-		.arg             = params->arg,
-		.exit_code       = 0u,
-		.run_queue_next  = NULL,
-		.wait_queue_next = NULL,
+		.entry              = params->entry,
+		.arg                = params->arg,
+		.exit_code          = 0u,
+		.run_queue_next     = NULL,
+		.wait_queue_next    = NULL,
+		.sleep_queue_next   = NULL,
+		.wake_deadline_tick = 0u,
 	};
 	thread_wait_queue_init(&thread->join_wait_queue);
 	return hal_cpu_thread_context_init(&thread->context,
@@ -53,20 +57,22 @@ void thread_init_idle(struct thread* thread, struct cpu* cpu, const char* name) 
 	if (thread == NULL) return;
 
 	*thread = (struct thread){
-		.name              = name,
-		.cpu               = cpu,
-		.preferred_cpu     = cpu,
-		.state             = THREAD_STATE_IDLE,
-		.block_reason      = THREAD_BLOCK_NONE,
-		.flags             = THREAD_FLAG_IDLE,
-		.kernel_stack_base = 0u,
-		.kernel_stack_top  = 0u,
-		.context           = {0},
-		.entry             = NULL,
-		.arg               = NULL,
-		.exit_code         = 0u,
-		.run_queue_next    = NULL,
-		.wait_queue_next   = NULL,
+		.name               = name,
+		.cpu                = cpu,
+		.preferred_cpu      = cpu,
+		.state              = THREAD_STATE_IDLE,
+		.block_reason       = THREAD_BLOCK_NONE,
+		.flags              = THREAD_FLAG_IDLE,
+		.kernel_stack_base  = 0u,
+		.kernel_stack_top   = 0u,
+		.context            = {0},
+		.entry              = NULL,
+		.arg                = NULL,
+		.exit_code          = 0u,
+		.run_queue_next     = NULL,
+		.wait_queue_next    = NULL,
+		.sleep_queue_next   = NULL,
+		.wake_deadline_tick = 0u,
 	};
 	thread_wait_queue_init(&thread->join_wait_queue);
 }

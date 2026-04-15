@@ -57,6 +57,7 @@ static void kernel_bootstrap_worker_entry(void* arg) {
 static void boot_clock_tick(void* ctx) {
 	(void)ctx;
 
+	sched_tick();
 	boot_timer_ticks++;
 	if (boot_timer_frequency_hz == 0u) return;
 

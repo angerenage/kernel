@@ -16,6 +16,7 @@ base_test_lib = static_library(
 )
 
 hal_mock_sources = files(
+	'mocks/hal/clock.c',
 	'mocks/hal/cpu.c',
 	'mocks/hal/interrupts.c',
 )

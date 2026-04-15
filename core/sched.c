@@ -16,6 +16,10 @@ struct sched_cpu_state {
 };
 
 static struct sched_cpu_state sched_cpu_state[SCHED_MAX_CPU_COUNT];
+static struct spinlock        sched_sleep_lock =
+	(struct spinlock)SPINLOCK_INIT_CLASS("sched_sleep_lock", SPINLOCK_ORDER_SCHED, SPINLOCK_FLAG_IRQSAVE);
+static struct thread* sched_sleep_head;
+static uint64_t       sched_ticks;
 
 static struct sched_cpu_state* sched_state_for_cpu(const struct cpu* cpu) {
 	if (cpu == NULL || cpu->index >= SCHED_MAX_CPU_COUNT) return NULL;
@@ -165,6 +169,8 @@ bool sched_init(void) {
 	for (size_t i = 0; i < SCHED_MAX_CPU_COUNT; i++) {
 		sched_cpu_state[i] = (struct sched_cpu_state){0};
 	}
+	sched_sleep_head = NULL;
+	sched_ticks      = 0u;
 
 	for (size_t i = 0; i < cpu_total; i++) {
 		struct cpu*             cpu = cpu_by_index(i);
@@ -253,6 +259,82 @@ void sched_yield(void) {
 	}
 
 	sched_dispatch_next(cpu);
+}
+
+uint64_t sched_tick_count(void) {
+	struct irq_state state;
+	uint64_t         tick_count;
+
+	state      = spinlock_lock_irqsave(&sched_sleep_lock);
+	tick_count = sched_ticks;
+	spinlock_unlock_irqrestore(&sched_sleep_lock, state);
+	return tick_count;
+}
+
+bool sched_sleep_until_tick(uint64_t deadline_tick) {
+	struct cpu*      cpu = cpu_current();
+	struct thread*   current;
+	struct irq_state state;
+	struct thread*   cursor;
+
+	if (cpu == NULL) return false;
+
+	current = cpu->current_thread;
+	if (current == NULL || thread_is_idle(current) || thread_is_terminated(current)) return false;
+
+	state = spinlock_lock_irqsave(&sched_sleep_lock);
+	if (deadline_tick <= sched_ticks) {
+		spinlock_unlock_irqrestore(&sched_sleep_lock, state);
+		return true;
+	}
+
+	thread_mark_blocked(current, THREAD_BLOCK_SLEEP);
+	current->wake_deadline_tick = deadline_tick;
+	current->sleep_queue_next   = NULL;
+
+	if (sched_sleep_head == NULL || sched_sleep_head->wake_deadline_tick > deadline_tick) {
+		current->sleep_queue_next = sched_sleep_head;
+		sched_sleep_head          = current;
+	}
+	else {
+		cursor = sched_sleep_head;
+		while (cursor->sleep_queue_next != NULL && cursor->sleep_queue_next->wake_deadline_tick <= deadline_tick) {
+			cursor = cursor->sleep_queue_next;
+		}
+		current->sleep_queue_next = cursor->sleep_queue_next;
+		cursor->sleep_queue_next  = current;
+	}
+	spinlock_unlock_irqrestore(&sched_sleep_lock, state);
+
+	sched_dispatch_next(cpu);
+	return true;
+}
+
+void sched_tick(void) {
+	struct thread*   due = NULL;
+	struct irq_state state;
+	uint64_t         now;
+
+	state = spinlock_lock_irqsave(&sched_sleep_lock);
+	sched_ticks++;
+	now = sched_ticks;
+	spinlock_unlock_irqrestore(&sched_sleep_lock, state);
+
+	for (;;) {
+		state = spinlock_lock_irqsave(&sched_sleep_lock);
+		if (sched_sleep_head != NULL && sched_sleep_head->wake_deadline_tick <= now) {
+			due                   = sched_sleep_head;
+			sched_sleep_head      = due->sleep_queue_next;
+			due->sleep_queue_next = NULL;
+		}
+		else {
+			due = NULL;
+		}
+		spinlock_unlock_irqrestore(&sched_sleep_lock, state);
+
+		if (due == NULL) break;
+		(void)sched_make_runnable(due);
+	}
 }
 
 bool sched_block_current_locked(struct thread_wait_queue* queue, enum thread_block_reason reason,
