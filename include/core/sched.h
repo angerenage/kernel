@@ -13,6 +13,16 @@ struct sched_stats {
 	uint64_t yield_count;
 };
 
+struct sched_cpu_stats {
+	uint64_t total_ticks;
+	uint64_t thread_ticks;
+	uint64_t idle_ticks;
+	uint64_t kernel_ticks;
+	uint64_t context_switch_count;
+	uint64_t timeslice_preempt_count;
+	uint64_t yield_count;
+};
+
 /*
  * Minimal per-CPU scheduler front-end.
  * Each CPU owns a run queue plus a permanently available idle thread.
@@ -95,6 +105,9 @@ size_t sched_run_queue_depth(struct cpu* cpu);
 
 /* Snapshot the scheduler counters used for debug visibility and tests. */
 void sched_get_stats(struct sched_stats* out_stats);
+
+/* Snapshot per-CPU scheduler accounting, or return false when cpu is not scheduler-managed. */
+bool sched_get_cpu_stats(const struct cpu* cpu, struct sched_cpu_stats* out_stats);
 
 /* Print a one-line debug dump of the scheduler counters. */
 void sched_debug_dump(void);

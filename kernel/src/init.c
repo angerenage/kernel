@@ -35,8 +35,60 @@ static void boot_fail(const char* message) {
 static volatile uint64_t boot_timer_ticks;
 static uint64_t          boot_timer_origin_ticks;
 static uint64_t          boot_timer_reported_seconds;
+static size_t            boot_timer_report_lines;
 static uint32_t          boot_timer_frequency_hz;
 static bool              boot_timer_started;
+
+static void boot_print_tick_duration(uint64_t ticks) {
+	uint64_t seconds = 0u;
+	uint64_t millis  = 0u;
+
+	if (boot_timer_frequency_hz != 0u) {
+		seconds = ticks / boot_timer_frequency_hz;
+		millis  = ((ticks % boot_timer_frequency_hz) * 1000u) / boot_timer_frequency_hz;
+	}
+
+	printf("%llu.%03llu s", (unsigned long long)seconds, (unsigned long long)millis);
+}
+
+static void boot_log_scheduler_uptime(uint64_t elapsed_seconds) {
+	struct sched_stats stats;
+	size_t             cpu_total = cpu_count();
+
+	sched_get_stats(&stats);
+	if (boot_timer_report_lines != 0u) {
+		for (size_t i = 0; i < boot_timer_report_lines; i++) {
+			printf("\r\033[2K");
+			if (i + 1u != boot_timer_report_lines) printf("\033[1A");
+		}
+		printf("\r");
+	}
+
+	printf("kernel: uptime %llu s [sched cs=%llu preempt=%llu yield=%llu]",
+	       (unsigned long long)elapsed_seconds,
+	       (unsigned long long)stats.context_switch_count,
+	       (unsigned long long)stats.timeslice_preempt_count,
+	       (unsigned long long)stats.yield_count);
+	for (size_t i = 0; i < cpu_total; i++) {
+		struct cpu*            cpu = cpu_by_index(i);
+		struct sched_cpu_stats cpu_stats;
+
+		if (cpu == NULL || !sched_get_cpu_stats(cpu, &cpu_stats)) continue;
+
+		printf("\n  cpu%zu: run=", cpu->index);
+		boot_print_tick_duration(cpu_stats.thread_ticks);
+		printf(" idle=");
+		boot_print_tick_duration(cpu_stats.idle_ticks);
+		printf(" sched=");
+		boot_print_tick_duration(cpu_stats.kernel_ticks);
+		printf(" cs=%llu preempt=%llu yield=%llu",
+		       (unsigned long long)cpu_stats.context_switch_count,
+		       (unsigned long long)cpu_stats.timeslice_preempt_count,
+		       (unsigned long long)cpu_stats.yield_count);
+	}
+
+	boot_timer_report_lines = 1u + cpu_total;
+}
 
 static void kernel_bootstrap_worker_entry(void* arg) {
 	(void)arg;
@@ -65,14 +117,14 @@ static void boot_clock_tick(void* ctx) {
 		boot_timer_started          = true;
 		boot_timer_origin_ticks     = boot_timer_ticks;
 		boot_timer_reported_seconds = 0u;
-		printf("\r\033[2Kkernel: uptime 0 s");
+		boot_log_scheduler_uptime(0u);
 		return;
 	}
 
 	uint64_t elapsed_seconds = (boot_timer_ticks - boot_timer_origin_ticks) / boot_timer_frequency_hz;
 	if (elapsed_seconds != boot_timer_reported_seconds) {
 		boot_timer_reported_seconds = elapsed_seconds;
-		printf("\r\033[2Kkernel: uptime %llu s", elapsed_seconds);
+		boot_log_scheduler_uptime(elapsed_seconds);
 	}
 }
 
