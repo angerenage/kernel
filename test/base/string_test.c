@@ -74,3 +74,39 @@ Test(base_string, memcmp_reports_equality_and_order) {
 	cr_assert(memcmp(lhs, low, sizeof(lhs)) > 0);
 	cr_assert(memcmp(lhs, high, sizeof(lhs)) < 0);
 }
+
+Test(base_string, zero_length_operations_leave_buffers_unchanged) {
+	uint8_t src[]  = {1, 2, 3, 4};
+	uint8_t dest[] = {9, 8, 7, 6};
+	uint8_t copy[] = {5, 4, 3, 2};
+	size_t  zero   = 0;
+
+	cr_assert_eq(memcpy(dest, src, zero), dest);
+	cr_assert_eq(memmove(copy, copy + 1, zero), copy);
+	cr_assert_eq(memset(dest + 1, 0xff, zero), dest + 1);
+	cr_assert_eq(memcmp(src, dest, zero), 0);
+
+	cr_assert_eq(dest[0], 9);
+	cr_assert_eq(dest[1], 8);
+	cr_assert_eq(dest[2], 7);
+	cr_assert_eq(dest[3], 6);
+	cr_assert_eq(copy[0], 5);
+	cr_assert_eq(copy[1], 4);
+	cr_assert_eq(copy[2], 3);
+	cr_assert_eq(copy[3], 2);
+}
+
+Test(base_string, memmove_returns_immediately_for_same_source_and_destination) {
+	char buffer[] = "kernel";
+
+	cr_assert_eq(memmove(buffer, buffer, strlen(buffer)), buffer);
+	cr_assert_str_eq(buffer, "kernel");
+}
+
+Test(base_string, memcmp_stops_at_first_differing_byte) {
+	const uint8_t lhs[] = {0x10, 0x20, 0x30, 0x40};
+	const uint8_t rhs[] = {0x10, 0x20, 0x31, 0x00};
+
+	cr_assert_lt(memcmp(lhs, rhs, sizeof(lhs)), 0);
+	cr_assert_gt(memcmp(rhs, lhs, sizeof(lhs)), 0);
+}

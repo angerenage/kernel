@@ -77,6 +77,13 @@ test_suites = [
 		'suites': ['unit', 'core'],
 	},
 	{
+		'name': 'cpu_irq',
+		'sources': files(
+			'core/cpu_irq_test.c',
+		),
+		'suites': ['unit', 'core'],
+	},
+	{
 		'name': 'pmm',
 		'sources': files(
 			'pmm/pmm_test.c',

@@ -110,6 +110,37 @@ cleanup:
 	}
 }
 
+static void kernel_selftest_kheap_realloc_special_cases_restore_state(struct kernel_selftest_context* ctx) {
+	size_t   free_before = kheap_free_bytes();
+	uint8_t* grown       = NULL;
+	uint8_t* direct      = NULL;
+
+	direct = (uint8_t*)krealloc(NULL, 64u);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, direct != NULL, "krealloc(NULL, 64) returned NULL", cleanup);
+
+	for (size_t i = 0; i < 64u; i++) {
+		direct[i] = (uint8_t)(i + 1u);
+	}
+
+	grown = (uint8_t*)krealloc(direct, 128u);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, grown != NULL, "krealloc(direct, 128) returned NULL", cleanup);
+	direct = NULL;
+
+	for (size_t i = 0; i < 64u; i++) {
+		KERNEL_SELFTEST_ASSERT_GOTO(ctx, grown[i] == (uint8_t)(i + 1u), cleanup);
+	}
+
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx, krealloc(grown, 0u) == NULL, "krealloc(grown, 0) did not return NULL", cleanup);
+	grown = NULL;
+
+cleanup:
+	if (grown != NULL) kfree(grown);
+	if (direct != NULL) kfree(direct);
+
+	if (ctx->failure_expr == NULL) KERNEL_SELFTEST_ASSERT(ctx, kheap_free_bytes() == free_before);
+}
+
 static const struct kernel_selftest_case kernel_kheap_selftests[] = {
 	{
      .name = "allocates_and_restores_heap",
@@ -122,6 +153,10 @@ static const struct kernel_selftest_case kernel_kheap_selftests[] = {
 	{
      .name = "grows_when_initial_arena_is_exhausted",
      .run  = kernel_selftest_kheap_grows_when_initial_arena_is_exhausted,
+	 },
+	{
+     .name = "realloc_special_cases_restore_state",
+     .run  = kernel_selftest_kheap_realloc_special_cases_restore_state,
 	 },
 };
 

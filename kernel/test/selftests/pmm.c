@@ -80,6 +80,25 @@ cleanup:
 	if (ctx->failure_expr == NULL) KERNEL_SELFTEST_ASSERT(ctx, pmm_free_page_count() == free_before);
 }
 
+static void kernel_selftest_pmm_rejects_invalid_requests(struct kernel_selftest_context* ctx) {
+	uintptr_t page        = 0;
+	size_t    free_before = pmm_free_page_count();
+
+	KERNEL_SELFTEST_ASSERT(ctx, !pmm_alloc_pages(0u, &page));
+	KERNEL_SELFTEST_ASSERT(ctx, !pmm_alloc_pages(1u, NULL));
+	KERNEL_SELFTEST_ASSERT(ctx, !pmm_free_pages(1u, 1u));
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, pmm_alloc_pages(1u, &page), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !pmm_free_pages(page + 1u, 1u), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, pmm_free_pages(page, 1u), cleanup);
+	page = 0;
+	KERNEL_SELFTEST_ASSERT(ctx, pmm_free_page_count() == free_before);
+
+cleanup:
+	if (page != 0) (void)pmm_free_pages(page, 1u);
+
+	if (ctx->failure_expr == NULL) KERNEL_SELFTEST_ASSERT(ctx, pmm_free_page_count() == free_before);
+}
+
 static const struct kernel_selftest_case kernel_pmm_selftests[] = {
 	{
      .name = "allocates_contiguous_runs_and_restores_state",
@@ -88,6 +107,10 @@ static const struct kernel_selftest_case kernel_pmm_selftests[] = {
 	{
      .name = "reuses_freed_pages",
      .run  = kernel_selftest_pmm_reuses_freed_pages,
+	 },
+	{
+     .name = "rejects_invalid_requests",
+     .run  = kernel_selftest_pmm_rejects_invalid_requests,
 	 },
 };
 

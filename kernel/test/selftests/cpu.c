@@ -45,6 +45,19 @@ static void kernel_selftest_cpu_ids_are_unique_and_bindings_succeeded(struct ker
 	}
 }
 
+static void kernel_selftest_cpu_current_accessors_match_bound_cpu(struct kernel_selftest_context* ctx) {
+	struct cpu* current = cpu_current();
+
+	KERNEL_SELFTEST_ASSERT_MSG(ctx, current != NULL, "cpu_current returned NULL");
+	KERNEL_SELFTEST_ASSERT(ctx, cpu_index() == current->index);
+	KERNEL_SELFTEST_ASSERT(ctx, cpu_arch_id() == current->arch_id);
+	KERNEL_SELFTEST_ASSERT(ctx, current->boot_stack_top > current->boot_stack_base);
+	KERNEL_SELFTEST_ASSERT(ctx, current->irq_disable_depth == 0u);
+	KERNEL_SELFTEST_ASSERT(ctx, current->exception_depth == 0u);
+	KERNEL_SELFTEST_ASSERT(ctx, !cpu_irq_in_exception());
+	KERNEL_SELFTEST_ASSERT(ctx, current->interrupts_ready);
+}
+
 static const struct kernel_selftest_case kernel_cpu_selftests[] = {
 	{
      .name = "topology_is_consistent",
@@ -53,6 +66,10 @@ static const struct kernel_selftest_case kernel_cpu_selftests[] = {
 	{
      .name = "ids_are_unique_and_bindings_succeeded",
      .run  = kernel_selftest_cpu_ids_are_unique_and_bindings_succeeded,
+	 },
+	{
+     .name = "current_accessors_match_bound_cpu",
+     .run  = kernel_selftest_cpu_current_accessors_match_bound_cpu,
 	 },
 };
 
