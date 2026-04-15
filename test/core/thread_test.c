@@ -45,6 +45,11 @@ Test(thread, init_populates_extended_descriptor_fields) {
 	cr_assert(thread.context.stack_pointer > params.kernel_stack_base, "initial stack pointer should stay in range");
 	cr_assert_eq(thread.entry, thread_test_entry, "entry pointer mismatch");
 	cr_assert_eq(thread.arg, &arg, "thread arg mismatch");
+	cr_assert_eq(
+		thread.timeslice_ticks, THREAD_DEFAULT_TIMESLICE_TICKS, "regular threads should inherit the default timeslice");
+	cr_assert_eq(thread.timeslice_remaining,
+	             THREAD_DEFAULT_TIMESLICE_TICKS,
+	             "regular threads should start with a full timeslice budget");
 	cr_assert(thread_is_joinable(&thread), "fresh non-detached thread should be joinable");
 	cr_assert(!thread_is_terminated(&thread), "fresh thread should not be terminated");
 	cr_assert_eq(thread_wait_queue_depth(&thread.join_wait_queue), 0u, "join wait queue should start empty");
@@ -178,6 +183,8 @@ Test(thread, detach_and_idle_helpers_follow_joinability_rules) {
 	cr_assert(!thread_is_joinable(&idle_thread), "idle thread must never be joinable");
 	cr_assert(!thread_request_cancel(&idle_thread), "idle thread must reject cancellation");
 	cr_assert(!thread_detach(&idle_thread), "idle thread must reject detach");
+	cr_assert_eq(idle_thread.timeslice_ticks, 0u, "idle threads should not consume scheduler timeslices");
+	cr_assert_eq(idle_thread.timeslice_remaining, 0u, "idle threads should not carry a timeslice budget");
 	cr_assert_eq(
 		thread_wait_queue_depth(&idle_thread.join_wait_queue), 0u, "idle thread wait queue should start empty");
 

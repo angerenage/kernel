@@ -9,6 +9,10 @@
 struct cpu;
 struct thread_wait_queue;
 
+enum {
+	THREAD_DEFAULT_TIMESLICE_TICKS = 4u,
+};
+
 /* Thread entry function used for first-run bootstrap. */
 typedef void (*thread_entry_t)(void* arg);
 
@@ -94,6 +98,8 @@ struct thread {
 	struct thread*            sleep_queue_next;
 	uint64_t                  wake_deadline_tick;
 	uint32_t                  wait_status;
+	uint32_t                  timeslice_ticks;
+	uint32_t                  timeslice_remaining;
 };
 
 /* FIFO run queue protected by a spinlock. */
