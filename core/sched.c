@@ -18,8 +18,37 @@ struct sched_cpu_state {
 static struct sched_cpu_state sched_cpu_state[SCHED_MAX_CPU_COUNT];
 static struct spinlock        sched_sleep_lock =
 	(struct spinlock)SPINLOCK_INIT_CLASS("sched_sleep_lock", SPINLOCK_ORDER_SCHED, SPINLOCK_FLAG_IRQSAVE);
-static struct thread* sched_sleep_head;
-static uint64_t       sched_ticks;
+static struct thread*     sched_sleep_head;
+static uint64_t           sched_ticks;
+static struct sched_stats sched_stats;
+
+static void sched_stat_increment(uint64_t* counter) {
+	(void)__atomic_fetch_add(counter, 1u, __ATOMIC_RELAXED);
+}
+
+static void sched_clear_reschedule_request(struct cpu* cpu) {
+	if (cpu == NULL) return;
+
+	__atomic_store_n(&cpu->reschedule_requested, false, __ATOMIC_RELEASE);
+}
+
+static void sched_charge_current_timeslice(struct cpu* cpu) {
+	struct thread* current;
+
+	if (cpu == NULL) return;
+
+	current = cpu->current_thread;
+	if (current == NULL || thread_is_idle(current) || thread_is_terminated(current) || current->timeslice_ticks == 0u) {
+		return;
+	}
+
+	if (current->timeslice_remaining == 0u) current->timeslice_remaining = current->timeslice_ticks;
+	current->timeslice_remaining--;
+	if (current->timeslice_remaining != 0u) return;
+
+	current->timeslice_remaining = current->timeslice_ticks;
+	if (sched_run_queue_depth(cpu) != 0u) sched_request_reschedule(cpu);
+}
 
 static struct sched_cpu_state* sched_state_for_cpu(const struct cpu* cpu) {
 	if (cpu == NULL || cpu->index >= SCHED_MAX_CPU_COUNT) return NULL;
@@ -238,7 +267,10 @@ static void sched_dispatch_next(struct cpu* cpu) {
 	}
 
 	sched_set_current(cpu, next);
-	if (previous != NULL) hal_cpu_context_switch(&previous->context, &next->context);
+	if (previous != NULL) {
+		sched_stat_increment(&sched_stats.context_switch_count);
+		hal_cpu_context_switch(&previous->context, &next->context);
+	}
 }
 
 static bool sched_make_runnable_on_cpu(struct cpu* cpu, struct thread* thread, bool allow_current) {
@@ -261,6 +293,7 @@ bool sched_init(void) {
 	}
 	sched_sleep_head = NULL;
 	sched_ticks      = 0u;
+	sched_stats      = (struct sched_stats){0};
 
 	for (size_t i = 0; i < cpu_total; i++) {
 		struct cpu*             cpu = cpu_by_index(i);
@@ -274,6 +307,7 @@ bool sched_init(void) {
 		sprintf(state->idle_name, "idle/%zu", cpu->index);
 		thread_init_idle(&state->idle_thread, cpu, state->idle_name);
 		cpu->current_thread = NULL;
+		sched_clear_reschedule_request(cpu);
 	}
 
 	return true;
@@ -338,6 +372,8 @@ void sched_yield(void) {
 
 	if (cpu == NULL) return;
 
+	sched_stat_increment(&sched_stats.yield_count);
+
 	current = cpu->current_thread;
 	if (current == NULL) {
 		(void)sched_start_cpu(cpu);
@@ -349,6 +385,38 @@ void sched_yield(void) {
 	}
 
 	sched_dispatch_next(cpu);
+}
+
+void sched_request_reschedule(struct cpu* cpu) {
+	if (sched_state_for_cpu(cpu) == NULL) return;
+
+	__atomic_store_n(&cpu->reschedule_requested, true, __ATOMIC_RELEASE);
+}
+
+bool sched_reschedule_pending(const struct cpu* cpu) {
+	if (sched_state_for_cpu(cpu) == NULL) return false;
+
+	return __atomic_load_n(&cpu->reschedule_requested, __ATOMIC_ACQUIRE);
+}
+
+bool sched_handle_interrupt_exit(void) {
+	struct cpu*    cpu = cpu_current();
+	struct thread* current;
+
+	if (!sched_reschedule_pending(cpu)) return false;
+
+	current = cpu->current_thread;
+	sched_clear_reschedule_request(cpu);
+	if (current == NULL || thread_is_idle(current) || thread_is_terminated(current) ||
+	    sched_run_queue_depth(cpu) == 0u) {
+		return false;
+	}
+
+	if (!sched_make_runnable_on_cpu(cpu, current, true)) return false;
+
+	sched_stat_increment(&sched_stats.timeslice_preempt_count);
+	sched_dispatch_next(cpu);
+	return true;
 }
 
 uint64_t sched_tick_count(void) {
@@ -422,6 +490,8 @@ void sched_tick(void) {
 
 		(void)sched_make_runnable(due);
 	}
+
+	sched_charge_current_timeslice(cpu_current());
 }
 
 bool sched_block_current_locked(struct thread_wait_queue* queue, enum thread_block_reason reason,
@@ -590,6 +660,25 @@ void sched_exit_current(thread_exit_code_t exit_code) {
 size_t sched_run_queue_depth(struct cpu* cpu) {
 	struct sched_cpu_state* state = sched_state_for_cpu(cpu);
 	return state == NULL ? 0u : run_queue_depth(&state->run_queue);
+}
+
+void sched_get_stats(struct sched_stats* out_stats) {
+	if (out_stats == NULL) return;
+
+	out_stats->context_switch_count    = __atomic_load_n(&sched_stats.context_switch_count, __ATOMIC_RELAXED);
+	out_stats->timeslice_preempt_count = __atomic_load_n(&sched_stats.timeslice_preempt_count, __ATOMIC_RELAXED);
+	out_stats->yield_count             = __atomic_load_n(&sched_stats.yield_count, __ATOMIC_RELAXED);
+}
+
+void sched_debug_dump(void) {
+	struct sched_stats stats;
+
+	sched_get_stats(&stats);
+	printf("kernel: sched stats: switches=%llu preempts=%llu yields=%llu ticks=%llu\n",
+	       (unsigned long long)stats.context_switch_count,
+	       (unsigned long long)stats.timeslice_preempt_count,
+	       (unsigned long long)stats.yield_count,
+	       (unsigned long long)sched_tick_count());
 }
 
 void sched_enter_idle(void) {

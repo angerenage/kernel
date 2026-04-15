@@ -43,6 +43,7 @@ struct cpu {
 	enum cpu_role  role;
 	enum cpu_state state;
 	struct thread* current_thread;
+	bool           reschedule_requested;
 	bool           interrupts_ready;
 	uint32_t       irq_disable_depth;
 	uint32_t       exception_depth;

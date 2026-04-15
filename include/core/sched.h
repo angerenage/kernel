@@ -7,6 +7,12 @@
 
 struct cpu;
 
+struct sched_stats {
+	uint64_t context_switch_count;
+	uint64_t timeslice_preempt_count;
+	uint64_t yield_count;
+};
+
 /*
  * Minimal per-CPU scheduler front-end.
  * Each CPU owns a run queue plus a permanently available idle thread.
@@ -35,6 +41,15 @@ bool sched_remove_runnable(struct thread* thread);
 
 /* Yield the current CPU so another runnable thread may be dispatched. */
 void sched_yield(void);
+
+/* Ask the scheduler to preempt cpu at the next safe interrupt-exit point. */
+void sched_request_reschedule(struct cpu* cpu);
+
+/* Return whether cpu has a deferred preemption request pending. */
+bool sched_reschedule_pending(const struct cpu* cpu);
+
+/* Consume any pending preemption request for the current CPU on interrupt exit. */
+bool sched_handle_interrupt_exit(void);
 
 /* Return the scheduler's monotonic tick counter. */
 uint64_t sched_tick_count(void);
@@ -77,6 +92,12 @@ void sched_exit_current(thread_exit_code_t exit_code);
 
 /* Return the current run-queue depth for a CPU. */
 size_t sched_run_queue_depth(struct cpu* cpu);
+
+/* Snapshot the scheduler counters used for debug visibility and tests. */
+void sched_get_stats(struct sched_stats* out_stats);
+
+/* Print a one-line debug dump of the scheduler counters. */
+void sched_debug_dump(void);
 
 /* Enter the CPU's idle loop and never return. */
 __attribute__((noreturn))

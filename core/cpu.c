@@ -23,17 +23,18 @@ bool cpu_topology_init(const struct cpu_init_info* init_info, size_t cpu_count, 
 
 		if (role == CPU_ROLE_BSP && i != bsp_index) role = CPU_ROLE_AP;
 		cpu_storage[i] = (struct cpu){
-			.index             = init_info[i].index,
-			.processor_id      = init_info[i].processor_id,
-			.arch_id           = init_info[i].arch_id,
-			.role              = role,
-			.state             = CPU_STATE_PRESENT,
-			.current_thread    = NULL,
-			.interrupts_ready  = false,
-			.irq_disable_depth = 0u,
-			.exception_depth   = 0u,
-			.boot_stack_base   = init_info[i].boot_stack_base,
-			.boot_stack_top    = init_info[i].boot_stack_top,
+			.index                = init_info[i].index,
+			.processor_id         = init_info[i].processor_id,
+			.arch_id              = init_info[i].arch_id,
+			.role                 = role,
+			.state                = CPU_STATE_PRESENT,
+			.current_thread       = NULL,
+			.reschedule_requested = false,
+			.interrupts_ready     = false,
+			.irq_disable_depth    = 0u,
+			.exception_depth      = 0u,
+			.boot_stack_base      = init_info[i].boot_stack_base,
+			.boot_stack_top       = init_info[i].boot_stack_top,
 		};
 	}
 

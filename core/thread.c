@@ -150,7 +150,11 @@ void thread_mark_running(struct thread* thread, struct cpu* cpu) {
 	thread->cpu           = cpu;
 	thread->blocked_queue = NULL;
 	thread->block_reason  = THREAD_BLOCK_NONE;
-	if (!thread_is_idle(thread) && !thread_is_terminated(thread)) thread->state = THREAD_STATE_RUNNING;
+	if (!thread_is_idle(thread) && !thread_is_terminated(thread)) {
+		if (thread->timeslice_ticks == 0u) thread->timeslice_ticks = THREAD_DEFAULT_TIMESLICE_TICKS;
+		if (thread->timeslice_remaining == 0u) thread->timeslice_remaining = thread->timeslice_ticks;
+		thread->state = THREAD_STATE_RUNNING;
+	}
 }
 
 void thread_mark_blocked(struct thread* thread, enum thread_block_reason reason) {
