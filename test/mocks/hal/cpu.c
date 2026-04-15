@@ -1,7 +1,10 @@
 #include <hal/cpu.h>
 #include <stddef.h>
 
-static _Thread_local void* hosted_cpu_local_ptr;
+#include "cpu_mock.h"
+
+static _Thread_local void*                hosted_cpu_local_ptr;
+static hal_cpu_mock_context_switch_hook_t hosted_context_switch_hook;
 
 uint64_t hal_cpu_boot_arch_id(void) {
 	return 0u;
@@ -28,9 +31,15 @@ bool hal_cpu_thread_context_init(struct thread_context* context, uintptr_t stack
 }
 
 void hal_cpu_context_switch(struct thread_context* current, const struct thread_context* next) {
+	if (hosted_context_switch_hook != NULL) hosted_context_switch_hook(current, next);
+
 	(void)current;
 	(void)next;
 }
 
 void hal_cpu_park(void) {
+}
+
+void hal_cpu_mock_set_context_switch_hook(hal_cpu_mock_context_switch_hook_t hook) {
+	hosted_context_switch_hook = hook;
 }

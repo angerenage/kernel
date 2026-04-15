@@ -8,6 +8,11 @@
 #include <hal/cpu.h>
 #include <hal/interrupts.h>
 
+#include "../mocks/hal/cpu_mock.h"
+
+static bool   mutex_test_switch_hook_active;
+static size_t mutex_test_switch_hook_runs;
+
 static void init_bound_bootstrap_cpu(void) {
 	irq_enable_local();
 	cr_assert(cpu_topology_init_bootstrap(0x100000u, 0x104000u), "cpu_topology_init_bootstrap failed");
@@ -18,11 +23,36 @@ static void init_bound_bootstrap_cpu(void) {
 
 static void reset_test_state(void) {
 	irq_enable_local();
+	hal_cpu_mock_set_context_switch_hook(NULL);
+	mutex_test_switch_hook_active = false;
+	mutex_test_switch_hook_runs   = 0u;
 	hal_cpu_local_bind(NULL);
 }
 
 static void mutex_test_entry(void* arg) {
 	(void)arg;
+}
+
+static void mutex_test_set_one_tick_timeslice(struct thread* thread) {
+	if (thread == NULL) return;
+
+	thread->timeslice_ticks     = 1u;
+	thread->timeslice_remaining = 1u;
+}
+
+static void mutex_test_timeout_context_switch_hook(struct thread_context* current, const struct thread_context* next) {
+	(void)current;
+	(void)next;
+
+	if (mutex_test_switch_hook_active || mutex_test_switch_hook_runs != 0u) return;
+
+	mutex_test_switch_hook_active = true;
+	mutex_test_switch_hook_runs++;
+	sched_tick();
+	(void)sched_handle_interrupt_exit();
+	sched_tick();
+	(void)sched_handle_interrupt_exit();
+	mutex_test_switch_hook_active = false;
 }
 
 Test(mutex, init_try_lock_and_unlock_track_owner_and_state) {
@@ -199,6 +229,85 @@ Test(mutex, timed_lock_zero_timeout_times_out_when_contended) {
 
 	sched_set_current(cpu_current(), &owner);
 	cr_assert(mutex_unlock(&mutex), "owner should still be able to unlock");
+	hal_clock_stop();
+	reset_test_state();
+}
+
+Test(mutex, timed_lock_times_out_while_preemption_keeps_other_workers_running) {
+	const struct thread_create_params owner_params = {
+		.name              = "mutex_owner",
+		.entry             = mutex_test_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x3a0000u,
+		.kernel_stack_top  = 0x3a4000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	const struct thread_create_params waiter_params = {
+		.name              = "mutex_waiter",
+		.entry             = mutex_test_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x3b0000u,
+		.kernel_stack_top  = 0x3b4000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	const struct thread_create_params runner1_params = {
+		.name              = "runner1",
+		.entry             = mutex_test_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x3c0000u,
+		.kernel_stack_top  = 0x3c4000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	const struct thread_create_params runner2_params = {
+		.name              = "runner2",
+		.entry             = mutex_test_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x3d0000u,
+		.kernel_stack_top  = 0x3d4000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	struct mutex       mutex;
+	struct thread      owner;
+	struct thread      waiter;
+	struct thread      runner1;
+	struct thread      runner2;
+	struct sched_stats stats;
+
+	init_bound_bootstrap_cpu();
+	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
+	cr_assert(hal_clock_start(1000u, NULL, NULL), "hal_clock_start failed");
+
+	mutex_init(&mutex);
+	cr_assert(kthread_create(&owner, &owner_params), "owner kthread_create failed");
+	cr_assert(kthread_create(&waiter, &waiter_params), "waiter kthread_create failed");
+	cr_assert(kthread_create(&runner1, &runner1_params), "runner1 kthread_create failed");
+	cr_assert(kthread_create(&runner2, &runner2_params), "runner2 kthread_create failed");
+	mutex_test_set_one_tick_timeslice(&runner1);
+	mutex_test_set_one_tick_timeslice(&runner2);
+
+	sched_set_current(cpu_current(), &owner);
+	cr_assert(mutex_try_lock(&mutex), "owner should acquire the mutex");
+	cr_assert(sched_make_runnable(&runner1), "runner1 should become runnable");
+	cr_assert(sched_make_runnable(&runner2), "runner2 should become runnable");
+
+	hal_cpu_mock_set_context_switch_hook(mutex_test_timeout_context_switch_hook);
+	sched_set_current(cpu_current(), &waiter);
+	cr_assert(!mutex_timed_lock(&mutex, 2u), "timed mutex wait should time out while other workers keep running");
+	cr_assert_eq(mutex_owner(&mutex), &owner, "timed wait timeout must not change ownership");
+	cr_assert_eq(mutex_waiter_count(&mutex), 0u, "timed wait timeout should remove the waiter from the queue");
+	cr_assert_eq(mutex_test_switch_hook_runs, 1u, "the timeout simulation should run once");
+
+	sched_get_stats(&stats);
+	cr_assert_gt(stats.timeslice_preempt_count, 0u, "timer-driven preemption should occur during the timeout window");
+
+	hal_cpu_mock_set_context_switch_hook(NULL);
+	sched_set_current(cpu_current(), &owner);
+	cr_assert(mutex_unlock(&mutex), "owner should still be able to unlock after the timeout");
 	hal_clock_stop();
 	reset_test_state();
 }
