@@ -137,17 +137,14 @@ static bool is_page_fault_exception(uint64_t code) {
 }
 
 void handle_exception(const struct exception_frame* frame) {
-	bool     is_interrupt;
-	uint64_t code;
+	bool     is_interrupt = (frame->scause >> 63) != 0;
+	uint64_t code         = frame->scause & ~(1ull << 63);
 
-	cpu_enter_exception();
+	if (!is_interrupt) cpu_enter_exception();
 	if (clock_handle_irq(frame)) {
-		cpu_leave_exception();
+		if (!is_interrupt) cpu_leave_exception();
 		return;
 	}
-
-	is_interrupt = (frame->scause >> 63) != 0;
-	code         = frame->scause & ~(1ull << 63);
 
 	if (!is_interrupt && is_page_fault_exception(code) && vmm_resolve_page_fault(frame->stval)) {
 		cpu_leave_exception();

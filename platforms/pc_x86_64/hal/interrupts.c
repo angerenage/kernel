@@ -242,13 +242,13 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 void x86_64_handle_interrupt(const struct interrupt_frame* frame) {
 	unsigned long long vector = frame->vector;
 	uint64_t           fault_addr;
+	bool               trap_context = !is_external_irq(vector);
 
-	cpu_enter_exception();
+	if (trap_context) cpu_enter_exception();
 	if (is_external_irq(vector)) {
 		bool handled = clock_handle_irq((unsigned)vector);
 		interrupt_send_eoi((unsigned)vector);
 		if (handled) {
-			cpu_leave_exception();
 			return;
 		}
 	}
@@ -256,7 +256,7 @@ void x86_64_handle_interrupt(const struct interrupt_frame* frame) {
 	fault_addr = vector == 14u ? read_cr2() : 0;
 	if (vector == 14u && x86_page_fault_is_not_present(frame->error_code) &&
 	    vmm_resolve_page_fault((uintptr_t)fault_addr)) {
-		cpu_leave_exception();
+		if (trap_context) cpu_leave_exception();
 		return;
 	}
 

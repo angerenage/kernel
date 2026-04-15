@@ -197,14 +197,14 @@ void handle_exception(const struct exception_frame* frame) {
 	uint64_t ecode;
 	uint64_t esubcode;
 
-	cpu_enter_exception();
+	ecode = (frame->estat >> 16) & 0x3fu;
+	if (ecode != 0u) cpu_enter_exception();
 	if (clock_handle_irq(frame)) {
-		cpu_leave_exception();
+		if (ecode != 0u) cpu_leave_exception();
 		return;
 	}
 
 	is_pending = frame->estat & 0x1fffu;
-	ecode      = (frame->estat >> 16) & 0x3fu;
 	esubcode   = (frame->estat >> 22) & 0x1ffu;
 
 	if (is_page_invalid_exception(ecode) && vmm_resolve_page_fault(frame->badv)) {

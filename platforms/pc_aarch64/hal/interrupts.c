@@ -230,9 +230,11 @@ static const char* abort_target_el(uint64_t ec) {
 }
 
 void handle_exception(const struct exception_frame* frame) {
-	cpu_enter_exception();
+	bool is_irq = (frame->vector & 0x3u) == 1u;
+
+	if (!is_irq) cpu_enter_exception();
 	if (clock_handle_irq(frame)) {
-		cpu_leave_exception();
+		if (!is_irq) cpu_leave_exception();
 		return;
 	}
 
@@ -246,7 +248,7 @@ void handle_exception(const struct exception_frame* frame) {
 	bool     fnv   = ((iss >> 10) & 1u) != 0;
 
 	if (!fnv && is_translation_fault(dfsc) && vmm_resolve_page_fault(frame->far)) {
-		cpu_leave_exception();
+		if (!is_irq) cpu_leave_exception();
 		return;
 	}
 
