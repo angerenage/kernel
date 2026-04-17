@@ -41,6 +41,13 @@ test_suites = [
 		'suites': ['unit', 'base'],
 	},
 	{
+		'name': 'condvar',
+		'sources': files(
+			'core/condvar_test.c',
+		),
+		'suites': ['unit', 'core'],
+	},
+	{
 		'name': 'mutex',
 		'sources': files(
 			'core/mutex_test.c',

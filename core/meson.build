@@ -1,4 +1,5 @@
 core_sources = files(
+	'condvar.c',
 	'cpu.c',
 	'irq.c',
 	'mutex.c',
