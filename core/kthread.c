@@ -14,8 +14,18 @@ bool kthread_start(struct thread* thread) {
 	return sched_make_runnable(thread);
 }
 
+void kthread_testcancel(void) {
+	struct thread* current = kthread_current();
+
+	if (!thread_should_cancel(current)) return;
+
+	sched_exit_current(THREAD_EXIT_CODE_CANCELLED);
+}
+
 void kthread_yield(void) {
+	kthread_testcancel();
 	sched_yield();
+	kthread_testcancel();
 }
 
 bool kthread_sleep_ms(uint64_t ms) {
@@ -23,6 +33,7 @@ bool kthread_sleep_ms(uint64_t ms) {
 	uint64_t sleep_ticks;
 	uint64_t current_tick;
 
+	kthread_testcancel();
 	if (ms == 0u) {
 		kthread_yield();
 		return true;
@@ -41,12 +52,15 @@ bool kthread_sleep_ms(uint64_t ms) {
 
 	current_tick = sched_tick_count();
 	if (current_tick > UINT64_MAX - sleep_ticks) return false;
-	return sched_sleep_until_tick(current_tick + sleep_ticks);
+	if (!sched_sleep_until_tick(current_tick + sleep_ticks)) return false;
+	kthread_testcancel();
+	return true;
 }
 
 bool kthread_join(struct thread* target, thread_exit_code_t* out_exit_code) {
 	struct thread* current = kthread_current();
 
+	kthread_testcancel();
 	if (target == NULL || current == NULL || target == current || thread_is_idle(target) ||
 	    !thread_is_joinable(target)) {
 		return false;
@@ -54,6 +68,7 @@ bool kthread_join(struct thread* target, thread_exit_code_t* out_exit_code) {
 
 	if (!thread_is_terminated(target)) {
 		sched_block_current(&target->join_wait_queue, THREAD_BLOCK_JOIN);
+		kthread_testcancel();
 		if (!thread_is_terminated(target)) return false;
 	}
 

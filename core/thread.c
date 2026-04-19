@@ -11,10 +11,17 @@ static void thread_reset_links(struct thread* thread) {
 	thread->flags &= ~THREAD_FLAG_QUEUED;
 }
 
+static void thread_exit_if_cancelled(struct thread* thread) {
+	if (!thread_should_cancel(thread)) return;
+
+	sched_exit_current(THREAD_EXIT_CODE_CANCELLED);
+}
+
 __attribute__((noreturn))
 static void thread_entry_bootstrap(void* ctx) {
 	struct thread* thread = (struct thread*)ctx;
 
+	thread_exit_if_cancelled(thread);
 	if (thread != NULL && thread->entry != NULL) thread->entry(thread->arg);
 	sched_exit_current(0u);
 }
@@ -107,6 +114,16 @@ bool thread_cancel_requested(const struct thread* thread) {
 	return thread != NULL && (thread->flags & THREAD_FLAG_CANCEL_PENDING) != 0u;
 }
 
+bool thread_cancel_enabled(const struct thread* thread) {
+	return thread != NULL && (thread->flags & THREAD_FLAG_CANCEL_DISABLED) == 0u;
+}
+
+bool thread_should_cancel(const struct thread* thread) {
+	if (thread == NULL || thread_is_idle(thread) || thread_is_terminated(thread)) return false;
+
+	return thread_cancel_requested(thread) && thread_cancel_enabled(thread);
+}
+
 bool thread_detach(struct thread* thread) {
 	if (thread == NULL || thread_is_idle(thread) || thread->state == THREAD_STATE_ZOMBIE) return false;
 	if (!thread_is_joinable(thread)) return false;
@@ -119,6 +136,7 @@ bool thread_request_cancel(struct thread* thread) {
 	if (thread == NULL || thread_is_idle(thread) || thread_is_terminated(thread)) return false;
 
 	thread->flags |= THREAD_FLAG_CANCEL_PENDING;
+	sched_cancel_thread(thread);
 	return true;
 }
 

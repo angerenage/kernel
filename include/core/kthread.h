@@ -33,6 +33,9 @@ bool kthread_detach(struct thread* target);
 /* Request deferred cancellation on target thread. */
 bool kthread_cancel(struct thread* target);
 
+/* Exit the current thread when a deferred cancellation request is pending. */
+void kthread_testcancel(void);
+
 /* Publish the current thread exit code and hand control back to the scheduler. */
 __attribute__((noreturn))
 void kthread_exit(thread_exit_code_t exit_code);

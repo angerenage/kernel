@@ -96,6 +96,9 @@ bool sched_wake_one(struct thread_wait_queue* queue);
 /* Wake every blocked waiter from queue and return the number of threads made runnable. */
 size_t sched_wake_all(struct thread_wait_queue* queue);
 
+/* Force a cancellation-pending thread out of any blocking wait so it can reach a cancellation point. */
+void sched_cancel_thread(struct thread* thread);
+
 /* Publish the current thread's final exit status, wake joiners, and never return. */
 __attribute__((noreturn))
 void sched_exit_current(thread_exit_code_t exit_code);

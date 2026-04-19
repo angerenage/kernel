@@ -1,4 +1,5 @@
 #include <core/condvar.h>
+#include <core/kthread.h>
 #include <core/math.h>
 #include <core/sched.h>
 #include <hal/clock.h>
@@ -43,6 +44,7 @@ void condvar_wait(struct condvar* condvar, struct mutex* mutex) {
 	if (condvar == NULL || mutex == NULL) return;
 	current = sched_current_thread();
 	if (current == NULL) condvar_trap();
+	kthread_testcancel();
 
 	mutex_state = spinlock_lock_irqsave(&mutex->lock);
 	if (mutex->owner != current) {
@@ -61,6 +63,7 @@ void condvar_wait(struct condvar* condvar, struct mutex* mutex) {
 	}
 	irq_restore(mutex_state);
 	mutex_lock(mutex);
+	kthread_testcancel();
 }
 
 bool condvar_timed_wait(struct condvar* condvar, struct mutex* mutex, uint64_t timeout_ms) {
@@ -73,6 +76,7 @@ bool condvar_timed_wait(struct condvar* condvar, struct mutex* mutex, uint64_t t
 	if (condvar == NULL || mutex == NULL) return false;
 	current = sched_current_thread();
 	if (current == NULL) condvar_trap();
+	kthread_testcancel();
 
 	if (!condvar_timeout_deadline(timeout_ms, &deadline_tick)) return false;
 
@@ -90,6 +94,7 @@ bool condvar_timed_wait(struct condvar* condvar, struct mutex* mutex, uint64_t t
 	signaled = sched_block_current_until_locked(&condvar->waiters, THREAD_BLOCK_WAIT_QUEUE, deadline_tick, wait_state);
 	irq_restore(mutex_state);
 	mutex_lock(mutex);
+	kthread_testcancel();
 	return signaled;
 }
 

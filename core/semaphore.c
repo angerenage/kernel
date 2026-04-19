@@ -1,3 +1,4 @@
+#include <core/kthread.h>
 #include <core/math.h>
 #include <core/sched.h>
 #include <core/semaphore.h>
@@ -55,6 +56,7 @@ bool semaphore_try_acquire(struct semaphore* semaphore) {
 void semaphore_acquire(struct semaphore* semaphore) {
 	if (semaphore == NULL) return;
 	if (sched_current_thread() == NULL) semaphore_trap();
+	kthread_testcancel();
 
 	for (;;) {
 		struct irq_state semaphore_state;
@@ -74,6 +76,7 @@ void semaphore_acquire(struct semaphore* semaphore) {
 			semaphore_trap();
 		}
 		irq_restore(semaphore_state);
+		kthread_testcancel();
 	}
 }
 
@@ -82,6 +85,7 @@ bool semaphore_timed_acquire(struct semaphore* semaphore, uint64_t timeout_ms) {
 
 	if (semaphore == NULL) return false;
 	if (sched_current_thread() == NULL) semaphore_trap();
+	kthread_testcancel();
 
 	if (timeout_ms == 0u) return semaphore_try_acquire(semaphore);
 	if (!semaphore_timeout_deadline(timeout_ms, &deadline_tick)) return false;
@@ -101,9 +105,11 @@ bool semaphore_timed_acquire(struct semaphore* semaphore, uint64_t timeout_ms) {
 		spinlock_unlock(&semaphore->lock);
 		if (!sched_block_current_until_locked(&semaphore->waiters, THREAD_BLOCK_SEMAPHORE, deadline_tick, wait_state)) {
 			irq_restore(semaphore_state);
+			kthread_testcancel();
 			return false;
 		}
 		irq_restore(semaphore_state);
+		kthread_testcancel();
 	}
 }
 

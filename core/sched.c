@@ -291,6 +291,12 @@ static bool sched_thread_wait_status_transition(struct thread* thread, enum thre
 		&thread->wait_status, &expected_value, (uint32_t)desired, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
 }
 
+static void sched_thread_wait_status_store(struct thread* thread, enum thread_wait_status status) {
+	if (thread == NULL) return;
+
+	__atomic_store_n(&thread->wait_status, (uint32_t)status, __ATOMIC_RELEASE);
+}
+
 static struct thread* sched_select_next(struct cpu* cpu) {
 	struct sched_cpu_state* state = sched_state_for_cpu(cpu);
 	struct thread*          next;
@@ -496,9 +502,10 @@ uint64_t sched_tick_count(void) {
 }
 
 bool sched_sleep_until_tick(uint64_t deadline_tick) {
-	struct cpu*      cpu = cpu_current();
-	struct thread*   current;
-	struct irq_state state;
+	struct cpu*             cpu = cpu_current();
+	struct thread*          current;
+	struct irq_state        state;
+	enum thread_wait_status wait_status;
 
 	if (cpu == NULL) return false;
 
@@ -513,10 +520,14 @@ bool sched_sleep_until_tick(uint64_t deadline_tick) {
 
 	sched_set_cpu_activity(cpu, SCHED_CPU_ACTIVITY_KERNEL);
 	thread_mark_blocked(current, THREAD_BLOCK_SLEEP);
+	sched_thread_wait_status_store(current, THREAD_WAIT_STATUS_PENDING);
 	sched_sleep_queue_insert_locked(current, deadline_tick);
 	spinlock_unlock_irqrestore(&sched_sleep_lock, state);
 
 	sched_dispatch_next(cpu);
+	wait_status = sched_thread_wait_status_load(current);
+	sched_thread_wait_status_store(current, THREAD_WAIT_STATUS_NONE);
+	(void)wait_status;
 	return true;
 }
 
@@ -544,12 +555,16 @@ void sched_tick(void) {
 		spinlock_unlock_irqrestore(&sched_sleep_lock, state);
 
 		if (due == NULL) break;
-		if (due->blocked_queue != NULL && sched_thread_wait_status_load(due) == THREAD_WAIT_STATUS_PENDING) {
-			struct thread_wait_queue* queue = due->blocked_queue;
+		if (sched_thread_wait_status_load(due) == THREAD_WAIT_STATUS_PENDING) {
+			enum thread_wait_status wake_status =
+				due->blocked_queue == NULL ? THREAD_WAIT_STATUS_SIGNALED : THREAD_WAIT_STATUS_TIMED_OUT;
 
-			if (!sched_thread_wait_status_transition(due, THREAD_WAIT_STATUS_PENDING, THREAD_WAIT_STATUS_TIMED_OUT)) {
+			if (!sched_thread_wait_status_transition(due, THREAD_WAIT_STATUS_PENDING, wake_status)) {
 				continue;
 			}
+		}
+		if (due->blocked_queue != NULL && sched_thread_wait_status_load(due) == THREAD_WAIT_STATUS_TIMED_OUT) {
+			struct thread_wait_queue* queue = due->blocked_queue;
 
 			state = spinlock_lock_irqsave(&queue->lock);
 			(void)sched_wait_queue_remove_locked(queue, due);
@@ -589,16 +604,20 @@ bool sched_block_current_locked(struct thread_wait_queue* queue, enum thread_blo
 
 	sched_set_cpu_activity(cpu, SCHED_CPU_ACTIVITY_KERNEL);
 	thread_mark_blocked(current, reason);
+	current->blocked_queue = queue;
+	sched_thread_wait_status_store(current, THREAD_WAIT_STATUS_PENDING);
 	queued = sched_wait_queue_enqueue_locked(queue, current);
 	spinlock_unlock_irqrestore(&queue->lock, queue_irq_state);
 
 	if (!queued) {
 		thread_mark_running(current, cpu);
+		sched_thread_wait_status_store(current, THREAD_WAIT_STATUS_NONE);
 		sched_set_cpu_activity(cpu, sched_activity_for_thread(current));
 		return false;
 	}
 
 	sched_dispatch_next(cpu);
+	sched_thread_wait_status_store(current, THREAD_WAIT_STATUS_NONE);
 	return true;
 }
 
@@ -646,6 +665,7 @@ bool sched_block_current_until_locked(struct thread_wait_queue* queue, enum thre
 
 	if (!queued) {
 		thread_mark_running(current, cpu);
+		sched_thread_wait_status_store(current, THREAD_WAIT_STATUS_NONE);
 		sched_set_cpu_activity(cpu, sched_activity_for_thread(current));
 		return false;
 	}
@@ -689,7 +709,7 @@ bool sched_wake_one(struct thread_wait_queue* queue) {
 			(void)sched_sleep_queue_remove_locked(thread);
 			spinlock_unlock_irqrestore(&sched_sleep_lock, sleep_state);
 		}
-		else if (thread->blocked_queue == queue) {
+		else if (sched_thread_wait_status_load(thread) != THREAD_WAIT_STATUS_NONE) {
 			continue;
 		}
 
@@ -707,6 +727,38 @@ size_t sched_wake_all(struct thread_wait_queue* queue) {
 	}
 
 	return woken;
+}
+
+void sched_cancel_thread(struct thread* thread) {
+	struct thread_wait_queue* queue;
+
+	if (!thread_should_cancel(thread)) return;
+
+	if (thread->state == THREAD_STATE_RUNNING) {
+		if (thread->cpu != NULL) sched_request_reschedule(thread->cpu);
+		return;
+	}
+	if (thread->state != THREAD_STATE_BLOCKED) return;
+
+	queue = thread->blocked_queue;
+	if (!sched_thread_wait_status_transition(thread, THREAD_WAIT_STATUS_PENDING, THREAD_WAIT_STATUS_CANCELED)) {
+		return;
+	}
+
+	if (queue != NULL) {
+		struct irq_state queue_state = spinlock_lock_irqsave(&queue->lock);
+
+		(void)sched_wait_queue_remove_locked(queue, thread);
+		spinlock_unlock_irqrestore(&queue->lock, queue_state);
+	}
+	if (thread->block_reason == THREAD_BLOCK_SLEEP || thread->wake_deadline_tick != 0u) {
+		struct irq_state sleep_state = spinlock_lock_irqsave(&sched_sleep_lock);
+
+		(void)sched_sleep_queue_remove_locked(thread);
+		spinlock_unlock_irqrestore(&sched_sleep_lock, sleep_state);
+	}
+
+	(void)sched_make_runnable(thread);
 }
 
 void sched_exit_current(thread_exit_code_t exit_code) {

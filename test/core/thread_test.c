@@ -126,10 +126,16 @@ Test(thread, lifecycle_helpers_update_state_flags_and_links) {
 
 	cr_assert(thread_request_cancel(&thread), "thread_request_cancel should succeed on live thread");
 	cr_assert(thread_cancel_requested(&thread), "cancel request flag should be visible");
+	cr_assert(thread_cancel_enabled(&thread), "fresh thread should start with cancellation enabled");
+	cr_assert(thread_should_cancel(&thread), "pending cancellation should be actionable while enabled");
 	thread_set_cancel_enabled(&thread, false);
 	cr_assert((thread.flags & THREAD_FLAG_CANCEL_DISABLED) != 0u, "cancel disable flag should be set");
+	cr_assert(!thread_cancel_enabled(&thread), "cancel disable helper should reflect the masked state");
+	cr_assert(!thread_should_cancel(&thread), "masked cancellation should not trip a cancellation point");
 	thread_set_cancel_enabled(&thread, true);
 	cr_assert((thread.flags & THREAD_FLAG_CANCEL_DISABLED) == 0u, "cancel disable flag should clear");
+	cr_assert(thread_cancel_enabled(&thread), "cancel enable helper should reflect the unmasked state");
+	cr_assert(thread_should_cancel(&thread), "re-enabling cancellation should re-arm pending cancellation");
 
 	thread_mark_exiting(&thread, 99u);
 	cr_assert_eq(thread.state, THREAD_STATE_EXITING, "thread_mark_exiting should move thread to EXITING");

@@ -1,3 +1,4 @@
+#include <core/kthread.h>
 #include <core/math.h>
 #include <core/mutex.h>
 #include <core/sched.h>
@@ -42,6 +43,7 @@ void mutex_lock(struct mutex* mutex) {
 
 	current = sched_current_thread();
 	if (current == NULL) mutex_trap();
+	kthread_testcancel();
 
 	for (;;) {
 		struct irq_state mutex_state;
@@ -65,6 +67,7 @@ void mutex_lock(struct mutex* mutex) {
 			mutex_trap();
 		}
 		irq_restore(mutex_state);
+		kthread_testcancel();
 	}
 }
 
@@ -78,6 +81,7 @@ bool mutex_timed_lock(struct mutex* mutex, uint64_t timeout_ms) {
 
 	current = sched_current_thread();
 	if (current == NULL) mutex_trap();
+	kthread_testcancel();
 
 	if (timeout_ms == 0u) {
 		struct irq_state state;
@@ -128,9 +132,11 @@ bool mutex_timed_lock(struct mutex* mutex, uint64_t timeout_ms) {
 		spinlock_unlock(&mutex->lock);
 		if (!sched_block_current_until_locked(&mutex->waiters, THREAD_BLOCK_MUTEX, deadline_tick, wait_state)) {
 			irq_restore(mutex_state);
+			kthread_testcancel();
 			return false;
 		}
 		irq_restore(mutex_state);
+		kthread_testcancel();
 	}
 }
 

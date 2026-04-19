@@ -19,6 +19,8 @@ typedef void (*thread_entry_t)(void* arg);
 /* Machine-word-sized thread exit value published to joiners. */
 typedef uintptr_t thread_exit_code_t;
 
+#define THREAD_EXIT_CODE_CANCELLED ((thread_exit_code_t)UINTPTR_MAX)
+
 /* High-level lifecycle state for a thread descriptor. */
 enum thread_state {
 	THREAD_STATE_NEW = 0,
@@ -57,6 +59,7 @@ enum thread_wait_status {
 	THREAD_WAIT_STATUS_PENDING,
 	THREAD_WAIT_STATUS_SIGNALED,
 	THREAD_WAIT_STATUS_TIMED_OUT,
+	THREAD_WAIT_STATUS_CANCELED,
 };
 
 /* Parameters used to initialize a non-idle thread descriptor. */
@@ -131,6 +134,12 @@ bool thread_is_joinable(const struct thread* thread);
 
 /* Return true when deferred cancellation has been requested for the thread. */
 bool thread_cancel_requested(const struct thread* thread);
+
+/* Return true when deferred cancellation checks are currently unmasked. */
+bool thread_cancel_enabled(const struct thread* thread);
+
+/* Return true when the thread should exit at the next cancellation point. */
+bool thread_should_cancel(const struct thread* thread);
 
 /* Convert a joinable thread into a detached thread before it reaches ZOMBIE. */
 bool thread_detach(struct thread* thread);
