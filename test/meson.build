@@ -55,6 +55,13 @@ test_suites = [
 		'suites': ['unit', 'core'],
 	},
 	{
+		'name': 'semaphore',
+		'sources': files(
+			'core/semaphore_test.c',
+		),
+		'suites': ['unit', 'core'],
+	},
+	{
 		'name': 'sched',
 		'sources': files(
 			'core/sched_test.c',
