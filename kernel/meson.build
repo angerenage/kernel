@@ -34,6 +34,8 @@ kernel_selftest_sources = files(
 	'test/selftests/vmm.c',
 	'test/selftests/kheap.c',
 	'test/selftests/sched_mutex.c',
+	'test/selftests/semaphore.c',
+	'test/selftests/condvar.c',
 )
 
 kernel_objs = base_sources + core_sources + kernel_format_sources + kernel_libk_sources + platform_kernel_objects + [
