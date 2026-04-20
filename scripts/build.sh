@@ -10,7 +10,7 @@ readonly ARCHES=(
 
 usage() {
 	cat <<'EOF'
-Usage: build.sh (--arch <arch> | --all) [--setup|-s] [--compile|-c] [-sc] [--reconfigure] [--no-tests] [--kernel-selftests] [--kernel-selftests-autorun]
+Usage: build.sh (--arch <arch> | --all) [--setup|-s] [--compile|-c] [-sc] [--reconfigure] [--no-tests] [--kernel-selftests] [--kernel-selftests-autorun] [--kernel-selftests-suite <name>]
 
 Target selection:
   --arch <arch>  Build a single architecture (x86_64, aarch64, riscv64, loongarch64).
@@ -28,12 +28,16 @@ Actions:
   --kernel-selftests-autorun
                   Configure Meson with -Dkernel_selftests_autorun=true.
                   Implies --kernel-selftests.
+  --kernel-selftests-suite <name>
+                  Configure Meson with -Dkernel_selftests_suite=<name>.
+                  Implies --kernel-selftests and boots only that suite.
 
 Examples:
   bash scripts/build.sh --arch x86_64
   bash scripts/build.sh --arch aarch64 --setup
   bash scripts/build.sh --arch riscv64 -sc
   bash scripts/build.sh --arch x86_64 --kernel-selftests --kernel-selftests-autorun
+  bash scripts/build.sh --arch x86_64 --kernel-selftests-suite vmm
   bash scripts/build.sh --all --compile
   bash scripts/build.sh --all -sc
 EOF
@@ -110,6 +114,7 @@ setup_arch() {
 		"-Dtests=$( (( BUILD_TESTS )) && printf true || printf false )"
 		"-Dkernel_selftests=$( (( BUILD_KERNEL_SELFTESTS )) && printf true || printf false )"
 		"-Dkernel_selftests_autorun=$( (( KERNEL_SELFTESTS_AUTORUN )) && printf true || printf false )"
+		"-Dkernel_selftests_suite=${KERNEL_SELFTESTS_SUITE}"
 	)
 
 	if (( RECONFIGURE )) || [[ -d "$build_dir" ]]; then
@@ -122,6 +127,7 @@ setup_arch() {
 			"-Dtests=$( (( BUILD_TESTS )) && printf true || printf false )"
 			"-Dkernel_selftests=$( (( BUILD_KERNEL_SELFTESTS )) && printf true || printf false )"
 			"-Dkernel_selftests_autorun=$( (( KERNEL_SELFTESTS_AUTORUN )) && printf true || printf false )"
+			"-Dkernel_selftests_suite=${KERNEL_SELFTESTS_SUITE}"
 		)
 	fi
 
@@ -194,6 +200,7 @@ RECONFIGURE=0
 BUILD_TESTS=1
 BUILD_KERNEL_SELFTESTS=0
 KERNEL_SELFTESTS_AUTORUN=0
+KERNEL_SELFTESTS_SUITE=""
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -242,6 +249,19 @@ while [[ $# -gt 0 ]]; do
 		--kernel-selftests-autorun)
 			BUILD_KERNEL_SELFTESTS=1
 			KERNEL_SELFTESTS_AUTORUN=1
+			shift
+			;;
+		--kernel-selftests-suite)
+			[[ $# -ge 2 ]] || error "missing value for --kernel-selftests-suite"
+			[[ -n "$2" ]] || error "--kernel-selftests-suite requires a non-empty suite name"
+			BUILD_KERNEL_SELFTESTS=1
+			KERNEL_SELFTESTS_SUITE="$2"
+			shift 2
+			;;
+		--kernel-selftests-suite=*)
+			[[ -n "${1#*=}" ]] || error "--kernel-selftests-suite requires a non-empty suite name"
+			BUILD_KERNEL_SELFTESTS=1
+			KERNEL_SELFTESTS_SUITE="${1#*=}"
 			shift
 			;;
 		-h|--help)

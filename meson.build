@@ -6,10 +6,21 @@ project('kernel', 'c',
 platform = get_option('platform')
 kernel_selftests = get_option('kernel_selftests')
 kernel_selftests_autorun = get_option('kernel_selftests_autorun')
+kernel_selftests_suite = get_option('kernel_selftests_suite')
 
 if kernel_selftests_autorun and not kernel_selftests
 	error('kernel_selftests_autorun requires -Dkernel_selftests=true')
 endif
+
+if kernel_selftests_suite != '' and not kernel_selftests
+	error('kernel_selftests_suite requires -Dkernel_selftests=true')
+endif
+
+foreach whitespace : [' ', '\t', '\n', '\r']
+	if kernel_selftests_suite.contains(whitespace)
+		error('kernel_selftests_suite must not contain whitespace')
+	endif
+endforeach
 
 freestanding_c_args = [
 	'-ffreestanding', '-fno-builtin', '-nostdinc',
@@ -36,8 +47,11 @@ alias_target('kernel', [kernel_elf])
 bash = find_program('bash', required : true)
 limine_script = files('scripts/make_limine_image.sh')
 limine_cmdline = 'loglevel=debug'
-if kernel_selftests_autorun
+if kernel_selftests_autorun or kernel_selftests_suite != ''
 	limine_cmdline += ' kernel.selftest=1'
+endif
+if kernel_selftests_suite != ''
+	limine_cmdline += ' kernel.selftest.suite=' + kernel_selftests_suite
 endif
 
 limine_conf_data = configuration_data()

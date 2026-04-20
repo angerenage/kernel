@@ -67,12 +67,14 @@ bash scripts/build.sh --all --setup
 bash scripts/build.sh --arch x86_64 --setup --no-tests
 bash scripts/build.sh --arch x86_64 --setup --kernel-selftests
 bash scripts/build.sh --arch x86_64 --setup --kernel-selftests --kernel-selftests-autorun
+bash scripts/build.sh --arch x86_64 --setup --kernel-selftests-suite vmm
 ```
 
 When no architecture is provided, the helper exits with guidance to use either `--arch <arch>` or `--all`.
 Use `--no-tests` if you want a kernel-only configure without native test dependencies installed.
 Use `--kernel-selftests` to compile in-kernel selftest suites into the kernel.
 Use `--kernel-selftests-autorun` to also inject `kernel.selftest=1` into the generated image so that booting the ISO runs the in-kernel tests automatically.
+Use `--kernel-selftests-suite <name>` to inject `kernel.selftest.suite=<name>` into the generated image and boot only that suite. This also enables selftest autorun for the generated image.
 
 If you prefer calling Meson directly, configure the architecture you want to build from the repository root:
 
@@ -100,6 +102,7 @@ To configure and compile in one command:
 bash scripts/build.sh --arch x86_64
 bash scripts/build.sh --arch riscv64 -sc
 bash scripts/build.sh --arch x86_64 --kernel-selftests --kernel-selftests-autorun
+bash scripts/build.sh --arch x86_64 --kernel-selftests-suite vmm
 bash scripts/build.sh --all
 bash scripts/build.sh --all -sc
 ```
@@ -172,7 +175,14 @@ bash scripts/build.sh --arch x86_64 --kernel-selftests --kernel-selftests-autoru
 bash scripts/run.sh --kernel-selftest --arch x86_64 --timeout 45
 ```
 
-If you only want a specific test suite:
+If you only want a specific in-kernel selftest suite:
+
+```sh
+bash scripts/build.sh --arch x86_64 --kernel-selftests-suite vmm --no-tests
+bash scripts/run.sh --kernel-selftest --arch x86_64 --timeout 45
+```
+
+If you only want a specific hosted Criterion test suite:
 
 ```sh
 bash scripts/run.sh -t --test-name pmm
@@ -191,12 +201,14 @@ bash scripts/run_qemu.sh --arch loongarch64
 
 The hosted Criterion tests under `test/` remain the right place for fast native unit coverage. For checks that must run inside the live kernel after boot-time memory initialization, there is now a small in-kernel selftest runner.
 
-Build-time control is split into two flags:
+Build-time control uses three options:
 
 - `--kernel-selftests` compiles the in-kernel selftest suites into the kernel binary
 - `--kernel-selftests-autorun` writes `kernel.selftest=1` into the generated image command line so they run automatically on boot
+- `--kernel-selftests-suite <name>` writes `kernel.selftest.suite=<name>` into the generated image command line and limits autorun to that suite
 
 The kernel runs selftests immediately after `pmm`, `vmm`, and `kheap` initialization, prints per-test results to serial, and emits a final `kernel: selftests result: PASS` or `FAIL` marker for automation.
+When a suite filter is present, only the matching registered suite is executed.
 
 The first in-kernel example is a `kheap` smoke test that:
 
@@ -211,7 +223,7 @@ To add more in-kernel tests:
 - export a `const struct kernel_selftest_suite`
 - register that suite in [`kernel/test/selftest.c`](/c:/Users/anger/Code/kernel/new/kernel/test/selftest.c)
 
-Use the assertion macros in [`include/kernel/selftest.h`](/c:/Users/anger/Code/kernel/new/include/kernel/selftest.h). For tests that allocate or lock resources, prefer the `_GOTO` variants so cleanup still runs on failure.
+Use the assertion macros in [`kernel/test/selftest.h`](/c:/Users/anger/Code/kernel/new/kernel/test/selftest.h). For tests that allocate or lock resources, prefer the `_GOTO` variants so cleanup still runs on failure.
 
 ## Notes
 
@@ -222,6 +234,7 @@ Use the assertion macros in [`include/kernel/selftest.h`](/c:/Users/anger/Code/k
 - `-Dtests=false` skips configuring the native Criterion test targets. `scripts/build.sh --no-tests` is the helper equivalent.
 - `-Dkernel_selftests=true` compiles in-kernel selftest code into the kernel. `scripts/build.sh --kernel-selftests` is the helper equivalent.
 - `-Dkernel_selftests_autorun=true` injects `kernel.selftest=1` into the generated image. `scripts/build.sh --kernel-selftests-autorun` is the helper equivalent.
+- `-Dkernel_selftests_suite=<name>` injects `kernel.selftest.suite=<name>` into the generated image and also causes selftests to autorun for that image. `scripts/build.sh --kernel-selftests-suite <name>` is the helper equivalent.
 - `scripts/build.sh` supports `--arch <arch>` for one target and `--all` to configure and/or compile every supported target in one parallel run.
 - `scripts/run.sh` has three modes: test mode with `--test`/`-t`, kernel selftest mode with `--kernel-selftest`, and QEMU mode otherwise.
 - The Limine helper script clones Limine into the build directory the first time the ISO target is built.

@@ -17,3 +17,8 @@ option('kernel_selftests_autorun',
 	type : 'boolean',
 	value : false,
 	description : 'Append kernel.selftest=1 to the generated boot image command line.')
+
+option('kernel_selftests_suite',
+	type : 'string',
+	value : '',
+	description : 'Append kernel.selftest.suite=<name> to the generated boot image command line.')

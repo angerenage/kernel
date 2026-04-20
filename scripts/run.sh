@@ -20,6 +20,8 @@ Modes:
   --test, -t           Run Meson tests for the current machine architecture.
   --kernel-selftest    Boot QEMU, watch serial output, and exit non-interactively
                        based on in-kernel selftest PASS/FAIL markers.
+                       To limit the run to one suite, build the image first with
+                       scripts/build.sh --kernel-selftests-suite <name>.
 
 QEMU options:
   --arch <arch>        Target architecture (x86_64, aarch64, riscv64, loongarch64).
@@ -49,6 +51,7 @@ Examples:
   bash scripts/run.sh --test
   bash scripts/run.sh -t --test-name pmm
   bash scripts/run.sh --kernel-selftest --arch x86_64 --headless
+  bash scripts/run.sh --kernel-selftest --arch x86_64 --timeout 45
 EOF
 }
 
