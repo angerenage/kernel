@@ -158,7 +158,7 @@ static void kernel_selftest_semaphore_timed_acquire_times_out_without_permit(str
 
 	timeout_deadline = state.waiter_start_tick + timeout_ticks;
 	kernel_selftest_advance_ticks_until(timeout_deadline);
-	sched_yield();
+	kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
 
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_finished, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.waiter_result, cleanup);

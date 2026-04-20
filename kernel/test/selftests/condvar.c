@@ -179,7 +179,7 @@ static void kernel_selftest_condvar_timed_wait_times_out_and_reacquires_mutex(st
 
 	timeout_deadline = state.waiter_start_tick + timeout_ticks;
 	kernel_selftest_advance_ticks_until(timeout_deadline);
-	sched_yield();
+	kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
 
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_finished, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.waiter_result, cleanup);

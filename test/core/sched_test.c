@@ -277,6 +277,46 @@ Test(sched, make_runnable_chooses_cpu_with_smallest_run_queue_depth) {
 	reset_test_state();
 }
 
+Test(sched, make_runnable_prefers_idle_cpu_over_busy_current_cpu) {
+	const struct thread_create_params busy_params = {
+		.name              = "busy_running",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x312000u,
+		.kernel_stack_top  = 0x316000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	const struct thread_create_params balanced_params = {
+		.name              = "balanced_idle_target",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x316000u,
+		.kernel_stack_top  = 0x31a000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	struct cpu*   bsp;
+	struct cpu*   ap;
+	struct thread busy;
+	struct thread balanced;
+
+	init_started_dual_cpu_topology(&bsp, &ap);
+
+	cr_assert(thread_init(&busy, &busy_params), "thread_init failed for busy running thread");
+	cr_assert(thread_init(&balanced, &balanced_params), "thread_init failed for balanced thread");
+
+	cpu_bind_current(bsp);
+	sched_set_current(bsp, &busy);
+
+	cr_assert(sched_make_runnable(&balanced), "failed to enqueue balanced thread");
+	cr_assert_eq(balanced.cpu, ap, "idle AP should be preferred over a CPU already running work");
+	cr_assert_eq(sched_run_queue_depth(bsp), 0u, "busy BSP should not receive additional queued work");
+	cr_assert_eq(sched_run_queue_depth(ap), 1u, "idle AP should receive the queued work");
+
+	reset_test_state();
+}
+
 Test(sched, remote_enqueue_requests_reschedule_and_kicks_target_cpu) {
 	const struct thread_create_params remote_params = {
 		.name              = "remote",
