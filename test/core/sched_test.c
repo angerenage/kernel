@@ -29,6 +29,51 @@ static void sched_test_set_one_tick_timeslice(struct thread* thread) {
 	thread->timeslice_remaining = 1u;
 }
 
+static void init_started_dual_cpu_topology(struct cpu** out_bsp, struct cpu** out_ap) {
+	const struct cpu_init_info init_info[] = {
+		{
+         .index           = 0u,
+         .processor_id    = 10u,
+         .arch_id         = 0x20u,
+         .role            = CPU_ROLE_BSP,
+         .boot_stack_base = 0x200000u,
+         .boot_stack_top  = 0x204000u,
+		 },
+		{
+         .index           = 1u,
+         .processor_id    = 11u,
+         .arch_id         = 0x21u,
+         .role            = CPU_ROLE_AP,
+         .boot_stack_base = 0x210000u,
+         .boot_stack_top  = 0x214000u,
+		 },
+	};
+	struct cpu* bsp;
+	struct cpu* ap;
+
+	cr_assert(cpu_topology_init(init_info, 2u, 0u), "cpu_topology_init failed");
+
+	bsp = cpu_bsp();
+	ap  = cpu_by_index(1u);
+	cr_assert_not_null(bsp, "cpu_bsp returned NULL");
+	cr_assert_not_null(ap, "cpu_by_index returned NULL for AP");
+
+	cpu_bind_current(bsp);
+	cpu_interrupts_set_ready(bsp, false);
+	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(bsp), "sched_start_cpu failed for BSP");
+
+	cpu_bind_current(ap);
+	cpu_interrupts_set_ready(ap, false);
+	cr_assert(sched_start_cpu(ap), "sched_start_cpu failed for AP");
+
+	cpu_bind_current(bsp);
+	cpu_interrupts_set_ready(bsp, false);
+
+	if (out_bsp != NULL) *out_bsp = bsp;
+	if (out_ap != NULL) *out_ap = ap;
+}
+
 Test(sched, init_creates_per_cpu_idle_threads) {
 	const struct cpu_init_info init_info[] = {
 		{
@@ -136,6 +181,95 @@ Test(sched, runnable_threads_yield_in_fifo_order) {
 	cr_assert_eq(second.state, THREAD_STATE_RUNNING, "second thread should still be running");
 	cr_assert_eq(sched_run_queue_depth(cpu_current()), 0u, "single-thread yield should leave run queue empty");
 	cr_assert(!sched_make_runnable(sched_idle_thread(cpu_current())), "idle thread must not be runnable");
+
+	reset_test_state();
+}
+
+Test(sched, make_runnable_prefers_preferred_cpu_over_lower_depth_target) {
+	const struct thread_create_params pinned_params = {
+		.name              = "pinned_existing",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x304000u,
+		.kernel_stack_top  = 0x308000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	struct cpu*   bsp;
+	struct cpu*   ap;
+	struct thread pinned;
+	struct thread preferred;
+
+	init_started_dual_cpu_topology(&bsp, &ap);
+
+	{
+		const struct thread_create_params preferred_params = {
+			.name              = "preferred",
+			.entry             = sched_test_thread_entry,
+			.arg               = NULL,
+			.kernel_stack_base = 0x308000u,
+			.kernel_stack_top  = 0x30c000u,
+			.preferred_cpu     = ap,
+			.detached          = false,
+		};
+
+		cr_assert(thread_init(&pinned, &pinned_params), "thread_init failed for pinned thread");
+		pinned.preferred_cpu = ap;
+		cr_assert(thread_init(&preferred, &preferred_params), "thread_init failed for preferred thread");
+	}
+
+	cr_assert(sched_make_runnable(&pinned), "failed to enqueue existing AP thread");
+	cr_assert_eq(pinned.cpu, ap, "pinned thread should land on AP");
+	cr_assert_eq(sched_run_queue_depth(bsp), 0u, "BSP should still have an empty run queue");
+	cr_assert_eq(sched_run_queue_depth(ap), 1u, "AP should have one queued thread before preferred enqueue");
+
+	cr_assert(sched_make_runnable(&preferred), "failed to enqueue preferred thread");
+	cr_assert_eq(preferred.cpu, ap, "preferred_cpu should override lower BSP queue depth");
+	cr_assert_eq(sched_run_queue_depth(bsp), 0u, "BSP should remain empty when preferred_cpu selects AP");
+	cr_assert_eq(sched_run_queue_depth(ap), 2u, "AP should contain both preferred threads");
+
+	reset_test_state();
+}
+
+Test(sched, make_runnable_chooses_cpu_with_smallest_run_queue_depth) {
+	const struct thread_create_params busy_params = {
+		.name              = "busy",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x30c000u,
+		.kernel_stack_top  = 0x310000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	const struct thread_create_params balanced_params = {
+		.name              = "balanced",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x310000u,
+		.kernel_stack_top  = 0x314000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	struct cpu*   bsp;
+	struct cpu*   ap;
+	struct thread busy;
+	struct thread balanced;
+
+	init_started_dual_cpu_topology(&bsp, &ap);
+
+	cr_assert(thread_init(&busy, &busy_params), "thread_init failed for busy thread");
+	busy.preferred_cpu = bsp;
+	cr_assert(thread_init(&balanced, &balanced_params), "thread_init failed for balanced thread");
+
+	cr_assert(sched_make_runnable(&busy), "failed to enqueue busy thread");
+	cr_assert_eq(busy.cpu, bsp, "busy thread should be pinned to BSP");
+	cr_assert_eq(sched_run_queue_depth(bsp), 1u, "BSP should have one queued thread");
+	cr_assert_eq(sched_run_queue_depth(ap), 0u, "AP should still be empty");
+
+	cr_assert(sched_make_runnable(&balanced), "failed to enqueue balanced thread");
+	cr_assert_eq(balanced.cpu, ap, "unbound thread should pick the less-loaded AP run queue");
+	cr_assert_eq(sched_run_queue_depth(bsp), 1u, "BSP queue depth should remain unchanged");
+	cr_assert_eq(sched_run_queue_depth(ap), 1u, "AP queue depth should increase after balancing");
 
 	reset_test_state();
 }

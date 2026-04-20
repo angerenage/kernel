@@ -124,19 +124,54 @@ static struct cpu* sched_default_cpu(void) {
 	return NULL;
 }
 
+static bool sched_cpu_can_accept_balanced_work(const struct cpu* cpu) {
+	return sched_state_for_cpu(cpu) != NULL && cpu != NULL && cpu->current_thread != NULL;
+}
+
+static struct cpu* sched_pick_least_loaded_cpu(const struct thread* thread) {
+	struct cpu* best_cpu   = NULL;
+	size_t      best_depth = 0u;
+
+	for (size_t i = 0; i < cpu_count(); i++) {
+		struct cpu* cpu = cpu_by_index(i);
+		size_t      depth;
+
+		if (!sched_cpu_can_accept_balanced_work(cpu)) continue;
+
+		depth = sched_run_queue_depth(cpu);
+		if (best_cpu == NULL || depth < best_depth) {
+			best_cpu   = cpu;
+			best_depth = depth;
+		}
+	}
+
+	if (best_cpu == NULL) return NULL;
+
+	if (sched_cpu_can_accept_balanced_work(thread == NULL ? NULL : thread->cpu) &&
+	    sched_run_queue_depth(thread->cpu) == best_depth) {
+		return thread->cpu;
+	}
+
+	if (sched_cpu_can_accept_balanced_work(cpu_current()) && sched_run_queue_depth(cpu_current()) == best_depth) {
+		return cpu_current();
+	}
+
+	if (sched_cpu_can_accept_balanced_work(cpu_bsp()) && sched_run_queue_depth(cpu_bsp()) == best_depth) {
+		return cpu_bsp();
+	}
+
+	return best_cpu;
+}
+
 static struct cpu* sched_target_cpu_for_thread(const struct thread* thread) {
-	struct cpu* candidates[4];
+	struct cpu* cpu;
 
 	if (thread == NULL) return NULL;
 
-	candidates[0] = thread->preferred_cpu;
-	candidates[1] = thread->cpu;
-	candidates[2] = cpu_current();
-	candidates[3] = cpu_bsp();
+	if (sched_state_for_cpu(thread->preferred_cpu) != NULL) return thread->preferred_cpu;
 
-	for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
-		if (sched_state_for_cpu(candidates[i]) != NULL) return candidates[i];
-	}
+	cpu = sched_pick_least_loaded_cpu(thread);
+	if (cpu != NULL) return cpu;
 
 	return sched_default_cpu();
 }
