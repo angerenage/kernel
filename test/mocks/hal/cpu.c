@@ -1,3 +1,4 @@
+#include <core/cpu.h>
 #include <hal/cpu.h>
 #include <stddef.h>
 
@@ -5,6 +6,7 @@
 
 static _Thread_local void*                hosted_cpu_local_ptr;
 static hal_cpu_mock_context_switch_hook_t hosted_context_switch_hook;
+static size_t                             hosted_kick_count[64];
 
 uint64_t hal_cpu_boot_arch_id(void) {
 	return 0u;
@@ -40,6 +42,24 @@ void hal_cpu_context_switch(struct thread_context* current, const struct thread_
 void hal_cpu_park(void) {
 }
 
+void hal_cpu_kick(const struct cpu* cpu) {
+	if (cpu == NULL || cpu->index >= 64u) return;
+
+	hosted_kick_count[cpu->index]++;
+}
+
 void hal_cpu_mock_set_context_switch_hook(hal_cpu_mock_context_switch_hook_t hook) {
 	hosted_context_switch_hook = hook;
+}
+
+void hal_cpu_mock_reset_kicks(void) {
+	for (size_t i = 0; i < 64u; i++) {
+		hosted_kick_count[i] = 0u;
+	}
+}
+
+size_t hal_cpu_mock_kick_count(const struct cpu* cpu) {
+	if (cpu == NULL || cpu->index >= 64u) return 0u;
+
+	return hosted_kick_count[cpu->index];
 }

@@ -295,6 +295,7 @@ void kernel_main(void) {
 	if (!hal_interrupts_init_local(cpu_current())) {
 		boot_fail("kernel: hal_interrupts_init_local failed");
 	}
+	irq_enable_local();
 	(void)cpu_set_state(cpu_current(), CPU_STATE_ONLINE);
 
 	if (!kernel_boot_protocol_supported()) boot_fail("kernel: boot protocol unavailable");

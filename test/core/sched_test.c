@@ -5,6 +5,8 @@
 #include <hal/cpu.h>
 #include <hal/interrupts.h>
 
+#include "../mocks/hal/cpu_mock.h"
+
 static void init_bound_bootstrap_cpu(void) {
 	irq_enable_local();
 	cr_assert(cpu_topology_init_bootstrap(0x100000u, 0x104000u), "cpu_topology_init_bootstrap failed");
@@ -16,6 +18,7 @@ static void init_bound_bootstrap_cpu(void) {
 static void reset_test_state(void) {
 	irq_enable_local();
 	hal_cpu_local_bind(NULL);
+	hal_cpu_mock_reset_kicks();
 }
 
 static void sched_test_thread_entry(void* arg) {
@@ -270,6 +273,35 @@ Test(sched, make_runnable_chooses_cpu_with_smallest_run_queue_depth) {
 	cr_assert_eq(balanced.cpu, ap, "unbound thread should pick the less-loaded AP run queue");
 	cr_assert_eq(sched_run_queue_depth(bsp), 1u, "BSP queue depth should remain unchanged");
 	cr_assert_eq(sched_run_queue_depth(ap), 1u, "AP queue depth should increase after balancing");
+
+	reset_test_state();
+}
+
+Test(sched, remote_enqueue_requests_reschedule_and_kicks_target_cpu) {
+	const struct thread_create_params remote_params = {
+		.name              = "remote",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x314000u,
+		.kernel_stack_top  = 0x318000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	struct cpu*   bsp;
+	struct cpu*   ap;
+	struct thread remote;
+
+	init_started_dual_cpu_topology(&bsp, &ap);
+	hal_cpu_mock_reset_kicks();
+
+	cr_assert(thread_init(&remote, &remote_params), "thread_init failed for remote thread");
+	remote.preferred_cpu = ap;
+
+	cr_assert(sched_make_runnable(&remote), "failed to enqueue remote thread");
+	cr_assert_eq(remote.cpu, ap, "remote thread should land on the AP run queue");
+	cr_assert(sched_reschedule_pending(ap), "remote enqueue should request an AP reschedule");
+	cr_assert_eq(hal_cpu_mock_kick_count(ap), 1u, "remote enqueue should kick the AP once");
+	cr_assert_eq(hal_cpu_mock_kick_count(bsp), 0u, "remote enqueue should not kick the BSP");
 
 	reset_test_state();
 }

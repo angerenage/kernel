@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+struct cpu;
+
 /*
  * Architecture hooks for CPU-local storage.
  */
@@ -43,3 +45,6 @@ void hal_cpu_context_switch(struct thread_context* current, const struct thread_
 
 /* Park the current CPU in the architecture's low-level idle instruction until the next external wake event. */
 void hal_cpu_park(void);
+
+/* Best-effort wake request for cpu so it can observe newly queued work. */
+void hal_cpu_kick(const struct cpu* cpu);

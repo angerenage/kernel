@@ -62,3 +62,7 @@ void hal_cpu_context_switch(struct thread_context* current, const struct thread_
 void hal_cpu_park(void) {
 	__asm__ volatile("wfi" : : : "memory");
 }
+
+void hal_cpu_kick(const struct cpu* cpu) {
+	(void)cpu;
+}

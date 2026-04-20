@@ -26,11 +26,11 @@ struct sched_cpu_state {
 static struct sched_cpu_state sched_cpu_state[SCHED_MAX_CPU_COUNT];
 static struct spinlock        sched_sleep_lock =
 	(struct spinlock)SPINLOCK_INIT_CLASS("sched_sleep_lock", SPINLOCK_ORDER_SCHED, SPINLOCK_FLAG_IRQSAVE);
-static struct thread*     sched_sleep_head;
-static uint64_t           sched_ticks;
-static struct sched_stats sched_stats;
+static struct thread* sched_sleep_head;
+static uint64_t       sched_ticks;
 
 static void sched_stat_increment(uint64_t* counter) {
+	if (counter == NULL) return;
 	(void)__atomic_fetch_add(counter, 1u, __ATOMIC_RELAXED);
 }
 
@@ -62,11 +62,6 @@ static struct sched_cpu_state* sched_state_for_cpu(const struct cpu* cpu) {
 	if (cpu == NULL || cpu->index >= SCHED_MAX_CPU_COUNT) return NULL;
 	if (!sched_cpu_state[cpu->index].present) return NULL;
 	return &sched_cpu_state[cpu->index];
-}
-
-static void sched_stat_increment_pair(uint64_t* global_counter, uint64_t* cpu_counter) {
-	sched_stat_increment(global_counter);
-	if (cpu_counter != NULL) sched_stat_increment(cpu_counter);
 }
 
 static enum sched_cpu_activity sched_activity_for_thread(const struct thread* thread) {
@@ -356,7 +351,6 @@ static void sched_dispatch_next(struct cpu* cpu) {
 	next     = sched_select_next(cpu);
 	if (next == NULL) return;
 
-	sched_set_cpu_activity(cpu, SCHED_CPU_ACTIVITY_KERNEL);
 	if (previous == next) {
 		sched_set_current(cpu, next);
 		return;
@@ -364,20 +358,28 @@ static void sched_dispatch_next(struct cpu* cpu) {
 
 	sched_set_current(cpu, next);
 	if (previous != NULL) {
-		sched_stat_increment_pair(&sched_stats.context_switch_count,
-		                          state == NULL ? NULL : &state->stats.context_switch_count);
+		sched_stat_increment(state == NULL ? NULL : &state->stats.context_switch_count);
 		hal_cpu_context_switch(&previous->context, &next->context);
 	}
 }
 
 static bool sched_make_runnable_on_cpu(struct cpu* cpu, struct thread* thread, bool allow_current) {
 	struct sched_cpu_state* state = sched_state_for_cpu(cpu);
+	bool                    queued;
 
 	if (state == NULL || thread == NULL || thread_is_idle(thread) || thread_is_terminated(thread)) return false;
 	if (!allow_current && cpu != NULL && cpu->current_thread == thread) return false;
 
 	thread_mark_ready(thread, cpu);
-	return run_queue_enqueue(&state->run_queue, thread);
+	queued = run_queue_enqueue(&state->run_queue, thread);
+	if (!queued) return false;
+
+	if (cpu != NULL && cpu != cpu_current()) {
+		sched_request_reschedule(cpu);
+		hal_cpu_kick(cpu);
+	}
+
+	return true;
 }
 
 bool sched_init(void) {
@@ -390,7 +392,6 @@ bool sched_init(void) {
 	}
 	sched_sleep_head = NULL;
 	sched_ticks      = 0u;
-	sched_stats      = (struct sched_stats){0};
 
 	for (size_t i = 0; i < cpu_total; i++) {
 		struct cpu*             cpu = cpu_by_index(i);
@@ -474,7 +475,7 @@ void sched_yield(void) {
 	if (cpu == NULL) return;
 
 	state = sched_state_for_cpu(cpu);
-	sched_stat_increment_pair(&sched_stats.yield_count, state == NULL ? NULL : &state->stats.yield_count);
+	sched_stat_increment(state == NULL ? NULL : &state->stats.yield_count);
 	sched_set_cpu_activity(cpu, SCHED_CPU_ACTIVITY_KERNEL);
 
 	current = cpu->current_thread;
@@ -520,8 +521,7 @@ bool sched_handle_interrupt_exit(void) {
 	sched_set_cpu_activity(cpu, SCHED_CPU_ACTIVITY_KERNEL);
 	if (!sched_make_runnable_on_cpu(cpu, current, true)) return false;
 
-	sched_stat_increment_pair(&sched_stats.timeslice_preempt_count,
-	                          state == NULL ? NULL : &state->stats.timeslice_preempt_count);
+	sched_stat_increment(state == NULL ? NULL : &state->stats.timeslice_preempt_count);
 	sched_dispatch_next(cpu);
 	return true;
 }
@@ -825,9 +825,16 @@ size_t sched_run_queue_depth(struct cpu* cpu) {
 void sched_get_stats(struct sched_stats* out_stats) {
 	if (out_stats == NULL) return;
 
-	out_stats->context_switch_count    = __atomic_load_n(&sched_stats.context_switch_count, __ATOMIC_RELAXED);
-	out_stats->timeslice_preempt_count = __atomic_load_n(&sched_stats.timeslice_preempt_count, __ATOMIC_RELAXED);
-	out_stats->yield_count             = __atomic_load_n(&sched_stats.yield_count, __ATOMIC_RELAXED);
+	*out_stats = (struct sched_stats){0};
+	for (size_t i = 0; i < SCHED_MAX_CPU_COUNT; i++) {
+		if (!sched_cpu_state[i].present) continue;
+
+		out_stats->context_switch_count +=
+			__atomic_load_n(&sched_cpu_state[i].stats.context_switch_count, __ATOMIC_RELAXED);
+		out_stats->timeslice_preempt_count +=
+			__atomic_load_n(&sched_cpu_state[i].stats.timeslice_preempt_count, __ATOMIC_RELAXED);
+		out_stats->yield_count += __atomic_load_n(&sched_cpu_state[i].stats.yield_count, __ATOMIC_RELAXED);
+	}
 }
 
 bool sched_get_cpu_stats(const struct cpu* cpu, struct sched_cpu_stats* out_stats) {
@@ -859,7 +866,13 @@ void sched_debug_dump(void) {
 void sched_enter_idle(void) {
 	struct cpu* cpu = cpu_current();
 
-	if (!sched_start_cpu(cpu)) {
+	if (cpu == NULL) {
+		for (;;) {
+			hal_cpu_park();
+		}
+	}
+
+	if (cpu->current_thread == NULL && !sched_start_cpu(cpu)) {
 		for (;;) {
 			hal_cpu_park();
 		}
@@ -868,6 +881,19 @@ void sched_enter_idle(void) {
 	for (;;) {
 		if (sched_run_queue_depth(cpu) != 0u) {
 			sched_yield();
+			continue;
+		}
+
+		/*
+		 * Some early SMP backends do not yet provide a reliable cross-CPU
+		 * wakeup path for parked APs.
+		 * Polling here keeps application
+		 * processors responsive to remotely enqueued work until their wake
+
+		 * * mechanism is fully wired up.
+		 */
+		if (cpu != NULL && cpu->role == CPU_ROLE_AP) {
+			spinlock_relax();
 			continue;
 		}
 

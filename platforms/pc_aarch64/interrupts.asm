@@ -7,6 +7,7 @@
 
 .equ AARCH64_EXCEPTION_FRAME_SIZE, 288
 .equ AARCH64_EXCEPTION_META_SIZE, 16
+.equ CPU_INDEX_OFFSET, 0
 
 .macro VECTOR_SLOT index
 	b aarch64_vector_\index
@@ -19,24 +20,32 @@ aarch64_vector_\index:
 	stp x16, x17, [sp]
 
 	mov x17, sp
+	mrs x15, tpidr_el1
+	cbz x15, 0f
+	ldr x15, [x15, #CPU_INDEX_OFFSET]
 	adrp x16, aarch64_exception_stack_bottom
-	ldr x16, [x16, :lo12:aarch64_exception_stack_bottom]
+	add x16, x16, :lo12:aarch64_exception_stack_bottom
+	ldr x16, [x16, x15, lsl #3]
 	cmp x17, x16
-	b.lo 0f
+	b.lo 1f
 	adrp x16, aarch64_exception_stack_top
-	ldr x16, [x16, :lo12:aarch64_exception_stack_top]
+	add x16, x16, :lo12:aarch64_exception_stack_top
+	ldr x16, [x16, x15, lsl #3]
 	cmp x17, x16
-	b.hs 0f
+	b.hs 1f
 	sub sp, sp, #AARCH64_EXCEPTION_META_SIZE
 	str x17, [sp]
-	b 1f
+	b 2f
 0:
+	mov x15, xzr
+1:
 	adrp x16, aarch64_exception_stack_top
-	ldr x16, [x16, :lo12:aarch64_exception_stack_top]
+	add x16, x16, :lo12:aarch64_exception_stack_top
+	ldr x16, [x16, x15, lsl #3]
 	mov sp, x16
 	sub sp, sp, #AARCH64_EXCEPTION_META_SIZE
 	str x17, [sp]
-1:
+2:
 	sub sp, sp, #AARCH64_EXCEPTION_FRAME_SIZE
 
 	stp x0, x1, [sp, #0]

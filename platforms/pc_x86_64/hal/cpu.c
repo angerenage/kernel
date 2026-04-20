@@ -1,7 +1,10 @@
+#include <core/cpu.h>
 #include <hal/cpu.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include "interrupts_private.h"
 
 #define X86_64_MSR_GS_BASE 0xc0000101u
 
@@ -78,4 +81,10 @@ void hal_cpu_context_switch(struct thread_context* current, const struct thread_
 
 void hal_cpu_park(void) {
 	__asm__ volatile("hlt" : : : "memory");
+}
+
+void hal_cpu_kick(const struct cpu* cpu) {
+	if (cpu == NULL) return;
+
+	(void)apic_send_ipi((uint32_t)cpu->arch_id, X86_LAPIC_WAKE_VECTOR);
 }

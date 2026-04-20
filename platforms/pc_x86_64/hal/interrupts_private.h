@@ -26,9 +26,13 @@
 #define X86_LAPIC_ID_REG 0x20u
 #define X86_LAPIC_TPR_REG 0x80u
 #define X86_LAPIC_EOI_REG 0x0b0u
+#define X86_LAPIC_ICR_LOW_REG 0x300u
+#define X86_LAPIC_ICR_HIGH_REG 0x310u
+#define X86_LAPIC_ICR_DELIVERY_PENDING (1u << 12)
 #define X86_LAPIC_SVR_REG 0x0f0u
 #define X86_LAPIC_SVR_ENABLE 0x100u
 #define X86_LAPIC_SPURIOUS_VECTOR 0xffu
+#define X86_LAPIC_WAKE_VECTOR 0xfeu
 #define X86_IOAPIC_REGSEL 0x00u
 #define X86_IOAPIC_WINDOW 0x10u
 #define X86_IOAPIC_VERSION_REG 0x01u
@@ -77,4 +81,5 @@ bool apic_route_isa_irq(unsigned irq, unsigned vector);
 bool apic_set_isa_irq_mask(unsigned irq, bool masked);
 bool apic_is_active(void);
 void apic_send_eoi(void);
+bool apic_send_ipi(uint32_t lapic_id, unsigned vector);
 bool clock_handle_irq(unsigned vector);

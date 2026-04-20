@@ -174,6 +174,12 @@ static void lapic_write(uint32_t reg, uint32_t value) {
 	(void)lapic_read(reg);
 }
 
+static void lapic_wait_icr_idle(void) {
+	while ((lapic_read(X86_LAPIC_ICR_LOW_REG) & X86_LAPIC_ICR_DELIVERY_PENDING) != 0u) {
+		__asm__ volatile("pause");
+	}
+}
+
 static uint32_t ioapic_read(uint8_t reg) {
 	*(volatile uint32_t*)(ioapic_mmio + X86_IOAPIC_REGSEL) = reg;
 	return *(volatile uint32_t*)(ioapic_mmio + X86_IOAPIC_WINDOW);
@@ -310,4 +316,14 @@ bool apic_is_active(void) {
 void apic_send_eoi(void) {
 	if (!apic_active) return;
 	lapic_write(X86_LAPIC_EOI_REG, 0u);
+}
+
+bool apic_send_ipi(uint32_t lapic_id, unsigned vector) {
+	if (!apic_active || lapic_mmio == NULL || vector >= 256u) return false;
+
+	lapic_wait_icr_idle();
+	lapic_write(X86_LAPIC_ICR_HIGH_REG, lapic_id << 24);
+	lapic_write(X86_LAPIC_ICR_LOW_REG, (uint32_t)vector);
+	lapic_wait_icr_idle();
+	return true;
 }

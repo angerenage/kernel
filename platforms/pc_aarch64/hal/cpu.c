@@ -62,5 +62,20 @@ void hal_cpu_context_switch(struct thread_context* current, const struct thread_
 }
 
 void hal_cpu_park(void) {
-	__asm__ volatile("wfe" : : : "memory");
+	__asm__ volatile("sevl\n\t"
+	                 "wfe\n\t"
+	                 "wfe"
+	                 :
+	                 :
+	                 : "memory");
+}
+
+void hal_cpu_kick(const struct cpu* cpu) {
+	(void)cpu;
+
+	__asm__ volatile("dsb ishst\n\t"
+	                 "sev"
+	                 :
+	                 :
+	                 : "memory");
 }

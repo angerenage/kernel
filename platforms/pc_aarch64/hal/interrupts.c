@@ -14,8 +14,8 @@
 static bool global_ready;
 static bool local_ready[64];
 _Alignas(16) uint8_t aarch64_exception_stack[64][AARCH64_EXCEPTION_STACK_SIZE];
-uintptr_t aarch64_exception_stack_top;
-uintptr_t aarch64_exception_stack_bottom;
+uintptr_t aarch64_exception_stack_top[64];
+uintptr_t aarch64_exception_stack_bottom[64];
 
 extern char exception_vectors[];
 
@@ -47,8 +47,8 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 
 	vectors = (uintptr_t)exception_vectors;
 	irq_disable_local();
-	aarch64_exception_stack_bottom = (uintptr_t)aarch64_exception_stack[cpu->index];
-	aarch64_exception_stack_top    = aarch64_exception_stack_bottom + AARCH64_EXCEPTION_STACK_SIZE;
+	aarch64_exception_stack_bottom[cpu->index] = (uintptr_t)aarch64_exception_stack[cpu->index];
+	aarch64_exception_stack_top[cpu->index] = aarch64_exception_stack_bottom[cpu->index] + AARCH64_EXCEPTION_STACK_SIZE;
 
 	__asm__ volatile("msr vbar_el1, %0\n\t"
 	                 "isb"
@@ -61,7 +61,7 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 	if (cpu->role == CPU_ROLE_BSP) {
 		printf("kernel: aarch64 local vectors installed on cpu%zu (exc_sp=0x%016llx)\n",
 		       cpu->index,
-		       (unsigned long long)aarch64_exception_stack_top);
+		       (unsigned long long)aarch64_exception_stack_top[cpu->index]);
 	}
 	return true;
 }

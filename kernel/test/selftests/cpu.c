@@ -1,9 +1,14 @@
 #include <core/cpu.h>
+#include <core/sched.h>
 #include <core/spinlock.h>
 #include <hal/interrupts.h>
 #include <kernel/cpu_boot.h>
+#include <string.h>
 
 #include "../selftest.h"
+#include "sync_helpers.h"
+
+#define KERNEL_SELFTEST_CPU_MAX_CPUS 64u
 
 static void kernel_selftest_cpu_topology_is_consistent(struct kernel_selftest_context* ctx) {
 	struct cpu_topology* topology = cpu_topology_get();
@@ -146,6 +151,122 @@ cleanup:
 	}
 }
 
+struct kernel_selftest_cpu_remote_dispatch_state {
+	struct cpu* expected_cpu;
+	uintptr_t   actual_cpu;
+	uintptr_t   current_thread;
+	uint32_t    ran;
+};
+
+static struct kernel_selftest_managed_thread kernel_selftest_cpu_remote_workers[KERNEL_SELFTEST_CPU_MAX_CPUS];
+static struct kernel_selftest_cpu_remote_dispatch_state kernel_selftest_cpu_remote_states[KERNEL_SELFTEST_CPU_MAX_CPUS];
+static struct sched_cpu_stats                           kernel_selftest_cpu_stats_before[KERNEL_SELFTEST_CPU_MAX_CPUS];
+static struct sched_cpu_stats                           kernel_selftest_cpu_stats_after[KERNEL_SELFTEST_CPU_MAX_CPUS];
+static bool kernel_selftest_cpu_remote_created[KERNEL_SELFTEST_CPU_MAX_CPUS];
+
+static void kernel_selftest_cpu_remote_dispatch_worker(void* arg) {
+	struct kernel_selftest_cpu_remote_dispatch_state* state = arg;
+
+	if (state == NULL) return;
+
+	__atomic_store_n(&state->actual_cpu, (uintptr_t)cpu_current(), __ATOMIC_RELEASE);
+	__atomic_store_n(&state->current_thread, (uintptr_t)kthread_current(), __ATOMIC_RELEASE);
+	__atomic_store_n(&state->ran, 1u, __ATOMIC_RELEASE);
+}
+
+static void kernel_selftest_cpu_remote_dispatch_reaches_application_processors(struct kernel_selftest_context* ctx) {
+	size_t total_cpus   = cpu_count();
+	size_t worker_count = 0u;
+
+	memset(kernel_selftest_cpu_remote_workers, 0, sizeof(kernel_selftest_cpu_remote_workers));
+	memset(kernel_selftest_cpu_remote_states, 0, sizeof(kernel_selftest_cpu_remote_states));
+	memset(kernel_selftest_cpu_stats_before, 0, sizeof(kernel_selftest_cpu_stats_before));
+	memset(kernel_selftest_cpu_stats_after, 0, sizeof(kernel_selftest_cpu_stats_after));
+	memset(kernel_selftest_cpu_remote_created, 0, sizeof(kernel_selftest_cpu_remote_created));
+
+	KERNEL_SELFTEST_ASSERT_MSG(ctx, total_cpus > 0u, "cpu_count returned zero");
+	KERNEL_SELFTEST_ASSERT_MSG(ctx, total_cpus <= KERNEL_SELFTEST_CPU_MAX_CPUS, "cpu_count exceeds selftest capacity");
+
+	if (total_cpus == 1u) return;
+
+	for (size_t i = 0u; i < total_cpus; i++) {
+		struct cpu* cpu = cpu_by_index(i);
+
+		KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, cpu != NULL, "cpu_by_index returned NULL", cleanup);
+		if (cpu->role != CPU_ROLE_AP) continue;
+		KERNEL_SELFTEST_ASSERT_GOTO(ctx, sched_get_cpu_stats(cpu, &kernel_selftest_cpu_stats_before[i]), cleanup);
+
+		kernel_selftest_cpu_remote_states[i].expected_cpu = cpu;
+		KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+			ctx,
+			kernel_selftest_thread_create_with_preferred_cpu(&kernel_selftest_cpu_remote_workers[i],
+		                                                     "selftest/cpu-remote-dispatch",
+		                                                     kernel_selftest_cpu_remote_dispatch_worker,
+		                                                     &kernel_selftest_cpu_remote_states[i],
+		                                                     cpu),
+			"failed to create AP-targeted worker thread",
+			cleanup);
+		kernel_selftest_cpu_remote_created[i] = true;
+		worker_count++;
+	}
+
+	for (size_t i = 0u; i < total_cpus; i++) {
+		if (!kernel_selftest_cpu_remote_created[i]) continue;
+		KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+		                                kthread_start(&kernel_selftest_cpu_remote_workers[i].thread),
+		                                "failed to start AP-targeted worker thread",
+		                                cleanup);
+	}
+
+	for (size_t attempt = 0u; attempt < KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS * total_cpus * 1024u; attempt++) {
+		bool all_done = true;
+
+		for (size_t i = 0u; i < total_cpus; i++) {
+			if (kernel_selftest_cpu_remote_created[i] &&
+			    __atomic_load_n(&kernel_selftest_cpu_remote_states[i].ran, __ATOMIC_ACQUIRE) == 0u) {
+				all_done = false;
+				break;
+			}
+		}
+
+		if (all_done) break;
+		spinlock_relax();
+	}
+
+	for (size_t i = 0u; i < total_cpus; i++) {
+		struct cpu* cpu = kernel_selftest_cpu_remote_states[i].expected_cpu;
+
+		if (!kernel_selftest_cpu_remote_created[i]) continue;
+
+		KERNEL_SELFTEST_ASSERT_GOTO(
+			ctx, __atomic_load_n(&kernel_selftest_cpu_remote_states[i].ran, __ATOMIC_ACQUIRE) != 0u, cleanup);
+		KERNEL_SELFTEST_ASSERT_GOTO(
+			ctx,
+			(struct cpu*)__atomic_load_n(&kernel_selftest_cpu_remote_states[i].actual_cpu, __ATOMIC_ACQUIRE) == cpu,
+			cleanup);
+		KERNEL_SELFTEST_ASSERT_GOTO(
+			ctx,
+			(struct thread*)__atomic_load_n(&kernel_selftest_cpu_remote_states[i].current_thread, __ATOMIC_ACQUIRE) ==
+				&kernel_selftest_cpu_remote_workers[i].thread,
+			cleanup);
+		KERNEL_SELFTEST_ASSERT_GOTO(ctx, sched_get_cpu_stats(cpu, &kernel_selftest_cpu_stats_after[i]), cleanup);
+		KERNEL_SELFTEST_ASSERT_GOTO(ctx,
+		                            kernel_selftest_cpu_stats_after[i].context_switch_count >
+		                                kernel_selftest_cpu_stats_before[i].context_switch_count,
+		                            cleanup);
+	}
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, worker_count == cpu_online_count() - 1u, cleanup);
+
+cleanup:
+	for (size_t i = 0u; i < total_cpus && i < KERNEL_SELFTEST_CPU_MAX_CPUS; i++) {
+		if (!kernel_selftest_cpu_remote_created[i]) continue;
+		if (!thread_is_terminated(&kernel_selftest_cpu_remote_workers[i].thread)) {
+			kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
+		}
+		kernel_selftest_thread_destroy(&kernel_selftest_cpu_remote_workers[i]);
+	}
+}
+
 static const struct kernel_selftest_case kernel_cpu_selftests[] = {
 	{
      .name = "topology_is_consistent",
@@ -166,6 +287,10 @@ static const struct kernel_selftest_case kernel_cpu_selftests[] = {
 	{
      .name = "spinlock_debug_checks_enforce_irqsave_and_order",
      .run  = kernel_selftest_cpu_spinlock_debug_checks_enforce_irqsave_and_order,
+	 },
+	{
+     .name = "remote_dispatch_reaches_application_processors",
+     .run  = kernel_selftest_cpu_remote_dispatch_reaches_application_processors,
 	 },
 };
 

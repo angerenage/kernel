@@ -24,9 +24,9 @@ struct kernel_selftest_managed_thread {
 	vmm_id_t      stack_id;
 };
 
-static bool kernel_selftest_thread_create(struct kernel_selftest_managed_thread* managed, const char* name,
-                                          thread_entry_t entry, void* arg) {
-	struct cpu*                 cpu;
+static bool kernel_selftest_thread_create_with_preferred_cpu(struct kernel_selftest_managed_thread* managed,
+                                                             const char* name, thread_entry_t entry, void* arg,
+                                                             struct cpu* preferred_cpu) {
 	struct thread_create_params params;
 	struct vmm_alloc_params     stack_params = {
 			.page_count  = KERNEL_SELFTEST_THREAD_STACK_PAGES,
@@ -45,8 +45,6 @@ static bool kernel_selftest_thread_create(struct kernel_selftest_managed_thread*
 		.stack_id = VMM_ID_INVALID,
 	};
 
-	cpu = cpu_current();
-	if (cpu == NULL) return false;
 	if (!vmm_alloc(&stack_params, &stack_id, &stack_base)) return false;
 
 	params = (struct thread_create_params){
@@ -55,7 +53,7 @@ static bool kernel_selftest_thread_create(struct kernel_selftest_managed_thread*
 		.arg               = arg,
 		.kernel_stack_base = (uintptr_t)stack_base,
 		.kernel_stack_top  = (uintptr_t)stack_base + KERNEL_SELFTEST_THREAD_STACK_PAGES * (uintptr_t)PMM_PAGE_SIZE,
-		.preferred_cpu     = cpu,
+		.preferred_cpu     = preferred_cpu,
 		.detached          = false,
 	};
 
@@ -66,6 +64,15 @@ static bool kernel_selftest_thread_create(struct kernel_selftest_managed_thread*
 
 	managed->stack_id = stack_id;
 	return true;
+}
+
+static bool kernel_selftest_thread_create(struct kernel_selftest_managed_thread* managed, const char* name,
+                                          thread_entry_t entry, void* arg) {
+	struct cpu* cpu = cpu_current();
+
+	if (cpu == NULL) return false;
+
+	return kernel_selftest_thread_create_with_preferred_cpu(managed, name, entry, arg, cpu);
 }
 
 static void kernel_selftest_thread_destroy(struct kernel_selftest_managed_thread* managed) {

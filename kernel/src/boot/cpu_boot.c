@@ -32,6 +32,12 @@ static void kernel_cpu_mp_entry(size_t cpu_index, void* arg) {
 			hal_cpu_park();
 		}
 	}
+	irq_enable_local();
+	if (!sched_start_cpu(cpu)) {
+		for (;;) {
+			hal_cpu_park();
+		}
+	}
 	(void)cpu_set_state(cpu, CPU_STATE_ONLINE);
 	sched_enter_idle();
 }

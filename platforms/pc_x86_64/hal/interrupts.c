@@ -250,6 +250,10 @@ void x86_64_handle_interrupt(const struct interrupt_frame* frame) {
 	bool               trap_context = !is_external_irq(vector);
 
 	if (trap_context) cpu_enter_exception();
+	if (vector == X86_LAPIC_WAKE_VECTOR) {
+		apic_send_eoi();
+		return;
+	}
 	if (is_external_irq(vector)) {
 		bool handled = clock_handle_irq((unsigned)vector);
 		interrupt_send_eoi((unsigned)vector);
