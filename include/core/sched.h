@@ -70,6 +70,9 @@ bool sched_sleep_until_tick(uint64_t deadline_tick);
 /* Advance scheduler timers and wake any sleep-deadline waiters that are now due. */
 void sched_tick(void);
 
+/* Charge one scheduler tick to cpu without advancing global time. */
+void sched_tick_remote(struct cpu* cpu);
+
 /* Block the current thread on queue until another CPU or event source wakes it. */
 void sched_block_current(struct thread_wait_queue* queue, enum thread_block_reason reason);
 

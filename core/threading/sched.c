@@ -631,6 +631,13 @@ void sched_tick(void) {
 	sched_charge_current_timeslice(cpu_current());
 }
 
+void sched_tick_remote(struct cpu* cpu) {
+	if (cpu == NULL) return;
+
+	sched_account_cpu_tick(cpu);
+	sched_charge_current_timeslice(cpu);
+}
+
 bool sched_block_current_locked(struct thread_wait_queue* queue, enum thread_block_reason reason,
                                 struct irq_state queue_irq_state) {
 	struct cpu*    cpu = cpu_current();

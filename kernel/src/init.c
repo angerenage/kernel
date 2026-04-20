@@ -117,6 +117,12 @@ static void boot_clock_tick(void* ctx) {
 	(void)ctx;
 
 	sched_tick();
+	for (size_t i = 0; i < cpu_count(); i++) {
+		struct cpu* cpu = cpu_by_index(i);
+
+		if (cpu == NULL || cpu == cpu_current() || cpu_state_get(cpu) != CPU_STATE_ONLINE) continue;
+		sched_tick_remote(cpu);
+	}
 	boot_timer_ticks++;
 	if (boot_timer_frequency_hz == 0u) return;
 
