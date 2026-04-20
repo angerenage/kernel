@@ -322,6 +322,120 @@ cleanup:
 	}
 }
 
+struct kernel_selftest_condvar_single_signal_state;
+
+struct kernel_selftest_condvar_single_signal_arg {
+	struct kernel_selftest_condvar_single_signal_state* state;
+	size_t                                              index;
+};
+
+struct kernel_selftest_condvar_single_signal_state {
+	struct condvar                                   condvar;
+	struct mutex                                     mutex;
+	struct thread*                                   waiter_threads[2];
+	bool                                             waiter_started[2];
+	bool                                             waiter_woke[2];
+	bool                                             waiter_owned_mutex_after_wait[2];
+	bool                                             waiter_unlocked[2];
+	struct kernel_selftest_condvar_single_signal_arg waiter_args[2];
+};
+
+static void kernel_selftest_condvar_single_signal_waiter_worker(void* arg) {
+	struct kernel_selftest_condvar_single_signal_arg*   waiter_arg = arg;
+	struct kernel_selftest_condvar_single_signal_state* state;
+	size_t                                              index;
+
+	if (waiter_arg == NULL || waiter_arg->state == NULL || waiter_arg->index >= 2u) return;
+
+	state = waiter_arg->state;
+	index = waiter_arg->index;
+
+	mutex_lock(&state->mutex);
+	state->waiter_threads[index] = kthread_current();
+	state->waiter_started[index] = true;
+	condvar_wait(&state->condvar, &state->mutex);
+	state->waiter_woke[index]                   = true;
+	state->waiter_owned_mutex_after_wait[index] = mutex_is_owned_by_current(&state->mutex);
+	state->waiter_unlocked[index]               = mutex_unlock(&state->mutex);
+}
+
+static void kernel_selftest_condvar_signal_wakes_single_waiter(struct kernel_selftest_context* ctx) {
+	struct kernel_selftest_managed_thread waiters[2] = {
+		{.stack_id = VMM_ID_INVALID},
+		{.stack_id = VMM_ID_INVALID},
+	};
+	struct kernel_selftest_condvar_single_signal_state state         = {0};
+	size_t                                             woken_index   = 0u;
+	size_t                                             blocked_index = 0u;
+
+	condvar_init(&state.condvar);
+	mutex_init(&state.mutex);
+	for (size_t i = 0; i < 2u; i++) {
+		state.waiter_args[i] = (struct kernel_selftest_condvar_single_signal_arg){
+			.state = &state,
+			.index = i,
+		};
+		KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+			ctx,
+			kernel_selftest_thread_create(&waiters[i],
+		                                  i == 0u ? "selftest/condvar-signal-a" : "selftest/condvar-signal-b",
+		                                  kernel_selftest_condvar_single_signal_waiter_worker,
+		                                  &state.waiter_args[i]),
+			"failed to create condvar signal waiter thread",
+			cleanup);
+	}
+
+	for (size_t i = 0; i < 2u; i++) {
+		KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+			ctx, kthread_start(&waiters[i].thread), "failed to start condvar signal waiter thread", cleanup);
+		sched_yield();
+		KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_started[i], cleanup);
+	}
+
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_wait_queue_depth(&state.condvar.waiters) == 2u, cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx, mutex_try_lock(&state.mutex), "main thread could not take mutex before signaling", cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx, condvar_signal(&state.condvar), "condvar_signal returned false with two blocked waiters", unlock);
+
+unlock:
+	if (mutex_is_owned_by_current(&state.mutex)) KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_unlock(&state.mutex), cleanup);
+
+	kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
+
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_count_true(state.waiter_woke, 2u) == 1u, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(
+		ctx, kernel_selftest_count_true(state.waiter_owned_mutex_after_wait, 2u) == 1u, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_count_true(state.waiter_unlocked, 2u) == 1u, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_wait_queue_depth(&state.condvar.waiters) == 1u, cleanup);
+
+	woken_index   = state.waiter_woke[0] ? 0u : 1u;
+	blocked_index = woken_index == 0u ? 1u : 0u;
+
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&waiters[woken_index].thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !thread_is_terminated(&waiters[blocked_index].thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiters[blocked_index].thread.state == THREAD_STATE_BLOCKED, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiters[blocked_index].thread.block_reason == THREAD_BLOCK_WAIT_QUEUE, cleanup);
+
+cleanup:
+	if (mutex_try_lock(&state.mutex)) {
+		(void)condvar_broadcast(&state.condvar);
+		(void)mutex_unlock(&state.mutex);
+	}
+	if (!thread_is_terminated(&waiters[0].thread) || !thread_is_terminated(&waiters[1].thread)) {
+		kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
+	}
+	if (ctx->failure_expr == NULL) {
+		for (size_t i = 0; i < 2u; i++) {
+			if (waiters[i].stack_id != VMM_ID_INVALID)
+				KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&waiters[i].thread));
+		}
+	}
+	for (size_t i = 0; i < 2u; i++) {
+		kernel_selftest_thread_destroy(&waiters[i]);
+	}
+}
+
 static const struct kernel_selftest_case kernel_condvar_selftests[] = {
 	{
      .name = "empty_queue_signal_and_broadcast_are_noops",
@@ -338,6 +452,10 @@ static const struct kernel_selftest_case kernel_condvar_selftests[] = {
 	{
      .name = "broadcast_wakes_all_waiters",
      .run  = kernel_selftest_condvar_broadcast_wakes_all_waiters,
+	 },
+	{
+     .name = "signal_wakes_single_waiter",
+     .run  = kernel_selftest_condvar_signal_wakes_single_waiter,
 	 },
 };
 

@@ -212,6 +212,124 @@ cleanup:
 	}
 }
 
+static void kernel_selftest_vmm_supports_lazy_map_unmap_remap_and_reprotect(struct kernel_selftest_context* ctx) {
+	struct vmm_alloc_params params = {
+		.page_count  = 3,
+		.align_pages = 1,
+		.prot        = VMM_PROT_READ | VMM_PROT_WRITE,
+		.kind        = VMM_KIND_GENERIC,
+		.map_flags   = VMM_MAP_LAZY,
+	};
+	struct vmm_info info;
+	vmm_id_t        alloc_id             = VMM_ID_INVALID;
+	void*           base                 = NULL;
+	uintptr_t       first_phys           = 0;
+	uintptr_t       remapped_phys        = 0;
+	uint64_t        flags                = 0;
+	size_t          free_before          = pmm_free_page_count();
+	size_t          free_after_first_map = free_before;
+	size_t          count_before         = vmm_count();
+
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx, vmm_alloc(&params, &alloc_id, &base), "lazy generic vmm_alloc returned false", cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, alloc_id != VMM_ID_INVALID, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, base != NULL, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, vmm_count() == count_before + 1u, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, pmm_free_page_count() == free_before, cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx, vmm_query_id(alloc_id, &info), "vmm_query_id returned false for a lazy generic allocation", cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, info.state == VMM_STATE_RESERVED, cleanup);
+
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, vmm_map(alloc_id), "vmm_map returned false", cleanup);
+	free_after_first_map = pmm_free_page_count();
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, free_after_first_map < free_before, cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx, vmm_query_id(alloc_id, &info), "vmm_query_id returned false after vmm_map", cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, info.state == VMM_STATE_MAPPED, cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx, hal_paging_query((uintptr_t)base, &first_phys, &flags), "hal_paging_query failed after vmm_map", cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, flags == (uint64_t)VMM_PROT_WRITE, cleanup);
+
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, vmm_unmap(alloc_id, false), "vmm_unmap(false) returned false", cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !hal_paging_query((uintptr_t)base, NULL, NULL), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, pmm_free_page_count() == free_after_first_map, cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx, vmm_query_id(alloc_id, &info), "vmm_query_id returned false after vmm_unmap(false)", cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, info.state == VMM_STATE_RESERVED, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, info.first_phys == first_phys, cleanup);
+
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, vmm_map(alloc_id), "second vmm_map returned false", cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx, hal_paging_query((uintptr_t)base, &remapped_phys, &flags), "hal_paging_query failed after remap", cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, remapped_phys == first_phys, cleanup);
+
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx, vmm_protect(alloc_id, VMM_PROT_READ | VMM_PROT_GLOBAL), "vmm_protect returned false", cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, hal_paging_query((uintptr_t)base, NULL, &flags), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, flags == (uint64_t)VMM_PROT_GLOBAL, cleanup);
+
+cleanup:
+	if (alloc_id != VMM_ID_INVALID) (void)vmm_free(alloc_id);
+
+	if (ctx->failure_expr == NULL) {
+		KERNEL_SELFTEST_ASSERT(ctx, vmm_count() == count_before);
+		KERNEL_SELFTEST_ASSERT(ctx, pmm_free_page_count() == free_before);
+	}
+}
+
+static void
+kernel_selftest_vmm_rejects_invalid_inputs_and_non_lazy_fault_resolution(struct kernel_selftest_context* ctx) {
+	struct vmm_alloc_params invalid_prot_params = {
+		.page_count  = 1,
+		.align_pages = 1,
+		.prot        = VMM_PROT_READ | ((vmm_prot_t)1ull << 63),
+		.kind        = VMM_KIND_GENERIC,
+	};
+	struct vmm_alloc_params guard_heap_params = {
+		.page_count  = 2,
+		.align_pages = 1,
+		.prot        = VMM_PROT_READ | VMM_PROT_WRITE,
+		.kind        = VMM_KIND_HEAP,
+		.guard_pages = 1,
+	};
+	struct vmm_alloc_params eager_params = {
+		.page_count  = 1,
+		.align_pages = 1,
+		.prot        = VMM_PROT_READ | VMM_PROT_WRITE,
+		.kind        = VMM_KIND_GENERIC,
+	};
+	vmm_id_t alloc_id     = VMM_ID_INVALID;
+	void*    base         = NULL;
+	size_t   free_before  = pmm_free_page_count();
+	size_t   count_before = vmm_count();
+
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !vmm_alloc(&invalid_prot_params, &alloc_id, &base), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, alloc_id == VMM_ID_INVALID, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, base == NULL, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, vmm_count() == count_before, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !vmm_alloc(&guard_heap_params, &alloc_id, &base), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, alloc_id == VMM_ID_INVALID, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, base == NULL, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, vmm_count() == count_before, cleanup);
+
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx, vmm_alloc(&eager_params, &alloc_id, &base), "eager vmm_alloc returned false", cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, alloc_id != VMM_ID_INVALID, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, base != NULL, cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx, vmm_unmap(alloc_id, false), "vmm_unmap(false) returned false for eager allocation", cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !vmm_resolve_page_fault((uintptr_t)base), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !vmm_resolve_page_fault((uintptr_t)base + 0x200000u), cleanup);
+
+cleanup:
+	if (alloc_id != VMM_ID_INVALID) (void)vmm_free(alloc_id);
+
+	if (ctx->failure_expr == NULL) {
+		KERNEL_SELFTEST_ASSERT(ctx, vmm_count() == count_before);
+		KERNEL_SELFTEST_ASSERT(ctx, pmm_free_page_count() == free_before);
+	}
+}
+
 static const struct kernel_selftest_case kernel_vmm_selftests[] = {
 	{
      .name = "allocates_queries_and_frees_mapped_ranges",
@@ -228,6 +346,14 @@ static const struct kernel_selftest_case kernel_vmm_selftests[] = {
 	{
      .name = "free_at_releases_tracking_and_backing",
      .run  = kernel_selftest_vmm_free_at_releases_tracking_and_backing,
+	 },
+	{
+     .name = "supports_lazy_map_unmap_remap_and_reprotect",
+     .run  = kernel_selftest_vmm_supports_lazy_map_unmap_remap_and_reprotect,
+	 },
+	{
+     .name = "rejects_invalid_inputs_and_non_lazy_fault_resolution",
+     .run  = kernel_selftest_vmm_rejects_invalid_inputs_and_non_lazy_fault_resolution,
 	 },
 };
 

@@ -178,6 +178,23 @@ cleanup:
 	kernel_selftest_clock_scope_end(&clock);
 }
 
+static void kernel_selftest_semaphore_timed_acquire_zero_timeout_is_non_blocking(struct kernel_selftest_context* ctx) {
+	struct semaphore semaphore;
+
+	semaphore_init(&semaphore, 1u);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, semaphore_timed_acquire(&semaphore, 0u), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, semaphore_count(&semaphore) == 0u, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !semaphore_timed_acquire(&semaphore, 0u), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, semaphore_count(&semaphore) == 0u, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, semaphore_waiter_count(&semaphore) == 0u, cleanup);
+
+cleanup:
+	if (ctx->failure_expr == NULL) {
+		KERNEL_SELFTEST_ASSERT(ctx, semaphore_count(&semaphore) == 0u);
+		KERNEL_SELFTEST_ASSERT(ctx, semaphore_waiter_count(&semaphore) == 0u);
+	}
+}
+
 static const struct kernel_selftest_case kernel_semaphore_selftests[] = {
 	{
      .name = "counts_and_overflow_behave",
@@ -190,6 +207,10 @@ static const struct kernel_selftest_case kernel_semaphore_selftests[] = {
 	{
      .name = "timed_acquire_times_out_without_permit",
      .run  = kernel_selftest_semaphore_timed_acquire_times_out_without_permit,
+	 },
+	{
+     .name = "timed_acquire_zero_timeout_is_non_blocking",
+     .run  = kernel_selftest_semaphore_timed_acquire_zero_timeout_is_non_blocking,
 	 },
 };
 

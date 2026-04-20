@@ -33,6 +33,7 @@ kernel_selftest_sources = files(
 	'test/selftests/pmm.c',
 	'test/selftests/vmm.c',
 	'test/selftests/kheap.c',
+	'test/selftests/kthread.c',
 	'test/selftests/sched_mutex.c',
 	'test/selftests/semaphore.c',
 	'test/selftests/condvar.c',
