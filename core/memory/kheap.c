@@ -1,6 +1,6 @@
+#include <base/math.h>
 #include <core/kheap.h>
 #include <core/lock.h>
-#include <core/math.h>
 #include <core/pmm.h>
 #include <core/spinlock.h>
 #include <stdbool.h>

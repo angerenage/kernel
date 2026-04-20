@@ -1,3 +1,4 @@
+#include <base/time.h>
 #include <core/kthread.h>
 #include <core/sched.h>
 #include <hal/clock.h>
@@ -30,8 +31,7 @@ void kthread_yield(void) {
 
 bool kthread_sleep_ms(uint64_t ms) {
 	uint32_t timer_hz;
-	uint64_t sleep_ticks;
-	uint64_t current_tick;
+	uint64_t deadline_tick;
 
 	kthread_testcancel();
 	if (ms == 0u) {
@@ -40,19 +40,8 @@ bool kthread_sleep_ms(uint64_t ms) {
 	}
 
 	timer_hz = hal_clock_frequency();
-	if (timer_hz == 0u) return false;
-
-	if (ms > (UINT64_MAX - 999u) / (uint64_t)timer_hz) {
-		sleep_ticks = UINT64_MAX;
-	}
-	else {
-		sleep_ticks = (ms * (uint64_t)timer_hz + 999u) / 1000u;
-	}
-	if (sleep_ticks == 0u) sleep_ticks = 1u;
-
-	current_tick = sched_tick_count();
-	if (current_tick > UINT64_MAX - sleep_ticks) return false;
-	if (!sched_sleep_until_tick(current_tick + sleep_ticks)) return false;
+	if (!time_tick_deadline_from_ms(sched_tick_count(), ms, timer_hz, &deadline_tick)) return false;
+	if (!sched_sleep_until_tick(deadline_tick)) return false;
 	kthread_testcancel();
 	return true;
 }

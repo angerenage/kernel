@@ -1,5 +1,6 @@
 #pragma once
 
+#include <base/time.h>
 #include <core/cpu.h>
 #include <core/kthread.h>
 #include <core/pmm.h>
@@ -101,18 +102,10 @@ size_t kernel_selftest_count_true(const bool* values, size_t count) {
 }
 
 static uint64_t kernel_selftest_ms_to_ticks(uint64_t ms, uint32_t hz) {
-	uint64_t sleep_ticks;
+	uint64_t ticks = 0u;
 
-	if (ms == 0u || hz == 0u) return 0u;
-
-	if (ms > (UINT64_MAX - 999u) / (uint64_t)hz) {
-		sleep_ticks = UINT64_MAX;
-	}
-	else {
-		sleep_ticks = (ms * (uint64_t)hz + 999u) / 1000u;
-	}
-
-	return sleep_ticks == 0u ? 1u : sleep_ticks;
+	if (!time_ms_to_ticks(ms, hz, &ticks)) return 0u;
+	return ticks;
 }
 
 struct kernel_selftest_clock_scope {

@@ -41,6 +41,22 @@ test_suites = [
 		'suites': ['unit', 'base'],
 	},
 	{
+		'name': 'base_math',
+		'sources': files(
+			'base/math_test.c',
+		),
+		'link_with': base_test_lib,
+		'suites': ['unit', 'base'],
+	},
+	{
+		'name': 'base_time',
+		'sources': files(
+			'base/time_test.c',
+		),
+		'link_with': base_test_lib,
+		'suites': ['unit', 'base'],
+	},
+	{
 		'name': 'condvar',
 		'sources': files(
 			'core/condvar_test.c',

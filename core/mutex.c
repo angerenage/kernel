@@ -1,5 +1,5 @@
+#include <base/time.h>
 #include <core/kthread.h>
-#include <core/math.h>
 #include <core/mutex.h>
 #include <core/sched.h>
 #include <hal/clock.h>
@@ -73,8 +73,6 @@ void mutex_lock(struct mutex* mutex) {
 
 bool mutex_timed_lock(struct mutex* mutex, uint64_t timeout_ms) {
 	struct thread* current;
-	uint32_t       timer_hz;
-	uint64_t       sleep_ticks;
 	uint64_t       deadline_tick;
 
 	if (mutex == NULL) return false;
@@ -100,18 +98,9 @@ bool mutex_timed_lock(struct mutex* mutex, uint64_t timeout_ms) {
 		return false;
 	}
 
-	timer_hz = hal_clock_frequency();
-	if (timer_hz == 0u) return false;
-
-	if (mul_overflow_u64(timeout_ms, (uint64_t)timer_hz, &sleep_ticks) ||
-	    add_overflow_u64(sleep_ticks, 999u, &sleep_ticks)) {
-		sleep_ticks = UINT64_MAX;
+	if (!time_tick_deadline_from_ms(sched_tick_count(), timeout_ms, hal_clock_frequency(), &deadline_tick)) {
+		return false;
 	}
-	else {
-		sleep_ticks /= 1000u;
-	}
-	if (sleep_ticks == 0u) sleep_ticks = 1u;
-	if (add_overflow_u64(sched_tick_count(), sleep_ticks, &deadline_tick)) return false;
 
 	for (;;) {
 		struct irq_state mutex_state;

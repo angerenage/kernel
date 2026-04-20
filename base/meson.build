@@ -4,4 +4,6 @@ base_sources = files(
 	'libk/string/memmove.c',
 	'libk/string/memset.c',
 	'libk/string/strlen.c',
+	'math.c',
+	'time.c',
 )

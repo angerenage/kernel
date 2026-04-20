@@ -1,33 +1,12 @@
+#include <base/time.h>
 #include <core/condvar.h>
 #include <core/kthread.h>
-#include <core/math.h>
 #include <core/sched.h>
 #include <hal/clock.h>
 
 static __attribute__((noreturn))
 void condvar_trap(void) {
 	__builtin_trap();
-}
-
-static bool condvar_timeout_deadline(uint64_t timeout_ms, uint64_t* deadline_tick) {
-	uint32_t timer_hz;
-	uint64_t sleep_ticks;
-
-	if (deadline_tick == NULL) return false;
-	if (timeout_ms == 0u) return false;
-
-	timer_hz = hal_clock_frequency();
-	if (timer_hz == 0u) return false;
-
-	if (mul_overflow_u64(timeout_ms, (uint64_t)timer_hz, &sleep_ticks) ||
-	    add_overflow_u64(sleep_ticks, 999u, &sleep_ticks)) {
-		sleep_ticks = UINT64_MAX;
-	}
-	else {
-		sleep_ticks /= 1000u;
-	}
-	if (sleep_ticks == 0u) sleep_ticks = 1u;
-	return !add_overflow_u64(sched_tick_count(), sleep_ticks, deadline_tick);
 }
 
 void condvar_init(struct condvar* condvar) {
@@ -78,7 +57,8 @@ bool condvar_timed_wait(struct condvar* condvar, struct mutex* mutex, uint64_t t
 	if (current == NULL) condvar_trap();
 	kthread_testcancel();
 
-	if (!condvar_timeout_deadline(timeout_ms, &deadline_tick)) return false;
+	if (!time_tick_deadline_from_ms(sched_tick_count(), timeout_ms, hal_clock_frequency(), &deadline_tick))
+		return false;
 
 	mutex_state = spinlock_lock_irqsave(&mutex->lock);
 	if (mutex->owner != current) {

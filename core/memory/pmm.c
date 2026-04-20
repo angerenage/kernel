@@ -1,5 +1,5 @@
+#include <base/math.h>
 #include <core/lock.h>
-#include <core/math.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/spinlock.h>
