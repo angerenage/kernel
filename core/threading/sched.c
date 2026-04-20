@@ -3,6 +3,7 @@
 #include <core/spinlock.h>
 #include <core/thread.h>
 #include <hal/cpu.h>
+#include <stdint.h>
 #include <stdio.h>
 
 #define SCHED_MAX_CPU_COUNT 64u
@@ -55,7 +56,10 @@ static void sched_charge_current_timeslice(struct cpu* cpu) {
 	if (current->timeslice_remaining != 0u) return;
 
 	current->timeslice_remaining = current->timeslice_ticks;
-	if (sched_run_queue_depth(cpu) != 0u) sched_request_reschedule(cpu);
+	if (sched_run_queue_depth(cpu) == 0u) return;
+
+	sched_request_reschedule(cpu);
+	if (cpu != cpu_current()) hal_cpu_kick(cpu);
 }
 
 static struct sched_cpu_state* sched_state_for_cpu(const struct cpu* cpu) {
@@ -123,35 +127,50 @@ static bool sched_cpu_can_accept_balanced_work(const struct cpu* cpu) {
 	return sched_state_for_cpu(cpu) != NULL && cpu != NULL && cpu->current_thread != NULL;
 }
 
+static size_t sched_cpu_effective_load(const struct cpu* cpu) {
+	size_t               load = 0u;
+	const struct thread* current;
+
+	if (!sched_cpu_can_accept_balanced_work(cpu)) return SIZE_MAX;
+
+	load    = sched_run_queue_depth((struct cpu*)cpu);
+	current = cpu->current_thread;
+	if (current != NULL && !thread_is_idle(current) && !thread_is_terminated(current)) {
+		load++;
+	}
+
+	return load;
+}
+
 static struct cpu* sched_pick_least_loaded_cpu(const struct thread* thread) {
-	struct cpu* best_cpu   = NULL;
-	size_t      best_depth = 0u;
+	struct cpu* best_cpu  = NULL;
+	size_t      best_load = 0u;
 
 	for (size_t i = 0; i < cpu_count(); i++) {
 		struct cpu* cpu = cpu_by_index(i);
-		size_t      depth;
+		size_t      load;
 
 		if (!sched_cpu_can_accept_balanced_work(cpu)) continue;
 
-		depth = sched_run_queue_depth(cpu);
-		if (best_cpu == NULL || depth < best_depth) {
-			best_cpu   = cpu;
-			best_depth = depth;
+		load = sched_cpu_effective_load(cpu);
+		if (best_cpu == NULL || load < best_load) {
+			best_cpu  = cpu;
+			best_load = load;
 		}
 	}
 
 	if (best_cpu == NULL) return NULL;
 
 	if (sched_cpu_can_accept_balanced_work(thread == NULL ? NULL : thread->cpu) &&
-	    sched_run_queue_depth(thread->cpu) == best_depth) {
+	    sched_cpu_effective_load(thread->cpu) == best_load) {
 		return thread->cpu;
 	}
 
-	if (sched_cpu_can_accept_balanced_work(cpu_current()) && sched_run_queue_depth(cpu_current()) == best_depth) {
+	if (sched_cpu_can_accept_balanced_work(cpu_current()) && sched_cpu_effective_load(cpu_current()) == best_load) {
 		return cpu_current();
 	}
 
-	if (sched_cpu_can_accept_balanced_work(cpu_bsp()) && sched_run_queue_depth(cpu_bsp()) == best_depth) {
+	if (sched_cpu_can_accept_balanced_work(cpu_bsp()) && sched_cpu_effective_load(cpu_bsp()) == best_load) {
 		return cpu_bsp();
 	}
 

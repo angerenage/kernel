@@ -35,6 +35,8 @@ typedef __UINTMAX_TYPE__ uintmax_t;
 #define INTPTR_MAX __INTPTR_MAX__
 #define UINTPTR_MAX __UINTPTR_MAX__
 
+#define SIZE_MAX __SIZE_MAX__
+
 #define INTMAX_MIN (-__INTMAX_MAX__ - 1)
 #define INTMAX_MAX __INTMAX_MAX__
 #define UINTMAX_MAX __UINTMAX_MAX__
