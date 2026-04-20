@@ -347,7 +347,7 @@ static void kernel_selftest_mutex_timed_lock_times_out_when_owner_never_unlocks(
 
 	timeout_deadline = state.waiter_start_tick + timeout_ticks;
 	kernel_selftest_advance_ticks_until(timeout_deadline);
-	sched_yield();
+	kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
 
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_finished, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.waiter_result, cleanup);
@@ -489,7 +489,7 @@ static void kernel_selftest_mutex_unlock_wakes_single_waiter(struct kernel_selft
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_waiter_count(&state.mutex) == 2u, cleanup);
 
 	kernel_selftest_advance_ticks_until(state.holder_deadline_tick);
-	sched_yield();
+	kernel_selftest_dispatch_rounds(2u);
 
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.holder_sleep_result, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.holder_unlocked, cleanup);
@@ -512,7 +512,7 @@ static void kernel_selftest_mutex_unlock_wakes_single_waiter(struct kernel_selft
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_waiter_count(&state.mutex) == 1u, cleanup);
 
 	kernel_selftest_advance_ticks_until(state.waiter_deadline_ticks[woken_index]);
-	sched_yield();
+	kernel_selftest_dispatch_rounds(2u);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_acquired[blocked_index], cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_owned_mutex[blocked_index], cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_owner(&state.mutex) == &waiters[blocked_index].thread, cleanup);
@@ -597,7 +597,7 @@ static void kernel_selftest_mutex_contention_blocks_and_wakes_waiter(struct kern
 
 	kernel_selftest_advance_ticks_until(state.holder_deadline_tick);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, sched_run_queue_depth(cpu) >= 1u, cleanup);
-	sched_yield();
+	kernel_selftest_dispatch_rounds(2u);
 
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.holder_sleep_result, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.holder_wake_tick >= state.holder_deadline_tick, cleanup);

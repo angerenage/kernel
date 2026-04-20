@@ -103,6 +103,13 @@ static void kernel_bootstrap_worker_entry(void* arg) {
 
 	printf("kernel: bootstrap worker allocated 128 bytes at %p\n", block);
 	kfree(block);
+
+#if KERNEL_SELFTESTS_ENABLED
+	if (kernel_selftests_requested() && !kernel_selftests_run()) {
+		boot_fail("kernel: selftests failed");
+	}
+#endif
+
 	printf("kernel: bootstrap worker completed\n");
 }
 
@@ -309,11 +316,6 @@ void kernel_main(void) {
 	}
 	printf("kernel: cpu topology %zu present, %zu online\n", cpu_count(), cpu_online_count());
 	kernel_run_bootstrap_worker();
-#if KERNEL_SELFTESTS_ENABLED
-	if (kernel_selftests_requested() && !kernel_selftests_run()) {
-		boot_fail("kernel: selftests failed");
-	}
-#endif
 
 	boot_start_timer_counter();
 	sched_enter_idle();
