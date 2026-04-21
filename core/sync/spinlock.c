@@ -1,5 +1,6 @@
 #include <core/cpu.h>
 #include <core/spinlock.h>
+#include <stdio.h>
 
 void spinlock_init(struct spinlock* lock) {
 	if (!lock) return;
@@ -58,8 +59,47 @@ static void spinlock_debug_record_release(struct spinlock* lock) {
 	lock->owner_cpu = 0u;
 }
 
-static void spinlock_debug_fail(enum spinlock_debug_check check) {
-	(void)check;
+static const char* spinlock_debug_check_name(enum spinlock_debug_check check) {
+	switch (check) {
+	case SPINLOCK_DEBUG_CHECK_OK:
+		return "ok";
+	case SPINLOCK_DEBUG_CHECK_REENTRANT:
+		return "reentrant";
+	case SPINLOCK_DEBUG_CHECK_ORDER:
+		return "order";
+	case SPINLOCK_DEBUG_CHECK_IRQSAVE_REQUIRED:
+		return "irqsave_required";
+	case SPINLOCK_DEBUG_CHECK_EXCEPTION_DISALLOWED:
+		return "exception_disallowed";
+	default:
+		return "unknown";
+	}
+}
+
+static void spinlock_debug_fail(const struct spinlock* lock, enum spinlock_debug_check check) {
+	const struct cpu* cpu = cpu_current();
+
+	printf("kernel: spinlock debug failure: check=%s(%u) lock=%s order=%u flags=0x%x owner_cpu=%u\n",
+	       spinlock_debug_check_name(check),
+	       (unsigned)check,
+	       lock != NULL && lock->name != NULL ? lock->name : "<unnamed>",
+	       lock != NULL ? (unsigned)lock->order : 0u,
+	       lock != NULL ? (unsigned)lock->flags : 0u,
+	       lock != NULL ? (unsigned)lock->owner_cpu : 0u);
+	if (cpu != NULL) {
+		printf("kernel: spinlock debug cpu=%zu irq_disable_depth=%u exception_depth=%u lock_depth=%u\n",
+		       cpu->index,
+		       (unsigned)cpu->irq_disable_depth,
+		       (unsigned)cpu->exception_depth,
+		       (unsigned)cpu->lock_depth);
+		if (cpu->lock_depth != 0u) {
+			printf("kernel: spinlock debug held orders:");
+			for (uint32_t i = 0; i < cpu->lock_depth; i++) {
+				printf(" %u", (unsigned)cpu->lock_order_stack[i]);
+			}
+			printf("\n");
+		}
+	}
 	__builtin_trap();
 }
 #else
@@ -71,7 +111,8 @@ static void spinlock_debug_record_release(struct spinlock* lock) {
 	(void)lock;
 }
 
-static void spinlock_debug_fail(enum spinlock_debug_check check) {
+static void spinlock_debug_fail(const struct spinlock* lock, enum spinlock_debug_check check) {
+	(void)lock;
 	(void)check;
 }
 #endif
@@ -109,7 +150,7 @@ bool spinlock_try_lock(struct spinlock* lock) {
 
 	check = spinlock_debug_check_acquire(lock);
 	if (check != SPINLOCK_DEBUG_CHECK_OK) {
-		spinlock_debug_fail(check);
+		spinlock_debug_fail(lock, check);
 		return false;
 	}
 	if (__atomic_exchange_n(&lock->state, 1u, __ATOMIC_ACQUIRE) != 0u) return false;

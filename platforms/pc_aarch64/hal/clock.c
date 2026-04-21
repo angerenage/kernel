@@ -85,14 +85,6 @@ static inline void write_timer_control(uint32_t value) {
 	__asm__ volatile("msr cntv_ctl_el0, %0" : : "r"((uint64_t)value) : "memory");
 }
 
-static inline void mask_irqs(void) {
-	__asm__ volatile("msr daifset, #2" : : : "memory");
-}
-
-static inline void unmask_irqs(void) {
-	__asm__ volatile("msr daifclr, #2" : : : "memory");
-}
-
 static bool map_mmio_page(uintptr_t phys) {
 	uintptr_t page_phys = phys & ~(uintptr_t)(AARCH64_MMIO_PAGE_SIZE - 1u);
 	uintptr_t page_virt;
@@ -177,7 +169,6 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 	}
 
 	if (clock_running) {
-		mask_irqs();
 		write_timer_control(0u);
 		clock_running        = false;
 		clock_frequency_hz   = 0u;
@@ -209,7 +200,6 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 
 	write_deadline(clock_next_deadline);
 	write_timer_control(AARCH64_CNTV_CTL_ENABLE);
-	unmask_irqs();
 
 	printf("kernel: aarch64 clock started (requested=%u Hz, actual=%u Hz, source=generic timer)\n",
 	       frequency_hz,
@@ -235,7 +225,6 @@ void hal_clock_stop(void) {
 		return;
 	}
 
-	mask_irqs();
 	write_timer_control(0u);
 
 	clock_running        = false;

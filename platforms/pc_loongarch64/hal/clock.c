@@ -104,7 +104,6 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 	uint64_t         timer_hz;
 	uint64_t         interval_ticks;
 	uint64_t         ecfg;
-	uint64_t         crmd;
 	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
 
 	if (!clock_initialized || frequency_hz == 0u || handler == NULL) {
@@ -118,9 +117,6 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 		ecfg = csrrd(LOONGARCH64_CSR_ECFG);
 		ecfg &= ~LOONGARCH64_TIMER_INT_MASK;
 		csrwr(ecfg, LOONGARCH64_CSR_ECFG);
-		crmd = csrrd(LOONGARCH64_CSR_CRMD);
-		crmd &= ~LOONGARCH64_CRMD_IE;
-		csrwr(crmd, LOONGARCH64_CSR_CRMD);
 		clock_running      = false;
 		clock_frequency_hz = 0u;
 		clock_handler      = NULL;
@@ -149,10 +145,6 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 	ecfg |= LOONGARCH64_TIMER_INT_MASK;
 	csrwr(ecfg, LOONGARCH64_CSR_ECFG);
 
-	crmd = csrrd(LOONGARCH64_CSR_CRMD);
-	crmd |= LOONGARCH64_CRMD_IE;
-	csrwr(crmd, LOONGARCH64_CSR_CRMD);
-
 	printf("kernel: loongarch64 clock started (requested=%u Hz, actual=%u Hz, source=csr timer)\n",
 	       frequency_hz,
 	       clock_frequency_hz);
@@ -171,7 +163,6 @@ uint32_t hal_clock_frequency(void) {
 
 void hal_clock_stop(void) {
 	uint64_t         ecfg;
-	uint64_t         crmd;
 	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
 
 	if (!clock_initialized) {
@@ -185,10 +176,6 @@ void hal_clock_stop(void) {
 	ecfg = csrrd(LOONGARCH64_CSR_ECFG);
 	ecfg &= ~LOONGARCH64_TIMER_INT_MASK;
 	csrwr(ecfg, LOONGARCH64_CSR_ECFG);
-
-	crmd = csrrd(LOONGARCH64_CSR_CRMD);
-	crmd &= ~LOONGARCH64_CRMD_IE;
-	csrwr(crmd, LOONGARCH64_CSR_CRMD);
 
 	clock_running      = false;
 	clock_frequency_hz = 0u;

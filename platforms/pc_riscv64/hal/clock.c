@@ -47,14 +47,6 @@ static inline void write_sie(uint64_t value) {
 	__asm__ volatile("csrw sie, %0" : : "r"(value) : "memory");
 }
 
-static inline void enable_interrupts(void) {
-	__asm__ volatile("csrs sstatus, %0" : : "r"(1ull << 1) : "memory");
-}
-
-static inline void disable_interrupts(void) {
-	__asm__ volatile("csrc sstatus, %0" : : "r"(1ull << 1) : "memory");
-}
-
 static struct sbi_ret sbi_call1(unsigned long arg0, unsigned long fid, unsigned long eid) {
 	register unsigned long a0 asm("a0") = arg0;
 	register unsigned long a1 asm("a1");
@@ -110,7 +102,6 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 		sie = read_sie();
 		sie &= ~RISCV64_SIE_STIE;
 		write_sie(sie);
-		disable_interrupts();
 		(void)set_timer(UINT64_MAX);
 		clock_running        = false;
 		clock_frequency_hz   = 0u;
@@ -134,7 +125,6 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 		sie = read_sie();
 		sie &= ~RISCV64_SIE_STIE;
 		write_sie(sie);
-		disable_interrupts();
 		(void)set_timer(UINT64_MAX);
 		clock_running        = false;
 		clock_frequency_hz   = 0u;
@@ -149,7 +139,6 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 	sie = read_sie();
 	sie |= RISCV64_SIE_STIE;
 	write_sie(sie);
-	enable_interrupts();
 
 	printf("kernel: riscv64 clock started (requested=%u Hz, actual=%u Hz, source=sbi time)\n",
 	       frequency_hz,
@@ -179,7 +168,6 @@ void hal_clock_stop(void) {
 	sie = read_sie();
 	sie &= ~RISCV64_SIE_STIE;
 	write_sie(sie);
-	disable_interrupts();
 	(void)set_timer(UINT64_MAX);
 
 	clock_running        = false;

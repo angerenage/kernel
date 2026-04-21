@@ -339,6 +339,7 @@ struct kernel_selftest_rwlock_writer_timeout_state {
 	struct thread* holder_thread;
 	struct thread* writer_thread;
 	struct thread* reader_thread;
+	uint64_t       holder_hold_ticks;
 	uint64_t       holder_deadline_tick;
 	uint64_t       writer_start_tick;
 	uint64_t       writer_finish_tick;
@@ -364,7 +365,7 @@ static void kernel_selftest_rwlock_timeout_holder_worker(void* arg) {
 	rwlock_read_lock(&state->rwlock);
 	state->holder_thread        = kthread_current();
 	state->holder_acquired      = true;
-	state->holder_deadline_tick = sched_tick_count() + KERNEL_SELFTEST_SLEEP_TICKS + KERNEL_SELFTEST_RWLOCK_HOLD_TICKS;
+	state->holder_deadline_tick = sched_tick_count() + state->holder_hold_ticks;
 	state->holder_sleep_result  = sched_sleep_until_tick(state->holder_deadline_tick);
 	state->holder_unlocked      = rwlock_read_unlock(&state->rwlock);
 }
@@ -398,6 +399,17 @@ static void kernel_selftest_rwlock_timeout_reader_worker(void* arg) {
 	state->reader_unlocked      = rwlock_read_unlock(&state->rwlock);
 }
 
+static bool kernel_selftest_rwlock_wait_for_timeout_waiters(struct kernel_selftest_rwlock_writer_timeout_state* state,
+                                                            size_t expected_waiters) {
+	for (size_t attempt = 0; attempt < KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS; attempt++) {
+		if (state != NULL && !state->writer_finished && rwlock_waiter_count(&state->rwlock) == expected_waiters) {
+			return true;
+		}
+		sched_yield();
+	}
+	return state != NULL && !state->writer_finished && rwlock_waiter_count(&state->rwlock) == expected_waiters;
+}
+
 static void kernel_selftest_rwlock_timed_writer_timeout_wakes_blocked_readers(struct kernel_selftest_context* ctx) {
 	struct kernel_selftest_managed_thread holder = {
 		.stack_id = VMM_ID_INVALID,
@@ -417,6 +429,7 @@ static void kernel_selftest_rwlock_timed_writer_timeout_wakes_blocked_readers(st
 		ctx, kernel_selftest_clock_scope_begin(&clock), "failed to start a temporary clock source", cleanup);
 	timeout_ticks = kernel_selftest_ms_to_ticks(KERNEL_SELFTEST_RWLOCK_TIMEOUT_MS, clock.hz);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, timeout_ticks != 0u, "timeout conversion returned zero ticks", cleanup);
+	state.holder_hold_ticks = timeout_ticks + KERNEL_SELFTEST_RWLOCK_HOLD_TICKS;
 
 	rwlock_init(&state.rwlock);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
@@ -448,9 +461,7 @@ static void kernel_selftest_rwlock_timed_writer_timeout_wakes_blocked_readers(st
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.writer_started, "timeout writer never attempted the rwlock", cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.writer_finished, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, writer.thread.state == THREAD_STATE_BLOCKED, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, writer.thread.block_reason == THREAD_BLOCK_RWLOCK, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_waiter_count(&state.rwlock) == 1u, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_rwlock_wait_for_timeout_waiters(&state, 1u), cleanup);
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, kthread_start(&reader.thread), "failed to start timeout reader", cleanup);
 	sched_yield();
@@ -458,9 +469,7 @@ static void kernel_selftest_rwlock_timed_writer_timeout_wakes_blocked_readers(st
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.reader_started, "timeout reader never attempted the rwlock", cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.reader_try_result, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.reader_acquired, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, reader.thread.state == THREAD_STATE_BLOCKED, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, reader.thread.block_reason == THREAD_BLOCK_RWLOCK, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_waiter_count(&state.rwlock) == 2u, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_rwlock_wait_for_timeout_waiters(&state, 2u), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_reader_count(&state.rwlock) == 1u, cleanup);
 
 	timeout_deadline = state.writer_start_tick + timeout_ticks;

@@ -256,6 +256,7 @@ struct kernel_selftest_mutex_timeout_state {
 	struct mutex   mutex;
 	struct thread* owner_thread;
 	struct thread* waiter_thread;
+	uint64_t       owner_hold_ticks;
 	uint64_t       owner_deadline_tick;
 	uint64_t       owner_wake_tick;
 	uint64_t       waiter_start_tick;
@@ -277,7 +278,7 @@ static void kernel_selftest_mutex_timeout_owner_worker(void* arg) {
 	mutex_lock(&state->mutex);
 	state->owner_thread        = kthread_current();
 	state->owner_locked        = mutex_is_owned_by_current(&state->mutex);
-	state->owner_deadline_tick = sched_tick_count() + KERNEL_SELFTEST_SLEEP_TICKS + KERNEL_SELFTEST_MUTEX_HOLD_TICKS;
+	state->owner_deadline_tick = sched_tick_count() + state->owner_hold_ticks;
 	state->owner_sleep_result  = sched_sleep_until_tick(state->owner_deadline_tick);
 	state->owner_wake_tick     = sched_tick_count();
 	state->owner_unlocked      = mutex_unlock(&state->mutex);
@@ -314,6 +315,7 @@ static void kernel_selftest_mutex_timed_lock_times_out_when_owner_never_unlocks(
 		ctx, kernel_selftest_clock_scope_begin(&clock), "failed to start a temporary clock source", cleanup);
 	timeout_ticks = kernel_selftest_ms_to_ticks(KERNEL_SELFTEST_MUTEX_TIMEOUT_MS, clock.hz);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, timeout_ticks != 0u, "timeout conversion returned zero ticks", cleanup);
+	state.owner_hold_ticks = timeout_ticks + KERNEL_SELFTEST_MUTEX_HOLD_TICKS;
 
 	mutex_init(&state.mutex);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
