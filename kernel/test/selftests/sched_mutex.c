@@ -24,10 +24,8 @@ static void kernel_selftest_sched_dispatch_worker(void* arg) {
 }
 
 static void kernel_selftest_sched_yield_dispatches_runnable_thread(struct kernel_selftest_context* ctx) {
-	struct kernel_selftest_managed_thread worker = {
-		.stack_id = VMM_ID_INVALID,
-	};
-	struct kernel_selftest_sched_dispatch_state state = {0};
+	struct kthread*                             worker = NULL;
+	struct kernel_selftest_sched_dispatch_state state  = {0};
 	struct sched_stats                          stats_before;
 	struct sched_stats                          stats_after;
 	struct cpu*                                 cpu = cpu_current();
@@ -41,8 +39,7 @@ static void kernel_selftest_sched_yield_dispatches_runnable_thread(struct kernel
 			&worker, "selftest/sched-dispatch", kernel_selftest_sched_dispatch_worker, &state),
 		"failed to create scheduler dispatch worker",
 		cleanup);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, kthread_start(&worker.thread), "failed to start scheduler dispatch worker", cleanup);
+
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, sched_run_queue_depth(cpu) == 1u, cleanup);
 
 	sched_yield();
@@ -50,18 +47,18 @@ static void kernel_selftest_sched_yield_dispatches_runnable_thread(struct kernel
 	sched_get_stats(&stats_after);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.ran, "worker thread was not dispatched", cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.cpu_at_entry == cpu, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.current_thread == &worker.thread, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&worker.thread), cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, worker.thread.exit_code == 0u, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.current_thread == &worker->thread, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&worker->thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, worker->thread.exit_code == 0u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, sched_run_queue_depth(cpu) == 0u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, stats_after.yield_count >= stats_before.yield_count + 1u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(
 		ctx, stats_after.context_switch_count >= stats_before.context_switch_count + 2u, cleanup);
 
 cleanup:
-	if (!thread_is_terminated(&worker.thread)) kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
-	if (ctx->failure_expr == NULL && worker.stack_id != VMM_ID_INVALID) {
-		KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&worker.thread));
+	if (kernel_selftest_thread_is_live(worker)) kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
+	if (ctx->failure_expr == NULL && worker != NULL) {
+		KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&worker->thread));
 	}
 	kernel_selftest_thread_destroy(&worker);
 }
@@ -85,11 +82,9 @@ static void kernel_selftest_sched_sleep_worker(void* arg) {
 }
 
 static void kernel_selftest_sched_sleep_wakes_after_deadline(struct kernel_selftest_context* ctx) {
-	struct kernel_selftest_managed_thread worker = {
-		.stack_id = VMM_ID_INVALID,
-	};
-	struct kernel_selftest_sched_sleep_state state = {0};
-	struct cpu*                              cpu   = cpu_current();
+	struct kthread*                          worker = NULL;
+	struct kernel_selftest_sched_sleep_state state  = {0};
+	struct cpu*                              cpu    = cpu_current();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, cpu != NULL, "cpu_current returned NULL", cleanup);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
@@ -97,19 +92,17 @@ static void kernel_selftest_sched_sleep_wakes_after_deadline(struct kernel_selft
 		kernel_selftest_thread_create(&worker, "selftest/sched-sleep", kernel_selftest_sched_sleep_worker, &state),
 		"failed to create scheduler sleep worker",
 		cleanup);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, kthread_start(&worker.thread), "failed to start scheduler sleep worker", cleanup);
 
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.entered, "worker thread did not reach sched_sleep_until_tick", cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !thread_is_terminated(&worker.thread), cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, worker.thread.state == THREAD_STATE_BLOCKED, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, worker.thread.block_reason == THREAD_BLOCK_SLEEP, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_thread_is_live(worker), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, worker->thread.state == THREAD_STATE_BLOCKED, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, worker->thread.block_reason == THREAD_BLOCK_SLEEP, cleanup);
 
 	for (size_t i = 0; i + 1u < KERNEL_SELFTEST_SLEEP_TICKS; i++) {
 		sched_tick();
-		KERNEL_SELFTEST_ASSERT_GOTO(ctx, !thread_is_terminated(&worker.thread), cleanup);
+		KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_thread_is_live(worker), cleanup);
 		KERNEL_SELFTEST_ASSERT_GOTO(ctx, sched_run_queue_depth(cpu) == 0u, cleanup);
 	}
 
@@ -119,15 +112,15 @@ static void kernel_selftest_sched_sleep_wakes_after_deadline(struct kernel_selft
 
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.slept, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.wake_tick >= state.deadline_tick, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&worker.thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&worker->thread), cleanup);
 
 cleanup:
-	if (!thread_is_terminated(&worker.thread)) {
+	if (kernel_selftest_thread_is_live(worker)) {
 		kernel_selftest_advance_ticks_until(state.deadline_tick);
 		kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
 	}
-	if (ctx->failure_expr == NULL && worker.stack_id != VMM_ID_INVALID) {
-		KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&worker.thread));
+	if (ctx->failure_expr == NULL && worker != NULL) {
+		KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&worker->thread));
 	}
 	kernel_selftest_thread_destroy(&worker);
 }
@@ -151,12 +144,10 @@ static void kernel_selftest_kthread_sleep_ms_worker(void* arg) {
 }
 
 static void kernel_selftest_sleep_ms_wakes_after_deadline(struct kernel_selftest_context* ctx) {
-	struct kernel_selftest_managed_thread worker = {
-		.stack_id = VMM_ID_INVALID,
-	};
-	struct kernel_selftest_kthread_sleep_ms_state state = {0};
-	struct kernel_selftest_clock_scope            clock = {0};
-	struct cpu*                                   cpu   = cpu_current();
+	struct kthread*                               worker = NULL;
+	struct kernel_selftest_kthread_sleep_ms_state state  = {0};
+	struct kernel_selftest_clock_scope            clock  = {0};
+	struct cpu*                                   cpu    = cpu_current();
 	uint64_t                                      sleep_ticks;
 	uint64_t                                      deadline_tick = 0u;
 
@@ -172,20 +163,18 @@ static void kernel_selftest_sleep_ms_wakes_after_deadline(struct kernel_selftest
 			&worker, "selftest/kthread-sleep-ms", kernel_selftest_kthread_sleep_ms_worker, &state),
 		"failed to create kthread_sleep_ms worker",
 		cleanup);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, kthread_start(&worker.thread), "failed to start kthread_sleep_ms worker", cleanup);
 
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.started, "worker thread did not call kthread_sleep_ms", cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !thread_is_terminated(&worker.thread), cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, worker.thread.state == THREAD_STATE_BLOCKED, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, worker.thread.block_reason == THREAD_BLOCK_SLEEP, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_thread_is_live(worker), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, worker->thread.state == THREAD_STATE_BLOCKED, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, worker->thread.block_reason == THREAD_BLOCK_SLEEP, cleanup);
 
 	deadline_tick = state.start_tick + sleep_ticks;
 	for (uint64_t tick = 0; tick + 1u < sleep_ticks; tick++) {
 		sched_tick();
-		KERNEL_SELFTEST_ASSERT_GOTO(ctx, !thread_is_terminated(&worker.thread), cleanup);
+		KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_thread_is_live(worker), cleanup);
 		KERNEL_SELFTEST_ASSERT_GOTO(ctx, sched_run_queue_depth(cpu) == 0u, cleanup);
 	}
 
@@ -196,15 +185,15 @@ static void kernel_selftest_sleep_ms_wakes_after_deadline(struct kernel_selftest
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.slept, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.wake_tick >= deadline_tick, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.wake_tick - state.start_tick >= sleep_ticks, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&worker.thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&worker->thread), cleanup);
 
 cleanup:
-	if (!thread_is_terminated(&worker.thread)) {
+	if (kernel_selftest_thread_is_live(worker)) {
 		kernel_selftest_advance_ticks_until(deadline_tick);
 		kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
 	}
-	if (ctx->failure_expr == NULL && worker.stack_id != VMM_ID_INVALID) {
-		KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&worker.thread));
+	if (ctx->failure_expr == NULL && worker != NULL) {
+		KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&worker->thread));
 	}
 	kernel_selftest_thread_destroy(&worker);
 	kernel_selftest_clock_scope_end(&clock);
@@ -300,14 +289,10 @@ static void kernel_selftest_mutex_timeout_waiter_worker(void* arg) {
 }
 
 static void kernel_selftest_mutex_timed_lock_times_out_when_owner_never_unlocks(struct kernel_selftest_context* ctx) {
-	struct kernel_selftest_managed_thread owner = {
-		.stack_id = VMM_ID_INVALID,
-	};
-	struct kernel_selftest_managed_thread waiter = {
-		.stack_id = VMM_ID_INVALID,
-	};
-	struct kernel_selftest_mutex_timeout_state state = {0};
-	struct kernel_selftest_clock_scope         clock = {0};
+	struct kthread*                            owner  = NULL;
+	struct kthread*                            waiter = NULL;
+	struct kernel_selftest_mutex_timeout_state state  = {0};
+	struct kernel_selftest_clock_scope         clock  = {0};
 	uint64_t                                   timeout_ticks;
 	uint64_t                                   timeout_deadline = 0u;
 
@@ -330,21 +315,19 @@ static void kernel_selftest_mutex_timed_lock_times_out_when_owner_never_unlocks(
 			&waiter, "selftest/mutex-timeout-waiter", kernel_selftest_mutex_timeout_waiter_worker, &state),
 		"failed to create mutex timeout waiter thread",
 		cleanup);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, kthread_start(&owner.thread), "failed to start timeout owner thread", cleanup);
+
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.owner_locked, "owner thread never acquired the mutex", cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_owner(&state.mutex) == &owner.thread, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_owner(&state.mutex) == &owner->thread, cleanup);
 
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, kthread_start(&waiter.thread), "failed to start timeout waiter thread", cleanup);
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.waiter_started, "timed waiter never attempted the mutex", cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.waiter_finished, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiter.thread.state == THREAD_STATE_BLOCKED, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiter.thread.block_reason == THREAD_BLOCK_MUTEX, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_owner(&state.mutex) == &owner.thread, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiter->thread.state == THREAD_STATE_BLOCKED, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiter->thread.block_reason == THREAD_BLOCK_MUTEX, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_owner(&state.mutex) == &owner->thread, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_waiter_count(&state.mutex) == 1u, cleanup);
 
 	timeout_deadline = state.waiter_start_tick + timeout_ticks;
@@ -356,19 +339,19 @@ static void kernel_selftest_mutex_timed_lock_times_out_when_owner_never_unlocks(
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.waiter_owned_mutex, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_finish_tick >= timeout_deadline, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_finish_tick - state.waiter_start_tick >= timeout_ticks, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_owner(&state.mutex) == &owner.thread, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !thread_is_terminated(&owner.thread), cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&waiter.thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_owner(&state.mutex) == &owner->thread, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_thread_is_live(owner), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&waiter->thread), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_waiter_count(&state.mutex) == 0u, cleanup);
 
 cleanup:
 	kernel_selftest_advance_ticks_until(state.owner_deadline_tick);
-	if (!thread_is_terminated(&owner.thread) || !thread_is_terminated(&waiter.thread)) {
+	if (kernel_selftest_thread_is_live(owner) || kernel_selftest_thread_is_live(waiter)) {
 		kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
 	}
 	if (ctx->failure_expr == NULL) {
-		if (owner.stack_id != VMM_ID_INVALID) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&owner.thread));
-		if (waiter.stack_id != VMM_ID_INVALID) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&waiter.thread));
+		if (owner != NULL) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&owner->thread));
+		if (waiter != NULL) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&waiter->thread));
 	}
 	kernel_selftest_thread_destroy(&waiter);
 	kernel_selftest_thread_destroy(&owner);
@@ -433,13 +416,8 @@ static void kernel_selftest_mutex_single_wake_waiter_worker(void* arg) {
 }
 
 static void kernel_selftest_mutex_unlock_wakes_single_waiter(struct kernel_selftest_context* ctx) {
-	struct kernel_selftest_managed_thread holder = {
-		.stack_id = VMM_ID_INVALID,
-	};
-	struct kernel_selftest_managed_thread waiters[2] = {
-		{.stack_id = VMM_ID_INVALID},
-		{.stack_id = VMM_ID_INVALID},
-	};
+	struct kthread*                                holder        = NULL;
+	struct kthread*                                waiters[2]    = {0};
 	struct kernel_selftest_mutex_single_wake_state state         = {0};
 	size_t                                         woken_index   = 0u;
 	size_t                                         blocked_index = 0u;
@@ -469,25 +447,21 @@ static void kernel_selftest_mutex_unlock_wakes_single_waiter(struct kernel_selft
 			cleanup);
 	}
 
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, kthread_start(&holder.thread), "failed to start single-wake holder thread", cleanup);
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.holder_locked, "holder thread never acquired the mutex", cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_owner(&state.mutex) == &holder.thread, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_owner(&state.mutex) == &holder->thread, cleanup);
 
 	for (size_t i = 0; i < 2u; i++) {
-		KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-			ctx, kthread_start(&waiters[i].thread), "failed to start single-wake waiter thread", cleanup);
 	}
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_started[0], cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_started[1], cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiters[0].thread.state == THREAD_STATE_BLOCKED, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiters[1].thread.state == THREAD_STATE_BLOCKED, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiters[0].thread.block_reason == THREAD_BLOCK_MUTEX, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiters[1].thread.block_reason == THREAD_BLOCK_MUTEX, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiters[0]->thread.state == THREAD_STATE_BLOCKED, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiters[1]->thread.state == THREAD_STATE_BLOCKED, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiters[0]->thread.block_reason == THREAD_BLOCK_MUTEX, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiters[1]->thread.block_reason == THREAD_BLOCK_MUTEX, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_waiter_count(&state.mutex) == 2u, cleanup);
 
 	kernel_selftest_advance_ticks_until(state.holder_deadline_tick);
@@ -495,7 +469,7 @@ static void kernel_selftest_mutex_unlock_wakes_single_waiter(struct kernel_selft
 
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.holder_sleep_result, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.holder_unlocked, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&holder.thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&holder->thread), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_count_true(state.waiter_acquired, 2u) == 1u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_count_true(state.waiter_owned_mutex, 2u) == 1u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_waiter_count(&state.mutex) == 1u, cleanup);
@@ -506,18 +480,18 @@ static void kernel_selftest_mutex_unlock_wakes_single_waiter(struct kernel_selft
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_acquired[woken_index], cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_owned_mutex[woken_index], cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.waiter_acquired[blocked_index], cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_owner(&state.mutex) == &waiters[woken_index].thread, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiters[woken_index].thread.state == THREAD_STATE_BLOCKED, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiters[woken_index].thread.block_reason == THREAD_BLOCK_SLEEP, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiters[blocked_index].thread.state == THREAD_STATE_BLOCKED, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiters[blocked_index].thread.block_reason == THREAD_BLOCK_MUTEX, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_owner(&state.mutex) == &waiters[woken_index]->thread, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiters[woken_index]->thread.state == THREAD_STATE_BLOCKED, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiters[woken_index]->thread.block_reason == THREAD_BLOCK_SLEEP, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiters[blocked_index]->thread.state == THREAD_STATE_BLOCKED, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiters[blocked_index]->thread.block_reason == THREAD_BLOCK_MUTEX, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_waiter_count(&state.mutex) == 1u, cleanup);
 
 	kernel_selftest_advance_ticks_until(state.waiter_deadline_ticks[woken_index]);
 	kernel_selftest_dispatch_rounds(2u);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_acquired[blocked_index], cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_owned_mutex[blocked_index], cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_owner(&state.mutex) == &waiters[blocked_index].thread, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_owner(&state.mutex) == &waiters[blocked_index]->thread, cleanup);
 
 	kernel_selftest_advance_ticks_until(state.waiter_deadline_ticks[blocked_index]);
 	sched_yield();
@@ -526,15 +500,15 @@ static void kernel_selftest_mutex_unlock_wakes_single_waiter(struct kernel_selft
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_sleep_result[1], cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_unlocked[0], cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_unlocked[1], cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&waiters[0].thread), cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&waiters[1].thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&waiters[0]->thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&waiters[1]->thread), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !mutex_is_locked(&state.mutex), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_waiter_count(&state.mutex) == 0u, cleanup);
 
 cleanup:
 	for (size_t attempt = 0; attempt < KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS &&
-	                         (!thread_is_terminated(&holder.thread) || !thread_is_terminated(&waiters[0].thread) ||
-	                          !thread_is_terminated(&waiters[1].thread));
+	                         (kernel_selftest_thread_is_live(holder) || kernel_selftest_thread_is_live(waiters[0]) ||
+	                          kernel_selftest_thread_is_live(waiters[1]));
 	     attempt++) {
 		kernel_selftest_advance_ticks_until(state.holder_deadline_tick);
 		for (size_t i = 0; i < 2u; i++) {
@@ -543,10 +517,9 @@ cleanup:
 		sched_yield();
 	}
 	if (ctx->failure_expr == NULL) {
-		if (holder.stack_id != VMM_ID_INVALID) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&holder.thread));
+		if (holder != NULL) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&holder->thread));
 		for (size_t i = 0; i < 2u; i++) {
-			if (waiters[i].stack_id != VMM_ID_INVALID)
-				KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&waiters[i].thread));
+			if (waiters[i] != NULL) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&waiters[i]->thread));
 		}
 	}
 	for (size_t i = 0; i < 2u; i++) {
@@ -556,14 +529,10 @@ cleanup:
 }
 
 static void kernel_selftest_mutex_contention_blocks_and_wakes_waiter(struct kernel_selftest_context* ctx) {
-	struct kernel_selftest_managed_thread holder = {
-		.stack_id = VMM_ID_INVALID,
-	};
-	struct kernel_selftest_managed_thread waiter = {
-		.stack_id = VMM_ID_INVALID,
-	};
-	struct kernel_selftest_mutex_state state = {0};
-	struct cpu*                        cpu   = cpu_current();
+	struct kthread*                    holder = NULL;
+	struct kthread*                    waiter = NULL;
+	struct kernel_selftest_mutex_state state  = {0};
+	struct cpu*                        cpu    = cpu_current();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, cpu != NULL, "cpu_current returned NULL", cleanup);
 
@@ -578,22 +547,20 @@ static void kernel_selftest_mutex_contention_blocks_and_wakes_waiter(struct kern
 		kernel_selftest_thread_create(&waiter, "selftest/mutex-waiter", kernel_selftest_mutex_waiter_worker, &state),
 		"failed to create mutex waiter thread",
 		cleanup);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, kthread_start(&holder.thread), "failed to start mutex holder thread", cleanup);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, kthread_start(&waiter.thread), "failed to start mutex waiter thread", cleanup);
 
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.holder_acquired, "holder thread never acquired the mutex", cleanup);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.waiter_started, "waiter thread never attempted the mutex", cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !thread_is_terminated(&holder.thread), cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !thread_is_terminated(&waiter.thread), cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, holder.thread.state == THREAD_STATE_BLOCKED, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, holder.thread.block_reason == THREAD_BLOCK_SLEEP, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiter.thread.state == THREAD_STATE_BLOCKED, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiter.thread.block_reason == THREAD_BLOCK_MUTEX, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.holder_thread == &holder.thread, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_thread == &waiter.thread, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_owner(&state.mutex) == &holder.thread, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_thread_is_live(holder), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_thread_is_live(waiter), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, holder->thread.state == THREAD_STATE_BLOCKED, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, holder->thread.block_reason == THREAD_BLOCK_SLEEP, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiter->thread.state == THREAD_STATE_BLOCKED, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiter->thread.block_reason == THREAD_BLOCK_MUTEX, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.holder_thread == &holder->thread, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_thread == &waiter->thread, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_owner(&state.mutex) == &holder->thread, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_waiter_count(&state.mutex) == 1u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, sched_run_queue_depth(cpu) == 0u, cleanup);
 
@@ -607,20 +574,20 @@ static void kernel_selftest_mutex_contention_blocks_and_wakes_waiter(struct kern
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_acquired, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_owned_mutex, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_unlocked, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&holder.thread), cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&waiter.thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&holder->thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&waiter->thread), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !mutex_is_locked(&state.mutex), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_owner(&state.mutex) == NULL, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_waiter_count(&state.mutex) == 0u, cleanup);
 
 cleanup:
 	kernel_selftest_advance_ticks_until(state.holder_deadline_tick);
-	if (!thread_is_terminated(&holder.thread) || !thread_is_terminated(&waiter.thread)) {
+	if (kernel_selftest_thread_is_live(holder) || kernel_selftest_thread_is_live(waiter)) {
 		kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
 	}
 	if (ctx->failure_expr == NULL) {
-		if (holder.stack_id != VMM_ID_INVALID) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&holder.thread));
-		if (waiter.stack_id != VMM_ID_INVALID) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&waiter.thread));
+		if (holder != NULL) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&holder->thread));
+		if (waiter != NULL) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&waiter->thread));
 	}
 	kernel_selftest_thread_destroy(&waiter);
 	kernel_selftest_thread_destroy(&holder);

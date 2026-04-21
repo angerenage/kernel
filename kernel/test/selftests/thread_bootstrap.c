@@ -15,17 +15,23 @@ struct kernel_selftest_thread_bootstrap_state {
 	bool           ran;
 };
 
-static const char* kernel_selftest_thread_bootstrap_create_failure_message(enum thread_init_result result) {
+static const char* kernel_selftest_thread_bootstrap_spawn_failure_message(enum kthread_spawn_result result) {
 	switch (result) {
-	case THREAD_INIT_INVALID_STACK:
-		return "stack allocation produced invalid thread bounds";
-	case THREAD_INIT_CONTEXT_UNSUPPORTED:
+	case KTHREAD_SPAWN_CONTEXT_UNSUPPORTED:
 		return "hal_cpu_thread_context_init rejected bootstrap setup";
-	case THREAD_INIT_INVALID_ARGUMENTS:
+	case KTHREAD_SPAWN_INVALID_ARGUMENTS:
 		return "thread bootstrap worker parameters were rejected";
-	case THREAD_INIT_OK:
+	case KTHREAD_SPAWN_NO_MEMORY:
+		return "thread bootstrap worker allocation failed";
+	case KTHREAD_SPAWN_STACK_ALLOC_FAILED:
+		return "thread bootstrap stack allocation failed";
+	case KTHREAD_SPAWN_START_FAILED:
+		return "thread bootstrap worker could not be made runnable";
+	case KTHREAD_SPAWN_REAPER_UNAVAILABLE:
+		return "thread bootstrap reaper unavailable";
+	case KTHREAD_SPAWN_OK:
 	default:
-		return "thread bootstrap worker creation failed";
+		return "thread bootstrap worker spawn failed";
 	}
 }
 
@@ -41,65 +47,38 @@ static void kernel_selftest_thread_bootstrap_worker(void* arg) {
 }
 
 static void kernel_selftest_thread_bootstrap_create_start_join_worker(struct kernel_selftest_context* ctx) {
-	struct vmm_alloc_params stack_params = {
-		.page_count  = KERNEL_SELFTEST_THREAD_STACK_PAGES,
-		.align_pages = 1u,
-		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_GLOBAL,
-		.kind        = VMM_KIND_STACK,
-		.guard_pages = VMM_STACK_DEFAULT_GUARD_PAGES,
-		.map_flags   = 0u,
-	};
-	struct thread_create_params           params;
-	struct kernel_selftest_managed_thread worker = {
-		.stack_id = VMM_ID_INVALID,
-	};
-	struct kernel_selftest_thread_bootstrap_state state      = {0};
-	struct cpu*                                   cpu        = cpu_current();
-	void*                                         stack_base = NULL;
-	thread_exit_code_t                            exit_code  = THREAD_EXIT_CODE_CANCELLED;
-	enum thread_init_result                       create_result;
+	struct kthread*                               worker    = NULL;
+	struct kernel_selftest_thread_bootstrap_state state     = {0};
+	struct cpu*                                   cpu       = cpu_current();
+	thread_exit_code_t                            exit_code = THREAD_EXIT_CODE_CANCELLED;
+	enum kthread_spawn_result                     spawn_result;
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, cpu != NULL, "cpu_current returned NULL", cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, worker.stack_id == VMM_ID_INVALID, cleanup);
 
+	spawn_result = kthread_spawn_on_cpu(
+		&worker, "selftest/thread-bootstrap", kernel_selftest_thread_bootstrap_worker, &state, cpu);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
-	                                vmm_alloc(&stack_params, &worker.stack_id, &stack_base),
-	                                "failed to allocate thread bootstrap stack",
+	                                spawn_result == KTHREAD_SPAWN_OK,
+	                                kernel_selftest_thread_bootstrap_spawn_failure_message(spawn_result),
 	                                cleanup);
-	params = (struct thread_create_params){
-		.name              = "selftest/thread-bootstrap",
-		.entry             = kernel_selftest_thread_bootstrap_worker,
-		.arg               = &state,
-		.kernel_stack_base = (uintptr_t)stack_base,
-		.kernel_stack_top  = (uintptr_t)stack_base + KERNEL_SELFTEST_THREAD_STACK_PAGES * (uintptr_t)PMM_PAGE_SIZE,
-		.preferred_cpu     = cpu,
-		.detached          = false,
-	};
-
-	create_result = kthread_create_ex(&worker.thread, &params);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
-	                                create_result == THREAD_INIT_OK,
-	                                kernel_selftest_thread_bootstrap_create_failure_message(create_result),
-	                                cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, worker.thread.state == THREAD_STATE_NEW, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, worker.thread.preferred_cpu == cpu, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !thread_is_terminated(&worker.thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, worker->thread.preferred_cpu == cpu, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_thread_is_live(worker), cleanup);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, kthread_start(&worker.thread), "failed to start thread bootstrap worker", cleanup);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, kthread_join(&worker.thread, &exit_code), "failed to join thread bootstrap worker", cleanup);
+		ctx, kthread_join(worker, &exit_code), "failed to join thread bootstrap worker", cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.ran, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.cpu == cpu, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.thread == &worker.thread, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.thread == &worker->thread, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.arg_value == (uintptr_t)&state, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&worker.thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&worker->thread), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, exit_code == 0u, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_wait_queue_depth(&worker.thread.join_wait_queue) == 0u, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_wait_queue_depth(&worker->thread.join_wait_queue) == 0u, cleanup);
 
 cleanup:
-	if (!thread_is_terminated(&worker.thread)) kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
-	if (ctx->failure_expr == NULL && worker.stack_id != VMM_ID_INVALID) {
-		KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&worker.thread));
+	if (worker != NULL && kernel_selftest_thread_is_live(worker)) {
+		kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
+	}
+	if (ctx->failure_expr == NULL && worker != NULL) {
+		KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&worker->thread));
 	}
 	kernel_selftest_thread_destroy(&worker);
 }

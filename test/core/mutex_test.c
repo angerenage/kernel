@@ -96,7 +96,7 @@ Test(mutex, unlock_rejects_non_owner) {
 	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
 
 	mutex_init(&mutex);
-	cr_assert(kthread_create(&owner, &params), "kthread_create failed");
+	cr_assert(thread_init(&owner, &params), "thread_init failed");
 	sched_set_current(cpu_current(), &owner);
 	cr_assert(mutex_try_lock(&mutex), "owner thread should acquire the mutex");
 	cr_assert_eq(mutex_owner(&mutex), &owner, "owner thread should hold the mutex");
@@ -138,8 +138,8 @@ Test(mutex, contended_lock_blocks_and_wakes_waiter) {
 	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
 
 	mutex_init(&mutex);
-	cr_assert(kthread_create(&owner, &owner_params), "owner kthread_create failed");
-	cr_assert(kthread_create(&waiter, &waiter_params), "waiter kthread_create failed");
+	cr_assert(thread_init(&owner, &owner_params), "owner thread_init failed");
+	cr_assert(thread_init(&waiter, &waiter_params), "waiter thread_init failed");
 
 	sched_set_current(cpu_current(), &owner);
 	cr_assert(mutex_try_lock(&mutex), "owner should acquire the mutex");
@@ -216,8 +216,8 @@ Test(mutex, timed_lock_zero_timeout_times_out_when_contended) {
 	cr_assert(hal_clock_start(1000u, NULL, NULL), "hal_clock_start failed");
 
 	mutex_init(&mutex);
-	cr_assert(kthread_create(&owner, &owner_params), "owner kthread_create failed");
-	cr_assert(kthread_create(&waiter, &waiter_params), "waiter kthread_create failed");
+	cr_assert(thread_init(&owner, &owner_params), "owner thread_init failed");
+	cr_assert(thread_init(&waiter, &waiter_params), "waiter thread_init failed");
 
 	sched_set_current(cpu_current(), &owner);
 	cr_assert(mutex_try_lock(&mutex), "owner should acquire the mutex");
@@ -283,10 +283,10 @@ Test(mutex, timed_lock_times_out_while_preemption_keeps_other_workers_running) {
 	cr_assert(hal_clock_start(1000u, NULL, NULL), "hal_clock_start failed");
 
 	mutex_init(&mutex);
-	cr_assert(kthread_create(&owner, &owner_params), "owner kthread_create failed");
-	cr_assert(kthread_create(&waiter, &waiter_params), "waiter kthread_create failed");
-	cr_assert(kthread_create(&runner1, &runner1_params), "runner1 kthread_create failed");
-	cr_assert(kthread_create(&runner2, &runner2_params), "runner2 kthread_create failed");
+	cr_assert(thread_init(&owner, &owner_params), "owner thread_init failed");
+	cr_assert(thread_init(&waiter, &waiter_params), "waiter thread_init failed");
+	cr_assert(thread_init(&runner1, &runner1_params), "runner1 thread_init failed");
+	cr_assert(thread_init(&runner2, &runner2_params), "runner2 thread_init failed");
 	mutex_test_set_one_tick_timeslice(&runner1);
 	mutex_test_set_one_tick_timeslice(&runner2);
 

@@ -48,10 +48,8 @@ static void kernel_selftest_semaphore_waiter_worker(void* arg) {
 }
 
 static void kernel_selftest_semaphore_release_wakes_blocked_waiter(struct kernel_selftest_context* ctx) {
-	struct kernel_selftest_managed_thread waiter = {
-		.stack_id = VMM_ID_INVALID,
-	};
-	struct kernel_selftest_semaphore_wait_state state = {0};
+	struct kthread*                             waiter = NULL;
+	struct kernel_selftest_semaphore_wait_state state  = {0};
 
 	semaphore_init(&state.semaphore, 0u);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
@@ -60,18 +58,16 @@ static void kernel_selftest_semaphore_release_wakes_blocked_waiter(struct kernel
 			&waiter, "selftest/semaphore-waiter", kernel_selftest_semaphore_waiter_worker, &state),
 		"failed to create semaphore waiter thread",
 		cleanup);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, kthread_start(&waiter.thread), "failed to start semaphore waiter thread", cleanup);
 
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
 		ctx, state.waiter_started, "waiter thread did not attempt semaphore_acquire", cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.waiter_acquired, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !thread_is_terminated(&waiter.thread), cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_thread == &waiter.thread, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiter.thread.state == THREAD_STATE_BLOCKED, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiter.thread.block_reason == THREAD_BLOCK_SEMAPHORE, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_thread_is_live(waiter), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_thread == &waiter->thread, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiter->thread.state == THREAD_STATE_BLOCKED, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiter->thread.block_reason == THREAD_BLOCK_SEMAPHORE, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, semaphore_count(&state.semaphore) == 0u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, semaphore_waiter_count(&state.semaphore) == 1u, cleanup);
 
@@ -82,17 +78,17 @@ static void kernel_selftest_semaphore_release_wakes_blocked_waiter(struct kernel
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_acquired, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&waiter.thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&waiter->thread), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, semaphore_count(&state.semaphore) == 0u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, semaphore_waiter_count(&state.semaphore) == 0u, cleanup);
 
 cleanup:
-	if (!thread_is_terminated(&waiter.thread) && semaphore_waiter_count(&state.semaphore) != 0u) {
+	if (kernel_selftest_thread_is_live(waiter) && semaphore_waiter_count(&state.semaphore) != 0u) {
 		(void)semaphore_release(&state.semaphore);
 	}
-	if (!thread_is_terminated(&waiter.thread)) kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
-	if (ctx->failure_expr == NULL && waiter.stack_id != VMM_ID_INVALID) {
-		KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&waiter.thread));
+	if (kernel_selftest_thread_is_live(waiter)) kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
+	if (ctx->failure_expr == NULL && waiter != NULL) {
+		KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&waiter->thread));
 	}
 	kernel_selftest_thread_destroy(&waiter);
 }
@@ -121,9 +117,7 @@ static void kernel_selftest_semaphore_timed_waiter_worker(void* arg) {
 }
 
 static void kernel_selftest_semaphore_timed_acquire_times_out_without_permit(struct kernel_selftest_context* ctx) {
-	struct kernel_selftest_managed_thread waiter = {
-		.stack_id = VMM_ID_INVALID,
-	};
+	struct kthread*                              waiter           = NULL;
 	struct kernel_selftest_semaphore_timed_state state            = {0};
 	struct kernel_selftest_clock_scope           clock            = {0};
 	uint64_t                                     timeout_ticks    = 0u;
@@ -141,18 +135,16 @@ static void kernel_selftest_semaphore_timed_acquire_times_out_without_permit(str
 			&waiter, "selftest/semaphore-timeout", kernel_selftest_semaphore_timed_waiter_worker, &state),
 		"failed to create timed semaphore waiter thread",
 		cleanup);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, kthread_start(&waiter.thread), "failed to start timed semaphore waiter thread", cleanup);
 
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
 		ctx, state.waiter_started, "waiter thread did not attempt semaphore_timed_acquire", cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.waiter_finished, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !thread_is_terminated(&waiter.thread), cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_thread == &waiter.thread, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiter.thread.state == THREAD_STATE_BLOCKED, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiter.thread.block_reason == THREAD_BLOCK_SEMAPHORE, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_thread_is_live(waiter), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_thread == &waiter->thread, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiter->thread.state == THREAD_STATE_BLOCKED, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiter->thread.block_reason == THREAD_BLOCK_SEMAPHORE, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, semaphore_waiter_count(&state.semaphore) == 1u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, semaphore_count(&state.semaphore) == 0u, cleanup);
 
@@ -164,15 +156,15 @@ static void kernel_selftest_semaphore_timed_acquire_times_out_without_permit(str
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.waiter_result, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_finish_tick >= timeout_deadline, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_finish_tick - state.waiter_start_tick >= timeout_ticks, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&waiter.thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&waiter->thread), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, semaphore_waiter_count(&state.semaphore) == 0u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, semaphore_count(&state.semaphore) == 0u, cleanup);
 
 cleanup:
 	kernel_selftest_advance_ticks_until(timeout_deadline);
-	if (!thread_is_terminated(&waiter.thread)) kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
-	if (ctx->failure_expr == NULL && waiter.stack_id != VMM_ID_INVALID) {
-		KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&waiter.thread));
+	if (kernel_selftest_thread_is_live(waiter)) kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
+	if (ctx->failure_expr == NULL && waiter != NULL) {
+		KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&waiter->thread));
 	}
 	kernel_selftest_thread_destroy(&waiter);
 	kernel_selftest_clock_scope_end(&clock);

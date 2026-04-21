@@ -72,16 +72,10 @@ static void kernel_selftest_rwlock_late_reader_worker(void* arg) {
 
 static void
 kernel_selftest_rwlock_last_reader_wakes_writer_and_blocks_new_readers(struct kernel_selftest_context* ctx) {
-	struct kernel_selftest_managed_thread holder = {
-		.stack_id = VMM_ID_INVALID,
-	};
-	struct kernel_selftest_managed_thread writer = {
-		.stack_id = VMM_ID_INVALID,
-	};
-	struct kernel_selftest_managed_thread reader = {
-		.stack_id = VMM_ID_INVALID,
-	};
-	struct kernel_selftest_rwlock_writer_priority_state state = {0};
+	struct kthread*                                     holder = NULL;
+	struct kthread*                                     writer = NULL;
+	struct kthread*                                     reader = NULL;
+	struct kernel_selftest_rwlock_writer_priority_state state  = {0};
 
 	rwlock_init(&state.rwlock);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
@@ -103,30 +97,27 @@ kernel_selftest_rwlock_last_reader_wakes_writer_and_blocks_new_readers(struct ke
 		"failed to create rwlock late reader thread",
 		cleanup);
 
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, kthread_start(&holder.thread), "failed to start holder thread", cleanup);
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.holder_acquired, "holder thread never acquired the read lock", cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_reader_count(&state.rwlock) == 1u, cleanup);
 
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, kthread_start(&writer.thread), "failed to start writer thread", cleanup);
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.writer_started, "writer thread never attempted the write lock", cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.writer_acquired, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, writer.thread.state == THREAD_STATE_BLOCKED, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, writer.thread.block_reason == THREAD_BLOCK_RWLOCK, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, writer->thread.state == THREAD_STATE_BLOCKED, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, writer->thread.block_reason == THREAD_BLOCK_RWLOCK, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_waiter_count(&state.rwlock) == 1u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_reader_count(&state.rwlock) == 1u, cleanup);
 
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, kthread_start(&reader.thread), "failed to start late reader thread", cleanup);
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.reader_started, "late reader never attempted the rwlock", cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.reader_try_result, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.reader_acquired, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, reader.thread.state == THREAD_STATE_BLOCKED, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, reader.thread.block_reason == THREAD_BLOCK_RWLOCK, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, reader->thread.state == THREAD_STATE_BLOCKED, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, reader->thread.block_reason == THREAD_BLOCK_RWLOCK, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_waiter_count(&state.rwlock) == 2u, cleanup);
 
 	kernel_selftest_advance_ticks_until(state.holder_deadline_tick);
@@ -136,10 +127,10 @@ kernel_selftest_rwlock_last_reader_wakes_writer_and_blocks_new_readers(struct ke
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.holder_unlocked, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.writer_acquired, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.reader_acquired, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, writer.thread.state == THREAD_STATE_BLOCKED, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, writer.thread.block_reason == THREAD_BLOCK_SLEEP, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, reader.thread.state == THREAD_STATE_BLOCKED, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, reader.thread.block_reason == THREAD_BLOCK_RWLOCK, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, writer->thread.state == THREAD_STATE_BLOCKED, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, writer->thread.block_reason == THREAD_BLOCK_SLEEP, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, reader->thread.state == THREAD_STATE_BLOCKED, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, reader->thread.block_reason == THREAD_BLOCK_RWLOCK, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_waiter_count(&state.rwlock) == 1u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_reader_count(&state.rwlock) == 0u, cleanup);
 
@@ -150,25 +141,25 @@ kernel_selftest_rwlock_last_reader_wakes_writer_and_blocks_new_readers(struct ke
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.writer_unlocked, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.reader_acquired, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.reader_unlocked, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&holder.thread), cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&writer.thread), cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&reader.thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&holder->thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&writer->thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&reader->thread), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_waiter_count(&state.rwlock) == 0u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_reader_count(&state.rwlock) == 0u, cleanup);
 
 cleanup:
 	for (size_t attempt = 0; attempt < KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS &&
-	                         (!thread_is_terminated(&holder.thread) || !thread_is_terminated(&writer.thread) ||
-	                          !thread_is_terminated(&reader.thread));
+	                         (kernel_selftest_thread_is_live(holder) || kernel_selftest_thread_is_live(writer) ||
+	                          kernel_selftest_thread_is_live(reader));
 	     attempt++) {
 		kernel_selftest_advance_ticks_until(state.holder_deadline_tick);
 		kernel_selftest_advance_ticks_until(state.writer_deadline_tick);
 		sched_yield();
 	}
 	if (ctx->failure_expr == NULL) {
-		if (holder.stack_id != VMM_ID_INVALID) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&holder.thread));
-		if (writer.stack_id != VMM_ID_INVALID) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&writer.thread));
-		if (reader.stack_id != VMM_ID_INVALID) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&reader.thread));
+		if (holder != NULL) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&holder->thread));
+		if (writer != NULL) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&writer->thread));
+		if (reader != NULL) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&reader->thread));
 	}
 	kernel_selftest_thread_destroy(&reader);
 	kernel_selftest_thread_destroy(&writer);
@@ -231,14 +222,9 @@ static void kernel_selftest_rwlock_reader_broadcast_worker(void* arg) {
 }
 
 static void kernel_selftest_rwlock_writer_unlock_wakes_all_readers(struct kernel_selftest_context* ctx) {
-	struct kernel_selftest_managed_thread writer = {
-		.stack_id = VMM_ID_INVALID,
-	};
-	struct kernel_selftest_managed_thread readers[2] = {
-		{.stack_id = VMM_ID_INVALID},
-		{.stack_id = VMM_ID_INVALID},
-	};
-	struct kernel_selftest_rwlock_reader_broadcast_state state = {0};
+	struct kthread*                                      writer     = NULL;
+	struct kthread*                                      readers[2] = {0};
+	struct kernel_selftest_rwlock_reader_broadcast_state state      = {0};
 
 	rwlock_init(&state.rwlock);
 	for (size_t i = 0; i < 2u; i++) {
@@ -265,14 +251,11 @@ static void kernel_selftest_rwlock_writer_unlock_wakes_all_readers(struct kernel
 			cleanup);
 	}
 
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, kthread_start(&writer.thread), "failed to start writer holder", cleanup);
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.writer_locked, "writer holder never acquired the rwlock", cleanup);
 
 	for (size_t i = 0; i < 2u; i++) {
-		KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-			ctx, kthread_start(&readers[i].thread), "failed to start rwlock reader waiter", cleanup);
 	}
 	sched_yield();
 
@@ -280,10 +263,10 @@ static void kernel_selftest_rwlock_writer_unlock_wakes_all_readers(struct kernel
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.reader_started[1], cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.reader_acquired[0], cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.reader_acquired[1], cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, readers[0].thread.state == THREAD_STATE_BLOCKED, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, readers[1].thread.state == THREAD_STATE_BLOCKED, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, readers[0].thread.block_reason == THREAD_BLOCK_RWLOCK, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, readers[1].thread.block_reason == THREAD_BLOCK_RWLOCK, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, readers[0]->thread.state == THREAD_STATE_BLOCKED, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, readers[1]->thread.state == THREAD_STATE_BLOCKED, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, readers[0]->thread.block_reason == THREAD_BLOCK_RWLOCK, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, readers[1]->thread.block_reason == THREAD_BLOCK_RWLOCK, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_waiter_count(&state.rwlock) == 2u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_reader_count(&state.rwlock) == 0u, cleanup);
 
@@ -305,15 +288,15 @@ static void kernel_selftest_rwlock_writer_unlock_wakes_all_readers(struct kernel
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.reader_sleep_result[1], cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.reader_unlocked[0], cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.reader_unlocked[1], cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&writer.thread), cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&readers[0].thread), cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&readers[1].thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&writer->thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&readers[0]->thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&readers[1]->thread), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_reader_count(&state.rwlock) == 0u, cleanup);
 
 cleanup:
 	for (size_t attempt = 0; attempt < KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS &&
-	                         (!thread_is_terminated(&writer.thread) || !thread_is_terminated(&readers[0].thread) ||
-	                          !thread_is_terminated(&readers[1].thread));
+	                         (kernel_selftest_thread_is_live(writer) || kernel_selftest_thread_is_live(readers[0]) ||
+	                          kernel_selftest_thread_is_live(readers[1]));
 	     attempt++) {
 		kernel_selftest_advance_ticks_until(state.writer_deadline_tick);
 		for (size_t i = 0; i < 2u; i++) {
@@ -322,10 +305,9 @@ cleanup:
 		sched_yield();
 	}
 	if (ctx->failure_expr == NULL) {
-		if (writer.stack_id != VMM_ID_INVALID) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&writer.thread));
+		if (writer != NULL) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&writer->thread));
 		for (size_t i = 0; i < 2u; i++) {
-			if (readers[i].stack_id != VMM_ID_INVALID)
-				KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&readers[i].thread));
+			if (readers[i] != NULL) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&readers[i]->thread));
 		}
 	}
 	for (size_t i = 0; i < 2u; i++) {
@@ -411,15 +393,9 @@ static bool kernel_selftest_rwlock_wait_for_timeout_waiters(struct kernel_selfte
 }
 
 static void kernel_selftest_rwlock_timed_writer_timeout_wakes_blocked_readers(struct kernel_selftest_context* ctx) {
-	struct kernel_selftest_managed_thread holder = {
-		.stack_id = VMM_ID_INVALID,
-	};
-	struct kernel_selftest_managed_thread writer = {
-		.stack_id = VMM_ID_INVALID,
-	};
-	struct kernel_selftest_managed_thread reader = {
-		.stack_id = VMM_ID_INVALID,
-	};
+	struct kthread*                                    holder           = NULL;
+	struct kthread*                                    writer           = NULL;
+	struct kthread*                                    reader           = NULL;
 	struct kernel_selftest_rwlock_writer_timeout_state state            = {0};
 	struct kernel_selftest_clock_scope                 clock            = {0};
 	uint64_t                                           timeout_ticks    = 0u;
@@ -451,19 +427,16 @@ static void kernel_selftest_rwlock_timed_writer_timeout_wakes_blocked_readers(st
 		"failed to create rwlock timeout reader",
 		cleanup);
 
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, kthread_start(&holder.thread), "failed to start timeout holder", cleanup);
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.holder_acquired, "timeout holder never acquired the read lock", cleanup);
 
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, kthread_start(&writer.thread), "failed to start timeout writer", cleanup);
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.writer_started, "timeout writer never attempted the rwlock", cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.writer_finished, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_rwlock_wait_for_timeout_waiters(&state, 1u), cleanup);
 
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, kthread_start(&reader.thread), "failed to start timeout reader", cleanup);
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.reader_started, "timeout reader never attempted the rwlock", cleanup);
@@ -479,7 +452,7 @@ static void kernel_selftest_rwlock_timed_writer_timeout_wakes_blocked_readers(st
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.writer_finished, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.writer_result, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.writer_finish_tick >= timeout_deadline, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !thread_is_terminated(&holder.thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_thread_is_live(holder), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.reader_acquired, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_reader_count(&state.rwlock) == 2u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_waiter_count(&state.rwlock) == 0u, cleanup);
@@ -492,22 +465,22 @@ static void kernel_selftest_rwlock_timed_writer_timeout_wakes_blocked_readers(st
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.reader_unlocked, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.holder_sleep_result, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.holder_unlocked, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&holder.thread), cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&writer.thread), cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&reader.thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&holder->thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&writer->thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&reader->thread), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_reader_count(&state.rwlock) == 0u, cleanup);
 
 cleanup:
 	kernel_selftest_advance_ticks_until(state.reader_deadline_tick);
 	kernel_selftest_advance_ticks_until(state.holder_deadline_tick);
-	if (!thread_is_terminated(&holder.thread) || !thread_is_terminated(&writer.thread) ||
-	    !thread_is_terminated(&reader.thread)) {
+	if (kernel_selftest_thread_is_live(holder) || kernel_selftest_thread_is_live(writer) ||
+	    kernel_selftest_thread_is_live(reader)) {
 		kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
 	}
 	if (ctx->failure_expr == NULL) {
-		if (holder.stack_id != VMM_ID_INVALID) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&holder.thread));
-		if (writer.stack_id != VMM_ID_INVALID) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&writer.thread));
-		if (reader.stack_id != VMM_ID_INVALID) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&reader.thread));
+		if (holder != NULL) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&holder->thread));
+		if (writer != NULL) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&writer->thread));
+		if (reader != NULL) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&reader->thread));
 	}
 	kernel_selftest_thread_destroy(&reader);
 	kernel_selftest_thread_destroy(&writer);

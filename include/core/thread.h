@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 struct cpu;
+struct thread;
 struct thread_wait_queue;
 
 enum {
@@ -74,6 +75,9 @@ struct thread_create_params {
 	bool           detached;
 };
 
+/* Callback invoked after a thread reaches stable ZOMBIE state. */
+typedef void (*thread_reap_callback_t)(struct thread* thread, void* ctx);
+
 /* FIFO wait queue used by joins and other blocking synchronization points. */
 struct thread_wait_queue {
 	struct spinlock lock;
@@ -105,6 +109,8 @@ struct thread {
 	uint32_t                  wait_status;
 	uint32_t                  timeslice_ticks;
 	uint32_t                  timeslice_remaining;
+	thread_reap_callback_t    reap_callback;
+	void*                     reap_context;
 };
 
 /* FIFO run queue protected by a spinlock. */
@@ -160,6 +166,12 @@ bool thread_request_cancel(struct thread* thread);
 
 /* Mask or unmask deferred cancellation checks for a thread. */
 void thread_set_cancel_enabled(struct thread* thread, bool enabled);
+
+/* Register a callback used by higher-level owners to reclaim detached threads after exit. */
+void thread_set_reap_callback(struct thread* thread, thread_reap_callback_t callback, void* ctx);
+
+/* Invoke the registered reaper callback after a thread has become a zombie. */
+void thread_notify_reap(struct thread* thread);
 
 /* Mark a thread ready on cpu and clear any queue / wait linkage. */
 void thread_mark_ready(struct thread* thread, struct cpu* cpu);

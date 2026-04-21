@@ -9,10 +9,10 @@
 
 #include "../mocks/hal/cpu_mock.h"
 
-static bool           kthread_test_cancel_hook_armed;
-static jmp_buf        kthread_test_cancel_jmp;
-static bool           kthread_test_sleep_cancel_hook_armed;
-static struct thread* kthread_test_sleep_cancel_target;
+static bool            kthread_test_cancel_hook_armed;
+static jmp_buf         kthread_test_cancel_jmp;
+static bool            kthread_test_sleep_cancel_hook_armed;
+static struct kthread* kthread_test_sleep_cancel_target;
 
 static void init_bound_bootstrap_cpu(void) {
 	irq_enable_local();
@@ -68,7 +68,7 @@ Test(kthread, current_start_and_yield_delegate_to_scheduler) {
 		.preferred_cpu     = NULL,
 		.detached          = false,
 	};
-	struct thread  worker;
+	struct kthread worker = {.stack_id = VMM_ID_INVALID};
 	struct thread* idle;
 
 	init_bound_bootstrap_cpu();
@@ -77,16 +77,16 @@ Test(kthread, current_start_and_yield_delegate_to_scheduler) {
 	idle = sched_idle_thread(cpu_current());
 
 	cr_assert_eq(kthread_current(), idle, "kthread_current should match scheduler current thread");
-	cr_assert(kthread_create(&worker, &params), "kthread_create failed");
-	cr_assert(kthread_start(&worker), "kthread_start should make thread runnable");
+	cr_assert(thread_init(&worker.thread, &params), "thread_init failed");
+	cr_assert(sched_make_runnable(&worker.thread), "sched_make_runnable should queue the worker thread");
 
 	kthread_yield();
-	cr_assert_eq(kthread_current(), &worker, "kthread_yield should dispatch the runnable worker thread");
+	cr_assert_eq(kthread_current(), &worker.thread, "kthread_yield should dispatch the runnable worker thread");
 
 	reset_test_state();
 }
 
-Test(kthread, create_ex_reports_unsupported_context_setup) {
+Test(kthread, init_reports_unsupported_context_setup) {
 	const struct thread_create_params params = {
 		.name              = "worker",
 		.entry             = kthread_test_entry,
@@ -96,13 +96,13 @@ Test(kthread, create_ex_reports_unsupported_context_setup) {
 		.preferred_cpu     = NULL,
 		.detached          = false,
 	};
-	struct thread worker = {0};
+	struct kthread worker = {.stack_id = VMM_ID_INVALID};
 
 	hal_cpu_mock_set_thread_context_init_result(false);
-	cr_assert_eq(kthread_create_ex(&worker, &params),
+	cr_assert_eq(thread_init_ex(&worker.thread, &params),
 	             THREAD_INIT_CONTEXT_UNSUPPORTED,
-	             "kthread_create_ex should surface HAL bootstrap rejection");
-	cr_assert(!kthread_create(&worker, &params), "kthread_create should fail when bootstrap setup is unsupported");
+	             "thread_init_ex should surface HAL bootstrap rejection");
+	cr_assert(!thread_init(&worker.thread, &params), "thread_init should fail when bootstrap setup is unsupported");
 
 	reset_test_state();
 }
@@ -117,16 +117,16 @@ Test(kthread, join_terminated_thread_returns_exit_code_and_detaches) {
 		.preferred_cpu     = NULL,
 		.detached          = false,
 	};
-	struct thread      target;
+	struct kthread     target    = {.stack_id = VMM_ID_INVALID};
 	thread_exit_code_t exit_code = 0u;
 
 	init_bound_bootstrap_cpu();
 	cr_assert(sched_init(), "sched_init failed");
 	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
-	cr_assert(kthread_create(&target, &params), "kthread_create failed");
+	cr_assert(thread_init(&target.thread, &params), "thread_init failed");
 
-	thread_mark_exiting(&target, 123u);
-	thread_mark_zombie(&target);
+	thread_mark_exiting(&target.thread, 123u);
+	thread_mark_zombie(&target.thread);
 	cr_assert(kthread_join(&target, &exit_code), "kthread_join should succeed for terminated joinable thread");
 	cr_assert_eq(exit_code, 123u, "kthread_join should publish target exit code");
 
@@ -143,22 +143,23 @@ Test(kthread, join_detach_and_cancel_validate_inputs) {
 		.preferred_cpu     = NULL,
 		.detached          = false,
 	};
-	struct thread worker;
-	struct thread idle;
+	struct kthread worker = {.stack_id = VMM_ID_INVALID};
+	struct thread  idle;
 
 	init_bound_bootstrap_cpu();
 	cr_assert(sched_init(), "sched_init failed");
 	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
-	cr_assert(kthread_create(&worker, &params), "kthread_create failed");
+	cr_assert(thread_init(&worker.thread, &params), "thread_init failed");
 	thread_init_idle(&idle, cpu_current(), "idle/test");
 
 	cr_assert(!kthread_join(NULL, NULL), "kthread_join should reject NULL targets");
-	cr_assert(!kthread_join(kthread_current(), NULL), "kthread_join should reject self-join");
-	cr_assert(!kthread_join(&idle, NULL), "kthread_join should reject idle thread targets");
-	cr_assert(kthread_detach(&worker), "kthread_detach should succeed on live joinable thread");
+	sched_set_current(cpu_current(), &worker.thread);
+	cr_assert(!kthread_join(&worker, NULL), "kthread_join should reject self-join");
+	sched_set_current(cpu_current(), &idle);
+	cr_assert(thread_detach(&worker.thread), "thread_detach should succeed on live joinable thread");
 	cr_assert(!kthread_join(&worker, NULL), "kthread_join should reject detached targets");
 	cr_assert(kthread_cancel(&worker), "kthread_cancel should set cancellation pending on live thread");
-	cr_assert(thread_cancel_requested(&worker), "cancel flag should be visible after kthread_cancel");
+	cr_assert(thread_cancel_requested(&worker.thread), "cancel flag should be visible after kthread_cancel");
 
 	reset_test_state();
 }
@@ -173,13 +174,13 @@ Test(kthread, canceled_running_thread_exits_with_cancel_code_at_cancellation_poi
 		.preferred_cpu     = NULL,
 		.detached          = false,
 	};
-	struct thread worker;
+	struct kthread worker = {.stack_id = VMM_ID_INVALID};
 
 	init_bound_bootstrap_cpu();
 	cr_assert(sched_init(), "sched_init failed");
 	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
-	cr_assert(kthread_create(&worker, &params), "kthread_create failed");
-	sched_set_current(cpu_current(), &worker);
+	cr_assert(thread_init(&worker.thread, &params), "thread_init failed");
+	sched_set_current(cpu_current(), &worker.thread);
 	cr_assert(kthread_cancel(&worker), "kthread_cancel should mark the current worker for cancellation");
 
 	hal_cpu_mock_set_context_switch_hook(kthread_test_cancel_context_switch_hook);
@@ -189,8 +190,8 @@ Test(kthread, canceled_running_thread_exits_with_cancel_code_at_cancellation_poi
 		cr_assert_fail("kthread_yield should not return once cancellation exits the running thread");
 	}
 
-	cr_assert_eq(worker.state, THREAD_STATE_ZOMBIE, "canceled worker should publish a zombie state");
-	cr_assert_eq(worker.exit_code,
+	cr_assert_eq(worker.thread.state, THREAD_STATE_ZOMBIE, "canceled worker should publish a zombie state");
+	cr_assert_eq(worker.thread.exit_code,
 	             THREAD_EXIT_CODE_CANCELLED,
 	             "canceled worker should publish the dedicated cancellation exit code");
 	cr_assert_eq(sched_current_thread(),
@@ -210,21 +211,21 @@ Test(kthread, cancel_wakes_sleeping_thread_so_it_can_reach_a_cancellation_point)
 		.preferred_cpu     = NULL,
 		.detached          = false,
 	};
-	struct thread sleeper;
+	struct kthread sleeper = {.stack_id = VMM_ID_INVALID};
 
 	init_bound_bootstrap_cpu();
 	cr_assert(sched_init(), "sched_init failed");
 	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
-	cr_assert(kthread_create(&sleeper, &params), "kthread_create failed");
+	cr_assert(thread_init(&sleeper.thread, &params), "thread_init failed");
 
-	sched_set_current(cpu_current(), &sleeper);
+	sched_set_current(cpu_current(), &sleeper.thread);
 	kthread_test_sleep_cancel_target     = &sleeper;
 	kthread_test_sleep_cancel_hook_armed = true;
 	hal_cpu_mock_set_context_switch_hook(kthread_test_sleep_cancel_context_switch_hook);
 	cr_assert(sched_sleep_until_tick(sched_tick_count() + 8u), "sched_sleep_until_tick failed");
 
-	cr_assert(thread_cancel_requested(&sleeper), "cancel flag should stay visible after wakeup");
-	cr_assert_eq(sleeper.state, THREAD_STATE_READY, "cancel should move the sleeping thread back to READY");
+	cr_assert(thread_cancel_requested(&sleeper.thread), "cancel flag should stay visible after wakeup");
+	cr_assert_eq(sleeper.thread.state, THREAD_STATE_READY, "cancel should move the sleeping thread back to READY");
 	cr_assert_eq(sched_run_queue_depth(cpu_current()), 1u, "canceled sleeper should be queued so it can run and exit");
 
 	reset_test_state();

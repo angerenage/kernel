@@ -16,9 +16,11 @@ base_test_lib = static_library(
 )
 
 hal_mock_sources = files(
+	'mocks/core/kheap.c',
 	'mocks/hal/clock.c',
 	'mocks/hal/cpu.c',
 	'mocks/hal/interrupts.c',
+	'mocks/hal/paging.c',
 )
 
 core_test_lib = static_library(

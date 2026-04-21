@@ -27,9 +27,7 @@ static void kernel_selftest_kthread_join_worker(void* arg) {
 }
 
 static void kernel_selftest_kthread_join_waits_for_exit_and_returns_exit_code(struct kernel_selftest_context* ctx) {
-	struct kernel_selftest_managed_thread worker = {
-		.stack_id = VMM_ID_INVALID,
-	};
+	struct kthread*                           worker    = NULL;
 	struct kernel_selftest_kthread_join_state state     = {0};
 	thread_exit_code_t                        exit_code = 0u;
 
@@ -38,19 +36,20 @@ static void kernel_selftest_kthread_join_waits_for_exit_and_returns_exit_code(st
 		kernel_selftest_thread_create(&worker, "selftest/kthread-join", kernel_selftest_kthread_join_worker, &state),
 		"failed to create join target thread",
 		cleanup);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, kthread_start(&worker.thread), "failed to start join target thread", cleanup);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, kthread_join(&worker.thread, &exit_code), "kthread_join failed for a live join target", cleanup);
+		ctx, kthread_join(worker, &exit_code), "kthread_join failed for a live join target", cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.ran, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.thread == &worker.thread, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&worker.thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.thread == &worker->thread, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&worker->thread), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, exit_code == KERNEL_SELFTEST_KTHREAD_JOIN_EXIT_CODE, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_wait_queue_depth(&worker.thread.join_wait_queue) == 0u, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_wait_queue_depth(&worker->thread.join_wait_queue) == 0u, cleanup);
 
 cleanup:
-	if (!thread_is_terminated(&worker.thread)) kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
-	if (ctx->failure_expr == NULL && worker.stack_id != VMM_ID_INVALID) {
-		KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&worker.thread));
+	if (worker != NULL && kernel_selftest_thread_is_live(worker)) {
+		kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
+	}
+	if (ctx->failure_expr == NULL && worker != NULL) {
+		KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&worker->thread));
 	}
 	kernel_selftest_thread_destroy(&worker);
 }
@@ -66,33 +65,21 @@ static void kernel_selftest_kthread_detach_worker(void* arg) {
 }
 
 static void kernel_selftest_kthread_detach_prevents_join_but_thread_still_runs(struct kernel_selftest_context* ctx) {
-	struct kernel_selftest_managed_thread worker = {
-		.stack_id = VMM_ID_INVALID,
-	};
 	struct kernel_selftest_kthread_detach_state state = {0};
 
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx,
-		kernel_selftest_thread_create(
-			&worker, "selftest/kthread-detach", kernel_selftest_kthread_detach_worker, &state),
-		"failed to create detached thread",
-		cleanup);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, kthread_detach(&worker.thread), "kthread_detach failed", cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !kthread_join(&worker.thread, NULL), cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !thread_is_joinable(&worker.thread), cleanup);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, kthread_start(&worker.thread), "failed to start detached thread", cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+	                                kthread_spawn_detached("selftest/kthread-detach",
+	                                                       kernel_selftest_kthread_detach_worker,
+	                                                       &state) == KTHREAD_SPAWN_OK,
+	                                "failed to create detached thread",
+	                                cleanup);
 
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.ran, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&worker.thread), cleanup);
 
 cleanup:
-	if (!thread_is_terminated(&worker.thread)) kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
-	if (ctx->failure_expr == NULL && worker.stack_id != VMM_ID_INVALID) {
-		KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&worker.thread));
-	}
-	kernel_selftest_thread_destroy(&worker);
+	kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
 }
 
 struct kernel_selftest_kthread_cancel_state {
@@ -116,9 +103,7 @@ static void kernel_selftest_kthread_cancel_worker(void* arg) {
 
 static void
 kernel_selftest_kthread_cancel_wakes_sleeping_thread_and_returns_cancel_code(struct kernel_selftest_context* ctx) {
-	struct kernel_selftest_managed_thread worker = {
-		.stack_id = VMM_ID_INVALID,
-	};
+	struct kthread*                             worker         = NULL;
 	struct kernel_selftest_kthread_cancel_state state          = {0};
 	struct kernel_selftest_clock_scope          clock          = {0};
 	thread_exit_code_t                          exit_code      = 0u;
@@ -135,35 +120,36 @@ kernel_selftest_kthread_cancel_wakes_sleeping_thread_and_returns_cancel_code(str
 			&worker, "selftest/kthread-cancel", kernel_selftest_kthread_cancel_worker, &state),
 		"failed to create cancellable thread",
 		cleanup);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, kthread_start(&worker.thread), "failed to start cancellable thread", cleanup);
 
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.started, "worker thread never attempted kthread_sleep_ms", cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.thread == &worker.thread, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.thread == &worker->thread, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.returned_from_sleep, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !thread_is_terminated(&worker.thread), cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, worker.thread.state == THREAD_STATE_BLOCKED, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, worker.thread.block_reason == THREAD_BLOCK_SLEEP, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_thread_is_live(worker), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, worker->thread.state == THREAD_STATE_BLOCKED, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, worker->thread.block_reason == THREAD_BLOCK_SLEEP, cleanup);
 
 	sleep_deadline = state.start_tick + sleep_ticks;
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, kthread_cancel(&worker.thread), "kthread_cancel failed for the sleeping worker", cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_cancel_requested(&worker.thread), cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, worker.thread.state == THREAD_STATE_READY, cleanup);
+		ctx, kthread_cancel(worker), "kthread_cancel failed for the sleeping worker", cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_cancel_requested(&worker->thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, worker->thread.state == THREAD_STATE_READY, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, sched_run_queue_depth(cpu_current()) >= 1u, cleanup);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, kthread_join(&worker.thread, &exit_code), "kthread_join failed for the canceled worker", cleanup);
+		ctx, kthread_join(worker, &exit_code), "kthread_join failed for the canceled worker", cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, exit_code == THREAD_EXIT_CODE_CANCELLED, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&worker.thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&worker->thread), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.returned_from_sleep, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, sched_tick_count() < sleep_deadline, cleanup);
 
 cleanup:
 	kernel_selftest_advance_ticks_until(sleep_deadline);
-	if (!thread_is_terminated(&worker.thread)) kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
-	if (ctx->failure_expr == NULL && worker.stack_id != VMM_ID_INVALID) {
-		KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&worker.thread));
+	if (worker != NULL && kernel_selftest_thread_is_live(worker)) {
+		kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
+	}
+	if (ctx->failure_expr == NULL && worker != NULL) {
+		KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&worker->thread));
 	}
 	kernel_selftest_thread_destroy(&worker);
 	kernel_selftest_clock_scope_end(&clock);

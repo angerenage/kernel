@@ -158,7 +158,7 @@ struct kernel_selftest_cpu_remote_dispatch_state {
 	uint32_t    ran;
 };
 
-static struct kernel_selftest_managed_thread kernel_selftest_cpu_remote_workers[KERNEL_SELFTEST_CPU_MAX_CPUS];
+static struct kthread* kernel_selftest_cpu_remote_workers[KERNEL_SELFTEST_CPU_MAX_CPUS];
 static struct kernel_selftest_cpu_remote_dispatch_state kernel_selftest_cpu_remote_states[KERNEL_SELFTEST_CPU_MAX_CPUS];
 static struct sched_cpu_stats                           kernel_selftest_cpu_stats_before[KERNEL_SELFTEST_CPU_MAX_CPUS];
 static struct sched_cpu_stats                           kernel_selftest_cpu_stats_after[KERNEL_SELFTEST_CPU_MAX_CPUS];
@@ -212,10 +212,6 @@ static void kernel_selftest_cpu_remote_dispatch_reaches_application_processors(s
 
 	for (size_t i = 0u; i < total_cpus; i++) {
 		if (!kernel_selftest_cpu_remote_created[i]) continue;
-		KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
-		                                kthread_start(&kernel_selftest_cpu_remote_workers[i].thread),
-		                                "failed to start AP-targeted worker thread",
-		                                cleanup);
 	}
 
 	for (size_t attempt = 0u; attempt < KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS * total_cpus * 1024u; attempt++) {
@@ -247,7 +243,7 @@ static void kernel_selftest_cpu_remote_dispatch_reaches_application_processors(s
 		KERNEL_SELFTEST_ASSERT_GOTO(
 			ctx,
 			(struct thread*)__atomic_load_n(&kernel_selftest_cpu_remote_states[i].current_thread, __ATOMIC_ACQUIRE) ==
-				&kernel_selftest_cpu_remote_workers[i].thread,
+				&kernel_selftest_cpu_remote_workers[i]->thread,
 			cleanup);
 		KERNEL_SELFTEST_ASSERT_GOTO(ctx, sched_get_cpu_stats(cpu, &kernel_selftest_cpu_stats_after[i]), cleanup);
 		KERNEL_SELFTEST_ASSERT_GOTO(ctx,
@@ -260,7 +256,7 @@ static void kernel_selftest_cpu_remote_dispatch_reaches_application_processors(s
 cleanup:
 	for (size_t i = 0u; i < total_cpus && i < KERNEL_SELFTEST_CPU_MAX_CPUS; i++) {
 		if (!kernel_selftest_cpu_remote_created[i]) continue;
-		if (!thread_is_terminated(&kernel_selftest_cpu_remote_workers[i].thread)) {
+		if (kernel_selftest_thread_is_live(kernel_selftest_cpu_remote_workers[i])) {
 			kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
 		}
 		kernel_selftest_thread_destroy(&kernel_selftest_cpu_remote_workers[i]);

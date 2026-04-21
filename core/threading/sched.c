@@ -836,6 +836,7 @@ void sched_exit_current(thread_exit_code_t exit_code) {
 	thread_mark_exiting(current, exit_code);
 	(void)sched_wake_all(&current->join_wait_queue);
 	thread_mark_zombie(current);
+	thread_notify_reap(current);
 	sched_dispatch_next(cpu);
 
 	for (;;) {

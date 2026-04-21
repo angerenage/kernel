@@ -138,8 +138,8 @@ Test(semaphore, acquire_blocks_and_release_wakes_waiter) {
 	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
 
 	semaphore_init(&semaphore, 0u);
-	cr_assert(kthread_create(&waiter, &waiter_params), "waiter kthread_create failed");
-	cr_assert(kthread_create(&signaler, &signaler_params), "signaler kthread_create failed");
+	cr_assert(thread_init(&waiter, &waiter_params), "waiter thread_init failed");
+	cr_assert(thread_init(&signaler, &signaler_params), "signaler thread_init failed");
 	cr_assert(sched_make_runnable(&signaler), "signaler should become runnable");
 
 	semaphore_test_semaphore = &semaphore;
@@ -216,9 +216,9 @@ Test(semaphore, timed_acquire_times_out_while_preemption_keeps_other_workers_run
 	cr_assert(hal_clock_start(1000u, NULL, NULL), "hal_clock_start failed");
 
 	semaphore_init(&semaphore, 0u);
-	cr_assert(kthread_create(&waiter, &waiter_params), "waiter kthread_create failed");
-	cr_assert(kthread_create(&runner1, &runner1_params), "runner1 kthread_create failed");
-	cr_assert(kthread_create(&runner2, &runner2_params), "runner2 kthread_create failed");
+	cr_assert(thread_init(&waiter, &waiter_params), "waiter thread_init failed");
+	cr_assert(thread_init(&runner1, &runner1_params), "runner1 thread_init failed");
+	cr_assert(thread_init(&runner2, &runner2_params), "runner2 thread_init failed");
 	semaphore_test_set_one_tick_timeslice(&runner1);
 	semaphore_test_set_one_tick_timeslice(&runner2);
 	cr_assert(sched_make_runnable(&runner1), "runner1 should become runnable");

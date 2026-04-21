@@ -30,7 +30,6 @@ static void boot_fail(const char* message) {
 }
 
 #define KERNEL_TIMER_HZ 100u
-#define KERNEL_BOOTSTRAP_THREAD_STACK_PAGES 4u
 
 static volatile uint64_t boot_timer_ticks;
 static uint64_t          boot_timer_origin_ticks;
@@ -220,83 +219,52 @@ static void kernel_init_memory(const struct mem_range* memory_map, size_t range_
 	printf("kernel: kheap initialized with %zu/%zu bytes free\n", kheap_free_bytes(), kheap_total_bytes());
 }
 
-static void kernel_bootstrap_worker_handle_create_failure(enum thread_init_result create_result, uintptr_t stack_base,
-                                                          uintptr_t stack_top, vmm_id_t stack_id) {
-	(void)stack_id;
-
-	switch (create_result) {
-	case THREAD_INIT_INVALID_STACK:
-		printf("kernel: bootstrap worker stack bounds invalid (base=%p top=%p)\n", (void*)stack_base, (void*)stack_top);
-		boot_fail("kernel: bootstrap worker stack allocation produced unusable bounds");
-	case THREAD_INIT_CONTEXT_UNSUPPORTED:
+static void kernel_bootstrap_worker_handle_spawn_failure(enum kthread_spawn_result result) {
+	switch (result) {
+	case KTHREAD_SPAWN_CONTEXT_UNSUPPORTED:
 		printf("kernel: bootstrap worker context setup rejected by hal_cpu_thread_context_init\n");
 #if KERNEL_THREAD_BOOTSTRAP_WARN_FALLBACK
 		printf("kernel: continuing without runtime thread bootstrap because warn fallback is enabled\n");
-		(void)vmm_free(stack_id);
 		return;
 #else
 		boot_fail("kernel: runtime thread bootstrap unsupported on this platform");
 #endif
-	case THREAD_INIT_INVALID_ARGUMENTS:
-	case THREAD_INIT_OK:
+	case KTHREAD_SPAWN_INVALID_ARGUMENTS:
+	case KTHREAD_SPAWN_NO_MEMORY:
+	case KTHREAD_SPAWN_STACK_ALLOC_FAILED:
+	case KTHREAD_SPAWN_START_FAILED:
+	case KTHREAD_SPAWN_REAPER_UNAVAILABLE:
+	case KTHREAD_SPAWN_OK:
 	default:
-		boot_fail("kernel: bootstrap worker thread creation failed");
+		boot_fail("kernel: bootstrap worker spawn failed");
 	}
 }
 
 static void kernel_run_bootstrap_worker(void) {
-	struct vmm_alloc_params stack_params = {
-		.page_count  = KERNEL_BOOTSTRAP_THREAD_STACK_PAGES,
-		.align_pages = 1u,
-		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_GLOBAL,
-		.kind        = VMM_KIND_STACK,
-		.guard_pages = VMM_STACK_DEFAULT_GUARD_PAGES,
-		.map_flags   = 0u,
-	};
-	struct thread_create_params thread_params;
-	struct thread               worker;
-	struct cpu*                 cpu      = cpu_current();
-	vmm_id_t                    stack_id = VMM_ID_INVALID;
-	void*                       stack_base;
+	struct kthread*           worker = NULL;
+	struct cpu*               cpu    = cpu_current();
+	enum kthread_spawn_result result;
 
 	if (!sched_start_cpu(cpu)) {
 		boot_fail("kernel: sched_start_cpu failed for bootstrap worker");
 	}
 
-	if (!vmm_alloc(&stack_params, &stack_id, &stack_base)) {
-		boot_fail("kernel: bootstrap worker stack allocation failed");
-	}
-
-	thread_params = (struct thread_create_params){
-		.name              = "bootstrap/worker",
-		.entry             = kernel_bootstrap_worker_entry,
-		.arg               = NULL,
-		.kernel_stack_base = (uintptr_t)stack_base,
-		.kernel_stack_top  = (uintptr_t)stack_base + KERNEL_BOOTSTRAP_THREAD_STACK_PAGES * (uintptr_t)PMM_PAGE_SIZE,
-		.preferred_cpu     = cpu,
-		.detached          = false,
-	};
-
-	enum thread_init_result create_result = kthread_create_ex(&worker, &thread_params);
-	if (create_result != THREAD_INIT_OK) {
-		kernel_bootstrap_worker_handle_create_failure(
-			create_result, thread_params.kernel_stack_base, thread_params.kernel_stack_top, stack_id);
+	result = kthread_spawn_on_cpu(&worker, "bootstrap/worker", kernel_bootstrap_worker_entry, NULL, cpu);
+	if (result != KTHREAD_SPAWN_OK) {
+		kernel_bootstrap_worker_handle_spawn_failure(result);
 		return;
-	}
-	if (!kthread_start(&worker)) {
-		boot_fail("kernel: bootstrap worker failed to start");
 	}
 
 	printf("kernel: starting bootstrap worker on cpu%zu\n", cpu->index);
 	sched_yield();
 
-	if (!thread_is_terminated(&worker)) {
+	if (!thread_is_terminated(&worker->thread)) {
 		boot_fail("kernel: bootstrap worker returned without exiting");
 	}
-	printf("kernel: bootstrap worker exited with code %llu\n", (unsigned long long)worker.exit_code);
+	printf("kernel: bootstrap worker exited with code %llu\n", (unsigned long long)worker->thread.exit_code);
 
-	if (!vmm_free(stack_id)) {
-		boot_fail("kernel: bootstrap worker stack reclaim failed");
+	if (!kthread_destroy(worker)) {
+		boot_fail("kernel: bootstrap worker reclaim failed");
 	}
 }
 

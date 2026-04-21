@@ -70,6 +70,8 @@ enum thread_init_result thread_init_ex(struct thread* thread, const struct threa
 		.wait_status         = THREAD_WAIT_STATUS_NONE,
 		.timeslice_ticks     = THREAD_DEFAULT_TIMESLICE_TICKS,
 		.timeslice_remaining = THREAD_DEFAULT_TIMESLICE_TICKS,
+		.reap_callback       = NULL,
+		.reap_context        = NULL,
 	};
 	thread_wait_queue_init(&thread->join_wait_queue);
 	return THREAD_INIT_OK;
@@ -103,6 +105,8 @@ void thread_init_idle(struct thread* thread, struct cpu* cpu, const char* name) 
 		.wait_status         = THREAD_WAIT_STATUS_NONE,
 		.timeslice_ticks     = 0u,
 		.timeslice_remaining = 0u,
+		.reap_callback       = NULL,
+		.reap_context        = NULL,
 	};
 	thread_wait_queue_init(&thread->join_wait_queue);
 }
@@ -164,6 +168,24 @@ void thread_set_cancel_enabled(struct thread* thread, bool enabled) {
 	else {
 		thread->flags |= THREAD_FLAG_CANCEL_DISABLED;
 	}
+}
+
+void thread_set_reap_callback(struct thread* thread, thread_reap_callback_t callback, void* ctx) {
+	if (thread == NULL) return;
+
+	thread->reap_callback = callback;
+	thread->reap_context  = ctx;
+}
+
+void thread_notify_reap(struct thread* thread) {
+	thread_reap_callback_t callback;
+	void*                  ctx;
+
+	if (thread == NULL) return;
+
+	callback = thread->reap_callback;
+	ctx      = thread->reap_context;
+	if (callback != NULL) callback(thread, ctx);
 }
 
 void thread_mark_ready(struct thread* thread, struct cpu* cpu) {

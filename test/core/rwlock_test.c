@@ -120,7 +120,7 @@ Test(rwlock, write_unlock_rejects_non_owner) {
 	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
 
 	rwlock_init(&rwlock);
-	cr_assert(kthread_create(&owner, &owner_params), "kthread_create failed");
+	cr_assert(thread_init(&owner, &owner_params), "thread_init failed");
 	sched_set_current(cpu_current(), &owner);
 	cr_assert(rwlock_try_write_lock(&rwlock), "owner thread should acquire the write lock");
 
@@ -161,8 +161,8 @@ Test(rwlock, write_lock_blocks_until_last_reader_unlocks) {
 	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
 
 	rwlock_init(&rwlock);
-	cr_assert(kthread_create(&reader, &reader_params), "reader kthread_create failed");
-	cr_assert(kthread_create(&writer, &writer_params), "writer kthread_create failed");
+	cr_assert(thread_init(&reader, &reader_params), "reader thread_init failed");
+	cr_assert(thread_init(&writer, &writer_params), "writer thread_init failed");
 
 	sched_set_current(cpu_current(), &reader);
 	cr_assert(rwlock_try_read_lock(&rwlock), "reader should acquire the shared lock");
@@ -236,10 +236,10 @@ Test(rwlock, timed_read_lock_times_out_while_preemption_keeps_other_workers_runn
 	cr_assert(hal_clock_start(1000u, NULL, NULL), "hal_clock_start failed");
 
 	rwlock_init(&rwlock);
-	cr_assert(kthread_create(&writer, &writer_params), "writer kthread_create failed");
-	cr_assert(kthread_create(&reader, &reader_params), "reader kthread_create failed");
-	cr_assert(kthread_create(&runner1, &runner1_params), "runner1 kthread_create failed");
-	cr_assert(kthread_create(&runner2, &runner2_params), "runner2 kthread_create failed");
+	cr_assert(thread_init(&writer, &writer_params), "writer thread_init failed");
+	cr_assert(thread_init(&reader, &reader_params), "reader thread_init failed");
+	cr_assert(thread_init(&runner1, &runner1_params), "runner1 thread_init failed");
+	cr_assert(thread_init(&runner2, &runner2_params), "runner2 thread_init failed");
 	rwlock_test_set_one_tick_timeslice(&runner1);
 	rwlock_test_set_one_tick_timeslice(&runner2);
 
@@ -314,10 +314,10 @@ Test(rwlock, timed_write_lock_times_out_while_readers_hold_the_rwlock) {
 	cr_assert(hal_clock_start(1000u, NULL, NULL), "hal_clock_start failed");
 
 	rwlock_init(&rwlock);
-	cr_assert(kthread_create(&reader, &reader_params), "reader kthread_create failed");
-	cr_assert(kthread_create(&writer, &writer_params), "writer kthread_create failed");
-	cr_assert(kthread_create(&runner1, &runner1_params), "runner1 kthread_create failed");
-	cr_assert(kthread_create(&runner2, &runner2_params), "runner2 kthread_create failed");
+	cr_assert(thread_init(&reader, &reader_params), "reader thread_init failed");
+	cr_assert(thread_init(&writer, &writer_params), "writer thread_init failed");
+	cr_assert(thread_init(&runner1, &runner1_params), "runner1 thread_init failed");
+	cr_assert(thread_init(&runner2, &runner2_params), "runner2 thread_init failed");
 	rwlock_test_set_one_tick_timeslice(&runner1);
 	rwlock_test_set_one_tick_timeslice(&runner2);
 
