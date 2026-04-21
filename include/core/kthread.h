@@ -12,6 +12,9 @@
 /* Return the thread descriptor currently associated with the running CPU. */
 struct thread* kthread_current(void);
 
+/* Initialize a kernel-thread descriptor and return a classified failure result on rejection. */
+enum thread_init_result kthread_create_ex(struct thread* thread, const struct thread_create_params* params);
+
 /* Initialize a kernel-thread descriptor using core thread create parameters. */
 bool kthread_create(struct thread* thread, const struct thread_create_params* params);
 

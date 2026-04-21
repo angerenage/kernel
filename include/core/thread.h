@@ -114,6 +114,16 @@ struct run_queue {
 	size_t          depth;
 };
 
+enum thread_init_result {
+	THREAD_INIT_OK = 0,
+	THREAD_INIT_INVALID_ARGUMENTS,
+	THREAD_INIT_INVALID_STACK,
+	THREAD_INIT_CONTEXT_UNSUPPORTED,
+};
+
+/* Initialize a regular thread descriptor and return a classified failure result on rejection. */
+enum thread_init_result thread_init_ex(struct thread* thread, const struct thread_create_params* params);
+
 /* Initialize a regular thread descriptor. */
 bool thread_init(struct thread* thread, const struct thread_create_params* params);
 

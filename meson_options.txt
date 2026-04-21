@@ -22,3 +22,8 @@ option('kernel_selftests_suite',
 	type : 'string',
 	value : '',
 	description : 'Append kernel.selftest.suite=<name> to the generated boot image command line.')
+
+option('kernel_thread_bootstrap_warn_fallback',
+	type : 'boolean',
+	value : false,
+	description : 'Allow the kernel to warn and continue when runtime thread bootstrap context setup is unsupported.')

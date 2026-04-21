@@ -220,6 +220,30 @@ static void kernel_init_memory(const struct mem_range* memory_map, size_t range_
 	printf("kernel: kheap initialized with %zu/%zu bytes free\n", kheap_free_bytes(), kheap_total_bytes());
 }
 
+static void kernel_bootstrap_worker_handle_create_failure(enum thread_init_result create_result, uintptr_t stack_base,
+                                                          uintptr_t stack_top, vmm_id_t stack_id) {
+	(void)stack_id;
+
+	switch (create_result) {
+	case THREAD_INIT_INVALID_STACK:
+		printf("kernel: bootstrap worker stack bounds invalid (base=%p top=%p)\n", (void*)stack_base, (void*)stack_top);
+		boot_fail("kernel: bootstrap worker stack allocation produced unusable bounds");
+	case THREAD_INIT_CONTEXT_UNSUPPORTED:
+		printf("kernel: bootstrap worker context setup rejected by hal_cpu_thread_context_init\n");
+#if KERNEL_THREAD_BOOTSTRAP_WARN_FALLBACK
+		printf("kernel: continuing without runtime thread bootstrap because warn fallback is enabled\n");
+		(void)vmm_free(stack_id);
+		return;
+#else
+		boot_fail("kernel: runtime thread bootstrap unsupported on this platform");
+#endif
+	case THREAD_INIT_INVALID_ARGUMENTS:
+	case THREAD_INIT_OK:
+	default:
+		boot_fail("kernel: bootstrap worker thread creation failed");
+	}
+}
+
 static void kernel_run_bootstrap_worker(void) {
 	struct vmm_alloc_params stack_params = {
 		.page_count  = KERNEL_BOOTSTRAP_THREAD_STACK_PAGES,
@@ -253,9 +277,10 @@ static void kernel_run_bootstrap_worker(void) {
 		.detached          = false,
 	};
 
-	if (!kthread_create(&worker, &thread_params)) {
-		printf("kernel: runtime thread bootstrap not implemented on this platform yet\n");
-		(void)vmm_free(stack_id);
+	enum thread_init_result create_result = kthread_create_ex(&worker, &thread_params);
+	if (create_result != THREAD_INIT_OK) {
+		kernel_bootstrap_worker_handle_create_failure(
+			create_result, thread_params.kernel_stack_base, thread_params.kernel_stack_top, stack_id);
 		return;
 	}
 	if (!kthread_start(&worker)) {

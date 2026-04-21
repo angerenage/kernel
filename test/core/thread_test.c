@@ -4,6 +4,8 @@
 #include <hal/cpu.h>
 #include <hal/interrupts.h>
 
+#include "../mocks/hal/cpu_mock.h"
+
 static void init_bound_bootstrap_cpu(void) {
 	irq_enable_local();
 	cr_assert(cpu_topology_init_bootstrap(0x100000u, 0x104000u), "cpu_topology_init_bootstrap failed");
@@ -14,6 +16,7 @@ static void init_bound_bootstrap_cpu(void) {
 
 static void reset_test_state(void) {
 	irq_enable_local();
+	hal_cpu_mock_set_thread_context_init_result(true);
 	hal_cpu_local_bind(NULL);
 }
 
@@ -35,6 +38,7 @@ Test(thread, init_populates_extended_descriptor_fields) {
 	struct thread thread;
 
 	cr_assert(thread_init(&thread, &params), "thread_init rejected valid params");
+	cr_assert_eq(thread_init_ex(&thread, &params), THREAD_INIT_OK, "thread_init_ex rejected valid params");
 	cr_assert_str_eq(thread.name, "worker", "thread name mismatch");
 	cr_assert_eq(thread.state, THREAD_STATE_NEW, "new thread should start in NEW state");
 	cr_assert_eq(thread.block_reason, THREAD_BLOCK_NONE, "new thread should not start blocked");
@@ -58,19 +62,33 @@ Test(thread, init_populates_extended_descriptor_fields) {
 Test(thread, init_rejects_invalid_regular_thread_params) {
 	struct thread thread;
 
-	cr_assert(!thread_init(NULL, NULL), "NULL thread and params should be rejected");
-	cr_assert(!thread_init(&thread, NULL), "NULL params should be rejected");
-	cr_assert(!thread_init(&thread,
-	                       &(const struct thread_create_params){
-							   .name              = "bad",
-							   .entry             = NULL,
-							   .arg               = NULL,
-							   .kernel_stack_base = 0x500000u,
-							   .kernel_stack_top  = 0x504000u,
-							   .preferred_cpu     = NULL,
-							   .detached          = false,
-						   }),
-	          "NULL entry should be rejected");
+	cr_assert_eq(
+		thread_init_ex(NULL, NULL), THREAD_INIT_INVALID_ARGUMENTS, "NULL thread and params should be rejected");
+	cr_assert_eq(thread_init_ex(&thread, NULL), THREAD_INIT_INVALID_ARGUMENTS, "NULL params should be rejected");
+	cr_assert_eq(thread_init_ex(&thread,
+	                            &(const struct thread_create_params){
+									.name              = "bad",
+									.entry             = NULL,
+									.arg               = NULL,
+									.kernel_stack_base = 0x500000u,
+									.kernel_stack_top  = 0x504000u,
+									.preferred_cpu     = NULL,
+									.detached          = false,
+								}),
+	             THREAD_INIT_INVALID_ARGUMENTS,
+	             "NULL entry should be rejected");
+	cr_assert_eq(thread_init_ex(&thread,
+	                            &(const struct thread_create_params){
+									.name              = "bad",
+									.entry             = thread_test_entry,
+									.arg               = NULL,
+									.kernel_stack_base = 0x504000u,
+									.kernel_stack_top  = 0x504000u,
+									.preferred_cpu     = NULL,
+									.detached          = false,
+								}),
+	             THREAD_INIT_INVALID_STACK,
+	             "empty stack range should be rejected");
 	cr_assert(!thread_init(&thread,
 	                       &(const struct thread_create_params){
 							   .name              = "bad",
@@ -81,7 +99,27 @@ Test(thread, init_rejects_invalid_regular_thread_params) {
 							   .preferred_cpu     = NULL,
 							   .detached          = false,
 						   }),
-	          "empty stack range should be rejected");
+	          "thread_init should reject an empty stack range");
+}
+
+Test(thread, init_reports_unsupported_context_setup) {
+	const struct thread_create_params params = {
+		.name              = "worker",
+		.entry             = thread_test_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x520000u,
+		.kernel_stack_top  = 0x524000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	struct thread thread = {0};
+
+	hal_cpu_mock_set_thread_context_init_result(false);
+	cr_assert_eq(thread_init_ex(&thread, &params),
+	             THREAD_INIT_CONTEXT_UNSUPPORTED,
+	             "thread_init_ex should surface HAL bootstrap rejection");
+	cr_assert(!thread_init(&thread, &params), "thread_init should fail when the HAL rejects bootstrap setup");
+	reset_test_state();
 }
 
 Test(thread, lifecycle_helpers_update_state_flags_and_links) {

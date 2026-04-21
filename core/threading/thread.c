@@ -26,24 +26,39 @@ static void thread_entry_bootstrap(void* ctx) {
 	sched_exit_current(0u);
 }
 
-bool thread_init(struct thread* thread, const struct thread_create_params* params) {
-	if (thread == NULL || params == NULL || params->entry == NULL) return false;
-	if (params->kernel_stack_top <= params->kernel_stack_base) return false;
+static enum thread_init_result thread_validate_create_params(const struct thread_create_params* params) {
+	if (params == NULL || params->entry == NULL) return THREAD_INIT_INVALID_ARGUMENTS;
+	if (params->kernel_stack_top <= params->kernel_stack_base) return THREAD_INIT_INVALID_STACK;
+	return THREAD_INIT_OK;
+}
+
+enum thread_init_result thread_init_ex(struct thread* thread, const struct thread_create_params* params) {
+	enum thread_init_result result;
+	struct thread_context   context;
+
+	if (thread == NULL) return THREAD_INIT_INVALID_ARGUMENTS;
+
+	result = thread_validate_create_params(params);
+	if (result != THREAD_INIT_OK) return result;
+
+	if (!hal_cpu_thread_context_init(&context,
+	                                 params->kernel_stack_base,
+	                                 params->kernel_stack_top,
+	                                 (uintptr_t)thread_entry_bootstrap,
+	                                 (uintptr_t)thread)) {
+		return THREAD_INIT_CONTEXT_UNSUPPORTED;
+	}
 
 	*thread = (struct thread){
-		.name              = params->name,
-		.cpu               = NULL,
-		.preferred_cpu     = params->preferred_cpu,
-		.state             = THREAD_STATE_NEW,
-		.block_reason      = THREAD_BLOCK_NONE,
-		.flags             = params->detached ? THREAD_FLAG_DETACHED : THREAD_FLAG_NONE,
-		.kernel_stack_base = params->kernel_stack_base,
-		.kernel_stack_top  = params->kernel_stack_top,
-		.context =
-			{
-					  .instruction_pointer = (uintptr_t)params->entry,
-					  .stack_pointer       = params->kernel_stack_top,
-					  },
+		.name                = params->name,
+		.cpu                 = NULL,
+		.preferred_cpu       = params->preferred_cpu,
+		.state               = THREAD_STATE_NEW,
+		.block_reason        = THREAD_BLOCK_NONE,
+		.flags               = params->detached ? THREAD_FLAG_DETACHED : THREAD_FLAG_NONE,
+		.kernel_stack_base   = params->kernel_stack_base,
+		.kernel_stack_top    = params->kernel_stack_top,
+		.context             = context,
 		.entry               = params->entry,
 		.arg                 = params->arg,
 		.exit_code           = 0u,
@@ -57,11 +72,11 @@ bool thread_init(struct thread* thread, const struct thread_create_params* param
 		.timeslice_remaining = THREAD_DEFAULT_TIMESLICE_TICKS,
 	};
 	thread_wait_queue_init(&thread->join_wait_queue);
-	return hal_cpu_thread_context_init(&thread->context,
-	                                   params->kernel_stack_base,
-	                                   params->kernel_stack_top,
-	                                   (uintptr_t)thread_entry_bootstrap,
-	                                   (uintptr_t)thread);
+	return THREAD_INIT_OK;
+}
+
+bool thread_init(struct thread* thread, const struct thread_create_params* params) {
+	return thread_init_ex(thread, params) == THREAD_INIT_OK;
 }
 
 void thread_init_idle(struct thread* thread, struct cpu* cpu, const char* name) {

@@ -9,7 +9,9 @@
 #define X86_64_MSR_GS_BASE 0xc0000101u
 
 enum {
-	X86_THREAD_CTX_RBX = 0,
+	X86_THREAD_STACK_ALIGNMENT  = 16u,
+	X86_THREAD_ENTRY_FRAME_SIZE = sizeof(uintptr_t),
+	X86_THREAD_CTX_RBX          = 0,
 	X86_THREAD_CTX_RBP,
 	X86_THREAD_CTX_R12,
 	X86_THREAD_CTX_R13,
@@ -19,6 +21,8 @@ enum {
 
 extern void x86_64_thread_context_switch(struct thread_context* current, const struct thread_context* next);
 extern void x86_64_thread_entry(void);
+
+_Static_assert(HAL_CPU_THREAD_CONTEXT_SPILL_WORDS > X86_THREAD_CTX_R15, "x86_64 thread spill area is too small");
 
 uint64_t hal_cpu_boot_arch_id(void) {
 	uint32_t eax;
@@ -57,11 +61,17 @@ bool hal_cpu_thread_context_init(struct thread_context* context, uintptr_t stack
 
 	if (context == NULL || entry_pc == 0u || stack_top <= stack_base) return false;
 
-	aligned_top = stack_top & ~(uintptr_t)0xful;
+	aligned_top = stack_top & ~((uintptr_t)X86_THREAD_STACK_ALIGNMENT - 1u);
 	if (aligned_top <= stack_base) return false;
-	if (aligned_top < stack_base + sizeof(uintptr_t)) return false;
+	if (aligned_top < stack_base + X86_THREAD_ENTRY_FRAME_SIZE) return false;
 
-	initial_sp   = aligned_top - sizeof(uintptr_t);
+	/*
+	 * x86_64_thread_context_switch restores r12/r13 and jumps into
+	 * x86_64_thread_entry, which passes r13 -> rdi and branches to r12.
+	 * Seed a synthetic return slot so the first C frame sees the SysV
+	 * ABI stack shape (%rsp % 16 == 8 at function entry).
+	 */
+	initial_sp   = aligned_top - X86_THREAD_ENTRY_FRAME_SIZE;
 	return_slot  = (uintptr_t*)initial_sp;
 	*return_slot = 0u;
 

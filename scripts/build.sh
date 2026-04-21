@@ -10,7 +10,7 @@ readonly ARCHES=(
 
 usage() {
 	cat <<'EOF'
-Usage: build.sh (--arch <arch> | --all) [--setup|-s] [--compile|-c] [-sc] [--reconfigure] [--no-tests] [--kernel-selftests] [--kernel-selftests-autorun] [--kernel-selftests-suite <name>]
+Usage: build.sh (--arch <arch> | --all) [--setup|-s] [--compile|-c] [-sc] [--reconfigure] [--no-tests] [--kernel-selftests] [--kernel-selftests-autorun] [--kernel-selftests-suite <name>] [--kernel-thread-bootstrap-warn-fallback]
 
 Target selection:
   --arch <arch>  Build a single architecture (x86_64, aarch64, riscv64, loongarch64).
@@ -31,6 +31,9 @@ Actions:
   --kernel-selftests-suite <name>
                   Configure Meson with -Dkernel_selftests_suite=<name>.
                   Implies --kernel-selftests and boots only that suite.
+  --kernel-thread-bootstrap-warn-fallback
+                  Configure Meson with
+                  -Dkernel_thread_bootstrap_warn_fallback=true.
 
 Examples:
   bash scripts/build.sh --arch x86_64
@@ -38,6 +41,7 @@ Examples:
   bash scripts/build.sh --arch riscv64 -sc
   bash scripts/build.sh --arch x86_64 --kernel-selftests --kernel-selftests-autorun
   bash scripts/build.sh --arch x86_64 --kernel-selftests-suite vmm
+  bash scripts/build.sh --arch x86_64 --kernel-thread-bootstrap-warn-fallback
   bash scripts/build.sh --all --compile
   bash scripts/build.sh --all -sc
 EOF
@@ -115,6 +119,7 @@ setup_arch() {
 		"-Dkernel_selftests=$( (( BUILD_KERNEL_SELFTESTS )) && printf true || printf false )"
 		"-Dkernel_selftests_autorun=$( (( KERNEL_SELFTESTS_AUTORUN )) && printf true || printf false )"
 		"-Dkernel_selftests_suite=${KERNEL_SELFTESTS_SUITE}"
+		"-Dkernel_thread_bootstrap_warn_fallback=$( (( THREAD_BOOTSTRAP_WARN_FALLBACK )) && printf true || printf false )"
 	)
 
 	if (( RECONFIGURE )) || [[ -d "$build_dir" ]]; then
@@ -128,6 +133,7 @@ setup_arch() {
 			"-Dkernel_selftests=$( (( BUILD_KERNEL_SELFTESTS )) && printf true || printf false )"
 			"-Dkernel_selftests_autorun=$( (( KERNEL_SELFTESTS_AUTORUN )) && printf true || printf false )"
 			"-Dkernel_selftests_suite=${KERNEL_SELFTESTS_SUITE}"
+			"-Dkernel_thread_bootstrap_warn_fallback=$( (( THREAD_BOOTSTRAP_WARN_FALLBACK )) && printf true || printf false )"
 		)
 	fi
 
@@ -201,6 +207,7 @@ BUILD_TESTS=1
 BUILD_KERNEL_SELFTESTS=0
 KERNEL_SELFTESTS_AUTORUN=0
 KERNEL_SELFTESTS_SUITE=""
+THREAD_BOOTSTRAP_WARN_FALLBACK=0
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -262,6 +269,10 @@ while [[ $# -gt 0 ]]; do
 			[[ -n "${1#*=}" ]] || error "--kernel-selftests-suite requires a non-empty suite name"
 			BUILD_KERNEL_SELFTESTS=1
 			KERNEL_SELFTESTS_SUITE="${1#*=}"
+			shift
+			;;
+		--kernel-thread-bootstrap-warn-fallback)
+			THREAD_BOOTSTRAP_WARN_FALLBACK=1
 			shift
 			;;
 		-h|--help)

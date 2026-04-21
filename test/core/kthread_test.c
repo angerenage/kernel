@@ -25,6 +25,7 @@ static void init_bound_bootstrap_cpu(void) {
 static void reset_test_state(void) {
 	irq_enable_local();
 	hal_cpu_mock_set_context_switch_hook(NULL);
+	hal_cpu_mock_set_thread_context_init_result(true);
 	kthread_test_cancel_hook_armed       = false;
 	kthread_test_sleep_cancel_hook_armed = false;
 	kthread_test_sleep_cancel_target     = NULL;
@@ -81,6 +82,27 @@ Test(kthread, current_start_and_yield_delegate_to_scheduler) {
 
 	kthread_yield();
 	cr_assert_eq(kthread_current(), &worker, "kthread_yield should dispatch the runnable worker thread");
+
+	reset_test_state();
+}
+
+Test(kthread, create_ex_reports_unsupported_context_setup) {
+	const struct thread_create_params params = {
+		.name              = "worker",
+		.entry             = kthread_test_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x308000u,
+		.kernel_stack_top  = 0x30c000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	struct thread worker = {0};
+
+	hal_cpu_mock_set_thread_context_init_result(false);
+	cr_assert_eq(kthread_create_ex(&worker, &params),
+	             THREAD_INIT_CONTEXT_UNSUPPORTED,
+	             "kthread_create_ex should surface HAL bootstrap rejection");
+	cr_assert(!kthread_create(&worker, &params), "kthread_create should fail when bootstrap setup is unsupported");
 
 	reset_test_state();
 }

@@ -7,8 +7,12 @@ struct thread* kthread_current(void) {
 	return sched_current_thread();
 }
 
+enum thread_init_result kthread_create_ex(struct thread* thread, const struct thread_create_params* params) {
+	return thread_init_ex(thread, params);
+}
+
 bool kthread_create(struct thread* thread, const struct thread_create_params* params) {
-	return thread_init(thread, params);
+	return kthread_create_ex(thread, params) == THREAD_INIT_OK;
 }
 
 bool kthread_start(struct thread* thread) {

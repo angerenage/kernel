@@ -4,7 +4,8 @@
 #include <stdint.h>
 
 enum {
-	RISCV64_THREAD_CTX_S0 = 0,
+	RISCV64_THREAD_STACK_ALIGNMENT = 16u,
+	RISCV64_THREAD_CTX_S0          = 0,
 	RISCV64_THREAD_CTX_S1,
 	RISCV64_THREAD_CTX_S2,
 	RISCV64_THREAD_CTX_S3,
@@ -20,6 +21,8 @@ enum {
 
 extern void riscv64_thread_context_switch(struct thread_context* current, const struct thread_context* next);
 extern void riscv64_thread_entry(void);
+
+_Static_assert(HAL_CPU_THREAD_CONTEXT_SPILL_WORDS > RISCV64_THREAD_CTX_S11, "riscv64 thread spill area is too small");
 
 uint64_t hal_cpu_boot_arch_id(void) {
 	return 0u;
@@ -42,7 +45,12 @@ bool hal_cpu_thread_context_init(struct thread_context* context, uintptr_t stack
 
 	if (context == NULL || entry_pc == 0u || stack_top <= stack_base) return false;
 
-	aligned_top = stack_top & ~(uintptr_t)0xful;
+	/*
+	 * riscv64_thread_context_switch restores s0-s11 and jumps into
+	 * riscv64_thread_entry, which moves s1 -> a0 and jumps to s0.
+	 * The RISC-V psABI requires sp to stay 16-byte aligned.
+	 */
+	aligned_top = stack_top & ~((uintptr_t)RISCV64_THREAD_STACK_ALIGNMENT - 1u);
 	if (aligned_top <= stack_base) return false;
 
 	*context = (struct thread_context){

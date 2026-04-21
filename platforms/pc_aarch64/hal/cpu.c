@@ -4,7 +4,8 @@
 #include <stdint.h>
 
 enum {
-	AARCH64_THREAD_CTX_X19 = 0,
+	AARCH64_THREAD_STACK_ALIGNMENT = 16u,
+	AARCH64_THREAD_CTX_X19         = 0,
 	AARCH64_THREAD_CTX_X20,
 	AARCH64_THREAD_CTX_X21,
 	AARCH64_THREAD_CTX_X22,
@@ -19,6 +20,8 @@ enum {
 
 extern void aarch64_thread_context_switch(struct thread_context* current, const struct thread_context* next);
 extern void aarch64_thread_entry(void);
+
+_Static_assert(HAL_CPU_THREAD_CONTEXT_SPILL_WORDS > AARCH64_THREAD_CTX_X29, "aarch64 thread spill area is too small");
 
 uint64_t hal_cpu_boot_arch_id(void) {
 	uint64_t value;
@@ -44,7 +47,12 @@ bool hal_cpu_thread_context_init(struct thread_context* context, uintptr_t stack
 
 	if (context == NULL || entry_pc == 0u || stack_top <= stack_base) return false;
 
-	aligned_top = stack_top & ~(uintptr_t)0xful;
+	/*
+	 * aarch64_thread_context_switch restores x19-x29 and branches into
+	 * aarch64_thread_entry, which moves x20 -> x0 and branches to x19.
+	 * AAPCS64 requires a 16-byte-aligned sp at every public interface.
+	 */
+	aligned_top = stack_top & ~((uintptr_t)AARCH64_THREAD_STACK_ALIGNMENT - 1u);
 	if (aligned_top <= stack_base) return false;
 
 	*context = (struct thread_context){
