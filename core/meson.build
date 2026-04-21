@@ -3,6 +3,7 @@ core_sources = files(
 	'cpu/irq.c',
 	'sync/condvar.c',
 	'sync/mutex.c',
+	'sync/rwlock.c',
 	'sync/semaphore.c',
 	'sync/spinlock.c',
 	'threading/kthread.c',
