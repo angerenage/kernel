@@ -54,6 +54,10 @@ Test(thread, init_populates_extended_descriptor_fields) {
 	cr_assert_eq(thread.timeslice_remaining,
 	             THREAD_DEFAULT_TIMESLICE_TICKS,
 	             "regular threads should start with a full timeslice budget");
+	cr_assert_eq(thread.base_priority, THREAD_PRIORITY_DEFAULT, "regular threads should inherit the default priority");
+	cr_assert_eq(thread.effective_priority,
+	             THREAD_PRIORITY_DEFAULT,
+	             "regular threads should start with base priority as effective priority");
 	cr_assert(thread_is_joinable(&thread), "fresh non-detached thread should be joinable");
 	cr_assert(!thread_is_terminated(&thread), "fresh thread should not be terminated");
 	cr_assert_eq(thread_wait_queue_depth(&thread.join_wait_queue), 0u, "join wait queue should start empty");
@@ -227,6 +231,8 @@ Test(thread, detach_and_idle_helpers_follow_joinability_rules) {
 	cr_assert(!thread_is_joinable(&idle_thread), "idle thread must never be joinable");
 	cr_assert(!thread_request_cancel(&idle_thread), "idle thread must reject cancellation");
 	cr_assert(!thread_detach(&idle_thread), "idle thread must reject detach");
+	cr_assert_eq(idle_thread.base_priority, THREAD_PRIORITY_MIN, "idle threads should carry minimum priority");
+	cr_assert_eq(idle_thread.effective_priority, THREAD_PRIORITY_MIN, "idle threads should carry minimum priority");
 	cr_assert_eq(idle_thread.timeslice_ticks, 0u, "idle threads should not consume scheduler timeslices");
 	cr_assert_eq(idle_thread.timeslice_remaining, 0u, "idle threads should not carry a timeslice budget");
 	cr_assert_eq(

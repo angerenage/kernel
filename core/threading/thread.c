@@ -1,6 +1,12 @@
 #include <core/sched.h>
 #include <core/thread.h>
 
+static int32_t thread_clamp_priority(int32_t priority) {
+	if (priority < THREAD_PRIORITY_MIN) return THREAD_PRIORITY_MIN;
+	if (priority > THREAD_PRIORITY_MAX) return THREAD_PRIORITY_MAX;
+	return priority;
+}
+
 static void thread_reset_links(struct thread* thread) {
 	if (thread == NULL) return;
 
@@ -68,6 +74,8 @@ enum thread_init_result thread_init_ex(struct thread* thread, const struct threa
 		.sleep_queue_next    = NULL,
 		.wake_deadline_tick  = 0u,
 		.wait_status         = THREAD_WAIT_STATUS_NONE,
+		.base_priority       = thread_clamp_priority(params->base_priority),
+		.effective_priority  = thread_clamp_priority(params->base_priority),
 		.timeslice_ticks     = THREAD_DEFAULT_TIMESLICE_TICKS,
 		.timeslice_remaining = THREAD_DEFAULT_TIMESLICE_TICKS,
 		.reap_callback       = NULL,
@@ -103,6 +111,8 @@ void thread_init_idle(struct thread* thread, struct cpu* cpu, const char* name) 
 		.sleep_queue_next    = NULL,
 		.wake_deadline_tick  = 0u,
 		.wait_status         = THREAD_WAIT_STATUS_NONE,
+		.base_priority       = THREAD_PRIORITY_MIN,
+		.effective_priority  = THREAD_PRIORITY_MIN,
 		.timeslice_ticks     = 0u,
 		.timeslice_remaining = 0u,
 		.reap_callback       = NULL,
@@ -276,6 +286,8 @@ void run_queue_init(struct run_queue* queue) {
 
 bool run_queue_enqueue(struct run_queue* queue, struct thread* thread) {
 	struct irq_state state;
+	struct thread*   previous = NULL;
+	struct thread*   current;
 
 	if (queue == NULL || thread == NULL || thread_is_idle(thread) || thread_is_terminated(thread)) return false;
 
@@ -284,14 +296,25 @@ bool run_queue_enqueue(struct run_queue* queue, struct thread* thread) {
 		spinlock_unlock_irqrestore(&queue->lock, state);
 		return false;
 	}
-	if (queue->tail == NULL) {
-		queue->head = thread;
+
+	current = queue->head;
+	while (current != NULL && current->effective_priority >= thread->effective_priority) {
+		previous = current;
+		current  = current->run_queue_next;
+	}
+
+	if (previous == NULL) {
+		thread->run_queue_next = queue->head;
+		queue->head            = thread;
 	}
 	else {
-		queue->tail->run_queue_next = thread;
+		thread->run_queue_next   = previous->run_queue_next;
+		previous->run_queue_next = thread;
 	}
-	queue->tail             = thread;
-	thread->run_queue_next  = NULL;
+
+	if (thread->run_queue_next == NULL) queue->tail = thread;
+	if (queue->tail == NULL) queue->tail = thread;
+
 	thread->wait_queue_next = NULL;
 	thread->flags |= THREAD_FLAG_QUEUED;
 	thread->block_reason = THREAD_BLOCK_NONE;

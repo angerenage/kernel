@@ -14,6 +14,12 @@ enum {
 	THREAD_DEFAULT_TIMESLICE_TICKS = 4u,
 };
 
+enum {
+	THREAD_PRIORITY_MIN     = -20,
+	THREAD_PRIORITY_DEFAULT = 0,
+	THREAD_PRIORITY_MAX     = 20,
+};
+
 /* Thread entry function used for first-run bootstrap. */
 typedef void (*thread_entry_t)(void* arg);
 
@@ -72,6 +78,7 @@ struct thread_create_params {
 	uintptr_t      kernel_stack_base;
 	uintptr_t      kernel_stack_top;
 	struct cpu*    preferred_cpu;
+	int32_t        base_priority;
 	bool           detached;
 };
 
@@ -107,13 +114,15 @@ struct thread {
 	struct thread*            sleep_queue_next;
 	uint64_t                  wake_deadline_tick;
 	uint32_t                  wait_status;
+	int32_t                   base_priority;
+	int32_t                   effective_priority;
 	uint32_t                  timeslice_ticks;
 	uint32_t                  timeslice_remaining;
 	thread_reap_callback_t    reap_callback;
 	void*                     reap_context;
 };
 
-/* FIFO run queue protected by a spinlock. */
+/* Priority-ordered run queue with FIFO ordering among equal-priority threads. */
 struct run_queue {
 	struct spinlock lock;
 	struct thread*  head;
@@ -194,10 +203,10 @@ void thread_wait_queue_init(struct thread_wait_queue* queue);
 /* Return the current number of blocked waiters in a thread wait queue. */
 size_t thread_wait_queue_depth(struct thread_wait_queue* queue);
 
-/* Initialize an empty FIFO run queue. */
+/* Initialize an empty priority-aware run queue. */
 void run_queue_init(struct run_queue* queue);
 
-/* Enqueue a non-idle thread at the tail of the queue. */
+/* Enqueue a non-idle thread by effective priority, preserving FIFO ties. */
 bool run_queue_enqueue(struct run_queue* queue, struct thread* thread);
 
 /* Remove and return the head thread, or NULL when the queue is empty. */

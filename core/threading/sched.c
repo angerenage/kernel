@@ -30,6 +30,8 @@ static struct spinlock        sched_sleep_lock =
 static struct thread* sched_sleep_head;
 static uint64_t       sched_ticks;
 
+static struct sched_cpu_state* sched_state_for_cpu(const struct cpu* cpu);
+
 static void sched_stat_increment(uint64_t* counter) {
 	if (counter == NULL) return;
 	(void)__atomic_fetch_add(counter, 1u, __ATOMIC_RELAXED);
@@ -39,6 +41,37 @@ static void sched_clear_reschedule_request(struct cpu* cpu) {
 	if (cpu == NULL) return;
 
 	__atomic_store_n(&cpu->reschedule_requested, false, __ATOMIC_RELEASE);
+}
+
+static int32_t sched_effective_priority(const struct thread* thread) {
+	return thread == NULL ? THREAD_PRIORITY_MIN : thread->effective_priority;
+}
+
+static bool sched_run_queue_has_priority_at_least(struct cpu* cpu, int32_t priority) {
+	struct sched_cpu_state* state;
+	struct irq_state        irq_state;
+	struct thread*          head;
+	bool                    has_priority;
+
+	state = sched_state_for_cpu(cpu);
+	if (state == NULL) return false;
+
+	irq_state    = spinlock_lock_irqsave(&state->run_queue.lock);
+	head         = state->run_queue.head;
+	has_priority = head != NULL && sched_effective_priority(head) >= priority;
+	spinlock_unlock_irqrestore(&state->run_queue.lock, irq_state);
+	return has_priority;
+}
+
+static bool sched_thread_should_preempt_current(struct cpu* cpu, const struct thread* thread) {
+	const struct thread* current;
+
+	if (cpu == NULL || thread == NULL) return false;
+
+	current = cpu->current_thread;
+	if (current == NULL || thread_is_idle(current) || thread_is_terminated(current)) return false;
+
+	return sched_effective_priority(thread) > sched_effective_priority(current);
 }
 
 static void sched_charge_current_timeslice(struct cpu* cpu) {
@@ -56,7 +89,7 @@ static void sched_charge_current_timeslice(struct cpu* cpu) {
 	if (current->timeslice_remaining != 0u) return;
 
 	current->timeslice_remaining = current->timeslice_ticks;
-	if (sched_run_queue_depth(cpu) == 0u) return;
+	if (!sched_run_queue_has_priority_at_least(cpu, sched_effective_priority(current))) return;
 
 	sched_request_reschedule(cpu);
 	if (cpu != cpu_current()) hal_cpu_kick(cpu);
@@ -396,6 +429,9 @@ static bool sched_make_runnable_on_cpu(struct cpu* cpu, struct thread* thread, b
 	if (cpu != NULL && cpu != cpu_current()) {
 		sched_request_reschedule(cpu);
 		hal_cpu_kick(cpu);
+	}
+	else if (sched_thread_should_preempt_current(cpu, thread)) {
+		sched_request_reschedule(cpu);
 	}
 
 	return true;

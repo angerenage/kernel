@@ -188,6 +188,157 @@ Test(sched, runnable_threads_yield_in_fifo_order) {
 	reset_test_state();
 }
 
+Test(sched, runnable_threads_dispatch_highest_priority_first) {
+	const struct thread_create_params low_params = {
+		.name              = "low",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x302000u,
+		.kernel_stack_top  = 0x306000u,
+		.preferred_cpu     = NULL,
+		.base_priority     = THREAD_PRIORITY_DEFAULT - 4,
+		.detached          = false,
+	};
+	const struct thread_create_params high_params = {
+		.name              = "high",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x306000u,
+		.kernel_stack_top  = 0x30a000u,
+		.preferred_cpu     = NULL,
+		.base_priority     = THREAD_PRIORITY_DEFAULT + 4,
+		.detached          = false,
+	};
+	struct thread low;
+	struct thread high;
+
+	init_bound_bootstrap_cpu();
+	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
+
+	cr_assert(thread_init(&low, &low_params), "thread_init failed for low-priority thread");
+	cr_assert(thread_init(&high, &high_params), "thread_init failed for high-priority thread");
+
+	cr_assert(sched_make_runnable(&low), "failed to make low-priority thread runnable");
+	cr_assert(sched_make_runnable(&high), "failed to make high-priority thread runnable");
+	cr_assert_eq(sched_run_queue_depth(cpu_current()), 2u, "run queue depth mismatch after enqueue");
+
+	sched_yield();
+	cr_assert_eq(sched_current_thread(), &high, "highest-priority runnable thread should dispatch first");
+	cr_assert(thread_is_queued(&low), "lower-priority thread should remain queued");
+
+	reset_test_state();
+}
+
+Test(sched, high_priority_thread_preempts_lower_priority_current_at_interrupt_exit) {
+	const struct thread_create_params low_params = {
+		.name              = "low_current",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x30a000u,
+		.kernel_stack_top  = 0x30e000u,
+		.preferred_cpu     = NULL,
+		.base_priority     = THREAD_PRIORITY_DEFAULT - 2,
+		.detached          = false,
+	};
+	const struct thread_create_params high_params = {
+		.name              = "high_ready",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x30e000u,
+		.kernel_stack_top  = 0x312000u,
+		.preferred_cpu     = NULL,
+		.base_priority     = THREAD_PRIORITY_DEFAULT + 2,
+		.detached          = false,
+	};
+	struct thread low;
+	struct thread high;
+
+	init_bound_bootstrap_cpu();
+	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
+
+	cr_assert(thread_init(&low, &low_params), "thread_init failed for low-priority current thread");
+	cr_assert(thread_init(&high, &high_params), "thread_init failed for high-priority runnable thread");
+
+	sched_set_current(cpu_current(), &low);
+	cr_assert(sched_make_runnable(&high), "failed to make high-priority thread runnable");
+	cr_assert(sched_reschedule_pending(cpu_current()), "higher-priority enqueue should request deferred preemption");
+	cr_assert_eq(sched_current_thread(), &low, "preemption should wait for interrupt-exit handling");
+
+	cr_assert(sched_handle_interrupt_exit(), "interrupt exit should consume the priority preemption request");
+	cr_assert_eq(sched_current_thread(), &high, "high-priority thread should preempt lower-priority current thread");
+	cr_assert(thread_is_queued(&low), "preempted lower-priority thread should be re-queued");
+
+	reset_test_state();
+}
+
+Test(sched, timeslice_expiry_rotates_equal_priority_threads_only) {
+	const struct thread_create_params high_params = {
+		.name              = "high_current",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x312000u,
+		.kernel_stack_top  = 0x316000u,
+		.preferred_cpu     = NULL,
+		.base_priority     = THREAD_PRIORITY_DEFAULT + 3,
+		.detached          = false,
+	};
+	const struct thread_create_params low_params = {
+		.name              = "low_queued",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x316000u,
+		.kernel_stack_top  = 0x31a000u,
+		.preferred_cpu     = NULL,
+		.base_priority     = THREAD_PRIORITY_DEFAULT - 3,
+		.detached          = false,
+	};
+	const struct thread_create_params peer_params = {
+		.name              = "high_peer",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x31a000u,
+		.kernel_stack_top  = 0x31e000u,
+		.preferred_cpu     = NULL,
+		.base_priority     = THREAD_PRIORITY_DEFAULT + 3,
+		.detached          = false,
+	};
+	struct thread high;
+	struct thread low;
+	struct thread peer;
+
+	init_bound_bootstrap_cpu();
+	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
+
+	cr_assert(thread_init(&high, &high_params), "thread_init failed for high-priority current thread");
+	cr_assert(thread_init(&low, &low_params), "thread_init failed for low-priority queued thread");
+	cr_assert(thread_init(&peer, &peer_params), "thread_init failed for high-priority peer thread");
+	sched_test_set_one_tick_timeslice(&high);
+	sched_test_set_one_tick_timeslice(&low);
+	sched_test_set_one_tick_timeslice(&peer);
+
+	sched_set_current(cpu_current(), &high);
+	cr_assert(sched_make_runnable(&low), "failed to make low-priority thread runnable");
+	sched_tick();
+	cr_assert(!sched_reschedule_pending(cpu_current()),
+	          "lower-priority queued work should not consume the current priority band's timeslice");
+	cr_assert(!sched_handle_interrupt_exit(), "no preemption should be pending for lower-priority queued work");
+	cr_assert_eq(sched_current_thread(), &high, "high-priority current thread should keep running");
+
+	cr_assert(sched_make_runnable(&peer), "failed to make equal-priority peer runnable");
+	sched_tick();
+	cr_assert(sched_reschedule_pending(cpu_current()),
+	          "equal-priority runnable work should rotate on timeslice expiry");
+	cr_assert(sched_handle_interrupt_exit(), "interrupt exit should consume equal-priority timeslice rotation");
+	cr_assert_eq(sched_current_thread(), &peer, "equal-priority peer should run after current timeslice expires");
+	cr_assert(thread_is_queued(&high), "preempted equal-priority thread should be queued for round-robin");
+	cr_assert(thread_is_queued(&low), "lower-priority thread should remain queued behind the priority band");
+
+	reset_test_state();
+}
+
 Test(sched, make_runnable_prefers_preferred_cpu_over_lower_depth_target) {
 	const struct thread_create_params pinned_params = {
 		.name              = "pinned_existing",
