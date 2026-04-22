@@ -1,4 +1,5 @@
 #include <base/time.h>
+#include <core/cpu.h>
 #include <core/kheap.h>
 #include <core/kthread.h>
 #include <core/lock.h>
@@ -9,13 +10,21 @@
 #include <hal/clock.h>
 #include <stddef.h>
 
-static struct thread_wait_queue kthread_reaper_wait_queue = {
-	.lock = SPINLOCK_INIT_CLASS("kthread_reaper_wait", SPINLOCK_ORDER_SCHED, SPINLOCK_FLAG_IRQSAVE),
+#define KTHREAD_REAPER_MAX_CPUS 64u
+
+struct kthread_reaper {
+	struct thread_wait_queue wait_queue;
+	struct kthread*          head;
+	struct kthread*          tail;
+	struct kthread*          thread;
+	bool                     started;
+	bool                     starting;
 };
-static struct kthread* kthread_reaper_head;
-static struct kthread* kthread_reaper_tail;
-static bool            kthread_reaper_started;
-static bool            kthread_reaper_starting;
+
+static struct kthread_reaper kthread_reapers[KTHREAD_REAPER_MAX_CPUS];
+static struct spinlock       kthread_reaper_init_lock =
+	SPINLOCK_INIT_CLASS("kthread_reaper_init", SPINLOCK_ORDER_SCHED, SPINLOCK_FLAG_IRQSAVE);
+static bool kthread_reapers_initialized;
 
 static enum kthread_spawn_result kthread_spawn_internal(struct kthread** out_thread, const char* name,
                                                         thread_entry_t entry, void* arg, struct cpu* preferred_cpu,
@@ -46,56 +55,121 @@ static void kthread_free(struct kthread* thread) {
 	kfree(thread);
 }
 
-static void kthread_reap_callback(struct thread* thread, void* ctx) {
-	struct kthread*  target = (struct kthread*)ctx;
+static void kthread_reapers_init_once(void) {
 	struct irq_state state;
+
+	state = spinlock_lock_irqsave(&kthread_reaper_init_lock);
+	if (!kthread_reapers_initialized) {
+		for (size_t i = 0; i < KTHREAD_REAPER_MAX_CPUS; i++) {
+			thread_wait_queue_init(&kthread_reapers[i].wait_queue);
+			kthread_reapers[i].head     = NULL;
+			kthread_reapers[i].tail     = NULL;
+			kthread_reapers[i].thread   = NULL;
+			kthread_reapers[i].started  = false;
+			kthread_reapers[i].starting = false;
+		}
+		kthread_reapers_initialized = true;
+	}
+	spinlock_unlock_irqrestore(&kthread_reaper_init_lock, state);
+}
+
+static struct kthread_reaper* kthread_reaper_for_cpu(const struct cpu* cpu) {
+	if (cpu == NULL || cpu->index >= KTHREAD_REAPER_MAX_CPUS) return NULL;
+
+	kthread_reapers_init_once();
+	return &kthread_reapers[cpu->index];
+}
+
+static bool kthread_cpu_online(const struct cpu* cpu) {
+	return cpu != NULL && cpu_state_get(cpu) == CPU_STATE_ONLINE;
+}
+
+static struct cpu* kthread_default_cpu(void) {
+	struct cpu* cpu = cpu_current();
+
+	if (kthread_cpu_online(cpu)) return cpu;
+
+	cpu = cpu_bsp();
+	if (kthread_cpu_online(cpu)) return cpu;
+
+	for (size_t i = 0; i < cpu_count(); i++) {
+		cpu = cpu_by_index(i);
+		if (kthread_cpu_online(cpu)) return cpu;
+	}
+
+	return NULL;
+}
+
+static void kthread_reap_callback(struct thread* thread, void* ctx) {
+	struct kthread_reaper* reaper;
+	struct kthread*        target = (struct kthread*)ctx;
+	struct irq_state       state;
 
 	(void)thread;
 	if (target == NULL) return;
 
-	state               = spinlock_lock_irqsave(&kthread_reaper_wait_queue.lock);
+	reaper = kthread_reaper_for_cpu(cpu_current());
+	if (reaper == NULL || !reaper->started) return;
+
+	state               = spinlock_lock_irqsave(&reaper->wait_queue.lock);
 	target->reaper_next = NULL;
-	if (kthread_reaper_tail == NULL) {
-		kthread_reaper_head = target;
+	if (reaper->tail == NULL) {
+		reaper->head = target;
 	}
 	else {
-		kthread_reaper_tail->reaper_next = target;
+		reaper->tail->reaper_next = target;
 	}
-	kthread_reaper_tail = target;
-	spinlock_unlock_irqrestore(&kthread_reaper_wait_queue.lock, state);
+	reaper->tail = target;
+	spinlock_unlock_irqrestore(&reaper->wait_queue.lock, state);
 
-	(void)sched_wake_one(&kthread_reaper_wait_queue);
+	(void)sched_wake_one(&reaper->wait_queue);
 }
 
-bool kthread_reaper_start(struct cpu* preferred_cpu) {
+static bool kthread_reaper_start_cpu(struct cpu* cpu) {
+	struct kthread_reaper*    reaper;
 	struct irq_state          state;
-	struct kthread*           reaper = NULL;
+	struct kthread*           reaper_thread = NULL;
 	enum kthread_spawn_result result;
 
-	state = spinlock_lock_irqsave(&kthread_reaper_wait_queue.lock);
-	if (kthread_reaper_started) {
-		spinlock_unlock_irqrestore(&kthread_reaper_wait_queue.lock, state);
-		return true;
-	}
-	if (kthread_reaper_starting) {
-		spinlock_unlock_irqrestore(&kthread_reaper_wait_queue.lock, state);
-		return false;
-	}
-	kthread_reaper_starting = true;
-	spinlock_unlock_irqrestore(&kthread_reaper_wait_queue.lock, state);
+	reaper = kthread_reaper_for_cpu(cpu);
+	if (reaper == NULL || !kthread_cpu_online(cpu)) return false;
 
-	result = kthread_spawn_internal(&reaper, "kthread/reaper", kthread_reaper_entry, NULL, preferred_cpu, true, false);
+	for (;;) {
+		state = spinlock_lock_irqsave(&reaper->wait_queue.lock);
+		if (reaper->started) {
+			spinlock_unlock_irqrestore(&reaper->wait_queue.lock, state);
+			return true;
+		}
+		if (!reaper->starting) {
+			reaper->starting = true;
+			spinlock_unlock_irqrestore(&reaper->wait_queue.lock, state);
+			break;
+		}
+		spinlock_unlock_irqrestore(&reaper->wait_queue.lock, state);
+		spinlock_relax();
+	}
 
-	state                   = spinlock_lock_irqsave(&kthread_reaper_wait_queue.lock);
-	kthread_reaper_starting = false;
-	if (result == KTHREAD_SPAWN_OK) kthread_reaper_started = true;
-	spinlock_unlock_irqrestore(&kthread_reaper_wait_queue.lock, state);
+	result = kthread_spawn_internal(&reaper_thread, "kthread/reaper", kthread_reaper_entry, reaper, cpu, true, false);
+
+	state            = spinlock_lock_irqsave(&reaper->wait_queue.lock);
+	reaper->starting = false;
+	if (result == KTHREAD_SPAWN_OK) {
+		reaper->thread  = reaper_thread;
+		reaper->started = true;
+	}
+	spinlock_unlock_irqrestore(&reaper->wait_queue.lock, state);
 
 	if (result != KTHREAD_SPAWN_OK) {
-		kthread_free(reaper);
+		kthread_free(reaper_thread);
 		return false;
 	}
 	return true;
+}
+
+bool kthread_reaper_start(struct cpu* preferred_cpu) {
+	if (preferred_cpu != NULL) return kthread_reaper_start_cpu(preferred_cpu);
+
+	return kthread_reaper_start_cpu(kthread_default_cpu());
 }
 
 static enum kthread_spawn_result kthread_spawn_internal(struct kthread** out_thread, const char* name,
@@ -175,39 +249,44 @@ enum kthread_spawn_result kthread_spawn_detached(const char* name, thread_entry_
 
 enum kthread_spawn_result kthread_spawn_detached_on_cpu(const char* name, thread_entry_t entry, void* arg,
                                                         struct cpu* preferred_cpu) {
-	if (!kthread_reaper_start(preferred_cpu)) return KTHREAD_SPAWN_REAPER_UNAVAILABLE;
+	struct cpu* target_cpu = preferred_cpu != NULL ? preferred_cpu : kthread_default_cpu();
 
-	return kthread_spawn_internal(NULL, name, entry, arg, preferred_cpu, true, true);
+	if (!kthread_reaper_start_cpu(target_cpu)) return KTHREAD_SPAWN_REAPER_UNAVAILABLE;
+
+	return kthread_spawn_internal(NULL, name, entry, arg, target_cpu, true, true);
 }
 
-static struct kthread* kthread_reaper_dequeue(void) {
+static struct kthread* kthread_reaper_dequeue(struct kthread_reaper* reaper) {
 	struct irq_state state;
 	struct kthread*  target;
 
-	state  = spinlock_lock_irqsave(&kthread_reaper_wait_queue.lock);
-	target = kthread_reaper_head;
+	if (reaper == NULL) return NULL;
+
+	state  = spinlock_lock_irqsave(&reaper->wait_queue.lock);
+	target = reaper->head;
 	if (target != NULL) {
-		kthread_reaper_head = target->reaper_next;
-		if (kthread_reaper_head == NULL) kthread_reaper_tail = NULL;
+		reaper->head = target->reaper_next;
+		if (reaper->head == NULL) reaper->tail = NULL;
 		target->reaper_next = NULL;
 	}
-	spinlock_unlock_irqrestore(&kthread_reaper_wait_queue.lock, state);
+	spinlock_unlock_irqrestore(&reaper->wait_queue.lock, state);
 	return target;
 }
 
 static void kthread_reaper_entry(void* arg) {
-	(void)arg;
+	struct kthread_reaper* reaper = arg;
 
 	thread_set_cancel_enabled(kthread_current(), false);
 	for (;;) {
-		struct kthread* target = kthread_reaper_dequeue();
+		struct kthread* target = kthread_reaper_dequeue(reaper);
 
 		if (target != NULL) {
 			kthread_free(target);
 			continue;
 		}
 
-		sched_block_current(&kthread_reaper_wait_queue, THREAD_BLOCK_WAIT_QUEUE);
+		if (reaper != NULL) sched_block_current(&reaper->wait_queue, THREAD_BLOCK_WAIT_QUEUE);
+		else sched_yield();
 	}
 }
 
@@ -272,8 +351,14 @@ bool kthread_destroy(struct kthread* target) {
 }
 
 bool kthread_detach(struct kthread* target) {
+	struct cpu* target_cpu;
+
 	if (target == NULL) return false;
-	if (!kthread_reaper_start(target->thread.preferred_cpu)) return false;
+	target_cpu = kthread_cpu_online(target->thread.preferred_cpu) ? target->thread.preferred_cpu : target->thread.cpu;
+	if (!kthread_cpu_online(target_cpu)) target_cpu = kthread_default_cpu();
+	if (!kthread_reaper_start_cpu(target_cpu)) return false;
+
+	target->thread.preferred_cpu = target_cpu;
 	if (!thread_detach(&target->thread)) return false;
 
 	thread_set_reap_callback(&target->thread, kthread_reap_callback, target);

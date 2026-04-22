@@ -84,24 +84,18 @@ kernel_selftest_rwlock_last_reader_wakes_writer_and_blocks_new_readers(struct ke
 			&holder, "selftest/rwlock-reader-holder", kernel_selftest_rwlock_reader_holder_worker, &state),
 		"failed to create rwlock holder thread",
 		cleanup);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx,
-		kernel_selftest_thread_create(
-			&writer, "selftest/rwlock-writer", kernel_selftest_rwlock_writer_waiter_worker, &state),
-		"failed to create rwlock writer thread",
-		cleanup);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx,
-		kernel_selftest_thread_create(
-			&reader, "selftest/rwlock-late-reader", kernel_selftest_rwlock_late_reader_worker, &state),
-		"failed to create rwlock late reader thread",
-		cleanup);
 
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.holder_acquired, "holder thread never acquired the read lock", cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_reader_count(&state.rwlock) == 1u, cleanup);
 
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx,
+		kernel_selftest_thread_create(
+			&writer, "selftest/rwlock-writer", kernel_selftest_rwlock_writer_waiter_worker, &state),
+		"failed to create rwlock writer thread",
+		cleanup);
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.writer_started, "writer thread never attempted the write lock", cleanup);
@@ -111,6 +105,12 @@ kernel_selftest_rwlock_last_reader_wakes_writer_and_blocks_new_readers(struct ke
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_waiter_count(&state.rwlock) == 1u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_reader_count(&state.rwlock) == 1u, cleanup);
 
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx,
+		kernel_selftest_thread_create(
+			&reader, "selftest/rwlock-late-reader", kernel_selftest_rwlock_late_reader_worker, &state),
+		"failed to create rwlock late reader thread",
+		cleanup);
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.reader_started, "late reader never attempted the rwlock", cleanup);
@@ -414,29 +414,29 @@ static void kernel_selftest_rwlock_timed_writer_timeout_wakes_blocked_readers(st
 			&holder, "selftest/rwlock-timeout-holder", kernel_selftest_rwlock_timeout_holder_worker, &state),
 		"failed to create rwlock timeout holder",
 		cleanup);
+
+	sched_yield();
+
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.holder_acquired, "timeout holder never acquired the read lock", cleanup);
+
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
 		ctx,
 		kernel_selftest_thread_create(
 			&writer, "selftest/rwlock-timeout-writer", kernel_selftest_rwlock_timeout_writer_worker, &state),
 		"failed to create rwlock timeout writer",
 		cleanup);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx,
-		kernel_selftest_thread_create(
-			&reader, "selftest/rwlock-timeout-reader", kernel_selftest_rwlock_timeout_reader_worker, &state),
-		"failed to create rwlock timeout reader",
-		cleanup);
-
-	sched_yield();
-
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.holder_acquired, "timeout holder never acquired the read lock", cleanup);
-
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.writer_started, "timeout writer never attempted the rwlock", cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.writer_finished, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_rwlock_wait_for_timeout_waiters(&state, 1u), cleanup);
 
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx,
+		kernel_selftest_thread_create(
+			&reader, "selftest/rwlock-timeout-reader", kernel_selftest_rwlock_timeout_reader_worker, &state),
+		"failed to create rwlock timeout reader",
+		cleanup);
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.reader_started, "timeout reader never attempted the rwlock", cleanup);

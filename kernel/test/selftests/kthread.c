@@ -1,3 +1,4 @@
+#include <core/cpu.h>
 #include <core/kthread.h>
 #include <core/thread.h>
 #include <stdbool.h>
@@ -55,13 +56,13 @@ cleanup:
 }
 
 struct kernel_selftest_kthread_detach_state {
-	bool ran;
+	uint32_t ran;
 };
 
 static void kernel_selftest_kthread_detach_worker(void* arg) {
 	struct kernel_selftest_kthread_detach_state* state = arg;
 
-	if (state != NULL) state->ran = true;
+	if (state != NULL) __atomic_store_n(&state->ran, 1u, __ATOMIC_RELEASE);
 }
 
 static void kernel_selftest_kthread_detach_prevents_join_but_thread_still_runs(struct kernel_selftest_context* ctx) {
@@ -74,9 +75,12 @@ static void kernel_selftest_kthread_detach_prevents_join_but_thread_still_runs(s
 	                                "failed to create detached thread",
 	                                cleanup);
 
-	sched_yield();
+	for (size_t attempt = 0u; attempt < KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS * cpu_count() * 1024u; attempt++) {
+		if (__atomic_load_n(&state.ran, __ATOMIC_ACQUIRE) != 0u) break;
+		sched_yield();
+	}
 
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.ran, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, __atomic_load_n(&state.ran, __ATOMIC_ACQUIRE) != 0u, cleanup);
 
 cleanup:
 	kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
