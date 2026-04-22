@@ -50,6 +50,9 @@ bool kthread_reaper_start(struct cpu* preferred_cpu);
 /* Block until target exits (or is already exited), then publish its exit code. */
 bool kthread_join(struct kthread* target, thread_exit_code_t* out_exit_code);
 
+/* Block until target exits or timeout_ms elapses, then publish its exit code when joined. */
+bool kthread_timed_join(struct kthread* target, uint64_t timeout_ms, thread_exit_code_t* out_exit_code);
+
 /* Reclaim a terminated joinable kthread handle. */
 bool kthread_destroy(struct kthread* target);
 

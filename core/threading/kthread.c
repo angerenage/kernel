@@ -31,6 +31,27 @@ static enum kthread_spawn_result kthread_spawn_internal(struct kthread** out_thr
                                                         bool detached, bool reap_on_exit);
 static void                      kthread_reaper_entry(void* arg);
 
+static bool kthread_join_target(struct kthread* target, struct thread** out_thread) {
+	struct thread* current = kthread_current();
+	struct thread* thread;
+
+	if (out_thread != NULL) *out_thread = NULL;
+	if (target == NULL || current == NULL) return false;
+
+	thread = &target->thread;
+	if (thread == current || thread_is_idle(thread) || !thread_is_joinable(thread)) return false;
+
+	if (out_thread != NULL) *out_thread = thread;
+	return true;
+}
+
+static bool kthread_join_publish_exit_code(struct thread* thread, thread_exit_code_t* out_exit_code) {
+	if (!thread_is_terminated(thread)) return false;
+
+	if (out_exit_code != NULL) *out_exit_code = thread->exit_code;
+	return true;
+}
+
 static enum kthread_spawn_result kthread_result_from_thread_result(enum thread_init_result result) {
 	switch (result) {
 	case THREAD_INIT_OK:
@@ -323,22 +344,57 @@ bool kthread_sleep_ms(uint64_t ms) {
 
 bool kthread_join(struct kthread* target, thread_exit_code_t* out_exit_code) {
 	struct thread* thread;
-	struct thread* current = kthread_current();
 
 	kthread_testcancel();
-	if (target == NULL || current == NULL) return false;
-
-	thread = &target->thread;
-	if (thread == current || thread_is_idle(thread) || !thread_is_joinable(thread)) return false;
+	if (!kthread_join_target(target, &thread)) return false;
 
 	if (!thread_is_terminated(thread)) {
-		sched_block_current(&thread->join_wait_queue, THREAD_BLOCK_JOIN);
+		struct irq_state wait_state = spinlock_lock_irqsave(&thread->join_wait_queue.lock);
+
+		if (!thread_is_terminated(thread)) {
+			if (!sched_block_current_locked(&thread->join_wait_queue, THREAD_BLOCK_JOIN, wait_state)) {
+				kthread_testcancel();
+				return false;
+			}
+		}
+		else {
+			spinlock_unlock_irqrestore(&thread->join_wait_queue.lock, wait_state);
+		}
 		kthread_testcancel();
-		if (!thread_is_terminated(thread)) return false;
 	}
 
-	if (out_exit_code != NULL) *out_exit_code = thread->exit_code;
-	return true;
+	return kthread_join_publish_exit_code(thread, out_exit_code);
+}
+
+bool kthread_timed_join(struct kthread* target, uint64_t timeout_ms, thread_exit_code_t* out_exit_code) {
+	struct thread* thread;
+	uint64_t       deadline_tick;
+
+	kthread_testcancel();
+	if (!kthread_join_target(target, &thread)) return false;
+	if (kthread_join_publish_exit_code(thread, out_exit_code)) return true;
+	if (timeout_ms == 0u) return false;
+	if (!time_tick_deadline_from_ms(sched_tick_count(), timeout_ms, hal_clock_frequency(), &deadline_tick)) {
+		return false;
+	}
+
+	if (!thread_is_terminated(thread)) {
+		struct irq_state wait_state = spinlock_lock_irqsave(&thread->join_wait_queue.lock);
+
+		if (!thread_is_terminated(thread)) {
+			if (!sched_block_current_until_locked(
+					&thread->join_wait_queue, THREAD_BLOCK_JOIN, deadline_tick, wait_state)) {
+				kthread_testcancel();
+				return false;
+			}
+		}
+		else {
+			spinlock_unlock_irqrestore(&thread->join_wait_queue.lock, wait_state);
+		}
+		kthread_testcancel();
+	}
+
+	return kthread_join_publish_exit_code(thread, out_exit_code);
 }
 
 bool kthread_destroy(struct kthread* target) {
