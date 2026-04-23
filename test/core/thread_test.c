@@ -61,6 +61,8 @@ Test(thread, init_populates_extended_descriptor_fields) {
 	cr_assert(thread_is_joinable(&thread), "fresh non-detached thread should be joinable");
 	cr_assert(!thread_is_terminated(&thread), "fresh thread should not be terminated");
 	cr_assert_eq(thread_wait_queue_depth(&thread.join_wait_queue), 0u, "join wait queue should start empty");
+	cr_assert_eq(thread_wait_queue_depth(&thread.park_wait_queue), 0u, "park wait queue should start empty");
+	cr_assert_eq(thread.flags & THREAD_FLAG_PARK_PERMIT, 0u, "fresh thread should not start with a park permit");
 }
 
 Test(thread, init_rejects_invalid_regular_thread_params) {
@@ -237,6 +239,8 @@ Test(thread, detach_and_idle_helpers_follow_joinability_rules) {
 	cr_assert_eq(idle_thread.timeslice_remaining, 0u, "idle threads should not carry a timeslice budget");
 	cr_assert_eq(
 		thread_wait_queue_depth(&idle_thread.join_wait_queue), 0u, "idle thread wait queue should start empty");
+	cr_assert_eq(
+		thread_wait_queue_depth(&idle_thread.park_wait_queue), 0u, "idle thread park wait queue should start empty");
 
 	reset_test_state();
 }

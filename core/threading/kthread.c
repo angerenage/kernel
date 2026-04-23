@@ -325,6 +325,55 @@ void kthread_yield(void) {
 	kthread_testcancel();
 }
 
+bool kthread_park(void) {
+	struct thread*   current = kthread_current();
+	struct irq_state wait_state;
+
+	kthread_testcancel();
+	if (current == NULL || thread_is_idle(current) || thread_is_terminated(current)) return false;
+
+	wait_state = spinlock_lock_irqsave(&current->park_wait_queue.lock);
+	if ((current->flags & THREAD_FLAG_PARK_PERMIT) != 0u) {
+		current->flags &= ~THREAD_FLAG_PARK_PERMIT;
+		spinlock_unlock_irqrestore(&current->park_wait_queue.lock, wait_state);
+		kthread_testcancel();
+		return true;
+	}
+
+	if (!sched_block_current_locked(&current->park_wait_queue, THREAD_BLOCK_PARKED, wait_state)) {
+		kthread_testcancel();
+		return false;
+	}
+
+	wait_state = spinlock_lock_irqsave(&current->park_wait_queue.lock);
+	current->flags &= ~THREAD_FLAG_PARK_PERMIT;
+	spinlock_unlock_irqrestore(&current->park_wait_queue.lock, wait_state);
+
+	kthread_testcancel();
+	return true;
+}
+
+bool kthread_unpark(struct kthread* target) {
+	struct thread*   thread;
+	struct irq_state wait_state;
+	bool             wake_target;
+
+	if (target == NULL) return false;
+
+	thread = &target->thread;
+	if (thread_is_idle(thread) || thread_is_terminated(thread)) return false;
+
+	wait_state = spinlock_lock_irqsave(&thread->park_wait_queue.lock);
+	thread->flags |= THREAD_FLAG_PARK_PERMIT;
+	wake_target = thread->state == THREAD_STATE_BLOCKED && thread->block_reason == THREAD_BLOCK_PARKED &&
+	              thread->blocked_queue == &thread->park_wait_queue &&
+	              thread->wait_status == THREAD_WAIT_STATUS_PENDING;
+	spinlock_unlock_irqrestore(&thread->park_wait_queue.lock, wait_state);
+
+	if (wake_target) (void)sched_wake_one(&thread->park_wait_queue);
+	return true;
+}
+
 bool kthread_sleep_ms(uint64_t ms) {
 	uint32_t timer_hz;
 	uint64_t deadline_tick;

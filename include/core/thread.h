@@ -48,6 +48,7 @@ enum thread_flags {
 	THREAD_FLAG_DETACHED        = 1u << 2,
 	THREAD_FLAG_CANCEL_PENDING  = 1u << 3,
 	THREAD_FLAG_CANCEL_DISABLED = 1u << 4,
+	THREAD_FLAG_PARK_PERMIT     = 1u << 5,
 };
 
 /* Why a thread is blocked when state == THREAD_STATE_BLOCKED. */
@@ -109,6 +110,7 @@ struct thread {
 	void*                     arg;
 	thread_exit_code_t        exit_code;
 	struct thread_wait_queue  join_wait_queue;
+	struct thread_wait_queue  park_wait_queue;
 	struct thread_wait_queue* blocked_queue;
 	struct mutex*             owned_mutexes;
 	struct thread*            run_queue_next;

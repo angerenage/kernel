@@ -14,8 +14,11 @@ static bool            kthread_test_cancel_hook_armed;
 static jmp_buf         kthread_test_cancel_jmp;
 static bool            kthread_test_sleep_cancel_hook_armed;
 static struct kthread* kthread_test_sleep_cancel_target;
+static bool            kthread_test_park_hook_armed;
+static struct kthread* kthread_test_park_target;
 static bool            kthread_test_timeout_hook_active;
 static size_t          kthread_test_timeout_hook_runs;
+static size_t          kthread_test_park_hook_runs;
 
 static void init_bound_bootstrap_cpu(void) {
 	irq_enable_local();
@@ -32,8 +35,11 @@ static void reset_test_state(void) {
 	kthread_test_cancel_hook_armed       = false;
 	kthread_test_sleep_cancel_hook_armed = false;
 	kthread_test_sleep_cancel_target     = NULL;
+	kthread_test_park_hook_armed         = false;
+	kthread_test_park_target             = NULL;
 	kthread_test_timeout_hook_active     = false;
 	kthread_test_timeout_hook_runs       = 0u;
+	kthread_test_park_hook_runs          = 0u;
 	hal_cpu_local_bind(NULL);
 }
 
@@ -61,6 +67,18 @@ static void kthread_test_sleep_cancel_context_switch_hook(struct thread_context*
 	kthread_test_sleep_cancel_hook_armed = false;
 	cr_assert(kthread_cancel(kthread_test_sleep_cancel_target),
 	          "kthread_cancel should succeed while the sleeper is blocked");
+}
+
+static void kthread_test_park_context_switch_hook(struct thread_context* current, const struct thread_context* next) {
+	(void)current;
+	(void)next;
+
+	if (!kthread_test_park_hook_armed || kthread_test_park_target == NULL) return;
+
+	kthread_test_park_hook_armed = false;
+	kthread_test_park_hook_runs++;
+	cr_assert(kthread_unpark(kthread_test_park_target), "kthread_unpark should succeed while the target is parked");
+	sched_yield();
 }
 
 static void kthread_test_timeout_context_switch_hook(struct thread_context*       current,
@@ -104,6 +122,83 @@ Test(kthread, current_start_and_yield_delegate_to_scheduler) {
 
 	kthread_yield();
 	cr_assert_eq(kthread_current(), &worker.thread, "kthread_yield should dispatch the runnable worker thread");
+
+	reset_test_state();
+}
+
+Test(kthread, park_blocks_until_another_thread_unparks_the_current_thread) {
+	const struct thread_create_params parker_params = {
+		.name              = "parker",
+		.entry             = kthread_test_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x304000u,
+		.kernel_stack_top  = 0x308000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	const struct thread_create_params runner_params = {
+		.name              = "runner",
+		.entry             = kthread_test_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x308000u,
+		.kernel_stack_top  = 0x30c000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	struct kthread parker = {.stack_id = VMM_ID_INVALID};
+	struct thread  runner;
+
+	init_bound_bootstrap_cpu();
+	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
+	cr_assert(thread_init(&parker.thread, &parker_params), "thread_init failed for parker");
+	cr_assert(thread_init(&runner, &runner_params), "thread_init failed for runner");
+	cr_assert(sched_make_runnable(&runner), "runner should be runnable while the parker is blocked");
+
+	sched_set_current(cpu_current(), &parker.thread);
+	kthread_test_park_target     = &parker;
+	kthread_test_park_hook_armed = true;
+	hal_cpu_mock_set_context_switch_hook(kthread_test_park_context_switch_hook);
+	cr_assert(kthread_park(), "kthread_park should return after another thread unparks the target");
+
+	cr_assert_eq(kthread_test_park_hook_runs, 1u, "park hook should run exactly once");
+	cr_assert_eq(sched_current_thread(), &parker.thread, "parker should resume once unparked");
+	cr_assert_eq(parker.thread.state, THREAD_STATE_RUNNING, "parker should be running after park returns");
+	cr_assert_eq(parker.thread.block_reason, THREAD_BLOCK_NONE, "park should clear the parked block reason");
+	cr_assert_eq(thread_wait_queue_depth(&parker.thread.park_wait_queue), 0u, "park wait queue should be empty");
+	cr_assert_eq(parker.thread.flags & THREAD_FLAG_PARK_PERMIT,
+	             0u,
+	             "waking a parked thread should consume the delivered park permit");
+
+	reset_test_state();
+}
+
+Test(kthread, unpark_before_park_leaves_a_single_permit) {
+	const struct thread_create_params worker_params = {
+		.name              = "worker",
+		.entry             = kthread_test_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x30c000u,
+		.kernel_stack_top  = 0x310000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	struct kthread worker = {.stack_id = VMM_ID_INVALID};
+
+	init_bound_bootstrap_cpu();
+	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
+	cr_assert(thread_init(&worker.thread, &worker_params), "thread_init failed for worker");
+	sched_set_current(cpu_current(), &worker.thread);
+
+	hal_cpu_mock_set_context_switch_hook(kthread_test_park_context_switch_hook);
+	cr_assert(kthread_unpark(&worker), "kthread_unpark should grant a permit to a running thread");
+	cr_assert(kthread_park(), "kthread_park should consume a previously granted permit without blocking");
+
+	cr_assert_eq(kthread_test_park_hook_runs, 0u, "consuming an existing permit should not context switch");
+	cr_assert_eq(sched_current_thread(), &worker.thread, "worker should keep the CPU when park consumes a permit");
+	cr_assert_eq(worker.thread.flags & THREAD_FLAG_PARK_PERMIT, 0u, "kthread_park should consume the stored permit");
+	cr_assert_eq(thread_wait_queue_depth(&worker.thread.park_wait_queue), 0u, "park should not queue the worker");
 
 	reset_test_state();
 }
@@ -226,26 +321,31 @@ Test(kthread, join_detach_and_cancel_validate_inputs) {
 		.preferred_cpu     = NULL,
 		.detached          = false,
 	};
-	struct kthread worker = {.stack_id = VMM_ID_INVALID};
-	struct thread  idle;
+	struct kthread worker      = {.stack_id = VMM_ID_INVALID};
+	struct kthread idle_target = {.stack_id = VMM_ID_INVALID};
 
 	init_bound_bootstrap_cpu();
 	cr_assert(sched_init(), "sched_init failed");
 	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
 	cr_assert(thread_init(&worker.thread, &params), "thread_init failed");
-	thread_init_idle(&idle, cpu_current(), "idle/test");
+	thread_init_idle(&idle_target.thread, cpu_current(), "idle/test");
 
 	cr_assert(!kthread_join(NULL, NULL), "kthread_join should reject NULL targets");
 	cr_assert(!kthread_timed_join(NULL, 0u, NULL), "kthread_timed_join should reject NULL targets");
+	cr_assert(!kthread_unpark(NULL), "kthread_unpark should reject NULL targets");
 	sched_set_current(cpu_current(), &worker.thread);
 	cr_assert(!kthread_join(&worker, NULL), "kthread_join should reject self-join");
 	cr_assert(!kthread_timed_join(&worker, 0u, NULL), "kthread_timed_join should reject self-join");
-	sched_set_current(cpu_current(), &idle);
+	sched_set_current(cpu_current(), &idle_target.thread);
+	cr_assert(!kthread_unpark(&idle_target), "kthread_unpark should reject idle targets");
 	cr_assert(thread_detach(&worker.thread), "thread_detach should succeed on live joinable thread");
 	cr_assert(!kthread_join(&worker, NULL), "kthread_join should reject detached targets");
 	cr_assert(!kthread_timed_join(&worker, 0u, NULL), "kthread_timed_join should reject detached targets");
 	cr_assert(kthread_cancel(&worker), "kthread_cancel should set cancellation pending on live thread");
 	cr_assert(thread_cancel_requested(&worker.thread), "cancel flag should be visible after kthread_cancel");
+	thread_mark_exiting(&worker.thread, 1u);
+	thread_mark_zombie(&worker.thread);
+	cr_assert(!kthread_unpark(&worker), "kthread_unpark should reject terminated targets");
 
 	reset_test_state();
 }

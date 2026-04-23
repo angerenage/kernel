@@ -83,6 +83,7 @@ enum thread_init_result thread_init_ex(struct thread* thread, const struct threa
 		.reap_context        = NULL,
 	};
 	thread_wait_queue_init(&thread->join_wait_queue);
+	thread_wait_queue_init(&thread->park_wait_queue);
 	return THREAD_INIT_OK;
 }
 
@@ -121,6 +122,7 @@ void thread_init_idle(struct thread* thread, struct cpu* cpu, const char* name) 
 		.reap_context        = NULL,
 	};
 	thread_wait_queue_init(&thread->join_wait_queue);
+	thread_wait_queue_init(&thread->park_wait_queue);
 }
 
 bool thread_is_idle(const struct thread* thread) {

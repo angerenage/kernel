@@ -68,6 +68,12 @@ void kthread_testcancel(void);
 /* Yield the current thread's CPU slot to the next runnable thread. */
 void kthread_yield(void);
 
+/* Block the current thread until another thread grants it a park permit. */
+bool kthread_park(void);
+
+/* Grant target one park permit and wake it if it is currently parked. */
+bool kthread_unpark(struct kthread* target);
+
 /* Sleep for at least ms milliseconds using the kernel periodic timer source. */
 bool kthread_sleep_ms(uint64_t ms);
 
