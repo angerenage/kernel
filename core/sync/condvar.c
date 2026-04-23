@@ -32,8 +32,12 @@ void condvar_wait(struct condvar* condvar, struct mutex* mutex) {
 	}
 
 	/* Hold the condvar queue lock across the mutex release to avoid missed wakeups. */
-	wait_state   = spinlock_lock_irqsave(&condvar->waiters.lock);
-	mutex->owner = NULL;
+	wait_state = spinlock_lock_irqsave(&condvar->waiters.lock);
+	if (!mutex_release_locked(mutex, current)) {
+		spinlock_unlock_irqrestore(&condvar->waiters.lock, wait_state);
+		spinlock_unlock_irqrestore(&mutex->lock, mutex_state);
+		condvar_trap();
+	}
 	spinlock_unlock(&mutex->lock);
 	(void)sched_wake_one(&mutex->waiters);
 	if (!sched_block_current_locked(&condvar->waiters, THREAD_BLOCK_WAIT_QUEUE, wait_state)) {
@@ -67,8 +71,12 @@ bool condvar_timed_wait(struct condvar* condvar, struct mutex* mutex, uint64_t t
 	}
 
 	/* Hold the condvar queue lock across the mutex release to avoid missed wakeups. */
-	wait_state   = spinlock_lock_irqsave(&condvar->waiters.lock);
-	mutex->owner = NULL;
+	wait_state = spinlock_lock_irqsave(&condvar->waiters.lock);
+	if (!mutex_release_locked(mutex, current)) {
+		spinlock_unlock_irqrestore(&condvar->waiters.lock, wait_state);
+		spinlock_unlock_irqrestore(&mutex->lock, mutex_state);
+		condvar_trap();
+	}
 	spinlock_unlock(&mutex->lock);
 	(void)sched_wake_one(&mutex->waiters);
 	signaled = sched_block_current_until_locked(&condvar->waiters, THREAD_BLOCK_WAIT_QUEUE, deadline_tick, wait_state);

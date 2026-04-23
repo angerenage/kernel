@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 struct cpu;
+struct mutex;
 struct thread;
 struct thread_wait_queue;
 
@@ -109,6 +110,7 @@ struct thread {
 	thread_exit_code_t        exit_code;
 	struct thread_wait_queue  join_wait_queue;
 	struct thread_wait_queue* blocked_queue;
+	struct mutex*             owned_mutexes;
 	struct thread*            run_queue_next;
 	struct thread*            wait_queue_next;
 	struct thread*            sleep_queue_next;
@@ -139,6 +141,9 @@ enum thread_init_result {
 
 /* Initialize a regular thread descriptor and return a classified failure result on rejection. */
 enum thread_init_result thread_init_ex(struct thread* thread, const struct thread_create_params* params);
+
+/* Clamp a scheduler priority into the supported thread priority range. */
+int32_t thread_priority_clamp(int32_t priority);
 
 /* Initialize a regular thread descriptor. */
 bool thread_init(struct thread* thread, const struct thread_create_params* params);
@@ -208,6 +213,9 @@ void run_queue_init(struct run_queue* queue);
 
 /* Enqueue a non-idle thread by effective priority, preserving FIFO ties. */
 bool run_queue_enqueue(struct run_queue* queue, struct thread* thread);
+
+/* Reposition an already queued thread after its effective priority changes. */
+bool run_queue_requeue(struct run_queue* queue, struct thread* thread);
 
 /* Remove and return the head thread, or NULL when the queue is empty. */
 struct thread* run_queue_dequeue(struct run_queue* queue);

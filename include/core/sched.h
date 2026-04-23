@@ -49,6 +49,9 @@ bool sched_make_runnable(struct thread* thread);
 /* Remove a thread from its current CPU run queue before it begins running. */
 bool sched_remove_runnable(struct thread* thread);
 
+/* Update a thread's effective priority and reposition it if it is queued. */
+void sched_set_thread_effective_priority(struct thread* thread, int32_t priority);
+
 /* Yield the current CPU so another runnable thread may be dispatched. */
 void sched_yield(void);
 

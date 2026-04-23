@@ -1,7 +1,7 @@
 #include <core/sched.h>
 #include <core/thread.h>
 
-static int32_t thread_clamp_priority(int32_t priority) {
+int32_t thread_priority_clamp(int32_t priority) {
 	if (priority < THREAD_PRIORITY_MIN) return THREAD_PRIORITY_MIN;
 	if (priority > THREAD_PRIORITY_MAX) return THREAD_PRIORITY_MAX;
 	return priority;
@@ -69,13 +69,14 @@ enum thread_init_result thread_init_ex(struct thread* thread, const struct threa
 		.arg                 = params->arg,
 		.exit_code           = 0u,
 		.blocked_queue       = NULL,
+		.owned_mutexes       = NULL,
 		.run_queue_next      = NULL,
 		.wait_queue_next     = NULL,
 		.sleep_queue_next    = NULL,
 		.wake_deadline_tick  = 0u,
 		.wait_status         = THREAD_WAIT_STATUS_NONE,
-		.base_priority       = thread_clamp_priority(params->base_priority),
-		.effective_priority  = thread_clamp_priority(params->base_priority),
+		.base_priority       = thread_priority_clamp(params->base_priority),
+		.effective_priority  = thread_priority_clamp(params->base_priority),
 		.timeslice_ticks     = THREAD_DEFAULT_TIMESLICE_TICKS,
 		.timeslice_remaining = THREAD_DEFAULT_TIMESLICE_TICKS,
 		.reap_callback       = NULL,
@@ -106,6 +107,7 @@ void thread_init_idle(struct thread* thread, struct cpu* cpu, const char* name) 
 		.arg                 = NULL,
 		.exit_code           = 0u,
 		.blocked_queue       = NULL,
+		.owned_mutexes       = NULL,
 		.run_queue_next      = NULL,
 		.wait_queue_next     = NULL,
 		.sleep_queue_next    = NULL,
@@ -275,27 +277,11 @@ size_t thread_wait_queue_depth(struct thread_wait_queue* queue) {
 	return depth;
 }
 
-void run_queue_init(struct run_queue* queue) {
-	if (queue == NULL) return;
+static void run_queue_insert_locked(struct run_queue* queue, struct thread* thread) {
+	struct thread* previous = NULL;
+	struct thread* current;
 
-	queue->lock  = (struct spinlock)SPINLOCK_INIT_CLASS("run_queue_lock", SPINLOCK_ORDER_SCHED, SPINLOCK_FLAG_IRQSAVE);
-	queue->head  = NULL;
-	queue->tail  = NULL;
-	queue->depth = 0u;
-}
-
-bool run_queue_enqueue(struct run_queue* queue, struct thread* thread) {
-	struct irq_state state;
-	struct thread*   previous = NULL;
-	struct thread*   current;
-
-	if (queue == NULL || thread == NULL || thread_is_idle(thread) || thread_is_terminated(thread)) return false;
-
-	state = spinlock_lock_irqsave(&queue->lock);
-	if (thread_is_queued(thread)) {
-		spinlock_unlock_irqrestore(&queue->lock, state);
-		return false;
-	}
+	if (queue == NULL || thread == NULL) return;
 
 	current = queue->head;
 	while (current != NULL && current->effective_priority >= thread->effective_priority) {
@@ -314,12 +300,75 @@ bool run_queue_enqueue(struct run_queue* queue, struct thread* thread) {
 
 	if (thread->run_queue_next == NULL) queue->tail = thread;
 	if (queue->tail == NULL) queue->tail = thread;
+}
 
+static bool run_queue_remove_locked(struct run_queue* queue, struct thread* thread) {
+	struct thread* previous = NULL;
+	struct thread* current;
+
+	if (queue == NULL || thread == NULL) return false;
+
+	current = queue->head;
+	while (current != NULL && current != thread) {
+		previous = current;
+		current  = current->run_queue_next;
+	}
+
+	if (current == NULL) return false;
+
+	if (previous == NULL) {
+		queue->head = current->run_queue_next;
+	}
+	else {
+		previous->run_queue_next = current->run_queue_next;
+	}
+
+	if (queue->tail == current) queue->tail = previous;
+	current->run_queue_next = NULL;
+	return true;
+}
+
+void run_queue_init(struct run_queue* queue) {
+	if (queue == NULL) return;
+
+	queue->lock  = (struct spinlock)SPINLOCK_INIT_CLASS("run_queue_lock", SPINLOCK_ORDER_SCHED, SPINLOCK_FLAG_IRQSAVE);
+	queue->head  = NULL;
+	queue->tail  = NULL;
+	queue->depth = 0u;
+}
+
+bool run_queue_enqueue(struct run_queue* queue, struct thread* thread) {
+	struct irq_state state;
+
+	if (queue == NULL || thread == NULL || thread_is_idle(thread) || thread_is_terminated(thread)) return false;
+
+	state = spinlock_lock_irqsave(&queue->lock);
+	if (thread_is_queued(thread)) {
+		spinlock_unlock_irqrestore(&queue->lock, state);
+		return false;
+	}
+
+	run_queue_insert_locked(queue, thread);
 	thread->wait_queue_next = NULL;
 	thread->flags |= THREAD_FLAG_QUEUED;
 	thread->block_reason = THREAD_BLOCK_NONE;
 	thread->state        = THREAD_STATE_READY;
 	queue->depth++;
+	spinlock_unlock_irqrestore(&queue->lock, state);
+	return true;
+}
+
+bool run_queue_requeue(struct run_queue* queue, struct thread* thread) {
+	struct irq_state state;
+
+	if (queue == NULL || thread == NULL || !thread_is_queued(thread)) return false;
+
+	state = spinlock_lock_irqsave(&queue->lock);
+	if (!run_queue_remove_locked(queue, thread)) {
+		spinlock_unlock_irqrestore(&queue->lock, state);
+		return false;
+	}
+	run_queue_insert_locked(queue, thread);
 	spinlock_unlock_irqrestore(&queue->lock, state);
 	return true;
 }

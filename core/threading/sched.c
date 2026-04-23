@@ -522,6 +522,36 @@ bool sched_remove_runnable(struct thread* thread) {
 	return true;
 }
 
+void sched_set_thread_effective_priority(struct thread* thread, int32_t priority) {
+	struct sched_cpu_state* state;
+	struct cpu*             cpu;
+	int32_t                 normalized_priority;
+
+	if (thread == NULL || thread_is_idle(thread) || thread_is_terminated(thread)) return;
+
+	normalized_priority = thread_priority_clamp(priority);
+	if (thread->effective_priority == normalized_priority) return;
+
+	thread->effective_priority = normalized_priority;
+	cpu                        = thread->cpu;
+	state                      = sched_state_for_cpu(cpu);
+
+	if (state != NULL && thread_is_queued(thread)) {
+		(void)run_queue_requeue(&state->run_queue, thread);
+		if (cpu != NULL && cpu != cpu_current()) {
+			sched_request_reschedule(cpu);
+			hal_cpu_kick(cpu);
+		}
+		return;
+	}
+
+	if (state != NULL && cpu != NULL && cpu->current_thread == thread &&
+	    sched_run_queue_has_priority_at_least(cpu, normalized_priority + 1)) {
+		sched_request_reschedule(cpu);
+		if (cpu != cpu_current()) hal_cpu_kick(cpu);
+	}
+}
+
 void sched_yield(void) {
 	struct sched_cpu_state* state;
 	struct cpu*             cpu = cpu_current();

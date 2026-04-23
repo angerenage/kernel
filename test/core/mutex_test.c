@@ -10,8 +10,11 @@
 
 #include "../mocks/hal/cpu_mock.h"
 
-static bool   mutex_test_switch_hook_active;
-static size_t mutex_test_switch_hook_runs;
+static bool           mutex_test_switch_hook_active;
+static size_t         mutex_test_switch_hook_runs;
+static struct mutex*  mutex_test_inheritance_mutex;
+static struct thread* mutex_test_inheritance_owner;
+static struct thread* mutex_test_inheritance_waiter;
 
 static void init_bound_bootstrap_cpu(void) {
 	irq_enable_local();
@@ -26,6 +29,9 @@ static void reset_test_state(void) {
 	hal_cpu_mock_set_context_switch_hook(NULL);
 	mutex_test_switch_hook_active = false;
 	mutex_test_switch_hook_runs   = 0u;
+	mutex_test_inheritance_mutex  = NULL;
+	mutex_test_inheritance_owner  = NULL;
+	mutex_test_inheritance_waiter = NULL;
 	hal_cpu_local_bind(NULL);
 }
 
@@ -48,6 +54,45 @@ static void mutex_test_timeout_context_switch_hook(struct thread_context* curren
 
 	mutex_test_switch_hook_active = true;
 	mutex_test_switch_hook_runs++;
+	sched_tick();
+	(void)sched_handle_interrupt_exit();
+	sched_tick();
+	(void)sched_handle_interrupt_exit();
+	mutex_test_switch_hook_active = false;
+}
+
+static void mutex_test_inheritance_unlock_context_switch_hook(struct thread_context*       current,
+                                                              const struct thread_context* next) {
+	(void)current;
+	(void)next;
+
+	if (mutex_test_switch_hook_active || mutex_test_switch_hook_runs != 0u) return;
+
+	mutex_test_switch_hook_active = true;
+	mutex_test_switch_hook_runs++;
+	cr_assert_eq(sched_current_thread(),
+	             mutex_test_inheritance_owner,
+	             "boosted owner should dispatch before medium-priority runnable work");
+	cr_assert_eq(mutex_test_inheritance_owner->effective_priority,
+	             mutex_test_inheritance_waiter->effective_priority,
+	             "owner should inherit the high-priority waiter's effective priority");
+	cr_assert(mutex_unlock(mutex_test_inheritance_mutex), "boosted owner should be able to unlock the mutex");
+	sched_yield();
+	mutex_test_switch_hook_active = false;
+}
+
+static void mutex_test_inheritance_timeout_context_switch_hook(struct thread_context*       current,
+                                                               const struct thread_context* next) {
+	(void)current;
+	(void)next;
+
+	if (mutex_test_switch_hook_active || mutex_test_switch_hook_runs != 0u) return;
+
+	mutex_test_switch_hook_active = true;
+	mutex_test_switch_hook_runs++;
+	cr_assert_eq(mutex_test_inheritance_owner->effective_priority,
+	             mutex_test_inheritance_waiter->effective_priority,
+	             "owner should inherit priority while the high-priority waiter is blocked");
 	sched_tick();
 	(void)sched_handle_interrupt_exit();
 	sched_tick();
@@ -169,6 +214,144 @@ Test(mutex, contended_lock_blocks_and_wakes_waiter) {
 	cr_assert(mutex_unlock(&mutex), "waiter should be able to release the mutex");
 	cr_assert(!mutex_is_locked(&mutex), "mutex should end unlocked");
 
+	reset_test_state();
+}
+
+Test(mutex, high_priority_waiter_boosts_owner_ahead_of_medium_priority_work) {
+	const struct thread_create_params owner_params = {
+		.name              = "pi_owner",
+		.entry             = mutex_test_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x355000u,
+		.kernel_stack_top  = 0x359000u,
+		.preferred_cpu     = NULL,
+		.base_priority     = THREAD_PRIORITY_DEFAULT - 5,
+		.detached          = false,
+	};
+	const struct thread_create_params waiter_params = {
+		.name              = "pi_waiter",
+		.entry             = mutex_test_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x359000u,
+		.kernel_stack_top  = 0x35d000u,
+		.preferred_cpu     = NULL,
+		.base_priority     = THREAD_PRIORITY_DEFAULT + 5,
+		.detached          = false,
+	};
+	const struct thread_create_params medium_params = {
+		.name              = "pi_medium",
+		.entry             = mutex_test_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x35d000u,
+		.kernel_stack_top  = 0x361000u,
+		.preferred_cpu     = NULL,
+		.base_priority     = THREAD_PRIORITY_DEFAULT,
+		.detached          = false,
+	};
+	struct mutex  mutex;
+	struct thread owner;
+	struct thread waiter;
+	struct thread medium;
+
+	init_bound_bootstrap_cpu();
+	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
+	cr_assert(hal_clock_start(1000u, NULL, NULL), "hal_clock_start failed");
+
+	mutex_init(&mutex);
+	cr_assert(thread_init(&owner, &owner_params), "owner thread_init failed");
+	cr_assert(thread_init(&waiter, &waiter_params), "waiter thread_init failed");
+	cr_assert(thread_init(&medium, &medium_params), "medium thread_init failed");
+
+	sched_set_current(cpu_current(), &owner);
+	cr_assert(mutex_try_lock(&mutex), "owner should acquire the mutex");
+	sched_set_current(cpu_current(), sched_idle_thread(cpu_current()));
+	cr_assert(sched_make_runnable(&owner), "owner should be queued before waiter blocks");
+	cr_assert(sched_make_runnable(&medium), "medium-priority work should be queued");
+
+	mutex_test_inheritance_mutex  = &mutex;
+	mutex_test_inheritance_owner  = &owner;
+	mutex_test_inheritance_waiter = &waiter;
+	hal_cpu_mock_set_context_switch_hook(mutex_test_inheritance_unlock_context_switch_hook);
+
+	sched_set_current(cpu_current(), &waiter);
+	cr_assert(mutex_timed_lock(&mutex, 10u), "high-priority waiter should acquire after owner unlocks");
+	cr_assert_eq(mutex_test_switch_hook_runs, 1u, "inheritance dispatch hook should run once");
+	cr_assert_eq(sched_current_thread(), &waiter, "waiter should resume after the inherited owner releases");
+	cr_assert(mutex_is_owned_by_current(&mutex), "waiter should own the mutex after waking");
+	cr_assert_eq(owner.effective_priority, owner.base_priority, "owner priority should restore after releasing mutex");
+	cr_assert(mutex_unlock(&mutex), "waiter should be able to release the mutex");
+
+	hal_clock_stop();
+	reset_test_state();
+}
+
+Test(mutex, timed_out_priority_waiter_restores_owner_effective_priority) {
+	const struct thread_create_params owner_params = {
+		.name              = "pi_timeout_owner",
+		.entry             = mutex_test_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x361000u,
+		.kernel_stack_top  = 0x365000u,
+		.preferred_cpu     = NULL,
+		.base_priority     = THREAD_PRIORITY_DEFAULT - 5,
+		.detached          = false,
+	};
+	const struct thread_create_params waiter_params = {
+		.name              = "pi_timeout_waiter",
+		.entry             = mutex_test_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x365000u,
+		.kernel_stack_top  = 0x369000u,
+		.preferred_cpu     = NULL,
+		.base_priority     = THREAD_PRIORITY_DEFAULT + 5,
+		.detached          = false,
+	};
+	const struct thread_create_params runner_params = {
+		.name              = "pi_timeout_runner",
+		.entry             = mutex_test_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x369000u,
+		.kernel_stack_top  = 0x36d000u,
+		.preferred_cpu     = NULL,
+		.base_priority     = THREAD_PRIORITY_DEFAULT,
+		.detached          = false,
+	};
+	struct mutex  mutex;
+	struct thread owner;
+	struct thread waiter;
+	struct thread runner;
+
+	init_bound_bootstrap_cpu();
+	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
+	cr_assert(hal_clock_start(1000u, NULL, NULL), "hal_clock_start failed");
+
+	mutex_init(&mutex);
+	cr_assert(thread_init(&owner, &owner_params), "owner thread_init failed");
+	cr_assert(thread_init(&waiter, &waiter_params), "waiter thread_init failed");
+	cr_assert(thread_init(&runner, &runner_params), "runner thread_init failed");
+
+	sched_set_current(cpu_current(), &owner);
+	cr_assert(mutex_try_lock(&mutex), "owner should acquire the mutex");
+	cr_assert(sched_make_runnable(&runner), "runner should become runnable during timed wait");
+
+	mutex_test_inheritance_owner  = &owner;
+	mutex_test_inheritance_waiter = &waiter;
+	hal_cpu_mock_set_context_switch_hook(mutex_test_inheritance_timeout_context_switch_hook);
+
+	sched_set_current(cpu_current(), &waiter);
+	cr_assert(!mutex_timed_lock(&mutex, 2u), "high-priority waiter should time out");
+	cr_assert_eq(mutex_test_switch_hook_runs, 1u, "timeout simulation hook should run once");
+	cr_assert_eq(mutex_waiter_count(&mutex), 0u, "timed-out waiter should leave the mutex wait queue");
+	cr_assert_eq(owner.effective_priority,
+	             owner.base_priority,
+	             "owner priority should restore after the high-priority waiter times out");
+
+	sched_set_current(cpu_current(), &owner);
+	cr_assert(mutex_unlock(&mutex), "owner should still be able to release the mutex");
+
+	hal_clock_stop();
 	reset_test_state();
 }
 

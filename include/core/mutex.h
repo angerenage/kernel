@@ -9,6 +9,7 @@ struct mutex {
 	struct spinlock          lock;
 	struct thread*           owner;
 	struct thread_wait_queue waiters;
+	struct mutex*            owner_next;
 };
 
 /* Reset the mutex to the unlocked state with no current owner or waiters. */
@@ -25,6 +26,9 @@ bool mutex_timed_lock(struct mutex* mutex, uint64_t timeout_ms);
 
 /* Release the mutex. Returns false when the current thread is not the owner. */
 bool mutex_unlock(struct mutex* mutex);
+
+/* Release a mutex already verified as owned by owner while mutex->lock is held. */
+bool mutex_release_locked(struct mutex* mutex, struct thread* owner);
 
 /* Return true while the mutex has a current owner. */
 bool mutex_is_locked(const struct mutex* mutex);
