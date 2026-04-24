@@ -18,14 +18,14 @@ static void* vaddr_worker(void* arg) {
 	test_barrier_wait(ctx->barrier);
 
 	for (size_t i = 0; i < VADDR_ALLOCS_PER_THREAD; i++) {
-		if (!vaddr_alloc_reserve(1, 1, &ctx->addrs[i])) {
+		if (!address_space_reserve(address_space_kernel(), 1, 1, &ctx->addrs[i])) {
 			ctx->ok = false;
 			return NULL;
 		}
 	}
 
 	for (size_t i = 0; i < VADDR_ALLOCS_PER_THREAD; i++) {
-		if (!vaddr_alloc_release(ctx->addrs[i], 1)) {
+		if (!address_space_release(address_space_kernel(), ctx->addrs[i], 1)) {
 			ctx->ok = false;
 			return NULL;
 		}
@@ -43,7 +43,7 @@ Test(vaddr_alloc, concurrent_reserve_release_preserves_free_space) {
 	size_t                  initial_free;
 
 	init_test_vaddr_alloc(arena, sizeof(arena), 0x30000000ull, 128);
-	initial_free = vaddr_alloc_free_page_count();
+	initial_free = address_space_free_page_count(address_space_kernel());
 
 	test_barrier_init(&barrier, VADDR_THREAD_COUNT);
 
@@ -62,5 +62,7 @@ Test(vaddr_alloc, concurrent_reserve_release_preserves_free_space) {
 		cr_assert(ctx[i].ok, "vaddr worker reported failure");
 	}
 
-	cr_assert_eq(vaddr_alloc_free_page_count(), initial_free, "vaddr allocator leaked pages under concurrency");
+	cr_assert_eq(address_space_free_page_count(address_space_kernel()),
+	             initial_free,
+	             "vaddr allocator leaked pages under concurrency");
 }

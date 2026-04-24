@@ -9,40 +9,55 @@ static void kernel_selftest_vaddr_alloc_reserves_releases_and_reuses_ranges(stru
 	uintptr_t first       = 0;
 	uintptr_t second      = 0;
 	uintptr_t reused      = 0;
-	size_t    free_before = vaddr_alloc_free_page_count();
-	size_t    total_pages = vaddr_alloc_total_page_count();
+	size_t    free_before = address_space_free_page_count(address_space_kernel());
+	size_t    total_pages = address_space_total_page_count(address_space_kernel());
 
-	KERNEL_SELFTEST_ASSERT_MSG(ctx, vaddr_alloc_is_initialized(), "vaddr allocator is not initialized");
+	KERNEL_SELFTEST_ASSERT_MSG(
+		ctx, address_space_is_initialized(address_space_kernel()), "kernel address space is not initialized");
 	KERNEL_SELFTEST_ASSERT_MSG(ctx, total_pages > 0u, "vaddr allocator reported zero pages");
 	KERNEL_SELFTEST_ASSERT(ctx, free_before <= total_pages);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, vaddr_alloc_reserve(2u, 1u, &first), "vaddr_alloc_reserve first range failed", cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+	                                address_space_reserve(address_space_kernel(), 2u, 1u, &first),
+	                                "address_space_reserve first range failed",
+	                                cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, first != 0u, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, vaddr_alloc_free_page_count() == free_before - 2u, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(
+		ctx, address_space_free_page_count(address_space_kernel()) == free_before - 2u, cleanup);
 
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, vaddr_alloc_reserve(4u, 4u, &second), "vaddr_alloc_reserve aligned range failed", cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+	                                address_space_reserve(address_space_kernel(), 4u, 4u, &second),
+	                                "address_space_reserve aligned range failed",
+	                                cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, second != 0u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, second != first, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, (second & ((uintptr_t)4u * (uintptr_t)PMM_PAGE_SIZE - 1u)) == 0u, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, vaddr_alloc_free_page_count() == free_before - 6u, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(
+		ctx, address_space_free_page_count(address_space_kernel()) == free_before - 6u, cleanup);
 
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, vaddr_alloc_release(first, 2u), "vaddr_alloc_release first range failed", cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+	                                address_space_release(address_space_kernel(), first, 2u),
+	                                "address_space_release first range failed",
+	                                cleanup);
 	first = 0u;
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, vaddr_alloc_free_page_count() == free_before - 4u, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(
+		ctx, address_space_free_page_count(address_space_kernel()) == free_before - 4u, cleanup);
 
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, vaddr_alloc_reserve(2u, 1u, &reused), "vaddr_alloc_reserve did not reuse a released range", cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+	                                address_space_reserve(address_space_kernel(), 2u, 1u, &reused),
+	                                "address_space_reserve did not reuse a released range",
+	                                cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, reused != 0u, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, vaddr_alloc_free_page_count() == free_before - 6u, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(
+		ctx, address_space_free_page_count(address_space_kernel()) == free_before - 6u, cleanup);
 
 cleanup:
-	if (reused != 0u) (void)vaddr_alloc_release(reused, 2u);
-	if (second != 0u) (void)vaddr_alloc_release(second, 4u);
-	if (first != 0u) (void)vaddr_alloc_release(first, 2u);
+	if (reused != 0u) (void)address_space_release(address_space_kernel(), reused, 2u);
+	if (second != 0u) (void)address_space_release(address_space_kernel(), second, 4u);
+	if (first != 0u) (void)address_space_release(address_space_kernel(), first, 2u);
 
-	if (ctx->failure_expr == NULL) KERNEL_SELFTEST_ASSERT(ctx, vaddr_alloc_free_page_count() == free_before);
+	if (ctx->failure_expr == NULL) {
+		KERNEL_SELFTEST_ASSERT(ctx, address_space_free_page_count(address_space_kernel()) == free_before);
+	}
 }
 
 static const struct kernel_selftest_case kernel_vaddr_alloc_selftests[] = {

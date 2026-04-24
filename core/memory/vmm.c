@@ -11,8 +11,8 @@
 #include <stdint.h>
 #include <string.h>
 
-#define VMM_WINDOW_BASE 0xffffffffa0000000ull
-#define VMM_WINDOW_SIZE 0x40000000ull
+#define VMM_WINDOW_BASE MM_KERNEL_VMM_BASE
+#define VMM_WINDOW_SIZE MM_KERNEL_VMM_SIZE
 #define VMM_INITIAL_ALLOCATION_CAPACITY 16u
 #define VMM_PAGE_ENTRY_MAPPED (uintptr_t)1u
 #define VMM_PAGE_ENTRY_ROLLBACK_KEEP (uintptr_t)2u
@@ -509,7 +509,7 @@ bool vmm_init(void) {
 		spinlock_unlock_irqrestore(&vmm_lock, state);
 		return false;
 	}
-	if (!vaddr_alloc_init((uintptr_t)VMM_WINDOW_BASE, window_pages)) {
+	if (!address_space_init(address_space_kernel(), (uintptr_t)VMM_WINDOW_BASE, window_pages)) {
 		spinlock_unlock_irqrestore(&vmm_lock, state);
 		return false;
 	}
@@ -556,20 +556,20 @@ bool vmm_alloc(const struct vmm_alloc_params* params, vmm_id_t* out_id, void** o
 	if (reserved_page_count == 0) return false;
 
 	state = spinlock_lock_irqsave(&vmm_lock);
-	if (!vaddr_alloc_reserve(reserved_page_count, align_pages, &reserved_base)) {
+	if (!address_space_reserve(address_space_kernel(), reserved_page_count, align_pages, &reserved_base)) {
 		spinlock_unlock_irqrestore(&vmm_lock, state);
 		return false;
 	}
 	base = reserved_base + guard_pages * (uintptr_t)PMM_PAGE_SIZE;
 	if (!ensure_allocation_capacity_locked()) {
-		(void)vaddr_alloc_release(reserved_base, reserved_page_count);
+		(void)address_space_release(address_space_kernel(), reserved_base, reserved_page_count);
 		spinlock_unlock_irqrestore(&vmm_lock, state);
 		return false;
 	}
 
 	allocation = find_free_allocation_slot_locked();
 	if (!allocation) {
-		(void)vaddr_alloc_release(reserved_base, reserved_page_count);
+		(void)address_space_release(address_space_kernel(), reserved_base, reserved_page_count);
 		spinlock_unlock_irqrestore(&vmm_lock, state);
 		return false;
 	}
@@ -588,7 +588,7 @@ bool vmm_alloc(const struct vmm_alloc_params* params, vmm_id_t* out_id, void** o
 	};
 
 	if ((params->map_flags & VMM_MAP_LAZY) == 0 && !map_allocation_locked(allocation)) {
-		(void)vaddr_alloc_release(reserved_base, reserved_page_count);
+		(void)address_space_release(address_space_kernel(), reserved_base, reserved_page_count);
 		memset(allocation, 0, sizeof(*allocation));
 		spinlock_unlock_irqrestore(&vmm_lock, state);
 		return false;
@@ -619,7 +619,7 @@ bool vmm_free(vmm_id_t id) {
 	}
 
 	release_allocation_backing_locked(allocation);
-	(void)vaddr_alloc_release(allocation->reserved_base, allocation->reserved_page_count);
+	(void)address_space_release(address_space_kernel(), allocation->reserved_base, allocation->reserved_page_count);
 	memset(allocation, 0, sizeof(*allocation));
 	allocation_count--;
 	spinlock_unlock_irqrestore(&vmm_lock, state);
@@ -644,7 +644,7 @@ bool vmm_free_at(void* base) {
 	}
 
 	release_allocation_backing_locked(allocation);
-	(void)vaddr_alloc_release(allocation->reserved_base, allocation->reserved_page_count);
+	(void)address_space_release(address_space_kernel(), allocation->reserved_base, allocation->reserved_page_count);
 	memset(allocation, 0, sizeof(*allocation));
 	allocation_count--;
 	spinlock_unlock_irqrestore(&vmm_lock, state);

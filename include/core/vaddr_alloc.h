@@ -1,29 +1,47 @@
 #pragma once
 
+#include <core/spinlock.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 /*
- * Bitmap allocator for reserving virtual address ranges inside a preselected
- * window. This layer only tracks address space ownership; it does not create
+ * Bitmap allocator for reserving virtual address ranges inside an address
+ * space window. This layer only tracks address ownership; it does not create
  * page-table mappings.
  */
 
-/* Initialize the allocator over [base, base + page_count * PMM_PAGE_SIZE). */
-bool vaddr_alloc_init(uintptr_t base, size_t page_count);
+struct address_space {
+	uintptr_t       base;
+	uint64_t*       bitmap;
+	uintptr_t       bitmap_phys;
+	size_t          bitmap_pages;
+	size_t          total_pages;
+	size_t          free_pages;
+	bool            initialized;
+	struct spinlock lock;
+};
 
-/* Return whether the allocator has been initialized. */
-bool vaddr_alloc_is_initialized(void);
+/* Initialize an address-space allocator over [base, base + page_count * PMM_PAGE_SIZE). */
+bool address_space_init(struct address_space* space, uintptr_t base, size_t page_count);
+
+/* Release allocator metadata and mark the address-space allocator uninitialized. */
+void address_space_deinit(struct address_space* space);
+
+/* Return whether an address-space allocator has been initialized. */
+bool address_space_is_initialized(const struct address_space* space);
 
 /* Reserve count consecutive virtual pages with the requested page alignment. */
-bool vaddr_alloc_reserve(size_t count, size_t align_pages, uintptr_t* out_base);
+bool address_space_reserve(struct address_space* space, size_t count, size_t align_pages, uintptr_t* out_base);
 
-/* Release a previously reserved page range back to the virtual window. */
-bool vaddr_alloc_release(uintptr_t base, size_t count);
+/* Release a previously reserved page range back to the address-space window. */
+bool address_space_release(struct address_space* space, uintptr_t base, size_t count);
 
-/* Total number of pages tracked by the allocator. */
-size_t vaddr_alloc_total_page_count(void);
+/* Total number of pages tracked by an address-space allocator. */
+size_t address_space_total_page_count(struct address_space* space);
 
-/* Number of currently unreserved pages in the virtual window. */
-size_t vaddr_alloc_free_page_count(void);
+/* Number of currently unreserved pages in an address-space allocator. */
+size_t address_space_free_page_count(struct address_space* space);
+
+/* Return the kernel address-space allocator. */
+struct address_space* address_space_kernel(void);

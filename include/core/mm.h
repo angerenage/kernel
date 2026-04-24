@@ -4,6 +4,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define MM_KERNEL_VMM_BASE 0xffffffffa0000000ull
+#define MM_KERNEL_VMM_SIZE 0x40000000ull
+#define MM_USER_NULL_GUARD_SIZE 0x1000ull
+#define MM_USER_VMM_BASE MM_USER_NULL_GUARD_SIZE
+#define MM_USER_VMM_SIZE 0x00007ffffff00000ull
+
 /* Boot-time memory-range classification imported from the boot protocol and reused by the physical allocator. */
 enum mem_range_type {
 	MEM_RANGE_USABLE = 0,
