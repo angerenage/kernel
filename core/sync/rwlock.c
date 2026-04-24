@@ -313,6 +313,31 @@ bool rwlock_write_unlock(struct rwlock* rwlock) {
 	return true;
 }
 
+bool rwlock_downgrade(struct rwlock* rwlock) {
+	struct irq_state state;
+	struct thread*   current;
+	bool             wake_readers = false;
+
+	if (rwlock == NULL) return false;
+
+	current = sched_current_thread();
+	if (current == NULL) return false;
+
+	state = spinlock_lock_irqsave(&rwlock->lock);
+	if (rwlock->writer != current) {
+		spinlock_unlock_irqrestore(&rwlock->lock, state);
+		return false;
+	}
+
+	rwlock->reader_count++;
+	rwlock->writer = NULL;
+	wake_readers   = rwlock_should_wake_readers_locked(rwlock);
+	spinlock_unlock_irqrestore(&rwlock->lock, state);
+
+	if (wake_readers) (void)sched_wake_all(&rwlock->readers);
+	return true;
+}
+
 size_t rwlock_reader_count(const struct rwlock* rwlock) {
 	struct irq_state state;
 	struct spinlock* lock;

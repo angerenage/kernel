@@ -95,7 +95,13 @@ Test(rwlock, init_try_paths_and_unlocks_track_state) {
 	cr_assert_eq(rwlock_reader_count(&rwlock), 0u, "reader count should drop back to zero");
 	cr_assert(rwlock_try_write_lock(&rwlock), "write try lock should acquire once readers leave");
 	cr_assert(!rwlock_try_read_lock(&rwlock), "new readers should be blocked while a writer owns the rwlock");
-	cr_assert(rwlock_write_unlock(&rwlock), "writer unlock should release the rwlock");
+	cr_assert(rwlock_downgrade(&rwlock), "writer should be able to downgrade to a read lock");
+	cr_assert_eq(rwlock_reader_count(&rwlock), 1u, "downgrade should publish one reader hold");
+	cr_assert(!rwlock_try_write_lock(&rwlock), "downgraded read hold should block writers");
+	cr_assert(rwlock_try_read_lock(&rwlock), "other readers should share a downgraded lock when no writer waits");
+	cr_assert_eq(rwlock_reader_count(&rwlock), 2u, "downgraded lock should count every reader hold");
+	cr_assert(rwlock_read_unlock(&rwlock), "extra reader unlock should succeed");
+	cr_assert(rwlock_read_unlock(&rwlock), "downgraded reader unlock should succeed");
 	cr_assert_eq(rwlock_reader_count(&rwlock), 0u, "rwlock should end without active readers");
 	cr_assert_eq(rwlock_waiter_count(&rwlock), 0u, "rwlock should end without waiters");
 
@@ -126,6 +132,7 @@ Test(rwlock, write_unlock_rejects_non_owner) {
 
 	sched_set_current(cpu_current(), sched_idle_thread(cpu_current()));
 	cr_assert(!rwlock_write_unlock(&rwlock), "non-owner write unlock should fail");
+	cr_assert(!rwlock_downgrade(&rwlock), "non-owner downgrade should fail");
 
 	sched_set_current(cpu_current(), &owner);
 	cr_assert(rwlock_write_unlock(&rwlock), "owner should still be able to release the write lock");

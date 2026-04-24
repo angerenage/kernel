@@ -43,6 +43,9 @@ bool rwlock_read_unlock(struct rwlock* rwlock);
 /* Release the exclusive writer hold. */
 bool rwlock_write_unlock(struct rwlock* rwlock);
 
+/* Convert the current writer hold into one shared reader hold. */
+bool rwlock_downgrade(struct rwlock* rwlock);
+
 /* Return the current number of active readers. */
 size_t rwlock_reader_count(const struct rwlock* rwlock);
 

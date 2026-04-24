@@ -488,6 +488,173 @@ cleanup:
 	kernel_selftest_clock_scope_end(&clock);
 }
 
+struct kernel_selftest_rwlock_downgrade_state {
+	struct rwlock  rwlock;
+	struct thread* downgrader_thread;
+	struct thread* writer_thread;
+	struct thread* reader_thread;
+	uint64_t       downgrade_deadline_tick;
+	uint64_t       read_deadline_tick;
+	uint64_t       writer_deadline_tick;
+	uint64_t       reader_deadline_tick;
+	bool           downgrader_acquired;
+	bool           downgrader_write_sleep_result;
+	bool           downgrader_downgraded;
+	bool           downgrader_read_sleep_result;
+	bool           downgrader_unlocked;
+	bool           writer_started;
+	bool           writer_acquired;
+	bool           writer_sleep_result;
+	bool           writer_unlocked;
+	bool           reader_started;
+	bool           reader_try_result;
+	bool           reader_acquired;
+	bool           reader_sleep_result;
+	bool           reader_unlocked;
+};
+
+static void kernel_selftest_rwlock_downgrader_worker(void* arg) {
+	struct kernel_selftest_rwlock_downgrade_state* state = arg;
+
+	if (state == NULL) return;
+
+	rwlock_write_lock(&state->rwlock);
+	state->downgrader_thread             = kthread_current();
+	state->downgrader_acquired           = true;
+	state->downgrade_deadline_tick       = sched_tick_count() + KERNEL_SELFTEST_RWLOCK_HOLD_TICKS;
+	state->downgrader_write_sleep_result = sched_sleep_until_tick(state->downgrade_deadline_tick);
+	state->downgrader_downgraded         = rwlock_downgrade(&state->rwlock);
+	state->read_deadline_tick            = sched_tick_count() + KERNEL_SELFTEST_RWLOCK_HOLD_TICKS;
+	state->downgrader_read_sleep_result  = sched_sleep_until_tick(state->read_deadline_tick);
+	state->downgrader_unlocked           = rwlock_read_unlock(&state->rwlock);
+}
+
+static void kernel_selftest_rwlock_downgrade_writer_worker(void* arg) {
+	struct kernel_selftest_rwlock_downgrade_state* state = arg;
+
+	if (state == NULL) return;
+
+	state->writer_thread  = kthread_current();
+	state->writer_started = true;
+	rwlock_write_lock(&state->rwlock);
+	state->writer_acquired      = true;
+	state->writer_deadline_tick = sched_tick_count() + KERNEL_SELFTEST_RWLOCK_HOLD_TICKS;
+	state->writer_sleep_result  = sched_sleep_until_tick(state->writer_deadline_tick);
+	state->writer_unlocked      = rwlock_write_unlock(&state->rwlock);
+}
+
+static void kernel_selftest_rwlock_downgrade_reader_worker(void* arg) {
+	struct kernel_selftest_rwlock_downgrade_state* state = arg;
+
+	if (state == NULL) return;
+
+	state->reader_thread     = kthread_current();
+	state->reader_started    = true;
+	state->reader_try_result = rwlock_try_read_lock(&state->rwlock);
+	if (!state->reader_try_result) rwlock_read_lock(&state->rwlock);
+	state->reader_acquired      = true;
+	state->reader_deadline_tick = sched_tick_count() + KERNEL_SELFTEST_RWLOCK_HOLD_TICKS;
+	state->reader_sleep_result  = sched_sleep_until_tick(state->reader_deadline_tick);
+	state->reader_unlocked      = rwlock_read_unlock(&state->rwlock);
+}
+
+static void kernel_selftest_rwlock_downgrade_preserves_waiting_writer_priority(struct kernel_selftest_context* ctx) {
+	struct kthread*                               downgrader = NULL;
+	struct kthread*                               writer     = NULL;
+	struct kthread*                               reader     = NULL;
+	struct kernel_selftest_rwlock_downgrade_state state      = {0};
+
+	rwlock_init(&state.rwlock);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx,
+		kernel_selftest_thread_create(
+			&downgrader, "selftest/rwlock-downgrader", kernel_selftest_rwlock_downgrader_worker, &state),
+		"failed to create rwlock downgrader",
+		cleanup);
+	sched_yield();
+
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx, state.downgrader_acquired, "downgrader never acquired the write lock", cleanup);
+
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx,
+		kernel_selftest_thread_create(
+			&writer, "selftest/rwlock-downgrade-writer", kernel_selftest_rwlock_downgrade_writer_worker, &state),
+		"failed to create rwlock downgrade writer",
+		cleanup);
+	sched_yield();
+
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.writer_started, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.writer_acquired, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, writer->thread.state == THREAD_STATE_BLOCKED, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, writer->thread.block_reason == THREAD_BLOCK_RWLOCK, cleanup);
+
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx,
+		kernel_selftest_thread_create(
+			&reader, "selftest/rwlock-downgrade-reader", kernel_selftest_rwlock_downgrade_reader_worker, &state),
+		"failed to create rwlock downgrade reader",
+		cleanup);
+	sched_yield();
+
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.reader_started, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.reader_try_result, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.reader_acquired, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_waiter_count(&state.rwlock) == 2u, cleanup);
+
+	kernel_selftest_advance_ticks_until(state.downgrade_deadline_tick);
+	kernel_selftest_dispatch_rounds(2u);
+
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.downgrader_write_sleep_result, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.downgrader_downgraded, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.writer_acquired, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.reader_acquired, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_reader_count(&state.rwlock) == 1u, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_waiter_count(&state.rwlock) == 2u, cleanup);
+
+	kernel_selftest_advance_ticks_until(state.read_deadline_tick);
+	kernel_selftest_dispatch_rounds(2u);
+
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.downgrader_read_sleep_result, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.downgrader_unlocked, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.writer_acquired, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.reader_acquired, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_reader_count(&state.rwlock) == 0u, cleanup);
+
+	kernel_selftest_advance_ticks_until(state.writer_deadline_tick);
+	kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
+
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.writer_sleep_result, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.writer_unlocked, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.reader_acquired, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.reader_unlocked, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&downgrader->thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&writer->thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&reader->thread), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_reader_count(&state.rwlock) == 0u, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, rwlock_waiter_count(&state.rwlock) == 0u, cleanup);
+
+cleanup:
+	for (size_t attempt = 0; attempt < KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS &&
+	                         (kernel_selftest_thread_is_live(downgrader) || kernel_selftest_thread_is_live(writer) ||
+	                          kernel_selftest_thread_is_live(reader));
+	     attempt++) {
+		kernel_selftest_advance_ticks_until(state.downgrade_deadline_tick);
+		kernel_selftest_advance_ticks_until(state.read_deadline_tick);
+		kernel_selftest_advance_ticks_until(state.writer_deadline_tick);
+		kernel_selftest_advance_ticks_until(state.reader_deadline_tick);
+		sched_yield();
+	}
+	if (ctx->failure_expr == NULL) {
+		if (downgrader != NULL) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&downgrader->thread));
+		if (writer != NULL) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&writer->thread));
+		if (reader != NULL) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&reader->thread));
+	}
+	kernel_selftest_thread_destroy(&reader);
+	kernel_selftest_thread_destroy(&writer);
+	kernel_selftest_thread_destroy(&downgrader);
+}
+
 static const struct kernel_selftest_case kernel_rwlock_selftests[] = {
 	{
      .name = "last_reader_wakes_writer_and_blocks_new_readers",
@@ -500,6 +667,10 @@ static const struct kernel_selftest_case kernel_rwlock_selftests[] = {
 	{
      .name = "timed_writer_timeout_wakes_blocked_readers",
      .run  = kernel_selftest_rwlock_timed_writer_timeout_wakes_blocked_readers,
+	 },
+	{
+     .name = "downgrade_preserves_waiting_writer_priority",
+     .run  = kernel_selftest_rwlock_downgrade_preserves_waiting_writer_priority,
 	 },
 };
 
