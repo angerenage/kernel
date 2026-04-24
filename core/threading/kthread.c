@@ -6,6 +6,7 @@
 #include <core/pmm.h>
 #include <core/sched.h>
 #include <core/spinlock.h>
+#include <core/vaddr_alloc.h>
 #include <core/vmm.h>
 #include <hal/clock.h>
 #include <stddef.h>
@@ -70,7 +71,7 @@ static void kthread_free(struct kthread* thread) {
 	if (thread == NULL) return;
 
 	if (thread->stack_id != VMM_ID_INVALID) {
-		(void)vmm_free(thread->stack_id);
+		(void)vmm_free(address_space_kernel(), thread->stack_id);
 		thread->stack_id = VMM_ID_INVALID;
 	}
 	kfree(thread);
@@ -221,7 +222,7 @@ static enum kthread_spawn_result kthread_spawn_internal(struct kthread** out_thr
 		.stack_pages = KTHREAD_DEFAULT_STACK_PAGES,
 	};
 
-	if (!vmm_alloc(&stack_params, &thread->stack_id, &stack_base)) {
+	if (!vmm_alloc(address_space_kernel(), &stack_params, &thread->stack_id, &stack_base)) {
 		kthread_free(thread);
 		return KTHREAD_SPAWN_STACK_ALLOC_FAILED;
 	}

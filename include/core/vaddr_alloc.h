@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+struct vmm_alloc_record;
+
 /*
  * Bitmap allocator for reserving virtual address ranges inside an address
  * space window. This layer only tracks address ownership; it does not create
@@ -12,14 +14,20 @@
  */
 
 struct address_space {
-	uintptr_t       base;
-	uint64_t*       bitmap;
-	uintptr_t       bitmap_phys;
-	size_t          bitmap_pages;
-	size_t          total_pages;
-	size_t          free_pages;
-	bool            initialized;
-	struct spinlock lock;
+	uintptr_t                base;
+	uint64_t*                bitmap;
+	uintptr_t                bitmap_phys;
+	size_t                   bitmap_pages;
+	size_t                   total_pages;
+	size_t                   free_pages;
+	struct vmm_alloc_record* allocations;
+	uintptr_t                allocations_phys;
+	size_t                   allocations_page_count;
+	size_t                   allocations_capacity;
+	size_t                   allocation_count;
+	uint64_t                 next_allocation_id;
+	bool                     initialized;
+	struct spinlock          lock;
 };
 
 /* Initialize an address-space allocator over [base, base + page_count * PMM_PAGE_SIZE). */

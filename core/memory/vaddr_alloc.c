@@ -109,6 +109,7 @@ bool address_space_init(struct address_space* space, uintptr_t base, size_t page
 
 	space->total_pages = page_count;
 	space->free_pages  = page_count;
+	if (space->next_allocation_id == 0u) space->next_allocation_id = 1u;
 	space->initialized = true;
 	spinlock_unlock(&space->lock);
 	return true;

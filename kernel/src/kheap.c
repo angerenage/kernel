@@ -1,4 +1,5 @@
 #include <core/kheap.h>
+#include <core/vaddr_alloc.h>
 #include <core/vmm.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -13,5 +14,5 @@ bool kheap_grow_pages(size_t page_count, void** out_base) {
 		.map_flags   = 0u,
 	};
 
-	return vmm_alloc(&params, NULL, out_base);
+	return vmm_alloc(address_space_kernel(), &params, NULL, out_base);
 }
