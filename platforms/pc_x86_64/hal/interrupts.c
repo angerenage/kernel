@@ -1,5 +1,6 @@
 #include <core/cpu.h>
 #include <core/sched.h>
+#include <core/syscall.h>
 #include <core/vaddr_alloc.h>
 #include <core/vmm.h>
 #include <hal/hcf.h>
@@ -17,6 +18,9 @@
 #define X86_GDT_TSS_SELECTOR 0x18u
 #define X86_EXCEPTION_STACK_SIZE 0x4000u
 #define X86_EXCEPTION_IST_INDEX 1u
+#define X86_SYSCALL_VECTOR 0x80u
+#define X86_IDT_INTERRUPT_GATE 0x8eu
+#define X86_IDT_USER_INTERRUPT_GATE 0xeeu
 
 static bool x86_page_fault_is_not_present(uint64_t error_code) {
 	return (error_code & 0x1u) == 0;
@@ -180,14 +184,14 @@ static void x86_setup_exception_stack(size_t cpu_index) {
 	x86_load_segments_and_tss(cpu_index);
 }
 
-static void idt_set_entry(unsigned vector, void (*handler)(void)) {
+static void idt_set_entry(unsigned vector, void (*handler)(void), uint8_t type_attributes) {
 	uint64_t address = (uint64_t)(uintptr_t)handler;
 
 	idt[vector] = (struct idt_entry){
 		.offset_low      = (uint16_t)(address & 0xffffu),
 		.selector        = kernel_code_selector,
 		.ist             = X86_EXCEPTION_IST_INDEX,
-		.type_attributes = 0x8eu,
+		.type_attributes = type_attributes,
 		.offset_mid      = (uint16_t)((address >> 16) & 0xffffu),
 		.offset_high     = (uint32_t)(address >> 32),
 		.reserved        = 0u,
@@ -200,8 +204,9 @@ bool hal_interrupts_init_global(void) {
 	kernel_code_selector = X86_GDT_KERNEL_CODE_SELECTOR;
 
 	for (unsigned vector = 0; vector < 256; vector++) {
-		idt_set_entry(vector, x86_64_interrupt_stub_table[vector]);
+		idt_set_entry(vector, x86_64_interrupt_stub_table[vector], X86_IDT_INTERRUPT_GATE);
 	}
+	idt_set_entry(X86_SYSCALL_VECTOR, x86_64_interrupt_stub_table[X86_SYSCALL_VECTOR], X86_IDT_USER_INTERRUPT_GATE);
 
 	struct idtr idtr = {
 		.limit = (uint16_t)(sizeof(idt) - 1u),
@@ -245,11 +250,19 @@ void x86_64_maybe_preempt_on_interrupt_exit(void) {
 	(void)sched_handle_interrupt_exit();
 }
 
-void x86_64_handle_interrupt(const struct interrupt_frame* frame) {
+static bool x86_64_handle_syscall(struct interrupt_frame* frame) {
+	if (frame->vector != X86_SYSCALL_VECTOR) return false;
+
+	frame->rax = syscall_dispatch(frame->rax, frame->rdi, frame->rsi, frame->rdx, frame->rcx, frame->r8, frame->r9);
+	return true;
+}
+
+void x86_64_handle_interrupt(struct interrupt_frame* frame) {
 	unsigned long long vector = frame->vector;
 	uint64_t           fault_addr;
 	bool               trap_context = !is_external_irq(vector);
 
+	if (x86_64_handle_syscall(frame)) return;
 	if (trap_context) cpu_enter_exception();
 	if (vector == X86_LAPIC_WAKE_VECTOR) {
 		apic_send_eoi();

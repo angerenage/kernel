@@ -1,5 +1,6 @@
 #include <core/cpu.h>
 #include <core/sched.h>
+#include <core/syscall.h>
 #include <core/vaddr_alloc.h>
 #include <core/vmm.h>
 #include <hal/hcf.h>
@@ -143,6 +144,14 @@ static bool is_translation_fault(uint64_t dfsc) {
 	return dfsc >= 0x04 && dfsc <= 0x07;
 }
 
+static bool aarch64_handle_syscall(struct exception_frame* frame, uint64_t ec) {
+	if ((frame->vector & 0xfu) != 8u || ec != 0x15u) return false;
+
+	frame->x[0] =
+		syscall_dispatch(frame->x[8], frame->x[0], frame->x[1], frame->x[2], frame->x[3], frame->x[4], frame->x[5]);
+	return true;
+}
+
 static const char* abort_dfsc_name(uint64_t dfsc) {
 	switch (dfsc) {
 	case 0x00:
@@ -235,16 +244,17 @@ void aarch64_maybe_preempt_on_interrupt_exit(void) {
 	(void)sched_handle_interrupt_exit();
 }
 
-void handle_exception(const struct exception_frame* frame) {
-	bool is_irq = (frame->vector & 0x3u) == 1u;
+void handle_exception(struct exception_frame* frame) {
+	bool     is_irq = (frame->vector & 0x3u) == 1u;
+	uint64_t ec     = (frame->esr >> 26) & 0x3fu;
 
+	if (aarch64_handle_syscall(frame, ec)) return;
 	if (!is_irq) cpu_enter_exception();
 	if (clock_handle_irq(frame)) {
 		if (!is_irq) cpu_leave_exception();
 		return;
 	}
 
-	uint64_t ec  = (frame->esr >> 26) & 0x3fu;
 	uint64_t iss = frame->esr & 0x01ffffffu;
 
 	uint64_t dfsc  = iss & 0x3fu;

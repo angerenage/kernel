@@ -128,6 +128,8 @@ exception_entry:
 	ld.d $r31, $sp, 248
 	ld.d $r13, $sp, 104
 	ld.d $r12, $sp, 96
+	ld.d $t0, $sp, 264
+	csrwr $t0, 0x6
 
 	ld.d $sp, $sp, 24
 	ertn
