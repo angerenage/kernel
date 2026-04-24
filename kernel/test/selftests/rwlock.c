@@ -627,6 +627,10 @@ static void kernel_selftest_rwlock_downgrade_preserves_waiting_writer_priority(s
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.writer_sleep_result, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.writer_unlocked, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.reader_acquired, cleanup);
+
+	kernel_selftest_advance_ticks_until(state.reader_deadline_tick);
+	kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
+
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.reader_unlocked, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&downgrader->thread), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, thread_is_terminated(&writer->thread), cleanup);
