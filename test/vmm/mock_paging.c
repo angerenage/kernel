@@ -73,6 +73,7 @@ bool hal_paging_map(uintptr_t virt, uintptr_t phys, uint64_t flags) {
 	uintptr_t page_base = virt & ~(uintptr_t)(PMM_PAGE_SIZE - 1u);
 
 	if (!initialized) return false;
+	if ((flags & ~HAL_PAGE_VALID_MASK) != 0) return false;
 	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	if ((phys & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	if (find_mapping(virt) != NULL) return false;

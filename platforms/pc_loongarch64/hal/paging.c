@@ -24,6 +24,8 @@
 #define LOONGARCH_PTE_V (1ull << 0)
 #define LOONGARCH_PTE_D (1ull << 1)
 #define LOONGARCH_PTE_PLV0 (0ull << 2)
+#define LOONGARCH_PTE_PLV3 (3ull << 2)
+#define LOONGARCH_PTE_PLV_MASK (3ull << 2)
 #define LOONGARCH_PTE_MAT_SHIFT 4u
 #define LOONGARCH_PTE_G (1ull << 6)
 #define LOONGARCH_PTE_P (1ull << 7)
@@ -131,9 +133,10 @@ static inline uint64_t loongarch_root_phys(uintptr_t virt) {
 }
 
 static inline uint64_t loongarch_common_flags(uint64_t flags) {
-	uint64_t entry = LOONGARCH_PTE_PLV0 | LOONGARCH_PTE_P | LOONGARCH_PTE_V;
+	uint64_t entry = LOONGARCH_PTE_P | LOONGARCH_PTE_V;
 	uint64_t mat   = ((flags & HAL_PAGE_NO_CACHE) != 0) ? 0ull : (uint64_t)LOONGARCH_CRMD_CC;
 
+	entry |= ((flags & HAL_PAGE_USER) != 0) ? LOONGARCH_PTE_PLV3 : LOONGARCH_PTE_PLV0;
 	entry |= mat << LOONGARCH_PTE_MAT_SHIFT;
 	if ((flags & HAL_PAGE_WRITE) != 0) entry |= LOONGARCH_PTE_W | LOONGARCH_PTE_D;
 	if ((flags & HAL_PAGE_EXEC) == 0) entry |= LOONGARCH_PTE_NX;
@@ -226,6 +229,7 @@ bool hal_paging_map(uintptr_t virt, uintptr_t phys, uint64_t flags) {
 	struct irq_state state;
 
 	if (!initialized) return false;
+	if ((flags & ~HAL_PAGE_VALID_MASK) != 0) return false;
 	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	if ((phys & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	state = spinlock_lock_irqsave(&paging_lock);
@@ -297,6 +301,7 @@ bool hal_paging_query(uintptr_t virt, uintptr_t* out_phys, uint64_t* out_flags) 
 	if ((entry & LOONGARCH_PTE_NX) == 0) flags |= HAL_PAGE_EXEC;
 	if ((entry & LOONGARCH_PTE_G) != 0) flags |= HAL_PAGE_GLOBAL;
 	if ((((entry >> LOONGARCH_PTE_MAT_SHIFT) & 0x3u) != LOONGARCH_CRMD_CC)) flags |= HAL_PAGE_NO_CACHE;
+	if ((entry & LOONGARCH_PTE_PLV_MASK) == LOONGARCH_PTE_PLV3) flags |= HAL_PAGE_USER;
 	if (out_flags) *out_flags = flags;
 
 	spinlock_unlock_irqrestore(&paging_lock, state);

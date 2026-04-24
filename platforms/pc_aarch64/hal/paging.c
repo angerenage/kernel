@@ -14,7 +14,9 @@
 #define AARCH64_ATTR_MASK (7ull << 2)
 #define AARCH64_AP_MASK (3ull << 6)
 #define AARCH64_AP_RW_EL1 (0ull << 6)
+#define AARCH64_AP_RW_EL0 (1ull << 6)
 #define AARCH64_AP_RO_EL1 (2ull << 6)
+#define AARCH64_AP_RO_EL0 (3ull << 6)
 #define AARCH64_SH_MASK (3ull << 8)
 #define AARCH64_AF (1ull << 10)
 #define AARCH64_NG (1ull << 11)
@@ -185,10 +187,18 @@ static uint64_t aarch64_leaf_flags(uint64_t flags) {
 	uint64_t entry = normal_attrs_template;
 
 	entry &= ~(AARCH64_AP_MASK | AARCH64_NG | AARCH64_PXN | AARCH64_UXN | AARCH64_ATTR_MASK);
-	entry |= AARCH64_AF | AARCH64_UXN;
-	entry |= ((flags & HAL_PAGE_WRITE) != 0) ? AARCH64_AP_RW_EL1 : AARCH64_AP_RO_EL1;
+	entry |= AARCH64_AF;
+	if ((flags & HAL_PAGE_USER) != 0) {
+		entry |= ((flags & HAL_PAGE_WRITE) != 0) ? AARCH64_AP_RW_EL0 : AARCH64_AP_RO_EL0;
+		entry |= AARCH64_PXN;
+		if ((flags & HAL_PAGE_EXEC) == 0) entry |= AARCH64_UXN;
+	}
+	else {
+		entry |= ((flags & HAL_PAGE_WRITE) != 0) ? AARCH64_AP_RW_EL1 : AARCH64_AP_RO_EL1;
+		entry |= AARCH64_UXN;
+		if ((flags & HAL_PAGE_EXEC) == 0) entry |= AARCH64_PXN;
+	}
 	entry |= ((flags & HAL_PAGE_GLOBAL) != 0) ? 0ull : AARCH64_NG;
-	entry |= ((flags & HAL_PAGE_EXEC) != 0) ? 0ull : AARCH64_PXN;
 
 	if ((flags & HAL_PAGE_NO_CACHE) != 0) {
 		entry &= ~(AARCH64_ATTR_MASK | AARCH64_SH_MASK);
@@ -225,6 +235,7 @@ bool hal_paging_map(uintptr_t virt, uintptr_t phys, uint64_t flags) {
 	struct irq_state state;
 
 	if (!initialized) return false;
+	if ((flags & ~HAL_PAGE_VALID_MASK) != 0) return false;
 	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	if ((phys & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	state = spinlock_lock_irqsave(&paging_lock);
@@ -287,8 +298,18 @@ bool hal_paging_query(uintptr_t virt, uintptr_t* out_phys, uint64_t* out_flags) 
 	page_mask = (1ull << shift) - 1u;
 	if (out_phys) *out_phys = (uintptr_t)((entry & AARCH64_ADDR_MASK) | ((uint64_t)virt & page_mask));
 
-	if ((entry & AARCH64_AP_MASK) == AARCH64_AP_RW_EL1) flags |= HAL_PAGE_WRITE;
-	if ((entry & AARCH64_PXN) == 0) flags |= HAL_PAGE_EXEC;
+	if ((entry & AARCH64_AP_MASK) == AARCH64_AP_RW_EL1 || (entry & AARCH64_AP_MASK) == AARCH64_AP_RW_EL0) {
+		flags |= HAL_PAGE_WRITE;
+	}
+	if ((entry & AARCH64_AP_MASK) == AARCH64_AP_RW_EL0 || (entry & AARCH64_AP_MASK) == AARCH64_AP_RO_EL0) {
+		flags |= HAL_PAGE_USER;
+	}
+	if ((flags & HAL_PAGE_USER) != 0) {
+		if ((entry & AARCH64_UXN) == 0) flags |= HAL_PAGE_EXEC;
+	}
+	else if ((entry & AARCH64_PXN) == 0) {
+		flags |= HAL_PAGE_EXEC;
+	}
 	if ((entry & AARCH64_NG) == 0) flags |= HAL_PAGE_GLOBAL;
 	if ((entry & AARCH64_ATTR_MASK) == AARCH64_DEVICE_ATTR) flags |= HAL_PAGE_NO_CACHE;
 	if (out_flags) *out_flags = flags;

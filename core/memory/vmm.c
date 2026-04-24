@@ -50,7 +50,14 @@ static inline void* hhdm_phys_to_virt(uintptr_t phys) {
 }
 
 static inline uint64_t vmm_prot_to_hal_flags(vmm_prot_t prot) {
-	return (uint64_t)(prot & (VMM_PROT_WRITE | VMM_PROT_EXEC | VMM_PROT_GLOBAL | VMM_PROT_NO_CACHE));
+	uint64_t flags = 0;
+
+	if ((prot & VMM_PROT_WRITE) != 0) flags |= HAL_PAGE_WRITE;
+	if ((prot & VMM_PROT_EXEC) != 0) flags |= HAL_PAGE_EXEC;
+	if ((prot & VMM_PROT_GLOBAL) != 0) flags |= HAL_PAGE_GLOBAL;
+	if ((prot & VMM_PROT_NO_CACHE) != 0) flags |= HAL_PAGE_NO_CACHE;
+	if ((prot & VMM_PROT_USER) != 0) flags |= HAL_PAGE_USER;
+	return flags;
 }
 
 static inline bool vmm_prot_is_valid(vmm_prot_t prot) {

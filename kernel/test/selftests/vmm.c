@@ -330,6 +330,45 @@ cleanup:
 	}
 }
 
+static void kernel_selftest_vmm_translates_user_protection(struct kernel_selftest_context* ctx) {
+	struct vmm_alloc_params params = {
+		.page_count  = 1,
+		.align_pages = 1,
+		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
+		.kind        = VMM_KIND_GENERIC,
+	};
+	struct vmm_info info;
+	vmm_id_t        alloc_id     = VMM_ID_INVALID;
+	void*           base         = NULL;
+	uint64_t        flags        = 0;
+	size_t          free_before  = pmm_free_page_count();
+	size_t          count_before = vmm_count();
+
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx, vmm_alloc(&params, &alloc_id, &base), "user vmm_alloc returned false", cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, alloc_id != VMM_ID_INVALID, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, base != NULL, cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, vmm_query_id(alloc_id, &info), "vmm_query_id returned false", cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, info.prot == params.prot, cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx, hal_paging_query((uintptr_t)base, NULL, &flags), "hal_paging_query returned false", cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, flags == (uint64_t)(HAL_PAGE_WRITE | HAL_PAGE_USER), cleanup);
+
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx, vmm_protect(alloc_id, VMM_PROT_READ | VMM_PROT_WRITE), "vmm_protect returned false", cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx, hal_paging_query((uintptr_t)base, NULL, &flags), "hal_paging_query returned false after protect", cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, flags == (uint64_t)HAL_PAGE_WRITE, cleanup);
+
+cleanup:
+	if (alloc_id != VMM_ID_INVALID) (void)vmm_free(alloc_id);
+
+	if (ctx->failure_expr == NULL) {
+		KERNEL_SELFTEST_ASSERT(ctx, vmm_count() == count_before);
+		KERNEL_SELFTEST_ASSERT(ctx, pmm_free_page_count() == free_before);
+	}
+}
+
 static const struct kernel_selftest_case kernel_vmm_selftests[] = {
 	{
      .name = "allocates_queries_and_frees_mapped_ranges",
@@ -354,6 +393,10 @@ static const struct kernel_selftest_case kernel_vmm_selftests[] = {
 	{
      .name = "rejects_invalid_inputs_and_non_lazy_fault_resolution",
      .run  = kernel_selftest_vmm_rejects_invalid_inputs_and_non_lazy_fault_resolution,
+	 },
+	{
+     .name = "translates_user_protection",
+     .run  = kernel_selftest_vmm_translates_user_protection,
 	 },
 };
 

@@ -342,6 +342,39 @@ Test(vmm, rejects_invalid_protection_masks) {
 	cr_assert(vmm_free(alloc_id), "vmm_free failed after invalid protection tests");
 }
 
+Test(vmm, maps_and_reprotects_user_pages_distinct_from_kernel_pages) {
+	_Alignas(4096) uint8_t  arena[KiB(256)];
+	struct vmm_alloc_params params = {
+		.page_count  = 1,
+		.align_pages = 1,
+		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
+		.kind        = VMM_KIND_GENERIC,
+	};
+	struct vmm_info info;
+	vmm_id_t        alloc_id = VMM_ID_INVALID;
+	void*           base     = NULL;
+	uint64_t        flags    = 0;
+
+	init_test_vmm(arena, sizeof(arena));
+
+	cr_assert(vmm_alloc(&params, &alloc_id, &base), "vmm_alloc failed for a user mapping");
+	cr_assert(vmm_query_id(alloc_id, &info), "vmm_query_id failed for user mapping");
+	cr_assert_eq(info.prot, params.prot, "vmm_query_id lost the user protection bit");
+	cr_assert(hal_paging_query((uintptr_t)base, NULL, &flags), "hal_paging_query failed for user mapping");
+	cr_assert_eq(flags, (uint64_t)(HAL_PAGE_WRITE | HAL_PAGE_USER), "user mapping flags were not translated");
+
+	cr_assert(vmm_protect(alloc_id, VMM_PROT_READ | VMM_PROT_WRITE), "vmm_protect failed to clear user access");
+	cr_assert(hal_paging_query((uintptr_t)base, NULL, &flags), "hal_paging_query failed after clearing user access");
+	cr_assert_eq(flags, (uint64_t)HAL_PAGE_WRITE, "kernel-only mapping still reported user access");
+
+	cr_assert(vmm_protect(alloc_id, VMM_PROT_READ | VMM_PROT_EXEC | VMM_PROT_USER),
+	          "vmm_protect failed to restore user access");
+	cr_assert(hal_paging_query((uintptr_t)base, NULL, &flags), "hal_paging_query failed after restoring user access");
+	cr_assert_eq(flags, (uint64_t)(HAL_PAGE_EXEC | HAL_PAGE_USER), "user exec mapping flags were not translated");
+
+	cr_assert(vmm_free(alloc_id), "vmm_free failed for user mapping");
+}
+
 Test(vmm, rejects_guard_pages_for_non_stack_allocations) {
 	_Alignas(4096) uint8_t  arena[KiB(256)];
 	struct vmm_alloc_params params = {

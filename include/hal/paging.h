@@ -14,7 +14,11 @@ enum hal_page_flags {
 	HAL_PAGE_EXEC     = 1u << 1,
 	HAL_PAGE_GLOBAL   = 1u << 2,
 	HAL_PAGE_NO_CACHE = 1u << 3,
+	HAL_PAGE_USER     = 1u << 4,
 };
+
+#define HAL_PAGE_VALID_MASK                                                                                            \
+	((uint64_t)(HAL_PAGE_WRITE | HAL_PAGE_EXEC | HAL_PAGE_GLOBAL | HAL_PAGE_NO_CACHE | HAL_PAGE_USER))
 
 /* Validate that the currently active page-table root can be queried and updated through this HAL backend. */
 bool hal_paging_init(void);

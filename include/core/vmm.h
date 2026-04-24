@@ -19,10 +19,11 @@ enum vmm_prot_flag {
 	VMM_PROT_GLOBAL   = 1u << 2,
 	VMM_PROT_NO_CACHE = 1u << 3,
 	VMM_PROT_READ     = 1u << 4,
+	VMM_PROT_USER     = 1u << 5,
 };
 
 #define VMM_PROT_VALID_MASK                                                                                            \
-	((vmm_prot_t)(VMM_PROT_WRITE | VMM_PROT_EXEC | VMM_PROT_GLOBAL | VMM_PROT_NO_CACHE | VMM_PROT_READ))
+	((vmm_prot_t)(VMM_PROT_WRITE | VMM_PROT_EXEC | VMM_PROT_GLOBAL | VMM_PROT_NO_CACHE | VMM_PROT_READ | VMM_PROT_USER))
 
 enum vmm_kind {
 	VMM_KIND_GENERIC = 0,

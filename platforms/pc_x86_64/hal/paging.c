@@ -11,6 +11,7 @@
 
 #define X86_PTE_PRESENT (1ull << 0)
 #define X86_PTE_WRITE (1ull << 1)
+#define X86_PTE_USER (1ull << 2)
 #define X86_PTE_PWT (1ull << 3)
 #define X86_PTE_PCD (1ull << 4)
 #define X86_PTE_LARGE (1ull << 7)
@@ -50,6 +51,7 @@ static inline uint64_t x86_leaf_flags(uint64_t flags) {
 	if ((flags & HAL_PAGE_EXEC) == 0) entry |= X86_PTE_NX;
 	if ((flags & HAL_PAGE_GLOBAL) != 0) entry |= X86_PTE_GLOBAL;
 	if ((flags & HAL_PAGE_NO_CACHE) != 0) entry |= X86_PTE_PCD;
+	if ((flags & HAL_PAGE_USER) != 0) entry |= X86_PTE_USER;
 
 	return entry;
 }
@@ -65,7 +67,7 @@ static inline int x86_paging_levels(void) {
 	return (x86_read_cr4() & X86_CR4_LA57) != 0 ? 5 : 4;
 }
 
-static bool x86_walk_to_leaf(uintptr_t virt, bool create, uint64_t** out_table, size_t* out_index) {
+static bool x86_walk_to_leaf(uintptr_t virt, bool create, bool user, uint64_t** out_table, size_t* out_index) {
 	uint64_t* table  = x86_root_table();
 	int       levels = x86_paging_levels();
 
@@ -85,10 +87,15 @@ static bool x86_walk_to_leaf(uintptr_t virt, bool create, uint64_t** out_table, 
 			next_table = (uint64_t*)hhdm_phys_to_virt(next_phys);
 			memset(next_table, 0, PMM_PAGE_SIZE);
 			table[index] = (uint64_t)next_phys | X86_PTE_PRESENT | X86_PTE_WRITE;
-			entry        = table[index];
+			if (user) table[index] |= X86_PTE_USER;
+			entry = table[index];
 		}
 		else if ((entry & X86_PTE_LARGE) != 0) {
 			return false;
+		}
+		else if (user && (entry & X86_PTE_USER) == 0) {
+			table[index] = entry | X86_PTE_USER;
+			entry        = table[index];
 		}
 
 		table = (uint64_t*)hhdm_phys_to_virt((uintptr_t)(entry & X86_PHYS_MASK));
@@ -113,10 +120,11 @@ bool hal_paging_map(uintptr_t virt, uintptr_t phys, uint64_t flags) {
 	struct irq_state state;
 
 	if (!initialized) return false;
+	if ((flags & ~HAL_PAGE_VALID_MASK) != 0) return false;
 	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	if ((phys & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	state = spinlock_lock_irqsave(&paging_lock);
-	if (!x86_walk_to_leaf(virt, true, &table, &index)) {
+	if (!x86_walk_to_leaf(virt, true, (flags & HAL_PAGE_USER) != 0, &table, &index)) {
 		spinlock_unlock_irqrestore(&paging_lock, state);
 		return false;
 	}
@@ -139,7 +147,7 @@ bool hal_paging_unmap(uintptr_t virt) {
 	if (!initialized) return false;
 	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	state = spinlock_lock_irqsave(&paging_lock);
-	if (!x86_walk_to_leaf(virt, false, &table, &index)) {
+	if (!x86_walk_to_leaf(virt, false, false, &table, &index)) {
 		spinlock_unlock_irqrestore(&paging_lock, state);
 		return false;
 	}
@@ -167,7 +175,7 @@ bool hal_paging_query(uintptr_t virt, uintptr_t* out_phys, uint64_t* out_flags) 
 
 	if (!initialized) return false;
 	state = spinlock_lock_irqsave(&paging_lock);
-	if (!x86_walk_to_leaf(virt, false, &table, &index)) {
+	if (!x86_walk_to_leaf(virt, false, false, &table, &index)) {
 		spinlock_unlock_irqrestore(&paging_lock, state);
 		return false;
 	}
@@ -182,6 +190,7 @@ bool hal_paging_query(uintptr_t virt, uintptr_t* out_phys, uint64_t* out_flags) 
 	if ((entry & X86_PTE_NX) == 0) flags |= HAL_PAGE_EXEC;
 	if ((entry & X86_PTE_GLOBAL) != 0) flags |= HAL_PAGE_GLOBAL;
 	if ((entry & (X86_PTE_PCD | X86_PTE_PWT)) != 0) flags |= HAL_PAGE_NO_CACHE;
+	if ((entry & X86_PTE_USER) != 0) flags |= HAL_PAGE_USER;
 
 	if (out_phys) {
 		uint64_t phys;

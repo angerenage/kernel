@@ -12,6 +12,7 @@
 #define RISCV_PTE_R (1ull << 1)
 #define RISCV_PTE_W (1ull << 2)
 #define RISCV_PTE_X (1ull << 3)
+#define RISCV_PTE_U (1ull << 4)
 #define RISCV_PTE_G (1ull << 5)
 #define RISCV_PTE_A (1ull << 6)
 #define RISCV_PTE_D (1ull << 7)
@@ -53,6 +54,7 @@ static inline uint64_t riscv_leaf_flags(uint64_t flags) {
 	if ((flags & HAL_PAGE_WRITE) != 0) entry |= RISCV_PTE_W | RISCV_PTE_D;
 	if ((flags & HAL_PAGE_EXEC) != 0) entry |= RISCV_PTE_X;
 	if ((flags & HAL_PAGE_GLOBAL) != 0) entry |= RISCV_PTE_G;
+	if ((flags & HAL_PAGE_USER) != 0) entry |= RISCV_PTE_U;
 
 	return entry;
 }
@@ -128,6 +130,7 @@ bool hal_paging_map(uintptr_t virt, uintptr_t phys, uint64_t flags) {
 	struct irq_state state;
 
 	if (!initialized) return false;
+	if ((flags & ~HAL_PAGE_VALID_MASK) != 0) return false;
 	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	if ((phys & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	state = spinlock_lock_irqsave(&paging_lock);
@@ -196,6 +199,7 @@ bool hal_paging_query(uintptr_t virt, uintptr_t* out_phys, uint64_t* out_flags) 
 	if ((entry & RISCV_PTE_W) != 0) flags |= HAL_PAGE_WRITE;
 	if ((entry & RISCV_PTE_X) != 0) flags |= HAL_PAGE_EXEC;
 	if ((entry & RISCV_PTE_G) != 0) flags |= HAL_PAGE_GLOBAL;
+	if ((entry & RISCV_PTE_U) != 0) flags |= HAL_PAGE_USER;
 	if (out_flags) *out_flags = flags;
 
 	spinlock_unlock_irqrestore(&paging_lock, state);
