@@ -7,6 +7,7 @@ platform_kernel_c_args += [
 platform_kernel_objects += [
 	clang_loongarch64_elf.process(files('entry.asm')),
 	clang_loongarch64_elf.process(files('interrupts.asm')),
+	clang_loongarch64_elf.process(files('hal/userspace.asm')),
 	clang_loongarch64_elf.process(files('thread.asm')),
 	files('hal/cpu.c'),
 	files('hal/clock.c'),
@@ -15,4 +16,5 @@ platform_kernel_objects += [
 	files('hal/paging.c'),
 	files('hal/serial.c'),
 	files('hal/syscall.c'),
+	files('hal/userspace.c'),
 ]
