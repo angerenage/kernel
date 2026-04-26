@@ -227,7 +227,7 @@ Build-time control uses three options:
 - `--kernel-selftests-autorun` writes `kernel.selftest=1` into the generated image command line so they run automatically on boot
 - `--kernel-selftests-suite <name>` writes `kernel.selftest.suite=<name>` into the generated image command line and limits autorun to that suite
 
-The kernel runs selftests immediately after `pmm`, `vmm`, and `kheap` initialization, prints per-test results to serial, and emits a final `kernel: selftests result: PASS` or `FAIL` marker for automation.
+The kernel runs selftests immediately after `pmm`, `vmm`, and `kheap` initialization, prints per-test results to serial, and emits a final `selftest: result: PASS` or `FAIL` marker for automation.
 When a suite filter is present, only the matching registered suite is executed.
 
 The first in-kernel example is a `kheap` smoke test that:

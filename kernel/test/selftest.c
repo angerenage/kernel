@@ -155,17 +155,17 @@ static bool kernel_selftests_run_case(const struct kernel_selftest_suite* suite,
 	*assertion_total += ctx.assertions;
 
 	if (ctx.failure_expr != NULL) {
-		printf("kernel: selftest %s.%s FAIL at %s:%zu (%s)\n",
+		printf("selftest: %s.%s FAIL at %s:%zu (%s)\n",
 		       suite->name,
 		       test_case->name,
 		       ctx.failure_file,
 		       ctx.failure_line,
 		       ctx.failure_expr);
-		if (ctx.failure_message != NULL) printf("kernel: selftest detail: %s\n", ctx.failure_message);
+		if (ctx.failure_message != NULL) printf("selftest: detail: %s\n", ctx.failure_message);
 		return false;
 	}
 
-	printf("kernel: selftest %s.%s PASS (%zu assertions)\n", suite->name, test_case->name, ctx.assertions);
+	printf("selftest: %s.%s PASS (%zu assertions)\n", suite->name, test_case->name, ctx.assertions);
 	return true;
 }
 
@@ -182,10 +182,10 @@ bool kernel_selftests_run(void) {
 	has_suite_filter = selftest_cmdline_requested_suite(&suite_filter, &suite_filter_len);
 
 	if (has_suite_filter) {
-		printf("kernel: selftests requested, running suite '%.*s'\n", (int)suite_filter_len, suite_filter);
+		printf("selftest: requested, running suite '%.*s'\n", (int)suite_filter_len, suite_filter);
 	}
 	else {
-		printf("kernel: selftests requested, running %zu suite(s)\n", suite_count);
+		printf("selftest: requested, running %zu suite(s)\n", suite_count);
 	}
 
 	for (size_t i = 0; i < suite_count; i++) {
@@ -201,15 +201,15 @@ bool kernel_selftests_run(void) {
 	}
 
 	if (!ran_any_suite) {
-		printf("kernel: selftest suite '%.*s' not found\n", (int)suite_filter_len, suite_filter);
-		printf("kernel: selftests result: FAIL\n");
+		printf("selftest: suite '%.*s' not found\n", (int)suite_filter_len, suite_filter);
+		printf("selftest: result: FAIL\n");
 		return false;
 	}
 
-	printf("kernel: selftest summary: %zu passed, %zu failed, %zu assertions\n",
+	printf("selftest: summary: %zu passed, %zu failed, %zu assertions\n",
 	       case_total - case_failed,
 	       case_failed,
 	       assertion_total);
-	printf("kernel: selftests result: %s\n", case_failed == 0 ? "PASS" : "FAIL");
+	printf("selftest: result: %s\n", case_failed == 0 ? "PASS" : "FAIL");
 	return case_failed == 0;
 }

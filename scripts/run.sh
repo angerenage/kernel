@@ -216,11 +216,11 @@ run_kernel_selftests() {
 
 	deadline=$((SECONDS + timeout_seconds))
 	while :; do
-		if [[ -f "$log_file" ]] && grep -Fq "kernel: selftests result: PASS" "$log_file"; then
+		if [[ -f "$log_file" ]] && grep -Fq "selftest: result: PASS" "$log_file"; then
 			outcome="pass"
 			break
 		fi
-		if [[ -f "$log_file" ]] && grep -Fq "kernel: selftests result: FAIL" "$log_file"; then
+		if [[ -f "$log_file" ]] && grep -Fq "selftest: result: FAIL" "$log_file"; then
 			outcome="fail"
 			break
 		fi
