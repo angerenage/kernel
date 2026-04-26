@@ -6,13 +6,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
-enum {
-	SYSCALL_COUNT   = 3u,
-	SYSCALL_INVALID = UINTPTR_MAX,
-};
-
-static uintptr_t syscall_nop(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                             uintptr_t arg5) {
+static syscall_status_t syscall_nop(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
+                                    uintptr_t arg5) {
 	(void)arg0;
 	(void)arg1;
 	(void)arg2;
@@ -28,11 +23,11 @@ static uintptr_t syscall_nop(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uin
 	       (void*)arg4,
 	       (void*)arg5);
 
-	return 0u;
+	return SYSCALL_STATUS_OK;
 }
 
-static uintptr_t syscall_yield(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                               uintptr_t arg5) {
+static syscall_status_t syscall_yield(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
+                                      uintptr_t arg5) {
 	(void)arg0;
 	(void)arg1;
 	(void)arg2;
@@ -41,12 +36,13 @@ static uintptr_t syscall_yield(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, u
 	(void)arg5;
 
 	sched_yield();
-	return 0u;
+	return SYSCALL_STATUS_OK;
 }
 
-static uintptr_t syscall_sleep_ms(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                  uintptr_t arg5) {
+static syscall_status_t syscall_sleep_ms(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
+                                         uintptr_t arg5) {
 	uint64_t deadline_tick;
+	uint32_t frequency;
 
 	(void)arg1;
 	(void)arg2;
@@ -56,14 +52,17 @@ static uintptr_t syscall_sleep_ms(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 
 	if (arg0 == 0u) {
 		sched_yield();
-		return 0u;
+		return SYSCALL_STATUS_OK;
 	}
 
-	if (!time_tick_deadline_from_ms(sched_tick_count(), (uint64_t)arg0, hal_clock_frequency(), &deadline_tick)) {
-		return SYSCALL_INVALID;
+	frequency = hal_clock_frequency();
+	if (frequency == 0u) return SYSCALL_STATUS_UNAVAILABLE;
+
+	if (!time_tick_deadline_from_ms(sched_tick_count(), (uint64_t)arg0, frequency, &deadline_tick)) {
+		return SYSCALL_STATUS_BAD_ARGUMENT;
 	}
-	if (!sched_sleep_until_tick(deadline_tick)) return SYSCALL_INVALID;
-	return 0u;
+	if (!sched_sleep_until_tick(deadline_tick)) return SYSCALL_STATUS_FAILED;
+	return SYSCALL_STATUS_OK;
 }
 
 static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
@@ -72,8 +71,10 @@ static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 	[SYSCALL_SLEEP_MS] = syscall_sleep_ms,
 };
 
-uintptr_t syscall_dispatch(uintptr_t number, uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
-                           uintptr_t arg4, uintptr_t arg5) {
-	if (number >= SYSCALL_COUNT || syscall_table[number] == NULL) return SYSCALL_INVALID;
+syscall_status_t syscall_dispatch(uintptr_t number, uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
+                                  uintptr_t arg4, uintptr_t arg5) {
+	if (number >= SYSCALL_COUNT || syscall_table[number] == NULL) {
+		return SYSCALL_STATUS_UNKNOWN_SYSCALL;
+	}
 	return syscall_table[number](arg0, arg1, arg2, arg3, arg4, arg5);
 }
