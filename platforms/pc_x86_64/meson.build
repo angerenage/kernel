@@ -9,6 +9,7 @@ platform_kernel_c_args += [
 platform_kernel_objects += [
 	clang_x86_64_elf.process(files('entry.asm')),
 	clang_x86_64_elf.process(files('interrupts.asm')),
+	clang_x86_64_elf.process(files('hal/syscall.asm')),
 	clang_x86_64_elf.process(files('thread.asm')),
 	files('hal/cpu.c'),
 	files('hal/clock.c'),
@@ -18,4 +19,5 @@ platform_kernel_objects += [
 	files('hal/interrupts_pic.c'),
 	files('hal/paging.c'),
 	files('hal/serial.c'),
+	files('hal/syscall.c'),
 ]

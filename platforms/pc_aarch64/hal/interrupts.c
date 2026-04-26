@@ -1,6 +1,5 @@
 #include <core/cpu.h>
 #include <core/sched.h>
-#include <core/syscall.h>
 #include <core/vaddr_alloc.h>
 #include <core/vmm.h>
 #include <hal/hcf.h>
@@ -16,9 +15,8 @@
 static bool global_ready;
 static bool local_ready[64];
 _Alignas(16) uint8_t aarch64_exception_stack[64][AARCH64_EXCEPTION_STACK_SIZE];
-uintptr_t aarch64_exception_stack_top[64];
-uintptr_t aarch64_exception_stack_bottom[64];
-
+uintptr_t   aarch64_exception_stack_top[64];
+uintptr_t   aarch64_exception_stack_bottom[64];
 extern char exception_vectors[];
 
 bool irq_enabled(void) {
@@ -142,14 +140,6 @@ static bool is_data_abort(uint64_t ec) {
 
 static bool is_translation_fault(uint64_t dfsc) {
 	return dfsc >= 0x04 && dfsc <= 0x07;
-}
-
-static bool aarch64_handle_syscall(struct exception_frame* frame, uint64_t ec) {
-	if ((frame->vector & 0xfu) != 8u || ec != 0x15u) return false;
-
-	frame->x[0] =
-		syscall_dispatch(frame->x[8], frame->x[0], frame->x[1], frame->x[2], frame->x[3], frame->x[4], frame->x[5]);
-	return true;
 }
 
 static const char* abort_dfsc_name(uint64_t dfsc) {

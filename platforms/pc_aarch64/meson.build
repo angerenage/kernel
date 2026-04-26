@@ -14,4 +14,5 @@ platform_kernel_objects += [
 	files('hal/interrupts.c'),
 	files('hal/paging.c'),
 	files('hal/serial.c'),
+	files('hal/syscall.c'),
 ]

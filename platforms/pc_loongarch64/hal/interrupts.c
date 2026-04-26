@@ -1,6 +1,5 @@
 #include <core/cpu.h>
 #include <core/sched.h>
-#include <core/syscall.h>
 #include <core/vaddr_alloc.h>
 #include <core/vmm.h>
 #include <hal/hcf.h>
@@ -193,15 +192,6 @@ static const char* ecode_name(uint64_t ecode, uint64_t esubcode) {
 
 static bool is_page_invalid_exception(uint64_t ecode) {
 	return ecode >= 0x1u && ecode <= 0x3u;
-}
-
-static bool loongarch64_handle_syscall(struct exception_frame* frame, uint64_t ecode) {
-	if (ecode != 0xbu) return false;
-
-	frame->gpr[4] = syscall_dispatch(
-		frame->gpr[11], frame->gpr[4], frame->gpr[5], frame->gpr[6], frame->gpr[7], frame->gpr[8], frame->gpr[9]);
-	frame->era += 4u;
-	return true;
 }
 
 void loongarch64_maybe_preempt_on_interrupt_exit(void) {

@@ -43,3 +43,4 @@ struct exception_frame {
 };
 
 bool clock_handle_irq(const struct exception_frame* frame);
+bool riscv64_handle_syscall(struct exception_frame* frame, bool is_interrupt, uint64_t code);

@@ -1,6 +1,5 @@
 #include <core/cpu.h>
 #include <core/sched.h>
-#include <core/syscall.h>
 #include <core/vaddr_alloc.h>
 #include <core/vmm.h>
 #include <hal/hcf.h>
@@ -137,14 +136,6 @@ static const char* exception_name(uint64_t code) {
 
 static bool is_page_fault_exception(uint64_t code) {
 	return code == 12u || code == 13u || code == 15u;
-}
-
-static bool riscv64_handle_syscall(struct exception_frame* frame, bool is_interrupt, uint64_t code) {
-	if (is_interrupt || code != 8u) return false;
-
-	frame->a0 = syscall_dispatch(frame->a7, frame->a0, frame->a1, frame->a2, frame->a3, frame->a4, frame->a5);
-	frame->sepc += 4u;
-	return true;
 }
 
 void riscv64_maybe_preempt_on_interrupt_exit(void) {

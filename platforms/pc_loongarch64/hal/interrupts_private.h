@@ -12,3 +12,4 @@ struct exception_frame {
 };
 
 bool clock_handle_irq(const struct exception_frame* frame);
+bool loongarch64_handle_syscall(struct exception_frame* frame, uint64_t ecode);

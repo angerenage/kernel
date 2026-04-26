@@ -20,9 +20,21 @@
 #define X86_PIT_COMMAND 0x43u
 #define X86_PIT_INPUT_HZ 1193182u
 #define X86_PAGE_SIZE 0x1000u
+#define X86_GDT_KERNEL_CODE_SELECTOR 0x08u
+#define X86_GDT_KERNEL_DATA_SELECTOR 0x10u
+#define X86_GDT_USER_COMPAT_SELECTOR 0x18u
+#define X86_GDT_USER_DATA_SELECTOR 0x20u
+#define X86_GDT_USER_CODE_SELECTOR 0x28u
+#define X86_GDT_TSS_SELECTOR 0x30u
+#define X86_SYSCALL_VECTOR 0x80u
 #define X86_IA32_APIC_BASE_MSR 0x1bu
 #define X86_IA32_APIC_BASE_ENABLE (1ull << 11)
 #define X86_IA32_APIC_BASE_ADDR_MASK 0xfffff000ull
+#define X86_IA32_EFER_MSR 0xc0000080u
+#define X86_IA32_EFER_SCE (1ull << 0)
+#define X86_IA32_STAR_MSR 0xc0000081u
+#define X86_IA32_LSTAR_MSR 0xc0000082u
+#define X86_IA32_FMASK_MSR 0xc0000084u
 #define X86_LAPIC_ID_REG 0x20u
 #define X86_LAPIC_TPR_REG 0x80u
 #define X86_LAPIC_EOI_REG 0x0b0u
@@ -83,3 +95,6 @@ bool apic_is_active(void);
 void apic_send_eoi(void);
 bool apic_send_ipi(uint32_t lapic_id, unsigned vector);
 bool clock_handle_irq(unsigned vector);
+
+void x86_64_syscall_init(void);
+bool x86_64_handle_syscall(struct interrupt_frame* frame);

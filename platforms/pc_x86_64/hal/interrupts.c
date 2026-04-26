@@ -1,6 +1,5 @@
 #include <core/cpu.h>
 #include <core/sched.h>
-#include <core/syscall.h>
 #include <core/vaddr_alloc.h>
 #include <core/vmm.h>
 #include <hal/hcf.h>
@@ -13,12 +12,8 @@
 
 #include "interrupts_private.h"
 
-#define X86_GDT_KERNEL_CODE_SELECTOR 0x08u
-#define X86_GDT_KERNEL_DATA_SELECTOR 0x10u
-#define X86_GDT_TSS_SELECTOR 0x18u
 #define X86_EXCEPTION_STACK_SIZE 0x4000u
 #define X86_EXCEPTION_IST_INDEX 1u
-#define X86_SYSCALL_VECTOR 0x80u
 #define X86_IDT_INTERRUPT_GATE 0x8eu
 #define X86_IDT_USER_INTERRUPT_GATE 0xeeu
 
@@ -67,7 +62,7 @@ struct tss64 {
 extern void (*x86_64_interrupt_stub_table[])(void);
 
 static struct idt_entry idt[256];
-static uint64_t         gdt[64][5];
+static uint64_t         gdt[64][8];
 static struct tss64     x86_tss[64];
 static _Alignas(16) uint8_t x86_exception_stack[64][X86_EXCEPTION_STACK_SIZE];
 static bool     local_ready[64];
@@ -170,6 +165,9 @@ static void x86_setup_exception_stack(size_t cpu_index) {
 	gdt[cpu_index][0] = 0u;
 	gdt[cpu_index][1] = 0x00af9a000000ffffull;
 	gdt[cpu_index][2] = 0x00af92000000ffffull;
+	gdt[cpu_index][3] = 0x00cffb000000ffffull;
+	gdt[cpu_index][4] = 0x00cff3000000ffffull;
+	gdt[cpu_index][5] = 0x00affa000000ffffull;
 
 	memset(&x86_tss[cpu_index], 0, sizeof(x86_tss[cpu_index]));
 	x86_tss[cpu_index].ist1       = (uint64_t)(uintptr_t)(x86_exception_stack[cpu_index] + X86_EXCEPTION_STACK_SIZE);
@@ -177,9 +175,9 @@ static void x86_setup_exception_stack(size_t cpu_index) {
 
 	base              = (uint64_t)(uintptr_t)&x86_tss[cpu_index];
 	limit             = (uint64_t)(sizeof(x86_tss[cpu_index]) - 1u);
-	gdt[cpu_index][3] = (limit & 0xffffu) | ((base & 0xffffull) << 16) | (((base >> 16) & 0xffull) << 32) |
+	gdt[cpu_index][6] = (limit & 0xffffu) | ((base & 0xffffull) << 16) | (((base >> 16) & 0xffull) << 32) |
 	                    ((uint64_t)0x89u << 40) | (((limit >> 16) & 0x0full) << 48) | (((base >> 24) & 0xffull) << 56);
-	gdt[cpu_index][4] = base >> 32;
+	gdt[cpu_index][7] = base >> 32;
 
 	x86_load_segments_and_tss(cpu_index);
 }
@@ -231,6 +229,7 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 
 	irq_disable_local();
 	x86_setup_exception_stack(cpu->index);
+	x86_64_syscall_init();
 	__asm__ volatile("lidt %0" : : "m"(idtr));
 	if (cpu->role == CPU_ROLE_BSP) {
 		irq_enable_local();
@@ -248,13 +247,6 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 
 void x86_64_maybe_preempt_on_interrupt_exit(void) {
 	(void)sched_handle_interrupt_exit();
-}
-
-static bool x86_64_handle_syscall(struct interrupt_frame* frame) {
-	if (frame->vector != X86_SYSCALL_VECTOR) return false;
-
-	frame->rax = syscall_dispatch(frame->rax, frame->rdi, frame->rsi, frame->rdx, frame->rcx, frame->r8, frame->r9);
-	return true;
 }
 
 void x86_64_handle_interrupt(struct interrupt_frame* frame) {
