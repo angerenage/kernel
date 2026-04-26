@@ -75,6 +75,20 @@ Test(syscall, sleep_ms_rejects_unrepresentable_deadline) {
 	syscall_test_reset_state();
 }
 
+Test(syscall, tick_count_returns_scheduler_ticks) {
+	syscall_result_t result;
+
+	syscall_test_init_scheduler();
+	sched_tick();
+	sched_tick();
+
+	result = syscall_dispatch(SYSCALL_TICK_COUNT, 0u, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(result.value, 2u);
+
+	syscall_test_reset_state();
+}
+
 Test(syscall, yield_dispatches_next_runnable_thread) {
 	const struct thread_create_params first_params = {
 		.name              = "syscall-yield-first",

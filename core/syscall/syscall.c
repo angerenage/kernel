@@ -65,10 +65,23 @@ static syscall_result_t syscall_sleep_ms(uintptr_t arg0, uintptr_t arg1, uintptr
 	return syscall_result_ok(0u);
 }
 
+static syscall_result_t syscall_tick_count(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
+                                           uintptr_t arg4, uintptr_t arg5) {
+	(void)arg0;
+	(void)arg1;
+	(void)arg2;
+	(void)arg3;
+	(void)arg4;
+	(void)arg5;
+
+	return syscall_result_ok((uintptr_t)sched_tick_count());
+}
+
 static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
-	[SYSCALL_NOP]      = syscall_nop,
-	[SYSCALL_YIELD]    = syscall_yield,
-	[SYSCALL_SLEEP_MS] = syscall_sleep_ms,
+	[SYSCALL_NOP]        = syscall_nop,
+	[SYSCALL_YIELD]      = syscall_yield,
+	[SYSCALL_SLEEP_MS]   = syscall_sleep_ms,
+	[SYSCALL_TICK_COUNT] = syscall_tick_count,
 };
 
 syscall_result_t syscall_dispatch(uintptr_t number, uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
