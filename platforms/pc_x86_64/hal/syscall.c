@@ -18,8 +18,12 @@ void x86_64_syscall_init(void) {
 }
 
 bool x86_64_handle_syscall(struct interrupt_frame* frame) {
+	syscall_result_t result;
+
 	if (frame->vector != X86_SYSCALL_VECTOR) return false;
 
-	frame->rax = syscall_dispatch(frame->rax, frame->rdi, frame->rsi, frame->rdx, frame->rcx, frame->r8, frame->r9);
+	result     = syscall_dispatch(frame->rax, frame->rdi, frame->rsi, frame->rdx, frame->rcx, frame->r8, frame->r9);
+	frame->rax = result.value;
+	frame->rdx = (uint64_t)result.status;
 	return true;
 }

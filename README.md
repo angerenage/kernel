@@ -34,9 +34,11 @@ Hosted testing works by linking `core` against mocks instead of the real platfor
 
 That is how `core` can use HAL-defined operations while still remaining testable on a normal hosted system.
 
-## Syscall Status Codes
+## Syscall Results
 
-Syscalls return one register-sized status code. The values are intentionally compact and grouped by range:
+On success, the value is the syscall result. On error, the value is a syscall/status-specific diagnostic payload, such as the unsupported syscall number or the index of a problematic argument.
+
+Status values are grouped by range:
 
 - `0xx`: success. `SYSCALL_STATUS_OK` is `0`.
 - `1xx`: caller-side errors. The syscall request was malformed or unsupported, so retrying it unchanged should not work.
@@ -48,6 +50,7 @@ Current codes:
 - `SYSCALL_STATUS_UNKNOWN_SYSCALL` (`100`): the syscall number is not implemented.
 - `SYSCALL_STATUS_BAD_ARGUMENT` (`101`): an argument is invalid or cannot be represented by the kernel.
 - `SYSCALL_STATUS_FAILED` (`200`): the request is valid, but the kernel operation failed while handling it.
+- `SYSCALL_STATUS_UNAVAILABLE` (`201`): the syscall depends on kernel state that is not available yet.
 
 Use `syscall_status_is_success()`, `syscall_status_is_caller_error()`, and `syscall_status_is_kernel_error()` when callers only care about the result class.
 

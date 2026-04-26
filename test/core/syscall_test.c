@@ -33,34 +33,44 @@ static void syscall_test_thread_entry(void* arg) {
 }
 
 Test(syscall, nop_returns_ok) {
-	syscall_status_t status = syscall_dispatch(SYSCALL_NOP, 1u, 2u, 3u, 4u, 5u, 6u);
+	syscall_result_t result = syscall_dispatch(SYSCALL_NOP, 1u, 2u, 3u, 4u, 5u, 6u);
 
-	cr_assert_eq(status, SYSCALL_STATUS_OK);
-	cr_assert(syscall_status_is_success(status), "nop should return success");
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(result.value, 0u);
+	cr_assert(syscall_status_is_success(result.status), "nop should return success");
 }
 
 Test(syscall, invalid_number_returns_unknown_syscall) {
-	syscall_status_t status = syscall_dispatch(UINTPTR_MAX, 0u, 0u, 0u, 0u, 0u, 0u);
+	syscall_result_t result = syscall_dispatch(UINTPTR_MAX, 0u, 0u, 0u, 0u, 0u, 0u);
 
-	cr_assert_eq(status, SYSCALL_STATUS_UNKNOWN_SYSCALL);
-	cr_assert(syscall_status_is_caller_error(status), "unknown syscall should be a caller error");
+	cr_assert_eq(result.status, SYSCALL_STATUS_UNKNOWN_SYSCALL);
+	cr_assert_eq(result.value, UINTPTR_MAX);
+	cr_assert(syscall_status_is_caller_error(result.status), "unknown syscall should be a caller error");
 }
 
 Test(syscall, sleep_ms_fails_without_clock) {
+	syscall_result_t result;
+
 	syscall_test_init_scheduler();
 
-	cr_assert_eq(syscall_dispatch(SYSCALL_SLEEP_MS, 1u, 0u, 0u, 0u, 0u, 0u), SYSCALL_STATUS_UNAVAILABLE);
+	result = syscall_dispatch(SYSCALL_SLEEP_MS, 1u, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
+	cr_assert_eq(result.value, 0u);
 	cr_assert(syscall_status_is_kernel_error(SYSCALL_STATUS_UNAVAILABLE));
 
 	syscall_test_reset_state();
 }
 
 Test(syscall, sleep_ms_rejects_unrepresentable_deadline) {
+	syscall_result_t result;
+
 	syscall_test_init_scheduler();
 	cr_assert(hal_clock_start(1000u, NULL, NULL), "hal_clock_start failed");
 	sched_tick();
 
-	cr_assert_eq(syscall_dispatch(SYSCALL_SLEEP_MS, UINTPTR_MAX, 0u, 0u, 0u, 0u, 0u), SYSCALL_STATUS_BAD_ARGUMENT);
+	result = syscall_dispatch(SYSCALL_SLEEP_MS, UINTPTR_MAX, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(result.value, 0u, "sleep_ms should report arg0 as problematic");
 
 	syscall_test_reset_state();
 }
@@ -93,10 +103,10 @@ Test(syscall, yield_dispatches_next_runnable_thread) {
 	cr_assert(sched_make_runnable(&first), "failed to make first thread runnable");
 	cr_assert(sched_make_runnable(&second), "failed to make second thread runnable");
 
-	cr_assert_eq(syscall_dispatch(SYSCALL_YIELD, 0u, 0u, 0u, 0u, 0u, 0u), SYSCALL_STATUS_OK);
+	cr_assert_eq(syscall_dispatch(SYSCALL_YIELD, 0u, 0u, 0u, 0u, 0u, 0u).status, SYSCALL_STATUS_OK);
 	cr_assert_eq(sched_current_thread(), &first, "yield should dispatch first runnable thread");
 
-	cr_assert_eq(syscall_dispatch(SYSCALL_YIELD, 0u, 0u, 0u, 0u, 0u, 0u), SYSCALL_STATUS_OK);
+	cr_assert_eq(syscall_dispatch(SYSCALL_YIELD, 0u, 0u, 0u, 0u, 0u, 0u).status, SYSCALL_STATUS_OK);
 	cr_assert_eq(sched_current_thread(), &second, "yield should rotate to the next runnable thread");
 	cr_assert(thread_is_queued(&first), "previous thread should be queued after yielding");
 
@@ -133,7 +143,7 @@ Test(syscall, sleep_ms_zero_yields) {
 
 	sched_yield();
 	cr_assert_eq(sched_current_thread(), &first, "first thread should be running before sleep_ms(0)");
-	cr_assert_eq(syscall_dispatch(SYSCALL_SLEEP_MS, 0u, 0u, 0u, 0u, 0u, 0u), SYSCALL_STATUS_OK);
+	cr_assert_eq(syscall_dispatch(SYSCALL_SLEEP_MS, 0u, 0u, 0u, 0u, 0u, 0u).status, SYSCALL_STATUS_OK);
 	cr_assert_eq(sched_current_thread(), &second, "sleep_ms(0) should yield to the next runnable thread");
 
 	syscall_test_reset_state();
@@ -172,7 +182,7 @@ Test(syscall, sleep_ms_blocks_until_deadline) {
 
 	sched_yield();
 	cr_assert_eq(sched_current_thread(), &sleeper, "sleeper should dispatch first");
-	cr_assert_eq(syscall_dispatch(SYSCALL_SLEEP_MS, 2u, 0u, 0u, 0u, 0u, 0u), SYSCALL_STATUS_OK);
+	cr_assert_eq(syscall_dispatch(SYSCALL_SLEEP_MS, 2u, 0u, 0u, 0u, 0u, 0u).status, SYSCALL_STATUS_OK);
 	cr_assert_eq(sleeper.state, THREAD_STATE_BLOCKED, "sleeper should block while sleeping");
 	cr_assert_eq(sleeper.block_reason, THREAD_BLOCK_SLEEP, "sleeper block reason should be sleep");
 	cr_assert_eq(sched_current_thread(), &worker, "worker should run after sleeper blocks");

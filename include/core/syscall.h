@@ -18,8 +18,27 @@ typedef enum syscall_status {
 	SYSCALL_STATUS_UNAVAILABLE     = 201u,
 } syscall_status_t;
 
-typedef syscall_status_t (*syscall_fn_t)(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
+typedef struct syscall_result {
+	uintptr_t        value;
+	syscall_status_t status;
+} syscall_result_t;
+
+typedef syscall_result_t (*syscall_fn_t)(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
                                          uintptr_t arg5);
+
+static inline syscall_result_t syscall_result_ok(uintptr_t value) {
+	return (syscall_result_t){
+		.value  = value,
+		.status = SYSCALL_STATUS_OK,
+	};
+}
+
+static inline syscall_result_t syscall_result_error(syscall_status_t status, uintptr_t value) {
+	return (syscall_result_t){
+		.value  = value,
+		.status = status,
+	};
+}
 
 static inline bool syscall_status_is_success(syscall_status_t status) {
 	return status == SYSCALL_STATUS_OK;
@@ -33,5 +52,5 @@ static inline bool syscall_status_is_kernel_error(syscall_status_t status) {
 	return status >= 200u && status < 300u;
 }
 
-syscall_status_t syscall_dispatch(uintptr_t number, uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
+syscall_result_t syscall_dispatch(uintptr_t number, uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
                                   uintptr_t arg4, uintptr_t arg5);
