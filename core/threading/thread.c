@@ -38,9 +38,58 @@ static enum thread_init_result thread_validate_create_params(const struct thread
 	return THREAD_INIT_OK;
 }
 
-enum thread_init_result thread_init_ex(struct thread* thread, const struct thread_create_params* params) {
+static enum thread_init_result thread_validate_context_params(const struct thread_context_params* params) {
+	if (params == NULL) return THREAD_INIT_INVALID_ARGUMENTS;
+	if (params->kernel_stack_top <= params->kernel_stack_base) return THREAD_INIT_INVALID_STACK;
+	return THREAD_INIT_OK;
+}
+
+enum thread_init_result thread_init_context(struct thread* thread, const struct thread_context_params* params) {
 	enum thread_init_result result;
-	struct thread_context   context;
+	int32_t                 priority;
+
+	if (thread == NULL) return THREAD_INIT_INVALID_ARGUMENTS;
+
+	result = thread_validate_context_params(params);
+	if (result != THREAD_INIT_OK) return result;
+
+	priority = thread_priority_clamp(params->base_priority);
+	*thread  = (struct thread){
+		 .name                = params->name,
+		 .cpu                 = NULL,
+		 .preferred_cpu       = params->preferred_cpu,
+		 .state               = THREAD_STATE_NEW,
+		 .block_reason        = THREAD_BLOCK_NONE,
+		 .flags               = params->detached ? THREAD_FLAG_DETACHED : THREAD_FLAG_NONE,
+		 .kernel_stack_base   = params->kernel_stack_base,
+		 .kernel_stack_top    = params->kernel_stack_top,
+		 .context             = params->context,
+		 .entry               = params->entry,
+		 .arg                 = params->arg,
+		 .exit_code           = 0u,
+		 .blocked_queue       = NULL,
+		 .owned_mutexes       = NULL,
+		 .run_queue_next      = NULL,
+		 .wait_queue_next     = NULL,
+		 .sleep_queue_next    = NULL,
+		 .wake_deadline_tick  = 0u,
+		 .wait_status         = THREAD_WAIT_STATUS_NONE,
+		 .base_priority       = priority,
+		 .effective_priority  = priority,
+		 .timeslice_ticks     = THREAD_DEFAULT_TIMESLICE_TICKS,
+		 .timeslice_remaining = THREAD_DEFAULT_TIMESLICE_TICKS,
+		 .reap_callback       = NULL,
+		 .reap_context        = NULL,
+    };
+	thread_wait_queue_init(&thread->join_wait_queue);
+	thread_wait_queue_init(&thread->park_wait_queue);
+	return THREAD_INIT_OK;
+}
+
+enum thread_init_result thread_init_ex(struct thread* thread, const struct thread_create_params* params) {
+	enum thread_init_result      result;
+	struct thread_context        context;
+	struct thread_context_params context_params;
 
 	if (thread == NULL) return THREAD_INIT_INVALID_ARGUMENTS;
 
@@ -55,36 +104,18 @@ enum thread_init_result thread_init_ex(struct thread* thread, const struct threa
 		return THREAD_INIT_CONTEXT_UNSUPPORTED;
 	}
 
-	*thread = (struct thread){
-		.name                = params->name,
-		.cpu                 = NULL,
-		.preferred_cpu       = params->preferred_cpu,
-		.state               = THREAD_STATE_NEW,
-		.block_reason        = THREAD_BLOCK_NONE,
-		.flags               = params->detached ? THREAD_FLAG_DETACHED : THREAD_FLAG_NONE,
-		.kernel_stack_base   = params->kernel_stack_base,
-		.kernel_stack_top    = params->kernel_stack_top,
-		.context             = context,
-		.entry               = params->entry,
-		.arg                 = params->arg,
-		.exit_code           = 0u,
-		.blocked_queue       = NULL,
-		.owned_mutexes       = NULL,
-		.run_queue_next      = NULL,
-		.wait_queue_next     = NULL,
-		.sleep_queue_next    = NULL,
-		.wake_deadline_tick  = 0u,
-		.wait_status         = THREAD_WAIT_STATUS_NONE,
-		.base_priority       = thread_priority_clamp(params->base_priority),
-		.effective_priority  = thread_priority_clamp(params->base_priority),
-		.timeslice_ticks     = THREAD_DEFAULT_TIMESLICE_TICKS,
-		.timeslice_remaining = THREAD_DEFAULT_TIMESLICE_TICKS,
-		.reap_callback       = NULL,
-		.reap_context        = NULL,
+	context_params = (struct thread_context_params){
+		.name              = params->name,
+		.kernel_stack_base = params->kernel_stack_base,
+		.kernel_stack_top  = params->kernel_stack_top,
+		.preferred_cpu     = params->preferred_cpu,
+		.base_priority     = params->base_priority,
+		.detached          = params->detached,
+		.context           = context,
+		.entry             = params->entry,
+		.arg               = params->arg,
 	};
-	thread_wait_queue_init(&thread->join_wait_queue);
-	thread_wait_queue_init(&thread->park_wait_queue);
-	return THREAD_INIT_OK;
+	return thread_init_context(thread, &context_params);
 }
 
 bool thread_init(struct thread* thread, const struct thread_create_params* params) {

@@ -9,6 +9,7 @@ core_sources = files(
 	'threading/kthread.c',
 	'threading/sched.c',
 	'threading/thread.c',
+	'threading/uthread.c',
 	'syscall/syscall.c',
 	'memory/kheap.c',
 	'memory/pmm.c',

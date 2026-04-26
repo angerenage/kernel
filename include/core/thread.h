@@ -84,6 +84,19 @@ struct thread_create_params {
 	bool           detached;
 };
 
+/* Parameters used when the caller already built an initial CPU context. */
+struct thread_context_params {
+	const char*           name;
+	uintptr_t             kernel_stack_base;
+	uintptr_t             kernel_stack_top;
+	struct cpu*           preferred_cpu;
+	int32_t               base_priority;
+	bool                  detached;
+	struct thread_context context;
+	thread_entry_t        entry;
+	void*                 arg;
+};
+
 /* Callback invoked after a thread reaches stable ZOMBIE state. */
 typedef void (*thread_reap_callback_t)(struct thread* thread, void* ctx);
 
@@ -143,6 +156,9 @@ enum thread_init_result {
 
 /* Initialize a regular thread descriptor and return a classified failure result on rejection. */
 enum thread_init_result thread_init_ex(struct thread* thread, const struct thread_create_params* params);
+
+/* Initialize a thread descriptor from a prebuilt CPU context. */
+enum thread_init_result thread_init_context(struct thread* thread, const struct thread_context_params* params);
 
 /* Clamp a scheduler priority into the supported thread priority range. */
 int32_t thread_priority_clamp(int32_t priority);
