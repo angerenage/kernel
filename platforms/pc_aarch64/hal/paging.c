@@ -36,9 +36,10 @@
 #define AARCH64_TCR_TG1_4K 2ull
 #define AARCH64_DEVICE_ATTR (2ull << 2)
 
-static bool            initialized;
-static uint64_t        normal_attrs_template;
-static struct spinlock paging_lock =
+static bool                     initialized;
+static uint64_t                 normal_attrs_template;
+static struct hal_address_space kernel_space;
+static struct spinlock          paging_lock =
 	SPINLOCK_INIT_CLASS("paging_lock", SPINLOCK_ORDER_PAGING, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
 
 struct aarch64_walk_params {
@@ -65,6 +66,14 @@ static inline uint64_t aarch64_read_tcr_el1(void) {
 	return value;
 }
 
+static inline void aarch64_write_ttbr0_el1(uint64_t value) {
+	__asm__ volatile("msr ttbr0_el1, %0\n\tisb" : : "r"(value) : "memory");
+}
+
+static inline void aarch64_write_ttbr1_el1(uint64_t value) {
+	__asm__ volatile("msr ttbr1_el1, %0\n\tisb" : : "r"(value) : "memory");
+}
+
 static inline uintptr_t hhdm_phys_to_virt(uintptr_t phys) {
 	return phys + boot_info.direct_map_offset;
 }
@@ -86,7 +95,8 @@ static unsigned aarch64_level_count(uint64_t va_bits) {
 	return (unsigned)(((va_bits - 12) + 8) / 9);
 }
 
-static bool aarch64_walk_params(uintptr_t virt, struct aarch64_walk_params* out) {
+static bool aarch64_walk_params_for_space(const struct hal_address_space* space, uintptr_t virt,
+                                          struct aarch64_walk_params* out) {
 	uint64_t tcr;
 	uint64_t root_phys;
 	uint64_t va_bits;
@@ -99,13 +109,13 @@ static bool aarch64_walk_params(uintptr_t virt, struct aarch64_walk_params* out)
 		granule = (tcr & AARCH64_TCR_TG1_MASK) >> AARCH64_TCR_TG1_SHIFT;
 		if (granule != AARCH64_TCR_TG1_4K) return false;
 		va_bits   = 64u - ((tcr & AARCH64_TCR_T1SZ_MASK) >> AARCH64_TCR_T1SZ_SHIFT);
-		root_phys = aarch64_read_ttbr1_el1() & AARCH64_ADDR_MASK;
+		root_phys = space != NULL ? space->upper_root_phys : (aarch64_read_ttbr1_el1() & AARCH64_ADDR_MASK);
 	}
 	else {
 		granule = (tcr & AARCH64_TCR_TG0_MASK) >> AARCH64_TCR_TG0_SHIFT;
 		if (granule != AARCH64_TCR_TG_4K) return false;
 		va_bits   = 64u - (tcr & AARCH64_TCR_T0SZ_MASK);
-		root_phys = aarch64_read_ttbr0_el1() & AARCH64_ADDR_MASK;
+		root_phys = space != NULL ? space->lower_root_phys : (aarch64_read_ttbr0_el1() & AARCH64_ADDR_MASK);
 	}
 
 	if (root_phys == 0) return false;
@@ -119,13 +129,13 @@ static bool aarch64_walk_params(uintptr_t virt, struct aarch64_walk_params* out)
 	return out->levels >= 1 && out->levels <= 4;
 }
 
-static bool aarch64_lookup_entry(uintptr_t virt, bool create, uint64_t** out_table, size_t* out_index,
-                                 unsigned* out_shift) {
+static bool aarch64_lookup_entry_in(const struct hal_address_space* space, uintptr_t virt, bool create,
+                                    uint64_t** out_table, size_t* out_index, unsigned* out_shift) {
 	struct aarch64_walk_params params;
 	uint64_t*                  table;
 
 	if (!out_table || !out_index || !out_shift) return false;
-	if (!aarch64_walk_params(virt, &params)) return false;
+	if (!aarch64_walk_params_for_space(space, virt, &params)) return false;
 
 	table = (uint64_t*)hhdm_phys_to_virt((uintptr_t)params.root_phys);
 
@@ -158,12 +168,13 @@ static bool aarch64_lookup_entry(uintptr_t virt, bool create, uint64_t** out_tab
 	return true;
 }
 
-static bool aarch64_query_entry(uintptr_t virt, uint64_t* out_entry, unsigned* out_shift) {
+static bool aarch64_query_entry_in(const struct hal_address_space* space, uintptr_t virt, uint64_t* out_entry,
+                                   unsigned* out_shift) {
 	struct aarch64_walk_params params;
 	uint64_t*                  table;
 
 	if (!out_entry || !out_shift) return false;
-	if (!aarch64_walk_params(virt, &params)) return false;
+	if (!aarch64_walk_params_for_space(space, virt, &params)) return false;
 
 	table = (uint64_t*)hhdm_phys_to_virt((uintptr_t)params.root_phys);
 
@@ -181,6 +192,10 @@ static bool aarch64_query_entry(uintptr_t virt, uint64_t* out_entry, unsigned* o
 
 		table = (uint64_t*)hhdm_phys_to_virt((uintptr_t)(entry & AARCH64_ADDR_MASK));
 	}
+}
+
+static bool aarch64_query_entry(uintptr_t virt, uint64_t* out_entry, unsigned* out_shift) {
+	return aarch64_query_entry_in(NULL, virt, out_entry, out_shift);
 }
 
 static uint64_t aarch64_leaf_flags(uint64_t flags) {
@@ -223,23 +238,78 @@ bool hal_paging_init(void) {
 	(void)shift;
 
 	normal_attrs_template = entry & (AARCH64_LOWER_MASK | AARCH64_UPPER_MASK);
-	initialized           = true;
+	kernel_space          = (struct hal_address_space){
+				 .lower_root_phys = (uintptr_t)(aarch64_read_ttbr0_el1() & AARCH64_ADDR_MASK),
+				 .upper_root_phys = (uintptr_t)(aarch64_read_ttbr1_el1() & AARCH64_ADDR_MASK),
+				 .flags           = 0u,
+    };
+	initialized = true;
 	spinlock_unlock_irqrestore(&paging_lock, state);
 	return true;
 }
 
-bool hal_paging_map(uintptr_t virt, uintptr_t phys, uint64_t flags) {
+struct hal_address_space* hal_paging_kernel_space(void) {
+	return initialized ? &kernel_space : NULL;
+}
+
+bool hal_paging_space_create(struct hal_address_space* out_space) {
+	uintptr_t        root_phys = 0;
+	uint64_t*        root;
+	struct irq_state state;
+
+	if (out_space == NULL || !initialized) return false;
+
+	state = spinlock_lock_irqsave(&paging_lock);
+	if (!pmm_alloc_pages(1, &root_phys)) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
+
+	root = (uint64_t*)hhdm_phys_to_virt(root_phys);
+	memset(root, 0, PMM_PAGE_SIZE);
+	*out_space = (struct hal_address_space){
+		.lower_root_phys = root_phys,
+		.upper_root_phys = kernel_space.upper_root_phys,
+		.flags           = 0u,
+	};
+	spinlock_unlock_irqrestore(&paging_lock, state);
+	return true;
+}
+
+void hal_paging_space_destroy(struct hal_address_space* space) {
+	if (space == NULL || space->lower_root_phys == 0u) return;
+	if (space->lower_root_phys != kernel_space.lower_root_phys) {
+		(void)pmm_free_pages(space->lower_root_phys, 1);
+	}
+	*space = (struct hal_address_space){0};
+}
+
+bool hal_paging_activate(const struct hal_address_space* space) {
+	struct irq_state state;
+
+	if (space == NULL || !initialized) return false;
+	if (space->lower_root_phys == 0u && space->upper_root_phys == 0u) return false;
+	state = spinlock_lock_irqsave(&paging_lock);
+	aarch64_write_ttbr0_el1(space->lower_root_phys & AARCH64_ADDR_MASK);
+	aarch64_write_ttbr1_el1(space->upper_root_phys & AARCH64_ADDR_MASK);
+	aarch64_tlb_flush_all();
+	spinlock_unlock_irqrestore(&paging_lock, state);
+	return true;
+}
+
+bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t phys, uint64_t flags) {
 	uint64_t*        table = NULL;
 	size_t           index = 0;
 	unsigned         shift = 0;
 	struct irq_state state;
 
+	if (space == NULL) return false;
 	if (!initialized) return false;
 	if ((flags & ~HAL_PAGE_VALID_MASK) != 0) return false;
 	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	if ((phys & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	state = spinlock_lock_irqsave(&paging_lock);
-	if (!aarch64_lookup_entry(virt, true, &table, &index, &shift)) {
+	if (!aarch64_lookup_entry_in(space, virt, true, &table, &index, &shift)) {
 		spinlock_unlock_irqrestore(&paging_lock, state);
 		return false;
 	}
@@ -254,16 +324,17 @@ bool hal_paging_map(uintptr_t virt, uintptr_t phys, uint64_t flags) {
 	return true;
 }
 
-bool hal_paging_unmap(uintptr_t virt) {
+bool hal_paging_unmap(struct hal_address_space* space, uintptr_t virt) {
 	uint64_t*        table = NULL;
 	size_t           index = 0;
 	unsigned         shift = 0;
 	struct irq_state state;
 
+	if (space == NULL) return false;
 	if (!initialized) return false;
 	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	state = spinlock_lock_irqsave(&paging_lock);
-	if (!aarch64_lookup_entry(virt, false, &table, &index, &shift)) {
+	if (!aarch64_lookup_entry_in(space, virt, false, &table, &index, &shift)) {
 		spinlock_unlock_irqrestore(&paging_lock, state);
 		return false;
 	}
@@ -278,7 +349,7 @@ bool hal_paging_unmap(uintptr_t virt) {
 	return true;
 }
 
-bool hal_paging_query(uintptr_t virt, uintptr_t* out_phys, uint64_t* out_flags) {
+bool hal_paging_query(const struct hal_address_space* space, uintptr_t virt, uintptr_t* out_phys, uint64_t* out_flags) {
 	uint64_t         entry;
 	uint64_t         flags = 0;
 	unsigned         shift;
@@ -288,9 +359,10 @@ bool hal_paging_query(uintptr_t virt, uintptr_t* out_phys, uint64_t* out_flags) 
 	if (out_phys) *out_phys = 0;
 	if (out_flags) *out_flags = 0;
 
+	if (space == NULL) return false;
 	if (!initialized) return false;
 	state = spinlock_lock_irqsave(&paging_lock);
-	if (!aarch64_query_entry(virt, &entry, &shift)) {
+	if (!aarch64_query_entry_in(space, virt, &entry, &shift)) {
 		spinlock_unlock_irqrestore(&paging_lock, state);
 		return false;
 	}

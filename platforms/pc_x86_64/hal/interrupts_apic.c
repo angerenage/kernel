@@ -91,10 +91,12 @@ static bool map_mmio_page(uintptr_t phys) {
 	uintptr_t virt = hhdm_phys_to_virt(phys & ~(uintptr_t)(X86_PAGE_SIZE - 1u));
 
 	uintptr_t existing_phys = 0;
-	if (hal_paging_query(virt, &existing_phys, NULL)) return true;
+	if (hal_paging_query(hal_paging_kernel_space(), virt, &existing_phys, NULL)) return true;
 
-	return hal_paging_map(
-		virt, phys & ~(uintptr_t)(X86_PAGE_SIZE - 1u), HAL_PAGE_WRITE | HAL_PAGE_GLOBAL | HAL_PAGE_NO_CACHE);
+	return hal_paging_map(hal_paging_kernel_space(),
+	                      virt,
+	                      phys & ~(uintptr_t)(X86_PAGE_SIZE - 1u),
+	                      HAL_PAGE_WRITE | HAL_PAGE_GLOBAL | HAL_PAGE_NO_CACHE);
 }
 
 static bool acpi_signature_equals(const char* actual, const char* expected) {

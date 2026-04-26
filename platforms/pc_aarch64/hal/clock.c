@@ -92,9 +92,10 @@ static bool map_mmio_page(uintptr_t phys) {
 
 	page_virt = phys_to_virt(page_phys);
 	if (page_virt == 0u) return false;
-	if (hal_paging_query(page_virt, &existing_phys, NULL)) return true;
+	if (hal_paging_query(hal_paging_kernel_space(), page_virt, &existing_phys, NULL)) return true;
 
-	return hal_paging_map(page_virt, page_phys, HAL_PAGE_WRITE | HAL_PAGE_GLOBAL | HAL_PAGE_NO_CACHE);
+	return hal_paging_map(
+		hal_paging_kernel_space(), page_virt, page_phys, HAL_PAGE_WRITE | HAL_PAGE_GLOBAL | HAL_PAGE_NO_CACHE);
 }
 
 static bool gic_init(void) {

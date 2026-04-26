@@ -48,7 +48,8 @@ Test(vmm, allocates_queries_and_frees_mapped_ranges) {
 	          "vmm_query failed for interior address");
 	cr_assert_eq(info.id, alloc_id, "vmm_query returned the wrong allocation");
 
-	cr_assert(hal_paging_query((uintptr_t)base, &phys, &flags), "hal_paging_query failed for mapped allocation");
+	cr_assert(hal_paging_query(hal_paging_kernel_space(), (uintptr_t)base, &phys, &flags),
+	          "hal_paging_query failed for mapped allocation");
 	cr_assert_eq(phys & (PMM_PAGE_SIZE - 1u), 0, "mapped allocation physical address is not aligned");
 	cr_assert_eq(flags, (uint64_t)(VMM_PROT_WRITE | VMM_PROT_GLOBAL), "mapped allocation flags mismatch");
 
@@ -89,7 +90,8 @@ Test(vmm, supports_lazy_map_unmap_remap_and_reprotect) {
 	cr_assert(vmm_map(address_space_kernel(), alloc_id), "vmm_map failed");
 	cr_assert_eq(mock_paging_mapping_count(), 3, "vmm_map did not map every page");
 	cr_assert_geq(pages_consumed_since(free_before), 3, "vmm_map did not consume physical pages");
-	cr_assert(hal_paging_query((uintptr_t)base, &first_phys, &flags), "hal_paging_query failed after vmm_map");
+	cr_assert(hal_paging_query(hal_paging_kernel_space(), (uintptr_t)base, &first_phys, &flags),
+	          "hal_paging_query failed after vmm_map");
 	cr_assert_eq(flags, (uint64_t)VMM_PROT_WRITE, "vmm_map set incorrect initial flags");
 
 	cr_assert(vmm_unmap(address_space_kernel(), alloc_id, false), "vmm_unmap(address_space_kernel(), false) failed");
@@ -99,11 +101,13 @@ Test(vmm, supports_lazy_map_unmap_remap_and_reprotect) {
 	              "vmm_unmap(address_space_kernel(), false) unexpectedly freed backing pages");
 
 	cr_assert(vmm_map(address_space_kernel(), alloc_id), "vmm_map failed when reusing preserved backing");
-	cr_assert(hal_paging_query((uintptr_t)base, &remapped_phys, &flags), "hal_paging_query failed after remap");
+	cr_assert(hal_paging_query(hal_paging_kernel_space(), (uintptr_t)base, &remapped_phys, &flags),
+	          "hal_paging_query failed after remap");
 	cr_assert_eq(remapped_phys, first_phys, "vmm_map did not reuse preserved backing");
 
 	cr_assert(vmm_protect(address_space_kernel(), alloc_id, VMM_PROT_READ | VMM_PROT_GLOBAL), "vmm_protect failed");
-	cr_assert(hal_paging_query((uintptr_t)base, NULL, &flags), "hal_paging_query failed after vmm_protect");
+	cr_assert(hal_paging_query(hal_paging_kernel_space(), (uintptr_t)base, NULL, &flags),
+	          "hal_paging_query failed after vmm_protect");
 	cr_assert_eq(flags, (uint64_t)VMM_PROT_GLOBAL, "vmm_protect did not update page flags");
 
 	cr_assert(vmm_free(address_space_kernel(), alloc_id), "vmm_free failed for lazy allocation");
@@ -138,9 +142,9 @@ Test(vmm, resolves_page_faults_for_lazy_heap_allocations) {
 	cr_assert_lt(pages_consumed_since(free_before),
 	             params.page_count + 1u,
 	             "fault resolution allocated backing for the entire heap allocation");
-	cr_assert(!hal_paging_query((uintptr_t)base, NULL, NULL),
+	cr_assert(!hal_paging_query(hal_paging_kernel_space(), (uintptr_t)base, NULL, NULL),
 	          "fault resolution unexpectedly mapped a non-faulting heap page");
-	cr_assert(hal_paging_query((uintptr_t)base + PMM_PAGE_SIZE, NULL, &flags),
+	cr_assert(hal_paging_query(hal_paging_kernel_space(), (uintptr_t)base + PMM_PAGE_SIZE, NULL, &flags),
 	          "fault resolution did not map the faulting address");
 	cr_assert_eq(flags, (uint64_t)VMM_PROT_WRITE, "fault resolution applied incorrect mapping flags");
 	cr_assert(!vmm_resolve_page_fault(address_space_kernel(), (uintptr_t)base + PMM_PAGE_SIZE),
@@ -155,7 +159,7 @@ Test(vmm, resolves_page_faults_for_lazy_heap_allocations) {
 	cr_assert_geq(pages_consumed_since(free_before),
 	              params.page_count,
 	              "second fault resolution did not allocate the remaining heap backing");
-	cr_assert(hal_paging_query((uintptr_t)base, &phys, NULL),
+	cr_assert(hal_paging_query(hal_paging_kernel_space(), (uintptr_t)base, &phys, NULL),
 	          "second fault resolution did not map the first heap page");
 	cr_assert_eq(phys & (PMM_PAGE_SIZE - 1u), 0, "heap fault resolution returned an unaligned physical page");
 	cr_assert(vmm_query_id(address_space_kernel(), alloc_id, &info),
@@ -197,12 +201,13 @@ Test(vmm, resolves_page_faults_for_lazy_stack_allocations) {
 	cr_assert_lt(pages_consumed_since(free_before),
 	             params.page_count + 1u,
 	             "stack fault resolution allocated backing for the entire stack allocation");
-	cr_assert(!hal_paging_query((uintptr_t)base, NULL, NULL),
+	cr_assert(!hal_paging_query(hal_paging_kernel_space(), (uintptr_t)base, NULL, NULL),
 	          "stack fault resolution unexpectedly mapped the base page");
-	cr_assert(!hal_paging_query((uintptr_t)base + PMM_PAGE_SIZE, NULL, NULL),
+	cr_assert(!hal_paging_query(hal_paging_kernel_space(), (uintptr_t)base + PMM_PAGE_SIZE, NULL, NULL),
 	          "stack fault resolution unexpectedly mapped the middle page");
-	cr_assert(hal_paging_query((uintptr_t)base + 2u * (uintptr_t)PMM_PAGE_SIZE, NULL, &flags),
-	          "stack fault resolution did not map the faulting address");
+	cr_assert(
+		hal_paging_query(hal_paging_kernel_space(), (uintptr_t)base + 2u * (uintptr_t)PMM_PAGE_SIZE, NULL, &flags),
+		"stack fault resolution did not map the faulting address");
 	cr_assert_eq(flags, (uint64_t)VMM_PROT_WRITE, "stack fault resolution applied incorrect mapping flags");
 	cr_assert(vmm_query_id(address_space_kernel(), alloc_id, &info),
 	          "vmm_query_id failed after stack fault resolution");
@@ -306,7 +311,8 @@ Test(vmm, rolls_back_failed_protect_and_preserves_original_mapping) {
 	for (size_t page = 0; page < params.page_count; page++) {
 		uintptr_t virt = (uintptr_t)base + page * (uintptr_t)PMM_PAGE_SIZE;
 
-		cr_assert(hal_paging_query(virt, NULL, &flags), "hal_paging_query failed after protect rollback");
+		cr_assert(hal_paging_query(hal_paging_kernel_space(), virt, NULL, &flags),
+		          "hal_paging_query failed after protect rollback");
 		cr_assert_eq(flags, (uint64_t)VMM_PROT_WRITE, "protect rollback did not restore the original flags");
 	}
 
@@ -349,7 +355,8 @@ Test(vmm, rejects_invalid_protection_masks) {
 	          "vmm_alloc failed for valid protection bits");
 	cr_assert(!vmm_protect(address_space_kernel(), alloc_id, VMM_PROT_READ | ((vmm_prot_t)1ull << 63)),
 	          "vmm_protect accepted invalid protection bits");
-	cr_assert(hal_paging_query((uintptr_t)base, NULL, &flags), "hal_paging_query failed after rejected protect");
+	cr_assert(hal_paging_query(hal_paging_kernel_space(), (uintptr_t)base, NULL, &flags),
+	          "hal_paging_query failed after rejected protect");
 	cr_assert_eq(flags, (uint64_t)VMM_PROT_WRITE, "rejected protect changed the live mapping");
 
 	cr_assert(vmm_free(address_space_kernel(), alloc_id), "vmm_free failed after invalid protection tests");
@@ -380,17 +387,19 @@ Test(vmm, maps_and_reprotects_user_pages_distinct_from_kernel_pages) {
 	cr_assert(vmm_alloc(&user_space, &params, &alloc_id, &base), "vmm_alloc failed for a user mapping");
 	cr_assert(vmm_query_id(&user_space, alloc_id, &info), "vmm_query_id failed for user mapping");
 	cr_assert_eq(info.prot, params.prot, "vmm_query_id lost the user protection bit");
-	cr_assert(hal_paging_query((uintptr_t)base, NULL, &flags), "hal_paging_query failed for user mapping");
+	cr_assert(hal_paging_query(hal_paging_kernel_space(), (uintptr_t)base, NULL, &flags),
+	          "hal_paging_query failed for user mapping");
 	cr_assert_eq(flags, (uint64_t)(HAL_PAGE_WRITE | HAL_PAGE_USER), "user mapping flags were not translated");
 
 	cr_assert(!vmm_protect(&user_space, alloc_id, VMM_PROT_READ | VMM_PROT_WRITE),
 	          "vmm_protect allowed clearing user access inside a user address space");
-	cr_assert(hal_paging_query((uintptr_t)base, NULL, &flags), "hal_paging_query failed after rejected protect");
+	cr_assert(hal_paging_query(hal_paging_kernel_space(), (uintptr_t)base, NULL, &flags),
+	          "hal_paging_query failed after rejected protect");
 	cr_assert_eq(flags, (uint64_t)(HAL_PAGE_WRITE | HAL_PAGE_USER), "rejected protect changed user mapping flags");
 
 	cr_assert(vmm_protect(&user_space, alloc_id, VMM_PROT_READ | VMM_PROT_EXEC | VMM_PROT_USER),
 	          "vmm_protect failed to reprotect user access");
-	cr_assert(hal_paging_query((uintptr_t)base, NULL, &flags),
+	cr_assert(hal_paging_query(hal_paging_kernel_space(), (uintptr_t)base, NULL, &flags),
 	          "hal_paging_query failed after reprotecting user access");
 	cr_assert_eq(flags, (uint64_t)(HAL_PAGE_EXEC | HAL_PAGE_USER), "user exec mapping flags were not translated");
 
