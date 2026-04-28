@@ -2,6 +2,7 @@
 #include <core/sched.h>
 #include <core/spinlock.h>
 #include <core/thread.h>
+#include <core/vaddr_alloc.h>
 #include <hal/cpu.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -112,6 +113,20 @@ static void sched_set_cpu_activity(struct cpu* cpu, enum sched_cpu_activity acti
 	if (state == NULL) return;
 
 	__atomic_store_n(&state->activity, (uint32_t)activity, __ATOMIC_RELEASE);
+}
+
+static bool sched_activate_thread_address_space(const struct thread* previous, const struct thread* next) {
+	struct address_space* previous_space;
+	struct address_space* next_space;
+
+	previous_space = previous == NULL ? NULL : previous->address_space;
+	next_space     = next == NULL ? NULL : next->address_space;
+	if (previous_space == NULL && next_space == NULL) return true;
+	if (previous_space == next_space) return true;
+
+	if (next_space == NULL) next_space = address_space_kernel();
+	if (!address_space_is_initialized(next_space)) return false;
+	return address_space_activate(next_space);
 }
 
 static void sched_account_cpu_tick(struct cpu* cpu) {
@@ -402,6 +417,7 @@ static void sched_dispatch_next(struct cpu* cpu) {
 	previous = cpu->current_thread;
 	next     = sched_select_next(cpu);
 	if (next == NULL) return;
+	if (!sched_activate_thread_address_space(previous, next)) return;
 
 	if (previous == next) {
 		sched_set_current(cpu, next);

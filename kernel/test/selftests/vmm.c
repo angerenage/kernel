@@ -398,15 +398,18 @@ static void kernel_selftest_vmm_translates_user_protection(struct kernel_selftes
 			.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
 			.kind        = VMM_KIND_GENERIC,
     };
-	struct vmm_info info;
-	vmm_id_t        alloc_id     = VMM_ID_INVALID;
-	void*           base         = NULL;
-	uint64_t        flags        = 0;
-	size_t          free_before  = pmm_free_page_count();
-	size_t          count_before = vmm_count(address_space_kernel());
+	struct vmm_info           info;
+	vmm_id_t                  alloc_id = VMM_ID_INVALID;
+	void*                     base     = NULL;
+	uint64_t                  flags    = 0;
+	struct hal_address_space* user_hal_space;
+	size_t                    free_before  = pmm_free_page_count();
+	size_t                    count_before = vmm_count(address_space_kernel());
 
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !vmm_alloc(address_space_kernel(), &params, &alloc_id, &base), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, vmm_user_address_space_init(&user_space), cleanup);
+	user_hal_space = address_space_hal(&user_space);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, user_hal_space != NULL, cleanup);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
 		ctx, vmm_alloc(&user_space, &params, &alloc_id, &base), "user vmm_alloc returned false", cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, alloc_id != VMM_ID_INVALID, cleanup);
@@ -414,8 +417,10 @@ static void kernel_selftest_vmm_translates_user_protection(struct kernel_selftes
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
 		ctx, vmm_query_id(&user_space, alloc_id, &info), "vmm_query_id returned false", cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, info.prot == params.prot, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(
+		ctx, !hal_paging_query(hal_paging_kernel_space(), (uintptr_t)base, NULL, NULL), cleanup);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
-	                                hal_paging_query(hal_paging_kernel_space(), (uintptr_t)base, NULL, &flags),
+	                                hal_paging_query(user_hal_space, (uintptr_t)base, NULL, &flags),
 	                                "hal_paging_query returned false",
 	                                cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, flags == (uint64_t)(HAL_PAGE_WRITE | HAL_PAGE_USER), cleanup);
@@ -425,7 +430,7 @@ static void kernel_selftest_vmm_translates_user_protection(struct kernel_selftes
 	                                "vmm_protect allowed clearing user access",
 	                                cleanup);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
-	                                hal_paging_query(hal_paging_kernel_space(), (uintptr_t)base, NULL, &flags),
+	                                hal_paging_query(user_hal_space, (uintptr_t)base, NULL, &flags),
 	                                "hal_paging_query returned false after protect",
 	                                cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, flags == (uint64_t)(HAL_PAGE_WRITE | HAL_PAGE_USER), cleanup);

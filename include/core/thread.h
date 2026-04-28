@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 struct cpu;
+struct address_space;
 struct mutex;
 struct thread;
 struct thread_wait_queue;
@@ -74,14 +75,15 @@ enum thread_wait_status {
 
 /* Parameters used to initialize a non-idle thread descriptor. */
 struct thread_create_params {
-	const char*    name;
-	thread_entry_t entry;
-	void*          arg;
-	uintptr_t      kernel_stack_base;
-	uintptr_t      kernel_stack_top;
-	struct cpu*    preferred_cpu;
-	int32_t        base_priority;
-	bool           detached;
+	const char*           name;
+	thread_entry_t        entry;
+	void*                 arg;
+	uintptr_t             kernel_stack_base;
+	uintptr_t             kernel_stack_top;
+	struct address_space* address_space;
+	struct cpu*           preferred_cpu;
+	int32_t               base_priority;
+	bool                  detached;
 };
 
 /* Parameters used when the caller already built an initial CPU context. */
@@ -89,6 +91,7 @@ struct thread_context_params {
 	const char*           name;
 	uintptr_t             kernel_stack_base;
 	uintptr_t             kernel_stack_top;
+	struct address_space* address_space;
 	struct cpu*           preferred_cpu;
 	int32_t               base_priority;
 	bool                  detached;
@@ -118,6 +121,7 @@ struct thread {
 	uint32_t                  flags;
 	uintptr_t                 kernel_stack_base;
 	uintptr_t                 kernel_stack_top;
+	struct address_space*     address_space;
 	struct thread_context     context;
 	thread_entry_t            entry;
 	void*                     arg;

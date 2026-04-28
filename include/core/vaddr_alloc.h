@@ -1,6 +1,7 @@
 #pragma once
 
 #include <core/spinlock.h>
+#include <hal/paging.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -15,6 +16,7 @@ struct vmm_alloc_record;
 
 struct address_space {
 	uintptr_t                base;
+	struct hal_address_space hal_space;
 	uint64_t*                bitmap;
 	uintptr_t                bitmap_phys;
 	size_t                   bitmap_pages;
@@ -38,6 +40,12 @@ void address_space_deinit(struct address_space* space);
 
 /* Return whether an address-space allocator has been initialized. */
 bool address_space_is_initialized(const struct address_space* space);
+
+/* Return the architecture paging handle backing an initialized address space. */
+struct hal_address_space* address_space_hal(struct address_space* space);
+
+/* Switch the current CPU to an initialized address space's paging handle. */
+bool address_space_activate(struct address_space* space);
 
 /* Reserve count consecutive virtual pages with the requested page alignment. */
 bool address_space_reserve(struct address_space* space, size_t count, size_t align_pages, uintptr_t* out_base);

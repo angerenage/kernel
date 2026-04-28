@@ -1,11 +1,15 @@
 #include <core/cpu.h>
 #include <core/sched.h>
 #include <core/thread.h>
+#include <core/vaddr_alloc.h>
 #include <criterion/criterion.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>
 
 #include "../mocks/hal/cpu_mock.h"
+
+uintptr_t hal_paging_mock_active_root_phys(void);
+void      hal_paging_mock_reset_active(void);
 
 static void init_bound_bootstrap_cpu(void) {
 	irq_enable_local();
@@ -19,6 +23,7 @@ static void reset_test_state(void) {
 	irq_enable_local();
 	hal_cpu_local_bind(NULL);
 	hal_cpu_mock_reset_kicks();
+	hal_paging_mock_reset_active();
 }
 
 static void sched_test_thread_entry(void* arg) {
@@ -226,6 +231,42 @@ Test(sched, runnable_threads_dispatch_highest_priority_first) {
 	sched_yield();
 	cr_assert_eq(sched_current_thread(), &high, "highest-priority runnable thread should dispatch first");
 	cr_assert(thread_is_queued(&low), "lower-priority thread should remain queued");
+
+	reset_test_state();
+}
+
+Test(sched, dispatch_activates_thread_address_space) {
+	struct address_space user_space = {
+		.hal_space   = {.lower_root_phys = 0x4242000u},
+		.initialized = true,
+	};
+	const struct thread_create_params user_params = {
+		.name              = "user",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x305000u,
+		.kernel_stack_top  = 0x309000u,
+		.address_space     = &user_space,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	struct thread user_thread;
+
+	init_bound_bootstrap_cpu();
+	hal_paging_mock_reset_active();
+	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
+	cr_assert_eq(
+		hal_paging_mock_active_root_phys(), 0u, "idle startup should not activate an uninitialized kernel space");
+
+	cr_assert(thread_init(&user_thread, &user_params), "thread_init failed for userspace thread");
+	cr_assert(sched_make_runnable(&user_thread), "failed to make userspace thread runnable");
+	sched_yield();
+
+	cr_assert_eq(sched_current_thread(), &user_thread, "userspace thread should dispatch");
+	cr_assert_eq(hal_paging_mock_active_root_phys(),
+	             user_space.hal_space.lower_root_phys,
+	             "dispatch should activate the userspace paging root");
 
 	reset_test_state();
 }

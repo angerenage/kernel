@@ -84,6 +84,7 @@ enum uthread_start_result uthread_start(struct uthread* thread, const struct uth
 		.name              = params->name,
 		.kernel_stack_base = (uintptr_t)kernel_stack_base,
 		.kernel_stack_top  = kernel_stack_top,
+		.address_space     = thread->address_space,
 		.preferred_cpu     = params->preferred_cpu,
 		.base_priority     = THREAD_PRIORITY_DEFAULT,
 		.detached          = params->detached,

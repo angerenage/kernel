@@ -40,6 +40,7 @@ static void address_space_reset_locked(struct address_space* space) {
 	}
 
 	space->base         = 0;
+	space->hal_space    = (struct hal_address_space){0};
 	space->bitmap       = NULL;
 	space->bitmap_phys  = 0;
 	space->bitmap_pages = 0;
@@ -125,6 +126,18 @@ void address_space_deinit(struct address_space* space) {
 
 bool address_space_is_initialized(const struct address_space* space) {
 	return space != NULL && space->initialized;
+}
+
+struct hal_address_space* address_space_hal(struct address_space* space) {
+	if (space == NULL || !space->initialized) return NULL;
+	return &space->hal_space;
+}
+
+bool address_space_activate(struct address_space* space) {
+	struct hal_address_space* hal_space = address_space_hal(space);
+
+	if (hal_space == NULL) return false;
+	return hal_paging_activate(hal_space);
 }
 
 bool address_space_reserve(struct address_space* space, size_t count, size_t align_pages, uintptr_t* out_base) {
