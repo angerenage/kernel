@@ -1,6 +1,9 @@
 #include <core/cpu.h>
+#include <core/kheap.h>
+#include <core/kthread.h>
 #include <core/pmm.h>
 #include <core/sched.h>
+#include <core/spinlock.h>
 #include <core/uthread.h>
 #include <core/vaddr_alloc.h>
 #include <hal/userspace.h>
@@ -11,6 +14,24 @@
 enum {
 	UTHREAD_KERNEL_STACK_PAGES = 4u,
 };
+
+#define UTHREAD_REAPER_MAX_CPUS 64u
+
+struct uthread_reaper {
+	struct thread_wait_queue wait_queue;
+	struct uthread*          head;
+	struct uthread*          tail;
+	struct kthread*          thread;
+	bool                     started;
+	bool                     starting;
+};
+
+static struct uthread_reaper uthread_reapers[UTHREAD_REAPER_MAX_CPUS];
+static struct spinlock       uthread_reaper_init_lock =
+	SPINLOCK_INIT_CLASS("uthread_reaper_init", SPINLOCK_ORDER_SCHED, SPINLOCK_FLAG_IRQSAVE);
+static bool uthread_reapers_initialized;
+
+static void uthread_reaper_entry(void* arg);
 
 static void uthread_release_stacks(struct uthread* thread) {
 	if (thread == NULL) return;
@@ -25,7 +46,161 @@ static void uthread_release_stacks(struct uthread* thread) {
 	}
 }
 
-enum uthread_start_result uthread_start(struct uthread* thread, const struct uthread_start_params* params) {
+static void uthread_free(struct uthread* thread) {
+	bool heap_allocated;
+
+	if (thread == NULL) return;
+
+	heap_allocated = thread->heap_allocated;
+	uthread_release_stacks(thread);
+	if (heap_allocated) kfree(thread);
+}
+
+static void uthread_reapers_init_once(void) {
+	struct irq_state state;
+
+	state = spinlock_lock_irqsave(&uthread_reaper_init_lock);
+	if (!uthread_reapers_initialized) {
+		for (size_t i = 0; i < UTHREAD_REAPER_MAX_CPUS; i++) {
+			thread_wait_queue_init(&uthread_reapers[i].wait_queue);
+			uthread_reapers[i].head     = NULL;
+			uthread_reapers[i].tail     = NULL;
+			uthread_reapers[i].thread   = NULL;
+			uthread_reapers[i].started  = false;
+			uthread_reapers[i].starting = false;
+		}
+		uthread_reapers_initialized = true;
+	}
+	spinlock_unlock_irqrestore(&uthread_reaper_init_lock, state);
+}
+
+static struct uthread_reaper* uthread_reaper_for_cpu(const struct cpu* cpu) {
+	if (cpu == NULL || cpu->index >= UTHREAD_REAPER_MAX_CPUS) return NULL;
+
+	uthread_reapers_init_once();
+	return &uthread_reapers[cpu->index];
+}
+
+static bool uthread_cpu_online(const struct cpu* cpu) {
+	return cpu != NULL && cpu_state_get(cpu) == CPU_STATE_ONLINE;
+}
+
+static struct cpu* uthread_default_cpu(void) {
+	struct cpu* cpu = cpu_current();
+
+	if (uthread_cpu_online(cpu)) return cpu;
+
+	cpu = cpu_bsp();
+	if (uthread_cpu_online(cpu)) return cpu;
+
+	for (size_t i = 0; i < cpu_count(); i++) {
+		cpu = cpu_by_index(i);
+		if (uthread_cpu_online(cpu)) return cpu;
+	}
+
+	return NULL;
+}
+
+static void uthread_reap_callback(struct thread* thread, void* ctx) {
+	struct uthread_reaper* reaper;
+	struct uthread*        target = (struct uthread*)ctx;
+	struct irq_state       state;
+
+	(void)thread;
+	if (target == NULL) return;
+
+	reaper = uthread_reaper_for_cpu(cpu_current());
+	if (reaper == NULL || !reaper->started) return;
+
+	state               = spinlock_lock_irqsave(&reaper->wait_queue.lock);
+	target->reaper_next = NULL;
+	if (reaper->tail == NULL) {
+		reaper->head = target;
+	}
+	else {
+		reaper->tail->reaper_next = target;
+	}
+	reaper->tail = target;
+	spinlock_unlock_irqrestore(&reaper->wait_queue.lock, state);
+
+	(void)sched_wake_one(&reaper->wait_queue);
+}
+
+static bool uthread_reaper_start_cpu(struct cpu* cpu) {
+	struct uthread_reaper*    reaper;
+	struct irq_state          state;
+	struct kthread*           reaper_thread = NULL;
+	enum kthread_spawn_result result;
+
+	reaper = uthread_reaper_for_cpu(cpu);
+	if (reaper == NULL || !uthread_cpu_online(cpu)) return false;
+
+	for (;;) {
+		state = spinlock_lock_irqsave(&reaper->wait_queue.lock);
+		if (reaper->started) {
+			spinlock_unlock_irqrestore(&reaper->wait_queue.lock, state);
+			return true;
+		}
+		if (!reaper->starting) {
+			reaper->starting = true;
+			spinlock_unlock_irqrestore(&reaper->wait_queue.lock, state);
+			break;
+		}
+		spinlock_unlock_irqrestore(&reaper->wait_queue.lock, state);
+		spinlock_relax();
+	}
+
+	result = kthread_spawn_on_cpu(&reaper_thread, "uthread/reaper", uthread_reaper_entry, reaper, cpu);
+
+	state            = spinlock_lock_irqsave(&reaper->wait_queue.lock);
+	reaper->starting = false;
+	if (result == KTHREAD_SPAWN_OK) {
+		reaper->thread  = reaper_thread;
+		reaper->started = true;
+	}
+	spinlock_unlock_irqrestore(&reaper->wait_queue.lock, state);
+
+	if (result != KTHREAD_SPAWN_OK) {
+		(void)kthread_destroy(reaper_thread);
+		return false;
+	}
+	return true;
+}
+
+static struct cpu* uthread_reaper_target_cpu(const struct uthread_start_params* params) {
+	struct cpu* cpu;
+
+	if (params == NULL) return NULL;
+	if (uthread_cpu_online(params->preferred_cpu)) return params->preferred_cpu;
+
+	cpu = uthread_default_cpu();
+	return cpu;
+}
+
+static enum uthread_start_result uthread_start_prepared(struct uthread*                    thread,
+                                                        const struct uthread_start_params* params, bool heap_allocated,
+                                                        bool reap_on_exit);
+
+static enum uthread_start_result
+uthread_start_internal(struct uthread* thread, const struct uthread_start_params* params, bool heap_allocated) {
+	struct uthread_start_params effective_params;
+	struct cpu*                 reaper_cpu = NULL;
+
+	if (thread == NULL || params == NULL) return UTHREAD_START_INVALID_ARGUMENTS;
+
+	effective_params = *params;
+	if (effective_params.detached) {
+		reaper_cpu = uthread_reaper_target_cpu(&effective_params);
+		if (!uthread_reaper_start_cpu(reaper_cpu)) return UTHREAD_START_REAPER_UNAVAILABLE;
+		effective_params.preferred_cpu = reaper_cpu;
+	}
+
+	return uthread_start_prepared(thread, &effective_params, heap_allocated, effective_params.detached);
+}
+
+static enum uthread_start_result uthread_start_prepared(struct uthread*                    thread,
+                                                        const struct uthread_start_params* params, bool heap_allocated,
+                                                        bool reap_on_exit) {
 	struct vmm_alloc_params user_stack_params = {
 		.align_pages = 1u,
 		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
@@ -58,6 +233,8 @@ enum uthread_start_result uthread_start(struct uthread* thread, const struct uth
 		.address_space   = params->address_space,
 		.user_stack_id   = VMM_ID_INVALID,
 		.kernel_stack_id = VMM_ID_INVALID,
+		.reaper_next     = NULL,
+		.heap_allocated  = heap_allocated,
 	};
 
 	user_stack_pages = params->user_stack_pages != 0u ? params->user_stack_pages : UTHREAD_DEFAULT_USER_STACK_PAGES;
@@ -97,12 +274,57 @@ enum uthread_start_result uthread_start(struct uthread* thread, const struct uth
 		uthread_release_stacks(thread);
 		return UTHREAD_START_INVALID_ARGUMENTS;
 	}
+	if (reap_on_exit) thread_set_reap_callback(&thread->thread, uthread_reap_callback, thread);
 	if (!sched_make_runnable(&thread->thread)) {
 		uthread_release_stacks(thread);
 		return UTHREAD_START_SCHEDULER_REJECTED;
 	}
 
 	return UTHREAD_START_OK;
+}
+
+enum uthread_start_result uthread_start(struct uthread* thread, const struct uthread_start_params* params) {
+	return uthread_start_internal(thread, params, false);
+}
+
+enum uthread_start_result uthread_spawn_detached(const struct uthread_start_params* params) {
+	struct uthread_start_params effective_params;
+	struct uthread*             thread;
+	enum uthread_start_result   result;
+
+	if (params == NULL) return UTHREAD_START_INVALID_ARGUMENTS;
+
+	thread = kmalloc(sizeof(*thread));
+	if (thread == NULL) return UTHREAD_START_NO_MEMORY;
+	*thread = (struct uthread){
+		.user_stack_id   = VMM_ID_INVALID,
+		.kernel_stack_id = VMM_ID_INVALID,
+		.heap_allocated  = true,
+	};
+
+	effective_params          = *params;
+	effective_params.detached = true;
+	result                    = uthread_start_internal(thread, &effective_params, true);
+	if (result != UTHREAD_START_OK) {
+		uthread_free(thread);
+		return result;
+	}
+	return UTHREAD_START_OK;
+}
+
+bool uthread_detach(struct uthread* thread) {
+	struct cpu* target_cpu;
+
+	if (thread == NULL) return false;
+	target_cpu = uthread_cpu_online(thread->thread.preferred_cpu) ? thread->thread.preferred_cpu : thread->thread.cpu;
+	if (!uthread_cpu_online(target_cpu)) target_cpu = uthread_default_cpu();
+	if (!uthread_reaper_start_cpu(target_cpu)) return false;
+
+	thread->thread.preferred_cpu = target_cpu;
+	if (!thread_detach(&thread->thread)) return false;
+
+	thread_set_reap_callback(&thread->thread, uthread_reap_callback, thread);
+	return true;
 }
 
 bool uthread_deinit(struct uthread* thread) {
@@ -115,4 +337,38 @@ bool uthread_deinit(struct uthread* thread) {
 	thread->user_stack_id   = VMM_ID_INVALID;
 	thread->kernel_stack_id = VMM_ID_INVALID;
 	return true;
+}
+
+static struct uthread* uthread_reaper_dequeue(struct uthread_reaper* reaper) {
+	struct irq_state state;
+	struct uthread*  target;
+
+	if (reaper == NULL) return NULL;
+
+	state  = spinlock_lock_irqsave(&reaper->wait_queue.lock);
+	target = reaper->head;
+	if (target != NULL) {
+		reaper->head = target->reaper_next;
+		if (reaper->head == NULL) reaper->tail = NULL;
+		target->reaper_next = NULL;
+	}
+	spinlock_unlock_irqrestore(&reaper->wait_queue.lock, state);
+	return target;
+}
+
+static void uthread_reaper_entry(void* arg) {
+	struct uthread_reaper* reaper = arg;
+
+	thread_set_cancel_enabled(kthread_current(), false);
+	for (;;) {
+		struct uthread* target = uthread_reaper_dequeue(reaper);
+
+		if (target != NULL) {
+			uthread_free(target);
+			continue;
+		}
+
+		if (reaper != NULL) sched_block_current(&reaper->wait_queue, THREAD_BLOCK_WAIT_QUEUE);
+		else sched_yield();
+	}
 }

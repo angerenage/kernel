@@ -21,6 +21,7 @@ hal_mock_sources = files(
 	'mocks/hal/cpu.c',
 	'mocks/hal/interrupts.c',
 	'mocks/hal/paging.c',
+	'mocks/hal/userspace.c',
 )
 
 core_test_lib = static_library(
@@ -105,6 +106,15 @@ test_suites = [
 		'name': 'thread',
 		'sources': files(
 			'core/thread_test.c',
+		),
+		'suites': ['unit', 'core'],
+	},
+	{
+		'name': 'uthread',
+		'sources': files(
+			'vmm/test_support.c',
+			'vmm/mock_paging.c',
+			'core/uthread_test.c',
 		),
 		'suites': ['unit', 'core'],
 	},
