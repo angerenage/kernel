@@ -119,6 +119,15 @@ test_suites = [
 		'suites': ['unit', 'core'],
 	},
 	{
+		'name': 'process',
+		'sources': files(
+			'vmm/test_support.c',
+			'vmm/mock_paging.c',
+			'core/process_test.c',
+		),
+		'suites': ['unit', 'core'],
+	},
+	{
 		'name': 'cpu_spinlock',
 		'sources': files(
 			'core/cpu_spinlock_test.c',
