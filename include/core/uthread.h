@@ -1,5 +1,6 @@
 #pragma once
 
+#include <core/process.h>
 #include <core/thread.h>
 #include <core/vmm.h>
 #include <stdbool.h>
@@ -21,23 +22,23 @@ enum uthread_start_result {
 };
 
 struct uthread_start_params {
-	const char*           name;
-	struct address_space* address_space;
-	uintptr_t             user_entry;
-	uintptr_t             user_arg;
-	size_t                user_stack_pages;
-	struct cpu*           preferred_cpu;
-	bool                  detached;
+	const char*     name;
+	struct process* process;
+	uintptr_t       user_entry;
+	uintptr_t       user_arg;
+	size_t          user_stack_pages;
+	struct cpu*     preferred_cpu;
+	bool            detached;
 };
 
 struct uthread {
-	struct thread         thread;
-	struct address_space* address_space;
-	vmm_id_t              user_stack_id;
-	vmm_id_t              kernel_stack_id;
-	uintptr_t             user_stack_top;
-	struct uthread*       reaper_next;
-	bool                  heap_allocated;
+	struct thread   thread;
+	struct process* process;
+	vmm_id_t        user_stack_id;
+	vmm_id_t        kernel_stack_id;
+	uintptr_t       user_stack_top;
+	struct uthread* reaper_next;
+	bool            heap_allocated;
 };
 
 /* Initialize caller-owned userspace thread storage and queue it on the scheduler. */
@@ -45,8 +46,8 @@ enum uthread_start_result uthread_start(struct uthread* thread, const struct uth
 
 /*
  * Allocate, initialize, and queue a detached userspace thread.
- * The user address space remains caller-owned; the thread descriptor and stacks
- * are reclaimed by the user-thread reaper after exit.
+ * The process remains caller-owned; the thread descriptor and stacks are
+ * reclaimed by the user-thread reaper after exit.
  */
 enum uthread_start_result uthread_spawn_detached(const struct uthread_start_params* params);
 

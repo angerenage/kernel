@@ -76,6 +76,41 @@ bool process_destroy(struct process* process) {
 	return true;
 }
 
+process_id_t process_pid(const struct process* process) {
+	return process == NULL ? PROCESS_PID_INVALID : process->pid;
+}
+
+struct address_space* process_address_space(struct process* process) {
+	return process == NULL ? NULL : &process->address_space;
+}
+
+bool process_attach_thread(struct process* process) {
+	struct irq_state state;
+	bool             attached = false;
+
+	if (process == NULL) return false;
+
+	state = spinlock_lock_irqsave(&process->lock);
+	if ((process->state == PROCESS_STATE_NEW || process->state == PROCESS_STATE_RUNNING) &&
+	    process->thread_count != SIZE_MAX) {
+		process->thread_count++;
+		process->state = PROCESS_STATE_RUNNING;
+		attached       = true;
+	}
+	spinlock_unlock_irqrestore(&process->lock, state);
+	return attached;
+}
+
+void process_detach_thread(struct process* process) {
+	struct irq_state state;
+
+	if (process == NULL) return;
+
+	state = spinlock_lock_irqsave(&process->lock);
+	if (process->thread_count != 0u) process->thread_count--;
+	spinlock_unlock_irqrestore(&process->lock, state);
+}
+
 enum process_state process_get_state(struct process* process) {
 	enum process_state state;
 	struct irq_state   irq_state;

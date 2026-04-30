@@ -2,6 +2,7 @@
 #include <core/kheap.h>
 #include <core/mm.h>
 #include <core/pmm.h>
+#include <core/process.h>
 #include <core/sched.h>
 #include <core/thread.h>
 #include <core/uthread.h>
@@ -73,15 +74,15 @@ static void init_uthread_test_environment(void) {
 }
 
 Test(uthread, detached_start_registers_reaper_before_queueing) {
-	struct address_space user_space = {0};
-	struct uthread       worker     = {
-				  .user_stack_id   = VMM_ID_INVALID,
-				  .kernel_stack_id = VMM_ID_INVALID,
+	struct process* process = NULL;
+	struct uthread  worker  = {
+		  .user_stack_id   = VMM_ID_INVALID,
+		  .kernel_stack_id = VMM_ID_INVALID,
     };
-	enum uthread_start_result         result;
-	const struct uthread_start_params params = {
+	enum uthread_start_result   result;
+	struct uthread_start_params params = {
 		.name             = "user/detached",
-		.address_space    = &user_space,
+		.process          = NULL,
 		.user_entry       = 0x400000u,
 		.user_arg         = 0x1234u,
 		.user_stack_pages = 2u,
@@ -90,16 +91,52 @@ Test(uthread, detached_start_registers_reaper_before_queueing) {
 	};
 
 	init_uthread_test_environment();
-	cr_assert(vmm_user_address_space_init(&user_space), "vmm_user_address_space_init failed");
+	cr_assert_eq(process_create(&process, "test/process"), PROCESS_CREATE_OK, "process_create failed");
+	params.process = process;
 
 	result = uthread_start(&worker, &params);
 	cr_assert_eq(result, UTHREAD_START_OK, "uthread_start failed: %d", result);
 
+	cr_assert_eq(worker.process, process, "uthread should retain its owning process");
+	cr_assert_eq(worker.thread.address_space,
+	             process_address_space(process),
+	             "scheduler thread should use the process address space");
+	cr_assert_eq(process_thread_count(process), 1u, "started uthread should attach to its process");
+	cr_assert_eq(
+		process_get_state(process), PROCESS_STATE_RUNNING, "process should become running after thread attach");
+	cr_assert(!process_destroy(process), "process_destroy must reject a process with live threads");
 	cr_assert(!thread_is_joinable(&worker.thread), "detached user thread must not be joinable");
 	cr_assert_not_null(worker.thread.reap_callback, "detached user thread must have a reaper callback");
 	cr_assert_eq(worker.thread.reap_context, &worker, "reaper callback should receive the uthread wrapper");
 	cr_assert_eq(worker.heap_allocated, false, "caller-owned uthread_start must not mark storage heap-owned");
 	cr_assert_eq(sched_run_queue_depth(cpu_current()), 2u, "user thread and reaper should both be runnable");
+}
 
-	vmm_address_space_deinit(&user_space);
+Test(uthread, deinit_detaches_joinable_thread_from_process) {
+	struct process* process = NULL;
+	struct uthread  worker  = {
+		  .user_stack_id   = VMM_ID_INVALID,
+		  .kernel_stack_id = VMM_ID_INVALID,
+    };
+	struct uthread_start_params params = {
+		.name             = "user/joinable",
+		.process          = NULL,
+		.user_entry       = 0x400000u,
+		.user_arg         = 0x5678u,
+		.user_stack_pages = 2u,
+		.preferred_cpu    = NULL,
+		.detached         = false,
+	};
+
+	init_uthread_test_environment();
+	cr_assert_eq(process_create(&process, "test/process"), PROCESS_CREATE_OK, "process_create failed");
+	params.process = process;
+
+	cr_assert_eq(uthread_start(&worker, &params), UTHREAD_START_OK, "uthread_start failed");
+	cr_assert_eq(process_thread_count(process), 1u, "started uthread should attach to process");
+
+	thread_mark_zombie(&worker.thread);
+	cr_assert(uthread_deinit(&worker), "uthread_deinit should reclaim terminated joinable user thread");
+	cr_assert_eq(process_thread_count(process), 0u, "uthread_deinit should detach from process");
+	cr_assert(process_destroy(process), "process_destroy should succeed after uthread_deinit");
 }

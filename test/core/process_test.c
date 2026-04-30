@@ -62,11 +62,11 @@ Test(process, create_initializes_pid_state_and_user_address_space) {
 	result = process_create(&process, "init");
 	cr_assert_eq(result, PROCESS_CREATE_OK, "process_create failed: %d", result);
 	cr_assert_not_null(process, "process_create did not return a process");
-	cr_assert_neq(process->pid, PROCESS_PID_INVALID, "process pid should be valid");
+	cr_assert_neq(process_pid(process), PROCESS_PID_INVALID, "process pid should be valid");
 	cr_assert_eq(process_get_state(process), PROCESS_STATE_NEW, "new process should start in NEW state");
 	cr_assert_eq(process_thread_count(process), 0u, "new process should not have attached threads");
 
-	space = &process->address_space;
+	space = process_address_space(process);
 	cr_assert_not_null(space, "process address space should be exposed");
 	cr_assert(address_space_is_initialized(space), "process address space should be initialized");
 	cr_assert_eq(address_space_total_page_count(space), MM_USER_VMM_SIZE / PMM_PAGE_SIZE);
@@ -86,8 +86,8 @@ Test(process, create_assigns_monotonic_pids) {
 	cr_assert_eq(process_create(&first, "first"), PROCESS_CREATE_OK);
 	cr_assert_eq(process_create(&second, "second"), PROCESS_CREATE_OK);
 
-	first_pid  = first->pid;
-	second_pid = second->pid;
+	first_pid  = process_pid(first);
+	second_pid = process_pid(second);
 	cr_assert_neq(first_pid, PROCESS_PID_INVALID);
 	cr_assert_neq(second_pid, PROCESS_PID_INVALID);
 	cr_assert(second_pid > first_pid, "second pid should be greater than first pid");
@@ -100,4 +100,20 @@ Test(process, create_rejects_missing_output_pointer) {
 	init_process_test_environment();
 
 	cr_assert_eq(process_create(NULL, "invalid"), PROCESS_CREATE_INVALID_ARGUMENTS);
+}
+
+Test(process, thread_attach_blocks_destroy_until_detached) {
+	struct process* process = NULL;
+
+	init_process_test_environment();
+
+	cr_assert_eq(process_create(&process, "thread-owner"), PROCESS_CREATE_OK);
+	cr_assert(process_attach_thread(process), "process_attach_thread failed");
+	cr_assert_eq(process_thread_count(process), 1u);
+	cr_assert_eq(process_get_state(process), PROCESS_STATE_RUNNING);
+	cr_assert(!process_destroy(process), "process_destroy should reject an attached thread");
+
+	process_detach_thread(process);
+	cr_assert_eq(process_thread_count(process), 0u);
+	cr_assert(process_destroy(process), "process_destroy should succeed after detach");
 }

@@ -42,6 +42,18 @@ enum process_create_result process_create(struct process** out_process, const ch
 /* Destroy a process with no attached threads and release its user address space. */
 bool process_destroy(struct process* process);
 
+/* Return a process PID, or PROCESS_PID_INVALID for NULL. */
+process_id_t process_pid(const struct process* process);
+
+/* Return the mutable user address space owned by process. */
+struct address_space* process_address_space(struct process* process);
+
+/* Attach one userspace thread to process, transitioning NEW to RUNNING. */
+bool process_attach_thread(struct process* process);
+
+/* Detach one userspace thread from process after the thread can no longer run. */
+void process_detach_thread(struct process* process);
+
 /* Return the current process state. */
 enum process_state process_get_state(struct process* process);
 
