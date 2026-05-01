@@ -52,6 +52,7 @@ static enum process_result process_create(struct process** out_process, const ch
 	process->name  = name;
 	process->state = PROCESS_STATE_NEW;
 	spinlock_init_class(&process->lock, "process", SPINLOCK_ORDER_PROCESS, SPINLOCK_FLAG_IRQSAVE);
+	thread_wait_queue_init(&process->join_wait_queue);
 
 	if (!vmm_user_address_space_init(&process->address_space)) {
 		kfree(process);
@@ -84,6 +85,27 @@ static enum process_result process_result_from_uthread(enum uthread_start_result
 	}
 }
 
+static bool process_all_threads_terminated_locked(const struct process* process) {
+	const struct uthread* cursor;
+
+	if (process == NULL || process->thread_head == NULL) return true;
+
+	cursor = process->thread_head;
+	while (cursor != NULL) {
+		if (!thread_is_terminated(&cursor->thread)) return false;
+		cursor = cursor->process_next;
+	}
+	return true;
+}
+
+static bool process_mark_zombie_if_complete_locked(struct process* process) {
+	if (process == NULL || process->state == PROCESS_STATE_ZOMBIE) return false;
+	if (!process_all_threads_terminated_locked(process)) return false;
+
+	process->state = PROCESS_STATE_ZOMBIE;
+	return true;
+}
+
 enum process_result process_create_thread(struct process* process, struct uthread* thread,
                                           const struct process_thread_params* params) {
 	enum uthread_start_result result;
@@ -101,6 +123,116 @@ enum process_result process_create_thread(struct process* process, struct uthrea
 							   .detached         = params->detached,
 						   });
 	return process_result_from_uthread(result);
+}
+
+bool process_terminate(struct process* process, uintptr_t exit_code) {
+	struct irq_state state;
+	struct irq_state wait_state;
+	struct uthread*  cursor;
+	struct thread*   current;
+	bool             current_in_process = false;
+	bool             wake_joiners       = false;
+
+	if (process == NULL) return false;
+
+	wait_state = spinlock_lock_irqsave(&process->join_wait_queue.lock);
+	state      = spinlock_lock_irqsave(&process->lock);
+	if (process->state == PROCESS_STATE_ZOMBIE) {
+		spinlock_unlock_irqrestore(&process->lock, state);
+		spinlock_unlock_irqrestore(&process->join_wait_queue.lock, wait_state);
+		return false;
+	}
+
+	if (process->state != PROCESS_STATE_EXITING) {
+		process->exit_code = exit_code;
+		process->state     = PROCESS_STATE_EXITING;
+	}
+
+	current = sched_current_thread();
+	cursor  = process->thread_head;
+	while (cursor != NULL) {
+		if (&cursor->thread == current) current_in_process = true;
+		cursor = cursor->process_next;
+	}
+
+	wake_joiners = process_mark_zombie_if_complete_locked(process);
+	spinlock_unlock_irqrestore(&process->lock, state);
+	spinlock_unlock_irqrestore(&process->join_wait_queue.lock, wait_state);
+
+	cursor = process->thread_head;
+	while (cursor != NULL) {
+		struct uthread* next = cursor->process_next;
+
+		if (&cursor->thread != current) (void)thread_request_cancel(&cursor->thread);
+		cursor = next;
+	}
+
+	if (wake_joiners) (void)sched_wake_all(&process->join_wait_queue);
+	if (current_in_process) sched_exit_current(exit_code);
+	return true;
+}
+
+enum process_join_result process_join(struct process* process, uintptr_t* out_exit_code) {
+	struct thread* current;
+
+	if (process == NULL) return PROCESS_JOIN_INVALID_ARGUMENTS;
+
+	current = sched_current_thread();
+	if (current != NULL && current->process == process) return PROCESS_JOIN_SELF;
+
+	for (;;) {
+		struct irq_state wait_state;
+		struct irq_state state;
+		uintptr_t        exit_code;
+
+		wait_state = spinlock_lock_irqsave(&process->join_wait_queue.lock);
+		state      = spinlock_lock_irqsave(&process->lock);
+
+		(void)process_mark_zombie_if_complete_locked(process);
+		if (process->detached) {
+			spinlock_unlock_irqrestore(&process->lock, state);
+			spinlock_unlock_irqrestore(&process->join_wait_queue.lock, wait_state);
+			return PROCESS_JOIN_DETACHED;
+		}
+		if (process->joined) {
+			spinlock_unlock_irqrestore(&process->lock, state);
+			spinlock_unlock_irqrestore(&process->join_wait_queue.lock, wait_state);
+			return PROCESS_JOIN_ALREADY_JOINED;
+		}
+		if (process->state == PROCESS_STATE_ZOMBIE) {
+			process->joined = true;
+			exit_code       = process->exit_code;
+			spinlock_unlock_irqrestore(&process->lock, state);
+			spinlock_unlock_irqrestore(&process->join_wait_queue.lock, wait_state);
+			if (out_exit_code != NULL) *out_exit_code = exit_code;
+			return PROCESS_JOIN_OK;
+		}
+
+		spinlock_unlock_irqrestore(&process->lock, state);
+		if (!sched_block_current_locked(&process->join_wait_queue, THREAD_BLOCK_JOIN, wait_state)) {
+			return PROCESS_JOIN_WAIT_FAILED;
+		}
+	}
+}
+
+enum process_detach_result process_detach(struct process* process) {
+	struct irq_state state;
+
+	if (process == NULL) return PROCESS_DETACH_INVALID_ARGUMENTS;
+
+	state = spinlock_lock_irqsave(&process->lock);
+	if (process->joined) {
+		spinlock_unlock_irqrestore(&process->lock, state);
+		return PROCESS_DETACH_ALREADY_JOINED;
+	}
+	if (process->detached) {
+		spinlock_unlock_irqrestore(&process->lock, state);
+		return PROCESS_DETACH_ALREADY_DETACHED;
+	}
+
+	process->detached = true;
+	spinlock_unlock_irqrestore(&process->lock, state);
+	return PROCESS_DETACH_OK;
 }
 
 enum process_result process_spawn(struct process** out_process, const struct process_spawn_params* params) {
@@ -228,4 +360,24 @@ size_t process_thread_count(struct process* process) {
 struct process* process_current(void) {
 	struct thread* current = sched_current_thread();
 	return current == NULL ? NULL : current->process;
+}
+
+void process_notify_thread_exit(struct process* process, struct thread* thread, uintptr_t exit_code) {
+	struct irq_state state;
+	struct irq_state wait_state;
+	bool             wake_joiners;
+
+	if (process == NULL || thread == NULL) return;
+
+	wait_state = spinlock_lock_irqsave(&process->join_wait_queue.lock);
+	state      = spinlock_lock_irqsave(&process->lock);
+	if (thread->process == process && process->state != PROCESS_STATE_EXITING &&
+	    process->state != PROCESS_STATE_ZOMBIE) {
+		process->exit_code = exit_code;
+	}
+	wake_joiners = process_mark_zombie_if_complete_locked(process);
+	spinlock_unlock_irqrestore(&process->lock, state);
+	spinlock_unlock_irqrestore(&process->join_wait_queue.lock, wait_state);
+
+	if (wake_joiners) (void)sched_wake_all(&process->join_wait_queue);
 }

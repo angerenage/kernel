@@ -1,4 +1,5 @@
 #include <core/cpu.h>
+#include <core/process.h>
 #include <core/sched.h>
 #include <core/spinlock.h>
 #include <core/thread.h>
@@ -918,6 +919,7 @@ void sched_exit_current(thread_exit_code_t exit_code) {
 	thread_mark_exiting(current, exit_code);
 	(void)sched_wake_all(&current->join_wait_queue);
 	thread_mark_zombie(current);
+	process_notify_thread_exit(current->process, current, exit_code);
 	thread_notify_reap(current);
 	sched_dispatch_next(cpu);
 

@@ -272,3 +272,72 @@ Test(process, destroy_rejects_live_main_thread) {
 	thread_mark_zombie(&process->main_thread->thread);
 	cr_assert(process_destroy(process), "process_destroy should succeed after main thread exits");
 }
+
+Test(process, terminate_marks_process_exiting_and_requests_thread_cancellation) {
+	struct process* process = NULL;
+
+	init_process_test_environment();
+
+	cr_assert_eq(process_spawn(&process,
+	                           &(const struct process_spawn_params){
+								   .name       = "terminating",
+								   .user_entry = 0x400000u,
+							   }),
+	             PROCESS_OK);
+
+	cr_assert_eq(
+		process_terminate(process, 77u), PROCESS_TERMINATE_OK, "process_terminate should accept a running process");
+	cr_assert_eq(process_get_state(process), PROCESS_STATE_EXITING, "process should enter EXITING state");
+	cr_assert_eq(process->exit_code, 77u, "process_terminate should publish the process exit code");
+	cr_assert(thread_cancel_requested(&process->main_thread->thread), "process threads should receive cancellation");
+
+	thread_mark_zombie(&process->main_thread->thread);
+	process_notify_thread_exit(process, &process->main_thread->thread, 77u);
+	cr_assert_eq(process_get_state(process), PROCESS_STATE_ZOMBIE, "last thread exit should make process zombie");
+	cr_assert(process_destroy(process), "process_destroy should reclaim the terminated process");
+}
+
+Test(process, join_returns_zombie_exit_code_once) {
+	struct process* process   = NULL;
+	uintptr_t       exit_code = 0u;
+
+	init_process_test_environment();
+
+	cr_assert_eq(process_spawn(&process,
+	                           &(const struct process_spawn_params){
+								   .name       = "joinable",
+								   .user_entry = 0x400000u,
+							   }),
+	             PROCESS_OK);
+
+	cr_assert_eq(process_terminate(process, 123u), PROCESS_TERMINATE_OK);
+	thread_mark_zombie(&process->main_thread->thread);
+	process_notify_thread_exit(process, &process->main_thread->thread, 123u);
+
+	cr_assert_eq(process_join(process, &exit_code), PROCESS_JOIN_OK, "join should accept a zombie process");
+	cr_assert_eq(exit_code, 123u, "join should publish the process exit code");
+	cr_assert_eq(process_join(process, NULL), PROCESS_JOIN_ALREADY_JOINED, "process should be joined only once");
+
+	cr_assert(process_destroy(process), "process_destroy should reclaim a joined zombie process");
+}
+
+Test(process, detach_prevents_later_join) {
+	struct process* process = NULL;
+
+	init_process_test_environment();
+
+	cr_assert_eq(process_spawn(&process,
+	                           &(const struct process_spawn_params){
+								   .name       = "detached",
+								   .user_entry = 0x400000u,
+							   }),
+	             PROCESS_OK);
+
+	cr_assert_eq(process_detach(process), PROCESS_DETACH_OK, "process_detach should accept a joinable process");
+	cr_assert_eq(process_detach(process), PROCESS_DETACH_ALREADY_DETACHED, "process_detach should reject repeats");
+	cr_assert_eq(process_join(process, NULL), PROCESS_JOIN_DETACHED, "detached process should not be joinable");
+
+	thread_mark_zombie(&process->main_thread->thread);
+	process_notify_thread_exit(process, &process->main_thread->thread, 0u);
+	cr_assert(process_destroy(process), "process_destroy should reclaim detached zombie process");
+}
