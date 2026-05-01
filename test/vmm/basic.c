@@ -1,6 +1,9 @@
+#include <core/cpu.h>
 #include <core/pmm.h>
+#include <core/thread.h>
 #include <core/vaddr_alloc.h>
 #include <core/vmm.h>
+#include <hal/cpu.h>
 #include <hal/paging.h>
 
 #include "test_support.h"
@@ -257,6 +260,66 @@ Test(vmm, refuses_page_fault_resolution_for_non_lazy_allocations) {
 
 	cr_assert(vmm_free(address_space_kernel(), alloc_id), "vmm_free failed after rejected fault resolution");
 	cr_assert_eq(pmm_free_page_count(), free_before, "rejected fault resolution leaked physical pages");
+}
+
+Test(vmm, current_page_fault_resolution_uses_thread_space_then_kernel_space) {
+	_Alignas(4096) uint8_t   arena[KiB(512)];
+	struct address_space     user_space = {0};
+	struct hal_address_space user_hal_space;
+	struct thread            current     = {0};
+	struct vmm_alloc_params  user_params = {
+		 .page_count  = 1,
+		 .align_pages = 1,
+		 .prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
+		 .kind        = VMM_KIND_HEAP,
+		 .map_flags   = VMM_MAP_LAZY,
+    };
+	struct vmm_alloc_params kernel_params = {
+		.page_count  = 1,
+		.align_pages = 1,
+		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_GLOBAL,
+		.kind        = VMM_KIND_HEAP,
+		.map_flags   = VMM_MAP_LAZY,
+	};
+	vmm_id_t  user_id     = VMM_ID_INVALID;
+	vmm_id_t  kernel_id   = VMM_ID_INVALID;
+	void*     user_base   = NULL;
+	void*     kernel_base = NULL;
+	uintptr_t phys;
+	uint64_t  flags;
+
+	init_test_vmm(arena, sizeof(arena));
+	hal_cpu_local_bind(NULL);
+	cr_assert(cpu_topology_init_bootstrap(0x100000u, 0x104000u), "cpu_topology_init_bootstrap failed");
+	cpu_bind_current(cpu_bsp());
+	cr_assert(hal_paging_space_create(&user_hal_space), "hal_paging_space_create failed");
+	cr_assert(address_space_init(&user_space, 0x40000000u, 16u), "address_space_init failed for user space");
+	user_space.hal_space = user_hal_space;
+
+	current.address_space         = &user_space;
+	cpu_current()->current_thread = &current;
+
+	cr_assert(vmm_alloc(&user_space, &user_params, &user_id, &user_base), "user lazy vmm_alloc failed");
+	cr_assert(vmm_alloc(address_space_kernel(), &kernel_params, &kernel_id, &kernel_base),
+	          "kernel lazy vmm_alloc failed");
+
+	cr_assert(vmm_resolve_current_page_fault((uintptr_t)user_base),
+	          "current fault resolution did not handle the user address space");
+	cr_assert(hal_paging_query(address_space_hal(&user_space), (uintptr_t)user_base, &phys, &flags),
+	          "user fault did not map into the current thread address space");
+	cr_assert_eq(flags, (uint64_t)(HAL_PAGE_WRITE | HAL_PAGE_USER), "user fault used incorrect mapping flags");
+
+	cr_assert(vmm_resolve_current_page_fault((uintptr_t)kernel_base),
+	          "current fault resolution did not fall back to the kernel address space");
+	cr_assert(hal_paging_query(hal_paging_kernel_space(), (uintptr_t)kernel_base, &phys, &flags),
+	          "kernel fallback fault did not map into the kernel address space");
+	cr_assert_eq(flags, (uint64_t)(HAL_PAGE_WRITE | HAL_PAGE_GLOBAL), "kernel fault used incorrect mapping flags");
+
+	cpu_current()->current_thread = NULL;
+	cr_assert(vmm_free(address_space_kernel(), kernel_id), "vmm_free failed for kernel allocation");
+	cr_assert(vmm_free(&user_space, user_id), "vmm_free failed for user allocation");
+	vmm_address_space_deinit(&user_space);
+	hal_cpu_local_bind(NULL);
 }
 
 Test(vmm, rolls_back_partial_mappings_on_eager_map_failure) {

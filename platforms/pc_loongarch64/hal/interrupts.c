@@ -1,6 +1,5 @@
 #include <core/cpu.h>
 #include <core/sched.h>
-#include <core/vaddr_alloc.h>
 #include <core/vmm.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
@@ -214,7 +213,7 @@ void handle_exception(struct exception_frame* frame) {
 	is_pending = frame->estat & 0x1fffu;
 	esubcode   = (frame->estat >> 22) & 0x1ffu;
 
-	if (is_page_invalid_exception(ecode) && vmm_resolve_page_fault(address_space_kernel(), frame->badv)) {
+	if (is_page_invalid_exception(ecode) && vmm_resolve_current_page_fault(frame->badv)) {
 		cpu_leave_exception();
 		return;
 	}

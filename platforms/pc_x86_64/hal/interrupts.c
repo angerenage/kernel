@@ -1,6 +1,5 @@
 #include <core/cpu.h>
 #include <core/sched.h>
-#include <core/vaddr_alloc.h>
 #include <core/vmm.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
@@ -270,7 +269,7 @@ void x86_64_handle_interrupt(struct interrupt_frame* frame) {
 
 	fault_addr = vector == 14u ? read_cr2() : 0;
 	if (vector == 14u && x86_page_fault_is_not_present(frame->error_code) &&
-	    vmm_resolve_page_fault(address_space_kernel(), (uintptr_t)fault_addr)) {
+	    vmm_resolve_current_page_fault((uintptr_t)fault_addr)) {
 		if (trap_context) cpu_leave_exception();
 		return;
 	}

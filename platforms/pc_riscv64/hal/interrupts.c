@@ -1,6 +1,5 @@
 #include <core/cpu.h>
 #include <core/sched.h>
-#include <core/vaddr_alloc.h>
 #include <core/vmm.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
@@ -153,8 +152,7 @@ void handle_exception(struct exception_frame* frame) {
 		return;
 	}
 
-	if (!is_interrupt && is_page_fault_exception(code) &&
-	    vmm_resolve_page_fault(address_space_kernel(), frame->stval)) {
+	if (!is_interrupt && is_page_fault_exception(code) && vmm_resolve_current_page_fault(frame->stval)) {
 		cpu_leave_exception();
 		return;
 	}

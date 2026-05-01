@@ -1,6 +1,5 @@
 #include <core/cpu.h>
 #include <core/sched.h>
-#include <core/vaddr_alloc.h>
 #include <core/vmm.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
@@ -253,7 +252,7 @@ void handle_exception(struct exception_frame* frame) {
 	bool     ea    = ((iss >> 9) & 1u) != 0;
 	bool     fnv   = ((iss >> 10) & 1u) != 0;
 
-	if (!fnv && is_translation_fault(dfsc) && vmm_resolve_page_fault(address_space_kernel(), frame->far)) {
+	if (!fnv && is_translation_fault(dfsc) && vmm_resolve_current_page_fault(frame->far)) {
 		if (!is_irq) cpu_leave_exception();
 		return;
 	}

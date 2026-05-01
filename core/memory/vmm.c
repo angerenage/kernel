@@ -2,7 +2,9 @@
 #include <core/lock.h>
 #include <core/mm.h>
 #include <core/pmm.h>
+#include <core/sched.h>
 #include <core/spinlock.h>
+#include <core/thread.h>
 #include <core/vaddr_alloc.h>
 #include <core/vmm.h>
 #include <hal/paging.h>
@@ -788,6 +790,20 @@ bool vmm_resolve_page_fault(struct address_space* space, uintptr_t addr) {
 	ok         = map_allocation_for_fault_locked(space, allocation, addr);
 	spinlock_unlock_irqrestore(&vmm_lock, state);
 	return ok;
+}
+
+bool vmm_resolve_current_page_fault(uintptr_t addr) {
+	struct thread*        current;
+	struct address_space* current_space;
+	struct address_space* kernel_space;
+
+	current       = sched_current_thread();
+	current_space = current == NULL ? NULL : current->address_space;
+	kernel_space  = address_space_kernel();
+
+	if (current_space != NULL && vmm_resolve_page_fault(current_space, addr)) return true;
+	if (current_space == kernel_space) return false;
+	return vmm_resolve_page_fault(kernel_space, addr);
 }
 
 bool vmm_query(struct address_space* space, void* addr, struct vmm_info* out_info) {

@@ -109,6 +109,9 @@ bool vmm_protect(struct address_space* space, vmm_id_t id, vmm_prot_t new_prot);
 /* Resolve a lazy fault inside an explicit address space. */
 bool vmm_resolve_page_fault(struct address_space* space, uintptr_t addr);
 
+/* Resolve a lazy fault against the current address space. */
+bool vmm_resolve_current_page_fault(uintptr_t addr);
+
 /* Query the tracked allocation owning an address inside an explicit address space. */
 bool vmm_query(struct address_space* space, void* addr, struct vmm_info* out_info);
 
