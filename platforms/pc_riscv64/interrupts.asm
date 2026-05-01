@@ -2,12 +2,11 @@
 .global exception_entry
 .extern handle_exception
 .extern riscv64_maybe_preempt_on_interrupt_exit
-.extern riscv64_exception_entry_state
-.extern riscv64_exception_stack_bottom
-.extern riscv64_exception_stack_top
 
 .equ RISCV64_EXCEPTION_FRAME_SIZE, 288
 .equ RISCV64_EXCEPTION_META_SIZE, 8
+.equ RISCV64_EXCEPTION_STATE_STACK_BOTTOM, 32
+.equ RISCV64_EXCEPTION_STATE_STACK_TOP, 40
 
 .balign 4
 exception_entry:
@@ -17,14 +16,11 @@ exception_entry:
 	sd t2, 16(t0)
 	csrr t1, sscratch
 	sd t1, 24(t0)
-	la t1, riscv64_exception_entry_state
-	csrw sscratch, t1
+	csrw sscratch, t0
 
-	la t1, riscv64_exception_stack_bottom
-	ld t1, 0(t1)
+	ld t1, RISCV64_EXCEPTION_STATE_STACK_BOTTOM(t0)
 	bltu sp, t1, .Lriscv64_switch_stack
-	la t1, riscv64_exception_stack_top
-	ld t1, 0(t1)
+	ld t1, RISCV64_EXCEPTION_STATE_STACK_TOP(t0)
 	bgeu sp, t1, .Lriscv64_switch_stack
 
 	addi sp, sp, -RISCV64_EXCEPTION_META_SIZE
@@ -32,8 +28,7 @@ exception_entry:
 	j .Lriscv64_frame
 
 .Lriscv64_switch_stack:
-	la t1, riscv64_exception_stack_top
-	ld sp, 0(t1)
+	ld sp, RISCV64_EXCEPTION_STATE_STACK_TOP(t0)
 	addi sp, sp, -RISCV64_EXCEPTION_META_SIZE
 	ld t1, 0(t0)
 	sd t1, 0(sp)
