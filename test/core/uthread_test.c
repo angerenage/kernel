@@ -81,7 +81,7 @@ static struct process* spawn_owner_process(const char* name) {
 								   .name       = name,
 								   .user_entry = 0x300000u,
 							   }),
-	             PROCESS_SPAWN_OK,
+	             PROCESS_OK,
 	             "process_spawn failed");
 	cr_assert_not_null(process, "process_spawn returned NULL process");
 	return process;

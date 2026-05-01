@@ -8,14 +8,6 @@
 #include <stdint.h>
 #include <string.h>
 
-enum process_create_result {
-	PROCESS_CREATE_OK = 0,
-	PROCESS_CREATE_INVALID_ARGUMENTS,
-	PROCESS_CREATE_NO_MEMORY,
-	PROCESS_CREATE_ADDRESS_SPACE_FAILED,
-	PROCESS_CREATE_PID_EXHAUSTED,
-};
-
 static struct spinlock process_pid_lock =
 	SPINLOCK_INIT_CLASS("process_pid_lock", SPINLOCK_ORDER_PROCESS, SPINLOCK_FLAG_IRQSAVE);
 static process_id_t process_next_pid = 1u;
@@ -41,17 +33,17 @@ static bool process_alloc_pid(process_id_t* out_pid) {
 	return true;
 }
 
-static enum process_create_result process_create(struct process** out_process, const char* name) {
+static enum process_result process_create(struct process** out_process, const char* name) {
 	struct process* process;
 	process_id_t    pid;
 
-	if (out_process == NULL) return PROCESS_CREATE_INVALID_ARGUMENTS;
+	if (out_process == NULL) return PROCESS_INVALID_ARGUMENTS;
 	*out_process = NULL;
 
-	if (!process_alloc_pid(&pid)) return PROCESS_CREATE_PID_EXHAUSTED;
+	if (!process_alloc_pid(&pid)) return PROCESS_PID_EXHAUSTED;
 
 	process = kmalloc(sizeof(*process));
-	if (process == NULL) return PROCESS_CREATE_NO_MEMORY;
+	if (process == NULL) return PROCESS_NO_MEMORY;
 
 	memset(process, 0, sizeof(*process));
 	process->pid   = pid;
@@ -61,52 +53,38 @@ static enum process_create_result process_create(struct process** out_process, c
 
 	if (!vmm_user_address_space_init(&process->address_space)) {
 		kfree(process);
-		return PROCESS_CREATE_ADDRESS_SPACE_FAILED;
+		return PROCESS_ADDRESS_SPACE_FAILED;
 	}
 
 	*out_process = process;
-	return PROCESS_CREATE_OK;
+	return PROCESS_OK;
 }
 
-static enum process_spawn_result process_spawn_result_from_create(enum process_create_result result) {
-	switch (result) {
-	case PROCESS_CREATE_OK:
-		return PROCESS_SPAWN_OK;
-	case PROCESS_CREATE_INVALID_ARGUMENTS:
-		return PROCESS_SPAWN_INVALID_ARGUMENTS;
-	case PROCESS_CREATE_NO_MEMORY:
-	case PROCESS_CREATE_ADDRESS_SPACE_FAILED:
-	case PROCESS_CREATE_PID_EXHAUSTED:
-	default:
-		return PROCESS_SPAWN_CREATE_FAILED;
-	}
-}
-
-static enum process_thread_create_result process_thread_create_result_from_uthread(enum uthread_start_result result) {
+static enum process_result process_result_from_uthread(enum uthread_start_result result) {
 	switch (result) {
 	case UTHREAD_START_OK:
-		return PROCESS_THREAD_CREATE_OK;
+		return PROCESS_OK;
 	case UTHREAD_START_INVALID_ARGUMENTS:
-		return PROCESS_THREAD_CREATE_INVALID_ARGUMENTS;
+		return PROCESS_INVALID_ARGUMENTS;
 	case UTHREAD_START_NO_MEMORY:
-		return PROCESS_THREAD_CREATE_NO_MEMORY;
+		return PROCESS_NO_MEMORY;
 	case UTHREAD_START_STACK_ALLOC_FAILED:
-		return PROCESS_THREAD_CREATE_STACK_ALLOC_FAILED;
+		return PROCESS_THREAD_STACK_ALLOC_FAILED;
 	case UTHREAD_START_CONTEXT_UNSUPPORTED:
-		return PROCESS_THREAD_CREATE_CONTEXT_UNSUPPORTED;
+		return PROCESS_THREAD_CONTEXT_UNSUPPORTED;
 	case UTHREAD_START_SCHEDULER_REJECTED:
-		return PROCESS_THREAD_CREATE_SCHEDULER_REJECTED;
+		return PROCESS_THREAD_SCHEDULER_REJECTED;
 	case UTHREAD_START_REAPER_UNAVAILABLE:
 	default:
-		return PROCESS_THREAD_CREATE_REAPER_UNAVAILABLE;
+		return PROCESS_THREAD_REAPER_UNAVAILABLE;
 	}
 }
 
-enum process_thread_create_result process_create_thread(struct process* process, struct uthread* thread,
-                                                        const struct process_thread_params* params) {
+enum process_result process_create_thread(struct process* process, struct uthread* thread,
+                                          const struct process_thread_params* params) {
 	enum uthread_start_result result;
 
-	if (process == NULL || thread == NULL || params == NULL) return PROCESS_THREAD_CREATE_INVALID_ARGUMENTS;
+	if (process == NULL || thread == NULL || params == NULL) return PROCESS_INVALID_ARGUMENTS;
 
 	result = uthread_start(thread,
 	                       &(const struct uthread_start_params){
@@ -118,25 +96,25 @@ enum process_thread_create_result process_create_thread(struct process* process,
 							   .preferred_cpu    = params->preferred_cpu,
 							   .detached         = params->detached,
 						   });
-	return process_thread_create_result_from_uthread(result);
+	return process_result_from_uthread(result);
 }
 
-enum process_spawn_result process_spawn(struct process** out_process, const struct process_spawn_params* params) {
-	struct process*                   process = NULL;
-	struct uthread*                   main_thread;
-	enum process_create_result        create_result;
-	enum process_thread_create_result thread_result;
+enum process_result process_spawn(struct process** out_process, const struct process_spawn_params* params) {
+	struct process*     process = NULL;
+	struct uthread*     main_thread;
+	enum process_result create_result;
+	enum process_result thread_result;
 
-	if (out_process == NULL || params == NULL || params->user_entry == 0u) return PROCESS_SPAWN_INVALID_ARGUMENTS;
+	if (out_process == NULL || params == NULL || params->user_entry == 0u) return PROCESS_INVALID_ARGUMENTS;
 	*out_process = NULL;
 
 	create_result = process_create(&process, params->name);
-	if (create_result != PROCESS_CREATE_OK) return process_spawn_result_from_create(create_result);
+	if (create_result != PROCESS_OK) return create_result;
 
 	main_thread = kmalloc(sizeof(*main_thread));
 	if (main_thread == NULL) {
 		(void)process_destroy(process);
-		return PROCESS_SPAWN_CREATE_FAILED;
+		return PROCESS_NO_MEMORY;
 	}
 	*main_thread = (struct uthread){
 		.user_stack_id   = VMM_ID_INVALID,
@@ -153,16 +131,16 @@ enum process_spawn_result process_spawn(struct process** out_process, const stru
 											  .preferred_cpu    = params->preferred_cpu,
 											  .detached         = false,
 										  });
-	if (thread_result != PROCESS_THREAD_CREATE_OK) {
+	if (thread_result != PROCESS_OK) {
 		kfree(main_thread);
 		(void)process_destroy(process);
-		return PROCESS_SPAWN_MAIN_THREAD_FAILED;
+		return thread_result;
 	}
 
 	main_thread->heap_allocated = true;
 	process->main_thread        = main_thread;
 	*out_process                = process;
-	return PROCESS_SPAWN_OK;
+	return PROCESS_OK;
 }
 
 bool process_destroy(struct process* process) {
