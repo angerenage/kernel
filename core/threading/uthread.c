@@ -348,7 +348,9 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 		uthread_release_stacks(thread);
 		return UTHREAD_START_INVALID_ARGUMENTS;
 	}
+	thread->thread.process = params->process;
 	if (!uthread_attach_process(thread, thread->process)) {
+		thread->thread.process = NULL;
 		uthread_release_stacks(thread);
 		return UTHREAD_START_INVALID_ARGUMENTS;
 	}
@@ -356,7 +358,8 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 	if (!sched_make_runnable(&thread->thread)) {
 		uthread_release_stacks(thread);
 		uthread_detach_process(thread);
-		thread->process = NULL;
+		thread->thread.process = NULL;
+		thread->process        = NULL;
 		return UTHREAD_START_SCHEDULER_REJECTED;
 	}
 

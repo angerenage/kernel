@@ -9,6 +9,7 @@
 struct cpu;
 struct address_space;
 struct mutex;
+struct process;
 struct thread;
 struct thread_wait_queue;
 
@@ -122,6 +123,7 @@ struct thread {
 	uintptr_t                 kernel_stack_base;
 	uintptr_t                 kernel_stack_top;
 	struct address_space*     address_space;
+	struct process*           process;
 	struct thread_context     context;
 	thread_entry_t            entry;
 	void*                     arg;

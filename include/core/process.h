@@ -87,3 +87,6 @@ enum process_state process_get_state(struct process* process);
 
 /* Return the number of threads currently attached to process. */
 size_t process_thread_count(struct process* process);
+
+/* Return the process owned by the current userspace thread, or NULL. */
+struct process* process_current(void);

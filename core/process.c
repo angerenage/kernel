@@ -1,6 +1,8 @@
 #include <core/kheap.h>
 #include <core/process.h>
+#include <core/sched.h>
 #include <core/spinlock.h>
+#include <core/thread.h>
 #include <core/uthread.h>
 #include <core/vmm.h>
 #include <stdbool.h>
@@ -219,4 +221,9 @@ size_t process_thread_count(struct process* process) {
 	count = process->thread_count;
 	spinlock_unlock_irqrestore(&process->lock, state);
 	return count;
+}
+
+struct process* process_current(void) {
+	struct thread* current = sched_current_thread();
+	return current == NULL ? NULL : current->process;
 }
