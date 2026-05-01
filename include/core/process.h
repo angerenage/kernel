@@ -27,12 +27,31 @@ enum process_spawn_result {
 	PROCESS_SPAWN_MAIN_THREAD_FAILED,
 };
 
+enum process_thread_create_result {
+	PROCESS_THREAD_CREATE_OK = 0,
+	PROCESS_THREAD_CREATE_INVALID_ARGUMENTS,
+	PROCESS_THREAD_CREATE_NO_MEMORY,
+	PROCESS_THREAD_CREATE_STACK_ALLOC_FAILED,
+	PROCESS_THREAD_CREATE_CONTEXT_UNSUPPORTED,
+	PROCESS_THREAD_CREATE_SCHEDULER_REJECTED,
+	PROCESS_THREAD_CREATE_REAPER_UNAVAILABLE,
+};
+
 struct process_spawn_params {
 	const char* name;
 	uintptr_t   user_entry;
 	uintptr_t   user_arg;
 	size_t      user_stack_pages;
 	struct cpu* preferred_cpu;
+};
+
+struct process_thread_params {
+	const char* name;
+	uintptr_t   user_entry;
+	uintptr_t   user_arg;
+	size_t      user_stack_pages;
+	struct cpu* preferred_cpu;
+	bool        detached;
 };
 
 struct process {
@@ -52,6 +71,10 @@ struct process {
 /* Create a process and start its main userspace thread. */
 enum process_spawn_result process_spawn(struct process** out_process, const struct process_spawn_params* params);
 
+/* Initialize caller-owned userspace thread storage inside process and queue it on the scheduler. */
+enum process_thread_create_result process_create_thread(struct process* process, struct uthread* thread,
+                                                        const struct process_thread_params* params);
+
 /* Destroy all reclaimable process threads, release its user address space, and free the process. */
 bool process_destroy(struct process* process);
 
@@ -60,6 +83,9 @@ process_id_t process_pid(const struct process* process);
 
 /* Return the mutable user address space owned by process. */
 struct address_space* process_address_space(struct process* process);
+
+/* Return the main userspace thread for process, or NULL. */
+struct uthread* process_main_thread(struct process* process);
 
 /* Return the current process state. */
 enum process_state process_get_state(struct process* process);

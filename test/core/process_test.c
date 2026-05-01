@@ -79,6 +79,10 @@ static void terminate_main_thread(struct process* process) {
 	if (process != NULL && process->main_thread != NULL) thread_mark_zombie(&process->main_thread->thread);
 }
 
+static void terminate_process_thread(struct uthread* thread) {
+	if (thread != NULL) thread_mark_zombie(&thread->thread);
+}
+
 Test(process, spawn_initializes_pid_state_address_space_and_main_thread) {
 	struct process*           process = NULL;
 	struct address_space*     space;
@@ -97,6 +101,8 @@ Test(process, spawn_initializes_pid_state_address_space_and_main_thread) {
 	cr_assert_eq(process_get_state(process), PROCESS_STATE_RUNNING, "spawned process should start running");
 	cr_assert_eq(process_thread_count(process), 1u, "spawned process should have one main thread");
 	cr_assert_not_null(process->main_thread, "spawned process should record its main thread");
+	cr_assert_eq(
+		process_main_thread(process), process->main_thread, "main thread accessor should return the main thread");
 
 	space = process_address_space(process);
 	cr_assert_not_null(space, "process address space should be exposed");
@@ -177,6 +183,76 @@ Test(process, spawn_user_creates_main_thread_in_process_address_space) {
 	cr_assert_eq(sched_run_queue_depth(cpu_current()), 1u, "main thread should be runnable");
 
 	thread_mark_zombie(&process->main_thread->thread);
+	cr_assert(process_destroy(process), "process_destroy should reclaim terminated main thread");
+}
+
+Test(process, create_thread_starts_joinable_thread_in_process_address_space) {
+	struct process* process = NULL;
+	struct uthread  worker;
+
+	init_process_test_environment();
+
+	cr_assert_eq(process_spawn(&process,
+	                           &(const struct process_spawn_params){
+								   .name       = "owner",
+								   .user_entry = 0x400000u,
+							   }),
+	             PROCESS_SPAWN_OK);
+
+	cr_assert_eq(process_create_thread(process,
+	                                   &worker,
+	                                   &(const struct process_thread_params){
+										   .name             = "worker",
+										   .user_entry       = 0x410000u,
+										   .user_arg         = 0x55u,
+										   .user_stack_pages = 2u,
+										   .preferred_cpu    = NULL,
+										   .detached         = false,
+									   }),
+	             PROCESS_THREAD_CREATE_OK);
+
+	cr_assert_eq(worker.process, process, "created thread should retain its owning process");
+	cr_assert_eq(worker.thread.address_space,
+	             process_address_space(process),
+	             "created thread should use the process address space");
+	cr_assert_eq(process_thread_count(process), 2u, "process should track the main thread and created thread");
+	cr_assert_eq(sched_run_queue_depth(cpu_current()), 2u, "main and created threads should be runnable");
+
+	terminate_process_thread(&worker);
+	terminate_main_thread(process);
+	cr_assert(process_destroy(process), "process_destroy should reclaim terminated process threads");
+}
+
+Test(process, create_thread_rejects_missing_arguments) {
+	struct process* process = NULL;
+	struct uthread  worker;
+
+	init_process_test_environment();
+
+	cr_assert_eq(process_spawn(&process,
+	                           &(const struct process_spawn_params){
+								   .name       = "owner",
+								   .user_entry = 0x400000u,
+							   }),
+	             PROCESS_SPAWN_OK);
+
+	cr_assert_eq(process_create_thread(NULL,
+	                                   &worker,
+	                                   &(const struct process_thread_params){
+										   .name       = "worker",
+										   .user_entry = 0x410000u,
+									   }),
+	             PROCESS_THREAD_CREATE_INVALID_ARGUMENTS);
+	cr_assert_eq(process_create_thread(process,
+	                                   NULL,
+	                                   &(const struct process_thread_params){
+										   .name       = "worker",
+										   .user_entry = 0x410000u,
+									   }),
+	             PROCESS_THREAD_CREATE_INVALID_ARGUMENTS);
+	cr_assert_eq(process_create_thread(process, &worker, NULL), PROCESS_THREAD_CREATE_INVALID_ARGUMENTS);
+
+	terminate_main_thread(process);
 	cr_assert(process_destroy(process), "process_destroy should reclaim terminated main thread");
 }
 

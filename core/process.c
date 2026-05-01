@@ -82,11 +82,50 @@ static enum process_spawn_result process_spawn_result_from_create(enum process_c
 	}
 }
 
+static enum process_thread_create_result process_thread_create_result_from_uthread(enum uthread_start_result result) {
+	switch (result) {
+	case UTHREAD_START_OK:
+		return PROCESS_THREAD_CREATE_OK;
+	case UTHREAD_START_INVALID_ARGUMENTS:
+		return PROCESS_THREAD_CREATE_INVALID_ARGUMENTS;
+	case UTHREAD_START_NO_MEMORY:
+		return PROCESS_THREAD_CREATE_NO_MEMORY;
+	case UTHREAD_START_STACK_ALLOC_FAILED:
+		return PROCESS_THREAD_CREATE_STACK_ALLOC_FAILED;
+	case UTHREAD_START_CONTEXT_UNSUPPORTED:
+		return PROCESS_THREAD_CREATE_CONTEXT_UNSUPPORTED;
+	case UTHREAD_START_SCHEDULER_REJECTED:
+		return PROCESS_THREAD_CREATE_SCHEDULER_REJECTED;
+	case UTHREAD_START_REAPER_UNAVAILABLE:
+	default:
+		return PROCESS_THREAD_CREATE_REAPER_UNAVAILABLE;
+	}
+}
+
+enum process_thread_create_result process_create_thread(struct process* process, struct uthread* thread,
+                                                        const struct process_thread_params* params) {
+	enum uthread_start_result result;
+
+	if (process == NULL || thread == NULL || params == NULL) return PROCESS_THREAD_CREATE_INVALID_ARGUMENTS;
+
+	result = uthread_start(thread,
+	                       &(const struct uthread_start_params){
+							   .name             = params->name,
+							   .process          = process,
+							   .user_entry       = params->user_entry,
+							   .user_arg         = params->user_arg,
+							   .user_stack_pages = params->user_stack_pages,
+							   .preferred_cpu    = params->preferred_cpu,
+							   .detached         = params->detached,
+						   });
+	return process_thread_create_result_from_uthread(result);
+}
+
 enum process_spawn_result process_spawn(struct process** out_process, const struct process_spawn_params* params) {
-	struct process*            process = NULL;
-	struct uthread*            main_thread;
-	enum process_create_result create_result;
-	enum uthread_start_result  thread_result;
+	struct process*                   process = NULL;
+	struct uthread*                   main_thread;
+	enum process_create_result        create_result;
+	enum process_thread_create_result thread_result;
 
 	if (out_process == NULL || params == NULL || params->user_entry == 0u) return PROCESS_SPAWN_INVALID_ARGUMENTS;
 	*out_process = NULL;
@@ -104,17 +143,17 @@ enum process_spawn_result process_spawn(struct process** out_process, const stru
 		.kernel_stack_id = VMM_ID_INVALID,
 	};
 
-	thread_result = uthread_start(main_thread,
-	                              &(const struct uthread_start_params){
-									  .name             = params->name,
-									  .process          = process,
-									  .user_entry       = params->user_entry,
-									  .user_arg         = params->user_arg,
-									  .user_stack_pages = params->user_stack_pages,
-									  .preferred_cpu    = params->preferred_cpu,
-									  .detached         = false,
-								  });
-	if (thread_result != UTHREAD_START_OK) {
+	thread_result = process_create_thread(process,
+	                                      main_thread,
+	                                      &(const struct process_thread_params){
+											  .name             = params->name,
+											  .user_entry       = params->user_entry,
+											  .user_arg         = params->user_arg,
+											  .user_stack_pages = params->user_stack_pages,
+											  .preferred_cpu    = params->preferred_cpu,
+											  .detached         = false,
+										  });
+	if (thread_result != PROCESS_THREAD_CREATE_OK) {
 		kfree(main_thread);
 		(void)process_destroy(process);
 		return PROCESS_SPAWN_MAIN_THREAD_FAILED;
@@ -166,6 +205,18 @@ process_id_t process_pid(const struct process* process) {
 
 struct address_space* process_address_space(struct process* process) {
 	return process == NULL ? NULL : &process->address_space;
+}
+
+struct uthread* process_main_thread(struct process* process) {
+	struct uthread*  main_thread;
+	struct irq_state state;
+
+	if (process == NULL) return NULL;
+
+	state       = spinlock_lock_irqsave(&process->lock);
+	main_thread = process->main_thread;
+	spinlock_unlock_irqrestore(&process->lock, state);
+	return main_thread;
 }
 
 enum process_state process_get_state(struct process* process) {
