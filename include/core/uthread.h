@@ -38,6 +38,7 @@ struct uthread {
 	vmm_id_t        kernel_stack_id;
 	uintptr_t       user_stack_top;
 	struct uthread* reaper_next;
+	struct uthread* process_next;
 	bool            heap_allocated;
 };
 

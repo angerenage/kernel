@@ -34,6 +34,72 @@ static bool uthread_reapers_initialized;
 
 static void uthread_reaper_entry(void* arg);
 
+static bool uthread_attach_process(struct uthread* thread, struct process* process) {
+	struct irq_state state;
+	struct uthread*  cursor;
+	bool             attached = false;
+
+	if (thread == NULL || process == NULL) return false;
+
+	state  = spinlock_lock_irqsave(&process->lock);
+	cursor = process->thread_head;
+	while (cursor != NULL) {
+		if (cursor == thread) {
+			spinlock_unlock_irqrestore(&process->lock, state);
+			return false;
+		}
+		cursor = cursor->process_next;
+	}
+	if ((process->state == PROCESS_STATE_NEW || process->state == PROCESS_STATE_RUNNING) &&
+	    process->thread_count != SIZE_MAX && thread->process_next == NULL) {
+		if (process->thread_tail == NULL) {
+			process->thread_head = thread;
+		}
+		else {
+			process->thread_tail->process_next = thread;
+		}
+		process->thread_tail = thread;
+		if (process->main_thread == NULL) process->main_thread = thread;
+		thread->process = process;
+		process->thread_count++;
+		process->state = PROCESS_STATE_RUNNING;
+		attached       = true;
+	}
+	spinlock_unlock_irqrestore(&process->lock, state);
+	return attached;
+}
+
+static void uthread_detach_process(struct uthread* thread) {
+	struct process*  process;
+	struct uthread*  previous = NULL;
+	struct uthread*  current;
+	struct irq_state state;
+
+	if (thread == NULL || thread->process == NULL) return;
+
+	process = thread->process;
+	state   = spinlock_lock_irqsave(&process->lock);
+	current = process->thread_head;
+	while (current != NULL && current != thread) {
+		previous = current;
+		current  = current->process_next;
+	}
+	if (current != NULL) {
+		if (previous == NULL) {
+			process->thread_head = current->process_next;
+		}
+		else {
+			previous->process_next = current->process_next;
+		}
+		if (process->thread_tail == current) process->thread_tail = previous;
+		if (process->main_thread == current) process->main_thread = process->thread_head;
+		current->process_next = NULL;
+		current->process      = NULL;
+		if (process->thread_count != 0u) process->thread_count--;
+	}
+	spinlock_unlock_irqrestore(&process->lock, state);
+}
+
 static void uthread_release_stacks(struct uthread* thread) {
 	struct address_space* address_space;
 
@@ -51,15 +117,13 @@ static void uthread_release_stacks(struct uthread* thread) {
 }
 
 static void uthread_free(struct uthread* thread) {
-	bool            heap_allocated;
-	struct process* process;
+	bool heap_allocated;
 
 	if (thread == NULL) return;
 
 	heap_allocated = thread->heap_allocated;
-	process        = thread->process;
 	uthread_release_stacks(thread);
-	process_detach_thread(process);
+	uthread_detach_process(thread);
 	thread->process = NULL;
 	if (heap_allocated) kfree(thread);
 }
@@ -284,14 +348,14 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 		uthread_release_stacks(thread);
 		return UTHREAD_START_INVALID_ARGUMENTS;
 	}
-	if (!process_attach_thread(thread->process)) {
+	if (!uthread_attach_process(thread, thread->process)) {
 		uthread_release_stacks(thread);
 		return UTHREAD_START_INVALID_ARGUMENTS;
 	}
 	if (reap_on_exit) thread_set_reap_callback(&thread->thread, uthread_reap_callback, thread);
 	if (!sched_make_runnable(&thread->thread)) {
 		uthread_release_stacks(thread);
-		process_detach_thread(thread->process);
+		uthread_detach_process(thread);
 		thread->process = NULL;
 		return UTHREAD_START_SCHEDULER_REJECTED;
 	}
@@ -344,18 +408,19 @@ bool uthread_detach(struct uthread* thread) {
 }
 
 bool uthread_deinit(struct uthread* thread) {
-	struct process* process;
+	bool heap_allocated;
 
 	if (thread == NULL) return false;
 	if (!thread_is_terminated(&thread->thread) && thread->thread.state != THREAD_STATE_NEW) return false;
 	if (!thread_is_joinable(&thread->thread)) return false;
 
-	process = thread->process;
+	heap_allocated = thread->heap_allocated;
 	uthread_release_stacks(thread);
-	process_detach_thread(process);
+	uthread_detach_process(thread);
 	memset(thread, 0, sizeof(*thread));
 	thread->user_stack_id   = VMM_ID_INVALID;
 	thread->kernel_stack_id = VMM_ID_INVALID;
+	if (heap_allocated) kfree(thread);
 	return true;
 }
 

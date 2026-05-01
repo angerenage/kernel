@@ -73,6 +73,24 @@ static void init_uthread_test_environment(void) {
 	cr_assert(kheap_init(), "kheap_init failed");
 }
 
+static struct process* spawn_owner_process(const char* name) {
+	struct process* process = NULL;
+
+	cr_assert_eq(process_spawn(&process,
+	                           &(const struct process_spawn_params){
+								   .name       = name,
+								   .user_entry = 0x300000u,
+							   }),
+	             PROCESS_SPAWN_OK,
+	             "process_spawn failed");
+	cr_assert_not_null(process, "process_spawn returned NULL process");
+	return process;
+}
+
+static void terminate_main_thread(struct process* process) {
+	if (process != NULL && process->main_thread != NULL) thread_mark_zombie(&process->main_thread->thread);
+}
+
 Test(uthread, detached_start_registers_reaper_before_queueing) {
 	struct process* process = NULL;
 	struct uthread  worker  = {
@@ -91,7 +109,7 @@ Test(uthread, detached_start_registers_reaper_before_queueing) {
 	};
 
 	init_uthread_test_environment();
-	cr_assert_eq(process_create(&process, "test/process"), PROCESS_CREATE_OK, "process_create failed");
+	process        = spawn_owner_process("test/process");
 	params.process = process;
 
 	result = uthread_start(&worker, &params);
@@ -101,7 +119,7 @@ Test(uthread, detached_start_registers_reaper_before_queueing) {
 	cr_assert_eq(worker.thread.address_space,
 	             process_address_space(process),
 	             "scheduler thread should use the process address space");
-	cr_assert_eq(process_thread_count(process), 1u, "started uthread should attach to its process");
+	cr_assert_eq(process_thread_count(process), 2u, "started uthread should attach to its process");
 	cr_assert_eq(
 		process_get_state(process), PROCESS_STATE_RUNNING, "process should become running after thread attach");
 	cr_assert(!process_destroy(process), "process_destroy must reject a process with live threads");
@@ -109,7 +127,7 @@ Test(uthread, detached_start_registers_reaper_before_queueing) {
 	cr_assert_not_null(worker.thread.reap_callback, "detached user thread must have a reaper callback");
 	cr_assert_eq(worker.thread.reap_context, &worker, "reaper callback should receive the uthread wrapper");
 	cr_assert_eq(worker.heap_allocated, false, "caller-owned uthread_start must not mark storage heap-owned");
-	cr_assert_eq(sched_run_queue_depth(cpu_current()), 2u, "user thread and reaper should both be runnable");
+	cr_assert_eq(sched_run_queue_depth(cpu_current()), 3u, "main thread, user thread, and reaper should be runnable");
 }
 
 Test(uthread, deinit_detaches_joinable_thread_from_process) {
@@ -129,14 +147,15 @@ Test(uthread, deinit_detaches_joinable_thread_from_process) {
 	};
 
 	init_uthread_test_environment();
-	cr_assert_eq(process_create(&process, "test/process"), PROCESS_CREATE_OK, "process_create failed");
+	process        = spawn_owner_process("test/process");
 	params.process = process;
 
 	cr_assert_eq(uthread_start(&worker, &params), UTHREAD_START_OK, "uthread_start failed");
-	cr_assert_eq(process_thread_count(process), 1u, "started uthread should attach to process");
+	cr_assert_eq(process_thread_count(process), 2u, "started uthread should attach to process");
 
 	thread_mark_zombie(&worker.thread);
 	cr_assert(uthread_deinit(&worker), "uthread_deinit should reclaim terminated joinable user thread");
-	cr_assert_eq(process_thread_count(process), 0u, "uthread_deinit should detach from process");
+	cr_assert_eq(process_thread_count(process), 1u, "uthread_deinit should detach from process");
+	terminate_main_thread(process);
 	cr_assert(process_destroy(process), "process_destroy should succeed after uthread_deinit");
 }
