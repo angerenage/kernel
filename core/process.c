@@ -77,8 +77,10 @@ static enum process_result process_result_from_uthread(enum uthread_start_result
 	case UTHREAD_START_SCHEDULER_REJECTED:
 		return PROCESS_THREAD_SCHEDULER_REJECTED;
 	case UTHREAD_START_REAPER_UNAVAILABLE:
-	default:
 		return PROCESS_THREAD_REAPER_UNAVAILABLE;
+	case UTHREAD_START_ID_EXHAUSTED:
+	default:
+		return PROCESS_THREAD_ID_EXHAUSTED;
 	}
 }
 

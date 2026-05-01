@@ -7,6 +7,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+typedef uint64_t uthread_id_t;
+
+#define UTHREAD_ID_INVALID ((uthread_id_t)0u)
+
 enum {
 	UTHREAD_DEFAULT_USER_STACK_PAGES = 4u,
 };
@@ -19,6 +23,7 @@ enum uthread_start_result {
 	UTHREAD_START_CONTEXT_UNSUPPORTED,
 	UTHREAD_START_SCHEDULER_REJECTED,
 	UTHREAD_START_REAPER_UNAVAILABLE,
+	UTHREAD_START_ID_EXHAUSTED,
 };
 
 struct uthread_start_params {
@@ -33,6 +38,7 @@ struct uthread_start_params {
 
 struct uthread {
 	struct thread   thread;
+	uthread_id_t    id;
 	struct process* process;
 	vmm_id_t        user_stack_id;
 	vmm_id_t        kernel_stack_id;
@@ -51,6 +57,9 @@ enum uthread_start_result uthread_start(struct uthread* thread, const struct uth
  * reclaimed by the user-thread reaper after exit.
  */
 enum uthread_start_result uthread_spawn_detached(const struct uthread_start_params* params);
+
+/* Return a userspace thread ID, or UTHREAD_ID_INVALID for NULL. */
+uthread_id_t uthread_id(const struct uthread* thread);
 
 /* Convert a live joinable userspace thread into a detached thread. */
 bool uthread_detach(struct uthread* thread);

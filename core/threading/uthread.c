@@ -30,9 +30,33 @@ struct uthread_reaper {
 static struct uthread_reaper uthread_reapers[UTHREAD_REAPER_MAX_CPUS];
 static struct spinlock       uthread_reaper_init_lock =
 	SPINLOCK_INIT_CLASS("uthread_reaper_init", SPINLOCK_ORDER_SCHED, SPINLOCK_FLAG_IRQSAVE);
-static bool uthread_reapers_initialized;
+static bool            uthread_reapers_initialized;
+static struct spinlock uthread_id_lock =
+	SPINLOCK_INIT_CLASS("uthread_id_lock", SPINLOCK_ORDER_PROCESS, SPINLOCK_FLAG_IRQSAVE);
+static uthread_id_t uthread_next_id = 1u;
 
 static void uthread_reaper_entry(void* arg);
+
+static bool uthread_alloc_id(uthread_id_t* out_id) {
+	uthread_id_t     id;
+	struct irq_state state;
+
+	if (out_id == NULL) return false;
+	*out_id = UTHREAD_ID_INVALID;
+
+	state = spinlock_lock_irqsave(&uthread_id_lock);
+	id    = uthread_next_id;
+	if (id == UTHREAD_ID_INVALID) {
+		spinlock_unlock_irqrestore(&uthread_id_lock, state);
+		return false;
+	}
+	uthread_next_id++;
+	if (uthread_next_id == UTHREAD_ID_INVALID) uthread_next_id = UTHREAD_ID_INVALID;
+	spinlock_unlock_irqrestore(&uthread_id_lock, state);
+
+	*out_id = id;
+	return true;
+}
 
 static bool uthread_attach_process(struct uthread* thread, struct process* process) {
 	struct irq_state state;
@@ -296,14 +320,17 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 	void*                        kernel_stack_base = NULL;
 	size_t                       user_stack_pages;
 	uintptr_t                    kernel_stack_top;
+	uthread_id_t                 id;
 
 	if (thread == NULL || params == NULL || params->process == NULL || params->user_entry == 0u) {
 		return UTHREAD_START_INVALID_ARGUMENTS;
 	}
 	address_space = process_address_space(params->process);
 	if (!address_space_is_initialized(address_space)) return UTHREAD_START_INVALID_ARGUMENTS;
+	if (!uthread_alloc_id(&id)) return UTHREAD_START_ID_EXHAUSTED;
 
 	*thread = (struct uthread){
+		.id              = id,
 		.process         = params->process,
 		.user_stack_id   = VMM_ID_INVALID,
 		.kernel_stack_id = VMM_ID_INVALID,
@@ -393,6 +420,10 @@ enum uthread_start_result uthread_spawn_detached(const struct uthread_start_para
 		return result;
 	}
 	return UTHREAD_START_OK;
+}
+
+uthread_id_t uthread_id(const struct uthread* thread) {
+	return thread == NULL ? UTHREAD_ID_INVALID : thread->id;
 }
 
 bool uthread_detach(struct uthread* thread) {
