@@ -49,6 +49,33 @@ enum process_detach_result {
 	PROCESS_DETACH_ALREADY_JOINED,
 };
 
+enum process_thread_join_result {
+	PROCESS_THREAD_JOIN_OK = 0,
+	PROCESS_THREAD_JOIN_INVALID_ARGUMENTS,
+	PROCESS_THREAD_JOIN_FOREIGN_THREAD,
+	PROCESS_THREAD_JOIN_SELF,
+	PROCESS_THREAD_JOIN_DETACHED,
+	PROCESS_THREAD_JOIN_WAIT_FAILED,
+	PROCESS_THREAD_JOIN_RECLAIM_FAILED,
+};
+
+enum process_thread_detach_result {
+	PROCESS_THREAD_DETACH_OK = 0,
+	PROCESS_THREAD_DETACH_INVALID_ARGUMENTS,
+	PROCESS_THREAD_DETACH_FOREIGN_THREAD,
+	PROCESS_THREAD_DETACH_ALREADY_DETACHED,
+	PROCESS_THREAD_DETACH_ALREADY_TERMINATED,
+	PROCESS_THREAD_DETACH_FAILED,
+};
+
+enum process_thread_cancel_result {
+	PROCESS_THREAD_CANCEL_OK = 0,
+	PROCESS_THREAD_CANCEL_INVALID_ARGUMENTS,
+	PROCESS_THREAD_CANCEL_FOREIGN_THREAD,
+	PROCESS_THREAD_CANCEL_ALREADY_TERMINATED,
+	PROCESS_THREAD_CANCEL_FAILED,
+};
+
 struct process_spawn_params {
 	const char* name;
 	uintptr_t   user_entry;
@@ -89,6 +116,16 @@ enum process_result process_spawn(struct process** out_process, const struct pro
 /* Initialize caller-owned userspace thread storage inside process and queue it on the scheduler. */
 enum process_result process_create_thread(struct process* process, struct uthread* thread,
                                           const struct process_thread_params* params);
+
+/* Block until thread exits, publish its exit code, and reclaim its process-owned resources. */
+enum process_thread_join_result process_join_thread(struct process* process, struct uthread* thread,
+                                                    uintptr_t* out_exit_code);
+
+/* Mark a process thread detached so it is reclaimed by the user-thread reaper after exit. */
+enum process_thread_detach_result process_detach_thread(struct process* process, struct uthread* thread);
+
+/* Request deferred cancellation of a process thread. */
+enum process_thread_cancel_result process_cancel_thread(struct process* process, struct uthread* thread);
 
 /* Request termination of all threads in process and publish the process exit code. */
 bool process_terminate(struct process* process, uintptr_t exit_code);

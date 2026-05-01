@@ -106,6 +106,31 @@ static bool process_mark_zombie_if_complete_locked(struct process* process) {
 	return true;
 }
 
+static bool process_has_thread_locked(const struct process* process, const struct uthread* thread) {
+	const struct uthread* cursor;
+
+	if (process == NULL || thread == NULL) return false;
+
+	cursor = process->thread_head;
+	while (cursor != NULL) {
+		if (cursor == thread) return true;
+		cursor = cursor->process_next;
+	}
+	return false;
+}
+
+static bool process_has_thread(struct process* process, struct uthread* thread) {
+	struct irq_state state;
+	bool             found;
+
+	if (process == NULL || thread == NULL) return false;
+
+	state = spinlock_lock_irqsave(&process->lock);
+	found = process_has_thread_locked(process, thread) && thread->process == process;
+	spinlock_unlock_irqrestore(&process->lock, state);
+	return found;
+}
+
 enum process_result process_create_thread(struct process* process, struct uthread* thread,
                                           const struct process_thread_params* params) {
 	enum uthread_start_result result;
@@ -123,6 +148,57 @@ enum process_result process_create_thread(struct process* process, struct uthrea
 							   .detached         = params->detached,
 						   });
 	return process_result_from_uthread(result);
+}
+
+enum process_thread_join_result process_join_thread(struct process* process, struct uthread* thread,
+                                                    uintptr_t* out_exit_code) {
+	struct thread* current;
+	uintptr_t      exit_code;
+
+	if (process == NULL || thread == NULL) return PROCESS_THREAD_JOIN_INVALID_ARGUMENTS;
+
+	current = sched_current_thread();
+	if (current == &thread->thread) return PROCESS_THREAD_JOIN_SELF;
+	if (!process_has_thread(process, thread)) return PROCESS_THREAD_JOIN_FOREIGN_THREAD;
+	if (!thread_is_joinable(&thread->thread)) return PROCESS_THREAD_JOIN_DETACHED;
+
+	if (!thread_is_terminated(&thread->thread)) {
+		struct irq_state wait_state = spinlock_lock_irqsave(&thread->thread.join_wait_queue.lock);
+
+		if (!thread_is_terminated(&thread->thread)) {
+			if (!sched_block_current_locked(&thread->thread.join_wait_queue, THREAD_BLOCK_JOIN, wait_state)) {
+				return PROCESS_THREAD_JOIN_WAIT_FAILED;
+			}
+		}
+		else {
+			spinlock_unlock_irqrestore(&thread->thread.join_wait_queue.lock, wait_state);
+		}
+	}
+
+	if (!process_has_thread(process, thread)) return PROCESS_THREAD_JOIN_FOREIGN_THREAD;
+	if (!thread_is_terminated(&thread->thread)) return PROCESS_THREAD_JOIN_WAIT_FAILED;
+
+	exit_code = thread->thread.exit_code;
+	if (!uthread_deinit(thread)) return PROCESS_THREAD_JOIN_RECLAIM_FAILED;
+	if (out_exit_code != NULL) *out_exit_code = exit_code;
+	return PROCESS_THREAD_JOIN_OK;
+}
+
+enum process_thread_detach_result process_detach_thread(struct process* process, struct uthread* thread) {
+	if (process == NULL || thread == NULL) return PROCESS_THREAD_DETACH_INVALID_ARGUMENTS;
+	if (!process_has_thread(process, thread)) return PROCESS_THREAD_DETACH_FOREIGN_THREAD;
+	if (thread_is_terminated(&thread->thread)) return PROCESS_THREAD_DETACH_ALREADY_TERMINATED;
+	if (!thread_is_joinable(&thread->thread)) return PROCESS_THREAD_DETACH_ALREADY_DETACHED;
+
+	return uthread_detach(thread) ? PROCESS_THREAD_DETACH_OK : PROCESS_THREAD_DETACH_FAILED;
+}
+
+enum process_thread_cancel_result process_cancel_thread(struct process* process, struct uthread* thread) {
+	if (process == NULL || thread == NULL) return PROCESS_THREAD_CANCEL_INVALID_ARGUMENTS;
+	if (!process_has_thread(process, thread)) return PROCESS_THREAD_CANCEL_FOREIGN_THREAD;
+	if (thread_is_terminated(&thread->thread)) return PROCESS_THREAD_CANCEL_ALREADY_TERMINATED;
+
+	return thread_request_cancel(&thread->thread) ? PROCESS_THREAD_CANCEL_OK : PROCESS_THREAD_CANCEL_FAILED;
 }
 
 bool process_terminate(struct process* process, uintptr_t exit_code) {

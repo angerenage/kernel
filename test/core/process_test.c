@@ -256,6 +256,97 @@ Test(process, create_thread_rejects_missing_arguments) {
 	cr_assert(process_destroy(process), "process_destroy should reclaim terminated main thread");
 }
 
+Test(process, join_thread_returns_exit_code_and_reclaims_thread) {
+	struct process* process = NULL;
+	struct uthread  worker;
+	uintptr_t       exit_code = 0u;
+
+	init_process_test_environment();
+
+	cr_assert_eq(process_spawn(&process,
+	                           &(const struct process_spawn_params){
+								   .name       = "owner",
+								   .user_entry = 0x400000u,
+							   }),
+	             PROCESS_OK);
+	cr_assert_eq(process_create_thread(process,
+	                                   &worker,
+	                                   &(const struct process_thread_params){
+										   .name       = "worker",
+										   .user_entry = 0x410000u,
+									   }),
+	             PROCESS_OK);
+
+	thread_mark_exiting(&worker.thread, 44u);
+	thread_mark_zombie(&worker.thread);
+	cr_assert_eq(process_join_thread(process, &worker, &exit_code),
+	             PROCESS_THREAD_JOIN_OK,
+	             "process_join_thread should join a terminated process thread");
+	cr_assert_eq(exit_code, 44u, "process_join_thread should publish thread exit code");
+	cr_assert_eq(process_thread_count(process), 1u, "joined thread should detach from process");
+
+	terminate_main_thread(process);
+	cr_assert(process_destroy(process), "process_destroy should reclaim remaining main thread");
+}
+
+Test(process, cancel_thread_requests_deferred_cancellation) {
+	struct process* process = NULL;
+	struct uthread  worker;
+
+	init_process_test_environment();
+
+	cr_assert_eq(process_spawn(&process,
+	                           &(const struct process_spawn_params){
+								   .name       = "owner",
+								   .user_entry = 0x400000u,
+							   }),
+	             PROCESS_OK);
+	cr_assert_eq(process_create_thread(process,
+	                                   &worker,
+	                                   &(const struct process_thread_params){
+										   .name       = "worker",
+										   .user_entry = 0x410000u,
+									   }),
+	             PROCESS_OK);
+
+	cr_assert_eq(process_cancel_thread(process, &worker),
+	             PROCESS_THREAD_CANCEL_OK,
+	             "process_cancel_thread should accept a live process thread");
+	cr_assert(thread_cancel_requested(&worker.thread), "target thread should record cancellation request");
+
+	terminate_process_thread(&worker);
+	terminate_main_thread(process);
+	cr_assert(process_destroy(process), "process_destroy should reclaim canceled terminated thread");
+}
+
+Test(process, detach_thread_marks_thread_unjoinable) {
+	struct process* process = NULL;
+	struct uthread  worker;
+
+	init_process_test_environment();
+
+	cr_assert_eq(process_spawn(&process,
+	                           &(const struct process_spawn_params){
+								   .name       = "owner",
+								   .user_entry = 0x400000u,
+							   }),
+	             PROCESS_OK);
+	cr_assert_eq(process_create_thread(process,
+	                                   &worker,
+	                                   &(const struct process_thread_params){
+										   .name       = "worker",
+										   .user_entry = 0x410000u,
+									   }),
+	             PROCESS_OK);
+
+	cr_assert_eq(process_detach_thread(process, &worker),
+	             PROCESS_THREAD_DETACH_OK,
+	             "process_detach_thread should accept a live joinable process thread");
+	cr_assert_eq(process_join_thread(process, &worker, NULL),
+	             PROCESS_THREAD_JOIN_DETACHED,
+	             "detached process thread should reject join");
+}
+
 Test(process, destroy_rejects_live_main_thread) {
 	struct process* process = NULL;
 
@@ -285,8 +376,7 @@ Test(process, terminate_marks_process_exiting_and_requests_thread_cancellation) 
 							   }),
 	             PROCESS_OK);
 
-	cr_assert_eq(
-		process_terminate(process, 77u), PROCESS_TERMINATE_OK, "process_terminate should accept a running process");
+	cr_assert(process_terminate(process, 77u), "process_terminate should accept a running process");
 	cr_assert_eq(process_get_state(process), PROCESS_STATE_EXITING, "process should enter EXITING state");
 	cr_assert_eq(process->exit_code, 77u, "process_terminate should publish the process exit code");
 	cr_assert(thread_cancel_requested(&process->main_thread->thread), "process threads should receive cancellation");
@@ -310,7 +400,7 @@ Test(process, join_returns_zombie_exit_code_once) {
 							   }),
 	             PROCESS_OK);
 
-	cr_assert_eq(process_terminate(process, 123u), PROCESS_TERMINATE_OK);
+	cr_assert(process_terminate(process, 123u));
 	thread_mark_zombie(&process->main_thread->thread);
 	process_notify_thread_exit(process, &process->main_thread->thread, 123u);
 
