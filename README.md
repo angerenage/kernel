@@ -84,6 +84,7 @@ The recommended entry point is the build helper:
 ```sh
 bash scripts/build.sh --arch x86_64 --setup
 bash scripts/build.sh --all --setup
+bash scripts/build.sh --all --setup --build-prefix build-debug
 bash scripts/build.sh --arch x86_64 --setup --no-tests
 bash scripts/build.sh --arch x86_64 --setup --kernel-selftests
 bash scripts/build.sh --arch x86_64 --setup --kernel-selftests --kernel-selftests-autorun
@@ -95,6 +96,8 @@ Use `--no-tests` if you want a kernel-only configure without native test depende
 Use `--kernel-selftests` to compile in-kernel selftest suites into the kernel.
 Use `--kernel-selftests-autorun` to also inject `kernel.selftest=1` into the generated image so that booting the ISO runs the in-kernel tests automatically.
 Use `--kernel-selftests-suite <name>` to inject `kernel.selftest.suite=<name>` into the generated image and boot only that suite. This also enables selftest autorun for the generated image.
+Use `--builddir <path>` for a custom single-architecture build directory.
+Use `--build-root <path>` and/or `--build-prefix <name>` for per-architecture directories; for example, `--build-prefix build-debug` produces `build-debug-x86_64`, `build-debug-aarch64`, `build-debug-riscv64`, and `build-debug-loongarch64`.
 
 If you prefer calling Meson directly, configure the architecture you want to build from the repository root:
 
@@ -121,6 +124,7 @@ To configure and compile in one command:
 ```sh
 bash scripts/build.sh --arch x86_64
 bash scripts/build.sh --arch riscv64 -sc
+bash scripts/build.sh --arch x86_64 --builddir build-debug-x86_64
 bash scripts/build.sh --arch x86_64 --kernel-selftests --kernel-selftests-autorun
 bash scripts/build.sh --arch x86_64 --kernel-selftests-suite vmm
 bash scripts/build.sh --all
@@ -167,6 +171,7 @@ bash scripts/run.sh --arch riscv64
 bash scripts/run.sh --arch loongarch64
 bash scripts/run.sh --test
 bash scripts/run.sh -t
+bash scripts/run.sh --test --builddir build-debug-x86_64
 bash scripts/run.sh --kernel-selftest --arch x86_64
 ```
 
@@ -180,6 +185,14 @@ If you use a non-standard build directory, override it explicitly for a single-a
 
 ```sh
 bash scripts/run.sh --arch x86_64 --builddir out/kernel-x86_64
+bash scripts/run.sh --kernel-selftest --arch x86_64 --builddir build-debug-x86_64
+```
+
+If you use matching per-architecture build directories, select them with the same root/prefix options used by `scripts/build.sh`:
+
+```sh
+bash scripts/run.sh --all --build-prefix build-debug
+bash scripts/run.sh --arch riscv64 --build-root /tmp/kernel-builds --build-prefix build-debug
 ```
 
 If you want to launch QEMU in debug mode, use `--debug` and optionally `--debug-port`:
@@ -215,6 +228,7 @@ bash scripts/run_qemu.sh --arch x86_64
 bash scripts/run_qemu.sh --arch aarch64
 bash scripts/run_qemu.sh --arch riscv64
 bash scripts/run_qemu.sh --arch loongarch64
+bash scripts/run_qemu.sh --arch x86_64 --builddir build-debug-x86_64
 ```
 
 ## In-Kernel Selftests
@@ -256,6 +270,7 @@ Use the assertion macros in [`kernel/test/selftest.h`](/c:/Users/anger/Code/kern
 - `-Dkernel_selftests_autorun=true` injects `kernel.selftest=1` into the generated image. `scripts/build.sh --kernel-selftests-autorun` is the helper equivalent.
 - `-Dkernel_selftests_suite=<name>` injects `kernel.selftest.suite=<name>` into the generated image and also causes selftests to autorun for that image. `scripts/build.sh --kernel-selftests-suite <name>` is the helper equivalent.
 - `scripts/build.sh` supports `--arch <arch>` for one target and `--all` to configure and/or compile every supported target in one parallel run.
+- `scripts/build.sh`, `scripts/run.sh`, and `scripts/run_qemu.sh` support `--builddir <path>` for single-target custom build directories, plus `--build-root <path>` and `--build-prefix <name>` for matching per-architecture directory sets.
 - `scripts/run.sh` has three modes: test mode with `--test`/`-t`, kernel selftest mode with `--kernel-selftest`, and QEMU mode otherwise.
 - The Limine helper script clones Limine into the build directory the first time the ISO target is built.
 - The `virt` machines for non-`x86_64` targets need explicit edk2 firmware. `scripts/run.sh` and `scripts/run_qemu.sh` locate the matching firmware image automatically, or you can point one of them at it with `QEMU_FIRMWARE_DIR`.

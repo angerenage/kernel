@@ -8,9 +8,12 @@ readonly ARCHES=(
 	"loongarch64"
 )
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 usage() {
 	cat <<'EOF'
-Usage: build.sh (--arch <arch> | --all) [--setup|-s] [--compile|-c] [-sc] [--reconfigure] [--no-tests] [--kernel-selftests] [--kernel-selftests-autorun] [--kernel-selftests-suite <name>] [--kernel-thread-bootstrap-warn-fallback]
+Usage: build.sh (--arch <arch> | --all) [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--setup|-s] [--compile|-c] [-sc] [--reconfigure] [--no-tests] [--kernel-selftests] [--kernel-selftests-autorun] [--kernel-selftests-suite <name>] [--kernel-thread-bootstrap-warn-fallback]
 
 Target selection:
   --arch <arch>  Build a single architecture (x86_64, aarch64, riscv64, loongarch64).
@@ -35,8 +38,21 @@ Actions:
                   Configure Meson with
                   -Dkernel_thread_bootstrap_warn_fallback=true.
 
+Build directories:
+  --builddir <path>
+                  Build directory for a single --arch run.
+  --build-root <path>
+                  Directory that contains per-architecture build directories.
+                  Defaults to the repository root.
+  --build-prefix <name>
+                  Prefix for per-architecture build directories under
+                  --build-root. Defaults to build, producing build-<arch>.
+
 Examples:
   bash scripts/build.sh --arch x86_64
+  bash scripts/build.sh --arch x86_64 --builddir build-debug-x86_64
+  bash scripts/build.sh --all --build-prefix build-debug
+  bash scripts/build.sh --all --build-root /tmp/kernel-builds
   bash scripts/build.sh --arch aarch64 --setup
   bash scripts/build.sh --arch riscv64 -sc
   bash scripts/build.sh --arch x86_64 --kernel-selftests --kernel-selftests-autorun
@@ -66,6 +82,13 @@ need_cmd() {
 	if ! command -v "$1" >/dev/null 2>&1; then
 		error "required tool '$1' not found in PATH"
 	fi
+}
+
+abspath() {
+	case "$1" in
+		/*) printf '%s\n' "$1" ;;
+		*) printf '%s/%s\n' "$(pwd)" "$1" ;;
+	esac
 }
 
 cross_file_for_arch() {
@@ -101,13 +124,24 @@ validate_arch() {
 	error "unsupported architecture: ${arch}"
 }
 
+build_dir_for_arch() {
+	local arch="$1"
+
+	if [[ -n "$BUILD_DIR" ]]; then
+		printf '%s\n' "$BUILD_DIR"
+	else
+		printf '%s/%s-%s\n' "$BUILD_ROOT" "$BUILD_PREFIX" "$arch"
+	fi
+}
+
 setup_arch() {
 	local arch="$1"
-	local build_dir="build-${arch}"
+	local build_dir
 	local cross_file
 	local platform
 	local -a meson_args
 
+	build_dir="$(build_dir_for_arch "$arch")"
 	cross_file="$(cross_file_for_arch "$arch")"
 	platform="$(platform_for_arch "$arch")"
 	meson_args=(
@@ -138,17 +172,25 @@ setup_arch() {
 	fi
 
 	log_arch "$arch" "configuring in ${build_dir}"
-	meson "${meson_args[@]}"
+	(
+		cd "$REPO_ROOT"
+		meson "${meson_args[@]}"
+	)
 }
 
 compile_arch() {
 	local arch="$1"
-	local build_dir="build-${arch}"
+	local build_dir
+
+	build_dir="$(build_dir_for_arch "$arch")"
 
 	[[ -d "$build_dir" ]] || error "build directory not found for ${arch}: ${build_dir}; run with --setup or use --all to configure every target first"
 
 	log_arch "$arch" "compiling from ${build_dir}"
-	meson compile -C "$build_dir"
+	(
+		cd "$REPO_ROOT"
+		meson compile -C "$build_dir"
+	)
 }
 
 run_arch() {
@@ -200,6 +242,9 @@ run_arches_in_parallel() {
 
 TARGET_ARCH=""
 ALL_ARCHES=0
+BUILD_DIR=""
+BUILD_ROOT="$REPO_ROOT"
+BUILD_PREFIX="build"
 DO_SETUP=0
 DO_COMPILE=0
 RECONFIGURE=0
@@ -218,6 +263,33 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--all)
 			ALL_ARCHES=1
+			shift
+			;;
+		--builddir)
+			[[ $# -ge 2 ]] || error "missing value for --builddir"
+			BUILD_DIR="$2"
+			shift 2
+			;;
+		--builddir=*)
+			BUILD_DIR="${1#*=}"
+			shift
+			;;
+		--build-root)
+			[[ $# -ge 2 ]] || error "missing value for --build-root"
+			BUILD_ROOT="$2"
+			shift 2
+			;;
+		--build-root=*)
+			BUILD_ROOT="${1#*=}"
+			shift
+			;;
+		--build-prefix)
+			[[ $# -ge 2 ]] || error "missing value for --build-prefix"
+			BUILD_PREFIX="$2"
+			shift 2
+			;;
+		--build-prefix=*)
+			BUILD_PREFIX="${1#*=}"
 			shift
 			;;
 		-s)
@@ -292,6 +364,25 @@ fi
 
 if (( ALL_ARCHES )) && [[ -n "$TARGET_ARCH" ]]; then
 	error "use either --arch <arch> or --all, not both"
+fi
+
+if (( ALL_ARCHES )) && [[ -n "$BUILD_DIR" ]]; then
+	error "--builddir cannot be combined with --all; use --build-root and/or --build-prefix instead"
+fi
+
+if [[ -n "$BUILD_DIR" ]] && [[ "$BUILD_ROOT" != "$REPO_ROOT" ]]; then
+	error "use either --builddir or --build-root, not both"
+fi
+
+if [[ -n "$BUILD_DIR" ]] && [[ "$BUILD_PREFIX" != "build" ]]; then
+	error "use either --builddir or --build-prefix, not both"
+fi
+
+[[ -n "$BUILD_PREFIX" ]] || error "--build-prefix requires a non-empty value"
+
+BUILD_ROOT="$(abspath "$BUILD_ROOT")"
+if [[ -n "$BUILD_DIR" ]]; then
+	BUILD_DIR="$(abspath "$BUILD_DIR")"
 fi
 
 if (( ! ALL_ARCHES )) && [[ -z "$TARGET_ARCH" ]]; then

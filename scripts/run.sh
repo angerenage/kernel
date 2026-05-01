@@ -13,7 +13,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 usage() {
 	cat <<'EOF'
-Usage: run.sh [--test|-t | --kernel-selftest] [--test-name <name>] [--arch <arch> | --all] [--builddir <path>] [--headless] [--debug] [--debug-port <port>] [--timeout <seconds>] [-- <extra qemu args>]
+Usage: run.sh [--test|-t | --kernel-selftest] [--test-name <name>] [--arch <arch> | --all] [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--headless] [--debug] [--debug-port <port>] [--timeout <seconds>] [-- <extra qemu args>]
 
 Modes:
   Default mode         Launch QEMU. Requires --arch <arch> or --all.
@@ -26,8 +26,14 @@ Modes:
 QEMU options:
   --arch <arch>        Target architecture (x86_64, aarch64, riscv64, loongarch64).
   --all                Launch QEMU for every architecture sequentially.
-  --builddir <path>    Meson build directory to use for single-architecture runs.
+  --builddir <path>    Meson build directory to use for single-architecture
+                       QEMU, hosted test, or kernel selftest runs.
                        Defaults to <repo>/build-<arch>.
+  --build-root <path>  Directory that contains per-architecture build
+                       directories. Defaults to the repository root.
+  --build-prefix <name>
+                       Prefix for per-architecture build directories under
+                       --build-root. Defaults to build, producing build-<arch>.
   --headless           Pass --headless through to the QEMU launcher.
   --debug              Pass --debug through to the QEMU launcher.
   --debug-port <port>  Pass --debug-port through to the QEMU launcher.
@@ -41,14 +47,17 @@ General:
 
 Test arch resolution:
   Test mode detects the current machine architecture from uname(1) and uses
-  the matching <repo>/build-<arch> directory. If the host architecture is not
+  the matching configured build directory. If the host architecture is not
   supported, the script exits with an error.
 
 Examples:
   bash scripts/run.sh --arch x86_64
   bash scripts/run.sh --arch riscv64 --debug
   bash scripts/run.sh --all
+  bash scripts/run.sh --arch x86_64 --builddir build-debug-x86_64
+  bash scripts/run.sh --all --build-prefix build-debug
   bash scripts/run.sh --test
+  bash scripts/run.sh --test --builddir build-debug-x86_64
   bash scripts/run.sh -t --test-name pmm
   bash scripts/run.sh --kernel-selftest --arch x86_64 --headless
   bash scripts/run.sh --kernel-selftest --arch x86_64 --timeout 45
@@ -86,7 +95,7 @@ validate_arch() {
 
 default_builddir_for_arch() {
 	validate_arch "$1"
-	printf '%s/build-%s\n' "$REPO_ROOT" "$1"
+	printf '%s/%s-%s\n' "$BUILD_ROOT" "$BUILD_PREFIX" "$1"
 }
 
 host_arch() {
@@ -264,6 +273,8 @@ DO_KERNEL_SELFTEST=0
 TARGET_ARCH=""
 ALL_ARCHES=0
 BUILD_DIR=""
+BUILD_ROOT="$REPO_ROOT"
+BUILD_PREFIX="build"
 DEBUG_MODE=0
 DEBUG_PORT=1234
 DEBUG_PORT_SET=0
@@ -302,6 +313,24 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--builddir=*)
 			BUILD_DIR="${1#*=}"
+			shift
+			;;
+		--build-root)
+			[[ $# -ge 2 ]] || error "missing value for --build-root"
+			BUILD_ROOT="$2"
+			shift 2
+			;;
+		--build-root=*)
+			BUILD_ROOT="${1#*=}"
+			shift
+			;;
+		--build-prefix)
+			[[ $# -ge 2 ]] || error "missing value for --build-prefix"
+			BUILD_PREFIX="$2"
+			shift 2
+			;;
+		--build-prefix=*)
+			BUILD_PREFIX="${1#*=}"
 			shift
 			;;
 		--headless)
@@ -360,6 +389,25 @@ if (( ALL_ARCHES )) && [[ -n "$TARGET_ARCH" ]]; then
 	error "use either --arch <arch> or --all, not both"
 fi
 
+if (( ALL_ARCHES )) && [[ -n "$BUILD_DIR" ]]; then
+	error "--builddir cannot be combined with --all; use --build-root and/or --build-prefix instead"
+fi
+
+if [[ -n "$BUILD_DIR" ]] && [[ "$BUILD_ROOT" != "$REPO_ROOT" ]]; then
+	error "use either --builddir or --build-root, not both"
+fi
+
+if [[ -n "$BUILD_DIR" ]] && [[ "$BUILD_PREFIX" != "build" ]]; then
+	error "use either --builddir or --build-prefix, not both"
+fi
+
+[[ -n "$BUILD_PREFIX" ]] || error "--build-prefix requires a non-empty value"
+
+BUILD_ROOT="$(abspath "$BUILD_ROOT")"
+if [[ -n "$BUILD_DIR" ]]; then
+	BUILD_DIR="$(abspath "$BUILD_DIR")"
+fi
+
 if (( DO_TEST )) && (( DO_KERNEL_SELFTEST )); then
 	error "use either --test or --kernel-selftest, not both"
 fi
@@ -367,7 +415,6 @@ fi
 if (( DO_TEST )); then
 	[[ -z "$TARGET_ARCH" ]] || error "--arch is not used in test mode"
 	(( ! ALL_ARCHES )) || error "--all is not used in test mode"
-	[[ -z "$BUILD_DIR" ]] || error "--builddir is not used in test mode"
 	(( ! HEADLESS )) || error "--headless is not used in test mode"
 	(( ! DEBUG_MODE )) || error "--debug is not used in test mode"
 	(( ! DEBUG_PORT_SET )) || error "--debug-port is not used in test mode"
@@ -375,7 +422,9 @@ if (( DO_TEST )); then
 	(( ${#EXTRA_QEMU_ARGS[@]} == 0 )) || error "extra QEMU arguments are not used in test mode"
 
 	TARGET_ARCH="$(host_arch)" || error "unsupported host architecture for tests: $(uname -m 2>/dev/null || printf 'unknown')"
-	BUILD_DIR="$(default_builddir_for_arch "$TARGET_ARCH")"
+	if [[ -z "$BUILD_DIR" ]]; then
+		BUILD_DIR="$(default_builddir_for_arch "$TARGET_ARCH")"
+	fi
 	run_tests "$TARGET_ARCH" "$BUILD_DIR"
 elif (( DO_KERNEL_SELFTEST )); then
 	(( ! ALL_ARCHES )) || error "--all is not used in kernel selftest mode"
@@ -383,9 +432,7 @@ elif (( DO_KERNEL_SELFTEST )); then
 	[[ -n "$TARGET_ARCH" ]] || error "--kernel-selftest requires --arch <arch>"
 
 	validate_arch "$TARGET_ARCH"
-	if [[ -n "$BUILD_DIR" ]]; then
-		BUILD_DIR="$(abspath "$BUILD_DIR")"
-	else
+	if [[ -z "$BUILD_DIR" ]]; then
 		BUILD_DIR="$(default_builddir_for_arch "$TARGET_ARCH")"
 	fi
 	run_kernel_selftests "$TARGET_ARCH" "$BUILD_DIR" "$SELFTEST_TIMEOUT"
@@ -400,19 +447,13 @@ else
 	if [[ -z "$TARGET_ARCH" ]] && (( ! ALL_ARCHES )); then
 		error "missing target selection; use --arch <arch> to launch one target or --all to launch every target"
 	fi
-	if (( ALL_ARCHES )) && [[ -n "$BUILD_DIR" ]]; then
-		error "--builddir cannot be combined with --all"
-	fi
-
 	if (( ALL_ARCHES )); then
 		for arch in "${ARCHES[@]}"; do
 			run_qemu_for_arch "$arch" "$(default_builddir_for_arch "$arch")"
 		done
 	else
 		validate_arch "$TARGET_ARCH"
-		if [[ -n "$BUILD_DIR" ]]; then
-			BUILD_DIR="$(abspath "$BUILD_DIR")"
-		else
+		if [[ -z "$BUILD_DIR" ]]; then
 			BUILD_DIR="$(default_builddir_for_arch "$TARGET_ARCH")"
 		fi
 		run_qemu_for_arch "$TARGET_ARCH" "$BUILD_DIR"

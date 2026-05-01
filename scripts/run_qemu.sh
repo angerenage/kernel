@@ -3,14 +3,19 @@ set -euo pipefail
 
 usage() {
 	cat <<'EOF'
-Usage: run_qemu.sh --arch <arch> [--builddir <path>] [--headless] [--debug] [--debug-port <port>] [-- <extra qemu args>]
+Usage: run_qemu.sh --arch <arch> [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--headless] [--debug] [--debug-port <port>] [-- <extra qemu args>]
 
 Required arguments:
   --arch        Target architecture (x86_64, aarch64, riscv64, loongarch64).
 
 Optional arguments:
   --builddir    Meson build directory containing kernel.iso.
-                Defaults to build-<arch>.
+                Defaults to <repo>/build-<arch>.
+  --build-root  Directory that contains per-architecture build directories.
+                Defaults to the repository root.
+  --build-prefix
+                Prefix for per-architecture build directories under
+                --build-root. Defaults to build, producing build-<arch>.
   --headless    Disable graphical display and keep serial on stdio.
   --debug       Start QEMU paused with a GDB stub on localhost and enable
                 QEMU debug logging in the build directory.
@@ -28,6 +33,9 @@ error() {
 	echo "run_qemu.sh: $*" >&2
 	exit 1
 }
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 abspath() {
 	case "$1" in
@@ -89,7 +97,7 @@ resolve_cmd() {
 default_builddir_for_arch() {
 	case "$1" in
 		x86_64|aarch64|riscv64|loongarch64)
-			printf 'build-%s\n' "$1"
+			printf '%s/%s-%s\n' "$BUILD_ROOT" "$BUILD_PREFIX" "$1"
 			;;
 		*)
 			error "unsupported architecture: $1"
@@ -184,6 +192,8 @@ firmware_search_dirs() {
 
 TARGET_ARCH=""
 BUILD_DIR=""
+BUILD_ROOT="$REPO_ROOT"
+BUILD_PREFIX="build"
 DEBUG_MODE=0
 DEBUG_PORT=1234
 HEADLESS=0
@@ -198,6 +208,26 @@ while [[ $# -gt 0 ]]; do
 		--builddir)
 			BUILD_DIR="$2"
 			shift 2
+			;;
+		--builddir=*)
+			BUILD_DIR="${1#*=}"
+			shift
+			;;
+		--build-root)
+			BUILD_ROOT="$2"
+			shift 2
+			;;
+		--build-root=*)
+			BUILD_ROOT="${1#*=}"
+			shift
+			;;
+		--build-prefix)
+			BUILD_PREFIX="$2"
+			shift 2
+			;;
+		--build-prefix=*)
+			BUILD_PREFIX="${1#*=}"
+			shift
 			;;
 		--debug)
 			DEBUG_MODE=1
@@ -228,6 +258,17 @@ done
 
 [[ -n "$TARGET_ARCH" ]] || error "missing required argument --arch"
 
+if [[ -n "$BUILD_DIR" ]] && [[ "$BUILD_ROOT" != "$REPO_ROOT" ]]; then
+	error "use either --builddir or --build-root, not both"
+fi
+
+if [[ -n "$BUILD_DIR" ]] && [[ "$BUILD_PREFIX" != "build" ]]; then
+	error "use either --builddir or --build-prefix, not both"
+fi
+
+[[ -n "$BUILD_PREFIX" ]] || error "--build-prefix requires a non-empty value"
+
+BUILD_ROOT="$(abspath "$BUILD_ROOT")"
 if [[ -z "$BUILD_DIR" ]]; then
 	BUILD_DIR="$(default_builddir_for_arch "$TARGET_ARCH")"
 fi
