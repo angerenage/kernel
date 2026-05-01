@@ -88,6 +88,14 @@ test_suites = [
 		'suites': ['unit', 'core'],
 	},
 	{
+		'name': 'id_table',
+		'sources': files(
+			'kheap/kheap_test.c',
+			'core/id_table_test.c',
+		),
+		'suites': ['unit', 'core'],
+	},
+	{
 		'name': 'sched',
 		'sources': files(
 			'core/sched_test.c',

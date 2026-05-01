@@ -16,6 +16,7 @@ enum spinlock_order {
 	SPINLOCK_ORDER_MUTEX        = 12u,
 	SPINLOCK_ORDER_SCHED        = 15u,
 	SPINLOCK_ORDER_CLOCK        = 20u,
+	SPINLOCK_ORDER_ID_TABLE     = 25u,
 	SPINLOCK_ORDER_PROCESS      = 25u,
 	SPINLOCK_ORDER_VMM          = 30u,
 	SPINLOCK_ORDER_VADDR        = 40u,
