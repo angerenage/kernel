@@ -61,6 +61,12 @@ enum uthread_start_result uthread_spawn_detached(const struct uthread_start_para
 /* Return a userspace thread ID, or UTHREAD_ID_INVALID for NULL. */
 uthread_id_t uthread_id(const struct uthread* thread);
 
+/* Return the userspace thread registered for id, or NULL when id is invalid or absent. */
+struct uthread* uthread_lookup(uthread_id_t id);
+
+/* Return the number of registered userspace threads. */
+size_t uthread_count(void);
+
 /* Convert a live joinable userspace thread into a detached thread. */
 bool uthread_detach(struct uthread* thread);
 

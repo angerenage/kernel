@@ -1,4 +1,5 @@
 #include <core/cpu.h>
+#include <core/id_table.h>
 #include <core/kheap.h>
 #include <core/kthread.h>
 #include <core/pmm.h>
@@ -31,31 +32,20 @@ static struct uthread_reaper uthread_reapers[UTHREAD_REAPER_MAX_CPUS];
 static struct spinlock       uthread_reaper_init_lock =
 	SPINLOCK_INIT_CLASS("uthread_reaper_init", SPINLOCK_ORDER_SCHED, SPINLOCK_FLAG_IRQSAVE);
 static bool            uthread_reapers_initialized;
-static struct spinlock uthread_id_lock =
-	SPINLOCK_INIT_CLASS("uthread_id_lock", SPINLOCK_ORDER_PROCESS, SPINLOCK_FLAG_IRQSAVE);
-static uthread_id_t uthread_next_id = 1u;
+static struct id_table uthread_table = {
+	.lock    = SPINLOCK_INIT_CLASS("uthread_table", SPINLOCK_ORDER_ID_TABLE, SPINLOCK_FLAG_IRQSAVE),
+	.next_id = 1u,
+	.min_id  = 1u,
+	.max_id  = UINT64_MAX,
+};
 
 static void uthread_reaper_entry(void* arg);
 
-static bool uthread_alloc_id(uthread_id_t* out_id) {
-	uthread_id_t     id;
-	struct irq_state state;
+static void uthread_unregister_id(struct uthread* thread) {
+	if (thread == NULL || thread->id == UTHREAD_ID_INVALID) return;
 
-	if (out_id == NULL) return false;
-	*out_id = UTHREAD_ID_INVALID;
-
-	state = spinlock_lock_irqsave(&uthread_id_lock);
-	id    = uthread_next_id;
-	if (id == UTHREAD_ID_INVALID) {
-		spinlock_unlock_irqrestore(&uthread_id_lock, state);
-		return false;
-	}
-	uthread_next_id++;
-	if (uthread_next_id == UTHREAD_ID_INVALID) uthread_next_id = UTHREAD_ID_INVALID;
-	spinlock_unlock_irqrestore(&uthread_id_lock, state);
-
-	*out_id = id;
-	return true;
+	(void)id_table_remove(&uthread_table, thread->id, NULL);
+	thread->id = UTHREAD_ID_INVALID;
 }
 
 static bool uthread_attach_process(struct uthread* thread, struct process* process) {
@@ -148,6 +138,7 @@ static void uthread_free(struct uthread* thread) {
 	heap_allocated = thread->heap_allocated;
 	uthread_release_stacks(thread);
 	uthread_detach_process(thread);
+	uthread_unregister_id(thread);
 	thread->process = NULL;
 	if (heap_allocated) kfree(thread);
 }
@@ -327,25 +318,27 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 	}
 	address_space = process_address_space(params->process);
 	if (!address_space_is_initialized(address_space)) return UTHREAD_START_INVALID_ARGUMENTS;
-	if (!uthread_alloc_id(&id)) return UTHREAD_START_ID_EXHAUSTED;
 
 	*thread = (struct uthread){
-		.id              = id,
 		.process         = params->process,
 		.user_stack_id   = VMM_ID_INVALID,
 		.kernel_stack_id = VMM_ID_INVALID,
 		.reaper_next     = NULL,
 		.heap_allocated  = heap_allocated,
 	};
+	if (!id_table_alloc(&uthread_table, thread, &id)) return UTHREAD_START_ID_EXHAUSTED;
+	thread->id = id;
 
 	user_stack_pages = params->user_stack_pages != 0u ? params->user_stack_pages : UTHREAD_DEFAULT_USER_STACK_PAGES;
 	user_stack_params.page_count = user_stack_pages;
 	if (!vmm_alloc(address_space, &user_stack_params, &thread->user_stack_id, &user_stack_base)) {
 		uthread_release_stacks(thread);
+		uthread_unregister_id(thread);
 		return UTHREAD_START_STACK_ALLOC_FAILED;
 	}
 	if (!vmm_alloc(address_space_kernel(), &kernel_stack_params, &thread->kernel_stack_id, &kernel_stack_base)) {
 		uthread_release_stacks(thread);
+		uthread_unregister_id(thread);
 		return UTHREAD_START_STACK_ALLOC_FAILED;
 	}
 
@@ -355,6 +348,7 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 	if (!hal_userspace_thread_context_init(
 			&context, kernel_stack_top, params->user_entry, thread->user_stack_top, params->user_arg)) {
 		uthread_release_stacks(thread);
+		uthread_unregister_id(thread);
 		return UTHREAD_START_CONTEXT_UNSUPPORTED;
 	}
 
@@ -373,18 +367,21 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 	init_result = thread_init_context(&thread->thread, &thread_params);
 	if (init_result != THREAD_INIT_OK) {
 		uthread_release_stacks(thread);
+		uthread_unregister_id(thread);
 		return UTHREAD_START_INVALID_ARGUMENTS;
 	}
 	thread->thread.process = params->process;
 	if (!uthread_attach_process(thread, thread->process)) {
 		thread->thread.process = NULL;
 		uthread_release_stacks(thread);
+		uthread_unregister_id(thread);
 		return UTHREAD_START_INVALID_ARGUMENTS;
 	}
 	if (reap_on_exit) thread_set_reap_callback(&thread->thread, uthread_reap_callback, thread);
 	if (!sched_make_runnable(&thread->thread)) {
 		uthread_release_stacks(thread);
 		uthread_detach_process(thread);
+		uthread_unregister_id(thread);
 		thread->thread.process = NULL;
 		thread->process        = NULL;
 		return UTHREAD_START_SCHEDULER_REJECTED;
@@ -426,6 +423,14 @@ uthread_id_t uthread_id(const struct uthread* thread) {
 	return thread == NULL ? UTHREAD_ID_INVALID : thread->id;
 }
 
+struct uthread* uthread_lookup(uthread_id_t id) {
+	return (struct uthread*)id_table_lookup(&uthread_table, id);
+}
+
+size_t uthread_count(void) {
+	return id_table_count(&uthread_table);
+}
+
 bool uthread_detach(struct uthread* thread) {
 	struct cpu* target_cpu;
 
@@ -451,6 +456,7 @@ bool uthread_deinit(struct uthread* thread) {
 	heap_allocated = thread->heap_allocated;
 	uthread_release_stacks(thread);
 	uthread_detach_process(thread);
+	uthread_unregister_id(thread);
 	memset(thread, 0, sizeof(*thread));
 	thread->user_stack_id   = VMM_ID_INVALID;
 	thread->kernel_stack_id = VMM_ID_INVALID;

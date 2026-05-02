@@ -116,6 +116,8 @@ Test(uthread, detached_start_registers_reaper_before_queueing) {
 	cr_assert_eq(result, UTHREAD_START_OK, "uthread_start failed: %d", result);
 
 	cr_assert_eq(worker.process, process, "uthread should retain its owning process");
+	cr_assert_neq(uthread_id(&worker), UTHREAD_ID_INVALID, "uthread_start should assign a valid TID");
+	cr_assert_eq(uthread_lookup(uthread_id(&worker)), &worker, "TID lookup should return the started uthread");
 	cr_assert_eq(worker.thread.address_space,
 	             process_address_space(process),
 	             "scheduler thread should use the process address space");
@@ -136,6 +138,7 @@ Test(uthread, deinit_detaches_joinable_thread_from_process) {
 		  .user_stack_id   = VMM_ID_INVALID,
 		  .kernel_stack_id = VMM_ID_INVALID,
     };
+	uthread_id_t                worker_tid;
 	struct uthread_start_params params = {
 		.name             = "user/joinable",
 		.process          = NULL,
@@ -151,11 +154,13 @@ Test(uthread, deinit_detaches_joinable_thread_from_process) {
 	params.process = process;
 
 	cr_assert_eq(uthread_start(&worker, &params), UTHREAD_START_OK, "uthread_start failed");
+	worker_tid = uthread_id(&worker);
 	cr_assert_eq(process_thread_count(process), 2u, "started uthread should attach to process");
 
 	thread_mark_zombie(&worker.thread);
 	cr_assert(uthread_deinit(&worker), "uthread_deinit should reclaim terminated joinable user thread");
 	cr_assert_eq(process_thread_count(process), 1u, "uthread_deinit should detach from process");
+	cr_assert_null(uthread_lookup(worker_tid), "uthread_deinit should remove the TID registry entry");
 	terminate_main_thread(process);
 	cr_assert(process_destroy(process), "process_destroy should succeed after uthread_deinit");
 }

@@ -142,6 +142,12 @@ bool process_destroy(struct process* process);
 /* Return a process PID, or PROCESS_PID_INVALID for NULL. */
 process_id_t process_pid(const struct process* process);
 
+/* Return the process registered for pid, or NULL when pid is invalid or absent. */
+struct process* process_lookup(process_id_t pid);
+
+/* Return the number of registered processes. */
+size_t process_count(void);
+
 /* Return the mutable user address space owned by process. */
 struct address_space* process_address_space(struct process* process);
 

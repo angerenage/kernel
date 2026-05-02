@@ -1,3 +1,4 @@
+#include <core/id_table.h>
 #include <core/kheap.h>
 #include <core/process.h>
 #include <core/sched.h>
@@ -10,30 +11,12 @@
 #include <stdint.h>
 #include <string.h>
 
-static struct spinlock process_pid_lock =
-	SPINLOCK_INIT_CLASS("process_pid_lock", SPINLOCK_ORDER_PROCESS, SPINLOCK_FLAG_IRQSAVE);
-static process_id_t process_next_pid = 1u;
-
-static bool process_alloc_pid(process_id_t* out_pid) {
-	process_id_t     pid;
-	struct irq_state state;
-
-	if (out_pid == NULL) return false;
-	*out_pid = PROCESS_PID_INVALID;
-
-	state = spinlock_lock_irqsave(&process_pid_lock);
-	pid   = process_next_pid;
-	if (pid == PROCESS_PID_INVALID) {
-		spinlock_unlock_irqrestore(&process_pid_lock, state);
-		return false;
-	}
-	process_next_pid++;
-	if (process_next_pid == PROCESS_PID_INVALID) process_next_pid = PROCESS_PID_INVALID;
-	spinlock_unlock_irqrestore(&process_pid_lock, state);
-
-	*out_pid = pid;
-	return true;
-}
+static struct id_table process_table = {
+	.lock    = SPINLOCK_INIT_CLASS("process_table", SPINLOCK_ORDER_ID_TABLE, SPINLOCK_FLAG_IRQSAVE),
+	.next_id = 1u,
+	.min_id  = 1u,
+	.max_id  = UINT64_MAX,
+};
 
 static enum process_result process_create(struct process** out_process, const char* name) {
 	struct process* process;
@@ -42,19 +25,23 @@ static enum process_result process_create(struct process** out_process, const ch
 	if (out_process == NULL) return PROCESS_INVALID_ARGUMENTS;
 	*out_process = NULL;
 
-	if (!process_alloc_pid(&pid)) return PROCESS_PID_EXHAUSTED;
-
 	process = kmalloc(sizeof(*process));
 	if (process == NULL) return PROCESS_NO_MEMORY;
 
 	memset(process, 0, sizeof(*process));
-	process->pid   = pid;
 	process->name  = name;
 	process->state = PROCESS_STATE_NEW;
 	spinlock_init_class(&process->lock, "process", SPINLOCK_ORDER_PROCESS, SPINLOCK_FLAG_IRQSAVE);
 	thread_wait_queue_init(&process->join_wait_queue);
 
+	if (!id_table_alloc(&process_table, process, &pid)) {
+		kfree(process);
+		return PROCESS_PID_EXHAUSTED;
+	}
+	process->pid = pid;
+
 	if (!vmm_user_address_space_init(&process->address_space)) {
+		(void)id_table_remove(&process_table, process->pid, NULL);
 		kfree(process);
 		return PROCESS_ADDRESS_SPACE_FAILED;
 	}
@@ -384,6 +371,7 @@ bool process_destroy(struct process* process) {
 	}
 
 	vmm_address_space_deinit(&process->address_space);
+	(void)id_table_remove(&process_table, process->pid, NULL);
 	memset(process, 0, sizeof(*process));
 	kfree(process);
 	return true;
@@ -391,6 +379,14 @@ bool process_destroy(struct process* process) {
 
 process_id_t process_pid(const struct process* process) {
 	return process == NULL ? PROCESS_PID_INVALID : process->pid;
+}
+
+struct process* process_lookup(process_id_t pid) {
+	return (struct process*)id_table_lookup(&process_table, pid);
+}
+
+size_t process_count(void) {
+	return id_table_count(&process_table);
 }
 
 struct address_space* process_address_space(struct process* process) {

@@ -87,6 +87,8 @@ Test(process, spawn_initializes_pid_state_address_space_and_main_thread) {
 	struct process*       process = NULL;
 	struct address_space* space;
 	enum process_result   result;
+	process_id_t          pid;
+	uthread_id_t          main_tid;
 
 	init_process_test_environment();
 
@@ -97,10 +99,17 @@ Test(process, spawn_initializes_pid_state_address_space_and_main_thread) {
 						   });
 	cr_assert_eq(result, PROCESS_OK, "process_spawn failed: %d", result);
 	cr_assert_not_null(process, "process_spawn did not return a process");
-	cr_assert_neq(process_pid(process), PROCESS_PID_INVALID, "process pid should be valid");
+	pid = process_pid(process);
+	cr_assert_neq(pid, PROCESS_PID_INVALID, "process pid should be valid");
+	cr_assert_eq(process_lookup(pid), process, "process PID lookup should return the process");
+	cr_assert_eq(process_count(), 1u, "process registry should track the spawned process");
 	cr_assert_eq(process_get_state(process), PROCESS_STATE_RUNNING, "spawned process should start running");
 	cr_assert_eq(process_thread_count(process), 1u, "spawned process should have one main thread");
 	cr_assert_not_null(process->main_thread, "spawned process should record its main thread");
+	main_tid = uthread_id(process->main_thread);
+	cr_assert_neq(main_tid, UTHREAD_ID_INVALID, "main thread TID should be valid");
+	cr_assert_eq(
+		uthread_lookup(main_tid), process->main_thread, "main thread TID lookup should return the main thread");
 	cr_assert_eq(
 		process_main_thread(process), process->main_thread, "main thread accessor should return the main thread");
 
@@ -112,6 +121,9 @@ Test(process, spawn_initializes_pid_state_address_space_and_main_thread) {
 
 	terminate_main_thread(process);
 	cr_assert(process_destroy(process), "process_destroy failed");
+	cr_assert_null(process_lookup(pid), "destroyed process should not remain registered");
+	cr_assert_eq(process_count(), 0u, "process registry should be empty after destroy");
+	cr_assert_null(uthread_lookup(main_tid), "destroyed main thread should not remain registered");
 }
 
 Test(process, spawn_assigns_monotonic_pids) {
@@ -189,6 +201,7 @@ Test(process, spawn_user_creates_main_thread_in_process_address_space) {
 Test(process, create_thread_starts_joinable_thread_in_process_address_space) {
 	struct process* process = NULL;
 	struct uthread  worker;
+	uthread_id_t    worker_tid;
 
 	init_process_test_environment();
 
@@ -212,6 +225,10 @@ Test(process, create_thread_starts_joinable_thread_in_process_address_space) {
 	             PROCESS_OK);
 
 	cr_assert_eq(worker.process, process, "created thread should retain its owning process");
+	worker_tid = uthread_id(&worker);
+	cr_assert_neq(worker_tid, UTHREAD_ID_INVALID, "created thread should receive a valid TID");
+	cr_assert_eq(uthread_lookup(worker_tid), &worker, "created thread TID lookup should return the thread");
+	cr_assert_eq(uthread_count(), 2u, "thread registry should track main and worker threads");
 	cr_assert_eq(worker.thread.address_space,
 	             process_address_space(process),
 	             "created thread should use the process address space");
@@ -221,6 +238,8 @@ Test(process, create_thread_starts_joinable_thread_in_process_address_space) {
 	terminate_process_thread(&worker);
 	terminate_main_thread(process);
 	cr_assert(process_destroy(process), "process_destroy should reclaim terminated process threads");
+	cr_assert_null(uthread_lookup(worker_tid), "destroyed worker should not remain registered");
+	cr_assert_eq(uthread_count(), 0u, "thread registry should be empty after process destroy");
 }
 
 Test(process, create_thread_rejects_missing_arguments) {
@@ -260,6 +279,7 @@ Test(process, join_thread_returns_exit_code_and_reclaims_thread) {
 	struct process* process = NULL;
 	struct uthread  worker;
 	uintptr_t       exit_code = 0u;
+	uthread_id_t    worker_tid;
 
 	init_process_test_environment();
 
@@ -276,6 +296,7 @@ Test(process, join_thread_returns_exit_code_and_reclaims_thread) {
 										   .user_entry = 0x410000u,
 									   }),
 	             PROCESS_OK);
+	worker_tid = uthread_id(&worker);
 
 	thread_mark_exiting(&worker.thread, 44u);
 	thread_mark_zombie(&worker.thread);
@@ -284,6 +305,7 @@ Test(process, join_thread_returns_exit_code_and_reclaims_thread) {
 	             "process_join_thread should join a terminated process thread");
 	cr_assert_eq(exit_code, 44u, "process_join_thread should publish thread exit code");
 	cr_assert_eq(process_thread_count(process), 1u, "joined thread should detach from process");
+	cr_assert_null(uthread_lookup(worker_tid), "joined thread should be removed from TID registry");
 
 	terminate_main_thread(process);
 	cr_assert(process_destroy(process), "process_destroy should reclaim remaining main thread");
