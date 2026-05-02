@@ -299,11 +299,11 @@ bool process_terminate(struct process* process, uintptr_t exit_code) {
 }
 
 enum process_join_result process_join(struct process* process, uintptr_t* out_exit_code) {
-	struct thread* current;
+	struct uthread* current;
 
 	if (process == NULL) return PROCESS_JOIN_INVALID_ARGUMENTS;
 
-	current = sched_current_thread();
+	current = uthread_current();
 	if (current != NULL && current->process == process) return PROCESS_JOIN_SELF;
 
 	for (;;) {
@@ -449,20 +449,22 @@ size_t process_thread_count(struct process* process) {
 }
 
 struct process* process_current(void) {
-	struct thread* current = sched_current_thread();
+	struct uthread* current = uthread_current();
 	return current == NULL ? NULL : current->process;
 }
 
 void process_notify_thread_exit(struct process* process, struct thread* thread, uintptr_t exit_code) {
 	struct irq_state state;
 	struct irq_state wait_state;
+	struct uthread*  uthread;
 	bool             wake_joiners;
 
 	if (process == NULL || thread == NULL) return;
 
+	uthread    = uthread_from_thread(thread);
 	wait_state = spinlock_lock_irqsave(&process->join_wait_queue.lock);
 	state      = spinlock_lock_irqsave(&process->lock);
-	if (thread->process == process && process->state != PROCESS_STATE_EXITING &&
+	if (uthread != NULL && uthread->process == process && process->state != PROCESS_STATE_EXITING &&
 	    process->state != PROCESS_STATE_ZOMBIE) {
 		process->exit_code = exit_code;
 	}

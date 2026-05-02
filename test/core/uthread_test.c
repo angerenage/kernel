@@ -136,6 +136,22 @@ Test(uthread, detached_start_registers_reaper_before_queueing) {
 	cr_assert_eq(sched_run_queue_depth(cpu_current()), 3u, "main thread, user thread, and reaper should be runnable");
 }
 
+Test(uthread, current_returns_running_user_thread) {
+	struct process* process = NULL;
+	struct uthread* main_thread;
+
+	init_uthread_test_environment();
+	process     = spawn_owner_process("test/current");
+	main_thread = process_main_thread(process);
+
+	cr_assert_null(uthread_current(), "idle scheduler thread should not resolve to a uthread");
+	cr_assert_eq(uthread_from_thread(&main_thread->thread), main_thread, "embedded scheduler thread should resolve");
+
+	sched_set_current(cpu_current(), &main_thread->thread);
+	cr_assert_eq(uthread_current(), main_thread, "uthread_current should return the running user thread");
+	cr_assert_eq(process_current(), process, "process_current should use the running user thread owner");
+}
+
 Test(uthread, deinit_detaches_joinable_thread_from_process) {
 	struct process* process = NULL;
 	struct uthread  worker  = {

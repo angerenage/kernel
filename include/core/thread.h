@@ -9,7 +9,6 @@
 struct cpu;
 struct address_space;
 struct mutex;
-struct process;
 struct thread;
 struct thread_wait_queue;
 
@@ -63,6 +62,13 @@ enum thread_block_reason {
 	THREAD_BLOCK_JOIN,
 	THREAD_BLOCK_SLEEP,
 	THREAD_BLOCK_PARKED,
+};
+
+/* Higher-level object that owns a scheduler thread descriptor. */
+enum thread_owner_kind {
+	THREAD_OWNER_NONE = 0,
+	THREAD_OWNER_KTHREAD,
+	THREAD_OWNER_UTHREAD,
 };
 
 /* Resolution state for waits that are armed against both a wait queue and a timeout. */
@@ -123,7 +129,8 @@ struct thread {
 	uintptr_t                 kernel_stack_base;
 	uintptr_t                 kernel_stack_top;
 	struct address_space*     address_space;
-	struct process*           process;
+	enum thread_owner_kind    owner_kind;
+	void*                     owner;
 	struct thread_context     context;
 	thread_entry_t            entry;
 	void*                     arg;

@@ -243,6 +243,8 @@ static enum kthread_spawn_result kthread_spawn_internal(struct kthread** out_thr
 		kthread_free(thread);
 		return result;
 	}
+	thread->thread.owner_kind = THREAD_OWNER_KTHREAD;
+	thread->thread.owner      = thread;
 
 	if (reap_on_exit) thread_set_reap_callback(&thread->thread, kthread_reap_callback, thread);
 

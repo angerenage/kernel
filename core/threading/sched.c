@@ -3,6 +3,7 @@
 #include <core/sched.h>
 #include <core/spinlock.h>
 #include <core/thread.h>
+#include <core/uthread.h>
 #include <core/vaddr_alloc.h>
 #include <hal/cpu.h>
 #include <stdint.h>
@@ -906,8 +907,9 @@ void sched_cancel_thread(struct thread* thread) {
 }
 
 void sched_exit_current(thread_exit_code_t exit_code) {
-	struct cpu*    cpu     = cpu_current();
-	struct thread* current = sched_current_thread();
+	struct cpu*     cpu     = cpu_current();
+	struct thread*  current = sched_current_thread();
+	struct uthread* current_uthread;
 
 	if (cpu == NULL || current == NULL || thread_is_idle(current)) {
 		for (;;) {
@@ -919,7 +921,10 @@ void sched_exit_current(thread_exit_code_t exit_code) {
 	thread_mark_exiting(current, exit_code);
 	(void)sched_wake_all(&current->join_wait_queue);
 	thread_mark_zombie(current);
-	process_notify_thread_exit(current->process, current, exit_code);
+	current_uthread = uthread_from_thread(current);
+	if (current_uthread != NULL) {
+		process_notify_thread_exit(current_uthread->process, current, exit_code);
+	}
 	thread_notify_reap(current);
 	sched_dispatch_next(cpu);
 

@@ -370,20 +370,19 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 		uthread_unregister_id(thread);
 		return UTHREAD_START_INVALID_ARGUMENTS;
 	}
-	thread->thread.process = params->process;
 	if (!uthread_attach_process(thread, thread->process)) {
-		thread->thread.process = NULL;
 		uthread_release_stacks(thread);
 		uthread_unregister_id(thread);
 		return UTHREAD_START_INVALID_ARGUMENTS;
 	}
+	thread->thread.owner_kind = THREAD_OWNER_UTHREAD;
+	thread->thread.owner      = thread;
 	if (reap_on_exit) thread_set_reap_callback(&thread->thread, uthread_reap_callback, thread);
 	if (!sched_make_runnable(&thread->thread)) {
 		uthread_release_stacks(thread);
 		uthread_detach_process(thread);
 		uthread_unregister_id(thread);
-		thread->thread.process = NULL;
-		thread->process        = NULL;
+		thread->process = NULL;
 		return UTHREAD_START_SCHEDULER_REJECTED;
 	}
 
@@ -421,6 +420,16 @@ enum uthread_start_result uthread_spawn_detached(const struct uthread_start_para
 
 uthread_id_t uthread_id(const struct uthread* thread) {
 	return thread == NULL ? UTHREAD_ID_INVALID : thread->id;
+}
+
+struct uthread* uthread_from_thread(struct thread* thread) {
+	if (thread == NULL || thread->owner_kind != THREAD_OWNER_UTHREAD) return NULL;
+
+	return (struct uthread*)thread->owner;
+}
+
+struct uthread* uthread_current(void) {
+	return uthread_from_thread(sched_current_thread());
 }
 
 struct uthread* uthread_lookup(uthread_id_t id) {
