@@ -146,6 +146,21 @@ enum process_thread_spawn_result process_spawn_thread(struct process* process, s
 	return PROCESS_THREAD_SPAWN_OK;
 }
 
+enum process_thread_spawn_result process_start_main_thread(struct process* process, struct uthread** out_thread,
+                                                           const struct process_thread_params* params) {
+	struct irq_state state;
+	bool             can_start;
+
+	if (process == NULL || out_thread == NULL || params == NULL) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
+
+	state     = spinlock_lock_irqsave(&process->lock);
+	can_start = process->state == PROCESS_STATE_NEW && process->main_thread == NULL && process->thread_count == 0u;
+	spinlock_unlock_irqrestore(&process->lock, state);
+	if (!can_start) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
+
+	return process_spawn_thread(process, out_thread, params);
+}
+
 enum process_thread_join_result process_join_thread(struct process* process, struct uthread* thread,
                                                     uintptr_t* out_exit_code) {
 	struct thread* current;

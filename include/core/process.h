@@ -125,6 +125,10 @@ struct process {
 enum process_thread_spawn_result process_spawn_thread(struct process* process, struct uthread** out_thread,
                                                       const struct process_thread_params* params);
 
+/* Queue the initial userspace thread for a newly-created process. */
+enum process_thread_spawn_result process_start_main_thread(struct process* process, struct uthread** out_thread,
+                                                           const struct process_thread_params* params);
+
 /* Block until thread exits, publish its exit code, and reclaim its process-owned resources. */
 enum process_thread_join_result process_join_thread(struct process* process, struct uthread* thread,
                                                     uintptr_t* out_exit_code);
