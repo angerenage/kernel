@@ -162,7 +162,7 @@ Test(syscall, tick_count_returns_scheduler_ticks) {
 	syscall_test_reset_state();
 }
 
-Test(syscall, getpid_fails_without_current_process) {
+Test(syscall, process_and_thread_identity_fail_without_current_process) {
 	syscall_result_t result;
 
 	syscall_test_init_scheduler();
@@ -171,10 +171,14 @@ Test(syscall, getpid_fails_without_current_process) {
 	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
 	cr_assert_eq(result.value, 0u);
 
+	result = syscall_dispatch(SYSCALL_GETTID, 0u, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
+	cr_assert_eq(result.value, 0u);
+
 	syscall_test_reset_state();
 }
 
-Test(syscall, process_introspection_returns_current_process_values) {
+Test(syscall, process_and_thread_introspection_return_current_values) {
 	struct process*  process;
 	struct uthread*  main_thread;
 	syscall_result_t result;
@@ -193,6 +197,10 @@ Test(syscall, process_introspection_returns_current_process_values) {
 	result = syscall_dispatch(SYSCALL_GET_PROCESS_THREAD_COUNT, 0u, 0u, 0u, 0u, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(result.value, 1u);
+
+	result = syscall_dispatch(SYSCALL_GETTID, 0u, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(result.value, (uintptr_t)uthread_id(main_thread));
 
 	syscall_test_reset_state();
 }

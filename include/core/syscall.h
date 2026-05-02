@@ -15,6 +15,9 @@ enum {
 	SYSCALL_GETPID,
 	SYSCALL_GET_PROCESS_THREAD_COUNT,
 
+	/* Thread identity / introspection */
+	SYSCALL_GETTID,
+
 	SYSCALL_COUNT,
 };
 

@@ -2,6 +2,7 @@
 #include <core/process.h>
 #include <core/sched.h>
 #include <core/syscall.h>
+#include <core/uthread.h>
 #include <hal/clock.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -110,6 +111,22 @@ static syscall_result_t syscall_get_process_thread_count(uintptr_t arg0, uintptr
 	return syscall_result_ok((uintptr_t)process_thread_count(process));
 }
 
+static syscall_result_t syscall_gettid(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
+                                       uintptr_t arg5) {
+	struct uthread* thread;
+
+	(void)arg0;
+	(void)arg1;
+	(void)arg2;
+	(void)arg3;
+	(void)arg4;
+	(void)arg5;
+
+	thread = uthread_current();
+	if (thread == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	return syscall_result_ok((uintptr_t)uthread_id(thread));
+}
+
 static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 	[SYSCALL_NOP]                      = syscall_nop,
 	[SYSCALL_YIELD]                    = syscall_yield,
@@ -117,6 +134,7 @@ static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 	[SYSCALL_TICK_COUNT]               = syscall_tick_count,
 	[SYSCALL_GETPID]                   = syscall_getpid,
 	[SYSCALL_GET_PROCESS_THREAD_COUNT] = syscall_get_process_thread_count,
+	[SYSCALL_GETTID]                   = syscall_gettid,
 };
 
 syscall_result_t syscall_dispatch(uintptr_t number, uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
