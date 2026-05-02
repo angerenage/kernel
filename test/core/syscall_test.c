@@ -205,6 +205,146 @@ Test(syscall, process_and_thread_introspection_return_current_values) {
 	syscall_test_reset_state();
 }
 
+Test(syscall, create_process_returns_new_process_pid) {
+	syscall_result_t result;
+	struct process*  process;
+
+	syscall_test_init_process_environment();
+
+	result = syscall_dispatch(SYSCALL_CREATE_PROCESS, (uintptr_t)"syscall-created", 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_neq(result.value, (uintptr_t)PROCESS_PID_INVALID);
+
+	process = process_lookup((process_id_t)result.value);
+	cr_assert_not_null(process, "created process should be registered");
+	cr_assert_eq(process_get_state(process), PROCESS_STATE_NEW, "created process should not be runnable yet");
+	cr_assert_eq(process_thread_count(process), 0u, "created process should not have a main thread");
+	cr_assert_null(process_main_thread(process), "created process should not publish a main thread");
+
+	cr_assert(process_destroy(process), "process_destroy failed");
+	syscall_test_reset_state();
+}
+
+Test(syscall, run_process_creates_main_thread_at_entrypoint) {
+	syscall_result_t create_result;
+	syscall_result_t run_result;
+	struct process*  process;
+	struct uthread*  main_thread;
+
+	syscall_test_init_process_environment();
+
+	create_result = syscall_dispatch(SYSCALL_CREATE_PROCESS, (uintptr_t)"syscall-run", 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(create_result.status, SYSCALL_STATUS_OK);
+	process = process_lookup((process_id_t)create_result.value);
+	cr_assert_not_null(process);
+
+	run_result = syscall_dispatch(SYSCALL_RUN_PROCESS, create_result.value, 0x400000u, 0x1234u, 2u, 0u, 0u);
+	cr_assert_eq(run_result.status, SYSCALL_STATUS_OK);
+	main_thread = process_main_thread(process);
+	cr_assert_not_null(main_thread, "run_process should create the process main thread");
+	cr_assert_eq(run_result.value, (uintptr_t)uthread_id(main_thread));
+	cr_assert_eq(process_get_state(process), PROCESS_STATE_RUNNING);
+	cr_assert_eq(process_thread_count(process), 1u);
+	cr_assert_eq(main_thread->thread.address_space, process_address_space(process));
+	cr_assert_eq(sched_run_queue_depth(cpu_current()), 1u, "main thread should be runnable");
+
+	thread_mark_zombie(&main_thread->thread);
+	cr_assert(process_destroy(process), "process_destroy failed");
+	syscall_test_reset_state();
+}
+
+Test(syscall, run_process_rejects_invalid_or_already_started_process) {
+	syscall_result_t create_result;
+	syscall_result_t run_result;
+	struct process*  process;
+
+	syscall_test_init_process_environment();
+
+	run_result = syscall_dispatch(SYSCALL_RUN_PROCESS, UINTPTR_MAX, 0x400000u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(run_result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+
+	create_result = syscall_dispatch(SYSCALL_CREATE_PROCESS, (uintptr_t)"syscall-run-invalid", 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(create_result.status, SYSCALL_STATUS_OK);
+	process = process_lookup((process_id_t)create_result.value);
+	cr_assert_not_null(process);
+
+	run_result = syscall_dispatch(SYSCALL_RUN_PROCESS, create_result.value, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(run_result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+
+	run_result = syscall_dispatch(SYSCALL_RUN_PROCESS, create_result.value, 0x400000u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(run_result.status, SYSCALL_STATUS_OK);
+	run_result = syscall_dispatch(SYSCALL_RUN_PROCESS, create_result.value, 0x410000u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(run_result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+
+	thread_mark_zombie(&process_main_thread(process)->thread);
+	cr_assert(process_destroy(process), "process_destroy failed");
+	syscall_test_reset_state();
+}
+
+Test(syscall, wait_process_returns_exit_code_and_reclaims_process) {
+	syscall_result_t create_result;
+	syscall_result_t run_result;
+	syscall_result_t wait_result;
+	struct process*  process;
+	struct uthread*  main_thread;
+	process_id_t     pid;
+
+	syscall_test_init_process_environment();
+
+	create_result = syscall_dispatch(SYSCALL_CREATE_PROCESS, (uintptr_t)"syscall-wait", 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(create_result.status, SYSCALL_STATUS_OK);
+	pid     = (process_id_t)create_result.value;
+	process = process_lookup(pid);
+	cr_assert_not_null(process);
+	run_result = syscall_dispatch(SYSCALL_RUN_PROCESS, create_result.value, 0x400000u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(run_result.status, SYSCALL_STATUS_OK);
+
+	cr_assert(process_terminate(process, 42u));
+	main_thread = process_main_thread(process);
+	thread_mark_zombie(&main_thread->thread);
+	process_notify_thread_exit(process, &main_thread->thread, 42u);
+
+	wait_result = syscall_dispatch(SYSCALL_WAIT_PROCESS, create_result.value, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(wait_result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(wait_result.value, 42u);
+	cr_assert_null(process_lookup(pid), "wait_process should destroy a joined process");
+
+	syscall_test_reset_state();
+}
+
+Test(syscall, detach_and_kill_process_dispatch_to_lifecycle_helpers) {
+	syscall_result_t create_result;
+	syscall_result_t run_result;
+	syscall_result_t detach_result;
+	syscall_result_t kill_result;
+	syscall_result_t wait_result;
+	struct process*  process;
+
+	syscall_test_init_process_environment();
+
+	create_result = syscall_dispatch(SYSCALL_CREATE_PROCESS, (uintptr_t)"syscall-kill", 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(create_result.status, SYSCALL_STATUS_OK);
+	process = process_lookup((process_id_t)create_result.value);
+	cr_assert_not_null(process);
+	run_result = syscall_dispatch(SYSCALL_RUN_PROCESS, create_result.value, 0x400000u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(run_result.status, SYSCALL_STATUS_OK);
+
+	kill_result = syscall_dispatch(SYSCALL_KILL_PROCESS, create_result.value, 7u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(kill_result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(process_get_state(process), PROCESS_STATE_EXITING);
+	cr_assert(thread_cancel_requested(&process_main_thread(process)->thread));
+
+	detach_result = syscall_dispatch(SYSCALL_DETACH_PROCESS, create_result.value, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(detach_result.status, SYSCALL_STATUS_OK);
+	wait_result = syscall_dispatch(SYSCALL_WAIT_PROCESS, create_result.value, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(wait_result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+
+	thread_mark_zombie(&process_main_thread(process)->thread);
+	process_notify_thread_exit(process, &process_main_thread(process)->thread, 7u);
+	cr_assert(process_destroy(process), "process_destroy failed");
+	syscall_test_reset_state();
+}
+
 Test(syscall, yield_dispatches_next_runnable_thread) {
 	const struct thread_create_params first_params = {
 		.name              = "syscall-yield-first",
