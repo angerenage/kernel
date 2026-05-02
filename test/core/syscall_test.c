@@ -262,6 +262,7 @@ Test(syscall, run_process_rejects_invalid_or_already_started_process) {
 
 	run_result = syscall_dispatch(SYSCALL_RUN_PROCESS, UINTPTR_MAX, 0x400000u, 0u, 0u, 0u, 0u);
 	cr_assert_eq(run_result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(run_result.value, 0u);
 
 	create_result = syscall_dispatch(SYSCALL_CREATE_PROCESS, (uintptr_t)"syscall-run-invalid", 0u, 0u, 0u, 0u, 0u);
 	cr_assert_eq(create_result.status, SYSCALL_STATUS_OK);
@@ -270,11 +271,13 @@ Test(syscall, run_process_rejects_invalid_or_already_started_process) {
 
 	run_result = syscall_dispatch(SYSCALL_RUN_PROCESS, create_result.value, 0u, 0u, 0u, 0u, 0u);
 	cr_assert_eq(run_result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(run_result.value, 1u);
 
 	run_result = syscall_dispatch(SYSCALL_RUN_PROCESS, create_result.value, 0x400000u, 0u, 0u, 0u, 0u);
 	cr_assert_eq(run_result.status, SYSCALL_STATUS_OK);
 	run_result = syscall_dispatch(SYSCALL_RUN_PROCESS, create_result.value, 0x410000u, 0u, 0u, 0u, 0u);
 	cr_assert_eq(run_result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(run_result.value, 0u);
 
 	thread_mark_zombie(&process_main_thread(process)->thread);
 	cr_assert(process_destroy(process), "process_destroy failed");
@@ -341,6 +344,198 @@ Test(syscall, detach_and_kill_process_dispatch_to_lifecycle_helpers) {
 
 	thread_mark_zombie(&process_main_thread(process)->thread);
 	process_notify_thread_exit(process, &process_main_thread(process)->thread, 7u);
+	cr_assert(process_destroy(process), "process_destroy failed");
+	syscall_test_reset_state();
+}
+
+Test(syscall, thread_lifecycle_requires_current_thread) {
+	syscall_result_t result;
+
+	syscall_test_init_process_environment();
+
+	result = syscall_dispatch(SYSCALL_EXIT_THREAD, 0u, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
+
+	result = syscall_dispatch(SYSCALL_SPAWN_THREAD, 0x410000u, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
+
+	result = syscall_dispatch(SYSCALL_JOIN_THREAD, 1u, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
+
+	result = syscall_dispatch(SYSCALL_DETACH_THREAD, 1u, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
+
+	result = syscall_dispatch(SYSCALL_CANCEL_THREAD, 1u, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
+
+	result = syscall_dispatch(SYSCALL_SET_THREAD_CANCEL_ENABLED, 1u, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
+
+	result = syscall_dispatch(SYSCALL_TEST_THREAD_CANCEL, 0u, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
+
+	syscall_test_reset_state();
+}
+
+Test(syscall, spawn_thread_creates_joinable_thread_in_current_process) {
+	struct process*  process;
+	struct uthread*  main_thread;
+	struct uthread*  worker;
+	syscall_result_t result;
+
+	syscall_test_init_process_environment();
+	process     = syscall_test_spawn_process("syscall/spawn-thread");
+	main_thread = process_main_thread(process);
+	cr_assert_not_null(main_thread);
+	sched_set_current(cpu_current(), &main_thread->thread);
+
+	result = syscall_dispatch(SYSCALL_SPAWN_THREAD, 0x410000u, 0x1234u, 2u, 0u, (uintptr_t)"syscall-worker", 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_neq(result.value, (uintptr_t)UTHREAD_ID_INVALID);
+	worker = uthread_lookup((uthread_id_t)result.value);
+	cr_assert_not_null(worker, "spawn_thread should return the new TID");
+	cr_assert_eq(worker->process, process);
+	cr_assert_eq(worker->thread.address_space, process_address_space(process));
+	cr_assert_eq(process_thread_count(process), 2u);
+	cr_assert_eq(sched_run_queue_depth(cpu_current()), 2u);
+
+	thread_mark_zombie(&worker->thread);
+	thread_mark_zombie(&main_thread->thread);
+	cr_assert(process_destroy(process), "process_destroy failed");
+	syscall_test_reset_state();
+}
+
+Test(syscall, spawn_thread_rejects_missing_entrypoint_with_argument_index) {
+	struct process*  process;
+	struct uthread*  main_thread;
+	syscall_result_t result;
+
+	syscall_test_init_process_environment();
+	process     = syscall_test_spawn_process("syscall/spawn-invalid");
+	main_thread = process_main_thread(process);
+	cr_assert_not_null(main_thread);
+	sched_set_current(cpu_current(), &main_thread->thread);
+
+	result = syscall_dispatch(SYSCALL_SPAWN_THREAD, 0u, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(result.value, 0u);
+
+	thread_mark_zombie(&main_thread->thread);
+	cr_assert(process_destroy(process), "process_destroy failed");
+	syscall_test_reset_state();
+}
+
+Test(syscall, join_thread_returns_exit_code_and_reclaims_thread) {
+	struct process*  process;
+	struct uthread*  main_thread;
+	struct uthread*  worker;
+	syscall_result_t spawn_result;
+	syscall_result_t join_result;
+
+	syscall_test_init_process_environment();
+	process     = syscall_test_spawn_process("syscall/join-thread");
+	main_thread = process_main_thread(process);
+	cr_assert_not_null(main_thread);
+	sched_set_current(cpu_current(), &main_thread->thread);
+
+	spawn_result = syscall_dispatch(SYSCALL_SPAWN_THREAD, 0x410000u, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(spawn_result.status, SYSCALL_STATUS_OK);
+	worker = uthread_lookup((uthread_id_t)spawn_result.value);
+	cr_assert_not_null(worker);
+
+	thread_mark_exiting(&worker->thread, 55u);
+	thread_mark_zombie(&worker->thread);
+	join_result = syscall_dispatch(SYSCALL_JOIN_THREAD, spawn_result.value, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(join_result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(join_result.value, 55u);
+	cr_assert_null(uthread_lookup((uthread_id_t)spawn_result.value), "joined thread should be reclaimed");
+	cr_assert_eq(process_thread_count(process), 1u);
+
+	thread_mark_zombie(&main_thread->thread);
+	cr_assert(process_destroy(process), "process_destroy failed");
+	syscall_test_reset_state();
+}
+
+Test(syscall, thread_target_syscalls_reject_invalid_tid_with_argument_index) {
+	struct process*  process;
+	struct uthread*  main_thread;
+	syscall_result_t result;
+
+	syscall_test_init_process_environment();
+	process     = syscall_test_spawn_process("syscall/thread-invalid-target");
+	main_thread = process_main_thread(process);
+	cr_assert_not_null(main_thread);
+	sched_set_current(cpu_current(), &main_thread->thread);
+
+	result = syscall_dispatch(SYSCALL_JOIN_THREAD, UINTPTR_MAX, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(result.value, 0u);
+
+	result = syscall_dispatch(SYSCALL_DETACH_THREAD, UINTPTR_MAX, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(result.value, 0u);
+
+	result = syscall_dispatch(SYSCALL_CANCEL_THREAD, UINTPTR_MAX, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(result.value, 0u);
+
+	thread_mark_zombie(&main_thread->thread);
+	cr_assert(process_destroy(process), "process_destroy failed");
+	syscall_test_reset_state();
+}
+
+Test(syscall, cancel_thread_requests_deferred_cancellation) {
+	struct process*  process;
+	struct uthread*  main_thread;
+	struct uthread*  worker;
+	syscall_result_t spawn_result;
+	syscall_result_t cancel_result;
+
+	syscall_test_init_process_environment();
+	process     = syscall_test_spawn_process("syscall/cancel-thread");
+	main_thread = process_main_thread(process);
+	cr_assert_not_null(main_thread);
+	sched_set_current(cpu_current(), &main_thread->thread);
+
+	spawn_result = syscall_dispatch(SYSCALL_SPAWN_THREAD, 0x410000u, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(spawn_result.status, SYSCALL_STATUS_OK);
+	worker = uthread_lookup((uthread_id_t)spawn_result.value);
+	cr_assert_not_null(worker);
+
+	cancel_result = syscall_dispatch(SYSCALL_CANCEL_THREAD, spawn_result.value, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(cancel_result.status, SYSCALL_STATUS_OK);
+	cr_assert(thread_cancel_requested(&worker->thread), "target thread should record cancellation");
+
+	thread_mark_zombie(&worker->thread);
+	thread_mark_zombie(&main_thread->thread);
+	cr_assert(process_destroy(process), "process_destroy failed");
+	syscall_test_reset_state();
+}
+
+Test(syscall, set_thread_cancel_enabled_updates_current_thread) {
+	struct process*  process;
+	struct uthread*  main_thread;
+	syscall_result_t result;
+
+	syscall_test_init_process_environment();
+	process     = syscall_test_spawn_process("syscall/cancel-enable");
+	main_thread = process_main_thread(process);
+	cr_assert_not_null(main_thread);
+	sched_set_current(cpu_current(), &main_thread->thread);
+	cr_assert(thread_cancel_enabled(&main_thread->thread));
+
+	result = syscall_dispatch(SYSCALL_SET_THREAD_CANCEL_ENABLED, 0u, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert(!thread_cancel_enabled(&main_thread->thread));
+
+	result = syscall_dispatch(SYSCALL_TEST_THREAD_CANCEL, 0u, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+
+	result = syscall_dispatch(SYSCALL_SET_THREAD_CANCEL_ENABLED, 1u, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert(thread_cancel_enabled(&main_thread->thread));
+
+	thread_mark_zombie(&main_thread->thread);
 	cr_assert(process_destroy(process), "process_destroy failed");
 	syscall_test_reset_state();
 }

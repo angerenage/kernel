@@ -291,20 +291,218 @@ static syscall_result_t syscall_kill_process(uintptr_t arg0, uintptr_t arg1, uin
 	return syscall_result_ok(0u);
 }
 
+static syscall_result_t syscall_join_result_from_thread_join(enum process_thread_join_result result,
+                                                             uintptr_t                       exit_code) {
+	switch (result) {
+	case PROCESS_THREAD_JOIN_OK:
+		return syscall_result_ok(exit_code);
+	case PROCESS_THREAD_JOIN_INVALID_ARGUMENTS:
+	case PROCESS_THREAD_JOIN_FOREIGN_THREAD:
+	case PROCESS_THREAD_JOIN_SELF:
+	case PROCESS_THREAD_JOIN_DETACHED:
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	case PROCESS_THREAD_JOIN_WAIT_FAILED:
+	case PROCESS_THREAD_JOIN_RECLAIM_FAILED:
+	default:
+		return syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
+	}
+}
+
+static syscall_result_t syscall_result_from_thread_detach(enum process_thread_detach_result result) {
+	switch (result) {
+	case PROCESS_THREAD_DETACH_OK:
+		return syscall_result_ok(0u);
+	case PROCESS_THREAD_DETACH_INVALID_ARGUMENTS:
+	case PROCESS_THREAD_DETACH_FOREIGN_THREAD:
+	case PROCESS_THREAD_DETACH_ALREADY_DETACHED:
+	case PROCESS_THREAD_DETACH_ALREADY_TERMINATED:
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	case PROCESS_THREAD_DETACH_FAILED:
+	default:
+		return syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
+	}
+}
+
+static syscall_result_t syscall_result_from_thread_cancel(enum process_thread_cancel_result result) {
+	switch (result) {
+	case PROCESS_THREAD_CANCEL_OK:
+		return syscall_result_ok(0u);
+	case PROCESS_THREAD_CANCEL_INVALID_ARGUMENTS:
+	case PROCESS_THREAD_CANCEL_FOREIGN_THREAD:
+	case PROCESS_THREAD_CANCEL_ALREADY_TERMINATED:
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	case PROCESS_THREAD_CANCEL_FAILED:
+	default:
+		return syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
+	}
+}
+
+static syscall_result_t syscall_exit_thread(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
+                                            uintptr_t arg4, uintptr_t arg5) {
+	struct uthread* thread;
+
+	(void)arg1;
+	(void)arg2;
+	(void)arg3;
+	(void)arg4;
+	(void)arg5;
+
+	thread = uthread_current();
+	if (thread == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	sched_exit_current(arg0);
+}
+
+static syscall_result_t syscall_spawn_thread(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
+                                             uintptr_t arg4, uintptr_t arg5) {
+	struct process*                  process;
+	struct uthread*                  thread = NULL;
+	enum process_thread_spawn_result result;
+	struct process_thread_params     params;
+	bool                             detached;
+
+	(void)arg5;
+
+	process = process_current();
+	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	if (arg0 == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+
+	detached                = arg3 != 0u;
+	params.name             = (const char*)arg4;
+	params.user_entry       = arg0;
+	params.user_arg         = arg1;
+	params.user_stack_pages = (size_t)arg2;
+	params.preferred_cpu    = NULL;
+	params.detached         = detached;
+	result                  = process_spawn_thread(process, detached ? NULL : &thread, &params);
+	if (result != PROCESS_THREAD_SPAWN_OK) return syscall_result_from_thread_spawn(result);
+
+	return syscall_result_ok(detached ? 0u : (uintptr_t)uthread_id(thread));
+}
+
+static syscall_result_t syscall_join_thread(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
+                                            uintptr_t arg4, uintptr_t arg5) {
+	struct process*                 process;
+	struct uthread*                 thread;
+	uintptr_t                       exit_code = 0u;
+	enum process_thread_join_result result;
+
+	(void)arg1;
+	(void)arg2;
+	(void)arg3;
+	(void)arg4;
+	(void)arg5;
+
+	process = process_current();
+	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	thread = uthread_lookup((uthread_id_t)arg0);
+	if (thread == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+
+	result = process_join_thread(process, thread, &exit_code);
+	return syscall_join_result_from_thread_join(result, exit_code);
+}
+
+static syscall_result_t syscall_detach_thread(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
+                                              uintptr_t arg4, uintptr_t arg5) {
+	struct process*                   process;
+	struct uthread*                   thread;
+	enum process_thread_detach_result result;
+
+	(void)arg1;
+	(void)arg2;
+	(void)arg3;
+	(void)arg4;
+	(void)arg5;
+
+	process = process_current();
+	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	thread = uthread_lookup((uthread_id_t)arg0);
+	if (thread == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+
+	result = process_detach_thread(process, thread);
+	return syscall_result_from_thread_detach(result);
+}
+
+static syscall_result_t syscall_cancel_thread(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
+                                              uintptr_t arg4, uintptr_t arg5) {
+	struct process*                   process;
+	struct uthread*                   thread;
+	enum process_thread_cancel_result result;
+
+	(void)arg1;
+	(void)arg2;
+	(void)arg3;
+	(void)arg4;
+	(void)arg5;
+
+	process = process_current();
+	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	thread = uthread_lookup((uthread_id_t)arg0);
+	if (thread == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+
+	result = process_cancel_thread(process, thread);
+	return syscall_result_from_thread_cancel(result);
+}
+
+static syscall_result_t syscall_set_thread_cancel_enabled(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2,
+                                                          uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
+	struct uthread* thread;
+
+	(void)arg1;
+	(void)arg2;
+	(void)arg3;
+	(void)arg4;
+	(void)arg5;
+
+	thread = uthread_current();
+	if (thread == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+
+	thread_set_cancel_enabled(&thread->thread, arg0 != 0u);
+	return syscall_result_ok(0u);
+}
+
+static syscall_result_t syscall_test_thread_cancel(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
+                                                   uintptr_t arg4, uintptr_t arg5) {
+	struct uthread* thread;
+
+	(void)arg0;
+	(void)arg1;
+	(void)arg2;
+	(void)arg3;
+	(void)arg4;
+	(void)arg5;
+
+	thread = uthread_current();
+	if (thread == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	if (thread_should_cancel(&thread->thread)) sched_exit_current(THREAD_EXIT_CODE_CANCELLED);
+	return syscall_result_ok(0u);
+}
+
 static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
-	[SYSCALL_NOP]                      = syscall_nop,
-	[SYSCALL_YIELD]                    = syscall_yield,
-	[SYSCALL_SLEEP_MS]                 = syscall_sleep_ms,
-	[SYSCALL_TICK_COUNT]               = syscall_tick_count,
+	[SYSCALL_NOP] = syscall_nop,
+
+	[SYSCALL_YIELD]      = syscall_yield,
+	[SYSCALL_SLEEP_MS]   = syscall_sleep_ms,
+	[SYSCALL_TICK_COUNT] = syscall_tick_count,
+
 	[SYSCALL_GETPID]                   = syscall_getpid,
 	[SYSCALL_GET_PROCESS_THREAD_COUNT] = syscall_get_process_thread_count,
-	[SYSCALL_GETTID]                   = syscall_gettid,
-	[SYSCALL_EXIT_PROCESS]             = syscall_exit_process,
-	[SYSCALL_CREATE_PROCESS]           = syscall_create_process,
-	[SYSCALL_RUN_PROCESS]              = syscall_run_process,
-	[SYSCALL_WAIT_PROCESS]             = syscall_wait_process,
-	[SYSCALL_DETACH_PROCESS]           = syscall_detach_process,
-	[SYSCALL_KILL_PROCESS]             = syscall_kill_process,
+
+	[SYSCALL_GETTID] = syscall_gettid,
+
+	[SYSCALL_EXIT_PROCESS]   = syscall_exit_process,
+	[SYSCALL_CREATE_PROCESS] = syscall_create_process,
+	[SYSCALL_RUN_PROCESS]    = syscall_run_process,
+	[SYSCALL_WAIT_PROCESS]   = syscall_wait_process,
+	[SYSCALL_DETACH_PROCESS] = syscall_detach_process,
+	[SYSCALL_KILL_PROCESS]   = syscall_kill_process,
+
+	[SYSCALL_EXIT_THREAD]               = syscall_exit_thread,
+	[SYSCALL_SPAWN_THREAD]              = syscall_spawn_thread,
+	[SYSCALL_JOIN_THREAD]               = syscall_join_thread,
+	[SYSCALL_DETACH_THREAD]             = syscall_detach_thread,
+	[SYSCALL_CANCEL_THREAD]             = syscall_cancel_thread,
+	[SYSCALL_SET_THREAD_CANCEL_ENABLED] = syscall_set_thread_cancel_enabled,
+	[SYSCALL_TEST_THREAD_CANCEL]        = syscall_test_thread_cancel,
 };
 
 syscall_result_t syscall_dispatch(uintptr_t number, uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
