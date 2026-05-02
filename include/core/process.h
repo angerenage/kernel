@@ -76,6 +76,17 @@ enum process_thread_cancel_result {
 	PROCESS_THREAD_CANCEL_FAILED,
 };
 
+enum process_thread_spawn_result {
+	PROCESS_THREAD_SPAWN_OK = 0,
+	PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS,
+	PROCESS_THREAD_SPAWN_NO_MEMORY,
+	PROCESS_THREAD_SPAWN_STACK_ALLOC_FAILED,
+	PROCESS_THREAD_SPAWN_CONTEXT_UNSUPPORTED,
+	PROCESS_THREAD_SPAWN_SCHEDULER_REJECTED,
+	PROCESS_THREAD_SPAWN_REAPER_UNAVAILABLE,
+	PROCESS_THREAD_SPAWN_ID_EXHAUSTED,
+};
+
 struct process_spawn_params {
 	const char* name;
 	uintptr_t   user_entry;
@@ -113,9 +124,9 @@ struct process {
 /* Create a process and start its main userspace thread. */
 enum process_result process_spawn(struct process** out_process, const struct process_spawn_params* params);
 
-/* Initialize caller-owned userspace thread storage inside process and queue it on the scheduler. */
-enum process_result process_create_thread(struct process* process, struct uthread* thread,
-                                          const struct process_thread_params* params);
+/* Allocate, initialize, and queue a userspace thread inside process. Detached threads do not publish a handle. */
+enum process_thread_spawn_result process_spawn_thread(struct process* process, struct uthread** out_thread,
+                                                      const struct process_thread_params* params);
 
 /* Block until thread exits, publish its exit code, and reclaim its process-owned resources. */
 enum process_thread_join_result process_join_thread(struct process* process, struct uthread* thread,

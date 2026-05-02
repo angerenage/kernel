@@ -50,23 +50,45 @@ static enum process_result process_create(struct process** out_process, const ch
 	return PROCESS_OK;
 }
 
-static enum process_result process_result_from_uthread(enum uthread_start_result result) {
+static enum process_thread_spawn_result process_thread_spawn_result_from_uthread(enum uthread_start_result result) {
 	switch (result) {
 	case UTHREAD_START_OK:
-		return PROCESS_OK;
+		return PROCESS_THREAD_SPAWN_OK;
 	case UTHREAD_START_INVALID_ARGUMENTS:
-		return PROCESS_INVALID_ARGUMENTS;
+		return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
 	case UTHREAD_START_NO_MEMORY:
-		return PROCESS_NO_MEMORY;
+		return PROCESS_THREAD_SPAWN_NO_MEMORY;
 	case UTHREAD_START_STACK_ALLOC_FAILED:
-		return PROCESS_THREAD_STACK_ALLOC_FAILED;
+		return PROCESS_THREAD_SPAWN_STACK_ALLOC_FAILED;
 	case UTHREAD_START_CONTEXT_UNSUPPORTED:
-		return PROCESS_THREAD_CONTEXT_UNSUPPORTED;
+		return PROCESS_THREAD_SPAWN_CONTEXT_UNSUPPORTED;
 	case UTHREAD_START_SCHEDULER_REJECTED:
-		return PROCESS_THREAD_SCHEDULER_REJECTED;
+		return PROCESS_THREAD_SPAWN_SCHEDULER_REJECTED;
 	case UTHREAD_START_REAPER_UNAVAILABLE:
-		return PROCESS_THREAD_REAPER_UNAVAILABLE;
+		return PROCESS_THREAD_SPAWN_REAPER_UNAVAILABLE;
 	case UTHREAD_START_ID_EXHAUSTED:
+	default:
+		return PROCESS_THREAD_SPAWN_ID_EXHAUSTED;
+	}
+}
+
+static enum process_result process_result_from_thread_spawn(enum process_thread_spawn_result result) {
+	switch (result) {
+	case PROCESS_THREAD_SPAWN_OK:
+		return PROCESS_OK;
+	case PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS:
+		return PROCESS_INVALID_ARGUMENTS;
+	case PROCESS_THREAD_SPAWN_NO_MEMORY:
+		return PROCESS_NO_MEMORY;
+	case PROCESS_THREAD_SPAWN_STACK_ALLOC_FAILED:
+		return PROCESS_THREAD_STACK_ALLOC_FAILED;
+	case PROCESS_THREAD_SPAWN_CONTEXT_UNSUPPORTED:
+		return PROCESS_THREAD_CONTEXT_UNSUPPORTED;
+	case PROCESS_THREAD_SPAWN_SCHEDULER_REJECTED:
+		return PROCESS_THREAD_SCHEDULER_REJECTED;
+	case PROCESS_THREAD_SPAWN_REAPER_UNAVAILABLE:
+		return PROCESS_THREAD_REAPER_UNAVAILABLE;
+	case PROCESS_THREAD_SPAWN_ID_EXHAUSTED:
 	default:
 		return PROCESS_THREAD_ID_EXHAUSTED;
 	}
@@ -118,11 +140,11 @@ static bool process_has_thread(struct process* process, struct uthread* thread) 
 	return found;
 }
 
-enum process_result process_create_thread(struct process* process, struct uthread* thread,
-                                          const struct process_thread_params* params) {
+static enum process_thread_spawn_result process_create_thread(struct process* process, struct uthread* thread,
+                                                              const struct process_thread_params* params) {
 	enum uthread_start_result result;
 
-	if (process == NULL || thread == NULL || params == NULL) return PROCESS_INVALID_ARGUMENTS;
+	if (process == NULL || thread == NULL || params == NULL) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
 
 	result = uthread_start(thread,
 	                       &(const struct uthread_start_params){
@@ -134,7 +156,48 @@ enum process_result process_create_thread(struct process* process, struct uthrea
 							   .preferred_cpu    = params->preferred_cpu,
 							   .detached         = params->detached,
 						   });
-	return process_result_from_uthread(result);
+	return process_thread_spawn_result_from_uthread(result);
+}
+
+enum process_thread_spawn_result process_spawn_thread(struct process* process, struct uthread** out_thread,
+                                                      const struct process_thread_params* params) {
+	struct uthread*                  thread;
+	enum process_thread_spawn_result thread_result;
+
+	if (process == NULL || params == NULL) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
+	if (!params->detached && out_thread == NULL) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
+	if (out_thread != NULL) *out_thread = NULL;
+
+	if (params->detached) {
+		enum uthread_start_result start_result = uthread_spawn_detached(&(const struct uthread_start_params){
+			.name             = params->name,
+			.process          = process,
+			.user_entry       = params->user_entry,
+			.user_arg         = params->user_arg,
+			.user_stack_pages = params->user_stack_pages,
+			.preferred_cpu    = params->preferred_cpu,
+			.detached         = true,
+		});
+		return process_thread_spawn_result_from_uthread(start_result);
+	}
+
+	thread = kmalloc(sizeof(*thread));
+	if (thread == NULL) return PROCESS_THREAD_SPAWN_NO_MEMORY;
+	*thread = (struct uthread){
+		.user_stack_id   = VMM_ID_INVALID,
+		.kernel_stack_id = VMM_ID_INVALID,
+		.heap_allocated  = true,
+	};
+
+	thread_result = process_create_thread(process, thread, params);
+	if (thread_result != PROCESS_THREAD_SPAWN_OK) {
+		kfree(thread);
+		return thread_result;
+	}
+
+	thread->heap_allocated = true;
+	if (out_thread != NULL) *out_thread = thread;
+	return PROCESS_THREAD_SPAWN_OK;
 }
 
 enum process_thread_join_result process_join_thread(struct process* process, struct uthread* thread,
@@ -299,10 +362,10 @@ enum process_detach_result process_detach(struct process* process) {
 }
 
 enum process_result process_spawn(struct process** out_process, const struct process_spawn_params* params) {
-	struct process*     process = NULL;
-	struct uthread*     main_thread;
-	enum process_result create_result;
-	enum process_result thread_result;
+	struct process*                  process = NULL;
+	struct uthread*                  main_thread;
+	enum process_result              create_result;
+	enum process_thread_spawn_result thread_result;
 
 	if (out_process == NULL || params == NULL || params->user_entry == 0u) return PROCESS_INVALID_ARGUMENTS;
 	*out_process = NULL;
@@ -330,10 +393,10 @@ enum process_result process_spawn(struct process** out_process, const struct pro
 											  .preferred_cpu    = params->preferred_cpu,
 											  .detached         = false,
 										  });
-	if (thread_result != PROCESS_OK) {
+	if (thread_result != PROCESS_THREAD_SPAWN_OK) {
 		kfree(main_thread);
 		(void)process_destroy(process);
-		return thread_result;
+		return process_result_from_thread_spawn(thread_result);
 	}
 
 	main_thread->heap_allocated = true;
