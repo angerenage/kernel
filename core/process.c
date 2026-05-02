@@ -40,28 +40,6 @@ static enum process_thread_spawn_result process_thread_spawn_result_from_uthread
 	}
 }
 
-static enum process_result process_result_from_thread_spawn(enum process_thread_spawn_result result) {
-	switch (result) {
-	case PROCESS_THREAD_SPAWN_OK:
-		return PROCESS_OK;
-	case PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS:
-		return PROCESS_INVALID_ARGUMENTS;
-	case PROCESS_THREAD_SPAWN_NO_MEMORY:
-		return PROCESS_NO_MEMORY;
-	case PROCESS_THREAD_SPAWN_STACK_ALLOC_FAILED:
-		return PROCESS_THREAD_STACK_ALLOC_FAILED;
-	case PROCESS_THREAD_SPAWN_CONTEXT_UNSUPPORTED:
-		return PROCESS_THREAD_CONTEXT_UNSUPPORTED;
-	case PROCESS_THREAD_SPAWN_SCHEDULER_REJECTED:
-		return PROCESS_THREAD_SCHEDULER_REJECTED;
-	case PROCESS_THREAD_SPAWN_REAPER_UNAVAILABLE:
-		return PROCESS_THREAD_REAPER_UNAVAILABLE;
-	case PROCESS_THREAD_SPAWN_ID_EXHAUSTED:
-	default:
-		return PROCESS_THREAD_ID_EXHAUSTED;
-	}
-}
-
 static bool process_all_threads_terminated_locked(const struct process* process) {
 	const struct uthread* cursor;
 

@@ -152,6 +152,8 @@ test_suites = [
 	{
 		'name': 'syscall',
 		'sources': files(
+			'vmm/test_support.c',
+			'vmm/mock_paging.c',
 			'core/syscall_test.c',
 		),
 		'suites': ['unit', 'core'],

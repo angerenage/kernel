@@ -1,4 +1,5 @@
 #include <base/time.h>
+#include <core/process.h>
 #include <core/sched.h>
 #include <core/syscall.h>
 #include <hal/clock.h>
@@ -77,11 +78,45 @@ static syscall_result_t syscall_tick_count(uintptr_t arg0, uintptr_t arg1, uintp
 	return syscall_result_ok((uintptr_t)sched_tick_count());
 }
 
+static syscall_result_t syscall_getpid(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
+                                       uintptr_t arg5) {
+	struct process* process;
+
+	(void)arg0;
+	(void)arg1;
+	(void)arg2;
+	(void)arg3;
+	(void)arg4;
+	(void)arg5;
+
+	process = process_current();
+	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	return syscall_result_ok((uintptr_t)process_pid(process));
+}
+
+static syscall_result_t syscall_get_process_thread_count(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
+                                                         uintptr_t arg4, uintptr_t arg5) {
+	struct process* process;
+
+	(void)arg0;
+	(void)arg1;
+	(void)arg2;
+	(void)arg3;
+	(void)arg4;
+	(void)arg5;
+
+	process = process_current();
+	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	return syscall_result_ok((uintptr_t)process_thread_count(process));
+}
+
 static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
-	[SYSCALL_NOP]        = syscall_nop,
-	[SYSCALL_YIELD]      = syscall_yield,
-	[SYSCALL_SLEEP_MS]   = syscall_sleep_ms,
-	[SYSCALL_TICK_COUNT] = syscall_tick_count,
+	[SYSCALL_NOP]                      = syscall_nop,
+	[SYSCALL_YIELD]                    = syscall_yield,
+	[SYSCALL_SLEEP_MS]                 = syscall_sleep_ms,
+	[SYSCALL_TICK_COUNT]               = syscall_tick_count,
+	[SYSCALL_GETPID]                   = syscall_getpid,
+	[SYSCALL_GET_PROCESS_THREAD_COUNT] = syscall_get_process_thread_count,
 };
 
 syscall_result_t syscall_dispatch(uintptr_t number, uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,

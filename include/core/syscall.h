@@ -5,9 +5,16 @@
 
 enum {
 	SYSCALL_NOP = 0u,
+
+	/* Scheduler / time */
 	SYSCALL_YIELD,
 	SYSCALL_SLEEP_MS,
 	SYSCALL_TICK_COUNT,
+
+	/* Process identity / introspection */
+	SYSCALL_GETPID,
+	SYSCALL_GET_PROCESS_THREAD_COUNT,
+
 	SYSCALL_COUNT,
 };
 
