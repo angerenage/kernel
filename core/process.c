@@ -18,38 +18,6 @@ static struct id_table process_table = {
 	.max_id  = UINT64_MAX,
 };
 
-static enum process_result process_create(struct process** out_process, const char* name) {
-	struct process* process;
-	process_id_t    pid;
-
-	if (out_process == NULL) return PROCESS_INVALID_ARGUMENTS;
-	*out_process = NULL;
-
-	process = kmalloc(sizeof(*process));
-	if (process == NULL) return PROCESS_NO_MEMORY;
-
-	memset(process, 0, sizeof(*process));
-	process->name  = name;
-	process->state = PROCESS_STATE_NEW;
-	spinlock_init_class(&process->lock, "process", SPINLOCK_ORDER_PROCESS, SPINLOCK_FLAG_IRQSAVE);
-	thread_wait_queue_init(&process->join_wait_queue);
-
-	if (!id_table_alloc(&process_table, process, &pid)) {
-		kfree(process);
-		return PROCESS_PID_EXHAUSTED;
-	}
-	process->pid = pid;
-
-	if (!vmm_user_address_space_init(&process->address_space)) {
-		(void)id_table_remove(&process_table, process->pid, NULL);
-		kfree(process);
-		return PROCESS_ADDRESS_SPACE_FAILED;
-	}
-
-	*out_process = process;
-	return PROCESS_OK;
-}
-
 static enum process_thread_spawn_result process_thread_spawn_result_from_uthread(enum uthread_start_result result) {
 	switch (result) {
 	case UTHREAD_START_OK:
@@ -251,6 +219,38 @@ enum process_thread_cancel_result process_cancel_thread(struct process* process,
 	return thread_request_cancel(&thread->thread) ? PROCESS_THREAD_CANCEL_OK : PROCESS_THREAD_CANCEL_FAILED;
 }
 
+enum process_result process_create(struct process** out_process, const char* name) {
+	struct process* process;
+	process_id_t    pid;
+
+	if (out_process == NULL) return PROCESS_INVALID_ARGUMENTS;
+	*out_process = NULL;
+
+	process = kmalloc(sizeof(*process));
+	if (process == NULL) return PROCESS_NO_MEMORY;
+
+	memset(process, 0, sizeof(*process));
+	process->name  = name;
+	process->state = PROCESS_STATE_NEW;
+	spinlock_init_class(&process->lock, "process", SPINLOCK_ORDER_PROCESS, SPINLOCK_FLAG_IRQSAVE);
+	thread_wait_queue_init(&process->join_wait_queue);
+
+	if (!id_table_alloc(&process_table, process, &pid)) {
+		kfree(process);
+		return PROCESS_PID_EXHAUSTED;
+	}
+	process->pid = pid;
+
+	if (!vmm_user_address_space_init(&process->address_space)) {
+		(void)id_table_remove(&process_table, process->pid, NULL);
+		kfree(process);
+		return PROCESS_ADDRESS_SPACE_FAILED;
+	}
+
+	*out_process = process;
+	return PROCESS_OK;
+}
+
 bool process_terminate(struct process* process, uintptr_t exit_code) {
 	struct irq_state state;
 	struct irq_state wait_state;
@@ -359,50 +359,6 @@ enum process_detach_result process_detach(struct process* process) {
 	process->detached = true;
 	spinlock_unlock_irqrestore(&process->lock, state);
 	return PROCESS_DETACH_OK;
-}
-
-enum process_result process_spawn(struct process** out_process, const struct process_spawn_params* params) {
-	struct process*                  process = NULL;
-	struct uthread*                  main_thread;
-	enum process_result              create_result;
-	enum process_thread_spawn_result thread_result;
-
-	if (out_process == NULL || params == NULL || params->user_entry == 0u) return PROCESS_INVALID_ARGUMENTS;
-	*out_process = NULL;
-
-	create_result = process_create(&process, params->name);
-	if (create_result != PROCESS_OK) return create_result;
-
-	main_thread = kmalloc(sizeof(*main_thread));
-	if (main_thread == NULL) {
-		(void)process_destroy(process);
-		return PROCESS_NO_MEMORY;
-	}
-	*main_thread = (struct uthread){
-		.user_stack_id   = VMM_ID_INVALID,
-		.kernel_stack_id = VMM_ID_INVALID,
-	};
-
-	thread_result = process_create_thread(process,
-	                                      main_thread,
-	                                      &(const struct process_thread_params){
-											  .name             = params->name,
-											  .user_entry       = params->user_entry,
-											  .user_arg         = params->user_arg,
-											  .user_stack_pages = params->user_stack_pages,
-											  .preferred_cpu    = params->preferred_cpu,
-											  .detached         = false,
-										  });
-	if (thread_result != PROCESS_THREAD_SPAWN_OK) {
-		kfree(main_thread);
-		(void)process_destroy(process);
-		return process_result_from_thread_spawn(thread_result);
-	}
-
-	main_thread->heap_allocated = true;
-	process->main_thread        = main_thread;
-	*out_process                = process;
-	return PROCESS_OK;
 }
 
 bool process_destroy(struct process* process) {

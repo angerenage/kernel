@@ -75,6 +75,60 @@ static void init_process_test_environment(void) {
 	cr_assert(kheap_init(), "kheap_init failed");
 }
 
+static enum process_result process_test_result_from_thread_spawn(enum process_thread_spawn_result result) {
+	switch (result) {
+	case PROCESS_THREAD_SPAWN_OK:
+		return PROCESS_OK;
+	case PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS:
+		return PROCESS_INVALID_ARGUMENTS;
+	case PROCESS_THREAD_SPAWN_NO_MEMORY:
+		return PROCESS_NO_MEMORY;
+	case PROCESS_THREAD_SPAWN_STACK_ALLOC_FAILED:
+		return PROCESS_THREAD_STACK_ALLOC_FAILED;
+	case PROCESS_THREAD_SPAWN_CONTEXT_UNSUPPORTED:
+		return PROCESS_THREAD_CONTEXT_UNSUPPORTED;
+	case PROCESS_THREAD_SPAWN_SCHEDULER_REJECTED:
+		return PROCESS_THREAD_SCHEDULER_REJECTED;
+	case PROCESS_THREAD_SPAWN_REAPER_UNAVAILABLE:
+		return PROCESS_THREAD_REAPER_UNAVAILABLE;
+	case PROCESS_THREAD_SPAWN_ID_EXHAUSTED:
+	default:
+		return PROCESS_THREAD_ID_EXHAUSTED;
+	}
+}
+
+static enum process_result create_process_with_main_thread(struct process**                   out_process,
+                                                           const struct process_spawn_params* params) {
+	struct process*                  process = NULL;
+	struct uthread*                  main_thread;
+	enum process_result              process_result;
+	enum process_thread_spawn_result thread_result;
+
+	if (out_process == NULL || params == NULL) return PROCESS_INVALID_ARGUMENTS;
+	*out_process = NULL;
+
+	process_result = process_create(&process, params->name);
+	if (process_result != PROCESS_OK) return process_result;
+
+	thread_result = process_spawn_thread(process,
+	                                     &main_thread,
+	                                     &(const struct process_thread_params){
+											 .name             = params->name,
+											 .user_entry       = params->user_entry,
+											 .user_arg         = params->user_arg,
+											 .user_stack_pages = params->user_stack_pages,
+											 .preferred_cpu    = params->preferred_cpu,
+											 .detached         = false,
+										 });
+	if (thread_result != PROCESS_THREAD_SPAWN_OK) {
+		(void)process_destroy(process);
+		return process_test_result_from_thread_spawn(thread_result);
+	}
+
+	*out_process = process;
+	return PROCESS_OK;
+}
+
 static void terminate_main_thread(struct process* process) {
 	if (process != NULL && process->main_thread != NULL) thread_mark_zombie(&process->main_thread->thread);
 }
@@ -83,7 +137,37 @@ static void terminate_process_thread(struct uthread* thread) {
 	if (thread != NULL) thread_mark_zombie(&thread->thread);
 }
 
-Test(process, spawn_initializes_pid_state_address_space_and_main_thread) {
+Test(process, create_initializes_pid_new_state_and_address_space) {
+	struct process*       process = NULL;
+	struct address_space* space;
+	enum process_result   result;
+	process_id_t          pid;
+
+	init_process_test_environment();
+
+	result = process_create(&process, "init");
+	cr_assert_eq(result, PROCESS_OK, "process_create failed: %d", result);
+	cr_assert_not_null(process, "process_create did not return a process");
+	pid = process_pid(process);
+	cr_assert_neq(pid, PROCESS_PID_INVALID, "process pid should be valid");
+	cr_assert_eq(process_lookup(pid), process, "process PID lookup should return the process");
+	cr_assert_eq(process_count(), 1u, "process registry should track the created process");
+	cr_assert_eq(process_get_state(process), PROCESS_STATE_NEW, "created process should start new");
+	cr_assert_eq(process_thread_count(process), 0u, "created process should not have threads yet");
+	cr_assert_null(process_main_thread(process), "created process should not have a main thread yet");
+
+	space = process_address_space(process);
+	cr_assert_not_null(space, "process address space should be exposed");
+	cr_assert(address_space_is_initialized(space), "process address space should be initialized");
+	cr_assert_eq(address_space_total_page_count(space), MM_USER_VMM_SIZE / PMM_PAGE_SIZE);
+	cr_assert_eq(address_space_free_page_count(space), MM_USER_VMM_SIZE / PMM_PAGE_SIZE);
+
+	cr_assert(process_destroy(process), "process_destroy failed");
+	cr_assert_null(process_lookup(pid), "destroyed process should not remain registered");
+	cr_assert_eq(process_count(), 0u, "process registry should be empty after destroy");
+}
+
+Test(process, spawn_thread_sets_running_state_and_main_thread) {
 	struct process*       process = NULL;
 	struct address_space* space;
 	enum process_result   result;
@@ -92,20 +176,20 @@ Test(process, spawn_initializes_pid_state_address_space_and_main_thread) {
 
 	init_process_test_environment();
 
-	result = process_spawn(&process,
-	                       &(const struct process_spawn_params){
-							   .name       = "init",
-							   .user_entry = 0x400000u,
-						   });
-	cr_assert_eq(result, PROCESS_OK, "process_spawn failed: %d", result);
-	cr_assert_not_null(process, "process_spawn did not return a process");
+	result = create_process_with_main_thread(&process,
+	                                         &(const struct process_spawn_params){
+												 .name       = "init",
+												 .user_entry = 0x400000u,
+											 });
+	cr_assert_eq(result, PROCESS_OK, "process_create/process_spawn_thread failed: %d", result);
+	cr_assert_not_null(process, "process_create did not return a process");
 	pid = process_pid(process);
 	cr_assert_neq(pid, PROCESS_PID_INVALID, "process pid should be valid");
 	cr_assert_eq(process_lookup(pid), process, "process PID lookup should return the process");
-	cr_assert_eq(process_count(), 1u, "process registry should track the spawned process");
-	cr_assert_eq(process_get_state(process), PROCESS_STATE_RUNNING, "spawned process should start running");
-	cr_assert_eq(process_thread_count(process), 1u, "spawned process should have one main thread");
-	cr_assert_not_null(process->main_thread, "spawned process should record its main thread");
+	cr_assert_eq(process_count(), 1u, "process registry should track the process");
+	cr_assert_eq(process_get_state(process), PROCESS_STATE_RUNNING, "process should run after its main thread starts");
+	cr_assert_eq(process_thread_count(process), 1u, "process should have one main thread");
+	cr_assert_not_null(process->main_thread, "process should record its main thread");
 	main_tid = uthread_id(process->main_thread);
 	cr_assert_neq(main_tid, UTHREAD_ID_INVALID, "main thread TID should be valid");
 	cr_assert_eq(
@@ -134,17 +218,17 @@ Test(process, spawn_assigns_monotonic_pids) {
 
 	init_process_test_environment();
 
-	cr_assert_eq(process_spawn(&first,
-	                           &(const struct process_spawn_params){
-								   .name       = "first",
-								   .user_entry = 0x400000u,
-							   }),
+	cr_assert_eq(create_process_with_main_thread(&first,
+	                                             &(const struct process_spawn_params){
+													 .name       = "first",
+													 .user_entry = 0x400000u,
+												 }),
 	             PROCESS_OK);
-	cr_assert_eq(process_spawn(&second,
-	                           &(const struct process_spawn_params){
-								   .name       = "second",
-								   .user_entry = 0x410000u,
-							   }),
+	cr_assert_eq(create_process_with_main_thread(&second,
+	                                             &(const struct process_spawn_params){
+													 .name       = "second",
+													 .user_entry = 0x410000u,
+												 }),
 	             PROCESS_OK);
 
 	first_pid  = process_pid(first);
@@ -162,11 +246,11 @@ Test(process, spawn_assigns_monotonic_pids) {
 Test(process, spawn_rejects_missing_output_pointer) {
 	init_process_test_environment();
 
-	cr_assert_eq(process_spawn(NULL,
-	                           &(const struct process_spawn_params){
-								   .name       = "invalid",
-								   .user_entry = 0x400000u,
-							   }),
+	cr_assert_eq(create_process_with_main_thread(NULL,
+	                                             &(const struct process_spawn_params){
+													 .name       = "invalid",
+													 .user_entry = 0x400000u,
+												 }),
 	             PROCESS_INVALID_ARGUMENTS);
 }
 
@@ -176,16 +260,16 @@ Test(process, spawn_user_creates_main_thread_in_process_address_space) {
 
 	init_process_test_environment();
 
-	result = process_spawn(&process,
-	                       &(const struct process_spawn_params){
-							   .name             = "spawned",
-							   .user_entry       = 0x400000u,
-							   .user_arg         = 0x1234u,
-							   .user_stack_pages = 2u,
-							   .preferred_cpu    = NULL,
-						   });
-	cr_assert_eq(result, PROCESS_OK, "process_spawn failed: %d", result);
-	cr_assert_not_null(process, "process_spawn did not return a process");
+	result = create_process_with_main_thread(&process,
+	                                         &(const struct process_spawn_params){
+												 .name             = "spawned",
+												 .user_entry       = 0x400000u,
+												 .user_arg         = 0x1234u,
+												 .user_stack_pages = 2u,
+												 .preferred_cpu    = NULL,
+											 });
+	cr_assert_eq(result, PROCESS_OK, "process_create/process_spawn_thread failed: %d", result);
+	cr_assert_not_null(process, "process_create did not return a process");
 	cr_assert_not_null(process->main_thread, "process should record the main user thread");
 	cr_assert_eq(process->main_thread->process, process, "main uthread should point back to the process");
 	cr_assert_eq(process->main_thread->thread.address_space,
@@ -205,11 +289,11 @@ Test(process, spawn_thread_allocates_joinable_thread_in_process_address_space) {
 
 	init_process_test_environment();
 
-	cr_assert_eq(process_spawn(&process,
-	                           &(const struct process_spawn_params){
-								   .name       = "owner",
-								   .user_entry = 0x400000u,
-							   }),
+	cr_assert_eq(create_process_with_main_thread(&process,
+	                                             &(const struct process_spawn_params){
+													 .name       = "owner",
+													 .user_entry = 0x400000u,
+												 }),
 	             PROCESS_OK);
 
 	cr_assert_eq(process_spawn_thread(process,
@@ -248,11 +332,11 @@ Test(process, spawn_thread_rejects_missing_arguments) {
 
 	init_process_test_environment();
 
-	cr_assert_eq(process_spawn(&process,
-	                           &(const struct process_spawn_params){
-								   .name       = "owner",
-								   .user_entry = 0x400000u,
-							   }),
+	cr_assert_eq(create_process_with_main_thread(&process,
+	                                             &(const struct process_spawn_params){
+													 .name       = "owner",
+													 .user_entry = 0x400000u,
+												 }),
 	             PROCESS_OK);
 
 	cr_assert_eq(process_spawn_thread(NULL,
@@ -286,11 +370,11 @@ Test(process, join_thread_returns_exit_code_and_reclaims_thread) {
 
 	init_process_test_environment();
 
-	cr_assert_eq(process_spawn(&process,
-	                           &(const struct process_spawn_params){
-								   .name       = "owner",
-								   .user_entry = 0x400000u,
-							   }),
+	cr_assert_eq(create_process_with_main_thread(&process,
+	                                             &(const struct process_spawn_params){
+													 .name       = "owner",
+													 .user_entry = 0x400000u,
+												 }),
 	             PROCESS_OK);
 	cr_assert_eq(process_spawn_thread(process,
 	                                  &worker,
@@ -320,11 +404,11 @@ Test(process, cancel_thread_requests_deferred_cancellation) {
 
 	init_process_test_environment();
 
-	cr_assert_eq(process_spawn(&process,
-	                           &(const struct process_spawn_params){
-								   .name       = "owner",
-								   .user_entry = 0x400000u,
-							   }),
+	cr_assert_eq(create_process_with_main_thread(&process,
+	                                             &(const struct process_spawn_params){
+													 .name       = "owner",
+													 .user_entry = 0x400000u,
+												 }),
 	             PROCESS_OK);
 	cr_assert_eq(process_spawn_thread(process,
 	                                  &worker,
@@ -350,11 +434,11 @@ Test(process, detach_thread_marks_thread_unjoinable) {
 
 	init_process_test_environment();
 
-	cr_assert_eq(process_spawn(&process,
-	                           &(const struct process_spawn_params){
-								   .name       = "owner",
-								   .user_entry = 0x400000u,
-							   }),
+	cr_assert_eq(create_process_with_main_thread(&process,
+	                                             &(const struct process_spawn_params){
+													 .name       = "owner",
+													 .user_entry = 0x400000u,
+												 }),
 	             PROCESS_OK);
 	cr_assert_eq(process_spawn_thread(process,
 	                                  &worker,
@@ -377,11 +461,11 @@ Test(process, destroy_rejects_live_main_thread) {
 
 	init_process_test_environment();
 
-	cr_assert_eq(process_spawn(&process,
-	                           &(const struct process_spawn_params){
-								   .name       = "live",
-								   .user_entry = 0x400000u,
-							   }),
+	cr_assert_eq(create_process_with_main_thread(&process,
+	                                             &(const struct process_spawn_params){
+													 .name       = "live",
+													 .user_entry = 0x400000u,
+												 }),
 	             PROCESS_OK);
 	cr_assert(!process_destroy(process), "process_destroy must reject live process threads");
 
@@ -394,11 +478,11 @@ Test(process, terminate_marks_process_exiting_and_requests_thread_cancellation) 
 
 	init_process_test_environment();
 
-	cr_assert_eq(process_spawn(&process,
-	                           &(const struct process_spawn_params){
-								   .name       = "terminating",
-								   .user_entry = 0x400000u,
-							   }),
+	cr_assert_eq(create_process_with_main_thread(&process,
+	                                             &(const struct process_spawn_params){
+													 .name       = "terminating",
+													 .user_entry = 0x400000u,
+												 }),
 	             PROCESS_OK);
 
 	cr_assert(process_terminate(process, 77u), "process_terminate should accept a running process");
@@ -418,11 +502,11 @@ Test(process, join_returns_zombie_exit_code_once) {
 
 	init_process_test_environment();
 
-	cr_assert_eq(process_spawn(&process,
-	                           &(const struct process_spawn_params){
-								   .name       = "joinable",
-								   .user_entry = 0x400000u,
-							   }),
+	cr_assert_eq(create_process_with_main_thread(&process,
+	                                             &(const struct process_spawn_params){
+													 .name       = "joinable",
+													 .user_entry = 0x400000u,
+												 }),
 	             PROCESS_OK);
 
 	cr_assert(process_terminate(process, 123u));
@@ -441,11 +525,11 @@ Test(process, detach_prevents_later_join) {
 
 	init_process_test_environment();
 
-	cr_assert_eq(process_spawn(&process,
-	                           &(const struct process_spawn_params){
-								   .name       = "detached",
-								   .user_entry = 0x400000u,
-							   }),
+	cr_assert_eq(create_process_with_main_thread(&process,
+	                                             &(const struct process_spawn_params){
+													 .name       = "detached",
+													 .user_entry = 0x400000u,
+												 }),
 	             PROCESS_OK);
 
 	cr_assert_eq(process_detach(process), PROCESS_DETACH_OK, "process_detach should accept a joinable process");

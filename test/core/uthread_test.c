@@ -75,15 +75,19 @@ static void init_uthread_test_environment(void) {
 
 static struct process* spawn_owner_process(const char* name) {
 	struct process* process = NULL;
+	struct uthread* main_thread;
 
-	cr_assert_eq(process_spawn(&process,
-	                           &(const struct process_spawn_params){
-								   .name       = name,
-								   .user_entry = 0x300000u,
-							   }),
-	             PROCESS_OK,
-	             "process_spawn failed");
-	cr_assert_not_null(process, "process_spawn returned NULL process");
+	cr_assert_eq(process_create(&process, name), PROCESS_OK, "process_create failed");
+	cr_assert_not_null(process, "process_create returned NULL process");
+	cr_assert_eq(process_spawn_thread(process,
+	                                  &main_thread,
+	                                  &(const struct process_thread_params){
+										  .name       = name,
+										  .user_entry = 0x300000u,
+										  .detached   = false,
+									  }),
+	             PROCESS_THREAD_SPAWN_OK,
+	             "process_spawn_thread failed");
 	return process;
 }
 

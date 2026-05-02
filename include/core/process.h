@@ -121,9 +121,6 @@ struct process {
 	bool                     joined;
 };
 
-/* Create a process and start its main userspace thread. */
-enum process_result process_spawn(struct process** out_process, const struct process_spawn_params* params);
-
 /* Allocate, initialize, and queue a userspace thread inside process. Detached threads do not publish a handle. */
 enum process_thread_spawn_result process_spawn_thread(struct process* process, struct uthread** out_thread,
                                                       const struct process_thread_params* params);
@@ -138,14 +135,17 @@ enum process_thread_detach_result process_detach_thread(struct process* process,
 /* Request deferred cancellation of a process thread. */
 enum process_thread_cancel_result process_cancel_thread(struct process* process, struct uthread* thread);
 
-/* Request termination of all threads in process and publish the process exit code. */
-bool process_terminate(struct process* process, uintptr_t exit_code);
+/* Allocate and initialize a process, but do not start it. */
+enum process_result process_create(struct process** out_process, const char* name);
 
 /* Block until process exits, then publish its process exit code. */
 enum process_join_result process_join(struct process* process, uintptr_t* out_exit_code);
 
 /* Mark process as detached so it can no longer be joined. */
 enum process_detach_result process_detach(struct process* process);
+
+/* Request termination of all threads in process and publish the process exit code. */
+bool process_terminate(struct process* process, uintptr_t exit_code);
 
 /* Destroy all reclaimable process threads, release its user address space, and free the process. */
 bool process_destroy(struct process* process);
