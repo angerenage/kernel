@@ -823,6 +823,179 @@ Test(syscall, address_space_syscalls_reject_bad_targets_and_arguments) {
 	syscall_test_reset_state();
 }
 
+Test(syscall, vm_copy_from_and_copy_to_copy_between_current_and_target_process) {
+	struct process*         caller;
+	struct process*         target;
+	struct uthread*         caller_thread;
+	struct uthread*         target_thread;
+	struct address_space*   caller_space;
+	struct address_space*   target_space;
+	struct vmm_alloc_params buffer_params = {
+		.page_count  = 1u,
+		.align_pages = 1u,
+		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
+		.kind        = VMM_KIND_GENERIC,
+	};
+	vmm_id_t         caller_id = VMM_ID_INVALID;
+	vmm_id_t         target_id = VMM_ID_INVALID;
+	void*            caller_base;
+	void*            target_base;
+	const char       caller_data[] = "caller-to-target";
+	const char       target_data[] = "target-to-caller";
+	char             copied[sizeof(target_data)];
+	syscall_result_t result;
+
+	syscall_test_init_process_environment();
+	caller        = syscall_test_spawn_process("syscall/vm-copy-caller");
+	target        = syscall_test_spawn_process("syscall/vm-copy-target");
+	caller_thread = process_main_thread(caller);
+	target_thread = process_main_thread(target);
+	cr_assert_not_null(caller_thread);
+	cr_assert_not_null(target_thread);
+	sched_set_current(cpu_current(), &caller_thread->thread);
+	caller_space = process_address_space(caller);
+	target_space = process_address_space(target);
+	cr_assert(vmm_alloc(caller_space, &buffer_params, &caller_id, &caller_base), "failed to allocate caller buffer");
+	cr_assert(vmm_alloc(target_space, &buffer_params, &target_id, &target_base), "failed to allocate target buffer");
+
+	cr_assert_eq(address_space_copy_to(caller_space, (uintptr_t)caller_base, caller_data, sizeof(caller_data)),
+	             ADDRESS_TRANSFER_OK);
+	result = syscall_dispatch(SYSCALL_VM_COPY_TO,
+	                          process_pid(target),
+	                          (uintptr_t)target_base,
+	                          (uintptr_t)caller_base,
+	                          sizeof(caller_data),
+	                          0u,
+	                          0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(result.value, sizeof(caller_data));
+	memset(copied, 0, sizeof(copied));
+	cr_assert_eq(address_space_copy_from(target_space, (uintptr_t)target_base, copied, sizeof(caller_data)),
+	             ADDRESS_TRANSFER_OK);
+	cr_assert_str_eq(copied, caller_data);
+
+	cr_assert_eq(address_space_copy_to(target_space, (uintptr_t)target_base, target_data, sizeof(target_data)),
+	             ADDRESS_TRANSFER_OK);
+	memset(copied, 0, sizeof(copied));
+	cr_assert_eq(address_space_copy_to(caller_space, (uintptr_t)caller_base, copied, sizeof(copied)),
+	             ADDRESS_TRANSFER_OK);
+	result = syscall_dispatch(SYSCALL_VM_COPY_FROM,
+	                          process_pid(target),
+	                          (uintptr_t)target_base,
+	                          (uintptr_t)caller_base,
+	                          sizeof(target_data),
+	                          0u,
+	                          0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(result.value, sizeof(target_data));
+	cr_assert_eq(address_space_copy_from(caller_space, (uintptr_t)caller_base, copied, sizeof(copied)),
+	             ADDRESS_TRANSFER_OK);
+	cr_assert_str_eq(copied, target_data);
+
+	thread_mark_zombie(&target_thread->thread);
+	thread_mark_zombie(&caller_thread->thread);
+	cr_assert(process_destroy(target), "target process_destroy failed");
+	cr_assert(process_destroy(caller), "caller process_destroy failed");
+	syscall_test_reset_state();
+}
+
+Test(syscall, vm_copy_from_and_copy_to_reject_bad_targets_and_ranges) {
+	struct process*         caller;
+	struct process*         target;
+	struct uthread*         caller_thread;
+	struct uthread*         target_thread;
+	struct address_space*   caller_space;
+	struct address_space*   target_space;
+	struct vmm_alloc_params buffer_params = {
+		.page_count  = 1u,
+		.align_pages = 1u,
+		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
+		.kind        = VMM_KIND_GENERIC,
+	};
+	vmm_id_t         caller_id = VMM_ID_INVALID;
+	vmm_id_t         target_id = VMM_ID_INVALID;
+	void*            caller_base;
+	void*            target_base;
+	syscall_result_t result;
+
+	syscall_test_init_process_environment();
+
+	result = syscall_dispatch(SYSCALL_VM_COPY_FROM, 0u, 1u, 2u, 1u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
+	cr_assert_eq(result.value, 0u);
+	result = syscall_dispatch(SYSCALL_VM_COPY_TO, 0u, 1u, 2u, 1u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
+	cr_assert_eq(result.value, 0u);
+
+	caller        = syscall_test_spawn_process("syscall/vm-copy-invalid-caller");
+	target        = syscall_test_spawn_process("syscall/vm-copy-invalid-target");
+	caller_thread = process_main_thread(caller);
+	target_thread = process_main_thread(target);
+	cr_assert_not_null(caller_thread);
+	cr_assert_not_null(target_thread);
+	sched_set_current(cpu_current(), &caller_thread->thread);
+	caller_space = process_address_space(caller);
+	target_space = process_address_space(target);
+	cr_assert(vmm_alloc(caller_space, &buffer_params, &caller_id, &caller_base), "failed to allocate caller buffer");
+	cr_assert(vmm_alloc(target_space, &buffer_params, &target_id, &target_base), "failed to allocate target buffer");
+
+	result =
+		syscall_dispatch(SYSCALL_VM_COPY_FROM, UINTPTR_MAX, (uintptr_t)target_base, (uintptr_t)caller_base, 1u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(result.value, 0u);
+
+	result = syscall_dispatch(SYSCALL_VM_COPY_FROM,
+	                          process_pid(target),
+	                          (uintptr_t)target_base + PMM_PAGE_SIZE,
+	                          (uintptr_t)caller_base,
+	                          1u,
+	                          0u,
+	                          0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(result.value, 1u);
+
+	result = syscall_dispatch(SYSCALL_VM_COPY_FROM,
+	                          process_pid(target),
+	                          (uintptr_t)target_base,
+	                          (uintptr_t)caller_base + PMM_PAGE_SIZE,
+	                          1u,
+	                          0u,
+	                          0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(result.value, 2u);
+
+	result = syscall_dispatch(SYSCALL_VM_COPY_TO,
+	                          process_pid(target),
+	                          (uintptr_t)target_base + PMM_PAGE_SIZE,
+	                          (uintptr_t)caller_base,
+	                          1u,
+	                          0u,
+	                          0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(result.value, 1u);
+
+	result = syscall_dispatch(SYSCALL_VM_COPY_TO,
+	                          process_pid(target),
+	                          (uintptr_t)target_base,
+	                          (uintptr_t)caller_base + PMM_PAGE_SIZE,
+	                          1u,
+	                          0u,
+	                          0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(result.value, 2u);
+
+	result = syscall_dispatch(
+		SYSCALL_VM_COPY_TO, process_pid(target), (uintptr_t)target_base, (uintptr_t)caller_base, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(result.value, 0u);
+
+	thread_mark_zombie(&target_thread->thread);
+	thread_mark_zombie(&caller_thread->thread);
+	cr_assert(process_destroy(target), "target process_destroy failed");
+	cr_assert(process_destroy(caller), "caller process_destroy failed");
+	syscall_test_reset_state();
+}
+
 Test(syscall, yield_dispatches_next_runnable_thread) {
 	const struct thread_create_params first_params = {
 		.name              = "syscall-yield-first",

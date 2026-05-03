@@ -37,6 +37,10 @@ syscall_result_t syscall_vm_map(uintptr_t arg0, uintptr_t arg1, uintptr_t, uintp
 syscall_result_t syscall_vm_unmap(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t, uintptr_t, uintptr_t);
 syscall_result_t syscall_vm_protect(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t, uintptr_t, uintptr_t);
 syscall_result_t syscall_vm_query(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t, uintptr_t, uintptr_t);
+syscall_result_t syscall_vm_copy_from(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t,
+                                      uintptr_t);
+syscall_result_t syscall_vm_copy_to(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t,
+                                    uintptr_t);
 
 syscall_result_t syscall_copy_string_arg(uintptr_t ptr_arg_index, uintptr_t string_ptr, uintptr_t len_arg_index,
                                          uintptr_t string_len_arg, char** out_string);

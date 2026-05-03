@@ -70,6 +70,22 @@ static syscall_result_t syscall_copy_out(uintptr_t ptr_arg_index, uintptr_t dst,
 	return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, ptr_arg_index);
 }
 
+static syscall_result_t syscall_result_from_address_transfer(enum address_transfer_result result, uintptr_t arg_index) {
+	switch (result) {
+	case ADDRESS_TRANSFER_OK:
+		return syscall_result_ok(0u);
+	case ADDRESS_TRANSFER_FAULT_FAILED:
+		return syscall_result_error(SYSCALL_STATUS_FAILED, arg_index);
+	case ADDRESS_TRANSFER_INVALID_ARGUMENTS:
+	case ADDRESS_TRANSFER_ADDRESS_OVERFLOW:
+	case ADDRESS_TRANSFER_NOT_MAPPED:
+	case ADDRESS_TRANSFER_NOT_USER:
+	case ADDRESS_TRANSFER_ACCESS_DENIED:
+	default:
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, arg_index);
+	}
+}
+
 syscall_result_t syscall_vm_alloc(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
                                   uintptr_t arg5) {
 	struct address_space*   space;
@@ -202,4 +218,66 @@ syscall_result_t syscall_vm_query(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 	copy_result = syscall_copy_out(2u, arg2, &info, sizeof(info));
 	if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
 	return syscall_result_ok(0u);
+}
+
+syscall_result_t syscall_vm_copy_from(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
+                                      uintptr_t arg5) {
+	struct address_space*        src_space;
+	struct address_space*        dst_space;
+	size_t                       size;
+	enum address_transfer_result transfer_result;
+
+	(void)arg4;
+	(void)arg5;
+
+	size = (size_t)arg3;
+	if ((uintptr_t)size != arg3) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 3u);
+	if (size == 0u) return syscall_result_ok(0u);
+
+	src_space = syscall_target_address_space(arg0);
+	if (src_space == NULL)
+		return syscall_result_error(arg0 == 0u ? SYSCALL_STATUS_UNAVAILABLE : SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	dst_space = syscall_current_user_space();
+	if (dst_space == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 2u);
+
+	transfer_result = address_space_validate_range(
+		src_space, arg1, size, ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
+	if (transfer_result != ADDRESS_TRANSFER_OK) return syscall_result_from_address_transfer(transfer_result, 1u);
+	transfer_result = address_space_validate_range(
+		dst_space, arg2, size, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
+	if (transfer_result != ADDRESS_TRANSFER_OK) return syscall_result_from_address_transfer(transfer_result, 2u);
+	transfer_result = address_space_copy_between(dst_space, arg2, src_space, arg1, size);
+	if (transfer_result != ADDRESS_TRANSFER_OK) return syscall_result_from_address_transfer(transfer_result, 3u);
+	return syscall_result_ok((uintptr_t)size);
+}
+
+syscall_result_t syscall_vm_copy_to(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
+                                    uintptr_t arg5) {
+	struct address_space*        dst_space;
+	struct address_space*        src_space;
+	size_t                       size;
+	enum address_transfer_result transfer_result;
+
+	(void)arg4;
+	(void)arg5;
+
+	size = (size_t)arg3;
+	if ((uintptr_t)size != arg3) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 3u);
+	if (size == 0u) return syscall_result_ok(0u);
+
+	dst_space = syscall_target_address_space(arg0);
+	if (dst_space == NULL)
+		return syscall_result_error(arg0 == 0u ? SYSCALL_STATUS_UNAVAILABLE : SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	src_space = syscall_current_user_space();
+	if (src_space == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 2u);
+
+	transfer_result = address_space_validate_range(
+		dst_space, arg1, size, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
+	if (transfer_result != ADDRESS_TRANSFER_OK) return syscall_result_from_address_transfer(transfer_result, 1u);
+	transfer_result = address_space_validate_range(
+		src_space, arg2, size, ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
+	if (transfer_result != ADDRESS_TRANSFER_OK) return syscall_result_from_address_transfer(transfer_result, 2u);
+	transfer_result = address_space_copy_between(dst_space, arg1, src_space, arg2, size);
+	if (transfer_result != ADDRESS_TRANSFER_OK) return syscall_result_from_address_transfer(transfer_result, 3u);
+	return syscall_result_ok((uintptr_t)size);
 }
