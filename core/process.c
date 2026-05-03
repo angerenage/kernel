@@ -6,10 +6,10 @@
 #include <core/thread.h>
 #include <core/uthread.h>
 #include <core/vmm.h>
+#include <libk/string.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 static struct id_table process_table = {
 	.lock    = SPINLOCK_INIT_CLASS("process_table", SPINLOCK_ORDER_ID_TABLE, SPINLOCK_FLAG_IRQSAVE),
@@ -223,12 +223,19 @@ enum process_result process_create(struct process** out_process, const char* nam
 	if (process == NULL) return PROCESS_NO_MEMORY;
 
 	memset(process, 0, sizeof(*process));
-	process->name  = name;
+	if (name != NULL) {
+		process->name = strdup(name);
+		if (process->name == NULL) {
+			kfree(process);
+			return PROCESS_NO_MEMORY;
+		}
+	}
 	process->state = PROCESS_STATE_NEW;
 	spinlock_init_class(&process->lock, "process", SPINLOCK_ORDER_PROCESS, SPINLOCK_FLAG_IRQSAVE);
 	thread_wait_queue_init(&process->join_wait_queue);
 
 	if (!id_table_alloc(&process_table, process, &pid)) {
+		kfree((void*)process->name);
 		kfree(process);
 		return PROCESS_PID_EXHAUSTED;
 	}
@@ -236,6 +243,7 @@ enum process_result process_create(struct process** out_process, const char* nam
 
 	if (!vmm_user_address_space_init(&process->address_space)) {
 		(void)id_table_remove(&process_table, process->pid, NULL);
+		kfree((void*)process->name);
 		kfree(process);
 		return PROCESS_ADDRESS_SPACE_FAILED;
 	}
@@ -384,6 +392,7 @@ bool process_destroy(struct process* process) {
 
 	vmm_address_space_deinit(&process->address_space);
 	(void)id_table_remove(&process_table, process->pid, NULL);
+	kfree((void*)process->name);
 	memset(process, 0, sizeof(*process));
 	kfree(process);
 	return true;

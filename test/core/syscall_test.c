@@ -1,3 +1,4 @@
+#include <core/address_transfer.h>
 #include <core/cpu.h>
 #include <core/kheap.h>
 #include <core/mm.h>
@@ -14,6 +15,7 @@
 #include <hal/interrupts.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "../mocks/hal/cpu_mock.h"
 #include "../vmm/test_support.h"
@@ -103,6 +105,10 @@ static struct process* syscall_test_spawn_process(const char* name) {
 
 static void syscall_test_thread_entry(void* arg) {
 	(void)arg;
+}
+
+static syscall_result_t syscall_test_create_process_call(const char* name) {
+	return syscall_dispatch(SYSCALL_CREATE_PROCESS, (uintptr_t)name, strlen(name) + 1u, 0u, 0u, 0u, 0u);
 }
 
 Test(syscall, nop_returns_ok) {
@@ -211,7 +217,7 @@ Test(syscall, create_process_returns_new_process_pid) {
 
 	syscall_test_init_process_environment();
 
-	result = syscall_dispatch(SYSCALL_CREATE_PROCESS, (uintptr_t)"syscall-created", 0u, 0u, 0u, 0u, 0u);
+	result = syscall_test_create_process_call("syscall-created");
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_neq(result.value, (uintptr_t)PROCESS_PID_INVALID);
 
@@ -225,6 +231,56 @@ Test(syscall, create_process_returns_new_process_pid) {
 	syscall_test_reset_state();
 }
 
+Test(syscall, create_process_copies_name_from_current_address_space) {
+	struct process*         caller;
+	struct process*         created;
+	struct uthread*         main_thread;
+	struct address_space*   space;
+	struct vmm_alloc_params params = {
+		.page_count  = 1u,
+		.align_pages = 1u,
+		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
+		.kind        = VMM_KIND_GENERIC,
+		.map_flags   = VMM_MAP_LAZY,
+	};
+	vmm_id_t         name_id   = VMM_ID_INVALID;
+	void*            name_base = NULL;
+	const char       name[]    = "syscall-user-created";
+	syscall_result_t result;
+	syscall_result_t invalid_result;
+	syscall_result_t unterminated_result;
+
+	syscall_test_init_process_environment();
+	caller      = syscall_test_spawn_process("syscall/create-caller");
+	main_thread = process_main_thread(caller);
+	cr_assert_not_null(main_thread);
+	sched_set_current(cpu_current(), &main_thread->thread);
+	space = process_address_space(caller);
+	cr_assert(vmm_alloc(space, &params, &name_id, &name_base), "failed to allocate user name buffer");
+	cr_assert_eq(address_space_copy_to(space, (uintptr_t)name_base, name, sizeof(name)), ADDRESS_TRANSFER_OK);
+
+	invalid_result =
+		syscall_dispatch(SYSCALL_CREATE_PROCESS, (uintptr_t)name_base + PMM_PAGE_SIZE, sizeof(name), 0u, 0u, 0u, 0u);
+	cr_assert_eq(invalid_result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(invalid_result.value, 0u, "bad create_process name pointer should report arg0");
+
+	unterminated_result =
+		syscall_dispatch(SYSCALL_CREATE_PROCESS, (uintptr_t)name_base, sizeof(name) - 1u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(unterminated_result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(unterminated_result.value, 1u, "unterminated create_process name should report arg1");
+
+	result = syscall_dispatch(SYSCALL_CREATE_PROCESS, (uintptr_t)name_base, sizeof(name), 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	created = process_lookup((process_id_t)result.value);
+	cr_assert_not_null(created);
+	cr_assert_str_eq(created->name, name, "created process should own the copied name");
+
+	cr_assert(process_destroy(created), "created process_destroy failed");
+	thread_mark_zombie(&main_thread->thread);
+	cr_assert(process_destroy(caller), "caller process_destroy failed");
+	syscall_test_reset_state();
+}
+
 Test(syscall, run_process_creates_main_thread_at_entrypoint) {
 	syscall_result_t create_result;
 	syscall_result_t run_result;
@@ -233,7 +289,7 @@ Test(syscall, run_process_creates_main_thread_at_entrypoint) {
 
 	syscall_test_init_process_environment();
 
-	create_result = syscall_dispatch(SYSCALL_CREATE_PROCESS, (uintptr_t)"syscall-run", 0u, 0u, 0u, 0u, 0u);
+	create_result = syscall_test_create_process_call("syscall-run");
 	cr_assert_eq(create_result.status, SYSCALL_STATUS_OK);
 	process = process_lookup((process_id_t)create_result.value);
 	cr_assert_not_null(process);
@@ -264,7 +320,7 @@ Test(syscall, run_process_rejects_invalid_or_already_started_process) {
 	cr_assert_eq(run_result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 	cr_assert_eq(run_result.value, 0u);
 
-	create_result = syscall_dispatch(SYSCALL_CREATE_PROCESS, (uintptr_t)"syscall-run-invalid", 0u, 0u, 0u, 0u, 0u);
+	create_result = syscall_test_create_process_call("syscall-run-invalid");
 	cr_assert_eq(create_result.status, SYSCALL_STATUS_OK);
 	process = process_lookup((process_id_t)create_result.value);
 	cr_assert_not_null(process);
@@ -294,7 +350,7 @@ Test(syscall, wait_process_returns_exit_code_and_reclaims_process) {
 
 	syscall_test_init_process_environment();
 
-	create_result = syscall_dispatch(SYSCALL_CREATE_PROCESS, (uintptr_t)"syscall-wait", 0u, 0u, 0u, 0u, 0u);
+	create_result = syscall_test_create_process_call("syscall-wait");
 	cr_assert_eq(create_result.status, SYSCALL_STATUS_OK);
 	pid     = (process_id_t)create_result.value;
 	process = process_lookup(pid);
@@ -325,7 +381,7 @@ Test(syscall, detach_and_kill_process_dispatch_to_lifecycle_helpers) {
 
 	syscall_test_init_process_environment();
 
-	create_result = syscall_dispatch(SYSCALL_CREATE_PROCESS, (uintptr_t)"syscall-kill", 0u, 0u, 0u, 0u, 0u);
+	create_result = syscall_test_create_process_call("syscall-kill");
 	cr_assert_eq(create_result.status, SYSCALL_STATUS_OK);
 	process = process_lookup((process_id_t)create_result.value);
 	cr_assert_not_null(process);
@@ -378,22 +434,42 @@ Test(syscall, thread_lifecycle_requires_current_thread) {
 }
 
 Test(syscall, spawn_thread_creates_joinable_thread_in_current_process) {
-	struct process*  process;
-	struct uthread*  main_thread;
-	struct uthread*  worker;
-	syscall_result_t result;
+	struct process*         process;
+	struct uthread*         main_thread;
+	struct uthread*         worker;
+	syscall_result_t        result;
+	struct vmm_alloc_params name_params = {
+		.page_count  = 1u,
+		.align_pages = 1u,
+		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
+		.kind        = VMM_KIND_GENERIC,
+		.map_flags   = VMM_MAP_LAZY,
+	};
+	vmm_id_t   name_id   = VMM_ID_INVALID;
+	void*      name_base = NULL;
+	const char name[]    = "syscall-worker";
 
 	syscall_test_init_process_environment();
 	process     = syscall_test_spawn_process("syscall/spawn-thread");
 	main_thread = process_main_thread(process);
 	cr_assert_not_null(main_thread);
 	sched_set_current(cpu_current(), &main_thread->thread);
+	cr_assert(vmm_alloc(process_address_space(process), &name_params, &name_id, &name_base),
+	          "failed to allocate user thread name buffer");
+	cr_assert_eq(address_space_copy_to(process_address_space(process), (uintptr_t)name_base, name, sizeof(name)),
+	             ADDRESS_TRANSFER_OK);
 
-	result = syscall_dispatch(SYSCALL_SPAWN_THREAD, 0x410000u, 0x1234u, 2u, 0u, (uintptr_t)"syscall-worker", 0u);
+	result =
+		syscall_dispatch(SYSCALL_SPAWN_THREAD, 0x410000u, 0x1234u, 2u, 0u, (uintptr_t)name_base, sizeof(name) - 1u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(result.value, 5u, "unterminated spawn_thread name should report arg5");
+
+	result = syscall_dispatch(SYSCALL_SPAWN_THREAD, 0x410000u, 0x1234u, 2u, 0u, (uintptr_t)name_base, sizeof(name));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_neq(result.value, (uintptr_t)UTHREAD_ID_INVALID);
 	worker = uthread_lookup((uthread_id_t)result.value);
 	cr_assert_not_null(worker, "spawn_thread should return the new TID");
+	cr_assert_str_eq(worker->thread.name, name, "spawned thread should own the copied name");
 	cr_assert_eq(worker->process, process);
 	cr_assert_eq(worker->thread.address_space, process_address_space(process));
 	cr_assert_eq(process_thread_count(process), 2u);
@@ -419,6 +495,26 @@ Test(syscall, spawn_thread_rejects_missing_entrypoint_with_argument_index) {
 	result = syscall_dispatch(SYSCALL_SPAWN_THREAD, 0u, 0u, 0u, 0u, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 	cr_assert_eq(result.value, 0u);
+
+	thread_mark_zombie(&main_thread->thread);
+	cr_assert(process_destroy(process), "process_destroy failed");
+	syscall_test_reset_state();
+}
+
+Test(syscall, spawn_thread_rejects_bad_name_pointer_with_argument_index) {
+	struct process*  process;
+	struct uthread*  main_thread;
+	syscall_result_t result;
+
+	syscall_test_init_process_environment();
+	process     = syscall_test_spawn_process("syscall/spawn-bad-name");
+	main_thread = process_main_thread(process);
+	cr_assert_not_null(main_thread);
+	sched_set_current(cpu_current(), &main_thread->thread);
+
+	result = syscall_dispatch(SYSCALL_SPAWN_THREAD, 0x410000u, 0u, 0u, 0u, MM_USER_VMM_BASE, 4u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(result.value, 4u);
 
 	thread_mark_zombie(&main_thread->thread);
 	cr_assert(process_destroy(process), "process_destroy failed");

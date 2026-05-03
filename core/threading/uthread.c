@@ -9,9 +9,9 @@
 #include <core/uthread.h>
 #include <core/vaddr_alloc.h>
 #include <hal/userspace.h>
+#include <libk/string.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 enum {
 	UTHREAD_KERNEL_STACK_PAGES = 4u,
@@ -46,6 +46,13 @@ static void uthread_unregister_id(struct uthread* thread) {
 
 	(void)id_table_remove(&uthread_table, thread->id, NULL);
 	thread->id = UTHREAD_ID_INVALID;
+}
+
+static void uthread_release_name(struct uthread* thread) {
+	if (thread == NULL) return;
+
+	kfree((void*)thread->thread.name);
+	thread->thread.name = NULL;
 }
 
 static bool uthread_attach_process(struct uthread* thread, struct process* process) {
@@ -139,6 +146,7 @@ static void uthread_free(struct uthread* thread) {
 	uthread_release_stacks(thread);
 	uthread_detach_process(thread);
 	uthread_unregister_id(thread);
+	uthread_release_name(thread);
 	thread->process = NULL;
 	if (heap_allocated) kfree(thread);
 }
@@ -312,6 +320,7 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 	size_t                       user_stack_pages;
 	uintptr_t                    kernel_stack_top;
 	uthread_id_t                 id;
+	char*                        name = NULL;
 
 	if (thread == NULL || params == NULL || params->process == NULL || params->user_entry == 0u) {
 		return UTHREAD_START_INVALID_ARGUMENTS;
@@ -319,24 +328,35 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 	address_space = process_address_space(params->process);
 	if (!address_space_is_initialized(address_space)) return UTHREAD_START_INVALID_ARGUMENTS;
 
+	if (params->name != NULL) {
+		name = strdup(params->name);
+		if (name == NULL) return UTHREAD_START_NO_MEMORY;
+	}
+
 	*thread = (struct uthread){
 		.process         = params->process,
+		.thread          = {.name = name},
 		.user_stack_id   = VMM_ID_INVALID,
 		.kernel_stack_id = VMM_ID_INVALID,
 		.reaper_next     = NULL,
 		.heap_allocated  = heap_allocated,
 	};
-	if (!id_table_alloc(&uthread_table, thread, &id)) return UTHREAD_START_ID_EXHAUSTED;
+	if (!id_table_alloc(&uthread_table, thread, &id)) {
+		uthread_release_name(thread);
+		return UTHREAD_START_ID_EXHAUSTED;
+	}
 	thread->id = id;
 
 	user_stack_pages = params->user_stack_pages != 0u ? params->user_stack_pages : UTHREAD_DEFAULT_USER_STACK_PAGES;
 	user_stack_params.page_count = user_stack_pages;
 	if (!vmm_alloc(address_space, &user_stack_params, &thread->user_stack_id, &user_stack_base)) {
+		uthread_release_name(thread);
 		uthread_release_stacks(thread);
 		uthread_unregister_id(thread);
 		return UTHREAD_START_STACK_ALLOC_FAILED;
 	}
 	if (!vmm_alloc(address_space_kernel(), &kernel_stack_params, &thread->kernel_stack_id, &kernel_stack_base)) {
+		uthread_release_name(thread);
 		uthread_release_stacks(thread);
 		uthread_unregister_id(thread);
 		return UTHREAD_START_STACK_ALLOC_FAILED;
@@ -347,13 +367,14 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 
 	if (!hal_userspace_thread_context_init(
 			&context, kernel_stack_top, params->user_entry, thread->user_stack_top, params->user_arg)) {
+		uthread_release_name(thread);
 		uthread_release_stacks(thread);
 		uthread_unregister_id(thread);
 		return UTHREAD_START_CONTEXT_UNSUPPORTED;
 	}
 
 	thread_params = (struct thread_context_params){
-		.name              = params->name,
+		.name              = thread->thread.name,
 		.kernel_stack_base = (uintptr_t)kernel_stack_base,
 		.kernel_stack_top  = kernel_stack_top,
 		.address_space     = address_space,
@@ -366,11 +387,13 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 	};
 	init_result = thread_init_context(&thread->thread, &thread_params);
 	if (init_result != THREAD_INIT_OK) {
+		uthread_release_name(thread);
 		uthread_release_stacks(thread);
 		uthread_unregister_id(thread);
 		return UTHREAD_START_INVALID_ARGUMENTS;
 	}
 	if (!uthread_attach_process(thread, thread->process)) {
+		uthread_release_name(thread);
 		uthread_release_stacks(thread);
 		uthread_unregister_id(thread);
 		return UTHREAD_START_INVALID_ARGUMENTS;
@@ -379,6 +402,7 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 	thread->thread.owner      = thread;
 	if (reap_on_exit) thread_set_reap_callback(&thread->thread, uthread_reap_callback, thread);
 	if (!sched_make_runnable(&thread->thread)) {
+		uthread_release_name(thread);
 		uthread_release_stacks(thread);
 		uthread_detach_process(thread);
 		uthread_unregister_id(thread);
@@ -466,6 +490,7 @@ bool uthread_deinit(struct uthread* thread) {
 	uthread_release_stacks(thread);
 	uthread_detach_process(thread);
 	uthread_unregister_id(thread);
+	uthread_release_name(thread);
 	memset(thread, 0, sizeof(*thread));
 	thread->user_stack_id   = VMM_ID_INVALID;
 	thread->kernel_stack_id = VMM_ID_INVALID;
