@@ -12,6 +12,7 @@ core_sources = files(
 	'threading/sched.c',
 	'threading/thread.c',
 	'threading/uthread.c',
+	'syscall/address_space.c',
 	'syscall/misc.c',
 	'syscall/process.c',
 	'syscall/syscall.c',
