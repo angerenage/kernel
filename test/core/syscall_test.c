@@ -127,6 +127,58 @@ Test(syscall, invalid_number_returns_unknown_syscall) {
 	cr_assert(syscall_status_is_caller_error(result.status), "unknown syscall should be a caller error");
 }
 
+Test(syscall, print_requires_current_process_for_nonzero_buffer) {
+	syscall_result_t result;
+
+	syscall_test_init_process_environment();
+
+	result = syscall_dispatch(SYSCALL_PRINT, 0x1000u, 4u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
+	cr_assert_eq(result.value, 0u);
+
+	result = syscall_dispatch(SYSCALL_PRINT, 0u, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(result.value, 0u);
+
+	syscall_test_reset_state();
+}
+
+Test(syscall, print_rejects_invalid_user_buffer) {
+	struct process*         process;
+	struct uthread*         main_thread;
+	struct address_space*   space;
+	struct vmm_alloc_params params = {
+		.page_count  = 1u,
+		.align_pages = 1u,
+		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
+		.kind        = VMM_KIND_GENERIC,
+		.map_flags   = VMM_MAP_LAZY,
+	};
+	vmm_id_t         buffer_id = VMM_ID_INVALID;
+	void*            buffer_base;
+	syscall_result_t result;
+
+	syscall_test_init_process_environment();
+	process     = syscall_test_spawn_process("syscall/print");
+	main_thread = process_main_thread(process);
+	cr_assert_not_null(main_thread);
+	sched_set_current(cpu_current(), &main_thread->thread);
+	space = process_address_space(process);
+	cr_assert(vmm_alloc(space, &params, &buffer_id, &buffer_base), "failed to allocate print buffer");
+
+	result = syscall_dispatch(SYSCALL_PRINT, 0u, 1u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(result.value, 0u);
+
+	result = syscall_dispatch(SYSCALL_PRINT, (uintptr_t)buffer_base + PMM_PAGE_SIZE, 1u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(result.value, 0u);
+
+	thread_mark_zombie(&main_thread->thread);
+	cr_assert(process_destroy(process), "process_destroy failed");
+	syscall_test_reset_state();
+}
+
 Test(syscall, sleep_ms_fails_without_clock) {
 	syscall_result_t result;
 

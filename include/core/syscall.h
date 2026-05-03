@@ -11,6 +11,9 @@ enum {
 	SYSCALL_SLEEP_MS,
 	SYSCALL_TICK_COUNT,
 
+	/* Temporary diagnostics */
+	SYSCALL_PRINT,
+
 	/* Process identity / introspection */
 	SYSCALL_GETPID,
 	SYSCALL_GET_PROCESS_THREAD_COUNT,

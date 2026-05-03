@@ -86,6 +86,8 @@ syscall_result_t syscall_copy_string_arg(uintptr_t ptr_arg_index, uintptr_t stri
 static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 	[SYSCALL_NOP] = syscall_nop,
 
+	[SYSCALL_PRINT] = syscall_print,
+
 	[SYSCALL_YIELD]      = syscall_yield,
 	[SYSCALL_SLEEP_MS]   = syscall_sleep_ms,
 	[SYSCALL_TICK_COUNT] = syscall_tick_count,

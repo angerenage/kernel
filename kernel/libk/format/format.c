@@ -26,13 +26,16 @@ static void emit_char(struct format_ctx* ctx, char ch) {
 	serial_out_char(ch);
 }
 
-static void emit_string(struct format_ctx* ctx, const char* str) {
+static void emit_string(struct format_ctx* ctx, const char* str, int precision) {
+	int emitted = 0;
+
 	if (!str) {
 		str = "(null)";
 	}
 
-	while (*str) {
+	while (*str && (precision < 0 || emitted < precision)) {
 		emit_char(ctx, *str++);
+		emitted++;
 	}
 }
 
@@ -148,8 +151,9 @@ static void format_internal(struct format_ctx* ctx, const char* format, va_list*
 			continue;
 		}
 
-		bool zero_pad = false;
-		int  width    = 0;
+		bool zero_pad  = false;
+		int  width     = 0;
+		int  precision = -1;
 
 		if (*format == '0') {
 			zero_pad = true;
@@ -159,6 +163,22 @@ static void format_internal(struct format_ctx* ctx, const char* format, va_list*
 		while (*format >= '0' && *format <= '9') {
 			width = width * 10 + (*format - '0');
 			format++;
+		}
+
+		if (*format == '.') {
+			format++;
+			precision = 0;
+			if (*format == '*') {
+				precision = va_arg(*args, int);
+				if (precision < 0) precision = -1;
+				format++;
+			}
+			else {
+				while (*format >= '0' && *format <= '9') {
+					precision = precision * 10 + (*format - '0');
+					format++;
+				}
+			}
 		}
 
 		int  length      = 0;
@@ -185,7 +205,7 @@ static void format_internal(struct format_ctx* ctx, const char* format, va_list*
 		}
 		case 's': {
 			const char* str = va_arg(*args, const char*);
-			emit_string(ctx, str);
+			emit_string(ctx, str, precision);
 			break;
 		}
 		case 'd':
