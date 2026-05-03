@@ -593,6 +593,55 @@ Test(vmm, copies_between_kernel_and_user_and_between_user_spaces) {
 	vmm_address_space_deinit(&left_space);
 }
 
+Test(vmm, typed_address_transfer_helpers_allow_unaligned_cross_page_access) {
+	_Alignas(4096) uint8_t  arena[KiB(256)];
+	struct address_space    user_space = {0};
+	struct vmm_alloc_params params     = {
+			.page_count  = 2,
+			.align_pages = 1,
+			.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
+			.kind        = VMM_KIND_GENERIC,
+			.map_flags   = VMM_MAP_LAZY,
+    };
+	vmm_id_t  alloc_id      = VMM_ID_INVALID;
+	void*     base          = NULL;
+	uint64_t  u64_value     = 0x1122334455667788ull;
+	uint64_t  read_u64      = 0u;
+	uintptr_t uptr_value    = (uintptr_t)0xfeedc0de12345678ull;
+	uintptr_t read_uintptr  = 0u;
+	uint32_t  rejected_read = 0u;
+	uintptr_t cross_page_addr;
+
+	init_test_vmm(arena, sizeof(arena));
+	cr_assert(address_space_init(&user_space, MM_USER_VMM_BASE, 16u), "failed to initialize user address space");
+	cr_assert(hal_paging_space_create(&user_space.hal_space), "failed to create user HAL address space");
+	cr_assert(vmm_alloc(&user_space, &params, &alloc_id, &base), "failed to allocate typed helper user range");
+
+	cross_page_addr = (uintptr_t)base + PMM_PAGE_SIZE - 3u;
+	cr_assert_eq(address_space_write_u64(&user_space, cross_page_addr, u64_value),
+	             ADDRESS_TRANSFER_OK,
+	             "unaligned cross-page u64 write failed");
+	cr_assert_eq(address_space_read_u64(&user_space, cross_page_addr, &read_u64),
+	             ADDRESS_TRANSFER_OK,
+	             "unaligned cross-page u64 read failed");
+	cr_assert_eq(read_u64, u64_value, "u64 helper round-trip returned the wrong value");
+
+	cr_assert_eq(address_space_write_uintptr(&user_space, (uintptr_t)base, uptr_value),
+	             ADDRESS_TRANSFER_OK,
+	             "uintptr write failed");
+	cr_assert_eq(address_space_read_uintptr(&user_space, (uintptr_t)base, &read_uintptr),
+	             ADDRESS_TRANSFER_OK,
+	             "uintptr read failed");
+	cr_assert_eq(read_uintptr, uptr_value, "uintptr helper round-trip returned the wrong value");
+
+	cr_assert_eq(address_space_read_u32(&user_space, (uintptr_t)base + 2u * PMM_PAGE_SIZE, &rejected_read),
+	             ADDRESS_TRANSFER_NOT_MAPPED,
+	             "read outside allocation should fail");
+
+	cr_assert(vmm_free(&user_space, alloc_id), "vmm_free failed for typed helper user range");
+	vmm_address_space_deinit(&user_space);
+}
+
 Test(vmm, rejects_guard_pages_for_non_stack_allocations) {
 	_Alignas(4096) uint8_t  arena[KiB(256)];
 	struct vmm_alloc_params params = {

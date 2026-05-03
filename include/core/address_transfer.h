@@ -36,3 +36,15 @@ enum address_transfer_result address_space_copy_to(struct address_space* dst_spa
 enum address_transfer_result address_space_copy_between(struct address_space* dst_space, uintptr_t dst_addr,
                                                         struct address_space* src_space, uintptr_t src_addr,
                                                         size_t size);
+
+enum address_transfer_result address_space_read_u8(struct address_space* space, uintptr_t addr, uint8_t* out);
+enum address_transfer_result address_space_read_u16(struct address_space* space, uintptr_t addr, uint16_t* out);
+enum address_transfer_result address_space_read_u32(struct address_space* space, uintptr_t addr, uint32_t* out);
+enum address_transfer_result address_space_read_u64(struct address_space* space, uintptr_t addr, uint64_t* out);
+enum address_transfer_result address_space_read_uintptr(struct address_space* space, uintptr_t addr, uintptr_t* out);
+
+enum address_transfer_result address_space_write_u8(struct address_space* space, uintptr_t addr, uint8_t value);
+enum address_transfer_result address_space_write_u16(struct address_space* space, uintptr_t addr, uint16_t value);
+enum address_transfer_result address_space_write_u32(struct address_space* space, uintptr_t addr, uint32_t value);
+enum address_transfer_result address_space_write_u64(struct address_space* space, uintptr_t addr, uint64_t value);
+enum address_transfer_result address_space_write_uintptr(struct address_space* space, uintptr_t addr, uintptr_t value);

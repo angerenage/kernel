@@ -213,3 +213,43 @@ enum address_transfer_result address_space_copy_between(struct address_space* ds
 
 	return ADDRESS_TRANSFER_OK;
 }
+
+enum address_transfer_result address_space_read_u8(struct address_space* space, uintptr_t addr, uint8_t* out) {
+	return address_space_copy_from(space, addr, out, sizeof(*out));
+}
+
+enum address_transfer_result address_space_read_u16(struct address_space* space, uintptr_t addr, uint16_t* out) {
+	return address_space_copy_from(space, addr, out, sizeof(*out));
+}
+
+enum address_transfer_result address_space_read_u32(struct address_space* space, uintptr_t addr, uint32_t* out) {
+	return address_space_copy_from(space, addr, out, sizeof(*out));
+}
+
+enum address_transfer_result address_space_read_u64(struct address_space* space, uintptr_t addr, uint64_t* out) {
+	return address_space_copy_from(space, addr, out, sizeof(*out));
+}
+
+enum address_transfer_result address_space_read_uintptr(struct address_space* space, uintptr_t addr, uintptr_t* out) {
+	return address_space_copy_from(space, addr, out, sizeof(*out));
+}
+
+enum address_transfer_result address_space_write_u8(struct address_space* space, uintptr_t addr, uint8_t value) {
+	return address_space_copy_to(space, addr, &value, sizeof(value));
+}
+
+enum address_transfer_result address_space_write_u16(struct address_space* space, uintptr_t addr, uint16_t value) {
+	return address_space_copy_to(space, addr, &value, sizeof(value));
+}
+
+enum address_transfer_result address_space_write_u32(struct address_space* space, uintptr_t addr, uint32_t value) {
+	return address_space_copy_to(space, addr, &value, sizeof(value));
+}
+
+enum address_transfer_result address_space_write_u64(struct address_space* space, uintptr_t addr, uint64_t value) {
+	return address_space_copy_to(space, addr, &value, sizeof(value));
+}
+
+enum address_transfer_result address_space_write_uintptr(struct address_space* space, uintptr_t addr, uintptr_t value) {
+	return address_space_copy_to(space, addr, &value, sizeof(value));
+}
