@@ -1,3 +1,4 @@
+#include <core/address_transfer.h>
 #include <core/cpu.h>
 #include <core/pmm.h>
 #include <core/thread.h>
@@ -5,6 +6,7 @@
 #include <core/vmm.h>
 #include <hal/cpu.h>
 #include <hal/paging.h>
+#include <string.h>
 
 #include "test_support.h"
 
@@ -474,6 +476,121 @@ Test(vmm, maps_and_reprotects_user_pages_distinct_from_kernel_pages) {
 
 	cr_assert(vmm_free(&user_space, alloc_id), "vmm_free failed for user mapping");
 	vmm_address_space_deinit(&user_space);
+}
+
+Test(vmm, validates_user_ranges_without_faulting_unless_requested) {
+	_Alignas(4096) uint8_t  arena[KiB(256)];
+	struct address_space    user_space = {0};
+	struct vmm_alloc_params params     = {
+			.page_count  = 2,
+			.align_pages = 1,
+			.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
+			.kind        = VMM_KIND_GENERIC,
+			.map_flags   = VMM_MAP_LAZY,
+    };
+	vmm_id_t alloc_id = VMM_ID_INVALID;
+	void*    base     = NULL;
+
+	init_test_vmm(arena, sizeof(arena));
+	cr_assert(address_space_init(&user_space, MM_USER_VMM_BASE, 16u), "failed to initialize user address space");
+	cr_assert(hal_paging_space_create(&user_space.hal_space), "failed to create user HAL address space");
+	cr_assert(vmm_alloc(&user_space, &params, &alloc_id, &base), "failed to allocate lazy user range");
+
+	cr_assert_eq(
+		address_space_validate_range(&user_space, (uintptr_t)base, 1u, ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER),
+		ADDRESS_TRANSFER_OK,
+		"reserved user address should be valid by VMM metadata");
+	cr_assert_eq(address_space_validate_range(&user_space,
+	                                          (uintptr_t)base,
+	                                          2u * PMM_PAGE_SIZE,
+	                                          ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_PRESENT),
+	             ADDRESS_TRANSFER_NOT_MAPPED,
+	             "present validation should not fault in lazy pages");
+	cr_assert_eq(
+		address_space_validate_range(&user_space,
+	                                 (uintptr_t)base,
+	                                 2u * PMM_PAGE_SIZE,
+	                                 ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN),
+		ADDRESS_TRANSFER_OK,
+		"fault-in validation should materialize lazy pages");
+	cr_assert_eq(
+		address_space_validate_range(
+			&user_space, (uintptr_t)base + 2u * PMM_PAGE_SIZE, 1u, ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER),
+		ADDRESS_TRANSFER_NOT_MAPPED,
+		"address after allocation should be rejected");
+
+	cr_assert(vmm_free(&user_space, alloc_id), "vmm_free failed for user range");
+	vmm_address_space_deinit(&user_space);
+}
+
+Test(vmm, copies_between_kernel_and_user_and_between_user_spaces) {
+	_Alignas(4096) uint8_t arena[KiB(1024)];
+	const struct mem_range memory_map[] = {
+		{
+         .base   = (uintptr_t)arena,
+         .length = sizeof(arena),
+         .type   = MEM_RANGE_USABLE,
+		 },
+	};
+	struct address_space    left_space  = {0};
+	struct address_space    right_space = {0};
+	struct vmm_alloc_params params      = {
+			 .page_count  = 1,
+			 .align_pages = 1,
+			 .prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
+			 .kind        = VMM_KIND_GENERIC,
+			 .map_flags   = VMM_MAP_LAZY,
+    };
+	vmm_id_t                     left_id    = VMM_ID_INVALID;
+	vmm_id_t                     right_id   = VMM_ID_INVALID;
+	void*                        left_base  = NULL;
+	void*                        right_base = NULL;
+	const char                   source[]   = "transfer-across-user-pages";
+	char                         out[sizeof(source)];
+	uintptr_t                    left_addr;
+	uintptr_t                    right_addr;
+	enum address_transfer_result transfer_result;
+
+	mock_paging_reset();
+	cr_assert(pmm_init(memory_map, sizeof(memory_map) / sizeof(memory_map[0]), 0), "pmm_init failed");
+	cr_assert(vmm_init(), "vmm_init failed");
+	cr_assert(address_space_init(&left_space, MM_USER_VMM_BASE, 16u), "failed to initialize left user address space");
+	cr_assert(hal_paging_space_create(&left_space.hal_space), "failed to create left user HAL address space");
+	cr_assert(address_space_init(&right_space, MM_USER_VMM_BASE, 16u), "failed to initialize right user address space");
+	cr_assert(hal_paging_space_create(&right_space.hal_space), "failed to create right user HAL address space");
+	cr_assert(vmm_alloc(&left_space, &params, &left_id, &left_base), "failed to allocate left user range");
+
+	left_addr = (uintptr_t)left_base;
+	transfer_result =
+		address_space_validate_range(&left_space,
+	                                 left_addr,
+	                                 sizeof(source),
+	                                 ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
+	cr_assert_eq(transfer_result, ADDRESS_TRANSFER_OK, "range fault-in failed with result %d", transfer_result);
+
+	transfer_result = address_space_copy_to(&left_space, left_addr, source, sizeof(source));
+	cr_assert_eq(transfer_result, ADDRESS_TRANSFER_OK, "kernel-to-user copy failed with result %d", transfer_result);
+	memset(out, 0, sizeof(out));
+	cr_assert_eq(address_space_copy_from(&left_space, left_addr, out, sizeof(out)),
+	             ADDRESS_TRANSFER_OK,
+	             "user-to-kernel copy failed");
+	cr_assert_eq(memcmp(out, source, sizeof(source)), 0, "user-to-kernel copy returned wrong data");
+
+	cr_assert(vmm_alloc(&right_space, &params, &right_id, &right_base), "failed to allocate right user range");
+	right_addr = (uintptr_t)right_base;
+	cr_assert_eq(address_space_copy_between(&right_space, right_addr, &left_space, left_addr, sizeof(source)),
+	             ADDRESS_TRANSFER_OK,
+	             "user-to-user copy failed");
+	memset(out, 0, sizeof(out));
+	cr_assert_eq(address_space_copy_from(&right_space, right_addr, out, sizeof(out)),
+	             ADDRESS_TRANSFER_OK,
+	             "right user-to-kernel copy failed");
+	cr_assert_eq(memcmp(out, source, sizeof(source)), 0, "user-to-user copy returned wrong data");
+
+	cr_assert(vmm_free(&right_space, right_id), "vmm_free failed for right user range");
+	cr_assert(vmm_free(&left_space, left_id), "vmm_free failed for left user range");
+	vmm_address_space_deinit(&right_space);
+	vmm_address_space_deinit(&left_space);
 }
 
 Test(vmm, rejects_guard_pages_for_non_stack_allocations) {

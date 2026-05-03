@@ -13,6 +13,7 @@ core_sources = files(
 	'threading/thread.c',
 	'threading/uthread.c',
 	'syscall/syscall.c',
+	'memory/address_transfer.c',
 	'memory/kheap.c',
 	'memory/pmm.c',
 	'memory/vaddr_alloc.c',
