@@ -1,5 +1,5 @@
+#include <base/heap.h>
 #include <core/cpu.h>
-#include <core/kheap.h>
 #include <core/kthread.h>
 #include <core/mm.h>
 #include <core/pmm.h>
@@ -11,6 +11,7 @@
 #include <hal/serial.h>
 #include <kernel/boot.h>
 #include <kernel/cpu_boot.h>
+#include <libc/stdlib.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -94,14 +95,14 @@ static void kernel_bootstrap_worker_entry(void* arg) {
 
 	printf("kernel: bootstrap worker running on cpu%zu\n", cpu_index());
 
-	void* block = kmalloc(128u);
+	void* block = malloc(128u);
 	if (block == NULL) {
 		printf("kernel: bootstrap worker heap allocation failed\n");
 		return;
 	}
 
 	printf("kernel: bootstrap worker allocated 128 bytes at %p\n", block);
-	kfree(block);
+	free(block);
 
 #if KERNEL_SELFTESTS_ENABLED
 	if (kernel_selftests_requested() && !kernel_selftests_run()) {
@@ -212,11 +213,11 @@ static void kernel_init_memory(const struct mem_range* memory_map, size_t range_
 
 	printf("kernel: vmm initialized for window %p (%zu pages)\n", (void*)vmm_window_base(), vmm_window_page_count());
 
-	if (!kheap_init()) {
-		boot_fail("kernel: kheap_init failed");
+	if (!heap_init()) {
+		boot_fail("kernel: heap_init failed");
 	}
 
-	printf("kernel: kheap initialized with %zu/%zu bytes free\n", kheap_free_bytes(), kheap_total_bytes());
+	printf("kernel: heap initialized with %zu/%zu bytes free\n", heap_free_bytes(), heap_total_bytes());
 }
 
 static void kernel_bootstrap_worker_handle_spawn_failure(enum kthread_spawn_result result) {

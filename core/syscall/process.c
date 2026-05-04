@@ -1,6 +1,6 @@
-#include <core/kheap.h>
 #include <core/process.h>
 #include <core/uthread.h>
+#include <libc/stdlib.h>
 
 #include "syscall_private.h"
 
@@ -67,7 +67,7 @@ syscall_result_t syscall_create_process(uintptr_t arg0, uintptr_t arg1, uintptr_
 	if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
 
 	result = process_create(&process, name);
-	kfree(name);
+	free(name);
 	if (result != PROCESS_OK) return syscall_result_from_process_create(result);
 
 	return syscall_result_ok((uintptr_t)process_pid(process));

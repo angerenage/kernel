@@ -3,15 +3,15 @@
 #include <stddef.h>
 
 #ifdef BASE_STDLIB_RENAME_ALLOC
-void* kheap_malloc(size_t);
-void* kheap_calloc(size_t, size_t);
-void* kheap_realloc(void*, size_t);
-void  kheap_free(void*);
+void* heap_malloc(size_t);
+void* heap_calloc(size_t, size_t);
+void* heap_realloc(void*, size_t);
+void  heap_free(void*);
 
-#define malloc kheap_malloc
-#define calloc kheap_calloc
-#define realloc kheap_realloc
-#define free kheap_free
+#define malloc heap_malloc
+#define calloc heap_calloc
+#define realloc heap_realloc
+#define free heap_free
 #else
 void* malloc(size_t);
 void* calloc(size_t, size_t);

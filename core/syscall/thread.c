@@ -1,8 +1,8 @@
-#include <core/kheap.h>
 #include <core/process.h>
 #include <core/sched.h>
 #include <core/thread.h>
 #include <core/uthread.h>
+#include <libc/stdlib.h>
 
 #include "syscall_private.h"
 
@@ -124,7 +124,7 @@ syscall_result_t syscall_spawn_thread(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 	params.preferred_cpu    = NULL;
 	params.detached         = detached;
 	result                  = process_spawn_thread(process, detached ? NULL : &thread, &params);
-	kfree(name);
+	free(name);
 	if (result != PROCESS_THREAD_SPAWN_OK) return syscall_result_from_thread_spawn(result);
 
 	return syscall_result_ok(detached ? 0u : (uintptr_t)uthread_id(thread));

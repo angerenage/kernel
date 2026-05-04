@@ -3,9 +3,9 @@
 #include <string.h>
 
 void* realloc(void* ptr, size_t size) {
-	struct kheap_block* block;
-	size_t              current_payload;
-	void*               new_ptr;
+	struct heap_block* block;
+	size_t             current_payload;
+	void*              new_ptr;
 
 	if (ptr == NULL) return malloc(size);
 	if (size == 0) {
@@ -13,10 +13,10 @@ void* realloc(void* ptr, size_t size) {
 		return NULL;
 	}
 
-	block = (struct kheap_block*)((uint8_t*)ptr - kheap_header_size);
+	block = (struct heap_block*)((uint8_t*)ptr - heap_header_size);
 	if (!block_used(block)) return NULL;
 
-	current_payload = block_size(block) - kheap_header_size - kheap_footer_size;
+	current_payload = block_size(block) - heap_header_size - heap_footer_size;
 	if (size <= current_payload) return ptr;
 
 	new_ptr = malloc(size);

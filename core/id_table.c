@@ -1,6 +1,6 @@
 #include <core/id_table.h>
-#include <core/kheap.h>
 #include <core/lock.h>
+#include <libc/stdlib.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -44,7 +44,7 @@ static bool id_table_grow_locked(struct id_table* table, size_t min_capacity) {
 	if (new_capacity > SIZE_MAX / sizeof(*table->slots)) return false;
 
 	new_bytes = new_capacity * sizeof(*table->slots);
-	new_slots = krealloc(table->slots, new_bytes);
+	new_slots = realloc(table->slots, new_bytes);
 	if (new_slots == NULL) return false;
 
 	if (new_capacity > old_capacity) {
@@ -84,7 +84,7 @@ void id_table_deinit(struct id_table* table) {
 	table->slots    = NULL;
 	spinlock_unlock_irqrestore(&table->lock, state);
 
-	kfree(slots);
+	free(slots);
 }
 
 bool id_table_alloc(struct id_table* table, void* object, id_table_id_t* out_id) {

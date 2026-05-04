@@ -7,7 +7,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-static struct spinlock kernel_kheap_lock = SPINLOCK_INIT_CLASS("kheap_lock", SPINLOCK_ORDER_KHEAP, SPINLOCK_FLAG_NONE);
+static struct spinlock kernel_heap_lock = SPINLOCK_INIT_CLASS("heap_lock", SPINLOCK_ORDER_HEAP, SPINLOCK_FLAG_NONE);
 
 bool heap_grow_pages(size_t page_count, void** out_base) {
 	struct vmm_alloc_params params = {
@@ -27,9 +27,9 @@ size_t heap_page_size(void) {
 }
 
 void heap_lock(void) {
-	spinlock_lock(&kernel_kheap_lock);
+	spinlock_lock(&kernel_heap_lock);
 }
 
 void heap_unlock(void) {
-	spinlock_unlock(&kernel_kheap_lock);
+	spinlock_unlock(&kernel_heap_lock);
 }

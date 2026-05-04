@@ -1,7 +1,7 @@
 #include <core/address_transfer.h>
-#include <core/kheap.h>
 #include <core/sched.h>
 #include <core/vaddr_alloc.h>
+#include <libc/stdlib.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -65,16 +65,16 @@ syscall_result_t syscall_copy_string_arg(uintptr_t ptr_arg_index, uintptr_t stri
 		if (string == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, len_arg_index);
 	}
 	else {
-		string = kmalloc(string_len);
+		string = malloc(string_len);
 		if (string == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, len_arg_index);
 
 		transfer_result = address_space_copy_from(space, string_ptr, string, string_len);
 		if (transfer_result != ADDRESS_TRANSFER_OK) {
-			kfree(string);
+			free(string);
 			return syscall_result_from_address_transfer(transfer_result, ptr_arg_index);
 		}
 		if (string[string_len - 1u] != '\0') {
-			kfree(string);
+			free(string);
 			return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, len_arg_index);
 		}
 	}

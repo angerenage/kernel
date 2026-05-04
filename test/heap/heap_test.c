@@ -1,4 +1,4 @@
-#include "kheap_test.h"
+#include "heap_test.h"
 
 #include <core/pmm.h>
 
@@ -24,16 +24,16 @@ bool heap_grow_pages(size_t page_count, void** out_base) {
 	}
 }
 
-void init_test_kheap(uint8_t* arena, size_t arena_size) {
+void init_test_heap(uint8_t* arena, size_t arena_size) {
 	cr_assert_eq(((uintptr_t)arena & (PMM_PAGE_SIZE - 1u)), 0, "test arena must be page-aligned");
 	cr_assert_eq((arena_size & (PMM_PAGE_SIZE - 1u)), 0, "test arena size must be page-aligned");
 	grow_base     = arena;
 	grow_capacity = arena_size;
 	__atomic_store_n(&grow_offset, 0u, __ATOMIC_RELEASE);
 
-	cr_assert(kheap_init(), "kheap_init failed");
+	cr_assert(heap_init(), "heap_init failed");
 }
 
-bool is_kheap_aligned(const void* ptr) {
+bool is_heap_aligned(const void* ptr) {
 	return (((uintptr_t)ptr) & 0x0fu) == 0;
 }

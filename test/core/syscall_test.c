@@ -1,6 +1,6 @@
+#include <base/heap.h>
 #include <core/address_transfer.h>
 #include <core/cpu.h>
-#include <core/kheap.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/process.h>
@@ -82,7 +82,7 @@ static void syscall_test_init_process_environment(void) {
 	mock_paging_reset();
 	cr_assert(pmm_init(memory_map, sizeof(memory_map) / sizeof(memory_map[0]), 0), "pmm_init failed");
 	cr_assert(vmm_init(), "vmm_init failed");
-	cr_assert(kheap_init(), "kheap_init failed");
+	cr_assert(heap_init(), "heap_init failed");
 }
 
 static struct process* syscall_test_spawn_process(const char* name) {

@@ -16,8 +16,8 @@ base_test_lib = static_library(
 )
 
 hal_mock_sources = files(
-	'mocks/core/kheap.c',
-	'mocks/core/kheap_hooks.c',
+	'mocks/core/heap.c',
+	'mocks/core/heap_hooks.c',
 	'mocks/hal/clock.c',
 	'mocks/hal/cpu.c',
 	'mocks/hal/interrupts.c',
@@ -91,7 +91,7 @@ test_suites = [
 	{
 		'name': 'id_table',
 		'sources': files(
-			'kheap/kheap_test.c',
+			'heap/heap_test.c',
 			'core/id_table_test.c',
 		),
 		'suites': ['unit', 'core'],
@@ -180,13 +180,13 @@ test_suites = [
 		'suites': ['unit', 'memory'],
 	},
 	{
-		'name': 'kheap',
+		'name': 'heap',
 		'sources': files(
-			'kheap/kheap_test.c',
-			'kheap/basic.c',
-			'kheap/calloc_realloc.c',
-			'kheap/concurrency.c',
-			'kheap/growth.c',
+			'heap/heap_test.c',
+			'heap/basic.c',
+			'heap/calloc_realloc.c',
+			'heap/concurrency.c',
+			'heap/growth.c',
 		),
 		'suites': ['unit', 'memory'],
 	},

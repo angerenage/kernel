@@ -2,12 +2,12 @@
 #include <libc/stdlib.h>
 
 void free(void* ptr) {
-	struct kheap_block* block;
+	struct heap_block* block;
 
 	if (!heap_is_initialized() || ptr == NULL) return;
 	heap_lock();
 
-	block = (struct kheap_block*)((uint8_t*)ptr - kheap_header_size);
+	block = (struct heap_block*)((uint8_t*)ptr - heap_header_size);
 	if (!block_used(block)) {
 		heap_unlock();
 		return;

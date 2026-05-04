@@ -1,11 +1,11 @@
 #include <core/id_table.h>
-#include <core/kheap.h>
 #include <core/process.h>
 #include <core/sched.h>
 #include <core/spinlock.h>
 #include <core/thread.h>
 #include <core/uthread.h>
 #include <core/vmm.h>
+#include <libc/stdlib.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -127,7 +127,7 @@ enum process_thread_spawn_result process_spawn_thread(struct process* process, s
 		return process_thread_spawn_result_from_uthread(start_result);
 	}
 
-	thread = kmalloc(sizeof(*thread));
+	thread = malloc(sizeof(*thread));
 	if (thread == NULL) return PROCESS_THREAD_SPAWN_NO_MEMORY;
 	*thread = (struct uthread){
 		.user_stack_id   = VMM_ID_INVALID,
@@ -137,7 +137,7 @@ enum process_thread_spawn_result process_spawn_thread(struct process* process, s
 
 	thread_result = process_create_thread(process, thread, params);
 	if (thread_result != PROCESS_THREAD_SPAWN_OK) {
-		kfree(thread);
+		free(thread);
 		return thread_result;
 	}
 
@@ -219,14 +219,14 @@ enum process_result process_create(struct process** out_process, const char* nam
 	if (out_process == NULL) return PROCESS_INVALID_ARGUMENTS;
 	*out_process = NULL;
 
-	process = kmalloc(sizeof(*process));
+	process = malloc(sizeof(*process));
 	if (process == NULL) return PROCESS_NO_MEMORY;
 
 	memset(process, 0, sizeof(*process));
 	if (name != NULL) {
 		process->name = strdup(name);
 		if (process->name == NULL) {
-			kfree(process);
+			free(process);
 			return PROCESS_NO_MEMORY;
 		}
 	}
@@ -235,16 +235,16 @@ enum process_result process_create(struct process** out_process, const char* nam
 	thread_wait_queue_init(&process->join_wait_queue);
 
 	if (!id_table_alloc(&process_table, process, &pid)) {
-		kfree((void*)process->name);
-		kfree(process);
+		free((void*)process->name);
+		free(process);
 		return PROCESS_PID_EXHAUSTED;
 	}
 	process->pid = pid;
 
 	if (!vmm_user_address_space_init(&process->address_space)) {
 		(void)id_table_remove(&process_table, process->pid, NULL);
-		kfree((void*)process->name);
-		kfree(process);
+		free((void*)process->name);
+		free(process);
 		return PROCESS_ADDRESS_SPACE_FAILED;
 	}
 
@@ -392,9 +392,9 @@ bool process_destroy(struct process* process) {
 
 	vmm_address_space_deinit(&process->address_space);
 	(void)id_table_remove(&process_table, process->pid, NULL);
-	kfree((void*)process->name);
+	free((void*)process->name);
 	memset(process, 0, sizeof(*process));
-	kfree(process);
+	free(process);
 	return true;
 }
 

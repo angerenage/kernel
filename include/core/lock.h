@@ -22,7 +22,7 @@ enum spinlock_order {
 	SPINLOCK_ORDER_VADDR        = 40u,
 	SPINLOCK_ORDER_PAGING       = 50u,
 	SPINLOCK_ORDER_PMM          = 60u,
-	SPINLOCK_ORDER_KHEAP        = 70u,
+	SPINLOCK_ORDER_HEAP         = 70u,
 };
 
 /* Extra behavioral requirements that debug builds validate on lock acquisition. */

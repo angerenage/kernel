@@ -1,6 +1,5 @@
 #include <base/time.h>
 #include <core/cpu.h>
-#include <core/kheap.h>
 #include <core/kthread.h>
 #include <core/lock.h>
 #include <core/pmm.h>
@@ -9,6 +8,7 @@
 #include <core/vaddr_alloc.h>
 #include <core/vmm.h>
 #include <hal/clock.h>
+#include <libc/stdlib.h>
 #include <stddef.h>
 
 #define KTHREAD_REAPER_MAX_CPUS 64u
@@ -74,7 +74,7 @@ static void kthread_free(struct kthread* thread) {
 		(void)vmm_free(address_space_kernel(), thread->stack_id);
 		thread->stack_id = VMM_ID_INVALID;
 	}
-	kfree(thread);
+	free(thread);
 }
 
 static void kthread_reapers_init_once(void) {
@@ -214,7 +214,7 @@ static enum kthread_spawn_result kthread_spawn_internal(struct kthread** out_thr
 	if (entry == NULL) return KTHREAD_SPAWN_INVALID_ARGUMENTS;
 	if (!detached && out_thread == NULL) return KTHREAD_SPAWN_INVALID_ARGUMENTS;
 
-	thread = kmalloc(sizeof(*thread));
+	thread = malloc(sizeof(*thread));
 	if (thread == NULL) return KTHREAD_SPAWN_NO_MEMORY;
 
 	*thread = (struct kthread){

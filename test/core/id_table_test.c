@@ -3,7 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "../kheap/kheap_test.h"
+#include "../heap/heap_test.h"
 #include "../thread_test.h"
 
 #define ID_TABLE_TEST_HEAP_SIZE KiB(256)
@@ -13,7 +13,7 @@
 static void init_id_table_test_heap(void) {
 	_Alignas(4096) static uint8_t arena[ID_TABLE_TEST_HEAP_SIZE];
 
-	init_test_kheap(arena, sizeof(arena));
+	init_test_heap(arena, sizeof(arena));
 }
 
 Test(id_table, allocates_sequential_ids_and_supports_lookup) {

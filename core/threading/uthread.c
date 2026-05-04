@@ -1,6 +1,5 @@
 #include <core/cpu.h>
 #include <core/id_table.h>
-#include <core/kheap.h>
 #include <core/kthread.h>
 #include <core/pmm.h>
 #include <core/process.h>
@@ -9,6 +8,7 @@
 #include <core/uthread.h>
 #include <core/vaddr_alloc.h>
 #include <hal/userspace.h>
+#include <libc/stdlib.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -51,7 +51,7 @@ static void uthread_unregister_id(struct uthread* thread) {
 static void uthread_release_name(struct uthread* thread) {
 	if (thread == NULL) return;
 
-	kfree((void*)thread->thread.name);
+	free((void*)thread->thread.name);
 	thread->thread.name = NULL;
 }
 
@@ -148,7 +148,7 @@ static void uthread_free(struct uthread* thread) {
 	uthread_unregister_id(thread);
 	uthread_release_name(thread);
 	thread->process = NULL;
-	if (heap_allocated) kfree(thread);
+	if (heap_allocated) free(thread);
 }
 
 static void uthread_reapers_init_once(void) {
@@ -424,7 +424,7 @@ enum uthread_start_result uthread_spawn_detached(const struct uthread_start_para
 
 	if (params == NULL) return UTHREAD_START_INVALID_ARGUMENTS;
 
-	thread = kmalloc(sizeof(*thread));
+	thread = malloc(sizeof(*thread));
 	if (thread == NULL) return UTHREAD_START_NO_MEMORY;
 	*thread = (struct uthread){
 		.user_stack_id   = VMM_ID_INVALID,
@@ -494,7 +494,7 @@ bool uthread_deinit(struct uthread* thread) {
 	memset(thread, 0, sizeof(*thread));
 	thread->user_stack_id   = VMM_ID_INVALID;
 	thread->kernel_stack_id = VMM_ID_INVALID;
-	if (heap_allocated) kfree(thread);
+	if (heap_allocated) free(thread);
 	return true;
 }
 
