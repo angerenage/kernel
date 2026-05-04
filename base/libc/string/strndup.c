@@ -1,5 +1,5 @@
 #include <core/kheap.h>
-#include <libk/string.h>
+#include <string.h>
 
 char* strndup(const char* str, size_t size) {
 	size_t length = 0u;

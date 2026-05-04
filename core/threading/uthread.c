@@ -9,9 +9,9 @@
 #include <core/uthread.h>
 #include <core/vaddr_alloc.h>
 #include <hal/userspace.h>
-#include <libk/string.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 enum {
 	UTHREAD_KERNEL_STACK_PAGES = 4u,

@@ -1,11 +1,11 @@
 base_sources = files(
-	'libk/string/memcmp.c',
-	'libk/string/memcpy.c',
-	'libk/string/memmove.c',
-	'libk/string/memset.c',
-	'libk/string/strdup.c',
-	'libk/string/strndup.c',
-	'libk/string/strlen.c',
+	'libc/string/memcmp.c',
+	'libc/string/memcpy.c',
+	'libc/string/memmove.c',
+	'libc/string/memset.c',
+	'libc/string/strdup.c',
+	'libc/string/strndup.c',
+	'libc/string/strlen.c',
 	'math.c',
 	'time.c',
 )

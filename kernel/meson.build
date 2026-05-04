@@ -15,17 +15,17 @@ kernel_ld_args = [
 ]
 kernel_ld_args += platform_kernel_link_args
 
-kernel_inc = include_directories('../include/libk', '../include', '../')
+kernel_inc = include_directories('../include/libc', '../include', '../')
 
 kernel_format_sources = files(
-	'libk/format/format.c',
-	'libk/format/sprintf.c',
+	'libc/format/format.c',
+	'libc/format/sprintf.c',
 )
 
 kernel_libk_sources = files(
-	'libk/stdio/printf.c',
-	'libk/stdio/putchar.c',
-	'libk/stdio/puts.c',
+	'libc/stdio/printf.c',
+	'libc/stdio/putchar.c',
+	'libc/stdio/puts.c',
 )
 
 kernel_selftest_sources = files(

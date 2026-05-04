@@ -2,8 +2,8 @@
 #include <core/kheap.h>
 #include <core/sched.h>
 #include <core/vaddr_alloc.h>
-#include <libk/string.h>
 #include <stddef.h>
+#include <string.h>
 
 #include "syscall_private.h"
 
