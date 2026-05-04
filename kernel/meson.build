@@ -18,14 +18,15 @@ kernel_ld_args += platform_kernel_link_args
 kernel_inc = include_directories('../include/libc', '../include', '../')
 
 kernel_format_sources = files(
-	'libc/format/format.c',
-	'libc/format/sprintf.c',
+	'libk/format/format.c',
+	'libk/format/sprintf.c',
 )
 
 kernel_libk_sources = files(
-	'libc/stdio/printf.c',
-	'libc/stdio/putchar.c',
-	'libc/stdio/puts.c',
+	'libk/stdlib/heap.c',
+	'libk/stdio/printf.c',
+	'libk/stdio/putchar.c',
+	'libk/stdio/puts.c',
 )
 
 kernel_selftest_sources = files(
@@ -47,7 +48,6 @@ kernel_objs = base_sources + core_sources + kernel_format_sources + kernel_libk_
 	'src/boot/boot.c',
 	'src/boot/cpu_boot.c',
 	'src/init.c',
-	'src/kheap.c',
 	'src/boot/requests.c',
 ]
 if kernel_selftests

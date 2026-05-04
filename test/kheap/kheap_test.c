@@ -6,7 +6,7 @@ static uint8_t* grow_base;
 static size_t   grow_capacity;
 static size_t   grow_offset;
 
-bool kheap_grow_pages(size_t page_count, void** out_base) {
+bool heap_grow_pages(size_t page_count, void** out_base) {
 	size_t bytes  = page_count * PMM_PAGE_SIZE;
 	size_t offset = 0;
 

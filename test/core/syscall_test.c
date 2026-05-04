@@ -27,7 +27,7 @@ static uint8_t syscall_test_arena[SYSCALL_TEST_ARENA_SIZE] __attribute__((aligne
 static uint8_t syscall_test_heap[SYSCALL_TEST_HEAP_SIZE] __attribute__((aligned(PMM_PAGE_SIZE)));
 static size_t  syscall_test_heap_offset;
 
-bool kheap_grow_pages(size_t page_count, void** out_base) {
+bool heap_grow_pages(size_t page_count, void** out_base) {
 	size_t bytes;
 	size_t offset;
 

@@ -1,4 +1,4 @@
-#include <core/kheap.h>
+#include <libc/stdlib.h>
 #include <string.h>
 
 char* strndup(const char* str, size_t size) {
@@ -9,7 +9,7 @@ char* strndup(const char* str, size_t size) {
 		length++;
 	}
 
-	copy = kmalloc(length + 1u);
+	copy = malloc(length + 1u);
 	if (copy == NULL) return NULL;
 
 	memcpy(copy, str, length);

@@ -2,7 +2,7 @@ test_inc = include_directories('../include')
 criterion = dependency('criterion', native: true, required: true)
 threads = dependency('threads', native: true)
 
-test_common_c_args = ['--coverage', '-DCORE_LOCK_DEBUG=1']
+test_common_c_args = ['--coverage', '-DCORE_LOCK_DEBUG=1', '-DBASE_STDLIB_RENAME_ALLOC=1']
 test_common_link_args = ['--coverage']
 
 base_test_lib = static_library(
@@ -17,6 +17,7 @@ base_test_lib = static_library(
 
 hal_mock_sources = files(
 	'mocks/core/kheap.c',
+	'mocks/core/kheap_hooks.c',
 	'mocks/hal/clock.c',
 	'mocks/hal/cpu.c',
 	'mocks/hal/interrupts.c',

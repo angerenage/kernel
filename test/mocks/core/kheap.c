@@ -1,6 +1,6 @@
-#include <core/kheap.h>
+#include <base/heap.h>
 
-bool kheap_grow_pages(size_t page_count, void** out_base) {
+bool heap_grow_pages(size_t page_count, void** out_base) {
 	(void)page_count;
 	if (out_base != NULL) *out_base = NULL;
 	return false;

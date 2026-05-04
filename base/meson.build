@@ -6,6 +6,11 @@ base_sources = files(
 	'libc/string/strdup.c',
 	'libc/string/strndup.c',
 	'libc/string/strlen.c',
+	'libc/stdlib/calloc.c',
+	'libc/stdlib/free.c',
+	'libc/stdlib/malloc.c',
+	'libc/stdlib/realloc.c',
+	'heap.c',
 	'math.c',
 	'time.c',
 )

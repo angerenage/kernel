@@ -19,7 +19,6 @@ core_sources = files(
 	'syscall/thread.c',
 	'syscall/time.c',
 	'memory/address_transfer.c',
-	'memory/kheap.c',
 	'memory/pmm.c',
 	'memory/vaddr_alloc.c',
 	'memory/vmm.c',

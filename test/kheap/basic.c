@@ -1,4 +1,4 @@
-#include <string.h>
+#include <libc/string.h>
 
 #include "kheap_test.h"
 

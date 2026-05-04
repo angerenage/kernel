@@ -24,7 +24,7 @@ static uint8_t process_test_arena[PROCESS_TEST_ARENA_SIZE] __attribute__((aligne
 static uint8_t process_test_heap[PROCESS_TEST_HEAP_SIZE] __attribute__((aligned(PMM_PAGE_SIZE)));
 static size_t  process_test_heap_offset;
 
-bool kheap_grow_pages(size_t page_count, void** out_base) {
+bool heap_grow_pages(size_t page_count, void** out_base) {
 	size_t bytes;
 	size_t offset;
 
