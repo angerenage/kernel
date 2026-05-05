@@ -4,7 +4,7 @@
 
 #define EOF (-1)
 
-void putchar(char);
-void puts(const char*);
-void printf(const char* restrict format, ...);
-void sprintf(char* buffer, const char* restrict format, ...);
+int putchar(int);
+int puts(const char*);
+int printf(const char* restrict format, ...);
+int sprintf(char* restrict buffer, const char* restrict format, ...);

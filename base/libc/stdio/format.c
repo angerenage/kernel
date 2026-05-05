@@ -1,6 +1,6 @@
 #include "format.h"
 
-#include <hal/serial.h>
+#include <base/display.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -8,22 +8,17 @@
 struct format_ctx {
 	char*  buffer;
 	size_t index;
+	int    count;
 };
-
-static void serial_out_char(char ch) {
-	if (ch == '\n') {
-		hal_serial_write_char('\r');
-	}
-	hal_serial_write_char(ch);
-}
 
 static void emit_char(struct format_ctx* ctx, char ch) {
 	if (ctx->buffer) {
 		ctx->buffer[ctx->index++] = ch;
-		return;
 	}
-
-	serial_out_char(ch);
+	else {
+		base_display_write(&ch, 1u);
+	}
+	ctx->count++;
 }
 
 static void emit_string(struct format_ctx* ctx, const char* str, int precision) {
@@ -263,23 +258,27 @@ static void format_internal(struct format_ctx* ctx, const char* format, va_list*
 	}
 }
 
-void format_to_serial(const char* format, va_list* args) {
+int format_to_display(const char* format, va_list* args) {
 	struct format_ctx ctx = {
 		.buffer = NULL,
 		.index  = 0,
+		.count  = 0,
 	};
 
 	format_internal(&ctx, format, args);
+	return ctx.count;
 }
 
-void format_to_buffer(char* buffer, const char* format, va_list* args) {
-	if (!buffer) return;
+int format_to_buffer(char* buffer, const char* format, va_list* args) {
+	if (!buffer) return -1;
 
 	struct format_ctx ctx = {
 		.buffer = buffer,
 		.index  = 0,
+		.count  = 0,
 	};
 
 	format_internal(&ctx, format, args);
 	ctx.buffer[ctx.index] = '\0';
+	return ctx.count;
 }

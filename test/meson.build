@@ -16,8 +16,9 @@ base_test_lib = static_library(
 )
 
 hal_mock_sources = files(
-	'mocks/core/heap.c',
-	'mocks/core/heap_hooks.c',
+	'mocks/base/heap.c',
+	'mocks/base/heap_hooks.c',
+	'mocks/base/display.c',
 	'mocks/hal/clock.c',
 	'mocks/hal/cpu.c',
 	'mocks/hal/interrupts.c',
