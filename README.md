@@ -6,33 +6,57 @@ This project uses Meson to:
 - build a bootable Limine ISO image
 - build and run native Criterion tests
 
-## Code Layout
+## Project Organization
 
-The tree is split by role:
+The tree is split into layers so code can move toward the least specific place that can own it. The boundaries are meant to describe ownership, not a perfect dependency graph.
 
-- `base/`: freestanding leaf code with no HAL or boot dependencies
-- `core/`: reusable kernel services designed to stay testable in hosted mode
-- `kernel/`: integration and orchestration code that turns the core services into a running kernel
-- `platforms/<platform>/hal/`: platform-specific HAL implementations
-- `test/`: hosted tests and mocks used by those tests
+- `include/`: public headers for the layer contracts. `include/base/`, `include/core/`, `include/hal/`, and `include/kernel/` mirror the implementation layers.
+- `base/`: standalone freestanding support code. It currently presents a libc-like API and deliberately leaves some low-level operations to the environment that links it, so the kernel, future userspace, and hosted mocks can provide different implementations. It should not know about boot protocols, CPUs, interrupts, address spaces, or platform devices.
+- `core/`: reusable, platform-neutral kernel behavior. Code belongs here when it can be expressed in terms of core data structures and HAL contracts rather than a specific boot path, runtime composition choice, or architecture.
+- `kernel/`: live-kernel composition. Code belongs here when it is about turning reusable services into one booted kernel image: boot protocol adaptation, initialization order, kernel-wide policy, and integration between services that should otherwise stay independent.
+- `platforms/<platform>/`: concrete machine and architecture support. One platform backend is selected per build, and this is where entry code, context-switch details, and HAL implementations live.
+- `boot/`: Limine configuration template used when producing the bootable ISO.
+- `toolchain/`: Meson cross files for the supported kernel targets.
+- `test/`: native Criterion tests plus hosted mocks for dependencies that are supplied by the platform or kernel when the real image is linked.
 
-The practical distinction between `core` and `kernel` is:
+The top-level Meson file builds the image by collecting `base_sources`, `core_sources`, the selected `platform_kernel_objects`, and `kernel/` integration sources into `kernel.elf`, then packages that ELF into `kernel.iso`.
 
-- `core` contains service-level logic such as locking, CPU state, scheduling, PMM, VMM, and heap management, it should expose behavior that can be exercised outside the live kernel by replacing platform-facing dependencies with mocks
-- `kernel` contains the code that assembles, sequences, and drives those services inside the real kernel, it is where long-lived orchestration and kernel-specific policy live
+The HAL is the main contract between reusable kernel code and platform code. Public HAL interfaces live in `include/hal/`; `core` targets those interfaces, while the selected platform supplies the concrete behavior. Supported Meson platforms are `pc_x86_64`, `pc_aarch64`, `pc_riscv64`, and `pc_loongarch64`.
 
-The HAL split is:
+## Memory Model
 
-- `include/hal/` declares the contracts that isolate platform-specific operations
-- `platforms/<platform>/hal/` provides the concrete implementations of those contracts
-- `core` may include and call the HAL contracts, but it should not contain code that is itself tied to one concrete platform implementation
+Physical memory starts with the bootloader memory map. `pmm_init()` records the direct-map offset, reserves allocator metadata from usable memory, and manages contiguous 4 KiB page runs.
 
-Hosted testing works by linking `core` against mocks instead of the real platform HAL:
+Virtual memory is split into two related layers:
+
+- `address_space` in `include/core/vaddr_alloc.h` tracks ownership of virtual page ranges with a bitmap and stores the HAL paging handle for that space.
+- `vmm` in `include/core/vmm.h` tracks allocation records by ID, owns backing pages for mapped allocations, applies protection policy, supports lazy mappings, resolves eligible page faults, and releases metadata/backing during teardown.
+
+The kernel has a global managed virtual window at `MM_KERNEL_VMM_BASE` with size `MM_KERNEL_VMM_SIZE`. User processes receive separate address spaces over `MM_USER_VMM_BASE` and `MM_USER_VMM_SIZE`, with a null guard at the bottom. New hardware user address spaces inherit the kernel mappings required to enter and leave kernel mode.
+
+The address-transfer helpers validate user ranges, fault in lazy pages when requested, and copy data between kernel and user address spaces without syscalls reaching directly into untrusted pointers.
+
+## Execution Model
+
+The scheduler is per-CPU. Each CPU owns a run queue and a permanent idle thread. Regular threads carry a kernel stack, an address-space pointer, priority state, wait queue links, join state, cancellation flags, and an owner kind.
+
+Higher-level thread wrappers add ownership:
+
+- `kthread` allocates a kernel stack from the kernel VMM window and runs a kernel entry point.
+- `uthread` allocates both a user stack in its process address space and a kernel stack in the kernel address space, then uses the HAL userspace contract to build an initial user context.
+- `process` owns a user address space and links its user threads for lifecycle operations.
+
+The scheduler switches address spaces when the next thread requires a different one, falling back to the kernel address space for idle/kernel-only execution.
+
+## Testing Model
+
+Hosted Criterion tests are native executables. They link `base` or `core` sources with mocks instead of the real platform backend:
 
 - generic HAL mocks live in `test/mocks/hal/`
-- subsystem-specific mocks stay next to the tests that use them, such as the paging mock in `test/vmm/`
+- generic base mocks live in `test/mocks/base/`
+- subsystem-specific mocks stay next to the tests that need them, such as `test/vmm/mock_paging.c`
 
-That is how `core` can use HAL-defined operations while still remaining testable on a normal hosted system.
+This is why `core` can depend on HAL contracts and still remain testable outside the live kernel. In-kernel selftests under `kernel/test/` cover behavior that must run after boot-time memory and scheduler initialization.
 
 ## Syscall Results
 
@@ -241,15 +265,9 @@ Build-time control uses three options:
 - `--kernel-selftests-autorun` writes `kernel.selftest=1` into the generated image command line so they run automatically on boot
 - `--kernel-selftests-suite <name>` writes `kernel.selftest.suite=<name>` into the generated image command line and limits autorun to that suite
 
-The kernel runs selftests immediately after `pmm`, `vmm`, and `heap` initialization, prints per-test results to serial, and emits a final `selftest: result: PASS` or `FAIL` marker for automation.
+The kernel runs selftests from the bootstrap worker after `pmm`, `vmm`, `heap`, and scheduler initialization, prints per-test results to serial, and emits a final `selftest: result: PASS` or `FAIL` marker for automation.
 When a suite filter is present, only the matching registered suite is executed.
 
-The first in-kernel example is a `heap` smoke test that:
-
-- allocates two blocks from the real kernel heap
-- checks alignment and free-space accounting
-- frees and reallocates to verify block reuse
-- restores the heap state before continuing
 
 To add more in-kernel tests:
 
