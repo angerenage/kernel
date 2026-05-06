@@ -65,6 +65,11 @@ limine_config = configure_file(
 	configuration : limine_conf_data,
 )
 
+limine_module_args = []
+foreach userspace_program : userspace_programs
+	limine_module_args += ['--module', userspace_program]
+endforeach
+
 limine_image = custom_target('limine_image',
 	input : kernel_elf,
 	output : 'kernel.iso',
@@ -76,7 +81,7 @@ limine_image = custom_target('limine_image',
 		'--config', limine_config,
 		'--output', '@OUTPUT@',
 		'--builddir', meson.project_build_root(),
-	],
+	] + limine_module_args,
 	depend_files : [limine_config, limine_script[0]],
 	build_by_default : true
 )

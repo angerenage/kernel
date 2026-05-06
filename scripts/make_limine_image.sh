@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
 	cat <<'EOF'
-Usage: make_limine_image.sh --arch <arch> --kernel <path> --config <path> --output <path> --builddir <path>
+Usage: make_limine_image.sh --arch <arch> --kernel <path> --config <path> --output <path> --builddir <path> [--module <path>]...
 
 Required arguments:
   --arch        Limine target architecture (x86_64, aarch64, riscv64, loongarch64).
@@ -11,6 +11,7 @@ Required arguments:
   --config      Path to the limine.conf configuration file.
   --output      Path of the image file to generate.
   --builddir    Meson build directory used for caching helper assets.
+  --module      Path to a module file to embed. May be passed more than once.
 
 Optional arguments:
   --update-limine
@@ -47,6 +48,7 @@ OUTPUT_PATH=""
 BUILD_DIR=""
 TARGET_ARCH=""
 UPDATE_LIMINE=0
+MODULE_PATHS=()
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -68,6 +70,10 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--builddir)
 			BUILD_DIR="$2"
+			shift 2
+			;;
+		--module)
+			MODULE_PATHS+=( "$2" )
 			shift 2
 			;;
 		--update-limine)
@@ -92,6 +98,9 @@ done
 
 [[ -f "$KERNEL_PATH" ]] || error "kernel binary not found: $KERNEL_PATH"
 [[ -f "$CONFIG_PATH" ]] || error "limine configuration not found: $CONFIG_PATH"
+for module_path in "${MODULE_PATHS[@]}"; do
+	[[ -f "$module_path" ]] || error "module file not found: $module_path"
+done
 
 need_cmd git
 need_cmd make
@@ -338,6 +347,34 @@ mkdir -p "$iso_root/EFI/BOOT"
 log "copying kernel and configuration into staging area"
 cp -f "$kernel_abs" "${iso_root}/kernel.elf"
 cp -f "$config_abs" "${iso_root}/limine.conf"
+
+if (( ${#MODULE_PATHS[@]} > 0 )); then
+	log "copying Limine modules into staging area"
+	mkdir -p "${iso_root}/modules"
+	module_names=()
+
+	for module_path in "${MODULE_PATHS[@]}"; do
+		module_abs="$(abspath "$module_path")"
+		module_name="$(basename "$module_path")"
+
+		for existing_name in "${module_names[@]}"; do
+			if [[ "$existing_name" == "$module_name" ]]; then
+				error "duplicate module filename would collide in image: ${module_name}"
+			fi
+		done
+
+		cp -f "$module_abs" "${iso_root}/modules/${module_name}"
+		module_names+=( "$module_name" )
+	done
+
+	{
+		printf '\n'
+		for module_name in "${module_names[@]}"; do
+			printf '    module_path: boot():/modules/%s\n' "$module_name"
+			printf '    module_string: %s\n' "$module_name"
+		done
+	} >> "${iso_root}/limine.conf"
+fi
 
 log "copying Limine support files"
 for asset in "${required_assets[@]}"; do
