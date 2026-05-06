@@ -1,4 +1,5 @@
 #include <core/address_transfer.h>
+#include <core/pmm.h>
 #include <core/process.h>
 #include <core/sched.h>
 #include <core/thread.h>
@@ -86,8 +87,8 @@ static syscall_result_t syscall_result_from_address_transfer(enum address_transf
 	}
 }
 
-syscall_result_t syscall_vm_alloc(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                  uintptr_t arg5) {
+syscall_result_t syscall_vm_reserve(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
+                                    uintptr_t arg5) {
 	struct address_space*   space;
 	struct vmm_alloc_params params;
 	vmm_id_t                id   = VMM_ID_INVALID;
@@ -126,6 +127,37 @@ syscall_result_t syscall_vm_alloc(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 		}
 	}
 
+	return syscall_result_ok((uintptr_t)id);
+}
+
+syscall_result_t syscall_vm_reserve_at(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
+                                       uintptr_t arg5) {
+	struct address_space*   space;
+	struct vmm_alloc_params params;
+	vmm_id_t                id = VMM_ID_INVALID;
+	size_t                  page_count;
+
+	if (arg1 == 0u || (arg1 & (PMM_PAGE_SIZE - 1u)) != 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 1u);
+	if (arg2 == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 2u);
+	page_count = (size_t)arg2;
+	if ((uintptr_t)page_count != arg2) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 2u);
+	if (!syscall_vmm_prot_is_valid((vmm_prot_t)arg3)) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 3u);
+	if (!syscall_vmm_kind_is_valid((enum vmm_kind)arg4)) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 4u);
+	if ((arg5 & ~((uintptr_t)VMM_MAP_LAZY)) != 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 5u);
+
+	space = syscall_target_address_space(arg0);
+	if (space == NULL)
+		return syscall_result_error(arg0 == 0u ? SYSCALL_STATUS_UNAVAILABLE : SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+
+	params = (struct vmm_alloc_params){
+		.page_count  = page_count,
+		.align_pages = VMM_MIN_ALIGN_PAGES,
+		.prot        = (vmm_prot_t)arg3,
+		.kind        = (enum vmm_kind)arg4,
+		.guard_pages = 0u,
+		.map_flags   = (uint64_t)arg5,
+	};
+	if (!vmm_alloc_at(space, (void*)arg1, &params, &id)) return syscall_result_error(SYSCALL_STATUS_FAILED, 1u);
 	return syscall_result_ok((uintptr_t)id);
 }
 

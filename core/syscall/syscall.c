@@ -112,14 +112,15 @@ static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 	[SYSCALL_SET_THREAD_CANCEL_ENABLED] = syscall_set_thread_cancel_enabled,
 	[SYSCALL_TEST_THREAD_CANCEL]        = syscall_test_thread_cancel,
 
-	[SYSCALL_VM_ALLOC]     = syscall_vm_alloc,
-	[SYSCALL_VM_FREE]      = syscall_vm_free,
-	[SYSCALL_VM_MAP]       = syscall_vm_map,
-	[SYSCALL_VM_UNMAP]     = syscall_vm_unmap,
-	[SYSCALL_VM_PROTECT]   = syscall_vm_protect,
-	[SYSCALL_VM_QUERY]     = syscall_vm_query,
-	[SYSCALL_VM_COPY_FROM] = syscall_vm_copy_from,
-	[SYSCALL_VM_COPY_TO]   = syscall_vm_copy_to,
+	[SYSCALL_VM_RESERVE]    = syscall_vm_reserve,
+	[SYSCALL_VM_RESERVE_AT] = syscall_vm_reserve_at,
+	[SYSCALL_VM_FREE]       = syscall_vm_free,
+	[SYSCALL_VM_MAP]        = syscall_vm_map,
+	[SYSCALL_VM_UNMAP]      = syscall_vm_unmap,
+	[SYSCALL_VM_PROTECT]    = syscall_vm_protect,
+	[SYSCALL_VM_QUERY]      = syscall_vm_query,
+	[SYSCALL_VM_COPY_FROM]  = syscall_vm_copy_from,
+	[SYSCALL_VM_COPY_TO]    = syscall_vm_copy_to,
 };
 
 syscall_result_t syscall_dispatch(uintptr_t number, uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,

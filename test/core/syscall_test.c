@@ -714,7 +714,7 @@ Test(syscall, address_space_alloc_query_protect_unmap_map_and_free_current_proce
 	space = process_address_space(process);
 	cr_assert(vmm_alloc(space, &out_params, &out_id, &out_base), "failed to allocate syscall output page");
 
-	result = syscall_dispatch(SYSCALL_VM_ALLOC,
+	result = syscall_dispatch(SYSCALL_VM_RESERVE,
 	                          0u,
 	                          2u,
 	                          VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
@@ -762,6 +762,44 @@ Test(syscall, address_space_alloc_query_protect_unmap_map_and_free_current_proce
 	syscall_test_reset_state();
 }
 
+Test(syscall, address_space_alloc_at_maps_current_process_fixed_address) {
+	struct process*       process;
+	struct uthread*       main_thread;
+	struct address_space* space;
+	uintptr_t             fixed = MM_USER_VMM_BASE + 8u * (uintptr_t)PMM_PAGE_SIZE;
+	struct vmm_info       info;
+	syscall_result_t      result;
+	vmm_id_t              alloc_id;
+
+	syscall_test_init_process_environment();
+	process     = syscall_test_spawn_process("syscall/vm-fixed");
+	main_thread = process_main_thread(process);
+	cr_assert_not_null(main_thread);
+	sched_set_current(cpu_current(), &main_thread->thread);
+	space = process_address_space(process);
+
+	result = syscall_dispatch(
+		SYSCALL_VM_RESERVE_AT, 0u, fixed, 1u, VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER, VMM_KIND_GENERIC, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	alloc_id = (vmm_id_t)result.value;
+	cr_assert(vmm_query_id(space, alloc_id, &info), "fixed syscall allocation should be tracked");
+	cr_assert_eq((uintptr_t)info.base, fixed, "fixed syscall allocation base mismatch");
+	cr_assert_eq(info.state, VMM_STATE_MAPPED, "fixed syscall allocation should be mapped");
+
+	result = syscall_dispatch(
+		SYSCALL_VM_RESERVE_AT, 0u, fixed, 1u, VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER, VMM_KIND_GENERIC, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_FAILED);
+	cr_assert_eq(result.value, 1u);
+
+	result = syscall_dispatch(SYSCALL_VM_FREE, 0u, alloc_id, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert(!vmm_query_id(space, alloc_id, &info), "fixed syscall allocation should be freed");
+
+	thread_mark_zombie(&main_thread->thread);
+	cr_assert(process_destroy(process), "process_destroy failed");
+	syscall_test_reset_state();
+}
+
 Test(syscall, address_space_syscalls_can_target_another_process) {
 	struct process*         caller;
 	struct process*         target;
@@ -795,7 +833,7 @@ Test(syscall, address_space_syscalls_can_target_another_process) {
 	target_space = process_address_space(target);
 	cr_assert(vmm_alloc(caller_space, &out_params, &out_id, &out_base), "failed to allocate caller output page");
 
-	result = syscall_dispatch(SYSCALL_VM_ALLOC,
+	result = syscall_dispatch(SYSCALL_VM_RESERVE,
 	                          process_pid(target),
 	                          1u,
 	                          VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
@@ -836,7 +874,7 @@ Test(syscall, address_space_syscalls_reject_bad_targets_and_arguments) {
 
 	syscall_test_init_process_environment();
 
-	result = syscall_dispatch(SYSCALL_VM_ALLOC, 0u, 1u, VMM_PROT_READ | VMM_PROT_USER, VMM_KIND_GENERIC, 0u, 0u);
+	result = syscall_dispatch(SYSCALL_VM_RESERVE, 0u, 1u, VMM_PROT_READ | VMM_PROT_USER, VMM_KIND_GENERIC, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
 	cr_assert_eq(result.value, 0u);
 
@@ -846,19 +884,19 @@ Test(syscall, address_space_syscalls_reject_bad_targets_and_arguments) {
 	sched_set_current(cpu_current(), &main_thread->thread);
 
 	result =
-		syscall_dispatch(SYSCALL_VM_ALLOC, UINTPTR_MAX, 1u, VMM_PROT_READ | VMM_PROT_USER, VMM_KIND_GENERIC, 0u, 0u);
+		syscall_dispatch(SYSCALL_VM_RESERVE, UINTPTR_MAX, 1u, VMM_PROT_READ | VMM_PROT_USER, VMM_KIND_GENERIC, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 	cr_assert_eq(result.value, 0u);
 
-	result = syscall_dispatch(SYSCALL_VM_ALLOC, 0u, 0u, VMM_PROT_READ | VMM_PROT_USER, VMM_KIND_GENERIC, 0u, 0u);
+	result = syscall_dispatch(SYSCALL_VM_RESERVE, 0u, 0u, VMM_PROT_READ | VMM_PROT_USER, VMM_KIND_GENERIC, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 	cr_assert_eq(result.value, 1u);
 
-	result = syscall_dispatch(SYSCALL_VM_ALLOC, 0u, 1u, VMM_PROT_VALID_MASK << 1u, VMM_KIND_GENERIC, 0u, 0u);
+	result = syscall_dispatch(SYSCALL_VM_RESERVE, 0u, 1u, VMM_PROT_VALID_MASK << 1u, VMM_KIND_GENERIC, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 	cr_assert_eq(result.value, 2u);
 
-	result = syscall_dispatch(SYSCALL_VM_ALLOC, 0u, 1u, VMM_PROT_READ | VMM_PROT_USER, VMM_KIND_KERNEL_DATA, 0u, 0u);
+	result = syscall_dispatch(SYSCALL_VM_RESERVE, 0u, 1u, VMM_PROT_READ | VMM_PROT_USER, VMM_KIND_KERNEL_DATA, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 	cr_assert_eq(result.value, 3u);
 

@@ -31,8 +31,10 @@ syscall_result_t syscall_set_thread_cancel_enabled(uintptr_t arg0, uintptr_t, ui
 syscall_result_t syscall_test_thread_cancel(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 syscall_result_t syscall_gettid(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 
-syscall_result_t syscall_vm_alloc(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                  uintptr_t arg5);
+syscall_result_t syscall_vm_reserve(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
+                                    uintptr_t arg5);
+syscall_result_t syscall_vm_reserve_at(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
+                                       uintptr_t arg5);
 syscall_result_t syscall_vm_free(uintptr_t arg0, uintptr_t arg1, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 syscall_result_t syscall_vm_map(uintptr_t arg0, uintptr_t arg1, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 syscall_result_t syscall_vm_unmap(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t, uintptr_t, uintptr_t);
