@@ -1,4 +1,4 @@
-base_sources = files(
+base_libc_sources = files(
 	'libc/string/memcmp.c',
 	'libc/string/memcpy.c',
 	'libc/string/memmove.c',
@@ -16,7 +16,13 @@ base_sources = files(
 	'libc/stdio/putchar.c',
 	'libc/stdio/puts.c',
 	'libc/stdio/sprintf.c',
-	'heap.c',
-	'math.c',
-	'time.c',
+)
+
+base_sources = (
+	base_libc_sources
+	+ files(
+		'heap.c',
+		'math.c',
+		'time.c',
+	)
 )

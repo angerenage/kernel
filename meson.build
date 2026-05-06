@@ -37,6 +37,7 @@ platform_limine_arch = ''
 subdir('base')
 subdir('core')
 subdir('platforms/' + platform)
+subdir('userspace')
 subdir('kernel')
 
 if get_option('tests')
