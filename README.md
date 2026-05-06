@@ -1,4 +1,12 @@
-# Kernel Build and Run
+# Kernel
+
+## Introduction
+
+This repository is an experimental microkernel project. Kernel code should be the smallest possible layer that provides the necessary primitives for building higher-level services in userspace.
+
+The goal is to have a single codebase that can be built and run on multiple architectures, with a clean separation between reusable kernel logic and platform-specific behavior. The supported targets are `x86_64`, `aarch64`, `riscv64`, and `loongarch64`.
+
+## Build and Run
 
 This project uses Meson to:
 
@@ -12,8 +20,8 @@ The tree is split into layers so code can move toward the least specific place t
 
 - `include/`: public headers for the layer contracts. `include/base/`, `include/core/`, `include/hal/`, and `include/kernel/` mirror the implementation layers.
 - `base/`: standalone freestanding support code. It currently presents a libc-like API and deliberately leaves some low-level operations to the environment that links it, so the kernel, future userspace, and hosted mocks can provide different implementations. It should not know about boot protocols, CPUs, interrupts, address spaces, or platform devices.
-- `core/`: reusable, platform-neutral kernel behavior. Code belongs here when it can be expressed in terms of core data structures and HAL contracts rather than a specific boot path, runtime composition choice, or architecture.
-- `kernel/`: live-kernel composition. Code belongs here when it is about turning reusable services into one booted kernel image: boot protocol adaptation, initialization order, kernel-wide policy, and integration between services that should otherwise stay independent.
+- `core/`: reusable, platform-neutral kernel behavior. Code belongs here when it can be expressed in terms of core data structures and HAL contracts rather than a specific boot path, runtime policy, or architecture.
+- `kernel/`: live-kernel composition. Code belongs here when it turns reusable services into one booted kernel image: boot protocol adaptation, initialization order, kernel-wide policy, and integration between services that should otherwise stay independent.
 - `platforms/<platform>/`: concrete machine and architecture support. One platform backend is selected per build, and this is where entry code, context-switch details, and HAL implementations live.
 - `boot/`: Limine configuration template used when producing the bootable ISO.
 - `toolchain/`: Meson cross files for the supported kernel targets.
@@ -267,7 +275,6 @@ Build-time control uses three options:
 
 The kernel runs selftests from the bootstrap worker after `pmm`, `vmm`, `heap`, and scheduler initialization, prints per-test results to serial, and emits a final `selftest: result: PASS` or `FAIL` marker for automation.
 When a suite filter is present, only the matching registered suite is executed.
-
 
 To add more in-kernel tests:
 
