@@ -22,6 +22,15 @@ struct kernel_boot_address_space {
 	uintptr_t virtual_base;
 };
 
+/* Boot module loaded alongside the kernel image. */
+struct kernel_boot_module {
+	const char* path;
+	const char* name;
+	void*       address;
+	size_t      size;
+	uint32_t    media_type;
+};
+
 /* Entry point type used when asking the boot protocol to start an application processor. */
 typedef void (*kernel_boot_cpu_entry_t)(size_t cpu_index, void* arg);
 
@@ -39,6 +48,15 @@ const struct mem_range* kernel_boot_memmap(size_t* out_count);
 
 /* Return the raw kernel command line string, or NULL if none was supplied. */
 const char* kernel_boot_cmdline(void);
+
+/* Return the number of boot modules cached from the bootloader. */
+size_t kernel_boot_module_count(void);
+
+/* Return a boot module by stable bootloader order, or NULL if index is out of range. */
+const struct kernel_boot_module* kernel_boot_module_at(size_t index);
+
+/* Return the first boot module matching name. The module string is matched first, then the path basename. */
+const struct kernel_boot_module* kernel_boot_module_find(const char* name);
 
 /* Return the ACPI RSDP physical address when the bootloader reported it. */
 bool kernel_boot_rsdp_address(uintptr_t* out_address);

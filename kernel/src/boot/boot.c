@@ -2,11 +2,13 @@
 #include <kernel/boot.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "limine_requests.h"
 
 #define KERNEL_BOOT_MAX_CPUS 64u
 #define KERNEL_BOOT_MAX_MEM_RANGES 256u
+#define KERNEL_BOOT_MAX_MODULES 64u
 
 struct kernel_boot_cpu_launch {
 	kernel_boot_cpu_entry_t entry;
@@ -21,6 +23,8 @@ static bool                             boot_framebuffer_valid;
 static struct kernel_boot_address_space boot_address_space;
 static bool                             boot_address_space_valid;
 static const char*                      boot_cmdline;
+static struct kernel_boot_module        boot_modules[KERNEL_BOOT_MAX_MODULES];
+static size_t                           boot_module_count;
 static uintptr_t                        boot_rsdp_address;
 static bool                             boot_rsdp_valid;
 static struct kernel_boot_cpu_launch    boot_cpu_launch[KERNEL_BOOT_MAX_CPUS];
@@ -120,6 +124,16 @@ static bool kernel_boot_mp_supported(void) {
 }
 #endif
 
+static const char* kernel_boot_path_basename(const char* path) {
+	const char* basename = path;
+
+	if (path == NULL) return NULL;
+	for (const char* cursor = path; *cursor != '\0'; cursor++) {
+		if (*cursor == '/' || *cursor == '\\') basename = cursor + 1;
+	}
+	return basename;
+}
+
 #if defined(PLATFORM_PC_X86_64) || defined(PLATFORM_PC_AARCH64) || defined(PLATFORM_PC_RISCV64)
 static void kernel_boot_mp_entry(struct LIMINE_MP(info) * info) {
 	struct kernel_boot_cpu_launch* launch;
@@ -173,6 +187,30 @@ bool kernel_boot_init(void) {
 
 	boot_cmdline = (cmdline_req.response != NULL) ? cmdline_req.response->cmdline : NULL;
 
+	boot_module_count = 0u;
+	if (module_req.response != NULL && module_req.response->module_count > 0u) {
+		if (module_req.response->module_count > KERNEL_BOOT_MAX_MODULES) return false;
+		if (module_req.response->modules == NULL) return false;
+
+		boot_module_count = (size_t)module_req.response->module_count;
+		for (size_t i = 0; i < boot_module_count; i++) {
+			const struct limine_file* file = module_req.response->modules[i];
+			if (file == NULL || file->address == NULL) return false;
+
+			boot_modules[i] = (struct kernel_boot_module){
+				.path = file->path,
+#if LIMINE_API_REVISION >= 3
+				.name = file->string,
+#else
+				.name = file->cmdline,
+#endif
+				.address    = (void*)(uintptr_t)file->address,
+				.size       = (size_t)file->size,
+				.media_type = file->media_type,
+			};
+		}
+	}
+
 	if (fb_req.response != NULL && fb_req.response->framebuffer_count > 0u && fb_req.response->framebuffers != NULL &&
 	    fb_req.response->framebuffers[0] != NULL && fb_req.response->framebuffers[0]->address != NULL) {
 		const struct limine_framebuffer* fb = fb_req.response->framebuffers[0];
@@ -219,6 +257,30 @@ const struct mem_range* kernel_boot_memmap(size_t* out_count) {
 
 const char* kernel_boot_cmdline(void) {
 	return boot_cmdline;
+}
+
+size_t kernel_boot_module_count(void) {
+	if (!boot_initialized) return 0u;
+	return boot_module_count;
+}
+
+const struct kernel_boot_module* kernel_boot_module_at(size_t index) {
+	if (!boot_initialized || index >= boot_module_count) return NULL;
+	return &boot_modules[index];
+}
+
+const struct kernel_boot_module* kernel_boot_module_find(const char* name) {
+	if (!boot_initialized || name == NULL) return NULL;
+
+	for (size_t i = 0; i < boot_module_count; i++) {
+		const struct kernel_boot_module* module   = &boot_modules[i];
+		const char*                      basename = kernel_boot_path_basename(module->path);
+
+		if (module->name != NULL && strcmp(module->name, name) == 0) return module;
+		if (basename != NULL && strcmp(basename, name) == 0) return module;
+	}
+
+	return NULL;
 }
 
 bool kernel_boot_rsdp_address(uintptr_t* out_address) {

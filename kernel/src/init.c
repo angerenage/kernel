@@ -197,6 +197,27 @@ static void boot_log_memory_map(const struct mem_range* memory_map, size_t range
 	printf("kernel: total memory: %u MB\n", (unsigned)(total_mem / (1024 * 1024)));
 }
 
+static void boot_log_modules(void) {
+	size_t module_count = kernel_boot_module_count();
+
+	if (module_count == 0u) {
+		printf("kernel: no boot modules loaded\n");
+		return;
+	}
+
+	printf("kernel: boot modules:\n");
+	for (size_t i = 0; i < module_count; i++) {
+		const struct kernel_boot_module* module = kernel_boot_module_at(i);
+
+		if (module == NULL) continue;
+		printf("  name: %s, path: %s, address: %p, size: %zu bytes\n",
+		       module->name != NULL ? module->name : "(none)",
+		       module->path != NULL ? module->path : "(none)",
+		       module->address,
+		       module->size);
+	}
+}
+
 static void kernel_init_memory(const struct mem_range* memory_map, size_t range_count, uintptr_t direct_map_offset) {
 	if (!pmm_init(memory_map, range_count, direct_map_offset)) {
 		boot_fail("kernel: pmm_init failed");
@@ -305,6 +326,7 @@ void kernel_main(void) {
 
 	boot_log_framebuffer();
 	boot_log_memory_map(memory_map, memory_map_count);
+	boot_log_modules();
 	kernel_init_memory(memory_map, memory_map_count, boot_address_space.direct_map_offset);
 	if (!kernel_boot_cpu_mp_supported()) {
 		printf("kernel: SMP boot hooks unavailable on this platform, continuing with the BSP only\n");

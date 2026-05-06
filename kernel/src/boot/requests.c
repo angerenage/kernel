@@ -47,6 +47,13 @@ volatile struct limine_executable_cmdline_request cmdline_req = {
 	.revision = 0,
 };
 
+/* Boot modules */
+__attribute__((used, section(".limine_requests")))
+volatile struct limine_module_request module_req = {
+	.id       = LIMINE_MODULE_REQUEST,
+	.revision = 0,
+};
+
 /* RSDP request */
 __attribute__((used, section(".limine_requests")))
 volatile struct limine_rsdp_request rsdp_req = {

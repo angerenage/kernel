@@ -12,3 +12,4 @@ extern volatile struct limine_hhdm_request               hhdm_req;
 extern volatile struct limine_rsdp_request               rsdp_req;
 extern volatile struct limine_executable_cmdline_request cmdline_req;
 extern volatile struct limine_kernel_address_request     exec_addr_req;
+extern volatile struct limine_module_request             module_req;
