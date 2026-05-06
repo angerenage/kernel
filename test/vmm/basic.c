@@ -64,6 +64,50 @@ Test(vmm, allocates_queries_and_frees_mapped_ranges) {
 	cr_assert_eq(pmm_free_page_count(), free_before, "vmm_free leaked physical pages");
 }
 
+Test(vmm, allocates_at_exact_addresses_and_rejects_overlaps) {
+	_Alignas(4096) uint8_t  arena[KiB(256)];
+	struct vmm_alloc_params params = {
+		.page_count  = 2,
+		.align_pages = 1,
+		.prot        = VMM_PROT_READ | VMM_PROT_WRITE,
+		.kind        = VMM_KIND_GENERIC,
+		.map_flags   = VMM_MAP_LAZY,
+	};
+	struct vmm_info info;
+	vmm_id_t        fixed_id  = VMM_ID_INVALID;
+	vmm_id_t        mapped_id = VMM_ID_INVALID;
+	uintptr_t       fixed     = vmm_window_base() + 8u * (uintptr_t)PMM_PAGE_SIZE;
+	uintptr_t       mapped    = fixed + 4u * (uintptr_t)PMM_PAGE_SIZE;
+	size_t          free_before;
+
+	init_test_vmm(arena, sizeof(arena));
+	free_before = pmm_free_page_count();
+
+	cr_assert(vmm_alloc_at(address_space_kernel(), (void*)fixed, &params, &fixed_id),
+	          "vmm_alloc_at failed for a fixed lazy range");
+	cr_assert(vmm_query_id(address_space_kernel(), fixed_id, &info), "fixed allocation was not tracked");
+	cr_assert_eq((uintptr_t)info.base, fixed, "fixed allocation base mismatch");
+	cr_assert_eq(info.state, VMM_STATE_RESERVED, "fixed lazy allocation should start reserved");
+	cr_assert_eq(mock_paging_mapping_count(), 0, "fixed lazy allocation unexpectedly mapped pages");
+
+	cr_assert(!vmm_alloc_at(address_space_kernel(), (void*)(fixed + PMM_PAGE_SIZE), &params, &mapped_id),
+	          "vmm_alloc_at unexpectedly allowed an overlapping range");
+	cr_assert_eq(mapped_id, VMM_ID_INVALID, "failed fixed allocation changed the id");
+
+	params.map_flags = 0u;
+	cr_assert(vmm_alloc_at(address_space_kernel(), (void*)mapped, &params, &mapped_id),
+	          "vmm_alloc_at failed for a fixed eager range");
+	cr_assert(vmm_query_id(address_space_kernel(), mapped_id, &info), "fixed eager allocation was not tracked");
+	cr_assert_eq((uintptr_t)info.base, mapped, "fixed eager allocation base mismatch");
+	cr_assert_eq(info.state, VMM_STATE_MAPPED, "fixed eager allocation should start mapped");
+	cr_assert_eq(mock_paging_mapping_count(), 2, "fixed eager allocation did not map both pages");
+
+	cr_assert(vmm_free(address_space_kernel(), mapped_id), "failed to free fixed eager allocation");
+	cr_assert(vmm_free(address_space_kernel(), fixed_id), "failed to free fixed lazy allocation");
+	cr_assert_eq(mock_paging_mapping_count(), 0, "fixed allocations leaked mappings");
+	cr_assert_eq(pmm_free_page_count(), free_before, "fixed allocations leaked physical pages");
+}
+
 Test(vmm, supports_lazy_map_unmap_remap_and_reprotect) {
 	_Alignas(4096) uint8_t  arena[KiB(256)];
 	struct vmm_alloc_params params = {

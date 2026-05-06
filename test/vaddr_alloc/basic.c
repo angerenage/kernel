@@ -58,3 +58,26 @@ Test(vaddr_alloc, address_space_instances_reserve_independently) {
 	address_space_deinit(&first_space);
 	address_space_deinit(&second_space);
 }
+
+Test(vaddr_alloc, reserves_exact_ranges_and_rejects_collisions) {
+	_Alignas(4096) uint8_t arena[KiB(256)];
+	uintptr_t              fixed = 0x30000000ull + 8u * (uintptr_t)PMM_PAGE_SIZE;
+	uintptr_t              next  = 0;
+
+	init_test_vaddr_alloc(arena, sizeof(arena), 0x30000000ull, 32);
+
+	cr_assert(address_space_reserve_at(address_space_kernel(), fixed, 3), "failed to reserve exact range");
+	cr_assert_eq(address_space_free_page_count(address_space_kernel()), 29, "free count mismatch after exact reserve");
+	cr_assert(!address_space_reserve_at(address_space_kernel(), fixed + PMM_PAGE_SIZE, 1),
+	          "exact reserve unexpectedly allowed overlap");
+	cr_assert(!address_space_reserve_at(address_space_kernel(), fixed + 24u, 1),
+	          "exact reserve unexpectedly allowed an unaligned base");
+	cr_assert(!address_space_reserve_at(address_space_kernel(), fixed + 32u * (uintptr_t)PMM_PAGE_SIZE, 1),
+	          "exact reserve unexpectedly allowed an out-of-range base");
+
+	cr_assert(address_space_reserve(address_space_kernel(), 8, 1, &next), "allocator failed after exact reserve");
+	cr_assert_neq(next, fixed, "allocator reused an exact-reserved range");
+
+	cr_assert(address_space_release(address_space_kernel(), fixed, 3), "failed to release exact range");
+	cr_assert(address_space_reserve_at(address_space_kernel(), fixed, 3), "failed to reserve released exact range");
+}

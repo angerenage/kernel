@@ -91,6 +91,9 @@ bool vmm_is_initialized(void);
  */
 bool vmm_alloc(struct address_space* space, const struct vmm_alloc_params* params, vmm_id_t* out_id, void** out_base);
 
+/* Create a tracked virtual allocation whose usable base is exactly base. */
+bool vmm_alloc_at(struct address_space* space, void* base, const struct vmm_alloc_params* params, vmm_id_t* out_id);
+
 /* Destroy allocation metadata and backing owned by an explicit address space. */
 bool vmm_free(struct address_space* space, vmm_id_t id);
 

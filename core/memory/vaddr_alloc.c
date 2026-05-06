@@ -191,6 +191,43 @@ bool address_space_reserve(struct address_space* space, size_t count, size_t ali
 	return false;
 }
 
+bool address_space_reserve_at(struct address_space* space, uintptr_t base, size_t count) {
+	size_t start_page;
+	size_t end_page;
+
+	if (space == NULL || !space->initialized || count == 0) return false;
+	if ((base & (PMM_PAGE_SIZE - 1u)) != 0) return false;
+
+	spinlock_lock(&space->lock);
+	if (base < space->base) {
+		spinlock_unlock(&space->lock);
+		return false;
+	}
+
+	start_page = (size_t)((base - space->base) / (uintptr_t)PMM_PAGE_SIZE);
+	end_page   = start_page + count;
+	if (start_page >= space->total_pages || end_page > space->total_pages || end_page < start_page ||
+	    count > space->free_pages) {
+		spinlock_unlock(&space->lock);
+		return false;
+	}
+
+	for (size_t page = start_page; page < end_page; page++) {
+		if (bitmap_test(space->bitmap, page)) {
+			spinlock_unlock(&space->lock);
+			return false;
+		}
+	}
+
+	for (size_t page = start_page; page < end_page; page++) {
+		bitmap_set(space->bitmap, page);
+	}
+
+	space->free_pages -= count;
+	spinlock_unlock(&space->lock);
+	return true;
+}
+
 bool address_space_release(struct address_space* space, uintptr_t base, size_t count) {
 	size_t start_page;
 	size_t end_page;

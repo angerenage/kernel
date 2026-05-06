@@ -598,7 +598,8 @@ bool vmm_is_initialized(void) {
 	return initialized;
 }
 
-bool vmm_alloc(struct address_space* space, const struct vmm_alloc_params* params, vmm_id_t* out_id, void** out_base) {
+static bool vmm_alloc_internal(struct address_space* space, uintptr_t requested_base,
+                               const struct vmm_alloc_params* params, vmm_id_t* out_id, void** out_base) {
 	struct vmm_alloc_record* allocation;
 	struct irq_state         state;
 	uintptr_t                reserved_base = 0;
@@ -611,6 +612,7 @@ bool vmm_alloc(struct address_space* space, const struct vmm_alloc_params* param
 	if (out_base) *out_base = NULL;
 
 	if (!initialized || !space || !params || (!out_id && !out_base) || params->page_count == 0) return false;
+	if (requested_base != 0 && (requested_base & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	if (!address_space_is_initialized(space)) return false;
 	if (!vmm_prot_is_valid(params->prot)) return false;
 	if (!vmm_params_allowed_for_space(space, params)) return false;
@@ -630,9 +632,29 @@ bool vmm_alloc(struct address_space* space, const struct vmm_alloc_params* param
 	if (reserved_page_count == 0) return false;
 
 	state = spinlock_lock_irqsave(&vmm_lock);
-	if (!address_space_reserve(space, reserved_page_count, align_pages, &reserved_base)) {
-		spinlock_unlock_irqrestore(&vmm_lock, state);
-		return false;
+	if (requested_base == 0) {
+		if (!address_space_reserve(space, reserved_page_count, align_pages, &reserved_base)) {
+			spinlock_unlock_irqrestore(&vmm_lock, state);
+			return false;
+		}
+	}
+	else {
+		uint64_t guard_span;
+
+		if ((((requested_base / (uintptr_t)PMM_PAGE_SIZE) & (uintptr_t)(align_pages - 1u)) != 0)) {
+			spinlock_unlock_irqrestore(&vmm_lock, state);
+			return false;
+		}
+		if (mul_overflow_u64((uint64_t)guard_pages, PMM_PAGE_SIZE, &guard_span) ||
+		    (uint64_t)requested_base < guard_span) {
+			spinlock_unlock_irqrestore(&vmm_lock, state);
+			return false;
+		}
+		reserved_base = requested_base - (uintptr_t)guard_span;
+		if (!address_space_reserve_at(space, reserved_base, reserved_page_count)) {
+			spinlock_unlock_irqrestore(&vmm_lock, state);
+			return false;
+		}
 	}
 	base = reserved_base + guard_pages * (uintptr_t)PMM_PAGE_SIZE;
 	if (!address_space_range_contains(space, reserved_base, reserved_page_count) ||
@@ -674,6 +696,28 @@ bool vmm_alloc(struct address_space* space, const struct vmm_alloc_params* param
 	if (out_base) *out_base = (void*)base;
 	spinlock_unlock_irqrestore(&vmm_lock, state);
 	return true;
+}
+
+bool vmm_alloc(struct address_space* space, const struct vmm_alloc_params* params, vmm_id_t* out_id, void** out_base) {
+	return vmm_alloc_internal(space, 0u, params, out_id, out_base);
+}
+
+bool vmm_alloc_at(struct address_space* space, void* base, const struct vmm_alloc_params* params, vmm_id_t* out_id) {
+	void*    allocated_base = NULL;
+	vmm_id_t id             = VMM_ID_INVALID;
+
+	if (base == NULL) {
+		if (out_id) *out_id = VMM_ID_INVALID;
+		return false;
+	}
+	if (!vmm_alloc_internal(space, (uintptr_t)base, params, &id, &allocated_base)) return false;
+	if (out_id) *out_id = id;
+	if (allocated_base != base) {
+		(void)vmm_free(space, id);
+		if (out_id) *out_id = VMM_ID_INVALID;
+		return false;
+	}
+	return allocated_base == base;
 }
 
 bool vmm_free(struct address_space* space, vmm_id_t id) {

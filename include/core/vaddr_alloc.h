@@ -50,6 +50,9 @@ bool address_space_activate(struct address_space* space);
 /* Reserve count consecutive virtual pages with the requested page alignment. */
 bool address_space_reserve(struct address_space* space, size_t count, size_t align_pages, uintptr_t* out_base);
 
+/* Reserve count consecutive virtual pages at an exact virtual base. */
+bool address_space_reserve_at(struct address_space* space, uintptr_t base, size_t count);
+
 /* Release a previously reserved page range back to the address-space window. */
 bool address_space_release(struct address_space* space, uintptr_t base, size_t count);
 
