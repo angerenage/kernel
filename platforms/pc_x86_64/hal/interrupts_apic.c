@@ -3,7 +3,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 
 #include "interrupts_private.h"
 
@@ -287,7 +286,6 @@ bool apic_route_isa_irq(unsigned irq, unsigned vector) {
 	}
 
 	apic_active = true;
-	printf("kernel: x86_64 ioapic routed irq%u to vector %u (gsi=%u, lapic=%u)\n", irq, vector, routed_gsi, lapic_id);
 	return true;
 }
 

@@ -86,11 +86,6 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 
 	local_ready[cpu->index] = true;
 	cpu_interrupts_set_ready(cpu, true);
-	if (cpu->role == CPU_ROLE_BSP) {
-		printf("kernel: riscv64 local trap vector installed on cpu%zu (exc_sp=0x%016llx)\n",
-		       cpu->index,
-		       (unsigned long long)entry_state->stack_top);
-	}
 	return true;
 }
 

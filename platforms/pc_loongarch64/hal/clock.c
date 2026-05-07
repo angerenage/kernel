@@ -4,7 +4,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 
 #include "interrupts_private.h"
 
@@ -145,9 +144,6 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 	ecfg |= LOONGARCH64_TIMER_INT_MASK;
 	csrwr(ecfg, LOONGARCH64_CSR_ECFG);
 
-	printf("kernel: loongarch64 clock started (requested=%u Hz, actual=%u Hz, source=csr timer)\n",
-	       frequency_hz,
-	       clock_frequency_hz);
 	spinlock_unlock_irqrestore(&clock_lock, state);
 	return true;
 }

@@ -4,7 +4,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 
 #include "interrupts_private.h"
 
@@ -140,9 +139,6 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 	sie |= RISCV64_SIE_STIE;
 	write_sie(sie);
 
-	printf("kernel: riscv64 clock started (requested=%u Hz, actual=%u Hz, source=sbi time)\n",
-	       frequency_hz,
-	       clock_frequency_hz);
 	spinlock_unlock_irqrestore(&clock_lock, state);
 	return true;
 }

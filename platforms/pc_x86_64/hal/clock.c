@@ -4,7 +4,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 
 #include "interrupts_private.h"
 
@@ -31,7 +30,6 @@ static const char* clock_enable_timer_irq(void) {
 		return "ioapic/lapic";
 	}
 
-	printf("kernel: x86_64 ioapic timer route unavailable, falling back to legacy pic\n");
 	pic_unmask_irq(0u);
 	return "pic";
 }
@@ -82,11 +80,7 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 	__atomic_store_n(&clock_context, ctx, __ATOMIC_RELEASE);
 	__atomic_store_n(&clock_frequency_hz, actual_frequency_hz, __ATOMIC_RELEASE);
 	__atomic_store_n(&clock_running, true, __ATOMIC_RELEASE);
-	const char* route_name = clock_enable_timer_irq();
-	printf("kernel: x86_64 clock started (requested=%u Hz, actual=%u Hz, source=pit, route=%s)\n",
-	       frequency_hz,
-	       __atomic_load_n(&clock_frequency_hz, __ATOMIC_ACQUIRE),
-	       route_name);
+	(void)clock_enable_timer_irq();
 	spinlock_unlock_irqrestore(&clock_lock, state);
 	return true;
 }

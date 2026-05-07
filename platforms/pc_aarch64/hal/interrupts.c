@@ -57,11 +57,6 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 
 	local_ready[cpu->index] = true;
 	cpu_interrupts_set_ready(cpu, true);
-	if (cpu->role == CPU_ROLE_BSP) {
-		printf("kernel: aarch64 local vectors installed on cpu%zu (exc_sp=0x%016llx)\n",
-		       cpu->index,
-		       (unsigned long long)aarch64_exception_stack_top[cpu->index]);
-	}
 	return true;
 }
 

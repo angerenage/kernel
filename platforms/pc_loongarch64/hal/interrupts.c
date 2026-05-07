@@ -118,15 +118,6 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 
 	local_ready[cpu->index] = true;
 	cpu_interrupts_set_ready(cpu, true);
-	if (cpu->role == CPU_ROLE_BSP) {
-		printf("kernel: loongarch64 local trap entries installed on cpu%zu (eentry=%p tlbrentry=%p merrentry=%p "
-		       "exc_sp=%p)\n",
-		       cpu->index,
-		       (void*)trap_entry,
-		       (void*)tlbr_entry,
-		       (void*)merr_entry,
-		       (void*)loongarch64_exception_stack_top);
-	}
 	return true;
 }
 

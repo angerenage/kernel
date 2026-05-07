@@ -213,7 +213,6 @@ bool hal_interrupts_init_global(void) {
 	__asm__ volatile("lidt %0" : : "m"(idtr));
 	pic_init();
 	global_ready = true;
-	printf("kernel: x86_64 interrupt globals installed (cs=0x%04x)\n", kernel_code_selector);
 	return true;
 }
 
@@ -236,11 +235,6 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 
 	local_ready[cpu->index] = true;
 	cpu_interrupts_set_ready(cpu, true);
-	if (cpu->role == CPU_ROLE_BSP) {
-		printf("kernel: x86_64 local interrupts ready on cpu%zu (ist=0x%016llx)\n",
-		       cpu->index,
-		       (unsigned long long)x86_tss[cpu->index].ist1);
-	}
 	return true;
 }
 
