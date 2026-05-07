@@ -287,3 +287,9 @@ bool hal_paging_query(const struct hal_address_space* space, uintptr_t virt, uin
 	spinlock_unlock_irqrestore(&paging_lock, state);
 	return true;
 }
+
+void hal_paging_sync_executable_range(void* address, size_t size) {
+	(void)address;
+	(void)size;
+	__asm__ volatile("fence.i" : : : "memory");
+}

@@ -5,14 +5,16 @@
 
 enum {
 	AARCH64_USER_STACK_ALIGNMENT = 16u,
+	AARCH64_USER_SPSR_EL0T       = 0x3c0u,
 	AARCH64_THREAD_CTX_X19       = 0,
 	AARCH64_THREAD_CTX_X20,
 	AARCH64_THREAD_CTX_X21,
+	AARCH64_THREAD_CTX_X22,
 };
 
 extern void aarch64_userspace_enter(void);
 
-_Static_assert(HAL_CPU_THREAD_CONTEXT_SPILL_WORDS > AARCH64_THREAD_CTX_X21,
+_Static_assert(HAL_CPU_THREAD_CONTEXT_SPILL_WORDS > AARCH64_THREAD_CTX_X22,
                "aarch64 userspace spill area is too small");
 
 bool hal_userspace_thread_context_init(struct thread_context* context, uintptr_t kernel_stack_top, uintptr_t user_entry,
@@ -32,5 +34,6 @@ bool hal_userspace_thread_context_init(struct thread_context* context, uintptr_t
 	context->spill[AARCH64_THREAD_CTX_X19] = user_entry;
 	context->spill[AARCH64_THREAD_CTX_X20] = user_arg;
 	context->spill[AARCH64_THREAD_CTX_X21] = user_sp;
+	context->spill[AARCH64_THREAD_CTX_X22] = AARCH64_USER_SPSR_EL0T;
 	return true;
 }

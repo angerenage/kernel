@@ -3,7 +3,9 @@
 #include <core/kthread.h>
 #include <core/mm.h>
 #include <core/pmm.h>
+#include <core/process.h>
 #include <core/sched.h>
+#include <core/uthread.h>
 #include <core/vmm.h>
 #include <hal/clock.h>
 #include <hal/hcf.h>
@@ -11,6 +13,7 @@
 #include <hal/serial.h>
 #include <kernel/boot.h>
 #include <kernel/cpu_boot.h>
+#include <kernel/elf_loader.h>
 #include <libc/stdlib.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -49,6 +52,70 @@ static void boot_print_tick_duration(uint64_t ticks) {
 	}
 
 	printf("%llu.%03llu s", (unsigned long long)seconds, (unsigned long long)millis);
+}
+
+static const char* kernel_elf_load_result_string(enum kernel_elf_load_result result) {
+	switch (result) {
+	case KERNEL_ELF_LOAD_OK:
+		return "ok";
+	case KERNEL_ELF_LOAD_INVALID_ARGUMENTS:
+		return "invalid arguments";
+	case KERNEL_ELF_LOAD_BAD_FORMAT:
+		return "bad format";
+	case KERNEL_ELF_LOAD_UNSUPPORTED:
+		return "unsupported";
+	case KERNEL_ELF_LOAD_NO_MEMORY:
+		return "no memory";
+	case KERNEL_ELF_LOAD_MAP_FAILED:
+		return "map failed";
+	case KERNEL_ELF_LOAD_COPY_FAILED:
+		return "copy failed";
+	case KERNEL_ELF_LOAD_START_FAILED:
+		return "start failed";
+	}
+	return "unknown";
+}
+
+static void kernel_launch_init_process(void) {
+	const struct kernel_boot_module* module;
+	struct kernel_elf_process        loaded = {0};
+	struct uthread*                  main_thread;
+	enum kernel_elf_load_result      load_result;
+	enum process_thread_spawn_result start_result;
+
+	module = kernel_boot_module_find("init.elf");
+	if (module == NULL) {
+		printf("kernel: init.elf module not found\n");
+		return;
+	}
+
+	load_result = kernel_elf_load_process(module, "init", &loaded);
+	if (load_result != KERNEL_ELF_LOAD_OK) {
+		printf("kernel: init ELF load failed: %s\n", kernel_elf_load_result_string(load_result));
+		return;
+	}
+
+	main_thread  = NULL;
+	start_result = process_start_main_thread(loaded.process,
+	                                         &main_thread,
+	                                         &(const struct process_thread_params){
+												 .name             = "init/main",
+												 .user_entry       = loaded.entry,
+												 .user_arg         = 0u,
+												 .user_stack_pages = UTHREAD_DEFAULT_USER_STACK_PAGES,
+												 .preferred_cpu    = cpu_current(),
+												 .detached         = false,
+											 });
+	if (start_result != PROCESS_THREAD_SPAWN_OK) {
+		(void)process_destroy(loaded.process);
+		printf("kernel: init thread start failed: %u\n", (unsigned)start_result);
+		return;
+	}
+
+	printf("kernel: launched init pid=%llu entry=%p thread=%llu\n",
+	       (unsigned long long)process_pid(loaded.process),
+	       (void*)loaded.entry,
+	       (unsigned long long)uthread_id(main_thread));
 }
 
 static void boot_log_scheduler_uptime(uint64_t elapsed_seconds) {
@@ -109,6 +176,9 @@ static void kernel_bootstrap_worker_entry(void* arg) {
 		boot_fail("kernel: selftests failed");
 	}
 #endif
+
+	kernel_launch_init_process();
+	sched_yield();
 
 	printf("kernel: bootstrap worker completed\n");
 }

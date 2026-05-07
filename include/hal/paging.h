@@ -56,3 +56,6 @@ bool hal_paging_unmap(struct hal_address_space* space, uintptr_t virt);
 
 /* Resolve an existing mapping, returning the translated physical address and reconstructed HAL flags. */
 bool hal_paging_query(const struct hal_address_space* space, uintptr_t virt, uintptr_t* out_phys, uint64_t* out_flags);
+
+/* Make bytes written through a kernel mapping visible to instruction fetch. */
+void hal_paging_sync_executable_range(void* address, size_t size);
