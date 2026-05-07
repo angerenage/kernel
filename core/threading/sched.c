@@ -498,6 +498,8 @@ void sched_set_current(struct cpu* cpu, struct thread* thread) {
 	if (cpu == NULL) return;
 
 	cpu->current_thread = thread;
+	cpu->kernel_entry_stack_top =
+		thread != NULL && thread->kernel_stack_top != 0u ? thread->kernel_stack_top : cpu->boot_stack_top;
 	if (thread != NULL) thread_mark_running(thread, cpu);
 	sched_set_cpu_activity(cpu, sched_activity_for_thread(thread));
 }

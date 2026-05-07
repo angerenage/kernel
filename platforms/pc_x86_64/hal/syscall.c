@@ -1,12 +1,21 @@
+#include <core/cpu.h>
 #include <core/syscall.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "interrupts_private.h"
 
 #define X86_RFLAGS_INTERRUPT_ENABLE (1ull << 9)
 #define X86_RFLAGS_DIRECTION (1ull << 10)
+#define X86_CPU_KERNEL_ENTRY_STACK_TOP_OFFSET 40u
+#define X86_CPU_SYSCALL_USER_STACK_OFFSET 48u
 
 extern void x86_64_syscall_entry(void);
+
+_Static_assert(offsetof(struct cpu, kernel_entry_stack_top) == X86_CPU_KERNEL_ENTRY_STACK_TOP_OFFSET,
+               "x86_64 syscall asm kernel entry stack offset mismatch");
+_Static_assert(offsetof(struct cpu, syscall_user_stack) == X86_CPU_SYSCALL_USER_STACK_OFFSET,
+               "x86_64 syscall asm user stack offset mismatch");
 
 void x86_64_syscall_init(void) {
 	uint64_t star = ((uint64_t)X86_GDT_KERNEL_CODE_SELECTOR << 32) | ((uint64_t)X86_GDT_USER_COMPAT_SELECTOR << 48);

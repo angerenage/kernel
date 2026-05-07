@@ -43,6 +43,8 @@ struct cpu {
 	enum cpu_role  role;
 	enum cpu_state state;
 	struct thread* current_thread;
+	uintptr_t      kernel_entry_stack_top;
+	uintptr_t      syscall_user_stack;
 	bool           reschedule_requested;
 	bool           interrupts_ready;
 	uint32_t       irq_disable_depth;
