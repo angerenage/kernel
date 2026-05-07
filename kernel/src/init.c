@@ -12,9 +12,9 @@
 #include <hal/interrupts.h>
 #include <hal/serial.h>
 #include <kernel/boot.h>
+#include <kernel/boot_diagnostics.h>
 #include <kernel/cpu_boot.h>
 #include <kernel/elf_loader.h>
-#include <libc/stdlib.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -41,18 +41,7 @@ static uint64_t          boot_timer_reported_seconds;
 static size_t            boot_timer_report_lines;
 static uint32_t          boot_timer_frequency_hz;
 static bool              boot_timer_started;
-
-static void boot_print_tick_duration(uint64_t ticks) {
-	uint64_t seconds = 0u;
-	uint64_t millis  = 0u;
-
-	if (boot_timer_frequency_hz != 0u) {
-		seconds = ticks / boot_timer_frequency_hz;
-		millis  = ((ticks % boot_timer_frequency_hz) * 1000u) / boot_timer_frequency_hz;
-	}
-
-	printf("%llu.%03llu s", (unsigned long long)seconds, (unsigned long long)millis);
-}
+static bool              boot_diagnostics_enabled;
 
 static const char* kernel_elf_load_result_string(enum kernel_elf_load_result result) {
 	switch (result) {
@@ -112,64 +101,16 @@ static void kernel_launch_init_process(void) {
 		return;
 	}
 
-	printf("kernel: launched init pid=%llu entry=%p thread=%llu\n",
-	       (unsigned long long)process_pid(loaded.process),
-	       (void*)loaded.entry,
-	       (unsigned long long)uthread_id(main_thread));
-}
-
-static void boot_log_scheduler_uptime(uint64_t elapsed_seconds) {
-	struct sched_stats stats;
-	size_t             cpu_total = cpu_count();
-
-	sched_get_stats(&stats);
-	if (boot_timer_report_lines != 0u) {
-		for (size_t i = 0; i < boot_timer_report_lines; i++) {
-			printf("\r\033[2K");
-			if (i + 1u != boot_timer_report_lines) printf("\033[1A");
-		}
-		printf("\r");
+	if (boot_diagnostics_enabled) {
+		printf("kernel: launched init pid=%llu entry=%p thread=%llu\n",
+		       (unsigned long long)process_pid(loaded.process),
+		       (void*)loaded.entry,
+		       (unsigned long long)uthread_id(main_thread));
 	}
-
-	printf("kernel: uptime %llu s [sched cs=%llu preempt=%llu yield=%llu]",
-	       (unsigned long long)elapsed_seconds,
-	       (unsigned long long)stats.context_switch_count,
-	       (unsigned long long)stats.timeslice_preempt_count,
-	       (unsigned long long)stats.yield_count);
-	for (size_t i = 0; i < cpu_total; i++) {
-		struct cpu*            cpu = cpu_by_index(i);
-		struct sched_cpu_stats cpu_stats;
-
-		if (cpu == NULL || !sched_get_cpu_stats(cpu, &cpu_stats)) continue;
-
-		printf("\n  cpu%zu: run=", cpu->index);
-		boot_print_tick_duration(cpu_stats.thread_ticks);
-		printf(" idle=");
-		boot_print_tick_duration(cpu_stats.idle_ticks);
-		printf(" sched=");
-		boot_print_tick_duration(cpu_stats.kernel_ticks);
-		printf(" cs=%llu preempt=%llu yield=%llu",
-		       (unsigned long long)cpu_stats.context_switch_count,
-		       (unsigned long long)cpu_stats.timeslice_preempt_count,
-		       (unsigned long long)cpu_stats.yield_count);
-	}
-
-	boot_timer_report_lines = 1u + cpu_total;
 }
 
 static void kernel_bootstrap_worker_entry(void* arg) {
 	(void)arg;
-
-	printf("kernel: bootstrap worker running on cpu%zu\n", cpu_index());
-
-	void* block = malloc(128u);
-	if (block == NULL) {
-		printf("kernel: bootstrap worker heap allocation failed\n");
-		return;
-	}
-
-	printf("kernel: bootstrap worker allocated 128 bytes at %p\n", block);
-	free(block);
 
 #if KERNEL_SELFTESTS_ENABLED
 	if (kernel_selftests_requested() && !kernel_selftests_run()) {
@@ -179,8 +120,6 @@ static void kernel_bootstrap_worker_entry(void* arg) {
 
 	kernel_launch_init_process();
 	sched_yield();
-
-	printf("kernel: bootstrap worker completed\n");
 }
 
 static void boot_clock_tick(void* ctx) {
@@ -193,6 +132,9 @@ static void boot_clock_tick(void* ctx) {
 		if (cpu == NULL || cpu == cpu_current() || cpu_state_get(cpu) != CPU_STATE_ONLINE) continue;
 		sched_tick_remote(cpu);
 	}
+
+	if (!boot_diagnostics_enabled) return;
+
 	boot_timer_ticks++;
 	if (boot_timer_frequency_hz == 0u) return;
 
@@ -200,14 +142,14 @@ static void boot_clock_tick(void* ctx) {
 		boot_timer_started          = true;
 		boot_timer_origin_ticks     = boot_timer_ticks;
 		boot_timer_reported_seconds = 0u;
-		boot_log_scheduler_uptime(0u);
+		kernel_boot_diagnostics_scheduler_uptime(0u, boot_timer_frequency_hz, &boot_timer_report_lines);
 		return;
 	}
 
 	uint64_t elapsed_seconds = (boot_timer_ticks - boot_timer_origin_ticks) / boot_timer_frequency_hz;
 	if (elapsed_seconds != boot_timer_reported_seconds) {
 		boot_timer_reported_seconds = elapsed_seconds;
-		boot_log_scheduler_uptime(elapsed_seconds);
+		kernel_boot_diagnostics_scheduler_uptime(elapsed_seconds, boot_timer_frequency_hz, &boot_timer_report_lines);
 	}
 }
 
@@ -225,90 +167,18 @@ static void boot_start_timer_counter(void) {
 	}
 }
 
-static void boot_log_framebuffer(void) {
-	struct kernel_boot_framebuffer fb;
-
-	if (!kernel_boot_framebuffer_get(&fb)) {
-		printf("kernel: no framebuffer available, continuing in headless mode\n");
-		return;
-	}
-
-	printf(
-		"kernel: framebuffer available (%ux%u, %u bpp)\n", (unsigned)fb.width, (unsigned)fb.height, (unsigned)fb.bpp);
-
-	for (uint32_t x = 0; x < fb.width; x++) {
-		for (uint32_t y = 0; y < fb.height; y++) {
-			uint32_t  red        = x * 255u / (uint32_t)fb.width;
-			uint32_t  green      = y * 255u / (uint32_t)fb.height;
-			uint32_t  blue       = 64u;
-			uint8_t*  pixel_addr = (uint8_t*)fb.address + (size_t)y * fb.pitch + (size_t)x * ((size_t)fb.bpp / 8u);
-			uint32_t* pixel      = (uint32_t*)pixel_addr;
-
-			*pixel = (red << 16) | (green << 8) | blue;
-		}
-	}
-}
-
-static void boot_log_memory_map(const struct mem_range* memory_map, size_t range_count) {
-	uint64_t total_mem = 0;
-
-	printf("kernel: memory map entries:\n");
-	for (size_t i = 0; i < range_count; i++) {
-		const struct mem_range* entry = &memory_map[i];
-
-		if (entry->type == MEM_RANGE_USABLE) total_mem += entry->length;
-
-		printf("  base: %p, length: %p, type: %s\n",
-		       (void*)entry->base,
-		       (void*)(uintptr_t)entry->length,
-		       mem_range_type_str(entry->type));
-	}
-
-	printf("kernel: total memory: %u MB\n", (unsigned)(total_mem / (1024 * 1024)));
-}
-
-static void boot_log_modules(void) {
-	size_t module_count = kernel_boot_module_count();
-
-	if (module_count == 0u) {
-		printf("kernel: no boot modules loaded\n");
-		return;
-	}
-
-	printf("kernel: boot modules:\n");
-	for (size_t i = 0; i < module_count; i++) {
-		const struct kernel_boot_module* module = kernel_boot_module_at(i);
-
-		if (module == NULL) continue;
-		printf("  name: %s, path: %s, address: %p, size: %zu bytes\n",
-		       module->name != NULL ? module->name : "(none)",
-		       module->path != NULL ? module->path : "(none)",
-		       module->address,
-		       module->size);
-	}
-}
-
 static void kernel_init_memory(const struct mem_range* memory_map, size_t range_count, uintptr_t direct_map_offset) {
 	if (!pmm_init(memory_map, range_count, direct_map_offset)) {
 		boot_fail("kernel: pmm_init failed");
 	}
 
-	printf("kernel: pmm initialized with %zu usable ranges, %zu/%zu pages free\n",
-	       pmm_managed_range_count(),
-	       pmm_free_page_count(),
-	       pmm_total_page_count());
-
 	if (!vmm_init()) {
 		boot_fail("kernel: vmm_init failed");
 	}
 
-	printf("kernel: vmm initialized for window %p (%zu pages)\n", (void*)vmm_window_base(), vmm_window_page_count());
-
 	if (!heap_init()) {
 		boot_fail("kernel: heap_init failed");
 	}
-
-	printf("kernel: heap initialized with %zu/%zu bytes free\n", heap_free_bytes(), heap_total_bytes());
 }
 
 static void kernel_bootstrap_worker_handle_spawn_failure(enum kthread_spawn_result result) {
@@ -347,14 +217,12 @@ static void kernel_run_bootstrap_worker(void) {
 		return;
 	}
 
-	printf("kernel: starting bootstrap worker on cpu%zu\n", cpu->index);
+	if (boot_diagnostics_enabled) printf("kernel: starting bootstrap worker on cpu%zu\n", cpu->index);
 	sched_yield();
 
 	if (!thread_is_terminated(&worker->thread)) {
 		boot_fail("kernel: bootstrap worker returned without exiting");
 	}
-	printf("kernel: bootstrap worker exited with code %llu\n", (unsigned long long)worker->thread.exit_code);
-
 	if (!kthread_destroy(worker)) {
 		boot_fail("kernel: bootstrap worker reclaim failed");
 	}
@@ -372,7 +240,6 @@ void kernel_main(void) {
 	}
 
 	hal_serial_init();
-	printf("kernel: entering kernel_main\n");
 
 	if (!kernel_cpu_boot_init((uintptr_t)stack_bottom, (uintptr_t)stack_top)) {
 		boot_fail("kernel: kernel_cpu_boot_init failed");
@@ -394,10 +261,15 @@ void kernel_main(void) {
 	if (memory_map == NULL || memory_map_count == 0u) boot_fail("kernel: memory map unavailable");
 	if (!kernel_boot_address_space_get(&boot_address_space)) boot_fail("kernel: boot address space unavailable");
 
-	boot_log_framebuffer();
-	boot_log_memory_map(memory_map, memory_map_count);
-	boot_log_modules();
+	boot_diagnostics_enabled = kernel_boot_diagnostics_enabled();
+	if (boot_diagnostics_enabled) {
+		printf("kernel: entering kernel_main\n");
+		kernel_boot_diagnostics_framebuffer();
+		kernel_boot_diagnostics_memory_map(memory_map, memory_map_count);
+		kernel_boot_diagnostics_modules();
+	}
 	kernel_init_memory(memory_map, memory_map_count, boot_address_space.direct_map_offset);
+	if (boot_diagnostics_enabled) kernel_boot_diagnostics_memory_summary();
 	if (!kernel_boot_cpu_mp_supported()) {
 		printf("kernel: SMP boot hooks unavailable on this platform, continuing with the BSP only\n");
 	}
@@ -407,7 +279,8 @@ void kernel_main(void) {
 	if (!kernel_cpu_boot_start_aps()) {
 		boot_fail("kernel: kernel_cpu_boot_start_aps failed");
 	}
-	printf("kernel: cpu topology %zu present, %zu online\n", cpu_count(), cpu_online_count());
+	if (boot_diagnostics_enabled)
+		printf("kernel: cpu topology %zu present, %zu online\n", cpu_count(), cpu_online_count());
 	kernel_run_bootstrap_worker();
 
 	boot_start_timer_counter();

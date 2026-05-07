@@ -294,6 +294,7 @@ Use the assertion macros in [`kernel/test/selftest.h`](/c:/Users/anger/Code/kern
 - `-Dkernel_selftests=true` compiles in-kernel selftest code into the kernel. `scripts/build.sh --kernel-selftests` is the helper equivalent.
 - `-Dkernel_selftests_autorun=true` injects `kernel.selftest=1` into the generated image. `scripts/build.sh --kernel-selftests-autorun` is the helper equivalent.
 - `-Dkernel_selftests_suite=<name>` injects `kernel.selftest.suite=<name>` into the generated image and also causes selftests to autorun for that image. `scripts/build.sh --kernel-selftests-suite <name>` is the helper equivalent.
+- `-Dkernel_boot_debug=true` injects `loglevel=debug` into the generated image and enables verbose boot diagnostics. `scripts/build.sh --kernel-boot-debug` is the helper equivalent.
 - `scripts/build.sh` supports `--arch <arch>` for one target and `--all` to configure and/or compile every supported target in one parallel run.
 - `scripts/build.sh`, `scripts/run.sh`, and `scripts/run_qemu.sh` support `--builddir <path>` for single-target custom build directories, plus `--build-root <path>` and `--build-prefix <name>` for matching per-architecture directory sets.
 - `scripts/run.sh` has three modes: test mode with `--test`/`-t`, kernel selftest mode with `--kernel-selftest`, and QEMU mode otherwise.

@@ -7,6 +7,7 @@ platform = get_option('platform')
 kernel_selftests = get_option('kernel_selftests')
 kernel_selftests_autorun = get_option('kernel_selftests_autorun')
 kernel_selftests_suite = get_option('kernel_selftests_suite')
+kernel_boot_debug = get_option('kernel_boot_debug')
 kernel_thread_bootstrap_warn_fallback = get_option('kernel_thread_bootstrap_warn_fallback')
 
 if kernel_selftests_autorun and not kernel_selftests
@@ -48,9 +49,12 @@ alias_target('kernel', [kernel_elf])
 
 bash = find_program('bash', required : true)
 limine_script = files('scripts/make_limine_image.sh')
-limine_cmdline = 'loglevel=debug'
+limine_cmdline = ''
+if kernel_boot_debug
+	limine_cmdline += 'loglevel=debug'
+endif
 if kernel_selftests_autorun or kernel_selftests_suite != ''
-	limine_cmdline += ' kernel.selftest=1'
+	limine_cmdline += (limine_cmdline == '' ? '' : ' ') + 'kernel.selftest=1'
 endif
 if kernel_selftests_suite != ''
 	limine_cmdline += ' kernel.selftest.suite=' + kernel_selftests_suite

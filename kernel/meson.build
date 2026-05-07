@@ -39,6 +39,8 @@ kernel_selftest_sources = files(
 
 kernel_objs = base_sources + core_sources + kernel_libk_sources + platform_kernel_objects + [
 	'src/boot/boot.c',
+	'src/boot/cmdline.c',
+	'src/boot/diagnostics.c',
 	'src/boot/cpu_boot.c',
 	'src/elf_loader.c',
 	'src/init.c',
