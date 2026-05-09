@@ -6,7 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-struct vmm_alloc_record;
+struct memory_region;
 
 /*
  * Bitmap allocator for reserving virtual address ranges inside an address
@@ -22,12 +22,12 @@ struct address_space {
 	size_t                   bitmap_pages;
 	size_t                   total_pages;
 	size_t                   free_pages;
-	struct vmm_alloc_record* allocations;
-	uintptr_t                allocations_phys;
-	size_t                   allocations_page_count;
-	size_t                   allocations_capacity;
-	size_t                   allocation_count;
-	uint64_t                 next_allocation_id;
+	struct memory_region*    regions;
+	uintptr_t                regions_phys;
+	size_t                   regions_page_count;
+	size_t                   regions_capacity;
+	size_t                   region_count;
+	uint64_t                 next_region_id;
 	bool                     initialized;
 	struct spinlock          lock;
 };

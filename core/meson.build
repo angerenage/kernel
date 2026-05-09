@@ -21,5 +21,9 @@ core_sources = files(
 	'memory/address_transfer.c',
 	'memory/pmm.c',
 	'memory/vaddr_alloc.c',
+	'memory/backing_store.c',
+	'memory/memory_region.c',
+	'memory/page_table.c',
+	'memory/region_pager.c',
 	'memory/vmm.c',
 )
