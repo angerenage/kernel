@@ -25,9 +25,9 @@ Test(id_table, allocates_sequential_ids_and_supports_lookup) {
 
 	init_id_table_test_heap();
 
-	cr_assert(id_table_init(&table, "id_table_test", 1u, 64u), "id_table_init failed");
-	cr_assert(id_table_alloc(&table, &first_object, &first_id), "first allocation failed");
-	cr_assert(id_table_alloc(&table, &second_object, &second_id), "second allocation failed");
+	cr_assert_eq(id_table_init(&table, "id_table_test", 1u, 64u), ID_TABLE_OK, "id_table_init failed");
+	cr_assert_eq(id_table_alloc(&table, &first_object, &first_id), ID_TABLE_OK, "first allocation failed");
+	cr_assert_eq(id_table_alloc(&table, &second_object, &second_id), ID_TABLE_OK, "second allocation failed");
 
 	cr_assert_eq(first_id, 1u, "first ID should start at min_id");
 	cr_assert_eq(second_id, 2u, "second ID should be sequential");
@@ -46,15 +46,15 @@ Test(id_table, remove_clears_slot_and_returns_object) {
 
 	init_id_table_test_heap();
 
-	cr_assert(id_table_init(&table, "id_table_test", 1u, 16u), "id_table_init failed");
-	cr_assert(id_table_alloc(&table, &object, &id), "allocation failed");
+	cr_assert_eq(id_table_init(&table, "id_table_test", 1u, 16u), ID_TABLE_OK, "id_table_init failed");
+	cr_assert_eq(id_table_alloc(&table, &object, &id), ID_TABLE_OK, "allocation failed");
 
 	removed = NULL;
-	cr_assert(id_table_remove(&table, id, &removed), "remove should accept a present ID");
+	cr_assert_eq(id_table_remove(&table, id, &removed), ID_TABLE_OK, "remove should accept a present ID");
 	cr_assert_eq(removed, &object, "remove returned wrong object");
 	cr_assert_null(id_table_lookup(&table, id), "removed ID should not be visible");
 	cr_assert_eq(id_table_count(&table), 0u, "count should decrease after remove");
-	cr_assert(!id_table_remove(&table, id, NULL), "removing an absent ID should fail");
+	cr_assert_eq(id_table_remove(&table, id, NULL), ID_TABLE_NOT_FOUND, "removing an absent ID should fail");
 
 	id_table_deinit(&table);
 }
@@ -67,19 +67,27 @@ Test(id_table, rejects_invalid_arguments_and_exhaustion) {
 
 	init_id_table_test_heap();
 
-	cr_assert(!id_table_init(NULL, "id_table_test", 1u, 16u), "NULL table should be rejected");
-	cr_assert(!id_table_init(&table, "id_table_test", ID_TABLE_ID_INVALID, 16u), "zero min ID should be rejected");
-	cr_assert(!id_table_init(&table, "id_table_test", 4u, 3u), "inverted range should be rejected");
+	cr_assert_eq(
+		id_table_init(NULL, "id_table_test", 1u, 16u), ID_TABLE_INVALID_ARGUMENTS, "NULL table should be rejected");
+	cr_assert_eq(id_table_init(&table, "id_table_test", ID_TABLE_ID_INVALID, 16u),
+	             ID_TABLE_INVALID_ARGUMENTS,
+	             "zero min ID should be rejected");
+	cr_assert_eq(id_table_init(&table, "id_table_test", 4u, 3u),
+	             ID_TABLE_INVALID_ARGUMENTS,
+	             "inverted range should be rejected");
 
-	cr_assert(id_table_init(&table, "id_table_test", 7u, 7u), "single-ID table should initialize");
-	cr_assert(!id_table_alloc(&table, NULL, &id), "NULL object should be rejected");
-	cr_assert(!id_table_alloc(&table, &first_object, NULL), "NULL output ID should be rejected");
-	cr_assert(id_table_alloc(&table, &first_object, &id), "first allocation should consume the only ID");
+	cr_assert_eq(id_table_init(&table, "id_table_test", 7u, 7u), ID_TABLE_OK, "single-ID table should initialize");
+	cr_assert_eq(id_table_alloc(&table, NULL, &id), ID_TABLE_INVALID_ARGUMENTS, "NULL object should be rejected");
+	cr_assert_eq(
+		id_table_alloc(&table, &first_object, NULL), ID_TABLE_INVALID_ARGUMENTS, "NULL output ID should be rejected");
+	cr_assert_eq(
+		id_table_alloc(&table, &first_object, &id), ID_TABLE_OK, "first allocation should consume the only ID");
 	cr_assert_eq(id, 7u, "single-ID table returned wrong ID");
-	cr_assert(!id_table_alloc(&table, &second_object, &id), "exhausted table should reject allocation");
+	cr_assert_eq(
+		id_table_alloc(&table, &second_object, &id), ID_TABLE_EXHAUSTED, "exhausted table should reject allocation");
 	cr_assert_eq(id, ID_TABLE_ID_INVALID, "failed allocation should clear output ID");
 	cr_assert_null(id_table_lookup(&table, ID_TABLE_ID_INVALID), "invalid ID should not resolve");
-	cr_assert(!id_table_remove(&table, 8u, NULL), "out-of-range remove should fail");
+	cr_assert_eq(id_table_remove(&table, 8u, NULL), ID_TABLE_OUT_OF_RANGE, "out-of-range remove should fail");
 
 	id_table_deinit(&table);
 }
@@ -92,19 +100,19 @@ Test(id_table, grows_slot_storage_without_reusing_removed_ids) {
 
 	init_id_table_test_heap();
 
-	cr_assert(id_table_init(&table, "id_table_test", 1u, 128u), "id_table_init failed");
+	cr_assert_eq(id_table_init(&table, "id_table_test", 1u, 128u), ID_TABLE_OK, "id_table_init failed");
 	for (size_t i = 0; i < 40u; i++) {
 		objects[i] = (int)i;
 		ids[i]     = ID_TABLE_ID_INVALID;
-		cr_assert(id_table_alloc(&table, &objects[i], &ids[i]), "allocation %zu failed", i);
+		cr_assert_eq(id_table_alloc(&table, &objects[i], &ids[i]), ID_TABLE_OK, "allocation %zu failed", i);
 		cr_assert_eq(ids[i], i + 1u, "allocation %zu returned unexpected ID", i);
 	}
 
 	cr_assert_eq(id_table_lookup(&table, ids[39]), &objects[39], "lookup after growth failed");
 	removed = NULL;
-	cr_assert(id_table_remove(&table, ids[3], &removed), "remove before next allocation failed");
+	cr_assert_eq(id_table_remove(&table, ids[3], &removed), ID_TABLE_OK, "remove before next allocation failed");
 	cr_assert_eq(removed, &objects[3], "remove returned wrong object");
-	cr_assert(id_table_alloc(&table, &objects[3], &ids[3]), "allocation after remove failed");
+	cr_assert_eq(id_table_alloc(&table, &objects[3], &ids[3]), ID_TABLE_OK, "allocation after remove failed");
 	cr_assert_eq(ids[3], 41u, "removed ID should not be reused in the simple table");
 	cr_assert_eq(id_table_count(&table), 40u, "count should track live objects after remove and alloc");
 
@@ -124,7 +132,7 @@ static void* id_table_concurrent_alloc_worker(void* arg) {
 
 	test_barrier_wait(ctx->barrier);
 	for (size_t i = 0; i < ID_TABLE_CONCURRENT_ALLOCS; i++) {
-		if (!id_table_alloc(ctx->table, &ctx->object, &ctx->ids[i])) {
+		if (id_table_alloc(ctx->table, &ctx->object, &ctx->ids[i]) != ID_TABLE_OK) {
 			ctx->ok = false;
 			return NULL;
 		}
@@ -143,8 +151,9 @@ Test(id_table, concurrent_allocations_get_unique_ids) {
 
 	init_id_table_test_heap();
 
-	cr_assert(id_table_init(&table, "id_table_test", 1u, ID_TABLE_CONCURRENT_THREADS * ID_TABLE_CONCURRENT_ALLOCS),
-	          "id_table_init failed");
+	cr_assert_eq(id_table_init(&table, "id_table_test", 1u, ID_TABLE_CONCURRENT_THREADS * ID_TABLE_CONCURRENT_ALLOCS),
+	             ID_TABLE_OK,
+	             "id_table_init failed");
 	test_barrier_init(&barrier, ID_TABLE_CONCURRENT_THREADS);
 
 	for (size_t i = 0; i < ID_TABLE_CONCURRENT_THREADS; i++) {

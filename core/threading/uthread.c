@@ -320,6 +320,7 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 	size_t                       user_stack_pages;
 	uintptr_t                    kernel_stack_top;
 	uthread_id_t                 id;
+	enum id_table_result         id_result;
 	char*                        name = NULL;
 
 	if (thread == NULL || params == NULL || params->process == NULL || params->user_entry == 0u) {
@@ -341,9 +342,10 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 		.reaper_next     = NULL,
 		.heap_allocated  = heap_allocated,
 	};
-	if (!id_table_alloc(&uthread_table, thread, &id)) {
+	id_result = id_table_alloc(&uthread_table, thread, &id);
+	if (id_result != ID_TABLE_OK) {
 		uthread_release_name(thread);
-		return UTHREAD_START_ID_EXHAUSTED;
+		return id_result == ID_TABLE_NO_MEMORY ? UTHREAD_START_NO_MEMORY : UTHREAD_START_ID_EXHAUSTED;
 	}
 	thread->id = id;
 

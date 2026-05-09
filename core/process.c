@@ -213,8 +213,9 @@ enum process_thread_cancel_result process_cancel_thread(struct process* process,
 }
 
 enum process_result process_create(struct process** out_process, const char* name) {
-	struct process* process;
-	process_id_t    pid;
+	struct process*      process;
+	process_id_t         pid;
+	enum id_table_result id_result;
 
 	if (out_process == NULL) return PROCESS_INVALID_ARGUMENTS;
 	*out_process = NULL;
@@ -234,10 +235,11 @@ enum process_result process_create(struct process** out_process, const char* nam
 	spinlock_init_class(&process->lock, "process", SPINLOCK_ORDER_PROCESS, SPINLOCK_FLAG_IRQSAVE);
 	thread_wait_queue_init(&process->join_wait_queue);
 
-	if (!id_table_alloc(&process_table, process, &pid)) {
+	id_result = id_table_alloc(&process_table, process, &pid);
+	if (id_result != ID_TABLE_OK) {
 		free((void*)process->name);
 		free(process);
-		return PROCESS_PID_EXHAUSTED;
+		return id_result == ID_TABLE_NO_MEMORY ? PROCESS_NO_MEMORY : PROCESS_PID_EXHAUSTED;
 	}
 	process->pid = pid;
 
