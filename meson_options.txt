@@ -27,8 +27,3 @@ option('kernel_boot_debug',
 	type : 'boolean',
 	value : false,
 	description : 'Append loglevel=debug to the generated boot image command line for verbose boot diagnostics.')
-
-option('kernel_thread_bootstrap_warn_fallback',
-	type : 'boolean',
-	value : false,
-	description : 'Allow the kernel to warn and continue when runtime thread bootstrap context setup is unsupported.')

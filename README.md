@@ -273,7 +273,7 @@ Build-time control uses three options:
 - `--kernel-selftests-autorun` writes `kernel.selftest=1` into the generated image command line so they run automatically on boot
 - `--kernel-selftests-suite <name>` writes `kernel.selftest.suite=<name>` into the generated image command line and limits autorun to that suite
 
-The kernel runs selftests from the bootstrap worker after `pmm`, `vmm`, `heap`, and scheduler initialization, prints per-test results to serial, and emits a final `selftest: result: PASS` or `FAIL` marker for automation.
+The kernel runs selftests from a selftest-only runner after `pmm`, `vmm`, `heap`, and scheduler initialization, prints per-test results to serial, and emits a final `selftest: result: PASS` or `FAIL` marker for automation.
 When a suite filter is present, only the matching registered suite is executed.
 
 To add more in-kernel tests:

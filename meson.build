@@ -8,7 +8,6 @@ kernel_selftests = get_option('kernel_selftests')
 kernel_selftests_autorun = get_option('kernel_selftests_autorun')
 kernel_selftests_suite = get_option('kernel_selftests_suite')
 kernel_boot_debug = get_option('kernel_boot_debug')
-kernel_thread_bootstrap_warn_fallback = get_option('kernel_thread_bootstrap_warn_fallback')
 
 if kernel_selftests_autorun and not kernel_selftests
 	error('kernel_selftests_autorun requires -Dkernel_selftests=true')

@@ -13,7 +13,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 usage() {
 	cat <<'EOF'
-Usage: build.sh (--arch <arch> | --all) [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--setup|-s] [--compile|-c] [-sc] [--reconfigure] [--no-tests] [--kernel-selftests] [--kernel-selftests-autorun] [--kernel-selftests-suite <name>] [--kernel-boot-debug] [--kernel-thread-bootstrap-warn-fallback]
+Usage: build.sh (--arch <arch> | --all) [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--setup|-s] [--compile|-c] [-sc] [--reconfigure] [--no-tests] [--kernel-selftests] [--kernel-selftests-autorun] [--kernel-selftests-suite <name>] [--kernel-boot-debug]
 
 Target selection:
   --arch <arch>  Build a single architecture (x86_64, aarch64, riscv64, loongarch64).
@@ -37,9 +37,6 @@ Actions:
   --kernel-boot-debug
                   Configure Meson with -Dkernel_boot_debug=true.
                   Enables verbose boot diagnostics in the generated image.
-  --kernel-thread-bootstrap-warn-fallback
-                  Configure Meson with
-                  -Dkernel_thread_bootstrap_warn_fallback=true.
 
 Build directories:
   --builddir <path>
@@ -61,7 +58,6 @@ Examples:
   bash scripts/build.sh --arch x86_64 --kernel-selftests --kernel-selftests-autorun
   bash scripts/build.sh --arch x86_64 --kernel-selftests-suite vmm
   bash scripts/build.sh --arch x86_64 --kernel-boot-debug
-  bash scripts/build.sh --arch x86_64 --kernel-thread-bootstrap-warn-fallback
   bash scripts/build.sh --all --compile
   bash scripts/build.sh --all -sc
 EOF
@@ -158,7 +154,6 @@ setup_arch() {
 		"-Dkernel_selftests_autorun=$( (( KERNEL_SELFTESTS_AUTORUN )) && printf true || printf false )"
 		"-Dkernel_selftests_suite=${KERNEL_SELFTESTS_SUITE}"
 		"-Dkernel_boot_debug=$( (( KERNEL_BOOT_DEBUG )) && printf true || printf false )"
-		"-Dkernel_thread_bootstrap_warn_fallback=$( (( THREAD_BOOTSTRAP_WARN_FALLBACK )) && printf true || printf false )"
 	)
 
 	if (( RECONFIGURE )) || [[ -d "$build_dir" ]]; then
@@ -173,7 +168,6 @@ setup_arch() {
 			"-Dkernel_selftests_autorun=$( (( KERNEL_SELFTESTS_AUTORUN )) && printf true || printf false )"
 			"-Dkernel_selftests_suite=${KERNEL_SELFTESTS_SUITE}"
 			"-Dkernel_boot_debug=$( (( KERNEL_BOOT_DEBUG )) && printf true || printf false )"
-			"-Dkernel_thread_bootstrap_warn_fallback=$( (( THREAD_BOOTSTRAP_WARN_FALLBACK )) && printf true || printf false )"
 		)
 	fi
 
@@ -259,7 +253,6 @@ BUILD_KERNEL_SELFTESTS=0
 KERNEL_SELFTESTS_AUTORUN=0
 KERNEL_SELFTESTS_SUITE=""
 KERNEL_BOOT_DEBUG=0
-THREAD_BOOTSTRAP_WARN_FALLBACK=0
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -352,10 +345,6 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--kernel-boot-debug)
 			KERNEL_BOOT_DEBUG=1
-			shift
-			;;
-		--kernel-thread-bootstrap-warn-fallback)
-			THREAD_BOOTSTRAP_WARN_FALLBACK=1
 			shift
 			;;
 		-h|--help)

@@ -1,6 +1,5 @@
 #include <base/heap.h>
 #include <core/cpu.h>
-#include <core/kthread.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/process.h>
@@ -21,6 +20,8 @@
 #include <stdio.h>
 
 #if KERNEL_SELFTESTS_ENABLED
+#include <core/kthread.h>
+
 #include "../test/selftest.h"
 #endif
 
@@ -65,7 +66,7 @@ static const char* kernel_elf_load_result_string(enum kernel_elf_load_result res
 	return "unknown";
 }
 
-static void kernel_launch_init_process(void) {
+static bool kernel_launch_init_process(void) {
 	const struct kernel_boot_module* module;
 	struct kernel_elf_process        loaded = {0};
 	struct uthread*                  main_thread;
@@ -75,13 +76,13 @@ static void kernel_launch_init_process(void) {
 	module = kernel_boot_module_find("init.elf");
 	if (module == NULL) {
 		printf("kernel: init.elf module not found\n");
-		return;
+		return false;
 	}
 
 	load_result = kernel_elf_load_process(module, "init", &loaded);
 	if (load_result != KERNEL_ELF_LOAD_OK) {
 		printf("kernel: init ELF load failed: %s\n", kernel_elf_load_result_string(load_result));
-		return;
+		return false;
 	}
 
 	main_thread  = NULL;
@@ -98,7 +99,7 @@ static void kernel_launch_init_process(void) {
 	if (start_result != PROCESS_THREAD_SPAWN_OK) {
 		(void)process_destroy(loaded.process);
 		printf("kernel: init thread start failed: %u\n", (unsigned)start_result);
-		return;
+		return false;
 	}
 
 	if (boot_diagnostics_enabled) {
@@ -107,20 +108,38 @@ static void kernel_launch_init_process(void) {
 		       (void*)loaded.entry,
 		       (unsigned long long)uthread_id(main_thread));
 	}
+	return true;
 }
-
-static void kernel_bootstrap_worker_entry(void* arg) {
-	(void)arg;
 
 #if KERNEL_SELFTESTS_ENABLED
-	if (kernel_selftests_requested() && !kernel_selftests_run()) {
+static void kernel_selftest_runner_entry(void* arg) {
+	(void)arg;
+
+	if (!kernel_selftests_run()) {
 		boot_fail("kernel: selftests failed");
 	}
-#endif
-
-	kernel_launch_init_process();
-	sched_yield();
 }
+
+static void kernel_run_selftests(void) {
+	struct kthread*           worker = NULL;
+	struct cpu*               cpu    = cpu_current();
+	enum kthread_spawn_result result;
+
+	result = kthread_spawn_on_cpu(&worker, "selftest/runner", kernel_selftest_runner_entry, NULL, cpu);
+	if (result != KTHREAD_SPAWN_OK) {
+		boot_fail("kernel: selftest runner spawn failed");
+	}
+
+	sched_yield();
+
+	if (!thread_is_terminated(&worker->thread)) {
+		boot_fail("kernel: selftest runner returned without exiting");
+	}
+	if (!kthread_destroy(worker)) {
+		boot_fail("kernel: selftest runner reclaim failed");
+	}
+}
+#endif
 
 static void boot_clock_tick(void* ctx) {
 	(void)ctx;
@@ -181,53 +200,6 @@ static void kernel_init_memory(const struct mem_range* memory_map, size_t range_
 	}
 }
 
-static void kernel_bootstrap_worker_handle_spawn_failure(enum kthread_spawn_result result) {
-	switch (result) {
-	case KTHREAD_SPAWN_CONTEXT_UNSUPPORTED:
-		printf("kernel: bootstrap worker context setup rejected by hal_cpu_thread_context_init\n");
-#if KERNEL_THREAD_BOOTSTRAP_WARN_FALLBACK
-		printf("kernel: continuing without runtime thread bootstrap because warn fallback is enabled\n");
-		return;
-#else
-		boot_fail("kernel: runtime thread bootstrap unsupported on this platform");
-#endif
-	case KTHREAD_SPAWN_INVALID_ARGUMENTS:
-	case KTHREAD_SPAWN_NO_MEMORY:
-	case KTHREAD_SPAWN_STACK_ALLOC_FAILED:
-	case KTHREAD_SPAWN_START_FAILED:
-	case KTHREAD_SPAWN_REAPER_UNAVAILABLE:
-	case KTHREAD_SPAWN_OK:
-	default:
-		boot_fail("kernel: bootstrap worker spawn failed");
-	}
-}
-
-static void kernel_run_bootstrap_worker(void) {
-	struct kthread*           worker = NULL;
-	struct cpu*               cpu    = cpu_current();
-	enum kthread_spawn_result result;
-
-	if (!sched_start_cpu(cpu)) {
-		boot_fail("kernel: sched_start_cpu failed for bootstrap worker");
-	}
-
-	result = kthread_spawn_on_cpu(&worker, "bootstrap/worker", kernel_bootstrap_worker_entry, NULL, cpu);
-	if (result != KTHREAD_SPAWN_OK) {
-		kernel_bootstrap_worker_handle_spawn_failure(result);
-		return;
-	}
-
-	if (boot_diagnostics_enabled) printf("kernel: starting bootstrap worker on cpu%zu\n", cpu->index);
-	sched_yield();
-
-	if (!thread_is_terminated(&worker->thread)) {
-		boot_fail("kernel: bootstrap worker returned without exiting");
-	}
-	if (!kthread_destroy(worker)) {
-		boot_fail("kernel: bootstrap worker reclaim failed");
-	}
-}
-
 __attribute__((noreturn))
 void kernel_main(void) {
 	size_t                           memory_map_count = 0u;
@@ -279,10 +251,23 @@ void kernel_main(void) {
 	if (!kernel_cpu_boot_start_aps()) {
 		boot_fail("kernel: kernel_cpu_boot_start_aps failed");
 	}
+	if (!sched_start_cpu(cpu_current())) {
+		boot_fail("kernel: sched_start_cpu failed for bootstrap processor");
+	}
 	if (boot_diagnostics_enabled)
 		printf("kernel: cpu topology %zu present, %zu online\n", cpu_count(), cpu_online_count());
-	kernel_run_bootstrap_worker();
+
+#if KERNEL_SELFTESTS_ENABLED
+	if (kernel_selftests_requested()) {
+		kernel_run_selftests();
+	}
+#endif
 
 	boot_start_timer_counter();
+
+	if (!kernel_launch_init_process()) {
+		boot_fail("kernel: init launch failed");
+	}
+
 	sched_enter_idle();
 }
