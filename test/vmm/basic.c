@@ -309,7 +309,7 @@ Test(vmm, refuses_page_fault_resolution_for_non_lazy_allocations) {
 	cr_assert_eq(pmm_free_page_count(), free_before, "rejected fault resolution leaked physical pages");
 }
 
-Test(vmm, current_page_fault_resolution_uses_thread_space_then_kernel_space) {
+Test(vmm, current_page_fault_handling_uses_thread_space_then_kernel_space) {
 	_Alignas(4096) uint8_t   arena[KiB(512)];
 	struct address_space     user_space = {0};
 	struct hal_address_space user_hal_space;
@@ -350,14 +350,15 @@ Test(vmm, current_page_fault_resolution_uses_thread_space_then_kernel_space) {
 	cr_assert(vmm_alloc(address_space_kernel(), &kernel_params, &kernel_id, &kernel_base),
 	          "kernel lazy vmm_alloc failed");
 
-	cr_assert(vmm_resolve_current_page_fault((uintptr_t)user_base),
-	          "current fault resolution did not handle the user address space");
+	cr_assert(vmm_handle_current_page_fault((uintptr_t)user_base, VMM_FAULT_NOT_PRESENT, VMM_FAULT_ACCESS_READ, false),
+	          "current fault handling did not handle the user address space");
 	cr_assert(hal_paging_query(address_space_hal(&user_space), (uintptr_t)user_base, &phys, &flags),
 	          "user fault did not map into the current thread address space");
 	cr_assert_eq(flags, (uint64_t)(HAL_PAGE_WRITE | HAL_PAGE_USER), "user fault used incorrect mapping flags");
 
-	cr_assert(vmm_resolve_current_page_fault((uintptr_t)kernel_base),
-	          "current fault resolution did not fall back to the kernel address space");
+	cr_assert(
+		vmm_handle_current_page_fault((uintptr_t)kernel_base, VMM_FAULT_NOT_PRESENT, VMM_FAULT_ACCESS_READ, false),
+		"current fault handling did not fall back to the kernel address space");
 	cr_assert(hal_paging_query(hal_paging_kernel_space(), (uintptr_t)kernel_base, &phys, &flags),
 	          "kernel fallback fault did not map into the kernel address space");
 	cr_assert_eq(flags, (uint64_t)(HAL_PAGE_WRITE | HAL_PAGE_GLOBAL), "kernel fault used incorrect mapping flags");

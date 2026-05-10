@@ -139,6 +139,23 @@ static bool is_page_fault_exception(uint64_t code) {
 	return code == 12u || code == 13u || code == 15u;
 }
 
+static bool was_user_mode(uint64_t sstatus) {
+	return (sstatus & (1ull << 8)) == 0;
+}
+
+static enum vmm_fault_access page_fault_access(uint64_t code) {
+	switch (code) {
+	case 12:
+		return VMM_FAULT_ACCESS_EXEC;
+	case 13:
+		return VMM_FAULT_ACCESS_READ;
+	case 15:
+		return VMM_FAULT_ACCESS_WRITE;
+	default:
+		return VMM_FAULT_ACCESS_UNKNOWN;
+	}
+}
+
 void riscv64_maybe_preempt_on_interrupt_exit(void) {
 	(void)sched_handle_interrupt_exit();
 }
@@ -154,9 +171,13 @@ void handle_exception(struct exception_frame* frame) {
 		return;
 	}
 
-	if (!is_interrupt && is_page_fault_exception(code) && vmm_resolve_current_page_fault(frame->stval)) {
+	if (!is_interrupt && is_page_fault_exception(code)) {
 		cpu_leave_exception();
-		return;
+		if (vmm_handle_current_page_fault(
+				frame->stval, VMM_FAULT_NOT_PRESENT, page_fault_access(code), was_user_mode(frame->sstatus))) {
+			return;
+		}
+		cpu_enter_exception();
 	}
 
 	printf("kernel: riscv64 %s %llu (%s)\n",

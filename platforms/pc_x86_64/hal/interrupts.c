@@ -20,6 +20,27 @@ static bool x86_page_fault_is_not_present(uint64_t error_code) {
 	return (error_code & 0x1u) == 0;
 }
 
+static bool x86_page_fault_from_user(uint64_t error_code) {
+	return (error_code & (1u << 2)) != 0;
+}
+
+static bool x86_page_fault_is_write(uint64_t error_code) {
+	return (error_code & (1u << 1)) != 0;
+}
+
+static bool x86_page_fault_is_instruction(uint64_t error_code) {
+	return (error_code & (1u << 4)) != 0;
+}
+
+static enum vmm_fault_kind x86_page_fault_kind(uint64_t error_code) {
+	return x86_page_fault_is_not_present(error_code) ? VMM_FAULT_NOT_PRESENT : VMM_FAULT_PROTECTION;
+}
+
+static enum vmm_fault_access x86_page_fault_access(uint64_t error_code) {
+	if (x86_page_fault_is_instruction(error_code)) return VMM_FAULT_ACCESS_EXEC;
+	return x86_page_fault_is_write(error_code) ? VMM_FAULT_ACCESS_WRITE : VMM_FAULT_ACCESS_READ;
+}
+
 struct idt_entry {
 	uint16_t offset_low;
 	uint16_t selector;
@@ -262,10 +283,15 @@ void x86_64_handle_interrupt(struct interrupt_frame* frame) {
 	}
 
 	fault_addr = vector == 14u ? read_cr2() : 0;
-	if (vector == 14u && x86_page_fault_is_not_present(frame->error_code) &&
-	    vmm_resolve_current_page_fault((uintptr_t)fault_addr)) {
+	if (vector == 14u) {
 		if (trap_context) cpu_leave_exception();
-		return;
+		if (vmm_handle_current_page_fault((uintptr_t)fault_addr,
+		                                  x86_page_fault_kind(frame->error_code),
+		                                  x86_page_fault_access(frame->error_code),
+		                                  x86_page_fault_from_user(frame->error_code))) {
+			return;
+		}
+		if (trap_context) cpu_enter_exception();
 	}
 
 	if (vector < 32u) {

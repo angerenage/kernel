@@ -13,6 +13,7 @@
 
 #define LOONGARCH64_CSR_ECFG 0x4u
 #define LOONGARCH64_CSR_EENTRY 0xcu
+#define LOONGARCH64_CSR_PRMD 0x1u
 #define LOONGARCH64_CSR_SAVE1 0x31u
 #define LOONGARCH64_CSR_TLBRENTRY 0x88u
 #define LOONGARCH64_CSR_MERRENTRY 0x94u
@@ -184,6 +185,26 @@ static bool is_page_invalid_exception(uint64_t ecode) {
 	return ecode >= 0x1u && ecode <= 0x3u;
 }
 
+static bool was_user_mode(void) {
+	uint64_t prmd;
+
+	__asm__ volatile("csrrd %0, 0x1" : "=r"(prmd));
+	return (prmd & 0x3u) == 0x3u;
+}
+
+static enum vmm_fault_access loongarch64_fault_access(uint64_t ecode) {
+	switch (ecode) {
+	case 0x1:
+		return VMM_FAULT_ACCESS_READ;
+	case 0x2:
+		return VMM_FAULT_ACCESS_WRITE;
+	case 0x3:
+		return VMM_FAULT_ACCESS_EXEC;
+	default:
+		return VMM_FAULT_ACCESS_UNKNOWN;
+	}
+}
+
 void loongarch64_maybe_preempt_on_interrupt_exit(void) {
 	(void)sched_handle_interrupt_exit();
 }
@@ -204,9 +225,13 @@ void handle_exception(struct exception_frame* frame) {
 	is_pending = frame->estat & 0x1fffu;
 	esubcode   = (frame->estat >> 22) & 0x1ffu;
 
-	if (is_page_invalid_exception(ecode) && vmm_resolve_current_page_fault(frame->badv)) {
+	if (is_page_invalid_exception(ecode)) {
 		cpu_leave_exception();
-		return;
+		if (vmm_handle_current_page_fault(
+				frame->badv, VMM_FAULT_NOT_PRESENT, loongarch64_fault_access(ecode), was_user_mode())) {
+			return;
+		}
+		cpu_enter_exception();
 	}
 
 	printf("kernel: loongarch64 exception ecode=0x%02llx esubcode=0x%03llx (%s)\n",

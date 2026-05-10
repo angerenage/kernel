@@ -1,4 +1,5 @@
 #include <base/heap.h>
+#include <base/process.h>
 #include <core/cpu.h>
 #include <core/mm.h>
 #include <core/pmm.h>
@@ -485,13 +486,15 @@ Test(process, terminate_marks_process_exiting_and_requests_thread_cancellation) 
 												 }),
 	             PROCESS_OK);
 
-	cr_assert(process_terminate(process, 77u), "process_terminate should accept a running process");
+	cr_assert(process_terminate(process, PROCESS_EXIT_MEMORY_PROTECTION),
+	          "process_terminate should accept a running process");
 	cr_assert_eq(process_get_state(process), PROCESS_STATE_EXITING, "process should enter EXITING state");
-	cr_assert_eq(process->exit_code, 77u, "process_terminate should publish the process exit code");
+	cr_assert_eq(
+		process->exit_code, PROCESS_EXIT_MEMORY_PROTECTION, "process_terminate should publish the process exit code");
 	cr_assert(thread_cancel_requested(&process->main_thread->thread), "process threads should receive cancellation");
 
 	thread_mark_zombie(&process->main_thread->thread);
-	process_notify_thread_exit(process, &process->main_thread->thread, 77u);
+	process_notify_thread_exit(process, &process->main_thread->thread, PROCESS_EXIT_MEMORY_PROTECTION);
 	cr_assert_eq(process_get_state(process), PROCESS_STATE_ZOMBIE, "last thread exit should make process zombie");
 	cr_assert(process_destroy(process), "process_destroy should reclaim the terminated process");
 }

@@ -1,7 +1,9 @@
+#include <base/process.h>
 #include <core/lock.h>
 #include <core/memory_region.h>
 #include <core/mm.h>
 #include <core/pmm.h>
+#include <core/process.h>
 #include <core/region_pager.h>
 #include <core/sched.h>
 #include <core/spinlock.h>
@@ -187,7 +189,7 @@ bool vmm_resolve_page_fault(struct address_space* space, uintptr_t addr) {
 	return ok;
 }
 
-bool vmm_resolve_current_page_fault(uintptr_t addr) {
+static bool resolve_current_lazy_fault(uintptr_t addr) {
 	struct thread*        current;
 	struct address_space* current_space;
 	struct address_space* kernel_space;
@@ -198,6 +200,30 @@ bool vmm_resolve_current_page_fault(uintptr_t addr) {
 	if (current_space != NULL && vmm_resolve_page_fault(current_space, addr)) return true;
 	if (current_space == kernel_space) return false;
 	return vmm_resolve_page_fault(kernel_space, addr);
+}
+
+static uintptr_t vmm_fault_exit_code(enum vmm_fault_kind kind) {
+	switch (kind) {
+	case VMM_FAULT_NOT_PRESENT:
+		return PROCESS_EXIT_MEMORY_NOT_PRESENT;
+	case VMM_FAULT_PROTECTION:
+		return PROCESS_EXIT_MEMORY_PROTECTION;
+	case VMM_FAULT_INVALID:
+	default:
+		return PROCESS_EXIT_MEMORY_INVALID;
+	}
+}
+
+bool vmm_handle_current_page_fault(uintptr_t addr, enum vmm_fault_kind kind, enum vmm_fault_access access,
+                                   bool user_mode) {
+	struct process* process;
+
+	(void)access;
+	if (kind == VMM_FAULT_NOT_PRESENT && resolve_current_lazy_fault(addr)) return true;
+	if (!user_mode) return false;
+	process = process_current();
+	if (process == NULL) return false;
+	return process_terminate(process, vmm_fault_exit_code(kind));
 }
 
 bool vmm_query(struct address_space* space, void* addr, struct vmm_info* out_info) {

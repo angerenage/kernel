@@ -136,6 +136,26 @@ static bool is_translation_fault(uint64_t dfsc) {
 	return dfsc >= 0x04 && dfsc <= 0x07;
 }
 
+static bool is_abort_from_lower_el(uint64_t ec) {
+	return ec == 0x20 || ec == 0x24;
+}
+
+static bool is_page_fault_abort(uint64_t dfsc) {
+	return (dfsc >= 0x04 && dfsc <= 0x0f) || dfsc == 0x21;
+}
+
+static enum vmm_fault_kind abort_fault_kind(uint64_t dfsc) {
+	if (is_translation_fault(dfsc)) return VMM_FAULT_NOT_PRESENT;
+	if ((dfsc >= 0x08 && dfsc <= 0x0fu) || dfsc == 0x21u) return VMM_FAULT_PROTECTION;
+	return VMM_FAULT_INVALID;
+}
+
+static enum vmm_fault_access abort_fault_access(uint64_t ec, uint64_t iss) {
+	if (is_instruction_abort(ec)) return VMM_FAULT_ACCESS_EXEC;
+	if (!is_data_abort(ec)) return VMM_FAULT_ACCESS_UNKNOWN;
+	return ((iss >> 6) & 1u) != 0 ? VMM_FAULT_ACCESS_WRITE : VMM_FAULT_ACCESS_READ;
+}
+
 static const char* abort_dfsc_name(uint64_t dfsc) {
 	switch (dfsc) {
 	case 0x00:
@@ -247,9 +267,15 @@ void handle_exception(struct exception_frame* frame) {
 	bool     ea    = ((iss >> 9) & 1u) != 0;
 	bool     fnv   = ((iss >> 10) & 1u) != 0;
 
-	if (!fnv && is_translation_fault(dfsc) && vmm_resolve_current_page_fault(frame->far)) {
+	if ((is_instruction_abort(ec) || is_data_abort(ec)) && is_page_fault_abort(dfsc)) {
 		if (!is_irq) cpu_leave_exception();
-		return;
+		if (vmm_handle_current_page_fault(fnv ? 0u : frame->far,
+		                                  fnv ? VMM_FAULT_INVALID : abort_fault_kind(dfsc),
+		                                  abort_fault_access(ec, iss),
+		                                  is_abort_from_lower_el(ec))) {
+			return;
+		}
+		if (!is_irq) cpu_enter_exception();
 	}
 
 	printf("kernel: aarch64 exception %s\n", vector_names[frame->vector & 0xfu]);
