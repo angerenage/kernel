@@ -3,6 +3,7 @@
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/vaddr_alloc.h>
+#include <core/vmm.h>
 #include <hal/paging.h>
 #include <stdbool.h>
 #include <stddef.h>

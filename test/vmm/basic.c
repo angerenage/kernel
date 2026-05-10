@@ -1,5 +1,6 @@
 #include <core/address_transfer.h>
 #include <core/cpu.h>
+#include <core/mm.h>
 #include <core/pmm.h>
 #include <core/thread.h>
 #include <core/vaddr_alloc.h>
@@ -76,7 +77,7 @@ Test(vmm, allocates_at_exact_addresses_and_rejects_overlaps) {
 	struct vmm_info info;
 	vmm_id_t        fixed_id  = VMM_ID_INVALID;
 	vmm_id_t        mapped_id = VMM_ID_INVALID;
-	uintptr_t       fixed     = vmm_window_base() + 8u * (uintptr_t)PMM_PAGE_SIZE;
+	uintptr_t       fixed     = (uintptr_t)MM_KERNEL_VMM_BASE + 8u * (uintptr_t)PMM_PAGE_SIZE;
 	uintptr_t       mapped    = fixed + 4u * (uintptr_t)PMM_PAGE_SIZE;
 	size_t          free_before;
 

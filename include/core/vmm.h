@@ -8,9 +8,6 @@ struct address_space;
 /* Initialize the paging backend and reserve the kernel's managed virtual window. Re-initializing resets metadata. */
 bool vmm_init(void);
 
-/* Return whether vmm_init() completed successfully. */
-bool vmm_is_initialized(void);
-
 /*
  * Creates a tracked virtual allocation in an explicit address space.
  * - With VMM_MAP_LAZY: reserve only, state starts RESERVED.
@@ -25,9 +22,6 @@ bool vmm_alloc_at(struct address_space* space, void* base, const struct vmm_allo
 
 /* Destroy allocation metadata and backing owned by an explicit address space. */
 bool vmm_free(struct address_space* space, vmm_id_t id);
-
-/* Destroy an allocation by base address inside an explicit address space. */
-bool vmm_free_at(struct address_space* space, void* base);
 
 /* Materialize all pages in an explicit address-space allocation. */
 bool vmm_map(struct address_space* space, vmm_id_t id);
@@ -49,12 +43,6 @@ bool vmm_query(struct address_space* space, void* addr, struct vmm_info* out_inf
 
 /* Query an explicit address-space allocation by id. */
 bool vmm_query_id(struct address_space* space, vmm_id_t id, struct vmm_info* out_info);
-
-/* Base virtual address of the managed VMM window. */
-uintptr_t vmm_window_base(void);
-
-/* Size of the managed VMM window in pages. */
-size_t vmm_window_page_count(void);
 
 /* Number of live tracked allocations in an explicit address space. */
 size_t vmm_count(struct address_space* space);

@@ -1,9 +1,10 @@
 #pragma once
 
-#include <core/vmm.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+struct address_space;
 
 enum address_transfer_result {
 	ADDRESS_TRANSFER_OK = 0,

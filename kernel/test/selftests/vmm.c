@@ -22,7 +22,6 @@ static void kernel_selftest_vmm_allocates_queries_and_frees_mapped_ranges(struct
 	size_t          free_before  = pmm_free_page_count();
 	size_t          count_before = vmm_count(address_space_kernel());
 
-	KERNEL_SELFTEST_ASSERT_MSG(ctx, vmm_is_initialized(), "vmm is not initialized");
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
 		ctx, vmm_alloc(address_space_kernel(), &params, &alloc_id, &base), "vmm_alloc returned false", cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, alloc_id != VMM_ID_INVALID, cleanup);
@@ -200,41 +199,6 @@ static void kernel_selftest_vmm_keeps_stack_guard_pages_unmapped(struct kernel_s
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, info.kind == VMM_KIND_STACK, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, info.guard_pages == params.guard_pages, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, info.state == VMM_STATE_MAPPED, cleanup);
-
-cleanup:
-	if (alloc_id != VMM_ID_INVALID) (void)vmm_free(address_space_kernel(), alloc_id);
-
-	if (ctx->failure_expr == NULL) {
-		KERNEL_SELFTEST_ASSERT(ctx, vmm_count(address_space_kernel()) == count_before);
-		KERNEL_SELFTEST_ASSERT(ctx, pmm_free_page_count() == free_before);
-	}
-}
-
-static void kernel_selftest_vmm_free_at_releases_tracking_and_backing(struct kernel_selftest_context* ctx) {
-	struct vmm_alloc_params params = {
-		.page_count  = 1,
-		.align_pages = 1,
-		.prot        = VMM_PROT_READ | VMM_PROT_WRITE,
-		.kind        = VMM_KIND_GENERIC,
-	};
-	struct vmm_info info;
-	vmm_id_t        alloc_id     = VMM_ID_INVALID;
-	void*           base         = NULL;
-	size_t          free_before  = pmm_free_page_count();
-	size_t          count_before = vmm_count(address_space_kernel());
-
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, vmm_alloc(address_space_kernel(), &params, &alloc_id, &base), "vmm_alloc returned false", cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, alloc_id != VMM_ID_INVALID, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, base != NULL, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, vmm_query_id(address_space_kernel(), alloc_id, &info), cleanup);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, vmm_free_at(address_space_kernel(), base), "vmm_free_at returned false", cleanup);
-	alloc_id = VMM_ID_INVALID;
-	base     = NULL;
-	KERNEL_SELFTEST_ASSERT(ctx, !vmm_query_id(address_space_kernel(), info.id, &info));
-	KERNEL_SELFTEST_ASSERT(ctx, vmm_count(address_space_kernel()) == count_before);
-	KERNEL_SELFTEST_ASSERT(ctx, pmm_free_page_count() == free_before);
 
 cleanup:
 	if (alloc_id != VMM_ID_INVALID) (void)vmm_free(address_space_kernel(), alloc_id);
@@ -457,10 +421,6 @@ static const struct kernel_selftest_case kernel_vmm_selftests[] = {
 	{
      .name = "keeps_stack_guard_pages_unmapped",
      .run  = kernel_selftest_vmm_keeps_stack_guard_pages_unmapped,
-	 },
-	{
-     .name = "free_at_releases_tracking_and_backing",
-     .run  = kernel_selftest_vmm_free_at_releases_tracking_and_backing,
 	 },
 	{
      .name = "supports_lazy_map_unmap_remap_and_reprotect",

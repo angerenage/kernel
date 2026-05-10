@@ -1,8 +1,8 @@
 #include <base/heap.h>
 #include <core/cpu.h>
+#include <core/mm.h>
 #include <core/pmm.h>
 #include <core/sched.h>
-#include <core/vmm.h>
 #include <kernel/boot.h>
 #include <kernel/boot_diagnostics.h>
 #include <kernel/cmdline.h>
@@ -74,12 +74,12 @@ void kernel_boot_diagnostics_memory_map(const struct mem_range* memory_map, size
 }
 
 void kernel_boot_diagnostics_memory_summary(void) {
-	printf("kernel: memory pmm=%zu/%zu pages heap=%zu/%zu bytes vmm=%zu pages\n",
+	printf("kernel: memory pmm=%zu/%zu pages heap=%zu/%zu bytes regions=%zu pages\n",
 	       pmm_free_page_count(),
 	       pmm_total_page_count(),
 	       heap_free_bytes(),
 	       heap_total_bytes(),
-	       vmm_window_page_count());
+	       MM_KERNEL_VMM_SIZE / PMM_PAGE_SIZE);
 }
 
 void kernel_boot_diagnostics_modules(void) {

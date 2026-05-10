@@ -54,10 +54,6 @@ bool vmm_init(void) {
 	return true;
 }
 
-bool vmm_is_initialized(void) {
-	return initialized;
-}
-
 static bool vmm_alloc_internal(struct address_space* space, uintptr_t requested_base,
                                const struct vmm_alloc_params* params, vmm_id_t* out_id, void** out_base) {
 	struct memory_region_create_result result;
@@ -114,26 +110,6 @@ bool vmm_free(struct address_space* space, vmm_id_t id) {
 	if (!initialized || !space || id == VMM_ID_INVALID) return false;
 	state  = spinlock_lock_irqsave(&vmm_lock);
 	region = memory_region_find_by_id(space, id);
-	if (!region) {
-		spinlock_unlock_irqrestore(&vmm_lock, state);
-		return false;
-	}
-	if (backing_store_mapped_count(&region->backing) != 0 && !region_pager_unmap_all(space, region, false)) {
-		spinlock_unlock_irqrestore(&vmm_lock, state);
-		return false;
-	}
-	(void)memory_region_destroy(space, region);
-	spinlock_unlock_irqrestore(&vmm_lock, state);
-	return true;
-}
-
-bool vmm_free_at(struct address_space* space, void* base) {
-	struct memory_region* region;
-	struct irq_state      state;
-
-	if (!initialized || !space || !base) return false;
-	state  = spinlock_lock_irqsave(&vmm_lock);
-	region = memory_region_find_by_base(space, (uintptr_t)base);
 	if (!region) {
 		spinlock_unlock_irqrestore(&vmm_lock, state);
 		return false;
@@ -248,14 +224,6 @@ bool vmm_query_id(struct address_space* space, vmm_id_t id, struct vmm_info* out
 	if (region) memory_region_fill_info(region, out_info);
 	spinlock_unlock_irqrestore(&vmm_lock, state);
 	return region != NULL;
-}
-
-uintptr_t vmm_window_base(void) {
-	return (uintptr_t)VMM_WINDOW_BASE;
-}
-
-size_t vmm_window_page_count(void) {
-	return VMM_WINDOW_SIZE / PMM_PAGE_SIZE;
 }
 
 size_t vmm_count(struct address_space* space) {

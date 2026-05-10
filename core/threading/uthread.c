@@ -7,6 +7,7 @@
 #include <core/spinlock.h>
 #include <core/uthread.h>
 #include <core/vaddr_alloc.h>
+#include <core/vmm.h>
 #include <hal/userspace.h>
 #include <libc/stdlib.h>
 #include <stddef.h>
