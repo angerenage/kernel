@@ -1,4 +1,6 @@
+#include <base/process.h>
 #include <core/cpu.h>
+#include <core/exception.h>
 #include <core/sched.h>
 #include <core/vmm.h>
 #include <hal/hcf.h>
@@ -244,6 +246,55 @@ static const char* abort_target_el(uint64_t ec) {
 	}
 }
 
+static bool aarch64_exception_from_lower_el(const struct exception_frame* frame) {
+	return (frame->vector & 0x8u) != 0u;
+}
+
+static bool aarch64_exception_kind(uint64_t ec, uint64_t dfsc, enum core_exception_kind* out_kind) {
+	if (!out_kind) return false;
+	switch (ec) {
+	case 0x0e:
+	case 0x01:
+	case 0x03:
+	case 0x04:
+	case 0x05:
+	case 0x06:
+	case 0x18:
+		*out_kind = CORE_EXCEPTION_INSTRUCTION_ILLEGAL;
+		return true;
+	case 0x20:
+	case 0x21:
+		if (is_page_fault_abort(dfsc)) return false;
+		*out_kind = CORE_EXCEPTION_ACCESS_INSTRUCTION_ABORT;
+		return true;
+	case 0x22:
+	case 0x26:
+		*out_kind = CORE_EXCEPTION_ALIGNMENT;
+		return true;
+	case 0x24:
+	case 0x25:
+		if (is_page_fault_abort(dfsc)) return false;
+		*out_kind = CORE_EXCEPTION_ACCESS_DATA_ABORT;
+		return true;
+	case 0x2c:
+		*out_kind = CORE_EXCEPTION_FLOATING_POINT;
+		return true;
+	case 0x2f:
+		*out_kind = CORE_EXCEPTION_BUS_ERROR;
+		return true;
+	default:
+		return false;
+	}
+}
+
+static bool aarch64_handle_user_exception(uint64_t ec, uint64_t dfsc, const struct exception_frame* frame) {
+	enum core_exception_kind kind;
+
+	if (!aarch64_exception_from_lower_el(frame)) return false;
+	if (!aarch64_exception_kind(ec, dfsc, &kind)) return false;
+	return core_handle_user_exception(kind);
+}
+
 void aarch64_maybe_preempt_on_interrupt_exit(void) {
 	(void)sched_handle_interrupt_exit();
 }
@@ -276,6 +327,12 @@ void handle_exception(struct exception_frame* frame) {
 			return;
 		}
 		if (!is_irq) cpu_enter_exception();
+	}
+
+	if (!is_irq && aarch64_exception_from_lower_el(frame)) {
+		cpu_leave_exception();
+		if (aarch64_handle_user_exception(ec, dfsc, frame)) return;
+		cpu_enter_exception();
 	}
 
 	printf("kernel: aarch64 exception %s\n", vector_names[frame->vector & 0xfu]);

@@ -1,6 +1,6 @@
 #include <core/cpu.h>
+#include <core/exception.h>
 #include <core/sched.h>
-#include <core/vmm.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
 #include <stdbool.h>
@@ -32,13 +32,60 @@ static bool x86_page_fault_is_instruction(uint64_t error_code) {
 	return (error_code & (1u << 4)) != 0;
 }
 
-static enum vmm_fault_kind x86_page_fault_kind(uint64_t error_code) {
-	return x86_page_fault_is_not_present(error_code) ? VMM_FAULT_NOT_PRESENT : VMM_FAULT_PROTECTION;
+static enum core_exception_kind x86_page_fault_kind(uint64_t error_code) {
+	return x86_page_fault_is_not_present(error_code) ? CORE_EXCEPTION_PAGE_FAULT_NOT_PRESENT
+	                                                 : CORE_EXCEPTION_PAGE_FAULT_PROTECTION;
 }
 
-static enum vmm_fault_access x86_page_fault_access(uint64_t error_code) {
-	if (x86_page_fault_is_instruction(error_code)) return VMM_FAULT_ACCESS_EXEC;
-	return x86_page_fault_is_write(error_code) ? VMM_FAULT_ACCESS_WRITE : VMM_FAULT_ACCESS_READ;
+static enum core_exception_access x86_page_fault_access(uint64_t error_code) {
+	if (x86_page_fault_is_instruction(error_code)) return CORE_EXCEPTION_ACCESS_EXEC;
+	return x86_page_fault_is_write(error_code) ? CORE_EXCEPTION_ACCESS_WRITE : CORE_EXCEPTION_ACCESS_READ;
+}
+
+static bool x86_exception_from_user(const struct interrupt_frame* frame) {
+	return (frame->cs & 0x3u) == 3u;
+}
+
+static bool x86_exception_kind(unsigned long long vector, enum core_exception_kind* out_kind) {
+	if (!out_kind) return false;
+	switch (vector) {
+	case 0:
+		*out_kind = CORE_EXCEPTION_ARITHMETIC_DIVIDE_BY_ZERO;
+		return true;
+	case 4:
+		*out_kind = CORE_EXCEPTION_ARITHMETIC_OVERFLOW;
+		return true;
+	case 5:
+		*out_kind = CORE_EXCEPTION_ARITHMETIC_BOUND_RANGE;
+		return true;
+	case 6:
+		*out_kind = CORE_EXCEPTION_INSTRUCTION_ILLEGAL;
+		return true;
+	case 13:
+		*out_kind = CORE_EXCEPTION_PRIVILEGE_GENERAL_PROTECTION;
+		return true;
+	case 16:
+		*out_kind = CORE_EXCEPTION_FLOATING_POINT;
+		return true;
+	case 19:
+		*out_kind = CORE_EXCEPTION_FLOATING_POINT_SIMD;
+		return true;
+	case 17:
+		*out_kind = CORE_EXCEPTION_ALIGNMENT;
+		return true;
+	default:
+		return false;
+	}
+}
+
+static bool x86_handle_user_exception(unsigned long long vector, const struct interrupt_frame* frame) {
+	enum core_exception_kind kind;
+
+	if (vector >= 32u) return false;
+	if (vector == 14u) return false;
+	if (!x86_exception_from_user(frame)) return false;
+	if (!x86_exception_kind(vector, &kind)) return false;
+	return core_handle_exception(kind, CORE_EXCEPTION_ACCESS_UNKNOWN, 0u, true);
 }
 
 struct idt_entry {
@@ -285,12 +332,18 @@ void x86_64_handle_interrupt(struct interrupt_frame* frame) {
 	fault_addr = vector == 14u ? read_cr2() : 0;
 	if (vector == 14u) {
 		if (trap_context) cpu_leave_exception();
-		if (vmm_handle_current_page_fault((uintptr_t)fault_addr,
-		                                  x86_page_fault_kind(frame->error_code),
-		                                  x86_page_fault_access(frame->error_code),
-		                                  x86_page_fault_from_user(frame->error_code))) {
+		if (core_handle_exception(x86_page_fault_kind(frame->error_code),
+		                          x86_page_fault_access(frame->error_code),
+		                          (uintptr_t)fault_addr,
+		                          x86_page_fault_from_user(frame->error_code))) {
 			return;
 		}
+		if (trap_context) cpu_enter_exception();
+	}
+
+	if (vector < 32u) {
+		if (trap_context) cpu_leave_exception();
+		if (x86_handle_user_exception(vector, frame)) return;
 		if (trap_context) cpu_enter_exception();
 	}
 

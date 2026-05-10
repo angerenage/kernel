@@ -1,4 +1,6 @@
+#include <base/process.h>
 #include <core/cpu.h>
+#include <core/exception.h>
 #include <core/sched.h>
 #include <core/vmm.h>
 #include <hal/hcf.h>
@@ -205,6 +207,48 @@ static enum vmm_fault_access loongarch64_fault_access(uint64_t ecode) {
 	}
 }
 
+static bool loongarch64_exception_kind(uint64_t ecode, uint64_t esubcode, enum core_exception_kind* out_kind) {
+	if (!out_kind) return false;
+	switch (ecode) {
+	case 0x4:
+	case 0x5:
+	case 0x6:
+	case 0x7:
+		*out_kind = CORE_EXCEPTION_MEMORY_PROTECTION;
+		return true;
+	case 0x8:
+		*out_kind =
+			esubcode == 0 ? CORE_EXCEPTION_ACCESS_ADDRESS_ERROR_FETCH : CORE_EXCEPTION_ACCESS_ADDRESS_ERROR_MEMORY;
+		return true;
+	case 0x9:
+		*out_kind = CORE_EXCEPTION_ALIGNMENT;
+		return true;
+	case 0xa:
+		*out_kind = CORE_EXCEPTION_ARITHMETIC_BOUND_RANGE;
+		return true;
+	case 0xd:
+		*out_kind = CORE_EXCEPTION_INSTRUCTION_ILLEGAL;
+		return true;
+	case 0xe:
+		*out_kind = CORE_EXCEPTION_PRIVILEGE_GENERAL_PROTECTION;
+		return true;
+	case 0x12:
+		*out_kind = esubcode == 0 ? CORE_EXCEPTION_FLOATING_POINT : CORE_EXCEPTION_FLOATING_POINT_SIMD;
+		return true;
+	default:
+		return false;
+	}
+}
+
+static bool loongarch64_handle_user_exception(uint64_t ecode, uint64_t esubcode) {
+	enum core_exception_kind kind;
+
+	if (!was_user_mode()) return false;
+	if (is_page_invalid_exception(ecode)) return false;
+	if (!loongarch64_exception_kind(ecode, esubcode, &kind)) return false;
+	return core_handle_user_exception(kind);
+}
+
 void loongarch64_maybe_preempt_on_interrupt_exit(void) {
 	(void)sched_handle_interrupt_exit();
 }
@@ -231,6 +275,12 @@ void handle_exception(struct exception_frame* frame) {
 				frame->badv, VMM_FAULT_NOT_PRESENT, loongarch64_fault_access(ecode), was_user_mode())) {
 			return;
 		}
+		cpu_enter_exception();
+	}
+
+	if (ecode != 0u && was_user_mode()) {
+		cpu_leave_exception();
+		if (loongarch64_handle_user_exception(ecode, esubcode)) return;
 		cpu_enter_exception();
 	}
 

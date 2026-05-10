@@ -1,4 +1,6 @@
+#include <base/process.h>
 #include <core/cpu.h>
+#include <core/exception.h>
 #include <core/sched.h>
 #include <core/vmm.h>
 #include <hal/hcf.h>
@@ -156,6 +158,36 @@ static enum vmm_fault_access page_fault_access(uint64_t code) {
 	}
 }
 
+static bool riscv64_exception_kind(uint64_t code, enum core_exception_kind* out_kind) {
+	if (!out_kind) return false;
+	switch (code) {
+	case 0:
+	case 4:
+	case 6:
+		*out_kind = CORE_EXCEPTION_ALIGNMENT;
+		return true;
+	case 1:
+	case 5:
+	case 7:
+		*out_kind = code == 1 ? CORE_EXCEPTION_ACCESS_INSTRUCTION_ABORT : CORE_EXCEPTION_ACCESS_DATA_ABORT;
+		return true;
+	case 2:
+		*out_kind = CORE_EXCEPTION_INSTRUCTION_ILLEGAL;
+		return true;
+	default:
+		return false;
+	}
+}
+
+static bool riscv64_handle_user_exception(uint64_t code, uint64_t sstatus) {
+	enum core_exception_kind kind;
+
+	if (!was_user_mode(sstatus)) return false;
+	if (is_page_fault_exception(code)) return false;
+	if (!riscv64_exception_kind(code, &kind)) return false;
+	return core_handle_user_exception(kind);
+}
+
 void riscv64_maybe_preempt_on_interrupt_exit(void) {
 	(void)sched_handle_interrupt_exit();
 }
@@ -177,6 +209,12 @@ void handle_exception(struct exception_frame* frame) {
 				frame->stval, VMM_FAULT_NOT_PRESENT, page_fault_access(code), was_user_mode(frame->sstatus))) {
 			return;
 		}
+		cpu_enter_exception();
+	}
+
+	if (!is_interrupt && was_user_mode(frame->sstatus)) {
+		cpu_leave_exception();
+		if (riscv64_handle_user_exception(code, frame->sstatus)) return;
 		cpu_enter_exception();
 	}
 
