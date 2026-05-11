@@ -121,6 +121,9 @@ static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 	[SYSCALL_VM_QUERY]      = syscall_vm_query,
 	[SYSCALL_VM_COPY_FROM]  = syscall_vm_copy_from,
 	[SYSCALL_VM_COPY_TO]    = syscall_vm_copy_to,
+
+	[SYSCALL_SEND_MESSAGE] = syscall_send_message,
+	[SYSCALL_RECV_MESSAGE] = syscall_recv_message,
 };
 
 syscall_result_t syscall_dispatch(uintptr_t number, uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,

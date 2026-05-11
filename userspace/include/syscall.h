@@ -179,3 +179,13 @@ static inline syscall_result_t vm_copy_from(uintptr_t src_pid, const void* src, 
 static inline syscall_result_t vm_copy_to(uintptr_t dst_pid, void* dst, const void* src, size_t size) {
 	return syscall(SYSCALL_VM_COPY_TO, dst_pid, (uintptr_t)dst, (uintptr_t)src, (uintptr_t)size, 0u, 0u);
 }
+
+/* Send a message to a target process. */
+static inline syscall_result_t send_message(uintptr_t pid, const void* buffer, size_t length) {
+	return syscall(SYSCALL_SEND_MESSAGE, pid, (uintptr_t)buffer, (uintptr_t)length, 0u, 0u, 0u);
+}
+
+/* Receive the next message into buffer, writing the message size to *out_length. */
+static inline syscall_result_t recv_message(void* buffer, size_t* out_length) {
+	return syscall(SYSCALL_RECV_MESSAGE, (uintptr_t)buffer, (uintptr_t)out_length, 0u, 0u, 0u, 0u);
+}

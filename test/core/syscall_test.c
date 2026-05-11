@@ -1,4 +1,5 @@
 #include <base/heap.h>
+#include <base/message.h>
 #include <core/address_transfer.h>
 #include <core/cpu.h>
 #include <core/mm.h>
@@ -1078,6 +1079,189 @@ Test(syscall, vm_copy_from_and_copy_to_reject_bad_targets_and_ranges) {
 		SYSCALL_VM_COPY_TO, process_pid(target), (uintptr_t)target_base, (uintptr_t)caller_base, 0u, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(result.value, 0u);
+
+	thread_mark_zombie(&target_thread->thread);
+	thread_mark_zombie(&caller_thread->thread);
+	cr_assert(process_destroy(target), "target process_destroy failed");
+	cr_assert(process_destroy(caller), "caller process_destroy failed");
+	syscall_test_reset_state();
+}
+
+Test(syscall, message_send_rejects_invalid_pid_and_size) {
+	struct process*  process;
+	struct uthread*  main_thread;
+	syscall_result_t result;
+
+	syscall_test_init_process_environment();
+	process     = syscall_test_spawn_process("syscall/message-invalid");
+	main_thread = process_main_thread(process);
+	cr_assert_not_null(main_thread);
+	sched_set_current(cpu_current(), &main_thread->thread);
+
+	result = syscall_dispatch(SYSCALL_SEND_MESSAGE, UINTPTR_MAX, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_FAILED);
+	cr_assert_eq(result.value, MESSAGE_INVALID_PID);
+
+	result = syscall_dispatch(SYSCALL_SEND_MESSAGE, process_pid(process), 0u, MESSAGE_MAX_SIZE + 1u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_FAILED);
+	cr_assert_eq(result.value, MESSAGE_TOO_LARGE);
+
+	thread_mark_zombie(&main_thread->thread);
+	cr_assert(process_destroy(process), "process_destroy failed");
+	syscall_test_reset_state();
+}
+
+Test(syscall, message_recv_reports_empty_queue) {
+	struct process*         process;
+	struct uthread*         main_thread;
+	struct address_space*   space;
+	struct vmm_alloc_params params = {
+		.page_count  = 1u,
+		.align_pages = 1u,
+		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
+		.kind        = VMM_KIND_GENERIC,
+		.map_flags   = VMM_MAP_LAZY,
+	};
+	vmm_id_t         buffer_id = VMM_ID_INVALID;
+	vmm_id_t         length_id = VMM_ID_INVALID;
+	void*            buffer_base;
+	void*            length_base;
+	uintptr_t        length_value = 42u;
+	syscall_result_t result;
+
+	syscall_test_init_process_environment();
+	process     = syscall_test_spawn_process("syscall/message-empty");
+	main_thread = process_main_thread(process);
+	cr_assert_not_null(main_thread);
+	sched_set_current(cpu_current(), &main_thread->thread);
+	space = process_address_space(process);
+	cr_assert(vmm_alloc(space, &params, &buffer_id, &buffer_base), "failed to allocate recv buffer");
+	cr_assert(vmm_alloc(space, &params, &length_id, &length_base), "failed to allocate length buffer");
+	cr_assert_eq(address_space_write_uintptr(space, (uintptr_t)length_base, length_value), ADDRESS_TRANSFER_OK);
+
+	result = syscall_dispatch(SYSCALL_RECV_MESSAGE, (uintptr_t)buffer_base, (uintptr_t)length_base, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(result.value, 0u);
+	cr_assert_eq(address_space_read_uintptr(space, (uintptr_t)length_base, &length_value), ADDRESS_TRANSFER_OK);
+	cr_assert_eq(length_value, 42u, "empty recv should not update length");
+
+	thread_mark_zombie(&main_thread->thread);
+	cr_assert(process_destroy(process), "process_destroy failed");
+	syscall_test_reset_state();
+}
+
+Test(syscall, message_send_and_recv_roundtrip) {
+	struct process*         caller;
+	struct process*         target;
+	struct uthread*         caller_thread;
+	struct uthread*         target_thread;
+	struct address_space*   caller_space;
+	struct address_space*   target_space;
+	struct vmm_alloc_params params = {
+		.page_count  = 1u,
+		.align_pages = 1u,
+		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
+		.kind        = VMM_KIND_GENERIC,
+		.map_flags   = VMM_MAP_LAZY,
+	};
+	vmm_id_t         send_id   = VMM_ID_INVALID;
+	vmm_id_t         recv_id   = VMM_ID_INVALID;
+	vmm_id_t         len_id    = VMM_ID_INVALID;
+	void*            send_base = NULL;
+	void*            recv_base = NULL;
+	void*            len_base  = NULL;
+	const char       payload[] = "syscall-message";
+	char             received[sizeof(payload)];
+	uintptr_t        length_value = 0u;
+	syscall_result_t result;
+
+	syscall_test_init_process_environment();
+	caller        = syscall_test_spawn_process("syscall/message-caller");
+	target        = syscall_test_spawn_process("syscall/message-target");
+	caller_thread = process_main_thread(caller);
+	target_thread = process_main_thread(target);
+	cr_assert_not_null(caller_thread);
+	cr_assert_not_null(target_thread);
+	caller_space = process_address_space(caller);
+	target_space = process_address_space(target);
+
+	cr_assert(vmm_alloc(caller_space, &params, &send_id, &send_base), "failed to allocate send buffer");
+	cr_assert_eq(address_space_copy_to(caller_space, (uintptr_t)send_base, payload, sizeof(payload)),
+	             ADDRESS_TRANSFER_OK);
+
+	sched_set_current(cpu_current(), &caller_thread->thread);
+	result =
+		syscall_dispatch(SYSCALL_SEND_MESSAGE, process_pid(target), (uintptr_t)send_base, sizeof(payload), 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(result.value, 0u);
+
+	cr_assert(vmm_alloc(target_space, &params, &recv_id, &recv_base), "failed to allocate recv buffer");
+	cr_assert(vmm_alloc(target_space, &params, &len_id, &len_base), "failed to allocate length buffer");
+	cr_assert_eq(address_space_write_uintptr(target_space, (uintptr_t)len_base, 0u), ADDRESS_TRANSFER_OK);
+
+	sched_set_current(cpu_current(), &target_thread->thread);
+	result = syscall_dispatch(SYSCALL_RECV_MESSAGE, (uintptr_t)recv_base, (uintptr_t)len_base, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(result.value, 1u);
+	cr_assert_eq(address_space_read_uintptr(target_space, (uintptr_t)len_base, &length_value), ADDRESS_TRANSFER_OK);
+	cr_assert_eq(length_value, sizeof(payload));
+	cr_assert_eq(address_space_copy_from(target_space, (uintptr_t)recv_base, received, sizeof(received)),
+	             ADDRESS_TRANSFER_OK);
+	cr_assert_eq(memcmp(received, payload, sizeof(payload)), 0);
+
+	result = syscall_dispatch(SYSCALL_RECV_MESSAGE, (uintptr_t)recv_base, (uintptr_t)len_base, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(result.value, 0u);
+
+	thread_mark_zombie(&target_thread->thread);
+	thread_mark_zombie(&caller_thread->thread);
+	cr_assert(process_destroy(target), "target process_destroy failed");
+	cr_assert(process_destroy(caller), "caller process_destroy failed");
+	syscall_test_reset_state();
+}
+
+Test(syscall, message_send_reports_queue_full) {
+	struct process*         caller;
+	struct process*         target;
+	struct uthread*         caller_thread;
+	struct uthread*         target_thread;
+	struct address_space*   caller_space;
+	struct vmm_alloc_params params = {
+		.page_count  = 1u,
+		.align_pages = 1u,
+		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
+		.kind        = VMM_KIND_GENERIC,
+		.map_flags   = VMM_MAP_LAZY,
+	};
+	vmm_id_t         send_id   = VMM_ID_INVALID;
+	void*            send_base = NULL;
+	uint8_t          byte      = 0x5a;
+	syscall_result_t result;
+
+	syscall_test_init_process_environment();
+	caller        = syscall_test_spawn_process("syscall/message-full-caller");
+	target        = syscall_test_spawn_process("syscall/message-full-target");
+	caller_thread = process_main_thread(caller);
+	target_thread = process_main_thread(target);
+	cr_assert_not_null(caller_thread);
+	cr_assert_not_null(target_thread);
+	caller_space = process_address_space(caller);
+
+	cr_assert(vmm_alloc(caller_space, &params, &send_id, &send_base), "failed to allocate send buffer");
+	cr_assert_eq(address_space_copy_to(caller_space, (uintptr_t)send_base, &byte, sizeof(byte)), ADDRESS_TRANSFER_OK);
+
+	sched_set_current(cpu_current(), &caller_thread->thread);
+	for (size_t i = 0u; i < MESSAGE_QUEUE_DEPTH; i++) {
+		result =
+			syscall_dispatch(SYSCALL_SEND_MESSAGE, process_pid(target), (uintptr_t)send_base, sizeof(byte), 0u, 0u, 0u);
+		cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+		cr_assert_eq(result.value, 0u);
+	}
+
+	result =
+		syscall_dispatch(SYSCALL_SEND_MESSAGE, process_pid(target), (uintptr_t)send_base, sizeof(byte), 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_FAILED);
+	cr_assert_eq(result.value, MESSAGE_QUEUE_FULL);
 
 	thread_mark_zombie(&target_thread->thread);
 	thread_mark_zombie(&caller_thread->thread);
