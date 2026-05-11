@@ -1,5 +1,6 @@
 #pragma once
 
+#include <core/message.h>
 #include <core/thread.h>
 #include <core/vaddr_alloc.h>
 #include <stdbool.h>
@@ -115,6 +116,7 @@ struct process {
 	struct uthread*          thread_head;
 	struct uthread*          thread_tail;
 	struct thread_wait_queue join_wait_queue;
+	struct message_queue     message_queue;
 	struct address_space     address_space;
 	struct spinlock          lock;
 	bool                     detached;

@@ -234,6 +234,7 @@ enum process_result process_create(struct process** out_process, const char* nam
 	process->state = PROCESS_STATE_NEW;
 	spinlock_init_class(&process->lock, "process", SPINLOCK_ORDER_PROCESS, SPINLOCK_FLAG_IRQSAVE);
 	thread_wait_queue_init(&process->join_wait_queue);
+	message_queue_init(&process->message_queue);
 
 	id_result = id_table_alloc(&process_table, process, &pid);
 	if (id_result != ID_TABLE_OK) {

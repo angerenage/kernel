@@ -3,6 +3,7 @@ core_sources = files(
 	'cpu/irq.c',
 	'exception.c',
 	'id_table.c',
+	'message.c',
 	'process.c',
 	'sync/condvar.c',
 	'sync/mutex.c',

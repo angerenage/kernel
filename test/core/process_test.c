@@ -19,7 +19,7 @@
 #include "../vmm/test_support.h"
 
 #define PROCESS_TEST_ARENA_SIZE KiB(2048)
-#define PROCESS_TEST_HEAP_SIZE KiB(64)
+#define PROCESS_TEST_HEAP_SIZE KiB(256)
 
 static uint8_t process_test_arena[PROCESS_TEST_ARENA_SIZE] __attribute__((aligned(PMM_PAGE_SIZE)));
 static uint8_t process_test_heap[PROCESS_TEST_HEAP_SIZE] __attribute__((aligned(PMM_PAGE_SIZE)));

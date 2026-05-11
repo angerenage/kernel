@@ -83,6 +83,13 @@ test_suites = [
 		'suites': ['unit', 'core'],
 	},
 	{
+		'name': 'message',
+		'sources': files(
+			'core/message_test.c',
+		),
+		'suites': ['unit', 'core'],
+	},
+	{
 		'name': 'rwlock',
 		'sources': files(
 			'core/rwlock_test.c',

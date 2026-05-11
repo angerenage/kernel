@@ -21,7 +21,7 @@
 #include "../vmm/test_support.h"
 
 #define SYSCALL_TEST_ARENA_SIZE KiB(2048)
-#define SYSCALL_TEST_HEAP_SIZE KiB(64)
+#define SYSCALL_TEST_HEAP_SIZE KiB(256)
 
 static uint8_t syscall_test_arena[SYSCALL_TEST_ARENA_SIZE] __attribute__((aligned(PMM_PAGE_SIZE)));
 static uint8_t syscall_test_heap[SYSCALL_TEST_HEAP_SIZE] __attribute__((aligned(PMM_PAGE_SIZE)));
