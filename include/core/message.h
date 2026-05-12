@@ -27,4 +27,5 @@ void message_queue_init(struct message_queue* queue);
 enum message_result message_queue_send(struct message_queue* queue, const void* data, size_t length);
 
 /* Dequeue the next message payload into the caller buffer. */
-enum message_result message_queue_receive(struct message_queue* queue, void* buffer, size_t* out_length);
+enum message_result message_queue_receive(struct message_queue* queue, void* buffer, size_t buffer_size,
+                                          size_t* out_length);

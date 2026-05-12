@@ -39,7 +39,8 @@ enum message_result message_queue_send(struct message_queue* queue, const void* 
 	return MESSAGE_OK;
 }
 
-enum message_result message_queue_receive(struct message_queue* queue, void* buffer, size_t* out_length) {
+enum message_result message_queue_receive(struct message_queue* queue, void* buffer, size_t buffer_size,
+                                          size_t* out_length) {
 	struct irq_state state;
 	struct message*  slot;
 	size_t           length;
@@ -54,6 +55,11 @@ enum message_result message_queue_receive(struct message_queue* queue, void* buf
 
 	slot   = &queue->slots[queue->head];
 	length = slot->length;
+	if (length > buffer_size) {
+		*out_length = length;
+		spinlock_unlock_irqrestore(&queue->lock, state);
+		return MESSAGE_TOO_LARGE;
+	}
 	if (length > 0u && buffer == NULL) {
 		spinlock_unlock_irqrestore(&queue->lock, state);
 		return MESSAGE_INVALID_ARGUMENTS;

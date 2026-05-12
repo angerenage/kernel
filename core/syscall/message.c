@@ -114,35 +114,43 @@ syscall_result_t syscall_recv_message(uintptr_t arg0, uintptr_t arg1, uintptr_t 
                                       uintptr_t arg5) {
 	struct process*              process;
 	struct address_space*        space;
+	size_t                       buffer_size;
 	size_t                       length = 0u;
 	enum message_result          result;
 	enum address_transfer_result transfer_result;
 	syscall_result_t             copy_result;
 	uint8_t                      payload[MESSAGE_MAX_SIZE];
 
-	(void)arg2;
 	(void)arg3;
 	(void)arg4;
 	(void)arg5;
 
 	process = process_current();
 	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
-	if (arg0 == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+
+	buffer_size = (size_t)arg2;
+	if ((uintptr_t)buffer_size != arg2) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 2u);
+	if (buffer_size > 0u && arg0 == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	if (arg1 == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 1u);
 
 	space = syscall_current_user_space();
 
-	if (space != NULL) {
+	if (space != NULL && buffer_size > 0u) {
 		transfer_result = address_space_validate_range(
-			space, arg0, MESSAGE_MAX_SIZE, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
+			space, arg0, buffer_size, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
 		if (transfer_result != ADDRESS_TRANSFER_OK) {
 			return syscall_result_from_address_transfer(transfer_result, 0u);
 		}
 	}
 
-	result = message_queue_receive(&process->message_queue, payload, &length);
+	result = message_queue_receive(&process->message_queue, payload, buffer_size, &length);
 	if (result == MESSAGE_NO_MESSAGE) return syscall_result_ok(0u);
 	if (result == MESSAGE_INVALID_ARGUMENTS) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	if (result == MESSAGE_TOO_LARGE) {
+		copy_result = syscall_write_uintptr_arg(space, arg1, 1u, (uintptr_t)length);
+		if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 2u);
+	}
 	if (result != MESSAGE_OK) return syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
 
 	copy_result = syscall_copy_to_user(space, arg0, payload, length, 0u);

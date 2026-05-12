@@ -10,7 +10,7 @@ Test(message_queue, starts_empty_and_reports_no_message) {
 	size_t               length = 123u;
 
 	message_queue_init(&queue);
-	cr_assert_eq(message_queue_receive(&queue, NULL, &length), MESSAGE_NO_MESSAGE);
+	cr_assert_eq(message_queue_receive(&queue, NULL, 0u, &length), MESSAGE_NO_MESSAGE);
 	cr_assert_eq(length, 123u, "receive should not update length when empty");
 }
 
@@ -26,12 +26,12 @@ Test(message_queue, preserves_fifo_order) {
 	cr_assert_eq(message_queue_send(&queue, second, sizeof(second)), MESSAGE_OK);
 
 	length = 0u;
-	cr_assert_eq(message_queue_receive(&queue, buffer, &length), MESSAGE_OK);
+	cr_assert_eq(message_queue_receive(&queue, buffer, sizeof(buffer), &length), MESSAGE_OK);
 	cr_assert_eq(length, sizeof(first));
 	cr_assert_eq(memcmp(buffer, first, sizeof(first)), 0);
 
 	length = 0u;
-	cr_assert_eq(message_queue_receive(&queue, buffer, &length), MESSAGE_OK);
+	cr_assert_eq(message_queue_receive(&queue, buffer, sizeof(buffer), &length), MESSAGE_OK);
 	cr_assert_eq(length, sizeof(second));
 	cr_assert_eq(memcmp(buffer, second, sizeof(second)), 0);
 }
@@ -45,14 +45,16 @@ Test(message_queue, rejects_invalid_arguments) {
 	message_queue_init(&queue);
 	cr_assert_eq(message_queue_send(NULL, payload, sizeof(payload)), MESSAGE_INVALID_ARGUMENTS);
 	cr_assert_eq(message_queue_send(&queue, NULL, sizeof(payload)), MESSAGE_INVALID_ARGUMENTS);
-	cr_assert_eq(message_queue_receive(NULL, buffer, &length), MESSAGE_INVALID_ARGUMENTS);
-	cr_assert_eq(message_queue_receive(&queue, buffer, NULL), MESSAGE_INVALID_ARGUMENTS);
+	cr_assert_eq(message_queue_receive(NULL, buffer, sizeof(buffer), &length), MESSAGE_INVALID_ARGUMENTS);
+	cr_assert_eq(message_queue_receive(&queue, buffer, sizeof(buffer), NULL), MESSAGE_INVALID_ARGUMENTS);
 
 	cr_assert_eq(message_queue_send(&queue, payload, sizeof(payload)), MESSAGE_OK);
-	cr_assert_eq(message_queue_receive(&queue, NULL, &length), MESSAGE_INVALID_ARGUMENTS);
+	cr_assert_eq(message_queue_receive(&queue, NULL, 0u, &length), MESSAGE_TOO_LARGE);
+	cr_assert_eq(length, sizeof(payload));
+	cr_assert_eq(message_queue_receive(&queue, NULL, sizeof(payload), &length), MESSAGE_INVALID_ARGUMENTS);
 
 	length = 0u;
-	cr_assert_eq(message_queue_receive(&queue, buffer, &length), MESSAGE_OK);
+	cr_assert_eq(message_queue_receive(&queue, buffer, sizeof(buffer), &length), MESSAGE_OK);
 	cr_assert_eq(length, sizeof(payload));
 }
 
@@ -62,8 +64,27 @@ Test(message_queue, accepts_empty_payloads) {
 
 	message_queue_init(&queue);
 	cr_assert_eq(message_queue_send(&queue, NULL, 0u), MESSAGE_OK);
-	cr_assert_eq(message_queue_receive(&queue, NULL, &length), MESSAGE_OK);
+	cr_assert_eq(message_queue_receive(&queue, NULL, 0u, &length), MESSAGE_OK);
 	cr_assert_eq(length, 0u);
+}
+
+Test(message_queue, reports_required_size_when_buffer_too_small) {
+	struct message_queue queue;
+	uint8_t              buffer_small[4];
+	size_t               length    = 0u;
+	const char           payload[] = "message";
+	uint8_t              buffer_full[sizeof(payload)];
+
+	message_queue_init(&queue);
+	cr_assert_eq(message_queue_send(&queue, payload, sizeof(payload)), MESSAGE_OK);
+
+	cr_assert_eq(message_queue_receive(&queue, buffer_small, sizeof(buffer_small), &length), MESSAGE_TOO_LARGE);
+	cr_assert_eq(length, sizeof(payload));
+
+	length = 0u;
+	cr_assert_eq(message_queue_receive(&queue, buffer_full, sizeof(buffer_full), &length), MESSAGE_OK);
+	cr_assert_eq(length, sizeof(payload));
+	cr_assert_eq(memcmp(buffer_full, payload, sizeof(payload)), 0);
 }
 
 Test(message_queue, rejects_oversize_payloads_and_queue_full) {

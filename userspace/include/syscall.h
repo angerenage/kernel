@@ -186,6 +186,6 @@ static inline syscall_result_t send_message(uintptr_t pid, const void* buffer, s
 }
 
 /* Receive the next message into buffer, writing the message size to *out_length. */
-static inline syscall_result_t recv_message(void* buffer, size_t* out_length) {
-	return syscall(SYSCALL_RECV_MESSAGE, (uintptr_t)buffer, (uintptr_t)out_length, 0u, 0u, 0u, 0u);
+static inline syscall_result_t recv_message(void* buffer, size_t buffer_size, size_t* out_length) {
+	return syscall(SYSCALL_RECV_MESSAGE, (uintptr_t)buffer, (uintptr_t)out_length, (uintptr_t)buffer_size, 0u, 0u, 0u);
 }
