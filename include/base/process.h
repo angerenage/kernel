@@ -2,6 +2,10 @@
 
 #include <stdint.h>
 
+typedef uint64_t process_id_t;
+
+#define PROCESS_PID_INVALID ((process_id_t)0u)
+
 typedef uintptr_t process_exit_code_t;
 
 enum process_exit_code {

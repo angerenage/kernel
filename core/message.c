@@ -16,7 +16,8 @@ void message_queue_init(struct message_queue* queue) {
 	memset(queue->slots, 0, sizeof(queue->slots));
 }
 
-enum message_result message_queue_send(struct message_queue* queue, const void* data, size_t length) {
+enum message_result message_queue_send(struct message_queue* queue, process_id_t sender_pid, const void* data,
+                                       size_t length) {
 	struct irq_state state;
 	struct message*  slot;
 
@@ -30,8 +31,9 @@ enum message_result message_queue_send(struct message_queue* queue, const void* 
 		return MESSAGE_QUEUE_FULL;
 	}
 
-	slot         = &queue->slots[queue->tail];
-	slot->length = length;
+	slot             = &queue->slots[queue->tail];
+	slot->sender_pid = sender_pid;
+	slot->length     = length;
 	if (length > 0u) memcpy(slot->data, data, length);
 	queue->tail = message_queue_next_index(queue->tail);
 	queue->count++;
@@ -40,12 +42,12 @@ enum message_result message_queue_send(struct message_queue* queue, const void* 
 }
 
 enum message_result message_queue_receive(struct message_queue* queue, void* buffer, size_t buffer_size,
-                                          size_t* out_length) {
+                                          size_t* out_length, process_id_t* out_sender_pid) {
 	struct irq_state state;
 	struct message*  slot;
 	size_t           length;
 
-	if (queue == NULL || out_length == NULL) return MESSAGE_INVALID_ARGUMENTS;
+	if (queue == NULL || out_length == NULL || out_sender_pid == NULL) return MESSAGE_INVALID_ARGUMENTS;
 
 	state = spinlock_lock_irqsave(&queue->lock);
 	if (queue->count == 0u) {
@@ -69,6 +71,7 @@ enum message_result message_queue_receive(struct message_queue* queue, void* buf
 	queue->head = message_queue_next_index(queue->head);
 	queue->count--;
 	spinlock_unlock_irqrestore(&queue->lock, state);
-	*out_length = length;
+	*out_length     = length;
+	*out_sender_pid = slot->sender_pid;
 	return MESSAGE_OK;
 }

@@ -1,15 +1,12 @@
 #pragma once
 
+#include <base/process.h>
 #include <core/message.h>
 #include <core/thread.h>
 #include <core/vaddr_alloc.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-
-typedef uint64_t process_id_t;
-
-#define PROCESS_PID_INVALID ((process_id_t)0u)
 
 struct cpu;
 struct uthread;

@@ -76,6 +76,7 @@ syscall_result_t syscall_send_message(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 	uint8_t                      payload[MESSAGE_MAX_SIZE];
 	const void*                  source;
 	enum message_result          result;
+	process_id_t                 sender_pid = PROCESS_PID_INVALID;
 
 	(void)arg3;
 	(void)arg4;
@@ -85,6 +86,11 @@ syscall_result_t syscall_send_message(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 	if ((uintptr_t)length != arg2) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 2u);
 	if (length > MESSAGE_MAX_SIZE) return syscall_result_error(SYSCALL_STATUS_FAILED, MESSAGE_TOO_LARGE);
 	if (length > 0u && arg1 == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 1u);
+
+	{
+		struct process* sender = process_current();
+		if (sender != NULL) sender_pid = process_pid(sender);
+	}
 
 	target = process_lookup((process_id_t)arg0);
 	if (target == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, MESSAGE_INVALID_PID);
@@ -104,7 +110,7 @@ syscall_result_t syscall_send_message(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 		source = payload;
 	}
 
-	result = message_queue_send(&target->message_queue, source, length);
+	result = message_queue_send(&target->message_queue, sender_pid, source, length);
 	if (result == MESSAGE_OK) return syscall_result_ok(0u);
 	if (result == MESSAGE_INVALID_ARGUMENTS) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	return syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
@@ -115,7 +121,8 @@ syscall_result_t syscall_recv_message(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 	struct process*              process;
 	struct address_space*        space;
 	size_t                       buffer_size;
-	size_t                       length = 0u;
+	size_t                       length     = 0u;
+	process_id_t                 sender_pid = PROCESS_PID_INVALID;
 	enum message_result          result;
 	enum address_transfer_result transfer_result;
 	syscall_result_t             copy_result;
@@ -132,6 +139,7 @@ syscall_result_t syscall_recv_message(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 	if ((uintptr_t)buffer_size != arg2) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 2u);
 	if (buffer_size > 0u && arg0 == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	if (arg1 == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 1u);
+	if (arg3 == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 3u);
 
 	space = syscall_current_user_space();
 
@@ -143,7 +151,7 @@ syscall_result_t syscall_recv_message(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 		}
 	}
 
-	result = message_queue_receive(&process->message_queue, payload, buffer_size, &length);
+	result = message_queue_receive(&process->message_queue, payload, buffer_size, &length, &sender_pid);
 	if (result == MESSAGE_NO_MESSAGE) return syscall_result_ok(0u);
 	if (result == MESSAGE_INVALID_ARGUMENTS) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	if (result == MESSAGE_TOO_LARGE) {
@@ -157,6 +165,9 @@ syscall_result_t syscall_recv_message(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 	if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
 
 	copy_result = syscall_write_uintptr_arg(space, arg1, 1u, (uintptr_t)length);
+	if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
+
+	copy_result = syscall_write_uintptr_arg(space, arg3, 3u, (uintptr_t)sender_pid);
 	if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
 
 	return syscall_result_ok(1u);

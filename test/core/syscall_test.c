@@ -1124,9 +1124,12 @@ Test(syscall, message_recv_reports_empty_queue) {
 	};
 	vmm_id_t         buffer_id = VMM_ID_INVALID;
 	vmm_id_t         length_id = VMM_ID_INVALID;
+	vmm_id_t         sender_id = VMM_ID_INVALID;
 	void*            buffer_base;
 	void*            length_base;
+	void*            sender_base;
 	uintptr_t        length_value = 42u;
+	uintptr_t        sender_value = 77u;
 	syscall_result_t result;
 
 	syscall_test_init_process_environment();
@@ -1137,14 +1140,23 @@ Test(syscall, message_recv_reports_empty_queue) {
 	space = process_address_space(process);
 	cr_assert(vmm_alloc(space, &params, &buffer_id, &buffer_base), "failed to allocate recv buffer");
 	cr_assert(vmm_alloc(space, &params, &length_id, &length_base), "failed to allocate length buffer");
+	cr_assert(vmm_alloc(space, &params, &sender_id, &sender_base), "failed to allocate sender buffer");
 	cr_assert_eq(address_space_write_uintptr(space, (uintptr_t)length_base, length_value), ADDRESS_TRANSFER_OK);
+	cr_assert_eq(address_space_write_uintptr(space, (uintptr_t)sender_base, sender_value), ADDRESS_TRANSFER_OK);
 
-	result = syscall_dispatch(
-		SYSCALL_RECV_MESSAGE, (uintptr_t)buffer_base, (uintptr_t)length_base, MESSAGE_MAX_SIZE, 0u, 0u, 0u);
+	result = syscall_dispatch(SYSCALL_RECV_MESSAGE,
+	                          (uintptr_t)buffer_base,
+	                          (uintptr_t)length_base,
+	                          MESSAGE_MAX_SIZE,
+	                          (uintptr_t)sender_base,
+	                          0u,
+	                          0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(result.value, 0u);
 	cr_assert_eq(address_space_read_uintptr(space, (uintptr_t)length_base, &length_value), ADDRESS_TRANSFER_OK);
 	cr_assert_eq(length_value, 42u, "empty recv should not update length");
+	cr_assert_eq(address_space_read_uintptr(space, (uintptr_t)sender_base, &sender_value), ADDRESS_TRANSFER_OK);
+	cr_assert_eq(sender_value, 77u, "empty recv should not update sender");
 
 	thread_mark_zombie(&main_thread->thread);
 	cr_assert(process_destroy(process), "process_destroy failed");
@@ -1165,15 +1177,18 @@ Test(syscall, message_send_and_recv_roundtrip) {
 		.kind        = VMM_KIND_GENERIC,
 		.map_flags   = VMM_MAP_LAZY,
 	};
-	vmm_id_t         send_id   = VMM_ID_INVALID;
-	vmm_id_t         recv_id   = VMM_ID_INVALID;
-	vmm_id_t         len_id    = VMM_ID_INVALID;
-	void*            send_base = NULL;
-	void*            recv_base = NULL;
-	void*            len_base  = NULL;
-	const char       payload[] = "syscall-message";
+	vmm_id_t         send_id     = VMM_ID_INVALID;
+	vmm_id_t         recv_id     = VMM_ID_INVALID;
+	vmm_id_t         len_id      = VMM_ID_INVALID;
+	vmm_id_t         sender_id   = VMM_ID_INVALID;
+	void*            send_base   = NULL;
+	void*            recv_base   = NULL;
+	void*            len_base    = NULL;
+	void*            sender_base = NULL;
+	const char       payload[]   = "syscall-message";
 	char             received[sizeof(payload)];
 	uintptr_t        length_value = 0u;
+	uintptr_t        sender_value = 0u;
 	syscall_result_t result;
 
 	syscall_test_init_process_environment();
@@ -1198,23 +1213,40 @@ Test(syscall, message_send_and_recv_roundtrip) {
 
 	cr_assert(vmm_alloc(target_space, &params, &recv_id, &recv_base), "failed to allocate recv buffer");
 	cr_assert(vmm_alloc(target_space, &params, &len_id, &len_base), "failed to allocate length buffer");
+	cr_assert(vmm_alloc(target_space, &params, &sender_id, &sender_base), "failed to allocate sender buffer");
 	cr_assert_eq(address_space_write_uintptr(target_space, (uintptr_t)len_base, 0u), ADDRESS_TRANSFER_OK);
+	cr_assert_eq(address_space_write_uintptr(target_space, (uintptr_t)sender_base, 0u), ADDRESS_TRANSFER_OK);
 
 	sched_set_current(cpu_current(), &target_thread->thread);
-	result =
-		syscall_dispatch(SYSCALL_RECV_MESSAGE, (uintptr_t)recv_base, (uintptr_t)len_base, MESSAGE_MAX_SIZE, 0u, 0u, 0u);
+	result = syscall_dispatch(SYSCALL_RECV_MESSAGE,
+	                          (uintptr_t)recv_base,
+	                          (uintptr_t)len_base,
+	                          MESSAGE_MAX_SIZE,
+	                          (uintptr_t)sender_base,
+	                          0u,
+	                          0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(result.value, 1u);
 	cr_assert_eq(address_space_read_uintptr(target_space, (uintptr_t)len_base, &length_value), ADDRESS_TRANSFER_OK);
 	cr_assert_eq(length_value, sizeof(payload));
+	cr_assert_eq(address_space_read_uintptr(target_space, (uintptr_t)sender_base, &sender_value), ADDRESS_TRANSFER_OK);
+	cr_assert_eq(sender_value, (uintptr_t)process_pid(caller));
 	cr_assert_eq(address_space_copy_from(target_space, (uintptr_t)recv_base, received, sizeof(received)),
 	             ADDRESS_TRANSFER_OK);
 	cr_assert_eq(memcmp(received, payload, sizeof(payload)), 0);
 
-	result =
-		syscall_dispatch(SYSCALL_RECV_MESSAGE, (uintptr_t)recv_base, (uintptr_t)len_base, MESSAGE_MAX_SIZE, 0u, 0u, 0u);
+	cr_assert_eq(address_space_write_uintptr(target_space, (uintptr_t)sender_base, 88u), ADDRESS_TRANSFER_OK);
+	result = syscall_dispatch(SYSCALL_RECV_MESSAGE,
+	                          (uintptr_t)recv_base,
+	                          (uintptr_t)len_base,
+	                          MESSAGE_MAX_SIZE,
+	                          (uintptr_t)sender_base,
+	                          0u,
+	                          0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(result.value, 0u);
+	cr_assert_eq(address_space_read_uintptr(target_space, (uintptr_t)sender_base, &sender_value), ADDRESS_TRANSFER_OK);
+	cr_assert_eq(sender_value, 88u, "empty recv should not update sender");
 
 	thread_mark_zombie(&target_thread->thread);
 	thread_mark_zombie(&caller_thread->thread);
@@ -1237,15 +1269,18 @@ Test(syscall, message_recv_reports_required_size_when_buffer_too_small) {
 		.kind        = VMM_KIND_GENERIC,
 		.map_flags   = VMM_MAP_LAZY,
 	};
-	vmm_id_t         send_id   = VMM_ID_INVALID;
-	vmm_id_t         recv_id   = VMM_ID_INVALID;
-	vmm_id_t         len_id    = VMM_ID_INVALID;
-	void*            send_base = NULL;
-	void*            recv_base = NULL;
-	void*            len_base  = NULL;
-	const char       payload[] = "syscall-message";
+	vmm_id_t         send_id     = VMM_ID_INVALID;
+	vmm_id_t         recv_id     = VMM_ID_INVALID;
+	vmm_id_t         len_id      = VMM_ID_INVALID;
+	vmm_id_t         sender_id   = VMM_ID_INVALID;
+	void*            send_base   = NULL;
+	void*            recv_base   = NULL;
+	void*            len_base    = NULL;
+	void*            sender_base = NULL;
+	const char       payload[]   = "syscall-message";
 	char             received[sizeof(payload)];
 	uintptr_t        length_value = 0u;
+	uintptr_t        sender_value = 55u;
 	syscall_result_t result;
 
 	syscall_test_init_process_environment();
@@ -1270,21 +1305,33 @@ Test(syscall, message_recv_reports_required_size_when_buffer_too_small) {
 
 	cr_assert(vmm_alloc(target_space, &params, &recv_id, &recv_base), "failed to allocate recv buffer");
 	cr_assert(vmm_alloc(target_space, &params, &len_id, &len_base), "failed to allocate length buffer");
+	cr_assert(vmm_alloc(target_space, &params, &sender_id, &sender_base), "failed to allocate sender buffer");
 	cr_assert_eq(address_space_write_uintptr(target_space, (uintptr_t)len_base, 0u), ADDRESS_TRANSFER_OK);
+	cr_assert_eq(address_space_write_uintptr(target_space, (uintptr_t)sender_base, sender_value), ADDRESS_TRANSFER_OK);
 
 	sched_set_current(cpu_current(), &target_thread->thread);
-	result = syscall_dispatch(SYSCALL_RECV_MESSAGE, (uintptr_t)recv_base, (uintptr_t)len_base, 4u, 0u, 0u, 0u);
+	result = syscall_dispatch(
+		SYSCALL_RECV_MESSAGE, (uintptr_t)recv_base, (uintptr_t)len_base, 4u, (uintptr_t)sender_base, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 	cr_assert_eq(result.value, 2u);
 	cr_assert_eq(address_space_read_uintptr(target_space, (uintptr_t)len_base, &length_value), ADDRESS_TRANSFER_OK);
 	cr_assert_eq(length_value, sizeof(payload));
+	cr_assert_eq(address_space_read_uintptr(target_space, (uintptr_t)sender_base, &sender_value), ADDRESS_TRANSFER_OK);
+	cr_assert_eq(sender_value, 55u, "too-small recv should not update sender");
 
-	result =
-		syscall_dispatch(SYSCALL_RECV_MESSAGE, (uintptr_t)recv_base, (uintptr_t)len_base, MESSAGE_MAX_SIZE, 0u, 0u, 0u);
+	result = syscall_dispatch(SYSCALL_RECV_MESSAGE,
+	                          (uintptr_t)recv_base,
+	                          (uintptr_t)len_base,
+	                          MESSAGE_MAX_SIZE,
+	                          (uintptr_t)sender_base,
+	                          0u,
+	                          0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(result.value, 1u);
 	cr_assert_eq(address_space_read_uintptr(target_space, (uintptr_t)len_base, &length_value), ADDRESS_TRANSFER_OK);
 	cr_assert_eq(length_value, sizeof(payload));
+	cr_assert_eq(address_space_read_uintptr(target_space, (uintptr_t)sender_base, &sender_value), ADDRESS_TRANSFER_OK);
+	cr_assert_eq(sender_value, (uintptr_t)process_pid(caller));
 	cr_assert_eq(address_space_copy_from(target_space, (uintptr_t)recv_base, received, sizeof(received)),
 	             ADDRESS_TRANSFER_OK);
 	cr_assert_eq(memcmp(received, payload, sizeof(payload)), 0);
