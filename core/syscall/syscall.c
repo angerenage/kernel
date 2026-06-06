@@ -124,6 +124,11 @@ static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 
 	[SYSCALL_SEND_MESSAGE] = syscall_send_message,
 	[SYSCALL_RECV_MESSAGE] = syscall_recv_message,
+
+	[SYSCALL_CHANNEL_CREATE]  = syscall_channel_create,
+	[SYSCALL_CHANNEL_SEND]    = syscall_channel_send,
+	[SYSCALL_CHANNEL_RECV]    = syscall_channel_recv,
+	[SYSCALL_CHANNEL_DESTROY] = syscall_channel_destroy,
 };
 
 syscall_result_t syscall_dispatch(uintptr_t number, uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,

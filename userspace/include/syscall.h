@@ -1,5 +1,6 @@
 #pragma once
 
+#include <base/channel.h>
 #include <base/syscall.h>
 #include <base/vmm.h>
 #include <stdbool.h>
@@ -195,4 +196,31 @@ static inline syscall_result_t recv_message(void* buffer, size_t buffer_size, si
 	               (uintptr_t)out_sender_pid,
 	               0u,
 	               0u);
+}
+
+/* Create a new channel and return its ID. */
+static inline syscall_result_t channel_create(channel_id_t* out_id) {
+	return syscall(SYSCALL_CHANNEL_CREATE, (uintptr_t)out_id, 0u, 0u, 0u, 0u, 0u);
+}
+
+/* Send a message to a channel by ID. */
+static inline syscall_result_t channel_send(channel_id_t channel_id, const void* buffer, size_t length) {
+	return syscall(SYSCALL_CHANNEL_SEND, (uintptr_t)channel_id, (uintptr_t)buffer, (uintptr_t)length, 0u, 0u, 0u);
+}
+
+/* Receive a message from a channel by ID. */
+static inline syscall_result_t channel_recv(channel_id_t channel_id, void* buffer, size_t buffer_size,
+                                            size_t* out_length, uintptr_t* out_sender_pid) {
+	return syscall(SYSCALL_CHANNEL_RECV,
+	               (uintptr_t)channel_id,
+	               (uintptr_t)buffer,
+	               (uintptr_t)buffer_size,
+	               (uintptr_t)out_length,
+	               (uintptr_t)out_sender_pid,
+	               0u);
+}
+
+/* Destroy a channel by ID. */
+static inline syscall_result_t channel_destroy(channel_id_t channel_id) {
+	return syscall(SYSCALL_CHANNEL_DESTROY, (uintptr_t)channel_id, 0u, 0u, 0u, 0u, 0u);
 }
