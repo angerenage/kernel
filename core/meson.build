@@ -1,4 +1,5 @@
 core_sources = files(
+	'channel.c',
 	'cpu/cpu.c',
 	'cpu/irq.c',
 	'exception.c',

@@ -235,6 +235,7 @@ enum process_result process_create(struct process** out_process, const char* nam
 	spinlock_init_class(&process->lock, "process", SPINLOCK_ORDER_PROCESS, SPINLOCK_FLAG_IRQSAVE);
 	thread_wait_queue_init(&process->join_wait_queue);
 	message_queue_init(&process->message_queue);
+	process_channel_state_init(&process->channel_state);
 
 	id_result = id_table_alloc(&process_table, process, &pid);
 	if (id_result != ID_TABLE_OK) {
@@ -394,6 +395,7 @@ bool process_destroy(struct process* process) {
 	}
 
 	vmm_address_space_deinit(&process->address_space);
+	process_channel_state_deinit(&process->channel_state);
 	(void)id_table_remove(&process_table, process->pid, NULL);
 	free((void*)process->name);
 	memset(process, 0, sizeof(*process));

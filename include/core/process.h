@@ -1,6 +1,7 @@
 #pragma once
 
 #include <base/process.h>
+#include <core/channel.h>
 #include <core/message.h>
 #include <core/thread.h>
 #include <core/vaddr_alloc.h>
@@ -103,21 +104,22 @@ struct process_thread_params {
 };
 
 struct process {
-	process_id_t             pid;
-	const char*              name;
-	enum process_state       state;
-	uintptr_t                exit_code;
-	size_t                   thread_count;
-	struct process*          parent;
-	struct uthread*          main_thread;
-	struct uthread*          thread_head;
-	struct uthread*          thread_tail;
-	struct thread_wait_queue join_wait_queue;
-	struct message_queue     message_queue;
-	struct address_space     address_space;
-	struct spinlock          lock;
-	bool                     detached;
-	bool                     joined;
+	process_id_t                 pid;
+	const char*                  name;
+	enum process_state           state;
+	uintptr_t                    exit_code;
+	size_t                       thread_count;
+	struct process*              parent;
+	struct uthread*              main_thread;
+	struct uthread*              thread_head;
+	struct uthread*              thread_tail;
+	struct thread_wait_queue     join_wait_queue;
+	struct message_queue         message_queue;
+	struct process_channel_state channel_state;
+	struct address_space         address_space;
+	struct spinlock              lock;
+	bool                         detached;
+	bool                         joined;
 };
 
 /* Allocate, initialize, and queue a userspace thread inside process. Detached threads do not publish a handle. */
