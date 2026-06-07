@@ -59,6 +59,10 @@ enum {
 	SYSCALL_CHANNEL_RECV,
 	SYSCALL_CHANNEL_DESTROY,
 
+	/* Boot modules - temporary solution for loading additional ELF files */
+	SYSCALL_MODULE_RESOLVE,
+	SYSCALL_MODULE_MAP,
+
 	SYSCALL_COUNT,
 };
 

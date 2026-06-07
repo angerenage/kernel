@@ -19,6 +19,7 @@ core_sources = files(
 	'syscall/channel.c',
 	'syscall/message.c',
 	'syscall/misc.c',
+	'syscall/module.c',
 	'syscall/process.c',
 	'syscall/syscall.c',
 	'syscall/thread.c',

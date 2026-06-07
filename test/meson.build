@@ -24,6 +24,7 @@ hal_mock_sources = files(
 	'mocks/hal/interrupts.c',
 	'mocks/hal/paging.c',
 	'mocks/hal/userspace.c',
+	'mocks/kernel/boot.c',
 )
 
 core_test_lib = static_library(

@@ -51,7 +51,7 @@ static struct address_space* syscall_current_user_space(void) {
 	return current->address_space;
 }
 
-static syscall_result_t syscall_copy_out(uintptr_t ptr_arg_index, uintptr_t dst, const void* src, size_t size) {
+syscall_result_t syscall_copy_out(uintptr_t ptr_arg_index, uintptr_t dst, const void* src, size_t size) {
 	struct address_space*        caller_space;
 	enum address_transfer_result transfer_result;
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <base/channel.h>
+#include <base/module.h>
 #include <base/syscall.h>
 #include <base/vmm.h>
 #include <stdbool.h>
@@ -223,4 +224,14 @@ static inline syscall_result_t channel_recv(channel_id_t channel_id, void* buffe
 /* Destroy a channel by ID. */
 static inline syscall_result_t channel_destroy(channel_id_t channel_id) {
 	return syscall(SYSCALL_CHANNEL_DESTROY, (uintptr_t)channel_id, 0u, 0u, 0u, 0u, 0u);
+}
+
+/* Resolve a boot module by name and get its info. */
+static inline syscall_result_t module_resolve(const char* name, size_t name_length, struct module_info* out_info) {
+	return syscall(SYSCALL_MODULE_RESOLVE, (uintptr_t)name, (uintptr_t)name_length, (uintptr_t)out_info, 0u, 0u, 0u);
+}
+
+/* Map a boot module into the current process and return the virtual address. */
+static inline syscall_result_t module_map(size_t index) {
+	return syscall(SYSCALL_MODULE_MAP, index, 0u, 0u, 0u, 0u, 0u);
 }
