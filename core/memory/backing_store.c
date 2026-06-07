@@ -66,6 +66,12 @@ void backing_store_release(struct backing_store* store) {
 	backing_store_init(store, store->page_count);
 }
 
+void backing_store_release_metadata(struct backing_store* store) {
+	if (!store) return;
+	if (store->pages != NULL) free_metadata(store->pages_phys, store->metadata_pages);
+	backing_store_init(store, store->page_count);
+}
+
 void backing_store_release_if_empty(struct backing_store* store) {
 	if (!store || !store->pages || store->mapped_count != 0) return;
 	for (size_t page = 0; page < store->page_count; page++) {

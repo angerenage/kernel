@@ -39,6 +39,7 @@ static inline uintptr_t backing_page_make(uintptr_t phys, uintptr_t flags) {
 void      backing_store_init(struct backing_store* store, size_t page_count);
 bool      backing_store_ensure(struct backing_store* store);
 void      backing_store_release(struct backing_store* store);
+void      backing_store_release_metadata(struct backing_store* store);
 void      backing_store_release_if_empty(struct backing_store* store);
 bool      backing_store_ensure_page(struct backing_store* store, size_t page_index, uintptr_t* out_phys,
                                     bool* out_allocated);

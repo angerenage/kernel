@@ -32,6 +32,7 @@ enum vmm_kind {
 	VMM_KIND_KERNEL_TEXT,
 	VMM_KIND_KERNEL_RODATA,
 	VMM_KIND_KERNEL_DATA,
+	VMM_KIND_PHYSICAL,
 };
 
 /* Mapping state of a tracked allocation. */

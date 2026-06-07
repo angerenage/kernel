@@ -105,6 +105,44 @@ bool vmm_alloc_at(struct address_space* space, void* base, const struct vmm_allo
 	return allocated_base == base;
 }
 
+bool vmm_alloc_phys(struct address_space* space, uintptr_t phys_base, size_t page_count, vmm_prot_t prot,
+                    void* virt_base, vmm_id_t* out_id, void** out_base) {
+	struct memory_region*   region;
+	vmm_id_t                id          = VMM_ID_INVALID;
+	void*                   region_base = NULL;
+	struct vmm_alloc_params params;
+	struct irq_state        state;
+
+	if (out_id) *out_id = VMM_ID_INVALID;
+	if (out_base) *out_base = NULL;
+	if (!initialized || !space || page_count == 0) return false;
+	if (!prot_is_valid(prot)) return false;
+	if (out_id == NULL && out_base == NULL) return false;
+
+	params = (struct vmm_alloc_params){
+		.page_count = page_count,
+		.prot       = prot,
+		.kind       = VMM_KIND_PHYSICAL,
+	};
+
+	state = spinlock_lock_irqsave(&vmm_lock);
+	if (!memory_region_create_phys(
+			space, (uintptr_t)virt_base, phys_base, &params, &region, (uintptr_t*)&region_base)) {
+		spinlock_unlock_irqrestore(&vmm_lock, state);
+		return false;
+	}
+	if (!region_pager_map_all(space, region)) {
+		(void)memory_region_destroy(space, region);
+		spinlock_unlock_irqrestore(&vmm_lock, state);
+		return false;
+	}
+	id = region->id;
+	if (out_id) *out_id = id;
+	if (out_base) *out_base = region_base;
+	spinlock_unlock_irqrestore(&vmm_lock, state);
+	return true;
+}
+
 bool vmm_free(struct address_space* space, vmm_id_t id) {
 	struct memory_region* region;
 	struct irq_state      state;

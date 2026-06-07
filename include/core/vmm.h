@@ -33,6 +33,15 @@ bool vmm_alloc(struct address_space* space, const struct vmm_alloc_params* param
 /* Create a tracked virtual allocation whose usable base is exactly base. */
 bool vmm_alloc_at(struct address_space* space, void* base, const struct vmm_alloc_params* params, vmm_id_t* out_id);
 
+/*
+ * Map a range of external physical pages into an address space. The VMM does not own the physical pages and
+ * they are not released when the mapping is removed; the caller manages their lifetime.
+ *
+ * - virt_base: 0 to auto-allocate, or a specific page-aligned virtual address
+ */
+bool vmm_alloc_phys(struct address_space* space, uintptr_t phys_base, size_t page_count, vmm_prot_t prot,
+                    void* virt_base, vmm_id_t* out_id, void** out_base);
+
 /* Destroy allocation metadata and backing owned by an explicit address space. */
 bool vmm_free(struct address_space* space, vmm_id_t id);
 

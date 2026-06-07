@@ -66,6 +66,7 @@ bool memory_region_params_allowed(const struct address_space* space, const struc
 	case VMM_KIND_GENERIC:
 	case VMM_KIND_HEAP:
 	case VMM_KIND_STACK:
+	case VMM_KIND_PHYSICAL:
 		return true;
 	case VMM_KIND_MMIO:
 	case VMM_KIND_KERNEL_TEXT:
@@ -201,6 +202,7 @@ bool memory_region_create(struct address_space* space, uintptr_t requested_base,
 		.kind                = params->kind,
 		.guard_pages         = guard_pages,
 		.map_flags           = params->map_flags,
+		.owns_pages          = true,
 		.used                = true,
 	};
 	backing_store_init(&region->backing, params->page_count);
@@ -212,9 +214,83 @@ bool memory_region_create(struct address_space* space, uintptr_t requested_base,
 	return true;
 }
 
+bool memory_region_create_phys(struct address_space* space, uintptr_t requested_base, uintptr_t phys_base,
+                               const struct vmm_alloc_params* params, struct memory_region** out_region,
+                               uintptr_t* out_base) {
+	struct memory_region* region;
+	uintptr_t             reserved_base = 0;
+	uintptr_t             base          = 0;
+	size_t                align_pages;
+	size_t                reserved_page_count;
+
+	if (out_region) *out_region = NULL;
+	if (out_base) *out_base = 0;
+	if (!space || !params || !out_region || params->page_count == 0) return false;
+	if ((phys_base & (PMM_PAGE_SIZE - 1u)) != 0) return false;
+	if (requested_base != 0 && (requested_base & (PMM_PAGE_SIZE - 1u)) != 0) return false;
+	if (!address_space_is_initialized(space)) return false;
+	if (params->kind != VMM_KIND_PHYSICAL) return false;
+	if (params->guard_pages != 0) return false;
+	if ((params->map_flags & ~((uint64_t)VMM_MAP_LAZY)) != 0) return false;
+
+	align_pages = params->align_pages != 0 ? params->align_pages : VMM_MIN_ALIGN_PAGES;
+	if ((align_pages & (align_pages - 1u)) != 0) return false;
+	reserved_page_count = params->page_count;
+
+	if (requested_base == 0) {
+		if (!address_space_reserve(space, reserved_page_count, align_pages, &reserved_base)) return false;
+	}
+	else {
+		if (((requested_base / (uintptr_t)PMM_PAGE_SIZE) & (uintptr_t)(align_pages - 1u)) != 0) return false;
+		if (!address_space_reserve_at(space, requested_base, reserved_page_count)) return false;
+		reserved_base = requested_base;
+	}
+	base = reserved_base;
+	if (!range_contains(space, reserved_base, reserved_page_count) || !memory_region_ensure_capacity(space)) {
+		(void)address_space_release(space, reserved_base, reserved_page_count);
+		return false;
+	}
+	region = find_free_slot(space);
+	if (!region) {
+		(void)address_space_release(space, reserved_base, reserved_page_count);
+		return false;
+	}
+	*region = (struct memory_region){
+		.id                  = space->next_region_id++,
+		.reserved_base       = reserved_base,
+		.base                = base,
+		.reserved_page_count = reserved_page_count,
+		.page_count          = params->page_count,
+		.prot                = params->prot,
+		.kind                = params->kind,
+		.guard_pages         = 0,
+		.map_flags           = params->map_flags,
+		.owns_pages          = false,
+		.used                = true,
+	};
+	backing_store_init(&region->backing, params->page_count);
+	if (!backing_store_ensure(&region->backing)) {
+		(void)address_space_release(space, reserved_base, reserved_page_count);
+		memset(region, 0, sizeof(*region));
+		return false;
+	}
+	for (size_t i = 0; i < params->page_count; i++) {
+		backing_store_set_entry(&region->backing, i, backing_page_make(phys_base + i * (uintptr_t)PMM_PAGE_SIZE, 0));
+	}
+	space->region_count++;
+	*out_region = region;
+	*out_base   = base;
+	return true;
+}
+
 bool memory_region_destroy(struct address_space* space, struct memory_region* region) {
 	if (!space || !region || !region->used) return false;
-	backing_store_release(&region->backing);
+	if (region->owns_pages) {
+		backing_store_release(&region->backing);
+	}
+	else {
+		backing_store_release_metadata(&region->backing);
+	}
 	(void)address_space_release(space, region->reserved_base, region->reserved_page_count);
 	memset(region, 0, sizeof(*region));
 	space->region_count--;
@@ -226,7 +302,12 @@ void memory_region_destroy_all(struct address_space* space) {
 	if (space->regions != NULL) {
 		for (size_t i = 0; i < space->regions_capacity; i++) {
 			if (!space->regions[i].used) continue;
-			backing_store_release(&space->regions[i].backing);
+			if (space->regions[i].owns_pages) {
+				backing_store_release(&space->regions[i].backing);
+			}
+			else {
+				backing_store_release_metadata(&space->regions[i].backing);
+			}
 			space->regions[i].used = false;
 		}
 		free_metadata(space->regions_phys, space->regions_page_count);
