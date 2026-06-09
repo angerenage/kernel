@@ -110,6 +110,21 @@ static bool usable_page_range(const struct mem_range* source, uintptr_t* out_bas
 	return true;
 }
 
+static bool early_bump_alloc(uintptr_t* cursor, uintptr_t cursor_end, size_t size, size_t align, uintptr_t* out_phys) {
+	uint64_t normalized_align = normalize_align_u64(align, 1u);
+	uint64_t aligned;
+	uint64_t alloc_end;
+
+	if (!cursor || !out_phys || size == 0 || normalized_align == 0) return false;
+	if (!align_up_u64((uint64_t)*cursor, normalized_align, &aligned)) return false;
+	if (add_overflow_u64(aligned, (uint64_t)size, &alloc_end)) return false;
+	if (alloc_end > (uint64_t)cursor_end) return false;
+
+	*out_phys = (uintptr_t)aligned;
+	*cursor   = (uintptr_t)alloc_end;
+	return true;
+}
+
 static bool bootstrap_alloc(struct pmm_bootstrap_cursor* cursors, size_t cursor_count, size_t size, size_t align,
                             uintptr_t* out_base, struct pmm_reserved_span* out_reserved) {
 	uint64_t normalized_align = normalize_align_u64(align, 1u);
@@ -193,13 +208,19 @@ static bool find_contiguous_free(const struct pmm_range* range, size_t count, si
 }
 
 bool pmm_init(const struct mem_range* memory_map, size_t range_count, uintptr_t direct_map_offset) {
-	size_t                   usable_ranges  = 0;
-	size_t                   usable_pages   = 0;
-	size_t                   range_index    = 0;
-	size_t                   reserved_count = 0;
-	size_t                   ranges_bytes;
-	uintptr_t                ranges_phys = 0;
-	struct pmm_reserved_span ranges_reserved;
+	size_t                       usable_ranges  = 0;
+	size_t                       usable_pages   = 0;
+	size_t                       range_index    = 0;
+	size_t                       reserved_count = 0;
+	size_t                       ranges_bytes;
+	uintptr_t                    ranges_phys = 0;
+	struct pmm_reserved_span     ranges_reserved;
+	struct pmm_init_range*       init_ranges       = NULL;
+	struct pmm_bootstrap_cursor* bootstrap_cursors = NULL;
+	struct pmm_reserved_span*    reserved_spans    = NULL;
+	uintptr_t                    first_usable_base = 0;
+	uintptr_t                    first_usable_end  = 0;
+	uintptr_t                    bump              = 0;
 
 	spinlock_lock(&pmm_lock);
 
@@ -226,6 +247,17 @@ bool pmm_init(const struct mem_range* memory_map, size_t range_count, uintptr_t 
 			return false;
 		}
 
+		if (usable_ranges == 0) {
+			uint64_t span;
+
+			if (mul_overflow_u64((uint64_t)page_count, PMM_PAGE_SIZE, &span)) {
+				spinlock_unlock(&pmm_lock);
+				return false;
+			}
+			first_usable_base = base;
+			first_usable_end  = base + (uintptr_t)span;
+		}
+
 		usable_ranges++;
 		usable_pages += page_count;
 	}
@@ -235,9 +267,46 @@ bool pmm_init(const struct mem_range* memory_map, size_t range_count, uintptr_t 
 		return false;
 	}
 
-	struct pmm_init_range       init_ranges[usable_ranges];
-	struct pmm_bootstrap_cursor bootstrap_cursors[usable_ranges];
-	struct pmm_reserved_span    reserved_spans[usable_ranges + 1u];
+	{
+		size_t    init_bytes;
+		size_t    cursor_bytes;
+		size_t    span_bytes;
+		size_t    total_bytes;
+		uintptr_t block_phys = 0;
+
+		bump = first_usable_base;
+
+		if (mul_overflow_size(usable_ranges, sizeof(struct pmm_init_range), &init_bytes)) {
+			spinlock_unlock(&pmm_lock);
+			return false;
+		}
+		if (mul_overflow_size(usable_ranges, sizeof(struct pmm_bootstrap_cursor), &cursor_bytes)) {
+			spinlock_unlock(&pmm_lock);
+			return false;
+		}
+		if (mul_overflow_size(usable_ranges + 1u, sizeof(struct pmm_reserved_span), &span_bytes)) {
+			spinlock_unlock(&pmm_lock);
+			return false;
+		}
+		if (add_overflow_size(init_bytes, cursor_bytes, &total_bytes)) {
+			spinlock_unlock(&pmm_lock);
+			return false;
+		}
+		if (add_overflow_size(total_bytes, span_bytes, &total_bytes)) {
+			spinlock_unlock(&pmm_lock);
+			return false;
+		}
+
+		if (!early_bump_alloc(&bump, first_usable_end, total_bytes, _Alignof(uint64_t), &block_phys)) {
+			spinlock_unlock(&pmm_lock);
+			return false;
+		}
+
+		uintptr_t virt    = (uintptr_t)hhdm_phys_to_virt(block_phys);
+		init_ranges       = (struct pmm_init_range*)virt;
+		bootstrap_cursors = (struct pmm_bootstrap_cursor*)(virt + init_bytes);
+		reserved_spans    = (struct pmm_reserved_span*)(virt + init_bytes + cursor_bytes);
+	}
 
 	for (size_t i = 0; i < range_count; i++) {
 		uintptr_t base;
@@ -261,6 +330,8 @@ bool pmm_init(const struct mem_range* memory_map, size_t range_count, uintptr_t 
 		};
 		range_index++;
 	}
+
+	bootstrap_cursors[0].base = bump;
 
 	if (mul_overflow_size(usable_ranges, sizeof(struct pmm_range), &ranges_bytes)) {
 		spinlock_unlock(&pmm_lock);
