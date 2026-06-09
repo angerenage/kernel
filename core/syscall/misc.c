@@ -1,6 +1,7 @@
 #include <base/display.h>
 #include <core/address_transfer.h>
 #include <core/process.h>
+#include <libc/stdlib.h>
 #include <limits.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -38,7 +39,6 @@ syscall_result_t syscall_nop(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uin
 
 syscall_result_t syscall_print(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
                                uintptr_t arg5) {
-	uint8_t                      buffer[256];
 	struct process*              process;
 	struct address_space*        space;
 	enum address_transfer_result transfer_result;
@@ -65,14 +65,23 @@ syscall_result_t syscall_print(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, u
 		space, arg0, length, ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
 	if (transfer_result != ADDRESS_TRANSFER_OK) return syscall_result_from_address_transfer(transfer_result, 0u);
 
-	while (written < length) {
-		size_t chunk = length - written;
+	{
+		uint8_t* buffer = malloc(256);
+		if (buffer == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 
-		if (chunk > sizeof(buffer)) chunk = sizeof(buffer);
-		transfer_result = address_space_copy_from(space, arg0 + written, buffer, chunk);
-		if (transfer_result != ADDRESS_TRANSFER_OK) return syscall_result_from_address_transfer(transfer_result, 0u);
-		base_display_write((const char*)buffer, chunk);
-		written += chunk;
+		while (written < length) {
+			size_t chunk = length - written;
+
+			if (chunk > 256u) chunk = 256u;
+			transfer_result = address_space_copy_from(space, arg0 + written, buffer, chunk);
+			if (transfer_result != ADDRESS_TRANSFER_OK) {
+				free(buffer);
+				return syscall_result_from_address_transfer(transfer_result, 0u);
+			}
+			base_display_write((const char*)buffer, chunk);
+			written += chunk;
+		}
+		free(buffer);
 	}
 	return syscall_result_ok((uintptr_t)length);
 }

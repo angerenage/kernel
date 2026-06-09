@@ -7,6 +7,7 @@
 #include <core/sched.h>
 #include <core/thread.h>
 #include <core/vaddr_alloc.h>
+#include <libc/stdlib.h>
 #include <stdbool.h>
 #include <string.h>
 
@@ -142,9 +143,10 @@ syscall_result_t syscall_channel_send(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 	enum address_transfer_result transfer_result;
 	enum channel_result          ch_result;
 	size_t                       length;
-	uint8_t                      payload[MESSAGE_MAX_SIZE];
+	uint8_t*                     heap_payload;
 	const void*                  source;
 	process_id_t                 sender_pid;
+	syscall_result_t             ret;
 
 	(void)arg3;
 	(void)arg4;
@@ -159,8 +161,14 @@ syscall_result_t syscall_channel_send(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 	if (length > MESSAGE_MAX_SIZE) return syscall_result_error(SYSCALL_STATUS_FAILED, MESSAGE_TOO_LARGE);
 	if (length > 0u && arg1 == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 1u);
 
+	heap_payload = malloc(MESSAGE_MAX_SIZE);
+	if (heap_payload == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 2u);
+
 	ch = channel_lookup((channel_id_t)arg0);
-	if (ch == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	if (ch == NULL) {
+		free(heap_payload);
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
 
 	space = syscall_current_user_space();
 	if (length == 0u) {
@@ -170,16 +178,19 @@ syscall_result_t syscall_channel_send(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 		source = (const void*)arg1;
 	}
 	else {
-		transfer_result = address_space_copy_from(space, arg1, payload, length);
+		transfer_result = address_space_copy_from(space, arg1, heap_payload, length);
 		if (transfer_result != ADDRESS_TRANSFER_OK) {
+			free(heap_payload);
 			return syscall_result_from_address_transfer(transfer_result, 1u);
 		}
-		source = payload;
+		source = heap_payload;
 	}
 
 	sender_pid = process_pid(process);
 	ch_result  = channel_send(ch, sender_pid, source, length);
-	return syscall_channel_result_to_syscall(ch_result);
+	ret        = syscall_channel_result_to_syscall(ch_result);
+	free(heap_payload);
+	return ret;
 }
 
 /* arg0 = channel_id_t channel_id, arg1 = void* buffer, arg2 = size_t buffer_size,
@@ -192,11 +203,12 @@ syscall_result_t syscall_channel_recv(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 	enum channel_result          ch_result;
 	enum address_transfer_result transfer_result;
 	syscall_result_t             copy_result;
+	syscall_result_t             ret;
 	size_t                       buffer_size;
 	size_t                       length     = 0u;
 	process_id_t                 sender_pid = PROCESS_PID_INVALID;
 	process_id_t                 caller_pid;
-	uint8_t                      payload[MESSAGE_MAX_SIZE];
+	uint8_t*                     heap_payload;
 
 	(void)arg5;
 
@@ -210,8 +222,14 @@ syscall_result_t syscall_channel_recv(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 	buffer_size = (size_t)arg2;
 	if ((uintptr_t)buffer_size != arg2) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 2u);
 
+	heap_payload = malloc(MESSAGE_MAX_SIZE);
+	if (heap_payload == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 2u);
+
 	ch = channel_lookup((channel_id_t)arg0);
-	if (ch == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	if (ch == NULL) {
+		free(heap_payload);
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
 
 	caller_pid = process_pid(process);
 	space      = syscall_current_user_space();
@@ -219,35 +237,42 @@ syscall_result_t syscall_channel_recv(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 		transfer_result = address_space_validate_range(
 			space, arg1, buffer_size, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
 		if (transfer_result != ADDRESS_TRANSFER_OK) {
+			free(heap_payload);
 			return syscall_result_from_address_transfer(transfer_result, 1u);
 		}
 	}
 
-	ch_result = channel_recv(ch, caller_pid, payload, buffer_size, &length, &sender_pid);
+	ch_result = channel_recv(ch, caller_pid, heap_payload, buffer_size, &length, &sender_pid);
 	if (ch_result == CHANNEL_NO_MESSAGE) {
+		free(heap_payload);
 		return syscall_result_ok(0u);
 	}
 	if (ch_result == CHANNEL_BUFFER_TOO_SMALL) {
 		copy_result = syscall_write_uintptr_arg(space, arg3, 3u, (uintptr_t)length);
+		free(heap_payload);
 		if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 2u);
 	}
 	if (ch_result != CHANNEL_OK) {
+		free(heap_payload);
 		return syscall_channel_result_to_syscall(ch_result);
 	}
 
-	copy_result = syscall_copy_to_user(space, arg1, payload, length, 1u);
+	copy_result = syscall_copy_to_user(space, arg1, heap_payload, length, 1u);
 	if (copy_result.status != SYSCALL_STATUS_OK) {
+		free(heap_payload);
 		return copy_result;
 	}
 	copy_result = syscall_write_uintptr_arg(space, arg3, 3u, (uintptr_t)length);
 	if (copy_result.status != SYSCALL_STATUS_OK) {
+		free(heap_payload);
 		return copy_result;
 	}
 	copy_result = syscall_write_uintptr_arg(space, arg4, 4u, (uintptr_t)sender_pid);
-	if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
-
-	return syscall_result_ok(1u);
+	ret         = (copy_result.status == SYSCALL_STATUS_OK) ? syscall_result_ok(1u)
+	                                                        : syscall_result_error(copy_result.status, copy_result.value);
+	free(heap_payload);
+	return ret;
 }
 
 /* arg0 = channel_id_t channel_id */

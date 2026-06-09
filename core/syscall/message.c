@@ -5,6 +5,7 @@
 #include <core/sched.h>
 #include <core/thread.h>
 #include <core/vaddr_alloc.h>
+#include <libc/stdlib.h>
 #include <stdbool.h>
 #include <string.h>
 
@@ -73,10 +74,11 @@ syscall_result_t syscall_send_message(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 	struct address_space*        space;
 	enum address_transfer_result transfer_result;
 	size_t                       length;
-	uint8_t                      payload[MESSAGE_MAX_SIZE];
+	uint8_t*                     heap_payload = NULL;
 	const void*                  source;
 	enum message_result          result;
 	process_id_t                 sender_pid = PROCESS_PID_INVALID;
+	syscall_result_t             ret;
 
 	(void)arg3;
 	(void)arg4;
@@ -87,13 +89,19 @@ syscall_result_t syscall_send_message(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 	if (length > MESSAGE_MAX_SIZE) return syscall_result_error(SYSCALL_STATUS_FAILED, MESSAGE_TOO_LARGE);
 	if (length > 0u && arg1 == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 1u);
 
+	heap_payload = malloc(MESSAGE_MAX_SIZE);
+	if (heap_payload == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 2u);
+
 	{
 		struct process* sender = process_current();
 		if (sender != NULL) sender_pid = process_pid(sender);
 	}
 
 	target = process_lookup((process_id_t)arg0);
-	if (target == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, MESSAGE_INVALID_PID);
+	if (target == NULL) {
+		free(heap_payload);
+		return syscall_result_error(SYSCALL_STATUS_FAILED, MESSAGE_INVALID_PID);
+	}
 
 	space = syscall_current_user_space();
 	if (length == 0u) {
@@ -103,17 +111,20 @@ syscall_result_t syscall_send_message(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 		source = (const void*)arg1;
 	}
 	else {
-		transfer_result = address_space_copy_from(space, arg1, payload, length);
+		transfer_result = address_space_copy_from(space, arg1, heap_payload, length);
 		if (transfer_result != ADDRESS_TRANSFER_OK) {
+			free(heap_payload);
 			return syscall_result_from_address_transfer(transfer_result, 1u);
 		}
-		source = payload;
+		source = heap_payload;
 	}
 
 	result = message_queue_send(&target->message_queue, sender_pid, source, length);
-	if (result == MESSAGE_OK) return syscall_result_ok(0u);
-	if (result == MESSAGE_INVALID_ARGUMENTS) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	return syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
+	ret    = (result == MESSAGE_OK)                  ? syscall_result_ok(0u)
+	         : (result == MESSAGE_INVALID_ARGUMENTS) ? syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u)
+	                                                 : syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
+	free(heap_payload);
+	return ret;
 }
 
 syscall_result_t syscall_recv_message(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
@@ -126,7 +137,8 @@ syscall_result_t syscall_recv_message(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 	enum message_result          result;
 	enum address_transfer_result transfer_result;
 	syscall_result_t             copy_result;
-	uint8_t                      payload[MESSAGE_MAX_SIZE];
+	syscall_result_t             ret;
+	uint8_t*                     heap_payload;
 
 	(void)arg3;
 	(void)arg4;
@@ -141,34 +153,55 @@ syscall_result_t syscall_recv_message(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 	if (arg1 == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 1u);
 	if (arg3 == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 3u);
 
+	heap_payload = malloc(MESSAGE_MAX_SIZE);
+	if (heap_payload == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 2u);
+
 	space = syscall_current_user_space();
 
 	if (space != NULL && buffer_size > 0u) {
 		transfer_result = address_space_validate_range(
 			space, arg0, buffer_size, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
 		if (transfer_result != ADDRESS_TRANSFER_OK) {
+			free(heap_payload);
 			return syscall_result_from_address_transfer(transfer_result, 0u);
 		}
 	}
 
-	result = message_queue_receive(&process->message_queue, payload, buffer_size, &length, &sender_pid);
-	if (result == MESSAGE_NO_MESSAGE) return syscall_result_ok(0u);
-	if (result == MESSAGE_INVALID_ARGUMENTS) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	result = message_queue_receive(&process->message_queue, heap_payload, buffer_size, &length, &sender_pid);
+	if (result == MESSAGE_NO_MESSAGE) {
+		free(heap_payload);
+		return syscall_result_ok(0u);
+	}
+	if (result == MESSAGE_INVALID_ARGUMENTS) {
+		free(heap_payload);
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
 	if (result == MESSAGE_TOO_LARGE) {
 		copy_result = syscall_write_uintptr_arg(space, arg1, 1u, (uintptr_t)length);
+		free(heap_payload);
 		if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 2u);
 	}
-	if (result != MESSAGE_OK) return syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
+	if (result != MESSAGE_OK) {
+		free(heap_payload);
+		return syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
+	}
 
-	copy_result = syscall_copy_to_user(space, arg0, payload, length, 0u);
-	if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
+	copy_result = syscall_copy_to_user(space, arg0, heap_payload, length, 0u);
+	if (copy_result.status != SYSCALL_STATUS_OK) {
+		free(heap_payload);
+		return copy_result;
+	}
 
 	copy_result = syscall_write_uintptr_arg(space, arg1, 1u, (uintptr_t)length);
-	if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
+	if (copy_result.status != SYSCALL_STATUS_OK) {
+		free(heap_payload);
+		return copy_result;
+	}
 
 	copy_result = syscall_write_uintptr_arg(space, arg3, 3u, (uintptr_t)sender_pid);
-	if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
-
-	return syscall_result_ok(1u);
+	ret         = (copy_result.status == SYSCALL_STATUS_OK) ? syscall_result_ok(1u)
+	                                                        : syscall_result_error(copy_result.status, copy_result.value);
+	free(heap_payload);
+	return ret;
 }
