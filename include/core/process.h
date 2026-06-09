@@ -103,23 +103,32 @@ struct process_thread_params {
 	bool        detached;
 };
 
+/* Aggregate state of one process: its address space, threads, and lifecycle bookkeeping. */
 struct process {
-	process_id_t                 pid;
-	const char*                  name;
-	enum process_state           state;
-	uintptr_t                    exit_code;
-	size_t                       thread_count;
-	struct process*              parent;
-	struct uthread*              main_thread;
-	struct uthread*              thread_head;
-	struct uthread*              thread_tail;
-	struct thread_wait_queue     join_wait_queue;
+	process_id_t       pid;
+	const char*        name;
+	enum process_state state;
+	/* Exit code produced when the process terminates. */
+	uintptr_t exit_code;
+	size_t    thread_count;
+	/* Parent process that created this one, or NULL for the initial process. */
+	struct process* parent;
+	struct uthread* main_thread;
+	/* Singly-linked list of all userspace threads, head and tail. */
+	struct uthread* thread_head;
+	struct uthread* thread_tail;
+	/* Wait queue for threads blocking on process join. */
+	struct thread_wait_queue join_wait_queue;
+	/* Channel state and message queue for inter-process communication. */
 	struct message_queue         message_queue;
 	struct process_channel_state channel_state;
-	struct address_space         address_space;
-	struct spinlock              lock;
-	bool                         detached;
-	bool                         joined;
+	/* User-mode address space for this process. */
+	struct address_space address_space;
+	struct spinlock      lock;
+	/* When true, the process cannot be joined anymore. */
+	bool detached;
+	/* When true, some thread has successfully joined this process. */
+	bool joined;
 };
 
 /* Allocate, initialize, and queue a userspace thread inside process. Detached threads do not publish a handle. */

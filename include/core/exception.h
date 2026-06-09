@@ -3,34 +3,54 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* Architecture-neutral classification of synchronous traps and faults. */
 enum core_exception_kind {
+	/* Page fault exceptions. */
 	CORE_EXCEPTION_UNKNOWN = 0,
 	CORE_EXCEPTION_PAGE_FAULT_NOT_PRESENT,
 	CORE_EXCEPTION_PAGE_FAULT_PROTECTION,
 	CORE_EXCEPTION_PAGE_FAULT_INVALID,
+
+	/* Arithmetic exceptions. */
 	CORE_EXCEPTION_ARITHMETIC_DIVIDE_BY_ZERO,
 	CORE_EXCEPTION_ARITHMETIC_OVERFLOW,
 	CORE_EXCEPTION_ARITHMETIC_BOUND_RANGE,
+
+	/* Instruction exceptions. */
 	CORE_EXCEPTION_INSTRUCTION_ILLEGAL,
 	CORE_EXCEPTION_PRIVILEGE_GENERAL_PROTECTION,
+
+	/* Alignment exceptions. */
 	CORE_EXCEPTION_ALIGNMENT,
+
+	/* Access/Abort exceptions. */
 	CORE_EXCEPTION_ACCESS_INSTRUCTION_ABORT,
 	CORE_EXCEPTION_ACCESS_DATA_ABORT,
 	CORE_EXCEPTION_ACCESS_ADDRESS_ERROR_FETCH,
 	CORE_EXCEPTION_ACCESS_ADDRESS_ERROR_MEMORY,
+
+	/* Bus and memory exceptions. */
 	CORE_EXCEPTION_BUS_ERROR,
+
+	/* Floating-point exceptions. */
 	CORE_EXCEPTION_FLOATING_POINT,
 	CORE_EXCEPTION_FLOATING_POINT_SIMD,
+
+	/* Memory protection exceptions. */
 	CORE_EXCEPTION_MEMORY_PROTECTION,
 	CORE_EXCEPTION_BREAKPOINT,
 	CORE_EXCEPTION_DEBUG,
 	CORE_EXCEPTION_WATCHPOINT,
+
+	/* Machine and security exceptions. */
 	CORE_EXCEPTION_MACHINE_CHECK,
 	CORE_EXCEPTION_VIRTUALIZATION,
 	CORE_EXCEPTION_CONTROL_PROTECTION,
 	CORE_EXCEPTION_HYPERVISOR_INJECTION,
 	CORE_EXCEPTION_VMM_COMMUNICATION,
 	CORE_EXCEPTION_SECURITY,
+
+	/* Device and privilege exceptions. */
 	CORE_EXCEPTION_DEVICE_NOT_AVAILABLE,
 	CORE_EXCEPTION_DOUBLE_FAULT,
 	CORE_EXCEPTION_INVALID_TSS,
@@ -40,16 +60,21 @@ enum core_exception_kind {
 	CORE_EXCEPTION_SIMD_DISABLED,
 	CORE_EXCEPTION_BINARY_TRANSLATION_DISABLED,
 	CORE_EXCEPTION_BINARY_TRANSLATION_EXCEPTION,
+
+	/* Guest/hypervisor exceptions. */
 	CORE_EXCEPTION_GUEST_PRIVILEGE_RESOURCE,
-	CORE_EXCEPTION_HYPERVISOR_CALL,
 	CORE_EXCEPTION_GUEST_CSR_SOFTWARE_CHANGE,
 	CORE_EXCEPTION_GUEST_CSR_HARDWARE_CHANGE,
+	CORE_EXCEPTION_HYPERVISOR_CALL,
+
+	/* Page attribute exceptions. */
 	CORE_EXCEPTION_PAGE_MODIFIED,
 	CORE_EXCEPTION_PAGE_NON_READABLE,
 	CORE_EXCEPTION_PAGE_NON_EXECUTABLE,
 	CORE_EXCEPTION_PAGE_PRIVILEGE,
 };
 
+/* Access class of a fault, used to refine the core exception handler response. */
 enum core_exception_access {
 	CORE_EXCEPTION_ACCESS_UNKNOWN = 0,
 	CORE_EXCEPTION_ACCESS_READ,
@@ -57,6 +82,9 @@ enum core_exception_access {
 	CORE_EXCEPTION_ACCESS_EXEC,
 };
 
+/* Handle a fault that was already classified as originating in user mode. */
 bool core_handle_user_exception(enum core_exception_kind kind);
+
+/* Handle an architecture-classified fault using access info and the faulting address. */
 bool core_handle_exception(enum core_exception_kind kind, enum core_exception_access access, uintptr_t addr,
                            bool user_mode);
