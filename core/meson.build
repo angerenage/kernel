@@ -1,4 +1,5 @@
 core_sources = files(
+	'capability.c',
 	'channel.c',
 	'cpu/cpu.c',
 	'cpu/irq.c',
