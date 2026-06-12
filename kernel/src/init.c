@@ -21,6 +21,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "capability/serial.h"
+
 #if KERNEL_SELFTESTS_ENABLED
 #include <core/kthread.h>
 
@@ -88,16 +90,17 @@ static bool kernel_launch_init_process(void) {
 	}
 
 	main_thread  = NULL;
-	start_result = process_start_main_thread(loaded.process,
-	                                         &main_thread,
-	                                         &(const struct process_thread_params){
-												 .name             = "init/main",
-												 .user_entry       = loaded.entry,
-												 .user_arg         = 0u,
-												 .user_stack_pages = UTHREAD_DEFAULT_USER_STACK_PAGES,
-												 .preferred_cpu    = cpu_current(),
-												 .detached         = false,
-											 });
+	start_result = process_start_main_thread(
+		loaded.process,
+		&main_thread,
+		&(const struct process_thread_params){
+			.name             = "init/main",
+			.user_entry       = loaded.entry,
+			.user_arg         = (uintptr_t)kernel_capability_serial_grant(process_pid(loaded.process)),
+			.user_stack_pages = UTHREAD_DEFAULT_USER_STACK_PAGES,
+			.preferred_cpu    = cpu_current(),
+			.detached         = false,
+		});
 	if (start_result != PROCESS_THREAD_SPAWN_OK) {
 		(void)process_destroy(loaded.process);
 		printf("kernel: init thread start failed: %u\n", (unsigned)start_result);

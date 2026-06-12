@@ -32,11 +32,6 @@ static inline syscall_result_t tick_count(void) {
 	return syscall(SYSCALL_TICK_COUNT, 0u, 0u, 0u, 0u, 0u, 0u);
 }
 
-/* Write a user buffer to the kernel's temporary diagnostic output. */
-static inline syscall_result_t print(const char* data, size_t length) {
-	return syscall(SYSCALL_PRINT, (uintptr_t)data, (uintptr_t)length, 0u, 0u, 0u, 0u);
-}
-
 /* Return the current process identifier. */
 static inline syscall_result_t getpid(void) {
 	return syscall(SYSCALL_GETPID, 0u, 0u, 0u, 0u, 0u, 0u);
