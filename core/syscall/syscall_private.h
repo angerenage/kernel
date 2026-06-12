@@ -1,6 +1,7 @@
 #pragma once
 
 #include <core/syscall.h>
+#include <stddef.h>
 #include <stdint.h>
 
 syscall_result_t syscall_nop(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);

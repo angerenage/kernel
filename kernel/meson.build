@@ -45,6 +45,8 @@ kernel_objs = base_sources + core_sources + kernel_libk_sources + platform_kerne
 	'src/capability/serial.c',
 	'src/elf_loader.c',
 	'src/init.c',
+	'src/syscall/module.c',
+	'src/syscall/syscall.c',
 	'src/boot/requests.c',
 ]
 if kernel_selftests

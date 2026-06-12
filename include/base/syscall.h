@@ -113,3 +113,7 @@ static inline bool syscall_status_is_caller_error(syscall_status_t status) {
 static inline bool syscall_status_is_kernel_error(syscall_status_t status) {
 	return status >= 200u && status < 300u;
 }
+
+/* Dispatch a syscall number to the registered handler. Implemented by the environment linking base. */
+syscall_result_t syscall_dispatch(uintptr_t number, uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
+                                  uintptr_t arg4, uintptr_t arg5);
