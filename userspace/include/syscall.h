@@ -1,5 +1,6 @@
 #pragma once
 
+#include <base/cap.h>
 #include <base/channel.h>
 #include <base/module.h>
 #include <base/syscall.h>
@@ -217,4 +218,56 @@ static inline syscall_result_t module_resolve(const char* name, size_t name_leng
 /* Map a boot module into the current process and return the virtual address. */
 static inline syscall_result_t module_map(size_t index) {
 	return syscall(SYSCALL_MODULE_MAP, index, 0u, 0u, 0u, 0u, 0u);
+}
+
+/* Create a capability for an object owned by the caller's endpoint. */
+static inline syscall_result_t cap_create(channel_id_t endpoint_id, process_id_t target, uint64_t object_id,
+                                          cap_rights_t rights, cap_id_t* out) {
+	return syscall(SYSCALL_CAP_CREATE,
+	               (uintptr_t)endpoint_id,
+	               (uintptr_t)target,
+	               (uintptr_t)object_id,
+	               (uintptr_t)rights,
+	               (uintptr_t)out,
+	               0u);
+}
+
+/* Delegate a capability to another entity with a subset of rights. */
+static inline syscall_result_t cap_delegate(cap_id_t source, process_id_t target, cap_rights_t rights, cap_id_t* out) {
+	return syscall(
+		SYSCALL_CAP_DELEGATE, (uintptr_t)source, (uintptr_t)target, (uintptr_t)rights, (uintptr_t)out, 0u, 0u);
+}
+
+/* Derive a capability for a different object under the same endpoint. */
+static inline syscall_result_t cap_derive(cap_id_t base, process_id_t target, uint64_t object_id, cap_rights_t rights,
+                                          cap_id_t* out) {
+	return syscall(SYSCALL_CAP_DERIVE,
+	               (uintptr_t)base,
+	               (uintptr_t)target,
+	               (uintptr_t)object_id,
+	               (uintptr_t)rights,
+	               (uintptr_t)out,
+	               0u);
+}
+
+/* Deliver a request payload to the capability's endpoint. */
+static inline syscall_result_t cap_call(cap_id_t cap, const void* request, size_t request_size) {
+	return syscall(SYSCALL_CAP_CALL, (uintptr_t)cap, (uintptr_t)request, (uintptr_t)request_size, 0u, 0u, 0u);
+}
+
+/* Revoke rights from a capability, or revoke the capability entirely (rights == 0). */
+static inline syscall_result_t cap_revoke(cap_id_t cap, cap_rights_t rights) {
+	return syscall(SYSCALL_CAP_REVOKE, (uintptr_t)cap, (uintptr_t)rights, 0u, 0u, 0u, 0u);
+}
+
+/* Dequeue a capability call request from an endpoint. */
+static inline syscall_result_t cap_recv(channel_id_t endpoint_id, struct cap_request* out, void* request_buffer,
+                                        size_t request_buffer_size) {
+	return syscall(SYSCALL_CAP_RECV,
+	               (uintptr_t)endpoint_id,
+	               (uintptr_t)out,
+	               (uintptr_t)request_buffer,
+	               (uintptr_t)request_buffer_size,
+	               0u,
+	               0u);
 }
