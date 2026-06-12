@@ -1,10 +1,9 @@
 #include <core/process.h>
 #include <core/sched.h>
+#include <core/syscall.h>
 #include <core/thread.h>
 #include <core/uthread.h>
 #include <libc/stdlib.h>
-
-#include "syscall_private.h"
 
 static syscall_result_t syscall_result_from_thread_spawn(enum process_thread_spawn_result result) {
 	switch (result) {

@@ -3,11 +3,10 @@
 #include <core/channel.h>
 #include <core/process.h>
 #include <core/sched.h>
+#include <core/syscall.h>
 #include <core/thread.h>
 #include <core/vaddr_alloc.h>
 #include <stdbool.h>
-
-#include "syscall_private.h"
 
 static struct address_space* syscall_current_user_space(void) {
 	struct thread* current = sched_current_thread();

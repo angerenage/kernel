@@ -1,7 +1,5 @@
 #include <core/syscall.h>
 
-#include "../../core/syscall/syscall_private.h"
-
 static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 	[SYSCALL_NOP] = syscall_nop,
 

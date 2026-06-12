@@ -2,13 +2,12 @@
 #include <core/pmm.h>
 #include <core/process.h>
 #include <core/sched.h>
+#include <core/syscall.h>
 #include <core/thread.h>
 #include <core/vmm.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-
-#include "syscall_private.h"
 
 static bool syscall_vmm_prot_is_valid(vmm_prot_t prot) {
 	return (prot & ~VMM_PROT_VALID_MASK) == 0;

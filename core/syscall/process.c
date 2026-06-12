@@ -1,8 +1,7 @@
 #include <core/process.h>
+#include <core/syscall.h>
 #include <core/uthread.h>
 #include <libc/stdlib.h>
-
-#include "syscall_private.h"
 
 static syscall_result_t syscall_result_from_process_create(enum process_result result) {
 	switch (result) {

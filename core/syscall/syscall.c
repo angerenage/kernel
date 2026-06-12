@@ -1,11 +1,10 @@
 #include <core/address_transfer.h>
 #include <core/sched.h>
+#include <core/syscall.h>
 #include <core/vaddr_alloc.h>
 #include <libc/stdlib.h>
 #include <stddef.h>
 #include <string.h>
-
-#include "syscall_private.h"
 
 static syscall_result_t syscall_result_from_address_transfer(enum address_transfer_result result, uintptr_t arg_index) {
 	switch (result) {
