@@ -2,17 +2,22 @@
 
 #include <base/cap.h>
 #include <base/process.h>
+#include <base/syscall.h>
 #include <core/channel.h>
 #include <core/id_table.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
+/* Handler invoked by sys_cap_call for kernel-owned capabilities. */
+typedef syscall_result_t (*cap_kernel_handler_t)(const struct cap_request* req);
+
 /* A kernel or userspace object that can be referenced by capabilities. */
 struct cap_object {
-	id_table_id_t   cap_object_id;
-	uint64_t        object_id;
-	struct channel* endpoint;
+	id_table_id_t        cap_object_id;
+	uint64_t             object_id;
+	struct channel*      endpoint;
+	cap_kernel_handler_t handler;
 };
 
 /* A capability grants a target process rights on a cap_object. Capabilities form a delegation tree through parent. */
@@ -37,8 +42,11 @@ enum cap_result {
 	CAP_ID_EXHAUSTED,
 };
 
-/* Create a new kernel object and register it in the global object table. Returns NULL on failure. */
+/* Create a new userspace-owned object and register it in the global object table. Returns NULL on failure. */
 struct cap_object* cap_object_create(uint64_t object_id, struct channel* endpoint);
+
+/* Create a new kernel-owned object with a handler and an endpoint set to NULL. */
+struct cap_object* cap_object_create_kernel(uint64_t object_id, cap_kernel_handler_t handler);
 
 /* Look up an existing kernel object by its endpoint and object_id. */
 struct cap_object* cap_object_lookup(struct channel* endpoint, uint64_t object_id);

@@ -1,4 +1,5 @@
 #include <base/cap.h>
+#include <base/syscall.h>
 #include <core/capability.h>
 #include <core/lock.h>
 #include <core/pmm.h>
@@ -24,19 +25,37 @@ static struct id_table capability_table = {
 	.max_id  = CAP_ID_TABLE_MAX,
 };
 
-static struct cap_object* cap_object_create_locked(uint64_t object_id, struct channel* endpoint) {
+static struct cap_object* cap_object_create_locked(uint64_t object_id, struct channel* endpoint,
+                                                   cap_kernel_handler_t handler) {
 	struct cap_object* object = malloc(sizeof(*object));
 	if (object == NULL) return NULL;
 
 	object->cap_object_id = 0;
 	object->object_id     = object_id;
 	object->endpoint      = endpoint;
+	object->handler       = handler;
 
 	return object;
 }
 
 struct cap_object* cap_object_create(uint64_t object_id, struct channel* endpoint) {
-	struct cap_object* object = cap_object_create_locked(object_id, endpoint);
+	struct cap_object* object = cap_object_create_locked(object_id, endpoint, NULL);
+	if (object == NULL) return NULL;
+
+	id_table_id_t id;
+	if (id_table_alloc(&cap_object_table, object, &id) != ID_TABLE_OK) {
+		free(object);
+		return NULL;
+	}
+
+	object->cap_object_id = id;
+	return object;
+}
+
+struct cap_object* cap_object_create_kernel(uint64_t object_id, cap_kernel_handler_t handler) {
+	if (handler == NULL) return NULL;
+
+	struct cap_object* object = cap_object_create_locked(object_id, NULL, handler);
 	if (object == NULL) return NULL;
 
 	id_table_id_t id;

@@ -1,4 +1,5 @@
 #include <base/heap.h>
+#include <core/capability.h>
 #include <core/cpu.h>
 #include <core/mm.h>
 #include <core/pmm.h>
@@ -12,6 +13,7 @@
 #include <hal/serial.h>
 #include <kernel/boot.h>
 #include <kernel/boot_diagnostics.h>
+#include <kernel/capability.h>
 #include <kernel/cpu_boot.h>
 #include <kernel/elf_loader.h>
 #include <stdbool.h>
@@ -256,6 +258,9 @@ void kernel_main(void) {
 	}
 	if (boot_diagnostics_enabled)
 		printf("kernel: cpu topology %zu present, %zu online\n", cpu_count(), cpu_online_count());
+
+	capability_init();
+	kernel_capability_init();
 
 #if KERNEL_SELFTESTS_ENABLED
 	if (kernel_selftests_requested()) {

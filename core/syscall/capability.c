@@ -267,7 +267,18 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 	if (request_size > 0u && arg1 == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 1u);
 
 	if (cap->object->endpoint == NULL) {
-		return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+		if (cap->object->handler == NULL) {
+			return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+		}
+
+		req.caller       = caller_pid;
+		req.cap_id       = cap->cap_id;
+		req.object_id    = cap->object->object_id;
+		req.rights       = cap->rights;
+		req.request      = (void*)arg1;
+		req.request_size = request_size;
+
+		return cap->object->handler(&req);
 	}
 
 	heap_request = NULL;
