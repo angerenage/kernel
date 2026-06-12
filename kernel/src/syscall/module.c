@@ -1,16 +1,14 @@
-#include <base/module.h>
+#include "module.h"
+
 #include <base/syscall.h>
-#include <base/vmm.h>
-#include <core/mm.h>
-#include <core/pmm.h>
-#include <core/sched.h>
-#include <core/vmm.h>
+#include <core/capability.h>
+#include <core/syscall.h>
 #include <kernel/boot.h>
 #include <libc/stdlib.h>
 #include <stddef.h>
 #include <string.h>
 
-#include "../../core/syscall/syscall_private.h"
+#include "../capability/boot_module.h"
 
 syscall_result_t syscall_module_resolve(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
                                         uintptr_t arg5) {
@@ -30,66 +28,17 @@ syscall_result_t syscall_module_resolve(uintptr_t arg0, uintptr_t arg1, uintptr_
 		if (module == NULL) continue;
 
 		if (strcmp(module->name, name) == 0 || strcmp(module->path, name) == 0) {
-			if (arg2 != 0) {
-				struct module_info info = {
-					.size = module->size,
-				};
-
-				size_t name_len = strlen(module->name);
-				if (name_len >= sizeof(info.name)) {
-					name_len = sizeof(info.name) - 1;
-				}
-				memcpy(info.name, module->name, name_len);
-				info.name[name_len] = '\0';
-
-				syscall_copy_out(2, arg2, &info, sizeof(info));
-			}
+			cap_id_t cap_id = kernel_capability_boot_module_grant(i, (process_id_t)arg2);
 			free(name);
-			return syscall_result_ok(i);
+
+			if (cap_id == CAP_ID_INVALID) {
+				return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
+			}
+
+			return syscall_result_ok((uintptr_t)cap_id);
 		}
 	}
 
 	free(name);
 	return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0);
-}
-
-syscall_result_t syscall_module_map(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                    uintptr_t arg5) {
-	(void)arg1;
-	(void)arg2;
-	(void)arg3;
-	(void)arg4;
-	(void)arg5;
-
-	size_t index = (size_t)arg0;
-
-	const struct kernel_boot_module* module = kernel_boot_module_at(index);
-	if (module == NULL) {
-		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0);
-	}
-
-	struct thread* current_thread = sched_current_thread();
-	if (current_thread == NULL || current_thread->address_space == NULL) {
-		return syscall_result_error(SYSCALL_STATUS_FAILED, 0);
-	}
-	struct address_space* space = current_thread->address_space;
-
-	size_t page_count = (module->size + PMM_PAGE_SIZE - 1) / PMM_PAGE_SIZE;
-
-	void*    mapped_address = NULL;
-	vmm_id_t mapping_id     = VMM_ID_INVALID;
-
-	bool success = vmm_alloc_phys(space,
-	                              (uintptr_t)module->address,
-	                              page_count,
-	                              VMM_PROT_READ | VMM_PROT_USER,
-	                              NULL,
-	                              &mapping_id,
-	                              &mapped_address);
-
-	if (!success) {
-		return syscall_result_error(SYSCALL_STATUS_FAILED, 0);
-	}
-
-	return syscall_result_ok((uintptr_t)mapped_address);
 }

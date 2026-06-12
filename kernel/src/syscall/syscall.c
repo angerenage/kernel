@@ -1,5 +1,7 @@
 #include <core/syscall.h>
 
+#include "module.h"
+
 static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 	[SYSCALL_NOP] = syscall_nop,
 
@@ -44,7 +46,6 @@ static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 	[SYSCALL_CHANNEL_DESTROY] = syscall_channel_destroy,
 
 	[SYSCALL_MODULE_RESOLVE] = syscall_module_resolve,
-	[SYSCALL_MODULE_MAP]     = syscall_module_map,
 
 	[SYSCALL_CAP_CREATE]   = syscall_cap_create,
 	[SYSCALL_CAP_DELEGATE] = syscall_cap_delegate,

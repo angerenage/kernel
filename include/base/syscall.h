@@ -54,9 +54,8 @@ enum {
 	SYSCALL_CHANNEL_CREATE,
 	SYSCALL_CHANNEL_DESTROY,
 
-	/* Boot modules - temporary solution for loading additional ELF files */
+	/* Boot module */
 	SYSCALL_MODULE_RESOLVE,
-	SYSCALL_MODULE_MAP,
 
 	/* Capability system */
 	SYSCALL_CAP_CREATE,
