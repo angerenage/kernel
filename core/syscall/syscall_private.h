@@ -49,9 +49,6 @@ syscall_result_t syscall_send_message(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 syscall_result_t syscall_recv_message(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t, uintptr_t, uintptr_t);
 
 syscall_result_t syscall_channel_create(uintptr_t arg0, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
-syscall_result_t syscall_channel_send(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t, uintptr_t, uintptr_t);
-syscall_result_t syscall_channel_recv(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                      uintptr_t);
 syscall_result_t syscall_channel_destroy(uintptr_t arg0, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 
 syscall_result_t syscall_copy_out(uintptr_t ptr_arg_index, uintptr_t dst, const void* src, size_t size);

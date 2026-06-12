@@ -55,8 +55,6 @@ enum {
 
 	/* Channels */
 	SYSCALL_CHANNEL_CREATE,
-	SYSCALL_CHANNEL_SEND,
-	SYSCALL_CHANNEL_RECV,
 	SYSCALL_CHANNEL_DESTROY,
 
 	/* Boot modules - temporary solution for loading additional ELF files */

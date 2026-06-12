@@ -1,9 +1,10 @@
+#include <base/cap.h>
 #include <base/channel.h>
 #include <base/heap.h>
 #include <base/process.h>
 #include <core/channel.h>
-#include <core/message.h>
 #include <core/pmm.h>
+#include <core/ring_buffer.h>
 #include <criterion/criterion.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -73,136 +74,119 @@ Test(channel, destroy_rejects_non_owner) {
 	cr_assert_eq(result, CHANNEL_OK, "channel_destroy should succeed for owner");
 }
 
-Test(channel, send_rejects_invalid_arguments) {
-	struct channel*     ch;
-	enum channel_result result;
+Test(channel, cap_queue_init_is_empty) {
+	struct channel*    ch;
+	struct cap_request req;
 
 	channel_test_init_heap();
 	ch = channel_create(1u);
 	cr_assert_not_null(ch);
 
-	result = channel_send(NULL, 1u, "test", 4u);
-	cr_assert_eq(result, CHANNEL_INVALID_ARGUMENTS, "channel_send should reject NULL channel");
-
-	result = channel_send(ch, 1u, NULL, 4u);
-	cr_assert_eq(result, CHANNEL_INVALID_ARGUMENTS, "channel_send should reject NULL data with non-zero length");
-
-	result = channel_send(ch, 1u, "test", 4u);
-	cr_assert_eq(result, CHANNEL_OK, "channel_send should succeed with valid arguments");
+	cr_assert_not(ring_buffer_dequeue(&ch->cap_queue, &req), "new channel cap_queue should be empty");
 
 	channel_destroy(ch, 1u);
 }
 
-Test(channel, send_accepts_empty_payloads) {
-	struct channel*     ch;
-	enum channel_result result;
+Test(channel, cap_queue_send_and_recv) {
+	struct channel*    ch;
+	struct cap_request req;
+	struct cap_request out;
 
 	channel_test_init_heap();
 	ch = channel_create(1u);
 	cr_assert_not_null(ch);
 
-	result = channel_send(ch, 1u, NULL, 0u);
-	cr_assert_eq(result, CHANNEL_OK, "channel_send should accept NULL data with zero length");
+	req.caller       = 5u;
+	req.cap_id       = 42u;
+	req.object_id    = 100u;
+	req.rights       = CAP_READ;
+	req.request      = NULL;
+	req.request_size = 0u;
+
+	cr_assert(ring_buffer_enqueue(&ch->cap_queue, &req), "enqueue should succeed");
+
+	cr_assert(ring_buffer_dequeue(&ch->cap_queue, &out), "dequeue should succeed");
+	cr_assert_eq(out.caller, 5u);
+	cr_assert_eq(out.cap_id, 42u);
+	cr_assert_eq(out.object_id, 100u);
+	cr_assert_eq(out.rights, CAP_READ);
+	cr_assert_eq(out.request_size, 0u);
+
+	cr_assert_not(ring_buffer_dequeue(&ch->cap_queue, &out), "queue should be empty after dequeue");
 
 	channel_destroy(ch, 1u);
 }
 
-Test(channel, recv_rejects_non_owner) {
-	struct channel*     ch;
-	struct message      msg;
-	size_t              length;
-	process_id_t        sender;
-	enum channel_result result;
+Test(channel, cap_queue_fifo_order) {
+	struct channel*    ch;
+	struct cap_request req1;
+	struct cap_request req2;
+	struct cap_request out;
 
 	channel_test_init_heap();
 	ch = channel_create(1u);
 	cr_assert_not_null(ch);
 
-	result = channel_recv(ch, 2u, &msg, sizeof(msg), &length, &sender);
-	cr_assert_eq(result, CHANNEL_NOT_OWNER, "channel_recv should reject non-owner");
+	req1.caller       = 1u;
+	req1.cap_id       = 10u;
+	req1.object_id    = 100u;
+	req1.rights       = CAP_READ;
+	req1.request      = NULL;
+	req1.request_size = 0u;
 
-	result = channel_recv(ch, 1u, &msg, sizeof(msg), &length, &sender);
-	cr_assert_eq(result, CHANNEL_NO_MESSAGE, "channel_recv should return NO_MESSAGE for owner on empty queue");
+	req2.caller       = 2u;
+	req2.cap_id       = 20u;
+	req2.object_id    = 200u;
+	req2.rights       = CAP_WRITE;
+	req2.request      = NULL;
+	req2.request_size = 0u;
+
+	cr_assert(ring_buffer_enqueue(&ch->cap_queue, &req1));
+	cr_assert(ring_buffer_enqueue(&ch->cap_queue, &req2));
+
+	cr_assert(ring_buffer_dequeue(&ch->cap_queue, &out));
+	cr_assert_eq(out.caller, 1u);
+	cr_assert_eq(out.cap_id, 10u);
+
+	cr_assert(ring_buffer_dequeue(&ch->cap_queue, &out));
+	cr_assert_eq(out.caller, 2u);
+	cr_assert_eq(out.cap_id, 20u);
+
+	cr_assert_not(ring_buffer_dequeue(&ch->cap_queue, &out));
 
 	channel_destroy(ch, 1u);
 }
 
-Test(channel, recv_accepts_empty_payloads) {
-	struct channel*     ch;
-	size_t              length;
-	process_id_t        sender;
-	enum channel_result result;
+Test(channel, cap_queue_full) {
+	struct channel*    ch;
+	struct cap_request req;
 
 	channel_test_init_heap();
 	ch = channel_create(1u);
 	cr_assert_not_null(ch);
 
-	result = channel_send(ch, 100u, "hello", 5u);
-	cr_assert_eq(result, CHANNEL_OK);
+	memset(&req, 0, sizeof(req));
+	for (size_t i = 0u; i < CAP_REQUEST_QUEUE_DEPTH; i++) {
+		cr_assert(ring_buffer_enqueue(&ch->cap_queue, &req), "enqueue %zu should succeed", i);
+	}
 
-	result = channel_recv(ch, 1u, NULL, 0u, &length, &sender);
-	cr_assert_eq(result,
-	             CHANNEL_BUFFER_TOO_SMALL,
-	             "channel_recv should report a too-small buffer with CHANNEL_BUFFER_TOO_SMALL");
-	cr_assert_eq(length, 5u, "channel_recv should report required size");
-
-	result = channel_recv(ch, 1u, NULL, 5u, &length, &sender);
-	cr_assert_eq(result, CHANNEL_INVALID_ARGUMENTS, "channel_recv should reject NULL buffer");
-
-	char buffer[64] = {0};
-	result          = channel_recv(ch, 1u, buffer, sizeof(buffer), &length, &sender);
-	cr_assert_eq(result, CHANNEL_OK, "channel_recv should succeed with valid buffer");
-	cr_assert_eq(length, 5u, "channel_recv should report correct length");
-	cr_assert_eq(memcmp(buffer, "hello", 5u), 0, "channel_recv should copy correct data");
-	cr_assert_eq(sender, 100u, "channel_recv should report correct sender");
+	cr_assert_not(ring_buffer_enqueue(&ch->cap_queue, &req), "enqueue should fail when queue is full");
 
 	channel_destroy(ch, 1u);
 }
 
-Test(channel, fifo_order_preserved) {
-	struct channel*     ch;
-	char                buffer[64];
-	size_t              length;
-	process_id_t        sender;
-	enum channel_result result;
+Test(channel, cap_queue_rejects_null) {
+	struct channel*    ch;
+	struct cap_request req;
 
 	channel_test_init_heap();
 	ch = channel_create(1u);
 	cr_assert_not_null(ch);
 
-	result = channel_send(ch, 100u, "first", 5u);
-	cr_assert_eq(result, CHANNEL_OK);
-
-	result = channel_send(ch, 200u, "second", 6u);
-	cr_assert_eq(result, CHANNEL_OK);
-
-	result = channel_recv(ch, 1u, buffer, sizeof(buffer), &length, &sender);
-	cr_assert_eq(result, CHANNEL_OK);
-	cr_assert_eq(length, 5u);
-	cr_assert_eq(memcmp(buffer, "first", 5u), 0);
-	cr_assert_eq(sender, 100u);
-
-	memset(buffer, 0, sizeof(buffer));
-	result = channel_recv(ch, 1u, buffer, sizeof(buffer), &length, &sender);
-	cr_assert_eq(result, CHANNEL_OK);
-	cr_assert_eq(length, 6u);
-	cr_assert_eq(memcmp(buffer, "second", 6u), 0);
-	cr_assert_eq(sender, 200u);
-
-	channel_destroy(ch, 1u);
-}
-
-Test(channel, handles_max_payload_limit) {
-	struct channel*     ch;
-	char                buffer[MESSAGE_MAX_SIZE + 1u];
-	enum channel_result result;
-
-	channel_test_init_heap();
-	ch = channel_create(1u);
-	cr_assert_not_null(ch);
-
-	result = channel_send(ch, 1u, buffer, MESSAGE_MAX_SIZE + 1u);
-	cr_assert_eq(result, CHANNEL_INVALID_ARGUMENTS, "channel_send should reject oversized messages");
+	cr_assert_not(ring_buffer_enqueue(NULL, &req));
+	cr_assert_not(ring_buffer_enqueue(&ch->cap_queue, NULL));
+	cr_assert_not(ring_buffer_dequeue(NULL, &req));
+	cr_assert_not(ring_buffer_dequeue(&ch->cap_queue, NULL));
 
 	channel_destroy(ch, 1u);
 }

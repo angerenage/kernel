@@ -1,22 +1,22 @@
 #pragma once
 
+#include <base/cap.h>
 #include <base/channel.h>
 #include <base/process.h>
-#include <core/message.h>
+#include <core/ring_buffer.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 /*
- * A channel is a kernel object wrapping a message queue. It has a single
- * owner process that may receive from or destroy it. Any process that knows
- * the channel ID may send to it. Channel IDs are plain integers that can be
- * carried in any message payload like any other data.
+ * A channel is a kernel object that carries capability call requests. It has
+ * a single owner process that may receive from or destroy it. Any process that
+ * knows the channel ID may send capability calls to it.
  */
 struct channel {
-	channel_id_t         id;
-	struct message_queue queue;
-	process_id_t         owner_pid;
+	channel_id_t       id;
+	struct ring_buffer cap_queue;
+	process_id_t       owner_pid;
 };
 
 #define CHANNEL_MAX_PER_PROCESS 64u
@@ -31,13 +31,6 @@ struct channel* channel_create(process_id_t owner_pid);
 
 /* Destroy a channel. Only the owner may do this. */
 enum channel_result channel_destroy(struct channel* channel, process_id_t caller_pid);
-
-/* Send a message to a channel (any process may do this). */
-enum channel_result channel_send(struct channel* channel, process_id_t sender_pid, const void* data, size_t length);
-
-/* Receive a message from a channel (only the owner may do this). */
-enum channel_result channel_recv(struct channel* channel, process_id_t caller_pid, void* buffer, size_t buffer_size,
-                                 size_t* out_length, process_id_t* out_sender_pid);
 
 /* Look up a channel by its global ID. */
 struct channel* channel_lookup(channel_id_t id);
