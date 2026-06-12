@@ -2,7 +2,7 @@
 
 #include <base/message.h>
 #include <base/process.h>
-#include <core/spinlock.h>
+#include <core/ring_buffer.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -13,22 +13,13 @@ struct message {
 	uint8_t      data[MESSAGE_MAX_SIZE];
 };
 
-/* Per-process FIFO queue for fixed-size messages. */
-struct message_queue {
-	struct spinlock lock;
-	size_t          head;
-	size_t          tail;
-	size_t          count;
-	struct message  slots[MESSAGE_QUEUE_DEPTH];
-};
-
-/* Initialize an empty message queue. */
-void message_queue_init(struct message_queue* queue);
+/* Initialize a message ring buffer. */
+void message_queue_init(struct ring_buffer* rb);
 
 /* Enqueue a message payload. */
-enum message_result message_queue_send(struct message_queue* queue, process_id_t sender_pid, const void* data,
+enum message_result message_queue_send(struct ring_buffer* rb, process_id_t sender_pid, const void* data,
                                        size_t length);
 
 /* Dequeue the next message payload into the caller buffer. */
-enum message_result message_queue_receive(struct message_queue* queue, void* buffer, size_t buffer_size,
-                                          size_t* out_length, process_id_t* out_sender_pid);
+enum message_result message_queue_receive(struct ring_buffer* rb, void* buffer, size_t buffer_size, size_t* out_length,
+                                          process_id_t* out_sender_pid);
