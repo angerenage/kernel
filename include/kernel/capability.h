@@ -1,16 +1,14 @@
 #pragma once
 
 #include <base/cap.h>
+#include <base/id.h>
 #include <base/process.h>
 #include <core/capability.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-/* Object IDs for kernel-owned capabilities. */
-enum cap_kernel_object_id {
-	CAP_KERNEL_OBJECT_SERIAL = 0u,
-};
+extern id_allocator_t cap_kernel_object_id_allocator;
 
 /* Create a kernel-owned cap_object and a root capability granting rights on it to target. Returns CAP_ID_INVALID on
  * failure. */

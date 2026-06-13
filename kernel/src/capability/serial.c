@@ -54,7 +54,7 @@ static syscall_result_t serial_handler(const struct cap_request* req) {
 }
 
 void kernel_capability_serial_init(void) {
-	serial_object = cap_object_create_kernel(CAP_KERNEL_OBJECT_SERIAL, serial_handler);
+	serial_object = cap_object_create_kernel(id_alloc(&cap_kernel_object_id_allocator), serial_handler);
 }
 
 cap_id_t kernel_capability_serial_grant(process_id_t target) {

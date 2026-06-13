@@ -121,8 +121,9 @@ void kernel_capability_boot_module_init(void) {
 	boot_module_objects = malloc(count * sizeof(*boot_module_objects));
 	if (boot_module_objects == NULL) return;
 
+	uint64_t base_id = id_alloc_range(&cap_kernel_object_id_allocator, count);
 	for (size_t i = 0; i < count; i++) {
-		boot_module_objects[i] = cap_object_create_kernel((uint64_t)i, boot_module_handler);
+		boot_module_objects[i] = cap_object_create_kernel(base_id + i, boot_module_handler);
 	}
 	boot_module_object_count = count;
 }
