@@ -8,12 +8,20 @@
 typedef syscall_result_t (*syscall_fn_t)(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
                                          uintptr_t arg5);
 
+/* Get the current user address space for syscall operations. */
+struct address_space* syscall_current_user_space(void);
+
 /* Copy a string argument from user space to kernel space. */
 syscall_result_t syscall_copy_string_arg(uintptr_t ptr_arg_index, uintptr_t string_ptr, uintptr_t len_arg_index,
                                          uintptr_t string_len_arg, char** out_string);
 
-/* Copy kernel data out to a user-space pointer. */
-syscall_result_t syscall_copy_out(uintptr_t ptr_arg_index, uintptr_t dst, const void* src, size_t size);
+/* Write a uintptr_t value to user space. */
+syscall_result_t syscall_write_uintptr_arg(struct address_space* space, uintptr_t dst, uintptr_t arg_index,
+                                           uintptr_t value);
+
+/* Copy data to user space. */
+syscall_result_t syscall_copy_to_user(struct address_space* space, uintptr_t dst, const void* src, size_t size,
+                                      uintptr_t arg_index);
 
 syscall_result_t syscall_nop(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 

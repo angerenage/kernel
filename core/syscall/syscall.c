@@ -1,9 +1,8 @@
 #include <core/address_transfer.h>
+#include <core/process.h>
 #include <core/sched.h>
 #include <core/syscall.h>
-#include <core/vaddr_alloc.h>
 #include <libc/stdlib.h>
-#include <stddef.h>
 #include <string.h>
 
 static syscall_result_t syscall_result_from_address_transfer(enum address_transfer_result result, uintptr_t arg_index) {
@@ -22,7 +21,7 @@ static syscall_result_t syscall_result_from_address_transfer(enum address_transf
 	}
 }
 
-static struct address_space* syscall_current_user_space(void) {
+struct address_space* syscall_current_user_space(void) {
 	struct thread* current = sched_current_thread();
 
 	if (current == NULL || current->address_space == NULL || current->address_space == address_space_kernel()) {
@@ -80,4 +79,35 @@ syscall_result_t syscall_copy_string_arg(uintptr_t ptr_arg_index, uintptr_t stri
 
 	*out_string = string;
 	return syscall_result_ok(0u);
+}
+
+syscall_result_t syscall_write_uintptr_arg(struct address_space* space, uintptr_t dst, uintptr_t arg_index,
+                                           uintptr_t value) {
+	enum address_transfer_result transfer_result;
+
+	if (dst == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, arg_index);
+
+	if (space == NULL) {
+		*(uintptr_t*)dst = value;
+		return syscall_result_ok(0u);
+	}
+
+	transfer_result = address_space_write_uintptr(space, dst, value);
+	return syscall_result_from_address_transfer(transfer_result, arg_index);
+}
+
+syscall_result_t syscall_copy_to_user(struct address_space* space, uintptr_t dst, const void* src, size_t size,
+                                      uintptr_t arg_index) {
+	enum address_transfer_result transfer_result;
+
+	if (size == 0u) return syscall_result_ok(0u);
+	if (dst == 0u || src == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, arg_index);
+
+	if (space == NULL) {
+		memcpy((void*)dst, src, size);
+		return syscall_result_ok(0u);
+	}
+
+	transfer_result = address_space_copy_to(space, dst, src, size);
+	return syscall_result_from_address_transfer(transfer_result, arg_index);
 }

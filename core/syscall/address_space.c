@@ -40,36 +40,6 @@ static struct address_space* syscall_target_address_space(uintptr_t pid_arg) {
 	return process_address_space(process);
 }
 
-static struct address_space* syscall_current_user_space(void) {
-	struct thread* current = sched_current_thread();
-
-	if (current == NULL || current->address_space == NULL || current->address_space == address_space_kernel()) {
-		return NULL;
-	}
-	if (!address_space_is_initialized(current->address_space)) return NULL;
-	return current->address_space;
-}
-
-syscall_result_t syscall_copy_out(uintptr_t ptr_arg_index, uintptr_t dst, const void* src, size_t size) {
-	struct address_space*        caller_space;
-	enum address_transfer_result transfer_result;
-
-	if (dst == 0u || src == NULL || size == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, ptr_arg_index);
-
-	caller_space = syscall_current_user_space();
-	if (caller_space == NULL) {
-		memcpy((void*)dst, src, size);
-		return syscall_result_ok(0u);
-	}
-
-	transfer_result = address_space_copy_to(caller_space, dst, src, size);
-	if (transfer_result == ADDRESS_TRANSFER_OK) return syscall_result_ok(0u);
-	if (transfer_result == ADDRESS_TRANSFER_FAULT_FAILED) {
-		return syscall_result_error(SYSCALL_STATUS_FAILED, ptr_arg_index);
-	}
-	return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, ptr_arg_index);
-}
-
 static syscall_result_t syscall_result_from_address_transfer(enum address_transfer_result result, uintptr_t arg_index) {
 	switch (result) {
 	case ADDRESS_TRANSFER_OK:
@@ -119,7 +89,7 @@ syscall_result_t syscall_vm_reserve(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 	if (arg5 != 0u) {
 		uintptr_t base_value = (uintptr_t)base;
 
-		copy_result = syscall_copy_out(5u, arg5, &base_value, sizeof(base_value));
+		copy_result = syscall_copy_to_user(syscall_current_user_space(), arg5, &base_value, sizeof(base_value), 5u);
 		if (copy_result.status != SYSCALL_STATUS_OK) {
 			(void)vmm_free(space, id);
 			return copy_result;
@@ -246,7 +216,7 @@ syscall_result_t syscall_vm_query(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 		return syscall_result_error(arg0 == 0u ? SYSCALL_STATUS_UNAVAILABLE : SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	if (!vmm_query_id(space, (vmm_id_t)arg1, &info)) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 1u);
 
-	copy_result = syscall_copy_out(2u, arg2, &info, sizeof(info));
+	copy_result = syscall_copy_to_user(syscall_current_user_space(), arg2, &info, sizeof(info), 2u);
 	if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
 	return syscall_result_ok(0u);
 }

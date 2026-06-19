@@ -8,47 +8,6 @@
 #include <core/vaddr_alloc.h>
 #include <stdbool.h>
 
-static struct address_space* syscall_current_user_space(void) {
-	struct thread* current = sched_current_thread();
-
-	if (current == NULL || current->address_space == NULL || current->address_space == address_space_kernel()) {
-		return NULL;
-	}
-	if (!address_space_is_initialized(current->address_space)) return NULL;
-	return current->address_space;
-}
-
-static syscall_result_t syscall_result_from_address_transfer(enum address_transfer_result result, uintptr_t arg_index) {
-	switch (result) {
-	case ADDRESS_TRANSFER_OK:
-		return syscall_result_ok(0u);
-	case ADDRESS_TRANSFER_FAULT_FAILED:
-		return syscall_result_error(SYSCALL_STATUS_FAILED, arg_index);
-	case ADDRESS_TRANSFER_INVALID_ARGUMENTS:
-	case ADDRESS_TRANSFER_ADDRESS_OVERFLOW:
-	case ADDRESS_TRANSFER_NOT_MAPPED:
-	case ADDRESS_TRANSFER_NOT_USER:
-	case ADDRESS_TRANSFER_ACCESS_DENIED:
-	default:
-		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, arg_index);
-	}
-}
-
-static syscall_result_t syscall_write_uintptr_arg(struct address_space* space, uintptr_t dst, uintptr_t arg_index,
-                                                  uintptr_t value) {
-	enum address_transfer_result transfer_result;
-
-	if (dst == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, arg_index);
-
-	if (space == NULL) {
-		*(uintptr_t*)dst = value;
-		return syscall_result_ok(0u);
-	}
-
-	transfer_result = address_space_write_uintptr(space, dst, value);
-	return syscall_result_from_address_transfer(transfer_result, arg_index);
-}
-
 static syscall_result_t syscall_channel_result_to_syscall(enum channel_result result) {
 	switch (result) {
 	case CHANNEL_OK:

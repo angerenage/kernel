@@ -14,16 +14,6 @@
 #include <stddef.h>
 #include <string.h>
 
-static struct address_space* syscall_current_user_space(void) {
-	struct thread* current = sched_current_thread();
-
-	if (current == NULL || current->address_space == NULL || current->address_space == address_space_kernel()) {
-		return NULL;
-	}
-	if (!address_space_is_initialized(current->address_space)) return NULL;
-	return current->address_space;
-}
-
 static syscall_result_t syscall_result_from_address_transfer(enum address_transfer_result result, uintptr_t arg_index) {
 	switch (result) {
 	case ADDRESS_TRANSFER_OK:
@@ -103,7 +93,7 @@ syscall_result_t syscall_cap_create(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 	cap_id = cap->cap_id;
 
 	if (arg4 != 0u) {
-		copy_result = syscall_copy_out(4u, arg4, &cap_id, sizeof(cap_id));
+		copy_result = syscall_copy_to_user(syscall_current_user_space(), arg4, &cap_id, sizeof(cap_id), 4u);
 		if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
 	}
 
@@ -156,7 +146,7 @@ syscall_result_t syscall_cap_delegate(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 	cap_id = new_cap->cap_id;
 
 	if (arg3 != 0u) {
-		copy_result = syscall_copy_out(3u, arg3, &cap_id, sizeof(cap_id));
+		copy_result = syscall_copy_to_user(syscall_current_user_space(), arg3, &cap_id, sizeof(cap_id), 3u);
 		if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
 	}
 
@@ -219,7 +209,7 @@ syscall_result_t syscall_cap_derive(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 	cap_id = new_cap->cap_id;
 
 	if (arg4 != 0u) {
-		copy_result = syscall_copy_out(4u, arg4, &cap_id, sizeof(cap_id));
+		copy_result = syscall_copy_to_user(syscall_current_user_space(), arg4, &cap_id, sizeof(cap_id), 4u);
 		if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
 	}
 
@@ -421,7 +411,7 @@ syscall_result_t syscall_cap_recv(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 		user_req.request      = (void*)arg2;
 		user_req.request_size = req.request_size;
 
-		copy_result = syscall_copy_out(1u, arg1, &user_req, sizeof(user_req));
+		copy_result = syscall_copy_to_user(syscall_current_user_space(), arg1, &user_req, sizeof(user_req), 1u);
 		if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
 	}
 
