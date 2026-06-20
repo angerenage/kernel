@@ -7,8 +7,6 @@
 #include "capability/boot_module.h"
 #include "capability/serial.h"
 
-id_allocator_t cap_kernel_object_id_allocator;
-
 cap_id_t cap_kernel_create(uint64_t object_id, cap_kernel_handler_t handler, process_id_t target, cap_rights_t rights) {
 	struct cap_object* object;
 	struct capability* cap;
@@ -26,8 +24,6 @@ cap_id_t cap_kernel_create(uint64_t object_id, cap_kernel_handler_t handler, pro
 }
 
 void kernel_capability_init(void) {
-	id_allocator_init(&cap_kernel_object_id_allocator);
-
 	kernel_capability_boot_module_init();
 	kernel_capability_serial_init();
 }

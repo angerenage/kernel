@@ -54,13 +54,13 @@ static syscall_result_t copy_to_user(process_id_t caller_pid, uintptr_t user_ptr
 static syscall_result_t boot_module_handler(const struct cap_request* req) {
 	struct boot_module_map_request request;
 	syscall_result_t               result;
-	size_t                         module_index;
 
 	if (req->request_size < sizeof(request)) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
-	module_index = (size_t)req->object_id;
+	const struct kernel_boot_module* module = (struct kernel_boot_module*)(uintptr_t)req->object_id;
+	if (module == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 
 	{
 		struct address_space*        space;
@@ -80,9 +80,6 @@ static syscall_result_t boot_module_handler(const struct cap_request* req) {
 			}
 		}
 	}
-
-	const struct kernel_boot_module* module = kernel_boot_module_at(module_index);
-	if (module == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 
 	struct address_space* space = caller_space(req->caller);
 	if (space == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
@@ -120,19 +117,26 @@ void kernel_capability_boot_module_init(void) {
 
 	boot_module_objects = malloc(count * sizeof(*boot_module_objects));
 	if (boot_module_objects == NULL) return;
-
-	uint64_t base_id = id_alloc_range(&cap_kernel_object_id_allocator, count);
-	for (size_t i = 0; i < count; i++) {
-		boot_module_objects[i] = cap_object_create_kernel(base_id + i, boot_module_handler);
-	}
 	boot_module_object_count = count;
 }
 
 cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t target) {
 	struct capability* cap;
 
-	if (module_index >= boot_module_object_count || boot_module_objects[module_index] == NULL) {
+	if (module_index >= boot_module_object_count) {
 		return CAP_ID_INVALID;
+	}
+
+	if (boot_module_objects[module_index] == NULL) {
+		const uint64_t object_id = (uint64_t)(uintptr_t)kernel_boot_module_at(module_index);
+		if (object_id == 0u) {
+			return CAP_ID_INVALID;
+		}
+
+		boot_module_objects[module_index] = cap_object_create_kernel(object_id, boot_module_handler);
+		if (boot_module_objects[module_index] == NULL) {
+			return CAP_ID_INVALID;
+		}
 	}
 
 	cap = cap_create(boot_module_objects[module_index], target, CAP_READ | CAP_MAP | CAP_CALL, NULL);
