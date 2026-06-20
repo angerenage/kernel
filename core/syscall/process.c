@@ -34,22 +34,6 @@ static syscall_result_t syscall_result_from_thread_spawn(enum process_thread_spa
 	}
 }
 
-syscall_result_t syscall_getpid(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                uintptr_t arg5) {
-	struct process* process;
-
-	(void)arg0;
-	(void)arg1;
-	(void)arg2;
-	(void)arg3;
-	(void)arg4;
-	(void)arg5;
-
-	process = process_current();
-	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
-	return syscall_result_ok((uintptr_t)process_pid(process));
-}
-
 syscall_result_t syscall_create_process(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
                                         uintptr_t arg5) {
 	struct process*     process = NULL;
@@ -186,20 +170,4 @@ syscall_result_t syscall_kill_process(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	if (!process_terminate(process, arg1)) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	return syscall_result_ok(0u);
-}
-
-syscall_result_t syscall_get_process_thread_count(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
-                                                  uintptr_t arg4, uintptr_t arg5) {
-	struct process* process;
-
-	(void)arg0;
-	(void)arg1;
-	(void)arg2;
-	(void)arg3;
-	(void)arg4;
-	(void)arg5;
-
-	process = process_current();
-	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
-	return syscall_result_ok((uintptr_t)process_thread_count(process));
 }

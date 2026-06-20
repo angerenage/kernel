@@ -11,12 +11,8 @@ enum {
 	SYSCALL_SLEEP_MS,
 	SYSCALL_TICK_COUNT,
 
-	/* Process identity / introspection */
-	SYSCALL_GETPID,
-	SYSCALL_GET_PROCESS_THREAD_COUNT,
-
-	/* Thread identity / introspection */
-	SYSCALL_GETTID,
+	/* Process identity */
+	SYSCALL_SELF,
 
 	/* Process lifecycle */
 	SYSCALL_EXIT_PROCESS,

@@ -3,6 +3,7 @@
 #include <base/cap.h>
 #include <base/channel.h>
 #include <base/module.h>
+#include <base/self.h>
 #include <base/syscall.h>
 #include <base/vmm.h>
 #include <stdbool.h>
@@ -32,19 +33,9 @@ static inline syscall_result_t tick_count(void) {
 	return syscall(SYSCALL_TICK_COUNT, 0u, 0u, 0u, 0u, 0u, 0u);
 }
 
-/* Return the current process identifier. */
-static inline syscall_result_t getpid(void) {
-	return syscall(SYSCALL_GETPID, 0u, 0u, 0u, 0u, 0u, 0u);
-}
-
-/* Return the number of threads currently owned by the current process. */
-static inline syscall_result_t get_process_thread_count(void) {
-	return syscall(SYSCALL_GET_PROCESS_THREAD_COUNT, 0u, 0u, 0u, 0u, 0u, 0u);
-}
-
-/* Return the current user thread identifier. */
-static inline syscall_result_t gettid(void) {
-	return syscall(SYSCALL_GETTID, 0u, 0u, 0u, 0u, 0u, 0u);
+/* Return a struct self_info describing the calling process and a capability to it. */
+static inline syscall_result_t self(struct self_info* info) {
+	return syscall(SYSCALL_SELF, (uintptr_t)info, 0u, 0u, 0u, 0u, 0u);
 }
 
 /* Terminate the current process with the supplied exit code. */

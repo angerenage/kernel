@@ -29,7 +29,6 @@ syscall_result_t syscall_yield(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintp
 syscall_result_t syscall_sleep_ms(uintptr_t arg0, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 syscall_result_t syscall_tick_count(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 
-syscall_result_t syscall_getpid(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 syscall_result_t syscall_exit_process(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 syscall_result_t syscall_create_process(uintptr_t arg0, uintptr_t arg1, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 syscall_result_t syscall_run_process(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t,
@@ -37,7 +36,6 @@ syscall_result_t syscall_run_process(uintptr_t arg0, uintptr_t arg1, uintptr_t a
 syscall_result_t syscall_wait_process(uintptr_t arg0, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 syscall_result_t syscall_detach_process(uintptr_t arg0, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 syscall_result_t syscall_kill_process(uintptr_t arg0, uintptr_t arg1, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
-syscall_result_t syscall_get_process_thread_count(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 
 syscall_result_t syscall_exit_thread(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 syscall_result_t syscall_spawn_thread(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
@@ -48,7 +46,6 @@ syscall_result_t syscall_cancel_thread(uintptr_t arg0, uintptr_t, uintptr_t, uin
 syscall_result_t syscall_set_thread_cancel_enabled(uintptr_t arg0, uintptr_t, uintptr_t, uintptr_t, uintptr_t,
                                                    uintptr_t);
 syscall_result_t syscall_test_thread_cancel(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
-syscall_result_t syscall_gettid(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 
 syscall_result_t syscall_vm_reserve(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
                                     uintptr_t arg5);

@@ -68,22 +68,6 @@ static syscall_result_t syscall_result_from_thread_cancel(enum process_thread_ca
 	}
 }
 
-syscall_result_t syscall_gettid(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                uintptr_t arg5) {
-	struct uthread* thread;
-
-	(void)arg0;
-	(void)arg1;
-	(void)arg2;
-	(void)arg3;
-	(void)arg4;
-	(void)arg5;
-
-	thread = uthread_current();
-	if (thread == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
-	return syscall_result_ok((uintptr_t)uthread_id(thread));
-}
-
 syscall_result_t syscall_exit_thread(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
                                      uintptr_t arg5) {
 	struct uthread* thread;

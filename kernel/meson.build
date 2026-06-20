@@ -43,10 +43,12 @@ kernel_objs = base_sources + core_sources + kernel_libk_sources + platform_kerne
 	'src/boot/cpu_boot.c',
 	'src/capability.c',
 	'src/capability/boot_module.c',
+	'src/capability/process.c',
 	'src/capability/serial.c',
 	'src/elf_loader.c',
 	'src/init.c',
 	'src/syscall/module.c',
+	'src/syscall/self.c',
 	'src/syscall/syscall.c',
 	'src/boot/requests.c',
 ]
