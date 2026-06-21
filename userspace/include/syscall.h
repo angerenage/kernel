@@ -48,26 +48,6 @@ static inline syscall_result_t create_process(const char* name, size_t name_leng
 	return syscall(SYSCALL_CREATE_PROCESS, (uintptr_t)name, (uintptr_t)name_length, 0u, 0u, 0u, 0u);
 }
 
-/* Start a process's main thread at a user entry point. */
-static inline syscall_result_t run_process(uintptr_t pid, uintptr_t entry, uintptr_t arg, size_t stack_pages) {
-	return syscall(SYSCALL_RUN_PROCESS, pid, entry, arg, (uintptr_t)stack_pages, 0u, 0u);
-}
-
-/* Wait for a process to exit and return its exit code. */
-static inline syscall_result_t wait_process(uintptr_t pid) {
-	return syscall(SYSCALL_WAIT_PROCESS, pid, 0u, 0u, 0u, 0u, 0u);
-}
-
-/* Detach a process so it can be reclaimed without being waited on. */
-static inline syscall_result_t detach_process(uintptr_t pid) {
-	return syscall(SYSCALL_DETACH_PROCESS, pid, 0u, 0u, 0u, 0u, 0u);
-}
-
-/* Request termination of a process with the supplied exit code. */
-static inline syscall_result_t kill_process(uintptr_t pid, uintptr_t code) {
-	return syscall(SYSCALL_KILL_PROCESS, pid, code, 0u, 0u, 0u, 0u);
-}
-
 /* Terminate the current thread with the supplied exit code. */
 static inline syscall_result_t exit_thread(uintptr_t code) {
 	return syscall(SYSCALL_EXIT_THREAD, code, 0u, 0u, 0u, 0u, 0u);

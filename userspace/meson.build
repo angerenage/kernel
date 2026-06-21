@@ -30,6 +30,7 @@ userspace_crt_sources = files(
 
 userspace_runtime_sources = files(
 	'base/display.c',
+	'base/process.c',
 	'platforms/' + platform + '/syscall.c',
 )
 

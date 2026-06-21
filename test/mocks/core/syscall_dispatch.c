@@ -9,10 +9,6 @@ static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 
 	[SYSCALL_EXIT_PROCESS]   = syscall_exit_process,
 	[SYSCALL_CREATE_PROCESS] = syscall_create_process,
-	[SYSCALL_RUN_PROCESS]    = syscall_run_process,
-	[SYSCALL_WAIT_PROCESS]   = syscall_wait_process,
-	[SYSCALL_DETACH_PROCESS] = syscall_detach_process,
-	[SYSCALL_KILL_PROCESS]   = syscall_kill_process,
 
 	[SYSCALL_EXIT_THREAD]               = syscall_exit_thread,
 	[SYSCALL_SPAWN_THREAD]              = syscall_spawn_thread,
