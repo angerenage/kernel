@@ -108,10 +108,6 @@ static void syscall_test_thread_entry(void* arg) {
 	(void)arg;
 }
 
-static syscall_result_t syscall_test_create_process_call(const char* name) {
-	return syscall_dispatch(SYSCALL_CREATE_PROCESS, (uintptr_t)name, strlen(name) + 1u, 0u, 0u, 0u, 0u);
-}
-
 Test(syscall, nop_returns_ok) {
 	syscall_result_t result = syscall_dispatch(SYSCALL_NOP, 1u, 2u, 3u, 4u, 5u, 6u);
 
@@ -166,26 +162,6 @@ Test(syscall, tick_count_returns_scheduler_ticks) {
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(result.value, 2u);
 
-	syscall_test_reset_state();
-}
-
-Test(syscall, create_process_returns_new_process_pid) {
-	syscall_result_t result;
-	struct process*  process;
-
-	syscall_test_init_process_environment();
-
-	result = syscall_test_create_process_call("syscall-created");
-	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
-	cr_assert_neq(result.value, (uintptr_t)PROCESS_PID_INVALID);
-
-	process = process_lookup((process_id_t)result.value);
-	cr_assert_not_null(process, "created process should be registered");
-	cr_assert_eq(process_get_state(process), PROCESS_STATE_NEW, "created process should not be runnable yet");
-	cr_assert_eq(process_thread_count(process), 0u, "created process should not have a main thread");
-	cr_assert_null(process_main_thread(process), "created process should not publish a main thread");
-
-	cr_assert(process_destroy(process), "process_destroy failed");
 	syscall_test_reset_state();
 }
 

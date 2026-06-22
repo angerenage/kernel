@@ -43,7 +43,7 @@ static inline syscall_result_t exit_process(uintptr_t code) {
 	return syscall(SYSCALL_EXIT_PROCESS, code, 0u, 0u, 0u, 0u, 0u);
 }
 
-/* Create a process record using the supplied NUL-terminated name buffer. */
+/* Create a process record and return a capability that grants full process-management rights over the new process. */
 static inline syscall_result_t create_process(const char* name, size_t name_length) {
 	return syscall(SYSCALL_CREATE_PROCESS, (uintptr_t)name, (uintptr_t)name_length, 0u, 0u, 0u, 0u);
 }

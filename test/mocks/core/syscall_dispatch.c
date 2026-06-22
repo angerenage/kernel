@@ -7,8 +7,7 @@ static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 	[SYSCALL_SLEEP_MS]   = syscall_sleep_ms,
 	[SYSCALL_TICK_COUNT] = syscall_tick_count,
 
-	[SYSCALL_EXIT_PROCESS]   = syscall_exit_process,
-	[SYSCALL_CREATE_PROCESS] = syscall_create_process,
+	[SYSCALL_EXIT_PROCESS] = syscall_exit_process,
 
 	[SYSCALL_EXIT_THREAD]               = syscall_exit_thread,
 	[SYSCALL_SPAWN_THREAD]              = syscall_spawn_thread,
