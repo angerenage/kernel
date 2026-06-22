@@ -255,19 +255,12 @@ cap_id_t kernel_process_grant(struct process* target, cap_rights_t rights) {
 	if (object == NULL) return CAP_ID_INVALID;
 
 	cap = cap_create(object, process_pid(target), rights, NULL);
-	if (cap == NULL) {
-		cap_object_destroy(object);
-		return CAP_ID_INVALID;
-	}
+	if (cap == NULL) return CAP_ID_INVALID;
 
 	return cap->cap_id;
 }
 
 cap_id_t kernel_self_grant(struct process* process) {
-	if (process == NULL) return CAP_ID_INVALID;
-	if (process->self_cap != CAP_ID_INVALID) return process->self_cap;
-
-	process->self_cap = kernel_process_grant(
-		process, CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_EXEC | CAP_DELEGATE);
-	return process->self_cap;
+	return kernel_process_grant(process,
+	                            CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_EXEC | CAP_DELEGATE);
 }

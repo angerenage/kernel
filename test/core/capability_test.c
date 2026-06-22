@@ -67,16 +67,15 @@ Test(capability, object_create_and_lookup) {
 
 	obj2 = cap_object_create(42u, NULL);
 	cr_assert_not_null(obj2, "second cap_object_create should succeed");
-	cr_assert_neq(obj2, obj1, "cap_object_create should create distinct objects (no dedup in core helper)");
+	cr_assert_eq(obj2, obj1, "cap_object_create should deduplicate on (object_id, endpoint)");
 
 	found = cap_object_lookup(NULL, 42u);
-	cr_assert_eq(found, obj1, "cap_object_lookup should return the first match");
+	cr_assert_eq(found, obj1, "cap_object_lookup should still return the original object");
 
 	found = cap_object_lookup(NULL, 99u);
 	cr_assert_null(found, "cap_object_lookup should return NULL for non-existent object");
 
 	cap_object_destroy(obj1);
-	cap_object_destroy(obj2);
 }
 
 Test(capability, object_destroy) {
@@ -435,6 +434,37 @@ Test(capability, counts_track_allocations) {
 		cap_object_destroy(objs[i]);
 		cr_assert_eq(capability_object_count(), 3 - i, "object count mismatch after destroy %zu", i);
 	}
+}
+
+Test(capability, dedup_returns_existing_cap) {
+	struct cap_object* obj;
+	struct capability* cap1;
+	struct capability* cap2;
+
+	cap_test_setup();
+
+	obj = cap_object_create(7u, NULL);
+	cr_assert_not_null(obj);
+
+	cap1 = cap_create(obj, 9u, CAP_READ, NULL);
+	cr_assert_not_null(cap1);
+	cr_assert_eq(capability_count(), 1u);
+
+	cap2 = cap_create(obj, 9u, CAP_READ, NULL);
+	cr_assert_eq(cap2, cap1, "dedup should return the existing capability for matching key");
+	cr_assert_eq(capability_count(), 1u, "dedup should not allocate a second capability");
+
+	cap1 = cap_create(obj, 10u, CAP_READ, NULL);
+	cr_assert_neq(cap1, cap2, "different target should allocate a new capability");
+	cr_assert_eq(capability_count(), 2u);
+
+	cap2 = cap_create(obj, 9u, CAP_WRITE, NULL);
+	cr_assert_neq(cap2, cap1, "different rights should allocate a new capability");
+	cr_assert_eq(capability_count(), 3u);
+
+	cap_destroy(cap2);
+	cap_destroy(cap1);
+	cap_object_destroy(obj);
 }
 
 Test(capability, null_and_invalid_arguments) {

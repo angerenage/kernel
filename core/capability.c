@@ -38,8 +38,33 @@ static struct cap_object* cap_object_create_locked(uint64_t object_id, struct ch
 	return object;
 }
 
+static struct cap_object* cap_object_find_locked(struct channel* endpoint, uint64_t object_id,
+                                                 cap_kernel_handler_t handler) {
+	for (size_t i = 0; i < cap_object_table.capacity; i++) {
+		if (cap_object_table.slots[i] != NULL) {
+			struct cap_object* obj = (struct cap_object*)cap_object_table.slots[i];
+			if (obj->object_id != object_id) continue;
+			if (obj->endpoint != endpoint) continue;
+			if (handler != NULL && obj->handler != handler) continue;
+			return obj;
+		}
+	}
+	return NULL;
+}
+
 struct cap_object* cap_object_create(uint64_t object_id, struct channel* endpoint) {
-	struct cap_object* object = cap_object_create_locked(object_id, endpoint, NULL);
+	struct irq_state   state;
+	struct cap_object* object;
+
+	state  = spinlock_lock_irqsave(&cap_object_table.lock);
+	object = cap_object_find_locked(endpoint, object_id, NULL);
+	if (object != NULL) {
+		spinlock_unlock_irqrestore(&cap_object_table.lock, state);
+		return object;
+	}
+	spinlock_unlock_irqrestore(&cap_object_table.lock, state);
+
+	object = cap_object_create_locked(object_id, endpoint, NULL);
 	if (object == NULL) return NULL;
 
 	id_table_id_t id;
@@ -48,14 +73,35 @@ struct cap_object* cap_object_create(uint64_t object_id, struct channel* endpoin
 		return NULL;
 	}
 
+	state                 = spinlock_lock_irqsave(&cap_object_table.lock);
 	object->cap_object_id = id;
+	if (cap_object_find_locked(endpoint, object_id, NULL) != object) {
+		(void)id_table_remove(&cap_object_table, id, NULL);
+		struct cap_object* existing = cap_object_find_locked(endpoint, object_id, NULL);
+		spinlock_unlock_irqrestore(&cap_object_table.lock, state);
+		free(object);
+		return existing;
+	}
+	spinlock_unlock_irqrestore(&cap_object_table.lock, state);
+
 	return object;
 }
 
 struct cap_object* cap_object_create_kernel(uint64_t object_id, cap_kernel_handler_t handler) {
+	struct irq_state   state;
+	struct cap_object* object;
+
 	if (handler == NULL) return NULL;
 
-	struct cap_object* object = cap_object_create_locked(object_id, NULL, handler);
+	state  = spinlock_lock_irqsave(&cap_object_table.lock);
+	object = cap_object_find_locked(NULL, object_id, handler);
+	if (object != NULL) {
+		spinlock_unlock_irqrestore(&cap_object_table.lock, state);
+		return object;
+	}
+	spinlock_unlock_irqrestore(&cap_object_table.lock, state);
+
+	object = cap_object_create_locked(object_id, NULL, handler);
 	if (object == NULL) return NULL;
 
 	id_table_id_t id;
@@ -64,7 +110,17 @@ struct cap_object* cap_object_create_kernel(uint64_t object_id, cap_kernel_handl
 		return NULL;
 	}
 
+	state                 = spinlock_lock_irqsave(&cap_object_table.lock);
 	object->cap_object_id = id;
+	if (cap_object_find_locked(NULL, object_id, handler) != object) {
+		(void)id_table_remove(&cap_object_table, id, NULL);
+		struct cap_object* existing = cap_object_find_locked(NULL, object_id, handler);
+		spinlock_unlock_irqrestore(&cap_object_table.lock, state);
+		free(object);
+		return existing;
+	}
+	spinlock_unlock_irqrestore(&cap_object_table.lock, state);
+
 	return object;
 }
 
@@ -110,11 +166,37 @@ static struct capability* capability_create_locked(struct cap_object* object, pr
 	return capability;
 }
 
+static struct capability* capability_find_locked(struct cap_object* object, process_id_t target, cap_rights_t rights,
+                                                 struct capability* parent) {
+	for (size_t i = 0; i < capability_table.capacity; i++) {
+		if (capability_table.slots[i] != NULL) {
+			struct capability* cap = (struct capability*)capability_table.slots[i];
+			if (cap->object != object) continue;
+			if (cap->target != target) continue;
+			if (cap->rights != rights) continue;
+			if (cap->parent != parent) continue;
+			return cap;
+		}
+	}
+	return NULL;
+}
+
 struct capability* cap_create(struct cap_object* object, process_id_t target, cap_rights_t rights,
                               struct capability* parent) {
+	struct irq_state   state;
+	struct capability* capability;
+
 	if (object == NULL) return NULL;
 
-	struct capability* capability = capability_create_locked(object, target, rights, parent);
+	state      = spinlock_lock_irqsave(&capability_table.lock);
+	capability = capability_find_locked(object, target, rights, parent);
+	if (capability != NULL) {
+		spinlock_unlock_irqrestore(&capability_table.lock, state);
+		return capability;
+	}
+	spinlock_unlock_irqrestore(&capability_table.lock, state);
+
+	capability = capability_create_locked(object, target, rights, parent);
 	if (capability == NULL) return NULL;
 
 	id_table_id_t id;
@@ -123,7 +205,17 @@ struct capability* cap_create(struct cap_object* object, process_id_t target, ca
 		return NULL;
 	}
 
+	state              = spinlock_lock_irqsave(&capability_table.lock);
 	capability->cap_id = (cap_id_t)id;
+	if (capability_find_locked(object, target, rights, parent) != capability) {
+		(void)id_table_remove(&capability_table, id, NULL);
+		struct capability* existing = capability_find_locked(object, target, rights, parent);
+		spinlock_unlock_irqrestore(&capability_table.lock, state);
+		free(capability);
+		return existing;
+	}
+	spinlock_unlock_irqrestore(&capability_table.lock, state);
+
 	return capability;
 }
 

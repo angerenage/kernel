@@ -1,5 +1,3 @@
-#include <base/cap.h>
-#include <core/capability.h>
 #include <core/id_table.h>
 #include <core/process.h>
 #include <core/sched.h>
@@ -233,8 +231,7 @@ enum process_result process_create(struct process** out_process, const char* nam
 			return PROCESS_NO_MEMORY;
 		}
 	}
-	process->state    = PROCESS_STATE_NEW;
-	process->self_cap = CAP_ID_INVALID;
+	process->state = PROCESS_STATE_NEW;
 	spinlock_init_class(&process->lock, "process", SPINLOCK_ORDER_PROCESS, SPINLOCK_FLAG_IRQSAVE);
 	thread_wait_queue_init(&process->join_wait_queue);
 	message_queue_init(&process->message_queue);
@@ -399,13 +396,6 @@ bool process_destroy(struct process* process) {
 
 	vmm_address_space_deinit(&process->address_space);
 	process_channel_state_deinit(&process->channel_state);
-
-	if (process->self_cap != CAP_ID_INVALID) {
-		struct capability* cap    = cap_lookup(process->self_cap);
-		struct cap_object* object = cap != NULL ? cap->object : NULL;
-		if (cap != NULL) cap_destroy(cap);
-		if (object != NULL) cap_object_destroy(object);
-	}
 
 	(void)id_table_remove(&process_table, process->pid, NULL);
 	free((void*)process->name);

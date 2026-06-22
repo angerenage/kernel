@@ -1,6 +1,5 @@
 #pragma once
 
-#include <base/cap.h>
 #include <base/process.h>
 #include <core/channel.h>
 #include <core/message.h>
@@ -123,8 +122,6 @@ struct process {
 	/* Channel state and message ring buffer for inter-process communication. */
 	struct ring_buffer           message_queue;
 	struct process_channel_state channel_state;
-	/* Capability that identifies and controls this process. */
-	cap_id_t self_cap;
 	/* User-mode address space for this process. */
 	struct address_space address_space;
 	struct spinlock      lock;
