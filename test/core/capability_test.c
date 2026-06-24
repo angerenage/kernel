@@ -99,8 +99,8 @@ Test(capability, cap_create_rejects_null_object) {
 
 	cap_test_setup();
 
-	cap = cap_create(NULL, 1u, CAP_READ, NULL);
-	cr_assert_null(cap, "cap_create should reject NULL object");
+	cap = cap_create(ID_TABLE_ID_INVALID, 1u, CAP_READ, NULL);
+	cr_assert_null(cap, "cap_create should reject an invalid object id");
 }
 
 Test(capability, cap_create_lookup_destroy) {
@@ -113,10 +113,10 @@ Test(capability, cap_create_lookup_destroy) {
 	obj = cap_object_create(10u, NULL);
 	cr_assert_not_null(obj);
 
-	cap = cap_create(obj, 5u, CAP_READ | CAP_WRITE, NULL);
+	cap = cap_create(obj->cap_object_id, 5u, CAP_READ | CAP_WRITE, NULL);
 	cr_assert_not_null(cap, "cap_create should succeed");
 	cr_assert_neq(cap->cap_id, CAP_ID_INVALID, "cap_id should be valid");
-	cr_assert_eq(cap->object, obj, "cap object mismatch");
+	cr_assert_eq(cap->cap_object_id, obj->cap_object_id, "cap object_id mismatch");
 	cr_assert_eq(cap->target, 5u, "cap target mismatch");
 	cr_assert_eq(cap->rights, CAP_READ | CAP_WRITE, "cap rights mismatch");
 	cr_assert_null(cap->parent, "root cap parent should be NULL");
@@ -145,7 +145,7 @@ Test(capability, authorization_direct_target) {
 	cap_test_setup();
 
 	obj = cap_object_create(1u, NULL);
-	cap = cap_create(obj, 5u, CAP_READ, NULL);
+	cap = cap_create(obj->cap_object_id, 5u, CAP_READ, NULL);
 
 	result = cap_is_authorized(5u, cap);
 	cr_assert_eq(result, CAP_OK, "direct target should be authorized");
@@ -169,7 +169,7 @@ Test(capability, authorization_endpoint_owner) {
 	cr_assert_not_null(ch, "channel_create should succeed");
 
 	obj = cap_object_create(1u, ch);
-	cap = cap_create(obj, 5u, CAP_READ, NULL);
+	cap = cap_create(obj->cap_object_id, 5u, CAP_READ, NULL);
 
 	result = cap_is_authorized(10u, cap);
 	cr_assert_eq(result, CAP_OK, "endpoint owner should be authorized");
@@ -193,9 +193,9 @@ Test(capability, authorization_ancestral_chain) {
 
 	obj = cap_object_create(1u, NULL);
 
-	root       = cap_create(obj, 10u, CAP_READ | CAP_DELEGATE, NULL);
-	child      = cap_create(obj, 5u, CAP_READ, root);
-	grandchild = cap_create(obj, 7u, CAP_READ, child);
+	root       = cap_create(obj->cap_object_id, 10u, CAP_READ | CAP_DELEGATE, NULL);
+	child      = cap_create(obj->cap_object_id, 5u, CAP_READ, root);
+	grandchild = cap_create(obj->cap_object_id, 7u, CAP_READ, child);
 
 	result = cap_is_authorized(10u, grandchild);
 	cr_assert_eq(result, CAP_OK, "ancestor target should be authorized for grandchild");
@@ -229,7 +229,7 @@ Test(capability, authorization_revoked_capability) {
 	cap_test_setup();
 
 	obj = cap_object_create(1u, NULL);
-	cap = cap_create(obj, 5u, CAP_READ, NULL);
+	cap = cap_create(obj->cap_object_id, 5u, CAP_READ, NULL);
 
 	cap->revoked = true;
 
@@ -252,8 +252,8 @@ Test(capability, authorization_revoked_ancestor) {
 	cap_test_setup();
 
 	obj   = cap_object_create(1u, NULL);
-	root  = cap_create(obj, 10u, CAP_READ | CAP_DELEGATE, NULL);
-	child = cap_create(obj, 5u, CAP_READ, root);
+	root  = cap_create(obj->cap_object_id, 10u, CAP_READ | CAP_DELEGATE, NULL);
+	child = cap_create(obj->cap_object_id, 5u, CAP_READ, root);
 
 	root->revoked = true;
 
@@ -279,7 +279,7 @@ Test(capability, validity_revoked_self) {
 	cap_test_setup();
 
 	obj = cap_object_create(1u, NULL);
-	cap = cap_create(obj, 5u, CAP_READ, NULL);
+	cap = cap_create(obj->cap_object_id, 5u, CAP_READ, NULL);
 
 	result = cap_is_valid(cap);
 	cr_assert_eq(result, CAP_OK, "valid cap should return CAP_OK");
@@ -302,9 +302,9 @@ Test(capability, validity_revoked_ancestor) {
 	cap_test_setup();
 
 	obj        = cap_object_create(1u, NULL);
-	root       = cap_create(obj, 10u, CAP_READ | CAP_DELEGATE, NULL);
-	child      = cap_create(obj, 5u, CAP_READ, root);
-	grandchild = cap_create(obj, 7u, CAP_READ, child);
+	root       = cap_create(obj->cap_object_id, 10u, CAP_READ | CAP_DELEGATE, NULL);
+	child      = cap_create(obj->cap_object_id, 5u, CAP_READ, root);
+	grandchild = cap_create(obj->cap_object_id, 7u, CAP_READ, child);
 
 	result = cap_is_valid(grandchild);
 	cr_assert_eq(result, CAP_OK, "chain should be valid");
@@ -335,11 +335,11 @@ Test(capability, deep_parent_chain) {
 	cap_test_setup();
 
 	obj     = cap_object_create(1u, NULL);
-	caps[0] = cap_create(obj, targets[0], CAP_READ | CAP_DELEGATE, NULL);
+	caps[0] = cap_create(obj->cap_object_id, targets[0], CAP_READ | CAP_DELEGATE, NULL);
 	cr_assert_not_null(caps[0]);
 
 	for (size_t i = 1; i < 8; i++) {
-		caps[i] = cap_create(obj, targets[i], CAP_READ, caps[i - 1]);
+		caps[i] = cap_create(obj->cap_object_id, targets[i], CAP_READ, caps[i - 1]);
 		cr_assert_not_null(caps[i], "deep chain allocation %zu failed", i);
 	}
 
@@ -420,7 +420,7 @@ Test(capability, counts_track_allocations) {
 	}
 
 	for (size_t i = 0; i < 4; i++) {
-		caps[i] = cap_create(objs[i], 1u, CAP_READ, NULL);
+		caps[i] = cap_create(objs[i]->cap_object_id, 1u, CAP_READ, NULL);
 		cr_assert_not_null(caps[i]);
 		cr_assert_eq(capability_count(), i + 1, "capability count mismatch at %zu", i);
 	}
@@ -446,19 +446,19 @@ Test(capability, dedup_returns_existing_cap) {
 	obj = cap_object_create(7u, NULL);
 	cr_assert_not_null(obj);
 
-	cap1 = cap_create(obj, 9u, CAP_READ, NULL);
+	cap1 = cap_create(obj->cap_object_id, 9u, CAP_READ, NULL);
 	cr_assert_not_null(cap1);
 	cr_assert_eq(capability_count(), 1u);
 
-	cap2 = cap_create(obj, 9u, CAP_READ, NULL);
+	cap2 = cap_create(obj->cap_object_id, 9u, CAP_READ, NULL);
 	cr_assert_eq(cap2, cap1, "dedup should return the existing capability for matching key");
 	cr_assert_eq(capability_count(), 1u, "dedup should not allocate a second capability");
 
-	cap1 = cap_create(obj, 10u, CAP_READ, NULL);
+	cap1 = cap_create(obj->cap_object_id, 10u, CAP_READ, NULL);
 	cr_assert_neq(cap1, cap2, "different target should allocate a new capability");
 	cr_assert_eq(capability_count(), 2u);
 
-	cap2 = cap_create(obj, 9u, CAP_WRITE, NULL);
+	cap2 = cap_create(obj->cap_object_id, 9u, CAP_WRITE, NULL);
 	cr_assert_neq(cap2, cap1, "different rights should allocate a new capability");
 	cr_assert_eq(capability_count(), 3u);
 
@@ -488,9 +488,123 @@ Test(capability, null_and_invalid_arguments) {
 	cr_assert_not(cap_object_destroy(NULL), "NULL object destroy should return false");
 
 	obj = cap_object_create(1u, NULL);
-	cap = cap_create(obj, 1u, CAP_READ, NULL);
+	cap = cap_create(obj->cap_object_id, 1u, CAP_READ, NULL);
 
 	cr_assert_null(cap_lookup(999999u), "non-existent ID lookup should return NULL");
+
+	cap_destroy(cap);
+	cap_object_destroy(obj);
+}
+
+Test(capability, object_destroy_invalidates_capabilities) {
+	struct cap_object* obj;
+	struct capability* cap;
+	struct capability* found;
+	enum cap_result    result;
+
+	cap_test_setup();
+
+	obj = cap_object_create(2u, NULL);
+	cr_assert_not_null(obj);
+
+	cap = cap_create(obj->cap_object_id, 5u, CAP_READ, NULL);
+	cr_assert_not_null(cap);
+
+	cr_assert(cap_object_alive(cap), "cap should be backed by a live object");
+	result = cap_is_valid(cap);
+	cr_assert_eq(result, CAP_OK, "live cap should be valid");
+
+	cr_assert(cap_object_destroy_with_id(obj->cap_object_id), "destroy by id should succeed");
+	cr_assert_eq(capability_object_count(), 0u, "object table should be empty");
+
+	cr_assert_eq(capability_count(), 1u, "capability record should linger until reap");
+	found = cap_lookup(cap->cap_id);
+	cr_assert_eq(found, cap, "cap_lookup should still return the record");
+
+	cr_assert_not(cap_object_alive(cap), "cap should report dead object");
+	result = cap_is_valid(cap);
+	cr_assert_eq(result, CAP_OBJECT_DESTROYED, "validity should report destroyed object");
+	result = cap_is_authorized(5u, cap);
+	cr_assert_eq(result, CAP_OBJECT_DESTROYED, "authorization should report destroyed object");
+
+	cr_assert(cap_destroy_by_id(cap->cap_id), "destroy by id should reap the dangling cap");
+	cr_assert_eq(capability_count(), 0u, "capability table should be empty after reap");
+}
+
+Test(capability, object_destroy_invalidates_delegation_chain) {
+	struct cap_object* obj;
+	struct capability* root;
+	struct capability* child;
+	struct capability* grandchild;
+	enum cap_result    result;
+
+	cap_test_setup();
+
+	obj        = cap_object_create(3u, NULL);
+	root       = cap_create(obj->cap_object_id, 10u, CAP_READ | CAP_DELEGATE, NULL);
+	child      = cap_create(obj->cap_object_id, 5u, CAP_READ, root);
+	grandchild = cap_create(obj->cap_object_id, 7u, CAP_READ, child);
+
+	cr_assert(cap_object_destroy_with_id(obj->cap_object_id), "destroy by id should succeed");
+
+	result = cap_is_valid(grandchild);
+	cr_assert_eq(result, CAP_OBJECT_DESTROYED, "grandchild should report destroyed object");
+	result = cap_is_valid(child);
+	cr_assert_eq(result, CAP_OBJECT_DESTROYED, "child should report destroyed object");
+	result = cap_is_valid(root);
+	cr_assert_eq(result, CAP_OBJECT_DESTROYED, "root should report destroyed object");
+
+	result = cap_is_authorized(7u, grandchild);
+	cr_assert_eq(result, CAP_OBJECT_DESTROYED, "authorization should propagate destroyed state");
+
+	cap_destroy(grandchild);
+	cap_destroy(child);
+	cap_destroy(root);
+}
+
+Test(capability, revoke_for_process_marks_target_caps) {
+	struct cap_object* obj;
+	struct capability* targeted;
+	struct capability* other;
+	enum cap_result    result;
+
+	cap_test_setup();
+
+	obj = cap_object_create(4u, NULL);
+
+	targeted = cap_create(obj->cap_object_id, 42u, CAP_READ, NULL);
+	other    = cap_create(obj->cap_object_id, 99u, CAP_READ, NULL);
+
+	cr_assert_eq(cap_is_valid(targeted), CAP_OK, "targeted cap starts valid");
+	cr_assert_eq(cap_is_valid(other), CAP_OK, "other cap starts valid");
+
+	cap_revoke_for_process(42u);
+
+	cr_assert_eq(cap_is_valid(targeted), CAP_REVOKED, "targeted cap should be revoked");
+	cr_assert_eq(cap_is_valid(other), CAP_OK, "other cap should be untouched");
+
+	result = cap_is_authorized(42u, targeted);
+	cr_assert_eq(result, CAP_REVOKED, "revoked target should not authorize its own PID");
+
+	cap_destroy(targeted);
+	cap_destroy(other);
+	cap_object_destroy(obj);
+}
+
+Test(capability, revoke_for_process_is_noop_for_unknown_pid) {
+	struct cap_object* obj;
+	struct capability* cap;
+	enum cap_result    result;
+
+	cap_test_setup();
+
+	obj = cap_object_create(5u, NULL);
+	cap = cap_create(obj->cap_object_id, 42u, CAP_READ, NULL);
+
+	cap_revoke_for_process(1234u);
+
+	result = cap_is_valid(cap);
+	cr_assert_eq(result, CAP_OK, "unknown PID must not affect unrelated caps");
 
 	cap_destroy(cap);
 	cap_object_destroy(obj);

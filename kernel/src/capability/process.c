@@ -247,14 +247,29 @@ static syscall_result_t process_handler(const struct cap_request* req) {
 
 cap_id_t kernel_process_grant(struct process* target, cap_rights_t rights) {
 	struct cap_object* object;
+	id_table_id_t      object_id;
 	struct capability* cap;
 
 	if (target == NULL) return CAP_ID_INVALID;
 
-	object = cap_object_create_kernel((uint64_t)(uintptr_t)target, process_handler);
-	if (object == NULL) return CAP_ID_INVALID;
+	object_id = process_cap_object_id(target);
+	if (object_id != ID_TABLE_ID_INVALID) {
+		object = cap_object_get(object_id);
+		if (object == NULL) {
+			object = cap_object_create_kernel((uint64_t)(uintptr_t)target, process_handler);
+			if (object == NULL) return CAP_ID_INVALID;
+			process_set_cap_object_id(target, object->cap_object_id);
+			object_id = object->cap_object_id;
+		}
+	}
+	else {
+		object = cap_object_create_kernel((uint64_t)(uintptr_t)target, process_handler);
+		if (object == NULL) return CAP_ID_INVALID;
+		process_set_cap_object_id(target, object->cap_object_id);
+		object_id = object->cap_object_id;
+	}
 
-	cap = cap_create(object, process_pid(target), rights, NULL);
+	cap = cap_create(object_id, process_pid(target), rights, NULL);
 	if (cap == NULL) return CAP_ID_INVALID;
 
 	return cap->cap_id;

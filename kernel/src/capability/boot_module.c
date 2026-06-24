@@ -139,7 +139,7 @@ cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t t
 		}
 	}
 
-	cap = cap_create(boot_module_objects[module_index], target, CAP_READ | CAP_MAP | CAP_CALL, NULL);
+	cap = cap_create(boot_module_objects[module_index]->cap_object_id, target, CAP_READ | CAP_MAP | CAP_CALL, NULL);
 	if (cap == NULL) return CAP_ID_INVALID;
 
 	return cap->cap_id;

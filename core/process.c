@@ -1,3 +1,4 @@
+#include <core/capability.h>
 #include <core/id_table.h>
 #include <core/process.h>
 #include <core/sched.h>
@@ -231,7 +232,8 @@ enum process_result process_create(struct process** out_process, const char* nam
 			return PROCESS_NO_MEMORY;
 		}
 	}
-	process->state = PROCESS_STATE_NEW;
+	process->state         = PROCESS_STATE_NEW;
+	process->cap_object_id = ID_TABLE_ID_INVALID;
 	spinlock_init_class(&process->lock, "process", SPINLOCK_ORDER_PROCESS, SPINLOCK_FLAG_IRQSAVE);
 	thread_wait_queue_init(&process->join_wait_queue);
 	message_queue_init(&process->message_queue);
@@ -397,6 +399,9 @@ bool process_destroy(struct process* process) {
 	vmm_address_space_deinit(&process->address_space);
 	process_channel_state_deinit(&process->channel_state);
 
+	cap_revoke_for_process(process->pid);
+	(void)process_destroy_cap_object(process);
+
 	(void)id_table_remove(&process_table, process->pid, NULL);
 	free((void*)process->name);
 	memset(process, 0, sizeof(*process));
@@ -481,4 +486,36 @@ void process_notify_thread_exit(struct process* process, struct thread* thread, 
 	spinlock_unlock_irqrestore(&process->join_wait_queue.lock, wait_state);
 
 	if (wake_joiners) (void)sched_wake_all(&process->join_wait_queue);
+}
+
+id_table_id_t process_cap_object_id(const struct process* process) {
+	return process == NULL ? ID_TABLE_ID_INVALID : process->cap_object_id;
+}
+
+void process_set_cap_object_id(struct process* process, id_table_id_t id) {
+	struct irq_state state;
+
+	if (process == NULL) return;
+
+	state                  = spinlock_lock_irqsave(&process->lock);
+	process->cap_object_id = id;
+	spinlock_unlock_irqrestore(&process->lock, state);
+}
+
+bool process_destroy_cap_object(struct process* process) {
+	struct irq_state state;
+	id_table_id_t    id;
+	bool             destroyed;
+
+	if (process == NULL) return false;
+
+	state                  = spinlock_lock_irqsave(&process->lock);
+	id                     = process->cap_object_id;
+	process->cap_object_id = ID_TABLE_ID_INVALID;
+	spinlock_unlock_irqrestore(&process->lock, state);
+
+	if (id == ID_TABLE_ID_INVALID) return false;
+
+	destroyed = cap_object_destroy_with_id(id);
+	return destroyed;
 }

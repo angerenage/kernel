@@ -2,6 +2,7 @@
 
 #include <base/process.h>
 #include <core/channel.h>
+#include <core/id_table.h>
 #include <core/message.h>
 #include <core/thread.h>
 #include <core/vaddr_alloc.h>
@@ -129,6 +130,8 @@ struct process {
 	bool detached;
 	/* When true, some thread has successfully joined this process. */
 	bool joined;
+	/* Lazily-created cap_object id for this process; ID_TABLE_ID_INVALID until one is created. */
+	id_table_id_t cap_object_id;
 };
 
 /* Allocate, initialize, and queue a userspace thread inside process. Detached threads do not publish a handle. */
@@ -190,3 +193,14 @@ struct process* process_current(void);
 
 /* Update process lifecycle after one of its scheduler threads exits. */
 void process_notify_thread_exit(struct process* process, struct thread* thread, uintptr_t exit_code);
+
+/* Return the lazily-allocated cap_object id cached on this process, or ID_TABLE_ID_INVALID when none has been created.
+ */
+id_table_id_t process_cap_object_id(const struct process* process);
+
+/* Publish a cap_object id on the process. Pass ID_TABLE_ID_INVALID to clear the slot. */
+void process_set_cap_object_id(struct process* process, id_table_id_t id);
+
+/* Destroy the lazily-created cap_object for this process if one is cached and reset the slot. Returns true when
+ * destroyed. */
+bool process_destroy_cap_object(struct process* process);

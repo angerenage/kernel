@@ -14,7 +14,7 @@ cap_id_t cap_kernel_create(uint64_t object_id, cap_kernel_handler_t handler, pro
 	object = cap_object_create_kernel(object_id, handler);
 	if (object == NULL) return CAP_ID_INVALID;
 
-	cap = cap_create(object, target, rights, NULL);
+	cap = cap_create(object->cap_object_id, target, rights, NULL);
 	if (cap == NULL) return CAP_ID_INVALID;
 
 	return cap->cap_id;
