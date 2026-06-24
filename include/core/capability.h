@@ -12,9 +12,14 @@
 /* Handler invoked by sys_cap_call for kernel-owned capabilities. */
 typedef syscall_result_t (*cap_kernel_handler_t)(const struct cap_request* req);
 
+/* Stable identifier for a registered cap_object. */
+typedef id_table_id_t cap_object_id_t;
+
+#define CAP_OBJECT_ID_INVALID ID_TABLE_ID_INVALID
+
 /* A kernel or userspace object that can be referenced by capabilities. */
 struct cap_object {
-	id_table_id_t        cap_object_id;
+	cap_object_id_t      cap_object_id;
 	uint64_t             object_id;
 	struct channel*      endpoint;
 	cap_kernel_handler_t handler;
@@ -23,7 +28,7 @@ struct cap_object {
 /* A capability grants a target process rights on a cap_object. Capabilities form a delegation tree through parent. */
 struct capability {
 	cap_id_t           cap_id;
-	id_table_id_t      cap_object_id;
+	cap_object_id_t    cap_object_id;
 	process_id_t       target;
 	cap_rights_t       rights;
 	struct capability* parent;
@@ -53,18 +58,18 @@ struct cap_object* cap_object_create_kernel(uint64_t object_id, cap_kernel_handl
 struct cap_object* cap_object_lookup(struct channel* endpoint, uint64_t object_id);
 
 /* Return the cap_object registered under id, or NULL if no such object is registered. */
-struct cap_object* cap_object_get(id_table_id_t id);
+struct cap_object* cap_object_get(cap_object_id_t id);
 
 /* Remove the cap_object registered under id from the global table and free it. Returns true when an object was removed.
  */
-bool cap_object_destroy_with_id(id_table_id_t id);
+bool cap_object_destroy_with_id(cap_object_id_t id);
 
 /* Destroy a kernel object and remove it from the global object table. */
 bool cap_object_destroy(struct cap_object* object);
 
 /* Create a new capability granting rights on cap_object_id to target. The capability does not take ownership of the
  * object. */
-struct capability* cap_create(id_table_id_t cap_object_id, process_id_t target, cap_rights_t rights,
+struct capability* cap_create(cap_object_id_t cap_object_id, process_id_t target, cap_rights_t rights,
                               struct capability* parent);
 
 /* Look up a capability by its global ID. */

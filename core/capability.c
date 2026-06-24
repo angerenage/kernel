@@ -30,7 +30,7 @@ static struct cap_object* cap_object_create_locked(uint64_t object_id, struct ch
 	struct cap_object* object = malloc(sizeof(*object));
 	if (object == NULL) return NULL;
 
-	object->cap_object_id = ID_TABLE_ID_INVALID;
+	object->cap_object_id = CAP_OBJECT_ID_INVALID;
 	object->object_id     = object_id;
 	object->endpoint      = endpoint;
 	object->handler       = handler;
@@ -143,16 +143,16 @@ struct cap_object* cap_object_lookup(struct channel* endpoint, uint64_t object_i
 	return object;
 }
 
-struct cap_object* cap_object_get(id_table_id_t id) {
-	if (id == ID_TABLE_ID_INVALID) return NULL;
-	return (struct cap_object*)id_table_lookup(&cap_object_table, id);
+struct cap_object* cap_object_get(cap_object_id_t id) {
+	if (id == CAP_OBJECT_ID_INVALID) return NULL;
+	return (struct cap_object*)id_table_lookup(&cap_object_table, (id_table_id_t)id);
 }
 
-bool cap_object_destroy_with_id(id_table_id_t id) {
-	if (id == ID_TABLE_ID_INVALID) return false;
+bool cap_object_destroy_with_id(cap_object_id_t id) {
+	if (id == CAP_OBJECT_ID_INVALID) return false;
 
 	struct cap_object* object = NULL;
-	if (id_table_remove(&cap_object_table, id, (void**)&object) != ID_TABLE_OK) return false;
+	if (id_table_remove(&cap_object_table, (id_table_id_t)id, (void**)&object) != ID_TABLE_OK) return false;
 
 	free(object);
 	return true;
@@ -168,7 +168,7 @@ bool cap_object_destroy(struct cap_object* object) {
 	return true;
 }
 
-static struct capability* capability_create_locked(id_table_id_t cap_object_id, process_id_t target,
+static struct capability* capability_create_locked(cap_object_id_t cap_object_id, process_id_t target,
                                                    cap_rights_t rights, struct capability* parent) {
 	struct capability* capability = malloc(sizeof(*capability));
 	if (capability == NULL) return NULL;
@@ -183,8 +183,8 @@ static struct capability* capability_create_locked(id_table_id_t cap_object_id, 
 	return capability;
 }
 
-static struct capability* capability_find_locked(id_table_id_t cap_object_id, process_id_t target, cap_rights_t rights,
-                                                 struct capability* parent) {
+static struct capability* capability_find_locked(cap_object_id_t cap_object_id, process_id_t target,
+                                                 cap_rights_t rights, struct capability* parent) {
 	for (size_t i = 0; i < capability_table.capacity; i++) {
 		if (capability_table.slots[i] != NULL) {
 			struct capability* cap = (struct capability*)capability_table.slots[i];
@@ -198,12 +198,12 @@ static struct capability* capability_find_locked(id_table_id_t cap_object_id, pr
 	return NULL;
 }
 
-struct capability* cap_create(id_table_id_t cap_object_id, process_id_t target, cap_rights_t rights,
+struct capability* cap_create(cap_object_id_t cap_object_id, process_id_t target, cap_rights_t rights,
                               struct capability* parent) {
 	struct irq_state   state;
 	struct capability* capability;
 
-	if (cap_object_id == ID_TABLE_ID_INVALID) return NULL;
+	if (cap_object_id == CAP_OBJECT_ID_INVALID) return NULL;
 
 	state      = spinlock_lock_irqsave(&capability_table.lock);
 	capability = capability_find_locked(cap_object_id, target, rights, parent);

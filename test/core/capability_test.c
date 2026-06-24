@@ -99,7 +99,7 @@ Test(capability, cap_create_rejects_null_object) {
 
 	cap_test_setup();
 
-	cap = cap_create(ID_TABLE_ID_INVALID, 1u, CAP_READ, NULL);
+	cap = cap_create(CAP_OBJECT_ID_INVALID, 1u, CAP_READ, NULL);
 	cr_assert_null(cap, "cap_create should reject an invalid object id");
 }
 
