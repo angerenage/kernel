@@ -21,6 +21,5 @@ cap_id_t cap_kernel_create(uint64_t object_id, cap_kernel_handler_t handler, pro
 }
 
 void kernel_capability_init(void) {
-	kernel_capability_boot_module_init();
 	kernel_capability_serial_init();
 }
