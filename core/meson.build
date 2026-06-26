@@ -17,7 +17,6 @@ core_sources = files(
 	'threading/sched.c',
 	'threading/thread.c',
 	'threading/uthread.c',
-	'syscall/address_space.c',
 	'syscall/capability.c',
 	'syscall/channel.c',
 	'syscall/message.c',

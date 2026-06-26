@@ -90,65 +90,6 @@ static inline syscall_result_t test_thread_cancel(void) {
 	return syscall(SYSCALL_TEST_THREAD_CANCEL, 0u, 0u, 0u, 0u, 0u, 0u);
 }
 
-/* Reserve virtual pages in a target process and optionally copy out the chosen base address. */
-static inline syscall_result_t vm_reserve(uintptr_t pid, size_t page_count, vmm_prot_t prot, enum vmm_kind kind,
-                                          uint64_t map_flags, uintptr_t* out_base) {
-	return syscall(SYSCALL_VM_RESERVE,
-	               pid,
-	               (uintptr_t)page_count,
-	               (uintptr_t)prot,
-	               (uintptr_t)kind,
-	               (uintptr_t)map_flags,
-	               (uintptr_t)out_base);
-}
-
-/* Reserve virtual pages at an explicit base in a target process. */
-static inline syscall_result_t vm_reserve_at(uintptr_t pid, void* base, size_t page_count, vmm_prot_t prot,
-                                             enum vmm_kind kind, uint64_t map_flags) {
-	return syscall(SYSCALL_VM_RESERVE_AT,
-	               pid,
-	               (uintptr_t)base,
-	               (uintptr_t)page_count,
-	               (uintptr_t)prot,
-	               (uintptr_t)kind,
-	               (uintptr_t)map_flags);
-}
-
-/* Free a virtual memory allocation in a target process. */
-static inline syscall_result_t vm_free(uintptr_t pid, vmm_id_t id) {
-	return syscall(SYSCALL_VM_FREE, pid, (uintptr_t)id, 0u, 0u, 0u, 0u);
-}
-
-/* Materialize all pages for a virtual memory allocation in a target process. */
-static inline syscall_result_t vm_map(uintptr_t pid, vmm_id_t id) {
-	return syscall(SYSCALL_VM_MAP, pid, (uintptr_t)id, 0u, 0u, 0u, 0u);
-}
-
-/* Remove mappings for a virtual memory allocation in a target process. */
-static inline syscall_result_t vm_unmap(uintptr_t pid, vmm_id_t id, bool release_phys) {
-	return syscall(SYSCALL_VM_UNMAP, pid, (uintptr_t)id, release_phys ? 1u : 0u, 0u, 0u, 0u);
-}
-
-/* Change protection flags for a virtual memory allocation in a target process. */
-static inline syscall_result_t vm_protect(uintptr_t pid, vmm_id_t id, vmm_prot_t prot) {
-	return syscall(SYSCALL_VM_PROTECT, pid, (uintptr_t)id, (uintptr_t)prot, 0u, 0u, 0u);
-}
-
-/* Copy information about a virtual memory allocation into a user buffer. */
-static inline syscall_result_t vm_query(uintptr_t pid, vmm_id_t id, struct vmm_info* out_info) {
-	return syscall(SYSCALL_VM_QUERY, pid, (uintptr_t)id, (uintptr_t)out_info, 0u, 0u, 0u);
-}
-
-/* Copy bytes from a target process into the current process. */
-static inline syscall_result_t vm_copy_from(uintptr_t src_pid, const void* src, void* dst, size_t size) {
-	return syscall(SYSCALL_VM_COPY_FROM, src_pid, (uintptr_t)src, (uintptr_t)dst, (uintptr_t)size, 0u, 0u);
-}
-
-/* Copy bytes from the current process into a target process. */
-static inline syscall_result_t vm_copy_to(uintptr_t dst_pid, void* dst, const void* src, size_t size) {
-	return syscall(SYSCALL_VM_COPY_TO, dst_pid, (uintptr_t)dst, (uintptr_t)src, (uintptr_t)size, 0u, 0u);
-}
-
 /* Send a message to a target process. */
 static inline syscall_result_t send_message(uintptr_t pid, const void* buffer, size_t length) {
 	return syscall(SYSCALL_SEND_MESSAGE, pid, (uintptr_t)buffer, (uintptr_t)length, 0u, 0u, 0u);

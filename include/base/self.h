@@ -4,12 +4,15 @@
 #include <base/process.h>
 #include <stdint.h>
 
-/* Identity information returned by the self capability. */
+/* Identity information returned by the self syscall. */
 struct self_info {
 	process_id_t pid;
 	uint64_t     thread_id;
 	uint64_t     thread_count;
-	cap_id_t     self_cap;
+	/* Capability for the calling process. */
+	cap_id_t self_cap;
+	/* Capability for the calling process' address space. */
+	cap_id_t address_space_cap;
 };
 
 /* Response with process identity information. */
