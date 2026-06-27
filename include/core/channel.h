@@ -4,6 +4,7 @@
 #include <base/channel.h>
 #include <base/process.h>
 #include <core/ring_buffer.h>
+#include <core/spinlock.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -14,9 +15,12 @@
  * knows the channel ID may send capability calls to it.
  */
 struct channel {
+	struct spinlock    lock;
 	channel_id_t       id;
 	struct ring_buffer cap_queue;
 	process_id_t       owner_pid;
+	uint64_t           reference_count;
+	bool               closing;
 };
 
 #define CHANNEL_MAX_PER_PROCESS 64u
@@ -34,6 +38,18 @@ enum channel_result channel_destroy(struct channel* channel, process_id_t caller
 
 /* Look up a channel by its global ID. */
 struct channel* channel_lookup(channel_id_t id);
+
+/* Acquire a registered channel reference, or NULL when it is closing or absent. */
+struct channel* channel_acquire(channel_id_t id);
+
+/* Retain a channel reference already protected by its owner or another reference. */
+bool channel_retain(struct channel* channel);
+
+/* Release a retained channel reference. */
+void channel_release(struct channel* channel);
+
+/* Enqueue a capability request unless channel closure has begun. */
+bool channel_enqueue_cap_request(struct channel* channel, const struct cap_request* request);
 
 /* Initialize per-process channel state. */
 void process_channel_state_init(struct process_channel_state* state);

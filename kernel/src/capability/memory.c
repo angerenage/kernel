@@ -5,13 +5,13 @@
 #include <base/vmm.h>
 #include <core/address_transfer.h>
 #include <core/capability.h>
-#include <core/message.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/process.h>
 #include <core/spinlock.h>
 #include <core/syscall.h>
 #include <core/vmm.h>
+#include <kernel/capability.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -41,32 +41,11 @@ static cap_id_t         kernel_mapping_create(struct allocation_state* allocatio
                                               process_id_t owner, struct address_space* space, vmm_id_t region_id,
                                               enum vmm_kind allocation_kind);
 
-static syscall_result_t copy_request_from_caller(process_id_t caller_pid, const void* request, size_t request_size,
-                                                 void* out, size_t expected_size) {
-	struct process*              caller;
-	struct address_space*        space;
-	enum address_transfer_result transfer_result;
-
+static syscall_result_t copy_request(const void* request, size_t request_size, void* out, size_t expected_size) {
 	if (request == NULL || out == NULL || request_size < expected_size) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
-
-	caller = process_lookup(caller_pid);
-	if (caller == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
-
-	space = process_address_space(caller);
-	if (space == NULL) {
-		memcpy(out, request, expected_size);
-		return syscall_result_ok(0u);
-	}
-
-	transfer_result = address_space_copy_from(space, (uintptr_t)request, out, expected_size);
-	if (transfer_result == ADDRESS_TRANSFER_FAULT_FAILED) {
-		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
-	}
-	if (transfer_result != ADDRESS_TRANSFER_OK) {
-		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	}
+	memcpy(out, request, expected_size);
 	return syscall_result_ok(0u);
 }
 
@@ -191,9 +170,12 @@ static syscall_result_t allocation_map_handler(const struct cap_request* req, st
 	vmm_id_t                         new_id           = VMM_ID_INVALID;
 	cap_id_t                         mapping_cap;
 
+	if (!cap_kernel_response_fits(req, sizeof(struct allocation_map_response))) {
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
+
 	if (at_explicit) {
-		syscall_result_t copy_result =
-			copy_request_from_caller(req->caller, req->request, req->request_size, &request, sizeof(request));
+		syscall_result_t copy_result = copy_request(req->request, req->request_size, &request, sizeof(request));
 		if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
 		explicit_address = request.address;
 		if (explicit_address == 0u || (explicit_address & (PMM_PAGE_SIZE - 1u)) != 0u) {
@@ -220,7 +202,8 @@ static syscall_result_t allocation_map_handler(const struct cap_request* req, st
 		kernel_allocation_mapping_release(state);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
-	return syscall_result_ok((uintptr_t)mapping_cap);
+	struct allocation_map_response response = {.mapping_cap = mapping_cap};
+	return cap_kernel_write_response(req, &response, sizeof(response));
 }
 
 static syscall_result_t allocation_free_handler(struct allocation_state* state) {
@@ -246,7 +229,6 @@ static syscall_result_t allocation_free_handler(struct allocation_state* state) 
 
 static syscall_result_t allocation_read_handler(const struct cap_request* req, struct allocation_state* state) {
 	struct allocation_read_response response;
-	struct process*                 caller;
 
 	if (!allocation_begin_operation(state)) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	response.info = (struct vmm_info){
@@ -260,17 +242,8 @@ static syscall_result_t allocation_read_handler(const struct cap_request* req, s
 		.first_phys  = state->phys_base,
 	};
 
-	caller = process_lookup(req->caller);
-	if (caller == NULL) {
-		allocation_end_operation(state);
-		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
-	}
-	if (message_queue_send(&caller->message_queue, req->caller, &response, sizeof(response)) != MESSAGE_OK) {
-		allocation_end_operation(state);
-		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
-	}
 	allocation_end_operation(state);
-	return syscall_result_ok(0u);
+	return cap_kernel_write_response(req, &response, sizeof(response));
 }
 
 static syscall_result_t allocation_copy_handler(const struct cap_request* req, struct allocation_state* state,
@@ -287,16 +260,18 @@ static syscall_result_t allocation_copy_handler(const struct cap_request* req, s
 	enum address_transfer_result transfer_result;
 	syscall_result_t             copy_result;
 
+	if (!cap_kernel_response_fits(req, sizeof(struct allocation_copy_response))) {
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
+
 	if (from_allocation) {
-		copy_result =
-			copy_request_from_caller(req->caller, req->request, req->request_size, &request.from, sizeof(request.from));
+		copy_result = copy_request(req->request, req->request_size, &request.from, sizeof(request.from));
 		if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
 		offset = request.from.src_offset;
 		size   = request.from.size;
 	}
 	else {
-		copy_result =
-			copy_request_from_caller(req->caller, req->request, req->request_size, &request.to, sizeof(request.to));
+		copy_result = copy_request(req->request, req->request_size, &request.to, sizeof(request.to));
 		if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
 		offset = request.to.dst_offset;
 		size   = request.to.size;
@@ -304,7 +279,10 @@ static syscall_result_t allocation_copy_handler(const struct cap_request* req, s
 
 	caller_space = caller_address_space(req->caller);
 	if (caller_space == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
-	if (size == 0u) return syscall_result_ok(0u);
+	if (size == 0u) {
+		const struct allocation_copy_response response = {.bytes_copied = 0u};
+		return cap_kernel_write_response(req, &response, sizeof(response));
+	}
 	if (!allocation_begin_operation(state)) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 
 	allocation_size = state->page_count * (uintptr_t)PMM_PAGE_SIZE;
@@ -328,7 +306,8 @@ static syscall_result_t allocation_copy_handler(const struct cap_request* req, s
 	if (transfer_result != ADDRESS_TRANSFER_OK) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
-	return syscall_result_ok((uintptr_t)size);
+	struct allocation_copy_response response = {.bytes_copied = size};
+	return cap_kernel_write_response(req, &response, sizeof(response));
 }
 
 static syscall_result_t allocation_handler(const struct cap_request* req) {
@@ -341,7 +320,7 @@ static syscall_result_t allocation_handler(const struct cap_request* req) {
 	state = (struct allocation_state*)(uintptr_t)req->object_id;
 	if (state == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 
-	copy_result = copy_request_from_caller(req->caller, req->request, req->request_size, &header, sizeof(header));
+	copy_result = copy_request(req->request, req->request_size, &header, sizeof(header));
 	if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
 
 	switch (header.op) {
@@ -391,7 +370,6 @@ static bool mapping_owner_is_alive(const struct mapping_state* state) {
 
 static syscall_result_t mapping_read_handler(const struct cap_request* req, struct mapping_state* state) {
 	struct mapping_read_response response;
-	struct process*              caller;
 
 	if (!mapping_owner_is_alive(state)) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -406,19 +384,14 @@ static syscall_result_t mapping_read_handler(const struct cap_request* req, stru
 	response.info.kind = state->allocation_kind;
 	spinlock_unlock(&state->lock);
 
-	caller = process_lookup(req->caller);
-	if (caller == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
-	if (message_queue_send(&caller->message_queue, req->caller, &response, sizeof(response)) != MESSAGE_OK) {
-		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
-	}
-	return syscall_result_ok(0u);
+	return cap_kernel_write_response(req, &response, sizeof(response));
 }
 
 static syscall_result_t mapping_protect_handler(const struct cap_request* req, struct mapping_state* state) {
 	struct mapping_protect_request request;
 	syscall_result_t               copy_result;
 
-	copy_result = copy_request_from_caller(req->caller, req->request, req->request_size, &request, sizeof(request));
+	copy_result = copy_request(req->request, req->request_size, &request, sizeof(request));
 	if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
 	if (!vmm_prot_is_valid(request.prot)) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	if (!mapping_owner_is_alive(state)) {
@@ -462,7 +435,7 @@ static syscall_result_t mapping_handler(const struct cap_request* req) {
 	state = (struct mapping_state*)(uintptr_t)req->object_id;
 	if (state == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 
-	copy_result = copy_request_from_caller(req->caller, req->request, req->request_size, &header, sizeof(header));
+	copy_result = copy_request(req->request, req->request_size, &header, sizeof(header));
 	if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
 
 	switch (header.op) {

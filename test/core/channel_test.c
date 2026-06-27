@@ -2,6 +2,7 @@
 #include <base/channel.h>
 #include <base/heap.h>
 #include <base/process.h>
+#include <core/capability.h>
 #include <core/channel.h>
 #include <core/pmm.h>
 #include <core/ring_buffer.h>
@@ -72,6 +73,23 @@ Test(channel, destroy_rejects_non_owner) {
 
 	result = channel_destroy(ch, 1u);
 	cr_assert_eq(result, CHANNEL_OK, "channel_destroy should succeed for owner");
+}
+
+Test(channel, destroy_unpublishes_endpoint_objects) {
+	struct channel*    ch;
+	struct cap_object* object;
+	cap_object_id_t    object_id;
+
+	channel_test_init_heap();
+	capability_init();
+	ch = channel_create(3u);
+	cr_assert_not_null(ch);
+	object = cap_object_create(77u, ch);
+	cr_assert_not_null(object);
+	object_id = object->cap_object_id;
+
+	cr_assert_eq(channel_destroy(ch, 3u), CHANNEL_OK);
+	cr_assert_null(cap_object_acquire(object_id));
 }
 
 Test(channel, cap_queue_init_is_empty) {

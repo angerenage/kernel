@@ -1,56 +1,23 @@
 #include <base/cap.h>
 #include <base/syscall.h>
-#include <core/address_transfer.h>
 #include <core/capability.h>
-#include <core/process.h>
 #include <hal/serial.h>
 #include <kernel/capability.h>
-#include <libc/stdlib.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 static struct cap_object* serial_object;
 
 static syscall_result_t serial_handler(const struct cap_request* req) {
-	struct address_space*        space;
-	enum address_transfer_result result;
-	size_t                       size;
-	uint8_t*                     buffer;
-
 	if (req->request_size == 0u || req->request == NULL) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
-	size = req->request_size;
-	if (size > CAP_MAX_REQUEST_SIZE) {
+	if (req->request_size > CAP_MAX_REQUEST_SIZE) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
-
-	buffer = malloc(size);
-	if (buffer == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
-
-	{
-		struct process* process = process_lookup(req->caller);
-		if (process == NULL) {
-			free(buffer);
-			return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
-		}
-		space = process_address_space(process);
-	}
-
-	result = address_space_copy_from(space, (uintptr_t)req->request, buffer, size);
-	if (result != ADDRESS_TRANSFER_OK) {
-		free(buffer);
-		if (result == ADDRESS_TRANSFER_FAULT_FAILED) {
-			return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
-		}
-		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	}
-
-	hal_serial_write((const char*)buffer, size);
-	free(buffer);
-	return syscall_result_ok((uintptr_t)size);
+	hal_serial_write((const char*)req->request, req->request_size);
+	return syscall_result_ok(0u);
 }
 
 void kernel_capability_serial_init(void) {

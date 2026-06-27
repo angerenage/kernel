@@ -1,8 +1,6 @@
 #include <base/cap.h>
 #include <base/syscall.h>
-#include <core/address_transfer.h>
 #include <core/capability.h>
-#include <core/message.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/process.h>
@@ -47,13 +45,15 @@ static syscall_result_t boot_module_handler(const struct cap_request* req) {
 	if (req->request_size < sizeof(request)) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
+	if (!cap_kernel_response_fits(req, sizeof(struct boot_module_map_response))) {
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
 
 	const struct kernel_boot_module* module = (struct kernel_boot_module*)(uintptr_t)req->object_id;
 	if (module == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 
-	struct process*              caller;
-	struct address_space*        space;
-	enum address_transfer_result transfer_result;
+	struct process*       caller;
+	struct address_space* space;
 
 	caller = process_lookup(req->caller);
 	if (caller == NULL) {
@@ -61,18 +61,7 @@ static syscall_result_t boot_module_handler(const struct cap_request* req) {
 	}
 	space = process_address_space(caller);
 
-	if (space != NULL) {
-		transfer_result = address_space_copy_from(space, (uintptr_t)req->request, &request, sizeof(request));
-		if (transfer_result != ADDRESS_TRANSFER_OK) {
-			if (transfer_result == ADDRESS_TRANSFER_FAULT_FAILED) {
-				return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
-			}
-			return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-		}
-	}
-	else {
-		memcpy(&request, req->request, sizeof(request));
-	}
+	memcpy(&request, req->request, sizeof(request));
 
 	space = process_address_space(caller);
 	if (space == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
@@ -96,17 +85,8 @@ static syscall_result_t boot_module_handler(const struct cap_request* req) {
 		.mapped_base = (uintptr_t)mapped_address,
 	};
 
-	if (request.base_out_ptr != 0u) {
-		enum message_result result =
-			message_queue_send(&caller->message_queue, req->caller, &response, sizeof(response));
-		if (result != MESSAGE_OK) {
-			return syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
-		}
-
-		return syscall_result_ok((uintptr_t)mapped_address);
-	}
-
-	return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
+	(void)request.base_out_ptr;
+	return cap_kernel_write_response(req, &response, sizeof(response));
 }
 
 cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t target) {

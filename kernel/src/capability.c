@@ -3,6 +3,7 @@
 #include <kernel/capability.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "capability/boot_module.h"
 #include "capability/serial.h"
@@ -18,6 +19,20 @@ cap_id_t cap_kernel_create(uint64_t object_id, cap_kernel_handler_t handler, pro
 	if (cap == NULL) return CAP_ID_INVALID;
 
 	return cap->cap_id;
+}
+
+bool cap_kernel_response_fits(const struct cap_request* request, size_t response_size) {
+	return request != NULL && response_size != 0u && request->response != NULL &&
+	       response_size <= request->response_capacity;
+}
+
+syscall_result_t cap_kernel_write_response(const struct cap_request* request, const void* response,
+                                           size_t response_size) {
+	if (response == NULL || !cap_kernel_response_fits(request, response_size)) {
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
+	memcpy(request->response, response, response_size);
+	return syscall_result_ok(response_size);
 }
 
 void kernel_capability_init(void) {

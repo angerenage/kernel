@@ -152,9 +152,28 @@ static inline syscall_result_t cap_derive(cap_id_t base, process_id_t target, ui
 	               0u);
 }
 
-/* Deliver a request payload to the capability's endpoint. */
-static inline syscall_result_t cap_call(cap_id_t cap, const void* request, size_t request_size) {
-	return syscall(SYSCALL_CAP_CALL, (uintptr_t)cap, (uintptr_t)request, (uintptr_t)request_size, 0u, 0u, 0u);
+/* Invoke a capability with a mandatory request and an optional response buffer. */
+static inline syscall_result_t cap_call(cap_id_t cap, const void* request, size_t request_size, void* response,
+                                        size_t response_capacity) {
+	return syscall(SYSCALL_CAP_CALL,
+	               (uintptr_t)cap,
+	               (uintptr_t)request,
+	               (uintptr_t)request_size,
+	               (uintptr_t)response,
+	               (uintptr_t)response_capacity,
+	               0u);
+}
+
+/* Complete one request received through cap_recv. */
+static inline syscall_result_t cap_reply(cap_call_id_t call_id, const void* response, size_t response_size,
+                                         syscall_status_t status) {
+	return syscall(SYSCALL_CAP_REPLY,
+	               (uintptr_t)call_id,
+	               (uintptr_t)response,
+	               (uintptr_t)response_size,
+	               (uintptr_t)status,
+	               0u,
+	               0u);
 }
 
 /* Revoke rights from a capability, or revoke the capability entirely (rights == 0). */
@@ -162,7 +181,9 @@ static inline syscall_result_t cap_revoke(cap_id_t cap, cap_rights_t rights) {
 	return syscall(SYSCALL_CAP_REVOKE, (uintptr_t)cap, (uintptr_t)rights, 0u, 0u, 0u, 0u);
 }
 
-/* Dequeue a capability call request from an endpoint. */
+/* Dequeue a capability call request from an endpoint. A successful dequeue must eventually be completed with
+ *
+ * cap_reply. */
 static inline syscall_result_t cap_recv(channel_id_t endpoint_id, struct cap_request* out, void* request_buffer,
                                         size_t request_buffer_size) {
 	return syscall(SYSCALL_CAP_RECV,

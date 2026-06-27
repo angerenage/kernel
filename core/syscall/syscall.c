@@ -111,3 +111,19 @@ syscall_result_t syscall_copy_to_user(struct address_space* space, uintptr_t dst
 	transfer_result = address_space_copy_to(space, dst, src, size);
 	return syscall_result_from_address_transfer(transfer_result, arg_index);
 }
+
+syscall_result_t syscall_copy_from_user(struct address_space* space, uintptr_t src, void* dst, size_t size,
+                                        uintptr_t arg_index) {
+	enum address_transfer_result transfer_result;
+
+	if (size == 0u) return syscall_result_ok(0u);
+	if (src == 0u || dst == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, arg_index);
+
+	if (space == NULL) {
+		memcpy(dst, (const void*)src, size);
+		return syscall_result_ok(0u);
+	}
+
+	transfer_result = address_space_copy_from(space, src, dst, size);
+	return syscall_result_from_address_transfer(transfer_result, arg_index);
+}

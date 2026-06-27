@@ -22,3 +22,8 @@ struct address_space_query_request {
 	struct address_space_request_header header;
 	vmm_id_t                            id;
 };
+
+/* Response with metadata for an address-space allocation. */
+struct address_space_query_response {
+	struct vmm_info info;
+};

@@ -2,13 +2,11 @@
 
 #include <base/cap.h>
 #include <base/self.h>
-#include <core/address_transfer.h>
 #include <core/capability.h>
-#include <core/message.h>
 #include <core/process.h>
 #include <core/syscall.h>
 #include <core/uthread.h>
-#include <stdlib.h>
+#include <kernel/capability.h>
 #include <string.h>
 
 /* Extract the operation code from a request buffer. Returns -1 if the buffer is too small. */
@@ -20,42 +18,28 @@ static enum process_op process_op_from_request(const void* request, size_t reque
 }
 
 static syscall_result_t process_info_handler(const struct cap_request* req, struct process* target) {
-	struct process*              caller;
 	struct process_info_response response;
-	enum message_result          result;
 
 	response.pid          = process_pid(target);
 	response.thread_id    = 0u;
 	response.thread_count = process_thread_count(target);
 
-	caller = process_lookup(req->caller);
-	if (caller == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
-
-	result = message_queue_send(&caller->message_queue, req->caller, &response, sizeof(response));
-	if (result != MESSAGE_OK) return syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
-
-	return syscall_result_ok(0u);
+	return cap_kernel_write_response(req, &response, sizeof(response));
 }
 
 static syscall_result_t process_run_handler(const struct cap_request* req, struct process* target) {
 	struct process_run_request       request;
-	enum address_transfer_result     transfer_result;
-	struct process*                  caller;
 	struct uthread*                  main_thread = NULL;
 	enum process_thread_spawn_result result;
 
 	if (req->request == NULL || req->request_size < sizeof(request)) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
-
-	caller = process_lookup(req->caller);
-	if (caller == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
-
-	transfer_result =
-		address_space_copy_from(process_address_space(caller), (uintptr_t)req->request, &request, sizeof(request));
-	if (transfer_result != ADDRESS_TRANSFER_OK) {
+	if (!cap_kernel_response_fits(req, sizeof(struct process_run_response))) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
+
+	memcpy(&request, req->request, sizeof(request));
 
 	result = process_start_main_thread(target,
 	                                   &main_thread,
@@ -71,14 +55,18 @@ static syscall_result_t process_run_handler(const struct cap_request* req, struc
 		return syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
 	}
 
-	return syscall_result_ok((uintptr_t)uthread_id(main_thread));
+	struct process_run_response response = {.thread_id = uthread_id(main_thread)};
+	return cap_kernel_write_response(req, &response, sizeof(response));
 }
 
 static syscall_result_t process_wait_handler(const struct cap_request* req, struct process* target) {
-	struct process*              caller;
 	struct process_wait_response response;
 	enum process_join_result     join_result;
 	uintptr_t                    exit_code = 0u;
+
+	if (!cap_kernel_response_fits(req, sizeof(response))) {
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
 
 	join_result = process_join(target, &exit_code);
 	switch (join_result) {
@@ -96,12 +84,7 @@ static syscall_result_t process_wait_handler(const struct cap_request* req, stru
 		return syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)join_result);
 	}
 
-	caller = process_lookup(req->caller);
-	if (caller == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
-
-	return message_queue_send(&caller->message_queue, req->caller, &response, sizeof(response)) == MESSAGE_OK
-	           ? syscall_result_ok(0u)
-	           : syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
+	return cap_kernel_write_response(req, &response, sizeof(response));
 }
 
 static syscall_result_t process_detach_handler(const struct cap_request* req, struct process* target) {
@@ -122,23 +105,14 @@ static syscall_result_t process_detach_handler(const struct cap_request* req, st
 }
 
 static syscall_result_t process_kill_handler(const struct cap_request* req, struct process* target) {
-	struct process*              caller;
-	struct process_kill_request  request;
-	enum address_transfer_result transfer_result;
-	bool                         success;
+	struct process_kill_request request;
+	bool                        success;
 
 	if (req->request == NULL || req->request_size < sizeof(request)) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
-	caller = process_lookup(req->caller);
-	if (caller == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
-
-	transfer_result =
-		address_space_copy_from(process_address_space(caller), (uintptr_t)req->request, &request, sizeof(request));
-	if (transfer_result != ADDRESS_TRANSFER_OK) {
-		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	}
+	memcpy(&request, req->request, sizeof(request));
 
 	success = process_terminate(target, request.exit_code);
 	if (!success) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
@@ -150,7 +124,6 @@ static syscall_result_t process_handler(const struct cap_request* req) {
 	struct process*  process;
 	enum process_op  op;
 	cap_rights_t     required_rights;
-	void*            kernel_request = NULL;
 	syscall_result_t result;
 
 	process = (struct process*)(uintptr_t)req->object_id;
@@ -160,37 +133,8 @@ static syscall_result_t process_handler(const struct cap_request* req) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
-	kernel_request = malloc(req->request_size);
-	if (kernel_request == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
-
-	{
-		struct process*       caller;
-		struct address_space* space;
-
-		caller = process_lookup(req->caller);
-		if (caller == NULL) {
-			free(kernel_request);
-			return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
-		}
-
-		space = process_address_space(caller);
-		if (space != NULL) {
-			enum address_transfer_result transfer_result;
-			transfer_result =
-				address_space_copy_from(space, (uintptr_t)req->request, kernel_request, req->request_size);
-			if (transfer_result != ADDRESS_TRANSFER_OK) {
-				free(kernel_request);
-				return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-			}
-		}
-		else {
-			memcpy(kernel_request, req->request, req->request_size);
-		}
-	}
-
-	op = process_op_from_request(kernel_request, req->request_size);
+	op = process_op_from_request(req->request, req->request_size);
 	if ((int)op < 0) {
-		free(kernel_request);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
@@ -211,12 +155,10 @@ static syscall_result_t process_handler(const struct cap_request* req) {
 		required_rights = CAP_EXEC;
 		break;
 	default:
-		free(kernel_request);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
 	if ((req->rights & required_rights) != required_rights) {
-		free(kernel_request);
 		return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	}
 
@@ -241,7 +183,6 @@ static syscall_result_t process_handler(const struct cap_request* req) {
 		break;
 	}
 
-	free(kernel_request);
 	return result;
 }
 

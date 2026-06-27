@@ -38,6 +38,7 @@ static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 	[SYSCALL_CAP_DELEGATE] = syscall_cap_delegate,
 	[SYSCALL_CAP_DERIVE]   = syscall_cap_derive,
 	[SYSCALL_CAP_CALL]     = syscall_cap_call,
+	[SYSCALL_CAP_REPLY]    = syscall_cap_reply,
 	[SYSCALL_CAP_REVOKE]   = syscall_cap_revoke,
 	[SYSCALL_CAP_RECV]     = syscall_cap_recv,
 };

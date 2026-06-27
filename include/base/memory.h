@@ -43,6 +43,11 @@ struct allocation_map_at_request {
 	uintptr_t                        address;
 };
 
+/* Response with the capability for a newly-created mapping. */
+struct allocation_map_response {
+	cap_id_t mapping_cap;
+};
+
 /* Request to free an allocation. */
 struct allocation_free_request {
 	struct allocation_request_header header;
@@ -67,6 +72,11 @@ struct allocation_copy_to_request {
 	uintptr_t                        src_address;
 	uintptr_t                        dst_offset;
 	size_t                           size;
+};
+
+/* Response with the number of bytes copied. */
+struct allocation_copy_response {
+	size_t bytes_copied;
 };
 
 /* Response with allocation metadata. */

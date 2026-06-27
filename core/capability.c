@@ -1,6 +1,7 @@
 #include <base/cap.h>
 #include <base/syscall.h>
 #include <core/capability.h>
+#include <core/capability_call.h>
 #include <core/lock.h>
 #include <core/pmm.h>
 #include <libc/stdlib.h>
@@ -10,6 +11,7 @@
 
 #define CAP_ID_TABLE_MIN 1u
 #define CAP_ID_TABLE_MAX UINT64_MAX
+#define CAP_OBJECT_UNREGISTER_BATCH 16u
 
 static struct id_table cap_object_table = {
 	.lock    = SPINLOCK_INIT_CLASS("cap_object_table", SPINLOCK_ORDER_ID_TABLE, SPINLOCK_FLAG_IRQSAVE),
@@ -29,6 +31,10 @@ static struct cap_object* cap_object_create_locked(uint64_t object_id, struct ch
                                                    cap_kernel_handler_t handler) {
 	struct cap_object* object = malloc(sizeof(*object));
 	if (object == NULL) return NULL;
+	if (!channel_retain(endpoint)) {
+		free(object);
+		return NULL;
+	}
 
 	object->cap_object_id   = CAP_OBJECT_ID_INVALID;
 	object->object_id       = object_id;
@@ -70,7 +76,7 @@ struct cap_object* cap_object_create(uint64_t object_id, struct channel* endpoin
 
 	id_table_id_t id;
 	if (id_table_alloc(&cap_object_table, object, &id) != ID_TABLE_OK) {
-		free(object);
+		cap_object_release(object);
 		return NULL;
 	}
 
@@ -80,7 +86,7 @@ struct cap_object* cap_object_create(uint64_t object_id, struct channel* endpoin
 	spinlock_unlock_irqrestore(&cap_object_table.lock, state);
 	if (existing != object) {
 		(void)id_table_remove(&cap_object_table, id, NULL);
-		free(object);
+		cap_object_release(object);
 		return existing;
 	}
 
@@ -106,7 +112,7 @@ struct cap_object* cap_object_create_kernel(uint64_t object_id, cap_kernel_handl
 
 	id_table_id_t id;
 	if (id_table_alloc(&cap_object_table, object, &id) != ID_TABLE_OK) {
-		free(object);
+		cap_object_release(object);
 		return NULL;
 	}
 
@@ -116,7 +122,7 @@ struct cap_object* cap_object_create_kernel(uint64_t object_id, cap_kernel_handl
 	spinlock_unlock_irqrestore(&cap_object_table.lock, state);
 	if (existing != object) {
 		(void)id_table_remove(&cap_object_table, id, NULL);
-		free(object);
+		cap_object_release(object);
 		return existing;
 	}
 
@@ -161,6 +167,7 @@ void cap_object_release(struct cap_object* object) {
 	if (object == NULL) return;
 	remaining = __atomic_sub_fetch(&object->reference_count, 1u, __ATOMIC_ACQ_REL);
 	if (remaining != 0u) return;
+	channel_release(object->endpoint);
 	free(object);
 }
 
@@ -182,6 +189,25 @@ bool cap_object_destroy(struct cap_object* object) {
 
 	if (removed != NULL) cap_object_release(removed);
 	return true;
+}
+
+void cap_object_unregister_endpoint(struct channel* endpoint) {
+	cap_object_id_t ids[CAP_OBJECT_UNREGISTER_BATCH];
+	size_t          count;
+
+	if (endpoint == NULL) return;
+	do {
+		struct irq_state state = spinlock_lock_irqsave(&cap_object_table.lock);
+		count                  = 0u;
+		for (size_t i = 0u; i < cap_object_table.capacity && count < CAP_OBJECT_UNREGISTER_BATCH; i++) {
+			struct cap_object* object = cap_object_table.slots[i];
+			if (object == NULL || object->endpoint != endpoint) continue;
+			ids[count++] = object->cap_object_id;
+		}
+		spinlock_unlock_irqrestore(&cap_object_table.lock, state);
+
+		for (size_t i = 0u; i < count; i++) (void)cap_object_destroy_with_id(ids[i]);
+	} while (count != 0u);
 }
 
 static struct capability* capability_create_locked(cap_object_id_t cap_object_id, process_id_t target,
@@ -367,6 +393,7 @@ enum cap_result cap_is_valid(struct capability* cap) {
 void capability_init(void) {
 	id_table_init(&cap_object_table, "cap_object_table", CAP_ID_TABLE_MIN, CAP_ID_TABLE_MAX);
 	id_table_init(&capability_table, "capability_table", CAP_ID_TABLE_MIN, CAP_ID_TABLE_MAX);
+	cap_pending_call_init();
 }
 
 size_t capability_object_count(void) {

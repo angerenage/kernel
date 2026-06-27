@@ -1,4 +1,6 @@
 #include <base/cap.h>
+#include <core/capability.h>
+#include <core/capability_call.h>
 #include <core/channel.h>
 #include <core/id_table.h>
 #include <core/ring_buffer.h>
@@ -24,7 +26,9 @@ struct channel* channel_create(process_id_t owner_pid) {
 	ch = malloc(sizeof(*ch));
 	if (ch == NULL) return NULL;
 	memset(ch, 0, sizeof(*ch));
-	ch->owner_pid = owner_pid;
+	spinlock_init_class(&ch->lock, "channel_lock", SPINLOCK_ORDER_MUTEX, SPINLOCK_FLAG_IRQSAVE);
+	ch->owner_pid       = owner_pid;
+	ch->reference_count = 1u;
 	if (!ring_buffer_init(&ch->cap_queue,
 	                      "channel_cap_queue",
 	                      SPINLOCK_ORDER_ID_TABLE,
@@ -46,18 +50,79 @@ struct channel* channel_create(process_id_t owner_pid) {
 }
 
 enum channel_result channel_destroy(struct channel* channel, process_id_t caller_pid) {
+	struct irq_state state;
+
 	if (channel == NULL) return CHANNEL_INVALID_ARGUMENTS;
 	if (caller_pid != channel->owner_pid) return CHANNEL_NOT_OWNER;
 
-	(void)id_table_remove(&channel_table, (id_table_id_t)channel->id, NULL);
-	ring_buffer_deinit(&channel->cap_queue);
-	memset(channel, 0, sizeof(*channel));
-	free(channel);
+	state = spinlock_lock_irqsave(&channel->lock);
+	if (channel->closing) {
+		spinlock_unlock_irqrestore(&channel->lock, state);
+		return CHANNEL_NOT_FOUND;
+	}
+	channel->closing = true;
+	spinlock_unlock_irqrestore(&channel->lock, state);
+	if (id_table_remove(&channel_table, (id_table_id_t)channel->id, NULL) != ID_TABLE_OK) {
+		return CHANNEL_NOT_FOUND;
+	}
+	cap_object_unregister_endpoint(channel);
+	cap_pending_call_cancel_channel(channel->id);
+	channel_release(channel);
 	return CHANNEL_OK;
 }
 
 struct channel* channel_lookup(channel_id_t id) {
 	return (struct channel*)id_table_lookup(&channel_table, (id_table_id_t)id);
+}
+
+static bool channel_retain_callback(void* value, void* context) {
+	struct channel* channel = value;
+	(void)context;
+
+	if (__atomic_load_n(&channel->closing, __ATOMIC_ACQUIRE)) return false;
+	(void)__atomic_add_fetch(&channel->reference_count, 1u, __ATOMIC_RELAXED);
+	return true;
+}
+
+struct channel* channel_acquire(channel_id_t id) {
+	if (id == CHANNEL_ID_INVALID) return NULL;
+	return id_table_lookup_retain(&channel_table, id, channel_retain_callback, NULL);
+}
+
+bool channel_retain(struct channel* channel) {
+	struct irq_state state;
+
+	if (channel == NULL) return true;
+	state = spinlock_lock_irqsave(&channel->lock);
+	if (channel->closing) {
+		spinlock_unlock_irqrestore(&channel->lock, state);
+		return false;
+	}
+	(void)__atomic_add_fetch(&channel->reference_count, 1u, __ATOMIC_RELAXED);
+	spinlock_unlock_irqrestore(&channel->lock, state);
+	return true;
+}
+
+void channel_release(struct channel* channel) {
+	if (channel == NULL) return;
+	if (__atomic_sub_fetch(&channel->reference_count, 1u, __ATOMIC_ACQ_REL) != 0u) return;
+	ring_buffer_deinit(&channel->cap_queue);
+	free(channel);
+}
+
+bool channel_enqueue_cap_request(struct channel* channel, const struct cap_request* request) {
+	struct irq_state state;
+	bool             enqueued;
+
+	if (channel == NULL || request == NULL) return false;
+	state = spinlock_lock_irqsave(&channel->lock);
+	if (channel->closing) {
+		spinlock_unlock_irqrestore(&channel->lock, state);
+		return false;
+	}
+	enqueued = ring_buffer_enqueue(&channel->cap_queue, request);
+	spinlock_unlock_irqrestore(&channel->lock, state);
+	return enqueued;
 }
 
 void process_channel_state_init(struct process_channel_state* state) {

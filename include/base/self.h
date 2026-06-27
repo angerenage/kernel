@@ -27,6 +27,11 @@ struct process_wait_response {
 	uintptr_t exit_code;
 };
 
+/* Response with the ID of a process' newly-started main thread. */
+struct process_run_response {
+	uint64_t thread_id;
+};
+
 /* Operation codes for process capability requests. */
 enum process_op {
 	PROCESS_OP_INFO   = 0,

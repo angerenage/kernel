@@ -2,6 +2,7 @@
 #include <base/channel.h>
 #include <core/address_transfer.h>
 #include <core/capability.h>
+#include <core/capability_call.h>
 #include <core/channel.h>
 #include <core/process.h>
 #include <core/ring_buffer.h>
@@ -74,19 +75,26 @@ syscall_result_t syscall_cap_create(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 	rights    = (cap_rights_t)arg3;
 
 	if (arg0 == CHANNEL_ID_INVALID) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	endpoint = channel_lookup((channel_id_t)arg0);
+	endpoint = channel_acquire((channel_id_t)arg0);
 	if (endpoint == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 
-	if (endpoint->owner_pid != caller_pid) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	if (endpoint->owner_pid != caller_pid) {
+		channel_release(endpoint);
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
 
 	object = cap_object_lookup(endpoint, object_id);
 	if (object == NULL) {
 		object = cap_object_create(object_id, endpoint);
-		if (object == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
+		if (object == NULL) {
+			channel_release(endpoint);
+			return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
+		}
 	}
 
 	cap = cap_create(object->cap_object_id, target, rights, NULL);
 	if (cap == NULL) {
+		channel_release(endpoint);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 
@@ -94,9 +102,13 @@ syscall_result_t syscall_cap_create(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 
 	if (arg4 != 0u) {
 		copy_result = syscall_copy_to_user(syscall_current_user_space(), arg4, &cap_id, sizeof(cap_id), 4u);
-		if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
+		if (copy_result.status != SYSCALL_STATUS_OK) {
+			channel_release(endpoint);
+			return copy_result;
+		}
 	}
 
+	channel_release(endpoint);
 	return syscall_result_ok((uintptr_t)cap_id);
 }
 
@@ -227,21 +239,19 @@ syscall_result_t syscall_cap_derive(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 
 syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
                                   uintptr_t arg5) {
-	struct process*              process;
-	struct capability*           cap;
-	process_id_t                 caller_pid;
-	size_t                       request_size;
-	enum cap_result              auth_result;
-	enum cap_result              valid_result;
-	struct cap_object*           object;
-	struct address_space*        space;
-	enum address_transfer_result transfer_result;
-	struct cap_request           req;
-	void*                        heap_request;
-	syscall_result_t             call_result;
+	struct process*    process;
+	struct capability* cap;
+	process_id_t       caller_pid;
+	size_t             request_size;
+	size_t             response_capacity;
+	enum cap_result    auth_result;
+	enum cap_result    valid_result;
+	struct cap_object* object;
+	struct cap_request req;
+	void*              kernel_request;
+	void*              kernel_response;
+	syscall_result_t   call_result;
 
-	(void)arg3;
-	(void)arg4;
 	(void)arg5;
 
 	process = process_current();
@@ -276,70 +286,172 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
-	request_size = (size_t)arg2;
-	if ((uintptr_t)request_size != arg2 || request_size > CAP_MAX_REQUEST_SIZE) {
+	request_size      = (size_t)arg2;
+	response_capacity = (size_t)arg4;
+	if ((uintptr_t)request_size != arg2 || request_size == 0u || request_size > CAP_MAX_REQUEST_SIZE) {
 		cap_object_release(object);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 2u);
 	}
-	if (request_size > 0u && arg1 == 0u) {
+	if (arg1 == 0u) {
 		cap_object_release(object);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 1u);
 	}
+	if ((uintptr_t)response_capacity != arg4 || response_capacity > CAP_MAX_RESPONSE_SIZE) {
+		cap_object_release(object);
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 4u);
+	}
+	if ((arg3 == 0u) != (response_capacity == 0u)) {
+		cap_object_release(object);
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 3u);
+	}
 
-	if (object->endpoint == NULL) {
-		if (object->handler == NULL) {
-			cap_object_release(object);
-			return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
-		}
-
-		req.caller       = caller_pid;
-		req.cap_id       = cap->cap_id;
-		req.object_id    = object->object_id;
-		req.rights       = cap->rights;
-		req.request      = (void*)arg1;
-		req.request_size = request_size;
-
-		call_result = object->handler(&req);
+	kernel_request = malloc(request_size);
+	if (kernel_request == NULL) {
+		cap_object_release(object);
+		return syscall_result_error(SYSCALL_STATUS_FAILED, 2u);
+	}
+	call_result = syscall_copy_from_user(syscall_current_user_space(), arg1, kernel_request, request_size, 1u);
+	if (call_result.status != SYSCALL_STATUS_OK) {
+		free(kernel_request);
 		cap_object_release(object);
 		return call_result;
 	}
 
-	heap_request = NULL;
-	if (request_size > 0u) {
-		heap_request = malloc(request_size);
-		if (heap_request == NULL) {
+	if (object->endpoint == NULL) {
+		if (object->handler == NULL) {
+			free(kernel_request);
 			cap_object_release(object);
-			return syscall_result_error(SYSCALL_STATUS_FAILED, 2u);
+			return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+		}
+		kernel_response = response_capacity == 0u ? NULL : malloc(response_capacity);
+		if (response_capacity != 0u && kernel_response == NULL) {
+			free(kernel_request);
+			cap_object_release(object);
+			return syscall_result_error(SYSCALL_STATUS_FAILED, 4u);
 		}
 
-		space = syscall_current_user_space();
-		if (space == NULL) {
-			memcpy(heap_request, (const void*)arg1, request_size);
+		req.call_id           = CAP_CALL_ID_INVALID;
+		req.caller            = caller_pid;
+		req.cap_id            = cap->cap_id;
+		req.object_id         = object->object_id;
+		req.rights            = cap->rights;
+		req.request           = kernel_request;
+		req.request_size      = request_size;
+		req.response          = kernel_response;
+		req.response_capacity = response_capacity;
+
+		call_result = object->handler(&req);
+		cap_object_release(object);
+		if (call_result.status == SYSCALL_STATUS_OK && call_result.value > response_capacity) {
+			free(kernel_response);
+			free(kernel_request);
+			return syscall_result_error(SYSCALL_STATUS_FAILED, 4u);
 		}
-		else {
-			transfer_result = address_space_copy_from(space, arg1, heap_request, request_size);
-			if (transfer_result != ADDRESS_TRANSFER_OK) {
-				free(heap_request);
-				cap_object_release(object);
-				return syscall_result_from_address_transfer(transfer_result, 1u);
-			}
+		if (call_result.status == SYSCALL_STATUS_OK && call_result.value != 0u) {
+			syscall_result_t copy_result = syscall_copy_to_user(
+				syscall_current_user_space(), arg3, kernel_response, (size_t)call_result.value, 3u);
+			if (copy_result.status != SYSCALL_STATUS_OK) call_result = copy_result;
 		}
+		free(kernel_response);
+		free(kernel_request);
+		return call_result;
 	}
 
-	req.caller       = caller_pid;
-	req.cap_id       = cap->cap_id;
-	req.object_id    = object->object_id;
-	req.rights       = cap->rights;
-	req.request      = heap_request;
-	req.request_size = request_size;
+	struct cap_pending_call* pending =
+		cap_pending_call_create(object->endpoint->id, object->endpoint->owner_pid, caller_pid, response_capacity);
+	if (pending == NULL) {
+		free(kernel_request);
+		cap_object_release(object);
+		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
+	}
+	req.call_id           = cap_pending_call_id(pending);
+	req.caller            = caller_pid;
+	req.cap_id            = cap->cap_id;
+	req.object_id         = object->object_id;
+	req.rights            = cap->rights;
+	req.request           = kernel_request;
+	req.request_size      = request_size;
+	req.response          = NULL;
+	req.response_capacity = response_capacity;
 
-	if (!ring_buffer_enqueue(&object->endpoint->cap_queue, &req)) {
-		free(heap_request);
+	if (!channel_enqueue_cap_request(object->endpoint, &req)) {
+		cap_pending_call_destroy(pending);
+		free(kernel_request);
 		cap_object_release(object);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 
 	cap_object_release(object);
+	const void* pending_response = NULL;
+	cap_pending_call_wait(pending, &call_result, &pending_response);
+	if (call_result.status == SYSCALL_STATUS_OK && call_result.value != 0u) {
+		syscall_result_t copy_result =
+			syscall_copy_to_user(syscall_current_user_space(), arg3, pending_response, (size_t)call_result.value, 3u);
+		if (copy_result.status != SYSCALL_STATUS_OK) call_result = copy_result;
+	}
+	cap_pending_call_destroy(pending);
+	free(kernel_request);
+	return call_result;
+}
+
+static bool cap_reply_status_is_valid(syscall_status_t status) {
+	switch (status) {
+	case SYSCALL_STATUS_OK:
+	case SYSCALL_STATUS_BAD_ARGUMENT:
+	case SYSCALL_STATUS_DENIED:
+	case SYSCALL_STATUS_FAILED:
+	case SYSCALL_STATUS_UNAVAILABLE:
+		return true;
+	case SYSCALL_STATUS_UNKNOWN_SYSCALL:
+	default:
+		return false;
+	}
+}
+
+syscall_result_t syscall_cap_reply(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
+                                   uintptr_t arg5) {
+	struct process*               process;
+	struct cap_pending_reply      reply;
+	size_t                        response_size;
+	syscall_status_t              status = (syscall_status_t)arg3;
+	enum cap_pending_reply_result prepare_result;
+	syscall_result_t              copy_result;
+
+	(void)arg4;
+	(void)arg5;
+	process = process_current();
+	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	if (arg0 == CAP_CALL_ID_INVALID) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	response_size = (size_t)arg2;
+	if ((uintptr_t)response_size != arg2 || response_size > CAP_MAX_RESPONSE_SIZE) {
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 2u);
+	}
+	if ((arg1 == 0u) != (response_size == 0u)) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 1u);
+	if (!cap_reply_status_is_valid(status)) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 3u);
+	if (status != SYSCALL_STATUS_OK && response_size != 0u) {
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 2u);
+	}
+
+	prepare_result = cap_pending_call_prepare_reply((cap_call_id_t)arg0, process_pid(process), response_size, &reply);
+	switch (prepare_result) {
+	case CAP_PENDING_REPLY_OK:
+		break;
+	case CAP_PENDING_REPLY_NOT_OWNER:
+		return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
+	case CAP_PENDING_REPLY_TOO_LARGE:
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 2u);
+	case CAP_PENDING_REPLY_NOT_FOUND:
+	case CAP_PENDING_REPLY_ALREADY_COMPLETED:
+	default:
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
+
+	copy_result = syscall_copy_from_user(syscall_current_user_space(), arg1, reply.response, response_size, 1u);
+	if (copy_result.status != SYSCALL_STATUS_OK) {
+		cap_pending_call_abort_reply(&reply);
+		return copy_result;
+	}
+	cap_pending_call_finish_reply(&reply, status, response_size);
 	return syscall_result_ok(0u);
 }
 
@@ -413,18 +525,28 @@ syscall_result_t syscall_cap_recv(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 	caller_pid = process_pid(process);
 
 	if (arg0 == CHANNEL_ID_INVALID) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	endpoint = channel_lookup((channel_id_t)arg0);
+	endpoint = channel_acquire((channel_id_t)arg0);
 	if (endpoint == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 
-	if (endpoint->owner_pid != caller_pid) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	if (endpoint->owner_pid != caller_pid) {
+		channel_release(endpoint);
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
 
-	if (arg1 == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 1u);
+	if (arg1 == 0u) {
+		channel_release(endpoint);
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 1u);
+	}
 
-	if (!ring_buffer_dequeue(&endpoint->cap_queue, &req)) return syscall_result_ok(0u);
+	if (!ring_buffer_dequeue(&endpoint->cap_queue, &req)) {
+		channel_release(endpoint);
+		return syscall_result_ok(0u);
+	}
 
 	buffer_size = (size_t)arg3;
 	if ((uintptr_t)buffer_size != arg3) {
-		free(req.request);
+		(void)cap_pending_call_fail(req.call_id, SYSCALL_STATUS_FAILED);
+		channel_release(endpoint);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 3u);
 	}
 
@@ -432,7 +554,8 @@ syscall_result_t syscall_cap_recv(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 
 	if (req.request_size > 0u) {
 		if (arg2 == 0u || buffer_size < req.request_size) {
-			free(req.request);
+			(void)cap_pending_call_fail(req.call_id, SYSCALL_STATUS_FAILED);
+			channel_release(endpoint);
 			return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 2u);
 		}
 
@@ -442,26 +565,33 @@ syscall_result_t syscall_cap_recv(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 		else {
 			transfer_result = address_space_copy_to(space, arg2, req.request, req.request_size);
 			if (transfer_result != ADDRESS_TRANSFER_OK) {
-				free(req.request);
+				(void)cap_pending_call_fail(req.call_id, SYSCALL_STATUS_FAILED);
+				channel_release(endpoint);
 				return syscall_result_from_address_transfer(transfer_result, 2u);
 			}
 		}
 	}
 
-	free(req.request);
-
 	{
 		struct cap_request user_req;
-		user_req.caller       = req.caller;
-		user_req.cap_id       = req.cap_id;
-		user_req.object_id    = req.object_id;
-		user_req.rights       = req.rights;
-		user_req.request      = (void*)arg2;
-		user_req.request_size = req.request_size;
+		user_req.call_id           = req.call_id;
+		user_req.caller            = req.caller;
+		user_req.cap_id            = req.cap_id;
+		user_req.object_id         = req.object_id;
+		user_req.rights            = req.rights;
+		user_req.request           = (const void*)arg2;
+		user_req.request_size      = req.request_size;
+		user_req.response          = NULL;
+		user_req.response_capacity = req.response_capacity;
 
 		copy_result = syscall_copy_to_user(syscall_current_user_space(), arg1, &user_req, sizeof(user_req), 1u);
-		if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
+		if (copy_result.status != SYSCALL_STATUS_OK) {
+			(void)cap_pending_call_fail(req.call_id, SYSCALL_STATUS_FAILED);
+			channel_release(endpoint);
+			return copy_result;
+		}
 	}
 
+	channel_release(endpoint);
 	return syscall_result_ok(1u);
 }

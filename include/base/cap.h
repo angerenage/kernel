@@ -6,9 +6,12 @@
 
 typedef uint64_t cap_id_t;
 typedef uint64_t cap_rights_t;
+typedef uint64_t cap_call_id_t;
 
 #define CAP_ID_INVALID ((cap_id_t)0u)
+#define CAP_CALL_ID_INVALID ((cap_call_id_t)0u)
 #define CAP_MAX_REQUEST_SIZE (64 * 1024)
+#define CAP_MAX_RESPONSE_SIZE (64 * 1024)
 #define CAP_REQUEST_QUEUE_DEPTH 16u
 
 enum cap_right {
@@ -28,12 +31,17 @@ enum cap_right {
 	CAP_MANAGE   = 1ull << 19,
 };
 
-/* Request delivered to a server endpoint when a client issues sys_cap_call. */
+/* Request delivered to a server endpoint when a client issues cap_call. Userspace servers receive response == NULL
+ *
+ * and complete call_id with cap_reply; kernel handlers receive a writable response buffer directly. */
 struct cap_request {
-	process_id_t caller;
-	cap_id_t     cap_id;
-	uint64_t     object_id;
-	cap_rights_t rights;
-	void*        request;
-	size_t       request_size;
+	cap_call_id_t call_id;
+	process_id_t  caller;
+	cap_id_t      cap_id;
+	uint64_t      object_id;
+	cap_rights_t  rights;
+	const void*   request;
+	size_t        request_size;
+	void*         response;
+	size_t        response_capacity;
 };

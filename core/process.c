@@ -1,4 +1,5 @@
 #include <core/capability.h>
+#include <core/capability_call.h>
 #include <core/id_table.h>
 #include <core/process.h>
 #include <core/sched.h>
@@ -291,6 +292,7 @@ bool process_terminate(struct process* process, uintptr_t exit_code) {
 	wake_joiners = process_mark_zombie_if_complete_locked(process);
 	spinlock_unlock_irqrestore(&process->lock, state);
 	spinlock_unlock_irqrestore(&process->join_wait_queue.lock, wait_state);
+	cap_pending_call_cancel_caller(process->pid);
 
 	cursor = process->thread_head;
 	while (cursor != NULL) {

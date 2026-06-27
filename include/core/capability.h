@@ -71,6 +71,9 @@ bool cap_object_destroy_with_id(cap_object_id_t id);
 /* Unregister a routing object. This never destroys the resource identified by object_id. */
 bool cap_object_destroy(struct cap_object* object);
 
+/* Unpublish every routing object owned by endpoint. Represented provider resources remain untouched. */
+void cap_object_unregister_endpoint(struct channel* endpoint);
+
 /* Create a new capability granting rights on cap_object_id to target. The capability does not take ownership of the
  * object. */
 struct capability* cap_create(cap_object_id_t cap_object_id, process_id_t target, cap_rights_t rights,

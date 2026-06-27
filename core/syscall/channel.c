@@ -90,7 +90,7 @@ syscall_result_t syscall_channel_destroy(uintptr_t arg0, uintptr_t arg1, uintptr
 	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 	if (arg0 == CHANNEL_ID_INVALID) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 
-	ch = channel_lookup((channel_id_t)arg0);
+	ch = channel_acquire((channel_id_t)arg0);
 	if (ch == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 
 	caller_pid = process_pid(process);
@@ -98,5 +98,6 @@ syscall_result_t syscall_channel_destroy(uintptr_t arg0, uintptr_t arg1, uintptr
 	if (result == CHANNEL_OK) {
 		process_channel_state_remove(&process->channel_state, ch);
 	}
+	channel_release(ch);
 	return syscall_channel_result_to_syscall(result);
 }
