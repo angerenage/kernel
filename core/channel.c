@@ -128,35 +128,52 @@ bool channel_enqueue_cap_request(struct channel* channel, const struct cap_reque
 void process_channel_state_init(struct process_channel_state* state) {
 	if (state == NULL) return;
 	memset(state, 0, sizeof(*state));
+	spinlock_init_class(&state->lock, "process_channels", SPINLOCK_ORDER_PROCESS, SPINLOCK_FLAG_IRQSAVE);
 }
 
 void process_channel_state_deinit(struct process_channel_state* state) {
 	if (state == NULL) return;
 	for (size_t i = 0u; i < CHANNEL_MAX_PER_PROCESS; i++) {
-		if (state->channels[i] != NULL) {
-			channel_destroy(state->channels[i], state->channels[i]->owner_pid);
-			state->channels[i] = NULL;
-		}
+		struct channel*  channel;
+		struct irq_state irq_state = spinlock_lock_irqsave(&state->lock);
+
+		channel            = state->channels[i];
+		state->channels[i] = NULL;
+		if (channel != NULL && state->count > 0u) state->count--;
+		spinlock_unlock_irqrestore(&state->lock, irq_state);
+
+		if (channel != NULL) (void)channel_destroy(channel, channel->owner_pid);
 	}
-	state->count = 0u;
 }
 
 bool process_channel_state_add(struct process_channel_state* state, struct channel* channel) {
+	struct irq_state irq_state;
+	bool             added = false;
+
 	if (state == NULL || channel == NULL) return false;
-	if (state->count >= CHANNEL_MAX_PER_PROCESS) return false;
+	irq_state = spinlock_lock_irqsave(&state->lock);
+	if (state->count >= CHANNEL_MAX_PER_PROCESS) {
+		spinlock_unlock_irqrestore(&state->lock, irq_state);
+		return false;
+	}
 
 	for (size_t i = 0u; i < CHANNEL_MAX_PER_PROCESS; i++) {
 		if (state->channels[i] == NULL) {
 			state->channels[i] = channel;
 			state->count++;
-			return true;
+			added = true;
+			break;
 		}
 	}
-	return false;
+	spinlock_unlock_irqrestore(&state->lock, irq_state);
+	return added;
 }
 
 void process_channel_state_remove(struct process_channel_state* state, struct channel* channel) {
+	struct irq_state irq_state;
+
 	if (state == NULL || channel == NULL) return;
+	irq_state = spinlock_lock_irqsave(&state->lock);
 	for (size_t i = 0u; i < CHANNEL_MAX_PER_PROCESS; i++) {
 		if (state->channels[i] == channel) {
 			state->channels[i] = NULL;
@@ -164,4 +181,5 @@ void process_channel_state_remove(struct process_channel_state* state, struct ch
 			break;
 		}
 	}
+	spinlock_unlock_irqrestore(&state->lock, irq_state);
 }

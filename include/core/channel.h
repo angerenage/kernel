@@ -26,6 +26,7 @@ struct channel {
 #define CHANNEL_MAX_PER_PROCESS 64u
 
 struct process_channel_state {
+	struct spinlock lock;
 	size_t          count;
 	struct channel* channels[CHANNEL_MAX_PER_PROCESS];
 };

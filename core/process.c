@@ -8,10 +8,10 @@
 #include <core/uthread.h>
 #include <core/vmm.h>
 #include <libc/stdlib.h>
+#include <libc/string.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 static struct id_table process_table = {
 	.lock    = SPINLOCK_INIT_CLASS("process_table", SPINLOCK_ORDER_ID_TABLE, SPINLOCK_FLAG_IRQSAVE),

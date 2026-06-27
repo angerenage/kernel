@@ -8,6 +8,11 @@ kernel_selftests = get_option('kernel_selftests')
 kernel_selftests_autorun = get_option('kernel_selftests_autorun')
 kernel_selftests_suite = get_option('kernel_selftests_suite')
 kernel_boot_debug = get_option('kernel_boot_debug')
+test_sanitizers = get_option('test_sanitizers')
+
+if test_sanitizers and not get_option('tests')
+	error('test_sanitizers requires -Dtests=true')
+endif
 
 if kernel_selftests_autorun and not kernel_selftests
 	error('kernel_selftests_autorun requires -Dkernel_selftests=true')

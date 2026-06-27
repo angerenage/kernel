@@ -118,6 +118,7 @@ bash scripts/build.sh --arch x86_64 --setup
 bash scripts/build.sh --all --setup
 bash scripts/build.sh --all --setup --build-prefix build-debug
 bash scripts/build.sh --arch x86_64 --setup --no-tests
+bash scripts/build.sh --arch x86_64 --setup --test-sanitizers
 bash scripts/build.sh --arch x86_64 --setup --kernel-selftests
 bash scripts/build.sh --arch x86_64 --setup --kernel-selftests --kernel-selftests-autorun
 bash scripts/build.sh --arch x86_64 --setup --kernel-selftests-suite vmm
@@ -125,6 +126,7 @@ bash scripts/build.sh --arch x86_64 --setup --kernel-selftests-suite vmm
 
 When no architecture is provided, the helper exits with guidance to use either `--arch <arch>` or `--all`.
 Use `--no-tests` if you want a kernel-only configure without native test dependencies installed.
+Use `--test-sanitizers` to run native tests with AddressSanitizer and UndefinedBehaviorSanitizer instrumentation.
 Use `--kernel-selftests` to compile in-kernel selftest suites into the kernel.
 Use `--kernel-selftests-autorun` to also inject `kernel.selftest=1` into the generated image so that booting the ISO runs the in-kernel tests automatically.
 Use `--kernel-selftests-suite <name>` to inject `kernel.selftest.suite=<name>` into the generated image and boot only that suite. This also enables selftest autorun for the generated image.
@@ -291,6 +293,7 @@ Use the assertion macros in [`kernel/test/selftest.h`](/c:/Users/anger/Code/kern
 - These platform names describe the kernel target rather than the emulator; the same binaries are intended to be usable on matching hardware, while `scripts/run.sh` and `scripts/run_qemu.sh` remain QEMU launch helpers.
 - The test binaries are built natively, while the kernel is cross-compiled with the selected file in `toolchain/`.
 - `-Dtests=false` skips configuring the native Criterion test targets. `scripts/build.sh --no-tests` is the helper equivalent.
+- `-Dtest_sanitizers=true` instruments native tests with AddressSanitizer and UndefinedBehaviorSanitizer. `scripts/build.sh --test-sanitizers` is the helper equivalent.
 - `-Dkernel_selftests=true` compiles in-kernel selftest code into the kernel. `scripts/build.sh --kernel-selftests` is the helper equivalent.
 - `-Dkernel_selftests_autorun=true` injects `kernel.selftest=1` into the generated image. `scripts/build.sh --kernel-selftests-autorun` is the helper equivalent.
 - `-Dkernel_selftests_suite=<name>` injects `kernel.selftest.suite=<name>` into the generated image and also causes selftests to autorun for that image. `scripts/build.sh --kernel-selftests-suite <name>` is the helper equivalent.

@@ -13,7 +13,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 usage() {
 	cat <<'EOF'
-Usage: build.sh (--arch <arch> | --all) [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--setup|-s] [--compile|-c] [-sc] [--reconfigure] [--no-tests] [--kernel-selftests] [--kernel-selftests-autorun] [--kernel-selftests-suite <name>] [--kernel-boot-debug]
+Usage: build.sh (--arch <arch> | --all) [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--setup|-s] [--compile|-c] [-sc] [--reconfigure] [--no-tests] [--test-sanitizers] [--kernel-selftests] [--kernel-selftests-autorun] [--kernel-selftests-suite <name>] [--kernel-boot-debug]
 
 Target selection:
   --arch <arch>  Build a single architecture (x86_64, aarch64, riscv64, loongarch64).
@@ -26,6 +26,9 @@ Actions:
   -sc            Short form for running both setup and compile.
   --reconfigure  Force Meson reconfiguration for existing build directories.
   --no-tests     Configure Meson with -Dtests=false.
+  --test-sanitizers
+                  Instrument native tests with AddressSanitizer and
+                  UndefinedBehaviorSanitizer.
   --kernel-selftests
                   Configure Meson with -Dkernel_selftests=true.
   --kernel-selftests-autorun
@@ -150,6 +153,7 @@ setup_arch() {
 		"--cross-file" "$cross_file"
 		"-Dplatform=${platform}"
 		"-Dtests=$( (( BUILD_TESTS )) && printf true || printf false )"
+		"-Dtest_sanitizers=$( (( TEST_SANITIZERS )) && printf true || printf false )"
 		"-Dkernel_selftests=$( (( BUILD_KERNEL_SELFTESTS )) && printf true || printf false )"
 		"-Dkernel_selftests_autorun=$( (( KERNEL_SELFTESTS_AUTORUN )) && printf true || printf false )"
 		"-Dkernel_selftests_suite=${KERNEL_SELFTESTS_SUITE}"
@@ -164,6 +168,7 @@ setup_arch() {
 			"--cross-file" "$cross_file"
 			"-Dplatform=${platform}"
 			"-Dtests=$( (( BUILD_TESTS )) && printf true || printf false )"
+			"-Dtest_sanitizers=$( (( TEST_SANITIZERS )) && printf true || printf false )"
 			"-Dkernel_selftests=$( (( BUILD_KERNEL_SELFTESTS )) && printf true || printf false )"
 			"-Dkernel_selftests_autorun=$( (( KERNEL_SELFTESTS_AUTORUN )) && printf true || printf false )"
 			"-Dkernel_selftests_suite=${KERNEL_SELFTESTS_SUITE}"
@@ -249,6 +254,7 @@ DO_SETUP=0
 DO_COMPILE=0
 RECONFIGURE=0
 BUILD_TESTS=1
+TEST_SANITIZERS=0
 BUILD_KERNEL_SELFTESTS=0
 KERNEL_SELFTESTS_AUTORUN=0
 KERNEL_SELFTESTS_SUITE=""
@@ -321,6 +327,10 @@ while [[ $# -gt 0 ]]; do
 			BUILD_TESTS=0
 			shift
 			;;
+		--test-sanitizers)
+			TEST_SANITIZERS=1
+			shift
+			;;
 		--kernel-selftests)
 			BUILD_KERNEL_SELFTESTS=1
 			shift
@@ -379,6 +389,10 @@ if [[ -n "$BUILD_DIR" ]] && [[ "$BUILD_PREFIX" != "build" ]]; then
 fi
 
 [[ -n "$BUILD_PREFIX" ]] || error "--build-prefix requires a non-empty value"
+
+if (( TEST_SANITIZERS )) && (( ! BUILD_TESTS )); then
+	error "--test-sanitizers cannot be combined with --no-tests"
+fi
 
 BUILD_ROOT="$(abspath "$BUILD_ROOT")"
 if [[ -n "$BUILD_DIR" ]]; then

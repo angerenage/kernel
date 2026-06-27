@@ -1,4 +1,4 @@
-#include <string.h>
+#include <libc/string.h>
 
 char* strdup(const char* str) {
 	return strndup(str, strlen(str));

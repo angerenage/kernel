@@ -3,7 +3,7 @@
 #include <core/sched.h>
 #include <core/syscall.h>
 #include <libc/stdlib.h>
-#include <string.h>
+#include <libc/string.h>
 
 static syscall_result_t syscall_result_from_address_transfer(enum address_transfer_result result, uintptr_t arg_index) {
 	switch (result) {

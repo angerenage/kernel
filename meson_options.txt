@@ -8,6 +8,11 @@ option('tests',
 	value : true,
 	description : 'Build native test targets.')
 
+option('test_sanitizers',
+	type : 'boolean',
+	value : false,
+	description : 'Instrument native tests with AddressSanitizer and UndefinedBehaviorSanitizer.')
+
 option('kernel_selftests',
 	type : 'boolean',
 	value : false,

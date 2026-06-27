@@ -10,9 +10,9 @@
 #include <core/vmm.h>
 #include <hal/userspace.h>
 #include <libc/stdlib.h>
+#include <libc/string.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 enum {
 	UTHREAD_KERNEL_STACK_PAGES = 4u,

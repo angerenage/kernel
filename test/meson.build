@@ -5,6 +5,22 @@ threads = dependency('threads', native: true)
 test_common_c_args = ['--coverage', '-DCORE_LOCK_DEBUG=1', '-DBASE_STDLIB_RENAME_ALLOC=1']
 test_common_link_args = ['--coverage']
 
+if test_sanitizers
+	test_common_c_args += [
+		'-fsanitize=address,undefined',
+		'-fno-omit-frame-pointer',
+		'-fno-sanitize-recover=all',
+	]
+	test_common_link_args += ['-fsanitize=address,undefined']
+endif
+
+test_environment = environment()
+if test_sanitizers
+	# Kernel allocations come from the test-owned heap arena, which LeakSanitizer cannot track. Some lifecycle tests
+	# intentionally leave scheduler-owned objects live until process exit, so only enable the address and UB checks.
+	test_environment.set('ASAN_OPTIONS', 'detect_leaks=0')
+endif
+
 base_test_lib = static_library(
 	'base_test_lib',
 	base_sources,
@@ -245,5 +261,6 @@ foreach t : test_suites
 		suite: t.get('suites', ['unit']),
 		timeout: t.get('timeout', 30),
 		is_parallel: t.get('parallel', true),
+		env: test_environment,
 	)
 endforeach

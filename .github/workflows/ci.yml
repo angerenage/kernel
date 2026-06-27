@@ -60,7 +60,7 @@ jobs:
             libcriterion-dev
 
       - name: Configure x86_64 build
-        run: bash scripts/build.sh --arch x86_64 --setup
+        run: bash scripts/build.sh --arch x86_64 --setup --test-sanitizers
 
       - name: Run tests
         run: bash scripts/run.sh --test

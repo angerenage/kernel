@@ -1,5 +1,5 @@
 #include <libc/stdlib.h>
-#include <string.h>
+#include <libc/string.h>
 
 char* strndup(const char* str, size_t size) {
 	size_t length = 0u;
