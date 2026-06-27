@@ -271,6 +271,24 @@ Test(capability, authorization_revoked_ancestor) {
 	cap_object_destroy(obj);
 }
 
+Test(capability, destroying_parent_keeps_descendant_chain_safe_and_revoked) {
+	struct cap_object* object;
+	struct capability* parent;
+	struct capability* child;
+
+	cap_test_setup();
+	object = cap_object_create(77u, NULL);
+	parent = cap_create(object->cap_object_id, 1u, CAP_READ | CAP_DELEGATE, NULL);
+	child  = cap_create(object->cap_object_id, 2u, CAP_READ, parent);
+	cr_assert_not_null(parent);
+	cr_assert_not_null(child);
+
+	cr_assert(cap_destroy(parent));
+	cr_assert_eq(cap_is_valid(child), CAP_REVOKED, "destroying a parent must invalidate its descendants");
+	cr_assert(cap_destroy(child));
+	cr_assert(cap_object_destroy(object));
+}
+
 Test(capability, validity_revoked_self) {
 	struct cap_object* obj;
 	struct capability* cap;

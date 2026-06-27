@@ -23,6 +23,7 @@ struct cap_object {
 	uint64_t             object_id;
 	struct channel*      endpoint;
 	cap_kernel_handler_t handler;
+	uint64_t             reference_count;
 };
 
 /* A capability grants a target process rights on a cap_object. Capabilities form a delegation tree through parent. */
@@ -33,6 +34,7 @@ struct capability {
 	cap_rights_t       rights;
 	struct capability* parent;
 	bool               revoked;
+	uint64_t           reference_count;
 };
 
 enum cap_result {
@@ -48,23 +50,25 @@ enum cap_result {
 	CAP_OBJECT_DESTROYED,
 };
 
-/* Create a new userspace-owned object and register it in the global object table. Returns NULL on failure. */
+/* Publish a userspace provider's object identifier through an endpoint. Returns NULL on failure. */
 struct cap_object* cap_object_create(uint64_t object_id, struct channel* endpoint);
 
-/* Create a new kernel-owned object with a handler and an endpoint set to NULL. Returns NULL on failure. */
+/* Publish a kernel provider's object identifier through a handler. Returns NULL on failure. */
 struct cap_object* cap_object_create_kernel(uint64_t object_id, cap_kernel_handler_t handler);
 
 /* Look up an existing kernel object by its endpoint and object_id. */
 struct cap_object* cap_object_lookup(struct channel* endpoint, uint64_t object_id);
 
-/* Return the cap_object registered under id, or NULL if no such object is registered. */
-struct cap_object* cap_object_get(cap_object_id_t id);
+/* Retain a registered object so it cannot be finalized until cap_object_release(). */
+struct cap_object* cap_object_acquire(cap_object_id_t id);
 
-/* Remove the cap_object registered under id from the global table and free it. Returns true when an object was removed.
- */
+/* Release a reference returned by cap_object_acquire(). */
+void cap_object_release(struct cap_object* object);
+
+/* Unregister the routing object under id. Reclaiming its metadata waits for retained references. */
 bool cap_object_destroy_with_id(cap_object_id_t id);
 
-/* Destroy a kernel object and remove it from the global object table. */
+/* Unregister a routing object. This never destroys the resource identified by object_id. */
 bool cap_object_destroy(struct cap_object* object);
 
 /* Create a new capability granting rights on cap_object_id to target. The capability does not take ownership of the

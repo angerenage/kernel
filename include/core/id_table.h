@@ -19,6 +19,9 @@ struct id_table {
 	void**          slots;
 };
 
+/* Called while the table lock protects object from concurrent removal. Return false to reject the lookup. */
+typedef bool (*id_table_retain_fn)(void* object, void* context);
+
 enum id_table_result {
 	ID_TABLE_OK = 0,
 	ID_TABLE_INVALID_ARGUMENTS,
@@ -50,6 +53,9 @@ enum id_table_result id_table_alloc(struct id_table* table, void* object, id_tab
 
 /* Return the object registered for id, or NULL when id is invalid or absent. */
 void* id_table_lookup(struct id_table* table, id_table_id_t id);
+
+/* Look up id and retain the object before releasing the table lock. */
+void* id_table_lookup_retain(struct id_table* table, id_table_id_t id, id_table_retain_fn retain, void* context);
 
 /* Remove id from the table and optionally return the object that was stored. */
 enum id_table_result id_table_remove(struct id_table* table, id_table_id_t id, void** out_object);

@@ -254,12 +254,15 @@ cap_id_t kernel_process_grant(struct process* target, cap_rights_t rights) {
 
 	object_id = process_cap_object_id(target);
 	if (object_id != CAP_OBJECT_ID_INVALID) {
-		object = cap_object_get(object_id);
+		object = cap_object_acquire(object_id);
 		if (object == NULL) {
 			object = cap_object_create_kernel((uint64_t)(uintptr_t)target, process_handler);
 			if (object == NULL) return CAP_ID_INVALID;
 			process_set_cap_object_id(target, object->cap_object_id);
 			object_id = object->cap_object_id;
+		}
+		else {
+			cap_object_release(object);
 		}
 	}
 	else {

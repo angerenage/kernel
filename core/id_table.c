@@ -146,6 +146,20 @@ void* id_table_lookup(struct id_table* table, id_table_id_t id) {
 	return object;
 }
 
+void* id_table_lookup_retain(struct id_table* table, id_table_id_t id, id_table_retain_fn retain, void* context) {
+	struct irq_state state;
+	size_t           index;
+	void*            object = NULL;
+
+	if (retain == NULL || id_table_index(table, id, &index) != ID_TABLE_OK) return NULL;
+
+	state = spinlock_lock_irqsave(&table->lock);
+	if (index < table->capacity) object = table->slots[index];
+	if (object != NULL && !retain(object, context)) object = NULL;
+	spinlock_unlock_irqrestore(&table->lock, state);
+	return object;
+}
+
 enum id_table_result id_table_remove(struct id_table* table, id_table_id_t id, void** out_object) {
 	struct irq_state     state;
 	size_t               index;

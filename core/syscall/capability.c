@@ -191,22 +191,28 @@ syscall_result_t syscall_cap_derive(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 	valid_result = cap_is_valid(base);
 	if (valid_result != CAP_OK) return syscall_cap_result_to_syscall(valid_result, 0u);
 
-	struct cap_object* base_object = cap_object_get(base->cap_object_id);
+	struct cap_object* base_object = cap_object_acquire(base->cap_object_id);
 	if (base_object == NULL || base_object->endpoint == NULL) {
+		cap_object_release(base_object);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
 	if ((base->rights & CAP_DERIVE) == 0u && base_object->endpoint->owner_pid != caller_pid) {
+		cap_object_release(base_object);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
 	object = cap_object_lookup(base_object->endpoint, object_id);
 	if (object == NULL) {
 		object = cap_object_create(object_id, base_object->endpoint);
-		if (object == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
+		if (object == NULL) {
+			cap_object_release(base_object);
+			return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
+		}
 	}
 
 	new_cap = cap_create(object->cap_object_id, target, rights, base);
+	cap_object_release(base_object);
 	if (new_cap == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 
 	cap_id = new_cap->cap_id;
@@ -232,6 +238,7 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 	enum address_transfer_result transfer_result;
 	struct cap_request           req;
 	void*                        heap_request;
+	syscall_result_t             call_result;
 
 	(void)arg3;
 	(void)arg4;
@@ -246,27 +253,42 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 	cap = cap_lookup((cap_id_t)arg0);
 	if (cap == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 
-	object = cap_object_get(cap->cap_object_id);
+	object = cap_object_acquire(cap->cap_object_id);
 	if (object == NULL) {
 		(void)cap_destroy_by_id(cap->cap_id);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
 	auth_result = cap_is_authorized(caller_pid, cap);
-	if (auth_result != CAP_OK) return syscall_cap_result_to_syscall(auth_result, 0u);
+	if (auth_result != CAP_OK) {
+		cap_object_release(object);
+		return syscall_cap_result_to_syscall(auth_result, 0u);
+	}
 
 	valid_result = cap_is_valid(cap);
-	if (valid_result != CAP_OK) return syscall_cap_result_to_syscall(valid_result, 0u);
+	if (valid_result != CAP_OK) {
+		cap_object_release(object);
+		return syscall_cap_result_to_syscall(valid_result, 0u);
+	}
 
-	if ((cap->rights & CAP_CALL) == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	if ((cap->rights & CAP_CALL) == 0u) {
+		cap_object_release(object);
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
 
 	request_size = (size_t)arg2;
-	if ((uintptr_t)request_size != arg2) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 2u);
-	if (request_size > CAP_MAX_REQUEST_SIZE) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 2u);
-	if (request_size > 0u && arg1 == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 1u);
+	if ((uintptr_t)request_size != arg2 || request_size > CAP_MAX_REQUEST_SIZE) {
+		cap_object_release(object);
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 2u);
+	}
+	if (request_size > 0u && arg1 == 0u) {
+		cap_object_release(object);
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 1u);
+	}
 
 	if (object->endpoint == NULL) {
 		if (object->handler == NULL) {
+			cap_object_release(object);
 			return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 		}
 
@@ -277,13 +299,18 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 		req.request      = (void*)arg1;
 		req.request_size = request_size;
 
-		return object->handler(&req);
+		call_result = object->handler(&req);
+		cap_object_release(object);
+		return call_result;
 	}
 
 	heap_request = NULL;
 	if (request_size > 0u) {
 		heap_request = malloc(request_size);
-		if (heap_request == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 2u);
+		if (heap_request == NULL) {
+			cap_object_release(object);
+			return syscall_result_error(SYSCALL_STATUS_FAILED, 2u);
+		}
 
 		space = syscall_current_user_space();
 		if (space == NULL) {
@@ -293,6 +320,7 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 			transfer_result = address_space_copy_from(space, arg1, heap_request, request_size);
 			if (transfer_result != ADDRESS_TRANSFER_OK) {
 				free(heap_request);
+				cap_object_release(object);
 				return syscall_result_from_address_transfer(transfer_result, 1u);
 			}
 		}
@@ -307,9 +335,11 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 
 	if (!ring_buffer_enqueue(&object->endpoint->cap_queue, &req)) {
 		free(heap_request);
+		cap_object_release(object);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 
+	cap_object_release(object);
 	return syscall_result_ok(0u);
 }
 
@@ -338,7 +368,7 @@ syscall_result_t syscall_cap_revoke(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 	auth_result = cap_is_authorized(caller_pid, cap);
 	if (auth_result != CAP_OK) return syscall_cap_result_to_syscall(auth_result, 0u);
 
-	struct cap_object* revoke_object = cap_object_get(cap->cap_object_id);
+	struct cap_object* revoke_object = cap_object_acquire(cap->cap_object_id);
 	if (revoke_object == NULL) {
 		(void)cap_destroy_by_id(cap->cap_id);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -346,8 +376,10 @@ syscall_result_t syscall_cap_revoke(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 
 	if ((cap->rights & CAP_REVOKE) == 0u && revoke_object->endpoint != NULL &&
 	    revoke_object->endpoint->owner_pid != caller_pid) {
+		cap_object_release(revoke_object);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
+	cap_object_release(revoke_object);
 
 	rights = (cap_rights_t)arg1;
 	if (rights == 0u) {
