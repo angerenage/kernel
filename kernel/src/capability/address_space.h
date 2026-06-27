@@ -1,6 +1,8 @@
 #pragma once
 
 #include <base/cap.h>
+#include <base/process.h>
+#include <base/vmm.h>
 #include <core/process.h>
 
 /* Creates and returns an address space capability for process. Returns CAP_ID_INVALID on failure. */

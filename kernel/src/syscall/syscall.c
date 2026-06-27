@@ -1,5 +1,6 @@
 #include <core/syscall.h>
 
+#include "memory.h"
 #include "module.h"
 #include "process.h"
 
@@ -22,6 +23,8 @@ static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 	[SYSCALL_CANCEL_THREAD]             = syscall_cancel_thread,
 	[SYSCALL_SET_THREAD_CANCEL_ENABLED] = syscall_set_thread_cancel_enabled,
 	[SYSCALL_TEST_THREAD_CANCEL]        = syscall_test_thread_cancel,
+
+	[SYSCALL_MEMORY_ALLOCATE] = syscall_memory_allocate,
 
 	[SYSCALL_SEND_MESSAGE] = syscall_send_message,
 	[SYSCALL_RECV_MESSAGE] = syscall_recv_message,
