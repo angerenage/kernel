@@ -233,8 +233,9 @@ enum process_result process_create(struct process** out_process, const char* nam
 			return PROCESS_NO_MEMORY;
 		}
 	}
-	process->state         = PROCESS_STATE_NEW;
-	process->cap_object_id = CAP_OBJECT_ID_INVALID;
+	process->state                       = PROCESS_STATE_NEW;
+	process->cap_object_id               = CAP_OBJECT_ID_INVALID;
+	process->address_space_cap_object_id = CAP_OBJECT_ID_INVALID;
 	spinlock_init_class(&process->lock, "process", SPINLOCK_ORDER_PROCESS, SPINLOCK_FLAG_IRQSAVE);
 	thread_wait_queue_init(&process->join_wait_queue);
 	message_queue_init(&process->message_queue);
@@ -398,11 +399,12 @@ bool process_destroy(struct process* process) {
 		if (!uthread_deinit(thread)) return false;
 	}
 
+	(void)process_destroy_address_space_cap_object(process);
+	(void)process_destroy_cap_object(process);
 	vmm_address_space_deinit(&process->address_space);
 	process_channel_state_deinit(&process->channel_state);
 
 	cap_revoke_for_process(process->pid);
-	(void)process_destroy_cap_object(process);
 
 	(void)id_table_remove(&process_table, process->pid, NULL);
 	free((void*)process->name);
@@ -520,4 +522,32 @@ bool process_destroy_cap_object(struct process* process) {
 
 	destroyed = cap_object_destroy_with_id(id);
 	return destroyed;
+}
+
+cap_object_id_t process_address_space_cap_object_id(const struct process* process) {
+	return process == NULL ? CAP_OBJECT_ID_INVALID : process->address_space_cap_object_id;
+}
+
+void process_set_address_space_cap_object_id(struct process* process, cap_object_id_t id) {
+	struct irq_state state;
+
+	if (process == NULL) return;
+
+	state                                = spinlock_lock_irqsave(&process->lock);
+	process->address_space_cap_object_id = id;
+	spinlock_unlock_irqrestore(&process->lock, state);
+}
+
+bool process_destroy_address_space_cap_object(struct process* process) {
+	struct irq_state state;
+	cap_object_id_t  id;
+
+	if (process == NULL) return false;
+
+	state                                = spinlock_lock_irqsave(&process->lock);
+	id                                   = process->address_space_cap_object_id;
+	process->address_space_cap_object_id = CAP_OBJECT_ID_INVALID;
+	spinlock_unlock_irqrestore(&process->lock, state);
+
+	return id != CAP_OBJECT_ID_INVALID && cap_object_destroy_with_id(id);
 }

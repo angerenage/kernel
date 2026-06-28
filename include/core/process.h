@@ -132,6 +132,8 @@ struct process {
 	bool joined;
 	/* Lazily-created cap_object id for this process; CAP_OBJECT_ID_INVALID until one is created. */
 	cap_object_id_t cap_object_id;
+	/* Lazily-created cap_object id for this process' address space. */
+	cap_object_id_t address_space_cap_object_id;
 };
 
 /* Allocate, initialize, and queue a userspace thread inside process. Detached threads do not publish a handle. */
@@ -204,3 +206,12 @@ void process_set_cap_object_id(struct process* process, cap_object_id_t id);
 /* Destroy the lazily-created cap_object for this process if one is cached and reset the slot. Returns true when
  * destroyed. */
 bool process_destroy_cap_object(struct process* process);
+
+/* Return the lazily-allocated cap_object id for the process address space. */
+cap_object_id_t process_address_space_cap_object_id(const struct process* process);
+
+/* Publish an address-space cap_object id on the process. */
+void process_set_address_space_cap_object_id(struct process* process, cap_object_id_t id);
+
+/* Destroy the lazily-created address-space cap_object and reset its slot. */
+bool process_destroy_address_space_cap_object(struct process* process);

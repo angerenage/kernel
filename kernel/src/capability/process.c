@@ -186,12 +186,12 @@ static syscall_result_t process_handler(const struct cap_request* req) {
 	return result;
 }
 
-cap_id_t kernel_process_grant(struct process* target, cap_rights_t rights) {
+cap_id_t kernel_process_grant(struct process* target, process_id_t recipient, cap_rights_t rights) {
 	struct cap_object* object;
 	cap_object_id_t    object_id;
 	struct capability* cap;
 
-	if (target == NULL) return CAP_ID_INVALID;
+	if (target == NULL || recipient == PROCESS_PID_INVALID) return CAP_ID_INVALID;
 
 	object_id = process_cap_object_id(target);
 	if (object_id != CAP_OBJECT_ID_INVALID) {
@@ -213,7 +213,7 @@ cap_id_t kernel_process_grant(struct process* target, cap_rights_t rights) {
 		object_id = object->cap_object_id;
 	}
 
-	cap = cap_create(object_id, process_pid(target), rights, NULL);
+	cap = cap_create(object_id, recipient, rights, NULL);
 	if (cap == NULL) return CAP_ID_INVALID;
 
 	return cap->cap_id;
@@ -221,5 +221,6 @@ cap_id_t kernel_process_grant(struct process* target, cap_rights_t rights) {
 
 cap_id_t kernel_self_grant(struct process* process) {
 	return kernel_process_grant(process,
+	                            process_pid(process),
 	                            CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_EXEC | CAP_DELEGATE);
 }

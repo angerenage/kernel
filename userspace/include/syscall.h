@@ -33,7 +33,7 @@ static inline syscall_result_t tick_count(void) {
 	return syscall(SYSCALL_TICK_COUNT, 0u, 0u, 0u, 0u, 0u, 0u);
 }
 
-/* Return a struct self_info describing the calling process and a capability to it. */
+/* Return identity information plus capabilities for the calling process and its address space. */
 static inline syscall_result_t self(struct self_info* info) {
 	return syscall(SYSCALL_SELF, (uintptr_t)info, 0u, 0u, 0u, 0u, 0u);
 }
@@ -43,9 +43,10 @@ static inline syscall_result_t exit_process(uintptr_t code) {
 	return syscall(SYSCALL_EXIT_PROCESS, code, 0u, 0u, 0u, 0u, 0u);
 }
 
-/* Create a process record and return a capability that grants full process-management rights over the new process. */
-static inline syscall_result_t create_process(const char* name, size_t name_length) {
-	return syscall(SYSCALL_CREATE_PROCESS, (uintptr_t)name, (uintptr_t)name_length, 0u, 0u, 0u, 0u);
+/* Create a process and return caller-owned capabilities for the process and its address space. */
+static inline syscall_result_t create_process(const char* name, size_t name_length,
+                                              struct process_create_response* response) {
+	return syscall(SYSCALL_CREATE_PROCESS, (uintptr_t)name, (uintptr_t)name_length, (uintptr_t)response, 0u, 0u, 0u);
 }
 
 /* Terminate the current thread with the supplied exit code. */

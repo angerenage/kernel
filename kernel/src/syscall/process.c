@@ -3,6 +3,7 @@
 #include <base/cap.h>
 #include <base/self.h>
 #include <base/syscall.h>
+#include <core/capability.h>
 #include <core/process.h>
 #include <core/syscall.h>
 #include <core/uthread.h>
@@ -48,7 +49,7 @@ syscall_result_t syscall_self(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, ui
 	if (self_cap_id == CAP_ID_INVALID) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 
 	address_space_cap_id =
-		kernel_address_space_grant(process, CAP_ALLOCATE | CAP_DESTROY | CAP_MAP | CAP_READ | CAP_WRITE);
+		kernel_address_space_grant(process, process_pid(process), CAP_CALL | CAP_MAP | CAP_READ | CAP_DELEGATE);
 	if (address_space_cap_id == CAP_ID_INVALID) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 
 	info.pid               = process_pid(process);
@@ -62,16 +63,22 @@ syscall_result_t syscall_self(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, ui
 
 syscall_result_t syscall_create_process(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
                                         uintptr_t arg5) {
-	struct process*     process = NULL;
-	enum process_result result;
-	char*               name = NULL;
-	syscall_result_t    copy_result;
-	cap_id_t            cap_id;
+	struct process*                process = NULL;
+	struct process*                caller;
+	enum process_result            result;
+	char*                          name = NULL;
+	syscall_result_t               copy_result;
+	struct process_create_response response;
+	process_id_t                   caller_pid;
 
-	(void)arg2;
 	(void)arg3;
 	(void)arg4;
 	(void)arg5;
+
+	caller = process_current();
+	if (caller == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	if (arg2 == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 2u);
+	caller_pid = process_pid(caller);
 
 	copy_result = syscall_copy_string_arg(0u, arg0, 1u, arg1, &name);
 	if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
@@ -80,11 +87,27 @@ syscall_result_t syscall_create_process(uintptr_t arg0, uintptr_t arg1, uintptr_
 	free(name);
 	if (result != PROCESS_OK) return syscall_result_from_process_create(result);
 
-	cap_id = kernel_self_grant(process);
-	if (cap_id == CAP_ID_INVALID) {
-		process_destroy(process);
+	response.process_cap = kernel_process_grant(
+		process, caller_pid, CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_EXEC | CAP_DELEGATE);
+	if (response.process_cap == CAP_ID_INVALID) {
+		(void)process_destroy(process);
+		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
+	}
+	response.address_space_cap =
+		kernel_address_space_grant(process, caller_pid, CAP_CALL | CAP_MAP | CAP_READ | CAP_DELEGATE);
+	if (response.address_space_cap == CAP_ID_INVALID) {
+		(void)cap_destroy_by_id(response.process_cap);
+		(void)process_destroy(process);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 
-	return syscall_result_ok((uintptr_t)cap_id);
+	copy_result = syscall_copy_to_user(process_address_space(caller), arg2, &response, sizeof(response), 2u);
+	if (copy_result.status != SYSCALL_STATUS_OK) {
+		(void)cap_destroy_by_id(response.address_space_cap);
+		(void)cap_destroy_by_id(response.process_cap);
+		(void)process_destroy(process);
+		return copy_result;
+	}
+
+	return syscall_result_ok((uintptr_t)response.process_cap);
 }

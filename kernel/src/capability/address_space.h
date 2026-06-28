@@ -5,5 +5,5 @@
 #include <base/vmm.h>
 #include <core/process.h>
 
-/* Creates and returns an address space capability for process. Returns CAP_ID_INVALID on failure. */
-cap_id_t kernel_address_space_grant(struct process* process, cap_rights_t rights);
+/* Grant recipient a capability for process' address space. */
+cap_id_t kernel_address_space_grant(struct process* process, process_id_t recipient, cap_rights_t rights);

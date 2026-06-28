@@ -15,6 +15,12 @@ struct self_info {
 	cap_id_t address_space_cap;
 };
 
+/* Capabilities returned to the creator of a new process. */
+struct process_create_response {
+	cap_id_t process_cap;
+	cap_id_t address_space_cap;
+};
+
 /* Response with process identity information. */
 struct process_info_response {
 	process_id_t pid;

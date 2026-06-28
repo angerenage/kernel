@@ -9,7 +9,9 @@
 
 /* Operation codes for address space capability requests. */
 enum address_space_op {
-	ADDRESS_SPACE_OP_QUERY = 0,
+	ADDRESS_SPACE_OP_QUERY  = 0,
+	ADDRESS_SPACE_OP_MAP    = 1,
+	ADDRESS_SPACE_OP_MAP_AT = 2,
 };
 
 /* Common header for all address space capability requests. */
@@ -23,7 +25,25 @@ struct address_space_query_request {
 	vmm_id_t                            id;
 };
 
+/* Request to map an allocation at an automatically selected address. */
+struct address_space_map_request {
+	struct address_space_request_header header;
+	cap_id_t                            allocation_cap;
+};
+
+/* Request to map an allocation at a specific page-aligned address. */
+struct address_space_map_at_request {
+	struct address_space_request_header header;
+	cap_id_t                            allocation_cap;
+	uintptr_t                           address;
+};
+
 /* Response with metadata for an address-space allocation. */
 struct address_space_query_response {
 	struct vmm_info info;
+};
+
+/* Response with control over the newly-created mapping. */
+struct address_space_map_response {
+	cap_id_t mapping_cap;
 };

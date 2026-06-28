@@ -7,8 +7,6 @@
 
 /* Operation codes for allocation capability requests. */
 enum allocation_op {
-	ALLOCATION_OP_MAP       = 0,
-	ALLOCATION_OP_MAP_AT    = 1,
 	ALLOCATION_OP_FREE      = 4,
 	ALLOCATION_OP_READ      = 5,
 	ALLOCATION_OP_COPY_FROM = 6,
@@ -30,22 +28,6 @@ struct allocation_request_header {
 /* Common header for all mapping capability requests. */
 struct mapping_request_header {
 	enum mapping_op op;
-};
-
-/* Request to map an allocation in the caller's address space at an automatic base. */
-struct allocation_map_request {
-	struct allocation_request_header header;
-};
-
-/* Request to map an allocation in the caller's address space at an explicit base. */
-struct allocation_map_at_request {
-	struct allocation_request_header header;
-	uintptr_t                        address;
-};
-
-/* Response with the capability for a newly-created mapping. */
-struct allocation_map_response {
-	cap_id_t mapping_cap;
 };
 
 /* Request to free an allocation. */
