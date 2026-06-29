@@ -11,6 +11,7 @@
 
 #include "../capability/address_space.h"
 #include "../capability/process.h"
+#include "../capability/thread.h"
 
 static syscall_result_t syscall_result_from_process_create(enum process_result result) {
 	switch (result) {
@@ -33,6 +34,8 @@ syscall_result_t syscall_self(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, ui
 	struct self_info info;
 	cap_id_t         self_cap_id;
 	cap_id_t         address_space_cap_id;
+	cap_id_t         main_thread_cap_id;
+	struct uthread*  main_thread;
 
 	(void)arg1;
 	(void)arg2;
@@ -43,7 +46,9 @@ syscall_result_t syscall_self(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, ui
 	process = process_current();
 	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 
-	thread = uthread_current();
+	thread      = uthread_current();
+	main_thread = process_main_thread(process);
+	if (main_thread == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 
 	self_cap_id = kernel_self_grant(process);
 	if (self_cap_id == CAP_ID_INVALID) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
@@ -51,12 +56,15 @@ syscall_result_t syscall_self(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, ui
 	address_space_cap_id =
 		kernel_address_space_grant(process, process_pid(process), CAP_CALL | CAP_MAP | CAP_READ | CAP_DELEGATE);
 	if (address_space_cap_id == CAP_ID_INVALID) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
+	main_thread_cap_id = kernel_thread_grant_full(main_thread, process_pid(process));
+	if (main_thread_cap_id == CAP_ID_INVALID) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 
 	info.pid               = process_pid(process);
 	info.thread_id         = thread != NULL ? (uint64_t)uthread_id(thread) : 0u;
 	info.thread_count      = process_thread_count(process);
 	info.self_cap          = self_cap_id;
 	info.address_space_cap = address_space_cap_id;
+	info.main_thread_cap   = main_thread_cap_id;
 
 	return syscall_copy_to_user(process_address_space(process), arg0, &info, sizeof(info), 0u);
 }

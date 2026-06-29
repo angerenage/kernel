@@ -144,6 +144,7 @@ static void uthread_free(struct uthread* thread) {
 	if (thread == NULL) return;
 
 	heap_allocated = thread->heap_allocated;
+	(void)uthread_destroy_cap_object(thread);
 	uthread_release_stacks(thread);
 	uthread_detach_process(thread);
 	uthread_unregister_id(thread);
@@ -341,6 +342,7 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 		.user_stack_id   = VMM_ID_INVALID,
 		.kernel_stack_id = VMM_ID_INVALID,
 		.reaper_next     = NULL,
+		.cap_object_id   = CAP_OBJECT_ID_INVALID,
 		.heap_allocated  = heap_allocated,
 	};
 	id_result = id_table_alloc(&uthread_table, thread, &id);
@@ -420,12 +422,14 @@ enum uthread_start_result uthread_start(struct uthread* thread, const struct uth
 	return uthread_start_internal(thread, params, false);
 }
 
-enum uthread_start_result uthread_spawn_detached(const struct uthread_start_params* params) {
+enum uthread_start_result uthread_spawn_detached(struct uthread**                   out_thread,
+                                                 const struct uthread_start_params* params) {
 	struct uthread_start_params effective_params;
 	struct uthread*             thread;
 	enum uthread_start_result   result;
 
-	if (params == NULL) return UTHREAD_START_INVALID_ARGUMENTS;
+	if (out_thread == NULL || params == NULL) return UTHREAD_START_INVALID_ARGUMENTS;
+	*out_thread = NULL;
 
 	thread = malloc(sizeof(*thread));
 	if (thread == NULL) return UTHREAD_START_NO_MEMORY;
@@ -442,6 +446,7 @@ enum uthread_start_result uthread_spawn_detached(const struct uthread_start_para
 		uthread_free(thread);
 		return result;
 	}
+	*out_thread = thread;
 	return UTHREAD_START_OK;
 }
 
@@ -490,6 +495,7 @@ bool uthread_deinit(struct uthread* thread) {
 	if (!thread_is_joinable(&thread->thread)) return false;
 
 	heap_allocated = thread->heap_allocated;
+	(void)uthread_destroy_cap_object(thread);
 	uthread_release_stacks(thread);
 	uthread_detach_process(thread);
 	uthread_unregister_id(thread);
@@ -499,6 +505,23 @@ bool uthread_deinit(struct uthread* thread) {
 	thread->kernel_stack_id = VMM_ID_INVALID;
 	if (heap_allocated) free(thread);
 	return true;
+}
+
+cap_object_id_t uthread_cap_object_id(const struct uthread* thread) {
+	return thread == NULL ? CAP_OBJECT_ID_INVALID : thread->cap_object_id;
+}
+
+void uthread_set_cap_object_id(struct uthread* thread, cap_object_id_t id) {
+	if (thread != NULL) thread->cap_object_id = id;
+}
+
+bool uthread_destroy_cap_object(struct uthread* thread) {
+	cap_object_id_t id;
+
+	if (thread == NULL) return false;
+	id                    = thread->cap_object_id;
+	thread->cap_object_id = CAP_OBJECT_ID_INVALID;
+	return id != CAP_OBJECT_ID_INVALID && cap_object_destroy_with_id(id);
 }
 
 static struct uthread* uthread_reaper_dequeue(struct uthread_reaper* reaper) {

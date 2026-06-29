@@ -2,6 +2,7 @@
 
 #include <base/cap.h>
 #include <base/process.h>
+#include <base/thread.h>
 #include <stdint.h>
 
 /* Identity information returned by the self syscall. */
@@ -13,6 +14,8 @@ struct self_info {
 	cap_id_t self_cap;
 	/* Capability for the calling process' address space. */
 	cap_id_t address_space_cap;
+	/* Capability for the calling process' main thread. */
+	cap_id_t main_thread_cap;
 };
 
 /* Capabilities returned to the creator of a new process. */
@@ -33,18 +36,25 @@ struct process_wait_response {
 	uintptr_t exit_code;
 };
 
-/* Response with the ID of a process' newly-started main thread. */
+/* Response with the ID and capability of a process' newly-started main thread. */
 struct process_run_response {
 	uint64_t thread_id;
+	cap_id_t thread_cap;
+};
+
+/* Response with a capability for a newly-created thread. */
+struct process_spawn_thread_response {
+	cap_id_t thread_cap;
 };
 
 /* Operation codes for process capability requests. */
 enum process_op {
-	PROCESS_OP_INFO   = 0,
-	PROCESS_OP_RUN    = 1,
-	PROCESS_OP_WAIT   = 2,
-	PROCESS_OP_DETACH = 3,
-	PROCESS_OP_KILL   = 4,
+	PROCESS_OP_INFO         = 0,
+	PROCESS_OP_RUN          = 1,
+	PROCESS_OP_WAIT         = 2,
+	PROCESS_OP_DETACH       = 3,
+	PROCESS_OP_KILL         = 4,
+	PROCESS_OP_SPAWN_THREAD = 5,
 };
 
 /* Common header for all process capability requests. */
@@ -79,4 +89,14 @@ struct process_run_request {
 	uintptr_t                     entry;
 	uintptr_t                     arg;
 	size_t                        stack_pages;
+};
+
+/* Request to create a joinable thread in a process. */
+struct process_spawn_thread_request {
+	struct process_request_header header;
+	uintptr_t                     entry;
+	uintptr_t                     arg;
+	size_t                        stack_pages;
+	const char*                   name;
+	size_t                        name_length;
 };

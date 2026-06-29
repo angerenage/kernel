@@ -8,14 +8,7 @@ static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 	[SYSCALL_TICK_COUNT] = syscall_tick_count,
 
 	[SYSCALL_EXIT_PROCESS] = syscall_exit_process,
-
-	[SYSCALL_EXIT_THREAD]               = syscall_exit_thread,
-	[SYSCALL_SPAWN_THREAD]              = syscall_spawn_thread,
-	[SYSCALL_JOIN_THREAD]               = syscall_join_thread,
-	[SYSCALL_DETACH_THREAD]             = syscall_detach_thread,
-	[SYSCALL_CANCEL_THREAD]             = syscall_cancel_thread,
-	[SYSCALL_SET_THREAD_CANCEL_ENABLED] = syscall_set_thread_cancel_enabled,
-	[SYSCALL_TEST_THREAD_CANCEL]        = syscall_test_thread_cancel,
+	[SYSCALL_EXIT_THREAD]  = syscall_exit_thread,
 
 	[SYSCALL_SEND_MESSAGE] = syscall_send_message,
 	[SYSCALL_RECV_MESSAGE] = syscall_recv_message,

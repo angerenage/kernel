@@ -45,6 +45,8 @@ struct uthread {
 	uintptr_t       user_stack_top;
 	struct uthread* reaper_next;
 	struct uthread* process_next;
+	/* Lazily-created cap_object id for this thread. */
+	cap_object_id_t cap_object_id;
 	bool            heap_allocated;
 };
 
@@ -56,7 +58,8 @@ enum uthread_start_result uthread_start(struct uthread* thread, const struct uth
  * The process remains caller-owned; the thread descriptor and stacks are
  * reclaimed by the user-thread reaper after exit.
  */
-enum uthread_start_result uthread_spawn_detached(const struct uthread_start_params* params);
+enum uthread_start_result uthread_spawn_detached(struct uthread**                   out_thread,
+                                                 const struct uthread_start_params* params);
 
 /* Return a userspace thread ID, or UTHREAD_ID_INVALID for NULL. */
 uthread_id_t uthread_id(const struct uthread* thread);
@@ -78,3 +81,12 @@ bool uthread_detach(struct uthread* thread);
 
 /* Release stack resources owned by a userspace thread that is no longer running. */
 bool uthread_deinit(struct uthread* thread);
+
+/* Return the lazily-created cap_object id for thread. */
+cap_object_id_t uthread_cap_object_id(const struct uthread* thread);
+
+/* Publish a cap_object id on thread. */
+void uthread_set_cap_object_id(struct uthread* thread, cap_object_id_t id);
+
+/* Destroy the lazily-created cap_object for thread and clear the slot. */
+bool uthread_destroy_cap_object(struct uthread* thread);

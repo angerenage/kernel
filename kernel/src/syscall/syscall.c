@@ -14,15 +14,8 @@ static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 	[SYSCALL_SELF] = syscall_self,
 
 	[SYSCALL_EXIT_PROCESS]   = syscall_exit_process,
+	[SYSCALL_EXIT_THREAD]    = syscall_exit_thread,
 	[SYSCALL_CREATE_PROCESS] = syscall_create_process,
-
-	[SYSCALL_EXIT_THREAD]               = syscall_exit_thread,
-	[SYSCALL_SPAWN_THREAD]              = syscall_spawn_thread,
-	[SYSCALL_JOIN_THREAD]               = syscall_join_thread,
-	[SYSCALL_DETACH_THREAD]             = syscall_detach_thread,
-	[SYSCALL_CANCEL_THREAD]             = syscall_cancel_thread,
-	[SYSCALL_SET_THREAD_CANCEL_ENABLED] = syscall_set_thread_cancel_enabled,
-	[SYSCALL_TEST_THREAD_CANCEL]        = syscall_test_thread_cancel,
 
 	[SYSCALL_MEMORY_ALLOCATE] = syscall_memory_allocate,
 

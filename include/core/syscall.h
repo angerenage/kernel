@@ -36,14 +36,6 @@ syscall_result_t syscall_tick_count(uintptr_t, uintptr_t, uintptr_t, uintptr_t, 
 syscall_result_t syscall_exit_process(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 
 syscall_result_t syscall_exit_thread(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
-syscall_result_t syscall_spawn_thread(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                      uintptr_t arg5);
-syscall_result_t syscall_join_thread(uintptr_t arg0, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
-syscall_result_t syscall_detach_thread(uintptr_t arg0, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
-syscall_result_t syscall_cancel_thread(uintptr_t arg0, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
-syscall_result_t syscall_set_thread_cancel_enabled(uintptr_t arg0, uintptr_t, uintptr_t, uintptr_t, uintptr_t,
-                                                   uintptr_t);
-syscall_result_t syscall_test_thread_cancel(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 
 syscall_result_t syscall_send_message(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t, uintptr_t, uintptr_t);
 syscall_result_t syscall_recv_message(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t, uintptr_t, uintptr_t);

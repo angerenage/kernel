@@ -113,19 +113,21 @@ enum process_thread_spawn_result process_spawn_thread(struct process* process, s
 	enum process_thread_spawn_result thread_result;
 
 	if (process == NULL || params == NULL) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
-	if (!params->detached && out_thread == NULL) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
+	if (out_thread == NULL) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
 	if (out_thread != NULL) *out_thread = NULL;
 
 	if (params->detached) {
-		enum uthread_start_result start_result = uthread_spawn_detached(&(const struct uthread_start_params){
-			.name             = params->name,
-			.process          = process,
-			.user_entry       = params->user_entry,
-			.user_arg         = params->user_arg,
-			.user_stack_pages = params->user_stack_pages,
-			.preferred_cpu    = params->preferred_cpu,
-			.detached         = true,
-		});
+		enum uthread_start_result start_result =
+			uthread_spawn_detached(out_thread,
+		                           &(const struct uthread_start_params){
+									   .name             = params->name,
+									   .process          = process,
+									   .user_entry       = params->user_entry,
+									   .user_arg         = params->user_arg,
+									   .user_stack_pages = params->user_stack_pages,
+									   .preferred_cpu    = params->preferred_cpu,
+									   .detached         = true,
+								   });
 		return process_thread_spawn_result_from_uthread(start_result);
 	}
 

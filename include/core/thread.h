@@ -1,5 +1,6 @@
 #pragma once
 
+#include <base/thread.h>
 #include <core/spinlock.h>
 #include <hal/cpu.h>
 #include <stdbool.h>
@@ -27,8 +28,6 @@ typedef void (*thread_entry_t)(void* arg);
 
 /* Machine-word-sized thread exit value published to joiners. */
 typedef uintptr_t thread_exit_code_t;
-
-#define THREAD_EXIT_CODE_CANCELLED ((thread_exit_code_t)UINTPTR_MAX)
 
 /* High-level lifecycle state for a thread descriptor. */
 enum thread_state {
