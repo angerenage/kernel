@@ -1,4 +1,4 @@
-#include <syscall.h>
+#include <system/syscall.h>
 
 syscall_result_t syscall(uintptr_t number, uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
                          uintptr_t arg4, uintptr_t arg5) {

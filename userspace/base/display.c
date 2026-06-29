@@ -1,10 +1,7 @@
-#include <base/cap.h>
 #include <base/display.h>
-#include <syscall.h>
+#include <system/display.h>
 
-extern cap_id_t serial_cap_id;
-
+/* Userspace shim for the libc. */
 void base_display_write(const char* data, size_t length) {
-	if (serial_cap_id == CAP_ID_INVALID) return;
-	(void)cap_call(serial_cap_id, data, length, NULL, 0u);
+	(void)display_write(data, length);
 }

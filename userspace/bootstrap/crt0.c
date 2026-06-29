@@ -1,19 +1,16 @@
 #include <base/cap.h>
-#include <runtime.h>
 #include <string.h>
-#include <syscall.h>
+#include <system/display.h>
+#include <system/process.h>
+
+int main(int argc, char** argv);
 
 extern unsigned char __bss_start[];
 extern unsigned char __bss_end[];
 
-cap_id_t serial_cap_id = CAP_ID_INVALID;
-
 __attribute__((noreturn))
 void exit(uintptr_t code) {
-	(void)exit_process(code);
-	for (;;) {
-		(void)exit_thread(code);
-	}
+	process_exit(code);
 }
 
 __attribute__((noreturn))
