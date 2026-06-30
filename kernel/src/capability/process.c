@@ -1,7 +1,7 @@
 #include "process.h"
 
 #include <base/cap.h>
-#include <base/self.h>
+#include <base/process.h>
 #include <base/thread.h>
 #include <core/capability.h>
 #include <core/process.h>

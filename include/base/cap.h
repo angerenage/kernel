@@ -1,8 +1,9 @@
 #pragma once
 
-#include <base/process.h>
 #include <stddef.h>
 #include <stdint.h>
+
+typedef uint64_t process_id_t;
 
 typedef uint64_t cap_id_t;
 typedef uint64_t cap_rights_t;
@@ -32,7 +33,6 @@ enum cap_right {
 };
 
 /* Request delivered to a server endpoint when a client issues cap_call. Userspace servers receive response == NULL
- *
  * and complete call_id with cap_reply; kernel handlers receive a writable response buffer directly. */
 struct cap_request {
 	cap_call_id_t call_id;
