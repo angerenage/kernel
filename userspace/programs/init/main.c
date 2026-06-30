@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <system/process.h>
 
 int main(int argc, char** argv) {
@@ -6,6 +7,13 @@ int main(int argc, char** argv) {
 	(void)argv;
 
 	printf("init: hello from userspace\n");
+	void* heap_probe = malloc(128u);
+	if (heap_probe == NULL) {
+		printf("init: heap allocation failed\n");
+		return 1;
+	}
+	printf("init: heap allocation=%p\n", heap_probe);
+	free(heap_probe);
 
 	struct self_info self;
 	if (!process_self_info(&self)) {

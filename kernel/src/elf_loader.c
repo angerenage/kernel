@@ -1,3 +1,4 @@
+#include <base/heap.h>
 #include <base/math.h>
 #include <core/address_transfer.h>
 #include <core/mm.h>
@@ -203,13 +204,34 @@ static enum kernel_elf_load_result kernel_elf_load_segment(struct process*      
 	return KERNEL_ELF_LOAD_OK;
 }
 
+static bool kernel_elf_allocate_initial_heap(struct process* process, uintptr_t* out_base) {
+	void*    base = NULL;
+	vmm_id_t id   = VMM_ID_INVALID;
+
+	if (process == NULL || out_base == NULL) return false;
+	if (!vmm_alloc(process_address_space(process),
+	               &(const struct vmm_alloc_params){
+					   .page_count  = HEAP_DEFAULT_GROW_PAGES,
+					   .align_pages = 1u,
+					   .prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
+					   .kind        = VMM_KIND_HEAP,
+				   },
+	               &id,
+	               &base)) {
+		return false;
+	}
+	*out_base = (uintptr_t)base;
+	return true;
+}
+
 enum kernel_elf_load_result kernel_elf_load_process(const struct kernel_boot_module* module, const char* name,
                                                     struct kernel_elf_process* out_process) {
 	const struct elf64_ehdr* ehdr;
 	const struct elf64_phdr* phdrs;
 	struct process*          process = NULL;
 	enum process_result      create_result;
-	bool                     saw_load = false;
+	uintptr_t                heap_base = 0u;
+	bool                     saw_load  = false;
 
 	if (out_process != NULL) *out_process = (struct kernel_elf_process){0};
 	if (module == NULL || module->address == NULL || out_process == NULL) return KERNEL_ELF_LOAD_INVALID_ARGUMENTS;
@@ -246,10 +268,16 @@ enum kernel_elf_load_result kernel_elf_load_process(const struct kernel_boot_mod
 		(void)process_destroy(process);
 		return KERNEL_ELF_LOAD_BAD_FORMAT;
 	}
+	if (!kernel_elf_allocate_initial_heap(process, &heap_base)) {
+		(void)process_destroy(process);
+		return KERNEL_ELF_LOAD_MAP_FAILED;
+	}
 
 	*out_process = (struct kernel_elf_process){
-		.process = process,
-		.entry   = (uintptr_t)ehdr->entry,
+		.process         = process,
+		.entry           = (uintptr_t)ehdr->entry,
+		.heap_base       = heap_base,
+		.heap_page_count = HEAP_DEFAULT_GROW_PAGES,
 	};
 	return KERNEL_ELF_LOAD_OK;
 }

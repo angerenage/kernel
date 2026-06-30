@@ -1,4 +1,5 @@
 userspace_libc_inc = include_directories('../include/libc', '../include', 'include')
+userspace_system_inc = include_directories('../include/libc', '../include', 'include')
 userspace_runtime_inc = include_directories('../include/libc', '../include', 'include')
 userspace_inc = include_directories('../include/libc', '../include', 'include')
 
@@ -25,11 +26,16 @@ userspace_link_args = [
 ]
 
 userspace_crt_sources = files(
-	'bootstrap/crt0.c',
+	'runtime/crt0.c',
 )
 
 userspace_base_sources = files(
 	'base/display.c',
+	'base/heap.c',
+)
+
+userspace_runtime_sources = files(
+	'runtime/heap.c',
 )
 
 userspace_system_sources = files(
@@ -56,6 +62,14 @@ userspace_libc = static_library('userspace_libc',
 userspace_system = static_library('userspace_system',
 	sources : userspace_system_sources,
 	c_args : userspace_c_args,
+	include_directories : userspace_system_inc,
+	pic : false,
+	install : false,
+)
+
+userspace_runtime = static_library('userspace_runtime',
+	sources : userspace_runtime_sources,
+	c_args : userspace_c_args,
 	include_directories : userspace_runtime_inc,
 	pic : false,
 	install : false,
@@ -70,6 +84,7 @@ userspace_crt = static_library('userspace_crt',
 )
 
 userspace_link_libs = [
+	userspace_runtime,
 	userspace_libc,
 	userspace_system,
 ]

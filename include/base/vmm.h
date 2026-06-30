@@ -6,6 +6,7 @@
 #define VMM_ID_INVALID 0ull
 #define VMM_MIN_ALIGN_PAGES 1u
 #define VMM_STACK_DEFAULT_GUARD_PAGES 1u
+#define VMM_PAGE_SIZE 0x1000ull
 
 typedef uint64_t vmm_id_t;
 typedef uint64_t vmm_prot_t;

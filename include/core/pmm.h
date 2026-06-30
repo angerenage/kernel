@@ -1,12 +1,13 @@
 #pragma once
 
+#include <base/vmm.h>
 #include <core/mm.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 /* Physical page size managed by the physical memory manager and used throughout the kernel. */
-#define PMM_PAGE_SIZE 0x1000ull
+#define PMM_PAGE_SIZE VMM_PAGE_SIZE
 
 /*
  * Physical memory manager.

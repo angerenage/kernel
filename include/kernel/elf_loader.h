@@ -3,6 +3,7 @@
 #include <core/process.h>
 #include <kernel/boot.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /* Result codes for ELF-driven process creation. */
@@ -21,8 +22,10 @@ enum kernel_elf_load_result {
 struct kernel_elf_process {
 	struct process* process;
 	uintptr_t       entry;
+	uintptr_t       heap_base;
+	size_t          heap_page_count;
 };
 
-/* Load an ELF boot module into a fresh process and queue its main userspace thread. */
+/* Load an ELF boot module and initial heap into a fresh process and queue its main userspace thread. */
 enum kernel_elf_load_result kernel_elf_load_process(const struct kernel_boot_module* module, const char* name,
                                                     struct kernel_elf_process* out_process);

@@ -1,4 +1,5 @@
 #include <base/heap.h>
+#include <base/startup.h>
 #include <core/capability.h>
 #include <core/cpu.h>
 #include <core/mm.h>
@@ -73,6 +74,7 @@ static const char* kernel_elf_load_result_string(enum kernel_elf_load_result res
 static bool kernel_launch_init_process(void) {
 	const struct kernel_boot_module* module;
 	struct kernel_elf_process        loaded = {0};
+	struct process_startup_info      startup;
 	struct uthread*                  main_thread;
 	enum kernel_elf_load_result      load_result;
 	enum process_thread_spawn_result start_result;
@@ -95,14 +97,21 @@ static bool kernel_launch_init_process(void) {
 		printf("kernel: init serial capability grant failed\n");
 		return false;
 	}
+	startup = (struct process_startup_info){
+		.size            = sizeof(startup),
+		.heap_base       = loaded.heap_base,
+		.heap_page_count = loaded.heap_page_count,
+		.page_size       = PMM_PAGE_SIZE,
+		.serial_cap      = serial_cap,
+	};
 	main_thread  = NULL;
 	start_result = process_start_main_thread(loaded.process,
 	                                         &main_thread,
 	                                         &(const struct process_thread_params){
 												 .name             = "init/main",
 												 .user_entry       = loaded.entry,
-												 .arg_data         = &serial_cap,
-												 .arg_size         = sizeof(serial_cap),
+												 .arg_data         = &startup,
+												 .arg_size         = sizeof(startup),
 												 .user_stack_pages = UTHREAD_DEFAULT_USER_STACK_PAGES,
 												 .preferred_cpu    = cpu_current(),
 												 .detached         = false,

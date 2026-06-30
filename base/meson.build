@@ -16,13 +16,11 @@ base_libc_sources = files(
 	'libc/stdio/putchar.c',
 	'libc/stdio/puts.c',
 	'libc/stdio/sprintf.c',
+	'libc/heap.c',
+	'libc/math.c',
 )
 
 base_sources = (
 	base_libc_sources
-	+ files(
-		'heap.c',
-		'math.c',
-		'time.c',
-	)
+	+ files('time.c')
 )
