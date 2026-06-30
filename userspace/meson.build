@@ -1,6 +1,6 @@
 userspace_libc_inc = include_directories('../include/libc', '../include', 'include')
 userspace_runtime_inc = include_directories('../include/libc', '../include', 'include')
-userspace_inc = include_directories('../include/libc', 'include')
+userspace_inc = include_directories('../include/libc', '../include', 'include')
 
 userspace_linker_file = meson.current_source_dir() + '/linker.ld'
 

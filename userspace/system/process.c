@@ -1,7 +1,9 @@
+#include <base/cap.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <system/capability.h>
+#include <system/display.h>
 #include <system/process.h>
 
 #include "syscall.h"
@@ -34,12 +36,28 @@ bool process_get_info(cap_id_t cap, struct process_info_response* out_info) {
 }
 
 bool process_run(cap_id_t cap, uintptr_t entry, uintptr_t arg, size_t stack_pages, cap_id_t* out_thread_cap) {
-	struct process_run_request request = {
-		.header = {.op = PROCESS_OP_RUN}, .entry = entry, .arg = arg, .stack_pages = stack_pages};
-	struct process_run_response response;
-	syscall_result_t            result;
+	struct process_info_response proc;
+	struct process_run_request   request;
+	struct process_run_response  response;
+	syscall_result_t             result;
+	cap_id_t                     serial_cap = CAP_ID_INVALID;
+	bool                         have_pid;
 
-	if (out_thread_cap == NULL) return false;
+	(void)arg;
+
+	if (out_thread_cap == NULL || cap == CAP_ID_INVALID) return false;
+
+	have_pid = process_get_info(cap, &proc) && proc.pid != PROCESS_PID_INVALID;
+	if (have_pid && serial_cap_id != CAP_ID_INVALID) {
+		(void)cap_delegate(serial_cap_id, proc.pid, CAP_READ | CAP_DELEGATE, &serial_cap);
+	}
+
+	request = (struct process_run_request){
+		.header      = {.op = PROCESS_OP_RUN},
+		.entry       = entry,
+		.arg         = (uintptr_t)&serial_cap,
+		.stack_pages = stack_pages,
+	};
 	result = cap_call_syscall(cap, &request, sizeof(request), &response, sizeof(response));
 	if (result.status != SYSCALL_STATUS_OK || result.value != sizeof(response)) return false;
 	*out_thread_cap = response.thread_cap;
