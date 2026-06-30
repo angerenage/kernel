@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #define THREAD_EXIT_CODE_CANCELLED ((uintptr_t)UINTPTR_MAX)
+#define THREAD_START_ARG_MAX_SIZE 4096u
 
 /* Operation codes for thread capability requests. */
 enum thread_op {

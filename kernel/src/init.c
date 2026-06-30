@@ -76,6 +76,7 @@ static bool kernel_launch_init_process(void) {
 	struct uthread*                  main_thread;
 	enum kernel_elf_load_result      load_result;
 	enum process_thread_spawn_result start_result;
+	cap_id_t                         serial_cap;
 
 	module = kernel_boot_module_find("init.elf");
 	if (module == NULL) {
@@ -88,19 +89,24 @@ static bool kernel_launch_init_process(void) {
 		printf("kernel: init ELF load failed: %s\n", kernel_elf_load_result_string(load_result));
 		return false;
 	}
-
+	serial_cap = kernel_capability_serial_grant(process_pid(loaded.process));
+	if (serial_cap == CAP_ID_INVALID) {
+		(void)process_destroy(loaded.process);
+		printf("kernel: init serial capability grant failed\n");
+		return false;
+	}
 	main_thread  = NULL;
-	start_result = process_start_main_thread(
-		loaded.process,
-		&main_thread,
-		&(const struct process_thread_params){
-			.name             = "init/main",
-			.user_entry       = loaded.entry,
-			.user_arg         = (uintptr_t)kernel_capability_serial_grant(process_pid(loaded.process)),
-			.user_stack_pages = UTHREAD_DEFAULT_USER_STACK_PAGES,
-			.preferred_cpu    = cpu_current(),
-			.detached         = false,
-		});
+	start_result = process_start_main_thread(loaded.process,
+	                                         &main_thread,
+	                                         &(const struct process_thread_params){
+												 .name             = "init/main",
+												 .user_entry       = loaded.entry,
+												 .arg_data         = &serial_cap,
+												 .arg_size         = sizeof(serial_cap),
+												 .user_stack_pages = UTHREAD_DEFAULT_USER_STACK_PAGES,
+												 .preferred_cpu    = cpu_current(),
+												 .detached         = false,
+											 });
 	if (start_result != PROCESS_THREAD_SPAWN_OK) {
 		(void)process_destroy(loaded.process);
 		printf("kernel: init thread start failed: %u\n", (unsigned)start_result);

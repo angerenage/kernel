@@ -90,7 +90,8 @@ enum process_thread_spawn_result {
 struct process_spawn_params {
 	const char* name;
 	uintptr_t   user_entry;
-	uintptr_t   user_arg;
+	const void* arg_data;
+	size_t      arg_size;
 	size_t      user_stack_pages;
 	struct cpu* preferred_cpu;
 };
@@ -98,7 +99,8 @@ struct process_spawn_params {
 struct process_thread_params {
 	const char* name;
 	uintptr_t   user_entry;
-	uintptr_t   user_arg;
+	const void* arg_data;
+	size_t      arg_size;
 	size_t      user_stack_pages;
 	struct cpu* preferred_cpu;
 	bool        detached;

@@ -2,6 +2,7 @@
 
 #include <base/cap.h>
 #include <base/self.h>
+#include <base/thread.h>
 #include <core/capability.h>
 #include <core/process.h>
 #include <core/syscall.h>
@@ -30,10 +31,38 @@ static syscall_result_t process_info_handler(const struct cap_request* req, stru
 	return cap_kernel_write_response(req, &response, sizeof(response));
 }
 
+static syscall_result_t process_copy_thread_arg(const struct cap_request* req, const void* arg_data, size_t arg_size,
+                                                void** out_arg) {
+	struct process*  caller;
+	void*            copy;
+	syscall_result_t result;
+
+	if (out_arg == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	*out_arg = NULL;
+	if ((arg_data == NULL) != (arg_size == 0u) || arg_size > THREAD_START_ARG_MAX_SIZE) {
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
+	if (arg_size == 0u) return syscall_result_ok(0u);
+
+	caller = process_lookup(req->caller);
+	if (caller == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	copy = malloc(arg_size);
+	if (copy == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
+	result = syscall_copy_from_user(process_address_space(caller), (uintptr_t)arg_data, copy, arg_size, 0u);
+	if (result.status != SYSCALL_STATUS_OK) {
+		free(copy);
+		return result;
+	}
+	*out_arg = copy;
+	return syscall_result_ok(0u);
+}
+
 static syscall_result_t process_run_handler(const struct cap_request* req, struct process* target) {
 	struct process_run_request       request;
 	struct uthread*                  main_thread = NULL;
 	enum process_thread_spawn_result result;
+	void*                            arg_copy = NULL;
+	syscall_result_t                 copy_result;
 
 	if (req->request == NULL || req->request_size < sizeof(request)) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -43,17 +72,21 @@ static syscall_result_t process_run_handler(const struct cap_request* req, struc
 	}
 
 	memcpy(&request, req->request, sizeof(request));
+	copy_result = process_copy_thread_arg(req, request.arg_data, request.arg_size, &arg_copy);
+	if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
 
 	result = process_start_main_thread(target,
 	                                   &main_thread,
 	                                   &(const struct process_thread_params){
 										   .name             = target->name,
 										   .user_entry       = request.entry,
-										   .user_arg         = request.arg,
-										   .user_stack_pages = request.stack_pages,
+										   .arg_data         = arg_copy,
+										   .arg_size         = request.arg_size,
+										   .user_stack_pages = UTHREAD_DEFAULT_USER_STACK_PAGES,
 										   .preferred_cpu    = NULL,
 										   .detached         = false,
 									   });
+	free(arg_copy);
 	if (result != PROCESS_THREAD_SPAWN_OK) {
 		return syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
 	}
@@ -72,7 +105,8 @@ static syscall_result_t process_spawn_thread_handler(const struct cap_request* r
 	struct process_thread_params         params;
 	struct uthread*                      thread = NULL;
 	enum process_thread_spawn_result     result;
-	char*                                name = NULL;
+	char*                                name     = NULL;
+	void*                                arg_copy = NULL;
 	syscall_result_t                     copy_result;
 
 	if (req->request == NULL || req->request_size < sizeof(request)) {
@@ -83,20 +117,27 @@ static syscall_result_t process_spawn_thread_handler(const struct cap_request* r
 	}
 	memcpy(&request, req->request, sizeof(request));
 	if (request.entry == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	copy_result = process_copy_thread_arg(req, request.arg_data, request.arg_size, &arg_copy);
+	if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
 
 	copy_result = syscall_copy_string_arg(0u, (uintptr_t)request.name, 0u, (uintptr_t)request.name_length, &name);
-	if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
+	if (copy_result.status != SYSCALL_STATUS_OK) {
+		free(arg_copy);
+		return copy_result;
+	}
 
 	params = (struct process_thread_params){
 		.name             = name,
 		.user_entry       = request.entry,
-		.user_arg         = request.arg,
-		.user_stack_pages = request.stack_pages,
+		.arg_data         = arg_copy,
+		.arg_size         = request.arg_size,
+		.user_stack_pages = UTHREAD_DEFAULT_USER_STACK_PAGES,
 		.preferred_cpu    = NULL,
 		.detached         = false,
 	};
 	result = process_spawn_thread(target, &thread, &params);
 	free(name);
+	free(arg_copy);
 	if (result != PROCESS_THREAD_SPAWN_OK) {
 		return result == PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS
 		           ? syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, (uintptr_t)result)

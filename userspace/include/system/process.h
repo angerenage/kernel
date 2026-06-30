@@ -15,11 +15,11 @@ bool process_self_info(struct self_info* out_info);
 /* Read info about a process through its capability. */
 bool process_get_info(cap_id_t cap, struct process_info_response* out_info);
 
-/* Start the main thread of a process through its capability. */
-bool process_run(cap_id_t cap, uintptr_t entry, uintptr_t arg, size_t stack_pages, cap_id_t* out_thread_cap);
+/* Copy an argument onto the new main thread's stack and start it. */
+bool process_run(cap_id_t cap, uintptr_t entry, const void* arg_data, size_t arg_size, cap_id_t* out_thread_cap);
 
-/* Spawn a joinable thread inside a process through its capability. */
-bool process_spawn_thread(cap_id_t cap, uintptr_t entry, uintptr_t arg, size_t stack_pages, const char* name,
+/* Copy an argument onto a new joinable thread's stack and start it. */
+bool process_spawn_thread(cap_id_t cap, uintptr_t entry, const void* arg_data, size_t arg_size, const char* name,
                           size_t name_length, cap_id_t* out_thread_cap);
 
 /* Wait for a process to terminate through its capability. */

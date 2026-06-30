@@ -3,7 +3,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <system/capability.h>
-#include <system/display.h>
 #include <system/process.h>
 
 #include "syscall.h"
@@ -35,28 +34,19 @@ bool process_get_info(cap_id_t cap, struct process_info_response* out_info) {
 	return result.value == sizeof(*out_info);
 }
 
-bool process_run(cap_id_t cap, uintptr_t entry, uintptr_t arg, size_t stack_pages, cap_id_t* out_thread_cap) {
-	struct process_info_response proc;
-	struct process_run_request   request;
-	struct process_run_response  response;
-	syscall_result_t             result;
-	cap_id_t                     serial_cap = CAP_ID_INVALID;
-	bool                         have_pid;
-
-	(void)arg;
+bool process_run(cap_id_t cap, uintptr_t entry, const void* arg_data, size_t arg_size, cap_id_t* out_thread_cap) {
+	struct process_run_request  request;
+	struct process_run_response response;
+	syscall_result_t            result;
 
 	if (out_thread_cap == NULL || cap == CAP_ID_INVALID) return false;
-
-	have_pid = process_get_info(cap, &proc) && proc.pid != PROCESS_PID_INVALID;
-	if (have_pid && serial_cap_id != CAP_ID_INVALID) {
-		(void)cap_delegate(serial_cap_id, proc.pid, CAP_READ | CAP_DELEGATE, &serial_cap);
-	}
+	if ((arg_data == NULL) != (arg_size == 0u) || arg_size > THREAD_START_ARG_MAX_SIZE) return false;
 
 	request = (struct process_run_request){
-		.header      = {.op = PROCESS_OP_RUN},
-		.entry       = entry,
-		.arg         = (uintptr_t)&serial_cap,
-		.stack_pages = stack_pages,
+		.header   = {.op = PROCESS_OP_RUN},
+		.entry    = entry,
+		.arg_data = arg_data,
+		.arg_size = arg_size,
 	};
 	result = cap_call_syscall(cap, &request, sizeof(request), &response, sizeof(response));
 	if (result.status != SYSCALL_STATUS_OK || result.value != sizeof(response)) return false;
@@ -64,20 +54,22 @@ bool process_run(cap_id_t cap, uintptr_t entry, uintptr_t arg, size_t stack_page
 	return response.thread_cap != CAP_ID_INVALID;
 }
 
-bool process_spawn_thread(cap_id_t cap, uintptr_t entry, uintptr_t arg, size_t stack_pages, const char* name,
+bool process_spawn_thread(cap_id_t cap, uintptr_t entry, const void* arg_data, size_t arg_size, const char* name,
                           size_t name_length, cap_id_t* out_thread_cap) {
 	struct process_spawn_thread_request request = {
 		.header      = {.op = PROCESS_OP_SPAWN_THREAD},
 		.entry       = entry,
-		.arg         = arg,
-		.stack_pages = stack_pages,
+		.arg_data    = arg_data,
+		.arg_size    = arg_size,
 		.name        = name,
 		.name_length = name_length,
 	};
 	struct process_spawn_thread_response response;
 	syscall_result_t                     result;
 
-	if (out_thread_cap == NULL) return false;
+	if (out_thread_cap == NULL || (arg_data == NULL) != (arg_size == 0u) || arg_size > THREAD_START_ARG_MAX_SIZE) {
+		return false;
+	}
 	result = cap_call_syscall(cap, &request, sizeof(request), &response, sizeof(response));
 	if (result.status != SYSCALL_STATUS_OK || result.value != sizeof(response)) return false;
 	*out_thread_cap = response.thread_cap;

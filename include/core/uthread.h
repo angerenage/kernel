@@ -30,7 +30,8 @@ struct uthread_start_params {
 	const char*     name;
 	struct process* process;
 	uintptr_t       user_entry;
-	uintptr_t       user_arg;
+	const void*     arg_data;
+	size_t          arg_size;
 	size_t          user_stack_pages;
 	struct cpu*     preferred_cpu;
 	bool            detached;

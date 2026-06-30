@@ -83,20 +83,20 @@ struct process_kill_request {
 	uintptr_t                     exit_code;
 };
 
-/* Request to run a process. */
+/* Request to run a process. arg_data is copied from the caller onto the new thread's stack. */
 struct process_run_request {
 	struct process_request_header header;
 	uintptr_t                     entry;
-	uintptr_t                     arg;
-	size_t                        stack_pages;
+	const void*                   arg_data;
+	size_t                        arg_size;
 };
 
-/* Request to create a joinable thread in a process. */
+/* Request to create a joinable thread. arg_data is copied from the caller onto the new thread's stack. */
 struct process_spawn_thread_request {
 	struct process_request_header header;
 	uintptr_t                     entry;
-	uintptr_t                     arg;
-	size_t                        stack_pages;
+	const void*                   arg_data;
+	size_t                        arg_size;
 	const char*                   name;
 	size_t                        name_length;
 };

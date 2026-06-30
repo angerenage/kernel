@@ -116,7 +116,8 @@ static enum process_result create_process_with_main_thread(struct process**     
 	                                     &(const struct process_thread_params){
 											 .name             = params->name,
 											 .user_entry       = params->user_entry,
-											 .user_arg         = params->user_arg,
+											 .arg_data         = params->arg_data,
+											 .arg_size         = params->arg_size,
 											 .user_stack_pages = params->user_stack_pages,
 											 .preferred_cpu    = params->preferred_cpu,
 											 .detached         = false,
@@ -265,7 +266,6 @@ Test(process, spawn_user_creates_main_thread_in_process_address_space) {
 	                                         &(const struct process_spawn_params){
 												 .name             = "spawned",
 												 .user_entry       = 0x400000u,
-												 .user_arg         = 0x1234u,
 												 .user_stack_pages = 2u,
 												 .preferred_cpu    = NULL,
 											 });
@@ -302,7 +302,6 @@ Test(process, spawn_thread_allocates_joinable_thread_in_process_address_space) {
 	                                  &(const struct process_thread_params){
 										  .name             = "spawned-worker",
 										  .user_entry       = 0x410000u,
-										  .user_arg         = 0x66u,
 										  .user_stack_pages = 2u,
 										  .preferred_cpu    = NULL,
 										  .detached         = false,

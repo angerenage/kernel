@@ -14,8 +14,8 @@ void exit(uintptr_t code) {
 }
 
 __attribute__((noreturn))
-void _start(uintptr_t arg) {
+void _start(const cap_id_t* serial_cap) {
 	memset(__bss_start, 0, __bss_end - __bss_start);
-	serial_cap_id = (cap_id_t)arg;
+	serial_cap_id = serial_cap == NULL ? CAP_ID_INVALID : *serial_cap;
 	exit((uintptr_t)main(0, (char**)0));
 }

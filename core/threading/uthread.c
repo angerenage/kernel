@@ -1,3 +1,5 @@
+#include <base/thread.h>
+#include <core/address_transfer.h>
 #include <core/cpu.h>
 #include <core/id_table.h>
 #include <core/kthread.h>
@@ -15,7 +17,8 @@
 #include <stdint.h>
 
 enum {
-	UTHREAD_KERNEL_STACK_PAGES = 4u,
+	UTHREAD_KERNEL_STACK_PAGES   = 4u,
+	UTHREAD_USER_STACK_ALIGNMENT = 16u,
 };
 
 #define UTHREAD_REAPER_MAX_CPUS 64u
@@ -321,11 +324,16 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 	void*                        kernel_stack_base = NULL;
 	size_t                       user_stack_pages;
 	uintptr_t                    kernel_stack_top;
+	uintptr_t                    initial_user_stack_top;
+	uintptr_t                    user_arg = 0u;
 	uthread_id_t                 id;
 	enum id_table_result         id_result;
 	char*                        name = NULL;
 
 	if (thread == NULL || params == NULL || params->process == NULL || params->user_entry == 0u) {
+		return UTHREAD_START_INVALID_ARGUMENTS;
+	}
+	if ((params->arg_data == NULL) != (params->arg_size == 0u) || params->arg_size > THREAD_START_ARG_MAX_SIZE) {
 		return UTHREAD_START_INVALID_ARGUMENTS;
 	}
 	address_space = process_address_space(params->process);
@@ -369,9 +377,27 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 
 	thread->user_stack_top = (uintptr_t)user_stack_base + user_stack_pages * (uintptr_t)PMM_PAGE_SIZE;
 	kernel_stack_top       = (uintptr_t)kernel_stack_base + UTHREAD_KERNEL_STACK_PAGES * (uintptr_t)PMM_PAGE_SIZE;
+	initial_user_stack_top = thread->user_stack_top;
+	if (params->arg_size != 0u) {
+		if (params->arg_size > initial_user_stack_top - (uintptr_t)user_stack_base) {
+			uthread_release_name(thread);
+			uthread_release_stacks(thread);
+			uthread_unregister_id(thread);
+			return UTHREAD_START_INVALID_ARGUMENTS;
+		}
+		user_arg = (initial_user_stack_top - params->arg_size) & ~((uintptr_t)UTHREAD_USER_STACK_ALIGNMENT - 1u);
+		if (user_arg <= (uintptr_t)user_stack_base ||
+		    address_space_copy_to(address_space, user_arg, params->arg_data, params->arg_size) != ADDRESS_TRANSFER_OK) {
+			uthread_release_name(thread);
+			uthread_release_stacks(thread);
+			uthread_unregister_id(thread);
+			return UTHREAD_START_INVALID_ARGUMENTS;
+		}
+		initial_user_stack_top = user_arg;
+	}
 
 	if (!hal_userspace_thread_context_init(
-			&context, kernel_stack_top, params->user_entry, thread->user_stack_top, params->user_arg)) {
+			&context, kernel_stack_top, params->user_entry, initial_user_stack_top, user_arg)) {
 		uthread_release_name(thread);
 		uthread_release_stacks(thread);
 		uthread_unregister_id(thread);
