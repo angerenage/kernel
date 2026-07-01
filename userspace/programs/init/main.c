@@ -16,7 +16,7 @@ int main(int argc, char** argv) {
 	free(heap_probe);
 
 	struct self_info self;
-	if (!process_self_info(&self)) {
+	if (!syscall_status_is_success(process_self_info(&self))) {
 		printf("init: process_self_info failed\n");
 		return 1;
 	}
@@ -26,7 +26,7 @@ int main(int argc, char** argv) {
 	       (unsigned long long)self.thread_count);
 
 	struct process_create_response child;
-	if (!process_create("child", sizeof("child"), &child)) {
+	if (!syscall_status_is_success(process_create("child", sizeof("child"), &child))) {
 		printf("init: process_create failed\n");
 		return 1;
 	}
@@ -35,7 +35,7 @@ int main(int argc, char** argv) {
 	       (unsigned long long)child.address_space_cap);
 
 	struct process_info_response info;
-	if (!process_get_info(child.process_cap, &info)) {
+	if (!syscall_status_is_success(process_get_info(child.process_cap, &info))) {
 		printf("init: process_get_info failed\n");
 		return 1;
 	}

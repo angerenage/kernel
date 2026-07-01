@@ -28,7 +28,7 @@ static bool runtime_heap_configure(uintptr_t base, size_t page_count, size_t pag
 bool runtime_heap_init(const struct process_startup_info* startup) {
 	struct self_info self;
 
-	if (startup == NULL || !process_self_info(&self)) return false;
+	if (startup == NULL || !syscall_status_is_success(process_self_info(&self))) return false;
 	if (!runtime_heap_configure(
 			startup->heap_base, startup->heap_page_count, startup->page_size, self.address_space_cap)) {
 		return false;

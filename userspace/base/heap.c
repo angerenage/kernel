@@ -37,12 +37,17 @@ bool heap_grow_pages(size_t page_count, void** out_base) {
 	}
 	userspace_heap_state_unlock();
 
-	if (!memory_allocate(page_count, VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER, VMM_KIND_HEAP, &allocation_cap)) {
+	if (!syscall_status_is_success(memory_allocate(
+			page_count, VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER, VMM_KIND_HEAP, &allocation_cap))) {
 		return false;
 	}
-	if (!address_space_map(runtime_heap_address_space_cap, allocation_cap, &mapping_cap)) goto cleanup;
-	if (!mapping_get_info(mapping_cap, &mapping) || mapping.base == NULL || mapping.page_count != page_count)
+	if (!syscall_status_is_success(address_space_map(runtime_heap_address_space_cap, allocation_cap, &mapping_cap))) {
 		goto cleanup;
+	}
+	if (!syscall_status_is_success(mapping_get_info(mapping_cap, &mapping)) || mapping.base == NULL ||
+	    mapping.page_count != page_count) {
+		goto cleanup;
+	}
 
 	*out_base = mapping.base;
 	return true;
