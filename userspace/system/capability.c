@@ -1,3 +1,4 @@
+#include <runtime/diagnostic.h>
 #include <system/capability.h>
 
 #include "syscall.h"
@@ -24,6 +25,31 @@ syscall_status_t cap_publish(channel_id_t endpoint_id, uint64_t object_id, proce
 	                                  (uintptr_t)&cap_id,
 	                                  0u);
 
+#ifdef RUNTIME_DIAGNOSTICS
+	if (result.status == SYSCALL_STATUS_BAD_ARGUMENT) {
+		switch (result.value) {
+		case 0u:
+			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(endpoint_id);
+			break;
+		case 1u:
+			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(target);
+			break;
+		case 2u:
+			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(object_id);
+			break;
+		case 3u:
+			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(rights);
+			break;
+		default:
+			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER_INDEX(SYSCALL_CAP_CREATE, result.value);
+			break;
+		}
+	}
+	else {
+		RUNTIME_DIAGNOSTIC_SYSCALL_RESULT(SYSCALL_CAP_CREATE, result);
+	}
+#endif
+
 	if (result.status == SYSCALL_STATUS_OK && out != NULL) *out = cap_id;
 	return result.status;
 }
@@ -32,6 +58,28 @@ syscall_status_t cap_delegate(cap_id_t source, process_id_t target, cap_rights_t
 	cap_id_t         cap_id = CAP_ID_INVALID;
 	syscall_result_t result = syscall(
 		SYSCALL_CAP_DELEGATE, (uintptr_t)source, (uintptr_t)target, (uintptr_t)rights, (uintptr_t)&cap_id, 0u, 0u);
+
+#ifdef RUNTIME_DIAGNOSTICS
+	if (result.status == SYSCALL_STATUS_BAD_ARGUMENT) {
+		switch (result.value) {
+		case 0u:
+			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(source);
+			break;
+		case 1u:
+			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(target);
+			break;
+		case 2u:
+			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(rights);
+			break;
+		default:
+			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER_INDEX(SYSCALL_CAP_DELEGATE, result.value);
+			break;
+		}
+	}
+	else {
+		RUNTIME_DIAGNOSTIC_SYSCALL_RESULT(SYSCALL_CAP_DELEGATE, result);
+	}
+#endif
 
 	if (result.status == SYSCALL_STATUS_OK && out != NULL) *out = cap_id;
 	return result.status;
@@ -48,12 +96,55 @@ syscall_status_t cap_derive(cap_id_t base, process_id_t target, uint64_t object_
 	                                  (uintptr_t)&cap_id,
 	                                  0u);
 
+#ifdef RUNTIME_DIAGNOSTICS
+	if (result.status == SYSCALL_STATUS_BAD_ARGUMENT) {
+		switch (result.value) {
+		case 0u:
+			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(base);
+			break;
+		case 1u:
+			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(target);
+			break;
+		case 2u:
+			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(object_id);
+			break;
+		case 3u:
+			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(rights);
+			break;
+		default:
+			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER_INDEX(SYSCALL_CAP_DERIVE, result.value);
+			break;
+		}
+	}
+	else {
+		RUNTIME_DIAGNOSTIC_SYSCALL_RESULT(SYSCALL_CAP_DERIVE, result);
+	}
+#endif
+
 	if (result.status == SYSCALL_STATUS_OK && out != NULL) *out = cap_id;
 	return result.status;
 }
 
 syscall_status_t cap_revoke(cap_id_t cap, cap_rights_t rights) {
 	syscall_result_t result = syscall(SYSCALL_CAP_REVOKE, (uintptr_t)cap, (uintptr_t)rights, 0u, 0u, 0u, 0u);
+
+#ifdef RUNTIME_DIAGNOSTICS
+	if (result.status == SYSCALL_STATUS_BAD_ARGUMENT) {
+		if (result.value == 0u) {
+			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(cap);
+		}
+		else if (result.value == 1u) {
+			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(rights);
+		}
+		else {
+			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER_INDEX(SYSCALL_CAP_REVOKE, result.value);
+		}
+	}
+	else {
+		RUNTIME_DIAGNOSTIC_SYSCALL_RESULT(SYSCALL_CAP_REVOKE, result);
+	}
+#endif
+
 	return result.status;
 }
 
@@ -61,9 +152,33 @@ syscall_status_t cap_call(cap_id_t cap, const void* request, size_t request_size
                           size_t response_capacity, size_t* result_value) {
 	syscall_result_t result;
 
-	if (request == NULL || request_size == 0u) return SYSCALL_STATUS_BAD_ARGUMENT;
-	if (response_capacity != 0u && response == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	if (cap == CAP_ID_INVALID) {
+		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(cap);
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	}
+	if (request == NULL) {
+		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(request);
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	}
+	if (request_size == 0u) {
+		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(request_size);
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	}
+	if (request_size > CAP_MAX_REQUEST_SIZE) {
+		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(request_size);
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	}
+	if (response_capacity != 0u && response == NULL) {
+		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(response);
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	}
+	if (response_capacity > CAP_MAX_RESPONSE_SIZE) {
+		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(response_capacity);
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	}
+
 	result = cap_call_syscall(cap, request, request_size, response, response_capacity);
+	RUNTIME_DIAGNOSTIC_OPERATION_RESULT(cap_call, result);
 	if (result.status == SYSCALL_STATUS_OK && result_value != NULL) *result_value = (size_t)result.value;
 	return result.status;
 }

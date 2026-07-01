@@ -10,6 +10,10 @@ userspace_c_args = freestanding_c_args + [
 	'-fno-pie',
 ]
 
+if get_option('debug')
+	userspace_c_args += ['-DRUNTIME_DIAGNOSTICS=1']
+endif
+
 if platform == 'pc_x86_64'
 	userspace_c_args += [
 		'-mno-red-zone',
@@ -35,6 +39,7 @@ userspace_base_sources = files(
 )
 
 userspace_runtime_sources = files(
+	'runtime/diagnostic.c',
 	'runtime/heap.c',
 )
 
