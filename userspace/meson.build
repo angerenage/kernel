@@ -97,5 +97,6 @@ userspace_link_libs = [
 userspace_programs = []
 
 subdir('programs/init')
+subdir('programs/loader')
 
 alias_target('userspace', userspace_programs)
