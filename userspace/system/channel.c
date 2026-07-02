@@ -35,7 +35,7 @@ syscall_status_t channel_destroy(channel_id_t channel_id) {
 }
 
 syscall_status_t channel_recv(channel_id_t endpoint_id, struct cap_request* out_request, void* request_buffer,
-                              size_t request_buffer_size) {
+                              size_t request_buffer_size, bool* out_received) {
 	syscall_result_t result;
 
 	if (out_request == NULL) {
@@ -46,6 +46,7 @@ syscall_status_t channel_recv(channel_id_t endpoint_id, struct cap_request* out_
 		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(request_buffer);
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	}
+	if (out_received != NULL) *out_received = false;
 
 	result = syscall(SYSCALL_CAP_RECV,
 	                 (uintptr_t)endpoint_id,
@@ -80,6 +81,7 @@ syscall_status_t channel_recv(channel_id_t endpoint_id, struct cap_request* out_
 	}
 #endif
 
+	if (result.status == SYSCALL_STATUS_OK && out_received != NULL) *out_received = result.value != 0u;
 	return result.status;
 }
 

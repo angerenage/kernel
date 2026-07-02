@@ -41,6 +41,7 @@ userspace_base_sources = files(
 userspace_runtime_sources = files(
 	'runtime/diagnostic.c',
 	'runtime/heap.c',
+	'runtime/init.c',
 )
 
 userspace_system_sources = files(

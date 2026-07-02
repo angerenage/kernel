@@ -114,6 +114,7 @@ static bool kernel_launch_init_process(void) {
 		.heap_page_count = loaded.heap_page_count,
 		.page_size       = PMM_PAGE_SIZE,
 		.serial_cap      = serial_cap,
+		.init_cap        = CAP_ID_INVALID,
 	};
 	startup.loader_cap = loader_cap;
 	thread_params      = (struct process_thread_params){

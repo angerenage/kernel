@@ -1,6 +1,7 @@
 #include <base/cap.h>
 #include <base/startup.h>
 #include <runtime/heap.h>
+#include <runtime/init.h>
 #include <string.h>
 #include <system/display.h>
 #include <system/process.h>
@@ -23,6 +24,7 @@ void _start(const struct process_startup_info* startup) {
 		exit(PROCESS_EXIT_SYSTEM_INVALID_STARTUP);
 	}
 	serial_cap_id = startup->serial_cap;
+	init_cap_id   = startup->init_cap;
 	if (!runtime_heap_init(startup)) {
 		exit(PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
 	}
