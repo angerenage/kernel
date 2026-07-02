@@ -61,7 +61,11 @@ static syscall_result_t address_space_map_handler(const struct cap_request* req,
 
 	result = kernel_map_allocation(allocation_cap, req->caller, target, address, &response.mapping_cap);
 	if (result.status != SYSCALL_STATUS_OK) return result;
-	return cap_kernel_write_response(req, &response, sizeof(response));
+	result = cap_kernel_write_response(req, &response, sizeof(response));
+	if (result.status != SYSCALL_STATUS_OK) {
+		(void)kernel_mapping_discard_unpublished(response.mapping_cap, req->caller);
+	}
+	return result;
 }
 
 static syscall_result_t address_space_handler(const struct cap_request* req) {

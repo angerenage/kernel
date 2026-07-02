@@ -12,5 +12,8 @@ syscall_status_t module_resolve(const char* name, size_t name_length, struct mod
 /* Read descriptive metadata through a boot-module capability. */
 syscall_status_t module_get_info(cap_id_t module_cap, struct module_info_response* out_info);
 
-/* Map a boot module capability into the caller's address space. */
-syscall_status_t module_map(cap_id_t module_cap, uintptr_t* out_mapped_base);
+/* Map a boot module and return its mapping capability and initial mapping snapshot. */
+syscall_status_t module_map(cap_id_t module_cap, struct module_map_response* out_mapping);
+
+/* Copy an exact byte range from a boot module. */
+syscall_status_t module_read(cap_id_t module_cap, uint64_t offset, void* buffer, size_t size);

@@ -11,6 +11,7 @@
 #include <core/spinlock.h>
 #include <core/syscall.h>
 #include <core/vmm.h>
+#include <hal/paging.h>
 #include <kernel/capability.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,20 +27,23 @@ struct allocation_state {
 };
 
 struct mapping_state {
-	struct spinlock          lock;
-	struct allocation_state* allocation;
-	struct address_space*    space;
-	process_id_t             space_owner;
-	vmm_id_t                 region_id;
-	enum vmm_kind            allocation_kind;
-	bool                     active;
+	struct spinlock lock;
+	void*           backing_context;
+	void (*backing_release)(void* context);
+	struct address_space* space;
+	process_id_t          space_owner;
+	vmm_id_t              region_id;
+	enum vmm_kind         kind;
+	bool                  active;
 };
 
 static syscall_result_t allocation_handler(const struct cap_request* req);
 static syscall_result_t mapping_handler(const struct cap_request* req);
-static cap_id_t         kernel_mapping_create(struct allocation_state* allocation, struct capability* allocation_cap,
-                                              process_id_t cap_target, process_id_t space_owner, struct address_space* space,
-                                              vmm_id_t region_id, enum vmm_kind allocation_kind);
+static syscall_result_t mapping_unmap_handler(struct mapping_state* state);
+static cap_id_t         kernel_mapping_create(void*              backing_context, void (*backing_release)(void* context),
+                                              struct capability* parent_cap, process_id_t cap_target, process_id_t space_owner,
+                                              struct address_space* space, vmm_id_t region_id, enum vmm_kind kind,
+                                              cap_rights_t rights);
 
 static syscall_result_t copy_request(const void* request, size_t request_size, void* out, size_t expected_size) {
 	if (request == NULL || out == NULL || request_size < expected_size) {
@@ -104,7 +108,9 @@ static bool allocation_mapping_acquire(struct allocation_state* state) {
 	return acquired;
 }
 
-static void kernel_allocation_mapping_release(struct allocation_state* state) {
+static void kernel_allocation_mapping_release(void* context) {
+	struct allocation_state* state = context;
+
 	if (state == NULL) return;
 	spinlock_lock(&state->lock);
 	if (state->mapping_count > 0u) state->mapping_count--;
@@ -139,7 +145,15 @@ static syscall_result_t allocation_map_into(struct allocation_state* state, stru
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 
-	mapping_cap = kernel_mapping_create(state, allocation_cap, cap_target, space_owner, space, new_id, state->kind);
+	mapping_cap = kernel_mapping_create(state,
+	                                    kernel_allocation_mapping_release,
+	                                    allocation_cap,
+	                                    cap_target,
+	                                    space_owner,
+	                                    space,
+	                                    new_id,
+	                                    state->kind,
+	                                    CAP_READ | CAP_MAP | CAP_DESTROY);
 	if (mapping_cap == CAP_ID_INVALID) {
 		(void)vmm_free(space, new_id);
 		kernel_allocation_mapping_release(state);
@@ -230,6 +244,46 @@ cap_id_t kernel_allocate_memory(cap_rights_t rights, size_t page_count, vmm_prot
 		return CAP_ID_INVALID;
 	}
 	return cap->cap_id;
+}
+
+cap_id_t kernel_mapping_grant(struct process* target, process_id_t recipient, vmm_id_t region_id, enum vmm_kind kind,
+                              cap_rights_t rights) {
+	process_id_t          owner;
+	struct address_space* space;
+	struct vmm_info       info;
+
+	if (target == NULL || recipient == PROCESS_PID_INVALID) return CAP_ID_INVALID;
+	owner = process_pid(target);
+	space = process_address_space(target);
+	if (owner == PROCESS_PID_INVALID || process_lookup(owner) != target || space == NULL) return CAP_ID_INVALID;
+	if (!vmm_query_id(space, region_id, &info)) return CAP_ID_INVALID;
+	return kernel_mapping_create(NULL, NULL, NULL, recipient, owner, space, region_id, kind, rights);
+}
+
+bool kernel_mapping_discard_unpublished(cap_id_t mapping_cap, process_id_t owner) {
+	struct capability*    cap;
+	struct cap_object*    object;
+	struct mapping_state* state;
+	cap_object_id_t       object_id;
+	syscall_result_t      result;
+
+	if (mapping_cap == CAP_ID_INVALID || owner == PROCESS_PID_INVALID) return false;
+	cap = cap_lookup(mapping_cap);
+	if (cap == NULL || cap_is_authorized(owner, cap) != CAP_OK) return false;
+	object_id = cap->cap_object_id;
+	object    = cap_object_acquire(object_id);
+	if (object == NULL || object->handler != mapping_handler) {
+		cap_object_release(object);
+		return false;
+	}
+	state  = (struct mapping_state*)(uintptr_t)object->object_id;
+	result = mapping_unmap_handler(state);
+	cap_object_release(object);
+	if (result.status != SYSCALL_STATUS_OK) return false;
+	if (!cap_destroy_by_id(mapping_cap)) return false;
+	if (!cap_object_destroy_with_id(object_id)) return false;
+	free(state);
+	return true;
 }
 
 static syscall_result_t allocation_free_handler(struct allocation_state* state) {
@@ -325,6 +379,9 @@ static syscall_result_t allocation_copy_handler(const struct cap_request* req, s
 		transfer_result =
 			address_space_copy_from(caller_space, request.to.src_address, (void*)allocation_address, size);
 	}
+	if (transfer_result == ADDRESS_TRANSFER_OK && !from_allocation && (state->prot & VMM_PROT_EXEC) != 0u) {
+		hal_paging_sync_executable_range((void*)allocation_address, size);
+	}
 	allocation_end_operation(state);
 	if (transfer_result == ADDRESS_TRANSFER_FAULT_FAILED) {
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
@@ -399,7 +456,7 @@ static syscall_result_t mapping_read_handler(const struct cap_request* req, stru
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 	response.info.id   = VMM_ID_INVALID;
-	response.info.kind = state->allocation_kind;
+	response.info.kind = state->kind;
 	spinlock_unlock(&state->lock);
 
 	return cap_kernel_write_response(req, &response, sizeof(response));
@@ -439,7 +496,7 @@ static syscall_result_t mapping_unmap_handler(struct mapping_state* state) {
 	}
 	state->active = false;
 	spinlock_unlock(&state->lock);
-	kernel_allocation_mapping_release(state->allocation);
+	if (state->backing_release != NULL) state->backing_release(state->backing_context);
 	return syscall_result_ok(0u);
 }
 
@@ -485,26 +542,28 @@ static syscall_result_t mapping_handler(const struct cap_request* req) {
 	}
 }
 
-static cap_id_t kernel_mapping_create(struct allocation_state* allocation, struct capability* allocation_cap,
-                                      process_id_t cap_target, process_id_t space_owner, struct address_space* space,
-                                      vmm_id_t region_id, enum vmm_kind allocation_kind) {
+static cap_id_t kernel_mapping_create(void*              backing_context, void (*backing_release)(void* context),
+                                      struct capability* parent_cap, process_id_t cap_target, process_id_t space_owner,
+                                      struct address_space* space, vmm_id_t region_id, enum vmm_kind kind,
+                                      cap_rights_t rights) {
 	struct mapping_state* state;
 	struct cap_object*    object;
 	struct capability*    cap;
 
-	if (allocation == NULL || allocation_cap == NULL || cap_target == PROCESS_PID_INVALID ||
-	    space_owner == PROCESS_PID_INVALID || space == NULL || region_id == VMM_ID_INVALID) {
+	if (cap_target == PROCESS_PID_INVALID || space_owner == PROCESS_PID_INVALID || space == NULL ||
+	    region_id == VMM_ID_INVALID || (rights & ~(CAP_READ | CAP_MAP | CAP_DESTROY)) != 0u) {
 		return CAP_ID_INVALID;
 	}
 
 	state = malloc(sizeof(*state));
 	if (state == NULL) return CAP_ID_INVALID;
 	spinlock_init(&state->lock);
-	state->allocation      = allocation;
+	state->backing_context = backing_context;
+	state->backing_release = backing_release;
 	state->space           = space;
 	state->space_owner     = space_owner;
 	state->region_id       = region_id;
-	state->allocation_kind = allocation_kind;
+	state->kind            = kind;
 	state->active          = true;
 
 	object = cap_object_create_kernel((uint64_t)(uintptr_t)state, mapping_handler);
@@ -513,7 +572,7 @@ static cap_id_t kernel_mapping_create(struct allocation_state* allocation, struc
 		return CAP_ID_INVALID;
 	}
 
-	cap = cap_create(object->cap_object_id, cap_target, CAP_CALL | CAP_READ | CAP_MAP | CAP_DESTROY, allocation_cap);
+	cap = cap_create(object->cap_object_id, cap_target, CAP_CALL | rights, parent_cap);
 	if (cap == NULL) {
 		(void)cap_object_destroy(object);
 		free(state);
