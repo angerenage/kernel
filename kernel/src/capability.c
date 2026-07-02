@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "capability/boot_module.h"
+#include "capability/loader.h"
 #include "capability/serial.h"
 
 cap_id_t cap_kernel_create(uint64_t object_id, cap_kernel_handler_t handler, process_id_t target, cap_rights_t rights) {
@@ -37,4 +38,5 @@ syscall_result_t cap_kernel_write_response(const struct cap_request* request, co
 
 void kernel_capability_init(void) {
 	kernel_capability_serial_init();
+	kernel_capability_loader_init();
 }

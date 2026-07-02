@@ -12,3 +12,9 @@ struct process_startup_info {
 	size_t    page_size;
 	cap_id_t  serial_cap;
 };
+
+/* Extended startup info for init that includes loader capability. */
+struct init_startup_info {
+	struct process_startup_info base;
+	cap_id_t                    loader_cap;
+};

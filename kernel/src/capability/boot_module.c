@@ -117,6 +117,43 @@ static syscall_result_t boot_module_handler(const struct cap_request* req) {
 	}
 }
 
+syscall_result_t kernel_capability_boot_module_get(cap_id_t module_cap, process_id_t caller,
+                                                   cap_rights_t                      required_rights,
+                                                   const struct kernel_boot_module** out_module) {
+	struct capability* cap;
+	struct cap_object* object;
+	enum cap_result    result;
+	module_id_t        id;
+
+	if (module_cap == CAP_ID_INVALID || caller == PROCESS_PID_INVALID || out_module == NULL) {
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
+	*out_module = NULL;
+
+	cap = cap_lookup(module_cap);
+	if (cap == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	result = cap_is_authorized(caller, cap);
+	if (result != CAP_OK) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
+	result = cap_is_valid(cap);
+	if (result != CAP_OK) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	if ((cap->rights & required_rights) != required_rights) {
+		return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
+	}
+
+	object = cap_object_acquire(cap->cap_object_id);
+	if (object == NULL || object->handler != boot_module_handler) {
+		cap_object_release(object);
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
+
+	id = (module_id_t)object->object_id;
+	if (id != MODULE_ID_INVALID) *out_module = kernel_boot_module_at((size_t)(id - 1u));
+	cap_object_release(object);
+
+	if (*out_module == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	return syscall_result_ok(0u);
+}
+
 cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t recipient) {
 	cap_object_id_t*   slot;
 	cap_object_id_t    object_id;
