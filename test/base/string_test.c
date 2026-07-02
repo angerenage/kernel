@@ -8,6 +8,33 @@ Test(base_string, strlen_counts_until_nul) {
 	cr_assert_eq(strlen("with space"), 10);
 }
 
+Test(base_string, strlcpy_copies_and_reports_source_length) {
+	char destination[8] = "stale";
+
+	size_t length = strlcpy(destination, "kernel", sizeof(destination));
+
+	cr_assert_eq(length, 6);
+	cr_assert_str_eq(destination, "kernel");
+}
+
+Test(base_string, strlcpy_truncates_and_terminates) {
+	char destination[5] = "xxxx";
+
+	size_t length = strlcpy(destination, "kernel", sizeof(destination));
+
+	cr_assert_eq(length, 6);
+	cr_assert_str_eq(destination, "kern");
+}
+
+Test(base_string, strlcpy_with_zero_capacity_only_reports_length) {
+	char destination[] = "unchanged";
+
+	size_t length = strlcpy(destination, "kernel", 0u);
+
+	cr_assert_eq(length, 6);
+	cr_assert_str_eq(destination, "unchanged");
+}
+
 Test(base_string, memset_fills_requested_range) {
 	uint8_t bytes[8] = {0, 1, 2, 3, 4, 5, 6, 7};
 

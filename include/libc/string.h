@@ -18,3 +18,4 @@ char* strdup(const char*);
 char* strndup(const char*, size_t);
 #endif
 size_t strlen(const char*);
+size_t strlcpy(char* restrict, const char* restrict, size_t);

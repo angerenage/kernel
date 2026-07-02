@@ -6,11 +6,11 @@
 
 #include "syscall.h"
 
-syscall_status_t module_resolve(const char* name, size_t name_length, process_id_t target, cap_id_t* out_module_cap) {
+syscall_status_t module_resolve(const char* name, size_t name_length, struct module_query_response* out_module) {
 	syscall_result_t result;
 
-	if (out_module_cap == NULL) {
-		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(out_module_cap);
+	if (out_module == NULL) {
+		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(out_module);
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	}
 	if (name == NULL) {
@@ -18,7 +18,8 @@ syscall_status_t module_resolve(const char* name, size_t name_length, process_id
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	}
 
-	result = syscall(SYSCALL_MODULE_RESOLVE, (uintptr_t)name, (uintptr_t)name_length, (uintptr_t)target, 0u, 0u, 0u);
+	result =
+		syscall(SYSCALL_MODULE_RESOLVE, (uintptr_t)name, (uintptr_t)name_length, (uintptr_t)out_module, 0u, 0u, 0u);
 
 #ifdef RUNTIME_DIAGNOSTICS
 	if (result.status == SYSCALL_STATUS_BAD_ARGUMENT) {
@@ -30,7 +31,7 @@ syscall_status_t module_resolve(const char* name, size_t name_length, process_id
 			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(name_length);
 			break;
 		case 2u:
-			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(target);
+			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(out_module);
 			break;
 		default:
 			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER_INDEX(SYSCALL_MODULE_RESOLVE, result.value);
@@ -43,31 +44,46 @@ syscall_status_t module_resolve(const char* name, size_t name_length, process_id
 #endif
 
 	if (result.status != SYSCALL_STATUS_OK) return result.status;
-	*out_module_cap = (cap_id_t)result.value;
 	return SYSCALL_STATUS_OK;
 }
 
-syscall_status_t module_map(cap_id_t module_cap, uintptr_t* out_mapped_base) {
-	struct {
-		uintptr_t base_out_ptr;
-	} request;
-
-	struct {
-		uintptr_t mapped_base;
-	} response;
-
-	syscall_result_t result;
+syscall_status_t module_get_info(cap_id_t module_cap, struct module_info_response* out_info) {
+	const struct module_info_request request = {.header = {.op = MODULE_OP_INFO}};
+	syscall_result_t                 result;
 
 	if (module_cap == CAP_ID_INVALID) {
 		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(module_cap);
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	}
-	request.base_out_ptr = (uintptr_t)out_mapped_base;
-	result               = cap_call_syscall(module_cap, &request, sizeof(request), &response, sizeof(response));
-	RUNTIME_DIAGNOSTIC_OPERATION_RESULT(module_map, result);
+	if (out_info == NULL) {
+		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(out_info);
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	}
+
+	result = cap_call_syscall(module_cap, &request, sizeof(request), out_info, sizeof(*out_info));
+	RUNTIME_DIAGNOSTIC_OPERATION_RESULT(MODULE_OP_INFO, result);
+	if (result.status != SYSCALL_STATUS_OK) return result.status;
+	if (result.value != sizeof(*out_info)) {
+		RUNTIME_DIAGNOSTIC_NAMED_VALUE("MODULE_OP_INFO returned invalid response size", "response_size", result.value);
+		return SYSCALL_STATUS_FAILED;
+	}
+	return SYSCALL_STATUS_OK;
+}
+
+syscall_status_t module_map(cap_id_t module_cap, uintptr_t* out_mapped_base) {
+	const struct module_map_request request = {.header = {.op = MODULE_OP_MAP}};
+	struct module_map_response      response;
+	syscall_result_t                result;
+
+	if (module_cap == CAP_ID_INVALID) {
+		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(module_cap);
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	}
+	result = cap_call_syscall(module_cap, &request, sizeof(request), &response, sizeof(response));
+	RUNTIME_DIAGNOSTIC_OPERATION_RESULT(MODULE_OP_MAP, result);
 	if (result.status != SYSCALL_STATUS_OK) return result.status;
 	if (result.value != sizeof(response)) {
-		RUNTIME_DIAGNOSTIC_NAMED_VALUE("module_map returned invalid response size", "response_size", result.value);
+		RUNTIME_DIAGNOSTIC_NAMED_VALUE("MODULE_OP_MAP returned invalid response size", "response_size", result.value);
 		return SYSCALL_STATUS_FAILED;
 	}
 	if (out_mapped_base != NULL) *out_mapped_base = response.mapped_base;
