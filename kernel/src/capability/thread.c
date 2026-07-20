@@ -119,8 +119,10 @@ static syscall_result_t thread_handler(const struct cap_request* req) {
 		required_rights = CAP_MANAGE;
 		break;
 	case THREAD_OP_CANCEL:
+		required_rights = CAP_DESTROY;
+		break;
 	case THREAD_OP_TEST_CANCEL:
-		required_rights = CAP_SIGNAL;
+		required_rights = CAP_READ;
 		break;
 	default:
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -172,5 +174,6 @@ cap_id_t kernel_thread_grant(struct uthread* target, process_id_t recipient, cap
 }
 
 cap_id_t kernel_thread_grant_full(struct uthread* target, process_id_t recipient) {
-	return kernel_thread_grant(target, recipient, CAP_CALL | CAP_WAIT | CAP_MANAGE | CAP_SIGNAL | CAP_DELEGATE);
+	return kernel_thread_grant(
+		target, recipient, CAP_CALL | CAP_WAIT | CAP_MANAGE | CAP_READ | CAP_DESTROY | CAP_DELEGATE);
 }
