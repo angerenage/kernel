@@ -13,6 +13,7 @@
 
 #define X86_EXCEPTION_STACK_SIZE 0x4000u
 #define X86_EXCEPTION_IST_INDEX 1u
+#define X86_IDT_NO_IST 0u
 #define X86_IDT_INTERRUPT_GATE 0x8eu
 #define X86_IDT_USER_INTERRUPT_GATE 0xeeu
 
@@ -175,6 +176,17 @@ static bool is_external_irq(unsigned long long vector) {
 	return vector >= X86_IRQ_BASE && vector < X86_IRQ_BASE + X86_IRQ_COUNT;
 }
 
+static uint8_t x86_ist_for_vector(unsigned vector) {
+	switch (vector) {
+	case 2u:  /* NMI */
+	case 8u:  /* Double fault */
+	case 18u: /* Machine check */
+		return X86_EXCEPTION_IST_INDEX;
+	default:
+		return X86_IDT_NO_IST;
+	}
+}
+
 bool irq_enabled(void) {
 	uint64_t flags;
 
@@ -225,9 +237,13 @@ static void x86_load_segments_and_tss(size_t cpu_index) {
 		: "rax", "memory");
 }
 
-static void x86_setup_exception_stack(size_t cpu_index) {
+static bool x86_setup_exception_stack(struct cpu* cpu) {
+	size_t   cpu_index;
 	uint64_t base;
 	uint64_t limit;
+
+	if (cpu == NULL || cpu->index >= 64u || cpu->kernel_entry_stack_top == 0u) return false;
+	cpu_index = cpu->index;
 
 	gdt[cpu_index][0] = 0u;
 	gdt[cpu_index][1] = 0x00af9a000000ffffull;
@@ -237,6 +253,7 @@ static void x86_setup_exception_stack(size_t cpu_index) {
 	gdt[cpu_index][5] = 0x00affa000000ffffull;
 
 	memset(&x86_tss[cpu_index], 0, sizeof(x86_tss[cpu_index]));
+	x86_tss[cpu_index].rsp0       = (uint64_t)cpu->kernel_entry_stack_top;
 	x86_tss[cpu_index].ist1       = (uint64_t)(uintptr_t)(x86_exception_stack[cpu_index] + X86_EXCEPTION_STACK_SIZE);
 	x86_tss[cpu_index].iomap_base = (uint16_t)sizeof(x86_tss[cpu_index]);
 
@@ -247,15 +264,16 @@ static void x86_setup_exception_stack(size_t cpu_index) {
 	gdt[cpu_index][7] = base >> 32;
 
 	x86_load_segments_and_tss(cpu_index);
+	return true;
 }
 
-static void idt_set_entry(unsigned vector, void (*handler)(void), uint8_t type_attributes) {
+static void idt_set_entry(unsigned vector, void (*handler)(void), uint8_t ist, uint8_t type_attributes) {
 	uint64_t address = (uint64_t)(uintptr_t)handler;
 
 	idt[vector] = (struct idt_entry){
 		.offset_low      = (uint16_t)(address & 0xffffu),
 		.selector        = kernel_code_selector,
-		.ist             = X86_EXCEPTION_IST_INDEX,
+		.ist             = ist,
 		.type_attributes = type_attributes,
 		.offset_mid      = (uint16_t)((address >> 16) & 0xffffu),
 		.offset_high     = (uint32_t)(address >> 32),
@@ -269,9 +287,12 @@ bool hal_interrupts_init_global(void) {
 	kernel_code_selector = X86_GDT_KERNEL_CODE_SELECTOR;
 
 	for (unsigned vector = 0; vector < 256; vector++) {
-		idt_set_entry(vector, x86_64_interrupt_stub_table[vector], X86_IDT_INTERRUPT_GATE);
+		idt_set_entry(vector, x86_64_interrupt_stub_table[vector], x86_ist_for_vector(vector), X86_IDT_INTERRUPT_GATE);
 	}
-	idt_set_entry(X86_SYSCALL_VECTOR, x86_64_interrupt_stub_table[X86_SYSCALL_VECTOR], X86_IDT_USER_INTERRUPT_GATE);
+	idt_set_entry(X86_SYSCALL_VECTOR,
+	              x86_64_interrupt_stub_table[X86_SYSCALL_VECTOR],
+	              X86_IDT_NO_IST,
+	              X86_IDT_USER_INTERRUPT_GATE);
 
 	struct idtr idtr = {
 		.limit = (uint16_t)(sizeof(idt) - 1u),
@@ -294,7 +315,7 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 	if (local_ready[cpu->index]) return true;
 
 	irq_disable_local();
-	x86_setup_exception_stack(cpu->index);
+	if (!x86_setup_exception_stack(cpu)) return false;
 	x86_64_syscall_init();
 	__asm__ volatile("lidt %0" : : "m"(idtr));
 	if (cpu->role == CPU_ROLE_BSP) {
@@ -304,6 +325,16 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 	local_ready[cpu->index] = true;
 	cpu_interrupts_set_ready(cpu, true);
 	return true;
+}
+
+void x86_64_prepare_user_return(void) {
+	struct cpu* cpu = cpu_current();
+
+	if (cpu == NULL || cpu->index >= 64u || cpu->kernel_entry_stack_top == 0u) {
+		hcf();
+	}
+	x86_tss[cpu->index].rsp0 = (uint64_t)cpu->kernel_entry_stack_top;
+	__asm__ volatile("" : : : "memory");
 }
 
 void x86_64_maybe_preempt_on_interrupt_exit(void) {

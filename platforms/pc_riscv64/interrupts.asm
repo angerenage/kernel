@@ -2,11 +2,12 @@
 .global exception_entry
 .extern handle_exception
 .extern riscv64_maybe_preempt_on_interrupt_exit
+.extern riscv64_prepare_user_return
 
 .equ RISCV64_EXCEPTION_FRAME_SIZE, 288
 .equ RISCV64_EXCEPTION_META_SIZE, 8
-.equ RISCV64_EXCEPTION_STATE_STACK_BOTTOM, 32
-.equ RISCV64_EXCEPTION_STATE_STACK_TOP, 40
+.equ RISCV64_EXCEPTION_STATE_KERNEL_STACK_TOP, 32
+.equ RISCV64_SSTATUS_SPP, 0x100
 
 .balign 4
 exception_entry:
@@ -18,20 +19,22 @@ exception_entry:
 	sd t1, 24(t0)
 	csrw sscratch, t0
 
-	ld t1, RISCV64_EXCEPTION_STATE_STACK_BOTTOM(t0)
-	bltu sp, t1, .Lriscv64_switch_stack
-	ld t1, RISCV64_EXCEPTION_STATE_STACK_TOP(t0)
-	bgeu sp, t1, .Lriscv64_switch_stack
+	/* S-mode traps stay on the interrupted kernel stack. */
+	csrr t1, sstatus
+	andi t1, t1, RISCV64_SSTATUS_SPP
+	bnez t1, .Lriscv64_same_stack
 
-	addi sp, sp, -RISCV64_EXCEPTION_META_SIZE
-	sd zero, 0(sp)
-	j .Lriscv64_frame
-
-.Lriscv64_switch_stack:
-	ld sp, RISCV64_EXCEPTION_STATE_STACK_TOP(t0)
+	/* U-mode traps enter on the current thread's dedicated kernel stack. */
+	ld sp, RISCV64_EXCEPTION_STATE_KERNEL_STACK_TOP(t0)
 	addi sp, sp, -RISCV64_EXCEPTION_META_SIZE
 	ld t1, 0(t0)
 	sd t1, 0(sp)
+	j .Lriscv64_frame
+
+.Lriscv64_same_stack:
+	ld sp, 0(t0)
+	addi sp, sp, -RISCV64_EXCEPTION_META_SIZE
+	sd zero, 0(sp)
 
 .Lriscv64_frame:
 	addi sp, sp, -RISCV64_EXCEPTION_FRAME_SIZE
@@ -85,6 +88,7 @@ exception_entry:
 	mv a0, sp
 	call handle_exception
 	call riscv64_maybe_preempt_on_interrupt_exit
+	call riscv64_prepare_user_return
 
 	ld ra, 0(sp)
 	ld gp, 16(sp)

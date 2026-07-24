@@ -19,13 +19,9 @@
 #define LOONGARCH64_CSR_SAVE1 0x31u
 #define LOONGARCH64_CSR_TLBRENTRY 0x88u
 #define LOONGARCH64_CSR_MERRENTRY 0x94u
-#define LOONGARCH64_EXCEPTION_STACK_SIZE 0x4000u
 
 static bool global_ready;
 static bool local_ready[64];
-_Alignas(16) uint8_t loongarch64_exception_stack[64][LOONGARCH64_EXCEPTION_STACK_SIZE];
-uintptr_t loongarch64_exception_stack_top;
-uintptr_t loongarch64_exception_stack_bottom;
 
 extern void exception_entry(void);
 extern void tlb_refill_entry(void);
@@ -58,6 +54,13 @@ static inline void csrwr(uint64_t value, unsigned csr) {
 	default:
 		break;
 	}
+}
+
+void loongarch64_prepare_user_return(void) {
+	struct cpu* cpu = cpu_current();
+
+	if (cpu == NULL || cpu->index >= 64u || cpu->kernel_entry_stack_top == 0u) hcf();
+	csrwr(cpu->kernel_entry_stack_top, LOONGARCH64_CSR_SAVE1);
 }
 
 bool irq_enabled(void) {
@@ -110,12 +113,10 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 	if (tlbr_entry == 0 || merr_entry == 0) {
 		return false;
 	}
-	loongarch64_exception_stack_bottom = (uintptr_t)loongarch64_exception_stack[cpu->index];
-	loongarch64_exception_stack_top    = loongarch64_exception_stack_bottom + LOONGARCH64_EXCEPTION_STACK_SIZE;
 
 	csrwr(0u, LOONGARCH64_CSR_ECFG);
 	csrwr(trap_entry, LOONGARCH64_CSR_EENTRY);
-	csrwr(loongarch64_exception_stack_top, LOONGARCH64_CSR_SAVE1);
+	csrwr(cpu->kernel_entry_stack_top, LOONGARCH64_CSR_SAVE1);
 	csrwr(tlbr_entry, LOONGARCH64_CSR_TLBRENTRY);
 	csrwr(merr_entry, LOONGARCH64_CSR_MERRENTRY);
 

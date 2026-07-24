@@ -3,6 +3,7 @@
 .section .text
 .extern x86_64_handle_interrupt
 .extern x86_64_maybe_preempt_on_interrupt_exit
+.extern x86_64_prepare_user_return
 
 .macro INTERRUPT_STUB vector has_error_code
 .global x86_64_interrupt_stub_\vector
@@ -35,6 +36,7 @@ x86_64_interrupt_common:
 	mov rdi, rsp
 	call x86_64_handle_interrupt
 	call x86_64_maybe_preempt_on_interrupt_exit
+	call x86_64_prepare_user_return
 
 	pop rax
 	pop rbx

@@ -11,26 +11,20 @@
 
 #include "interrupts_private.h"
 
-#define RISCV64_EXCEPTION_STACK_SIZE 0x4000u
-
 extern void exception_entry(void);
 
 static bool global_ready;
 static bool local_ready[64];
-_Alignas(16) uint8_t riscv64_exception_stack[64][RISCV64_EXCEPTION_STACK_SIZE];
 struct riscv64_exception_entry_state {
 	uintptr_t old_sp;
 	uintptr_t saved_t1;
 	uintptr_t saved_t2;
 	uintptr_t scratch;
-	uintptr_t stack_bottom;
-	uintptr_t stack_top;
+	uintptr_t kernel_stack_top;
 } riscv64_exception_entry_state[64];
 
-_Static_assert(offsetof(struct riscv64_exception_entry_state, stack_bottom) == 32u,
-               "riscv64 exception entry assembly stack_bottom offset mismatch");
-_Static_assert(offsetof(struct riscv64_exception_entry_state, stack_top) == 40u,
-               "riscv64 exception entry assembly stack_top offset mismatch");
+_Static_assert(offsetof(struct riscv64_exception_entry_state, kernel_stack_top) == 32u,
+               "riscv64 exception entry assembly kernel_stack_top offset mismatch");
 
 static inline uint64_t read_sie(void) {
 	uint64_t value;
@@ -78,8 +72,7 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 	entry_state = &riscv64_exception_entry_state[cpu->index];
 	sie         = read_sie();
 	sie &= ~(1ull << 5);
-	entry_state->stack_bottom = (uintptr_t)riscv64_exception_stack[cpu->index];
-	entry_state->stack_top    = entry_state->stack_bottom + RISCV64_EXCEPTION_STACK_SIZE;
+	entry_state->kernel_stack_top = cpu->kernel_entry_stack_top;
 
 	__asm__ volatile("csrw stvec, %0" : : "r"(entry) : "memory");
 	write_sscratch((uint64_t)(uintptr_t)entry_state);
@@ -89,6 +82,17 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 	local_ready[cpu->index] = true;
 	cpu_interrupts_set_ready(cpu, true);
 	return true;
+}
+
+void riscv64_prepare_user_return(void) {
+	struct cpu*                           cpu = cpu_current();
+	struct riscv64_exception_entry_state* entry_state;
+
+	if (cpu == NULL || cpu->index >= 64u || cpu->kernel_entry_stack_top == 0u) hcf();
+
+	entry_state                   = &riscv64_exception_entry_state[cpu->index];
+	entry_state->kernel_stack_top = cpu->kernel_entry_stack_top;
+	__asm__ volatile("" : : : "memory");
 }
 
 static const char* interrupt_name(uint64_t code) {

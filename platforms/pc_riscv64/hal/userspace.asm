@@ -1,7 +1,9 @@
 .section .text
 
 .global riscv64_userspace_enter
+.extern riscv64_prepare_user_return
 riscv64_userspace_enter:
+	call riscv64_prepare_user_return
 	csrw sepc, s0
 	li t0, 0x100
 	csrc sstatus, t0

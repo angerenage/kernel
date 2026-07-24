@@ -4,6 +4,7 @@
 .global x86_64_syscall_entry
 .type x86_64_syscall_entry, @function
 .extern syscall_dispatch
+.extern x86_64_prepare_user_return
 
 .equ CPU_KERNEL_ENTRY_STACK_TOP, 40
 .equ CPU_SYSCALL_USER_STACK, 48
@@ -35,6 +36,18 @@ x86_64_syscall_entry:
 	push r11
 	call syscall_dispatch
 	add rsp, 8
+
+	# syscall_result_t is returned in rax/rdx. Preserve it across the TSS update.
+	mov r14, rax
+	mov r15, rdx
+
+	# Nine saved words leave rsp misaligned for a second C call.
+	sub rsp, 8
+	call x86_64_prepare_user_return
+	add rsp, 8
+
+	mov rax, r14
+	mov rdx, r15
 
 	pop r15
 	pop r14

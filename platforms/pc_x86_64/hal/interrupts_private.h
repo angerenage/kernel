@@ -98,3 +98,6 @@ bool clock_handle_irq(unsigned vector);
 
 void x86_64_syscall_init(void);
 bool x86_64_handle_syscall(struct interrupt_frame* frame);
+
+/* Install the current thread's kernel entry stack in the local CPU TSS. */
+void x86_64_prepare_user_return(void);

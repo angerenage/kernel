@@ -4,7 +4,9 @@
 .global machine_error_entry
 .extern handle_exception
 .extern loongarch64_maybe_preempt_on_interrupt_exit
+.extern loongarch64_prepare_user_return
 .equ LOONGARCH64_EXCEPTION_FRAME_SIZE, 288
+.equ LOONGARCH64_CSR_PRMD, 0x1
 .equ LOONGARCH64_CSR_SAVE0, 0x30
 .equ LOONGARCH64_CSR_SAVE1, 0x31
 .equ LOONGARCH64_CSR_SAVE2, 0x32
@@ -39,15 +41,19 @@ exception_entry:
 	csrwr $t0, LOONGARCH64_CSR_SAVE2
 	csrwr $t1, LOONGARCH64_CSR_SAVE3
 
-	csrrd $t0, LOONGARCH64_CSR_SAVE1
-	li.w $t1, -0x4000
-	add.d $t1, $t0, $t1
-	bltu $sp, $t1, 0f
-	bgeu $sp, $t0, 0f
-	b 1f
-0:
-	addi.d $sp, $t0, 0
-1:
+	/* PPLV == 0 means the exception interrupted kernel code. */
+	csrrd $t0, LOONGARCH64_CSR_PRMD
+	andi $t0, $t0, 0x3
+	beqz $t0, .Lloongarch64_kernel_stack
+
+	/* User exceptions enter on the current thread's kernel stack. */
+	csrrd $sp, LOONGARCH64_CSR_SAVE1
+	b .Lloongarch64_frame
+
+.Lloongarch64_kernel_stack:
+	csrrd $sp, LOONGARCH64_CSR_SAVE0
+
+.Lloongarch64_frame:
 	addi.d $sp, $sp, -LOONGARCH64_EXCEPTION_FRAME_SIZE
 
 	st.d $r0, $sp, 0
@@ -97,6 +103,7 @@ exception_entry:
 	addi.d $a0, $sp, 0
 	bl handle_exception
 	bl loongarch64_maybe_preempt_on_interrupt_exit
+	bl loongarch64_prepare_user_return
 
 	ld.d $r1, $sp, 8
 	ld.d $r2, $sp, 16

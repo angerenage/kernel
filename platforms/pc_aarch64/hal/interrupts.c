@@ -11,13 +11,8 @@
 
 #include "interrupts_private.h"
 
-#define AARCH64_EXCEPTION_STACK_SIZE 0x4000u
-
 static bool global_ready;
 static bool local_ready[64];
-_Alignas(16) uint8_t aarch64_exception_stack[64][AARCH64_EXCEPTION_STACK_SIZE];
-uintptr_t   aarch64_exception_stack_top[64];
-uintptr_t   aarch64_exception_stack_bottom[64];
 extern char exception_vectors[];
 
 bool irq_enabled(void) {
@@ -48,9 +43,6 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 
 	vectors = (uintptr_t)exception_vectors;
 	irq_disable_local();
-	aarch64_exception_stack_bottom[cpu->index] = (uintptr_t)aarch64_exception_stack[cpu->index];
-	aarch64_exception_stack_top[cpu->index] = aarch64_exception_stack_bottom[cpu->index] + AARCH64_EXCEPTION_STACK_SIZE;
-
 	__asm__ volatile("msr vbar_el1, %0\n\t"
 	                 "isb"
 	                 :
