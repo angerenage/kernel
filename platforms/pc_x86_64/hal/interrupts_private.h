@@ -83,6 +83,18 @@ struct interrupt_frame {
 	uint64_t rflags;
 };
 
+struct user_interrupt_frame {
+	struct interrupt_frame frame;
+	uint64_t               rsp;
+	uint64_t               ss;
+};
+
+enum x86_user_return_kind {
+	X86_USER_RETURN_SYSRET = 0,
+	X86_USER_RETURN_IRET,
+	X86_USER_RETURN_INVALID,
+};
+
 void pic_init(void);
 void pic_mask_irq(unsigned irq);
 void pic_unmask_irq(unsigned irq);
@@ -99,8 +111,13 @@ void apic_send_eoi(void);
 bool apic_send_ipi(uint32_t lapic_id, unsigned vector);
 bool clock_handle_irq(unsigned vector);
 
-void x86_64_syscall_init(void);
-bool x86_64_handle_syscall(struct interrupt_frame* frame);
+void                      x86_64_syscall_init(void);
+bool                      x86_64_handle_syscall(struct interrupt_frame* frame);
+enum x86_user_return_kind x86_64_classify_user_return(const struct user_interrupt_frame* frame);
+
+/* Terminate the current userspace process after an invalid return frame is detected. */
+__attribute__((noreturn))
+void x86_64_reject_user_return(void);
 
 /* Install the current thread's kernel entry stack in the local CPU TSS. */
 void x86_64_prepare_user_return(void);

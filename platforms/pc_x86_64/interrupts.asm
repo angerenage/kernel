@@ -38,6 +38,8 @@ x86_64_interrupt_common:
 	call x86_64_maybe_preempt_on_interrupt_exit
 	call x86_64_prepare_user_return
 
+.global x86_64_interrupt_restore
+x86_64_interrupt_restore:
 	pop rax
 	pop rbx
 	pop rcx

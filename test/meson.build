@@ -243,6 +243,20 @@ test_suites = [
 	},
 ]
 
+if build_machine.cpu_family() == 'x86_64'
+	test_suites += [
+		{
+			'name': 'x86_64_syscall',
+			'sources': files(
+				'platform/x86_64/syscall_test.c',
+				'../platforms/pc_x86_64/hal/syscall.c',
+			),
+			'link_with': base_test_lib,
+			'suites': ['unit', 'platform'],
+		},
+	]
+endif
+
 foreach t : test_suites
 	exe = executable(
 		t['name'] + '_test',
