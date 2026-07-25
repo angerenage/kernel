@@ -330,6 +330,7 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 void x86_64_prepare_user_return(void) {
 	struct cpu* cpu = cpu_current();
 
+	sched_finish_context_switch();
 	if (cpu == NULL || cpu->index >= 64u || cpu->kernel_entry_stack_top == 0u) {
 		hcf();
 	}

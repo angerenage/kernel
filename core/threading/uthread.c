@@ -185,48 +185,19 @@ static bool uthread_cpu_online(const struct cpu* cpu) {
 	return cpu != NULL && cpu_state_get(cpu) == CPU_STATE_ONLINE;
 }
 
-static struct cpu* uthread_default_cpu(void) {
-	struct cpu* cpu = cpu_current();
-
-	if (uthread_cpu_online(cpu)) return cpu;
-
-	cpu = cpu_bsp();
-	if (uthread_cpu_online(cpu)) return cpu;
-
-	for (size_t i = 0; i < cpu_count(); i++) {
-		cpu = cpu_by_index(i);
-		if (uthread_cpu_online(cpu)) return cpu;
-	}
-
-	return NULL;
-}
-
 static void uthread_reap_callback(struct thread* thread, void* ctx) {
-	struct uthread_reaper* reaper;
-	struct uthread*        target = (struct uthread*)ctx;
-	struct irq_state       state;
+	struct uthread* target = (struct uthread*)ctx;
 
-	(void)thread;
-	if (target == NULL) return;
+	if (target == NULL || thread != &target->thread) return;
 
-	reaper = uthread_reaper_for_cpu(cpu_current());
-	if (reaper == NULL || !reaper->started) return;
-
-	state               = spinlock_lock_irqsave(&reaper->wait_queue.lock);
-	target->reaper_next = NULL;
-	if (reaper->tail == NULL) {
-		reaper->head = target;
-	}
-	else {
-		reaper->tail->reaper_next = target;
-	}
-	reaper->tail = target;
-	spinlock_unlock_irqrestore(&reaper->wait_queue.lock, state);
-
-	(void)sched_wake_one(&reaper->wait_queue);
+	thread_mark_zombie(thread);
+	process_notify_thread_exit(target->process, thread, thread->exit_code);
+	(void)sched_wake_all(&thread->join_wait_queue);
+	if (!thread_is_joinable(thread)) uthread_free(target);
 }
 
-static bool uthread_reaper_start_cpu(struct cpu* cpu) {
+static bool __attribute__((unused))
+uthread_reaper_start_cpu(struct cpu* cpu) {
 	struct uthread_reaper*    reaper;
 	struct irq_state          state;
 	struct kthread*           reaper_thread = NULL;
@@ -267,35 +238,15 @@ static bool uthread_reaper_start_cpu(struct cpu* cpu) {
 	return true;
 }
 
-static struct cpu* uthread_reaper_target_cpu(const struct uthread_start_params* params) {
-	struct cpu* cpu;
-
-	if (params == NULL) return NULL;
-	if (uthread_cpu_online(params->preferred_cpu)) return params->preferred_cpu;
-
-	cpu = uthread_default_cpu();
-	return cpu;
-}
-
 static enum uthread_start_result uthread_start_prepared(struct uthread*                    thread,
                                                         const struct uthread_start_params* params, bool heap_allocated,
                                                         bool reap_on_exit);
 
 static enum uthread_start_result
 uthread_start_internal(struct uthread* thread, const struct uthread_start_params* params, bool heap_allocated) {
-	struct uthread_start_params effective_params;
-	struct cpu*                 reaper_cpu = NULL;
-
 	if (thread == NULL || params == NULL) return UTHREAD_START_INVALID_ARGUMENTS;
 
-	effective_params = *params;
-	if (effective_params.detached) {
-		reaper_cpu = uthread_reaper_target_cpu(&effective_params);
-		if (!uthread_reaper_start_cpu(reaper_cpu)) return UTHREAD_START_REAPER_UNAVAILABLE;
-		effective_params.preferred_cpu = reaper_cpu;
-	}
-
-	return uthread_start_prepared(thread, &effective_params, heap_allocated, effective_params.detached);
+	return uthread_start_prepared(thread, params, heap_allocated, true);
 }
 
 static enum uthread_start_result uthread_start_prepared(struct uthread*                    thread,
@@ -499,14 +450,8 @@ size_t uthread_count(void) {
 }
 
 bool uthread_detach(struct uthread* thread) {
-	struct cpu* target_cpu;
-
 	if (thread == NULL) return false;
-	target_cpu = uthread_cpu_online(thread->thread.preferred_cpu) ? thread->thread.preferred_cpu : thread->thread.cpu;
-	if (!uthread_cpu_online(target_cpu)) target_cpu = uthread_default_cpu();
-	if (!uthread_reaper_start_cpu(target_cpu)) return false;
-
-	thread->thread.preferred_cpu = target_cpu;
+	if (thread_is_terminated(&thread->thread)) return false;
 	if (!thread_detach(&thread->thread)) return false;
 
 	thread_set_reap_callback(&thread->thread, uthread_reap_callback, thread);
@@ -517,7 +462,7 @@ bool uthread_deinit(struct uthread* thread) {
 	bool heap_allocated;
 
 	if (thread == NULL) return false;
-	if (!thread_is_terminated(&thread->thread) && thread->thread.state != THREAD_STATE_NEW) return false;
+	if (!thread_is_reap_safe(&thread->thread) && thread->thread.state != THREAD_STATE_NEW) return false;
 	if (!thread_is_joinable(&thread->thread)) return false;
 
 	heap_allocated = thread->heap_allocated;
@@ -575,7 +520,13 @@ static void uthread_reaper_entry(void* arg) {
 		struct uthread* target = uthread_reaper_dequeue(reaper);
 
 		if (target != NULL) {
-			uthread_free(target);
+			thread_mark_zombie(&target->thread);
+			process_notify_thread_exit(target->process, &target->thread, target->thread.exit_code);
+			(void)sched_wake_all(&target->thread.join_wait_queue);
+
+			if (!thread_is_joinable(&target->thread)) {
+				uthread_free(target);
+			}
 			continue;
 		}
 

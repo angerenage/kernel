@@ -10,6 +10,8 @@ struct exception_frame {
 	uint64_t far;
 	uint64_t elr;
 	uint64_t spsr;
+	uint64_t sp_el0;
+	uint64_t reserved;
 };
 
 bool clock_handle_irq(const struct exception_frame* frame);

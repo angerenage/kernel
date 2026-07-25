@@ -49,7 +49,7 @@ static bool process_all_threads_terminated_locked(const struct process* process)
 
 	cursor = process->thread_head;
 	while (cursor != NULL) {
-		if (!thread_is_terminated(&cursor->thread)) return false;
+		if (!thread_is_reap_safe(&cursor->thread)) return false;
 		cursor = cursor->process_next;
 	}
 	return true;
@@ -179,10 +179,10 @@ enum process_thread_join_result process_join_thread(struct process* process, str
 	if (!process_has_thread(process, thread)) return PROCESS_THREAD_JOIN_FOREIGN_THREAD;
 	if (!thread_is_joinable(&thread->thread)) return PROCESS_THREAD_JOIN_DETACHED;
 
-	if (!thread_is_terminated(&thread->thread)) {
+	if (!thread_is_reap_safe(&thread->thread)) {
 		struct irq_state wait_state = spinlock_lock_irqsave(&thread->thread.join_wait_queue.lock);
 
-		if (!thread_is_terminated(&thread->thread)) {
+		if (!thread_is_reap_safe(&thread->thread)) {
 			if (!sched_block_current_locked(&thread->thread.join_wait_queue, THREAD_BLOCK_JOIN, wait_state)) {
 				return PROCESS_THREAD_JOIN_WAIT_FAILED;
 			}
@@ -193,7 +193,7 @@ enum process_thread_join_result process_join_thread(struct process* process, str
 	}
 
 	if (!process_has_thread(process, thread)) return PROCESS_THREAD_JOIN_FOREIGN_THREAD;
-	if (!thread_is_terminated(&thread->thread)) return PROCESS_THREAD_JOIN_WAIT_FAILED;
+	if (!thread_is_reap_safe(&thread->thread)) return PROCESS_THREAD_JOIN_WAIT_FAILED;
 
 	exit_code = thread->thread.exit_code;
 	if (!uthread_deinit(thread)) return PROCESS_THREAD_JOIN_RECLAIM_FAILED;
@@ -384,7 +384,7 @@ bool process_destroy(struct process* process) {
 	state  = spinlock_lock_irqsave(&process->lock);
 	cursor = process->thread_head;
 	while (cursor != NULL) {
-		if ((!thread_is_terminated(&cursor->thread) && cursor->thread.state != THREAD_STATE_NEW) ||
+		if ((!thread_is_reap_safe(&cursor->thread) && cursor->thread.state != THREAD_STATE_NEW) ||
 		    !thread_is_joinable(&cursor->thread)) {
 			spinlock_unlock_irqrestore(&process->lock, state);
 			return false;

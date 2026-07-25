@@ -44,7 +44,7 @@ enum kthread_spawn_result kthread_spawn_detached(const char* name, thread_entry_
 enum kthread_spawn_result kthread_spawn_detached_on_cpu(const char* name, thread_entry_t entry, void* arg,
                                                         struct cpu* preferred_cpu);
 
-/* Start the detached-thread reaper. Usually called lazily by detached spawn/detach. */
+/* Compatibility hook; finalization is completed by the scheduler after context switches. */
 bool kthread_reaper_start(struct cpu* preferred_cpu);
 
 /* Block until target exits (or is already exited), then publish its exit code. */

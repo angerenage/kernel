@@ -191,9 +191,10 @@ static void kernel_selftest_kthread_detach_prevents_join_but_thread_still_runs(s
 	struct kernel_selftest_kthread_detach_state state = {0};
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
-	                                kthread_spawn_detached("selftest/kthread-detach",
-	                                                       kernel_selftest_kthread_detach_worker,
-	                                                       &state) == KTHREAD_SPAWN_OK,
+	                                kthread_spawn_detached_on_cpu("selftest/kthread-detach",
+	                                                              kernel_selftest_kthread_detach_worker,
+	                                                              &state,
+	                                                              cpu_current()) == KTHREAD_SPAWN_OK,
 	                                "failed to create detached thread",
 	                                cleanup);
 

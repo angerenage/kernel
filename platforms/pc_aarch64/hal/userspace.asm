@@ -1,7 +1,9 @@
 .section .text
 
 .global aarch64_userspace_enter
+.extern sched_complete_context_switch
 aarch64_userspace_enter:
+	bl sched_complete_context_switch
 	msr elr_el1, x19
 	msr sp_el0, x21
 	msr spsr_el1, x22

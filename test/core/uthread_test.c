@@ -96,7 +96,7 @@ static void terminate_main_thread(struct process* process) {
 	if (process != NULL && process->main_thread != NULL) thread_mark_zombie(&process->main_thread->thread);
 }
 
-Test(uthread, detached_start_registers_reaper_before_queueing) {
+Test(uthread, detached_start_registers_finalizer_before_queueing) {
 	struct process* process = NULL;
 	struct uthread  worker  = {
 		  .user_stack_id   = VMM_ID_INVALID,
@@ -130,10 +130,10 @@ Test(uthread, detached_start_registers_reaper_before_queueing) {
 		process_get_state(process), PROCESS_STATE_RUNNING, "process should become running after thread attach");
 	cr_assert(!process_destroy(process), "process_destroy must reject a process with live threads");
 	cr_assert(!thread_is_joinable(&worker.thread), "detached user thread must not be joinable");
-	cr_assert_not_null(worker.thread.reap_callback, "detached user thread must have a reaper callback");
-	cr_assert_eq(worker.thread.reap_context, &worker, "reaper callback should receive the uthread wrapper");
+	cr_assert_not_null(worker.thread.reap_callback, "detached user thread must have a finalizer callback");
+	cr_assert_eq(worker.thread.reap_context, &worker, "finalizer callback should receive the uthread wrapper");
 	cr_assert_eq(worker.heap_allocated, false, "caller-owned uthread_start must not mark storage heap-owned");
-	cr_assert_eq(sched_run_queue_depth(cpu_current()), 3u, "main thread, user thread, and reaper should be runnable");
+	cr_assert_eq(sched_run_queue_depth(cpu_current()), 2u, "only the process threads should be runnable");
 }
 
 Test(uthread, current_returns_running_user_thread) {

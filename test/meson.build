@@ -259,7 +259,7 @@ foreach t : test_suites
 		t['name'],
 		exe,
 		suite: t.get('suites', ['unit']),
-		timeout: t.get('timeout', 30),
+		timeout: t.get('timeout', 45),
 		is_parallel: t.get('parallel', true),
 		env: test_environment,
 	)

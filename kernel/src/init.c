@@ -162,10 +162,17 @@ static void kernel_run_selftests(void) {
 		boot_fail("kernel: selftest runner spawn failed");
 	}
 
-	sched_yield();
+	/*
+	 * kernel_main still runs through the bootstrap CPU's idle scheduler
+	 * context, which cannot block on a join queue. Yield cooperatively until
+	 * the runner has completed the deferred EXITING -> ZOMBIE transition.
+	 */
+	while (!thread_is_reap_safe(&worker->thread)) {
+		sched_yield();
+	}
 
-	if (!thread_is_terminated(&worker->thread)) {
-		boot_fail("kernel: selftest runner returned without exiting");
+	if (worker->thread.exit_code != 0u) {
+		boot_fail("kernel: selftest runner exited with failure");
 	}
 	if (!kthread_destroy(worker)) {
 		boot_fail("kernel: selftest runner reclaim failed");

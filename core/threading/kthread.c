@@ -47,7 +47,7 @@ static bool kthread_join_target(struct kthread* target, struct thread** out_thre
 }
 
 static bool kthread_join_publish_exit_code(struct thread* thread, thread_exit_code_t* out_exit_code) {
-	if (!thread_is_terminated(thread)) return false;
+	if (!thread_is_reap_safe(thread)) return false;
 
 	if (out_exit_code != NULL) *out_exit_code = thread->exit_code;
 	return true;
@@ -123,28 +123,13 @@ static struct cpu* kthread_default_cpu(void) {
 }
 
 static void kthread_reap_callback(struct thread* thread, void* ctx) {
-	struct kthread_reaper* reaper;
-	struct kthread*        target = (struct kthread*)ctx;
-	struct irq_state       state;
+	struct kthread* target = (struct kthread*)ctx;
 
-	(void)thread;
-	if (target == NULL) return;
+	if (target == NULL || thread != &target->thread) return;
 
-	reaper = kthread_reaper_for_cpu(cpu_current());
-	if (reaper == NULL || !reaper->started) return;
-
-	state               = spinlock_lock_irqsave(&reaper->wait_queue.lock);
-	target->reaper_next = NULL;
-	if (reaper->tail == NULL) {
-		reaper->head = target;
-	}
-	else {
-		reaper->tail->reaper_next = target;
-	}
-	reaper->tail = target;
-	spinlock_unlock_irqrestore(&reaper->wait_queue.lock, state);
-
-	(void)sched_wake_one(&reaper->wait_queue);
+	thread_mark_zombie(thread);
+	(void)sched_wake_all(&thread->join_wait_queue);
+	if (!thread_is_joinable(thread)) kthread_free(target);
 }
 
 static bool kthread_reaper_start_cpu(struct cpu* cpu) {
@@ -264,7 +249,7 @@ enum kthread_spawn_result kthread_spawn(struct kthread** out_thread, const char*
 
 enum kthread_spawn_result kthread_spawn_on_cpu(struct kthread** out_thread, const char* name, thread_entry_t entry,
                                                void* arg, struct cpu* preferred_cpu) {
-	return kthread_spawn_internal(out_thread, name, entry, arg, preferred_cpu, false, false);
+	return kthread_spawn_internal(out_thread, name, entry, arg, preferred_cpu, false, true);
 }
 
 enum kthread_spawn_result kthread_spawn_detached(const char* name, thread_entry_t entry, void* arg) {
@@ -273,11 +258,7 @@ enum kthread_spawn_result kthread_spawn_detached(const char* name, thread_entry_
 
 enum kthread_spawn_result kthread_spawn_detached_on_cpu(const char* name, thread_entry_t entry, void* arg,
                                                         struct cpu* preferred_cpu) {
-	struct cpu* target_cpu = preferred_cpu != NULL ? preferred_cpu : kthread_default_cpu();
-
-	if (!kthread_reaper_start_cpu(target_cpu)) return KTHREAD_SPAWN_REAPER_UNAVAILABLE;
-
-	return kthread_spawn_internal(NULL, name, entry, arg, target_cpu, true, true);
+	return kthread_spawn_internal(NULL, name, entry, arg, preferred_cpu, true, true);
 }
 
 static struct kthread* kthread_reaper_dequeue(struct kthread_reaper* reaper) {
@@ -305,7 +286,12 @@ static void kthread_reaper_entry(void* arg) {
 		struct kthread* target = kthread_reaper_dequeue(reaper);
 
 		if (target != NULL) {
-			kthread_free(target);
+			thread_mark_zombie(&target->thread);
+			(void)sched_wake_all(&target->thread.join_wait_queue);
+
+			if (!thread_is_joinable(&target->thread)) {
+				kthread_free(target);
+			}
 			continue;
 		}
 
@@ -400,10 +386,10 @@ bool kthread_join(struct kthread* target, thread_exit_code_t* out_exit_code) {
 	kthread_testcancel();
 	if (!kthread_join_target(target, &thread)) return false;
 
-	if (!thread_is_terminated(thread)) {
+	if (!thread_is_reap_safe(thread)) {
 		struct irq_state wait_state = spinlock_lock_irqsave(&thread->join_wait_queue.lock);
 
-		if (!thread_is_terminated(thread)) {
+		if (!thread_is_reap_safe(thread)) {
 			if (!sched_block_current_locked(&thread->join_wait_queue, THREAD_BLOCK_JOIN, wait_state)) {
 				kthread_testcancel();
 				return false;
@@ -430,10 +416,10 @@ bool kthread_timed_join(struct kthread* target, uint64_t timeout_ms, thread_exit
 		return false;
 	}
 
-	if (!thread_is_terminated(thread)) {
+	if (!thread_is_reap_safe(thread)) {
 		struct irq_state wait_state = spinlock_lock_irqsave(&thread->join_wait_queue.lock);
 
-		if (!thread_is_terminated(thread)) {
+		if (!thread_is_reap_safe(thread)) {
 			if (!sched_block_current_until_locked(
 					&thread->join_wait_queue, THREAD_BLOCK_JOIN, deadline_tick, wait_state)) {
 				kthread_testcancel();
@@ -451,7 +437,7 @@ bool kthread_timed_join(struct kthread* target, uint64_t timeout_ms, thread_exit
 
 bool kthread_destroy(struct kthread* target) {
 	if (target == NULL) return false;
-	if (!thread_is_terminated(&target->thread) && target->thread.state != THREAD_STATE_NEW) return false;
+	if (!thread_is_reap_safe(&target->thread) && target->thread.state != THREAD_STATE_NEW) return false;
 	if (!thread_is_joinable(&target->thread)) return false;
 
 	kthread_free(target);
@@ -459,14 +445,8 @@ bool kthread_destroy(struct kthread* target) {
 }
 
 bool kthread_detach(struct kthread* target) {
-	struct cpu* target_cpu;
-
 	if (target == NULL) return false;
-	target_cpu = kthread_cpu_online(target->thread.preferred_cpu) ? target->thread.preferred_cpu : target->thread.cpu;
-	if (!kthread_cpu_online(target_cpu)) target_cpu = kthread_default_cpu();
-	if (!kthread_reaper_start_cpu(target_cpu)) return false;
-
-	target->thread.preferred_cpu = target_cpu;
+	if (thread_is_terminated(&target->thread)) return false;
 	if (!thread_detach(&target->thread)) return false;
 
 	thread_set_reap_callback(&target->thread, kthread_reap_callback, target);

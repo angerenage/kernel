@@ -415,6 +415,7 @@ static void sched_dispatch_next(struct cpu* cpu) {
 
 	if (cpu == NULL) return;
 
+	sched_finish_context_switch();
 	state    = sched_state_for_cpu(cpu);
 	previous = cpu->current_thread;
 	next     = sched_select_next(cpu);
@@ -426,10 +427,16 @@ static void sched_dispatch_next(struct cpu* cpu) {
 		return;
 	}
 
+	if (previous != NULL && previous->state == THREAD_STATE_EXITING) {
+		__atomic_store_n(&cpu->context_switch_in_progress, true, __ATOMIC_RELEASE);
+		__atomic_store_n(&cpu->deferred_reap_thread, previous, __ATOMIC_RELEASE);
+	}
+
 	sched_set_current(cpu, next);
 	if (previous != NULL) {
 		sched_stat_increment(state == NULL ? NULL : &state->stats.context_switch_count);
 		hal_cpu_context_switch(&previous->context, &next->context);
+		sched_complete_context_switch();
 	}
 }
 
@@ -613,6 +620,7 @@ bool sched_handle_interrupt_exit(void) {
 	struct cpu*             cpu = cpu_current();
 	struct thread*          current;
 
+	if (cpu == NULL || __atomic_load_n(&cpu->context_switch_in_progress, __ATOMIC_ACQUIRE)) return false;
 	if (!sched_reschedule_pending(cpu)) return false;
 
 	state   = sched_state_for_cpu(cpu);
@@ -629,6 +637,35 @@ bool sched_handle_interrupt_exit(void) {
 	sched_stat_increment(state == NULL ? NULL : &state->stats.timeslice_preempt_count);
 	sched_dispatch_next(cpu);
 	return true;
+}
+
+void sched_finish_context_switch(void) {
+	struct cpu*    cpu = cpu_current();
+	struct thread* thread;
+	bool           joinable;
+
+	if (cpu == NULL || __atomic_load_n(&cpu->context_switch_in_progress, __ATOMIC_ACQUIRE)) return;
+
+	thread = __atomic_exchange_n(&cpu->deferred_reap_thread, NULL, __ATOMIC_ACQ_REL);
+	if (thread == NULL) return;
+	if (thread == cpu->current_thread) {
+		__atomic_store_n(&cpu->deferred_reap_thread, thread, __ATOMIC_RELEASE);
+		return;
+	}
+	if (thread->state != THREAD_STATE_EXITING) return;
+
+	joinable = thread_is_joinable(thread);
+	thread_mark_zombie(thread);
+	if (thread->reap_callback != NULL) thread_notify_reap(thread);
+	if (joinable) (void)sched_wake_all(&thread->join_wait_queue);
+}
+
+void sched_complete_context_switch(void) {
+	struct cpu* cpu = cpu_current();
+
+	if (cpu == NULL) return;
+	__atomic_store_n(&cpu->context_switch_in_progress, false, __ATOMIC_RELEASE);
+	sched_finish_context_switch();
 }
 
 uint64_t sched_tick_count(void) {
@@ -909,9 +946,8 @@ void sched_cancel_thread(struct thread* thread) {
 }
 
 void sched_exit_current(thread_exit_code_t exit_code) {
-	struct cpu*     cpu     = cpu_current();
-	struct thread*  current = sched_current_thread();
-	struct uthread* current_uthread;
+	struct cpu*    cpu     = cpu_current();
+	struct thread* current = sched_current_thread();
 
 	if (cpu == NULL || current == NULL || thread_is_idle(current)) {
 		for (;;) {
@@ -921,13 +957,6 @@ void sched_exit_current(thread_exit_code_t exit_code) {
 
 	sched_set_cpu_activity(cpu, SCHED_CPU_ACTIVITY_KERNEL);
 	thread_mark_exiting(current, exit_code);
-	(void)sched_wake_all(&current->join_wait_queue);
-	thread_mark_zombie(current);
-	current_uthread = uthread_from_thread(current);
-	if (current_uthread != NULL) {
-		process_notify_thread_exit(current_uthread->process, current, exit_code);
-	}
-	thread_notify_reap(current);
 	sched_dispatch_next(cpu);
 
 	for (;;) {

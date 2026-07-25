@@ -2,7 +2,9 @@
 
 .global riscv64_userspace_enter
 .extern riscv64_prepare_user_return
+.extern sched_complete_context_switch
 riscv64_userspace_enter:
+	call sched_complete_context_switch
 	call riscv64_prepare_user_return
 	csrw sepc, s0
 	li t0, 0x100

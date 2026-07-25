@@ -64,6 +64,12 @@ bool sched_reschedule_pending(const struct cpu* cpu);
 /* Consume any pending preemption request for the current CPU on interrupt exit. */
 bool sched_handle_interrupt_exit(void);
 
+/* Finalize a switched-out EXITING thread when no context switch is in progress. */
+void sched_finish_context_switch(void);
+
+/* Mark a context switch complete, then finalize its switched-out thread. */
+void sched_complete_context_switch(void);
+
 /* Return the scheduler's monotonic tick counter. */
 uint64_t sched_tick_count(void);
 

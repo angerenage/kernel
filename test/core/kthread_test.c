@@ -243,6 +243,9 @@ Test(kthread, join_terminated_thread_returns_exit_code_and_detaches) {
 	cr_assert(thread_init(&target.thread, &params), "thread_init failed");
 
 	thread_mark_exiting(&target.thread, 123u);
+	cr_assert(!kthread_timed_join(&target, 0u, &exit_code),
+	          "EXITING thread must not be joinable before its stack is reap-safe");
+	cr_assert_eq(exit_code, 0u, "failed join must not publish an exit code");
 	thread_mark_zombie(&target.thread);
 	cr_assert(kthread_join(&target, &exit_code), "kthread_join should succeed for terminated joinable thread");
 	cr_assert_eq(exit_code, 123u, "kthread_join should publish target exit code");
@@ -376,7 +379,8 @@ Test(kthread, canceled_running_thread_exits_with_cancel_code_at_cancellation_poi
 		cr_assert_fail("kthread_yield should not return once cancellation exits the running thread");
 	}
 
-	cr_assert_eq(worker.thread.state, THREAD_STATE_ZOMBIE, "canceled worker should publish a zombie state");
+	sched_complete_context_switch();
+	cr_assert_eq(worker.thread.state, THREAD_STATE_ZOMBIE, "context-switch completion should publish ZOMBIE");
 	cr_assert_eq(worker.thread.exit_code,
 	             THREAD_EXIT_CODE_CANCELLED,
 	             "canceled worker should publish the dedicated cancellation exit code");

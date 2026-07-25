@@ -51,6 +51,8 @@ struct cpu {
 	uint32_t       exception_depth;
 	uintptr_t      boot_stack_base;
 	uintptr_t      boot_stack_top;
+	struct thread* deferred_reap_thread;
+	bool           context_switch_in_progress;
 #if CORE_LOCK_DEBUG
 	uint32_t lock_depth;
 	uint32_t lock_order_stack[CPU_DEBUG_LOCK_DEPTH];

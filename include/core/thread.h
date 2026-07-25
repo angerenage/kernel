@@ -106,7 +106,7 @@ struct thread_context_params {
 	void*                 arg;
 };
 
-/* Callback invoked after a thread reaches stable ZOMBIE state. */
+/* Owner callback invoked from a safe stack after the scheduler publishes ZOMBIE. */
 typedef void (*thread_reap_callback_t)(struct thread* thread, void* ctx);
 
 /* FIFO wait queue used by joins and other blocking synchronization points. */
@@ -190,6 +190,9 @@ bool thread_is_queued(const struct thread* thread);
 /* Return true once the thread has published a stable final exit status. */
 bool thread_is_terminated(const struct thread* thread);
 
+/* Return true once the thread no longer executes on, or may return to, its kernel stack. */
+bool thread_is_reap_safe(const struct thread* thread);
+
 /* Return true while another thread may still legally join this thread. */
 bool thread_is_joinable(const struct thread* thread);
 
@@ -211,10 +214,10 @@ bool thread_request_cancel(struct thread* thread);
 /* Mask or unmask deferred cancellation checks for a thread. */
 void thread_set_cancel_enabled(struct thread* thread, bool enabled);
 
-/* Register a callback used by higher-level owners to reclaim detached threads after exit. */
+/* Register owner-specific cleanup invoked after the thread has left its kernel stack. */
 void thread_set_reap_callback(struct thread* thread, thread_reap_callback_t callback, void* ctx);
 
-/* Invoke the registered reaper callback after a thread has become a zombie. */
+/* Invoke owner-specific cleanup from a stack that is safe for reclamation. */
 void thread_notify_reap(struct thread* thread);
 
 /* Mark a thread ready on cpu and clear any queue / wait linkage. */
@@ -226,10 +229,10 @@ void thread_mark_running(struct thread* thread, struct cpu* cpu);
 /* Mark a thread blocked for reason and remove any queue linkage. */
 void thread_mark_blocked(struct thread* thread, enum thread_block_reason reason);
 
-/* Publish a thread's exit status before the scheduler performs final wakeups. */
+/* Publish a thread's exit status before the scheduler switches away from its stack. */
 void thread_mark_exiting(struct thread* thread, thread_exit_code_t exit_code);
 
-/* Mark a thread as a zombie after it has woken joiners and left the CPU. */
+/* Mark a thread reap-safe after it has left the CPU and no longer uses its kernel stack. */
 void thread_mark_zombie(struct thread* thread);
 
 /* Initialize an empty FIFO wait queue. */

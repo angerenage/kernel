@@ -40,10 +40,13 @@ bool kernel_selftest_thread_create(struct kthread** out_thread, const char* name
 static __attribute__((unused))
 void kernel_selftest_thread_destroy(struct kthread** thread) {
 	if (thread == NULL || *thread == NULL) return;
-	if (!thread_is_terminated(&(*thread)->thread) && (*thread)->thread.state != THREAD_STATE_NEW) return;
 
-	(void)kthread_destroy(*thread);
-	*thread = NULL;
+	while ((*thread)->thread.state == THREAD_STATE_EXITING) {
+		sched_yield();
+	}
+
+	if (!thread_is_reap_safe(&(*thread)->thread) && (*thread)->thread.state != THREAD_STATE_NEW) return;
+	if (kthread_destroy(*thread)) *thread = NULL;
 }
 
 static __attribute__((unused))

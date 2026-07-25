@@ -3,7 +3,7 @@
 .extern handle_exception
 .extern aarch64_maybe_preempt_on_interrupt_exit
 
-.equ AARCH64_EXCEPTION_FRAME_SIZE, 288
+.equ AARCH64_EXCEPTION_FRAME_SIZE, 304
 
 .macro VECTOR_SLOT index
 	b aarch64_vector_\index
@@ -51,10 +51,21 @@ aarch64_vector_\index:
 	str x16, [sp, #272]
 	mrs x16, spsr_el1
 	str x16, [sp, #280]
+	mrs x16, sp_el0
+	str x16, [sp, #288]
+	str xzr, [sp, #296]
 
 	mov x0, sp
 	bl handle_exception
 	bl aarch64_maybe_preempt_on_interrupt_exit
+
+	ldr x16, [sp, #272]
+	msr elr_el1, x16
+	ldr x16, [sp, #280]
+	msr spsr_el1, x16
+	ldr x16, [sp, #288]
+	msr sp_el0, x16
+	isb
 
 	ldp x0, x1, [sp, #0]
 	ldp x2, x3, [sp, #16]

@@ -27,6 +27,7 @@ __attribute__((noreturn))
 static void thread_entry_bootstrap(void* ctx) {
 	struct thread* thread = (struct thread*)ctx;
 
+	sched_complete_context_switch();
 	thread_exit_if_cancelled(thread);
 	if (thread != NULL && thread->entry != NULL) thread->entry(thread->arg);
 	sched_exit_current(0u);
@@ -174,6 +175,10 @@ bool thread_is_queued(const struct thread* thread) {
 bool thread_is_terminated(const struct thread* thread) {
 	if (thread == NULL) return false;
 	return thread->state == THREAD_STATE_EXITING || thread->state == THREAD_STATE_ZOMBIE;
+}
+
+bool thread_is_reap_safe(const struct thread* thread) {
+	return thread != NULL && thread->state == THREAD_STATE_ZOMBIE;
 }
 
 bool thread_is_joinable(const struct thread* thread) {

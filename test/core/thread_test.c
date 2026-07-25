@@ -185,11 +185,13 @@ Test(thread, lifecycle_helpers_update_state_flags_and_links) {
 	cr_assert_eq(thread.state, THREAD_STATE_EXITING, "thread_mark_exiting should move thread to EXITING");
 	cr_assert_eq(thread.exit_code, 99u, "thread_mark_exiting should publish exit code");
 	cr_assert(thread_is_terminated(&thread), "EXITING thread should count as terminated");
+	cr_assert(!thread_is_reap_safe(&thread), "EXITING thread must not be reclaimable");
 	cr_assert(!thread_request_cancel(&thread), "terminated thread should reject new cancel requests");
 
 	thread_mark_zombie(&thread);
 	cr_assert_eq(thread.state, THREAD_STATE_ZOMBIE, "thread_mark_zombie should move thread to ZOMBIE");
 	cr_assert_eq(thread.block_reason, THREAD_BLOCK_NONE, "thread_mark_zombie should clear block reason");
+	cr_assert(thread_is_reap_safe(&thread), "ZOMBIE thread should be reclaimable");
 
 	reset_test_state();
 }
