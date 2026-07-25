@@ -56,6 +56,55 @@ cleanup:
 	kernel_selftest_thread_destroy(&worker);
 }
 
+struct kernel_selftest_kthread_unbound_state {
+	struct cpu*    cpu;
+	struct thread* thread;
+	bool           ran;
+};
+
+static void kernel_selftest_kthread_unbound_worker(void* arg) {
+	struct kernel_selftest_kthread_unbound_state* state = arg;
+
+	if (state != NULL) {
+		state->cpu    = cpu_current();
+		state->thread = kthread_current();
+		state->ran    = true;
+	}
+
+	kthread_exit(KERNEL_SELFTEST_KTHREAD_JOIN_EXIT_CODE);
+}
+
+static void kernel_selftest_kthread_scheduler_selects_cpu_without_preference(struct kernel_selftest_context* ctx) {
+	struct kthread*                              worker    = NULL;
+	struct kernel_selftest_kthread_unbound_state state     = {0};
+	thread_exit_code_t                           exit_code = 0u;
+
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx,
+		kthread_spawn(&worker, "selftest/kthread-unbound", kernel_selftest_kthread_unbound_worker, &state) ==
+			KTHREAD_SPAWN_OK,
+		"failed to create scheduler-selected thread",
+		cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, worker->thread.preferred_cpu == NULL, cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx, kthread_join(worker, &exit_code), "failed to join scheduler-selected thread", cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.ran, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.cpu != NULL, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.thread == &worker->thread, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, worker->thread.cpu == state.cpu, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, cpu_state_get(state.cpu) == CPU_STATE_ONLINE, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, exit_code == KERNEL_SELFTEST_KTHREAD_JOIN_EXIT_CODE, cleanup);
+
+cleanup:
+	if (worker != NULL && kernel_selftest_thread_is_live(worker)) {
+		kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
+	}
+	if (ctx->failure_expr == NULL && worker != NULL) {
+		KERNEL_SELFTEST_ASSERT(ctx, thread_is_reap_safe(&worker->thread));
+	}
+	kernel_selftest_thread_destroy(&worker);
+}
+
 struct kernel_selftest_kthread_timed_join_state {
 	struct kthread*    target;
 	struct thread*     target_thread;
@@ -190,6 +239,10 @@ static void kernel_selftest_kthread_detach_worker(void* arg) {
 static void kernel_selftest_kthread_detach_prevents_join_but_thread_still_runs(struct kernel_selftest_context* ctx) {
 	struct kernel_selftest_kthread_detach_state state = {0};
 
+	/*
+	 * Keep this lifecycle test local. Scheduler-selected placement and remote
+	 * join wakeups are covered independently by the unbound joinable case.
+	 */
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
 	                                kthread_spawn_detached_on_cpu("selftest/kthread-detach",
 	                                                              kernel_selftest_kthread_detach_worker,
@@ -286,6 +339,10 @@ static const struct kernel_selftest_case kernel_kthread_selftests[] = {
 	{
      .name = "join_waits_for_exit_and_returns_exit_code",
      .run  = kernel_selftest_kthread_join_waits_for_exit_and_returns_exit_code,
+	 },
+	{
+     .name = "scheduler_selects_cpu_without_preference",
+     .run  = kernel_selftest_kthread_scheduler_selects_cpu_without_preference,
 	 },
 	{
      .name = "timed_join_times_out_without_detaching_target",

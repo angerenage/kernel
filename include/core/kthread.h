@@ -30,17 +30,17 @@ struct kthread {
 /* Return the thread descriptor currently associated with the running CPU. */
 struct thread* kthread_current(void);
 
-/* Spawn a joinable kernel thread on the scheduler's default CPU. */
+/* Spawn a joinable kernel thread on a CPU selected by the scheduler. */
 enum kthread_spawn_result kthread_spawn(struct kthread** out_thread, const char* name, thread_entry_t entry, void* arg);
 
-/* Spawn a joinable kernel thread with a CPU preference. */
+/* Spawn a joinable kernel thread with a CPU preference; NULL lets the scheduler select one. */
 enum kthread_spawn_result kthread_spawn_on_cpu(struct kthread** out_thread, const char* name, thread_entry_t entry,
                                                void* arg, struct cpu* preferred_cpu);
 
-/* Spawn a detached kernel thread on the scheduler's default CPU. */
+/* Spawn a detached kernel thread on a CPU selected by the scheduler. */
 enum kthread_spawn_result kthread_spawn_detached(const char* name, thread_entry_t entry, void* arg);
 
-/* Spawn a detached kernel thread with a CPU preference. */
+/* Spawn a detached kernel thread with a CPU preference; NULL lets the scheduler select one. */
 enum kthread_spawn_result kthread_spawn_detached_on_cpu(const char* name, thread_entry_t entry, void* arg,
                                                         struct cpu* preferred_cpu);
 
