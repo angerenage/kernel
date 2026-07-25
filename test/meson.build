@@ -254,6 +254,15 @@ if build_machine.cpu_family() == 'x86_64'
 			'link_with': base_test_lib,
 			'suites': ['unit', 'platform'],
 		},
+		{
+			'name': 'x86_64_userspace',
+			'sources': files(
+				'platform/x86_64/userspace_test.c',
+				'../platforms/pc_x86_64/hal/userspace.c',
+			),
+			'link_with': base_test_lib,
+			'suites': ['unit', 'platform'],
+		},
 	]
 endif
 

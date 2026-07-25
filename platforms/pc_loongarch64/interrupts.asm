@@ -98,7 +98,8 @@ exception_entry:
 	st.d $r12, $sp, 264
 	csrrd $r12, 0x7
 	st.d $r12, $sp, 272
-	st.d $r0, $sp, 280
+	csrrd $r12, LOONGARCH64_CSR_PRMD
+	st.d $r12, $sp, 280
 
 	addi.d $a0, $sp, 0
 	bl handle_exception
@@ -133,10 +134,12 @@ exception_entry:
 	ld.d $r29, $sp, 232
 	ld.d $r30, $sp, 240
 	ld.d $r31, $sp, 248
-	ld.d $r13, $sp, 104
-	ld.d $r12, $sp, 96
 	ld.d $t0, $sp, 264
 	csrwr $t0, 0x6
+	ld.d $t0, $sp, 280
+	csrwr $t0, LOONGARCH64_CSR_PRMD
+	ld.d $r13, $sp, 104
+	ld.d $r12, $sp, 96
 
 	ld.d $sp, $sp, 24
 	ertn

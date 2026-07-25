@@ -8,7 +8,7 @@ struct exception_frame {
 	uint64_t estat;
 	uint64_t era;
 	uint64_t badv;
-	uint64_t reserved;
+	uint64_t prmd;
 };
 
 bool clock_handle_irq(const struct exception_frame* frame);

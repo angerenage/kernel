@@ -114,12 +114,21 @@ exception_entry:
 	ld s10, 200(sp)
 	ld s11, 208(sp)
 	csrr t3, sscratch
-	ld t0, 32(sp)
-	sd t0, 24(t3)
+	ld t1, 32(sp)
+	sd t1, 24(t3)
 	ld t0, 272(sp)
 	csrw sstatus, t0
-	ld t0, 256(sp)
-	csrw sepc, t0
+	andi t0, t0, RISCV64_SSTATUS_SPP
+	bnez t0, .Lriscv64_kernel_return_stack
+	ld t0, 8(sp)
+	j .Lriscv64_return_stack_ready
+
+.Lriscv64_kernel_return_stack:
+	addi t0, sp, RISCV64_EXCEPTION_FRAME_SIZE + RISCV64_EXCEPTION_META_SIZE
+
+.Lriscv64_return_stack_ready:
+	ld t1, 256(sp)
+	csrw sepc, t1
 	ld t1, 40(sp)
 	ld t2, 48(sp)
 	ld t3, 216(sp)
@@ -127,16 +136,7 @@ exception_entry:
 	ld t5, 232(sp)
 	ld t6, 240(sp)
 
-	addi sp, sp, RISCV64_EXCEPTION_FRAME_SIZE
-	ld t0, 0(sp)
-	beqz t0, .Lriscv64_restore_same_stack
 	mv sp, t0
-	j .Lriscv64_restore_t0
-
-.Lriscv64_restore_same_stack:
-	addi sp, sp, RISCV64_EXCEPTION_META_SIZE
-
-.Lriscv64_restore_t0:
 	csrr t0, sscratch
 	ld t0, 24(t0)
 	sret
