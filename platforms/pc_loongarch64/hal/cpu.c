@@ -65,6 +65,10 @@ void hal_cpu_context_switch(struct thread_context* current, const struct thread_
 	loongarch64_thread_context_switch(current, next);
 }
 
+bool hal_cpu_prepare_smp(void) {
+	return false;
+}
+
 void hal_cpu_park(void) {
 	__asm__ volatile("idle 0" : : : "memory");
 }

@@ -64,6 +64,7 @@ struct x86_acpi_madt_lapic_addr_override {
 } __attribute__((packed));
 
 static bool              apic_active;
+static bool              lapic_ready;
 static volatile uint8_t* lapic_mmio;
 static volatile uint8_t* ioapic_mmio;
 static bool              apic_irq_route_valid[X86_IRQ_COUNT];
@@ -191,24 +192,45 @@ static void ioapic_write(uint8_t reg, uint32_t value) {
 	*(volatile uint32_t*)(ioapic_mmio + X86_IOAPIC_WINDOW) = value;
 }
 
-static bool lapic_init(uintptr_t lapic_phys) {
-	uint64_t apic_base = read_msr(X86_IA32_APIC_BASE_MSR);
+bool apic_init_local(void) {
+	uint64_t apic_base;
 
+	if (lapic_mmio == NULL) return false;
+
+	apic_base = read_msr(X86_IA32_APIC_BASE_MSR);
 	if ((apic_base & X86_IA32_APIC_BASE_ENABLE) == 0u) {
-		apic_base |= X86_IA32_APIC_BASE_ENABLE;
-		write_msr(X86_IA32_APIC_BASE_MSR, apic_base);
+		write_msr(X86_IA32_APIC_BASE_MSR, apic_base | X86_IA32_APIC_BASE_ENABLE);
 	}
 
-	if (lapic_phys == 0u) {
-		lapic_phys = (uintptr_t)(apic_base & X86_IA32_APIC_BASE_ADDR_MASK);
-	}
-	if (lapic_phys == 0u || !boot_address_space_available()) return false;
-	if (!map_mmio_page(lapic_phys)) return false;
-
-	lapic_mmio = (volatile uint8_t*)hhdm_phys_to_virt(lapic_phys);
 	lapic_write(X86_LAPIC_TPR_REG, 0u);
 	lapic_write(X86_LAPIC_SVR_REG, X86_LAPIC_SVR_ENABLE | X86_LAPIC_SPURIOUS_VECTOR);
 	return true;
+}
+
+bool apic_ipi_ready(void) {
+	return __atomic_load_n(&lapic_ready, __ATOMIC_ACQUIRE);
+}
+
+static bool lapic_init(uintptr_t lapic_phys) {
+	if (lapic_mmio == NULL) {
+		uint64_t apic_base = read_msr(X86_IA32_APIC_BASE_MSR);
+
+		if (lapic_phys == 0u) {
+			lapic_phys = (uintptr_t)(apic_base & X86_IA32_APIC_BASE_ADDR_MASK);
+		}
+		if (lapic_phys == 0u || !boot_address_space_available()) return false;
+		if (!map_mmio_page(lapic_phys)) return false;
+
+		lapic_mmio = (volatile uint8_t*)hhdm_phys_to_virt(lapic_phys);
+	}
+
+	if (!apic_init_local()) return false;
+	__atomic_store_n(&lapic_ready, true, __ATOMIC_RELEASE);
+	return true;
+}
+
+bool apic_prepare_ipi(void) {
+	return lapic_init(0u);
 }
 
 bool apic_route_isa_irq(unsigned irq, unsigned vector) {
@@ -314,12 +336,12 @@ bool apic_is_active(void) {
 }
 
 void apic_send_eoi(void) {
-	if (!apic_active) return;
+	if (!apic_ipi_ready()) return;
 	lapic_write(X86_LAPIC_EOI_REG, 0u);
 }
 
 bool apic_send_ipi(uint32_t lapic_id, unsigned vector) {
-	if (!apic_active || lapic_mmio == NULL || vector >= 256u) return false;
+	if (!apic_ipi_ready() || lapic_mmio == NULL || vector >= 256u) return false;
 
 	lapic_wait_icr_idle();
 	lapic_write(X86_LAPIC_ICR_HIGH_REG, lapic_id << 24);

@@ -89,6 +89,9 @@ void pic_unmask_irq(unsigned irq);
 void pic_send_eoi(unsigned vector);
 bool pit_init(uint32_t frequency_hz, uint32_t* actual_frequency_hz);
 
+bool apic_prepare_ipi(void);
+bool apic_init_local(void);
+bool apic_ipi_ready(void);
 bool apic_route_isa_irq(unsigned irq, unsigned vector);
 bool apic_set_isa_irq_mask(unsigned irq, bool masked);
 bool apic_is_active(void);

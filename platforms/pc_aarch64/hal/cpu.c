@@ -69,6 +69,10 @@ void hal_cpu_context_switch(struct thread_context* current, const struct thread_
 	aarch64_thread_context_switch(current, next);
 }
 
+bool hal_cpu_prepare_smp(void) {
+	return true;
+}
+
 void hal_cpu_park(void) {
 	__asm__ volatile("sevl\n\t"
 	                 "wfe\n\t"

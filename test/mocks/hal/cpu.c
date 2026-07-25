@@ -41,6 +41,10 @@ void hal_cpu_context_switch(struct thread_context* current, const struct thread_
 	(void)next;
 }
 
+bool hal_cpu_prepare_smp(void) {
+	return true;
+}
+
 void hal_cpu_park(void) {
 }
 

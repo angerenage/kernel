@@ -89,6 +89,10 @@ void hal_cpu_context_switch(struct thread_context* current, const struct thread_
 	x86_64_thread_context_switch(current, next);
 }
 
+bool hal_cpu_prepare_smp(void) {
+	return apic_prepare_ipi();
+}
+
 void hal_cpu_park(void) {
 	__asm__ volatile("hlt" : : : "memory");
 }

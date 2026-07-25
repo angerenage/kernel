@@ -316,6 +316,7 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 
 	irq_disable_local();
 	if (!x86_setup_exception_stack(cpu)) return false;
+	if (apic_ipi_ready() && !apic_init_local()) return false;
 	x86_64_syscall_init();
 	__asm__ volatile("lidt %0" : : "m"(idtr));
 	if (cpu->role == CPU_ROLE_BSP) {

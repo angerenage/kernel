@@ -43,6 +43,9 @@ bool hal_cpu_thread_context_init(struct thread_context* context, uintptr_t stack
 /* Save the current thread frame and resume the target frame. */
 void hal_cpu_context_switch(struct thread_context* current, const struct thread_context* next);
 
+/* Prepare the architecture transport used for inter-CPU wake requests before application processors start. */
+bool hal_cpu_prepare_smp(void);
+
 /* Park the current CPU in the architecture's low-level idle instruction until the next external wake event. */
 void hal_cpu_park(void);
 

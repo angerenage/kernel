@@ -1,7 +1,18 @@
+#include <core/cpu.h>
 #include <hal/cpu.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#define RISCV64_SBI_EID_BASE 0x10ul
+#define RISCV64_SBI_FID_PROBE_EXTENSION 3ul
+#define RISCV64_SBI_EID_IPI 0x735049ul
+#define RISCV64_SBI_FID_SEND_IPI 0ul
+
+struct riscv64_sbi_ret {
+	long error;
+	long value;
+};
 
 enum {
 	RISCV64_THREAD_STACK_ALIGNMENT = 16u,
@@ -23,6 +34,20 @@ extern void riscv64_thread_context_switch(struct thread_context* current, const 
 extern void riscv64_thread_entry(void);
 
 _Static_assert(HAL_CPU_THREAD_CONTEXT_SPILL_WORDS > RISCV64_THREAD_CTX_S11, "riscv64 thread spill area is too small");
+
+static struct riscv64_sbi_ret riscv64_sbi_call2(unsigned long arg0, unsigned long arg1, unsigned long fid,
+                                                unsigned long eid) {
+	register unsigned long a0 asm("a0") = arg0;
+	register unsigned long a1 asm("a1") = arg1;
+	register unsigned long a6 asm("a6") = fid;
+	register unsigned long a7 asm("a7") = eid;
+
+	__asm__ volatile("ecall" : "+r"(a0), "+r"(a1) : "r"(a6), "r"(a7) : "memory", "a2", "a3", "a4", "a5");
+	return (struct riscv64_sbi_ret){
+		.error = (long)a0,
+		.value = (long)a1,
+	};
+}
 
 uint64_t hal_cpu_boot_arch_id(void) {
 	return 0u;
@@ -67,10 +92,20 @@ void hal_cpu_context_switch(struct thread_context* current, const struct thread_
 	riscv64_thread_context_switch(current, next);
 }
 
+bool hal_cpu_prepare_smp(void) {
+	struct riscv64_sbi_ret ret =
+		riscv64_sbi_call2(RISCV64_SBI_EID_IPI, 0u, RISCV64_SBI_FID_PROBE_EXTENSION, RISCV64_SBI_EID_BASE);
+
+	return ret.error == 0 && ret.value != 0;
+}
+
 void hal_cpu_park(void) {
 	__asm__ volatile("wfi" : : : "memory");
 }
 
 void hal_cpu_kick(const struct cpu* cpu) {
-	(void)cpu;
+	if (cpu == NULL) return;
+
+	/* A one-bit mask based at the target hart ID selects exactly that hart. */
+	(void)riscv64_sbi_call2(1ul, (unsigned long)cpu->arch_id, RISCV64_SBI_FID_SEND_IPI, RISCV64_SBI_EID_IPI);
 }

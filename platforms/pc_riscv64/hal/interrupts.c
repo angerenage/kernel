@@ -11,6 +11,11 @@
 
 #include "interrupts_private.h"
 
+#define RISCV64_SIE_SSIE (1ull << 1)
+#define RISCV64_SIE_STIE (1ull << 5)
+#define RISCV64_SIP_SSIP (1ull << 1)
+#define RISCV64_SCAUSE_SUPERVISOR_SOFTWARE 1u
+
 extern void exception_entry(void);
 
 static bool global_ready;
@@ -38,6 +43,10 @@ static inline void write_sscratch(uint64_t value) {
 
 static inline void write_sie(uint64_t value) {
 	__asm__ volatile("csrw sie, %0" : : "r"(value) : "memory");
+}
+
+static inline void clear_software_interrupt(void) {
+	__asm__ volatile("csrc sip, %0" : : "r"(RISCV64_SIP_SSIP) : "memory");
 }
 
 bool irq_enabled(void) {
@@ -71,11 +80,13 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 	entry       = (uintptr_t)exception_entry;
 	entry_state = &riscv64_exception_entry_state[cpu->index];
 	sie         = read_sie();
-	sie &= ~(1ull << 5);
+	sie &= ~RISCV64_SIE_STIE;
+	sie |= RISCV64_SIE_SSIE;
 	entry_state->kernel_stack_top = cpu->kernel_entry_stack_top;
 
 	__asm__ volatile("csrw stvec, %0" : : "r"(entry) : "memory");
 	write_sscratch((uint64_t)(uintptr_t)entry_state);
+	clear_software_interrupt();
 	write_sie(sie);
 	irq_disable_local();
 
@@ -203,6 +214,10 @@ void handle_exception(struct exception_frame* frame) {
 
 	if (riscv64_handle_syscall(frame, is_interrupt, code)) return;
 	if (!is_interrupt) cpu_enter_exception();
+	if (is_interrupt && code == RISCV64_SCAUSE_SUPERVISOR_SOFTWARE) {
+		clear_software_interrupt();
+		return;
+	}
 	if (clock_handle_irq(frame)) {
 		if (!is_interrupt) cpu_leave_exception();
 		return;

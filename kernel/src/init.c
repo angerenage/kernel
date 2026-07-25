@@ -9,6 +9,7 @@
 #include <core/uthread.h>
 #include <core/vmm.h>
 #include <hal/clock.h>
+#include <hal/cpu.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
 #include <hal/serial.h>
@@ -281,6 +282,9 @@ void kernel_main(void) {
 	}
 	kernel_init_memory(memory_map, memory_map_count, boot_address_space.direct_map_offset);
 	if (boot_diagnostics_enabled) kernel_boot_diagnostics_memory_summary();
+	if (kernel_boot_cpu_mp_supported() && cpu_count() > 1u && !hal_cpu_prepare_smp()) {
+		boot_fail("kernel: hal_cpu_prepare_smp failed");
+	}
 	if (!kernel_boot_cpu_mp_supported()) {
 		printf("kernel: SMP boot hooks unavailable on this platform, continuing with the BSP only\n");
 	}
