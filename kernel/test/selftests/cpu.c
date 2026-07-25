@@ -155,6 +155,7 @@ struct kernel_selftest_cpu_remote_dispatch_state {
 	struct cpu* expected_cpu;
 	uintptr_t   actual_cpu;
 	uintptr_t   current_thread;
+	uint32_t    exception_depth;
 	uint32_t    ran;
 };
 
@@ -171,6 +172,7 @@ static void kernel_selftest_cpu_remote_dispatch_worker(void* arg) {
 
 	__atomic_store_n(&state->actual_cpu, (uintptr_t)cpu_current(), __ATOMIC_RELEASE);
 	__atomic_store_n(&state->current_thread, (uintptr_t)kthread_current(), __ATOMIC_RELEASE);
+	__atomic_store_n(&state->exception_depth, cpu_current()->exception_depth, __ATOMIC_RELEASE);
 	__atomic_store_n(&state->ran, 1u, __ATOMIC_RELEASE);
 }
 
@@ -244,6 +246,10 @@ static void kernel_selftest_cpu_remote_dispatch_reaches_application_processors(s
 			ctx,
 			(struct thread*)__atomic_load_n(&kernel_selftest_cpu_remote_states[i].current_thread, __ATOMIC_ACQUIRE) ==
 				&kernel_selftest_cpu_remote_workers[i]->thread,
+			cleanup);
+		KERNEL_SELFTEST_ASSERT_GOTO(
+			ctx,
+			__atomic_load_n(&kernel_selftest_cpu_remote_states[i].exception_depth, __ATOMIC_ACQUIRE) == 0u,
 			cleanup);
 		KERNEL_SELFTEST_ASSERT_GOTO(ctx, sched_get_cpu_stats(cpu, &kernel_selftest_cpu_stats_after[i]), cleanup);
 		KERNEL_SELFTEST_ASSERT_GOTO(ctx,

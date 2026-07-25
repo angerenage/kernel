@@ -351,6 +351,7 @@ void x86_64_handle_interrupt(struct interrupt_frame* frame) {
 	if (trap_context) cpu_enter_exception();
 	if (vector == X86_LAPIC_WAKE_VECTOR) {
 		apic_send_eoi();
+		cpu_leave_exception();
 		return;
 	}
 	if (is_external_irq(vector)) {
