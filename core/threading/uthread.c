@@ -10,6 +10,7 @@
 #include <core/uthread.h>
 #include <core/vaddr_alloc.h>
 #include <core/vmm.h>
+#include <hal/hcf.h>
 #include <hal/userspace.h>
 #include <libc/stdlib.h>
 #include <libc/string.h>
@@ -57,6 +58,18 @@ static void uthread_release_name(struct uthread* thread) {
 
 	free((void*)thread->thread.name);
 	thread->thread.name = NULL;
+}
+
+static bool uthread_begin_destroy(struct uthread* thread) {
+	uint32_t expected = 0u;
+
+	if (thread == NULL) return false;
+	if (!__atomic_compare_exchange_n(&thread->dying, &expected, 1u, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+		return false;
+	}
+
+	uthread_unregister_id(thread);
+	return true;
 }
 
 static bool uthread_attach_process(struct uthread* thread, struct process* process) {
@@ -150,10 +163,17 @@ static void uthread_free(struct uthread* thread) {
 	(void)uthread_destroy_cap_object(thread);
 	uthread_release_stacks(thread);
 	uthread_detach_process(thread);
-	uthread_unregister_id(thread);
 	uthread_release_name(thread);
 	thread->process = NULL;
-	if (heap_allocated) free(thread);
+	if (heap_allocated) {
+		free(thread);
+		return;
+	}
+
+	memset(thread, 0, sizeof(*thread));
+	thread->user_stack_id   = VMM_ID_INVALID;
+	thread->kernel_stack_id = VMM_ID_INVALID;
+	thread->cap_object_id   = CAP_OBJECT_ID_INVALID;
 }
 
 static void uthread_reapers_init_once(void) {
@@ -193,7 +213,7 @@ static void uthread_reap_callback(struct thread* thread, void* ctx) {
 	thread_mark_zombie(thread);
 	process_notify_thread_exit(target->process, thread, thread->exit_code);
 	(void)sched_wake_all(&thread->join_wait_queue);
-	if (!thread_is_joinable(thread)) uthread_free(target);
+	if (!thread_is_joinable(thread) && uthread_begin_destroy(target)) uthread_release(target);
 }
 
 static bool __attribute__((unused))
@@ -302,6 +322,8 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 		.kernel_stack_id = VMM_ID_INVALID,
 		.reaper_next     = NULL,
 		.cap_object_id   = CAP_OBJECT_ID_INVALID,
+		.reference_count = 1u,
+		.dying           = 0u,
 		.heap_allocated  = heap_allocated,
 	};
 	id_result = id_table_alloc(&uthread_table, thread, &id);
@@ -445,6 +467,58 @@ struct uthread* uthread_lookup(uthread_id_t id) {
 	return (struct uthread*)id_table_lookup(&uthread_table, id);
 }
 
+static bool uthread_retain_callback(void* value, void* context) {
+	struct uthread* thread = (struct uthread*)value;
+	uint64_t        old_refcount;
+
+	(void)context;
+	if (thread == NULL) return false;
+
+	for (;;) {
+		if (__atomic_load_n(&thread->dying, __ATOMIC_ACQUIRE) != 0u) return false;
+
+		old_refcount = __atomic_load_n(&thread->reference_count, __ATOMIC_ACQUIRE);
+		if (old_refcount == 0u || old_refcount == UINT64_MAX) return false;
+		if (__atomic_compare_exchange_n(&thread->reference_count,
+		                                &old_refcount,
+		                                old_refcount + 1u,
+		                                false,
+		                                __ATOMIC_ACQ_REL,
+		                                __ATOMIC_ACQUIRE)) {
+			return true;
+		}
+	}
+}
+
+struct uthread* uthread_acquire(uthread_id_t id) {
+	if (id == UTHREAD_ID_INVALID) return NULL;
+
+	return (struct uthread*)id_table_lookup_retain(&uthread_table, id, uthread_retain_callback, NULL);
+}
+
+void uthread_release(struct uthread* thread) {
+	uint64_t old_refcount;
+
+	if (thread == NULL) return;
+
+	for (;;) {
+		old_refcount = __atomic_load_n(&thread->reference_count, __ATOMIC_ACQUIRE);
+		if (old_refcount == 0u) hcf();
+		if (__atomic_compare_exchange_n(&thread->reference_count,
+		                                &old_refcount,
+		                                old_refcount - 1u,
+		                                false,
+		                                __ATOMIC_ACQ_REL,
+		                                __ATOMIC_ACQUIRE)) {
+			break;
+		}
+	}
+
+	if (old_refcount != 1u) return;
+	if (__atomic_load_n(&thread->dying, __ATOMIC_ACQUIRE) == 0u || thread->id != UTHREAD_ID_INVALID) hcf();
+	uthread_free(thread);
+}
+
 size_t uthread_count(void) {
 	return id_table_count(&uthread_table);
 }
@@ -459,22 +533,12 @@ bool uthread_detach(struct uthread* thread) {
 }
 
 bool uthread_deinit(struct uthread* thread) {
-	bool heap_allocated;
-
 	if (thread == NULL) return false;
 	if (!thread_is_reap_safe(&thread->thread) && thread->thread.state != THREAD_STATE_NEW) return false;
 	if (!thread_is_joinable(&thread->thread)) return false;
+	if (!uthread_begin_destroy(thread)) return false;
 
-	heap_allocated = thread->heap_allocated;
-	(void)uthread_destroy_cap_object(thread);
-	uthread_release_stacks(thread);
-	uthread_detach_process(thread);
-	uthread_unregister_id(thread);
-	uthread_release_name(thread);
-	memset(thread, 0, sizeof(*thread));
-	thread->user_stack_id   = VMM_ID_INVALID;
-	thread->kernel_stack_id = VMM_ID_INVALID;
-	if (heap_allocated) free(thread);
+	uthread_release(thread);
 	return true;
 }
 
@@ -524,8 +588,8 @@ static void uthread_reaper_entry(void* arg) {
 			process_notify_thread_exit(target->process, &target->thread, target->thread.exit_code);
 			(void)sched_wake_all(&target->thread.join_wait_queue);
 
-			if (!thread_is_joinable(&target->thread)) {
-				uthread_free(target);
+			if (!thread_is_joinable(&target->thread) && uthread_begin_destroy(target)) {
+				uthread_release(target);
 			}
 			continue;
 		}

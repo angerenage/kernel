@@ -48,7 +48,11 @@ struct uthread {
 	struct uthread* process_next;
 	/* Lazily-created cap_object id for this thread. */
 	cap_object_id_t cap_object_id;
-	bool            heap_allocated;
+	/* References keep the descriptor and its owned resources alive. */
+	uint64_t reference_count;
+	/* Set before the ID is removed and the owner reference is released. */
+	uint32_t dying;
+	bool     heap_allocated;
 };
 
 /* Initialize caller-owned userspace thread storage and queue it on the scheduler. */
@@ -71,8 +75,17 @@ struct uthread* uthread_from_thread(struct thread* thread);
 /* Return the userspace thread currently associated with the running CPU, or NULL. */
 struct uthread* uthread_current(void);
 
-/* Return the userspace thread registered for id, or NULL when id is invalid or absent. */
+/*
+ * Return the userspace thread registered for id, or NULL when id is invalid or absent.
+ * The returned pointer is borrowed and requires external lifetime synchronization.
+ */
 struct uthread* uthread_lookup(uthread_id_t id);
+
+/* Look up and retain id. The caller must release the returned descriptor. */
+struct uthread* uthread_acquire(uthread_id_t id);
+
+/* Drop a reference acquired through uthread_acquire(). */
+void uthread_release(struct uthread* thread);
 
 /* Return the number of registered userspace threads. */
 size_t uthread_count(void);

@@ -101,14 +101,18 @@ static syscall_result_t thread_test_cancel_handler(const struct cap_request* req
 }
 
 static syscall_result_t thread_handler(const struct cap_request* req) {
-	struct uthread* target;
-	enum thread_op  op;
-	cap_rights_t    required_rights;
+	struct uthread*  target;
+	enum thread_op   op;
+	cap_rights_t     required_rights;
+	syscall_result_t result;
 
-	target = uthread_lookup((uthread_id_t)req->object_id);
+	target = uthread_acquire((uthread_id_t)req->object_id);
 	if (target == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 	op = thread_op_from_request(req->request, req->request_size);
-	if ((int)op < 0) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	if ((int)op < 0) {
+		uthread_release(target);
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
 
 	switch (op) {
 	case THREAD_OP_JOIN:
@@ -125,26 +129,37 @@ static syscall_result_t thread_handler(const struct cap_request* req) {
 		required_rights = CAP_READ;
 		break;
 	default:
+		uthread_release(target);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 	if ((req->rights & required_rights) != required_rights) {
+		uthread_release(target);
 		return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	}
 
 	switch (op) {
 	case THREAD_OP_JOIN:
-		return thread_join_handler(req, target);
+		result = thread_join_handler(req, target);
+		break;
 	case THREAD_OP_DETACH:
-		return thread_detach_handler(target);
+		result = thread_detach_handler(target);
+		break;
 	case THREAD_OP_CANCEL:
-		return thread_cancel_handler(target);
+		result = thread_cancel_handler(target);
+		break;
 	case THREAD_OP_SET_CANCEL_ENABLED:
-		return thread_set_cancel_enabled_handler(req, target);
+		result = thread_set_cancel_enabled_handler(req, target);
+		break;
 	case THREAD_OP_TEST_CANCEL:
-		return thread_test_cancel_handler(req, target);
+		result = thread_test_cancel_handler(req, target);
+		break;
 	default:
-		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+		result = syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+		break;
 	}
+
+	uthread_release(target);
+	return result;
 }
 
 cap_id_t kernel_thread_grant(struct uthread* target, process_id_t recipient, cap_rights_t rights) {
@@ -152,25 +167,34 @@ cap_id_t kernel_thread_grant(struct uthread* target, process_id_t recipient, cap
 	cap_object_id_t    object_id;
 	struct capability* cap;
 	uthread_id_t       thread_id;
+	struct uthread*    held;
+	cap_id_t           result_cap = CAP_ID_INVALID;
 
 	if (target == NULL || recipient == PROCESS_PID_INVALID) return CAP_ID_INVALID;
 	thread_id = uthread_id(target);
-	if (thread_id == UTHREAD_ID_INVALID || uthread_lookup(thread_id) != target) return CAP_ID_INVALID;
+	held      = uthread_acquire(thread_id);
+	if (held != target) {
+		if (held != NULL) uthread_release(held);
+		return CAP_ID_INVALID;
+	}
 
-	object_id = uthread_cap_object_id(target);
+	object_id = uthread_cap_object_id(held);
 	if (object_id != CAP_OBJECT_ID_INVALID) object = cap_object_acquire(object_id);
 	if (object == NULL) {
 		object = cap_object_create_kernel((uint64_t)thread_id, thread_handler);
-		if (object == NULL) return CAP_ID_INVALID;
+		if (object == NULL) goto out;
 		object_id = object->cap_object_id;
-		uthread_set_cap_object_id(target, object_id);
+		uthread_set_cap_object_id(held, object_id);
 	}
 	else {
 		cap_object_release(object);
 	}
 
-	cap = cap_create(object_id, recipient, rights, NULL);
-	return cap == NULL ? CAP_ID_INVALID : cap->cap_id;
+	cap        = cap_create(object_id, recipient, rights, NULL);
+	result_cap = cap == NULL ? CAP_ID_INVALID : cap->cap_id;
+out:
+	uthread_release(held);
+	return result_cap;
 }
 
 cap_id_t kernel_thread_grant_full(struct uthread* target, process_id_t recipient) {
