@@ -3,6 +3,7 @@
 #include <base/vmm.h>
 #include <core/process.h>
 #include <core/thread.h>
+#include <core/user_upcall.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -38,14 +39,15 @@ struct uthread_start_params {
 };
 
 struct uthread {
-	struct thread   thread;
-	uthread_id_t    id;
-	struct process* process;
-	vmm_id_t        user_stack_id;
-	vmm_id_t        kernel_stack_id;
-	uintptr_t       user_stack_top;
-	struct uthread* reaper_next;
-	struct uthread* process_next;
+	struct thread            thread;
+	uthread_id_t             id;
+	struct process*          process;
+	struct user_upcall_state upcall;
+	vmm_id_t                 user_stack_id;
+	vmm_id_t                 kernel_stack_id;
+	uintptr_t                user_stack_top;
+	struct uthread*          reaper_next;
+	struct uthread*          process_next;
 	/* Lazily-created cap_object id for this thread. */
 	cap_object_id_t cap_object_id;
 	/* References keep the descriptor and its owned resources alive. */

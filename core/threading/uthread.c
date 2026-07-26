@@ -160,6 +160,7 @@ static void uthread_free(struct uthread* thread) {
 	if (thread == NULL) return;
 
 	heap_allocated = thread->heap_allocated;
+	uthread_upcall_state_deinit(thread);
 	(void)uthread_destroy_cap_object(thread);
 	uthread_release_stacks(thread);
 	uthread_detach_process(thread);
@@ -326,6 +327,7 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 		.dying           = 0u,
 		.heap_allocated  = heap_allocated,
 	};
+	uthread_upcall_state_init(thread);
 	id_result = id_table_alloc(&uthread_table, thread, &id);
 	if (id_result != ID_TABLE_OK) {
 		uthread_release_name(thread);

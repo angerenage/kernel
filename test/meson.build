@@ -232,6 +232,13 @@ test_suites = [
 		'suites': ['unit', 'memory'],
 	},
 	{
+		'name': 'user_upcall',
+		'sources': files(
+			'core/user_upcall_test.c',
+		),
+		'suites': ['unit', 'core'],
+	},
+	{
 		'name': 'user_return',
 		'sources': files(
 			'core/user_return_test.c',
