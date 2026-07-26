@@ -14,5 +14,7 @@ struct exception_frame {
 	uint64_t reserved;
 };
 
+void aarch64_prepare_user_return(void);
+
 bool clock_handle_irq(const struct exception_frame* frame);
 bool aarch64_handle_syscall(struct exception_frame* frame, uint64_t ec);

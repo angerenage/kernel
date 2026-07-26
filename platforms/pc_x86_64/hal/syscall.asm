@@ -6,6 +6,7 @@
 .extern x86_64_handle_interrupt
 .extern x86_64_maybe_preempt_on_interrupt_exit
 .extern x86_64_prepare_user_return
+.extern core_finalize_user_return
 .extern x86_64_classify_user_return
 .extern x86_64_reject_user_return
 .extern x86_64_interrupt_restore
@@ -85,6 +86,8 @@ x86_64_syscall_entry:
 	call x86_64_handle_interrupt
 	call x86_64_maybe_preempt_on_interrupt_exit
 	call x86_64_prepare_user_return
+	mov rdi, rsp
+	call core_finalize_user_return
 
 	mov rdi, rsp
 	call x86_64_classify_user_return

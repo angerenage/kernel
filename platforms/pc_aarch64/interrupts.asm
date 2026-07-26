@@ -2,6 +2,8 @@
 .global exception_vectors
 .extern handle_exception
 .extern aarch64_maybe_preempt_on_interrupt_exit
+.extern aarch64_prepare_user_return
+.extern core_finalize_user_return
 
 .equ AARCH64_EXCEPTION_FRAME_SIZE, 304
 
@@ -58,6 +60,9 @@ aarch64_vector_\index:
 	mov x0, sp
 	bl handle_exception
 	bl aarch64_maybe_preempt_on_interrupt_exit
+	bl aarch64_prepare_user_return
+	mov x0, sp
+	bl core_finalize_user_return
 
 	ldr x16, [sp, #272]
 	msr elr_el1, x16

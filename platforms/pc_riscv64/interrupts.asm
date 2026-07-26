@@ -3,6 +3,7 @@
 .extern handle_exception
 .extern riscv64_maybe_preempt_on_interrupt_exit
 .extern riscv64_prepare_user_return
+.extern core_finalize_user_return
 
 .equ RISCV64_EXCEPTION_FRAME_SIZE, 288
 .equ RISCV64_EXCEPTION_META_SIZE, 8
@@ -89,6 +90,8 @@ exception_entry:
 	call handle_exception
 	call riscv64_maybe_preempt_on_interrupt_exit
 	call riscv64_prepare_user_return
+	mv a0, sp
+	call core_finalize_user_return
 
 	ld ra, 0(sp)
 	ld gp, 16(sp)

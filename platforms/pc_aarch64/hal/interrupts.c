@@ -291,6 +291,10 @@ void aarch64_maybe_preempt_on_interrupt_exit(void) {
 	(void)sched_handle_interrupt_exit();
 }
 
+void aarch64_prepare_user_return(void) {
+	sched_finish_context_switch();
+}
+
 void handle_exception(struct exception_frame* frame) {
 	bool     is_irq = (frame->vector & 0x3u) == 1u;
 	uint64_t ec     = (frame->esr >> 26) & 0x3fu;

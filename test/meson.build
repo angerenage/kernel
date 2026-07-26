@@ -232,6 +232,15 @@ test_suites = [
 		'suites': ['unit', 'memory'],
 	},
 	{
+		'name': 'user_return',
+		'sources': files(
+			'core/user_return_test.c',
+			'../core/user_return.c',
+		),
+		'link_with': base_test_lib,
+		'suites': ['unit', 'core'],
+	},
+	{
 		'name': 'vmm',
 		'sources': files(
 			'vmm/test_support.c',

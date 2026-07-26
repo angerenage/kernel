@@ -5,6 +5,7 @@
 .extern handle_exception
 .extern loongarch64_maybe_preempt_on_interrupt_exit
 .extern loongarch64_prepare_user_return
+.extern core_finalize_user_return
 .equ LOONGARCH64_EXCEPTION_FRAME_SIZE, 288
 .equ LOONGARCH64_CSR_PRMD, 0x1
 .equ LOONGARCH64_CSR_SAVE0, 0x30
@@ -105,6 +106,8 @@ exception_entry:
 	bl handle_exception
 	bl loongarch64_maybe_preempt_on_interrupt_exit
 	bl loongarch64_prepare_user_return
+	addi.d $a0, $sp, 0
+	bl core_finalize_user_return
 
 	ld.d $r1, $sp, 8
 	ld.d $r2, $sp, 16

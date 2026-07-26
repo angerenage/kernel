@@ -4,6 +4,7 @@
 .extern x86_64_handle_interrupt
 .extern x86_64_maybe_preempt_on_interrupt_exit
 .extern x86_64_prepare_user_return
+.extern core_finalize_user_return
 
 .macro INTERRUPT_STUB vector has_error_code
 .global x86_64_interrupt_stub_\vector
@@ -37,6 +38,8 @@ x86_64_interrupt_common:
 	call x86_64_handle_interrupt
 	call x86_64_maybe_preempt_on_interrupt_exit
 	call x86_64_prepare_user_return
+	mov rdi, rsp
+	call core_finalize_user_return
 
 .global x86_64_interrupt_restore
 x86_64_interrupt_restore:
