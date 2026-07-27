@@ -41,7 +41,7 @@ kernel_objs = base_sources + core_sources + kernel_libk_sources + platform_kerne
 	'src/boot/cmdline.c',
 	'src/boot/diagnostics.c',
 	'src/boot/cpu_boot.c',
-	'src/capability.c',
+	'src/capability/capability.c',
 	'src/capability/address_space.c',
 	'src/capability/memory.c',
 	'src/capability/boot_module.c',
