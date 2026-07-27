@@ -1,3 +1,5 @@
+#include <base/process.h>
+#include <core/process.h>
 #include <core/user_return.h>
 #include <core/user_upcall.h>
 #include <core/uthread.h>
@@ -20,6 +22,9 @@ static size_t                  delivery_checks;
 static enum user_upcall_result delivery_result;
 static struct uthread          fake_current;
 static struct uthread*         current_thread;
+static size_t                  terminate_checks;
+static struct process*         terminated_process;
+static uintptr_t               terminated_exit_code;
 
 bool hal_userspace_frame_is_user(const struct hal_userspace_return_frame* frame) {
 	frame_checks++;
@@ -38,6 +43,13 @@ enum user_upcall_result uthread_upcall_deliver(struct uthread* thread, struct ha
 	return delivery_result;
 }
 
+bool process_terminate(struct process* process, uintptr_t exit_code) {
+	terminate_checks++;
+	terminated_process   = process;
+	terminated_exit_code = exit_code;
+	return true;
+}
+
 __attribute__((noreturn))
 void hcf(void) {
 	abort();
@@ -48,6 +60,9 @@ static void user_return_test_reset(void) {
 	current_checks       = 0u;
 	delivery_checks      = 0u;
 	delivery_result      = USER_UPCALL_IDLE;
+	terminate_checks     = 0u;
+	terminated_process   = NULL;
+	terminated_exit_code = 0u;
 	fake_current         = (struct uthread){0};
 	fake_current.process = (struct process*)(uintptr_t)1u;
 	current_thread       = &fake_current;
@@ -122,4 +137,36 @@ Test(user_return, accepts_a_deferred_upcall_delivery) {
 	cr_assert_eq(current_checks, 1u);
 	cr_assert_eq(delivery_checks, 1u);
 	cr_assert_eq(frame.marker, 0x0fedcba987654321ull);
+}
+
+Test(user_return, ignores_a_dying_thread) {
+	struct hal_userspace_return_frame frame = {
+		.user   = true,
+		.marker = 0x1020304050607080ull,
+	};
+
+	user_return_test_reset();
+	delivery_result = USER_UPCALL_THREAD_DYING;
+	core_finalize_user_return(&frame);
+
+	cr_assert_eq(delivery_checks, 1u);
+	cr_assert_eq(terminate_checks, 0u);
+	cr_assert_eq(frame.marker, 0x1020304050607080ull);
+}
+
+Test(user_return, terminates_the_process_for_an_invalid_upcall_context) {
+	struct hal_userspace_return_frame frame = {
+		.user   = true,
+		.marker = 0xaabbccddeeff0011ull,
+	};
+
+	user_return_test_reset();
+	delivery_result = USER_UPCALL_CONTEXT_INVALID;
+	core_finalize_user_return(&frame);
+
+	cr_assert_eq(delivery_checks, 1u);
+	cr_assert_eq(terminate_checks, 1u);
+	cr_assert_eq(terminated_process, fake_current.process);
+	cr_assert_eq(terminated_exit_code, PROCESS_EXIT_SYSTEM_UPCALL_CONTEXT_INVALID);
+	cr_assert_eq(frame.marker, 0xaabbccddeeff0011ull);
 }

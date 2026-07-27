@@ -1,3 +1,5 @@
+#include <base/process.h>
+#include <core/process.h>
 #include <core/syscall.h>
 #include <core/user_upcall.h>
 #include <core/uthread.h>
@@ -16,14 +18,20 @@ static struct uthread          fake_thread;
 static struct uthread*         current_thread;
 static enum user_upcall_result restore_result;
 static size_t                  dispatch_count;
+static size_t                  terminate_count;
+static struct process*         terminated_process;
+static uintptr_t               terminated_exit_code;
 
 /* Reset the syscall test state. */
 static void upcall_syscall_test_reset(void) {
 	memset(&fake_thread, 0, sizeof(fake_thread));
-	fake_thread.process = (struct process*)(uintptr_t)1u;
-	current_thread      = &fake_thread;
-	restore_result      = USER_UPCALL_OK;
-	dispatch_count      = 0u;
+	fake_thread.process  = (struct process*)(uintptr_t)1u;
+	current_thread       = &fake_thread;
+	restore_result       = USER_UPCALL_OK;
+	dispatch_count       = 0u;
+	terminate_count      = 0u;
+	terminated_process   = NULL;
+	terminated_exit_code = 0u;
 }
 
 /* Return the fake current thread. */
@@ -36,6 +44,14 @@ enum user_upcall_result uthread_upcall_restore(struct uthread* thread, struct ha
 	cr_assert_eq(thread, current_thread);
 	if (restore_result == USER_UPCALL_OK) frame->marker = 0xdecafbadull;
 	return restore_result;
+}
+
+/* Record process termination caused by an invalid saved context. */
+bool process_terminate(struct process* process, uintptr_t exit_code) {
+	terminate_count++;
+	terminated_process   = process;
+	terminated_exit_code = exit_code;
+	return true;
 }
 
 /* Return whether the fake frame is a userspace frame. */
@@ -89,4 +105,20 @@ Test(upcall_syscall, return_outside_an_upcall_is_denied) {
 	cr_assert_eq(syscall_dispatch_user_frame(&frame, SYSCALL_UPCALL_RETURN, 0u, 0u, 0u, 0u, 0u, 0u, &result),
 	             SYSCALL_FRAME_WRITE_RESULT);
 	cr_assert_eq(result.status, SYSCALL_STATUS_DENIED);
+	cr_assert_eq(terminate_count, 0u);
+}
+
+Test(upcall_syscall, invalid_saved_context_terminates_the_process) {
+	struct hal_userspace_return_frame frame  = {.user = true, .marker = 0x55u};
+	syscall_result_t                  result = {0};
+
+	upcall_syscall_test_reset();
+	restore_result = USER_UPCALL_CONTEXT_INVALID;
+	cr_assert_eq(syscall_dispatch_user_frame(&frame, SYSCALL_UPCALL_RETURN, 0u, 0u, 0u, 0u, 0u, 0u, &result),
+	             SYSCALL_FRAME_WRITE_RESULT);
+	cr_assert_eq(terminate_count, 1u);
+	cr_assert_eq(terminated_process, fake_thread.process);
+	cr_assert_eq(terminated_exit_code, PROCESS_EXIT_SYSTEM_UPCALL_CONTEXT_INVALID);
+	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
+	cr_assert_eq(frame.marker, 0x55u);
 }

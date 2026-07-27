@@ -1,3 +1,5 @@
+#include <base/process.h>
+#include <core/process.h>
 #include <core/syscall.h>
 #include <core/user_upcall.h>
 #include <core/uthread.h>
@@ -46,6 +48,11 @@ enum syscall_frame_action syscall_dispatch_user_frame(struct hal_userspace_retur
 
 	restore_result = uthread_upcall_restore(current, frame);
 	if (restore_result == USER_UPCALL_OK) return SYSCALL_FRAME_RESTORED;
+	if (restore_result == USER_UPCALL_CONTEXT_INVALID) {
+		*out_result = syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+		(void)process_terminate(current->process, PROCESS_EXIT_SYSTEM_UPCALL_CONTEXT_INVALID);
+		return SYSCALL_FRAME_WRITE_RESULT;
+	}
 	*out_result = syscall_upcall_result(restore_result);
 	return SYSCALL_FRAME_WRITE_RESULT;
 }
