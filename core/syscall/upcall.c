@@ -15,6 +15,7 @@ static syscall_result_t syscall_upcall_result(enum user_upcall_result result) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	case USER_UPCALL_CONTEXT_INVALID:
 	case USER_UPCALL_QUEUE_FULL:
+	case USER_UPCALL_DEFERRED:
 	case USER_UPCALL_IDLE:
 	default:
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);

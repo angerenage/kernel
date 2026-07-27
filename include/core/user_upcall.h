@@ -24,11 +24,22 @@ struct user_upcall_request {
 enum user_upcall_result {
 	USER_UPCALL_OK = 0,
 	USER_UPCALL_IDLE,
+	USER_UPCALL_DEFERRED,
 	USER_UPCALL_INVALID_ARGUMENTS,
 	USER_UPCALL_QUEUE_FULL,
 	USER_UPCALL_THREAD_DYING,
 	USER_UPCALL_NOT_ACTIVE,
 	USER_UPCALL_CONTEXT_INVALID,
+};
+
+/* Delivery lifecycle for one userspace thread. */
+enum user_upcall_phase {
+	/* No handler is running and the next queued request may be delivered. */
+	USER_UPCALL_PHASE_IDLE = 0,
+	/* Userspace is executing one handler with an interrupted context saved. */
+	USER_UPCALL_PHASE_ACTIVE,
+	/* The interrupted context was restored and must return once before another delivery. */
+	USER_UPCALL_PHASE_RESUME,
 };
 
 /* State owned by one userspace thread. */
@@ -40,8 +51,8 @@ struct user_upcall_state {
 	struct user_upcall_request   pending[USER_UPCALL_QUEUE_CAPACITY];
 	size_t                       head;
 	size_t                       count;
+	enum user_upcall_phase       phase;
 	bool                         initialized;
-	bool                         active;
 };
 
 /* Initialize the state for one thread. */
@@ -53,10 +64,10 @@ void uthread_upcall_state_deinit(struct uthread* thread);
 /* Queue one upcall request. */
 enum user_upcall_result uthread_upcall_enqueue(struct uthread* thread, const struct user_upcall_request* request);
 
-/* Deliver the next upcall when possible. */
+/* Deliver the next upcall, or consume one required resume boundary. */
 enum user_upcall_result uthread_upcall_deliver(struct uthread* thread, struct hal_userspace_return_frame* frame);
 
-/* Restore the context interrupted by the active upcall. */
+/* Restore the interrupted context and require one return boundary before another delivery. */
 enum user_upcall_result uthread_upcall_restore(struct uthread* thread, struct hal_userspace_return_frame* frame);
 
 /* Return the number of queued requests. */

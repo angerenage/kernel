@@ -15,5 +15,5 @@ void core_finalize_user_return(struct hal_userspace_return_frame* frame) {
 	if (current == NULL || current->process == NULL) hcf();
 
 	result = uthread_upcall_deliver(current, frame);
-	if (result != USER_UPCALL_OK && result != USER_UPCALL_IDLE) hcf();
+	if (result != USER_UPCALL_OK && result != USER_UPCALL_IDLE && result != USER_UPCALL_DEFERRED) hcf();
 }

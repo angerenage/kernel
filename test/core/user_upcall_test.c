@@ -98,6 +98,12 @@ Test(user_upcall, delivers_fifo_and_restores_interrupted_context) {
 	cr_assert_eq(frame.args[2], original.args[2]);
 	cr_assert_eq(frame.args[3], original.args[3]);
 	cr_assert_not(uthread_upcall_is_active(&thread));
+	cr_assert_eq(thread.upcall.phase, USER_UPCALL_PHASE_RESUME);
+
+	cr_assert_eq(uthread_upcall_deliver(&thread, &frame), USER_UPCALL_DEFERRED);
+	cr_assert_eq(thread.upcall.phase, USER_UPCALL_PHASE_IDLE);
+	cr_assert_eq(uthread_upcall_pending_count(&thread), USER_UPCALL_QUEUE_CAPACITY - 1u);
+	cr_assert_eq(frame.entry, original.entry);
 
 	cr_assert_eq(uthread_upcall_deliver(&thread, &frame), USER_UPCALL_OK);
 	cr_assert_eq(frame.entry, 0x5000u);
@@ -147,8 +153,45 @@ Test(user_upcall, queues_requests_while_active) {
 	cr_assert_eq(uthread_upcall_enqueue(&thread, &second), USER_UPCALL_OK);
 	cr_assert_eq(uthread_upcall_deliver(&thread, &frame), USER_UPCALL_IDLE);
 	cr_assert_eq(uthread_upcall_restore(&thread, &frame), USER_UPCALL_OK);
+	cr_assert_eq(uthread_upcall_deliver(&thread, &frame), USER_UPCALL_DEFERRED);
+	cr_assert_eq(uthread_upcall_pending_count(&thread), 1u);
 	cr_assert_eq(uthread_upcall_deliver(&thread, &frame), USER_UPCALL_OK);
 	cr_assert_eq(frame.entry, 0x5000u);
 	cr_assert_eq(frame.args[3], 8u);
+	uthread_upcall_state_deinit(&thread);
+}
+
+Test(user_upcall, defers_a_full_queue_after_restoring_userspace) {
+	struct uthread                    thread;
+	struct hal_userspace_return_frame frame;
+	struct hal_userspace_return_frame original;
+	struct user_upcall_request        request = {
+			   .entry = 0x4000u,
+			   .args  = {1u, 2u, 3u, 4u},
+    };
+
+	user_upcall_test_reset(&thread, &frame);
+	original = frame;
+	cr_assert_eq(uthread_upcall_enqueue(&thread, &request), USER_UPCALL_OK);
+	cr_assert_eq(uthread_upcall_deliver(&thread, &frame), USER_UPCALL_OK);
+
+	for (size_t i = 0u; i < USER_UPCALL_QUEUE_CAPACITY; i++) {
+		request.entry   = 0x5000u + i * 0x1000u;
+		request.args[0] = i;
+		cr_assert_eq(uthread_upcall_enqueue(&thread, &request), USER_UPCALL_OK);
+	}
+	cr_assert_eq(uthread_upcall_pending_count(&thread), USER_UPCALL_QUEUE_CAPACITY);
+
+	cr_assert_eq(uthread_upcall_restore(&thread, &frame), USER_UPCALL_OK);
+	cr_assert_eq(thread.upcall.phase, USER_UPCALL_PHASE_RESUME);
+	cr_assert_eq(uthread_upcall_deliver(&thread, &frame), USER_UPCALL_DEFERRED);
+	cr_assert_eq(thread.upcall.phase, USER_UPCALL_PHASE_IDLE);
+	cr_assert_eq(uthread_upcall_pending_count(&thread), USER_UPCALL_QUEUE_CAPACITY);
+	cr_assert_eq(memcmp(&frame, &original, sizeof(frame)), 0);
+	cr_assert_eq(uthread_upcall_enqueue(&thread, &request), USER_UPCALL_QUEUE_FULL);
+
+	cr_assert_eq(uthread_upcall_deliver(&thread, &frame), USER_UPCALL_OK);
+	cr_assert_eq(frame.entry, 0x5000u);
+	cr_assert_eq(frame.args[0], 0u);
 	uthread_upcall_state_deinit(&thread);
 }

@@ -26,6 +26,7 @@ void uthread_upcall_state_init(struct uthread* thread) {
 	                    SPINLOCK_ORDER_USER_UPCALL,
 	                    SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
 	state->stack_id    = VMM_ID_INVALID;
+	state->phase       = USER_UPCALL_PHASE_IDLE;
 	state->initialized = true;
 }
 
@@ -40,7 +41,7 @@ void uthread_upcall_state_deinit(struct uthread* thread) {
 	irq_state          = spinlock_lock_irqsave(&state->lock);
 	state->stack_id    = VMM_ID_INVALID;
 	state->stack_top   = 0u;
-	state->active      = false;
+	state->phase       = USER_UPCALL_PHASE_IDLE;
 	state->initialized = false;
 	memset(&state->interrupted_context, 0, sizeof(state->interrupted_context));
 	uthread_upcall_clear_pending(state);
@@ -92,7 +93,21 @@ enum user_upcall_result uthread_upcall_deliver(struct uthread* thread, struct ha
 		spinlock_unlock_irqrestore(&state->lock, irq_state);
 		return USER_UPCALL_THREAD_DYING;
 	}
-	if (state->active || state->count == 0u) {
+	switch (state->phase) {
+	case USER_UPCALL_PHASE_RESUME:
+		state->phase = USER_UPCALL_PHASE_IDLE;
+		spinlock_unlock_irqrestore(&state->lock, irq_state);
+		return USER_UPCALL_DEFERRED;
+	case USER_UPCALL_PHASE_ACTIVE:
+		spinlock_unlock_irqrestore(&state->lock, irq_state);
+		return USER_UPCALL_IDLE;
+	case USER_UPCALL_PHASE_IDLE:
+		break;
+	default:
+		spinlock_unlock_irqrestore(&state->lock, irq_state);
+		return USER_UPCALL_CONTEXT_INVALID;
+	}
+	if (state->count == 0u) {
 		spinlock_unlock_irqrestore(&state->lock, irq_state);
 		return USER_UPCALL_IDLE;
 	}
@@ -121,7 +136,7 @@ enum user_upcall_result uthread_upcall_deliver(struct uthread* thread, struct ha
 	memset(&state->pending[state->head], 0, sizeof(state->pending[state->head]));
 	state->head = (state->head + 1u) % USER_UPCALL_QUEUE_CAPACITY;
 	state->count--;
-	state->active = true;
+	state->phase = USER_UPCALL_PHASE_ACTIVE;
 	spinlock_unlock_irqrestore(&state->lock, irq_state);
 	return USER_UPCALL_OK;
 }
@@ -134,7 +149,7 @@ enum user_upcall_result uthread_upcall_restore(struct uthread* thread, struct ha
 
 	state     = &thread->upcall;
 	irq_state = spinlock_lock_irqsave(&state->lock);
-	if (!state->active) {
+	if (state->phase != USER_UPCALL_PHASE_ACTIVE) {
 		spinlock_unlock_irqrestore(&state->lock, irq_state);
 		return USER_UPCALL_NOT_ACTIVE;
 	}
@@ -144,7 +159,7 @@ enum user_upcall_result uthread_upcall_restore(struct uthread* thread, struct ha
 	}
 
 	memset(&state->interrupted_context, 0, sizeof(state->interrupted_context));
-	state->active = false;
+	state->phase = USER_UPCALL_PHASE_RESUME;
 	spinlock_unlock_irqrestore(&state->lock, irq_state);
 	return USER_UPCALL_OK;
 }
@@ -170,7 +185,7 @@ bool uthread_upcall_is_active(struct uthread* thread) {
 	if (thread == NULL || !thread->upcall.initialized) return false;
 	state     = &thread->upcall;
 	irq_state = spinlock_lock_irqsave(&state->lock);
-	active    = state->active;
+	active    = state->phase == USER_UPCALL_PHASE_ACTIVE;
 	spinlock_unlock_irqrestore(&state->lock, irq_state);
 	return active;
 }

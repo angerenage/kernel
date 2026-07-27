@@ -107,3 +107,19 @@ Test(user_return, accepts_delivered_upcall) {
 	cr_assert_eq(current_checks, 1u);
 	cr_assert_eq(delivery_checks, 1u);
 }
+
+Test(user_return, accepts_a_deferred_upcall_delivery) {
+	struct hal_userspace_return_frame frame = {
+		.user   = true,
+		.marker = 0x0fedcba987654321ull,
+	};
+
+	user_return_test_reset();
+	delivery_result = USER_UPCALL_DEFERRED;
+	core_finalize_user_return(&frame);
+
+	cr_assert_eq(frame_checks, 1u);
+	cr_assert_eq(current_checks, 1u);
+	cr_assert_eq(delivery_checks, 1u);
+	cr_assert_eq(frame.marker, 0x0fedcba987654321ull);
+}
