@@ -14,6 +14,7 @@ enum {
 	LOONGARCH64_GPR_A0               = 4,
 	LOONGARCH64_GPR_A1               = 5,
 	LOONGARCH64_GPR_A2               = 6,
+	LOONGARCH64_GPR_A3               = 7,
 	LOONGARCH64_THREAD_CTX_S0        = 1,
 	LOONGARCH64_THREAD_CTX_S1,
 	LOONGARCH64_THREAD_CTX_S2,
@@ -99,7 +100,7 @@ bool hal_userspace_context_restore(struct hal_userspace_return_frame*  frame,
 }
 
 bool hal_userspace_frame_redirect(struct hal_userspace_return_frame* frame, uintptr_t entry, uintptr_t stack,
-                                  uintptr_t arg0, uintptr_t arg1, uintptr_t arg2) {
+                                  uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3) {
 	struct exception_frame* native = (struct exception_frame*)frame;
 
 	if (!loongarch64_frame_is_user(native) || entry == 0u || stack == 0u) return false;
@@ -110,5 +111,6 @@ bool hal_userspace_frame_redirect(struct hal_userspace_return_frame* frame, uint
 	native->gpr[LOONGARCH64_GPR_A0] = arg0;
 	native->gpr[LOONGARCH64_GPR_A1] = arg1;
 	native->gpr[LOONGARCH64_GPR_A2] = arg2;
+	native->gpr[LOONGARCH64_GPR_A3] = arg3;
 	return true;
 }

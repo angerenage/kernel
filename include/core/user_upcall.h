@@ -1,5 +1,6 @@
 #pragma once
 
+#include <base/vmm.h>
 #include <core/spinlock.h>
 #include <hal/userspace.h>
 #include <stdbool.h>
@@ -10,59 +11,56 @@ struct hal_userspace_return_frame;
 struct uthread;
 
 enum {
+	USER_UPCALL_ARGUMENT_COUNT = 4u,
 	USER_UPCALL_QUEUE_CAPACITY = 16u,
 };
 
-/* Three architecture-neutral machine-word arguments passed to the userspace entry point. */
-struct user_upcall_event {
-	uintptr_t args[3];
+/* One userspace entry and its opaque arguments. */
+struct user_upcall_request {
+	uintptr_t entry;
+	uintptr_t args[USER_UPCALL_ARGUMENT_COUNT];
 };
 
 enum user_upcall_result {
 	USER_UPCALL_OK = 0,
 	USER_UPCALL_IDLE,
 	USER_UPCALL_INVALID_ARGUMENTS,
-	USER_UPCALL_NOT_CONFIGURED,
-	USER_UPCALL_BUSY,
 	USER_UPCALL_QUEUE_FULL,
 	USER_UPCALL_THREAD_DYING,
 	USER_UPCALL_NOT_ACTIVE,
 	USER_UPCALL_CONTEXT_INVALID,
 };
 
-/* Per-uthread state. Callers must use the helpers below rather than mutating it directly. */
+/* State owned by one userspace thread. */
 struct user_upcall_state {
 	struct spinlock              lock;
-	uintptr_t                    entry;
+	vmm_id_t                     stack_id;
 	uintptr_t                    stack_top;
 	struct hal_userspace_context interrupted_context;
-	struct user_upcall_event     pending[USER_UPCALL_QUEUE_CAPACITY];
+	struct user_upcall_request   pending[USER_UPCALL_QUEUE_CAPACITY];
 	size_t                       head;
 	size_t                       count;
 	bool                         initialized;
-	bool                         configured;
 	bool                         active;
 };
 
-/* Lifecycle hooks owned by uthread initialization and destruction. */
+/* Initialize the state for one thread. */
 void uthread_upcall_state_init(struct uthread* thread);
+
+/* Clear the state for one thread. */
 void uthread_upcall_state_deinit(struct uthread* thread);
 
-/*
- * Configure the userspace entry point and exact stack top. Passing zero for both
- * disables delivery and discards queued events. Configuration cannot change
- * while an upcall is active.
- */
-enum user_upcall_result uthread_upcall_configure(struct uthread* thread, uintptr_t entry, uintptr_t stack_top);
+/* Queue one upcall request. */
+enum user_upcall_result uthread_upcall_enqueue(struct uthread* thread, const struct user_upcall_request* request);
 
-/* Queue one event for FIFO delivery. The target must already be configured. */
-enum user_upcall_result uthread_upcall_enqueue(struct uthread* thread, const struct user_upcall_event* event);
-
-/* Deliver the oldest pending event into frame, or return USER_UPCALL_IDLE when no delivery is required. */
+/* Deliver the next upcall when possible. */
 enum user_upcall_result uthread_upcall_deliver(struct uthread* thread, struct hal_userspace_return_frame* frame);
 
 /* Restore the context interrupted by the active upcall. */
 enum user_upcall_result uthread_upcall_restore(struct uthread* thread, struct hal_userspace_return_frame* frame);
 
+/* Return the number of queued requests. */
 size_t uthread_upcall_pending_count(struct uthread* thread);
-bool   uthread_upcall_is_active(struct uthread* thread);
+
+/* Return whether one upcall is active. */
+bool uthread_upcall_is_active(struct uthread* thread);

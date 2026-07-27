@@ -92,11 +92,21 @@ void x86_64_syscall_init(void) {
 }
 
 bool x86_64_handle_syscall(struct interrupt_frame* frame) {
-	syscall_result_t result;
+	enum syscall_frame_action action;
+	syscall_result_t          result;
 
 	if (frame->vector != X86_SYSCALL_VECTOR) return false;
 
-	result     = syscall_dispatch(frame->rax, frame->rdi, frame->rsi, frame->rdx, frame->r10, frame->r8, frame->r9);
+	action = syscall_dispatch_user_frame((struct hal_userspace_return_frame*)frame,
+	                                     frame->rax,
+	                                     frame->rdi,
+	                                     frame->rsi,
+	                                     frame->rdx,
+	                                     frame->r10,
+	                                     frame->r8,
+	                                     frame->r9,
+	                                     &result);
+	if (action == SYSCALL_FRAME_RESTORED) return true;
 	frame->rax = result.value;
 	frame->rdx = (uint64_t)result.status;
 	return true;

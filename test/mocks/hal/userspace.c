@@ -6,7 +6,7 @@ struct hal_userspace_return_frame {
 	bool      user;
 	uintptr_t entry;
 	uintptr_t stack;
-	uintptr_t args[3];
+	uintptr_t args[4];
 };
 
 #define MOCK_USERSPACE_CONTEXT_MAGIC 0x757063616c6c7631ull
@@ -64,7 +64,7 @@ bool hal_userspace_context_restore(struct hal_userspace_return_frame*  frame,
 }
 
 bool hal_userspace_frame_redirect(struct hal_userspace_return_frame* frame, uintptr_t entry, uintptr_t stack,
-                                  uintptr_t arg0, uintptr_t arg1, uintptr_t arg2) {
+                                  uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3) {
 	if (!hal_userspace_frame_is_user(frame) || entry == 0u || stack == 0u) return false;
 	if ((stack & (HAL_USERSPACE_STACK_ALIGNMENT - 1u)) != 0u) return false;
 
@@ -73,6 +73,7 @@ bool hal_userspace_frame_redirect(struct hal_userspace_return_frame* frame, uint
 	frame->args[0] = arg0;
 	frame->args[1] = arg1;
 	frame->args[2] = arg2;
+	frame->args[3] = arg3;
 	return true;
 }
 

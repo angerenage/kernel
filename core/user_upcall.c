@@ -25,6 +25,7 @@ void uthread_upcall_state_init(struct uthread* thread) {
 	                    "uthread_upcall",
 	                    SPINLOCK_ORDER_USER_UPCALL,
 	                    SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
+	state->stack_id    = VMM_ID_INVALID;
 	state->initialized = true;
 }
 
@@ -37,9 +38,8 @@ void uthread_upcall_state_deinit(struct uthread* thread) {
 	if (!state->initialized) return;
 
 	irq_state          = spinlock_lock_irqsave(&state->lock);
-	state->entry       = 0u;
+	state->stack_id    = VMM_ID_INVALID;
 	state->stack_top   = 0u;
-	state->configured  = false;
 	state->active      = false;
 	state->initialized = false;
 	memset(&state->interrupted_context, 0, sizeof(state->interrupted_context));
@@ -47,15 +47,12 @@ void uthread_upcall_state_deinit(struct uthread* thread) {
 	spinlock_unlock_irqrestore(&state->lock, irq_state);
 }
 
-enum user_upcall_result uthread_upcall_configure(struct uthread* thread, uintptr_t entry, uintptr_t stack_top) {
+enum user_upcall_result uthread_upcall_enqueue(struct uthread* thread, const struct user_upcall_request* request) {
 	struct user_upcall_state* state;
 	struct irq_state          irq_state;
-	bool                      disable;
+	size_t                    tail;
 
-	if (thread == NULL || !thread->upcall.initialized) return USER_UPCALL_INVALID_ARGUMENTS;
-	disable = entry == 0u && stack_top == 0u;
-	if (!disable && (entry == 0u || stack_top == 0u)) return USER_UPCALL_INVALID_ARGUMENTS;
-	if (!disable && (stack_top & (HAL_USERSPACE_STACK_ALIGNMENT - 1u)) != 0u) {
+	if (thread == NULL || request == NULL || request->entry == 0u || !thread->upcall.initialized) {
 		return USER_UPCALL_INVALID_ARGUMENTS;
 	}
 	if (uthread_upcall_thread_dying(thread)) return USER_UPCALL_THREAD_DYING;
@@ -70,56 +67,22 @@ enum user_upcall_result uthread_upcall_configure(struct uthread* thread, uintptr
 		spinlock_unlock_irqrestore(&state->lock, irq_state);
 		return USER_UPCALL_THREAD_DYING;
 	}
-	if (state->active) {
-		spinlock_unlock_irqrestore(&state->lock, irq_state);
-		return USER_UPCALL_BUSY;
-	}
-
-	state->entry      = entry;
-	state->stack_top  = stack_top;
-	state->configured = !disable;
-	if (disable) {
-		memset(&state->interrupted_context, 0, sizeof(state->interrupted_context));
-		uthread_upcall_clear_pending(state);
-	}
-	spinlock_unlock_irqrestore(&state->lock, irq_state);
-	return USER_UPCALL_OK;
-}
-
-enum user_upcall_result uthread_upcall_enqueue(struct uthread* thread, const struct user_upcall_event* event) {
-	struct user_upcall_state* state;
-	struct irq_state          irq_state;
-	size_t                    tail;
-
-	if (thread == NULL || event == NULL || !thread->upcall.initialized) return USER_UPCALL_INVALID_ARGUMENTS;
-	if (uthread_upcall_thread_dying(thread)) return USER_UPCALL_THREAD_DYING;
-
-	state     = &thread->upcall;
-	irq_state = spinlock_lock_irqsave(&state->lock);
-	if (!state->configured) {
-		spinlock_unlock_irqrestore(&state->lock, irq_state);
-		return USER_UPCALL_NOT_CONFIGURED;
-	}
-	if (uthread_upcall_thread_dying(thread)) {
-		spinlock_unlock_irqrestore(&state->lock, irq_state);
-		return USER_UPCALL_THREAD_DYING;
-	}
 	if (state->count == USER_UPCALL_QUEUE_CAPACITY) {
 		spinlock_unlock_irqrestore(&state->lock, irq_state);
 		return USER_UPCALL_QUEUE_FULL;
 	}
 
 	tail                 = (state->head + state->count) % USER_UPCALL_QUEUE_CAPACITY;
-	state->pending[tail] = *event;
+	state->pending[tail] = *request;
 	state->count++;
 	spinlock_unlock_irqrestore(&state->lock, irq_state);
 	return USER_UPCALL_OK;
 }
 
 enum user_upcall_result uthread_upcall_deliver(struct uthread* thread, struct hal_userspace_return_frame* frame) {
-	struct user_upcall_state* state;
-	struct user_upcall_event  event;
-	struct irq_state          irq_state;
+	struct user_upcall_state*  state;
+	struct user_upcall_request request;
+	struct irq_state           irq_state;
 
 	if (thread == NULL || frame == NULL || !thread->upcall.initialized) return USER_UPCALL_INVALID_ARGUMENTS;
 
@@ -129,18 +92,27 @@ enum user_upcall_result uthread_upcall_deliver(struct uthread* thread, struct ha
 		spinlock_unlock_irqrestore(&state->lock, irq_state);
 		return USER_UPCALL_THREAD_DYING;
 	}
-	if (!state->configured || state->active || state->count == 0u) {
+	if (state->active || state->count == 0u) {
 		spinlock_unlock_irqrestore(&state->lock, irq_state);
 		return USER_UPCALL_IDLE;
 	}
+	if (state->stack_id == VMM_ID_INVALID || state->stack_top == 0u) {
+		spinlock_unlock_irqrestore(&state->lock, irq_state);
+		return USER_UPCALL_CONTEXT_INVALID;
+	}
 
-	event = state->pending[state->head];
+	request = state->pending[state->head];
 	if (!hal_userspace_context_save(&state->interrupted_context, frame)) {
 		spinlock_unlock_irqrestore(&state->lock, irq_state);
 		return USER_UPCALL_CONTEXT_INVALID;
 	}
-	if (!hal_userspace_frame_redirect(
-			frame, state->entry, state->stack_top, event.args[0], event.args[1], event.args[2])) {
+	if (!hal_userspace_frame_redirect(frame,
+	                                  request.entry,
+	                                  state->stack_top,
+	                                  request.args[0],
+	                                  request.args[1],
+	                                  request.args[2],
+	                                  request.args[3])) {
 		memset(&state->interrupted_context, 0, sizeof(state->interrupted_context));
 		spinlock_unlock_irqrestore(&state->lock, irq_state);
 		return USER_UPCALL_CONTEXT_INVALID;

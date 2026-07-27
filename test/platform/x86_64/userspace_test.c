@@ -84,26 +84,28 @@ Test(x86_64_userspace, redirects_only_control_and_argument_registers) {
 	struct user_interrupt_frame before = user_frame();
 	struct user_interrupt_frame frame  = before;
 
-	cr_assert(hal_userspace_frame_redirect(opaque_frame(&frame), 0x4000u, 0x9000u, 0x11u, 0x22u, 0x33u));
+	cr_assert(hal_userspace_frame_redirect(opaque_frame(&frame), 0x4000u, 0x9000u, 0x11u, 0x22u, 0x33u, 0x44u));
 	cr_assert_eq(frame.frame.rip, 0x4000u);
 	cr_assert_eq(frame.rsp, 0x9000u);
 	cr_assert_eq(frame.frame.rdi, 0x11u);
 	cr_assert_eq(frame.frame.rsi, 0x22u);
 	cr_assert_eq(frame.frame.rdx, 0x33u);
+	cr_assert_eq(frame.frame.rcx, 0x44u);
 
 	frame.frame.rip = before.frame.rip;
 	frame.rsp       = before.rsp;
 	frame.frame.rdi = before.frame.rdi;
 	frame.frame.rsi = before.frame.rsi;
 	frame.frame.rdx = before.frame.rdx;
+	frame.frame.rcx = before.frame.rcx;
 	cr_assert_eq(memcmp(&frame, &before, sizeof(frame)), 0);
 }
 
 Test(x86_64_userspace, rejects_invalid_redirect_targets) {
 	struct user_interrupt_frame frame = user_frame();
 
-	cr_assert_not(hal_userspace_frame_redirect(opaque_frame(&frame), 0u, 0x9000u, 0u, 0u, 0u));
-	cr_assert_not(hal_userspace_frame_redirect(opaque_frame(&frame), 0x4000u, 0x9008u, 0u, 0u, 0u));
+	cr_assert_not(hal_userspace_frame_redirect(opaque_frame(&frame), 0u, 0x9000u, 0u, 0u, 0u, 0u));
+	cr_assert_not(hal_userspace_frame_redirect(opaque_frame(&frame), 0x4000u, 0x9008u, 0u, 0u, 0u, 0u));
 	frame.frame.cs = 0x08u;
-	cr_assert_not(hal_userspace_frame_redirect(opaque_frame(&frame), 0x4000u, 0x9000u, 0u, 0u, 0u));
+	cr_assert_not(hal_userspace_frame_redirect(opaque_frame(&frame), 0x4000u, 0x9000u, 0u, 0u, 0u, 0u));
 }

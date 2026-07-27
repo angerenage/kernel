@@ -12,6 +12,7 @@
 #include <criterion/criterion.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>
+#include <hal/userspace.h>
 
 #include "../mocks/hal/cpu_mock.h"
 #include "../vmm/test_support.h"
@@ -119,6 +120,10 @@ Test(uthread, detached_start_registers_finalizer_before_queueing) {
 	result = uthread_start(&worker, &params);
 	cr_assert_eq(result, UTHREAD_START_OK, "uthread_start failed: %d", result);
 
+	cr_assert_neq(worker.upcall.stack_id, VMM_ID_INVALID, "uthread_start should allocate an upcall stack");
+	cr_assert_neq(worker.upcall.stack_top, 0u, "uthread_start should publish the upcall stack top");
+	cr_assert_eq(
+		worker.upcall.stack_top & (HAL_USERSPACE_STACK_ALIGNMENT - 1u), 0u, "upcall stack top should be aligned");
 	cr_assert_eq(worker.process, process, "uthread should retain its owning process");
 	cr_assert_neq(uthread_id(&worker), UTHREAD_ID_INVALID, "uthread_start should assign a valid TID");
 	cr_assert_eq(uthread_lookup(uthread_id(&worker)), &worker, "TID lookup should return the started uthread");
@@ -266,6 +271,7 @@ Test(uthread, retained_descriptor_defers_final_cleanup) {
 	uthread_release(held);
 	cr_assert_eq(process_thread_count(process), 1u, "the last reference should perform final cleanup");
 	cr_assert_eq(worker.user_stack_id, VMM_ID_INVALID);
+	cr_assert_eq(worker.upcall.stack_id, VMM_ID_INVALID);
 	cr_assert_eq(worker.kernel_stack_id, VMM_ID_INVALID);
 
 	terminate_main_thread(process);

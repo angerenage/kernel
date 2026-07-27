@@ -47,7 +47,7 @@ bool hal_userspace_context_restore(struct hal_userspace_return_frame*  frame,
 
 /*
  * Redirect a userspace return frame to entry on the exact supplied stack pointer.
- * Only the program counter, stack pointer, and first three integer argument registers change.
+ * Only the program counter, stack pointer, and first four integer argument registers change.
  */
 bool hal_userspace_frame_redirect(struct hal_userspace_return_frame* frame, uintptr_t entry, uintptr_t stack,
-                                  uintptr_t arg0, uintptr_t arg1, uintptr_t arg2);
+                                  uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3);

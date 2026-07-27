@@ -55,6 +55,7 @@ userspace_system_sources = files(
 	'system/process.c',
 	'system/thread.c',
 	'system/time.c',
+	'system/upcall.c',
 	'platforms/' + platform + '/syscall.c',
 )
 

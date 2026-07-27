@@ -232,6 +232,15 @@ test_suites = [
 		'suites': ['unit', 'memory'],
 	},
 	{
+		'name': 'upcall_syscall',
+		'sources': files(
+			'core/upcall_syscall_test.c',
+			'../core/syscall/upcall.c',
+		),
+		'link_with': base_test_lib,
+		'suites': ['unit', 'core'],
+	},
+	{
 		'name': 'user_upcall',
 		'sources': files(
 			'core/user_upcall_test.c',

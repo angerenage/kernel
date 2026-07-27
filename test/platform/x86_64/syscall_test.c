@@ -9,8 +9,9 @@
 
 #include "../../../platforms/pc_x86_64/hal/interrupts_private.h"
 
-static uintptr_t dispatched_number;
-static uintptr_t dispatched_args[6];
+static uintptr_t                 dispatched_number;
+static uintptr_t                 dispatched_args[6];
+static enum syscall_frame_action dispatched_action;
 
 void x86_64_syscall_entry(void) {
 }
@@ -25,8 +26,11 @@ void hcf(void) {
 	abort();
 }
 
-syscall_result_t syscall_dispatch(uintptr_t number, uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
-                                  uintptr_t arg4, uintptr_t arg5) {
+enum syscall_frame_action syscall_dispatch_user_frame(struct hal_userspace_return_frame* opaque_frame, uintptr_t number,
+                                                      uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
+                                                      uintptr_t arg4, uintptr_t arg5, syscall_result_t* out_result) {
+	struct interrupt_frame* frame = (struct interrupt_frame*)opaque_frame;
+
 	dispatched_number  = number;
 	dispatched_args[0] = arg0;
 	dispatched_args[1] = arg1;
@@ -34,7 +38,13 @@ syscall_result_t syscall_dispatch(uintptr_t number, uintptr_t arg0, uintptr_t ar
 	dispatched_args[3] = arg3;
 	dispatched_args[4] = arg4;
 	dispatched_args[5] = arg5;
-	return syscall_result_error(SYSCALL_STATUS_FAILED, 0xfeedu);
+	if (dispatched_action == SYSCALL_FRAME_RESTORED) {
+		frame->rax = 0xcafeu;
+		frame->rdx = 0xbeefu;
+		return SYSCALL_FRAME_RESTORED;
+	}
+	*out_result = syscall_result_error(SYSCALL_STATUS_FAILED, 0xfeedu);
+	return SYSCALL_FRAME_WRITE_RESULT;
 }
 
 static struct user_interrupt_frame valid_user_frame(void) {
@@ -57,6 +67,7 @@ static struct user_interrupt_frame valid_user_frame(void) {
 }
 
 Test(x86_64_syscall, dispatches_six_arguments_from_the_normalized_frame) {
+	dispatched_action            = SYSCALL_FRAME_WRITE_RESULT;
 	struct interrupt_frame frame = {
 		.rax    = 0x10u,
 		.rdi    = 0x20u,
@@ -78,6 +89,20 @@ Test(x86_64_syscall, dispatches_six_arguments_from_the_normalized_frame) {
 	cr_assert_eq(dispatched_args[5], 0x70u);
 	cr_assert_eq(frame.rax, 0xfeedu);
 	cr_assert_eq(frame.rdx, SYSCALL_STATUS_FAILED);
+}
+
+Test(x86_64_syscall, preserves_a_frame_restored_by_the_common_dispatcher) {
+	struct interrupt_frame frame = {
+		.rax    = SYSCALL_UPCALL_RETURN,
+		.rdx    = 0x44u,
+		.vector = X86_SYSCALL_VECTOR,
+	};
+
+	dispatched_action = SYSCALL_FRAME_RESTORED;
+	cr_assert(x86_64_handle_syscall(&frame));
+	cr_assert_eq(frame.rax, 0xcafeu);
+	cr_assert_eq(frame.rdx, 0xbeefu);
+	dispatched_action = SYSCALL_FRAME_WRITE_RESULT;
 }
 
 Test(x86_64_syscall, ignores_non_syscall_vectors) {

@@ -19,7 +19,8 @@
 
 enum {
 	UTHREAD_KERNEL_STACK_PAGES   = 4u,
-	UTHREAD_USER_STACK_ALIGNMENT = 16u,
+	UTHREAD_UPCALL_STACK_PAGES   = 4u,
+	UTHREAD_USER_STACK_ALIGNMENT = HAL_USERSPACE_STACK_ALIGNMENT,
 };
 
 #define UTHREAD_REAPER_MAX_CPUS 64u
@@ -144,6 +145,11 @@ static void uthread_release_stacks(struct uthread* thread) {
 	if (thread == NULL) return;
 
 	address_space = process_address_space(thread->process);
+	if (thread->upcall.stack_id != VMM_ID_INVALID && address_space != NULL) {
+		(void)vmm_free(address_space, thread->upcall.stack_id);
+		thread->upcall.stack_id = VMM_ID_INVALID;
+	}
+	thread->upcall.stack_top = 0u;
 	if (thread->user_stack_id != VMM_ID_INVALID && address_space != NULL) {
 		(void)vmm_free(address_space, thread->user_stack_id);
 		thread->user_stack_id = VMM_ID_INVALID;
@@ -160,9 +166,9 @@ static void uthread_free(struct uthread* thread) {
 	if (thread == NULL) return;
 
 	heap_allocated = thread->heap_allocated;
-	uthread_upcall_state_deinit(thread);
 	(void)uthread_destroy_cap_object(thread);
 	uthread_release_stacks(thread);
+	uthread_upcall_state_deinit(thread);
 	uthread_detach_process(thread);
 	uthread_release_name(thread);
 	thread->process = NULL;
@@ -174,6 +180,7 @@ static void uthread_free(struct uthread* thread) {
 	memset(thread, 0, sizeof(*thread));
 	thread->user_stack_id   = VMM_ID_INVALID;
 	thread->kernel_stack_id = VMM_ID_INVALID;
+	thread->upcall.stack_id = VMM_ID_INVALID;
 	thread->cap_object_id   = CAP_OBJECT_ID_INVALID;
 }
 
@@ -280,6 +287,14 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 		.guard_pages = VMM_STACK_DEFAULT_GUARD_PAGES,
 		.map_flags   = 0u,
 	};
+	struct vmm_alloc_params upcall_stack_params = {
+		.page_count  = UTHREAD_UPCALL_STACK_PAGES,
+		.align_pages = 1u,
+		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
+		.kind        = VMM_KIND_STACK,
+		.guard_pages = VMM_STACK_DEFAULT_GUARD_PAGES,
+		.map_flags   = 0u,
+	};
 	struct vmm_alloc_params kernel_stack_params = {
 		.page_count  = UTHREAD_KERNEL_STACK_PAGES,
 		.align_pages = 1u,
@@ -293,6 +308,7 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 	struct address_space*        address_space;
 	enum thread_init_result      init_result;
 	void*                        user_stack_base   = NULL;
+	void*                        upcall_stack_base = NULL;
 	void*                        kernel_stack_base = NULL;
 	size_t                       user_stack_pages;
 	uintptr_t                    kernel_stack_top;
@@ -343,6 +359,13 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 		uthread_unregister_id(thread);
 		return UTHREAD_START_STACK_ALLOC_FAILED;
 	}
+	if (!vmm_alloc(address_space, &upcall_stack_params, &thread->upcall.stack_id, &upcall_stack_base)) {
+		uthread_release_name(thread);
+		uthread_release_stacks(thread);
+		uthread_unregister_id(thread);
+		return UTHREAD_START_STACK_ALLOC_FAILED;
+	}
+	thread->upcall.stack_top = (uintptr_t)upcall_stack_base + UTHREAD_UPCALL_STACK_PAGES * (uintptr_t)PMM_PAGE_SIZE;
 	if (!vmm_alloc(address_space_kernel(), &kernel_stack_params, &thread->kernel_stack_id, &kernel_stack_base)) {
 		uthread_release_name(thread);
 		uthread_release_stacks(thread);
@@ -437,6 +460,7 @@ enum uthread_start_result uthread_spawn_detached(struct uthread**               
 	*thread = (struct uthread){
 		.user_stack_id   = VMM_ID_INVALID,
 		.kernel_stack_id = VMM_ID_INVALID,
+		.upcall          = {.stack_id = VMM_ID_INVALID},
 		.heap_allocated  = true,
 	};
 

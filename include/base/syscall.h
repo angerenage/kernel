@@ -42,6 +42,9 @@ enum {
 	SYSCALL_CAP_REVOKE,
 	SYSCALL_CAP_RECV,
 
+	/* Userspace upcalls */
+	SYSCALL_UPCALL_RETURN,
+
 	SYSCALL_COUNT,
 };
 

@@ -103,7 +103,7 @@ bool hal_userspace_context_restore(struct hal_userspace_return_frame*  frame,
 }
 
 bool hal_userspace_frame_redirect(struct hal_userspace_return_frame* frame, uintptr_t entry, uintptr_t stack,
-                                  uintptr_t arg0, uintptr_t arg1, uintptr_t arg2) {
+                                  uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3) {
 	struct user_interrupt_frame* native = (struct user_interrupt_frame*)frame;
 
 	if (!x86_64_frame_is_user(native) || entry == 0u || stack == 0u) return false;
@@ -114,5 +114,6 @@ bool hal_userspace_frame_redirect(struct hal_userspace_return_frame* frame, uint
 	native->frame.rdi = arg0;
 	native->frame.rsi = arg1;
 	native->frame.rdx = arg2;
+	native->frame.rcx = arg3;
 	return true;
 }
