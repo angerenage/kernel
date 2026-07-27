@@ -7,6 +7,38 @@
 
 #define X86_RFLAGS_DIRECTION (1ull << 10)
 
+static struct hal_cpu_fp_context live_fp_context;
+
+bool hal_cpu_fp_init(void) {
+	hal_cpu_fp_context_init(&live_fp_context);
+	return true;
+}
+
+void hal_cpu_fp_context_init(struct hal_cpu_fp_context* context) {
+	if (context == NULL) return;
+	memset(context, 0, sizeof(*context));
+}
+
+void hal_cpu_fp_context_save(struct hal_cpu_fp_context* context) {
+	if (context == NULL) return;
+	*context = live_fp_context;
+}
+
+void hal_cpu_fp_context_restore(const struct hal_cpu_fp_context* context) {
+	if (context == NULL) return;
+	live_fp_context = *context;
+}
+
+Test(x86_64_userspace, exposes_aligned_fp_context_storage) {
+	struct hal_cpu_fp_context context;
+	uintptr_t                 base = (uintptr_t)&context;
+	uintptr_t                 data = (uintptr_t)hal_cpu_fp_context_data(&context);
+
+	cr_assert_eq(data & (HAL_CPU_FP_CONTEXT_ALIGNMENT - 1u), 0u);
+	cr_assert(data >= base);
+	cr_assert(data + HAL_CPU_FP_CONTEXT_SIZE <= base + sizeof(context));
+}
+
 void x86_64_userspace_enter(void) {
 }
 
@@ -59,17 +91,22 @@ Test(x86_64_userspace, recognizes_only_complete_user_frames) {
 	cr_assert_not(hal_userspace_frame_is_user(NULL));
 }
 
-Test(x86_64_userspace, saves_and_restores_the_complete_integer_frame) {
+Test(x86_64_userspace, saves_and_restores_the_complete_user_context) {
 	struct user_interrupt_frame  original = user_frame();
 	struct user_interrupt_frame  frame    = original;
 	struct hal_userspace_context context;
+	struct hal_cpu_fp_context    original_fp;
 
+	memset(&live_fp_context, 0x5a, sizeof(live_fp_context));
+	original_fp = live_fp_context;
 	cr_assert(hal_userspace_context_save(&context, opaque_const_frame(&frame)));
 	memset(&frame, 0xa5, sizeof(frame));
+	memset(&live_fp_context, 0xa5, sizeof(live_fp_context));
 	frame.frame.cs = X86_GDT_USER_CODE_SELECTOR | 0x3u;
 	frame.ss       = X86_GDT_USER_DATA_SELECTOR | 0x3u;
 	cr_assert(hal_userspace_context_restore(opaque_frame(&frame), &context));
 	cr_assert_eq(memcmp(&frame, &original, sizeof(frame)), 0);
+	cr_assert_eq(memcmp(&live_fp_context, &original_fp, sizeof(original_fp)), 0);
 }
 
 Test(x86_64_userspace, rejects_non_user_saved_contexts) {

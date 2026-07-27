@@ -42,4 +42,34 @@ x86_64_thread_entry:
 	mov rdi, r13
 	jmp r12
 
+
+.global x86_64_fp_init
+x86_64_fp_init:
+	mov rax, cr0
+	and rax, -13
+	or rax, 0x22
+	mov cr0, rax
+	mov rax, cr4
+	or rax, (1 << 9) | (1 << 10)
+	mov cr4, rax
+	fninit
+	ldmxcsr [rip + .Lx86_default_mxcsr]
+	mov eax, 1
+	ret
+
+.global x86_64_fp_context_save
+x86_64_fp_context_save:
+	fxsave64 [rdi]
+	ret
+
+.global x86_64_fp_context_restore
+x86_64_fp_context_restore:
+	fxrstor64 [rdi]
+	ret
+
+.section .rodata
+.balign 4
+.Lx86_default_mxcsr:
+	.long 0x1f80
+
 .section .note.GNU-stack,"",@progbits

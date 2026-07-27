@@ -2,6 +2,7 @@
 #include <core/sched.h>
 #include <core/spinlock.h>
 #include <hal/cpu.h>
+#include <hal/hcf.h>
 #include <hal/interrupts.h>
 #include <kernel/boot.h>
 #include <kernel/cpu_boot.h>
@@ -69,6 +70,7 @@ void kernel_cpu_boot_bind_current(struct cpu* cpu) {
 	if (cpu == NULL) return;
 
 	cpu_bind_current(cpu);
+	if (!hal_cpu_fp_init()) hcf();
 	if (cpu->index < CPU_BOOT_MAX_COUNT) {
 		__atomic_store_n(&cpu_current_ok[cpu->index], cpu_current() == cpu, __ATOMIC_RELEASE);
 	}

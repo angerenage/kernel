@@ -49,6 +49,7 @@ bool hal_userspace_context_save(struct hal_userspace_context* context, const str
 	};
 	memset(context, 0, sizeof(*context));
 	memcpy(context->opaque, &saved, sizeof(saved));
+	hal_cpu_fp_context_save(&context->fp_context);
 	return true;
 }
 
@@ -59,6 +60,7 @@ bool hal_userspace_context_restore(struct hal_userspace_return_frame*  frame,
 	if (context == NULL || !hal_userspace_frame_is_user(frame)) return false;
 	memcpy(&saved, context->opaque, sizeof(saved));
 	if (saved.magic != MOCK_USERSPACE_CONTEXT_MAGIC || !hal_userspace_frame_is_user(&saved.frame)) return false;
+	hal_cpu_fp_context_restore(&context->fp_context);
 	*frame = saved.frame;
 	return true;
 }

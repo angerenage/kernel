@@ -321,7 +321,7 @@ case "$TARGET_ARCH" in
 		qemu_args=(
 			-M virt,acpi=off,pflash0=pflash0,pflash1=pflash1
 			-smp 4
-			-cpu rv64
+			-cpu rv64,v=true,vlen=128,elen=64
 			-m 2G
 			-device virtio-scsi-pci,id=scsi0
 			-drive "file=${ISO_PATH},format=raw,media=cdrom,if=none,id=cdrom0,readonly=on"

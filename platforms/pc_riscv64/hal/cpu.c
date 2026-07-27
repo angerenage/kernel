@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #define RISCV64_SBI_EID_BASE 0x10ul
 #define RISCV64_SBI_FID_PROBE_EXTENSION 3ul
@@ -30,10 +31,14 @@ enum {
 	RISCV64_THREAD_CTX_S11,
 };
 
+extern bool riscv64_fp_init(void);
+extern void riscv64_fp_context_save(void* context);
+extern void riscv64_fp_context_restore(const void* context);
 extern void riscv64_thread_context_switch(struct thread_context* current, const struct thread_context* next);
 extern void riscv64_thread_entry(void);
 
 _Static_assert(HAL_CPU_THREAD_CONTEXT_SPILL_WORDS > RISCV64_THREAD_CTX_S11, "riscv64 thread spill area is too small");
+_Static_assert(HAL_CPU_FP_CONTEXT_SIZE >= 832u, "riscv64 FP/vector area is too small");
 
 static struct riscv64_sbi_ret riscv64_sbi_call2(unsigned long arg0, unsigned long arg1, unsigned long fid,
                                                 unsigned long eid) {
@@ -84,11 +89,33 @@ bool hal_cpu_thread_context_init(struct thread_context* context, uintptr_t stack
 	};
 	context->spill[RISCV64_THREAD_CTX_S0] = entry_pc;
 	context->spill[RISCV64_THREAD_CTX_S1] = entry_arg;
+	hal_cpu_fp_context_init(&context->fp_context);
 	return true;
+}
+
+bool hal_cpu_fp_init(void) {
+	return riscv64_fp_init();
+}
+
+void hal_cpu_fp_context_init(struct hal_cpu_fp_context* context) {
+	if (context == NULL) return;
+	memset(context, 0, sizeof(*context));
+}
+
+void hal_cpu_fp_context_save(struct hal_cpu_fp_context* context) {
+	if (context == NULL) return;
+	riscv64_fp_context_save(hal_cpu_fp_context_data(context));
+}
+
+void hal_cpu_fp_context_restore(const struct hal_cpu_fp_context* context) {
+	if (context == NULL) return;
+	riscv64_fp_context_restore(hal_cpu_fp_context_const_data(context));
 }
 
 void hal_cpu_context_switch(struct thread_context* current, const struct thread_context* next) {
 	if (current == NULL || next == NULL) return;
+	hal_cpu_fp_context_save(&current->fp_context);
+	hal_cpu_fp_context_restore(&next->fp_context);
 	riscv64_thread_context_switch(current, next);
 }
 

@@ -160,6 +160,7 @@ void thread_init_idle(struct thread* thread, struct cpu* cpu, const char* name) 
 		.reap_callback       = NULL,
 		.reap_context        = NULL,
 	};
+	hal_cpu_fp_context_init(&thread->context.fp_context);
 	thread_wait_queue_init(&thread->join_wait_queue);
 	thread_wait_queue_init(&thread->park_wait_queue);
 }

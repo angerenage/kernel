@@ -4,6 +4,18 @@ platform_kernel_c_args += [
 	'-DPLATFORM_PC_X86_64',
 	'-mno-red-zone',
 	'-mcmodel=kernel',
+	'-mno-80387',
+	'-mno-mmx',
+	'-mno-sse',
+	'-mno-sse2',
+]
+
+platform_userspace_c_args += [
+	'-msse2',
+	'-mfpmath=sse',
+	'-mno-avx',
+	'-mno-avx2',
+	'-mno-avx512f',
 ]
 
 platform_kernel_objects += [

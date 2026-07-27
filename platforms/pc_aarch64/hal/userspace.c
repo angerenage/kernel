@@ -30,8 +30,8 @@ struct arch_userspace_context {
 
 _Static_assert(HAL_CPU_THREAD_CONTEXT_SPILL_WORDS > AARCH64_THREAD_CTX_X22,
                "aarch64 userspace spill area is too small");
-_Static_assert(sizeof(struct arch_userspace_context) <= HAL_USERSPACE_CONTEXT_SIZE,
-               "aarch64 userspace context storage is too small");
+_Static_assert(sizeof(struct arch_userspace_context) <= HAL_USERSPACE_INTEGER_CONTEXT_SIZE,
+               "aarch64 integer userspace context storage is too small");
 _Static_assert(offsetof(struct exception_frame, x[0]) == 0u, "aarch64 userspace x0 offset mismatch");
 _Static_assert(offsetof(struct exception_frame, elr) == 272u, "aarch64 userspace elr offset mismatch");
 _Static_assert(offsetof(struct exception_frame, spsr) == 280u, "aarch64 userspace spsr offset mismatch");
@@ -60,6 +60,7 @@ bool hal_userspace_thread_context_init(struct thread_context* context, uintptr_t
 	context->spill[AARCH64_THREAD_CTX_X20] = user_arg;
 	context->spill[AARCH64_THREAD_CTX_X21] = user_sp;
 	context->spill[AARCH64_THREAD_CTX_X22] = AARCH64_USER_SPSR_EL0T;
+	hal_cpu_fp_context_init(&context->fp_context);
 	return true;
 }
 
@@ -78,6 +79,7 @@ bool hal_userspace_context_save(struct hal_userspace_context* context, const str
 	};
 	memset(context, 0, sizeof(*context));
 	memcpy(context->opaque, &saved, sizeof(saved));
+	hal_cpu_fp_context_save(&context->fp_context);
 	return true;
 }
 
@@ -89,6 +91,7 @@ bool hal_userspace_context_restore(struct hal_userspace_return_frame*  frame,
 	if (context == NULL || !aarch64_frame_is_user(native)) return false;
 	memcpy(&saved, context->opaque, sizeof(saved));
 	if (saved.magic != HAL_USERSPACE_CONTEXT_MAGIC || !aarch64_frame_is_user(&saved.frame)) return false;
+	hal_cpu_fp_context_restore(&context->fp_context);
 	*native = saved.frame;
 	return true;
 }

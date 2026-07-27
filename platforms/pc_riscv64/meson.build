@@ -2,6 +2,14 @@ platform_limine_arch = 'riscv64'
 
 platform_kernel_c_args += [
 	'-DPLATFORM_PC_RISCV64',
+	'-march=rv64imac',
+	'-mabi=lp64',
+]
+
+platform_userspace_c_args += [
+	'-march=rv64gcv',
+	'-mabi=lp64d',
+	'-mrvv-vector-bits=128',
 ]
 
 platform_kernel_objects += [

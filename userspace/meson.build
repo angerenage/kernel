@@ -9,6 +9,7 @@ userspace_c_args = freestanding_c_args + [
 	'-fno-pic',
 	'-fno-pie',
 ]
+userspace_c_args += platform_userspace_c_args
 
 if get_option('debug')
 	userspace_c_args += ['-DRUNTIME_DIAGNOSTICS=1']

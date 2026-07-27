@@ -12,10 +12,12 @@ clang_aarch64_elf = generator(clang,
 
 clang_riscv64_elf = generator(clang,
 	output : ['@BASENAME@.o'],
-	arguments : ['--target=riscv64-elf', '-c', '-x', 'assembler', '-o', '@OUTPUT@', '@INPUT@']
+	arguments : ['--target=riscv64-elf', '-march=rv64gcv', '-mabi=lp64',
+		'-c', '-x', 'assembler', '-o', '@OUTPUT@', '@INPUT@']
 )
 
 clang_loongarch64_elf = generator(clang,
 	output : ['@BASENAME@.o'],
-	arguments : ['--target=loongarch64-unknown-elf', '-c', '-x', 'assembler', '-o', '@OUTPUT@', '@INPUT@']
+	arguments : ['--target=loongarch64-unknown-none-gnusf', '-mlasx',
+		'-c', '-x', 'assembler', '-o', '@OUTPUT@', '@INPUT@']
 )

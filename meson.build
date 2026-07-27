@@ -36,6 +36,7 @@ subdir('toolchain/meson')
 
 platform_kernel_objects = []
 platform_kernel_c_args = []
+platform_userspace_c_args = []
 platform_kernel_link_args = []
 platform_limine_arch = ''
 

@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "interrupts_private.h"
 
@@ -19,10 +20,14 @@ enum {
 	X86_THREAD_CTX_R15,
 };
 
+extern bool x86_64_fp_init(void);
+extern void x86_64_fp_context_save(void* context);
+extern void x86_64_fp_context_restore(const void* context);
 extern void x86_64_thread_context_switch(struct thread_context* current, const struct thread_context* next);
 extern void x86_64_thread_entry(void);
 
 _Static_assert(HAL_CPU_THREAD_CONTEXT_SPILL_WORDS > X86_THREAD_CTX_R15, "x86_64 thread spill area is too small");
+_Static_assert(HAL_CPU_FP_CONTEXT_SIZE >= 512u, "x86_64 FXSAVE area is too small");
 
 uint64_t hal_cpu_boot_arch_id(void) {
 	uint32_t eax;
@@ -81,11 +86,40 @@ bool hal_cpu_thread_context_init(struct thread_context* context, uintptr_t stack
 	};
 	context->spill[X86_THREAD_CTX_R12] = entry_pc;
 	context->spill[X86_THREAD_CTX_R13] = entry_arg;
+	hal_cpu_fp_context_init(&context->fp_context);
 	return true;
+}
+
+bool hal_cpu_fp_init(void) {
+	return x86_64_fp_init();
+}
+
+void hal_cpu_fp_context_init(struct hal_cpu_fp_context* context) {
+	const uint16_t control_word = 0x037fu;
+	const uint32_t mxcsr        = 0x1f80u;
+	unsigned char* data;
+
+	if (context == NULL) return;
+	memset(context, 0, sizeof(*context));
+	data = hal_cpu_fp_context_data(context);
+	memcpy(&data[0], &control_word, sizeof(control_word));
+	memcpy(&data[24], &mxcsr, sizeof(mxcsr));
+}
+
+void hal_cpu_fp_context_save(struct hal_cpu_fp_context* context) {
+	if (context == NULL) return;
+	x86_64_fp_context_save(hal_cpu_fp_context_data(context));
+}
+
+void hal_cpu_fp_context_restore(const struct hal_cpu_fp_context* context) {
+	if (context == NULL) return;
+	x86_64_fp_context_restore(hal_cpu_fp_context_const_data(context));
 }
 
 void hal_cpu_context_switch(struct thread_context* current, const struct thread_context* next) {
 	if (current == NULL || next == NULL) return;
+	hal_cpu_fp_context_save(&current->fp_context);
+	hal_cpu_fp_context_restore(&next->fp_context);
 	x86_64_thread_context_switch(current, next);
 }
 
