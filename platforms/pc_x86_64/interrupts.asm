@@ -34,6 +34,8 @@ x86_64_interrupt_common:
 	push rbx
 	push rax
 
+	cld
+
 	mov rdi, rsp
 	call x86_64_handle_interrupt
 	call x86_64_maybe_preempt_on_interrupt_exit

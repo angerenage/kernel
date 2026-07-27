@@ -7,15 +7,17 @@
 #include "interrupts_private.h"
 
 enum {
-	LOONGARCH64_USER_STACK_ALIGNMENT = 16u,
-	LOONGARCH64_PRMD_PPLV_MASK       = 0x3u,
-	LOONGARCH64_PRMD_PPLV_USER       = 0x3u,
-	LOONGARCH64_GPR_SP               = 3,
-	LOONGARCH64_GPR_A0               = 4,
-	LOONGARCH64_GPR_A1               = 5,
-	LOONGARCH64_GPR_A2               = 6,
-	LOONGARCH64_GPR_A3               = 7,
-	LOONGARCH64_THREAD_CTX_S0        = 1,
+	LOONGARCH64_USER_STACK_ALIGNMENT       = 16u,
+	LOONGARCH64_USER_INSTRUCTION_ALIGNMENT = 4u,
+	LOONGARCH64_PRMD_PPLV_MASK             = 0x3u,
+	LOONGARCH64_PRMD_PPLV_USER             = 0x3u,
+	LOONGARCH64_GPR_RA                     = 1,
+	LOONGARCH64_GPR_SP                     = 3,
+	LOONGARCH64_GPR_A0                     = 4,
+	LOONGARCH64_GPR_A1                     = 5,
+	LOONGARCH64_GPR_A2                     = 6,
+	LOONGARCH64_GPR_A3                     = 7,
+	LOONGARCH64_THREAD_CTX_S0              = 1,
 	LOONGARCH64_THREAD_CTX_S1,
 	LOONGARCH64_THREAD_CTX_S2,
 };
@@ -33,6 +35,8 @@ _Static_assert(HAL_CPU_THREAD_CONTEXT_SPILL_WORDS > LOONGARCH64_THREAD_CTX_S2,
                "loongarch64 userspace spill area is too small");
 _Static_assert(sizeof(struct arch_userspace_context) <= HAL_USERSPACE_CONTEXT_SIZE,
                "loongarch64 userspace context storage is too small");
+_Static_assert(offsetof(struct exception_frame, gpr[LOONGARCH64_GPR_RA]) == 8u,
+               "loongarch64 userspace ra offset mismatch");
 _Static_assert(offsetof(struct exception_frame, gpr[LOONGARCH64_GPR_SP]) == 24u,
                "loongarch64 userspace sp offset mismatch");
 _Static_assert(offsetof(struct exception_frame, gpr[LOONGARCH64_GPR_A0]) == 32u,
@@ -99,15 +103,17 @@ bool hal_userspace_context_restore(struct hal_userspace_return_frame*  frame,
 	return true;
 }
 
-bool hal_userspace_frame_redirect(struct hal_userspace_return_frame* frame, uintptr_t entry, uintptr_t stack,
+bool hal_userspace_frame_redirect(struct hal_userspace_return_frame* frame, uintptr_t entry, uintptr_t stack_top,
                                   uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3) {
 	struct exception_frame* native = (struct exception_frame*)frame;
 
-	if (!loongarch64_frame_is_user(native) || entry == 0u || stack == 0u) return false;
-	if ((stack & (HAL_USERSPACE_STACK_ALIGNMENT - 1u)) != 0u) return false;
+	if (!loongarch64_frame_is_user(native) || entry == 0u || stack_top == 0u) return false;
+	if ((entry & (LOONGARCH64_USER_INSTRUCTION_ALIGNMENT - 1u)) != 0u) return false;
+	if ((stack_top & (HAL_USERSPACE_STACK_ALIGNMENT - 1u)) != 0u) return false;
 
 	native->era                     = entry;
-	native->gpr[LOONGARCH64_GPR_SP] = stack;
+	native->gpr[LOONGARCH64_GPR_RA] = 0u;
+	native->gpr[LOONGARCH64_GPR_SP] = stack_top;
 	native->gpr[LOONGARCH64_GPR_A0] = arg0;
 	native->gpr[LOONGARCH64_GPR_A1] = arg1;
 	native->gpr[LOONGARCH64_GPR_A2] = arg2;

@@ -7,10 +7,12 @@
 #include "interrupts_private.h"
 
 #define X86_USER_RFLAGS 0x202ull
+#define X86_RFLAGS_DIRECTION (1ull << 10)
 
 enum {
-	X86_USER_ENTRY_FRAME_WORDS = 5u,
-	X86_THREAD_CTX_R12         = 2,
+	X86_USER_ENTRY_FRAME_WORDS     = 5u,
+	X86_USER_CALL_RETURN_SLOT_SIZE = sizeof(uintptr_t),
+	X86_THREAD_CTX_R12             = 2,
 };
 
 enum {
@@ -102,18 +104,21 @@ bool hal_userspace_context_restore(struct hal_userspace_return_frame*  frame,
 	return true;
 }
 
-bool hal_userspace_frame_redirect(struct hal_userspace_return_frame* frame, uintptr_t entry, uintptr_t stack,
+bool hal_userspace_frame_redirect(struct hal_userspace_return_frame* frame, uintptr_t entry, uintptr_t stack_top,
                                   uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3) {
 	struct user_interrupt_frame* native = (struct user_interrupt_frame*)frame;
 
-	if (!x86_64_frame_is_user(native) || entry == 0u || stack == 0u) return false;
-	if ((stack & (HAL_USERSPACE_STACK_ALIGNMENT - 1u)) != 0u) return false;
+	if (!x86_64_frame_is_user(native) || entry == 0u || stack_top == 0u) return false;
+	if ((stack_top & (HAL_USERSPACE_STACK_ALIGNMENT - 1u)) != 0u) return false;
+	if (stack_top < X86_USER_CALL_RETURN_SLOT_SIZE) return false;
 
 	native->frame.rip = entry;
-	native->rsp       = stack;
+	native->rsp       = stack_top - X86_USER_CALL_RETURN_SLOT_SIZE;
 	native->frame.rdi = arg0;
 	native->frame.rsi = arg1;
 	native->frame.rdx = arg2;
 	native->frame.rcx = arg3;
+	/* A direct IRET is not a CALL, so establish the SysV function-entry state explicitly. */
+	native->frame.rflags &= ~X86_RFLAGS_DIRECTION;
 	return true;
 }

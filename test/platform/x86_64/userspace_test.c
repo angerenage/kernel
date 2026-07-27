@@ -5,6 +5,8 @@
 
 #include "../../../platforms/pc_x86_64/hal/interrupts_private.h"
 
+#define X86_RFLAGS_DIRECTION (1ull << 10)
+
 void x86_64_userspace_enter(void) {
 }
 
@@ -80,24 +82,30 @@ Test(x86_64_userspace, rejects_non_user_saved_contexts) {
 	cr_assert_not(hal_userspace_context_save(&context, opaque_const_frame(&frame)));
 }
 
-Test(x86_64_userspace, redirects_only_control_and_argument_registers) {
+Test(x86_64_userspace, redirects_with_sysv_stack_shape_and_safe_direction_flag) {
 	struct user_interrupt_frame before = user_frame();
-	struct user_interrupt_frame frame  = before;
+	struct user_interrupt_frame frame;
+
+	before.frame.rflags |= X86_RFLAGS_DIRECTION;
+	frame = before;
 
 	cr_assert(hal_userspace_frame_redirect(opaque_frame(&frame), 0x4000u, 0x9000u, 0x11u, 0x22u, 0x33u, 0x44u));
 	cr_assert_eq(frame.frame.rip, 0x4000u);
-	cr_assert_eq(frame.rsp, 0x9000u);
+	cr_assert_eq(frame.rsp, 0x8ff8u);
+	cr_assert_eq((frame.rsp + sizeof(uintptr_t)) & (HAL_USERSPACE_STACK_ALIGNMENT - 1u), 0u);
 	cr_assert_eq(frame.frame.rdi, 0x11u);
 	cr_assert_eq(frame.frame.rsi, 0x22u);
 	cr_assert_eq(frame.frame.rdx, 0x33u);
 	cr_assert_eq(frame.frame.rcx, 0x44u);
+	cr_assert_eq(frame.frame.rflags & X86_RFLAGS_DIRECTION, 0u);
 
-	frame.frame.rip = before.frame.rip;
-	frame.rsp       = before.rsp;
-	frame.frame.rdi = before.frame.rdi;
-	frame.frame.rsi = before.frame.rsi;
-	frame.frame.rdx = before.frame.rdx;
-	frame.frame.rcx = before.frame.rcx;
+	frame.frame.rip    = before.frame.rip;
+	frame.rsp          = before.rsp;
+	frame.frame.rdi    = before.frame.rdi;
+	frame.frame.rsi    = before.frame.rsi;
+	frame.frame.rdx    = before.frame.rdx;
+	frame.frame.rcx    = before.frame.rcx;
+	frame.frame.rflags = before.frame.rflags;
 	cr_assert_eq(memcmp(&frame, &before, sizeof(frame)), 0);
 }
 
@@ -105,6 +113,7 @@ Test(x86_64_userspace, rejects_invalid_redirect_targets) {
 	struct user_interrupt_frame frame = user_frame();
 
 	cr_assert_not(hal_userspace_frame_redirect(opaque_frame(&frame), 0u, 0x9000u, 0u, 0u, 0u, 0u));
+	cr_assert_not(hal_userspace_frame_redirect(opaque_frame(&frame), 0x4000u, 0u, 0u, 0u, 0u, 0u));
 	cr_assert_not(hal_userspace_frame_redirect(opaque_frame(&frame), 0x4000u, 0x9008u, 0u, 0u, 0u, 0u));
 	frame.frame.cs = 0x08u;
 	cr_assert_not(hal_userspace_frame_redirect(opaque_frame(&frame), 0x4000u, 0x9000u, 0u, 0u, 0u, 0u));

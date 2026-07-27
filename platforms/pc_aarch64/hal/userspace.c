@@ -7,11 +7,13 @@
 #include "interrupts_private.h"
 
 enum {
-	AARCH64_USER_STACK_ALIGNMENT = 16u,
-	AARCH64_USER_SPSR_EL0T       = 0x3c0u,
-	AARCH64_SPSR_MODE_MASK       = 0x1fu,
-	AARCH64_SPSR_MODE_EL0T       = 0x00u,
-	AARCH64_THREAD_CTX_X19       = 0,
+	AARCH64_USER_STACK_ALIGNMENT       = 16u,
+	AARCH64_USER_INSTRUCTION_ALIGNMENT = 4u,
+	AARCH64_USER_SPSR_EL0T             = 0x3c0u,
+	AARCH64_SPSR_MODE_MASK             = 0x1fu,
+	AARCH64_SPSR_MODE_EL0T             = 0x00u,
+	AARCH64_LINK_REGISTER              = 30u,
+	AARCH64_THREAD_CTX_X19             = 0,
 	AARCH64_THREAD_CTX_X20,
 	AARCH64_THREAD_CTX_X21,
 	AARCH64_THREAD_CTX_X22,
@@ -91,18 +93,20 @@ bool hal_userspace_context_restore(struct hal_userspace_return_frame*  frame,
 	return true;
 }
 
-bool hal_userspace_frame_redirect(struct hal_userspace_return_frame* frame, uintptr_t entry, uintptr_t stack,
+bool hal_userspace_frame_redirect(struct hal_userspace_return_frame* frame, uintptr_t entry, uintptr_t stack_top,
                                   uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3) {
 	struct exception_frame* native = (struct exception_frame*)frame;
 
-	if (!aarch64_frame_is_user(native) || entry == 0u || stack == 0u) return false;
-	if ((stack & (HAL_USERSPACE_STACK_ALIGNMENT - 1u)) != 0u) return false;
+	if (!aarch64_frame_is_user(native) || entry == 0u || stack_top == 0u) return false;
+	if ((entry & (AARCH64_USER_INSTRUCTION_ALIGNMENT - 1u)) != 0u) return false;
+	if ((stack_top & (HAL_USERSPACE_STACK_ALIGNMENT - 1u)) != 0u) return false;
 
-	native->elr    = entry;
-	native->sp_el0 = stack;
-	native->x[0]   = arg0;
-	native->x[1]   = arg1;
-	native->x[2]   = arg2;
-	native->x[3]   = arg3;
+	native->elr                      = entry;
+	native->sp_el0                   = stack_top;
+	native->x[AARCH64_LINK_REGISTER] = 0u;
+	native->x[0]                     = arg0;
+	native->x[1]                     = arg1;
+	native->x[2]                     = arg2;
+	native->x[3]                     = arg3;
 	return true;
 }

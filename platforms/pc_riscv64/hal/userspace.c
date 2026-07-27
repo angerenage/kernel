@@ -6,6 +6,12 @@
 
 #include "interrupts_private.h"
 
+#if defined(__riscv_compressed)
+#define RISCV64_USER_INSTRUCTION_ALIGNMENT 2u
+#else
+#define RISCV64_USER_INSTRUCTION_ALIGNMENT 4u
+#endif
+
 enum {
 	RISCV64_USER_STACK_ALIGNMENT = 16u,
 	RISCV64_SSTATUS_SPP          = 1u << 8,
@@ -88,15 +94,17 @@ bool hal_userspace_context_restore(struct hal_userspace_return_frame*  frame,
 	return true;
 }
 
-bool hal_userspace_frame_redirect(struct hal_userspace_return_frame* frame, uintptr_t entry, uintptr_t stack,
+bool hal_userspace_frame_redirect(struct hal_userspace_return_frame* frame, uintptr_t entry, uintptr_t stack_top,
                                   uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3) {
 	struct exception_frame* native = (struct exception_frame*)frame;
 
-	if (!riscv64_frame_is_user(native) || entry == 0u || stack == 0u) return false;
-	if ((stack & (HAL_USERSPACE_STACK_ALIGNMENT - 1u)) != 0u) return false;
+	if (!riscv64_frame_is_user(native) || entry == 0u || stack_top == 0u) return false;
+	if ((entry & (RISCV64_USER_INSTRUCTION_ALIGNMENT - 1u)) != 0u) return false;
+	if ((stack_top & (HAL_USERSPACE_STACK_ALIGNMENT - 1u)) != 0u) return false;
 
 	native->sepc = entry;
-	native->sp   = stack;
+	native->ra   = 0u;
+	native->sp   = stack_top;
 	native->a0   = arg0;
 	native->a1   = arg1;
 	native->a2   = arg2;
