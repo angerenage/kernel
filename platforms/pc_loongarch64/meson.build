@@ -3,7 +3,8 @@ platform_limine_arch = 'loongarch64'
 platform_kernel_c_args += [
 	'-DPLATFORM_PC_LOONGARCH64',
 	'--target=loongarch64-unknown-none-gnusf',
-	'-msimd=none',
+	'-mno-lsx',
+	'-mno-lasx',
 ]
 
 platform_kernel_link_args += [
@@ -12,7 +13,7 @@ platform_kernel_link_args += [
 
 platform_userspace_c_args += [
 	'-mabi=lp64d',
-	'-msimd=lasx',
+	'-mlasx',
 ]
 
 platform_kernel_objects += [
