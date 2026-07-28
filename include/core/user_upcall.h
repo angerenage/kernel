@@ -1,5 +1,6 @@
 #pragma once
 
+#include <base/upcall.h>
 #include <base/vmm.h>
 #include <core/spinlock.h>
 #include <hal/userspace.h>
@@ -11,7 +12,6 @@ struct hal_userspace_return_frame;
 struct uthread;
 
 enum {
-	USER_UPCALL_ARGUMENT_COUNT = 4u,
 	USER_UPCALL_QUEUE_CAPACITY = 16u,
 };
 
