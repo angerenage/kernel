@@ -9,6 +9,7 @@ core_sources = files(
 	'message.c',
 	'process.c',
 	'ring_buffer.c',
+	'signal.c',
 	'user_return.c',
 	'user_upcall.c',
 	'sync/condvar.c',

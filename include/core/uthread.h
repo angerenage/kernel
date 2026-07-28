@@ -83,6 +83,9 @@ struct uthread* uthread_current(void);
  */
 struct uthread* uthread_lookup(uthread_id_t id);
 
+/* Retain a live userspace thread descriptor already protected by another reference. */
+bool uthread_retain(struct uthread* thread);
+
 /* Look up and retain id. The caller must release the returned descriptor. */
 struct uthread* uthread_acquire(uthread_id_t id);
 

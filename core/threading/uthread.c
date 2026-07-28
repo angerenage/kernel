@@ -6,6 +6,7 @@
 #include <core/pmm.h>
 #include <core/process.h>
 #include <core/sched.h>
+#include <core/signal.h>
 #include <core/spinlock.h>
 #include <core/uthread.h>
 #include <core/vaddr_alloc.h>
@@ -69,6 +70,7 @@ static bool uthread_begin_destroy(struct uthread* thread) {
 		return false;
 	}
 
+	signal_unregister_thread_receivers(thread);
 	uthread_unregister_id(thread);
 	return true;
 }
@@ -493,11 +495,9 @@ struct uthread* uthread_lookup(uthread_id_t id) {
 	return (struct uthread*)id_table_lookup(&uthread_table, id);
 }
 
-static bool uthread_retain_callback(void* value, void* context) {
-	struct uthread* thread = (struct uthread*)value;
-	uint64_t        old_refcount;
+bool uthread_retain(struct uthread* thread) {
+	uint64_t old_refcount;
 
-	(void)context;
 	if (thread == NULL) return false;
 
 	for (;;) {
@@ -514,6 +514,11 @@ static bool uthread_retain_callback(void* value, void* context) {
 			return true;
 		}
 	}
+}
+
+static bool uthread_retain_callback(void* value, void* context) {
+	(void)context;
+	return uthread_retain((struct uthread*)value);
 }
 
 struct uthread* uthread_acquire(uthread_id_t id) {

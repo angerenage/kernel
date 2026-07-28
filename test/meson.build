@@ -102,6 +102,13 @@ test_suites = [
 		'suites': ['unit', 'core'],
 	},
 	{
+		'name': 'signal',
+		'sources': files(
+			'core/signal_test.c',
+		),
+		'suites': ['unit', 'core'],
+	},
+	{
 		'name': 'message',
 		'sources': files(
 			'core/message_test.c',
