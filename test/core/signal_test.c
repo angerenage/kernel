@@ -50,6 +50,8 @@ static void signal_test_init_heap(void) {
 	signal_test_heap_initialized = true;
 }
 
+#define SIGNAL_TEST_SENDER ((process_id_t)42u)
+
 static bool                  signal_test_hook_active;
 static size_t                signal_test_hook_runs;
 static struct signal*        signal_test_signal;
@@ -62,11 +64,12 @@ static uint64_t              signal_test_first_deliveries;
 static uint64_t              signal_test_second_receivers;
 static uint64_t              signal_test_second_deliveries;
 
-static void signal_test_handler(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3) {
+static void signal_test_handler(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4) {
 	(void)arg0;
 	(void)arg1;
 	(void)arg2;
 	(void)arg3;
+	(void)arg4;
 }
 
 static void signal_test_thread_entry(void* arg) {
@@ -149,12 +152,14 @@ static void signal_test_send_context_switch_hook(struct thread_context* current,
 	signal_test_hook_runs++;
 	cr_assert_eq(sched_current_thread(), signal_test_sender, "sender should run while the receiver is blocked");
 	cr_assert_eq(signal_send(signal_test_signal,
+	                         SIGNAL_TEST_SENDER,
 	                         &signal_test_first_payload,
 	                         &signal_test_first_receivers,
 	                         &signal_test_first_deliveries),
 	             SIGNAL_OK);
 	if (signal_test_send_twice) {
 		cr_assert_eq(signal_send(signal_test_signal,
+		                         SIGNAL_TEST_SENDER,
 		                         &signal_test_second_payload,
 		                         &signal_test_second_receivers,
 		                         &signal_test_second_deliveries),
@@ -185,7 +190,7 @@ Test(signal, create_send_read_and_destroy) {
 
 	acquired = signal_acquire(id);
 	cr_assert_eq(acquired, signal);
-	cr_assert_eq(signal_send(signal, &payload, &receiver_count, &delivery_count), SIGNAL_OK);
+	cr_assert_eq(signal_send(signal, SIGNAL_SENDER_KERNEL, &payload, &receiver_count, &delivery_count), SIGNAL_OK);
 	cr_assert_eq(receiver_count, 0u);
 	cr_assert_eq(delivery_count, 0u);
 	cr_assert(signal_has_value(signal));
@@ -218,7 +223,7 @@ Test(signal, synchronous_receivers_track_the_latest_generation_independently) {
 	signal = signal_create();
 	cr_assert_not_null(signal);
 
-	cr_assert_eq(signal_send(signal, &payload, NULL, NULL), SIGNAL_OK);
+	cr_assert_eq(signal_send(signal, SIGNAL_TEST_SENDER, &payload, NULL, NULL), SIGNAL_OK);
 	sched_set_current(cpu_current(), &first.thread);
 	cr_assert_eq(signal_try_wait(signal, &received), SIGNAL_OK);
 	cr_assert_eq(memcmp(&payload, &received, sizeof(payload)), 0);
@@ -230,7 +235,7 @@ Test(signal, synchronous_receivers_track_the_latest_generation_independently) {
 	cr_assert_eq(signal_wait_subscription_count(signal), 2u);
 
 	payload.args[0] = 99u;
-	cr_assert_eq(signal_send(signal, &payload, &receiver_count, &delivery_count), SIGNAL_OK);
+	cr_assert_eq(signal_send(signal, SIGNAL_TEST_SENDER, &payload, &receiver_count, &delivery_count), SIGNAL_OK);
 	cr_assert_eq(receiver_count, 0u, "inactive synchronous cursors are not immediate receivers");
 	cr_assert_eq(delivery_count, 0u);
 
@@ -272,12 +277,13 @@ Test(signal, handlers_receive_broadcast_and_report_partial_delivery) {
 	for (size_t i = 0u; i < USER_UPCALL_QUEUE_CAPACITY; i++) {
 		cr_assert_eq(uthread_upcall_enqueue(&second, &filler), USER_UPCALL_OK);
 	}
-	cr_assert_eq(signal_send(signal, &payload, &receiver_count, &delivery_count), SIGNAL_OK);
+	cr_assert_eq(signal_send(signal, SIGNAL_TEST_SENDER, &payload, &receiver_count, &delivery_count), SIGNAL_OK);
 	cr_assert_eq(receiver_count, 2u);
 	cr_assert_eq(delivery_count, 1u);
 	cr_assert_eq(uthread_upcall_pending_count(&first), 1u);
-	cr_assert_eq(first.upcall.pending[first.upcall.head].args[0], 5u);
-	cr_assert_eq(first.upcall.pending[first.upcall.head].args[3], 8u);
+	cr_assert_eq(first.upcall.pending[first.upcall.head].args[0], SIGNAL_TEST_SENDER);
+	cr_assert_eq(first.upcall.pending[first.upcall.head].args[1], 5u);
+	cr_assert_eq(first.upcall.pending[first.upcall.head].args[4], 8u);
 	cr_assert_eq(uthread_upcall_pending_count(&second), USER_UPCALL_QUEUE_CAPACITY);
 
 	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
@@ -323,7 +329,8 @@ Test(signal, one_thread_can_receive_the_same_publication_by_handler_and_wait) {
 	cr_assert_eq(signal_test_first_deliveries, 2u);
 	cr_assert_eq(memcmp(&received, &signal_test_first_payload, sizeof(received)), 0);
 	cr_assert_eq(uthread_upcall_pending_count(&receiver), 1u);
-	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].args[0], 11u);
+	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].args[0], SIGNAL_TEST_SENDER);
+	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].args[1], 11u);
 	cr_assert_eq(signal_blocked_waiter_count(signal), 0u);
 
 	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);

@@ -335,7 +335,7 @@ enum signal_result signal_destroy(struct signal* signal) {
 	return SIGNAL_OK;
 }
 
-enum signal_result signal_send(struct signal* signal, const struct signal_payload* payload,
+enum signal_result signal_send(struct signal* signal, process_id_t sender, const struct signal_payload* payload,
                                uint64_t* out_receiver_count, uint64_t* out_delivery_count) {
 	struct signal_handler_binding* handler;
 	struct signal_wait_binding*    wait;
@@ -368,6 +368,7 @@ enum signal_result signal_send(struct signal* signal, const struct signal_payloa
 			.entry = handler->entry,
 			.args =
 				{
+					   (uintptr_t)sender,
 					   (uintptr_t)payload->args[0],
 					   (uintptr_t)payload->args[1],
 					   (uintptr_t)payload->args[2],

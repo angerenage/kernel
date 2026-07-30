@@ -126,7 +126,7 @@ Test(x86_64_userspace, redirects_with_sysv_stack_shape_and_safe_direction_flag) 
 	before.frame.rflags |= X86_RFLAGS_DIRECTION;
 	frame = before;
 
-	cr_assert(hal_userspace_frame_redirect(opaque_frame(&frame), 0x4000u, 0x9000u, 0x11u, 0x22u, 0x33u, 0x44u));
+	cr_assert(hal_userspace_frame_redirect(opaque_frame(&frame), 0x4000u, 0x9000u, 0x11u, 0x22u, 0x33u, 0x44u, 0x55u));
 	cr_assert_eq(frame.frame.rip, 0x4000u);
 	cr_assert_eq(frame.rsp, 0x8ff8u);
 	cr_assert_eq((frame.rsp + sizeof(uintptr_t)) & (HAL_USERSPACE_STACK_ALIGNMENT - 1u), 0u);
@@ -134,6 +134,7 @@ Test(x86_64_userspace, redirects_with_sysv_stack_shape_and_safe_direction_flag) 
 	cr_assert_eq(frame.frame.rsi, 0x22u);
 	cr_assert_eq(frame.frame.rdx, 0x33u);
 	cr_assert_eq(frame.frame.rcx, 0x44u);
+	cr_assert_eq(frame.frame.r8, 0x55u);
 	cr_assert_eq(frame.frame.rflags & X86_RFLAGS_DIRECTION, 0u);
 
 	frame.frame.rip    = before.frame.rip;
@@ -142,6 +143,7 @@ Test(x86_64_userspace, redirects_with_sysv_stack_shape_and_safe_direction_flag) 
 	frame.frame.rsi    = before.frame.rsi;
 	frame.frame.rdx    = before.frame.rdx;
 	frame.frame.rcx    = before.frame.rcx;
+	frame.frame.r8     = before.frame.r8;
 	frame.frame.rflags = before.frame.rflags;
 	cr_assert_eq(memcmp(&frame, &before, sizeof(frame)), 0);
 }
@@ -149,9 +151,9 @@ Test(x86_64_userspace, redirects_with_sysv_stack_shape_and_safe_direction_flag) 
 Test(x86_64_userspace, rejects_invalid_redirect_targets) {
 	struct user_interrupt_frame frame = user_frame();
 
-	cr_assert_not(hal_userspace_frame_redirect(opaque_frame(&frame), 0u, 0x9000u, 0u, 0u, 0u, 0u));
-	cr_assert_not(hal_userspace_frame_redirect(opaque_frame(&frame), 0x4000u, 0u, 0u, 0u, 0u, 0u));
-	cr_assert_not(hal_userspace_frame_redirect(opaque_frame(&frame), 0x4000u, 0x9008u, 0u, 0u, 0u, 0u));
+	cr_assert_not(hal_userspace_frame_redirect(opaque_frame(&frame), 0u, 0x9000u, 0u, 0u, 0u, 0u, 0u));
+	cr_assert_not(hal_userspace_frame_redirect(opaque_frame(&frame), 0x4000u, 0u, 0u, 0u, 0u, 0u, 0u));
+	cr_assert_not(hal_userspace_frame_redirect(opaque_frame(&frame), 0x4000u, 0x9008u, 0u, 0u, 0u, 0u, 0u));
 	frame.frame.cs = 0x08u;
-	cr_assert_not(hal_userspace_frame_redirect(opaque_frame(&frame), 0x4000u, 0x9000u, 0u, 0u, 0u, 0u));
+	cr_assert_not(hal_userspace_frame_redirect(opaque_frame(&frame), 0x4000u, 0x9000u, 0u, 0u, 0u, 0u, 0u));
 }

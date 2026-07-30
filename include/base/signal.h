@@ -5,6 +5,8 @@
 typedef uint64_t signal_id_t;
 
 #define SIGNAL_ID_INVALID ((signal_id_t)0u)
+/* Reserved sender for publications produced directly by the kernel. */
+#define SIGNAL_SENDER_KERNEL ((process_id_t)0u)
 
 enum {
 	SIGNAL_ARGUMENT_COUNT = 4u,

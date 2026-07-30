@@ -127,7 +127,8 @@ enum user_upcall_result uthread_upcall_deliver(struct uthread* thread, struct ha
 	                                  request.args[0],
 	                                  request.args[1],
 	                                  request.args[2],
-	                                  request.args[3])) {
+	                                  request.args[3],
+	                                  request.args[4])) {
 		memset(&state->interrupted_context, 0, sizeof(state->interrupted_context));
 		spinlock_unlock_irqrestore(&state->lock, irq_state);
 		return USER_UPCALL_CONTEXT_INVALID;

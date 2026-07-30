@@ -108,7 +108,7 @@ bool hal_userspace_context_restore(struct hal_userspace_return_frame*  frame,
 }
 
 bool hal_userspace_frame_redirect(struct hal_userspace_return_frame* frame, uintptr_t entry, uintptr_t stack_top,
-                                  uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3) {
+                                  uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4) {
 	struct user_interrupt_frame* native = (struct user_interrupt_frame*)frame;
 
 	if (!x86_64_frame_is_user(native) || entry == 0u || stack_top == 0u) return false;
@@ -121,6 +121,7 @@ bool hal_userspace_frame_redirect(struct hal_userspace_return_frame* frame, uint
 	native->frame.rsi = arg1;
 	native->frame.rdx = arg2;
 	native->frame.rcx = arg3;
+	native->frame.r8  = arg4;
 	/* A direct IRET is not a CALL, so establish the SysV function-entry state explicitly. */
 	native->frame.rflags &= ~X86_RFLAGS_DIRECTION;
 	return true;

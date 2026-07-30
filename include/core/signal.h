@@ -2,6 +2,7 @@
 
 #include <base/signal.h>
 #include <base/upcall.h>
+#include <core/process.h>
 #include <core/spinlock.h>
 #include <core/thread.h>
 #include <stdbool.h>
@@ -51,7 +52,7 @@ enum signal_result signal_destroy(struct signal* signal);
  * publication point. out_delivery_count counts successful upcall enqueues plus
  * wait calls for which a private wake value was installed.
  */
-enum signal_result signal_send(struct signal* signal, const struct signal_payload* payload,
+enum signal_result signal_send(struct signal* signal, process_id_t sender, const struct signal_payload* payload,
                                uint64_t* out_receiver_count, uint64_t* out_delivery_count);
 
 /* Read the currently remembered value without creating a receiver or consuming a generation. */

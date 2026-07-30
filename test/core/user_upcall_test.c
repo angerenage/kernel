@@ -11,7 +11,7 @@ struct hal_userspace_return_frame {
 	bool      user;
 	uintptr_t entry;
 	uintptr_t stack;
-	uintptr_t args[4];
+	uintptr_t args[USER_UPCALL_ARGUMENT_COUNT];
 };
 
 static void user_upcall_test_reset(struct uthread* thread, struct hal_userspace_return_frame* frame) {
@@ -24,7 +24,7 @@ static void user_upcall_test_reset(struct uthread* thread, struct hal_userspace_
 						  .user  = true,
 						  .entry = 0x1000u,
 						  .stack = 0x8000u,
-						  .args  = {0x11u, 0x22u, 0x33u, 0x44u},
+						  .args  = {0x11u, 0x22u, 0x33u, 0x44u, 0x55u},
     };
 }
 
@@ -33,7 +33,7 @@ Test(user_upcall, validates_requests) {
 	struct hal_userspace_return_frame frame;
 	struct user_upcall_request        request = {
 			   .entry = 0x4000u,
-			   .args  = {1u, 2u, 3u, 4u},
+			   .args  = {1u, 2u, 3u, 4u, 5u},
     };
 
 	user_upcall_test_reset(&thread, &frame);
@@ -72,7 +72,7 @@ Test(user_upcall, delivers_fifo_and_restores_interrupted_context) {
 	for (size_t i = 0u; i < USER_UPCALL_QUEUE_CAPACITY; i++) {
 		request = (struct user_upcall_request){
 			.entry = 0x4000u + i * 0x1000u,
-			.args  = {i + 1u, i + 101u, i + 201u, i + 301u},
+			.args  = {i + 1u, i + 101u, i + 201u, i + 301u, i + 401u},
 		};
 		cr_assert_eq(uthread_upcall_enqueue(&thread, &request), USER_UPCALL_OK);
 	}
@@ -85,6 +85,7 @@ Test(user_upcall, delivers_fifo_and_restores_interrupted_context) {
 	cr_assert_eq(frame.args[1], 101u);
 	cr_assert_eq(frame.args[2], 201u);
 	cr_assert_eq(frame.args[3], 301u);
+	cr_assert_eq(frame.args[4], 401u);
 	cr_assert(uthread_upcall_is_active(&thread));
 	cr_assert_eq(uthread_upcall_pending_count(&thread), USER_UPCALL_QUEUE_CAPACITY - 1u);
 	cr_assert_eq(uthread_upcall_deliver(&thread, &frame), USER_UPCALL_IDLE);
@@ -97,6 +98,7 @@ Test(user_upcall, delivers_fifo_and_restores_interrupted_context) {
 	cr_assert_eq(frame.args[1], original.args[1]);
 	cr_assert_eq(frame.args[2], original.args[2]);
 	cr_assert_eq(frame.args[3], original.args[3]);
+	cr_assert_eq(frame.args[4], original.args[4]);
 	cr_assert_not(uthread_upcall_is_active(&thread));
 	cr_assert_eq(thread.upcall.phase, USER_UPCALL_PHASE_RESUME);
 
@@ -111,6 +113,7 @@ Test(user_upcall, delivers_fifo_and_restores_interrupted_context) {
 	cr_assert_eq(frame.args[1], 102u);
 	cr_assert_eq(frame.args[2], 202u);
 	cr_assert_eq(frame.args[3], 302u);
+	cr_assert_eq(frame.args[4], 402u);
 	uthread_upcall_state_deinit(&thread);
 }
 
