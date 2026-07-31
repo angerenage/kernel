@@ -5,6 +5,7 @@
 #include <core/signal.h>
 #include <core/user_upcall.h>
 #include <core/uthread.h>
+#include <hal/hcf.h>
 #include <libc/stdlib.h>
 #include <libc/string.h>
 #include <stdbool.h>
@@ -270,22 +271,20 @@ signal_id_t signal_id(const struct signal* signal) {
 }
 
 bool signal_retain(struct signal* signal) {
-	uint64_t old_refcount;
+	struct irq_state state;
+	uint64_t         reference_count;
+	bool             retained = false;
 
 	if (signal == NULL) return false;
-	for (;;) {
-		if (__atomic_load_n(&signal->closing, __ATOMIC_ACQUIRE)) return false;
-		old_refcount = __atomic_load_n(&signal->reference_count, __ATOMIC_ACQUIRE);
-		if (old_refcount == 0u || old_refcount == UINT64_MAX) return false;
-		if (__atomic_compare_exchange_n(&signal->reference_count,
-		                                &old_refcount,
-		                                old_refcount + 1u,
-		                                false,
-		                                __ATOMIC_ACQ_REL,
-		                                __ATOMIC_ACQUIRE)) {
-			return true;
-		}
+
+	state           = spinlock_lock_irqsave(&signal->lock);
+	reference_count = __atomic_load_n(&signal->reference_count, __ATOMIC_ACQUIRE);
+	if (!signal->closing && reference_count != 0u && reference_count != UINT64_MAX) {
+		(void)__atomic_add_fetch(&signal->reference_count, 1u, __ATOMIC_ACQ_REL);
+		retained = true;
 	}
+	spinlock_unlock_irqrestore(&signal->lock, state);
+	return retained;
 }
 
 struct signal* signal_acquire(signal_id_t id) {
@@ -305,6 +304,7 @@ enum signal_result signal_destroy(struct signal* signal) {
 	struct irq_state               state;
 	struct signal*                 removed = NULL;
 	enum id_table_result           id_result;
+	signal_id_t                    id;
 
 	if (signal == NULL) return SIGNAL_INVALID_ARGUMENTS;
 
@@ -313,11 +313,18 @@ enum signal_result signal_destroy(struct signal* signal) {
 		spinlock_unlock_irqrestore(&signal->lock, state);
 		return SIGNAL_CLOSED;
 	}
+	id              = signal->id;
 	signal->closing = true;
 	spinlock_unlock_irqrestore(&signal->lock, state);
 
-	id_result = id_table_remove(&signal_table, (id_table_id_t)signal->id, (void**)&removed);
-	if (id_result != ID_TABLE_OK || removed != signal) return SIGNAL_NOT_FOUND;
+	id_result = id_table_remove(&signal_table, (id_table_id_t)id, (void**)&removed);
+	if (id_result != ID_TABLE_OK) {
+		state           = spinlock_lock_irqsave(&signal->lock);
+		signal->closing = false;
+		spinlock_unlock_irqrestore(&signal->lock, state);
+		return SIGNAL_NOT_FOUND;
+	}
+	if (removed != signal) hcf();
 
 	state              = spinlock_lock_irqsave(&signal->lock);
 	signal->id         = SIGNAL_ID_INVALID;
@@ -484,7 +491,7 @@ enum signal_result signal_wait(struct signal* signal, struct signal_payload* out
 			spinlock_unlock(&signal->lock);
 			if (!sched_block_current_locked(&signal->waiters, THREAD_BLOCK_SIGNAL, wait_state)) {
 				signal_clear_waiting(signal, current);
-				return SIGNAL_WAIT_FAILED;
+				return thread_should_cancel(&current->thread) ? SIGNAL_WAIT_CANCELED : SIGNAL_WAIT_FAILED;
 			}
 			continue;
 		}

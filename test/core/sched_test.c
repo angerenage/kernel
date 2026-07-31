@@ -901,3 +901,193 @@ Test(sched, wake_one_skips_stale_timed_out_waiters) {
 
 	reset_test_state();
 }
+
+Test(sched, pending_cancellation_aborts_wait_queue_handoff) {
+	const struct thread_create_params params = {
+		.name              = "cancelled_waiter",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x3a0000u,
+		.kernel_stack_top  = 0x3a4000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	struct thread            current;
+	struct thread_wait_queue wait_queue;
+	struct irq_state         wait_state;
+
+	init_bound_bootstrap_cpu();
+	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
+	thread_wait_queue_init(&wait_queue);
+	cr_assert(thread_init(&current, &params), "thread_init failed for cancelled waiter");
+	sched_set_current(cpu_current(), &current);
+
+	cr_assert(thread_request_cancel(&current), "cancellation request should succeed");
+	wait_state = spinlock_lock_irqsave(&wait_queue.lock);
+	cr_assert_not(sched_block_current_locked(&wait_queue, THREAD_BLOCK_SIGNAL, wait_state),
+	              "a pending cancellation must abort the wait handoff");
+	cr_assert_eq(sched_current_thread(), &current, "cancelled waiter must remain current");
+	cr_assert_eq(current.state, THREAD_STATE_RUNNING, "cancelled waiter must remain running");
+	cr_assert_null(current.blocked_queue, "cancelled waiter must not retain a blocked queue");
+	cr_assert_eq(current.wait_status, THREAD_WAIT_STATUS_NONE, "cancelled waiter status must be cleared");
+	cr_assert_eq(thread_wait_queue_depth(&wait_queue), 0u, "cancelled waiter must not enter the wait queue");
+	cr_assert_eq(sched_run_queue_depth(cpu_current()), 0u, "cancelled current thread must not be re-queued");
+
+	reset_test_state();
+}
+
+Test(sched, pending_cancellation_aborts_timed_wait_handoff) {
+	const struct thread_create_params params = {
+		.name              = "cancelled_timed_waiter",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x3b0000u,
+		.kernel_stack_top  = 0x3b4000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	struct thread            current;
+	struct thread_wait_queue wait_queue;
+	struct irq_state         wait_state;
+
+	init_bound_bootstrap_cpu();
+	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
+	thread_wait_queue_init(&wait_queue);
+	cr_assert(thread_init(&current, &params), "thread_init failed for cancelled timed waiter");
+	sched_set_current(cpu_current(), &current);
+
+	cr_assert(thread_request_cancel(&current), "cancellation request should succeed");
+	wait_state = spinlock_lock_irqsave(&wait_queue.lock);
+	cr_assert_not(
+		sched_block_current_until_locked(&wait_queue, THREAD_BLOCK_JOIN, sched_tick_count() + 10u, wait_state),
+		"a pending cancellation must abort the timed wait handoff");
+	cr_assert_eq(sched_current_thread(), &current, "cancelled timed waiter must remain current");
+	cr_assert_eq(current.state, THREAD_STATE_RUNNING, "cancelled timed waiter must remain running");
+	cr_assert_null(current.blocked_queue, "cancelled timed waiter must not retain a blocked queue");
+	cr_assert_null(current.sleep_queue_next, "cancelled timed waiter must not enter the sleep queue");
+	cr_assert_eq(current.wake_deadline_tick, 0u, "cancelled timed waiter must clear its deadline");
+	cr_assert_eq(thread_wait_queue_depth(&wait_queue), 0u, "cancelled timed waiter must not enter the wait queue");
+
+	reset_test_state();
+}
+
+Test(sched, wake_during_block_handoff_requeues_current_thread) {
+	const struct thread_create_params params = {
+		.name              = "handoff_waiter",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x3e0000u,
+		.kernel_stack_top  = 0x3e4000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	struct thread            current;
+	struct thread_wait_queue wait_queue;
+
+	init_bound_bootstrap_cpu();
+	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
+	thread_wait_queue_init(&wait_queue);
+	cr_assert(thread_init(&current, &params), "thread_init failed for handoff waiter");
+	sched_set_current(cpu_current(), &current);
+
+	thread_mark_blocked(&current, THREAD_BLOCK_SIGNAL);
+	current.blocked_queue = &wait_queue;
+	current.wait_status   = THREAD_WAIT_STATUS_PENDING;
+	wait_queue.head       = &current;
+	wait_queue.tail       = &current;
+	wait_queue.depth      = 1u;
+
+	cr_assert(sched_wake_one(&wait_queue), "a wake during block handoff must remain deliverable");
+	cr_assert_eq(thread_wait_queue_depth(&wait_queue), 0u, "the handoff waiter must leave the wait queue");
+	cr_assert_eq(current.state, THREAD_STATE_READY, "the handoff waiter must become ready");
+	cr_assert(thread_is_queued(&current), "the handoff waiter must be queued even while still current");
+	cr_assert_eq(sched_run_queue_depth(cpu_current()), 1u, "the handoff waiter must remain runnable");
+
+	reset_test_state();
+}
+
+Test(sched, cancellation_during_block_handoff_requeues_current_thread) {
+	const struct thread_create_params params = {
+		.name              = "handoff_cancelled",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x3f0000u,
+		.kernel_stack_top  = 0x3f4000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	struct thread            current;
+	struct thread_wait_queue wait_queue;
+
+	init_bound_bootstrap_cpu();
+	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
+	thread_wait_queue_init(&wait_queue);
+	cr_assert(thread_init(&current, &params), "thread_init failed for handoff cancellation");
+	sched_set_current(cpu_current(), &current);
+
+	thread_mark_blocked(&current, THREAD_BLOCK_SIGNAL);
+	current.blocked_queue = &wait_queue;
+	current.wait_status   = THREAD_WAIT_STATUS_PENDING;
+	wait_queue.head       = &current;
+	wait_queue.tail       = &current;
+	wait_queue.depth      = 1u;
+
+	cr_assert(thread_request_cancel(&current), "cancellation during block handoff must succeed");
+	cr_assert_eq(thread_wait_queue_depth(&wait_queue), 0u, "the cancelled handoff must leave the wait queue");
+	cr_assert_eq(current.state, THREAD_STATE_READY, "the cancelled handoff must become ready");
+	cr_assert(thread_is_queued(&current), "the cancelled handoff must remain runnable");
+	cr_assert_eq(current.wait_status, THREAD_WAIT_STATUS_CANCELED, "the cancellation result must remain observable");
+	cr_assert_eq(sched_run_queue_depth(cpu_current()), 1u, "the cancelled handoff must be queued to run");
+
+	reset_test_state();
+}
+
+Test(sched, wake_all_skips_terminated_waiters) {
+	const struct thread_create_params stale_params = {
+		.name              = "terminated_waiter",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x3c0000u,
+		.kernel_stack_top  = 0x3c4000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	const struct thread_create_params live_params = {
+		.name              = "live_after_terminated",
+		.entry             = sched_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x3d0000u,
+		.kernel_stack_top  = 0x3d4000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	struct thread            stale;
+	struct thread            live;
+	struct thread_wait_queue wait_queue;
+
+	init_bound_bootstrap_cpu();
+	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
+	thread_wait_queue_init(&wait_queue);
+	cr_assert(thread_init(&stale, &stale_params), "thread_init failed for terminated waiter");
+	cr_assert(thread_init(&live, &live_params), "thread_init failed for live waiter");
+
+	thread_mark_exiting(&stale, 1u);
+	stale.wait_queue_next = &live;
+	thread_mark_blocked(&live, THREAD_BLOCK_JOIN);
+	live.wait_queue_next = NULL;
+	wait_queue.head      = &stale;
+	wait_queue.tail      = &live;
+	wait_queue.depth     = 2u;
+
+	cr_assert_eq(sched_wake_all(&wait_queue), 1u, "terminated waiters must not stop wake_all");
+	cr_assert_eq(thread_wait_queue_depth(&wait_queue), 0u, "wake_all must consume the full queue");
+	cr_assert_eq(live.state, THREAD_STATE_READY, "live waiter after a terminated entry must become ready");
+	cr_assert_eq(sched_run_queue_depth(cpu_current()), 1u, "the live waiter must be queued to run");
+
+	reset_test_state();
+}

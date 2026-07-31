@@ -322,8 +322,8 @@ bool kthread_park(void) {
 	if (current == NULL || thread_is_idle(current) || thread_is_terminated(current)) return false;
 
 	wait_state = spinlock_lock_irqsave(&current->park_wait_queue.lock);
-	if ((current->flags & THREAD_FLAG_PARK_PERMIT) != 0u) {
-		current->flags &= ~THREAD_FLAG_PARK_PERMIT;
+	if ((__atomic_load_n(&current->flags, __ATOMIC_ACQUIRE) & THREAD_FLAG_PARK_PERMIT) != 0u) {
+		(void)__atomic_fetch_and(&current->flags, ~(uint32_t)THREAD_FLAG_PARK_PERMIT, __ATOMIC_ACQ_REL);
 		spinlock_unlock_irqrestore(&current->park_wait_queue.lock, wait_state);
 		kthread_testcancel();
 		return true;
@@ -335,7 +335,7 @@ bool kthread_park(void) {
 	}
 
 	wait_state = spinlock_lock_irqsave(&current->park_wait_queue.lock);
-	current->flags &= ~THREAD_FLAG_PARK_PERMIT;
+	(void)__atomic_fetch_and(&current->flags, ~(uint32_t)THREAD_FLAG_PARK_PERMIT, __ATOMIC_ACQ_REL);
 	spinlock_unlock_irqrestore(&current->park_wait_queue.lock, wait_state);
 
 	kthread_testcancel();
@@ -353,10 +353,10 @@ bool kthread_unpark(struct kthread* target) {
 	if (thread_is_idle(thread) || thread_is_terminated(thread)) return false;
 
 	wait_state = spinlock_lock_irqsave(&thread->park_wait_queue.lock);
-	thread->flags |= THREAD_FLAG_PARK_PERMIT;
+	(void)__atomic_fetch_or(&thread->flags, (uint32_t)THREAD_FLAG_PARK_PERMIT, __ATOMIC_ACQ_REL);
 	wake_target = thread->state == THREAD_STATE_BLOCKED && thread->block_reason == THREAD_BLOCK_PARKED &&
 	              thread->blocked_queue == &thread->park_wait_queue &&
-	              thread->wait_status == THREAD_WAIT_STATUS_PENDING;
+	              __atomic_load_n(&thread->wait_status, __ATOMIC_ACQUIRE) == THREAD_WAIT_STATUS_PENDING;
 	spinlock_unlock_irqrestore(&thread->park_wait_queue.lock, wait_state);
 
 	if (wake_target) (void)sched_wake_one(&thread->park_wait_queue);

@@ -205,6 +205,28 @@ Test(signal, create_send_read_and_destroy) {
 	signal_release(acquired);
 }
 
+Test(signal, failed_destroy_restores_open_state) {
+	struct signal* signal;
+	struct signal* acquired;
+	signal_id_t    id;
+
+	signal_test_init_heap();
+	signal = signal_create();
+	cr_assert_not_null(signal);
+	id = signal_id(signal);
+	cr_assert_neq(id, SIGNAL_ID_INVALID);
+
+	signal->id = SIGNAL_ID_INVALID;
+	cr_assert_eq(signal_destroy(signal), SIGNAL_NOT_FOUND);
+	cr_assert_not(signal->closing, "a failed registry removal must not leave the signal closed");
+
+	signal->id = id;
+	acquired   = signal_acquire(id);
+	cr_assert_eq(acquired, signal, "the registry entry must remain acquirable after a failed destroy");
+	signal_release(acquired);
+	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
+}
+
 Test(signal, synchronous_receivers_track_the_latest_generation_independently) {
 	struct signal*        signal;
 	struct uthread        first;

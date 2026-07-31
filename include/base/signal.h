@@ -1,5 +1,6 @@
 #pragma once
 
+#include <base/process.h>
 #include <stdint.h>
 
 typedef uint64_t signal_id_t;

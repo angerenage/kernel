@@ -7,6 +7,10 @@ int32_t thread_priority_clamp(int32_t priority) {
 	return priority;
 }
 
+static uint32_t thread_flags_load(const struct thread* thread) {
+	return thread == NULL ? THREAD_FLAG_NONE : __atomic_load_n(&thread->flags, __ATOMIC_ACQUIRE);
+}
+
 static void thread_reset_links(struct thread* thread) {
 	if (thread == NULL) return;
 
@@ -14,7 +18,7 @@ static void thread_reset_links(struct thread* thread) {
 	thread->wait_queue_next    = NULL;
 	thread->sleep_queue_next   = NULL;
 	thread->wake_deadline_tick = 0u;
-	thread->flags &= ~THREAD_FLAG_QUEUED;
+	(void)__atomic_fetch_and(&thread->flags, ~(uint32_t)THREAD_FLAG_QUEUED, __ATOMIC_ACQ_REL);
 }
 
 static void thread_exit_if_cancelled(struct thread* thread) {
@@ -166,11 +170,11 @@ void thread_init_idle(struct thread* thread, struct cpu* cpu, const char* name) 
 }
 
 bool thread_is_idle(const struct thread* thread) {
-	return thread != NULL && (thread->flags & THREAD_FLAG_IDLE) != 0u;
+	return (thread_flags_load(thread) & THREAD_FLAG_IDLE) != 0u;
 }
 
 bool thread_is_queued(const struct thread* thread) {
-	return thread != NULL && (thread->flags & THREAD_FLAG_QUEUED) != 0u;
+	return (thread_flags_load(thread) & THREAD_FLAG_QUEUED) != 0u;
 }
 
 bool thread_is_terminated(const struct thread* thread) {
@@ -184,15 +188,15 @@ bool thread_is_reap_safe(const struct thread* thread) {
 
 bool thread_is_joinable(const struct thread* thread) {
 	if (thread == NULL || thread_is_idle(thread)) return false;
-	return (thread->flags & THREAD_FLAG_DETACHED) == 0u;
+	return (thread_flags_load(thread) & THREAD_FLAG_DETACHED) == 0u;
 }
 
 bool thread_cancel_requested(const struct thread* thread) {
-	return thread != NULL && (thread->flags & THREAD_FLAG_CANCEL_PENDING) != 0u;
+	return (thread_flags_load(thread) & THREAD_FLAG_CANCEL_PENDING) != 0u;
 }
 
 bool thread_cancel_enabled(const struct thread* thread) {
-	return thread != NULL && (thread->flags & THREAD_FLAG_CANCEL_DISABLED) == 0u;
+	return thread != NULL && (thread_flags_load(thread) & THREAD_FLAG_CANCEL_DISABLED) == 0u;
 }
 
 bool thread_should_cancel(const struct thread* thread) {
@@ -205,14 +209,14 @@ bool thread_detach(struct thread* thread) {
 	if (thread == NULL || thread_is_idle(thread) || thread->state == THREAD_STATE_ZOMBIE) return false;
 	if (!thread_is_joinable(thread)) return false;
 
-	thread->flags |= THREAD_FLAG_DETACHED;
+	(void)__atomic_fetch_or(&thread->flags, (uint32_t)THREAD_FLAG_DETACHED, __ATOMIC_ACQ_REL);
 	return true;
 }
 
 bool thread_request_cancel(struct thread* thread) {
 	if (thread == NULL || thread_is_idle(thread) || thread_is_terminated(thread)) return false;
 
-	thread->flags |= THREAD_FLAG_CANCEL_PENDING;
+	(void)__atomic_fetch_or(&thread->flags, (uint32_t)THREAD_FLAG_CANCEL_PENDING, __ATOMIC_ACQ_REL);
 	sched_cancel_thread(thread);
 	return true;
 }
@@ -221,10 +225,10 @@ void thread_set_cancel_enabled(struct thread* thread, bool enabled) {
 	if (thread == NULL) return;
 
 	if (enabled) {
-		thread->flags &= ~THREAD_FLAG_CANCEL_DISABLED;
+		(void)__atomic_fetch_and(&thread->flags, ~(uint32_t)THREAD_FLAG_CANCEL_DISABLED, __ATOMIC_ACQ_REL);
 	}
 	else {
-		thread->flags |= THREAD_FLAG_CANCEL_DISABLED;
+		(void)__atomic_fetch_or(&thread->flags, (uint32_t)THREAD_FLAG_CANCEL_DISABLED, __ATOMIC_ACQ_REL);
 	}
 }
 
@@ -396,7 +400,7 @@ bool run_queue_enqueue(struct run_queue* queue, struct thread* thread) {
 
 	run_queue_insert_locked(queue, thread);
 	thread->wait_queue_next = NULL;
-	thread->flags |= THREAD_FLAG_QUEUED;
+	(void)__atomic_fetch_or(&thread->flags, (uint32_t)THREAD_FLAG_QUEUED, __ATOMIC_ACQ_REL);
 	thread->block_reason = THREAD_BLOCK_NONE;
 	thread->state        = THREAD_STATE_READY;
 	queue->depth++;

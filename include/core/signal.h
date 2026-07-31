@@ -2,7 +2,6 @@
 
 #include <base/signal.h>
 #include <base/upcall.h>
-#include <core/process.h>
 #include <core/spinlock.h>
 #include <core/thread.h>
 #include <stdbool.h>
