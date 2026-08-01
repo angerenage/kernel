@@ -509,6 +509,35 @@ enum signal_result signal_wait(struct signal* signal, struct signal_message* out
 	}
 }
 
+enum signal_result signal_unregister_wait_receiver(struct signal* signal) {
+	struct signal_wait_binding* previous;
+	struct signal_wait_binding* binding;
+	struct uthread*             current;
+	struct irq_state            state;
+
+	if (signal == NULL) return SIGNAL_INVALID_ARGUMENTS;
+	current = uthread_current();
+	if (current == NULL || thread_is_terminated(&current->thread)) return SIGNAL_WAIT_FAILED;
+
+	state = spinlock_lock_irqsave(&signal->lock);
+	if (signal->closing) {
+		spinlock_unlock_irqrestore(&signal->lock, state);
+		return SIGNAL_CLOSED;
+	}
+
+	binding = signal_find_wait_locked(signal, current, &previous);
+	if (binding != NULL && binding->waiting) {
+		spinlock_unlock_irqrestore(&signal->lock, state);
+		return SIGNAL_WAIT_FAILED;
+	}
+	if (binding != NULL) (void)signal_remove_wait_locked(signal, previous, binding);
+	spinlock_unlock_irqrestore(&signal->lock, state);
+
+	if (binding == NULL) return SIGNAL_WAIT_RECEIVER_NOT_REGISTERED;
+	signal_release_waits(binding);
+	return SIGNAL_OK;
+}
+
 enum signal_result signal_register_handler(struct signal* signal, struct uthread* target,
                                            user_upcall_entry_t* handler) {
 	struct signal_handler_binding* binding;

@@ -66,6 +66,9 @@ enum signal_result signal_try_wait(struct signal* signal, struct signal_message*
 /* Block the current uthread until it has a new message, the signal closes, or waiting is canceled. */
 enum signal_result signal_wait(struct signal* signal, struct signal_message* out_message);
 
+/* Remove the current uthread's synchronous receiver and discard its generation cursor. */
+enum signal_result signal_unregister_wait_receiver(struct signal* signal);
+
 /*
  * Register or update one persistent userspace upcall handler for target.
  * Updating purges queued requests for the previous entry; an already active handler may finish.
@@ -90,7 +93,7 @@ uint64_t signal_generation(struct signal* signal);
 /* Return the number of registered handlers for a signal. */
 size_t signal_handler_count(struct signal* signal);
 
-/* Return the number of waiters for a signal. */
+/* Return the number of synchronous receiver subscriptions for a signal. */
 size_t signal_wait_subscription_count(struct signal* signal);
 
 /* Return the number of threads waiting on a signal. */

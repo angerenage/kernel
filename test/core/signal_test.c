@@ -519,3 +519,41 @@ Test(signal, updating_and_destroying_handler_purge_stale_queued_upcalls) {
 	cr_assert_eq(uthread_upcall_pending_count(&receiver), 0u);
 	signal_test_deinit_uthread(&receiver);
 }
+
+Test(signal, current_thread_can_unregister_and_recreate_synchronous_receiver) {
+	struct signal*        signal;
+	struct uthread        receiver;
+	struct signal_payload payload = {
+		.args = {9u, 8u, 7u, 6u}
+    };
+	struct signal_message received;
+
+	signal_test_init_heap();
+	signal_test_init_bound_bootstrap_cpu();
+	signal_test_init_sched_uthread(&receiver, "signal_receiver", 0x490000u, 0x494000u, 0x9000u);
+	signal = signal_create();
+	cr_assert_not_null(signal);
+	sched_set_current(cpu_current(), &receiver.thread);
+
+	cr_assert_eq(signal_unregister_wait_receiver(signal), SIGNAL_WAIT_RECEIVER_NOT_REGISTERED);
+	cr_assert_eq(signal_try_wait(signal, &received), SIGNAL_WOULD_BLOCK);
+	cr_assert_eq(signal_wait_subscription_count(signal), 1u);
+	cr_assert_eq(__atomic_load_n(&receiver.reference_count, __ATOMIC_ACQUIRE), 2u);
+
+	cr_assert_eq(signal_unregister_wait_receiver(signal), SIGNAL_OK);
+	cr_assert_eq(signal_wait_subscription_count(signal), 0u);
+	cr_assert_eq(__atomic_load_n(&receiver.reference_count, __ATOMIC_ACQUIRE), 1u);
+
+	cr_assert_eq(signal_send(signal, (process_id_t)84u, &payload, NULL, NULL), SIGNAL_OK);
+	cr_assert_eq(signal_try_wait(signal, &received), SIGNAL_OK);
+	cr_assert_eq(received.sender, (process_id_t)84u);
+	cr_assert_eq(memcmp(&received.payload, &payload, sizeof(payload)), 0);
+	cr_assert_eq(signal_wait_subscription_count(signal), 1u);
+	cr_assert_eq(__atomic_load_n(&receiver.reference_count, __ATOMIC_ACQUIRE), 2u);
+
+	cr_assert_eq(signal_unregister_wait_receiver(signal), SIGNAL_OK);
+	cr_assert_eq(signal_wait_subscription_count(signal), 0u);
+	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
+	signal_test_deinit_uthread(&receiver);
+	signal_test_reset_scheduler_state();
+}
