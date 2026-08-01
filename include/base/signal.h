@@ -18,6 +18,12 @@ struct signal_payload {
 	uint64_t args[SIGNAL_ARGUMENT_COUNT];
 };
 
+/* One authenticated signal publication as observed by synchronous receivers. */
+struct signal_message {
+	process_id_t          sender;
+	struct signal_payload payload;
+};
+
 enum signal_result {
 	SIGNAL_OK = 0,
 	SIGNAL_INVALID_ARGUMENTS,

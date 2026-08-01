@@ -51,6 +51,7 @@ static void signal_test_init_heap(void) {
 }
 
 #define SIGNAL_TEST_SENDER ((process_id_t)42u)
+#define SIGNAL_TEST_SECOND_SENDER ((process_id_t)84u)
 
 static bool                  signal_test_hook_active;
 static size_t                signal_test_hook_runs;
@@ -168,7 +169,7 @@ static void signal_test_send_context_switch_hook(struct thread_context* current,
 	             SIGNAL_OK);
 	if (signal_test_send_twice) {
 		cr_assert_eq(signal_send(signal_test_signal,
-		                         SIGNAL_TEST_SENDER,
+		                         SIGNAL_TEST_SECOND_SENDER,
 		                         &signal_test_second_payload,
 		                         &signal_test_second_receivers,
 		                         &signal_test_second_deliveries),
@@ -184,7 +185,7 @@ Test(signal, create_send_read_and_destroy) {
 	struct signal_payload payload = {
 		.args = {1u, 2u, 3u, 4u}
     };
-	struct signal_payload received;
+	struct signal_message received;
 	uint64_t              receiver_count = UINT64_MAX;
 	uint64_t              delivery_count = UINT64_MAX;
 	signal_id_t           id;
@@ -205,7 +206,8 @@ Test(signal, create_send_read_and_destroy) {
 	cr_assert(signal_has_value(signal));
 	cr_assert_eq(signal_generation(signal), 1u);
 	cr_assert_eq(signal_read(signal, &received), SIGNAL_OK);
-	cr_assert_eq(memcmp(&payload, &received, sizeof(payload)), 0);
+	cr_assert_eq(received.sender, SIGNAL_SENDER_KERNEL);
+	cr_assert_eq(memcmp(&payload, &received.payload, sizeof(payload)), 0);
 
 	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
 	cr_assert_null(signal_acquire(id));
@@ -243,7 +245,7 @@ Test(signal, synchronous_receivers_track_the_latest_generation_independently) {
 	struct signal_payload payload = {
 		.args = {10u, 20u, 30u, 40u}
     };
-	struct signal_payload received;
+	struct signal_message received;
 	uint64_t              receiver_count;
 	uint64_t              delivery_count;
 
@@ -257,12 +259,14 @@ Test(signal, synchronous_receivers_track_the_latest_generation_independently) {
 	cr_assert_eq(signal_send(signal, SIGNAL_TEST_SENDER, &payload, NULL, NULL), SIGNAL_OK);
 	sched_set_current(cpu_current(), &first.thread);
 	cr_assert_eq(signal_try_wait(signal, &received), SIGNAL_OK);
-	cr_assert_eq(memcmp(&payload, &received, sizeof(payload)), 0);
+	cr_assert_eq(received.sender, SIGNAL_TEST_SENDER);
+	cr_assert_eq(memcmp(&payload, &received.payload, sizeof(payload)), 0);
 	cr_assert_eq(signal_try_wait(signal, &received), SIGNAL_WOULD_BLOCK);
 
 	sched_set_current(cpu_current(), &second.thread);
 	cr_assert_eq(signal_try_wait(signal, &received), SIGNAL_OK);
-	cr_assert_eq(memcmp(&payload, &received, sizeof(payload)), 0);
+	cr_assert_eq(received.sender, SIGNAL_TEST_SENDER);
+	cr_assert_eq(memcmp(&payload, &received.payload, sizeof(payload)), 0);
 	cr_assert_eq(signal_wait_subscription_count(signal), 2u);
 
 	payload.args[0] = 99u;
@@ -272,12 +276,15 @@ Test(signal, synchronous_receivers_track_the_latest_generation_independently) {
 
 	sched_set_current(cpu_current(), &first.thread);
 	cr_assert_eq(signal_try_wait(signal, &received), SIGNAL_OK);
-	cr_assert_eq(received.args[0], 99u);
+	cr_assert_eq(received.sender, SIGNAL_TEST_SENDER);
+	cr_assert_eq(received.payload.args[0], 99u);
 	sched_set_current(cpu_current(), &second.thread);
 	cr_assert_eq(signal_try_wait(signal, &received), SIGNAL_OK);
-	cr_assert_eq(received.args[0], 99u);
+	cr_assert_eq(received.sender, SIGNAL_TEST_SENDER);
+	cr_assert_eq(received.payload.args[0], 99u);
 	cr_assert_eq(signal_read(signal, &received), SIGNAL_OK);
-	cr_assert_eq(received.args[0], 99u);
+	cr_assert_eq(received.sender, SIGNAL_TEST_SENDER);
+	cr_assert_eq(received.payload.args[0], 99u);
 	cr_assert_eq(signal_try_wait(signal, &received), SIGNAL_WOULD_BLOCK, "read must not change the synchronous cursor");
 
 	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
@@ -335,7 +342,7 @@ Test(signal, one_thread_can_receive_the_same_publication_by_handler_and_wait) {
 	struct signal*        signal;
 	struct uthread        receiver;
 	struct thread         sender;
-	struct signal_payload received;
+	struct signal_message received;
 
 	signal_test_init_heap();
 	signal_test_init_bound_bootstrap_cpu();
@@ -358,7 +365,8 @@ Test(signal, one_thread_can_receive_the_same_publication_by_handler_and_wait) {
 	cr_assert_eq(signal_test_hook_runs, 1u);
 	cr_assert_eq(signal_test_first_receivers, 2u);
 	cr_assert_eq(signal_test_first_deliveries, 2u);
-	cr_assert_eq(memcmp(&received, &signal_test_first_payload, sizeof(received)), 0);
+	cr_assert_eq(received.sender, SIGNAL_TEST_SENDER);
+	cr_assert_eq(memcmp(&received.payload, &signal_test_first_payload, sizeof(received.payload)), 0);
 	cr_assert_eq(uthread_upcall_pending_count(&receiver), 1u);
 	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].args[0], SIGNAL_TEST_SENDER);
 	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].args[1], 11u);
@@ -382,7 +390,7 @@ Test(signal, blocked_wait_keeps_its_wake_value_when_latest_advances) {
 	struct signal*        signal;
 	struct uthread        receiver;
 	struct thread         sender;
-	struct signal_payload received;
+	struct signal_message received;
 
 	signal_test_init_heap();
 	signal_test_init_bound_bootstrap_cpu();
@@ -405,13 +413,15 @@ Test(signal, blocked_wait_keeps_its_wake_value_when_latest_advances) {
 
 	sched_set_current(cpu_current(), &receiver.thread);
 	cr_assert_eq(signal_wait(signal, &received), SIGNAL_OK);
-	cr_assert_eq(received.args[0], 1u, "the blocked wait must receive the value that woke it");
+	cr_assert_eq(received.sender, SIGNAL_TEST_SENDER);
+	cr_assert_eq(received.payload.args[0], 1u, "the blocked wait must receive the value that woke it");
 	cr_assert_eq(signal_test_first_receivers, 1u);
 	cr_assert_eq(signal_test_first_deliveries, 1u);
 	cr_assert_eq(signal_test_second_receivers, 0u);
 	cr_assert_eq(signal_test_second_deliveries, 0u);
 	cr_assert_eq(signal_try_wait(signal, &received), SIGNAL_OK);
-	cr_assert_eq(received.args[0], 5u, "the next wait must observe the newer remembered value");
+	cr_assert_eq(received.sender, SIGNAL_TEST_SECOND_SENDER);
+	cr_assert_eq(received.payload.args[0], 5u, "the next wait must observe the newer remembered value");
 	cr_assert_eq(signal_try_wait(signal, &received), SIGNAL_WOULD_BLOCK);
 
 	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
@@ -423,7 +433,7 @@ Test(signal, thread_cleanup_removes_handlers_and_synchronous_cursors) {
 	struct signal*        first;
 	struct signal*        second;
 	struct uthread        receiver;
-	struct signal_payload unused;
+	struct signal_message unused;
 
 	signal_test_init_heap();
 	signal_test_init_bound_bootstrap_cpu();

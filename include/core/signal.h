@@ -12,11 +12,11 @@ struct signal_handler_binding;
 struct signal_wait_binding;
 struct uthread;
 
-/* Multi-producer broadcast object carrying one four-word value. */
+/* Multi-producer broadcast object carrying one authenticated four-word message. */
 struct signal {
 	struct spinlock                lock;
 	signal_id_t                    id;
-	struct signal_payload          latest;
+	struct signal_message          latest;
 	uint64_t                       generation;
 	struct signal_handler_binding* handler_head;
 	struct signal_handler_binding* handler_tail;
@@ -57,14 +57,14 @@ enum signal_result signal_destroy(struct signal* signal);
 enum signal_result signal_send(struct signal* signal, process_id_t sender, const struct signal_payload* payload,
                                uint64_t* out_receiver_count, uint64_t* out_delivery_count);
 
-/* Read the currently remembered value without creating a receiver or consuming a generation. */
-enum signal_result signal_read(struct signal* signal, struct signal_payload* out_payload);
+/* Read the currently remembered message without creating a receiver or consuming a generation. */
+enum signal_result signal_read(struct signal* signal, struct signal_message* out_message);
 
-/* Return the newest value not yet consumed by the current uthread, without blocking. */
-enum signal_result signal_try_wait(struct signal* signal, struct signal_payload* out_payload);
+/* Return the newest message not yet consumed by the current uthread, without blocking. */
+enum signal_result signal_try_wait(struct signal* signal, struct signal_message* out_message);
 
-/* Block the current uthread until it has a new value, the signal closes, or waiting is canceled. */
-enum signal_result signal_wait(struct signal* signal, struct signal_payload* out_payload);
+/* Block the current uthread until it has a new message, the signal closes, or waiting is canceled. */
+enum signal_result signal_wait(struct signal* signal, struct signal_message* out_message);
 
 /*
  * Register or update one persistent userspace upcall handler for target.
