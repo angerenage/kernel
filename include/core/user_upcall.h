@@ -15,10 +15,18 @@ enum {
 	USER_UPCALL_QUEUE_CAPACITY = 16u,
 };
 
-/* One userspace entry and its opaque arguments. */
+/* Kernel-internal provenance used to identify and revoke queued requests. */
+enum user_upcall_origin {
+	USER_UPCALL_ORIGIN_NONE = 0,
+	USER_UPCALL_ORIGIN_SIGNAL,
+};
+
+/* One userspace entry, opaque arguments, and non-user-visible provenance. */
 struct user_upcall_request {
-	uintptr_t entry;
-	uintptr_t args[USER_UPCALL_ARGUMENT_COUNT];
+	enum user_upcall_origin origin;
+	uintptr_t               origin_token;
+	uintptr_t               entry;
+	uintptr_t               args[USER_UPCALL_ARGUMENT_COUNT];
 };
 
 enum user_upcall_result {
@@ -63,6 +71,9 @@ void uthread_upcall_state_deinit(struct uthread* thread);
 
 /* Queue one upcall request. */
 enum user_upcall_result uthread_upcall_enqueue(struct uthread* thread, const struct user_upcall_request* request);
+
+/* Remove queued requests matching one kernel origin and token. An active request is not affected. */
+size_t uthread_upcall_purge(struct uthread* thread, enum user_upcall_origin origin, uintptr_t origin_token);
 
 /* Deliver the next upcall, or consume one required resume boundary. */
 enum user_upcall_result uthread_upcall_deliver(struct uthread* thread, struct hal_userspace_return_frame* frame);

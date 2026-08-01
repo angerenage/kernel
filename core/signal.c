@@ -141,6 +141,7 @@ static void signal_release_handlers(struct signal_handler_binding* binding) {
 	while (binding != NULL) {
 		struct signal_handler_binding* next = binding->next;
 
+		(void)uthread_upcall_purge(binding->target, USER_UPCALL_ORIGIN_SIGNAL, (uintptr_t)binding);
 		uthread_release(binding->target);
 		free(binding);
 		binding = next;
@@ -372,7 +373,9 @@ enum signal_result signal_send(struct signal* signal, process_id_t sender, const
 		receiver_count++;
 		if (__atomic_load_n(&handler->target->dying, __ATOMIC_ACQUIRE) != 0u) continue;
 		request = (struct user_upcall_request){
-			.entry = handler->entry,
+			.origin       = USER_UPCALL_ORIGIN_SIGNAL,
+			.origin_token = (uintptr_t)handler,
+			.entry        = handler->entry,
 			.args =
 				{
 					   (uintptr_t)sender,
@@ -530,6 +533,7 @@ enum signal_result signal_register_handler(struct signal* signal, struct uthread
 		result = SIGNAL_UNAVAILABLE;
 	}
 	else if (existing != NULL) {
+		(void)uthread_upcall_purge(existing->target, USER_UPCALL_ORIGIN_SIGNAL, (uintptr_t)existing);
 		existing->entry = (uintptr_t)handler;
 	}
 	else if (binding == NULL) {
@@ -571,8 +575,7 @@ enum signal_result signal_unregister_handler(struct signal* signal, struct uthre
 	spinlock_unlock_irqrestore(&signal->lock, state);
 
 	if (binding == NULL) return SIGNAL_HANDLER_NOT_REGISTERED;
-	uthread_release(binding->target);
-	free(binding);
+	signal_release_handlers(binding);
 	return SIGNAL_OK;
 }
 

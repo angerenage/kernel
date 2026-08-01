@@ -198,3 +198,34 @@ Test(user_upcall, defers_a_full_queue_after_restoring_userspace) {
 	cr_assert_eq(frame.args[0], 0u);
 	uthread_upcall_state_deinit(&thread);
 }
+
+Test(user_upcall, purge_removes_only_matching_queued_requests_and_preserves_fifo) {
+	struct uthread                    thread;
+	struct hal_userspace_return_frame frame;
+	const uintptr_t                   first_token  = 0x1111u;
+	const uintptr_t                   second_token = 0x2222u;
+	struct user_upcall_request        requests[]   = {
+        {.origin = USER_UPCALL_ORIGIN_SIGNAL, .origin_token = first_token, .entry = 0x4000u, .args = {1u}},
+        {.origin = USER_UPCALL_ORIGIN_SIGNAL, .origin_token = second_token, .entry = 0x5000u, .args = {2u}},
+        {.origin = USER_UPCALL_ORIGIN_NONE, .entry = 0x6000u, .args = {3u}},
+        {.origin = USER_UPCALL_ORIGIN_SIGNAL, .origin_token = first_token, .entry = 0x7000u, .args = {4u}},
+        {.origin = USER_UPCALL_ORIGIN_SIGNAL, .origin_token = second_token, .entry = 0x8000u, .args = {5u}},
+    };
+
+	user_upcall_test_reset(&thread, &frame);
+	for (size_t i = 0u; i < sizeof(requests) / sizeof(requests[0]); i++) {
+		cr_assert_eq(uthread_upcall_enqueue(&thread, &requests[i]), USER_UPCALL_OK);
+	}
+
+	cr_assert_eq(uthread_upcall_purge(&thread, USER_UPCALL_ORIGIN_SIGNAL, first_token), 2u);
+	cr_assert_eq(uthread_upcall_pending_count(&thread), 3u);
+	cr_assert_eq(thread.upcall.pending[thread.upcall.head].args[0], 2u);
+	cr_assert_eq(thread.upcall.pending[(thread.upcall.head + 1u) % USER_UPCALL_QUEUE_CAPACITY].args[0], 3u);
+	cr_assert_eq(thread.upcall.pending[(thread.upcall.head + 2u) % USER_UPCALL_QUEUE_CAPACITY].args[0], 5u);
+
+	cr_assert_eq(uthread_upcall_purge(&thread, USER_UPCALL_ORIGIN_NONE, first_token), 0u);
+	cr_assert_eq(uthread_upcall_purge(&thread, USER_UPCALL_ORIGIN_SIGNAL, second_token), 2u);
+	cr_assert_eq(uthread_upcall_pending_count(&thread), 1u);
+	cr_assert_eq(thread.upcall.pending[thread.upcall.head].args[0], 3u);
+	uthread_upcall_state_deinit(&thread);
+}

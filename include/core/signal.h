@@ -42,7 +42,10 @@ bool signal_retain(struct signal* signal);
 /* Drop a reference acquired through signal_acquire() or signal_create(). */
 void signal_release(struct signal* signal);
 
-/* Remove a signal from the registry, wake waiters, detach receivers, and consume its owner reference. */
+/*
+ * Remove a signal from the registry, purge queued handler requests, wake waiters,
+ * detach receivers, and consume its owner reference.
+ */
 enum signal_result signal_destroy(struct signal* signal);
 
 /*
@@ -63,10 +66,13 @@ enum signal_result signal_try_wait(struct signal* signal, struct signal_payload*
 /* Block the current uthread until it has a new value, the signal closes, or waiting is canceled. */
 enum signal_result signal_wait(struct signal* signal, struct signal_payload* out_payload);
 
-/* Register or update one persistent userspace upcall handler for target. */
+/*
+ * Register or update one persistent userspace upcall handler for target.
+ * Updating purges queued requests for the previous entry; an already active handler may finish.
+ */
 enum signal_result signal_register_handler(struct signal* signal, struct uthread* target, user_upcall_entry_t* handler);
 
-/* Remove target's persistent userspace handler registration from signal. */
+/* Remove target's persistent userspace handler registration and purge its queued requests. */
 enum signal_result signal_unregister_handler(struct signal* signal, struct uthread* target);
 
 /* Remove every handler and synchronous receiver owned by a uthread beginning destruction. */
