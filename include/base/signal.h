@@ -24,6 +24,33 @@ struct signal_message {
 	struct signal_payload payload;
 };
 
+/* Delivery statistics returned by one Signal publication. */
+struct signal_send_response {
+	uint64_t receiver_count;
+	uint64_t delivery_count;
+};
+
+/* Control operations routed through the Signal capability with cap_call. */
+enum signal_op {
+	SIGNAL_OP_UNSUBSCRIBE = 0,
+	SIGNAL_OP_DESTROY,
+};
+
+/* Common header for all Signal capability requests. */
+struct signal_request_header {
+	enum signal_op op;
+};
+
+/* Request to remove the calling thread's synchronous receiver. */
+struct signal_unsubscribe_request {
+	struct signal_request_header header;
+};
+
+/* Request to destroy the Signal object. */
+struct signal_destroy_request {
+	struct signal_request_header header;
+};
+
 enum signal_result {
 	SIGNAL_OK = 0,
 	SIGNAL_INVALID_ARGUMENTS,

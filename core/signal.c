@@ -1,5 +1,6 @@
 #include <base/signal.h>
 #include <base/upcall.h>
+#include <core/capability.h>
 #include <core/id_table.h>
 #include <core/sched.h>
 #include <core/signal.h>
@@ -256,6 +257,7 @@ struct signal* signal_create(void) {
 	                    "signal_waiters",
 	                    SPINLOCK_ORDER_SCHED,
 	                    SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
+	signal->cap_object_id   = CAP_OBJECT_ID_INVALID;
 	signal->reference_count = 1u;
 
 	id_result = id_table_alloc(&signal_table, signal, &id);
@@ -269,6 +271,39 @@ struct signal* signal_create(void) {
 
 signal_id_t signal_id(const struct signal* signal) {
 	return signal == NULL ? SIGNAL_ID_INVALID : signal->id;
+}
+
+cap_object_id_t signal_cap_object_id(const struct signal* signal) {
+	return signal == NULL ? CAP_OBJECT_ID_INVALID : signal->cap_object_id;
+}
+
+bool signal_set_cap_object_id(struct signal* signal, cap_object_id_t id) {
+	struct irq_state state;
+	bool             published = false;
+
+	if (signal == NULL || id == CAP_OBJECT_ID_INVALID) return false;
+
+	state = spinlock_lock_irqsave(&signal->lock);
+	if (!signal->closing) {
+		signal->cap_object_id = id;
+		published             = true;
+	}
+	spinlock_unlock_irqrestore(&signal->lock, state);
+	return published;
+}
+
+bool signal_destroy_cap_object(struct signal* signal) {
+	struct irq_state state;
+	cap_object_id_t  id;
+
+	if (signal == NULL) return false;
+
+	state                 = spinlock_lock_irqsave(&signal->lock);
+	id                    = signal->cap_object_id;
+	signal->cap_object_id = CAP_OBJECT_ID_INVALID;
+	spinlock_unlock_irqrestore(&signal->lock, state);
+
+	return id != CAP_OBJECT_ID_INVALID && cap_object_destroy_with_id(id);
 }
 
 bool signal_retain(struct signal* signal) {
@@ -336,6 +371,7 @@ enum signal_result signal_destroy(struct signal* signal) {
 	signal->has_value  = false;
 	spinlock_unlock_irqrestore(&signal->lock, state);
 
+	(void)signal_destroy_cap_object(signal);
 	(void)sched_wake_all(&signal->waiters);
 	signal_release_handlers(handlers);
 	signal_release_waits(waits);

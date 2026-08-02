@@ -2,6 +2,7 @@
 
 #include <base/signal.h>
 #include <base/upcall.h>
+#include <core/capability.h>
 #include <core/spinlock.h>
 #include <core/thread.h>
 #include <stdbool.h>
@@ -25,9 +26,11 @@ struct signal {
 	struct signal_wait_binding*    wait_tail;
 	size_t                         wait_receiver_count;
 	struct thread_wait_queue       waiters;
-	uint64_t                       reference_count;
-	bool                           has_value;
-	bool                           closing;
+	/* Lazily-created cap_object id for this Signal. */
+	cap_object_id_t cap_object_id;
+	uint64_t        reference_count;
+	bool            has_value;
+	bool            closing;
 };
 
 /* Create and register a signal. The returned pointer owns the registry reference. */
@@ -86,6 +89,15 @@ bool signal_has_value(struct signal* signal);
 
 /* Return a stable signal identifier, or SIGNAL_ID_INVALID for NULL. */
 signal_id_t signal_id(const struct signal* signal);
+
+/* Return the lazily-created cap_object id for signal. */
+cap_object_id_t signal_cap_object_id(const struct signal* signal);
+
+/* Publish a cap_object id on an open signal. */
+bool signal_set_cap_object_id(struct signal* signal, cap_object_id_t id);
+
+/* Destroy the lazily-created cap_object for signal and clear the slot. */
+bool signal_destroy_cap_object(struct signal* signal);
 
 /* Return the current generation number, which monotonically increases with each publication. */
 uint64_t signal_generation(struct signal* signal);
