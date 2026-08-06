@@ -21,6 +21,8 @@ struct signal {
 	uint64_t                       generation;
 	struct signal_handler_binding* handler_head;
 	struct signal_handler_binding* handler_tail;
+	struct signal_handler_binding* handler_wake_head;
+	struct signal_handler_binding* handler_wake_tail;
 	size_t                         handler_count;
 	struct signal_wait_binding*    wait_head;
 	struct signal_wait_binding*    wait_tail;

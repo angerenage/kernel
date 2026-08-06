@@ -18,7 +18,8 @@ static void thread_reset_links(struct thread* thread) {
 	thread->wait_queue_next    = NULL;
 	thread->sleep_queue_next   = NULL;
 	thread->wake_deadline_tick = 0u;
-	(void)__atomic_fetch_and(&thread->flags, ~(uint32_t)THREAD_FLAG_QUEUED, __ATOMIC_ACQ_REL);
+	(void)__atomic_fetch_and(
+		&thread->flags, ~((uint32_t)THREAD_FLAG_QUEUED | (uint32_t)THREAD_FLAG_WAIT_INTERRUPTIBLE), __ATOMIC_ACQ_REL);
 }
 
 static void thread_exit_if_cancelled(struct thread* thread) {
@@ -203,6 +204,22 @@ bool thread_should_cancel(const struct thread* thread) {
 	if (thread == NULL || thread_is_idle(thread) || thread_is_terminated(thread)) return false;
 
 	return thread_cancel_requested(thread) && thread_cancel_enabled(thread);
+}
+
+void thread_request_interrupt(struct thread* thread) {
+	if (thread == NULL || thread_is_idle(thread) || thread_is_terminated(thread)) return;
+
+	(void)__atomic_fetch_or(&thread->flags, (uint32_t)THREAD_FLAG_INTERRUPT_PENDING, __ATOMIC_ACQ_REL);
+}
+
+bool thread_interrupt_pending(const struct thread* thread) {
+	return (thread_flags_load(thread) & THREAD_FLAG_INTERRUPT_PENDING) != 0u;
+}
+
+void thread_clear_interrupt(struct thread* thread) {
+	if (thread == NULL) return;
+
+	(void)__atomic_fetch_and(&thread->flags, ~(uint32_t)THREAD_FLAG_INTERRUPT_PENDING, __ATOMIC_ACQ_REL);
 }
 
 bool thread_detach(struct thread* thread) {

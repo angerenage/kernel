@@ -1,3 +1,4 @@
+#include <core/thread.h>
 #include <core/user_upcall.h>
 #include <core/uthread.h>
 #include <libc/string.h>
@@ -45,6 +46,7 @@ void uthread_upcall_state_deinit(struct uthread* thread) {
 	state->initialized = false;
 	memset(&state->interrupted_context, 0, sizeof(state->interrupted_context));
 	uthread_upcall_clear_pending(state);
+	thread_clear_interrupt(&thread->thread);
 	spinlock_unlock_irqrestore(&state->lock, irq_state);
 }
 
@@ -76,6 +78,7 @@ enum user_upcall_result uthread_upcall_enqueue(struct uthread* thread, const str
 	tail                 = (state->head + state->count) % USER_UPCALL_QUEUE_CAPACITY;
 	state->pending[tail] = *request;
 	state->count++;
+	thread_request_interrupt(&thread->thread);
 	spinlock_unlock_irqrestore(&state->lock, irq_state);
 	return USER_UPCALL_OK;
 }
@@ -123,6 +126,7 @@ size_t uthread_upcall_purge(struct uthread* thread, enum user_upcall_origin orig
 	}
 	state->count = retained;
 	if (retained == 0u) state->head = 0u;
+	if (retained == 0u) thread_clear_interrupt(&thread->thread);
 	spinlock_unlock_irqrestore(&state->lock, irq_state);
 	return purged;
 }
@@ -185,6 +189,7 @@ enum user_upcall_result uthread_upcall_deliver(struct uthread* thread, struct ha
 	state->head = (state->head + 1u) % USER_UPCALL_QUEUE_CAPACITY;
 	state->count--;
 	state->phase = USER_UPCALL_PHASE_ACTIVE;
+	if (state->count == 0u) thread_clear_interrupt(&thread->thread);
 	spinlock_unlock_irqrestore(&state->lock, irq_state);
 	return USER_UPCALL_OK;
 }

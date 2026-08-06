@@ -42,13 +42,15 @@ enum thread_state {
 
 /* Persistent thread attributes and transient scheduler bookkeeping flags. */
 enum thread_flags {
-	THREAD_FLAG_NONE            = 0u,
-	THREAD_FLAG_IDLE            = 1u << 0,
-	THREAD_FLAG_QUEUED          = 1u << 1,
-	THREAD_FLAG_DETACHED        = 1u << 2,
-	THREAD_FLAG_CANCEL_PENDING  = 1u << 3,
-	THREAD_FLAG_CANCEL_DISABLED = 1u << 4,
-	THREAD_FLAG_PARK_PERMIT     = 1u << 5,
+	THREAD_FLAG_NONE               = 0u,
+	THREAD_FLAG_IDLE               = 1u << 0,
+	THREAD_FLAG_QUEUED             = 1u << 1,
+	THREAD_FLAG_DETACHED           = 1u << 2,
+	THREAD_FLAG_CANCEL_PENDING     = 1u << 3,
+	THREAD_FLAG_CANCEL_DISABLED    = 1u << 4,
+	THREAD_FLAG_PARK_PERMIT        = 1u << 5,
+	THREAD_FLAG_INTERRUPT_PENDING  = 1u << 6,
+	THREAD_FLAG_WAIT_INTERRUPTIBLE = 1u << 7,
 };
 
 /* Why a thread is blocked when state == THREAD_STATE_BLOCKED. */
@@ -78,6 +80,7 @@ enum thread_wait_status {
 	THREAD_WAIT_STATUS_SIGNALED,
 	THREAD_WAIT_STATUS_TIMED_OUT,
 	THREAD_WAIT_STATUS_CANCELED,
+	THREAD_WAIT_STATUS_INTERRUPTED,
 };
 
 /* Parameters used to initialize a non-idle thread descriptor. */
@@ -205,6 +208,15 @@ bool thread_cancel_enabled(const struct thread* thread);
 
 /* Return true when the thread should exit at the next cancellation point. */
 bool thread_should_cancel(const struct thread* thread);
+
+/* Mark an asynchronous userspace interruption pending without waking the thread. */
+void thread_request_interrupt(struct thread* thread);
+
+/* Return whether an asynchronous userspace interruption is pending. */
+bool thread_interrupt_pending(const struct thread* thread);
+
+/* Clear a pending userspace interruption after its upcall was delivered or purged. */
+void thread_clear_interrupt(struct thread* thread);
 
 /* Convert a joinable thread into a detached thread before it reaches ZOMBIE. */
 bool thread_detach(struct thread* thread);

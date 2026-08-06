@@ -23,6 +23,13 @@ struct sched_cpu_stats {
 	uint64_t yield_count;
 };
 
+/* Completion reason returned by an explicitly interruptible blocking operation. */
+enum sched_block_result {
+	SCHED_BLOCK_FAILED = 0,
+	SCHED_BLOCK_SIGNALED,
+	SCHED_BLOCK_INTERRUPTED,
+};
+
 /*
  * Minimal per-CPU scheduler front-end.
  * Each CPU owns a run queue plus a permanently available idle thread.
@@ -94,6 +101,14 @@ bool sched_block_current_locked(struct thread_wait_queue* queue, enum thread_blo
                                 struct irq_state queue_irq_state);
 
 /*
+ * Block on queue while allowing a queued userspace upcall to abort the wait.
+ * The pending interrupt remains set until the upcall is delivered or purged.
+ */
+enum sched_block_result sched_block_current_interruptible_locked(struct thread_wait_queue* queue,
+                                                                 enum thread_block_reason  reason,
+                                                                 struct irq_state          queue_irq_state);
+
+/*
  * Block the current thread on queue until another CPU wakes it or the scheduler
  * tick reaches deadline_tick.
  * Returns true when the thread was signaled via the
@@ -107,6 +122,9 @@ bool sched_wake_one(struct thread_wait_queue* queue);
 
 /* Wake every blocked waiter from queue and return the number of threads made runnable. */
 size_t sched_wake_all(struct thread_wait_queue* queue);
+
+/* Request userspace interruption and wake the target when its current wait is interruptible. */
+bool sched_interrupt_thread(struct thread* thread);
 
 /* Force a cancellation-pending thread out of any blocking wait so it can reach a cancellation point. */
 void sched_cancel_thread(struct thread* thread);

@@ -557,3 +557,56 @@ Test(signal, current_thread_can_unregister_and_recreate_synchronous_receiver) {
 	signal_test_deinit_uthread(&receiver);
 	signal_test_reset_scheduler_state();
 }
+
+Test(signal, queued_handler_interrupts_blocking_wait_on_another_signal) {
+	const struct thread_create_params sender_params = {
+		.name              = "signal_upcall_sender",
+		.entry             = signal_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x4a0000u,
+		.kernel_stack_top  = 0x4a4000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	struct signal*        handler_signal;
+	struct signal*        waited_signal;
+	struct uthread        receiver;
+	struct thread         sender;
+	struct signal_message unused;
+
+	signal_test_init_heap();
+	signal_test_init_bound_bootstrap_cpu();
+	signal_test_init_sched_uthread(&receiver, "signal_handler_waiter", 0x4b0000u, 0x4b4000u, 0x9000u);
+	cr_assert(thread_init(&sender, &sender_params), "sender thread_init failed");
+	cr_assert(sched_make_runnable(&sender), "sender should become runnable");
+
+	handler_signal = signal_create();
+	waited_signal  = signal_create();
+	cr_assert_not_null(handler_signal);
+	cr_assert_not_null(waited_signal);
+	cr_assert_eq(signal_register_handler(handler_signal, &receiver, signal_test_handler), SIGNAL_OK);
+
+	signal_test_signal        = handler_signal;
+	signal_test_sender        = &sender;
+	signal_test_first_payload = (struct signal_payload){
+		.args = {1u, 2u, 3u, 4u}
+    };
+	hal_cpu_mock_set_context_switch_hook(signal_test_send_context_switch_hook);
+
+	sched_set_current(cpu_current(), &receiver.thread);
+	cr_assert_eq(signal_wait(waited_signal, &unused), SIGNAL_WAIT_INTERRUPTED);
+	cr_assert_eq(signal_test_hook_runs, 1u);
+	cr_assert_eq(signal_test_first_receivers, 1u);
+	cr_assert_eq(signal_test_first_deliveries, 1u);
+	cr_assert_eq(signal_blocked_waiter_count(waited_signal), 0u);
+	cr_assert_eq(uthread_upcall_pending_count(&receiver), 1u);
+	cr_assert(thread_interrupt_pending(&receiver.thread));
+
+	cr_assert_eq(signal_unregister_wait_receiver(waited_signal), SIGNAL_OK);
+	cr_assert_eq(signal_destroy(handler_signal), SIGNAL_OK);
+	cr_assert_eq(uthread_upcall_pending_count(&receiver), 0u);
+	cr_assert_not(thread_interrupt_pending(&receiver.thread));
+	cr_assert_eq(signal_destroy(waited_signal), SIGNAL_OK);
+	signal_test_deinit_uthread(&receiver);
+	signal_test_reset_scheduler_state();
+}

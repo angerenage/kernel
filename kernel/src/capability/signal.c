@@ -31,6 +31,8 @@ static syscall_result_t signal_result_to_syscall(enum signal_result result) {
 	case SIGNAL_UNAVAILABLE:
 	case SIGNAL_WAIT_CANCELED:
 		return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, (uintptr_t)result);
+	case SIGNAL_WAIT_INTERRUPTED:
+		return syscall_result_error(SYSCALL_STATUS_INTERRUPTED, (uintptr_t)result);
 	case SIGNAL_NO_VALUE:
 	case SIGNAL_WOULD_BLOCK:
 	case SIGNAL_HANDLER_NOT_REGISTERED:

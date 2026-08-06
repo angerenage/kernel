@@ -62,6 +62,7 @@ typedef enum syscall_status {
 	SYSCALL_STATUS_DENIED          = 102u,
 	SYSCALL_STATUS_FAILED          = 200u,
 	SYSCALL_STATUS_UNAVAILABLE     = 201u,
+	SYSCALL_STATUS_INTERRUPTED     = 202u,
 } syscall_status_t;
 
 /* Result envelope returned by every syscall implementation. */

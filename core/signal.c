@@ -17,8 +17,10 @@ _Static_assert(sizeof(uintptr_t) >= sizeof(uint64_t), "signal payload requires 6
 
 struct signal_handler_binding {
 	struct signal_handler_binding* next;
+	struct signal_handler_binding* wake_next;
 	struct uthread*                target;
 	uintptr_t                      entry;
+	bool                           wake_queued;
 };
 
 struct signal_wait_binding {
@@ -79,10 +81,61 @@ static struct signal_wait_binding* signal_find_wait_locked(struct signal* signal
 	return NULL;
 }
 
+static void signal_remove_handler_wake_locked(struct signal* signal, struct signal_handler_binding* binding) {
+	struct signal_handler_binding* previous = NULL;
+	struct signal_handler_binding* current;
+
+	if (signal == NULL || binding == NULL || !binding->wake_queued) return;
+	for (current = signal->handler_wake_head; current != NULL && current != binding; current = current->wake_next) {
+		previous = current;
+	}
+	if (current == NULL) {
+		binding->wake_queued = false;
+		binding->wake_next   = NULL;
+		return;
+	}
+	if (previous == NULL) {
+		signal->handler_wake_head = current->wake_next;
+	}
+	else {
+		previous->wake_next = current->wake_next;
+	}
+	if (signal->handler_wake_tail == current) signal->handler_wake_tail = previous;
+	current->wake_next   = NULL;
+	current->wake_queued = false;
+}
+
+static void signal_queue_handler_wake_locked(struct signal* signal, struct signal_handler_binding* binding) {
+	if (signal == NULL || binding == NULL || binding->wake_queued) return;
+	if (signal->handler_wake_tail == NULL) {
+		signal->handler_wake_head = binding;
+	}
+	else {
+		signal->handler_wake_tail->wake_next = binding;
+	}
+	signal->handler_wake_tail = binding;
+	binding->wake_next        = NULL;
+	binding->wake_queued      = true;
+}
+
+static struct signal_handler_binding* signal_dequeue_handler_wake_locked(struct signal* signal) {
+	struct signal_handler_binding* binding;
+
+	if (signal == NULL) return NULL;
+	binding = signal->handler_wake_head;
+	if (binding == NULL) return NULL;
+	signal->handler_wake_head = binding->wake_next;
+	if (signal->handler_wake_head == NULL) signal->handler_wake_tail = NULL;
+	binding->wake_next   = NULL;
+	binding->wake_queued = false;
+	return binding;
+}
+
 static struct signal_handler_binding* signal_remove_handler_locked(struct signal*                 signal,
                                                                    struct signal_handler_binding* previous,
                                                                    struct signal_handler_binding* binding) {
 	if (signal == NULL || binding == NULL) return NULL;
+	signal_remove_handler_wake_locked(signal, binding);
 	if (previous == NULL) {
 		signal->handler_head = binding->next;
 	}
@@ -123,9 +176,15 @@ static struct signal_wait_binding* signal_remove_wait_locked(struct signal*     
 static struct signal_handler_binding* signal_detach_handlers_locked(struct signal* signal) {
 	struct signal_handler_binding* bindings = signal->handler_head;
 
-	signal->handler_head  = NULL;
-	signal->handler_tail  = NULL;
-	signal->handler_count = 0u;
+	signal->handler_head      = NULL;
+	signal->handler_tail      = NULL;
+	signal->handler_wake_head = NULL;
+	signal->handler_wake_tail = NULL;
+	signal->handler_count     = 0u;
+	for (struct signal_handler_binding* binding = bindings; binding != NULL; binding = binding->next) {
+		binding->wake_next   = NULL;
+		binding->wake_queued = false;
+	}
 	return bindings;
 }
 
@@ -156,6 +215,28 @@ static void signal_release_waits(struct signal_wait_binding* binding) {
 		uthread_release(binding->target);
 		free(binding);
 		binding = next;
+	}
+}
+
+static void signal_wake_upcall_targets(struct signal* signal) {
+	for (;;) {
+		struct signal_handler_binding* binding;
+		struct uthread*                target;
+		struct irq_state               state;
+
+		state   = spinlock_lock_irqsave(&signal->lock);
+		binding = signal_dequeue_handler_wake_locked(signal);
+		if (binding == NULL) {
+			spinlock_unlock_irqrestore(&signal->lock, state);
+			return;
+		}
+		target = binding->target;
+		if (!uthread_retain(target)) target = NULL;
+		spinlock_unlock_irqrestore(&signal->lock, state);
+
+		if (target == NULL) continue;
+		(void)sched_interrupt_thread(&target->thread);
+		uthread_release(target);
 	}
 }
 
@@ -427,7 +508,10 @@ enum signal_result signal_send(struct signal* signal, process_id_t sender, const
 					   },
 		};
 		upcall_result = uthread_upcall_enqueue(handler->target, &request);
-		if (upcall_result == USER_UPCALL_OK) delivery_count++;
+		if (upcall_result == USER_UPCALL_OK) {
+			delivery_count++;
+			signal_queue_handler_wake_locked(signal, handler);
+		}
 	}
 
 	for (wait = signal->wait_head; wait != NULL; wait = wait->next) {
@@ -445,6 +529,7 @@ enum signal_result signal_send(struct signal* signal, process_id_t sender, const
 	spinlock_unlock_irqrestore(&signal->lock, state);
 
 	if (waiting_delivery_count != 0u) (void)sched_wake_all(&signal->waiters);
+	signal_wake_upcall_targets(signal);
 	if (out_receiver_count != NULL) *out_receiver_count = receiver_count;
 	if (out_delivery_count != NULL) *out_delivery_count = delivery_count;
 	return SIGNAL_OK;
@@ -531,9 +616,16 @@ enum signal_result signal_wait(struct signal* signal, struct signal_message* out
 			result = SIGNAL_OK;
 		}
 		else {
+			enum sched_block_result block_result;
+
 			binding->waiting = true;
 			spinlock_unlock(&signal->lock);
-			if (!sched_block_current_locked(&signal->waiters, THREAD_BLOCK_SIGNAL, wait_state)) {
+			block_result = sched_block_current_interruptible_locked(&signal->waiters, THREAD_BLOCK_SIGNAL, wait_state);
+			if (block_result == SCHED_BLOCK_INTERRUPTED) {
+				signal_clear_waiting(signal, current);
+				return SIGNAL_WAIT_INTERRUPTED;
+			}
+			if (block_result == SCHED_BLOCK_FAILED) {
 				signal_clear_waiting(signal, current);
 				return thread_should_cancel(&current->thread) ? SIGNAL_WAIT_CANCELED : SIGNAL_WAIT_FAILED;
 			}
@@ -603,6 +695,7 @@ enum signal_result signal_register_handler(struct signal* signal, struct uthread
 		result = SIGNAL_UNAVAILABLE;
 	}
 	else if (existing != NULL) {
+		signal_remove_handler_wake_locked(signal, existing);
 		(void)uthread_upcall_purge(existing->target, USER_UPCALL_ORIGIN_SIGNAL, (uintptr_t)existing);
 		existing->entry = (uintptr_t)handler;
 	}
