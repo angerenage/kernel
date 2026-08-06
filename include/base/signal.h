@@ -1,6 +1,7 @@
 #pragma once
 
 #include <base/process.h>
+#include <base/upcall.h>
 #include <stdint.h>
 
 typedef uint64_t signal_id_t;
@@ -34,6 +35,8 @@ struct signal_send_response {
 enum signal_op {
 	SIGNAL_OP_UNSUBSCRIBE = 0,
 	SIGNAL_OP_DESTROY,
+	SIGNAL_OP_SET_HANDLER,
+	SIGNAL_OP_CLEAR_HANDLER,
 };
 
 /* Common header for all Signal capability requests. */
@@ -48,6 +51,17 @@ struct signal_unsubscribe_request {
 
 /* Request to destroy the Signal object. */
 struct signal_destroy_request {
+	struct signal_request_header header;
+};
+
+/* Request to install or replace the calling thread's persistent upcall handler. */
+struct signal_set_handler_request {
+	struct signal_request_header header;
+	user_upcall_entry_t*         handler;
+};
+
+/* Request to remove the calling thread's persistent upcall handler. */
+struct signal_clear_handler_request {
 	struct signal_request_header header;
 };
 

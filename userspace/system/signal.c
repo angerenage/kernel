@@ -100,6 +100,41 @@ syscall_status_t signal_try_wait(cap_id_t cap, struct signal_message* out_messag
 	return result.status;
 }
 
+syscall_status_t signal_set_handler(cap_id_t cap, user_upcall_entry_t* handler) {
+	const struct signal_set_handler_request request = {
+		.header  = {.op = SIGNAL_OP_SET_HANDLER},
+		.handler = handler,
+	};
+	syscall_result_t result;
+
+	if (cap == CAP_ID_INVALID) {
+		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(cap);
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	}
+	if (handler == NULL) {
+		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(handler);
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	}
+	result = cap_call_syscall(cap, &request, sizeof(request), NULL, 0u);
+	RUNTIME_DIAGNOSTIC_OPERATION_RESULT(SIGNAL_OP_SET_HANDLER, result);
+	return result.status;
+}
+
+syscall_status_t signal_clear_handler(cap_id_t cap) {
+	const struct signal_clear_handler_request request = {
+		.header = {.op = SIGNAL_OP_CLEAR_HANDLER},
+	};
+	syscall_result_t result;
+
+	if (cap == CAP_ID_INVALID) {
+		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(cap);
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	}
+	result = cap_call_syscall(cap, &request, sizeof(request), NULL, 0u);
+	RUNTIME_DIAGNOSTIC_OPERATION_RESULT(SIGNAL_OP_CLEAR_HANDLER, result);
+	return result.status;
+}
+
 syscall_status_t signal_unsubscribe(cap_id_t cap) {
 	const struct signal_unsubscribe_request request = {.header = {.op = SIGNAL_OP_UNSUBSCRIBE}};
 	syscall_result_t                        result;

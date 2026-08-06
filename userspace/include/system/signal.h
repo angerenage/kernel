@@ -3,6 +3,7 @@
 #include <base/cap.h>
 #include <base/signal.h>
 #include <base/syscall.h>
+#include <base/upcall.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -21,6 +22,12 @@ syscall_status_t signal_wait(cap_id_t cap, struct signal_message* out_message);
 
 /* Consume a new message without blocking. */
 syscall_status_t signal_try_wait(cap_id_t cap, struct signal_message* out_message, bool* out_received);
+
+/* Install or replace the calling thread's persistent handler through CAP_CALL | CAP_MAP. */
+syscall_status_t signal_set_handler(cap_id_t cap, user_upcall_entry_t* handler);
+
+/* Remove the calling thread's persistent handler through CAP_CALL | CAP_MAP. */
+syscall_status_t signal_clear_handler(cap_id_t cap);
 
 /* Remove the calling thread's synchronous receiver subscription. */
 syscall_status_t signal_unsubscribe(cap_id_t cap);

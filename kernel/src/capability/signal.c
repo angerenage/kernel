@@ -5,6 +5,7 @@
 #include <base/syscall.h>
 #include <core/capability.h>
 #include <core/signal.h>
+#include <core/uthread.h>
 #include <kernel/capability.h>
 #include <string.h>
 
@@ -40,6 +41,32 @@ static syscall_result_t signal_result_to_syscall(enum signal_result result) {
 	}
 }
 
+static syscall_result_t signal_set_handler(const struct cap_request* req, struct signal* signal) {
+	const struct signal_set_handler_request* request;
+	struct uthread*                          current;
+
+	if (req->request_size != sizeof(*request)) {
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
+	request = req->request;
+	if (request->handler == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+
+	current = uthread_current();
+	if (current == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	return signal_result_to_syscall(signal_register_handler(signal, current, request->handler));
+}
+
+static syscall_result_t signal_clear_handler(const struct cap_request* req, struct signal* signal) {
+	struct uthread* current;
+
+	if (req->request_size != sizeof(struct signal_clear_handler_request)) {
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
+	current = uthread_current();
+	if (current == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	return signal_result_to_syscall(signal_unregister_handler(signal, current));
+}
+
 static syscall_result_t signal_handler(const struct cap_request* req) {
 	struct signal*   signal;
 	enum signal_op   op;
@@ -62,6 +89,10 @@ static syscall_result_t signal_handler(const struct cap_request* req) {
 	case SIGNAL_OP_DESTROY:
 		required_rights = CAP_DESTROY;
 		break;
+	case SIGNAL_OP_SET_HANDLER:
+	case SIGNAL_OP_CLEAR_HANDLER:
+		required_rights = CAP_MAP;
+		break;
 	default:
 		signal_release(signal);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -77,6 +108,12 @@ static syscall_result_t signal_handler(const struct cap_request* req) {
 		break;
 	case SIGNAL_OP_DESTROY:
 		result = signal_result_to_syscall(signal_destroy(signal));
+		break;
+	case SIGNAL_OP_SET_HANDLER:
+		result = signal_set_handler(req, signal);
+		break;
+	case SIGNAL_OP_CLEAR_HANDLER:
+		result = signal_clear_handler(req, signal);
 		break;
 	default:
 		result = syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -239,5 +276,5 @@ out:
 
 cap_id_t kernel_signal_grant_full(struct signal* target, process_id_t recipient) {
 	return kernel_signal_grant(
-		target, recipient, CAP_CALL | CAP_SIGNAL | CAP_READ | CAP_WAIT | CAP_DESTROY | CAP_DELEGATE);
+		target, recipient, CAP_CALL | CAP_SIGNAL | CAP_READ | CAP_WAIT | CAP_MAP | CAP_DESTROY | CAP_DELEGATE);
 }
