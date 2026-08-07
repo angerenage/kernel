@@ -229,3 +229,59 @@ Test(user_upcall, purge_removes_only_matching_queued_requests_and_preserves_fifo
 	cr_assert_eq(thread.upcall.pending[thread.upcall.head].args[0], 3u);
 	uthread_upcall_state_deinit(&thread);
 }
+
+Test(user_upcall, coalescing_preserves_latest_and_counts_only_real_drops) {
+	struct uthread                    thread;
+	struct hal_userspace_return_frame frame;
+	const uintptr_t                   token   = 0x1111u;
+	struct user_upcall_request        tracked = {
+			   .origin       = USER_UPCALL_ORIGIN_SIGNAL,
+			   .origin_token = token,
+			   .entry        = 0x4000u,
+			   .args         = {1u, 2u, 3u, 4u, 5u},
+    };
+	struct user_upcall_request filler = {
+		.entry = 0x5000u,
+	};
+	struct user_upcall_request unrelated = {
+		.origin       = USER_UPCALL_ORIGIN_SIGNAL,
+		.origin_token = 0x2222u,
+		.entry        = 0x6000u,
+	};
+	size_t tail;
+
+	user_upcall_test_reset(&thread, &frame);
+	cr_assert_eq(uthread_upcall_enqueue_latest(&thread, &tracked), USER_UPCALL_OK);
+	for (size_t i = 1u; i < USER_UPCALL_QUEUE_CAPACITY; i++) {
+		filler.args[0] = i;
+		cr_assert_eq(uthread_upcall_enqueue(&thread, &filler), USER_UPCALL_OK);
+	}
+	cr_assert_eq(uthread_upcall_pending_count(&thread), USER_UPCALL_QUEUE_CAPACITY);
+	cr_assert_eq(uthread_upcall_dropped_count(&thread), 0u);
+
+	cr_assert_eq(uthread_upcall_enqueue(&thread, &filler), USER_UPCALL_QUEUE_FULL);
+	cr_assert_eq(uthread_upcall_dropped_count(&thread), 1u);
+
+	tracked.entry   = 0x7000u;
+	tracked.args[0] = 10u;
+	tracked.args[4] = 50u;
+	cr_assert_eq(uthread_upcall_enqueue_latest(&thread, &tracked), USER_UPCALL_OK);
+	cr_assert_eq(uthread_upcall_pending_count(&thread), USER_UPCALL_QUEUE_CAPACITY);
+	cr_assert_eq(uthread_upcall_dropped_count(&thread), 1u, "coalescing is intentional, not a dropped delivery");
+	cr_assert_eq(thread.upcall.pending[thread.upcall.head].args[0], 1u, "unrelated FIFO order must be preserved");
+	tail = (thread.upcall.head + thread.upcall.count - 1u) % USER_UPCALL_QUEUE_CAPACITY;
+	cr_assert_eq(thread.upcall.pending[tail].entry, 0x7000u);
+	cr_assert_eq(thread.upcall.pending[tail].args[0], 10u);
+	cr_assert_eq(thread.upcall.pending[tail].args[4], 50u);
+
+	cr_assert_eq(uthread_upcall_enqueue_latest(&thread, &unrelated), USER_UPCALL_QUEUE_FULL);
+	cr_assert_eq(uthread_upcall_dropped_count(&thread), 2u);
+	unrelated.origin = USER_UPCALL_ORIGIN_NONE;
+	cr_assert_eq(uthread_upcall_enqueue_latest(&thread, &unrelated), USER_UPCALL_INVALID_ARGUMENTS);
+	cr_assert_eq(uthread_upcall_dropped_count(&thread), 2u);
+
+	thread.upcall.dropped_count = UINT64_MAX;
+	cr_assert_eq(uthread_upcall_enqueue(&thread, &filler), USER_UPCALL_QUEUE_FULL);
+	cr_assert_eq(uthread_upcall_dropped_count(&thread), UINT64_MAX, "drop count must saturate");
+	uthread_upcall_state_deinit(&thread);
+}

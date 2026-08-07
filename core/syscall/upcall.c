@@ -24,6 +24,20 @@ static syscall_result_t syscall_upcall_result(enum user_upcall_result result) {
 	}
 }
 
+syscall_result_t syscall_upcall_dropped_count(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
+                                              uintptr_t arg4, uintptr_t arg5) {
+	struct uthread* current = uthread_current();
+
+	(void)arg0;
+	(void)arg1;
+	(void)arg2;
+	(void)arg3;
+	(void)arg4;
+	(void)arg5;
+	if (current == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	return syscall_result_ok((uintptr_t)uthread_upcall_dropped_count(current));
+}
+
 enum syscall_frame_action syscall_dispatch_user_frame(struct hal_userspace_return_frame* frame, uintptr_t number,
                                                       uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
                                                       uintptr_t arg4, uintptr_t arg5, syscall_result_t* out_result) {

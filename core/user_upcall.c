@@ -9,6 +9,11 @@ static bool uthread_upcall_thread_dying(const struct uthread* thread) {
 	return thread != NULL && __atomic_load_n(&thread->dying, __ATOMIC_ACQUIRE) != 0u;
 }
 
+static void uthread_upcall_record_drop_locked(struct user_upcall_state* state) {
+	if (state == NULL || state->dropped_count == UINT64_MAX) return;
+	state->dropped_count++;
+}
+
 static void uthread_upcall_clear_pending(struct user_upcall_state* state) {
 	state->head  = 0u;
 	state->count = 0u;
@@ -50,9 +55,13 @@ void uthread_upcall_state_deinit(struct uthread* thread) {
 	spinlock_unlock_irqrestore(&state->lock, irq_state);
 }
 
-enum user_upcall_result uthread_upcall_enqueue(struct uthread* thread, const struct user_upcall_request* request) {
+static enum user_upcall_result uthread_upcall_enqueue_internal(struct uthread*                   thread,
+                                                               const struct user_upcall_request* request,
+                                                               bool                              coalesce_matching) {
 	struct user_upcall_state* state;
 	struct irq_state          irq_state;
+	size_t                    original_count;
+	size_t                    retained;
 	size_t                    tail;
 
 	if (thread == NULL || request == NULL || request->entry == 0u || !thread->upcall.initialized) {
@@ -70,7 +79,26 @@ enum user_upcall_result uthread_upcall_enqueue(struct uthread* thread, const str
 		spinlock_unlock_irqrestore(&state->lock, irq_state);
 		return USER_UPCALL_THREAD_DYING;
 	}
+
+	original_count = state->count;
+	retained       = 0u;
+	if (coalesce_matching) {
+		for (size_t i = 0u; i < original_count; i++) {
+			size_t                     source  = (state->head + i) % USER_UPCALL_QUEUE_CAPACITY;
+			struct user_upcall_request pending = state->pending[source];
+
+			if (pending.origin == request->origin && pending.origin_token == request->origin_token) continue;
+			{
+				size_t destination = (state->head + retained) % USER_UPCALL_QUEUE_CAPACITY;
+
+				if (destination != source) state->pending[destination] = pending;
+			}
+			retained++;
+		}
+		state->count = retained;
+	}
 	if (state->count == USER_UPCALL_QUEUE_CAPACITY) {
+		uthread_upcall_record_drop_locked(state);
 		spinlock_unlock_irqrestore(&state->lock, irq_state);
 		return USER_UPCALL_QUEUE_FULL;
 	}
@@ -78,9 +106,26 @@ enum user_upcall_result uthread_upcall_enqueue(struct uthread* thread, const str
 	tail                 = (state->head + state->count) % USER_UPCALL_QUEUE_CAPACITY;
 	state->pending[tail] = *request;
 	state->count++;
+	for (size_t i = state->count; i < original_count; i++) {
+		size_t index = (state->head + i) % USER_UPCALL_QUEUE_CAPACITY;
+
+		memset(&state->pending[index], 0, sizeof(state->pending[index]));
+	}
 	thread_request_interrupt(&thread->thread);
 	spinlock_unlock_irqrestore(&state->lock, irq_state);
 	return USER_UPCALL_OK;
+}
+
+enum user_upcall_result uthread_upcall_enqueue(struct uthread* thread, const struct user_upcall_request* request) {
+	return uthread_upcall_enqueue_internal(thread, request, false);
+}
+
+enum user_upcall_result uthread_upcall_enqueue_latest(struct uthread*                   thread,
+                                                      const struct user_upcall_request* request) {
+	if (request == NULL || request->origin == USER_UPCALL_ORIGIN_NONE || request->origin_token == 0u) {
+		return USER_UPCALL_INVALID_ARGUMENTS;
+	}
+	return uthread_upcall_enqueue_internal(thread, request, true);
 }
 
 size_t uthread_upcall_purge(struct uthread* thread, enum user_upcall_origin origin, uintptr_t origin_token) {
@@ -226,6 +271,19 @@ size_t uthread_upcall_pending_count(struct uthread* thread) {
 	state     = &thread->upcall;
 	irq_state = spinlock_lock_irqsave(&state->lock);
 	count     = state->count;
+	spinlock_unlock_irqrestore(&state->lock, irq_state);
+	return count;
+}
+
+uint64_t uthread_upcall_dropped_count(struct uthread* thread) {
+	struct user_upcall_state* state;
+	struct irq_state          irq_state;
+	uint64_t                  count;
+
+	if (thread == NULL || !thread->upcall.initialized) return 0u;
+	state     = &thread->upcall;
+	irq_state = spinlock_lock_irqsave(&state->lock);
+	count     = state->dropped_count;
 	spinlock_unlock_irqrestore(&state->lock, irq_state);
 	return count;
 }

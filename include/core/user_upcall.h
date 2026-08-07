@@ -12,7 +12,7 @@ struct hal_userspace_return_frame;
 struct uthread;
 
 enum {
-	USER_UPCALL_QUEUE_CAPACITY = 16u,
+	USER_UPCALL_QUEUE_CAPACITY = 32u,
 };
 
 /* Kernel-internal provenance used to identify and revoke queued requests. */
@@ -59,6 +59,7 @@ struct user_upcall_state {
 	struct user_upcall_request   pending[USER_UPCALL_QUEUE_CAPACITY];
 	size_t                       head;
 	size_t                       count;
+	uint64_t                     dropped_count;
 	enum user_upcall_phase       phase;
 	bool                         initialized;
 };
@@ -72,6 +73,14 @@ void uthread_upcall_state_deinit(struct uthread* thread);
 /* Queue one upcall request. */
 enum user_upcall_result uthread_upcall_enqueue(struct uthread* thread, const struct user_upcall_request* request);
 
+/*
+ * Queue one request, coalescing already-pending requests with the same
+ * non-NONE origin and origin token. Unrelated requests keep FIFO order and the
+ * replacement is appended as the newest request.
+ */
+enum user_upcall_result uthread_upcall_enqueue_latest(struct uthread*                   thread,
+                                                      const struct user_upcall_request* request);
+
 /* Remove queued requests matching one kernel origin and token. An active request is not affected. */
 size_t uthread_upcall_purge(struct uthread* thread, enum user_upcall_origin origin, uintptr_t origin_token);
 
@@ -83,6 +92,9 @@ enum user_upcall_result uthread_upcall_restore(struct uthread* thread, struct ha
 
 /* Return the number of queued requests. */
 size_t uthread_upcall_pending_count(struct uthread* thread);
+
+/* Return the saturating count of requests dropped because the queue was full. */
+uint64_t uthread_upcall_dropped_count(struct uthread* thread);
 
 /* Return whether one upcall is active. */
 bool uthread_upcall_is_active(struct uthread* thread);

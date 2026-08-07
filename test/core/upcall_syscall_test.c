@@ -21,6 +21,7 @@ static size_t                  dispatch_count;
 static size_t                  terminate_count;
 static struct process*         terminated_process;
 static uintptr_t               terminated_exit_code;
+static uint64_t                dropped_count;
 
 /* Reset the syscall test state. */
 static void upcall_syscall_test_reset(void) {
@@ -32,6 +33,7 @@ static void upcall_syscall_test_reset(void) {
 	terminate_count      = 0u;
 	terminated_process   = NULL;
 	terminated_exit_code = 0u;
+	dropped_count        = 0u;
 }
 
 /* Return the fake current thread. */
@@ -44,6 +46,11 @@ enum user_upcall_result uthread_upcall_restore(struct uthread* thread, struct ha
 	cr_assert_eq(thread, current_thread);
 	if (restore_result == USER_UPCALL_OK) frame->marker = 0xdecafbadull;
 	return restore_result;
+}
+
+uint64_t uthread_upcall_dropped_count(struct uthread* thread) {
+	cr_assert_eq(thread, current_thread);
+	return dropped_count;
 }
 
 /* Record process termination caused by an invalid saved context. */
@@ -82,6 +89,20 @@ Test(upcall_syscall, normal_syscalls_use_the_generic_dispatcher) {
 	cr_assert_eq(dispatch_count, 1u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_FAILED);
 	cr_assert_eq(result.value, 0x1234u);
+}
+
+Test(upcall_syscall, dropped_count_returns_the_current_thread_counter) {
+	syscall_result_t result;
+
+	upcall_syscall_test_reset();
+	dropped_count = 42u;
+	result        = syscall_upcall_dropped_count(0u, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(result.value, 42u);
+
+	current_thread = NULL;
+	result         = syscall_upcall_dropped_count(0u, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
 }
 
 Test(upcall_syscall, successful_return_restores_the_native_frame) {
