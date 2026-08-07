@@ -62,6 +62,15 @@ enum signal_result signal_destroy(struct signal* signal);
 enum signal_result signal_send(struct signal* signal, process_id_t sender, const struct signal_payload* payload,
                                uint64_t* out_receiver_count, uint64_t* out_delivery_count);
 
+/*
+ * Publish atomically to all live handlers, reserving queue admission first. A
+ * forced handler request may evict the oldest evictable pending upcall and is
+ * itself non-evictable. If any handler cannot reserve admission, nothing is
+ * published and no receiver is modified.
+ */
+enum signal_result signal_send_force(struct signal* signal, process_id_t sender, const struct signal_payload* payload,
+                                     uint64_t* out_receiver_count, uint64_t* out_delivery_count);
+
 /* Read the currently remembered message without creating a receiver or consuming a generation. */
 enum signal_result signal_read(struct signal* signal, struct signal_message* out_message);
 

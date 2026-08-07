@@ -285,3 +285,75 @@ Test(user_upcall, coalescing_preserves_latest_and_counts_only_real_drops) {
 	cr_assert_eq(uthread_upcall_dropped_count(&thread), UINT64_MAX, "drop count must saturate");
 	uthread_upcall_state_deinit(&thread);
 }
+
+Test(user_upcall, forced_enqueue_evicts_oldest_evictable_and_preserves_protected_requests) {
+	struct uthread                    thread;
+	struct hal_userspace_return_frame frame;
+	struct user_upcall_request        protected = {
+			   .flags = USER_UPCALL_FLAG_NON_EVICTABLE,
+			   .entry = 0x4000u,
+    };
+	struct user_upcall_request evictable = {
+		.entry = 0x5000u,
+	};
+	struct user_upcall_request forced = {
+		.flags = USER_UPCALL_FLAG_NON_EVICTABLE,
+		.entry = 0x6000u,
+		.args  = {0xfeedu},
+	};
+	size_t tail;
+
+	user_upcall_test_reset(&thread, &frame);
+	protected.args[0] = 1u;
+	cr_assert_eq(uthread_upcall_enqueue(&thread, &protected), USER_UPCALL_OK);
+	evictable.args[0] = 2u;
+	cr_assert_eq(uthread_upcall_enqueue(&thread, &evictable), USER_UPCALL_OK);
+	for (size_t i = 2u; i < USER_UPCALL_QUEUE_CAPACITY; i++) {
+		protected.args[0] = i + 1u;
+		cr_assert_eq(uthread_upcall_enqueue(&thread, &protected), USER_UPCALL_OK);
+	}
+
+	cr_assert_eq(uthread_upcall_enqueue_force(&thread, &forced), USER_UPCALL_OK);
+	cr_assert_eq(uthread_upcall_pending_count(&thread), USER_UPCALL_QUEUE_CAPACITY);
+	cr_assert_eq(uthread_upcall_dropped_count(&thread), 1u);
+	cr_assert_eq(thread.upcall.pending[thread.upcall.head].args[0], 1u);
+	for (size_t i = 0u; i < thread.upcall.count; i++) {
+		size_t index = (thread.upcall.head + i) % USER_UPCALL_QUEUE_CAPACITY;
+
+		cr_assert_neq(thread.upcall.pending[index].args[0], 2u, "oldest evictable request must be removed");
+	}
+	tail = (thread.upcall.head + thread.upcall.count - 1u) % USER_UPCALL_QUEUE_CAPACITY;
+	cr_assert_eq(thread.upcall.pending[tail].entry, forced.entry);
+	cr_assert_eq(thread.upcall.pending[tail].args[0], 0xfeedu);
+	cr_assert((thread.upcall.pending[tail].flags & USER_UPCALL_FLAG_NON_EVICTABLE) != 0u);
+
+	cr_assert_eq(uthread_upcall_enqueue_force(&thread, &forced), USER_UPCALL_QUEUE_FULL);
+	cr_assert_eq(uthread_upcall_dropped_count(&thread), 2u);
+	uthread_upcall_state_deinit(&thread);
+}
+
+Test(user_upcall, forced_reservation_prevents_regular_enqueue_from_stealing_capacity) {
+	struct uthread                    thread;
+	struct hal_userspace_return_frame frame;
+	struct user_upcall_request        regular = {
+			   .entry = 0x4000u,
+    };
+	struct user_upcall_request forced = {
+		.flags = USER_UPCALL_FLAG_NON_EVICTABLE,
+		.entry = 0x5000u,
+	};
+
+	user_upcall_test_reset(&thread, &frame);
+	for (size_t i = 0u; i + 1u < USER_UPCALL_QUEUE_CAPACITY; i++) {
+		regular.args[0] = i;
+		cr_assert_eq(uthread_upcall_enqueue(&thread, &regular), USER_UPCALL_OK);
+	}
+	cr_assert_eq(uthread_upcall_force_reserve(&thread), USER_UPCALL_OK);
+	cr_assert_eq(uthread_upcall_enqueue(&thread, &regular), USER_UPCALL_QUEUE_FULL);
+	cr_assert_eq(uthread_upcall_dropped_count(&thread), 1u);
+	cr_assert_eq(uthread_upcall_force_commit(&thread, &forced), USER_UPCALL_OK);
+	cr_assert_eq(uthread_upcall_pending_count(&thread), USER_UPCALL_QUEUE_CAPACITY);
+	cr_assert_eq(thread.upcall.force_free_reservations, 0u);
+	cr_assert_eq(thread.upcall.force_eviction_reservations, 0u);
+	uthread_upcall_state_deinit(&thread);
+}

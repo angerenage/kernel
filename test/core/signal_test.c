@@ -610,3 +610,105 @@ Test(signal, queued_handler_interrupts_blocking_wait_on_another_signal) {
 	signal_test_deinit_uthread(&receiver);
 	signal_test_reset_scheduler_state();
 }
+
+Test(signal, forced_send_aborts_before_publication_when_one_handler_has_only_protected_upcalls) {
+	struct signal*        signal;
+	struct uthread        available;
+	struct uthread        blocked;
+	struct signal_payload payload = {
+		.args = {10u, 20u, 30u, 40u}
+    };
+	struct user_upcall_request protected = {
+		.flags = USER_UPCALL_FLAG_NON_EVICTABLE,
+		.entry = 0x3000u,
+	};
+	uint64_t receiver_count = UINT64_MAX;
+	uint64_t delivery_count = UINT64_MAX;
+
+	signal_test_init_heap();
+	signal = signal_create();
+	cr_assert_not_null(signal);
+	signal_test_init_handler_uthread(&available, 0x9000u);
+	signal_test_init_handler_uthread(&blocked, 0xa000u);
+	cr_assert_eq(signal_register_handler(signal, &available, signal_test_handler), SIGNAL_OK);
+	cr_assert_eq(signal_register_handler(signal, &blocked, signal_test_handler), SIGNAL_OK);
+
+	for (size_t i = 0u; i < USER_UPCALL_QUEUE_CAPACITY; i++) {
+		protected.args[0] = i;
+		cr_assert_eq(uthread_upcall_enqueue(&blocked, &protected), USER_UPCALL_OK);
+	}
+	cr_assert_eq(signal_send_force(signal, SIGNAL_TEST_SENDER, &payload, &receiver_count, &delivery_count),
+	             SIGNAL_UNAVAILABLE);
+	cr_assert_eq(receiver_count, 0u);
+	cr_assert_eq(delivery_count, 0u);
+	cr_assert_not(signal_has_value(signal));
+	cr_assert_eq(signal_generation(signal), 0u);
+	cr_assert_eq(uthread_upcall_pending_count(&available), 0u);
+	cr_assert_eq(available.upcall.force_free_reservations, 0u);
+	cr_assert_eq(available.upcall.force_eviction_reservations, 0u);
+	cr_assert_eq(uthread_upcall_pending_count(&blocked), USER_UPCALL_QUEUE_CAPACITY);
+	cr_assert_eq(uthread_upcall_dropped_count(&available), 0u);
+	cr_assert_eq(uthread_upcall_dropped_count(&blocked), 0u);
+
+	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
+	signal_test_deinit_uthread(&available);
+	signal_test_deinit_uthread(&blocked);
+}
+
+Test(signal, forced_send_evicts_an_old_upcall_and_protects_the_signal_delivery) {
+	struct signal*        signal;
+	struct uthread        receiver;
+	struct signal_payload payload = {
+		.args = {11u, 22u, 33u, 44u}
+    };
+	struct signal_message      received;
+	struct user_upcall_request protected = {
+		.flags = USER_UPCALL_FLAG_NON_EVICTABLE,
+		.entry = 0x3000u,
+	};
+	struct user_upcall_request evictable = {
+		.entry = 0x4000u,
+		.args  = {0xdeadu},
+	};
+	uint64_t receiver_count;
+	uint64_t delivery_count;
+	size_t   tail;
+
+	signal_test_init_heap();
+	signal = signal_create();
+	cr_assert_not_null(signal);
+	signal_test_init_handler_uthread(&receiver, 0x9000u);
+	cr_assert_eq(signal_register_handler(signal, &receiver, signal_test_handler), SIGNAL_OK);
+
+	protected.args[0] = 1u;
+	cr_assert_eq(uthread_upcall_enqueue(&receiver, &protected), USER_UPCALL_OK);
+	cr_assert_eq(uthread_upcall_enqueue(&receiver, &evictable), USER_UPCALL_OK);
+	for (size_t i = 2u; i < USER_UPCALL_QUEUE_CAPACITY; i++) {
+		protected.args[0] = i + 1u;
+		cr_assert_eq(uthread_upcall_enqueue(&receiver, &protected), USER_UPCALL_OK);
+	}
+
+	cr_assert_eq(signal_send_force(signal, SIGNAL_TEST_SENDER, &payload, &receiver_count, &delivery_count), SIGNAL_OK);
+	cr_assert_eq(receiver_count, 1u);
+	cr_assert_eq(delivery_count, 1u);
+	cr_assert_eq(uthread_upcall_pending_count(&receiver), USER_UPCALL_QUEUE_CAPACITY);
+	cr_assert_eq(uthread_upcall_dropped_count(&receiver), 1u);
+	cr_assert_eq(signal_generation(signal), 1u);
+	cr_assert_eq(signal_read(signal, &received), SIGNAL_OK);
+	cr_assert_eq(received.sender, SIGNAL_TEST_SENDER);
+	cr_assert_eq(memcmp(&received.payload, &payload, sizeof(payload)), 0);
+
+	tail = (receiver.upcall.head + receiver.upcall.count - 1u) % USER_UPCALL_QUEUE_CAPACITY;
+	cr_assert_eq(receiver.upcall.pending[tail].entry, (uintptr_t)signal_test_handler);
+	cr_assert((receiver.upcall.pending[tail].flags & USER_UPCALL_FLAG_NON_EVICTABLE) != 0u);
+	cr_assert_eq(receiver.upcall.pending[tail].args[0], SIGNAL_TEST_SENDER);
+	cr_assert_eq(receiver.upcall.pending[tail].args[1], 11u);
+	for (size_t i = 0u; i < receiver.upcall.count; i++) {
+		size_t index = (receiver.upcall.head + i) % USER_UPCALL_QUEUE_CAPACITY;
+
+		cr_assert_neq(receiver.upcall.pending[index].args[0], 0xdeadu, "evictable request must be replaced");
+	}
+
+	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
+	signal_test_deinit_uthread(&receiver);
+}

@@ -5,8 +5,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define USER_UPCALL_INTERNAL_FORCE_RESERVED ((uint32_t)1u << 31)
+
 static bool uthread_upcall_thread_dying(const struct uthread* thread) {
 	return thread != NULL && __atomic_load_n(&thread->dying, __ATOMIC_ACQUIRE) != 0u;
+}
+
+static bool uthread_upcall_request_valid(const struct user_upcall_request* request) {
+	if (request == NULL || request->entry == 0u) return false;
+	return (request->flags & ~((uint32_t)USER_UPCALL_FLAG_NON_EVICTABLE)) == 0u;
 }
 
 static void uthread_upcall_record_drop_locked(struct user_upcall_state* state) {
@@ -14,9 +21,57 @@ static void uthread_upcall_record_drop_locked(struct user_upcall_state* state) {
 	state->dropped_count++;
 }
 
+static bool uthread_upcall_request_non_evictable(const struct user_upcall_request* request) {
+	return request != NULL && (request->flags & USER_UPCALL_FLAG_NON_EVICTABLE) != 0u;
+}
+
+static bool uthread_upcall_request_force_reserved(const struct user_upcall_request* request) {
+	return request != NULL && (request->flags & USER_UPCALL_INTERNAL_FORCE_RESERVED) != 0u;
+}
+
+static void uthread_upcall_remove_offset_locked(struct user_upcall_state* state, size_t offset) {
+	if (state == NULL || offset >= state->count) return;
+
+	for (size_t i = offset; i + 1u < state->count; i++) {
+		size_t destination = (state->head + i) % USER_UPCALL_QUEUE_CAPACITY;
+		size_t source      = (state->head + i + 1u) % USER_UPCALL_QUEUE_CAPACITY;
+
+		state->pending[destination] = state->pending[source];
+	}
+	{
+		size_t tail = (state->head + state->count - 1u) % USER_UPCALL_QUEUE_CAPACITY;
+
+		memset(&state->pending[tail], 0, sizeof(state->pending[tail]));
+	}
+	state->count--;
+}
+
+static void uthread_upcall_rebalance_force_reservations_locked(struct user_upcall_state* state) {
+	if (state == NULL) return;
+
+	while (state->force_eviction_reservations != 0u &&
+	       state->count + state->force_free_reservations < USER_UPCALL_QUEUE_CAPACITY) {
+		bool converted = false;
+
+		for (size_t i = 0u; i < state->count; i++) {
+			size_t index = (state->head + i) % USER_UPCALL_QUEUE_CAPACITY;
+
+			if (!uthread_upcall_request_force_reserved(&state->pending[index])) continue;
+			state->pending[index].flags &= ~USER_UPCALL_INTERNAL_FORCE_RESERVED;
+			state->force_eviction_reservations--;
+			state->force_free_reservations++;
+			converted = true;
+			break;
+		}
+		if (!converted) break;
+	}
+}
+
 static void uthread_upcall_clear_pending(struct user_upcall_state* state) {
-	state->head  = 0u;
-	state->count = 0u;
+	state->head                        = 0u;
+	state->count                       = 0u;
+	state->force_free_reservations     = 0u;
+	state->force_eviction_reservations = 0u;
 	memset(state->pending, 0, sizeof(state->pending));
 }
 
@@ -64,7 +119,7 @@ static enum user_upcall_result uthread_upcall_enqueue_internal(struct uthread*  
 	size_t                    retained;
 	size_t                    tail;
 
-	if (thread == NULL || request == NULL || request->entry == 0u || !thread->upcall.initialized) {
+	if (thread == NULL || !uthread_upcall_request_valid(request) || !thread->upcall.initialized) {
 		return USER_UPCALL_INVALID_ARGUMENTS;
 	}
 	if (uthread_upcall_thread_dying(thread)) return USER_UPCALL_THREAD_DYING;
@@ -87,7 +142,10 @@ static enum user_upcall_result uthread_upcall_enqueue_internal(struct uthread*  
 			size_t                     source  = (state->head + i) % USER_UPCALL_QUEUE_CAPACITY;
 			struct user_upcall_request pending = state->pending[source];
 
-			if (pending.origin == request->origin && pending.origin_token == request->origin_token) continue;
+			if (pending.origin == request->origin && pending.origin_token == request->origin_token &&
+			    !uthread_upcall_request_non_evictable(&pending) && !uthread_upcall_request_force_reserved(&pending)) {
+				continue;
+			}
 			{
 				size_t destination = (state->head + retained) % USER_UPCALL_QUEUE_CAPACITY;
 
@@ -97,7 +155,7 @@ static enum user_upcall_result uthread_upcall_enqueue_internal(struct uthread*  
 		}
 		state->count = retained;
 	}
-	if (state->count == USER_UPCALL_QUEUE_CAPACITY) {
+	if (state->count + state->force_free_reservations >= USER_UPCALL_QUEUE_CAPACITY) {
 		uthread_upcall_record_drop_locked(state);
 		spinlock_unlock_irqrestore(&state->lock, irq_state);
 		return USER_UPCALL_QUEUE_FULL;
@@ -111,6 +169,7 @@ static enum user_upcall_result uthread_upcall_enqueue_internal(struct uthread*  
 
 		memset(&state->pending[index], 0, sizeof(state->pending[index]));
 	}
+	uthread_upcall_rebalance_force_reservations_locked(state);
 	thread_request_interrupt(&thread->thread);
 	spinlock_unlock_irqrestore(&state->lock, irq_state);
 	return USER_UPCALL_OK;
@@ -126,6 +185,148 @@ enum user_upcall_result uthread_upcall_enqueue_latest(struct uthread*           
 		return USER_UPCALL_INVALID_ARGUMENTS;
 	}
 	return uthread_upcall_enqueue_internal(thread, request, true);
+}
+
+enum user_upcall_result uthread_upcall_force_reserve(struct uthread* thread) {
+	struct user_upcall_state* state;
+	struct irq_state          irq_state;
+
+	if (thread == NULL || !thread->upcall.initialized) return USER_UPCALL_INVALID_ARGUMENTS;
+	if (uthread_upcall_thread_dying(thread)) return USER_UPCALL_THREAD_DYING;
+
+	state     = &thread->upcall;
+	irq_state = spinlock_lock_irqsave(&state->lock);
+	if (!state->initialized) {
+		spinlock_unlock_irqrestore(&state->lock, irq_state);
+		return USER_UPCALL_INVALID_ARGUMENTS;
+	}
+	if (uthread_upcall_thread_dying(thread)) {
+		spinlock_unlock_irqrestore(&state->lock, irq_state);
+		return USER_UPCALL_THREAD_DYING;
+	}
+	if (state->count + state->force_free_reservations < USER_UPCALL_QUEUE_CAPACITY) {
+		state->force_free_reservations++;
+		spinlock_unlock_irqrestore(&state->lock, irq_state);
+		return USER_UPCALL_OK;
+	}
+
+	for (size_t i = 0u; i < state->count; i++) {
+		size_t                      index   = (state->head + i) % USER_UPCALL_QUEUE_CAPACITY;
+		struct user_upcall_request* pending = &state->pending[index];
+
+		if (uthread_upcall_request_non_evictable(pending) || uthread_upcall_request_force_reserved(pending)) {
+			continue;
+		}
+		pending->flags |= USER_UPCALL_INTERNAL_FORCE_RESERVED;
+		state->force_eviction_reservations++;
+		spinlock_unlock_irqrestore(&state->lock, irq_state);
+		return USER_UPCALL_OK;
+	}
+
+	spinlock_unlock_irqrestore(&state->lock, irq_state);
+	return USER_UPCALL_QUEUE_FULL;
+}
+
+void uthread_upcall_force_cancel(struct uthread* thread) {
+	struct user_upcall_state* state;
+	struct irq_state          irq_state;
+
+	if (thread == NULL || !thread->upcall.initialized) return;
+	state     = &thread->upcall;
+	irq_state = spinlock_lock_irqsave(&state->lock);
+	if (!state->initialized) {
+		spinlock_unlock_irqrestore(&state->lock, irq_state);
+		return;
+	}
+	if (state->force_free_reservations != 0u) {
+		state->force_free_reservations--;
+		spinlock_unlock_irqrestore(&state->lock, irq_state);
+		return;
+	}
+	for (size_t i = 0u; i < state->count; i++) {
+		size_t index = (state->head + i) % USER_UPCALL_QUEUE_CAPACITY;
+
+		if (!uthread_upcall_request_force_reserved(&state->pending[index])) continue;
+		state->pending[index].flags &= ~USER_UPCALL_INTERNAL_FORCE_RESERVED;
+		if (state->force_eviction_reservations != 0u) state->force_eviction_reservations--;
+		break;
+	}
+	spinlock_unlock_irqrestore(&state->lock, irq_state);
+}
+
+enum user_upcall_result uthread_upcall_force_commit(struct uthread* thread, const struct user_upcall_request* request) {
+	struct user_upcall_request committed;
+	struct user_upcall_state*  state;
+	struct irq_state           irq_state;
+	size_t                     tail;
+
+	if (thread == NULL || !uthread_upcall_request_valid(request) || !thread->upcall.initialized) {
+		return USER_UPCALL_INVALID_ARGUMENTS;
+	}
+
+	state     = &thread->upcall;
+	committed = *request;
+	committed.flags &= ~USER_UPCALL_INTERNAL_FORCE_RESERVED;
+	irq_state = spinlock_lock_irqsave(&state->lock);
+	if (!state->initialized) {
+		spinlock_unlock_irqrestore(&state->lock, irq_state);
+		return USER_UPCALL_INVALID_ARGUMENTS;
+	}
+
+	if (state->force_free_reservations != 0u) {
+		if (state->count >= USER_UPCALL_QUEUE_CAPACITY) {
+			spinlock_unlock_irqrestore(&state->lock, irq_state);
+			return USER_UPCALL_INVALID_ARGUMENTS;
+		}
+		state->force_free_reservations--;
+	}
+	else {
+		size_t victim = SIZE_MAX;
+
+		for (size_t i = 0u; i < state->count; i++) {
+			size_t index = (state->head + i) % USER_UPCALL_QUEUE_CAPACITY;
+
+			if (!uthread_upcall_request_force_reserved(&state->pending[index])) continue;
+			victim = i;
+			break;
+		}
+		if (victim == SIZE_MAX) {
+			spinlock_unlock_irqrestore(&state->lock, irq_state);
+			return USER_UPCALL_INVALID_ARGUMENTS;
+		}
+		uthread_upcall_remove_offset_locked(state, victim);
+		if (state->force_eviction_reservations != 0u) state->force_eviction_reservations--;
+		uthread_upcall_record_drop_locked(state);
+	}
+
+	tail                 = (state->head + state->count) % USER_UPCALL_QUEUE_CAPACITY;
+	state->pending[tail] = committed;
+	state->count++;
+	thread_request_interrupt(&thread->thread);
+	spinlock_unlock_irqrestore(&state->lock, irq_state);
+	return USER_UPCALL_OK;
+}
+
+enum user_upcall_result uthread_upcall_enqueue_force(struct uthread*                   thread,
+                                                     const struct user_upcall_request* request) {
+	enum user_upcall_result result;
+
+	if (thread == NULL || !uthread_upcall_request_valid(request) || !thread->upcall.initialized) {
+		return USER_UPCALL_INVALID_ARGUMENTS;
+	}
+	result = uthread_upcall_force_reserve(thread);
+	if (result != USER_UPCALL_OK) {
+		if (result == USER_UPCALL_QUEUE_FULL && thread != NULL && thread->upcall.initialized) {
+			struct irq_state irq_state = spinlock_lock_irqsave(&thread->upcall.lock);
+
+			if (thread->upcall.initialized) uthread_upcall_record_drop_locked(&thread->upcall);
+			spinlock_unlock_irqrestore(&thread->upcall.lock, irq_state);
+		}
+		return result;
+	}
+	result = uthread_upcall_force_commit(thread, request);
+	if (result != USER_UPCALL_OK) uthread_upcall_force_cancel(thread);
+	return result;
 }
 
 size_t uthread_upcall_purge(struct uthread* thread, enum user_upcall_origin origin, uintptr_t origin_token) {
@@ -152,6 +353,10 @@ size_t uthread_upcall_purge(struct uthread* thread, enum user_upcall_origin orig
 		struct user_upcall_request request = state->pending[source];
 
 		if (request.origin == origin && request.origin_token == origin_token) {
+			if (uthread_upcall_request_force_reserved(&request) && state->force_eviction_reservations != 0u) {
+				state->force_eviction_reservations--;
+				state->force_free_reservations++;
+			}
 			purged++;
 			continue;
 		}
@@ -171,6 +376,7 @@ size_t uthread_upcall_purge(struct uthread* thread, enum user_upcall_origin orig
 	}
 	state->count = retained;
 	if (retained == 0u) state->head = 0u;
+	uthread_upcall_rebalance_force_reservations_locked(state);
 	if (retained == 0u) thread_clear_interrupt(&thread->thread);
 	spinlock_unlock_irqrestore(&state->lock, irq_state);
 	return purged;
@@ -211,6 +417,10 @@ enum user_upcall_result uthread_upcall_deliver(struct uthread* thread, struct ha
 		spinlock_unlock_irqrestore(&state->lock, irq_state);
 		return USER_UPCALL_CONTEXT_INVALID;
 	}
+	if (uthread_upcall_request_force_reserved(&state->pending[state->head])) {
+		spinlock_unlock_irqrestore(&state->lock, irq_state);
+		return USER_UPCALL_DEFERRED;
+	}
 
 	request = state->pending[state->head];
 	if (!hal_userspace_context_save(&state->interrupted_context, frame)) {
@@ -234,6 +444,7 @@ enum user_upcall_result uthread_upcall_deliver(struct uthread* thread, struct ha
 	state->head = (state->head + 1u) % USER_UPCALL_QUEUE_CAPACITY;
 	state->count--;
 	state->phase = USER_UPCALL_PHASE_ACTIVE;
+	uthread_upcall_rebalance_force_reservations_locked(state);
 	if (state->count == 0u) thread_clear_interrupt(&thread->thread);
 	spinlock_unlock_irqrestore(&state->lock, irq_state);
 	return USER_UPCALL_OK;

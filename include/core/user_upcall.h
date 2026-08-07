@@ -21,9 +21,16 @@ enum user_upcall_origin {
 	USER_UPCALL_ORIGIN_SIGNAL,
 };
 
+/* Queue-management properties attached to one pending request. */
+enum user_upcall_flags {
+	USER_UPCALL_FLAG_NONE          = 0u,
+	USER_UPCALL_FLAG_NON_EVICTABLE = 1u << 0,
+};
+
 /* One userspace entry, opaque arguments, and non-user-visible provenance. */
 struct user_upcall_request {
 	enum user_upcall_origin origin;
+	uint32_t                flags;
 	uintptr_t               origin_token;
 	uintptr_t               entry;
 	uintptr_t               args[USER_UPCALL_ARGUMENT_COUNT];
@@ -60,6 +67,8 @@ struct user_upcall_state {
 	size_t                       head;
 	size_t                       count;
 	uint64_t                     dropped_count;
+	size_t                       force_free_reservations;
+	size_t                       force_eviction_reservations;
 	enum user_upcall_phase       phase;
 	bool                         initialized;
 };
@@ -80,6 +89,18 @@ enum user_upcall_result uthread_upcall_enqueue(struct uthread* thread, const str
  */
 enum user_upcall_result uthread_upcall_enqueue_latest(struct uthread*                   thread,
                                                       const struct user_upcall_request* request);
+
+/* Reserve admission for one forced request without changing the visible FIFO. */
+enum user_upcall_result uthread_upcall_force_reserve(struct uthread* thread);
+
+/* Cancel one outstanding forced-admission reservation. */
+void uthread_upcall_force_cancel(struct uthread* thread);
+
+/* Commit one previously reserved forced request. Reserved victims count as drops. */
+enum user_upcall_result uthread_upcall_force_commit(struct uthread* thread, const struct user_upcall_request* request);
+
+/* Force one request into a queue, evicting the oldest evictable request when full. */
+enum user_upcall_result uthread_upcall_enqueue_force(struct uthread* thread, const struct user_upcall_request* request);
 
 /* Remove queued requests matching one kernel origin and token. An active request is not affected. */
 size_t uthread_upcall_purge(struct uthread* thread, enum user_upcall_origin origin, uintptr_t origin_token);
