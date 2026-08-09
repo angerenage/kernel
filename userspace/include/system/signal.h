@@ -23,8 +23,8 @@ syscall_status_t signal_wait(cap_id_t cap, struct signal_message* out_message);
 /* Consume a new message without blocking. */
 syscall_status_t signal_try_wait(cap_id_t cap, struct signal_message* out_message, bool* out_received);
 
-/* Install or replace the calling thread's persistent handler through CAP_CALL | CAP_MAP. */
-syscall_status_t signal_set_handler(cap_id_t cap, user_upcall_entry_t* handler);
+/* Register the calling thread's asynchronous handler with immutable lifecycle flags. */
+syscall_status_t signal_set_handler(cap_id_t cap, user_upcall_entry_t* handler, uint32_t flags);
 
 /* Remove the calling thread's persistent handler through CAP_CALL | CAP_MAP. */
 syscall_status_t signal_clear_handler(cap_id_t cap);

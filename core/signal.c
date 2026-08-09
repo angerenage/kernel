@@ -20,6 +20,7 @@ struct signal_handler_binding {
 	struct signal_handler_binding* wake_next;
 	struct uthread*                target;
 	uintptr_t                      entry;
+	uint32_t                       flags;
 	bool                           wake_queued;
 	bool                           force_reserved;
 };
@@ -203,6 +204,17 @@ static void signal_release_handlers(struct signal_handler_binding* binding) {
 		struct signal_handler_binding* next = binding->next;
 
 		(void)uthread_upcall_purge(binding->target, USER_UPCALL_ORIGIN_SIGNAL, (uintptr_t)binding);
+		uthread_release(binding->target);
+		free(binding);
+		binding = next;
+	}
+}
+
+static void signal_wake_and_release_consumed_handlers(struct signal_handler_binding* binding) {
+	while (binding != NULL) {
+		struct signal_handler_binding* next = binding->next;
+
+		(void)sched_interrupt_thread(&binding->target->thread);
 		uthread_release(binding->target);
 		free(binding);
 		binding = next;
@@ -473,16 +485,21 @@ static bool signal_send_internal_is_coalesced(uint32_t flags) {
 	return (flags & (uint32_t)SIGNAL_SEND_FLAG_COALESCE) != 0u;
 }
 
+static bool signal_handler_is_oneshot(const struct signal_handler_binding* handler) {
+	return handler != NULL && (handler->flags & (uint32_t)SIGNAL_HANDLER_FLAG_ONESHOT) != 0u;
+}
+
 static struct user_upcall_request signal_handler_request(const struct signal_handler_binding* handler,
                                                          const struct signal_message* message, uint32_t flags) {
 	uint32_t upcall_flags = USER_UPCALL_FLAG_NONE;
+	bool     oneshot      = signal_handler_is_oneshot(handler);
 
 	if (signal_send_internal_is_coalesced(flags)) upcall_flags |= USER_UPCALL_FLAG_COALESCIBLE;
-	if (signal_send_internal_is_forced(flags)) upcall_flags |= USER_UPCALL_FLAG_NON_EVICTABLE;
+	if (signal_send_internal_is_forced(flags) || oneshot) upcall_flags |= USER_UPCALL_FLAG_NON_EVICTABLE;
 	return (struct user_upcall_request){
-		.origin       = USER_UPCALL_ORIGIN_SIGNAL,
+		.origin       = oneshot ? USER_UPCALL_ORIGIN_NONE : USER_UPCALL_ORIGIN_SIGNAL,
 		.flags        = upcall_flags,
-		.origin_token = (uintptr_t)handler,
+		.origin_token = oneshot ? 0u : (uintptr_t)handler,
 		.entry        = handler->entry,
 		.args =
 			{
@@ -536,7 +553,9 @@ static enum user_upcall_result signal_enqueue_handler_locked(struct signal_handl
 		return result;
 	}
 	if (__atomic_load_n(&handler->target->dying, __ATOMIC_ACQUIRE) != 0u) return USER_UPCALL_THREAD_DYING;
-	if (signal_send_internal_is_coalesced(flags)) return uthread_upcall_enqueue_latest(handler->target, request);
+	if (signal_send_internal_is_coalesced(flags) && !signal_handler_is_oneshot(handler)) {
+		return uthread_upcall_enqueue_latest(handler->target, request);
+	}
 	return uthread_upcall_enqueue(handler->target, request);
 }
 
@@ -544,6 +563,8 @@ static enum signal_result signal_send_internal(struct signal* signal, process_id
                                                const struct signal_payload* payload, uint32_t flags,
                                                uint64_t* out_receiver_count, uint64_t* out_delivery_count) {
 	struct signal_handler_binding* handler;
+	struct signal_handler_binding* handler_previous  = NULL;
+	struct signal_handler_binding* consumed_handlers = NULL;
 	struct signal_wait_binding*    wait;
 	struct signal_message          message;
 	struct irq_state               state;
@@ -578,17 +599,28 @@ static enum signal_result signal_send_internal(struct signal* signal, process_id
 	signal->latest     = message;
 	signal->has_value  = true;
 
-	for (handler = signal->handler_head; handler != NULL; handler = handler->next) {
-		struct user_upcall_request request;
-		enum user_upcall_result    upcall_result;
+	handler = signal->handler_head;
+	while (handler != NULL) {
+		struct signal_handler_binding* next = handler->next;
+		struct user_upcall_request     request;
+		enum user_upcall_result        upcall_result;
 
 		receiver_count++;
 		request       = signal_handler_request(handler, &message, flags);
 		upcall_result = signal_enqueue_handler_locked(handler, &request, flags);
 		if (upcall_result == USER_UPCALL_OK) {
 			delivery_count++;
+			if (signal_handler_is_oneshot(handler)) {
+				(void)signal_remove_handler_locked(signal, handler_previous, handler);
+				handler->next     = consumed_handlers;
+				consumed_handlers = handler;
+				handler           = next;
+				continue;
+			}
 			signal_queue_handler_wake_locked(signal, handler);
 		}
+		handler_previous = handler;
+		handler          = next;
 	}
 
 	for (wait = signal->wait_head; wait != NULL; wait = wait->next) {
@@ -607,6 +639,7 @@ static enum signal_result signal_send_internal(struct signal* signal, process_id
 
 	if (waiting_delivery_count != 0u) (void)sched_wake_all(&signal->waiters);
 	signal_wake_upcall_targets(signal);
+	signal_wake_and_release_consumed_handlers(consumed_handlers);
 	if (out_receiver_count != NULL) *out_receiver_count = receiver_count;
 	if (out_delivery_count != NULL) *out_delivery_count = delivery_count;
 	return SIGNAL_OK;
@@ -761,8 +794,8 @@ enum signal_result signal_unregister_wait_receiver(struct signal* signal) {
 	return SIGNAL_OK;
 }
 
-enum signal_result signal_register_handler(struct signal* signal, struct uthread* target,
-                                           user_upcall_entry_t* handler) {
+enum signal_result signal_register_handler(struct signal* signal, struct uthread* target, user_upcall_entry_t* handler,
+                                           uint32_t flags) {
 	struct signal_handler_binding* binding;
 	struct signal_handler_binding* existing;
 	struct irq_state               state;
@@ -770,7 +803,9 @@ enum signal_result signal_register_handler(struct signal* signal, struct uthread
 	bool                           keep_binding   = false;
 	bool                           keep_reference = false;
 
-	if (signal == NULL || target == NULL || handler == NULL) return SIGNAL_INVALID_ARGUMENTS;
+	if (signal == NULL || target == NULL || handler == NULL || (flags & ~(uint32_t)SIGNAL_HANDLER_FLAG_ONESHOT) != 0u) {
+		return SIGNAL_INVALID_ARGUMENTS;
+	}
 	if (!uthread_retain(target)) return SIGNAL_UNAVAILABLE;
 
 	binding = malloc(sizeof(*binding));
@@ -778,6 +813,7 @@ enum signal_result signal_register_handler(struct signal* signal, struct uthread
 		*binding = (struct signal_handler_binding){
 			.target = target,
 			.entry  = (uintptr_t)handler,
+			.flags  = flags,
 		};
 	}
 
@@ -790,9 +826,7 @@ enum signal_result signal_register_handler(struct signal* signal, struct uthread
 		result = SIGNAL_UNAVAILABLE;
 	}
 	else if (existing != NULL) {
-		signal_remove_handler_wake_locked(signal, existing);
-		(void)uthread_upcall_purge(existing->target, USER_UPCALL_ORIGIN_SIGNAL, (uintptr_t)existing);
-		existing->entry = (uintptr_t)handler;
+		result = SIGNAL_HANDLER_ALREADY_REGISTERED;
 	}
 	else if (binding == NULL) {
 		result = SIGNAL_NO_MEMORY;

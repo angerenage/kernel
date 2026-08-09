@@ -92,10 +92,11 @@ enum signal_result signal_wait(struct signal* signal, struct signal_message* out
 enum signal_result signal_unregister_wait_receiver(struct signal* signal);
 
 /*
- * Register or update one persistent userspace upcall handler for target.
- * Updating purges queued requests for the previous entry; an already active handler may finish.
+ * Register one userspace upcall handler for target with immutable lifecycle flags.
+ * A one-shot binding is removed after its first successfully admitted upcall.
  */
-enum signal_result signal_register_handler(struct signal* signal, struct uthread* target, user_upcall_entry_t* handler);
+enum signal_result signal_register_handler(struct signal* signal, struct uthread* target, user_upcall_entry_t* handler,
+                                           uint32_t flags);
 
 /* Remove target's persistent userspace handler registration and purge its queued requests. */
 enum signal_result signal_unregister_handler(struct signal* signal, struct uthread* target);

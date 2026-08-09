@@ -37,6 +37,12 @@ enum signal_send_flags {
 	SIGNAL_SEND_FLAG_COALESCE = 1u << 0,
 };
 
+/* Lifecycle properties fixed when an asynchronous Signal handler is registered. */
+enum signal_handler_flags {
+	SIGNAL_HANDLER_FLAG_NONE    = 0u,
+	SIGNAL_HANDLER_FLAG_ONESHOT = 1u << 0,
+};
+
 /* Control operations routed through the Signal capability with cap_call. */
 enum signal_op {
 	SIGNAL_OP_UNSUBSCRIBE = 0,
@@ -60,10 +66,11 @@ struct signal_destroy_request {
 	struct signal_request_header header;
 };
 
-/* Request to install or replace the calling thread's persistent upcall handler. */
+/* Request to register the calling thread's asynchronous upcall handler. */
 struct signal_set_handler_request {
 	struct signal_request_header header;
 	user_upcall_entry_t*         handler;
+	uint32_t                     flags;
 };
 
 /* Request to remove the calling thread's persistent upcall handler. */
@@ -85,4 +92,5 @@ enum signal_result {
 	SIGNAL_WAIT_CANCELED,
 	SIGNAL_WAIT_INTERRUPTED,
 	SIGNAL_WAIT_RECEIVER_NOT_REGISTERED,
+	SIGNAL_HANDLER_ALREADY_REGISTERED,
 };

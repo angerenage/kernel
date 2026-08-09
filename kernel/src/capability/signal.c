@@ -36,6 +36,7 @@ static syscall_result_t signal_result_to_syscall(enum signal_result result) {
 	case SIGNAL_NO_VALUE:
 	case SIGNAL_WOULD_BLOCK:
 	case SIGNAL_HANDLER_NOT_REGISTERED:
+	case SIGNAL_HANDLER_ALREADY_REGISTERED:
 	case SIGNAL_NO_MEMORY:
 	case SIGNAL_WAIT_FAILED:
 	default:
@@ -51,11 +52,13 @@ static syscall_result_t signal_set_handler(const struct cap_request* req, struct
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 	request = req->request;
-	if (request->handler == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	if (request->handler == 0u || (request->flags & ~(uint32_t)SIGNAL_HANDLER_FLAG_ONESHOT) != 0u) {
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
 
 	current = uthread_current();
 	if (current == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
-	return signal_result_to_syscall(signal_register_handler(signal, current, request->handler));
+	return signal_result_to_syscall(signal_register_handler(signal, current, request->handler, request->flags));
 }
 
 static syscall_result_t signal_clear_handler(const struct cap_request* req, struct signal* signal) {
