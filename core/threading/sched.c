@@ -446,7 +446,19 @@ static void sched_dispatch_next(struct cpu* cpu) {
 	previous = cpu->current_thread;
 	next     = sched_select_next(cpu);
 	if (next == NULL) return;
-	if (!sched_activate_thread_address_space(previous, next)) return;
+	if (!sched_activate_thread_address_space(previous, next)) {
+		/* Selection consumed the runnable candidate. Preserve it for a later attempt
+		 * and restore the still-active descriptor when yield/preemption had temporarily queued it. */
+		if (!thread_is_idle(next) && !thread_is_terminated(next)) {
+			(void)run_queue_enqueue(&state->run_queue, next);
+		}
+		if (previous != NULL && thread_is_queued(previous)) {
+			(void)sched_remove_runnable(previous);
+			thread_mark_running(previous, cpu);
+			sched_set_cpu_activity(cpu, sched_activity_for_thread(previous));
+		}
+		return;
+	}
 
 	if (previous == next) {
 		sched_set_current(cpu, next);
@@ -593,19 +605,21 @@ void sched_set_thread_effective_priority(struct thread* thread, int32_t priority
 	if (thread == NULL || thread_is_idle(thread) || thread_is_terminated(thread)) return;
 
 	normalized_priority = thread_priority_clamp(priority);
-	if (thread->effective_priority == normalized_priority) return;
-
-	thread->effective_priority = normalized_priority;
-	cpu                        = thread->cpu;
-	state                      = sched_state_for_cpu(cpu);
+	cpu                 = thread->cpu;
+	state               = sched_state_for_cpu(cpu);
 
 	if (state != NULL && thread_is_queued(thread)) {
-		(void)run_queue_requeue(&state->run_queue, thread);
-		if (cpu != NULL && cpu != cpu_current()) {
-			sched_request_reschedule(cpu);
-			hal_cpu_kick(cpu);
+		if (run_queue_update_priority(&state->run_queue, thread, normalized_priority)) {
+			if (cpu != NULL && cpu != cpu_current()) {
+				sched_request_reschedule(cpu);
+				hal_cpu_kick(cpu);
+			}
+			return;
 		}
-		return;
+	}
+	else {
+		if (thread->effective_priority == normalized_priority) return;
+		thread->effective_priority = normalized_priority;
 	}
 
 	if (state != NULL && cpu != NULL && cpu->current_thread == thread &&
@@ -662,12 +676,15 @@ bool sched_handle_interrupt_exit(void) {
 	state   = sched_state_for_cpu(cpu);
 	current = cpu->current_thread;
 	sched_clear_reschedule_request(cpu);
-	if (current == NULL || thread_is_idle(current) || thread_is_terminated(current) ||
-	    sched_run_queue_depth(cpu) == 0u) {
+	if (current == NULL || thread_is_terminated(current) || sched_run_queue_depth(cpu) == 0u) {
 		return false;
 	}
 
 	sched_set_cpu_activity(cpu, SCHED_CPU_ACTIVITY_KERNEL);
+	if (thread_is_idle(current)) {
+		sched_dispatch_next(cpu);
+		return true;
+	}
 	if (!sched_make_runnable_on_cpu(cpu, current, true)) return false;
 
 	sched_stat_increment(state == NULL ? NULL : &state->stats.timeslice_preempt_count);
@@ -735,6 +752,15 @@ bool sched_sleep_until_tick(uint64_t deadline_tick) {
 	thread_mark_blocked(current, THREAD_BLOCK_SLEEP);
 	sched_thread_wait_status_store(current, THREAD_WAIT_STATUS_PENDING);
 	sched_sleep_queue_insert_locked(current, deadline_tick);
+	if (thread_should_cancel(current)) {
+		(void)sched_thread_wait_status_transition(current, THREAD_WAIT_STATUS_PENDING, THREAD_WAIT_STATUS_CANCELED);
+		(void)sched_sleep_queue_remove_locked(current);
+		thread_mark_running(current, cpu);
+		sched_thread_wait_status_store(current, THREAD_WAIT_STATUS_NONE);
+		sched_set_cpu_activity(cpu, sched_activity_for_thread(current));
+		spinlock_unlock_irqrestore(&sched_sleep_lock, state);
+		return false;
+	}
 	spinlock_unlock_irqrestore(&sched_sleep_lock, state);
 
 	sched_dispatch_next(cpu);
