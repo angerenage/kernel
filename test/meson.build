@@ -173,7 +173,10 @@ test_suites = [
 	{
 		'name': 'thread',
 		'sources': files(
-			'core/thread_test.c',
+			'thread/test_support.c',
+			'thread/initialization.c',
+			'thread/lifecycle.c',
+			'thread/run_queue.c',
 		),
 		'suites': ['unit', 'core'],
 	},

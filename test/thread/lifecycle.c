@@ -1,132 +1,4 @@
-#include <core/cpu.h>
-#include <core/thread.h>
-#include <criterion/criterion.h>
-#include <hal/cpu.h>
-#include <hal/interrupts.h>
-
-#include "../mocks/hal/cpu_mock.h"
-
-static void init_bound_bootstrap_cpu(void) {
-	irq_enable_local();
-	cr_assert(cpu_topology_init_bootstrap(0x100000u, 0x104000u), "cpu_topology_init_bootstrap failed");
-	cr_assert_not_null(cpu_bsp(), "cpu_bsp returned NULL");
-	cpu_bind_current(cpu_bsp());
-	cpu_interrupts_set_ready(cpu_current(), false);
-}
-
-static void reset_test_state(void) {
-	irq_enable_local();
-	hal_cpu_mock_set_thread_context_init_result(true);
-	hal_cpu_local_bind(NULL);
-}
-
-static void thread_test_entry(void* arg) {
-	(void)arg;
-}
-
-Test(thread, init_populates_extended_descriptor_fields) {
-	int                               arg    = 42;
-	const struct thread_create_params params = {
-		.name              = "worker",
-		.entry             = thread_test_entry,
-		.arg               = &arg,
-		.kernel_stack_base = 0x400000u,
-		.kernel_stack_top  = 0x404000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
-	};
-	struct thread thread;
-
-	cr_assert(thread_init(&thread, &params), "thread_init rejected valid params");
-	cr_assert_eq(thread_init_ex(&thread, &params), THREAD_INIT_OK, "thread_init_ex rejected valid params");
-	cr_assert_str_eq(thread.name, "worker", "thread name mismatch");
-	cr_assert_eq(thread.state, THREAD_STATE_NEW, "new thread should start in NEW state");
-	cr_assert_eq(thread.block_reason, THREAD_BLOCK_NONE, "new thread should not start blocked");
-	cr_assert_eq(thread.kernel_stack_base, params.kernel_stack_base, "stack base mismatch");
-	cr_assert_eq(thread.kernel_stack_top, params.kernel_stack_top, "stack top mismatch");
-	cr_assert_neq(thread.context.instruction_pointer, 0u, "initial instruction pointer should be populated");
-	cr_assert(thread.context.stack_pointer <= params.kernel_stack_top, "initial stack pointer should stay in range");
-	cr_assert(thread.context.stack_pointer > params.kernel_stack_base, "initial stack pointer should stay in range");
-	cr_assert_eq(thread.entry, thread_test_entry, "entry pointer mismatch");
-	cr_assert_eq(thread.arg, &arg, "thread arg mismatch");
-	cr_assert_eq(
-		thread.timeslice_ticks, THREAD_DEFAULT_TIMESLICE_TICKS, "regular threads should inherit the default timeslice");
-	cr_assert_eq(thread.timeslice_remaining,
-	             THREAD_DEFAULT_TIMESLICE_TICKS,
-	             "regular threads should start with a full timeslice budget");
-	cr_assert_eq(thread.base_priority, THREAD_PRIORITY_DEFAULT, "regular threads should inherit the default priority");
-	cr_assert_eq(thread.effective_priority,
-	             THREAD_PRIORITY_DEFAULT,
-	             "regular threads should start with base priority as effective priority");
-	cr_assert(thread_is_joinable(&thread), "fresh non-detached thread should be joinable");
-	cr_assert(!thread_is_terminated(&thread), "fresh thread should not be terminated");
-	cr_assert_eq(thread_wait_queue_depth(&thread.join_wait_queue), 0u, "join wait queue should start empty");
-	cr_assert_eq(thread_wait_queue_depth(&thread.park_wait_queue), 0u, "park wait queue should start empty");
-	cr_assert_eq(thread.flags & THREAD_FLAG_PARK_PERMIT, 0u, "fresh thread should not start with a park permit");
-}
-
-Test(thread, init_rejects_invalid_regular_thread_params) {
-	struct thread thread;
-
-	cr_assert_eq(
-		thread_init_ex(NULL, NULL), THREAD_INIT_INVALID_ARGUMENTS, "NULL thread and params should be rejected");
-	cr_assert_eq(thread_init_ex(&thread, NULL), THREAD_INIT_INVALID_ARGUMENTS, "NULL params should be rejected");
-	cr_assert_eq(thread_init_ex(&thread,
-	                            &(const struct thread_create_params){
-									.name              = "bad",
-									.entry             = NULL,
-									.arg               = NULL,
-									.kernel_stack_base = 0x500000u,
-									.kernel_stack_top  = 0x504000u,
-									.preferred_cpu     = NULL,
-									.detached          = false,
-								}),
-	             THREAD_INIT_INVALID_ARGUMENTS,
-	             "NULL entry should be rejected");
-	cr_assert_eq(thread_init_ex(&thread,
-	                            &(const struct thread_create_params){
-									.name              = "bad",
-									.entry             = thread_test_entry,
-									.arg               = NULL,
-									.kernel_stack_base = 0x504000u,
-									.kernel_stack_top  = 0x504000u,
-									.preferred_cpu     = NULL,
-									.detached          = false,
-								}),
-	             THREAD_INIT_INVALID_STACK,
-	             "empty stack range should be rejected");
-	cr_assert(!thread_init(&thread,
-	                       &(const struct thread_create_params){
-							   .name              = "bad",
-							   .entry             = thread_test_entry,
-							   .arg               = NULL,
-							   .kernel_stack_base = 0x504000u,
-							   .kernel_stack_top  = 0x504000u,
-							   .preferred_cpu     = NULL,
-							   .detached          = false,
-						   }),
-	          "thread_init should reject an empty stack range");
-}
-
-Test(thread, init_reports_unsupported_context_setup) {
-	const struct thread_create_params params = {
-		.name              = "worker",
-		.entry             = thread_test_entry,
-		.arg               = NULL,
-		.kernel_stack_base = 0x520000u,
-		.kernel_stack_top  = 0x524000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
-	};
-	struct thread thread = {0};
-
-	hal_cpu_mock_set_thread_context_init_result(false);
-	cr_assert_eq(thread_init_ex(&thread, &params),
-	             THREAD_INIT_CONTEXT_UNSUPPORTED,
-	             "thread_init_ex should surface HAL bootstrap rejection");
-	cr_assert(!thread_init(&thread, &params), "thread_init should fail when the HAL rejects bootstrap setup");
-	reset_test_state();
-}
+#include "test_support.h"
 
 Test(thread, lifecycle_helpers_update_state_flags_and_links) {
 	const struct thread_create_params params = {
@@ -245,4 +117,50 @@ Test(thread, detach_and_idle_helpers_follow_joinability_rules) {
 		thread_wait_queue_depth(&idle_thread.park_wait_queue), 0u, "idle thread park wait queue should start empty");
 
 	reset_test_state();
+}
+
+Test(thread, lifecycle_transitions_preserve_persistent_flags_and_clear_scheduler_links) {
+	struct thread  thread;
+	const uint32_t persistent_flags =
+		THREAD_FLAG_DETACHED | THREAD_FLAG_CANCEL_PENDING | THREAD_FLAG_PARK_PERMIT | THREAD_FLAG_INTERRUPT_PENDING;
+
+	irq_enable_local();
+	thread_regression_init(&thread, "lifecycle", 0x830000u, THREAD_PRIORITY_DEFAULT);
+
+	thread.flags |= persistent_flags | THREAD_FLAG_QUEUED | THREAD_FLAG_WAIT_INTERRUPTIBLE;
+	thread.run_queue_next     = &thread;
+	thread.wait_queue_next    = &thread;
+	thread.sleep_queue_next   = &thread;
+	thread.wake_deadline_tick = 123u;
+
+	thread_mark_ready(&thread, NULL);
+	cr_assert_eq(thread.flags & persistent_flags, persistent_flags, "READY must preserve persistent flags");
+	cr_assert_eq(thread.flags & (THREAD_FLAG_QUEUED | THREAD_FLAG_WAIT_INTERRUPTIBLE),
+	             0u,
+	             "READY must clear transient scheduler flags");
+	cr_assert_null(thread.run_queue_next, "READY must clear run linkage");
+	cr_assert_null(thread.wait_queue_next, "READY must clear wait linkage");
+	cr_assert_null(thread.sleep_queue_next, "READY must clear sleep linkage");
+	cr_assert_eq(thread.wake_deadline_tick, 0u, "READY must clear sleep deadline");
+
+	thread.flags |= THREAD_FLAG_QUEUED | THREAD_FLAG_WAIT_INTERRUPTIBLE;
+	thread.run_queue_next     = &thread;
+	thread.wait_queue_next    = &thread;
+	thread.sleep_queue_next   = &thread;
+	thread.wake_deadline_tick = 456u;
+	thread_mark_blocked(&thread, THREAD_BLOCK_JOIN);
+	cr_assert_eq(thread.flags & persistent_flags, persistent_flags, "BLOCKED must preserve persistent flags");
+	cr_assert_eq(thread.flags & (THREAD_FLAG_QUEUED | THREAD_FLAG_WAIT_INTERRUPTIBLE),
+	             0u,
+	             "BLOCKED must clear transient scheduler flags");
+	cr_assert_null(thread.run_queue_next, "BLOCKED must clear run linkage");
+	cr_assert_null(thread.wait_queue_next, "BLOCKED must clear wait linkage");
+	cr_assert_null(thread.sleep_queue_next, "BLOCKED must clear sleep linkage");
+	cr_assert_eq(thread.wake_deadline_tick, 0u, "BLOCKED must clear stale deadline");
+
+	thread_mark_running(&thread, NULL);
+	cr_assert_eq(thread.flags & persistent_flags, persistent_flags, "RUNNING must preserve persistent flags");
+	cr_assert_eq(thread.block_reason, THREAD_BLOCK_NONE, "RUNNING must clear block reason");
+
+	thread_regression_reset();
 }
