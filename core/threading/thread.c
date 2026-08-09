@@ -223,10 +223,34 @@ void thread_clear_interrupt(struct thread* thread) {
 }
 
 bool thread_detach(struct thread* thread) {
-	if (thread == NULL || thread_is_idle(thread) || thread->state == THREAD_STATE_ZOMBIE) return false;
-	if (!thread_is_joinable(thread)) return false;
+	struct irq_state state;
 
+	if (thread == NULL || thread_is_idle(thread)) return false;
+
+	state = spinlock_lock_irqsave(&thread->join_wait_queue.lock);
+	if (thread_is_terminated(thread) || !thread_is_joinable(thread)) {
+		spinlock_unlock_irqrestore(&thread->join_wait_queue.lock, state);
+		return false;
+	}
 	(void)__atomic_fetch_or(&thread->flags, (uint32_t)THREAD_FLAG_DETACHED, __ATOMIC_ACQ_REL);
+	spinlock_unlock_irqrestore(&thread->join_wait_queue.lock, state);
+	return true;
+}
+
+bool thread_detach_with_reap_callback(struct thread* thread, thread_reap_callback_t callback, void* ctx) {
+	struct irq_state state;
+
+	if (thread == NULL || thread_is_idle(thread)) return false;
+
+	state = spinlock_lock_irqsave(&thread->join_wait_queue.lock);
+	if (thread_is_terminated(thread) || !thread_is_joinable(thread)) {
+		spinlock_unlock_irqrestore(&thread->join_wait_queue.lock, state);
+		return false;
+	}
+	thread->reap_callback = callback;
+	thread->reap_context  = ctx;
+	(void)__atomic_fetch_or(&thread->flags, (uint32_t)THREAD_FLAG_DETACHED, __ATOMIC_ACQ_REL);
+	spinlock_unlock_irqrestore(&thread->join_wait_queue.lock, state);
 	return true;
 }
 
@@ -256,20 +280,29 @@ void thread_set_cancel_enabled(struct thread* thread, bool enabled) {
 }
 
 void thread_set_reap_callback(struct thread* thread, thread_reap_callback_t callback, void* ctx) {
+	struct irq_state state;
+
 	if (thread == NULL) return;
 
-	thread->reap_callback = callback;
-	thread->reap_context  = ctx;
+	state = spinlock_lock_irqsave(&thread->join_wait_queue.lock);
+	if (!thread_is_terminated(thread)) {
+		thread->reap_callback = callback;
+		thread->reap_context  = ctx;
+	}
+	spinlock_unlock_irqrestore(&thread->join_wait_queue.lock, state);
 }
 
 void thread_notify_reap(struct thread* thread) {
 	thread_reap_callback_t callback;
 	void*                  ctx;
+	struct irq_state       state;
 
 	if (thread == NULL) return;
 
+	state    = spinlock_lock_irqsave(&thread->join_wait_queue.lock);
 	callback = thread->reap_callback;
 	ctx      = thread->reap_context;
+	spinlock_unlock_irqrestore(&thread->join_wait_queue.lock, state);
 	if (callback != NULL) callback(thread, ctx);
 }
 
@@ -308,14 +341,18 @@ void thread_mark_blocked(struct thread* thread, enum thread_block_reason reason)
 }
 
 void thread_mark_exiting(struct thread* thread, thread_exit_code_t exit_code) {
+	struct irq_state state;
+
 	if (thread == NULL || thread_is_idle(thread)) return;
 
+	state = spinlock_lock_irqsave(&thread->join_wait_queue.lock);
 	thread_reset_links(thread);
 	thread->blocked_queue = NULL;
 	thread->wait_status   = THREAD_WAIT_STATUS_NONE;
 	thread->block_reason  = THREAD_BLOCK_NONE;
 	thread->exit_code     = exit_code;
 	thread->state         = THREAD_STATE_EXITING;
+	spinlock_unlock_irqrestore(&thread->join_wait_queue.lock, state);
 }
 
 void thread_mark_zombie(struct thread* thread) {

@@ -693,9 +693,12 @@ bool sched_handle_interrupt_exit(void) {
 }
 
 void sched_finish_context_switch(void) {
-	struct cpu*    cpu = cpu_current();
-	struct thread* thread;
-	bool           joinable;
+	struct cpu*            cpu = cpu_current();
+	struct thread*         thread;
+	struct irq_state       join_state;
+	thread_reap_callback_t reap_callback;
+	void*                  reap_context;
+	bool                   joinable;
 
 	if (cpu == NULL || __atomic_load_n(&cpu->context_switch_in_progress, __ATOMIC_ACQUIRE)) return;
 
@@ -707,9 +710,14 @@ void sched_finish_context_switch(void) {
 	}
 	if (thread->state != THREAD_STATE_EXITING) return;
 
-	joinable = thread_is_joinable(thread);
+	join_state    = spinlock_lock_irqsave(&thread->join_wait_queue.lock);
+	joinable      = thread_is_joinable(thread);
+	reap_callback = thread->reap_callback;
+	reap_context  = thread->reap_context;
 	thread_mark_zombie(thread);
-	if (thread->reap_callback != NULL) thread_notify_reap(thread);
+	spinlock_unlock_irqrestore(&thread->join_wait_queue.lock, join_state);
+
+	if (reap_callback != NULL) reap_callback(thread, reap_context);
 	if (joinable) (void)sched_wake_all(&thread->join_wait_queue);
 }
 

@@ -8,6 +8,7 @@
 #include <core/vaddr_alloc.h>
 #include <core/vmm.h>
 #include <hal/clock.h>
+#include <hal/hcf.h>
 #include <libc/stdlib.h>
 #include <stddef.h>
 
@@ -67,14 +68,15 @@ static enum kthread_spawn_result kthread_result_from_thread_result(enum thread_i
 	}
 }
 
-static void kthread_free(struct kthread* thread) {
-	if (thread == NULL) return;
+static bool kthread_free(struct kthread* thread) {
+	if (thread == NULL) return true;
 
 	if (thread->stack_id != VMM_ID_INVALID) {
-		(void)vmm_free(address_space_kernel(), thread->stack_id);
+		if (!vmm_free(address_space_kernel(), thread->stack_id)) return false;
 		thread->stack_id = VMM_ID_INVALID;
 	}
 	free(thread);
+	return true;
 }
 
 static void kthread_reapers_init_once(void) {
@@ -127,9 +129,7 @@ static void kthread_reap_callback(struct thread* thread, void* ctx) {
 
 	if (target == NULL || thread != &target->thread) return;
 
-	thread_mark_zombie(thread);
-	(void)sched_wake_all(&thread->join_wait_queue);
-	if (!thread_is_joinable(thread)) kthread_free(target);
+	if (!thread_is_joinable(thread) && !kthread_free(target)) hcf();
 }
 
 static bool kthread_reaper_start_cpu(struct cpu* cpu) {
@@ -167,7 +167,7 @@ static bool kthread_reaper_start_cpu(struct cpu* cpu) {
 	spinlock_unlock_irqrestore(&reaper->wait_queue.lock, state);
 
 	if (result != KTHREAD_SPAWN_OK) {
-		kthread_free(reaper_thread);
+		if (!kthread_free(reaper_thread)) hcf();
 		return false;
 	}
 	return true;
@@ -208,7 +208,7 @@ static enum kthread_spawn_result kthread_spawn_internal(struct kthread** out_thr
 	};
 
 	if (!vmm_alloc(address_space_kernel(), &stack_params, &thread->stack_id, &stack_base)) {
-		kthread_free(thread);
+		if (!kthread_free(thread)) hcf();
 		return KTHREAD_SPAWN_STACK_ALLOC_FAILED;
 	}
 
@@ -225,7 +225,7 @@ static enum kthread_spawn_result kthread_spawn_internal(struct kthread** out_thr
 	if (init_result != THREAD_INIT_OK) {
 		enum kthread_spawn_result result = kthread_result_from_thread_result(init_result);
 
-		kthread_free(thread);
+		if (!kthread_free(thread)) hcf();
 		return result;
 	}
 	thread->thread.owner_kind = THREAD_OWNER_KTHREAD;
@@ -234,7 +234,7 @@ static enum kthread_spawn_result kthread_spawn_internal(struct kthread** out_thr
 	if (reap_on_exit) thread_set_reap_callback(&thread->thread, kthread_reap_callback, thread);
 
 	if (!sched_make_runnable(&thread->thread)) {
-		kthread_free(thread);
+		if (!kthread_free(thread)) hcf();
 		return KTHREAD_SPAWN_START_FAILED;
 	}
 
@@ -290,7 +290,7 @@ static void kthread_reaper_entry(void* arg) {
 			(void)sched_wake_all(&target->thread.join_wait_queue);
 
 			if (!thread_is_joinable(&target->thread)) {
-				kthread_free(target);
+				if (!kthread_free(target)) hcf();
 			}
 			continue;
 		}
@@ -440,17 +440,12 @@ bool kthread_destroy(struct kthread* target) {
 	if (!thread_is_reap_safe(&target->thread) && target->thread.state != THREAD_STATE_NEW) return false;
 	if (!thread_is_joinable(&target->thread)) return false;
 
-	kthread_free(target);
-	return true;
+	return kthread_free(target);
 }
 
 bool kthread_detach(struct kthread* target) {
 	if (target == NULL) return false;
-	if (thread_is_terminated(&target->thread)) return false;
-	if (!thread_detach(&target->thread)) return false;
-
-	thread_set_reap_callback(&target->thread, kthread_reap_callback, target);
-	return true;
+	return thread_detach_with_reap_callback(&target->thread, kthread_reap_callback, target);
 }
 
 bool kthread_cancel(struct kthread* target) {

@@ -221,6 +221,9 @@ void thread_clear_interrupt(struct thread* thread);
 /* Convert a joinable thread into a detached thread before it reaches ZOMBIE. */
 bool thread_detach(struct thread* thread);
 
+/* Atomically install owner cleanup and detach before the thread reaches ZOMBIE. */
+bool thread_detach_with_reap_callback(struct thread* thread, thread_reap_callback_t callback, void* ctx);
+
 /* Record a deferred cancellation request on the target thread. */
 bool thread_request_cancel(struct thread* thread);
 

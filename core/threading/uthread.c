@@ -220,9 +220,7 @@ static void uthread_reap_callback(struct thread* thread, void* ctx) {
 
 	if (target == NULL || thread != &target->thread) return;
 
-	thread_mark_zombie(thread);
 	process_notify_thread_exit(target->process, thread, thread->exit_code);
-	(void)sched_wake_all(&thread->join_wait_queue);
 	if (!thread_is_joinable(thread) && uthread_begin_destroy(target)) uthread_release(target);
 }
 
@@ -570,11 +568,7 @@ size_t uthread_count(void) {
 
 bool uthread_detach(struct uthread* thread) {
 	if (thread == NULL) return false;
-	if (thread_is_terminated(&thread->thread)) return false;
-	if (!thread_detach(&thread->thread)) return false;
-
-	thread_set_reap_callback(&thread->thread, uthread_reap_callback, thread);
-	return true;
+	return thread_detach_with_reap_callback(&thread->thread, uthread_reap_callback, thread);
 }
 
 bool uthread_deinit(struct uthread* thread) {
