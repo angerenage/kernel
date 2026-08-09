@@ -23,6 +23,8 @@ struct signal {
 	struct signal_handler_binding* handler_tail;
 	struct signal_handler_binding* handler_wake_head;
 	struct signal_handler_binding* handler_wake_tail;
+	struct signal_handler_binding* retired_handler_head;
+	struct signal_handler_binding* retired_handler_tail;
 	size_t                         handler_count;
 	struct signal_wait_binding*    wait_head;
 	struct signal_wait_binding*    wait_tail;
@@ -75,6 +77,9 @@ enum signal_result signal_send_coalesced(struct signal* signal, process_id_t sen
  * forced handler request may evict the oldest evictable pending upcall and is
  * itself non-evictable. If any handler cannot reserve admission, nothing is
  * published and no receiver is modified.
+ *
+ * The publication path performs no allocation or handler reclamation and may
+ * be used by a hard-IRQ producer that owns a stable reference to signal.
  */
 enum signal_result signal_send_force(struct signal* signal, process_id_t sender, const struct signal_payload* payload,
                                      uint64_t* out_receiver_count, uint64_t* out_delivery_count);

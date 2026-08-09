@@ -795,6 +795,41 @@ Test(signal, oneshot_handler_detaches_only_after_successful_admission) {
 	signal_test_deinit_uthread(&receiver);
 }
 
+Test(signal, oneshot_handler_reuses_retired_binding_when_rearmed) {
+	struct signal*        signal;
+	struct uthread        receiver;
+	struct signal_payload payload = {
+		.args = {1u, 2u, 3u, 4u}
+    };
+
+	signal_test_init_heap();
+	signal = signal_create();
+	cr_assert_not_null(signal);
+	signal_test_init_handler_uthread(&receiver, 0x9000u);
+	cr_assert_eq(__atomic_load_n(&receiver.reference_count, __ATOMIC_ACQUIRE), 1u);
+
+	for (size_t i = 0u; i < 3u; i++) {
+		cr_assert_eq(signal_register_handler(signal, &receiver, signal_test_handler, SIGNAL_HANDLER_FLAG_ONESHOT),
+		             SIGNAL_OK);
+		cr_assert_eq(signal_handler_count(signal), 1u);
+		cr_assert_eq(__atomic_load_n(&receiver.reference_count, __ATOMIC_ACQUIRE), 2u);
+
+		payload.args[0] = i + 1u;
+		cr_assert_eq(signal_send_force(signal, SIGNAL_TEST_SENDER, &payload, NULL, NULL), SIGNAL_OK);
+		cr_assert_eq(signal_handler_count(signal), 0u);
+		cr_assert_eq(__atomic_load_n(&receiver.reference_count, __ATOMIC_ACQUIRE),
+		             2u,
+		             "a consumed one-shot binding stays retained until safe lifecycle reclamation");
+	}
+
+	cr_assert_eq(uthread_upcall_pending_count(&receiver), 3u);
+	cr_assert_eq(signal_unregister_handler(signal, &receiver), SIGNAL_HANDLER_NOT_REGISTERED);
+	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
+	cr_assert_eq(__atomic_load_n(&receiver.reference_count, __ATOMIC_ACQUIRE), 1u);
+	cr_assert_eq(uthread_upcall_pending_count(&receiver), 3u);
+	signal_test_deinit_uthread(&receiver);
+}
+
 Test(signal, full_queue_keeps_oneshot_handler_armed) {
 	struct signal*        signal;
 	struct uthread        receiver;
