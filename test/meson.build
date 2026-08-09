@@ -208,16 +208,13 @@ test_suites = [
 		'suites': ['unit', 'core'],
 	},
 	{
-		'name': 'cpu_spinlock',
+		'name': 'cpu',
 		'sources': files(
-			'core/cpu_spinlock_test.c',
-		),
-		'suites': ['unit', 'core'],
-	},
-	{
-		'name': 'cpu_irq',
-		'sources': files(
-			'core/cpu_irq_test.c',
+			'cpu/test_support.c',
+			'cpu/topology.c',
+			'cpu/state.c',
+			'cpu/interrupts.c',
+			'cpu/spinlock.c',
 		),
 		'suites': ['unit', 'core'],
 	},
