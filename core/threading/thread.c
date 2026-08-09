@@ -45,7 +45,7 @@ static enum thread_init_result thread_validate_create_params(const struct thread
 }
 
 static enum thread_init_result thread_validate_context_params(const struct thread_context_params* params) {
-	if (params == NULL) return THREAD_INIT_INVALID_ARGUMENTS;
+	if (params == NULL || params->context == NULL) return THREAD_INIT_INVALID_ARGUMENTS;
 	if (params->kernel_stack_top <= params->kernel_stack_base) return THREAD_INIT_INVALID_STACK;
 	return THREAD_INIT_OK;
 }
@@ -72,7 +72,7 @@ enum thread_init_result thread_init_context(struct thread* thread, const struct 
 		 .address_space       = params->address_space,
 		 .owner_kind          = THREAD_OWNER_NONE,
 		 .owner               = NULL,
-		 .context             = params->context,
+		 .context             = *params->context,
 		 .entry               = params->entry,
 		 .arg                 = params->arg,
 		 .exit_code           = 0u,
@@ -121,7 +121,7 @@ enum thread_init_result thread_init_ex(struct thread* thread, const struct threa
 		.preferred_cpu     = params->preferred_cpu,
 		.base_priority     = params->base_priority,
 		.detached          = params->detached,
-		.context           = context,
+		.context           = &context,
 		.entry             = params->entry,
 		.arg               = params->arg,
 	};

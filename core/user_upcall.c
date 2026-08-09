@@ -1,6 +1,7 @@
 #include <core/thread.h>
 #include <core/user_upcall.h>
 #include <core/uthread.h>
+#include <libc/stdlib.h>
 #include <libc/string.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -73,20 +74,25 @@ static void uthread_upcall_rebalance_force_reservations_locked(struct user_upcal
 }
 
 static void uthread_upcall_clear_pending(struct user_upcall_state* state) {
+	if (state == NULL) return;
 	state->head                        = 0u;
 	state->count                       = 0u;
 	state->force_free_reservations     = 0u;
 	state->force_eviction_reservations = 0u;
-	memset(state->pending, 0, sizeof(state->pending));
+	if (state->pending != NULL) {
+		memset(state->pending, 0, USER_UPCALL_QUEUE_CAPACITY * sizeof(*state->pending));
+	}
 }
 
-void uthread_upcall_state_init(struct uthread* thread) {
+bool uthread_upcall_state_init(struct uthread* thread) {
 	struct user_upcall_state* state;
 
-	if (thread == NULL) return;
+	if (thread == NULL) return false;
 
 	state = &thread->upcall;
 	memset(state, 0, sizeof(*state));
+	state->pending = calloc(USER_UPCALL_QUEUE_CAPACITY, sizeof(*state->pending));
+	if (state->pending == NULL) return false;
 	spinlock_init_class(&state->lock,
 	                    "uthread_upcall",
 	                    SPINLOCK_ORDER_USER_UPCALL,
@@ -94,25 +100,30 @@ void uthread_upcall_state_init(struct uthread* thread) {
 	state->stack_id    = VMM_ID_INVALID;
 	state->phase       = USER_UPCALL_PHASE_IDLE;
 	state->initialized = true;
+	return true;
 }
 
 void uthread_upcall_state_deinit(struct uthread* thread) {
-	struct user_upcall_state* state;
-	struct irq_state          irq_state;
+	struct user_upcall_request* pending;
+	struct user_upcall_state*   state;
+	struct irq_state            irq_state;
 
 	if (thread == NULL) return;
 	state = &thread->upcall;
 	if (!state->initialized) return;
 
-	irq_state          = spinlock_lock_irqsave(&state->lock);
-	state->stack_id    = VMM_ID_INVALID;
-	state->stack_top   = 0u;
-	state->phase       = USER_UPCALL_PHASE_IDLE;
-	state->initialized = false;
+	irq_state        = spinlock_lock_irqsave(&state->lock);
+	pending          = state->pending;
+	state->stack_id  = VMM_ID_INVALID;
+	state->stack_top = 0u;
+	state->phase     = USER_UPCALL_PHASE_IDLE;
 	memset(&state->interrupted_context, 0, sizeof(state->interrupted_context));
 	uthread_upcall_clear_pending(state);
+	state->pending     = NULL;
+	state->initialized = false;
 	thread_clear_interrupt(&thread->thread);
 	spinlock_unlock_irqrestore(&state->lock, irq_state);
+	free(pending);
 }
 
 static enum user_upcall_result uthread_upcall_enqueue_internal(struct uthread*                   thread,

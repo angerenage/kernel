@@ -64,7 +64,7 @@ struct user_upcall_state {
 	vmm_id_t                     stack_id;
 	uintptr_t                    stack_top;
 	struct hal_userspace_context interrupted_context;
-	struct user_upcall_request   pending[USER_UPCALL_QUEUE_CAPACITY];
+	struct user_upcall_request*  pending;
 	size_t                       head;
 	size_t                       count;
 	uint64_t                     dropped_count;
@@ -74,8 +74,8 @@ struct user_upcall_state {
 	bool                         initialized;
 };
 
-/* Initialize the state for one thread. */
-void uthread_upcall_state_init(struct uthread* thread);
+/* Initialize the state and allocate its fixed-capacity pending queue. */
+bool uthread_upcall_state_init(struct uthread* thread);
 
 /* Clear the state for one thread. */
 void uthread_upcall_state_deinit(struct uthread* thread);

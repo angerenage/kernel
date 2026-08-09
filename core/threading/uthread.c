@@ -345,6 +345,11 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 		.dying           = 0u,
 		.heap_allocated  = heap_allocated,
 	};
+	if (!uthread_upcall_state_init(thread)) {
+		uthread_release_name(thread);
+		uthread_upcall_state_deinit(thread);
+		return UTHREAD_START_NO_MEMORY;
+	}
 	uthread_upcall_state_init(thread);
 	id_result = id_table_alloc(&uthread_table, thread, &id);
 	if (id_result != ID_TABLE_OK) {
@@ -358,12 +363,14 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 	if (!vmm_alloc(address_space, &user_stack_params, &thread->user_stack_id, &user_stack_base)) {
 		uthread_release_name(thread);
 		uthread_release_stacks(thread);
+		uthread_upcall_state_deinit(thread);
 		uthread_unregister_id(thread);
 		return UTHREAD_START_STACK_ALLOC_FAILED;
 	}
 	if (!vmm_alloc(address_space, &upcall_stack_params, &thread->upcall.stack_id, &upcall_stack_base)) {
 		uthread_release_name(thread);
 		uthread_release_stacks(thread);
+		uthread_upcall_state_deinit(thread);
 		uthread_unregister_id(thread);
 		return UTHREAD_START_STACK_ALLOC_FAILED;
 	}
@@ -371,6 +378,7 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 	if (!vmm_alloc(address_space_kernel(), &kernel_stack_params, &thread->kernel_stack_id, &kernel_stack_base)) {
 		uthread_release_name(thread);
 		uthread_release_stacks(thread);
+		uthread_upcall_state_deinit(thread);
 		uthread_unregister_id(thread);
 		return UTHREAD_START_STACK_ALLOC_FAILED;
 	}
@@ -382,6 +390,7 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 		if (params->arg_size > initial_user_stack_top - (uintptr_t)user_stack_base) {
 			uthread_release_name(thread);
 			uthread_release_stacks(thread);
+			uthread_upcall_state_deinit(thread);
 			uthread_unregister_id(thread);
 			return UTHREAD_START_INVALID_ARGUMENTS;
 		}
@@ -390,6 +399,7 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 		    address_space_copy_to(address_space, user_arg, params->arg_data, params->arg_size) != ADDRESS_TRANSFER_OK) {
 			uthread_release_name(thread);
 			uthread_release_stacks(thread);
+			uthread_upcall_state_deinit(thread);
 			uthread_unregister_id(thread);
 			return UTHREAD_START_INVALID_ARGUMENTS;
 		}
@@ -400,6 +410,7 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 			&context, kernel_stack_top, params->user_entry, initial_user_stack_top, user_arg)) {
 		uthread_release_name(thread);
 		uthread_release_stacks(thread);
+		uthread_upcall_state_deinit(thread);
 		uthread_unregister_id(thread);
 		return UTHREAD_START_CONTEXT_UNSUPPORTED;
 	}
@@ -412,7 +423,7 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 		.preferred_cpu     = params->preferred_cpu,
 		.base_priority     = THREAD_PRIORITY_DEFAULT,
 		.detached          = params->detached,
-		.context           = context,
+		.context           = &context,
 		.entry             = NULL,
 		.arg               = NULL,
 	};
@@ -420,12 +431,14 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 	if (init_result != THREAD_INIT_OK) {
 		uthread_release_name(thread);
 		uthread_release_stacks(thread);
+		uthread_upcall_state_deinit(thread);
 		uthread_unregister_id(thread);
 		return UTHREAD_START_INVALID_ARGUMENTS;
 	}
 	if (!uthread_attach_process(thread, thread->process)) {
 		uthread_release_name(thread);
 		uthread_release_stacks(thread);
+		uthread_upcall_state_deinit(thread);
 		uthread_unregister_id(thread);
 		return UTHREAD_START_INVALID_ARGUMENTS;
 	}
@@ -435,6 +448,7 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 	if (!sched_make_runnable(&thread->thread)) {
 		uthread_release_name(thread);
 		uthread_release_stacks(thread);
+		uthread_upcall_state_deinit(thread);
 		uthread_detach_process(thread);
 		uthread_unregister_id(thread);
 		thread->process = NULL;

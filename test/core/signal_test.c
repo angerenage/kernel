@@ -125,22 +125,24 @@ static void signal_test_init_sched_uthread(struct uthread* target, const char* n
 		.detached          = false,
 	};
 
+	signal_test_init_heap();
 	memset(target, 0, sizeof(*target));
 	cr_assert(thread_init(&target->thread, &params), "uthread scheduler descriptor initialization failed");
 	target->thread.owner_kind = THREAD_OWNER_UTHREAD;
 	target->thread.owner      = target;
 	target->process           = (struct process*)(uintptr_t)1u;
 	target->reference_count   = 1u;
-	uthread_upcall_state_init(target);
+	cr_assert(uthread_upcall_state_init(target), "uthread upcall state initialization failed");
 	target->upcall.stack_id  = 1u;
 	target->upcall.stack_top = upcall_stack_top;
 }
 
 static void signal_test_init_handler_uthread(struct uthread* target, uintptr_t upcall_stack_top) {
+	signal_test_init_heap();
 	memset(target, 0, sizeof(*target));
 	target->process         = (struct process*)(uintptr_t)1u;
 	target->reference_count = 1u;
-	uthread_upcall_state_init(target);
+	cr_assert(uthread_upcall_state_init(target), "uthread upcall state initialization failed");
 	target->upcall.stack_id  = 1u;
 	target->upcall.stack_top = upcall_stack_top;
 }

@@ -1,3 +1,5 @@
+#include <base/heap.h>
+#include <core/pmm.h>
 #include <core/user_upcall.h>
 #include <core/uthread.h>
 #include <criterion/criterion.h>
@@ -7,6 +9,39 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define KiB(x) ((size_t)(x) * 1024u)
+#define USER_UPCALL_TEST_HEAP_SIZE KiB(64)
+
+static uint8_t user_upcall_test_heap[USER_UPCALL_TEST_HEAP_SIZE] __attribute__((aligned(PMM_PAGE_SIZE)));
+static size_t  user_upcall_test_heap_offset;
+static bool    user_upcall_test_heap_initialized;
+
+bool heap_grow_pages(size_t page_count, void** out_base) {
+	size_t bytes;
+	size_t offset;
+
+	if (out_base == NULL) return false;
+	*out_base = NULL;
+
+	bytes = page_count * PMM_PAGE_SIZE;
+	for (;;) {
+		offset = __atomic_load_n(&user_upcall_test_heap_offset, __ATOMIC_ACQUIRE);
+		if (bytes > USER_UPCALL_TEST_HEAP_SIZE - offset) return false;
+		if (__atomic_compare_exchange_n(
+				&user_upcall_test_heap_offset, &offset, offset + bytes, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+			*out_base = user_upcall_test_heap + offset;
+			return true;
+		}
+	}
+}
+
+static void user_upcall_test_init_heap(void) {
+	if (user_upcall_test_heap_initialized) return;
+	user_upcall_test_heap_offset = 0u;
+	cr_assert(heap_init(), "heap_init failed");
+	user_upcall_test_heap_initialized = true;
+}
+
 struct hal_userspace_return_frame {
 	bool      user;
 	uintptr_t entry;
@@ -15,8 +50,9 @@ struct hal_userspace_return_frame {
 };
 
 static void user_upcall_test_reset(struct uthread* thread, struct hal_userspace_return_frame* frame) {
+	user_upcall_test_init_heap();
 	memset(thread, 0, sizeof(*thread));
-	uthread_upcall_state_init(thread);
+	cr_assert(uthread_upcall_state_init(thread), "uthread upcall state initialization failed");
 	thread->process          = (struct process*)(uintptr_t)1u;
 	thread->upcall.stack_id  = 1u;
 	thread->upcall.stack_top = 0x9000u;

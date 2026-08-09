@@ -98,16 +98,16 @@ struct thread_create_params {
 
 /* Parameters used when the caller already built an initial CPU context. */
 struct thread_context_params {
-	const char*           name;
-	uintptr_t             kernel_stack_base;
-	uintptr_t             kernel_stack_top;
-	struct address_space* address_space;
-	struct cpu*           preferred_cpu;
-	int32_t               base_priority;
-	bool                  detached;
-	struct thread_context context;
-	thread_entry_t        entry;
-	void*                 arg;
+	const char*                  name;
+	uintptr_t                    kernel_stack_base;
+	uintptr_t                    kernel_stack_top;
+	struct address_space*        address_space;
+	struct cpu*                  preferred_cpu;
+	int32_t                      base_priority;
+	bool                         detached;
+	const struct thread_context* context;
+	thread_entry_t               entry;
+	void*                        arg;
 };
 
 /* Owner callback invoked from a safe stack after the scheduler publishes ZOMBIE. */
