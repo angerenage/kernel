@@ -166,7 +166,13 @@ test_suites = [
 	{
 		'name': 'kthread',
 		'sources': files(
-			'core/kthread_test.c',
+			'kthread/test_support.c',
+			'kthread/initialization.c',
+			'kthread/scheduling.c',
+			'kthread/lifecycle.c',
+			'kthread/park.c',
+			'kthread/join.c',
+			'kthread/cancellation.c',
 		),
 		'suites': ['unit', 'core'],
 	},
