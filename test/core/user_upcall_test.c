@@ -236,6 +236,7 @@ Test(user_upcall, coalescing_preserves_latest_and_counts_only_real_drops) {
 	const uintptr_t                   token   = 0x1111u;
 	struct user_upcall_request        tracked = {
 			   .origin       = USER_UPCALL_ORIGIN_SIGNAL,
+			   .flags        = USER_UPCALL_FLAG_COALESCIBLE,
 			   .origin_token = token,
 			   .entry        = 0x4000u,
 			   .args         = {1u, 2u, 3u, 4u, 5u},
@@ -245,6 +246,7 @@ Test(user_upcall, coalescing_preserves_latest_and_counts_only_real_drops) {
 	};
 	struct user_upcall_request unrelated = {
 		.origin       = USER_UPCALL_ORIGIN_SIGNAL,
+		.flags        = USER_UPCALL_FLAG_COALESCIBLE,
 		.origin_token = 0x2222u,
 		.entry        = 0x6000u,
 	};
@@ -283,6 +285,45 @@ Test(user_upcall, coalescing_preserves_latest_and_counts_only_real_drops) {
 	thread.upcall.dropped_count = UINT64_MAX;
 	cr_assert_eq(uthread_upcall_enqueue(&thread, &filler), USER_UPCALL_QUEUE_FULL);
 	cr_assert_eq(uthread_upcall_dropped_count(&thread), UINT64_MAX, "drop count must saturate");
+	uthread_upcall_state_deinit(&thread);
+}
+
+Test(user_upcall, coalescing_never_removes_a_normal_matching_request) {
+	struct uthread                    thread;
+	struct hal_userspace_return_frame frame;
+	const uintptr_t                   token  = 0x1111u;
+	struct user_upcall_request        queued = {
+			   .origin       = USER_UPCALL_ORIGIN_SIGNAL,
+			   .origin_token = token,
+			   .entry        = 0x4000u,
+			   .args         = {1u},
+    };
+	struct user_upcall_request coalesced = {
+		.origin       = USER_UPCALL_ORIGIN_SIGNAL,
+		.flags        = USER_UPCALL_FLAG_COALESCIBLE,
+		.origin_token = token,
+		.entry        = 0x5000u,
+		.args         = {2u},
+	};
+
+	user_upcall_test_reset(&thread, &frame);
+	cr_assert_eq(uthread_upcall_enqueue(&thread, &queued), USER_UPCALL_OK);
+	cr_assert_eq(uthread_upcall_enqueue_latest(&thread, &coalesced), USER_UPCALL_OK);
+	coalesced.entry   = 0x6000u;
+	coalesced.args[0] = 3u;
+	cr_assert_eq(uthread_upcall_enqueue_latest(&thread, &coalesced), USER_UPCALL_OK);
+
+	cr_assert_eq(uthread_upcall_pending_count(&thread), 2u);
+	cr_assert_eq(thread.upcall.pending[thread.upcall.head].entry, queued.entry);
+	cr_assert_eq(thread.upcall.pending[thread.upcall.head].args[0], 1u);
+	{
+		size_t tail = (thread.upcall.head + 1u) % USER_UPCALL_QUEUE_CAPACITY;
+
+		cr_assert_eq(thread.upcall.pending[tail].entry, 0x6000u);
+		cr_assert_eq(thread.upcall.pending[tail].args[0], 3u);
+		cr_assert((thread.upcall.pending[tail].flags & USER_UPCALL_FLAG_COALESCIBLE) != 0u);
+	}
+	cr_assert_eq(uthread_upcall_dropped_count(&thread), 0u);
 	uthread_upcall_state_deinit(&thread);
 }
 

@@ -329,6 +329,40 @@ Test(signal, handlers_receive_broadcast_and_report_partial_delivery) {
 	signal_test_deinit_uthread(&second);
 }
 
+Test(signal, coalesced_publications_replace_only_older_coalescible_publications) {
+	struct signal*        signal;
+	struct uthread        receiver;
+	struct signal_payload payload = {
+		.args = {1u, 2u, 3u, 4u}
+    };
+	size_t second;
+
+	signal_test_init_heap();
+	signal = signal_create();
+	cr_assert_not_null(signal);
+	signal_test_init_handler_uthread(&receiver, 0x9000u);
+	cr_assert_eq(signal_register_handler(signal, &receiver, signal_test_handler), SIGNAL_OK);
+
+	cr_assert_eq(signal_send(signal, SIGNAL_TEST_SENDER, &payload, NULL, NULL), SIGNAL_OK);
+	payload.args[0] = 10u;
+	cr_assert_eq(signal_send_coalesced(signal, SIGNAL_TEST_SECOND_SENDER, &payload, NULL, NULL), SIGNAL_OK);
+	payload.args[0] = 20u;
+	cr_assert_eq(signal_send_coalesced(signal, SIGNAL_TEST_SENDER, &payload, NULL, NULL), SIGNAL_OK);
+
+	cr_assert_eq(uthread_upcall_pending_count(&receiver), 2u);
+	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].args[0], SIGNAL_TEST_SENDER);
+	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].args[1], 1u);
+	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].flags & USER_UPCALL_FLAG_COALESCIBLE, 0u);
+	second = (receiver.upcall.head + 1u) % USER_UPCALL_QUEUE_CAPACITY;
+	cr_assert_eq(receiver.upcall.pending[second].args[0], SIGNAL_TEST_SENDER);
+	cr_assert_eq(receiver.upcall.pending[second].args[1], 20u);
+	cr_assert((receiver.upcall.pending[second].flags & USER_UPCALL_FLAG_COALESCIBLE) != 0u);
+	cr_assert_eq(uthread_upcall_dropped_count(&receiver), 0u);
+
+	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
+	signal_test_deinit_uthread(&receiver);
+}
+
 Test(signal, one_thread_can_receive_the_same_publication_by_handler_and_wait) {
 	const struct thread_create_params sender_params = {
 		.name              = "signal_sender",

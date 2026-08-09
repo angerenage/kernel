@@ -26,11 +26,12 @@ static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 	[SYSCALL_CHANNEL_CREATE]  = syscall_channel_create,
 	[SYSCALL_CHANNEL_DESTROY] = syscall_channel_destroy,
 
-	[SYSCALL_SIGNAL_CREATE]   = syscall_signal_create,
-	[SYSCALL_SIGNAL_SEND]     = syscall_signal_send,
-	[SYSCALL_SIGNAL_READ]     = syscall_signal_read,
-	[SYSCALL_SIGNAL_WAIT]     = syscall_signal_wait,
-	[SYSCALL_SIGNAL_TRY_WAIT] = syscall_signal_try_wait,
+	[SYSCALL_SIGNAL_CREATE]         = syscall_signal_create,
+	[SYSCALL_SIGNAL_SEND]           = syscall_signal_send,
+	[SYSCALL_SIGNAL_SEND_COALESCED] = syscall_signal_send_coalesced,
+	[SYSCALL_SIGNAL_READ]           = syscall_signal_read,
+	[SYSCALL_SIGNAL_WAIT]           = syscall_signal_wait,
+	[SYSCALL_SIGNAL_TRY_WAIT]       = syscall_signal_try_wait,
 
 	[SYSCALL_MODULE_RESOLVE] = syscall_module_resolve,
 

@@ -13,7 +13,8 @@ static bool uthread_upcall_thread_dying(const struct uthread* thread) {
 
 static bool uthread_upcall_request_valid(const struct user_upcall_request* request) {
 	if (request == NULL || request->entry == 0u) return false;
-	return (request->flags & ~((uint32_t)USER_UPCALL_FLAG_NON_EVICTABLE)) == 0u;
+	return (request->flags & ~((uint32_t)USER_UPCALL_FLAG_NON_EVICTABLE | (uint32_t)USER_UPCALL_FLAG_COALESCIBLE)) ==
+	       0u;
 }
 
 static void uthread_upcall_record_drop_locked(struct user_upcall_state* state) {
@@ -23,6 +24,10 @@ static void uthread_upcall_record_drop_locked(struct user_upcall_state* state) {
 
 static bool uthread_upcall_request_non_evictable(const struct user_upcall_request* request) {
 	return request != NULL && (request->flags & USER_UPCALL_FLAG_NON_EVICTABLE) != 0u;
+}
+
+static bool uthread_upcall_request_coalescible(const struct user_upcall_request* request) {
+	return request != NULL && (request->flags & USER_UPCALL_FLAG_COALESCIBLE) != 0u;
 }
 
 static bool uthread_upcall_request_force_reserved(const struct user_upcall_request* request) {
@@ -143,6 +148,7 @@ static enum user_upcall_result uthread_upcall_enqueue_internal(struct uthread*  
 			struct user_upcall_request pending = state->pending[source];
 
 			if (pending.origin == request->origin && pending.origin_token == request->origin_token &&
+			    uthread_upcall_request_coalescible(&pending) && uthread_upcall_request_coalescible(request) &&
 			    !uthread_upcall_request_non_evictable(&pending) && !uthread_upcall_request_force_reserved(&pending)) {
 				continue;
 			}
@@ -181,7 +187,8 @@ enum user_upcall_result uthread_upcall_enqueue(struct uthread* thread, const str
 
 enum user_upcall_result uthread_upcall_enqueue_latest(struct uthread*                   thread,
                                                       const struct user_upcall_request* request) {
-	if (request == NULL || request->origin == USER_UPCALL_ORIGIN_NONE || request->origin_token == 0u) {
+	if (request == NULL || request->origin == USER_UPCALL_ORIGIN_NONE || request->origin_token == 0u ||
+	    !uthread_upcall_request_coalescible(request)) {
 		return USER_UPCALL_INVALID_ARGUMENTS;
 	}
 	return uthread_upcall_enqueue_internal(thread, request, true);

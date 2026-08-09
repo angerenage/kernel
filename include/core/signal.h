@@ -63,6 +63,14 @@ enum signal_result signal_send(struct signal* signal, process_id_t sender, const
                                uint64_t* out_receiver_count, uint64_t* out_delivery_count);
 
 /*
+ * Publish like signal_send(), but replace only older coalescible publications
+ * pending for the same handler. Ordinary queued publications are never removed.
+ */
+enum signal_result signal_send_coalesced(struct signal* signal, process_id_t sender,
+                                         const struct signal_payload* payload, uint64_t* out_receiver_count,
+                                         uint64_t* out_delivery_count);
+
+/*
  * Publish atomically to all live handlers, reserving queue admission first. A
  * forced handler request may evict the oldest evictable pending upcall and is
  * itself non-evictable. If any handler cannot reserve admission, nothing is

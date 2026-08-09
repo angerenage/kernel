@@ -31,6 +31,12 @@ struct signal_send_response {
 	uint64_t delivery_count;
 };
 
+/* Userspace-selectable behavior attached to one Signal publication. */
+enum signal_send_flags {
+	SIGNAL_SEND_FLAG_NONE     = 0u,
+	SIGNAL_SEND_FLAG_COALESCE = 1u << 0,
+};
+
 /* Control operations routed through the Signal capability with cap_call. */
 enum signal_op {
 	SIGNAL_OP_UNSUBSCRIBE = 0,

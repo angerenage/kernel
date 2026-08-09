@@ -461,13 +461,93 @@ enum signal_result signal_destroy(struct signal* signal) {
 	return SIGNAL_OK;
 }
 
-enum signal_result signal_send(struct signal* signal, process_id_t sender, const struct signal_payload* payload,
-                               uint64_t* out_receiver_count, uint64_t* out_delivery_count) {
+enum signal_send_internal_flags {
+	SIGNAL_SEND_INTERNAL_FORCE = 1u << 1,
+};
+
+static bool signal_send_internal_is_forced(uint32_t flags) {
+	return (flags & (uint32_t)SIGNAL_SEND_INTERNAL_FORCE) != 0u;
+}
+
+static bool signal_send_internal_is_coalesced(uint32_t flags) {
+	return (flags & (uint32_t)SIGNAL_SEND_FLAG_COALESCE) != 0u;
+}
+
+static struct user_upcall_request signal_handler_request(const struct signal_handler_binding* handler,
+                                                         const struct signal_message* message, uint32_t flags) {
+	uint32_t upcall_flags = USER_UPCALL_FLAG_NONE;
+
+	if (signal_send_internal_is_coalesced(flags)) upcall_flags |= USER_UPCALL_FLAG_COALESCIBLE;
+	if (signal_send_internal_is_forced(flags)) upcall_flags |= USER_UPCALL_FLAG_NON_EVICTABLE;
+	return (struct user_upcall_request){
+		.origin       = USER_UPCALL_ORIGIN_SIGNAL,
+		.flags        = upcall_flags,
+		.origin_token = (uintptr_t)handler,
+		.entry        = handler->entry,
+		.args =
+			{
+				   (uintptr_t)message->sender,
+				   (uintptr_t)message->payload.args[0],
+				   (uintptr_t)message->payload.args[1],
+				   (uintptr_t)message->payload.args[2],
+				   (uintptr_t)message->payload.args[3],
+				   },
+	};
+}
+
+static void signal_cancel_force_reservations_locked(struct signal* signal) {
+	for (struct signal_handler_binding* handler = signal->handler_head; handler != NULL; handler = handler->next) {
+		if (!handler->force_reserved) continue;
+		uthread_upcall_force_cancel(handler->target);
+		handler->force_reserved = false;
+	}
+}
+
+static enum signal_result signal_reserve_force_handlers_locked(struct signal* signal) {
+	struct signal_handler_binding* handler;
+
+	for (handler = signal->handler_head; handler != NULL; handler = handler->next) {
+		enum user_upcall_result reserve_result;
+
+		handler->force_reserved = false;
+		if (__atomic_load_n(&handler->target->dying, __ATOMIC_ACQUIRE) != 0u) continue;
+		reserve_result = uthread_upcall_force_reserve(handler->target);
+		if (reserve_result == USER_UPCALL_THREAD_DYING) continue;
+		if (reserve_result == USER_UPCALL_OK) {
+			handler->force_reserved = true;
+			continue;
+		}
+		signal_cancel_force_reservations_locked(signal);
+		return SIGNAL_UNAVAILABLE;
+	}
+	return SIGNAL_OK;
+}
+
+static enum user_upcall_result signal_enqueue_handler_locked(struct signal_handler_binding*    handler,
+                                                             const struct user_upcall_request* request,
+                                                             uint32_t                          flags) {
+	enum user_upcall_result result;
+
+	if (signal_send_internal_is_forced(flags)) {
+		if (!handler->force_reserved) return USER_UPCALL_THREAD_DYING;
+		result                  = uthread_upcall_force_commit(handler->target, request);
+		handler->force_reserved = false;
+		if (result != USER_UPCALL_OK) hcf();
+		return result;
+	}
+	if (__atomic_load_n(&handler->target->dying, __ATOMIC_ACQUIRE) != 0u) return USER_UPCALL_THREAD_DYING;
+	if (signal_send_internal_is_coalesced(flags)) return uthread_upcall_enqueue_latest(handler->target, request);
+	return uthread_upcall_enqueue(handler->target, request);
+}
+
+static enum signal_result signal_send_internal(struct signal* signal, process_id_t sender,
+                                               const struct signal_payload* payload, uint32_t flags,
+                                               uint64_t* out_receiver_count, uint64_t* out_delivery_count) {
 	struct signal_handler_binding* handler;
 	struct signal_wait_binding*    wait;
-	struct user_upcall_request     request;
 	struct signal_message          message;
 	struct irq_state               state;
+	enum signal_result             reserve_result;
 	uint64_t                       receiver_count         = 0u;
 	uint64_t                       delivery_count         = 0u;
 	size_t                         waiting_delivery_count = 0u;
@@ -486,29 +566,25 @@ enum signal_result signal_send(struct signal* signal, process_id_t sender, const
 		return SIGNAL_CLOSED;
 	}
 
+	if (signal_send_internal_is_forced(flags)) {
+		reserve_result = signal_reserve_force_handlers_locked(signal);
+		if (reserve_result != SIGNAL_OK) {
+			spinlock_unlock_irqrestore(&signal->lock, state);
+			return reserve_result;
+		}
+	}
+
 	signal->generation = signal_next_generation(signal->generation);
 	signal->latest     = message;
 	signal->has_value  = true;
 
 	for (handler = signal->handler_head; handler != NULL; handler = handler->next) {
-		enum user_upcall_result upcall_result;
+		struct user_upcall_request request;
+		enum user_upcall_result    upcall_result;
 
 		receiver_count++;
-		if (__atomic_load_n(&handler->target->dying, __ATOMIC_ACQUIRE) != 0u) continue;
-		request = (struct user_upcall_request){
-			.origin       = USER_UPCALL_ORIGIN_SIGNAL,
-			.origin_token = (uintptr_t)handler,
-			.entry        = handler->entry,
-			.args =
-				{
-					   (uintptr_t)message.sender,
-					   (uintptr_t)message.payload.args[0],
-					   (uintptr_t)message.payload.args[1],
-					   (uintptr_t)message.payload.args[2],
-					   (uintptr_t)message.payload.args[3],
-					   },
-		};
-		upcall_result = uthread_upcall_enqueue(handler->target, &request);
+		request       = signal_handler_request(handler, &message, flags);
+		upcall_result = signal_enqueue_handler_locked(handler, &request, flags);
 		if (upcall_result == USER_UPCALL_OK) {
 			delivery_count++;
 			signal_queue_handler_wake_locked(signal, handler);
@@ -536,100 +612,22 @@ enum signal_result signal_send(struct signal* signal, process_id_t sender, const
 	return SIGNAL_OK;
 }
 
+enum signal_result signal_send(struct signal* signal, process_id_t sender, const struct signal_payload* payload,
+                               uint64_t* out_receiver_count, uint64_t* out_delivery_count) {
+	return signal_send_internal(signal, sender, payload, SIGNAL_SEND_FLAG_NONE, out_receiver_count, out_delivery_count);
+}
+
+enum signal_result signal_send_coalesced(struct signal* signal, process_id_t sender,
+                                         const struct signal_payload* payload, uint64_t* out_receiver_count,
+                                         uint64_t* out_delivery_count) {
+	return signal_send_internal(
+		signal, sender, payload, SIGNAL_SEND_FLAG_COALESCE, out_receiver_count, out_delivery_count);
+}
+
 enum signal_result signal_send_force(struct signal* signal, process_id_t sender, const struct signal_payload* payload,
                                      uint64_t* out_receiver_count, uint64_t* out_delivery_count) {
-	struct signal_handler_binding* handler;
-	struct signal_wait_binding*    wait;
-	struct user_upcall_request     request;
-	struct signal_message          message;
-	struct irq_state               state;
-	uint64_t                       receiver_count         = 0u;
-	uint64_t                       delivery_count         = 0u;
-	size_t                         waiting_delivery_count = 0u;
-
-	if (out_receiver_count != NULL) *out_receiver_count = 0u;
-	if (out_delivery_count != NULL) *out_delivery_count = 0u;
-	if (signal == NULL || payload == NULL) return SIGNAL_INVALID_ARGUMENTS;
-
-	message = (struct signal_message){
-		.sender  = sender,
-		.payload = *payload,
-	};
-	state = spinlock_lock_irqsave(&signal->lock);
-	if (signal->closing) {
-		spinlock_unlock_irqrestore(&signal->lock, state);
-		return SIGNAL_CLOSED;
-	}
-
-	for (handler = signal->handler_head; handler != NULL; handler = handler->next) {
-		enum user_upcall_result reserve_result;
-
-		receiver_count++;
-		handler->force_reserved = false;
-		if (__atomic_load_n(&handler->target->dying, __ATOMIC_ACQUIRE) != 0u) continue;
-		reserve_result = uthread_upcall_force_reserve(handler->target);
-		if (reserve_result == USER_UPCALL_THREAD_DYING) continue;
-		if (reserve_result != USER_UPCALL_OK) {
-			for (struct signal_handler_binding* rollback = signal->handler_head; rollback != NULL;
-			     rollback                                = rollback->next) {
-				if (!rollback->force_reserved) continue;
-				uthread_upcall_force_cancel(rollback->target);
-				rollback->force_reserved = false;
-			}
-			spinlock_unlock_irqrestore(&signal->lock, state);
-			return SIGNAL_UNAVAILABLE;
-		}
-		handler->force_reserved = true;
-	}
-
-	signal->generation = signal_next_generation(signal->generation);
-	signal->latest     = message;
-	signal->has_value  = true;
-
-	for (handler = signal->handler_head; handler != NULL; handler = handler->next) {
-		enum user_upcall_result commit_result;
-
-		if (!handler->force_reserved) continue;
-		request = (struct user_upcall_request){
-			.origin       = USER_UPCALL_ORIGIN_SIGNAL,
-			.flags        = USER_UPCALL_FLAG_NON_EVICTABLE,
-			.origin_token = (uintptr_t)handler,
-			.entry        = handler->entry,
-			.args =
-				{
-					   (uintptr_t)message.sender,
-					   (uintptr_t)message.payload.args[0],
-					   (uintptr_t)message.payload.args[1],
-					   (uintptr_t)message.payload.args[2],
-					   (uintptr_t)message.payload.args[3],
-					   },
-		};
-		commit_result           = uthread_upcall_force_commit(handler->target, &request);
-		handler->force_reserved = false;
-		if (commit_result != USER_UPCALL_OK) hcf();
-		delivery_count++;
-		signal_queue_handler_wake_locked(signal, handler);
-	}
-
-	for (wait = signal->wait_head; wait != NULL; wait = wait->next) {
-		if (!wait->waiting) continue;
-		receiver_count++;
-		if (__atomic_load_n(&wait->target->dying, __ATOMIC_ACQUIRE) != 0u) continue;
-
-		wait->pending            = message;
-		wait->pending_generation = signal->generation;
-		wait->pending_delivery   = true;
-		wait->waiting            = false;
-		delivery_count++;
-		waiting_delivery_count++;
-	}
-	spinlock_unlock_irqrestore(&signal->lock, state);
-
-	if (waiting_delivery_count != 0u) (void)sched_wake_all(&signal->waiters);
-	signal_wake_upcall_targets(signal);
-	if (out_receiver_count != NULL) *out_receiver_count = receiver_count;
-	if (out_delivery_count != NULL) *out_delivery_count = delivery_count;
-	return SIGNAL_OK;
+	return signal_send_internal(
+		signal, sender, payload, SIGNAL_SEND_INTERNAL_FORCE, out_receiver_count, out_delivery_count);
 }
 
 enum signal_result signal_read(struct signal* signal, struct signal_message* out_message) {

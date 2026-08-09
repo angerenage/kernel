@@ -66,8 +66,8 @@ syscall_result_t syscall_signal_create(uintptr_t arg0, uintptr_t arg1, uintptr_t
 	return syscall_result_ok((uintptr_t)cap);
 }
 
-syscall_result_t syscall_signal_send(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                     uintptr_t arg5) {
+static syscall_result_t syscall_signal_send_internal(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
+                                                     uintptr_t arg4, uintptr_t arg5, uint32_t flags) {
 	struct process*             process;
 	const struct signal_payload payload = {
 		.args = {(uint64_t)arg1, (uint64_t)arg2, (uint64_t)arg3, (uint64_t)arg4},
@@ -82,9 +82,19 @@ syscall_result_t syscall_signal_send(uintptr_t arg0, uintptr_t arg1, uintptr_t a
 		if (result.status != SYSCALL_STATUS_OK) return result;
 	}
 
-	result = kernel_signal_send((cap_id_t)arg0, process_pid(process), &payload, arg5 != 0u ? &response : NULL);
+	result = kernel_signal_send((cap_id_t)arg0, process_pid(process), &payload, flags, arg5 != 0u ? &response : NULL);
 	if (result.status != SYSCALL_STATUS_OK || arg5 == 0u) return result;
 	return syscall_copy_to_user(syscall_current_user_space(), arg5, &response, sizeof(response), 5u);
+}
+
+syscall_result_t syscall_signal_send(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
+                                     uintptr_t arg5) {
+	return syscall_signal_send_internal(arg0, arg1, arg2, arg3, arg4, arg5, SIGNAL_SEND_FLAG_NONE);
+}
+
+syscall_result_t syscall_signal_send_coalesced(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
+                                               uintptr_t arg4, uintptr_t arg5) {
+	return syscall_signal_send_internal(arg0, arg1, arg2, arg3, arg4, arg5, SIGNAL_SEND_FLAG_COALESCE);
 }
 
 syscall_result_t syscall_signal_read(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,

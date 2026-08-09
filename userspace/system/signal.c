@@ -23,7 +23,7 @@ syscall_status_t signal_create(cap_id_t* out_cap) {
 	return SYSCALL_STATUS_OK;
 }
 
-syscall_status_t signal_send(cap_id_t cap, uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3,
+syscall_status_t signal_send(cap_id_t cap, uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint32_t flags,
                              struct signal_send_response* out_response) {
 	syscall_result_t result;
 
@@ -31,14 +31,30 @@ syscall_status_t signal_send(cap_id_t cap, uint64_t arg0, uint64_t arg1, uint64_
 		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(cap);
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	}
-	result = syscall(SYSCALL_SIGNAL_SEND,
-	                 (uintptr_t)cap,
-	                 (uintptr_t)arg0,
-	                 (uintptr_t)arg1,
-	                 (uintptr_t)arg2,
-	                 (uintptr_t)arg3,
-	                 (uintptr_t)out_response);
-	RUNTIME_DIAGNOSTIC_SYSCALL_RESULT(SYSCALL_SIGNAL_SEND, result);
+	if ((flags & ~((uint32_t)SIGNAL_SEND_FLAG_COALESCE)) != 0u) {
+		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(flags);
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	}
+	if ((flags & (uint32_t)SIGNAL_SEND_FLAG_COALESCE) != 0u) {
+		result = syscall(SYSCALL_SIGNAL_SEND_COALESCED,
+		                 (uintptr_t)cap,
+		                 (uintptr_t)arg0,
+		                 (uintptr_t)arg1,
+		                 (uintptr_t)arg2,
+		                 (uintptr_t)arg3,
+		                 (uintptr_t)out_response);
+		RUNTIME_DIAGNOSTIC_SYSCALL_RESULT(SYSCALL_SIGNAL_SEND_COALESCED, result);
+	}
+	else {
+		result = syscall(SYSCALL_SIGNAL_SEND,
+		                 (uintptr_t)cap,
+		                 (uintptr_t)arg0,
+		                 (uintptr_t)arg1,
+		                 (uintptr_t)arg2,
+		                 (uintptr_t)arg3,
+		                 (uintptr_t)out_response);
+		RUNTIME_DIAGNOSTIC_SYSCALL_RESULT(SYSCALL_SIGNAL_SEND, result);
+	}
 	return result.status;
 }
 

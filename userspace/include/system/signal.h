@@ -10,8 +10,8 @@
 /* Create a Signal capability with full synchronous rights. */
 syscall_status_t signal_create(cap_id_t* out_cap);
 
-/* Publish a payload and optionally return receiver and delivery counts. */
-syscall_status_t signal_send(cap_id_t cap, uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3,
+/* Publish a payload with the requested userspace delivery behavior. */
+syscall_status_t signal_send(cap_id_t cap, uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint32_t flags,
                              struct signal_send_response* out_response);
 
 /* Read the remembered message without creating or advancing a synchronous receiver. */

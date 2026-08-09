@@ -25,6 +25,7 @@ enum user_upcall_origin {
 enum user_upcall_flags {
 	USER_UPCALL_FLAG_NONE          = 0u,
 	USER_UPCALL_FLAG_NON_EVICTABLE = 1u << 0,
+	USER_UPCALL_FLAG_COALESCIBLE   = 1u << 1,
 };
 
 /* One userspace entry, opaque arguments, and non-user-visible provenance. */
@@ -83,9 +84,10 @@ void uthread_upcall_state_deinit(struct uthread* thread);
 enum user_upcall_result uthread_upcall_enqueue(struct uthread* thread, const struct user_upcall_request* request);
 
 /*
- * Queue one request, coalescing already-pending requests with the same
- * non-NONE origin and origin token. Unrelated requests keep FIFO order and the
- * replacement is appended as the newest request.
+ * Queue one coalescible request, replacing already-pending coalescible requests
+ * with the same non-NONE origin and origin token. Non-coalescible requests are
+ * never removed. Unrelated requests keep FIFO order and the replacement is
+ * appended as the newest request.
  */
 enum user_upcall_result uthread_upcall_enqueue_latest(struct uthread*                   thread,
                                                       const struct user_upcall_request* request);

@@ -179,16 +179,25 @@ static void kernel_signal_release(struct kernel_signal_reference* reference) {
 }
 
 syscall_result_t kernel_signal_send(cap_id_t cap, process_id_t caller, const struct signal_payload* payload,
-                                    struct signal_send_response* out_response) {
+                                    uint32_t flags, struct signal_send_response* out_response) {
 	struct kernel_signal_reference reference;
 	struct signal_send_response    response = {0};
 	syscall_result_t               result;
 	enum signal_result             signal_result;
 
-	if (payload == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	if (payload == NULL || (flags & ~((uint32_t)SIGNAL_SEND_FLAG_COALESCE)) != 0u) {
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
 	result = kernel_signal_acquire(cap, caller, CAP_SIGNAL, &reference);
 	if (result.status != SYSCALL_STATUS_OK) return result;
-	signal_result = signal_send(reference.signal, caller, payload, &response.receiver_count, &response.delivery_count);
+	if ((flags & (uint32_t)SIGNAL_SEND_FLAG_COALESCE) != 0u) {
+		signal_result = signal_send_coalesced(
+			reference.signal, caller, payload, &response.receiver_count, &response.delivery_count);
+	}
+	else {
+		signal_result =
+			signal_send(reference.signal, caller, payload, &response.receiver_count, &response.delivery_count);
+	}
 	kernel_signal_release(&reference);
 	if (signal_result != SIGNAL_OK) return signal_result_to_syscall(signal_result);
 	if (out_response != NULL) *out_response = response;
