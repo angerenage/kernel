@@ -148,7 +148,17 @@ test_suites = [
 	{
 		'name': 'sched',
 		'sources': files(
-			'core/sched_test.c',
+			'sched/test_support.c',
+			'sched/initialization.c',
+			'sched/dispatch.c',
+			'sched/preemption.c',
+			'sched/placement.c',
+			'sched/statistics.c',
+			'sched/wait_queue.c',
+			'sched/cancellation.c',
+			'sched/sleep_interrupt.c',
+			'sched/run_queue.c',
+			'sched/lifecycle.c',
 		),
 		'suites': ['unit', 'core'],
 	},
