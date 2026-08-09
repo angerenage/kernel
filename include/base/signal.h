@@ -43,12 +43,19 @@ enum signal_handler_flags {
 	SIGNAL_HANDLER_FLAG_ONESHOT = 1u << 0,
 };
 
+/* Flags returned by SIGNAL_OP_READ. */
+enum signal_read_flags {
+	SIGNAL_READ_FLAG_NONE      = 0u,
+	SIGNAL_READ_FLAG_HAS_VALUE = 1u << 0,
+};
+
 /* Control operations routed through the Signal capability with cap_call. */
 enum signal_op {
 	SIGNAL_OP_UNSUBSCRIBE = 0,
 	SIGNAL_OP_DESTROY,
 	SIGNAL_OP_SET_HANDLER,
 	SIGNAL_OP_CLEAR_HANDLER,
+	SIGNAL_OP_READ,
 };
 
 /* Common header for all Signal capability requests. */
@@ -76,6 +83,27 @@ struct signal_set_handler_request {
 /* Request to remove the calling thread's persistent upcall handler. */
 struct signal_clear_handler_request {
 	struct signal_request_header header;
+};
+
+/* Request a diagnostic snapshot through CAP_CALL | CAP_READ. */
+struct signal_read_request {
+	struct signal_request_header header;
+};
+
+/*
+ * Signal state plus queue-wide upcall accounting for the calling uthread.
+ * The upcall counters are intentionally caller-scoped: one uthread queue may
+ * receive requests from multiple Signals and future upcall origins.
+ */
+struct signal_read_response {
+	uint64_t generation;
+	uint64_t handler_count;
+	uint64_t wait_subscription_count;
+	uint64_t blocked_waiter_count;
+	uint64_t caller_upcall_pending_count;
+	uint64_t caller_upcall_dropped_count;
+	uint64_t caller_upcall_capacity;
+	uint64_t flags;
 };
 
 enum signal_result {

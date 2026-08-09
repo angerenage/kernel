@@ -42,6 +42,7 @@ int main(int argc, char** argv) {
 	struct init_ping_response       ping_response;
 	struct init_signal_back_request signal_back_request;
 	struct signal_message           signal_message;
+	struct signal_read_response     signal_read_response;
 	struct signal_send_response     signal_response;
 	cap_id_t                        init_signal_cap;
 	cap_id_t                        loader_signal_cap;
@@ -146,6 +147,23 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 	printf("loader: received Signal upcall from init pid=%llu\n", (unsigned long long)get_signal_response.init_pid);
+
+	status = signal_read_info(loader_signal_cap, &signal_read_response);
+	if (status != SYSCALL_STATUS_OK) {
+		printf("loader: reverse Signal info read failed: %u\n", (unsigned)status);
+		(void)signal_destroy(loader_signal_cap);
+		return 1;
+	}
+	if (signal_read_response.generation != 1u || signal_read_response.handler_count != 0u ||
+	    signal_read_response.wait_subscription_count != 0u || signal_read_response.blocked_waiter_count != 0u ||
+	    signal_read_response.caller_upcall_pending_count != 0u ||
+	    signal_read_response.caller_upcall_dropped_count != 0u || signal_read_response.caller_upcall_capacity == 0u ||
+	    (signal_read_response.flags & SIGNAL_READ_FLAG_HAS_VALUE) == 0u) {
+		printf("loader: invalid reverse Signal info snapshot\n");
+		(void)signal_destroy(loader_signal_cap);
+		return 1;
+	}
+
 	status = signal_destroy(loader_signal_cap);
 	if (status != SYSCALL_STATUS_OK) {
 		printf("loader: reverse Signal destroy failed: %u\n", (unsigned)status);

@@ -17,6 +17,9 @@ syscall_status_t signal_send(cap_id_t cap, uint64_t arg0, uint64_t arg1, uint64_
 /* Read the remembered message without creating or advancing a synchronous receiver. */
 syscall_status_t signal_read(cap_id_t cap, struct signal_message* out_message, bool* out_has_value);
 
+/* Read Signal state and calling-thread upcall accounting through CAP_CALL | CAP_READ. */
+syscall_status_t signal_read_info(cap_id_t cap, struct signal_read_response* out_response);
+
 /* Block until the calling thread receives a new message. */
 syscall_status_t signal_wait(cap_id_t cap, struct signal_message* out_message);
 

@@ -1197,13 +1197,19 @@ Test(signal, kernel_capability_rights_restrict_publication_and_read) {
 		.header  = {.op = SIGNAL_OP_SET_HANDLER},
 		.handler = signal_test_handler,
 	};
-	struct cap_request cap_request;
-	struct capability* control;
-	struct cap_object* object;
-	cap_id_t           sender_cap;
-	cap_id_t           reader_cap;
-	cap_id_t           control_cap;
-	syscall_result_t   result;
+	struct signal_read_request read_request = {
+		.header = {.op = SIGNAL_OP_READ},
+	};
+	struct signal_read_response read_response;
+	struct cap_request          cap_request;
+	struct capability*          control;
+	struct capability*          info;
+	struct cap_object*          object;
+	cap_id_t                    sender_cap;
+	cap_id_t                    reader_cap;
+	cap_id_t                    control_cap;
+	cap_id_t                    info_cap;
+	syscall_result_t            result;
 
 	signal_test_init_heap();
 	capability_init();
@@ -1212,9 +1218,11 @@ Test(signal, kernel_capability_rights_restrict_publication_and_read) {
 	sender_cap  = kernel_signal_grant(signal, SIGNAL_TEST_SENDER, CAP_SIGNAL);
 	reader_cap  = kernel_signal_grant(signal, SIGNAL_TEST_SECOND_SENDER, CAP_READ);
 	control_cap = kernel_signal_grant(signal, SIGNAL_TEST_SENDER, CAP_CALL);
+	info_cap    = kernel_signal_grant(signal, SIGNAL_TEST_SECOND_SENDER, CAP_CALL | CAP_READ);
 	cr_assert_neq(sender_cap, CAP_ID_INVALID);
 	cr_assert_neq(reader_cap, CAP_ID_INVALID);
 	cr_assert_neq(control_cap, CAP_ID_INVALID);
+	cr_assert_neq(info_cap, CAP_ID_INVALID);
 
 	result = kernel_signal_read(sender_cap, SIGNAL_TEST_SENDER, &message);
 	cr_assert_eq(result.status, SYSCALL_STATUS_DENIED, "CAP_SIGNAL must not imply CAP_READ");
@@ -1240,6 +1248,18 @@ Test(signal, kernel_capability_rights_restrict_publication_and_read) {
 	};
 	result = object->handler(&cap_request);
 	cr_assert_eq(result.status, SYSCALL_STATUS_DENIED, "CAP_CALL must not imply the CAP_MAP handler right");
+	cap_request = (struct cap_request){
+		.caller            = SIGNAL_TEST_SENDER,
+		.cap_id            = control_cap,
+		.object_id         = signal_id(signal),
+		.rights            = control->rights,
+		.request           = &read_request,
+		.request_size      = sizeof(read_request),
+		.response          = &read_response,
+		.response_capacity = sizeof(read_response),
+	};
+	result = object->handler(&cap_request);
+	cr_assert_eq(result.status, SYSCALL_STATUS_DENIED, "CAP_CALL must not imply the CAP_READ handler right");
 	cap_object_release(object);
 
 	result = kernel_signal_send(sender_cap, SIGNAL_TEST_SENDER, &payload, SIGNAL_SEND_FLAG_NONE, &response);
@@ -1252,10 +1272,38 @@ Test(signal, kernel_capability_rights_restrict_publication_and_read) {
 	cr_assert_eq(message.sender, SIGNAL_TEST_SENDER);
 	cr_assert_eq(memcmp(&message.payload, &payload, sizeof(payload)), 0);
 
+	info = cap_lookup(info_cap);
+	cr_assert_not_null(info);
+	object = cap_object_acquire(info->cap_object_id);
+	cr_assert_not_null(object);
+	cap_request = (struct cap_request){
+		.caller            = SIGNAL_TEST_SECOND_SENDER,
+		.cap_id            = info_cap,
+		.object_id         = signal_id(signal),
+		.rights            = info->rights,
+		.request           = &read_request,
+		.request_size      = sizeof(read_request),
+		.response          = &read_response,
+		.response_capacity = sizeof(read_response),
+	};
+	result = object->handler(&cap_request);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(result.value, sizeof(read_response));
+	cr_assert_eq(read_response.generation, 1u);
+	cr_assert_eq(read_response.handler_count, 0u);
+	cr_assert_eq(read_response.wait_subscription_count, 0u);
+	cr_assert_eq(read_response.blocked_waiter_count, 0u);
+	cr_assert_eq(read_response.caller_upcall_pending_count, 0u);
+	cr_assert_eq(read_response.caller_upcall_dropped_count, 0u);
+	cr_assert_eq(read_response.caller_upcall_capacity, USER_UPCALL_QUEUE_CAPACITY);
+	cr_assert((read_response.flags & SIGNAL_READ_FLAG_HAS_VALUE) != 0u);
+	cap_object_release(object);
+
 	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
 	cr_assert(cap_destroy_by_id(sender_cap));
 	cr_assert(cap_destroy_by_id(reader_cap));
 	cr_assert(cap_destroy_by_id(control_cap));
+	cr_assert(cap_destroy_by_id(info_cap));
 }
 
 Test(signal, invalid_handler_flags_are_rejected) {

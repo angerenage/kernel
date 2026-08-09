@@ -5,6 +5,7 @@
 #include <base/syscall.h>
 #include <core/capability.h>
 #include <core/signal.h>
+#include <core/user_upcall.h>
 #include <core/uthread.h>
 #include <kernel/capability.h>
 #include <string.h>
@@ -72,6 +73,30 @@ static syscall_result_t signal_clear_handler(const struct cap_request* req, stru
 	return signal_result_to_syscall(signal_unregister_handler(signal, current));
 }
 
+static syscall_result_t signal_read_info(const struct cap_request* req, struct signal* signal) {
+	struct signal_read_response response;
+	struct uthread*             current;
+
+	if (req->request_size != sizeof(struct signal_read_request) || req->response == NULL ||
+	    req->response_capacity < sizeof(response)) {
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
+
+	current  = uthread_current();
+	response = (struct signal_read_response){
+		.generation                  = signal_generation(signal),
+		.handler_count               = (uint64_t)signal_handler_count(signal),
+		.wait_subscription_count     = (uint64_t)signal_wait_subscription_count(signal),
+		.blocked_waiter_count        = (uint64_t)signal_blocked_waiter_count(signal),
+		.caller_upcall_pending_count = (uint64_t)uthread_upcall_pending_count(current),
+		.caller_upcall_dropped_count = uthread_upcall_dropped_count(current),
+		.caller_upcall_capacity      = USER_UPCALL_QUEUE_CAPACITY,
+		.flags                       = signal_has_value(signal) ? SIGNAL_READ_FLAG_HAS_VALUE : SIGNAL_READ_FLAG_NONE,
+	};
+	memcpy(req->response, &response, sizeof(response));
+	return syscall_result_ok(sizeof(response));
+}
+
 static syscall_result_t signal_handler(const struct cap_request* req) {
 	struct signal*   signal;
 	enum signal_op   op;
@@ -98,6 +123,9 @@ static syscall_result_t signal_handler(const struct cap_request* req) {
 	case SIGNAL_OP_CLEAR_HANDLER:
 		required_rights = CAP_MAP;
 		break;
+	case SIGNAL_OP_READ:
+		required_rights = CAP_READ;
+		break;
 	default:
 		signal_release(signal);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -119,6 +147,9 @@ static syscall_result_t signal_handler(const struct cap_request* req) {
 		break;
 	case SIGNAL_OP_CLEAR_HANDLER:
 		result = signal_clear_handler(req, signal);
+		break;
+	case SIGNAL_OP_READ:
+		result = signal_read_info(req, signal);
 		break;
 	default:
 		result = syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);

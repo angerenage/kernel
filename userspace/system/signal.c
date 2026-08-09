@@ -79,6 +79,31 @@ syscall_status_t signal_read(cap_id_t cap, struct signal_message* out_message, b
 	return result.status;
 }
 
+syscall_status_t signal_read_info(cap_id_t cap, struct signal_read_response* out_response) {
+	const struct signal_read_request request = {
+		.header = {.op = SIGNAL_OP_READ},
+	};
+	syscall_result_t result;
+
+	if (cap == CAP_ID_INVALID) {
+		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(cap);
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	}
+	if (out_response == NULL) {
+		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(out_response);
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	}
+
+	result = cap_call_syscall(cap, &request, sizeof(request), out_response, sizeof(*out_response));
+	RUNTIME_DIAGNOSTIC_OPERATION_RESULT(SIGNAL_OP_READ, result);
+	if (result.status != SYSCALL_STATUS_OK) return result.status;
+	if (result.value != sizeof(*out_response)) {
+		RUNTIME_DIAGNOSTIC_FAILED(SIGNAL_OP_READ);
+		return SYSCALL_STATUS_FAILED;
+	}
+	return SYSCALL_STATUS_OK;
+}
+
 syscall_status_t signal_wait(cap_id_t cap, struct signal_message* out_message) {
 	syscall_result_t result;
 
