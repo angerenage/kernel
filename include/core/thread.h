@@ -263,6 +263,9 @@ bool run_queue_enqueue(struct run_queue* queue, struct thread* thread);
 /* Reposition an already queued thread after its effective priority changes. */
 bool run_queue_requeue(struct run_queue* queue, struct thread* thread);
 
+/* Update an already queued thread's priority and reposition it atomically. */
+bool run_queue_update_priority(struct run_queue* queue, struct thread* thread, int32_t priority);
+
 /* Remove and return the head thread, or NULL when the queue is empty. */
 struct thread* run_queue_dequeue(struct run_queue* queue);
 

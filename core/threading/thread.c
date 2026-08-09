@@ -239,10 +239,16 @@ bool thread_request_cancel(struct thread* thread) {
 }
 
 void thread_set_cancel_enabled(struct thread* thread, bool enabled) {
+	uint32_t previous_flags;
+
 	if (thread == NULL) return;
 
 	if (enabled) {
-		(void)__atomic_fetch_and(&thread->flags, ~(uint32_t)THREAD_FLAG_CANCEL_DISABLED, __ATOMIC_ACQ_REL);
+		previous_flags = __atomic_fetch_and(&thread->flags, ~(uint32_t)THREAD_FLAG_CANCEL_DISABLED, __ATOMIC_ACQ_REL);
+		if ((previous_flags & (THREAD_FLAG_CANCEL_DISABLED | THREAD_FLAG_CANCEL_PENDING)) ==
+		    (THREAD_FLAG_CANCEL_DISABLED | THREAD_FLAG_CANCEL_PENDING)) {
+			sched_cancel_thread(thread);
+		}
 	}
 	else {
 		(void)__atomic_fetch_or(&thread->flags, (uint32_t)THREAD_FLAG_CANCEL_DISABLED, __ATOMIC_ACQ_REL);
@@ -435,6 +441,30 @@ bool run_queue_requeue(struct run_queue* queue, struct thread* thread) {
 		spinlock_unlock_irqrestore(&queue->lock, state);
 		return false;
 	}
+	run_queue_insert_locked(queue, thread);
+	spinlock_unlock_irqrestore(&queue->lock, state);
+	return true;
+}
+
+bool run_queue_update_priority(struct run_queue* queue, struct thread* thread, int32_t priority) {
+	struct irq_state state;
+
+	if (queue == NULL || thread == NULL) return false;
+
+	state = spinlock_lock_irqsave(&queue->lock);
+	if (thread->effective_priority == priority) {
+		spinlock_unlock_irqrestore(&queue->lock, state);
+		return true;
+	}
+	if (!run_queue_remove_locked(queue, thread)) {
+		/* The scheduler may have dequeued the thread after the caller observed
+		 * THREAD_FLAG_QUEUED. The queue no longer needs reordering, but the
+		 * requested priority change must still take effect. */
+		thread->effective_priority = priority;
+		spinlock_unlock_irqrestore(&queue->lock, state);
+		return false;
+	}
+	thread->effective_priority = priority;
 	run_queue_insert_locked(queue, thread);
 	spinlock_unlock_irqrestore(&queue->lock, state);
 	return true;
