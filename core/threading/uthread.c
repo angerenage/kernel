@@ -350,10 +350,10 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 		uthread_upcall_state_deinit(thread);
 		return UTHREAD_START_NO_MEMORY;
 	}
-	uthread_upcall_state_init(thread);
 	id_result = id_table_alloc(&uthread_table, thread, &id);
 	if (id_result != ID_TABLE_OK) {
 		uthread_release_name(thread);
+		uthread_upcall_state_deinit(thread);
 		return id_result == ID_TABLE_NO_MEMORY ? UTHREAD_START_NO_MEMORY : UTHREAD_START_ID_EXHAUSTED;
 	}
 	thread->id = id;
