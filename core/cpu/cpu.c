@@ -12,10 +12,22 @@ static struct cpu_topology topology;
 static struct spinlock     cpu_topology_lock =
 	SPINLOCK_INIT_CLASS("cpu_topology_lock", SPINLOCK_ORDER_CPU_TOPOLOGY, SPINLOCK_FLAG_IRQSAVE);
 
+static bool cpu_is_installed_locked(const struct cpu* cpu) {
+	if (cpu == NULL || topology.cpus == NULL) return false;
+
+	for (size_t i = 0; i < topology.cpu_count; i++) {
+		if (cpu == &topology.cpus[i]) return true;
+	}
+	return false;
+}
+
 bool cpu_topology_init(const struct cpu_init_info* init_info, size_t cpu_count, size_t bsp_index) {
 	struct irq_state state;
 
 	if (init_info == NULL || cpu_count == 0u || cpu_count > CPU_MAX_COUNT || bsp_index >= cpu_count) return false;
+	for (size_t i = 0; i < cpu_count; i++) {
+		if (init_info[i].index != i) return false;
+	}
 
 	state = spinlock_lock_irqsave(&cpu_topology_lock);
 	for (size_t i = 0; i < cpu_count; i++) {
@@ -109,9 +121,11 @@ void cpu_bind_current(struct cpu* cpu) {
 bool cpu_set_state(struct cpu* cpu, enum cpu_state state) {
 	struct irq_state irq_state;
 
-	if (!cpu) return false;
-
 	irq_state = spinlock_lock_irqsave(&cpu_topology_lock);
+	if (!cpu_is_installed_locked(cpu)) {
+		spinlock_unlock_irqrestore(&cpu_topology_lock, irq_state);
+		return false;
+	}
 	if (cpu->state != CPU_STATE_ONLINE && state == CPU_STATE_ONLINE) topology.online_count++;
 	if (cpu->state == CPU_STATE_ONLINE && state != CPU_STATE_ONLINE && topology.online_count != 0u)
 		topology.online_count--;
