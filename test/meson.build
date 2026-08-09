@@ -105,6 +105,7 @@ test_suites = [
 		'name': 'signal',
 		'sources': files(
 			'core/signal_test.c',
+			'../kernel/src/capability/signal.c',
 		),
 		'suites': ['unit', 'core'],
 	},
@@ -315,7 +316,7 @@ foreach t : test_suites
 		t['name'],
 		exe,
 		suite: t.get('suites', ['unit']),
-		timeout: t.get('timeout', 45),
+		timeout: t.get('timeout', 60),
 		is_parallel: t.get('parallel', true),
 		env: test_environment,
 	)

@@ -1,4 +1,5 @@
 #include <base/heap.h>
+#include <core/capability.h>
 #include <core/cpu.h>
 #include <core/pmm.h>
 #include <core/sched.h>
@@ -14,6 +15,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "../../kernel/src/capability/signal.h"
 #include "../mocks/hal/cpu_mock.h"
 
 #define KiB(x) ((size_t)(x) * 1024u)
@@ -60,6 +62,9 @@ static struct thread*        signal_test_sender;
 static struct signal_payload signal_test_first_payload;
 static struct signal_payload signal_test_second_payload;
 static bool                  signal_test_send_twice;
+static bool                  signal_test_force_retry;
+static struct uthread*       signal_test_force_blocked_handler;
+static uintptr_t             signal_test_force_purge_token;
 static uint64_t              signal_test_first_receivers;
 static uint64_t              signal_test_first_deliveries;
 static uint64_t              signal_test_second_receivers;
@@ -99,17 +104,20 @@ static void signal_test_init_bound_bootstrap_cpu(void) {
 static void signal_test_reset_scheduler_state(void) {
 	irq_enable_local();
 	hal_cpu_mock_set_context_switch_hook(NULL);
-	signal_test_hook_active       = false;
-	signal_test_hook_runs         = 0u;
-	signal_test_signal            = NULL;
-	signal_test_sender            = NULL;
-	signal_test_first_payload     = (struct signal_payload){0};
-	signal_test_second_payload    = (struct signal_payload){0};
-	signal_test_send_twice        = false;
-	signal_test_first_receivers   = 0u;
-	signal_test_first_deliveries  = 0u;
-	signal_test_second_receivers  = 0u;
-	signal_test_second_deliveries = 0u;
+	signal_test_hook_active           = false;
+	signal_test_hook_runs             = 0u;
+	signal_test_signal                = NULL;
+	signal_test_sender                = NULL;
+	signal_test_first_payload         = (struct signal_payload){0};
+	signal_test_second_payload        = (struct signal_payload){0};
+	signal_test_send_twice            = false;
+	signal_test_force_retry           = false;
+	signal_test_force_blocked_handler = NULL;
+	signal_test_force_purge_token     = 0u;
+	signal_test_first_receivers       = 0u;
+	signal_test_first_deliveries      = 0u;
+	signal_test_second_receivers      = 0u;
+	signal_test_second_deliveries     = 0u;
 	hal_cpu_local_bind(NULL);
 }
 
@@ -163,19 +171,44 @@ static void signal_test_send_context_switch_hook(struct thread_context* current,
 	signal_test_hook_active = true;
 	signal_test_hook_runs++;
 	cr_assert_eq(sched_current_thread(), signal_test_sender, "sender should run while the receiver is blocked");
-	cr_assert_eq(signal_send(signal_test_signal,
-	                         SIGNAL_TEST_SENDER,
-	                         &signal_test_first_payload,
-	                         &signal_test_first_receivers,
-	                         &signal_test_first_deliveries),
-	             SIGNAL_OK);
-	if (signal_test_send_twice) {
-		cr_assert_eq(signal_send(signal_test_signal,
-		                         SIGNAL_TEST_SECOND_SENDER,
-		                         &signal_test_second_payload,
-		                         &signal_test_second_receivers,
-		                         &signal_test_second_deliveries),
+	if (signal_test_force_retry) {
+		cr_assert_not_null(signal_test_force_blocked_handler);
+		cr_assert_neq(signal_test_force_purge_token, 0u);
+		cr_assert_eq(signal_send_force(signal_test_signal,
+		                               SIGNAL_TEST_SENDER,
+		                               &signal_test_first_payload,
+		                               &signal_test_first_receivers,
+		                               &signal_test_first_deliveries),
+		             SIGNAL_UNAVAILABLE);
+		cr_assert_eq(signal_test_first_receivers, 0u);
+		cr_assert_eq(signal_test_first_deliveries, 0u);
+		cr_assert_eq(signal_generation(signal_test_signal), 0u);
+		cr_assert_eq(signal_blocked_waiter_count(signal_test_signal), 1u);
+		cr_assert_eq(uthread_upcall_purge(
+						 signal_test_force_blocked_handler, USER_UPCALL_ORIGIN_SIGNAL, signal_test_force_purge_token),
+		             1u);
+		cr_assert_eq(signal_send_force(signal_test_signal,
+		                               SIGNAL_TEST_SECOND_SENDER,
+		                               &signal_test_second_payload,
+		                               &signal_test_second_receivers,
+		                               &signal_test_second_deliveries),
 		             SIGNAL_OK);
+	}
+	else {
+		cr_assert_eq(signal_send(signal_test_signal,
+		                         SIGNAL_TEST_SENDER,
+		                         &signal_test_first_payload,
+		                         &signal_test_first_receivers,
+		                         &signal_test_first_deliveries),
+		             SIGNAL_OK);
+		if (signal_test_send_twice) {
+			cr_assert_eq(signal_send(signal_test_signal,
+			                         SIGNAL_TEST_SECOND_SENDER,
+			                         &signal_test_second_payload,
+			                         &signal_test_second_receivers,
+			                         &signal_test_second_deliveries),
+			             SIGNAL_OK);
+		}
 	}
 	sched_yield();
 	signal_test_hook_active = false;
@@ -940,6 +973,289 @@ Test(signal, forced_oneshot_is_protected_and_survives_detach) {
 	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
 	cr_assert_eq(uthread_upcall_pending_count(&receiver), USER_UPCALL_QUEUE_CAPACITY);
 	signal_test_deinit_uthread(&receiver);
+}
+
+Test(signal, forced_preflight_failure_leaves_blocked_waiter_untouched) {
+	const struct thread_create_params sender_params = {
+		.name              = "signal_force_sender",
+		.entry             = signal_test_thread_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x4c0000u,
+		.kernel_stack_top  = 0x4c4000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	const uintptr_t            purge_token = 0xabcdu;
+	struct signal*             signal;
+	struct uthread             receiver;
+	struct uthread             blocked_handler;
+	struct thread              sender;
+	struct signal_message      received;
+	struct user_upcall_request protected = {
+		.flags = USER_UPCALL_FLAG_NON_EVICTABLE,
+		.entry = 0x3000u,
+	};
+
+	signal_test_init_heap();
+	signal_test_init_bound_bootstrap_cpu();
+	signal_test_init_sched_uthread(&receiver, "signal_force_waiter", 0x4d0000u, 0x4d4000u, 0x9000u);
+	signal_test_init_handler_uthread(&blocked_handler, 0xa000u);
+	cr_assert(thread_init(&sender, &sender_params), "sender thread_init failed");
+	cr_assert(sched_make_runnable(&sender), "sender should become runnable");
+
+	signal = signal_create();
+	cr_assert_not_null(signal);
+	cr_assert_eq(signal_register_handler(signal, &blocked_handler, signal_test_handler, SIGNAL_HANDLER_FLAG_NONE),
+	             SIGNAL_OK);
+	protected.origin       = USER_UPCALL_ORIGIN_SIGNAL;
+	protected.origin_token = purge_token;
+	protected.args[0]      = 1u;
+	cr_assert_eq(uthread_upcall_enqueue(&blocked_handler, &protected), USER_UPCALL_OK);
+	protected.origin       = USER_UPCALL_ORIGIN_NONE;
+	protected.origin_token = 0u;
+	for (size_t i = 1u; i < USER_UPCALL_QUEUE_CAPACITY; i++) {
+		protected.args[0] = i + 1u;
+		cr_assert_eq(uthread_upcall_enqueue(&blocked_handler, &protected), USER_UPCALL_OK);
+	}
+
+	signal_test_signal        = signal;
+	signal_test_sender        = &sender;
+	signal_test_first_payload = (struct signal_payload){
+		.args = {10u, 20u, 30u, 40u}
+    };
+	signal_test_second_payload = (struct signal_payload){
+		.args = {50u, 60u, 70u, 80u}
+    };
+	signal_test_force_retry           = true;
+	signal_test_force_blocked_handler = &blocked_handler;
+	signal_test_force_purge_token     = purge_token;
+	hal_cpu_mock_set_context_switch_hook(signal_test_send_context_switch_hook);
+
+	sched_set_current(cpu_current(), &receiver.thread);
+	cr_assert_eq(signal_wait(signal, &received), SIGNAL_OK);
+	cr_assert_eq(signal_test_hook_runs, 1u);
+	cr_assert_eq(signal_test_first_receivers, 0u);
+	cr_assert_eq(signal_test_first_deliveries, 0u);
+	cr_assert_eq(signal_test_second_receivers, 2u);
+	cr_assert_eq(signal_test_second_deliveries, 2u);
+	cr_assert_eq(received.sender, SIGNAL_TEST_SECOND_SENDER);
+	cr_assert_eq(memcmp(&received.payload, &signal_test_second_payload, sizeof(received.payload)), 0);
+	cr_assert_eq(signal_generation(signal), 1u);
+	cr_assert_eq(signal_blocked_waiter_count(signal), 0u);
+	cr_assert_eq(uthread_upcall_pending_count(&blocked_handler), USER_UPCALL_QUEUE_CAPACITY);
+	cr_assert_eq(uthread_upcall_dropped_count(&blocked_handler), 0u);
+
+	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
+	signal_test_deinit_uthread(&blocked_handler);
+	signal_test_deinit_uthread(&receiver);
+	signal_test_reset_scheduler_state();
+}
+
+Test(signal, failed_forced_oneshot_preflight_keeps_handler_armed_for_retry) {
+	const uintptr_t       purge_token = 0xbeefu;
+	struct signal*        signal;
+	struct uthread        receiver;
+	struct signal_payload payload = {
+		.args = {1u, 2u, 3u, 4u}
+    };
+	struct user_upcall_request protected = {
+		.flags = USER_UPCALL_FLAG_NON_EVICTABLE,
+		.entry = 0x3000u,
+	};
+	uint64_t receiver_count = UINT64_MAX;
+	uint64_t delivery_count = UINT64_MAX;
+	size_t   tail;
+
+	signal_test_init_heap();
+	signal = signal_create();
+	cr_assert_not_null(signal);
+	signal_test_init_handler_uthread(&receiver, 0x9000u);
+	cr_assert_eq(signal_register_handler(signal, &receiver, signal_test_handler, SIGNAL_HANDLER_FLAG_ONESHOT),
+	             SIGNAL_OK);
+	protected.origin       = USER_UPCALL_ORIGIN_SIGNAL;
+	protected.origin_token = purge_token;
+	cr_assert_eq(uthread_upcall_enqueue(&receiver, &protected), USER_UPCALL_OK);
+	protected.origin       = USER_UPCALL_ORIGIN_NONE;
+	protected.origin_token = 0u;
+	for (size_t i = 1u; i < USER_UPCALL_QUEUE_CAPACITY; i++) {
+		protected.args[0] = i;
+		cr_assert_eq(uthread_upcall_enqueue(&receiver, &protected), USER_UPCALL_OK);
+	}
+
+	cr_assert_eq(signal_send_force(signal, SIGNAL_TEST_SENDER, &payload, &receiver_count, &delivery_count),
+	             SIGNAL_UNAVAILABLE);
+	cr_assert_eq(receiver_count, 0u);
+	cr_assert_eq(delivery_count, 0u);
+	cr_assert_eq(signal_handler_count(signal), 1u);
+	cr_assert_eq(signal_generation(signal), 0u);
+	cr_assert_eq(__atomic_load_n(&receiver.reference_count, __ATOMIC_ACQUIRE), 2u);
+	cr_assert_eq(uthread_upcall_dropped_count(&receiver), 0u);
+	cr_assert_eq(uthread_upcall_purge(&receiver, USER_UPCALL_ORIGIN_SIGNAL, purge_token), 1u);
+
+	payload.args[0] = 99u;
+	cr_assert_eq(signal_send_force(signal, SIGNAL_TEST_SECOND_SENDER, &payload, &receiver_count, &delivery_count),
+	             SIGNAL_OK);
+	cr_assert_eq(receiver_count, 1u);
+	cr_assert_eq(delivery_count, 1u);
+	cr_assert_eq(signal_handler_count(signal), 0u);
+	cr_assert_eq(signal_generation(signal), 1u);
+	cr_assert_eq(uthread_upcall_pending_count(&receiver), USER_UPCALL_QUEUE_CAPACITY);
+	tail = (receiver.upcall.head + receiver.upcall.count - 1u) % USER_UPCALL_QUEUE_CAPACITY;
+	cr_assert_eq(receiver.upcall.pending[tail].origin, USER_UPCALL_ORIGIN_NONE);
+	cr_assert_eq(receiver.upcall.pending[tail].args[0], SIGNAL_TEST_SECOND_SENDER);
+	cr_assert_eq(receiver.upcall.pending[tail].args[1], 99u);
+	cr_assert((receiver.upcall.pending[tail].flags & USER_UPCALL_FLAG_NON_EVICTABLE) != 0u);
+
+	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
+	cr_assert_eq(__atomic_load_n(&receiver.reference_count, __ATOMIC_ACQUIRE), 1u);
+	cr_assert_eq(uthread_upcall_pending_count(&receiver), USER_UPCALL_QUEUE_CAPACITY);
+	signal_test_deinit_uthread(&receiver);
+}
+
+Test(signal, thread_cleanup_reclaims_retired_oneshot_without_purging_admitted_delivery) {
+	struct signal*        signal;
+	struct uthread        receiver;
+	struct signal_payload payload = {
+		.args = {7u, 8u, 9u, 10u}
+    };
+
+	signal_test_init_heap();
+	signal = signal_create();
+	cr_assert_not_null(signal);
+	signal_test_init_handler_uthread(&receiver, 0x9000u);
+	cr_assert_eq(signal_register_handler(signal, &receiver, signal_test_handler, SIGNAL_HANDLER_FLAG_ONESHOT),
+	             SIGNAL_OK);
+	cr_assert_eq(signal_send_force(signal, SIGNAL_TEST_SENDER, &payload, NULL, NULL), SIGNAL_OK);
+	cr_assert_eq(signal_handler_count(signal), 0u);
+	cr_assert_eq(__atomic_load_n(&receiver.reference_count, __ATOMIC_ACQUIRE), 2u);
+	cr_assert_eq(uthread_upcall_pending_count(&receiver), 1u);
+
+	signal_unregister_thread_receivers(&receiver);
+	cr_assert_eq(__atomic_load_n(&receiver.reference_count, __ATOMIC_ACQUIRE), 1u);
+	cr_assert_eq(uthread_upcall_pending_count(&receiver), 1u);
+	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].origin, USER_UPCALL_ORIGIN_NONE);
+
+	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
+	cr_assert_eq(uthread_upcall_pending_count(&receiver), 1u);
+	signal_test_deinit_uthread(&receiver);
+}
+
+Test(signal, rearmed_oneshot_binding_can_change_entry_and_become_persistent) {
+	struct signal*        signal;
+	struct uthread        receiver;
+	struct signal_payload first = {
+		.args = {1u, 2u, 3u, 4u}
+    };
+	struct signal_payload second = {
+		.args = {5u, 6u, 7u, 8u}
+    };
+	size_t second_index;
+
+	signal_test_init_heap();
+	signal = signal_create();
+	cr_assert_not_null(signal);
+	signal_test_init_handler_uthread(&receiver, 0x9000u);
+	cr_assert_eq(signal_register_handler(signal, &receiver, signal_test_handler, SIGNAL_HANDLER_FLAG_ONESHOT),
+	             SIGNAL_OK);
+	cr_assert_eq(signal_send(signal, SIGNAL_TEST_SENDER, &first, NULL, NULL), SIGNAL_OK);
+	cr_assert_eq(signal_handler_count(signal), 0u);
+
+	cr_assert_eq(signal_register_handler(signal, &receiver, signal_test_replacement_handler, SIGNAL_HANDLER_FLAG_NONE),
+	             SIGNAL_OK);
+	cr_assert_eq(signal_handler_count(signal), 1u);
+	cr_assert_eq(__atomic_load_n(&receiver.reference_count, __ATOMIC_ACQUIRE), 2u);
+	cr_assert_eq(signal_send(signal, SIGNAL_TEST_SECOND_SENDER, &second, NULL, NULL), SIGNAL_OK);
+	cr_assert_eq(uthread_upcall_pending_count(&receiver), 2u);
+	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].origin, USER_UPCALL_ORIGIN_NONE);
+	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].entry, (uintptr_t)signal_test_handler);
+	second_index = (receiver.upcall.head + 1u) % USER_UPCALL_QUEUE_CAPACITY;
+	cr_assert_eq(receiver.upcall.pending[second_index].origin, USER_UPCALL_ORIGIN_SIGNAL);
+	cr_assert_neq(receiver.upcall.pending[second_index].origin_token, 0u);
+	cr_assert_eq(receiver.upcall.pending[second_index].entry, (uintptr_t)signal_test_replacement_handler);
+	cr_assert_eq(receiver.upcall.pending[second_index].flags & USER_UPCALL_FLAG_NON_EVICTABLE, 0u);
+
+	cr_assert_eq(signal_unregister_handler(signal, &receiver), SIGNAL_OK);
+	cr_assert_eq(__atomic_load_n(&receiver.reference_count, __ATOMIC_ACQUIRE), 1u);
+	cr_assert_eq(uthread_upcall_pending_count(&receiver),
+	             1u,
+	             "clearing the rearmed persistent handler must not purge the admitted one-shot");
+	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].entry, (uintptr_t)signal_test_handler);
+
+	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
+	cr_assert_eq(uthread_upcall_pending_count(&receiver), 1u);
+	signal_test_deinit_uthread(&receiver);
+}
+
+Test(signal, kernel_capability_rights_restrict_publication_and_read) {
+	struct signal*        signal;
+	struct signal_payload payload = {
+		.args = {12u, 34u, 56u, 78u}
+    };
+	struct signal_message             message;
+	struct signal_send_response       response;
+	struct signal_set_handler_request set_handler_request = {
+		.header  = {.op = SIGNAL_OP_SET_HANDLER},
+		.handler = signal_test_handler,
+	};
+	struct cap_request cap_request;
+	struct capability* control;
+	struct cap_object* object;
+	cap_id_t           sender_cap;
+	cap_id_t           reader_cap;
+	cap_id_t           control_cap;
+	syscall_result_t   result;
+
+	signal_test_init_heap();
+	capability_init();
+	signal = signal_create();
+	cr_assert_not_null(signal);
+	sender_cap  = kernel_signal_grant(signal, SIGNAL_TEST_SENDER, CAP_SIGNAL);
+	reader_cap  = kernel_signal_grant(signal, SIGNAL_TEST_SECOND_SENDER, CAP_READ);
+	control_cap = kernel_signal_grant(signal, SIGNAL_TEST_SENDER, CAP_CALL);
+	cr_assert_neq(sender_cap, CAP_ID_INVALID);
+	cr_assert_neq(reader_cap, CAP_ID_INVALID);
+	cr_assert_neq(control_cap, CAP_ID_INVALID);
+
+	result = kernel_signal_read(sender_cap, SIGNAL_TEST_SENDER, &message);
+	cr_assert_eq(result.status, SYSCALL_STATUS_DENIED, "CAP_SIGNAL must not imply CAP_READ");
+	result = kernel_signal_try_wait(sender_cap, SIGNAL_TEST_SENDER, &message);
+	cr_assert_eq(result.status, SYSCALL_STATUS_DENIED, "CAP_SIGNAL must not imply CAP_WAIT");
+	result = kernel_signal_send(reader_cap, SIGNAL_TEST_SECOND_SENDER, &payload, SIGNAL_SEND_FLAG_NONE, &response);
+	cr_assert_eq(result.status, SYSCALL_STATUS_DENIED, "CAP_READ must not imply CAP_SIGNAL");
+	result = kernel_signal_send(sender_cap, SIGNAL_TEST_SECOND_SENDER, &payload, SIGNAL_SEND_FLAG_NONE, &response);
+	cr_assert_eq(result.status, SYSCALL_STATUS_DENIED, "a capability must remain bound to its recipient PID");
+
+	control = cap_lookup(control_cap);
+	cr_assert_not_null(control);
+	object = cap_object_acquire(control->cap_object_id);
+	cr_assert_not_null(object);
+	cr_assert_not_null(object->handler);
+	cap_request = (struct cap_request){
+		.caller       = SIGNAL_TEST_SENDER,
+		.cap_id       = control_cap,
+		.object_id    = signal_id(signal),
+		.rights       = control->rights,
+		.request      = &set_handler_request,
+		.request_size = sizeof(set_handler_request),
+	};
+	result = object->handler(&cap_request);
+	cr_assert_eq(result.status, SYSCALL_STATUS_DENIED, "CAP_CALL must not imply the CAP_MAP handler right");
+	cap_object_release(object);
+
+	result = kernel_signal_send(sender_cap, SIGNAL_TEST_SENDER, &payload, SIGNAL_SEND_FLAG_NONE, &response);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(response.receiver_count, 0u);
+	cr_assert_eq(response.delivery_count, 0u);
+	result = kernel_signal_read(reader_cap, SIGNAL_TEST_SECOND_SENDER, &message);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(result.value, 1u);
+	cr_assert_eq(message.sender, SIGNAL_TEST_SENDER);
+	cr_assert_eq(memcmp(&message.payload, &payload, sizeof(payload)), 0);
+
+	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
+	cr_assert(cap_destroy_by_id(sender_cap));
+	cr_assert(cap_destroy_by_id(reader_cap));
+	cr_assert(cap_destroy_by_id(control_cap));
 }
 
 Test(signal, invalid_handler_flags_are_rejected) {
