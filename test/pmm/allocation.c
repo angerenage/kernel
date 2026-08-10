@@ -1,4 +1,4 @@
-#include "pmm_test.h"
+#include "test_support.h"
 
 Test(pmm, allocates_every_free_page_and_reuses_freed_page) {
 	_Alignas(4096) uint8_t arena[KiB(256)];
@@ -42,4 +42,17 @@ Test(pmm, allocates_every_free_page_and_reuses_freed_page) {
 		cr_assert(pmm_alloc_pages(1, &reused), "pmm_alloc_pages failed after free");
 		cr_assert_eq(reused, first_page, "allocator did not reuse the freed page first");
 	}
+}
+
+Test(pmm, failed_allocation_clears_output_without_changing_accounting) {
+	_Alignas(PMM_PAGE_SIZE) uint8_t arena[KiB(256)];
+	uintptr_t                       phys = (uintptr_t)-1;
+	size_t                          initial_free;
+
+	init_test_pmm(arena, sizeof(arena));
+	initial_free = pmm_free_page_count();
+
+	cr_assert_not(pmm_alloc_pages(initial_free + 1u, &phys), "oversized allocation must fail");
+	cr_assert_eq(phys, 0u, "failed allocation must clear its output address");
+	cr_assert_eq(pmm_free_page_count(), initial_free, "failed allocation must leave free-page accounting unchanged");
 }

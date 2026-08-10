@@ -1,5 +1,5 @@
 #include "../thread_test.h"
-#include "pmm_test.h"
+#include "test_support.h"
 
 #define PMM_THREAD_COUNT 4u
 #define PMM_BATCH_PAGES 2u

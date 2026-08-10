@@ -1,4 +1,4 @@
-#include "pmm_test.h"
+#include "test_support.h"
 
 Test(pmm, allocates_and_frees_contiguous_runs) {
 	_Alignas(4096) uint8_t arena[KiB(256)];

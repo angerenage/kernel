@@ -230,9 +230,11 @@ test_suites = [
 	{
 		'name': 'pmm',
 		'sources': files(
-			'pmm/pmm_test.c',
-			'pmm/basic.c',
+			'pmm/test_support.c',
+			'pmm/allocation.c',
 			'pmm/contiguous.c',
+			'pmm/memory_map.c',
+			'pmm/free.c',
 			'pmm/concurrency.c',
 		),
 		'suites': ['unit', 'memory'],

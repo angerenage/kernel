@@ -1,4 +1,4 @@
-#include "pmm_test.h"
+#include "test_support.h"
 
 bool phys_in_range(uintptr_t phys, uintptr_t base, size_t length) {
 	return phys >= base && phys < base + length;
