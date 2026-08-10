@@ -14,7 +14,7 @@ static struct address_space kernel_address_space = {
 };
 
 static inline size_t bitmap_word_count(size_t page_count) {
-	return (page_count + 63u) / 64u;
+	return page_count / 64u + ((page_count % 64u) != 0u ? 1u : 0u);
 }
 
 static inline void* hhdm_phys_to_virt(uintptr_t phys) {
@@ -51,68 +51,57 @@ static void address_space_reset_locked(struct address_space* space) {
 
 bool address_space_init(struct address_space* space, uintptr_t base, size_t page_count) {
 	uint64_t  span;
+	uint64_t  window_end;
 	uint64_t  bitmap_span;
 	size_t    words;
 	size_t    bitmap_bytes;
 	size_t    bitmap_pages;
 	uintptr_t bitmap_phys = 0;
+	uintptr_t old_bitmap_phys;
+	size_t    old_bitmap_pages;
+	bool      had_old_bitmap;
 
 	if (space == NULL) return false;
+	if ((base & (PMM_PAGE_SIZE - 1u)) != 0 || page_count == 0u) return false;
+	if (mul_overflow_u64((uint64_t)page_count, PMM_PAGE_SIZE, &span)) {
+		return false;
+	}
+	if (add_overflow_u64((uint64_t)base, span, &window_end) || window_end <= (uint64_t)base) return false;
+
+	words = bitmap_word_count(page_count);
+	if (words == 0u || mul_overflow_size(words, sizeof(uint64_t), &bitmap_bytes)) return false;
+
+	bitmap_pages = bitmap_bytes / (size_t)PMM_PAGE_SIZE;
+	if ((bitmap_bytes % (size_t)PMM_PAGE_SIZE) != 0u) bitmap_pages++;
+	if (bitmap_pages == 0u) return false;
+	if (!pmm_alloc_pages(bitmap_pages, &bitmap_phys)) return false;
+	if (mul_overflow_u64((uint64_t)bitmap_pages, PMM_PAGE_SIZE, &bitmap_span)) {
+		(void)pmm_free_pages(bitmap_phys, bitmap_pages);
+		return false;
+	}
+	memset(hhdm_phys_to_virt(bitmap_phys), 0, (size_t)bitmap_span);
+
 	if (!space->initialized) {
 		spinlock_init_class(&space->lock, "address_space", SPINLOCK_ORDER_VADDR, SPINLOCK_FLAG_NONE);
 	}
 
 	spinlock_lock(&space->lock);
-	address_space_reset_locked(space);
-	if ((base & (PMM_PAGE_SIZE - 1u)) != 0) {
-		spinlock_unlock(&space->lock);
-		return false;
-	}
-	if (page_count == 0) {
-		spinlock_unlock(&space->lock);
-		return false;
-	}
-	if (mul_overflow_u64((uint64_t)page_count, PMM_PAGE_SIZE, &span)) {
-		spinlock_unlock(&space->lock);
-		return false;
-	}
-	if ((uint64_t)base + span <= (uint64_t)base) {
-		spinlock_unlock(&space->lock);
-		return false;
-	}
-
-	words = bitmap_word_count(page_count);
-	if (mul_overflow_size(words, sizeof(uint64_t), &bitmap_bytes)) {
-		spinlock_unlock(&space->lock);
-		return false;
-	}
-
-	bitmap_pages = (bitmap_bytes + (size_t)PMM_PAGE_SIZE - 1u) / (size_t)PMM_PAGE_SIZE;
-	if (bitmap_pages == 0) {
-		spinlock_unlock(&space->lock);
-		return false;
-	}
-	if (!pmm_alloc_pages(bitmap_pages, &bitmap_phys)) {
-		spinlock_unlock(&space->lock);
-		return false;
-	}
-	if (mul_overflow_u64((uint64_t)bitmap_pages, PMM_PAGE_SIZE, &bitmap_span)) {
-		(void)pmm_free_pages(bitmap_phys, bitmap_pages);
-		spinlock_unlock(&space->lock);
-		return false;
-	}
+	old_bitmap_phys  = space->bitmap_phys;
+	old_bitmap_pages = space->bitmap_pages;
+	had_old_bitmap   = space->initialized && old_bitmap_pages != 0u;
 
 	space->base         = base;
+	space->hal_space    = (struct hal_address_space){0};
 	space->bitmap_phys  = bitmap_phys;
 	space->bitmap_pages = bitmap_pages;
 	space->bitmap       = (uint64_t*)hhdm_phys_to_virt(bitmap_phys);
-	memset(space->bitmap, 0, (size_t)bitmap_span);
-
-	space->total_pages = page_count;
-	space->free_pages  = page_count;
+	space->total_pages  = page_count;
+	space->free_pages   = page_count;
 	if (space->next_region_id == 0u) space->next_region_id = 1u;
 	space->initialized = true;
 	spinlock_unlock(&space->lock);
+
+	if (had_old_bitmap) (void)pmm_free_pages(old_bitmap_phys, old_bitmap_pages);
 	return true;
 }
 
@@ -142,6 +131,7 @@ bool address_space_activate(struct address_space* space) {
 
 bool address_space_reserve(struct address_space* space, size_t count, size_t align_pages, uintptr_t* out_base) {
 	size_t start_page;
+	size_t align_bytes;
 
 	if (out_base) *out_base = 0;
 
@@ -152,20 +142,29 @@ bool address_space_reserve(struct address_space* space, size_t count, size_t ali
 		spinlock_unlock(&space->lock);
 		return false;
 	}
+	if (mul_overflow_size(align_pages, (size_t)PMM_PAGE_SIZE, &align_bytes)) {
+		spinlock_unlock(&space->lock);
+		return false;
+	}
 	if (count > space->free_pages) {
 		spinlock_unlock(&space->lock);
 		return false;
 	}
 
-	for (start_page = 0; start_page + count <= space->total_pages;) {
-		size_t aligned_page = start_page;
-		bool   fit          = true;
+	for (start_page = 0; start_page <= space->total_pages && count <= space->total_pages - start_page;) {
+		uint64_t candidate;
+		uint64_t aligned_address;
+		size_t   aligned_page;
+		bool     fit = true;
 
-		if ((aligned_page & (align_pages - 1u)) != 0) {
-			aligned_page = (aligned_page + align_pages - 1u) & ~(align_pages - 1u);
-			start_page   = aligned_page;
-			continue;
+		if (mul_overflow_u64((uint64_t)start_page, PMM_PAGE_SIZE, &candidate) ||
+		    add_overflow_u64((uint64_t)space->base, candidate, &candidate) ||
+		    !align_up_u64(candidate, (uint64_t)align_bytes, &aligned_address) ||
+		    aligned_address < (uint64_t)space->base) {
+			break;
 		}
+		aligned_page = (size_t)((aligned_address - (uint64_t)space->base) / PMM_PAGE_SIZE);
+		if (aligned_page > space->total_pages || count > space->total_pages - aligned_page) break;
 
 		for (size_t page = 0; page < count; page++) {
 			if (bitmap_test(space->bitmap, aligned_page + page)) {
