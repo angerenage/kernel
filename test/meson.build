@@ -242,9 +242,10 @@ test_suites = [
 	{
 		'name': 'vaddr_alloc',
 		'sources': files(
-			'vaddr_alloc/vaddr_alloc_test.c',
-			'vaddr_alloc/basic.c',
+			'vaddr_alloc/test_support.c',
+			'vaddr_alloc/reservation.c',
 			'vaddr_alloc/alignment.c',
+			'vaddr_alloc/failure.c',
 			'vaddr_alloc/concurrency.c',
 		),
 		'suites': ['unit', 'memory'],

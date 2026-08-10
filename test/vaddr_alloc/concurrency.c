@@ -1,7 +1,7 @@
 #include <core/pmm.h>
 
 #include "../thread_test.h"
-#include "vaddr_alloc_test.h"
+#include "test_support.h"
 
 #define VADDR_THREAD_COUNT 4u
 #define VADDR_ALLOCS_PER_THREAD 8u

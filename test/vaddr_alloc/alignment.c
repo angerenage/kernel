@@ -1,6 +1,6 @@
 #include <core/pmm.h>
 
-#include "vaddr_alloc_test.h"
+#include "test_support.h"
 
 Test(vaddr_alloc, honors_alignment_and_coalesces_on_free) {
 	_Alignas(4096) uint8_t arena[KiB(256)];
@@ -25,4 +25,25 @@ Test(vaddr_alloc, honors_alignment_and_coalesces_on_free) {
 		cr_assert(address_space_reserve(address_space_kernel(), 128, 1, &whole), "failed to reserve coalesced region");
 		cr_assert_eq(whole, (uintptr_t)0x20000000ull, "coalesced region base mismatch");
 	}
+}
+
+Test(vaddr_alloc, alignment_is_applied_to_the_absolute_virtual_address) {
+	_Alignas(4096) uint8_t arena[KiB(256)];
+	const uintptr_t        space_base = 0x10001000ull;
+	const uintptr_t        alignment  = 8u * (uintptr_t)PMM_PAGE_SIZE;
+	uintptr_t              aligned    = 0u;
+
+	init_test_vaddr_alloc(arena, sizeof(arena), space_base, 64u);
+
+	cr_assert(address_space_reserve(address_space_kernel(), 2u, 8u, &aligned), "aligned reservation failed");
+	cr_assert_eq(aligned & (alignment - 1u),
+	             0u,
+	             "alignment must apply to the absolute virtual address, not the window-relative page index");
+	cr_assert_geq(aligned, space_base, "aligned reservation escaped below the address-space window");
+	cr_assert_lt(aligned,
+	             space_base + 64u * (uintptr_t)PMM_PAGE_SIZE,
+	             "aligned reservation escaped above the address-space window");
+
+	cr_assert(address_space_reserve_at(address_space_kernel(), space_base, 1u),
+	          "alignment padding must remain free and independently reservable");
 }

@@ -1,6 +1,6 @@
 #include <core/pmm.h>
 
-#include "vaddr_alloc_test.h"
+#include "test_support.h"
 
 Test(vaddr_alloc, allocates_releases_and_reuses_ranges) {
 	_Alignas(4096) uint8_t arena[KiB(256)];

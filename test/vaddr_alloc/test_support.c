@@ -1,4 +1,4 @@
-#include "vaddr_alloc_test.h"
+#include "test_support.h"
 
 #include <core/pmm.h>
 
