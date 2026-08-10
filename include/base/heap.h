@@ -36,7 +36,7 @@ bool heap_init(void);
 /* Return true once heap_init() has completed successfully. */
 bool heap_is_initialized(void);
 
-/* Total bytes currently under heap management, including headers and sentinels. */
+/* Allocatable block capacity across all arenas, including block metadata but excluding arena sentinels. */
 size_t heap_total_bytes(void);
 
 /* Bytes currently available for allocation, summed across every arena. */
