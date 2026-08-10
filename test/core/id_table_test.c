@@ -3,7 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "../heap/heap_test.h"
+#include "../heap/test_support.h"
 #include "../thread_test.h"
 
 #define ID_TABLE_TEST_HEAP_SIZE KiB(256)

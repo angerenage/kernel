@@ -1,4 +1,4 @@
-#include "heap_test.h"
+#include "test_support.h"
 
 #include <core/pmm.h>
 

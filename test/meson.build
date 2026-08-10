@@ -140,7 +140,7 @@ test_suites = [
 	{
 		'name': 'id_table',
 		'sources': files(
-			'heap/heap_test.c',
+			'heap/test_support.c',
 			'core/id_table_test.c',
 		),
 		'suites': ['unit', 'core'],
@@ -252,10 +252,13 @@ test_suites = [
 	{
 		'name': 'heap',
 		'sources': files(
-			'heap/heap_test.c',
-			'heap/basic.c',
+			'heap/test_support.c',
+			'heap/allocation.c',
+			'heap/strings.c',
 			'heap/calloc_realloc.c',
 			'heap/concurrency.c',
+			'heap/coalescing.c',
+			'heap/failure.c',
 			'heap/growth.c',
 		),
 		'suites': ['unit', 'memory'],

@@ -1,7 +1,7 @@
 #include <string.h>
 
 #include "../thread_test.h"
-#include "heap_test.h"
+#include "test_support.h"
 
 #define HEAP_THREAD_COUNT 4u
 #define HEAP_ALLOCS_PER_THREAD 64u

@@ -1,4 +1,4 @@
-#include "heap_test.h"
+#include "test_support.h"
 
 Test(heap, grows_when_initial_arena_is_exhausted) {
 	_Alignas(4096) static uint8_t arena[KiB(128)];
