@@ -17,6 +17,7 @@ struct pmm_range {
 	size_t    page_count;
 	size_t    free_pages;
 	uint64_t* bitmap;
+	uint64_t* reserved_bitmap;
 };
 
 struct pmm_init_range {
@@ -110,6 +111,49 @@ static bool usable_page_range(const struct mem_range* source, uintptr_t* out_bas
 	return true;
 }
 
+static bool memory_map_is_unambiguous(const struct mem_range* memory_map, size_t range_count) {
+	for (size_t i = 0; i < range_count; i++) {
+		uint64_t left_end;
+
+		if (memory_map[i].length == 0u) continue;
+		if (add_overflow_u64(memory_map[i].base, memory_map[i].length, &left_end)) return false;
+
+		for (size_t j = i + 1u; j < range_count; j++) {
+			uint64_t right_end;
+
+			if (memory_map[j].length == 0u) continue;
+			if (add_overflow_u64(memory_map[j].base, memory_map[j].length, &right_end)) return false;
+			if ((uint64_t)memory_map[i].base < right_end && (uint64_t)memory_map[j].base < left_end) return false;
+		}
+	}
+	return true;
+}
+
+static bool next_usable_page_range(const struct mem_range* memory_map, size_t range_count, bool have_after,
+                                   uintptr_t after, uintptr_t* out_base, size_t* out_pages) {
+	bool      found      = false;
+	uintptr_t best_base  = 0u;
+	size_t    best_pages = 0u;
+
+	for (size_t i = 0; i < range_count; i++) {
+		uintptr_t base;
+		size_t    pages;
+
+		if (!usable_page_range(&memory_map[i], &base, &pages)) continue;
+		if (have_after && base <= after) continue;
+		if (!found || base < best_base) {
+			found      = true;
+			best_base  = base;
+			best_pages = pages;
+		}
+	}
+
+	if (!found) return false;
+	*out_base  = best_base;
+	*out_pages = best_pages;
+	return true;
+}
+
 static bool early_bump_alloc(uintptr_t* cursor, uintptr_t cursor_end, size_t size, size_t align, uintptr_t* out_phys) {
 	uint64_t normalized_align = normalize_align_u64(align, 1u);
 	uint64_t aligned;
@@ -175,11 +219,12 @@ static void reserve_pages(struct pmm_range* range, uintptr_t reserved_base, uint
 	if (last_page > range->page_count) last_page = range->page_count;
 
 	for (size_t page = first_page; page < last_page; page++) {
-		if (bitmap_test(range->bitmap, page)) continue;
-
-		bitmap_set(range->bitmap, page);
-		range->free_pages--;
-		free_page_count--;
+		bitmap_set(range->reserved_bitmap, page);
+		if (!bitmap_test(range->bitmap, page)) {
+			bitmap_set(range->bitmap, page);
+			range->free_pages--;
+			free_page_count--;
+		}
 	}
 }
 
@@ -221,6 +266,8 @@ bool pmm_init(const struct mem_range* memory_map, size_t range_count, uintptr_t 
 	uintptr_t                    first_usable_base = 0;
 	uintptr_t                    first_usable_end  = 0;
 	uintptr_t                    bump              = 0;
+	uintptr_t                    selected_after    = 0;
+	bool                         have_selected     = false;
 
 	spinlock_lock(&pmm_lock);
 
@@ -236,36 +283,96 @@ bool pmm_init(const struct mem_range* memory_map, size_t range_count, uintptr_t 
 	}
 
 	boot_info.direct_map_offset = direct_map_offset;
+	if (!memory_map_is_unambiguous(memory_map, range_count)) {
+		spinlock_unlock(&pmm_lock);
+		return false;
+	}
 
-	for (size_t i = 0; i < range_count; i++) {
+	for (;;) {
 		uintptr_t base;
 		size_t    page_count;
+		uint64_t  span;
+		uintptr_t end;
 
-		if (!usable_page_range(&memory_map[i], &base, &page_count)) continue;
+		if (!next_usable_page_range(memory_map, range_count, have_selected, selected_after, &base, &page_count)) {
+			break;
+		}
+		selected_after = base;
+		have_selected  = true;
+		if (mul_overflow_u64((uint64_t)page_count, PMM_PAGE_SIZE, &span)) {
+			spinlock_unlock(&pmm_lock);
+			return false;
+		}
+		end = base + (uintptr_t)span;
+
+		if (usable_ranges == 0) {
+			first_usable_base = base;
+			first_usable_end  = end;
+			usable_ranges     = 1u;
+			continue;
+		}
+
+		if (base == first_usable_end) {
+			first_usable_end = end;
+			continue;
+		}
+
+		page_count = (size_t)(((uint64_t)first_usable_end - (uint64_t)first_usable_base) / PMM_PAGE_SIZE);
 		if (usable_pages > PMM_SIZE_MAX - page_count) {
 			spinlock_unlock(&pmm_lock);
 			return false;
 		}
-
-		if (usable_ranges == 0) {
-			uint64_t span;
-
-			if (mul_overflow_u64((uint64_t)page_count, PMM_PAGE_SIZE, &span)) {
-				spinlock_unlock(&pmm_lock);
-				return false;
-			}
-			first_usable_base = base;
-			first_usable_end  = base + (uintptr_t)span;
-		}
-
-		usable_ranges++;
 		usable_pages += page_count;
+		usable_ranges++;
+		first_usable_base = base;
+		first_usable_end  = end;
 	}
 
-	if (usable_ranges == 0 || usable_pages == 0) {
+	if (usable_ranges != 0u) {
+		size_t pages = (size_t)(((uint64_t)first_usable_end - (uint64_t)first_usable_base) / PMM_PAGE_SIZE);
+
+		if (usable_pages > PMM_SIZE_MAX - pages) {
+			spinlock_unlock(&pmm_lock);
+			return false;
+		}
+		usable_pages += pages;
+	}
+	if (usable_ranges == 0u || usable_pages == 0u) {
 		spinlock_unlock(&pmm_lock);
 		return false;
 	}
+
+	/* Locate the first normalized range again; the bootstrap metadata must fit
+	 * entirely inside it before the
+	 * general cursors exist. */
+	have_selected = false;
+	{
+		size_t   first_pages;
+		uint64_t span;
+
+		if (!next_usable_page_range(memory_map, range_count, false, 0u, &first_usable_base, &first_pages) ||
+		    mul_overflow_u64((uint64_t)first_pages, PMM_PAGE_SIZE, &span)) {
+			spinlock_unlock(&pmm_lock);
+			return false;
+		}
+		first_usable_end = first_usable_base + (uintptr_t)span;
+	}
+	selected_after = first_usable_base;
+	for (;;) {
+		uintptr_t base;
+		size_t    pages;
+		uint64_t  span;
+
+		if (!next_usable_page_range(memory_map, range_count, true, selected_after, &base, &pages)) break;
+		if (mul_overflow_u64((uint64_t)pages, PMM_PAGE_SIZE, &span)) {
+			spinlock_unlock(&pmm_lock);
+			return false;
+		}
+		if (base != first_usable_end) break;
+		first_usable_end = base + (uintptr_t)span;
+		selected_after   = base;
+	}
+	range_index = 0u;
 
 	{
 		size_t    init_bytes;
@@ -284,7 +391,8 @@ bool pmm_init(const struct mem_range* memory_map, size_t range_count, uintptr_t 
 			spinlock_unlock(&pmm_lock);
 			return false;
 		}
-		if (mul_overflow_size(usable_ranges + 1u, sizeof(struct pmm_reserved_span), &span_bytes)) {
+		if (usable_ranges > (PMM_SIZE_MAX - 2u) / 2u ||
+		    mul_overflow_size(usable_ranges * 2u + 2u, sizeof(struct pmm_reserved_span), &span_bytes)) {
 			spinlock_unlock(&pmm_lock);
 			return false;
 		}
@@ -308,15 +416,36 @@ bool pmm_init(const struct mem_range* memory_map, size_t range_count, uintptr_t 
 		reserved_spans    = (struct pmm_reserved_span*)(virt + init_bytes + cursor_bytes);
 	}
 
-	for (size_t i = 0; i < range_count; i++) {
+	have_selected = false;
+	for (;;) {
 		uintptr_t base;
 		size_t    page_count;
 		uint64_t  span;
 
-		if (!usable_page_range(&memory_map[i], &base, &page_count)) continue;
+		if (!next_usable_page_range(memory_map, range_count, have_selected, selected_after, &base, &page_count)) {
+			break;
+		}
+		selected_after = base;
+		have_selected  = true;
 		if (mul_overflow_u64((uint64_t)page_count, PMM_PAGE_SIZE, &span)) {
 			spinlock_unlock(&pmm_lock);
 			return false;
+		}
+
+		if (range_index != 0u) {
+			struct pmm_init_range* previous = &init_ranges[range_index - 1u];
+			uint64_t               previous_span;
+
+			if (mul_overflow_u64((uint64_t)previous->page_count, PMM_PAGE_SIZE, &previous_span)) {
+				spinlock_unlock(&pmm_lock);
+				return false;
+			}
+			if (previous->base + (uintptr_t)previous_span == base) {
+				previous->page_count += page_count;
+				previous->bitmap_words                  = bitmap_word_count(previous->page_count);
+				bootstrap_cursors[range_index - 1u].end = base + (uintptr_t)span;
+				continue;
+			}
 		}
 
 		init_ranges[range_index] = (struct pmm_init_range){
@@ -349,6 +478,7 @@ bool pmm_init(const struct mem_range* memory_map, size_t range_count, uintptr_t 
 
 	ranges = (struct pmm_range*)hhdm_phys_to_virt(ranges_phys);
 	memset(ranges, 0, ranges_bytes);
+	reserved_spans[reserved_count++] = (struct pmm_reserved_span){.base = first_usable_base, .end = bump};
 	reserved_spans[reserved_count++] = ranges_reserved;
 
 	managed_range_count = usable_ranges;
@@ -359,7 +489,9 @@ bool pmm_init(const struct mem_range* memory_map, size_t range_count, uintptr_t 
 		size_t                   bitmap_bytes;
 		uintptr_t                bitmap_phys = 0;
 		struct pmm_reserved_span bitmap_reserved;
+		struct pmm_reserved_span permanent_bitmap_reserved;
 		uint64_t*                bitmap;
+		uint64_t*                permanent_bitmap;
 
 		if (mul_overflow_size(init_ranges[i].bitmap_words, sizeof(uint64_t), &bitmap_bytes)) {
 			spinlock_unlock(&pmm_lock);
@@ -373,14 +505,27 @@ bool pmm_init(const struct mem_range* memory_map, size_t range_count, uintptr_t 
 
 		bitmap = (uint64_t*)hhdm_phys_to_virt(bitmap_phys);
 		memset(bitmap, 0, bitmap_bytes);
+		if (!bootstrap_alloc(bootstrap_cursors,
+		                     usable_ranges,
+		                     bitmap_bytes,
+		                     _Alignof(uint64_t),
+		                     &bitmap_phys,
+		                     &permanent_bitmap_reserved)) {
+			spinlock_unlock(&pmm_lock);
+			return false;
+		}
+		permanent_bitmap = (uint64_t*)hhdm_phys_to_virt(bitmap_phys);
+		memset(permanent_bitmap, 0, bitmap_bytes);
 
 		ranges[i] = (struct pmm_range){
-			.base       = init_ranges[i].base,
-			.page_count = init_ranges[i].page_count,
-			.free_pages = init_ranges[i].page_count,
-			.bitmap     = bitmap,
+			.base            = init_ranges[i].base,
+			.page_count      = init_ranges[i].page_count,
+			.free_pages      = init_ranges[i].page_count,
+			.bitmap          = bitmap,
+			.reserved_bitmap = permanent_bitmap,
 		};
 		reserved_spans[reserved_count++] = bitmap_reserved;
+		reserved_spans[reserved_count++] = permanent_bitmap_reserved;
 	}
 
 	for (size_t i = 0; i < reserved_count; i++) {
@@ -449,7 +594,8 @@ bool pmm_free_pages(uintptr_t phys, size_t count) {
 		first_page = (size_t)(((uint64_t)phys - (uint64_t)ranges[i].base) / PMM_PAGE_SIZE);
 
 		for (size_t page = 0; page < count; page++) {
-			if (!bitmap_test(ranges[i].bitmap, first_page + page)) {
+			if (!bitmap_test(ranges[i].bitmap, first_page + page) ||
+			    bitmap_test(ranges[i].reserved_bitmap, first_page + page)) {
 				spinlock_unlock(&pmm_lock);
 				return false;
 			}
