@@ -18,6 +18,7 @@ static size_t                   fail_after_maps = (size_t)-1;
 static size_t                   fail_map_budget = (size_t)-1;
 static size_t                   successful_maps;
 static bool                     initialized;
+static bool                     fail_init_once;
 static struct hal_address_space kernel_space    = {.lower_root_phys = 1u};
 static uintptr_t                next_space_root = 2u;
 
@@ -34,8 +35,13 @@ void mock_paging_reset(void) {
 	fail_map_budget = (size_t)-1;
 	successful_maps = 0;
 	initialized     = false;
+	fail_init_once  = false;
 	kernel_space    = (struct hal_address_space){.lower_root_phys = 1u};
 	next_space_root = 2u;
+}
+
+void mock_paging_fail_init_once(void) {
+	fail_init_once = true;
 }
 
 void mock_paging_fail_after(size_t maps) {
@@ -72,6 +78,10 @@ static struct mock_mapping* find_mapping(const struct hal_address_space* space, 
 }
 
 bool hal_paging_init(void) {
+	if (fail_init_once) {
+		fail_init_once = false;
+		return false;
+	}
 	mock_paging_reset();
 	initialized = true;
 	return true;

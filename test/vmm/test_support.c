@@ -28,3 +28,8 @@ void init_test_vmm(uint8_t* arena, size_t arena_size) {
 	cr_assert(pmm_init(memory_map, sizeof(memory_map) / sizeof(memory_map[0]), 0), "pmm_init failed");
 	cr_assert(vmm_init(), "vmm_init failed");
 }
+
+size_t vmm_test_pages_consumed_since(size_t free_before) {
+	size_t free_after = pmm_free_page_count();
+	return free_before >= free_after ? free_before - free_after : 0u;
+}
