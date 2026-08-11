@@ -258,6 +258,7 @@ enum process_result process_create(struct process** out_process, const char* nam
 	process->state                       = PROCESS_STATE_NEW;
 	process->cap_object_id               = CAP_OBJECT_ID_INVALID;
 	process->address_space_cap_object_id = CAP_OBJECT_ID_INVALID;
+	process->reference_count             = 1u;
 	spinlock_init_class(&process->lock, "process", SPINLOCK_ORDER_PROCESS, SPINLOCK_FLAG_IRQSAVE);
 	thread_wait_queue_init(&process->join_wait_queue);
 	if (!message_queue_init(&process->message_queue)) {
@@ -267,22 +268,22 @@ enum process_result process_create(struct process** out_process, const char* nam
 	}
 	process_channel_state_init(&process->channel_state);
 
+	if (!vmm_user_address_space_init(&process->address_space)) {
+		ring_buffer_deinit(&process->message_queue);
+		free((void*)process->name);
+		free(process);
+		return PROCESS_ADDRESS_SPACE_FAILED;
+	}
+
 	id_result = id_table_alloc(&process_table, process, &pid);
 	if (id_result != ID_TABLE_OK) {
+		vmm_address_space_deinit(&process->address_space);
 		ring_buffer_deinit(&process->message_queue);
 		free((void*)process->name);
 		free(process);
 		return id_result == ID_TABLE_NO_MEMORY ? PROCESS_NO_MEMORY : PROCESS_PID_EXHAUSTED;
 	}
 	process->pid = pid;
-
-	if (!vmm_user_address_space_init(&process->address_space)) {
-		(void)id_table_remove(&process_table, process->pid, NULL);
-		ring_buffer_deinit(&process->message_queue);
-		free((void*)process->name);
-		free(process);
-		return PROCESS_ADDRESS_SPACE_FAILED;
-	}
 
 	*out_process = process;
 	return PROCESS_OK;
@@ -414,9 +415,26 @@ enum process_detach_result process_detach(struct process* process) {
 	return PROCESS_DETACH_OK;
 }
 
+static void process_finalize(struct process* process) {
+	(void)process_destroy_address_space_cap_object(process);
+	(void)process_destroy_cap_object(process);
+	vmm_address_space_deinit(&process->address_space);
+	process_channel_state_deinit(&process->channel_state);
+	ring_buffer_deinit(&process->message_queue);
+	free((void*)process->name);
+	memset(process, 0, sizeof(*process));
+	free(process);
+}
+
+void process_release(struct process* process) {
+	if (process == NULL) return;
+	if (__atomic_sub_fetch(&process->reference_count, 1u, __ATOMIC_ACQ_REL) == 0u) process_finalize(process);
+}
+
 bool process_destroy(struct process* process) {
 	struct irq_state state;
 	struct uthread*  cursor;
+	struct process*  removed;
 
 	if (process == NULL) return false;
 
@@ -446,18 +464,12 @@ bool process_destroy(struct process* process) {
 		if (!uthread_deinit(thread)) return false;
 	}
 
-	(void)process_destroy_address_space_cap_object(process);
-	(void)process_destroy_cap_object(process);
-	vmm_address_space_deinit(&process->address_space);
-	process_channel_state_deinit(&process->channel_state);
-	ring_buffer_deinit(&process->message_queue);
-
+	removed = NULL;
+	if (id_table_remove(&process_table, process->pid, (void**)&removed) != ID_TABLE_OK || removed != process) {
+		return false;
+	}
 	cap_revoke_for_process(process->pid);
-
-	(void)id_table_remove(&process_table, process->pid, NULL);
-	free((void*)process->name);
-	memset(process, 0, sizeof(*process));
-	free(process);
+	process_release(removed);
 	return true;
 }
 
@@ -467,6 +479,26 @@ process_id_t process_pid(const struct process* process) {
 
 struct process* process_lookup(process_id_t pid) {
 	return (struct process*)id_table_lookup(&process_table, pid);
+}
+
+static bool process_retain_callback(void* value, void* context) {
+	struct process* process = value;
+	uint64_t        current;
+
+	(void)context;
+	current = __atomic_load_n(&process->reference_count, __ATOMIC_ACQUIRE);
+	for (;;) {
+		if (current == 0u || current == UINT64_MAX) return false;
+		if (__atomic_compare_exchange_n(
+				&process->reference_count, &current, current + 1u, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+			return true;
+		}
+	}
+}
+
+struct process* process_acquire(process_id_t pid) {
+	if (pid == PROCESS_PID_INVALID) return NULL;
+	return id_table_lookup_retain(&process_table, pid, process_retain_callback, NULL);
 }
 
 size_t process_count(void) {

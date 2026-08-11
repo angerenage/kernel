@@ -138,6 +138,8 @@ struct process {
 	cap_object_id_t cap_object_id;
 	/* Lazily-created cap_object id for this process' address space. */
 	cap_object_id_t address_space_cap_object_id;
+	/* Table ownership and temporary users hold references; final teardown occurs when the last one is released. */
+	uint64_t reference_count;
 };
 
 /* Allocate and queue a userspace thread. out_thread remains NULL for detached threads. */
@@ -170,14 +172,20 @@ enum process_detach_result process_detach(struct process* process);
 /* Request termination of all threads in process and publish the process exit code. */
 bool process_terminate(struct process* process, uintptr_t exit_code);
 
-/* Destroy all reclaimable process threads, release its user address space, and free the process. */
+/* Unregister a process and release table ownership. Final teardown waits for acquired references. */
 bool process_destroy(struct process* process);
 
 /* Return a process PID, or PROCESS_PID_INVALID for NULL. */
 process_id_t process_pid(const struct process* process);
 
-/* Return the process registered for pid, or NULL when pid is invalid or absent. */
+/* Return the process registered for pid as a borrowed pointer requiring external lifetime synchronization. */
 struct process* process_lookup(process_id_t pid);
+
+/* Acquire the process registered for pid so its storage and owned resources remain valid until process_release(). */
+struct process* process_acquire(process_id_t pid);
+
+/* Release a process reference returned by process_acquire(). */
+void process_release(struct process* process);
 
 /* Return the number of registered processes. */
 size_t process_count(void);

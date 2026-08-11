@@ -21,7 +21,14 @@ struct ring_buffer {
 	uint8_t*        data;
 };
 
-/* Initialize a ring buffer with the given capacity and element size. */
+/* Locked view of the oldest element. Call ring_buffer_front_release() exactly once after a successful acquire. */
+struct ring_buffer_front {
+	struct ring_buffer* buffer;
+	const void*         element;
+	struct irq_state    irq_state;
+};
+
+/* Initialize a ring buffer with the given capacity and element size. Rejects an overflowing storage size. */
 bool ring_buffer_init(struct ring_buffer* rb, const char* lock_name, uint32_t lock_order, size_t capacity,
                       size_t element_size);
 
@@ -36,6 +43,15 @@ bool ring_buffer_dequeue(struct ring_buffer* rb, void* out_element);
 
 /* Peek at the oldest element without removing it. Returns true on success, false when empty. */
 bool ring_buffer_peek(struct ring_buffer* rb, void* out_element);
+
+/*
+ * Lock and expose the oldest element without copying it. The buffer remains locked until ring_buffer_front_release(),
+ * allowing the caller to inspect the element and atomically decide whether to consume it.
+ */
+bool ring_buffer_front_acquire(struct ring_buffer* rb, struct ring_buffer_front* out_front);
+
+/* Release a locked front view, removing its element first when consume is true. */
+void ring_buffer_front_release(struct ring_buffer_front* front, bool consume);
 
 /* Return the number of elements currently in the buffer. */
 size_t ring_buffer_count(struct ring_buffer* rb);

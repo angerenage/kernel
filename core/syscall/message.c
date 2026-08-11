@@ -55,12 +55,6 @@ syscall_result_t syscall_send_message(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 		if (sender != NULL) sender_pid = process_pid(sender);
 	}
 
-	target = process_lookup((process_id_t)arg0);
-	if (target == NULL) {
-		free(heap_payload);
-		return syscall_result_error(SYSCALL_STATUS_FAILED, MESSAGE_INVALID_PID);
-	}
-
 	space = syscall_current_user_space();
 	if (length == 0u) {
 		source = NULL;
@@ -77,10 +71,17 @@ syscall_result_t syscall_send_message(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 		source = heap_payload;
 	}
 
+	target = process_acquire((process_id_t)arg0);
+	if (target == NULL) {
+		free(heap_payload);
+		return syscall_result_error(SYSCALL_STATUS_FAILED, MESSAGE_INVALID_PID);
+	}
+
 	result = message_queue_send(&target->message_queue, sender_pid, source, length);
-	ret    = (result == MESSAGE_OK)                  ? syscall_result_ok(0u)
-	         : (result == MESSAGE_INVALID_ARGUMENTS) ? syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u)
-	                                                 : syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
+	process_release(target);
+	ret = (result == MESSAGE_OK)                  ? syscall_result_ok(0u)
+	      : (result == MESSAGE_INVALID_ARGUMENTS) ? syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u)
+	                                              : syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
 	free(heap_payload);
 	return ret;
 }
@@ -122,6 +123,20 @@ syscall_result_t syscall_recv_message(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 		if (transfer_result != ADDRESS_TRANSFER_OK) {
 			free(heap_payload);
 			return syscall_result_from_address_transfer(transfer_result, 0u);
+		}
+	}
+	if (space != NULL) {
+		transfer_result = address_space_validate_range(
+			space, arg1, sizeof(uintptr_t), ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
+		if (transfer_result != ADDRESS_TRANSFER_OK) {
+			free(heap_payload);
+			return syscall_result_from_address_transfer(transfer_result, 1u);
+		}
+		transfer_result = address_space_validate_range(
+			space, arg3, sizeof(uintptr_t), ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
+		if (transfer_result != ADDRESS_TRANSFER_OK) {
+			free(heap_payload);
+			return syscall_result_from_address_transfer(transfer_result, 3u);
 		}
 	}
 

@@ -26,22 +26,27 @@ enum message_result message_queue_send(struct ring_buffer* rb, process_id_t send
 
 enum message_result message_queue_receive(struct ring_buffer* rb, void* buffer, size_t buffer_size, size_t* out_length,
                                           process_id_t* out_sender_pid) {
-	struct message msg;
+	struct ring_buffer_front front;
+	const struct message*    msg;
 
 	if (rb == NULL || out_length == NULL || out_sender_pid == NULL) return MESSAGE_INVALID_ARGUMENTS;
 
-	if (!ring_buffer_peek(rb, &msg)) return MESSAGE_NO_MESSAGE;
+	if (!ring_buffer_front_acquire(rb, &front)) return MESSAGE_NO_MESSAGE;
+	msg = front.element;
 
-	if (msg.length > buffer_size) {
-		*out_length = msg.length;
+	if (msg->length > buffer_size) {
+		*out_length = msg->length;
+		ring_buffer_front_release(&front, false);
 		return MESSAGE_TOO_LARGE;
 	}
-	if (msg.length > 0u && buffer == NULL) return MESSAGE_INVALID_ARGUMENTS;
+	if (msg->length > 0u && buffer == NULL) {
+		ring_buffer_front_release(&front, false);
+		return MESSAGE_INVALID_ARGUMENTS;
+	}
 
-	(void)ring_buffer_dequeue(rb, &msg);
-
-	if (msg.length > 0u) memcpy(buffer, msg.data, msg.length);
-	*out_length     = msg.length;
-	*out_sender_pid = msg.sender_pid;
+	if (msg->length > 0u) memcpy(buffer, msg->data, msg->length);
+	*out_length     = msg->length;
+	*out_sender_pid = msg->sender_pid;
+	ring_buffer_front_release(&front, true);
 	return MESSAGE_OK;
 }

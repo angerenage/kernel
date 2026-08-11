@@ -106,3 +106,31 @@ Test(process, destroy_reclaims_message_queue_heap_storage) {
 	cr_assert(process_destroy(process), "process_destroy failed");
 	cr_assert_eq(heap_free_bytes(), baseline, "destroying a process must release its message queue backing storage");
 }
+
+Test(process, acquired_reference_defers_final_teardown) {
+	struct process* warmup   = NULL;
+	struct process* process  = NULL;
+	struct process* retained = NULL;
+	process_id_t    pid;
+	size_t          baseline;
+	uint8_t         payload = 0x5au;
+
+	init_process_test_environment();
+	cr_assert_eq(process_create(&warmup, NULL), PROCESS_OK);
+	cr_assert(process_destroy(warmup));
+	baseline = heap_free_bytes();
+
+	cr_assert_eq(process_create(&process, NULL), PROCESS_OK);
+	pid      = process_pid(process);
+	retained = process_acquire(pid);
+	cr_assert_eq(retained, process);
+
+	cr_assert(process_destroy(process));
+	cr_assert_null(process_lookup(pid), "destroy must prevent new acquisitions before teardown");
+	cr_assert_not_null(retained->message_queue.data, "an acquired process must retain its message queue");
+	cr_assert_eq(message_queue_send(&retained->message_queue, 1u, &payload, sizeof(payload)), MESSAGE_OK);
+	cr_assert_lt(heap_free_bytes(), baseline, "retained process storage must remain allocated");
+
+	process_release(retained);
+	cr_assert_eq(heap_free_bytes(), baseline, "the last process reference must complete teardown");
+}

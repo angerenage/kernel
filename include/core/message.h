@@ -20,6 +20,6 @@ bool message_queue_init(struct ring_buffer* rb);
 enum message_result message_queue_send(struct ring_buffer* rb, process_id_t sender_pid, const void* data,
                                        size_t length);
 
-/* Dequeue the next message payload into the caller buffer. */
+/* Atomically validate and dequeue the next message, leaving it queued when the caller buffer is too small. */
 enum message_result message_queue_receive(struct ring_buffer* rb, void* buffer, size_t buffer_size, size_t* out_length,
                                           process_id_t* out_sender_pid);
