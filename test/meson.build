@@ -126,7 +126,13 @@ test_suites = [
 	{
 		'name': 'capability',
 		'sources': files(
-			'core/capability_test.c',
+			'capability/test_support.c',
+			'capability/objects.c',
+			'capability/capabilities.c',
+			'capability/calls.c',
+			'capability/authorization.c',
+			'capability/delegation.c',
+			'capability/revocation.c',
 		),
 		'suites': ['unit', 'core'],
 	},
@@ -233,6 +239,7 @@ test_suites = [
 			'vmm/test_support.c',
 			'vmm/mock_paging.c',
 			'core/syscall_test.c',
+			'capability/syscall_rollback.c',
 		),
 		'suites': ['unit', 'core'],
 	},

@@ -23,6 +23,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "../capability/syscall_test_support.h"
 #include "../mocks/hal/cpu_mock.h"
 #include "../vmm/test_support.h"
 
@@ -62,14 +63,14 @@ static void syscall_test_init_scheduler(void) {
 	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
 }
 
-static void syscall_test_reset_state(void) {
+void syscall_test_reset_state(void) {
 	hal_clock_stop();
 	irq_enable_local();
 	hal_cpu_local_bind(NULL);
 	hal_cpu_mock_reset_kicks();
 }
 
-static void syscall_test_init_process_environment(void) {
+void syscall_test_init_process_environment(void) {
 	const struct mem_range memory_map[] = {
 		{
          .base   = (uintptr_t)syscall_test_arena,
@@ -91,7 +92,7 @@ static void syscall_test_init_process_environment(void) {
 	cr_assert(heap_init(), "heap_init failed");
 }
 
-static struct process* syscall_test_spawn_process(const char* name) {
+struct process* syscall_test_spawn_process(const char* name) {
 	struct process* process = NULL;
 	struct uthread* main_thread;
 
