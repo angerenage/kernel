@@ -389,6 +389,16 @@ endif
 if build_machine.cpu_family() == 'x86_64'
 	test_suites += [
 		{
+			'name': 'x86_64_boot',
+			'sources': files(
+				'boot/test_support.c',
+				'boot/state.c',
+				'boot/topology.c',
+			),
+			'link_with': base_test_lib,
+			'suites': ['unit', 'boot', 'platform'],
+		},
+		{
 			'name': 'x86_64_syscall',
 			'sources': files(
 				'platform/x86_64/syscall_test.c',
