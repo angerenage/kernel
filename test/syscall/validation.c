@@ -1,0 +1,250 @@
+#include <base/cap.h>
+#include <base/module.h>
+#include <base/process.h>
+#include <core/capability.h>
+#include <core/cpu.h>
+#include <core/mm.h>
+#include <core/process.h>
+#include <core/sched.h>
+#include <core/syscall.h>
+#include <core/thread.h>
+#include <core/uthread.h>
+#include <criterion/criterion.h>
+#include <kernel/boot.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "../../kernel/src/capability/address_space.h"
+#include "../../kernel/src/capability/boot_module.h"
+#include "../../kernel/src/capability/process.h"
+#include "../../kernel/src/capability/thread.h"
+#include "../../kernel/src/syscall/module.h"
+#include "../../kernel/src/syscall/process.h"
+#include "test_support.h"
+
+enum grant_slot {
+	GRANT_SELF = 0,
+	GRANT_ADDRESS_SPACE,
+	GRANT_MAIN_THREAD,
+	GRANT_PROCESS,
+	GRANT_SLOT_COUNT,
+};
+
+static cap_id_t        grant_caps[GRANT_SLOT_COUNT];
+static cap_object_id_t grant_objects[GRANT_SLOT_COUNT];
+
+void kernel_boot_mock_set_modules(const struct kernel_boot_module* modules, size_t count);
+void kernel_boot_mock_reset(void);
+
+static syscall_result_t grant_test_handler(const struct cap_request* request) {
+	(void)request;
+	return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+}
+
+static cap_id_t ensure_test_grant(enum grant_slot slot, uint64_t object_id, process_id_t recipient,
+                                  cap_rights_t rights) {
+	struct capability* cap;
+	struct cap_object* object;
+
+	if (slot >= GRANT_SLOT_COUNT || recipient == PROCESS_PID_INVALID) return CAP_ID_INVALID;
+
+	if (grant_caps[slot] != CAP_ID_INVALID) {
+		cap = cap_acquire(grant_caps[slot]);
+		if (cap != NULL) {
+			cap_release(cap);
+			return grant_caps[slot];
+		}
+		grant_caps[slot] = CAP_ID_INVALID;
+	}
+
+	object = cap_object_create_kernel(object_id, grant_test_handler);
+	if (object == NULL) return CAP_ID_INVALID;
+	grant_objects[slot] = object->cap_object_id;
+
+	cap = cap_create(object->cap_object_id, recipient, rights, NULL, NULL);
+	if (cap == NULL) return CAP_ID_INVALID;
+	grant_caps[slot] = cap->cap_id;
+	return cap->cap_id;
+}
+
+static void grant_test_reset(void) {
+	for (size_t i = 0u; i < GRANT_SLOT_COUNT; i++) {
+		grant_caps[i]    = CAP_ID_INVALID;
+		grant_objects[i] = CAP_OBJECT_ID_INVALID;
+	}
+}
+
+static void grant_test_cleanup(void) {
+	for (size_t i = 0u; i < GRANT_SLOT_COUNT; i++) {
+		if (grant_caps[i] != CAP_ID_INVALID) {
+			(void)cap_destroy_by_id(grant_caps[i]);
+			grant_caps[i] = CAP_ID_INVALID;
+		}
+	}
+	for (size_t i = 0u; i < GRANT_SLOT_COUNT; i++) {
+		if (grant_objects[i] != CAP_OBJECT_ID_INVALID) {
+			(void)cap_object_destroy_with_id(grant_objects[i]);
+			grant_objects[i] = CAP_OBJECT_ID_INVALID;
+		}
+	}
+}
+
+cap_id_t kernel_process_grant(struct process* target, process_id_t recipient, cap_rights_t rights) {
+	if (target == NULL) return CAP_ID_INVALID;
+	return ensure_test_grant(GRANT_PROCESS, 0xf100u, recipient, rights);
+}
+
+cap_id_t kernel_self_grant(struct process* process) {
+	if (process == NULL) return CAP_ID_INVALID;
+	return ensure_test_grant(GRANT_SELF,
+	                         0xf101u,
+	                         process_pid(process),
+	                         CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_EXEC | CAP_DELEGATE);
+}
+
+cap_id_t kernel_address_space_grant(struct process* process, process_id_t recipient, cap_rights_t rights) {
+	if (process == NULL) return CAP_ID_INVALID;
+	return ensure_test_grant(GRANT_ADDRESS_SPACE, 0xf102u, recipient, rights);
+}
+
+cap_id_t kernel_thread_grant_full(struct uthread* target, process_id_t recipient) {
+	if (target == NULL) return CAP_ID_INVALID;
+	return ensure_test_grant(GRANT_MAIN_THREAD,
+	                         0xf103u,
+	                         recipient,
+	                         CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_DELEGATE);
+}
+
+cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t recipient) {
+	(void)module_index;
+	(void)recipient;
+	return CAP_ID_INVALID;
+}
+
+static struct process* make_current_process(const char* name) {
+	struct process* process;
+	struct uthread* main_thread;
+
+	syscall_test_init_process_environment();
+	capability_init();
+	grant_test_reset();
+
+	process = syscall_test_spawn_process(name);
+	cr_assert_not_null(process);
+	main_thread = process_main_thread(process);
+	cr_assert_not_null(main_thread);
+	sched_set_current(cpu_current(), &main_thread->thread);
+	return process;
+}
+
+static void destroy_current_process(struct process* process) {
+	struct uthread* main_thread;
+
+	if (process == NULL) return;
+	main_thread = process_main_thread(process);
+	if (main_thread != NULL) thread_mark_zombie(&main_thread->thread);
+	sched_set_current(cpu_current(), NULL);
+	grant_test_cleanup();
+	cr_assert(process_destroy(process), "failed to destroy syscall validation process");
+	kernel_boot_mock_reset();
+	syscall_test_reset_state();
+}
+
+Test(syscall_validation, module_resolve_rejects_null_mandatory_name) {
+	const struct kernel_boot_module modules[] = {
+		{
+         .name       = "init",
+         .path       = "/boot/init",
+         .address    = (void*)(uintptr_t)0x1000u,
+         .size       = 4096u,
+         .media_type = 0u,
+		 },
+	};
+	struct process*  process;
+	syscall_result_t result;
+
+	process = make_current_process("syscall/module-null");
+	kernel_boot_mock_set_modules(modules, 1u);
+
+	result = syscall_module_resolve(0u, 0u, 1u, 0u, 0u, 0u);
+	cr_assert_eq(result.status,
+	             SYSCALL_STATUS_BAD_ARGUMENT,
+	             "a mandatory module name cannot use the generic optional-string NULL/zero form");
+	cr_assert_eq(result.value, 0u, "the invalid pointer is argument 0");
+
+	destroy_current_process(process);
+}
+
+Test(syscall_validation, failed_self_copyout_does_not_publish_hidden_grants) {
+	struct process*  process;
+	syscall_result_t result;
+	size_t           caps_before;
+	size_t           objects_before;
+
+	process        = make_current_process("syscall/self-rollback");
+	caps_before    = capability_count();
+	objects_before = capability_object_count();
+
+	result = syscall_self(MM_USER_VMM_BASE, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT, "unmapped self-info output must reject the syscall");
+	cr_assert_eq(capability_count(),
+	             caps_before,
+	             "failed self copyout must not leave capabilities that userspace never received");
+	cr_assert_eq(capability_object_count(),
+	             objects_before,
+	             "failed self copyout must not publish routing objects solely for the failed query");
+
+	destroy_current_process(process);
+}
+
+Test(syscall_validation, failed_self_copyout_preserves_preexisting_grants) {
+	struct process*  process;
+	struct uthread*  main_thread;
+	cap_id_t         self_cap;
+	cap_id_t         address_cap;
+	cap_id_t         thread_cap;
+	syscall_result_t result;
+	size_t           caps_before;
+	size_t           objects_before;
+
+	process     = make_current_process("syscall/self-existing");
+	main_thread = process_main_thread(process);
+	cr_assert_not_null(main_thread);
+
+	self_cap = kernel_self_grant(process);
+	address_cap =
+		kernel_address_space_grant(process, process_pid(process), CAP_CALL | CAP_MAP | CAP_READ | CAP_DELEGATE);
+	thread_cap = kernel_thread_grant_full(main_thread, process_pid(process));
+	cr_assert_neq(self_cap, CAP_ID_INVALID);
+	cr_assert_neq(address_cap, CAP_ID_INVALID);
+	cr_assert_neq(thread_cap, CAP_ID_INVALID);
+
+	caps_before    = capability_count();
+	objects_before = capability_object_count();
+
+	result = syscall_self(MM_USER_VMM_BASE, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(
+		capability_count(), caps_before, "copyout rollback must not destroy grants that existed before the syscall");
+	cr_assert_eq(
+		capability_object_count(), objects_before, "copyout rollback must preserve preexisting routing objects");
+
+	{
+		struct capability* cap = cap_acquire(self_cap);
+		cr_assert_not_null(cap);
+		cap_release(cap);
+	}
+	{
+		struct capability* cap = cap_acquire(address_cap);
+		cr_assert_not_null(cap);
+		cap_release(cap);
+	}
+	{
+		struct capability* cap = cap_acquire(thread_cap);
+		cr_assert_not_null(cap);
+		cap_release(cap);
+	}
+
+	destroy_current_process(process);
+}

@@ -12,7 +12,7 @@
 #include <criterion/criterion.h>
 #include <stdint.h>
 
-#include "syscall_test_support.h"
+#include "test_support.h"
 
 static uintptr_t invalid_cap_output_pointer(void) {
 	return UINTPTR_MAX - 3u;
