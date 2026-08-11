@@ -110,16 +110,14 @@ test_suites = [
 		'suites': ['unit', 'core'],
 	},
 	{
-		'name': 'message',
+		'name': 'ipc',
 		'sources': files(
-			'core/message_test.c',
-		),
-		'suites': ['unit', 'core'],
-	},
-	{
-		'name': 'channel',
-		'sources': files(
-			'core/channel_test.c',
+			'ipc/test_support.c',
+			'ipc/ring_buffer.c',
+			'ipc/channel_lifecycle.c',
+			'ipc/capability_queue.c',
+			'ipc/channel_state.c',
+			'ipc/message_queue.c',
 		),
 		'suites': ['unit', 'core'],
 	},
