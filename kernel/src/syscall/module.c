@@ -23,6 +23,7 @@ syscall_result_t syscall_module_resolve(uintptr_t arg0, uintptr_t arg1, uintptr_
 	if (!syscall_status_is_success(result.status)) {
 		return result;
 	}
+	if (name == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 
 	struct process* caller = process_current();
 	if (caller == NULL) {

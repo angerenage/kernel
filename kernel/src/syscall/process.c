@@ -3,6 +3,7 @@
 #include <base/cap.h>
 #include <base/process.h>
 #include <base/syscall.h>
+#include <core/address_transfer.h>
 #include <core/capability.h>
 #include <core/process.h>
 #include <core/syscall.h>
@@ -29,13 +30,14 @@ static syscall_result_t syscall_result_from_process_create(enum process_result r
 
 syscall_result_t syscall_self(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
                               uintptr_t arg5) {
-	struct process*  process;
-	struct uthread*  thread;
-	struct self_info info;
-	cap_id_t         self_cap_id;
-	cap_id_t         address_space_cap_id;
-	cap_id_t         main_thread_cap_id;
-	struct uthread*  main_thread;
+	struct process*              process;
+	struct uthread*              thread;
+	struct self_info             info;
+	cap_id_t                     self_cap_id;
+	cap_id_t                     address_space_cap_id;
+	cap_id_t                     main_thread_cap_id;
+	struct uthread*              main_thread;
+	enum address_transfer_result validation_result;
 
 	(void)arg1;
 	(void)arg2;
@@ -45,6 +47,12 @@ syscall_result_t syscall_self(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, ui
 
 	process = process_current();
 	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	validation_result =
+		address_space_validate_range(process_address_space(process),
+	                                 arg0,
+	                                 sizeof(info),
+	                                 ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
+	if (validation_result != ADDRESS_TRANSFER_OK) return syscall_result_from_address_transfer(validation_result, 0u);
 
 	thread      = uthread_current();
 	main_thread = process_main_thread(process);

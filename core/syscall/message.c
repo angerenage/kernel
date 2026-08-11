@@ -10,22 +10,6 @@
 #include <stdbool.h>
 #include <string.h>
 
-static syscall_result_t syscall_result_from_address_transfer(enum address_transfer_result result, uintptr_t arg_index) {
-	switch (result) {
-	case ADDRESS_TRANSFER_OK:
-		return syscall_result_ok(0u);
-	case ADDRESS_TRANSFER_FAULT_FAILED:
-		return syscall_result_error(SYSCALL_STATUS_FAILED, arg_index);
-	case ADDRESS_TRANSFER_INVALID_ARGUMENTS:
-	case ADDRESS_TRANSFER_ADDRESS_OVERFLOW:
-	case ADDRESS_TRANSFER_NOT_MAPPED:
-	case ADDRESS_TRANSFER_NOT_USER:
-	case ADDRESS_TRANSFER_ACCESS_DENIED:
-	default:
-		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, arg_index);
-	}
-}
-
 syscall_result_t syscall_send_message(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
                                       uintptr_t arg5) {
 	struct process*              target;

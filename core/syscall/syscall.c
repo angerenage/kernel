@@ -5,7 +5,7 @@
 #include <libc/stdlib.h>
 #include <libc/string.h>
 
-static syscall_result_t syscall_result_from_address_transfer(enum address_transfer_result result, uintptr_t arg_index) {
+syscall_result_t syscall_result_from_address_transfer(enum address_transfer_result result, uintptr_t arg_index) {
 	switch (result) {
 	case ADDRESS_TRANSFER_OK:
 		return syscall_result_ok(0u);

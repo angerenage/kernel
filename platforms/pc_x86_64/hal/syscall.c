@@ -28,6 +28,9 @@
 	 X86_RFLAGS_SIGN | X86_RFLAGS_TRAP | X86_RFLAGS_INTERRUPT_ENABLE | X86_RFLAGS_DIRECTION | X86_RFLAGS_OVERFLOW |    \
 	 X86_RFLAGS_RESUME | X86_RFLAGS_ALIGNMENT_CHECK | X86_RFLAGS_ID)
 
+#define X86_SYSCALL_RFLAGS_MASK                                                                                        \
+	(X86_RFLAGS_TRAP | X86_RFLAGS_INTERRUPT_ENABLE | X86_RFLAGS_DIRECTION | X86_RFLAGS_ALIGNMENT_CHECK)
+
 #define X86_CPU_KERNEL_ENTRY_STACK_TOP_OFFSET 40u
 #define X86_CPU_SYSCALL_USER_STACK_OFFSET 48u
 
@@ -62,6 +65,8 @@ _Static_assert(offsetof(struct cpu, kernel_entry_stack_top) == X86_CPU_KERNEL_EN
                "x86_64 syscall asm kernel entry stack offset mismatch");
 _Static_assert(offsetof(struct cpu, syscall_user_stack) == X86_CPU_SYSCALL_USER_STACK_OFFSET,
                "x86_64 syscall asm user stack offset mismatch");
+_Static_assert((X86_SYSCALL_RFLAGS_MASK & X86_RFLAGS_TRAP) != 0u,
+               "IA32_FMASK must suppress userspace single-step state on kernel entry");
 
 static bool x86_64_user_instruction_pointer(uint64_t address) {
 	const uint64_t user_base = MM_USER_VMM_BASE;
@@ -87,7 +92,8 @@ void x86_64_syscall_init(void) {
 
 	write_msr(X86_IA32_STAR_MSR, star);
 	write_msr(X86_IA32_LSTAR_MSR, (uint64_t)(uintptr_t)x86_64_syscall_entry);
-	write_msr(X86_IA32_FMASK_MSR, X86_RFLAGS_INTERRUPT_ENABLE | X86_RFLAGS_DIRECTION);
+	/* Do not let user-controlled tracing, interrupt, string, or alignment state reach the kernel entry prologue. */
+	write_msr(X86_IA32_FMASK_MSR, X86_SYSCALL_RFLAGS_MASK);
 	write_msr(X86_IA32_EFER_MSR, read_msr(X86_IA32_EFER_MSR) | X86_IA32_EFER_SCE);
 }
 
