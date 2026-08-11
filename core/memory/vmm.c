@@ -31,13 +31,15 @@ bool vmm_init(void) {
 	size_t           window_pages = VMM_WINDOW_SIZE / PMM_PAGE_SIZE;
 	struct irq_state state;
 
-	state = spinlock_lock_irqsave(&vmm_lock);
+	state       = spinlock_lock_irqsave(&vmm_lock);
+	initialized = false;
 	(void)region_pager_unmap_space(address_space_kernel());
 	memory_region_destroy_all(address_space_kernel());
 	if (!hal_paging_init()) {
 		spinlock_unlock_irqrestore(&vmm_lock, state);
 		return false;
 	}
+	address_space_deinit(address_space_kernel());
 	if (!address_space_init(address_space_kernel(), (uintptr_t)VMM_WINDOW_BASE, window_pages)) {
 		spinlock_unlock_irqrestore(&vmm_lock, state);
 		return false;

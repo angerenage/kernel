@@ -52,7 +52,10 @@ static bool map_one(struct address_space* space, struct memory_region* region, s
 	virt = region->base + page_index * (uintptr_t)PMM_PAGE_SIZE;
 	if (page_table_query(table, virt, &existing_phys, NULL)) {
 		if ((existing_phys & ~(uintptr_t)(PMM_PAGE_SIZE - 1u)) != phys) {
-			if (allocated_phys) (void)pmm_free_pages(phys, 1);
+			if (allocated_phys) {
+				backing_store_set_entry(&region->backing, page_index, 0u);
+				(void)pmm_free_pages(phys, 1);
+			}
 			backing_store_release_if_empty(&region->backing);
 			return false;
 		}
@@ -63,7 +66,10 @@ static bool map_one(struct address_space* space, struct memory_region* region, s
 	}
 
 	if (!page_table_map(table, virt, phys, region->prot)) {
-		if (allocated_phys) (void)pmm_free_pages(phys, 1);
+		if (allocated_phys) {
+			backing_store_set_entry(&region->backing, page_index, 0u);
+			(void)pmm_free_pages(phys, 1);
+		}
 		backing_store_release_if_empty(&region->backing);
 		return false;
 	}
@@ -178,7 +184,7 @@ bool region_pager_unmap_all(struct address_space* space, struct memory_region* r
 			backing_page_make(backing_page_phys(entry), backing_page_flags(entry) & ~BACKING_PAGE_MAPPED));
 	}
 	backing_store_set_mapped_count(&region->backing, 0);
-	if (release_phys) backing_store_release(&region->backing);
+	if (release_phys && region->owns_pages) backing_store_release(&region->backing);
 	return true;
 }
 

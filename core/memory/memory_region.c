@@ -222,6 +222,8 @@ bool memory_region_create_phys(struct address_space* space, uintptr_t requested_
 	uintptr_t             base          = 0;
 	size_t                align_pages;
 	size_t                reserved_page_count;
+	uint64_t              last_page_offset;
+	uint64_t              last_page_base;
 
 	if (out_region) *out_region = NULL;
 	if (out_base) *out_base = 0;
@@ -229,9 +231,15 @@ bool memory_region_create_phys(struct address_space* space, uintptr_t requested_
 	if ((phys_base & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	if (requested_base != 0 && (requested_base & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	if (!address_space_is_initialized(space)) return false;
+	if (!memory_region_params_allowed(space, params)) return false;
 	if (params->kind != VMM_KIND_PHYSICAL) return false;
 	if (params->guard_pages != 0) return false;
 	if ((params->map_flags & ~((uint64_t)VMM_MAP_LAZY)) != 0) return false;
+	if (mul_overflow_u64((uint64_t)(params->page_count - 1u), PMM_PAGE_SIZE, &last_page_offset) ||
+	    add_overflow_u64((uint64_t)phys_base, last_page_offset, &last_page_base) ||
+	    last_page_base > (uint64_t)UINTPTR_MAX - (PMM_PAGE_SIZE - 1u)) {
+		return false;
+	}
 
 	align_pages = params->align_pages != 0 ? params->align_pages : VMM_MIN_ALIGN_PAGES;
 	if ((align_pages & (align_pages - 1u)) != 0) return false;
