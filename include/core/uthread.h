@@ -36,6 +36,8 @@ struct uthread_start_params {
 	size_t          user_stack_pages;
 	struct cpu*     preferred_cpu;
 	bool            detached;
+	/* Internal process lifecycle claim for the unique initial thread. */
+	bool main_thread;
 };
 
 struct uthread {

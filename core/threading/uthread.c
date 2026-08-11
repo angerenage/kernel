@@ -69,13 +69,21 @@ static bool uthread_begin_destroy(struct uthread* thread) {
 	if (!__atomic_compare_exchange_n(&thread->dying, &expected, 1u, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
 		return false;
 	}
-
-	signal_unregister_thread_receivers(thread);
-	uthread_unregister_id(thread);
 	return true;
 }
 
-static bool uthread_attach_process(struct uthread* thread, struct process* process) {
+static void uthread_commit_destroy(struct uthread* thread) {
+	if (thread == NULL) return;
+	signal_unregister_thread_receivers(thread);
+	uthread_unregister_id(thread);
+}
+
+static void uthread_abort_destroy(struct uthread* thread) {
+	if (thread == NULL) return;
+	__atomic_store_n(&thread->dying, 0u, __ATOMIC_RELEASE);
+}
+
+static bool uthread_attach_process(struct uthread* thread, struct process* process, bool main_thread) {
 	struct irq_state state;
 	struct uthread*  cursor;
 	bool             attached = false;
@@ -90,6 +98,15 @@ static bool uthread_attach_process(struct uthread* thread, struct process* proce
 			return false;
 		}
 		cursor = cursor->process_next;
+	}
+	if (main_thread && (!process->main_thread_starting || process->state != PROCESS_STATE_NEW ||
+	                    process->main_thread != NULL || process->thread_count != 0u)) {
+		spinlock_unlock_irqrestore(&process->lock, state);
+		return false;
+	}
+	if (!main_thread && process->main_thread_starting) {
+		spinlock_unlock_irqrestore(&process->lock, state);
+		return false;
 	}
 	if ((process->state == PROCESS_STATE_NEW || process->state == PROCESS_STATE_RUNNING) &&
 	    process->thread_count != SIZE_MAX && thread->process_next == NULL) {
@@ -141,42 +158,56 @@ static void uthread_detach_process(struct uthread* thread) {
 	spinlock_unlock_irqrestore(&process->lock, state);
 }
 
-static void uthread_release_stacks(struct uthread* thread) {
+static bool uthread_release_stacks(struct uthread* thread) {
 	struct address_space* address_space;
+	bool                  released = true;
 
-	if (thread == NULL) return;
+	if (thread == NULL) return true;
 
 	address_space = process_address_space(thread->process);
-	if (thread->upcall.stack_id != VMM_ID_INVALID && address_space != NULL) {
-		(void)vmm_free(address_space, thread->upcall.stack_id);
-		thread->upcall.stack_id = VMM_ID_INVALID;
+	if (thread->upcall.stack_id != VMM_ID_INVALID) {
+		if (address_space != NULL && vmm_free(address_space, thread->upcall.stack_id)) {
+			thread->upcall.stack_id = VMM_ID_INVALID;
+		}
+		else {
+			released = false;
+		}
 	}
-	thread->upcall.stack_top = 0u;
-	if (thread->user_stack_id != VMM_ID_INVALID && address_space != NULL) {
-		(void)vmm_free(address_space, thread->user_stack_id);
-		thread->user_stack_id = VMM_ID_INVALID;
+	if (thread->upcall.stack_id == VMM_ID_INVALID) thread->upcall.stack_top = 0u;
+	if (thread->user_stack_id != VMM_ID_INVALID) {
+		if (address_space != NULL && vmm_free(address_space, thread->user_stack_id)) {
+			thread->user_stack_id = VMM_ID_INVALID;
+		}
+		else {
+			released = false;
+		}
 	}
 	if (thread->kernel_stack_id != VMM_ID_INVALID) {
-		(void)vmm_free(address_space_kernel(), thread->kernel_stack_id);
-		thread->kernel_stack_id = VMM_ID_INVALID;
+		if (vmm_free(address_space_kernel(), thread->kernel_stack_id)) thread->kernel_stack_id = VMM_ID_INVALID;
+		else released = false;
 	}
+	return released;
 }
 
-static void uthread_free(struct uthread* thread) {
+static void uthread_release_stacks_or_hcf(struct uthread* thread) {
+	if (!uthread_release_stacks(thread)) hcf();
+}
+
+static bool uthread_free(struct uthread* thread) {
 	bool heap_allocated;
 
-	if (thread == NULL) return;
+	if (thread == NULL) return true;
+	if (!uthread_release_stacks(thread)) return false;
 
 	heap_allocated = thread->heap_allocated;
 	(void)uthread_destroy_cap_object(thread);
-	uthread_release_stacks(thread);
 	uthread_upcall_state_deinit(thread);
 	uthread_detach_process(thread);
 	uthread_release_name(thread);
 	thread->process = NULL;
 	if (heap_allocated) {
 		free(thread);
-		return;
+		return true;
 	}
 
 	memset(thread, 0, sizeof(*thread));
@@ -184,6 +215,7 @@ static void uthread_free(struct uthread* thread) {
 	thread->kernel_stack_id = VMM_ID_INVALID;
 	thread->upcall.stack_id = VMM_ID_INVALID;
 	thread->cap_object_id   = CAP_OBJECT_ID_INVALID;
+	return true;
 }
 
 static void uthread_reapers_init_once(void) {
@@ -221,7 +253,10 @@ static void uthread_reap_callback(struct thread* thread, void* ctx) {
 	if (target == NULL || thread != &target->thread) return;
 
 	process_notify_thread_exit(target->process, thread, thread->exit_code);
-	if (!thread_is_joinable(thread) && uthread_begin_destroy(target)) uthread_release(target);
+	if (!thread_is_joinable(thread) && uthread_begin_destroy(target)) {
+		uthread_commit_destroy(target);
+		uthread_release(target);
+	}
 }
 
 static bool __attribute__((unused))
@@ -360,14 +395,14 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 	user_stack_params.page_count = user_stack_pages;
 	if (!vmm_alloc(address_space, &user_stack_params, &thread->user_stack_id, &user_stack_base)) {
 		uthread_release_name(thread);
-		uthread_release_stacks(thread);
+		uthread_release_stacks_or_hcf(thread);
 		uthread_upcall_state_deinit(thread);
 		uthread_unregister_id(thread);
 		return UTHREAD_START_STACK_ALLOC_FAILED;
 	}
 	if (!vmm_alloc(address_space, &upcall_stack_params, &thread->upcall.stack_id, &upcall_stack_base)) {
 		uthread_release_name(thread);
-		uthread_release_stacks(thread);
+		uthread_release_stacks_or_hcf(thread);
 		uthread_upcall_state_deinit(thread);
 		uthread_unregister_id(thread);
 		return UTHREAD_START_STACK_ALLOC_FAILED;
@@ -375,7 +410,7 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 	thread->upcall.stack_top = (uintptr_t)upcall_stack_base + UTHREAD_UPCALL_STACK_PAGES * (uintptr_t)PMM_PAGE_SIZE;
 	if (!vmm_alloc(address_space_kernel(), &kernel_stack_params, &thread->kernel_stack_id, &kernel_stack_base)) {
 		uthread_release_name(thread);
-		uthread_release_stacks(thread);
+		uthread_release_stacks_or_hcf(thread);
 		uthread_upcall_state_deinit(thread);
 		uthread_unregister_id(thread);
 		return UTHREAD_START_STACK_ALLOC_FAILED;
@@ -387,7 +422,7 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 	if (params->arg_size != 0u) {
 		if (params->arg_size > initial_user_stack_top - (uintptr_t)user_stack_base) {
 			uthread_release_name(thread);
-			uthread_release_stacks(thread);
+			uthread_release_stacks_or_hcf(thread);
 			uthread_upcall_state_deinit(thread);
 			uthread_unregister_id(thread);
 			return UTHREAD_START_INVALID_ARGUMENTS;
@@ -396,7 +431,7 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 		if (user_arg <= (uintptr_t)user_stack_base ||
 		    address_space_copy_to(address_space, user_arg, params->arg_data, params->arg_size) != ADDRESS_TRANSFER_OK) {
 			uthread_release_name(thread);
-			uthread_release_stacks(thread);
+			uthread_release_stacks_or_hcf(thread);
 			uthread_upcall_state_deinit(thread);
 			uthread_unregister_id(thread);
 			return UTHREAD_START_INVALID_ARGUMENTS;
@@ -407,7 +442,7 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 	if (!hal_userspace_thread_context_init(
 			&context, kernel_stack_top, params->user_entry, initial_user_stack_top, user_arg)) {
 		uthread_release_name(thread);
-		uthread_release_stacks(thread);
+		uthread_release_stacks_or_hcf(thread);
 		uthread_upcall_state_deinit(thread);
 		uthread_unregister_id(thread);
 		return UTHREAD_START_CONTEXT_UNSUPPORTED;
@@ -428,14 +463,14 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 	init_result = thread_init_context(&thread->thread, &thread_params);
 	if (init_result != THREAD_INIT_OK) {
 		uthread_release_name(thread);
-		uthread_release_stacks(thread);
+		uthread_release_stacks_or_hcf(thread);
 		uthread_upcall_state_deinit(thread);
 		uthread_unregister_id(thread);
 		return UTHREAD_START_INVALID_ARGUMENTS;
 	}
-	if (!uthread_attach_process(thread, thread->process)) {
+	if (!uthread_attach_process(thread, thread->process, params->main_thread)) {
 		uthread_release_name(thread);
-		uthread_release_stacks(thread);
+		uthread_release_stacks_or_hcf(thread);
 		uthread_upcall_state_deinit(thread);
 		uthread_unregister_id(thread);
 		return UTHREAD_START_INVALID_ARGUMENTS;
@@ -445,7 +480,7 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 	if (reap_on_exit) thread_set_reap_callback(&thread->thread, uthread_reap_callback, thread);
 	if (!sched_make_runnable(&thread->thread)) {
 		uthread_release_name(thread);
-		uthread_release_stacks(thread);
+		uthread_release_stacks_or_hcf(thread);
 		uthread_upcall_state_deinit(thread);
 		uthread_detach_process(thread);
 		uthread_unregister_id(thread);
@@ -482,7 +517,7 @@ enum uthread_start_result uthread_spawn_detached(struct uthread**               
 	effective_params.detached = true;
 	result                    = uthread_start_internal(thread, &effective_params, true);
 	if (result != UTHREAD_START_OK) {
-		uthread_free(thread);
+		if (!uthread_free(thread)) hcf();
 		return result;
 	}
 	*out_thread = thread;
@@ -559,7 +594,7 @@ void uthread_release(struct uthread* thread) {
 
 	if (old_refcount != 1u) return;
 	if (__atomic_load_n(&thread->dying, __ATOMIC_ACQUIRE) == 0u || thread->id != UTHREAD_ID_INVALID) hcf();
-	uthread_free(thread);
+	if (!uthread_free(thread)) hcf();
 }
 
 size_t uthread_count(void) {
@@ -576,7 +611,12 @@ bool uthread_deinit(struct uthread* thread) {
 	if (!thread_is_reap_safe(&thread->thread) && thread->thread.state != THREAD_STATE_NEW) return false;
 	if (!thread_is_joinable(&thread->thread)) return false;
 	if (!uthread_begin_destroy(thread)) return false;
+	if (__atomic_load_n(&thread->reference_count, __ATOMIC_ACQUIRE) == 1u && !uthread_release_stacks(thread)) {
+		uthread_abort_destroy(thread);
+		return false;
+	}
 
+	uthread_commit_destroy(thread);
 	uthread_release(thread);
 	return true;
 }
@@ -628,6 +668,7 @@ static void uthread_reaper_entry(void* arg) {
 			(void)sched_wake_all(&target->thread.join_wait_queue);
 
 			if (!thread_is_joinable(&target->thread) && uthread_begin_destroy(target)) {
+				uthread_commit_destroy(target);
 				uthread_release(target);
 			}
 			continue;

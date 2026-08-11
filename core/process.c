@@ -89,7 +89,8 @@ static bool process_has_thread(struct process* process, struct uthread* thread) 
 }
 
 static enum process_thread_spawn_result process_create_thread(struct process* process, struct uthread* thread,
-                                                              const struct process_thread_params* params) {
+                                                              const struct process_thread_params* params,
+                                                              bool                                main_thread) {
 	enum uthread_start_result result;
 
 	if (process == NULL || thread == NULL || params == NULL) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
@@ -104,12 +105,15 @@ static enum process_thread_spawn_result process_create_thread(struct process* pr
 							   .user_stack_pages = params->user_stack_pages,
 							   .preferred_cpu    = params->preferred_cpu,
 							   .detached         = params->detached,
+							   .main_thread      = main_thread,
 						   });
 	return process_thread_spawn_result_from_uthread(result);
 }
 
-enum process_thread_spawn_result process_spawn_thread(struct process* process, struct uthread** out_thread,
-                                                      const struct process_thread_params* params) {
+static enum process_thread_spawn_result process_spawn_thread_internal(struct process*                     process,
+                                                                      struct uthread**                    out_thread,
+                                                                      const struct process_thread_params* params,
+                                                                      bool                                main_thread) {
 	struct uthread*                  thread;
 	enum process_thread_spawn_result thread_result;
 
@@ -118,8 +122,9 @@ enum process_thread_spawn_result process_spawn_thread(struct process* process, s
 	if (out_thread != NULL) *out_thread = NULL;
 
 	if (params->detached) {
+		struct uthread*           detached_thread = NULL;
 		enum uthread_start_result start_result =
-			uthread_spawn_detached(out_thread,
+			uthread_spawn_detached(&detached_thread,
 		                           &(const struct uthread_start_params){
 									   .name             = params->name,
 									   .process          = process,
@@ -129,6 +134,7 @@ enum process_thread_spawn_result process_spawn_thread(struct process* process, s
 									   .user_stack_pages = params->user_stack_pages,
 									   .preferred_cpu    = params->preferred_cpu,
 									   .detached         = true,
+									   .main_thread      = main_thread,
 								   });
 		return process_thread_spawn_result_from_uthread(start_result);
 	}
@@ -141,7 +147,7 @@ enum process_thread_spawn_result process_spawn_thread(struct process* process, s
 		.heap_allocated  = true,
 	};
 
-	thread_result = process_create_thread(process, thread, params);
+	thread_result = process_create_thread(process, thread, params, main_thread);
 	if (thread_result != PROCESS_THREAD_SPAWN_OK) {
 		free(thread);
 		return thread_result;
@@ -152,19 +158,31 @@ enum process_thread_spawn_result process_spawn_thread(struct process* process, s
 	return PROCESS_THREAD_SPAWN_OK;
 }
 
+enum process_thread_spawn_result process_spawn_thread(struct process* process, struct uthread** out_thread,
+                                                      const struct process_thread_params* params) {
+	return process_spawn_thread_internal(process, out_thread, params, false);
+}
+
 enum process_thread_spawn_result process_start_main_thread(struct process* process, struct uthread** out_thread,
                                                            const struct process_thread_params* params) {
-	struct irq_state state;
-	bool             can_start;
+	struct irq_state                 state;
+	bool                             claimed;
+	enum process_thread_spawn_result result;
 
 	if (process == NULL || out_thread == NULL || params == NULL) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
 
-	state     = spinlock_lock_irqsave(&process->lock);
-	can_start = process->state == PROCESS_STATE_NEW && process->main_thread == NULL && process->thread_count == 0u;
+	state   = spinlock_lock_irqsave(&process->lock);
+	claimed = process->state == PROCESS_STATE_NEW && process->main_thread == NULL && process->thread_count == 0u &&
+	          !process->main_thread_starting;
+	if (claimed) process->main_thread_starting = true;
 	spinlock_unlock_irqrestore(&process->lock, state);
-	if (!can_start) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
+	if (!claimed) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
 
-	return process_spawn_thread(process, out_thread, params);
+	result                        = process_spawn_thread_internal(process, out_thread, params, true);
+	state                         = spinlock_lock_irqsave(&process->lock);
+	process->main_thread_starting = false;
+	spinlock_unlock_irqrestore(&process->lock, state);
+	return result;
 }
 
 enum process_thread_join_result process_join_thread(struct process* process, struct uthread* thread,
@@ -242,11 +260,16 @@ enum process_result process_create(struct process** out_process, const char* nam
 	process->address_space_cap_object_id = CAP_OBJECT_ID_INVALID;
 	spinlock_init_class(&process->lock, "process", SPINLOCK_ORDER_PROCESS, SPINLOCK_FLAG_IRQSAVE);
 	thread_wait_queue_init(&process->join_wait_queue);
-	message_queue_init(&process->message_queue);
+	if (!message_queue_init(&process->message_queue)) {
+		free((void*)process->name);
+		free(process);
+		return PROCESS_NO_MEMORY;
+	}
 	process_channel_state_init(&process->channel_state);
 
 	id_result = id_table_alloc(&process_table, process, &pid);
 	if (id_result != ID_TABLE_OK) {
+		ring_buffer_deinit(&process->message_queue);
 		free((void*)process->name);
 		free(process);
 		return id_result == ID_TABLE_NO_MEMORY ? PROCESS_NO_MEMORY : PROCESS_PID_EXHAUSTED;
@@ -255,6 +278,7 @@ enum process_result process_create(struct process** out_process, const char* nam
 
 	if (!vmm_user_address_space_init(&process->address_space)) {
 		(void)id_table_remove(&process_table, process->pid, NULL);
+		ring_buffer_deinit(&process->message_queue);
 		free((void*)process->name);
 		free(process);
 		return PROCESS_ADDRESS_SPACE_FAILED;
@@ -265,9 +289,11 @@ enum process_result process_create(struct process** out_process, const char* nam
 }
 
 bool process_terminate(struct process* process, uintptr_t exit_code) {
+	enum { CANCEL_BATCH_SIZE = 16u };
 	struct irq_state state;
 	struct irq_state wait_state;
 	struct uthread*  cursor;
+	struct uthread*  cancel_batch[CANCEL_BATCH_SIZE];
 	struct thread*   current;
 	bool             current_in_process = false;
 	bool             wake_joiners       = false;
@@ -299,12 +325,25 @@ bool process_terminate(struct process* process, uintptr_t exit_code) {
 	spinlock_unlock_irqrestore(&process->join_wait_queue.lock, wait_state);
 	cap_pending_call_cancel_caller(process->pid);
 
-	cursor = process->thread_head;
-	while (cursor != NULL) {
-		struct uthread* next = cursor->process_next;
+	for (;;) {
+		size_t cancel_count = 0u;
 
-		if (&cursor->thread != current) (void)thread_request_cancel(&cursor->thread);
-		cursor = next;
+		state  = spinlock_lock_irqsave(&process->lock);
+		cursor = process->thread_head;
+		while (cursor != NULL && cancel_count < CANCEL_BATCH_SIZE) {
+			if (&cursor->thread != current && !thread_is_terminated(&cursor->thread) &&
+			    !thread_cancel_requested(&cursor->thread) && uthread_retain(cursor)) {
+				cancel_batch[cancel_count++] = cursor;
+			}
+			cursor = cursor->process_next;
+		}
+		spinlock_unlock_irqrestore(&process->lock, state);
+
+		if (cancel_count == 0u) break;
+		for (size_t i = 0u; i < cancel_count; i++) {
+			(void)thread_request_cancel(&cancel_batch[i]->thread);
+			uthread_release(cancel_batch[i]);
+		}
 	}
 
 	if (wake_joiners) (void)sched_wake_all(&process->join_wait_queue);
@@ -381,7 +420,11 @@ bool process_destroy(struct process* process) {
 
 	if (process == NULL) return false;
 
-	state  = spinlock_lock_irqsave(&process->lock);
+	state = spinlock_lock_irqsave(&process->lock);
+	if (process->main_thread_starting) {
+		spinlock_unlock_irqrestore(&process->lock, state);
+		return false;
+	}
 	cursor = process->thread_head;
 	while (cursor != NULL) {
 		if ((!thread_is_reap_safe(&cursor->thread) && cursor->thread.state != THREAD_STATE_NEW) ||
@@ -407,6 +450,7 @@ bool process_destroy(struct process* process) {
 	(void)process_destroy_cap_object(process);
 	vmm_address_space_deinit(&process->address_space);
 	process_channel_state_deinit(&process->channel_state);
+	ring_buffer_deinit(&process->message_queue);
 
 	cap_revoke_for_process(process->pid);
 

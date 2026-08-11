@@ -3,9 +3,9 @@
 #include <stdbool.h>
 #include <string.h>
 
-void message_queue_init(struct ring_buffer* rb) {
-	if (rb == NULL) return;
-	ring_buffer_init(rb, "message_queue", SPINLOCK_ORDER_PROCESS, MESSAGE_QUEUE_DEPTH, sizeof(struct message));
+bool message_queue_init(struct ring_buffer* rb) {
+	if (rb == NULL) return false;
+	return ring_buffer_init(rb, "message_queue", SPINLOCK_ORDER_PROCESS, MESSAGE_QUEUE_DEPTH, sizeof(struct message));
 }
 
 enum message_result message_queue_send(struct ring_buffer* rb, process_id_t sender_pid, const void* data,

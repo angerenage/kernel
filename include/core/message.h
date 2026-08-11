@@ -14,7 +14,7 @@ struct message {
 };
 
 /* Initialize a message ring buffer. */
-void message_queue_init(struct ring_buffer* rb);
+bool message_queue_init(struct ring_buffer* rb);
 
 /* Enqueue a message payload. */
 enum message_result message_queue_send(struct ring_buffer* rb, process_id_t sender_pid, const void* data,

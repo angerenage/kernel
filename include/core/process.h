@@ -132,13 +132,15 @@ struct process {
 	bool detached;
 	/* When true, some thread has successfully joined this process. */
 	bool joined;
+	/* Serializes creation of the unique initial thread. */
+	bool main_thread_starting;
 	/* Lazily-created cap_object id for this process; CAP_OBJECT_ID_INVALID until one is created. */
 	cap_object_id_t cap_object_id;
 	/* Lazily-created cap_object id for this process' address space. */
 	cap_object_id_t address_space_cap_object_id;
 };
 
-/* Allocate, initialize, and queue a userspace thread inside process. Detached threads do not publish a handle. */
+/* Allocate and queue a userspace thread. out_thread remains NULL for detached threads. */
 enum process_thread_spawn_result process_spawn_thread(struct process* process, struct uthread** out_thread,
                                                       const struct process_thread_params* params);
 
