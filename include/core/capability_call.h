@@ -14,6 +14,12 @@ struct cap_pending_reply {
 	void*                    response;
 };
 
+struct cap_pending_request {
+	struct cap_pending_call* call;
+	const void*              request;
+	size_t                   request_size;
+};
+
 enum cap_pending_reply_result {
 	CAP_PENDING_REPLY_OK = 0,
 	CAP_PENDING_REPLY_NOT_FOUND,
@@ -29,6 +35,18 @@ struct cap_pending_call* cap_pending_call_create(channel_id_t endpoint_id, proce
 cap_call_id_t            cap_pending_call_id(const struct cap_pending_call* call);
 void cap_pending_call_wait(struct cap_pending_call* call, syscall_result_t* out_result, const void** out_response);
 void cap_pending_call_destroy(struct cap_pending_call* call);
+
+/* Transfer ownership of a kernel request buffer to call before publishing its queue entry. */
+bool cap_pending_call_attach_request(struct cap_pending_call* call, void* request, size_t request_size);
+
+/*
+ * Pin a queued request buffer before dereferencing it. This rejects canceled or already-removed calls, allowing stale
+ * queue entries to be discarded without touching their old pointer value.
+ */
+bool cap_pending_call_prepare_receive(cap_call_id_t id, process_id_t provider, struct cap_pending_request* out_request);
+
+/* Release the request-buffer pin established by cap_pending_call_prepare_receive(). */
+void cap_pending_call_finish_receive(struct cap_pending_request* request);
 
 enum cap_pending_reply_result cap_pending_call_prepare_reply(cap_call_id_t id, process_id_t provider,
                                                              size_t response_size, struct cap_pending_reply* out_reply);

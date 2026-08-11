@@ -312,7 +312,7 @@ cap_id_t kernel_process_grant(struct process* target, process_id_t recipient, ca
 		object_id = object->cap_object_id;
 	}
 
-	cap = cap_create(object_id, recipient, rights, NULL);
+	cap = cap_create(object_id, recipient, rights, NULL, NULL);
 	if (cap == NULL) return CAP_ID_INVALID;
 
 	return cap->cap_id;

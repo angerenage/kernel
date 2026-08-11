@@ -91,7 +91,7 @@ cap_id_t kernel_capability_loader_grant(process_id_t recipient) {
 
 	if (loader_object == NULL) return CAP_ID_INVALID;
 
-	cap = cap_create(loader_object->cap_object_id, recipient, CAP_CALL | CAP_DELEGATE, NULL);
+	cap = cap_create(loader_object->cap_object_id, recipient, CAP_CALL | CAP_DELEGATE, NULL, NULL);
 	if (cap == NULL) return CAP_ID_INVALID;
 
 	return cap->cap_id;

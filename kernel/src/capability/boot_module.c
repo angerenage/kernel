@@ -171,25 +171,34 @@ syscall_result_t kernel_capability_boot_module_get(cap_id_t module_cap, process_
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 	*out_module = NULL;
-	cap         = cap_lookup(module_cap);
+	cap         = cap_acquire(module_cap);
 	if (cap == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	result = cap_is_authorized(caller, cap);
-	if (result != CAP_OK) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
+	if (result != CAP_OK) {
+		cap_release(cap);
+		return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
+	}
 	result = cap_is_valid(cap);
-	if (result != CAP_OK) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	if ((cap->rights & required_rights) != required_rights) {
+	if (result != CAP_OK) {
+		cap_release(cap);
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
+	if ((cap_rights(cap) & required_rights) != required_rights) {
+		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	}
 
 	object = cap_object_acquire(cap->cap_object_id);
 	if (object == NULL || object->handler != boot_module_handler) {
 		cap_object_release(object);
+		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
 	id = (module_id_t)object->object_id;
 	if (id != MODULE_ID_INVALID) *out_module = kernel_boot_module_at((size_t)(id - 1u));
 	cap_object_release(object);
+	cap_release(cap);
 	return *out_module == NULL ? syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u) : syscall_result_ok(0u);
 }
 
@@ -214,6 +223,6 @@ cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t r
 		*slot     = object_id;
 	}
 
-	cap = cap_create(object_id, recipient, CAP_READ | CAP_MAP | CAP_CALL, NULL);
+	cap = cap_create(object_id, recipient, CAP_READ | CAP_MAP | CAP_CALL, NULL, NULL);
 	return cap == NULL ? CAP_ID_INVALID : cap->cap_id;
 }

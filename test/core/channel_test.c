@@ -106,7 +106,7 @@ Test(channel, destroy_unpublishes_endpoint_objects) {
 	capability_init();
 	ch = channel_create(3u);
 	cr_assert_not_null(ch);
-	object = cap_object_create(77u, ch);
+	object = cap_object_create(77u, ch, NULL);
 	cr_assert_not_null(object);
 	object_id = object->cap_object_id;
 

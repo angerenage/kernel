@@ -190,7 +190,7 @@ cap_id_t kernel_thread_grant(struct uthread* target, process_id_t recipient, cap
 		cap_object_release(object);
 	}
 
-	cap        = cap_create(object_id, recipient, rights, NULL);
+	cap        = cap_create(object_id, recipient, rights, NULL, NULL);
 	result_cap = cap == NULL ? CAP_ID_INVALID : cap->cap_id;
 out:
 	uthread_release(held);

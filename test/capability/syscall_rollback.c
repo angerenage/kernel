@@ -82,7 +82,7 @@ Test(capability_syscall, publish_output_failure_preserves_preexisting_object) {
 	syscall_result_t   result;
 
 	cr_assert_not_null(channel);
-	object = cap_object_create(object_id, channel);
+	object = cap_object_create(object_id, channel, NULL);
 	cr_assert_not_null(object);
 	objects_before = capability_object_count();
 	caps_before    = capability_count();
@@ -106,13 +106,13 @@ Test(capability_syscall, publish_output_failure_preserves_preexisting_object) {
 
 Test(capability_syscall, delegate_output_failure_rolls_back_child_capability) {
 	struct process*    process = make_current_process("cap/delegate-rollback");
-	struct cap_object* object  = cap_object_create(0x2003u, NULL);
+	struct cap_object* object  = cap_object_create(0x2003u, NULL, NULL);
 	struct capability* source;
 	size_t             caps_before;
 	syscall_result_t   result;
 
 	cr_assert_not_null(object);
-	source = cap_create(object->cap_object_id, process_pid(process), CAP_READ | CAP_DELEGATE, NULL);
+	source = cap_create(object->cap_object_id, process_pid(process), CAP_READ | CAP_DELEGATE, NULL, NULL);
 	cr_assert_not_null(source);
 	caps_before = capability_count();
 
@@ -142,9 +142,9 @@ Test(capability_syscall, derive_output_failure_rolls_back_child_and_new_object) 
 	syscall_result_t   result;
 
 	cr_assert_not_null(channel);
-	base_object = cap_object_create(0x2004u, channel);
+	base_object = cap_object_create(0x2004u, channel, NULL);
 	cr_assert_not_null(base_object);
-	base_cap = cap_create(base_object->cap_object_id, process_pid(process), CAP_DERIVE, NULL);
+	base_cap = cap_create(base_object->cap_object_id, process_pid(process), CAP_DERIVE, NULL, NULL);
 	cr_assert_not_null(base_cap);
 	objects_before = capability_object_count();
 	caps_before    = capability_count();

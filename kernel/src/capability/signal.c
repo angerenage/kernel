@@ -173,35 +173,52 @@ static syscall_result_t kernel_signal_acquire(cap_id_t cap_id, process_id_t call
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
-	cap = cap_lookup(cap_id);
+	cap = cap_acquire(cap_id);
 	if (cap == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	cap_result = cap_is_authorized(caller, cap);
-	if (cap_result == CAP_OBJECT_DESTROYED) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
-	if (cap_result != CAP_OK) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
-	cap_result = cap_is_valid(cap);
-	if (cap_result == CAP_OBJECT_DESTROYED || cap_result == CAP_NOT_FOUND) {
+	if (cap_result == CAP_OBJECT_DESTROYED) {
+		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 	}
-	if (cap_result != CAP_OK) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
-	if ((cap->rights & required_rights) != required_rights) {
+	if (cap_result != CAP_OK) {
+		cap_release(cap);
+		return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
+	}
+	cap_result = cap_is_valid(cap);
+	if (cap_result == CAP_OBJECT_DESTROYED || cap_result == CAP_NOT_FOUND) {
+		cap_release(cap);
+		return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	}
+	if (cap_result != CAP_OK) {
+		cap_release(cap);
+		return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
+	}
+	if ((cap_rights(cap) & required_rights) != required_rights) {
+		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	}
 
 	object = cap_object_acquire(cap->cap_object_id);
-	if (object == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	if (object == NULL) {
+		cap_release(cap);
+		return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	}
 	if (object->endpoint != NULL || object->handler != signal_handler) {
 		cap_object_release(object);
+		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
 	signal = signal_acquire((signal_id_t)object->object_id);
 	if (signal == NULL) {
 		cap_object_release(object);
+		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 	}
 
 	out_reference->object = object;
 	out_reference->signal = signal;
+	cap_release(cap);
 	return syscall_result_ok(0u);
 }
 
@@ -312,7 +329,7 @@ cap_id_t kernel_signal_grant(struct signal* target, process_id_t recipient, cap_
 		cap_object_release(object);
 	}
 
-	cap        = cap_create(object_id, recipient, rights, NULL);
+	cap        = cap_create(object_id, recipient, rights, NULL, NULL);
 	result_cap = cap == NULL ? CAP_ID_INVALID : cap->cap_id;
 out:
 	signal_release(held);

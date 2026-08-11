@@ -50,13 +50,19 @@ enum cap_result {
 	CAP_OBJECT_DESTROYED,
 };
 
-/* Publish a userspace provider's object identifier through an endpoint. Returns NULL on failure. */
-struct cap_object* cap_object_create(uint64_t object_id, struct channel* endpoint);
+/*
+ * Find or publish a userspace provider's object through an endpoint. Returns NULL on failure.
+ * When out_created is
+ * non-NULL, it reports whether this call installed the returned table record. This allows
+ * callers to roll back their
+ * own creation without destroying an older record returned by deduplication.
+ */
+struct cap_object* cap_object_create(uint64_t object_id, struct channel* endpoint, bool* out_created);
 
 /* Publish a kernel provider's object identifier through a handler. Returns NULL on failure. */
 struct cap_object* cap_object_create_kernel(uint64_t object_id, cap_kernel_handler_t handler);
 
-/* Look up an existing kernel object by its endpoint and object_id. */
+/* Look up an existing object. The returned pointer is borrowed and requires external lifetime synchronisation. */
 struct cap_object* cap_object_lookup(struct channel* endpoint, uint64_t object_id);
 
 /* Retain a registered object so it cannot be finalized until cap_object_release(). */
@@ -74,15 +80,32 @@ bool cap_object_destroy(struct cap_object* object);
 /* Unpublish every routing object owned by endpoint. Represented provider resources remain untouched. */
 void cap_object_unregister_endpoint(struct channel* endpoint);
 
-/* Create a new capability granting rights on cap_object_id to target. The capability does not take ownership of the
- * object. */
+/*
+ * Create or deduplicate a capability grant. The returned pointer is table-owned and the capability does not retain
+ *
+ * the represented cap_object. When out_created is non-NULL, it reports whether this call installed a fresh record,
+ *
+ * allowing precise rollback without destroying an older identical grant.
+ */
 struct capability* cap_create(cap_object_id_t cap_object_id, process_id_t target, cap_rights_t rights,
-                              struct capability* parent);
+                              struct capability* parent, bool* out_created);
 
-/* Look up a capability by its global ID. */
+/* Look up a capability by ID. The returned pointer is borrowed and requires external lifetime synchronisation. */
 struct capability* cap_lookup(cap_id_t id);
 
-/* Destroy a capability and remove it from the global capability table. */
+/* Acquire a capability record by ID so concurrent removal cannot reclaim it. */
+struct capability* cap_acquire(cap_id_t id);
+
+/* Release a record returned by cap_acquire(). */
+void cap_release(struct capability* capability);
+
+/* Synchronised accessors for mutable grant state. Immutable fields require a retained record. */
+cap_rights_t cap_rights(const struct capability* capability);
+bool         cap_is_revoked(const struct capability* capability);
+void         cap_mark_revoked(struct capability* capability);
+bool         cap_remove_rights(struct capability* capability, cap_rights_t rights);
+
+/* Remove a capability from the table. The pointer must already be protected by ownership or a retained reference. */
 bool cap_destroy(struct capability* capability);
 
 /* Destroy a capability whose ID is already known, without dereferencing the supplied pointer. */

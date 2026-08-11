@@ -7,8 +7,8 @@ Test(capability, validity_revoked_self) {
 
 	cap_test_setup();
 
-	obj = cap_object_create(1u, NULL);
-	cap = cap_create(obj->cap_object_id, 5u, CAP_READ, NULL);
+	obj = cap_object_create(1u, NULL, NULL);
+	cap = cap_create(obj->cap_object_id, 5u, CAP_READ, NULL, NULL);
 
 	result = cap_is_valid(cap);
 	cr_assert_eq(result, CAP_OK, "valid cap should return CAP_OK");
@@ -30,10 +30,10 @@ Test(capability, validity_revoked_ancestor) {
 
 	cap_test_setup();
 
-	obj        = cap_object_create(1u, NULL);
-	root       = cap_create(obj->cap_object_id, 10u, CAP_READ | CAP_DELEGATE, NULL);
-	child      = cap_create(obj->cap_object_id, 5u, CAP_READ, root);
-	grandchild = cap_create(obj->cap_object_id, 7u, CAP_READ, child);
+	obj        = cap_object_create(1u, NULL, NULL);
+	root       = cap_create(obj->cap_object_id, 10u, CAP_READ | CAP_DELEGATE, NULL, NULL);
+	child      = cap_create(obj->cap_object_id, 5u, CAP_READ, root, NULL);
+	grandchild = cap_create(obj->cap_object_id, 7u, CAP_READ, child, NULL);
 
 	result = cap_is_valid(grandchild);
 	cr_assert_eq(result, CAP_OK, "chain should be valid");
@@ -63,10 +63,10 @@ Test(capability, revoke_for_process_marks_target_caps) {
 
 	cap_test_setup();
 
-	obj = cap_object_create(4u, NULL);
+	obj = cap_object_create(4u, NULL, NULL);
 
-	targeted = cap_create(obj->cap_object_id, 42u, CAP_READ, NULL);
-	other    = cap_create(obj->cap_object_id, 99u, CAP_READ, NULL);
+	targeted = cap_create(obj->cap_object_id, 42u, CAP_READ, NULL, NULL);
+	other    = cap_create(obj->cap_object_id, 99u, CAP_READ, NULL, NULL);
 
 	cr_assert_eq(cap_is_valid(targeted), CAP_OK, "targeted cap starts valid");
 	cr_assert_eq(cap_is_valid(other), CAP_OK, "other cap starts valid");
@@ -91,8 +91,8 @@ Test(capability, revoke_for_process_is_noop_for_unknown_pid) {
 
 	cap_test_setup();
 
-	obj = cap_object_create(5u, NULL);
-	cap = cap_create(obj->cap_object_id, 42u, CAP_READ, NULL);
+	obj = cap_object_create(5u, NULL, NULL);
+	cap = cap_create(obj->cap_object_id, 42u, CAP_READ, NULL, NULL);
 
 	cap_revoke_for_process(1234u);
 
@@ -111,19 +111,19 @@ Test(capability, regrant_after_full_revoke_creates_a_fresh_live_capability) {
 	cap_id_t           original_id;
 
 	cap_test_setup();
-	object = cap_object_create(0x103u, NULL);
+	object = cap_object_create(0x103u, NULL, NULL);
 	cr_assert_not_null(object);
-	original = cap_create(object->cap_object_id, 10u, CAP_READ | CAP_DELEGATE, NULL);
+	original = cap_create(object->cap_object_id, 10u, CAP_READ | CAP_DELEGATE, NULL, NULL);
 	cr_assert_not_null(original);
 	original_id = original->cap_id;
-	descendant  = cap_create(object->cap_object_id, 11u, CAP_READ, original);
+	descendant  = cap_create(object->cap_object_id, 11u, CAP_READ, original, NULL);
 	cr_assert_not_null(descendant);
 
 	cap_revoke_for_process(10u);
 	cr_assert_eq(cap_is_valid(original), CAP_REVOKED);
 	cr_assert_eq(cap_is_valid(descendant), CAP_REVOKED);
 
-	replacement = cap_create(object->cap_object_id, 10u, CAP_READ | CAP_DELEGATE, NULL);
+	replacement = cap_create(object->cap_object_id, 10u, CAP_READ | CAP_DELEGATE, NULL, NULL);
 	cr_assert_not_null(replacement, "a later legitimate grant must still be possible");
 	cr_assert_neq(replacement, original, "regrant must not return the revoked capability record");
 	cr_assert_neq(replacement->cap_id, original_id, "regrant must receive an independent capability id");
@@ -143,15 +143,15 @@ Test(capability, revoked_parent_cannot_gain_new_descendants) {
 	size_t             count_before;
 
 	cap_test_setup();
-	object = cap_object_create(0x104u, NULL);
+	object = cap_object_create(0x104u, NULL, NULL);
 	cr_assert_not_null(object);
-	parent = cap_create(object->cap_object_id, 20u, CAP_READ | CAP_DELEGATE, NULL);
+	parent = cap_create(object->cap_object_id, 20u, CAP_READ | CAP_DELEGATE, NULL, NULL);
 	cr_assert_not_null(parent);
 
 	cap_revoke_for_process(20u);
 	cr_assert_eq(cap_is_valid(parent), CAP_REVOKED);
 	count_before = capability_count();
-	cr_assert_null(cap_create(object->cap_object_id, 21u, CAP_READ, parent),
+	cr_assert_null(cap_create(object->cap_object_id, 21u, CAP_READ, parent, NULL),
 	               "cap_create must not attach a new child below a revoked parent");
 	cr_assert_eq(
 		capability_count(), count_before, "rejected child creation must not leave an already-invalid capability");

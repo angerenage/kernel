@@ -174,7 +174,7 @@ Test(syscall, capability_call_uses_distinct_request_and_response_buffers) {
 
 	object = cap_object_create_kernel(1u, syscall_test_cap_handler);
 	cr_assert_not_null(object);
-	capability = cap_create(object->cap_object_id, process_pid(process), CAP_CALL, NULL);
+	capability = cap_create(object->cap_object_id, process_pid(process), CAP_CALL, NULL, NULL);
 	cr_assert_not_null(capability);
 
 	result = syscall_dispatch(SYSCALL_CAP_CALL,

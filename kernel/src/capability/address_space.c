@@ -143,7 +143,7 @@ cap_id_t kernel_address_space_grant(struct process* process, process_id_t recipi
 		process_set_address_space_cap_object_id(process, object_id);
 	}
 
-	cap = cap_create(object_id, recipient, rights, NULL);
+	cap = cap_create(object_id, recipient, rights, NULL, NULL);
 	if (cap == NULL) return CAP_ID_INVALID;
 
 	return cap->cap_id;

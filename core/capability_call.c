@@ -21,6 +21,8 @@ struct cap_pending_call {
 	process_id_t     provider;
 	process_id_t     caller;
 	size_t           response_capacity;
+	void*            request;
+	size_t           request_size;
 	void*            response;
 	syscall_result_t result;
 	struct semaphore completion;
@@ -53,6 +55,7 @@ static struct cap_pending_call* cap_pending_call_acquire(cap_call_id_t id) {
 static void cap_pending_call_release(struct cap_pending_call* call) {
 	if (call == NULL) return;
 	if (__atomic_sub_fetch(&call->reference_count, 1u, __ATOMIC_ACQ_REL) != 0u) return;
+	free(call->request);
 	free(call->response);
 	free(call);
 }
@@ -128,6 +131,45 @@ void cap_pending_call_destroy(struct cap_pending_call* call) {
 	if (call == NULL) return;
 	if (id_table_remove(&pending_call_table, call->id, (void**)&removed) != ID_TABLE_OK) return;
 	cap_pending_call_release(removed);
+}
+
+bool cap_pending_call_attach_request(struct cap_pending_call* call, void* request, size_t request_size) {
+	if (call == NULL || request == NULL || request_size == 0u || call->request != NULL) return false;
+	call->request      = request;
+	call->request_size = request_size;
+	return true;
+}
+
+bool cap_pending_call_prepare_receive(cap_call_id_t id, process_id_t provider,
+                                      struct cap_pending_request* out_request) {
+	struct cap_pending_call* call;
+
+	if (out_request == NULL) return false;
+	out_request->call         = NULL;
+	out_request->request      = NULL;
+	out_request->request_size = 0u;
+	call                      = cap_pending_call_acquire(id);
+	if (call == NULL) return false;
+	if (call->provider != provider || call->request == NULL ||
+	    __atomic_load_n(&call->state, __ATOMIC_ACQUIRE) != CAP_PENDING_STATE_WAITING) {
+		cap_pending_call_release(call);
+		return false;
+	}
+	out_request->call         = call;
+	out_request->request      = call->request;
+	out_request->request_size = call->request_size;
+	return true;
+}
+
+void cap_pending_call_finish_receive(struct cap_pending_request* request) {
+	struct cap_pending_call* call;
+
+	if (request == NULL || request->call == NULL) return;
+	call                  = request->call;
+	request->call         = NULL;
+	request->request      = NULL;
+	request->request_size = 0u;
+	cap_pending_call_release(call);
 }
 
 enum cap_pending_reply_result cap_pending_call_prepare_reply(cap_call_id_t id, process_id_t provider,

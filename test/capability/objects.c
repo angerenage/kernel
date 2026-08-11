@@ -13,7 +13,7 @@ Test(capability, object_create_and_lookup) {
 
 	cap_test_setup();
 
-	obj1 = cap_object_create(42u, NULL);
+	obj1 = cap_object_create(42u, NULL, NULL);
 	cr_assert_not_null(obj1, "cap_object_create should succeed");
 	cr_assert_eq(obj1->object_id, 42u, "object_id mismatch");
 	cr_assert_null(obj1->endpoint, "endpoint should be NULL for kernel object");
@@ -21,7 +21,7 @@ Test(capability, object_create_and_lookup) {
 	found = cap_object_lookup(NULL, 42u);
 	cr_assert_eq(found, obj1, "cap_object_lookup should find the created object");
 
-	obj2 = cap_object_create(42u, NULL);
+	obj2 = cap_object_create(42u, NULL, NULL);
 	cr_assert_not_null(obj2, "second cap_object_create should succeed");
 	cr_assert_eq(obj2, obj1, "cap_object_create should deduplicate on (object_id, endpoint)");
 
@@ -39,7 +39,7 @@ Test(capability, object_destroy) {
 
 	cap_test_setup();
 
-	obj = cap_object_create(1u, NULL);
+	obj = cap_object_create(1u, NULL, NULL);
 	cr_assert_not_null(obj);
 	cr_assert_eq(capability_object_count(), 1u);
 
@@ -60,13 +60,13 @@ Test(capability, counts_track_allocations) {
 	cr_assert_eq(capability_count(), 0u);
 
 	for (size_t i = 0; i < 4; i++) {
-		objs[i] = cap_object_create(i, NULL);
+		objs[i] = cap_object_create(i, NULL, NULL);
 		cr_assert_not_null(objs[i]);
 		cr_assert_eq(capability_object_count(), i + 1, "object count mismatch at %zu", i);
 	}
 
 	for (size_t i = 0; i < 4; i++) {
-		caps[i] = cap_create(objs[i]->cap_object_id, 1u, CAP_READ, NULL);
+		caps[i] = cap_create(objs[i]->cap_object_id, 1u, CAP_READ, NULL, NULL);
 		cr_assert_not_null(caps[i]);
 		cr_assert_eq(capability_count(), i + 1, "capability count mismatch at %zu", i);
 	}
@@ -85,7 +85,7 @@ Test(capability, counts_track_allocations) {
 Test(capability, create_rejects_unknown_object_ids) {
 	cap_test_setup();
 
-	cr_assert_null(cap_create((cap_object_id_t)0x7fffffffu, 1u, CAP_READ, NULL),
+	cr_assert_null(cap_create((cap_object_id_t)0x7fffffffu, 1u, CAP_READ, NULL, NULL),
 	               "a capability must not be created for an unregistered cap_object");
 	cr_assert_eq(capability_count(), 0u, "rejected creation must not leave a dead capability record");
 }
@@ -95,13 +95,13 @@ Test(capability, destroyed_object_id_cannot_create_a_dead_capability) {
 	cap_object_id_t    object_id;
 
 	cap_test_setup();
-	object = cap_object_create(0x102u, NULL);
+	object = cap_object_create(0x102u, NULL, NULL);
 	cr_assert_not_null(object);
 	object_id = object->cap_object_id;
 
 	cr_assert(cap_object_destroy_with_id(object_id), "failed to unregister test cap_object");
 	cr_assert_eq(capability_object_count(), 0u);
-	cr_assert_null(cap_create(object_id, 2u, CAP_READ, NULL),
+	cr_assert_null(cap_create(object_id, 2u, CAP_READ, NULL, NULL),
 	               "cap_create must reject an object id after that object is unregistered");
 	cr_assert_eq(capability_count(), 0u, "dead-object creation leaked an unusable capability");
 }
@@ -112,7 +112,7 @@ Test(capability, acquired_object_survives_unregistration_until_release) {
 	cap_object_id_t    id;
 
 	cap_test_setup();
-	object = cap_object_create(0x105u, NULL);
+	object = cap_object_create(0x105u, NULL, NULL);
 	cr_assert_not_null(object);
 	id   = object->cap_object_id;
 	held = cap_object_acquire(id);
