@@ -92,3 +92,40 @@ Test(exception_fault, user_fault_cannot_materialize_a_lazy_kernel_mapping) {
 	vmm_address_space_deinit(&user_space);
 	hal_cpu_local_bind(NULL);
 }
+
+Test(exception_fault, forbidden_user_access_does_not_materialize_lazy_backing) {
+	_Alignas(4096) uint8_t  arena[KiB(512)];
+	struct address_space    user_space = {0};
+	struct thread           current    = {0};
+	struct vmm_alloc_params params     = {
+			.page_count  = 1u,
+			.align_pages = 1u,
+			.prot        = VMM_PROT_READ | VMM_PROT_USER,
+			.kind        = VMM_KIND_GENERIC,
+			.map_flags   = VMM_MAP_LAZY,
+    };
+	vmm_id_t id   = VMM_ID_INVALID;
+	void*    base = NULL;
+	size_t   free_before;
+
+	init_test_vmm(arena, sizeof(arena));
+	bind_exception_test_cpu();
+	init_small_user_space(&user_space);
+	current.address_space         = &user_space;
+	cpu_current()->current_thread = &current;
+
+	cr_assert(vmm_alloc(&user_space, &params, &id, &base));
+	free_before = pmm_free_page_count();
+	cr_assert_not(vmm_handle_current_page_fault((uintptr_t)base, VMM_FAULT_NOT_PRESENT, VMM_FAULT_ACCESS_WRITE, true));
+	cr_assert_not(hal_paging_query(address_space_hal(&user_space), (uintptr_t)base, NULL, NULL));
+	cr_assert_eq(pmm_free_page_count(), free_before, "a rejected write fault must not allocate physical backing");
+
+	cr_assert(vmm_handle_current_page_fault((uintptr_t)base, VMM_FAULT_NOT_PRESENT, VMM_FAULT_ACCESS_READ, true));
+	cr_assert(hal_paging_query(address_space_hal(&user_space), (uintptr_t)base, NULL, NULL),
+	          "an allowed read fault must still materialize userspace lazy backing");
+
+	cpu_current()->current_thread = NULL;
+	cr_assert(vmm_free(&user_space, id));
+	vmm_address_space_deinit(&user_space);
+	hal_cpu_local_bind(NULL);
+}

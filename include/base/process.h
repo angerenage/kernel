@@ -52,6 +52,11 @@ enum process_exit_code {
 	/* Floating-point and SIMD exceptions. */
 	PROCESS_EXIT_FLOATING_POINT_ERROR = 0x900u,
 	PROCESS_EXIT_FLOATING_POINT_SIMD,
+
+	/* Debugger and software-generated traps. */
+	PROCESS_EXIT_BREAKPOINT = 0xa00u,
+	PROCESS_EXIT_DEBUG,
+	PROCESS_EXIT_WATCHPOINT,
 };
 
 /* Identity information returned by the self syscall. */

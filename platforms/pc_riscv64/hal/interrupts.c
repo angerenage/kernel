@@ -190,6 +190,9 @@ static bool riscv64_exception_kind(uint64_t code, enum core_exception_kind* out_
 	case 2:
 		*out_kind = CORE_EXCEPTION_INSTRUCTION_ILLEGAL;
 		return true;
+	case 3:
+		*out_kind = CORE_EXCEPTION_BREAKPOINT;
+		return true;
 	default:
 		return false;
 	}
@@ -226,7 +229,7 @@ void handle_exception(struct exception_frame* frame) {
 	if (!is_interrupt && is_page_fault_exception(code)) {
 		cpu_leave_exception();
 		if (vmm_handle_current_page_fault(
-				frame->stval, VMM_FAULT_NOT_PRESENT, page_fault_access(code), was_user_mode(frame->sstatus))) {
+				frame->stval, VMM_FAULT_UNCLASSIFIED, page_fault_access(code), was_user_mode(frame->sstatus))) {
 			return;
 		}
 		cpu_enter_exception();

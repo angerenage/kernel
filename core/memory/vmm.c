@@ -249,7 +249,39 @@ bool vmm_resolve_page_fault_guarded(const struct vmm_transfer_guard* guard, stru
 	return region_pager_handle_lazy_fault(space, region, addr);
 }
 
-static bool resolve_current_lazy_fault(uintptr_t addr) {
+static bool fault_access_allowed(const struct memory_region* region, enum vmm_fault_access access, bool user_mode) {
+	if (region == NULL) return false;
+	if (user_mode && (region->prot & VMM_PROT_USER) == 0u) return false;
+	switch (access) {
+	case VMM_FAULT_ACCESS_READ:
+		return (region->prot & VMM_PROT_READ) != 0u;
+	case VMM_FAULT_ACCESS_WRITE:
+		return (region->prot & VMM_PROT_WRITE) != 0u;
+	case VMM_FAULT_ACCESS_EXEC:
+		return (region->prot & VMM_PROT_EXEC) != 0u;
+	case VMM_FAULT_ACCESS_UNKNOWN:
+	default:
+		return true;
+	}
+}
+
+static bool resolve_lazy_fault_in_space(struct address_space* space, uintptr_t addr, enum vmm_fault_access access,
+                                        bool user_mode) {
+	struct vmm_transfer_guard guard = {0};
+	struct memory_region*     region;
+	bool                      resolved = false;
+
+	if (space == NULL) return false;
+	vmm_transfer_guard_acquire(&guard);
+	region = memory_region_find_containing(space, addr);
+	if (fault_access_allowed(region, access, user_mode)) {
+		resolved = vmm_resolve_page_fault_guarded(&guard, space, addr);
+	}
+	vmm_transfer_guard_release(&guard);
+	return resolved;
+}
+
+static bool resolve_current_lazy_fault(uintptr_t addr, enum vmm_fault_access access, bool user_mode) {
 	struct thread*        current;
 	struct address_space* current_space;
 	struct address_space* kernel_space;
@@ -257,9 +289,33 @@ static bool resolve_current_lazy_fault(uintptr_t addr) {
 	current       = sched_current_thread();
 	current_space = current == NULL ? NULL : current->address_space;
 	kernel_space  = address_space_kernel();
-	if (current_space != NULL && vmm_resolve_page_fault(current_space, addr)) return true;
+	if (current_space != NULL && resolve_lazy_fault_in_space(current_space, addr, access, user_mode)) return true;
+	if (user_mode) return false;
 	if (current_space == kernel_space) return false;
-	return vmm_resolve_page_fault(kernel_space, addr);
+	return resolve_lazy_fault_in_space(kernel_space, addr, access, false);
+}
+
+static enum vmm_fault_kind classify_current_page_fault(uintptr_t addr, bool user_mode) {
+	struct thread*        current;
+	struct address_space* current_space;
+	struct address_space* kernel_space;
+	struct irq_state      state;
+	uintptr_t             page_base;
+	bool                  mapped = false;
+
+	current       = sched_current_thread();
+	current_space = current == NULL ? NULL : current->address_space;
+	kernel_space  = address_space_kernel();
+	page_base     = addr & ~(uintptr_t)(PMM_PAGE_SIZE - 1u);
+	state         = spinlock_lock_irqsave(&vmm_lock);
+	if (current_space != NULL) {
+		mapped = hal_paging_query(address_space_hal(current_space), page_base, NULL, NULL);
+	}
+	if (!mapped && !user_mode && current_space != kernel_space) {
+		mapped = hal_paging_query(address_space_hal(kernel_space), page_base, NULL, NULL);
+	}
+	spinlock_unlock_irqrestore(&vmm_lock, state);
+	return mapped ? VMM_FAULT_PROTECTION : VMM_FAULT_NOT_PRESENT;
 }
 
 static uintptr_t vmm_fault_exit_code(enum vmm_fault_kind kind) {
@@ -278,8 +334,8 @@ bool vmm_handle_current_page_fault(uintptr_t addr, enum vmm_fault_kind kind, enu
                                    bool user_mode) {
 	struct process* process;
 
-	(void)access;
-	if (kind == VMM_FAULT_NOT_PRESENT && resolve_current_lazy_fault(addr)) return true;
+	if (kind == VMM_FAULT_UNCLASSIFIED) kind = classify_current_page_fault(addr, user_mode);
+	if (kind == VMM_FAULT_NOT_PRESENT && resolve_current_lazy_fault(addr, access, user_mode)) return true;
 	if (!user_mode) return false;
 	process = process_current();
 	if (process == NULL) return false;

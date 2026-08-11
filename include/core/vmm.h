@@ -19,6 +19,8 @@ enum vmm_fault_kind {
 	VMM_FAULT_NOT_PRESENT = 0,
 	VMM_FAULT_PROTECTION,
 	VMM_FAULT_INVALID,
+	/* The architecture reports a page fault but has no hardware present/protection discriminator. */
+	VMM_FAULT_UNCLASSIFIED,
 };
 
 enum vmm_fault_access {
@@ -75,7 +77,13 @@ void vmm_transfer_guard_release(struct vmm_transfer_guard* guard);
 bool vmm_resolve_page_fault_guarded(const struct vmm_transfer_guard* guard, struct address_space* space,
                                     uintptr_t addr);
 
-/* Resolve or dispatch a current page fault. Kernel faults return false for architecture fatal handling. */
+/*
+ * Resolve or dispatch a current page fault. Lazy backing is materialized only when the faulting mode and access are
+ *
+ * permitted by the region. Unclassified faults are resolved from the active page tables; kernel faults return false
+ *
+ * for architecture fatal handling.
+ */
 bool vmm_handle_current_page_fault(uintptr_t addr, enum vmm_fault_kind kind, enum vmm_fault_access access,
                                    bool user_mode);
 

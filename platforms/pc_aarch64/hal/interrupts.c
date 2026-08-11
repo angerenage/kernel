@@ -135,12 +135,12 @@ static bool is_abort_from_lower_el(uint64_t ec) {
 }
 
 static bool is_page_fault_abort(uint64_t dfsc) {
-	return (dfsc >= 0x04 && dfsc <= 0x0f) || dfsc == 0x21;
+	return dfsc >= 0x04 && dfsc <= 0x0f;
 }
 
 static enum vmm_fault_kind abort_fault_kind(uint64_t dfsc) {
 	if (is_translation_fault(dfsc)) return VMM_FAULT_NOT_PRESENT;
-	if ((dfsc >= 0x08 && dfsc <= 0x0fu) || dfsc == 0x21u) return VMM_FAULT_PROTECTION;
+	if (dfsc >= 0x08 && dfsc <= 0x0fu) return VMM_FAULT_PROTECTION;
 	return VMM_FAULT_INVALID;
 }
 
@@ -265,6 +265,10 @@ static bool aarch64_exception_kind(uint64_t ec, uint64_t dfsc, enum core_excepti
 		return true;
 	case 0x24:
 	case 0x25:
+		if (dfsc == 0x21u) {
+			*out_kind = CORE_EXCEPTION_ALIGNMENT;
+			return true;
+		}
 		if (is_page_fault_abort(dfsc)) return false;
 		*out_kind = CORE_EXCEPTION_ACCESS_DATA_ABORT;
 		return true;

@@ -228,6 +228,9 @@ static bool loongarch64_exception_kind(uint64_t ecode, uint64_t esubcode, enum c
 	case 0xa:
 		*out_kind = CORE_EXCEPTION_ARITHMETIC_BOUND_RANGE;
 		return true;
+	case 0xc:
+		*out_kind = CORE_EXCEPTION_BREAKPOINT;
+		return true;
 	case 0xd:
 		*out_kind = CORE_EXCEPTION_INSTRUCTION_ILLEGAL;
 		return true;
@@ -236,6 +239,9 @@ static bool loongarch64_exception_kind(uint64_t ecode, uint64_t esubcode, enum c
 		return true;
 	case 0x12:
 		*out_kind = esubcode == 0 ? CORE_EXCEPTION_FLOATING_POINT : CORE_EXCEPTION_FLOATING_POINT_SIMD;
+		return true;
+	case 0x13:
+		*out_kind = CORE_EXCEPTION_WATCHPOINT;
 		return true;
 	default:
 		return false;

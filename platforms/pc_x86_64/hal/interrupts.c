@@ -53,6 +53,12 @@ static bool x86_exception_kind(unsigned long long vector, enum core_exception_ki
 	case 0:
 		*out_kind = CORE_EXCEPTION_ARITHMETIC_DIVIDE_BY_ZERO;
 		return true;
+	case 1:
+		*out_kind = CORE_EXCEPTION_DEBUG;
+		return true;
+	case 3:
+		*out_kind = CORE_EXCEPTION_BREAKPOINT;
+		return true;
 	case 4:
 		*out_kind = CORE_EXCEPTION_ARITHMETIC_OVERFLOW;
 		return true;

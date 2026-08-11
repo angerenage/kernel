@@ -136,18 +136,23 @@ Test(exception_core, public_user_faults_publish_their_stable_process_exit_codes)
 }
 
 Test(exception_core, debugger_generated_user_traps_are_contained_by_the_core) {
-	static const enum core_exception_kind kinds[] = {
-		CORE_EXCEPTION_BREAKPOINT,
-		CORE_EXCEPTION_DEBUG,
-		CORE_EXCEPTION_WATCHPOINT,
+	static const struct {
+		enum core_exception_kind kind;
+		uintptr_t                exit_code;
+	} cases[] = {
+		{CORE_EXCEPTION_BREAKPOINT, PROCESS_EXIT_BREAKPOINT},
+		{     CORE_EXCEPTION_DEBUG,      PROCESS_EXIT_DEBUG},
+		{CORE_EXCEPTION_WATCHPOINT, PROCESS_EXIT_WATCHPOINT},
 	};
 
-	for (size_t i = 0u; i < sizeof(kinds) / sizeof(kinds[0]); i++) {
+	for (size_t i = 0u; i < sizeof(cases) / sizeof(cases[0]); i++) {
 		exception_test_reset();
 
-		cr_assert(core_handle_user_exception(kinds[i]),
+		cr_assert(core_handle_user_exception(cases[i].kind),
 		          "userspace trap kind %d escaped to architecture-fatal handling",
-		          (int)kinds[i]);
+		          (int)cases[i].kind);
+		cr_assert_eq(terminate_calls, 1u);
+		cr_assert_eq(terminated_exit_code, cases[i].exit_code);
 	}
 }
 

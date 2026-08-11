@@ -50,6 +50,15 @@ static bool core_exception_exit_code(enum core_exception_kind kind, uintptr_t* o
 	case CORE_EXCEPTION_MEMORY_PROTECTION:
 		*out_code = PROCESS_EXIT_MEMORY_PROTECTION;
 		return true;
+	case CORE_EXCEPTION_BREAKPOINT:
+		*out_code = PROCESS_EXIT_BREAKPOINT;
+		return true;
+	case CORE_EXCEPTION_DEBUG:
+		*out_code = PROCESS_EXIT_DEBUG;
+		return true;
+	case CORE_EXCEPTION_WATCHPOINT:
+		*out_code = PROCESS_EXIT_WATCHPOINT;
+		return true;
 	default:
 		return false;
 	}
