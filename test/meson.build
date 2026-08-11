@@ -290,6 +290,19 @@ test_suites = [
 		'suites': ['unit', 'core'],
 	},
 	{
+		'name': 'address_transfer',
+		'sources': files(
+			'vmm/test_support.c',
+			'vmm/mock_paging.c',
+			'address_transfer/validation.c',
+			'address_transfer/copy.c',
+			'address_transfer/overlap.c',
+			'address_transfer/failure.c',
+		),
+		'link_with': core_test_lib,
+		'suites': ['unit', 'memory'],
+	},
+	{
 		'name': 'vmm',
 		'sources': files(
 			'vmm/test_support.c',
@@ -298,7 +311,7 @@ test_suites = [
 			'vmm/mapping.c',
 			'vmm/page_fault.c',
 			'vmm/rollback.c',
-			'vmm/user_memory.c',
+			'vmm/user_mapping.c',
 			'vmm/physical.c',
 			'vmm/lifecycle.c',
 		),
