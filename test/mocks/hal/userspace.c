@@ -18,12 +18,14 @@ struct mock_userspace_context {
 };
 
 static bool userspace_context_init_result = true;
+static void (*userspace_context_init_hook)(void);
 
 _Static_assert(sizeof(struct mock_userspace_context) <= HAL_USERSPACE_CONTEXT_SIZE,
                "mock userspace context storage is too small");
 
 bool hal_userspace_thread_context_init(struct thread_context* context, uintptr_t kernel_stack_top, uintptr_t user_entry,
                                        uintptr_t user_stack, uintptr_t user_arg) {
+	if (userspace_context_init_hook != NULL) userspace_context_init_hook();
 	if (!userspace_context_init_result) return false;
 	if (context == NULL || kernel_stack_top == 0u || user_entry == 0u || user_stack == 0u) return false;
 
@@ -83,4 +85,8 @@ bool hal_userspace_frame_redirect(struct hal_userspace_return_frame* frame, uint
 
 void hal_userspace_mock_set_context_init_result(bool result) {
 	userspace_context_init_result = result;
+}
+
+void hal_userspace_mock_set_context_init_hook(void (*hook)(void)) {
+	userspace_context_init_hook = hook;
 }
