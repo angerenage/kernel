@@ -214,19 +214,39 @@ bool vmm_protect(struct address_space* space, vmm_id_t id, vmm_prot_t new_prot) 
 }
 
 bool vmm_resolve_page_fault(struct address_space* space, uintptr_t addr) {
-	struct memory_region* region;
-	struct irq_state      state;
-	uintptr_t             page_base;
-	bool                  ok = false;
+	struct vmm_transfer_guard guard = {0};
+	bool                      ok;
 
 	if (!initialized || !space) return false;
+	vmm_transfer_guard_acquire(&guard);
+	ok = vmm_resolve_page_fault_guarded(&guard, space, addr);
+	vmm_transfer_guard_release(&guard);
+	return ok;
+}
+
+void vmm_transfer_guard_acquire(struct vmm_transfer_guard* guard) {
+	if (guard == NULL) return;
+	guard->active    = false;
+	guard->irq_state = spinlock_lock_irqsave(&vmm_lock);
+	guard->active    = true;
+}
+
+void vmm_transfer_guard_release(struct vmm_transfer_guard* guard) {
+	if (guard == NULL || !guard->active) return;
+	guard->active = false;
+	spinlock_unlock_irqrestore(&vmm_lock, guard->irq_state);
+}
+
+bool vmm_resolve_page_fault_guarded(const struct vmm_transfer_guard* guard, struct address_space* space,
+                                    uintptr_t addr) {
+	struct memory_region* region;
+	uintptr_t             page_base;
+
+	if (guard == NULL || !guard->active || !initialized || !space) return false;
 	page_base = addr & ~(uintptr_t)(PMM_PAGE_SIZE - 1u);
 	if (hal_paging_query(address_space_hal(space), page_base, NULL, NULL)) return false;
-	state  = spinlock_lock_irqsave(&vmm_lock);
 	region = memory_region_find_containing(space, addr);
-	ok     = region_pager_handle_lazy_fault(space, region, addr);
-	spinlock_unlock_irqrestore(&vmm_lock, state);
-	return ok;
+	return region_pager_handle_lazy_fault(space, region, addr);
 }
 
 static bool resolve_current_lazy_fault(uintptr_t addr) {
@@ -267,15 +287,25 @@ bool vmm_handle_current_page_fault(uintptr_t addr, enum vmm_fault_kind kind, enu
 }
 
 bool vmm_query(struct address_space* space, void* addr, struct vmm_info* out_info) {
-	struct memory_region* region;
-	struct irq_state      state;
+	struct vmm_transfer_guard guard = {0};
+	bool                      found;
 
 	if (out_info) memset(out_info, 0, sizeof(*out_info));
 	if (!initialized || !space || !addr || !out_info) return false;
-	state  = spinlock_lock_irqsave(&vmm_lock);
+	vmm_transfer_guard_acquire(&guard);
+	found = vmm_query_guarded(&guard, space, addr, out_info);
+	vmm_transfer_guard_release(&guard);
+	return found;
+}
+
+bool vmm_query_guarded(const struct vmm_transfer_guard* guard, struct address_space* space, void* addr,
+                       struct vmm_info* out_info) {
+	struct memory_region* region;
+
+	if (out_info) memset(out_info, 0, sizeof(*out_info));
+	if (guard == NULL || !guard->active || !initialized || !space || !addr || !out_info) return false;
 	region = memory_region_find_containing(space, (uintptr_t)addr);
 	if (region) memory_region_fill_info(region, out_info);
-	spinlock_unlock_irqrestore(&vmm_lock, state);
 	return region != NULL;
 }
 

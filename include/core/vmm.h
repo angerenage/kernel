@@ -1,9 +1,19 @@
 #pragma once
 
 #include <base/vmm.h>
+#include <hal/interrupts.h>
 #include <stdbool.h>
 
 struct address_space;
+
+/*
+ * Keeps VMM regions, mappings, and backing pages stable across a complete
+ * address-space transfer. Guarded helpers must only be used while active.
+ */
+struct vmm_transfer_guard {
+	struct irq_state irq_state;
+	bool             active;
+};
 
 enum vmm_fault_kind {
 	VMM_FAULT_NOT_PRESENT = 0,
@@ -57,12 +67,24 @@ bool vmm_protect(struct address_space* space, vmm_id_t id, vmm_prot_t new_prot);
 /* Resolve a lazy fault inside an explicit address space. */
 bool vmm_resolve_page_fault(struct address_space* space, uintptr_t addr);
 
+/* Acquire/release a transfer guard for an explicit address space. */
+void vmm_transfer_guard_acquire(struct vmm_transfer_guard* guard);
+void vmm_transfer_guard_release(struct vmm_transfer_guard* guard);
+
+/* Resolve a lazy fault inside an explicit address space, with a transfer guard. */
+bool vmm_resolve_page_fault_guarded(const struct vmm_transfer_guard* guard, struct address_space* space,
+                                    uintptr_t addr);
+
 /* Resolve or dispatch a current page fault. Kernel faults return false for architecture fatal handling. */
 bool vmm_handle_current_page_fault(uintptr_t addr, enum vmm_fault_kind kind, enum vmm_fault_access access,
                                    bool user_mode);
 
 /* Query the tracked allocation owning an address inside an explicit address space. */
 bool vmm_query(struct address_space* space, void* addr, struct vmm_info* out_info);
+
+/* Query the tracked allocation owning an address inside an explicit address space, with a transfer guard. */
+bool vmm_query_guarded(const struct vmm_transfer_guard* guard, struct address_space* space, void* addr,
+                       struct vmm_info* out_info);
 
 /* Query an explicit address-space allocation by id. */
 bool vmm_query_id(struct address_space* space, vmm_id_t id, struct vmm_info* out_info);
