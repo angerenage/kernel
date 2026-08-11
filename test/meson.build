@@ -315,6 +315,25 @@ test_suites = [
 		'suites': ['unit', 'core'],
 	},
 	{
+		'name': 'exception_policy',
+		'sources': files(
+			'exception/policy.c',
+			'../core/exception.c',
+		),
+		'link_with': base_test_lib,
+		'suites': ['unit', 'core'],
+	},
+	{
+		'name': 'exception_fault',
+		'sources': files(
+			'vmm/test_support.c',
+			'vmm/mock_paging.c',
+			'exception/page_fault.c',
+		),
+		'link_with': core_test_lib,
+		'suites': ['unit', 'memory'],
+	},
+	{
 		'name': 'user_return',
 		'sources': files(
 			'core/user_return_test.c',
@@ -353,6 +372,19 @@ test_suites = [
 		'suites': ['unit', 'memory'],
 	},
 ]
+
+if build_machine.cpu_family() == 'aarch64'
+	test_suites += [
+		{
+			'name': 'aarch64_exception_return',
+			'sources': files(
+				'platform/aarch64/exception_return_test.c',
+			),
+			'link_with': base_test_lib,
+			'suites': ['unit', 'platform'],
+		},
+	]
+endif
 
 if build_machine.cpu_family() == 'x86_64'
 	test_suites += [
