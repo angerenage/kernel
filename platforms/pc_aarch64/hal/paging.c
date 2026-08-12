@@ -276,12 +276,38 @@ bool hal_paging_space_create(struct hal_address_space* out_space) {
 	return true;
 }
 
-void hal_paging_space_destroy(struct hal_address_space* space) {
-	if (space == NULL || space->lower_root_phys == 0u) return;
-	if (space->lower_root_phys != kernel_space.lower_root_phys) {
-		(void)pmm_free_pages(space->lower_root_phys, 1);
+static void aarch64_free_page_table_children(uint64_t* table, unsigned level) {
+	if (table == NULL || level == 0u) return;
+	for (size_t index = 0u; index < 512u; index++) {
+		uint64_t entry = table[index];
+		if ((entry & (AARCH64_DESC_VALID | AARCH64_DESC_TABLE)) != (AARCH64_DESC_VALID | AARCH64_DESC_TABLE)) {
+			continue;
+		}
+
+		uintptr_t child_phys = (uintptr_t)(entry & AARCH64_ADDR_MASK);
+		uint64_t* child      = (uint64_t*)hhdm_phys_to_virt(child_phys);
+		aarch64_free_page_table_children(child, level - 1u);
+		(void)pmm_free_pages(child_phys, 1u);
 	}
+}
+
+void hal_paging_space_destroy(struct hal_address_space* space) {
+	struct aarch64_walk_params params;
+	struct irq_state           state;
+	uintptr_t                  root_phys;
+	uint64_t*                  root;
+
+	if (space == NULL || space->lower_root_phys == 0u) return;
+	root_phys = space->lower_root_phys & AARCH64_ADDR_MASK;
+	if (root_phys == kernel_space.lower_root_phys) return;
+	state = spinlock_lock_irqsave(&paging_lock);
+	if (aarch64_walk_params_for_space(space, 0u, &params)) {
+		root = (uint64_t*)hhdm_phys_to_virt(root_phys);
+		aarch64_free_page_table_children(root, params.levels - 1u);
+	}
+	(void)pmm_free_pages(root_phys, 1u);
 	*space = (struct hal_address_space){0};
+	spinlock_unlock_irqrestore(&paging_lock, state);
 }
 
 bool hal_paging_activate(const struct hal_address_space* space) {
