@@ -304,7 +304,8 @@ cap_id_t kernel_signal_grant(struct signal* target, process_id_t recipient, cap_
 	struct capability* cap;
 	signal_id_t        id;
 	struct signal*     held;
-	cap_id_t           result_cap = CAP_ID_INVALID;
+	cap_id_t           result_cap     = CAP_ID_INVALID;
+	bool               object_created = false;
 
 	if (target == NULL || recipient == PROCESS_PID_INVALID) return CAP_ID_INVALID;
 	id   = signal_id(target);
@@ -317,7 +318,7 @@ cap_id_t kernel_signal_grant(struct signal* target, process_id_t recipient, cap_
 	object_id = signal_cap_object_id(held);
 	if (object_id != CAP_OBJECT_ID_INVALID) object = cap_object_acquire(object_id);
 	if (object == NULL) {
-		object = cap_object_create_kernel((uint64_t)id, signal_handler);
+		object = cap_object_create_kernel((uint64_t)id, signal_handler, &object_created);
 		if (object == NULL) goto out;
 		object_id = object->cap_object_id;
 		if (!signal_set_cap_object_id(held, object_id)) {
@@ -331,6 +332,9 @@ cap_id_t kernel_signal_grant(struct signal* target, process_id_t recipient, cap_
 
 	cap        = cap_create(object_id, recipient, rights, NULL, NULL);
 	result_cap = cap == NULL ? CAP_ID_INVALID : cap->cap_id;
+	if (cap == NULL && object_created) {
+		(void)signal_destroy_cap_object(held);
+	}
 out:
 	signal_release(held);
 	return result_cap;

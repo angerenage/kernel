@@ -210,7 +210,9 @@ cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t r
 	cap_object_id_t    object_id;
 	struct cap_object* object;
 	struct capability* cap;
+	bool               object_created = false;
 
+	if (out_created != NULL) *out_created = false;
 	slot = boot_module_id_slot(module_index);
 	if (slot == NULL) return CAP_ID_INVALID;
 
@@ -219,7 +221,7 @@ cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t r
 		const uint64_t raw_id = (uint64_t)module_index + 1u;
 		if (kernel_boot_module_at(module_index) == NULL) return CAP_ID_INVALID;
 
-		object = cap_object_create_kernel(raw_id, boot_module_handler);
+		object = cap_object_create_kernel(raw_id, boot_module_handler, &object_created);
 		if (object == NULL) return CAP_ID_INVALID;
 
 		object_id = object->cap_object_id;
@@ -227,5 +229,9 @@ cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t r
 	}
 
 	cap = cap_create(object_id, recipient, CAP_READ | CAP_MAP | CAP_CALL, NULL, out_created);
+	if (cap == NULL && object_created) {
+		*slot = CAP_OBJECT_ID_INVALID;
+		(void)cap_object_destroy_with_id(object_id);
+	}
 	return cap == NULL ? CAP_ID_INVALID : cap->cap_id;
 }

@@ -64,12 +64,12 @@ enum cap_result {
 struct cap_object* cap_object_create(uint64_t object_id, struct channel* endpoint, bool* out_created);
 
 /* Publish a kernel provider's object identifier through a handler. Returns NULL on failure. */
-struct cap_object* cap_object_create_kernel(uint64_t object_id, cap_kernel_handler_t handler);
+struct cap_object* cap_object_create_kernel(uint64_t object_id, cap_kernel_handler_t handler, bool* out_created);
 
 /* Publish a kernel object with resource lifecycle callbacks. */
 struct cap_object* cap_object_create_kernel_managed(uint64_t object_id, cap_kernel_handler_t handler,
                                                     cap_kernel_process_cleanup_t process_cleanup,
-                                                    cap_kernel_destroy_t         destroy);
+                                                    cap_kernel_destroy_t destroy, bool* out_created);
 
 /* Look up an existing object. The returned pointer is borrowed and requires external lifetime synchronisation. */
 struct cap_object* cap_object_lookup(struct channel* endpoint, uint64_t object_id);

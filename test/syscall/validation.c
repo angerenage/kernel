@@ -43,11 +43,12 @@ static syscall_result_t grant_test_handler(const struct cap_request* request) {
 	return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 }
 
-static cap_id_t ensure_test_grant(enum grant_slot slot, uint64_t object_id, process_id_t recipient,
-                                  cap_rights_t rights) {
+static cap_id_t ensure_test_grant(enum grant_slot slot, uint64_t object_id, process_id_t recipient, cap_rights_t rights,
+                                  bool* out_created) {
 	struct capability* cap;
 	struct cap_object* object;
 
+	if (out_created != NULL) *out_created = false;
 	if (slot >= GRANT_SLOT_COUNT || recipient == PROCESS_PID_INVALID) return CAP_ID_INVALID;
 	if (slot == grant_fail_slot) return CAP_ID_INVALID;
 
@@ -60,11 +61,11 @@ static cap_id_t ensure_test_grant(enum grant_slot slot, uint64_t object_id, proc
 		grant_caps[slot] = CAP_ID_INVALID;
 	}
 
-	object = cap_object_create_kernel(object_id, grant_test_handler);
+	object = cap_object_create_kernel(object_id, grant_test_handler, NULL);
 	if (object == NULL) return CAP_ID_INVALID;
 	grant_objects[slot] = object->cap_object_id;
 
-	cap = cap_create(object->cap_object_id, recipient, rights, NULL, NULL);
+	cap = cap_create(object->cap_object_id, recipient, rights, NULL, out_created);
 	if (cap == NULL) return CAP_ID_INVALID;
 	grant_caps[slot] = cap->cap_id;
 	return cap->cap_id;
@@ -93,30 +94,42 @@ static void grant_test_cleanup(void) {
 	}
 }
 
-cap_id_t kernel_process_grant(struct process* target, process_id_t recipient, cap_rights_t rights) {
+cap_id_t kernel_process_grant(struct process* target, process_id_t recipient, cap_rights_t rights, bool* out_created) {
 	if (target == NULL) return CAP_ID_INVALID;
-	return ensure_test_grant(GRANT_PROCESS, 0xf100u, recipient, rights);
+	cap_id_t cap = ensure_test_grant(GRANT_PROCESS, 0xf100u, recipient, rights, out_created);
+	if (cap != CAP_ID_INVALID) process_set_cap_object_id(target, grant_objects[GRANT_PROCESS]);
+	return cap;
 }
 
-cap_id_t kernel_self_grant(struct process* process) {
+cap_id_t kernel_self_grant(struct process* process, bool* out_created) {
 	if (process == NULL) return CAP_ID_INVALID;
-	return ensure_test_grant(GRANT_SELF,
-	                         0xf101u,
-	                         process_pid(process),
-	                         CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_EXEC | CAP_DELEGATE);
+	cap_id_t cap =
+		ensure_test_grant(GRANT_SELF,
+	                      0xf101u,
+	                      process_pid(process),
+	                      CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_EXEC | CAP_DELEGATE,
+	                      out_created);
+	if (cap != CAP_ID_INVALID) process_set_cap_object_id(process, grant_objects[GRANT_SELF]);
+	return cap;
 }
 
-cap_id_t kernel_address_space_grant(struct process* process, process_id_t recipient, cap_rights_t rights) {
+cap_id_t kernel_address_space_grant(struct process* process, process_id_t recipient, cap_rights_t rights,
+                                    bool* out_created) {
 	if (process == NULL) return CAP_ID_INVALID;
-	return ensure_test_grant(GRANT_ADDRESS_SPACE, 0xf102u, recipient, rights);
+	cap_id_t cap = ensure_test_grant(GRANT_ADDRESS_SPACE, 0xf102u, recipient, rights, out_created);
+	if (cap != CAP_ID_INVALID) process_set_address_space_cap_object_id(process, grant_objects[GRANT_ADDRESS_SPACE]);
+	return cap;
 }
 
-cap_id_t kernel_thread_grant_full(struct uthread* target, process_id_t recipient) {
+cap_id_t kernel_thread_grant_full(struct uthread* target, process_id_t recipient, bool* out_created) {
 	if (target == NULL) return CAP_ID_INVALID;
-	return ensure_test_grant(GRANT_MAIN_THREAD,
-	                         0xf103u,
-	                         recipient,
-	                         CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_DELEGATE);
+	cap_id_t cap = ensure_test_grant(GRANT_MAIN_THREAD,
+	                                 0xf103u,
+	                                 recipient,
+	                                 CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_DELEGATE,
+	                                 out_created);
+	if (cap != CAP_ID_INVALID) uthread_set_cap_object_id(target, grant_objects[GRANT_MAIN_THREAD]);
+	return cap;
 }
 
 cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t recipient, bool* out_created) {
@@ -216,10 +229,10 @@ Test(syscall_validation, failed_self_copyout_preserves_preexisting_grants) {
 	main_thread = process_main_thread(process);
 	cr_assert_not_null(main_thread);
 
-	self_cap = kernel_self_grant(process);
+	self_cap = kernel_self_grant(process, NULL);
 	address_cap =
-		kernel_address_space_grant(process, process_pid(process), CAP_CALL | CAP_MAP | CAP_READ | CAP_DELEGATE);
-	thread_cap = kernel_thread_grant_full(main_thread, process_pid(process));
+		kernel_address_space_grant(process, process_pid(process), CAP_CALL | CAP_MAP | CAP_READ | CAP_DELEGATE, NULL);
+	thread_cap = kernel_thread_grant_full(main_thread, process_pid(process), NULL);
 	cr_assert_neq(self_cap, CAP_ID_INVALID);
 	cr_assert_neq(address_cap, CAP_ID_INVALID);
 	cr_assert_neq(thread_cap, CAP_ID_INVALID);
@@ -338,7 +351,7 @@ Test(syscall_validation, grant_failure_rollback_preserves_preexisting_self_grant
 
 	process       = make_current_process("syscall/self-existing-grant-failure");
 	output        = allocate_self_info_output(process, &output_id);
-	existing_self = kernel_self_grant(process);
+	existing_self = kernel_self_grant(process, NULL);
 	cr_assert_neq(existing_self, CAP_ID_INVALID);
 	caps_before     = capability_count();
 	objects_before  = capability_object_count();

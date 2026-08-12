@@ -99,16 +99,17 @@ struct cap_object* cap_object_create(uint64_t object_id, struct channel* endpoin
 	return object;
 }
 
-struct cap_object* cap_object_create_kernel(uint64_t object_id, cap_kernel_handler_t handler) {
-	return cap_object_create_kernel_managed(object_id, handler, NULL, NULL);
+struct cap_object* cap_object_create_kernel(uint64_t object_id, cap_kernel_handler_t handler, bool* out_created) {
+	return cap_object_create_kernel_managed(object_id, handler, NULL, NULL, out_created);
 }
 
 struct cap_object* cap_object_create_kernel_managed(uint64_t object_id, cap_kernel_handler_t handler,
                                                     cap_kernel_process_cleanup_t process_cleanup,
-                                                    cap_kernel_destroy_t         destroy) {
+                                                    cap_kernel_destroy_t destroy, bool* out_created) {
 	struct irq_state   state;
 	struct cap_object* object;
 
+	if (out_created != NULL) *out_created = false;
 	if (handler == NULL) return NULL;
 
 	state  = spinlock_lock_irqsave(&cap_object_table.lock);
@@ -137,6 +138,7 @@ struct cap_object* cap_object_create_kernel_managed(uint64_t object_id, cap_kern
 		cap_object_release(object);
 		return existing;
 	}
+	if (out_created != NULL) *out_created = true;
 
 	return object;
 }

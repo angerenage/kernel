@@ -119,11 +119,14 @@ static syscall_result_t address_space_handler(const struct cap_request* req) {
 	}
 }
 
-cap_id_t kernel_address_space_grant(struct process* process, process_id_t recipient, cap_rights_t rights) {
+cap_id_t kernel_address_space_grant(struct process* process, process_id_t recipient, cap_rights_t rights,
+                                    bool* out_created) {
 	struct cap_object* object;
 	cap_object_id_t    object_id;
 	struct capability* cap;
+	bool               object_created = false;
 
+	if (out_created != NULL) *out_created = false;
 	if (process == NULL || recipient == PROCESS_PID_INVALID || process_address_space(process) == NULL) {
 		return CAP_ID_INVALID;
 	}
@@ -137,14 +140,20 @@ cap_id_t kernel_address_space_grant(struct process* process, process_id_t recipi
 		object = NULL;
 	}
 	if (object == NULL) {
-		object = cap_object_create_kernel((uint64_t)(uintptr_t)process, address_space_handler);
+		object = cap_object_create_kernel((uint64_t)(uintptr_t)process, address_space_handler, &object_created);
 		if (object == NULL) return CAP_ID_INVALID;
 		object_id = object->cap_object_id;
 		process_set_address_space_cap_object_id(process, object_id);
 	}
 
-	cap = cap_create(object_id, recipient, rights, NULL, NULL);
-	if (cap == NULL) return CAP_ID_INVALID;
+	cap = cap_create(object_id, recipient, rights, NULL, out_created);
+	if (cap == NULL) {
+		if (object_created) {
+			process_set_address_space_cap_object_id(process, CAP_OBJECT_ID_INVALID);
+			(void)cap_object_destroy_with_id(object_id);
+		}
+		return CAP_ID_INVALID;
+	}
 
 	return cap->cap_id;
 }

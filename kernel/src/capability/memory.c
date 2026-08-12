@@ -241,7 +241,7 @@ cap_id_t kernel_allocate_memory(cap_rights_t rights, size_t page_count, vmm_prot
 	state->kind            = kind;
 
 	object = cap_object_create_kernel_managed(
-		(uint64_t)(uintptr_t)state, allocation_handler, allocation_process_cleanup, allocation_destroy);
+		(uint64_t)(uintptr_t)state, allocation_handler, allocation_process_cleanup, allocation_destroy, NULL);
 	if (object == NULL) {
 		free(state);
 		(void)pmm_free_pages(phys_base, page_count);
@@ -649,7 +649,7 @@ static cap_id_t kernel_mapping_create(void*              backing_context, void (
 	state->active          = true;
 
 	object = cap_object_create_kernel_managed(
-		(uint64_t)(uintptr_t)state, mapping_handler, mapping_process_cleanup, mapping_destroy);
+		(uint64_t)(uintptr_t)state, mapping_handler, mapping_process_cleanup, mapping_destroy, NULL);
 	if (object == NULL) {
 		free(state);
 		return CAP_ID_INVALID;

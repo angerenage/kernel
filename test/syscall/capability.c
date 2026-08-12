@@ -17,7 +17,7 @@ Test(syscall, capability_call_uses_distinct_request_and_response_buffers) {
 	sched_set_current(cpu_current(), &main_thread->thread);
 	main_thread->thread.address_space = NULL;
 
-	object = cap_object_create_kernel(1u, syscall_test_cap_handler);
+	object = cap_object_create_kernel(1u, syscall_test_cap_handler, NULL);
 	cr_assert_not_null(object);
 	capability = cap_create(object->cap_object_id, process_pid(process), CAP_CALL, NULL, NULL);
 	cr_assert_not_null(capability);
