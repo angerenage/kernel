@@ -164,15 +164,15 @@ static enum kernel_elf_load_result kernel_elf_load_segment(struct process*      
 	vmm_prot_t            final_prot = kernel_elf_segment_prot(phdr->flags);
 	vmm_prot_t            load_prot  = final_prot | VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER;
 
-	if (phdr->memsz == 0u) return KERNEL_ELF_LOAD_OK;
 	if (phdr->filesz > phdr->memsz) return KERNEL_ELF_LOAD_BAD_FORMAT;
-	if ((phdr->align != 0u && phdr->align != 1u && phdr->align != PMM_PAGE_SIZE) ||
-	    ((phdr->vaddr - phdr->offset) & (uint64_t)(PMM_PAGE_SIZE - 1u)) != 0u) {
-		return KERNEL_ELF_LOAD_UNSUPPORTED;
-	}
+	if (phdr->memsz == 0u) return KERNEL_ELF_LOAD_OK;
 	if (!kernel_elf_range_in_module(module->size, phdr->offset, phdr->filesz)) return KERNEL_ELF_LOAD_BAD_FORMAT;
 	if (!kernel_elf_range_to_pages(phdr->vaddr, phdr->memsz, &map_base, &page_count)) {
 		return KERNEL_ELF_LOAD_BAD_FORMAT;
+	}
+	if ((phdr->align != 0u && phdr->align != 1u && phdr->align != PMM_PAGE_SIZE) ||
+	    ((phdr->vaddr - phdr->offset) & (uint64_t)(PMM_PAGE_SIZE - 1u)) != 0u) {
+		return KERNEL_ELF_LOAD_UNSUPPORTED;
 	}
 
 	space = process_address_space(process);
@@ -188,27 +188,29 @@ static enum kernel_elf_load_result kernel_elf_load_segment(struct process*      
 		return KERNEL_ELF_LOAD_MAP_FAILED;
 	}
 
+	/* PMM pages retain their previous contents. Clear the complete page-rounded mapping before exposing either the
+
+	 * * segment bytes or its padding to userspace. */
+	enum kernel_elf_load_result zero_result =
+		kernel_elf_zero_range(space, map_base, page_count * (size_t)PMM_PAGE_SIZE);
+	if (zero_result != KERNEL_ELF_LOAD_OK) return zero_result;
+
 	if (phdr->filesz != 0u && address_space_copy_to(space,
 	                                                (uintptr_t)phdr->vaddr,
 	                                                (const uint8_t*)module->address + (size_t)phdr->offset,
 	                                                (size_t)phdr->filesz) != ADDRESS_TRANSFER_OK) {
 		return KERNEL_ELF_LOAD_COPY_FAILED;
 	}
-	if (phdr->memsz > phdr->filesz) {
-		enum kernel_elf_load_result zero_result =
-			kernel_elf_zero_range(space, (uintptr_t)(phdr->vaddr + phdr->filesz), (size_t)(phdr->memsz - phdr->filesz));
-		if (zero_result != KERNEL_ELF_LOAD_OK) return zero_result;
-	}
 	if ((final_prot & VMM_PROT_EXEC) != 0) kernel_elf_sync_loaded_pages(space, map_base, page_count);
 	if (final_prot != load_prot && !vmm_protect(space, id, final_prot)) return KERNEL_ELF_LOAD_MAP_FAILED;
 	return KERNEL_ELF_LOAD_OK;
 }
 
-static bool kernel_elf_allocate_initial_heap(struct process* process, uintptr_t* out_base) {
+static enum kernel_elf_load_result kernel_elf_allocate_initial_heap(struct process* process, uintptr_t* out_base) {
 	void*    base = NULL;
 	vmm_id_t id   = VMM_ID_INVALID;
 
-	if (process == NULL || out_base == NULL) return false;
+	if (process == NULL || out_base == NULL) return KERNEL_ELF_LOAD_INVALID_ARGUMENTS;
 	if (!vmm_alloc(process_address_space(process),
 	               &(const struct vmm_alloc_params){
 					   .page_count  = HEAP_DEFAULT_GROW_PAGES,
@@ -218,39 +220,44 @@ static bool kernel_elf_allocate_initial_heap(struct process* process, uintptr_t*
 				   },
 	               &id,
 	               &base)) {
-		return false;
+		return KERNEL_ELF_LOAD_MAP_FAILED;
 	}
+	enum kernel_elf_load_result zero_result = kernel_elf_zero_range(
+		process_address_space(process), (uintptr_t)base, HEAP_DEFAULT_GROW_PAGES * (size_t)PMM_PAGE_SIZE);
+	if (zero_result != KERNEL_ELF_LOAD_OK) return zero_result;
+
 	*out_base = (uintptr_t)base;
-	return true;
+	return KERNEL_ELF_LOAD_OK;
 }
 
 enum kernel_elf_load_result kernel_elf_load_process(const struct kernel_boot_module* module, const char* name,
                                                     struct kernel_elf_process* out_process) {
-	const struct elf64_ehdr* ehdr;
-	const struct elf64_phdr* phdrs;
-	struct process*          process = NULL;
-	enum process_result      create_result;
-	uintptr_t                heap_base = 0u;
-	bool                     saw_load  = false;
+	struct elf64_ehdr   ehdr;
+	struct process*     process = NULL;
+	enum process_result create_result;
+	uintptr_t           heap_base = 0u;
+	bool                saw_load  = false;
 
 	if (out_process != NULL) *out_process = (struct kernel_elf_process){0};
 	if (module == NULL || module->address == NULL || out_process == NULL) return KERNEL_ELF_LOAD_INVALID_ARGUMENTS;
 	if (module->size < sizeof(struct elf64_ehdr)) return KERNEL_ELF_LOAD_BAD_FORMAT;
 
-	ehdr = (const struct elf64_ehdr*)module->address;
-	if (!kernel_elf_header_valid(ehdr, module->size)) return KERNEL_ELF_LOAD_BAD_FORMAT;
+	memcpy(&ehdr, module->address, sizeof(ehdr));
+	if (!kernel_elf_header_valid(&ehdr, module->size)) return KERNEL_ELF_LOAD_BAD_FORMAT;
 
 	create_result = process_create(&process, name);
 	if (create_result != PROCESS_OK)
 		return create_result == PROCESS_NO_MEMORY ? KERNEL_ELF_LOAD_NO_MEMORY : KERNEL_ELF_LOAD_MAP_FAILED;
 
-	phdrs = (const struct elf64_phdr*)((const uint8_t*)module->address + (size_t)ehdr->phoff);
-	for (size_t i = 0; i < ehdr->phnum; i++) {
+	for (size_t i = 0; i < ehdr.phnum; i++) {
 		enum kernel_elf_load_result segment_result;
+		struct elf64_phdr           phdr;
+		size_t                      phdr_offset = (size_t)ehdr.phoff + i * sizeof(phdr);
 
-		if (phdrs[i].type != ELF_PT_LOAD) continue;
+		memcpy(&phdr, (const uint8_t*)module->address + phdr_offset, sizeof(phdr));
+		if (phdr.type != ELF_PT_LOAD) continue;
 		saw_load       = true;
-		segment_result = kernel_elf_load_segment(process, module, &phdrs[i]);
+		segment_result = kernel_elf_load_segment(process, module, &phdr);
 		if (segment_result != KERNEL_ELF_LOAD_OK) {
 			(void)process_destroy(process);
 			return segment_result;
@@ -261,21 +268,22 @@ enum kernel_elf_load_result kernel_elf_load_process(const struct kernel_boot_mod
 		return KERNEL_ELF_LOAD_BAD_FORMAT;
 	}
 	if (address_space_validate_range(process_address_space(process),
-	                                 (uintptr_t)ehdr->entry,
+	                                 (uintptr_t)ehdr.entry,
 	                                 1u,
 	                                 ADDRESS_TRANSFER_EXEC | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_PRESENT) !=
 	    ADDRESS_TRANSFER_OK) {
 		(void)process_destroy(process);
 		return KERNEL_ELF_LOAD_BAD_FORMAT;
 	}
-	if (!kernel_elf_allocate_initial_heap(process, &heap_base)) {
+	enum kernel_elf_load_result heap_result = kernel_elf_allocate_initial_heap(process, &heap_base);
+	if (heap_result != KERNEL_ELF_LOAD_OK) {
 		(void)process_destroy(process);
-		return KERNEL_ELF_LOAD_MAP_FAILED;
+		return heap_result;
 	}
 
 	*out_process = (struct kernel_elf_process){
 		.process         = process,
-		.entry           = (uintptr_t)ehdr->entry,
+		.entry           = (uintptr_t)ehdr.entry,
 		.heap_base       = heap_base,
 		.heap_page_count = HEAP_DEFAULT_GROW_PAGES,
 	};
