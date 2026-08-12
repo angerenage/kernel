@@ -1,3 +1,6 @@
+#include <pthread.h>
+
+#include "../thread_test.h"
 #include "test_support.h"
 
 #define CHANNEL_STATE_THREAD_COUNT 8u

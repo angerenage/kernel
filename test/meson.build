@@ -113,22 +113,16 @@ test_suites = [
 		'suites': ['unit', 'core'],
 	},
 	{
-		'name': 'signal',
-		'sources': files(
-			'core/signal_test.c',
-			'../kernel/src/capability/signal.c',
-		),
-		'suites': ['unit', 'core'],
-	},
-	{
 		'name': 'ipc',
 		'sources': files(
 			'ipc/test_support.c',
+			'ipc/signal.c',
 			'ipc/ring_buffer.c',
 			'ipc/channel_lifecycle.c',
 			'ipc/capability_queue.c',
 			'ipc/channel_state.c',
 			'ipc/message_queue.c',
+			'../kernel/src/capability/signal.c',
 		),
 		'suites': ['unit', 'core'],
 	},

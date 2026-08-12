@@ -13,13 +13,10 @@
 #include <core/pmm.h>
 #include <core/ring_buffer.h>
 #include <criterion/criterion.h>
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-
-#include "../thread_test.h"
 
 #define KiB(x) ((size_t)(x) * 1024u)
 

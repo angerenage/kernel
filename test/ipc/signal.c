@@ -1,7 +1,7 @@
-#include <base/heap.h>
+#include "../../kernel/src/capability/signal.h"
+
 #include <core/capability.h>
 #include <core/cpu.h>
-#include <core/pmm.h>
 #include <core/sched.h>
 #include <core/signal.h>
 #include <core/thread.h>
@@ -15,42 +15,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "../../kernel/src/capability/signal.h"
 #include "../mocks/hal/cpu_mock.h"
-
-#define KiB(x) ((size_t)(x) * 1024u)
-#define SIGNAL_TEST_HEAP_SIZE KiB(64)
-
-static uint8_t signal_test_heap[SIGNAL_TEST_HEAP_SIZE] __attribute__((aligned(PMM_PAGE_SIZE)));
-static size_t  signal_test_heap_offset;
-static bool    signal_test_heap_initialized;
-
-bool heap_grow_pages(size_t page_count, void** out_base) {
-	size_t bytes;
-	size_t offset;
-
-	if (out_base == NULL) return false;
-	*out_base = NULL;
-
-	bytes = page_count * PMM_PAGE_SIZE;
-	for (;;) {
-		offset = __atomic_load_n(&signal_test_heap_offset, __ATOMIC_ACQUIRE);
-		if (bytes > SIGNAL_TEST_HEAP_SIZE - offset) return false;
-		if (__atomic_compare_exchange_n(
-				&signal_test_heap_offset, &offset, offset + bytes, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
-			*out_base = signal_test_heap + offset;
-			return true;
-		}
-	}
-}
-
-static void signal_test_init_heap(void) {
-	if (signal_test_heap_initialized) return;
-
-	signal_test_heap_offset = 0u;
-	cr_assert(heap_init(), "heap_init failed");
-	signal_test_heap_initialized = true;
-}
+#include "test_support.h"
 
 #define SIGNAL_TEST_SENDER ((process_id_t)42u)
 #define SIGNAL_TEST_SECOND_SENDER ((process_id_t)84u)
@@ -133,7 +99,7 @@ static void signal_test_init_sched_uthread(struct uthread* target, const char* n
 		.detached          = false,
 	};
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	memset(target, 0, sizeof(*target));
 	cr_assert(thread_init(&target->thread, &params), "uthread scheduler descriptor initialization failed");
 	target->thread.owner_kind = THREAD_OWNER_UTHREAD;
@@ -146,7 +112,7 @@ static void signal_test_init_sched_uthread(struct uthread* target, const char* n
 }
 
 static void signal_test_init_handler_uthread(struct uthread* target, uintptr_t upcall_stack_top) {
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	memset(target, 0, sizeof(*target));
 	target->process         = (struct process*)(uintptr_t)1u;
 	target->reference_count = 1u;
@@ -225,7 +191,7 @@ Test(signal, create_send_read_and_destroy) {
 	uint64_t              delivery_count = UINT64_MAX;
 	signal_id_t           id;
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	signal = signal_create();
 	cr_assert_not_null(signal);
 	id = signal_id(signal);
@@ -256,7 +222,7 @@ Test(signal, failed_destroy_restores_open_state) {
 	struct signal* acquired;
 	signal_id_t    id;
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	signal = signal_create();
 	cr_assert_not_null(signal);
 	id = signal_id(signal);
@@ -284,7 +250,7 @@ Test(signal, synchronous_receivers_track_the_latest_generation_independently) {
 	uint64_t              receiver_count;
 	uint64_t              delivery_count;
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	signal_test_init_bound_bootstrap_cpu();
 	signal_test_init_sched_uthread(&first, "signal_first", 0x420000u, 0x424000u, 0x9000u);
 	signal_test_init_sched_uthread(&second, "signal_second", 0x430000u, 0x434000u, 0xa000u);
@@ -339,7 +305,7 @@ Test(signal, handlers_receive_broadcast_and_report_partial_delivery) {
 	uint64_t                   receiver_count;
 	uint64_t                   delivery_count;
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	signal = signal_create();
 	cr_assert_not_null(signal);
 	signal_test_init_handler_uthread(&first, 0x9000u);
@@ -372,7 +338,7 @@ Test(signal, coalesced_publications_replace_only_older_coalescible_publications)
     };
 	size_t second;
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	signal = signal_create();
 	cr_assert_not_null(signal);
 	signal_test_init_handler_uthread(&receiver, 0x9000u);
@@ -413,7 +379,7 @@ Test(signal, one_thread_can_receive_the_same_publication_by_handler_and_wait) {
 	struct thread         sender;
 	struct signal_message received;
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	signal_test_init_bound_bootstrap_cpu();
 	signal_test_init_sched_uthread(&receiver, "signal_receiver", 0x450000u, 0x454000u, 0x9000u);
 	cr_assert(thread_init(&sender, &sender_params), "sender thread_init failed");
@@ -461,7 +427,7 @@ Test(signal, blocked_wait_keeps_its_wake_value_when_latest_advances) {
 	struct thread         sender;
 	struct signal_message received;
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	signal_test_init_bound_bootstrap_cpu();
 	signal_test_init_sched_uthread(&receiver, "signal_receiver", 0x470000u, 0x474000u, 0x9000u);
 	cr_assert(thread_init(&sender, &sender_params), "sender thread_init failed");
@@ -504,7 +470,7 @@ Test(signal, thread_cleanup_removes_handlers_and_synchronous_cursors) {
 	struct uthread        receiver;
 	struct signal_message unused;
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	signal_test_init_bound_bootstrap_cpu();
 	signal_test_init_sched_uthread(&receiver, "signal_receiver", 0x480000u, 0x484000u, 0x9000u);
 	first  = signal_create();
@@ -543,7 +509,7 @@ Test(signal, unregister_handler_purges_only_its_queued_upcalls) {
 		.args  = {99u},
 	};
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	signal = signal_create();
 	cr_assert_not_null(signal);
 	signal_test_init_handler_uthread(&receiver, 0x9000u);
@@ -569,7 +535,7 @@ Test(signal, handler_registration_is_immutable_and_clear_allows_recreate) {
 		.args = {5u, 6u, 7u, 8u}
     };
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	signal = signal_create();
 	cr_assert_not_null(signal);
 	signal_test_init_handler_uthread(&receiver, 0x9000u);
@@ -603,7 +569,7 @@ Test(signal, current_thread_can_unregister_and_recreate_synchronous_receiver) {
     };
 	struct signal_message received;
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	signal_test_init_bound_bootstrap_cpu();
 	signal_test_init_sched_uthread(&receiver, "signal_receiver", 0x490000u, 0x494000u, 0x9000u);
 	signal = signal_create();
@@ -649,7 +615,7 @@ Test(signal, queued_handler_interrupts_blocking_wait_on_another_signal) {
 	struct thread         sender;
 	struct signal_message unused;
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	signal_test_init_bound_bootstrap_cpu();
 	signal_test_init_sched_uthread(&receiver, "signal_handler_waiter", 0x4b0000u, 0x4b4000u, 0x9000u);
 	cr_assert(thread_init(&sender, &sender_params), "sender thread_init failed");
@@ -701,7 +667,7 @@ Test(signal, forced_send_aborts_before_publication_when_one_handler_has_only_pro
 	uint64_t receiver_count = UINT64_MAX;
 	uint64_t delivery_count = UINT64_MAX;
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	signal = signal_create();
 	cr_assert_not_null(signal);
 	signal_test_init_handler_uthread(&available, 0x9000u);
@@ -750,7 +716,7 @@ Test(signal, forced_send_evicts_an_old_upcall_and_protects_the_signal_delivery) 
 	uint64_t delivery_count;
 	size_t   tail;
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	signal = signal_create();
 	cr_assert_not_null(signal);
 	signal_test_init_handler_uthread(&receiver, 0x9000u);
@@ -801,7 +767,7 @@ Test(signal, oneshot_handler_detaches_only_after_successful_admission) {
 	uint64_t receiver_count;
 	uint64_t delivery_count;
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	signal = signal_create();
 	cr_assert_not_null(signal);
 	signal_test_init_handler_uthread(&receiver, 0x9000u);
@@ -837,7 +803,7 @@ Test(signal, oneshot_handler_reuses_retired_binding_when_rearmed) {
 		.args = {1u, 2u, 3u, 4u}
     };
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	signal = signal_create();
 	cr_assert_not_null(signal);
 	signal_test_init_handler_uthread(&receiver, 0x9000u);
@@ -877,7 +843,7 @@ Test(signal, full_queue_keeps_oneshot_handler_armed) {
 	uint64_t receiver_count;
 	uint64_t delivery_count;
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	signal = signal_create();
 	cr_assert_not_null(signal);
 	signal_test_init_handler_uthread(&receiver, 0x9000u);
@@ -907,7 +873,7 @@ Test(signal, coalesced_oneshot_is_admitted_as_an_independent_request) {
 		.args = {7u, 8u, 9u, 10u}
     };
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	signal = signal_create();
 	cr_assert_not_null(signal);
 	signal_test_init_handler_uthread(&receiver, 0x9000u);
@@ -945,7 +911,7 @@ Test(signal, forced_oneshot_is_protected_and_survives_detach) {
 	uint64_t delivery_count;
 	size_t   tail;
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	signal = signal_create();
 	cr_assert_not_null(signal);
 	signal_test_init_handler_uthread(&receiver, 0x9000u);
@@ -996,7 +962,7 @@ Test(signal, forced_preflight_failure_leaves_blocked_waiter_untouched) {
 		.entry = 0x3000u,
 	};
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	signal_test_init_bound_bootstrap_cpu();
 	signal_test_init_sched_uthread(&receiver, "signal_force_waiter", 0x4d0000u, 0x4d4000u, 0x9000u);
 	signal_test_init_handler_uthread(&blocked_handler, 0xa000u);
@@ -1066,7 +1032,7 @@ Test(signal, failed_forced_oneshot_preflight_keeps_handler_armed_for_retry) {
 	uint64_t delivery_count = UINT64_MAX;
 	size_t   tail;
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	signal = signal_create();
 	cr_assert_not_null(signal);
 	signal_test_init_handler_uthread(&receiver, 0x9000u);
@@ -1119,7 +1085,7 @@ Test(signal, thread_cleanup_reclaims_retired_oneshot_without_purging_admitted_de
 		.args = {7u, 8u, 9u, 10u}
     };
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	signal = signal_create();
 	cr_assert_not_null(signal);
 	signal_test_init_handler_uthread(&receiver, 0x9000u);
@@ -1151,7 +1117,7 @@ Test(signal, rearmed_oneshot_binding_can_change_entry_and_become_persistent) {
     };
 	size_t second_index;
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	signal = signal_create();
 	cr_assert_not_null(signal);
 	signal_test_init_handler_uthread(&receiver, 0x9000u);
@@ -1211,7 +1177,7 @@ Test(signal, kernel_capability_rights_restrict_publication_and_read) {
 	cap_id_t                    info_cap;
 	syscall_result_t            result;
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	capability_init();
 	signal = signal_create();
 	cr_assert_not_null(signal);
@@ -1310,7 +1276,7 @@ Test(signal, invalid_handler_flags_are_rejected) {
 	struct signal* signal;
 	struct uthread receiver;
 
-	signal_test_init_heap();
+	ipc_test_init_heap();
 	signal = signal_create();
 	cr_assert_not_null(signal);
 	signal_test_init_handler_uthread(&receiver, 0x9000u);
