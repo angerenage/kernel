@@ -281,6 +281,24 @@ test_suites = [
 		'suites': ['unit', 'kernel'],
 	},
 	{
+		'name': 'kernel_capability',
+		'sources': files(
+			'vmm/test_support.c',
+			'vmm/mock_paging.c',
+			'syscall/test_support.c',
+			'kernel_capability/test_support.c',
+			'kernel_capability/memory.c',
+			'kernel_capability/serial.c',
+			'kernel_capability/module.c',
+			'../kernel/src/capability/capability.c',
+			'../kernel/src/capability/memory.c',
+			'../kernel/src/capability/boot_module.c',
+			'../kernel/src/capability/serial.c',
+			'../kernel/src/syscall/module.c',
+		),
+		'suites': ['unit', 'kernel'],
+	},
+	{
 		'name': 'pmm',
 		'sources': files(
 			'pmm/test_support.c',
