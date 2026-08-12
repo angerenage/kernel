@@ -33,6 +33,7 @@ enum grant_slot {
 
 static cap_id_t        grant_caps[GRANT_SLOT_COUNT];
 static cap_object_id_t grant_objects[GRANT_SLOT_COUNT];
+static enum grant_slot grant_fail_slot = GRANT_SLOT_COUNT;
 
 void kernel_boot_mock_set_modules(const struct kernel_boot_module* modules, size_t count);
 void kernel_boot_mock_reset(void);
@@ -48,6 +49,7 @@ static cap_id_t ensure_test_grant(enum grant_slot slot, uint64_t object_id, proc
 	struct cap_object* object;
 
 	if (slot >= GRANT_SLOT_COUNT || recipient == PROCESS_PID_INVALID) return CAP_ID_INVALID;
+	if (slot == grant_fail_slot) return CAP_ID_INVALID;
 
 	if (grant_caps[slot] != CAP_ID_INVALID) {
 		cap = cap_acquire(grant_caps[slot]);
@@ -73,6 +75,7 @@ static void grant_test_reset(void) {
 		grant_caps[i]    = CAP_ID_INVALID;
 		grant_objects[i] = CAP_OBJECT_ID_INVALID;
 	}
+	grant_fail_slot = GRANT_SLOT_COUNT;
 }
 
 static void grant_test_cleanup(void) {
@@ -247,5 +250,109 @@ Test(syscall_validation, failed_self_copyout_preserves_preexisting_grants) {
 		cap_release(cap);
 	}
 
+	destroy_current_process(process);
+}
+
+static uintptr_t allocate_self_info_output(struct process* process, vmm_id_t* out_id) {
+	void* base = NULL;
+
+	*out_id = VMM_ID_INVALID;
+	cr_assert(vmm_alloc(process_address_space(process),
+	                    &(const struct vmm_alloc_params){
+							.page_count  = 1u,
+							.align_pages = 1u,
+							.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
+							.kind        = VMM_KIND_GENERIC,
+						},
+	                    out_id,
+	                    &base));
+	cr_assert_not_null(base);
+	return (uintptr_t)base;
+}
+
+Test(syscall_validation, failed_address_space_grant_rolls_back_new_self_grant) {
+	struct process*  process;
+	vmm_id_t         output_id = VMM_ID_INVALID;
+	uintptr_t        output;
+	size_t           caps_before;
+	size_t           objects_before;
+	syscall_result_t result;
+
+	process         = make_current_process("syscall/self-address-grant-failure");
+	output          = allocate_self_info_output(process, &output_id);
+	caps_before     = capability_count();
+	objects_before  = capability_object_count();
+	grant_fail_slot = GRANT_ADDRESS_SPACE;
+
+	result = syscall_self(output, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_FAILED);
+	cr_assert_eq(capability_count(),
+	             caps_before,
+	             "failed address-space grant left the earlier self capability hidden from userspace");
+	cr_assert_eq(capability_object_count(),
+	             objects_before,
+	             "failed address-space grant left the earlier self routing object hidden from userspace");
+
+	grant_fail_slot = GRANT_SLOT_COUNT;
+	cr_assert(vmm_free(process_address_space(process), output_id));
+	destroy_current_process(process);
+}
+
+Test(syscall_validation, failed_thread_grant_rolls_back_all_new_preceding_grants) {
+	struct process*  process;
+	vmm_id_t         output_id = VMM_ID_INVALID;
+	uintptr_t        output;
+	size_t           caps_before;
+	size_t           objects_before;
+	syscall_result_t result;
+
+	process         = make_current_process("syscall/self-thread-grant-failure");
+	output          = allocate_self_info_output(process, &output_id);
+	caps_before     = capability_count();
+	objects_before  = capability_object_count();
+	grant_fail_slot = GRANT_MAIN_THREAD;
+
+	result = syscall_self(output, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_FAILED);
+	cr_assert_eq(capability_count(),
+	             caps_before,
+	             "failed thread grant left earlier self/address-space capabilities hidden from userspace");
+	cr_assert_eq(capability_object_count(),
+	             objects_before,
+	             "failed thread grant left earlier routing objects hidden from userspace");
+
+	grant_fail_slot = GRANT_SLOT_COUNT;
+	cr_assert(vmm_free(process_address_space(process), output_id));
+	destroy_current_process(process);
+}
+
+Test(syscall_validation, grant_failure_rollback_preserves_preexisting_self_grant) {
+	struct process*    process;
+	vmm_id_t           output_id = VMM_ID_INVALID;
+	uintptr_t          output;
+	cap_id_t           existing_self;
+	struct capability* retained;
+	size_t             caps_before;
+	size_t             objects_before;
+	syscall_result_t   result;
+
+	process       = make_current_process("syscall/self-existing-grant-failure");
+	output        = allocate_self_info_output(process, &output_id);
+	existing_self = kernel_self_grant(process);
+	cr_assert_neq(existing_self, CAP_ID_INVALID);
+	caps_before     = capability_count();
+	objects_before  = capability_object_count();
+	grant_fail_slot = GRANT_ADDRESS_SPACE;
+
+	result = syscall_self(output, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_FAILED);
+	cr_assert_eq(capability_count(), caps_before, "rollback changed the preexisting grant set");
+	cr_assert_eq(capability_object_count(), objects_before, "rollback changed the preexisting routing object set");
+	retained = cap_acquire(existing_self);
+	cr_assert_not_null(retained, "rollback destroyed a self capability that existed before the failed syscall");
+	cap_release(retained);
+
+	grant_fail_slot = GRANT_SLOT_COUNT;
+	cr_assert(vmm_free(process_address_space(process), output_id));
 	destroy_current_process(process);
 }
