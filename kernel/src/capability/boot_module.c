@@ -1,3 +1,5 @@
+#include "boot_module.h"
+
 #include <base/cap.h>
 #include <base/math.h>
 #include <base/module.h>
@@ -126,6 +128,7 @@ static syscall_result_t boot_module_read_handler(const struct cap_request*      
 
 	if (req->request_size < sizeof(request)) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	memcpy(&request, req->request, sizeof(request));
+	if (request.size == 0u && request.offset <= module->size) return syscall_result_ok(0u);
 	if (request.size > CAP_MAX_RESPONSE_SIZE || request.offset > module->size ||
 	    request.size > module->size - request.offset || !cap_kernel_response_fits(req, request.size)) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -202,7 +205,7 @@ syscall_result_t kernel_capability_boot_module_get(cap_id_t module_cap, process_
 	return *out_module == NULL ? syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u) : syscall_result_ok(0u);
 }
 
-cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t recipient) {
+cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t recipient, bool* out_created) {
 	cap_object_id_t*   slot;
 	cap_object_id_t    object_id;
 	struct cap_object* object;
@@ -223,6 +226,6 @@ cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t r
 		*slot     = object_id;
 	}
 
-	cap = cap_create(object_id, recipient, CAP_READ | CAP_MAP | CAP_CALL, NULL, NULL);
+	cap = cap_create(object_id, recipient, CAP_READ | CAP_MAP | CAP_CALL, NULL, out_created);
 	return cap == NULL ? CAP_ID_INVALID : cap->cap_id;
 }

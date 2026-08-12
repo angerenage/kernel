@@ -22,6 +22,7 @@ struct allocation_state {
 	size_t          page_count;
 	size_t          mapping_count;
 	size_t          operation_count;
+	process_id_t    owner;
 	vmm_prot_t      prot;
 	enum vmm_kind   kind;
 };
@@ -32,6 +33,7 @@ struct mapping_state {
 	void (*backing_release)(void* context);
 	struct address_space* space;
 	process_id_t          space_owner;
+	process_id_t          cap_owner;
 	vmm_id_t              region_id;
 	enum vmm_kind         kind;
 	bool                  active;
@@ -39,6 +41,10 @@ struct mapping_state {
 
 static syscall_result_t allocation_handler(const struct cap_request* req);
 static syscall_result_t mapping_handler(const struct cap_request* req);
+static bool             allocation_process_cleanup(uint64_t object_id, process_id_t process);
+static void             allocation_destroy(uint64_t object_id);
+static bool             mapping_process_cleanup(uint64_t object_id, process_id_t process);
+static void             mapping_destroy(uint64_t object_id);
 static syscall_result_t mapping_unmap_handler(struct mapping_state* state);
 static cap_id_t         kernel_mapping_create(void*              backing_context, void (*backing_release)(void* context),
                                               struct capability* parent_cap, process_id_t cap_target, process_id_t space_owner,
@@ -217,6 +223,7 @@ cap_id_t kernel_allocate_memory(cap_rights_t rights, size_t page_count, vmm_prot
 	if (page_count == 0u || page_count > SIZE_MAX / PMM_PAGE_SIZE) return CAP_ID_INVALID;
 	if (!vmm_prot_is_valid(prot) || !vmm_kind_is_valid(kind)) return CAP_ID_INVALID;
 	if (!pmm_alloc_pages(page_count, &phys_base)) return CAP_ID_INVALID;
+	memset((void*)(phys_base + boot_info.direct_map_offset), 0, page_count * PMM_PAGE_SIZE);
 
 	state = malloc(sizeof(*state));
 	if (state == NULL) {
@@ -229,10 +236,12 @@ cap_id_t kernel_allocate_memory(cap_rights_t rights, size_t page_count, vmm_prot
 	state->page_count      = page_count;
 	state->mapping_count   = 0u;
 	state->operation_count = 0u;
+	state->owner           = PROCESS_PID_INVALID;
 	state->prot            = prot;
 	state->kind            = kind;
 
-	object = cap_object_create_kernel((uint64_t)(uintptr_t)state, allocation_handler);
+	object = cap_object_create_kernel_managed(
+		(uint64_t)(uintptr_t)state, allocation_handler, allocation_process_cleanup, allocation_destroy);
 	if (object == NULL) {
 		free(state);
 		(void)pmm_free_pages(phys_base, page_count);
@@ -242,16 +251,13 @@ cap_id_t kernel_allocate_memory(cap_rights_t rights, size_t page_count, vmm_prot
 	caller = process_current();
 	if (caller == NULL) {
 		(void)cap_object_destroy(object);
-		free(state);
-		(void)pmm_free_pages(phys_base, page_count);
 		return CAP_ID_INVALID;
 	}
+	state->owner = process_pid(caller);
 
 	cap = cap_create(object->cap_object_id, process_pid(caller), rights, NULL, NULL);
 	if (cap == NULL) {
 		(void)cap_object_destroy(object);
-		free(state);
-		(void)pmm_free_pages(phys_base, page_count);
 		return CAP_ID_INVALID;
 	}
 	return cap->cap_id;
@@ -299,12 +305,12 @@ bool kernel_mapping_discard_unpublished(cap_id_t mapping_cap, process_id_t owner
 	if (result.status != SYSCALL_STATUS_OK) return false;
 	if (!cap_destroy_by_id(mapping_cap)) return false;
 	if (!cap_object_destroy_with_id(object_id)) return false;
-	free(state);
 	return true;
 }
 
-static syscall_result_t allocation_free_handler(struct allocation_state* state) {
-	uintptr_t phys_base;
+static syscall_result_t allocation_free_handler(const struct cap_request* req, struct allocation_state* state) {
+	uintptr_t       phys_base;
+	cap_object_id_t object_id;
 
 	spinlock_lock(&state->lock);
 	if (state->phys_base == 0u || state->mapping_count != 0u || state->operation_count != 0u) {
@@ -321,6 +327,14 @@ static syscall_result_t allocation_free_handler(struct allocation_state* state) 
 		spinlock_unlock(&state->lock);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
+	object_id              = CAP_OBJECT_ID_INVALID;
+	struct capability* cap = cap_acquire(req->cap_id);
+	if (cap != NULL) {
+		object_id = cap->cap_object_id;
+		cap_release(cap);
+	}
+	(void)cap_destroy_by_id(req->cap_id);
+	if (object_id != CAP_OBJECT_ID_INVALID) (void)cap_object_destroy_with_id(object_id);
 	return syscall_result_ok(0u);
 }
 
@@ -443,7 +457,7 @@ static syscall_result_t allocation_handler(const struct cap_request* req) {
 
 	switch (header.op) {
 	case ALLOCATION_OP_FREE:
-		return allocation_free_handler(state);
+		return allocation_free_handler(req, state);
 	case ALLOCATION_OP_READ:
 		return allocation_read_handler(req, state);
 	case ALLOCATION_OP_COPY_FROM:
@@ -517,6 +531,45 @@ static syscall_result_t mapping_unmap_handler(struct mapping_state* state) {
 	return syscall_result_ok(0u);
 }
 
+static bool allocation_process_cleanup(uint64_t object_id, process_id_t process) {
+	struct allocation_state* state = (struct allocation_state*)(uintptr_t)object_id;
+	bool                     ready;
+
+	if (state == NULL || state->owner != process) return false;
+	spinlock_lock(&state->lock);
+	ready = state->mapping_count == 0u && state->operation_count == 0u;
+	spinlock_unlock(&state->lock);
+	return ready;
+}
+
+static void allocation_destroy(uint64_t object_id) {
+	struct allocation_state* state = (struct allocation_state*)(uintptr_t)object_id;
+	uintptr_t                phys_base;
+
+	if (state == NULL) return;
+	spinlock_lock(&state->lock);
+	phys_base        = state->phys_base;
+	state->phys_base = 0u;
+	spinlock_unlock(&state->lock);
+	if (phys_base != 0u) (void)pmm_free_pages(phys_base, state->page_count);
+	free(state);
+}
+
+static bool mapping_process_cleanup(uint64_t object_id, process_id_t process) {
+	struct mapping_state* state = (struct mapping_state*)(uintptr_t)object_id;
+
+	if (state == NULL || (state->space_owner != process && state->cap_owner != process)) return false;
+	(void)mapping_unmap_handler(state);
+	return true;
+}
+
+static void mapping_destroy(uint64_t object_id) {
+	struct mapping_state* state = (struct mapping_state*)(uintptr_t)object_id;
+	if (state == NULL) return;
+	if (state->active) (void)mapping_unmap_handler(state);
+	free(state);
+}
+
 static syscall_result_t mapping_handler(const struct cap_request* req) {
 	struct mapping_request_header header;
 	struct mapping_state*         state;
@@ -553,7 +606,18 @@ static syscall_result_t mapping_handler(const struct cap_request* req) {
 	case MAPPING_OP_PROTECT:
 		return mapping_protect_handler(req, state);
 	case MAPPING_OP_UNMAP:
-		return mapping_unmap_handler(state);
+		copy_result = mapping_unmap_handler(state);
+		if (copy_result.status == SYSCALL_STATUS_OK) {
+			cap_object_id_t    object_id = CAP_OBJECT_ID_INVALID;
+			struct capability* cap       = cap_acquire(req->cap_id);
+			if (cap != NULL) {
+				object_id = cap->cap_object_id;
+				cap_release(cap);
+			}
+			(void)cap_destroy_by_id(req->cap_id);
+			if (object_id != CAP_OBJECT_ID_INVALID) (void)cap_object_destroy_with_id(object_id);
+		}
+		return copy_result;
 	default:
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
@@ -579,11 +643,13 @@ static cap_id_t kernel_mapping_create(void*              backing_context, void (
 	state->backing_release = backing_release;
 	state->space           = space;
 	state->space_owner     = space_owner;
+	state->cap_owner       = cap_target;
 	state->region_id       = region_id;
 	state->kind            = kind;
 	state->active          = true;
 
-	object = cap_object_create_kernel((uint64_t)(uintptr_t)state, mapping_handler);
+	object = cap_object_create_kernel_managed(
+		(uint64_t)(uintptr_t)state, mapping_handler, mapping_process_cleanup, mapping_destroy);
 	if (object == NULL) {
 		free(state);
 		return CAP_ID_INVALID;
@@ -592,7 +658,6 @@ static cap_id_t kernel_mapping_create(void*              backing_context, void (
 	cap = cap_create(object->cap_object_id, cap_target, CAP_CALL | rights, parent_cap, NULL);
 	if (cap == NULL) {
 		(void)cap_object_destroy(object);
-		free(state);
 		return CAP_ID_INVALID;
 	}
 

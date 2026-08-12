@@ -11,6 +11,8 @@
 
 /* Handler invoked by sys_cap_call for kernel-owned capabilities. */
 typedef syscall_result_t (*cap_kernel_handler_t)(const struct cap_request* req);
+typedef bool (*cap_kernel_process_cleanup_t)(uint64_t object_id, process_id_t process);
+typedef void (*cap_kernel_destroy_t)(uint64_t object_id);
 
 /* Stable identifier for a registered cap_object. */
 typedef id_table_id_t cap_object_id_t;
@@ -19,11 +21,13 @@ typedef id_table_id_t cap_object_id_t;
 
 /* A kernel or userspace object that can be referenced by capabilities. */
 struct cap_object {
-	cap_object_id_t      cap_object_id;
-	uint64_t             object_id;
-	struct channel*      endpoint;
-	cap_kernel_handler_t handler;
-	uint64_t             reference_count;
+	cap_object_id_t              cap_object_id;
+	uint64_t                     object_id;
+	struct channel*              endpoint;
+	cap_kernel_handler_t         handler;
+	cap_kernel_process_cleanup_t process_cleanup;
+	cap_kernel_destroy_t         destroy;
+	uint64_t                     reference_count;
 };
 
 /* A capability grants a target process rights on a cap_object. Capabilities form a delegation tree through parent. */
@@ -62,6 +66,11 @@ struct cap_object* cap_object_create(uint64_t object_id, struct channel* endpoin
 /* Publish a kernel provider's object identifier through a handler. Returns NULL on failure. */
 struct cap_object* cap_object_create_kernel(uint64_t object_id, cap_kernel_handler_t handler);
 
+/* Publish a kernel object with resource lifecycle callbacks. */
+struct cap_object* cap_object_create_kernel_managed(uint64_t object_id, cap_kernel_handler_t handler,
+                                                    cap_kernel_process_cleanup_t process_cleanup,
+                                                    cap_kernel_destroy_t         destroy);
+
 /* Look up an existing object. The returned pointer is borrowed and requires external lifetime synchronisation. */
 struct cap_object* cap_object_lookup(struct channel* endpoint, uint64_t object_id);
 
@@ -79,6 +88,9 @@ bool cap_object_destroy(struct cap_object* object);
 
 /* Unpublish every routing object owned by endpoint. Represented provider resources remain untouched. */
 void cap_object_unregister_endpoint(struct channel* endpoint);
+
+/* Notify managed kernel objects before a process and its address space are destroyed. */
+void cap_object_cleanup_for_process(process_id_t process);
 
 /*
  * Create or deduplicate a capability grant. The returned pointer is table-owned and the capability does not retain

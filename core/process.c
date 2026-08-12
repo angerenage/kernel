@@ -465,6 +465,7 @@ bool process_destroy(struct process* process) {
 	}
 
 	removed = NULL;
+	cap_object_cleanup_for_process(process->pid);
 	if (id_table_remove(&process_table, process->pid, (void**)&removed) != ID_TABLE_OK || removed != process) {
 		return false;
 	}

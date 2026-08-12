@@ -116,9 +116,10 @@ cap_id_t kernel_thread_grant_full(struct uthread* target, process_id_t recipient
 	                         CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_DELEGATE);
 }
 
-cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t recipient) {
+cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t recipient, bool* out_created) {
 	(void)module_index;
 	(void)recipient;
+	if (out_created != NULL) *out_created = false;
 	return CAP_ID_INVALID;
 }
 

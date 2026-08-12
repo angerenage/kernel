@@ -11,6 +11,9 @@
 static struct cap_object* serial_object;
 
 static syscall_result_t serial_handler(const struct cap_request* req) {
+	if ((req->rights & CAP_WRITE) != CAP_WRITE) {
+		return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
+	}
 	if (req->request_size == 0u || req->request == NULL) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}

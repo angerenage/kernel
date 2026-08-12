@@ -28,7 +28,9 @@ static struct id_table capability_table = {
 };
 
 static struct cap_object* cap_object_create_locked(uint64_t object_id, struct channel* endpoint,
-                                                   cap_kernel_handler_t handler) {
+                                                   cap_kernel_handler_t         handler,
+                                                   cap_kernel_process_cleanup_t process_cleanup,
+                                                   cap_kernel_destroy_t         destroy) {
 	struct cap_object* object = malloc(sizeof(*object));
 	if (object == NULL) return NULL;
 	if (!channel_retain(endpoint)) {
@@ -40,6 +42,8 @@ static struct cap_object* cap_object_create_locked(uint64_t object_id, struct ch
 	object->object_id       = object_id;
 	object->endpoint        = endpoint;
 	object->handler         = handler;
+	object->process_cleanup = process_cleanup;
+	object->destroy         = destroy;
 	object->reference_count = 1u;
 
 	return object;
@@ -72,7 +76,7 @@ struct cap_object* cap_object_create(uint64_t object_id, struct channel* endpoin
 	}
 	spinlock_unlock_irqrestore(&cap_object_table.lock, state);
 
-	object = cap_object_create_locked(object_id, endpoint, NULL);
+	object = cap_object_create_locked(object_id, endpoint, NULL, NULL, NULL);
 	if (object == NULL) return NULL;
 
 	id_table_id_t id;
@@ -96,6 +100,12 @@ struct cap_object* cap_object_create(uint64_t object_id, struct channel* endpoin
 }
 
 struct cap_object* cap_object_create_kernel(uint64_t object_id, cap_kernel_handler_t handler) {
+	return cap_object_create_kernel_managed(object_id, handler, NULL, NULL);
+}
+
+struct cap_object* cap_object_create_kernel_managed(uint64_t object_id, cap_kernel_handler_t handler,
+                                                    cap_kernel_process_cleanup_t process_cleanup,
+                                                    cap_kernel_destroy_t         destroy) {
 	struct irq_state   state;
 	struct cap_object* object;
 
@@ -109,7 +119,7 @@ struct cap_object* cap_object_create_kernel(uint64_t object_id, cap_kernel_handl
 	}
 	spinlock_unlock_irqrestore(&cap_object_table.lock, state);
 
-	object = cap_object_create_locked(object_id, NULL, handler);
+	object = cap_object_create_locked(object_id, NULL, handler, process_cleanup, destroy);
 	if (object == NULL) return NULL;
 
 	id_table_id_t id;
@@ -169,6 +179,7 @@ void cap_object_release(struct cap_object* object) {
 	if (object == NULL) return;
 	remaining = __atomic_sub_fetch(&object->reference_count, 1u, __ATOMIC_ACQ_REL);
 	if (remaining != 0u) return;
+	if (object->destroy != NULL) object->destroy(object->object_id);
 	channel_release(object->endpoint);
 	free(object);
 }
@@ -210,6 +221,35 @@ void cap_object_unregister_endpoint(struct channel* endpoint) {
 
 		for (size_t i = 0u; i < count; i++) (void)cap_object_destroy_with_id(ids[i]);
 	} while (count != 0u);
+}
+
+void cap_object_cleanup_for_process(process_id_t process) {
+	if (process == PROCESS_PID_INVALID) return;
+	for (;;) {
+		size_t cursor        = 0u;
+		bool   destroyed_any = false;
+
+		for (;;) {
+			struct cap_object* object = NULL;
+			struct irq_state   state  = spinlock_lock_irqsave(&cap_object_table.lock);
+			for (; cursor < cap_object_table.capacity; cursor++) {
+				struct cap_object* candidate = cap_object_table.slots[cursor];
+				if (candidate == NULL || candidate->process_cleanup == NULL) continue;
+				(void)__atomic_add_fetch(&candidate->reference_count, 1u, __ATOMIC_RELAXED);
+				object = candidate;
+				cursor++;
+				break;
+			}
+			spinlock_unlock_irqrestore(&cap_object_table.lock, state);
+			if (object == NULL) break;
+
+			cap_object_id_t id      = object->cap_object_id;
+			bool            destroy = object->process_cleanup(object->object_id, process);
+			cap_object_release(object);
+			if (destroy && cap_object_destroy_with_id(id)) destroyed_any = true;
+		}
+		if (!destroyed_any) return;
+	}
 }
 
 static struct capability* capability_create_locked(cap_object_id_t cap_object_id, process_id_t target,

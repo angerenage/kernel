@@ -42,12 +42,13 @@ syscall_result_t syscall_module_resolve(uintptr_t arg0, uintptr_t arg1, uintptr_
 
 		if ((module->name != NULL && strcmp(module->name, name) == 0) ||
 		    (module->path != NULL && strcmp(module->path, name) == 0)) {
-			struct module_query_response response = {
-				.id         = (module_id_t)i + 1u,
-				.cap        = kernel_capability_boot_module_grant(i, process_pid(caller)),
-				.size       = module->size,
-				.media_type = module->media_type,
-			};
+			bool                         cap_created = false;
+			struct module_query_response response    = {
+				   .id         = (module_id_t)i + 1u,
+				   .cap        = kernel_capability_boot_module_grant(i, process_pid(caller), &cap_created),
+				   .size       = module->size,
+				   .media_type = module->media_type,
+            };
 			strlcpy(response.name, module->name != NULL ? module->name : "", sizeof(response.name));
 			strlcpy(response.path, module->path != NULL ? module->path : "", sizeof(response.path));
 			free(name);
@@ -59,7 +60,7 @@ syscall_result_t syscall_module_resolve(uintptr_t arg0, uintptr_t arg1, uintptr_
 			syscall_result_t copy_result =
 				syscall_copy_to_user(process_address_space(caller), arg2, &response, sizeof(response), 2u);
 			if (copy_result.status != SYSCALL_STATUS_OK) {
-				(void)cap_destroy_by_id(response.cap);
+				if (cap_created) (void)cap_destroy_by_id(response.cap);
 				return copy_result;
 			}
 
