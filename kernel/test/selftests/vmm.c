@@ -405,7 +405,9 @@ cleanup:
 
 	if (ctx->failure_expr == NULL) {
 		KERNEL_SELFTEST_ASSERT(ctx, vmm_count(address_space_kernel()) == count_before);
-		KERNEL_SELFTEST_ASSERT(ctx, pmm_free_page_count() <= free_before);
+		KERNEL_SELFTEST_ASSERT_MSG(ctx,
+		                           pmm_free_page_count() == free_before,
+		                           "user address-space teardown leaked VMM or architecture page-table pages");
 	}
 }
 
