@@ -3,8 +3,8 @@
 Test(syscall, capability_call_uses_distinct_request_and_response_buffers) {
 	struct process*                  process;
 	struct uthread*                  main_thread;
-	struct cap_object*               object;
-	struct capability*               capability;
+	cap_object_id_t                  object_id;
+	cap_id_t                         capability_id;
 	struct syscall_test_cap_request  request  = {.value = 41u};
 	struct syscall_test_cap_response response = {0};
 	syscall_result_t                 result;
@@ -17,13 +17,13 @@ Test(syscall, capability_call_uses_distinct_request_and_response_buffers) {
 	sched_set_current(cpu_current(), &main_thread->thread);
 	main_thread->thread.address_space = NULL;
 
-	object = cap_object_create_kernel(1u, syscall_test_cap_handler, NULL);
-	cr_assert_not_null(object);
-	capability = cap_create(object->cap_object_id, process_pid(process), CAP_CALL, NULL, NULL);
-	cr_assert_not_null(capability);
+	object_id = cap_object_create_kernel(1u, syscall_test_cap_handler, NULL);
+	cr_assert_neq(object_id, CAP_OBJECT_ID_INVALID);
+	capability_id = cap_create(object_id, process_pid(process), CAP_CALL, NULL, NULL);
+	cr_assert_neq(capability_id, CAP_ID_INVALID);
 
 	result = syscall_dispatch(SYSCALL_CAP_CALL,
-	                          capability->cap_id,
+	                          capability_id,
 	                          (uintptr_t)&request,
 	                          sizeof(request),
 	                          (uintptr_t)&response,
@@ -33,17 +33,17 @@ Test(syscall, capability_call_uses_distinct_request_and_response_buffers) {
 	cr_assert_eq(result.value, sizeof(response));
 	cr_assert_eq(response.value, 42u);
 
-	result = syscall_dispatch(SYSCALL_CAP_CALL, capability->cap_id, 0u, 0u, (uintptr_t)&response, sizeof(response), 0u);
+	result = syscall_dispatch(SYSCALL_CAP_CALL, capability_id, 0u, 0u, (uintptr_t)&response, sizeof(response), 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 	cr_assert_eq(result.value, 2u);
 
 	result = syscall_dispatch(
-		SYSCALL_CAP_CALL, capability->cap_id, (uintptr_t)&request, sizeof(request), 0u, sizeof(response), 0u);
+		SYSCALL_CAP_CALL, capability_id, (uintptr_t)&request, sizeof(request), 0u, sizeof(response), 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 	cr_assert_eq(result.value, 3u);
 
-	cr_assert(cap_destroy(capability));
-	cr_assert(cap_object_destroy(object));
+	cr_assert(cap_destroy_by_id(capability_id));
+	cr_assert(cap_object_destroy_with_id(object_id));
 	syscall_test_reset_state();
 }
 

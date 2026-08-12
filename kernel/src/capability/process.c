@@ -45,11 +45,15 @@ static syscall_result_t process_copy_thread_arg(const struct cap_request* req, c
 	}
 	if (arg_size == 0u) return syscall_result_ok(0u);
 
-	caller = process_lookup(req->caller);
+	caller = process_acquire(req->caller);
 	if (caller == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 	copy = malloc(arg_size);
-	if (copy == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
+	if (copy == NULL) {
+		process_release(caller);
+		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
+	}
 	result = syscall_copy_from_user(process_address_space(caller), (uintptr_t)arg_data, copy, arg_size, 0u);
+	process_release(caller);
 	if (result.status != SYSCALL_STATUS_OK) {
 		free(copy);
 		return result;
@@ -190,6 +194,8 @@ static syscall_result_t process_detach_handler(const struct cap_request* req, st
 	detach_result = process_detach(target);
 	switch (detach_result) {
 	case PROCESS_DETACH_OK:
+		/* If the process was already a zombie, no later thread callback exists to trigger detached reaping. */
+		(void)process_reap_detached(target);
 		return syscall_result_ok(0u);
 	case PROCESS_DETACH_INVALID_ARGUMENTS:
 	case PROCESS_DETACH_ALREADY_DETACHED:
@@ -221,15 +227,17 @@ static syscall_result_t process_handler(const struct cap_request* req) {
 	cap_rights_t     required_rights;
 	syscall_result_t result;
 
-	process = (struct process*)(uintptr_t)req->object_id;
+	process = process_acquire((process_id_t)req->object_id);
 	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 
 	if (req->request_size == 0u) {
+		process_release(process);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
 	op = process_op_from_request(req->request, req->request_size);
 	if ((int)op < 0) {
+		process_release(process);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
@@ -251,10 +259,12 @@ static syscall_result_t process_handler(const struct cap_request* req) {
 		required_rights = CAP_EXEC;
 		break;
 	default:
+		process_release(process);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
 	if ((req->rights & required_rights) != required_rights) {
+		process_release(process);
 		return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	}
 
@@ -282,13 +292,13 @@ static syscall_result_t process_handler(const struct cap_request* req) {
 		break;
 	}
 
+	process_release(process);
 	return result;
 }
 
 cap_id_t kernel_process_grant(struct process* target, process_id_t recipient, cap_rights_t rights, bool* out_created) {
 	struct cap_object* object;
 	cap_object_id_t    object_id;
-	struct capability* cap;
 	bool               object_created = false;
 
 	if (out_created != NULL) *out_created = false;
@@ -298,24 +308,22 @@ cap_id_t kernel_process_grant(struct process* target, process_id_t recipient, ca
 	if (object_id != CAP_OBJECT_ID_INVALID) {
 		object = cap_object_acquire(object_id);
 		if (object == NULL) {
-			object = cap_object_create_kernel((uint64_t)(uintptr_t)target, process_handler, &object_created);
-			if (object == NULL) return CAP_ID_INVALID;
-			process_set_cap_object_id(target, object->cap_object_id);
-			object_id = object->cap_object_id;
+			object_id = cap_object_create_kernel((uint64_t)process_pid(target), process_handler, &object_created);
+			if (object_id == CAP_OBJECT_ID_INVALID) return CAP_ID_INVALID;
+			process_set_cap_object_id(target, object_id);
 		}
 		else {
 			cap_object_release(object);
 		}
 	}
 	else {
-		object = cap_object_create_kernel((uint64_t)(uintptr_t)target, process_handler, &object_created);
-		if (object == NULL) return CAP_ID_INVALID;
-		process_set_cap_object_id(target, object->cap_object_id);
-		object_id = object->cap_object_id;
+		object_id = cap_object_create_kernel((uint64_t)process_pid(target), process_handler, &object_created);
+		if (object_id == CAP_OBJECT_ID_INVALID) return CAP_ID_INVALID;
+		process_set_cap_object_id(target, object_id);
 	}
 
-	cap = cap_create(object_id, recipient, rights, NULL, out_created);
-	if (cap == NULL) {
+	cap_id_t cap_id = cap_create(object_id, recipient, rights, NULL, out_created);
+	if (cap_id == CAP_ID_INVALID) {
 		if (object_created) {
 			process_set_cap_object_id(target, CAP_OBJECT_ID_INVALID);
 			(void)cap_object_destroy_with_id(object_id);
@@ -323,7 +331,7 @@ cap_id_t kernel_process_grant(struct process* target, process_id_t recipient, ca
 		return CAP_ID_INVALID;
 	}
 
-	return cap->cap_id;
+	return cap_id;
 }
 
 cap_id_t kernel_self_grant(struct process* process, bool* out_created) {

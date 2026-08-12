@@ -13,7 +13,7 @@
 #include "boot_module.h"
 #include "process.h"
 
-static struct cap_object* loader_object;
+static cap_object_id_t loader_object_id = CAP_OBJECT_ID_INVALID;
 
 static const char* module_process_name(const struct kernel_boot_module* module) {
 	const char* basename;
@@ -84,16 +84,10 @@ static syscall_result_t loader_handler(const struct cap_request* req) {
 }
 
 void kernel_capability_loader_init(void) {
-	loader_object = cap_object_create_kernel(0u, loader_handler, NULL);
+	loader_object_id = cap_object_create_kernel(0u, loader_handler, NULL);
 }
 
 cap_id_t kernel_capability_loader_grant(process_id_t recipient) {
-	struct capability* cap;
-
-	if (loader_object == NULL) return CAP_ID_INVALID;
-
-	cap = cap_create(loader_object->cap_object_id, recipient, CAP_CALL | CAP_DELEGATE, NULL, NULL);
-	if (cap == NULL) return CAP_ID_INVALID;
-
-	return cap->cap_id;
+	if (loader_object_id == CAP_OBJECT_ID_INVALID) return CAP_ID_INVALID;
+	return cap_create(loader_object_id, recipient, CAP_CALL | CAP_DELEGATE, NULL, NULL);
 }

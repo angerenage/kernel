@@ -306,3 +306,35 @@ void cap_pending_call_cancel_caller(process_id_t caller) {
 		if (finished) return;
 	}
 }
+
+void cap_pending_call_cancel_provider(process_id_t provider) {
+	size_t cursor = 0u;
+
+	if (provider == PROCESS_PID_INVALID) return;
+	for (;;) {
+		struct cap_pending_call* batch[CAP_CALL_CANCEL_BATCH];
+		size_t                   count = 0u;
+		bool                     finished;
+		struct irq_state         irq_state = spinlock_lock_irqsave(&pending_call_table.lock);
+
+		while (cursor < pending_call_table.capacity && count < CAP_CALL_CANCEL_BATCH) {
+			struct cap_pending_call* call = pending_call_table.slots[cursor++];
+			if (call == NULL || call->provider != provider ||
+			    __atomic_load_n(&call->state, __ATOMIC_ACQUIRE) == CAP_PENDING_STATE_COMPLETED) {
+				continue;
+			}
+			(void)__atomic_add_fetch(&call->reference_count, 1u, __ATOMIC_RELAXED);
+			batch[count++] = call;
+		}
+		finished = cursor >= pending_call_table.capacity;
+		spinlock_unlock_irqrestore(&pending_call_table.lock, irq_state);
+
+		for (size_t i = 0u; i < count; i++) {
+			if (cap_pending_call_claim(batch[i])) {
+				cap_pending_call_complete(batch[i], SYSCALL_STATUS_UNAVAILABLE, 0u);
+			}
+			cap_pending_call_release(batch[i]);
+		}
+		if (finished) return;
+	}
+}

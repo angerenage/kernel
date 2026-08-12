@@ -187,6 +187,11 @@ struct process* process_acquire(process_id_t pid);
 /* Release a process reference returned by process_acquire(). */
 void process_release(struct process* process);
 
+/* Destroy a detached zombie process once all of its threads are scheduler-reap-safe. The caller must hold a process
+ *
+ * reference for the duration of this call. */
+bool process_reap_detached(struct process* process);
+
 /* Return the number of registered processes. */
 size_t process_count(void);
 

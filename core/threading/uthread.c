@@ -249,13 +249,19 @@ static bool uthread_cpu_online(const struct cpu* cpu) {
 
 static void uthread_reap_callback(struct thread* thread, void* ctx) {
 	struct uthread* target = (struct uthread*)ctx;
+	struct process* process;
 
 	if (target == NULL || thread != &target->thread) return;
 
-	process_notify_thread_exit(target->process, thread, thread->exit_code);
+	process = process_acquire(process_pid(target->process));
+	process_notify_thread_exit(process, thread, thread->exit_code);
 	if (!thread_is_joinable(thread) && uthread_begin_destroy(target)) {
 		uthread_commit_destroy(target);
 		uthread_release(target);
+	}
+	if (process != NULL) {
+		(void)process_reap_detached(process);
+		process_release(process);
 	}
 }
 

@@ -7,8 +7,9 @@ Test(capability, authorization_direct_target) {
 
 	cap_test_setup();
 
-	obj = cap_object_create(1u, NULL, NULL);
-	cap = cap_create(obj->cap_object_id, 5u, CAP_READ, NULL, NULL);
+	cap_object_id_t object_id = cap_object_create(1u, NULL, NULL);
+	obj                       = cap_object_lookup(NULL, 1u);
+	cap                       = cap_lookup(cap_create(object_id, 5u, CAP_READ, NULL, NULL));
 
 	result = cap_is_authorized(5u, cap);
 	cr_assert_eq(result, CAP_OK, "direct target should be authorized");
@@ -31,8 +32,9 @@ Test(capability, authorization_endpoint_owner) {
 	ch = channel_create(10u);
 	cr_assert_not_null(ch, "channel_create should succeed");
 
-	obj = cap_object_create(1u, ch, NULL);
-	cap = cap_create(obj->cap_object_id, 5u, CAP_READ, NULL, NULL);
+	cap_object_id_t object_id = cap_object_create(1u, ch, NULL);
+	obj                       = cap_object_lookup(ch, 1u);
+	cap                       = cap_lookup(cap_create(object_id, 5u, CAP_READ, NULL, NULL));
 
 	result = cap_is_authorized(10u, cap);
 	cr_assert_eq(result, CAP_OK, "endpoint owner should be authorized");
@@ -54,11 +56,12 @@ Test(capability, authorization_ancestral_chain) {
 
 	cap_test_setup();
 
-	obj = cap_object_create(1u, NULL, NULL);
+	cap_object_id_t object_id = cap_object_create(1u, NULL, NULL);
+	obj                       = cap_object_lookup(NULL, 1u);
 
-	root       = cap_create(obj->cap_object_id, 10u, CAP_READ | CAP_DELEGATE, NULL, NULL);
-	child      = cap_create(obj->cap_object_id, 5u, CAP_READ, root, NULL);
-	grandchild = cap_create(obj->cap_object_id, 7u, CAP_READ, child, NULL);
+	root       = cap_lookup(cap_create(object_id, 10u, CAP_READ | CAP_DELEGATE, NULL, NULL));
+	child      = cap_lookup(cap_create(object_id, 5u, CAP_READ, root, NULL));
+	grandchild = cap_lookup(cap_create(object_id, 7u, CAP_READ, child, NULL));
 
 	result = cap_is_authorized(10u, grandchild);
 	cr_assert_eq(result, CAP_OK, "ancestor target should be authorized for grandchild");
@@ -91,8 +94,9 @@ Test(capability, authorization_revoked_capability) {
 
 	cap_test_setup();
 
-	obj = cap_object_create(1u, NULL, NULL);
-	cap = cap_create(obj->cap_object_id, 5u, CAP_READ, NULL, NULL);
+	cap_object_id_t object_id = cap_object_create(1u, NULL, NULL);
+	obj                       = cap_object_lookup(NULL, 1u);
+	cap                       = cap_lookup(cap_create(object_id, 5u, CAP_READ, NULL, NULL));
 
 	cap->revoked = true;
 
@@ -114,9 +118,10 @@ Test(capability, authorization_revoked_ancestor) {
 
 	cap_test_setup();
 
-	obj   = cap_object_create(1u, NULL, NULL);
-	root  = cap_create(obj->cap_object_id, 10u, CAP_READ | CAP_DELEGATE, NULL, NULL);
-	child = cap_create(obj->cap_object_id, 5u, CAP_READ, root, NULL);
+	cap_object_id_t object_id = cap_object_create(1u, NULL, NULL);
+	obj                       = cap_object_lookup(NULL, 1u);
+	root                      = cap_lookup(cap_create(object_id, 10u, CAP_READ | CAP_DELEGATE, NULL, NULL));
+	child                     = cap_lookup(cap_create(object_id, 5u, CAP_READ, root, NULL));
 
 	root->revoked = true;
 

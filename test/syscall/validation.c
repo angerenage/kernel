@@ -45,30 +45,28 @@ static syscall_result_t grant_test_handler(const struct cap_request* request) {
 
 static cap_id_t ensure_test_grant(enum grant_slot slot, uint64_t object_id, process_id_t recipient, cap_rights_t rights,
                                   bool* out_created) {
-	struct capability* cap;
-	struct cap_object* object;
+	cap_id_t cap;
 
 	if (out_created != NULL) *out_created = false;
 	if (slot >= GRANT_SLOT_COUNT || recipient == PROCESS_PID_INVALID) return CAP_ID_INVALID;
 	if (slot == grant_fail_slot) return CAP_ID_INVALID;
 
 	if (grant_caps[slot] != CAP_ID_INVALID) {
-		cap = cap_acquire(grant_caps[slot]);
-		if (cap != NULL) {
-			cap_release(cap);
+		struct capability* retained = cap_acquire(grant_caps[slot]);
+		if (retained != NULL) {
+			cap_release(retained);
 			return grant_caps[slot];
 		}
 		grant_caps[slot] = CAP_ID_INVALID;
 	}
 
-	object = cap_object_create_kernel(object_id, grant_test_handler, NULL);
-	if (object == NULL) return CAP_ID_INVALID;
-	grant_objects[slot] = object->cap_object_id;
+	grant_objects[slot] = cap_object_create_kernel(object_id, grant_test_handler, NULL);
+	if (grant_objects[slot] == CAP_OBJECT_ID_INVALID) return CAP_ID_INVALID;
 
-	cap = cap_create(object->cap_object_id, recipient, rights, NULL, out_created);
-	if (cap == NULL) return CAP_ID_INVALID;
-	grant_caps[slot] = cap->cap_id;
-	return cap->cap_id;
+	cap = cap_create(grant_objects[slot], recipient, rights, NULL, out_created);
+	if (cap == CAP_ID_INVALID) return CAP_ID_INVALID;
+	grant_caps[slot] = cap;
+	return cap;
 }
 
 static void grant_test_reset(void) {

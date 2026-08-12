@@ -54,22 +54,18 @@ enum cap_result {
 	CAP_OBJECT_DESTROYED,
 };
 
-/*
- * Find or publish a userspace provider's object through an endpoint. Returns NULL on failure.
- * When out_created is
- * non-NULL, it reports whether this call installed the returned table record. This allows
- * callers to roll back their
- * own creation without destroying an older record returned by deduplication.
- */
-struct cap_object* cap_object_create(uint64_t object_id, struct channel* endpoint, bool* out_created);
+/* Find or publish a userspace provider's object and return its stable ID. out_created reports whether this call
+ *
+ * installed a new record, allowing rollback without destroying a deduplicated object. */
+cap_object_id_t cap_object_create(uint64_t object_id, struct channel* endpoint, bool* out_created);
 
-/* Publish a kernel provider's object identifier through a handler. Returns NULL on failure. */
-struct cap_object* cap_object_create_kernel(uint64_t object_id, cap_kernel_handler_t handler, bool* out_created);
+/* Publish a kernel provider's object identifier through a handler and return its stable ID. */
+cap_object_id_t cap_object_create_kernel(uint64_t object_id, cap_kernel_handler_t handler, bool* out_created);
 
-/* Publish a kernel object with resource lifecycle callbacks. */
-struct cap_object* cap_object_create_kernel_managed(uint64_t object_id, cap_kernel_handler_t handler,
-                                                    cap_kernel_process_cleanup_t process_cleanup,
-                                                    cap_kernel_destroy_t destroy, bool* out_created);
+/* Publish a managed kernel object and return its stable ID. */
+cap_object_id_t cap_object_create_kernel_managed(uint64_t object_id, cap_kernel_handler_t handler,
+                                                 cap_kernel_process_cleanup_t process_cleanup,
+                                                 cap_kernel_destroy_t destroy, bool* out_created);
 
 /* Look up an existing object. The returned pointer is borrowed and requires external lifetime synchronisation. */
 struct cap_object* cap_object_lookup(struct channel* endpoint, uint64_t object_id);
@@ -92,15 +88,11 @@ void cap_object_unregister_endpoint(struct channel* endpoint);
 /* Notify managed kernel objects before a process and its address space are destroyed. */
 void cap_object_cleanup_for_process(process_id_t process);
 
-/*
- * Create or deduplicate a capability grant. The returned pointer is table-owned and the capability does not retain
+/* Create or deduplicate a capability grant and return its stable ID. The capability does not retain the represented
  *
- * the represented cap_object. When out_created is non-NULL, it reports whether this call installed a fresh record,
- *
- * allowing precise rollback without destroying an older identical grant.
- */
-struct capability* cap_create(cap_object_id_t cap_object_id, process_id_t target, cap_rights_t rights,
-                              struct capability* parent, bool* out_created);
+ * cap_object. out_created reports whether a fresh record was installed. */
+cap_id_t cap_create(cap_object_id_t cap_object_id, process_id_t target, cap_rights_t rights, struct capability* parent,
+                    bool* out_created);
 
 /* Look up a capability by ID. The returned pointer is borrowed and requires external lifetime synchronisation. */
 struct capability* cap_lookup(cap_id_t id);

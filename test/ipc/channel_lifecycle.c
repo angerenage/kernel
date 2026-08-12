@@ -31,17 +31,15 @@ Test(channel, destroy_rejects_non_owner) {
 }
 
 Test(channel, destroy_unpublishes_endpoint_objects) {
-	struct channel*    ch;
-	struct cap_object* object;
-	cap_object_id_t    object_id;
+	struct channel* ch;
+	cap_object_id_t object_id;
 
 	ipc_test_init_heap();
 	capability_init();
 	ch = channel_create(3u);
 	cr_assert_not_null(ch);
-	object = cap_object_create(77u, ch, NULL);
-	cr_assert_not_null(object);
-	object_id = object->cap_object_id;
+	object_id = cap_object_create(77u, ch, NULL);
+	cr_assert_neq(object_id, CAP_OBJECT_ID_INVALID);
 
 	cr_assert_eq(channel_destroy(ch, 3u), CHANNEL_OK);
 	cr_assert_null(cap_object_acquire(object_id));

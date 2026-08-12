@@ -56,3 +56,6 @@ void cap_pending_call_abort_reply(struct cap_pending_reply* reply);
 bool cap_pending_call_fail(cap_call_id_t id, syscall_status_t status);
 void cap_pending_call_cancel_channel(channel_id_t endpoint_id);
 void cap_pending_call_cancel_caller(process_id_t caller);
+
+/* Complete every outstanding request serviced by provider when that process terminates. */
+void cap_pending_call_cancel_provider(process_id_t provider);

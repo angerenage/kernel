@@ -165,7 +165,6 @@ static syscall_result_t thread_handler(const struct cap_request* req) {
 cap_id_t kernel_thread_grant(struct uthread* target, process_id_t recipient, cap_rights_t rights, bool* out_created) {
 	struct cap_object* object = NULL;
 	cap_object_id_t    object_id;
-	struct capability* cap;
 	uthread_id_t       thread_id;
 	struct uthread*    held;
 	cap_id_t           result_cap     = CAP_ID_INVALID;
@@ -183,18 +182,16 @@ cap_id_t kernel_thread_grant(struct uthread* target, process_id_t recipient, cap
 	object_id = uthread_cap_object_id(held);
 	if (object_id != CAP_OBJECT_ID_INVALID) object = cap_object_acquire(object_id);
 	if (object == NULL) {
-		object = cap_object_create_kernel((uint64_t)thread_id, thread_handler, &object_created);
-		if (object == NULL) goto out;
-		object_id = object->cap_object_id;
+		object_id = cap_object_create_kernel((uint64_t)thread_id, thread_handler, &object_created);
+		if (object_id == CAP_OBJECT_ID_INVALID) goto out;
 		uthread_set_cap_object_id(held, object_id);
 	}
 	else {
 		cap_object_release(object);
 	}
 
-	cap        = cap_create(object_id, recipient, rights, NULL, out_created);
-	result_cap = cap == NULL ? CAP_ID_INVALID : cap->cap_id;
-	if (cap == NULL && object_created) {
+	result_cap = cap_create(object_id, recipient, rights, NULL, out_created);
+	if (result_cap == CAP_ID_INVALID && object_created) {
 		uthread_set_cap_object_id(held, CAP_OBJECT_ID_INVALID);
 		(void)cap_object_destroy_with_id(object_id);
 	}

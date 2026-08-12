@@ -74,20 +74,27 @@ static syscall_result_t address_space_handler(const struct cap_request* req) {
 	enum address_space_op op;
 	cap_rights_t          required_rights;
 
-	target = (struct process*)(uintptr_t)req->object_id;
-	if (target == NULL || process_lookup(process_pid(target)) != target) {
+	target = process_acquire((process_id_t)req->object_id);
+	if (target == NULL) {
 		return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 	}
 	space = process_address_space(target);
-	if (space == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	if (space == NULL) {
+		process_release(target);
+		return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	}
 
 	if (req->request_size < sizeof(struct address_space_request_header)) {
+		process_release(target);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
 	struct address_space_request_header header;
 	syscall_result_t copy_result = copy_request(req->request, req->request_size, &header, sizeof(header));
-	if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
+	if (copy_result.status != SYSCALL_STATUS_OK) {
+		process_release(target);
+		return copy_result;
+	}
 
 	op = header.op;
 
@@ -100,30 +107,38 @@ static syscall_result_t address_space_handler(const struct cap_request* req) {
 		required_rights = CAP_MAP;
 		break;
 	default:
+		process_release(target);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
 	if ((req->rights & required_rights) != required_rights) {
+		process_release(target);
 		return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	}
 
+	syscall_result_t result;
 	switch (op) {
 	case ADDRESS_SPACE_OP_QUERY:
-		return address_space_query_handler(req, space);
+		result = address_space_query_handler(req, space);
+		break;
 	case ADDRESS_SPACE_OP_MAP:
-		return address_space_map_handler(req, target, false);
+		result = address_space_map_handler(req, target, false);
+		break;
 	case ADDRESS_SPACE_OP_MAP_AT:
-		return address_space_map_handler(req, target, true);
+		result = address_space_map_handler(req, target, true);
+		break;
 	default:
-		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+		result = syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+		break;
 	}
+	process_release(target);
+	return result;
 }
 
 cap_id_t kernel_address_space_grant(struct process* process, process_id_t recipient, cap_rights_t rights,
                                     bool* out_created) {
 	struct cap_object* object;
 	cap_object_id_t    object_id;
-	struct capability* cap;
 	bool               object_created = false;
 
 	if (out_created != NULL) *out_created = false;
@@ -140,14 +155,13 @@ cap_id_t kernel_address_space_grant(struct process* process, process_id_t recipi
 		object = NULL;
 	}
 	if (object == NULL) {
-		object = cap_object_create_kernel((uint64_t)(uintptr_t)process, address_space_handler, &object_created);
-		if (object == NULL) return CAP_ID_INVALID;
-		object_id = object->cap_object_id;
+		object_id = cap_object_create_kernel((uint64_t)process_pid(process), address_space_handler, &object_created);
+		if (object_id == CAP_OBJECT_ID_INVALID) return CAP_ID_INVALID;
 		process_set_address_space_cap_object_id(process, object_id);
 	}
 
-	cap = cap_create(object_id, recipient, rights, NULL, out_created);
-	if (cap == NULL) {
+	cap_id_t cap_id = cap_create(object_id, recipient, rights, NULL, out_created);
+	if (cap_id == CAP_ID_INVALID) {
 		if (object_created) {
 			process_set_address_space_cap_object_id(process, CAP_OBJECT_ID_INVALID);
 			(void)cap_object_destroy_with_id(object_id);
@@ -155,5 +169,5 @@ cap_id_t kernel_address_space_grant(struct process* process, process_id_t recipi
 		return CAP_ID_INVALID;
 	}
 
-	return cap->cap_id;
+	return cap_id;
 }

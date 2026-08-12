@@ -63,7 +63,7 @@ static struct cap_object* cap_object_find_locked(struct channel* endpoint, uint6
 	return NULL;
 }
 
-struct cap_object* cap_object_create(uint64_t object_id, struct channel* endpoint, bool* out_created) {
+cap_object_id_t cap_object_create(uint64_t object_id, struct channel* endpoint, bool* out_created) {
 	struct irq_state   state;
 	struct cap_object* object;
 
@@ -71,76 +71,89 @@ struct cap_object* cap_object_create(uint64_t object_id, struct channel* endpoin
 	state  = spinlock_lock_irqsave(&cap_object_table.lock);
 	object = cap_object_find_locked(endpoint, object_id, NULL);
 	if (object != NULL) {
+		cap_object_id_t id = object->cap_object_id;
 		spinlock_unlock_irqrestore(&cap_object_table.lock, state);
-		return object;
+		return id;
 	}
 	spinlock_unlock_irqrestore(&cap_object_table.lock, state);
 
 	object = cap_object_create_locked(object_id, endpoint, NULL, NULL, NULL);
-	if (object == NULL) return NULL;
+	if (object == NULL) return CAP_OBJECT_ID_INVALID;
+	/* Keep a creator reference while the freshly published table entry can already be removed by another CPU. */
+	(void)__atomic_add_fetch(&object->reference_count, 1u, __ATOMIC_RELAXED);
 
 	id_table_id_t id;
 	if (id_table_alloc(&cap_object_table, object, &id) != ID_TABLE_OK) {
 		cap_object_release(object);
-		return NULL;
+		cap_object_release(object);
+		return CAP_OBJECT_ID_INVALID;
 	}
 
-	state                       = spinlock_lock_irqsave(&cap_object_table.lock);
-	object->cap_object_id       = id;
-	struct cap_object* existing = cap_object_find_locked(endpoint, object_id, NULL);
+	state                        = spinlock_lock_irqsave(&cap_object_table.lock);
+	object->cap_object_id        = id;
+	struct cap_object* existing  = cap_object_find_locked(endpoint, object_id, NULL);
+	cap_object_id_t    result_id = existing == NULL ? CAP_OBJECT_ID_INVALID : existing->cap_object_id;
 	spinlock_unlock_irqrestore(&cap_object_table.lock, state);
 	if (existing != object) {
-		(void)id_table_remove(&cap_object_table, id, NULL);
+		struct cap_object* removed = NULL;
+		if (id_table_remove(&cap_object_table, id, (void**)&removed) == ID_TABLE_OK) cap_object_release(removed);
 		cap_object_release(object);
-		return existing;
+		return result_id;
 	}
 	if (out_created != NULL) *out_created = true;
 
-	return object;
+	cap_object_release(object);
+	return result_id;
 }
 
-struct cap_object* cap_object_create_kernel(uint64_t object_id, cap_kernel_handler_t handler, bool* out_created) {
+cap_object_id_t cap_object_create_kernel(uint64_t object_id, cap_kernel_handler_t handler, bool* out_created) {
 	return cap_object_create_kernel_managed(object_id, handler, NULL, NULL, out_created);
 }
 
-struct cap_object* cap_object_create_kernel_managed(uint64_t object_id, cap_kernel_handler_t handler,
-                                                    cap_kernel_process_cleanup_t process_cleanup,
-                                                    cap_kernel_destroy_t destroy, bool* out_created) {
+cap_object_id_t cap_object_create_kernel_managed(uint64_t object_id, cap_kernel_handler_t handler,
+                                                 cap_kernel_process_cleanup_t process_cleanup,
+                                                 cap_kernel_destroy_t destroy, bool* out_created) {
 	struct irq_state   state;
 	struct cap_object* object;
 
 	if (out_created != NULL) *out_created = false;
-	if (handler == NULL) return NULL;
+	if (handler == NULL) return CAP_OBJECT_ID_INVALID;
 
 	state  = spinlock_lock_irqsave(&cap_object_table.lock);
 	object = cap_object_find_locked(NULL, object_id, handler);
 	if (object != NULL) {
+		cap_object_id_t id = object->cap_object_id;
 		spinlock_unlock_irqrestore(&cap_object_table.lock, state);
-		return object;
+		return id;
 	}
 	spinlock_unlock_irqrestore(&cap_object_table.lock, state);
 
 	object = cap_object_create_locked(object_id, NULL, handler, process_cleanup, destroy);
-	if (object == NULL) return NULL;
+	if (object == NULL) return CAP_OBJECT_ID_INVALID;
+	(void)__atomic_add_fetch(&object->reference_count, 1u, __ATOMIC_RELAXED);
 
 	id_table_id_t id;
 	if (id_table_alloc(&cap_object_table, object, &id) != ID_TABLE_OK) {
 		cap_object_release(object);
-		return NULL;
+		cap_object_release(object);
+		return CAP_OBJECT_ID_INVALID;
 	}
 
-	state                       = spinlock_lock_irqsave(&cap_object_table.lock);
-	object->cap_object_id       = id;
-	struct cap_object* existing = cap_object_find_locked(NULL, object_id, handler);
+	state                        = spinlock_lock_irqsave(&cap_object_table.lock);
+	object->cap_object_id        = id;
+	struct cap_object* existing  = cap_object_find_locked(NULL, object_id, handler);
+	cap_object_id_t    result_id = existing == NULL ? CAP_OBJECT_ID_INVALID : existing->cap_object_id;
 	spinlock_unlock_irqrestore(&cap_object_table.lock, state);
 	if (existing != object) {
-		(void)id_table_remove(&cap_object_table, id, NULL);
+		struct cap_object* removed = NULL;
+		if (id_table_remove(&cap_object_table, id, (void**)&removed) == ID_TABLE_OK) cap_object_release(removed);
 		cap_object_release(object);
-		return existing;
+		return result_id;
 	}
 	if (out_created != NULL) *out_created = true;
 
-	return object;
+	cap_object_release(object);
+	return result_id;
 }
 
 struct cap_object* cap_object_lookup(struct channel* endpoint, uint64_t object_id) {
@@ -342,65 +355,72 @@ static struct capability* capability_find_locked(cap_object_id_t cap_object_id, 
 	return NULL;
 }
 
-struct capability* cap_create(cap_object_id_t cap_object_id, process_id_t target, cap_rights_t rights,
-                              struct capability* parent, bool* out_created) {
+cap_id_t cap_create(cap_object_id_t cap_object_id, process_id_t target, cap_rights_t rights, struct capability* parent,
+                    bool* out_created) {
 	struct irq_state   state;
 	struct capability* capability;
 	struct cap_object* object;
 
 	if (out_created != NULL) *out_created = false;
-	if (cap_object_id == CAP_OBJECT_ID_INVALID) return NULL;
+	if (cap_object_id == CAP_OBJECT_ID_INVALID) return CAP_ID_INVALID;
 	object = cap_object_acquire(cap_object_id);
-	if (object == NULL) return NULL;
+	if (object == NULL) return CAP_ID_INVALID;
 	if (parent != NULL && cap_is_valid(parent) != CAP_OK) {
 		cap_object_release(object);
-		return NULL;
+		return CAP_ID_INVALID;
 	}
 
 	state      = spinlock_lock_irqsave(&capability_table.lock);
 	capability = capability_find_locked(cap_object_id, target, rights, parent);
 	if (capability != NULL) {
+		cap_id_t id = capability->cap_id;
 		spinlock_unlock_irqrestore(&capability_table.lock, state);
 		cap_object_release(object);
-		return capability;
+		return id;
 	}
 	spinlock_unlock_irqrestore(&capability_table.lock, state);
 
 	capability = capability_create_locked(cap_object_id, target, rights, parent);
 	if (capability == NULL) {
 		cap_object_release(object);
-		return NULL;
+		return CAP_ID_INVALID;
 	}
+	(void)__atomic_add_fetch(&capability->reference_count, 1u, __ATOMIC_RELAXED);
 
 	id_table_id_t id;
 	if (id_table_alloc(&capability_table, capability, &id) != ID_TABLE_OK) {
 		cap_release(capability);
-		cap_object_release(object);
-		return NULL;
-	}
-
-	state                       = spinlock_lock_irqsave(&capability_table.lock);
-	capability->cap_id          = (cap_id_t)id;
-	struct capability* existing = capability_find_locked(cap_object_id, target, rights, parent);
-	spinlock_unlock_irqrestore(&capability_table.lock, state);
-	if (existing != capability) {
-		(void)id_table_remove(&capability_table, id, NULL);
 		cap_release(capability);
 		cap_object_release(object);
-		return existing;
+		return CAP_ID_INVALID;
+	}
+
+	state                        = spinlock_lock_irqsave(&capability_table.lock);
+	capability->cap_id           = (cap_id_t)id;
+	struct capability* existing  = capability_find_locked(cap_object_id, target, rights, parent);
+	cap_id_t           result_id = existing == NULL ? CAP_ID_INVALID : existing->cap_id;
+	spinlock_unlock_irqrestore(&capability_table.lock, state);
+	if (existing != capability) {
+		struct capability* removed = NULL;
+		if (id_table_remove(&capability_table, id, (void**)&removed) == ID_TABLE_OK) cap_release(removed);
+		cap_release(capability);
+		cap_object_release(object);
+		return result_id;
 	}
 	struct cap_object* registered_object = cap_object_acquire(cap_object_id);
 	if (registered_object == NULL || (parent != NULL && cap_is_valid(parent) != CAP_OK)) {
 		(void)cap_destroy_by_id(capability->cap_id);
 		cap_object_release(registered_object);
 		cap_object_release(object);
-		return NULL;
+		cap_release(capability);
+		return CAP_ID_INVALID;
 	}
 	cap_object_release(registered_object);
 	cap_object_release(object);
 	if (out_created != NULL) *out_created = true;
 
-	return capability;
+	cap_release(capability);
+	return result_id;
 }
 
 struct capability* cap_lookup(cap_id_t id) {

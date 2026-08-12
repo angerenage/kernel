@@ -162,8 +162,8 @@ static syscall_result_t signal_handler(const struct cap_request* req) {
 
 static syscall_result_t kernel_signal_acquire(cap_id_t cap_id, process_id_t caller, cap_rights_t required_rights,
                                               struct kernel_signal_reference* out_reference) {
-	struct capability* cap;
 	struct cap_object* object;
+	struct capability* cap;
 	struct signal*     signal;
 	enum cap_result    cap_result;
 
@@ -301,7 +301,6 @@ syscall_result_t kernel_signal_try_wait(cap_id_t cap, process_id_t caller, struc
 cap_id_t kernel_signal_grant(struct signal* target, process_id_t recipient, cap_rights_t rights) {
 	struct cap_object* object = NULL;
 	cap_object_id_t    object_id;
-	struct capability* cap;
 	signal_id_t        id;
 	struct signal*     held;
 	cap_id_t           result_cap     = CAP_ID_INVALID;
@@ -318,9 +317,8 @@ cap_id_t kernel_signal_grant(struct signal* target, process_id_t recipient, cap_
 	object_id = signal_cap_object_id(held);
 	if (object_id != CAP_OBJECT_ID_INVALID) object = cap_object_acquire(object_id);
 	if (object == NULL) {
-		object = cap_object_create_kernel((uint64_t)id, signal_handler, &object_created);
-		if (object == NULL) goto out;
-		object_id = object->cap_object_id;
+		object_id = cap_object_create_kernel((uint64_t)id, signal_handler, &object_created);
+		if (object_id == CAP_OBJECT_ID_INVALID) goto out;
 		if (!signal_set_cap_object_id(held, object_id)) {
 			(void)cap_object_destroy_with_id(object_id);
 			goto out;
@@ -330,9 +328,8 @@ cap_id_t kernel_signal_grant(struct signal* target, process_id_t recipient, cap_
 		cap_object_release(object);
 	}
 
-	cap        = cap_create(object_id, recipient, rights, NULL, NULL);
-	result_cap = cap == NULL ? CAP_ID_INVALID : cap->cap_id;
-	if (cap == NULL && object_created) {
+	result_cap = cap_create(object_id, recipient, rights, NULL, NULL);
+	if (result_cap == CAP_ID_INVALID && object_created) {
 		(void)signal_destroy_cap_object(held);
 	}
 out:

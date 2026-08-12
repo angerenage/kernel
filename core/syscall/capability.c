@@ -35,18 +35,17 @@ static syscall_result_t syscall_cap_result_to_syscall(enum cap_result result, ui
 
 syscall_result_t syscall_cap_create(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
                                     uintptr_t arg5) {
-	struct process*    process;
-	struct channel*    endpoint;
-	struct cap_object* object;
-	struct capability* cap;
-	process_id_t       caller_pid;
-	process_id_t       target;
-	uint64_t           object_id;
-	cap_rights_t       rights;
-	cap_id_t           cap_id;
-	syscall_result_t   copy_result;
-	bool               object_created;
-	bool               cap_created;
+	struct process*  process;
+	struct channel*  endpoint;
+	cap_object_id_t  cap_object_id;
+	process_id_t     caller_pid;
+	process_id_t     target;
+	uint64_t         object_id;
+	cap_rights_t     rights;
+	cap_id_t         cap_id;
+	syscall_result_t copy_result;
+	bool             object_created;
+	bool             cap_created;
 
 	(void)arg5;
 
@@ -69,26 +68,24 @@ syscall_result_t syscall_cap_create(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
-	object = cap_object_create(object_id, endpoint, &object_created);
-	if (object == NULL) {
+	cap_object_id = cap_object_create(object_id, endpoint, &object_created);
+	if (cap_object_id == CAP_OBJECT_ID_INVALID) {
 		channel_release(endpoint);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 
-	cap = cap_create(object->cap_object_id, target, rights, NULL, &cap_created);
-	if (cap == NULL) {
-		if (object_created) (void)cap_object_destroy_with_id(object->cap_object_id);
+	cap_id = cap_create(cap_object_id, target, rights, NULL, &cap_created);
+	if (cap_id == CAP_ID_INVALID) {
+		if (object_created) (void)cap_object_destroy_with_id(cap_object_id);
 		channel_release(endpoint);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
-
-	cap_id = cap->cap_id;
 
 	if (arg4 != 0u) {
 		copy_result = syscall_copy_to_user(syscall_current_user_space(), arg4, &cap_id, sizeof(cap_id), 4u);
 		if (copy_result.status != SYSCALL_STATUS_OK) {
 			if (cap_created) (void)cap_destroy_by_id(cap_id);
-			if (object_created) (void)cap_object_destroy_with_id(object->cap_object_id);
+			if (object_created) (void)cap_object_destroy_with_id(cap_object_id);
 			channel_release(endpoint);
 			return copy_result;
 		}
@@ -102,7 +99,6 @@ syscall_result_t syscall_cap_delegate(uintptr_t arg0, uintptr_t arg1, uintptr_t 
                                       uintptr_t arg5) {
 	struct process*    process;
 	struct capability* source;
-	struct capability* new_cap;
 	process_id_t       caller_pid;
 	process_id_t       target;
 	cap_rights_t       rights;
@@ -156,13 +152,11 @@ syscall_result_t syscall_cap_delegate(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
-	new_cap = cap_create(source->cap_object_id, target, rights, source, &created);
-	if (new_cap == NULL) {
+	cap_id = cap_create(source->cap_object_id, target, rights, source, &created);
+	if (cap_id == CAP_ID_INVALID) {
 		cap_release(source);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
-
-	cap_id = new_cap->cap_id;
 
 	if (arg3 != 0u) {
 		copy_result = syscall_copy_to_user(syscall_current_user_space(), arg3, &cap_id, sizeof(cap_id), 3u);
@@ -181,8 +175,7 @@ syscall_result_t syscall_cap_derive(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
                                     uintptr_t arg5) {
 	struct process*    process;
 	struct capability* base;
-	struct cap_object* object;
-	struct capability* new_cap;
+	cap_object_id_t    derived_object_id;
 	process_id_t       caller_pid;
 	process_id_t       target;
 	uint64_t           object_id;
@@ -239,28 +232,26 @@ syscall_result_t syscall_cap_derive(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
-	object = cap_object_create(object_id, base_object->endpoint, &object_created);
-	if (object == NULL) {
+	derived_object_id = cap_object_create(object_id, base_object->endpoint, &object_created);
+	if (derived_object_id == CAP_OBJECT_ID_INVALID) {
 		cap_object_release(base_object);
 		cap_release(base);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 
-	new_cap = cap_create(object->cap_object_id, target, rights, base, &cap_created);
+	cap_id = cap_create(derived_object_id, target, rights, base, &cap_created);
 	cap_object_release(base_object);
-	if (new_cap == NULL) {
-		if (object_created) (void)cap_object_destroy_with_id(object->cap_object_id);
+	if (cap_id == CAP_ID_INVALID) {
+		if (object_created) (void)cap_object_destroy_with_id(derived_object_id);
 		cap_release(base);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
-
-	cap_id = new_cap->cap_id;
 
 	if (arg4 != 0u) {
 		copy_result = syscall_copy_to_user(syscall_current_user_space(), arg4, &cap_id, sizeof(cap_id), 4u);
 		if (copy_result.status != SYSCALL_STATUS_OK) {
 			if (cap_created) (void)cap_destroy_by_id(cap_id);
-			if (object_created) (void)cap_object_destroy_with_id(object->cap_object_id);
+			if (object_created) (void)cap_object_destroy_with_id(derived_object_id);
 			cap_release(base);
 			return copy_result;
 		}

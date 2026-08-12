@@ -8,7 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-static struct cap_object* serial_object;
+static cap_object_id_t serial_object_id = CAP_OBJECT_ID_INVALID;
 
 static syscall_result_t serial_handler(const struct cap_request* req) {
 	if ((req->rights & CAP_WRITE) != CAP_WRITE) {
@@ -26,16 +26,10 @@ static syscall_result_t serial_handler(const struct cap_request* req) {
 }
 
 void kernel_capability_serial_init(void) {
-	serial_object = cap_object_create_kernel(0u, serial_handler, NULL);
+	serial_object_id = cap_object_create_kernel(0u, serial_handler, NULL);
 }
 
 cap_id_t kernel_capability_serial_grant(process_id_t target) {
-	struct capability* cap;
-
-	if (serial_object == NULL) return CAP_ID_INVALID;
-
-	cap = cap_create(serial_object->cap_object_id, target, CAP_WRITE | CAP_CALL | CAP_DELEGATE, NULL, NULL);
-	if (cap == NULL) return CAP_ID_INVALID;
-
-	return cap->cap_id;
+	if (serial_object_id == CAP_OBJECT_ID_INVALID) return CAP_ID_INVALID;
+	return cap_create(serial_object_id, target, CAP_WRITE | CAP_CALL | CAP_DELEGATE, NULL, NULL);
 }

@@ -77,12 +77,15 @@ Test(capability_syscall, publish_output_failure_preserves_preexisting_object) {
 	struct channel*    channel   = channel_create(process_pid(process));
 	const uint64_t     object_id = 0x2002u;
 	struct cap_object* object;
+	cap_object_id_t    object_record_id;
 	size_t             objects_before;
 	size_t             caps_before;
 	syscall_result_t   result;
 
 	cr_assert_not_null(channel);
-	object = cap_object_create(object_id, channel, NULL);
+	object_record_id = cap_object_create(object_id, channel, NULL);
+	object           = cap_object_lookup(channel, object_id);
+	cr_assert_neq(object_record_id, CAP_OBJECT_ID_INVALID);
 	cr_assert_not_null(object);
 	objects_before = capability_object_count();
 	caps_before    = capability_count();
@@ -105,19 +108,20 @@ Test(capability_syscall, publish_output_failure_preserves_preexisting_object) {
 }
 
 Test(capability_syscall, delegate_output_failure_rolls_back_child_capability) {
-	struct process*    process = make_current_process("cap/delegate-rollback");
-	struct cap_object* object  = cap_object_create(0x2003u, NULL, NULL);
-	struct capability* source;
-	size_t             caps_before;
-	syscall_result_t   result;
+	struct process*  process = make_current_process("cap/delegate-rollback");
+	cap_object_id_t  object_id;
+	cap_id_t         source_id;
+	size_t           caps_before;
+	syscall_result_t result;
 
-	cr_assert_not_null(object);
-	source = cap_create(object->cap_object_id, process_pid(process), CAP_READ | CAP_DELEGATE, NULL, NULL);
-	cr_assert_not_null(source);
+	object_id = cap_object_create(0x2003u, NULL, NULL);
+	cr_assert_neq(object_id, CAP_OBJECT_ID_INVALID);
+	source_id = cap_create(object_id, process_pid(process), CAP_READ | CAP_DELEGATE, NULL, NULL);
+	cr_assert_neq(source_id, CAP_ID_INVALID);
 	caps_before = capability_count();
 
 	result = syscall_dispatch(SYSCALL_CAP_DELEGATE,
-	                          (uintptr_t)source->cap_id,
+	                          (uintptr_t)source_id,
 	                          (uintptr_t)process_pid(process),
 	                          (uintptr_t)CAP_READ,
 	                          invalid_cap_output_pointer(),
@@ -126,31 +130,31 @@ Test(capability_syscall, delegate_output_failure_rolls_back_child_capability) {
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 	cr_assert_eq(capability_count(), caps_before, "failed delegation left an unreachable child capability");
 
-	cr_assert(cap_destroy(source));
-	cr_assert(cap_object_destroy(object));
+	cr_assert(cap_destroy_by_id(source_id));
+	cr_assert(cap_object_destroy_with_id(object_id));
 	destroy_current_process(process);
 }
 
 Test(capability_syscall, derive_output_failure_rolls_back_child_and_new_object) {
-	struct process*    process = make_current_process("cap/derive-rollback");
-	struct channel*    channel = channel_create(process_pid(process));
-	struct cap_object* base_object;
-	struct capability* base_cap;
-	const uint64_t     derived_object_id = 0x2005u;
-	size_t             objects_before;
-	size_t             caps_before;
-	syscall_result_t   result;
+	struct process*  process = make_current_process("cap/derive-rollback");
+	struct channel*  channel = channel_create(process_pid(process));
+	cap_object_id_t  base_object_id;
+	cap_id_t         base_cap_id;
+	const uint64_t   derived_object_id = 0x2005u;
+	size_t           objects_before;
+	size_t           caps_before;
+	syscall_result_t result;
 
 	cr_assert_not_null(channel);
-	base_object = cap_object_create(0x2004u, channel, NULL);
-	cr_assert_not_null(base_object);
-	base_cap = cap_create(base_object->cap_object_id, process_pid(process), CAP_DERIVE, NULL, NULL);
-	cr_assert_not_null(base_cap);
+	base_object_id = cap_object_create(0x2004u, channel, NULL);
+	cr_assert_neq(base_object_id, CAP_OBJECT_ID_INVALID);
+	base_cap_id = cap_create(base_object_id, process_pid(process), CAP_DERIVE, NULL, NULL);
+	cr_assert_neq(base_cap_id, CAP_ID_INVALID);
 	objects_before = capability_object_count();
 	caps_before    = capability_count();
 
 	result = syscall_dispatch(SYSCALL_CAP_DERIVE,
-	                          (uintptr_t)base_cap->cap_id,
+	                          (uintptr_t)base_cap_id,
 	                          (uintptr_t)process_pid(process),
 	                          (uintptr_t)derived_object_id,
 	                          (uintptr_t)CAP_READ,
@@ -162,8 +166,8 @@ Test(capability_syscall, derive_output_failure_rolls_back_child_and_new_object) 
 		capability_object_count(), objects_before, "failed derive left its newly-created derived object behind");
 	cr_assert_null(cap_object_lookup(channel, derived_object_id));
 
-	cr_assert(cap_destroy(base_cap));
-	cr_assert(cap_object_destroy(base_object));
+	cr_assert(cap_destroy_by_id(base_cap_id));
+	cr_assert(cap_object_destroy_with_id(base_object_id));
 	cr_assert_eq(channel_destroy(channel, process_pid(process)), CHANNEL_OK);
 	destroy_current_process(process);
 }

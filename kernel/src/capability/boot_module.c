@@ -92,18 +92,21 @@ static syscall_result_t boot_module_map_handler(const struct cap_request*       
 	if (req->request_size < sizeof(struct module_map_request) || !cap_kernel_response_fits(req, sizeof(response))) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
-	caller = process_lookup(req->caller);
+	caller = process_acquire(req->caller);
 	if (caller == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	space = process_address_space(caller);
 	if (space == NULL || !boot_module_mapping_layout(module, &layout)) {
+		process_release(caller);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 	if (!vmm_alloc_phys(
 			space, layout.physical_base, layout.page_count, VMM_PROT_READ | VMM_PROT_USER, NULL, &mapping_id, NULL)) {
+		process_release(caller);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 	if (!vmm_query_id(space, mapping_id, &mapping_info)) {
 		(void)vmm_free(space, mapping_id);
+		process_release(caller);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 	mapping_info.id = VMM_ID_INVALID;
@@ -113,12 +116,14 @@ static syscall_result_t boot_module_map_handler(const struct cap_request*       
 	response.data_offset = layout.page_offset;
 	if (response.mapping_cap == CAP_ID_INVALID) {
 		(void)vmm_free(space, mapping_id);
+		process_release(caller);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 	result = cap_kernel_write_response(req, &response, sizeof(response));
 	if (result.status != SYSCALL_STATUS_OK) {
 		(void)kernel_mapping_discard_unpublished(response.mapping_cap, req->caller);
 	}
+	process_release(caller);
 	return result;
 }
 
@@ -206,11 +211,10 @@ syscall_result_t kernel_capability_boot_module_get(cap_id_t module_cap, process_
 }
 
 cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t recipient, bool* out_created) {
-	cap_object_id_t*   slot;
-	cap_object_id_t    object_id;
-	struct cap_object* object;
-	struct capability* cap;
-	bool               object_created = false;
+	cap_object_id_t* slot;
+	cap_object_id_t  object_id;
+	cap_id_t         cap_id;
+	bool             object_created = false;
 
 	if (out_created != NULL) *out_created = false;
 	slot = boot_module_id_slot(module_index);
@@ -221,17 +225,15 @@ cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t r
 		const uint64_t raw_id = (uint64_t)module_index + 1u;
 		if (kernel_boot_module_at(module_index) == NULL) return CAP_ID_INVALID;
 
-		object = cap_object_create_kernel(raw_id, boot_module_handler, &object_created);
-		if (object == NULL) return CAP_ID_INVALID;
-
-		object_id = object->cap_object_id;
-		*slot     = object_id;
+		object_id = cap_object_create_kernel(raw_id, boot_module_handler, &object_created);
+		if (object_id == CAP_OBJECT_ID_INVALID) return CAP_ID_INVALID;
+		*slot = object_id;
 	}
 
-	cap = cap_create(object_id, recipient, CAP_READ | CAP_MAP | CAP_CALL, NULL, out_created);
-	if (cap == NULL && object_created) {
+	cap_id = cap_create(object_id, recipient, CAP_READ | CAP_MAP | CAP_CALL, NULL, out_created);
+	if (cap_id == CAP_ID_INVALID && object_created) {
 		*slot = CAP_OBJECT_ID_INVALID;
 		(void)cap_object_destroy_with_id(object_id);
 	}
-	return cap == NULL ? CAP_ID_INVALID : cap->cap_id;
+	return cap_id;
 }

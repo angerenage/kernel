@@ -325,6 +325,7 @@ bool process_terminate(struct process* process, uintptr_t exit_code) {
 	spinlock_unlock_irqrestore(&process->lock, state);
 	spinlock_unlock_irqrestore(&process->join_wait_queue.lock, wait_state);
 	cap_pending_call_cancel_caller(process->pid);
+	cap_pending_call_cancel_provider(process->pid);
 
 	for (;;) {
 		size_t cancel_count = 0u;
@@ -429,6 +430,18 @@ static void process_finalize(struct process* process) {
 void process_release(struct process* process) {
 	if (process == NULL) return;
 	if (__atomic_sub_fetch(&process->reference_count, 1u, __ATOMIC_ACQ_REL) == 0u) process_finalize(process);
+}
+
+bool process_reap_detached(struct process* process) {
+	struct irq_state state;
+	bool             ready;
+
+	if (process == NULL) return false;
+	state = spinlock_lock_irqsave(&process->lock);
+	ready = process->detached && process->state == PROCESS_STATE_ZOMBIE && !process->main_thread_starting &&
+	        process_all_threads_terminated_locked(process);
+	spinlock_unlock_irqrestore(&process->lock, state);
+	return ready && process_destroy(process);
 }
 
 bool process_destroy(struct process* process) {
@@ -570,7 +583,11 @@ void process_notify_thread_exit(struct process* process, struct thread* thread, 
 	spinlock_unlock_irqrestore(&process->lock, state);
 	spinlock_unlock_irqrestore(&process->join_wait_queue.lock, wait_state);
 
-	if (wake_joiners) (void)sched_wake_all(&process->join_wait_queue);
+	if (wake_joiners) {
+		cap_pending_call_cancel_caller(process->pid);
+		cap_pending_call_cancel_provider(process->pid);
+		(void)sched_wake_all(&process->join_wait_queue);
+	}
 }
 
 cap_object_id_t process_cap_object_id(const struct process* process) {

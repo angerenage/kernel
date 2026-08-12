@@ -10,20 +10,20 @@
 #include "../capability/serial.h"
 
 cap_id_t cap_kernel_create(uint64_t object_id, cap_kernel_handler_t handler, process_id_t target, cap_rights_t rights) {
-	struct cap_object* object;
-	struct capability* cap;
-	bool               object_created = false;
+	cap_object_id_t cap_object_id;
+	cap_id_t        cap_id;
+	bool            object_created = false;
 
-	object = cap_object_create_kernel(object_id, handler, &object_created);
-	if (object == NULL) return CAP_ID_INVALID;
+	cap_object_id = cap_object_create_kernel(object_id, handler, &object_created);
+	if (cap_object_id == CAP_OBJECT_ID_INVALID) return CAP_ID_INVALID;
 
-	cap = cap_create(object->cap_object_id, target, rights, NULL, NULL);
-	if (cap == NULL) {
-		if (object_created) (void)cap_object_destroy_with_id(object->cap_object_id);
+	cap_id = cap_create(cap_object_id, target, rights, NULL, NULL);
+	if (cap_id == CAP_ID_INVALID) {
+		if (object_created) (void)cap_object_destroy_with_id(cap_object_id);
 		return CAP_ID_INVALID;
 	}
 
-	return cap->cap_id;
+	return cap_id;
 }
 
 bool cap_kernel_response_fits(const struct cap_request* request, size_t response_size) {

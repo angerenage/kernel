@@ -717,8 +717,11 @@ void sched_finish_context_switch(void) {
 	thread_mark_zombie(thread);
 	spinlock_unlock_irqrestore(&thread->join_wait_queue.lock, join_state);
 
-	if (reap_callback != NULL) reap_callback(thread, reap_context);
 	if (joinable) (void)sched_wake_all(&thread->join_wait_queue);
+	/* A finalizer may reclaim a joinable thread when its owning process is detached, so the scheduler must not touch
+	 * the
+	 * descriptor after invoking it. */
+	if (reap_callback != NULL) reap_callback(thread, reap_context);
 }
 
 void sched_complete_context_switch(void) {

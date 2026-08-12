@@ -72,3 +72,16 @@ Test(capability, terminating_caller_can_cancel_pending_calls) {
 	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
 	cap_pending_call_destroy(call);
 }
+
+Test(capability, terminating_provider_cancels_requests_waiting_for_its_reply) {
+	struct cap_pending_call* call;
+	syscall_result_t         result;
+
+	cap_test_setup();
+	call = cap_pending_call_create(13u, 46u, 16u, 0u);
+	cr_assert_not_null(call);
+	cap_pending_call_cancel_provider(46u);
+	cap_pending_call_wait(call, &result, NULL);
+	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
+	cap_pending_call_destroy(call);
+}

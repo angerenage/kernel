@@ -6,9 +6,10 @@ Test(capability, destroying_parent_keeps_descendant_chain_safe_and_revoked) {
 	struct capability* child;
 
 	cap_test_setup();
-	object = cap_object_create(77u, NULL, NULL);
-	parent = cap_create(object->cap_object_id, 1u, CAP_READ | CAP_DELEGATE, NULL, NULL);
-	child  = cap_create(object->cap_object_id, 2u, CAP_READ, parent, NULL);
+	cap_object_id_t object_id = cap_object_create(77u, NULL, NULL);
+	object                    = cap_object_lookup(NULL, 77u);
+	parent                    = cap_lookup(cap_create(object_id, 1u, CAP_READ | CAP_DELEGATE, NULL, NULL));
+	child                     = cap_lookup(cap_create(object_id, 2u, CAP_READ, parent, NULL));
 	cr_assert_not_null(parent);
 	cr_assert_not_null(child);
 
@@ -26,12 +27,13 @@ Test(capability, deep_parent_chain) {
 
 	cap_test_setup();
 
-	obj     = cap_object_create(1u, NULL, NULL);
-	caps[0] = cap_create(obj->cap_object_id, targets[0], CAP_READ | CAP_DELEGATE, NULL, NULL);
+	cap_object_id_t object_id = cap_object_create(1u, NULL, NULL);
+	obj                       = cap_object_lookup(NULL, 1u);
+	caps[0]                   = cap_lookup(cap_create(object_id, targets[0], CAP_READ | CAP_DELEGATE, NULL, NULL));
 	cr_assert_not_null(caps[0]);
 
 	for (size_t i = 1; i < 8; i++) {
-		caps[i] = cap_create(obj->cap_object_id, targets[i], CAP_READ, caps[i - 1], NULL);
+		caps[i] = cap_lookup(cap_create(object_id, targets[i], CAP_READ, caps[i - 1], NULL));
 		cr_assert_not_null(caps[i], "deep chain allocation %zu failed", i);
 	}
 
@@ -104,17 +106,19 @@ Test(capability, object_destroy_invalidates_capabilities) {
 
 	cap_test_setup();
 
-	obj = cap_object_create(2u, NULL, NULL);
+	cap_object_id_t object_id = cap_object_create(2u, NULL, NULL);
+	obj                       = cap_object_lookup(NULL, 2u);
 	cr_assert_not_null(obj);
 
-	cap = cap_create(obj->cap_object_id, 5u, CAP_READ, NULL, NULL);
+	cap_id_t cap_id = cap_create(object_id, 5u, CAP_READ, NULL, NULL);
+	cap             = cap_lookup(cap_id);
 	cr_assert_not_null(cap);
 
 	cr_assert(cap_object_alive(cap), "cap should be backed by a live object");
 	result = cap_is_valid(cap);
 	cr_assert_eq(result, CAP_OK, "live cap should be valid");
 
-	cr_assert(cap_object_destroy_with_id(obj->cap_object_id), "destroy by id should succeed");
+	cr_assert(cap_object_destroy_with_id(object_id), "destroy by id should succeed");
 	cr_assert_eq(capability_object_count(), 0u, "object table should be empty");
 
 	cr_assert_eq(capability_count(), 1u, "capability record should linger until reap");
@@ -127,12 +131,11 @@ Test(capability, object_destroy_invalidates_capabilities) {
 	result = cap_is_authorized(5u, cap);
 	cr_assert_eq(result, CAP_OBJECT_DESTROYED, "authorization should report destroyed object");
 
-	cr_assert(cap_destroy_by_id(cap->cap_id), "destroy by id should reap the dangling cap");
+	cr_assert(cap_destroy_by_id(cap_id), "destroy by id should reap the dangling cap");
 	cr_assert_eq(capability_count(), 0u, "capability table should be empty after reap");
 }
 
 Test(capability, object_destroy_invalidates_delegation_chain) {
-	struct cap_object* obj;
 	struct capability* root;
 	struct capability* child;
 	struct capability* grandchild;
@@ -140,12 +143,12 @@ Test(capability, object_destroy_invalidates_delegation_chain) {
 
 	cap_test_setup();
 
-	obj        = cap_object_create(3u, NULL, NULL);
-	root       = cap_create(obj->cap_object_id, 10u, CAP_READ | CAP_DELEGATE, NULL, NULL);
-	child      = cap_create(obj->cap_object_id, 5u, CAP_READ, root, NULL);
-	grandchild = cap_create(obj->cap_object_id, 7u, CAP_READ, child, NULL);
+	cap_object_id_t object_id = cap_object_create(3u, NULL, NULL);
+	root                      = cap_lookup(cap_create(object_id, 10u, CAP_READ | CAP_DELEGATE, NULL, NULL));
+	child                     = cap_lookup(cap_create(object_id, 5u, CAP_READ, root, NULL));
+	grandchild                = cap_lookup(cap_create(object_id, 7u, CAP_READ, child, NULL));
 
-	cr_assert(cap_object_destroy_with_id(obj->cap_object_id), "destroy by id should succeed");
+	cr_assert(cap_object_destroy_with_id(object_id), "destroy by id should succeed");
 
 	result = cap_is_valid(grandchild);
 	cr_assert_eq(result, CAP_OBJECT_DESTROYED, "grandchild should report destroyed object");

@@ -1,12 +1,11 @@
 #include "test_support.h"
 
 Test(capability, cap_create_rejects_null_object) {
-	struct capability* cap;
-
 	cap_test_setup();
 
-	cap = cap_create(CAP_OBJECT_ID_INVALID, 1u, CAP_READ, NULL, NULL);
-	cr_assert_null(cap, "cap_create should reject an invalid object id");
+	cr_assert_eq(cap_create(CAP_OBJECT_ID_INVALID, 1u, CAP_READ, NULL, NULL),
+	             CAP_ID_INVALID,
+	             "cap_create should reject an invalid object id");
 }
 
 Test(capability, cap_create_lookup_destroy) {
@@ -16,10 +15,14 @@ Test(capability, cap_create_lookup_destroy) {
 
 	cap_test_setup();
 
-	obj = cap_object_create(10u, NULL, NULL);
+	cap_object_id_t object_id = cap_object_create(10u, NULL, NULL);
+	obj                       = cap_object_lookup(NULL, 10u);
+	cr_assert_neq(object_id, CAP_OBJECT_ID_INVALID);
 	cr_assert_not_null(obj);
 
-	cap = cap_create(obj->cap_object_id, 5u, CAP_READ | CAP_WRITE, NULL, NULL);
+	cap_id_t cap_id = cap_create(object_id, 5u, CAP_READ | CAP_WRITE, NULL, NULL);
+	cap             = cap_lookup(cap_id);
+	cr_assert_neq(cap_id, CAP_ID_INVALID, "cap_create should succeed");
 	cr_assert_not_null(cap, "cap_create should succeed");
 	cr_assert_neq(cap->cap_id, CAP_ID_INVALID, "cap_id should be valid");
 	cr_assert_eq(cap->cap_object_id, obj->cap_object_id, "cap object_id mismatch");
@@ -34,8 +37,8 @@ Test(capability, cap_create_lookup_destroy) {
 	cr_assert_eq(capability_object_count(), 1u);
 	cr_assert_eq(capability_count(), 1u);
 
-	cr_assert(cap_destroy(cap), "cap_destroy should succeed");
-	found = cap_lookup(cap->cap_id);
+	cr_assert(cap_destroy_by_id(cap_id), "cap_destroy should succeed");
+	found = cap_lookup(cap_id);
 	cr_assert_null(found, "cap_lookup should return NULL after destroy");
 
 	cap_object_destroy(obj);
@@ -50,33 +53,39 @@ Test(capability, dedup_returns_existing_cap) {
 
 	cap_test_setup();
 
-	obj = cap_object_create(7u, NULL, NULL);
+	cap_object_id_t object_id = cap_object_create(7u, NULL, NULL);
+	obj                       = cap_object_lookup(NULL, 7u);
+	cr_assert_neq(object_id, CAP_OBJECT_ID_INVALID);
 	cr_assert_not_null(obj);
 
-	cap1 = cap_create(obj->cap_object_id, 9u, CAP_READ, NULL, NULL);
+	cap_id_t cap1_id = cap_create(object_id, 9u, CAP_READ, NULL, NULL);
+	cap1             = cap_lookup(cap1_id);
 	cr_assert_not_null(cap1);
 	cr_assert_eq(capability_count(), 1u);
 
-	cap2 = cap_create(obj->cap_object_id, 9u, CAP_READ, NULL, NULL);
+	cap_id_t cap2_id = cap_create(object_id, 9u, CAP_READ, NULL, NULL);
+	cap2             = cap_lookup(cap2_id);
+	cr_assert_eq(cap2_id, cap1_id, "dedup should return the existing capability ID");
 	cr_assert_eq(cap2, cap1, "dedup should return the existing capability for matching key");
 	cr_assert_eq(capability_count(), 1u, "dedup should not allocate a second capability");
 
-	cap1 = cap_create(obj->cap_object_id, 10u, CAP_READ, NULL, NULL);
+	cap1_id = cap_create(object_id, 10u, CAP_READ, NULL, NULL);
+	cap1    = cap_lookup(cap1_id);
 	cr_assert_neq(cap1, cap2, "different target should allocate a new capability");
 	cr_assert_eq(capability_count(), 2u);
 
-	cap2 = cap_create(obj->cap_object_id, 9u, CAP_WRITE, NULL, NULL);
+	cap2_id = cap_create(object_id, 9u, CAP_WRITE, NULL, NULL);
+	cap2    = cap_lookup(cap2_id);
 	cr_assert_neq(cap2, cap1, "different rights should allocate a new capability");
 	cr_assert_eq(capability_count(), 3u);
 
-	cap_destroy(cap2);
-	cap_destroy(cap1);
+	cap_destroy_by_id(cap2_id);
+	cap_destroy_by_id(cap1_id);
 	cap_object_destroy(obj);
 }
 
 Test(capability, null_and_invalid_arguments) {
 	struct cap_object* obj;
-	struct capability* cap;
 	enum cap_result    result;
 
 	cap_test_setup();
@@ -94,11 +103,12 @@ Test(capability, null_and_invalid_arguments) {
 	cr_assert_not(cap_destroy(NULL), "NULL cap destroy should return false");
 	cr_assert_not(cap_object_destroy(NULL), "NULL object destroy should return false");
 
-	obj = cap_object_create(1u, NULL, NULL);
-	cap = cap_create(obj->cap_object_id, 1u, CAP_READ, NULL, NULL);
+	cap_object_id_t object_id = cap_object_create(1u, NULL, NULL);
+	obj                       = cap_object_lookup(NULL, 1u);
+	cap_id_t cap_id           = cap_create(object_id, 1u, CAP_READ, NULL, NULL);
 
 	cr_assert_null(cap_lookup(999999u), "non-existent ID lookup should return NULL");
 
-	cap_destroy(cap);
+	cap_destroy_by_id(cap_id);
 	cap_object_destroy(obj);
 }

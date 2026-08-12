@@ -87,6 +87,46 @@ Test(process, detach_prevents_later_join) {
 	cr_assert(process_destroy(process), "process_destroy should reclaim detached zombie process");
 }
 
+Test(process, normal_joinable_thread_reap_notifies_process_exit) {
+	struct process* process = NULL;
+	uintptr_t       exit_code;
+
+	init_process_test_environment();
+	cr_assert_eq(create_process_with_main_thread(&process,
+	                                             &(const struct process_spawn_params){
+													 .name       = "naturally-exiting",
+													 .user_entry = 0x400000u,
+												 }),
+	             PROCESS_OK);
+	process->main_thread->thread.exit_code = 77u;
+	thread_mark_zombie(&process->main_thread->thread);
+	thread_notify_reap(&process->main_thread->thread);
+
+	cr_assert_eq(process_get_state(process), PROCESS_STATE_ZOMBIE);
+	cr_assert_eq(process_join(process, &exit_code), PROCESS_JOIN_OK);
+	cr_assert_eq(exit_code, 77u);
+	cr_assert(process_destroy(process));
+}
+
+Test(process, detached_process_is_reaped_after_its_last_thread_exits) {
+	struct process* process = NULL;
+	process_id_t    pid;
+
+	init_process_test_environment();
+	cr_assert_eq(create_process_with_main_thread(&process,
+	                                             &(const struct process_spawn_params){
+													 .name       = "auto-reap",
+													 .user_entry = 0x400000u,
+												 }),
+	             PROCESS_OK);
+	pid = process_pid(process);
+	cr_assert_eq(process_detach(process), PROCESS_DETACH_OK);
+	thread_mark_zombie(&process->main_thread->thread);
+	thread_notify_reap(&process->main_thread->thread);
+
+	cr_assert_null(process_lookup(pid), "detached zombie process remained registered after its last thread exited");
+}
+
 Test(process, destroy_reclaims_message_queue_heap_storage) {
 	struct process* warmup  = NULL;
 	struct process* process = NULL;
