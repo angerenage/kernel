@@ -4,6 +4,17 @@ threads = dependency('threads', native: true)
 
 test_common_c_args = ['--coverage', '-DCORE_LOCK_DEBUG=1', '-DBASE_STDLIB_RENAME_ALLOC=1']
 test_common_link_args = ['--coverage']
+elf_loader_test_c_args = []
+if platform == 'pc_x86_64'
+	elf_loader_test_c_args += ['-DPLATFORM_PC_X86_64']
+elif platform == 'pc_aarch64'
+	elf_loader_test_c_args += ['-DPLATFORM_PC_AARCH64']
+elif platform == 'pc_riscv64'
+	elf_loader_test_c_args += ['-DPLATFORM_PC_RISCV64']
+elif platform == 'pc_loongarch64'
+	elf_loader_test_c_args += ['-DPLATFORM_PC_LOONGARCH64']
+endif
+
 
 if test_sanitizers
 	test_common_c_args += [
@@ -262,6 +273,20 @@ test_suites = [
 		'suites': ['unit', 'core'],
 	},
 	{
+		'name': 'elf_loader',
+		'sources': files(
+			'vmm/test_support.c',
+			'vmm/mock_paging.c',
+			'elf_loader/test_support.c',
+			'elf_loader/format.c',
+			'elf_loader/segments.c',
+			'elf_loader/rollback.c',
+			'../kernel/src/elf_loader.c',
+		),
+		'c_args': elf_loader_test_c_args,
+		'suites': ['unit', 'kernel'],
+	},
+	{
 		'name': 'pmm',
 		'sources': files(
 			'pmm/test_support.c',
@@ -427,7 +452,7 @@ foreach t : test_suites
 		include_directories: test_inc,
 		dependencies: [criterion, threads],
 		link_with: t.get('link_with', core_test_lib),
-		c_args: test_common_c_args,
+		c_args: test_common_c_args + t.get('c_args', []),
 		link_args: test_common_link_args,
 		install: false,
 	)
