@@ -34,7 +34,9 @@ struct kernel_boot_module {
 /* Entry point type used when asking the boot protocol to start an application processor. */
 typedef void (*kernel_boot_cpu_entry_t)(size_t cpu_index, void* arg);
 
-/* Parse bootloader responses and cache the kernel-visible boot information. */
+/* Parse and validate all required bootloader responses, then publish the cached boot information atomically.
+ * On
+ * failure, boot getters continue to report that no initialized boot state is available. */
 bool kernel_boot_init(void);
 
 /* Return true once the current boot protocol has been recognized and initialized. */
@@ -67,8 +69,9 @@ bool kernel_boot_address_space_get(struct kernel_boot_address_space* out);
 /* Return whether the current architecture/boot path exposes boot-time symmetric multiprocessing startup services. */
 bool kernel_boot_cpu_mp_supported(void);
 
-/* Fill init_info with discovered CPUs and the bootstrap processor index, wiring in the supplied bootstrap stack for the
- * BSP. */
+/* Fill init_info with discovered CPUs and the bootstrap processor index, wiring in the supplied bootstrap stack for
+ * the
+ * BSP. Firmware topologies with null descriptors or a missing/ambiguous BSP identity are rejected. */
 bool kernel_boot_cpu_topology(struct cpu_init_info* init_info, size_t max_count, uintptr_t boot_stack_base,
                               uintptr_t boot_stack_top, size_t* out_cpu_count, size_t* out_bsp_index);
 

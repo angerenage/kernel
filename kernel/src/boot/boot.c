@@ -165,11 +165,22 @@ bool kernel_boot_init(void) {
 		return false;
 	if (memmap_req.response->entry_count > KERNEL_BOOT_MAX_MEM_RANGES) return false;
 	if (hhdm_req.response == NULL || exec_addr_req.response == NULL) return false;
+	for (size_t i = 0u; i < (size_t)memmap_req.response->entry_count; i++) {
+		if (memmap_req.response->entries[i] == NULL) return false;
+	}
+	if (module_req.response != NULL && module_req.response->module_count > 0u) {
+		if (module_req.response->module_count > KERNEL_BOOT_MAX_MODULES || module_req.response->modules == NULL) {
+			return false;
+		}
+		for (size_t i = 0u; i < (size_t)module_req.response->module_count; i++) {
+			const struct limine_file* file = module_req.response->modules[i];
+			if (file == NULL || file->address == NULL) return false;
+		}
+	}
 
 	boot_memmap_count = (size_t)memmap_req.response->entry_count;
 	for (size_t i = 0; i < boot_memmap_count; i++) {
 		const struct limine_memmap_entry* entry = memmap_req.response->entries[i];
-		if (entry == NULL) return false;
 
 		boot_memmap[i] = (struct mem_range){
 			.base   = (uintptr_t)entry->base,
@@ -183,19 +194,14 @@ bool kernel_boot_init(void) {
 		.physical_base     = (uintptr_t)exec_addr_req.response->physical_base,
 		.virtual_base      = (uintptr_t)exec_addr_req.response->virtual_base,
 	};
-	boot_address_space_valid = true;
 
 	boot_cmdline = (cmdline_req.response != NULL) ? cmdline_req.response->cmdline : NULL;
 
 	boot_module_count = 0u;
 	if (module_req.response != NULL && module_req.response->module_count > 0u) {
-		if (module_req.response->module_count > KERNEL_BOOT_MAX_MODULES) return false;
-		if (module_req.response->modules == NULL) return false;
-
 		boot_module_count = (size_t)module_req.response->module_count;
 		for (size_t i = 0; i < boot_module_count; i++) {
 			const struct limine_file* file = module_req.response->modules[i];
-			if (file == NULL || file->address == NULL) return false;
 
 			boot_modules[i] = (struct kernel_boot_module){
 				.path = file->path,
@@ -211,6 +217,7 @@ bool kernel_boot_init(void) {
 		}
 	}
 
+	boot_framebuffer_valid = false;
 	if (fb_req.response != NULL && fb_req.response->framebuffer_count > 0u && fb_req.response->framebuffers != NULL &&
 	    fb_req.response->framebuffers[0] != NULL && fb_req.response->framebuffers[0]->address != NULL) {
 		const struct limine_framebuffer* fb = fb_req.response->framebuffers[0];
@@ -225,6 +232,7 @@ bool kernel_boot_init(void) {
 		boot_framebuffer_valid = true;
 	}
 
+	boot_rsdp_valid = false;
 	if (rsdp_req.response != NULL && rsdp_req.response->address != NULL) {
 		boot_rsdp_address = (uintptr_t)rsdp_req.response->address;
 		boot_rsdp_valid   = true;
@@ -234,8 +242,9 @@ bool kernel_boot_init(void) {
 		boot_cpu_private[i] = NULL;
 		boot_cpu_launch[i]  = (struct kernel_boot_cpu_launch){0};
 	}
-	boot_cpu_count   = 0u;
-	boot_initialized = true;
+	boot_cpu_count           = 0u;
+	boot_address_space_valid = true;
+	boot_initialized         = true;
 	return true;
 }
 
@@ -244,7 +253,7 @@ bool kernel_boot_protocol_supported(void) {
 }
 
 bool kernel_boot_framebuffer_get(struct kernel_boot_framebuffer* out) {
-	if (out == NULL || !boot_framebuffer_valid) return false;
+	if (out == NULL || !boot_initialized || !boot_framebuffer_valid) return false;
 	*out = boot_framebuffer;
 	return true;
 }
@@ -256,7 +265,7 @@ const struct mem_range* kernel_boot_memmap(size_t* out_count) {
 }
 
 const char* kernel_boot_cmdline(void) {
-	return boot_cmdline;
+	return boot_initialized ? boot_cmdline : NULL;
 }
 
 size_t kernel_boot_module_count(void) {
@@ -284,13 +293,13 @@ const struct kernel_boot_module* kernel_boot_module_find(const char* name) {
 }
 
 bool kernel_boot_rsdp_address(uintptr_t* out_address) {
-	if (out_address == NULL || !boot_rsdp_valid) return false;
+	if (out_address == NULL || !boot_initialized || !boot_rsdp_valid) return false;
 	*out_address = boot_rsdp_address;
 	return true;
 }
 
 bool kernel_boot_address_space_get(struct kernel_boot_address_space* out) {
-	if (out == NULL || !boot_address_space_valid) return false;
+	if (out == NULL || !boot_initialized || !boot_address_space_valid) return false;
 	*out = boot_address_space;
 	return true;
 }
@@ -303,9 +312,12 @@ bool kernel_boot_cpu_topology(struct cpu_init_info* init_info, size_t max_count,
                               uintptr_t boot_stack_top, size_t* out_cpu_count, size_t* out_bsp_index) {
 	size_t cpu_count = 1u;
 	size_t bsp_index = 0u;
+	bool   bsp_found = false;
 
 	if (init_info == NULL || out_cpu_count == NULL || out_bsp_index == NULL || max_count == 0u || !boot_initialized)
 		return false;
+	*out_cpu_count = 0u;
+	*out_bsp_index = SIZE_MAX;
 
 	init_info[0] = (struct cpu_init_info){
 		.index           = 0u,
@@ -316,16 +328,26 @@ bool kernel_boot_cpu_topology(struct cpu_init_info* init_info, size_t max_count,
 		.boot_stack_top  = boot_stack_top,
 	};
 
-	if (kernel_boot_mp_supported() && mp_req.response != NULL && mp_req.response->cpus != NULL &&
-	    mp_req.response->cpu_count > 0u) {
+	if (kernel_boot_mp_supported() && mp_req.response != NULL) {
 		uint64_t bsp_arch_id = kernel_boot_mp_bsp_arch_id(mp_req.response);
 
+		if (mp_req.response->cpus == NULL || mp_req.response->cpu_count == 0u) return false;
 		if (mp_req.response->cpu_count > max_count || mp_req.response->cpu_count > KERNEL_BOOT_MAX_CPUS) return false;
 		cpu_count = (size_t)mp_req.response->cpu_count;
+		for (size_t i = 0u; i < cpu_count; i++) {
+			const struct LIMINE_MP(info)* info = mp_req.response->cpus[i];
+			if (info == NULL) return false;
+			if (kernel_boot_mp_info_arch_id(info) != bsp_arch_id) continue;
+			if (bsp_found) return false;
+			bsp_found = true;
+			bsp_index = i;
+		}
+		if (!bsp_found) return false;
+
 		for (size_t i = 0; i < cpu_count; i++) {
 			const struct LIMINE_MP(info)* info = mp_req.response->cpus[i];
 			uint64_t      arch_id              = kernel_boot_mp_info_arch_id(info);
-			enum cpu_role role                 = arch_id == bsp_arch_id ? CPU_ROLE_BSP : CPU_ROLE_AP;
+			enum cpu_role role                 = i == bsp_index ? CPU_ROLE_BSP : CPU_ROLE_AP;
 			uintptr_t     stack_base           = role == CPU_ROLE_BSP ? boot_stack_base : 0u;
 			uintptr_t     stack_top            = role == CPU_ROLE_BSP ? boot_stack_top : 0u;
 
@@ -338,7 +360,6 @@ bool kernel_boot_cpu_topology(struct cpu_init_info* init_info, size_t max_count,
 				.boot_stack_top  = stack_top,
 			};
 			boot_cpu_private[i] = (void*)info;
-			if (role == CPU_ROLE_BSP) bsp_index = i;
 		}
 	}
 

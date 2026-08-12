@@ -355,6 +355,8 @@ void x86_64_handle_interrupt(struct interrupt_frame* frame) {
 	bool               trap_context = !is_external_irq(vector);
 
 	if (x86_64_handle_syscall(frame)) return;
+	/* LAPIC spurious interrupts require neither an EOI nor fatal exception handling. */
+	if (vector == X86_LAPIC_SPURIOUS_VECTOR) return;
 	if (trap_context) cpu_enter_exception();
 	if (vector == X86_LAPIC_WAKE_VECTOR) {
 		apic_send_eoi();
