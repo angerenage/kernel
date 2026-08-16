@@ -662,3 +662,27 @@ syscall_result_t syscall_cap_recv(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 	channel_release(endpoint);
 	return syscall_result_ok(1u);
 }
+
+syscall_result_t syscall_cap_valid(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
+                                   uintptr_t arg5) {
+	struct process*    process;
+	struct capability* cap;
+	bool               valid;
+
+	(void)arg1;
+	(void)arg2;
+	(void)arg3;
+	(void)arg4;
+	(void)arg5;
+
+	process = process_current();
+	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+
+	cap = cap_acquire((cap_id_t)arg0);
+	if (cap == NULL) return syscall_result_ok(0u);
+
+	/* Do not disclose whether another process owns a live capability ID. */
+	valid = cap->target == process_pid(process) && cap_is_valid(cap) == CAP_OK;
+	cap_release(cap);
+	return syscall_result_ok(valid ? 1u : 0u);
+}

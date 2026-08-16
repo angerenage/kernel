@@ -4,6 +4,7 @@
 #include <base/channel.h>
 #include <base/process.h>
 #include <base/syscall.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -23,6 +24,9 @@ syscall_status_t cap_derive(cap_id_t base, process_id_t target, uint64_t object_
 
 /* Revoke a subset of rights from a capability (or the whole capability when rights == 0). */
 syscall_status_t cap_revoke(cap_id_t cap, cap_rights_t rights);
+
+/* Report whether a capability owned by the caller still exists, is not revoked, and has a live backing object. */
+syscall_status_t cap_valid(cap_id_t cap, bool* out_valid);
 
 /* Invoke a capability with a typed request and optional response. */
 syscall_status_t cap_call(cap_id_t cap, const void* request, size_t request_size, void* response,

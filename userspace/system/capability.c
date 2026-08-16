@@ -148,6 +148,21 @@ syscall_status_t cap_revoke(cap_id_t cap, cap_rights_t rights) {
 	return result.status;
 }
 
+syscall_status_t cap_valid(cap_id_t cap, bool* out_valid) {
+	syscall_result_t result;
+
+	if (out_valid == NULL) {
+		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(out_valid);
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	}
+	*out_valid = false;
+
+	result = syscall(SYSCALL_CAP_VALID, (uintptr_t)cap, 0u, 0u, 0u, 0u, 0u);
+	RUNTIME_DIAGNOSTIC_SYSCALL_RESULT(SYSCALL_CAP_VALID, result);
+	if (result.status == SYSCALL_STATUS_OK) *out_valid = result.value != 0u;
+	return result.status;
+}
+
 syscall_status_t cap_call(cap_id_t cap, const void* request, size_t request_size, void* response,
                           size_t response_capacity, size_t* result_value) {
 	syscall_result_t result;
