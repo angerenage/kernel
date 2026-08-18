@@ -43,6 +43,7 @@ userspace_runtime_sources = files(
 	'runtime/diagnostic.c',
 	'runtime/heap.c',
 	'runtime/init.c',
+	'runtime/blob.c',
 )
 
 userspace_system_sources = files(
