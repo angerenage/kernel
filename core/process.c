@@ -88,44 +88,21 @@ static bool process_has_thread(struct process* process, struct uthread* thread) 
 	return found;
 }
 
-static enum process_thread_spawn_result process_create_thread(struct process* process, struct uthread* thread,
-                                                              const struct process_thread_params* params,
-                                                              bool                                main_thread) {
-	enum uthread_start_result result;
-
-	if (process == NULL || thread == NULL || params == NULL) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
-
-	result = uthread_start(thread,
-	                       &(const struct uthread_start_params){
-							   .name             = params->name,
-							   .process          = process,
-							   .user_entry       = params->user_entry,
-							   .arg_data         = params->arg_data,
-							   .arg_size         = params->arg_size,
-							   .user_stack_pages = params->user_stack_pages,
-							   .preferred_cpu    = params->preferred_cpu,
-							   .detached         = params->detached,
-							   .main_thread      = main_thread,
-						   });
-	return process_thread_spawn_result_from_uthread(result);
-}
-
-static enum process_thread_spawn_result process_spawn_thread_internal(struct process*                     process,
-                                                                      struct uthread**                    out_thread,
-                                                                      const struct process_thread_params* params,
-                                                                      bool                                main_thread) {
-	struct uthread*                  thread;
-	enum process_thread_spawn_result thread_result;
+static enum process_thread_spawn_result process_prepare_thread_internal(struct process*                     process,
+                                                                        struct uthread**                    out_thread,
+                                                                        const struct process_thread_params* params,
+                                                                        bool main_thread) {
+	struct uthread*           thread;
+	enum uthread_start_result start_result;
 
 	if (process == NULL || params == NULL) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
 	if (out_thread == NULL) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
-	if (out_thread != NULL) *out_thread = NULL;
+	*out_thread = NULL;
 
-	if (params->detached) {
-		struct uthread*           detached_thread = NULL;
-		enum uthread_start_result start_result =
-			uthread_spawn_detached(&detached_thread,
-		                           &(const struct uthread_start_params){
+	thread = malloc(sizeof(*thread));
+	if (thread == NULL) return PROCESS_THREAD_SPAWN_NO_MEMORY;
+	start_result = uthread_prepare(thread,
+	                               &(const struct uthread_start_params){
 									   .name             = params->name,
 									   .process          = process,
 									   .user_entry       = params->user_entry,
@@ -133,43 +110,79 @@ static enum process_thread_spawn_result process_spawn_thread_internal(struct pro
 									   .arg_size         = params->arg_size,
 									   .user_stack_pages = params->user_stack_pages,
 									   .preferred_cpu    = params->preferred_cpu,
-									   .detached         = true,
+									   .detached         = params->detached,
 									   .main_thread      = main_thread,
 								   });
+	if (start_result != UTHREAD_START_OK) {
+		free(thread);
 		return process_thread_spawn_result_from_uthread(start_result);
 	}
 
-	thread = malloc(sizeof(*thread));
-	if (thread == NULL) return PROCESS_THREAD_SPAWN_NO_MEMORY;
-	*thread = (struct uthread){
-		.user_stack_id   = VMM_ID_INVALID,
-		.kernel_stack_id = VMM_ID_INVALID,
-		.heap_allocated  = true,
-	};
-
-	thread_result = process_create_thread(process, thread, params, main_thread);
-	if (thread_result != PROCESS_THREAD_SPAWN_OK) {
-		free(thread);
-		return thread_result;
-	}
-
 	thread->heap_allocated = true;
-	if (out_thread != NULL) *out_thread = thread;
+	*out_thread            = thread;
 	return PROCESS_THREAD_SPAWN_OK;
+}
+
+enum process_thread_spawn_result process_prepare_thread(struct process* process, struct uthread** out_thread,
+                                                        const struct process_thread_params* params) {
+	return process_prepare_thread_internal(process, out_thread, params, false);
+}
+
+enum process_thread_spawn_result process_commit_thread(struct process* process, struct uthread* thread) {
+	enum uthread_start_result result;
+
+	if (process == NULL || thread == NULL || thread->process != process || thread->process_main_thread) {
+		return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
+	}
+	result = uthread_commit_prepared(thread, false);
+	return process_thread_spawn_result_from_uthread(result);
+}
+
+bool process_abort_thread(struct process* process, struct uthread* thread) {
+	if (process == NULL || thread == NULL || thread->process != process || thread->process_main_thread ||
+	    process_has_thread(process, thread)) {
+		return false;
+	}
+	return uthread_abort_prepared(thread);
 }
 
 enum process_thread_spawn_result process_spawn_thread(struct process* process, struct uthread** out_thread,
                                                       const struct process_thread_params* params) {
-	return process_spawn_thread_internal(process, out_thread, params, false);
-}
-
-enum process_thread_spawn_result process_start_main_thread(struct process* process, struct uthread** out_thread,
-                                                           const struct process_thread_params* params) {
-	struct irq_state                 state;
-	bool                             claimed;
+	struct uthread*                  prepared = NULL;
 	enum process_thread_spawn_result result;
 
+	if (out_thread == NULL) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
+	*out_thread = NULL;
+	result      = process_prepare_thread(process, &prepared, params);
+	if (result != PROCESS_THREAD_SPAWN_OK) return result;
+
+	result = process_commit_thread(process, prepared);
+	if (result != PROCESS_THREAD_SPAWN_OK) {
+		(void)process_abort_thread(process, prepared);
+		return result;
+	}
+
+	*out_thread = params->detached ? NULL : prepared;
+	return PROCESS_THREAD_SPAWN_OK;
+}
+
+static void process_release_main_thread_claim(struct process* process) {
+	struct irq_state state;
+
+	if (process == NULL) return;
+	state                         = spinlock_lock_irqsave(&process->lock);
+	process->main_thread_starting = false;
+	spinlock_unlock_irqrestore(&process->lock, state);
+}
+
+enum process_thread_spawn_result process_prepare_main_thread(struct process* process, struct uthread** out_thread,
+                                                             const struct process_thread_params* params) {
+	struct irq_state                 state;
+	enum process_thread_spawn_result result;
+	bool                             claimed;
+
 	if (process == NULL || out_thread == NULL || params == NULL) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
+	*out_thread = NULL;
 
 	state   = spinlock_lock_irqsave(&process->lock);
 	claimed = process->state == PROCESS_STATE_NEW && process->main_thread == NULL && process->thread_count == 0u &&
@@ -178,11 +191,63 @@ enum process_thread_spawn_result process_start_main_thread(struct process* proce
 	spinlock_unlock_irqrestore(&process->lock, state);
 	if (!claimed) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
 
-	result                        = process_spawn_thread_internal(process, out_thread, params, true);
-	state                         = spinlock_lock_irqsave(&process->lock);
-	process->main_thread_starting = false;
-	spinlock_unlock_irqrestore(&process->lock, state);
+	result = process_prepare_thread_internal(process, out_thread, params, true);
+	if (result != PROCESS_THREAD_SPAWN_OK) process_release_main_thread_claim(process);
 	return result;
+}
+
+enum process_thread_spawn_result process_commit_main_thread(struct process* process, struct uthread* thread) {
+	struct irq_state          state;
+	bool                      claimed;
+	enum uthread_start_result start_result;
+
+	if (process == NULL || thread == NULL) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
+	state   = spinlock_lock_irqsave(&process->lock);
+	claimed = process->main_thread_starting && process->main_thread == NULL && process->thread_count == 0u &&
+	          thread->process == process;
+	spinlock_unlock_irqrestore(&process->lock, state);
+	if (!claimed) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
+
+	start_result = uthread_commit_prepared(thread, true);
+	if (start_result != UTHREAD_START_OK) return process_thread_spawn_result_from_uthread(start_result);
+
+	process_release_main_thread_claim(process);
+	return PROCESS_THREAD_SPAWN_OK;
+}
+
+bool process_abort_main_thread(struct process* process, struct uthread* thread) {
+	struct irq_state state;
+	bool             claimed;
+
+	if (process == NULL || thread == NULL || !thread->process_main_thread) return false;
+	state   = spinlock_lock_irqsave(&process->lock);
+	claimed = process->main_thread_starting && process->main_thread == NULL && process->thread_count == 0u &&
+	          thread->process == process;
+	spinlock_unlock_irqrestore(&process->lock, state);
+	if (!claimed || !uthread_abort_prepared(thread)) return false;
+
+	process_release_main_thread_claim(process);
+	return true;
+}
+
+enum process_thread_spawn_result process_start_main_thread(struct process* process, struct uthread** out_thread,
+                                                           const struct process_thread_params* params) {
+	struct uthread*                  prepared = NULL;
+	enum process_thread_spawn_result result;
+
+	if (out_thread == NULL) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
+	*out_thread = NULL;
+	result      = process_prepare_main_thread(process, &prepared, params);
+	if (result != PROCESS_THREAD_SPAWN_OK) return result;
+
+	result = process_commit_main_thread(process, prepared);
+	if (result != PROCESS_THREAD_SPAWN_OK) {
+		(void)process_abort_main_thread(process, prepared);
+		return result;
+	}
+
+	*out_thread = params->detached ? NULL : prepared;
+	return PROCESS_THREAD_SPAWN_OK;
 }
 
 enum process_thread_join_result process_join_thread(struct process* process, struct uthread* thread,

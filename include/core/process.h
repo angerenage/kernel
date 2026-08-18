@@ -142,9 +142,29 @@ struct process {
 	uint64_t reference_count;
 };
 
+/* Prepare a process thread without attaching it to the process or making it runnable. */
+enum process_thread_spawn_result process_prepare_thread(struct process* process, struct uthread** out_thread,
+                                                        const struct process_thread_params* params);
+
+/* Attach and schedule a thread returned by process_prepare_thread(). */
+enum process_thread_spawn_result process_commit_thread(struct process* process, struct uthread* thread);
+
+/* Destroy a thread returned by process_prepare_thread() before it is committed. */
+bool process_abort_thread(struct process* process, struct uthread* thread);
+
 /* Allocate and queue a userspace thread. out_thread remains NULL for detached threads. */
 enum process_thread_spawn_result process_spawn_thread(struct process* process, struct uthread** out_thread,
                                                       const struct process_thread_params* params);
+
+/* Reserve and prepare the unique initial thread without attaching or scheduling it. */
+enum process_thread_spawn_result process_prepare_main_thread(struct process* process, struct uthread** out_thread,
+                                                             const struct process_thread_params* params);
+
+/* Attach and schedule a main thread returned by process_prepare_main_thread(). */
+enum process_thread_spawn_result process_commit_main_thread(struct process* process, struct uthread* thread);
+
+/* Destroy a main thread returned by process_prepare_main_thread() before it is committed. */
+bool process_abort_main_thread(struct process* process, struct uthread* thread);
 
 /* Queue the initial userspace thread for a newly-created process. */
 enum process_thread_spawn_result process_start_main_thread(struct process* process, struct uthread** out_thread,

@@ -56,8 +56,19 @@ struct uthread {
 	uint64_t reference_count;
 	/* Set before the ID is removed and the owner reference is released. */
 	uint32_t dying;
-	bool     heap_allocated;
+	/* Records whether the thread was prepared as the process' unique initial thread. */
+	bool process_main_thread;
+	bool heap_allocated;
 };
+
+/* Initialize a userspace thread without attaching it to its process or making it runnable. */
+enum uthread_start_result uthread_prepare(struct uthread* thread, const struct uthread_start_params* params);
+
+/* Attach a prepared userspace thread to its process and make it runnable. */
+enum uthread_start_result uthread_commit_prepared(struct uthread* thread, bool main_thread);
+
+/* Destroy a prepared, never-started userspace thread and release all of its resources. */
+bool uthread_abort_prepared(struct uthread* thread);
 
 /* Initialize caller-owned userspace thread storage and queue it on the scheduler. */
 enum uthread_start_result uthread_start(struct uthread* thread, const struct uthread_start_params* params);

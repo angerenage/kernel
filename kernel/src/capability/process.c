@@ -66,7 +66,8 @@ static syscall_result_t process_run_handler(const struct cap_request* req, struc
 	struct process_run_request       request;
 	struct uthread*                  main_thread = NULL;
 	enum process_thread_spawn_result result;
-	void*                            arg_copy = NULL;
+	void*                            arg_copy           = NULL;
+	bool                             thread_cap_created = false;
 	syscall_result_t                 copy_result;
 
 	if (req->request == NULL || req->request_size < sizeof(request)) {
@@ -80,17 +81,17 @@ static syscall_result_t process_run_handler(const struct cap_request* req, struc
 	copy_result = process_copy_thread_arg(req, request.arg_data, request.arg_size, &arg_copy);
 	if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
 
-	result = process_start_main_thread(target,
-	                                   &main_thread,
-	                                   &(const struct process_thread_params){
-										   .name             = target->name,
-										   .user_entry       = request.entry,
-										   .arg_data         = arg_copy,
-										   .arg_size         = request.arg_size,
-										   .user_stack_pages = UTHREAD_DEFAULT_USER_STACK_PAGES,
-										   .preferred_cpu    = cpu_current(),
-										   .detached         = false,
-									   });
+	result = process_prepare_main_thread(target,
+	                                     &main_thread,
+	                                     &(const struct process_thread_params){
+											 .name             = target->name,
+											 .user_entry       = request.entry,
+											 .arg_data         = arg_copy,
+											 .arg_size         = request.arg_size,
+											 .user_stack_pages = UTHREAD_DEFAULT_USER_STACK_PAGES,
+											 .preferred_cpu    = cpu_current(),
+											 .detached         = false,
+										 });
 	free(arg_copy);
 	if (result != PROCESS_THREAD_SPAWN_OK) {
 		return syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
@@ -98,9 +99,19 @@ static syscall_result_t process_run_handler(const struct cap_request* req, struc
 
 	struct process_run_response response = {
 		.thread_id  = uthread_id(main_thread),
-		.thread_cap = kernel_thread_grant_full(main_thread, req->caller, NULL),
+		.thread_cap = kernel_thread_grant_full(main_thread, req->caller, &thread_cap_created),
 	};
-	if (response.thread_cap == CAP_ID_INVALID) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
+	if (response.thread_cap == CAP_ID_INVALID) {
+		(void)process_abort_main_thread(target, main_thread);
+		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
+	}
+
+	result = process_commit_main_thread(target, main_thread);
+	if (result != PROCESS_THREAD_SPAWN_OK) {
+		if (thread_cap_created) (void)cap_destroy_by_id(response.thread_cap);
+		(void)process_abort_main_thread(target, main_thread);
+		return syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
+	}
 	return cap_kernel_write_response(req, &response, sizeof(response));
 }
 
@@ -110,8 +121,9 @@ static syscall_result_t process_spawn_thread_handler(const struct cap_request* r
 	struct process_thread_params         params;
 	struct uthread*                      thread = NULL;
 	enum process_thread_spawn_result     result;
-	char*                                name     = NULL;
-	void*                                arg_copy = NULL;
+	bool                                 thread_cap_created = false;
+	char*                                name               = NULL;
+	void*                                arg_copy           = NULL;
 	syscall_result_t                     copy_result;
 
 	if (req->request == NULL || req->request_size < sizeof(request)) {
@@ -140,7 +152,7 @@ static syscall_result_t process_spawn_thread_handler(const struct cap_request* r
 		.preferred_cpu    = NULL,
 		.detached         = false,
 	};
-	result = process_spawn_thread(target, &thread, &params);
+	result = process_prepare_thread(target, &thread, &params);
 	free(name);
 	free(arg_copy);
 	if (result != PROCESS_THREAD_SPAWN_OK) {
@@ -149,11 +161,17 @@ static syscall_result_t process_spawn_thread_handler(const struct cap_request* r
 		           : syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
 	}
 
-	response.thread_cap = kernel_thread_grant_full(thread, req->caller, NULL);
+	response.thread_cap = kernel_thread_grant_full(thread, req->caller, &thread_cap_created);
 	if (response.thread_cap == CAP_ID_INVALID) {
-		(void)process_cancel_thread(target, thread);
-		(void)process_detach_thread(target, thread);
+		(void)process_abort_thread(target, thread);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
+	}
+
+	result = process_commit_thread(target, thread);
+	if (result != PROCESS_THREAD_SPAWN_OK) {
+		if (thread_cap_created) (void)cap_destroy_by_id(response.thread_cap);
+		(void)process_abort_thread(target, thread);
+		return syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
 	}
 	return cap_kernel_write_response(req, &response, sizeof(response));
 }

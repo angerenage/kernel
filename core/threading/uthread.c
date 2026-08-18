@@ -127,13 +127,14 @@ static bool uthread_attach_process(struct uthread* thread, struct process* proce
 	return attached;
 }
 
-static void uthread_detach_process(struct uthread* thread) {
+static bool uthread_remove_process_attachment(struct uthread* thread, bool preserve_process, bool restore_new) {
 	struct process*  process;
 	struct uthread*  previous = NULL;
 	struct uthread*  current;
 	struct irq_state state;
+	bool             removed = false;
 
-	if (thread == NULL || thread->process == NULL) return;
+	if (thread == NULL || thread->process == NULL) return false;
 
 	process = thread->process;
 	state   = spinlock_lock_irqsave(&process->lock);
@@ -152,10 +153,20 @@ static void uthread_detach_process(struct uthread* thread) {
 		if (process->thread_tail == current) process->thread_tail = previous;
 		if (process->main_thread == current) process->main_thread = process->thread_head;
 		current->process_next = NULL;
-		current->process      = NULL;
+		current->process      = preserve_process ? process : NULL;
 		if (process->thread_count != 0u) process->thread_count--;
+		if (restore_new && process->state == PROCESS_STATE_RUNNING && process->thread_count == 0u &&
+		    process->main_thread == NULL) {
+			process->state = PROCESS_STATE_NEW;
+		}
+		removed = true;
 	}
 	spinlock_unlock_irqrestore(&process->lock, state);
+	return removed;
+}
+
+static void uthread_detach_process(struct uthread* thread) {
+	(void)uthread_remove_process_attachment(thread, false, false);
 }
 
 static bool uthread_release_stacks(struct uthread* thread) {
@@ -307,6 +318,9 @@ uthread_reaper_start_cpu(struct cpu* cpu) {
 	return true;
 }
 
+static enum uthread_start_result uthread_prepare_internal(struct uthread*                    thread,
+                                                          const struct uthread_start_params* params,
+                                                          bool heap_allocated, bool reap_on_exit);
 static enum uthread_start_result uthread_start_prepared(struct uthread*                    thread,
                                                         const struct uthread_start_params* params, bool heap_allocated,
                                                         bool reap_on_exit);
@@ -318,9 +332,9 @@ uthread_start_internal(struct uthread* thread, const struct uthread_start_params
 	return uthread_start_prepared(thread, params, heap_allocated, true);
 }
 
-static enum uthread_start_result uthread_start_prepared(struct uthread*                    thread,
-                                                        const struct uthread_start_params* params, bool heap_allocated,
-                                                        bool reap_on_exit) {
+static enum uthread_start_result uthread_prepare_internal(struct uthread*                    thread,
+                                                          const struct uthread_start_params* params,
+                                                          bool heap_allocated, bool reap_on_exit) {
 	struct vmm_alloc_params user_stack_params = {
 		.align_pages = 1u,
 		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
@@ -374,15 +388,16 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 	}
 
 	*thread = (struct uthread){
-		.process         = params->process,
-		.thread          = {.name = name},
-		.user_stack_id   = VMM_ID_INVALID,
-		.kernel_stack_id = VMM_ID_INVALID,
-		.reaper_next     = NULL,
-		.cap_object_id   = CAP_OBJECT_ID_INVALID,
-		.reference_count = 1u,
-		.dying           = 0u,
-		.heap_allocated  = heap_allocated,
+		.process             = params->process,
+		.thread              = {.name = name},
+		.user_stack_id       = VMM_ID_INVALID,
+		.kernel_stack_id     = VMM_ID_INVALID,
+		.reaper_next         = NULL,
+		.cap_object_id       = CAP_OBJECT_ID_INVALID,
+		.reference_count     = 1u,
+		.dying               = 0u,
+		.process_main_thread = params->main_thread,
+		.heap_allocated      = heap_allocated,
 	};
 	if (!uthread_upcall_state_init(thread)) {
 		uthread_release_name(thread);
@@ -474,27 +489,73 @@ static enum uthread_start_result uthread_start_prepared(struct uthread*         
 		uthread_unregister_id(thread);
 		return UTHREAD_START_INVALID_ARGUMENTS;
 	}
-	if (!uthread_attach_process(thread, thread->process, params->main_thread)) {
-		uthread_release_name(thread);
-		uthread_release_stacks_or_hcf(thread);
-		uthread_upcall_state_deinit(thread);
-		uthread_unregister_id(thread);
-		return UTHREAD_START_INVALID_ARGUMENTS;
-	}
 	thread->thread.owner_kind = THREAD_OWNER_UTHREAD;
 	thread->thread.owner      = thread;
 	if (reap_on_exit) thread_set_reap_callback(&thread->thread, uthread_reap_callback, thread);
+	return UTHREAD_START_OK;
+}
+
+enum uthread_start_result uthread_prepare(struct uthread* thread, const struct uthread_start_params* params) {
+	return uthread_prepare_internal(thread, params, false, true);
+}
+
+enum uthread_start_result uthread_commit_prepared(struct uthread* thread, bool main_thread) {
+	struct process* process;
+	bool            restore_new;
+
+	if (thread == NULL || thread->process == NULL || thread->id == UTHREAD_ID_INVALID ||
+	    thread->thread.state != THREAD_STATE_NEW || thread_is_queued(&thread->thread) ||
+	    thread->thread.owner_kind != THREAD_OWNER_UTHREAD || thread->thread.owner != thread ||
+	    thread->process_main_thread != main_thread) {
+		return UTHREAD_START_INVALID_ARGUMENTS;
+	}
+
+	process     = thread->process;
+	restore_new = process_get_state(process) == PROCESS_STATE_NEW;
+	if (!uthread_attach_process(thread, process, main_thread)) return UTHREAD_START_INVALID_ARGUMENTS;
 	if (!sched_make_runnable(&thread->thread)) {
+		if (!uthread_remove_process_attachment(thread, true, restore_new)) hcf();
+		thread->thread.cpu   = NULL;
+		thread->thread.state = THREAD_STATE_NEW;
+		return UTHREAD_START_SCHEDULER_REJECTED;
+	}
+	return UTHREAD_START_OK;
+}
+
+bool uthread_abort_prepared(struct uthread* thread) {
+	if (thread == NULL || thread->id == UTHREAD_ID_INVALID || thread->thread.state != THREAD_STATE_NEW ||
+	    thread_is_queued(&thread->thread)) {
+		return false;
+	}
+	if (__atomic_load_n(&thread->reference_count, __ATOMIC_ACQUIRE) != 1u) return false;
+	if (!uthread_begin_destroy(thread)) return false;
+	if (!uthread_release_stacks(thread)) {
+		uthread_abort_destroy(thread);
+		return false;
+	}
+
+	uthread_commit_destroy(thread);
+	uthread_release(thread);
+	return true;
+}
+
+static enum uthread_start_result uthread_start_prepared(struct uthread*                    thread,
+                                                        const struct uthread_start_params* params, bool heap_allocated,
+                                                        bool reap_on_exit) {
+	enum uthread_start_result result;
+
+	result = uthread_prepare_internal(thread, params, heap_allocated, reap_on_exit);
+	if (result != UTHREAD_START_OK) return result;
+
+	result = uthread_commit_prepared(thread, params->main_thread);
+	if (result != UTHREAD_START_OK) {
 		uthread_release_name(thread);
 		uthread_release_stacks_or_hcf(thread);
 		uthread_upcall_state_deinit(thread);
-		uthread_detach_process(thread);
 		uthread_unregister_id(thread);
 		thread->process = NULL;
-		return UTHREAD_START_SCHEDULER_REJECTED;
 	}
-
-	return UTHREAD_START_OK;
+	return result;
 }
 
 enum uthread_start_result uthread_start(struct uthread* thread, const struct uthread_start_params* params) {
