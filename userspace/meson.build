@@ -44,6 +44,7 @@ userspace_runtime_sources = files(
 	'runtime/heap.c',
 	'runtime/init.c',
 	'runtime/blob.c',
+	'runtime/program.c',
 )
 
 userspace_system_sources = files(

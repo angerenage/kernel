@@ -61,6 +61,7 @@ struct init_service_selector {
 struct init_service_entry {
 	struct init_service_selector selector;
 	uint32_t                     minor;
+	process_id_t                 owner;
 	cap_id_t                     capability;
 	cap_rights_t                 rights;
 };

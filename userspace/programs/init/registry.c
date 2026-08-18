@@ -222,6 +222,7 @@ static void fill_service_entry(const struct registry_advertisement* ad, cap_id_t
 	*entry = (struct init_service_entry){
 		.selector   = ad->selector,
 		.minor      = ad->minor,
+		.owner      = ad->owner,
 		.capability = capability,
 		.rights     = ad->client_rights,
 	};
