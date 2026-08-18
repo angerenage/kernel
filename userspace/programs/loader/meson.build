@@ -1,5 +1,5 @@
 loader_elf = executable('loader.elf',
-	sources : files('main.c'),
+	sources : files('main.c', 'elf64.c', 'load.c', 'server.c'),
 	c_args : userspace_c_args,
 	include_directories : userspace_inc,
 	link_whole : userspace_crt,

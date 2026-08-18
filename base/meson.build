@@ -1,4 +1,5 @@
 base_libc_sources = files(
+	'libc/string/memchr.c',
 	'libc/string/memcmp.c',
 	'libc/string/memcpy.c',
 	'libc/string/memmove.c',

@@ -8,7 +8,10 @@ syscall_status_t blob_get_info(cap_id_t blob_cap, struct blob_info_response* out
 					 .op = BLOB_OP_INFO,
 					 },
 	};
-	return cap_call(blob_cap, &req, sizeof(req), out_info, sizeof(*out_info), NULL);
+	size_t           response_size = 0u;
+	syscall_status_t status        = cap_call(blob_cap, &req, sizeof(req), out_info, sizeof(*out_info), &response_size);
+	if (status != SYSCALL_STATUS_OK) return status;
+	return response_size == sizeof(*out_info) ? SYSCALL_STATUS_OK : SYSCALL_STATUS_FAILED;
 }
 
 syscall_status_t blob_read(cap_id_t blob_cap, uint64_t offset, void* buffer, size_t size) {
@@ -20,5 +23,11 @@ syscall_status_t blob_read(cap_id_t blob_cap, uint64_t offset, void* buffer, siz
 		.offset = offset,
 		.size   = size,
 	};
-	return cap_call(blob_cap, &req, sizeof(req), buffer, size, NULL);
+	size_t           response_size = 0u;
+	syscall_status_t status;
+
+	if (size == 0u) return SYSCALL_STATUS_OK;
+	status = cap_call(blob_cap, &req, sizeof(req), buffer, size, &response_size);
+	if (status != SYSCALL_STATUS_OK) return status;
+	return response_size == size ? SYSCALL_STATUS_OK : SYSCALL_STATUS_FAILED;
 }

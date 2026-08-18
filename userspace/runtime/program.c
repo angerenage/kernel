@@ -7,6 +7,9 @@
 #include <stdint.h>
 #include <system/capability.h>
 
+#define LOADER_PROTOCOL_VERSION_MAJOR 1u
+#define LOADER_PROTOCOL_VERSION_MINOR 0u
+
 struct cached_loader {
 	char         service[INIT_NAME_MAX + 1u];
 	process_id_t owner;
@@ -99,12 +102,11 @@ static syscall_status_t loader_load(cap_id_t loader_cap, cap_id_t blob_cap, cons
 	free(request);
 	if (status != SYSCALL_STATUS_OK) return status;
 	if (response_size != sizeof(response) || response.load_cap == CAP_ID_INVALID ||
-	    response.process_cap == CAP_ID_INVALID)
+	    response.process_id == PROCESS_PID_INVALID)
 		return SYSCALL_STATUS_FAILED;
 	*out_result = (struct program_load_result){
-		.load_cap    = response.load_cap,
-		.process_cap = response.process_cap,
-		.process_id  = response.process_id,
+		.load_cap   = response.load_cap,
+		.process_id = response.process_id,
 	};
 	return SYSCALL_STATUS_OK;
 }
@@ -113,21 +115,34 @@ syscall_status_t program_load(const char* service, cap_id_t blob_cap, const char
                               struct program_load_result* out_result) {
 	struct cached_loader loader;
 	cap_id_t             delegated_blob = CAP_ID_INVALID;
+	syscall_status_t     cleanup_status;
 	syscall_status_t     status;
 
-	if (service == NULL || blob_cap == CAP_ID_INVALID || name == NULL || name_size == 0u || out_result == NULL)
+	if (service == NULL || blob_cap == CAP_ID_INVALID || name == NULL || name_size == 0u || out_result == NULL ||
+	    memchr(name, '\0', name_size) != NULL)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	*out_result = (struct program_load_result){
-		.load_cap    = CAP_ID_INVALID,
-		.process_cap = CAP_ID_INVALID,
-		.process_id  = PROCESS_PID_INVALID,
+		.load_cap   = CAP_ID_INVALID,
+		.process_id = PROCESS_PID_INVALID,
 	};
 
 	status = resolve_loader(service, &loader);
 	if (status != SYSCALL_STATUS_OK) return status;
-	status = cap_delegate(blob_cap, loader.owner, CAP_CALL | CAP_READ, &delegated_blob);
+	status = cap_delegate(blob_cap, loader.owner, LOADER_V1_BLOB_CAP_RIGHTS, &delegated_blob);
 	if (status != SYSCALL_STATUS_OK) return status;
-	return loader_load(loader.capability, delegated_blob, name, name_size, out_result);
+	status         = loader_load(loader.capability, delegated_blob, name, name_size, out_result);
+	cleanup_status = cap_revoke(delegated_blob, 0u);
+	if (cleanup_status != SYSCALL_STATUS_OK) {
+		if (status == SYSCALL_STATUS_OK && out_result->load_cap != CAP_ID_INVALID &&
+		    program_cancel(out_result->load_cap) == SYSCALL_STATUS_OK) {
+			*out_result = (struct program_load_result){
+				.load_cap   = CAP_ID_INVALID,
+				.process_id = PROCESS_PID_INVALID,
+			};
+		}
+		return cleanup_status;
+	}
+	return status;
 }
 
 static syscall_status_t argv_wire_size(size_t argc, const char* const argv[], size_t* out_size) {
@@ -145,7 +160,8 @@ static syscall_status_t argv_wire_size(size_t argc, const char* const argv[], si
 	return SYSCALL_STATUS_OK;
 }
 
-syscall_status_t program_run(cap_id_t load_cap, size_t argc, const char* const argv[], cap_id_t* out_thread_cap) {
+syscall_status_t program_run(cap_id_t load_cap, size_t argc, const char* const argv[],
+                             struct program_run_result* out_result) {
 	struct loader_v1_run_request* request;
 	struct loader_v1_run_response response;
 	char*                         cursor;
@@ -154,9 +170,12 @@ syscall_status_t program_run(cap_id_t load_cap, size_t argc, const char* const a
 	size_t                        response_size = 0u;
 	syscall_status_t              status;
 
-	if (load_cap == CAP_ID_INVALID || out_thread_cap == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
-	*out_thread_cap = CAP_ID_INVALID;
-	status          = argv_wire_size(argc, argv, &argv_size);
+	if (load_cap == CAP_ID_INVALID || out_result == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	*out_result = (struct program_run_result){
+		.process_cap = CAP_ID_INVALID,
+		.thread_cap  = CAP_ID_INVALID,
+	};
+	status = argv_wire_size(argc, argv, &argv_size);
 	if (status != SYSCALL_STATUS_OK) return status;
 	if (argv_size > CAP_MAX_REQUEST_SIZE - sizeof(*request)) return SYSCALL_STATUS_BAD_ARGUMENT;
 
@@ -178,7 +197,21 @@ syscall_status_t program_run(cap_id_t load_cap, size_t argc, const char* const a
 	status = cap_call(load_cap, request, request_size, &response, sizeof(response), &response_size);
 	free(request);
 	if (status != SYSCALL_STATUS_OK) return status;
-	if (response_size != sizeof(response) || response.thread_cap == CAP_ID_INVALID) return SYSCALL_STATUS_FAILED;
-	*out_thread_cap = response.thread_cap;
+	if (response_size != sizeof(response) || response.process_cap == CAP_ID_INVALID ||
+	    response.thread_cap == CAP_ID_INVALID)
+		return SYSCALL_STATUS_FAILED;
+	*out_result = (struct program_run_result){
+		.process_cap = response.process_cap,
+		.thread_cap  = response.thread_cap,
+	};
 	return SYSCALL_STATUS_OK;
+}
+
+syscall_status_t program_cancel(cap_id_t load_cap) {
+	const struct loader_v1_cancel_request request = {
+		.header = {.op = LOADER_V1_OP_CANCEL},
+	};
+
+	if (load_cap == CAP_ID_INVALID) return SYSCALL_STATUS_BAD_ARGUMENT;
+	return cap_call(load_cap, &request, sizeof(request), NULL, 0u, NULL);
 }

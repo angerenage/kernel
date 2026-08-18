@@ -43,7 +43,8 @@ bool loader_launch(const struct init_startup_info* init_startup) {
 		(void)process_kill(loaded.process_cap, PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
 		return false;
 	}
-	status = cap_delegate(init_startup->base.serial_cap, process_info.pid, CAP_WRITE | CAP_CALL, &serial_cap);
+	status =
+		cap_delegate(init_startup->base.serial_cap, process_info.pid, CAP_WRITE | CAP_CALL | CAP_DELEGATE, &serial_cap);
 	if (status != SYSCALL_STATUS_OK) {
 		printf("init: serial capability delegation failed: %u\n", (unsigned)status);
 		(void)process_kill(loaded.process_cap, PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
