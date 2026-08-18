@@ -7,7 +7,7 @@
 
 struct init_startup_info g_startup = {0};
 
-int main(int argc, char** argv);
+int main();
 
 extern unsigned char __bss_start[];
 extern unsigned char __bss_end[];
@@ -34,5 +34,5 @@ void _start(const struct process_startup_info* startup) {
 	if (!runtime_heap_init(&g_startup.base)) {
 		exit(PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
 	}
-	exit((uintptr_t)main(0, (char**)0));
+	exit((uintptr_t)main());
 }

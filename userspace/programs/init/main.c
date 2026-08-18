@@ -5,10 +5,7 @@
 
 extern struct init_startup_info g_startup;
 
-int main(int argc, char** argv) {
-	(void)argc;
-	(void)argv;
-
+int main() {
 	if (g_startup.loader_cap == CAP_ID_INVALID) {
 		printf("init: loader capability not available\n");
 		return 1;
