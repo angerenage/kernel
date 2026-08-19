@@ -186,10 +186,13 @@ enum process_result process_create(struct process** out_process, const char* nam
 /* Block until process exits, then publish its process exit code. */
 enum process_join_result process_join(struct process* process, uintptr_t* out_exit_code);
 
-/* Mark process as detached so it can no longer be joined. */
+/* Mark process as detached so it can no longer be joined. A detached zombie may be reaped before this returns. */
 enum process_detach_result process_detach(struct process* process);
 
-/* Request termination of all threads in process and publish the process exit code. */
+/*
+ * Request termination of all threads in process and publish the process exit code.
+ * If termination completes an already-detached process, it may be reaped before this returns.
+ */
 bool process_terminate(struct process* process, uintptr_t exit_code);
 
 /* Unregister a process and release table ownership. Final teardown waits for acquired references. */

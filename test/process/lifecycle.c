@@ -87,6 +87,43 @@ Test(process, detach_prevents_later_join) {
 	cr_assert(process_destroy(process), "process_destroy should reclaim detached zombie process");
 }
 
+Test(process, detached_new_process_is_reaped_when_terminated) {
+	struct process* process = NULL;
+	process_id_t    pid;
+	size_t          processes_before;
+
+	init_process_test_environment();
+	processes_before = process_count();
+	cr_assert_eq(process_create(&process, "detach-then-terminate"), PROCESS_OK);
+	pid = process_pid(process);
+
+	cr_assert_eq(process_detach(process), PROCESS_DETACH_OK);
+	cr_assert_not_null(process_lookup(pid), "detaching a NEW process must not reap it before termination");
+	cr_assert(process_terminate(process, 41u), "terminating a detached NEW process should succeed");
+
+	cr_assert_null(process_lookup(pid), "DETACH -> TERMINATE left a detached zombie process registered");
+	cr_assert_eq(process_count(), processes_before, "DETACH -> TERMINATE leaked a process-table entry");
+}
+
+Test(process, zombie_process_is_reaped_when_detached) {
+	struct process* process = NULL;
+	process_id_t    pid;
+	size_t          processes_before;
+
+	init_process_test_environment();
+	processes_before = process_count();
+	cr_assert_eq(process_create(&process, "terminate-then-detach"), PROCESS_OK);
+	pid = process_pid(process);
+
+	cr_assert(process_terminate(process, 42u), "terminating a joinable NEW process should succeed");
+	cr_assert_eq(process_get_state(process), PROCESS_STATE_ZOMBIE);
+	cr_assert_not_null(process_lookup(pid), "joinable zombie must remain registered until join or detach");
+	cr_assert_eq(process_detach(process), PROCESS_DETACH_OK);
+
+	cr_assert_null(process_lookup(pid), "TERMINATE -> DETACH left a detached zombie process registered");
+	cr_assert_eq(process_count(), processes_before, "TERMINATE -> DETACH leaked a process-table entry");
+}
+
 Test(process, normal_joinable_thread_reap_notifies_process_exit) {
 	struct process* process = NULL;
 	uintptr_t       exit_code;

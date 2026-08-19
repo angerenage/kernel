@@ -212,8 +212,6 @@ static syscall_result_t process_detach_handler(const struct cap_request* req, st
 	detach_result = process_detach(target);
 	switch (detach_result) {
 	case PROCESS_DETACH_OK:
-		/* If the process was already a zombie, no later thread callback exists to trigger detached reaping. */
-		(void)process_reap_detached(target);
 		return syscall_result_ok(0u);
 	case PROCESS_DETACH_INVALID_ARGUMENTS:
 	case PROCESS_DETACH_ALREADY_DETACHED:

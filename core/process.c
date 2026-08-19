@@ -360,17 +360,26 @@ bool process_terminate(struct process* process, uintptr_t exit_code) {
 	struct irq_state wait_state;
 	struct uthread*  cursor;
 	struct uthread*  cancel_batch[CANCEL_BATCH_SIZE];
+	struct process*  held;
 	struct thread*   current;
 	bool             current_in_process = false;
 	bool             wake_joiners       = false;
 
 	if (process == NULL) return false;
 
+	held = process_acquire(process_pid(process));
+	if (held != process) {
+		if (held != NULL) process_release(held);
+		return false;
+	}
+	process = held;
+
 	wait_state = spinlock_lock_irqsave(&process->join_wait_queue.lock);
 	state      = spinlock_lock_irqsave(&process->lock);
 	if (process->state == PROCESS_STATE_ZOMBIE) {
 		spinlock_unlock_irqrestore(&process->lock, state);
 		spinlock_unlock_irqrestore(&process->join_wait_queue.lock, wait_state);
+		process_release(process);
 		return false;
 	}
 
@@ -413,8 +422,15 @@ bool process_terminate(struct process* process, uintptr_t exit_code) {
 		}
 	}
 
-	if (wake_joiners) (void)sched_wake_all(&process->join_wait_queue);
-	if (current_in_process) sched_exit_current(exit_code);
+	if (wake_joiners) {
+		(void)sched_wake_all(&process->join_wait_queue);
+		(void)process_reap_detached(process);
+	}
+	if (current_in_process) {
+		process_release(process);
+		sched_exit_current(exit_code);
+	}
+	process_release(process);
 	return true;
 }
 
@@ -463,21 +479,33 @@ enum process_join_result process_join(struct process* process, uintptr_t* out_ex
 
 enum process_detach_result process_detach(struct process* process) {
 	struct irq_state state;
+	struct process*  held;
 
 	if (process == NULL) return PROCESS_DETACH_INVALID_ARGUMENTS;
+
+	held = process_acquire(process_pid(process));
+	if (held != process) {
+		if (held != NULL) process_release(held);
+		return PROCESS_DETACH_INVALID_ARGUMENTS;
+	}
+	process = held;
 
 	state = spinlock_lock_irqsave(&process->lock);
 	if (process->joined) {
 		spinlock_unlock_irqrestore(&process->lock, state);
+		process_release(process);
 		return PROCESS_DETACH_ALREADY_JOINED;
 	}
 	if (process->detached) {
 		spinlock_unlock_irqrestore(&process->lock, state);
+		process_release(process);
 		return PROCESS_DETACH_ALREADY_DETACHED;
 	}
 
 	process->detached = true;
 	spinlock_unlock_irqrestore(&process->lock, state);
+	(void)process_reap_detached(process);
+	process_release(process);
 	return PROCESS_DETACH_OK;
 }
 
