@@ -261,6 +261,20 @@ syscall_result_t syscall_cap_derive(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 	return syscall_result_ok((uintptr_t)cap_id);
 }
 
+static syscall_result_t syscall_cap_validate_response_buffer(uintptr_t response, size_t response_capacity) {
+	struct address_space*        space;
+	enum address_transfer_result transfer_result;
+
+	if (response_capacity == 0u) return syscall_result_ok(0u);
+
+	space = syscall_current_user_space();
+	if (space == NULL) return syscall_result_ok(0u);
+
+	transfer_result = address_space_validate_range(
+		space, response, response_capacity, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
+	return syscall_result_from_address_transfer(transfer_result, 3u);
+}
+
 syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
                                   uintptr_t arg5) {
 	struct process*    process;
@@ -346,6 +360,13 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 2u);
 	}
 	call_result = syscall_copy_from_user(syscall_current_user_space(), arg1, kernel_request, request_size, 1u);
+	if (call_result.status != SYSCALL_STATUS_OK) {
+		free(kernel_request);
+		cap_object_release(object);
+		cap_release(cap);
+		return call_result;
+	}
+	call_result = syscall_cap_validate_response_buffer(arg3, response_capacity);
 	if (call_result.status != SYSCALL_STATUS_OK) {
 		free(kernel_request);
 		cap_object_release(object);

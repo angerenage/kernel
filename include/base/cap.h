@@ -11,8 +11,8 @@ typedef uint64_t cap_call_id_t;
 
 #define CAP_ID_INVALID ((cap_id_t)0u)
 #define CAP_CALL_ID_INVALID ((cap_call_id_t)0u)
-#define CAP_MAX_REQUEST_SIZE (64 * 1024)
-#define CAP_MAX_RESPONSE_SIZE (64 * 1024)
+#define CAP_MAX_REQUEST_SIZE (8u * 1024u)
+#define CAP_MAX_RESPONSE_SIZE (8u * 1024u)
 #define CAP_REQUEST_QUEUE_DEPTH 16u
 
 enum cap_right {
