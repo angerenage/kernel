@@ -219,6 +219,11 @@ syscall_result_t syscall_cap_derive(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 		return syscall_cap_result_to_syscall(valid_result, 0u);
 	}
 
+	if ((rights & ~cap_rights(base)) != 0u) {
+		cap_release(base);
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 3u);
+	}
+
 	struct cap_object* base_object = cap_object_acquire(base->cap_object_id);
 	if (base_object == NULL || base_object->endpoint == NULL) {
 		cap_object_release(base_object);
@@ -569,7 +574,10 @@ syscall_result_t syscall_cap_revoke(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 
 	rights = (cap_rights_t)arg1;
 	if (rights == 0u) {
-		cap_mark_revoked(cap);
+		if (!cap_destroy(cap)) {
+			cap_release(cap);
+			return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+		}
 	}
 	else {
 		if (!cap_remove_rights(cap, rights)) {

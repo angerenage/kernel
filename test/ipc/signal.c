@@ -1266,10 +1266,10 @@ Test(signal, kernel_capability_rights_restrict_publication_and_read) {
 	cap_object_release(object);
 
 	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
-	cr_assert(cap_destroy_by_id(sender_cap));
-	cr_assert(cap_destroy_by_id(reader_cap));
-	cr_assert(cap_destroy_by_id(control_cap));
-	cr_assert(cap_destroy_by_id(info_cap));
+	cr_assert_null(cap_lookup(sender_cap));
+	cr_assert_null(cap_lookup(reader_cap));
+	cr_assert_null(cap_lookup(control_cap));
+	cr_assert_null(cap_lookup(info_cap));
 }
 
 Test(signal, invalid_handler_flags_are_rejected) {

@@ -86,13 +86,13 @@ Test(syscall, capability_valid_reports_current_validity_without_disclosing_forei
 	sched_set_current(cpu_current(), &owner_thread->thread);
 	capability = cap_acquire(capability_id);
 	cr_assert_not_null(capability);
-	cap_mark_revoked(capability);
+	cr_assert(cap_destroy(capability));
 	cap_release(capability);
 	result = syscall_dispatch(SYSCALL_CAP_VALID, capability_id, 0u, 0u, 0u, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(result.value, 0u);
 
-	cr_assert(cap_destroy_by_id(capability_id));
+	cr_assert_not(cap_destroy_by_id(capability_id));
 	result = syscall_dispatch(SYSCALL_CAP_VALID, capability_id, 0u, 0u, 0u, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(result.value, 0u);

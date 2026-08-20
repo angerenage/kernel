@@ -29,7 +29,7 @@ Test(capability, cap_create_lookup_destroy) {
 	cr_assert_eq(cap->target, 5u, "cap target mismatch");
 	cr_assert_eq(cap->rights, CAP_READ | CAP_WRITE, "cap rights mismatch");
 	cr_assert_null(cap->parent, "root cap parent should be NULL");
-	cr_assert_not(cap->revoked, "new cap should not be revoked");
+	cr_assert_not(cap_is_removed(cap), "new cap should be live");
 
 	found = cap_lookup(cap->cap_id);
 	cr_assert_eq(found, cap, "cap_lookup should find the created capability");
@@ -44,6 +44,54 @@ Test(capability, cap_create_lookup_destroy) {
 	cap_object_destroy(obj);
 	cr_assert_eq(capability_object_count(), 0u);
 	cr_assert_eq(capability_count(), 0u);
+}
+
+Test(capability, delegation_links_do_not_retain_parent_records) {
+	struct cap_object* object;
+	struct capability* parent;
+	struct capability* child;
+
+	cap_test_setup();
+
+	cap_object_id_t object_id = cap_object_create(11u, NULL, NULL);
+	object                    = cap_object_lookup(NULL, 11u);
+	parent                    = cap_lookup(cap_create(object_id, 1u, CAP_READ | CAP_DELEGATE, NULL, NULL));
+	cr_assert_not_null(parent);
+	cr_assert_eq(parent->reference_count, 1u, "the table should own the only structural record reference");
+
+	child = cap_lookup(cap_create(object_id, 2u, CAP_READ, parent, NULL));
+	cr_assert_not_null(child);
+	cr_assert_eq(parent->reference_count,
+	             1u,
+	             "delegation topology must not use reference-count ownership between parent and child");
+	cr_assert_eq(child->reference_count, 1u);
+
+	cr_assert(cap_destroy(child));
+	cr_assert(cap_destroy(parent));
+	cr_assert(cap_object_destroy(object));
+}
+
+Test(capability, retained_reference_outlives_table_removal) {
+	struct cap_object* object;
+	struct capability* cap;
+	cap_id_t           cap_id;
+
+	cap_test_setup();
+
+	cap_object_id_t object_id = cap_object_create(12u, NULL, NULL);
+	object                    = cap_object_lookup(NULL, 12u);
+	cap_id                    = cap_create(object_id, 1u, CAP_READ, NULL, NULL);
+	cap                       = cap_acquire(cap_id);
+	cr_assert_not_null(cap);
+	cr_assert_eq(cap->reference_count, 2u, "table ownership plus one acquired reference should be retained");
+
+	cr_assert(cap_destroy(cap));
+	cr_assert_null(cap_lookup(cap_id));
+	cr_assert(cap_is_removed(cap));
+	cr_assert_eq(cap->reference_count, 1u, "removal should release only the table-owned reference");
+
+	cap_release(cap);
+	cr_assert(cap_object_destroy(object));
 }
 
 Test(capability, dedup_returns_existing_cap) {

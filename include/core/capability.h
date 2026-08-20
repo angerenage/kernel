@@ -37,7 +37,9 @@ struct capability {
 	process_id_t       target;
 	cap_rights_t       rights;
 	struct capability* parent;
-	bool               revoked;
+	struct capability* first_child;
+	struct capability* next_sibling;
+	bool               removed;
 	uint64_t           reference_count;
 };
 
@@ -76,7 +78,8 @@ struct cap_object* cap_object_acquire(cap_object_id_t id);
 /* Release a reference returned by cap_object_acquire(). */
 void cap_object_release(struct cap_object* object);
 
-/* Unregister the routing object under id. Reclaiming its metadata waits for retained references. */
+/* Unregister the routing object under id and remove capability subtrees that depend on it.
+ * Reclaiming its metadata waits for retained references. */
 bool cap_object_destroy_with_id(cap_object_id_t id);
 
 /* Unregister a routing object. This never destroys the resource identified by object_id. */
@@ -88,9 +91,9 @@ void cap_object_unregister_endpoint(struct channel* endpoint);
 /* Notify managed kernel objects before a process and its address space are destroyed. */
 void cap_object_cleanup_for_process(process_id_t process);
 
-/* Create or deduplicate a capability grant and return its stable ID. The capability does not retain the represented
- *
- * cap_object. out_created reports whether a fresh record was installed. */
+/* Create or deduplicate a capability grant and return its stable ID.
+ * The capability does not retain its parent or the cap_object.
+ * out_created reports whether a fresh record was installed. */
 cap_id_t cap_create(cap_object_id_t cap_object_id, process_id_t target, cap_rights_t rights, struct capability* parent,
                     bool* out_created);
 
@@ -105,24 +108,26 @@ void cap_release(struct capability* capability);
 
 /* Synchronised accessors for mutable grant state. Immutable fields require a retained record. */
 cap_rights_t cap_rights(const struct capability* capability);
-bool         cap_is_revoked(const struct capability* capability);
-void         cap_mark_revoked(struct capability* capability);
-bool         cap_remove_rights(struct capability* capability, cap_rights_t rights);
 
-/* Remove a capability from the table. The pointer must already be protected by ownership or a retained reference. */
+/* Check if a capability has been removed. */
+bool cap_is_removed(const struct capability* capability);
+
+/* Remove rights from capability and every descendant. */
+bool cap_remove_rights(struct capability* capability, cap_rights_t rights);
+
+/* Remove a capability and its delegation subtree. Retained records remain alive until their final cap_release(). */
 bool cap_destroy(struct capability* capability);
 
 /* Destroy a capability whose ID is already known, without dereferencing the supplied pointer. */
 bool cap_destroy_by_id(cap_id_t id);
 
-/* Mark every capability whose target is the given process as revoked. Capability records are not freed here. */
+/* Remove every capability whose target is the given process together with its delegation subtree. */
 void cap_revoke_for_process(process_id_t target);
 
 /* Check whether caller is authorized to use a capability by walking the parent chain. */
 enum cap_result cap_is_authorized(process_id_t caller, struct capability* cap);
 
-/* Validate a capability by checking that the underlying cap_object is still registered and that no ancestor is revoked.
- */
+/* Validate that a retained capability record is still part of the live capability topology. */
 enum cap_result cap_is_valid(struct capability* cap);
 
 /* Return true when the cap_object backing cap is still registered. */
