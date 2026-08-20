@@ -82,12 +82,12 @@ static bool dispatch_request(const struct cap_request* request, const void* data
 		response.status = registry_withdraw(request->caller, &withdraw->selector);
 		return reply_request(request->call_id, &response, sizeof(response), SYSCALL_STATUS_OK);
 	}
-	case INIT_OP_LOOKUP: {
-		const struct init_lookup_request* lookup   = data;
-		struct init_lookup_response       response = {0};
-		if (request->request_size != sizeof(*lookup) || request->response_capacity < sizeof(response))
+	case INIT_OP_ACQUIRE: {
+		const struct init_acquire_request* acquire  = data;
+		struct init_acquire_response       response = {0};
+		if (request->request_size != sizeof(*acquire) || request->response_capacity < sizeof(response))
 			return reply_request(request->call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
-		response.status = registry_lookup(request->caller, &lookup->query, lookup->service, &response.entry);
+		response.status = registry_acquire(request->caller, &acquire->query, acquire->service, &response.handle);
 		return reply_request(request->call_id, &response, sizeof(response), SYSCALL_STATUS_OK);
 	}
 	case INIT_OP_ENUMERATE: {
@@ -96,9 +96,9 @@ static bool dispatch_request(const struct cap_request* request, const void* data
 		size_t                               capacity;
 		size_t                               response_size;
 		if (request->request_size != sizeof(*enumerate) || request->response_capacity < sizeof(*response) ||
-		    enumerate->size > (request->response_capacity - sizeof(*response)) / sizeof(struct init_service_entry))
+		    enumerate->size > (request->response_capacity - sizeof(*response)) / sizeof(struct init_service_info))
 			return reply_request(request->call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
-		capacity = sizeof(*response) + (size_t)enumerate->size * sizeof(struct init_service_entry);
+		capacity = sizeof(*response) + (size_t)enumerate->size * sizeof(struct init_service_info);
 		response = malloc(capacity);
 		if (response == NULL) {
 			const struct init_enumerate_response failure = {
@@ -107,14 +107,13 @@ static bool dispatch_request(const struct cap_request* request, const void* data
 		}
 		response->returned = 0u;
 		response->total    = 0u;
-		response->status   = registry_enumerate(request->caller,
-                                              &enumerate->query,
+		response->status   = registry_enumerate(&enumerate->query,
                                               enumerate->offset,
                                               enumerate->size,
                                               response->entries,
                                               &response->returned,
                                               &response->total);
-		response_size      = sizeof(*response) + (size_t)response->returned * sizeof(struct init_service_entry);
+		response_size      = sizeof(*response) + (size_t)response->returned * sizeof(struct init_service_info);
 		bool replied       = reply_request(request->call_id, response, response_size, SYSCALL_STATUS_OK);
 		free(response);
 		return replied;
@@ -174,7 +173,7 @@ int server_run(const struct init_startup_info* startup) {
 		struct init_request_header    header;
 		struct init_advertise_request advertise;
 		struct init_withdraw_request  withdraw;
-		struct init_lookup_request    lookup;
+		struct init_acquire_request   acquire;
 		struct init_enumerate_request enumerate;
 		struct init_browse_request    browse;
 		struct init_watch_request     watch;

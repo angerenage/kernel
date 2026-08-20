@@ -10,14 +10,14 @@ enum init_registry_status registry_advertise(process_id_t owner, const struct in
 /* Withdraw one live advertisement when the caller is its owner. */
 enum init_registry_status registry_withdraw(process_id_t owner, const struct init_service_selector* selector);
 
-/* Look up and delegate one named compatible service to the caller. */
-enum init_registry_status registry_lookup(process_id_t caller, const struct init_protocol_query* query,
-                                          const char* service, struct init_service_entry* out_entry);
+/* Acquire and delegate one named compatible service to the caller. */
+enum init_registry_status registry_acquire(process_id_t caller, const struct init_protocol_query* query,
+                                           const char* service, struct init_service_handle* out_handle);
 
-/* Fetch an offset/size page of compatible services and the current total. */
-enum init_registry_status registry_enumerate(process_id_t caller, const struct init_protocol_query* query,
-                                             uint64_t offset, uint64_t size, struct init_service_entry* entries,
-                                             uint64_t* out_returned, uint64_t* out_total);
+/* Fetch an offset/size page of compatible service metadata and the current total. */
+enum init_registry_status registry_enumerate(const struct init_protocol_query* query, uint64_t offset, uint64_t size,
+                                             struct init_service_info* entries, uint64_t* out_returned,
+                                             uint64_t* out_total);
 
 /* Fetch an offset/size page of immediate children below a namespace. */
 enum init_registry_status registry_browse(const char* namespace_path, uint64_t offset, uint64_t size,

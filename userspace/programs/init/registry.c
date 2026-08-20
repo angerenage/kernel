@@ -222,57 +222,50 @@ enum init_registry_status registry_withdraw(process_id_t owner, const struct ini
 	return INIT_REGISTRY_OK;
 }
 
-static void fill_service_entry(const struct registry_advertisement* ad, cap_id_t capability,
-                               struct init_service_entry* entry) {
-	*entry = (struct init_service_entry){
-		.selector   = ad->selector,
-		.minor      = ad->minor,
-		.owner      = ad->owner,
-		.capability = capability,
-		.rights     = ad->client_rights,
+static void fill_service_info(const struct registry_advertisement* ad, struct init_service_info* info) {
+	*info = (struct init_service_info){
+		.selector = ad->selector,
+		.minor    = ad->minor,
+		.rights   = ad->client_rights,
 	};
 }
 
-enum init_registry_status registry_lookup(process_id_t caller, const struct init_protocol_query* query,
-                                          const char* service, struct init_service_entry* out_entry) {
+enum init_registry_status registry_acquire(process_id_t caller, const struct init_protocol_query* query,
+                                           const char* service, struct init_service_handle* out_handle) {
 	cap_id_t delegated;
 	if (caller == PROCESS_PID_INVALID || !registry_query_valid(query) || !registry_name_valid(service) ||
-	    out_entry == NULL)
+	    out_handle == NULL)
 		return INIT_REGISTRY_INVALID_ARGUMENT;
 	prune_dead_advertisements();
 	for (struct registry_advertisement* ad = advertisements; ad != NULL; ad = ad->next) {
 		if (!query_matches(query, ad) || strcmp(service, ad->selector.service) != 0) continue;
 		if (cap_delegate_peer(ad->capability, caller, ad->client_rights, &delegated) != SYSCALL_STATUS_OK)
 			return INIT_REGISTRY_RESOURCE_FAILURE;
-		fill_service_entry(ad, delegated, out_entry);
+		fill_service_info(ad, &out_handle->info);
+		out_handle->owner      = ad->owner;
+		out_handle->capability = delegated;
 		return INIT_REGISTRY_OK;
 	}
 	return INIT_REGISTRY_NOT_FOUND;
 }
 
-enum init_registry_status registry_enumerate(process_id_t caller, const struct init_protocol_query* query,
-                                             uint64_t offset, uint64_t size, struct init_service_entry* entries,
-                                             uint64_t* out_returned, uint64_t* out_total) {
+enum init_registry_status registry_enumerate(const struct init_protocol_query* query, uint64_t offset, uint64_t size,
+                                             struct init_service_info* entries, uint64_t* out_returned,
+                                             uint64_t* out_total) {
 	uint64_t index    = 0u;
 	uint64_t total    = 0u;
 	uint64_t returned = 0u;
-	if (caller == PROCESS_PID_INVALID || !registry_query_valid(query) || (size != 0u && entries == NULL) ||
-	    out_returned == NULL || out_total == NULL)
+	if (!registry_query_valid(query) || (size != 0u && entries == NULL) || out_returned == NULL || out_total == NULL)
 		return INIT_REGISTRY_INVALID_ARGUMENT;
 	prune_dead_advertisements();
 	for (struct registry_advertisement* ad = advertisements; ad != NULL; ad = ad->next) {
 		if (query_matches(query, ad)) total++;
 	}
 	for (struct registry_advertisement* ad = advertisements; ad != NULL; ad = ad->next) {
-		cap_id_t delegated;
 		if (!query_matches(query, ad)) continue;
 		if (index++ < offset) continue;
 		if (returned >= size) break;
-		if (cap_delegate_peer(ad->capability, caller, ad->client_rights, &delegated) != SYSCALL_STATUS_OK) {
-			if (returned == 0u) return INIT_REGISTRY_RESOURCE_FAILURE;
-			break;
-		}
-		fill_service_entry(ad, delegated, &entries[returned++]);
+		fill_service_info(ad, &entries[returned++]);
 	}
 	*out_returned = returned;
 	*out_total    = total;

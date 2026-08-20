@@ -55,8 +55,8 @@ static syscall_status_t resolve_loader(const char* service, struct cached_loader
 		.major          = LOADER_PROTOCOL_VERSION_MAJOR,
 		.minor          = LOADER_PROTOCOL_VERSION_MINOR,
 	};
-	struct init_service_entry entry;
-	struct init_call_result   result;
+	struct init_service_handle handle;
+	struct init_call_result    result;
 
 	if (service == NULL || out_loader == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	if (cached_loader_matches(service)) {
@@ -64,16 +64,16 @@ static syscall_status_t resolve_loader(const char* service, struct cached_loader
 		return SYSCALL_STATUS_OK;
 	}
 
-	result = init_lookup(&query, service, &entry);
+	result = init_acquire(&query, service, &handle);
 	if (result.status != INIT_REGISTRY_OK || result.transport_status != SYSCALL_STATUS_OK)
 		return registry_result_status(result);
-	if (entry.capability == CAP_ID_INVALID || entry.owner == PROCESS_PID_INVALID) return SYSCALL_STATUS_FAILED;
+	if (handle.capability == CAP_ID_INVALID || handle.owner == PROCESS_PID_INVALID) return SYSCALL_STATUS_FAILED;
 
 	loader_cache = (struct cached_loader){
-		.owner      = entry.owner,
-		.capability = entry.capability,
+		.owner      = handle.owner,
+		.capability = handle.capability,
 	};
-	(void)strlcpy(loader_cache.service, entry.selector.service, sizeof(loader_cache.service));
+	(void)strlcpy(loader_cache.service, handle.info.selector.service, sizeof(loader_cache.service));
 	*out_loader = loader_cache;
 	return SYSCALL_STATUS_OK;
 }

@@ -84,13 +84,13 @@ struct init_call_result init_withdraw(const struct init_service_selector* select
 	return result;
 }
 
-struct init_call_result init_lookup(const struct init_protocol_query* query, const char* service,
-                                    struct init_service_entry* out_entry) {
-	struct init_lookup_request  request = {.header = {.op = INIT_OP_LOOKUP}};
-	struct init_lookup_response response;
-	struct init_call_result     result;
+struct init_call_result init_acquire(const struct init_protocol_query* query, const char* service,
+                                     struct init_service_handle* out_handle) {
+	struct init_acquire_request  request = {.header = {.op = INIT_OP_ACQUIRE}};
+	struct init_acquire_response response;
+	struct init_call_result      result;
 
-	if (query == NULL || service == NULL || out_entry == NULL)
+	if (query == NULL || service == NULL || out_handle == NULL)
 		return local_error(INIT_REGISTRY_INVALID_ARGUMENT, SYSCALL_STATUS_BAD_ARGUMENT);
 	if (strlcpy(request.service, service, sizeof(request.service)) >= sizeof(request.service))
 		return local_error(INIT_REGISTRY_INVALID_ARGUMENT, SYSCALL_STATUS_BAD_ARGUMENT);
@@ -98,13 +98,12 @@ struct init_call_result init_lookup(const struct init_protocol_query* query, con
 	result        = call_fixed(&request, sizeof(request), &response, sizeof(response));
 	if (result.status != INIT_REGISTRY_OK) return result;
 	result.status = response.status;
-	if (response.status == INIT_REGISTRY_OK) *out_entry = response.entry;
+	if (response.status == INIT_REGISTRY_OK) *out_handle = response.handle;
 	return result;
 }
 
 struct init_call_result init_enumerate(const struct init_protocol_query* query, uint64_t offset, uint64_t size,
-                                       struct init_service_entry* entries, uint64_t* out_returned,
-                                       uint64_t* out_total) {
+                                       struct init_service_info* entries, uint64_t* out_returned, uint64_t* out_total) {
 	struct init_enumerate_request   request = {.header = {.op = INIT_OP_ENUMERATE}};
 	struct init_enumerate_response* response;
 	struct init_call_result         result;

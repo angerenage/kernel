@@ -20,7 +20,7 @@ enum init_op {
 	INIT_OP_GET_INFO = 0,
 	INIT_OP_ADVERTISE,
 	INIT_OP_WITHDRAW,
-	INIT_OP_LOOKUP,
+	INIT_OP_ACQUIRE,
 	INIT_OP_ENUMERATE,
 	INIT_OP_BROWSE,
 	INIT_OP_WATCH,
@@ -58,12 +58,16 @@ struct init_service_selector {
 	char     service[INIT_NAME_MAX + 1u];
 };
 
-struct init_service_entry {
+struct init_service_info {
 	struct init_service_selector selector;
 	uint32_t                     minor;
-	process_id_t                 owner;
-	cap_id_t                     capability;
 	cap_rights_t                 rights;
+};
+
+struct init_service_handle {
+	struct init_service_info info;
+	process_id_t             owner;
+	cap_id_t                 capability;
 };
 
 enum init_browse_entry_kind {
@@ -108,15 +112,15 @@ struct init_withdraw_request {
 	struct init_service_selector selector;
 };
 
-struct init_lookup_request {
+struct init_acquire_request {
 	struct init_request_header header;
 	struct init_protocol_query query;
 	char                       service[INIT_NAME_MAX + 1u];
 };
 
-struct init_lookup_response {
-	enum init_registry_status status;
-	struct init_service_entry entry;
+struct init_acquire_response {
+	enum init_registry_status  status;
+	struct init_service_handle handle;
 };
 
 struct init_enumerate_request {
@@ -130,7 +134,7 @@ struct init_enumerate_response {
 	enum init_registry_status status;
 	uint64_t                  total;
 	uint64_t                  returned;
-	struct init_service_entry entries[];
+	struct init_service_info  entries[];
 };
 
 struct init_browse_request {
@@ -171,13 +175,13 @@ struct init_call_result init_advertise(const struct init_service_selector* selec
 /* Remove the calling process's advertisement for one service identity. */
 struct init_call_result init_withdraw(const struct init_service_selector* selector);
 
-/* Find one named service compatible with the requested protocol revision. */
-struct init_call_result init_lookup(const struct init_protocol_query* query, const char* service,
-                                    struct init_service_entry* out_entry);
+/* Acquire one named service compatible with the requested protocol revision. */
+struct init_call_result init_acquire(const struct init_protocol_query* query, const char* service,
+                                     struct init_service_handle* out_handle);
 
-/* Fetch one offset/size page of compatible services and report the current total. */
+/* Fetch one offset/size page of compatible service metadata. */
 struct init_call_result init_enumerate(const struct init_protocol_query* query, uint64_t offset, uint64_t size,
-                                       struct init_service_entry* entries, uint64_t* out_returned, uint64_t* out_total);
+                                       struct init_service_info* entries, uint64_t* out_returned, uint64_t* out_total);
 
 /* Fetch one offset/size page of immediate children below a namespace. */
 struct init_call_result init_browse(const char* namespace_path, uint64_t offset, uint64_t size,
