@@ -17,7 +17,7 @@ Test(kernel_capability_serial, call_right_does_not_implicitly_grant_serial_write
 
 	root = cap_acquire(root_id);
 	cr_assert_not_null(root);
-	call_only_id = cap_create(root->cap_object_id, process_pid(ctx.process), CAP_CALL, root, NULL);
+	call_only_id = cap_create(root->cap_object_id, process_pid(ctx.process), CAP_CALL, root);
 	cr_assert_neq(call_only_id, CAP_ID_INVALID);
 	cap_release(root);
 

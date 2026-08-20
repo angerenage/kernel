@@ -529,27 +529,9 @@ bool cap_remove_rights(struct capability* capability, cap_rights_t rights) {
 	return true;
 }
 
-static struct capability* capability_find_locked(cap_object_id_t cap_object_id, process_id_t target,
-                                                 cap_rights_t rights, struct capability* parent) {
-	for (size_t i = 0; i < capability_table.capacity; i++) {
-		if (capability_table.slots[i] != NULL) {
-			struct capability* cap = (struct capability*)capability_table.slots[i];
-			if (cap->cap_object_id != cap_object_id) continue;
-			if (cap->target != target) continue;
-			if (cap_is_removed(cap) || cap_rights(cap) != rights) continue;
-			if (cap->parent != parent) continue;
-			return cap;
-		}
-	}
-	return NULL;
-}
+static cap_id_t capability_publish_locked(struct capability* capability, struct capability* parent) {
+	id_table_id_t id;
 
-static cap_id_t capability_publish_locked(struct capability* capability, struct capability* parent, bool* out_created) {
-	struct irq_state   table_state;
-	struct capability* existing;
-	id_table_id_t      id;
-
-	if (out_created != NULL) *out_created = false;
 	if (capability == NULL || capability->cap_object_id == CAP_OBJECT_ID_INVALID) return CAP_ID_INVALID;
 
 	capability->parent = parent;
@@ -559,29 +541,21 @@ static cap_id_t capability_publish_locked(struct capability* capability, struct 
 		return CAP_ID_INVALID;
 	}
 
-	table_state = spinlock_lock_irqsave(&capability_table.lock);
-	existing    = capability_find_locked(capability->cap_object_id, capability->target, capability->rights, parent);
-	spinlock_unlock_irqrestore(&capability_table.lock, table_state);
-	if (existing != NULL) return existing->cap_id;
-
 	if (id_table_alloc(&capability_table, capability, &id) != ID_TABLE_OK) return CAP_ID_INVALID;
 
 	capability->cap_id = (cap_id_t)id;
 	capability_attach_locked(capability);
 	__atomic_store_n(&capability->removed, false, __ATOMIC_RELEASE);
-	if (out_created != NULL) *out_created = true;
 	return capability->cap_id;
 }
 
-cap_id_t cap_create(cap_object_id_t cap_object_id, process_id_t target, cap_rights_t rights, struct capability* parent,
-                    bool* out_created) {
+cap_id_t cap_create(cap_object_id_t cap_object_id, process_id_t target, cap_rights_t rights,
+                    struct capability* parent) {
 	struct irq_state   topology_state;
 	struct capability* capability;
 	struct cap_object* object;
 	cap_id_t           result_id;
-	bool               created = false;
 
-	if (out_created != NULL) *out_created = false;
 	if (cap_object_id == CAP_OBJECT_ID_INVALID) return CAP_ID_INVALID;
 	object = cap_object_acquire(cap_object_id);
 	if (object == NULL) return CAP_ID_INVALID;
@@ -593,26 +567,22 @@ cap_id_t cap_create(cap_object_id_t cap_object_id, process_id_t target, cap_righ
 	}
 
 	topology_state = spinlock_lock_irqsave(&capability_topology_lock);
-	result_id      = capability_publish_locked(capability, parent, &created);
+	result_id      = capability_publish_locked(capability, parent);
 	spinlock_unlock_irqrestore(&capability_topology_lock, topology_state);
 
-	if (!created) cap_release(capability);
+	if (result_id == CAP_ID_INVALID) cap_release(capability);
 	cap_object_release(object);
-	if (out_created != NULL) *out_created = created;
 	return result_id;
 }
 
-cap_id_t cap_delegate_create(struct capability* source, process_id_t target, cap_rights_t rights, bool peer,
-                             bool* out_created) {
+cap_id_t cap_delegate_create(struct capability* source, process_id_t target, cap_rights_t rights, bool peer) {
 	struct irq_state   topology_state;
 	struct capability* capability;
 	struct capability* parent;
 	struct cap_object* object;
 	cap_rights_t       source_rights;
 	cap_id_t           result_id = CAP_ID_INVALID;
-	bool               created   = false;
 
-	if (out_created != NULL) *out_created = false;
 	if (source == NULL || target == PROCESS_PID_INVALID) return CAP_ID_INVALID;
 
 	object = cap_object_acquire(source->cap_object_id);
@@ -633,13 +603,12 @@ cap_id_t cap_delegate_create(struct capability* source, process_id_t target, cap
 	}
 
 	parent    = peer ? source->parent : source;
-	result_id = capability_publish_locked(capability, parent, &created);
+	result_id = capability_publish_locked(capability, parent);
 
 out:
 	spinlock_unlock_irqrestore(&capability_topology_lock, topology_state);
-	if (!created) cap_release(capability);
+	if (result_id == CAP_ID_INVALID) cap_release(capability);
 	cap_object_release(object);
-	if (out_created != NULL) *out_created = created;
 	return result_id;
 }
 

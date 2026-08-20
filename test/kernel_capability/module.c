@@ -70,7 +70,7 @@ Test(kernel_capability_module, zero_length_read_is_a_successful_noop) {
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/module-zero-read");
 	kernel_boot_mock_set_modules(modules, 1u);
-	cap = kernel_capability_boot_module_grant(0u, process_pid(ctx.process), NULL);
+	cap = kernel_capability_boot_module_grant(0u, process_pid(ctx.process));
 	cr_assert_neq(cap, CAP_ID_INVALID);
 
 	result = kernel_capability_test_call(cap, &request, sizeof(request), NULL, 0u);

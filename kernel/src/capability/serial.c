@@ -31,5 +31,5 @@ void kernel_capability_serial_init(void) {
 
 cap_id_t kernel_capability_serial_grant(process_id_t target) {
 	if (serial_object_id == CAP_OBJECT_ID_INVALID) return CAP_ID_INVALID;
-	return cap_create(serial_object_id, target, CAP_WRITE | CAP_CALL | CAP_DELEGATE | CAP_DELEGATE_PEER, NULL, NULL);
+	return cap_create(serial_object_id, target, CAP_WRITE | CAP_CALL | CAP_DELEGATE | CAP_DELEGATE_PEER, NULL);
 }

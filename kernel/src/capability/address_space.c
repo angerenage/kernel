@@ -135,13 +135,11 @@ static syscall_result_t address_space_handler(const struct cap_request* req) {
 	return result;
 }
 
-cap_id_t kernel_address_space_grant(struct process* process, process_id_t recipient, cap_rights_t rights,
-                                    bool* out_created) {
+cap_id_t kernel_address_space_grant(struct process* process, process_id_t recipient, cap_rights_t rights) {
 	struct cap_object* object;
 	cap_object_id_t    object_id;
 	bool               object_created = false;
 
-	if (out_created != NULL) *out_created = false;
 	if (process == NULL || recipient == PROCESS_PID_INVALID || process_address_space(process) == NULL) {
 		return CAP_ID_INVALID;
 	}
@@ -160,7 +158,7 @@ cap_id_t kernel_address_space_grant(struct process* process, process_id_t recipi
 		process_set_address_space_cap_object_id(process, object_id);
 	}
 
-	cap_id_t cap_id = cap_create(object_id, recipient, rights, NULL, out_created);
+	cap_id_t cap_id = cap_create(object_id, recipient, rights, NULL);
 	if (cap_id == CAP_ID_INVALID) {
 		if (object_created) {
 			process_set_address_space_cap_object_id(process, CAP_OBJECT_ID_INVALID);

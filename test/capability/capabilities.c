@@ -3,7 +3,7 @@
 Test(capability, cap_create_rejects_null_object) {
 	cap_test_setup();
 
-	cr_assert_eq(cap_create(CAP_OBJECT_ID_INVALID, 1u, CAP_READ, NULL, NULL),
+	cr_assert_eq(cap_create(CAP_OBJECT_ID_INVALID, 1u, CAP_READ, NULL),
 	             CAP_ID_INVALID,
 	             "cap_create should reject an invalid object id");
 }
@@ -20,7 +20,7 @@ Test(capability, cap_create_lookup_destroy) {
 	cr_assert_neq(object_id, CAP_OBJECT_ID_INVALID);
 	cr_assert_not_null(obj);
 
-	cap_id_t cap_id = cap_create(object_id, 5u, CAP_READ | CAP_WRITE, NULL, NULL);
+	cap_id_t cap_id = cap_create(object_id, 5u, CAP_READ | CAP_WRITE, NULL);
 	cap             = cap_lookup(cap_id);
 	cr_assert_neq(cap_id, CAP_ID_INVALID, "cap_create should succeed");
 	cr_assert_not_null(cap, "cap_create should succeed");
@@ -55,11 +55,11 @@ Test(capability, delegation_links_do_not_retain_parent_records) {
 
 	cap_object_id_t object_id = cap_object_create(11u, NULL, NULL);
 	object                    = cap_object_lookup(NULL, 11u);
-	parent                    = cap_lookup(cap_create(object_id, 1u, CAP_READ | CAP_DELEGATE, NULL, NULL));
+	parent                    = cap_lookup(cap_create(object_id, 1u, CAP_READ | CAP_DELEGATE, NULL));
 	cr_assert_not_null(parent);
 	cr_assert_eq(parent->reference_count, 1u, "the table should own the only structural record reference");
 
-	child = cap_lookup(cap_create(object_id, 2u, CAP_READ, parent, NULL));
+	child = cap_lookup(cap_create(object_id, 2u, CAP_READ, parent));
 	cr_assert_not_null(child);
 	cr_assert_eq(parent->reference_count,
 	             1u,
@@ -80,7 +80,7 @@ Test(capability, retained_reference_outlives_table_removal) {
 
 	cap_object_id_t object_id = cap_object_create(12u, NULL, NULL);
 	object                    = cap_object_lookup(NULL, 12u);
-	cap_id                    = cap_create(object_id, 1u, CAP_READ, NULL, NULL);
+	cap_id                    = cap_create(object_id, 1u, CAP_READ, NULL);
 	cap                       = cap_acquire(cap_id);
 	cr_assert_not_null(cap);
 	cr_assert_eq(cap->reference_count, 2u, "table ownership plus one acquired reference should be retained");
@@ -94,10 +94,12 @@ Test(capability, retained_reference_outlives_table_removal) {
 	cr_assert(cap_object_destroy(object));
 }
 
-Test(capability, dedup_returns_existing_cap) {
+Test(capability, matching_grants_are_distinct_and_independent) {
 	struct cap_object* obj;
 	struct capability* cap1;
 	struct capability* cap2;
+	cap_id_t           cap1_id;
+	cap_id_t           cap2_id;
 
 	cap_test_setup();
 
@@ -106,30 +108,24 @@ Test(capability, dedup_returns_existing_cap) {
 	cr_assert_neq(object_id, CAP_OBJECT_ID_INVALID);
 	cr_assert_not_null(obj);
 
-	cap_id_t cap1_id = cap_create(object_id, 9u, CAP_READ, NULL, NULL);
-	cap1             = cap_lookup(cap1_id);
-	cr_assert_not_null(cap1);
-	cr_assert_eq(capability_count(), 1u);
-
-	cap_id_t cap2_id = cap_create(object_id, 9u, CAP_READ, NULL, NULL);
-	cap2             = cap_lookup(cap2_id);
-	cr_assert_eq(cap2_id, cap1_id, "dedup should return the existing capability ID");
-	cr_assert_eq(cap2, cap1, "dedup should return the existing capability for matching key");
-	cr_assert_eq(capability_count(), 1u, "dedup should not allocate a second capability");
-
-	cap1_id = cap_create(object_id, 10u, CAP_READ, NULL, NULL);
+	cap1_id = cap_create(object_id, 9u, CAP_READ, NULL);
+	cap2_id = cap_create(object_id, 9u, CAP_READ, NULL);
 	cap1    = cap_lookup(cap1_id);
-	cr_assert_neq(cap1, cap2, "different target should allocate a new capability");
+	cap2    = cap_lookup(cap2_id);
+	cr_assert_not_null(cap1);
+	cr_assert_not_null(cap2);
+	cr_assert_neq(cap1_id, cap2_id, "matching grants must still receive independent capability IDs");
+	cr_assert_neq(cap1, cap2, "matching grants must use independent capability records");
 	cr_assert_eq(capability_count(), 2u);
 
-	cap2_id = cap_create(object_id, 9u, CAP_WRITE, NULL, NULL);
-	cap2    = cap_lookup(cap2_id);
-	cr_assert_neq(cap2, cap1, "different rights should allocate a new capability");
-	cr_assert_eq(capability_count(), 3u);
+	cr_assert(cap_drop(cap1));
+	cr_assert_null(cap_lookup(cap1_id));
+	cr_assert_eq(cap_lookup(cap2_id), cap2, "dropping one matching grant must not remove another grant");
+	cr_assert_eq(cap_is_valid(cap2), CAP_OK);
+	cr_assert_eq(capability_count(), 1u);
 
-	cap_destroy_by_id(cap2_id);
-	cap_destroy_by_id(cap1_id);
-	cap_object_destroy(obj);
+	cr_assert(cap_destroy(cap2));
+	cr_assert(cap_object_destroy(obj));
 }
 
 Test(capability, null_and_invalid_arguments) {
@@ -153,7 +149,7 @@ Test(capability, null_and_invalid_arguments) {
 
 	cap_object_id_t object_id = cap_object_create(1u, NULL, NULL);
 	obj                       = cap_object_lookup(NULL, 1u);
-	cap_id_t cap_id           = cap_create(object_id, 1u, CAP_READ, NULL, NULL);
+	cap_id_t cap_id           = cap_create(object_id, 1u, CAP_READ, NULL);
 
 	cr_assert_null(cap_lookup(999999u), "non-existent ID lookup should return NULL");
 

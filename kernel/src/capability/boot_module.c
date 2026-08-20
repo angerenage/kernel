@@ -210,13 +210,12 @@ syscall_result_t kernel_capability_boot_module_get(cap_id_t module_cap, process_
 	return *out_module == NULL ? syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u) : syscall_result_ok(0u);
 }
 
-cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t recipient, bool* out_created) {
+cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t recipient) {
 	cap_object_id_t* slot;
 	cap_object_id_t  object_id;
 	cap_id_t         cap_id;
 	bool             object_created = false;
 
-	if (out_created != NULL) *out_created = false;
 	slot = boot_module_id_slot(module_index);
 	if (slot == NULL) return CAP_ID_INVALID;
 
@@ -230,7 +229,7 @@ cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t r
 		*slot = object_id;
 	}
 
-	cap_id = cap_create(object_id, recipient, CAP_READ | CAP_MAP | CAP_CALL, NULL, out_created);
+	cap_id = cap_create(object_id, recipient, CAP_READ | CAP_MAP | CAP_CALL, NULL);
 	if (cap_id == CAP_ID_INVALID && object_created) {
 		*slot = CAP_OBJECT_ID_INVALID;
 		(void)cap_object_destroy_with_id(object_id);

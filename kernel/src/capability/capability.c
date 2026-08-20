@@ -17,7 +17,7 @@ cap_id_t cap_kernel_create(uint64_t object_id, cap_kernel_handler_t handler, pro
 	cap_object_id = cap_object_create_kernel(object_id, handler, &object_created);
 	if (cap_object_id == CAP_OBJECT_ID_INVALID) return CAP_ID_INVALID;
 
-	cap_id = cap_create(cap_object_id, target, rights, NULL, NULL);
+	cap_id = cap_create(cap_object_id, target, rights, NULL);
 	if (cap_id == CAP_ID_INVALID) {
 		if (object_created) (void)cap_object_destroy_with_id(cap_object_id);
 		return CAP_ID_INVALID;

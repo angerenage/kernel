@@ -130,7 +130,7 @@ Test(capability_syscall, delegate_output_failure_rolls_back_child_capability) {
 
 	object_id = cap_object_create(0x2003u, NULL, NULL);
 	cr_assert_neq(object_id, CAP_OBJECT_ID_INVALID);
-	source_id = cap_create(object_id, process_pid(process), CAP_READ | CAP_DELEGATE, NULL, NULL);
+	source_id = cap_create(object_id, process_pid(process), CAP_READ | CAP_DELEGATE, NULL);
 	cr_assert_neq(source_id, CAP_ID_INVALID);
 	caps_before = capability_count();
 
@@ -162,7 +162,7 @@ Test(capability_syscall, derive_output_failure_rolls_back_child_and_new_object) 
 	cr_assert_not_null(channel);
 	base_object_id = cap_object_create(0x2004u, channel, NULL);
 	cr_assert_neq(base_object_id, CAP_OBJECT_ID_INVALID);
-	base_cap_id = cap_create(base_object_id, process_pid(process), CAP_READ | CAP_DERIVE, NULL, NULL);
+	base_cap_id = cap_create(base_object_id, process_pid(process), CAP_READ | CAP_DERIVE, NULL);
 	cr_assert_neq(base_cap_id, CAP_ID_INVALID);
 	objects_before = capability_object_count();
 	caps_before    = capability_count();
@@ -217,7 +217,7 @@ Test(capability_syscall, call_validates_response_before_handler_side_effects) {
 
 	object_id = cap_object_create_kernel(0x2006u, side_effecting_cap_handler, NULL);
 	cr_assert_neq(object_id, CAP_OBJECT_ID_INVALID);
-	capability_id = cap_create(object_id, process_pid(process), CAP_CALL, NULL, NULL);
+	capability_id = cap_create(object_id, process_pid(process), CAP_CALL, NULL);
 	cr_assert_neq(capability_id, CAP_ID_INVALID);
 
 	cap_call_side_effect_count = 0u;

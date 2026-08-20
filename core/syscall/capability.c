@@ -45,7 +45,6 @@ syscall_result_t syscall_cap_create(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 	cap_id_t         cap_id;
 	syscall_result_t copy_result;
 	bool             object_created;
-	bool             cap_created;
 
 	(void)arg5;
 
@@ -74,7 +73,7 @@ syscall_result_t syscall_cap_create(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 
-	cap_id = cap_create(cap_object_id, target, rights, NULL, &cap_created);
+	cap_id = cap_create(cap_object_id, target, rights, NULL);
 	if (cap_id == CAP_ID_INVALID) {
 		if (object_created) (void)cap_object_destroy_with_id(cap_object_id);
 		channel_release(endpoint);
@@ -84,7 +83,7 @@ syscall_result_t syscall_cap_create(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 	if (arg4 != 0u) {
 		copy_result = syscall_copy_to_user(syscall_current_user_space(), arg4, &cap_id, sizeof(cap_id), 4u);
 		if (copy_result.status != SYSCALL_STATUS_OK) {
-			if (cap_created) (void)cap_destroy_by_id(cap_id);
+			(void)cap_destroy_by_id(cap_id);
 			if (object_created) (void)cap_object_destroy_with_id(cap_object_id);
 			channel_release(endpoint);
 			return copy_result;
@@ -107,7 +106,6 @@ syscall_result_t syscall_cap_delegate(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 	enum cap_result    auth_result;
 	enum cap_result    valid_result;
 	syscall_result_t   copy_result;
-	bool               created;
 	bool               peer;
 
 	(void)arg5;
@@ -156,7 +154,7 @@ syscall_result_t syscall_cap_delegate(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
-	cap_id = cap_delegate_create(source, target, rights, peer, &created);
+	cap_id = cap_delegate_create(source, target, rights, peer);
 	if (cap_id == CAP_ID_INVALID) {
 		cap_release(source);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
@@ -165,7 +163,7 @@ syscall_result_t syscall_cap_delegate(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 	if (arg3 != 0u) {
 		copy_result = syscall_copy_to_user(syscall_current_user_space(), arg3, &cap_id, sizeof(cap_id), 3u);
 		if (copy_result.status != SYSCALL_STATUS_OK) {
-			if (created) (void)cap_destroy_by_id(cap_id);
+			(void)cap_destroy_by_id(cap_id);
 			cap_release(source);
 			return copy_result;
 		}
@@ -189,7 +187,6 @@ syscall_result_t syscall_cap_derive(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 	enum cap_result    valid_result;
 	syscall_result_t   copy_result;
 	bool               object_created;
-	bool               cap_created;
 
 	(void)arg5;
 
@@ -248,7 +245,7 @@ syscall_result_t syscall_cap_derive(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 
-	cap_id = cap_create(derived_object_id, target, rights, base, &cap_created);
+	cap_id = cap_create(derived_object_id, target, rights, base);
 	cap_object_release(base_object);
 	if (cap_id == CAP_ID_INVALID) {
 		if (object_created) (void)cap_object_destroy_with_id(derived_object_id);
@@ -259,7 +256,7 @@ syscall_result_t syscall_cap_derive(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 	if (arg4 != 0u) {
 		copy_result = syscall_copy_to_user(syscall_current_user_space(), arg4, &cap_id, sizeof(cap_id), 4u);
 		if (copy_result.status != SYSCALL_STATUS_OK) {
-			if (cap_created) (void)cap_destroy_by_id(cap_id);
+			(void)cap_destroy_by_id(cap_id);
 			if (object_created) (void)cap_object_destroy_with_id(derived_object_id);
 			cap_release(base);
 			return copy_result;

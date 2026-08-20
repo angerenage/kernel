@@ -91,15 +91,11 @@ void cap_object_unregister_endpoint(struct channel* endpoint);
 /* Notify managed kernel objects before a process and its address space are destroyed. */
 void cap_object_cleanup_for_process(process_id_t process);
 
-/* Create or deduplicate a capability grant and return its stable ID.
- * The capability does not retain its parent or the cap_object.
- * out_created reports whether a fresh record was installed. */
-cap_id_t cap_create(cap_object_id_t cap_object_id, process_id_t target, cap_rights_t rights, struct capability* parent,
-                    bool* out_created);
+/* Create a fresh capability grant and return its stable ID. */
+cap_id_t cap_create(cap_object_id_t cap_object_id, process_id_t target, cap_rights_t rights, struct capability* parent);
 
 /* Delegate from source as either a child or a peer grant. Peer grants use source's parent as their parent. */
-cap_id_t cap_delegate_create(struct capability* source, process_id_t target, cap_rights_t rights, bool peer,
-                             bool* out_created);
+cap_id_t cap_delegate_create(struct capability* source, process_id_t target, cap_rights_t rights, bool peer);
 
 /* Look up a capability by ID. The returned pointer is borrowed and requires external lifetime synchronisation. */
 struct capability* cap_lookup(cap_id_t id);

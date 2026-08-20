@@ -10,7 +10,7 @@ Test(capability, validity_removed_self) {
 
 	cap_object_id_t object_id = cap_object_create(1u, NULL, NULL);
 	obj                       = cap_object_lookup(NULL, 1u);
-	cap_id                    = cap_create(object_id, 5u, CAP_READ, NULL, NULL);
+	cap_id                    = cap_create(object_id, 5u, CAP_READ, NULL);
 	cap                       = cap_acquire(cap_id);
 
 	result = cap_is_valid(cap);
@@ -39,11 +39,11 @@ Test(capability, validity_removed_ancestor) {
 
 	cap_object_id_t object_id = cap_object_create(1u, NULL, NULL);
 	obj                       = cap_object_lookup(NULL, 1u);
-	root_id                   = cap_create(object_id, 10u, CAP_READ | CAP_DELEGATE, NULL, NULL);
+	root_id                   = cap_create(object_id, 10u, CAP_READ | CAP_DELEGATE, NULL);
 	root                      = cap_acquire(root_id);
-	child_id                  = cap_create(object_id, 5u, CAP_READ, root, NULL);
+	child_id                  = cap_create(object_id, 5u, CAP_READ, root);
 	child                     = cap_acquire(child_id);
-	grandchild_id             = cap_create(object_id, 7u, CAP_READ, child, NULL);
+	grandchild_id             = cap_create(object_id, 7u, CAP_READ, child);
 	grandchild                = cap_acquire(grandchild_id);
 
 	result = cap_is_valid(grandchild);
@@ -80,9 +80,9 @@ Test(capability, removing_rights_propagates_to_descendants) {
 	cap_test_setup();
 	cap_object_id_t object_id = cap_object_create(0x106u, NULL, NULL);
 	object                    = cap_object_lookup(NULL, 0x106u);
-	root                      = cap_lookup(cap_create(object_id, 1u, CAP_READ | CAP_WRITE | CAP_DELEGATE, NULL, NULL));
-	child                     = cap_lookup(cap_create(object_id, 2u, CAP_READ | CAP_WRITE, root, NULL));
-	grandchild                = cap_lookup(cap_create(object_id, 3u, CAP_WRITE, child, NULL));
+	root                      = cap_lookup(cap_create(object_id, 1u, CAP_READ | CAP_WRITE | CAP_DELEGATE, NULL));
+	child                     = cap_lookup(cap_create(object_id, 2u, CAP_READ | CAP_WRITE, root));
+	grandchild                = cap_lookup(cap_create(object_id, 3u, CAP_WRITE, child));
 	cr_assert_not_null(root);
 	cr_assert_not_null(child);
 	cr_assert_not_null(grandchild);
@@ -111,9 +111,9 @@ Test(capability, drop_for_process_removes_target_caps) {
 	cap_object_id_t object_id = cap_object_create(4u, NULL, NULL);
 	obj                       = cap_object_lookup(NULL, 4u);
 
-	targeted_id = cap_create(object_id, 42u, CAP_READ, NULL, NULL);
+	targeted_id = cap_create(object_id, 42u, CAP_READ, NULL);
 	targeted    = cap_acquire(targeted_id);
-	other       = cap_lookup(cap_create(object_id, 99u, CAP_READ, NULL, NULL));
+	other       = cap_lookup(cap_create(object_id, 99u, CAP_READ, NULL));
 
 	cr_assert_eq(cap_is_valid(targeted), CAP_OK, "targeted cap starts valid");
 	cr_assert_eq(cap_is_valid(other), CAP_OK, "other cap starts valid");
@@ -141,7 +141,7 @@ Test(capability, drop_for_process_is_noop_for_unknown_pid) {
 
 	cap_object_id_t object_id = cap_object_create(5u, NULL, NULL);
 	obj                       = cap_object_lookup(NULL, 5u);
-	cap                       = cap_lookup(cap_create(object_id, 42u, CAP_READ, NULL, NULL));
+	cap                       = cap_lookup(cap_create(object_id, 42u, CAP_READ, NULL));
 
 	cap_drop_for_process(1234u);
 
@@ -164,10 +164,10 @@ Test(capability, regrant_after_full_revoke_creates_a_fresh_live_capability) {
 	cap_object_id_t object_id = cap_object_create(0x103u, NULL, NULL);
 	object                    = cap_object_lookup(NULL, 0x103u);
 	cr_assert_not_null(object);
-	original_id = cap_create(object_id, 10u, CAP_READ | CAP_DELEGATE, NULL, NULL);
+	original_id = cap_create(object_id, 10u, CAP_READ | CAP_DELEGATE, NULL);
 	original    = cap_acquire(original_id);
 	cr_assert_not_null(original);
-	descendant_id = cap_create(object_id, 11u, CAP_READ, original, NULL);
+	descendant_id = cap_create(object_id, 11u, CAP_READ, original);
 	descendant    = cap_acquire(descendant_id);
 	cr_assert_not_null(descendant);
 
@@ -177,7 +177,7 @@ Test(capability, regrant_after_full_revoke_creates_a_fresh_live_capability) {
 	cr_assert_null(cap_lookup(original_id));
 	cr_assert_null(cap_lookup(descendant_id));
 
-	replacement = cap_lookup(cap_create(object_id, 10u, CAP_READ | CAP_DELEGATE, NULL, NULL));
+	replacement = cap_lookup(cap_create(object_id, 10u, CAP_READ | CAP_DELEGATE, NULL));
 	cr_assert_not_null(replacement, "a later legitimate grant must still be possible");
 	cr_assert_neq(replacement, original, "regrant must not return the revoked capability record");
 	cr_assert_neq(replacement->cap_id, original_id, "regrant must receive an independent capability id");
@@ -200,7 +200,7 @@ Test(capability, removed_parent_cannot_gain_new_descendants) {
 	cap_object_id_t object_id = cap_object_create(0x104u, NULL, NULL);
 	object                    = cap_object_lookup(NULL, 0x104u);
 	cr_assert_not_null(object);
-	parent_id = cap_create(object_id, 20u, CAP_READ | CAP_DELEGATE, NULL, NULL);
+	parent_id = cap_create(object_id, 20u, CAP_READ | CAP_DELEGATE, NULL);
 	parent    = cap_acquire(parent_id);
 	cr_assert_not_null(parent);
 
@@ -208,7 +208,7 @@ Test(capability, removed_parent_cannot_gain_new_descendants) {
 	cr_assert_eq(cap_is_valid(parent), CAP_NOT_FOUND);
 	cr_assert_null(cap_lookup(parent_id));
 	count_before = capability_count();
-	cr_assert_eq(cap_create(object_id, 21u, CAP_READ, parent, NULL),
+	cr_assert_eq(cap_create(object_id, 21u, CAP_READ, parent),
 	             CAP_ID_INVALID,
 	             "cap_create must not attach a new child below a removed parent");
 	cr_assert_eq(

@@ -54,8 +54,7 @@ static syscall_result_t loader_handler(const struct cap_request* req) {
 		.process_cap =
 			kernel_process_grant(loaded.process,
 	                             req->caller,
-	                             CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_EXEC | CAP_DELEGATE,
-	                             NULL),
+	                             CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_EXEC | CAP_DELEGATE),
 		.address_space_cap = CAP_ID_INVALID,
 		.entry             = loaded.entry,
 		.heap_base         = loaded.heap_base,
@@ -67,7 +66,7 @@ static syscall_result_t loader_handler(const struct cap_request* req) {
 	}
 
 	response.address_space_cap =
-		kernel_address_space_grant(loaded.process, req->caller, CAP_CALL | CAP_MAP | CAP_READ | CAP_DELEGATE, NULL);
+		kernel_address_space_grant(loaded.process, req->caller, CAP_CALL | CAP_MAP | CAP_READ | CAP_DELEGATE);
 	if (response.address_space_cap == CAP_ID_INVALID) {
 		(void)cap_destroy_by_id(response.process_cap);
 		(void)process_destroy(loaded.process);
@@ -89,5 +88,5 @@ void kernel_capability_loader_init(void) {
 
 cap_id_t kernel_capability_loader_grant(process_id_t recipient) {
 	if (loader_object_id == CAP_OBJECT_ID_INVALID) return CAP_ID_INVALID;
-	return cap_create(loader_object_id, recipient, CAP_CALL | CAP_DELEGATE, NULL, NULL);
+	return cap_create(loader_object_id, recipient, CAP_CALL | CAP_DELEGATE, NULL);
 }

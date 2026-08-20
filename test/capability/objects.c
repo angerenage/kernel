@@ -72,7 +72,7 @@ Test(capability, counts_track_allocations) {
 	}
 
 	for (size_t i = 0; i < 4; i++) {
-		caps[i] = cap_create(objs[i], 1u, CAP_READ, NULL, NULL);
+		caps[i] = cap_create(objs[i], 1u, CAP_READ, NULL);
 		cr_assert_neq(caps[i], CAP_ID_INVALID);
 		cr_assert_eq(capability_count(), i + 1, "capability count mismatch at %zu", i);
 	}
@@ -91,7 +91,7 @@ Test(capability, counts_track_allocations) {
 Test(capability, create_rejects_unknown_object_ids) {
 	cap_test_setup();
 
-	cr_assert_eq(cap_create((cap_object_id_t)0x7fffffffu, 1u, CAP_READ, NULL, NULL),
+	cr_assert_eq(cap_create((cap_object_id_t)0x7fffffffu, 1u, CAP_READ, NULL),
 	             CAP_ID_INVALID,
 	             "a capability must not be created for an unregistered cap_object");
 	cr_assert_eq(capability_count(), 0u, "rejected creation must not leave a dead capability record");
@@ -106,7 +106,7 @@ Test(capability, destroyed_object_id_cannot_create_a_dead_capability) {
 
 	cr_assert(cap_object_destroy_with_id(object_id), "failed to unregister test cap_object");
 	cr_assert_eq(capability_object_count(), 0u);
-	cr_assert_eq(cap_create(object_id, 2u, CAP_READ, NULL, NULL),
+	cr_assert_eq(cap_create(object_id, 2u, CAP_READ, NULL),
 	             CAP_ID_INVALID,
 	             "cap_create must reject an object id after that object is unregistered");
 	cr_assert_eq(capability_count(), 0u, "dead-object creation leaked an unusable capability");

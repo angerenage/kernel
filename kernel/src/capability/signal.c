@@ -328,7 +328,7 @@ cap_id_t kernel_signal_grant(struct signal* target, process_id_t recipient, cap_
 		cap_object_release(object);
 	}
 
-	result_cap = cap_create(object_id, recipient, rights, NULL, NULL);
+	result_cap = cap_create(object_id, recipient, rights, NULL);
 	if (result_cap == CAP_ID_INVALID && object_created) {
 		(void)signal_destroy_cap_object(held);
 	}

@@ -19,7 +19,7 @@ Test(syscall, capability_call_uses_distinct_request_and_response_buffers) {
 
 	object_id = cap_object_create_kernel(1u, syscall_test_cap_handler, NULL);
 	cr_assert_neq(object_id, CAP_OBJECT_ID_INVALID);
-	capability_id = cap_create(object_id, process_pid(process), CAP_CALL, NULL, NULL);
+	capability_id = cap_create(object_id, process_pid(process), CAP_CALL, NULL);
 	cr_assert_neq(capability_id, CAP_ID_INVALID);
 
 	result = syscall_dispatch(SYSCALL_CAP_CALL,
@@ -70,7 +70,7 @@ Test(syscall, capability_valid_reports_current_validity_without_disclosing_forei
 
 	object_id = cap_object_create_kernel(2u, syscall_test_cap_handler, NULL);
 	cr_assert_neq(object_id, CAP_OBJECT_ID_INVALID);
-	capability_id = cap_create(object_id, process_pid(owner), CAP_CALL, NULL, NULL);
+	capability_id = cap_create(object_id, process_pid(owner), CAP_CALL, NULL);
 	cr_assert_neq(capability_id, CAP_ID_INVALID);
 
 	sched_set_current(cpu_current(), &owner_thread->thread);
@@ -157,7 +157,7 @@ Test(syscall, capability_drop_only_allows_direct_target) {
 
 	object_id = cap_object_create_kernel(3u, syscall_test_cap_handler, NULL);
 	cr_assert_neq(object_id, CAP_OBJECT_ID_INVALID);
-	capability_id = cap_create(object_id, process_pid(owner), CAP_CALL, NULL, NULL);
+	capability_id = cap_create(object_id, process_pid(owner), CAP_CALL, NULL);
 	cr_assert_neq(capability_id, CAP_ID_INVALID);
 
 	sched_set_current(cpu_current(), &other_thread->thread);
@@ -200,9 +200,9 @@ Test(syscall, capability_delegate_peer_uses_source_parent) {
 
 	object_id = cap_object_create_kernel(4u, syscall_test_cap_handler, NULL);
 	cr_assert_neq(object_id, CAP_OBJECT_ID_INVALID);
-	root_id   = cap_create(object_id, pid, CAP_READ | CAP_DELEGATE | CAP_DELEGATE_PEER, NULL, NULL);
+	root_id   = cap_create(object_id, pid, CAP_READ | CAP_DELEGATE | CAP_DELEGATE_PEER, NULL);
 	root      = cap_lookup(root_id);
-	source_id = cap_create(object_id, pid, CAP_READ | CAP_DELEGATE | CAP_DELEGATE_PEER, root, NULL);
+	source_id = cap_create(object_id, pid, CAP_READ | CAP_DELEGATE | CAP_DELEGATE_PEER, root);
 	source    = cap_lookup(source_id);
 	cr_assert_not_null(root);
 	cr_assert_not_null(source);

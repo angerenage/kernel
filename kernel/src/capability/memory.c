@@ -256,7 +256,7 @@ cap_id_t kernel_allocate_memory(cap_rights_t rights, size_t page_count, vmm_prot
 	}
 	state->owner = process_pid(caller);
 
-	cap_id = cap_create(object_id, process_pid(caller), rights, NULL, NULL);
+	cap_id = cap_create(object_id, process_pid(caller), rights, NULL);
 	if (cap_id == CAP_ID_INVALID) {
 		(void)cap_object_destroy_with_id(object_id);
 		return CAP_ID_INVALID;
@@ -674,7 +674,7 @@ static cap_id_t kernel_mapping_create(void*              backing_context, void (
 		return CAP_ID_INVALID;
 	}
 
-	cap_id = cap_create(object_id, cap_target, CAP_CALL | rights, parent_cap, NULL);
+	cap_id = cap_create(object_id, cap_target, CAP_CALL | rights, parent_cap);
 	if (cap_id == CAP_ID_INVALID) {
 		(void)cap_object_destroy_with_id(object_id);
 		return CAP_ID_INVALID;

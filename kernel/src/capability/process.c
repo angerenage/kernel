@@ -66,8 +66,7 @@ static syscall_result_t process_run_handler(const struct cap_request* req, struc
 	struct process_run_request       request;
 	struct uthread*                  main_thread = NULL;
 	enum process_thread_spawn_result result;
-	void*                            arg_copy           = NULL;
-	bool                             thread_cap_created = false;
+	void*                            arg_copy = NULL;
 	syscall_result_t                 copy_result;
 
 	if (req->request == NULL || req->request_size < sizeof(request)) {
@@ -99,7 +98,7 @@ static syscall_result_t process_run_handler(const struct cap_request* req, struc
 
 	struct process_run_response response = {
 		.thread_id  = uthread_id(main_thread),
-		.thread_cap = kernel_thread_grant_full(main_thread, req->caller, &thread_cap_created),
+		.thread_cap = kernel_thread_grant_full(main_thread, req->caller),
 	};
 	if (response.thread_cap == CAP_ID_INVALID) {
 		(void)process_abort_main_thread(target, main_thread);
@@ -108,7 +107,7 @@ static syscall_result_t process_run_handler(const struct cap_request* req, struc
 
 	result = process_commit_main_thread(target, main_thread);
 	if (result != PROCESS_THREAD_SPAWN_OK) {
-		if (thread_cap_created) (void)cap_destroy_by_id(response.thread_cap);
+		(void)cap_destroy_by_id(response.thread_cap);
 		(void)process_abort_main_thread(target, main_thread);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
 	}
@@ -121,9 +120,8 @@ static syscall_result_t process_spawn_thread_handler(const struct cap_request* r
 	struct process_thread_params         params;
 	struct uthread*                      thread = NULL;
 	enum process_thread_spawn_result     result;
-	bool                                 thread_cap_created = false;
-	char*                                name               = NULL;
-	void*                                arg_copy           = NULL;
+	char*                                name     = NULL;
+	void*                                arg_copy = NULL;
 	syscall_result_t                     copy_result;
 
 	if (req->request == NULL || req->request_size < sizeof(request)) {
@@ -161,7 +159,7 @@ static syscall_result_t process_spawn_thread_handler(const struct cap_request* r
 		           : syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
 	}
 
-	response.thread_cap = kernel_thread_grant_full(thread, req->caller, &thread_cap_created);
+	response.thread_cap = kernel_thread_grant_full(thread, req->caller);
 	if (response.thread_cap == CAP_ID_INVALID) {
 		(void)process_abort_thread(target, thread);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
@@ -169,7 +167,7 @@ static syscall_result_t process_spawn_thread_handler(const struct cap_request* r
 
 	result = process_commit_thread(target, thread);
 	if (result != PROCESS_THREAD_SPAWN_OK) {
-		if (thread_cap_created) (void)cap_destroy_by_id(response.thread_cap);
+		(void)cap_destroy_by_id(response.thread_cap);
 		(void)process_abort_thread(target, thread);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
 	}
@@ -312,12 +310,11 @@ static syscall_result_t process_handler(const struct cap_request* req) {
 	return result;
 }
 
-cap_id_t kernel_process_grant(struct process* target, process_id_t recipient, cap_rights_t rights, bool* out_created) {
+cap_id_t kernel_process_grant(struct process* target, process_id_t recipient, cap_rights_t rights) {
 	struct cap_object* object;
 	cap_object_id_t    object_id;
 	bool               object_created = false;
 
-	if (out_created != NULL) *out_created = false;
 	if (target == NULL || recipient == PROCESS_PID_INVALID) return CAP_ID_INVALID;
 
 	object_id = process_cap_object_id(target);
@@ -338,7 +335,7 @@ cap_id_t kernel_process_grant(struct process* target, process_id_t recipient, ca
 		process_set_cap_object_id(target, object_id);
 	}
 
-	cap_id_t cap_id = cap_create(object_id, recipient, rights, NULL, out_created);
+	cap_id_t cap_id = cap_create(object_id, recipient, rights, NULL);
 	if (cap_id == CAP_ID_INVALID) {
 		if (object_created) {
 			process_set_cap_object_id(target, CAP_OBJECT_ID_INVALID);
@@ -350,9 +347,8 @@ cap_id_t kernel_process_grant(struct process* target, process_id_t recipient, ca
 	return cap_id;
 }
 
-cap_id_t kernel_self_grant(struct process* process, bool* out_created) {
+cap_id_t kernel_self_grant(struct process* process) {
 	return kernel_process_grant(process,
 	                            process_pid(process),
-	                            CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_EXEC | CAP_DELEGATE,
-	                            out_created);
+	                            CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_EXEC | CAP_DELEGATE);
 }
