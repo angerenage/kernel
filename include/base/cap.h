@@ -26,10 +26,16 @@ enum cap_right {
 	CAP_ALLOCATE = 1ull << 7,
 	CAP_DESTROY  = 1ull << 8,
 
-	CAP_DELEGATE = 1ull << 16,
-	CAP_DERIVE   = 1ull << 17,
-	CAP_REVOKE   = 1ull << 18,
-	CAP_MANAGE   = 1ull << 19,
+	CAP_DELEGATE      = 1ull << 16,
+	CAP_DERIVE        = 1ull << 17,
+	CAP_REVOKE        = 1ull << 18,
+	CAP_MANAGE        = 1ull << 19,
+	CAP_DELEGATE_PEER = 1ull << 20,
+};
+
+enum cap_delegate_flag {
+	CAP_DELEGATE_FLAG_NONE = 0u,
+	CAP_DELEGATE_FLAG_PEER = 1u << 0,
 };
 
 /* Request delivered to a server endpoint when a client issues cap_call. Userspace servers receive response == NULL

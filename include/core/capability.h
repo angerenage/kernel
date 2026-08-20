@@ -97,6 +97,10 @@ void cap_object_cleanup_for_process(process_id_t process);
 cap_id_t cap_create(cap_object_id_t cap_object_id, process_id_t target, cap_rights_t rights, struct capability* parent,
                     bool* out_created);
 
+/* Delegate from source as either a child or a peer grant. Peer grants use source's parent as their parent. */
+cap_id_t cap_delegate_create(struct capability* source, process_id_t target, cap_rights_t rights, bool peer,
+                             bool* out_created);
+
 /* Look up a capability by ID. The returned pointer is borrowed and requires external lifetime synchronisation. */
 struct capability* cap_lookup(cap_id_t id);
 
@@ -121,8 +125,11 @@ bool cap_destroy(struct capability* capability);
 /* Destroy a capability whose ID is already known, without dereferencing the supplied pointer. */
 bool cap_destroy_by_id(cap_id_t id);
 
-/* Remove every capability whose target is the given process together with its delegation subtree. */
-void cap_revoke_for_process(process_id_t target);
+/* Drop one capability handle while preserving its descendants by splicing them into its parent. */
+bool cap_drop(struct capability* capability);
+
+/* Drop every capability held by target while preserving grants delegated to other processes. */
+void cap_drop_for_process(process_id_t target);
 
 /* Check whether caller is authorized to use a capability by walking the parent chain. */
 enum cap_result cap_is_authorized(process_id_t caller, struct capability* cap);

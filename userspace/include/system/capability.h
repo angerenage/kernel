@@ -19,13 +19,19 @@ syscall_status_t cap_publish(channel_id_t endpoint_id, uint64_t object_id, proce
 /* Delegate an existing capability to another process with a subset of rights. */
 syscall_status_t cap_delegate(cap_id_t source, process_id_t target, cap_rights_t rights, cap_id_t* out);
 
+/* Delegate as a sibling of source. The source must hold CAP_DELEGATE_PEER. */
+syscall_status_t cap_delegate_peer(cap_id_t source, process_id_t target, cap_rights_t rights, cap_id_t* out);
+
 /* Derive a new capability on a different object within the same endpoint. */
 syscall_status_t cap_derive(cap_id_t base, process_id_t target, uint64_t object_id, cap_rights_t rights, cap_id_t* out);
 
 /* Revoke a subset of rights from a capability (or the whole capability when rights == 0). */
 syscall_status_t cap_revoke(cap_id_t cap, cap_rights_t rights);
 
-/* Report whether a capability owned by the caller still exists, is not revoked, and has a live backing object. */
+/* Drop a capability owned by the caller without revoking capabilities delegated from it. */
+syscall_status_t cap_drop(cap_id_t cap);
+
+/* Report whether a capability owned by the caller still exists. */
 syscall_status_t cap_valid(cap_id_t cap, bool* out_valid);
 
 /* Invoke a capability with a typed request and optional response. */

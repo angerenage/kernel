@@ -99,7 +99,7 @@ Test(capability, removing_rights_propagates_to_descendants) {
 	cr_assert(cap_object_destroy(object));
 }
 
-Test(capability, revoke_for_process_marks_target_caps) {
+Test(capability, drop_for_process_removes_target_caps) {
 	struct cap_object* obj;
 	struct capability* targeted;
 	struct capability* other;
@@ -118,7 +118,7 @@ Test(capability, revoke_for_process_marks_target_caps) {
 	cr_assert_eq(cap_is_valid(targeted), CAP_OK, "targeted cap starts valid");
 	cr_assert_eq(cap_is_valid(other), CAP_OK, "other cap starts valid");
 
-	cap_revoke_for_process(42u);
+	cap_drop_for_process(42u);
 
 	cr_assert_eq(cap_is_valid(targeted), CAP_NOT_FOUND, "targeted cap should be removed");
 	cr_assert_null(cap_lookup(targeted_id));
@@ -132,7 +132,7 @@ Test(capability, revoke_for_process_marks_target_caps) {
 	cap_object_destroy(obj);
 }
 
-Test(capability, revoke_for_process_is_noop_for_unknown_pid) {
+Test(capability, drop_for_process_is_noop_for_unknown_pid) {
 	struct cap_object* obj;
 	struct capability* cap;
 	enum cap_result    result;
@@ -143,7 +143,7 @@ Test(capability, revoke_for_process_is_noop_for_unknown_pid) {
 	obj                       = cap_object_lookup(NULL, 5u);
 	cap                       = cap_lookup(cap_create(object_id, 42u, CAP_READ, NULL, NULL));
 
-	cap_revoke_for_process(1234u);
+	cap_drop_for_process(1234u);
 
 	result = cap_is_valid(cap);
 	cr_assert_eq(result, CAP_OK, "unknown PID must not affect unrelated caps");
@@ -171,7 +171,7 @@ Test(capability, regrant_after_full_revoke_creates_a_fresh_live_capability) {
 	descendant    = cap_acquire(descendant_id);
 	cr_assert_not_null(descendant);
 
-	cap_revoke_for_process(10u);
+	cr_assert(cap_destroy(original));
 	cr_assert_eq(cap_is_valid(original), CAP_NOT_FOUND);
 	cr_assert_eq(cap_is_valid(descendant), CAP_NOT_FOUND);
 	cr_assert_null(cap_lookup(original_id));
@@ -190,7 +190,7 @@ Test(capability, regrant_after_full_revoke_creates_a_fresh_live_capability) {
 	cr_assert(cap_object_destroy(object));
 }
 
-Test(capability, revoked_parent_cannot_gain_new_descendants) {
+Test(capability, removed_parent_cannot_gain_new_descendants) {
 	struct cap_object* object;
 	struct capability* parent;
 	cap_id_t           parent_id;
@@ -204,7 +204,7 @@ Test(capability, revoked_parent_cannot_gain_new_descendants) {
 	parent    = cap_acquire(parent_id);
 	cr_assert_not_null(parent);
 
-	cap_revoke_for_process(20u);
+	cr_assert(cap_destroy(parent));
 	cr_assert_eq(cap_is_valid(parent), CAP_NOT_FOUND);
 	cr_assert_null(cap_lookup(parent_id));
 	count_before = capability_count();

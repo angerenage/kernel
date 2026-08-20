@@ -575,7 +575,7 @@ bool process_destroy(struct process* process) {
 	if (id_table_remove(&process_table, process->pid, (void**)&removed) != ID_TABLE_OK || removed != process) {
 		return false;
 	}
-	cap_revoke_for_process(process->pid);
+	cap_drop_for_process(process->pid);
 	process_release(removed);
 	return true;
 }

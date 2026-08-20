@@ -54,10 +54,16 @@ syscall_status_t cap_publish(channel_id_t endpoint_id, uint64_t object_id, proce
 	return result.status;
 }
 
-syscall_status_t cap_delegate(cap_id_t source, process_id_t target, cap_rights_t rights, cap_id_t* out) {
+static syscall_status_t cap_delegate_with_flags(cap_id_t source, process_id_t target, cap_rights_t rights,
+                                                enum cap_delegate_flag flags, cap_id_t* out) {
 	cap_id_t         cap_id = CAP_ID_INVALID;
-	syscall_result_t result = syscall(
-		SYSCALL_CAP_DELEGATE, (uintptr_t)source, (uintptr_t)target, (uintptr_t)rights, (uintptr_t)&cap_id, 0u, 0u);
+	syscall_result_t result = syscall(SYSCALL_CAP_DELEGATE,
+	                                  (uintptr_t)source,
+	                                  (uintptr_t)target,
+	                                  (uintptr_t)rights,
+	                                  (uintptr_t)&cap_id,
+	                                  (uintptr_t)flags,
+	                                  0u);
 
 #ifdef RUNTIME_DIAGNOSTICS
 	if (result.status == SYSCALL_STATUS_BAD_ARGUMENT) {
@@ -71,6 +77,9 @@ syscall_status_t cap_delegate(cap_id_t source, process_id_t target, cap_rights_t
 		case 2u:
 			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(rights);
 			break;
+		case 4u:
+			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(flags);
+			break;
 		default:
 			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER_INDEX(SYSCALL_CAP_DELEGATE, result.value);
 			break;
@@ -83,6 +92,14 @@ syscall_status_t cap_delegate(cap_id_t source, process_id_t target, cap_rights_t
 
 	if (result.status == SYSCALL_STATUS_OK && out != NULL) *out = cap_id;
 	return result.status;
+}
+
+syscall_status_t cap_delegate(cap_id_t source, process_id_t target, cap_rights_t rights, cap_id_t* out) {
+	return cap_delegate_with_flags(source, target, rights, CAP_DELEGATE_FLAG_NONE, out);
+}
+
+syscall_status_t cap_delegate_peer(cap_id_t source, process_id_t target, cap_rights_t rights, cap_id_t* out) {
+	return cap_delegate_with_flags(source, target, rights, CAP_DELEGATE_FLAG_PEER, out);
 }
 
 syscall_status_t cap_derive(cap_id_t base, process_id_t target, uint64_t object_id, cap_rights_t rights,
@@ -142,6 +159,21 @@ syscall_status_t cap_revoke(cap_id_t cap, cap_rights_t rights) {
 	}
 	else {
 		RUNTIME_DIAGNOSTIC_SYSCALL_RESULT(SYSCALL_CAP_REVOKE, result);
+	}
+#endif
+
+	return result.status;
+}
+
+syscall_status_t cap_drop(cap_id_t cap) {
+	syscall_result_t result = syscall(SYSCALL_CAP_DROP, (uintptr_t)cap, 0u, 0u, 0u, 0u, 0u);
+
+#ifdef RUNTIME_DIAGNOSTICS
+	if (result.status == SYSCALL_STATUS_BAD_ARGUMENT) {
+		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(cap);
+	}
+	else {
+		RUNTIME_DIAGNOSTIC_SYSCALL_RESULT(SYSCALL_CAP_DROP, result);
 	}
 #endif
 

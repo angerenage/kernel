@@ -108,14 +108,18 @@ syscall_result_t syscall_cap_delegate(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 	enum cap_result    valid_result;
 	syscall_result_t   copy_result;
 	bool               created;
+	bool               peer;
 
-	(void)arg4;
 	(void)arg5;
 
 	process = process_current();
 	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 
 	caller_pid = process_pid(process);
+	if ((arg4 & ~(uintptr_t)CAP_DELEGATE_FLAG_PEER) != 0u) {
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 4u);
+	}
+	peer = (arg4 & (uintptr_t)CAP_DELEGATE_FLAG_PEER) != 0u;
 
 	if (arg0 == CAP_ID_INVALID) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	source = cap_acquire((cap_id_t)arg0);
@@ -147,12 +151,12 @@ syscall_result_t syscall_cap_delegate(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 2u);
 	}
 
-	if ((source_rights & CAP_DELEGATE) == 0u) {
+	if ((source_rights & CAP_DELEGATE) == 0u || (peer && (source_rights & CAP_DELEGATE_PEER) == 0u)) {
 		cap_release(source);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
-	cap_id = cap_create(source->cap_object_id, target, rights, source, &created);
+	cap_id = cap_delegate_create(source, target, rights, peer, &created);
 	if (cap_id == CAP_ID_INVALID) {
 		cap_release(source);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
@@ -584,6 +588,32 @@ syscall_result_t syscall_cap_revoke(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 			cap_release(cap);
 			return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 1u);
 		}
+	}
+
+	cap_release(cap);
+	return syscall_result_ok(0u);
+}
+
+syscall_result_t syscall_cap_drop(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
+                                  uintptr_t arg5) {
+	struct process*    process;
+	struct capability* cap;
+
+	(void)arg1;
+	(void)arg2;
+	(void)arg3;
+	(void)arg4;
+	(void)arg5;
+
+	process = process_current();
+	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	if (arg0 == CAP_ID_INVALID) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+
+	cap = cap_acquire((cap_id_t)arg0);
+	if (cap == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	if (cap->target != process_pid(process) || !cap_drop(cap)) {
+		cap_release(cap);
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
 	cap_release(cap);

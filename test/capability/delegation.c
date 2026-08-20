@@ -261,3 +261,196 @@ Test(capability, ancestor_object_destroy_is_propagated_to_derived_descendants) {
 	cap_release(root);
 	cr_assert(cap_object_destroy(child_object));
 }
+
+Test(capability, drop_internal_capability_splices_children_to_parent) {
+	struct cap_object* object;
+	struct capability* root;
+	struct capability* middle;
+	struct capability* child1;
+	struct capability* child2;
+	cap_id_t           middle_id;
+
+	cap_test_setup();
+	cap_object_id_t object_id = cap_object_create(0x82u, NULL, NULL);
+	object                    = cap_object_lookup(NULL, 0x82u);
+	root                      = cap_lookup(cap_create(object_id, 1u, CAP_READ | CAP_DELEGATE, NULL, NULL));
+	middle_id                 = cap_create(object_id, 2u, CAP_READ | CAP_DELEGATE, root, NULL);
+	middle                    = cap_lookup(middle_id);
+	child1                    = cap_lookup(cap_create(object_id, 3u, CAP_READ, middle, NULL));
+	child2                    = cap_lookup(cap_create(object_id, 4u, CAP_READ, middle, NULL));
+	cr_assert_not_null(root);
+	cr_assert_not_null(middle);
+	cr_assert_not_null(child1);
+	cr_assert_not_null(child2);
+
+	cr_assert(cap_drop(middle));
+	cr_assert_null(cap_lookup(middle_id));
+	cr_assert_eq(child1->parent, root);
+	cr_assert_eq(child2->parent, root);
+	cr_assert_eq(cap_is_valid(child1), CAP_OK);
+	cr_assert_eq(cap_is_valid(child2), CAP_OK);
+
+	cr_assert(cap_destroy(root));
+	cr_assert(cap_object_destroy(object));
+}
+
+Test(capability, drop_root_makes_children_independent_roots) {
+	struct cap_object* object;
+	struct capability* root;
+	struct capability* child1;
+	struct capability* child2;
+	cap_id_t           root_id;
+
+	cap_test_setup();
+	cap_object_id_t object_id = cap_object_create(0x83u, NULL, NULL);
+	object                    = cap_object_lookup(NULL, 0x83u);
+	root_id                   = cap_create(object_id, 1u, CAP_READ | CAP_DELEGATE, NULL, NULL);
+	root                      = cap_lookup(root_id);
+	child1                    = cap_lookup(cap_create(object_id, 2u, CAP_READ, root, NULL));
+	child2                    = cap_lookup(cap_create(object_id, 3u, CAP_READ, root, NULL));
+	cr_assert_not_null(root);
+	cr_assert_not_null(child1);
+	cr_assert_not_null(child2);
+
+	cr_assert(cap_drop(root));
+	cr_assert_null(cap_lookup(root_id));
+	cr_assert_null(child1->parent);
+	cr_assert_null(child2->parent);
+	cr_assert_null(child1->next_sibling);
+	cr_assert_null(child2->next_sibling);
+	cr_assert_eq(cap_is_valid(child1), CAP_OK);
+	cr_assert_eq(cap_is_valid(child2), CAP_OK);
+
+	cr_assert(cap_destroy(child1));
+	cr_assert(cap_destroy(child2));
+	cr_assert(cap_object_destroy(object));
+}
+
+Test(capability, drop_for_process_preserves_delegations_owned_by_other_processes) {
+	struct cap_object* object;
+	struct capability* a;
+	struct capability* b;
+	struct capability* c;
+	struct capability* d;
+	cap_id_t           a_id;
+	cap_id_t           b_id;
+	cap_id_t           c_id;
+	cap_id_t           d_id;
+
+	cap_test_setup();
+	cap_object_id_t object_id = cap_object_create(0x84u, NULL, NULL);
+	object                    = cap_object_lookup(NULL, 0x84u);
+	a_id                      = cap_create(object_id, 42u, CAP_READ | CAP_DELEGATE, NULL, NULL);
+	a                         = cap_lookup(a_id);
+	b_id                      = cap_create(object_id, 7u, CAP_READ | CAP_DELEGATE, a, NULL);
+	b                         = cap_lookup(b_id);
+	c_id                      = cap_create(object_id, 42u, CAP_READ | CAP_DELEGATE, b, NULL);
+	c                         = cap_lookup(c_id);
+	d_id                      = cap_create(object_id, 9u, CAP_READ, c, NULL);
+	d                         = cap_lookup(d_id);
+	cr_assert_not_null(a);
+	cr_assert_not_null(b);
+	cr_assert_not_null(c);
+	cr_assert_not_null(d);
+
+	cap_drop_for_process(42u);
+	cr_assert_null(cap_lookup(a_id));
+	cr_assert_null(cap_lookup(c_id));
+	cr_assert_eq(cap_lookup(b_id), b);
+	cr_assert_eq(cap_lookup(d_id), d);
+	cr_assert_null(b->parent);
+	cr_assert_eq(d->parent, b);
+	cr_assert_eq(cap_is_valid(b), CAP_OK);
+	cr_assert_eq(cap_is_valid(d), CAP_OK);
+
+	cr_assert(cap_destroy(b));
+	cr_assert_null(cap_lookup(d_id));
+	cr_assert(cap_object_destroy(object));
+}
+
+Test(capability, peer_delegation_creates_sibling_and_survives_source_revoke) {
+	struct cap_object* object;
+	struct capability* root;
+	struct capability* source;
+	struct capability* normal;
+	struct capability* peer;
+	cap_id_t           source_id;
+	cap_id_t           normal_id;
+	cap_id_t           peer_id;
+
+	cap_test_setup();
+	cap_object_id_t object_id = cap_object_create(0x85u, NULL, NULL);
+	object                    = cap_object_lookup(NULL, 0x85u);
+	root      = cap_lookup(cap_create(object_id, 1u, CAP_READ | CAP_DELEGATE | CAP_DELEGATE_PEER, NULL, NULL));
+	source_id = cap_create(object_id, 2u, CAP_READ | CAP_DELEGATE | CAP_DELEGATE_PEER, root, NULL);
+	source    = cap_lookup(source_id);
+	normal_id = cap_delegate_create(source, 3u, CAP_READ, false, NULL);
+	peer_id   = cap_delegate_create(source, 4u, CAP_READ, true, NULL);
+	normal    = cap_lookup(normal_id);
+	peer      = cap_lookup(peer_id);
+	cr_assert_not_null(root);
+	cr_assert_not_null(source);
+	cr_assert_not_null(normal);
+	cr_assert_not_null(peer);
+	cr_assert_eq(normal->parent, source);
+	cr_assert_eq(peer->parent, root);
+
+	cr_assert(cap_destroy(source));
+	cr_assert_null(cap_lookup(source_id));
+	cr_assert_null(cap_lookup(normal_id));
+	cr_assert_eq(cap_lookup(peer_id), peer);
+	cr_assert_eq(cap_is_valid(peer), CAP_OK);
+
+	cr_assert(cap_destroy(root));
+	cr_assert_null(cap_lookup(peer_id));
+	cr_assert(cap_object_destroy(object));
+}
+
+Test(capability, peer_delegation_from_root_creates_independent_root) {
+	struct cap_object* object;
+	struct capability* source;
+	struct capability* peer;
+	cap_id_t           source_id;
+	cap_id_t           peer_id;
+
+	cap_test_setup();
+	cap_object_id_t object_id = cap_object_create(0x86u, NULL, NULL);
+	object                    = cap_object_lookup(NULL, 0x86u);
+	source_id                 = cap_create(object_id, 1u, CAP_READ | CAP_DELEGATE | CAP_DELEGATE_PEER, NULL, NULL);
+	source                    = cap_lookup(source_id);
+	peer_id                   = cap_delegate_create(source, 2u, CAP_READ, true, NULL);
+	peer                      = cap_lookup(peer_id);
+	cr_assert_not_null(source);
+	cr_assert_not_null(peer);
+	cr_assert_null(peer->parent);
+
+	cr_assert(cap_destroy(source));
+	cr_assert_null(cap_lookup(source_id));
+	cr_assert_eq(cap_lookup(peer_id), peer);
+	cr_assert_eq(cap_is_valid(peer), CAP_OK);
+
+	cr_assert(cap_destroy(peer));
+	cr_assert(cap_object_destroy(object));
+}
+
+Test(capability, peer_delegation_requires_explicit_peer_right) {
+	struct cap_object* object;
+	struct capability* source;
+	cap_id_t           normal_id;
+
+	cap_test_setup();
+	cap_object_id_t object_id = cap_object_create(0x87u, NULL, NULL);
+	object                    = cap_object_lookup(NULL, 0x87u);
+	source                    = cap_lookup(cap_create(object_id, 1u, CAP_READ | CAP_DELEGATE, NULL, NULL));
+	cr_assert_not_null(source);
+
+	cr_assert_eq(cap_delegate_create(source, 2u, CAP_READ, true, NULL),
+	             CAP_ID_INVALID,
+	             "CAP_DELEGATE alone must not permit sibling creation");
+	normal_id = cap_delegate_create(source, 2u, CAP_READ, false, NULL);
+	cr_assert_neq(normal_id, CAP_ID_INVALID);
+
+	cr_assert(cap_destroy(source));
+	cr_assert_null(cap_lookup(normal_id));
+	cr_assert(cap_object_destroy(object));
+}
