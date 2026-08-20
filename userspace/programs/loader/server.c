@@ -139,6 +139,11 @@ static bool handle_run(const struct cap_request* call, struct loader_loaded_prog
 	if (status == SYSCALL_STATUS_OK) {
 		status = cap_delegate(loader_thread_cap, call->caller, LOADER_V1_THREAD_CAP_RIGHTS, &response.thread_cap);
 	}
+	if (loader_thread_cap != CAP_ID_INVALID) {
+		syscall_status_t drop_status = cap_drop(loader_thread_cap);
+		if (status == SYSCALL_STATUS_OK && drop_status != SYSCALL_STATUS_OK) status = drop_status;
+		loader_thread_cap = CAP_ID_INVALID;
+	}
 
 	if (status != SYSCALL_STATUS_OK) {
 		unlink_loaded(program);
@@ -207,10 +212,13 @@ static bool advertise_loader(void) {
 	if (status != SYSCALL_STATUS_OK || self.pid == PROCESS_PID_INVALID) return false;
 	status = channel_create(&loader_endpoint);
 	if (status != SYSCALL_STATUS_OK) return false;
-	status = cap_publish(loader_endpoint, LOADER_SERVICE_OBJECT_ID, self.pid, CAP_CALL | CAP_DELEGATE, &service_cap);
+	status = cap_publish(
+		loader_endpoint, LOADER_SERVICE_OBJECT_ID, self.pid, CAP_CALL | CAP_DELEGATE | CAP_DELEGATE_PEER, &service_cap);
 	if (status != SYSCALL_STATUS_OK) return false;
 	result = init_advertise(&selector, LOADER_PROTOCOL_VERSION_MINOR, service_cap, LOADER_V1_SERVICE_CAP_RIGHTS);
-	return result.status == INIT_REGISTRY_OK && result.transport_status == SYSCALL_STATUS_OK;
+	if (result.status == INIT_REGISTRY_OK && result.transport_status == SYSCALL_STATUS_OK) return true;
+	(void)cap_drop(service_cap);
+	return false;
 }
 
 int loader_server_run(void) {
@@ -222,7 +230,12 @@ int loader_server_run(void) {
 		printf("loader: advertisement failed\n");
 		return 1;
 	}
-	printf("loader: advertised %s/%s\n", PROGRAM_LOADER_NAMESPACE, LOADER_SERVICE_NAME);
+	printf("loader: advertised %s/%s@%u.%u/%s\n",
+	       PROGRAM_LOADER_NAMESPACE,
+	       LOADER_PROTOCOL_NAME,
+	       LOADER_PROTOCOL_VERSION_MAJOR,
+	       LOADER_PROTOCOL_VERSION_MINOR,
+	       LOADER_SERVICE_NAME);
 
 	for (;;) {
 		received = false;

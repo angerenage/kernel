@@ -182,6 +182,10 @@ enum init_registry_status registry_advertise(process_id_t owner, const struct in
 			.client_rights = client_rights,
 			.next          = current->next,
 		};
+		if (current->capability != capability && cap_drop(current->capability) != SYSCALL_STATUS_OK) {
+			free(replacement);
+			return INIT_REGISTRY_RESOURCE_FAILURE;
+		}
 		*cursor = replacement;
 		notify_watches(current, replacement);
 		free(current);
@@ -211,7 +215,8 @@ enum init_registry_status registry_withdraw(process_id_t owner, const struct ini
 	if (*cursor == NULL || selector_compare(&(*cursor)->selector, selector) != 0) return INIT_REGISTRY_NOT_FOUND;
 	if ((*cursor)->owner != owner) return INIT_REGISTRY_DENIED;
 	struct registry_advertisement* removed = *cursor;
-	*cursor                                = removed->next;
+	if (cap_drop(removed->capability) != SYSCALL_STATUS_OK) return INIT_REGISTRY_RESOURCE_FAILURE;
+	*cursor = removed->next;
 	notify_watches(removed, NULL);
 	free(removed);
 	return INIT_REGISTRY_OK;
@@ -237,7 +242,7 @@ enum init_registry_status registry_lookup(process_id_t caller, const struct init
 	prune_dead_advertisements();
 	for (struct registry_advertisement* ad = advertisements; ad != NULL; ad = ad->next) {
 		if (!query_matches(query, ad) || strcmp(service, ad->selector.service) != 0) continue;
-		if (cap_delegate(ad->capability, caller, ad->client_rights, &delegated) != SYSCALL_STATUS_OK)
+		if (cap_delegate_peer(ad->capability, caller, ad->client_rights, &delegated) != SYSCALL_STATUS_OK)
 			return INIT_REGISTRY_RESOURCE_FAILURE;
 		fill_service_entry(ad, delegated, out_entry);
 		return INIT_REGISTRY_OK;
@@ -248,6 +253,7 @@ enum init_registry_status registry_lookup(process_id_t caller, const struct init
 enum init_registry_status registry_enumerate(process_id_t caller, const struct init_protocol_query* query,
                                              uint64_t offset, uint64_t size, struct init_service_entry* entries,
                                              uint64_t* out_returned, uint64_t* out_total) {
+	uint64_t index    = 0u;
 	uint64_t total    = 0u;
 	uint64_t returned = 0u;
 	if (caller == PROCESS_PID_INVALID || !registry_query_valid(query) || (size != 0u && entries == NULL) ||
@@ -255,11 +261,17 @@ enum init_registry_status registry_enumerate(process_id_t caller, const struct i
 		return INIT_REGISTRY_INVALID_ARGUMENT;
 	prune_dead_advertisements();
 	for (struct registry_advertisement* ad = advertisements; ad != NULL; ad = ad->next) {
+		if (query_matches(query, ad)) total++;
+	}
+	for (struct registry_advertisement* ad = advertisements; ad != NULL; ad = ad->next) {
 		cap_id_t delegated;
 		if (!query_matches(query, ad)) continue;
-		if (total++ < offset || returned >= size) continue;
-		if (cap_delegate(ad->capability, caller, ad->client_rights, &delegated) != SYSCALL_STATUS_OK)
-			return INIT_REGISTRY_RESOURCE_FAILURE;
+		if (index++ < offset) continue;
+		if (returned >= size) break;
+		if (cap_delegate_peer(ad->capability, caller, ad->client_rights, &delegated) != SYSCALL_STATUS_OK) {
+			if (returned == 0u) return INIT_REGISTRY_RESOURCE_FAILURE;
+			break;
+		}
 		fill_service_entry(ad, delegated, &entries[returned++]);
 	}
 	*out_returned = returned;
@@ -384,6 +396,7 @@ enum init_registry_status registry_watch(process_id_t owner, const struct init_p
 	watches = watch;
 	if (signal_send(signal_capability, 1u, 0u, 0u, 0u, SIGNAL_SEND_FLAG_COALESCE, &response) != SYSCALL_STATUS_OK) {
 		watches = watch->next;
+		(void)cap_drop(watch->signal_capability);
 		free(watch);
 		return INIT_REGISTRY_DELIVERY_FAILED;
 	}
@@ -400,7 +413,8 @@ enum init_registry_status registry_unwatch(process_id_t owner, uint64_t subscrip
 	if (*cursor == NULL) return INIT_REGISTRY_NOT_FOUND;
 	if ((*cursor)->owner != owner) return INIT_REGISTRY_DENIED;
 	struct registry_watch* removed = *cursor;
-	*cursor                        = removed->next;
+	if (cap_drop(removed->signal_capability) != SYSCALL_STATUS_OK) return INIT_REGISTRY_RESOURCE_FAILURE;
+	*cursor = removed->next;
 	free(removed);
 	return INIT_REGISTRY_OK;
 }

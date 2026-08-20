@@ -60,7 +60,7 @@ struct init_call_result init_advertise(const struct init_service_selector* selec
 		return local_error(INIT_REGISTRY_INVALID_ARGUMENT, SYSCALL_STATUS_BAD_ARGUMENT);
 	result = init_get_pid(&init_pid);
 	if (result.status != INIT_REGISTRY_OK) return result;
-	status = cap_delegate(service_capability, init_pid, client_rights | CAP_DELEGATE, &delegated);
+	status = cap_delegate(service_capability, init_pid, client_rights | CAP_DELEGATE | CAP_DELEGATE_PEER, &delegated);
 	if (status != SYSCALL_STATUS_OK) return local_error(INIT_REGISTRY_RESOURCE_FAILURE, status);
 	request.selector      = *selector;
 	request.minor         = minor;

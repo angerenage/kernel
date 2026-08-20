@@ -47,7 +47,8 @@ void server_deinit(void) {
 
 syscall_status_t init_server_grant(process_id_t target, cap_id_t* out_cap) {
 	if (server_endpoint == CHANNEL_ID_INVALID) return SYSCALL_STATUS_BAD_ARGUMENT;
-	return cap_publish(server_endpoint, INIT_SERVICE_OBJECT_ID, target, CAP_CALL | CAP_DELEGATE, out_cap);
+	return cap_publish(
+		server_endpoint, INIT_SERVICE_OBJECT_ID, target, CAP_CALL | CAP_DELEGATE | CAP_DELEGATE_PEER, out_cap);
 }
 
 static bool dispatch_request(const struct cap_request* request, const void* data) {

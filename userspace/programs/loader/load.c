@@ -101,9 +101,12 @@ static syscall_status_t load_segment(struct loader_loaded_program* program, cap_
 	if (status != SYSCALL_STATUS_OK) return status;
 	if (final_prot != load_prot) {
 		status = mapping_protect(mapping_cap, final_prot);
-		if (status != SYSCALL_STATUS_OK) return status;
+		if (status != SYSCALL_STATUS_OK) {
+			(void)cap_drop(mapping_cap);
+			return status;
+		}
 	}
-	return SYSCALL_STATUS_OK;
+	return cap_drop(mapping_cap);
 }
 
 static syscall_status_t allocate_heap(struct loader_loaded_program* program) {
@@ -122,8 +125,12 @@ static syscall_status_t allocate_heap(struct loader_loaded_program* program) {
 	status = address_space_map(program->address_space_cap, allocation_cap, &mapping_cap);
 	if (status != SYSCALL_STATUS_OK) return status;
 	status = mapping_get_info(mapping_cap, &mapping);
-	if (status != SYSCALL_STATUS_OK || mapping.base == NULL || mapping.page_count != HEAP_DEFAULT_GROW_PAGES)
+	if (status != SYSCALL_STATUS_OK || mapping.base == NULL || mapping.page_count != HEAP_DEFAULT_GROW_PAGES) {
+		(void)cap_drop(mapping_cap);
 		return status == SYSCALL_STATUS_OK ? SYSCALL_STATUS_FAILED : status;
+	}
+	status = cap_drop(mapping_cap);
+	if (status != SYSCALL_STATUS_OK) return status;
 	program->heap_base       = (uintptr_t)mapping.base;
 	program->heap_page_count = mapping.page_count;
 	return SYSCALL_STATUS_OK;
@@ -133,9 +140,9 @@ static syscall_status_t delegate_runtime_caps(struct loader_loaded_program* prog
 	syscall_status_t status;
 
 	if (init_cap_id == CAP_ID_INVALID || serial_cap_id == CAP_ID_INVALID) return SYSCALL_STATUS_UNAVAILABLE;
-	status = cap_delegate(init_cap_id, program->process_id, CAP_CALL, &program->init_cap);
+	status = cap_delegate_peer(init_cap_id, program->process_id, CAP_CALL, &program->init_cap);
 	if (status != SYSCALL_STATUS_OK) return status;
-	return cap_delegate(serial_cap_id, program->process_id, CAP_CALL | CAP_WRITE, &program->serial_cap);
+	return cap_delegate_peer(serial_cap_id, program->process_id, CAP_CALL | CAP_WRITE, &program->serial_cap);
 }
 
 static bool argv_payload_valid(uint32_t argc, const void* argv_data, size_t argv_size) {
@@ -264,6 +271,9 @@ syscall_status_t loader_prepare_program(cap_id_t blob_cap, const char* name, siz
 	if (status != SYSCALL_STATUS_OK) goto fail;
 	status = delegate_runtime_caps(program);
 	if (status != SYSCALL_STATUS_OK) goto fail;
+	status = cap_drop(program->address_space_cap);
+	if (status != SYSCALL_STATUS_OK) goto fail;
+	program->address_space_cap = CAP_ID_INVALID;
 
 	elf64_image_deinit(&image);
 	*out_program = program;

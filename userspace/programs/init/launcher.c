@@ -19,6 +19,7 @@ bool loader_launch(const struct init_startup_info* init_startup) {
 	cap_id_t                     serial_cap;
 	cap_id_t                     thread_cap;
 	syscall_status_t             status;
+	syscall_status_t             drop_status;
 
 	if (init_startup == NULL) return false;
 	status = module_resolve("loader.elf", sizeof("loader.elf"), &module);
@@ -26,12 +27,25 @@ bool loader_launch(const struct init_startup_info* init_startup) {
 		printf("init: loader.elf module resolution failed: %u\n", (unsigned)status);
 		return false;
 	}
-	status = loader_load(init_startup->loader_cap, module.cap, &loaded);
+	status      = loader_load(init_startup->loader_cap, module.cap, &loaded);
+	drop_status = cap_drop(module.cap);
 	if (status != SYSCALL_STATUS_OK) {
 		printf("init: loader.elf load failed: %u\n", (unsigned)status);
 		return false;
 	}
-	status = process_get_info(loaded.process_cap, &process_info);
+	if (drop_status != SYSCALL_STATUS_OK) {
+		printf("init: loader module capability drop failed: %u\n", (unsigned)drop_status);
+		(void)process_kill(loaded.process_cap, PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
+		return false;
+	}
+	status = cap_drop(loaded.address_space_cap);
+	if (status != SYSCALL_STATUS_OK) {
+		printf("init: loader address-space capability drop failed: %u\n", (unsigned)status);
+		(void)process_kill(loaded.process_cap, PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
+		return false;
+	}
+	loaded.address_space_cap = CAP_ID_INVALID;
+	status                   = process_get_info(loaded.process_cap, &process_info);
 	if (status != SYSCALL_STATUS_OK) {
 		printf("init: loaded process query failed: %u\n", (unsigned)status);
 		(void)process_kill(loaded.process_cap, PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
@@ -43,8 +57,10 @@ bool loader_launch(const struct init_startup_info* init_startup) {
 		(void)process_kill(loaded.process_cap, PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
 		return false;
 	}
-	status =
-		cap_delegate(init_startup->base.serial_cap, process_info.pid, CAP_WRITE | CAP_CALL | CAP_DELEGATE, &serial_cap);
+	status = cap_delegate(init_startup->base.serial_cap,
+	                      process_info.pid,
+	                      CAP_WRITE | CAP_CALL | CAP_DELEGATE | CAP_DELEGATE_PEER,
+	                      &serial_cap);
 	if (status != SYSCALL_STATUS_OK) {
 		printf("init: serial capability delegation failed: %u\n", (unsigned)status);
 		(void)process_kill(loaded.process_cap, PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
@@ -64,9 +80,22 @@ bool loader_launch(const struct init_startup_info* init_startup) {
 		(void)process_kill(loaded.process_cap, PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
 		return false;
 	}
+	status = cap_drop(thread_cap);
+	if (status != SYSCALL_STATUS_OK) {
+		printf("init: loader thread capability drop failed: %u\n", (unsigned)status);
+		(void)process_kill(loaded.process_cap, PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
+		return false;
+	}
 	status = process_detach(loaded.process_cap);
 	if (status != SYSCALL_STATUS_OK) {
 		printf("init: loader process detach failed: %u\n", (unsigned)status);
+		(void)process_kill(loaded.process_cap, PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
+		return false;
+	}
+
+	status = cap_drop(loaded.process_cap);
+	if (status != SYSCALL_STATUS_OK) {
+		printf("init: loader process capability drop failed: %u\n", (unsigned)status);
 		(void)process_kill(loaded.process_cap, PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
 		return false;
 	}
