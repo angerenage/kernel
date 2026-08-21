@@ -23,4 +23,5 @@ void   mock_paging_reset(void);
 void   mock_paging_fail_init_once(void);
 void   mock_paging_fail_after(size_t successful_maps);
 void   mock_paging_fail_once_after(size_t successful_maps);
+void   mock_paging_fail_next_unmap(void);
 size_t mock_paging_mapping_count(void);

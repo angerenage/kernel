@@ -34,6 +34,7 @@ core_sources = files(
 	'memory/pmm.c',
 	'memory/vaddr_alloc.c',
 	'memory/backing_store.c',
+	'memory/memory_object.c',
 	'memory/memory_region.c',
 	'memory/region_presence.c',
 	'memory/page_table.c',

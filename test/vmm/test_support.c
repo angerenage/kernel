@@ -18,7 +18,7 @@ void init_test_vmm(uint8_t* arena, size_t arena_size) {
 		 },
 		{
          .base   = (uintptr_t)(arena + KiB(64)),
-         .length = KiB(40),
+         .length = KiB(64),
          .type   = MEM_RANGE_USABLE,
 		 },
 	};

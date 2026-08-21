@@ -1,4 +1,4 @@
-#include <core/backing_store.h>
+#include <core/memory_object.h>
 #include <core/memory_region.h>
 #include <core/page_table.h>
 #include <core/pmm.h>
@@ -40,7 +40,7 @@ static void restore_live_mappings(struct address_space* space, const struct memo
 		uintptr_t phys;
 
 		if (!region_presence_is_mapped(&region->presence, page)) continue;
-		phys = backing_page_phys(backing_store_entry(&region->backing, page));
+		if (!memory_object_page_phys(region->memory, region->memory_page_offset + page, &phys)) continue;
 		if (page_table_query(table, virt, &existing_phys, NULL)) {
 			if (!replace_existing) continue;
 			if ((existing_phys & ~(uintptr_t)(PMM_PAGE_SIZE - 1u)) != phys) continue;
@@ -55,7 +55,8 @@ static bool map_one(struct address_space* space, struct memory_region* region, s
 	struct hal_address_space* table;
 	uintptr_t                 phys;
 	uintptr_t                 virt;
-	uintptr_t                 existing_phys  = 0;
+	uintptr_t                 existing_phys = 0;
+	size_t                    memory_page;
 	bool                      allocated_phys = false;
 
 	if (out_allocated_phys) *out_allocated_phys = false;
@@ -64,8 +65,8 @@ static bool map_one(struct address_space* space, struct memory_region* region, s
 	if (table == NULL) return false;
 	if (region_presence_is_mapped(&region->presence, page_index)) return true;
 	if (!region_presence_prepare(&region->presence, page_index)) return false;
-	if (!backing_store_ensure_page(&region->backing, page_index, &phys, &allocated_phys)) {
-		backing_store_release_if_empty(&region->backing);
+	memory_page = region->memory_page_offset + page_index;
+	if (!memory_object_ensure_page(region->memory, memory_page, &phys, &allocated_phys)) {
 		region_presence_discard_empty(&region->presence, page_index);
 		return false;
 	}
@@ -73,11 +74,7 @@ static bool map_one(struct address_space* space, struct memory_region* region, s
 	virt = region->base + page_index * (uintptr_t)PMM_PAGE_SIZE;
 	if (page_table_query(table, virt, &existing_phys, NULL)) {
 		if ((existing_phys & ~(uintptr_t)(PMM_PAGE_SIZE - 1u)) != phys) {
-			if (allocated_phys) {
-				backing_store_set_entry(&region->backing, page_index, 0u);
-				(void)pmm_free_pages(phys, 1u);
-			}
-			backing_store_release_if_empty(&region->backing);
+			if (allocated_phys) (void)memory_object_release_page(region->memory, memory_page);
 			region_presence_discard_empty(&region->presence, page_index);
 			return false;
 		}
@@ -87,11 +84,7 @@ static bool map_one(struct address_space* space, struct memory_region* region, s
 	}
 
 	if (!page_table_map(table, virt, phys, region->prot)) {
-		if (allocated_phys) {
-			backing_store_set_entry(&region->backing, page_index, 0u);
-			(void)pmm_free_pages(phys, 1u);
-		}
-		backing_store_release_if_empty(&region->backing);
+		if (allocated_phys) (void)memory_object_release_page(region->memory, memory_page);
 		region_presence_discard_empty(&region->presence, page_index);
 		return false;
 	}
@@ -101,13 +94,14 @@ static bool map_one(struct address_space* space, struct memory_region* region, s
 	return true;
 }
 
-bool region_pager_map_all(struct address_space* space, struct memory_region* region) {
+enum region_pager_result region_pager_map_all(struct address_space* space, struct memory_region* region) {
 	struct map_transaction transaction;
+	bool                   rollback_failed = false;
 
-	if (!space || !region) return false;
-	if (region->page_count == 0) return false;
-	if (memory_region_state(region) == VMM_STATE_MAPPED) return true;
-	if (address_space_hal(space) == NULL) return false;
+	if (!space || !region) return REGION_PAGER_FAILED;
+	if (region->page_count == 0) return REGION_PAGER_FAILED;
+	if (memory_region_state(region) == VMM_STATE_MAPPED) return REGION_PAGER_OK;
+	if (address_space_hal(space) == NULL) return REGION_PAGER_FAILED;
 	map_transaction_init(&transaction);
 
 	for (size_t page = 0; page < region->page_count; page++) {
@@ -122,27 +116,30 @@ bool region_pager_map_all(struct address_space* space, struct memory_region* reg
 		if (allocated_phys) region_presence_mark_mapped(&transaction.allocated_phys, page);
 	}
 	map_transaction_release(&transaction);
-	return true;
+	return REGION_PAGER_OK;
 
 rollback:
 	for (size_t page = 0; page < region->page_count; page++) {
-		uintptr_t phys;
+		uintptr_t live_phys = 0u;
 		uintptr_t virt;
+		bool      unmapped;
 
 		if (!region_presence_is_mapped(&transaction.created_mappings, page)) continue;
-		phys = backing_page_phys(backing_store_entry(&region->backing, page));
-		virt = region->base + page * (uintptr_t)PMM_PAGE_SIZE;
-		if (page_table_unmap(address_space_hal(space), virt)) {
-			region_presence_clear_mapped(&region->presence, page);
-			if (region_presence_is_mapped(&transaction.allocated_phys, page)) {
-				backing_store_set_entry(&region->backing, page, 0u);
-				(void)pmm_free_pages(phys, 1u);
-			}
+		virt     = region->base + page * (uintptr_t)PMM_PAGE_SIZE;
+		unmapped = page_table_unmap(address_space_hal(space), virt);
+		if (!unmapped && !page_table_query(address_space_hal(space), virt, &live_phys, NULL)) unmapped = true;
+		if (!unmapped) {
+			rollback_failed = true;
+			continue;
+		}
+		region_presence_clear_mapped(&region->presence, page);
+		if (region_presence_is_mapped(&transaction.allocated_phys, page) &&
+		    !memory_object_release_page(region->memory, region->memory_page_offset + page)) {
+			rollback_failed = true;
 		}
 	}
-	backing_store_release_if_empty(&region->backing);
 	map_transaction_release(&transaction);
-	return false;
+	return rollback_failed ? REGION_PAGER_ROLLBACK_FAILED : REGION_PAGER_FAILED;
 }
 
 bool region_pager_handle_lazy_fault(struct address_space* space, struct memory_region* region, uintptr_t fault_addr) {
@@ -164,16 +161,17 @@ bool region_pager_unmap_all(struct address_space* space, struct memory_region* r
 	table = address_space_hal(space);
 	if (table == NULL) return false;
 	for (size_t page = 0; page < region->page_count; page++) {
-		uintptr_t entry = backing_store_entry(&region->backing, page);
-		uintptr_t virt  = region->base + page * (uintptr_t)PMM_PAGE_SIZE;
-		uintptr_t phys  = 0;
+		uintptr_t expected_phys;
+		uintptr_t virt = region->base + page * (uintptr_t)PMM_PAGE_SIZE;
+		uintptr_t phys = 0;
 
 		if (!region_presence_is_mapped(&region->presence, page)) continue;
+		if (!memory_object_page_phys(region->memory, region->memory_page_offset + page, &expected_phys)) return false;
 		if (!page_table_query(table, virt, &phys, NULL)) {
 			restore_live_mappings(space, region, region->prot, false);
 			return false;
 		}
-		if ((phys & ~(uintptr_t)(PMM_PAGE_SIZE - 1u)) != backing_page_phys(entry)) {
+		if ((phys & ~(uintptr_t)(PMM_PAGE_SIZE - 1u)) != expected_phys) {
 			restore_live_mappings(space, region, region->prot, false);
 			return false;
 		}
@@ -183,7 +181,8 @@ bool region_pager_unmap_all(struct address_space* space, struct memory_region* r
 		}
 	}
 	region_presence_release(&region->presence);
-	if (release_phys && region->owns_pages) backing_store_release(&region->backing);
+	if (release_phys && !memory_object_release_pages(region->memory, region->memory_page_offset, region->page_count))
+		return false;
 	return true;
 }
 
@@ -205,7 +204,7 @@ bool region_pager_protect_all(struct address_space* space, struct memory_region*
 		uintptr_t virt = region->base + page * (uintptr_t)PMM_PAGE_SIZE;
 
 		if (!region_presence_is_mapped(&region->presence, page)) continue;
-		phys = backing_page_phys(backing_store_entry(&region->backing, page));
+		if (!memory_object_page_phys(region->memory, region->memory_page_offset + page, &phys)) return false;
 		if (!page_table_remap_prot(table, virt, phys, new_prot)) {
 			restore_live_mappings(space, region, old_prot, true);
 			return false;

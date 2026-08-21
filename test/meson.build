@@ -401,6 +401,7 @@ test_suites = [
 			'vmm/mapping.c',
 			'vmm/page_fault.c',
 			'vmm/rollback.c',
+			'vmm/memory_object.c',
 			'vmm/user_mapping.c',
 			'vmm/physical.c',
 			'vmm/lifecycle.c',

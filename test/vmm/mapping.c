@@ -24,10 +24,10 @@ Test(vmm, supports_lazy_map_unmap_remap_and_reprotect) {
 	cr_assert(vmm_alloc(address_space_kernel(), &params, &alloc_id, &base), "lazy vmm_alloc failed");
 	cr_assert_eq(vmm_count(address_space_kernel()), 1, "vmm_count mismatch for lazy allocation");
 	cr_assert_eq(mock_paging_mapping_count(), 0, "lazy allocation unexpectedly created mappings");
-	cr_assert_eq(pmm_free_page_count(), free_before, "lazy allocation unexpectedly consumed physical pages");
 
 	cr_assert(vmm_query_id(address_space_kernel(), alloc_id, &info), "vmm_query_id failed for lazy allocation");
 	cr_assert_eq(info.state, VMM_STATE_RESERVED, "lazy allocation did not start reserved");
+	cr_assert_eq(info.first_phys, 0u, "lazy allocation unexpectedly materialized physical backing");
 
 	cr_assert(vmm_map(address_space_kernel(), alloc_id), "vmm_map failed");
 	cr_assert_eq(mock_paging_mapping_count(), 3, "vmm_map did not map every page");
@@ -70,23 +70,36 @@ Test(vmm, unmap_with_release_drops_owned_backing_but_keeps_the_region_reserved) 
 		.page_count = 2u,
 		.prot       = VMM_PROT_READ | VMM_PROT_WRITE,
 		.kind       = VMM_KIND_GENERIC,
+		.map_flags  = VMM_MAP_LAZY,
 	};
 	struct vmm_info info;
 	vmm_id_t        id   = VMM_ID_INVALID;
 	void*           base = NULL;
+	uintptr_t       phys = 0u;
+	uint64_t*       data;
 	size_t          free_before;
+	size_t          free_with_object;
 
 	init_test_vmm(arena, sizeof(arena));
 	free_before = pmm_free_page_count();
-	cr_assert(vmm_alloc(address_space_kernel(), &params, &id, &base), "eager allocation failed");
+	cr_assert(vmm_alloc(address_space_kernel(), &params, &id, &base), "lazy allocation failed");
+	free_with_object = pmm_free_page_count();
+	cr_assert(vmm_map(address_space_kernel(), id), "initial backing materialization failed");
+	cr_assert(hal_paging_query(hal_paging_kernel_space(), (uintptr_t)base, &phys, NULL),
+	          "initial backing query failed");
+	data  = (uint64_t*)(phys + boot_info.direct_map_offset);
+	*data = UINT64_MAX;
 	cr_assert(vmm_unmap(address_space_kernel(), id, true), "owned backing release failed");
 	cr_assert_eq(mock_paging_mapping_count(), 0u, "physical release left mappings behind");
-	cr_assert_eq(pmm_free_page_count(), free_before, "physical release retained owned pages or metadata");
+	cr_assert_eq(pmm_free_page_count(), free_with_object, "physical release retained anonymous backing");
 	cr_assert(vmm_query_id(address_space_kernel(), id, &info), "released region was no longer tracked");
 	cr_assert_eq(info.state, VMM_STATE_RESERVED, "released unmapped region must be reserved");
 	cr_assert_eq(info.first_phys, 0u, "released region retained a physical backing address");
 
 	cr_assert(vmm_map(address_space_kernel(), id), "released region could not allocate fresh backing");
+	cr_assert(hal_paging_query(hal_paging_kernel_space(), (uintptr_t)base, &phys, NULL), "fresh backing query failed");
+	data = (uint64_t*)(phys + boot_info.direct_map_offset);
+	cr_assert_eq(*data, 0u, "fresh anonymous backing was not zero-filled");
 	cr_assert(vmm_free(address_space_kernel(), id), "released/remapped region cleanup failed");
 	cr_assert_eq(pmm_free_page_count(), free_before, "released/remapped region leaked physical pages");
 }

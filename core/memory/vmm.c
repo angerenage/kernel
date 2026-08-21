@@ -10,6 +10,7 @@
 #include <core/thread.h>
 #include <core/vaddr_alloc.h>
 #include <core/vmm.h>
+#include <hal/hcf.h>
 #include <hal/paging.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -33,8 +34,14 @@ bool vmm_init(void) {
 
 	state       = spinlock_lock_irqsave(&vmm_lock);
 	initialized = false;
-	(void)region_pager_unmap_space(address_space_kernel());
-	memory_region_destroy_all(address_space_kernel());
+	if (!region_pager_unmap_space(address_space_kernel()) || !memory_region_destroy_all(address_space_kernel())) {
+		spinlock_unlock_irqrestore(&vmm_lock, state);
+		return false;
+	}
+	if (!memory_object_allocator_init()) {
+		spinlock_unlock_irqrestore(&vmm_lock, state);
+		return false;
+	}
 	if (!hal_paging_init()) {
 		spinlock_unlock_irqrestore(&vmm_lock, state);
 		return false;
@@ -61,6 +68,7 @@ bool vmm_init(void) {
 static bool vmm_alloc_internal(struct address_space* space, uintptr_t requested_base,
                                const struct vmm_alloc_params* params, vmm_id_t* out_id, void** out_base) {
 	struct memory_region_create_result result;
+	enum region_pager_result           pager_result;
 	struct irq_state                   state;
 
 	if (out_id) *out_id = VMM_ID_INVALID;
@@ -74,10 +82,14 @@ static bool vmm_alloc_internal(struct address_space* space, uintptr_t requested_
 		spinlock_unlock_irqrestore(&vmm_lock, state);
 		return false;
 	}
-	if ((params->map_flags & VMM_MAP_LAZY) == 0 && !region_pager_map_all(space, result.region)) {
-		(void)memory_region_destroy(space, result.region);
-		spinlock_unlock_irqrestore(&vmm_lock, state);
-		return false;
+	if ((params->map_flags & VMM_MAP_LAZY) == 0) {
+		pager_result = region_pager_map_all(space, result.region);
+		if (pager_result != REGION_PAGER_OK) {
+			if (pager_result == REGION_PAGER_ROLLBACK_FAILED) hcf();
+			(void)memory_region_destroy(space, result.region);
+			spinlock_unlock_irqrestore(&vmm_lock, state);
+			return false;
+		}
 	}
 	if (out_id) *out_id = result.region->id;
 	if (out_base) *out_base = (void*)result.base;
@@ -109,11 +121,12 @@ bool vmm_alloc_at(struct address_space* space, void* base, const struct vmm_allo
 
 bool vmm_alloc_phys(struct address_space* space, uintptr_t phys_base, size_t page_count, vmm_prot_t prot,
                     void* virt_base, vmm_id_t* out_id, void** out_base) {
-	struct memory_region*   region;
-	vmm_id_t                id          = VMM_ID_INVALID;
-	void*                   region_base = NULL;
-	struct vmm_alloc_params params;
-	struct irq_state        state;
+	struct memory_region*    region;
+	vmm_id_t                 id          = VMM_ID_INVALID;
+	void*                    region_base = NULL;
+	struct vmm_alloc_params  params;
+	struct irq_state         state;
+	enum region_pager_result pager_result;
 
 	if (out_id) *out_id = VMM_ID_INVALID;
 	if (out_base) *out_base = NULL;
@@ -133,7 +146,9 @@ bool vmm_alloc_phys(struct address_space* space, uintptr_t phys_base, size_t pag
 		spinlock_unlock_irqrestore(&vmm_lock, state);
 		return false;
 	}
-	if (!region_pager_map_all(space, region)) {
+	pager_result = region_pager_map_all(space, region);
+	if (pager_result != REGION_PAGER_OK) {
+		if (pager_result == REGION_PAGER_ROLLBACK_FAILED) hcf();
 		(void)memory_region_destroy(space, region);
 		spinlock_unlock_irqrestore(&vmm_lock, state);
 		return false;
@@ -147,6 +162,7 @@ bool vmm_alloc_phys(struct address_space* space, uintptr_t phys_base, size_t pag
 
 bool vmm_free(struct address_space* space, vmm_id_t id) {
 	struct memory_region* region;
+	bool                  ok;
 	struct irq_state      state;
 
 	if (!initialized || !space || id == VMM_ID_INVALID) return false;
@@ -160,9 +176,9 @@ bool vmm_free(struct address_space* space, vmm_id_t id) {
 		spinlock_unlock_irqrestore(&vmm_lock, state);
 		return false;
 	}
-	(void)memory_region_destroy(space, region);
+	ok = memory_region_destroy(space, region);
 	spinlock_unlock_irqrestore(&vmm_lock, state);
-	return true;
+	return ok;
 }
 
 bool vmm_map(struct address_space* space, vmm_id_t id) {
@@ -173,7 +189,7 @@ bool vmm_map(struct address_space* space, vmm_id_t id) {
 	if (!initialized || !space || id == VMM_ID_INVALID) return false;
 	state  = spinlock_lock_irqsave(&vmm_lock);
 	region = memory_region_find_by_id(space, id);
-	ok     = region_pager_map_all(space, region);
+	ok     = region_pager_map_all(space, region) == REGION_PAGER_OK;
 	spinlock_unlock_irqrestore(&vmm_lock, state);
 	return ok;
 }
@@ -411,8 +427,7 @@ void vmm_address_space_deinit(struct address_space* space) {
 
 	if (!space) return;
 	state = spinlock_lock_irqsave(&vmm_lock);
-	(void)region_pager_unmap_space(space);
-	memory_region_destroy_all(space);
+	if (!region_pager_unmap_space(space) || !memory_region_destroy_all(space)) hcf();
 	spinlock_unlock_irqrestore(&vmm_lock, state);
 	hal_space = space->hal_space;
 	address_space_deinit(space);

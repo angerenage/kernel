@@ -6,8 +6,15 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+enum region_pager_result {
+	REGION_PAGER_OK = 0,
+	REGION_PAGER_FAILED,
+	/* Rollback could not remove at least one transaction-created PTE; backing remains retained. */
+	REGION_PAGER_ROLLBACK_FAILED,
+};
+
 /* Materialize every page in region by allocating and mapping backing physical pages. */
-bool region_pager_map_all(struct address_space* space, struct memory_region* region);
+enum region_pager_result region_pager_map_all(struct address_space* space, struct memory_region* region);
 
 /* Remove every live mapping in region, optionally releasing the backing physical pages. */
 bool region_pager_unmap_all(struct address_space* space, struct memory_region* region, bool release_phys);

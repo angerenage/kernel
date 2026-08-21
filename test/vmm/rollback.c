@@ -1,3 +1,6 @@
+#include <core/memory_region.h>
+#include <core/region_pager.h>
+
 #include "test_support.h"
 
 Test(vmm, rolls_back_partial_mappings_on_eager_map_failure) {
@@ -68,6 +71,40 @@ Test(vmm, map_all_rollback_preserves_preexisting_mappings_and_backing) {
 	cr_assert(vmm_map(address_space_kernel(), id), "map_all could not be retried after rollback");
 	cr_assert(vmm_free(address_space_kernel(), id), "rollback test cleanup failed");
 	cr_assert_eq(pmm_free_page_count(), free_before, "rollback test leaked physical pages or mapping metadata");
+}
+
+Test(vmm, map_all_reports_incomplete_rollback_and_keeps_live_backing_owned) {
+	_Alignas(4096) uint8_t  arena[KiB(256)];
+	struct vmm_alloc_params params = {
+		.page_count = 2u,
+		.prot       = VMM_PROT_READ | VMM_PROT_WRITE,
+		.kind       = VMM_KIND_GENERIC,
+		.map_flags  = VMM_MAP_LAZY,
+	};
+	struct memory_region* region;
+	vmm_id_t              id   = VMM_ID_INVALID;
+	void*                 base = NULL;
+	size_t                free_before;
+
+	init_test_vmm(arena, sizeof(arena));
+	free_before = pmm_free_page_count();
+	cr_assert(vmm_alloc(address_space_kernel(), &params, &id, &base), "lazy allocation failed");
+	region = memory_region_find_by_id(address_space_kernel(), id);
+	cr_assert_not_null(region, "could not find the test region");
+
+	mock_paging_fail_after(1u);
+	mock_paging_fail_next_unmap();
+	cr_assert_eq(region_pager_map_all(address_space_kernel(), region),
+	             REGION_PAGER_ROLLBACK_FAILED,
+	             "map_all did not distinguish an incomplete rollback");
+	cr_assert_eq(mock_paging_mapping_count(), 1u, "failed rollback unexpectedly lost the live PTE");
+	cr_assert_eq(memory_region_state(region), VMM_STATE_PARTIAL, "failed rollback lost mapping presence state");
+	cr_assert_not(memory_region_destroy(address_space_kernel(), region),
+	              "region destruction accepted live mapping presence");
+
+	cr_assert(vmm_free(address_space_kernel(), id), "retained region/backing could not be safely cleaned up");
+	cr_assert_eq(mock_paging_mapping_count(), 0u, "rollback-failure cleanup leaked a PTE");
+	cr_assert_eq(pmm_free_page_count(), free_before, "rollback-failure cleanup leaked object or backing pages");
 }
 
 Test(vmm, rolls_back_failed_protect_and_preserves_original_mapping) {

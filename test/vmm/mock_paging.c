@@ -19,6 +19,7 @@ static size_t                   fail_map_budget = (size_t)-1;
 static size_t                   successful_maps;
 static bool                     initialized;
 static bool                     fail_init_once;
+static bool                     fail_next_unmap;
 static struct hal_address_space kernel_space    = {.lower_root_phys = 1u};
 static uintptr_t                next_space_root = 2u;
 
@@ -36,6 +37,7 @@ void mock_paging_reset(void) {
 	successful_maps = 0;
 	initialized     = false;
 	fail_init_once  = false;
+	fail_next_unmap = false;
 	kernel_space    = (struct hal_address_space){.lower_root_phys = 1u};
 	next_space_root = 2u;
 }
@@ -52,6 +54,10 @@ void mock_paging_fail_after(size_t maps) {
 void mock_paging_fail_once_after(size_t maps) {
 	fail_after_maps = maps;
 	fail_map_budget = 1;
+}
+
+void mock_paging_fail_next_unmap(void) {
+	fail_next_unmap = true;
 }
 
 size_t mock_paging_mapping_count(void) {
@@ -151,6 +157,10 @@ bool hal_paging_unmap(struct hal_address_space* space, uintptr_t virt) {
 	if (space == NULL || space->lower_root_phys == 0u) return false;
 	if (!initialized) return false;
 	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
+	if (fail_next_unmap) {
+		fail_next_unmap = false;
+		return false;
+	}
 
 	mapping = find_mapping(space, virt);
 	if (!mapping) return false;

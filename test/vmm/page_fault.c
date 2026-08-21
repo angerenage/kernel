@@ -15,15 +15,17 @@ Test(vmm, resolves_page_faults_for_lazy_heap_allocations) {
 	uintptr_t       phys     = 0;
 	uint64_t        flags    = 0;
 	size_t          free_before;
+	size_t          free_before_fault;
 
 	init_test_vmm(arena, sizeof(arena));
 	free_before = pmm_free_page_count();
 
 	cr_assert(vmm_alloc(address_space_kernel(), &params, &alloc_id, &base), "lazy vmm_alloc failed");
+	free_before_fault = pmm_free_page_count();
 	cr_assert(vmm_resolve_page_fault(address_space_kernel(), (uintptr_t)base + PMM_PAGE_SIZE),
 	          "vmm_resolve_page_fault failed for lazy reserved allocation");
 	cr_assert_eq(mock_paging_mapping_count(), 1, "fault resolution mapped more than the faulting page");
-	cr_assert_lt(vmm_test_pages_consumed_since(free_before),
+	cr_assert_lt(vmm_test_pages_consumed_since(free_before_fault),
 	             params.page_count + 1u,
 	             "fault resolution allocated backing for the entire heap allocation");
 	cr_assert(!hal_paging_query(hal_paging_kernel_space(), (uintptr_t)base, NULL, NULL),
@@ -40,7 +42,7 @@ Test(vmm, resolves_page_faults_for_lazy_heap_allocations) {
 	cr_assert(vmm_resolve_page_fault(address_space_kernel(), (uintptr_t)base),
 	          "vmm_resolve_page_fault failed for the first heap page");
 	cr_assert_eq(mock_paging_mapping_count(), 2, "second fault resolution did not map the remaining heap page");
-	cr_assert_geq(vmm_test_pages_consumed_since(free_before),
+	cr_assert_geq(vmm_test_pages_consumed_since(free_before_fault),
 	              params.page_count,
 	              "second fault resolution did not allocate the remaining heap backing");
 	cr_assert(hal_paging_query(hal_paging_kernel_space(), (uintptr_t)base, &phys, NULL),
@@ -70,11 +72,13 @@ Test(vmm, resolves_page_faults_for_lazy_stack_allocations) {
 	void*           base     = NULL;
 	uint64_t        flags    = 0;
 	size_t          free_before;
+	size_t          free_before_fault;
 
 	init_test_vmm(arena, sizeof(arena));
 	free_before = pmm_free_page_count();
 
 	cr_assert(vmm_alloc(address_space_kernel(), &params, &alloc_id, &base), "lazy stack vmm_alloc failed");
+	free_before_fault = pmm_free_page_count();
 	cr_assert(!vmm_query(address_space_kernel(), (uint8_t*)base - PMM_PAGE_SIZE, &info),
 	          "stack guard page was exposed as a normal allocation");
 	cr_assert(!vmm_resolve_page_fault(address_space_kernel(), (uintptr_t)base + 1u * (uintptr_t)PMM_PAGE_SIZE),
@@ -82,7 +86,7 @@ Test(vmm, resolves_page_faults_for_lazy_stack_allocations) {
 	cr_assert(vmm_resolve_page_fault(address_space_kernel(), (uintptr_t)base + 2u * (uintptr_t)PMM_PAGE_SIZE),
 	          "vmm_resolve_page_fault failed for lazy stack allocation");
 	cr_assert_eq(mock_paging_mapping_count(), 1, "stack fault resolution mapped more than the faulting page");
-	cr_assert_lt(vmm_test_pages_consumed_since(free_before),
+	cr_assert_lt(vmm_test_pages_consumed_since(free_before_fault),
 	             params.page_count + 1u,
 	             "stack fault resolution allocated backing for the entire stack allocation");
 	cr_assert(!hal_paging_query(hal_paging_kernel_space(), (uintptr_t)base, NULL, NULL),

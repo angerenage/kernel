@@ -1,7 +1,7 @@
 #pragma once
 
 #include <base/vmm.h>
-#include <core/backing_store.h>
+#include <core/memory_object.h>
 #include <core/region_presence.h>
 #include <core/vaddr_alloc.h>
 #include <stdbool.h>
@@ -25,11 +25,9 @@ struct memory_region {
 	size_t guard_pages;
 	/* Map policy flags (e.g. lazy mapping). */
 	uint64_t map_flags;
-	/* When true, the VMM owns the backing physical pages and frees them on destroy.
-	 * When false, the physical pages are external and only the mapping is freed. */
-	bool owns_pages;
-	/* Backing store for physical pages only. */
-	struct backing_store backing;
+	/* Retained logical-memory backing and the first object page visible through this mapping. */
+	struct memory_object* memory;
+	size_t                memory_page_offset;
 	/* Sparse per-mapping record of pages with live page-table entries. */
 	struct region_presence presence;
 	/* Slot validity flag for the region table. */
@@ -49,6 +47,12 @@ bool memory_region_params_allowed(const struct address_space* space, const struc
 bool memory_region_create(struct address_space* space, uintptr_t requested_base, const struct vmm_alloc_params* params,
                           struct memory_region_create_result* out_result);
 
+/* Create a mapping over a validated subrange of an existing Memory Object. */
+bool memory_region_create_with_object(struct address_space* space, uintptr_t requested_base,
+                                      struct memory_object* memory, size_t memory_page_offset,
+                                      const struct vmm_alloc_params*      params,
+                                      struct memory_region_create_result* out_result);
+
 /* Create a region backed by externally-owned physical pages. */
 bool memory_region_create_phys(struct address_space* space, uintptr_t requested_base, uintptr_t phys_base,
                                const struct vmm_alloc_params* params, struct memory_region** out_region,
@@ -58,7 +62,7 @@ bool memory_region_create_phys(struct address_space* space, uintptr_t requested_
 bool memory_region_destroy(struct address_space* space, struct memory_region* region);
 
 /* Destroy every region attached to an address space, used during teardown. */
-void memory_region_destroy_all(struct address_space* space);
+bool memory_region_destroy_all(struct address_space* space);
 
 /* Grow the region metadata table when capacity has been exhausted. */
 bool memory_region_ensure_capacity(struct address_space* space);
