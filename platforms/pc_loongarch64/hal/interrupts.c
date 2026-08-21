@@ -2,7 +2,7 @@
 #include <core/cpu.h>
 #include <core/exception.h>
 #include <core/sched.h>
-#include <core/vmm.h>
+#include <core/vm_space.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
 #include <kernel/boot.h>
@@ -279,7 +279,7 @@ void handle_exception(struct exception_frame* frame) {
 
 	if (is_page_invalid_exception(ecode)) {
 		cpu_leave_exception();
-		if (vmm_handle_current_page_fault(
+		if (vm_handle_current_page_fault(
 				frame->badv, VMM_FAULT_NOT_PRESENT, loongarch64_fault_access(ecode), was_user_mode())) {
 			return;
 		}

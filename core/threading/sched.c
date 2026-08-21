@@ -4,7 +4,7 @@
 #include <core/spinlock.h>
 #include <core/thread.h>
 #include <core/uthread.h>
-#include <core/vaddr_alloc.h>
+#include <core/vm_space.h>
 #include <hal/cpu.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -126,9 +126,9 @@ static bool sched_activate_thread_address_space(const struct thread* previous, c
 	if (previous_space == NULL && next_space == NULL) return true;
 	if (previous_space == next_space) return true;
 
-	if (next_space == NULL) next_space = address_space_kernel();
-	if (!address_space_is_initialized(next_space)) return false;
-	return address_space_activate(next_space);
+	if (next_space == NULL) next_space = vm_space_kernel();
+	if (!vm_space_is_initialized(next_space)) return false;
+	return vm_space_activate(next_space);
 }
 
 static void sched_account_cpu_tick(struct cpu* cpu) {

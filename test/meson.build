@@ -311,17 +311,6 @@ test_suites = [
 		'suites': ['unit', 'memory'],
 	},
 	{
-		'name': 'vaddr_alloc',
-		'sources': files(
-			'vaddr_alloc/test_support.c',
-			'vaddr_alloc/reservation.c',
-			'vaddr_alloc/alignment.c',
-			'vaddr_alloc/failure.c',
-			'vaddr_alloc/concurrency.c',
-		),
-		'suites': ['unit', 'memory'],
-	},
-	{
 		'name': 'heap',
 		'sources': files(
 			'heap/test_support.c',
@@ -384,10 +373,7 @@ test_suites = [
 		'sources': files(
 			'vmm/test_support.c',
 			'vmm/mock_paging.c',
-			'address_transfer/validation.c',
-			'address_transfer/copy.c',
-			'address_transfer/overlap.c',
-			'address_transfer/failure.c',
+			'address_transfer/logical.c',
 		),
 		'link_with': core_test_lib,
 		'suites': ['unit', 'memory'],
@@ -397,14 +383,7 @@ test_suites = [
 		'sources': files(
 			'vmm/test_support.c',
 			'vmm/mock_paging.c',
-			'vmm/allocation.c',
-			'vmm/mapping.c',
-			'vmm/page_fault.c',
-			'vmm/rollback.c',
-			'vmm/memory_object.c',
-			'vmm/user_mapping.c',
-			'vmm/physical.c',
-			'vmm/lifecycle.c',
+			'vmm/architecture.c',
 		),
 		'link_with': core_test_lib,
 		'suites': ['unit', 'memory'],

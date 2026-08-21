@@ -10,8 +10,7 @@
 #include <core/sched.h>
 #include <core/thread.h>
 #include <core/uthread.h>
-#include <core/vaddr_alloc.h>
-#include <core/vmm.h>
+#include <core/vm_space.h>
 #include <criterion/criterion.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>

@@ -24,10 +24,10 @@ syscall_result_t syscall_result_from_address_transfer(enum address_transfer_resu
 struct address_space* syscall_current_user_space(void) {
 	struct thread* current = sched_current_thread();
 
-	if (current == NULL || current->address_space == NULL || current->address_space == address_space_kernel()) {
+	if (current == NULL || current->address_space == NULL || current->address_space == vm_space_kernel()) {
 		return NULL;
 	}
-	if (!address_space_is_initialized(current->address_space)) return NULL;
+	if (!vm_space_is_initialized(current->address_space)) return NULL;
 	return current->address_space;
 }
 

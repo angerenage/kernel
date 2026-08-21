@@ -19,7 +19,7 @@
 #include <core/syscall.h>
 #include <core/thread.h>
 #include <core/uthread.h>
-#include <core/vmm.h>
+#include <core/vm_space.h>
 #include <criterion/criterion.h>
 #include <hal/clock.h>
 #include <hal/cpu.h>

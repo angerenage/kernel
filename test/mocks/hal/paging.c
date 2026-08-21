@@ -44,10 +44,17 @@ bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t p
 	return false;
 }
 
-bool hal_paging_unmap(struct hal_address_space* space, uintptr_t virt) {
+bool hal_paging_unmap_range(struct hal_address_space* space, uintptr_t virt, size_t page_count) {
 	(void)space;
 	(void)virt;
-	return false;
+	return page_count != 0u;
+}
+
+bool hal_paging_protect_range(struct hal_address_space* space, uintptr_t virt, size_t page_count, uint64_t flags) {
+	(void)space;
+	(void)virt;
+	(void)flags;
+	return page_count != 0u;
 }
 
 bool hal_paging_query(const struct hal_address_space* space, uintptr_t virt, uintptr_t* out_phys, uint64_t* out_flags) {

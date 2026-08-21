@@ -55,7 +55,7 @@ void syscall_test_init_process_environment(void) {
 	cr_assert(cpu_set_state(cpu_current(), CPU_STATE_ONLINE));
 	mock_paging_reset();
 	cr_assert(pmm_init(memory_map, sizeof(memory_map) / sizeof(memory_map[0]), 0));
-	cr_assert(vmm_init());
+	cr_assert(vm_init());
 	cr_assert(heap_init());
 }
 

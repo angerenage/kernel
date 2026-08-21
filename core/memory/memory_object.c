@@ -1,100 +1,68 @@
 #include <base/math.h>
-#include <core/backing_store.h>
 #include <core/memory_object.h>
 #include <core/mm.h>
 #include <core/pmm.h>
-#include <core/spinlock.h>
 #include <hal/hcf.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
 #include <string.h>
 
-static struct memory_object_slab* object_slabs;
-static bool                       object_allocator_initialized;
-static struct spinlock            object_allocator_lock =
+#include "memory_object_radix.h"
+
+struct object_free_slot {
+	struct object_free_slot* next;
+};
+struct object_slab {
+	struct object_slab*      next;
+	struct object_free_slot* free_slots;
+	uintptr_t                phys;
+	size_t                   used;
+};
+
+static struct object_slab* object_slabs;
+static struct spinlock     object_allocator_lock =
 	SPINLOCK_INIT_CLASS("memory_object_allocator", SPINLOCK_ORDER_MEMORY_OBJECT, SPINLOCK_FLAG_IRQSAVE);
 
-#define MEMORY_OBJECT_SLOT_ALIGN _Alignof(struct memory_object)
-#define MEMORY_OBJECT_SLOT_SIZE                                                                                        \
-	((sizeof(struct memory_object) + MEMORY_OBJECT_SLOT_ALIGN - 1u) & ~(MEMORY_OBJECT_SLOT_ALIGN - 1u))
-#define MEMORY_OBJECT_SLAB_OFFSET                                                                                      \
-	((sizeof(struct memory_object_slab) + MEMORY_OBJECT_SLOT_ALIGN - 1u) & ~(MEMORY_OBJECT_SLOT_ALIGN - 1u))
+#define OBJECT_ALIGN _Alignof(struct memory_object)
+#define OBJECT_SLOT_SIZE ((sizeof(struct memory_object) + OBJECT_ALIGN - 1u) & ~(OBJECT_ALIGN - 1u))
+#define OBJECT_SLAB_OFFSET ((sizeof(struct object_slab) + OBJECT_ALIGN - 1u) & ~(OBJECT_ALIGN - 1u))
 
-_Static_assert(MEMORY_OBJECT_SLAB_OFFSET + MEMORY_OBJECT_SLOT_SIZE <= PMM_PAGE_SIZE,
-               "memory object slab must contain at least one object");
+_Static_assert(OBJECT_SLAB_OFFSET + OBJECT_SLOT_SIZE <= PMM_PAGE_SIZE, "object slab must contain an object");
 
-static inline void* hhdm_phys_to_virt(uintptr_t phys) {
+static void* phys_to_virt(uintptr_t phys) {
 	return (void*)(uintptr_t)(phys + boot_info.direct_map_offset);
 }
 
-static struct memory_object_slab* memory_object_slab_create(void) {
-	struct memory_object_slab* slab;
-	uintptr_t                  phys = 0u;
-	uint8_t*                   slots;
-	size_t                     slot_count;
-
+static struct object_slab* slab_create(void) {
+	uintptr_t           phys = 0u;
+	struct object_slab* slab;
+	uint8_t*            slots;
+	size_t              count;
 	if (!pmm_alloc_pages(1u, &phys)) return NULL;
-	slab = hhdm_phys_to_virt(phys);
+	slab = phys_to_virt(phys);
 	memset(slab, 0, PMM_PAGE_SIZE);
 	slab->phys = phys;
-	slots      = (uint8_t*)slab + MEMORY_OBJECT_SLAB_OFFSET;
-	slot_count = (PMM_PAGE_SIZE - MEMORY_OBJECT_SLAB_OFFSET) / MEMORY_OBJECT_SLOT_SIZE;
-	for (size_t slot = 0; slot < slot_count; slot++) {
-		struct memory_object_free_slot* free_slot = (void*)(slots + slot * MEMORY_OBJECT_SLOT_SIZE);
-
-		free_slot->next  = slab->free_slots;
-		slab->free_slots = free_slot;
+	slots      = (uint8_t*)slab + OBJECT_SLAB_OFFSET;
+	count      = (PMM_PAGE_SIZE - OBJECT_SLAB_OFFSET) / OBJECT_SLOT_SIZE;
+	for (size_t i = 0u; i < count; i++) {
+		struct object_free_slot* slot = (void*)(slots + i * OBJECT_SLOT_SIZE);
+		slot->next                    = slab->free_slots;
+		slab->free_slots              = slot;
 	}
 	return slab;
 }
 
-bool memory_object_allocator_init(void) {
-	struct memory_object_slab* slab;
-	struct irq_state           state;
-
-	state = spinlock_lock_irqsave(&object_allocator_lock);
-	if (object_allocator_initialized) {
-		for (slab = object_slabs; slab != NULL; slab = slab->next) {
-			if (slab->used != 0u) {
-				spinlock_unlock_irqrestore(&object_allocator_lock, state);
-				return false;
-			}
-		}
-		while (object_slabs != NULL) {
-			slab         = object_slabs;
-			object_slabs = slab->next;
-			(void)pmm_free_pages(slab->phys, 1u);
-		}
-	}
-	slab = memory_object_slab_create();
-	if (!slab) {
-		object_allocator_initialized = false;
-		spinlock_unlock_irqrestore(&object_allocator_lock, state);
-		return false;
-	}
-	object_slabs                 = slab;
-	object_allocator_initialized = true;
-	spinlock_unlock_irqrestore(&object_allocator_lock, state);
-	return true;
+static struct object_slab* object_slab(const struct memory_object* object) {
+	return (struct object_slab*)((uintptr_t)object & ~(uintptr_t)(PMM_PAGE_SIZE - 1u));
 }
 
-static struct memory_object* memory_object_control_alloc(void) {
-	struct memory_object_slab* slab;
-	struct memory_object*      object;
-	struct irq_state           state;
-
-	state = spinlock_lock_irqsave(&object_allocator_lock);
-	if (!object_allocator_initialized) {
-		spinlock_unlock_irqrestore(&object_allocator_lock, state);
-		return NULL;
+static struct memory_object* control_alloc(void) {
+	struct irq_state      state = spinlock_lock_irqsave(&object_allocator_lock);
+	struct object_slab*   slab;
+	struct memory_object* object;
+	for (slab = object_slabs; slab != NULL && slab->free_slots == NULL; slab = slab->next) {
 	}
-	for (slab = object_slabs; slab != NULL; slab = slab->next) {
-		if (slab->free_slots != NULL) break;
-	}
-	if (!slab) {
-		slab = memory_object_slab_create();
-		if (!slab) {
+	if (slab == NULL) {
+		slab = slab_create();
+		if (slab == NULL) {
 			spinlock_unlock_irqrestore(&object_allocator_lock, state);
 			return NULL;
 		}
@@ -105,29 +73,24 @@ static struct memory_object* memory_object_control_alloc(void) {
 	slab->free_slots = slab->free_slots->next;
 	slab->used++;
 	memset(object, 0, sizeof(*object));
-	object->slab = slab;
 	spinlock_unlock_irqrestore(&object_allocator_lock, state);
 	return object;
 }
 
-static void memory_object_control_free(struct memory_object* object) {
-	struct memory_object_free_slot* free_slot;
-	struct memory_object_slab*      slab;
-	struct memory_object_slab**     link;
-	struct irq_state                state;
-
-	if (!object) return;
-	slab  = object->slab;
-	state = spinlock_lock_irqsave(&object_allocator_lock);
-	if (!slab || slab->used == 0u) hcf();
+static void control_free(struct memory_object* object) {
+	struct object_slab*      slab = object_slab(object);
+	struct object_slab**     link;
+	struct object_free_slot* slot;
+	struct irq_state         state = spinlock_lock_irqsave(&object_allocator_lock);
+	if (slab->used == 0u) hcf();
 	memset(object, 0, sizeof(*object));
-	free_slot        = (struct memory_object_free_slot*)object;
-	free_slot->next  = slab->free_slots;
-	slab->free_slots = free_slot;
+	slot             = (struct object_free_slot*)object;
+	slot->next       = slab->free_slots;
+	slab->free_slots = slot;
 	slab->used--;
-	if (slab != object_slabs && slab->used == 0u) {
-		link = &object_slabs;
-		while (*link != NULL && *link != slab) link = &(*link)->next;
+	if (slab->used == 0u) {
+		for (link = &object_slabs; *link != NULL && *link != slab; link = &(*link)->next) {
+		}
 		if (*link != slab) hcf();
 		*link = slab->next;
 		(void)pmm_free_pages(slab->phys, 1u);
@@ -135,55 +98,44 @@ static void memory_object_control_free(struct memory_object* object) {
 	spinlock_unlock_irqrestore(&object_allocator_lock, state);
 }
 
-static bool memory_object_alloc(enum memory_object_type type, size_t page_count, struct memory_object** out_object) {
-	struct memory_object*      object;
-	struct memory_object_slab* slab;
-
-	if (out_object) *out_object = NULL;
-	if (!out_object || page_count == 0) return false;
-	object = memory_object_control_alloc();
-	if (!object) return false;
-	slab    = object->slab;
-	*object = (struct memory_object){
-		.type            = type,
-		.page_count      = page_count,
-		.reference_count = 1u,
-		.slab            = slab,
-	};
+static bool object_create(enum memory_object_type type, size_t page_count, struct memory_object** out_object) {
+	struct memory_object* object;
+	if (out_object != NULL) *out_object = NULL;
+	if (out_object == NULL || page_count == 0u || page_count > SIZE_MAX / PMM_PAGE_SIZE) return false;
+	object = control_alloc();
+	if (object == NULL) return false;
+	object->page_count      = page_count;
+	object->reference_count = 1u;
+	object->type            = (uint8_t)type;
+	object->radix_depth     = type == MEMORY_OBJECT_OWNED ? memory_object_radix_depth(page_count) : 0u;
 	spinlock_init_class(&object->lock,
 	                    "memory_object",
 	                    SPINLOCK_ORDER_MEMORY_OBJECT,
 	                    SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
-	if (type == MEMORY_OBJECT_ANONYMOUS) backing_store_init(&object->backing.anonymous, page_count);
 	*out_object = object;
 	return true;
 }
 
-bool memory_object_create_anonymous(size_t page_count, struct memory_object** out_object) {
-	return memory_object_alloc(MEMORY_OBJECT_ANONYMOUS, page_count, out_object);
+bool memory_object_create_owned(size_t page_count, struct memory_object** out_object) {
+	return object_create(MEMORY_OBJECT_OWNED, page_count, out_object);
 }
 
 bool memory_object_create_external(uintptr_t phys_base, size_t page_count, struct memory_object** out_object) {
 	struct memory_object* object;
-	uint64_t              last_page_offset;
-	uint64_t              last_page_base;
-
-	if (out_object) *out_object = NULL;
-	if (!out_object || page_count == 0 || (phys_base & (PMM_PAGE_SIZE - 1u)) != 0) return false;
-	if (mul_overflow_u64((uint64_t)(page_count - 1u), PMM_PAGE_SIZE, &last_page_offset) ||
-	    add_overflow_u64((uint64_t)phys_base, last_page_offset, &last_page_base) ||
-	    last_page_base > (uint64_t)UINTPTR_MAX - (PMM_PAGE_SIZE - 1u))
+	uint64_t              span;
+	if (out_object != NULL) *out_object = NULL;
+	if ((phys_base & (PMM_PAGE_SIZE - 1u)) != 0u || page_count == 0u ||
+	    mul_overflow_u64((uint64_t)page_count, PMM_PAGE_SIZE, &span) || span - 1u > UINTPTR_MAX - phys_base)
 		return false;
-	if (!memory_object_alloc(MEMORY_OBJECT_EXTERNAL_PHYSICAL, page_count, &object)) return false;
-	object->backing.external_phys_base = phys_base;
-	*out_object                        = object;
+	if (!object_create(MEMORY_OBJECT_EXTERNAL, page_count, &object)) return false;
+	object->backing_root_or_phys = phys_base;
+	*out_object                  = object;
 	return true;
 }
 
 bool memory_object_retain(struct memory_object* object) {
 	uint64_t current;
-
-	if (!object) return false;
+	if (object == NULL) return false;
 	current = __atomic_load_n(&object->reference_count, __ATOMIC_ACQUIRE);
 	for (;;) {
 		if (current == 0u || current == UINT64_MAX) return false;
@@ -194,90 +146,102 @@ bool memory_object_retain(struct memory_object* object) {
 }
 
 void memory_object_release(struct memory_object* object) {
-	uint64_t old_reference_count;
-
-	if (!object) return;
-	old_reference_count = __atomic_fetch_sub(&object->reference_count, 1u, __ATOMIC_ACQ_REL);
-	if (old_reference_count == 0u) hcf();
-	if (old_reference_count != 1u) return;
-	if (object->type == MEMORY_OBJECT_ANONYMOUS) backing_store_release(&object->backing.anonymous);
-	memory_object_control_free(object);
+	uint64_t old;
+	if (object == NULL) return;
+	old = __atomic_fetch_sub(&object->reference_count, 1u, __ATOMIC_ACQ_REL);
+	if (old == 0u) hcf();
+	if (old != 1u) return;
+	if (object->type == MEMORY_OBJECT_OWNED) memory_object_radix_release(object);
+	control_free(object);
 }
 
 enum memory_object_type memory_object_type(const struct memory_object* object) {
-	return object != NULL ? object->type : MEMORY_OBJECT_ANONYMOUS;
+	return object == NULL ? MEMORY_OBJECT_OWNED : (enum memory_object_type)object->type;
 }
 
 size_t memory_object_page_count(const struct memory_object* object) {
-	return object != NULL ? object->page_count : 0u;
+	return object == NULL ? 0u : object->page_count;
 }
 
 bool memory_object_page_phys(struct memory_object* object, size_t logical_page, uintptr_t* out_phys) {
 	struct irq_state state;
-	uintptr_t        phys;
 	bool             found;
-
-	if (out_phys) *out_phys = 0u;
-	if (!object || !out_phys || logical_page >= object->page_count) return false;
+	if (out_phys != NULL) *out_phys = 0u;
+	if (object == NULL || out_phys == NULL || logical_page >= object->page_count) return false;
 	state = spinlock_lock_irqsave(&object->lock);
-	if (object->type == MEMORY_OBJECT_EXTERNAL_PHYSICAL) {
-		phys  = object->backing.external_phys_base + logical_page * (uintptr_t)PMM_PAGE_SIZE;
-		found = true;
+	if (object->type == MEMORY_OBJECT_EXTERNAL) {
+		*out_phys = object->backing_root_or_phys + logical_page * (uintptr_t)PMM_PAGE_SIZE;
+		found     = true;
 	}
-	else found = backing_store_page_phys(&object->backing.anonymous, logical_page, &phys);
+	else found = memory_object_radix_lookup(object, logical_page, out_phys);
 	spinlock_unlock_irqrestore(&object->lock, state);
-	if (!found) return false;
-	*out_phys = phys;
+	return found;
+}
+
+bool memory_object_resolve_page(struct memory_object* object, size_t logical_page, uintptr_t* out_phys) {
+	struct irq_state state;
+	bool             ok;
+	if (out_phys != NULL) *out_phys = 0u;
+	if (object == NULL || out_phys == NULL || logical_page >= object->page_count) return false;
+	state = spinlock_lock_irqsave(&object->lock);
+	if (object->type == MEMORY_OBJECT_EXTERNAL) {
+		*out_phys = object->backing_root_or_phys + logical_page * (uintptr_t)PMM_PAGE_SIZE;
+		ok        = true;
+	}
+	else ok = memory_object_radix_resolve(object, logical_page, out_phys);
+	spinlock_unlock_irqrestore(&object->lock, state);
+	return ok;
+}
+
+static bool access_bounds(const struct memory_object* object, size_t offset, size_t size) {
+	size_t bytes;
+	return object != NULL && !mul_overflow_size(object->page_count, PMM_PAGE_SIZE, &bytes) && offset <= bytes &&
+	       size <= bytes - offset;
+}
+
+bool memory_object_read(struct memory_object* object, size_t byte_offset, void* dst, size_t size) {
+	struct irq_state state;
+	size_t           done = 0u;
+	if (size == 0u) return access_bounds(object, byte_offset, 0u);
+	if (dst == NULL || !access_bounds(object, byte_offset, size)) return false;
+	state = spinlock_lock_irqsave(&object->lock);
+	while (done < size) {
+		size_t    offset = byte_offset + done, page = offset / PMM_PAGE_SIZE;
+		size_t    within = offset & (PMM_PAGE_SIZE - 1u), chunk = PMM_PAGE_SIZE - within;
+		uintptr_t phys;
+		if (chunk > size - done) chunk = size - done;
+		if (object->type == MEMORY_OBJECT_EXTERNAL) phys = object->backing_root_or_phys + page * PMM_PAGE_SIZE;
+		else if (!memory_object_radix_lookup(object, page, &phys)) {
+			memset((uint8_t*)dst + done, 0, chunk);
+			done += chunk;
+			continue;
+		}
+		memcpy((uint8_t*)dst + done, (uint8_t*)phys_to_virt(phys) + within, chunk);
+		done += chunk;
+	}
+	spinlock_unlock_irqrestore(&object->lock, state);
 	return true;
 }
 
-bool memory_object_ensure_page(struct memory_object* object, size_t logical_page, uintptr_t* out_phys,
-                               bool* out_allocated) {
+bool memory_object_write(struct memory_object* object, size_t byte_offset, const void* src, size_t size) {
 	struct irq_state state;
-	bool             allocated = false;
-	bool             ok;
-
-	if (out_phys) *out_phys = 0u;
-	if (out_allocated) *out_allocated = false;
-	if (!object || !out_phys || logical_page >= object->page_count) return false;
+	size_t           done = 0u;
+	if (size == 0u) return access_bounds(object, byte_offset, 0u);
+	if (src == NULL || !access_bounds(object, byte_offset, size)) return false;
 	state = spinlock_lock_irqsave(&object->lock);
-	if (object->type == MEMORY_OBJECT_EXTERNAL_PHYSICAL) {
-		*out_phys = object->backing.external_phys_base + logical_page * (uintptr_t)PMM_PAGE_SIZE;
-		ok        = true;
-	}
-	else {
-		ok = backing_store_ensure_page(&object->backing.anonymous, logical_page, out_phys, &allocated);
-		if (ok && allocated) memset(hhdm_phys_to_virt(*out_phys), 0, PMM_PAGE_SIZE);
+	while (done < size) {
+		size_t    offset = byte_offset + done, page = offset / PMM_PAGE_SIZE;
+		size_t    within = offset & (PMM_PAGE_SIZE - 1u), chunk = PMM_PAGE_SIZE - within;
+		uintptr_t phys;
+		if (chunk > size - done) chunk = size - done;
+		if (object->type == MEMORY_OBJECT_EXTERNAL) phys = object->backing_root_or_phys + page * PMM_PAGE_SIZE;
+		else if (!memory_object_radix_resolve(object, page, &phys)) {
+			spinlock_unlock_irqrestore(&object->lock, state);
+			return false;
+		}
+		memcpy((uint8_t*)phys_to_virt(phys) + within, (const uint8_t*)src + done, chunk);
+		done += chunk;
 	}
 	spinlock_unlock_irqrestore(&object->lock, state);
-	if (ok && out_allocated) *out_allocated = allocated;
-	return ok;
-}
-
-bool memory_object_release_page(struct memory_object* object, size_t logical_page) {
-	struct irq_state state;
-	bool             ok;
-
-	if (!object || logical_page >= object->page_count) return false;
-	state = spinlock_lock_irqsave(&object->lock);
-	if (object->type != MEMORY_OBJECT_ANONYMOUS) {
-		spinlock_unlock_irqrestore(&object->lock, state);
-		return true;
-	}
-	ok = backing_store_release_page(&object->backing.anonymous, logical_page);
-	spinlock_unlock_irqrestore(&object->lock, state);
-	return ok;
-}
-
-bool memory_object_release_pages(struct memory_object* object, size_t first_page, size_t page_count) {
-	size_t end_page;
-
-	if (!object || page_count == 0 || add_overflow_size(first_page, page_count, &end_page) ||
-	    end_page > object->page_count)
-		return false;
-	if (object->type == MEMORY_OBJECT_EXTERNAL_PHYSICAL) return true;
-	for (size_t page = first_page; page < end_page; page++) {
-		if (!memory_object_release_page(object, page)) return false;
-	}
 	return true;
 }

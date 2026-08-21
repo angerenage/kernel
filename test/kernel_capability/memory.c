@@ -3,10 +3,8 @@
 #include "test_support.h"
 
 static cap_id_t allocate_test_page(void) {
-	return kernel_allocate_memory(CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP | CAP_DESTROY,
-	                              1u,
-	                              VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
-	                              VMM_KIND_GENERIC);
+	return kernel_allocate_memory(
+		CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP | CAP_DESTROY, 1u, VMM_PROT_READ | VMM_PROT_WRITE);
 }
 
 static syscall_result_t free_allocation(cap_id_t cap) {
@@ -46,7 +44,7 @@ Test(kernel_capability_memory, newly_allocated_user_memory_does_not_expose_recyc
 	cr_assert_eq(byte, 0u, "fresh userspace allocation exposed recycled physical memory (0x%02x)", byte);
 
 	cr_assert_eq(free_allocation(allocation_cap).status, SYSCALL_STATUS_OK);
-	if (dst_id != VMM_ID_INVALID) cr_assert(vmm_free(process_address_space(ctx.process), dst_id));
+	if (dst_id != VMM_ID_INVALID) cr_assert(vm_space_unmap(process_address_space(ctx.process), dst_id));
 	kernel_capability_test_end(&ctx);
 }
 

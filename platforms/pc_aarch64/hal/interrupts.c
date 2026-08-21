@@ -2,7 +2,7 @@
 #include <core/cpu.h>
 #include <core/exception.h>
 #include <core/sched.h>
-#include <core/vmm.h>
+#include <core/vm_space.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
 #include <stdbool.h>
@@ -320,10 +320,10 @@ void handle_exception(struct exception_frame* frame) {
 
 	if ((is_instruction_abort(ec) || is_data_abort(ec)) && is_page_fault_abort(dfsc)) {
 		if (!is_irq) cpu_leave_exception();
-		if (vmm_handle_current_page_fault(fnv ? 0u : frame->far,
-		                                  fnv ? VMM_FAULT_INVALID : abort_fault_kind(dfsc),
-		                                  abort_fault_access(ec, iss),
-		                                  is_abort_from_lower_el(ec))) {
+		if (vm_handle_current_page_fault(fnv ? 0u : frame->far,
+		                                 fnv ? VMM_FAULT_INVALID : abort_fault_kind(dfsc),
+		                                 abort_fault_access(ec, iss),
+		                                 is_abort_from_lower_el(ec))) {
 			return;
 		}
 		if (!is_irq) cpu_enter_exception();

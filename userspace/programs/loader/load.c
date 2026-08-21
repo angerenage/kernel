@@ -36,7 +36,7 @@ static syscall_status_t parse_status(enum elf64_parse_result result) {
 }
 
 static vmm_prot_t segment_prot(uint32_t flags) {
-	vmm_prot_t prot = VMM_PROT_USER;
+	vmm_prot_t prot = VMM_PROT_NONE;
 	if ((flags & ELF64_SEGMENT_READ) != 0u) prot |= VMM_PROT_READ;
 	if ((flags & ELF64_SEGMENT_WRITE) != 0u) prot |= VMM_PROT_WRITE;
 	if ((flags & ELF64_SEGMENT_EXEC) != 0u) prot |= VMM_PROT_EXEC;
@@ -73,8 +73,8 @@ static syscall_status_t load_segment(struct loader_loaded_program* program, cap_
 	if (page_base > UINTPTR_MAX || page_offset > UINTPTR_MAX) return SYSCALL_STATUS_BAD_ARGUMENT;
 
 	final_prot = segment_prot(segment->flags);
-	load_prot  = final_prot | VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER;
-	status     = memory_allocate(page_count, load_prot, VMM_KIND_GENERIC, &allocation_cap);
+	load_prot  = final_prot | VMM_PROT_READ | VMM_PROT_WRITE;
+	status     = memory_allocate(page_count, load_prot, &allocation_cap);
 	if (status != SYSCALL_STATUS_OK) return status;
 	if (!remember_allocation(program, allocation_cap)) {
 		(void)allocation_free(allocation_cap);
@@ -115,8 +115,7 @@ static syscall_status_t allocate_heap(struct loader_loaded_program* program) {
 	struct vmm_info  mapping;
 	syscall_status_t status;
 
-	status = memory_allocate(
-		HEAP_DEFAULT_GROW_PAGES, VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER, VMM_KIND_HEAP, &allocation_cap);
+	status = memory_allocate(HEAP_DEFAULT_GROW_PAGES, VMM_PROT_READ | VMM_PROT_WRITE, &allocation_cap);
 	if (status != SYSCALL_STATUS_OK) return status;
 	if (!remember_allocation(program, allocation_cap)) {
 		(void)allocation_free(allocation_cap);

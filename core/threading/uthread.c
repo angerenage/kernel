@@ -3,14 +3,14 @@
 #include <core/cpu.h>
 #include <core/id_table.h>
 #include <core/kthread.h>
+#include <core/memory_object.h>
 #include <core/pmm.h>
 #include <core/process.h>
 #include <core/sched.h>
 #include <core/signal.h>
 #include <core/spinlock.h>
 #include <core/uthread.h>
-#include <core/vaddr_alloc.h>
-#include <core/vmm.h>
+#include <core/vm_space.h>
 #include <hal/hcf.h>
 #include <hal/userspace.h>
 #include <libc/stdlib.h>
@@ -34,6 +34,30 @@ struct uthread_reaper {
 	bool                     started;
 	bool                     starting;
 };
+
+static bool uthread_map_stack(struct address_space* space, size_t pages, bool prefault, vmm_id_t* out_id,
+                              void** out_base) {
+	struct memory_object* memory;
+	if (!memory_object_create_owned(pages, &memory)) return false;
+	bool mapped =
+		vm_space_map(space,
+	                 &(const struct vm_map_request){
+						 .memory      = memory,
+						 .page_count  = pages,
+						 .align_pages = 1u,
+						 .guard_pages = VMM_STACK_DEFAULT_GUARD_PAGES,
+						 .prot = VMM_PROT_READ | VMM_PROT_WRITE | (space == vm_space_kernel() ? VMM_PROT_GLOBAL : 0u),
+					 },
+	                 out_id,
+	                 out_base);
+	memory_object_release(memory);
+	if (!mapped) return false;
+	if (!prefault || vm_space_prefault(space, *out_id, 0u, pages)) return true;
+	(void)vm_space_unmap(space, *out_id);
+	*out_id   = VMM_ID_INVALID;
+	*out_base = NULL;
+	return false;
+}
 
 static struct uthread_reaper uthread_reapers[UTHREAD_REAPER_MAX_CPUS];
 static struct spinlock       uthread_reaper_init_lock =
@@ -177,7 +201,7 @@ static bool uthread_release_stacks(struct uthread* thread) {
 
 	address_space = process_address_space(thread->process);
 	if (thread->upcall.stack_id != VMM_ID_INVALID) {
-		if (address_space != NULL && vmm_free(address_space, thread->upcall.stack_id)) {
+		if (address_space != NULL && vm_space_unmap(address_space, thread->upcall.stack_id)) {
 			thread->upcall.stack_id = VMM_ID_INVALID;
 		}
 		else {
@@ -186,7 +210,7 @@ static bool uthread_release_stacks(struct uthread* thread) {
 	}
 	if (thread->upcall.stack_id == VMM_ID_INVALID) thread->upcall.stack_top = 0u;
 	if (thread->user_stack_id != VMM_ID_INVALID) {
-		if (address_space != NULL && vmm_free(address_space, thread->user_stack_id)) {
+		if (address_space != NULL && vm_space_unmap(address_space, thread->user_stack_id)) {
 			thread->user_stack_id = VMM_ID_INVALID;
 		}
 		else {
@@ -194,7 +218,7 @@ static bool uthread_release_stacks(struct uthread* thread) {
 		}
 	}
 	if (thread->kernel_stack_id != VMM_ID_INVALID) {
-		if (vmm_free(address_space_kernel(), thread->kernel_stack_id)) thread->kernel_stack_id = VMM_ID_INVALID;
+		if (vm_space_unmap(vm_space_kernel(), thread->kernel_stack_id)) thread->kernel_stack_id = VMM_ID_INVALID;
 		else released = false;
 	}
 	return released;
@@ -335,29 +359,6 @@ uthread_start_internal(struct uthread* thread, const struct uthread_start_params
 static enum uthread_start_result uthread_prepare_internal(struct uthread*                    thread,
                                                           const struct uthread_start_params* params,
                                                           bool heap_allocated, bool reap_on_exit) {
-	struct vmm_alloc_params user_stack_params = {
-		.align_pages = 1u,
-		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
-		.kind        = VMM_KIND_STACK,
-		.guard_pages = VMM_STACK_DEFAULT_GUARD_PAGES,
-		.map_flags   = 0u,
-	};
-	struct vmm_alloc_params upcall_stack_params = {
-		.page_count  = UTHREAD_UPCALL_STACK_PAGES,
-		.align_pages = 1u,
-		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
-		.kind        = VMM_KIND_STACK,
-		.guard_pages = VMM_STACK_DEFAULT_GUARD_PAGES,
-		.map_flags   = 0u,
-	};
-	struct vmm_alloc_params kernel_stack_params = {
-		.page_count  = UTHREAD_KERNEL_STACK_PAGES,
-		.align_pages = 1u,
-		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_GLOBAL,
-		.kind        = VMM_KIND_STACK,
-		.guard_pages = VMM_STACK_DEFAULT_GUARD_PAGES,
-		.map_flags   = 0u,
-	};
 	struct thread_context        context;
 	struct thread_context_params thread_params;
 	struct address_space*        address_space;
@@ -380,7 +381,7 @@ static enum uthread_start_result uthread_prepare_internal(struct uthread*       
 		return UTHREAD_START_INVALID_ARGUMENTS;
 	}
 	address_space = process_address_space(params->process);
-	if (!address_space_is_initialized(address_space)) return UTHREAD_START_INVALID_ARGUMENTS;
+	if (!vm_space_is_initialized(address_space)) return UTHREAD_START_INVALID_ARGUMENTS;
 
 	if (params->name != NULL) {
 		name = strdup(params->name);
@@ -413,15 +414,15 @@ static enum uthread_start_result uthread_prepare_internal(struct uthread*       
 	thread->id = id;
 
 	user_stack_pages = params->user_stack_pages != 0u ? params->user_stack_pages : UTHREAD_DEFAULT_USER_STACK_PAGES;
-	user_stack_params.page_count = user_stack_pages;
-	if (!vmm_alloc(address_space, &user_stack_params, &thread->user_stack_id, &user_stack_base)) {
+	if (!uthread_map_stack(address_space, user_stack_pages, false, &thread->user_stack_id, &user_stack_base)) {
 		uthread_release_name(thread);
 		uthread_release_stacks_or_hcf(thread);
 		uthread_upcall_state_deinit(thread);
 		uthread_unregister_id(thread);
 		return UTHREAD_START_STACK_ALLOC_FAILED;
 	}
-	if (!vmm_alloc(address_space, &upcall_stack_params, &thread->upcall.stack_id, &upcall_stack_base)) {
+	if (!uthread_map_stack(
+			address_space, UTHREAD_UPCALL_STACK_PAGES, false, &thread->upcall.stack_id, &upcall_stack_base)) {
 		uthread_release_name(thread);
 		uthread_release_stacks_or_hcf(thread);
 		uthread_upcall_state_deinit(thread);
@@ -429,7 +430,8 @@ static enum uthread_start_result uthread_prepare_internal(struct uthread*       
 		return UTHREAD_START_STACK_ALLOC_FAILED;
 	}
 	thread->upcall.stack_top = (uintptr_t)upcall_stack_base + UTHREAD_UPCALL_STACK_PAGES * (uintptr_t)PMM_PAGE_SIZE;
-	if (!vmm_alloc(address_space_kernel(), &kernel_stack_params, &thread->kernel_stack_id, &kernel_stack_base)) {
+	if (!uthread_map_stack(
+			vm_space_kernel(), UTHREAD_KERNEL_STACK_PAGES, true, &thread->kernel_stack_id, &kernel_stack_base)) {
 		uthread_release_name(thread);
 		uthread_release_stacks_or_hcf(thread);
 		uthread_upcall_state_deinit(thread);

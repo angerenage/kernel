@@ -1,21 +1,14 @@
 #include "test_support.h"
 
 Test(syscall, channel_create_and_destroy_manage_process_owned_state) {
-	struct process*         process;
-	struct uthread*         main_thread;
-	struct address_space*   space;
-	struct channel*         channel;
-	struct vmm_alloc_params params = {
-		.page_count  = 1u,
-		.align_pages = 1u,
-		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
-		.kind        = VMM_KIND_GENERIC,
-		.map_flags   = VMM_MAP_LAZY,
-	};
-	vmm_id_t         output_id = VMM_ID_INVALID;
-	void*            output_base;
-	channel_id_t     channel_id = CHANNEL_ID_INVALID;
-	syscall_result_t result;
+	struct process*       process;
+	struct uthread*       main_thread;
+	struct address_space* space;
+	struct channel*       channel;
+	vmm_id_t              output_id = VMM_ID_INVALID;
+	void*                 output_base;
+	channel_id_t          channel_id = CHANNEL_ID_INVALID;
+	syscall_result_t      result;
 
 	syscall_test_init_process_environment();
 	capability_init();
@@ -35,7 +28,8 @@ Test(syscall, channel_create_and_destroy_manage_process_owned_state) {
 	cr_assert_eq(result.value, 0u);
 	cr_assert_eq(process->channel_state.count, 0u, "failed copyout must roll back channel ownership");
 
-	cr_assert(vmm_alloc(space, &params, &output_id, &output_base), "failed to allocate channel ID output");
+	cr_assert(test_vm_map(space, 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, &output_id, &output_base),
+	          "failed to allocate channel ID output");
 	result = syscall_dispatch(SYSCALL_CHANNEL_CREATE, (uintptr_t)output_base, 0u, 0u, 0u, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(address_space_copy_from(space, (uintptr_t)output_base, &channel_id, sizeof(channel_id)),

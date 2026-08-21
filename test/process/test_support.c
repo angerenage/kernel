@@ -50,7 +50,7 @@ void init_process_test_environment(void) {
 	cr_assert(sched_start_cpu(cpu_current()));
 	mock_paging_reset();
 	cr_assert(pmm_init(memory_map, sizeof(memory_map) / sizeof(memory_map[0]), 0));
-	cr_assert(vmm_init());
+	cr_assert(vm_init());
 	cr_assert(heap_init());
 }
 

@@ -33,7 +33,6 @@ kernel_selftest_sources = files(
 	'test/selftests/semaphore.c',
 	'test/selftests/condvar.c',
 	'test/selftests/rwlock.c',
-	'test/selftests/vaddr_alloc.c',
 )
 
 kernel_objs = base_sources + core_sources + kernel_libk_sources + platform_kernel_objects + [

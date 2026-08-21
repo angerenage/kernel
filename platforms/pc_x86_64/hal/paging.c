@@ -231,28 +231,66 @@ bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t p
 	return true;
 }
 
-bool hal_paging_unmap(struct hal_address_space* space, uintptr_t virt) {
-	uint64_t*        table = NULL;
-	size_t           index = 0;
-	struct irq_state state;
-
-	if (space == NULL) return false;
-	if (!initialized) return false;
-	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
-	state = spinlock_lock_irqsave(&paging_lock);
-	if (!x86_walk_to_leaf(space, virt, false, false, &table, &index)) {
-		spinlock_unlock_irqrestore(&paging_lock, state);
-		return false;
-	}
-	if ((table[index] & X86_PTE_PRESENT) == 0) {
-		spinlock_unlock_irqrestore(&paging_lock, state);
-		return false;
-	}
-
-	table[index] = 0;
-	x86_invlpg(virt);
-	spinlock_unlock_irqrestore(&paging_lock, state);
+static bool x86_table_empty(const uint64_t* table) {
+	for (size_t i = 0u; i < 512u; i++)
+		if ((table[i] & X86_PTE_PRESENT) != 0u) return false;
 	return true;
+}
+
+static bool x86_change_range(uint64_t* table, int level, uintptr_t start, uintptr_t end, bool protect, uint64_t flags) {
+	unsigned  shift = 12u + 9u * (unsigned)level;
+	uintptr_t span  = (uintptr_t)1u << shift;
+	while (start < end) {
+		size_t    index = (size_t)((start >> shift) & 0x1ffu);
+		uintptr_t step  = span - (start & (span - 1u));
+		uintptr_t next  = step > end - start ? end : start + step;
+		uint64_t  entry = table[index];
+		if ((entry & X86_PTE_PRESENT) != 0u) {
+			if (level == 0) {
+				if (protect) table[index] = (entry & X86_PHYS_MASK) | x86_leaf_flags(flags);
+				else table[index] = 0u;
+				x86_invlpg(start);
+			}
+			else {
+				if ((entry & X86_PTE_LARGE) != 0u) return false;
+				uintptr_t child_phys = (uintptr_t)(entry & X86_PHYS_MASK);
+				uint64_t* child      = (uint64_t*)hhdm_phys_to_virt(child_phys);
+				if (!x86_change_range(child, level - 1, start, next, protect, flags)) return false;
+				if (!protect && x86_table_empty(child) && pmm_free_pages(child_phys, 1u)) table[index] = 0u;
+			}
+		}
+		start = next;
+	}
+	return true;
+}
+
+static bool x86_range_args(struct hal_address_space* space, uintptr_t virt, size_t page_count, uintptr_t* out_end) {
+	uint64_t bytes, end;
+	if (space == NULL || !initialized || page_count == 0u || (virt & (PMM_PAGE_SIZE - 1u)) != 0u ||
+	    mul_overflow_u64(page_count, PMM_PAGE_SIZE, &bytes) || add_overflow_u64(virt, bytes, &end))
+		return false;
+	*out_end = (uintptr_t)end;
+	return true;
+}
+
+bool hal_paging_unmap_range(struct hal_address_space* space, uintptr_t virt, size_t page_count) {
+	uintptr_t end;
+	if (!x86_range_args(space, virt, page_count, &end)) return false;
+	struct irq_state state = spinlock_lock_irqsave(&paging_lock);
+	uint64_t*        root  = x86_space_root_table(space);
+	bool             ok    = root != NULL && x86_change_range(root, x86_paging_levels() - 1, virt, end, false, 0u);
+	spinlock_unlock_irqrestore(&paging_lock, state);
+	return ok;
+}
+
+bool hal_paging_protect_range(struct hal_address_space* space, uintptr_t virt, size_t page_count, uint64_t flags) {
+	uintptr_t end;
+	if ((flags & ~HAL_PAGE_VALID_MASK) != 0u || !x86_range_args(space, virt, page_count, &end)) return false;
+	struct irq_state state = spinlock_lock_irqsave(&paging_lock);
+	uint64_t*        root  = x86_space_root_table(space);
+	bool             ok    = root != NULL && x86_change_range(root, x86_paging_levels() - 1, virt, end, true, flags);
+	spinlock_unlock_irqrestore(&paging_lock, state);
+	return ok;
 }
 
 bool hal_paging_query(const struct hal_address_space* space, uintptr_t virt, uintptr_t* out_phys, uint64_t* out_flags) {

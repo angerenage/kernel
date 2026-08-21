@@ -25,22 +25,15 @@ Test(syscall, message_send_rejects_invalid_pid_and_size) {
 }
 
 Test(syscall, message_send_reports_queue_full) {
-	struct process*         caller;
-	struct process*         target;
-	struct uthread*         caller_thread;
-	struct uthread*         target_thread;
-	struct address_space*   caller_space;
-	struct vmm_alloc_params params = {
-		.page_count  = 1u,
-		.align_pages = 1u,
-		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
-		.kind        = VMM_KIND_GENERIC,
-		.map_flags   = VMM_MAP_LAZY,
-	};
-	vmm_id_t         send_id   = VMM_ID_INVALID;
-	void*            send_base = NULL;
-	uint8_t          byte      = 0x5a;
-	syscall_result_t result;
+	struct process*       caller;
+	struct process*       target;
+	struct uthread*       caller_thread;
+	struct uthread*       target_thread;
+	struct address_space* caller_space;
+	vmm_id_t              send_id   = VMM_ID_INVALID;
+	void*                 send_base = NULL;
+	uint8_t               byte      = 0x5a;
+	syscall_result_t      result;
 
 	syscall_test_init_process_environment();
 	caller        = syscall_test_spawn_process("syscall/message-full-caller");
@@ -51,7 +44,8 @@ Test(syscall, message_send_reports_queue_full) {
 	cr_assert_not_null(target_thread);
 	caller_space = process_address_space(caller);
 
-	cr_assert(vmm_alloc(caller_space, &params, &send_id, &send_base), "failed to allocate send buffer");
+	cr_assert(test_vm_map(caller_space, 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, &send_id, &send_base),
+	          "failed to allocate send buffer");
 	cr_assert_eq(address_space_copy_to(caller_space, (uintptr_t)send_base, &byte, sizeof(byte)), ADDRESS_TRANSFER_OK);
 
 	sched_set_current(cpu_current(), &caller_thread->thread);

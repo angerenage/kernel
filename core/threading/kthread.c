@@ -2,11 +2,11 @@
 #include <core/cpu.h>
 #include <core/kthread.h>
 #include <core/lock.h>
+#include <core/memory_object.h>
 #include <core/pmm.h>
 #include <core/sched.h>
 #include <core/spinlock.h>
-#include <core/vaddr_alloc.h>
-#include <core/vmm.h>
+#include <core/vm_space.h>
 #include <hal/clock.h>
 #include <hal/hcf.h>
 #include <libc/stdlib.h>
@@ -22,6 +22,28 @@ struct kthread_reaper {
 	bool                     started;
 	bool                     starting;
 };
+
+static bool kthread_map_stack(vmm_id_t* out_id, void** out_base) {
+	struct memory_object* memory;
+	if (!memory_object_create_owned(KTHREAD_DEFAULT_STACK_PAGES, &memory)) return false;
+	bool mapped = vm_space_map(vm_space_kernel(),
+	                           &(const struct vm_map_request){
+								   .memory      = memory,
+								   .page_count  = KTHREAD_DEFAULT_STACK_PAGES,
+								   .align_pages = 1u,
+								   .guard_pages = VMM_STACK_DEFAULT_GUARD_PAGES,
+								   .prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_GLOBAL,
+							   },
+	                           out_id,
+	                           out_base);
+	memory_object_release(memory);
+	if (!mapped) return false;
+	if (vm_space_prefault(vm_space_kernel(), *out_id, 0u, KTHREAD_DEFAULT_STACK_PAGES)) return true;
+	(void)vm_space_unmap(vm_space_kernel(), *out_id);
+	*out_id   = VMM_ID_INVALID;
+	*out_base = NULL;
+	return false;
+}
 
 static struct kthread_reaper kthread_reapers[KTHREAD_REAPER_MAX_CPUS];
 static struct spinlock       kthread_reaper_init_lock =
@@ -72,7 +94,7 @@ static bool kthread_free(struct kthread* thread) {
 	if (thread == NULL) return true;
 
 	if (thread->stack_id != VMM_ID_INVALID) {
-		if (!vmm_free(address_space_kernel(), thread->stack_id)) return false;
+		if (!vm_space_unmap(vm_space_kernel(), thread->stack_id)) return false;
 		thread->stack_id = VMM_ID_INVALID;
 	}
 	free(thread);
@@ -182,14 +204,6 @@ bool kthread_reaper_start(struct cpu* preferred_cpu) {
 static enum kthread_spawn_result kthread_spawn_internal(struct kthread** out_thread, const char* name,
                                                         thread_entry_t entry, void* arg, struct cpu* preferred_cpu,
                                                         bool detached, bool reap_on_exit) {
-	struct vmm_alloc_params stack_params = {
-		.page_count  = KTHREAD_DEFAULT_STACK_PAGES,
-		.align_pages = 1u,
-		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_GLOBAL,
-		.kind        = VMM_KIND_STACK,
-		.guard_pages = VMM_STACK_DEFAULT_GUARD_PAGES,
-		.map_flags   = 0u,
-	};
 	struct kthread*             thread;
 	struct thread_create_params create_params;
 	enum thread_init_result     init_result;
@@ -207,7 +221,7 @@ static enum kthread_spawn_result kthread_spawn_internal(struct kthread** out_thr
 		.stack_pages = KTHREAD_DEFAULT_STACK_PAGES,
 	};
 
-	if (!vmm_alloc(address_space_kernel(), &stack_params, &thread->stack_id, &stack_base)) {
+	if (!kthread_map_stack(&thread->stack_id, &stack_base)) {
 		if (!kthread_free(thread)) hcf();
 		return KTHREAD_SPAWN_STACK_ALLOC_FAILED;
 	}

@@ -2,7 +2,7 @@
 #include <core/cpu.h>
 #include <core/exception.h>
 #include <core/sched.h>
-#include <core/vmm.h>
+#include <core/vm_space.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
 #include <stdbool.h>
@@ -228,7 +228,7 @@ void handle_exception(struct exception_frame* frame) {
 
 	if (!is_interrupt && is_page_fault_exception(code)) {
 		cpu_leave_exception();
-		if (vmm_handle_current_page_fault(
+		if (vm_handle_current_page_fault(
 				frame->stval, VMM_FAULT_UNCLASSIFIED, page_fault_access(code), was_user_mode(frame->sstatus))) {
 			return;
 		}

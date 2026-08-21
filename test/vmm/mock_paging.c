@@ -104,7 +104,10 @@ bool hal_paging_space_create(struct hal_address_space* out_space) {
 }
 
 void hal_paging_space_destroy(struct hal_address_space* space) {
-	if (space != NULL) *space = (struct hal_address_space){0};
+	if (space == NULL) return;
+	for (size_t i = 0u; i < MOCK_PAGING_MAX_MAPPINGS; i++)
+		if (mappings[i].space_root == space->lower_root_phys) mappings[i].present = false;
+	*space = (struct hal_address_space){0};
 }
 
 bool hal_paging_activate(const struct hal_address_space* space) {
@@ -151,21 +154,32 @@ bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t p
 	return false;
 }
 
-bool hal_paging_unmap(struct hal_address_space* space, uintptr_t virt) {
-	struct mock_mapping* mapping;
-
+bool hal_paging_unmap_range(struct hal_address_space* space, uintptr_t virt, size_t page_count) {
 	if (space == NULL || space->lower_root_phys == 0u) return false;
 	if (!initialized) return false;
-	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
+	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0 || page_count == 0u || page_count > (UINTPTR_MAX - virt) / PMM_PAGE_SIZE)
+		return false;
 	if (fail_next_unmap) {
 		fail_next_unmap = false;
 		return false;
 	}
+	uintptr_t end = virt + page_count * PMM_PAGE_SIZE;
+	for (size_t i = 0u; i < MOCK_PAGING_MAX_MAPPINGS; i++)
+		if (mappings[i].present && mappings[i].space_root == space->lower_root_phys && mappings[i].virt >= virt &&
+		    mappings[i].virt < end)
+			mappings[i].present = false;
+	return true;
+}
 
-	mapping = find_mapping(space, virt);
-	if (!mapping) return false;
-
-	mapping->present = false;
+bool hal_paging_protect_range(struct hal_address_space* space, uintptr_t virt, size_t page_count, uint64_t flags) {
+	if (space == NULL || space->lower_root_phys == 0u || !initialized || (flags & ~HAL_PAGE_VALID_MASK) != 0u ||
+	    (virt & (PMM_PAGE_SIZE - 1u)) != 0u || page_count == 0u || page_count > (UINTPTR_MAX - virt) / PMM_PAGE_SIZE)
+		return false;
+	uintptr_t end = virt + page_count * PMM_PAGE_SIZE;
+	for (size_t i = 0u; i < MOCK_PAGING_MAX_MAPPINGS; i++)
+		if (mappings[i].present && mappings[i].space_root == space->lower_root_phys && mappings[i].virt >= virt &&
+		    mappings[i].virt < end)
+			mappings[i].flags = flags;
 	return true;
 }
 

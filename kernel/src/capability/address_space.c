@@ -5,7 +5,7 @@
 #include <core/capability.h>
 #include <core/process.h>
 #include <core/syscall.h>
-#include <core/vmm.h>
+#include <core/vm_space.h>
 #include <kernel/capability.h>
 #include <string.h>
 
@@ -26,7 +26,7 @@ static syscall_result_t address_space_query_handler(const struct cap_request* re
 
 	copy_result = copy_request(req->request, req->request_size, &request, sizeof(request));
 	if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
-	if (request.id == VMM_ID_INVALID || !vmm_query_id(space, request.id, &response.info)) {
+	if (request.id == VMM_ID_INVALID || !vm_space_query_id(space, request.id, &response.info)) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 	return cap_kernel_write_response(req, &response, sizeof(response));

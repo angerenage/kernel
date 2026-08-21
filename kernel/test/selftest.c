@@ -15,7 +15,6 @@ extern const struct kernel_selftest_suite kernel_sched_mutex_selftest_suite;
 extern const struct kernel_selftest_suite kernel_semaphore_selftest_suite;
 extern const struct kernel_selftest_suite kernel_condvar_selftest_suite;
 extern const struct kernel_selftest_suite kernel_rwlock_selftest_suite;
-extern const struct kernel_selftest_suite kernel_vaddr_alloc_selftest_suite;
 
 static const struct kernel_selftest_suite* const kernel_selftest_suites[] = {
 	&kernel_cpu_selftest_suite,
@@ -28,7 +27,6 @@ static const struct kernel_selftest_suite* const kernel_selftest_suites[] = {
 	&kernel_semaphore_selftest_suite,
 	&kernel_condvar_selftest_suite,
 	&kernel_rwlock_selftest_suite,
-	&kernel_vaddr_alloc_selftest_suite,
 };
 
 void kernel_selftest_fail(struct kernel_selftest_context* ctx, const char* file, size_t line, const char* expr,

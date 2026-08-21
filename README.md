@@ -35,14 +35,15 @@ The HAL is the main contract between reusable kernel code and platform code. Pub
 
 Physical memory starts with the bootloader memory map. `pmm_init()` records the direct-map offset, reserves allocator metadata from usable memory, and manages contiguous 4 KiB page runs.
 
-Virtual memory is split into two related layers:
+Virtual memory has three ownership layers:
 
-- `address_space` in `include/core/vaddr_alloc.h` tracks ownership of virtual page ranges with a bitmap and stores the HAL paging handle for that space.
-- `vmm` in `include/core/vmm.h` tracks allocation records by ID, owns backing pages for mapped allocations, applies protection policy, supports lazy mappings, resolves eligible page faults, and releases metadata/backing during teardown.
+- Memory Objects in `include/core/memory_object.h` own logical contents and sparse owned or external physical backing.
+- Address Spaces in `include/core/vm_space.h` keep a sorted dense vector of object mappings, place virtual ranges, enforce protections, and resolve demand faults.
+- The paging HAL owns the architecture page tables and is the sole source of hardware-PTE presence.
 
 The kernel has a global managed virtual window at `MM_KERNEL_VMM_BASE` with size `MM_KERNEL_VMM_SIZE`. User processes receive separate address spaces over `MM_USER_VMM_BASE` and `MM_USER_VMM_SIZE`, with a null guard at the bottom. New hardware user address spaces inherit the kernel mappings required to enter and leave kernel mode.
 
-The address-transfer helpers validate user ranges, fault in lazy pages when requested, and copy data between kernel and user address spaces without syscalls reaching directly into untrusted pointers.
+The address-transfer helpers validate user ranges and copy directly through Memory Object contents, so logical reads and writes do not require user PTEs or expose untrusted pointers to syscall code.
 
 ## Execution Model
 

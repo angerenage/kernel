@@ -254,15 +254,8 @@ static uintptr_t allocate_self_info_output(struct process* process, vmm_id_t* ou
 	void* base = NULL;
 
 	*out_id = VMM_ID_INVALID;
-	cr_assert(vmm_alloc(process_address_space(process),
-	                    &(const struct vmm_alloc_params){
-							.page_count  = 1u,
-							.align_pages = 1u,
-							.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
-							.kind        = VMM_KIND_GENERIC,
-						},
-	                    out_id,
-	                    &base));
+	cr_assert(
+		test_vm_map(process_address_space(process), 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, out_id, &base));
 	cr_assert_not_null(base);
 	return (uintptr_t)base;
 }
@@ -291,7 +284,7 @@ Test(syscall_validation, failed_address_space_grant_rolls_back_new_self_grant) {
 	             "failed address-space grant left the earlier self routing object hidden from userspace");
 
 	grant_fail_slot = GRANT_SLOT_COUNT;
-	cr_assert(vmm_free(process_address_space(process), output_id));
+	cr_assert(vm_space_unmap(process_address_space(process), output_id));
 	destroy_current_process(process);
 }
 
@@ -319,7 +312,7 @@ Test(syscall_validation, failed_thread_grant_rolls_back_all_new_preceding_grants
 	             "failed thread grant left earlier routing objects hidden from userspace");
 
 	grant_fail_slot = GRANT_SLOT_COUNT;
-	cr_assert(vmm_free(process_address_space(process), output_id));
+	cr_assert(vm_space_unmap(process_address_space(process), output_id));
 	destroy_current_process(process);
 }
 
@@ -350,6 +343,6 @@ Test(syscall_validation, grant_failure_rollback_preserves_preexisting_self_grant
 	cap_release(retained);
 
 	grant_fail_slot = GRANT_SLOT_COUNT;
-	cr_assert(vmm_free(process_address_space(process), output_id));
+	cr_assert(vm_space_unmap(process_address_space(process), output_id));
 	destroy_current_process(process);
 }

@@ -45,7 +45,7 @@ Test(kernel_capability_module, failed_repeat_resolve_preserves_the_preexisting_m
 	                   "failed repeat module_resolve destroyed a capability that existed before the failed syscall");
 	cap_release(retained);
 
-	if (out_id != VMM_ID_INVALID) cr_assert(vmm_free(process_address_space(ctx.process), out_id));
+	if (out_id != VMM_ID_INVALID) cr_assert(vm_space_unmap(process_address_space(ctx.process), out_id));
 	kernel_capability_test_end(&ctx);
 }
 

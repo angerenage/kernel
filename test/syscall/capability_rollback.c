@@ -187,20 +187,7 @@ Test(capability_syscall, derive_output_failure_rolls_back_child_and_new_object) 
 }
 
 Test(capability_syscall, call_validates_response_before_handler_side_effects) {
-	struct process*               process        = make_current_process("cap/call-response-validation");
-	const struct vmm_alloc_params request_params = {
-		.page_count  = 1u,
-		.align_pages = 1u,
-		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
-		.kind        = VMM_KIND_GENERIC,
-	};
-	const struct vmm_alloc_params response_params = {
-		.page_count  = 1u,
-		.align_pages = 1u,
-		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
-		.kind        = VMM_KIND_GENERIC,
-		.map_flags   = VMM_MAP_LAZY,
-	};
+	struct process*  process = make_current_process("cap/call-response-validation");
 	cap_object_id_t  object_id;
 	cap_id_t         capability_id;
 	vmm_id_t         request_id      = VMM_ID_INVALID;
@@ -210,9 +197,17 @@ Test(capability_syscall, call_validates_response_before_handler_side_effects) {
 	uint32_t         response_value  = 0u;
 	syscall_result_t result;
 
-	cr_assert(vmm_alloc(process_address_space(process), &request_params, &request_id, &request_buffer));
+	cr_assert(test_vm_map(
+		process_address_space(process), 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, &request_id, &request_buffer));
 	cr_assert_not_null(request_buffer);
-	cr_assert(vmm_alloc(process_address_space(process), &response_params, &response_id, &response_buffer));
+	cr_assert(test_vm_map(process_address_space(process),
+	                      1u,
+	                      VMM_PROT_READ | VMM_PROT_WRITE,
+	                      0u,
+	                      1u,
+	                      0u,
+	                      &response_id,
+	                      &response_buffer));
 	cr_assert_not_null(response_buffer);
 
 	object_id = cap_object_create_kernel(0x2006u, side_effecting_cap_handler, NULL);
@@ -250,7 +245,7 @@ Test(capability_syscall, call_validates_response_before_handler_side_effects) {
 
 	cr_assert(cap_destroy_by_id(capability_id));
 	cr_assert(cap_object_destroy_with_id(object_id));
-	cr_assert(vmm_free(process_address_space(process), response_id));
-	cr_assert(vmm_free(process_address_space(process), request_id));
+	cr_assert(vm_space_unmap(process_address_space(process), response_id));
+	cr_assert(vm_space_unmap(process_address_space(process), request_id));
 	destroy_current_process(process);
 }

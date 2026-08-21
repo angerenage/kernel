@@ -78,15 +78,8 @@ uintptr_t kernel_capability_test_alloc_user_buffer(struct process* process, size
 	cr_assert_not_null(process);
 	cr_assert_not_null(out_id);
 	*out_id = VMM_ID_INVALID;
-	cr_assert(vmm_alloc(process_address_space(process),
-	                    &(const struct vmm_alloc_params){
-							.page_count  = page_count,
-							.align_pages = 1u,
-							.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
-							.kind        = VMM_KIND_GENERIC,
-						},
-	                    out_id,
-	                    &base));
+	cr_assert(test_vm_map(
+		process_address_space(process), page_count, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, out_id, &base));
 	cr_assert_not_null(base);
 	return (uintptr_t)base;
 }

@@ -5,7 +5,7 @@
 #include <core/sched.h>
 #include <core/syscall.h>
 #include <core/thread.h>
-#include <core/vaddr_alloc.h>
+#include <core/vm_space.h>
 #include <stdbool.h>
 
 static syscall_result_t syscall_channel_result_to_syscall(enum channel_result result) {

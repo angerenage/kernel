@@ -1,7 +1,7 @@
 #include <base/process.h>
 #include <core/exception.h>
 #include <core/process.h>
-#include <core/vmm.h>
+#include <core/vm_space.h>
 #include <criterion/criterion.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -31,8 +31,8 @@ bool process_terminate(struct process* process, uintptr_t exit_code) {
 	return terminate_result;
 }
 
-bool vmm_handle_current_page_fault(uintptr_t addr, enum vmm_fault_kind kind, enum vmm_fault_access access,
-                                   bool user_mode) {
+bool vm_handle_current_page_fault(uintptr_t addr, enum vmm_fault_kind kind, enum vmm_fault_access access,
+                                  bool user_mode) {
 	vmm_fault_calls++;
 	observed_fault_addr      = addr;
 	observed_fault_kind      = kind;
@@ -59,28 +59,28 @@ Test(exception_core, page_faults_preserve_kind_access_address_and_origin) {
 	static const struct {
 		enum core_exception_kind   core_kind;
 		enum core_exception_access core_access;
-		enum vmm_fault_kind        vmm_kind;
+		enum vmm_fault_kind        fault_kind;
 		enum vmm_fault_access      vmm_access;
 		bool                       user_mode;
 	} cases[] = {
 		{
          .core_kind   = CORE_EXCEPTION_PAGE_FAULT_NOT_PRESENT,
          .core_access = CORE_EXCEPTION_ACCESS_READ,
-         .vmm_kind    = VMM_FAULT_NOT_PRESENT,
+         .fault_kind  = VMM_FAULT_NOT_PRESENT,
          .vmm_access  = VMM_FAULT_ACCESS_READ,
          .user_mode   = true,
 		 },
 		{
          .core_kind   = CORE_EXCEPTION_PAGE_FAULT_PROTECTION,
          .core_access = CORE_EXCEPTION_ACCESS_WRITE,
-         .vmm_kind    = VMM_FAULT_PROTECTION,
+         .fault_kind  = VMM_FAULT_PROTECTION,
          .vmm_access  = VMM_FAULT_ACCESS_WRITE,
          .user_mode   = true,
 		 },
 		{
          .core_kind   = CORE_EXCEPTION_PAGE_FAULT_INVALID,
          .core_access = CORE_EXCEPTION_ACCESS_EXEC,
-         .vmm_kind    = VMM_FAULT_INVALID,
+         .fault_kind  = VMM_FAULT_INVALID,
          .vmm_access  = VMM_FAULT_ACCESS_EXEC,
          .user_mode   = false,
 		 },
@@ -96,7 +96,7 @@ Test(exception_core, page_faults_preserve_kind_access_address_and_origin) {
 		             vmm_fault_result);
 		cr_assert_eq(vmm_fault_calls, 1u);
 		cr_assert_eq(observed_fault_addr, addr);
-		cr_assert_eq(observed_fault_kind, cases[i].vmm_kind);
+		cr_assert_eq(observed_fault_kind, cases[i].fault_kind);
 		cr_assert_eq(observed_fault_access, cases[i].vmm_access);
 		cr_assert_eq(observed_fault_user_mode, cases[i].user_mode);
 		cr_assert_eq(terminate_calls, 0u, "page faults must stay delegated to the VMM policy");

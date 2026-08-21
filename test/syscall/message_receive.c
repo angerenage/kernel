@@ -1,25 +1,18 @@
 #include "test_support.h"
 
 Test(syscall, message_recv_reports_empty_queue) {
-	struct process*         process;
-	struct uthread*         main_thread;
-	struct address_space*   space;
-	struct vmm_alloc_params params = {
-		.page_count  = 1u,
-		.align_pages = 1u,
-		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
-		.kind        = VMM_KIND_GENERIC,
-		.map_flags   = VMM_MAP_LAZY,
-	};
-	vmm_id_t         buffer_id = VMM_ID_INVALID;
-	vmm_id_t         length_id = VMM_ID_INVALID;
-	vmm_id_t         sender_id = VMM_ID_INVALID;
-	void*            buffer_base;
-	void*            length_base;
-	void*            sender_base;
-	uintptr_t        length_value = 42u;
-	uintptr_t        sender_value = 77u;
-	syscall_result_t result;
+	struct process*       process;
+	struct uthread*       main_thread;
+	struct address_space* space;
+	vmm_id_t              buffer_id = VMM_ID_INVALID;
+	vmm_id_t              length_id = VMM_ID_INVALID;
+	vmm_id_t              sender_id = VMM_ID_INVALID;
+	void*                 buffer_base;
+	void*                 length_base;
+	void*                 sender_base;
+	uintptr_t             length_value = 42u;
+	uintptr_t             sender_value = 77u;
+	syscall_result_t      result;
 
 	syscall_test_init_process_environment();
 	process     = syscall_test_spawn_process("syscall/message-empty");
@@ -27,9 +20,12 @@ Test(syscall, message_recv_reports_empty_queue) {
 	cr_assert_not_null(main_thread);
 	sched_set_current(cpu_current(), &main_thread->thread);
 	space = process_address_space(process);
-	cr_assert(vmm_alloc(space, &params, &buffer_id, &buffer_base), "failed to allocate recv buffer");
-	cr_assert(vmm_alloc(space, &params, &length_id, &length_base), "failed to allocate length buffer");
-	cr_assert(vmm_alloc(space, &params, &sender_id, &sender_base), "failed to allocate sender buffer");
+	cr_assert(test_vm_map(space, 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, &buffer_id, &buffer_base),
+	          "failed to allocate recv buffer");
+	cr_assert(test_vm_map(space, 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, &length_id, &length_base),
+	          "failed to allocate length buffer");
+	cr_assert(test_vm_map(space, 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, &sender_id, &sender_base),
+	          "failed to allocate sender buffer");
 	cr_assert_eq(address_space_write_uintptr(space, (uintptr_t)length_base, length_value), ADDRESS_TRANSFER_OK);
 	cr_assert_eq(address_space_write_uintptr(space, (uintptr_t)sender_base, sender_value), ADDRESS_TRANSFER_OK);
 
@@ -53,32 +49,25 @@ Test(syscall, message_recv_reports_empty_queue) {
 }
 
 Test(syscall, message_recv_reports_required_size_when_buffer_too_small) {
-	struct process*         caller;
-	struct process*         target;
-	struct uthread*         caller_thread;
-	struct uthread*         target_thread;
-	struct address_space*   caller_space;
-	struct address_space*   target_space;
-	struct vmm_alloc_params params = {
-		.page_count  = 1u,
-		.align_pages = 1u,
-		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
-		.kind        = VMM_KIND_GENERIC,
-		.map_flags   = VMM_MAP_LAZY,
-	};
-	vmm_id_t         send_id     = VMM_ID_INVALID;
-	vmm_id_t         recv_id     = VMM_ID_INVALID;
-	vmm_id_t         len_id      = VMM_ID_INVALID;
-	vmm_id_t         sender_id   = VMM_ID_INVALID;
-	void*            send_base   = NULL;
-	void*            recv_base   = NULL;
-	void*            len_base    = NULL;
-	void*            sender_base = NULL;
-	const char       payload[]   = "syscall-message";
-	char             received[sizeof(payload)];
-	uintptr_t        length_value = 0u;
-	uintptr_t        sender_value = 55u;
-	syscall_result_t result;
+	struct process*       caller;
+	struct process*       target;
+	struct uthread*       caller_thread;
+	struct uthread*       target_thread;
+	struct address_space* caller_space;
+	struct address_space* target_space;
+	vmm_id_t              send_id     = VMM_ID_INVALID;
+	vmm_id_t              recv_id     = VMM_ID_INVALID;
+	vmm_id_t              len_id      = VMM_ID_INVALID;
+	vmm_id_t              sender_id   = VMM_ID_INVALID;
+	void*                 send_base   = NULL;
+	void*                 recv_base   = NULL;
+	void*                 len_base    = NULL;
+	void*                 sender_base = NULL;
+	const char            payload[]   = "syscall-message";
+	char                  received[sizeof(payload)];
+	uintptr_t             length_value = 0u;
+	uintptr_t             sender_value = 55u;
+	syscall_result_t      result;
 
 	syscall_test_init_process_environment();
 	caller        = syscall_test_spawn_process("syscall/message-small-buffer-caller");
@@ -90,7 +79,8 @@ Test(syscall, message_recv_reports_required_size_when_buffer_too_small) {
 	caller_space = process_address_space(caller);
 	target_space = process_address_space(target);
 
-	cr_assert(vmm_alloc(caller_space, &params, &send_id, &send_base), "failed to allocate send buffer");
+	cr_assert(test_vm_map(caller_space, 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, &send_id, &send_base),
+	          "failed to allocate send buffer");
 	cr_assert_eq(address_space_copy_to(caller_space, (uintptr_t)send_base, payload, sizeof(payload)),
 	             ADDRESS_TRANSFER_OK);
 
@@ -100,9 +90,12 @@ Test(syscall, message_recv_reports_required_size_when_buffer_too_small) {
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(result.value, 0u);
 
-	cr_assert(vmm_alloc(target_space, &params, &recv_id, &recv_base), "failed to allocate recv buffer");
-	cr_assert(vmm_alloc(target_space, &params, &len_id, &len_base), "failed to allocate length buffer");
-	cr_assert(vmm_alloc(target_space, &params, &sender_id, &sender_base), "failed to allocate sender buffer");
+	cr_assert(test_vm_map(target_space, 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, &recv_id, &recv_base),
+	          "failed to allocate recv buffer");
+	cr_assert(test_vm_map(target_space, 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, &len_id, &len_base),
+	          "failed to allocate length buffer");
+	cr_assert(test_vm_map(target_space, 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, &sender_id, &sender_base),
+	          "failed to allocate sender buffer");
 	cr_assert_eq(address_space_write_uintptr(target_space, (uintptr_t)len_base, 0u), ADDRESS_TRANSFER_OK);
 	cr_assert_eq(address_space_write_uintptr(target_space, (uintptr_t)sender_base, sender_value), ADDRESS_TRANSFER_OK);
 

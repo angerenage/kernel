@@ -6,7 +6,7 @@
 #include <core/spinlock.h>
 #include <core/thread.h>
 #include <core/uthread.h>
-#include <core/vmm.h>
+#include <core/vm_space.h>
 #include <libc/stdlib.h>
 #include <libc/string.h>
 #include <stdbool.h>
@@ -333,7 +333,7 @@ enum process_result process_create(struct process** out_process, const char* nam
 	}
 	process_channel_state_init(&process->channel_state);
 
-	if (!vmm_user_address_space_init(&process->address_space)) {
+	if (!vm_space_create_user(&process->address_space)) {
 		ring_buffer_deinit(&process->message_queue);
 		free((void*)process->name);
 		free(process);
@@ -342,7 +342,7 @@ enum process_result process_create(struct process** out_process, const char* nam
 
 	id_result = id_table_alloc(&process_table, process, &pid);
 	if (id_result != ID_TABLE_OK) {
-		vmm_address_space_deinit(&process->address_space);
+		vm_space_destroy(&process->address_space);
 		ring_buffer_deinit(&process->message_queue);
 		free((void*)process->name);
 		free(process);
@@ -512,7 +512,7 @@ enum process_detach_result process_detach(struct process* process) {
 static void process_finalize(struct process* process) {
 	(void)process_destroy_address_space_cap_object(process);
 	(void)process_destroy_cap_object(process);
-	vmm_address_space_deinit(&process->address_space);
+	vm_space_destroy(&process->address_space);
 	process_channel_state_deinit(&process->channel_state);
 	ring_buffer_deinit(&process->message_queue);
 	free((void*)process->name);

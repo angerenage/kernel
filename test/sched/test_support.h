@@ -4,7 +4,7 @@
 #include <core/cpu.h>
 #include <core/sched.h>
 #include <core/thread.h>
-#include <core/vaddr_alloc.h>
+#include <core/vm_space.h>
 #include <criterion/criterion.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>

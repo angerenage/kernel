@@ -1,32 +1,25 @@
 #include "test_support.h"
 
 Test(syscall, message_send_and_recv_roundtrip) {
-	struct process*         caller;
-	struct process*         target;
-	struct uthread*         caller_thread;
-	struct uthread*         target_thread;
-	struct address_space*   caller_space;
-	struct address_space*   target_space;
-	struct vmm_alloc_params params = {
-		.page_count  = 1u,
-		.align_pages = 1u,
-		.prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
-		.kind        = VMM_KIND_GENERIC,
-		.map_flags   = VMM_MAP_LAZY,
-	};
-	vmm_id_t         send_id     = VMM_ID_INVALID;
-	vmm_id_t         recv_id     = VMM_ID_INVALID;
-	vmm_id_t         len_id      = VMM_ID_INVALID;
-	vmm_id_t         sender_id   = VMM_ID_INVALID;
-	void*            send_base   = NULL;
-	void*            recv_base   = NULL;
-	void*            len_base    = NULL;
-	void*            sender_base = NULL;
-	const char       payload[]   = "syscall-message";
-	char             received[sizeof(payload)];
-	uintptr_t        length_value = 0u;
-	uintptr_t        sender_value = 0u;
-	syscall_result_t result;
+	struct process*       caller;
+	struct process*       target;
+	struct uthread*       caller_thread;
+	struct uthread*       target_thread;
+	struct address_space* caller_space;
+	struct address_space* target_space;
+	vmm_id_t              send_id     = VMM_ID_INVALID;
+	vmm_id_t              recv_id     = VMM_ID_INVALID;
+	vmm_id_t              len_id      = VMM_ID_INVALID;
+	vmm_id_t              sender_id   = VMM_ID_INVALID;
+	void*                 send_base   = NULL;
+	void*                 recv_base   = NULL;
+	void*                 len_base    = NULL;
+	void*                 sender_base = NULL;
+	const char            payload[]   = "syscall-message";
+	char                  received[sizeof(payload)];
+	uintptr_t             length_value = 0u;
+	uintptr_t             sender_value = 0u;
+	syscall_result_t      result;
 
 	syscall_test_init_process_environment();
 	caller        = syscall_test_spawn_process("syscall/message-caller");
@@ -38,7 +31,8 @@ Test(syscall, message_send_and_recv_roundtrip) {
 	caller_space = process_address_space(caller);
 	target_space = process_address_space(target);
 
-	cr_assert(vmm_alloc(caller_space, &params, &send_id, &send_base), "failed to allocate send buffer");
+	cr_assert(test_vm_map(caller_space, 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, &send_id, &send_base),
+	          "failed to allocate send buffer");
 	cr_assert_eq(address_space_copy_to(caller_space, (uintptr_t)send_base, payload, sizeof(payload)),
 	             ADDRESS_TRANSFER_OK);
 
@@ -48,9 +42,12 @@ Test(syscall, message_send_and_recv_roundtrip) {
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(result.value, 0u);
 
-	cr_assert(vmm_alloc(target_space, &params, &recv_id, &recv_base), "failed to allocate recv buffer");
-	cr_assert(vmm_alloc(target_space, &params, &len_id, &len_base), "failed to allocate length buffer");
-	cr_assert(vmm_alloc(target_space, &params, &sender_id, &sender_base), "failed to allocate sender buffer");
+	cr_assert(test_vm_map(target_space, 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, &recv_id, &recv_base),
+	          "failed to allocate recv buffer");
+	cr_assert(test_vm_map(target_space, 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, &len_id, &len_base),
+	          "failed to allocate length buffer");
+	cr_assert(test_vm_map(target_space, 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, &sender_id, &sender_base),
+	          "failed to allocate sender buffer");
 	cr_assert_eq(address_space_write_uintptr(target_space, (uintptr_t)len_base, 0u), ADDRESS_TRANSFER_OK);
 	cr_assert_eq(address_space_write_uintptr(target_space, (uintptr_t)sender_base, 0u), ADDRESS_TRANSFER_OK);
 

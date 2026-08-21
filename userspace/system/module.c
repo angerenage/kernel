@@ -96,10 +96,8 @@ syscall_status_t module_map(cap_id_t module_cap, struct module_map_response* out
 		return SYSCALL_STATUS_FAILED;
 	}
 	if (response.mapping_cap == CAP_ID_INVALID || response.mapping.id != VMM_ID_INVALID ||
-	    response.mapping.base == NULL || response.mapping.page_count == 0u ||
-	    response.mapping.prot != (VMM_PROT_READ | VMM_PROT_USER) || response.mapping.kind != VMM_KIND_PHYSICAL ||
-	    response.mapping.guard_pages != 0u || response.mapping.state != VMM_STATE_MAPPED ||
-	    response.data_offset >= VMM_PAGE_SIZE) {
+	    response.mapping.base == NULL || response.mapping.page_count == 0u || response.mapping.prot != VMM_PROT_READ ||
+	    response.mapping.guard_pages != 0u || response.data_offset >= VMM_PAGE_SIZE) {
 		RUNTIME_DIAGNOSTIC_INVALID_STATE("MODULE_OP_MAP returned an invalid mapping");
 		return SYSCALL_STATUS_FAILED;
 	}

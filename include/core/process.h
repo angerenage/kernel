@@ -5,7 +5,7 @@
 #include <core/channel.h>
 #include <core/message.h>
 #include <core/thread.h>
-#include <core/vaddr_alloc.h>
+#include <core/vm_space.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>

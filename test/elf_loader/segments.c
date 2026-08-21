@@ -24,14 +24,11 @@ Test(elf_loader_segments, loads_file_bytes_zeros_bss_and_applies_final_permissio
 	cr_assert_eq(address_space_copy_from(space, (uintptr_t)vaddr, bytes, sizeof(bytes)), ADDRESS_TRANSFER_OK);
 	for (size_t i = 0u; i < 32u; i++) cr_assert_eq(bytes[i], (uint8_t)(0x40u + i));
 	for (size_t i = 32u; i < sizeof(bytes); i++) cr_assert_eq(bytes[i], 0u, "BSS byte %zu was not zero", i);
-	cr_assert(vmm_query(space, (void*)(uintptr_t)vaddr, &info));
-	cr_assert_eq(info.kind, VMM_KIND_GENERIC);
-	cr_assert_eq(info.prot, (vmm_prot_t)(VMM_PROT_READ | VMM_PROT_EXEC | VMM_PROT_USER));
-	cr_assert_eq(info.state, VMM_STATE_MAPPED);
-	cr_assert(vmm_query(space, (void*)loaded.heap_base, &info));
-	cr_assert_eq(info.kind, VMM_KIND_HEAP);
+	cr_assert(vm_space_query(space, (uintptr_t)vaddr, &info));
+	cr_assert_eq(info.prot, (vmm_prot_t)(VMM_PROT_READ | VMM_PROT_EXEC));
+	cr_assert(vm_space_query(space, loaded.heap_base, &info));
 	cr_assert_eq(info.page_count, HEAP_DEFAULT_GROW_PAGES);
-	cr_assert_eq(info.prot, (vmm_prot_t)(VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER));
+	cr_assert_eq(info.prot, (vmm_prot_t)(VMM_PROT_READ | VMM_PROT_WRITE));
 	elf_test_destroy_loaded(&loaded);
 }
 
@@ -56,10 +53,10 @@ Test(elf_loader_segments, keeps_text_and_data_permissions_independent) {
 	module = elf_test_module(&image);
 	cr_assert_eq(kernel_elf_load_process(&module, "two-segments", &loaded), KERNEL_ELF_LOAD_OK);
 	space = process_address_space(loaded.process);
-	cr_assert(vmm_query(space, (void*)(uintptr_t)text_vaddr, &info));
-	cr_assert_eq(info.prot, (vmm_prot_t)(VMM_PROT_READ | VMM_PROT_EXEC | VMM_PROT_USER));
-	cr_assert(vmm_query(space, (void*)(uintptr_t)data_vaddr, &info));
-	cr_assert_eq(info.prot, (vmm_prot_t)(VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER));
+	cr_assert(vm_space_query(space, (uintptr_t)text_vaddr, &info));
+	cr_assert_eq(info.prot, (vmm_prot_t)(VMM_PROT_READ | VMM_PROT_EXEC));
+	cr_assert(vm_space_query(space, (uintptr_t)data_vaddr, &info));
+	cr_assert_eq(info.prot, (vmm_prot_t)(VMM_PROT_READ | VMM_PROT_WRITE));
 	cr_assert_eq(address_space_copy_from(space, text_vaddr, text, sizeof(text)), ADDRESS_TRANSFER_OK);
 	cr_assert_eq(address_space_copy_from(space, data_vaddr, data, sizeof(data)), ADDRESS_TRANSFER_OK);
 	for (size_t i = 0u; i < sizeof(text); i++) cr_assert_eq(text[i], 0x71u);

@@ -8,8 +8,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Allocate physical memory and return an allocation capability. */
-syscall_status_t memory_allocate(size_t page_count, vmm_prot_t prot, enum vmm_kind kind, cap_id_t* out_allocation_cap);
+/* Create a memory allocation and return its capability. */
+syscall_status_t memory_allocate(size_t page_count, vmm_prot_t prot, cap_id_t* out_allocation_cap);
 
 /* Copy src bytes into an allocation through its capability. */
 syscall_status_t allocation_write(cap_id_t allocation_cap, uintptr_t dst_offset, const void* src, size_t size);
@@ -30,7 +30,7 @@ syscall_status_t address_space_map_at(cap_id_t address_space_cap, cap_id_t alloc
 /* Query an allocation tracked by an address space. */
 syscall_status_t address_space_query(cap_id_t address_space_cap, vmm_id_t id, struct vmm_info* out_info);
 
-/* Read a mapping's base address, size, protection, kind, and state. */
+/* Read a mapping's persistent metadata. */
 syscall_status_t mapping_get_info(cap_id_t mapping_cap, struct vmm_info* out_info);
 
 /* Change a mapping's protection bits. */

@@ -87,12 +87,10 @@ struct mapping_read_response {
 	struct vmm_info info;
 };
 
-/* Request to create a new physical allocation. */
+/* Request to create a new memory allocation. */
 struct syscall_allocate_request {
-	size_t        page_count;
-	vmm_prot_t    prot;
-	enum vmm_kind kind;
-	uint64_t      map_flags;
+	size_t     page_count;
+	vmm_prot_t prot;
 };
 
 /* Response with a new allocation capability. */

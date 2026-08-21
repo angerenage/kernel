@@ -102,8 +102,9 @@ Test(sched, runnable_threads_dispatch_highest_priority_first) {
 
 Test(sched, dispatch_activates_thread_address_space) {
 	struct address_space user_space = {
-		.hal_space   = {.lower_root_phys = 0x4242000u},
-		.initialized = true,
+		.base = 0x1000u,
+		.end  = 0x2000u,
+		.hal  = {.lower_root_phys = 0x4242000u},
 	};
 	const struct thread_create_params user_params = {
 		.name              = "user",
@@ -130,7 +131,7 @@ Test(sched, dispatch_activates_thread_address_space) {
 
 	cr_assert_eq(sched_current_thread(), &user_thread, "userspace thread should dispatch");
 	cr_assert_eq(hal_paging_mock_active_root_phys(),
-	             user_space.hal_space.lower_root_phys,
+	             user_space.hal.lower_root_phys,
 	             "dispatch should activate the userspace paging root");
 
 	reset_test_state();

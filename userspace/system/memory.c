@@ -226,14 +226,14 @@ syscall_status_t address_space_query(cap_id_t address_space_cap, vmm_id_t id, st
 	return SYSCALL_STATUS_OK;
 }
 
-syscall_status_t memory_allocate(size_t page_count, vmm_prot_t prot, enum vmm_kind kind, cap_id_t* out_allocation_cap) {
+syscall_status_t memory_allocate(size_t page_count, vmm_prot_t prot, cap_id_t* out_allocation_cap) {
 	syscall_result_t result;
 
 	if (out_allocation_cap == NULL) {
 		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(out_allocation_cap);
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	}
-	result = syscall(SYSCALL_MEMORY_ALLOCATE, (uintptr_t)page_count, (uintptr_t)prot, (uintptr_t)kind, 0u, 0u, 0u);
+	result = syscall(SYSCALL_MEMORY_ALLOCATE, (uintptr_t)page_count, (uintptr_t)prot, 0u, 0u, 0u, 0u);
 
 #ifdef RUNTIME_DIAGNOSTICS
 	if (result.status == SYSCALL_STATUS_BAD_ARGUMENT) {
@@ -243,9 +243,6 @@ syscall_status_t memory_allocate(size_t page_count, vmm_prot_t prot, enum vmm_ki
 			break;
 		case 1u:
 			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(prot);
-			break;
-		case 2u:
-			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(kind);
 			break;
 		default:
 			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER_INDEX(SYSCALL_MEMORY_ALLOCATE, result.value);

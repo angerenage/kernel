@@ -1,7 +1,7 @@
 #include <base/process.h>
 #include <core/exception.h>
 #include <core/process.h>
-#include <core/vmm.h>
+#include <core/vm_space.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -74,7 +74,7 @@ bool core_handle_user_exception(enum core_exception_kind kind) {
 	return process_terminate(process, exit_code);
 }
 
-static enum vmm_fault_kind core_exception_to_vmm_kind(enum core_exception_kind kind) {
+static enum vmm_fault_kind core_exception_to_vm_fault_kind(enum core_exception_kind kind) {
 	switch (kind) {
 	case CORE_EXCEPTION_PAGE_FAULT_NOT_PRESENT:
 		return VMM_FAULT_NOT_PRESENT;
@@ -106,8 +106,8 @@ bool core_handle_exception(enum core_exception_kind kind, enum core_exception_ac
 	case CORE_EXCEPTION_PAGE_FAULT_NOT_PRESENT:
 	case CORE_EXCEPTION_PAGE_FAULT_PROTECTION:
 	case CORE_EXCEPTION_PAGE_FAULT_INVALID:
-		return vmm_handle_current_page_fault(
-			addr, core_exception_to_vmm_kind(kind), core_exception_to_vmm_access(access), user_mode);
+		return vm_handle_current_page_fault(
+			addr, core_exception_to_vm_fault_kind(kind), core_exception_to_vmm_access(access), user_mode);
 	default:
 		if (!user_mode) return false;
 		return core_handle_user_exception(kind);

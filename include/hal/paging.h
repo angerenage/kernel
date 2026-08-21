@@ -51,8 +51,11 @@ bool hal_paging_activate(const struct hal_address_space* space);
 /* Create a mapping in a hardware address space. Both addresses must be page aligned and currently unmapped. */
 bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t phys, uint64_t flags);
 
-/* Remove a mapping from a hardware address space. The caller owns any backing-page lifetime decisions. */
-bool hal_paging_unmap(struct hal_address_space* space, uintptr_t virt);
+/* Remove hardware mappings from a virtual range. */
+bool hal_paging_unmap_range(struct hal_address_space* space, uintptr_t virt, size_t page_count);
+
+/* Change the page flags of hardware mappings in a virtual range. */
+bool hal_paging_protect_range(struct hal_address_space* space, uintptr_t virt, size_t page_count, uint64_t flags);
 
 /* Resolve an existing mapping, returning the translated physical address and reconstructed HAL flags. */
 bool hal_paging_query(const struct hal_address_space* space, uintptr_t virt, uintptr_t* out_phys, uint64_t* out_flags);

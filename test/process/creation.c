@@ -21,9 +21,10 @@ Test(process, create_initializes_pid_new_state_and_address_space) {
 
 	space = process_address_space(process);
 	cr_assert_not_null(space, "process address space should be exposed");
-	cr_assert(address_space_is_initialized(space), "process address space should be initialized");
-	cr_assert_eq(address_space_total_page_count(space), MM_USER_VMM_SIZE / PMM_PAGE_SIZE);
-	cr_assert_eq(address_space_free_page_count(space), MM_USER_VMM_SIZE / PMM_PAGE_SIZE);
+	cr_assert(vm_space_is_initialized(space), "process address space should be initialized");
+	cr_assert_eq(space->base, MM_USER_VMM_BASE);
+	cr_assert_eq(space->end, MM_USER_VMM_BASE + MM_USER_VMM_SIZE);
+	cr_assert_eq(vm_space_mapping_count(space), 0u);
 
 	cr_assert(process_destroy(process), "process_destroy failed");
 	cr_assert_null(process_lookup(pid), "destroyed process should not remain registered");
@@ -62,9 +63,9 @@ Test(process, spawn_thread_sets_running_state_and_main_thread) {
 
 	space = process_address_space(process);
 	cr_assert_not_null(space, "process address space should be exposed");
-	cr_assert(address_space_is_initialized(space), "process address space should be initialized");
-	cr_assert_eq(address_space_total_page_count(space), MM_USER_VMM_SIZE / PMM_PAGE_SIZE);
-	cr_assert(address_space_free_page_count(space) < MM_USER_VMM_SIZE / PMM_PAGE_SIZE);
+	cr_assert(vm_space_is_initialized(space), "process address space should be initialized");
+	cr_assert_eq(space->end - space->base, MM_USER_VMM_SIZE);
+	cr_assert_gt(vm_space_mapping_count(space), 0u);
 
 	terminate_main_thread(process);
 	cr_assert(process_destroy(process), "process_destroy failed");

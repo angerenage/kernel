@@ -7,7 +7,7 @@
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/process.h>
-#include <core/vmm.h>
+#include <core/vm_space.h>
 #include <criterion/criterion.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>

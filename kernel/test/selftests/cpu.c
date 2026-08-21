@@ -115,8 +115,9 @@ cleanup:
 }
 
 static void kernel_selftest_cpu_spinlock_debug_checks_enforce_irqsave_and_order(struct kernel_selftest_context* ctx) {
-	struct spinlock  paging     = SPINLOCK_INIT_CLASS("paging_lock", SPINLOCK_ORDER_PAGING, SPINLOCK_FLAG_IRQSAVE);
-	struct spinlock  vmm        = SPINLOCK_INIT_CLASS("vmm_lock", SPINLOCK_ORDER_VMM, SPINLOCK_FLAG_IRQSAVE);
+	struct spinlock paging = SPINLOCK_INIT_CLASS("paging_lock", SPINLOCK_ORDER_PAGING, SPINLOCK_FLAG_IRQSAVE);
+	struct spinlock address_space =
+		SPINLOCK_INIT_CLASS("address_space_lock", SPINLOCK_ORDER_VADDR, SPINLOCK_FLAG_IRQSAVE);
 	struct spinlock  irqsave    = SPINLOCK_INIT_CLASS("clock_lock", SPINLOCK_ORDER_CLOCK, SPINLOCK_FLAG_IRQSAVE);
 	struct cpu*      current    = cpu_current();
 	struct irq_state state      = {0};
@@ -136,7 +137,8 @@ static void kernel_selftest_cpu_spinlock_debug_checks_enforce_irqsave_and_order(
 	state  = spinlock_lock_irqsave(&paging);
 	locked = true;
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, current->irq_disable_depth == 1u, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, spinlock_debug_check_acquire(&vmm) == SPINLOCK_DEBUG_CHECK_ORDER, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(
+		ctx, spinlock_debug_check_acquire(&address_space) == SPINLOCK_DEBUG_CHECK_ORDER, cleanup);
 
 cleanup:
 	if (locked) spinlock_unlock_irqrestore(&paging, state);
