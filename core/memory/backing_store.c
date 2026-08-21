@@ -73,7 +73,7 @@ void backing_store_release_metadata(struct backing_store* store) {
 }
 
 void backing_store_release_if_empty(struct backing_store* store) {
-	if (!store || !store->pages || store->mapped_count != 0) return;
+	if (!store || !store->pages) return;
 	for (size_t page = 0; page < store->page_count; page++) {
 		if (backing_page_has_phys(store->pages[page])) return;
 	}
@@ -97,7 +97,7 @@ bool backing_store_ensure_page(struct backing_store* store, size_t page_index, u
 	phys  = backing_page_phys(entry);
 	if (phys == 0) {
 		if (!pmm_alloc_pages(1, &phys)) return false;
-		store->pages[page_index] = backing_page_make(phys, backing_page_flags(entry));
+		store->pages[page_index] = phys;
 		if (out_allocated) *out_allocated = true;
 	}
 	*out_phys = phys;
@@ -112,20 +112,4 @@ uintptr_t backing_store_entry(const struct backing_store* store, size_t page_ind
 void backing_store_set_entry(struct backing_store* store, size_t page_index, uintptr_t entry) {
 	if (!store || !store->pages || page_index >= store->page_count) return;
 	store->pages[page_index] = entry;
-}
-
-size_t backing_store_mapped_count(const struct backing_store* store) {
-	return store != NULL ? store->mapped_count : 0;
-}
-
-void backing_store_set_mapped_count(struct backing_store* store, size_t count) {
-	if (store != NULL) store->mapped_count = count;
-}
-
-void backing_store_increment_mapped(struct backing_store* store) {
-	if (store != NULL) store->mapped_count++;
-}
-
-void backing_store_decrement_mapped(struct backing_store* store) {
-	if (store != NULL && store->mapped_count != 0) store->mapped_count--;
 }

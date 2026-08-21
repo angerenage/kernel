@@ -206,6 +206,7 @@ bool memory_region_create(struct address_space* space, uintptr_t requested_base,
 		.used                = true,
 	};
 	backing_store_init(&region->backing, params->page_count);
+	region_presence_init(&region->presence);
 	space->region_count++;
 	*out_result = (struct memory_region_create_result){
 		.region = region,
@@ -277,13 +278,14 @@ bool memory_region_create_phys(struct address_space* space, uintptr_t requested_
 		.used                = true,
 	};
 	backing_store_init(&region->backing, params->page_count);
+	region_presence_init(&region->presence);
 	if (!backing_store_ensure(&region->backing)) {
 		(void)address_space_release(space, reserved_base, reserved_page_count);
 		memset(region, 0, sizeof(*region));
 		return false;
 	}
 	for (size_t i = 0; i < params->page_count; i++) {
-		backing_store_set_entry(&region->backing, i, backing_page_make(phys_base + i * (uintptr_t)PMM_PAGE_SIZE, 0));
+		backing_store_set_entry(&region->backing, i, phys_base + i * (uintptr_t)PMM_PAGE_SIZE);
 	}
 	space->region_count++;
 	*out_region = region;
@@ -293,6 +295,7 @@ bool memory_region_create_phys(struct address_space* space, uintptr_t requested_
 
 bool memory_region_destroy(struct address_space* space, struct memory_region* region) {
 	if (!space || !region || !region->used) return false;
+	region_presence_release(&region->presence);
 	if (region->owns_pages) {
 		backing_store_release(&region->backing);
 	}
@@ -310,6 +313,7 @@ void memory_region_destroy_all(struct address_space* space) {
 	if (space->regions != NULL) {
 		for (size_t i = 0; i < space->regions_capacity; i++) {
 			if (!space->regions[i].used) continue;
+			region_presence_release(&space->regions[i].presence);
 			if (space->regions[i].owns_pages) {
 				backing_store_release(&space->regions[i].backing);
 			}
@@ -346,8 +350,8 @@ bool memory_region_is_used(const struct memory_region* region) {
 }
 
 enum vmm_state memory_region_state(const struct memory_region* region) {
-	if (!region || backing_store_mapped_count(&region->backing) == 0) return VMM_STATE_RESERVED;
-	if (backing_store_mapped_count(&region->backing) == region->page_count) return VMM_STATE_MAPPED;
+	if (!region || region_presence_mapped_count(&region->presence) == 0) return VMM_STATE_RESERVED;
+	if (region_presence_mapped_count(&region->presence) == region->page_count) return VMM_STATE_MAPPED;
 	return VMM_STATE_PARTIAL;
 }
 
@@ -357,7 +361,7 @@ bool memory_region_stack_fault_is_valid(const struct memory_region* region, size
 
 	if (!region || region->kind != VMM_KIND_STACK) return true;
 	if (page_index >= region->page_count) return false;
-	mapped_count = backing_store_mapped_count(&region->backing);
+	mapped_count = region_presence_mapped_count(&region->presence);
 	if (mapped_count >= region->page_count) return false;
 	next_page = region->page_count - mapped_count - 1u;
 	return page_index == next_page;

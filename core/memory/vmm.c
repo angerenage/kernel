@@ -156,7 +156,7 @@ bool vmm_free(struct address_space* space, vmm_id_t id) {
 		spinlock_unlock_irqrestore(&vmm_lock, state);
 		return false;
 	}
-	if (backing_store_mapped_count(&region->backing) != 0 && !region_pager_unmap_all(space, region, false)) {
+	if (region_presence_mapped_count(&region->presence) != 0 && !region_pager_unmap_all(space, region, false)) {
 		spinlock_unlock_irqrestore(&vmm_lock, state);
 		return false;
 	}

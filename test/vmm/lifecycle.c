@@ -47,3 +47,31 @@ Test(vmm, repeated_successful_initialization_starts_with_empty_tracking) {
 		vmm_count(address_space_kernel()), 0u, "successful reinitialization must reset tracked allocation metadata");
 	cr_assert_eq(mock_paging_mapping_count(), 0u, "successful reinitialization must start without stale mappings");
 }
+
+Test(vmm, address_space_destruction_releases_sparse_presence_and_owned_backing) {
+	_Alignas(4096) uint8_t  arena[KiB(256)];
+	struct address_space    user_space = {0};
+	struct vmm_alloc_params params     = {
+			.page_count = 65u,
+			.prot       = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_USER,
+			.kind       = VMM_KIND_GENERIC,
+			.map_flags  = VMM_MAP_LAZY,
+    };
+	vmm_id_t id   = VMM_ID_INVALID;
+	void*    base = NULL;
+	size_t   free_before;
+
+	init_test_vmm(arena, sizeof(arena));
+	free_before = pmm_free_page_count();
+	cr_assert(address_space_init(&user_space, MM_USER_VMM_BASE, 128u), "user address-space init failed");
+	cr_assert(hal_paging_space_create(&user_space.hal_space), "user paging-space creation failed");
+	cr_assert(vmm_alloc(&user_space, &params, &id, &base), "large sparse lazy allocation failed");
+	cr_assert(vmm_resolve_page_fault(&user_space, (uintptr_t)base + 64u * (uintptr_t)PMM_PAGE_SIZE),
+	          "faulting a page in sparse presence metadata failed");
+	cr_assert_eq(mock_paging_mapping_count(), 1u, "sparse fault created an unexpected mapping count");
+
+	vmm_address_space_deinit(&user_space);
+	cr_assert_eq(mock_paging_mapping_count(), 0u, "address-space destruction retained live mappings");
+	cr_assert_eq(
+		pmm_free_page_count(), free_before, "address-space destruction leaked backing or sparse presence metadata");
+}

@@ -2,6 +2,7 @@
 
 #include <base/vmm.h>
 #include <core/backing_store.h>
+#include <core/region_presence.h>
 #include <core/vaddr_alloc.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -27,8 +28,10 @@ struct memory_region {
 	/* When true, the VMM owns the backing physical pages and frees them on destroy.
 	 * When false, the physical pages are external and only the mapping is freed. */
 	bool owns_pages;
-	/* Backing store for physical pages and mapping state. */
+	/* Backing store for physical pages only. */
 	struct backing_store backing;
+	/* Sparse per-mapping record of pages with live page-table entries. */
+	struct region_presence presence;
 	/* Slot validity flag for the region table. */
 	bool used;
 };
