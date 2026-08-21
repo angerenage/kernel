@@ -154,7 +154,7 @@ static bool memory_object_alloc(enum memory_object_type type, size_t page_count,
 	                    "memory_object",
 	                    SPINLOCK_ORDER_MEMORY_OBJECT,
 	                    SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
-	backing_store_init(&object->backing, page_count);
+	if (type == MEMORY_OBJECT_ANONYMOUS) backing_store_init(&object->backing.anonymous, page_count);
 	*out_object = object;
 	return true;
 }
@@ -175,14 +175,8 @@ bool memory_object_create_external(uintptr_t phys_base, size_t page_count, struc
 	    last_page_base > (uint64_t)UINTPTR_MAX - (PMM_PAGE_SIZE - 1u))
 		return false;
 	if (!memory_object_alloc(MEMORY_OBJECT_EXTERNAL_PHYSICAL, page_count, &object)) return false;
-	if (!backing_store_ensure(&object->backing)) {
-		memory_object_control_free(object);
-		return false;
-	}
-	for (size_t page = 0; page < page_count; page++) {
-		backing_store_set_entry(&object->backing, page, phys_base + page * (uintptr_t)PMM_PAGE_SIZE);
-	}
-	*out_object = object;
+	object->backing.external_phys_base = phys_base;
+	*out_object                        = object;
 	return true;
 }
 
@@ -206,8 +200,7 @@ void memory_object_release(struct memory_object* object) {
 	old_reference_count = __atomic_fetch_sub(&object->reference_count, 1u, __ATOMIC_ACQ_REL);
 	if (old_reference_count == 0u) hcf();
 	if (old_reference_count != 1u) return;
-	if (object->type == MEMORY_OBJECT_ANONYMOUS) backing_store_release(&object->backing);
-	else backing_store_release_metadata(&object->backing);
+	if (object->type == MEMORY_OBJECT_ANONYMOUS) backing_store_release(&object->backing.anonymous);
 	memory_object_control_free(object);
 }
 
@@ -222,13 +215,18 @@ size_t memory_object_page_count(const struct memory_object* object) {
 bool memory_object_page_phys(struct memory_object* object, size_t logical_page, uintptr_t* out_phys) {
 	struct irq_state state;
 	uintptr_t        phys;
+	bool             found;
 
 	if (out_phys) *out_phys = 0u;
 	if (!object || !out_phys || logical_page >= object->page_count) return false;
 	state = spinlock_lock_irqsave(&object->lock);
-	phys  = backing_page_phys(backing_store_entry(&object->backing, logical_page));
+	if (object->type == MEMORY_OBJECT_EXTERNAL_PHYSICAL) {
+		phys  = object->backing.external_phys_base + logical_page * (uintptr_t)PMM_PAGE_SIZE;
+		found = true;
+	}
+	else found = backing_store_page_phys(&object->backing.anonymous, logical_page, &phys);
 	spinlock_unlock_irqrestore(&object->lock, state);
-	if (phys == 0u) return false;
+	if (!found) return false;
 	*out_phys = phys;
 	return true;
 }
@@ -243,9 +241,14 @@ bool memory_object_ensure_page(struct memory_object* object, size_t logical_page
 	if (out_allocated) *out_allocated = false;
 	if (!object || !out_phys || logical_page >= object->page_count) return false;
 	state = spinlock_lock_irqsave(&object->lock);
-	ok    = backing_store_ensure_page(&object->backing, logical_page, out_phys, &allocated);
-	if (ok && allocated && object->type == MEMORY_OBJECT_ANONYMOUS)
-		memset(hhdm_phys_to_virt(*out_phys), 0, PMM_PAGE_SIZE);
+	if (object->type == MEMORY_OBJECT_EXTERNAL_PHYSICAL) {
+		*out_phys = object->backing.external_phys_base + logical_page * (uintptr_t)PMM_PAGE_SIZE;
+		ok        = true;
+	}
+	else {
+		ok = backing_store_ensure_page(&object->backing.anonymous, logical_page, out_phys, &allocated);
+		if (ok && allocated) memset(hhdm_phys_to_virt(*out_phys), 0, PMM_PAGE_SIZE);
+	}
 	spinlock_unlock_irqrestore(&object->lock, state);
 	if (ok && out_allocated) *out_allocated = allocated;
 	return ok;
@@ -253,7 +256,6 @@ bool memory_object_ensure_page(struct memory_object* object, size_t logical_page
 
 bool memory_object_release_page(struct memory_object* object, size_t logical_page) {
 	struct irq_state state;
-	uintptr_t        phys;
 	bool             ok;
 
 	if (!object || logical_page >= object->page_count) return false;
@@ -262,16 +264,7 @@ bool memory_object_release_page(struct memory_object* object, size_t logical_pag
 		spinlock_unlock_irqrestore(&object->lock, state);
 		return true;
 	}
-	phys = backing_page_phys(backing_store_entry(&object->backing, logical_page));
-	if (phys == 0u) {
-		spinlock_unlock_irqrestore(&object->lock, state);
-		return true;
-	}
-	ok = pmm_free_pages(phys, 1u);
-	if (ok) {
-		backing_store_set_entry(&object->backing, logical_page, 0u);
-		backing_store_release_if_empty(&object->backing);
-	}
+	ok = backing_store_release_page(&object->backing.anonymous, logical_page);
 	spinlock_unlock_irqrestore(&object->lock, state);
 	return ok;
 }

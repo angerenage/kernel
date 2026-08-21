@@ -18,12 +18,12 @@ void init_test_vmm(uint8_t* arena, size_t arena_size) {
 		 },
 		{
          .base   = (uintptr_t)(arena + KiB(64)),
-         .length = KiB(64),
+         .length = KiB(128),
          .type   = MEM_RANGE_USABLE,
 		 },
 	};
 
-	cr_assert_geq(arena_size, KiB(128), "test arena is too small");
+	cr_assert_geq(arena_size, KiB(192), "test arena is too small");
 	mock_paging_reset();
 	cr_assert(pmm_init(memory_map, sizeof(memory_map) / sizeof(memory_map[0]), 0), "pmm_init failed");
 	cr_assert(vmm_init(), "vmm_init failed");

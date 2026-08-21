@@ -1,48 +1,36 @@
 #pragma once
 
+#include <core/pmm.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-/* Metadata tracking physical-page backing for one allocation. */
+#define BACKING_STORE_NODE_ENTRY_COUNT ((size_t)PMM_PAGE_SIZE / sizeof(uintptr_t))
+#define BACKING_STORE_RADIX_BITS 9u
+#define BACKING_STORE_MAX_DEPTH ((sizeof(size_t) * CHAR_BIT + BACKING_STORE_RADIX_BITS - 1u) / BACKING_STORE_RADIX_BITS)
+
+/* Sparse radix-tree backing for an anonymous logical memory object. */
 struct backing_store {
-	uintptr_t* pages;
-	uintptr_t  pages_phys;
-	size_t     metadata_pages;
-	size_t     page_count;
+	uintptr_t root_phys;
+	size_t    page_count;
+	size_t    resident_page_count;
+	size_t    metadata_page_count;
+	size_t    tree_depth;
 };
 
-/* Return the physical address stored in a backing-store entry. */
-static inline uintptr_t backing_page_phys(uintptr_t entry) {
-	return entry;
-}
-
-/* Return true when the entry holds a non-zero physical address. */
-static inline bool backing_page_has_phys(uintptr_t entry) {
-	return backing_page_phys(entry) != 0;
-}
-
-/* Reset a backing store to a zero-page metadata layout, retaining the requested capacity. */
+/* Initialize an empty sparse store without allocating metadata. */
 void backing_store_init(struct backing_store* store, size_t page_count);
 
-/* Allocate direct-map storage for the page metadata on demand. */
-bool backing_store_ensure(struct backing_store* store);
+/* Return the materialized physical page for page_index, or false when it is implicit zero. */
+bool backing_store_page_phys(const struct backing_store* store, size_t page_index, uintptr_t* out_phys);
 
-/* Release direct-map storage and the metadata pages themselves. */
-void backing_store_release(struct backing_store* store);
-
-/* Release just the metadata pages while keeping the per-page entries. */
-void backing_store_release_metadata(struct backing_store* store);
-
-/* Release both the entries and the metadata when no live pages remain. */
-void backing_store_release_if_empty(struct backing_store* store);
-
-/* Ensure page_index has an allocated backing physical page, allocating one if needed. */
+/* Materialize page_index transactionally and report whether this call allocated its data page. */
 bool backing_store_ensure_page(struct backing_store* store, size_t page_index, uintptr_t* out_phys,
                                bool* out_allocated);
 
-/* Read the raw entry stored for page_index. */
-uintptr_t backing_store_entry(const struct backing_store* store, size_t page_index);
+/* Release a materialized page and recursively prune metadata nodes that become empty. */
+bool backing_store_release_page(struct backing_store* store, size_t page_index);
 
-/* Overwrite the entry stored for page_index. */
-void backing_store_set_entry(struct backing_store* store, size_t page_index, uintptr_t entry);
+/* Release every resident page and metadata node by walking only the allocated radix tree. */
+void backing_store_release(struct backing_store* store);

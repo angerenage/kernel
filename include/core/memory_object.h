@@ -24,14 +24,20 @@ struct memory_object_slab {
 	struct memory_object_free_slot* free_slots;
 };
 
+/* Type-specific physical backing state. */
+union memory_object_backing {
+	struct backing_store anonymous;
+	uintptr_t            external_phys_base;
+};
+
 /* Owner of logical memory contents and physical backing. */
 struct memory_object {
-	struct spinlock            lock;
-	enum memory_object_type    type;
-	size_t                     page_count;
-	uint64_t                   reference_count;
-	struct memory_object_slab* slab;
-	struct backing_store       backing;
+	struct spinlock             lock;
+	enum memory_object_type     type;
+	size_t                      page_count;
+	uint64_t                    reference_count;
+	struct memory_object_slab*  slab;
+	union memory_object_backing backing;
 };
 
 /* Initialize the boot-safe control-block allocator after PMM initialization. */
