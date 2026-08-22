@@ -15,4 +15,4 @@ void server_deinit(void);
 syscall_status_t init_server_grant(process_id_t target, cap_id_t* out_cap);
 
 /* Start the loader once the registry is ready, then serve registry requests. */
-int server_run(const struct init_startup_info* startup);
+int server_run(struct init_startup_info* startup);

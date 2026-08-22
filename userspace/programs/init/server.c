@@ -170,7 +170,7 @@ static bool dispatch_request(const struct cap_request* request, const void* data
 	}
 }
 
-int server_run(const struct init_startup_info* startup) {
+int server_run(struct init_startup_info* startup) {
 	union {
 		struct init_request_header    header;
 		struct init_advertise_request advertise;
