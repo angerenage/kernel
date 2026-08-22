@@ -9,6 +9,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+struct cap_object;
+
 /*
  * A channel is a kernel object that carries capability call requests. It has
  * a single owner process that may receive from or destroy it. Any process that
@@ -18,6 +20,8 @@ struct channel {
 	struct spinlock    lock;
 	channel_id_t       id;
 	struct ring_buffer cap_queue;
+	struct cap_object* event_head;
+	struct cap_object* event_tail;
 	process_id_t       owner_pid;
 	uint64_t           reference_count;
 	bool               closing;
@@ -25,6 +29,7 @@ struct channel {
 
 #define CHANNEL_MAX_PER_PROCESS 64u
 
+/* Channels owned by one process for teardown. */
 struct process_channel_state {
 	struct spinlock lock;
 	size_t          count;
@@ -51,6 +56,12 @@ void channel_release(struct channel* channel);
 
 /* Enqueue a capability request unless channel closure has begun. */
 bool channel_enqueue_cap_request(struct channel* channel, const struct cap_request* request);
+
+/* Queue one retained capability-object lifecycle event. */
+bool channel_enqueue_cap_event(struct channel* channel, struct cap_object* object);
+
+/* Remove the next queued lifecycle event object. */
+struct cap_object* channel_dequeue_cap_event(struct channel* channel);
 
 /* Initialize per-process channel state. */
 void process_channel_state_init(struct process_channel_state* state);

@@ -1,3 +1,5 @@
+#include <core/signal.h>
+
 #include "test_support.h"
 
 Test(channel, cap_queue_init_is_empty) {
@@ -12,7 +14,6 @@ Test(channel, cap_queue_init_is_empty) {
 
 	channel_destroy(ch, 1u);
 }
-
 Test(channel, cap_queue_send_and_recv) {
 	struct channel*    ch;
 	struct cap_request req;

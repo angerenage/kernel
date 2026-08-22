@@ -11,8 +11,20 @@
 
 /* Handler invoked by sys_cap_call for kernel-owned capabilities. */
 typedef syscall_result_t (*cap_kernel_handler_t)(const struct cap_request* req);
+/* Handler invoked before a process resource context disappears. */
 typedef bool (*cap_kernel_process_cleanup_t)(uint64_t object_id, process_id_t process);
+/* Handler invoked when managed kernel routing metadata is finalized. */
 typedef void (*cap_kernel_destroy_t)(uint64_t object_id);
+
+/* Lifecycle events observed by a kernel capability provider. */
+enum cap_object_event {
+	CAP_OBJECT_EVENT_ZERO_GRANTS = 1u,
+};
+
+struct cap_object;
+
+/* Handler invoked for an eligible kernel capability-object lifecycle event. */
+typedef void (*cap_object_event_handler_t)(struct cap_object* object, enum cap_object_event event);
 
 /* Stable identifier for a registered cap_object. */
 typedef id_table_id_t cap_object_id_t;
@@ -27,7 +39,14 @@ struct cap_object {
 	cap_kernel_handler_t         handler;
 	cap_kernel_process_cleanup_t process_cleanup;
 	cap_kernel_destroy_t         destroy;
+	cap_object_event_handler_t   event_handler;
+	struct cap_object*           event_next;
+	struct cap_object*           dispatch_next;
 	uint64_t                     reference_count;
+	size_t                       grant_count;
+	size_t                       active_calls;
+	bool                         event_pending;
+	bool                         zero_grants_notified;
 };
 
 /* A capability grants a target process rights on a cap_object. Capabilities form a delegation tree through parent. */
@@ -43,6 +62,7 @@ struct capability {
 	uint64_t           reference_count;
 };
 
+/* Results from capability topology and authorization operations. */
 enum cap_result {
 	CAP_OK = 0,
 	CAP_INVALID_ARGUMENTS,
@@ -69,6 +89,12 @@ cap_object_id_t cap_object_create_kernel_managed(uint64_t object_id, cap_kernel_
                                                  cap_kernel_process_cleanup_t process_cleanup,
                                                  cap_kernel_destroy_t destroy, bool* out_created);
 
+/* Publish a managed kernel object with a zero-grants lifecycle handler. */
+cap_object_id_t cap_object_create_kernel_lifecycle(uint64_t object_id, cap_kernel_handler_t handler,
+                                                   cap_kernel_process_cleanup_t process_cleanup,
+                                                   cap_kernel_destroy_t         destroy,
+                                                   cap_object_event_handler_t event_handler, bool* out_created);
+
 /* Look up an existing object. The returned pointer is borrowed and requires external lifetime synchronisation. */
 struct cap_object* cap_object_lookup(struct channel* endpoint, uint64_t object_id);
 
@@ -85,11 +111,33 @@ bool cap_object_destroy_with_id(cap_object_id_t id);
 /* Unregister a routing object. This never destroys the resource identified by object_id. */
 bool cap_object_destroy(struct cap_object* object);
 
+/* Unpublish a userspace provider object identified by its endpoint and object ID. */
+bool cap_object_unpublish(struct channel* endpoint, uint64_t object_id);
+
 /* Unpublish every routing object owned by endpoint. Represented provider resources remain untouched. */
 void cap_object_unregister_endpoint(struct channel* endpoint);
 
 /* Notify managed kernel objects before a process and its address space are destroyed. */
 void cap_object_cleanup_for_process(process_id_t process);
+
+/* Begin a capability call and snapshot its retained routing object and rights. */
+enum cap_result cap_object_begin_call(process_id_t caller, struct capability* capability,
+                                      struct cap_object** out_object, cap_rights_t* out_rights);
+
+/* End a previously begun capability call and release its routing-object reference. */
+void cap_object_end_call(struct cap_object* object);
+
+/* Consume and validate one queued userspace zero-grants event. */
+bool cap_object_consume_zero_grants_event(struct cap_object* object, uint64_t* out_object_id);
+
+/* Discard one queued lifecycle event reference without notifying its provider. */
+void cap_object_discard_event(struct cap_object* object);
+
+/* Return the number of live grants referencing an object. */
+size_t cap_object_grant_count(struct cap_object* object);
+
+/* Return the number of active calls using an object. */
+size_t cap_object_active_call_count(struct cap_object* object);
 
 /* Create a fresh capability grant and return its stable ID. */
 cap_id_t cap_create(cap_object_id_t cap_object_id, process_id_t target, cap_rights_t rights, struct capability* parent);

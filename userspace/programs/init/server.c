@@ -186,26 +186,31 @@ int server_run(const struct init_startup_info* startup) {
 
 	if (server_endpoint == CHANNEL_ID_INVALID || startup == NULL) return 1;
 	for (;;) {
-		received = false;
-		status   = channel_recv(server_endpoint, &request, &buffer, sizeof(buffer), &received);
-		if (status != SYSCALL_STATUS_OK) {
-			printf("init: channel receive failed: %u\n", (unsigned)status);
-			return 1;
-		}
-		if (!received) {
-			if (!loader_started) {
-				if (!loader_launch(startup)) return 1;
-				loader_started = true;
-				continue;
+		do {
+			received = false;
+			status   = channel_recv(server_endpoint, &request, &buffer, sizeof(buffer), &received);
+			if (status != SYSCALL_STATUS_OK) {
+				printf("init: channel receive failed: %u\n", (unsigned)status);
+				return 1;
 			}
-			(void)sched_yield();
+			if (received) {
+				if (request.object_id != INIT_SERVICE_OBJECT_ID || (request.rights & CAP_CALL) == 0u ||
+				    request.request_size < sizeof(buffer.header)) {
+					if (!reply_request(request.call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT)) return 1;
+				}
+				else if (!dispatch_request(&request, &buffer)) return 1;
+			}
+		} while (received);
+		do {
+			struct channel_event event;
+			status = channel_event_recv(server_endpoint, &event, &received);
+			if (status != SYSCALL_STATUS_OK) return 1;
+		} while (received);
+		if (!loader_started) {
+			if (!loader_launch(startup)) return 1;
+			loader_started = true;
 			continue;
 		}
-		if (request.object_id != INIT_SERVICE_OBJECT_ID || (request.rights & CAP_CALL) == 0u ||
-		    request.request_size < sizeof(buffer.header)) {
-			if (!reply_request(request.call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT)) return 1;
-			continue;
-		}
-		if (!dispatch_request(&request, &buffer)) return 1;
+		(void)sched_yield();
 	}
 }

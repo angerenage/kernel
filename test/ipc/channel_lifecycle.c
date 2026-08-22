@@ -81,7 +81,7 @@ Test(channel, destroy_completes_pending_calls_as_unavailable) {
 
 	channel = channel_create(77u);
 	cr_assert_not_null(channel);
-	call = cap_pending_call_create(channel->id, 77u, 55u, 0u);
+	call = cap_pending_call_create(NULL, channel->id, 77u, 55u, 0u);
 	cr_assert_not_null(call);
 
 	cr_assert_eq(channel_destroy(channel, 77u), CHANNEL_OK);

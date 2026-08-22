@@ -67,6 +67,11 @@ enum channel_result channel_destroy(struct channel* channel, process_id_t caller
 	}
 	cap_object_unregister_endpoint(channel);
 	cap_pending_call_cancel_channel(channel->id);
+	for (;;) {
+		struct cap_object* object = channel_dequeue_cap_event(channel);
+		if (object == NULL) break;
+		cap_object_discard_event(object);
+	}
 	channel_release(channel);
 	return CHANNEL_OK;
 }
@@ -123,6 +128,37 @@ bool channel_enqueue_cap_request(struct channel* channel, const struct cap_reque
 	enqueued = ring_buffer_enqueue(&channel->cap_queue, request);
 	spinlock_unlock_irqrestore(&channel->lock, state);
 	return enqueued;
+}
+
+bool channel_enqueue_cap_event(struct channel* channel, struct cap_object* object) {
+	struct irq_state state;
+	if (channel == NULL || object == NULL) return false;
+	state = spinlock_lock_irqsave(&channel->lock);
+	if (channel->closing) {
+		spinlock_unlock_irqrestore(&channel->lock, state);
+		return false;
+	}
+	object->event_next = NULL;
+	if (channel->event_tail == NULL) channel->event_head = object;
+	else channel->event_tail->event_next = object;
+	channel->event_tail = object;
+	spinlock_unlock_irqrestore(&channel->lock, state);
+	return true;
+}
+
+struct cap_object* channel_dequeue_cap_event(struct channel* channel) {
+	struct cap_object* object;
+	struct irq_state   state;
+	if (channel == NULL) return NULL;
+	state  = spinlock_lock_irqsave(&channel->lock);
+	object = channel->event_head;
+	if (object != NULL) {
+		channel->event_head = object->event_next;
+		if (channel->event_head == NULL) channel->event_tail = NULL;
+		object->event_next = NULL;
+	}
+	spinlock_unlock_irqrestore(&channel->lock, state);
+	return object;
 }
 
 void process_channel_state_init(struct process_channel_state* state) {

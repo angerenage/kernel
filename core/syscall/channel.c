@@ -31,7 +31,6 @@ static syscall_result_t syscall_channel_result_to_syscall(enum channel_result re
 	}
 }
 
-/* arg0 = (out) channel_id_t* out_id */
 syscall_result_t syscall_channel_create(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
                                         uintptr_t arg5) {
 	struct process*       process;
@@ -72,7 +71,50 @@ syscall_result_t syscall_channel_create(uintptr_t arg0, uintptr_t arg1, uintptr_
 	return syscall_result_ok(0u);
 }
 
-/* arg0 = channel_id_t channel_id */
+syscall_result_t syscall_channel_event_recv(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
+                                            uintptr_t arg4, uintptr_t arg5) {
+	struct process*              process;
+	struct channel*              channel;
+	struct address_space*        space;
+	struct channel_event         event = {0};
+	enum address_transfer_result transfer_result;
+	(void)arg2;
+	(void)arg3;
+	(void)arg4;
+	(void)arg5;
+
+	process = process_current();
+	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	if (arg0 == CHANNEL_ID_INVALID) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	if (arg1 == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 1u);
+	space = syscall_current_user_space();
+	if (space != NULL) {
+		transfer_result = address_space_validate_range(
+			space, arg1, sizeof(event), ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
+		if (transfer_result != ADDRESS_TRANSFER_OK) return syscall_result_from_address_transfer(transfer_result, 1u);
+	}
+
+	channel = channel_acquire((channel_id_t)arg0);
+	if (channel == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	if (channel->owner_pid != process_pid(process)) {
+		channel_release(channel);
+		return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
+	}
+	for (;;) {
+		struct cap_object* object = channel_dequeue_cap_event(channel);
+		if (object == NULL) {
+			channel_release(channel);
+			return syscall_result_ok(0u);
+		}
+		if (!cap_object_consume_zero_grants_event(object, &event.object_id)) continue;
+		event.type = CHANNEL_EVENT_CAP_ZERO_GRANTS;
+		break;
+	}
+	channel_release(channel);
+	syscall_result_t copy_result = syscall_copy_to_user(space, arg1, &event, sizeof(event), 1u);
+	return copy_result.status == SYSCALL_STATUS_OK ? syscall_result_ok(1u) : copy_result;
+}
+
 syscall_result_t syscall_channel_destroy(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
                                          uintptr_t arg5) {
 	struct process*     process;

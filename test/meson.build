@@ -136,6 +136,7 @@ test_suites = [
 			'capability/authorization.c',
 			'capability/delegation.c',
 			'capability/revocation.c',
+			'capability/lifecycle.c',
 		),
 		'suites': ['unit', 'core'],
 	},

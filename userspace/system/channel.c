@@ -19,6 +19,18 @@ syscall_status_t channel_create(channel_id_t* out_id) {
 	return result.status;
 }
 
+syscall_status_t channel_event_recv(channel_id_t channel, struct channel_event* out_event, bool* out_received) {
+	syscall_result_t result;
+	if (out_event == NULL) {
+		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(out_event);
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	}
+	if (out_received != NULL) *out_received = false;
+	result = syscall(SYSCALL_CHANNEL_EVENT_RECV, (uintptr_t)channel, (uintptr_t)out_event, 0u, 0u, 0u, 0u);
+	if (result.status == SYSCALL_STATUS_OK && out_received != NULL) *out_received = result.value != 0u;
+	return result.status;
+}
+
 syscall_status_t channel_destroy(channel_id_t channel_id) {
 	syscall_result_t result = syscall(SYSCALL_CHANNEL_DESTROY, (uintptr_t)channel_id, 0u, 0u, 0u, 0u, 0u);
 

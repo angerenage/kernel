@@ -57,3 +57,45 @@ Test(syscall, channel_create_and_destroy_manage_process_owned_state) {
 	cr_assert(process_destroy(process), "process_destroy failed");
 	syscall_test_reset_state();
 }
+
+Test(syscall, cap_unpublish_requires_endpoint_owner_authority) {
+	struct process*  owner;
+	struct process*  other;
+	struct uthread*  owner_thread;
+	struct uthread*  other_thread;
+	struct channel*  endpoint;
+	cap_object_id_t  object_id;
+	syscall_result_t result;
+
+	syscall_test_init_process_environment();
+	capability_init();
+	owner        = syscall_test_spawn_process("syscall/unpublish-owner");
+	other        = syscall_test_spawn_process("syscall/unpublish-other");
+	owner_thread = process_main_thread(owner);
+	other_thread = process_main_thread(other);
+	endpoint     = channel_create(process_pid(owner));
+	cr_assert_not_null(endpoint);
+	object_id = cap_object_create(0x500u, endpoint, NULL);
+	cr_assert_neq(object_id, CAP_OBJECT_ID_INVALID);
+	cr_assert_neq(cap_create(object_id, process_pid(other), CAP_CALL, NULL), CAP_ID_INVALID);
+
+	sched_set_current(cpu_current(), &other_thread->thread);
+	result = syscall_dispatch(SYSCALL_CAP_UNPUBLISH, endpoint->id, 0x500u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_DENIED);
+	struct cap_object* retained = cap_object_acquire(object_id);
+	cr_assert_not_null(retained);
+	cap_object_release(retained);
+
+	sched_set_current(cpu_current(), &owner_thread->thread);
+	result = syscall_dispatch(SYSCALL_CAP_UNPUBLISH, endpoint->id, 0x500u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_null(cap_object_acquire(object_id));
+	cr_assert_eq(channel_destroy(endpoint, process_pid(owner)), CHANNEL_OK);
+
+	thread_mark_zombie(&other_thread->thread);
+	cr_assert(process_destroy(other));
+	sched_set_current(cpu_current(), &owner_thread->thread);
+	thread_mark_zombie(&owner_thread->thread);
+	cr_assert(process_destroy(owner));
+	syscall_test_reset_state();
+}

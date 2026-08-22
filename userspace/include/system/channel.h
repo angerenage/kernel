@@ -19,3 +19,6 @@ syscall_status_t channel_recv(channel_id_t endpoint_id, struct cap_request* out_
 /* Complete a previously received capability call. */
 syscall_status_t channel_reply(cap_call_id_t call_id, const void* response, size_t response_size,
                                syscall_status_t status);
+
+/* Receive one pending channel lifecycle event without blocking. */
+syscall_status_t channel_event_recv(channel_id_t channel, struct channel_event* out_event, bool* out_received);

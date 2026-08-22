@@ -15,23 +15,6 @@ enum cap_pending_state {
 	CAP_PENDING_STATE_COMPLETED,
 };
 
-struct cap_pending_call {
-	cap_call_id_t    id;
-	channel_id_t     endpoint_id;
-	process_id_t     provider;
-	process_id_t     caller;
-	size_t           response_capacity;
-	void*            request;
-	size_t           request_size;
-	void*            response;
-	syscall_result_t result;
-	struct semaphore completion;
-	uint32_t         state;
-	uint32_t         channel_closed;
-	uint32_t         caller_closed;
-	uint64_t         reference_count;
-};
-
 static struct id_table pending_call_table = {
 	.lock    = SPINLOCK_INIT_CLASS("pending_call_table", SPINLOCK_ORDER_ID_TABLE, SPINLOCK_FLAG_IRQSAVE),
 	.next_id = CAP_CALL_ID_MIN,
@@ -55,6 +38,7 @@ static struct cap_pending_call* cap_pending_call_acquire(cap_call_id_t id) {
 static void cap_pending_call_release(struct cap_pending_call* call) {
 	if (call == NULL) return;
 	if (__atomic_sub_fetch(&call->reference_count, 1u, __ATOMIC_ACQ_REL) != 0u) return;
+	if (call->object != NULL) cap_object_end_call(call->object);
 	free(call->request);
 	free(call->response);
 	free(call);
@@ -67,9 +51,12 @@ static bool cap_pending_call_claim(struct cap_pending_call* call) {
 }
 
 static void cap_pending_call_complete(struct cap_pending_call* call, syscall_status_t status, size_t response_size) {
-	call->result = syscall_result_error(status, response_size);
+	struct cap_object* object = call->object;
+	call->object              = NULL;
+	call->result              = syscall_result_error(status, response_size);
 	if (status == SYSCALL_STATUS_OK) call->result = syscall_result_ok(response_size);
 	__atomic_store_n(&call->state, CAP_PENDING_STATE_COMPLETED, __ATOMIC_RELEASE);
+	cap_object_end_call(object);
 	(void)semaphore_release(&call->completion);
 }
 
@@ -77,8 +64,8 @@ void cap_pending_call_init(void) {
 	(void)id_table_init(&pending_call_table, "pending_call_table", CAP_CALL_ID_MIN, CAP_CALL_ID_MAX);
 }
 
-struct cap_pending_call* cap_pending_call_create(channel_id_t endpoint_id, process_id_t provider, process_id_t caller,
-                                                 size_t response_capacity) {
+struct cap_pending_call* cap_pending_call_create(struct cap_object* object, channel_id_t endpoint_id,
+                                                 process_id_t provider, process_id_t caller, size_t response_capacity) {
 	struct cap_pending_call* call;
 	id_table_id_t            id;
 
@@ -99,11 +86,13 @@ struct cap_pending_call* cap_pending_call_create(channel_id_t endpoint_id, proce
 	call->provider          = provider;
 	call->caller            = caller;
 	call->response_capacity = response_capacity;
+	call->object            = object;
 	call->reference_count   = 1u;
 	call->state             = CAP_PENDING_STATE_WAITING;
 	semaphore_init(&call->completion, 0u);
 
 	if (id_table_alloc(&pending_call_table, call, &id) != ID_TABLE_OK) {
+		call->object = NULL;
 		cap_pending_call_release(call);
 		return NULL;
 	}
@@ -129,6 +118,7 @@ void cap_pending_call_destroy(struct cap_pending_call* call) {
 	struct cap_pending_call* removed = NULL;
 
 	if (call == NULL) return;
+	if (cap_pending_call_claim(call)) cap_pending_call_complete(call, SYSCALL_STATUS_UNAVAILABLE, 0u);
 	if (id_table_remove(&pending_call_table, call->id, (void**)&removed) != ID_TABLE_OK) return;
 	cap_pending_call_release(removed);
 }

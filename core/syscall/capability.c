@@ -288,9 +288,9 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 	process_id_t       caller_pid;
 	size_t             request_size;
 	size_t             response_capacity;
-	enum cap_result    auth_result;
-	enum cap_result    valid_result;
+	enum cap_result    begin_result;
 	struct cap_object* object;
+	struct channel*    endpoint;
 	struct cap_request req;
 	void*              kernel_request;
 	void*              kernel_response;
@@ -308,89 +308,61 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 	cap = cap_acquire((cap_id_t)arg0);
 	if (cap == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 
-	object = cap_object_acquire(cap->cap_object_id);
-	if (object == NULL) {
-		(void)cap_destroy_by_id(cap->cap_id);
-		cap_release(cap);
-		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	}
-
-	auth_result = cap_is_authorized(caller_pid, cap);
-	if (auth_result != CAP_OK) {
-		cap_object_release(object);
-		cap_release(cap);
-		return syscall_cap_result_to_syscall(auth_result, 0u);
-	}
-
-	valid_result = cap_is_valid(cap);
-	if (valid_result != CAP_OK) {
-		cap_object_release(object);
-		cap_release(cap);
-		return syscall_cap_result_to_syscall(valid_result, 0u);
-	}
-
-	granted_rights = cap_rights(cap);
-	if ((granted_rights & CAP_CALL) == 0u) {
-		cap_object_release(object);
-		cap_release(cap);
-		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	}
-
 	request_size      = (size_t)arg2;
 	response_capacity = (size_t)arg4;
 	if ((uintptr_t)request_size != arg2 || request_size == 0u || request_size > CAP_MAX_REQUEST_SIZE) {
-		cap_object_release(object);
 		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 2u);
 	}
 	if (arg1 == 0u) {
-		cap_object_release(object);
 		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 1u);
 	}
 	if ((uintptr_t)response_capacity != arg4 || response_capacity > CAP_MAX_RESPONSE_SIZE) {
-		cap_object_release(object);
 		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 4u);
 	}
 	if ((arg3 == 0u) != (response_capacity == 0u)) {
-		cap_object_release(object);
 		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 3u);
 	}
 
 	kernel_request = malloc(request_size);
 	if (kernel_request == NULL) {
-		cap_object_release(object);
 		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 2u);
 	}
 	call_result = syscall_copy_from_user(syscall_current_user_space(), arg1, kernel_request, request_size, 1u);
 	if (call_result.status != SYSCALL_STATUS_OK) {
 		free(kernel_request);
-		cap_object_release(object);
 		cap_release(cap);
 		return call_result;
 	}
 	call_result = syscall_cap_validate_response_buffer(arg3, response_capacity);
 	if (call_result.status != SYSCALL_STATUS_OK) {
 		free(kernel_request);
-		cap_object_release(object);
 		cap_release(cap);
 		return call_result;
+	}
+
+	begin_result = cap_object_begin_call(caller_pid, cap, &object, &granted_rights);
+	if (begin_result != CAP_OK) {
+		free(kernel_request);
+		cap_release(cap);
+		return syscall_cap_result_to_syscall(begin_result, 0u);
 	}
 
 	if (object->endpoint == NULL) {
 		if (object->handler == NULL) {
 			free(kernel_request);
-			cap_object_release(object);
+			cap_object_end_call(object);
 			cap_release(cap);
 			return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 		}
 		kernel_response = response_capacity == 0u ? NULL : malloc(response_capacity);
 		if (response_capacity != 0u && kernel_response == NULL) {
 			free(kernel_request);
-			cap_object_release(object);
+			cap_object_end_call(object);
 			cap_release(cap);
 			return syscall_result_error(SYSCALL_STATUS_FAILED, 4u);
 		}
@@ -406,7 +378,7 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 		req.response_capacity = response_capacity;
 
 		call_result = object->handler(&req);
-		cap_object_release(object);
+		cap_object_end_call(object);
 		cap_release(cap);
 		if (call_result.status == SYSCALL_STATUS_OK && call_result.value > response_capacity) {
 			free(kernel_response);
@@ -423,15 +395,14 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 		return call_result;
 	}
 
-	struct cap_pending_call* pending =
-		cap_pending_call_create(object->endpoint->id, object->endpoint->owner_pid, caller_pid, response_capacity);
-	if (pending == NULL) {
+	endpoint = object->endpoint;
+	if (!channel_retain(endpoint)) {
 		free(kernel_request);
-		cap_object_release(object);
+		cap_object_end_call(object);
 		cap_release(cap);
-		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
+		return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 	}
-	req.call_id           = cap_pending_call_id(pending);
+	req.call_id           = CAP_CALL_ID_INVALID;
 	req.caller            = caller_pid;
 	req.cap_id            = cap->cap_id;
 	req.object_id         = object->object_id;
@@ -440,23 +411,33 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 	req.request_size      = request_size;
 	req.response          = NULL;
 	req.response_capacity = response_capacity;
+	struct cap_pending_call* pending =
+		cap_pending_call_create(object, endpoint->id, endpoint->owner_pid, caller_pid, response_capacity);
+	if (pending == NULL) {
+		channel_release(endpoint);
+		free(kernel_request);
+		cap_object_end_call(object);
+		cap_release(cap);
+		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
+	}
+	req.call_id = cap_pending_call_id(pending);
 	if (!cap_pending_call_attach_request(pending, kernel_request, request_size)) {
 		cap_pending_call_destroy(pending);
+		channel_release(endpoint);
 		free(kernel_request);
-		cap_object_release(object);
 		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 	kernel_request = NULL;
 
-	if (!channel_enqueue_cap_request(object->endpoint, &req)) {
+	if (!channel_enqueue_cap_request(endpoint, &req)) {
 		cap_pending_call_destroy(pending);
-		cap_object_release(object);
+		channel_release(endpoint);
 		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
+	channel_release(endpoint);
 
-	cap_object_release(object);
 	cap_release(cap);
 	const void* pending_response = NULL;
 	cap_pending_call_wait(pending, &call_result, &pending_response);
@@ -615,6 +596,29 @@ syscall_result_t syscall_cap_drop(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 
 	cap_release(cap);
 	return syscall_result_ok(0u);
+}
+
+syscall_result_t syscall_cap_unpublish(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
+                                       uintptr_t arg5) {
+	struct process* process;
+	struct channel* endpoint;
+	bool            unpublished;
+	(void)arg2;
+	(void)arg3;
+	(void)arg4;
+	(void)arg5;
+	process = process_current();
+	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	if (arg0 == CHANNEL_ID_INVALID) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	endpoint = channel_acquire((channel_id_t)arg0);
+	if (endpoint == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	if (endpoint->owner_pid != process_pid(process)) {
+		channel_release(endpoint);
+		return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
+	}
+	unpublished = cap_object_unpublish(endpoint, (uint64_t)arg1);
+	channel_release(endpoint);
+	return unpublished ? syscall_result_ok(0u) : syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 1u);
 }
 
 syscall_result_t syscall_cap_recv(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,

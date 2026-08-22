@@ -35,6 +35,13 @@ static uint64_t loaded_object_id(const struct loader_loaded_program* program) {
 	return (uint64_t)(uintptr_t)program;
 }
 
+static syscall_status_t unpublish_load(struct loader_loaded_program* program) {
+	if (program == NULL || program->load_cap == CAP_ID_INVALID) return SYSCALL_STATUS_OK;
+	syscall_status_t status = cap_unpublish(loader_endpoint, loaded_object_id(program));
+	if (status == SYSCALL_STATUS_OK) program->load_cap = CAP_ID_INVALID;
+	return status;
+}
+
 static struct loader_loaded_program* find_loaded(uint64_t object_id) {
 	for (struct loader_loaded_program* program = loaded_programs; program != NULL; program = program->next) {
 		if (loaded_object_id(program) == object_id) return program;
@@ -54,7 +61,6 @@ static void unlink_loaded(struct loader_loaded_program* target) {
 		cursor = &(*cursor)->next;
 	}
 }
-
 static bool copy_request(const struct cap_request* call, const void* data, void* out, size_t size) {
 	if (call == NULL || data == NULL || out == NULL || call->request_size < size) return false;
 	memcpy(out, data, size);
@@ -100,6 +106,7 @@ static bool handle_load(const struct cap_request* call, const void* data) {
 			   .process_id = program->process_id,
     };
 	if (reply_request(call->call_id, &response, sizeof(response), SYSCALL_STATUS_OK)) return true;
+	(void)unpublish_load(program);
 	unlink_loaded(program);
 	loader_discard_program(program);
 	return false;
@@ -129,6 +136,7 @@ static bool handle_run(const struct cap_request* call, struct loader_loaded_prog
 	                              &loader_thread_cap);
 	if (status != SYSCALL_STATUS_OK) {
 		if (program->started) {
+			(void)unpublish_load(program);
 			unlink_loaded(program);
 			loader_discard_program(program);
 		}
@@ -146,17 +154,18 @@ static bool handle_run(const struct cap_request* call, struct loader_loaded_prog
 	}
 
 	if (status != SYSCALL_STATUS_OK) {
+		(void)unpublish_load(program);
 		unlink_loaded(program);
 		loader_discard_program(program);
 		return reply_request(call->call_id, NULL, 0u, status);
 	}
-	status = cap_revoke(program->load_cap, 0u);
+	status = unpublish_load(program);
 	if (status != SYSCALL_STATUS_OK) {
 		unlink_loaded(program);
 		loader_discard_program(program);
 		return reply_request(call->call_id, NULL, 0u, status);
 	}
-	program->load_cap = CAP_ID_INVALID;
+
 	if (reply_request(call->call_id, &response, sizeof(response), SYSCALL_STATUS_OK)) return true;
 	unlink_loaded(program);
 	loader_discard_program(program);
@@ -171,9 +180,9 @@ static bool handle_cancel(const struct cap_request* call, struct loader_loaded_p
 	    call->request_size != sizeof(request))
 		return reply_request(call->call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 
-	status = cap_revoke(program->load_cap, 0u);
+	status = unpublish_load(program);
 	if (status != SYSCALL_STATUS_OK) return reply_request(call->call_id, NULL, 0u, status);
-	program->load_cap = CAP_ID_INVALID;
+
 	unlink_loaded(program);
 	loader_discard_program(program);
 	return reply_request(call->call_id, NULL, 0u, SYSCALL_STATUS_OK);
@@ -238,16 +247,30 @@ int loader_server_run(void) {
 	       LOADER_SERVICE_NAME);
 
 	for (;;) {
-		received = false;
-		status   = channel_recv(loader_endpoint, &call, request_buffer, sizeof(request_buffer), &received);
-		if (status != SYSCALL_STATUS_OK) {
-			printf("loader: channel receive failed: %u\n", (unsigned)status);
-			return 1;
-		}
-		if (!received) {
-			(void)sched_yield();
-			continue;
-		}
-		if (!dispatch_request(&call, request_buffer)) printf("loader: channel reply failed\n");
+		do {
+			received = false;
+			status   = channel_recv(loader_endpoint, &call, request_buffer, sizeof(request_buffer), &received);
+			if (status != SYSCALL_STATUS_OK) {
+				printf("loader: channel receive failed: %u\n", (unsigned)status);
+				return 1;
+			}
+			if (received && !dispatch_request(&call, request_buffer)) printf("loader: channel reply failed\n");
+		} while (received);
+		do {
+			struct channel_event event;
+			received = false;
+			status   = channel_event_recv(loader_endpoint, &event, &received);
+			if (status != SYSCALL_STATUS_OK) return 1;
+			if (received && event.type == CHANNEL_EVENT_CAP_ZERO_GRANTS &&
+			    event.object_id != LOADER_SERVICE_OBJECT_ID) {
+				struct loader_loaded_program* program = find_loaded(event.object_id);
+				if (program != NULL && !program->started) {
+					(void)unpublish_load(program);
+					unlink_loaded(program);
+					loader_discard_program(program);
+				}
+			}
+		} while (received);
+		(void)sched_yield();
 	}
 }

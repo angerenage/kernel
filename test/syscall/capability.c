@@ -1,5 +1,55 @@
 #include "test_support.h"
 
+static size_t          kernel_call_lifecycle_events;
+static cap_object_id_t kernel_call_object_id;
+
+static void kernel_call_lifecycle_callback(struct cap_object* object, enum cap_object_event event) {
+	cr_assert_eq(event, CAP_OBJECT_EVENT_ZERO_GRANTS);
+	cr_assert_eq(object->cap_object_id, kernel_call_object_id);
+	kernel_call_lifecycle_events++;
+}
+
+static syscall_result_t kernel_call_lifecycle_handler(const struct cap_request* request) {
+	struct cap_object* object = cap_object_acquire(kernel_call_object_id);
+	struct capability* grant  = cap_acquire(request->cap_id);
+	cr_assert_not_null(object);
+	cr_assert_not_null(grant);
+	cr_assert_eq(cap_object_active_call_count(object), 1u);
+	cr_assert(cap_destroy(grant));
+	cr_assert_eq(kernel_call_lifecycle_events, 0u);
+	cap_release(grant);
+	cap_object_release(object);
+	return syscall_result_ok(0u);
+}
+
+Test(syscall, kernel_handler_call_defers_zero_grants_until_handler_returns) {
+	struct process* process;
+	struct uthread* main_thread;
+	cap_id_t        capability_id;
+	bool            created = false;
+	uint8_t         request = 0u;
+
+	syscall_test_init_process_environment();
+	capability_init();
+	process     = syscall_test_spawn_process("syscall/kernel-call-lifecycle");
+	main_thread = process_main_thread(process);
+	cr_assert_not_null(main_thread);
+	main_thread->thread.address_space = NULL;
+	sched_set_current(cpu_current(), &main_thread->thread);
+	kernel_call_lifecycle_events = 0u;
+	kernel_call_object_id        = cap_object_create_kernel_lifecycle(
+        0x600u, kernel_call_lifecycle_handler, NULL, NULL, kernel_call_lifecycle_callback, &created);
+	cr_assert(created);
+	capability_id = cap_create(kernel_call_object_id, process_pid(process), CAP_CALL, NULL);
+	cr_assert_neq(capability_id, CAP_ID_INVALID);
+	syscall_result_t result =
+		syscall_dispatch(SYSCALL_CAP_CALL, capability_id, (uintptr_t)&request, sizeof(request), 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(kernel_call_lifecycle_events, 1u);
+	cr_assert(cap_object_destroy_with_id(kernel_call_object_id));
+	syscall_test_reset_state();
+}
+
 Test(syscall, capability_call_uses_distinct_request_and_response_buffers) {
 	struct process*                  process;
 	struct uthread*                  main_thread;
@@ -117,7 +167,7 @@ Test(syscall, capability_reply_completes_provider_owned_call) {
 	sched_set_current(cpu_current(), &main_thread->thread);
 	main_thread->thread.address_space = NULL;
 
-	pending = cap_pending_call_create(9u, process_pid(process), 99u, sizeof(reply_value));
+	pending = cap_pending_call_create(NULL, 9u, process_pid(process), 99u, sizeof(reply_value));
 	cr_assert_not_null(pending);
 	result = syscall_dispatch(SYSCALL_CAP_REPLY,
 	                          cap_pending_call_id(pending),

@@ -60,6 +60,9 @@ syscall_result_t syscall_recv_message(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 syscall_result_t syscall_channel_create(uintptr_t arg0, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 syscall_result_t syscall_channel_destroy(uintptr_t arg0, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 
+/* Receive one pending lifecycle event from an owned channel. */
+syscall_result_t syscall_channel_event_recv(uintptr_t arg0, uintptr_t arg1, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+
 syscall_result_t syscall_cap_create(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
                                     uintptr_t);
 syscall_result_t syscall_cap_delegate(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t,
@@ -74,5 +77,8 @@ syscall_result_t syscall_cap_revoke(uintptr_t arg0, uintptr_t arg1, uintptr_t, u
 syscall_result_t syscall_cap_recv(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t, uintptr_t);
 syscall_result_t syscall_cap_valid(uintptr_t arg0, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 syscall_result_t syscall_cap_drop(uintptr_t arg0, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+
+/* Unpublish an object routed through an owned channel. */
+syscall_result_t syscall_cap_unpublish(uintptr_t arg0, uintptr_t arg1, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 
 syscall_result_t syscall_upcall_dropped_count(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
