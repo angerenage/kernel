@@ -1,3 +1,5 @@
+#include "message.h"
+
 #include <base/message.h>
 #include <core/address_transfer.h>
 #include <core/message.h>

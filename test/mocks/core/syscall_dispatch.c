@@ -1,4 +1,14 @@
 #include <core/syscall.h>
+#include <kernel/syscall.h>
+
+#include "../../../kernel/src/syscall/capability.h"
+#include "../../../kernel/src/syscall/channel.h"
+#include "../../../kernel/src/syscall/message.h"
+#include "../../../kernel/src/syscall/misc.h"
+#include "../../../kernel/src/syscall/process.h"
+#include "../../../kernel/src/syscall/thread.h"
+#include "../../../kernel/src/syscall/time.h"
+#include "../../../kernel/src/syscall/upcall.h"
 
 static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 	[SYSCALL_NOP] = syscall_nop,

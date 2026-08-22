@@ -8,3 +8,6 @@ syscall_result_t syscall_self(uintptr_t arg0, uintptr_t, uintptr_t, uintptr_t, u
 
 /* Create a new process and return a capability that grants full process-management rights to the caller. */
 syscall_result_t syscall_create_process(uintptr_t arg0, uintptr_t arg1, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+
+/* Terminate the calling process with the given exit code. */
+syscall_result_t syscall_exit_process(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);

@@ -13,10 +13,10 @@
 #include <kernel/boot.h>
 #include <kernel/capability.h>
 #include <libc/stdlib.h>
+#include <libc/string.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "memory.h"
 

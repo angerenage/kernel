@@ -5,9 +5,12 @@
 #include <core/uthread.h>
 #include <criterion/criterion.h>
 #include <hal/userspace.h>
+#include <kernel/syscall.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+
+#include "../../kernel/src/syscall/upcall.h"
 
 struct hal_userspace_return_frame {
 	bool      user;

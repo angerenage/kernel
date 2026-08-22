@@ -1,4 +1,4 @@
-#include <core/syscall.h>
+#include <kernel/syscall.h>
 #include <stdint.h>
 
 #include "interrupts_private.h"

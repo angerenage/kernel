@@ -1,5 +1,7 @@
 #include "test_support.h"
 
+#include "../../kernel/src/syscall/capability.h"
+
 static size_t serial_bytes;
 
 void kernel_capability_loader_init(void) {
@@ -63,8 +65,7 @@ void kernel_capability_test_end(struct kernel_capability_test_context* ctx) {
 
 syscall_result_t kernel_capability_test_call(cap_id_t cap, const void* request, size_t request_size, void* response,
                                              size_t response_capacity) {
-	return syscall_dispatch(SYSCALL_CAP_CALL,
-	                        (uintptr_t)cap,
+	return syscall_cap_call((uintptr_t)cap,
 	                        (uintptr_t)request,
 	                        (uintptr_t)request_size,
 	                        (uintptr_t)response,

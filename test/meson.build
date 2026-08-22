@@ -53,7 +53,6 @@ hal_mock_sources = files(
 	'mocks/hal/paging.c',
 	'mocks/hal/userspace.c',
 	'mocks/kernel/boot.c',
-	'mocks/core/syscall_dispatch.c',
 )
 
 core_test_lib = static_library(
@@ -240,6 +239,7 @@ test_suites = [
 	{
 		'name': 'syscall',
 		'sources': files(
+			'mocks/core/syscall_dispatch.c',
 			'vmm/test_support.c',
 			'vmm/mock_paging.c',
 			'syscall/test_support.c',
@@ -253,10 +253,17 @@ test_suites = [
 			'syscall/message_receive.c',
 			'syscall/message_roundtrip.c',
 			'syscall/validation.c',
+			'../kernel/src/syscall/capability.c',
+			'../kernel/src/syscall/channel.c',
+			'../kernel/src/syscall/message.c',
+			'../kernel/src/syscall/misc.c',
 			'../kernel/src/syscall/module.c',
 			'../kernel/src/syscall/process.c',
+			'../kernel/src/syscall/thread.c',
+			'../kernel/src/syscall/time.c',
+			'../kernel/src/syscall/upcall.c',
 		),
-		'suites': ['unit', 'core'],
+		'suites': ['unit', 'kernel'],
 	},
 	{
 		'name': 'syscall_dispatch',
@@ -265,7 +272,7 @@ test_suites = [
 			'../kernel/src/syscall/syscall.c',
 		),
 		'link_with': base_test_lib,
-		'suites': ['unit', 'core'],
+		'suites': ['unit', 'kernel'],
 	},
 	{
 		'name': 'elf_loader',
@@ -295,6 +302,7 @@ test_suites = [
 			'../kernel/src/capability/memory.c',
 			'../kernel/src/capability/boot_module.c',
 			'../kernel/src/capability/serial.c',
+			'../kernel/src/syscall/capability.c',
 			'../kernel/src/syscall/module.c',
 		),
 		'suites': ['unit', 'kernel'],
@@ -329,10 +337,11 @@ test_suites = [
 		'name': 'upcall_syscall',
 		'sources': files(
 			'core/upcall_syscall_test.c',
-			'../core/syscall/upcall.c',
+			'../kernel/src/syscall/upcall.c',
+			'../kernel/src/syscall/user_frame.c',
 		),
 		'link_with': base_test_lib,
-		'suites': ['unit', 'core'],
+		'suites': ['unit', 'kernel'],
 	},
 	{
 		'name': 'user_upcall',

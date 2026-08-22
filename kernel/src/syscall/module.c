@@ -7,8 +7,8 @@
 #include <core/syscall.h>
 #include <kernel/boot.h>
 #include <libc/stdlib.h>
+#include <libc/string.h>
 #include <stddef.h>
-#include <string.h>
 
 #include "../capability/boot_module.h"
 

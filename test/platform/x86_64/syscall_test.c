@@ -1,8 +1,8 @@
 #include <core/exception.h>
 #include <core/mm.h>
-#include <core/syscall.h>
 #include <criterion/criterion.h>
 #include <hal/hcf.h>
+#include <kernel/syscall.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>

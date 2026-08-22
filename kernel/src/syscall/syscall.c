@@ -1,9 +1,17 @@
-#include <core/syscall.h>
+#include <kernel/syscall.h>
+#include <stddef.h>
 
+#include "capability.h"
+#include "channel.h"
 #include "memory.h"
+#include "message.h"
+#include "misc.h"
 #include "module.h"
 #include "process.h"
 #include "signal.h"
+#include "thread.h"
+#include "time.h"
+#include "upcall.h"
 
 static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 	[SYSCALL_NOP] = syscall_nop,

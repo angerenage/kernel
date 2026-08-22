@@ -1,3 +1,5 @@
+#include "channel.h"
+
 #include <base/channel.h>
 #include <core/address_transfer.h>
 #include <core/channel.h>

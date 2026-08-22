@@ -1,3 +1,5 @@
+#include "time.h"
+
 #include <base/time.h>
 #include <core/sched.h>
 #include <core/syscall.h>

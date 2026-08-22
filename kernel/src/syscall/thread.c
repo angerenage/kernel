@@ -1,3 +1,5 @@
+#include "thread.h"
+
 #include <core/sched.h>
 #include <core/syscall.h>
 #include <core/uthread.h>

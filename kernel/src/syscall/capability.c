@@ -1,3 +1,5 @@
+#include "capability.h"
+
 #include <base/cap.h>
 #include <base/channel.h>
 #include <core/address_transfer.h>
