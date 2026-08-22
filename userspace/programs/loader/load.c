@@ -16,6 +16,7 @@
 #include <system/process.h>
 
 #include "elf64.h"
+#include "load_plan.h"
 
 #define LOAD_COPY_CHUNK_SIZE 4096u
 
@@ -43,69 +44,98 @@ static vmm_prot_t segment_prot(uint32_t flags) {
 	return prot;
 }
 
-static syscall_status_t load_segment(struct loader_loaded_program* program, cap_id_t blob_cap,
-                                     const struct elf64_segment* segment) {
-	uint8_t                         buffer[LOAD_COPY_CHUNK_SIZE];
-	uint64_t                        page_base;
-	uint64_t                        page_offset;
-	uint64_t                        span;
-	uint64_t                        map_size;
-	size_t                          page_count;
-	vmm_prot_t                      final_prot;
-	cap_id_t                        memory_cap = CAP_ID_INVALID;
-	struct address_space_map_result mapped     = {.mapping_cap = CAP_ID_INVALID};
-	syscall_status_t                status;
-
-	if (segment->memsz == 0u) return SYSCALL_STATUS_OK;
-	page_base   = align_down_u64(segment->vaddr, VMM_PAGE_SIZE);
-	page_offset = segment->vaddr - page_base;
-	if (add_overflow_u64(page_offset, segment->memsz, &span) || !align_up_u64(span, VMM_PAGE_SIZE, &map_size) ||
-	    map_size == 0u || map_size / VMM_PAGE_SIZE > SIZE_MAX)
+static syscall_status_t plan_status(enum loader_elf_plan_result result) {
+	switch (result) {
+	case LOADER_ELF_PLAN_OK:
+		return SYSCALL_STATUS_OK;
+	case LOADER_ELF_PLAN_INVALID_ARGUMENT:
 		return SYSCALL_STATUS_BAD_ARGUMENT;
-	page_count = (size_t)(map_size / VMM_PAGE_SIZE);
-	if (page_base > UINTPTR_MAX || page_offset > UINTPTR_MAX) return SYSCALL_STATUS_BAD_ARGUMENT;
+	case LOADER_ELF_PLAN_BAD_LAYOUT:
+		return SYSCALL_STATUS_UNAVAILABLE;
+	case LOADER_ELF_PLAN_NO_MEMORY:
+	default:
+		return SYSCALL_STATUS_FAILED;
+	}
+}
 
-	final_prot = segment_prot(segment->flags);
-	status     = memory_create(page_count, &memory_cap);
+static bool segment_in_region(const struct elf64_segment* segment, const struct loader_elf_load_region* region) {
+	uint64_t region_size;
+	uint64_t region_end;
+	uint64_t segment_end;
+	if (segment->memsz == 0u || mul_overflow_u64(region->page_count, VMM_PAGE_SIZE, &region_size) ||
+	    add_overflow_u64(region->virtual_base, region_size, &region_end) ||
+	    add_overflow_u64(segment->vaddr, segment->memsz, &segment_end))
+		return false;
+	return segment->vaddr >= region->virtual_base && segment_end <= region_end;
+}
+
+static syscall_status_t populate_region(cap_id_t blob_cap, cap_id_t memory_cap, const struct elf64_image* image,
+                                        const struct loader_elf_load_region* region) {
+	uint8_t buffer[LOAD_COPY_CHUNK_SIZE];
+	for (size_t i = 0u; i < image->segment_count; i++) {
+		const struct elf64_segment* segment = &image->segments[i];
+		if (!segment_in_region(segment, region) || segment->filesz == 0u) continue;
+		for (uint64_t copied = 0u; copied < segment->filesz;) {
+			uint64_t remaining = segment->filesz - copied;
+			size_t   chunk     = remaining > sizeof(buffer) ? sizeof(buffer) : (size_t)remaining;
+			uint64_t source_offset;
+			uint64_t memory_offset;
+			if (add_overflow_u64(segment->offset, copied, &source_offset) ||
+			    add_overflow_u64(segment->vaddr - region->virtual_base, copied, &memory_offset) ||
+			    memory_offset > SIZE_MAX)
+				return SYSCALL_STATUS_BAD_ARGUMENT;
+			syscall_status_t status = blob_read(blob_cap, source_offset, buffer, chunk);
+			if (status != SYSCALL_STATUS_OK) return status;
+			status = memory_write(memory_cap, (size_t)memory_offset, buffer, chunk);
+			if (status != SYSCALL_STATUS_OK) return status;
+			copied += chunk;
+		}
+	}
+	return SYSCALL_STATUS_OK;
+}
+
+static syscall_status_t load_region(struct loader_loaded_program* program, cap_id_t blob_cap,
+                                    const struct elf64_image* image, const struct loader_elf_load_plan* plan,
+                                    const struct loader_elf_load_region* region) {
+	cap_id_t         memory_cap = CAP_ID_INVALID;
+	syscall_status_t status;
+	if (region->virtual_base > UINTPTR_MAX) return SYSCALL_STATUS_BAD_ARGUMENT;
+	status = memory_create(region->page_count, &memory_cap);
 	if (status != SYSCALL_STATUS_OK) return status;
+	status = populate_region(blob_cap, memory_cap, image, region);
+	if (status != SYSCALL_STATUS_OK) goto cleanup;
 
-	for (uint64_t copied = 0u; copied < segment->filesz;) {
-		uint64_t remaining = segment->filesz - copied;
-		size_t   chunk     = remaining > sizeof(buffer) ? sizeof(buffer) : (size_t)remaining;
-		uint64_t source_offset;
-		uint64_t memory_offset;
-
-		if (add_overflow_u64(segment->offset, copied, &source_offset) ||
-		    add_overflow_u64(page_offset, copied, &memory_offset) || memory_offset > SIZE_MAX) {
+	for (size_t i = 0u; i < region->run_count; i++) {
+		const struct loader_elf_load_run* run = &plan->runs[region->first_run + i];
+		uint64_t                          run_offset;
+		uint64_t                          run_base;
+		struct address_space_map_result   mapped = {.mapping_cap = CAP_ID_INVALID};
+		if (mul_overflow_u64(run->object_page_offset, VMM_PAGE_SIZE, &run_offset) ||
+		    add_overflow_u64(region->virtual_base, run_offset, &run_base) || run_base > UINTPTR_MAX) {
 			status = SYSCALL_STATUS_BAD_ARGUMENT;
 			goto cleanup;
 		}
-		status = blob_read(blob_cap, source_offset, buffer, chunk);
+		const struct memory_map_params params = {
+			.memory_page_offset = run->object_page_offset,
+			.page_count         = run->page_count,
+			.address            = (uintptr_t)run_base,
+			.align_pages        = 1u,
+			.guard_pages        = 0u,
+			.prot               = run->prot,
+		};
+		status = address_space_map(program->address_space_cap, memory_cap, &params, &mapped);
 		if (status != SYSCALL_STATUS_OK) goto cleanup;
-		status = memory_write(memory_cap, (size_t)memory_offset, buffer, chunk);
-		if (status != SYSCALL_STATUS_OK) goto cleanup;
-		copied += chunk;
+		status = cap_drop(mapped.mapping_cap);
+		if (status != SYSCALL_STATUS_OK) {
+			(void)mapping_unmap(mapped.mapping_cap);
+			goto cleanup;
+		}
 	}
-
-	const struct memory_map_params params = {
-		.memory_page_offset = 0u,
-		.page_count         = page_count,
-		.address            = (uintptr_t)page_base,
-		.align_pages        = 1u,
-		.guard_pages        = 0u,
-		.prot               = final_prot,
-	};
-	status = address_space_map(program->address_space_cap, memory_cap, &params, &mapped);
-	if (status != SYSCALL_STATUS_OK) goto cleanup;
 	status = cap_drop(memory_cap);
-	if (status != SYSCALL_STATUS_OK) goto cleanup;
-	memory_cap = CAP_ID_INVALID;
-	status     = cap_drop(mapped.mapping_cap);
-	if (status == SYSCALL_STATUS_OK) mapped.mapping_cap = CAP_ID_INVALID;
+	if (status == SYSCALL_STATUS_OK) memory_cap = CAP_ID_INVALID;
 	return status;
 
 cleanup:
-	if (mapped.mapping_cap != CAP_ID_INVALID) (void)mapping_unmap(mapped.mapping_cap);
 	if (memory_cap != CAP_ID_INVALID) (void)cap_drop(memory_cap);
 	return status;
 }
@@ -212,12 +242,14 @@ void loader_discard_program(struct loader_loaded_program* program) {
 
 syscall_status_t loader_prepare_program(cap_id_t blob_cap, const char* name, size_t name_size,
                                         struct loader_loaded_program** out_program) {
-	struct elf64_image             image = {0};
-	struct loader_loaded_program*  program;
-	struct process_create_response created;
-	struct process_info_response   process_info;
-	char*                          process_name = NULL;
-	syscall_status_t               status;
+	struct elf64_image                image   = {0};
+	struct loader_elf_load_plan       plan    = {0};
+	struct loader_elf_segment_layout* layouts = NULL;
+	struct loader_loaded_program*     program;
+	struct process_create_response    created;
+	struct process_info_response      process_info;
+	char*                             process_name = NULL;
+	syscall_status_t                  status;
 
 	if (blob_cap == CAP_ID_INVALID || name == NULL || name_size == 0u || name_size == SIZE_MAX || out_program == NULL ||
 	    memchr(name, '\0', name_size) != NULL)
@@ -225,9 +257,33 @@ syscall_status_t loader_prepare_program(cap_id_t blob_cap, const char* name, siz
 	*out_program = NULL;
 	status       = parse_status(elf64_image_parse(blob_cap, &image));
 	if (status != SYSCALL_STATUS_OK) return status;
+	if (image.segment_count > SIZE_MAX / sizeof(*layouts)) {
+		status = SYSCALL_STATUS_BAD_ARGUMENT;
+		goto fail_image;
+	}
+	layouts = calloc(image.segment_count, sizeof(*layouts));
+	if (layouts == NULL) {
+		status = SYSCALL_STATUS_FAILED;
+		goto fail_image;
+	}
+	for (size_t i = 0u; i < image.segment_count; i++) {
+		layouts[i] = (struct loader_elf_segment_layout){
+			.vaddr = image.segments[i].vaddr,
+			.memsz = image.segments[i].memsz,
+			.prot  = segment_prot(image.segments[i].flags),
+		};
+	}
+	status = plan_status(loader_elf_plan_create(layouts, image.segment_count, &plan));
+	if (status == SYSCALL_STATUS_OK &&
+	    (image.entry > UINTPTR_MAX || !loader_elf_entry_is_executable(layouts, image.segment_count, image.entry)))
+		status = SYSCALL_STATUS_BAD_ARGUMENT;
+	free(layouts);
+	layouts = NULL;
+	if (status != SYSCALL_STATUS_OK) goto fail_image;
 
 	program = calloc(1u, sizeof(*program));
 	if (program == NULL) {
+		loader_elf_plan_deinit(&plan);
 		elf64_image_deinit(&image);
 		return SYSCALL_STATUS_FAILED;
 	}
@@ -258,8 +314,8 @@ syscall_status_t loader_prepare_program(cap_id_t blob_cap, const char* name, siz
 	program->process_id = process_info.pid;
 	program->entry      = (uintptr_t)image.entry;
 
-	for (size_t i = 0u; i < image.segment_count; i++) {
-		status = load_segment(program, blob_cap, &image.segments[i]);
+	for (size_t i = 0u; i < plan.region_count; i++) {
+		status = load_region(program, blob_cap, &image, &plan, &plan.regions[i]);
 		if (status != SYSCALL_STATUS_OK) goto fail;
 	}
 	status = allocate_heap(program);
@@ -270,13 +326,21 @@ syscall_status_t loader_prepare_program(cap_id_t blob_cap, const char* name, siz
 	if (status != SYSCALL_STATUS_OK) goto fail;
 	program->address_space_cap = CAP_ID_INVALID;
 
+	loader_elf_plan_deinit(&plan);
 	elf64_image_deinit(&image);
 	*out_program = program;
 	return SYSCALL_STATUS_OK;
 
 fail:
 	free(process_name);
+	loader_elf_plan_deinit(&plan);
 	elf64_image_deinit(&image);
 	loader_discard_program(program);
+	return status;
+
+fail_image:
+	free(layouts);
+	loader_elf_plan_deinit(&plan);
+	elf64_image_deinit(&image);
 	return status;
 }
