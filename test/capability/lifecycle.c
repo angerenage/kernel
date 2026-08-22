@@ -1,3 +1,4 @@
+#include <pthread.h>
 #include <signal.h>
 
 #include "test_support.h"
@@ -6,6 +7,42 @@
 
 static size_t lifecycle_callback_count;
 static bool   lifecycle_callback_unpublish;
+static size_t direct_use_destroy_count;
+
+struct direct_use_race {
+	cap_id_t           cap_id;
+	process_id_t       caller;
+	cap_rights_t       rights;
+	struct capability* dropped_cap;
+	struct cap_object* acquired_object;
+	enum cap_result    result;
+	size_t             ready;
+	bool               start;
+	bool               dropped;
+};
+
+static void direct_use_destroy(uint64_t object_id) {
+	(void)object_id;
+	direct_use_destroy_count++;
+}
+
+static void* direct_use_acquire_worker(void* argument) {
+	struct direct_use_race* race = argument;
+	(void)__atomic_add_fetch(&race->ready, 1u, __ATOMIC_RELEASE);
+	while (!__atomic_load_n(&race->start, __ATOMIC_ACQUIRE)) {
+	}
+	race->result = cap_object_acquire_for_use(race->caller, race->cap_id, race->rights, &race->acquired_object, NULL);
+	return NULL;
+}
+
+static void* direct_use_drop_worker(void* argument) {
+	struct direct_use_race* race = argument;
+	(void)__atomic_add_fetch(&race->ready, 1u, __ATOMIC_RELEASE);
+	while (!__atomic_load_n(&race->start, __ATOMIC_ACQUIRE)) {
+	}
+	race->dropped = cap_drop(race->dropped_cap);
+	return NULL;
+}
 
 static syscall_result_t lifecycle_handler(const struct cap_request* request) {
 	(void)request;
@@ -40,6 +77,101 @@ static bool receive_zero_event(struct channel* endpoint, uint64_t* out_object_id
 Test(capability, lifecycle_state_fits_in_the_reduced_cap_object_layout) {
 	cr_assert_eq(sizeof(struct cap_object), 96u);
 	cr_assert_lt(sizeof(struct cap_object), 104u);
+}
+
+Test(capability, direct_use_linearizes_against_drop) {
+	struct direct_use_race race = {.caller = 101u, .rights = CAP_READ, .result = CAP_INVALID_ARGUMENTS};
+	struct cap_object*     published;
+	cap_object_id_t        object_id;
+	pthread_t              acquire_thread;
+	pthread_t              drop_thread;
+
+	cap_test_setup();
+	object_id        = cap_object_create_kernel(0x301u, lifecycle_handler, NULL);
+	published        = cap_object_acquire(object_id);
+	race.cap_id      = cap_create(object_id, race.caller, CAP_READ, NULL);
+	race.dropped_cap = cap_acquire(race.cap_id);
+	cr_assert_not_null(published);
+	cr_assert_not_null(race.dropped_cap);
+	cr_assert_eq(pthread_create(&acquire_thread, NULL, direct_use_acquire_worker, &race), 0);
+	cr_assert_eq(pthread_create(&drop_thread, NULL, direct_use_drop_worker, &race), 0);
+	while (__atomic_load_n(&race.ready, __ATOMIC_ACQUIRE) != 2u) {
+	}
+	__atomic_store_n(&race.start, true, __ATOMIC_RELEASE);
+	cr_assert_eq(pthread_join(acquire_thread, NULL), 0);
+	cr_assert_eq(pthread_join(drop_thread, NULL), 0);
+	cr_assert(race.dropped);
+	cr_assert(race.result == CAP_OK || race.result == CAP_NOT_FOUND);
+	if (race.result == CAP_OK) {
+		cr_assert_eq(race.acquired_object->object_id, 0x301u);
+		cap_object_release(race.acquired_object);
+	}
+	cap_release(race.dropped_cap);
+	cr_assert(cap_object_destroy(published));
+	cap_object_release(published);
+}
+
+Test(capability, direct_use_linearizes_against_authorization_topology_changes) {
+	struct direct_use_race race = {.caller = 102u, .rights = CAP_READ, .result = CAP_INVALID_ARGUMENTS};
+	struct cap_object*     published;
+	cap_object_id_t        object_id;
+	struct capability*     child;
+	pthread_t              acquire_thread;
+	pthread_t              drop_thread;
+
+	cap_test_setup();
+	object_id        = cap_object_create_kernel(0x302u, lifecycle_handler, NULL);
+	published        = cap_object_acquire(object_id);
+	race.dropped_cap = cap_acquire(cap_create(object_id, race.caller, CAP_READ | CAP_DELEGATE, NULL));
+	cr_assert_not_null(race.dropped_cap);
+	race.cap_id = cap_delegate_create(race.dropped_cap, 103u, CAP_READ, false);
+	child       = cap_acquire(race.cap_id);
+	cr_assert_not_null(child);
+	cr_assert_eq(pthread_create(&acquire_thread, NULL, direct_use_acquire_worker, &race), 0);
+	cr_assert_eq(pthread_create(&drop_thread, NULL, direct_use_drop_worker, &race), 0);
+	while (__atomic_load_n(&race.ready, __ATOMIC_ACQUIRE) != 2u) {
+	}
+	__atomic_store_n(&race.start, true, __ATOMIC_RELEASE);
+	cr_assert_eq(pthread_join(acquire_thread, NULL), 0);
+	cr_assert_eq(pthread_join(drop_thread, NULL), 0);
+	cr_assert(race.dropped);
+	cr_assert(race.result == CAP_OK || race.result == CAP_NOT_AUTHORIZED);
+	if (race.result == CAP_OK) cap_object_release(race.acquired_object);
+	cr_assert_eq(cap_object_acquire_for_use(race.caller, race.cap_id, CAP_READ, &race.acquired_object, NULL),
+	             CAP_NOT_AUTHORIZED);
+	cr_assert(cap_destroy(child));
+	cap_release(child);
+	cap_release(race.dropped_cap);
+	cr_assert(cap_object_destroy(published));
+	cap_object_release(published);
+}
+
+Test(capability, direct_use_checks_rights_and_retains_the_unpublished_object) {
+	struct cap_object* acquired = NULL;
+	struct cap_object* published;
+	cap_object_id_t    object_id;
+	cap_id_t           cap_id;
+	cap_rights_t       rights = 0u;
+
+	cap_test_setup();
+	direct_use_destroy_count = 0u;
+	object_id = cap_object_create_kernel_managed(0x303u, lifecycle_handler, NULL, direct_use_destroy, NULL);
+	published = cap_object_acquire(object_id);
+	cap_id    = cap_create(object_id, 104u, CAP_READ, NULL);
+	cr_assert_eq(cap_object_acquire_for_use(104u, cap_id, CAP_WRITE, &acquired, &rights), CAP_RIGHTS_EXCEEDED);
+	cr_assert_null(acquired);
+	cr_assert_eq(rights, 0u);
+	cr_assert_eq(cap_object_acquire_for_use(104u, cap_id, CAP_READ, &acquired, &rights), CAP_OK);
+	cr_assert_eq(rights, CAP_READ);
+	cr_assert_eq(cap_object_active_call_count(acquired), 0u);
+	cr_assert(cap_destroy_by_id(cap_id));
+	cr_assert(cap_object_destroy_with_id(object_id));
+	cr_assert_eq(direct_use_destroy_count, 0u);
+	cr_assert_eq(acquired->object_id, 0x303u);
+	cap_object_release(published);
+	cr_assert_eq(direct_use_destroy_count, 0u);
+	cap_object_release(acquired);
+	cr_assert_eq(direct_use_destroy_count, 1u);
 }
 
 Test(capability, ending_an_inactive_object_is_an_invariant_failure, .signal = SIGABRT) {

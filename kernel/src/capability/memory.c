@@ -125,7 +125,6 @@ static bool map_params_are_valid(const struct memory_map_params* params) {
 syscall_result_t kernel_memory_map(cap_id_t memory_cap_id, process_id_t caller, struct process* target,
                                    const struct memory_map_params*  params,
                                    struct address_space_map_result* out_result) {
-	struct capability*    cap;
 	struct cap_object*    object;
 	struct memory_object* memory;
 	struct process*       retained_target;
@@ -139,27 +138,17 @@ syscall_result_t kernel_memory_map(cap_id_t memory_cap_id, process_id_t caller, 
 	if (memory_cap_id == CAP_ID_INVALID || caller == PROCESS_PID_INVALID || target == NULL || out_result == NULL ||
 	    !map_params_are_valid(params))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	*out_result = (struct address_space_map_result){.mapping_cap = CAP_ID_INVALID};
-	cap         = cap_acquire(memory_cap_id);
-	if (cap == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	if (cap_is_authorized(caller, cap) != CAP_OK) {
-		cap_release(cap);
-		return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
-	}
-	if (cap_is_valid(cap) != CAP_OK) {
-		cap_release(cap);
-		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	}
-	memory_rights   = cap_rights(cap);
+	*out_result     = (struct address_space_map_result){.mapping_cap = CAP_ID_INVALID};
 	required_rights = CAP_MAP | protection_rights(params->prot);
-	if ((memory_rights & required_rights) != required_rights) {
-		cap_release(cap);
-		return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
-	}
-	object = cap_object_acquire(cap->cap_object_id);
+	enum cap_result cap_result =
+		cap_object_acquire_for_use(caller, memory_cap_id, required_rights, &object, &memory_rights);
+	if (cap_result != CAP_OK)
+		return syscall_result_error(cap_result == CAP_NOT_AUTHORIZED || cap_result == CAP_RIGHTS_EXCEEDED
+		                                ? SYSCALL_STATUS_DENIED
+		                                : SYSCALL_STATUS_BAD_ARGUMENT,
+		                            0u);
 	if (object == NULL || object->handler != memory_handler) {
 		cap_object_release(object);
-		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 	memory          = (struct memory_object*)(uintptr_t)object->object_id;
@@ -167,7 +156,6 @@ syscall_result_t kernel_memory_map(cap_id_t memory_cap_id, process_id_t caller, 
 	if (memory == NULL || retained_target == NULL || retained_target != target) {
 		process_release(retained_target);
 		cap_object_release(object);
-		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 	}
 	space                               = process_address_space(retained_target);
@@ -183,7 +171,6 @@ syscall_result_t kernel_memory_map(cap_id_t memory_cap_id, process_id_t caller, 
 	if (!vm_space_map(space, &request, &mapping_id, &base)) {
 		process_release(retained_target);
 		cap_object_release(object);
-		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 	mapping_cap =
@@ -195,7 +182,6 @@ syscall_result_t kernel_memory_map(cap_id_t memory_cap_id, process_id_t caller, 
 		(void)vm_space_unmap(space, mapping_id);
 		process_release(retained_target);
 		cap_object_release(object);
-		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 	out_result->mapping_cap = mapping_cap;
@@ -209,7 +195,6 @@ syscall_result_t kernel_memory_map(cap_id_t memory_cap_id, process_id_t caller, 
     };
 	process_release(retained_target);
 	cap_object_release(object);
-	cap_release(cap);
 	return syscall_result_ok(0u);
 }
 
@@ -244,26 +229,18 @@ static bool mapping_unmap_state(const struct mapping_state* state) {
 }
 
 bool kernel_mapping_discard_unpublished(cap_id_t mapping_cap, process_id_t owner) {
-	struct capability* cap;
 	struct cap_object* object;
 	bool               unmapped;
 	bool               destroyed;
 	if (mapping_cap == CAP_ID_INVALID || owner == PROCESS_PID_INVALID) return false;
-	cap = cap_acquire(mapping_cap);
-	if (cap == NULL || cap_is_authorized(owner, cap) != CAP_OK || cap_is_valid(cap) != CAP_OK) {
-		cap_release(cap);
-		return false;
-	}
-	object = cap_object_acquire(cap->cap_object_id);
+	if (cap_object_acquire_for_use(owner, mapping_cap, 0u, &object, NULL) != CAP_OK) return false;
 	if (object == NULL || object->handler != mapping_handler) {
 		cap_object_release(object);
-		cap_release(cap);
 		return false;
 	}
 	unmapped  = mapping_unmap_state((const struct mapping_state*)(uintptr_t)object->object_id);
 	destroyed = unmapped && cap_object_destroy(object);
 	cap_object_release(object);
-	cap_release(cap);
 	return destroyed;
 }
 
@@ -272,15 +249,10 @@ static syscall_result_t memory_info_handler(const struct cap_request* req, struc
 	return cap_kernel_write_response(req, &response, sizeof(response));
 }
 
-static void sync_written_pages(struct memory_object* memory, size_t offset, size_t size) {
-	if (size == 0u) return;
-	size_t first = offset / PMM_PAGE_SIZE;
-	size_t last  = (offset + size - 1u) / PMM_PAGE_SIZE;
-	for (size_t page = first; page <= last; page++) {
-		uintptr_t phys;
-		if (memory_object_page_phys(memory, page, &phys))
-			hal_paging_sync_executable_range((void*)(phys + boot_info.direct_map_offset), PMM_PAGE_SIZE);
-	}
+static void sync_written_page(struct memory_object* memory, size_t offset) {
+	uintptr_t phys;
+	if (memory_object_page_phys(memory, offset / PMM_PAGE_SIZE, &phys))
+		hal_paging_sync_executable_range((void*)(phys + boot_info.direct_map_offset), PMM_PAGE_SIZE);
 }
 
 static syscall_result_t memory_transfer_handler(const struct cap_request* req, struct memory_object* memory,
@@ -320,19 +292,22 @@ static syscall_result_t memory_transfer_handler(const struct cap_request* req, s
 		uint8_t buffer[256];
 		size_t  chunk = size - done;
 		if (chunk > sizeof(buffer)) chunk = sizeof(buffer);
+		size_t page_remaining = PMM_PAGE_SIZE - ((offset + done) & (PMM_PAGE_SIZE - 1u));
+		if (chunk > page_remaining) chunk = page_remaining;
 		if (reading) {
 			if (!memory_object_read(memory, offset + done, buffer, chunk)) memory_failure = true;
 			else transfer_result = address_space_copy_to(caller_space, user_address + done, buffer, chunk);
 		}
 		else {
 			transfer_result = address_space_copy_from(caller_space, user_address + done, buffer, chunk);
-			if (transfer_result == ADDRESS_TRANSFER_OK && !memory_object_write(memory, offset + done, buffer, chunk))
-				memory_failure = true;
+			if (transfer_result == ADDRESS_TRANSFER_OK) {
+				if (!memory_object_write(memory, offset + done, buffer, chunk)) memory_failure = true;
+				else sync_written_page(memory, offset + done);
+			}
 		}
 		if (memory_failure) break;
 		done += chunk;
 	}
-	if (!reading && !memory_failure && transfer_result == ADDRESS_TRANSFER_OK) sync_written_pages(memory, offset, size);
 	process_release(caller);
 	if (memory_failure) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	if (transfer_result != ADDRESS_TRANSFER_OK) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);

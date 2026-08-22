@@ -1152,7 +1152,7 @@ Test(signal, rearmed_oneshot_binding_can_change_entry_and_become_persistent) {
 	signal_test_deinit_uthread(&receiver);
 }
 
-Test(signal, kernel_capability_rights_restrict_publication_and_read) {
+Test(signal, direct_operations_use_specific_rights_without_cap_call) {
 	struct signal*        signal;
 	struct signal_payload payload = {
 		.args = {12u, 34u, 56u, 78u}

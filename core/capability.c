@@ -912,6 +912,44 @@ static enum cap_result cap_is_authorized_locked(process_id_t caller, struct capa
 	return CAP_NOT_AUTHORIZED;
 }
 
+enum cap_result cap_object_acquire_for_use(process_id_t caller, cap_id_t capability_id, cap_rights_t required_rights,
+                                           struct cap_object** out_object, cap_rights_t* out_rights) {
+	struct capability* capability;
+	struct cap_object* object;
+	cap_rights_t       rights;
+	enum cap_result    result;
+	struct irq_state   state;
+
+	if (capability_id == CAP_ID_INVALID || caller == PROCESS_PID_INVALID || out_object == NULL)
+		return CAP_INVALID_ARGUMENTS;
+	*out_object = NULL;
+	if (out_rights != NULL) *out_rights = 0u;
+	state      = spinlock_lock_irqsave(&capability_topology_lock);
+	capability = id_table_lookup(&capability_table, (id_table_id_t)capability_id);
+	if (capability == NULL) {
+		result = CAP_NOT_FOUND;
+		goto out;
+	}
+	result = cap_is_authorized_locked(caller, capability);
+	if (result != CAP_OK) goto out;
+	rights = cap_rights(capability);
+	if ((rights & required_rights) != required_rights) {
+		result = CAP_RIGHTS_EXCEEDED;
+		goto out;
+	}
+	object = id_table_lookup(&cap_object_table, (id_table_id_t)capability->cap_object_id);
+	if (object == NULL) {
+		result = CAP_OBJECT_DESTROYED;
+		goto out;
+	}
+	(void)__atomic_add_fetch(&object->reference_count, 1u, __ATOMIC_RELAXED);
+	*out_object = object;
+	if (out_rights != NULL) *out_rights = rights;
+out:
+	spinlock_unlock_irqrestore(&capability_topology_lock, state);
+	return result;
+}
+
 enum cap_result cap_object_begin_call(process_id_t caller, struct capability* capability,
                                       struct cap_object** out_object, cap_rights_t* out_rights) {
 	struct cap_object* object;

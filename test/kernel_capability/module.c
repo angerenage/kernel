@@ -79,3 +79,35 @@ Test(kernel_capability_module, zero_length_read_is_a_successful_noop) {
 
 	kernel_capability_test_end(&ctx);
 }
+
+Test(kernel_capability_module, direct_resolution_uses_read_right_without_cap_call) {
+	struct kernel_capability_test_context ctx;
+	static const uint8_t                  module_bytes[] = {0x33u};
+	const struct kernel_boot_module       modules[]      = {
+        {
+         .name    = "direct.bin",
+         .path    = "/boot/direct.bin",
+         .address = (void*)module_bytes,
+         .size    = sizeof(module_bytes),
+         },
+    };
+	const struct kernel_boot_module* resolved = NULL;
+	struct capability*               original;
+	cap_id_t                         original_id;
+	cap_id_t                         read_only_id;
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/module-direct-resolution");
+	kernel_boot_mock_set_modules(modules, 1u);
+	original_id = kernel_capability_boot_module_grant(0u, process_pid(ctx.process));
+	original    = cap_acquire(original_id);
+	cr_assert_not_null(original);
+	read_only_id = cap_create(original->cap_object_id, process_pid(ctx.process), CAP_READ, NULL);
+	cap_release(original);
+	cr_assert_neq(read_only_id, CAP_ID_INVALID);
+	cr_assert_eq(kernel_capability_boot_module_get(read_only_id, process_pid(ctx.process), CAP_READ, &resolved).status,
+	             SYSCALL_STATUS_OK);
+	cr_assert_not_null(resolved);
+	cr_assert_eq(resolved->address, modules[0].address);
+	cr_assert_eq(resolved->size, modules[0].size);
+	kernel_capability_test_end(&ctx);
+}

@@ -177,7 +177,6 @@ static syscall_result_t boot_module_handler(const struct cap_request* req) {
 syscall_result_t kernel_capability_boot_module_get(cap_id_t module_cap, process_id_t caller,
                                                    cap_rights_t                      required_rights,
                                                    const struct kernel_boot_module** out_module) {
-	struct capability* cap;
 	struct cap_object* object;
 	enum cap_result    result;
 	module_id_t        id;
@@ -186,34 +185,20 @@ syscall_result_t kernel_capability_boot_module_get(cap_id_t module_cap, process_
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 	*out_module = NULL;
-	cap         = cap_acquire(module_cap);
-	if (cap == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	result = cap_is_authorized(caller, cap);
-	if (result != CAP_OK) {
-		cap_release(cap);
-		return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
-	}
-	result = cap_is_valid(cap);
-	if (result != CAP_OK) {
-		cap_release(cap);
-		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	}
-	if ((cap_rights(cap) & required_rights) != required_rights) {
-		cap_release(cap);
-		return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
-	}
-
-	object = cap_object_acquire(cap->cap_object_id);
+	result      = cap_object_acquire_for_use(caller, module_cap, required_rights, &object, NULL);
+	if (result != CAP_OK)
+		return syscall_result_error(result == CAP_NOT_AUTHORIZED || result == CAP_RIGHTS_EXCEEDED
+		                                ? SYSCALL_STATUS_DENIED
+		                                : SYSCALL_STATUS_BAD_ARGUMENT,
+		                            0u);
 	if (object == NULL || object->handler != boot_module_handler) {
 		cap_object_release(object);
-		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
 	id = (module_id_t)object->object_id;
 	if (id != MODULE_ID_INVALID) *out_module = kernel_boot_module_at((size_t)(id - 1u));
 	cap_object_release(object);
-	cap_release(cap);
 	return *out_module == NULL ? syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u) : syscall_result_ok(0u);
 }
 

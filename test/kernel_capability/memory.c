@@ -234,6 +234,44 @@ Test(kernel_capability_memory, writes_synchronize_materialized_backing_without_p
 	kernel_capability_test_end(&ctx);
 }
 
+Test(kernel_capability_memory, partial_write_failure_synchronizes_the_successfully_modified_page) {
+	struct kernel_capability_test_context ctx;
+	cap_id_t                              memory_cap;
+	vmm_id_t                              buffer_id = VMM_ID_INVALID;
+	uintptr_t                             buffer;
+	uint8_t                               value = 0x5au;
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/memory-partial-write-sync");
+	buffer = kernel_capability_test_alloc_user_buffer(ctx.process, 1u, &buffer_id);
+	for (size_t offset = 0u; offset < PMM_PAGE_SIZE; offset += sizeof(value)) {
+		cr_assert_eq(address_space_copy_to(process_address_space(ctx.process), buffer + offset, &value, sizeof(value)),
+		             ADDRESS_TRANSFER_OK);
+	}
+	memory_cap = create_memory(CAP_CALL | CAP_WRITE, 2u);
+	cr_assert_eq(memory_write_from(memory_cap, 0u, buffer, PMM_PAGE_SIZE + 1u).status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(kernel_capability_test_executable_sync_count(), PMM_PAGE_SIZE / 256u);
+	cr_assert(drop_capability(memory_cap));
+	cr_assert(vm_space_unmap(process_address_space(ctx.process), buffer_id));
+	kernel_capability_test_end(&ctx);
+}
+
+Test(kernel_capability_memory, mapping_secondary_capability_resolution_does_not_require_cap_call) {
+	struct kernel_capability_test_context ctx;
+	struct address_space_map_result       mapped;
+	cap_id_t                              memory_cap;
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/memory-direct-map");
+	memory_cap                            = create_memory(CAP_MAP | CAP_READ, 1u);
+	const struct memory_map_params params = {.page_count = 1u, .prot = VMM_PROT_READ};
+	cr_assert_eq(map_memory(memory_cap, process_pid(ctx.process), ctx.process, &params, &mapped).status,
+	             SYSCALL_STATUS_OK);
+	cr_assert(drop_capability(memory_cap));
+	const struct mapping_unmap_request unmap = {.header = {.op = MAPPING_OP_UNMAP}};
+	cr_assert_eq(kernel_capability_test_call(mapped.mapping_cap, &unmap, sizeof(unmap), NULL, 0u).status,
+	             SYSCALL_STATUS_OK);
+	kernel_capability_test_end(&ctx);
+}
+
 Test(kernel_capability_memory, generic_map_supports_subranges_exact_auto_alignment_and_guards) {
 	struct kernel_capability_test_context ctx;
 	cap_id_t                              memory_cap;

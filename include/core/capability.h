@@ -128,6 +128,10 @@ void cap_object_cleanup_for_process(process_id_t process);
 enum cap_result cap_object_begin_call(process_id_t caller, struct capability* capability,
                                       struct cap_object** out_object, cap_rights_t* out_rights);
 
+/* Resolve an authorized capability and retain its object for direct use. */
+enum cap_result cap_object_acquire_for_use(process_id_t caller, cap_id_t capability_id, cap_rights_t required_rights,
+                                           struct cap_object** out_object, cap_rights_t* out_rights);
+
 /* End a previously begun capability call and release its routing-object reference. */
 void cap_object_end_call(struct cap_object* object);
 
