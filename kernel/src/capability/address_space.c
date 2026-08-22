@@ -5,132 +5,38 @@
 #include <core/capability.h>
 #include <core/process.h>
 #include <core/syscall.h>
-#include <core/vm_space.h>
 #include <kernel/capability.h>
 #include <string.h>
 
 #include "memory.h"
 
-static syscall_result_t copy_request(const void* req_ptr, size_t req_size, void* out_buf, size_t expected_size) {
-	if (req_ptr == NULL || out_buf == NULL || req_size < expected_size) {
+static syscall_result_t address_space_map_handler(const struct cap_request* req, struct process* target) {
+	struct address_space_map_request request;
+	struct address_space_map_result  response;
+	if (req->request == NULL || req->request_size < sizeof(request) || !cap_kernel_response_fits(req, sizeof(response)))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	}
-	memcpy(out_buf, req_ptr, expected_size);
-	return syscall_result_ok(0u);
-}
-
-static syscall_result_t address_space_query_handler(const struct cap_request* req, struct address_space* space) {
-	struct address_space_query_request  request;
-	struct address_space_query_response response;
-	syscall_result_t                    copy_result;
-
-	copy_result = copy_request(req->request, req->request_size, &request, sizeof(request));
-	if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
-	if (request.id == VMM_ID_INVALID || !vm_space_query_id(space, request.id, &response.info)) {
-		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	}
-	return cap_kernel_write_response(req, &response, sizeof(response));
-}
-
-static syscall_result_t address_space_map_handler(const struct cap_request* req, struct process* target,
-                                                  bool at_explicit) {
-	union {
-		struct address_space_map_request    automatic;
-		struct address_space_map_at_request explicit;
-	} request;
-	struct address_space_map_response response;
-	cap_id_t                          allocation_cap;
-	uintptr_t                         address = 0u;
-	syscall_result_t                  result;
-
-	if (!cap_kernel_response_fits(req, sizeof(response))) {
-		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	}
-
-	if (at_explicit) {
-		result = copy_request(req->request, req->request_size, &request.explicit, sizeof(request.explicit));
-		if (result.status != SYSCALL_STATUS_OK) return result;
-		allocation_cap = request.explicit.allocation_cap;
-		address        = request.explicit.address;
-	}
-	else {
-		result = copy_request(req->request, req->request_size, &request.automatic, sizeof(request.automatic));
-		if (result.status != SYSCALL_STATUS_OK) return result;
-		allocation_cap = request.automatic.allocation_cap;
-	}
-
-	result = kernel_map_allocation(allocation_cap, req->caller, target, address, &response.mapping_cap);
+	memcpy(&request, req->request, sizeof(request));
+	syscall_result_t result = kernel_memory_map(request.memory_cap, req->caller, target, &request.params, &response);
 	if (result.status != SYSCALL_STATUS_OK) return result;
 	result = cap_kernel_write_response(req, &response, sizeof(response));
-	if (result.status != SYSCALL_STATUS_OK) {
-		(void)kernel_mapping_discard_unpublished(response.mapping_cap, req->caller);
-	}
+	if (result.status != SYSCALL_STATUS_OK) (void)kernel_mapping_discard_unpublished(response.mapping_cap, req->caller);
 	return result;
 }
 
 static syscall_result_t address_space_handler(const struct cap_request* req) {
-	struct process*       target;
-	struct address_space* space;
-	enum address_space_op op;
-	cap_rights_t          required_rights;
-
-	target = process_acquire((process_id_t)req->object_id);
-	if (target == NULL) {
-		return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
-	}
-	space = process_address_space(target);
-	if (space == NULL) {
-		process_release(target);
-		return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
-	}
-
-	if (req->request_size < sizeof(struct address_space_request_header)) {
-		process_release(target);
-		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	}
-
 	struct address_space_request_header header;
-	syscall_result_t copy_result = copy_request(req->request, req->request_size, &header, sizeof(header));
-	if (copy_result.status != SYSCALL_STATUS_OK) {
-		process_release(target);
-		return copy_result;
-	}
-
-	op = header.op;
-
-	switch (op) {
-	case ADDRESS_SPACE_OP_QUERY:
-		required_rights = CAP_READ;
-		break;
-	case ADDRESS_SPACE_OP_MAP:
-	case ADDRESS_SPACE_OP_MAP_AT:
-		required_rights = CAP_MAP;
-		break;
-	default:
-		process_release(target);
+	struct process*                     target;
+	if (req == NULL || req->request == NULL || req->request_size < sizeof(header))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	}
-
-	if ((req->rights & required_rights) != required_rights) {
+	memcpy(&header, req->request, sizeof(header));
+	if (header.op != ADDRESS_SPACE_OP_MAP) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	if ((req->rights & CAP_MAP) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
+	target = process_acquire((process_id_t)req->object_id);
+	if (target == NULL || process_address_space(target) == NULL) {
 		process_release(target);
-		return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
+		return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 	}
-
-	syscall_result_t result;
-	switch (op) {
-	case ADDRESS_SPACE_OP_QUERY:
-		result = address_space_query_handler(req, space);
-		break;
-	case ADDRESS_SPACE_OP_MAP:
-		result = address_space_map_handler(req, target, false);
-		break;
-	case ADDRESS_SPACE_OP_MAP_AT:
-		result = address_space_map_handler(req, target, true);
-		break;
-	default:
-		result = syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-		break;
-	}
+	syscall_result_t result = address_space_map_handler(req, target);
 	process_release(target);
 	return result;
 }
@@ -140,32 +46,20 @@ cap_id_t kernel_address_space_grant(struct process* process, process_id_t recipi
 	cap_object_id_t    object_id;
 	bool               object_created = false;
 
-	if (process == NULL || recipient == PROCESS_PID_INVALID || process_address_space(process) == NULL) {
+	if (process == NULL || recipient == PROCESS_PID_INVALID || process_address_space(process) == NULL)
 		return CAP_ID_INVALID;
-	}
-
 	object_id = process_address_space_cap_object_id(process);
-	if (object_id != CAP_OBJECT_ID_INVALID) {
-		object = cap_object_acquire(object_id);
-		if (object != NULL) cap_object_release(object);
-	}
-	else {
-		object = NULL;
-	}
+	object    = object_id == CAP_OBJECT_ID_INVALID ? NULL : cap_object_acquire(object_id);
+	if (object != NULL) cap_object_release(object);
 	if (object == NULL) {
 		object_id = cap_object_create_kernel((uint64_t)process_pid(process), address_space_handler, &object_created);
 		if (object_id == CAP_OBJECT_ID_INVALID) return CAP_ID_INVALID;
 		process_set_address_space_cap_object_id(process, object_id);
 	}
-
 	cap_id_t cap_id = cap_create(object_id, recipient, rights, NULL);
-	if (cap_id == CAP_ID_INVALID) {
-		if (object_created) {
-			process_set_address_space_cap_object_id(process, CAP_OBJECT_ID_INVALID);
-			(void)cap_object_destroy_with_id(object_id);
-		}
-		return CAP_ID_INVALID;
+	if (cap_id == CAP_ID_INVALID && object_created) {
+		process_set_address_space_cap_object_id(process, CAP_OBJECT_ID_INVALID);
+		(void)cap_object_destroy_with_id(object_id);
 	}
-
 	return cap_id;
 }

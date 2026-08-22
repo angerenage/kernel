@@ -118,7 +118,7 @@ static syscall_result_t boot_module_map_handler(const struct cap_request*       
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 	mapping_info.id      = VMM_ID_INVALID;
-	response.mapping_cap = kernel_mapping_grant(caller, req->caller, mapping_id, CAP_READ | CAP_DESTROY);
+	response.mapping_cap = kernel_mapping_grant(caller, req->caller, mapping_id, CAP_DESTROY);
 	response.mapping     = mapping_info;
 	response.data_offset = layout.page_offset;
 	if (response.mapping_cap == CAP_ID_INVALID) {

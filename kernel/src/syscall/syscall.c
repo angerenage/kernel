@@ -26,7 +26,7 @@ static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 	[SYSCALL_EXIT_THREAD]    = syscall_exit_thread,
 	[SYSCALL_CREATE_PROCESS] = syscall_create_process,
 
-	[SYSCALL_MEMORY_ALLOCATE] = syscall_memory_allocate,
+	[SYSCALL_MEMORY_CREATE] = syscall_memory_create,
 
 	[SYSCALL_SEND_MESSAGE] = syscall_send_message,
 	[SYSCALL_RECV_MESSAGE] = syscall_recv_message,

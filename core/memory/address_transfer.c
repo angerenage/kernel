@@ -146,8 +146,8 @@ enum address_transfer_result address_space_copy_to(struct address_space* space, 
 
 static void lock_spaces(struct address_space* a, struct address_space* b, struct irq_state* first_state,
                         struct address_space** first, struct address_space** second) {
-	*first       = a < b ? a : b;
-	*second      = a < b ? b : a;
+	*first       = (uintptr_t)a < (uintptr_t)b ? a : b;
+	*second      = (uintptr_t)a < (uintptr_t)b ? b : a;
 	*first_state = spinlock_lock_irqsave(&(*first)->lock);
 	if (*second != *first) spinlock_lock(&(*second)->lock);
 }

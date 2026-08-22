@@ -3,6 +3,7 @@
 #include "../../kernel/src/syscall/capability.h"
 
 static size_t serial_bytes;
+static size_t executable_sync_count;
 
 void kernel_capability_loader_init(void) {
 }
@@ -23,6 +24,7 @@ void hal_serial_write(const char* data, size_t length) {
 void hal_paging_sync_executable_range(void* address, size_t size) {
 	(void)address;
 	(void)size;
+	executable_sync_count++;
 }
 
 void kernel_capability_test_serial_reset(void) {
@@ -41,6 +43,7 @@ void kernel_capability_test_begin(struct kernel_capability_test_context* ctx, co
 	capability_init();
 	kernel_boot_mock_reset();
 	kernel_capability_test_serial_reset();
+	executable_sync_count = 0u;
 
 	ctx->process = syscall_test_spawn_process(name);
 	cr_assert_not_null(ctx->process);
@@ -91,4 +94,8 @@ void kernel_capability_test_poison_next_pmm_page(uint8_t value) {
 	cr_assert(pmm_alloc_pages(1u, &phys), "failed to reserve PMM page for poisoning");
 	memset((void*)(phys + boot_info.direct_map_offset), value, PMM_PAGE_SIZE);
 	cr_assert(pmm_free_pages(phys, 1u), "failed to return poisoned PMM page");
+}
+
+size_t kernel_capability_test_executable_sync_count(void) {
+	return executable_sync_count;
 }

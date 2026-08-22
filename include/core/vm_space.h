@@ -8,7 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* One live mapping of a Memory Object into an address space. */
+/* One live mapping of a memory object into an address space. */
 struct vm_mapping {
 	struct memory_object* memory;
 	uintptr_t             base;
@@ -32,7 +32,7 @@ struct address_space {
 	uint64_t                 next_mapping_id;
 };
 
-/* Parameters for mapping a Memory Object range. */
+/* Parameters for mapping a memory object range. */
 struct vm_map_request {
 	struct memory_object* memory;
 	size_t                memory_page_offset;
@@ -78,7 +78,7 @@ struct hal_address_space* vm_space_hal(struct address_space* space);
 /* Activate an address space on the current CPU. */
 bool vm_space_activate(struct address_space* space);
 
-/* Map a Memory Object range into an address space. */
+/* Map a memory object range into an address space. */
 bool vm_space_map(struct address_space* space, const struct vm_map_request* request, vmm_id_t* out_id, void** out_base);
 
 /* Remove a mapping from an address space. */

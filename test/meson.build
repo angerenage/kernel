@@ -315,6 +315,7 @@ test_suites = [
 			'../kernel/src/capability/boot_module.c',
 			'../kernel/src/capability/serial.c',
 			'../kernel/src/syscall/capability.c',
+			'../kernel/src/syscall/memory.c',
 			'../kernel/src/syscall/module.c',
 		),
 		'suites': ['unit', 'kernel'],

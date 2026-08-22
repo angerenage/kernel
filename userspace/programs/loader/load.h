@@ -17,8 +17,6 @@ struct loader_loaded_program {
 	size_t                        heap_page_count;
 	cap_id_t                      init_cap;
 	cap_id_t                      serial_cap;
-	cap_id_t*                     allocation_caps;
-	size_t                        allocation_count;
 	bool                          started;
 	struct loader_loaded_program* next;
 };
@@ -31,5 +29,5 @@ syscall_status_t loader_prepare_program(cap_id_t blob_cap, const char* name, siz
 syscall_status_t loader_start_program(struct loader_loaded_program* program, uint32_t argc, const void* argv_data,
                                       size_t argv_size, cap_id_t* out_thread_cap);
 
-/* Destroy a prepared process and release allocations retained by the loader. */
+/* Destroy a prepared process and release the loader's local state. */
 void loader_discard_program(struct loader_loaded_program* program);

@@ -19,8 +19,8 @@ enum {
 	SYSCALL_EXIT_THREAD,
 	SYSCALL_CREATE_PROCESS,
 
-	/* Memory allocation */
-	SYSCALL_MEMORY_ALLOCATE,
+	/* Memory objects */
+	SYSCALL_MEMORY_CREATE,
 
 	/* Message passing */
 	SYSCALL_SEND_MESSAGE,

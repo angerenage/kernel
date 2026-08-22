@@ -161,10 +161,14 @@ static bool handle_run(const struct cap_request* call, struct loader_loaded_prog
 		return reply_request(call->call_id, NULL, 0u, status);
 	}
 
-	if (reply_request(call->call_id, &response, sizeof(response), SYSCALL_STATUS_OK)) return true;
+	if (!reply_request(call->call_id, &response, sizeof(response), SYSCALL_STATUS_OK)) {
+		unlink_loaded(program);
+		loader_discard_program(program);
+		return false;
+	}
 	unlink_loaded(program);
-	loader_discard_program(program);
-	return false;
+	loader_release_program(program);
+	return true;
 }
 
 static bool handle_cancel(const struct cap_request* call, struct loader_loaded_program* program, const void* data) {

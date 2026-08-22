@@ -45,3 +45,6 @@ syscall_result_t kernel_capability_test_call(cap_id_t cap, const void* request, 
 uintptr_t kernel_capability_test_alloc_user_buffer(struct process* process, size_t page_count, vmm_id_t* out_id);
 
 void kernel_capability_test_poison_next_pmm_page(uint8_t value);
+
+/* Return the number of executable backing synchronizations observed by the HAL mock. */
+size_t kernel_capability_test_executable_sync_count(void);

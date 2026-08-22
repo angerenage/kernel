@@ -10,3 +10,6 @@ syscall_status_t loader_unpublish_terminal(channel_id_t endpoint, struct loader_
 
 /* Unpublish an abandoned load only while it remains unused. */
 bool loader_unpublish_abandoned(channel_id_t endpoint, struct loader_loaded_program* program);
+
+/* Release loader state after ownership of a running process transfers. */
+void loader_release_program(struct loader_loaded_program* program);

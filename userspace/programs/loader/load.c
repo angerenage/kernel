@@ -43,25 +43,18 @@ static vmm_prot_t segment_prot(uint32_t flags) {
 	return prot;
 }
 
-static bool remember_allocation(struct loader_loaded_program* program, cap_id_t allocation_cap) {
-	if (program == NULL || allocation_cap == CAP_ID_INVALID || program->allocation_caps == NULL) return false;
-	program->allocation_caps[program->allocation_count++] = allocation_cap;
-	return true;
-}
-
 static syscall_status_t load_segment(struct loader_loaded_program* program, cap_id_t blob_cap,
                                      const struct elf64_segment* segment) {
-	uint8_t          buffer[LOAD_COPY_CHUNK_SIZE];
-	uint64_t         page_base;
-	uint64_t         page_offset;
-	uint64_t         span;
-	uint64_t         map_size;
-	size_t           page_count;
-	vmm_prot_t       final_prot;
-	vmm_prot_t       load_prot;
-	cap_id_t         allocation_cap = CAP_ID_INVALID;
-	cap_id_t         mapping_cap    = CAP_ID_INVALID;
-	syscall_status_t status;
+	uint8_t                         buffer[LOAD_COPY_CHUNK_SIZE];
+	uint64_t                        page_base;
+	uint64_t                        page_offset;
+	uint64_t                        span;
+	uint64_t                        map_size;
+	size_t                          page_count;
+	vmm_prot_t                      final_prot;
+	cap_id_t                        memory_cap = CAP_ID_INVALID;
+	struct address_space_map_result mapped     = {.mapping_cap = CAP_ID_INVALID};
+	syscall_status_t                status;
 
 	if (segment->memsz == 0u) return SYSCALL_STATUS_OK;
 	page_base   = align_down_u64(segment->vaddr, VMM_PAGE_SIZE);
@@ -73,66 +66,79 @@ static syscall_status_t load_segment(struct loader_loaded_program* program, cap_
 	if (page_base > UINTPTR_MAX || page_offset > UINTPTR_MAX) return SYSCALL_STATUS_BAD_ARGUMENT;
 
 	final_prot = segment_prot(segment->flags);
-	load_prot  = final_prot | VMM_PROT_READ | VMM_PROT_WRITE;
-	status     = memory_allocate(page_count, load_prot, &allocation_cap);
+	status     = memory_create(page_count, &memory_cap);
 	if (status != SYSCALL_STATUS_OK) return status;
-	if (!remember_allocation(program, allocation_cap)) {
-		(void)allocation_free(allocation_cap);
-		return SYSCALL_STATUS_FAILED;
-	}
 
 	for (uint64_t copied = 0u; copied < segment->filesz;) {
 		uint64_t remaining = segment->filesz - copied;
 		size_t   chunk     = remaining > sizeof(buffer) ? sizeof(buffer) : (size_t)remaining;
 		uint64_t source_offset;
-		uint64_t allocation_offset;
+		uint64_t memory_offset;
 
 		if (add_overflow_u64(segment->offset, copied, &source_offset) ||
-		    add_overflow_u64(page_offset, copied, &allocation_offset) || allocation_offset > UINTPTR_MAX)
-			return SYSCALL_STATUS_BAD_ARGUMENT;
+		    add_overflow_u64(page_offset, copied, &memory_offset) || memory_offset > SIZE_MAX) {
+			status = SYSCALL_STATUS_BAD_ARGUMENT;
+			goto cleanup;
+		}
 		status = blob_read(blob_cap, source_offset, buffer, chunk);
-		if (status != SYSCALL_STATUS_OK) return status;
-		status = allocation_write(allocation_cap, (uintptr_t)allocation_offset, buffer, chunk);
-		if (status != SYSCALL_STATUS_OK) return status;
+		if (status != SYSCALL_STATUS_OK) goto cleanup;
+		status = memory_write(memory_cap, (size_t)memory_offset, buffer, chunk);
+		if (status != SYSCALL_STATUS_OK) goto cleanup;
 		copied += chunk;
 	}
 
-	status = address_space_map_at(program->address_space_cap, allocation_cap, (uintptr_t)page_base, &mapping_cap);
-	if (status != SYSCALL_STATUS_OK) return status;
-	if (final_prot != load_prot) {
-		status = mapping_protect(mapping_cap, final_prot);
-		if (status != SYSCALL_STATUS_OK) {
-			(void)cap_drop(mapping_cap);
-			return status;
-		}
-	}
-	return cap_drop(mapping_cap);
+	const struct memory_map_params params = {
+		.memory_page_offset = 0u,
+		.page_count         = page_count,
+		.address            = (uintptr_t)page_base,
+		.align_pages        = 1u,
+		.guard_pages        = 0u,
+		.prot               = final_prot,
+	};
+	status = address_space_map(program->address_space_cap, memory_cap, &params, &mapped);
+	if (status != SYSCALL_STATUS_OK) goto cleanup;
+	status = cap_drop(memory_cap);
+	if (status != SYSCALL_STATUS_OK) goto cleanup;
+	memory_cap = CAP_ID_INVALID;
+	status     = cap_drop(mapped.mapping_cap);
+	if (status == SYSCALL_STATUS_OK) mapped.mapping_cap = CAP_ID_INVALID;
+	return status;
+
+cleanup:
+	if (mapped.mapping_cap != CAP_ID_INVALID) (void)mapping_unmap(mapped.mapping_cap);
+	if (memory_cap != CAP_ID_INVALID) (void)cap_drop(memory_cap);
+	return status;
 }
 
 static syscall_status_t allocate_heap(struct loader_loaded_program* program) {
-	cap_id_t         allocation_cap = CAP_ID_INVALID;
-	cap_id_t         mapping_cap    = CAP_ID_INVALID;
-	struct vmm_info  mapping;
-	syscall_status_t status;
+	cap_id_t                        memory_cap = CAP_ID_INVALID;
+	struct address_space_map_result mapped     = {.mapping_cap = CAP_ID_INVALID};
+	syscall_status_t                status;
 
-	status = memory_allocate(HEAP_DEFAULT_GROW_PAGES, VMM_PROT_READ | VMM_PROT_WRITE, &allocation_cap);
+	status = memory_create(HEAP_DEFAULT_GROW_PAGES, &memory_cap);
 	if (status != SYSCALL_STATUS_OK) return status;
-	if (!remember_allocation(program, allocation_cap)) {
-		(void)allocation_free(allocation_cap);
-		return SYSCALL_STATUS_FAILED;
+	const struct memory_map_params params = {
+		.page_count = HEAP_DEFAULT_GROW_PAGES, .align_pages = 1u, .prot = VMM_PROT_READ | VMM_PROT_WRITE};
+	status = address_space_map(program->address_space_cap, memory_cap, &params, &mapped);
+	if (status != SYSCALL_STATUS_OK) goto cleanup;
+	if (mapped.mapping.base == NULL || mapped.mapping.page_count != HEAP_DEFAULT_GROW_PAGES) {
+		status = SYSCALL_STATUS_FAILED;
+		goto cleanup;
 	}
-	status = address_space_map(program->address_space_cap, allocation_cap, &mapping_cap);
-	if (status != SYSCALL_STATUS_OK) return status;
-	status = mapping_get_info(mapping_cap, &mapping);
-	if (status != SYSCALL_STATUS_OK || mapping.base == NULL || mapping.page_count != HEAP_DEFAULT_GROW_PAGES) {
-		(void)cap_drop(mapping_cap);
-		return status == SYSCALL_STATUS_OK ? SYSCALL_STATUS_FAILED : status;
-	}
-	status = cap_drop(mapping_cap);
-	if (status != SYSCALL_STATUS_OK) return status;
-	program->heap_base       = (uintptr_t)mapping.base;
-	program->heap_page_count = mapping.page_count;
+	status = cap_drop(memory_cap);
+	if (status != SYSCALL_STATUS_OK) goto cleanup;
+	memory_cap = CAP_ID_INVALID;
+	status     = cap_drop(mapped.mapping_cap);
+	if (status != SYSCALL_STATUS_OK) goto cleanup;
+	mapped.mapping_cap       = CAP_ID_INVALID;
+	program->heap_base       = (uintptr_t)mapped.mapping.base;
+	program->heap_page_count = mapped.mapping.page_count;
 	return SYSCALL_STATUS_OK;
+
+cleanup:
+	if (mapped.mapping_cap != CAP_ID_INVALID) (void)mapping_unmap(mapped.mapping_cap);
+	if (memory_cap != CAP_ID_INVALID) (void)cap_drop(memory_cap);
+	return status;
 }
 
 static syscall_status_t delegate_runtime_caps(struct loader_loaded_program* program) {
@@ -199,11 +205,8 @@ void loader_discard_program(struct loader_loaded_program* program) {
 	if (program->process_cap != CAP_ID_INVALID) {
 		(void)process_kill(program->process_cap, PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
 		(void)process_wait(program->process_cap, NULL);
+		(void)cap_drop(program->process_cap);
 	}
-	for (size_t i = 0u; i < program->allocation_count; i++) {
-		if (program->allocation_caps[i] != CAP_ID_INVALID) (void)allocation_free(program->allocation_caps[i]);
-	}
-	free(program->allocation_caps);
 	free(program);
 }
 
@@ -234,14 +237,7 @@ syscall_status_t loader_prepare_program(cap_id_t blob_cap, const char* name, siz
 	program->process_id        = PROCESS_PID_INVALID;
 	program->init_cap          = CAP_ID_INVALID;
 	program->serial_cap        = CAP_ID_INVALID;
-	program->allocation_caps   = calloc(image.segment_count + 1u, sizeof(*program->allocation_caps));
-	if (program->allocation_caps == NULL) {
-		elf64_image_deinit(&image);
-		free(program);
-		return SYSCALL_STATUS_FAILED;
-	}
-
-	process_name = malloc(name_size + 1u);
+	process_name               = malloc(name_size + 1u);
 	if (process_name == NULL) {
 		status = SYSCALL_STATUS_FAILED;
 		goto fail;

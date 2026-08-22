@@ -6,35 +6,28 @@
 #include <base/syscall.h>
 #include <base/vmm.h>
 #include <stddef.h>
-#include <stdint.h>
 
-/* Create a memory allocation and return its capability. */
-syscall_status_t memory_allocate(size_t page_count, vmm_prot_t prot, cap_id_t* out_allocation_cap);
+/* Create a logical memory object and return its capability. */
+syscall_status_t memory_create(size_t page_count, cap_id_t* out_memory_cap);
 
-/* Copy src bytes into an allocation through its capability. */
-syscall_status_t allocation_write(cap_id_t allocation_cap, uintptr_t dst_offset, const void* src, size_t size);
+/* Read immutable logical metadata through a memory capability. */
+syscall_status_t memory_get_info(cap_id_t memory_cap, struct memory_info* out_info);
 
-/* Copy bytes out of an allocation through its capability. */
-syscall_status_t allocation_read(cap_id_t allocation_cap, uintptr_t src_offset, void* dst, size_t size);
+/* Copy memory object contents into the caller's address space. */
+syscall_status_t memory_read(cap_id_t memory_cap, size_t offset, void* destination, size_t size);
 
-/* Release an allocation by destroying its capability. */
-syscall_status_t allocation_free(cap_id_t allocation_cap);
+/* Copy caller contents into a memory object. */
+syscall_status_t memory_write(cap_id_t memory_cap, size_t offset, const void* source, size_t size);
 
-/* Map an allocation into an address space at an automatic address. */
-syscall_status_t address_space_map(cap_id_t address_space_cap, cap_id_t allocation_cap, cap_id_t* out_mapping_cap);
+/* Map a memory object range and return its control capability and metadata. */
+syscall_status_t address_space_map(cap_id_t address_space_cap, cap_id_t memory_cap,
+                                   const struct memory_map_params* params, struct address_space_map_result* out_result);
 
-/* Map an allocation into an address space at a specific page-aligned address. */
-syscall_status_t address_space_map_at(cap_id_t address_space_cap, cap_id_t allocation_cap, uintptr_t address,
-                                      cap_id_t* out_mapping_cap);
-
-/* Query an allocation tracked by an address space. */
-syscall_status_t address_space_query(cap_id_t address_space_cap, vmm_id_t id, struct vmm_info* out_info);
-
-/* Read a mapping's persistent metadata. */
+/* Read a live mapping's persistent metadata. */
 syscall_status_t mapping_get_info(cap_id_t mapping_cap, struct vmm_info* out_info);
 
-/* Change a mapping's protection bits. */
+/* Change a mapping's protection within its capability authority. */
 syscall_status_t mapping_protect(cap_id_t mapping_cap, vmm_prot_t prot);
 
-/* Unmap a mapping through its mapping capability. */
+/* Explicitly destroy a mapping through its control capability. */
 syscall_status_t mapping_unmap(cap_id_t mapping_cap);

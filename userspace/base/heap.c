@@ -1,6 +1,7 @@
 #include <base/heap.h>
 #include <base/vmm.h>
 #include <runtime/heap.h>
+#include <system/capability.h>
 #include <system/memory.h>
 
 static bool userspace_heap_state_locked;
@@ -17,9 +18,8 @@ static void userspace_heap_state_unlock(void) {
 }
 
 bool heap_grow_pages(size_t page_count, void** out_base) {
-	cap_id_t        allocation_cap = CAP_ID_INVALID;
-	cap_id_t        mapping_cap    = CAP_ID_INVALID;
-	struct vmm_info mapping;
+	cap_id_t                        memory_cap = CAP_ID_INVALID;
+	struct address_space_map_result mapped     = {.mapping_cap = CAP_ID_INVALID};
 
 	if (out_base == NULL || page_count == 0u) return false;
 	*out_base = NULL;
@@ -37,23 +37,23 @@ bool heap_grow_pages(size_t page_count, void** out_base) {
 	}
 	userspace_heap_state_unlock();
 
-	if (!syscall_status_is_success(memory_allocate(page_count, VMM_PROT_READ | VMM_PROT_WRITE, &allocation_cap))) {
-		return false;
-	}
-	if (!syscall_status_is_success(address_space_map(runtime_heap_address_space_cap, allocation_cap, &mapping_cap))) {
+	if (!syscall_status_is_success(memory_create(page_count, &memory_cap))) return false;
+	const struct memory_map_params params = {
+		.page_count = page_count, .align_pages = 1u, .prot = VMM_PROT_READ | VMM_PROT_WRITE};
+	if (!syscall_status_is_success(address_space_map(runtime_heap_address_space_cap, memory_cap, &params, &mapped)) ||
+	    mapped.mapping.base == NULL || mapped.mapping.page_count != page_count) {
 		goto cleanup;
 	}
-	if (!syscall_status_is_success(mapping_get_info(mapping_cap, &mapping)) || mapping.base == NULL ||
-	    mapping.page_count != page_count) {
-		goto cleanup;
-	}
-
-	*out_base = mapping.base;
+	if (!syscall_status_is_success(cap_drop(memory_cap))) goto cleanup;
+	memory_cap = CAP_ID_INVALID;
+	if (!syscall_status_is_success(cap_drop(mapped.mapping_cap))) goto cleanup;
+	mapped.mapping_cap = CAP_ID_INVALID;
+	*out_base          = mapped.mapping.base;
 	return true;
 
 cleanup:
-	if (mapping_cap != CAP_ID_INVALID) (void)mapping_unmap(mapping_cap);
-	if (allocation_cap != CAP_ID_INVALID) (void)allocation_free(allocation_cap);
+	if (mapped.mapping_cap != CAP_ID_INVALID) (void)mapping_unmap(mapped.mapping_cap);
+	if (memory_cap != CAP_ID_INVALID) (void)cap_drop(memory_cap);
 	return false;
 }
 
