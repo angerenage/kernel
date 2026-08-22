@@ -41,12 +41,10 @@ struct cap_object {
 	cap_kernel_destroy_t         destroy;
 	cap_object_event_handler_t   event_handler;
 	struct cap_object*           event_next;
-	struct cap_object*           dispatch_next;
 	uint64_t                     reference_count;
 	size_t                       grant_count;
 	size_t                       active_calls;
 	bool                         event_pending;
-	bool                         zero_grants_notified;
 };
 
 /* A capability grants a target process rights on a cap_object. Capabilities form a delegation tree through parent. */
@@ -111,8 +109,14 @@ bool cap_object_destroy_with_id(cap_object_id_t id);
 /* Unregister a routing object. This never destroys the resource identified by object_id. */
 bool cap_object_destroy(struct cap_object* object);
 
+/* Unregister a published routing object only while it has no grants or active calls. */
+bool cap_object_destroy_if_unused(struct cap_object* object);
+
 /* Unpublish a userspace provider object identified by its endpoint and object ID. */
 bool cap_object_unpublish(struct channel* endpoint, uint64_t object_id);
+
+/* Unpublish a userspace provider object only while it has no grants or active calls. */
+bool cap_object_unpublish_if_unused(struct channel* endpoint, uint64_t object_id);
 
 /* Unpublish every routing object owned by endpoint. Represented provider resources remain untouched. */
 void cap_object_unregister_endpoint(struct channel* endpoint);
@@ -127,8 +131,14 @@ enum cap_result cap_object_begin_call(process_id_t caller, struct capability* ca
 /* End a previously begun capability call and release its routing-object reference. */
 void cap_object_end_call(struct cap_object* object);
 
-/* Consume and validate one queued userspace zero-grants event. */
-bool cap_object_consume_zero_grants_event(struct cap_object* object, uint64_t* out_object_id);
+/* Prepare exclusive delivery of a queued zero-grants event, discarding stale input. */
+bool cap_object_prepare_zero_grants_event(struct cap_object* object, uint64_t* out_object_id);
+
+/* Commit delivery only if a prepared userspace zero-grants event remains current. */
+bool cap_object_commit_zero_grants_event(struct cap_object* object);
+
+/* Restore a prepared userspace zero-grants event after delivery failure. */
+void cap_object_rollback_zero_grants_event(struct cap_object* object);
 
 /* Discard one queued lifecycle event reference without notifying its provider. */
 void cap_object_discard_event(struct cap_object* object);

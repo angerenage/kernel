@@ -1,4 +1,5 @@
 test_inc = include_directories('../include')
+loader_test_inc = include_directories('../userspace/include')
 criterion = dependency('criterion', native: true, required: true)
 threads = dependency('threads', native: true)
 
@@ -140,6 +141,16 @@ test_suites = [
 		'suites': ['unit', 'core'],
 	},
 	{
+		'name': 'loader_lifecycle',
+		'sources': files(
+			'loader/lifecycle.c',
+			'../userspace/programs/loader/lifecycle.c',
+		),
+		'include_directories': [loader_test_inc],
+		'link_with': base_test_lib,
+		'suites': ['unit', 'userspace'],
+	},
+	{
 		'name': 'rwlock',
 		'sources': files(
 			'core/rwlock_test.c',
@@ -262,6 +273,7 @@ test_suites = [
 			'../kernel/src/syscall/thread.c',
 			'../kernel/src/syscall/time.c',
 			'../kernel/src/syscall/upcall.c',
+			'../kernel/src/capability/signal.c',
 		),
 		'suites': ['unit', 'kernel'],
 	},
@@ -451,7 +463,7 @@ foreach t : test_suites
 		t['name'] + '_test',
 		sources: t['sources'],
 		native: true,
-		include_directories: test_inc,
+		include_directories: [test_inc] + t.get('include_directories', []),
 		dependencies: [criterion, threads],
 		link_with: t.get('link_with', core_test_lib),
 		c_args: test_common_c_args + t.get('c_args', []),

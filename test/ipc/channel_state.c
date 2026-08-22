@@ -36,7 +36,7 @@ Test(channel, process_channel_state_is_safe_for_concurrent_threads) {
 	test_barrier_init(&barrier, CHANNEL_STATE_THREAD_COUNT + 1u);
 
 	for (size_t i = 0u; i < CHANNEL_STATE_THREAD_COUNT; i++) {
-		channels[i] = channel_create(1u);
+		channels[i] = channel_create(1u, false);
 		cr_assert_not_null(channels[i]);
 		contexts[i] = (struct channel_state_thread_ctx){
 			.barrier = &barrier,

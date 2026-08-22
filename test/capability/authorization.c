@@ -29,7 +29,7 @@ Test(capability, authorization_endpoint_owner) {
 
 	cap_test_setup();
 
-	ch = channel_create(10u);
+	ch = channel_create(10u, false);
 	cr_assert_not_null(ch, "channel_create should succeed");
 
 	cap_object_id_t object_id = cap_object_create(1u, ch, NULL);

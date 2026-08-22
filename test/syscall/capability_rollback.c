@@ -59,7 +59,7 @@ static void destroy_current_process(struct process* process) {
 
 Test(capability_syscall, publish_output_failure_rolls_back_new_capability_and_object) {
 	struct process*  process   = make_current_process("cap/publish-rollback");
-	struct channel*  channel   = channel_create(process_pid(process));
+	struct channel*  channel   = channel_create(process_pid(process), false);
 	const uint64_t   object_id = 0x2001u;
 	size_t           objects_before;
 	size_t           caps_before;
@@ -88,7 +88,7 @@ Test(capability_syscall, publish_output_failure_rolls_back_new_capability_and_ob
 
 Test(capability_syscall, publish_output_failure_preserves_preexisting_object) {
 	struct process*    process   = make_current_process("cap/publish-existing");
-	struct channel*    channel   = channel_create(process_pid(process));
+	struct channel*    channel   = channel_create(process_pid(process), false);
 	const uint64_t     object_id = 0x2002u;
 	struct cap_object* object;
 	cap_object_id_t    object_record_id;
@@ -151,7 +151,7 @@ Test(capability_syscall, delegate_output_failure_rolls_back_child_capability) {
 
 Test(capability_syscall, derive_output_failure_rolls_back_child_and_new_object) {
 	struct process*  process = make_current_process("cap/derive-rollback");
-	struct channel*  channel = channel_create(process_pid(process));
+	struct channel*  channel = channel_create(process_pid(process), false);
 	cap_object_id_t  base_object_id;
 	cap_id_t         base_cap_id;
 	const uint64_t   derived_object_id = 0x2005u;

@@ -4,12 +4,23 @@
 
 #include "syscall.h"
 
-syscall_status_t channel_create(channel_id_t* out_id) {
-	syscall_result_t result = syscall(SYSCALL_CHANNEL_CREATE, (uintptr_t)out_id, 0u, 0u, 0u, 0u, 0u);
+syscall_status_t channel_create(channel_id_t* out_id, cap_id_t* out_activity_signal) {
+	syscall_result_t result =
+		syscall(SYSCALL_CHANNEL_CREATE, (uintptr_t)out_id, (uintptr_t)out_activity_signal, 0u, 0u, 0u, 0u);
 
 #ifdef RUNTIME_DIAGNOSTICS
 	if (result.status == SYSCALL_STATUS_BAD_ARGUMENT) {
-		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(out_id);
+		switch (result.value) {
+		case 0u:
+			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(out_id);
+			break;
+		case 1u:
+			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(out_activity_signal);
+			break;
+		default:
+			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER_INDEX(SYSCALL_CHANNEL_CREATE, result.value);
+			break;
+		}
 	}
 	else {
 		RUNTIME_DIAGNOSTIC_SYSCALL_RESULT(SYSCALL_CHANNEL_CREATE, result);

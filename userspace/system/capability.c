@@ -170,6 +170,11 @@ syscall_status_t cap_unpublish(channel_id_t endpoint, uint64_t object_id) {
 	return result.status;
 }
 
+syscall_status_t cap_unpublish_if_unused(channel_id_t endpoint, uint64_t object_id) {
+	syscall_result_t result = syscall(SYSCALL_CAP_UNPUBLISH, (uintptr_t)endpoint, (uintptr_t)object_id, 1u, 0u, 0u, 0u);
+	return result.status;
+}
+
 syscall_status_t cap_drop(cap_id_t cap) {
 	syscall_result_t result = syscall(SYSCALL_CAP_DROP, (uintptr_t)cap, 0u, 0u, 0u, 0u, 0u);
 

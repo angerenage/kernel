@@ -7,7 +7,7 @@ Test(channel, cap_queue_init_is_empty) {
 	struct cap_request req;
 
 	ipc_test_init_heap();
-	ch = channel_create(1u);
+	ch = channel_create(1u, false);
 	cr_assert_not_null(ch);
 
 	cr_assert_not(ring_buffer_dequeue(&ch->cap_queue, &req), "new channel cap_queue should be empty");
@@ -20,7 +20,7 @@ Test(channel, cap_queue_send_and_recv) {
 	struct cap_request out;
 
 	ipc_test_init_heap();
-	ch = channel_create(1u);
+	ch = channel_create(1u, false);
 	cr_assert_not_null(ch);
 
 	req.caller       = 5u;
@@ -51,7 +51,7 @@ Test(channel, cap_queue_fifo_order) {
 	struct cap_request out;
 
 	ipc_test_init_heap();
-	ch = channel_create(1u);
+	ch = channel_create(1u, false);
 	cr_assert_not_null(ch);
 
 	req1.caller       = 1u;
@@ -89,7 +89,7 @@ Test(channel, cap_queue_full) {
 	struct cap_request req;
 
 	ipc_test_init_heap();
-	ch = channel_create(1u);
+	ch = channel_create(1u, false);
 	cr_assert_not_null(ch);
 
 	memset(&req, 0, sizeof(req));
@@ -107,7 +107,7 @@ Test(channel, cap_queue_rejects_null) {
 	struct cap_request req;
 
 	ipc_test_init_heap();
-	ch = channel_create(1u);
+	ch = channel_create(1u, false);
 	cr_assert_not_null(ch);
 
 	cr_assert_not(ring_buffer_enqueue(NULL, &req));
@@ -116,4 +116,25 @@ Test(channel, cap_queue_rejects_null) {
 	cr_assert_not(ring_buffer_dequeue(&ch->cap_queue, NULL));
 
 	channel_destroy(ch, 1u);
+}
+
+Test(channel, activity_signal_is_optional_and_reports_enqueued_requests) {
+	struct channel*       ch;
+	struct cap_request    req = {0};
+	struct signal_message message;
+
+	ipc_test_init_heap();
+	ch = channel_create(1u, false);
+	cr_assert_not_null(ch);
+	cr_assert_null(channel_activity_signal(ch));
+	cr_assert_eq(channel_destroy(ch, 1u), CHANNEL_OK);
+
+	ch = channel_create(1u, true);
+	cr_assert_not_null(ch);
+	cr_assert_not_null(channel_activity_signal(ch));
+	cr_assert_eq(signal_read(channel_activity_signal(ch), &message), SIGNAL_NO_VALUE);
+	cr_assert(channel_enqueue_cap_request(ch, &req));
+	cr_assert_eq(signal_read(channel_activity_signal(ch), &message), SIGNAL_OK);
+	cr_assert_eq(message.sender, SIGNAL_SENDER_KERNEL);
+	cr_assert_eq(channel_destroy(ch, 1u), CHANNEL_OK);
 }

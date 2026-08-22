@@ -10,6 +10,7 @@
 #include <stdint.h>
 
 struct cap_object;
+struct signal;
 
 /*
  * A channel is a kernel object that carries capability call requests. It has
@@ -22,6 +23,7 @@ struct channel {
 	struct ring_buffer cap_queue;
 	struct cap_object* event_head;
 	struct cap_object* event_tail;
+	struct signal*     activity_signal;
 	process_id_t       owner_pid;
 	uint64_t           reference_count;
 	bool               closing;
@@ -36,8 +38,8 @@ struct process_channel_state {
 	struct channel* channels[CHANNEL_MAX_PER_PROCESS];
 };
 
-/* Create a new channel owned by the given process. Returns NULL for an invalid owner PID or allocation failure. */
-struct channel* channel_create(process_id_t owner_pid);
+/* Create a channel, optionally with an activity signal, for the given owner. */
+struct channel* channel_create(process_id_t owner_pid, bool with_activity_signal);
 
 /* Destroy a channel. Only the owner may do this. */
 enum channel_result channel_destroy(struct channel* channel, process_id_t caller_pid);
@@ -62,6 +64,9 @@ bool channel_enqueue_cap_event(struct channel* channel, struct cap_object* objec
 
 /* Remove the next queued lifecycle event object. */
 struct cap_object* channel_dequeue_cap_event(struct channel* channel);
+
+/* Return the channel activity signal, or NULL when none was requested. */
+struct signal* channel_activity_signal(struct channel* channel);
 
 /* Initialize per-process channel state. */
 void process_channel_state_init(struct process_channel_state* state);

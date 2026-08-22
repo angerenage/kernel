@@ -605,22 +605,24 @@ syscall_result_t syscall_cap_unpublish(uintptr_t arg0, uintptr_t arg1, uintptr_t
 	struct process* process;
 	struct channel* endpoint;
 	bool            unpublished;
-	(void)arg2;
 	(void)arg3;
 	(void)arg4;
 	(void)arg5;
 	process = process_current();
 	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 	if (arg0 == CHANNEL_ID_INVALID) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	if (arg2 > 1u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 2u);
 	endpoint = channel_acquire((channel_id_t)arg0);
 	if (endpoint == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	if (endpoint->owner_pid != process_pid(process)) {
 		channel_release(endpoint);
 		return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	}
-	unpublished = cap_object_unpublish(endpoint, (uint64_t)arg1);
+	unpublished = arg2 == 0u ? cap_object_unpublish(endpoint, (uint64_t)arg1)
+	                         : cap_object_unpublish_if_unused(endpoint, (uint64_t)arg1);
 	channel_release(endpoint);
-	return unpublished ? syscall_result_ok(0u) : syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 1u);
+	if (unpublished) return syscall_result_ok(0u);
+	return syscall_result_error(arg2 == 0u ? SYSCALL_STATUS_BAD_ARGUMENT : SYSCALL_STATUS_UNAVAILABLE, 1u);
 }
 
 syscall_result_t syscall_cap_recv(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,

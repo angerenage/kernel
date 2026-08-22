@@ -13,8 +13,9 @@
 #include <system/capability.h>
 #include <system/channel.h>
 #include <system/process.h>
-#include <system/time.h>
+#include <system/signal.h>
 
+#include "lifecycle.h"
 #include "load.h"
 
 #define LOADER_SERVICE_NAME "elf64"
@@ -24,6 +25,7 @@
 #define LOADER_SERVICE_OBJECT_ID 1u
 
 static channel_id_t                  loader_endpoint = CHANNEL_ID_INVALID;
+static cap_id_t                      loader_activity = CAP_ID_INVALID;
 static struct loader_loaded_program* loaded_programs;
 static uint8_t                       request_buffer[CAP_MAX_REQUEST_SIZE];
 
@@ -33,13 +35,6 @@ static bool reply_request(cap_call_id_t call_id, const void* response, size_t re
 
 static uint64_t loaded_object_id(const struct loader_loaded_program* program) {
 	return (uint64_t)(uintptr_t)program;
-}
-
-static syscall_status_t unpublish_load(struct loader_loaded_program* program) {
-	if (program == NULL || program->load_cap == CAP_ID_INVALID) return SYSCALL_STATUS_OK;
-	syscall_status_t status = cap_unpublish(loader_endpoint, loaded_object_id(program));
-	if (status == SYSCALL_STATUS_OK) program->load_cap = CAP_ID_INVALID;
-	return status;
 }
 
 static struct loader_loaded_program* find_loaded(uint64_t object_id) {
@@ -106,7 +101,7 @@ static bool handle_load(const struct cap_request* call, const void* data) {
 			   .process_id = program->process_id,
     };
 	if (reply_request(call->call_id, &response, sizeof(response), SYSCALL_STATUS_OK)) return true;
-	(void)unpublish_load(program);
+	(void)loader_unpublish_terminal(loader_endpoint, program);
 	unlink_loaded(program);
 	loader_discard_program(program);
 	return false;
@@ -136,7 +131,7 @@ static bool handle_run(const struct cap_request* call, struct loader_loaded_prog
 	                              &loader_thread_cap);
 	if (status != SYSCALL_STATUS_OK) {
 		if (program->started) {
-			(void)unpublish_load(program);
+			(void)loader_unpublish_terminal(loader_endpoint, program);
 			unlink_loaded(program);
 			loader_discard_program(program);
 		}
@@ -154,12 +149,12 @@ static bool handle_run(const struct cap_request* call, struct loader_loaded_prog
 	}
 
 	if (status != SYSCALL_STATUS_OK) {
-		(void)unpublish_load(program);
+		(void)loader_unpublish_terminal(loader_endpoint, program);
 		unlink_loaded(program);
 		loader_discard_program(program);
 		return reply_request(call->call_id, NULL, 0u, status);
 	}
-	status = unpublish_load(program);
+	status = loader_unpublish_terminal(loader_endpoint, program);
 	if (status != SYSCALL_STATUS_OK) {
 		unlink_loaded(program);
 		loader_discard_program(program);
@@ -180,7 +175,7 @@ static bool handle_cancel(const struct cap_request* call, struct loader_loaded_p
 	    call->request_size != sizeof(request))
 		return reply_request(call->call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 
-	status = unpublish_load(program);
+	status = loader_unpublish_terminal(loader_endpoint, program);
 	if (status != SYSCALL_STATUS_OK) return reply_request(call->call_id, NULL, 0u, status);
 
 	unlink_loaded(program);
@@ -219,7 +214,7 @@ static bool advertise_loader(void) {
 
 	status = process_self_info(&self);
 	if (status != SYSCALL_STATUS_OK || self.pid == PROCESS_PID_INVALID) return false;
-	status = channel_create(&loader_endpoint);
+	status = channel_create(&loader_endpoint, &loader_activity);
 	if (status != SYSCALL_STATUS_OK) return false;
 	status = cap_publish(
 		loader_endpoint, LOADER_SERVICE_OBJECT_ID, self.pid, CAP_CALL | CAP_DELEGATE | CAP_DELEGATE_PEER, &service_cap);
@@ -264,13 +259,14 @@ int loader_server_run(void) {
 			if (received && event.type == CHANNEL_EVENT_CAP_ZERO_GRANTS &&
 			    event.object_id != LOADER_SERVICE_OBJECT_ID) {
 				struct loader_loaded_program* program = find_loaded(event.object_id);
-				if (program != NULL && !program->started) {
-					(void)unpublish_load(program);
+				if (program != NULL && !program->started && loader_unpublish_abandoned(loader_endpoint, program)) {
 					unlink_loaded(program);
 					loader_discard_program(program);
 				}
 			}
 		} while (received);
-		(void)sched_yield();
+		struct signal_message activity;
+		status = signal_wait(loader_activity, &activity);
+		if (status != SYSCALL_STATUS_OK) return 1;
 	}
 }

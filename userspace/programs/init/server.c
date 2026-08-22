@@ -5,12 +5,13 @@
 #include <system/capability.h>
 #include <system/channel.h>
 #include <system/process.h>
-#include <system/time.h>
+#include <system/signal.h>
 
 #include "launcher.h"
 #include "registry.h"
 
 static channel_id_t server_endpoint = CHANNEL_ID_INVALID;
+static cap_id_t     server_activity = CAP_ID_INVALID;
 static process_id_t server_pid      = PROCESS_PID_INVALID;
 
 static bool reply_request(cap_call_id_t call_id, const void* response, size_t response_size,
@@ -30,7 +31,7 @@ bool server_init(void) {
 		printf("init: self process query failed: %u\n", (unsigned)status);
 		return false;
 	}
-	status = channel_create(&server_endpoint);
+	status = channel_create(&server_endpoint, &server_activity);
 	if (status != SYSCALL_STATUS_OK) {
 		printf("init: service channel creation failed: %u\n", (unsigned)status);
 		return false;
@@ -42,6 +43,7 @@ bool server_init(void) {
 void server_deinit(void) {
 	if (server_endpoint != CHANNEL_ID_INVALID) (void)channel_destroy(server_endpoint);
 	server_endpoint = CHANNEL_ID_INVALID;
+	server_activity = CAP_ID_INVALID;
 	server_pid      = PROCESS_PID_INVALID;
 }
 
@@ -211,6 +213,8 @@ int server_run(const struct init_startup_info* startup) {
 			loader_started = true;
 			continue;
 		}
-		(void)sched_yield();
+		struct signal_message activity;
+		status = signal_wait(server_activity, &activity);
+		if (status != SYSCALL_STATUS_OK) return 1;
 	}
 }

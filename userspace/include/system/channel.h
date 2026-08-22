@@ -6,8 +6,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-/* Create a new endpoint channel owned by the calling process. */
-syscall_status_t channel_create(channel_id_t* out_id);
+/* Create a channel and optionally return a capability for its activity signal. */
+syscall_status_t channel_create(channel_id_t* out_id, cap_id_t* out_activity_signal);
 
 /* Destroy a channel owned by the calling process. */
 syscall_status_t channel_destroy(channel_id_t channel_id);

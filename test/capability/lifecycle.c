@@ -1,3 +1,5 @@
+#include <signal.h>
+
 #include "test_support.h"
 
 #define LIFECYCLE_MANY_OBJECTS 64u
@@ -29,8 +31,24 @@ static bool receive_zero_event(struct channel* endpoint, uint64_t* out_object_id
 	for (;;) {
 		struct cap_object* object = channel_dequeue_cap_event(endpoint);
 		if (object == NULL) return false;
-		if (cap_object_consume_zero_grants_event(object, out_object_id)) return true;
+		if (cap_object_prepare_zero_grants_event(object, out_object_id)) {
+			return cap_object_commit_zero_grants_event(object);
+		}
 	}
+}
+
+Test(capability, lifecycle_state_fits_in_the_reduced_cap_object_layout) {
+	cr_assert_eq(sizeof(struct cap_object), 96u);
+	cr_assert_lt(sizeof(struct cap_object), 104u);
+}
+
+Test(capability, ending_an_inactive_object_is_an_invariant_failure, .signal = SIGABRT) {
+	struct cap_object* object;
+
+	cap_test_setup();
+	object = cap_object_acquire(cap_object_create(0x20bu, NULL, NULL));
+	cr_assert_not_null(object);
+	cap_object_end_call(object);
 }
 
 Test(capability, grant_count_tracks_create_delegate_drop_revoke_and_cleanup) {
@@ -102,7 +120,7 @@ Test(capability, zero_grants_is_once_per_epoch_and_stale_events_are_suppressed) 
 	uint64_t           delivered_id = 0u;
 
 	cap_test_setup();
-	endpoint = channel_create(30u);
+	endpoint = channel_create(30u, false);
 	object   = create_userspace_object(endpoint, 0x203u, &object_id);
 	grant    = cap_lookup(cap_create(object_id, 31u, CAP_READ, NULL));
 	cr_assert(cap_destroy(grant));
@@ -122,6 +140,231 @@ Test(capability, zero_grants_is_once_per_epoch_and_stale_events_are_suppressed) 
 	cr_assert_eq(channel_destroy(endpoint, 30u), CHANNEL_OK);
 }
 
+Test(capability, regrant_and_redrop_reuses_the_pending_zero_grants_event) {
+	struct channel*    endpoint;
+	struct cap_object* object;
+	struct capability* grant;
+	cap_object_id_t    object_id;
+	uint64_t           delivered_id = 0u;
+
+	cap_test_setup();
+	endpoint = channel_create(31u, false);
+	object   = create_userspace_object(endpoint, 0x209u, &object_id);
+	cr_assert(cap_destroy_by_id(cap_create(object_id, 32u, CAP_READ, NULL)));
+	grant = cap_lookup(cap_create(object_id, 32u, CAP_READ, NULL));
+	cr_assert_not_null(grant);
+	cr_assert(cap_destroy(grant));
+	cr_assert(receive_zero_event(endpoint, &delivered_id));
+	cr_assert_eq(delivered_id, 0x209u);
+	cr_assert_not(receive_zero_event(endpoint, NULL));
+	cr_assert(cap_object_destroy(object));
+	cap_object_release(object);
+	cr_assert_eq(channel_destroy(endpoint, 31u), CHANNEL_OK);
+}
+
+Test(capability, failed_zero_grants_delivery_requeues_the_event_for_retry) {
+	struct channel*    endpoint;
+	struct cap_object* object;
+	struct cap_object* queued;
+	cap_object_id_t    object_id;
+	uint64_t           delivered_id = 0u;
+
+	cap_test_setup();
+	endpoint = channel_create(33u, false);
+	object   = create_userspace_object(endpoint, 0x20au, &object_id);
+	cr_assert(cap_destroy_by_id(cap_create(object_id, 34u, CAP_READ, NULL)));
+	queued = channel_dequeue_cap_event(endpoint);
+	cr_assert_eq(queued, object);
+	cr_assert(cap_object_prepare_zero_grants_event(queued, &delivered_id));
+	cr_assert_eq(delivered_id, 0x20au);
+	cap_object_rollback_zero_grants_event(queued);
+	cr_assert(receive_zero_event(endpoint, &delivered_id));
+	cr_assert_eq(delivered_id, 0x20au);
+	cr_assert_not(receive_zero_event(endpoint, NULL));
+	cr_assert(cap_object_destroy(object));
+	cap_object_release(object);
+	cr_assert_eq(channel_destroy(endpoint, 33u), CHANNEL_OK);
+}
+
+Test(capability, regrant_between_prepare_and_commit_makes_the_event_stale) {
+	struct channel*    endpoint;
+	struct cap_object* object;
+	struct cap_object* queued;
+	struct capability* grant;
+	cap_object_id_t    object_id;
+
+	cap_test_setup();
+	endpoint = channel_create(35u, false);
+	object   = create_userspace_object(endpoint, 0x20cu, &object_id);
+	cr_assert(cap_destroy_by_id(cap_create(object_id, 36u, CAP_READ, NULL)));
+	queued = channel_dequeue_cap_event(endpoint);
+	cr_assert_eq(queued, object);
+	cr_assert(cap_object_prepare_zero_grants_event(queued, NULL));
+	grant = cap_lookup(cap_create(object_id, 36u, CAP_READ, NULL));
+	cr_assert_not_null(grant);
+	cr_assert_not(cap_object_commit_zero_grants_event(queued));
+	cr_assert(cap_destroy(grant));
+	cr_assert(receive_zero_event(endpoint, NULL));
+	cr_assert(cap_object_destroy(object));
+	cap_object_release(object);
+	cr_assert_eq(channel_destroy(endpoint, 35u), CHANNEL_OK);
+}
+
+Test(capability, unpublish_between_prepare_and_commit_suppresses_delivery) {
+	struct channel*    endpoint;
+	struct cap_object* object;
+	struct cap_object* queued;
+	cap_object_id_t    object_id;
+
+	cap_test_setup();
+	endpoint = channel_create(37u, false);
+	object   = create_userspace_object(endpoint, 0x20du, &object_id);
+	cr_assert(cap_destroy_by_id(cap_create(object_id, 38u, CAP_READ, NULL)));
+	queued = channel_dequeue_cap_event(endpoint);
+	cr_assert_eq(queued, object);
+	cr_assert(cap_object_prepare_zero_grants_event(queued, NULL));
+	cr_assert(cap_object_unpublish(endpoint, 0x20du));
+	cr_assert_not(cap_object_commit_zero_grants_event(queued));
+	cr_assert_null(cap_object_acquire(object_id));
+	cap_object_release(object);
+	cr_assert_eq(channel_destroy(endpoint, 37u), CHANNEL_OK);
+}
+
+Test(capability, regrant_and_redrop_between_prepare_and_commit_keeps_the_event_current) {
+	struct channel*    endpoint;
+	struct cap_object* object;
+	struct cap_object* queued;
+	cap_object_id_t    object_id;
+
+	cap_test_setup();
+	endpoint = channel_create(39u, false);
+	object   = create_userspace_object(endpoint, 0x20eu, &object_id);
+	cr_assert(cap_destroy_by_id(cap_create(object_id, 40u, CAP_READ, NULL)));
+	queued = channel_dequeue_cap_event(endpoint);
+	cr_assert_eq(queued, object);
+	cr_assert(cap_object_prepare_zero_grants_event(queued, NULL));
+	cr_assert(cap_destroy_by_id(cap_create(object_id, 40u, CAP_READ, NULL)));
+	cr_assert(cap_object_commit_zero_grants_event(queued));
+	cr_assert_not(receive_zero_event(endpoint, NULL));
+	cr_assert(cap_object_destroy(object));
+	cap_object_release(object);
+	cr_assert_eq(channel_destroy(endpoint, 39u), CHANNEL_OK);
+}
+
+Test(capability, conditional_unpublish_requires_the_object_to_remain_unused) {
+	struct channel*    endpoint;
+	struct cap_object* unused;
+	struct cap_object* granted;
+	struct capability* grant;
+	cap_object_id_t    unused_id;
+	cap_object_id_t    granted_id;
+
+	cap_test_setup();
+	endpoint = channel_create(42u, false);
+	unused   = create_userspace_object(endpoint, 0x20fu, &unused_id);
+	cr_assert(cap_object_unpublish_if_unused(endpoint, 0x20fu));
+	cr_assert_null(cap_object_acquire(unused_id));
+	cap_object_release(unused);
+
+	granted = create_userspace_object(endpoint, 0x210u, &granted_id);
+	grant   = cap_acquire(cap_create(granted_id, 43u, CAP_READ, NULL));
+	cr_assert_not_null(grant);
+	cr_assert_not(cap_object_unpublish_if_unused(endpoint, 0x210u));
+	cr_assert_eq(cap_is_valid(grant), CAP_OK);
+	cr_assert_eq(cap_object_lookup(endpoint, 0x210u), granted);
+	cr_assert(cap_destroy(grant));
+	cap_release(grant);
+	cr_assert(receive_zero_event(endpoint, NULL));
+	cr_assert(cap_object_unpublish_if_unused(endpoint, 0x210u));
+	cap_object_release(granted);
+	cr_assert_eq(channel_destroy(endpoint, 42u), CHANNEL_OK);
+}
+
+Test(capability, conditional_unpublish_preserves_a_grant_that_appears_after_zero_grants) {
+	struct channel*    endpoint;
+	struct cap_object* object;
+	struct capability* grant;
+	cap_object_id_t    object_id;
+
+	cap_test_setup();
+	endpoint = channel_create(44u, false);
+	object   = create_userspace_object(endpoint, 0x211u, &object_id);
+	cr_assert(cap_destroy_by_id(cap_create(object_id, 45u, CAP_READ, NULL)));
+	cr_assert(receive_zero_event(endpoint, NULL));
+	grant = cap_acquire(cap_create(object_id, 45u, CAP_READ, NULL));
+	cr_assert_not_null(grant);
+	cr_assert_not(cap_object_unpublish_if_unused(endpoint, 0x211u));
+	cr_assert_eq(cap_is_valid(grant), CAP_OK);
+	cr_assert(cap_destroy(grant));
+	cap_release(grant);
+	cr_assert(receive_zero_event(endpoint, NULL));
+	cr_assert(cap_object_unpublish_if_unused(endpoint, 0x211u));
+	cap_object_release(object);
+	cr_assert_eq(channel_destroy(endpoint, 44u), CHANNEL_OK);
+}
+
+Test(capability, conditional_unpublish_rejects_an_active_call_without_mutation) {
+	struct channel*    endpoint;
+	struct cap_object* object;
+	struct cap_object* active = NULL;
+	struct capability* grant;
+	cap_object_id_t    object_id;
+
+	cap_test_setup();
+	endpoint = channel_create(46u, false);
+	object   = create_userspace_object(endpoint, 0x212u, &object_id);
+	grant    = cap_acquire(cap_create(object_id, 47u, CAP_CALL, NULL));
+	cr_assert_eq(cap_object_begin_call(47u, grant, &active, NULL), CAP_OK);
+	cr_assert(cap_destroy(grant));
+	cap_release(grant);
+	cr_assert_not(cap_object_unpublish_if_unused(endpoint, 0x212u));
+	cr_assert_eq(cap_object_lookup(endpoint, 0x212u), object);
+	cap_object_end_call(active);
+	cr_assert(receive_zero_event(endpoint, NULL));
+	cr_assert(cap_object_unpublish_if_unused(endpoint, 0x212u));
+	cap_object_release(object);
+	cr_assert_eq(channel_destroy(endpoint, 46u), CHANNEL_OK);
+}
+
+Test(capability, kernel_destroy_if_unused_checks_grants_and_active_calls_atomically) {
+	struct cap_object* unused;
+	struct cap_object* granted;
+	struct cap_object* active_object;
+	struct cap_object* active = NULL;
+	struct capability* grant;
+	cap_object_id_t    unused_id;
+	cap_object_id_t    granted_id;
+	cap_object_id_t    active_id;
+
+	cap_test_setup();
+	unused_id = cap_object_create_kernel(0x213u, lifecycle_handler, NULL);
+	unused    = cap_object_acquire(unused_id);
+	cr_assert(cap_object_destroy_if_unused(unused));
+	cr_assert_null(cap_object_acquire(unused_id));
+	cap_object_release(unused);
+
+	granted_id = cap_object_create_kernel(0x214u, lifecycle_handler, NULL);
+	granted    = cap_object_acquire(granted_id);
+	grant      = cap_acquire(cap_create(granted_id, 48u, CAP_READ, NULL));
+	cr_assert_not(cap_object_destroy_if_unused(granted));
+	cr_assert_eq(cap_is_valid(grant), CAP_OK);
+	cr_assert(cap_destroy(grant));
+	cap_release(grant);
+	cr_assert(cap_object_destroy_if_unused(granted));
+	cap_object_release(granted);
+
+	active_id     = cap_object_create_kernel(0x215u, lifecycle_handler, NULL);
+	active_object = cap_object_acquire(active_id);
+	grant         = cap_acquire(cap_create(active_id, 49u, CAP_CALL, NULL));
+	cr_assert_eq(cap_object_begin_call(49u, grant, &active, NULL), CAP_OK);
+	cr_assert(cap_destroy(grant));
+	cap_release(grant);
+	cr_assert_not(cap_object_destroy_if_unused(active_object));
+	cap_object_end_call(active);
+	cr_assert(cap_object_destroy_if_unused(active_object));
+	cap_object_release(active_object);
+}
+
 Test(capability, lifecycle_queue_is_lossless_beyond_request_queue_depth) {
 	struct channel*    endpoint;
 	struct cap_object* objects[LIFECYCLE_MANY_OBJECTS];
@@ -129,7 +372,7 @@ Test(capability, lifecycle_queue_is_lossless_beyond_request_queue_depth) {
 	bool               seen[LIFECYCLE_MANY_OBJECTS] = {0};
 
 	cap_test_setup();
-	endpoint = channel_create(40u);
+	endpoint = channel_create(40u, false);
 	for (size_t i = 0u; i < LIFECYCLE_MANY_OBJECTS; i++) {
 		objects[i]               = create_userspace_object(endpoint, 0x300u + i, &object_ids[i]);
 		struct capability* grant = cap_lookup(cap_create(object_ids[i], 41u, CAP_READ, NULL));
@@ -160,7 +403,7 @@ Test(capability, pending_call_defers_zero_grants_until_terminal_completion) {
 	struct cap_object*       active = NULL;
 
 	cap_test_setup();
-	endpoint = channel_create(50u);
+	endpoint = channel_create(50u, false);
 	object   = create_userspace_object(endpoint, 0x204u, &object_id);
 	grant    = cap_acquire(cap_create(object_id, 51u, CAP_CALL, NULL));
 	cr_assert_eq(cap_object_begin_call(51u, grant, &active, NULL), CAP_OK);
@@ -186,7 +429,7 @@ Test(capability, caller_and_channel_cancellation_end_active_calls_once) {
 	cap_object_id_t    object_id;
 
 	cap_test_setup();
-	endpoint = channel_create(60u);
+	endpoint = channel_create(60u, false);
 	object   = create_userspace_object(endpoint, 0x205u, &object_id);
 	grant    = cap_acquire(cap_create(object_id, 61u, CAP_CALL, NULL));
 	for (size_t i = 0u; i < 2u; i++) {
@@ -215,7 +458,7 @@ Test(capability, explicit_unpublish_invalidates_grants_suppresses_events_and_all
 	cap_object_id_t    object_id;
 
 	cap_test_setup();
-	endpoint = channel_create(70u);
+	endpoint = channel_create(70u, false);
 	object   = create_userspace_object(endpoint, 0x206u, &object_id);
 	grant    = cap_acquire(cap_create(object_id, 71u, CAP_CALL, NULL));
 	cr_assert_eq(cap_object_begin_call(71u, grant, &active, NULL), CAP_OK);
@@ -236,7 +479,7 @@ Test(capability, explicit_unpublish_suppresses_an_already_queued_zero_event) {
 	cap_object_id_t    object_id;
 
 	cap_test_setup();
-	endpoint = channel_create(80u);
+	endpoint = channel_create(80u, false);
 	object   = create_userspace_object(endpoint, 0x207u, &object_id);
 	cr_assert(cap_destroy_by_id(cap_create(object_id, 81u, CAP_READ, NULL)));
 	cr_assert(cap_object_unpublish(endpoint, 0x207u));

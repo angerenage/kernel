@@ -4,10 +4,10 @@ Test(channel, create_rejects_invalid_arguments) {
 	struct channel* ch;
 
 	ipc_test_init_heap();
-	ch = channel_create(PROCESS_PID_INVALID);
+	ch = channel_create(PROCESS_PID_INVALID, false);
 	cr_assert_null(ch, "channel_create should reject invalid owner PID");
 
-	ch = channel_create(1u);
+	ch = channel_create(1u, false);
 	cr_assert_not_null(ch, "channel_create should succeed with valid owner PID");
 
 	if (ch != NULL) {
@@ -20,7 +20,7 @@ Test(channel, destroy_rejects_non_owner) {
 	enum channel_result result;
 
 	ipc_test_init_heap();
-	ch = channel_create(1u);
+	ch = channel_create(1u, false);
 	cr_assert_not_null(ch);
 
 	result = channel_destroy(ch, 2u);
@@ -36,7 +36,7 @@ Test(channel, destroy_unpublishes_endpoint_objects) {
 
 	ipc_test_init_heap();
 	capability_init();
-	ch = channel_create(3u);
+	ch = channel_create(3u, false);
 	cr_assert_not_null(ch);
 	object_id = cap_object_create(77u, ch, NULL);
 	cr_assert_neq(object_id, CAP_OBJECT_ID_INVALID);
@@ -54,7 +54,7 @@ Test(channel, destroy_unpublishes_id_before_last_retained_reference_is_released)
 	ipc_test_init_heap();
 	capability_init();
 
-	channel = channel_create(42u);
+	channel = channel_create(42u, false);
 	cr_assert_not_null(channel);
 	id   = channel->id;
 	held = channel_acquire(id);
@@ -79,7 +79,7 @@ Test(channel, destroy_completes_pending_calls_as_unavailable) {
 	ipc_test_init_heap();
 	capability_init();
 
-	channel = channel_create(77u);
+	channel = channel_create(77u, false);
 	cr_assert_not_null(channel);
 	call = cap_pending_call_create(NULL, channel->id, 77u, 55u, 0u);
 	cr_assert_not_null(call);
@@ -103,7 +103,7 @@ Test(channel, process_channel_state_deinit_unpublishes_every_owned_channel) {
 	process_channel_state_init(&state);
 
 	for (size_t i = 0u; i < 8u; i++) {
-		channels[i] = channel_create(100u);
+		channels[i] = channel_create(100u, false);
 		cr_assert_not_null(channels[i]);
 		ids[i] = channels[i]->id;
 		cr_assert(process_channel_state_add(&state, channels[i]));

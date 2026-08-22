@@ -4,6 +4,7 @@
 #include <core/channel.h>
 #include <core/id_table.h>
 #include <core/ring_buffer.h>
+#include <core/signal.h>
 #include <core/spinlock.h>
 #include <libc/stdlib.h>
 #include <stdbool.h>
@@ -16,7 +17,7 @@ static struct id_table channel_table = {
 	.max_id  = UINT64_MAX,
 };
 
-struct channel* channel_create(process_id_t owner_pid) {
+struct channel* channel_create(process_id_t owner_pid, bool with_activity_signal) {
 	struct channel*      ch;
 	channel_id_t         id;
 	enum id_table_result id_result;
@@ -29,11 +30,19 @@ struct channel* channel_create(process_id_t owner_pid) {
 	spinlock_init_class(&ch->lock, "channel_lock", SPINLOCK_ORDER_MUTEX, SPINLOCK_FLAG_IRQSAVE);
 	ch->owner_pid       = owner_pid;
 	ch->reference_count = 1u;
+	if (with_activity_signal) {
+		ch->activity_signal = signal_create();
+		if (ch->activity_signal == NULL) {
+			free(ch);
+			return NULL;
+		}
+	}
 	if (!ring_buffer_init(&ch->cap_queue,
 	                      "channel_cap_queue",
 	                      SPINLOCK_ORDER_ID_TABLE,
 	                      CAP_REQUEST_QUEUE_DEPTH,
 	                      sizeof(struct cap_request))) {
+		if (ch->activity_signal != NULL) (void)signal_destroy(ch->activity_signal);
 		free(ch);
 		return NULL;
 	}
@@ -41,6 +50,7 @@ struct channel* channel_create(process_id_t owner_pid) {
 	id_result = id_table_alloc(&channel_table, ch, &id);
 	if (id_result != ID_TABLE_OK) {
 		ring_buffer_deinit(&ch->cap_queue);
+		if (ch->activity_signal != NULL) (void)signal_destroy(ch->activity_signal);
 		free(ch);
 		return NULL;
 	}
@@ -71,6 +81,10 @@ enum channel_result channel_destroy(struct channel* channel, process_id_t caller
 		struct cap_object* object = channel_dequeue_cap_event(channel);
 		if (object == NULL) break;
 		cap_object_discard_event(object);
+	}
+	if (channel->activity_signal != NULL) {
+		(void)signal_destroy(channel->activity_signal);
+		channel->activity_signal = NULL;
 	}
 	channel_release(channel);
 	return CHANNEL_OK;
@@ -118,6 +132,7 @@ void channel_release(struct channel* channel) {
 bool channel_enqueue_cap_request(struct channel* channel, const struct cap_request* request) {
 	struct irq_state state;
 	bool             enqueued;
+	struct signal*   activity = NULL;
 
 	if (channel == NULL || request == NULL) return false;
 	state = spinlock_lock_irqsave(&channel->lock);
@@ -126,12 +141,19 @@ bool channel_enqueue_cap_request(struct channel* channel, const struct cap_reque
 		return false;
 	}
 	enqueued = ring_buffer_enqueue(&channel->cap_queue, request);
+	if (enqueued && signal_retain(channel->activity_signal)) activity = channel->activity_signal;
 	spinlock_unlock_irqrestore(&channel->lock, state);
+	if (activity != NULL) {
+		const struct signal_payload payload = {0};
+		(void)signal_send_coalesced(activity, SIGNAL_SENDER_KERNEL, &payload, NULL, NULL);
+		signal_release(activity);
+	}
 	return enqueued;
 }
 
 bool channel_enqueue_cap_event(struct channel* channel, struct cap_object* object) {
 	struct irq_state state;
+	struct signal*   activity = NULL;
 	if (channel == NULL || object == NULL) return false;
 	state = spinlock_lock_irqsave(&channel->lock);
 	if (channel->closing) {
@@ -142,7 +164,13 @@ bool channel_enqueue_cap_event(struct channel* channel, struct cap_object* objec
 	if (channel->event_tail == NULL) channel->event_head = object;
 	else channel->event_tail->event_next = object;
 	channel->event_tail = object;
+	if (signal_retain(channel->activity_signal)) activity = channel->activity_signal;
 	spinlock_unlock_irqrestore(&channel->lock, state);
+	if (activity != NULL) {
+		const struct signal_payload payload = {0};
+		(void)signal_send_coalesced(activity, SIGNAL_SENDER_KERNEL, &payload, NULL, NULL);
+		signal_release(activity);
+	}
 	return true;
 }
 
@@ -159,6 +187,10 @@ struct cap_object* channel_dequeue_cap_event(struct channel* channel) {
 	}
 	spinlock_unlock_irqrestore(&channel->lock, state);
 	return object;
+}
+
+struct signal* channel_activity_signal(struct channel* channel) {
+	return channel == NULL ? NULL : channel->activity_signal;
 }
 
 void process_channel_state_init(struct process_channel_state* state) {
