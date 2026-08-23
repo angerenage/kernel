@@ -6,6 +6,7 @@
 #include <core/uthread.h>
 #include <core/vm_space.h>
 #include <hal/cpu.h>
+#include <hal/interrupts.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -438,6 +439,7 @@ static void sched_dispatch_next(struct cpu* cpu) {
 	struct sched_cpu_state* state;
 	struct thread*          next;
 	struct thread*          previous;
+	bool                    interrupts_enabled = false;
 
 	if (cpu == NULL) return;
 
@@ -465,6 +467,11 @@ static void sched_dispatch_next(struct cpu* cpu) {
 		return;
 	}
 
+	if (previous != NULL) {
+		interrupts_enabled = irq_enabled();
+		irq_disable_local();
+	}
+
 	if (previous != NULL && previous->state == THREAD_STATE_EXITING) {
 		__atomic_store_n(&cpu->context_switch_in_progress, true, __ATOMIC_RELEASE);
 		__atomic_store_n(&cpu->deferred_reap_thread, previous, __ATOMIC_RELEASE);
@@ -475,6 +482,7 @@ static void sched_dispatch_next(struct cpu* cpu) {
 		sched_stat_increment(state == NULL ? NULL : &state->stats.context_switch_count);
 		hal_cpu_context_switch(&previous->context, &next->context);
 		sched_complete_context_switch();
+		if (interrupts_enabled) irq_enable_local();
 	}
 }
 

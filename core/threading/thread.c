@@ -1,5 +1,6 @@
 #include <core/sched.h>
 #include <core/thread.h>
+#include <hal/interrupts.h>
 
 int32_t thread_priority_clamp(int32_t priority) {
 	if (priority < THREAD_PRIORITY_MIN) return THREAD_PRIORITY_MIN;
@@ -33,6 +34,7 @@ static void thread_entry_bootstrap(void* ctx) {
 	struct thread* thread = (struct thread*)ctx;
 
 	sched_complete_context_switch();
+	irq_enable_local();
 	thread_exit_if_cancelled(thread);
 	if (thread != NULL && thread->entry != NULL) thread->entry(thread->arg);
 	sched_exit_current(0u);

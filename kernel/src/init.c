@@ -124,7 +124,7 @@ static bool kernel_launch_init_process(void) {
 			 .arg_data         = &startup,
 			 .arg_size         = sizeof(startup),
 			 .user_stack_pages = UTHREAD_DEFAULT_USER_STACK_PAGES,
-			 .preferred_cpu    = cpu_current(),
+			 .preferred_cpu    = NULL,
 			 .detached         = false,
     };
 	main_thread  = NULL;

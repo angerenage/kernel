@@ -4,7 +4,6 @@
 #include <base/process.h>
 #include <base/thread.h>
 #include <core/capability.h>
-#include <core/cpu.h>
 #include <core/process.h>
 #include <core/syscall.h>
 #include <core/uthread.h>
@@ -88,7 +87,7 @@ static syscall_result_t process_run_handler(const struct cap_request* req, struc
 											 .arg_data         = arg_copy,
 											 .arg_size         = request.arg_size,
 											 .user_stack_pages = UTHREAD_DEFAULT_USER_STACK_PAGES,
-											 .preferred_cpu    = cpu_current(),
+											 .preferred_cpu    = NULL,
 											 .detached         = false,
 										 });
 	free(arg_copy);
