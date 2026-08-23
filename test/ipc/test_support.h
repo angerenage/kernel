@@ -4,12 +4,10 @@
 #include <base/cap.h>
 #include <base/channel.h>
 #include <base/heap.h>
-#include <base/message.h>
 #include <base/process.h>
 #include <core/capability.h>
 #include <core/capability_call.h>
 #include <core/channel.h>
-#include <core/message.h>
 #include <core/pmm.h>
 #include <core/ring_buffer.h>
 #include <criterion/criterion.h>

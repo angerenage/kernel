@@ -4,7 +4,6 @@
 #include <base/cap.h>
 #include <base/channel.h>
 #include <base/heap.h>
-#include <base/message.h>
 #include <base/process.h>
 #include <base/syscall.h>
 #include <core/address_transfer.h>

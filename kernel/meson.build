@@ -54,7 +54,6 @@ kernel_objs = base_sources + core_sources + kernel_libk_sources + platform_kerne
 	'src/syscall/capability.c',
 	'src/syscall/channel.c',
 	'src/syscall/memory.c',
-	'src/syscall/message.c',
 	'src/syscall/misc.c',
 	'src/syscall/module.c',
 	'src/syscall/process.c',

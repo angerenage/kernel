@@ -3,7 +3,6 @@
 
 #include "../../../kernel/src/syscall/capability.h"
 #include "../../../kernel/src/syscall/channel.h"
-#include "../../../kernel/src/syscall/message.h"
 #include "../../../kernel/src/syscall/misc.h"
 #include "../../../kernel/src/syscall/process.h"
 #include "../../../kernel/src/syscall/thread.h"
@@ -19,9 +18,6 @@ static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 
 	[SYSCALL_EXIT_PROCESS] = syscall_exit_process,
 	[SYSCALL_EXIT_THREAD]  = syscall_exit_thread,
-
-	[SYSCALL_SEND_MESSAGE] = syscall_send_message,
-	[SYSCALL_RECV_MESSAGE] = syscall_recv_message,
 
 	[SYSCALL_CHANNEL_CREATE]     = syscall_channel_create,
 	[SYSCALL_CHANNEL_DESTROY]    = syscall_channel_destroy,

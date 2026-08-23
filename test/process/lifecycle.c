@@ -164,33 +164,12 @@ Test(process, detached_process_is_reaped_after_its_last_thread_exits) {
 	cr_assert_null(process_lookup(pid), "detached zombie process remained registered after its last thread exited");
 }
 
-Test(process, destroy_reclaims_message_queue_heap_storage) {
-	struct process* warmup  = NULL;
-	struct process* process = NULL;
-	size_t          baseline;
-
-	init_process_test_environment();
-
-	cr_assert_eq(process_create(&warmup, NULL), PROCESS_OK, "warmup process_create failed");
-	cr_assert_not_null(warmup->message_queue.data, "warmup process did not initialize its message queue");
-	cr_assert(process_destroy(warmup), "warmup process_destroy failed");
-
-	baseline = heap_free_bytes();
-
-	cr_assert_eq(process_create(&process, NULL), PROCESS_OK, "process_create failed");
-	cr_assert_not_null(process->message_queue.data, "created process did not initialize its message queue");
-	cr_assert_lt(heap_free_bytes(), baseline, "process creation should consume heap storage");
-	cr_assert(process_destroy(process), "process_destroy failed");
-	cr_assert_eq(heap_free_bytes(), baseline, "destroying a process must release its message queue backing storage");
-}
-
 Test(process, acquired_reference_defers_final_teardown) {
 	struct process* warmup   = NULL;
 	struct process* process  = NULL;
 	struct process* retained = NULL;
 	process_id_t    pid;
 	size_t          baseline;
-	uint8_t         payload = 0x5au;
 
 	init_process_test_environment();
 	cr_assert_eq(process_create(&warmup, NULL), PROCESS_OK);
@@ -204,8 +183,9 @@ Test(process, acquired_reference_defers_final_teardown) {
 
 	cr_assert(process_destroy(process));
 	cr_assert_null(process_lookup(pid), "destroy must prevent new acquisitions before teardown");
-	cr_assert_not_null(retained->message_queue.data, "an acquired process must retain its message queue");
-	cr_assert_eq(message_queue_send(&retained->message_queue, 1u, &payload, sizeof(payload)), MESSAGE_OK);
+	cr_assert_eq(process_pid(retained), pid, "an acquired process must retain its identity");
+	cr_assert(vm_space_is_initialized(process_address_space(retained)),
+	          "an acquired process must retain its address space");
 	cr_assert_lt(heap_free_bytes(), baseline, "retained process storage must remain allocated");
 
 	process_release(retained);

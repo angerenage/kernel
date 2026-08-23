@@ -3,7 +3,6 @@
 #include <base/process.h>
 #include <core/capability.h>
 #include <core/channel.h>
-#include <core/message.h>
 #include <core/thread.h>
 #include <core/vm_space.h>
 #include <stdbool.h>
@@ -122,8 +121,7 @@ struct process {
 	struct uthread* thread_tail;
 	/* Wait queue for threads blocking on process join. */
 	struct thread_wait_queue join_wait_queue;
-	/* Channel state and message ring buffer for inter-process communication. */
-	struct ring_buffer           message_queue;
+	/* Channel state for capability-based IPC. */
 	struct process_channel_state channel_state;
 	/* User-mode address space for this process. */
 	struct address_space address_space;

@@ -6,7 +6,6 @@ core_sources = files(
 	'cpu/irq.c',
 	'exception.c',
 	'id_table.c',
-	'message.c',
 	'process.c',
 	'ring_buffer.c',
 	'signal.c',

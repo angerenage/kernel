@@ -326,15 +326,9 @@ enum process_result process_create(struct process** out_process, const char* nam
 	process->reference_count             = 1u;
 	spinlock_init_class(&process->lock, "process", SPINLOCK_ORDER_PROCESS, SPINLOCK_FLAG_IRQSAVE);
 	thread_wait_queue_init(&process->join_wait_queue);
-	if (!message_queue_init(&process->message_queue)) {
-		free((void*)process->name);
-		free(process);
-		return PROCESS_NO_MEMORY;
-	}
 	process_channel_state_init(&process->channel_state);
 
 	if (!vm_space_create_user(&process->address_space)) {
-		ring_buffer_deinit(&process->message_queue);
 		free((void*)process->name);
 		free(process);
 		return PROCESS_ADDRESS_SPACE_FAILED;
@@ -343,7 +337,6 @@ enum process_result process_create(struct process** out_process, const char* nam
 	id_result = id_table_alloc(&process_table, process, &pid);
 	if (id_result != ID_TABLE_OK) {
 		vm_space_destroy(&process->address_space);
-		ring_buffer_deinit(&process->message_queue);
 		free((void*)process->name);
 		free(process);
 		return id_result == ID_TABLE_NO_MEMORY ? PROCESS_NO_MEMORY : PROCESS_PID_EXHAUSTED;
@@ -514,7 +507,6 @@ static void process_finalize(struct process* process) {
 	(void)process_destroy_cap_object(process);
 	vm_space_destroy(&process->address_space);
 	process_channel_state_deinit(&process->channel_state);
-	ring_buffer_deinit(&process->message_queue);
 	free((void*)process->name);
 	memset(process, 0, sizeof(*process));
 	free(process);

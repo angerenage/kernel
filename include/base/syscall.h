@@ -22,10 +22,6 @@ enum {
 	/* Memory objects */
 	SYSCALL_MEMORY_CREATE,
 
-	/* Message passing */
-	SYSCALL_SEND_MESSAGE,
-	SYSCALL_RECV_MESSAGE,
-
 	/* Channels */
 	SYSCALL_CHANNEL_CREATE,
 	SYSCALL_CHANNEL_DESTROY,
