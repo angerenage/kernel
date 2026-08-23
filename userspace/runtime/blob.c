@@ -25,9 +25,25 @@ syscall_status_t blob_read(cap_id_t blob_cap, uint64_t offset, void* buffer, siz
 	};
 	size_t           response_size = 0u;
 	syscall_status_t status;
+	uint8_t*         cursor = buffer;
 
 	if (size == 0u) return SYSCALL_STATUS_OK;
-	status = cap_call(blob_cap, &req, sizeof(req), buffer, size, &response_size);
-	if (status != SYSCALL_STATUS_OK) return status;
-	return response_size == size ? SYSCALL_STATUS_OK : SYSCALL_STATUS_FAILED;
+	if (buffer == NULL || (uint64_t)size != size || (uint64_t)size > UINT64_MAX - offset)
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+
+	while (size != 0u) {
+		size_t chunk = size > CAP_MAX_RESPONSE_SIZE ? CAP_MAX_RESPONSE_SIZE : size;
+
+		req.offset    = offset;
+		req.size      = chunk;
+		response_size = 0u;
+		status        = cap_call(blob_cap, &req, sizeof(req), cursor, chunk, &response_size);
+		if (status != SYSCALL_STATUS_OK) return status;
+		if (response_size != chunk) return SYSCALL_STATUS_FAILED;
+
+		offset += chunk;
+		cursor += chunk;
+		size -= chunk;
+	}
+	return SYSCALL_STATUS_OK;
 }
