@@ -558,6 +558,8 @@ bool process_destroy(struct process* process) {
 		}
 		cursor = cursor->process_next;
 	}
+	if (process->state == PROCESS_STATE_NEW || process->state == PROCESS_STATE_RUNNING)
+		process->state = PROCESS_STATE_EXITING;
 	spinlock_unlock_irqrestore(&process->lock, state);
 
 	for (;;) {

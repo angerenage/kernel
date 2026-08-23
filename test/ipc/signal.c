@@ -2,11 +2,13 @@
 
 #include <core/capability.h>
 #include <core/cpu.h>
+#include <core/process.h>
 #include <core/sched.h>
 #include <core/signal.h>
 #include <core/thread.h>
 #include <core/user_upcall.h>
 #include <core/uthread.h>
+#include <core/vm_space.h>
 #include <criterion/criterion.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>
@@ -1171,6 +1173,10 @@ Test(signal, direct_operations_use_specific_rights_without_cap_call) {
 	struct capability*          control;
 	struct capability*          info;
 	struct cap_object*          object;
+	struct process*             sender_process = NULL;
+	struct process*             reader_process = NULL;
+	process_id_t                sender_pid;
+	process_id_t                reader_pid;
 	cap_id_t                    sender_cap;
 	cap_id_t                    reader_cap;
 	cap_id_t                    control_cap;
@@ -1179,24 +1185,33 @@ Test(signal, direct_operations_use_specific_rights_without_cap_call) {
 
 	ipc_test_init_heap();
 	capability_init();
+	cr_assert(vm_init(), "vm_init failed");
+	cr_assert_eq(process_create(&sender_process, NULL), PROCESS_OK);
+	cr_assert_eq(process_create(&reader_process, NULL), PROCESS_OK);
+	cr_assert_not_null(sender_process);
+	cr_assert_not_null(reader_process);
+	sender_pid = process_pid(sender_process);
+	reader_pid = process_pid(reader_process);
+	cr_assert_neq(sender_pid, reader_pid);
+
 	signal = signal_create();
 	cr_assert_not_null(signal);
-	sender_cap  = kernel_signal_grant(signal, SIGNAL_TEST_SENDER, CAP_SIGNAL);
-	reader_cap  = kernel_signal_grant(signal, SIGNAL_TEST_SECOND_SENDER, CAP_READ);
-	control_cap = kernel_signal_grant(signal, SIGNAL_TEST_SENDER, CAP_CALL);
-	info_cap    = kernel_signal_grant(signal, SIGNAL_TEST_SECOND_SENDER, CAP_CALL | CAP_READ);
+	sender_cap  = kernel_signal_grant(signal, sender_pid, CAP_SIGNAL);
+	reader_cap  = kernel_signal_grant(signal, reader_pid, CAP_READ);
+	control_cap = kernel_signal_grant(signal, sender_pid, CAP_CALL);
+	info_cap    = kernel_signal_grant(signal, reader_pid, CAP_CALL | CAP_READ);
 	cr_assert_neq(sender_cap, CAP_ID_INVALID);
 	cr_assert_neq(reader_cap, CAP_ID_INVALID);
 	cr_assert_neq(control_cap, CAP_ID_INVALID);
 	cr_assert_neq(info_cap, CAP_ID_INVALID);
 
-	result = kernel_signal_read(sender_cap, SIGNAL_TEST_SENDER, &message);
+	result = kernel_signal_read(sender_cap, sender_pid, &message);
 	cr_assert_eq(result.status, SYSCALL_STATUS_DENIED, "CAP_SIGNAL must not imply CAP_READ");
-	result = kernel_signal_try_wait(sender_cap, SIGNAL_TEST_SENDER, &message);
+	result = kernel_signal_try_wait(sender_cap, sender_pid, &message);
 	cr_assert_eq(result.status, SYSCALL_STATUS_DENIED, "CAP_SIGNAL must not imply CAP_WAIT");
-	result = kernel_signal_send(reader_cap, SIGNAL_TEST_SECOND_SENDER, &payload, SIGNAL_SEND_FLAG_NONE, &response);
+	result = kernel_signal_send(reader_cap, reader_pid, &payload, SIGNAL_SEND_FLAG_NONE, &response);
 	cr_assert_eq(result.status, SYSCALL_STATUS_DENIED, "CAP_READ must not imply CAP_SIGNAL");
-	result = kernel_signal_send(sender_cap, SIGNAL_TEST_SECOND_SENDER, &payload, SIGNAL_SEND_FLAG_NONE, &response);
+	result = kernel_signal_send(sender_cap, reader_pid, &payload, SIGNAL_SEND_FLAG_NONE, &response);
 	cr_assert_eq(result.status, SYSCALL_STATUS_DENIED, "a capability must remain bound to its recipient PID");
 
 	control = cap_lookup(control_cap);
@@ -1205,7 +1220,7 @@ Test(signal, direct_operations_use_specific_rights_without_cap_call) {
 	cr_assert_not_null(object);
 	cr_assert_not_null(object->handler);
 	cap_request = (struct cap_request){
-		.caller       = SIGNAL_TEST_SENDER,
+		.caller       = sender_pid,
 		.cap_id       = control_cap,
 		.object_id    = signal_id(signal),
 		.rights       = control->rights,
@@ -1215,7 +1230,7 @@ Test(signal, direct_operations_use_specific_rights_without_cap_call) {
 	result = object->handler(&cap_request);
 	cr_assert_eq(result.status, SYSCALL_STATUS_DENIED, "CAP_CALL must not imply the CAP_MAP handler right");
 	cap_request = (struct cap_request){
-		.caller            = SIGNAL_TEST_SENDER,
+		.caller            = sender_pid,
 		.cap_id            = control_cap,
 		.object_id         = signal_id(signal),
 		.rights            = control->rights,
@@ -1228,14 +1243,14 @@ Test(signal, direct_operations_use_specific_rights_without_cap_call) {
 	cr_assert_eq(result.status, SYSCALL_STATUS_DENIED, "CAP_CALL must not imply the CAP_READ handler right");
 	cap_object_release(object);
 
-	result = kernel_signal_send(sender_cap, SIGNAL_TEST_SENDER, &payload, SIGNAL_SEND_FLAG_NONE, &response);
+	result = kernel_signal_send(sender_cap, sender_pid, &payload, SIGNAL_SEND_FLAG_NONE, &response);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(response.receiver_count, 0u);
 	cr_assert_eq(response.delivery_count, 0u);
-	result = kernel_signal_read(reader_cap, SIGNAL_TEST_SECOND_SENDER, &message);
+	result = kernel_signal_read(reader_cap, reader_pid, &message);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(result.value, 1u);
-	cr_assert_eq(message.sender, SIGNAL_TEST_SENDER);
+	cr_assert_eq(message.sender, sender_pid);
 	cr_assert_eq(memcmp(&message.payload, &payload, sizeof(payload)), 0);
 
 	info = cap_lookup(info_cap);
@@ -1243,7 +1258,7 @@ Test(signal, direct_operations_use_specific_rights_without_cap_call) {
 	object = cap_object_acquire(info->cap_object_id);
 	cr_assert_not_null(object);
 	cap_request = (struct cap_request){
-		.caller            = SIGNAL_TEST_SECOND_SENDER,
+		.caller            = reader_pid,
 		.cap_id            = info_cap,
 		.object_id         = signal_id(signal),
 		.rights            = info->rights,
@@ -1270,6 +1285,8 @@ Test(signal, direct_operations_use_specific_rights_without_cap_call) {
 	cr_assert_null(cap_lookup(reader_cap));
 	cr_assert_null(cap_lookup(control_cap));
 	cr_assert_null(cap_lookup(info_cap));
+	cr_assert(process_destroy(sender_process));
+	cr_assert(process_destroy(reader_process));
 }
 
 Test(signal, invalid_handler_flags_are_rejected) {
