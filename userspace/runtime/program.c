@@ -57,6 +57,8 @@ static syscall_status_t resolve_loader(const char* service, struct cached_loader
 	};
 	struct init_service_handle handle;
 	struct init_call_result    result;
+	struct cached_loader       replacement;
+	syscall_status_t           cleanup_status;
 
 	if (service == NULL || out_loader == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	if (cached_loader_matches(service)) {
@@ -69,12 +71,22 @@ static syscall_status_t resolve_loader(const char* service, struct cached_loader
 		return registry_result_status(result);
 	if (handle.capability == CAP_ID_INVALID || handle.owner == PROCESS_PID_INVALID) return SYSCALL_STATUS_FAILED;
 
-	loader_cache = (struct cached_loader){
+	replacement = (struct cached_loader){
 		.owner      = handle.owner,
 		.capability = handle.capability,
 	};
-	(void)strlcpy(loader_cache.service, handle.info.selector.service, sizeof(loader_cache.service));
-	*out_loader = loader_cache;
+	(void)strlcpy(replacement.service, handle.info.selector.service, sizeof(replacement.service));
+
+	if (loader_cache.capability != CAP_ID_INVALID && loader_cache.capability != replacement.capability) {
+		cleanup_status = cap_drop(loader_cache.capability);
+		if (cleanup_status != SYSCALL_STATUS_OK) {
+			(void)cap_drop(replacement.capability);
+			return cleanup_status;
+		}
+	}
+
+	loader_cache = replacement;
+	*out_loader  = loader_cache;
 	return SYSCALL_STATUS_OK;
 }
 
