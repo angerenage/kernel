@@ -180,6 +180,9 @@ bool cap_remove_rights(struct capability* capability, cap_rights_t rights);
 /* Remove a capability and its delegation subtree. Retained records remain alive until their final cap_release(). */
 bool cap_destroy(struct capability* capability);
 
+/* Fully revoke a direct child while delegator still owns its live CAP_DELEGATE parent. */
+bool cap_revoke_direct_child(process_id_t delegator, struct capability* capability);
+
 /* Destroy a capability whose ID is already known, without dereferencing the supplied pointer. */
 bool cap_destroy_by_id(cap_id_t id);
 

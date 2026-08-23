@@ -422,7 +422,8 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
-	req.call_id = cap_pending_call_id(pending);
+	pending->response_address = arg3;
+	req.call_id               = cap_pending_call_id(pending);
 	if (!cap_pending_call_attach_request(pending, kernel_request, request_size)) {
 		cap_pending_call_destroy(pending);
 		channel_release(endpoint);
@@ -441,13 +442,7 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 	channel_release(endpoint);
 
 	cap_release(cap);
-	const void* pending_response = NULL;
-	cap_pending_call_wait(pending, &call_result, &pending_response);
-	if (call_result.status == SYSCALL_STATUS_OK && call_result.value != 0u) {
-		syscall_result_t copy_result =
-			syscall_copy_to_user(syscall_current_user_space(), arg3, pending_response, (size_t)call_result.value, 3u);
-		if (copy_result.status != SYSCALL_STATUS_OK) call_result = copy_result;
-	}
+	cap_pending_call_wait(pending, &call_result, NULL);
 	cap_pending_call_destroy(pending);
 	return call_result;
 }
@@ -466,12 +461,31 @@ static bool cap_reply_status_is_valid(syscall_status_t status) {
 	}
 }
 
+static syscall_status_t syscall_cap_reply_deliver(const struct cap_pending_reply* reply, size_t response_size) {
+	struct process*              caller;
+	enum address_transfer_result transfer_result;
+
+	if (reply == NULL || reply->call == NULL) return SYSCALL_STATUS_FAILED;
+	caller = process_acquire(reply->call->caller);
+	if (caller == NULL) return SYSCALL_STATUS_UNAVAILABLE;
+	if (response_size == 0u) {
+		process_release(caller);
+		return SYSCALL_STATUS_OK;
+	}
+
+	transfer_result = address_space_copy_to(
+		process_address_space(caller), reply->call->response_address, reply->response, response_size);
+	process_release(caller);
+	return transfer_result == ADDRESS_TRANSFER_OK ? SYSCALL_STATUS_OK : SYSCALL_STATUS_UNAVAILABLE;
+}
+
 syscall_result_t syscall_cap_reply(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
                                    uintptr_t arg5) {
 	struct process*               process;
 	struct cap_pending_reply      reply;
 	size_t                        response_size;
 	syscall_status_t              status = (syscall_status_t)arg3;
+	syscall_status_t              delivery_status;
 	enum cap_pending_reply_result prepare_result;
 	syscall_result_t              copy_result;
 
@@ -509,6 +523,13 @@ syscall_result_t syscall_cap_reply(uintptr_t arg0, uintptr_t arg1, uintptr_t arg
 		cap_pending_call_abort_reply(&reply);
 		return copy_result;
 	}
+
+	delivery_status = syscall_cap_reply_deliver(&reply, response_size);
+	if (delivery_status != SYSCALL_STATUS_OK) {
+		cap_pending_call_finish_reply(&reply, delivery_status, 0u);
+		return syscall_result_error(delivery_status, 0u);
+	}
+
 	cap_pending_call_finish_reply(&reply, status, response_size);
 	return syscall_result_ok(0u);
 }
@@ -530,6 +551,7 @@ syscall_result_t syscall_cap_revoke(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 
 	caller_pid = process_pid(process);
+	rights     = (cap_rights_t)arg1;
 
 	if (arg0 == CAP_ID_INVALID) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	cap = cap_acquire((cap_id_t)arg0);
@@ -551,12 +573,15 @@ syscall_result_t syscall_cap_revoke(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 	if ((cap_rights(cap) & CAP_REVOKE) == 0u && revoke_object->endpoint != NULL &&
 	    revoke_object->endpoint->owner_pid != caller_pid) {
 		cap_object_release(revoke_object);
+		if (rights == 0u && cap_revoke_direct_child(caller_pid, cap)) {
+			cap_release(cap);
+			return syscall_result_ok(0u);
+		}
 		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 	cap_object_release(revoke_object);
 
-	rights = (cap_rights_t)arg1;
 	if (rights == 0u) {
 		if (!cap_destroy(cap)) {
 			cap_release(cap);

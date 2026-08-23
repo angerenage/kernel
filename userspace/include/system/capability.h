@@ -25,7 +25,7 @@ syscall_status_t cap_delegate_peer(cap_id_t source, process_id_t target, cap_rig
 /* Derive a new capability on a different object within the same endpoint. */
 syscall_status_t cap_derive(cap_id_t base, process_id_t target, uint64_t object_id, cap_rights_t rights, cap_id_t* out);
 
-/* Revoke a subset of rights from a capability (or the whole capability when rights == 0). */
+/* Revoke rights or the whole capability. A direct delegator may fully retract its child with rights == 0. */
 syscall_status_t cap_revoke(cap_id_t cap, cap_rights_t rights);
 
 /* Drop a capability owned by the caller without revoking capabilities delegated from it. */

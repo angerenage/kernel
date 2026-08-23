@@ -87,10 +87,14 @@ static bool dispatch_request(const struct cap_request* request, const void* data
 	case INIT_OP_ACQUIRE: {
 		const struct init_acquire_request* acquire  = data;
 		struct init_acquire_response       response = {0};
+		bool                               replied;
 		if (request->request_size != sizeof(*acquire) || request->response_capacity < sizeof(response))
 			return reply_request(request->call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 		response.status = registry_acquire(request->caller, &acquire->query, acquire->service, &response.handle);
-		return reply_request(request->call_id, &response, sizeof(response), SYSCALL_STATUS_OK);
+		replied         = reply_request(request->call_id, &response, sizeof(response), SYSCALL_STATUS_OK);
+		if (!replied && response.status == INIT_REGISTRY_OK && response.handle.capability != CAP_ID_INVALID)
+			(void)cap_revoke(response.handle.capability, 0u);
+		return replied;
 	}
 	case INIT_OP_ENUMERATE: {
 		const struct init_enumerate_request* enumerate = data;

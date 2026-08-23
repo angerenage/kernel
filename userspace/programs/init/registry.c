@@ -239,7 +239,7 @@ enum init_registry_status registry_acquire(process_id_t caller, const struct ini
 	prune_dead_advertisements();
 	for (struct registry_advertisement* ad = advertisements; ad != NULL; ad = ad->next) {
 		if (!query_matches(query, ad) || strcmp(service, ad->selector.service) != 0) continue;
-		if (cap_delegate_peer(ad->capability, caller, ad->client_rights, &delegated) != SYSCALL_STATUS_OK)
+		if (cap_delegate(ad->capability, caller, ad->client_rights, &delegated) != SYSCALL_STATUS_OK)
 			return INIT_REGISTRY_RESOURCE_FAILURE;
 		fill_service_info(ad, &out_handle->info);
 		out_handle->owner      = ad->owner;

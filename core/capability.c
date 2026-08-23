@@ -817,6 +817,28 @@ bool cap_destroy(struct capability* capability) {
 	return removed;
 }
 
+bool cap_revoke_direct_child(process_id_t delegator, struct capability* capability) {
+	struct capability*     parent;
+	struct irq_state       topology_state;
+	struct cap_event_batch events  = {0};
+	bool                   removed = false;
+
+	if (delegator == PROCESS_PID_INVALID || capability == NULL) return false;
+
+	topology_state = spinlock_lock_irqsave(&capability_topology_lock);
+	if (!capability_is_published_locked(capability)) goto out;
+	parent = capability->parent;
+	if (parent == NULL || !capability_is_published_locked(parent) || parent->target != delegator ||
+	    (cap_rights(parent) & CAP_DELEGATE) == 0u)
+		goto out;
+	removed = capability_remove_subtree_locked(capability, NULL, &events);
+
+out:
+	spinlock_unlock_irqrestore(&capability_topology_lock, topology_state);
+	cap_object_dispatch_events(&events);
+	return removed;
+}
+
 bool cap_destroy_by_id(cap_id_t id) {
 	struct capability* capability;
 	bool               destroyed;

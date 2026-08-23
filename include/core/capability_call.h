@@ -11,10 +11,12 @@
 
 /* One userspace-provider call retained until reply or cancellation. */
 struct cap_pending_call {
-	cap_call_id_t      id;
-	channel_id_t       endpoint_id;
-	process_id_t       provider;
-	process_id_t       caller;
+	cap_call_id_t id;
+	channel_id_t  endpoint_id;
+	process_id_t  provider;
+	process_id_t  caller;
+	/* Caller response destination validated before the request is published. */
+	uintptr_t          response_address;
 	size_t             response_capacity;
 	void*              request;
 	size_t             request_size;
