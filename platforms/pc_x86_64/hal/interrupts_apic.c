@@ -100,7 +100,8 @@ static bool map_mmio_page(uintptr_t phys) {
 	return hal_paging_map(hal_paging_kernel_space(),
 	                      virt,
 	                      phys & ~(uintptr_t)(X86_PAGE_SIZE - 1u),
-	                      HAL_PAGE_WRITE | HAL_PAGE_GLOBAL | HAL_PAGE_NO_CACHE);
+	                      HAL_PAGE_WRITE | HAL_PAGE_GLOBAL,
+	                      MEMORY_TYPE_DEVICE);
 }
 
 static bool acpi_signature_equals(const char* actual, const char* expected) {

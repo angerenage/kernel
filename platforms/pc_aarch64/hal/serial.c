@@ -111,7 +111,7 @@ static bool serial_map_uart_direct(void) {
 	page_phys = (uintptr_t)PL011_BASE_PHYS & ~(uintptr_t)(PL011_PAGE_SIZE - 1u);
 	page_virt = (uintptr_t)(address_space.direct_map_offset + page_phys);
 	if (!hal_paging_query(kernel_space, page_virt, &existing_phys, NULL) &&
-	    !hal_paging_map(kernel_space, page_virt, page_phys, HAL_PAGE_WRITE | HAL_PAGE_GLOBAL | HAL_PAGE_NO_CACHE)) {
+	    !hal_paging_map(kernel_space, page_virt, page_phys, HAL_PAGE_WRITE | HAL_PAGE_GLOBAL, MEMORY_TYPE_DEVICE)) {
 		return false;
 	}
 

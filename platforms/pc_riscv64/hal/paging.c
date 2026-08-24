@@ -286,14 +286,20 @@ bool hal_paging_activate(const struct hal_address_space* space) {
 	return true;
 }
 
-bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t phys, uint64_t flags) {
+bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t phys, uint64_t flags,
+                    enum memory_type memory_type) {
 	uint64_t*        table = NULL;
 	size_t           index = 0;
 	struct irq_state state;
 
 	if (space == NULL) return false;
 	if (!initialized) return false;
-	if ((flags & ~HAL_PAGE_VALID_MASK) != 0) return false;
+	if ((flags & ~HAL_PAGE_VALID_MASK) != 0 || memory_type >= MEMORY_TYPE_COUNT) return false;
+	/*
+	 * Base RISC-V page tables do not encode CPU memory type. Device-vs-normal
+	 * semantics come from the platform's PMA/PBMT configuration;
+	 */
+	(void)memory_type;
 	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	if ((phys & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	state = spinlock_lock_irqsave(&paging_lock);

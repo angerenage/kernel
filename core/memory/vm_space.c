@@ -19,15 +19,23 @@ static bool initialized;
 static bool prot_valid(vmm_prot_t prot) {
 	return (prot & ~VMM_PROT_VALID_MASK) == 0u;
 }
+
+static bool memory_type_valid(enum memory_type memory_type) {
+	return memory_type < MEMORY_TYPE_COUNT;
+}
+
 static bool space_is_kernel(const struct address_space* space) {
 	return space == &kernel_space;
 }
+
 static uintptr_t mapping_reserved_start(const struct vm_mapping* mapping) {
 	return mapping->base - mapping->guard_pages * (uintptr_t)PMM_PAGE_SIZE;
 }
+
 static uintptr_t mapping_reserved_end(const struct vm_mapping* mapping) {
 	return mapping->base + mapping->page_count * (uintptr_t)PMM_PAGE_SIZE;
 }
+
 static void fill_info(const struct vm_mapping* mapping, struct vmm_info* info) {
 	*info = (struct vmm_info){
 		.id                 = mapping->id,
@@ -36,6 +44,7 @@ static void fill_info(const struct vm_mapping* mapping, struct vmm_info* info) {
 		.memory_page_offset = mapping->memory_page_offset,
 		.guard_pages        = mapping->guard_pages,
 		.prot               = mapping->prot,
+		.memory_type        = mapping->memory_type,
 	};
 }
 
@@ -44,7 +53,6 @@ uint64_t vm_mapping_hal_flags(const struct address_space* space, vmm_prot_t prot
 	if ((prot & VMM_PROT_WRITE) != 0u) flags |= HAL_PAGE_WRITE;
 	if ((prot & VMM_PROT_EXEC) != 0u) flags |= HAL_PAGE_EXEC;
 	if ((prot & VMM_PROT_GLOBAL) != 0u) flags |= HAL_PAGE_GLOBAL;
-	if ((prot & VMM_PROT_NO_CACHE) != 0u) flags |= HAL_PAGE_NO_CACHE;
 	if (!space_is_kernel(space)) flags |= HAL_PAGE_USER;
 	return flags;
 }
@@ -191,6 +199,7 @@ bool vm_space_map(struct address_space* space, const struct vm_map_request* requ
 	if (out_base != NULL) *out_base = NULL;
 	if (!initialized || !vm_space_is_initialized(space) || request == NULL || request->memory == NULL ||
 	    request->page_count == 0u || (out_id == NULL && out_base == NULL) || !prot_valid(request->prot) ||
+	    !memory_type_valid(request->memory_type) ||
 	    add_overflow_size(request->memory_page_offset, request->page_count, &object_end) ||
 	    object_end > memory_object_page_count(request->memory) || !mapping_span(request, &guard_bytes, &usable_bytes))
 		return false;
@@ -234,6 +243,7 @@ bool vm_space_map(struct address_space* space, const struct vm_map_request* requ
 		.id                 = id,
 		.guard_pages        = request->guard_pages,
 		.prot               = request->prot,
+		.memory_type        = request->memory_type,
 	};
 	space->mapping_count++;
 	if (out_id != NULL) *out_id = id;
@@ -308,7 +318,7 @@ static bool resolve_locked(struct address_space* space, struct vm_mapping* mappi
 	uintptr_t phys;
 	if (hal_paging_query(&space->hal, virt, NULL, NULL)) return true;
 	if (!memory_object_resolve_page(mapping->memory, mapping->memory_page_offset + page, &phys)) return false;
-	return hal_paging_map(&space->hal, virt, phys, vm_mapping_hal_flags(space, mapping->prot));
+	return hal_paging_map(&space->hal, virt, phys, vm_mapping_hal_flags(space, mapping->prot), mapping->memory_type);
 }
 
 bool vm_space_prefault(struct address_space* space, vmm_id_t id, size_t first_page, size_t page_count) {

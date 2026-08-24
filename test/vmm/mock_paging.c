@@ -6,11 +6,12 @@
 #define MOCK_PAGING_MAX_MAPPINGS 1024u
 
 struct mock_mapping {
-	uintptr_t space_root;
-	uintptr_t virt;
-	uintptr_t phys;
-	uint64_t  flags;
-	bool      present;
+	uintptr_t        space_root;
+	uintptr_t        virt;
+	uintptr_t        phys;
+	uint64_t         flags;
+	enum memory_type memory_type;
+	bool             present;
 };
 
 static struct mock_mapping      mappings[MOCK_PAGING_MAX_MAPPINGS];
@@ -25,11 +26,12 @@ static uintptr_t                next_space_root = 2u;
 
 void mock_paging_reset(void) {
 	for (size_t i = 0; i < MOCK_PAGING_MAX_MAPPINGS; i++) {
-		mappings[i].virt       = 0;
-		mappings[i].space_root = 0;
-		mappings[i].phys       = 0;
-		mappings[i].flags      = 0;
-		mappings[i].present    = false;
+		mappings[i].virt        = 0;
+		mappings[i].space_root  = 0;
+		mappings[i].phys        = 0;
+		mappings[i].flags       = 0;
+		mappings[i].memory_type = MEMORY_TYPE_NORMAL;
+		mappings[i].present     = false;
 	}
 
 	fail_after_maps = (size_t)-1;
@@ -115,12 +117,13 @@ bool hal_paging_activate(const struct hal_address_space* space) {
 	return true;
 }
 
-bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t phys, uint64_t flags) {
+bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t phys, uint64_t flags,
+                    enum memory_type memory_type) {
 	uintptr_t page_base = virt & ~(uintptr_t)(PMM_PAGE_SIZE - 1u);
 
 	if (space == NULL || space->lower_root_phys == 0u) return false;
 	if (!initialized) return false;
-	if ((flags & ~HAL_PAGE_VALID_MASK) != 0) return false;
+	if ((flags & ~HAL_PAGE_VALID_MASK) != 0 || memory_type >= MEMORY_TYPE_COUNT) return false;
 	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	if ((phys & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	if (find_mapping(space, virt) != NULL) return false;
@@ -141,11 +144,12 @@ bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t p
 		if (mappings[i].present) continue;
 
 		mappings[i] = (struct mock_mapping){
-			.space_root = space->lower_root_phys,
-			.virt       = page_base,
-			.phys       = phys,
-			.flags      = flags,
-			.present    = true,
+			.space_root  = space->lower_root_phys,
+			.virt        = page_base,
+			.phys        = phys,
+			.flags       = flags,
+			.memory_type = memory_type,
+			.present     = true,
 		};
 		successful_maps++;
 		return true;

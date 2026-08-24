@@ -213,7 +213,7 @@ static bool aarch64_query_entry(uintptr_t virt, uint64_t* out_entry, unsigned* o
 	return aarch64_query_entry_in(NULL, virt, out_entry, out_shift);
 }
 
-static uint64_t aarch64_leaf_flags(uint64_t flags) {
+static uint64_t aarch64_leaf_flags(uint64_t flags, enum memory_type memory_type) {
 	uint64_t entry = normal_attrs_template;
 
 	entry &= ~(AARCH64_AP_MASK | AARCH64_NG | AARCH64_PXN | AARCH64_UXN | AARCH64_ATTR_MASK);
@@ -230,12 +230,16 @@ static uint64_t aarch64_leaf_flags(uint64_t flags) {
 	}
 	entry |= ((flags & HAL_PAGE_GLOBAL) != 0) ? 0ull : AARCH64_NG;
 
-	if ((flags & HAL_PAGE_NO_CACHE) != 0) {
+	if (memory_type == MEMORY_TYPE_DEVICE) {
 		entry &= ~(AARCH64_ATTR_MASK | AARCH64_SH_MASK);
 		entry |= AARCH64_DEVICE_ATTR;
 	}
 
 	return entry | AARCH64_DESC_VALID | AARCH64_PAGE;
+}
+
+static enum memory_type aarch64_leaf_memory_type(uint64_t entry) {
+	return (entry & AARCH64_ATTR_MASK) == AARCH64_DEVICE_ATTR ? MEMORY_TYPE_DEVICE : MEMORY_TYPE_NORMAL;
 }
 
 bool hal_paging_init(void) {
@@ -338,7 +342,8 @@ bool hal_paging_activate(const struct hal_address_space* space) {
 	return true;
 }
 
-bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t phys, uint64_t flags) {
+bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t phys, uint64_t flags,
+                    enum memory_type memory_type) {
 	uint64_t*        table = NULL;
 	size_t           index = 0;
 	unsigned         shift = 0;
@@ -346,7 +351,7 @@ bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t p
 
 	if (space == NULL) return false;
 	if (!initialized) return false;
-	if ((flags & ~HAL_PAGE_VALID_MASK) != 0) return false;
+	if ((flags & ~HAL_PAGE_VALID_MASK) != 0 || memory_type >= MEMORY_TYPE_COUNT) return false;
 	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	if ((phys & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	state = spinlock_lock_irqsave(&paging_lock);
@@ -359,7 +364,7 @@ bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t p
 		return false;
 	}
 
-	table[index] = ((uint64_t)phys & AARCH64_ADDR_MASK) | aarch64_leaf_flags(flags);
+	table[index] = ((uint64_t)phys & AARCH64_ADDR_MASK) | aarch64_leaf_flags(flags, memory_type);
 	aarch64_tlb_shootdown_range(virt, 1u);
 	spinlock_unlock_irqrestore(&paging_lock, state);
 	return true;
@@ -377,7 +382,9 @@ static bool aarch64_change_range(uint64_t* table, unsigned level, uintptr_t star
 		if ((entry & AARCH64_DESC_VALID) != 0u) {
 			if (level == 0u) {
 				if ((entry & AARCH64_DESC_TABLE) == 0u) return false;
-				if (protect) table[index] = (entry & AARCH64_ADDR_MASK) | aarch64_leaf_flags(flags);
+				if (protect)
+					table[index] =
+						(entry & AARCH64_ADDR_MASK) | aarch64_leaf_flags(flags, aarch64_leaf_memory_type(entry));
 				else table[index] = 0u;
 			}
 			else {
@@ -463,7 +470,6 @@ bool hal_paging_query(const struct hal_address_space* space, uintptr_t virt, uin
 		flags |= HAL_PAGE_EXEC;
 	}
 	if ((entry & AARCH64_NG) == 0) flags |= HAL_PAGE_GLOBAL;
-	if ((entry & AARCH64_ATTR_MASK) == AARCH64_DEVICE_ATTR) flags |= HAL_PAGE_NO_CACHE;
 	if (out_flags) *out_flags = flags;
 
 	spinlock_unlock_irqrestore(&paging_lock, state);

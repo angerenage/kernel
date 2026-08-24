@@ -114,7 +114,7 @@ static bool map_params_are_valid(const struct memory_map_params* params) {
 	size_t align_pages;
 	size_t ignored;
 	if (params == NULL || params->page_count == 0u || !user_prot_is_valid(params->prot) ||
-	    (params->address & (PMM_PAGE_SIZE - 1u)) != 0u)
+	    params->memory_type >= MEMORY_TYPE_COUNT || (params->address & (PMM_PAGE_SIZE - 1u)) != 0u)
 		return false;
 	align_pages = params->align_pages == 0u ? 1u : params->align_pages;
 	return (align_pages & (align_pages - 1u)) == 0u && !mul_overflow_size(align_pages, PMM_PAGE_SIZE, &ignored) &&
@@ -167,6 +167,7 @@ syscall_result_t kernel_memory_map(cap_id_t memory_cap_id, process_id_t caller, 
 		.align_pages        = params->align_pages,
 		.guard_pages        = params->guard_pages,
 		.prot               = params->prot,
+		.memory_type        = params->memory_type,
 	};
 	if (!vm_space_map(space, &request, &mapping_id, &base)) {
 		process_release(retained_target);
@@ -192,6 +193,7 @@ syscall_result_t kernel_memory_map(cap_id_t memory_cap_id, process_id_t caller, 
 			.memory_page_offset = params->memory_page_offset,
 			.guard_pages        = params->guard_pages,
 			.prot               = params->prot,
+			.memory_type        = params->memory_type,
     };
 	process_release(retained_target);
 	cap_object_release(object);

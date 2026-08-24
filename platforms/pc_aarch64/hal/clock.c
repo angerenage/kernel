@@ -118,7 +118,7 @@ static bool map_mmio_page(uintptr_t phys) {
 	if (hal_paging_query(hal_paging_kernel_space(), page_virt, &existing_phys, NULL)) return true;
 
 	return hal_paging_map(
-		hal_paging_kernel_space(), page_virt, page_phys, HAL_PAGE_WRITE | HAL_PAGE_GLOBAL | HAL_PAGE_NO_CACHE);
+		hal_paging_kernel_space(), page_virt, page_phys, HAL_PAGE_WRITE | HAL_PAGE_GLOBAL, MEMORY_TYPE_DEVICE);
 }
 
 static bool gic_is_ready(void) {

@@ -153,16 +153,20 @@ static inline uintptr_t hhdm_phys_to_virt(uintptr_t phys) {
 	return phys + boot_info.direct_map_offset;
 }
 
-static inline uint64_t x86_leaf_flags(uint64_t flags) {
+static inline uint64_t x86_leaf_flags(uint64_t flags, enum memory_type memory_type) {
 	uint64_t entry = X86_PTE_PRESENT;
 
 	if ((flags & HAL_PAGE_WRITE) != 0) entry |= X86_PTE_WRITE;
 	if ((flags & HAL_PAGE_EXEC) == 0) entry |= X86_PTE_NX;
 	if ((flags & HAL_PAGE_GLOBAL) != 0) entry |= X86_PTE_GLOBAL;
-	if ((flags & HAL_PAGE_NO_CACHE) != 0) entry |= X86_PTE_PCD;
 	if ((flags & HAL_PAGE_USER) != 0) entry |= X86_PTE_USER;
+	if (memory_type == MEMORY_TYPE_DEVICE) entry |= X86_PTE_PWT | X86_PTE_PCD;
 
 	return entry;
+}
+
+static inline enum memory_type x86_leaf_memory_type(uint64_t entry) {
+	return (entry & (X86_PTE_PWT | X86_PTE_PCD)) != 0u ? MEMORY_TYPE_DEVICE : MEMORY_TYPE_NORMAL;
 }
 
 static inline uint64_t* x86_space_root_table(const struct hal_address_space* space) {
@@ -309,14 +313,15 @@ bool hal_paging_activate(const struct hal_address_space* space) {
 	return true;
 }
 
-bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t phys, uint64_t flags) {
+bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t phys, uint64_t flags,
+                    enum memory_type memory_type) {
 	uint64_t*        table = NULL;
 	size_t           index = 0;
 	struct irq_state state;
 
 	if (space == NULL) return false;
 	if (!initialized) return false;
-	if ((flags & ~HAL_PAGE_VALID_MASK) != 0) return false;
+	if ((flags & ~HAL_PAGE_VALID_MASK) != 0 || memory_type >= MEMORY_TYPE_COUNT) return false;
 	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	if ((phys & (PMM_PAGE_SIZE - 1u)) != 0) return false;
 	state = spinlock_lock_irqsave(&paging_lock);
@@ -329,7 +334,7 @@ bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t p
 		return false;
 	}
 
-	table[index] = (uint64_t)phys | x86_leaf_flags(flags);
+	table[index] = (uint64_t)phys | x86_leaf_flags(flags, memory_type);
 	spinlock_unlock_irqrestore(&paging_lock, state);
 	x86_tlb_shootdown_range(virt, 1u);
 	return true;
@@ -345,7 +350,8 @@ static bool x86_change_range(uint64_t* table, int level, uintptr_t start, uintpt
 		uint64_t  entry = table[index];
 		if ((entry & X86_PTE_PRESENT) != 0u) {
 			if (level == 0) {
-				if (protect) table[index] = (entry & X86_PHYS_MASK) | x86_leaf_flags(flags);
+				if (protect)
+					table[index] = (entry & X86_PHYS_MASK) | x86_leaf_flags(flags, x86_leaf_memory_type(entry));
 				else table[index] = 0u;
 			}
 			else {
@@ -419,7 +425,6 @@ bool hal_paging_query(const struct hal_address_space* space, uintptr_t virt, uin
 	if ((entry & X86_PTE_WRITE) != 0) flags |= HAL_PAGE_WRITE;
 	if ((entry & X86_PTE_NX) == 0) flags |= HAL_PAGE_EXEC;
 	if ((entry & X86_PTE_GLOBAL) != 0) flags |= HAL_PAGE_GLOBAL;
-	if ((entry & (X86_PTE_PCD | X86_PTE_PWT)) != 0) flags |= HAL_PAGE_NO_CACHE;
 	if ((entry & X86_PTE_USER) != 0) flags |= HAL_PAGE_USER;
 
 	if (out_phys) {

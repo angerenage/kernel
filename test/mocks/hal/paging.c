@@ -36,11 +36,13 @@ bool hal_paging_activate(const struct hal_address_space* space) {
 	return true;
 }
 
-bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t phys, uint64_t flags) {
+bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t phys, uint64_t flags,
+                    enum memory_type memory_type) {
 	(void)space;
 	(void)virt;
 	(void)phys;
 	(void)flags;
+	(void)memory_type;
 	return false;
 }
 

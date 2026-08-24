@@ -57,7 +57,8 @@ static enum address_transfer_result locate_locked(struct address_space* space, u
 			size_t    page_index = (address - mapping->base) / PMM_PAGE_SIZE;
 			uintptr_t phys;
 			if (!memory_object_resolve_page(mapping->memory, mapping->memory_page_offset + page_index, &phys) ||
-			    !hal_paging_map(&space->hal, page, phys, vm_mapping_hal_flags(space, mapping->prot)))
+			    !hal_paging_map(
+					&space->hal, page, phys, vm_mapping_hal_flags(space, mapping->prot), mapping->memory_type))
 				return ADDRESS_TRANSFER_FAULT_FAILED;
 		}
 	}

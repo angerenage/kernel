@@ -1,5 +1,6 @@
 #pragma once
 
+#include <base/vmm.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -10,15 +11,13 @@
  */
 
 enum hal_page_flags {
-	HAL_PAGE_WRITE    = 1u << 0,
-	HAL_PAGE_EXEC     = 1u << 1,
-	HAL_PAGE_GLOBAL   = 1u << 2,
-	HAL_PAGE_NO_CACHE = 1u << 3,
-	HAL_PAGE_USER     = 1u << 4,
+	HAL_PAGE_WRITE  = 1u << 0,
+	HAL_PAGE_EXEC   = 1u << 1,
+	HAL_PAGE_GLOBAL = 1u << 2,
+	HAL_PAGE_USER   = 1u << 3,
 };
 
-#define HAL_PAGE_VALID_MASK                                                                                            \
-	((uint64_t)(HAL_PAGE_WRITE | HAL_PAGE_EXEC | HAL_PAGE_GLOBAL | HAL_PAGE_NO_CACHE | HAL_PAGE_USER))
+#define HAL_PAGE_VALID_MASK ((uint64_t)(HAL_PAGE_WRITE | HAL_PAGE_EXEC | HAL_PAGE_GLOBAL | HAL_PAGE_USER))
 
 /*
  * Architecture-owned hardware address-space handle.
@@ -48,16 +47,20 @@ void hal_paging_space_destroy(struct hal_address_space* space);
 /* Switch the current CPU to the supplied hardware address space. */
 bool hal_paging_activate(const struct hal_address_space* space);
 
-/* Create a mapping in a hardware address space. Both addresses must be page aligned and currently unmapped. */
-bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t phys, uint64_t flags);
+/*
+ * Create a mapping in a hardware address space. Permissions and memory type are
+ * separate contracts; both addresses must be page aligned and currently unmapped.
+ */
+bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t phys, uint64_t flags,
+                    enum memory_type memory_type);
 
 /* Remove hardware mappings from a virtual range. */
 bool hal_paging_unmap_range(struct hal_address_space* space, uintptr_t virt, size_t page_count);
 
-/* Change the page flags of hardware mappings in a virtual range. */
+/* Change only access permissions of hardware mappings in a virtual range. */
 bool hal_paging_protect_range(struct hal_address_space* space, uintptr_t virt, size_t page_count, uint64_t flags);
 
-/* Resolve an existing mapping, returning the translated physical address and reconstructed HAL flags. */
+/* Resolve an existing mapping, returning the translated physical address and reconstructed HAL permission flags. */
 bool hal_paging_query(const struct hal_address_space* space, uintptr_t virt, uintptr_t* out_phys, uint64_t* out_flags);
 
 /* Make bytes written through a kernel mapping visible to instruction fetch. */

@@ -296,6 +296,7 @@ Test(kernel_capability_memory, generic_map_supports_subranges_exact_auto_alignme
 	cr_assert_eq(exact.mapping.memory_page_offset, 2u);
 	cr_assert_eq(exact.mapping.guard_pages, 1u);
 	cr_assert_eq(exact.mapping.prot, VMM_PROT_READ);
+	cr_assert_eq(exact.mapping.memory_type, MEMORY_TYPE_NORMAL);
 	struct address_space_map_result overlap;
 	cr_assert_eq(map_memory(memory_cap, process_pid(ctx.process), ctx.process, &exact_params, &overlap).status,
 	             SYSCALL_STATUS_BAD_ARGUMENT);

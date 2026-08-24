@@ -11,24 +11,29 @@
 typedef uint64_t vmm_id_t;
 typedef uint32_t vmm_prot_t;
 
-enum vmm_prot_flag {
-	VMM_PROT_NONE     = 0,
-	VMM_PROT_WRITE    = 1u << 0,
-	VMM_PROT_EXEC     = 1u << 1,
-	VMM_PROT_GLOBAL   = 1u << 2,
-	VMM_PROT_NO_CACHE = 1u << 3,
-	VMM_PROT_READ     = 1u << 4,
+enum memory_type {
+	MEMORY_TYPE_NORMAL = 0,
+	MEMORY_TYPE_DEVICE,
+	MEMORY_TYPE_COUNT,
 };
 
-#define VMM_PROT_VALID_MASK                                                                                            \
-	((vmm_prot_t)(VMM_PROT_WRITE | VMM_PROT_EXEC | VMM_PROT_GLOBAL | VMM_PROT_NO_CACHE | VMM_PROT_READ))
+enum vmm_prot_flag {
+	VMM_PROT_NONE   = 0,
+	VMM_PROT_WRITE  = 1u << 0,
+	VMM_PROT_EXEC   = 1u << 1,
+	VMM_PROT_GLOBAL = 1u << 2,
+	VMM_PROT_READ   = 1u << 3,
+};
+
+#define VMM_PROT_VALID_MASK ((vmm_prot_t)(VMM_PROT_WRITE | VMM_PROT_EXEC | VMM_PROT_GLOBAL | VMM_PROT_READ))
 
 /* Snapshot of one live virtual-memory mapping. */
 struct vmm_info {
-	vmm_id_t   id;
-	void*      base;
-	size_t     page_count;
-	size_t     memory_page_offset;
-	size_t     guard_pages;
-	vmm_prot_t prot;
+	vmm_id_t         id;
+	void*            base;
+	size_t           page_count;
+	size_t           memory_page_offset;
+	size_t           guard_pages;
+	vmm_prot_t       prot;
+	enum memory_type memory_type;
 };
