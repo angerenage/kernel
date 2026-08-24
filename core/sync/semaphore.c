@@ -3,11 +3,7 @@
 #include <core/sched.h>
 #include <core/semaphore.h>
 #include <hal/clock.h>
-
-static __attribute__((noreturn))
-void semaphore_trap(void) {
-	__builtin_trap();
-}
+#include <hal/hcf.h>
 
 void semaphore_init(struct semaphore* semaphore, size_t initial_count) {
 	if (semaphore == NULL) return;
@@ -34,7 +30,7 @@ bool semaphore_try_acquire(struct semaphore* semaphore) {
 
 void semaphore_acquire(struct semaphore* semaphore) {
 	if (semaphore == NULL) return;
-	if (sched_current_thread() == NULL) semaphore_trap();
+	if (sched_current_thread() == NULL) hcf();
 	kthread_testcancel();
 
 	for (;;) {
@@ -52,7 +48,7 @@ void semaphore_acquire(struct semaphore* semaphore) {
 		spinlock_unlock(&semaphore->lock);
 		if (!sched_block_current_locked(&semaphore->waiters, THREAD_BLOCK_SEMAPHORE, wait_state)) {
 			irq_restore(semaphore_state);
-			semaphore_trap();
+			hcf();
 		}
 		irq_restore(semaphore_state);
 		kthread_testcancel();
@@ -63,7 +59,7 @@ bool semaphore_timed_acquire(struct semaphore* semaphore, uint64_t timeout_ms) {
 	uint64_t deadline_tick;
 
 	if (semaphore == NULL) return false;
-	if (sched_current_thread() == NULL) semaphore_trap();
+	if (sched_current_thread() == NULL) hcf();
 	kthread_testcancel();
 
 	if (timeout_ms == 0u) return semaphore_try_acquire(semaphore);

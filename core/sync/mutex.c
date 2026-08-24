@@ -3,11 +3,7 @@
 #include <core/mutex.h>
 #include <core/sched.h>
 #include <hal/clock.h>
-
-static __attribute__((noreturn))
-void mutex_trap(void) {
-	__builtin_trap();
-}
+#include <hal/hcf.h>
 
 void mutex_init(struct mutex* mutex) {
 	if (mutex == NULL) return;
@@ -125,7 +121,7 @@ void mutex_lock(struct mutex* mutex) {
 	if (mutex == NULL) return;
 
 	current = sched_current_thread();
-	if (current == NULL) mutex_trap();
+	if (current == NULL) hcf();
 	kthread_testcancel();
 
 	for (;;) {
@@ -139,7 +135,7 @@ void mutex_lock(struct mutex* mutex) {
 		}
 		if (mutex->owner == current) {
 			spinlock_unlock_irqrestore(&mutex->lock, mutex_state);
-			mutex_trap();
+			hcf();
 		}
 
 		struct irq_state wait_state = spinlock_lock_irqsave(&mutex->waiters.lock);
@@ -148,7 +144,7 @@ void mutex_lock(struct mutex* mutex) {
 		spinlock_unlock(&mutex->lock);
 		if (!sched_block_current_locked(&mutex->waiters, THREAD_BLOCK_MUTEX, wait_state)) {
 			irq_restore(mutex_state);
-			mutex_trap();
+			hcf();
 		}
 		irq_restore(mutex_state);
 		mutex_recompute_owner_priority(mutex);
@@ -163,7 +159,7 @@ bool mutex_timed_lock(struct mutex* mutex, uint64_t timeout_ms) {
 	if (mutex == NULL) return false;
 
 	current = sched_current_thread();
-	if (current == NULL) mutex_trap();
+	if (current == NULL) hcf();
 	kthread_testcancel();
 
 	if (timeout_ms == 0u) {
@@ -177,7 +173,7 @@ bool mutex_timed_lock(struct mutex* mutex, uint64_t timeout_ms) {
 		}
 		if (mutex->owner == current) {
 			spinlock_unlock_irqrestore(&mutex->lock, state);
-			mutex_trap();
+			hcf();
 		}
 		spinlock_unlock_irqrestore(&mutex->lock, state);
 		return false;
@@ -199,7 +195,7 @@ bool mutex_timed_lock(struct mutex* mutex, uint64_t timeout_ms) {
 		}
 		if (mutex->owner == current) {
 			spinlock_unlock_irqrestore(&mutex->lock, mutex_state);
-			mutex_trap();
+			hcf();
 		}
 
 		wait_state = spinlock_lock_irqsave(&mutex->waiters.lock);

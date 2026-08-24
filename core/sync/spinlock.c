@@ -1,5 +1,6 @@
 #include <core/cpu.h>
 #include <core/spinlock.h>
+#include <hal/hcf.h>
 #include <stdio.h>
 
 void spinlock_init(struct spinlock* lock) {
@@ -100,7 +101,7 @@ static void spinlock_debug_fail(const struct spinlock* lock, enum spinlock_debug
 			printf("\n");
 		}
 	}
-	__builtin_trap();
+	hcf();
 }
 #else
 static void spinlock_debug_record_acquire(struct spinlock* lock) {

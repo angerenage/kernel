@@ -3,11 +3,7 @@
 #include <core/kthread.h>
 #include <core/sched.h>
 #include <hal/clock.h>
-
-static __attribute__((noreturn))
-void condvar_trap(void) {
-	__builtin_trap();
-}
+#include <hal/hcf.h>
 
 void condvar_init(struct condvar* condvar) {
 	if (condvar == NULL) return;
@@ -22,13 +18,13 @@ void condvar_wait(struct condvar* condvar, struct mutex* mutex) {
 
 	if (condvar == NULL || mutex == NULL) return;
 	current = sched_current_thread();
-	if (current == NULL) condvar_trap();
+	if (current == NULL) hcf();
 	kthread_testcancel();
 
 	mutex_state = spinlock_lock_irqsave(&mutex->lock);
 	if (mutex->owner != current) {
 		spinlock_unlock_irqrestore(&mutex->lock, mutex_state);
-		condvar_trap();
+		hcf();
 	}
 
 	/* Hold the condvar queue lock across the mutex release to avoid missed wakeups. */
@@ -36,13 +32,13 @@ void condvar_wait(struct condvar* condvar, struct mutex* mutex) {
 	if (!mutex_release_locked(mutex, current)) {
 		spinlock_unlock_irqrestore(&condvar->waiters.lock, wait_state);
 		spinlock_unlock_irqrestore(&mutex->lock, mutex_state);
-		condvar_trap();
+		hcf();
 	}
 	spinlock_unlock(&mutex->lock);
 	(void)sched_wake_one(&mutex->waiters);
 	if (!sched_block_current_locked(&condvar->waiters, THREAD_BLOCK_WAIT_QUEUE, wait_state)) {
 		irq_restore(mutex_state);
-		condvar_trap();
+		hcf();
 	}
 	irq_restore(mutex_state);
 	mutex_lock(mutex);
@@ -58,7 +54,7 @@ bool condvar_timed_wait(struct condvar* condvar, struct mutex* mutex, uint64_t t
 
 	if (condvar == NULL || mutex == NULL) return false;
 	current = sched_current_thread();
-	if (current == NULL) condvar_trap();
+	if (current == NULL) hcf();
 	kthread_testcancel();
 
 	if (!time_tick_deadline_from_ms(sched_tick_count(), timeout_ms, hal_clock_frequency(), &deadline_tick))
@@ -67,7 +63,7 @@ bool condvar_timed_wait(struct condvar* condvar, struct mutex* mutex, uint64_t t
 	mutex_state = spinlock_lock_irqsave(&mutex->lock);
 	if (mutex->owner != current) {
 		spinlock_unlock_irqrestore(&mutex->lock, mutex_state);
-		condvar_trap();
+		hcf();
 	}
 
 	/* Hold the condvar queue lock across the mutex release to avoid missed wakeups. */
@@ -75,7 +71,7 @@ bool condvar_timed_wait(struct condvar* condvar, struct mutex* mutex, uint64_t t
 	if (!mutex_release_locked(mutex, current)) {
 		spinlock_unlock_irqrestore(&condvar->waiters.lock, wait_state);
 		spinlock_unlock_irqrestore(&mutex->lock, mutex_state);
-		condvar_trap();
+		hcf();
 	}
 	spinlock_unlock(&mutex->lock);
 	(void)sched_wake_one(&mutex->waiters);

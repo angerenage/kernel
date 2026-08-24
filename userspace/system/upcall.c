@@ -2,9 +2,17 @@
 #include <runtime/diagnostic.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <system/upcall.h>
 
 #include "syscall.h"
+
+static __attribute__((noreturn))
+void upcall_hcf(void) {
+	printf("userspace: upcall return syscall unexpectedly returned; halting intentionally\n");
+	for (;;) {
+	}
+}
 
 syscall_status_t upcall_dropped_count(uint64_t* out_count) {
 	syscall_result_t result;
@@ -23,5 +31,5 @@ syscall_status_t upcall_dropped_count(uint64_t* out_count) {
 __attribute__((noreturn))
 void upcall_return(void) {
 	(void)syscall(SYSCALL_UPCALL_RETURN, 0u, 0u, 0u, 0u, 0u, 0u);
-	__builtin_trap();
+	upcall_hcf();
 }

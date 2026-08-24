@@ -3,11 +3,7 @@
 #include <core/rwlock.h>
 #include <core/sched.h>
 #include <hal/clock.h>
-
-static __attribute__((noreturn))
-void rwlock_trap(void) {
-	__builtin_trap();
-}
+#include <hal/hcf.h>
 
 static bool rwlock_can_grant_read_locked(const struct rwlock* rwlock) {
 	return rwlock->writer == NULL && rwlock->waiting_writers == 0u;
@@ -55,7 +51,7 @@ void rwlock_read_lock(struct rwlock* rwlock) {
 	if (rwlock == NULL) return;
 
 	current = sched_current_thread();
-	if (current == NULL) rwlock_trap();
+	if (current == NULL) hcf();
 	kthread_testcancel();
 
 	for (;;) {
@@ -70,14 +66,14 @@ void rwlock_read_lock(struct rwlock* rwlock) {
 		}
 		if (rwlock->writer == current) {
 			spinlock_unlock_irqrestore(&rwlock->lock, rwlock_state);
-			rwlock_trap();
+			hcf();
 		}
 
 		wait_state = spinlock_lock_irqsave(&rwlock->readers.lock);
 		spinlock_unlock(&rwlock->lock);
 		if (!sched_block_current_locked(&rwlock->readers, THREAD_BLOCK_RWLOCK, wait_state)) {
 			irq_restore(rwlock_state);
-			rwlock_trap();
+			hcf();
 		}
 		irq_restore(rwlock_state);
 		kthread_testcancel();
@@ -91,7 +87,7 @@ bool rwlock_timed_read_lock(struct rwlock* rwlock, uint64_t timeout_ms) {
 	if (rwlock == NULL) return false;
 
 	current = sched_current_thread();
-	if (current == NULL) rwlock_trap();
+	if (current == NULL) hcf();
 	kthread_testcancel();
 
 	if (timeout_ms == 0u) return rwlock_try_read_lock(rwlock);
@@ -111,7 +107,7 @@ bool rwlock_timed_read_lock(struct rwlock* rwlock, uint64_t timeout_ms) {
 		}
 		if (rwlock->writer == current) {
 			spinlock_unlock_irqrestore(&rwlock->lock, rwlock_state);
-			rwlock_trap();
+			hcf();
 		}
 
 		wait_state = spinlock_lock_irqsave(&rwlock->readers.lock);
@@ -152,7 +148,7 @@ void rwlock_write_lock(struct rwlock* rwlock) {
 	if (rwlock == NULL) return;
 
 	current = sched_current_thread();
-	if (current == NULL) rwlock_trap();
+	if (current == NULL) hcf();
 	kthread_testcancel();
 
 	for (;;) {
@@ -176,7 +172,7 @@ void rwlock_write_lock(struct rwlock* rwlock) {
 		}
 		if (rwlock->writer == current) {
 			spinlock_unlock_irqrestore(&rwlock->lock, rwlock_state);
-			rwlock_trap();
+			hcf();
 		}
 		if (!counted_waiter) {
 			rwlock->waiting_writers++;
@@ -193,7 +189,7 @@ void rwlock_write_lock(struct rwlock* rwlock) {
 			wake_readers = rwlock_should_wake_readers_locked(rwlock);
 			spinlock_unlock_irqrestore(&rwlock->lock, rwlock_state);
 			if (wake_readers) (void)sched_wake_all(&rwlock->readers);
-			rwlock_trap();
+			hcf();
 		}
 		irq_restore(rwlock_state);
 	}
@@ -207,7 +203,7 @@ bool rwlock_timed_write_lock(struct rwlock* rwlock, uint64_t timeout_ms) {
 	if (rwlock == NULL) return false;
 
 	current = sched_current_thread();
-	if (current == NULL) rwlock_trap();
+	if (current == NULL) hcf();
 	kthread_testcancel();
 
 	if (timeout_ms == 0u) return rwlock_try_write_lock(rwlock);
@@ -236,7 +232,7 @@ bool rwlock_timed_write_lock(struct rwlock* rwlock, uint64_t timeout_ms) {
 		}
 		if (rwlock->writer == current) {
 			spinlock_unlock_irqrestore(&rwlock->lock, rwlock_state);
-			rwlock_trap();
+			hcf();
 		}
 		if (!counted_waiter) {
 			rwlock->waiting_writers++;
