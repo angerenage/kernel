@@ -20,6 +20,5 @@ void kernel_boot_diagnostics_memory_summary(void);
 /* Print the list of boot modules the bootloader reported. */
 void kernel_boot_diagnostics_modules(void);
 
-/* Print scheduler uptime, tick frequency, and the prepared report line count for tests. */
-void kernel_boot_diagnostics_scheduler_uptime(uint64_t elapsed_seconds, uint32_t timer_frequency_hz,
-                                              size_t* report_lines);
+/* Append a scheduler utilization report computed from the interval since the previous report. */
+void kernel_boot_diagnostics_scheduler_report(uint64_t elapsed_ticks, uint32_t timer_frequency_hz);

@@ -2,6 +2,7 @@
 #include <base/startup.h>
 #include <core/capability.h>
 #include <core/cpu.h>
+#include <core/kthread.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/process.h>
@@ -27,8 +28,6 @@
 #include "capability/serial.h"
 
 #if KERNEL_SELFTESTS_ENABLED
-#include <core/kthread.h>
-
 #include "../test/selftest.h"
 #endif
 
@@ -42,14 +41,10 @@ static void boot_fail(const char* message) {
 }
 
 #define KERNEL_TIMER_HZ 100u
+#define KERNEL_DIAGNOSTICS_INTERVAL_MS 1000u
 
-static volatile uint64_t boot_timer_ticks;
-static uint64_t          boot_timer_origin_ticks;
-static uint64_t          boot_timer_reported_seconds;
-static size_t            boot_timer_report_lines;
-static uint32_t          boot_timer_frequency_hz;
-static bool              boot_timer_started;
-static bool              boot_diagnostics_enabled;
+static uint32_t boot_timer_frequency_hz;
+static bool     boot_diagnostics_enabled;
 
 static const char* kernel_elf_load_result_string(enum kernel_elf_load_result result) {
 	switch (result) {
@@ -191,25 +186,26 @@ static void boot_clock_tick(void* ctx) {
 		if (cpu == NULL || cpu == cpu_current() || cpu_state_get(cpu) != CPU_STATE_ONLINE) continue;
 		sched_tick_remote(cpu);
 	}
+}
 
-	if (!boot_diagnostics_enabled) return;
+static void kernel_diagnostics_entry(void* arg) {
+	(void)arg;
 
-	boot_timer_ticks++;
-	if (boot_timer_frequency_hz == 0u) return;
+	kernel_boot_diagnostics_scheduler_report(sched_tick_count(), boot_timer_frequency_hz);
 
-	if (!boot_timer_started) {
-		boot_timer_started          = true;
-		boot_timer_origin_ticks     = boot_timer_ticks;
-		boot_timer_reported_seconds = 0u;
-		kernel_boot_diagnostics_scheduler_uptime(0u, boot_timer_frequency_hz, &boot_timer_report_lines);
-		return;
+	for (;;) {
+		if (!kthread_sleep_ms(KERNEL_DIAGNOSTICS_INTERVAL_MS)) return;
+
+		kernel_boot_diagnostics_scheduler_report(sched_tick_count(), boot_timer_frequency_hz);
 	}
+}
 
-	uint64_t elapsed_seconds = (boot_timer_ticks - boot_timer_origin_ticks) / boot_timer_frequency_hz;
-	if (elapsed_seconds != boot_timer_reported_seconds) {
-		boot_timer_reported_seconds = elapsed_seconds;
-		kernel_boot_diagnostics_scheduler_uptime(elapsed_seconds, boot_timer_frequency_hz, &boot_timer_report_lines);
-	}
+static void boot_start_diagnostics_reporter(void) {
+	enum kthread_spawn_result result;
+
+	if (!boot_diagnostics_enabled || boot_timer_frequency_hz == 0u) return;
+	result = kthread_spawn_detached_on_cpu("kernel/diagnostics", kernel_diagnostics_entry, NULL, cpu_bsp());
+	if (result != KTHREAD_SPAWN_OK) printf("scheduler: diagnostics thread unavailable\n");
 }
 
 static void boot_start_timer_counter(void) {
@@ -314,6 +310,7 @@ void kernel_main(void) {
 	if (!kernel_launch_init_process()) {
 		boot_fail("kernel: init launch failed");
 	}
+	boot_start_diagnostics_reporter();
 
 	sched_enter_idle();
 }

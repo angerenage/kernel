@@ -6,20 +6,43 @@
 #include <kernel/boot.h>
 #include <kernel/boot_diagnostics.h>
 #include <kernel/cmdline.h>
+#include <libc/stdlib.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 
-static void diagnostics_print_tick_duration(uint64_t ticks, uint32_t timer_frequency_hz) {
-	uint64_t seconds = 0u;
-	uint64_t millis  = 0u;
+static struct sched_cpu_stats* scheduler_previous_cpu_stats;
+static size_t                  scheduler_previous_cpu_count;
+static bool                    scheduler_history_initialized;
 
-	if (timer_frequency_hz != 0u) {
-		seconds = ticks / timer_frequency_hz;
-		millis  = ((ticks % timer_frequency_hz) * 1000u) / timer_frequency_hz;
-	}
+static uint64_t diagnostics_counter_delta(uint64_t current, uint64_t previous) {
+	return current >= previous ? current - previous : current;
+}
 
-	printf("%llu.%03llu s", (unsigned long long)seconds, (unsigned long long)millis);
+static uint64_t diagnostics_tenths_percentage(uint64_t part, uint64_t total) {
+	if (total == 0u) return 0u;
+	if (part > total) part = total;
+	return (part * 1000u + total / 2u) / total;
+}
+
+static uint64_t diagnostics_tenths_rate(uint64_t count, uint64_t ticks, uint32_t timer_frequency_hz) {
+	if (ticks == 0u || timer_frequency_hz == 0u) return 0u;
+	return (count * (uint64_t)timer_frequency_hz * 10u + ticks / 2u) / ticks;
+}
+
+static bool diagnostics_prepare_scheduler_history(size_t cpu_total) {
+	if (scheduler_previous_cpu_stats != NULL && scheduler_previous_cpu_count == cpu_total) return true;
+
+	free(scheduler_previous_cpu_stats);
+	scheduler_previous_cpu_stats  = NULL;
+	scheduler_previous_cpu_count  = 0u;
+	scheduler_history_initialized = false;
+	if (cpu_total == 0u) return false;
+
+	scheduler_previous_cpu_stats = calloc(cpu_total, sizeof(*scheduler_previous_cpu_stats));
+	if (scheduler_previous_cpu_stats == NULL) return false;
+	scheduler_previous_cpu_count = cpu_total;
+	return true;
 }
 
 bool kernel_boot_diagnostics_enabled(void) {
@@ -103,42 +126,96 @@ void kernel_boot_diagnostics_modules(void) {
 	}
 }
 
-void kernel_boot_diagnostics_scheduler_uptime(uint64_t elapsed_seconds, uint32_t timer_frequency_hz,
-                                              size_t* report_lines) {
-	struct sched_stats stats;
-	size_t             cpu_total = cpu_count();
+void kernel_boot_diagnostics_scheduler_report(uint64_t elapsed_ticks, uint32_t timer_frequency_hz) {
+	uint64_t elapsed_seconds;
+	uint64_t hours;
+	uint64_t minutes;
+	uint64_t seconds;
+	size_t   cpu_total = cpu_count();
+	size_t   report_lines;
 
-	sched_get_stats(&stats);
-	if (report_lines != NULL && *report_lines != 0u) {
-		for (size_t i = 0; i < *report_lines; i++) {
-			printf("\r\033[2K");
-			if (i + 1u != *report_lines) printf("\033[1A");
-		}
-		printf("\r");
+	if (timer_frequency_hz == 0u) return;
+	if (!diagnostics_prepare_scheduler_history(cpu_total)) {
+		printf("scheduler: processor statistics unavailable\n");
+		return;
 	}
 
-	printf("kernel: uptime %llu s [sched cs=%llu preempt=%llu yield=%llu]",
-	       (unsigned long long)elapsed_seconds,
-	       (unsigned long long)stats.context_switch_count,
-	       (unsigned long long)stats.timeslice_preempt_count,
-	       (unsigned long long)stats.yield_count);
+	if (!scheduler_history_initialized) {
+		for (size_t i = 0; i < cpu_total; i++) {
+			struct cpu*            cpu = cpu_by_index(i);
+			struct sched_cpu_stats cpu_stats;
+
+			if (cpu == NULL || !sched_get_cpu_stats(cpu, &cpu_stats)) continue;
+			scheduler_previous_cpu_stats[i] = cpu_stats;
+		}
+		scheduler_history_initialized = true;
+		return;
+	}
+
+	elapsed_seconds = elapsed_ticks / timer_frequency_hz;
+	hours           = elapsed_seconds / 3600u;
+	minutes         = (elapsed_seconds / 60u) % 60u;
+	seconds         = elapsed_seconds % 60u;
+	report_lines    = 1u;
+
+	printf("scheduler: uptime %02llu:%02llu:%02llu\n",
+	       (unsigned long long)hours,
+	       (unsigned long long)minutes,
+	       (unsigned long long)seconds);
+
 	for (size_t i = 0; i < cpu_total; i++) {
-		struct cpu*            cpu = cpu_by_index(i);
-		struct sched_cpu_stats cpu_stats;
+		struct cpu*             cpu = cpu_by_index(i);
+		struct sched_cpu_stats  cpu_stats;
+		struct sched_cpu_stats* previous;
+		uint64_t                total_ticks;
+		uint64_t                thread_ticks;
+		uint64_t                kernel_ticks;
+		uint64_t                context_switches;
+		uint64_t                preemptions;
+		uint64_t                yields;
+		uint64_t                utilization;
+		uint64_t                thread_percentage;
+		uint64_t                kernel_percentage;
+		uint64_t                context_switch_rate;
+		uint64_t                preemption_rate;
+		uint64_t                yield_rate;
 
 		if (cpu == NULL || !sched_get_cpu_stats(cpu, &cpu_stats)) continue;
 
-		printf("\n  cpu%zu: run=", cpu->index);
-		diagnostics_print_tick_duration(cpu_stats.thread_ticks, timer_frequency_hz);
-		printf(" idle=");
-		diagnostics_print_tick_duration(cpu_stats.idle_ticks, timer_frequency_hz);
-		printf(" sched=");
-		diagnostics_print_tick_duration(cpu_stats.kernel_ticks, timer_frequency_hz);
-		printf(" cs=%llu preempt=%llu yield=%llu",
-		       (unsigned long long)cpu_stats.context_switch_count,
-		       (unsigned long long)cpu_stats.timeslice_preempt_count,
-		       (unsigned long long)cpu_stats.yield_count);
+		previous         = &scheduler_previous_cpu_stats[i];
+		total_ticks      = diagnostics_counter_delta(cpu_stats.total_ticks, previous->total_ticks);
+		thread_ticks     = diagnostics_counter_delta(cpu_stats.thread_ticks, previous->thread_ticks);
+		kernel_ticks     = diagnostics_counter_delta(cpu_stats.kernel_ticks, previous->kernel_ticks);
+		context_switches = diagnostics_counter_delta(cpu_stats.context_switch_count, previous->context_switch_count);
+		preemptions = diagnostics_counter_delta(cpu_stats.timeslice_preempt_count, previous->timeslice_preempt_count);
+		yields      = diagnostics_counter_delta(cpu_stats.yield_count, previous->yield_count);
+
+		utilization         = diagnostics_tenths_percentage(thread_ticks + kernel_ticks, total_ticks);
+		thread_percentage   = diagnostics_tenths_percentage(thread_ticks, total_ticks);
+		kernel_percentage   = diagnostics_tenths_percentage(kernel_ticks, total_ticks);
+		context_switch_rate = diagnostics_tenths_rate(context_switches, total_ticks, timer_frequency_hz);
+		preemption_rate     = diagnostics_tenths_rate(preemptions, total_ticks, timer_frequency_hz);
+		yield_rate          = diagnostics_tenths_rate(yields, total_ticks, timer_frequency_hz);
+
+		printf("\r\033[2Kscheduler: CPU%zu %llu.%llu%% "
+		       "(u %llu.%llu%%, k %llu.%llu%%), "
+		       "queue %zu, switches %llu/s "
+		       "(p %llu/s, y %llu/s)\n",
+		       cpu->index,
+		       (unsigned long long)(utilization / 10u),
+		       (unsigned long long)(utilization % 10u),
+		       (unsigned long long)(thread_percentage / 10u),
+		       (unsigned long long)(thread_percentage % 10u),
+		       (unsigned long long)(kernel_percentage / 10u),
+		       (unsigned long long)(kernel_percentage % 10u),
+		       sched_run_queue_depth(cpu),
+		       (unsigned long long)(context_switch_rate),
+		       (unsigned long long)(preemption_rate),
+		       (unsigned long long)(yield_rate));
+
+		*previous = cpu_stats;
+		report_lines++;
 	}
 
-	if (report_lines != NULL) *report_lines = 1u + cpu_total;
+	printf("\033[%zuA\r", report_lines);
 }
