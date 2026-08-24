@@ -23,8 +23,8 @@ Test(exception_fault, user_not_present_fault_materializes_only_the_current_user_
 	bind_exception_test_cpu();
 	init_small_user_space(&user_space);
 
-	current.address_space         = &user_space;
-	cpu_current()->current_thread = &current;
+	current.address_space = &user_space;
+	cpu_current_thread_store(cpu_current(), &current);
 
 	cr_assert(test_vm_map(&user_space, 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, &id, &base));
 	cr_assert_eq(mock_paging_mapping_count(), 0u);
@@ -35,7 +35,7 @@ Test(exception_fault, user_not_present_fault_materializes_only_the_current_user_
 	cr_assert(hal_paging_query(vm_space_hal(&user_space), (uintptr_t)base, NULL, NULL),
 	          "faulted page was not mapped in the current user address space");
 
-	cpu_current()->current_thread = NULL;
+	cpu_current_thread_store(cpu_current(), NULL);
 	cr_assert(vm_space_unmap(&user_space, id));
 	vm_space_destroy(&user_space);
 	hal_cpu_local_bind(NULL);
@@ -54,8 +54,8 @@ Test(exception_fault, user_fault_cannot_materialize_a_lazy_kernel_mapping) {
 	bind_exception_test_cpu();
 	init_small_user_space(&user_space);
 
-	current.address_space         = &user_space;
-	cpu_current()->current_thread = &current;
+	current.address_space = &user_space;
+	cpu_current_thread_store(cpu_current(), &current);
 
 	cr_assert(test_vm_map(vm_space_kernel(),
 	                      1u,
@@ -76,7 +76,7 @@ Test(exception_fault, user_fault_cannot_materialize_a_lazy_kernel_mapping) {
 	cr_assert_eq(
 		pmm_free_page_count(), free_before, "userspace fault allocated physical backing for a kernel-only region");
 
-	cpu_current()->current_thread = NULL;
+	cpu_current_thread_store(cpu_current(), NULL);
 	cr_assert(vm_space_unmap(vm_space_kernel(), kernel_id));
 	vm_space_destroy(&user_space);
 	hal_cpu_local_bind(NULL);
@@ -93,8 +93,8 @@ Test(exception_fault, forbidden_user_access_does_not_materialize_lazy_backing) {
 	init_test_vmm(arena, sizeof(arena));
 	bind_exception_test_cpu();
 	init_small_user_space(&user_space);
-	current.address_space         = &user_space;
-	cpu_current()->current_thread = &current;
+	current.address_space = &user_space;
+	cpu_current_thread_store(cpu_current(), &current);
 
 	cr_assert(test_vm_map(&user_space, 1u, VMM_PROT_READ, 0u, 1u, 0u, &id, &base));
 	free_before = pmm_free_page_count();
@@ -106,7 +106,7 @@ Test(exception_fault, forbidden_user_access_does_not_materialize_lazy_backing) {
 	cr_assert(hal_paging_query(vm_space_hal(&user_space), (uintptr_t)base, NULL, NULL),
 	          "an allowed read fault must still materialize userspace lazy backing");
 
-	cpu_current()->current_thread = NULL;
+	cpu_current_thread_store(cpu_current(), NULL);
 	cr_assert(vm_space_unmap(&user_space, id));
 	vm_space_destroy(&user_space);
 	hal_cpu_local_bind(NULL);

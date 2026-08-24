@@ -72,7 +72,7 @@ static bool sched_thread_should_preempt_current(struct cpu* cpu, const struct th
 
 	if (cpu == NULL || thread == NULL) return false;
 
-	current = cpu->current_thread;
+	current = cpu_current_thread_load(cpu);
 	if (current == NULL || thread_is_idle(current) || thread_is_terminated(current)) return false;
 
 	return sched_effective_priority(thread) > sched_effective_priority(current);
@@ -83,7 +83,7 @@ static void sched_charge_current_timeslice(struct cpu* cpu) {
 
 	if (cpu == NULL) return;
 
-	current = cpu->current_thread;
+	current = cpu_current_thread_load(cpu);
 	if (current == NULL || thread_is_idle(current) || thread_is_terminated(current) || current->timeslice_ticks == 0u) {
 		return;
 	}
@@ -175,20 +175,18 @@ static struct cpu* sched_default_cpu(void) {
 }
 
 static bool sched_cpu_can_accept_balanced_work(const struct cpu* cpu) {
-	return sched_state_for_cpu(cpu) != NULL && cpu != NULL && cpu->current_thread != NULL;
+	return sched_state_for_cpu(cpu) != NULL && cpu_current_thread_load(cpu) != NULL;
 }
 
 static size_t sched_cpu_effective_load(const struct cpu* cpu) {
-	size_t               load = 0u;
-	const struct thread* current;
+	struct sched_cpu_state* state;
+	size_t                  load = 0u;
 
 	if (!sched_cpu_can_accept_balanced_work(cpu)) return SIZE_MAX;
 
-	load    = sched_run_queue_depth((struct cpu*)cpu);
-	current = cpu->current_thread;
-	if (current != NULL && !thread_is_idle(current) && !thread_is_terminated(current)) {
-		load++;
-	}
+	state = sched_state_for_cpu(cpu);
+	load  = sched_run_queue_depth((struct cpu*)cpu);
+	if (__atomic_load_n(&state->activity, __ATOMIC_ACQUIRE) == SCHED_CPU_ACTIVITY_THREAD) load++;
 
 	return load;
 }
@@ -445,7 +443,7 @@ static void sched_dispatch_next(struct cpu* cpu) {
 
 	sched_finish_context_switch();
 	state    = sched_state_for_cpu(cpu);
-	previous = cpu->current_thread;
+	previous = cpu_current_thread_load(cpu);
 	next     = sched_select_next(cpu);
 	if (next == NULL) return;
 	if (!sched_activate_thread_address_space(previous, next)) {
@@ -492,7 +490,7 @@ static bool sched_make_runnable_on_cpu(struct cpu* cpu, struct thread* thread, b
 
 	if (state == NULL || thread == NULL || thread_is_idle(thread) || thread_is_terminated(thread)) return false;
 	if (thread_is_queued(thread)) return false;
-	if (!allow_current && cpu != NULL && cpu->current_thread == thread) return false;
+	if (!allow_current && cpu_current_thread_load(cpu) == thread) return false;
 
 	thread_mark_ready(thread, cpu);
 	queued = run_queue_enqueue(&state->run_queue, thread);
@@ -514,7 +512,7 @@ static bool sched_make_waiter_runnable(struct thread* thread) {
 
 	if (thread == NULL) return false;
 	cpu = thread->cpu;
-	if (cpu != NULL && cpu->current_thread == thread) return sched_make_runnable_on_cpu(cpu, thread, true);
+	if (cpu_current_thread_load(cpu) == thread) return sched_make_runnable_on_cpu(cpu, thread, true);
 	return sched_make_runnable(thread);
 }
 
@@ -540,9 +538,9 @@ bool sched_init(void) {
 		run_queue_init(&state->run_queue);
 		sprintf(state->idle_name, "idle/%zu", cpu->index);
 		thread_init_idle(&state->idle_thread, cpu, state->idle_name);
-		state->activity     = SCHED_CPU_ACTIVITY_KERNEL;
-		state->stats        = (struct sched_cpu_stats){0};
-		cpu->current_thread = NULL;
+		state->activity = SCHED_CPU_ACTIVITY_KERNEL;
+		state->stats    = (struct sched_cpu_stats){0};
+		cpu_current_thread_store(cpu, NULL);
 		sched_clear_reschedule_request(cpu);
 	}
 
@@ -560,16 +558,16 @@ bool sched_start_cpu(struct cpu* cpu) {
 void sched_set_current(struct cpu* cpu, struct thread* thread) {
 	if (cpu == NULL) return;
 
-	cpu->current_thread = thread;
 	cpu->kernel_entry_stack_top =
 		thread != NULL && thread->kernel_stack_top != 0u ? thread->kernel_stack_top : cpu->boot_stack_top;
 	if (thread != NULL) thread_mark_running(thread, cpu);
 	sched_set_cpu_activity(cpu, sched_activity_for_thread(thread));
+	cpu_current_thread_store(cpu, thread);
 }
 
 struct thread* sched_current_thread(void) {
 	struct cpu* cpu = cpu_current();
-	return cpu == NULL ? NULL : cpu->current_thread;
+	return cpu_current_thread_load(cpu);
 }
 
 struct thread* sched_idle_thread(struct cpu* cpu) {
@@ -630,7 +628,7 @@ void sched_set_thread_effective_priority(struct thread* thread, int32_t priority
 		thread->effective_priority = normalized_priority;
 	}
 
-	if (state != NULL && cpu != NULL && cpu->current_thread == thread &&
+	if (state != NULL && cpu_current_thread_load(cpu) == thread &&
 	    sched_run_queue_has_priority_at_least(cpu, normalized_priority + 1)) {
 		sched_request_reschedule(cpu);
 		if (cpu != cpu_current()) hal_cpu_kick(cpu);
@@ -648,10 +646,10 @@ void sched_yield(void) {
 	sched_stat_increment(state == NULL ? NULL : &state->stats.yield_count);
 	sched_set_cpu_activity(cpu, SCHED_CPU_ACTIVITY_KERNEL);
 
-	current = cpu->current_thread;
+	current = cpu_current_thread_load(cpu);
 	if (current == NULL) {
 		(void)sched_start_cpu(cpu);
-		current = cpu->current_thread;
+		current = cpu_current_thread_load(cpu);
 	}
 
 	if (current != NULL && !thread_is_idle(current) && !thread_is_terminated(current)) {
@@ -682,7 +680,7 @@ bool sched_handle_interrupt_exit(void) {
 	if (!sched_reschedule_pending(cpu)) return false;
 
 	state   = sched_state_for_cpu(cpu);
-	current = cpu->current_thread;
+	current = cpu_current_thread_load(cpu);
 	sched_clear_reschedule_request(cpu);
 	if (current == NULL || thread_is_terminated(current) || sched_run_queue_depth(cpu) == 0u) {
 		return false;
@@ -712,7 +710,7 @@ void sched_finish_context_switch(void) {
 
 	thread = __atomic_exchange_n(&cpu->deferred_reap_thread, NULL, __ATOMIC_ACQ_REL);
 	if (thread == NULL) return;
-	if (thread == cpu->current_thread) {
+	if (thread == cpu_current_thread_load(cpu)) {
 		__atomic_store_n(&cpu->deferred_reap_thread, thread, __ATOMIC_RELEASE);
 		return;
 	}
@@ -758,7 +756,7 @@ bool sched_sleep_until_tick(uint64_t deadline_tick) {
 
 	if (cpu == NULL) return false;
 
-	current = cpu->current_thread;
+	current = cpu_current_thread_load(cpu);
 	if (current == NULL || thread_is_idle(current) || thread_is_terminated(current)) return false;
 
 	state = spinlock_lock_irqsave(&sched_sleep_lock);
@@ -860,7 +858,7 @@ bool sched_block_current_locked(struct thread_wait_queue* queue, enum thread_blo
 		return false;
 	}
 
-	current = cpu->current_thread;
+	current = cpu_current_thread_load(cpu);
 	if (current == NULL) {
 		spinlock_unlock_irqrestore(&queue->lock, queue_irq_state);
 		(void)sched_start_cpu(cpu);
@@ -911,7 +909,7 @@ enum sched_block_result sched_block_current_interruptible_locked(struct thread_w
 		return SCHED_BLOCK_FAILED;
 	}
 
-	current = cpu->current_thread;
+	current = cpu_current_thread_load(cpu);
 	if (current == NULL) {
 		spinlock_unlock_irqrestore(&queue->lock, queue_irq_state);
 		(void)sched_start_cpu(cpu);
@@ -969,7 +967,7 @@ bool sched_block_current_until_locked(struct thread_wait_queue* queue, enum thre
 		return false;
 	}
 
-	current = cpu->current_thread;
+	current = cpu_current_thread_load(cpu);
 	if (current == NULL) {
 		spinlock_unlock_irqrestore(&queue->lock, queue_irq_state);
 		(void)sched_start_cpu(cpu);
@@ -1230,7 +1228,7 @@ void sched_enter_idle(void) {
 		}
 	}
 
-	if (cpu->current_thread == NULL && !sched_start_cpu(cpu)) {
+	if (cpu_current_thread_load(cpu) == NULL && !sched_start_cpu(cpu)) {
 		for (;;) {
 			hal_cpu_park();
 		}

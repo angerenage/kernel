@@ -31,7 +31,8 @@ struct thread;
  * Important fields:
  * - processor_id: boot protocol CPU index or firmware-facing identifier
  * - arch_id: hardware-local identifier used by the active architecture backend
- * - current_thread: thread currently considered running on this CPU
+ * - current_thread: atomically published snapshot of the thread running on this CPU;
+ *   access it only through cpu_current_thread_load()/cpu_current_thread_store()
  * - interrupts_ready: becomes true after local interrupt state has been installed
  * - irq_disable_depth / exception_depth: nesting counters for irq-save and trap handling
  * - boot_stack_*: stack bounds used during CPU bring-up before normal scheduling exists
@@ -88,6 +89,21 @@ struct cpu_topology* cpu_topology_get(void);
 
 /* Return the struct cpu bound to the running hardware thread through hal_cpu_local_bind(). */
 struct cpu* cpu_current(void);
+
+/*
+ * Load the CPU's published current-thread snapshot with acquire semantics.
+ *
+ * The owning CPU is the sole writer. Remote CPUs may use the returned value
+ * only as a moment-in-time snapshot: this accessor does not pin the thread or
+ * make later thread-field accesses safe after the CPU switches away from it.
+ */
+struct thread* cpu_current_thread_load(const struct cpu* cpu);
+
+/*
+ * Publish the owning CPU's current thread with release semantics. Scheduler
+ * code must finish the state updates that describe thread before publishing it.
+ */
+void cpu_current_thread_store(struct cpu* cpu, struct thread* thread);
 
 /* Return the bootstrap processor entry from the topology, or NULL if topology init has not completed. */
 struct cpu* cpu_bsp(void);

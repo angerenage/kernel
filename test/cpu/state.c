@@ -1,4 +1,24 @@
+#include <core/thread.h>
+
 #include "test_support.h"
+
+Test(cpu, current_thread_snapshot_uses_the_explicit_publication_api) {
+	struct thread published = {0};
+	struct cpu*   ap;
+
+	cr_assert(cpu_topology_init(cpu_test_valid_topology, 2u, 0u), "topology init failed");
+	ap = cpu_by_index(1u);
+	cr_assert_not_null(ap, "AP lookup failed");
+	cpu_bind_current(ap);
+	cr_assert_null(cpu_current_thread_load(ap), "new CPU must not publish a current thread");
+
+	cpu_current_thread_store(ap, &published);
+	cr_assert_eq(cpu_current_thread_load(ap), &published, "published current-thread snapshot mismatch");
+
+	cpu_current_thread_store(ap, NULL);
+	cr_assert_null(cpu_current_thread_load(ap), "cleared current-thread snapshot remained visible");
+	cpu_test_reset();
+}
 
 Test(cpu_irq, state_transitions_track_online_count_without_double_counting) {
 	const struct cpu_init_info init_info[] = {

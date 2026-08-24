@@ -40,7 +40,6 @@ bool cpu_topology_init(const struct cpu_init_info* init_info, size_t cpu_count, 
 			.arch_id                    = init_info[i].arch_id,
 			.role                       = role,
 			.state                      = CPU_STATE_PRESENT,
-			.current_thread             = NULL,
 			.kernel_entry_stack_top     = init_info[i].boot_stack_top,
 			.syscall_user_stack         = 0u,
 			.reschedule_requested       = false,
@@ -83,6 +82,16 @@ struct cpu_topology* cpu_topology_get(void) {
 
 struct cpu* cpu_current(void) {
 	return (struct cpu*)hal_cpu_local_current();
+}
+
+struct thread* cpu_current_thread_load(const struct cpu* cpu) {
+	if (cpu == NULL) return NULL;
+	return __atomic_load_n(&cpu->current_thread, __ATOMIC_ACQUIRE);
+}
+
+void cpu_current_thread_store(struct cpu* cpu, struct thread* thread) {
+	if (cpu == NULL) return;
+	__atomic_store_n(&cpu->current_thread, thread, __ATOMIC_RELEASE);
 }
 
 struct cpu* cpu_bsp(void) {
