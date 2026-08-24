@@ -25,6 +25,7 @@ struct sched_cpu_state {
 	struct thread          idle_thread;
 	char                   idle_name[SCHED_IDLE_NAME_MAX];
 	uint32_t               activity;
+	uint64_t               pending_ticks;
 	struct sched_cpu_stats stats;
 };
 
@@ -78,25 +79,39 @@ static bool sched_thread_should_preempt_current(struct cpu* cpu, const struct th
 	return sched_effective_priority(thread) > sched_effective_priority(current);
 }
 
-static void sched_charge_current_timeslice(struct cpu* cpu) {
+static void sched_charge_current_timeslice_ticks(struct cpu* cpu, uint64_t tick_count) {
 	struct thread* current;
+	uint64_t       remaining;
+	uint64_t       elapsed_after_expiry;
+	uint64_t       remainder;
 
-	if (cpu == NULL) return;
+	if (cpu == NULL || tick_count == 0u) return;
 
 	current = cpu_current_thread_load(cpu);
 	if (current == NULL || thread_is_idle(current) || thread_is_terminated(current) || current->timeslice_ticks == 0u) {
 		return;
 	}
 
-	if (current->timeslice_remaining == 0u) current->timeslice_remaining = current->timeslice_ticks;
-	current->timeslice_remaining--;
-	if (current->timeslice_remaining != 0u) return;
+	remaining = current->timeslice_remaining;
+	if (remaining == 0u) remaining = current->timeslice_ticks;
+	if (tick_count < remaining) {
+		current->timeslice_remaining = (uint32_t)(remaining - tick_count);
+		return;
+	}
 
-	current->timeslice_remaining = current->timeslice_ticks;
+	elapsed_after_expiry = tick_count - remaining;
+	remainder            = elapsed_after_expiry % current->timeslice_ticks;
+	current->timeslice_remaining =
+		(uint32_t)(remainder == 0u ? current->timeslice_ticks : current->timeslice_ticks - remainder);
+
 	if (!sched_run_queue_has_priority_at_least(cpu, sched_effective_priority(current))) return;
 
 	sched_request_reschedule(cpu);
 	if (cpu != cpu_current()) hal_cpu_kick(cpu);
+}
+
+static void sched_charge_current_timeslice(struct cpu* cpu) {
+	sched_charge_current_timeslice_ticks(cpu, 1u);
 }
 
 static struct sched_cpu_state* sched_state_for_cpu(const struct cpu* cpu) {
@@ -132,30 +147,34 @@ static bool sched_activate_thread_address_space(const struct thread* previous, c
 	return vm_space_activate(next_space);
 }
 
-static void sched_account_cpu_tick(struct cpu* cpu) {
+static void sched_account_cpu_ticks(struct cpu* cpu, uint64_t tick_count) {
 	struct sched_cpu_state* state;
 	enum sched_cpu_activity activity;
 	uint32_t                activity_value;
 
 	state = sched_state_for_cpu(cpu);
-	if (state == NULL) return;
+	if (state == NULL || tick_count == 0u) return;
 
-	(void)__atomic_fetch_add(&state->stats.total_ticks, 1u, __ATOMIC_RELAXED);
+	(void)__atomic_fetch_add(&state->stats.total_ticks, tick_count, __ATOMIC_RELAXED);
 	activity_value = __atomic_load_n(&state->activity, __ATOMIC_ACQUIRE);
 	activity =
 		activity_value <= SCHED_CPU_ACTIVITY_IDLE ? (enum sched_cpu_activity)activity_value : SCHED_CPU_ACTIVITY_KERNEL;
 	switch (activity) {
 	case SCHED_CPU_ACTIVITY_THREAD:
-		(void)__atomic_fetch_add(&state->stats.thread_ticks, 1u, __ATOMIC_RELAXED);
+		(void)__atomic_fetch_add(&state->stats.thread_ticks, tick_count, __ATOMIC_RELAXED);
 		break;
 	case SCHED_CPU_ACTIVITY_IDLE:
-		(void)__atomic_fetch_add(&state->stats.idle_ticks, 1u, __ATOMIC_RELAXED);
+		(void)__atomic_fetch_add(&state->stats.idle_ticks, tick_count, __ATOMIC_RELAXED);
 		break;
 	case SCHED_CPU_ACTIVITY_KERNEL:
 	default:
-		(void)__atomic_fetch_add(&state->stats.kernel_ticks, 1u, __ATOMIC_RELAXED);
+		(void)__atomic_fetch_add(&state->stats.kernel_ticks, tick_count, __ATOMIC_RELAXED);
 		break;
 	}
+}
+
+static void sched_account_cpu_tick(struct cpu* cpu) {
+	sched_account_cpu_ticks(cpu, 1u);
 }
 
 static struct cpu* sched_default_cpu(void) {
@@ -671,12 +690,26 @@ bool sched_reschedule_pending(const struct cpu* cpu) {
 	return __atomic_load_n(&cpu->reschedule_requested, __ATOMIC_ACQUIRE);
 }
 
+static void sched_consume_pending_ticks(struct cpu* cpu) {
+	struct sched_cpu_state* state = sched_state_for_cpu(cpu);
+	uint64_t                tick_count;
+
+	if (state == NULL) return;
+
+	tick_count = __atomic_exchange_n(&state->pending_ticks, 0u, __ATOMIC_ACQ_REL);
+	if (tick_count == 0u) return;
+
+	sched_account_cpu_ticks(cpu, tick_count);
+	sched_charge_current_timeslice_ticks(cpu, tick_count);
+}
+
 bool sched_handle_interrupt_exit(void) {
 	struct sched_cpu_state* state;
 	struct cpu*             cpu = cpu_current();
 	struct thread*          current;
 
 	if (cpu == NULL || __atomic_load_n(&cpu->context_switch_in_progress, __ATOMIC_ACQUIRE)) return false;
+	sched_consume_pending_ticks(cpu);
 	if (!sched_reschedule_pending(cpu)) return false;
 
 	state   = sched_state_for_cpu(cpu);
@@ -839,10 +872,13 @@ void sched_tick(void) {
 }
 
 void sched_tick_remote(struct cpu* cpu) {
-	if (cpu == NULL) return;
+	struct sched_cpu_state* state;
+	if (cpu == NULL || cpu == cpu_current()) return;
+	state = sched_state_for_cpu(cpu);
+	if (state == NULL) return;
 
-	sched_account_cpu_tick(cpu);
-	sched_charge_current_timeslice(cpu);
+	(void)__atomic_fetch_add(&state->pending_ticks, 1u, __ATOMIC_RELEASE);
+	hal_cpu_kick(cpu);
 }
 
 bool sched_block_current_locked(struct thread_wait_queue* queue, enum thread_block_reason reason,

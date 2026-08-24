@@ -165,6 +165,42 @@ Test(sched, timer_tick_requests_and_consumes_timeslice_preemption) {
 	reset_test_state();
 }
 
+Test(sched, remote_tick_is_consumed_only_by_target_cpu) {
+	struct cpu*   bsp;
+	struct cpu*   ap;
+	struct thread current;
+	struct thread peer;
+
+	sched_regression_init_dual_cpu(&bsp, &ap);
+	sched_regression_init_thread(&current, "ap_current", 0x3a0000u, THREAD_PRIORITY_DEFAULT, ap, NULL);
+	sched_regression_init_thread(&peer, "ap_peer", 0x3b0000u, THREAD_PRIORITY_DEFAULT, ap, NULL);
+	sched_test_set_one_tick_timeslice(&current);
+	sched_test_set_one_tick_timeslice(&peer);
+
+	cpu_bind_current(ap);
+	cpu_interrupts_set_ready(ap, false);
+	sched_set_current(ap, &current);
+	cr_assert(sched_make_runnable(&peer), "failed to queue equal-priority AP peer");
+	cr_assert(!sched_reschedule_pending(ap), "equal-priority enqueue should wait for timeslice expiry");
+
+	cpu_bind_current(bsp);
+	cpu_interrupts_set_ready(bsp, false);
+	hal_cpu_mock_reset_kicks();
+	sched_tick_remote(ap);
+
+	cr_assert_eq(current.timeslice_remaining, 1u, "BSP must not mutate the AP current thread's timeslice");
+	cr_assert(!sched_reschedule_pending(ap), "remote publication must not run target scheduler logic on the BSP");
+	cr_assert_eq(hal_cpu_mock_kick_count(ap), 1u, "remote AP tick should send exactly one kick");
+
+	cpu_bind_current(ap);
+	cpu_interrupts_set_ready(ap, false);
+	cr_assert(sched_handle_interrupt_exit(), "AP interrupt exit should consume its pending scheduler tick");
+	cr_assert_eq(sched_current_thread(), &peer, "AP should rotate to its equal-priority peer after local tick consume");
+	cr_assert(thread_is_queued(&current), "AP current thread should be re-queued after local timeslice expiry");
+
+	sched_regression_reset();
+}
+
 Test(sched, timer_preemption_rotates_non_yielding_workers) {
 	const struct thread_create_params first_params = {
 		.name              = "first",

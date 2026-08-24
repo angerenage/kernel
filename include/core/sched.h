@@ -68,7 +68,7 @@ void sched_request_reschedule(struct cpu* cpu);
 /* Return whether cpu has a deferred preemption request pending. */
 bool sched_reschedule_pending(const struct cpu* cpu);
 
-/* Consume any pending preemption request for the current CPU on interrupt exit. */
+/* Consume pending local scheduler ticks and any deferred preemption request on interrupt exit. */
 bool sched_handle_interrupt_exit(void);
 
 /* Finalize a switched-out EXITING thread when no context switch is in progress. */
@@ -86,7 +86,7 @@ bool sched_sleep_until_tick(uint64_t deadline_tick);
 /* Advance scheduler timers and wake any sleep-deadline waiters that are now due. */
 void sched_tick(void);
 
-/* Charge one scheduler tick to cpu without advancing global time. */
+/* Publish one scheduler tick for a remote CPU; the target consumes it locally on interrupt exit. */
 void sched_tick_remote(struct cpu* cpu);
 
 /* Block the current thread on queue until another CPU or event source wakes it. */
