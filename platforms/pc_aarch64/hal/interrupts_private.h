@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+struct cpu;
+
 struct exception_frame {
 	uint64_t x[31];
 	uint64_t vector;
@@ -16,5 +18,8 @@ struct exception_frame {
 
 void aarch64_prepare_user_return(void);
 
+bool aarch64_gic_prepare_smp(void);
+bool aarch64_gic_init_local(struct cpu* cpu);
+bool aarch64_gic_send_scheduler_kick(const struct cpu* cpu);
 bool clock_handle_irq(const struct exception_frame* frame);
 bool aarch64_handle_syscall(struct exception_frame* frame, uint64_t ec);

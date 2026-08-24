@@ -9,6 +9,7 @@
 #include "sync_helpers.h"
 
 #define KERNEL_SELFTEST_CPU_MAX_CPUS 64u
+#define KERNEL_SELFTEST_CPU_REMOTE_DISPATCH_TIMEOUT_MS 250u
 
 static void kernel_selftest_cpu_topology_is_consistent(struct kernel_selftest_context* ctx) {
 	struct cpu_topology* topology = cpu_topology_get();
@@ -179,8 +180,9 @@ static void kernel_selftest_cpu_remote_dispatch_worker(void* arg) {
 }
 
 static void kernel_selftest_cpu_remote_dispatch_reaches_application_processors(struct kernel_selftest_context* ctx) {
-	size_t total_cpus   = cpu_count();
-	size_t worker_count = 0u;
+	struct kernel_selftest_clock_scope clock        = {0};
+	size_t                             total_cpus   = cpu_count();
+	size_t                             worker_count = 0u;
 
 	memset(kernel_selftest_cpu_remote_workers, 0, sizeof(kernel_selftest_cpu_remote_workers));
 	memset(kernel_selftest_cpu_remote_states, 0, sizeof(kernel_selftest_cpu_remote_states));
@@ -192,6 +194,8 @@ static void kernel_selftest_cpu_remote_dispatch_reaches_application_processors(s
 	KERNEL_SELFTEST_ASSERT_MSG(ctx, total_cpus <= KERNEL_SELFTEST_CPU_MAX_CPUS, "cpu_count exceeds selftest capacity");
 
 	if (total_cpus == 1u) return;
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx, kernel_selftest_clock_scope_begin(&clock), "failed to start a temporary clock source", cleanup);
 
 	for (size_t i = 0u; i < total_cpus; i++) {
 		struct cpu* cpu = cpu_by_index(i);
@@ -214,23 +218,15 @@ static void kernel_selftest_cpu_remote_dispatch_reaches_application_processors(s
 		worker_count++;
 	}
 
+	/* Blocking the BSP lets single-threaded emulators schedule each AP. */
 	for (size_t i = 0u; i < total_cpus; i++) {
 		if (!kernel_selftest_cpu_remote_created[i]) continue;
-	}
-
-	for (size_t attempt = 0u; attempt < KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS * total_cpus * 1024u; attempt++) {
-		bool all_done = true;
-
-		for (size_t i = 0u; i < total_cpus; i++) {
-			if (kernel_selftest_cpu_remote_created[i] &&
-			    __atomic_load_n(&kernel_selftest_cpu_remote_states[i].ran, __ATOMIC_ACQUIRE) == 0u) {
-				all_done = false;
-				break;
-			}
-		}
-
-		if (all_done) break;
-		spinlock_relax();
+		KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+		                                kthread_timed_join(kernel_selftest_cpu_remote_workers[i],
+		                                                   KERNEL_SELFTEST_CPU_REMOTE_DISPATCH_TIMEOUT_MS,
+		                                                   NULL),
+		                                "AP-targeted worker did not finish before the dispatch timeout",
+		                                cleanup);
 	}
 
 	for (size_t i = 0u; i < total_cpus; i++) {
@@ -269,6 +265,7 @@ cleanup:
 		}
 		kernel_selftest_thread_destroy(&kernel_selftest_cpu_remote_workers[i]);
 	}
+	kernel_selftest_clock_scope_end(&clock);
 }
 
 static const struct kernel_selftest_case kernel_cpu_selftests[] = {

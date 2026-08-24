@@ -39,7 +39,7 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 	uintptr_t vectors;
 
 	if (!global_ready || cpu == NULL || cpu->index >= 64u) return false;
-	if (local_ready[cpu->index]) return true;
+	if (local_ready[cpu->index]) return aarch64_gic_init_local(cpu);
 
 	vectors = (uintptr_t)exception_vectors;
 	irq_disable_local();
@@ -49,6 +49,7 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 	                 : "r"(vectors)
 	                 : "memory");
 
+	if (!aarch64_gic_init_local(cpu)) return false;
 	local_ready[cpu->index] = true;
 	cpu_interrupts_set_ready(cpu, true);
 	return true;

@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "interrupts_private.h"
+
 enum {
 	AARCH64_THREAD_STACK_ALIGNMENT = 16u,
 	AARCH64_THREAD_CTX_X19         = 0,
@@ -97,7 +99,7 @@ void hal_cpu_context_switch(struct thread_context* current, const struct thread_
 }
 
 bool hal_cpu_prepare_smp(void) {
-	return true;
+	return aarch64_gic_prepare_smp();
 }
 
 void hal_cpu_park(void) {
@@ -110,7 +112,7 @@ void hal_cpu_park(void) {
 }
 
 void hal_cpu_kick(const struct cpu* cpu) {
-	(void)cpu;
+	if (cpu == NULL) return;
 
 	__asm__ volatile("dsb ishst\n\t"
 	                 "sev"
