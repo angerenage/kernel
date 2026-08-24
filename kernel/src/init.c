@@ -204,7 +204,7 @@ static void boot_start_diagnostics_reporter(void) {
 	enum kthread_spawn_result result;
 
 	if (!boot_diagnostics_enabled || boot_timer_frequency_hz == 0u) return;
-	result = kthread_spawn_detached_on_cpu("kernel/diagnostics", kernel_diagnostics_entry, NULL, cpu_bsp());
+	result = kthread_spawn_detached("kernel/diagnostics", kernel_diagnostics_entry, NULL);
 	if (result != KTHREAD_SPAWN_OK) printf("scheduler: diagnostics thread unavailable\n");
 }
 

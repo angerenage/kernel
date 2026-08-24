@@ -87,6 +87,20 @@ static inline void aarch64_tlb_flush_all(void) {
 	                     : "memory");
 }
 
+static void aarch64_tlb_shootdown_range(uintptr_t start, size_t page_count) {
+	/* VAAE1IS invalidates by VA for all ASIDs in the inner-shareable domain,
+	 * so this is an architectural SMP shootdown rather than a CPU-local flush. */
+	__asm__ volatile("dsb ishst" : : : "memory");
+	for (size_t i = 0u; i < page_count; i++) {
+		uint64_t operand = (((uint64_t)start + i * (uint64_t)PMM_PAGE_SIZE) >> 12u) & ((1ull << 44u) - 1u);
+
+		__asm__ volatile("tlbi vaae1is, %0" : : "r"(operand) : "memory");
+	}
+	__asm__ volatile("dsb ish\n\t"
+	                 "isb" ::
+	                     : "memory");
+}
+
 static bool aarch64_is_upper_region(uintptr_t virt) {
 	return ((uint64_t)virt >> 63) != 0;
 }
@@ -346,14 +360,8 @@ bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t p
 	}
 
 	table[index] = ((uint64_t)phys & AARCH64_ADDR_MASK) | aarch64_leaf_flags(flags);
-	aarch64_tlb_flush_all();
+	aarch64_tlb_shootdown_range(virt, 1u);
 	spinlock_unlock_irqrestore(&paging_lock, state);
-	return true;
-}
-
-static bool aarch64_table_empty(const uint64_t* table) {
-	for (size_t i = 0u; i < 512u; i++)
-		if ((table[i] & AARCH64_DESC_VALID) != 0u) return false;
 	return true;
 }
 
@@ -377,7 +385,6 @@ static bool aarch64_change_range(uint64_t* table, unsigned level, uintptr_t star
 				uintptr_t child_phys = (uintptr_t)(entry & AARCH64_ADDR_MASK);
 				uint64_t* child      = (uint64_t*)hhdm_phys_to_virt(child_phys);
 				if (!aarch64_change_range(child, level - 1u, start, next, protect, flags)) return false;
-				if (!protect && aarch64_table_empty(child) && pmm_free_pages(child_phys, 1u)) table[index] = 0u;
 			}
 		}
 		start = next;
@@ -404,7 +411,7 @@ bool hal_paging_unmap_range(struct hal_address_space* space, uintptr_t virt, siz
 	struct irq_state state = spinlock_lock_irqsave(&paging_lock);
 	uint64_t*        root  = (uint64_t*)hhdm_phys_to_virt((uintptr_t)params.root_phys);
 	bool             ok    = aarch64_change_range(root, params.levels - 1u, virt, end, false, 0u);
-	if (ok) aarch64_tlb_flush_all();
+	if (ok) aarch64_tlb_shootdown_range(virt, page_count);
 	spinlock_unlock_irqrestore(&paging_lock, state);
 	return ok;
 }
@@ -417,7 +424,7 @@ bool hal_paging_protect_range(struct hal_address_space* space, uintptr_t virt, s
 	struct irq_state state = spinlock_lock_irqsave(&paging_lock);
 	uint64_t*        root  = (uint64_t*)hhdm_phys_to_virt((uintptr_t)params.root_phys);
 	bool             ok    = aarch64_change_range(root, params.levels - 1u, virt, end, true, flags);
-	if (ok) aarch64_tlb_flush_all();
+	if (ok) aarch64_tlb_shootdown_range(virt, page_count);
 	spinlock_unlock_irqrestore(&paging_lock, state);
 	return ok;
 }

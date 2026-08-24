@@ -109,6 +109,8 @@ bool apic_set_isa_irq_mask(unsigned irq, bool masked);
 bool apic_is_active(void);
 void apic_send_eoi(void);
 bool apic_send_ipi(uint32_t lapic_id, unsigned vector);
+bool apic_send_nmi(uint32_t lapic_id);
+bool x86_64_paging_handle_tlb_nmi(void);
 bool clock_handle_irq(unsigned vector);
 
 void                      x86_64_syscall_init(void);

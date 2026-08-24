@@ -384,3 +384,13 @@ bool apic_send_ipi(uint32_t lapic_id, unsigned vector) {
 	lapic_wait_icr_idle();
 	return true;
 }
+
+bool apic_send_nmi(uint32_t lapic_id) {
+	if (!apic_ipi_ready() || lapic_mmio == NULL) return false;
+
+	lapic_wait_icr_idle();
+	lapic_write(X86_LAPIC_ICR_HIGH_REG, lapic_id << 24);
+	lapic_write(X86_LAPIC_ICR_LOW_REG, 4u << 8);
+	lapic_wait_icr_idle();
+	return true;
+}

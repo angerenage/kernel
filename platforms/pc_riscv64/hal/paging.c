@@ -1,8 +1,10 @@
 #include <base/math.h>
+#include <core/cpu.h>
 #include <core/lock.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/spinlock.h>
+#include <hal/hcf.h>
 #include <hal/paging.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -21,6 +23,14 @@
 #define RISCV_SATP_MODE_SV39 8ull
 #define RISCV_SATP_MODE_SV48 9ull
 #define RISCV_SATP_MODE_SV57 10ull
+
+#define RISCV_SBI_EID_RFENCE 0x52464e43ul
+#define RISCV_SBI_FID_REMOTE_SFENCE_VMA 1ul
+
+struct riscv_sbi_ret {
+	long error;
+	long value;
+};
 
 static bool                     initialized;
 static int                      paging_levels;
@@ -53,6 +63,57 @@ static inline uint64_t riscv_pte_from_phys(uintptr_t phys) {
 
 static inline void riscv_tlb_flush(uintptr_t virt) {
 	__asm__ volatile("sfence.vma %0, x0" : : "r"(virt) : "memory");
+}
+
+static struct riscv_sbi_ret riscv_sbi_call4(unsigned long arg0, unsigned long arg1, unsigned long arg2,
+                                            unsigned long arg3, unsigned long fid, unsigned long eid) {
+	register unsigned long a0 asm("a0") = arg0;
+	register unsigned long a1 asm("a1") = arg1;
+	register unsigned long a2 asm("a2") = arg2;
+	register unsigned long a3 asm("a3") = arg3;
+	register unsigned long a6 asm("a6") = fid;
+	register unsigned long a7 asm("a7") = eid;
+
+	__asm__ volatile("ecall" : "+r"(a0), "+r"(a1) : "r"(a2), "r"(a3), "r"(a6), "r"(a7) : "memory", "a4", "a5");
+	return (struct riscv_sbi_ret){
+		.error = (long)a0,
+		.value = (long)a1,
+	};
+}
+
+static void riscv_tlb_shootdown_range(uintptr_t start, size_t page_count) {
+	const struct cpu_topology* topology = cpu_topology_get();
+	struct cpu*                current  = cpu_current();
+	uint64_t                   byte_count;
+
+	if (page_count == 0u) return;
+	for (size_t i = 0u; i < page_count; i++) {
+		riscv_tlb_flush(start + i * (uintptr_t)PMM_PAGE_SIZE);
+	}
+
+	if (topology == NULL || topology->cpus == NULL || current == NULL || topology->cpu_count == 0u ||
+	    mul_overflow_u64(page_count, PMM_PAGE_SIZE, &byte_count)) {
+		hcf();
+	}
+	/* Publish page-table stores before firmware asks remote harts to fence. */
+	__asm__ volatile("fence rw, rw" : : : "memory");
+
+	for (size_t i = 0u; i < topology->cpu_count; i++) {
+		struct cpu*          target = &topology->cpus[i];
+		struct riscv_sbi_ret ret;
+
+		if (target == current || cpu_state_get(target) != CPU_STATE_ONLINE) continue;
+
+		/* SBI RFENCE is synchronous: successful return means the selected hart
+		 * has completed the requested SFENCE.VMA before execution continues here. */
+		ret = riscv_sbi_call4(1ul,
+		                      (unsigned long)target->arch_id,
+		                      (unsigned long)start,
+		                      (unsigned long)byte_count,
+		                      RISCV_SBI_FID_REMOTE_SFENCE_VMA,
+		                      RISCV_SBI_EID_RFENCE);
+		if (ret.error != 0) hcf();
+	}
 }
 
 static inline uint64_t riscv_leaf_flags(uint64_t flags) {
@@ -246,14 +307,8 @@ bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t p
 	}
 
 	table[index] = riscv_pte_from_phys(phys) | riscv_leaf_flags(flags);
-	riscv_tlb_flush(virt);
 	spinlock_unlock_irqrestore(&paging_lock, state);
-	return true;
-}
-
-static bool riscv_table_empty(const uint64_t* table) {
-	for (size_t i = 0u; i < 512u; i++)
-		if ((table[i] & RISCV_PTE_V) != 0u) return false;
+	riscv_tlb_shootdown_range(virt, 1u);
 	return true;
 }
 
@@ -272,14 +327,12 @@ static bool riscv_change_range(uint64_t* table, int level, uintptr_t start, uint
 				if (!leaf) return false;
 				if (protect) table[index] = riscv_pte_from_phys(riscv_pte_to_phys(entry)) | riscv_leaf_flags(flags);
 				else table[index] = 0u;
-				riscv_tlb_flush(start);
 			}
 			else {
 				if (leaf) return false;
 				uintptr_t child_phys = riscv_pte_to_phys(entry);
 				uint64_t* child      = (uint64_t*)hhdm_phys_to_virt(child_phys);
 				if (!riscv_change_range(child, level - 1, start, next, protect, flags)) return false;
-				if (!protect && riscv_table_empty(child) && pmm_free_pages(child_phys, 1u)) table[index] = 0u;
 			}
 		}
 		start = next;
@@ -303,6 +356,7 @@ bool hal_paging_unmap_range(struct hal_address_space* space, uintptr_t virt, siz
 	uint64_t*        root  = riscv_space_root_table(space);
 	bool             ok    = root != NULL && riscv_change_range(root, paging_levels - 1, virt, end, false, 0u);
 	spinlock_unlock_irqrestore(&paging_lock, state);
+	if (ok) riscv_tlb_shootdown_range(virt, page_count);
 	return ok;
 }
 
@@ -313,6 +367,7 @@ bool hal_paging_protect_range(struct hal_address_space* space, uintptr_t virt, s
 	uint64_t*        root  = riscv_space_root_table(space);
 	bool             ok    = root != NULL && riscv_change_range(root, paging_levels - 1, virt, end, true, flags);
 	spinlock_unlock_irqrestore(&paging_lock, state);
+	if (ok) riscv_tlb_shootdown_range(virt, page_count);
 	return ok;
 }
 

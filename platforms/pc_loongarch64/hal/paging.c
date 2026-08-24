@@ -1,8 +1,10 @@
 #include <base/math.h>
+#include <core/cpu.h>
 #include <core/lock.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/spinlock.h>
+#include <hal/hcf.h>
 #include <hal/paging.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -123,6 +125,22 @@ static inline void loongarch_page_table_sync(void) {
 	__asm__ volatile("dbar 0\n\t"
 	                 "ibar 0" ::
 	                     : "memory");
+}
+
+static inline void loongarch_tlb_shootdown_local(void) {
+	const struct cpu_topology* topology = cpu_topology_get();
+	struct cpu*                current  = cpu_current();
+
+	/* pc_loongarch64 does not currently expose SMP (hal_cpu_prepare_smp()
+	 * returns false), so every reachable paging update is single-CPU today. */
+	if (topology == NULL || topology->cpus == NULL || current == NULL) hcf();
+	for (size_t i = 0u; i < topology->cpu_count; i++) {
+		struct cpu* target = &topology->cpus[i];
+
+		if (target != current && cpu_state_get(target) == CPU_STATE_ONLINE) hcf();
+	}
+	loongarch_page_table_sync();
+	loongarch_tlb_flush_all();
 }
 
 static inline bool loongarch_upper_half(uintptr_t virt) {
@@ -328,8 +346,7 @@ bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t p
 	}
 
 	table[index] = loongarch_entry_from_phys(phys) | loongarch_common_flags(flags);
-	loongarch_page_table_sync();
-	loongarch_tlb_flush_all();
+	loongarch_tlb_shootdown_local();
 	spinlock_unlock_irqrestore(&paging_lock, state);
 	return true;
 }
@@ -388,8 +405,7 @@ bool hal_paging_unmap_range(struct hal_address_space* space, uintptr_t virt, siz
 	uint64_t*        root      = root_phys == 0u ? NULL : (uint64_t*)hhdm_phys_to_virt(root_phys);
 	bool             ok        = root != NULL && loongarch_change_range(root, 3u, virt, end, false, 0u);
 	if (ok) {
-		loongarch_page_table_sync();
-		loongarch_tlb_flush_all();
+		loongarch_tlb_shootdown_local();
 	}
 	spinlock_unlock_irqrestore(&paging_lock, state);
 	return ok;
@@ -403,8 +419,7 @@ bool hal_paging_protect_range(struct hal_address_space* space, uintptr_t virt, s
 	uint64_t*        root      = root_phys == 0u ? NULL : (uint64_t*)hhdm_phys_to_virt(root_phys);
 	bool             ok        = root != NULL && loongarch_change_range(root, 3u, virt, end, true, flags);
 	if (ok) {
-		loongarch_page_table_sync();
-		loongarch_tlb_flush_all();
+		loongarch_tlb_shootdown_local();
 	}
 	spinlock_unlock_irqrestore(&paging_lock, state);
 	return ok;

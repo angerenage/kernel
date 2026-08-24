@@ -9,6 +9,7 @@
 #define RISCV64_SBI_FID_PROBE_EXTENSION 3ul
 #define RISCV64_SBI_EID_IPI 0x735049ul
 #define RISCV64_SBI_FID_SEND_IPI 0ul
+#define RISCV64_SBI_EID_RFENCE 0x52464e43ul
 
 struct riscv64_sbi_ret {
 	long error;
@@ -120,10 +121,12 @@ void hal_cpu_context_switch(struct thread_context* current, const struct thread_
 }
 
 bool hal_cpu_prepare_smp(void) {
-	struct riscv64_sbi_ret ret =
+	struct riscv64_sbi_ret ipi =
 		riscv64_sbi_call2(RISCV64_SBI_EID_IPI, 0u, RISCV64_SBI_FID_PROBE_EXTENSION, RISCV64_SBI_EID_BASE);
+	struct riscv64_sbi_ret rfence =
+		riscv64_sbi_call2(RISCV64_SBI_EID_RFENCE, 0u, RISCV64_SBI_FID_PROBE_EXTENSION, RISCV64_SBI_EID_BASE);
 
-	return ret.error == 0 && ret.value != 0;
+	return ipi.error == 0 && ipi.value != 0 && rfence.error == 0 && rfence.value != 0;
 }
 
 void hal_cpu_park(void) {

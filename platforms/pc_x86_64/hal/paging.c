@@ -1,13 +1,17 @@
 #include <base/math.h>
+#include <core/cpu.h>
 #include <core/lock.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/spinlock.h>
+#include <hal/hcf.h>
 #include <hal/paging.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include "interrupts_private.h"
 
 #define X86_PTE_PRESENT (1ull << 0)
 #define X86_PTE_WRITE (1ull << 1)
@@ -19,11 +23,22 @@
 #define X86_PTE_NX (1ull << 63)
 #define X86_CR4_LA57 (1ull << 12)
 #define X86_PHYS_MASK 0x000ffffffffff000ull
+#define X86_TLB_MAX_CPUS 64u
+
+struct x86_tlb_request {
+	uintptr_t start;
+	size_t    page_count;
+	uint64_t  generation;
+};
 
 static bool                     initialized;
 static struct hal_address_space kernel_space;
 static struct spinlock          paging_lock =
 	SPINLOCK_INIT_CLASS("paging_lock", SPINLOCK_ORDER_PAGING, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
+static struct x86_tlb_request x86_tlb_requests[X86_TLB_MAX_CPUS];
+static uint64_t               x86_tlb_ack[X86_TLB_MAX_CPUS][X86_TLB_MAX_CPUS];
+static struct spinlock        x86_tlb_shootdown_lock = SPINLOCK_INIT_CLASS(
+    "tlb_shootdown_lock", SPINLOCK_ORDER_PAGING, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
 
 static inline uint64_t x86_read_cr3(void) {
 	uint64_t value;
@@ -43,6 +58,111 @@ static inline void x86_write_cr3(uint64_t value) {
 
 static inline void x86_invlpg(uintptr_t virt) {
 	__asm__ volatile("invlpg (%0)" : : "r"((void*)virt) : "memory");
+}
+
+static void x86_tlb_flush_range_local(uintptr_t start, size_t page_count) {
+	for (size_t i = 0u; i < page_count; i++) {
+		x86_invlpg(start + i * (uintptr_t)PMM_PAGE_SIZE);
+	}
+}
+
+static bool x86_tlb_process_requests_for_current_cpu(void) {
+	const struct cpu_topology* topology = cpu_topology_get();
+	struct cpu*                cpu      = cpu_current();
+	size_t                     cpu_total;
+	size_t                     target_index;
+	bool                       handled = false;
+
+	if (topology == NULL || topology->cpus == NULL || cpu == NULL || cpu->index >= X86_TLB_MAX_CPUS) hcf();
+	cpu_total = topology->cpu_count;
+	if (cpu_total == 0u || cpu_total > X86_TLB_MAX_CPUS) hcf();
+	target_index = cpu->index;
+
+	for (size_t source_index = 0u; source_index < cpu_total; source_index++) {
+		struct x86_tlb_request* request;
+		uint64_t                generation;
+		uint64_t                acknowledged;
+
+		if (source_index == target_index) continue;
+		request      = &x86_tlb_requests[source_index];
+		generation   = __atomic_load_n(&request->generation, __ATOMIC_ACQUIRE);
+		acknowledged = __atomic_load_n(&x86_tlb_ack[target_index][source_index], __ATOMIC_ACQUIRE);
+		if (generation == 0u || acknowledged == generation) continue;
+
+		x86_tlb_flush_range_local(request->start, request->page_count);
+		__atomic_store_n(&x86_tlb_ack[target_index][source_index], generation, __ATOMIC_RELEASE);
+		handled = true;
+	}
+	return handled;
+}
+
+bool x86_64_paging_handle_tlb_nmi(void) {
+	return x86_tlb_process_requests_for_current_cpu();
+}
+
+static void x86_tlb_shootdown_range(uintptr_t start, size_t page_count) {
+	bool                       targets[X86_TLB_MAX_CPUS] = {false};
+	struct cpu*                current                   = cpu_current();
+	struct x86_tlb_request*    request;
+	const struct cpu_topology* topology;
+	size_t                     cpu_total;
+	size_t                     source_index;
+	uint64_t                   generation;
+	struct irq_state           shootdown_state;
+
+	if (page_count == 0u) return;
+	shootdown_state = spinlock_lock_irqsave(&x86_tlb_shootdown_lock);
+	x86_tlb_flush_range_local(start, page_count);
+
+	topology = cpu_topology_get();
+	if (current == NULL || topology == NULL || topology->cpus == NULL || current->index >= X86_TLB_MAX_CPUS ||
+	    topology->cpu_count == 0u || topology->cpu_count > X86_TLB_MAX_CPUS) {
+		hcf();
+	}
+	cpu_total = topology->cpu_count;
+
+	bool has_remote_target = false;
+	for (size_t i = 0u; i < cpu_total; i++) {
+		struct cpu* target = &topology->cpus[i];
+		if (target != current && cpu_state_get(target) == CPU_STATE_ONLINE) {
+			has_remote_target = true;
+			break;
+		}
+	}
+	if (!has_remote_target) {
+		spinlock_unlock_irqrestore(&x86_tlb_shootdown_lock, shootdown_state);
+		return;
+	}
+	if (!apic_ipi_ready()) hcf();
+
+	source_index = current->index;
+	request      = &x86_tlb_requests[source_index];
+	generation   = __atomic_load_n(&request->generation, __ATOMIC_RELAXED) + 1u;
+	if (generation == 0u) generation = 1u;
+
+	request->start      = start;
+	request->page_count = page_count;
+	__atomic_store_n(&request->generation, generation, __ATOMIC_RELEASE);
+	/* Publish the request before the LAPIC MMIO write that delivers the NMI. */
+	__atomic_thread_fence(__ATOMIC_SEQ_CST);
+
+	for (size_t i = 0u; i < cpu_total; i++) {
+		struct cpu* target = &topology->cpus[i];
+
+		if (target == current || target->index >= X86_TLB_MAX_CPUS || cpu_state_get(target) != CPU_STATE_ONLINE) {
+			continue;
+		}
+		targets[target->index] = true;
+		if (!apic_send_nmi((uint32_t)target->arch_id)) hcf();
+	}
+
+	for (size_t target_index = 0u; target_index < cpu_total; target_index++) {
+		if (!targets[target_index]) continue;
+		while (__atomic_load_n(&x86_tlb_ack[target_index][source_index], __ATOMIC_ACQUIRE) != generation) {
+			__asm__ volatile("pause" : : : "memory");
+		}
+	}
+	spinlock_unlock_irqrestore(&x86_tlb_shootdown_lock, shootdown_state);
 }
 
 static inline uintptr_t hhdm_phys_to_virt(uintptr_t phys) {
@@ -226,14 +346,8 @@ bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t p
 	}
 
 	table[index] = (uint64_t)phys | x86_leaf_flags(flags);
-	x86_invlpg(virt);
 	spinlock_unlock_irqrestore(&paging_lock, state);
-	return true;
-}
-
-static bool x86_table_empty(const uint64_t* table) {
-	for (size_t i = 0u; i < 512u; i++)
-		if ((table[i] & X86_PTE_PRESENT) != 0u) return false;
+	x86_tlb_shootdown_range(virt, 1u);
 	return true;
 }
 
@@ -249,14 +363,12 @@ static bool x86_change_range(uint64_t* table, int level, uintptr_t start, uintpt
 			if (level == 0) {
 				if (protect) table[index] = (entry & X86_PHYS_MASK) | x86_leaf_flags(flags);
 				else table[index] = 0u;
-				x86_invlpg(start);
 			}
 			else {
 				if ((entry & X86_PTE_LARGE) != 0u) return false;
 				uintptr_t child_phys = (uintptr_t)(entry & X86_PHYS_MASK);
 				uint64_t* child      = (uint64_t*)hhdm_phys_to_virt(child_phys);
 				if (!x86_change_range(child, level - 1, start, next, protect, flags)) return false;
-				if (!protect && x86_table_empty(child) && pmm_free_pages(child_phys, 1u)) table[index] = 0u;
 			}
 		}
 		start = next;
@@ -280,6 +392,7 @@ bool hal_paging_unmap_range(struct hal_address_space* space, uintptr_t virt, siz
 	uint64_t*        root  = x86_space_root_table(space);
 	bool             ok    = root != NULL && x86_change_range(root, x86_paging_levels() - 1, virt, end, false, 0u);
 	spinlock_unlock_irqrestore(&paging_lock, state);
+	if (ok) x86_tlb_shootdown_range(virt, page_count);
 	return ok;
 }
 
@@ -290,6 +403,7 @@ bool hal_paging_protect_range(struct hal_address_space* space, uintptr_t virt, s
 	uint64_t*        root  = x86_space_root_table(space);
 	bool             ok    = root != NULL && x86_change_range(root, x86_paging_levels() - 1, virt, end, true, flags);
 	spinlock_unlock_irqrestore(&paging_lock, state);
+	if (ok) x86_tlb_shootdown_range(virt, page_count);
 	return ok;
 }
 
