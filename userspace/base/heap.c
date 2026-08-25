@@ -37,7 +37,8 @@ bool heap_grow_pages(size_t page_count, void** out_base) {
 	}
 	userspace_heap_state_unlock();
 
-	if (!syscall_status_is_success(memory_create(page_count, &memory_cap))) return false;
+	const struct memory_create_params create_params = {.page_count = page_count};
+	if (!syscall_status_is_success(memory_create(&create_params, &memory_cap))) return false;
 	const struct memory_map_params params = {
 		.page_count = page_count, .align_pages = 1u, .prot = VMM_PROT_READ | VMM_PROT_WRITE};
 	if (!syscall_status_is_success(address_space_map(runtime_heap_address_space_cap, memory_cap, &params, &mapped)) ||

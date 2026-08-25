@@ -3,8 +3,13 @@
 #include "../../kernel/src/syscall/memory.h"
 #include "test_support.h"
 
+static cap_id_t create_memory_params(cap_rights_t rights, const struct memory_create_params* params) {
+	return kernel_memory_create(rights, params);
+}
+
 static cap_id_t create_memory(cap_rights_t rights, size_t page_count) {
-	return kernel_memory_create(rights, page_count);
+	const struct memory_create_params params = {.page_count = page_count};
+	return create_memory_params(rights, &params);
 }
 
 static bool drop_capability(cap_id_t id) {
@@ -56,7 +61,8 @@ Test(kernel_capability_memory, create_syscall_grants_the_final_memory_rights) {
 	struct kernel_capability_test_context ctx;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/memory-create-rights");
-	syscall_result_t result = syscall_memory_create(1u, 0u, 0u, 0u, 0u, 0u);
+	const struct memory_create_params params = {.page_count = 1u};
+	syscall_result_t result = syscall_memory_create((uintptr_t)&params, sizeof(params), 0u, 0u, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	struct capability* cap = cap_acquire((cap_id_t)result.value);
 	cr_assert_not_null(cap);
@@ -80,6 +86,7 @@ Test(kernel_capability_memory, create_reports_logical_size_and_fresh_contents_ar
 	cr_assert_neq(memory_cap, CAP_ID_INVALID);
 	cr_assert_eq(memory_info(memory_cap, &info).status, SYSCALL_STATUS_OK);
 	cr_assert_eq(info.page_count, 3u);
+	cr_assert_eq(info.memory_type, MEMORY_TYPE_NORMAL);
 	buffer = kernel_capability_test_alloc_user_buffer(ctx.process, 1u, &buffer_id);
 	cr_assert_eq(memory_read_to(memory_cap, 0u, buffer, 1u).status, SYSCALL_STATUS_OK);
 	cr_assert_eq(address_space_copy_from(process_address_space(ctx.process), buffer, &byte, 1u), ADDRESS_TRANSFER_OK);
@@ -465,4 +472,61 @@ Test(kernel_capability_memory, delegated_mapping_rights_reduce_the_protection_ce
 
 Test(kernel_capability_memory, mapping_control_state_is_only_two_identity_fields) {
 	cr_assert_eq(kernel_mapping_state_size(), sizeof(process_id_t) + sizeof(vmm_id_t));
+}
+
+Test(kernel_capability_memory, fixed_device_memory_is_exclusive_and_controls_mapping_type) {
+	struct kernel_capability_test_context ctx;
+	struct address_space_map_result       mapped;
+	struct memory_info                    info;
+	cap_id_t                              first;
+	cap_id_t                              second;
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/memory-fixed-device");
+	const struct memory_create_params create_params = {
+		.page_count  = 2u,
+		.memory_type = MEMORY_TYPE_DEVICE,
+		.constraints = {.physical_address = 0x500000u, .flags = MEMORY_CONSTRAINT_FIXED},
+	};
+	first = create_memory_params(CAP_CALL | CAP_READ | CAP_WRITE | CAP_EXEC | CAP_MAP, &create_params);
+	cr_assert_neq(first, CAP_ID_INVALID);
+	cr_assert_eq(memory_info(first, &info).status, SYSCALL_STATUS_OK);
+	cr_assert_eq(info.page_count, 2u);
+	cr_assert_eq(info.memory_type, MEMORY_TYPE_DEVICE);
+	second = create_memory_params(CAP_CALL | CAP_MAP, &create_params);
+	cr_assert_eq(second, CAP_ID_INVALID);
+
+	const struct memory_map_params map_params = {.page_count = 2u, .prot = VMM_PROT_READ};
+	cr_assert_eq(map_memory(first, process_pid(ctx.process), ctx.process, &map_params, &mapped).status,
+	             SYSCALL_STATUS_OK);
+	cr_assert_eq(mapped.mapping.memory_type, MEMORY_TYPE_DEVICE);
+	uint8_t ignored;
+	cr_assert_eq(
+		address_space_copy_from(process_address_space(ctx.process), (uintptr_t)mapped.mapping.base, &ignored, 1u),
+		ADDRESS_TRANSFER_ACCESS_DENIED);
+	cr_assert_eq(protect_mapping(mapped.mapping_cap, VMM_PROT_EXEC).status, SYSCALL_STATUS_BAD_ARGUMENT);
+	const struct mapping_unmap_request unmap = {.header = {.op = MAPPING_OP_UNMAP}};
+	cr_assert_eq(kernel_capability_test_call(mapped.mapping_cap, &unmap, sizeof(unmap), NULL, 0u).status,
+	             SYSCALL_STATUS_OK);
+	cr_assert(drop_capability(first));
+	second = create_memory_params(CAP_CALL | CAP_MAP, &create_params);
+	cr_assert_neq(second, CAP_ID_INVALID);
+	cr_assert(drop_capability(second));
+	kernel_capability_test_end(&ctx);
+}
+
+Test(kernel_capability_memory, create_syscall_rejects_invalid_physical_constraints) {
+	struct kernel_capability_test_context ctx;
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/memory-create-invalid-constraints");
+	const struct memory_create_params params = {
+		.page_count = 1u,
+		.constraints =
+			{
+						  .physical_min = PMM_PAGE_SIZE,
+						  .align_pages  = 2u,
+						  },
+	};
+	syscall_result_t result = syscall_memory_create((uintptr_t)&params, sizeof(params), 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	kernel_capability_test_end(&ctx);
 }

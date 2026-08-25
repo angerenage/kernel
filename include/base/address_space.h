@@ -12,13 +12,12 @@ enum address_space_op {
 
 /* Parameters describing one memory object mapping. */
 struct memory_map_params {
-	size_t           memory_page_offset;
-	size_t           page_count;
-	uintptr_t        address;
-	size_t           align_pages;
-	size_t           guard_pages;
-	vmm_prot_t       prot;
-	enum memory_type memory_type;
+	size_t     memory_page_offset;
+	size_t     page_count;
+	uintptr_t  address;
+	size_t     align_pages;
+	size_t     guard_pages;
+	vmm_prot_t prot;
 };
 
 /* Result of creating one mapping in an address space. */

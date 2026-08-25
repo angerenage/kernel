@@ -23,6 +23,7 @@ static bool range_end(uintptr_t address, size_t size, uintptr_t* out_end) {
 static enum address_transfer_result check_access(const struct address_space* space, const struct vm_mapping* mapping,
                                                  uint32_t access) {
 	if ((access & ADDRESS_TRANSFER_USER) != 0u && space == vm_space_kernel()) return ADDRESS_TRANSFER_NOT_USER;
+	if (!memory_object_can_transfer(mapping->memory)) return ADDRESS_TRANSFER_ACCESS_DENIED;
 	if ((access & ADDRESS_TRANSFER_READ) != 0u && (mapping->prot & VMM_PROT_READ) == 0u)
 		return ADDRESS_TRANSFER_ACCESS_DENIED;
 	if ((access & ADDRESS_TRANSFER_WRITE) != 0u && (mapping->prot & VMM_PROT_WRITE) == 0u)
@@ -57,8 +58,11 @@ static enum address_transfer_result locate_locked(struct address_space* space, u
 			size_t    page_index = (address - mapping->base) / PMM_PAGE_SIZE;
 			uintptr_t phys;
 			if (!memory_object_resolve_page(mapping->memory, mapping->memory_page_offset + page_index, &phys) ||
-			    !hal_paging_map(
-					&space->hal, page, phys, vm_mapping_hal_flags(space, mapping->prot), mapping->memory_type))
+			    !hal_paging_map(&space->hal,
+			                    page,
+			                    phys,
+			                    vm_mapping_hal_flags(space, mapping->prot),
+			                    memory_object_memory_type(mapping->memory)))
 				return ADDRESS_TRANSFER_FAULT_FAILED;
 		}
 	}

@@ -90,15 +90,15 @@ static cap_id_t mapping_create(process_id_t target, process_id_t space_owner, vm
 	return cap_id;
 }
 
-cap_id_t kernel_memory_create(cap_rights_t rights, size_t page_count) {
+cap_id_t kernel_memory_create(cap_rights_t rights, const struct memory_create_params* params) {
 	struct memory_object* memory;
 	struct process*       caller;
 	cap_object_id_t       object_id;
 	cap_id_t              cap_id;
 
-	if (page_count == 0u || page_count > SIZE_MAX / PMM_PAGE_SIZE) return CAP_ID_INVALID;
+	if (!memory_object_create_params_valid(params)) return CAP_ID_INVALID;
 	caller = process_current();
-	if (caller == NULL || !memory_object_create_owned(page_count, &memory)) return CAP_ID_INVALID;
+	if (caller == NULL || !memory_object_create(params, &memory)) return CAP_ID_INVALID;
 	object_id = cap_object_create_kernel_lifecycle(
 		(uint64_t)(uintptr_t)memory, memory_handler, NULL, memory_destroy, memory_event, NULL);
 	if (object_id == CAP_OBJECT_ID_INVALID) {
@@ -114,7 +114,7 @@ static bool map_params_are_valid(const struct memory_map_params* params) {
 	size_t align_pages;
 	size_t ignored;
 	if (params == NULL || params->page_count == 0u || !user_prot_is_valid(params->prot) ||
-	    params->memory_type >= MEMORY_TYPE_COUNT || (params->address & (PMM_PAGE_SIZE - 1u)) != 0u)
+	    (params->address & (PMM_PAGE_SIZE - 1u)) != 0u)
 		return false;
 	align_pages = params->align_pages == 0u ? 1u : params->align_pages;
 	return (align_pages & (align_pages - 1u)) == 0u && !mul_overflow_size(align_pages, PMM_PAGE_SIZE, &ignored) &&
@@ -167,7 +167,6 @@ syscall_result_t kernel_memory_map(cap_id_t memory_cap_id, process_id_t caller, 
 		.align_pages        = params->align_pages,
 		.guard_pages        = params->guard_pages,
 		.prot               = params->prot,
-		.memory_type        = params->memory_type,
 	};
 	if (!vm_space_map(space, &request, &mapping_id, &base)) {
 		process_release(retained_target);
@@ -193,7 +192,7 @@ syscall_result_t kernel_memory_map(cap_id_t memory_cap_id, process_id_t caller, 
 			.memory_page_offset = params->memory_page_offset,
 			.guard_pages        = params->guard_pages,
 			.prot               = params->prot,
-			.memory_type        = params->memory_type,
+			.memory_type        = memory_object_memory_type(memory),
     };
 	process_release(retained_target);
 	cap_object_release(object);
@@ -247,7 +246,10 @@ bool kernel_mapping_discard_unpublished(cap_id_t mapping_cap, process_id_t owner
 }
 
 static syscall_result_t memory_info_handler(const struct cap_request* req, struct memory_object* memory) {
-	const struct memory_info response = {.page_count = memory_object_page_count(memory)};
+	const struct memory_info response = {
+		.page_count  = memory_object_page_count(memory),
+		.memory_type = memory_object_memory_type(memory),
+	};
 	return cap_kernel_write_response(req, &response, sizeof(response));
 }
 
@@ -271,6 +273,7 @@ static syscall_result_t memory_transfer_handler(const struct cap_request* req, s
 	enum address_transfer_result transfer_result = ADDRESS_TRANSFER_OK;
 	bool                         memory_failure  = false;
 
+	if (!memory_object_can_transfer(memory)) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (!cap_kernel_response_fits(req, sizeof(struct memory_transfer_response)))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	syscall_result_t result =

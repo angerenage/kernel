@@ -17,7 +17,6 @@ struct vm_mapping {
 	vmm_id_t              id;
 	size_t                guard_pages;
 	vmm_prot_t            prot;
-	enum memory_type      memory_type;
 };
 
 /* A virtual address space and its live mappings. */
@@ -42,7 +41,6 @@ struct vm_map_request {
 	size_t                align_pages;
 	size_t                guard_pages;
 	vmm_prot_t            prot;
-	enum memory_type      memory_type;
 };
 
 enum vmm_fault_kind {

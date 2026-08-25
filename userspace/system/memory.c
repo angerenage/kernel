@@ -6,14 +6,18 @@
 
 #include "syscall.h"
 
-syscall_status_t memory_create(size_t page_count, cap_id_t* out_memory_cap) {
+syscall_status_t memory_create(const struct memory_create_params* params, cap_id_t* out_memory_cap) {
+	if (params == NULL) {
+		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(params);
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	}
 	if (out_memory_cap == NULL) {
 		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(out_memory_cap);
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	}
-	syscall_result_t result = syscall(SYSCALL_MEMORY_CREATE, (uintptr_t)page_count, 0u, 0u, 0u, 0u, 0u);
+	syscall_result_t result = syscall(SYSCALL_MEMORY_CREATE, (uintptr_t)params, sizeof(*params), 0u, 0u, 0u, 0u);
 #ifdef RUNTIME_DIAGNOSTICS
-	if (result.status == SYSCALL_STATUS_BAD_ARGUMENT) RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(page_count);
+	if (result.status == SYSCALL_STATUS_BAD_ARGUMENT) RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(params);
 	else RUNTIME_DIAGNOSTIC_SYSCALL_RESULT(SYSCALL_MEMORY_CREATE, result);
 #endif
 	if (result.status != SYSCALL_STATUS_OK) return result.status;

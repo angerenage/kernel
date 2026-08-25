@@ -100,7 +100,8 @@ static syscall_status_t load_region(struct loader_loaded_program* program, cap_i
 	cap_id_t         memory_cap = CAP_ID_INVALID;
 	syscall_status_t status;
 	if (region->virtual_base > UINTPTR_MAX) return SYSCALL_STATUS_BAD_ARGUMENT;
-	status = memory_create(region->page_count, &memory_cap);
+	const struct memory_create_params create_params = {.page_count = region->page_count};
+	status                                          = memory_create(&create_params, &memory_cap);
 	if (status != SYSCALL_STATUS_OK) return status;
 	status = populate_region(blob_cap, memory_cap, image, region);
 	if (status != SYSCALL_STATUS_OK) goto cleanup;
@@ -145,7 +146,8 @@ static syscall_status_t allocate_heap(struct loader_loaded_program* program) {
 	struct address_space_map_result mapped     = {.mapping_cap = CAP_ID_INVALID};
 	syscall_status_t                status;
 
-	status = memory_create(HEAP_DEFAULT_GROW_PAGES, &memory_cap);
+	const struct memory_create_params create_params = {.page_count = HEAP_DEFAULT_GROW_PAGES};
+	status                                          = memory_create(&create_params, &memory_cap);
 	if (status != SYSCALL_STATUS_OK) return status;
 	const struct memory_map_params params = {
 		.page_count = HEAP_DEFAULT_GROW_PAGES, .align_pages = 1u, .prot = VMM_PROT_READ | VMM_PROT_WRITE};

@@ -8,7 +8,7 @@
 #include <stddef.h>
 
 /* Create a logical memory object and return its capability. */
-syscall_status_t memory_create(size_t page_count, cap_id_t* out_memory_cap);
+syscall_status_t memory_create(const struct memory_create_params* params, cap_id_t* out_memory_cap);
 
 /* Read immutable logical metadata through a memory capability. */
 syscall_status_t memory_get_info(cap_id_t memory_cap, struct memory_info* out_info);

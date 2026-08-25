@@ -41,7 +41,8 @@ enum mapping_op {
 
 /* Immutable logical metadata for a memory object. */
 struct memory_info {
-	size_t page_count;
+	size_t           page_count;
+	enum memory_type memory_type;
 };
 
 /* Common header for memory object capability requests. */
