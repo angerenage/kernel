@@ -3,6 +3,7 @@
 
 #include "capability.h"
 #include "channel.h"
+#include "interrupt.h"
 #include "memory.h"
 #include "misc.h"
 #include "module.h"
@@ -37,6 +38,9 @@ static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 	[SYSCALL_SIGNAL_READ]           = syscall_signal_read,
 	[SYSCALL_SIGNAL_WAIT]           = syscall_signal_wait,
 	[SYSCALL_SIGNAL_TRY_WAIT]       = syscall_signal_try_wait,
+
+	[SYSCALL_INTERRUPT_ATTACH] = syscall_interrupt_attach,
+	[SYSCALL_INTERRUPT_DETACH] = syscall_interrupt_detach,
 
 	[SYSCALL_MODULE_RESOLVE] = syscall_module_resolve,
 

@@ -11,6 +11,10 @@ cap_id_t kernel_signal_grant(struct signal* target, process_id_t recipient, cap_
 /* Grant recipient a Signal capability with all synchronous rights. */
 cap_id_t kernel_signal_grant_full(struct signal* target, process_id_t recipient);
 
+/* Resolve an authorized Signal capability and return one retained Signal reference. */
+syscall_result_t kernel_signal_retain_cap(cap_id_t cap, process_id_t caller, cap_rights_t required_rights,
+                                          struct signal** out_signal);
+
 /* Send a payload through an authorized Signal capability. */
 syscall_result_t kernel_signal_send(cap_id_t cap, process_id_t caller, const struct signal_payload* payload,
                                     uint32_t flags, struct signal_send_response* out_response);

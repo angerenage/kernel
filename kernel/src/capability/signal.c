@@ -205,6 +205,21 @@ static void kernel_signal_release(struct kernel_signal_reference* reference) {
 	*reference = (struct kernel_signal_reference){0};
 }
 
+syscall_result_t kernel_signal_retain_cap(cap_id_t cap, process_id_t caller, cap_rights_t required_rights,
+                                          struct signal** out_signal) {
+	struct kernel_signal_reference reference;
+	syscall_result_t               result;
+
+	if (out_signal == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	*out_signal = NULL;
+	result      = kernel_signal_acquire(cap, caller, required_rights, &reference);
+	if (result.status != SYSCALL_STATUS_OK) return result;
+	*out_signal      = reference.signal;
+	reference.signal = NULL;
+	kernel_signal_release(&reference);
+	return syscall_result_ok(0u);
+}
+
 syscall_result_t kernel_signal_send(cap_id_t cap, process_id_t caller, const struct signal_payload* payload,
                                     uint32_t flags, struct signal_send_response* out_response) {
 	struct kernel_signal_reference reference;
