@@ -4,6 +4,27 @@
 #include <stddef.h>
 #include <stdint.h>
 
+enum memory_constraint_flag {
+	MEMORY_CONSTRAINT_CONTIGUOUS = 1u << 0,
+	MEMORY_CONSTRAINT_FIXED      = 1u << 1,
+};
+
+/* Physical placement requirements for a memory object. */
+struct memory_constraints {
+	uintptr_t physical_min;
+	uintptr_t physical_max;
+	uintptr_t physical_address;
+	size_t    align_pages;
+	uint32_t  flags;
+};
+
+/* Parameters used to create one memory object. */
+struct memory_create_params {
+	size_t                    page_count;
+	enum memory_type          memory_type;
+	struct memory_constraints constraints;
+};
+
 /* Operations supported by a memory object capability. */
 enum memory_op {
 	MEMORY_OP_INFO = 0,

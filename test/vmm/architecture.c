@@ -162,3 +162,85 @@ Test(vmm, external_object_has_direct_backing_and_never_owns_frames) {
 	memory_object_release(memory);
 	cr_assert_eq(pmm_free_page_count(), before);
 }
+
+Test(vmm, constrained_object_reserves_contiguous_backing) {
+	struct memory_object*                  memory;
+	uintptr_t                              first;
+	uintptr_t                              last;
+	static _Alignas(PMM_PAGE_SIZE) uint8_t constrained_arena[KiB(192)];
+
+	init_test_vmm(constrained_arena, sizeof(constrained_arena));
+	const struct memory_create_params params = {
+		.page_count  = 3u,
+		.memory_type = MEMORY_TYPE_NORMAL,
+		.constraints =
+			{
+						  .physical_min = (uintptr_t)constrained_arena,
+						  .physical_max = (uintptr_t)constrained_arena + sizeof(constrained_arena),
+						  .align_pages  = 2u,
+						  .flags        = MEMORY_CONSTRAINT_CONTIGUOUS,
+						  },
+	};
+	cr_assert(memory_object_create(&params, &memory));
+	cr_assert_eq(memory_object_type(memory), MEMORY_OBJECT_CONTIGUOUS);
+	cr_assert_eq(memory_object_memory_type(memory), MEMORY_TYPE_NORMAL);
+	cr_assert(memory_object_page_phys(memory, 0u, &first));
+	cr_assert(memory_object_page_phys(memory, 2u, &last));
+	cr_assert_eq(last, first + 2u * PMM_PAGE_SIZE);
+	cr_assert_eq(first & (2u * PMM_PAGE_SIZE - 1u), 0u);
+	memory_object_release(memory);
+}
+
+Test(vmm, bounded_object_materializes_each_page_inside_the_window) {
+	struct memory_object*                  memory;
+	uintptr_t                              phys;
+	static _Alignas(PMM_PAGE_SIZE) uint8_t bounded_arena[KiB(192)];
+
+	init_test_vmm(bounded_arena, sizeof(bounded_arena));
+	const struct memory_create_params params = {
+		.page_count = 3u,
+		.constraints =
+			{
+						  .physical_min = (uintptr_t)(bounded_arena + KiB(64)),
+						  .physical_max = (uintptr_t)(bounded_arena + sizeof(bounded_arena)),
+						  },
+	};
+	cr_assert(memory_object_create(&params, &memory));
+	cr_assert_eq(memory_object_type(memory), MEMORY_OBJECT_OWNED);
+	for (size_t page = 0u; page < params.page_count; page++) {
+		cr_assert(memory_object_page_phys(memory, page, &phys), "constrained page was left lazy");
+		cr_assert_geq(phys, params.constraints.physical_min);
+		cr_assert_lt(phys, params.constraints.physical_max);
+	}
+	memory_object_release(memory);
+}
+
+Test(vmm, fixed_external_objects_are_exclusive_and_support_physical_zero) {
+	struct memory_object*                  first;
+	struct memory_object*                  second;
+	struct memory_object*                  zero;
+	uintptr_t                              phys = UINTPTR_MAX;
+	static _Alignas(PMM_PAGE_SIZE) uint8_t fixed_arena[KiB(192)];
+
+	init_test_vmm(fixed_arena, sizeof(fixed_arena));
+	const struct memory_create_params fixed = {
+		.page_count  = 2u,
+		.memory_type = MEMORY_TYPE_DEVICE,
+		.constraints = {.physical_address = 0x400000u, .flags = MEMORY_CONSTRAINT_FIXED},
+	};
+	cr_assert(memory_object_create(&fixed, &first));
+	cr_assert_eq(memory_object_type(first), MEMORY_OBJECT_EXTERNAL);
+	cr_assert_eq(memory_object_memory_type(first), MEMORY_TYPE_DEVICE);
+	cr_assert_not(memory_object_create(&fixed, &second));
+	memory_object_release(first);
+	cr_assert(memory_object_create(&fixed, &second));
+	memory_object_release(second);
+
+	struct memory_create_params at_zero  = fixed;
+	at_zero.page_count                   = 1u;
+	at_zero.constraints.physical_address = 0u;
+	cr_assert(memory_object_create(&at_zero, &zero));
+	cr_assert(memory_object_page_phys(zero, 0u, &phys));
+	cr_assert_eq(phys, 0u);
+	memory_object_release(zero);
+}

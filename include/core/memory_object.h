@@ -1,5 +1,6 @@
 #pragma once
 
+#include <base/memory.h>
 #include <core/spinlock.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -7,18 +8,28 @@
 
 enum memory_object_type {
 	MEMORY_OBJECT_OWNED = 0,
+	MEMORY_OBJECT_CONTIGUOUS,
 	MEMORY_OBJECT_EXTERNAL,
 };
 
 /* Owner of logical memory contents and physical backing. */
 struct memory_object {
-	struct spinlock lock;
-	uint8_t         radix_depth;
-	uint8_t         type;
-	size_t          page_count;
-	uintptr_t       backing_root_or_phys;
-	uint64_t        reference_count;
+	struct spinlock       lock;
+	uint8_t               radix_depth;
+	uint8_t               type;
+	uint8_t               memory_type;
+	bool                  external_claimed;
+	size_t                page_count;
+	uintptr_t             backing_root_or_phys;
+	uint64_t              reference_count;
+	struct memory_object* claim_next;
 };
+
+/* Return whether a create request has a valid, representable set of physical constraints. */
+bool memory_object_create_params_valid(const struct memory_create_params* params);
+
+/* Create a memory object satisfying the supplied physical constraints. */
+bool memory_object_create(const struct memory_create_params* params, struct memory_object** out_object);
 
 /* Create an owned logical memory object and return one retained reference. */
 bool memory_object_create_owned(size_t page_count, struct memory_object** out_object);
@@ -34,6 +45,12 @@ void memory_object_release(struct memory_object* object);
 
 /* Return the object's backing type. */
 enum memory_object_type memory_object_type(const struct memory_object* object);
+
+/* Return the CPU memory type intrinsic to the object. */
+enum memory_type memory_object_memory_type(const struct memory_object* object);
+
+/* Return whether kernel byte-transfer helpers can safely access the object backing. */
+bool memory_object_can_transfer(const struct memory_object* object);
 
 /* Return the object's logical size in pages. */
 size_t memory_object_page_count(const struct memory_object* object);

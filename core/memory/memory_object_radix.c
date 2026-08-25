@@ -73,6 +73,53 @@ static void discard_nodes(const uintptr_t* nodes, size_t count) {
 	for (size_t i = 0u; i < count; i++) (void)pmm_free_pages(nodes[i], 1u);
 }
 
+bool memory_object_radix_insert(struct memory_object* object, size_t page_index, uintptr_t phys) {
+	size_t             indexes[MEMORY_OBJECT_RADIX_MAX_DEPTH];
+	uintptr_t          new_nodes[MEMORY_OBJECT_RADIX_MAX_DEPTH];
+	struct radix_node* attach_parent = NULL;
+	size_t             attach_index  = 0u;
+	uint8_t            missing_level = 0u;
+	size_t             new_count;
+
+	if (object == NULL || page_index >= object->page_count || object->radix_depth == 0u ||
+	    object->radix_depth > MEMORY_OBJECT_RADIX_MAX_DEPTH || (phys & (PMM_PAGE_SIZE - 1u)) != 0u || phys == 0u)
+		return false;
+	indexes_for(object, page_index, indexes);
+	if (object->backing_root_or_phys != 0u) {
+		uintptr_t node_phys = object->backing_root_or_phys;
+		for (uint8_t level = 0u; level < object->radix_depth; level++) {
+			struct radix_node* node  = node_virt(node_phys);
+			uintptr_t*         entry = &node->entries[indexes[level]];
+			if (level + 1u == object->radix_depth) {
+				if (*entry != 0u) return false;
+				*entry = phys;
+				return true;
+			}
+			if (*entry == 0u) {
+				attach_parent = node;
+				attach_index  = indexes[level];
+				missing_level = level + 1u;
+				break;
+			}
+			node_phys = *entry;
+		}
+	}
+	new_count = (size_t)object->radix_depth - missing_level;
+	for (size_t i = 0u; i < new_count; i++) {
+		if (!alloc_zeroed_page(&new_nodes[i])) {
+			discard_nodes(new_nodes, i);
+			return false;
+		}
+	}
+	for (size_t i = 0u; i < new_count; i++) {
+		size_t level                                     = (size_t)missing_level + i;
+		node_virt(new_nodes[i])->entries[indexes[level]] = i + 1u < new_count ? new_nodes[i + 1u] : phys;
+	}
+	if (attach_parent != NULL) attach_parent->entries[attach_index] = new_nodes[0];
+	else object->backing_root_or_phys = new_nodes[0];
+	return true;
+}
+
 bool memory_object_radix_resolve(struct memory_object* object, size_t page_index, uintptr_t* out_phys) {
 	size_t             indexes[MEMORY_OBJECT_RADIX_MAX_DEPTH];
 	uintptr_t          new_nodes[MEMORY_OBJECT_RADIX_MAX_DEPTH];

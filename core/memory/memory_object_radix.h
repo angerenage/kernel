@@ -15,6 +15,9 @@ uint8_t memory_object_radix_depth(size_t page_count);
 /* Look up an existing physical page in an owned object's radix. */
 bool memory_object_radix_lookup(const struct memory_object* object, size_t page_index, uintptr_t* out_phys);
 
+/* Insert one already allocated physical page into an owned object's radix. */
+bool memory_object_radix_insert(struct memory_object* object, size_t page_index, uintptr_t phys);
+
 /* Resolve a physical page in an owned object's radix. */
 bool memory_object_radix_resolve(struct memory_object* object, size_t page_index, uintptr_t* out_phys);
 
