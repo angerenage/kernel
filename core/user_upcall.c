@@ -1,3 +1,4 @@
+#include <core/interrupt.h>
 #include <core/thread.h>
 #include <core/user_upcall.h>
 #include <core/uthread.h>
@@ -112,11 +113,13 @@ void uthread_upcall_state_deinit(struct uthread* thread) {
 	state = &thread->upcall;
 	if (!state->initialized) return;
 
-	irq_state        = spinlock_lock_irqsave(&state->lock);
-	pending          = state->pending;
-	state->stack_id  = VMM_ID_INVALID;
-	state->stack_top = 0u;
-	state->phase     = USER_UPCALL_PHASE_IDLE;
+	irq_state               = spinlock_lock_irqsave(&state->lock);
+	pending                 = state->pending;
+	state->stack_id         = VMM_ID_INVALID;
+	state->stack_top        = 0u;
+	state->active_origin    = USER_UPCALL_ORIGIN_NONE;
+	state->active_origin_id = 0u;
+	state->phase            = USER_UPCALL_PHASE_IDLE;
 	memset(&state->interrupted_context, 0, sizeof(state->interrupted_context));
 	uthread_upcall_clear_pending(state);
 	state->pending     = NULL;
@@ -458,6 +461,8 @@ enum user_upcall_result uthread_upcall_deliver(struct uthread* thread, struct ha
 		return USER_UPCALL_CONTEXT_INVALID;
 	}
 
+	state->active_origin    = request.origin;
+	state->active_origin_id = request.origin_id;
 	memset(&state->pending[state->head], 0, sizeof(state->pending[state->head]));
 	state->head = (state->head + 1u) % USER_UPCALL_QUEUE_CAPACITY;
 	state->count--;
@@ -471,6 +476,8 @@ enum user_upcall_result uthread_upcall_deliver(struct uthread* thread, struct ha
 enum user_upcall_result uthread_upcall_restore(struct uthread* thread, struct hal_userspace_return_frame* frame) {
 	struct user_upcall_state* state;
 	struct irq_state          irq_state;
+	enum user_upcall_origin   active_origin;
+	uint64_t                  active_origin_id;
 
 	if (thread == NULL || frame == NULL || !thread->upcall.initialized) return USER_UPCALL_INVALID_ARGUMENTS;
 
@@ -485,9 +492,16 @@ enum user_upcall_result uthread_upcall_restore(struct uthread* thread, struct ha
 		return USER_UPCALL_CONTEXT_INVALID;
 	}
 
+	active_origin           = state->active_origin;
+	active_origin_id        = state->active_origin_id;
+	state->active_origin    = USER_UPCALL_ORIGIN_NONE;
+	state->active_origin_id = 0u;
 	memset(&state->interrupted_context, 0, sizeof(state->interrupted_context));
 	state->phase = USER_UPCALL_PHASE_RESUME;
 	spinlock_unlock_irqrestore(&state->lock, irq_state);
+	if (active_origin == USER_UPCALL_ORIGIN_SIGNAL && active_origin_id != 0u) {
+		(void)interrupt_rearm_signal((signal_id_t)active_origin_id);
+	}
 	return USER_UPCALL_OK;
 }
 

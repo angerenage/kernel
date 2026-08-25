@@ -33,6 +33,7 @@ struct user_upcall_request {
 	enum user_upcall_origin origin;
 	uint32_t                flags;
 	uintptr_t               origin_token;
+	uint64_t                origin_id;
 	uintptr_t               entry;
 	uintptr_t               args[USER_UPCALL_ARGUMENT_COUNT];
 };
@@ -70,6 +71,8 @@ struct user_upcall_state {
 	uint64_t                     dropped_count;
 	size_t                       force_free_reservations;
 	size_t                       force_eviction_reservations;
+	enum user_upcall_origin      active_origin;
+	uint64_t                     active_origin_id;
 	enum user_upcall_phase       phase;
 	bool                         initialized;
 };

@@ -1,6 +1,7 @@
 #include <base/process.h>
 #include <core/cpu.h>
 #include <core/exception.h>
+#include <core/interrupt.h>
 #include <core/sched.h>
 #include <core/vm_space.h>
 #include <hal/hcf.h>
@@ -20,6 +21,8 @@
 #define LOONGARCH64_CSR_TLBRENTRY 0x88u
 #define LOONGARCH64_CSR_MERRENTRY 0x94u
 
+#define LOONGARCH64_USER_INTERRUPT_COUNT 11u
+
 static bool global_ready;
 static bool local_ready[64];
 
@@ -32,6 +35,18 @@ static inline uintptr_t kernel_virt_to_phys(const void* ptr) {
 
 	if (!kernel_boot_address_space_get(&address_space)) return 0u;
 	return address_space.physical_base + ((uint64_t)(uintptr_t)ptr - address_space.virtual_base);
+}
+
+static inline uint64_t csrrd(unsigned csr) {
+	uint64_t value;
+
+	switch (csr) {
+	case LOONGARCH64_CSR_ECFG:
+		__asm__ volatile("csrrd %0, 0x4" : "=r"(value));
+		return value;
+	default:
+		return 0u;
+	}
 }
 
 static inline void csrwr(uint64_t value, unsigned csr) {
@@ -85,6 +100,37 @@ void irq_enable_local(void) {
 	__asm__ volatile("csrrd %0, 0x0" : "=r"(crmd));
 	crmd |= 1u << 2;
 	__asm__ volatile("csrwr %0, 0x0" : : "r"(crmd) : "memory");
+}
+
+static bool loongarch64_interrupt_valid(interrupt_id_t id) {
+	return id < LOONGARCH64_USER_INTERRUPT_COUNT;
+}
+
+static bool loongarch64_set_interrupt_enabled(interrupt_id_t id, bool enabled) {
+	uint64_t ecfg;
+
+	if (!loongarch64_interrupt_valid(id)) return false;
+	ecfg = csrrd(LOONGARCH64_CSR_ECFG);
+	if (enabled) ecfg |= 1ull << id;
+	else ecfg &= ~(1ull << id);
+	csrwr(ecfg, LOONGARCH64_CSR_ECFG);
+	return true;
+}
+
+bool hal_interrupt_attach(interrupt_id_t id) {
+	return loongarch64_set_interrupt_enabled(id, true);
+}
+
+bool hal_interrupt_mask(interrupt_id_t id) {
+	return loongarch64_set_interrupt_enabled(id, false);
+}
+
+bool hal_interrupt_rearm(interrupt_id_t id) {
+	return loongarch64_set_interrupt_enabled(id, true);
+}
+
+bool hal_interrupt_detach(interrupt_id_t id) {
+	return loongarch64_set_interrupt_enabled(id, false);
 }
 
 bool hal_interrupts_init_global(void) {
@@ -272,6 +318,17 @@ void handle_exception(struct exception_frame* frame) {
 	if (clock_handle_irq(frame)) {
 		if (ecode != 0u) cpu_leave_exception();
 		return;
+	}
+	if (ecode == 0u) {
+		bool handled = false;
+
+		is_pending = frame->estat & 0x1fffu;
+		for (interrupt_id_t id = 0u; id < LOONGARCH64_USER_INTERRUPT_COUNT; id++) {
+			if ((is_pending & (1ull << id)) == 0u) continue;
+			if (!interrupt_dispatch(id)) (void)hal_interrupt_mask(id);
+			handled = true;
+		}
+		if (handled) return;
 	}
 
 	is_pending = frame->estat & 0x1fffu;

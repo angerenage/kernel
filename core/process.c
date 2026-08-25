@@ -1,6 +1,7 @@
 #include <core/capability.h>
 #include <core/capability_call.h>
 #include <core/id_table.h>
+#include <core/interrupt.h>
 #include <core/process.h>
 #include <core/sched.h>
 #include <core/spinlock.h>
@@ -565,6 +566,7 @@ bool process_destroy(struct process* process) {
 	}
 
 	removed = NULL;
+	interrupt_cleanup_process(process->pid);
 	cap_object_cleanup_for_process(process->pid);
 	if (id_table_remove(&process_table, process->pid, (void**)&removed) != ID_TABLE_OK || removed != process) {
 		return false;

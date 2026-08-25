@@ -1,4 +1,6 @@
+#include <base/interrupt.h>
 #include <core/cpu.h>
+#include <core/interrupt.h>
 #include <core/lock.h>
 #include <core/spinlock.h>
 #include <hal/clock.h>
@@ -22,6 +24,7 @@
 #define AARCH64_GICD_IGROUPR0 0x080u
 #define AARCH64_GICD_ISENABLER0 0x100u
 #define AARCH64_GICD_ICENABLER0 0x180u
+#define AARCH64_GICD_TYPER 0x004u
 #define AARCH64_GICD_IPRIORITYR 0x400u
 #define AARCH64_GICD_ITARGETSR 0x800u
 #define AARCH64_GICD_SGIR 0xf00u
@@ -174,6 +177,64 @@ bool aarch64_gic_init_local(struct cpu* cpu) {
 	return true;
 }
 
+static bool gic_external_interrupt_valid(interrupt_id_t id) {
+	uint32_t interrupt_count;
+
+	if (!gic_is_ready() || id < 32u || id >= AARCH64_GICC_INTID_SPURIOUS_MIN) return false;
+	interrupt_count = 32u * ((mmio_read32(gicd_mmio, AARCH64_GICD_TYPER) & 0x1fu) + 1u);
+	if (interrupt_count > AARCH64_GICC_INTID_SPURIOUS_MIN) interrupt_count = AARCH64_GICC_INTID_SPURIOUS_MIN;
+	return id < interrupt_count;
+}
+
+static bool gic_set_external_enabled(interrupt_id_t id, bool enabled) {
+	uint32_t bank;
+	uint32_t bit;
+
+	if (!gic_external_interrupt_valid(id)) return false;
+	bank = (uint32_t)id / 32u;
+	bit  = 1u << ((uint32_t)id % 32u);
+	mmio_write32(gicd_mmio, (enabled ? AARCH64_GICD_ISENABLER0 : AARCH64_GICD_ICENABLER0) + bank * 4u, bit);
+	sync();
+	return true;
+}
+
+bool hal_interrupt_attach(interrupt_id_t id) {
+	struct cpu* cpu = cpu_current();
+	uint8_t     target_mask;
+	uint32_t    bank;
+	uint32_t    bit;
+	uint32_t    group;
+
+	if (cpu == NULL || !gic_init_global() || !aarch64_gic_init_local(cpu) || !gic_external_interrupt_valid(id)) {
+		return false;
+	}
+	target_mask = __atomic_load_n(&gic_target_masks[cpu->index], __ATOMIC_ACQUIRE);
+	if (!gic_target_mask_valid(target_mask)) {
+		if (cpu_count() != 1u) return false;
+		target_mask = 1u;
+	}
+	bank  = (uint32_t)id / 32u;
+	bit   = 1u << ((uint32_t)id % 32u);
+	group = mmio_read32(gicd_mmio, AARCH64_GICD_IGROUPR0 + bank * 4u);
+	group |= bit;
+	mmio_write32(gicd_mmio, AARCH64_GICD_IGROUPR0 + bank * 4u, group);
+	mmio_write8(gicd_mmio, AARCH64_GICD_IPRIORITYR + (uint32_t)id, 0x80u);
+	mmio_write8(gicd_mmio, AARCH64_GICD_ITARGETSR + (uint32_t)id, target_mask);
+	return gic_set_external_enabled(id, true);
+}
+
+bool hal_interrupt_mask(interrupt_id_t id) {
+	return gic_set_external_enabled(id, false);
+}
+
+bool hal_interrupt_rearm(interrupt_id_t id) {
+	return gic_set_external_enabled(id, true);
+}
+
+bool hal_interrupt_detach(interrupt_id_t id) {
+	return gic_set_external_enabled(id, false);
+}
+
 bool aarch64_gic_prepare_smp(void) {
 	if (cpu_count() > AARCH64_GIC_MAX_TARGETS) return false;
 	if (!gic_init_global()) return false;
@@ -269,8 +330,10 @@ static bool gic_handle_scheduler_kick(const struct exception_frame* frame) {
 	}
 
 	if (intid >= AARCH64_GICC_INTID_SPURIOUS_MIN) return false;
+	bool handled = interrupt_dispatch((interrupt_id_t)intid);
+	if (!handled) handled = gic_set_external_enabled((interrupt_id_t)intid, false);
 	mmio_write32(gicc_mmio, AARCH64_GICC_EOIR, iar);
-	return false;
+	return handled;
 }
 
 void hal_clock_init(void) {
@@ -363,10 +426,37 @@ void hal_clock_stop(void) {
 	spinlock_unlock_irqrestore(&clock_lock, state);
 }
 
+static bool gic_handle_external_irq(const struct exception_frame* frame) {
+	uint32_t iar;
+	uint32_t intid;
+	bool     handled;
+
+	if (frame == NULL || !is_irq_vector(frame->vector) || !gic_is_ready()) return false;
+	iar   = mmio_read32(gicc_mmio, AARCH64_GICC_IAR);
+	intid = iar & AARCH64_GICC_IAR_INTID_MASK;
+	if (intid >= AARCH64_GICC_INTID_SPURIOUS_MIN) return false;
+	if (intid == AARCH64_GIC_SCHEDULER_SGI) {
+		struct cpu* cpu = cpu_current();
+		if (cpu != NULL && cpu->index < AARCH64_GIC_MAX_CPUS) {
+			__atomic_store_n(&gic_scheduler_kick_pending[cpu->index], false, __ATOMIC_RELEASE);
+		}
+		handled = true;
+	}
+	else if (intid == AARCH64_GIC_TIMER_PPI) {
+		handled = clock_fire();
+	}
+	else {
+		handled = interrupt_dispatch((interrupt_id_t)intid);
+		if (!handled) handled = gic_set_external_enabled((interrupt_id_t)intid, false);
+	}
+	mmio_write32(gicc_mmio, AARCH64_GICC_EOIR, iar);
+	return handled;
+}
+
 bool clock_handle_irq(const struct exception_frame* frame) {
 	if (frame == NULL || !is_irq_vector(frame->vector) || !gic_is_ready()) return false;
 	if (gic_handle_scheduler_kick(frame)) return true;
-	if ((read_timer_control() & AARCH64_CNTV_CTL_ISTATUS) == 0u) return false;
+	if ((read_timer_control() & AARCH64_CNTV_CTL_ISTATUS) == 0u) return gic_handle_external_irq(frame);
 
 	/*
 	 * The current QEMU/EDK2 AArch64 boot path delivers the timer IRQ once the

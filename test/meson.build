@@ -117,6 +117,7 @@ test_suites = [
 		'sources': files(
 			'ipc/test_support.c',
 			'ipc/signal.c',
+			'ipc/interrupt.c',
 			'ipc/ring_buffer.c',
 			'ipc/channel_lifecycle.c',
 			'ipc/capability_queue.c',

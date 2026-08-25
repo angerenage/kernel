@@ -1,5 +1,6 @@
 #include <core/cpu.h>
 #include <core/exception.h>
+#include <core/interrupt.h>
 #include <core/sched.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
@@ -141,6 +142,7 @@ static struct tss64     x86_tss[64];
 static _Alignas(16) uint8_t x86_exception_stack[64][X86_EXCEPTION_STACK_SIZE];
 static bool     local_ready[64];
 static uint16_t kernel_code_selector;
+static bool     user_irq_apic_routed[X86_IRQ_COUNT];
 static bool     global_ready;
 
 static const char* const exception_names[32] = {
@@ -334,6 +336,48 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 	return true;
 }
 
+static bool x86_user_interrupt_valid(interrupt_id_t id) {
+	return id < X86_IRQ_COUNT && id != 0u && id != 2u;
+}
+
+bool hal_interrupt_attach(interrupt_id_t id) {
+	unsigned irq;
+
+	if (!x86_user_interrupt_valid(id)) return false;
+	irq = (unsigned)id;
+	if (apic_route_isa_irq(irq, X86_IRQ_BASE + irq)) {
+		user_irq_apic_routed[irq] = true;
+		return apic_set_isa_irq_mask(irq, false);
+	}
+	user_irq_apic_routed[irq] = false;
+	pic_unmask_irq(irq);
+	return true;
+}
+
+bool hal_interrupt_mask(interrupt_id_t id) {
+	unsigned irq;
+
+	if (!x86_user_interrupt_valid(id)) return false;
+	irq = (unsigned)id;
+	if (user_irq_apic_routed[irq]) return apic_set_isa_irq_mask(irq, true);
+	pic_mask_irq(irq);
+	return true;
+}
+
+bool hal_interrupt_rearm(interrupt_id_t id) {
+	unsigned irq;
+
+	if (!x86_user_interrupt_valid(id)) return false;
+	irq = (unsigned)id;
+	if (user_irq_apic_routed[irq]) return apic_set_isa_irq_mask(irq, false);
+	pic_unmask_irq(irq);
+	return true;
+}
+
+bool hal_interrupt_detach(interrupt_id_t id) {
+	return hal_interrupt_mask(id);
+}
+
 void x86_64_prepare_user_return(void) {
 	struct cpu* cpu = cpu_current();
 
@@ -369,10 +413,12 @@ void x86_64_handle_interrupt(struct interrupt_frame* frame) {
 	}
 	if (is_external_irq(vector)) {
 		bool handled = clock_handle_irq((unsigned)vector);
-		interrupt_send_eoi((unsigned)vector);
-		if (handled) {
-			return;
+		if (!handled) {
+			interrupt_id_t id = (interrupt_id_t)(vector - X86_IRQ_BASE);
+			if (!interrupt_dispatch(id) && x86_user_interrupt_valid(id)) (void)hal_interrupt_mask(id);
 		}
+		interrupt_send_eoi((unsigned)vector);
+		return;
 	}
 
 	fault_addr = vector == 14u ? read_cr2() : 0;

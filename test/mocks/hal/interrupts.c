@@ -25,3 +25,19 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 	cpu_interrupts_set_ready(cpu, true);
 	return true;
 }
+
+bool hal_interrupt_attach(interrupt_id_t id) {
+	return id != INTERRUPT_ID_INVALID;
+}
+
+bool hal_interrupt_mask(interrupt_id_t id) {
+	return id != INTERRUPT_ID_INVALID;
+}
+
+bool hal_interrupt_rearm(interrupt_id_t id) {
+	return id != INTERRUPT_ID_INVALID;
+}
+
+bool hal_interrupt_detach(interrupt_id_t id) {
+	return id != INTERRUPT_ID_INVALID;
+}

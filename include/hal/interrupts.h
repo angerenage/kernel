@@ -1,5 +1,6 @@
 #pragma once
 
+#include <base/interrupt.h>
 #include <stdbool.h>
 
 struct cpu;
@@ -22,6 +23,18 @@ bool hal_interrupts_init_global(void);
 
 /* Complete interrupt setup for one CPU and mark that CPU as ready to take traps/IRQs. */
 bool hal_interrupts_init_local(struct cpu* cpu);
+
+/* Configure and enable one platform interrupt source for userspace delivery. */
+bool hal_interrupt_attach(interrupt_id_t id);
+
+/* Mask one attached source before its userspace notification is published. */
+bool hal_interrupt_mask(interrupt_id_t id);
+
+/* Re-enable one attached source after its Signal notification has been consumed. */
+bool hal_interrupt_rearm(interrupt_id_t id);
+
+/* Disable one source that is no longer attached. */
+bool hal_interrupt_detach(interrupt_id_t id);
 
 /* Return whether the local CPU currently has maskable interrupts enabled. */
 bool irq_enabled(void);

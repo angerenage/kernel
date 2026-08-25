@@ -1,8 +1,10 @@
 #include <base/process.h>
 #include <core/cpu.h>
 #include <core/exception.h>
+#include <core/interrupt.h>
 #include <core/sched.h>
 #include <core/vm_space.h>
+#include <hal/cpu.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
 #include <stdbool.h>
@@ -13,13 +15,16 @@
 
 #define RISCV64_SIE_SSIE (1ull << 1)
 #define RISCV64_SIE_STIE (1ull << 5)
+#define RISCV64_SIE_SEIE (1ull << 9)
 #define RISCV64_SIP_SSIP (1ull << 1)
 #define RISCV64_SCAUSE_SUPERVISOR_SOFTWARE 1u
+#define RISCV64_SCAUSE_SUPERVISOR_EXTERNAL 9u
 
 extern void exception_entry(void);
 
 static bool global_ready;
 static bool local_ready[64];
+static bool external_interrupt_enabled;
 struct riscv64_exception_entry_state {
 	uintptr_t old_sp;
 	uintptr_t saved_t1;
@@ -64,6 +69,42 @@ void irq_enable_local(void) {
 	__asm__ volatile("csrs sstatus, %0" : : "r"(1ull << 1) : "memory");
 }
 
+static void riscv64_sync_external_interrupt_local(void) {
+	uint64_t sie;
+
+	if (!cpu_is_bsp()) return;
+	sie = read_sie();
+	if (__atomic_load_n(&external_interrupt_enabled, __ATOMIC_ACQUIRE)) sie |= RISCV64_SIE_SEIE;
+	else sie &= ~RISCV64_SIE_SEIE;
+	write_sie(sie);
+}
+
+static bool riscv64_set_external_interrupt_enabled(bool enabled) {
+	struct cpu* bsp = cpu_bsp();
+
+	if (bsp == NULL) return false;
+	__atomic_store_n(&external_interrupt_enabled, enabled, __ATOMIC_RELEASE);
+	if (cpu_current() == bsp) riscv64_sync_external_interrupt_local();
+	else hal_cpu_kick(bsp);
+	return true;
+}
+
+bool hal_interrupt_attach(interrupt_id_t id) {
+	return id == RISCV64_SCAUSE_SUPERVISOR_EXTERNAL && riscv64_set_external_interrupt_enabled(true);
+}
+
+bool hal_interrupt_mask(interrupt_id_t id) {
+	return id == RISCV64_SCAUSE_SUPERVISOR_EXTERNAL && riscv64_set_external_interrupt_enabled(false);
+}
+
+bool hal_interrupt_rearm(interrupt_id_t id) {
+	return id == RISCV64_SCAUSE_SUPERVISOR_EXTERNAL && riscv64_set_external_interrupt_enabled(true);
+}
+
+bool hal_interrupt_detach(interrupt_id_t id) {
+	return id == RISCV64_SCAUSE_SUPERVISOR_EXTERNAL && riscv64_set_external_interrupt_enabled(false);
+}
+
 bool hal_interrupts_init_global(void) {
 	global_ready = true;
 	return true;
@@ -80,7 +121,7 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 	entry       = (uintptr_t)exception_entry;
 	entry_state = &riscv64_exception_entry_state[cpu->index];
 	sie         = read_sie();
-	sie &= ~RISCV64_SIE_STIE;
+	sie &= ~(RISCV64_SIE_STIE | RISCV64_SIE_SEIE);
 	sie |= RISCV64_SIE_SSIE;
 	entry_state->kernel_stack_top = cpu->kernel_entry_stack_top;
 
@@ -219,10 +260,15 @@ void handle_exception(struct exception_frame* frame) {
 	if (!is_interrupt) cpu_enter_exception();
 	if (is_interrupt && code == RISCV64_SCAUSE_SUPERVISOR_SOFTWARE) {
 		clear_software_interrupt();
+		riscv64_sync_external_interrupt_local();
 		return;
 	}
 	if (clock_handle_irq(frame)) {
 		if (!is_interrupt) cpu_leave_exception();
+		return;
+	}
+	if (is_interrupt && code == RISCV64_SCAUSE_SUPERVISOR_EXTERNAL) {
+		if (!interrupt_dispatch((interrupt_id_t)code)) (void)riscv64_set_external_interrupt_enabled(false);
 		return;
 	}
 

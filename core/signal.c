@@ -2,6 +2,7 @@
 #include <base/upcall.h>
 #include <core/capability.h>
 #include <core/id_table.h>
+#include <core/interrupt.h>
 #include <core/sched.h>
 #include <core/signal.h>
 #include <core/user_upcall.h>
@@ -590,7 +591,8 @@ static bool signal_handler_is_oneshot(const struct signal_handler_binding* handl
 	return handler != NULL && (handler->flags & (uint32_t)SIGNAL_HANDLER_FLAG_ONESHOT) != 0u;
 }
 
-static struct user_upcall_request signal_handler_request(const struct signal_handler_binding* handler,
+static struct user_upcall_request signal_handler_request(const struct signal*                 signal,
+                                                         const struct signal_handler_binding* handler,
                                                          const struct signal_message* message, uint32_t flags) {
 	uint32_t upcall_flags = USER_UPCALL_FLAG_NONE;
 	bool     oneshot      = signal_handler_is_oneshot(handler);
@@ -601,6 +603,7 @@ static struct user_upcall_request signal_handler_request(const struct signal_han
 		.origin       = oneshot ? USER_UPCALL_ORIGIN_NONE : USER_UPCALL_ORIGIN_SIGNAL,
 		.flags        = upcall_flags,
 		.origin_token = oneshot ? 0u : (uintptr_t)handler,
+		.origin_id    = oneshot ? 0u : (uint64_t)signal->id,
 		.entry        = handler->entry,
 		.args =
 			{
@@ -706,7 +709,7 @@ static enum signal_result signal_send_internal(struct signal* signal, process_id
 		enum user_upcall_result        upcall_result;
 
 		receiver_count++;
-		request       = signal_handler_request(handler, &message, flags);
+		request       = signal_handler_request(signal, handler, &message, flags);
 		upcall_result = signal_enqueue_handler_locked(handler, &request, flags);
 		if (upcall_result == USER_UPCALL_OK) {
 			delivery_count++;
@@ -785,6 +788,7 @@ enum signal_result signal_try_wait(struct signal* signal, struct signal_message*
 	struct uthread*             current;
 	struct irq_state            state;
 	enum signal_result          result;
+	signal_id_t                 rearm_id = SIGNAL_ID_INVALID;
 
 	if (signal == NULL || out_message == NULL) return SIGNAL_INVALID_ARGUMENTS;
 	current = uthread_current();
@@ -805,9 +809,11 @@ enum signal_result signal_try_wait(struct signal* signal, struct signal_message*
 		result = SIGNAL_OK;
 	}
 	else {
-		result = SIGNAL_WOULD_BLOCK;
+		result   = SIGNAL_WOULD_BLOCK;
+		rearm_id = signal->id;
 	}
 	spinlock_unlock_irqrestore(&signal->lock, state);
+	if (rearm_id != SIGNAL_ID_INVALID) (void)interrupt_rearm_signal(rearm_id);
 	return result;
 }
 
@@ -844,9 +850,12 @@ enum signal_result signal_wait(struct signal* signal, struct signal_message* out
 		}
 		else {
 			enum sched_block_result block_result;
+			signal_id_t             rearm_id;
 
 			binding->waiting = true;
+			rearm_id         = signal->id;
 			spinlock_unlock(&signal->lock);
+			if (rearm_id != SIGNAL_ID_INVALID) (void)interrupt_rearm_signal(rearm_id);
 			block_result = sched_block_current_interruptible_locked(&signal->waiters, THREAD_BLOCK_SIGNAL, wait_state);
 			if (block_result == SCHED_BLOCK_INTERRUPTED) {
 				signal_clear_waiting(signal, current);
