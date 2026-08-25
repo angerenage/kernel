@@ -228,25 +228,32 @@ static void reserve_pages(struct pmm_range* range, uintptr_t reserved_base, uint
 	}
 }
 
-static bool find_contiguous_free(const struct pmm_range* range, size_t count, size_t* out_start_page) {
-	size_t run_start = 0;
-	size_t run_count = 0;
+static bool find_contiguous_free(const struct pmm_range* range, size_t count, uintptr_t physical_min,
+                                 uintptr_t physical_max, size_t align_pages, size_t* out_start_page) {
+	uint64_t span;
+	size_t   align_bytes;
 
-	if (!range || !out_start_page || count == 0) return false;
+	if (!range || !out_start_page || count == 0u || count > range->page_count ||
+	    mul_overflow_u64((uint64_t)count, PMM_PAGE_SIZE, &span) ||
+	    mul_overflow_size(align_pages, PMM_PAGE_SIZE, &align_bytes))
+		return false;
 
-	for (size_t page = 0; page < range->page_count; page++) {
-		if (bitmap_test(range->bitmap, page)) {
-			run_count = 0;
+	for (size_t page = 0u; page <= range->page_count - count; page++) {
+		uintptr_t phys = range->base + page * (uintptr_t)PMM_PAGE_SIZE;
+		uint64_t  end;
+		bool      free = true;
+
+		if (phys < physical_min || (phys & (align_bytes - 1u)) != 0u || add_overflow_u64((uint64_t)phys, span, &end) ||
+		    (physical_max != 0u && end > physical_max))
 			continue;
+		for (size_t run_page = 0u; run_page < count; run_page++) {
+			if (!bitmap_test(range->bitmap, page + run_page)) continue;
+			free = false;
+			break;
 		}
-
-		if (run_count == 0) run_start = page;
-		run_count++;
-
-		if (run_count == count) {
-			*out_start_page = run_start;
-			return true;
-		}
+		if (!free) continue;
+		*out_start_page = page;
+		return true;
 	}
 
 	return false;
@@ -539,17 +546,25 @@ bool pmm_init(const struct mem_range* memory_map, size_t range_count, uintptr_t 
 	return true;
 }
 
-bool pmm_alloc_pages(size_t count, uintptr_t* out_phys) {
-	if (out_phys) *out_phys = 0;
+bool pmm_alloc_pages_constrained(size_t count, uintptr_t physical_min, uintptr_t physical_max, size_t align_pages,
+                                 uintptr_t* out_phys) {
+	size_t normalized_align = align_pages == 0u ? 1u : align_pages;
+	size_t ignored;
+	if (out_phys) *out_phys = 0u;
 
-	if (!initialized || !out_phys || count == 0) return false;
+	if (!initialized || !out_phys || count == 0u || (physical_min & (PMM_PAGE_SIZE - 1u)) != 0u ||
+	    (physical_max != 0u && ((physical_max & (PMM_PAGE_SIZE - 1u)) != 0u || physical_max <= physical_min)) ||
+	    (normalized_align & (normalized_align - 1u)) != 0u ||
+	    mul_overflow_size(normalized_align, PMM_PAGE_SIZE, &ignored))
+		return false;
 	spinlock_lock(&pmm_lock);
 
 	for (size_t i = 0; i < managed_range_count; i++) {
 		size_t start_page;
 
 		if (ranges[i].free_pages < count) continue;
-		if (!find_contiguous_free(&ranges[i], count, &start_page)) continue;
+		if (!find_contiguous_free(&ranges[i], count, physical_min, physical_max, normalized_align, &start_page))
+			continue;
 
 		for (size_t page = 0; page < count; page++) {
 			bitmap_set(ranges[i].bitmap, start_page + page);
@@ -564,6 +579,52 @@ bool pmm_alloc_pages(size_t count, uintptr_t* out_phys) {
 
 	spinlock_unlock(&pmm_lock);
 	return false;
+}
+
+bool pmm_alloc_pages(size_t count, uintptr_t* out_phys) {
+	return pmm_alloc_pages_constrained(count, 0u, 0u, 1u, out_phys);
+}
+
+enum pmm_claim_result pmm_claim_pages(uintptr_t phys, size_t count) {
+	uint64_t span;
+	uint64_t end;
+
+	if (!initialized || count == 0u || (phys & (PMM_PAGE_SIZE - 1u)) != 0u ||
+	    mul_overflow_u64((uint64_t)count, PMM_PAGE_SIZE, &span) || add_overflow_u64((uint64_t)phys, span, &end))
+		return PMM_CLAIM_UNAVAILABLE;
+	spinlock_lock(&pmm_lock);
+
+	for (size_t i = 0u; i < managed_range_count; i++) {
+		uint64_t range_span;
+		uint64_t range_end;
+		size_t   first_page;
+
+		if (mul_overflow_u64((uint64_t)ranges[i].page_count, PMM_PAGE_SIZE, &range_span) ||
+		    add_overflow_u64((uint64_t)ranges[i].base, range_span, &range_end)) {
+			spinlock_unlock(&pmm_lock);
+			return PMM_CLAIM_UNAVAILABLE;
+		}
+		if (end <= (uint64_t)ranges[i].base || (uint64_t)phys >= range_end) continue;
+		if ((uint64_t)phys < (uint64_t)ranges[i].base || end > range_end) {
+			spinlock_unlock(&pmm_lock);
+			return PMM_CLAIM_UNAVAILABLE;
+		}
+
+		first_page = (size_t)(((uint64_t)phys - (uint64_t)ranges[i].base) / PMM_PAGE_SIZE);
+		for (size_t page = 0u; page < count; page++) {
+			if (!bitmap_test(ranges[i].bitmap, first_page + page)) continue;
+			spinlock_unlock(&pmm_lock);
+			return PMM_CLAIM_UNAVAILABLE;
+		}
+		for (size_t page = 0u; page < count; page++) bitmap_set(ranges[i].bitmap, first_page + page);
+		ranges[i].free_pages -= count;
+		free_page_count -= count;
+		spinlock_unlock(&pmm_lock);
+		return PMM_CLAIM_OK;
+	}
+
+	spinlock_unlock(&pmm_lock);
+	return PMM_CLAIM_NOT_MANAGED;
 }
 
 bool pmm_free_pages(uintptr_t phys, size_t count) {

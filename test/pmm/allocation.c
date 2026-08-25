@@ -56,3 +56,49 @@ Test(pmm, failed_allocation_clears_output_without_changing_accounting) {
 	cr_assert_eq(phys, 0u, "failed allocation must clear its output address");
 	cr_assert_eq(pmm_free_page_count(), initial_free, "failed allocation must leave free-page accounting unchanged");
 }
+
+Test(pmm, constrained_allocation_respects_window_and_alignment) {
+	_Alignas(PMM_PAGE_SIZE) uint8_t arena[KiB(256)];
+	uintptr_t                       phys = 0u;
+	uintptr_t                       min;
+	uintptr_t                       max;
+
+	init_test_pmm(arena, sizeof(arena));
+	min = (uintptr_t)(arena + PMM_TEST_HIGH_OFFSET);
+	max = min + PMM_TEST_HIGH_LENGTH;
+
+	cr_assert(pmm_alloc_pages_constrained(2u, min, max, 2u, &phys));
+	cr_assert_geq(phys, min);
+	cr_assert_leq(phys + 2u * PMM_PAGE_SIZE, max);
+	cr_assert_eq(phys & (2u * PMM_PAGE_SIZE - 1u), 0u);
+	cr_assert(pmm_free_pages(phys, 2u));
+}
+
+Test(pmm, exact_claim_is_exclusive_and_reusable) {
+	_Alignas(PMM_PAGE_SIZE) uint8_t arena[KiB(256)];
+	uintptr_t                       phys = 0u;
+	size_t                          free_before;
+
+	init_test_pmm(arena, sizeof(arena));
+	cr_assert(pmm_alloc_pages(1u, &phys));
+	cr_assert(pmm_free_pages(phys, 1u));
+	free_before = pmm_free_page_count();
+
+	cr_assert_eq(pmm_claim_pages(phys, 1u), PMM_CLAIM_OK);
+	cr_assert_eq(pmm_free_page_count(), free_before - 1u);
+	cr_assert_eq(pmm_claim_pages(phys, 1u), PMM_CLAIM_UNAVAILABLE);
+	cr_assert(pmm_free_pages(phys, 1u));
+	cr_assert_eq(pmm_claim_pages(phys, 1u), PMM_CLAIM_OK);
+	cr_assert(pmm_free_pages(phys, 1u));
+	cr_assert_eq(pmm_free_page_count(), free_before);
+}
+
+Test(pmm, exact_claim_distinguishes_unmanaged_physical_space) {
+	_Alignas(PMM_PAGE_SIZE) uint8_t arena[KiB(256)];
+	uintptr_t                       outside;
+
+	init_test_pmm(arena, sizeof(arena));
+	outside = (uintptr_t)arena + sizeof(arena) + PMM_PAGE_SIZE;
+	outside = (outside + PMM_PAGE_SIZE - 1u) & ~(uintptr_t)(PMM_PAGE_SIZE - 1u);
+	cr_assert_eq(pmm_claim_pages(outside, 1u), PMM_CLAIM_NOT_MANAGED);
+}
