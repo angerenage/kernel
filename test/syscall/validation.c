@@ -1,5 +1,4 @@
 #include <base/cap.h>
-#include <base/module.h>
 #include <base/process.h>
 #include <core/capability.h>
 #include <core/cpu.h>
@@ -16,10 +15,8 @@
 #include <stdint.h>
 
 #include "../../kernel/src/capability/address_space.h"
-#include "../../kernel/src/capability/boot_module.h"
 #include "../../kernel/src/capability/process.h"
 #include "../../kernel/src/capability/thread.h"
-#include "../../kernel/src/syscall/module.h"
 #include "../../kernel/src/syscall/process.h"
 #include "test_support.h"
 
@@ -35,7 +32,6 @@ static cap_id_t        grant_caps[GRANT_SLOT_COUNT];
 static cap_object_id_t grant_objects[GRANT_SLOT_COUNT];
 static enum grant_slot grant_fail_slot = GRANT_SLOT_COUNT;
 
-void kernel_boot_mock_set_modules(const struct kernel_boot_module* modules, size_t count);
 void kernel_boot_mock_reset(void);
 
 static syscall_result_t grant_test_handler(const struct cap_request* request) {
@@ -117,12 +113,6 @@ cap_id_t kernel_thread_grant_full(struct uthread* target, process_id_t recipient
 	return cap;
 }
 
-cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t recipient) {
-	(void)module_index;
-	(void)recipient;
-	return CAP_ID_INVALID;
-}
-
 static struct process* make_current_process(const char* name) {
 	struct process* process;
 	struct uthread* main_thread;
@@ -150,31 +140,6 @@ static void destroy_current_process(struct process* process) {
 	cr_assert(process_destroy(process), "failed to destroy syscall validation process");
 	kernel_boot_mock_reset();
 	syscall_test_reset_state();
-}
-
-Test(syscall_validation, module_resolve_rejects_null_mandatory_name) {
-	const struct kernel_boot_module modules[] = {
-		{
-         .name       = "init",
-         .path       = "/boot/init",
-         .address    = (void*)(uintptr_t)0x1000u,
-         .size       = 4096u,
-         .media_type = 0u,
-		 },
-	};
-	struct process*  process;
-	syscall_result_t result;
-
-	process = make_current_process("syscall/module-null");
-	kernel_boot_mock_set_modules(modules, 1u);
-
-	result = syscall_module_resolve(0u, 0u, 1u, 0u, 0u, 0u);
-	cr_assert_eq(result.status,
-	             SYSCALL_STATUS_BAD_ARGUMENT,
-	             "a mandatory module name cannot use the generic optional-string NULL/zero form");
-	cr_assert_eq(result.value, 0u, "the invalid pointer is argument 0");
-
-	destroy_current_process(process);
 }
 
 Test(syscall_validation, failed_self_copyout_does_not_publish_hidden_grants) {

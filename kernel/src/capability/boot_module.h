@@ -7,6 +7,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* Create the singleton modules-provider capability object. */
+void kernel_capability_boot_module_provider_init(void);
+
+/* Grant the modules-provider capability to a process. */
+cap_id_t kernel_capability_boot_module_provider_grant(process_id_t recipient);
+
 /* Create a capability for the boot module at the given index. Returns CAP_ID_INVALID on failure. */
 cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t recipient);
 

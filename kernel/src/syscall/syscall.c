@@ -6,7 +6,6 @@
 #include "interrupt.h"
 #include "memory.h"
 #include "misc.h"
-#include "module.h"
 #include "process.h"
 #include "signal.h"
 #include "thread.h"
@@ -41,8 +40,6 @@ static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 
 	[SYSCALL_INTERRUPT_ATTACH] = syscall_interrupt_attach,
 	[SYSCALL_INTERRUPT_DETACH] = syscall_interrupt_detach,
-
-	[SYSCALL_MODULE_RESOLVE] = syscall_module_resolve,
 
 	[SYSCALL_CAP_CREATE]    = syscall_cap_create,
 	[SYSCALL_CAP_DELEGATE]  = syscall_cap_delegate,

@@ -1,15 +1,25 @@
+#include <base/math.h>
 #include <base/vmm.h>
+#include <libc/stdlib.h>
 #include <runtime/diagnostic.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 #include <system/capability.h>
 #include <system/module.h>
 
 #include "syscall.h"
 
-syscall_status_t module_resolve(const char* name, size_t name_length, struct module_query_response* out_module) {
-	syscall_result_t result;
+syscall_status_t module_resolve(cap_id_t modules_provider_cap, const char* name, size_t name_length,
+                                struct module_provider_resolve_response* out_module) {
+	struct module_provider_resolve_request* request;
+	syscall_result_t                        result;
+	size_t                                  request_size;
 
+	if (modules_provider_cap == CAP_ID_INVALID) {
+		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(modules_provider_cap);
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	}
 	if (name == NULL) {
 		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(name);
 		return SYSCALL_STATUS_BAD_ARGUMENT;
@@ -22,33 +32,26 @@ syscall_status_t module_resolve(const char* name, size_t name_length, struct mod
 		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(out_module);
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	}
-
-	result =
-		syscall(SYSCALL_MODULE_RESOLVE, (uintptr_t)name, (uintptr_t)name_length, (uintptr_t)out_module, 0u, 0u, 0u);
-
-#ifdef RUNTIME_DIAGNOSTICS
-	if (result.status == SYSCALL_STATUS_BAD_ARGUMENT) {
-		switch (result.value) {
-		case 0u:
-			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(name);
-			break;
-		case 1u:
-			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(name_length);
-			break;
-		case 2u:
-			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(out_module);
-			break;
-		default:
-			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER_INDEX(SYSCALL_MODULE_RESOLVE, result.value);
-			break;
-		}
+	if (add_overflow_size(sizeof(*request), name_length, &request_size) || request_size > CAP_MAX_REQUEST_SIZE) {
+		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(name_length);
+		return SYSCALL_STATUS_BAD_ARGUMENT;
 	}
-	else {
-		RUNTIME_DIAGNOSTIC_SYSCALL_RESULT(SYSCALL_MODULE_RESOLVE, result);
-	}
-#endif
-
+	request = malloc(request_size);
+	if (request == NULL) return SYSCALL_STATUS_FAILED;
+	*request = (struct module_provider_resolve_request){
+		.header    = {.op = MODULE_PROVIDER_OP_RESOLVE},
+		.name_size = name_length,
+	};
+	memcpy(request + 1, name, name_length);
+	result = cap_call_syscall(modules_provider_cap, request, request_size, out_module, sizeof(*out_module));
+	free(request);
+	RUNTIME_DIAGNOSTIC_OPERATION_RESULT(MODULE_PROVIDER_OP_RESOLVE, result);
 	if (result.status != SYSCALL_STATUS_OK) return result.status;
+	if (result.value != sizeof(*out_module) || out_module->id == MODULE_ID_INVALID ||
+	    out_module->cap == CAP_ID_INVALID) {
+		RUNTIME_DIAGNOSTIC_INVALID_STATE("MODULE_PROVIDER_OP_RESOLVE returned an invalid response");
+		return SYSCALL_STATUS_FAILED;
+	}
 	return SYSCALL_STATUS_OK;
 }
 

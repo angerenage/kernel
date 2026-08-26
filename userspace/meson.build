@@ -53,6 +53,7 @@ userspace_system_sources = files(
 	'system/channel.c',
 	'system/display.c',
 	'system/interrupt.c',
+	'system/kernel_resource.c',
 	'system/loader.c',
 	'system/memory.c',
 	'system/module.c',

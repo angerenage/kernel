@@ -10,6 +10,10 @@ int main() {
 		printf("init: loader capability not available\n");
 		return 1;
 	}
+	if (g_startup.kernel_resources_cap == CAP_ID_INVALID) {
+		printf("init: kernel-resources capability not available\n");
+		return 1;
+	}
 	if (g_startup.base.serial_cap == CAP_ID_INVALID) {
 		printf("init: serial capability not available\n");
 		return 1;

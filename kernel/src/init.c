@@ -24,6 +24,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "capability/kernel_resource.h"
 #include "capability/loader.h"
 #include "capability/serial.h"
 
@@ -78,6 +79,7 @@ static bool kernel_launch_init_process(void) {
 	enum process_thread_spawn_result start_result;
 	cap_id_t                         serial_cap;
 	cap_id_t                         loader_cap;
+	cap_id_t                         kernel_resources_cap;
 
 	module = kernel_boot_module_find("init.elf");
 	if (module == NULL) {
@@ -103,6 +105,12 @@ static bool kernel_launch_init_process(void) {
 		printf("kernel: init loader capability grant failed\n");
 		return false;
 	}
+	kernel_resources_cap = kernel_capability_resources_grant(process_pid(loaded.process));
+	if (kernel_resources_cap == CAP_ID_INVALID) {
+		(void)process_destroy(loaded.process);
+		printf("kernel: init kernel-resources capability grant failed\n");
+		return false;
+	}
 
 	startup.base = (struct process_startup_info){
 		.size            = sizeof(startup),
@@ -112,15 +120,16 @@ static bool kernel_launch_init_process(void) {
 		.serial_cap      = serial_cap,
 		.init_cap        = CAP_ID_INVALID,
 	};
-	startup.loader_cap = loader_cap;
-	thread_params      = (struct process_thread_params){
-			 .name             = "init/main",
-			 .user_entry       = loaded.entry,
-			 .arg_data         = &startup,
-			 .arg_size         = sizeof(startup),
-			 .user_stack_pages = UTHREAD_DEFAULT_USER_STACK_PAGES,
-			 .preferred_cpu    = NULL,
-			 .detached         = false,
+	startup.loader_cap           = loader_cap;
+	startup.kernel_resources_cap = kernel_resources_cap;
+	thread_params                = (struct process_thread_params){
+					   .name             = "init/main",
+					   .user_entry       = loaded.entry,
+					   .arg_data         = &startup,
+					   .arg_size         = sizeof(startup),
+					   .user_stack_pages = UTHREAD_DEFAULT_USER_STACK_PAGES,
+					   .preferred_cpu    = NULL,
+					   .detached         = false,
     };
 	main_thread  = NULL;
 	start_result = process_start_main_thread(loaded.process, &main_thread, &thread_params);

@@ -11,8 +11,23 @@ typedef uint64_t module_id_t;
 #define MODULE_NAME_CAPACITY 64u
 #define MODULE_PATH_CAPACITY 256u
 
+/* Operations supported by the modules-provider capability. */
+enum module_provider_op {
+	MODULE_PROVIDER_OP_RESOLVE = 0,
+};
+
+struct module_provider_request_header {
+	enum module_provider_op op;
+};
+
+/* Resolve a boot module through the provider. The request is followed by name_size bytes. */
+struct module_provider_resolve_request {
+	struct module_provider_request_header header;
+	size_t                                name_size;
+};
+
 /* Boot-module metadata and capability returned when resolving by name. */
-struct module_query_response {
+struct module_provider_resolve_response {
 	module_id_t id;
 	cap_id_t    cap;
 	size_t      size;

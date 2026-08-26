@@ -6,8 +6,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Resolve a boot module by name and grant its capability to the caller. */
-syscall_status_t module_resolve(const char* name, size_t name_length, struct module_query_response* out_module);
+/* Resolve a boot module by name through a modules-provider capability. */
+syscall_status_t module_resolve(cap_id_t modules_provider_cap, const char* name, size_t name_length,
+                                struct module_provider_resolve_response* out_module);
 
 /* Read descriptive metadata through a boot-module capability. */
 syscall_status_t module_get_info(cap_id_t module_cap, struct module_info_response* out_info);

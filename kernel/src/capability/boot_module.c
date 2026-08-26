@@ -22,6 +22,7 @@
 
 static cap_object_id_t* boot_module_object_ids;
 static size_t           boot_module_object_count;
+static cap_object_id_t  boot_module_provider_object_id = CAP_OBJECT_ID_INVALID;
 
 struct boot_module_mapping_layout {
 	uintptr_t physical_base;
@@ -148,6 +149,62 @@ static syscall_result_t boot_module_read_handler(const struct cap_request*      
 	return cap_kernel_write_response(req, (const uint8_t*)module->address + (size_t)request.offset, request.size);
 }
 
+static syscall_result_t boot_module_resolve_handler(const struct cap_request* req) {
+	struct module_provider_resolve_request request;
+	const char*                            name;
+	size_t                                 expected_size;
+	size_t                                 count;
+
+	if ((req->rights & CAP_READ) != CAP_READ || req->request == NULL || req->request_size < sizeof(request) ||
+	    !cap_kernel_response_fits(req, sizeof(struct module_provider_resolve_response))) {
+		return syscall_result_error(
+			(req->rights & CAP_READ) != CAP_READ ? SYSCALL_STATUS_DENIED : SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
+	memcpy(&request, req->request, sizeof(request));
+	if (request.header.op != MODULE_PROVIDER_OP_RESOLVE || request.name_size == 0u ||
+	    add_overflow_size(sizeof(request), request.name_size, &expected_size) || expected_size != req->request_size) {
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
+	name = (const char*)req->request + sizeof(request);
+	if (name[request.name_size - 1u] != '\0') return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+
+	count = kernel_boot_module_count();
+	for (size_t i = 0u; i < count; i++) {
+		const struct kernel_boot_module*        module = kernel_boot_module_at(i);
+		struct module_provider_resolve_response response;
+		syscall_result_t                        result;
+
+		if (module == NULL || !((module->name != NULL && strcmp(module->name, name) == 0) ||
+		                        (module->path != NULL && strcmp(module->path, name) == 0))) {
+			continue;
+		}
+		response = (struct module_provider_resolve_response){
+			.id         = (module_id_t)i + 1u,
+			.cap        = kernel_capability_boot_module_grant(i, req->caller),
+			.size       = module->size,
+			.media_type = module->media_type,
+		};
+		if (response.cap == CAP_ID_INVALID) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
+		strlcpy(response.name, module->name != NULL ? module->name : "", sizeof(response.name));
+		strlcpy(response.path, module->path != NULL ? module->path : "", sizeof(response.path));
+		result = cap_kernel_write_response(req, &response, sizeof(response));
+		if (result.status != SYSCALL_STATUS_OK) (void)cap_destroy_by_id(response.cap);
+		return result;
+	}
+	return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+}
+
+static syscall_result_t boot_module_provider_handler(const struct cap_request* req) {
+	uint32_t operation;
+
+	if (req->request == NULL || req->request_size < sizeof(operation)) {
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
+	memcpy(&operation, req->request, sizeof(operation));
+	if (operation != MODULE_PROVIDER_OP_RESOLVE) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	return boot_module_resolve_handler(req);
+}
+
 static syscall_result_t boot_module_handler(const struct cap_request* req) {
 	uint32_t    operation;
 	module_id_t id = (module_id_t)req->object_id;
@@ -200,6 +257,17 @@ syscall_result_t kernel_capability_boot_module_get(cap_id_t module_cap, process_
 	if (id != MODULE_ID_INVALID) *out_module = kernel_boot_module_at((size_t)(id - 1u));
 	cap_object_release(object);
 	return *out_module == NULL ? syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u) : syscall_result_ok(0u);
+}
+
+void kernel_capability_boot_module_provider_init(void) {
+	boot_module_provider_object_id = cap_object_create_kernel(0u, boot_module_provider_handler, NULL);
+}
+
+cap_id_t kernel_capability_boot_module_provider_grant(process_id_t recipient) {
+	if (boot_module_provider_object_id == CAP_OBJECT_ID_INVALID || kernel_boot_module_count() == 0u) {
+		return CAP_ID_INVALID;
+	}
+	return cap_create(boot_module_provider_object_id, recipient, CAP_CALL | CAP_READ | CAP_DELEGATE, NULL);
 }
 
 cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t recipient) {

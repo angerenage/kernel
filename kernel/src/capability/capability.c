@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "../capability/boot_module.h"
+#include "../capability/kernel_resource.h"
 #include "../capability/loader.h"
 #include "../capability/serial.h"
 
@@ -43,4 +44,6 @@ syscall_result_t cap_kernel_write_response(const struct cap_request* request, co
 void kernel_capability_init(void) {
 	kernel_capability_serial_init();
 	kernel_capability_loader_init();
+	kernel_capability_boot_module_provider_init();
+	kernel_capability_resources_init();
 }

@@ -4,6 +4,7 @@
 #include <base/module.h>
 #include <stdio.h>
 #include <system/capability.h>
+#include <system/kernel_resource.h>
 #include <system/loader.h>
 #include <system/module.h>
 #include <system/process.h>
@@ -46,20 +47,32 @@ static void rollback_loader_process(struct loader_load_response* loaded, cap_id_
 }
 
 bool loader_launch(struct init_startup_info* init_startup) {
-	struct module_query_response module = {.cap = CAP_ID_INVALID};
-	struct loader_load_response  loaded;
-	struct process_info_response process_info;
-	struct process_startup_info  startup;
-	cap_id_t                     init_cap   = CAP_ID_INVALID;
-	cap_id_t                     serial_cap = CAP_ID_INVALID;
-	cap_id_t                     thread_cap = CAP_ID_INVALID;
-	syscall_status_t             status;
-	bool                         temporary_caps_released;
+	struct module_provider_resolve_response module = {.cap = CAP_ID_INVALID};
+	struct loader_load_response             loaded;
+	struct process_info_response            process_info;
+	struct process_startup_info             startup;
+	cap_id_t                                init_cap    = CAP_ID_INVALID;
+	cap_id_t                                modules_cap = CAP_ID_INVALID;
+	cap_id_t                                serial_cap  = CAP_ID_INVALID;
+	cap_id_t                                thread_cap  = CAP_ID_INVALID;
+	syscall_status_t                        status;
+	bool                                    temporary_caps_released;
 
 	if (init_startup == NULL) return false;
 	loaded.process_cap       = CAP_ID_INVALID;
 	loaded.address_space_cap = CAP_ID_INVALID;
-	status                   = module_resolve("loader.elf", sizeof("loader.elf"), &module);
+	status = kernel_resource_acquire(init_startup->kernel_resources_cap, KERNEL_RESOURCE_TYPE_MODULES, &modules_cap);
+	if (status != SYSCALL_STATUS_OK) {
+		printf("init: modules provider acquisition failed: %u\n", (unsigned)status);
+		(void)drop_owned_capability(&init_startup->loader_cap, "kernel loader");
+		return false;
+	}
+	status = module_resolve(modules_cap, "loader.elf", sizeof("loader.elf"), &module);
+	if (!drop_owned_capability(&modules_cap, "modules provider")) {
+		(void)drop_owned_capability(&module.cap, "loader module");
+		(void)drop_owned_capability(&init_startup->loader_cap, "kernel loader");
+		return false;
+	}
 	if (status != SYSCALL_STATUS_OK) {
 		printf("init: loader.elf module resolution failed: %u\n", (unsigned)status);
 		(void)drop_owned_capability(&init_startup->loader_cap, "kernel loader");
