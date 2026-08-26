@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "boot_module.h"
+#include "boot_resource.h"
 #include "loader.h"
 #include "serial.h"
 
@@ -33,13 +34,17 @@ static size_t kernel_resources_available(enum kernel_resource_type* ids, size_t 
 		if (ids != NULL && count < capacity) ids[count] = KERNEL_RESOURCE_TYPE_LOADER;
 		count++;
 	}
+	if (kernel_capability_framebuffer_available()) {
+		if (ids != NULL && count < capacity) ids[count] = KERNEL_RESOURCE_TYPE_FRAMEBUFFER;
+		count++;
+	}
 	return count;
 }
 
 static syscall_result_t kernel_resources_list_handler(const struct cap_request* req) {
 	struct kernel_resources_list_request   request;
 	struct kernel_resources_list_response* response;
-	enum kernel_resource_type              available[3];
+	enum kernel_resource_type              available[4];
 	size_t                                 available_count;
 	size_t                                 start;
 	size_t                                 returned;
@@ -100,6 +105,10 @@ static syscall_result_t kernel_resource_acquire_handler(const struct cap_request
 	case KERNEL_RESOURCE_TYPE_LOADER:
 		if (!kernel_capability_loader_available()) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 		response.cap = kernel_capability_loader_grant(req->caller);
+		break;
+	case KERNEL_RESOURCE_TYPE_FRAMEBUFFER:
+		if (!kernel_capability_framebuffer_available()) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+		response.cap = kernel_capability_framebuffer_grant(req->caller);
 		break;
 	default:
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);

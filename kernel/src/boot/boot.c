@@ -1,3 +1,4 @@
+#include <base/math.h>
 #include <hal/cpu.h>
 #include <kernel/boot.h>
 #include <stddef.h>
@@ -221,15 +222,27 @@ bool kernel_boot_init(void) {
 	if (fb_req.response != NULL && fb_req.response->framebuffer_count > 0u && fb_req.response->framebuffers != NULL &&
 	    fb_req.response->framebuffers[0] != NULL && fb_req.response->framebuffers[0]->address != NULL) {
 		const struct limine_framebuffer* fb = fb_req.response->framebuffers[0];
+		size_t                           framebuffer_size;
 
-		boot_framebuffer = (struct kernel_boot_framebuffer){
-			.address = (void*)(uintptr_t)fb->address,
-			.width   = fb->width,
-			.height  = fb->height,
-			.pitch   = fb->pitch,
-			.bpp     = fb->bpp,
-		};
-		boot_framebuffer_valid = true;
+		if (fb->width != 0u && fb->height != 0u && fb->pitch != 0u && fb->bpp != 0u &&
+		    (uint64_t)(size_t)fb->pitch == fb->pitch && (uint64_t)(size_t)fb->height == fb->height &&
+		    !mul_overflow_size((size_t)fb->pitch, (size_t)fb->height, &framebuffer_size) && framebuffer_size != 0u) {
+			boot_framebuffer = (struct kernel_boot_framebuffer){
+				.address          = (void*)(uintptr_t)fb->address,
+				.width            = fb->width,
+				.height           = fb->height,
+				.pitch            = fb->pitch,
+				.bpp              = fb->bpp,
+				.memory_model     = fb->memory_model,
+				.red_mask_size    = fb->red_mask_size,
+				.red_mask_shift   = fb->red_mask_shift,
+				.green_mask_size  = fb->green_mask_size,
+				.green_mask_shift = fb->green_mask_shift,
+				.blue_mask_size   = fb->blue_mask_size,
+				.blue_mask_shift  = fb->blue_mask_shift,
+			};
+			boot_framebuffer_valid = true;
+		}
 	}
 
 	boot_rsdp_valid = false;

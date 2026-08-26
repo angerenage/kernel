@@ -37,6 +37,7 @@ void   kernel_capability_test_serial_reset(void);
 size_t kernel_capability_test_serial_bytes(void);
 
 void kernel_boot_mock_set_modules(const struct kernel_boot_module* modules, size_t count);
+void kernel_boot_mock_set_framebuffer(const struct kernel_boot_framebuffer* framebuffer);
 void kernel_boot_mock_reset(void);
 
 syscall_result_t kernel_capability_test_call(cap_id_t cap, const void* request, size_t request_size, void* response,

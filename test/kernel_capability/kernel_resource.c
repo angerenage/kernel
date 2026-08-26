@@ -3,16 +3,42 @@
 #include <base/kernel_resource.h>
 
 #include "../../kernel/src/capability/boot_module.h"
+#include "../../kernel/src/capability/boot_resource.h"
 #include "../../kernel/src/capability/loader.h"
 #include "../../kernel/src/capability/serial.h"
 #include "test_support.h"
 
 static cap_id_t init_resources(struct kernel_capability_test_context* ctx) {
 	kernel_capability_boot_module_provider_init();
+	kernel_capability_boot_resources_init();
 	kernel_capability_serial_init();
 	kernel_capability_loader_init();
 	kernel_capability_resources_init();
 	return kernel_capability_resources_grant(process_pid(ctx->process));
+}
+
+Test(kernel_capability_resource, framebuffer_is_listed_only_when_available) {
+	struct kernel_capability_test_context ctx;
+	static uint8_t                        framebuffer_bytes[64];
+	const struct kernel_boot_framebuffer  framebuffer = {
+		 .address = framebuffer_bytes, .width = 4u, .height = 4u, .pitch = 16u, .bpp = 32u};
+	struct kernel_resources_list_request request = {
+		.header = {.op = KERNEL_RESOURCES_OP_LIST}, .offset = 0u, .capacity = 4u};
+	uint8_t response_storage[sizeof(struct kernel_resources_list_response) + 4u * sizeof(enum kernel_resource_type)];
+	struct kernel_resources_list_response* response = (void*)response_storage;
+	cap_id_t                               root_cap;
+	syscall_result_t                       result;
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/resources-framebuffer");
+	kernel_boot_mock_set_framebuffer(&framebuffer);
+	root_cap = init_resources(&ctx);
+	cr_assert_neq(root_cap, CAP_ID_INVALID);
+	result = kernel_capability_test_call(root_cap, &request, sizeof(request), response, sizeof(response_storage));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(response->total, 3u);
+	cr_assert_eq(response->returned, 3u);
+	cr_assert_eq(response->ids[2], KERNEL_RESOURCE_TYPE_FRAMEBUFFER);
+	kernel_capability_test_end(&ctx);
 }
 
 Test(kernel_capability_resource, empty_and_zero_capacity_lists_report_totals) {
