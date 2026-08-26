@@ -3,10 +3,14 @@
 #include <base/kernel_resource.h>
 
 #include "../../kernel/src/capability/boot_module.h"
+#include "../../kernel/src/capability/loader.h"
+#include "../../kernel/src/capability/serial.h"
 #include "test_support.h"
 
 static cap_id_t init_resources(struct kernel_capability_test_context* ctx) {
 	kernel_capability_boot_module_provider_init();
+	kernel_capability_serial_init();
+	kernel_capability_loader_init();
 	kernel_capability_resources_init();
 	return kernel_capability_resources_grant(process_pid(ctx->process));
 }
@@ -27,14 +31,43 @@ Test(kernel_capability_resource, empty_and_zero_capacity_lists_report_totals) {
 	cr_assert_neq(root_cap, CAP_ID_INVALID);
 	result = kernel_capability_test_call(root_cap, &request, sizeof(request), &response, sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
-	cr_assert_eq(response.total, 0u);
+	cr_assert_eq(response.total, 2u);
 	cr_assert_eq(response.returned, 0u);
 
 	kernel_boot_mock_set_modules(modules, 1u);
 	result = kernel_capability_test_call(root_cap, &request, sizeof(request), &response, sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
-	cr_assert_eq(response.total, 1u);
+	cr_assert_eq(response.total, 3u);
 	cr_assert_eq(response.returned, 0u);
+	kernel_capability_test_end(&ctx);
+}
+
+Test(kernel_capability_resource, serial_and_loader_are_acquired_from_the_registry) {
+	struct kernel_capability_test_context   ctx;
+	struct kernel_resource_acquire_request  request = {.header = {.op = KERNEL_RESOURCES_OP_ACQUIRE}};
+	struct kernel_resource_acquire_response response;
+	struct capability*                      acquired;
+	cap_id_t                                root_cap;
+	syscall_result_t                        result;
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/resources-core-providers");
+	root_cap = init_resources(&ctx);
+	cr_assert_neq(root_cap, CAP_ID_INVALID);
+	request.id = KERNEL_RESOURCE_TYPE_SERIAL;
+	result     = kernel_capability_test_call(root_cap, &request, sizeof(request), &response, sizeof(response));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	acquired = cap_acquire(response.cap);
+	cr_assert_not_null(acquired);
+	cr_assert_eq(cap_rights(acquired), CAP_CALL | CAP_WRITE | CAP_DELEGATE | CAP_DELEGATE_PEER);
+	cap_release(acquired);
+
+	request.id = KERNEL_RESOURCE_TYPE_LOADER;
+	result     = kernel_capability_test_call(root_cap, &request, sizeof(request), &response, sizeof(response));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	acquired = cap_acquire(response.cap);
+	cr_assert_not_null(acquired);
+	cr_assert_eq(cap_rights(acquired), CAP_CALL | CAP_DELEGATE);
+	cap_release(acquired);
 	kernel_capability_test_end(&ctx);
 }
 
@@ -61,14 +94,14 @@ Test(kernel_capability_resource, listing_is_paginated_and_acquisition_targets_th
 	result =
 		kernel_capability_test_call(root_cap, &list_request, sizeof(list_request), list_response, sizeof(list_storage));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
-	cr_assert_eq(list_response->total, 1u);
+	cr_assert_eq(list_response->total, 3u);
 	cr_assert_eq(list_response->returned, 1u);
 	cr_assert_eq(list_response->ids[0], KERNEL_RESOURCE_TYPE_MODULES);
-	list_request.offset = 1u;
+	list_request.offset = 3u;
 	result =
 		kernel_capability_test_call(root_cap, &list_request, sizeof(list_request), list_response, sizeof(list_storage));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
-	cr_assert_eq(list_response->total, 1u);
+	cr_assert_eq(list_response->total, 3u);
 	cr_assert_eq(list_response->returned, 0u);
 
 	result = kernel_capability_test_call(

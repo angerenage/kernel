@@ -25,8 +25,6 @@
 #include <stdio.h>
 
 #include "capability/kernel_resource.h"
-#include "capability/loader.h"
-#include "capability/serial.h"
 
 #if KERNEL_SELFTESTS_ENABLED
 #include "../test/selftest.h"
@@ -77,8 +75,6 @@ static bool kernel_launch_init_process(void) {
 	struct process_thread_params     thread_params;
 	enum kernel_elf_load_result      load_result;
 	enum process_thread_spawn_result start_result;
-	cap_id_t                         serial_cap;
-	cap_id_t                         loader_cap;
 	cap_id_t                         kernel_resources_cap;
 
 	module = kernel_boot_module_find("init.elf");
@@ -92,19 +88,6 @@ static bool kernel_launch_init_process(void) {
 		printf("kernel: init ELF load failed: %s\n", kernel_elf_load_result_string(load_result));
 		return false;
 	}
-	serial_cap = kernel_capability_serial_grant(process_pid(loaded.process));
-	if (serial_cap == CAP_ID_INVALID) {
-		(void)process_destroy(loaded.process);
-		printf("kernel: init serial capability grant failed\n");
-		return false;
-	}
-
-	loader_cap = kernel_capability_loader_grant(process_pid(loaded.process));
-	if (loader_cap == CAP_ID_INVALID) {
-		(void)process_destroy(loaded.process);
-		printf("kernel: init loader capability grant failed\n");
-		return false;
-	}
 	kernel_resources_cap = kernel_capability_resources_grant(process_pid(loaded.process));
 	if (kernel_resources_cap == CAP_ID_INVALID) {
 		(void)process_destroy(loaded.process);
@@ -112,25 +95,22 @@ static bool kernel_launch_init_process(void) {
 		return false;
 	}
 
-	startup.base = (struct process_startup_info){
-		.size            = sizeof(startup),
-		.heap_base       = loaded.heap_base,
-		.heap_page_count = loaded.heap_page_count,
-		.page_size       = PMM_PAGE_SIZE,
-		.serial_cap      = serial_cap,
-		.init_cap        = CAP_ID_INVALID,
+	startup = (struct init_startup_info){
+		.size                 = sizeof(startup),
+		.heap_base            = loaded.heap_base,
+		.heap_page_count      = loaded.heap_page_count,
+		.page_size            = PMM_PAGE_SIZE,
+		.kernel_resources_cap = kernel_resources_cap,
 	};
-	startup.loader_cap           = loader_cap;
-	startup.kernel_resources_cap = kernel_resources_cap;
-	thread_params                = (struct process_thread_params){
-					   .name             = "init/main",
-					   .user_entry       = loaded.entry,
-					   .arg_data         = &startup,
-					   .arg_size         = sizeof(startup),
-					   .user_stack_pages = UTHREAD_DEFAULT_USER_STACK_PAGES,
-					   .preferred_cpu    = NULL,
-					   .detached         = false,
-    };
+	thread_params = (struct process_thread_params){
+		.name             = "init/main",
+		.user_entry       = loaded.entry,
+		.arg_data         = &startup,
+		.arg_size         = sizeof(startup),
+		.user_stack_pages = UTHREAD_DEFAULT_USER_STACK_PAGES,
+		.preferred_cpu    = NULL,
+		.detached         = false,
+	};
 	main_thread  = NULL;
 	start_result = process_start_main_thread(loaded.process, &main_thread, &thread_params);
 	if (start_result != PROCESS_THREAD_SPAWN_OK) {

@@ -174,7 +174,7 @@ static bool dispatch_request(const struct cap_request* request, const void* data
 	}
 }
 
-int server_run(struct init_startup_info* startup) {
+int server_run(const struct init_state* init) {
 	union {
 		struct init_request_header    header;
 		struct init_advertise_request advertise;
@@ -190,7 +190,7 @@ int server_run(struct init_startup_info* startup) {
 	bool               loader_started = false;
 	syscall_status_t   status;
 
-	if (server_endpoint == CHANNEL_ID_INVALID || startup == NULL) return 1;
+	if (server_endpoint == CHANNEL_ID_INVALID || init == NULL) return 1;
 	for (;;) {
 		do {
 			received = false;
@@ -213,7 +213,7 @@ int server_run(struct init_startup_info* startup) {
 			if (status != SYSCALL_STATUS_OK) return 1;
 		} while (received);
 		if (!loader_started) {
-			if (!loader_launch(startup)) return 1;
+			if (!loader_launch(init)) return 1;
 			loader_started = true;
 			continue;
 		}

@@ -29,6 +29,10 @@ void kernel_capability_serial_init(void) {
 	serial_object_id = cap_object_create_kernel(0u, serial_handler, NULL);
 }
 
+bool kernel_capability_serial_available(void) {
+	return serial_object_id != CAP_OBJECT_ID_INVALID;
+}
+
 cap_id_t kernel_capability_serial_grant(process_id_t target) {
 	if (serial_object_id == CAP_OBJECT_ID_INVALID) return CAP_ID_INVALID;
 	return cap_create(serial_object_id, target, CAP_WRITE | CAP_CALL | CAP_DELEGATE | CAP_DELEGATE_PEER, NULL);

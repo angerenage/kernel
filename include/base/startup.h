@@ -23,9 +23,11 @@ struct process_startup_info {
 	uint32_t  argv_size;
 };
 
-/* Extended startup info for init with its kernel-provided authority capabilities. */
+/* Minimal process environment passed by the kernel specifically to init. */
 struct init_startup_info {
-	struct process_startup_info base;
-	cap_id_t                    loader_cap;
-	cap_id_t                    kernel_resources_cap;
+	uint32_t  size;
+	uintptr_t heap_base;
+	size_t    heap_page_count;
+	size_t    page_size;
+	cap_id_t  kernel_resources_cap;
 };

@@ -2,6 +2,7 @@
 
 #include <base/loader.h>
 #include <base/module.h>
+#include <base/startup.h>
 #include <stdio.h>
 #include <system/capability.h>
 #include <system/kernel_resource.h>
@@ -46,44 +47,50 @@ static void rollback_loader_process(struct loader_load_response* loaded, cap_id_
 	(void)drop_owned_capability(&loaded->process_cap, "loader process");
 }
 
-bool loader_launch(struct init_startup_info* init_startup) {
+bool loader_launch(const struct init_state* init) {
 	struct module_provider_resolve_response module = {.cap = CAP_ID_INVALID};
 	struct loader_load_response             loaded;
 	struct process_info_response            process_info;
 	struct process_startup_info             startup;
 	cap_id_t                                init_cap    = CAP_ID_INVALID;
+	cap_id_t                                loader_cap  = CAP_ID_INVALID;
 	cap_id_t                                modules_cap = CAP_ID_INVALID;
 	cap_id_t                                serial_cap  = CAP_ID_INVALID;
 	cap_id_t                                thread_cap  = CAP_ID_INVALID;
 	syscall_status_t                        status;
 	bool                                    temporary_caps_released;
 
-	if (init_startup == NULL) return false;
+	if (init == NULL) return false;
 	loaded.process_cap       = CAP_ID_INVALID;
 	loaded.address_space_cap = CAP_ID_INVALID;
-	status = kernel_resource_acquire(init_startup->kernel_resources_cap, KERNEL_RESOURCE_TYPE_MODULES, &modules_cap);
+	status = kernel_resource_acquire(init->kernel_resources_cap, KERNEL_RESOURCE_TYPE_LOADER, &loader_cap);
+	if (status != SYSCALL_STATUS_OK) {
+		printf("init: kernel loader acquisition failed: %u\n", (unsigned)status);
+		return false;
+	}
+	status = kernel_resource_acquire(init->kernel_resources_cap, KERNEL_RESOURCE_TYPE_MODULES, &modules_cap);
 	if (status != SYSCALL_STATUS_OK) {
 		printf("init: modules provider acquisition failed: %u\n", (unsigned)status);
-		(void)drop_owned_capability(&init_startup->loader_cap, "kernel loader");
+		(void)drop_owned_capability(&loader_cap, "kernel loader");
 		return false;
 	}
 	status = module_resolve(modules_cap, "loader.elf", sizeof("loader.elf"), &module);
 	if (!drop_owned_capability(&modules_cap, "modules provider")) {
 		(void)drop_owned_capability(&module.cap, "loader module");
-		(void)drop_owned_capability(&init_startup->loader_cap, "kernel loader");
+		(void)drop_owned_capability(&loader_cap, "kernel loader");
 		return false;
 	}
 	if (status != SYSCALL_STATUS_OK) {
 		printf("init: loader.elf module resolution failed: %u\n", (unsigned)status);
-		(void)drop_owned_capability(&init_startup->loader_cap, "kernel loader");
+		(void)drop_owned_capability(&loader_cap, "kernel loader");
 		return false;
 	}
-	status = loader_load(init_startup->loader_cap, module.cap, &loaded);
+	status = loader_load(loader_cap, module.cap, &loaded);
 	if (status != SYSCALL_STATUS_OK) {
 		printf("init: loader.elf load failed: %u\n", (unsigned)status);
 	}
 	temporary_caps_released = drop_owned_capability(&module.cap, "loader module");
-	if (!drop_owned_capability(&init_startup->loader_cap, "kernel loader")) temporary_caps_released = false;
+	if (!drop_owned_capability(&loader_cap, "kernel loader")) temporary_caps_released = false;
 	if (status != SYSCALL_STATUS_OK) {
 		rollback_loader_process(&loaded, &thread_cap);
 		return false;
@@ -101,10 +108,8 @@ bool loader_launch(struct init_startup_info* init_startup) {
 		printf("init: init capability publication failed: %u\n", (unsigned)status);
 		goto fail;
 	}
-	status = cap_delegate(init_startup->base.serial_cap,
-	                      process_info.pid,
-	                      CAP_WRITE | CAP_CALL | CAP_DELEGATE | CAP_DELEGATE_PEER,
-	                      &serial_cap);
+	status = cap_delegate(
+		init->serial_cap, process_info.pid, CAP_WRITE | CAP_CALL | CAP_DELEGATE | CAP_DELEGATE_PEER, &serial_cap);
 	if (status != SYSCALL_STATUS_OK) {
 		printf("init: serial capability delegation failed: %u\n", (unsigned)status);
 		goto fail;
@@ -113,7 +118,7 @@ bool loader_launch(struct init_startup_info* init_startup) {
 		.size            = sizeof(startup),
 		.heap_base       = loaded.heap_base,
 		.heap_page_count = loaded.heap_page_count,
-		.page_size       = init_startup->base.page_size,
+		.page_size       = init->page_size,
 		.serial_cap      = serial_cap,
 		.init_cap        = init_cap,
 	};

@@ -7,6 +7,8 @@
 enum kernel_resource_type {
 	KERNEL_RESOURCE_TYPE_INVALID = 0u,
 	KERNEL_RESOURCE_TYPE_MODULES,
+	KERNEL_RESOURCE_TYPE_SERIAL,
+	KERNEL_RESOURCE_TYPE_LOADER,
 };
 
 enum kernel_resources_op {

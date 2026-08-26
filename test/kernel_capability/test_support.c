@@ -2,10 +2,26 @@
 
 #include "../../kernel/src/syscall/capability.h"
 
-static size_t serial_bytes;
-static size_t executable_sync_count;
+static size_t          serial_bytes;
+static size_t          executable_sync_count;
+static cap_object_id_t loader_object_id = CAP_OBJECT_ID_INVALID;
+
+static syscall_result_t loader_test_handler(const struct cap_request* request) {
+	(void)request;
+	return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+}
 
 void kernel_capability_loader_init(void) {
+	loader_object_id = cap_object_create_kernel(0u, loader_test_handler, NULL);
+}
+
+bool kernel_capability_loader_available(void) {
+	return loader_object_id != CAP_OBJECT_ID_INVALID;
+}
+
+cap_id_t kernel_capability_loader_grant(process_id_t recipient) {
+	if (loader_object_id == CAP_OBJECT_ID_INVALID) return CAP_ID_INVALID;
+	return cap_create(loader_object_id, recipient, CAP_CALL | CAP_DELEGATE, NULL);
 }
 
 void hal_serial_init(void) {
