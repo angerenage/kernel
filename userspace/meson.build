@@ -49,6 +49,7 @@ userspace_runtime_sources = files(
 )
 
 userspace_system_sources = files(
+	'system/boot_data.c',
 	'system/capability.c',
 	'system/channel.c',
 	'system/display.c',

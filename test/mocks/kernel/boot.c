@@ -6,6 +6,10 @@
 
 static struct kernel_boot_module      mock_boot_modules[16];
 static size_t                         mock_boot_module_count;
+static struct kernel_boot_data        mock_rsdp;
+static bool                           mock_rsdp_valid;
+static struct kernel_boot_data        mock_dtb;
+static bool                           mock_dtb_valid;
 static struct kernel_boot_framebuffer mock_framebuffer;
 static bool                           mock_framebuffer_valid;
 
@@ -19,13 +23,39 @@ void kernel_boot_mock_set_modules(const struct kernel_boot_module* modules, size
 
 void kernel_boot_mock_reset(void) {
 	mock_boot_module_count = 0;
+	mock_rsdp              = (struct kernel_boot_data){0};
+	mock_rsdp_valid        = false;
+	mock_dtb               = (struct kernel_boot_data){0};
+	mock_dtb_valid         = false;
 	mock_framebuffer       = (struct kernel_boot_framebuffer){0};
 	mock_framebuffer_valid = false;
+}
+
+void kernel_boot_mock_set_rsdp(const void* address, size_t size) {
+	mock_rsdp       = (struct kernel_boot_data){.address = address, .size = size};
+	mock_rsdp_valid = address != NULL && size != 0u;
+}
+
+void kernel_boot_mock_set_dtb(const void* address, size_t size) {
+	mock_dtb       = (struct kernel_boot_data){.address = address, .size = size};
+	mock_dtb_valid = address != NULL && size != 0u;
 }
 
 void kernel_boot_mock_set_framebuffer(const struct kernel_boot_framebuffer* framebuffer) {
 	mock_framebuffer_valid = framebuffer != NULL;
 	mock_framebuffer       = framebuffer != NULL ? *framebuffer : (struct kernel_boot_framebuffer){0};
+}
+
+bool kernel_boot_rsdp_get(struct kernel_boot_data* out) {
+	if (out == NULL || !mock_rsdp_valid) return false;
+	*out = mock_rsdp;
+	return true;
+}
+
+bool kernel_boot_dtb_get(struct kernel_boot_data* out) {
+	if (out == NULL || !mock_dtb_valid) return false;
+	*out = mock_dtb;
+	return true;
 }
 
 bool kernel_boot_framebuffer_get(struct kernel_boot_framebuffer* out) {

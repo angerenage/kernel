@@ -27,11 +27,54 @@ static const char*                      boot_cmdline;
 static struct kernel_boot_module        boot_modules[KERNEL_BOOT_MAX_MODULES];
 static size_t                           boot_module_count;
 static uintptr_t                        boot_rsdp_address;
+static size_t                           boot_rsdp_size;
 static bool                             boot_rsdp_valid;
+static const void*                      boot_dtb_address;
+static size_t                           boot_dtb_size;
+static bool                             boot_dtb_valid;
 static struct kernel_boot_cpu_launch    boot_cpu_launch[KERNEL_BOOT_MAX_CPUS];
 static void*                            boot_cpu_private[KERNEL_BOOT_MAX_CPUS];
 static size_t                           boot_cpu_count;
 static bool                             boot_initialized;
+
+#define ACPI_RSDP_V1_SIZE 20u
+#define ACPI_RSDP_V2_MIN_SIZE 36u
+#define ACPI_RSDP_MAX_SIZE 4096u
+#define FDT_HEADER_SIZE 40u
+#define FDT_MAGIC 0xd00dfeedu
+
+static uint32_t read_le32(const uint8_t* value) {
+	return (uint32_t)value[0] | ((uint32_t)value[1] << 8u) | ((uint32_t)value[2] << 16u) | ((uint32_t)value[3] << 24u);
+}
+
+static uint32_t read_be32(const uint8_t* value) {
+	return ((uint32_t)value[0] << 24u) | ((uint32_t)value[1] << 16u) | ((uint32_t)value[2] << 8u) | (uint32_t)value[3];
+}
+
+static bool kernel_boot_rsdp_size(const void* address, size_t* out_size) {
+	const uint8_t* bytes = address;
+	size_t         size;
+
+	if (bytes == NULL || out_size == NULL || memcmp(bytes, "RSD PTR ", 8u) != 0) return false;
+	size = ACPI_RSDP_V1_SIZE;
+	if (bytes[15] >= 2u) {
+		size = read_le32(bytes + 20u);
+		if (size < ACPI_RSDP_V2_MIN_SIZE || size > ACPI_RSDP_MAX_SIZE) return false;
+	}
+	*out_size = size;
+	return true;
+}
+
+static bool kernel_boot_dtb_size(const void* address, size_t* out_size) {
+	const uint8_t* bytes = address;
+	uint32_t       size;
+
+	if (bytes == NULL || out_size == NULL || read_be32(bytes) != FDT_MAGIC) return false;
+	size = read_be32(bytes + 4u);
+	if (size < FDT_HEADER_SIZE) return false;
+	*out_size = size;
+	return true;
+}
 
 static enum mem_range_type kernel_boot_mem_range_type(uint64_t type) {
 	switch (type) {
@@ -246,9 +289,17 @@ bool kernel_boot_init(void) {
 	}
 
 	boot_rsdp_valid = false;
-	if (rsdp_req.response != NULL && rsdp_req.response->address != NULL) {
+	if (rsdp_req.response != NULL && rsdp_req.response->address != NULL &&
+	    kernel_boot_rsdp_size(rsdp_req.response->address, &boot_rsdp_size)) {
 		boot_rsdp_address = (uintptr_t)rsdp_req.response->address;
 		boot_rsdp_valid   = true;
+	}
+
+	boot_dtb_valid = false;
+	if (dtb_req.response != NULL && dtb_req.response->dtb_ptr != NULL &&
+	    kernel_boot_dtb_size(dtb_req.response->dtb_ptr, &boot_dtb_size)) {
+		boot_dtb_address = dtb_req.response->dtb_ptr;
+		boot_dtb_valid   = true;
 	}
 
 	for (size_t i = 0; i < KERNEL_BOOT_MAX_CPUS; i++) {
@@ -308,6 +359,18 @@ const struct kernel_boot_module* kernel_boot_module_find(const char* name) {
 bool kernel_boot_rsdp_address(uintptr_t* out_address) {
 	if (out_address == NULL || !boot_initialized || !boot_rsdp_valid) return false;
 	*out_address = boot_rsdp_address;
+	return true;
+}
+
+bool kernel_boot_rsdp_get(struct kernel_boot_data* out) {
+	if (out == NULL || !boot_initialized || !boot_rsdp_valid) return false;
+	*out = (struct kernel_boot_data){.address = (const void*)boot_rsdp_address, .size = boot_rsdp_size};
+	return true;
+}
+
+bool kernel_boot_dtb_get(struct kernel_boot_data* out) {
+	if (out == NULL || !boot_initialized || !boot_dtb_valid) return false;
+	*out = (struct kernel_boot_data){.address = boot_dtb_address, .size = boot_dtb_size};
 	return true;
 }
 

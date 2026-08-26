@@ -37,6 +37,8 @@ void   kernel_capability_test_serial_reset(void);
 size_t kernel_capability_test_serial_bytes(void);
 
 void kernel_boot_mock_set_modules(const struct kernel_boot_module* modules, size_t count);
+void kernel_boot_mock_set_rsdp(const void* address, size_t size);
+void kernel_boot_mock_set_dtb(const void* address, size_t size);
 void kernel_boot_mock_set_framebuffer(const struct kernel_boot_framebuffer* framebuffer);
 void kernel_boot_mock_reset(void);
 

@@ -41,6 +41,45 @@ Test(kernel_capability_resource, framebuffer_is_listed_only_when_available) {
 	kernel_capability_test_end(&ctx);
 }
 
+Test(kernel_capability_resource, boot_data_is_listed_and_acquired_when_available) {
+	struct kernel_capability_test_context ctx;
+	static uint8_t                        rsdp[36];
+	static uint8_t                        dtb[40];
+	struct kernel_resources_list_request  list_request = {
+		 .header = {.op = KERNEL_RESOURCES_OP_LIST}, .offset = 0u, .capacity = 4u};
+	uint8_t list_storage[sizeof(struct kernel_resources_list_response) + 4u * sizeof(enum kernel_resource_type)];
+	struct kernel_resources_list_response*  list_response   = (void*)list_storage;
+	struct kernel_resource_acquire_request  acquire_request = {.header = {.op = KERNEL_RESOURCES_OP_ACQUIRE},
+	                                                           .id     = KERNEL_RESOURCE_TYPE_RSDP};
+	struct kernel_resource_acquire_response acquire_response;
+	struct capability*                      acquired;
+	cap_id_t                                root_cap;
+	syscall_result_t                        result;
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/resources-boot-data");
+	kernel_boot_mock_set_rsdp(rsdp, sizeof(rsdp));
+	kernel_boot_mock_set_dtb(dtb, sizeof(dtb));
+	root_cap = init_resources(&ctx);
+	cr_assert_neq(root_cap, CAP_ID_INVALID);
+	result =
+		kernel_capability_test_call(root_cap, &list_request, sizeof(list_request), list_response, sizeof(list_storage));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(list_response->total, 4u);
+	cr_assert_eq(list_response->returned, 4u);
+	cr_assert_eq(list_response->ids[2], KERNEL_RESOURCE_TYPE_RSDP);
+	cr_assert_eq(list_response->ids[3], KERNEL_RESOURCE_TYPE_DTB);
+
+	result = kernel_capability_test_call(
+		root_cap, &acquire_request, sizeof(acquire_request), &acquire_response, sizeof(acquire_response));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	acquired = cap_acquire(acquire_response.cap);
+	cr_assert_not_null(acquired);
+	cr_assert_eq(acquired->target, process_pid(ctx.process));
+	cr_assert_eq(cap_rights(acquired), CAP_CALL | CAP_READ | CAP_DELEGATE);
+	cap_release(acquired);
+	kernel_capability_test_end(&ctx);
+}
+
 Test(kernel_capability_resource, empty_and_zero_capacity_lists_report_totals) {
 	struct kernel_capability_test_context ctx;
 	const struct kernel_boot_module       modules[] = {

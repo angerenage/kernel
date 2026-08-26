@@ -61,6 +61,13 @@ volatile struct limine_rsdp_request rsdp_req = {
 	.revision = 0,
 };
 
+/* Device tree blob request */
+__attribute__((used, section(".limine_requests")))
+volatile struct limine_dtb_request dtb_req = {
+	.id       = LIMINE_DTB_REQUEST,
+	.revision = 0,
+};
+
 /* Executable address */
 __attribute__((used, section(".limine_requests")))
 volatile struct limine_kernel_address_request exec_addr_req = {

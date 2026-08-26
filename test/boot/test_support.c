@@ -18,6 +18,7 @@ volatile struct LIMINE_MP(request) mp_req;
 volatile struct limine_memmap_request             memmap_req;
 volatile struct limine_hhdm_request               hhdm_req;
 volatile struct limine_rsdp_request               rsdp_req;
+volatile struct limine_dtb_request                dtb_req;
 volatile struct limine_executable_cmdline_request cmdline_req;
 volatile struct limine_kernel_address_request     exec_addr_req;
 volatile struct limine_module_request             module_req;
@@ -59,7 +60,11 @@ void boot_test_reset(void) {
 	memset(boot_modules, 0, sizeof(boot_modules));
 	boot_module_count = 0u;
 	boot_rsdp_address = 0u;
+	boot_rsdp_size    = 0u;
 	boot_rsdp_valid   = false;
+	boot_dtb_address  = NULL;
+	boot_dtb_size     = 0u;
+	boot_dtb_valid    = false;
 	memset(boot_cpu_launch, 0, sizeof(boot_cpu_launch));
 	memset(boot_cpu_private, 0, sizeof(boot_cpu_private));
 	boot_cpu_count   = 0u;
@@ -70,6 +75,7 @@ void boot_test_reset(void) {
 	memset((void*)&memmap_req, 0, sizeof(memmap_req));
 	memset((void*)&hhdm_req, 0, sizeof(hhdm_req));
 	memset((void*)&rsdp_req, 0, sizeof(rsdp_req));
+	memset((void*)&dtb_req, 0, sizeof(dtb_req));
 	memset((void*)&cmdline_req, 0, sizeof(cmdline_req));
 	memset((void*)&exec_addr_req, 0, sizeof(exec_addr_req));
 	memset((void*)&module_req, 0, sizeof(module_req));
