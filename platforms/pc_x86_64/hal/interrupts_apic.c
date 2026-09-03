@@ -94,14 +94,16 @@ static uintptr_t hhdm_phys_to_virt(uintptr_t phys) {
 static bool map_mmio_page(uintptr_t phys) {
 	uintptr_t virt = hhdm_phys_to_virt(phys & ~(uintptr_t)(X86_PAGE_SIZE - 1u));
 
-	uintptr_t existing_phys = 0;
-	if (hal_paging_query(hal_paging_kernel_space(), virt, &existing_phys, NULL)) return true;
+	if (hal_paging_query(hal_paging_kernel_space(), virt, NULL)) return true;
 
 	return hal_paging_map(hal_paging_kernel_space(),
-	                      virt,
-	                      phys & ~(uintptr_t)(X86_PAGE_SIZE - 1u),
-	                      HAL_PAGE_WRITE | HAL_PAGE_GLOBAL,
-	                      MEMORY_TYPE_DEVICE);
+	                      &(const struct hal_paging_map_request){
+							  virt,
+							  phys & ~(uintptr_t)(X86_PAGE_SIZE - 1u),
+							  X86_PAGE_SIZE,
+							  HAL_PAGE_READ | HAL_PAGE_WRITE | HAL_PAGE_GLOBAL,
+							  MEMORY_TYPE_DEVICE,
+						  });
 }
 
 static bool acpi_signature_equals(const char* actual, const char* expected) {

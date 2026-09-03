@@ -53,16 +53,19 @@ static enum address_transfer_result locate_locked(struct address_space* space, u
 	if (result != ADDRESS_TRANSFER_OK) return result;
 	if ((access & (ADDRESS_TRANSFER_PRESENT | ADDRESS_TRANSFER_FAULT_IN)) != 0u) {
 		uintptr_t page = address & ~(uintptr_t)(PMM_PAGE_SIZE - 1u);
-		if (!hal_paging_query(&space->hal, page, NULL, NULL)) {
+		if (!hal_paging_query(space->hal, page, NULL)) {
 			if ((access & ADDRESS_TRANSFER_PRESENT) != 0u) return ADDRESS_TRANSFER_NOT_MAPPED;
 			size_t    page_index = (address - mapping->base) / PMM_PAGE_SIZE;
 			uintptr_t phys;
 			if (!memory_object_resolve_page(mapping->memory, mapping->memory_page_offset + page_index, &phys) ||
-			    !hal_paging_map(&space->hal,
-			                    page,
-			                    phys,
-			                    vm_mapping_hal_flags(space, mapping->prot),
-			                    memory_object_memory_type(mapping->memory)))
+			    !hal_paging_map(space->hal,
+			                    &(const struct hal_paging_map_request){
+									.virtual_address  = page,
+									.physical_address = phys,
+									.size             = PMM_PAGE_SIZE,
+									.flags            = vm_mapping_hal_flags(space, mapping->prot),
+									.memory_type      = memory_object_memory_type(mapping->memory),
+								}))
 				return ADDRESS_TRANSFER_FAULT_FAILED;
 		}
 	}

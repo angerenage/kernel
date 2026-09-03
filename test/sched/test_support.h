@@ -11,8 +11,9 @@
 
 #include "../mocks/hal/cpu_mock.h"
 
-uintptr_t hal_paging_mock_active_root_phys(void);
-void      hal_paging_mock_reset_active(void);
+uintptr_t                hal_paging_mock_active_root_phys(void);
+void                     hal_paging_mock_reset_active(void);
+struct hal_paging_space* hal_paging_mock_space(uintptr_t root_phys);
 
 extern bool   sched_regression_reschedule_hook_armed;
 extern size_t sched_regression_reap_count;

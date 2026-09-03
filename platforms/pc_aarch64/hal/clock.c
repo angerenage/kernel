@@ -114,14 +114,16 @@ static inline uint32_t read_timer_control(void) {
 static bool map_mmio_page(uintptr_t phys) {
 	uintptr_t page_phys = phys & ~(uintptr_t)(AARCH64_MMIO_PAGE_SIZE - 1u);
 	uintptr_t page_virt;
-	uintptr_t existing_phys = 0;
-
 	page_virt = phys_to_virt(page_phys);
 	if (page_virt == 0u) return false;
-	if (hal_paging_query(hal_paging_kernel_space(), page_virt, &existing_phys, NULL)) return true;
+	if (hal_paging_query(hal_paging_kernel_space(), page_virt, NULL)) return true;
 
-	return hal_paging_map(
-		hal_paging_kernel_space(), page_virt, page_phys, HAL_PAGE_WRITE | HAL_PAGE_GLOBAL, MEMORY_TYPE_DEVICE);
+	return hal_paging_map(hal_paging_kernel_space(),
+	                      &(const struct hal_paging_map_request){page_virt,
+	                                                             page_phys,
+	                                                             AARCH64_MMIO_PAGE_SIZE,
+	                                                             HAL_PAGE_READ | HAL_PAGE_WRITE | HAL_PAGE_GLOBAL,
+	                                                             MEMORY_TYPE_DEVICE});
 }
 
 static bool gic_is_ready(void) {

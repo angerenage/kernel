@@ -32,7 +32,7 @@ Test(exception_fault, user_not_present_fault_materializes_only_the_current_user_
 	cr_assert(vm_handle_current_page_fault((uintptr_t)base, VMM_FAULT_NOT_PRESENT, VMM_FAULT_ACCESS_READ, true),
 	          "valid userspace lazy fault was not resolved");
 	cr_assert_eq(mock_paging_mapping_count(), 1u, "valid userspace fault did not materialize exactly one page");
-	cr_assert(hal_paging_query(vm_space_hal(&user_space), (uintptr_t)base, NULL, NULL),
+	cr_assert(hal_paging_query(vm_space_hal(&user_space), (uintptr_t)base, NULL),
 	          "faulted page was not mapped in the current user address space");
 
 	cpu_current_thread_store(cpu_current(), NULL);
@@ -99,11 +99,11 @@ Test(exception_fault, forbidden_user_access_does_not_materialize_lazy_backing) {
 	cr_assert(test_vm_map(&user_space, 1u, VMM_PROT_READ, 0u, 1u, 0u, &id, &base));
 	free_before = pmm_free_page_count();
 	cr_assert_not(vm_handle_current_page_fault((uintptr_t)base, VMM_FAULT_NOT_PRESENT, VMM_FAULT_ACCESS_WRITE, true));
-	cr_assert_not(hal_paging_query(vm_space_hal(&user_space), (uintptr_t)base, NULL, NULL));
+	cr_assert_not(hal_paging_query(vm_space_hal(&user_space), (uintptr_t)base, NULL));
 	cr_assert_eq(pmm_free_page_count(), free_before, "a rejected write fault must not allocate physical backing");
 
 	cr_assert(vm_handle_current_page_fault((uintptr_t)base, VMM_FAULT_NOT_PRESENT, VMM_FAULT_ACCESS_READ, true));
-	cr_assert(hal_paging_query(vm_space_hal(&user_space), (uintptr_t)base, NULL, NULL),
+	cr_assert(hal_paging_query(vm_space_hal(&user_space), (uintptr_t)base, NULL),
 	          "an allowed read fault must still materialize userspace lazy backing");
 
 	cpu_current_thread_store(cpu_current(), NULL);

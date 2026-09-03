@@ -6,11 +6,11 @@
 #include "../selftest.h"
 
 static void kernel_selftest_vmm_demand_maps_and_releases(struct kernel_selftest_context* ctx) {
-	struct memory_object* memory = NULL;
-	vmm_id_t              id     = VMM_ID_INVALID;
-	void*                 base   = NULL;
-	struct vmm_info       info;
-	uint64_t              flags;
+	struct memory_object*         memory = NULL;
+	vmm_id_t                      id     = VMM_ID_INVALID;
+	void*                         base   = NULL;
+	struct vmm_info               info;
+	struct hal_paging_translation translation;
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, memory_object_create_owned(2u, &memory), "object create failed", cleanup);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
@@ -28,7 +28,7 @@ static void kernel_selftest_vmm_demand_maps_and_releases(struct kernel_selftest_
 	                                cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, base != NULL && id != VMM_ID_INVALID, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(
-		ctx, !hal_paging_query(vm_space_hal(vm_space_kernel()), (uintptr_t)base, NULL, NULL), cleanup);
+		ctx, !hal_paging_query(vm_space_hal(vm_space_kernel()), (uintptr_t)base, NULL), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(
 		ctx, !vm_space_query(vm_space_kernel(), (uintptr_t)base - PMM_PAGE_SIZE, &info), cleanup);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
@@ -37,12 +37,12 @@ static void kernel_selftest_vmm_demand_maps_and_releases(struct kernel_selftest_
 		"fault resolution failed",
 		cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(
-		ctx, hal_paging_query(vm_space_hal(vm_space_kernel()), (uintptr_t)base, NULL, &flags), cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, (flags & HAL_PAGE_WRITE) != 0u, cleanup);
+		ctx, hal_paging_query(vm_space_hal(vm_space_kernel()), (uintptr_t)base, &translation), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, (translation.flags & HAL_PAGE_WRITE) != 0u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, vm_space_protect(vm_space_kernel(), id, VMM_PROT_READ | VMM_PROT_GLOBAL), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(
-		ctx, hal_paging_query(vm_space_hal(vm_space_kernel()), (uintptr_t)base, NULL, &flags), cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, (flags & HAL_PAGE_WRITE) == 0u, cleanup);
+		ctx, hal_paging_query(vm_space_hal(vm_space_kernel()), (uintptr_t)base, &translation), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, (translation.flags & HAL_PAGE_WRITE) == 0u, cleanup);
 
 cleanup:
 	if (id != VMM_ID_INVALID) (void)vm_space_unmap(vm_space_kernel(), id);

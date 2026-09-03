@@ -54,7 +54,7 @@ Test(vmm, huge_sparse_mapping_uses_constant_initial_metadata) {
 	cr_assert(memory_object_create_owned(200000u, &memory));
 	cr_assert(map_object(vm_space_kernel(), memory, 0u, 200000u, 0u, 1u, 0u, VMM_PROT_READ, &id, &base));
 	cr_assert_eq(before - pmm_free_page_count(), 2u, "object plus vector should use two control pages");
-	cr_assert_not(hal_paging_query(vm_space_hal(vm_space_kernel()), (uintptr_t)base, NULL, NULL));
+	cr_assert_not(hal_paging_query(vm_space_hal(vm_space_kernel()), (uintptr_t)base, NULL));
 	cr_assert(vm_space_unmap(vm_space_kernel(), id));
 	memory_object_release(memory);
 	cr_assert_eq(pmm_free_page_count(), before);
@@ -80,58 +80,58 @@ Test(vmm, owned_object_implicit_zero_and_sparse_write) {
 }
 
 Test(vmm, shared_object_faults_reuse_backing_and_survive_unmap) {
-	struct address_space  a = {0}, b = {0};
-	struct memory_object* memory;
-	vmm_id_t              a_id, b_id, remap_id;
-	void *                a_base, *b_base, *remap_base;
-	uintptr_t             a_phys, b_phys, remap_phys;
-	uint8_t               written = 0x5au, readback = 0u;
+	struct address_space          a = {0}, b = {0};
+	struct memory_object*         memory;
+	vmm_id_t                      a_id, b_id, remap_id;
+	void *                        a_base, *b_base, *remap_base;
+	struct hal_paging_translation a_translation, b_translation, remap_translation;
+	uint8_t                       written = 0x5au, readback = 0u;
 	init_test_vmm(arena, sizeof(arena));
 	cr_assert(vm_space_create_user(&a));
 	cr_assert(vm_space_create_user(&b));
 	cr_assert(memory_object_create_owned(2u, &memory));
 	cr_assert(map_object(&a, memory, 0u, 2u, 0u, 1u, 0u, VMM_PROT_READ | VMM_PROT_WRITE, &a_id, &a_base));
 	cr_assert(map_object(&b, memory, 0u, 2u, 0u, 1u, 0u, VMM_PROT_READ | VMM_PROT_WRITE, &b_id, &b_base));
-	cr_assert_not(hal_paging_query(vm_space_hal(&a), (uintptr_t)a_base, NULL, NULL));
+	cr_assert_not(hal_paging_query(vm_space_hal(&a), (uintptr_t)a_base, NULL));
 	cr_assert(vm_space_resolve_page_fault(&a, (uintptr_t)a_base, VMM_FAULT_ACCESS_WRITE));
 	cr_assert(vm_space_resolve_page_fault(&b, (uintptr_t)b_base, VMM_FAULT_ACCESS_READ));
-	cr_assert(hal_paging_query(vm_space_hal(&a), (uintptr_t)a_base, &a_phys, NULL));
-	cr_assert(hal_paging_query(vm_space_hal(&b), (uintptr_t)b_base, &b_phys, NULL));
-	cr_assert_eq(a_phys, b_phys);
+	cr_assert(hal_paging_query(vm_space_hal(&a), (uintptr_t)a_base, &a_translation));
+	cr_assert(hal_paging_query(vm_space_hal(&b), (uintptr_t)b_base, &b_translation));
+	cr_assert_eq(a_translation.physical_address, b_translation.physical_address);
 	cr_assert(memory_object_write(memory, 0u, &written, 1u));
 	cr_assert(memory_object_read(memory, 0u, &readback, 1u));
 	cr_assert_eq(readback, written);
 	cr_assert(vm_space_unmap(&a, a_id));
-	cr_assert(hal_paging_query(vm_space_hal(&b), (uintptr_t)b_base, &b_phys, NULL));
+	cr_assert(hal_paging_query(vm_space_hal(&b), (uintptr_t)b_base, &b_translation));
 	cr_assert(map_object(&a, memory, 0u, 2u, 0u, 1u, 0u, VMM_PROT_READ, &remap_id, &remap_base));
 	cr_assert(vm_space_resolve_page_fault(&a, (uintptr_t)remap_base, VMM_FAULT_ACCESS_READ));
-	cr_assert(hal_paging_query(vm_space_hal(&a), (uintptr_t)remap_base, &remap_phys, NULL));
-	cr_assert_eq(remap_phys, b_phys);
+	cr_assert(hal_paging_query(vm_space_hal(&a), (uintptr_t)remap_base, &remap_translation));
+	cr_assert_eq(remap_translation.physical_address, b_translation.physical_address);
 	cr_assert(vm_space_unmap(&a, remap_id));
 	vm_space_destroy(&a);
-	cr_assert(hal_paging_query(vm_space_hal(&b), (uintptr_t)b_base, NULL, NULL));
+	cr_assert(hal_paging_query(vm_space_hal(&b), (uintptr_t)b_base, NULL));
 	cr_assert(vm_space_unmap(&b, b_id));
 	vm_space_destroy(&b);
 	memory_object_release(memory);
 }
 
 Test(vmm, protect_updates_present_and_future_pages) {
-	struct memory_object* memory;
-	vmm_id_t              id;
-	void*                 base;
-	uint64_t              flags;
+	struct memory_object*         memory;
+	vmm_id_t                      id;
+	void*                         base;
+	struct hal_paging_translation translation;
 	init_test_vmm(arena, sizeof(arena));
 	cr_assert(memory_object_create_owned(2u, &memory));
 	cr_assert(map_object(vm_space_kernel(), memory, 0u, 2u, 0u, 1u, 0u, VMM_PROT_READ | VMM_PROT_WRITE, &id, &base));
 	cr_assert(vm_space_resolve_page_fault(vm_space_kernel(), (uintptr_t)base, VMM_FAULT_ACCESS_WRITE));
 	cr_assert(vm_space_protect(vm_space_kernel(), id, VMM_PROT_READ | VMM_PROT_EXEC));
-	cr_assert(hal_paging_query(vm_space_hal(vm_space_kernel()), (uintptr_t)base, NULL, &flags));
-	cr_assert_eq(flags, HAL_PAGE_EXEC);
+	cr_assert(hal_paging_query(vm_space_hal(vm_space_kernel()), (uintptr_t)base, &translation));
+	cr_assert_eq(translation.flags, HAL_PAGE_READ | HAL_PAGE_EXEC);
 	cr_assert(vm_space_resolve_page_fault(vm_space_kernel(), (uintptr_t)base + PMM_PAGE_SIZE, VMM_FAULT_ACCESS_READ));
-	cr_assert(hal_paging_query(vm_space_hal(vm_space_kernel()), (uintptr_t)base + PMM_PAGE_SIZE, NULL, &flags));
-	cr_assert_eq(flags, HAL_PAGE_EXEC);
+	cr_assert(hal_paging_query(vm_space_hal(vm_space_kernel()), (uintptr_t)base + PMM_PAGE_SIZE, &translation));
+	cr_assert_eq(translation.flags, HAL_PAGE_READ | HAL_PAGE_EXEC);
 	cr_assert(vm_space_unmap(vm_space_kernel(), id));
-	cr_assert(memory_object_read(memory, 0u, &flags, sizeof(flags)), "unmap discarded object contents");
+	cr_assert(memory_object_read(memory, 0u, &translation, sizeof(uint64_t)), "unmap discarded object contents");
 	memory_object_release(memory);
 }
 

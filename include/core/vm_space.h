@@ -23,7 +23,7 @@ struct vm_mapping {
 struct address_space {
 	uintptr_t                base;
 	uintptr_t                end;
-	struct hal_address_space hal;
+	struct hal_paging_space* hal;
 	struct spinlock          lock;
 	struct vm_mapping*       mappings;
 	uintptr_t                mappings_phys;
@@ -73,7 +73,7 @@ void vm_space_destroy(struct address_space* space);
 bool vm_space_is_initialized(const struct address_space* space);
 
 /* Return an address space's hardware paging handle. */
-struct hal_address_space* vm_space_hal(struct address_space* space);
+struct hal_paging_space* vm_space_hal(struct address_space* space);
 
 /* Activate an address space on the current CPU. */
 bool vm_space_activate(struct address_space* space);

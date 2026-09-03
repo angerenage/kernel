@@ -5,63 +5,78 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/*
- * Thin architecture paging interface used by the core VMM.
- * The contract is page-granular and assumes 4 KiB pages only.
- */
+struct hal_paging_space;
 
 enum hal_page_flags {
-	HAL_PAGE_WRITE  = 1u << 0,
-	HAL_PAGE_EXEC   = 1u << 1,
-	HAL_PAGE_GLOBAL = 1u << 2,
-	HAL_PAGE_USER   = 1u << 3,
+	HAL_PAGE_READ   = 1u << 0,
+	HAL_PAGE_WRITE  = 1u << 1,
+	HAL_PAGE_EXEC   = 1u << 2,
+	HAL_PAGE_GLOBAL = 1u << 3,
+	HAL_PAGE_USER   = 1u << 4,
 };
 
-#define HAL_PAGE_VALID_MASK ((uint64_t)(HAL_PAGE_WRITE | HAL_PAGE_EXEC | HAL_PAGE_GLOBAL | HAL_PAGE_USER))
+#define HAL_PAGE_VALID_MASK                                                                                            \
+	((uint64_t)(HAL_PAGE_READ | HAL_PAGE_WRITE | HAL_PAGE_EXEC | HAL_PAGE_GLOBAL | HAL_PAGE_USER))
 
 /*
- * Architecture-owned hardware address-space handle.
- *
- * Architectures with one root use lower_root_phys. Split-root architectures use
- * lower_root_phys for user/lower mappings and upper_root_phys for kernel/upper
- * mappings. Kernel mappings are inherited when a new space is created.
+ * leaf_size_mask uses bit N for a supported 2^N-byte translation leaf.
+ * minimum_leaf_size is the minimum address and size granularity accepted by the HAL.
  */
-struct hal_address_space {
-	uintptr_t lower_root_phys;
-	uintptr_t upper_root_phys;
-	uint64_t  flags;
+struct hal_paging_info {
+	size_t   minimum_leaf_size;
+	uint64_t leaf_size_mask;
 };
 
-/* Validate that the currently active page-table root can be queried and updated through this HAL backend. */
+/* Parameters for mapping one contiguous physical extent. */
+struct hal_paging_map_request {
+	uintptr_t        virtual_address;
+	uintptr_t        physical_address;
+	size_t           size;
+	uint64_t         flags;
+	enum memory_type memory_type;
+};
+
+/* Information about the translation containing one virtual address. */
+struct hal_paging_translation {
+	uintptr_t        physical_address;
+	size_t           leaf_size;
+	uint64_t         flags;
+	enum memory_type memory_type;
+};
+
+/* Initialize paging and capture the hardware address space currently used by the kernel. */
 bool hal_paging_init(void);
 
-/* Return the kernel hardware address space captured during hal_paging_init(). */
-struct hal_address_space* hal_paging_kernel_space(void);
+/* Return the translation capabilities of the active architecture backend. */
+const struct hal_paging_info* hal_paging_info(void);
 
-/* Create a hardware user address space that inherits the kernel mappings needed to run kernel code. */
-bool hal_paging_space_create(struct hal_address_space* out_space);
+/* Return the kernel paging space captured during initialization. */
+struct hal_paging_space* hal_paging_kernel_space(void);
 
-/* Release the root page owned by a hardware address space. Leaf backing pages remain owned by the VMM/PMM caller. */
-void hal_paging_space_destroy(struct hal_address_space* space);
+/* Return whether the requested protection and memory type can be enforced exactly. */
+bool hal_paging_mapping_supported(uint64_t flags, enum memory_type memory_type);
 
-/* Switch the current CPU to the supplied hardware address space. */
-bool hal_paging_activate(const struct hal_address_space* space);
+/* Create a process paging space with the required kernel mappings. */
+bool hal_paging_space_create(struct hal_paging_space** out_space);
 
-/*
- * Create a mapping in a hardware address space. Permissions and memory type are
- * separate contracts; both addresses must be page aligned and currently unmapped.
- */
-bool hal_paging_map(struct hal_address_space* space, uintptr_t virt, uintptr_t phys, uint64_t flags,
-                    enum memory_type memory_type);
+/* Destroy one paging space and release its architecture-owned translation state. */
+void hal_paging_space_destroy(struct hal_paging_space* space);
 
-/* Remove hardware mappings from a virtual range. */
-bool hal_paging_unmap_range(struct hal_address_space* space, uintptr_t virt, size_t page_count);
+/* Activate one process paging space on the current CPU. */
+bool hal_paging_activate(const struct hal_paging_space* space);
 
-/* Change only access permissions of hardware mappings in a virtual range. */
-bool hal_paging_protect_range(struct hal_address_space* space, uintptr_t virt, size_t page_count, uint64_t flags);
+/* Map one contiguous physical extent into one contiguous virtual range. */
+bool hal_paging_map(struct hal_paging_space* space, const struct hal_paging_map_request* request);
 
-/* Resolve an existing mapping, returning the translated physical address and reconstructed HAL permission flags. */
-bool hal_paging_query(const struct hal_address_space* space, uintptr_t virt, uintptr_t* out_phys, uint64_t* out_flags);
+/* Remove all translations intersecting exactly the supplied virtual range. */
+bool hal_paging_unmap(struct hal_paging_space* space, uintptr_t virtual_address, size_t size);
+
+/* Change the protection of exactly the supplied virtual range. */
+bool hal_paging_protect(struct hal_paging_space* space, uintptr_t virtual_address, size_t size, uint64_t flags);
+
+/* Query the translation containing one virtual address. */
+bool hal_paging_query(const struct hal_paging_space* space, uintptr_t virtual_address,
+                      struct hal_paging_translation* out_translation);
 
 /* Make bytes written through a kernel mapping visible to instruction fetch. */
 void hal_paging_sync_executable_range(void* address, size_t size);

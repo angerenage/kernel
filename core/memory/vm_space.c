@@ -46,6 +46,7 @@ static void fill_info(const struct vm_mapping* mapping, struct vmm_info* info) {
 
 uint64_t vm_mapping_hal_flags(const struct address_space* space, vmm_prot_t prot) {
 	uint64_t flags = 0u;
+	if ((prot & VMM_PROT_READ) != 0u) flags |= HAL_PAGE_READ;
 	if ((prot & VMM_PROT_WRITE) != 0u) flags |= HAL_PAGE_WRITE;
 	if ((prot & VMM_PROT_EXEC) != 0u) flags |= HAL_PAGE_EXEC;
 	if ((prot & VMM_PROT_GLOBAL) != 0u) flags |= HAL_PAGE_GLOBAL;
@@ -61,15 +62,15 @@ struct address_space* vm_space_kernel(void) {
 	return &kernel_space;
 }
 
-struct hal_address_space* vm_space_hal(struct address_space* space) {
-	return vm_space_is_initialized(space) ? &space->hal : NULL;
+struct hal_paging_space* vm_space_hal(struct address_space* space) {
+	return vm_space_is_initialized(space) ? space->hal : NULL;
 }
 
 bool vm_space_activate(struct address_space* space) {
-	return vm_space_is_initialized(space) && hal_paging_activate(&space->hal);
+	return vm_space_is_initialized(space) && hal_paging_activate(space->hal);
 }
 
-static bool space_init(struct address_space* space, uintptr_t base, size_t bytes, const struct hal_address_space* hal) {
+static bool space_init(struct address_space* space, uintptr_t base, size_t bytes, struct hal_paging_space* hal) {
 	uint64_t end;
 	if (space == NULL || hal == NULL || bytes == 0u || (base & (PMM_PAGE_SIZE - 1u)) != 0u ||
 	    (bytes & (PMM_PAGE_SIZE - 1u)) != 0u || add_overflow_u64(base, bytes, &end))
@@ -77,7 +78,7 @@ static bool space_init(struct address_space* space, uintptr_t base, size_t bytes
 	memset(space, 0, sizeof(*space));
 	space->base            = base;
 	space->end             = (uintptr_t)end;
-	space->hal             = *hal;
+	space->hal             = hal;
 	space->next_mapping_id = 1u;
 	spinlock_init_class(&space->lock,
 	                    space_is_kernel(space) ? "kernel_address_space" : "user_address_space",
@@ -87,7 +88,7 @@ static bool space_init(struct address_space* space, uintptr_t base, size_t bytes
 }
 
 bool vm_init(void) {
-	struct hal_address_space* hal;
+	struct hal_paging_space* hal;
 	initialized = false;
 	if (vm_space_is_initialized(&kernel_space)) vm_space_destroy(&kernel_space);
 	if (!hal_paging_init() || (hal = hal_paging_kernel_space()) == NULL ||
@@ -98,10 +99,10 @@ bool vm_init(void) {
 }
 
 bool vm_space_create_user(struct address_space* space) {
-	struct hal_address_space hal;
+	struct hal_paging_space* hal;
 	if (!initialized || space == NULL || space == &kernel_space || !hal_paging_space_create(&hal)) return false;
-	if (!space_init(space, MM_USER_VMM_BASE, MM_USER_VMM_SIZE, &hal)) {
-		hal_paging_space_destroy(&hal);
+	if (!space_init(space, MM_USER_VMM_BASE, MM_USER_VMM_SIZE, hal)) {
+		hal_paging_space_destroy(hal);
 		return false;
 	}
 	return true;
@@ -200,6 +201,9 @@ bool vm_space_map(struct address_space* space, const struct vm_map_request* requ
 		return false;
 	if (memory_object_memory_type(request->memory) != MEMORY_TYPE_NORMAL && (request->prot & VMM_PROT_EXEC) != 0u)
 		return false;
+	if (!hal_paging_mapping_supported(vm_mapping_hal_flags(space, request->prot),
+	                                  memory_object_memory_type(request->memory)))
+		return false;
 	align_pages = request->align_pages == 0u ? 1u : request->align_pages;
 	if ((align_pages & (align_pages - 1u)) != 0u || mul_overflow_size(align_pages, PMM_PAGE_SIZE, &align_bytes))
 		return false;
@@ -259,7 +263,7 @@ bool vm_space_unmap(struct address_space* space, vmm_id_t id) {
 	if (!initialized || !vm_space_is_initialized(space) || id == VMM_ID_INVALID) return false;
 	state   = spinlock_lock_irqsave(&space->lock);
 	mapping = vm_mapping_find_id_locked(space, id);
-	if (mapping == NULL || !hal_paging_unmap_range(&space->hal, mapping->base, mapping->page_count)) {
+	if (mapping == NULL || !hal_paging_unmap(space->hal, mapping->base, mapping->page_count * PMM_PAGE_SIZE)) {
 		spinlock_unlock_irqrestore(&space->lock, state);
 		return false;
 	}
@@ -290,7 +294,8 @@ bool vm_space_protect(struct address_space* space, vmm_id_t id, vmm_prot_t prot)
 	    (prot & VMM_PROT_EXEC) != 0u)
 		mapping = NULL;
 	if (mapping == NULL ||
-	    !hal_paging_protect_range(&space->hal, mapping->base, mapping->page_count, vm_mapping_hal_flags(space, prot))) {
+	    !hal_paging_protect(
+			space->hal, mapping->base, mapping->page_count * PMM_PAGE_SIZE, vm_mapping_hal_flags(space, prot))) {
 		spinlock_unlock_irqrestore(&space->lock, state);
 		return false;
 	}
@@ -315,13 +320,16 @@ static bool access_allowed(vmm_prot_t prot, enum vmm_fault_access access) {
 static bool resolve_locked(struct address_space* space, struct vm_mapping* mapping, size_t page) {
 	uintptr_t virt = mapping->base + page * (uintptr_t)PMM_PAGE_SIZE;
 	uintptr_t phys;
-	if (hal_paging_query(&space->hal, virt, NULL, NULL)) return true;
+	if (hal_paging_query(space->hal, virt, NULL)) return true;
 	if (!memory_object_resolve_page(mapping->memory, mapping->memory_page_offset + page, &phys)) return false;
-	return hal_paging_map(&space->hal,
-	                      virt,
-	                      phys,
-	                      vm_mapping_hal_flags(space, mapping->prot),
-	                      memory_object_memory_type(mapping->memory));
+	return hal_paging_map(space->hal,
+	                      &(const struct hal_paging_map_request){
+							  .virtual_address  = virt,
+							  .physical_address = phys,
+							  .size             = PMM_PAGE_SIZE,
+							  .flags            = vm_mapping_hal_flags(space, mapping->prot),
+							  .memory_type      = memory_object_memory_type(mapping->memory),
+						  });
 }
 
 bool vm_space_prefault(struct address_space* space, vmm_id_t id, size_t first_page, size_t page_count) {
@@ -406,21 +414,22 @@ size_t vm_space_mapping_count(struct address_space* space) {
 
 void vm_space_destroy(struct address_space* space) {
 	struct irq_state         state;
-	struct hal_address_space hal;
+	struct hal_paging_space* hal;
 	if (!vm_space_is_initialized(space)) return;
 	state = spinlock_lock_irqsave(&space->lock);
 	hal   = space->hal;
 	if (space_is_kernel(space)) {
 		for (size_t i = 0u; i < space->mapping_count; i++)
-			if (!hal_paging_unmap_range(&space->hal, space->mappings[i].base, space->mappings[i].page_count)) hcf();
+			if (!hal_paging_unmap(space->hal, space->mappings[i].base, space->mappings[i].page_count * PMM_PAGE_SIZE))
+				hcf();
 	}
-	else hal_paging_space_destroy(&hal);
+	else hal_paging_space_destroy(hal);
 	for (size_t i = 0u; i < space->mapping_count; i++) memory_object_release(space->mappings[i].memory);
 	if (space->mapping_capacity != 0u)
 		(void)pmm_free_pages(space->mappings_phys, vector_pages(space->mapping_capacity));
 	space->base             = 0u;
 	space->end              = 0u;
-	space->hal              = (struct hal_address_space){0};
+	space->hal              = NULL;
 	space->mappings         = NULL;
 	space->mappings_phys    = 0u;
 	space->mapping_count    = 0u;
@@ -430,10 +439,8 @@ void vm_space_destroy(struct address_space* space) {
 }
 
 static enum vmm_fault_kind classify_fault(struct address_space* space, uintptr_t address) {
-	return vm_space_is_initialized(space) &&
-	               hal_paging_query(&space->hal, address & ~(uintptr_t)(PMM_PAGE_SIZE - 1u), NULL, NULL)
-	           ? VMM_FAULT_PROTECTION
-	           : VMM_FAULT_NOT_PRESENT;
+	return vm_space_is_initialized(space) && hal_paging_query(space->hal, address, NULL) ? VMM_FAULT_PROTECTION
+	                                                                                     : VMM_FAULT_NOT_PRESENT;
 }
 
 bool vm_handle_current_page_fault(uintptr_t address, enum vmm_fault_kind kind, enum vmm_fault_access access,
