@@ -4,6 +4,7 @@
 #include <base/math.h>
 #include <base/module.h>
 #include <base/syscall.h>
+#include <base/vmm.h>
 #include <core/capability.h>
 #include <core/memory_object.h>
 #include <core/mm.h>
@@ -40,13 +41,13 @@ static bool boot_module_mapping_layout(const struct kernel_boot_module*   module
 	module_address = (uintptr_t)module->address;
 	if (module_address < boot_info.direct_map_offset) return false;
 	physical_address          = module_address - boot_info.direct_map_offset;
-	out_layout->physical_base = physical_address & ~(uintptr_t)(PMM_PAGE_SIZE - 1u);
+	out_layout->physical_base = physical_address & ~(uintptr_t)(VMM_PAGE_SIZE - 1u);
 	out_layout->page_offset   = (size_t)(physical_address - out_layout->physical_base);
 	if (add_overflow_size(out_layout->page_offset, module->size, &mapped_size) ||
-	    add_overflow_size(mapped_size, PMM_PAGE_SIZE - 1u, &mapped_size)) {
+	    add_overflow_size(mapped_size, VMM_PAGE_SIZE - 1u, &mapped_size)) {
 		return false;
 	}
-	out_layout->page_count = mapped_size / PMM_PAGE_SIZE;
+	out_layout->page_count = mapped_size / VMM_PAGE_SIZE;
 	return out_layout->page_count != 0u;
 }
 

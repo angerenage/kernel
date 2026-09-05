@@ -1,8 +1,10 @@
+#include <base/vmm.h>
+
 #include "test_support.h"
 
 static void make_minimal_exec(struct elf_test_image* image) {
-	const uint64_t file_offset = PMM_PAGE_SIZE;
-	const uint64_t vaddr       = MM_USER_VMM_BASE + 4u * (uint64_t)PMM_PAGE_SIZE;
+	const uint64_t file_offset = VMM_PAGE_SIZE;
+	const uint64_t vaddr       = MM_USER_VMM_BASE + 4u * (uint64_t)VMM_PAGE_SIZE;
 	elf_test_image_init(image, 1u);
 	elf_test_header(image)->entry = vaddr;
 	elf_test_set_load(image, 0u, file_offset, vaddr, 16u, 16u, ELF_TEST_PF_R | ELF_TEST_PF_X);
@@ -68,10 +70,10 @@ Test(elf_loader_format, rejects_filesz_larger_than_memsz_even_when_memsz_is_zero
 	struct kernel_boot_module   module;
 	struct kernel_elf_process   loaded = {0};
 	enum kernel_elf_load_result result;
-	const uint64_t              exec_offset = PMM_PAGE_SIZE;
-	const uint64_t              exec_vaddr  = MM_USER_VMM_BASE + 4u * (uint64_t)PMM_PAGE_SIZE;
-	const uint64_t              bad_offset  = 2u * (uint64_t)PMM_PAGE_SIZE;
-	const uint64_t              bad_vaddr   = MM_USER_VMM_BASE + 8u * (uint64_t)PMM_PAGE_SIZE;
+	const uint64_t              exec_offset = VMM_PAGE_SIZE;
+	const uint64_t              exec_vaddr  = MM_USER_VMM_BASE + 4u * (uint64_t)VMM_PAGE_SIZE;
+	const uint64_t              bad_offset  = 2u * (uint64_t)VMM_PAGE_SIZE;
+	const uint64_t              bad_vaddr   = MM_USER_VMM_BASE + 8u * (uint64_t)VMM_PAGE_SIZE;
 
 	elf_test_init_environment();
 	elf_test_image_init(&image, 2u);
@@ -92,12 +94,12 @@ Test(elf_loader_format, rejects_segment_file_ranges_outside_the_module) {
 	struct elf_test_image     image;
 	struct kernel_boot_module module;
 	struct kernel_elf_process loaded;
-	const uint64_t            vaddr = MM_USER_VMM_BASE + 4u * (uint64_t)PMM_PAGE_SIZE;
+	const uint64_t            vaddr = MM_USER_VMM_BASE + 4u * (uint64_t)VMM_PAGE_SIZE;
 	elf_test_init_environment();
 	elf_test_image_init(&image, 1u);
 	elf_test_header(&image)->entry = vaddr;
 	elf_test_set_load(
-		&image, 0u, 2u * PMM_PAGE_SIZE, vaddr, PMM_PAGE_SIZE + 1u, PMM_PAGE_SIZE + 1u, ELF_TEST_PF_R | ELF_TEST_PF_X);
+		&image, 0u, 2u * VMM_PAGE_SIZE, vaddr, VMM_PAGE_SIZE + 1u, VMM_PAGE_SIZE + 1u, ELF_TEST_PF_R | ELF_TEST_PF_X);
 	module = elf_test_module(&image);
 	cr_assert_eq(kernel_elf_load_process(&module, "bad-file-range", &loaded), KERNEL_ELF_LOAD_BAD_FORMAT);
 	cr_assert_null(loaded.process);
@@ -110,7 +112,7 @@ Test(elf_loader_format, rejects_overflowing_virtual_segment_ranges) {
 	elf_test_init_environment();
 	elf_test_image_init(&image, 1u);
 	elf_test_header(&image)->entry = UINT64_MAX - 15u;
-	elf_test_set_load(&image, 0u, PMM_PAGE_SIZE, UINT64_MAX - 15u, 8u, 32u, ELF_TEST_PF_R | ELF_TEST_PF_X);
+	elf_test_set_load(&image, 0u, VMM_PAGE_SIZE, UINT64_MAX - 15u, 8u, 32u, ELF_TEST_PF_R | ELF_TEST_PF_X);
 	module = elf_test_module(&image);
 	cr_assert_eq(kernel_elf_load_process(&module, "overflow", &loaded), KERNEL_ELF_LOAD_BAD_FORMAT);
 	cr_assert_null(loaded.process);
@@ -120,12 +122,12 @@ Test(elf_loader_format, rejects_entry_points_without_executable_mapping) {
 	struct elf_test_image     image;
 	struct kernel_boot_module module;
 	struct kernel_elf_process loaded;
-	const uint64_t            vaddr = MM_USER_VMM_BASE + 4u * (uint64_t)PMM_PAGE_SIZE;
+	const uint64_t            vaddr = MM_USER_VMM_BASE + 4u * (uint64_t)VMM_PAGE_SIZE;
 	elf_test_init_environment();
 	elf_test_image_init(&image, 1u);
 	elf_test_header(&image)->entry = vaddr;
-	elf_test_set_load(&image, 0u, PMM_PAGE_SIZE, vaddr, 16u, 16u, ELF_TEST_PF_R | ELF_TEST_PF_W);
-	memset(image.bytes + PMM_PAGE_SIZE, 0x24, 16u);
+	elf_test_set_load(&image, 0u, VMM_PAGE_SIZE, vaddr, 16u, 16u, ELF_TEST_PF_R | ELF_TEST_PF_W);
+	memset(image.bytes + VMM_PAGE_SIZE, 0x24, 16u);
 	module = elf_test_module(&image);
 	cr_assert_eq(kernel_elf_load_process(&module, "nonexec-entry", &loaded), KERNEL_ELF_LOAD_BAD_FORMAT);
 	cr_assert_null(loaded.process);

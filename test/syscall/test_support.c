@@ -1,10 +1,12 @@
 #include "test_support.h"
 
+#include <base/vmm.h>
+
 #define SYSCALL_TEST_ARENA_SIZE KiB(2048)
 #define SYSCALL_TEST_HEAP_SIZE KiB(256)
 
-static uint8_t syscall_test_arena[SYSCALL_TEST_ARENA_SIZE] __attribute__((aligned(PMM_PAGE_SIZE)));
-static uint8_t syscall_test_heap[SYSCALL_TEST_HEAP_SIZE] __attribute__((aligned(PMM_PAGE_SIZE)));
+static uint8_t syscall_test_arena[SYSCALL_TEST_ARENA_SIZE] __attribute__((aligned(VMM_PAGE_SIZE)));
+static uint8_t syscall_test_heap[SYSCALL_TEST_HEAP_SIZE] __attribute__((aligned(VMM_PAGE_SIZE)));
 static size_t  syscall_test_heap_offset;
 
 bool heap_grow_pages(size_t page_count, void** out_base) {
@@ -13,7 +15,7 @@ bool heap_grow_pages(size_t page_count, void** out_base) {
 
 	if (out_base == NULL) return false;
 	*out_base = NULL;
-	bytes     = page_count * PMM_PAGE_SIZE;
+	bytes     = page_count * VMM_PAGE_SIZE;
 	for (;;) {
 		offset = __atomic_load_n(&syscall_test_heap_offset, __ATOMIC_ACQUIRE);
 		if (bytes > SYSCALL_TEST_HEAP_SIZE - offset) return false;

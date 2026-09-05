@@ -1,13 +1,9 @@
 #pragma once
 
-#include <base/vmm.h>
 #include <core/mm.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-
-/* Physical page size managed by the physical memory manager and used throughout the kernel. */
-#define PMM_PAGE_SIZE VMM_PAGE_SIZE
 
 enum pmm_claim_result {
 	PMM_CLAIM_OK = 0,
@@ -15,34 +11,42 @@ enum pmm_claim_result {
 	PMM_CLAIM_UNAVAILABLE,
 };
 
-/*
- * Physical memory manager.
- *
- * The PMM consumes the boot memory map, carves out its own metadata from usable
- * RAM, and then hands out contiguous runs of 4 KiB physical pages.
- */
+struct pmm_info {
+	size_t allocation_granule;
+};
 
-/* Initialize the allocator from the boot memory map and record the direct-map offset for metadata access. */
+struct pmm_extent {
+	uintptr_t address;
+	size_t    size;
+};
+
+struct pmm_alloc_request {
+	size_t    size;            /* Nonzero multiple of allocation_granule. */
+	size_t    alignment;       /* Zero selects allocation_granule, otherwise a power of two >= allocation_granule. */
+	uintptr_t minimum_address; /* Inclusive. */
+	uintptr_t maximum_address; /* Exclusive; zero means unbounded. */
+};
+
+/* Initialize physical memory management from the boot memory map. */
 bool pmm_init(const struct mem_range* memory_map, size_t range_count, uintptr_t direct_map_offset);
 
-/* Allocate a contiguous run inside an optional physical window with the requested page alignment. */
-bool pmm_alloc_pages_constrained(size_t count, uintptr_t physical_min, uintptr_t physical_max, size_t align_pages,
-                                 uintptr_t* out_phys);
+/* Return physical allocation properties. */
+const struct pmm_info* pmm_info(void);
 
-/* Allocate count contiguous physical pages and return the base physical address. */
-bool pmm_alloc_pages(size_t count, uintptr_t* out_phys);
+/* Allocate one contiguous physical extent. out_extent is defined only on success. */
+bool pmm_alloc(const struct pmm_alloc_request* request, struct pmm_extent* out_extent);
 
-/* Claim one exact free physical run, or report that the run is outside PMM-managed RAM. */
-enum pmm_claim_result pmm_claim_pages(uintptr_t phys, size_t count);
+/* Claim one exact free extent from PMM-managed memory. */
+enum pmm_claim_result pmm_claim(struct pmm_extent extent);
 
-/* Free a previously allocated contiguous run of count pages starting at phys. */
-bool pmm_free_pages(uintptr_t phys, size_t count);
+/* Release one allocated or claimed physical extent. */
+bool pmm_free(struct pmm_extent extent);
 
-/* Number of usable memory ranges currently managed by the PMM. */
+/* Return the number of physical memory ranges managed by the PMM. */
 size_t pmm_managed_range_count(void);
 
-/* Total number of pages under PMM management. */
-size_t pmm_total_page_count(void);
+/* Return the total amount of managed physical memory. */
+size_t pmm_total_size(void);
 
-/* Number of currently free managed pages. */
-size_t pmm_free_page_count(void);
+/* Return the currently available managed physical memory. */
+size_t pmm_free_size(void);

@@ -33,7 +33,7 @@ The HAL is the main contract between reusable kernel code and platform code. Pub
 
 ## Memory Model
 
-Physical memory starts with the bootloader memory map. `pmm_init()` records the direct-map offset, reserves allocator metadata from usable memory, and manages contiguous 4 KiB page runs.
+Physical memory starts with the bootloader memory map. `pmm_init()` records the direct-map offset, reserves allocator metadata from usable memory, and manages byte-sized contiguous extents at the granularity reported by `pmm_info()`.
 
 Virtual memory has three ownership layers:
 

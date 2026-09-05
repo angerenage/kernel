@@ -67,14 +67,13 @@ Test(exception_fault, user_fault_cannot_materialize_a_lazy_kernel_mapping) {
 	                      &kernel_base),
 	          "lazy kernel allocation failed");
 	mappings_before = mock_paging_mapping_count();
-	free_before     = pmm_free_page_count();
+	free_before     = pmm_free_size();
 
 	cr_assert_not(
 		vm_handle_current_page_fault((uintptr_t)kernel_base, VMM_FAULT_NOT_PRESENT, VMM_FAULT_ACCESS_READ, true),
 		"userspace fault must not be satisfied from the kernel lazy address space");
 	cr_assert_eq(mock_paging_mapping_count(), mappings_before, "userspace fault materialized a kernel-only mapping");
-	cr_assert_eq(
-		pmm_free_page_count(), free_before, "userspace fault allocated physical backing for a kernel-only region");
+	cr_assert_eq(pmm_free_size(), free_before, "userspace fault allocated physical backing for a kernel-only region");
 
 	cpu_current_thread_store(cpu_current(), NULL);
 	cr_assert(vm_space_unmap(vm_space_kernel(), kernel_id));
@@ -97,10 +96,10 @@ Test(exception_fault, forbidden_user_access_does_not_materialize_lazy_backing) {
 	cpu_current_thread_store(cpu_current(), &current);
 
 	cr_assert(test_vm_map(&user_space, 1u, VMM_PROT_READ, 0u, 1u, 0u, &id, &base));
-	free_before = pmm_free_page_count();
+	free_before = pmm_free_size();
 	cr_assert_not(vm_handle_current_page_fault((uintptr_t)base, VMM_FAULT_NOT_PRESENT, VMM_FAULT_ACCESS_WRITE, true));
 	cr_assert_not(hal_paging_query(vm_space_hal(&user_space), (uintptr_t)base, NULL));
-	cr_assert_eq(pmm_free_page_count(), free_before, "a rejected write fault must not allocate physical backing");
+	cr_assert_eq(pmm_free_size(), free_before, "a rejected write fault must not allocate physical backing");
 
 	cr_assert(vm_handle_current_page_fault((uintptr_t)base, VMM_FAULT_NOT_PRESENT, VMM_FAULT_ACCESS_READ, true));
 	cr_assert(hal_paging_query(vm_space_hal(&user_space), (uintptr_t)base, NULL),

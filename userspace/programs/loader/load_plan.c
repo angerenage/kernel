@@ -1,6 +1,7 @@
 #include "load_plan.h"
 
 #include <base/math.h>
+#include <base/vmm.h>
 #include <stdlib.h>
 
 static void sort_boundaries(uint64_t* values, size_t count) {

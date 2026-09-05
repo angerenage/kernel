@@ -1,4 +1,5 @@
 #include <base/time.h>
+#include <base/vmm.h>
 #include <core/cpu.h>
 #include <core/kthread.h>
 #include <core/lock.h>
@@ -232,7 +233,7 @@ static enum kthread_spawn_result kthread_spawn_internal(struct kthread** out_thr
 	create_params.entry             = entry;
 	create_params.arg               = arg;
 	create_params.kernel_stack_base = stack_base_addr;
-	create_params.kernel_stack_top  = stack_base_addr + KTHREAD_DEFAULT_STACK_PAGES * (uintptr_t)PMM_PAGE_SIZE;
+	create_params.kernel_stack_top  = stack_base_addr + KTHREAD_DEFAULT_STACK_PAGES * (uintptr_t)VMM_PAGE_SIZE;
 	create_params.preferred_cpu     = preferred_cpu;
 	create_params.detached          = detached;
 	init_result                     = thread_init_ex(&thread->thread, &create_params);

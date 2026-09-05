@@ -1,5 +1,6 @@
 #include "memory_object_radix.h"
 
+#include <base/vmm.h>
 #include <core/memory_object.h>
 #include <core/mm.h>
 #include <core/pmm.h>
@@ -9,7 +10,7 @@ struct radix_node {
 	uintptr_t entries[MEMORY_OBJECT_RADIX_ENTRIES];
 };
 
-_Static_assert(sizeof(struct radix_node) == PMM_PAGE_SIZE, "memory-object radix node must fill one page");
+_Static_assert(sizeof(struct radix_node) == VMM_PAGE_SIZE, "memory-object radix node must fill one page");
 
 static struct radix_node* node_virt(uintptr_t phys) {
 	return (struct radix_node*)(uintptr_t)(phys + boot_info.direct_map_offset);
@@ -57,20 +58,22 @@ bool memory_object_radix_lookup(const struct memory_object* object, size_t page_
 }
 
 static bool alloc_zeroed_page(uintptr_t* out_phys) {
-	uintptr_t phys = 0u;
+	struct pmm_extent allocation;
 	if (out_phys != NULL) *out_phys = 0u;
-	if (out_phys == NULL || !pmm_alloc_pages(1u, &phys)) return false;
-	if (phys == 0u) {
-		(void)pmm_free_pages(phys, 1u);
+	if (out_phys == NULL ||
+	    !pmm_alloc(&(const struct pmm_alloc_request){.size = VMM_PAGE_SIZE, .alignment = VMM_PAGE_SIZE}, &allocation))
+		return false;
+	if (allocation.address == 0u) {
+		(void)pmm_free(allocation);
 		return false;
 	}
-	memset(node_virt(phys), 0, PMM_PAGE_SIZE);
-	*out_phys = phys;
+	memset(node_virt(allocation.address), 0, VMM_PAGE_SIZE);
+	*out_phys = allocation.address;
 	return true;
 }
 
 static void discard_nodes(const uintptr_t* nodes, size_t count) {
-	for (size_t i = 0u; i < count; i++) (void)pmm_free_pages(nodes[i], 1u);
+	for (size_t i = 0u; i < count; i++) (void)pmm_free((struct pmm_extent){.address = nodes[i], .size = VMM_PAGE_SIZE});
 }
 
 bool memory_object_radix_insert(struct memory_object* object, size_t page_index, uintptr_t phys) {
@@ -82,7 +85,7 @@ bool memory_object_radix_insert(struct memory_object* object, size_t page_index,
 	size_t             new_count;
 
 	if (object == NULL || page_index >= object->page_count || object->radix_depth == 0u ||
-	    object->radix_depth > MEMORY_OBJECT_RADIX_MAX_DEPTH || (phys & (PMM_PAGE_SIZE - 1u)) != 0u || phys == 0u)
+	    object->radix_depth > MEMORY_OBJECT_RADIX_MAX_DEPTH || (phys & (VMM_PAGE_SIZE - 1u)) != 0u || phys == 0u)
 		return false;
 	indexes_for(object, page_index, indexes);
 	if (object->backing_root_or_phys != 0u) {
@@ -182,10 +185,11 @@ static void release_node(uintptr_t node_phys, uint8_t level, uint8_t depth) {
 	struct radix_node* node = node_virt(node_phys);
 	for (size_t i = 0u; i < MEMORY_OBJECT_RADIX_ENTRIES; i++) {
 		if (node->entries[i] == 0u) continue;
-		if (level + 1u == depth) (void)pmm_free_pages(node->entries[i], 1u);
+		if (level + 1u == depth)
+			(void)pmm_free((struct pmm_extent){.address = node->entries[i], .size = VMM_PAGE_SIZE});
 		else release_node(node->entries[i], level + 1u, depth);
 	}
-	(void)pmm_free_pages(node_phys, 1u);
+	(void)pmm_free((struct pmm_extent){.address = node_phys, .size = VMM_PAGE_SIZE});
 }
 
 void memory_object_radix_release(struct memory_object* object) {

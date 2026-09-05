@@ -1,5 +1,6 @@
 #include "test_support.h"
 
+#include <base/vmm.h>
 #include <hal/cache.h>
 
 #include "../../kernel/src/syscall/capability.h"
@@ -111,11 +112,12 @@ uintptr_t kernel_capability_test_alloc_user_buffer(struct process* process, size
 }
 
 void kernel_capability_test_poison_next_pmm_page(uint8_t value) {
-	uintptr_t phys = 0u;
+	struct pmm_extent allocation;
 
-	cr_assert(pmm_alloc_pages(1u, &phys), "failed to reserve PMM page for poisoning");
-	memset((void*)(phys + boot_info.direct_map_offset), value, PMM_PAGE_SIZE);
-	cr_assert(pmm_free_pages(phys, 1u), "failed to return poisoned PMM page");
+	cr_assert(
+		pmm_alloc(&(const struct pmm_alloc_request){.size = VMM_PAGE_SIZE, .alignment = VMM_PAGE_SIZE}, &allocation));
+	memset((void*)(allocation.address + boot_info.direct_map_offset), value, allocation.size);
+	cr_assert(pmm_free(allocation), "failed to return poisoned PMM extent");
 }
 
 size_t kernel_capability_test_executable_sync_count(void) {

@@ -2,6 +2,7 @@
 #define TEST_ELF_LOADER_TEST_SUPPORT_H
 
 #include <base/heap.h>
+#include <base/vmm.h>
 #include <core/address_transfer.h>
 #include <core/cpu.h>
 #include <core/mm.h>
@@ -20,7 +21,7 @@
 
 #include "../vmm/test_support.h"
 
-#define ELF_TEST_IMAGE_CAPACITY (3u * PMM_PAGE_SIZE)
+#define ELF_TEST_IMAGE_CAPACITY (3u * VMM_PAGE_SIZE)
 #define ELF_TEST_MAX_PHDRS 4u
 
 #define ELF_TEST_PT_LOAD 1u

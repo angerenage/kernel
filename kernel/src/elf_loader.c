@@ -1,5 +1,6 @@
 #include <base/heap.h>
 #include <base/math.h>
+#include <base/vmm.h>
 #include <core/address_transfer.h>
 #include <core/memory_object.h>
 #include <core/mm.h>
@@ -83,13 +84,13 @@ static bool kernel_elf_range_to_pages(uint64_t vaddr, uint64_t size, uintptr_t* 
 
 	if (out_base == NULL || out_pages == NULL || size == 0u) return false;
 	if (add_overflow_u64(vaddr, size, &end)) return false;
-	page_base = vaddr & ~(uint64_t)(PMM_PAGE_SIZE - 1u);
-	if (!align_up_u64(end, PMM_PAGE_SIZE, &page_end)) return false;
+	page_base = vaddr & ~(uint64_t)(VMM_PAGE_SIZE - 1u);
+	if (!align_up_u64(end, VMM_PAGE_SIZE, &page_end)) return false;
 	if (page_end <= page_base) return false;
-	if (((page_end - page_base) / PMM_PAGE_SIZE) > (uint64_t)SIZE_MAX) return false;
+	if (((page_end - page_base) / VMM_PAGE_SIZE) > (uint64_t)SIZE_MAX) return false;
 
 	*out_base  = (uintptr_t)page_base;
-	*out_pages = (size_t)((page_end - page_base) / PMM_PAGE_SIZE);
+	*out_pages = (size_t)((page_end - page_base) / VMM_PAGE_SIZE);
 	return true;
 }
 
@@ -127,7 +128,7 @@ static void kernel_elf_sync_loaded_pages(struct memory_object* memory, size_t pa
 	for (size_t page = 0; page < page_count; page++) {
 		uintptr_t phys = 0u;
 		if (memory_object_page_phys(memory, page, &phys))
-			hal_cache_sync_executable_range_all_cpus((void*)(phys + boot_info.direct_map_offset), PMM_PAGE_SIZE);
+			hal_cache_sync_executable_range_all_cpus((void*)(phys + boot_info.direct_map_offset), VMM_PAGE_SIZE);
 	}
 }
 
@@ -148,8 +149,8 @@ static enum kernel_elf_load_result kernel_elf_load_segment(struct process*      
 	if (!kernel_elf_range_to_pages(phdr->vaddr, phdr->memsz, &map_base, &page_count)) {
 		return KERNEL_ELF_LOAD_BAD_FORMAT;
 	}
-	if ((phdr->align != 0u && phdr->align != 1u && phdr->align != PMM_PAGE_SIZE) ||
-	    ((phdr->vaddr - phdr->offset) & (uint64_t)(PMM_PAGE_SIZE - 1u)) != 0u) {
+	if ((phdr->align != 0u && phdr->align != 1u && phdr->align != VMM_PAGE_SIZE) ||
+	    ((phdr->vaddr - phdr->offset) & (uint64_t)(VMM_PAGE_SIZE - 1u)) != 0u) {
 		return KERNEL_ELF_LOAD_UNSUPPORTED;
 	}
 

@@ -1,4 +1,5 @@
 #include <base/thread.h>
+#include <base/vmm.h>
 #include <core/address_transfer.h>
 #include <core/cpu.h>
 #include <core/id_table.h>
@@ -429,7 +430,7 @@ static enum uthread_start_result uthread_prepare_internal(struct uthread*       
 		uthread_unregister_id(thread);
 		return UTHREAD_START_STACK_ALLOC_FAILED;
 	}
-	thread->upcall.stack_top = (uintptr_t)upcall_stack_base + UTHREAD_UPCALL_STACK_PAGES * (uintptr_t)PMM_PAGE_SIZE;
+	thread->upcall.stack_top = (uintptr_t)upcall_stack_base + UTHREAD_UPCALL_STACK_PAGES * (uintptr_t)VMM_PAGE_SIZE;
 	if (!uthread_map_stack(
 			vm_space_kernel(), UTHREAD_KERNEL_STACK_PAGES, true, &thread->kernel_stack_id, &kernel_stack_base)) {
 		uthread_release_name(thread);
@@ -439,8 +440,8 @@ static enum uthread_start_result uthread_prepare_internal(struct uthread*       
 		return UTHREAD_START_STACK_ALLOC_FAILED;
 	}
 
-	thread->user_stack_top = (uintptr_t)user_stack_base + user_stack_pages * (uintptr_t)PMM_PAGE_SIZE;
-	kernel_stack_top       = (uintptr_t)kernel_stack_base + UTHREAD_KERNEL_STACK_PAGES * (uintptr_t)PMM_PAGE_SIZE;
+	thread->user_stack_top = (uintptr_t)user_stack_base + user_stack_pages * (uintptr_t)VMM_PAGE_SIZE;
+	kernel_stack_top       = (uintptr_t)kernel_stack_base + UTHREAD_KERNEL_STACK_PAGES * (uintptr_t)VMM_PAGE_SIZE;
 	initial_user_stack_top = thread->user_stack_top;
 	if (params->arg_size != 0u) {
 		if (params->arg_size > initial_user_stack_top - (uintptr_t)user_stack_base) {

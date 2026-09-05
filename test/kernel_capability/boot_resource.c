@@ -3,6 +3,7 @@
 #include <base/boot_data.h>
 #include <base/framebuffer.h>
 #include <base/kernel_resource.h>
+#include <base/vmm.h>
 
 #include "test_support.h"
 
@@ -65,6 +66,7 @@ Test(kernel_capability_boot_resource, framebuffer_reports_format_and_maps_writab
 	struct framebuffer_map_response       mapping;
 	struct kernel_boot_framebuffer        framebuffer;
 	struct capability*                    root;
+	struct pmm_extent                     allocation;
 	uintptr_t                             physical;
 	cap_id_t                              cap;
 	cap_id_t                              read_only_cap;
@@ -72,7 +74,9 @@ Test(kernel_capability_boot_resource, framebuffer_reports_format_and_maps_writab
 	syscall_result_t                      result;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/framebuffer");
-	cr_assert(pmm_alloc_pages(1u, &physical));
+	cr_assert(
+		pmm_alloc(&(const struct pmm_alloc_request){.size = VMM_PAGE_SIZE, .alignment = VMM_PAGE_SIZE}, &allocation));
+	physical    = allocation.address;
 	framebuffer = (struct kernel_boot_framebuffer){
 		.address          = (void*)(physical + 31u),
 		.width            = 8u,

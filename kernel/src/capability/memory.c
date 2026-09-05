@@ -114,10 +114,10 @@ static bool map_params_are_valid(const struct memory_map_params* params) {
 	size_t align_pages;
 	size_t ignored;
 	if (params == NULL || params->page_count == 0u || !user_prot_is_valid(params->prot) ||
-	    (params->address & (PMM_PAGE_SIZE - 1u)) != 0u)
+	    (params->address & (VMM_PAGE_SIZE - 1u)) != 0u)
 		return false;
 	align_pages = params->align_pages == 0u ? 1u : params->align_pages;
-	return (align_pages & (align_pages - 1u)) == 0u && !mul_overflow_size(align_pages, PMM_PAGE_SIZE, &ignored) &&
+	return (align_pages & (align_pages - 1u)) == 0u && !mul_overflow_size(align_pages, VMM_PAGE_SIZE, &ignored) &&
 	       !add_overflow_size(params->memory_page_offset, params->page_count, &ignored) &&
 	       !add_overflow_size(params->guard_pages, params->page_count, &ignored);
 }
@@ -255,8 +255,8 @@ static syscall_result_t memory_info_handler(const struct cap_request* req, struc
 
 static void sync_written_page(struct memory_object* memory, size_t offset) {
 	uintptr_t phys;
-	if (memory_object_page_phys(memory, offset / PMM_PAGE_SIZE, &phys))
-		hal_cache_sync_executable_range_all_cpus((void*)(phys + boot_info.direct_map_offset), PMM_PAGE_SIZE);
+	if (memory_object_page_phys(memory, offset / VMM_PAGE_SIZE, &phys))
+		hal_cache_sync_executable_range_all_cpus((void*)(phys + boot_info.direct_map_offset), VMM_PAGE_SIZE);
 }
 
 static syscall_result_t memory_transfer_handler(const struct cap_request* req, struct memory_object* memory,
@@ -284,8 +284,8 @@ static syscall_result_t memory_transfer_handler(const struct cap_request* req, s
 	size              = reading ? request.read.size : request.write.size;
 	user_address      = reading ? request.read.destination : request.write.source;
 	size_t page_count = memory_object_page_count(memory);
-	if (page_count > SIZE_MAX / PMM_PAGE_SIZE) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
-	size_t object_size = page_count * PMM_PAGE_SIZE;
+	if (page_count > SIZE_MAX / VMM_PAGE_SIZE) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
+	size_t object_size = page_count * VMM_PAGE_SIZE;
 	if (offset > object_size || size > object_size - offset)
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	uint64_t user_end;
@@ -297,7 +297,7 @@ static syscall_result_t memory_transfer_handler(const struct cap_request* req, s
 		uint8_t buffer[256];
 		size_t  chunk = size - done;
 		if (chunk > sizeof(buffer)) chunk = sizeof(buffer);
-		size_t page_remaining = PMM_PAGE_SIZE - ((offset + done) & (PMM_PAGE_SIZE - 1u));
+		size_t page_remaining = VMM_PAGE_SIZE - ((offset + done) & (VMM_PAGE_SIZE - 1u));
 		if (chunk > page_remaining) chunk = page_remaining;
 		if (reading) {
 			if (!memory_object_read(memory, offset + done, buffer, chunk)) memory_failure = true;

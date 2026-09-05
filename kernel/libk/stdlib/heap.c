@@ -1,4 +1,5 @@
 #include <base/heap.h>
+#include <base/vmm.h>
 #include <core/lock.h>
 #include <core/memory_object.h>
 #include <core/pmm.h>
@@ -32,7 +33,7 @@ bool heap_grow_pages(size_t page_count, void** out_base) {
 }
 
 size_t heap_page_size(void) {
-	return PMM_PAGE_SIZE;
+	return VMM_PAGE_SIZE;
 }
 
 void heap_lock(void) {

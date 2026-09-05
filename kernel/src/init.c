@@ -1,5 +1,6 @@
 #include <base/heap.h>
 #include <base/startup.h>
+#include <base/vmm.h>
 #include <core/capability.h>
 #include <core/cpu.h>
 #include <core/kthread.h>
@@ -27,6 +28,8 @@
 #include "capability/kernel_resource.h"
 
 #if KERNEL_SELFTESTS_ENABLED
+#include <base/vmm.h>
+
 #include "../test/selftest.h"
 #endif
 
@@ -99,7 +102,7 @@ static bool kernel_launch_init_process(void) {
 		.size                 = sizeof(startup),
 		.heap_base            = loaded.heap_base,
 		.heap_page_count      = loaded.heap_page_count,
-		.page_size            = PMM_PAGE_SIZE,
+		.page_size            = VMM_PAGE_SIZE,
 		.kernel_resources_cap = kernel_resources_cap,
 	};
 	thread_params = (struct process_thread_params){

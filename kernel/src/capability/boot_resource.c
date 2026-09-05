@@ -46,13 +46,13 @@ static bool external_mapping_layout(const void* address, size_t size, struct ext
 	virtual_address = (uintptr_t)address;
 	if (virtual_address < boot_info.direct_map_offset) return false;
 	physical_address   = virtual_address - boot_info.direct_map_offset;
-	out->physical_base = physical_address & ~(uintptr_t)(PMM_PAGE_SIZE - 1u);
+	out->physical_base = physical_address & ~(uintptr_t)(VMM_PAGE_SIZE - 1u);
 	out->page_offset   = (size_t)(physical_address - out->physical_base);
 	if (add_overflow_size(out->page_offset, size, &mapped_size) ||
-	    add_overflow_size(mapped_size, PMM_PAGE_SIZE - 1u, &mapped_size)) {
+	    add_overflow_size(mapped_size, VMM_PAGE_SIZE - 1u, &mapped_size)) {
 		return false;
 	}
-	out->page_count = mapped_size / PMM_PAGE_SIZE;
+	out->page_count = mapped_size / VMM_PAGE_SIZE;
 	return out->page_count != 0u;
 }
 

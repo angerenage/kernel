@@ -1,4 +1,5 @@
 #include <base/math.h>
+#include <base/vmm.h>
 #include <core/memory_object.h>
 #include <core/mm.h>
 #include <core/pmm.h>
@@ -28,23 +29,24 @@ static struct spinlock     object_allocator_lock =
 #define OBJECT_SLOT_SIZE ((sizeof(struct memory_object) + OBJECT_ALIGN - 1u) & ~(OBJECT_ALIGN - 1u))
 #define OBJECT_SLAB_OFFSET ((sizeof(struct object_slab) + OBJECT_ALIGN - 1u) & ~(OBJECT_ALIGN - 1u))
 
-_Static_assert(OBJECT_SLAB_OFFSET + OBJECT_SLOT_SIZE <= PMM_PAGE_SIZE, "object slab must contain an object");
+_Static_assert(OBJECT_SLAB_OFFSET + OBJECT_SLOT_SIZE <= VMM_PAGE_SIZE, "object slab must contain an object");
 
 static void* phys_to_virt(uintptr_t phys) {
 	return (void*)(uintptr_t)(phys + boot_info.direct_map_offset);
 }
 
 static struct object_slab* slab_create(void) {
-	uintptr_t           phys = 0u;
+	struct pmm_extent   allocation;
 	struct object_slab* slab;
 	uint8_t*            slots;
 	size_t              count;
-	if (!pmm_alloc_pages(1u, &phys)) return NULL;
-	slab = phys_to_virt(phys);
-	memset(slab, 0, PMM_PAGE_SIZE);
-	slab->phys = phys;
+	if (!pmm_alloc(&(const struct pmm_alloc_request){.size = VMM_PAGE_SIZE, .alignment = VMM_PAGE_SIZE}, &allocation))
+		return NULL;
+	slab = phys_to_virt(allocation.address);
+	memset(slab, 0, VMM_PAGE_SIZE);
+	slab->phys = allocation.address;
 	slots      = (uint8_t*)slab + OBJECT_SLAB_OFFSET;
-	count      = (PMM_PAGE_SIZE - OBJECT_SLAB_OFFSET) / OBJECT_SLOT_SIZE;
+	count      = (VMM_PAGE_SIZE - OBJECT_SLAB_OFFSET) / OBJECT_SLOT_SIZE;
 	for (size_t i = 0u; i < count; i++) {
 		struct object_free_slot* slot = (void*)(slots + i * OBJECT_SLOT_SIZE);
 		slot->next                    = slab->free_slots;
@@ -54,7 +56,7 @@ static struct object_slab* slab_create(void) {
 }
 
 static struct object_slab* object_slab(const struct memory_object* object) {
-	return (struct object_slab*)((uintptr_t)object & ~(uintptr_t)(PMM_PAGE_SIZE - 1u));
+	return (struct object_slab*)((uintptr_t)object & ~(uintptr_t)(VMM_PAGE_SIZE - 1u));
 }
 
 static struct memory_object* control_alloc(void) {
@@ -96,7 +98,7 @@ static void control_free(struct memory_object* object) {
 		}
 		if (*link != slab) hcf();
 		*link = slab->next;
-		(void)pmm_free_pages(slab->phys, 1u);
+		(void)pmm_free((struct pmm_extent){.address = slab->phys, .size = VMM_PAGE_SIZE});
 	}
 	spinlock_unlock_irqrestore(&object_allocator_lock, state);
 }
@@ -108,19 +110,19 @@ bool memory_object_create_params_valid(const struct memory_create_params* params
 	uint64_t                         span;
 	uint64_t                         fixed_end;
 
-	if (params == NULL || params->page_count == 0u || params->page_count > SIZE_MAX / PMM_PAGE_SIZE ||
+	if (params == NULL || params->page_count == 0u || params->page_count > SIZE_MAX / VMM_PAGE_SIZE ||
 	    params->memory_type >= MEMORY_TYPE_COUNT)
 		return false;
 	constraints = &params->constraints;
 	if (params->memory_type != MEMORY_TYPE_NORMAL && (constraints->flags & MEMORY_CONSTRAINT_FIXED) == 0u) return false;
 	if ((constraints->flags & ~(uint32_t)(MEMORY_CONSTRAINT_CONTIGUOUS | MEMORY_CONSTRAINT_FIXED)) != 0u ||
-	    (constraints->physical_min & (PMM_PAGE_SIZE - 1u)) != 0u ||
-	    (constraints->physical_max != 0u && ((constraints->physical_max & (PMM_PAGE_SIZE - 1u)) != 0u ||
+	    (constraints->physical_min & (VMM_PAGE_SIZE - 1u)) != 0u ||
+	    (constraints->physical_max != 0u && ((constraints->physical_max & (VMM_PAGE_SIZE - 1u)) != 0u ||
 	                                         constraints->physical_max <= constraints->physical_min)))
 		return false;
 	align_pages = constraints->align_pages == 0u ? 1u : constraints->align_pages;
-	if ((align_pages & (align_pages - 1u)) != 0u || mul_overflow_size(align_pages, PMM_PAGE_SIZE, &align_bytes) ||
-	    mul_overflow_u64((uint64_t)params->page_count, PMM_PAGE_SIZE, &span))
+	if ((align_pages & (align_pages - 1u)) != 0u || mul_overflow_size(align_pages, VMM_PAGE_SIZE, &align_bytes) ||
+	    mul_overflow_u64((uint64_t)params->page_count, VMM_PAGE_SIZE, &span))
 		return false;
 	if ((constraints->flags & MEMORY_CONSTRAINT_FIXED) == 0u) {
 		if (constraints->physical_address != 0u ||
@@ -131,7 +133,7 @@ bool memory_object_create_params_valid(const struct memory_create_params* params
 			return false;
 		return true;
 	}
-	if ((constraints->physical_address & (PMM_PAGE_SIZE - 1u)) != 0u ||
+	if ((constraints->physical_address & (VMM_PAGE_SIZE - 1u)) != 0u ||
 	    (constraints->physical_address & (align_bytes - 1u)) != 0u ||
 	    constraints->physical_address < constraints->physical_min ||
 	    add_overflow_u64((uint64_t)constraints->physical_address, span, &fixed_end) || fixed_end > UINTPTR_MAX ||
@@ -165,14 +167,14 @@ static bool external_claim(struct memory_object* object) {
 	uint64_t         end;
 	struct irq_state state;
 
-	if (object == NULL || mul_overflow_u64((uint64_t)object->page_count, PMM_PAGE_SIZE, &span) ||
+	if (object == NULL || mul_overflow_u64((uint64_t)object->page_count, VMM_PAGE_SIZE, &span) ||
 	    add_overflow_u64((uint64_t)object->backing_root_or_phys, span, &end))
 		return false;
 	state = spinlock_lock_irqsave(&external_claim_lock);
 	for (struct memory_object* current = external_claims; current != NULL; current = current->claim_next) {
 		uint64_t current_span;
 		uint64_t current_end;
-		if (mul_overflow_u64((uint64_t)current->page_count, PMM_PAGE_SIZE, &current_span) ||
+		if (mul_overflow_u64((uint64_t)current->page_count, VMM_PAGE_SIZE, &current_span) ||
 		    add_overflow_u64((uint64_t)current->backing_root_or_phys, current_span, &current_end) ||
 		    ((uint64_t)object->backing_root_or_phys < current_end && (uint64_t)current->backing_root_or_phys < end)) {
 			spinlock_unlock_irqrestore(&external_claim_lock, state);
@@ -198,7 +200,7 @@ static void external_unclaim(struct memory_object* object) {
 }
 
 static void zero_pages(uintptr_t phys, size_t page_count) {
-	memset(phys_to_virt(phys), 0, page_count * PMM_PAGE_SIZE);
+	memset(phys_to_virt(phys), 0, page_count * VMM_PAGE_SIZE);
 }
 
 bool memory_object_create(const struct memory_create_params* params, struct memory_object** out_object) {
@@ -213,14 +215,18 @@ bool memory_object_create(const struct memory_create_params* params, struct memo
 	contiguous  = (constraints->flags & (MEMORY_CONSTRAINT_CONTIGUOUS | MEMORY_CONSTRAINT_FIXED)) != 0u;
 
 	if ((constraints->flags & MEMORY_CONSTRAINT_FIXED) != 0u) {
-		enum pmm_claim_result claim = pmm_claim_pages(constraints->physical_address, params->page_count);
+		struct pmm_extent extent = {
+			.address = constraints->physical_address,
+			.size    = params->page_count * VMM_PAGE_SIZE,
+		};
+		enum pmm_claim_result claim = pmm_claim(extent);
 		if (claim == PMM_CLAIM_OK) {
 			if (params->memory_type != MEMORY_TYPE_NORMAL) {
-				(void)pmm_free_pages(constraints->physical_address, params->page_count);
+				(void)pmm_free(extent);
 				return false;
 			}
 			if (!object_create(MEMORY_OBJECT_CONTIGUOUS, params, &object)) {
-				(void)pmm_free_pages(constraints->physical_address, params->page_count);
+				(void)pmm_free(extent);
 				return false;
 			}
 			object->backing_root_or_phys = constraints->physical_address;
@@ -239,14 +245,19 @@ bool memory_object_create(const struct memory_create_params* params, struct memo
 	}
 
 	if (contiguous) {
-		if (!pmm_alloc_pages_constrained(params->page_count,
-		                                 constraints->physical_min,
-		                                 constraints->physical_max,
-		                                 constraints->align_pages,
-		                                 &phys))
+		struct pmm_extent allocation;
+		if (!pmm_alloc(
+				&(const struct pmm_alloc_request){
+					.size            = params->page_count * VMM_PAGE_SIZE,
+					.alignment       = (constraints->align_pages == 0u ? 1u : constraints->align_pages) * VMM_PAGE_SIZE,
+					.minimum_address = constraints->physical_min,
+					.maximum_address = constraints->physical_max,
+				},
+				&allocation))
 			return false;
+		phys = allocation.address;
 		if (!object_create(MEMORY_OBJECT_CONTIGUOUS, params, &object)) {
-			(void)pmm_free_pages(phys, params->page_count);
+			(void)pmm_free(allocation);
 			return false;
 		}
 		object->backing_root_or_phys = phys;
@@ -258,13 +269,22 @@ bool memory_object_create(const struct memory_create_params* params, struct memo
 	if (!object_create(MEMORY_OBJECT_OWNED, params, &object)) return false;
 	if (constraints->physical_min != 0u || constraints->physical_max != 0u) {
 		for (size_t page = 0u; page < params->page_count; page++) {
-			if (!pmm_alloc_pages_constrained(1u, constraints->physical_min, constraints->physical_max, 1u, &phys)) {
+			struct pmm_extent allocation;
+			if (!pmm_alloc(
+					&(const struct pmm_alloc_request){
+						.size            = VMM_PAGE_SIZE,
+						.alignment       = VMM_PAGE_SIZE,
+						.minimum_address = constraints->physical_min,
+						.maximum_address = constraints->physical_max,
+					},
+					&allocation)) {
 				memory_object_release(object);
 				return false;
 			}
+			phys = allocation.address;
 			zero_pages(phys, 1u);
 			if (!memory_object_radix_insert(object, page, phys)) {
-				(void)pmm_free_pages(phys, 1u);
+				(void)pmm_free(allocation);
 				memory_object_release(object);
 				return false;
 			}
@@ -284,8 +304,8 @@ bool memory_object_create_external(uintptr_t phys_base, size_t page_count, struc
 	uint64_t                          span;
 	const struct memory_create_params params = {.page_count = page_count, .memory_type = MEMORY_TYPE_NORMAL};
 	if (out_object != NULL) *out_object = NULL;
-	if ((phys_base & (PMM_PAGE_SIZE - 1u)) != 0u || page_count == 0u ||
-	    mul_overflow_u64((uint64_t)page_count, PMM_PAGE_SIZE, &span) || span - 1u > UINTPTR_MAX - phys_base)
+	if ((phys_base & (VMM_PAGE_SIZE - 1u)) != 0u || page_count == 0u ||
+	    mul_overflow_u64((uint64_t)page_count, VMM_PAGE_SIZE, &span) || span - 1u > UINTPTR_MAX - phys_base)
 		return false;
 	if (!object_create(MEMORY_OBJECT_EXTERNAL, &params, &object)) return false;
 	object->backing_root_or_phys = phys_base;
@@ -313,7 +333,10 @@ void memory_object_release(struct memory_object* object) {
 	if (old != 1u) return;
 	if (object->type == MEMORY_OBJECT_OWNED) memory_object_radix_release(object);
 	else if (object->type == MEMORY_OBJECT_CONTIGUOUS)
-		(void)pmm_free_pages(object->backing_root_or_phys, object->page_count);
+		(void)pmm_free((struct pmm_extent){
+			.address = object->backing_root_or_phys,
+			.size    = object->page_count * VMM_PAGE_SIZE,
+		});
 	else if (object->external_claimed) external_unclaim(object);
 	control_free(object);
 }
@@ -342,7 +365,7 @@ bool memory_object_page_phys(struct memory_object* object, size_t logical_page, 
 	if (object == NULL || out_phys == NULL || logical_page >= object->page_count) return false;
 	state = spinlock_lock_irqsave(&object->lock);
 	if (object->type != MEMORY_OBJECT_OWNED) {
-		*out_phys = object->backing_root_or_phys + logical_page * (uintptr_t)PMM_PAGE_SIZE;
+		*out_phys = object->backing_root_or_phys + logical_page * (uintptr_t)VMM_PAGE_SIZE;
 		found     = true;
 	}
 	else found = memory_object_radix_lookup(object, logical_page, out_phys);
@@ -357,7 +380,7 @@ bool memory_object_resolve_page(struct memory_object* object, size_t logical_pag
 	if (object == NULL || out_phys == NULL || logical_page >= object->page_count) return false;
 	state = spinlock_lock_irqsave(&object->lock);
 	if (object->type != MEMORY_OBJECT_OWNED) {
-		*out_phys = object->backing_root_or_phys + logical_page * (uintptr_t)PMM_PAGE_SIZE;
+		*out_phys = object->backing_root_or_phys + logical_page * (uintptr_t)VMM_PAGE_SIZE;
 		ok        = true;
 	}
 	else ok = memory_object_radix_resolve(object, logical_page, out_phys);
@@ -367,7 +390,7 @@ bool memory_object_resolve_page(struct memory_object* object, size_t logical_pag
 
 static bool access_bounds(const struct memory_object* object, size_t offset, size_t size) {
 	size_t bytes;
-	return object != NULL && !mul_overflow_size(object->page_count, PMM_PAGE_SIZE, &bytes) && offset <= bytes &&
+	return object != NULL && !mul_overflow_size(object->page_count, VMM_PAGE_SIZE, &bytes) && offset <= bytes &&
 	       size <= bytes - offset;
 }
 
@@ -378,8 +401,8 @@ bool memory_object_read(struct memory_object* object, size_t byte_offset, void* 
 	if (dst == NULL || !access_bounds(object, byte_offset, size)) return false;
 	state = spinlock_lock_irqsave(&object->lock);
 	while (done < size) {
-		size_t    offset = byte_offset + done, page = offset / PMM_PAGE_SIZE;
-		size_t    within = offset & (PMM_PAGE_SIZE - 1u), chunk = PMM_PAGE_SIZE - within;
+		size_t    offset = byte_offset + done, page = offset / VMM_PAGE_SIZE;
+		size_t    within = offset & (VMM_PAGE_SIZE - 1u), chunk = VMM_PAGE_SIZE - within;
 		uintptr_t phys;
 		if (chunk > size - done) chunk = size - done;
 		if (object->type != MEMORY_OBJECT_OWNED) {
@@ -387,7 +410,7 @@ bool memory_object_read(struct memory_object* object, size_t byte_offset, void* 
 				spinlock_unlock_irqrestore(&object->lock, state);
 				return false;
 			}
-			phys = object->backing_root_or_phys + page * PMM_PAGE_SIZE;
+			phys = object->backing_root_or_phys + page * VMM_PAGE_SIZE;
 		}
 		else if (!memory_object_radix_lookup(object, page, &phys)) {
 			memset((uint8_t*)dst + done, 0, chunk);
@@ -408,8 +431,8 @@ bool memory_object_write(struct memory_object* object, size_t byte_offset, const
 	if (src == NULL || !access_bounds(object, byte_offset, size)) return false;
 	state = spinlock_lock_irqsave(&object->lock);
 	while (done < size) {
-		size_t    offset = byte_offset + done, page = offset / PMM_PAGE_SIZE;
-		size_t    within = offset & (PMM_PAGE_SIZE - 1u), chunk = PMM_PAGE_SIZE - within;
+		size_t    offset = byte_offset + done, page = offset / VMM_PAGE_SIZE;
+		size_t    within = offset & (VMM_PAGE_SIZE - 1u), chunk = VMM_PAGE_SIZE - within;
 		uintptr_t phys;
 		if (chunk > size - done) chunk = size - done;
 		if (object->type != MEMORY_OBJECT_OWNED) {
@@ -417,7 +440,7 @@ bool memory_object_write(struct memory_object* object, size_t byte_offset, const
 				spinlock_unlock_irqrestore(&object->lock, state);
 				return false;
 			}
-			phys = object->backing_root_or_phys + page * PMM_PAGE_SIZE;
+			phys = object->backing_root_or_phys + page * VMM_PAGE_SIZE;
 		}
 		else if (!memory_object_radix_resolve(object, page, &phys)) {
 			spinlock_unlock_irqrestore(&object->lock, state);

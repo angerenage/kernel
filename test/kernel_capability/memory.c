@@ -1,5 +1,7 @@
 #include "../../kernel/src/capability/memory.h"
 
+#include <base/vmm.h>
+
 #include "../../kernel/src/syscall/memory.h"
 #include "test_support.h"
 
@@ -104,7 +106,7 @@ Test(kernel_capability_memory, zero_grants_removes_routing_and_releases_unmapped
 	uint8_t                               value = 0x5au;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/memory-lifetime");
-	free_before = pmm_free_page_count();
+	free_before = pmm_free_size();
 	memory_cap  = create_memory(CAP_CALL | CAP_WRITE, 1u);
 	object_id   = capability_object_id(memory_cap);
 	cr_assert_neq(object_id, CAP_OBJECT_ID_INVALID);
@@ -113,10 +115,10 @@ Test(kernel_capability_memory, zero_grants_removes_routing_and_releases_unmapped
 	struct memory_object* memory = (struct memory_object*)(uintptr_t)object->object_id;
 	cr_assert(memory_object_write(memory, 0u, &value, 1u));
 	cap_object_release(object);
-	cr_assert_lt(pmm_free_page_count(), free_before);
+	cr_assert_lt(pmm_free_size(), free_before);
 	cr_assert(drop_capability(memory_cap));
 	cr_assert_null(cap_object_acquire(object_id));
-	cr_assert_eq(pmm_free_page_count(), free_before);
+	cr_assert_eq(pmm_free_size(), free_before);
 	kernel_capability_test_end(&ctx);
 }
 
@@ -250,13 +252,13 @@ Test(kernel_capability_memory, partial_write_failure_synchronizes_the_successful
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/memory-partial-write-sync");
 	buffer = kernel_capability_test_alloc_user_buffer(ctx.process, 1u, &buffer_id);
-	for (size_t offset = 0u; offset < PMM_PAGE_SIZE; offset += sizeof(value)) {
+	for (size_t offset = 0u; offset < VMM_PAGE_SIZE; offset += sizeof(value)) {
 		cr_assert_eq(address_space_copy_to(process_address_space(ctx.process), buffer + offset, &value, sizeof(value)),
 		             ADDRESS_TRANSFER_OK);
 	}
 	memory_cap = create_memory(CAP_CALL | CAP_WRITE, 2u);
-	cr_assert_eq(memory_write_from(memory_cap, 0u, buffer, PMM_PAGE_SIZE + 1u).status, SYSCALL_STATUS_BAD_ARGUMENT);
-	cr_assert_eq(kernel_capability_test_executable_sync_count(), PMM_PAGE_SIZE / 256u);
+	cr_assert_eq(memory_write_from(memory_cap, 0u, buffer, VMM_PAGE_SIZE + 1u).status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(kernel_capability_test_executable_sync_count(), VMM_PAGE_SIZE / 256u);
 	cr_assert(drop_capability(memory_cap));
 	cr_assert(vm_space_unmap(process_address_space(ctx.process), buffer_id));
 	kernel_capability_test_end(&ctx);
@@ -311,7 +313,7 @@ Test(kernel_capability_memory, generic_map_supports_subranges_exact_auto_alignme
 		.memory_page_offset = 4u, .page_count = 1u, .align_pages = 8u, .guard_pages = 2u, .prot = VMM_PROT_READ};
 	cr_assert_eq(map_memory(memory_cap, process_pid(ctx.process), ctx.process, &auto_params, &automatic).status,
 	             SYSCALL_STATUS_OK);
-	cr_assert_eq((uintptr_t)automatic.mapping.base % (8u * PMM_PAGE_SIZE), 0u);
+	cr_assert_eq((uintptr_t)automatic.mapping.base % (8u * VMM_PAGE_SIZE), 0u);
 	struct memory_map_params invalid = {.memory_page_offset = SIZE_MAX, .page_count = 2u, .prot = VMM_PROT_READ};
 	cr_assert_eq(map_memory(memory_cap, process_pid(ctx.process), ctx.process, &invalid, &rejected).status,
 	             SYSCALL_STATUS_BAD_ARGUMENT);
@@ -522,7 +524,7 @@ Test(kernel_capability_memory, create_syscall_rejects_invalid_physical_constrain
 		.page_count = 1u,
 		.constraints =
 			{
-						  .physical_min = PMM_PAGE_SIZE,
+						  .physical_min = VMM_PAGE_SIZE,
 						  .align_pages  = 2u,
 						  },
 	};

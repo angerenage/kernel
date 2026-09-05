@@ -18,7 +18,7 @@
 #define KiB(x) ((size_t)(x) * 1024u)
 
 void   init_test_vmm(uint8_t* arena, size_t arena_size);
-size_t vmm_test_pages_consumed_since(size_t free_before);
+size_t vmm_test_bytes_consumed_since(size_t free_before);
 bool   test_vm_map(struct address_space* space, size_t page_count, vmm_prot_t prot, uintptr_t requested_base,
                    size_t align_pages, size_t guard_pages, vmm_id_t* out_id, void** out_base);
 void   mock_paging_reset(void);

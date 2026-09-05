@@ -9,6 +9,9 @@
 
 #define KiB(x) ((size_t)(x) * 1024u)
 
+#define PMM_TEST_ARENA_ALIGNMENT KiB(64)
+#define PMM_TEST_GRANULE (pmm_info()->allocation_granule)
+
 #define PMM_TEST_LOW_OFFSET KiB(0)
 #define PMM_TEST_LOW_LENGTH KiB(24)
 #define PMM_TEST_HIGH_OFFSET KiB(64)

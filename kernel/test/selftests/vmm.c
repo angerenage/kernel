@@ -1,3 +1,4 @@
+#include <base/vmm.h>
 #include <core/memory_object.h>
 #include <core/pmm.h>
 #include <core/vm_space.h>
@@ -30,7 +31,7 @@ static void kernel_selftest_vmm_demand_maps_and_releases(struct kernel_selftest_
 	KERNEL_SELFTEST_ASSERT_GOTO(
 		ctx, !hal_paging_query(vm_space_hal(vm_space_kernel()), (uintptr_t)base, NULL), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(
-		ctx, !vm_space_query(vm_space_kernel(), (uintptr_t)base - PMM_PAGE_SIZE, &info), cleanup);
+		ctx, !vm_space_query(vm_space_kernel(), (uintptr_t)base - VMM_PAGE_SIZE, &info), cleanup);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
 		ctx,
 		vm_space_resolve_page_fault(vm_space_kernel(), (uintptr_t)base, VMM_FAULT_ACCESS_WRITE),
@@ -54,7 +55,7 @@ static void kernel_selftest_vmm_large_leaf_split(struct kernel_selftest_context*
 	struct hal_paging_space*      space    = NULL;
 	uintptr_t                     physical = 0u;
 	uintptr_t                     new_physical;
-	uintptr_t                     allocation = 0u;
+	struct pmm_extent             allocation = {0};
 	size_t                        large_size = 0u;
 	uintptr_t                     virtual    = 0u;
 	struct hal_paging_translation translation;
@@ -75,14 +76,19 @@ static void kernel_selftest_vmm_large_leaf_split(struct kernel_selftest_context*
 	if (large_size == 0u) return;
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, large_size <= UINTPTR_MAX / 2u, cleanup);
 	virtual    = (uintptr_t)large_size * 2u;
-	page_count = large_size / PMM_PAGE_SIZE + (large_size % PMM_PAGE_SIZE != 0u ? 1u : 0u);
+	page_count = large_size / VMM_PAGE_SIZE + (large_size % VMM_PAGE_SIZE != 0u ? 1u : 0u);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, page_count <= SIZE_MAX / 3u, cleanup);
 	allocation_page_count = page_count * 3u;
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, pmm_alloc_pages(allocation_page_count, &allocation), cleanup);
-	physical     = (allocation + large_size - 1u) & ~(uintptr_t)(large_size - 1u);
+	KERNEL_SELFTEST_ASSERT_GOTO(
+		ctx,
+		pmm_alloc(&(const struct pmm_alloc_request){.size      = allocation_page_count * VMM_PAGE_SIZE,
+	                                                .alignment = VMM_PAGE_SIZE},
+	              &allocation),
+		cleanup);
+	physical     = (allocation.address + large_size - 1u) & ~(uintptr_t)(large_size - 1u);
 	new_physical = physical + large_size;
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, hal_paging_space_create(&space), cleanup);
-	free_after_create = pmm_free_page_count();
+	free_after_create = pmm_free_size();
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx,
 	                            hal_paging_map(space,
 	                                           &(const struct hal_paging_map_request){
@@ -164,7 +170,7 @@ static void kernel_selftest_vmm_large_leaf_split(struct kernel_selftest_context*
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, translation.memory_type == MEMORY_TYPE_NORMAL, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, hal_paging_unmap(space, virtual, large_size), cleanup);
 	mapped = false;
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, pmm_free_page_count() == free_after_create, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, pmm_free_size() == free_after_create, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx,
 	                            hal_paging_map(space,
 	                                           &(const struct hal_paging_map_request){
@@ -176,7 +182,7 @@ static void kernel_selftest_vmm_large_leaf_split(struct kernel_selftest_context*
 											   }),
 	                            cleanup);
 	mapped             = true;
-	size_t free_before = pmm_free_page_count();
+	size_t free_before = pmm_free_size();
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx,
 	                            !hal_paging_map(space,
 	                                            &(const struct hal_paging_map_request){
@@ -187,7 +193,7 @@ static void kernel_selftest_vmm_large_leaf_split(struct kernel_selftest_context*
 													.memory_type      = MEMORY_TYPE_NORMAL,
 												}),
 	                            cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, pmm_free_page_count() == free_before, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, pmm_free_size() == free_before, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(
 		ctx, !hal_paging_query(space, virtual - large_size + paging->minimum_leaf_size, NULL), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, hal_paging_query(space, virtual, &translation), cleanup);
@@ -197,7 +203,7 @@ cleanup:
 	if (active) (void)hal_paging_activate(hal_paging_kernel_space());
 	if (mapped) (void)hal_paging_unmap(space, virtual, large_size);
 	if (space != NULL) hal_paging_space_destroy(space);
-	if (allocation != 0u) (void)pmm_free_pages(allocation, allocation_page_count);
+	if (allocation.size != 0u) (void)pmm_free(allocation);
 }
 
 static const struct kernel_selftest_case kernel_vmm_selftests[] = {

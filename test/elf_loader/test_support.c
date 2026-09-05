@@ -1,5 +1,6 @@
 #include "test_support.h"
 
+#include <base/vmm.h>
 #include <hal/cache.h>
 
 #define KiB(x) ((size_t)(x) * 1024u)
@@ -27,8 +28,8 @@
 #define ELF_TEST_MACHINE 0u
 #endif
 
-static uint8_t elf_test_arena[ELF_TEST_ARENA_SIZE] __attribute__((aligned(PMM_PAGE_SIZE)));
-static uint8_t elf_test_heap[ELF_TEST_HEAP_SIZE] __attribute__((aligned(PMM_PAGE_SIZE)));
+static uint8_t elf_test_arena[ELF_TEST_ARENA_SIZE] __attribute__((aligned(VMM_PAGE_SIZE)));
+static uint8_t elf_test_heap[ELF_TEST_HEAP_SIZE] __attribute__((aligned(VMM_PAGE_SIZE)));
 static size_t  elf_test_heap_offset;
 
 bool heap_grow_pages(size_t page_count, void** out_base) {
@@ -37,7 +38,7 @@ bool heap_grow_pages(size_t page_count, void** out_base) {
 
 	if (out_base == NULL) return false;
 	*out_base = NULL;
-	bytes     = page_count * PMM_PAGE_SIZE;
+	bytes     = page_count * VMM_PAGE_SIZE;
 	for (;;) {
 		offset = __atomic_load_n(&elf_test_heap_offset, __ATOMIC_ACQUIRE);
 		if (bytes > ELF_TEST_HEAP_SIZE - offset) return false;
@@ -130,7 +131,7 @@ void elf_test_set_load(struct elf_test_image* image, size_t index, uint64_t offs
 		.vaddr  = vaddr,
 		.filesz = filesz,
 		.memsz  = memsz,
-		.align  = PMM_PAGE_SIZE,
+		.align  = VMM_PAGE_SIZE,
 	};
 }
 
@@ -141,9 +142,11 @@ void elf_test_destroy_loaded(struct kernel_elf_process* loaded) {
 }
 
 void elf_test_poison_recycled_pages(size_t page_count, uint8_t value) {
-	uintptr_t phys = 0u;
+	struct pmm_extent allocation;
 	cr_assert(page_count != 0u);
-	cr_assert(pmm_alloc_pages(page_count, &phys), "failed to reserve pages for recycle poisoning");
-	memset((void*)(phys + boot_info.direct_map_offset), value, page_count * (size_t)PMM_PAGE_SIZE);
-	cr_assert(pmm_free_pages(phys, page_count), "failed to return poisoned pages to PMM");
+	cr_assert(
+		pmm_alloc(&(const struct pmm_alloc_request){.size = page_count * VMM_PAGE_SIZE, .alignment = VMM_PAGE_SIZE},
+	              &allocation));
+	memset((void*)(allocation.address + boot_info.direct_map_offset), value, allocation.size);
+	cr_assert(pmm_free(allocation), "failed to return poisoned memory to PMM");
 }

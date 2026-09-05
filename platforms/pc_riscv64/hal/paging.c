@@ -203,15 +203,20 @@ static bool riscv_walk_to_level(const struct hal_paging_space* space, uintptr_t 
 		uint64_t entry = table[index];
 
 		if ((entry & RISCV_PTE_V) == 0) {
-			uintptr_t next_phys = 0;
-			uint64_t* next_table;
+			struct pmm_extent allocation;
+			uintptr_t         next_phys;
+			uint64_t*         next_table;
 
-			if (!pmm_alloc_pages(1, &next_phys)) return false;
+			if (!pmm_alloc(&(const struct pmm_alloc_request){.size      = paging_info.minimum_leaf_size,
+			                                                 .alignment = paging_info.minimum_leaf_size},
+			               &allocation))
+				return false;
+			next_phys = allocation.address;
 
 			next_table = (uint64_t*)hhdm_phys_to_virt(next_phys);
-			memset(next_table, 0, PMM_PAGE_SIZE);
-			if (!paging_transaction_record(transaction, &table[index], next_phys)) {
-				(void)pmm_free_pages(next_phys, 1u);
+			memset(next_table, 0, paging_info.minimum_leaf_size);
+			if (!paging_transaction_record(transaction, &table[index], allocation)) {
+				(void)pmm_free((struct pmm_extent){.address = next_phys, .size = paging_info.minimum_leaf_size});
 				return false;
 			}
 			table[index] = riscv_pte_from_phys(next_phys) | RISCV_PTE_V;
@@ -229,8 +234,9 @@ static bool riscv_walk_to_level(const struct hal_paging_space* space, uintptr_t 
 }
 
 bool hal_paging_init(void) {
-	uint64_t         satp  = riscv_read_satp();
-	struct irq_state state = spinlock_lock_irqsave(&paging_lock);
+	uint64_t               satp            = riscv_read_satp();
+	struct irq_state       state           = spinlock_lock_irqsave(&paging_lock);
+	const struct pmm_info* physical_memory = pmm_info();
 
 	switch (satp >> 60) {
 	case RISCV_SATP_MODE_SV39:
@@ -248,7 +254,14 @@ bool hal_paging_init(void) {
 	}
 	minimum_leaf_shift            = 12u;
 	paging_info.minimum_leaf_size = (size_t)1u << minimum_leaf_shift;
-	paging_info.leaf_size_mask    = 0u;
+	if (physical_memory->allocation_granule == 0u ||
+	    paging_info.minimum_leaf_size % physical_memory->allocation_granule != 0u ||
+	    sizeof(struct hal_paging_space) > physical_memory->allocation_granule ||
+	    paging_transaction_page_capacity() == 0u) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
+	paging_info.leaf_size_mask = 0u;
 	for (int level = 0; level < paging_levels; level++)
 		paging_info.leaf_size_mask |= 1ull << (minimum_leaf_shift + 9u * (unsigned)level);
 	/* S-mode cannot read menvcfg.PBMTE, and SBI exposes no architectural query for it.
@@ -305,8 +318,10 @@ struct hal_paging_space* hal_paging_kernel_space(void) {
 }
 
 bool hal_paging_space_create(struct hal_paging_space** out_space) {
-	uintptr_t                root_phys    = 0;
-	uintptr_t                storage_phys = 0;
+	struct pmm_extent        root_allocation;
+	struct pmm_extent        storage_allocation;
+	uintptr_t                root_phys;
+	uintptr_t                storage_phys;
 	struct hal_paging_space* space;
 	uint64_t*                root;
 	uint64_t*                kernel_root;
@@ -316,23 +331,31 @@ bool hal_paging_space_create(struct hal_paging_space** out_space) {
 	*out_space = NULL;
 
 	state = spinlock_lock_irqsave(&paging_lock);
-	if (!pmm_alloc_pages(1, &storage_phys) || !pmm_alloc_pages(1, &root_phys)) {
-		if (storage_phys != 0u) (void)pmm_free_pages(storage_phys, 1u);
+	if (!pmm_alloc(&(const struct pmm_alloc_request){.size = pmm_info()->allocation_granule}, &storage_allocation)) {
 		spinlock_unlock_irqrestore(&paging_lock, state);
 		return false;
 	}
-	space = (struct hal_paging_space*)hhdm_phys_to_virt(storage_phys);
+	storage_phys = storage_allocation.address;
+	if (!pmm_alloc(&(const struct pmm_alloc_request){.size      = paging_info.minimum_leaf_size,
+	                                                 .alignment = paging_info.minimum_leaf_size},
+	               &root_allocation)) {
+		(void)pmm_free(storage_allocation);
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
+	root_phys = root_allocation.address;
+	space     = (struct hal_paging_space*)hhdm_phys_to_virt(storage_phys);
 
 	root        = (uint64_t*)hhdm_phys_to_virt(root_phys);
 	kernel_root = riscv_space_root_table(&kernel_space);
 	if (kernel_root == NULL) {
-		(void)pmm_free_pages(root_phys, 1);
-		(void)pmm_free_pages(storage_phys, 1);
+		(void)pmm_free(root_allocation);
+		(void)pmm_free(storage_allocation);
 		spinlock_unlock_irqrestore(&paging_lock, state);
 		return false;
 	}
 
-	memset(root, 0, PMM_PAGE_SIZE);
+	memset(root, 0, paging_info.minimum_leaf_size);
 	for (size_t index = 256u; index < 512u; index++) {
 		root[index] = kernel_root[index];
 	}
@@ -356,7 +379,7 @@ static void riscv_free_page_table_children(uint64_t* table, int level, size_t en
 		uintptr_t child_phys = riscv_pte_to_phys(entry);
 		uint64_t* child      = (uint64_t*)hhdm_phys_to_virt(child_phys);
 		riscv_free_page_table_children(child, level - 1, 512u);
-		(void)pmm_free_pages(child_phys, 1u);
+		(void)pmm_free((struct pmm_extent){.address = child_phys, .size = paging_info.minimum_leaf_size});
 	}
 }
 
@@ -371,10 +394,11 @@ void hal_paging_space_destroy(struct hal_paging_space* space) {
 	state = spinlock_lock_irqsave(&paging_lock);
 	root  = (uint64_t*)hhdm_phys_to_virt(root_phys);
 	riscv_free_page_table_children(root, paging_levels - 1, 256u);
-	(void)pmm_free_pages(root_phys, 1u);
+	(void)pmm_free((struct pmm_extent){.address = root_phys, .size = paging_info.minimum_leaf_size});
 	uintptr_t storage_phys = space->storage_phys;
 	*space                 = (struct hal_paging_space){0};
-	if (storage_phys != 0u) (void)pmm_free_pages(storage_phys, 1u);
+	if (storage_phys != 0u)
+		(void)pmm_free((struct pmm_extent){.address = storage_phys, .size = pmm_info()->allocation_granule});
 	spinlock_unlock_irqrestore(&paging_lock, state);
 }
 
@@ -393,20 +417,26 @@ static inline bool riscv_is_leaf(uint64_t entry) {
 }
 
 static bool riscv_split_leaf(uint64_t* slot, int level, struct paging_transaction* transaction) {
-	uint64_t  entry = *slot;
-	uintptr_t child_phys;
-	uint64_t* child;
-	size_t    parent_size = riscv_leaf_size(level);
-	size_t    child_size  = riscv_leaf_size(level - 1);
-	uintptr_t base        = riscv_pte_to_phys(entry) & ~(parent_size - 1u);
-	uint64_t  flags       = entry & ~RISCV_PTE_PPN_MASK;
-	if (level <= 0 || !riscv_is_leaf(entry) || !pmm_alloc_pages(1u, &child_phys)) return false;
-	child = (uint64_t*)hhdm_phys_to_virt(child_phys);
-	memset(child, 0, PMM_PAGE_SIZE);
+	uint64_t          entry = *slot;
+	struct pmm_extent allocation;
+	uintptr_t         child_phys;
+	uint64_t*         child;
+	size_t            parent_size = riscv_leaf_size(level);
+	size_t            child_size  = riscv_leaf_size(level - 1);
+	uintptr_t         base        = riscv_pte_to_phys(entry) & ~(parent_size - 1u);
+	uint64_t          flags       = entry & ~RISCV_PTE_PPN_MASK;
+	if (level <= 0 || !riscv_is_leaf(entry) ||
+	    !pmm_alloc(&(const struct pmm_alloc_request){.size      = paging_info.minimum_leaf_size,
+	                                                 .alignment = paging_info.minimum_leaf_size},
+	               &allocation))
+		return false;
+	child_phys = allocation.address;
+	child      = (uint64_t*)hhdm_phys_to_virt(child_phys);
+	memset(child, 0, paging_info.minimum_leaf_size);
 	for (size_t index = 0u; index < 512u; index++)
 		child[index] = riscv_pte_from_phys(base + index * child_size) | flags;
-	if (!paging_transaction_record(transaction, slot, child_phys)) {
-		(void)pmm_free_pages(child_phys, 1u);
+	if (!paging_transaction_record(transaction, slot, allocation)) {
+		(void)pmm_free((struct pmm_extent){.address = child_phys, .size = paging_info.minimum_leaf_size});
 		return false;
 	}
 	*slot = riscv_pte_from_phys(child_phys) | RISCV_PTE_V;
@@ -458,7 +488,7 @@ static bool riscv_change_range(uint64_t* table, int level, uintptr_t start, uint
 		if ((entry & RISCV_PTE_V) != 0u) {
 			bool leaf = (entry & (RISCV_PTE_R | RISCV_PTE_W | RISCV_PTE_X)) != 0u;
 			if (leaf) {
-				if (!paging_transaction_record(transaction, &table[index], 0u)) return false;
+				if (!paging_transaction_record(transaction, &table[index], (struct pmm_extent){0})) return false;
 				if (protect) table[index] = riscv_leaf_apply_protection(entry, flags);
 				else table[index] = 0u;
 			}
@@ -468,7 +498,11 @@ static bool riscv_change_range(uint64_t* table, int level, uintptr_t start, uint
 				uint64_t* child      = (uint64_t*)hhdm_phys_to_virt(child_phys);
 				if (!riscv_change_range(child, level - 1, start, next, protect, flags, transaction)) return false;
 				if (!protect && riscv_table_empty(child)) {
-					if (!paging_transaction_retire(transaction, &table[index], child_phys)) return false;
+					if (!paging_transaction_retire(
+							transaction,
+							&table[index],
+							(struct pmm_extent){.address = child_phys, .size = paging_info.minimum_leaf_size}))
+						return false;
 					table[index] = 0u;
 				}
 			}
@@ -589,7 +623,7 @@ static bool riscv_remap_range(uint64_t* table, int level, uintptr_t start, uintp
 					return false;
 			}
 			else {
-				if (!paging_transaction_record(transaction, slot, 0u)) return false;
+				if (!paging_transaction_record(transaction, slot, (struct pmm_extent){0})) return false;
 				*slot = (entry & ~RISCV_PTE_PPN_MASK) | riscv_pte_from_phys(phys & ~(span - 1u));
 			}
 		}
@@ -667,7 +701,7 @@ bool hal_paging_map(struct hal_paging_space* space, const struct hal_paging_map_
 		}
 		uint64_t* slot;
 		if (!riscv_walk_to_level(space, virt, level, &transaction, &slot) || (*slot & RISCV_PTE_V) != 0u ||
-		    !paging_transaction_record(&transaction, slot, 0u)) {
+		    !paging_transaction_record(&transaction, slot, (struct pmm_extent){0})) {
 			ok = false;
 			break;
 		}

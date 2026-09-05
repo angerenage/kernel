@@ -1,4 +1,5 @@
 #include <base/heap.h>
+#include <base/vmm.h>
 #include <core/pmm.h>
 #include <core/user_upcall.h>
 #include <core/uthread.h>
@@ -12,7 +13,7 @@
 #define KiB(x) ((size_t)(x) * 1024u)
 #define USER_UPCALL_TEST_HEAP_SIZE KiB(64)
 
-static uint8_t user_upcall_test_heap[USER_UPCALL_TEST_HEAP_SIZE] __attribute__((aligned(PMM_PAGE_SIZE)));
+static uint8_t user_upcall_test_heap[USER_UPCALL_TEST_HEAP_SIZE] __attribute__((aligned(VMM_PAGE_SIZE)));
 static size_t  user_upcall_test_heap_offset;
 static bool    user_upcall_test_heap_initialized;
 
@@ -23,7 +24,7 @@ bool heap_grow_pages(size_t page_count, void** out_base) {
 	if (out_base == NULL) return false;
 	*out_base = NULL;
 
-	bytes = page_count * PMM_PAGE_SIZE;
+	bytes = page_count * VMM_PAGE_SIZE;
 	for (;;) {
 		offset = __atomic_load_n(&user_upcall_test_heap_offset, __ATOMIC_ACQUIRE);
 		if (bytes > USER_UPCALL_TEST_HEAP_SIZE - offset) return false;

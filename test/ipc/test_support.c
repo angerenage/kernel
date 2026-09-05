@@ -1,13 +1,14 @@
 #include "test_support.h"
 
 #include <base/heap.h>
+#include <base/vmm.h>
 #include <core/pmm.h>
 #include <criterion/criterion.h>
 #include <stdbool.h>
 
 #define IPC_TEST_HEAP_SIZE KiB(128)
 
-static uint8_t ipc_test_heap[IPC_TEST_HEAP_SIZE] __attribute__((aligned(PMM_PAGE_SIZE)));
+static uint8_t ipc_test_heap[IPC_TEST_HEAP_SIZE] __attribute__((aligned(VMM_PAGE_SIZE)));
 static size_t  ipc_test_heap_offset;
 static bool    ipc_test_heap_initialized;
 
@@ -17,8 +18,8 @@ bool heap_grow_pages(size_t page_count, void** out_base) {
 
 	if (out_base == NULL) return false;
 	*out_base = NULL;
-	if (page_count > SIZE_MAX / PMM_PAGE_SIZE) return false;
-	bytes = page_count * PMM_PAGE_SIZE;
+	if (page_count > SIZE_MAX / VMM_PAGE_SIZE) return false;
+	bytes = page_count * VMM_PAGE_SIZE;
 
 	for (;;) {
 		offset = __atomic_load_n(&ipc_test_heap_offset, __ATOMIC_ACQUIRE);
