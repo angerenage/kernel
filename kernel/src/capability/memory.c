@@ -12,7 +12,7 @@
 #include <core/process.h>
 #include <core/syscall.h>
 #include <core/vm_space.h>
-#include <hal/paging.h>
+#include <hal/cache.h>
 #include <kernel/capability.h>
 #include <stdlib.h>
 #include <string.h>
@@ -256,7 +256,7 @@ static syscall_result_t memory_info_handler(const struct cap_request* req, struc
 static void sync_written_page(struct memory_object* memory, size_t offset) {
 	uintptr_t phys;
 	if (memory_object_page_phys(memory, offset / PMM_PAGE_SIZE, &phys))
-		hal_paging_sync_executable_range((void*)(phys + boot_info.direct_map_offset), PMM_PAGE_SIZE);
+		hal_cache_sync_executable_range_all_cpus((void*)(phys + boot_info.direct_map_offset), PMM_PAGE_SIZE);
 }
 
 static syscall_result_t memory_transfer_handler(const struct cap_request* req, struct memory_object* memory,

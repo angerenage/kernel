@@ -402,9 +402,13 @@ void x86_64_handle_interrupt(struct interrupt_frame* frame) {
 	/* LAPIC spurious interrupts require neither an EOI nor fatal exception handling. */
 	if (vector == X86_LAPIC_SPURIOUS_VECTOR) return;
 	if (trap_context) cpu_enter_exception();
-	if (vector == 2u && x86_64_paging_handle_tlb_nmi()) {
-		cpu_leave_exception();
-		return;
+	if (vector == 2u) {
+		bool handled = x86_64_cache_handle_sync_nmi();
+		handled |= x86_64_paging_handle_tlb_nmi();
+		if (handled) {
+			cpu_leave_exception();
+			return;
+		}
 	}
 	if (vector == X86_LAPIC_WAKE_VECTOR) {
 		apic_send_eoi();

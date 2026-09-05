@@ -799,8 +799,3 @@ bool hal_paging_map(struct hal_paging_space* space, const struct hal_paging_map_
 	spinlock_unlock_irqrestore(&paging_lock, state);
 	return ok;
 }
-
-void hal_paging_sync_executable_range(void* address, size_t size) {
-	(void)address;
-	(void)size;
-}

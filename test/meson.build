@@ -47,6 +47,7 @@ hal_mock_sources = files(
 	'mocks/base/heap.c',
 	'mocks/base/heap_hooks.c',
 	'mocks/base/display.c',
+	'mocks/hal/cache.c',
 	'mocks/hal/clock.c',
 	'mocks/hal/cpu.c',
 	'mocks/hal/hcf.c',

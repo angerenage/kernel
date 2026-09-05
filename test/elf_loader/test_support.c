@@ -1,5 +1,7 @@
 #include "test_support.h"
 
+#include <hal/cache.h>
+
 #define KiB(x) ((size_t)(x) * 1024u)
 #define ELF_TEST_ARENA_SIZE KiB(2048)
 #define ELF_TEST_HEAP_SIZE KiB(256)
@@ -47,9 +49,13 @@ bool heap_grow_pages(size_t page_count, void** out_base) {
 	}
 }
 
-void hal_paging_sync_executable_range(void* address, size_t size) {
+void hal_cache_sync_executable_range(void* address, size_t size) {
 	(void)address;
 	(void)size;
+}
+
+void hal_cache_sync_executable_range_all_cpus(void* address, size_t size) {
+	hal_cache_sync_executable_range(address, size);
 }
 
 void elf_test_init_environment(void) {

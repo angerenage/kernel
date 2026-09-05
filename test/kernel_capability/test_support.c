@@ -1,5 +1,7 @@
 #include "test_support.h"
 
+#include <hal/cache.h>
+
 #include "../../kernel/src/syscall/capability.h"
 
 static size_t          serial_bytes;
@@ -37,10 +39,14 @@ void hal_serial_write(const char* data, size_t length) {
 	serial_bytes += length;
 }
 
-void hal_paging_sync_executable_range(void* address, size_t size) {
+void hal_cache_sync_executable_range(void* address, size_t size) {
 	(void)address;
 	(void)size;
 	executable_sync_count++;
+}
+
+void hal_cache_sync_executable_range_all_cpus(void* address, size_t size) {
+	hal_cache_sync_executable_range(address, size);
 }
 
 void kernel_capability_test_serial_reset(void) {

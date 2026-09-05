@@ -1,6 +1,7 @@
 #include <core/cpu.h>
 #include <core/sched.h>
 #include <core/spinlock.h>
+#include <hal/cache.h>
 #include <hal/interrupts.h>
 #include <kernel/cpu_boot.h>
 #include <string.h>
@@ -10,6 +11,11 @@
 
 #define KERNEL_SELFTEST_CPU_MAX_CPUS 64u
 #define KERNEL_SELFTEST_CPU_REMOTE_DISPATCH_TIMEOUT_MS 250u
+
+static void kernel_selftest_cpu_global_executable_sync(struct kernel_selftest_context* ctx) {
+	hal_cache_sync_executable_range_all_cpus((void*)(uintptr_t)&kernel_selftest_cpu_global_executable_sync, 1u);
+	KERNEL_SELFTEST_ASSERT(ctx, true);
+}
 
 static void kernel_selftest_cpu_topology_is_consistent(struct kernel_selftest_context* ctx) {
 	struct cpu_topology* topology = cpu_topology_get();
@@ -292,6 +298,10 @@ static const struct kernel_selftest_case kernel_cpu_selftests[] = {
 	{
      .name = "remote_dispatch_reaches_application_processors",
      .run  = kernel_selftest_cpu_remote_dispatch_reaches_application_processors,
+	 },
+	{
+     .name = "global_executable_sync_reaches_online_cpus",
+     .run  = kernel_selftest_cpu_global_executable_sync,
 	 },
 };
 

@@ -6,7 +6,7 @@
 #include <core/pmm.h>
 #include <core/process.h>
 #include <core/vm_space.h>
-#include <hal/paging.h>
+#include <hal/cache.h>
 #include <kernel/boot.h>
 #include <kernel/elf_loader.h>
 #include <libc/stdlib.h>
@@ -127,7 +127,7 @@ static void kernel_elf_sync_loaded_pages(struct memory_object* memory, size_t pa
 	for (size_t page = 0; page < page_count; page++) {
 		uintptr_t phys = 0u;
 		if (memory_object_page_phys(memory, page, &phys))
-			hal_paging_sync_executable_range((void*)(phys + boot_info.direct_map_offset), PMM_PAGE_SIZE);
+			hal_cache_sync_executable_range_all_cpus((void*)(phys + boot_info.direct_map_offset), PMM_PAGE_SIZE);
 	}
 }
 

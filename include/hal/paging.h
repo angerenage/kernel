@@ -87,6 +87,3 @@ bool hal_paging_protect(struct hal_paging_space* space, uintptr_t virtual_addres
 /* Query the translation containing one virtual address. */
 bool hal_paging_query(const struct hal_paging_space* space, uintptr_t virtual_address,
                       struct hal_paging_translation* out_translation);
-
-/* Make bytes written through a kernel mapping visible to instruction fetch. */
-void hal_paging_sync_executable_range(void* address, size_t size);

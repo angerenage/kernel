@@ -86,8 +86,3 @@ bool hal_paging_query(const struct hal_paging_space* space, uintptr_t virt,
 	if (out_translation != NULL) *out_translation = (struct hal_paging_translation){0};
 	return false;
 }
-
-void hal_paging_sync_executable_range(void* address, size_t size) {
-	(void)address;
-	(void)size;
-}

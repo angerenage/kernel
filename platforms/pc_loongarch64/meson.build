@@ -21,6 +21,7 @@ platform_kernel_objects += [
 	clang_loongarch64_elf.process(files('interrupts.asm')),
 	clang_loongarch64_elf.process(files('hal/userspace.asm')),
 	clang_loongarch64_elf.process(files('thread.asm')),
+	files('hal/cache.c'),
 	files('hal/cpu.c'),
 	files('hal/clock.c'),
 	files('hal/hcf.c'),

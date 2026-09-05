@@ -810,24 +810,3 @@ bool hal_paging_map(struct hal_paging_space* space, const struct hal_paging_map_
 	spinlock_unlock_irqrestore(&paging_lock, state);
 	return ok;
 }
-
-void hal_paging_sync_executable_range(void* address, size_t size) {
-	uint64_t  ctr;
-	uintptr_t start = (uintptr_t)address;
-	uintptr_t end   = start + size;
-	size_t    dcache_line;
-	size_t    icache_line;
-
-	__asm__ volatile("mrs %0, ctr_el0" : "=r"(ctr));
-	dcache_line = (size_t)4u << ((ctr >> 16u) & 0xfu);
-	icache_line = (size_t)4u << (ctr & 0xfu);
-
-	for (uintptr_t addr = start & ~(uintptr_t)(dcache_line - 1u); addr < end; addr += dcache_line) {
-		__asm__ volatile("dc cvau, %0" : : "r"(addr) : "memory");
-	}
-	__asm__ volatile("dsb ish" : : : "memory");
-	for (uintptr_t addr = start & ~(uintptr_t)(icache_line - 1u); addr < end; addr += icache_line) {
-		__asm__ volatile("ic ivau, %0" : : "r"(addr) : "memory");
-	}
-	__asm__ volatile("dsb ish\n\tisb" : : : "memory");
-}

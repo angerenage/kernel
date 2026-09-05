@@ -110,6 +110,7 @@ bool apic_is_active(void);
 void apic_send_eoi(void);
 bool apic_send_ipi(uint32_t lapic_id, unsigned vector);
 bool apic_send_nmi(uint32_t lapic_id);
+bool x86_64_cache_handle_sync_nmi(void);
 bool x86_64_paging_handle_tlb_nmi(void);
 bool clock_handle_irq(unsigned vector);
 

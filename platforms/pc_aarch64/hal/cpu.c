@@ -103,12 +103,14 @@ bool hal_cpu_prepare_smp(void) {
 }
 
 void hal_cpu_park(void) {
+	aarch64_cache_poll_sync();
 	__asm__ volatile("sevl\n\t"
 	                 "wfe\n\t"
 	                 "wfe"
 	                 :
 	                 :
 	                 : "memory");
+	aarch64_cache_poll_sync();
 }
 
 void hal_cpu_kick(const struct cpu* cpu) {

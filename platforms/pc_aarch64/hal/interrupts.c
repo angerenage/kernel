@@ -304,6 +304,7 @@ void handle_exception(struct exception_frame* frame) {
 	bool     is_irq = (frame->vector & 0x3u) == 1u;
 	uint64_t ec     = (frame->esr >> 26) & 0x3fu;
 
+	aarch64_cache_poll_sync();
 	if (aarch64_handle_syscall(frame, ec)) return;
 	if (!is_irq) cpu_enter_exception();
 	if (clock_handle_irq(frame)) {
