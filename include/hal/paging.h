@@ -36,6 +36,13 @@ struct hal_paging_map_request {
 	enum memory_type memory_type;
 };
 
+/* Parameters for retargeting one translated virtual range to a contiguous physical extent. */
+struct hal_paging_remap_request {
+	uintptr_t virtual_address;
+	uintptr_t physical_address;
+	size_t    size;
+};
+
 /* Information about the translation containing one virtual address. */
 struct hal_paging_translation {
 	uintptr_t        physical_address;
@@ -67,6 +74,9 @@ bool hal_paging_activate(const struct hal_paging_space* space);
 
 /* Map one contiguous physical extent into one contiguous virtual range. */
 bool hal_paging_map(struct hal_paging_space* space, const struct hal_paging_map_request* request);
+
+/* Retarget a mapped virtual range while preserving its protection and memory type. */
+bool hal_paging_remap(struct hal_paging_space* space, const struct hal_paging_remap_request* request);
 
 /* Remove all translations intersecting exactly the supplied virtual range. */
 bool hal_paging_unmap(struct hal_paging_space* space, uintptr_t virtual_address, size_t size);

@@ -60,6 +60,12 @@ bool hal_paging_map(struct hal_paging_space* space, const struct hal_paging_map_
 	return false;
 }
 
+bool hal_paging_remap(struct hal_paging_space* space, const struct hal_paging_remap_request* request) {
+	(void)space;
+	(void)request;
+	return false;
+}
+
 bool hal_paging_unmap(struct hal_paging_space* space, uintptr_t virt, size_t size) {
 	(void)space;
 	(void)virt;

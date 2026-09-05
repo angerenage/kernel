@@ -679,6 +679,85 @@ bool hal_paging_query(const struct hal_paging_space* space, uintptr_t virt,
 	return true;
 }
 
+static bool aarch64_remap_range(uint64_t* table, unsigned level, uintptr_t start, uintptr_t end,
+                                uintptr_t request_start, uintptr_t physical_start,
+                                struct paging_transaction* transaction) {
+	size_t span = aarch64_leaf_size(level);
+	while (start < end) {
+		size_t    index = (size_t)((start >> (minimum_leaf_shift + 9u * level)) & 0x1ffu);
+		uintptr_t step  = span - (start & (span - 1u));
+		uintptr_t next  = step > end - start ? end : start + step;
+		uint64_t* slot  = &table[index];
+		uint64_t  entry = *slot;
+		uintptr_t phys  = physical_start + (start - request_start);
+
+		if ((entry & AARCH64_DESC_VALID) == 0u) return false;
+		bool leaf = level == 0u || (entry & AARCH64_DESC_TABLE) == 0u;
+		if (leaf) {
+			if (level == 0u && (entry & AARCH64_DESC_TABLE) == 0u) return false;
+			uintptr_t leaf_start = start & ~((uintptr_t)span - 1u);
+			if (level > 0u && (start != leaf_start || next != leaf_start + span || (phys & (span - 1u)) != 0u)) {
+				if (!aarch64_split_leaf(slot, level, transaction) ||
+				    !aarch64_remap_range((uint64_t*)hhdm_phys_to_virt(*slot & pte_address_mask),
+				                         level - 1u,
+				                         start,
+				                         next,
+				                         request_start,
+				                         physical_start,
+				                         transaction))
+					return false;
+			}
+			else {
+				uint64_t address_mask = pte_address_mask & ~((uint64_t)span - 1u);
+				if (!paging_transaction_record(transaction, slot, 0u)) return false;
+				aarch64_replace_descriptor(slot, (entry & ~address_mask) | ((uint64_t)phys & address_mask));
+			}
+		}
+		else if (!aarch64_remap_range((uint64_t*)hhdm_phys_to_virt(entry & pte_address_mask),
+		                              level - 1u,
+		                              start,
+		                              next,
+		                              request_start,
+		                              physical_start,
+		                              transaction)) {
+			return false;
+		}
+		start = next;
+	}
+	return true;
+}
+
+bool hal_paging_remap(struct hal_paging_space* space, const struct hal_paging_remap_request* request) {
+	uintptr_t                  end;
+	struct aarch64_walk_params params;
+	if (request == NULL || !aarch64_range_args(space, request->virtual_address, request->size, &end, &params) ||
+	    (request->physical_address & (paging_info.minimum_leaf_size - 1u)) != 0u ||
+	    request->size > UINTPTR_MAX - request->physical_address ||
+	    ((request->physical_address + request->size - 1u) &
+	     ~(pte_address_mask | ((uint64_t)paging_info.minimum_leaf_size - 1u))) != 0u)
+		return false;
+
+	struct irq_state          state       = spinlock_lock_irqsave(&paging_lock);
+	uint64_t*                 root        = (uint64_t*)hhdm_phys_to_virt((uintptr_t)params.root_phys);
+	struct paging_transaction transaction = {0};
+	bool                      ok          = aarch64_remap_range(root,
+                                  params.levels - 1u,
+                                  request->virtual_address,
+                                  end,
+                                  request->virtual_address,
+                                  request->physical_address,
+                                  &transaction);
+	aarch64_tlb_shootdown_range(request->virtual_address, request->size);
+	if (ok) paging_transaction_commit(&transaction);
+	else {
+		paging_transaction_rollback(&transaction, aarch64_transaction_restore, NULL);
+		aarch64_tlb_flush_all();
+		paging_transaction_abort(&transaction);
+	}
+	spinlock_unlock_irqrestore(&paging_lock, state);
+	return ok;
+}
+
 bool hal_paging_map(struct hal_paging_space* space, const struct hal_paging_map_request* request) {
 	struct aarch64_walk_params params;
 	uint64_t                   end;

@@ -157,6 +157,19 @@ bool hal_paging_map(struct hal_paging_space* space, const struct hal_paging_map_
 	return true;
 }
 
+bool hal_paging_remap(struct hal_paging_space* space, const struct hal_paging_remap_request* request) {
+	if (space == NULL || !space->allocated || !initialized || request == NULL || request->size == 0u ||
+	    ((request->virtual_address | request->physical_address | request->size) & (PMM_PAGE_SIZE - 1u)) != 0u ||
+	    request->size > UINTPTR_MAX - request->virtual_address ||
+	    request->size > UINTPTR_MAX - request->physical_address)
+		return false;
+	for (size_t offset = 0u; offset < request->size; offset += PMM_PAGE_SIZE)
+		if (find_mapping(space, request->virtual_address + offset) == NULL) return false;
+	for (size_t offset = 0u; offset < request->size; offset += PMM_PAGE_SIZE)
+		find_mapping(space, request->virtual_address + offset)->phys = request->physical_address + offset;
+	return true;
+}
+
 static bool valid_range(struct hal_paging_space* space, uintptr_t virt, size_t size) {
 	return space != NULL && space->allocated && initialized && size != 0u &&
 	       ((virt | size) & (PMM_PAGE_SIZE - 1u)) == 0u && size <= UINTPTR_MAX - virt;
