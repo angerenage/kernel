@@ -11,6 +11,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "../../paging_transaction.h"
+
 #define LOONGARCH_CSR_CRMD 0x0u
 #define LOONGARCH_CSR_PGDL 0x19u
 #define LOONGARCH_CSR_PGDH 0x1au
@@ -31,6 +33,8 @@
 #define LOONGARCH_PTE_PLV_MASK (3ull << 2)
 #define LOONGARCH_PTE_MAT_SHIFT 4u
 #define LOONGARCH_PTE_G (1ull << 6)
+#define LOONGARCH_PTE_H (1ull << 6)
+#define LOONGARCH_PTE_HG (1ull << 12)
 #define LOONGARCH_PTE_P (1ull << 7)
 #define LOONGARCH_PTE_W (1ull << 8)
 #define LOONGARCH_PTE_NR (1ull << 61)
@@ -44,12 +48,13 @@ struct hal_paging_space {
 	uintptr_t storage_phys;
 };
 
-static const struct hal_paging_info paging_info = {PMM_PAGE_SIZE, 1ull << 12};
+static struct hal_paging_info paging_info;
 
 static bool                    initialized;
 static uint64_t                phys_mask;
 static unsigned                palen_bits;
 static unsigned                valen_bits;
+static unsigned                minimum_leaf_shift;
 static struct hal_paging_space kernel_space;
 static struct spinlock         paging_lock =
 	SPINLOCK_INIT_CLASS("paging_lock", SPINLOCK_ORDER_PAGING, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
@@ -126,6 +131,10 @@ static inline uint64_t loongarch_entry_from_phys(uintptr_t phys) {
 	return ((uint64_t)phys & phys_mask);
 }
 
+static inline size_t loongarch_leaf_size(unsigned level) {
+	return (size_t)1u << (minimum_leaf_shift + 9u * level);
+}
+
 static inline void loongarch_tlb_flush_all(void) {
 	__asm__ volatile("invtlb 0x0, $r0, $r0" ::: "memory");
 }
@@ -153,7 +162,14 @@ static inline void loongarch_tlb_shootdown_local(void) {
 }
 
 static inline bool loongarch_upper_half(uintptr_t virt) {
-	return ((uint64_t)virt >> (palen_bits - 1u)) != 0;
+	return ((uint64_t)virt >> (valen_bits - 1u)) != 0;
+}
+
+static inline bool loongarch_virtual_address_valid(uintptr_t virt) {
+	uint64_t sign     = ((uint64_t)virt >> (valen_bits - 1u)) & 1u;
+	uint64_t upper    = (uint64_t)virt >> valen_bits;
+	uint64_t expected = sign != 0u ? ((1ull << (64u - valen_bits)) - 1u) : 0u;
+	return upper == expected;
 }
 
 static inline uint64_t loongarch_root_phys(uintptr_t virt) {
@@ -166,7 +182,7 @@ static inline uint64_t loongarch_space_root_phys(const struct hal_paging_space* 
 	return loongarch_upper_half(virt) ? (space->upper_root_phys & phys_mask) : (space->lower_root_phys & phys_mask);
 }
 
-static inline uint64_t loongarch_common_flags(uint64_t flags, enum memory_type memory_type) {
+static inline uint64_t loongarch_leaf_flags(uint64_t flags, enum memory_type memory_type, bool huge) {
 	uint64_t entry = LOONGARCH_PTE_P | LOONGARCH_PTE_V;
 	uint64_t mat   = memory_type == MEMORY_TYPE_DEVICE ? 0ull : (uint64_t)LOONGARCH_CRMD_CC;
 
@@ -175,7 +191,8 @@ static inline uint64_t loongarch_common_flags(uint64_t flags, enum memory_type m
 	if ((flags & HAL_PAGE_WRITE) != 0) entry |= LOONGARCH_PTE_W | LOONGARCH_PTE_D;
 	if ((flags & HAL_PAGE_READ) == 0) entry |= LOONGARCH_PTE_NR;
 	if ((flags & HAL_PAGE_EXEC) == 0) entry |= LOONGARCH_PTE_NX;
-	if ((flags & HAL_PAGE_GLOBAL) != 0) entry |= LOONGARCH_PTE_G;
+	if ((flags & HAL_PAGE_GLOBAL) != 0) entry |= huge ? LOONGARCH_PTE_HG : LOONGARCH_PTE_G;
+	if (huge) entry |= LOONGARCH_PTE_H;
 
 	return entry;
 }
@@ -184,42 +201,59 @@ static inline enum memory_type loongarch_leaf_memory_type(uint64_t entry) {
 	return ((entry >> LOONGARCH_PTE_MAT_SHIFT) & 0x3u) == LOONGARCH_CRMD_CC ? MEMORY_TYPE_NORMAL : MEMORY_TYPE_DEVICE;
 }
 
-static bool loongarch_walk_to_leaf_in(const struct hal_paging_space* space, uintptr_t virt, bool create,
-                                      uint64_t** out_table, size_t* out_index) {
-	static const unsigned shifts[]  = {39u, 30u, 21u, 12u};
-	uint64_t              root_phys = loongarch_space_root_phys(space, virt);
-	uint64_t*             table;
+static inline uint64_t loongarch_leaf_apply_protection(uint64_t entry, uint64_t flags, bool huge) {
+	entry &= ~(LOONGARCH_PTE_PLV_MASK | LOONGARCH_PTE_W | LOONGARCH_PTE_NR | LOONGARCH_PTE_NX |
+	           (huge ? LOONGARCH_PTE_HG : LOONGARCH_PTE_G));
+	entry |= (flags & HAL_PAGE_USER) != 0u ? LOONGARCH_PTE_PLV3 : LOONGARCH_PTE_PLV0;
+	if ((flags & HAL_PAGE_WRITE) != 0u) entry |= LOONGARCH_PTE_W | LOONGARCH_PTE_D;
+	if ((flags & HAL_PAGE_READ) == 0u) entry |= LOONGARCH_PTE_NR;
+	if ((flags & HAL_PAGE_EXEC) == 0u) entry |= LOONGARCH_PTE_NX;
+	if ((flags & HAL_PAGE_GLOBAL) != 0u) entry |= huge ? LOONGARCH_PTE_HG : LOONGARCH_PTE_G;
+	return entry;
+}
 
-	if (!out_table || !out_index) return false;
+static void loongarch_transaction_restore(uint64_t* slot, uint64_t previous, void* context) {
+	(void)context;
+	*slot = previous;
+}
+
+static bool loongarch_walk_to_level(const struct hal_paging_space* space, uintptr_t virt, unsigned target_level,
+                                    struct paging_transaction* transaction, uint64_t** out_slot) {
+	uint64_t  root_phys = loongarch_space_root_phys(space, virt);
+	uint64_t* table;
+
+	if (!out_slot || target_level > 3u) return false;
 	if (root_phys == 0) return false;
 
 	table = (uint64_t*)hhdm_phys_to_virt((uintptr_t)root_phys);
 
-	for (size_t level = 0; level < 3; level++) {
-		size_t   index = (size_t)((virt >> shifts[level]) & 0x1ffu);
+	for (unsigned level = 3u; level > target_level; level--) {
+		size_t   index = (size_t)((virt >> (minimum_leaf_shift + 9u * level)) & 0x1ffu);
 		uint64_t entry = table[index];
 
 		if (entry == 0) {
 			uintptr_t next_phys = 0;
 			uint64_t* next_table;
 
-			if (!create) return false;
 			if (!pmm_alloc_pages(1, &next_phys)) return false;
 
 			next_table = (uint64_t*)hhdm_phys_to_virt(next_phys);
 			memset(next_table, 0, PMM_PAGE_SIZE);
+			if (!paging_transaction_record(transaction, &table[index], next_phys)) {
+				(void)pmm_free_pages(next_phys, 1u);
+				return false;
+			}
 			table[index] = loongarch_entry_from_phys(next_phys);
 			entry        = table[index];
 		}
-		else if ((entry & LOONGARCH_PTE_G) != 0) {
+		else if ((entry & LOONGARCH_PTE_H) != 0) {
 			return false;
 		}
 
 		table = (uint64_t*)hhdm_phys_to_virt(loongarch_entry_to_phys(entry));
 	}
 
-	*out_table = table;
-	*out_index = (size_t)((virt >> shifts[3]) & 0x1ffu);
+	*out_slot = &table[(virt >> (minimum_leaf_shift + 9u * target_level)) & 0x1ffu];
 	return true;
 }
 
@@ -237,7 +271,10 @@ bool hal_paging_init(void) {
 		return false;
 	}
 
-	phys_mask = (((1ull << palen_bits) - 1u) & ~(uint64_t)(PMM_PAGE_SIZE - 1u));
+	minimum_leaf_shift            = 12u;
+	paging_info.minimum_leaf_size = (size_t)1u << minimum_leaf_shift;
+	paging_info.leaf_size_mask    = (1ull << minimum_leaf_shift) | (1ull << (minimum_leaf_shift + 9u));
+	phys_mask                     = (((1ull << palen_bits) - 1u) & ~((1ull << minimum_leaf_shift) - 1u));
 	if ((loongarch_csrrd(LOONGARCH_CSR_PGDH) & phys_mask) == 0) {
 		spinlock_unlock_irqrestore(&paging_lock, state);
 		return false;
@@ -272,23 +309,28 @@ const struct hal_paging_info* hal_paging_info(void) {
 	return &paging_info;
 }
 
+static bool loongarch_protection_supported(uint64_t flags) {
+	return (flags & ~HAL_PAGE_VALID_MASK) == 0u;
+}
+
 bool hal_paging_mapping_supported(uint64_t flags, enum memory_type memory_type) {
-	return (flags & ~HAL_PAGE_VALID_MASK) == 0u && memory_type < MEMORY_TYPE_COUNT;
+	return loongarch_protection_supported(flags) && memory_type < MEMORY_TYPE_COUNT;
 }
 
 static bool loongarch_query_entry(const struct hal_paging_space* space, uintptr_t virt, uint64_t* out_entry,
                                   unsigned* out_shift) {
-	static const unsigned shifts[]  = {39u, 30u, 21u, 12u};
-	uint64_t              root_phys = loongarch_space_root_phys(space, virt);
-	if (root_phys == 0u || out_entry == NULL || out_shift == NULL) return false;
+	uint64_t root_phys = loongarch_space_root_phys(space, virt);
+	if (root_phys == 0u || out_entry == NULL || out_shift == NULL || !loongarch_virtual_address_valid(virt))
+		return false;
 	uint64_t* table = (uint64_t*)hhdm_phys_to_virt((uintptr_t)root_phys);
-	for (size_t level = 0u; level < 4u; level++) {
-		uint64_t entry = table[(virt >> shifts[level]) & 0x1ffu];
+	for (unsigned level = 3u;; level--) {
+		unsigned shift = minimum_leaf_shift + 9u * level;
+		uint64_t entry = table[(virt >> shift) & 0x1ffu];
 		if (entry == 0u) return false;
-		if (level == 3u || (entry & LOONGARCH_PTE_G) != 0u) {
+		if (level == 0u || (entry & LOONGARCH_PTE_H) != 0u) {
 			if ((entry & (LOONGARCH_PTE_P | LOONGARCH_PTE_V)) != (LOONGARCH_PTE_P | LOONGARCH_PTE_V)) return false;
 			*out_entry = entry;
-			*out_shift = shifts[level];
+			*out_shift = shift;
 			return true;
 		}
 		table = (uint64_t*)hhdm_phys_to_virt(loongarch_entry_to_phys(entry));
@@ -335,7 +377,7 @@ static void loongarch_free_page_table_children(uint64_t* table, unsigned level) 
 	if (table == NULL || level == 0u) return;
 	for (size_t index = 0u; index < 512u; index++) {
 		uint64_t entry = table[index];
-		if (entry == 0u || (entry & LOONGARCH_PTE_G) != 0u) continue;
+		if (entry == 0u || (entry & LOONGARCH_PTE_H) != 0u) continue;
 
 		uintptr_t child_phys = loongarch_entry_to_phys(entry);
 		uint64_t* child      = (uint64_t*)hhdm_phys_to_virt(child_phys);
@@ -376,85 +418,87 @@ bool hal_paging_activate(const struct hal_paging_space* space) {
 	return true;
 }
 
-static bool loongarch_map_page(struct hal_paging_space* space, uintptr_t virt, uintptr_t phys, uint64_t flags,
-                               enum memory_type memory_type) {
-	uint64_t*        table = NULL;
-	size_t           index = 0;
-	struct irq_state state;
-
-	if (space == NULL) return false;
-	if (!initialized) return false;
-	if ((flags & ~HAL_PAGE_VALID_MASK) != 0 || memory_type >= MEMORY_TYPE_COUNT) return false;
-	if ((virt & (PMM_PAGE_SIZE - 1u)) != 0) return false;
-	if ((phys & (PMM_PAGE_SIZE - 1u)) != 0) return false;
-	state = spinlock_lock_irqsave(&paging_lock);
-	if (!loongarch_walk_to_leaf_in(space, virt, true, &table, &index)) {
-		spinlock_unlock_irqrestore(&paging_lock, state);
+static bool loongarch_split_leaf(uint64_t* slot, unsigned level, struct paging_transaction* transaction) {
+	uint64_t  entry = *slot;
+	uintptr_t child_phys;
+	uint64_t* child;
+	size_t    parent_size = loongarch_leaf_size(level);
+	size_t    child_size  = loongarch_leaf_size(level - 1u);
+	uintptr_t base        = loongarch_entry_to_phys(entry) & ~(parent_size - 1u);
+	uint64_t  flags       = entry & ~phys_mask & ~(LOONGARCH_PTE_H | LOONGARCH_PTE_HG);
+	if (level != 1u || (entry & LOONGARCH_PTE_H) == 0u || !pmm_alloc_pages(1u, &child_phys)) return false;
+	if ((entry & LOONGARCH_PTE_HG) != 0u) flags |= LOONGARCH_PTE_G;
+	child = (uint64_t*)hhdm_phys_to_virt(child_phys);
+	memset(child, 0, PMM_PAGE_SIZE);
+	for (size_t index = 0u; index < 512u; index++)
+		child[index] = loongarch_entry_from_phys(base + index * child_size) | flags;
+	if (!paging_transaction_record(transaction, slot, child_phys)) {
+		(void)pmm_free_pages(child_phys, 1u);
 		return false;
 	}
-	if ((table[index] & LOONGARCH_PTE_P) != 0) {
-		spinlock_unlock_irqrestore(&paging_lock, state);
-		return false;
-	}
-
-	table[index] = loongarch_entry_from_phys(phys) | loongarch_common_flags(flags, memory_type);
-	loongarch_tlb_shootdown_local();
-	spinlock_unlock_irqrestore(&paging_lock, state);
+	*slot = loongarch_entry_from_phys(child_phys);
 	return true;
 }
 
 static bool loongarch_table_empty(const uint64_t* table) {
-	for (size_t i = 0u; i < 512u; i++)
-		if (table[i] != 0u) return false;
+	for (size_t index = 0u; index < 512u; index++) {
+		if (table[index] != 0u) return false;
+	}
 	return true;
 }
 
-static bool loongarch_change_range(uint64_t* table, unsigned level, uintptr_t start, uintptr_t end, bool protect,
-                                   uint64_t flags) {
-	unsigned  shift = 12u + 9u * level;
-	uintptr_t span  = (uintptr_t)1u << shift;
+static bool loongarch_prepare_range(uint64_t* table, unsigned level, uintptr_t start, uintptr_t end,
+                                    struct paging_transaction* transaction) {
+	size_t span = loongarch_leaf_size(level);
 	while (start < end) {
-		size_t    index = (size_t)((start >> shift) & 0x1ffu);
+		size_t    index = (start >> (minimum_leaf_shift + 9u * level)) & 0x1ffu;
 		uintptr_t step  = span - (start & (span - 1u));
 		uintptr_t next  = step > end - start ? end : start + step;
-		uint64_t  entry = table[index];
-		if (entry != 0u) {
-			if (level == 0u) {
-				if ((entry & LOONGARCH_PTE_P) == 0u) return false;
-				if (protect)
-					table[index] = loongarch_entry_from_phys(loongarch_entry_to_phys(entry)) |
-					               loongarch_common_flags(flags, loongarch_leaf_memory_type(entry));
-				else table[index] = 0u;
+		uint64_t* slot  = &table[index];
+		uint64_t  entry = *slot;
+		if (entry != 0u && level > 0u) {
+			if ((entry & LOONGARCH_PTE_H) != 0u) {
+				uintptr_t leaf_start = start & ~(span - 1u);
+				if (start != leaf_start || next != leaf_start + span) {
+					if (!loongarch_split_leaf(slot, level, transaction)) return false;
+					entry = *slot;
+				}
 			}
-			else {
-				if ((entry & LOONGARCH_PTE_G) != 0u) return false;
-				uintptr_t child_phys = loongarch_entry_to_phys(entry);
-				uint64_t* child      = (uint64_t*)hhdm_phys_to_virt(child_phys);
-				if (!loongarch_change_range(child, level - 1u, start, next, protect, flags)) return false;
-				if (!protect && loongarch_table_empty(child) && pmm_free_pages(child_phys, 1u)) table[index] = 0u;
-			}
+			if ((entry & LOONGARCH_PTE_H) == 0u &&
+			    !loongarch_prepare_range(
+					(uint64_t*)hhdm_phys_to_virt(loongarch_entry_to_phys(entry)), level - 1u, start, next, transaction))
+				return false;
 		}
 		start = next;
 	}
 	return true;
 }
 
-static bool loongarch_can_change_range(uint64_t* table, unsigned level, uintptr_t start, uintptr_t end) {
-	unsigned  shift = 12u + 9u * level;
-	uintptr_t span  = (uintptr_t)1u << shift;
+static bool loongarch_change_range(uint64_t* table, unsigned level, uintptr_t start, uintptr_t end, bool protect,
+                                   uint64_t flags, struct paging_transaction* transaction) {
+	size_t span = loongarch_leaf_size(level);
 	while (start < end) {
-		size_t    index = (size_t)((start >> shift) & 0x1ffu);
+		size_t    index = (size_t)((start >> (minimum_leaf_shift + 9u * level)) & 0x1ffu);
 		uintptr_t step  = span - (start & (span - 1u));
 		uintptr_t next  = step > end - start ? end : start + step;
 		uint64_t  entry = table[index];
 		if (entry != 0u) {
-			if (level == 0u) {
+			bool leaf = level == 0u || (entry & LOONGARCH_PTE_H) != 0u;
+			if (leaf) {
 				if ((entry & LOONGARCH_PTE_P) == 0u) return false;
+				if (!paging_transaction_record(transaction, &table[index], 0u)) return false;
+				if (protect) table[index] = loongarch_leaf_apply_protection(entry, flags, level != 0u);
+				else table[index] = 0u;
 			}
-			else if ((entry & LOONGARCH_PTE_G) != 0u ||
-			         !loongarch_can_change_range(
-						 (uint64_t*)hhdm_phys_to_virt(loongarch_entry_to_phys(entry)), level - 1u, start, next))
-				return false;
+			else {
+				uintptr_t child_phys = loongarch_entry_to_phys(entry);
+				uint64_t* child      = (uint64_t*)hhdm_phys_to_virt(child_phys);
+				if (!loongarch_change_range(child, level - 1u, start, next, protect, flags, transaction)) return false;
+				if (!protect && loongarch_table_empty(child)) {
+					if (!paging_transaction_retire(transaction, &table[index], child_phys)) return false;
+					table[index] = 0u;
+				}
+			}
 		}
 		start = next;
 	}
@@ -463,8 +507,9 @@ static bool loongarch_can_change_range(uint64_t* table, unsigned level, uintptr_
 
 static bool loongarch_range_args(struct hal_paging_space* space, uintptr_t virt, size_t size, uintptr_t* out_end) {
 	uint64_t end;
-	if (space == NULL || !initialized || size == 0u || (virt & (PMM_PAGE_SIZE - 1u)) != 0u ||
-	    (size & (PMM_PAGE_SIZE - 1u)) != 0u || add_overflow_u64(virt, size, &end) ||
+	if (space == NULL || !initialized || size == 0u || !loongarch_virtual_address_valid(virt) ||
+	    (virt & (paging_info.minimum_leaf_size - 1u)) != 0u || (size & (paging_info.minimum_leaf_size - 1u)) != 0u ||
+	    add_overflow_u64(virt, size, &end) || !loongarch_virtual_address_valid((uintptr_t)end - 1u) ||
 	    loongarch_upper_half(virt) != loongarch_upper_half((uintptr_t)end - 1u))
 		return false;
 	*out_end = (uintptr_t)end;
@@ -474,13 +519,18 @@ static bool loongarch_range_args(struct hal_paging_space* space, uintptr_t virt,
 bool hal_paging_unmap(struct hal_paging_space* space, uintptr_t virt, size_t size) {
 	uintptr_t end;
 	if (!loongarch_range_args(space, virt, size, &end)) return false;
-	struct irq_state state     = spinlock_lock_irqsave(&paging_lock);
-	uintptr_t        root_phys = (uintptr_t)loongarch_space_root_phys(space, virt);
-	uint64_t*        root      = root_phys == 0u ? NULL : (uint64_t*)hhdm_phys_to_virt(root_phys);
-	bool             ok        = root != NULL && loongarch_can_change_range(root, 3u, virt, end) &&
-	          loongarch_change_range(root, 3u, virt, end, false, 0u);
-	if (ok) {
+	struct irq_state          state       = spinlock_lock_irqsave(&paging_lock);
+	uintptr_t                 root_phys   = (uintptr_t)loongarch_space_root_phys(space, virt);
+	uint64_t*                 root        = root_phys == 0u ? NULL : (uint64_t*)hhdm_phys_to_virt(root_phys);
+	struct paging_transaction transaction = {0};
+	bool                      ok = root != NULL && loongarch_prepare_range(root, 3u, virt, end, &transaction) &&
+	          loongarch_change_range(root, 3u, virt, end, false, 0u, &transaction);
+	loongarch_tlb_shootdown_local();
+	if (ok) paging_transaction_commit(&transaction);
+	else {
+		paging_transaction_rollback(&transaction, loongarch_transaction_restore, NULL);
 		loongarch_tlb_shootdown_local();
+		paging_transaction_abort(&transaction);
 	}
 	spinlock_unlock_irqrestore(&paging_lock, state);
 	return ok;
@@ -488,15 +538,19 @@ bool hal_paging_unmap(struct hal_paging_space* space, uintptr_t virt, size_t siz
 
 bool hal_paging_protect(struct hal_paging_space* space, uintptr_t virt, size_t size, uint64_t flags) {
 	uintptr_t end;
-	if (!hal_paging_mapping_supported(flags, MEMORY_TYPE_NORMAL) || !loongarch_range_args(space, virt, size, &end))
-		return false;
-	struct irq_state state     = spinlock_lock_irqsave(&paging_lock);
-	uintptr_t        root_phys = (uintptr_t)loongarch_space_root_phys(space, virt);
-	uint64_t*        root      = root_phys == 0u ? NULL : (uint64_t*)hhdm_phys_to_virt(root_phys);
-	bool             ok        = root != NULL && loongarch_can_change_range(root, 3u, virt, end) &&
-	          loongarch_change_range(root, 3u, virt, end, true, flags);
-	if (ok) {
+	if (!loongarch_protection_supported(flags) || !loongarch_range_args(space, virt, size, &end)) return false;
+	struct irq_state          state       = spinlock_lock_irqsave(&paging_lock);
+	uintptr_t                 root_phys   = (uintptr_t)loongarch_space_root_phys(space, virt);
+	uint64_t*                 root        = root_phys == 0u ? NULL : (uint64_t*)hhdm_phys_to_virt(root_phys);
+	struct paging_transaction transaction = {0};
+	bool                      ok = root != NULL && loongarch_prepare_range(root, 3u, virt, end, &transaction) &&
+	          loongarch_change_range(root, 3u, virt, end, true, flags, &transaction);
+	loongarch_tlb_shootdown_local();
+	if (ok) paging_transaction_commit(&transaction);
+	else {
+		paging_transaction_rollback(&transaction, loongarch_transaction_restore, NULL);
 		loongarch_tlb_shootdown_local();
+		paging_transaction_abort(&transaction);
 	}
 	spinlock_unlock_irqrestore(&paging_lock, state);
 	return ok;
@@ -524,7 +578,9 @@ bool hal_paging_query(const struct hal_paging_space* space, uintptr_t virt,
 	if ((entry & LOONGARCH_PTE_NR) == 0) flags |= HAL_PAGE_READ;
 	if ((entry & LOONGARCH_PTE_W) != 0) flags |= HAL_PAGE_WRITE;
 	if ((entry & LOONGARCH_PTE_NX) == 0) flags |= HAL_PAGE_EXEC;
-	if ((entry & LOONGARCH_PTE_G) != 0) flags |= HAL_PAGE_GLOBAL;
+	if ((shift == minimum_leaf_shift && (entry & LOONGARCH_PTE_G) != 0u) ||
+	    (shift != minimum_leaf_shift && (entry & LOONGARCH_PTE_HG) != 0u))
+		flags |= HAL_PAGE_GLOBAL;
 	if ((entry & LOONGARCH_PTE_PLV_MASK) == LOONGARCH_PTE_PLV3) flags |= HAL_PAGE_USER;
 	if (out_translation)
 		*out_translation = (struct hal_paging_translation){
@@ -535,25 +591,51 @@ bool hal_paging_query(const struct hal_paging_space* space, uintptr_t virt,
 }
 
 bool hal_paging_map(struct hal_paging_space* space, const struct hal_paging_map_request* request) {
-	if (request == NULL || !hal_paging_mapping_supported(request->flags, request->memory_type) || request->size == 0u ||
-	    (request->virtual_address & (PMM_PAGE_SIZE - 1u)) != 0u ||
-	    (request->physical_address & (PMM_PAGE_SIZE - 1u)) != 0u || (request->size & (PMM_PAGE_SIZE - 1u)) != 0u ||
+	uint64_t end;
+	if (space == NULL || request == NULL || !initialized ||
+	    !hal_paging_mapping_supported(request->flags, request->memory_type) || request->size == 0u ||
+	    (request->virtual_address & (paging_info.minimum_leaf_size - 1u)) != 0u ||
+	    (request->physical_address & (paging_info.minimum_leaf_size - 1u)) != 0u ||
+	    (request->size & (paging_info.minimum_leaf_size - 1u)) != 0u ||
+	    !loongarch_virtual_address_valid(request->virtual_address) ||
 	    request->size > UINTPTR_MAX - request->virtual_address ||
-	    request->size > UINTPTR_MAX - request->physical_address)
+	    request->size > UINTPTR_MAX - request->physical_address ||
+	    ((request->physical_address + request->size - 1u) &
+	     ~(phys_mask | ((uint64_t)paging_info.minimum_leaf_size - 1u))) != 0u ||
+	    add_overflow_u64(request->virtual_address, request->size, &end) ||
+	    !loongarch_virtual_address_valid((uintptr_t)end - 1u) ||
+	    loongarch_upper_half(request->virtual_address) != loongarch_upper_half((uintptr_t)end - 1u))
 		return false;
-	size_t mapped = 0u;
+	struct irq_state          state       = spinlock_lock_irqsave(&paging_lock);
+	struct paging_transaction transaction = {0};
+	size_t                    mapped      = 0u;
+	bool                      ok          = true;
 	while (mapped < request->size) {
-		if (!loongarch_map_page(space,
-		                        request->virtual_address + mapped,
-		                        request->physical_address + mapped,
-		                        request->flags,
-		                        request->memory_type)) {
-			if (mapped != 0u) (void)hal_paging_unmap(space, request->virtual_address, mapped);
-			return false;
+		uintptr_t virt      = request->virtual_address + mapped;
+		uintptr_t phys      = request->physical_address + mapped;
+		size_t    remaining = request->size - mapped;
+		unsigned  level     = 1u;
+		size_t    huge_size = loongarch_leaf_size(level);
+		if ((virt & (huge_size - 1u)) != 0u || (phys & (huge_size - 1u)) != 0u || remaining < huge_size) level = 0u;
+		uint64_t* slot;
+		if (!loongarch_walk_to_level(space, virt, level, &transaction, &slot) || *slot != 0u ||
+		    !paging_transaction_record(&transaction, slot, 0u)) {
+			ok = false;
+			break;
 		}
-		mapped += PMM_PAGE_SIZE;
+		*slot = loongarch_entry_from_phys(phys & ~(loongarch_leaf_size(level) - 1u)) |
+		        loongarch_leaf_flags(request->flags, request->memory_type, level != 0u);
+		mapped += loongarch_leaf_size(level);
 	}
-	return true;
+	loongarch_tlb_shootdown_local();
+	if (ok) paging_transaction_commit(&transaction);
+	else {
+		paging_transaction_rollback(&transaction, loongarch_transaction_restore, NULL);
+		loongarch_tlb_shootdown_local();
+		paging_transaction_abort(&transaction);
+	}
+	spinlock_unlock_irqrestore(&paging_lock, state);
+	return ok;
 }
 
 void hal_paging_sync_executable_range(void* address, size_t size) {
