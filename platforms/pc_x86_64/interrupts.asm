@@ -6,6 +6,8 @@
 .extern x86_64_prepare_user_return
 .extern core_finalize_user_return
 
+.equ X86_INTERRUPT_FRAME_VECTOR_OFFSET, 120
+
 .macro INTERRUPT_STUB vector has_error_code
 .global x86_64_interrupt_stub_\vector
 x86_64_interrupt_stub_\vector:
@@ -38,6 +40,11 @@ x86_64_interrupt_common:
 
 	mov rdi, rsp
 	call x86_64_handle_interrupt
+	/* NMI uses a per-CPU IST stack. Scheduling before IRET would preserve a
+	 * thread context on that shared stack and allow a later NMI to overwrite
+	 * it, so an NMI must complete without running interrupt-exit hooks. */
+	cmp qword ptr [rsp + X86_INTERRUPT_FRAME_VECTOR_OFFSET], 2
+	je x86_64_interrupt_restore
 	call x86_64_maybe_preempt_on_interrupt_exit
 	call x86_64_prepare_user_return
 	mov rdi, rsp
