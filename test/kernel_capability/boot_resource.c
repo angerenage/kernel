@@ -76,7 +76,8 @@ Test(kernel_capability_boot_resource, framebuffer_reports_format_and_maps_writab
 	kernel_capability_test_begin(&ctx, "kernel-cap/framebuffer");
 	cr_assert(
 		pmm_alloc(&(const struct pmm_alloc_request){.size = VMM_PAGE_SIZE, .alignment = VMM_PAGE_SIZE}, &allocation));
-	physical    = allocation.address;
+	physical = allocation.address;
+	cr_assert(pmm_free(allocation));
 	framebuffer = (struct kernel_boot_framebuffer){
 		.address          = (void*)(physical + 31u),
 		.width            = 8u,
@@ -106,6 +107,9 @@ Test(kernel_capability_boot_resource, framebuffer_reports_format_and_maps_writab
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(mapping.mapping.prot, VMM_PROT_READ | VMM_PROT_WRITE);
 	cr_assert_eq(mapping.data_offset, 31u);
+	cr_assert_neq(mapping.mapping_cap, CAP_ID_INVALID);
+	result = kernel_capability_test_call(cap, &map_request, sizeof(map_request), &mapping, sizeof(mapping));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK, "a second mapping must share the resource backing");
 	cr_assert_neq(mapping.mapping_cap, CAP_ID_INVALID);
 
 	root = cap_acquire(cap);

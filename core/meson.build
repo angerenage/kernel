@@ -24,7 +24,8 @@ core_sources = files(
 	'syscall/syscall.c',
 	'memory/address_transfer.c',
 	'memory/pmm.c',
+	'memory/memory_backing_tree.c',
+	'memory/memory_backing.c',
 	'memory/memory_object.c',
-	'memory/memory_object_radix.c',
 	'memory/vm_space.c',
 )

@@ -1,6 +1,30 @@
 #include "../../kernel/src/capability/boot_module.h"
 #include "test_support.h"
 
+Test(kernel_capability_module, repeated_maps_share_one_physical_backing) {
+	struct kernel_capability_test_context  ctx;
+	_Alignas(VMM_PAGE_SIZE) static uint8_t module_bytes[VMM_PAGE_SIZE];
+	const struct kernel_boot_module        modules[] = {
+        {.name = "mapped.bin", .address = module_bytes + 17u, .size = 31u},
+    };
+	const struct module_map_request request = {.header = {.op = MODULE_OP_MAP}};
+	struct module_map_response      response;
+	cap_id_t                        cap;
+	syscall_result_t                result;
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/module-shared-backing");
+	kernel_boot_mock_set_modules(modules, 1u);
+	cap = kernel_capability_boot_module_grant(0u, process_pid(ctx.process));
+	cr_assert_neq(cap, CAP_ID_INVALID);
+	result = kernel_capability_test_call(cap, &request, sizeof(request), &response, sizeof(response));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(response.data_offset, 17u);
+	result = kernel_capability_test_call(cap, &request, sizeof(request), &response, sizeof(response));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(response.data_offset, 17u);
+	kernel_capability_test_end(&ctx);
+}
+
 Test(kernel_capability_module, failed_repeat_resolve_preserves_the_preexisting_module_capability) {
 	struct kernel_capability_test_context ctx;
 	static const uint8_t                  module_bytes[] = {1u, 2u, 3u, 4u};

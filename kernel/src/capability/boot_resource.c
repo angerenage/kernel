@@ -12,6 +12,7 @@
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/process.h>
+#include <core/spinlock.h>
 #include <core/vm_space.h>
 #include <kernel/boot.h>
 #include <kernel/capability.h>
@@ -21,9 +22,12 @@
 
 #include "memory.h"
 
-static cap_object_id_t rsdp_object_id        = CAP_OBJECT_ID_INVALID;
-static cap_object_id_t dtb_object_id         = CAP_OBJECT_ID_INVALID;
-static cap_object_id_t framebuffer_object_id = CAP_OBJECT_ID_INVALID;
+static cap_object_id_t       rsdp_object_id        = CAP_OBJECT_ID_INVALID;
+static cap_object_id_t       dtb_object_id         = CAP_OBJECT_ID_INVALID;
+static cap_object_id_t       framebuffer_object_id = CAP_OBJECT_ID_INVALID;
+static struct memory_object* framebuffer_memory;
+static struct spinlock       framebuffer_memory_lock =
+	SPINLOCK_INIT_CLASS("framebuffer_memory", SPINLOCK_ORDER_VADDR, SPINLOCK_FLAG_IRQSAVE);
 
 struct external_mapping_layout {
 	uintptr_t physical_base;
@@ -71,7 +75,14 @@ static syscall_result_t external_mapping_create(const struct cap_request* req, c
 	caller = process_acquire(req->caller);
 	if (caller == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	space = process_address_space(caller);
-	if (space == NULL || !memory_object_create_external(layout.physical_base, layout.page_count, &memory) ||
+	if (space != NULL) {
+		struct irq_state state = spinlock_lock_irqsave(&framebuffer_memory_lock);
+		if (framebuffer_memory == NULL)
+			(void)memory_object_create_external(layout.physical_base, layout.page_count, &framebuffer_memory);
+		if (framebuffer_memory != NULL && memory_object_retain(framebuffer_memory)) memory = framebuffer_memory;
+		spinlock_unlock_irqrestore(&framebuffer_memory_lock, state);
+	}
+	if (memory == NULL ||
 	    !vm_space_map(space,
 	                  &(const struct vm_map_request){
 						  .memory = memory, .page_count = layout.page_count, .align_pages = 1u, .prot = prot},

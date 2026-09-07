@@ -1,28 +1,17 @@
 #pragma once
 
 #include <base/memory.h>
-#include <core/spinlock.h>
+#include <core/memory_backing.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-enum memory_object_type {
-	MEMORY_OBJECT_OWNED = 0,
-	MEMORY_OBJECT_CONTIGUOUS,
-	MEMORY_OBJECT_EXTERNAL,
-};
-
 /* Owner of logical memory contents and physical backing. */
 struct memory_object {
-	struct spinlock       lock;
-	uint8_t               radix_depth;
-	uint8_t               type;
-	uint8_t               memory_type;
-	bool                  external_claimed;
-	size_t                page_count;
-	uintptr_t             backing_root_or_phys;
-	uint64_t              reference_count;
-	struct memory_object* claim_next;
+	struct memory_backing* backing;
+	size_t                 page_count;
+	uint64_t               reference_count;
+	uint8_t                memory_type;
 };
 
 /* Return whether a create request has a valid, representable set of physical constraints. */
@@ -42,9 +31,6 @@ bool memory_object_retain(struct memory_object* object);
 
 /* Release one object-lifetime reference and destroy the object after the final release. */
 void memory_object_release(struct memory_object* object);
-
-/* Return the object's backing type. */
-enum memory_object_type memory_object_type(const struct memory_object* object);
 
 /* Return the CPU memory type intrinsic to the object. */
 enum memory_type memory_object_memory_type(const struct memory_object* object);

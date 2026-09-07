@@ -333,6 +333,15 @@ test_suites = [
 		'suites': ['unit', 'memory'],
 	},
 	{
+		'name': 'memory_backing',
+		'sources': files(
+			'memory_backing/test_support.c',
+			'memory_backing/tree.c',
+			'memory_backing/backing.c',
+		),
+		'suites': ['unit', 'memory'],
+	},
+	{
 		'name': 'heap',
 		'sources': files(
 			'heap/test_support.c',

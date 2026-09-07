@@ -55,7 +55,9 @@ Test(vmm, huge_sparse_mapping_uses_constant_initial_metadata) {
 	size_t before = pmm_free_size();
 	cr_assert(memory_object_create_owned(200000u, &memory));
 	cr_assert(map_object(vm_space_kernel(), memory, 0u, 200000u, 0u, 1u, 0u, VMM_PROT_READ, &id, &base));
-	cr_assert_eq(before - pmm_free_size(), 2u * VMM_PAGE_SIZE, "object plus vector should use two control pages");
+	cr_assert_eq(before - pmm_free_size(),
+	             3u * VMM_PAGE_SIZE,
+	             "object, backing, and mapping vector should use three control pages");
 	cr_assert_not(hal_paging_query(vm_space_hal(vm_space_kernel()), (uintptr_t)base, NULL));
 	cr_assert(vm_space_unmap(vm_space_kernel(), id));
 	memory_object_release(memory);
@@ -158,10 +160,65 @@ Test(vmm, external_object_has_direct_backing_and_never_owns_frames) {
 	init_test_vmm(arena, sizeof(arena));
 	size_t before = pmm_free_size();
 	cr_assert(memory_object_create_external(0x400000u, 3u, &memory));
+	cr_assert(memory_object_can_transfer(memory));
 	cr_assert(memory_object_page_phys(memory, 2u, &phys));
 	cr_assert_eq(phys, 0x400000u + 2u * VMM_PAGE_SIZE);
-	cr_assert_eq(before - pmm_free_size(), VMM_PAGE_SIZE);
+	cr_assert_eq(before - pmm_free_size(), 2u * VMM_PAGE_SIZE);
 	memory_object_release(memory);
+	cr_assert_eq(pmm_free_size(), before);
+}
+
+Test(vmm, external_helper_backing_is_usable_by_address_transfer) {
+	struct address_space                   space = {0};
+	struct memory_object*                  memory;
+	vmm_id_t                               id;
+	void*                                  base;
+	uint8_t                                copied[32];
+	static _Alignas(VMM_PAGE_SIZE) uint8_t external[VMM_PAGE_SIZE];
+
+	init_test_vmm(arena, sizeof(arena));
+	for (size_t i = 0u; i < sizeof(external); i++) external[i] = (uint8_t)i;
+	cr_assert(memory_object_create_external((uintptr_t)external, 1u, &memory));
+	cr_assert(memory_object_can_transfer(memory));
+	cr_assert(vm_space_create_user(&space));
+	cr_assert(map_object(&space, memory, 0u, 1u, 0u, 1u, 0u, VMM_PROT_READ, &id, &base));
+	cr_assert_eq(address_space_copy_from(&space, (uintptr_t)base + 17u, copied, sizeof(copied)), ADDRESS_TRANSFER_OK);
+	cr_assert_arr_eq(copied, external + 17u, sizeof(copied));
+	cr_assert(vm_space_unmap(&space, id));
+	vm_space_destroy(&space);
+	memory_object_release(memory);
+}
+
+Test(vmm, fixed_managed_normal_is_zeroed_and_device_is_rejected) {
+	struct memory_object*                  memory;
+	struct pmm_extent                      allocation;
+	uint8_t                                bytes[32];
+	static _Alignas(VMM_PAGE_SIZE) uint8_t fixed_policy_arena[KiB(192)];
+
+	init_test_vmm(fixed_policy_arena, sizeof(fixed_policy_arena));
+	size_t before = pmm_free_size();
+	cr_assert(pmm_alloc(
+		&(const struct pmm_alloc_request){
+			.size            = VMM_PAGE_SIZE,
+			.minimum_address = (uintptr_t)fixed_policy_arena + KiB(64),
+		},
+		&allocation));
+	memset((void*)(allocation.address + boot_info.direct_map_offset), 0xa5, allocation.size);
+	cr_assert(pmm_free(allocation));
+	struct memory_create_params fixed = {
+		.page_count  = 1u,
+		.memory_type = MEMORY_TYPE_NORMAL,
+		.constraints = {.physical_address = allocation.address, .flags = MEMORY_CONSTRAINT_FIXED},
+	};
+	cr_assert(memory_object_create(&fixed, &memory));
+	memset(bytes, 0xff, sizeof(bytes));
+	cr_assert(memory_object_read(memory, 0u, bytes, sizeof(bytes)));
+	cr_assert_arr_eq(bytes, (uint8_t[sizeof(bytes)]){0}, sizeof(bytes));
+	memory_object_release(memory);
+	cr_assert_eq(pmm_free_size(), before);
+
+	fixed.memory_type = MEMORY_TYPE_DEVICE;
+	cr_assert_not(memory_object_create(&fixed, &memory));
 	cr_assert_eq(pmm_free_size(), before);
 }
 
@@ -184,7 +241,6 @@ Test(vmm, constrained_object_reserves_contiguous_backing) {
 						  },
 	};
 	cr_assert(memory_object_create(&params, &memory));
-	cr_assert_eq(memory_object_type(memory), MEMORY_OBJECT_CONTIGUOUS);
 	cr_assert_eq(memory_object_memory_type(memory), MEMORY_TYPE_NORMAL);
 	cr_assert(memory_object_page_phys(memory, 0u, &first));
 	cr_assert(memory_object_page_phys(memory, 2u, &last));
@@ -208,7 +264,6 @@ Test(vmm, bounded_object_materializes_each_page_inside_the_window) {
 						  },
 	};
 	cr_assert(memory_object_create(&params, &memory));
-	cr_assert_eq(memory_object_type(memory), MEMORY_OBJECT_OWNED);
 	for (size_t page = 0u; page < params.page_count; page++) {
 		cr_assert(memory_object_page_phys(memory, page, &phys), "constrained page was left lazy");
 		cr_assert_geq(phys, params.constraints.physical_min);
@@ -231,7 +286,6 @@ Test(vmm, fixed_external_objects_are_exclusive_and_support_physical_zero) {
 		.constraints = {.physical_address = 0x400000u, .flags = MEMORY_CONSTRAINT_FIXED},
 	};
 	cr_assert(memory_object_create(&fixed, &first));
-	cr_assert_eq(memory_object_type(first), MEMORY_OBJECT_EXTERNAL);
 	cr_assert_eq(memory_object_memory_type(first), MEMORY_TYPE_DEVICE);
 	cr_assert_not(memory_object_create(&fixed, &second));
 	memory_object_release(first);
