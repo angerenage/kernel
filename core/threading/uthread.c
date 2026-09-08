@@ -4,7 +4,7 @@
 #include <core/cpu.h>
 #include <core/id_table.h>
 #include <core/kthread.h>
-#include <core/memory_object.h>
+#include <core/memory.h>
 #include <core/pmm.h>
 #include <core/process.h>
 #include <core/sched.h>
@@ -38,8 +38,8 @@ struct uthread_reaper {
 
 static bool uthread_map_stack(struct address_space* space, size_t pages, bool prefault, vmm_id_t* out_id,
                               void** out_base) {
-	struct memory_object* memory;
-	if (!memory_object_create_owned(pages, &memory)) return false;
+	struct memory* memory;
+	if (pages > SIZE_MAX / VMM_PAGE_SIZE || !memory_create_anonymous(pages * VMM_PAGE_SIZE, &memory)) return false;
 	bool mapped =
 		vm_space_map(space,
 	                 &(const struct vm_map_request){
@@ -51,7 +51,7 @@ static bool uthread_map_stack(struct address_space* space, size_t pages, bool pr
 					 },
 	                 out_id,
 	                 out_base);
-	memory_object_release(memory);
+	memory_release(memory);
 	if (!mapped) return false;
 	if (!prefault || vm_space_prefault(space, *out_id, 0u, pages)) return true;
 	(void)vm_space_unmap(space, *out_id);

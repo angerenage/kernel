@@ -6,7 +6,7 @@
 #include <base/vmm.h>
 #include <core/address_transfer.h>
 #include <core/capability.h>
-#include <core/memory_object.h>
+#include <core/memory.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/process.h>
@@ -45,8 +45,18 @@ static cap_rights_t protection_rights(vmm_prot_t prot) {
 	return rights;
 }
 
+static bool legacy_memory_type_valid(enum memory_type type) {
+	switch (type) {
+	case MEMORY_TYPE_NORMAL:
+	case MEMORY_TYPE_DEVICE:
+		return true;
+	default:
+		return false;
+	}
+}
+
 static void memory_destroy(uint64_t object_id) {
-	memory_object_release((struct memory_object*)(uintptr_t)object_id);
+	memory_release((struct memory*)(uintptr_t)object_id);
 }
 
 static void memory_event(struct cap_object* object, enum cap_object_event event) {
@@ -90,19 +100,129 @@ static cap_id_t mapping_create(process_id_t target, process_id_t space_owner, vm
 	return cap_id;
 }
 
-cap_id_t kernel_memory_create(cap_rights_t rights, const struct memory_create_params* params) {
-	struct memory_object* memory;
-	struct process*       caller;
-	cap_object_id_t       object_id;
-	cap_id_t              cap_id;
+bool kernel_memory_create_params_valid(const struct memory_create_params* params) {
+	const struct memory_constraints* constraints;
+	const struct pmm_info*           pmm = pmm_info();
+	size_t                           align_pages;
+	size_t                           align_bytes;
+	size_t                           span;
+	uint64_t                         fixed_end;
+	if (params == NULL || pmm == NULL || pmm->allocation_granule == 0u ||
+	    (pmm->allocation_granule & (pmm->allocation_granule - 1u)) != 0u ||
+	    VMM_PAGE_SIZE % pmm->allocation_granule != 0u || params->page_count == 0u ||
+	    mul_overflow_size(params->page_count, VMM_PAGE_SIZE, &span) || !legacy_memory_type_valid(params->memory_type))
+		return false;
+	constraints = &params->constraints;
+	if (params->memory_type != MEMORY_TYPE_NORMAL && (constraints->flags & MEMORY_CONSTRAINT_FIXED) == 0u) return false;
+	if ((constraints->flags & ~(uint32_t)(MEMORY_CONSTRAINT_CONTIGUOUS | MEMORY_CONSTRAINT_FIXED)) != 0u ||
+	    (constraints->physical_min & (pmm->allocation_granule - 1u)) != 0u ||
+	    (constraints->physical_max != 0u && ((constraints->physical_max & (pmm->allocation_granule - 1u)) != 0u ||
+	                                         constraints->physical_max <= constraints->physical_min)))
+		return false;
+	align_pages = constraints->align_pages == 0u ? 1u : constraints->align_pages;
+	if ((align_pages & (align_pages - 1u)) != 0u || mul_overflow_size(align_pages, VMM_PAGE_SIZE, &align_bytes))
+		return false;
+	if ((constraints->flags & MEMORY_CONSTRAINT_FIXED) == 0u) {
+		if (constraints->physical_address != 0u ||
+		    (align_pages > 1u && (constraints->flags & MEMORY_CONSTRAINT_CONTIGUOUS) == 0u))
+			return false;
+		return (constraints->flags & MEMORY_CONSTRAINT_CONTIGUOUS) == 0u || constraints->physical_max == 0u ||
+		       span <= constraints->physical_max - constraints->physical_min;
+	}
+	return (constraints->physical_address & (pmm->allocation_granule - 1u)) == 0u &&
+	       (constraints->physical_address & (align_bytes - 1u)) == 0u &&
+	       constraints->physical_address >= constraints->physical_min &&
+	       !add_overflow_u64((uint64_t)constraints->physical_address, span, &fixed_end) && fixed_end <= UINTPTR_MAX &&
+	       (constraints->physical_max == 0u || fixed_end <= constraints->physical_max);
+}
 
-	if (!memory_object_create_params_valid(params)) return CAP_ID_INVALID;
+static bool materialize_legacy_memory(struct memory* memory, size_t page_count,
+                                      const struct memory_constraints* constraints) {
+	size_t alignment = (constraints->align_pages == 0u ? 1u : constraints->align_pages) * VMM_PAGE_SIZE;
+	if ((constraints->flags & MEMORY_CONSTRAINT_CONTIGUOUS) != 0u)
+		return memory_materialize(memory,
+		                          &(const struct memory_materialize_request){
+									  .size               = page_count * VMM_PAGE_SIZE,
+									  .alignment          = alignment,
+									  .minimum_address    = constraints->physical_min,
+									  .maximum_address    = constraints->physical_max,
+									  .require_contiguous = true,
+								  });
+	for (size_t page = 0u; page < page_count; page++) {
+		if (!memory_materialize(memory,
+		                        &(const struct memory_materialize_request){
+									.offset             = page * VMM_PAGE_SIZE,
+									.size               = VMM_PAGE_SIZE,
+									.alignment          = VMM_PAGE_SIZE,
+									.minimum_address    = constraints->physical_min,
+									.maximum_address    = constraints->physical_max,
+									.require_contiguous = true,
+								}))
+			return false;
+	}
+	return true;
+}
+
+static bool zero_legacy_fixed_memory(struct memory* memory) {
+	struct memory_span span;
+	size_t             size = memory_size(memory);
+	for (size_t offset = 0u; offset < size; offset += span.size) {
+		if (!memory_query(memory, offset, size - offset, &span) || span.kind != MEMORY_SPAN_PRESENT) return false;
+		memset((void*)(span.physical_address + boot_info.direct_map_offset), 0, span.size);
+	}
+	return true;
+}
+
+static bool create_legacy_memory(const struct memory_create_params* params, struct memory** out_memory) {
+	const struct memory_constraints* constraints;
+	struct memory*                   memory;
+	size_t                           span;
+	if (out_memory != NULL) *out_memory = NULL;
+	if (out_memory == NULL || !kernel_memory_create_params_valid(params) ||
+	    mul_overflow_size(params->page_count, VMM_PAGE_SIZE, &span))
+		return false;
+	constraints = &params->constraints;
+	if ((constraints->flags & MEMORY_CONSTRAINT_FIXED) != 0u) {
+		if (!memory_create_physical(
+				&(const struct memory_physical_request){
+					.physical_address = constraints->physical_address,
+					.size             = span,
+					.memory_type      = params->memory_type,
+				},
+				&memory))
+			return false;
+		if (memory_cpu_accessible(memory) &&
+		    (params->memory_type != MEMORY_TYPE_NORMAL || !zero_legacy_fixed_memory(memory))) {
+			memory_release(memory);
+			return false;
+		}
+	}
+	else {
+		if (!memory_create_anonymous(span, &memory)) return false;
+		if (((constraints->flags & MEMORY_CONSTRAINT_CONTIGUOUS) != 0u || constraints->physical_min != 0u ||
+		     constraints->physical_max != 0u) &&
+		    !materialize_legacy_memory(memory, params->page_count, constraints)) {
+			memory_release(memory);
+			return false;
+		}
+	}
+	*out_memory = memory;
+	return true;
+}
+
+cap_id_t kernel_memory_create(cap_rights_t rights, const struct memory_create_params* params) {
+	struct memory*  memory;
+	struct process* caller;
+	cap_object_id_t object_id;
+	cap_id_t        cap_id;
+
+	if (!kernel_memory_create_params_valid(params)) return CAP_ID_INVALID;
 	caller = process_current();
-	if (caller == NULL || !memory_object_create(params, &memory)) return CAP_ID_INVALID;
+	if (caller == NULL || !create_legacy_memory(params, &memory)) return CAP_ID_INVALID;
 	object_id = cap_object_create_kernel_lifecycle(
 		(uint64_t)(uintptr_t)memory, memory_handler, NULL, memory_destroy, memory_event, NULL);
 	if (object_id == CAP_OBJECT_ID_INVALID) {
-		memory_object_release(memory);
+		memory_release(memory);
 		return CAP_ID_INVALID;
 	}
 	cap_id = cap_create(object_id, process_pid(caller), rights, NULL);
@@ -126,7 +246,7 @@ syscall_result_t kernel_memory_map(cap_id_t memory_cap_id, process_id_t caller, 
                                    const struct memory_map_params*  params,
                                    struct address_space_map_result* out_result) {
 	struct cap_object*    object;
-	struct memory_object* memory;
+	struct memory*        memory;
 	struct process*       retained_target;
 	struct address_space* space;
 	cap_rights_t          memory_rights;
@@ -151,7 +271,7 @@ syscall_result_t kernel_memory_map(cap_id_t memory_cap_id, process_id_t caller, 
 		cap_object_release(object);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
-	memory          = (struct memory_object*)(uintptr_t)object->object_id;
+	memory          = (struct memory*)(uintptr_t)object->object_id;
 	retained_target = process_acquire(process_pid(target));
 	if (memory == NULL || retained_target == NULL || retained_target != target) {
 		process_release(retained_target);
@@ -192,7 +312,7 @@ syscall_result_t kernel_memory_map(cap_id_t memory_cap_id, process_id_t caller, 
 			.memory_page_offset = params->memory_page_offset,
 			.guard_pages        = params->guard_pages,
 			.prot               = params->prot,
-			.memory_type        = memory_object_memory_type(memory),
+			.memory_type        = memory_type(memory),
     };
 	process_release(retained_target);
 	cap_object_release(object);
@@ -245,22 +365,25 @@ bool kernel_mapping_discard_unpublished(cap_id_t mapping_cap, process_id_t owner
 	return destroyed;
 }
 
-static syscall_result_t memory_info_handler(const struct cap_request* req, struct memory_object* memory) {
+static syscall_result_t memory_info_handler(const struct cap_request* req, struct memory* memory) {
 	const struct memory_info response = {
-		.page_count  = memory_object_page_count(memory),
-		.memory_type = memory_object_memory_type(memory),
+		.page_count  = memory_size(memory) / VMM_PAGE_SIZE,
+		.memory_type = memory_type(memory),
 	};
 	return cap_kernel_write_response(req, &response, sizeof(response));
 }
 
-static void sync_written_page(struct memory_object* memory, size_t offset) {
-	uintptr_t phys;
-	if (memory_object_page_phys(memory, offset / VMM_PAGE_SIZE, &phys))
-		hal_cache_sync_executable_range_all_cpus((void*)(phys + boot_info.direct_map_offset), VMM_PAGE_SIZE);
+static bool sync_written_range(struct memory* memory, size_t offset, size_t size) {
+	struct memory_span span;
+	for (size_t done = 0u; done < size; done += span.size) {
+		if (!memory_query(memory, offset + done, size - done, &span) || span.kind != MEMORY_SPAN_PRESENT) return false;
+		hal_cache_sync_executable_range_all_cpus((void*)(span.physical_address + boot_info.direct_map_offset),
+		                                         span.size);
+	}
+	return true;
 }
 
-static syscall_result_t memory_transfer_handler(const struct cap_request* req, struct memory_object* memory,
-                                                bool reading) {
+static syscall_result_t memory_transfer_handler(const struct cap_request* req, struct memory* memory, bool reading) {
 	union {
 		struct memory_read_request  read;
 		struct memory_write_request write;
@@ -273,20 +396,18 @@ static syscall_result_t memory_transfer_handler(const struct cap_request* req, s
 	enum address_transfer_result transfer_result = ADDRESS_TRANSFER_OK;
 	bool                         memory_failure  = false;
 
-	if (!memory_object_can_transfer(memory)) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
+	if (!memory_can_transfer(memory)) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (!cap_kernel_response_fits(req, sizeof(struct memory_transfer_response)))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	syscall_result_t result =
 		reading ? copy_request(req->request, req->request_size, &request.read, sizeof(request.read))
 				: copy_request(req->request, req->request_size, &request.write, sizeof(request.write));
 	if (result.status != SYSCALL_STATUS_OK) return result;
-	offset            = reading ? request.read.offset : request.write.offset;
-	size              = reading ? request.read.size : request.write.size;
-	user_address      = reading ? request.read.destination : request.write.source;
-	size_t page_count = memory_object_page_count(memory);
-	if (page_count > SIZE_MAX / VMM_PAGE_SIZE) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
-	size_t object_size = page_count * VMM_PAGE_SIZE;
-	if (offset > object_size || size > object_size - offset)
+	offset              = reading ? request.read.offset : request.write.offset;
+	size                = reading ? request.read.size : request.write.size;
+	user_address        = reading ? request.read.destination : request.write.source;
+	size_t logical_size = memory_size(memory);
+	if (offset > logical_size || size > logical_size - offset)
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	uint64_t user_end;
 	if (add_overflow_u64(user_address, size, &user_end)) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -300,14 +421,15 @@ static syscall_result_t memory_transfer_handler(const struct cap_request* req, s
 		size_t page_remaining = VMM_PAGE_SIZE - ((offset + done) & (VMM_PAGE_SIZE - 1u));
 		if (chunk > page_remaining) chunk = page_remaining;
 		if (reading) {
-			if (!memory_object_read(memory, offset + done, buffer, chunk)) memory_failure = true;
+			if (!memory_read(memory, offset + done, buffer, chunk)) memory_failure = true;
 			else transfer_result = address_space_copy_to(caller_space, user_address + done, buffer, chunk);
 		}
 		else {
 			transfer_result = address_space_copy_from(caller_space, user_address + done, buffer, chunk);
 			if (transfer_result == ADDRESS_TRANSFER_OK) {
-				if (!memory_object_write(memory, offset + done, buffer, chunk)) memory_failure = true;
-				else sync_written_page(memory, offset + done);
+				if (!memory_write(memory, offset + done, buffer, chunk) ||
+				    !sync_written_range(memory, offset + done, chunk))
+					memory_failure = true;
 			}
 		}
 		if (memory_failure) break;
@@ -322,11 +444,11 @@ static syscall_result_t memory_transfer_handler(const struct cap_request* req, s
 
 static syscall_result_t memory_handler(const struct cap_request* req) {
 	struct memory_request_header header;
-	struct memory_object*        memory;
+	struct memory*               memory;
 	if (req == NULL || req->object_id == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	syscall_result_t result = copy_request(req->request, req->request_size, &header, sizeof(header));
 	if (result.status != SYSCALL_STATUS_OK) return result;
-	memory = (struct memory_object*)(uintptr_t)req->object_id;
+	memory = (struct memory*)(uintptr_t)req->object_id;
 	switch (header.op) {
 	case MEMORY_OP_INFO:
 		return memory_info_handler(req, memory);

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <core/memory_object.h>
+#include <core/memory.h>
 #include <core/vm_space.h>
 
 /* Find the mapping containing an address while the address-space lock is held. */

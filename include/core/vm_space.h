@@ -1,22 +1,22 @@
 #pragma once
 
 #include <base/vmm.h>
-#include <core/memory_object.h>
+#include <core/memory.h>
 #include <core/spinlock.h>
 #include <hal/paging.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-/* One live mapping of a memory object into an address space. */
+/* One live mapping of a memory range into an address space. */
 struct vm_mapping {
-	struct memory_object* memory;
-	uintptr_t             base;
-	size_t                page_count;
-	size_t                memory_page_offset;
-	vmm_id_t              id;
-	size_t                guard_pages;
-	vmm_prot_t            prot;
+	struct memory* memory;
+	uintptr_t      base;
+	size_t         page_count;
+	size_t         memory_page_offset;
+	vmm_id_t       id;
+	size_t         guard_pages;
+	vmm_prot_t     prot;
 };
 
 /* A virtual address space and its live mappings. */
@@ -32,15 +32,15 @@ struct address_space {
 	uint64_t                 next_mapping_id;
 };
 
-/* Parameters for mapping a memory object range. */
+/* Parameters for mapping a memory range. */
 struct vm_map_request {
-	struct memory_object* memory;
-	size_t                memory_page_offset;
-	size_t                page_count;
-	uintptr_t             requested_base;
-	size_t                align_pages;
-	size_t                guard_pages;
-	vmm_prot_t            prot;
+	struct memory* memory;
+	size_t         memory_page_offset;
+	size_t         page_count;
+	uintptr_t      requested_base;
+	size_t         align_pages;
+	size_t         guard_pages;
+	vmm_prot_t     prot;
 };
 
 enum vmm_fault_kind {
@@ -78,7 +78,7 @@ struct hal_paging_space* vm_space_hal(struct address_space* space);
 /* Activate an address space on the current CPU. */
 bool vm_space_activate(struct address_space* space);
 
-/* Map a memory object range into an address space. */
+/* Map a memory range into an address space. */
 bool vm_space_map(struct address_space* space, const struct vm_map_request* request, vmm_id_t* out_id, void** out_base);
 
 /* Remove a mapping from an address space. */

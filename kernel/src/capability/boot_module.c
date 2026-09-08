@@ -6,7 +6,7 @@
 #include <base/syscall.h>
 #include <base/vmm.h>
 #include <core/capability.h>
-#include <core/memory_object.h>
+#include <core/memory.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/process.h>
@@ -22,11 +22,11 @@
 
 #include "memory.h"
 
-static cap_object_id_t*       boot_module_object_ids;
-static struct memory_object** boot_module_memories;
-static size_t                 boot_module_object_count;
-static cap_object_id_t        boot_module_provider_object_id = CAP_OBJECT_ID_INVALID;
-static struct spinlock        boot_module_memory_lock =
+static cap_object_id_t* boot_module_object_ids;
+static struct memory**  boot_module_memories;
+static size_t           boot_module_object_count;
+static cap_object_id_t  boot_module_provider_object_id = CAP_OBJECT_ID_INVALID;
+static struct spinlock  boot_module_memory_lock =
 	SPINLOCK_INIT_CLASS("boot_module_memory", SPINLOCK_ORDER_VADDR, SPINLOCK_FLAG_IRQSAVE);
 
 struct boot_module_mapping_layout {
@@ -60,8 +60,8 @@ static cap_object_id_t* boot_module_id_slot(size_t module_index) {
 		size_t count = kernel_boot_module_count();
 		if (count == 0u || module_index >= count) return NULL;
 
-		cap_object_id_t*       ids      = calloc(count, sizeof(*boot_module_object_ids));
-		struct memory_object** memories = calloc(count, sizeof(*boot_module_memories));
+		cap_object_id_t* ids      = calloc(count, sizeof(*boot_module_object_ids));
+		struct memory**  memories = calloc(count, sizeof(*boot_module_memories));
 		if (ids == NULL || memories == NULL) {
 			free(ids);
 			free(memories);
@@ -101,7 +101,7 @@ static syscall_result_t boot_module_map_handler(const struct cap_request* req, s
 	struct address_space*             space;
 	struct vmm_info                   mapping_info = {0};
 	vmm_id_t                          mapping_id   = VMM_ID_INVALID;
-	struct memory_object*             memory       = NULL;
+	struct memory*                    memory       = NULL;
 	syscall_result_t                  result;
 
 	if (req->request_size < sizeof(struct module_map_request) || !cap_kernel_response_fits(req, sizeof(response))) {
@@ -117,10 +117,16 @@ static syscall_result_t boot_module_map_handler(const struct cap_request* req, s
 	{
 		struct irq_state state = spinlock_lock_irqsave(&boot_module_memory_lock);
 		if (boot_module_memories != NULL && boot_module_memories[module_index] == NULL)
-			(void)memory_object_create_external(
-				layout.physical_base, layout.page_count, &boot_module_memories[module_index]);
+			(void)memory_create_physical(
+				&(const struct memory_physical_request){
+					.physical_address        = layout.physical_base,
+					.size                    = layout.page_count * VMM_PAGE_SIZE,
+					.memory_type             = MEMORY_TYPE_NORMAL,
+					.external_cpu_accessible = true,
+				},
+				&boot_module_memories[module_index]);
 		if (boot_module_memories != NULL && boot_module_memories[module_index] != NULL &&
-		    memory_object_retain(boot_module_memories[module_index]))
+		    memory_retain(boot_module_memories[module_index]))
 			memory = boot_module_memories[module_index];
 		spinlock_unlock_irqrestore(&boot_module_memory_lock, state);
 	}
@@ -130,11 +136,11 @@ static syscall_result_t boot_module_map_handler(const struct cap_request* req, s
 						  .memory = memory, .page_count = layout.page_count, .align_pages = 1u, .prot = VMM_PROT_READ},
 	                  &mapping_id,
 	                  NULL)) {
-		memory_object_release(memory);
+		memory_release(memory);
 		process_release(caller);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
-	memory_object_release(memory);
+	memory_release(memory);
 	if (!vm_space_query_id(space, mapping_id, &mapping_info)) {
 		(void)vm_space_unmap(space, mapping_id);
 		process_release(caller);

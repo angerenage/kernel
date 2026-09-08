@@ -2,7 +2,6 @@
 
 #include <base/cap.h>
 #include <base/memory.h>
-#include <core/memory_object.h>
 #include <core/syscall.h>
 
 #include "../capability/memory.h"
@@ -23,7 +22,7 @@ syscall_result_t syscall_memory_create(uintptr_t arg0, uintptr_t arg1, uintptr_t
 	space  = syscall_current_user_space();
 	result = syscall_copy_from_user(space, arg0, &params, sizeof(params), 0u);
 	if (result.status != SYSCALL_STATUS_OK) return result;
-	if (!memory_object_create_params_valid(&params)) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	if (!kernel_memory_create_params_valid(&params)) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	rights = CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP | CAP_DELEGATE;
 	if (params.memory_type == MEMORY_TYPE_NORMAL) rights |= CAP_EXEC;
 	cap_id = kernel_memory_create(rights, &params);

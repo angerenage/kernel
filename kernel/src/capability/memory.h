@@ -8,8 +8,11 @@
 #include <core/process.h>
 #include <stdbool.h>
 
-/* Create a memory object capability for the current process. */
+/* Create a memory capability for the current process. */
 cap_id_t kernel_memory_create(cap_rights_t rights, const struct memory_create_params* params);
+
+/* Return whether one legacy memory creation request is valid. */
+bool kernel_memory_create_params_valid(const struct memory_create_params* params);
 
 /* Map a memory capability into a target address space. */
 syscall_result_t kernel_memory_map(cap_id_t memory_cap, process_id_t caller, struct process* target,

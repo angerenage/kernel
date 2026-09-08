@@ -2,7 +2,7 @@
 #include <base/math.h>
 #include <base/vmm.h>
 #include <core/address_transfer.h>
-#include <core/memory_object.h>
+#include <core/memory.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/process.h>
@@ -124,11 +124,14 @@ static vmm_prot_t kernel_elf_segment_prot(uint32_t flags) {
 	return prot;
 }
 
-static void kernel_elf_sync_loaded_pages(struct memory_object* memory, size_t page_count) {
-	for (size_t page = 0; page < page_count; page++) {
-		uintptr_t phys = 0u;
-		if (memory_object_page_phys(memory, page, &phys))
-			hal_cache_sync_executable_range_all_cpus((void*)(phys + boot_info.direct_map_offset), VMM_PAGE_SIZE);
+static void kernel_elf_sync_loaded_memory(struct memory* memory) {
+	struct memory_span span;
+	size_t             size = memory_size(memory);
+	for (size_t offset = 0u; offset < size; offset += span.size) {
+		if (!memory_query(memory, offset, size - offset, &span)) return;
+		if (span.kind == MEMORY_SPAN_PRESENT)
+			hal_cache_sync_executable_range_all_cpus((void*)(span.physical_address + boot_info.direct_map_offset),
+			                                         span.size);
 	}
 }
 
@@ -139,7 +142,7 @@ static enum kernel_elf_load_result kernel_elf_load_segment(struct process*      
 	uintptr_t             map_base;
 	size_t                page_count;
 	vmm_id_t              id         = VMM_ID_INVALID;
-	struct memory_object* memory     = NULL;
+	struct memory*        memory     = NULL;
 	vmm_prot_t            final_prot = kernel_elf_segment_prot(phdr->flags);
 	vmm_prot_t            load_prot  = final_prot | VMM_PROT_READ | VMM_PROT_WRITE;
 
@@ -155,7 +158,8 @@ static enum kernel_elf_load_result kernel_elf_load_segment(struct process*      
 	}
 
 	space = process_address_space(process);
-	if (!memory_object_create_owned(page_count, &memory)) return KERNEL_ELF_LOAD_MAP_FAILED;
+	if (page_count > SIZE_MAX / VMM_PAGE_SIZE || !memory_create_anonymous(page_count * VMM_PAGE_SIZE, &memory))
+		return KERNEL_ELF_LOAD_MAP_FAILED;
 	if (!vm_space_map(space,
 	                  &(const struct vm_map_request){
 						  .memory         = memory,
@@ -166,7 +170,7 @@ static enum kernel_elf_load_result kernel_elf_load_segment(struct process*      
 					  },
 	                  &id,
 	                  NULL)) {
-		memory_object_release(memory);
+		memory_release(memory);
 		return KERNEL_ELF_LOAD_MAP_FAILED;
 	}
 
@@ -174,22 +178,22 @@ static enum kernel_elf_load_result kernel_elf_load_segment(struct process*      
 	                                                (uintptr_t)phdr->vaddr,
 	                                                (const uint8_t*)module->address + (size_t)phdr->offset,
 	                                                (size_t)phdr->filesz) != ADDRESS_TRANSFER_OK) {
-		memory_object_release(memory);
+		memory_release(memory);
 		return KERNEL_ELF_LOAD_COPY_FAILED;
 	}
-	if ((final_prot & VMM_PROT_EXEC) != 0) kernel_elf_sync_loaded_pages(memory, page_count);
-	memory_object_release(memory);
+	if ((final_prot & VMM_PROT_EXEC) != 0) kernel_elf_sync_loaded_memory(memory);
+	memory_release(memory);
 	if (final_prot != load_prot && !vm_space_protect(space, id, final_prot)) return KERNEL_ELF_LOAD_MAP_FAILED;
 	return KERNEL_ELF_LOAD_OK;
 }
 
 static enum kernel_elf_load_result kernel_elf_allocate_initial_heap(struct process* process, uintptr_t* out_base) {
-	void*                 base = NULL;
-	vmm_id_t              id   = VMM_ID_INVALID;
-	struct memory_object* memory;
+	void*          base = NULL;
+	vmm_id_t       id   = VMM_ID_INVALID;
+	struct memory* memory;
 
 	if (process == NULL || out_base == NULL) return KERNEL_ELF_LOAD_INVALID_ARGUMENTS;
-	if (!memory_object_create_owned(HEAP_DEFAULT_GROW_PAGES, &memory)) return KERNEL_ELF_LOAD_MAP_FAILED;
+	if (!memory_create_anonymous(HEAP_DEFAULT_GROW_PAGES * VMM_PAGE_SIZE, &memory)) return KERNEL_ELF_LOAD_MAP_FAILED;
 	bool mapped = vm_space_map(process_address_space(process),
 	                           &(const struct vm_map_request){
 								   .memory      = memory,
@@ -199,7 +203,7 @@ static enum kernel_elf_load_result kernel_elf_allocate_initial_heap(struct proce
 							   },
 	                           &id,
 	                           &base);
-	memory_object_release(memory);
+	memory_release(memory);
 	if (!mapped) {
 		return KERNEL_ELF_LOAD_MAP_FAILED;
 	}

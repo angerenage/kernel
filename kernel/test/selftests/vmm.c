@@ -1,5 +1,5 @@
 #include <base/vmm.h>
-#include <core/memory_object.h>
+#include <core/memory.h>
 #include <core/pmm.h>
 #include <core/vm_space.h>
 #include <hal/paging.h>
@@ -7,13 +7,14 @@
 #include "../selftest.h"
 
 static void kernel_selftest_vmm_demand_maps_and_releases(struct kernel_selftest_context* ctx) {
-	struct memory_object*         memory = NULL;
+	struct memory*                memory = NULL;
 	vmm_id_t                      id     = VMM_ID_INVALID;
 	void*                         base   = NULL;
 	struct vmm_info               info;
 	struct hal_paging_translation translation;
 
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, memory_object_create_owned(2u, &memory), "object create failed", cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx, memory_create_anonymous(2u * VMM_PAGE_SIZE, &memory), "Memory create failed", cleanup);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
 	                                vm_space_map(vm_space_kernel(),
 	                                             &(const struct vm_map_request){
@@ -47,7 +48,7 @@ static void kernel_selftest_vmm_demand_maps_and_releases(struct kernel_selftest_
 
 cleanup:
 	if (id != VMM_ID_INVALID) (void)vm_space_unmap(vm_space_kernel(), id);
-	memory_object_release(memory);
+	memory_release(memory);
 }
 
 static void kernel_selftest_vmm_large_leaf_split(struct kernel_selftest_context* ctx) {

@@ -2,7 +2,7 @@
 
 #include <core/address_transfer.h>
 #include <core/cpu.h>
-#include <core/memory_object.h>
+#include <core/memory.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/thread.h>

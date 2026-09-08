@@ -37,13 +37,13 @@ Physical memory starts with the bootloader memory map. `pmm_init()` records the 
 
 Virtual memory has three ownership layers:
 
-- Memory Objects in `include/core/memory_object.h` own logical contents and sparse owned or external physical backing.
+- Memory in `include/core/memory.h` owns byte-sized logical contents, slices, and sparse or fixed physical backing.
 - Address Spaces in `include/core/vm_space.h` keep a sorted dense vector of object mappings, place virtual ranges, enforce protections, and resolve demand faults.
 - The paging HAL owns the architecture page tables and is the sole source of hardware-PTE presence.
 
 The kernel has a global managed virtual window at `MM_KERNEL_VMM_BASE` with size `MM_KERNEL_VMM_SIZE`. User processes receive separate address spaces over `MM_USER_VMM_BASE` and `MM_USER_VMM_SIZE`, with a null guard at the bottom. New hardware user address spaces inherit the kernel mappings required to enter and leave kernel mode.
 
-The address-transfer helpers validate user ranges and copy directly through Memory Object contents, so logical reads and writes do not require user PTEs or expose untrusted pointers to syscall code.
+The address-transfer helpers validate user ranges and copy directly through Memory contents, so logical reads and writes do not require user PTEs or expose untrusted pointers to syscall code.
 
 ## Execution Model
 

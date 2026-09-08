@@ -36,8 +36,9 @@ size_t vmm_test_bytes_consumed_since(size_t free_before) {
 
 bool test_vm_map(struct address_space* space, size_t page_count, vmm_prot_t prot, uintptr_t requested_base,
                  size_t align_pages, size_t guard_pages, vmm_id_t* out_id, void** out_base) {
-	struct memory_object* memory;
-	if (!memory_object_create_owned(page_count, &memory)) return false;
+	struct memory* memory;
+	if (page_count > SIZE_MAX / VMM_PAGE_SIZE || !memory_create_anonymous(page_count * VMM_PAGE_SIZE, &memory))
+		return false;
 	bool mapped = vm_space_map(space,
 	                           &(const struct vm_map_request){
 								   .memory         = memory,
@@ -49,6 +50,6 @@ bool test_vm_map(struct address_space* space, size_t page_count, vmm_prot_t prot
 							   },
 	                           out_id,
 	                           out_base);
-	memory_object_release(memory);
+	memory_release(memory);
 	return mapped;
 }

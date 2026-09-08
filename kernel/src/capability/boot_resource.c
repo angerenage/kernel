@@ -8,7 +8,7 @@
 #include <base/syscall.h>
 #include <base/vmm.h>
 #include <core/capability.h>
-#include <core/memory_object.h>
+#include <core/memory.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/process.h>
@@ -22,11 +22,11 @@
 
 #include "memory.h"
 
-static cap_object_id_t       rsdp_object_id        = CAP_OBJECT_ID_INVALID;
-static cap_object_id_t       dtb_object_id         = CAP_OBJECT_ID_INVALID;
-static cap_object_id_t       framebuffer_object_id = CAP_OBJECT_ID_INVALID;
-static struct memory_object* framebuffer_memory;
-static struct spinlock       framebuffer_memory_lock =
+static cap_object_id_t rsdp_object_id        = CAP_OBJECT_ID_INVALID;
+static cap_object_id_t dtb_object_id         = CAP_OBJECT_ID_INVALID;
+static cap_object_id_t framebuffer_object_id = CAP_OBJECT_ID_INVALID;
+static struct memory*  framebuffer_memory;
+static struct spinlock framebuffer_memory_lock =
 	SPINLOCK_INIT_CLASS("framebuffer_memory", SPINLOCK_ORDER_VADDR, SPINLOCK_FLAG_IRQSAVE);
 
 struct external_mapping_layout {
@@ -65,7 +65,7 @@ static syscall_result_t external_mapping_create(const struct cap_request* req, c
 	struct external_mapping_layout layout;
 	struct process*                caller;
 	struct address_space*          space;
-	struct memory_object*          memory     = NULL;
+	struct memory*                 memory     = NULL;
 	vmm_id_t                       mapping_id = VMM_ID_INVALID;
 
 	if (req == NULL || out == NULL || !external_mapping_layout(address, size, &layout)) {
@@ -78,8 +78,15 @@ static syscall_result_t external_mapping_create(const struct cap_request* req, c
 	if (space != NULL) {
 		struct irq_state state = spinlock_lock_irqsave(&framebuffer_memory_lock);
 		if (framebuffer_memory == NULL)
-			(void)memory_object_create_external(layout.physical_base, layout.page_count, &framebuffer_memory);
-		if (framebuffer_memory != NULL && memory_object_retain(framebuffer_memory)) memory = framebuffer_memory;
+			(void)memory_create_physical(
+				&(const struct memory_physical_request){
+					.physical_address        = layout.physical_base,
+					.size                    = layout.page_count * VMM_PAGE_SIZE,
+					.memory_type             = MEMORY_TYPE_NORMAL,
+					.external_cpu_accessible = true,
+				},
+				&framebuffer_memory);
+		if (framebuffer_memory != NULL && memory_retain(framebuffer_memory)) memory = framebuffer_memory;
 		spinlock_unlock_irqrestore(&framebuffer_memory_lock, state);
 	}
 	if (memory == NULL ||
@@ -88,11 +95,11 @@ static syscall_result_t external_mapping_create(const struct cap_request* req, c
 						  .memory = memory, .page_count = layout.page_count, .align_pages = 1u, .prot = prot},
 	                  &mapping_id,
 	                  NULL)) {
-		memory_object_release(memory);
+		memory_release(memory);
 		process_release(caller);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
-	memory_object_release(memory);
+	memory_release(memory);
 	if (!vm_space_query_id(space, mapping_id, &out->mapping)) {
 		(void)vm_space_unmap(space, mapping_id);
 		process_release(caller);

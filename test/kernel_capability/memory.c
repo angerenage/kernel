@@ -74,6 +74,16 @@ Test(kernel_capability_memory, create_syscall_grants_the_final_memory_rights) {
 	kernel_capability_test_end(&ctx);
 }
 
+Test(kernel_capability_memory, create_syscall_rejects_negative_memory_type_as_a_bad_argument) {
+	struct kernel_capability_test_context ctx;
+	struct memory_create_params           params = {.page_count = 1u, .memory_type = (enum memory_type) - 1};
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/memory-invalid-type");
+	syscall_result_t result = syscall_memory_create((uintptr_t)&params, sizeof(params), 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	kernel_capability_test_end(&ctx);
+}
+
 Test(kernel_capability_memory, create_reports_logical_size_and_fresh_contents_are_zero) {
 	struct kernel_capability_test_context ctx;
 	struct memory_info                    info;
@@ -92,8 +102,39 @@ Test(kernel_capability_memory, create_reports_logical_size_and_fresh_contents_ar
 	buffer = kernel_capability_test_alloc_user_buffer(ctx.process, 1u, &buffer_id);
 	cr_assert_eq(memory_read_to(memory_cap, 0u, buffer, 1u).status, SYSCALL_STATUS_OK);
 	cr_assert_eq(address_space_copy_from(process_address_space(ctx.process), buffer, &byte, 1u), ADDRESS_TRANSFER_OK);
-	cr_assert_eq(byte, 0u, "fresh memory object exposed recycled PMM contents");
+	cr_assert_eq(byte, 0u, "fresh memory exposed recycled PMM contents");
 	cr_assert(drop_capability(memory_cap));
+	cr_assert(vm_space_unmap(process_address_space(ctx.process), buffer_id));
+	kernel_capability_test_end(&ctx);
+}
+
+Test(kernel_capability_memory, legacy_fixed_managed_ram_is_scrubbed_and_device_is_rejected) {
+	struct kernel_capability_test_context ctx;
+	struct pmm_extent                     extent;
+	cap_id_t                              memory_cap;
+	vmm_id_t                              buffer_id = VMM_ID_INVALID;
+	uintptr_t                             buffer;
+	uint8_t                               readback = 0xffu;
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/memory-fixed-policy");
+	cr_assert(pmm_alloc(&(const struct pmm_alloc_request){.size = VMM_PAGE_SIZE}, &extent));
+	memset((void*)(extent.address + boot_info.direct_map_offset), 0xa5, extent.size);
+	cr_assert(pmm_free(extent));
+	struct memory_create_params params = {
+		.page_count  = 1u,
+		.memory_type = MEMORY_TYPE_NORMAL,
+		.constraints = {.physical_address = extent.address, .flags = MEMORY_CONSTRAINT_FIXED},
+	};
+	memory_cap = create_memory_params(CAP_CALL | CAP_READ, &params);
+	cr_assert_neq(memory_cap, CAP_ID_INVALID);
+	buffer = kernel_capability_test_alloc_user_buffer(ctx.process, 1u, &buffer_id);
+	cr_assert_eq(memory_read_to(memory_cap, 0u, buffer, 1u).status, SYSCALL_STATUS_OK);
+	cr_assert_eq(address_space_copy_from(process_address_space(ctx.process), buffer, &readback, 1u),
+	             ADDRESS_TRANSFER_OK);
+	cr_assert_eq(readback, 0u);
+	cr_assert(drop_capability(memory_cap));
+	params.memory_type = MEMORY_TYPE_DEVICE;
+	cr_assert_eq(create_memory_params(CAP_CALL | CAP_READ, &params), CAP_ID_INVALID);
 	cr_assert(vm_space_unmap(process_address_space(ctx.process), buffer_id));
 	kernel_capability_test_end(&ctx);
 }
@@ -112,8 +153,8 @@ Test(kernel_capability_memory, zero_grants_removes_routing_and_releases_unmapped
 	cr_assert_neq(object_id, CAP_OBJECT_ID_INVALID);
 	struct cap_object* object = cap_object_acquire(object_id);
 	cr_assert_not_null(object);
-	struct memory_object* memory = (struct memory_object*)(uintptr_t)object->object_id;
-	cr_assert(memory_object_write(memory, 0u, &value, 1u));
+	struct memory* memory = (struct memory*)(uintptr_t)object->object_id;
+	cr_assert(memory_write(memory, 0u, &value, 1u));
 	cap_object_release(object);
 	cr_assert_lt(pmm_free_size(), free_before);
 	cr_assert(drop_capability(memory_cap));
@@ -138,7 +179,7 @@ Test(kernel_capability_memory, delegated_grants_keep_memory_routing_alive) {
 	cr_assert_neq(delegated_cap, CAP_ID_INVALID);
 	cr_assert(drop_capability(root_cap));
 	struct cap_object* object = cap_object_acquire(object_id);
-	cr_assert_not_null(object, "dropping creator grant destroyed a delegated memory object");
+	cr_assert_not_null(object, "dropping creator grant destroyed delegated memory");
 	cap_object_release(object);
 	cr_assert(drop_capability(delegated_cap));
 	cr_assert_null(cap_object_acquire(object_id));
@@ -402,7 +443,7 @@ Test(kernel_capability_memory, process_teardown_drops_memory_grants_through_gene
 	kernel_capability_test_end(&ctx);
 }
 
-Test(kernel_capability_memory, one_memory_object_shares_backing_across_address_spaces) {
+Test(kernel_capability_memory, one_memory_shares_backing_across_address_spaces) {
 	struct kernel_capability_test_context ctx;
 	struct process*                       other;
 	struct uthread*                       other_main;

@@ -24,7 +24,7 @@ static bool range_end(uintptr_t address, size_t size, uintptr_t* out_end) {
 static enum address_transfer_result check_access(const struct address_space* space, const struct vm_mapping* mapping,
                                                  uint32_t access) {
 	if ((access & ADDRESS_TRANSFER_USER) != 0u && space == vm_space_kernel()) return ADDRESS_TRANSFER_NOT_USER;
-	if (!memory_object_can_transfer(mapping->memory)) return ADDRESS_TRANSFER_ACCESS_DENIED;
+	if (!memory_can_transfer(mapping->memory)) return ADDRESS_TRANSFER_ACCESS_DENIED;
 	if ((access & ADDRESS_TRANSFER_READ) != 0u && (mapping->prot & VMM_PROT_READ) == 0u)
 		return ADDRESS_TRANSFER_ACCESS_DENIED;
 	if ((access & ADDRESS_TRANSFER_WRITE) != 0u && (mapping->prot & VMM_PROT_WRITE) == 0u)
@@ -35,13 +35,13 @@ static enum address_transfer_result check_access(const struct address_space* spa
 }
 
 static enum address_transfer_result locate_locked(struct address_space* space, uintptr_t address, uint32_t access,
-                                                  struct vm_mapping** out_mapping, size_t* out_object_offset,
+                                                  struct vm_mapping** out_mapping, size_t* out_memory_offset,
                                                   size_t* out_chunk) {
 	struct vm_mapping*           mapping;
 	enum address_transfer_result result;
 	uintptr_t                    mapping_end;
 	if (out_mapping != NULL) *out_mapping = NULL;
-	if (out_object_offset != NULL) *out_object_offset = 0u;
+	if (out_memory_offset != NULL) *out_memory_offset = 0u;
 	if (out_chunk != NULL) *out_chunk = 0u;
 	if (!vm_space_is_initialized(space) ||
 	    (access & ~(ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_EXEC | ADDRESS_TRANSFER_USER |
@@ -56,24 +56,37 @@ static enum address_transfer_result locate_locked(struct address_space* space, u
 		uintptr_t page = address & ~(uintptr_t)(VMM_PAGE_SIZE - 1u);
 		if (!hal_paging_query(space->hal, page, NULL)) {
 			if ((access & ADDRESS_TRANSFER_PRESENT) != 0u) return ADDRESS_TRANSFER_NOT_MAPPED;
-			size_t    page_index = (address - mapping->base) / VMM_PAGE_SIZE;
-			uintptr_t phys;
-			if (!memory_object_resolve_page(mapping->memory, mapping->memory_page_offset + page_index, &phys) ||
+			size_t             page_index = (address - mapping->base) / VMM_PAGE_SIZE;
+			size_t             memory_page;
+			size_t             memory_offset;
+			struct memory_span span;
+			if (add_overflow_size(mapping->memory_page_offset, page_index, &memory_page) ||
+			    mul_overflow_size(memory_page, VMM_PAGE_SIZE, &memory_offset) ||
+			    !memory_materialize(mapping->memory,
+			                        &(const struct memory_materialize_request){
+										.offset             = memory_offset,
+										.size               = VMM_PAGE_SIZE,
+										.alignment          = VMM_PAGE_SIZE,
+										.require_contiguous = true,
+									}) ||
+			    !memory_query(mapping->memory, memory_offset, VMM_PAGE_SIZE, &span) ||
+			    span.kind != MEMORY_SPAN_PRESENT || span.size != VMM_PAGE_SIZE ||
+			    (span.physical_address & (VMM_PAGE_SIZE - 1u)) != 0u ||
 			    !hal_paging_map(space->hal,
 			                    &(const struct hal_paging_map_request){
 									.virtual_address  = page,
-									.physical_address = phys,
+									.physical_address = span.physical_address,
 									.size             = VMM_PAGE_SIZE,
 									.flags            = vm_mapping_hal_flags(space, mapping->prot),
-									.memory_type      = memory_object_memory_type(mapping->memory),
+									.memory_type      = memory_type(mapping->memory),
 								}))
 				return ADDRESS_TRANSFER_FAULT_FAILED;
 		}
 	}
 	mapping_end = mapping->base + mapping->page_count * (uintptr_t)VMM_PAGE_SIZE;
 	if (out_mapping != NULL) *out_mapping = mapping;
-	if (out_object_offset != NULL)
-		*out_object_offset = mapping->memory_page_offset * VMM_PAGE_SIZE + (size_t)(address - mapping->base);
+	if (out_memory_offset != NULL)
+		*out_memory_offset = mapping->memory_page_offset * VMM_PAGE_SIZE + (size_t)(address - mapping->base);
 	if (out_chunk != NULL) *out_chunk = (size_t)(mapping_end - address);
 	return ADDRESS_TRANSFER_OK;
 }
@@ -119,8 +132,7 @@ enum address_transfer_result address_space_copy_from(struct address_space* space
 		result = locate_locked(
 			space, address + done, ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER, &mapping, &object_offset, &chunk);
 		if (chunk > size - done) chunk = size - done;
-		if (result == ADDRESS_TRANSFER_OK &&
-		    !memory_object_read(mapping->memory, object_offset, (uint8_t*)dst + done, chunk))
+		if (result == ADDRESS_TRANSFER_OK && !memory_read(mapping->memory, object_offset, (uint8_t*)dst + done, chunk))
 			result = ADDRESS_TRANSFER_FAULT_FAILED;
 		done += chunk;
 	}
@@ -145,7 +157,7 @@ enum address_transfer_result address_space_copy_to(struct address_space* space, 
 			space, address + done, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER, &mapping, &object_offset, &chunk);
 		if (chunk > size - done) chunk = size - done;
 		if (result == ADDRESS_TRANSFER_OK &&
-		    !memory_object_write(mapping->memory, object_offset, (const uint8_t*)src + done, chunk))
+		    !memory_write(mapping->memory, object_offset, (const uint8_t*)src + done, chunk))
 			result = ADDRESS_TRANSFER_FAULT_FAILED;
 		done += chunk;
 	}
@@ -225,8 +237,8 @@ enum address_transfer_result address_space_copy_between(struct address_space* ds
 			if (chunk > src_chunk) chunk = src_chunk;
 			if (chunk > dst_chunk) chunk = dst_chunk;
 		}
-		if (!memory_object_read(src_mapping->memory, src_offset, buffer, chunk) ||
-		    !memory_object_write(dst_mapping->memory, dst_offset, buffer, chunk)) {
+		if (!memory_read(src_mapping->memory, src_offset, buffer, chunk) ||
+		    !memory_write(dst_mapping->memory, dst_offset, buffer, chunk)) {
 			result = ADDRESS_TRANSFER_FAULT_FAILED;
 			break;
 		}

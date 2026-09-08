@@ -26,6 +26,6 @@ core_sources = files(
 	'memory/pmm.c',
 	'memory/memory_backing_tree.c',
 	'memory/memory_backing.c',
-	'memory/memory_object.c',
+	'memory/memory.c',
 	'memory/vm_space.c',
 )

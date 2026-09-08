@@ -3,7 +3,7 @@
 #include <core/cpu.h>
 #include <core/kthread.h>
 #include <core/lock.h>
-#include <core/memory_object.h>
+#include <core/memory.h>
 #include <core/pmm.h>
 #include <core/sched.h>
 #include <core/spinlock.h>
@@ -25,8 +25,8 @@ struct kthread_reaper {
 };
 
 static bool kthread_map_stack(vmm_id_t* out_id, void** out_base) {
-	struct memory_object* memory;
-	if (!memory_object_create_owned(KTHREAD_DEFAULT_STACK_PAGES, &memory)) return false;
+	struct memory* memory;
+	if (!memory_create_anonymous(KTHREAD_DEFAULT_STACK_PAGES * VMM_PAGE_SIZE, &memory)) return false;
 	bool mapped = vm_space_map(vm_space_kernel(),
 	                           &(const struct vm_map_request){
 								   .memory      = memory,
@@ -37,7 +37,7 @@ static bool kthread_map_stack(vmm_id_t* out_id, void** out_base) {
 							   },
 	                           out_id,
 	                           out_base);
-	memory_object_release(memory);
+	memory_release(memory);
 	if (!mapped) return false;
 	if (vm_space_prefault(vm_space_kernel(), *out_id, 0u, KTHREAD_DEFAULT_STACK_PAGES)) return true;
 	(void)vm_space_unmap(vm_space_kernel(), *out_id);
