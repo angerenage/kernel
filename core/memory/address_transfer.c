@@ -1,10 +1,8 @@
 #include <base/math.h>
-#include <base/vmm.h>
 #include <core/address_transfer.h>
-#include <core/pmm.h>
 #include <string.h>
 
-#include "vm_space_internal.h"
+#include "address_space_internal.h"
 
 bool address_transfer_result_is_success(enum address_transfer_result result) {
 	return result == ADDRESS_TRANSFER_OK;
@@ -21,72 +19,51 @@ static bool range_end(uintptr_t address, size_t size, uintptr_t* out_end) {
 	return true;
 }
 
-static enum address_transfer_result check_access(const struct address_space* space, const struct vm_mapping* mapping,
+static enum address_transfer_result check_access(const struct address_space* space, const struct mapping* mapping,
                                                  uint32_t access) {
-	if ((access & ADDRESS_TRANSFER_USER) != 0u && space == vm_space_kernel()) return ADDRESS_TRANSFER_NOT_USER;
+	if ((access & ADDRESS_TRANSFER_USER) != 0u && space == address_space_kernel()) return ADDRESS_TRANSFER_NOT_USER;
 	if (!memory_can_transfer(mapping->memory)) return ADDRESS_TRANSFER_ACCESS_DENIED;
-	if ((access & ADDRESS_TRANSFER_READ) != 0u && (mapping->prot & VMM_PROT_READ) == 0u)
+	if ((access & ADDRESS_TRANSFER_READ) != 0u && (mapping->access & MAPPING_ACCESS_READ) == 0u)
 		return ADDRESS_TRANSFER_ACCESS_DENIED;
-	if ((access & ADDRESS_TRANSFER_WRITE) != 0u && (mapping->prot & VMM_PROT_WRITE) == 0u)
+	if ((access & ADDRESS_TRANSFER_WRITE) != 0u && (mapping->access & MAPPING_ACCESS_WRITE) == 0u)
 		return ADDRESS_TRANSFER_ACCESS_DENIED;
-	if ((access & ADDRESS_TRANSFER_EXEC) != 0u && (mapping->prot & VMM_PROT_EXEC) == 0u)
+	if ((access & ADDRESS_TRANSFER_EXEC) != 0u && (mapping->access & MAPPING_ACCESS_EXEC) == 0u)
 		return ADDRESS_TRANSFER_ACCESS_DENIED;
 	return ADDRESS_TRANSFER_OK;
 }
 
 static enum address_transfer_result locate_locked(struct address_space* space, uintptr_t address, uint32_t access,
-                                                  struct vm_mapping** out_mapping, size_t* out_memory_offset,
+                                                  struct mapping** out_mapping, size_t* out_memory_offset,
                                                   size_t* out_chunk) {
-	struct vm_mapping*           mapping;
+	struct mapping*              mapping;
 	enum address_transfer_result result;
 	uintptr_t                    mapping_end;
 	if (out_mapping != NULL) *out_mapping = NULL;
 	if (out_memory_offset != NULL) *out_memory_offset = 0u;
 	if (out_chunk != NULL) *out_chunk = 0u;
-	if (!vm_space_is_initialized(space) ||
+	if (!address_space_is_initialized(space) ||
 	    (access & ~(ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_EXEC | ADDRESS_TRANSFER_USER |
 	                ADDRESS_TRANSFER_PRESENT | ADDRESS_TRANSFER_FAULT_IN)) != 0u ||
 	    ((access & ADDRESS_TRANSFER_PRESENT) != 0u && (access & ADDRESS_TRANSFER_FAULT_IN) != 0u))
 		return ADDRESS_TRANSFER_INVALID_ARGUMENTS;
-	mapping = vm_mapping_find_locked(space, address);
+	mapping = address_space_find_mapping_locked(space, address);
 	if (mapping == NULL) return ADDRESS_TRANSFER_NOT_MAPPED;
 	result = check_access(space, mapping, access);
 	if (result != ADDRESS_TRANSFER_OK) return result;
 	if ((access & (ADDRESS_TRANSFER_PRESENT | ADDRESS_TRANSFER_FAULT_IN)) != 0u) {
-		uintptr_t page = address & ~(uintptr_t)(VMM_PAGE_SIZE - 1u);
-		if (!hal_paging_query(space->hal, page, NULL)) {
+		const struct hal_paging_info* info    = hal_paging_info();
+		size_t                        granule = info == NULL ? 0u : info->minimum_leaf_size;
+		if (granule == 0u) return ADDRESS_TRANSFER_FAULT_FAILED;
+		size_t    offset = (size_t)(address - mapping->address) & ~(granule - 1u);
+		uintptr_t leaf   = mapping->address + offset;
+		if (!hal_paging_query(space->hal, leaf, NULL)) {
 			if ((access & ADDRESS_TRANSFER_PRESENT) != 0u) return ADDRESS_TRANSFER_NOT_MAPPED;
-			size_t             page_index = (address - mapping->base) / VMM_PAGE_SIZE;
-			size_t             memory_page;
-			size_t             memory_offset;
-			struct memory_span span;
-			if (add_overflow_size(mapping->memory_page_offset, page_index, &memory_page) ||
-			    mul_overflow_size(memory_page, VMM_PAGE_SIZE, &memory_offset) ||
-			    !memory_materialize(mapping->memory,
-			                        &(const struct memory_materialize_request){
-										.offset             = memory_offset,
-										.size               = VMM_PAGE_SIZE,
-										.alignment          = VMM_PAGE_SIZE,
-										.require_contiguous = true,
-									}) ||
-			    !memory_query(mapping->memory, memory_offset, VMM_PAGE_SIZE, &span) ||
-			    span.kind != MEMORY_SPAN_PRESENT || span.size != VMM_PAGE_SIZE ||
-			    (span.physical_address & (VMM_PAGE_SIZE - 1u)) != 0u ||
-			    !hal_paging_map(space->hal,
-			                    &(const struct hal_paging_map_request){
-									.virtual_address  = page,
-									.physical_address = span.physical_address,
-									.size             = VMM_PAGE_SIZE,
-									.flags            = vm_mapping_hal_flags(space, mapping->prot),
-									.memory_type      = memory_type(mapping->memory),
-								}))
-				return ADDRESS_TRANSFER_FAULT_FAILED;
+			if (!address_space_resolve_locked(space, mapping, offset)) return ADDRESS_TRANSFER_FAULT_FAILED;
 		}
 	}
-	mapping_end = mapping->base + mapping->page_count * (uintptr_t)VMM_PAGE_SIZE;
+	mapping_end = mapping->address + mapping->size;
 	if (out_mapping != NULL) *out_mapping = mapping;
-	if (out_memory_offset != NULL)
-		*out_memory_offset = mapping->memory_page_offset * VMM_PAGE_SIZE + (size_t)(address - mapping->base);
+	if (out_memory_offset != NULL) *out_memory_offset = (size_t)(address - mapping->address);
 	if (out_chunk != NULL) *out_chunk = (size_t)(mapping_end - address);
 	return ADDRESS_TRANSFER_OK;
 }
@@ -109,7 +86,7 @@ enum address_transfer_result address_space_validate_range(struct address_space* 
 	struct irq_state state;
 	if (size == 0u) return ADDRESS_TRANSFER_OK;
 	if (!range_end(address, size, NULL)) return ADDRESS_TRANSFER_ADDRESS_OVERFLOW;
-	if (!vm_space_is_initialized(space)) return ADDRESS_TRANSFER_INVALID_ARGUMENTS;
+	if (!address_space_is_initialized(space)) return ADDRESS_TRANSFER_INVALID_ARGUMENTS;
 	state                               = spinlock_lock_irqsave(&space->lock);
 	enum address_transfer_result result = validate_locked(space, address, size, access);
 	spinlock_unlock_irqrestore(&space->lock, state);
@@ -121,14 +98,14 @@ enum address_transfer_result address_space_copy_from(struct address_space* space
 	struct irq_state state;
 	size_t           done = 0u;
 	if (size == 0u) return ADDRESS_TRANSFER_OK;
-	if (dst == NULL || !vm_space_is_initialized(space)) return ADDRESS_TRANSFER_INVALID_ARGUMENTS;
+	if (dst == NULL || !address_space_is_initialized(space)) return ADDRESS_TRANSFER_INVALID_ARGUMENTS;
 	if (!range_end(address, size, NULL)) return ADDRESS_TRANSFER_ADDRESS_OVERFLOW;
 	state = spinlock_lock_irqsave(&space->lock);
 	enum address_transfer_result result =
 		validate_locked(space, address, size, ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER);
 	while (result == ADDRESS_TRANSFER_OK && done < size) {
-		struct vm_mapping* mapping;
-		size_t             object_offset, chunk;
+		struct mapping* mapping;
+		size_t          object_offset, chunk;
 		result = locate_locked(
 			space, address + done, ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER, &mapping, &object_offset, &chunk);
 		if (chunk > size - done) chunk = size - done;
@@ -145,14 +122,14 @@ enum address_transfer_result address_space_copy_to(struct address_space* space, 
 	struct irq_state state;
 	size_t           done = 0u;
 	if (size == 0u) return ADDRESS_TRANSFER_OK;
-	if (src == NULL || !vm_space_is_initialized(space)) return ADDRESS_TRANSFER_INVALID_ARGUMENTS;
+	if (src == NULL || !address_space_is_initialized(space)) return ADDRESS_TRANSFER_INVALID_ARGUMENTS;
 	if (!range_end(address, size, NULL)) return ADDRESS_TRANSFER_ADDRESS_OVERFLOW;
 	state = spinlock_lock_irqsave(&space->lock);
 	enum address_transfer_result result =
 		validate_locked(space, address, size, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER);
 	while (result == ADDRESS_TRANSFER_OK && done < size) {
-		struct vm_mapping* mapping;
-		size_t             object_offset, chunk;
+		struct mapping* mapping;
+		size_t          object_offset, chunk;
 		result = locate_locked(
 			space, address + done, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER, &mapping, &object_offset, &chunk);
 		if (chunk > size - done) chunk = size - done;
@@ -188,7 +165,7 @@ enum address_transfer_result address_space_copy_between(struct address_space* ds
 	size_t                done = 0u;
 	uintptr_t             src_end;
 	if (size == 0u) return ADDRESS_TRANSFER_OK;
-	if (!vm_space_is_initialized(src_space) || !vm_space_is_initialized(dst_space))
+	if (!address_space_is_initialized(src_space) || !address_space_is_initialized(dst_space))
 		return ADDRESS_TRANSFER_INVALID_ARGUMENTS;
 	if (!range_end(src_address, size, &src_end) || !range_end(dst_address, size, NULL))
 		return ADDRESS_TRANSFER_ADDRESS_OVERFLOW;
@@ -199,9 +176,9 @@ enum address_transfer_result address_space_copy_between(struct address_space* ds
 		result = validate_locked(dst_space, dst_address, size, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER);
 	backward = src_space == dst_space && dst_address > src_address && dst_address < src_end;
 	while (result == ADDRESS_TRANSFER_OK && done < size) {
-		struct vm_mapping *src_mapping, *dst_mapping;
-		size_t             src_offset, dst_offset, src_chunk, dst_chunk;
-		size_t             chunk = size - done;
+		struct mapping *src_mapping, *dst_mapping;
+		size_t          src_offset, dst_offset, src_chunk, dst_chunk;
+		size_t          chunk = size - done;
 		if (chunk > sizeof(buffer)) chunk = sizeof(buffer);
 		if (backward) {
 			uintptr_t src_last = src_address + size - done - 1u;
@@ -212,8 +189,8 @@ enum address_transfer_result address_space_copy_between(struct address_space* ds
 			result = locate_locked(
 				dst_space, dst_last, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER, &dst_mapping, &dst_offset, NULL);
 			if (result != ADDRESS_TRANSFER_OK) break;
-			src_chunk = (size_t)(src_last - src_mapping->base) + 1u;
-			dst_chunk = (size_t)(dst_last - dst_mapping->base) + 1u;
+			src_chunk = (size_t)(src_last - src_mapping->address) + 1u;
+			dst_chunk = (size_t)(dst_last - dst_mapping->address) + 1u;
 			if (chunk > src_chunk) chunk = src_chunk;
 			if (chunk > dst_chunk) chunk = dst_chunk;
 			src_offset -= chunk - 1u;

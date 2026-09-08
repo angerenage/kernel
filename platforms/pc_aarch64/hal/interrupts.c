@@ -1,8 +1,8 @@
 #include <base/process.h>
+#include <core/address_space.h>
 #include <core/cpu.h>
 #include <core/exception.h>
 #include <core/sched.h>
-#include <core/vm_space.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
 #include <stdbool.h>
@@ -139,16 +139,16 @@ static bool is_page_fault_abort(uint64_t dfsc) {
 	return dfsc >= 0x04 && dfsc <= 0x0f;
 }
 
-static enum vmm_fault_kind abort_fault_kind(uint64_t dfsc) {
-	if (is_translation_fault(dfsc)) return VMM_FAULT_NOT_PRESENT;
-	if (dfsc >= 0x08 && dfsc <= 0x0fu) return VMM_FAULT_PROTECTION;
-	return VMM_FAULT_INVALID;
+static enum address_space_fault_kind abort_fault_kind(uint64_t dfsc) {
+	if (is_translation_fault(dfsc)) return ADDRESS_SPACE_FAULT_NOT_PRESENT;
+	if (dfsc >= 0x08 && dfsc <= 0x0fu) return ADDRESS_SPACE_FAULT_PROTECTION;
+	return ADDRESS_SPACE_FAULT_INVALID;
 }
 
-static enum vmm_fault_access abort_fault_access(uint64_t ec, uint64_t iss) {
-	if (is_instruction_abort(ec)) return VMM_FAULT_ACCESS_EXEC;
-	if (!is_data_abort(ec)) return VMM_FAULT_ACCESS_UNKNOWN;
-	return ((iss >> 6) & 1u) != 0 ? VMM_FAULT_ACCESS_WRITE : VMM_FAULT_ACCESS_READ;
+static mapping_access_t abort_fault_access(uint64_t ec, uint64_t iss) {
+	if (is_instruction_abort(ec)) return MAPPING_ACCESS_EXEC;
+	if (!is_data_abort(ec)) return 0u;
+	return ((iss >> 6) & 1u) != 0 ? MAPPING_ACCESS_WRITE : MAPPING_ACCESS_READ;
 }
 
 static const char* abort_dfsc_name(uint64_t dfsc) {
@@ -322,10 +322,10 @@ void handle_exception(struct exception_frame* frame) {
 
 	if ((is_instruction_abort(ec) || is_data_abort(ec)) && is_page_fault_abort(dfsc)) {
 		if (!is_irq) cpu_leave_exception();
-		if (vm_handle_current_page_fault(fnv ? 0u : frame->far,
-		                                 fnv ? VMM_FAULT_INVALID : abort_fault_kind(dfsc),
-		                                 abort_fault_access(ec, iss),
-		                                 is_abort_from_lower_el(ec))) {
+		if (address_space_handle_current_fault(fnv ? 0u : frame->far,
+		                                       fnv ? ADDRESS_SPACE_FAULT_INVALID : abort_fault_kind(dfsc),
+		                                       abort_fault_access(ec, iss),
+		                                       is_abort_from_lower_el(ec))) {
 			return;
 		}
 		if (!is_irq) cpu_enter_exception();

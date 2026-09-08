@@ -10,7 +10,7 @@ Test(kthread, init_reports_unsupported_context_setup) {
 		.preferred_cpu     = NULL,
 		.detached          = false,
 	};
-	struct kthread worker = {.stack_id = VMM_ID_INVALID};
+	struct kthread worker = {.stack_mapping = NULL};
 
 	hal_cpu_mock_set_thread_context_init_result(false);
 	cr_assert_eq(thread_init_ex(&worker.thread, &params),

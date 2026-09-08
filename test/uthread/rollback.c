@@ -3,8 +3,8 @@
 Test(uthread, context_initialization_failure_rolls_back_all_allocated_resources) {
 	struct process* process = NULL;
 	struct uthread  worker  = {
-		  .user_stack_id   = VMM_ID_INVALID,
-		  .kernel_stack_id = VMM_ID_INVALID,
+		  .user_stack_mapping   = NULL,
+		  .kernel_stack_mapping = NULL,
     };
 	size_t                    user_regions_before;
 	size_t                    kernel_regions_before;
@@ -16,8 +16,8 @@ Test(uthread, context_initialization_failure_rolls_back_all_allocated_resources)
 	init_uthread_test_environment();
 	process = spawn_owner_process("test/context-rollback");
 
-	user_regions_before    = vm_space_mapping_count(process_address_space(process));
-	kernel_regions_before  = vm_space_mapping_count(vm_space_kernel());
+	user_regions_before    = address_space_mapping_count(process_address_space(process));
+	kernel_regions_before  = address_space_mapping_count(address_space_kernel());
 	process_threads_before = process_thread_count(process);
 	uthreads_before        = uthread_count();
 	run_queue_before       = sched_run_queue_depth(cpu_current());
@@ -37,17 +37,17 @@ Test(uthread, context_initialization_failure_rolls_back_all_allocated_resources)
 	cr_assert_eq(uthread_count(), uthreads_before, "failed start leaked a TID registration");
 	cr_assert_eq(
 		process_thread_count(process), process_threads_before, "failed start attached a thread to the process");
-	cr_assert_eq(vm_space_mapping_count(process_address_space(process)),
+	cr_assert_eq(address_space_mapping_count(process_address_space(process)),
 	             user_regions_before,
 	             "failed start leaked user/upcall stack regions");
-	cr_assert_eq(vm_space_mapping_count(vm_space_kernel()),
+	cr_assert_eq(address_space_mapping_count(address_space_kernel()),
 	             kernel_regions_before,
 	             "failed start leaked its kernel stack region");
 	cr_assert_eq(
 		sched_run_queue_depth(cpu_current()), run_queue_before, "failed start changed scheduler run-queue membership");
-	cr_assert_eq(worker.user_stack_id, VMM_ID_INVALID, "failed start retained a user-stack id");
-	cr_assert_eq(worker.upcall.stack_id, VMM_ID_INVALID, "failed start retained an upcall-stack id");
-	cr_assert_eq(worker.kernel_stack_id, VMM_ID_INVALID, "failed start retained a kernel-stack id");
+	cr_assert_null(worker.user_stack_mapping, "failed start retained a user-stack Mapping");
+	cr_assert_null(worker.upcall.stack_mapping, "failed start retained an upcall-stack Mapping");
+	cr_assert_null(worker.kernel_stack_mapping, "failed start retained a kernel-stack Mapping");
 
 	terminate_main_thread(process);
 	cr_assert(process_destroy(process), "process_destroy failed after uthread rollback test");

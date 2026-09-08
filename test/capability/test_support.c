@@ -1,8 +1,8 @@
 #include "test_support.h"
 
 #include <base/vmm.h>
+#include <core/address_space.h>
 #include <core/process.h>
-#include <core/vm_space.h>
 
 #define CAP_TEST_HEAP_SIZE ((size_t)8u * 1024u * 1024u)
 #define CAP_TEST_TARGET_COUNT 128u
@@ -33,7 +33,7 @@ bool heap_grow_pages(size_t page_count, void** out_base) {
 static void cap_test_init_targets(void) {
 	if (cap_test_targets_initialized) return;
 
-	cr_assert(vm_init(), "vm_init failed");
+	cr_assert(address_space_init(), "address_space_init failed");
 	for (process_id_t expected = 1u; expected <= CAP_TEST_TARGET_COUNT; expected++) {
 		struct process* process = NULL;
 		cr_assert_eq(process_create(&process, NULL),

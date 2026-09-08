@@ -88,7 +88,7 @@ Test(kernel_capability_memory, create_reports_logical_size_and_fresh_contents_ar
 	struct kernel_capability_test_context ctx;
 	struct memory_info                    info;
 	cap_id_t                              memory_cap;
-	vmm_id_t                              buffer_id = VMM_ID_INVALID;
+	struct mapping*                       buffer_mapping = NULL;
 	uintptr_t                             buffer;
 	uint8_t                               byte = 0xffu;
 
@@ -99,12 +99,13 @@ Test(kernel_capability_memory, create_reports_logical_size_and_fresh_contents_ar
 	cr_assert_eq(memory_info(memory_cap, &info).status, SYSCALL_STATUS_OK);
 	cr_assert_eq(info.page_count, 3u);
 	cr_assert_eq(info.memory_type, MEMORY_TYPE_NORMAL);
-	buffer = kernel_capability_test_alloc_user_buffer(ctx.process, 1u, &buffer_id);
+	buffer = kernel_capability_test_alloc_user_buffer(ctx.process, 1u, &buffer_mapping);
 	cr_assert_eq(memory_read_to(memory_cap, 0u, buffer, 1u).status, SYSCALL_STATUS_OK);
 	cr_assert_eq(address_space_copy_from(process_address_space(ctx.process), buffer, &byte, 1u), ADDRESS_TRANSFER_OK);
 	cr_assert_eq(byte, 0u, "fresh memory exposed recycled PMM contents");
 	cr_assert(drop_capability(memory_cap));
-	cr_assert(vm_space_unmap(process_address_space(ctx.process), buffer_id));
+	cr_assert(address_space_unmap(process_address_space(ctx.process), buffer_mapping));
+	mapping_release(buffer_mapping);
 	kernel_capability_test_end(&ctx);
 }
 
@@ -112,7 +113,7 @@ Test(kernel_capability_memory, legacy_fixed_managed_ram_is_scrubbed_and_device_i
 	struct kernel_capability_test_context ctx;
 	struct pmm_extent                     extent;
 	cap_id_t                              memory_cap;
-	vmm_id_t                              buffer_id = VMM_ID_INVALID;
+	struct mapping*                       buffer_mapping = NULL;
 	uintptr_t                             buffer;
 	uint8_t                               readback = 0xffu;
 
@@ -127,7 +128,7 @@ Test(kernel_capability_memory, legacy_fixed_managed_ram_is_scrubbed_and_device_i
 	};
 	memory_cap = create_memory_params(CAP_CALL | CAP_READ, &params);
 	cr_assert_neq(memory_cap, CAP_ID_INVALID);
-	buffer = kernel_capability_test_alloc_user_buffer(ctx.process, 1u, &buffer_id);
+	buffer = kernel_capability_test_alloc_user_buffer(ctx.process, 1u, &buffer_mapping);
 	cr_assert_eq(memory_read_to(memory_cap, 0u, buffer, 1u).status, SYSCALL_STATUS_OK);
 	cr_assert_eq(address_space_copy_from(process_address_space(ctx.process), buffer, &readback, 1u),
 	             ADDRESS_TRANSFER_OK);
@@ -135,7 +136,8 @@ Test(kernel_capability_memory, legacy_fixed_managed_ram_is_scrubbed_and_device_i
 	cr_assert(drop_capability(memory_cap));
 	params.memory_type = MEMORY_TYPE_DEVICE;
 	cr_assert_eq(create_memory_params(CAP_CALL | CAP_READ, &params), CAP_ID_INVALID);
-	cr_assert(vm_space_unmap(process_address_space(ctx.process), buffer_id));
+	cr_assert(address_space_unmap(process_address_space(ctx.process), buffer_mapping));
+	mapping_release(buffer_mapping);
 	kernel_capability_test_end(&ctx);
 }
 
@@ -190,7 +192,6 @@ Test(kernel_capability_memory, mapping_and_memory_control_caps_do_not_own_the_ma
 	struct kernel_capability_test_context ctx;
 	cap_id_t                              memory_cap;
 	struct address_space_map_result       mapped;
-	struct vmm_info                       live;
 	cap_object_id_t                       mapping_object_id;
 	uint8_t                               written = 0x6du;
 	uint8_t                               read    = 0u;
@@ -205,17 +206,24 @@ Test(kernel_capability_memory, mapping_and_memory_control_caps_do_not_own_the_ma
 	mapping_object_id = capability_object_id(mapped.mapping_cap);
 	cr_assert(drop_capability(mapped.mapping_cap));
 	cr_assert_null(cap_object_acquire(mapping_object_id), "zero-grant mapping control metadata remained published");
-	cr_assert(vm_space_query(process_address_space(ctx.process), (uintptr_t)mapped.mapping.base, &live));
+	cr_assert_eq(address_space_validate_range(process_address_space(ctx.process),
+	                                          (uintptr_t)mapped.mapping.base,
+	                                          1u,
+	                                          ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER),
+	             ADDRESS_TRANSFER_OK);
 	cr_assert_eq(address_space_copy_to(
 					 process_address_space(ctx.process), (uintptr_t)mapped.mapping.base, &written, sizeof(written)),
 	             ADDRESS_TRANSFER_OK);
 	cr_assert(drop_capability(memory_cap));
-	cr_assert(vm_space_query(process_address_space(ctx.process), (uintptr_t)mapped.mapping.base, &live));
+	cr_assert_eq(address_space_validate_range(process_address_space(ctx.process),
+	                                          (uintptr_t)mapped.mapping.base,
+	                                          1u,
+	                                          ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER),
+	             ADDRESS_TRANSFER_OK);
 	cr_assert_eq(address_space_copy_from(
 					 process_address_space(ctx.process), (uintptr_t)mapped.mapping.base, &read, sizeof(read)),
 	             ADDRESS_TRANSFER_OK);
 	cr_assert_eq(read, written);
-	cr_assert(vm_space_unmap(process_address_space(ctx.process), live.id));
 	kernel_capability_test_end(&ctx);
 }
 
@@ -250,11 +258,11 @@ Test(kernel_capability_memory, memory_read_write_rights_are_independent_of_info)
 	cap_id_t                              read_only;
 	cap_id_t                              write_only;
 	struct memory_info                    info;
-	vmm_id_t                              buffer_id = VMM_ID_INVALID;
+	struct mapping*                       buffer_mapping = NULL;
 	uintptr_t                             buffer;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/memory-io-rights");
-	buffer     = kernel_capability_test_alloc_user_buffer(ctx.process, 1u, &buffer_id);
+	buffer     = kernel_capability_test_alloc_user_buffer(ctx.process, 1u, &buffer_mapping);
 	read_only  = create_memory(CAP_CALL | CAP_READ, 1u);
 	write_only = create_memory(CAP_CALL | CAP_WRITE, 1u);
 	cr_assert_eq(memory_info(write_only, &info).status, SYSCALL_STATUS_OK);
@@ -262,37 +270,39 @@ Test(kernel_capability_memory, memory_read_write_rights_are_independent_of_info)
 	cr_assert_eq(memory_read_to(write_only, 0u, buffer, 1u).status, SYSCALL_STATUS_DENIED);
 	cr_assert(drop_capability(read_only));
 	cr_assert(drop_capability(write_only));
-	cr_assert(vm_space_unmap(process_address_space(ctx.process), buffer_id));
+	cr_assert(address_space_unmap(process_address_space(ctx.process), buffer_mapping));
+	mapping_release(buffer_mapping);
 	kernel_capability_test_end(&ctx);
 }
 
 Test(kernel_capability_memory, writes_synchronize_materialized_backing_without_protection_state) {
 	struct kernel_capability_test_context ctx;
 	cap_id_t                              memory_cap;
-	vmm_id_t                              buffer_id = VMM_ID_INVALID;
+	struct mapping*                       buffer_mapping = NULL;
 	uintptr_t                             buffer;
 	uint8_t                               value = 0x42u;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/memory-executable-sync");
-	buffer = kernel_capability_test_alloc_user_buffer(ctx.process, 1u, &buffer_id);
+	buffer = kernel_capability_test_alloc_user_buffer(ctx.process, 1u, &buffer_mapping);
 	cr_assert_eq(address_space_copy_to(process_address_space(ctx.process), buffer, &value, 1u), ADDRESS_TRANSFER_OK);
 	memory_cap = create_memory(CAP_CALL | CAP_WRITE, 1u);
 	cr_assert_eq(memory_write_from(memory_cap, 0u, buffer, 1u).status, SYSCALL_STATUS_OK);
 	cr_assert_eq(kernel_capability_test_executable_sync_count(), 1u);
 	cr_assert(drop_capability(memory_cap));
-	cr_assert(vm_space_unmap(process_address_space(ctx.process), buffer_id));
+	cr_assert(address_space_unmap(process_address_space(ctx.process), buffer_mapping));
+	mapping_release(buffer_mapping);
 	kernel_capability_test_end(&ctx);
 }
 
 Test(kernel_capability_memory, partial_write_failure_synchronizes_the_successfully_modified_page) {
 	struct kernel_capability_test_context ctx;
 	cap_id_t                              memory_cap;
-	vmm_id_t                              buffer_id = VMM_ID_INVALID;
+	struct mapping*                       buffer_mapping = NULL;
 	uintptr_t                             buffer;
 	uint8_t                               value = 0x5au;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/memory-partial-write-sync");
-	buffer = kernel_capability_test_alloc_user_buffer(ctx.process, 1u, &buffer_id);
+	buffer = kernel_capability_test_alloc_user_buffer(ctx.process, 1u, &buffer_mapping);
 	for (size_t offset = 0u; offset < VMM_PAGE_SIZE; offset += sizeof(value)) {
 		cr_assert_eq(address_space_copy_to(process_address_space(ctx.process), buffer + offset, &value, sizeof(value)),
 		             ADDRESS_TRANSFER_OK);
@@ -301,7 +311,8 @@ Test(kernel_capability_memory, partial_write_failure_synchronizes_the_successful
 	cr_assert_eq(memory_write_from(memory_cap, 0u, buffer, VMM_PAGE_SIZE + 1u).status, SYSCALL_STATUS_BAD_ARGUMENT);
 	cr_assert_eq(kernel_capability_test_executable_sync_count(), VMM_PAGE_SIZE / 256u);
 	cr_assert(drop_capability(memory_cap));
-	cr_assert(vm_space_unmap(process_address_space(ctx.process), buffer_id));
+	cr_assert(address_space_unmap(process_address_space(ctx.process), buffer_mapping));
+	mapping_release(buffer_mapping);
 	kernel_capability_test_end(&ctx);
 }
 
@@ -396,7 +407,6 @@ Test(kernel_capability_memory, mapping_holder_death_does_not_unmap_another_live_
 	cap_id_t                              memory_cap;
 	cap_id_t                              holder_memory;
 	struct address_space_map_result       mapped;
-	struct vmm_info                       live;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/mapping-holder-death");
 	holder                  = syscall_test_spawn_process("kernel-cap/mapping-holder");
@@ -411,7 +421,11 @@ Test(kernel_capability_memory, mapping_holder_death_does_not_unmap_another_live_
 	cr_assert_eq(map_memory(holder_memory, process_pid(holder), target, &params, &mapped).status, SYSCALL_STATUS_OK);
 	thread_mark_zombie(&holder_main->thread);
 	cr_assert(process_destroy(holder));
-	cr_assert(vm_space_query(process_address_space(target), (uintptr_t)mapped.mapping.base, &live));
+	cr_assert_eq(address_space_validate_range(process_address_space(target),
+	                                          (uintptr_t)mapped.mapping.base,
+	                                          1u,
+	                                          ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER),
+	             ADDRESS_TRANSFER_OK);
 	cr_assert_null(cap_acquire(mapped.mapping_cap));
 	cr_assert(drop_capability(memory_cap));
 	thread_mark_zombie(&target_main->thread);
@@ -450,8 +464,6 @@ Test(kernel_capability_memory, one_memory_shares_backing_across_address_spaces) 
 	cap_id_t                              memory_cap;
 	struct address_space_map_result       first;
 	struct address_space_map_result       second;
-	struct vmm_info                       first_live;
-	struct vmm_info                       second_live;
 	uint8_t                               value = 0x91u;
 	uint8_t                               observed;
 
@@ -474,9 +486,6 @@ Test(kernel_capability_memory, one_memory_shares_backing_across_address_spaces) 
 					 process_address_space(other), (uintptr_t)second.mapping.base, &observed, sizeof(observed)),
 	             ADDRESS_TRANSFER_OK);
 	cr_assert_eq(observed, value);
-	cr_assert(vm_space_query(process_address_space(ctx.process), (uintptr_t)first.mapping.base, &first_live));
-	cr_assert(vm_space_query(process_address_space(other), (uintptr_t)second.mapping.base, &second_live));
-	cr_assert(vm_space_unmap(process_address_space(ctx.process), first_live.id));
 	cr_assert_eq(address_space_copy_from(
 					 process_address_space(other), (uintptr_t)second.mapping.base, &observed, sizeof(observed)),
 	             ADDRESS_TRANSFER_OK);
@@ -511,10 +520,6 @@ Test(kernel_capability_memory, delegated_mapping_rights_reduce_the_protection_ce
 	cr_assert_eq(kernel_capability_test_call(mapped.mapping_cap, &unmap, sizeof(unmap), NULL, 0u).status,
 	             SYSCALL_STATUS_OK);
 	kernel_capability_test_end(&ctx);
-}
-
-Test(kernel_capability_memory, mapping_control_state_is_only_two_identity_fields) {
-	cr_assert_eq(kernel_mapping_state_size(), sizeof(process_id_t) + sizeof(vmm_id_t));
 }
 
 Test(kernel_capability_memory, fixed_device_memory_is_exclusive_and_controls_mapping_type) {

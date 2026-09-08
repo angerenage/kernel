@@ -1,5 +1,6 @@
 #include "../../kernel/src/capability/signal.h"
 
+#include <core/address_space.h>
 #include <core/capability.h>
 #include <core/cpu.h>
 #include <core/process.h>
@@ -8,7 +9,6 @@
 #include <core/thread.h>
 #include <core/user_upcall.h>
 #include <core/uthread.h>
-#include <core/vm_space.h>
 #include <criterion/criterion.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>
@@ -109,8 +109,8 @@ static void signal_test_init_sched_uthread(struct uthread* target, const char* n
 	target->process           = (struct process*)(uintptr_t)1u;
 	target->reference_count   = 1u;
 	cr_assert(uthread_upcall_state_init(target), "uthread upcall state initialization failed");
-	target->upcall.stack_id  = 1u;
-	target->upcall.stack_top = upcall_stack_top;
+	target->upcall.stack_mapping = (struct mapping*)1u;
+	target->upcall.stack_top     = upcall_stack_top;
 }
 
 static void signal_test_init_handler_uthread(struct uthread* target, uintptr_t upcall_stack_top) {
@@ -119,8 +119,8 @@ static void signal_test_init_handler_uthread(struct uthread* target, uintptr_t u
 	target->process         = (struct process*)(uintptr_t)1u;
 	target->reference_count = 1u;
 	cr_assert(uthread_upcall_state_init(target), "uthread upcall state initialization failed");
-	target->upcall.stack_id  = 1u;
-	target->upcall.stack_top = upcall_stack_top;
+	target->upcall.stack_mapping = (struct mapping*)1u;
+	target->upcall.stack_top     = upcall_stack_top;
 }
 
 static void signal_test_deinit_uthread(struct uthread* target) {
@@ -1185,7 +1185,7 @@ Test(signal, direct_operations_use_specific_rights_without_cap_call) {
 
 	ipc_test_init_heap();
 	capability_init();
-	cr_assert(vm_init(), "vm_init failed");
+	cr_assert(address_space_init(), "address_space_init failed");
 	cr_assert_eq(process_create(&sender_process, NULL), PROCESS_OK);
 	cr_assert_eq(process_create(&reader_process, NULL), PROCESS_OK);
 	cr_assert_not_null(sender_process);

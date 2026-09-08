@@ -1,13 +1,13 @@
 #include "channel.h"
 
 #include <base/channel.h>
+#include <core/address_space.h>
 #include <core/address_transfer.h>
 #include <core/channel.h>
 #include <core/process.h>
 #include <core/sched.h>
 #include <core/syscall.h>
 #include <core/thread.h>
-#include <core/vm_space.h>
 #include <stdbool.h>
 
 #include "../capability/signal.h"

@@ -1,5 +1,6 @@
 #include <base/thread.h>
 #include <base/vmm.h>
+#include <core/address_space.h>
 #include <core/address_transfer.h>
 #include <core/cpu.h>
 #include <core/id_table.h>
@@ -11,7 +12,6 @@
 #include <core/signal.h>
 #include <core/spinlock.h>
 #include <core/uthread.h>
-#include <core/vm_space.h>
 #include <hal/hcf.h>
 #include <hal/userspace.h>
 #include <libc/stdlib.h>
@@ -36,27 +36,27 @@ struct uthread_reaper {
 	bool                     starting;
 };
 
-static bool uthread_map_stack(struct address_space* space, size_t pages, bool prefault, vmm_id_t* out_id,
+static bool uthread_map_stack(struct address_space* space, size_t pages, bool prefault, struct mapping** out_mapping,
                               void** out_base) {
-	struct memory* memory;
+	struct memory*  memory;
+	struct mapping* mapping;
 	if (pages > SIZE_MAX / VMM_PAGE_SIZE || !memory_create_anonymous(pages * VMM_PAGE_SIZE, &memory)) return false;
-	bool mapped =
-		vm_space_map(space,
-	                 &(const struct vm_map_request){
-						 .memory      = memory,
-						 .page_count  = pages,
-						 .align_pages = 1u,
-						 .guard_pages = VMM_STACK_DEFAULT_GUARD_PAGES,
-						 .prot = VMM_PROT_READ | VMM_PROT_WRITE | (space == vm_space_kernel() ? VMM_PROT_GLOBAL : 0u),
-					 },
-	                 out_id,
-	                 out_base);
+	bool mapped = address_space_map(space,
+	                                &(const struct address_space_mapping_request){
+										.memory       = memory,
+										.guard_before = VMM_STACK_DEFAULT_GUARD_PAGES * VMM_PAGE_SIZE,
+										.access       = MAPPING_ACCESS_READ | MAPPING_ACCESS_WRITE,
+									},
+	                                &mapping);
 	memory_release(memory);
 	if (!mapped) return false;
-	if (!prefault || vm_space_prefault(space, *out_id, 0u, pages)) return true;
-	(void)vm_space_unmap(space, *out_id);
-	*out_id   = VMM_ID_INVALID;
-	*out_base = NULL;
+	*out_mapping = mapping;
+	*out_base    = (void*)mapping_address(mapping);
+	if (!prefault || address_space_prefault(space, mapping, 0u, mapping_size(mapping))) return true;
+	(void)address_space_unmap(space, mapping);
+	mapping_release(mapping);
+	*out_mapping = NULL;
+	*out_base    = NULL;
 	return false;
 }
 
@@ -201,25 +201,30 @@ static bool uthread_release_stacks(struct uthread* thread) {
 	if (thread == NULL) return true;
 
 	address_space = process_address_space(thread->process);
-	if (thread->upcall.stack_id != VMM_ID_INVALID) {
-		if (address_space != NULL && vm_space_unmap(address_space, thread->upcall.stack_id)) {
-			thread->upcall.stack_id = VMM_ID_INVALID;
+	if (thread->upcall.stack_mapping != NULL) {
+		if (address_space != NULL && address_space_unmap(address_space, thread->upcall.stack_mapping)) {
+			mapping_release(thread->upcall.stack_mapping);
+			thread->upcall.stack_mapping = NULL;
 		}
 		else {
 			released = false;
 		}
 	}
-	if (thread->upcall.stack_id == VMM_ID_INVALID) thread->upcall.stack_top = 0u;
-	if (thread->user_stack_id != VMM_ID_INVALID) {
-		if (address_space != NULL && vm_space_unmap(address_space, thread->user_stack_id)) {
-			thread->user_stack_id = VMM_ID_INVALID;
+	if (thread->upcall.stack_mapping == NULL) thread->upcall.stack_top = 0u;
+	if (thread->user_stack_mapping != NULL) {
+		if (address_space != NULL && address_space_unmap(address_space, thread->user_stack_mapping)) {
+			mapping_release(thread->user_stack_mapping);
+			thread->user_stack_mapping = NULL;
 		}
 		else {
 			released = false;
 		}
 	}
-	if (thread->kernel_stack_id != VMM_ID_INVALID) {
-		if (vm_space_unmap(vm_space_kernel(), thread->kernel_stack_id)) thread->kernel_stack_id = VMM_ID_INVALID;
+	if (thread->kernel_stack_mapping != NULL) {
+		if (address_space_unmap(address_space_kernel(), thread->kernel_stack_mapping)) {
+			mapping_release(thread->kernel_stack_mapping);
+			thread->kernel_stack_mapping = NULL;
+		}
 		else released = false;
 	}
 	return released;
@@ -247,10 +252,10 @@ static bool uthread_free(struct uthread* thread) {
 	}
 
 	memset(thread, 0, sizeof(*thread));
-	thread->user_stack_id   = VMM_ID_INVALID;
-	thread->kernel_stack_id = VMM_ID_INVALID;
-	thread->upcall.stack_id = VMM_ID_INVALID;
-	thread->cap_object_id   = CAP_OBJECT_ID_INVALID;
+	thread->user_stack_mapping   = NULL;
+	thread->kernel_stack_mapping = NULL;
+	thread->upcall.stack_mapping = NULL;
+	thread->cap_object_id        = CAP_OBJECT_ID_INVALID;
 	return true;
 }
 
@@ -382,7 +387,7 @@ static enum uthread_start_result uthread_prepare_internal(struct uthread*       
 		return UTHREAD_START_INVALID_ARGUMENTS;
 	}
 	address_space = process_address_space(params->process);
-	if (!vm_space_is_initialized(address_space)) return UTHREAD_START_INVALID_ARGUMENTS;
+	if (!address_space_is_initialized(address_space)) return UTHREAD_START_INVALID_ARGUMENTS;
 
 	if (params->name != NULL) {
 		name = strdup(params->name);
@@ -390,16 +395,16 @@ static enum uthread_start_result uthread_prepare_internal(struct uthread*       
 	}
 
 	*thread = (struct uthread){
-		.process             = params->process,
-		.thread              = {.name = name},
-		.user_stack_id       = VMM_ID_INVALID,
-		.kernel_stack_id     = VMM_ID_INVALID,
-		.reaper_next         = NULL,
-		.cap_object_id       = CAP_OBJECT_ID_INVALID,
-		.reference_count     = 1u,
-		.dying               = 0u,
-		.process_main_thread = params->main_thread,
-		.heap_allocated      = heap_allocated,
+		.process              = params->process,
+		.thread               = {.name = name},
+		.user_stack_mapping   = NULL,
+		.kernel_stack_mapping = NULL,
+		.reaper_next          = NULL,
+		.cap_object_id        = CAP_OBJECT_ID_INVALID,
+		.reference_count      = 1u,
+		.dying                = 0u,
+		.process_main_thread  = params->main_thread,
+		.heap_allocated       = heap_allocated,
 	};
 	if (!uthread_upcall_state_init(thread)) {
 		uthread_release_name(thread);
@@ -415,7 +420,7 @@ static enum uthread_start_result uthread_prepare_internal(struct uthread*       
 	thread->id = id;
 
 	user_stack_pages = params->user_stack_pages != 0u ? params->user_stack_pages : UTHREAD_DEFAULT_USER_STACK_PAGES;
-	if (!uthread_map_stack(address_space, user_stack_pages, false, &thread->user_stack_id, &user_stack_base)) {
+	if (!uthread_map_stack(address_space, user_stack_pages, false, &thread->user_stack_mapping, &user_stack_base)) {
 		uthread_release_name(thread);
 		uthread_release_stacks_or_hcf(thread);
 		uthread_upcall_state_deinit(thread);
@@ -423,7 +428,7 @@ static enum uthread_start_result uthread_prepare_internal(struct uthread*       
 		return UTHREAD_START_STACK_ALLOC_FAILED;
 	}
 	if (!uthread_map_stack(
-			address_space, UTHREAD_UPCALL_STACK_PAGES, false, &thread->upcall.stack_id, &upcall_stack_base)) {
+			address_space, UTHREAD_UPCALL_STACK_PAGES, false, &thread->upcall.stack_mapping, &upcall_stack_base)) {
 		uthread_release_name(thread);
 		uthread_release_stacks_or_hcf(thread);
 		uthread_upcall_state_deinit(thread);
@@ -431,8 +436,11 @@ static enum uthread_start_result uthread_prepare_internal(struct uthread*       
 		return UTHREAD_START_STACK_ALLOC_FAILED;
 	}
 	thread->upcall.stack_top = (uintptr_t)upcall_stack_base + UTHREAD_UPCALL_STACK_PAGES * (uintptr_t)VMM_PAGE_SIZE;
-	if (!uthread_map_stack(
-			vm_space_kernel(), UTHREAD_KERNEL_STACK_PAGES, true, &thread->kernel_stack_id, &kernel_stack_base)) {
+	if (!uthread_map_stack(address_space_kernel(),
+	                       UTHREAD_KERNEL_STACK_PAGES,
+	                       true,
+	                       &thread->kernel_stack_mapping,
+	                       &kernel_stack_base)) {
 		uthread_release_name(thread);
 		uthread_release_stacks_or_hcf(thread);
 		uthread_upcall_state_deinit(thread);
@@ -577,10 +585,10 @@ enum uthread_start_result uthread_spawn_detached(struct uthread**               
 	thread = malloc(sizeof(*thread));
 	if (thread == NULL) return UTHREAD_START_NO_MEMORY;
 	*thread = (struct uthread){
-		.user_stack_id   = VMM_ID_INVALID,
-		.kernel_stack_id = VMM_ID_INVALID,
-		.upcall          = {.stack_id = VMM_ID_INVALID},
-		.heap_allocated  = true,
+		.user_stack_mapping   = NULL,
+		.kernel_stack_mapping = NULL,
+		.upcall               = {.stack_mapping = NULL},
+		.heap_allocated       = true,
 	};
 
 	effective_params          = *params;

@@ -3,6 +3,7 @@
 
 #include <base/heap.h>
 #include <base/process.h>
+#include <core/address_space.h>
 #include <core/cpu.h>
 #include <core/mm.h>
 #include <core/pmm.h>
@@ -10,7 +11,6 @@
 #include <core/sched.h>
 #include <core/thread.h>
 #include <core/uthread.h>
-#include <core/vm_space.h>
 #include <criterion/criterion.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <base/vmm.h>
 #include <core/process.h>
 #include <core/thread.h>
 #include <core/user_upcall.h>
@@ -45,8 +44,8 @@ struct uthread {
 	uthread_id_t             id;
 	struct process*          process;
 	struct user_upcall_state upcall;
-	vmm_id_t                 user_stack_id;
-	vmm_id_t                 kernel_stack_id;
+	struct mapping*          user_stack_mapping;
+	struct mapping*          kernel_stack_mapping;
 	uintptr_t                user_stack_top;
 	struct uthread*          reaper_next;
 	struct uthread*          process_next;

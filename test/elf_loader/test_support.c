@@ -74,7 +74,7 @@ void elf_test_init_environment(void) {
 	cpu_interrupts_set_ready(cpu_current(), false);
 	mock_paging_reset();
 	cr_assert(pmm_init(memory_map, sizeof(memory_map) / sizeof(memory_map[0]), 0u));
-	cr_assert(vm_init());
+	cr_assert(address_space_init());
 	cr_assert(heap_init());
 }
 

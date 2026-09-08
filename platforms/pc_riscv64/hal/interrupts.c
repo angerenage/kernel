@@ -1,9 +1,9 @@
 #include <base/process.h>
+#include <core/address_space.h>
 #include <core/cpu.h>
 #include <core/exception.h>
 #include <core/interrupt.h>
 #include <core/sched.h>
-#include <core/vm_space.h>
 #include <hal/cpu.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
@@ -202,16 +202,16 @@ static bool was_user_mode(uint64_t sstatus) {
 	return (sstatus & (1ull << 8)) == 0;
 }
 
-static enum vmm_fault_access page_fault_access(uint64_t code) {
+static mapping_access_t page_fault_access(uint64_t code) {
 	switch (code) {
 	case 12:
-		return VMM_FAULT_ACCESS_EXEC;
+		return MAPPING_ACCESS_EXEC;
 	case 13:
-		return VMM_FAULT_ACCESS_READ;
+		return MAPPING_ACCESS_READ;
 	case 15:
-		return VMM_FAULT_ACCESS_WRITE;
+		return MAPPING_ACCESS_WRITE;
 	default:
-		return VMM_FAULT_ACCESS_UNKNOWN;
+		return 0u;
 	}
 }
 
@@ -274,8 +274,10 @@ void handle_exception(struct exception_frame* frame) {
 
 	if (!is_interrupt && is_page_fault_exception(code)) {
 		cpu_leave_exception();
-		if (vm_handle_current_page_fault(
-				frame->stval, VMM_FAULT_UNCLASSIFIED, page_fault_access(code), was_user_mode(frame->sstatus))) {
+		if (address_space_handle_current_fault(frame->stval,
+		                                       ADDRESS_SPACE_FAULT_UNCLASSIFIED,
+		                                       page_fault_access(code),
+		                                       was_user_mode(frame->sstatus))) {
 			return;
 		}
 		cpu_enter_exception();

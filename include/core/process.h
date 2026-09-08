@@ -1,10 +1,10 @@
 #pragma once
 
 #include <base/process.h>
+#include <core/address_space.h>
 #include <core/capability.h>
 #include <core/channel.h>
 #include <core/thread.h>
-#include <core/vm_space.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>

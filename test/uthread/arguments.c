@@ -3,8 +3,8 @@
 Test(uthread, start_copies_argument_onto_new_user_stack) {
 	struct process* process = NULL;
 	struct uthread  worker  = {
-		  .user_stack_id   = VMM_ID_INVALID,
-		  .kernel_stack_id = VMM_ID_INVALID,
+		  .user_stack_mapping   = NULL,
+		  .kernel_stack_mapping = NULL,
     };
 	const struct {
 		uint64_t first;

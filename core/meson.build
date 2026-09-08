@@ -27,5 +27,5 @@ core_sources = files(
 	'memory/memory_backing_tree.c',
 	'memory/memory_backing.c',
 	'memory/memory.c',
-	'memory/vm_space.c',
+	'memory/address_space.c',
 )

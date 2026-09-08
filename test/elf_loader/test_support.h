@@ -3,12 +3,12 @@
 
 #include <base/heap.h>
 #include <base/vmm.h>
+#include <core/address_space.h>
 #include <core/address_transfer.h>
 #include <core/cpu.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/process.h>
-#include <core/vm_space.h>
 #include <criterion/criterion.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>

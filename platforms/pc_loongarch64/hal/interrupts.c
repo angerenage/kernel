@@ -1,9 +1,9 @@
 #include <base/process.h>
+#include <core/address_space.h>
 #include <core/cpu.h>
 #include <core/exception.h>
 #include <core/interrupt.h>
 #include <core/sched.h>
-#include <core/vm_space.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
 #include <kernel/boot.h>
@@ -242,16 +242,16 @@ static bool was_user_mode(void) {
 	return (prmd & 0x3u) == 0x3u;
 }
 
-static enum vmm_fault_access loongarch64_fault_access(uint64_t ecode) {
+static mapping_access_t loongarch64_fault_access(uint64_t ecode) {
 	switch (ecode) {
 	case 0x1:
-		return VMM_FAULT_ACCESS_READ;
+		return MAPPING_ACCESS_READ;
 	case 0x2:
-		return VMM_FAULT_ACCESS_WRITE;
+		return MAPPING_ACCESS_WRITE;
 	case 0x3:
-		return VMM_FAULT_ACCESS_EXEC;
+		return MAPPING_ACCESS_EXEC;
 	default:
-		return VMM_FAULT_ACCESS_UNKNOWN;
+		return 0u;
 	}
 }
 
@@ -336,8 +336,8 @@ void handle_exception(struct exception_frame* frame) {
 
 	if (is_page_invalid_exception(ecode)) {
 		cpu_leave_exception();
-		if (vm_handle_current_page_fault(
-				frame->badv, VMM_FAULT_NOT_PRESENT, loongarch64_fault_access(ecode), was_user_mode())) {
+		if (address_space_handle_current_fault(
+				frame->badv, ADDRESS_SPACE_FAULT_NOT_PRESENT, loongarch64_fault_access(ecode), was_user_mode())) {
 			return;
 		}
 		cpu_enter_exception();

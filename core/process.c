@@ -1,3 +1,4 @@
+#include <core/address_space.h>
 #include <core/capability.h>
 #include <core/capability_call.h>
 #include <core/id_table.h>
@@ -7,7 +8,6 @@
 #include <core/spinlock.h>
 #include <core/thread.h>
 #include <core/uthread.h>
-#include <core/vm_space.h>
 #include <libc/stdlib.h>
 #include <libc/string.h>
 #include <stdbool.h>
@@ -329,7 +329,7 @@ enum process_result process_create(struct process** out_process, const char* nam
 	thread_wait_queue_init(&process->join_wait_queue);
 	process_channel_state_init(&process->channel_state);
 
-	if (!vm_space_create_user(&process->address_space)) {
+	if (!address_space_create_process(&process->address_space)) {
 		free((void*)process->name);
 		free(process);
 		return PROCESS_ADDRESS_SPACE_FAILED;
@@ -337,7 +337,7 @@ enum process_result process_create(struct process** out_process, const char* nam
 
 	id_result = id_table_alloc(&process_table, process, &pid);
 	if (id_result != ID_TABLE_OK) {
-		vm_space_destroy(&process->address_space);
+		address_space_destroy(&process->address_space);
 		free((void*)process->name);
 		free(process);
 		return id_result == ID_TABLE_NO_MEMORY ? PROCESS_NO_MEMORY : PROCESS_PID_EXHAUSTED;
@@ -506,7 +506,7 @@ enum process_detach_result process_detach(struct process* process) {
 static void process_finalize(struct process* process) {
 	(void)process_destroy_address_space_cap_object(process);
 	(void)process_destroy_cap_object(process);
-	vm_space_destroy(&process->address_space);
+	address_space_destroy(&process->address_space);
 	process_channel_state_deinit(&process->channel_state);
 	free((void*)process->name);
 	memset(process, 0, sizeof(*process));

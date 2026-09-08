@@ -155,7 +155,7 @@ Test(syscall, capability_reply_delivers_to_caller_before_success) {
 	struct process*          caller;
 	struct uthread*          provider_thread;
 	struct cap_pending_call* pending;
-	vmm_id_t                 response_id      = VMM_ID_INVALID;
+	struct mapping*          response_mapping = NULL;
 	void*                    response_address = NULL;
 	const uint32_t           reply_value      = 0x55aa55aau;
 	uint32_t                 delivered        = 0u;
@@ -177,7 +177,7 @@ Test(syscall, capability_reply_delivers_to_caller_before_success) {
 	                      0u,
 	                      1u,
 	                      0u,
-	                      &response_id,
+	                      &response_mapping,
 	                      &response_address));
 	pending = cap_pending_call_create(NULL, 9u, process_pid(provider), process_pid(caller), sizeof(reply_value));
 	cr_assert_not_null(pending);
@@ -200,7 +200,8 @@ Test(syscall, capability_reply_delivers_to_caller_before_success) {
 	cr_assert_eq(call_result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(call_result.value, sizeof(reply_value));
 	cap_pending_call_destroy(pending);
-	cr_assert(vm_space_unmap(process_address_space(caller), response_id));
+	cr_assert(address_space_unmap(process_address_space(caller), response_mapping));
+	mapping_release(response_mapping);
 	syscall_test_reset_state();
 }
 
@@ -209,7 +210,7 @@ Test(syscall, capability_reply_reports_failed_caller_delivery) {
 	struct process*          caller;
 	struct uthread*          provider_thread;
 	struct cap_pending_call* pending;
-	vmm_id_t                 response_id      = VMM_ID_INVALID;
+	struct mapping*          response_mapping = NULL;
 	void*                    response_address = NULL;
 	const uint32_t           reply_value      = 0xaa55aa55u;
 	syscall_result_t         result;
@@ -230,12 +231,13 @@ Test(syscall, capability_reply_reports_failed_caller_delivery) {
 	                      0u,
 	                      1u,
 	                      0u,
-	                      &response_id,
+	                      &response_mapping,
 	                      &response_address));
 	pending = cap_pending_call_create(NULL, 10u, process_pid(provider), process_pid(caller), sizeof(reply_value));
 	cr_assert_not_null(pending);
 	pending->response_address = (uintptr_t)response_address;
-	cr_assert(vm_space_unmap(process_address_space(caller), response_id));
+	cr_assert(address_space_unmap(process_address_space(caller), response_mapping));
+	mapping_release(response_mapping);
 
 	result = syscall_dispatch(SYSCALL_CAP_REPLY,
 	                          cap_pending_call_id(pending),

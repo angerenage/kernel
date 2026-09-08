@@ -54,14 +54,14 @@ static void user_upcall_test_reset(struct uthread* thread, struct hal_userspace_
 	user_upcall_test_init_heap();
 	memset(thread, 0, sizeof(*thread));
 	cr_assert(uthread_upcall_state_init(thread), "uthread upcall state initialization failed");
-	thread->process          = (struct process*)(uintptr_t)1u;
-	thread->upcall.stack_id  = 1u;
-	thread->upcall.stack_top = 0x9000u;
-	*frame                   = (struct hal_userspace_return_frame){
-						  .user  = true,
-						  .entry = 0x1000u,
-						  .stack = 0x8000u,
-						  .args  = {0x11u, 0x22u, 0x33u, 0x44u, 0x55u},
+	thread->process              = (struct process*)(uintptr_t)1u;
+	thread->upcall.stack_mapping = (struct mapping*)1u;
+	thread->upcall.stack_top     = 0x9000u;
+	*frame                       = (struct hal_userspace_return_frame){
+							  .user  = true,
+							  .entry = 0x1000u,
+							  .stack = 0x8000u,
+							  .args  = {0x11u, 0x22u, 0x33u, 0x44u, 0x55u},
     };
 }
 

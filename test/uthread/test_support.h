@@ -2,6 +2,7 @@
 #define TEST_UTHREAD_TEST_SUPPORT_H
 
 #include <base/heap.h>
+#include <core/address_space.h>
 #include <core/address_transfer.h>
 #include <core/cpu.h>
 #include <core/mm.h>
@@ -10,7 +11,6 @@
 #include <core/sched.h>
 #include <core/thread.h>
 #include <core/uthread.h>
-#include <core/vm_space.h>
 #include <criterion/criterion.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>

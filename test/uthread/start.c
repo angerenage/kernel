@@ -3,8 +3,8 @@
 Test(uthread, detached_start_registers_finalizer_before_queueing) {
 	struct process* process = NULL;
 	struct uthread  worker  = {
-		  .user_stack_id   = VMM_ID_INVALID,
-		  .kernel_stack_id = VMM_ID_INVALID,
+		  .user_stack_mapping   = NULL,
+		  .kernel_stack_mapping = NULL,
     };
 	enum uthread_start_result   result;
 	struct uthread_start_params params = {
@@ -23,7 +23,7 @@ Test(uthread, detached_start_registers_finalizer_before_queueing) {
 	result = uthread_start(&worker, &params);
 	cr_assert_eq(result, UTHREAD_START_OK, "uthread_start failed: %d", result);
 
-	cr_assert_neq(worker.upcall.stack_id, VMM_ID_INVALID, "uthread_start should allocate an upcall stack");
+	cr_assert_not_null(worker.upcall.stack_mapping, "uthread_start should allocate an upcall stack");
 	cr_assert_neq(worker.upcall.stack_top, 0u, "uthread_start should publish the upcall stack top");
 	cr_assert_eq(
 		worker.upcall.stack_top & (HAL_USERSPACE_STACK_ALIGNMENT - 1u), 0u, "upcall stack top should be aligned");

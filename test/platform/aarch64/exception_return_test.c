@@ -1,7 +1,7 @@
+#include <core/address_space.h>
 #include <core/cpu.h>
 #include <core/exception.h>
 #include <core/sched.h>
-#include <core/vm_space.h>
 #include <criterion/criterion.h>
 #include <hal/cpu.h>
 #include <hal/hcf.h>
@@ -18,12 +18,12 @@
 
 char exception_vectors[2048];
 
-static size_t                observed_vmm_faults;
-static uintptr_t             observed_vmm_addr;
-static enum vmm_fault_kind   observed_fault_kind;
-static enum vmm_fault_access observed_vmm_access;
-static bool                  observed_vmm_user_mode;
-static bool                  vmm_fault_result;
+static size_t                        observed_vmm_faults;
+static uintptr_t                     observed_vmm_addr;
+static enum address_space_fault_kind observed_fault_kind;
+static mapping_access_t              observed_vmm_access;
+static bool                          observed_vmm_user_mode;
+static bool                          vmm_fault_result;
 
 static size_t                   observed_core_faults;
 static enum core_exception_kind observed_core_kind;
@@ -57,8 +57,8 @@ void cpu_enter_exception(void) {
 void cpu_leave_exception(void) {
 }
 
-bool vm_handle_current_page_fault(uintptr_t addr, enum vmm_fault_kind kind, enum vmm_fault_access access,
-                                  bool user_mode) {
+bool address_space_handle_current_fault(uintptr_t addr, enum address_space_fault_kind kind, mapping_access_t access,
+                                        bool user_mode) {
 	observed_vmm_faults++;
 	observed_vmm_addr      = addr;
 	observed_fault_kind    = kind;
@@ -116,8 +116,8 @@ void hal_cpu_fp_context_restore(const struct hal_cpu_fp_context* context) {
 static void aarch64_exception_test_reset(void) {
 	observed_vmm_faults    = 0u;
 	observed_vmm_addr      = 0u;
-	observed_fault_kind    = VMM_FAULT_INVALID;
-	observed_vmm_access    = VMM_FAULT_ACCESS_UNKNOWN;
+	observed_fault_kind    = ADDRESS_SPACE_FAULT_INVALID;
+	observed_vmm_access    = 0u;
 	observed_vmm_user_mode = false;
 	vmm_fault_result       = true;
 	observed_core_faults   = 0u;
@@ -154,8 +154,8 @@ Test(aarch64_exception_return, translation_faults_still_reach_lazy_page_fault_po
 
 	cr_assert_eq(observed_vmm_faults, 1u);
 	cr_assert_eq(observed_vmm_addr, frame.far);
-	cr_assert_eq(observed_fault_kind, VMM_FAULT_NOT_PRESENT);
-	cr_assert_eq(observed_vmm_access, VMM_FAULT_ACCESS_READ);
+	cr_assert_eq(observed_fault_kind, ADDRESS_SPACE_FAULT_NOT_PRESENT);
+	cr_assert_eq(observed_vmm_access, MAPPING_ACCESS_READ);
 	cr_assert(observed_vmm_user_mode);
 	cr_assert_eq(observed_core_faults, 0u);
 }
@@ -171,8 +171,8 @@ Test(aarch64_exception_return, permission_faults_reach_vmm_as_write_protection_f
 	handle_exception(&frame);
 
 	cr_assert_eq(observed_vmm_faults, 1u);
-	cr_assert_eq(observed_fault_kind, VMM_FAULT_PROTECTION);
-	cr_assert_eq(observed_vmm_access, VMM_FAULT_ACCESS_WRITE);
+	cr_assert_eq(observed_fault_kind, ADDRESS_SPACE_FAULT_PROTECTION);
+	cr_assert_eq(observed_vmm_access, MAPPING_ACCESS_WRITE);
 	cr_assert(observed_vmm_user_mode);
 	cr_assert_eq(observed_core_faults, 0u);
 }

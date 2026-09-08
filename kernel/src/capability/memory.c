@@ -4,6 +4,7 @@
 #include <base/math.h>
 #include <base/memory.h>
 #include <base/vmm.h>
+#include <core/address_space.h>
 #include <core/address_transfer.h>
 #include <core/capability.h>
 #include <core/memory.h>
@@ -11,7 +12,6 @@
 #include <core/pmm.h>
 #include <core/process.h>
 #include <core/syscall.h>
-#include <core/vm_space.h>
 #include <hal/cache.h>
 #include <kernel/capability.h>
 #include <stdlib.h>
@@ -19,8 +19,9 @@
 
 /* Immutable identity of a mapping controlled by a mapping capability. */
 struct mapping_state {
-	process_id_t space_owner;
-	vmm_id_t     mapping_id;
+	process_id_t    space_owner;
+	struct mapping* mapping;
+	size_t          legacy_memory_page_offset;
 };
 
 static syscall_result_t memory_handler(const struct cap_request* req);
@@ -64,7 +65,10 @@ static void memory_event(struct cap_object* object, enum cap_object_event event)
 }
 
 static void mapping_destroy(uint64_t object_id) {
-	free((struct mapping_state*)(uintptr_t)object_id);
+	struct mapping_state* state = (struct mapping_state*)(uintptr_t)object_id;
+	if (state == NULL) return;
+	mapping_release(state->mapping);
+	free(state);
 }
 
 static void mapping_event(struct cap_object* object, enum cap_object_event event) {
@@ -76,22 +80,28 @@ static bool mapping_process_cleanup(uint64_t object_id, process_id_t process) {
 	return state != NULL && state->space_owner == process;
 }
 
-static cap_id_t mapping_create(process_id_t target, process_id_t space_owner, vmm_id_t mapping_id,
-                               cap_rights_t rights) {
+static cap_id_t mapping_create(process_id_t target, process_id_t space_owner, struct mapping* mapping,
+                               size_t legacy_memory_page_offset, cap_rights_t rights) {
 	struct mapping_state* state;
 	cap_object_id_t       object_id;
 	cap_id_t              cap_id;
 
-	if (target == PROCESS_PID_INVALID || space_owner == PROCESS_PID_INVALID || mapping_id == VMM_ID_INVALID ||
+	if (target == PROCESS_PID_INVALID || space_owner == PROCESS_PID_INVALID || mapping == NULL ||
 	    (rights & ~(CAP_READ | CAP_WRITE | CAP_EXEC | CAP_MAP | CAP_DESTROY | CAP_DELEGATE)) != 0u)
 		return CAP_ID_INVALID;
 	state = malloc(sizeof(*state));
 	if (state == NULL) return CAP_ID_INVALID;
-	state->space_owner = space_owner;
-	state->mapping_id  = mapping_id;
-	object_id          = cap_object_create_kernel_lifecycle(
+	if (!mapping_retain(mapping)) {
+		free(state);
+		return CAP_ID_INVALID;
+	}
+	state->space_owner               = space_owner;
+	state->mapping                   = mapping;
+	state->legacy_memory_page_offset = legacy_memory_page_offset;
+	object_id                        = cap_object_create_kernel_lifecycle(
         (uint64_t)(uintptr_t)state, mapping_handler, mapping_process_cleanup, mapping_destroy, mapping_event, NULL);
 	if (object_id == CAP_OBJECT_ID_INVALID) {
+		mapping_release(mapping);
 		free(state);
 		return CAP_ID_INVALID;
 	}
@@ -247,13 +257,14 @@ syscall_result_t kernel_memory_map(cap_id_t memory_cap_id, process_id_t caller, 
                                    struct address_space_map_result* out_result) {
 	struct cap_object*    object;
 	struct memory*        memory;
+	struct memory*        mapped_memory = NULL;
 	struct process*       retained_target;
 	struct address_space* space;
 	cap_rights_t          memory_rights;
 	cap_rights_t          required_rights;
-	vmm_id_t              mapping_id = VMM_ID_INVALID;
-	void*                 base       = NULL;
+	struct mapping*       mapping = NULL;
 	cap_id_t              mapping_cap;
+	size_t                offset_bytes, size_bytes, alignment, guard_before;
 
 	if (memory_cap_id == CAP_ID_INVALID || caller == PROCESS_PID_INVALID || target == NULL || out_result == NULL ||
 	    !map_params_are_valid(params))
@@ -278,28 +289,51 @@ syscall_result_t kernel_memory_map(cap_id_t memory_cap_id, process_id_t caller, 
 		cap_object_release(object);
 		return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 	}
-	space                               = process_address_space(retained_target);
-	const struct vm_map_request request = {
-		.memory             = memory,
-		.memory_page_offset = params->memory_page_offset,
-		.page_count         = params->page_count,
-		.requested_base     = params->address,
-		.align_pages        = params->align_pages,
-		.guard_pages        = params->guard_pages,
-		.prot               = params->prot,
-	};
-	if (!vm_space_map(space, &request, &mapping_id, &base)) {
+	if (mul_overflow_size(params->memory_page_offset, VMM_PAGE_SIZE, &offset_bytes) ||
+	    mul_overflow_size(params->page_count, VMM_PAGE_SIZE, &size_bytes) ||
+	    mul_overflow_size(params->align_pages == 0u ? 1u : params->align_pages, VMM_PAGE_SIZE, &alignment) ||
+	    mul_overflow_size(params->guard_pages, VMM_PAGE_SIZE, &guard_before)) {
 		process_release(retained_target);
 		cap_object_release(object);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
+	if (offset_bytes == 0u && size_bytes == memory_size(memory)) {
+		if (memory_retain(memory)) mapped_memory = memory;
+	}
+	else (void)memory_slice(memory, offset_bytes, size_bytes, &mapped_memory);
+	if (mapped_memory == NULL) {
+		process_release(retained_target);
+		cap_object_release(object);
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
+	mapping_access_t access = 0u;
+	if ((params->prot & VMM_PROT_READ) != 0u) access |= MAPPING_ACCESS_READ;
+	if ((params->prot & VMM_PROT_WRITE) != 0u) access |= MAPPING_ACCESS_WRITE;
+	if ((params->prot & VMM_PROT_EXEC) != 0u) access |= MAPPING_ACCESS_EXEC;
+	space                                              = process_address_space(retained_target);
+	const struct address_space_mapping_request request = {
+		.memory       = mapped_memory,
+		.address      = params->address,
+		.alignment    = alignment,
+		.guard_before = guard_before,
+		.access       = access,
+	};
+	if (!address_space_map(space, &request, &mapping)) {
+		memory_release(mapped_memory);
+		process_release(retained_target);
+		cap_object_release(object);
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
+	memory_release(mapped_memory);
 	mapping_cap =
 		mapping_create(caller,
 	                   process_pid(retained_target),
-	                   mapping_id,
+	                   mapping,
+	                   params->memory_page_offset,
 	                   CAP_MAP | CAP_DESTROY | CAP_DELEGATE | (memory_rights & (CAP_READ | CAP_WRITE | CAP_EXEC)));
 	if (mapping_cap == CAP_ID_INVALID) {
-		(void)vm_space_unmap(space, mapping_id);
+		(void)address_space_unmap(space, mapping);
+		mapping_release(mapping);
 		process_release(retained_target);
 		cap_object_release(object);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
@@ -307,33 +341,33 @@ syscall_result_t kernel_memory_map(cap_id_t memory_cap_id, process_id_t caller, 
 	out_result->mapping_cap = mapping_cap;
 	out_result->mapping     = (struct vmm_info){
 			.id                 = VMM_ID_INVALID,
-			.base               = base,
+			.base               = (void*)mapping_address(mapping),
 			.page_count         = params->page_count,
 			.memory_page_offset = params->memory_page_offset,
 			.guard_pages        = params->guard_pages,
 			.prot               = params->prot,
 			.memory_type        = memory_type(memory),
     };
+	mapping_release(mapping);
 	process_release(retained_target);
 	cap_object_release(object);
 	return syscall_result_ok(0u);
 }
 
-cap_id_t kernel_mapping_grant(struct process* target, process_id_t recipient, vmm_id_t mapping_id,
-                              cap_rights_t rights) {
+cap_id_t kernel_mapping_grant(struct process* target, process_id_t recipient, struct mapping* mapping,
+                              size_t legacy_memory_page_offset, cap_rights_t rights) {
 	struct process* retained;
-	struct vmm_info info;
-	if (target == NULL || recipient == PROCESS_PID_INVALID) return CAP_ID_INVALID;
+	if (target == NULL || recipient == PROCESS_PID_INVALID || mapping == NULL) return CAP_ID_INVALID;
 	retained = process_acquire(process_pid(target));
 	if (retained == NULL || retained != target) {
 		process_release(retained);
 		return CAP_ID_INVALID;
 	}
-	if (!vm_space_query_id(process_address_space(retained), mapping_id, &info)) {
+	if (!address_space_contains_mapping(process_address_space(retained), mapping)) {
 		process_release(retained);
 		return CAP_ID_INVALID;
 	}
-	cap_id_t cap = mapping_create(recipient, process_pid(retained), mapping_id, rights);
+	cap_id_t cap = mapping_create(recipient, process_pid(retained), mapping, legacy_memory_page_offset, rights);
 	process_release(retained);
 	return cap;
 }
@@ -344,7 +378,7 @@ static bool mapping_unmap_state(const struct mapping_state* state) {
 	if (state == NULL) return false;
 	owner = process_acquire(state->space_owner);
 	if (owner == NULL) return false;
-	unmapped = vm_space_unmap(process_address_space(owner), state->mapping_id);
+	unmapped = address_space_unmap(process_address_space(owner), state->mapping);
 	process_release(owner);
 	return unmapped;
 }
@@ -466,12 +500,26 @@ static syscall_result_t memory_handler(const struct cap_request* req) {
 static syscall_result_t mapping_info_handler(const struct cap_request* req, const struct mapping_state* state) {
 	struct process* owner = process_acquire(state->space_owner);
 	if (owner == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	struct mapping_info_response response;
-	if (!vm_space_query_id(process_address_space(owner), state->mapping_id, &response.info)) {
+	if (!address_space_contains_mapping(process_address_space(owner), state->mapping)) {
 		process_release(owner);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
-	response.info.id        = VMM_ID_INVALID;
+	mapping_access_t access = mapping_access(state->mapping);
+	vmm_prot_t       prot   = VMM_PROT_NONE;
+	if ((access & MAPPING_ACCESS_READ) != 0u) prot |= VMM_PROT_READ;
+	if ((access & MAPPING_ACCESS_WRITE) != 0u) prot |= VMM_PROT_WRITE;
+	if ((access & MAPPING_ACCESS_EXEC) != 0u) prot |= VMM_PROT_EXEC;
+	struct mapping_info_response response = {
+		.info = {
+				 .id                 = VMM_ID_INVALID,
+				 .base               = (void*)mapping_address(state->mapping),
+				 .page_count         = mapping_size(state->mapping) / VMM_PAGE_SIZE,
+				 .memory_page_offset = state->legacy_memory_page_offset,
+				 .guard_pages        = mapping_guard_before(state->mapping) / VMM_PAGE_SIZE,
+				 .prot               = prot,
+				 .memory_type        = mapping_memory_type(state->mapping),
+				 }
+    };
 	syscall_result_t result = cap_kernel_write_response(req, &response, sizeof(response));
 	process_release(owner);
 	return result;
@@ -486,7 +534,11 @@ static syscall_result_t mapping_protect_handler(const struct cap_request* req, c
 	if ((req->rights & required) != required) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	struct process* owner = process_acquire(state->space_owner);
 	if (owner == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	bool protected = vm_space_protect(process_address_space(owner), state->mapping_id, request.prot);
+	mapping_access_t access = 0u;
+	if ((request.prot & VMM_PROT_READ) != 0u) access |= MAPPING_ACCESS_READ;
+	if ((request.prot & VMM_PROT_WRITE) != 0u) access |= MAPPING_ACCESS_WRITE;
+	if ((request.prot & VMM_PROT_EXEC) != 0u) access |= MAPPING_ACCESS_EXEC;
+	bool protected = address_space_protect(process_address_space(owner), state->mapping, access);
 	process_release(owner);
 	return protected ? syscall_result_ok(0u) : syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 }
@@ -521,8 +573,4 @@ static syscall_result_t mapping_handler(const struct cap_request* req) {
 	default:
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
-}
-
-size_t kernel_mapping_state_size(void) {
-	return sizeof(struct mapping_state);
 }

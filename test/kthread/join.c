@@ -10,7 +10,7 @@ Test(kthread, join_terminated_thread_returns_exit_code_and_detaches) {
 		.preferred_cpu     = NULL,
 		.detached          = false,
 	};
-	struct kthread     target    = {.stack_id = VMM_ID_INVALID};
+	struct kthread     target    = {.stack_mapping = NULL};
 	thread_exit_code_t exit_code = 0u;
 
 	init_bound_bootstrap_cpu();
@@ -62,8 +62,8 @@ Test(kthread, timed_join_times_out_without_consuming_joinability) {
 		.preferred_cpu     = NULL,
 		.detached          = false,
 	};
-	struct kthread     target = {.stack_id = VMM_ID_INVALID};
-	struct kthread     joiner = {.stack_id = VMM_ID_INVALID};
+	struct kthread     target = {.stack_mapping = NULL};
+	struct kthread     joiner = {.stack_mapping = NULL};
 	struct thread      runner;
 	thread_exit_code_t exit_code = 0xdeadbeefu;
 

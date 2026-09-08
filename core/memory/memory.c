@@ -259,7 +259,7 @@ bool memory_cpu_accessible(const struct memory* memory) {
 	return memory != NULL && memory_backing_cpu_accessible(memory->backing);
 }
 
-bool memory_range_is_aligned(const struct memory* memory, size_t offset, size_t size, size_t alignment) {
+bool memory_range_is_backing_aligned(const struct memory* memory, size_t offset, size_t size, size_t alignment) {
 	size_t absolute_offset;
 	return alignment != 0u && (alignment & (alignment - 1u)) == 0u && range_valid(memory, offset, size) &&
 	       backing_offset(memory, offset, &absolute_offset) && (absolute_offset & (alignment - 1u)) == 0u &&

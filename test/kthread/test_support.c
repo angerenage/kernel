@@ -55,7 +55,7 @@ void kthread_test_init_target(struct kthread* target, const char* name, uintptr_
 		.detached          = false,
 	};
 
-	*target = (struct kthread){.stack_id = VMM_ID_INVALID};
+	*target = (struct kthread){.stack_mapping = NULL};
 	cr_assert(thread_init(&target->thread, &params));
 	if (make_current) sched_set_current(cpu_current(), &target->thread);
 }

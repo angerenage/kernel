@@ -3,8 +3,8 @@
 Test(uthread, deinit_detaches_joinable_thread_from_process) {
 	struct process* process = NULL;
 	struct uthread  worker  = {
-		  .user_stack_id   = VMM_ID_INVALID,
-		  .kernel_stack_id = VMM_ID_INVALID,
+		  .user_stack_mapping   = NULL,
+		  .kernel_stack_mapping = NULL,
     };
 	uthread_id_t                worker_tid;
 	struct uthread_start_params params = {
@@ -35,8 +35,8 @@ Test(uthread, deinit_detaches_joinable_thread_from_process) {
 Test(uthread, retained_descriptor_defers_final_cleanup) {
 	struct process* process = NULL;
 	struct uthread  worker  = {
-		  .user_stack_id   = VMM_ID_INVALID,
-		  .kernel_stack_id = VMM_ID_INVALID,
+		  .user_stack_mapping   = NULL,
+		  .kernel_stack_mapping = NULL,
     };
 	struct uthread* held;
 	uthread_id_t    worker_tid;
@@ -68,9 +68,9 @@ Test(uthread, retained_descriptor_defers_final_cleanup) {
 
 	uthread_release(held);
 	cr_assert_eq(process_thread_count(process), 1u, "the last reference should perform final cleanup");
-	cr_assert_eq(worker.user_stack_id, VMM_ID_INVALID);
-	cr_assert_eq(worker.upcall.stack_id, VMM_ID_INVALID);
-	cr_assert_eq(worker.kernel_stack_id, VMM_ID_INVALID);
+	cr_assert_null(worker.user_stack_mapping);
+	cr_assert_null(worker.upcall.stack_mapping);
+	cr_assert_null(worker.kernel_stack_mapping);
 
 	terminate_main_thread(process);
 	cr_assert(process_destroy(process));

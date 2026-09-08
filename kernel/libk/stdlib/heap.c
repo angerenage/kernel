@@ -1,35 +1,37 @@
 #include <base/heap.h>
 #include <base/vmm.h>
+#include <core/address_space.h>
 #include <core/lock.h>
 #include <core/memory.h>
 #include <core/pmm.h>
 #include <core/spinlock.h>
-#include <core/vm_space.h>
 #include <stdbool.h>
 #include <stddef.h>
 
 static struct spinlock kernel_heap_lock = SPINLOCK_INIT_CLASS("heap_lock", SPINLOCK_ORDER_HEAP, SPINLOCK_FLAG_NONE);
 
 bool heap_grow_pages(size_t page_count, void** out_base) {
-	struct memory* memory;
-	vmm_id_t       id;
+	struct memory*  memory;
+	struct mapping* mapping;
 	if (out_base != NULL) *out_base = NULL;
 	if (out_base == NULL || page_count > SIZE_MAX / VMM_PAGE_SIZE ||
 	    !memory_create_anonymous(page_count * VMM_PAGE_SIZE, &memory))
 		return false;
-	bool mapped = vm_space_map(vm_space_kernel(),
-	                           &(const struct vm_map_request){
-								   .memory      = memory,
-								   .page_count  = page_count,
-								   .align_pages = 1u,
-								   .prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_GLOBAL,
-							   },
-	                           &id,
-	                           out_base);
+	bool mapped = address_space_map(address_space_kernel(),
+	                                &(const struct address_space_mapping_request){
+										.memory = memory,
+										.access = MAPPING_ACCESS_READ | MAPPING_ACCESS_WRITE,
+									},
+	                                &mapping);
 	memory_release(memory);
 	if (!mapped) return false;
-	if (vm_space_prefault(vm_space_kernel(), id, 0u, page_count)) return true;
-	(void)vm_space_unmap(vm_space_kernel(), id);
+	*out_base = (void*)mapping_address(mapping);
+	if (address_space_prefault(address_space_kernel(), mapping, 0u, mapping_size(mapping))) {
+		mapping_release(mapping);
+		return true;
+	}
+	(void)address_space_unmap(address_space_kernel(), mapping);
+	mapping_release(mapping);
 	*out_base = NULL;
 	return false;
 }

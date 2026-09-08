@@ -7,7 +7,6 @@ Test(elf_loader_segments, loads_file_bytes_zeros_bss_and_applies_final_permissio
 	struct kernel_boot_module module;
 	struct kernel_elf_process loaded = {0};
 	struct address_space*     space;
-	struct vmm_info           info;
 	uint8_t                   bytes[64];
 	const uint64_t            file_offset = VMM_PAGE_SIZE;
 	const uint64_t            vaddr       = MM_USER_VMM_BASE + 4u * (uint64_t)VMM_PAGE_SIZE;
@@ -26,11 +25,16 @@ Test(elf_loader_segments, loads_file_bytes_zeros_bss_and_applies_final_permissio
 	cr_assert_eq(address_space_copy_from(space, (uintptr_t)vaddr, bytes, sizeof(bytes)), ADDRESS_TRANSFER_OK);
 	for (size_t i = 0u; i < 32u; i++) cr_assert_eq(bytes[i], (uint8_t)(0x40u + i));
 	for (size_t i = 32u; i < sizeof(bytes); i++) cr_assert_eq(bytes[i], 0u, "BSS byte %zu was not zero", i);
-	cr_assert(vm_space_query(space, (uintptr_t)vaddr, &info));
-	cr_assert_eq(info.prot, (vmm_prot_t)(VMM_PROT_READ | VMM_PROT_EXEC));
-	cr_assert(vm_space_query(space, loaded.heap_base, &info));
-	cr_assert_eq(info.page_count, HEAP_DEFAULT_GROW_PAGES);
-	cr_assert_eq(info.prot, (vmm_prot_t)(VMM_PROT_READ | VMM_PROT_WRITE));
+	cr_assert_eq(address_space_validate_range(space, vaddr, 1u, ADDRESS_TRANSFER_EXEC | ADDRESS_TRANSFER_USER),
+	             ADDRESS_TRANSFER_OK);
+	cr_assert_eq(address_space_validate_range(space, vaddr, 1u, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER),
+	             ADDRESS_TRANSFER_ACCESS_DENIED);
+	cr_assert_eq(
+		address_space_validate_range(space, loaded.heap_base, 1u, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER),
+		ADDRESS_TRANSFER_OK);
+	cr_assert_eq(
+		address_space_validate_range(space, loaded.heap_base, 1u, ADDRESS_TRANSFER_EXEC | ADDRESS_TRANSFER_USER),
+		ADDRESS_TRANSFER_ACCESS_DENIED);
 	elf_test_destroy_loaded(&loaded);
 }
 
@@ -39,7 +43,6 @@ Test(elf_loader_segments, keeps_text_and_data_permissions_independent) {
 	struct kernel_boot_module module;
 	struct kernel_elf_process loaded = {0};
 	struct address_space*     space;
-	struct vmm_info           info;
 	const uint64_t            text_offset = VMM_PAGE_SIZE;
 	const uint64_t            data_offset = 2u * (uint64_t)VMM_PAGE_SIZE;
 	const uint64_t            text_vaddr  = MM_USER_VMM_BASE + 4u * (uint64_t)VMM_PAGE_SIZE;
@@ -55,10 +58,14 @@ Test(elf_loader_segments, keeps_text_and_data_permissions_independent) {
 	module = elf_test_module(&image);
 	cr_assert_eq(kernel_elf_load_process(&module, "two-segments", &loaded), KERNEL_ELF_LOAD_OK);
 	space = process_address_space(loaded.process);
-	cr_assert(vm_space_query(space, (uintptr_t)text_vaddr, &info));
-	cr_assert_eq(info.prot, (vmm_prot_t)(VMM_PROT_READ | VMM_PROT_EXEC));
-	cr_assert(vm_space_query(space, (uintptr_t)data_vaddr, &info));
-	cr_assert_eq(info.prot, (vmm_prot_t)(VMM_PROT_READ | VMM_PROT_WRITE));
+	cr_assert_eq(address_space_validate_range(space, text_vaddr, 1u, ADDRESS_TRANSFER_EXEC | ADDRESS_TRANSFER_USER),
+	             ADDRESS_TRANSFER_OK);
+	cr_assert_eq(address_space_validate_range(space, text_vaddr, 1u, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER),
+	             ADDRESS_TRANSFER_ACCESS_DENIED);
+	cr_assert_eq(address_space_validate_range(space, data_vaddr, 1u, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER),
+	             ADDRESS_TRANSFER_OK);
+	cr_assert_eq(address_space_validate_range(space, data_vaddr, 1u, ADDRESS_TRANSFER_EXEC | ADDRESS_TRANSFER_USER),
+	             ADDRESS_TRANSFER_ACCESS_DENIED);
 	cr_assert_eq(address_space_copy_from(space, text_vaddr, text, sizeof(text)), ADDRESS_TRANSFER_OK);
 	cr_assert_eq(address_space_copy_from(space, data_vaddr, data, sizeof(data)), ADDRESS_TRANSFER_OK);
 	for (size_t i = 0u; i < sizeof(text); i++) cr_assert_eq(text[i], 0x71u);

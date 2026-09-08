@@ -10,7 +10,7 @@ Test(kthread, current_start_and_yield_delegate_to_scheduler) {
 		.preferred_cpu     = NULL,
 		.detached          = false,
 	};
-	struct kthread worker = {.stack_id = VMM_ID_INVALID};
+	struct kthread worker = {.stack_mapping = NULL};
 	struct thread* idle;
 
 	init_bound_bootstrap_cpu();

@@ -1,12 +1,12 @@
 #include <base/heap.h>
 #include <base/math.h>
 #include <base/vmm.h>
+#include <core/address_space.h>
 #include <core/address_transfer.h>
 #include <core/memory.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/process.h>
-#include <core/vm_space.h>
 #include <hal/cache.h>
 #include <kernel/boot.h>
 #include <kernel/elf_loader.h>
@@ -115,13 +115,13 @@ static bool kernel_elf_header_valid(const struct elf64_ehdr* ehdr, size_t module
 	return kernel_elf_range_in_module(module_size, ehdr->phoff, ph_size);
 }
 
-static vmm_prot_t kernel_elf_segment_prot(uint32_t flags) {
-	vmm_prot_t prot = VMM_PROT_NONE;
+static mapping_access_t kernel_elf_segment_access(uint32_t flags) {
+	mapping_access_t access = 0u;
 
-	if ((flags & ELF_PF_R) != 0) prot |= VMM_PROT_READ;
-	if ((flags & ELF_PF_W) != 0) prot |= VMM_PROT_WRITE;
-	if ((flags & ELF_PF_X) != 0) prot |= VMM_PROT_EXEC;
-	return prot;
+	if ((flags & ELF_PF_R) != 0) access |= MAPPING_ACCESS_READ;
+	if ((flags & ELF_PF_W) != 0) access |= MAPPING_ACCESS_WRITE;
+	if ((flags & ELF_PF_X) != 0) access |= MAPPING_ACCESS_EXEC;
+	return access;
 }
 
 static void kernel_elf_sync_loaded_memory(struct memory* memory) {
@@ -141,10 +141,10 @@ static enum kernel_elf_load_result kernel_elf_load_segment(struct process*      
 	struct address_space* space;
 	uintptr_t             map_base;
 	size_t                page_count;
-	vmm_id_t              id         = VMM_ID_INVALID;
-	struct memory*        memory     = NULL;
-	vmm_prot_t            final_prot = kernel_elf_segment_prot(phdr->flags);
-	vmm_prot_t            load_prot  = final_prot | VMM_PROT_READ | VMM_PROT_WRITE;
+	struct mapping*       mapping      = NULL;
+	struct memory*        memory       = NULL;
+	mapping_access_t      final_access = kernel_elf_segment_access(phdr->flags);
+	mapping_access_t      load_access  = final_access | MAPPING_ACCESS_READ | MAPPING_ACCESS_WRITE;
 
 	if (phdr->filesz > phdr->memsz) return KERNEL_ELF_LOAD_BAD_FORMAT;
 	if (phdr->memsz == 0u) return KERNEL_ELF_LOAD_OK;
@@ -160,16 +160,13 @@ static enum kernel_elf_load_result kernel_elf_load_segment(struct process*      
 	space = process_address_space(process);
 	if (page_count > SIZE_MAX / VMM_PAGE_SIZE || !memory_create_anonymous(page_count * VMM_PAGE_SIZE, &memory))
 		return KERNEL_ELF_LOAD_MAP_FAILED;
-	if (!vm_space_map(space,
-	                  &(const struct vm_map_request){
-						  .memory         = memory,
-						  .page_count     = page_count,
-						  .requested_base = map_base,
-						  .align_pages    = 1u,
-						  .prot           = load_prot,
-					  },
-	                  &id,
-	                  NULL)) {
+	if (!address_space_map(space,
+	                       &(const struct address_space_mapping_request){
+							   .memory  = memory,
+							   .address = map_base,
+							   .access  = load_access,
+						   },
+	                       &mapping)) {
 		memory_release(memory);
 		return KERNEL_ELF_LOAD_MAP_FAILED;
 	}
@@ -179,35 +176,37 @@ static enum kernel_elf_load_result kernel_elf_load_segment(struct process*      
 	                                                (const uint8_t*)module->address + (size_t)phdr->offset,
 	                                                (size_t)phdr->filesz) != ADDRESS_TRANSFER_OK) {
 		memory_release(memory);
+		mapping_release(mapping);
 		return KERNEL_ELF_LOAD_COPY_FAILED;
 	}
-	if ((final_prot & VMM_PROT_EXEC) != 0) kernel_elf_sync_loaded_memory(memory);
+	if ((final_access & MAPPING_ACCESS_EXEC) != 0) kernel_elf_sync_loaded_memory(memory);
 	memory_release(memory);
-	if (final_prot != load_prot && !vm_space_protect(space, id, final_prot)) return KERNEL_ELF_LOAD_MAP_FAILED;
+	if (final_access != load_access && !address_space_protect(space, mapping, final_access)) {
+		mapping_release(mapping);
+		return KERNEL_ELF_LOAD_MAP_FAILED;
+	}
+	mapping_release(mapping);
 	return KERNEL_ELF_LOAD_OK;
 }
 
 static enum kernel_elf_load_result kernel_elf_allocate_initial_heap(struct process* process, uintptr_t* out_base) {
-	void*          base = NULL;
-	vmm_id_t       id   = VMM_ID_INVALID;
-	struct memory* memory;
+	struct mapping* mapping;
+	struct memory*  memory;
 
 	if (process == NULL || out_base == NULL) return KERNEL_ELF_LOAD_INVALID_ARGUMENTS;
 	if (!memory_create_anonymous(HEAP_DEFAULT_GROW_PAGES * VMM_PAGE_SIZE, &memory)) return KERNEL_ELF_LOAD_MAP_FAILED;
-	bool mapped = vm_space_map(process_address_space(process),
-	                           &(const struct vm_map_request){
-								   .memory      = memory,
-								   .page_count  = HEAP_DEFAULT_GROW_PAGES,
-								   .align_pages = 1u,
-								   .prot        = VMM_PROT_READ | VMM_PROT_WRITE,
-							   },
-	                           &id,
-	                           &base);
+	bool mapped = address_space_map(process_address_space(process),
+	                                &(const struct address_space_mapping_request){
+										.memory = memory,
+										.access = MAPPING_ACCESS_READ | MAPPING_ACCESS_WRITE,
+									},
+	                                &mapping);
 	memory_release(memory);
 	if (!mapped) {
 		return KERNEL_ELF_LOAD_MAP_FAILED;
 	}
-	*out_base = (uintptr_t)base;
+	*out_base = mapping_address(mapping);
+	mapping_release(mapping);
 	return KERNEL_ELF_LOAD_OK;
 }
 

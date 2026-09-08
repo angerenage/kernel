@@ -190,15 +190,21 @@ Test(capability_syscall, call_validates_response_before_handler_side_effects) {
 	struct process*  process = make_current_process("cap/call-response-validation");
 	cap_object_id_t  object_id;
 	cap_id_t         capability_id;
-	vmm_id_t         request_id      = VMM_ID_INVALID;
-	vmm_id_t         response_id     = VMM_ID_INVALID;
-	void*            request_buffer  = NULL;
-	void*            response_buffer = NULL;
-	uint32_t         response_value  = 0u;
+	struct mapping*  request_mapping  = NULL;
+	struct mapping*  response_mapping = NULL;
+	void*            request_buffer   = NULL;
+	void*            response_buffer  = NULL;
+	uint32_t         response_value   = 0u;
 	syscall_result_t result;
 
-	cr_assert(test_vm_map(
-		process_address_space(process), 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, &request_id, &request_buffer));
+	cr_assert(test_vm_map(process_address_space(process),
+	                      1u,
+	                      VMM_PROT_READ | VMM_PROT_WRITE,
+	                      0u,
+	                      1u,
+	                      0u,
+	                      &request_mapping,
+	                      &request_buffer));
 	cr_assert_not_null(request_buffer);
 	cr_assert(test_vm_map(process_address_space(process),
 	                      1u,
@@ -206,7 +212,7 @@ Test(capability_syscall, call_validates_response_before_handler_side_effects) {
 	                      0u,
 	                      1u,
 	                      0u,
-	                      &response_id,
+	                      &response_mapping,
 	                      &response_buffer));
 	cr_assert_not_null(response_buffer);
 
@@ -245,7 +251,9 @@ Test(capability_syscall, call_validates_response_before_handler_side_effects) {
 
 	cr_assert(cap_destroy_by_id(capability_id));
 	cr_assert(cap_object_destroy_with_id(object_id));
-	cr_assert(vm_space_unmap(process_address_space(process), response_id));
-	cr_assert(vm_space_unmap(process_address_space(process), request_id));
+	cr_assert(address_space_unmap(process_address_space(process), response_mapping));
+	cr_assert(address_space_unmap(process_address_space(process), request_mapping));
+	mapping_release(response_mapping);
+	mapping_release(request_mapping);
 	destroy_current_process(process);
 }

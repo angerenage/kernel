@@ -1,6 +1,7 @@
 #include <base/heap.h>
 #include <base/startup.h>
 #include <base/vmm.h>
+#include <core/address_space.h>
 #include <core/capability.h>
 #include <core/cpu.h>
 #include <core/kthread.h>
@@ -9,7 +10,6 @@
 #include <core/process.h>
 #include <core/sched.h>
 #include <core/uthread.h>
-#include <core/vm_space.h>
 #include <hal/clock.h>
 #include <hal/cpu.h>
 #include <hal/hcf.h>
@@ -219,8 +219,8 @@ static void kernel_init_memory(const struct mem_range* memory_map, size_t range_
 		boot_fail("kernel: pmm_init failed");
 	}
 
-	if (!vm_init()) {
-		boot_fail("kernel: vm_init failed");
+	if (!address_space_init()) {
+		boot_fail("kernel: address_space_init failed");
 	}
 
 	if (!heap_init()) {

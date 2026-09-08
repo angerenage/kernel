@@ -3,6 +3,7 @@
 #include <base/cap.h>
 #include <base/memory.h>
 #include <base/module.h>
+#include <core/address_space.h>
 #include <core/address_transfer.h>
 #include <core/capability.h>
 #include <core/cpu.h>
@@ -13,7 +14,6 @@
 #include <core/syscall.h>
 #include <core/thread.h>
 #include <core/uthread.h>
-#include <core/vm_space.h>
 #include <criterion/criterion.h>
 #include <hal/serial.h>
 #include <kernel/boot.h>
@@ -45,7 +45,8 @@ void kernel_boot_mock_reset(void);
 syscall_result_t kernel_capability_test_call(cap_id_t cap, const void* request, size_t request_size, void* response,
                                              size_t response_capacity);
 
-uintptr_t kernel_capability_test_alloc_user_buffer(struct process* process, size_t page_count, vmm_id_t* out_id);
+uintptr_t kernel_capability_test_alloc_user_buffer(struct process* process, size_t page_count,
+                                                   struct mapping** out_mapping);
 
 void kernel_capability_test_poison_next_pmm_page(uint8_t value);
 

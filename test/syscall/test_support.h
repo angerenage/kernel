@@ -6,6 +6,7 @@
 #include <base/heap.h>
 #include <base/process.h>
 #include <base/syscall.h>
+#include <core/address_space.h>
 #include <core/address_transfer.h>
 #include <core/capability.h>
 #include <core/capability_call.h>
@@ -18,7 +19,6 @@
 #include <core/syscall.h>
 #include <core/thread.h>
 #include <core/uthread.h>
-#include <core/vm_space.h>
 #include <criterion/criterion.h>
 #include <hal/clock.h>
 #include <hal/cpu.h>

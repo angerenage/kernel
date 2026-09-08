@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 struct hal_userspace_return_frame;
+struct mapping;
 struct uthread;
 
 enum {
@@ -62,7 +63,7 @@ enum user_upcall_phase {
 /* State owned by one userspace thread. */
 struct user_upcall_state {
 	struct spinlock              lock;
-	vmm_id_t                     stack_id;
+	struct mapping*              stack_mapping;
 	uintptr_t                    stack_top;
 	struct hal_userspace_context interrupted_context;
 	struct user_upcall_request*  pending;

@@ -19,7 +19,7 @@ Test(kthread, park_blocks_until_another_thread_unparks_the_current_thread) {
 		.preferred_cpu     = NULL,
 		.detached          = false,
 	};
-	struct kthread parker = {.stack_id = VMM_ID_INVALID};
+	struct kthread parker = {.stack_mapping = NULL};
 	struct thread  runner;
 
 	init_bound_bootstrap_cpu();
@@ -57,7 +57,7 @@ Test(kthread, unpark_before_park_leaves_a_single_permit) {
 		.preferred_cpu     = NULL,
 		.detached          = false,
 	};
-	struct kthread worker = {.stack_id = VMM_ID_INVALID};
+	struct kthread worker = {.stack_mapping = NULL};
 
 	init_bound_bootstrap_cpu();
 	cr_assert(sched_init(), "sched_init failed");

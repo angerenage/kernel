@@ -7,7 +7,6 @@ Test(syscall, channel_create_and_destroy_manage_process_owned_state) {
 	struct uthread*       main_thread;
 	struct address_space* space;
 	struct channel*       channel;
-	vmm_id_t              output_id = VMM_ID_INVALID;
 	void*                 output_base;
 	channel_id_t          channel_id = CHANNEL_ID_INVALID;
 	syscall_result_t      result;
@@ -30,7 +29,7 @@ Test(syscall, channel_create_and_destroy_manage_process_owned_state) {
 	cr_assert_eq(result.value, 0u);
 	cr_assert_eq(process->channel_state.count, 0u, "failed copyout must roll back channel ownership");
 
-	cr_assert(test_vm_map(space, 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, &output_id, &output_base),
+	cr_assert(test_vm_map(space, 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, NULL, &output_base),
 	          "failed to allocate channel ID output");
 	result = syscall_dispatch(SYSCALL_CHANNEL_CREATE, (uintptr_t)output_base, 0u, 0u, 0u, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
@@ -67,7 +66,6 @@ Test(syscall, channel_create_optionally_returns_an_activity_signal_capability) {
 	struct address_space* space;
 	struct capability*    activity_grant;
 	struct channel*       channel;
-	vmm_id_t              output_id = VMM_ID_INVALID;
 	void*                 output_base;
 	channel_id_t          channel_id   = CHANNEL_ID_INVALID;
 	cap_id_t              activity_cap = CAP_ID_INVALID;
@@ -85,7 +83,7 @@ Test(syscall, channel_create_optionally_returns_an_activity_signal_capability) {
 	caps_before    = capability_count();
 	signals_before = signal_count();
 
-	cr_assert(test_vm_map(space, 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, &output_id, &output_base));
+	cr_assert(test_vm_map(space, 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, NULL, &output_base));
 	result = syscall_dispatch(
 		SYSCALL_CHANNEL_CREATE, (uintptr_t)output_base, MM_USER_VMM_BASE + MM_USER_VMM_SIZE, 0u, 0u, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);

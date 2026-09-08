@@ -1,10 +1,10 @@
 #ifndef TEST_SCHED_TEST_SUPPORT_H
 #define TEST_SCHED_TEST_SUPPORT_H
 
+#include <core/address_space.h>
 #include <core/cpu.h>
 #include <core/sched.h>
 #include <core/thread.h>
-#include <core/vm_space.h>
 #include <criterion/criterion.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>

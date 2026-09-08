@@ -1,7 +1,7 @@
 #include <base/process.h>
+#include <core/address_space.h>
 #include <core/exception.h>
 #include <core/process.h>
-#include <core/vm_space.h>
 #include <criterion/criterion.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -13,12 +13,12 @@ static size_t          terminate_calls;
 static struct process* terminated_process;
 static uintptr_t       terminated_exit_code;
 
-static bool                  vmm_fault_result;
-static size_t                vmm_fault_calls;
-static uintptr_t             observed_fault_addr;
-static enum vmm_fault_kind   observed_fault_kind;
-static enum vmm_fault_access observed_fault_access;
-static bool                  observed_fault_user_mode;
+static bool                          vmm_fault_result;
+static size_t                        vmm_fault_calls;
+static uintptr_t                     observed_fault_addr;
+static enum address_space_fault_kind observed_fault_kind;
+static mapping_access_t              observed_fault_access;
+static bool                          observed_fault_user_mode;
 
 struct process* process_current(void) {
 	return fake_current_process;
@@ -31,8 +31,8 @@ bool process_terminate(struct process* process, uintptr_t exit_code) {
 	return terminate_result;
 }
 
-bool vm_handle_current_page_fault(uintptr_t addr, enum vmm_fault_kind kind, enum vmm_fault_access access,
-                                  bool user_mode) {
+bool address_space_handle_current_fault(uintptr_t addr, enum address_space_fault_kind kind, mapping_access_t access,
+                                        bool user_mode) {
 	vmm_fault_calls++;
 	observed_fault_addr      = addr;
 	observed_fault_kind      = kind;
@@ -50,38 +50,38 @@ static void exception_test_reset(void) {
 	vmm_fault_result         = true;
 	vmm_fault_calls          = 0u;
 	observed_fault_addr      = 0u;
-	observed_fault_kind      = VMM_FAULT_INVALID;
-	observed_fault_access    = VMM_FAULT_ACCESS_UNKNOWN;
+	observed_fault_kind      = ADDRESS_SPACE_FAULT_INVALID;
+	observed_fault_access    = 0u;
 	observed_fault_user_mode = false;
 }
 
 Test(exception_core, page_faults_preserve_kind_access_address_and_origin) {
 	static const struct {
-		enum core_exception_kind   core_kind;
-		enum core_exception_access core_access;
-		enum vmm_fault_kind        fault_kind;
-		enum vmm_fault_access      vmm_access;
-		bool                       user_mode;
+		enum core_exception_kind      core_kind;
+		enum core_exception_access    core_access;
+		enum address_space_fault_kind fault_kind;
+		mapping_access_t              vmm_access;
+		bool                          user_mode;
 	} cases[] = {
 		{
          .core_kind   = CORE_EXCEPTION_PAGE_FAULT_NOT_PRESENT,
          .core_access = CORE_EXCEPTION_ACCESS_READ,
-         .fault_kind  = VMM_FAULT_NOT_PRESENT,
-         .vmm_access  = VMM_FAULT_ACCESS_READ,
+         .fault_kind  = ADDRESS_SPACE_FAULT_NOT_PRESENT,
+         .vmm_access  = MAPPING_ACCESS_READ,
          .user_mode   = true,
 		 },
 		{
          .core_kind   = CORE_EXCEPTION_PAGE_FAULT_PROTECTION,
          .core_access = CORE_EXCEPTION_ACCESS_WRITE,
-         .fault_kind  = VMM_FAULT_PROTECTION,
-         .vmm_access  = VMM_FAULT_ACCESS_WRITE,
+         .fault_kind  = ADDRESS_SPACE_FAULT_PROTECTION,
+         .vmm_access  = MAPPING_ACCESS_WRITE,
          .user_mode   = true,
 		 },
 		{
          .core_kind   = CORE_EXCEPTION_PAGE_FAULT_INVALID,
          .core_access = CORE_EXCEPTION_ACCESS_EXEC,
-         .fault_kind  = VMM_FAULT_INVALID,
-         .vmm_access  = VMM_FAULT_ACCESS_EXEC,
+         .fault_kind  = ADDRESS_SPACE_FAULT_INVALID,
+         .vmm_access  = MAPPING_ACCESS_EXEC,
          .user_mode   = false,
 		 },
 	};

@@ -1,5 +1,6 @@
 #include <base/time.h>
 #include <base/vmm.h>
+#include <core/address_space.h>
 #include <core/cpu.h>
 #include <core/kthread.h>
 #include <core/lock.h>
@@ -7,7 +8,6 @@
 #include <core/pmm.h>
 #include <core/sched.h>
 #include <core/spinlock.h>
-#include <core/vm_space.h>
 #include <hal/clock.h>
 #include <hal/hcf.h>
 #include <libc/stdlib.h>
@@ -24,25 +24,26 @@ struct kthread_reaper {
 	bool                     starting;
 };
 
-static bool kthread_map_stack(vmm_id_t* out_id, void** out_base) {
-	struct memory* memory;
+static bool kthread_map_stack(struct mapping** out_mapping, void** out_base) {
+	struct memory*  memory;
+	struct mapping* mapping;
 	if (!memory_create_anonymous(KTHREAD_DEFAULT_STACK_PAGES * VMM_PAGE_SIZE, &memory)) return false;
-	bool mapped = vm_space_map(vm_space_kernel(),
-	                           &(const struct vm_map_request){
-								   .memory      = memory,
-								   .page_count  = KTHREAD_DEFAULT_STACK_PAGES,
-								   .align_pages = 1u,
-								   .guard_pages = VMM_STACK_DEFAULT_GUARD_PAGES,
-								   .prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_GLOBAL,
-							   },
-	                           out_id,
-	                           out_base);
+	bool mapped = address_space_map(address_space_kernel(),
+	                                &(const struct address_space_mapping_request){
+										.memory       = memory,
+										.guard_before = VMM_STACK_DEFAULT_GUARD_PAGES * VMM_PAGE_SIZE,
+										.access       = MAPPING_ACCESS_READ | MAPPING_ACCESS_WRITE,
+									},
+	                                &mapping);
 	memory_release(memory);
 	if (!mapped) return false;
-	if (vm_space_prefault(vm_space_kernel(), *out_id, 0u, KTHREAD_DEFAULT_STACK_PAGES)) return true;
-	(void)vm_space_unmap(vm_space_kernel(), *out_id);
-	*out_id   = VMM_ID_INVALID;
-	*out_base = NULL;
+	*out_base    = (void*)mapping_address(mapping);
+	*out_mapping = mapping;
+	if (address_space_prefault(address_space_kernel(), mapping, 0u, mapping_size(mapping))) return true;
+	(void)address_space_unmap(address_space_kernel(), mapping);
+	mapping_release(mapping);
+	*out_mapping = NULL;
+	*out_base    = NULL;
 	return false;
 }
 
@@ -94,9 +95,10 @@ static enum kthread_spawn_result kthread_result_from_thread_result(enum thread_i
 static bool kthread_free(struct kthread* thread) {
 	if (thread == NULL) return true;
 
-	if (thread->stack_id != VMM_ID_INVALID) {
-		if (!vm_space_unmap(vm_space_kernel(), thread->stack_id)) return false;
-		thread->stack_id = VMM_ID_INVALID;
+	if (thread->stack_mapping != NULL) {
+		if (!address_space_unmap(address_space_kernel(), thread->stack_mapping)) return false;
+		mapping_release(thread->stack_mapping);
+		thread->stack_mapping = NULL;
 	}
 	free(thread);
 	return true;
@@ -218,11 +220,11 @@ static enum kthread_spawn_result kthread_spawn_internal(struct kthread** out_thr
 	if (thread == NULL) return KTHREAD_SPAWN_NO_MEMORY;
 
 	*thread = (struct kthread){
-		.stack_id    = VMM_ID_INVALID,
-		.stack_pages = KTHREAD_DEFAULT_STACK_PAGES,
+		.stack_mapping = NULL,
+		.stack_pages   = KTHREAD_DEFAULT_STACK_PAGES,
 	};
 
-	if (!kthread_map_stack(&thread->stack_id, &stack_base)) {
+	if (!kthread_map_stack(&thread->stack_mapping, &stack_base)) {
 		if (!kthread_free(thread)) hcf();
 		return KTHREAD_SPAWN_STACK_ALLOC_FAILED;
 	}

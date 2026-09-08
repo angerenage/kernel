@@ -66,7 +66,7 @@ bool memory_can_transfer(const struct memory* memory);
 bool memory_cpu_accessible(const struct memory* memory);
 
 /* Return whether a Memory-relative range and its backing offset satisfy an alignment. */
-bool memory_range_is_aligned(const struct memory* memory, size_t offset, size_t size, size_t alignment);
+bool memory_range_is_backing_aligned(const struct memory* memory, size_t offset, size_t size, size_t alignment);
 
 /* Describe the present physical run or sparse hole beginning at an offset. */
 bool memory_query(struct memory* memory, size_t offset, size_t maximum_size, struct memory_span* out_span);

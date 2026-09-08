@@ -2,6 +2,7 @@
 
 #include <base/cap.h>
 #include <base/channel.h>
+#include <core/address_space.h>
 #include <core/address_transfer.h>
 #include <core/capability.h>
 #include <core/capability_call.h>
@@ -11,7 +12,6 @@
 #include <core/sched.h>
 #include <core/syscall.h>
 #include <core/thread.h>
-#include <core/vm_space.h>
 #include <libc/stdlib.h>
 #include <stdbool.h>
 #include <stddef.h>

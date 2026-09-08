@@ -35,11 +35,12 @@ The HAL is the main contract between reusable kernel code and platform code. Pub
 
 Physical memory starts with the bootloader memory map. `pmm_init()` records the direct-map offset, reserves allocator metadata from usable memory, and manages byte-sized contiguous extents at the granularity reported by `pmm_info()`.
 
-Virtual memory has three ownership layers:
+Virtual memory has four ownership layers:
 
 - Memory in `include/core/memory.h` owns byte-sized logical contents, slices, and sparse or fixed physical backing.
-- Address Spaces in `include/core/vm_space.h` keep a sorted dense vector of object mappings, place virtual ranges, enforce protections, and resolve demand faults.
-- The paging HAL owns the architecture page tables and is the sole source of hardware-PTE presence.
+- Mapping in `include/core/mapping.h` is one stable, reference-counted projection of a complete Memory.
+- AddressSpace in `include/core/address_space.h` owns a balanced reservation registry, virtual placement, protections, and demand faults.
+- The paging HAL owns the architecture page tables, hardware translations, and leaf-size selection.
 
 The kernel has a global managed virtual window at `MM_KERNEL_VMM_BASE` with size `MM_KERNEL_VMM_SIZE`. User processes receive separate address spaces over `MM_USER_VMM_BASE` and `MM_USER_VMM_SIZE`, with a null guard at the bottom. New hardware user address spaces inherit the kernel mappings required to enter and leave kernel mode.
 

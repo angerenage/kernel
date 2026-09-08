@@ -184,7 +184,7 @@ Test(process, acquired_reference_defers_final_teardown) {
 	cr_assert(process_destroy(process));
 	cr_assert_null(process_lookup(pid), "destroy must prevent new acquisitions before teardown");
 	cr_assert_eq(process_pid(retained), pid, "an acquired process must retain its identity");
-	cr_assert(vm_space_is_initialized(process_address_space(retained)),
+	cr_assert(address_space_is_initialized(process_address_space(retained)),
 	          "an acquired process must retain its address space");
 	cr_assert_lt(heap_free_bytes(), baseline, "retained process storage must remain allocated");
 

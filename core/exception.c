@@ -1,7 +1,7 @@
 #include <base/process.h>
+#include <core/address_space.h>
 #include <core/exception.h>
 #include <core/process.h>
-#include <core/vm_space.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -74,29 +74,29 @@ bool core_handle_user_exception(enum core_exception_kind kind) {
 	return process_terminate(process, exit_code);
 }
 
-static enum vmm_fault_kind core_exception_to_vm_fault_kind(enum core_exception_kind kind) {
+static enum address_space_fault_kind core_exception_to_address_space_fault_kind(enum core_exception_kind kind) {
 	switch (kind) {
 	case CORE_EXCEPTION_PAGE_FAULT_NOT_PRESENT:
-		return VMM_FAULT_NOT_PRESENT;
+		return ADDRESS_SPACE_FAULT_NOT_PRESENT;
 	case CORE_EXCEPTION_PAGE_FAULT_PROTECTION:
-		return VMM_FAULT_PROTECTION;
+		return ADDRESS_SPACE_FAULT_PROTECTION;
 	case CORE_EXCEPTION_PAGE_FAULT_INVALID:
 	default:
-		return VMM_FAULT_INVALID;
+		return ADDRESS_SPACE_FAULT_INVALID;
 	}
 }
 
-static enum vmm_fault_access core_exception_to_vmm_access(enum core_exception_access access) {
+static mapping_access_t core_exception_to_mapping_access(enum core_exception_access access) {
 	switch (access) {
 	case CORE_EXCEPTION_ACCESS_READ:
-		return VMM_FAULT_ACCESS_READ;
+		return MAPPING_ACCESS_READ;
 	case CORE_EXCEPTION_ACCESS_WRITE:
-		return VMM_FAULT_ACCESS_WRITE;
+		return MAPPING_ACCESS_WRITE;
 	case CORE_EXCEPTION_ACCESS_EXEC:
-		return VMM_FAULT_ACCESS_EXEC;
+		return MAPPING_ACCESS_EXEC;
 	case CORE_EXCEPTION_ACCESS_UNKNOWN:
 	default:
-		return VMM_FAULT_ACCESS_UNKNOWN;
+		return 0u;
 	}
 }
 
@@ -106,8 +106,10 @@ bool core_handle_exception(enum core_exception_kind kind, enum core_exception_ac
 	case CORE_EXCEPTION_PAGE_FAULT_NOT_PRESENT:
 	case CORE_EXCEPTION_PAGE_FAULT_PROTECTION:
 	case CORE_EXCEPTION_PAGE_FAULT_INVALID:
-		return vm_handle_current_page_fault(
-			addr, core_exception_to_vm_fault_kind(kind), core_exception_to_vmm_access(access), user_mode);
+		return address_space_handle_current_fault(addr,
+		                                          core_exception_to_address_space_fault_kind(kind),
+		                                          core_exception_to_mapping_access(access),
+		                                          user_mode);
 	default:
 		if (!user_mode) return false;
 		return core_handle_user_exception(kind);

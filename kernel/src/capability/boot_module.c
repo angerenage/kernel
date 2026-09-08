@@ -5,13 +5,13 @@
 #include <base/module.h>
 #include <base/syscall.h>
 #include <base/vmm.h>
+#include <core/address_space.h>
 #include <core/capability.h>
 #include <core/memory.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/process.h>
 #include <core/spinlock.h>
-#include <core/vm_space.h>
 #include <kernel/boot.h>
 #include <kernel/capability.h>
 #include <libc/stdlib.h>
@@ -99,9 +99,8 @@ static syscall_result_t boot_module_map_handler(const struct cap_request* req, s
 	struct module_map_response        response = {0};
 	struct process*                   caller;
 	struct address_space*             space;
-	struct vmm_info                   mapping_info = {0};
-	vmm_id_t                          mapping_id   = VMM_ID_INVALID;
-	struct memory*                    memory       = NULL;
+	struct mapping*                   mapping = NULL;
+	struct memory*                    memory  = NULL;
 	syscall_result_t                  result;
 
 	if (req->request_size < sizeof(struct module_map_request) || !cap_kernel_response_fits(req, sizeof(response))) {
@@ -130,31 +129,33 @@ static syscall_result_t boot_module_map_handler(const struct cap_request* req, s
 			memory = boot_module_memories[module_index];
 		spinlock_unlock_irqrestore(&boot_module_memory_lock, state);
 	}
-	if (memory == NULL ||
-	    !vm_space_map(space,
-	                  &(const struct vm_map_request){
-						  .memory = memory, .page_count = layout.page_count, .align_pages = 1u, .prot = VMM_PROT_READ},
-	                  &mapping_id,
-	                  NULL)) {
+	if (memory == NULL || !address_space_map(space,
+	                                         &(const struct address_space_mapping_request){
+												 .memory = memory,
+												 .access = MAPPING_ACCESS_READ,
+											 },
+	                                         &mapping)) {
 		memory_release(memory);
 		process_release(caller);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 	memory_release(memory);
-	if (!vm_space_query_id(space, mapping_id, &mapping_info)) {
-		(void)vm_space_unmap(space, mapping_id);
-		process_release(caller);
-		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
-	}
-	mapping_info.id      = VMM_ID_INVALID;
-	response.mapping_cap = kernel_mapping_grant(caller, req->caller, mapping_id, CAP_DESTROY);
-	response.mapping     = mapping_info;
+	response.mapping_cap = kernel_mapping_grant(caller, req->caller, mapping, 0u, CAP_DESTROY);
+	response.mapping     = (struct vmm_info){
+			.id          = VMM_ID_INVALID,
+			.base        = (void*)mapping_address(mapping),
+			.page_count  = mapping_size(mapping) / VMM_PAGE_SIZE,
+			.prot        = VMM_PROT_READ,
+			.memory_type = mapping_memory_type(mapping),
+    };
 	response.data_offset = layout.page_offset;
 	if (response.mapping_cap == CAP_ID_INVALID) {
-		(void)vm_space_unmap(space, mapping_id);
+		(void)address_space_unmap(space, mapping);
+		mapping_release(mapping);
 		process_release(caller);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
+	mapping_release(mapping);
 	result = cap_kernel_write_response(req, &response, sizeof(response));
 	if (result.status != SYSCALL_STATUS_OK) {
 		(void)kernel_mapping_discard_unpublished(response.mapping_cap, req->caller);

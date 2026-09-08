@@ -1,6 +1,6 @@
 #pragma once
 
-#include <base/vmm.h>
+#include <core/mapping.h>
 #include <core/thread.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -22,7 +22,7 @@ enum kthread_spawn_result {
 
 struct kthread {
 	struct thread   thread;
-	vmm_id_t        stack_id;
+	struct mapping* stack_mapping;
 	size_t          stack_pages;
 	struct kthread* reaper_next;
 };

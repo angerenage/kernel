@@ -98,9 +98,9 @@ bool uthread_upcall_state_init(struct uthread* thread) {
 	                    "uthread_upcall",
 	                    SPINLOCK_ORDER_USER_UPCALL,
 	                    SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
-	state->stack_id    = VMM_ID_INVALID;
-	state->phase       = USER_UPCALL_PHASE_IDLE;
-	state->initialized = true;
+	state->stack_mapping = NULL;
+	state->phase         = USER_UPCALL_PHASE_IDLE;
+	state->initialized   = true;
 	return true;
 }
 
@@ -115,7 +115,7 @@ void uthread_upcall_state_deinit(struct uthread* thread) {
 
 	irq_state               = spinlock_lock_irqsave(&state->lock);
 	pending                 = state->pending;
-	state->stack_id         = VMM_ID_INVALID;
+	state->stack_mapping    = NULL;
 	state->stack_top        = 0u;
 	state->active_origin    = USER_UPCALL_ORIGIN_NONE;
 	state->active_origin_id = 0u;
@@ -434,7 +434,7 @@ enum user_upcall_result uthread_upcall_deliver(struct uthread* thread, struct ha
 		spinlock_unlock_irqrestore(&state->lock, irq_state);
 		return USER_UPCALL_IDLE;
 	}
-	if (state->stack_id == VMM_ID_INVALID || state->stack_top == 0u) {
+	if (state->stack_mapping == NULL || state->stack_top == 0u) {
 		spinlock_unlock_irqrestore(&state->lock, irq_state);
 		return USER_UPCALL_CONTEXT_INVALID;
 	}

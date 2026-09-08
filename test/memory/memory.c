@@ -90,11 +90,11 @@ Test(memory, range_alignment_uses_the_absolute_backing_offset) {
 	cr_assert(memory_create_anonymous(3u * granule, &root));
 	cr_assert(memory_slice(root, 1u, granule, &unaligned));
 	cr_assert(memory_slice(root, granule, granule, &aligned));
-	cr_assert_not(memory_range_is_aligned(unaligned, 0u, granule, granule));
-	cr_assert(memory_range_is_aligned(aligned, 0u, granule, granule));
-	cr_assert_not(memory_range_is_aligned(aligned, 0u, granule - 1u, granule));
-	cr_assert_not(memory_range_is_aligned(aligned, 0u, granule, 0u));
-	cr_assert_not(memory_range_is_aligned(aligned, 0u, granule, granule - 1u));
+	cr_assert_not(memory_range_is_backing_aligned(unaligned, 0u, granule, granule));
+	cr_assert(memory_range_is_backing_aligned(aligned, 0u, granule, granule));
+	cr_assert_not(memory_range_is_backing_aligned(aligned, 0u, granule - 1u, granule));
+	cr_assert_not(memory_range_is_backing_aligned(aligned, 0u, granule, 0u));
+	cr_assert_not(memory_range_is_backing_aligned(aligned, 0u, granule, granule - 1u));
 	memory_release(unaligned);
 	memory_release(aligned);
 	memory_release(root);

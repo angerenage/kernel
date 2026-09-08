@@ -10,8 +10,8 @@ Test(kthread, join_detach_and_cancel_validate_inputs) {
 		.preferred_cpu     = NULL,
 		.detached          = false,
 	};
-	struct kthread worker      = {.stack_id = VMM_ID_INVALID};
-	struct kthread idle_target = {.stack_id = VMM_ID_INVALID};
+	struct kthread worker      = {.stack_mapping = NULL};
+	struct kthread idle_target = {.stack_mapping = NULL};
 
 	init_bound_bootstrap_cpu();
 	cr_assert(sched_init(), "sched_init failed");

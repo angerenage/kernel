@@ -22,29 +22,34 @@ struct mock_mapping {
 	bool                           present;
 };
 
-static struct mock_mapping          mappings[MOCK_PAGING_MAX_MAPPINGS];
-static struct hal_paging_space      spaces[MOCK_PAGING_MAX_SPACES];
-static struct hal_paging_space      kernel_space    = {1u, true};
-static const struct hal_paging_info paging_info     = {VMM_PAGE_SIZE, 1ull << 12};
-static size_t                       fail_after_maps = (size_t)-1;
-static size_t                       fail_map_budget = (size_t)-1;
-static size_t                       successful_maps;
-static bool                         initialized;
-static bool                         fail_init_once;
-static bool                         fail_next_unmap;
-static uintptr_t                    next_space_id = 2u;
+static struct mock_mapping     mappings[MOCK_PAGING_MAX_MAPPINGS];
+static struct hal_paging_space spaces[MOCK_PAGING_MAX_SPACES];
+static struct hal_paging_space kernel_space    = {1u, true};
+static struct hal_paging_info  paging_info     = {VMM_PAGE_SIZE, 1ull << 12};
+static size_t                  fail_after_maps = (size_t)-1;
+static size_t                  fail_map_budget = (size_t)-1;
+static size_t                  successful_maps;
+static size_t                  map_calls;
+static size_t                  largest_map_size;
+static bool                    initialized;
+static bool                    fail_init_once;
+static bool                    fail_next_unmap;
+static uintptr_t               next_space_id = 2u;
 
 void mock_paging_reset(void) {
 	memset(mappings, 0, sizeof(mappings));
 	memset(spaces, 0, sizeof(spaces));
-	fail_after_maps = (size_t)-1;
-	fail_map_budget = (size_t)-1;
-	successful_maps = 0u;
-	initialized     = false;
-	fail_init_once  = false;
-	fail_next_unmap = false;
-	kernel_space    = (struct hal_paging_space){1u, true};
-	next_space_id   = 2u;
+	fail_after_maps            = (size_t)-1;
+	fail_map_budget            = (size_t)-1;
+	successful_maps            = 0u;
+	map_calls                  = 0u;
+	largest_map_size           = 0u;
+	paging_info.leaf_size_mask = 1ull << 12;
+	initialized                = false;
+	fail_init_once             = false;
+	fail_next_unmap            = false;
+	kernel_space               = (struct hal_paging_space){1u, true};
+	next_space_id              = 2u;
 }
 
 void mock_paging_fail_init_once(void) {
@@ -67,6 +72,18 @@ size_t mock_paging_mapping_count(void) {
 	for (size_t i = 0u; i < MOCK_PAGING_MAX_MAPPINGS; i++)
 		if (mappings[i].present) count++;
 	return count;
+}
+
+void mock_paging_set_leaf_size_mask(uint64_t mask) {
+	paging_info.leaf_size_mask = mask;
+}
+
+size_t mock_paging_map_call_count(void) {
+	return map_calls;
+}
+
+size_t mock_paging_largest_map_size(void) {
+	return largest_map_size;
 }
 
 static struct mock_mapping* find_mapping(const struct hal_paging_space* space, uintptr_t virt) {
@@ -138,6 +155,8 @@ bool hal_paging_map(struct hal_paging_space* space, const struct hal_paging_map_
 	    request->size > UINTPTR_MAX - request->physical_address)
 		return false;
 	size_t pages = request->size / VMM_PAGE_SIZE;
+	map_calls++;
+	if (request->size > largest_map_size) largest_map_size = request->size;
 	if (mock_map_should_fail(pages)) return false;
 	if (MOCK_PAGING_MAX_MAPPINGS - mock_paging_mapping_count() < pages) return false;
 	for (size_t offset = 0u; offset < request->size; offset += VMM_PAGE_SIZE)

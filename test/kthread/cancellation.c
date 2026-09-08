@@ -10,7 +10,7 @@ Test(kthread, canceled_running_thread_exits_with_cancel_code_at_cancellation_poi
 		.preferred_cpu     = NULL,
 		.detached          = false,
 	};
-	struct kthread worker = {.stack_id = VMM_ID_INVALID};
+	struct kthread worker = {.stack_mapping = NULL};
 
 	init_bound_bootstrap_cpu();
 	cr_assert(sched_init(), "sched_init failed");
@@ -48,7 +48,7 @@ Test(kthread, cancel_wakes_sleeping_thread_so_it_can_reach_a_cancellation_point)
 		.preferred_cpu     = NULL,
 		.detached          = false,
 	};
-	struct kthread sleeper = {.stack_id = VMM_ID_INVALID};
+	struct kthread sleeper = {.stack_mapping = NULL};
 
 	init_bound_bootstrap_cpu();
 	cr_assert(sched_init(), "sched_init failed");

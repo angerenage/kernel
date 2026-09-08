@@ -1,53 +1,53 @@
 #include <base/vmm.h>
+#include <core/address_space.h>
 #include <core/memory.h>
 #include <core/pmm.h>
-#include <core/vm_space.h>
 #include <hal/paging.h>
 
 #include "../selftest.h"
 
 static void kernel_selftest_vmm_demand_maps_and_releases(struct kernel_selftest_context* ctx) {
-	struct memory*                memory = NULL;
-	vmm_id_t                      id     = VMM_ID_INVALID;
-	void*                         base   = NULL;
-	struct vmm_info               info;
+	struct memory*                memory  = NULL;
+	struct mapping*               mapping = NULL;
+	uintptr_t                     base    = 0u;
 	struct hal_paging_translation translation;
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
 		ctx, memory_create_anonymous(2u * VMM_PAGE_SIZE, &memory), "Memory create failed", cleanup);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
-	                                vm_space_map(vm_space_kernel(),
-	                                             &(const struct vm_map_request){
-													 .memory      = memory,
-													 .page_count  = 2u,
-													 .align_pages = 2u,
-													 .guard_pages = 1u,
-													 .prot        = VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_GLOBAL,
-												 },
-	                                             &id,
-	                                             &base),
+	                                address_space_map(address_space_kernel(),
+	                                                  &(const struct address_space_mapping_request){
+														  .memory       = memory,
+														  .alignment    = 2u * VMM_PAGE_SIZE,
+														  .guard_before = VMM_PAGE_SIZE,
+														  .access       = MAPPING_ACCESS_READ | MAPPING_ACCESS_WRITE,
+													  },
+	                                                  &mapping),
 	                                "mapping create failed",
 	                                cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, base != NULL && id != VMM_ID_INVALID, cleanup);
+	base = mapping_address(mapping);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, base != 0u, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !hal_paging_query(address_space_hal(address_space_kernel()), base, NULL), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(
-		ctx, !hal_paging_query(vm_space_hal(vm_space_kernel()), (uintptr_t)base, NULL), cleanup);
+		ctx, !address_space_resolve_fault(address_space_kernel(), base - VMM_PAGE_SIZE, MAPPING_ACCESS_READ), cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+	                                address_space_resolve_fault(address_space_kernel(), base, MAPPING_ACCESS_WRITE),
+	                                "fault resolution failed",
+	                                cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(
-		ctx, !vm_space_query(vm_space_kernel(), (uintptr_t)base - VMM_PAGE_SIZE, &info), cleanup);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx,
-		vm_space_resolve_page_fault(vm_space_kernel(), (uintptr_t)base, VMM_FAULT_ACCESS_WRITE),
-		"fault resolution failed",
-		cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(
-		ctx, hal_paging_query(vm_space_hal(vm_space_kernel()), (uintptr_t)base, &translation), cleanup);
+		ctx, hal_paging_query(address_space_hal(address_space_kernel()), base, &translation), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, (translation.flags & HAL_PAGE_WRITE) != 0u, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, vm_space_protect(vm_space_kernel(), id, VMM_PROT_READ | VMM_PROT_GLOBAL), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(
-		ctx, hal_paging_query(vm_space_hal(vm_space_kernel()), (uintptr_t)base, &translation), cleanup);
+		ctx, address_space_protect(address_space_kernel(), mapping, MAPPING_ACCESS_READ), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(
+		ctx, hal_paging_query(address_space_hal(address_space_kernel()), base, &translation), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, (translation.flags & HAL_PAGE_WRITE) == 0u, cleanup);
 
 cleanup:
-	if (id != VMM_ID_INVALID) (void)vm_space_unmap(vm_space_kernel(), id);
+	if (mapping != NULL) {
+		(void)address_space_unmap(address_space_kernel(), mapping);
+		mapping_release(mapping);
+	}
 	memory_release(memory);
 }
 

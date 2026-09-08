@@ -215,26 +215,25 @@ Test(syscall_validation, failed_self_copyout_preserves_preexisting_grants) {
 	destroy_current_process(process);
 }
 
-static uintptr_t allocate_self_info_output(struct process* process, vmm_id_t* out_id) {
+static uintptr_t allocate_self_info_output(struct process* process, struct mapping** out_mapping) {
 	void* base = NULL;
 
-	*out_id = VMM_ID_INVALID;
-	cr_assert(
-		test_vm_map(process_address_space(process), 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, out_id, &base));
+	cr_assert(test_vm_map(
+		process_address_space(process), 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, out_mapping, &base));
 	cr_assert_not_null(base);
 	return (uintptr_t)base;
 }
 
 Test(syscall_validation, failed_address_space_grant_rolls_back_new_self_grant) {
 	struct process*  process;
-	vmm_id_t         output_id = VMM_ID_INVALID;
+	struct mapping*  output_mapping = NULL;
 	uintptr_t        output;
 	size_t           caps_before;
 	size_t           objects_before;
 	syscall_result_t result;
 
 	process         = make_current_process("syscall/self-address-grant-failure");
-	output          = allocate_self_info_output(process, &output_id);
+	output          = allocate_self_info_output(process, &output_mapping);
 	caps_before     = capability_count();
 	objects_before  = capability_object_count();
 	grant_fail_slot = GRANT_ADDRESS_SPACE;
@@ -249,20 +248,21 @@ Test(syscall_validation, failed_address_space_grant_rolls_back_new_self_grant) {
 	             "failed address-space grant left the earlier self routing object hidden from userspace");
 
 	grant_fail_slot = GRANT_SLOT_COUNT;
-	cr_assert(vm_space_unmap(process_address_space(process), output_id));
+	cr_assert(address_space_unmap(process_address_space(process), output_mapping));
+	mapping_release(output_mapping);
 	destroy_current_process(process);
 }
 
 Test(syscall_validation, failed_thread_grant_rolls_back_all_new_preceding_grants) {
 	struct process*  process;
-	vmm_id_t         output_id = VMM_ID_INVALID;
+	struct mapping*  output_mapping = NULL;
 	uintptr_t        output;
 	size_t           caps_before;
 	size_t           objects_before;
 	syscall_result_t result;
 
 	process         = make_current_process("syscall/self-thread-grant-failure");
-	output          = allocate_self_info_output(process, &output_id);
+	output          = allocate_self_info_output(process, &output_mapping);
 	caps_before     = capability_count();
 	objects_before  = capability_object_count();
 	grant_fail_slot = GRANT_MAIN_THREAD;
@@ -277,13 +277,14 @@ Test(syscall_validation, failed_thread_grant_rolls_back_all_new_preceding_grants
 	             "failed thread grant left earlier routing objects hidden from userspace");
 
 	grant_fail_slot = GRANT_SLOT_COUNT;
-	cr_assert(vm_space_unmap(process_address_space(process), output_id));
+	cr_assert(address_space_unmap(process_address_space(process), output_mapping));
+	mapping_release(output_mapping);
 	destroy_current_process(process);
 }
 
 Test(syscall_validation, grant_failure_rollback_preserves_preexisting_self_grant) {
 	struct process*    process;
-	vmm_id_t           output_id = VMM_ID_INVALID;
+	struct mapping*    output_mapping = NULL;
 	uintptr_t          output;
 	cap_id_t           existing_self;
 	struct capability* retained;
@@ -292,7 +293,7 @@ Test(syscall_validation, grant_failure_rollback_preserves_preexisting_self_grant
 	syscall_result_t   result;
 
 	process       = make_current_process("syscall/self-existing-grant-failure");
-	output        = allocate_self_info_output(process, &output_id);
+	output        = allocate_self_info_output(process, &output_mapping);
 	existing_self = kernel_self_grant(process);
 	cr_assert_neq(existing_self, CAP_ID_INVALID);
 	caps_before     = capability_count();
@@ -308,6 +309,7 @@ Test(syscall_validation, grant_failure_rollback_preserves_preexisting_self_grant
 	cap_release(retained);
 
 	grant_fail_slot = GRANT_SLOT_COUNT;
-	cr_assert(vm_space_unmap(process_address_space(process), output_id));
+	cr_assert(address_space_unmap(process_address_space(process), output_mapping));
+	mapping_release(output_mapping);
 	destroy_current_process(process);
 }
