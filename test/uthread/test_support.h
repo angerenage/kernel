@@ -16,9 +16,9 @@
 #include <hal/interrupts.h>
 #include <hal/userspace.h>
 
+#include "../address_space/test_support.h"
 #include "../mocks/hal/cpu_mock.h"
 #include "../mocks/hal/userspace_mock.h"
-#include "../vmm/test_support.h"
 
 void            init_uthread_test_environment(void);
 struct process* spawn_owner_process(const char* name);

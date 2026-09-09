@@ -4,16 +4,29 @@
 #include <core/address_space.h>
 #include <core/capability.h>
 #include <core/process.h>
+#include <core/spinlock.h>
 #include <core/syscall.h>
 #include <kernel/capability.h>
 #include <stdlib.h>
 #include <string.h>
 
 struct mapping_state {
-	process_id_t    space_owner;
-	struct mapping* mapping;
-	memory_access_t maximum_access;
+	process_id_t          space_owner;
+	struct mapping*       mapping;
+	memory_access_t       maximum_access;
+	struct mapping_state* next;
 };
+
+#define MEMORY_CAP_RIGHTS                                                                                              \
+	((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE | CAP_EXEC | CAP_MAP | CAP_DERIVE | CAP_DELEGATE))
+#define MAPPING_CAP_RIGHTS                                                                                             \
+	((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE | CAP_EXEC | CAP_MAP | CAP_DESTROY | CAP_DELEGATE |                \
+	                CAP_DELEGATE_PEER))
+#define MAPPING_RESOURCE_BUCKET_COUNT 64u
+
+static struct spinlock mapping_resource_lock =
+	SPINLOCK_INIT_CLASS("mapping_resources", SPINLOCK_ORDER_CAPABILITY, SPINLOCK_FLAG_IRQSAVE);
+static struct mapping_state* mapping_resources[MAPPING_RESOURCE_BUCKET_COUNT];
 
 static syscall_result_t memory_handler(const struct cap_request* req);
 static syscall_result_t mapping_handler(const struct cap_request* req);
@@ -51,7 +64,7 @@ static cap_id_t memory_publish(struct memory* memory, process_id_t recipient, ca
 	cap_id_t        cap;
 	bool            created = false;
 	if (memory == NULL) return CAP_ID_INVALID;
-	if (recipient == PROCESS_PID_INVALID || (rights & CAP_CALL) == 0u) {
+	if (recipient == PROCESS_PID_INVALID || (rights & CAP_CALL) == 0u || (rights & ~MEMORY_CAP_RIGHTS) != 0u) {
 		memory_release(memory);
 		return CAP_ID_INVALID;
 	}
@@ -156,9 +169,34 @@ static bool mapping_unmap_state(const struct mapping_state* state) {
 	return result;
 }
 
+static bool mapping_resource_register(struct mapping_state* state) {
+	size_t           bucket = ((uintptr_t)state->mapping >> 4u) % MAPPING_RESOURCE_BUCKET_COUNT;
+	struct irq_state irq    = spinlock_lock_irqsave(&mapping_resource_lock);
+	for (const struct mapping_state* current = mapping_resources[bucket]; current != NULL; current = current->next) {
+		if (current->mapping == state->mapping) {
+			spinlock_unlock_irqrestore(&mapping_resource_lock, irq);
+			return false;
+		}
+	}
+	state->next               = mapping_resources[bucket];
+	mapping_resources[bucket] = state;
+	spinlock_unlock_irqrestore(&mapping_resource_lock, irq);
+	return true;
+}
+
+static void mapping_resource_unregister(struct mapping_state* state) {
+	size_t                 bucket = ((uintptr_t)state->mapping >> 4u) % MAPPING_RESOURCE_BUCKET_COUNT;
+	struct irq_state       irq    = spinlock_lock_irqsave(&mapping_resource_lock);
+	struct mapping_state** link   = &mapping_resources[bucket];
+	while (*link != NULL && *link != state) link = &(*link)->next;
+	if (*link == state) *link = state->next;
+	spinlock_unlock_irqrestore(&mapping_resource_lock, irq);
+}
+
 static void mapping_destroy(uint64_t object_id) {
 	struct mapping_state* state = (struct mapping_state*)(uintptr_t)object_id;
 	if (state == NULL) return;
+	mapping_resource_unregister(state);
 	(void)mapping_unmap_state(state);
 	mapping_release(state->mapping);
 	free(state);
@@ -175,12 +213,14 @@ static bool mapping_process_cleanup(uint64_t object_id, process_id_t process) {
 	return state != NULL && state->space_owner == process;
 }
 
-static cap_id_t mapping_publish(process_id_t recipient, process_id_t owner, struct mapping* mapping,
-                                cap_rights_t rights, memory_access_t maximum_access) {
+static cap_id_t mapping_publish_unique(process_id_t recipient, process_id_t owner, struct mapping* mapping,
+                                       cap_rights_t rights, memory_access_t maximum_access) {
 	struct mapping_state* state;
 	cap_object_id_t       object_id;
 	cap_id_t              cap;
-	if (recipient == PROCESS_PID_INVALID || owner == PROCESS_PID_INVALID || mapping == NULL) return CAP_ID_INVALID;
+	if (recipient == PROCESS_PID_INVALID || owner == PROCESS_PID_INVALID || mapping == NULL ||
+	    (rights & CAP_CALL) == 0u || (rights & ~MAPPING_CAP_RIGHTS) != 0u || !access_valid(maximum_access))
+		return CAP_ID_INVALID;
 	state = malloc(sizeof(*state));
 	if (state == NULL || !mapping_retain(mapping)) {
 		free(state);
@@ -191,9 +231,15 @@ static cap_id_t mapping_publish(process_id_t recipient, process_id_t owner, stru
 		.mapping        = mapping,
 		.maximum_access = maximum_access,
 	};
+	if (!mapping_resource_register(state)) {
+		mapping_release(mapping);
+		free(state);
+		return CAP_ID_INVALID;
+	}
 	object_id = cap_object_create_kernel_lifecycle(
 		(uint64_t)(uintptr_t)state, mapping_handler, mapping_process_cleanup, mapping_destroy, mapping_event, NULL);
 	if (object_id == CAP_OBJECT_ID_INVALID) {
+		mapping_resource_unregister(state);
 		mapping_release(mapping);
 		free(state);
 		return CAP_ID_INVALID;
@@ -203,8 +249,8 @@ static cap_id_t mapping_publish(process_id_t recipient, process_id_t owner, stru
 	return cap;
 }
 
-cap_id_t kernel_mapping_grant(struct process* target, process_id_t recipient, struct mapping* mapping,
-                              cap_rights_t rights, memory_access_t maximum_access) {
+cap_id_t kernel_mapping_publish(struct process* target, process_id_t recipient, struct mapping* mapping,
+                                cap_rights_t rights, memory_access_t maximum_access) {
 	struct process* retained;
 	if (target == NULL || recipient == PROCESS_PID_INVALID || mapping == NULL) return CAP_ID_INVALID;
 	retained = process_acquire(process_pid(target));
@@ -213,7 +259,7 @@ cap_id_t kernel_mapping_grant(struct process* target, process_id_t recipient, st
 		process_release(retained);
 		return CAP_ID_INVALID;
 	}
-	cap_id_t cap = mapping_publish(recipient, process_pid(retained), mapping, rights, maximum_access);
+	cap_id_t cap = mapping_publish_unique(recipient, process_pid(retained), mapping, rights, maximum_access);
 	process_release(retained);
 	return cap;
 }

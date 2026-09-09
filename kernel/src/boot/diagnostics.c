@@ -103,7 +103,7 @@ void kernel_boot_diagnostics_memory_summary(void) {
 	       pmm_total_size(),
 	       heap_free_bytes(),
 	       heap_total_bytes(),
-	       MM_KERNEL_VMM_SIZE / address_space_minimum_mapping_size());
+	       MM_KERNEL_ADDRESS_SPACE_SIZE / address_space_minimum_mapping_size());
 }
 
 void kernel_boot_diagnostics_modules(void) {

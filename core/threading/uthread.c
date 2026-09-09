@@ -42,14 +42,14 @@ static bool uthread_map_stack(struct address_space* space, size_t requested_size
 	struct mapping* mapping;
 	size_t          granule = address_space_minimum_mapping_size();
 	size_t          size, guard;
-	if (granule == 0u || !align_up_size(requested_size, granule, &size) || !align_up_size(4096u, granule, &guard) ||
-	    !memory_create_anonymous(size, &memory))
+	if (granule == 0u || !align_up_size(requested_size, granule, &size) || !memory_create_anonymous(size, &memory))
 		return false;
+	guard       = granule;
 	bool mapped = address_space_map(space,
 	                                &(const struct address_space_mapping_request){
 										.memory       = memory,
 										.guard_before = guard,
-										.access       = MAPPING_ACCESS_READ | MAPPING_ACCESS_WRITE,
+										.access       = MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
 									},
 	                                &mapping);
 	memory_release(memory);

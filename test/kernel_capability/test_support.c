@@ -89,21 +89,20 @@ syscall_result_t kernel_capability_test_call(cap_id_t cap, const void* request, 
 	                        0u);
 }
 
-uintptr_t kernel_capability_test_alloc_user_buffer(struct process* process, size_t page_count,
-                                                   struct mapping** out_mapping) {
+uintptr_t kernel_capability_test_alloc_user_buffer(struct process* process, size_t size, struct mapping** out_mapping) {
 	void* base = NULL;
 
 	cr_assert_not_null(process);
 	cr_assert_not_null(out_mapping);
 	*out_mapping = NULL;
-	cr_assert(test_vm_map(process_address_space(process),
-	                      page_count,
-	                      MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
-	                      0u,
-	                      1u,
-	                      0u,
-	                      out_mapping,
-	                      &base));
+	cr_assert(test_address_space_map(process_address_space(process),
+	                                 size,
+	                                 MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+	                                 0u,
+	                                 TEST_MAPPING_GRANULE,
+	                                 0u,
+	                                 out_mapping,
+	                                 &base));
 	cr_assert_not_null(base);
 	return (uintptr_t)base;
 }

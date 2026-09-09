@@ -12,12 +12,12 @@ struct mapping;
 
 /* Parameters for projecting one complete Memory into an AddressSpace. */
 struct address_space_mapping_request {
-	struct memory*   memory;
-	uintptr_t        address;
-	size_t           alignment;
-	size_t           guard_before;
-	size_t           guard_after;
-	mapping_access_t access;
+	struct memory*  memory;
+	uintptr_t       address;
+	size_t          alignment;
+	size_t          guard_before;
+	size_t          guard_after;
+	memory_access_t access;
 };
 
 /* Hardware-fault classification passed to the common AddressSpace dispatcher. */
@@ -73,13 +73,13 @@ bool address_space_map(struct address_space* space, const struct address_space_m
 bool address_space_unmap(struct address_space* space, struct mapping* mapping);
 
 /* Atomically change the access applied to present and future translations. */
-bool address_space_protect(struct address_space* space, struct mapping* mapping, mapping_access_t access);
+bool address_space_protect(struct address_space* space, struct mapping* mapping, memory_access_t access);
 
 /* Materialize and project an aligned Mapping-relative byte range. */
 bool address_space_prefault(struct address_space* space, struct mapping* mapping, size_t offset, size_t size);
 
 /* Resolve one eligible not-present access in an AddressSpace. */
-bool address_space_resolve_fault(struct address_space* space, uintptr_t address, mapping_access_t access);
+bool address_space_resolve_fault(struct address_space* space, uintptr_t address, memory_access_t access);
 
 /* Return the number of active Mappings in an AddressSpace. */
 size_t address_space_mapping_count(struct address_space* space);
@@ -88,5 +88,5 @@ size_t address_space_mapping_count(struct address_space* space);
 bool address_space_contains_mapping(struct address_space* space, const struct mapping* mapping);
 
 /* Resolve or dispatch a fault from the current execution context. */
-bool address_space_handle_current_fault(uintptr_t address, enum address_space_fault_kind kind, mapping_access_t access,
+bool address_space_handle_current_fault(uintptr_t address, enum address_space_fault_kind kind, memory_access_t access,
                                         bool user_mode);

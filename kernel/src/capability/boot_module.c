@@ -132,7 +132,7 @@ static syscall_result_t boot_module_map_handler(const struct cap_request* req, s
 	if (memory == NULL || !address_space_map(space,
 	                                         &(const struct address_space_mapping_request){
 												 .memory = memory,
-												 .access = MAPPING_ACCESS_READ,
+												 .access = MEMORY_ACCESS_READ,
 											 },
 	                                         &mapping)) {
 		memory_release(memory);
@@ -140,7 +140,7 @@ static syscall_result_t boot_module_map_handler(const struct cap_request* req, s
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 	memory_release(memory);
-	response.mapping_cap = kernel_mapping_grant(
+	response.mapping_cap = kernel_mapping_publish(
 		caller, req->caller, mapping, CAP_CALL | CAP_READ | CAP_MAP | CAP_DESTROY | CAP_DELEGATE, MEMORY_ACCESS_READ);
 	response.address      = mapping_address(mapping);
 	response.mapping_size = mapping_size(mapping);

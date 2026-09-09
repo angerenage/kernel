@@ -35,8 +35,8 @@ static uint8_t  elf_test_heap[ELF_TEST_HEAP_SIZE] __attribute__((aligned(TEST_MA
 static size_t   elf_test_heap_offset;
 static cap_id_t elf_test_next_mapping_cap;
 
-cap_id_t kernel_mapping_grant(struct process* target, process_id_t recipient, struct mapping* mapping,
-                              cap_rights_t rights, memory_access_t maximum_access) {
+cap_id_t kernel_mapping_publish(struct process* target, process_id_t recipient, struct mapping* mapping,
+                                cap_rights_t rights, memory_access_t maximum_access) {
 	(void)target;
 	(void)recipient;
 	(void)mapping;
@@ -147,12 +147,11 @@ void elf_test_destroy_loaded(struct kernel_elf_process* loaded) {
 	*loaded = (struct kernel_elf_process){0};
 }
 
-void elf_test_poison_recycled_pages(size_t page_count, uint8_t value) {
+void elf_test_poison_recycled_memory(size_t size, uint8_t value) {
 	struct pmm_extent allocation;
-	cr_assert(page_count != 0u);
-	cr_assert(pmm_alloc(
-		&(const struct pmm_alloc_request){.size = page_count * TEST_MAPPING_GRANULE, .alignment = TEST_MAPPING_GRANULE},
-		&allocation));
+	cr_assert(size != 0u);
+	cr_assert(
+		pmm_alloc(&(const struct pmm_alloc_request){.size = size, .alignment = TEST_MAPPING_GRANULE}, &allocation));
 	memset((void*)(allocation.address + boot_info.direct_map_offset), value, allocation.size);
 	cr_assert(pmm_free(allocation), "failed to return poisoned memory to PMM");
 }

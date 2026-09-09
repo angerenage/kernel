@@ -116,20 +116,20 @@ static bool kernel_elf_header_valid(const struct elf64_ehdr* ehdr, size_t module
 	return kernel_elf_range_in_module(module_size, ehdr->phoff, ph_size);
 }
 
-static mapping_access_t kernel_elf_segment_access(uint32_t flags) {
-	mapping_access_t access = 0u;
+static memory_access_t kernel_elf_segment_access(uint32_t flags) {
+	memory_access_t access = 0u;
 
-	if ((flags & ELF_PF_R) != 0) access |= MAPPING_ACCESS_READ;
-	if ((flags & ELF_PF_W) != 0) access |= MAPPING_ACCESS_WRITE;
-	if ((flags & ELF_PF_X) != 0) access |= MAPPING_ACCESS_EXEC;
+	if ((flags & ELF_PF_R) != 0) access |= MEMORY_ACCESS_READ;
+	if ((flags & ELF_PF_W) != 0) access |= MEMORY_ACCESS_WRITE;
+	if ((flags & ELF_PF_X) != 0) access |= MEMORY_ACCESS_EXEC;
 	return access;
 }
 
-static cap_rights_t mapping_rights(mapping_access_t access) {
+static cap_rights_t mapping_rights(memory_access_t access) {
 	cap_rights_t rights = CAP_CALL | CAP_READ | CAP_MAP | CAP_DESTROY | CAP_DELEGATE;
-	if ((access & MAPPING_ACCESS_READ) != 0u) rights |= CAP_READ;
-	if ((access & MAPPING_ACCESS_WRITE) != 0u) rights |= CAP_WRITE;
-	if ((access & MAPPING_ACCESS_EXEC) != 0u) rights |= CAP_EXEC;
+	if ((access & MEMORY_ACCESS_READ) != 0u) rights |= CAP_READ;
+	if ((access & MEMORY_ACCESS_WRITE) != 0u) rights |= CAP_WRITE;
+	if ((access & MEMORY_ACCESS_EXEC) != 0u) rights |= CAP_EXEC;
 	return rights;
 }
 
@@ -142,8 +142,8 @@ static enum kernel_elf_load_result kernel_elf_load_segment(struct process*      
 	size_t                granule      = address_space_minimum_mapping_size();
 	struct mapping*       mapping      = NULL;
 	struct memory*        memory       = NULL;
-	mapping_access_t      final_access = kernel_elf_segment_access(phdr->flags);
-	mapping_access_t      load_access  = final_access | MAPPING_ACCESS_READ | MAPPING_ACCESS_WRITE;
+	memory_access_t       final_access = kernel_elf_segment_access(phdr->flags);
+	memory_access_t       load_access  = final_access | MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE;
 
 	if (phdr->filesz > phdr->memsz) return KERNEL_ELF_LOAD_BAD_FORMAT;
 	if (phdr->memsz == 0u) return KERNEL_ELF_LOAD_OK;
@@ -182,7 +182,7 @@ static enum kernel_elf_load_result kernel_elf_load_segment(struct process*      
 		mapping_release(mapping);
 		return KERNEL_ELF_LOAD_MAP_FAILED;
 	}
-	if (kernel_mapping_grant(process, process_pid(process), mapping, mapping_rights(final_access), final_access) ==
+	if (kernel_mapping_publish(process, process_pid(process), mapping, mapping_rights(final_access), final_access) ==
 	    CAP_ID_INVALID) {
 		(void)address_space_unmap(space, mapping);
 		mapping_release(mapping);
@@ -206,7 +206,7 @@ static enum kernel_elf_load_result kernel_elf_allocate_initial_heap(struct proce
 	bool mapped = address_space_map(process_address_space(process),
 	                                &(const struct address_space_mapping_request){
 										.memory = memory,
-										.access = MAPPING_ACCESS_READ | MAPPING_ACCESS_WRITE,
+										.access = MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
 									},
 	                                &mapping);
 	memory_release(memory);
@@ -215,11 +215,11 @@ static enum kernel_elf_load_result kernel_elf_allocate_initial_heap(struct proce
 	}
 	*out_base = mapping_address(mapping);
 	*out_size = size;
-	if (kernel_mapping_grant(process,
-	                         process_pid(process),
-	                         mapping,
-	                         mapping_rights(MAPPING_ACCESS_READ | MAPPING_ACCESS_WRITE),
-	                         MAPPING_ACCESS_READ | MAPPING_ACCESS_WRITE) == CAP_ID_INVALID) {
+	if (kernel_mapping_publish(process,
+	                           process_pid(process),
+	                           mapping,
+	                           mapping_rights(MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE),
+	                           MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE) == CAP_ID_INVALID) {
 		(void)address_space_unmap(process_address_space(process), mapping);
 		mapping_release(mapping);
 		return KERNEL_ELF_LOAD_MAP_FAILED;

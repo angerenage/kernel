@@ -30,13 +30,14 @@ static bool kthread_map_stack(struct mapping** out_mapping, void** out_base) {
 	size_t          granule = address_space_minimum_mapping_size();
 	size_t          stack_size, guard_size;
 	if (granule == 0u || !align_up_size(KTHREAD_DEFAULT_STACK_SIZE, granule, &stack_size) ||
-	    !align_up_size(4096u, granule, &guard_size) || !memory_create_anonymous(stack_size, &memory))
+	    !memory_create_anonymous(stack_size, &memory))
 		return false;
+	guard_size  = granule;
 	bool mapped = address_space_map(address_space_kernel(),
 	                                &(const struct address_space_mapping_request){
 										.memory       = memory,
 										.guard_before = guard_size,
-										.access       = MAPPING_ACCESS_READ | MAPPING_ACCESS_WRITE,
+										.access       = MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
 									},
 	                                &mapping);
 	memory_release(memory);

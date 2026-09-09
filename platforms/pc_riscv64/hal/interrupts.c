@@ -202,14 +202,14 @@ static bool was_user_mode(uint64_t sstatus) {
 	return (sstatus & (1ull << 8)) == 0;
 }
 
-static mapping_access_t page_fault_access(uint64_t code) {
+static memory_access_t page_fault_access(uint64_t code) {
 	switch (code) {
 	case 12:
-		return MAPPING_ACCESS_EXEC;
+		return MEMORY_ACCESS_EXEC;
 	case 13:
-		return MAPPING_ACCESS_READ;
+		return MEMORY_ACCESS_READ;
 	case 15:
-		return MAPPING_ACCESS_WRITE;
+		return MEMORY_ACCESS_WRITE;
 	default:
 		return 0u;
 	}

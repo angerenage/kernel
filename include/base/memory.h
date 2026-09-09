@@ -10,6 +10,8 @@ enum memory_type {
 	MEMORY_TYPE_COUNT,
 };
 
+_Static_assert(MEMORY_TYPE_COUNT < 64, "memory type mask must fit in uint64_t");
+
 typedef uint32_t memory_access_t;
 
 enum memory_access {

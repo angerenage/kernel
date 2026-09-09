@@ -19,7 +19,7 @@
 #include <string.h>
 #include <test_memory.h>
 
-#include "../vmm/test_support.h"
+#include "../address_space/test_support.h"
 
 #define ELF_TEST_IMAGE_CAPACITY (3u * TEST_MAPPING_GRANULE)
 #define ELF_TEST_MAX_PHDRS 4u
@@ -70,6 +70,6 @@ struct kernel_boot_module elf_test_module(struct elf_test_image* image);
 void elf_test_set_load(struct elf_test_image* image, size_t index, uint64_t offset, uint64_t vaddr, uint64_t filesz,
                        uint64_t memsz, uint32_t flags);
 void elf_test_destroy_loaded(struct kernel_elf_process* loaded);
-void elf_test_poison_recycled_pages(size_t page_count, uint8_t value);
+void elf_test_poison_recycled_memory(size_t size, uint8_t value);
 
 #endif

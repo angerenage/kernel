@@ -27,8 +27,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "../address_space/test_support.h"
 #include "../mocks/hal/cpu_mock.h"
-#include "../vmm/test_support.h"
 
 struct syscall_test_cap_request {
 	uint32_t value;

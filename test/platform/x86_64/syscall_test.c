@@ -2,16 +2,23 @@
 #include <core/mm.h>
 #include <criterion/criterion.h>
 #include <hal/hcf.h>
+#include <hal/paging.h>
 #include <kernel/syscall.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <test_memory.h>
 
 #include "../../../platforms/pc_x86_64/hal/interrupts_private.h"
 
 static uintptr_t                 dispatched_number;
 static uintptr_t                 dispatched_args[6];
 static enum syscall_frame_action dispatched_action;
+
+const struct hal_paging_info* hal_paging_info(void) {
+	static const struct hal_paging_info info = {.minimum_leaf_size = TEST_MAPPING_GRANULE};
+	return &info;
+}
 
 void x86_64_syscall_entry(void) {
 }
@@ -48,8 +55,8 @@ enum syscall_frame_action syscall_dispatch_user_frame(struct hal_userspace_retur
 }
 
 static struct user_interrupt_frame valid_user_frame(void) {
-	const uint64_t rip    = MM_USER_VMM_BASE + 0x2000u;
-	const uint64_t rsp    = MM_USER_VMM_BASE + 0x8000u;
+	const uint64_t rip    = TEST_MAPPING_GRANULE + 0x2000u;
+	const uint64_t rsp    = TEST_MAPPING_GRANULE + 0x8000u;
 	const uint64_t rflags = 0x202u;
 
 	return (struct user_interrupt_frame){

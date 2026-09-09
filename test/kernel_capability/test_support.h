@@ -45,7 +45,6 @@ void kernel_boot_mock_reset(void);
 syscall_result_t kernel_capability_test_call(cap_id_t cap, const void* request, size_t request_size, void* response,
                                              size_t response_capacity);
 
-uintptr_t kernel_capability_test_alloc_user_buffer(struct process* process, size_t page_count,
-                                                   struct mapping** out_mapping);
+uintptr_t kernel_capability_test_alloc_user_buffer(struct process* process, size_t size, struct mapping** out_mapping);
 
 void kernel_capability_test_poison_next_pmm_page(uint8_t value);

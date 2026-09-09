@@ -13,11 +13,11 @@ static size_t          terminate_calls;
 static struct process* terminated_process;
 static uintptr_t       terminated_exit_code;
 
-static bool                          vmm_fault_result;
-static size_t                        vmm_fault_calls;
+static bool                          address_space_fault_result;
+static size_t                        address_space_fault_calls;
 static uintptr_t                     observed_fault_addr;
 static enum address_space_fault_kind observed_fault_kind;
-static mapping_access_t              observed_fault_access;
+static memory_access_t               observed_fault_access;
 static bool                          observed_fault_user_mode;
 
 struct process* process_current(void) {
@@ -31,28 +31,28 @@ bool process_terminate(struct process* process, uintptr_t exit_code) {
 	return terminate_result;
 }
 
-bool address_space_handle_current_fault(uintptr_t addr, enum address_space_fault_kind kind, mapping_access_t access,
+bool address_space_handle_current_fault(uintptr_t addr, enum address_space_fault_kind kind, memory_access_t access,
                                         bool user_mode) {
-	vmm_fault_calls++;
+	address_space_fault_calls++;
 	observed_fault_addr      = addr;
 	observed_fault_kind      = kind;
 	observed_fault_access    = access;
 	observed_fault_user_mode = user_mode;
-	return vmm_fault_result;
+	return address_space_fault_result;
 }
 
 static void exception_test_reset(void) {
-	fake_current_process     = (struct process*)(uintptr_t)0x1000u;
-	terminate_result         = true;
-	terminate_calls          = 0u;
-	terminated_process       = NULL;
-	terminated_exit_code     = UINTPTR_MAX;
-	vmm_fault_result         = true;
-	vmm_fault_calls          = 0u;
-	observed_fault_addr      = 0u;
-	observed_fault_kind      = ADDRESS_SPACE_FAULT_INVALID;
-	observed_fault_access    = 0u;
-	observed_fault_user_mode = false;
+	fake_current_process       = (struct process*)(uintptr_t)0x1000u;
+	terminate_result           = true;
+	terminate_calls            = 0u;
+	terminated_process         = NULL;
+	terminated_exit_code       = UINTPTR_MAX;
+	address_space_fault_result = true;
+	address_space_fault_calls  = 0u;
+	observed_fault_addr        = 0u;
+	observed_fault_kind        = ADDRESS_SPACE_FAULT_INVALID;
+	observed_fault_access      = 0u;
+	observed_fault_user_mode   = false;
 }
 
 Test(exception_core, page_faults_preserve_kind_access_address_and_origin) {
@@ -60,28 +60,28 @@ Test(exception_core, page_faults_preserve_kind_access_address_and_origin) {
 		enum core_exception_kind      core_kind;
 		enum core_exception_access    core_access;
 		enum address_space_fault_kind fault_kind;
-		mapping_access_t              vmm_access;
+		memory_access_t               access;
 		bool                          user_mode;
 	} cases[] = {
 		{
          .core_kind   = CORE_EXCEPTION_PAGE_FAULT_NOT_PRESENT,
          .core_access = CORE_EXCEPTION_ACCESS_READ,
          .fault_kind  = ADDRESS_SPACE_FAULT_NOT_PRESENT,
-         .vmm_access  = MAPPING_ACCESS_READ,
+         .access      = MEMORY_ACCESS_READ,
          .user_mode   = true,
 		 },
 		{
          .core_kind   = CORE_EXCEPTION_PAGE_FAULT_PROTECTION,
          .core_access = CORE_EXCEPTION_ACCESS_WRITE,
          .fault_kind  = ADDRESS_SPACE_FAULT_PROTECTION,
-         .vmm_access  = MAPPING_ACCESS_WRITE,
+         .access      = MEMORY_ACCESS_WRITE,
          .user_mode   = true,
 		 },
 		{
          .core_kind   = CORE_EXCEPTION_PAGE_FAULT_INVALID,
          .core_access = CORE_EXCEPTION_ACCESS_EXEC,
          .fault_kind  = ADDRESS_SPACE_FAULT_INVALID,
-         .vmm_access  = MAPPING_ACCESS_EXEC,
+         .access      = MEMORY_ACCESS_EXEC,
          .user_mode   = false,
 		 },
 	};
@@ -90,16 +90,16 @@ Test(exception_core, page_faults_preserve_kind_access_address_and_origin) {
 		const uintptr_t addr = 0x4000u + i * 0x1000u;
 
 		exception_test_reset();
-		vmm_fault_result = (i & 1u) == 0u;
+		address_space_fault_result = (i & 1u) == 0u;
 
 		cr_assert_eq(core_handle_exception(cases[i].core_kind, cases[i].core_access, addr, cases[i].user_mode),
-		             vmm_fault_result);
-		cr_assert_eq(vmm_fault_calls, 1u);
+		             address_space_fault_result);
+		cr_assert_eq(address_space_fault_calls, 1u);
 		cr_assert_eq(observed_fault_addr, addr);
 		cr_assert_eq(observed_fault_kind, cases[i].fault_kind);
-		cr_assert_eq(observed_fault_access, cases[i].vmm_access);
+		cr_assert_eq(observed_fault_access, cases[i].access);
 		cr_assert_eq(observed_fault_user_mode, cases[i].user_mode);
-		cr_assert_eq(terminate_calls, 0u, "page faults must stay delegated to the VMM policy");
+		cr_assert_eq(terminate_calls, 0u, "page faults must stay delegated to the address-space policy");
 	}
 }
 
@@ -160,7 +160,7 @@ Test(exception_core, kernel_non_page_exceptions_are_left_to_architecture_fatal_h
 	exception_test_reset();
 
 	cr_assert_not(core_handle_exception(CORE_EXCEPTION_INSTRUCTION_ILLEGAL, CORE_EXCEPTION_ACCESS_UNKNOWN, 0u, false));
-	cr_assert_eq(vmm_fault_calls, 0u);
+	cr_assert_eq(address_space_fault_calls, 0u);
 	cr_assert_eq(terminate_calls, 0u);
 }
 

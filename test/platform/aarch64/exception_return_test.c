@@ -18,12 +18,12 @@
 
 char exception_vectors[2048];
 
-static size_t                        observed_vmm_faults;
-static uintptr_t                     observed_vmm_addr;
+static size_t                        observed_address_space_faults;
+static uintptr_t                     observed_address_space_addr;
 static enum address_space_fault_kind observed_fault_kind;
-static mapping_access_t              observed_vmm_access;
-static bool                          observed_vmm_user_mode;
-static bool                          vmm_fault_result;
+static memory_access_t               observed_address_space_access;
+static bool                          observed_address_space_user_mode;
+static bool                          address_space_fault_result;
 
 static size_t                   observed_core_faults;
 static enum core_exception_kind observed_core_kind;
@@ -57,14 +57,14 @@ void cpu_enter_exception(void) {
 void cpu_leave_exception(void) {
 }
 
-bool address_space_handle_current_fault(uintptr_t addr, enum address_space_fault_kind kind, mapping_access_t access,
+bool address_space_handle_current_fault(uintptr_t addr, enum address_space_fault_kind kind, memory_access_t access,
                                         bool user_mode) {
-	observed_vmm_faults++;
-	observed_vmm_addr      = addr;
-	observed_fault_kind    = kind;
-	observed_vmm_access    = access;
-	observed_vmm_user_mode = user_mode;
-	return vmm_fault_result;
+	observed_address_space_faults++;
+	observed_address_space_addr      = addr;
+	observed_fault_kind              = kind;
+	observed_address_space_access    = access;
+	observed_address_space_user_mode = user_mode;
+	return address_space_fault_result;
 }
 
 bool core_handle_user_exception(enum core_exception_kind kind) {
@@ -114,14 +114,14 @@ void hal_cpu_fp_context_restore(const struct hal_cpu_fp_context* context) {
 #include "../../../platforms/pc_aarch64/hal/userspace.c"
 
 static void aarch64_exception_test_reset(void) {
-	observed_vmm_faults    = 0u;
-	observed_vmm_addr      = 0u;
-	observed_fault_kind    = ADDRESS_SPACE_FAULT_INVALID;
-	observed_vmm_access    = 0u;
-	observed_vmm_user_mode = false;
-	vmm_fault_result       = true;
-	observed_core_faults   = 0u;
-	observed_core_kind     = CORE_EXCEPTION_UNKNOWN;
+	observed_address_space_faults    = 0u;
+	observed_address_space_addr      = 0u;
+	observed_fault_kind              = ADDRESS_SPACE_FAULT_INVALID;
+	observed_address_space_access    = 0u;
+	observed_address_space_user_mode = false;
+	address_space_fault_result       = true;
+	observed_core_faults             = 0u;
+	observed_core_kind               = CORE_EXCEPTION_UNKNOWN;
 	memset(&live_fp_context, 0, sizeof(live_fp_context));
 }
 
@@ -152,15 +152,15 @@ Test(aarch64_exception_return, translation_faults_still_reach_lazy_page_fault_po
 	aarch64_exception_test_reset();
 	handle_exception(&frame);
 
-	cr_assert_eq(observed_vmm_faults, 1u);
-	cr_assert_eq(observed_vmm_addr, frame.far);
+	cr_assert_eq(observed_address_space_faults, 1u);
+	cr_assert_eq(observed_address_space_addr, frame.far);
 	cr_assert_eq(observed_fault_kind, ADDRESS_SPACE_FAULT_NOT_PRESENT);
-	cr_assert_eq(observed_vmm_access, MAPPING_ACCESS_READ);
-	cr_assert(observed_vmm_user_mode);
+	cr_assert_eq(observed_address_space_access, MEMORY_ACCESS_READ);
+	cr_assert(observed_address_space_user_mode);
 	cr_assert_eq(observed_core_faults, 0u);
 }
 
-Test(aarch64_exception_return, permission_faults_reach_vmm_as_write_protection_faults) {
+Test(aarch64_exception_return, permission_faults_reach_address_space_as_write_protection_faults) {
 	struct exception_frame frame = {
 		.vector = 8u,
 		.esr    = (0x24ull << 26) | (1ull << 6) | 0x0du,
@@ -170,10 +170,10 @@ Test(aarch64_exception_return, permission_faults_reach_vmm_as_write_protection_f
 	aarch64_exception_test_reset();
 	handle_exception(&frame);
 
-	cr_assert_eq(observed_vmm_faults, 1u);
+	cr_assert_eq(observed_address_space_faults, 1u);
 	cr_assert_eq(observed_fault_kind, ADDRESS_SPACE_FAULT_PROTECTION);
-	cr_assert_eq(observed_vmm_access, MAPPING_ACCESS_WRITE);
-	cr_assert(observed_vmm_user_mode);
+	cr_assert_eq(observed_address_space_access, MEMORY_ACCESS_WRITE);
+	cr_assert(observed_address_space_user_mode);
 	cr_assert_eq(observed_core_faults, 0u);
 }
 
@@ -187,7 +187,8 @@ Test(aarch64_exception_return, data_abort_alignment_is_not_misreported_as_page_p
 	aarch64_exception_test_reset();
 	handle_exception(&frame);
 
-	cr_assert_eq(observed_vmm_faults, 0u, "DFSC alignment faults must not enter lazy/protection page-fault handling");
+	cr_assert_eq(
+		observed_address_space_faults, 0u, "DFSC alignment faults must not enter lazy/protection page-fault handling");
 	cr_assert_eq(observed_core_faults, 1u);
 	cr_assert_eq(observed_core_kind,
 	             CORE_EXCEPTION_ALIGNMENT,

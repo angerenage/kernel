@@ -18,15 +18,15 @@
 
 #define KiB(x) ((size_t)(x) * 1024u)
 
-void   init_test_vmm(uint8_t* arena, size_t arena_size);
-size_t vmm_test_bytes_consumed_since(size_t free_before);
-bool   test_vm_map(struct address_space* space, size_t page_count, memory_access_t access, uintptr_t requested_base,
-                   size_t alignment_units, size_t guard_units, struct mapping** out_mapping, void** out_base);
-void   mock_paging_reset(void);
-void   mock_paging_fail_init_once(void);
-void   mock_paging_fail_after(size_t successful_maps);
-void   mock_paging_fail_once_after(size_t successful_maps);
-void   mock_paging_fail_next_unmap(void);
+void   init_test_address_space(uint8_t* arena, size_t arena_size);
+size_t address_space_test_bytes_consumed_since(size_t free_before);
+bool test_address_space_map(struct address_space* space, size_t size, memory_access_t access, uintptr_t requested_base,
+                            size_t alignment, size_t guard_before, struct mapping** out_mapping, void** out_base);
+void mock_paging_reset(void);
+void mock_paging_fail_init_once(void);
+void mock_paging_fail_after(size_t successful_maps);
+void mock_paging_fail_once_after(size_t successful_maps);
+void mock_paging_fail_next_unmap(void);
 size_t mock_paging_mapping_count(void);
 void   mock_paging_set_leaf_size_mask(uint64_t mask);
 size_t mock_paging_map_call_count(void);

@@ -152,7 +152,7 @@ Test(syscall_validation, failed_self_copyout_does_not_publish_hidden_grants) {
 	caps_before    = capability_count();
 	objects_before = capability_object_count();
 
-	result = syscall_self(MM_USER_VMM_BASE, 0u, 0u, 0u, 0u, 0u);
+	result = syscall_self(TEST_MAPPING_GRANULE, 0u, 0u, 0u, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT, "unmapped self-info output must reject the syscall");
 	cr_assert_eq(capability_count(),
 	             caps_before,
@@ -189,7 +189,7 @@ Test(syscall_validation, failed_self_copyout_preserves_preexisting_grants) {
 	caps_before    = capability_count();
 	objects_before = capability_object_count();
 
-	result = syscall_self(MM_USER_VMM_BASE, 0u, 0u, 0u, 0u, 0u);
+	result = syscall_self(TEST_MAPPING_GRANULE, 0u, 0u, 0u, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 	cr_assert_eq(
 		capability_count(), caps_before, "copyout rollback must not destroy grants that existed before the syscall");
@@ -218,8 +218,14 @@ Test(syscall_validation, failed_self_copyout_preserves_preexisting_grants) {
 static uintptr_t allocate_self_info_output(struct process* process, struct mapping** out_mapping) {
 	void* base = NULL;
 
-	cr_assert(test_vm_map(
-		process_address_space(process), 1u, MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE, 0u, 1u, 0u, out_mapping, &base));
+	cr_assert(test_address_space_map(process_address_space(process),
+	                                 TEST_MAPPING_GRANULE,
+	                                 MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+	                                 0u,
+	                                 TEST_MAPPING_GRANULE,
+	                                 0u,
+	                                 out_mapping,
+	                                 &base));
 	cr_assert_not_null(base);
 	return (uintptr_t)base;
 }

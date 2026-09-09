@@ -189,7 +189,7 @@ static syscall_status_t transfer_mappings(struct loader_loaded_program* program)
 		cap_id_t            delegated;
 		syscall_status_t    status = mapping_info(item->cap, &info);
 		if (status != SYSCALL_STATUS_OK) return status;
-		status = cap_delegate(item->cap, program->process_id, mapping_rights(info.access), &delegated);
+		status = cap_delegate_peer(item->cap, program->process_id, mapping_rights(info.access), &delegated);
 		if (status != SYSCALL_STATUS_OK) return status;
 	}
 	while (program->mappings != NULL) {

@@ -4,7 +4,7 @@
 #include <core/mm.h>
 #include <core/pmm.h>
 
-void init_test_vmm(uint8_t* arena, size_t arena_size) {
+void init_test_address_space(uint8_t* arena, size_t arena_size) {
 	const struct mem_range memory_map[] = {
 		{
          .base   = (uintptr_t)arena,
@@ -30,28 +30,25 @@ void init_test_vmm(uint8_t* arena, size_t arena_size) {
 	cr_assert(address_space_init(), "address_space_init failed");
 }
 
-size_t vmm_test_bytes_consumed_since(size_t free_before) {
+size_t address_space_test_bytes_consumed_since(size_t free_before) {
 	size_t free_after = pmm_free_size();
 	return free_before >= free_after ? free_before - free_after : 0u;
 }
 
-bool test_vm_map(struct address_space* space, size_t page_count, memory_access_t access, uintptr_t requested_base,
-                 size_t alignment_units, size_t guard_units, struct mapping** out_mapping, void** out_base) {
+bool test_address_space_map(struct address_space* space, size_t size, memory_access_t access, uintptr_t requested_base,
+                            size_t alignment, size_t guard_before, struct mapping** out_mapping, void** out_base) {
 	struct memory*  memory;
 	struct mapping* mapping;
-	if ((access & ~MEMORY_ACCESS_VALID_MASK) != 0u || page_count > SIZE_MAX / TEST_MAPPING_GRANULE ||
-	    !memory_create_anonymous(page_count * TEST_MAPPING_GRANULE, &memory))
-		return false;
-	bool mapped =
-		address_space_map(space,
-	                      &(const struct address_space_mapping_request){
-							  .memory       = memory,
-							  .address      = requested_base,
-							  .alignment    = (alignment_units == 0u ? 1u : alignment_units) * TEST_MAPPING_GRANULE,
-							  .guard_before = guard_units * TEST_MAPPING_GRANULE,
-							  .access       = access,
-						  },
-	                      &mapping);
+	if ((access & ~MEMORY_ACCESS_VALID_MASK) != 0u || !memory_create_anonymous(size, &memory)) return false;
+	bool mapped = address_space_map(space,
+	                                &(const struct address_space_mapping_request){
+										.memory       = memory,
+										.address      = requested_base,
+										.alignment    = alignment,
+										.guard_before = guard_before,
+										.access       = access,
+									},
+	                                &mapping);
 	memory_release(memory);
 	if (mapped) {
 		if (out_base != NULL) *out_base = (void*)mapping_address(mapping);

@@ -145,10 +145,10 @@ static enum address_space_fault_kind abort_fault_kind(uint64_t dfsc) {
 	return ADDRESS_SPACE_FAULT_INVALID;
 }
 
-static mapping_access_t abort_fault_access(uint64_t ec, uint64_t iss) {
-	if (is_instruction_abort(ec)) return MAPPING_ACCESS_EXEC;
+static memory_access_t abort_fault_access(uint64_t ec, uint64_t iss) {
+	if (is_instruction_abort(ec)) return MEMORY_ACCESS_EXEC;
 	if (!is_data_abort(ec)) return 0u;
-	return ((iss >> 6) & 1u) != 0 ? MAPPING_ACCESS_WRITE : MAPPING_ACCESS_READ;
+	return ((iss >> 6) & 1u) != 0 ? MEMORY_ACCESS_WRITE : MEMORY_ACCESS_READ;
 }
 
 static const char* abort_dfsc_name(uint64_t dfsc) {

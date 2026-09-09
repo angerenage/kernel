@@ -23,11 +23,11 @@ static enum address_transfer_result check_access(const struct address_space* spa
                                                  uint32_t access) {
 	if ((access & ADDRESS_TRANSFER_USER) != 0u && space == address_space_kernel()) return ADDRESS_TRANSFER_NOT_USER;
 	if (!memory_can_transfer(mapping->memory)) return ADDRESS_TRANSFER_ACCESS_DENIED;
-	if ((access & ADDRESS_TRANSFER_READ) != 0u && (mapping->access & MAPPING_ACCESS_READ) == 0u)
+	if ((access & ADDRESS_TRANSFER_READ) != 0u && (mapping->access & MEMORY_ACCESS_READ) == 0u)
 		return ADDRESS_TRANSFER_ACCESS_DENIED;
-	if ((access & ADDRESS_TRANSFER_WRITE) != 0u && (mapping->access & MAPPING_ACCESS_WRITE) == 0u)
+	if ((access & ADDRESS_TRANSFER_WRITE) != 0u && (mapping->access & MEMORY_ACCESS_WRITE) == 0u)
 		return ADDRESS_TRANSFER_ACCESS_DENIED;
-	if ((access & ADDRESS_TRANSFER_EXEC) != 0u && (mapping->access & MAPPING_ACCESS_EXEC) == 0u)
+	if ((access & ADDRESS_TRANSFER_EXEC) != 0u && (mapping->access & MEMORY_ACCESS_EXEC) == 0u)
 		return ADDRESS_TRANSFER_ACCESS_DENIED;
 	return ADDRESS_TRANSFER_OK;
 }

@@ -2,6 +2,7 @@
 #include <core/exception.h>
 #include <core/mm.h>
 #include <hal/hcf.h>
+#include <hal/paging.h>
 #include <kernel/syscall.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -69,15 +70,19 @@ _Static_assert((X86_SYSCALL_RFLAGS_MASK & X86_RFLAGS_TRAP) != 0u,
                "IA32_FMASK must suppress userspace single-step state on kernel entry");
 
 static bool x86_64_user_instruction_pointer(uint64_t address) {
-	const uint64_t user_base = MM_USER_VMM_BASE;
-	const uint64_t user_end  = MM_USER_VMM_BASE + MM_USER_VMM_SIZE;
+	const struct hal_paging_info* paging = hal_paging_info();
+	if (paging == NULL) return false;
+	const uint64_t user_base = paging->minimum_leaf_size;
+	const uint64_t user_end  = user_base + MM_USER_ADDRESS_SPACE_SIZE;
 
 	return address >= user_base && address < user_end;
 }
 
 static bool x86_64_user_stack_pointer(uint64_t address) {
-	const uint64_t user_base = MM_USER_VMM_BASE;
-	const uint64_t user_end  = MM_USER_VMM_BASE + MM_USER_VMM_SIZE;
+	const struct hal_paging_info* paging = hal_paging_info();
+	if (paging == NULL) return false;
+	const uint64_t user_base = paging->minimum_leaf_size;
+	const uint64_t user_end  = user_base + MM_USER_ADDRESS_SPACE_SIZE;
 
 	/* A stack pointer may legally point one byte beyond the last mapped stack byte. */
 	return address >= user_base && address <= user_end;

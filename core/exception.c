@@ -86,14 +86,14 @@ static enum address_space_fault_kind core_exception_to_address_space_fault_kind(
 	}
 }
 
-static mapping_access_t core_exception_to_mapping_access(enum core_exception_access access) {
+static memory_access_t core_exception_to_mapping_access(enum core_exception_access access) {
 	switch (access) {
 	case CORE_EXCEPTION_ACCESS_READ:
-		return MAPPING_ACCESS_READ;
+		return MEMORY_ACCESS_READ;
 	case CORE_EXCEPTION_ACCESS_WRITE:
-		return MAPPING_ACCESS_WRITE;
+		return MEMORY_ACCESS_WRITE;
 	case CORE_EXCEPTION_ACCESS_EXEC:
-		return MAPPING_ACCESS_EXEC;
+		return MEMORY_ACCESS_EXEC;
 	case CORE_EXCEPTION_ACCESS_UNKNOWN:
 	default:
 		return 0u;

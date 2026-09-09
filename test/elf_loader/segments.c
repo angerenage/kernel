@@ -9,7 +9,7 @@ Test(elf_loader_segments, loads_file_bytes_zeros_bss_and_applies_final_permissio
 	struct address_space*     space;
 	uint8_t                   bytes[64];
 	const uint64_t            file_offset = TEST_MAPPING_GRANULE;
-	const uint64_t            vaddr       = MM_USER_VMM_BASE + 4u * (uint64_t)TEST_MAPPING_GRANULE;
+	const uint64_t            vaddr       = TEST_MAPPING_GRANULE + 4u * (uint64_t)TEST_MAPPING_GRANULE;
 	elf_test_init_environment();
 	elf_test_image_init(&image, 1u);
 	elf_test_header(&image)->entry = vaddr;
@@ -45,8 +45,8 @@ Test(elf_loader_segments, keeps_text_and_data_permissions_independent) {
 	struct address_space*     space;
 	const uint64_t            text_offset = TEST_MAPPING_GRANULE;
 	const uint64_t            data_offset = 2u * (uint64_t)TEST_MAPPING_GRANULE;
-	const uint64_t            text_vaddr  = MM_USER_VMM_BASE + 4u * (uint64_t)TEST_MAPPING_GRANULE;
-	const uint64_t            data_vaddr  = MM_USER_VMM_BASE + 8u * (uint64_t)TEST_MAPPING_GRANULE;
+	const uint64_t            text_vaddr  = TEST_MAPPING_GRANULE + 4u * (uint64_t)TEST_MAPPING_GRANULE;
+	const uint64_t            data_vaddr  = TEST_MAPPING_GRANULE + 8u * (uint64_t)TEST_MAPPING_GRANULE;
 	uint8_t                   text[16], data[16];
 	elf_test_init_environment();
 	elf_test_image_init(&image, 2u);
@@ -82,10 +82,10 @@ Test(elf_loader_segments, segment_page_padding_does_not_expose_recycled_physical
 	const uint8_t             poison      = 0xd7u;
 	const uint64_t            page_offset = 0x120u;
 	const uint64_t            file_offset = TEST_MAPPING_GRANULE + page_offset;
-	const uint64_t            page_base   = MM_USER_VMM_BASE + 8u * (uint64_t)TEST_MAPPING_GRANULE;
+	const uint64_t            page_base   = TEST_MAPPING_GRANULE + 8u * (uint64_t)TEST_MAPPING_GRANULE;
 	const uint64_t            vaddr       = page_base + page_offset;
 	elf_test_init_environment();
-	elf_test_poison_recycled_pages(32u, poison);
+	elf_test_poison_recycled_memory(32u * TEST_MAPPING_GRANULE, poison);
 	elf_test_image_init(&image, 1u);
 	elf_test_header(&image)->entry = vaddr;
 	elf_test_set_load(&image, 0u, file_offset, vaddr, 8u, 16u, ELF_TEST_PF_R | ELF_TEST_PF_X);
@@ -109,10 +109,10 @@ Test(elf_loader_segments, initial_heap_does_not_expose_recycled_physical_content
 	uint8_t                   first_byte = 0u, last_byte = 0u;
 	const uint8_t             poison      = 0xa6u;
 	const uint64_t            file_offset = TEST_MAPPING_GRANULE;
-	const uint64_t            vaddr       = MM_USER_VMM_BASE + 4u * (uint64_t)TEST_MAPPING_GRANULE;
+	const uint64_t            vaddr       = TEST_MAPPING_GRANULE + 4u * (uint64_t)TEST_MAPPING_GRANULE;
 	uintptr_t                 heap_last;
 	elf_test_init_environment();
-	elf_test_poison_recycled_pages(32u, poison);
+	elf_test_poison_recycled_memory(32u * TEST_MAPPING_GRANULE, poison);
 	elf_test_image_init(&image, 1u);
 	elf_test_header(&image)->entry = vaddr;
 	elf_test_set_load(&image, 0u, file_offset, vaddr, 16u, 16u, ELF_TEST_PF_R | ELF_TEST_PF_X);

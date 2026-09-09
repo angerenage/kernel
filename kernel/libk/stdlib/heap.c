@@ -23,7 +23,7 @@ bool heap_grow_region(size_t minimum_size, void** out_base, size_t* out_size) {
 	bool mapped = address_space_map(address_space_kernel(),
 	                                &(const struct address_space_mapping_request){
 										.memory = memory,
-										.access = MAPPING_ACCESS_READ | MAPPING_ACCESS_WRITE,
+										.access = MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
 									},
 	                                &mapping);
 	memory_release(memory);

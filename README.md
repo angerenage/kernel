@@ -42,7 +42,7 @@ Virtual memory has four ownership layers:
 - AddressSpace in `include/core/address_space.h` owns a balanced reservation registry, virtual placement, protections, and demand faults.
 - The paging HAL owns the architecture page tables, hardware translations, and leaf-size selection.
 
-The kernel has a global managed virtual window at `MM_KERNEL_VMM_BASE` with size `MM_KERNEL_VMM_SIZE`. User processes receive separate address spaces over `MM_USER_VMM_BASE` and `MM_USER_VMM_SIZE`, with a null guard at the bottom. New hardware user address spaces inherit the kernel mappings required to enter and leave kernel mode.
+The kernel has a global managed virtual window at `MM_KERNEL_ADDRESS_SPACE_BASE` with size `MM_KERNEL_ADDRESS_SPACE_SIZE`. User address spaces begin one HAL translation granule above zero and span `MM_USER_ADDRESS_SPACE_SIZE`, making the null guard follow the architecture's actual mapping granularity. New hardware user address spaces inherit the kernel mappings required to enter and leave kernel mode.
 
 The address-transfer helpers validate user ranges and copy directly through Memory contents, so logical reads and writes do not require user PTEs or expose untrusted pointers to syscall code.
 
@@ -52,7 +52,7 @@ The scheduler is per-CPU. Each CPU owns a run queue and a permanent idle thread.
 
 Higher-level thread wrappers add ownership:
 
-- `kthread` allocates a kernel stack from the kernel VMM window and runs a kernel entry point.
+- `kthread` allocates a kernel stack from the kernel address-space window and runs a kernel entry point.
 - `uthread` allocates both a user stack in its process address space and a kernel stack in the kernel address space, then uses the HAL userspace contract to build an initial user context.
 - `process` owns a user address space and links its user threads for lifecycle operations.
 
@@ -64,7 +64,7 @@ Hosted Criterion tests are native executables. They link `base` or `core` source
 
 - generic HAL mocks live in `test/mocks/hal/`
 - generic base mocks live in `test/mocks/base/`
-- subsystem-specific mocks stay next to the tests that need them, such as `test/vmm/mock_paging.c`
+- subsystem-specific mocks stay next to the tests that need them, such as `test/address_space/mock_paging.c`
 
 This is why `core` can depend on HAL contracts and still remain testable outside the live kernel. In-kernel selftests under `kernel/test/` cover behavior that must run after boot-time memory and scheduler initialization.
 
@@ -123,7 +123,7 @@ bash scripts/build.sh --arch x86_64 --setup --no-tests
 bash scripts/build.sh --arch x86_64 --setup --test-sanitizers
 bash scripts/build.sh --arch x86_64 --setup --kernel-selftests
 bash scripts/build.sh --arch x86_64 --setup --kernel-selftests --kernel-selftests-autorun
-bash scripts/build.sh --arch x86_64 --setup --kernel-selftests-suite vmm
+bash scripts/build.sh --arch x86_64 --setup --kernel-selftests-suite address_space
 ```
 
 When no architecture is provided, the helper exits with guidance to use either `--arch <arch>` or `--all`.
@@ -162,7 +162,7 @@ bash scripts/build.sh --arch x86_64
 bash scripts/build.sh --arch riscv64 -sc
 bash scripts/build.sh --arch x86_64 --builddir build-debug-x86_64
 bash scripts/build.sh --arch x86_64 --kernel-selftests --kernel-selftests-autorun
-bash scripts/build.sh --arch x86_64 --kernel-selftests-suite vmm
+bash scripts/build.sh --arch x86_64 --kernel-selftests-suite address_space
 bash scripts/build.sh --all
 bash scripts/build.sh --all -sc
 ```
@@ -247,7 +247,7 @@ bash scripts/run.sh --kernel-selftest --arch x86_64 --timeout 45
 If you only want a specific in-kernel selftest suite:
 
 ```sh
-bash scripts/build.sh --arch x86_64 --kernel-selftests-suite vmm --no-tests
+bash scripts/build.sh --arch x86_64 --kernel-selftests-suite address_space --no-tests
 bash scripts/run.sh --kernel-selftest --arch x86_64 --timeout 45
 ```
 
@@ -277,7 +277,7 @@ Build-time control uses three options:
 - `--kernel-selftests-autorun` writes `kernel.selftest=1` into the generated image command line so they run automatically on boot
 - `--kernel-selftests-suite <name>` writes `kernel.selftest.suite=<name>` into the generated image command line and limits autorun to that suite
 
-The kernel runs selftests from a selftest-only runner after `pmm`, `vmm`, `heap`, and scheduler initialization, prints per-test results to serial, and emits a final `selftest: result: PASS` or `FAIL` marker for automation.
+The kernel runs selftests from a selftest-only runner after `pmm`, `address_space`, `heap`, and scheduler initialization, prints per-test results to serial, and emits a final `selftest: result: PASS` or `FAIL` marker for automation.
 When a suite filter is present, only the matching registered suite is executed.
 
 To add more in-kernel tests:

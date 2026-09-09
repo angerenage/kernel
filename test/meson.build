@@ -214,8 +214,8 @@ test_suites = [
 	{
 		'name': 'uthread',
 		'sources': files(
-			'vmm/test_support.c',
-			'vmm/mock_paging.c',
+			'address_space/test_support.c',
+			'address_space/mock_paging.c',
 			'uthread/test_support.c',
 			'uthread/start.c',
 			'uthread/current.c',
@@ -228,8 +228,8 @@ test_suites = [
 	{
 		'name': 'process',
 		'sources': files(
-			'vmm/test_support.c',
-			'vmm/mock_paging.c',
+			'address_space/test_support.c',
+			'address_space/mock_paging.c',
 			'process/test_support.c',
 			'process/creation.c',
 			'process/threads.c',
@@ -253,8 +253,8 @@ test_suites = [
 		'name': 'syscall',
 		'sources': files(
 			'mocks/core/syscall_dispatch.c',
-			'vmm/test_support.c',
-			'vmm/mock_paging.c',
+			'address_space/test_support.c',
+			'address_space/mock_paging.c',
 			'syscall/test_support.c',
 			'syscall/basic.c',
 			'syscall/capability.c',
@@ -286,8 +286,8 @@ test_suites = [
 	{
 		'name': 'elf_loader',
 		'sources': files(
-			'vmm/test_support.c',
-			'vmm/mock_paging.c',
+			'address_space/test_support.c',
+			'address_space/mock_paging.c',
 			'elf_loader/test_support.c',
 			'elf_loader/format.c',
 			'elf_loader/segments.c',
@@ -300,8 +300,8 @@ test_suites = [
 	{
 		'name': 'kernel_capability',
 		'sources': files(
-			'vmm/test_support.c',
-			'vmm/mock_paging.c',
+			'address_space/test_support.c',
+			'address_space/mock_paging.c',
 			'syscall/test_support.c',
 			'kernel_capability/test_support.c',
 			'kernel_capability/memory.c',
@@ -393,8 +393,8 @@ test_suites = [
 	{
 		'name': 'exception_fault',
 		'sources': files(
-			'vmm/test_support.c',
-			'vmm/mock_paging.c',
+			'address_space/test_support.c',
+			'address_space/mock_paging.c',
 			'exception/page_fault.c',
 		),
 		'link_with': core_test_lib,
@@ -412,19 +412,19 @@ test_suites = [
 	{
 		'name': 'address_transfer',
 		'sources': files(
-			'vmm/test_support.c',
-			'vmm/mock_paging.c',
+			'address_space/test_support.c',
+			'address_space/mock_paging.c',
 			'address_transfer/logical.c',
 		),
 		'link_with': core_test_lib,
 		'suites': ['unit', 'memory'],
 	},
 	{
-		'name': 'vmm',
+		'name': 'address_space',
 		'sources': files(
-			'vmm/test_support.c',
-			'vmm/mock_paging.c',
-			'vmm/architecture.c',
+			'address_space/test_support.c',
+			'address_space/mock_paging.c',
+			'address_space/architecture.c',
 		),
 		'link_with': core_test_lib,
 		'suites': ['unit', 'memory'],

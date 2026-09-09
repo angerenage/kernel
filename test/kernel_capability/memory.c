@@ -1,3 +1,5 @@
+#include "../../kernel/src/capability/memory.h"
+
 #include <base/address_space.h>
 #include <base/memory.h>
 #include <test_memory.h>
@@ -219,6 +221,133 @@ Test(kernel_capability_memory, allocator_without_normal_memory_denies_alloc) {
 	result = kernel_capability_test_call(
 		derived.allocator_cap, &alloc_request, sizeof(alloc_request), &allocation, sizeof(allocation));
 	cr_assert_eq(result.status, SYSCALL_STATUS_DENIED);
+	kernel_capability_test_end(&ctx);
+}
+
+Test(kernel_capability_memory, restricted_allocator_enforces_and_inherits_claim_ranges) {
+	struct kernel_capability_test_context           ctx;
+	struct memory_allocator_derive_response         restricted;
+	struct memory_allocator_derive_response         inherited;
+	struct memory_allocator_claim_physical_response claimed;
+	syscall_result_t                                result;
+	const uintptr_t                                 base    = 0x100000000ull;
+	const size_t                                    granule = TEST_MAPPING_GRANULE;
+	uint64_t payload[(sizeof(struct memory_allocator_derive_request) + sizeof(struct memory_allocator_physical_range) +
+	                  sizeof(uint64_t) - 1u) /
+	                 sizeof(uint64_t)]                      = {0};
+	struct memory_allocator_derive_request* request         = (struct memory_allocator_derive_request*)payload;
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/allocator-ranges");
+	cap_id_t root              = root_allocator(&ctx);
+	request->header.op         = MEMORY_ALLOCATOR_OP_DERIVE;
+	request->allocator_rights  = CAP_CALL | CAP_READ | CAP_MANAGE | CAP_DERIVE;
+	request->memory_rights     = CAP_READ | CAP_MAP;
+	request->memory_type_mask  = 1ull << MEMORY_TYPE_DEVICE;
+	request->claim_range_count = 1u;
+	request->claim_ranges[0]   = (struct memory_allocator_physical_range){base, 4u * granule};
+	result                     = kernel_capability_test_call(
+        root, request, sizeof(*request) + sizeof(request->claim_ranges[0]), &restricted, sizeof(restricted));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+
+	result = claim_memory(restricted.allocator_cap, base + granule, granule, MEMORY_TYPE_DEVICE, &claimed);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert(cap_destroy_by_id(claimed.memory_cap));
+	result = claim_memory(restricted.allocator_cap, base + 4u * granule, granule, MEMORY_TYPE_DEVICE, &claimed);
+	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	result = claim_memory(restricted.allocator_cap, base + 3u * granule, 2u * granule, MEMORY_TYPE_DEVICE, &claimed);
+	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+
+	const struct memory_allocator_derive_request inherit_request = {
+		.header           = {.op = MEMORY_ALLOCATOR_OP_DERIVE},
+		.allocator_rights = CAP_CALL | CAP_READ | CAP_MANAGE,
+		.memory_rights    = CAP_READ | CAP_MAP,
+		.memory_type_mask = 1ull << MEMORY_TYPE_DEVICE,
+		.flags            = MEMORY_ALLOCATOR_DERIVE_INHERIT_CLAIMS,
+	};
+	result = kernel_capability_test_call(
+		restricted.allocator_cap, &inherit_request, sizeof(inherit_request), &inherited, sizeof(inherited));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	result = claim_memory(inherited.allocator_cap, base + 2u * granule, granule, MEMORY_TYPE_DEVICE, &claimed);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert(cap_destroy_by_id(claimed.memory_cap));
+	result = claim_memory(inherited.allocator_cap, base + 4u * granule, granule, MEMORY_TYPE_DEVICE, &claimed);
+	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	kernel_capability_test_end(&ctx);
+}
+
+Test(kernel_capability_memory, mapping_has_one_resource_and_peer_authority_survives_initial_drop) {
+	struct kernel_capability_test_context ctx;
+	struct memory*                        memory;
+	struct mapping*                       mapping;
+	struct capability*                    initial;
+	struct capability*                    peer;
+	struct mapping_info                   info;
+	syscall_result_t                      result;
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/mapping-topology");
+	cr_assert(memory_create_anonymous(TEST_MAPPING_GRANULE, &memory));
+	cr_assert(address_space_map(process_address_space(ctx.process),
+	                            &(const struct address_space_mapping_request){
+									.memory = memory,
+									.access = MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+								},
+	                            &mapping));
+	memory_release(memory);
+	cap_id_t initial_id = kernel_mapping_publish(ctx.process,
+	                                             process_pid(ctx.process),
+	                                             mapping,
+	                                             CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP | CAP_DESTROY |
+	                                                 CAP_DELEGATE | CAP_DELEGATE_PEER,
+	                                             MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE);
+	cr_assert_neq(initial_id, CAP_ID_INVALID);
+	cr_assert_eq(
+		kernel_mapping_publish(ctx.process, process_pid(ctx.process), mapping, CAP_CALL | CAP_READ, MEMORY_ACCESS_READ),
+		CAP_ID_INVALID);
+	initial = cap_acquire(initial_id);
+	cr_assert_not_null(initial);
+	cap_id_t peer_id = cap_delegate_create(
+		initial, process_pid(ctx.process), CAP_CALL | CAP_READ | CAP_MAP | CAP_DESTROY | CAP_DELEGATE, true);
+	cap_release(initial);
+	cr_assert_neq(peer_id, CAP_ID_INVALID);
+	peer = cap_acquire(peer_id);
+	cr_assert_not_null(peer);
+	cap_id_t descendant_id =
+		cap_delegate_create(peer, process_pid(ctx.process), CAP_CALL | CAP_READ | CAP_DESTROY, false);
+	cap_release(peer);
+	cr_assert_neq(descendant_id, CAP_ID_INVALID);
+	cr_assert(cap_destroy_by_id(initial_id));
+	const struct mapping_info_request info_request = {.header = {.op = MAPPING_OP_INFO}};
+	result = kernel_capability_test_call(peer_id, &info_request, sizeof(info_request), &info, sizeof(info));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	const struct mapping_unmap_request unmap_request = {.header = {.op = MAPPING_OP_UNMAP}};
+	result = kernel_capability_test_call(peer_id, &unmap_request, sizeof(unmap_request), NULL, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_null(cap_acquire(peer_id));
+	cr_assert_null(cap_acquire(descendant_id));
+	mapping_release(mapping);
+	kernel_capability_test_end(&ctx);
+}
+
+Test(kernel_capability_memory, revoking_parent_memory_revokes_slices) {
+	struct kernel_capability_test_context ctx;
+	struct memory_slice_response          slice;
+	syscall_result_t                      result;
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/memory-slice-revocation");
+	cap_id_t                          allocator = root_allocator(&ctx);
+	cap_id_t                          memory    = allocate_memory(allocator, 2u * TEST_MAPPING_GRANULE);
+	const struct memory_slice_request request   = {
+		  .header = {.op = MEMORY_OP_SLICE},
+		  .offset = TEST_MAPPING_GRANULE,
+		  .size   = TEST_MAPPING_GRANULE,
+    };
+	result = kernel_capability_test_call(memory, &request, sizeof(request), &slice, sizeof(slice));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	struct capability* slice_cap = cap_acquire(slice.memory_cap);
+	cr_assert_not_null(slice_cap);
+	cap_release(slice_cap);
+	cr_assert(cap_destroy_by_id(memory));
+	cr_assert_null(cap_acquire(slice.memory_cap));
 	kernel_capability_test_end(&ctx);
 }
 

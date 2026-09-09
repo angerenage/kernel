@@ -5,7 +5,7 @@
 
 #include "../selftest.h"
 
-static void kernel_selftest_vmm_demand_maps_and_releases(struct kernel_selftest_context* ctx) {
+static void kernel_selftest_address_space_demand_maps_and_releases(struct kernel_selftest_context* ctx) {
 	struct memory*                memory  = NULL;
 	struct mapping*               mapping = NULL;
 	uintptr_t                     base    = 0u;
@@ -23,7 +23,7 @@ static void kernel_selftest_vmm_demand_maps_and_releases(struct kernel_selftest_
 														  .memory       = memory,
 														  .alignment    = 2u * granule,
 														  .guard_before = granule,
-														  .access       = MAPPING_ACCESS_READ | MAPPING_ACCESS_WRITE,
+														  .access       = MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
 													  },
 	                                                  &mapping),
 	                                "mapping create failed",
@@ -32,16 +32,16 @@ static void kernel_selftest_vmm_demand_maps_and_releases(struct kernel_selftest_
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, base != 0u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !hal_paging_query(address_space_hal(address_space_kernel()), base, NULL), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(
-		ctx, !address_space_resolve_fault(address_space_kernel(), base - granule, MAPPING_ACCESS_READ), cleanup);
+		ctx, !address_space_resolve_fault(address_space_kernel(), base - granule, MEMORY_ACCESS_READ), cleanup);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
-	                                address_space_resolve_fault(address_space_kernel(), base, MAPPING_ACCESS_WRITE),
+	                                address_space_resolve_fault(address_space_kernel(), base, MEMORY_ACCESS_WRITE),
 	                                "fault resolution failed",
 	                                cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(
 		ctx, hal_paging_query(address_space_hal(address_space_kernel()), base, &translation), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, (translation.flags & HAL_PAGE_WRITE) != 0u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(
-		ctx, address_space_protect(address_space_kernel(), mapping, MAPPING_ACCESS_READ), cleanup);
+		ctx, address_space_protect(address_space_kernel(), mapping, MEMORY_ACCESS_READ), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(
 		ctx, hal_paging_query(address_space_hal(address_space_kernel()), base, &translation), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, (translation.flags & HAL_PAGE_WRITE) == 0u, cleanup);
@@ -54,7 +54,7 @@ cleanup:
 	memory_release(memory);
 }
 
-static void kernel_selftest_vmm_large_leaf_split(struct kernel_selftest_context* ctx) {
+static void kernel_selftest_address_space_large_leaf_split(struct kernel_selftest_context* ctx) {
 	const struct hal_paging_info* paging   = hal_paging_info();
 	struct hal_paging_space*      space    = NULL;
 	uintptr_t                     physical = 0u;
@@ -204,13 +204,13 @@ cleanup:
 	if (allocation.size != 0u) (void)pmm_free(allocation);
 }
 
-static const struct kernel_selftest_case kernel_vmm_selftests[] = {
-	{.name = "demand_maps_and_releases", .run = kernel_selftest_vmm_demand_maps_and_releases},
-	{		.name = "large_leaf_split",         .run = kernel_selftest_vmm_large_leaf_split},
+static const struct kernel_selftest_case kernel_address_space_selftests[] = {
+	{.name = "demand_maps_and_releases", .run = kernel_selftest_address_space_demand_maps_and_releases},
+	{		.name = "large_leaf_split",         .run = kernel_selftest_address_space_large_leaf_split},
 };
 
-const struct kernel_selftest_suite kernel_vmm_selftest_suite = {
-	.name       = "vmm",
-	.cases      = kernel_vmm_selftests,
-	.case_count = sizeof(kernel_vmm_selftests) / sizeof(kernel_vmm_selftests[0]),
+const struct kernel_selftest_suite kernel_address_space_selftest_suite = {
+	.name       = "address_space",
+	.cases      = kernel_address_space_selftests,
+	.case_count = sizeof(kernel_address_space_selftests) / sizeof(kernel_address_space_selftests[0]),
 };

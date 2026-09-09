@@ -97,7 +97,7 @@ static syscall_result_t external_mapping_create(const struct cap_request* req, c
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 	memory_release(memory);
-	out->mapping_cap = kernel_mapping_grant(
+	out->mapping_cap = kernel_mapping_publish(
 		caller, req->caller, mapping, CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP | CAP_DESTROY | CAP_DELEGATE, access);
 	out->address      = mapping_address(mapping);
 	out->mapping_size = mapping_size(mapping);

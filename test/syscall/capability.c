@@ -171,14 +171,14 @@ Test(syscall, capability_reply_delivers_to_caller_before_success) {
 	provider_thread->thread.address_space = NULL;
 	sched_set_current(cpu_current(), &provider_thread->thread);
 
-	cr_assert(test_vm_map(process_address_space(caller),
-	                      1u,
-	                      MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
-	                      0u,
-	                      1u,
-	                      0u,
-	                      &response_mapping,
-	                      &response_address));
+	cr_assert(test_address_space_map(process_address_space(caller),
+	                                 TEST_MAPPING_GRANULE,
+	                                 MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+	                                 0u,
+	                                 TEST_MAPPING_GRANULE,
+	                                 0u,
+	                                 &response_mapping,
+	                                 &response_address));
 	pending = cap_pending_call_create(NULL, 9u, process_pid(provider), process_pid(caller), sizeof(reply_value));
 	cr_assert_not_null(pending);
 	pending->response_address = (uintptr_t)response_address;
@@ -225,14 +225,14 @@ Test(syscall, capability_reply_reports_failed_caller_delivery) {
 	provider_thread->thread.address_space = NULL;
 	sched_set_current(cpu_current(), &provider_thread->thread);
 
-	cr_assert(test_vm_map(process_address_space(caller),
-	                      1u,
-	                      MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
-	                      0u,
-	                      1u,
-	                      0u,
-	                      &response_mapping,
-	                      &response_address));
+	cr_assert(test_address_space_map(process_address_space(caller),
+	                                 TEST_MAPPING_GRANULE,
+	                                 MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+	                                 0u,
+	                                 TEST_MAPPING_GRANULE,
+	                                 0u,
+	                                 &response_mapping,
+	                                 &response_address));
 	pending = cap_pending_call_create(NULL, 10u, process_pid(provider), process_pid(caller), sizeof(reply_value));
 	cr_assert_not_null(pending);
 	pending->response_address = (uintptr_t)response_address;

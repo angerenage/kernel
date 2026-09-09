@@ -10,6 +10,8 @@
 
 #include "memory.h"
 
+#define ADDRESS_SPACE_CAP_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE | CAP_EXEC | CAP_MAP | CAP_DELEGATE))
+
 static bool access_valid(memory_access_t access) {
 	return (access & ~MEMORY_ACCESS_VALID_MASK) == 0u;
 }
@@ -65,13 +67,13 @@ static syscall_result_t address_space_map_handler(const struct cap_request* req,
 	}
 	cap_rights_t maximum = req->rights & memory_rights & (CAP_READ | CAP_WRITE | CAP_EXEC);
 	response.mapping_cap =
-		kernel_mapping_grant(target,
-	                         req->caller,
-	                         mapping,
-	                         CAP_CALL | CAP_READ | CAP_MAP | CAP_DESTROY | CAP_DELEGATE | maximum,
-	                         (memory_access_t)(((maximum & CAP_READ) != 0u ? MEMORY_ACCESS_READ : 0u) |
-	                                           ((maximum & CAP_WRITE) != 0u ? MEMORY_ACCESS_WRITE : 0u) |
-	                                           ((maximum & CAP_EXEC) != 0u ? MEMORY_ACCESS_EXEC : 0u)));
+		kernel_mapping_publish(target,
+	                           req->caller,
+	                           mapping,
+	                           CAP_CALL | CAP_READ | CAP_MAP | CAP_DESTROY | CAP_DELEGATE | CAP_DELEGATE_PEER | maximum,
+	                           (memory_access_t)(((maximum & CAP_READ) != 0u ? MEMORY_ACCESS_READ : 0u) |
+	                                             ((maximum & CAP_WRITE) != 0u ? MEMORY_ACCESS_WRITE : 0u) |
+	                                             ((maximum & CAP_EXEC) != 0u ? MEMORY_ACCESS_EXEC : 0u)));
 	response.address = mapping_address(mapping);
 	if (response.mapping_cap == CAP_ID_INVALID) {
 		(void)address_space_unmap(process_address_space(target), mapping);
@@ -117,7 +119,8 @@ cap_id_t kernel_address_space_grant(struct process* process, process_id_t recipi
 	struct cap_object* object;
 	cap_object_id_t    object_id;
 	bool               object_created = false;
-	if (process == NULL || recipient == PROCESS_PID_INVALID || process_address_space(process) == NULL)
+	if (process == NULL || recipient == PROCESS_PID_INVALID || process_address_space(process) == NULL ||
+	    (rights & CAP_CALL) == 0u || (rights & ~ADDRESS_SPACE_CAP_RIGHTS) != 0u)
 		return CAP_ID_INVALID;
 	object_id = process_address_space_cap_object_id(process);
 	object    = object_id == CAP_OBJECT_ID_INVALID ? NULL : cap_object_acquire(object_id);

@@ -18,9 +18,9 @@
 #include <stdint.h>
 #include <threads.h>
 
+#include "../address_space/test_support.h"
 #include "../mocks/hal/cpu_mock.h"
 #include "../mocks/hal/userspace_mock.h"
-#include "../vmm/test_support.h"
 
 void                init_process_test_environment(void);
 enum process_result create_process_with_main_thread(struct process**                   out_process,

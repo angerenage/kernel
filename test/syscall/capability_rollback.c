@@ -197,23 +197,23 @@ Test(capability_syscall, call_validates_response_before_handler_side_effects) {
 	uint32_t         response_value   = 0u;
 	syscall_result_t result;
 
-	cr_assert(test_vm_map(process_address_space(process),
-	                      1u,
-	                      MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
-	                      0u,
-	                      1u,
-	                      0u,
-	                      &request_mapping,
-	                      &request_buffer));
+	cr_assert(test_address_space_map(process_address_space(process),
+	                                 TEST_MAPPING_GRANULE,
+	                                 MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+	                                 0u,
+	                                 TEST_MAPPING_GRANULE,
+	                                 0u,
+	                                 &request_mapping,
+	                                 &request_buffer));
 	cr_assert_not_null(request_buffer);
-	cr_assert(test_vm_map(process_address_space(process),
-	                      1u,
-	                      MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
-	                      0u,
-	                      1u,
-	                      0u,
-	                      &response_mapping,
-	                      &response_buffer));
+	cr_assert(test_address_space_map(process_address_space(process),
+	                                 TEST_MAPPING_GRANULE,
+	                                 MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+	                                 0u,
+	                                 TEST_MAPPING_GRANULE,
+	                                 0u,
+	                                 &response_mapping,
+	                                 &response_buffer));
 	cr_assert_not_null(response_buffer);
 
 	object_id = cap_object_create_kernel(0x2006u, side_effecting_cap_handler, NULL);

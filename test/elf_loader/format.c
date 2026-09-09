@@ -4,7 +4,7 @@
 
 static void make_minimal_exec(struct elf_test_image* image) {
 	const uint64_t file_offset = TEST_MAPPING_GRANULE;
-	const uint64_t vaddr       = MM_USER_VMM_BASE + 4u * (uint64_t)TEST_MAPPING_GRANULE;
+	const uint64_t vaddr       = TEST_MAPPING_GRANULE + 4u * (uint64_t)TEST_MAPPING_GRANULE;
 	elf_test_image_init(image, 1u);
 	elf_test_header(image)->entry = vaddr;
 	elf_test_set_load(image, 0u, file_offset, vaddr, 16u, 16u, ELF_TEST_PF_R | ELF_TEST_PF_X);
@@ -71,9 +71,9 @@ Test(elf_loader_format, rejects_filesz_larger_than_memsz_even_when_memsz_is_zero
 	struct kernel_elf_process   loaded = {0};
 	enum kernel_elf_load_result result;
 	const uint64_t              exec_offset = TEST_MAPPING_GRANULE;
-	const uint64_t              exec_vaddr  = MM_USER_VMM_BASE + 4u * (uint64_t)TEST_MAPPING_GRANULE;
+	const uint64_t              exec_vaddr  = TEST_MAPPING_GRANULE + 4u * (uint64_t)TEST_MAPPING_GRANULE;
 	const uint64_t              bad_offset  = 2u * (uint64_t)TEST_MAPPING_GRANULE;
-	const uint64_t              bad_vaddr   = MM_USER_VMM_BASE + 8u * (uint64_t)TEST_MAPPING_GRANULE;
+	const uint64_t              bad_vaddr   = TEST_MAPPING_GRANULE + 8u * (uint64_t)TEST_MAPPING_GRANULE;
 
 	elf_test_init_environment();
 	elf_test_image_init(&image, 2u);
@@ -94,7 +94,7 @@ Test(elf_loader_format, rejects_segment_file_ranges_outside_the_module) {
 	struct elf_test_image     image;
 	struct kernel_boot_module module;
 	struct kernel_elf_process loaded;
-	const uint64_t            vaddr = MM_USER_VMM_BASE + 4u * (uint64_t)TEST_MAPPING_GRANULE;
+	const uint64_t            vaddr = TEST_MAPPING_GRANULE + 4u * (uint64_t)TEST_MAPPING_GRANULE;
 	elf_test_init_environment();
 	elf_test_image_init(&image, 1u);
 	elf_test_header(&image)->entry = vaddr;
@@ -127,7 +127,7 @@ Test(elf_loader_format, rejects_entry_points_without_executable_mapping) {
 	struct elf_test_image     image;
 	struct kernel_boot_module module;
 	struct kernel_elf_process loaded;
-	const uint64_t            vaddr = MM_USER_VMM_BASE + 4u * (uint64_t)TEST_MAPPING_GRANULE;
+	const uint64_t            vaddr = TEST_MAPPING_GRANULE + 4u * (uint64_t)TEST_MAPPING_GRANULE;
 	elf_test_init_environment();
 	elf_test_image_init(&image, 1u);
 	elf_test_header(&image)->entry = vaddr;

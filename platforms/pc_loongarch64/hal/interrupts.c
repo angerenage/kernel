@@ -242,14 +242,14 @@ static bool was_user_mode(void) {
 	return (prmd & 0x3u) == 0x3u;
 }
 
-static mapping_access_t loongarch64_fault_access(uint64_t ecode) {
+static memory_access_t loongarch64_fault_access(uint64_t ecode) {
 	switch (ecode) {
 	case 0x1:
-		return MAPPING_ACCESS_READ;
+		return MEMORY_ACCESS_READ;
 	case 0x2:
-		return MAPPING_ACCESS_WRITE;
+		return MEMORY_ACCESS_WRITE;
 	case 0x3:
-		return MAPPING_ACCESS_EXEC;
+		return MEMORY_ACCESS_EXEC;
 	default:
 		return 0u;
 	}
