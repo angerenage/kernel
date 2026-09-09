@@ -7,7 +7,7 @@
 struct init_state {
 	cap_id_t kernel_resources_cap;
 	cap_id_t serial_cap;
-	size_t   page_size;
+	cap_id_t memory_allocator_cap;
 };
 
 extern struct init_state g_init;

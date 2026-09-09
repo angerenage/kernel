@@ -1,4 +1,4 @@
-#include <base/vmm.h>
+#include <test_memory.h>
 
 #include "test_support.h"
 
@@ -7,8 +7,8 @@ Test(elf_loader_rollback, invalid_entry_after_segment_load_reclaims_everything) 
 	struct kernel_boot_module module;
 	struct kernel_elf_process loaded = {0};
 	size_t                    process_before, free_before;
-	const uint64_t            data_offset = VMM_PAGE_SIZE;
-	const uint64_t            data_vaddr  = MM_USER_VMM_BASE + 4u * (uint64_t)VMM_PAGE_SIZE;
+	const uint64_t            data_offset = TEST_MAPPING_GRANULE;
+	const uint64_t            data_vaddr  = MM_USER_VMM_BASE + 4u * (uint64_t)TEST_MAPPING_GRANULE;
 	elf_test_init_environment();
 	elf_test_image_init(&image, 1u);
 	elf_test_header(&image)->entry = data_vaddr;
@@ -31,7 +31,7 @@ Test(elf_loader_rollback, missing_load_segments_do_not_leave_an_empty_process) {
 	size_t                    process_before, free_before;
 	elf_test_init_environment();
 	elf_test_image_init(&image, 1u);
-	elf_test_header(&image)->entry  = MM_USER_VMM_BASE + 4u * (uintptr_t)VMM_PAGE_SIZE;
+	elf_test_header(&image)->entry  = MM_USER_VMM_BASE + 4u * (uintptr_t)TEST_MAPPING_GRANULE;
 	elf_test_phdr(&image, 0u)->type = 0u;
 	module                          = elf_test_module(&image);
 	process_before                  = process_count();

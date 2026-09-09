@@ -126,10 +126,10 @@ Test(process, spawn_user_creates_main_thread_in_process_address_space) {
 
 	result = create_process_with_main_thread(&process,
 	                                         &(const struct process_spawn_params){
-												 .name             = "spawned",
-												 .user_entry       = 0x400000u,
-												 .user_stack_pages = 2u,
-												 .preferred_cpu    = NULL,
+												 .name            = "spawned",
+												 .user_entry      = 0x400000u,
+												 .user_stack_size = 2u * TEST_MAPPING_GRANULE,
+												 .preferred_cpu   = NULL,
 											 });
 	cr_assert_eq(result, PROCESS_OK, "process_create/process_spawn_thread failed: %d", result);
 	cr_assert_not_null(process, "process_create did not return a process");

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <base/vmm.h>
+#include <base/memory.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -8,15 +8,12 @@
 struct mapping;
 
 /* CPU access rights attached to one Mapping projection. */
-enum mapping_access {
-	MAPPING_ACCESS_READ  = 1u << 0,
-	MAPPING_ACCESS_WRITE = 1u << 1,
-	MAPPING_ACCESS_EXEC  = 1u << 2,
-};
+typedef memory_access_t mapping_access_t;
 
-typedef uint32_t mapping_access_t;
-
-#define MAPPING_ACCESS_VALID_MASK ((mapping_access_t)(MAPPING_ACCESS_READ | MAPPING_ACCESS_WRITE | MAPPING_ACCESS_EXEC))
+#define MAPPING_ACCESS_READ MEMORY_ACCESS_READ
+#define MAPPING_ACCESS_WRITE MEMORY_ACCESS_WRITE
+#define MAPPING_ACCESS_EXEC MEMORY_ACCESS_EXEC
+#define MAPPING_ACCESS_VALID_MASK MEMORY_ACCESS_VALID_MASK
 
 /* Retain one stable Mapping metadata reference. */
 bool mapping_retain(struct mapping* mapping);

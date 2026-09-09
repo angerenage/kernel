@@ -1,27 +1,29 @@
 #include "test_support.h"
 
-#include <base/vmm.h>
+#include <test_memory.h>
 
 #define PROCESS_TEST_ARENA_SIZE KiB(2048)
 #define PROCESS_TEST_HEAP_SIZE KiB(256)
 
-static uint8_t process_test_arena[PROCESS_TEST_ARENA_SIZE] __attribute__((aligned(VMM_PAGE_SIZE)));
-static uint8_t process_test_heap[PROCESS_TEST_HEAP_SIZE] __attribute__((aligned(VMM_PAGE_SIZE)));
+static uint8_t process_test_arena[PROCESS_TEST_ARENA_SIZE] __attribute__((aligned(TEST_MAPPING_GRANULE)));
+static uint8_t process_test_heap[PROCESS_TEST_HEAP_SIZE] __attribute__((aligned(TEST_MAPPING_GRANULE)));
 static size_t  process_test_heap_offset;
 
-bool heap_grow_pages(size_t page_count, void** out_base) {
+bool heap_grow_region(size_t minimum_size, void** out_base, size_t* out_size) {
 	size_t bytes;
 	size_t offset;
 
-	if (out_base == NULL) return false;
+	if (out_base == NULL || out_size == NULL) return false;
 	*out_base = NULL;
-	bytes     = page_count * VMM_PAGE_SIZE;
+	*out_size = 0u;
+	bytes     = minimum_size;
 	for (;;) {
 		offset = __atomic_load_n(&process_test_heap_offset, __ATOMIC_ACQUIRE);
 		if (bytes > PROCESS_TEST_HEAP_SIZE - offset) return false;
 		if (__atomic_compare_exchange_n(
 				&process_test_heap_offset, &offset, offset + bytes, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
 			*out_base = process_test_heap + offset;
+			*out_size = bytes;
 			return true;
 		}
 	}
@@ -92,13 +94,13 @@ enum process_result create_process_with_main_thread(struct process**            
 	thread_result =
 		process_spawn_thread(process,
 	                         &main_thread,
-	                         &(const struct process_thread_params){.name             = params->name,
-	                                                               .user_entry       = params->user_entry,
-	                                                               .arg_data         = params->arg_data,
-	                                                               .arg_size         = params->arg_size,
-	                                                               .user_stack_pages = params->user_stack_pages,
-	                                                               .preferred_cpu    = params->preferred_cpu,
-	                                                               .detached         = false});
+	                         &(const struct process_thread_params){.name            = params->name,
+	                                                               .user_entry      = params->user_entry,
+	                                                               .arg_data        = params->arg_data,
+	                                                               .arg_size        = params->arg_size,
+	                                                               .user_stack_size = params->user_stack_size,
+	                                                               .preferred_cpu   = params->preferred_cpu,
+	                                                               .detached        = false});
 	if (thread_result != PROCESS_THREAD_SPAWN_OK) {
 		(void)process_destroy(process);
 		return process_test_result_from_thread_spawn(thread_result);

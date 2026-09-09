@@ -68,8 +68,8 @@ syscall_result_t syscall_self(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, ui
 	self_cap_id = kernel_self_grant(process);
 	if (self_cap_id == CAP_ID_INVALID) goto grant_failed;
 
-	address_space_cap_id =
-		kernel_address_space_grant(process, process_pid(process), CAP_CALL | CAP_MAP | CAP_READ | CAP_DELEGATE);
+	address_space_cap_id = kernel_address_space_grant(
+		process, process_pid(process), CAP_CALL | CAP_MAP | CAP_READ | CAP_WRITE | CAP_EXEC | CAP_DELEGATE);
 	if (address_space_cap_id == CAP_ID_INVALID) goto grant_failed;
 	main_thread_cap_id = kernel_thread_grant_full(main_thread, process_pid(process));
 	if (main_thread_cap_id == CAP_ID_INVALID) goto grant_failed;
@@ -126,8 +126,8 @@ syscall_result_t syscall_create_process(uintptr_t arg0, uintptr_t arg1, uintptr_
 		(void)process_destroy(process);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
-	response.address_space_cap =
-		kernel_address_space_grant(process, caller_pid, CAP_CALL | CAP_MAP | CAP_READ | CAP_DELEGATE);
+	response.address_space_cap = kernel_address_space_grant(
+		process, caller_pid, CAP_CALL | CAP_MAP | CAP_READ | CAP_WRITE | CAP_EXEC | CAP_DELEGATE);
 	if (response.address_space_cap == CAP_ID_INVALID) {
 		(void)cap_destroy_by_id(response.process_cap);
 		(void)process_destroy(process);

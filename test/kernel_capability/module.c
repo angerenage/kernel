@@ -2,9 +2,9 @@
 #include "test_support.h"
 
 Test(kernel_capability_module, repeated_maps_share_one_physical_backing) {
-	struct kernel_capability_test_context  ctx;
-	_Alignas(VMM_PAGE_SIZE) static uint8_t module_bytes[VMM_PAGE_SIZE];
-	const struct kernel_boot_module        modules[] = {
+	struct kernel_capability_test_context         ctx;
+	_Alignas(TEST_MAPPING_GRANULE) static uint8_t module_bytes[TEST_MAPPING_GRANULE];
+	const struct kernel_boot_module               modules[] = {
         {.name = "mapped.bin", .address = module_bytes + 17u, .size = 31u},
     };
 	const struct module_map_request request = {.header = {.op = MODULE_OP_MAP}};

@@ -6,7 +6,6 @@
 #include <base/kernel_resource.h>
 #include <base/math.h>
 #include <base/syscall.h>
-#include <base/vmm.h>
 #include <core/address_space.h>
 #include <core/capability.h>
 #include <core/memory.h>
@@ -31,37 +30,38 @@ static struct spinlock framebuffer_memory_lock =
 
 struct external_mapping_layout {
 	uintptr_t physical_base;
-	size_t    page_offset;
-	size_t    page_count;
+	size_t    data_offset;
+	size_t    mapping_size;
 };
 
 struct external_mapping_result {
-	cap_id_t        mapping_cap;
-	struct vmm_info mapping;
-	size_t          data_offset;
+	cap_id_t  mapping_cap;
+	uintptr_t address;
+	size_t    mapping_size;
+	size_t    data_offset;
 };
 
 static bool external_mapping_layout(const void* address, size_t size, struct external_mapping_layout* out) {
 	uintptr_t virtual_address;
 	uintptr_t physical_address;
 	size_t    mapped_size;
+	size_t    granule = address_space_minimum_mapping_size();
 
-	if (address == NULL || size == 0u || out == NULL) return false;
+	if (address == NULL || size == 0u || out == NULL || granule == 0u) return false;
 	virtual_address = (uintptr_t)address;
 	if (virtual_address < boot_info.direct_map_offset) return false;
 	physical_address   = virtual_address - boot_info.direct_map_offset;
-	out->physical_base = physical_address & ~(uintptr_t)(VMM_PAGE_SIZE - 1u);
-	out->page_offset   = (size_t)(physical_address - out->physical_base);
-	if (add_overflow_size(out->page_offset, size, &mapped_size) ||
-	    add_overflow_size(mapped_size, VMM_PAGE_SIZE - 1u, &mapped_size)) {
+	out->physical_base = physical_address & ~(uintptr_t)(granule - 1u);
+	out->data_offset   = (size_t)(physical_address - out->physical_base);
+	if (add_overflow_size(out->data_offset, size, &mapped_size) || !align_up_size(mapped_size, granule, &mapped_size)) {
 		return false;
 	}
-	out->page_count = mapped_size / VMM_PAGE_SIZE;
-	return out->page_count != 0u;
+	out->mapping_size = mapped_size;
+	return mapped_size != 0u;
 }
 
 static syscall_result_t external_mapping_create(const struct cap_request* req, const void* address, size_t size,
-                                                vmm_prot_t prot, struct external_mapping_result* out) {
+                                                memory_access_t access, struct external_mapping_result* out) {
 	struct external_mapping_layout layout;
 	struct process*                caller;
 	struct address_space*          space;
@@ -81,7 +81,7 @@ static syscall_result_t external_mapping_create(const struct cap_request* req, c
 			(void)memory_create_physical(
 				&(const struct memory_physical_request){
 					.physical_address        = layout.physical_base,
-					.size                    = layout.page_count * VMM_PAGE_SIZE,
+					.size                    = layout.mapping_size,
 					.memory_type             = MEMORY_TYPE_NORMAL,
 					.external_cpu_accessible = true,
 				},
@@ -89,10 +89,6 @@ static syscall_result_t external_mapping_create(const struct cap_request* req, c
 		if (framebuffer_memory != NULL && memory_retain(framebuffer_memory)) memory = framebuffer_memory;
 		spinlock_unlock_irqrestore(&framebuffer_memory_lock, state);
 	}
-	mapping_access_t access = 0u;
-	if ((prot & VMM_PROT_READ) != 0u) access |= MAPPING_ACCESS_READ;
-	if ((prot & VMM_PROT_WRITE) != 0u) access |= MAPPING_ACCESS_WRITE;
-	if ((prot & VMM_PROT_EXEC) != 0u) access |= MAPPING_ACCESS_EXEC;
 	if (memory == NULL ||
 	    !address_space_map(
 			space, &(const struct address_space_mapping_request){.memory = memory, .access = access}, &mapping)) {
@@ -101,15 +97,11 @@ static syscall_result_t external_mapping_create(const struct cap_request* req, c
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 	memory_release(memory);
-	out->mapping = (struct vmm_info){
-		.id          = VMM_ID_INVALID,
-		.base        = (void*)mapping_address(mapping),
-		.page_count  = mapping_size(mapping) / VMM_PAGE_SIZE,
-		.prot        = prot,
-		.memory_type = mapping_memory_type(mapping),
-	};
-	out->mapping_cap = kernel_mapping_grant(caller, req->caller, mapping, 0u, CAP_DESTROY);
-	out->data_offset = layout.page_offset;
+	out->mapping_cap = kernel_mapping_grant(
+		caller, req->caller, mapping, CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP | CAP_DESTROY | CAP_DELEGATE, access);
+	out->address      = mapping_address(mapping);
+	out->mapping_size = mapping_size(mapping);
+	out->data_offset  = layout.data_offset;
 	if (out->mapping_cap == CAP_ID_INVALID) {
 		(void)address_space_unmap(space, mapping);
 		mapping_release(mapping);
@@ -219,10 +211,15 @@ static syscall_result_t framebuffer_map_handler(const struct cap_request*       
 	    !cap_kernel_response_fits(req, sizeof(response))) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
-	result = external_mapping_create(req, framebuffer->address, size, VMM_PROT_READ | VMM_PROT_WRITE, &mapping);
+	result =
+		external_mapping_create(req, framebuffer->address, size, MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE, &mapping);
 	if (result.status != SYSCALL_STATUS_OK) return result;
 	response = (struct framebuffer_map_response){
-		.mapping_cap = mapping.mapping_cap, .mapping = mapping.mapping, .data_offset = mapping.data_offset};
+		.mapping_cap  = mapping.mapping_cap,
+		.address      = mapping.address,
+		.mapping_size = mapping.mapping_size,
+		.data_offset  = mapping.data_offset,
+	};
 	result = cap_kernel_write_response(req, &response, sizeof(response));
 	if (result.status != SYSCALL_STATUS_OK) {
 		(void)kernel_mapping_discard_unpublished(response.mapping_cap, req->caller);

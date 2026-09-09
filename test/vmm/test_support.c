@@ -25,6 +25,7 @@ void init_test_vmm(uint8_t* arena, size_t arena_size) {
 
 	cr_assert_geq(arena_size, KiB(192), "test arena is too small");
 	mock_paging_reset();
+	mock_cache_reset();
 	cr_assert(pmm_init(memory_map, sizeof(memory_map) / sizeof(memory_map[0]), 0), "pmm_init failed");
 	cr_assert(address_space_init(), "address_space_init failed");
 }
@@ -34,25 +35,23 @@ size_t vmm_test_bytes_consumed_since(size_t free_before) {
 	return free_before >= free_after ? free_before - free_after : 0u;
 }
 
-bool test_vm_map(struct address_space* space, size_t page_count, vmm_prot_t prot, uintptr_t requested_base,
-                 size_t align_pages, size_t guard_pages, struct mapping** out_mapping, void** out_base) {
+bool test_vm_map(struct address_space* space, size_t page_count, memory_access_t access, uintptr_t requested_base,
+                 size_t alignment_units, size_t guard_units, struct mapping** out_mapping, void** out_base) {
 	struct memory*  memory;
 	struct mapping* mapping;
-	if (page_count > SIZE_MAX / VMM_PAGE_SIZE || !memory_create_anonymous(page_count * VMM_PAGE_SIZE, &memory))
+	if ((access & ~MEMORY_ACCESS_VALID_MASK) != 0u || page_count > SIZE_MAX / TEST_MAPPING_GRANULE ||
+	    !memory_create_anonymous(page_count * TEST_MAPPING_GRANULE, &memory))
 		return false;
-	mapping_access_t access = 0u;
-	if ((prot & VMM_PROT_READ) != 0u) access |= MAPPING_ACCESS_READ;
-	if ((prot & VMM_PROT_WRITE) != 0u) access |= MAPPING_ACCESS_WRITE;
-	if ((prot & VMM_PROT_EXEC) != 0u) access |= MAPPING_ACCESS_EXEC;
-	bool mapped = address_space_map(space,
-	                                &(const struct address_space_mapping_request){
-										.memory       = memory,
-										.address      = requested_base,
-										.alignment    = (align_pages == 0u ? 1u : align_pages) * VMM_PAGE_SIZE,
-										.guard_before = guard_pages * VMM_PAGE_SIZE,
-										.access       = access,
-									},
-	                                &mapping);
+	bool mapped =
+		address_space_map(space,
+	                      &(const struct address_space_mapping_request){
+							  .memory       = memory,
+							  .address      = requested_base,
+							  .alignment    = (alignment_units == 0u ? 1u : alignment_units) * TEST_MAPPING_GRANULE,
+							  .guard_before = guard_units * TEST_MAPPING_GRANULE,
+							  .access       = access,
+						  },
+	                      &mapping);
 	memory_release(memory);
 	if (mapped) {
 		if (out_base != NULL) *out_base = (void*)mapping_address(mapping);

@@ -104,15 +104,15 @@ static enum process_thread_spawn_result process_prepare_thread_internal(struct p
 	if (thread == NULL) return PROCESS_THREAD_SPAWN_NO_MEMORY;
 	start_result = uthread_prepare(thread,
 	                               &(const struct uthread_start_params){
-									   .name             = params->name,
-									   .process          = process,
-									   .user_entry       = params->user_entry,
-									   .arg_data         = params->arg_data,
-									   .arg_size         = params->arg_size,
-									   .user_stack_pages = params->user_stack_pages,
-									   .preferred_cpu    = params->preferred_cpu,
-									   .detached         = params->detached,
-									   .main_thread      = main_thread,
+									   .name            = params->name,
+									   .process         = process,
+									   .user_entry      = params->user_entry,
+									   .arg_data        = params->arg_data,
+									   .arg_size        = params->arg_size,
+									   .user_stack_size = params->user_stack_size,
+									   .preferred_cpu   = params->preferred_cpu,
+									   .detached        = params->detached,
+									   .main_thread     = main_thread,
 								   });
 	if (start_result != UTHREAD_START_OK) {
 		free(thread);

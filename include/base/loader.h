@@ -15,5 +15,5 @@ struct loader_load_response {
 	cap_id_t  address_space_cap;
 	uintptr_t entry;
 	uintptr_t heap_base;
-	size_t    heap_page_count;
+	size_t    heap_size;
 };

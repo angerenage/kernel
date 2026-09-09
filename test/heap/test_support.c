@@ -1,18 +1,19 @@
 #include "test_support.h"
 
-#include <base/vmm.h>
 #include <core/pmm.h>
+#include <test_memory.h>
 
 static uint8_t* grow_base;
 static size_t   grow_capacity;
 static size_t   grow_offset;
 
-bool heap_grow_pages(size_t page_count, void** out_base) {
-	size_t bytes  = page_count * VMM_PAGE_SIZE;
+bool heap_grow_region(size_t minimum_size, void** out_base, size_t* out_size) {
+	size_t bytes  = minimum_size;
 	size_t offset = 0;
 
-	if (out_base) *out_base = NULL;
-	if (!out_base) return false;
+	if (out_base == NULL || out_size == NULL) return false;
+	*out_base = NULL;
+	*out_size = 0u;
 
 	for (;;) {
 		offset = __atomic_load_n(&grow_offset, __ATOMIC_ACQUIRE);
@@ -20,14 +21,15 @@ bool heap_grow_pages(size_t page_count, void** out_base) {
 		if (__atomic_compare_exchange_n(
 				&grow_offset, &offset, offset + bytes, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
 			*out_base = grow_base + offset;
+			*out_size = bytes;
 			return true;
 		}
 	}
 }
 
 void init_test_heap(uint8_t* arena, size_t arena_size) {
-	cr_assert_eq(((uintptr_t)arena & (VMM_PAGE_SIZE - 1u)), 0, "test arena must be page-aligned");
-	cr_assert_eq((arena_size & (VMM_PAGE_SIZE - 1u)), 0, "test arena size must be page-aligned");
+	cr_assert_eq(((uintptr_t)arena & (TEST_MAPPING_GRANULE - 1u)), 0, "test arena must be page-aligned");
+	cr_assert_eq((arena_size & (TEST_MAPPING_GRANULE - 1u)), 0, "test arena size must be page-aligned");
 	grow_base     = arena;
 	grow_capacity = arena_size;
 	__atomic_store_n(&grow_offset, 0u, __ATOMIC_RELEASE);

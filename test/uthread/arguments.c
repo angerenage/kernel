@@ -21,13 +21,13 @@ Test(uthread, start_copies_argument_onto_new_user_stack) {
 
 	cr_assert_eq(uthread_start(&worker,
 	                           &(const struct uthread_start_params){
-								   .name             = "user/argument-copy",
-								   .process          = process,
-								   .user_entry       = 0x400000u,
-								   .arg_data         = &source,
-								   .arg_size         = sizeof(source),
-								   .user_stack_pages = 2u,
-								   .detached         = false,
+								   .name            = "user/argument-copy",
+								   .process         = process,
+								   .user_entry      = 0x400000u,
+								   .arg_data        = &source,
+								   .arg_size        = sizeof(source),
+								   .user_stack_size = 2u * TEST_MAPPING_GRANULE,
+								   .detached        = false,
 							   }),
 	             UTHREAD_START_OK);
 

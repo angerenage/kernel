@@ -14,13 +14,14 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <test_memory.h>
 
 #define KiB(x) ((size_t)(x) * 1024u)
 
 void   init_test_vmm(uint8_t* arena, size_t arena_size);
 size_t vmm_test_bytes_consumed_since(size_t free_before);
-bool   test_vm_map(struct address_space* space, size_t page_count, vmm_prot_t prot, uintptr_t requested_base,
-                   size_t align_pages, size_t guard_pages, struct mapping** out_mapping, void** out_base);
+bool   test_vm_map(struct address_space* space, size_t page_count, memory_access_t access, uintptr_t requested_base,
+                   size_t alignment_units, size_t guard_units, struct mapping** out_mapping, void** out_base);
 void   mock_paging_reset(void);
 void   mock_paging_fail_init_once(void);
 void   mock_paging_fail_after(size_t successful_maps);
@@ -30,3 +31,5 @@ size_t mock_paging_mapping_count(void);
 void   mock_paging_set_leaf_size_mask(uint64_t mask);
 size_t mock_paging_map_call_count(void);
 size_t mock_paging_largest_map_size(void);
+void   mock_cache_reset(void);
+size_t mock_cache_executable_sync_count(void);

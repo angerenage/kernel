@@ -27,8 +27,8 @@ void _start(const struct init_startup_info* startup) {
 
 	memset(__bss_start, 0, __bss_end - __bss_start);
 
-	if (startup == NULL || startup->size < sizeof(*startup) || startup->heap_base == 0u ||
-	    startup->heap_page_count == 0u || startup->page_size == 0u || startup->kernel_resources_cap == CAP_ID_INVALID) {
+	if (startup == NULL || startup->size < sizeof(*startup) || startup->heap_base == 0u || startup->heap_size == 0u ||
+	    startup->memory_allocator_cap == CAP_ID_INVALID || startup->kernel_resources_cap == CAP_ID_INVALID) {
 		exit(PROCESS_EXIT_SYSTEM_INVALID_STARTUP);
 	}
 	if (kernel_resource_acquire(startup->kernel_resources_cap, KERNEL_RESOURCE_TYPE_SERIAL, &g_init.serial_cap) !=
@@ -36,15 +36,15 @@ void _start(const struct init_startup_info* startup) {
 		exit(PROCESS_EXIT_SYSTEM_INVALID_STARTUP);
 	}
 	g_init.kernel_resources_cap = startup->kernel_resources_cap;
-	g_init.page_size            = startup->page_size;
+	g_init.memory_allocator_cap = startup->memory_allocator_cap;
 	serial_cap_id               = g_init.serial_cap;
 	runtime_startup             = (struct process_startup_info){
-					.size            = sizeof(runtime_startup),
-					.heap_base       = startup->heap_base,
-					.heap_page_count = startup->heap_page_count,
-					.page_size       = startup->page_size,
-					.serial_cap      = g_init.serial_cap,
-					.init_cap        = CAP_ID_INVALID,
+					.size                 = sizeof(runtime_startup),
+					.heap_base            = startup->heap_base,
+					.heap_size            = startup->heap_size,
+					.memory_allocator_cap = startup->memory_allocator_cap,
+					.serial_cap           = g_init.serial_cap,
+					.init_cap             = CAP_ID_INVALID,
     };
 	if (!runtime_heap_init(&runtime_startup)) {
 		exit(PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);

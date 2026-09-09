@@ -1,5 +1,5 @@
+#include <base/math.h>
 #include <base/time.h>
-#include <base/vmm.h>
 #include <core/address_space.h>
 #include <core/cpu.h>
 #include <core/kthread.h>
@@ -27,11 +27,15 @@ struct kthread_reaper {
 static bool kthread_map_stack(struct mapping** out_mapping, void** out_base) {
 	struct memory*  memory;
 	struct mapping* mapping;
-	if (!memory_create_anonymous(KTHREAD_DEFAULT_STACK_PAGES * VMM_PAGE_SIZE, &memory)) return false;
+	size_t          granule = address_space_minimum_mapping_size();
+	size_t          stack_size, guard_size;
+	if (granule == 0u || !align_up_size(KTHREAD_DEFAULT_STACK_SIZE, granule, &stack_size) ||
+	    !align_up_size(4096u, granule, &guard_size) || !memory_create_anonymous(stack_size, &memory))
+		return false;
 	bool mapped = address_space_map(address_space_kernel(),
 	                                &(const struct address_space_mapping_request){
 										.memory       = memory,
-										.guard_before = VMM_STACK_DEFAULT_GUARD_PAGES * VMM_PAGE_SIZE,
+										.guard_before = guard_size,
 										.access       = MAPPING_ACCESS_READ | MAPPING_ACCESS_WRITE,
 									},
 	                                &mapping);
@@ -221,7 +225,7 @@ static enum kthread_spawn_result kthread_spawn_internal(struct kthread** out_thr
 
 	*thread = (struct kthread){
 		.stack_mapping = NULL,
-		.stack_pages   = KTHREAD_DEFAULT_STACK_PAGES,
+		.stack_size    = 0u,
 	};
 
 	if (!kthread_map_stack(&thread->stack_mapping, &stack_base)) {
@@ -230,12 +234,13 @@ static enum kthread_spawn_result kthread_spawn_internal(struct kthread** out_thr
 	}
 
 	stack_base_addr                 = (uintptr_t)stack_base;
+	thread->stack_size              = mapping_size(thread->stack_mapping);
 	create_params                   = (struct thread_create_params){0};
 	create_params.name              = name;
 	create_params.entry             = entry;
 	create_params.arg               = arg;
 	create_params.kernel_stack_base = stack_base_addr;
-	create_params.kernel_stack_top  = stack_base_addr + KTHREAD_DEFAULT_STACK_PAGES * (uintptr_t)VMM_PAGE_SIZE;
+	create_params.kernel_stack_top  = stack_base_addr + thread->stack_size;
 	create_params.preferred_cpu     = preferred_cpu;
 	create_params.detached          = detached;
 	init_result                     = thread_init_ex(&thread->thread, &create_params);

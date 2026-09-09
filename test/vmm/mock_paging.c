@@ -1,7 +1,7 @@
-#include <base/vmm.h>
 #include <core/pmm.h>
 #include <hal/paging.h>
 #include <string.h>
+#include <test_memory.h>
 
 #include "test_support.h"
 
@@ -25,7 +25,7 @@ struct mock_mapping {
 static struct mock_mapping     mappings[MOCK_PAGING_MAX_MAPPINGS];
 static struct hal_paging_space spaces[MOCK_PAGING_MAX_SPACES];
 static struct hal_paging_space kernel_space    = {1u, true};
-static struct hal_paging_info  paging_info     = {VMM_PAGE_SIZE, 1ull << 12};
+static struct hal_paging_info  paging_info     = {TEST_MAPPING_GRANULE, 1ull << 12};
 static size_t                  fail_after_maps = (size_t)-1;
 static size_t                  fail_map_budget = (size_t)-1;
 static size_t                  successful_maps;
@@ -87,7 +87,7 @@ size_t mock_paging_largest_map_size(void) {
 }
 
 static struct mock_mapping* find_mapping(const struct hal_paging_space* space, uintptr_t virt) {
-	uintptr_t page = virt & ~(uintptr_t)(VMM_PAGE_SIZE - 1u);
+	uintptr_t page = virt & ~(uintptr_t)(TEST_MAPPING_GRANULE - 1u);
 	for (size_t i = 0u; i < MOCK_PAGING_MAX_MAPPINGS; i++)
 		if (mappings[i].present && mappings[i].space == space && mappings[i].virt == page) return &mappings[i];
 	return NULL;
@@ -150,18 +150,18 @@ static bool mock_map_should_fail(size_t pages) {
 bool hal_paging_map(struct hal_paging_space* space, const struct hal_paging_map_request* request) {
 	if (space == NULL || !space->allocated || !initialized || request == NULL ||
 	    !hal_paging_mapping_supported(request->flags, request->memory_type) || request->size == 0u ||
-	    ((request->virtual_address | request->physical_address | request->size) & (VMM_PAGE_SIZE - 1u)) != 0u ||
+	    ((request->virtual_address | request->physical_address | request->size) & (TEST_MAPPING_GRANULE - 1u)) != 0u ||
 	    request->size > UINTPTR_MAX - request->virtual_address ||
 	    request->size > UINTPTR_MAX - request->physical_address)
 		return false;
-	size_t pages = request->size / VMM_PAGE_SIZE;
+	size_t pages = request->size / TEST_MAPPING_GRANULE;
 	map_calls++;
 	if (request->size > largest_map_size) largest_map_size = request->size;
 	if (mock_map_should_fail(pages)) return false;
 	if (MOCK_PAGING_MAX_MAPPINGS - mock_paging_mapping_count() < pages) return false;
-	for (size_t offset = 0u; offset < request->size; offset += VMM_PAGE_SIZE)
+	for (size_t offset = 0u; offset < request->size; offset += TEST_MAPPING_GRANULE)
 		if (find_mapping(space, request->virtual_address + offset) != NULL) return false;
-	for (size_t offset = 0u; offset < request->size; offset += VMM_PAGE_SIZE) {
+	for (size_t offset = 0u; offset < request->size; offset += TEST_MAPPING_GRANULE) {
 		for (size_t i = 0u; i < MOCK_PAGING_MAX_MAPPINGS; i++) {
 			if (mappings[i].present) continue;
 			mappings[i] = (struct mock_mapping){space,
@@ -179,20 +179,20 @@ bool hal_paging_map(struct hal_paging_space* space, const struct hal_paging_map_
 
 bool hal_paging_remap(struct hal_paging_space* space, const struct hal_paging_remap_request* request) {
 	if (space == NULL || !space->allocated || !initialized || request == NULL || request->size == 0u ||
-	    ((request->virtual_address | request->physical_address | request->size) & (VMM_PAGE_SIZE - 1u)) != 0u ||
+	    ((request->virtual_address | request->physical_address | request->size) & (TEST_MAPPING_GRANULE - 1u)) != 0u ||
 	    request->size > UINTPTR_MAX - request->virtual_address ||
 	    request->size > UINTPTR_MAX - request->physical_address)
 		return false;
-	for (size_t offset = 0u; offset < request->size; offset += VMM_PAGE_SIZE)
+	for (size_t offset = 0u; offset < request->size; offset += TEST_MAPPING_GRANULE)
 		if (find_mapping(space, request->virtual_address + offset) == NULL) return false;
-	for (size_t offset = 0u; offset < request->size; offset += VMM_PAGE_SIZE)
+	for (size_t offset = 0u; offset < request->size; offset += TEST_MAPPING_GRANULE)
 		find_mapping(space, request->virtual_address + offset)->phys = request->physical_address + offset;
 	return true;
 }
 
 static bool valid_range(struct hal_paging_space* space, uintptr_t virt, size_t size) {
 	return space != NULL && space->allocated && initialized && size != 0u &&
-	       ((virt | size) & (VMM_PAGE_SIZE - 1u)) == 0u && size <= UINTPTR_MAX - virt;
+	       ((virt | size) & (TEST_MAPPING_GRANULE - 1u)) == 0u && size <= UINTPTR_MAX - virt;
 }
 
 bool hal_paging_unmap(struct hal_paging_space* space, uintptr_t virt, size_t size) {
@@ -224,7 +224,9 @@ bool hal_paging_query(const struct hal_paging_space* space, uintptr_t virt,
 	struct mock_mapping* mapping = find_mapping(space, virt);
 	if (mapping == NULL) return false;
 	if (out_translation != NULL)
-		*out_translation = (struct hal_paging_translation){
-			mapping->phys + (virt & (VMM_PAGE_SIZE - 1u)), VMM_PAGE_SIZE, mapping->flags, mapping->memory_type};
+		*out_translation = (struct hal_paging_translation){mapping->phys + (virt & (TEST_MAPPING_GRANULE - 1u)),
+		                                                   TEST_MAPPING_GRANULE,
+		                                                   mapping->flags,
+		                                                   mapping->memory_type};
 	return true;
 }

@@ -17,11 +17,11 @@ Test(process, spawn_thread_allocates_joinable_thread_in_process_address_space) {
 	cr_assert_eq(process_spawn_thread(process,
 	                                  &worker,
 	                                  &(const struct process_thread_params){
-										  .name             = "spawned-worker",
-										  .user_entry       = 0x410000u,
-										  .user_stack_pages = 2u,
-										  .preferred_cpu    = NULL,
-										  .detached         = false,
+										  .name            = "spawned-worker",
+										  .user_entry      = 0x410000u,
+										  .user_stack_size = 2u * TEST_MAPPING_GRANULE,
+										  .preferred_cpu   = NULL,
+										  .detached        = false,
 									  }),
 	             PROCESS_THREAD_SPAWN_OK);
 	cr_assert_not_null(worker, "process_spawn_thread should return the allocated thread");

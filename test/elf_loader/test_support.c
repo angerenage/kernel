@@ -1,7 +1,9 @@
 #include "test_support.h"
 
-#include <base/vmm.h>
 #include <hal/cache.h>
+#include <test_memory.h>
+
+#include "../../kernel/src/capability/memory.h"
 
 #define KiB(x) ((size_t)(x) * 1024u)
 #define ELF_TEST_ARENA_SIZE KiB(2048)
@@ -28,35 +30,39 @@
 #define ELF_TEST_MACHINE 0u
 #endif
 
-static uint8_t elf_test_arena[ELF_TEST_ARENA_SIZE] __attribute__((aligned(VMM_PAGE_SIZE)));
-static uint8_t elf_test_heap[ELF_TEST_HEAP_SIZE] __attribute__((aligned(VMM_PAGE_SIZE)));
-static size_t  elf_test_heap_offset;
+static uint8_t  elf_test_arena[ELF_TEST_ARENA_SIZE] __attribute__((aligned(TEST_MAPPING_GRANULE)));
+static uint8_t  elf_test_heap[ELF_TEST_HEAP_SIZE] __attribute__((aligned(TEST_MAPPING_GRANULE)));
+static size_t   elf_test_heap_offset;
+static cap_id_t elf_test_next_mapping_cap;
 
-bool heap_grow_pages(size_t page_count, void** out_base) {
+cap_id_t kernel_mapping_grant(struct process* target, process_id_t recipient, struct mapping* mapping,
+                              cap_rights_t rights, memory_access_t maximum_access) {
+	(void)target;
+	(void)recipient;
+	(void)mapping;
+	(void)rights;
+	(void)maximum_access;
+	return ++elf_test_next_mapping_cap;
+}
+
+bool heap_grow_region(size_t minimum_size, void** out_base, size_t* out_size) {
 	size_t bytes;
 	size_t offset;
 
-	if (out_base == NULL) return false;
+	if (out_base == NULL || out_size == NULL) return false;
 	*out_base = NULL;
-	bytes     = page_count * VMM_PAGE_SIZE;
+	*out_size = 0u;
+	bytes     = minimum_size;
 	for (;;) {
 		offset = __atomic_load_n(&elf_test_heap_offset, __ATOMIC_ACQUIRE);
 		if (bytes > ELF_TEST_HEAP_SIZE - offset) return false;
 		if (__atomic_compare_exchange_n(
 				&elf_test_heap_offset, &offset, offset + bytes, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
 			*out_base = elf_test_heap + offset;
+			*out_size = bytes;
 			return true;
 		}
 	}
-}
-
-void hal_cache_sync_executable_range(void* address, size_t size) {
-	(void)address;
-	(void)size;
-}
-
-void hal_cache_sync_executable_range_all_cpus(void* address, size_t size) {
-	hal_cache_sync_executable_range(address, size);
 }
 
 void elf_test_init_environment(void) {
@@ -131,7 +137,7 @@ void elf_test_set_load(struct elf_test_image* image, size_t index, uint64_t offs
 		.vaddr  = vaddr,
 		.filesz = filesz,
 		.memsz  = memsz,
-		.align  = VMM_PAGE_SIZE,
+		.align  = TEST_MAPPING_GRANULE,
 	};
 }
 
@@ -144,9 +150,9 @@ void elf_test_destroy_loaded(struct kernel_elf_process* loaded) {
 void elf_test_poison_recycled_pages(size_t page_count, uint8_t value) {
 	struct pmm_extent allocation;
 	cr_assert(page_count != 0u);
-	cr_assert(
-		pmm_alloc(&(const struct pmm_alloc_request){.size = page_count * VMM_PAGE_SIZE, .alignment = VMM_PAGE_SIZE},
-	              &allocation));
+	cr_assert(pmm_alloc(
+		&(const struct pmm_alloc_request){.size = page_count * TEST_MAPPING_GRANULE, .alignment = TEST_MAPPING_GRANULE},
+		&allocation));
 	memset((void*)(allocation.address + boot_info.direct_map_offset), value, allocation.size);
 	cr_assert(pmm_free(allocation), "failed to return poisoned memory to PMM");
 }

@@ -1,5 +1,5 @@
 #include <base/heap.h>
-#include <base/vmm.h>
+#include <core/address_space.h>
 #include <core/cpu.h>
 #include <core/mm.h>
 #include <core/pmm.h>
@@ -98,12 +98,12 @@ void kernel_boot_diagnostics_memory_map(const struct mem_range* memory_map, size
 }
 
 void kernel_boot_diagnostics_memory_summary(void) {
-	printf("kernel: memory pmm=%zu/%zu bytes heap=%zu/%zu bytes regions=%zu pages\n",
+	printf("kernel: memory pmm=%zu/%zu bytes heap=%zu/%zu bytes kernel-va=%zu granules\n",
 	       pmm_free_size(),
 	       pmm_total_size(),
 	       heap_free_bytes(),
 	       heap_total_bytes(),
-	       MM_KERNEL_VMM_SIZE / VMM_PAGE_SIZE);
+	       MM_KERNEL_VMM_SIZE / address_space_minimum_mapping_size());
 }
 
 void kernel_boot_diagnostics_modules(void) {

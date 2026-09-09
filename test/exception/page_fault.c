@@ -26,7 +26,7 @@ Test(exception_fault, user_not_present_fault_materializes_only_the_current_user_
 	current.address_space = &user_space;
 	cpu_current_thread_store(cpu_current(), &current);
 
-	cr_assert(test_vm_map(&user_space, 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, &mapping, &base));
+	cr_assert(test_vm_map(&user_space, 1u, MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE, 0u, 1u, 0u, &mapping, &base));
 	cr_assert_eq(mock_paging_mapping_count(), 0u);
 
 	cr_assert(
@@ -61,7 +61,7 @@ Test(exception_fault, user_fault_cannot_materialize_a_lazy_kernel_mapping) {
 
 	cr_assert(test_vm_map(address_space_kernel(),
 	                      1u,
-	                      VMM_PROT_READ | VMM_PROT_WRITE | VMM_PROT_GLOBAL,
+	                      MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE | 0u,
 	                      0u,
 	                      1u,
 	                      0u,
@@ -98,7 +98,7 @@ Test(exception_fault, forbidden_user_access_does_not_materialize_lazy_backing) {
 	current.address_space = &user_space;
 	cpu_current_thread_store(cpu_current(), &current);
 
-	cr_assert(test_vm_map(&user_space, 1u, VMM_PROT_READ, 0u, 1u, 0u, &mapping, &base));
+	cr_assert(test_vm_map(&user_space, 1u, MEMORY_ACCESS_READ, 0u, 1u, 0u, &mapping, &base));
 	free_before = pmm_free_size();
 	cr_assert_not(address_space_handle_current_fault(
 		(uintptr_t)base, ADDRESS_SPACE_FAULT_NOT_PRESENT, MAPPING_ACCESS_WRITE, true));

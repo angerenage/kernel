@@ -173,7 +173,7 @@ Test(syscall, capability_reply_delivers_to_caller_before_success) {
 
 	cr_assert(test_vm_map(process_address_space(caller),
 	                      1u,
-	                      VMM_PROT_READ | VMM_PROT_WRITE,
+	                      MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
 	                      0u,
 	                      1u,
 	                      0u,
@@ -227,7 +227,7 @@ Test(syscall, capability_reply_reports_failed_caller_delivery) {
 
 	cr_assert(test_vm_map(process_address_space(caller),
 	                      1u,
-	                      VMM_PROT_READ | VMM_PROT_WRITE,
+	                      MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
 	                      0u,
 	                      1u,
 	                      0u,

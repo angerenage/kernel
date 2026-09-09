@@ -1,39 +1,50 @@
 #pragma once
 
 #include <base/cap.h>
-#include <base/vmm.h>
+#include <base/memory.h>
 #include <stddef.h>
 #include <stdint.h>
 
-/* Operations supported by an address space capability. */
 enum address_space_op {
-	ADDRESS_SPACE_OP_MAP = 0,
+	ADDRESS_SPACE_OP_INFO = 0,
+	ADDRESS_SPACE_OP_MAP,
 };
 
-/* Parameters describing one memory object mapping. */
-struct memory_map_params {
-	size_t     memory_page_offset;
-	size_t     page_count;
-	uintptr_t  address;
-	size_t     align_pages;
-	size_t     guard_pages;
-	vmm_prot_t prot;
+enum address_space_kind {
+	ADDRESS_SPACE_KIND_PROCESS = 0,
 };
 
-/* Result of creating one mapping in an address space. */
-struct address_space_map_result {
-	cap_id_t        mapping_cap;
-	struct vmm_info mapping;
-};
-
-/* Common header for address space capability requests. */
+/* Common header for AddressSpace requests. */
 struct address_space_request_header {
 	enum address_space_op op;
 };
 
-/* Request to map a memory object range into an address space. */
+/* Request immutable AddressSpace information. */
+struct address_space_info_request {
+	struct address_space_request_header header;
+};
+
+/* Public geometry and kind of one AddressSpace. */
+struct address_space_info {
+	enum address_space_kind kind;
+	uintptr_t               minimum_address;
+	uintptr_t               maximum_address;
+	size_t                  minimum_mapping_size;
+};
+
+/* Request projection of one complete Memory. */
 struct address_space_map_request {
 	struct address_space_request_header header;
 	cap_id_t                            memory_cap;
-	struct memory_map_params            params;
+	memory_access_t                     access;
+	uintptr_t                           address;
+	size_t                              alignment;
+	size_t                              guard_before;
+	size_t                              guard_after;
+};
+
+/* Capability and virtual address returned for a new Mapping. */
+struct address_space_map_response {
+	cap_id_t  mapping_cap;
+	uintptr_t address;
 };

@@ -199,7 +199,7 @@ Test(capability_syscall, call_validates_response_before_handler_side_effects) {
 
 	cr_assert(test_vm_map(process_address_space(process),
 	                      1u,
-	                      VMM_PROT_READ | VMM_PROT_WRITE,
+	                      MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
 	                      0u,
 	                      1u,
 	                      0u,
@@ -208,7 +208,7 @@ Test(capability_syscall, call_validates_response_before_handler_side_effects) {
 	cr_assert_not_null(request_buffer);
 	cr_assert(test_vm_map(process_address_space(process),
 	                      1u,
-	                      VMM_PROT_READ | VMM_PROT_WRITE,
+	                      MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
 	                      0u,
 	                      1u,
 	                      0u,

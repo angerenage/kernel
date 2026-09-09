@@ -44,6 +44,9 @@ struct address_space {
 /* Initialize AddressSpace support and the kernel AddressSpace. */
 bool address_space_init(void);
 
+/* Return the minimum byte granularity accepted by every AddressSpace. */
+size_t address_space_minimum_mapping_size(void);
+
 /* Return the kernel AddressSpace. */
 struct address_space* address_space_kernel(void);
 

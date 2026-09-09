@@ -4,7 +4,6 @@
 #include <base/math.h>
 #include <base/module.h>
 #include <base/syscall.h>
-#include <base/vmm.h>
 #include <core/address_space.h>
 #include <core/capability.h>
 #include <core/memory.h>
@@ -31,8 +30,8 @@ static struct spinlock  boot_module_memory_lock =
 
 struct boot_module_mapping_layout {
 	uintptr_t physical_base;
-	size_t    page_offset;
-	size_t    page_count;
+	size_t    data_offset;
+	size_t    mapping_size;
 };
 
 static bool boot_module_mapping_layout(const struct kernel_boot_module*   module,
@@ -40,19 +39,20 @@ static bool boot_module_mapping_layout(const struct kernel_boot_module*   module
 	uintptr_t module_address;
 	uintptr_t physical_address;
 	size_t    mapped_size;
+	size_t    granule = address_space_minimum_mapping_size();
 
-	if (module == NULL || out_layout == NULL) return false;
+	if (module == NULL || out_layout == NULL || granule == 0u) return false;
 	module_address = (uintptr_t)module->address;
 	if (module_address < boot_info.direct_map_offset) return false;
 	physical_address          = module_address - boot_info.direct_map_offset;
-	out_layout->physical_base = physical_address & ~(uintptr_t)(VMM_PAGE_SIZE - 1u);
-	out_layout->page_offset   = (size_t)(physical_address - out_layout->physical_base);
-	if (add_overflow_size(out_layout->page_offset, module->size, &mapped_size) ||
-	    add_overflow_size(mapped_size, VMM_PAGE_SIZE - 1u, &mapped_size)) {
+	out_layout->physical_base = physical_address & ~(uintptr_t)(granule - 1u);
+	out_layout->data_offset   = (size_t)(physical_address - out_layout->physical_base);
+	if (add_overflow_size(out_layout->data_offset, module->size, &mapped_size) ||
+	    !align_up_size(mapped_size, granule, &mapped_size)) {
 		return false;
 	}
-	out_layout->page_count = mapped_size / VMM_PAGE_SIZE;
-	return out_layout->page_count != 0u;
+	out_layout->mapping_size = mapped_size;
+	return mapped_size != 0u;
 }
 
 static cap_object_id_t* boot_module_id_slot(size_t module_index) {
@@ -119,7 +119,7 @@ static syscall_result_t boot_module_map_handler(const struct cap_request* req, s
 			(void)memory_create_physical(
 				&(const struct memory_physical_request){
 					.physical_address        = layout.physical_base,
-					.size                    = layout.page_count * VMM_PAGE_SIZE,
+					.size                    = layout.mapping_size,
 					.memory_type             = MEMORY_TYPE_NORMAL,
 					.external_cpu_accessible = true,
 				},
@@ -140,15 +140,11 @@ static syscall_result_t boot_module_map_handler(const struct cap_request* req, s
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 	memory_release(memory);
-	response.mapping_cap = kernel_mapping_grant(caller, req->caller, mapping, 0u, CAP_DESTROY);
-	response.mapping     = (struct vmm_info){
-			.id          = VMM_ID_INVALID,
-			.base        = (void*)mapping_address(mapping),
-			.page_count  = mapping_size(mapping) / VMM_PAGE_SIZE,
-			.prot        = VMM_PROT_READ,
-			.memory_type = mapping_memory_type(mapping),
-    };
-	response.data_offset = layout.page_offset;
+	response.mapping_cap = kernel_mapping_grant(
+		caller, req->caller, mapping, CAP_CALL | CAP_READ | CAP_MAP | CAP_DESTROY | CAP_DELEGATE, MEMORY_ACCESS_READ);
+	response.address      = mapping_address(mapping);
+	response.mapping_size = mapping_size(mapping);
+	response.data_offset  = layout.data_offset;
 	if (response.mapping_cap == CAP_ID_INVALID) {
 		(void)address_space_unmap(space, mapping);
 		mapping_release(mapping);

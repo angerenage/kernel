@@ -7,7 +7,7 @@
 #include <stdint.h>
 
 enum {
-	KTHREAD_DEFAULT_STACK_PAGES = 4u,
+	KTHREAD_DEFAULT_STACK_SIZE = 16u * 1024u,
 };
 
 enum kthread_spawn_result {
@@ -23,7 +23,7 @@ enum kthread_spawn_result {
 struct kthread {
 	struct thread   thread;
 	struct mapping* stack_mapping;
-	size_t          stack_pages;
+	size_t          stack_size;
 	struct kthread* reaper_next;
 };
 

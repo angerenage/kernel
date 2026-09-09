@@ -25,11 +25,11 @@ Test(uthread, context_initialization_failure_rolls_back_all_allocated_resources)
 	hal_userspace_mock_set_context_init_result(false);
 	result = uthread_start(&worker,
 	                       &(const struct uthread_start_params){
-							   .name             = "user/context-failure",
-							   .process          = process,
-							   .user_entry       = 0x420000u,
-							   .user_stack_pages = 2u,
-							   .detached         = false,
+							   .name            = "user/context-failure",
+							   .process         = process,
+							   .user_entry      = 0x420000u,
+							   .user_stack_size = 2u * TEST_MAPPING_GRANULE,
+							   .detached        = false,
 						   });
 	hal_userspace_mock_set_context_init_result(true);
 

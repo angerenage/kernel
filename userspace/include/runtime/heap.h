@@ -5,10 +5,11 @@
 #include <stddef.h>
 
 extern uintptr_t runtime_heap_base;
-extern size_t    runtime_heap_page_count;
-extern size_t    runtime_heap_used_pages;
-extern size_t    runtime_heap_page_size;
+extern size_t    runtime_heap_size;
+extern size_t    runtime_heap_used_size;
+extern size_t    runtime_heap_granule;
 extern cap_id_t  runtime_heap_address_space_cap;
+extern cap_id_t  runtime_heap_memory_allocator_cap;
 
 /* Initialize the runtime heap for the current process using the provided startup information. */
 bool runtime_heap_init(const struct process_startup_info* startup);

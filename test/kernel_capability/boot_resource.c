@@ -3,7 +3,7 @@
 #include <base/boot_data.h>
 #include <base/framebuffer.h>
 #include <base/kernel_resource.h>
-#include <base/vmm.h>
+#include <test_memory.h>
 
 #include "test_support.h"
 
@@ -75,7 +75,8 @@ Test(kernel_capability_boot_resource, framebuffer_reports_format_and_maps_writab
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/framebuffer");
 	cr_assert(
-		pmm_alloc(&(const struct pmm_alloc_request){.size = VMM_PAGE_SIZE, .alignment = VMM_PAGE_SIZE}, &allocation));
+		pmm_alloc(&(const struct pmm_alloc_request){.size = TEST_MAPPING_GRANULE, .alignment = TEST_MAPPING_GRANULE},
+	              &allocation));
 	physical = allocation.address;
 	cr_assert(pmm_free(allocation));
 	framebuffer = (struct kernel_boot_framebuffer){
@@ -105,7 +106,7 @@ Test(kernel_capability_boot_resource, framebuffer_reports_format_and_maps_writab
 	cr_assert_eq(capability_count(), caps_before);
 	result = kernel_capability_test_call(cap, &map_request, sizeof(map_request), &mapping, sizeof(mapping));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
-	cr_assert_eq(mapping.mapping.prot, VMM_PROT_READ | VMM_PROT_WRITE);
+	cr_assert_eq(mapping.mapping_size, TEST_MAPPING_GRANULE);
 	cr_assert_eq(mapping.data_offset, 31u);
 	cr_assert_neq(mapping.mapping_cap, CAP_ID_INVALID);
 	result = kernel_capability_test_call(cap, &map_request, sizeof(map_request), &mapping, sizeof(mapping));

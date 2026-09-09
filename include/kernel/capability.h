@@ -19,4 +19,4 @@ syscall_result_t cap_kernel_write_response(const struct cap_request* request, co
                                            size_t response_size);
 
 /* Initialize kernel capability objects. Called after capability_init(). */
-void kernel_capability_init(void);
+bool kernel_capability_init(void);

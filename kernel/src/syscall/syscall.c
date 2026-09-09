@@ -4,7 +4,6 @@
 #include "capability.h"
 #include "channel.h"
 #include "interrupt.h"
-#include "memory.h"
 #include "misc.h"
 #include "process.h"
 #include "signal.h"
@@ -24,8 +23,6 @@ static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 	[SYSCALL_EXIT_PROCESS]   = syscall_exit_process,
 	[SYSCALL_EXIT_THREAD]    = syscall_exit_thread,
 	[SYSCALL_CREATE_PROCESS] = syscall_create_process,
-
-	[SYSCALL_MEMORY_CREATE] = syscall_memory_create,
 
 	[SYSCALL_CHANNEL_CREATE]     = syscall_channel_create,
 	[SYSCALL_CHANNEL_DESTROY]    = syscall_channel_destroy,

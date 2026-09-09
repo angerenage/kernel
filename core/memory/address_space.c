@@ -5,6 +5,7 @@
 #include <core/process.h>
 #include <core/sched.h>
 #include <core/thread.h>
+#include <hal/cache.h>
 #include <hal/hcf.h>
 #include <string.h>
 
@@ -183,6 +184,10 @@ static bool space_is_kernel(const struct address_space* space) {
 static size_t translation_granule(void) {
 	const struct hal_paging_info* info = hal_paging_info();
 	return info == NULL ? 0u : info->minimum_leaf_size;
+}
+
+size_t address_space_minimum_mapping_size(void) {
+	return translation_granule();
 }
 
 static uintptr_t reserved_start(const struct mapping* mapping) {
@@ -467,7 +472,8 @@ bool address_space_map(struct address_space* space, const struct address_space_m
 	    (request->guard_after & (granule - 1u)) != 0u ||
 	    (request->address != 0u && (request->address & (alignment - 1u)) != 0u) ||
 	    !physical_layout_compatible(request->memory, size, granule) ||
-	    (memory_type(request->memory) != MEMORY_TYPE_NORMAL && (request->access & MAPPING_ACCESS_EXEC) != 0u) ||
+	    ((request->access & MAPPING_ACCESS_EXEC) != 0u &&
+	     (memory_type(request->memory) != MEMORY_TYPE_NORMAL || !memory_cpu_accessible(request->memory))) ||
 	    (request->access != 0u &&
 	     !hal_paging_mapping_supported(address_space_hal_flags(space, request->access), memory_type(request->memory))))
 		return false;
@@ -559,12 +565,22 @@ bool address_space_protect(struct address_space* space, struct mapping* mapping,
 	if (!initialized || !address_space_is_initialized(space) || mapping == NULL || !access_valid(access)) return false;
 	state = spinlock_lock_irqsave(&space->lock);
 	if (!mapping_belongs(space, mapping) ||
-	    (mapping->memory_type != MEMORY_TYPE_NORMAL && (access & MAPPING_ACCESS_EXEC) != 0u) ||
+	    ((access & MAPPING_ACCESS_EXEC) != 0u &&
+	     (mapping->memory_type != MEMORY_TYPE_NORMAL || !memory_cpu_accessible(mapping->memory))) ||
 	    (access != 0u && !hal_paging_mapping_supported(address_space_hal_flags(space, access), mapping->memory_type)))
 		goto fail;
 	if (mapping->access == access) {
 		spinlock_unlock_irqrestore(&space->lock, state);
 		return true;
+	}
+	if ((access & MAPPING_ACCESS_EXEC) != 0u && (mapping->access & MAPPING_ACCESS_EXEC) == 0u) {
+		struct memory_span span;
+		for (size_t offset = 0u; offset < mapping->size; offset += span.size) {
+			if (!memory_query(mapping->memory, offset, mapping->size - offset, &span)) goto fail;
+			if (span.kind == MEMORY_SPAN_PRESENT)
+				hal_cache_sync_executable_range_all_cpus((void*)(span.physical_address + boot_info.direct_map_offset),
+				                                         span.size);
+		}
 	}
 	if (mapping->access != 0u &&
 	    !(access == 0u ? hal_paging_unmap(space->hal, mapping->address, mapping->size)
@@ -618,6 +634,8 @@ static bool map_present_run_locked(struct address_space* space, struct mapping* 
 		.flags            = address_space_hal_flags(space, mapping->access),
 		.memory_type      = mapping->memory_type,
 	};
+	if ((mapping->access & MAPPING_ACCESS_EXEC) != 0u)
+		hal_cache_sync_executable_range_all_cpus((void*)(physical_address + boot_info.direct_map_offset), run_size);
 	if (hal_paging_map(space->hal, &request)) return true;
 	if (run_size == granule || required_size > granule) return false;
 	return hal_paging_map(space->hal,
@@ -650,6 +668,9 @@ static bool map_fault_leaf_locked(struct address_space* space, struct mapping* m
 				mapping->memory, offset, leaf_size, info->minimum_leaf_size, &physical_address, &present_size) ||
 		    present_size != leaf_size || (physical_address & (leaf_size - 1u)) != 0u)
 			continue;
+		if ((mapping->access & MAPPING_ACCESS_EXEC) != 0u)
+			hal_cache_sync_executable_range_all_cpus((void*)(physical_address + boot_info.direct_map_offset),
+			                                         leaf_size);
 		if (hal_paging_map(space->hal,
 		                   &(const struct hal_paging_map_request){
 							   .virtual_address  = virtual_address,

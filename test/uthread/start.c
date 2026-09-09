@@ -8,12 +8,12 @@ Test(uthread, detached_start_registers_finalizer_before_queueing) {
     };
 	enum uthread_start_result   result;
 	struct uthread_start_params params = {
-		.name             = "user/detached",
-		.process          = NULL,
-		.user_entry       = 0x400000u,
-		.user_stack_pages = 2u,
-		.preferred_cpu    = NULL,
-		.detached         = true,
+		.name            = "user/detached",
+		.process         = NULL,
+		.user_entry      = 0x400000u,
+		.user_stack_size = 2u * TEST_MAPPING_GRANULE,
+		.preferred_cpu   = NULL,
+		.detached        = true,
 	};
 
 	init_uthread_test_environment();

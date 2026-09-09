@@ -52,11 +52,12 @@ bool loader_launch(const struct init_state* init) {
 	struct loader_load_response             loaded;
 	struct process_info_response            process_info;
 	struct process_startup_info             startup;
-	cap_id_t                                init_cap    = CAP_ID_INVALID;
-	cap_id_t                                loader_cap  = CAP_ID_INVALID;
-	cap_id_t                                modules_cap = CAP_ID_INVALID;
-	cap_id_t                                serial_cap  = CAP_ID_INVALID;
-	cap_id_t                                thread_cap  = CAP_ID_INVALID;
+	cap_id_t                                init_cap      = CAP_ID_INVALID;
+	cap_id_t                                loader_cap    = CAP_ID_INVALID;
+	cap_id_t                                modules_cap   = CAP_ID_INVALID;
+	cap_id_t                                allocator_cap = CAP_ID_INVALID;
+	cap_id_t                                serial_cap    = CAP_ID_INVALID;
+	cap_id_t                                thread_cap    = CAP_ID_INVALID;
 	syscall_status_t                        status;
 	bool                                    temporary_caps_released;
 
@@ -97,10 +98,17 @@ bool loader_launch(const struct init_state* init) {
 	}
 	if (!temporary_caps_released) goto fail;
 	if (!drop_owned_capability(&loaded.address_space_cap, "loader address-space")) goto fail;
-
 	status = process_get_info(loaded.process_cap, &process_info);
 	if (status != SYSCALL_STATUS_OK) {
 		printf("init: loaded process query failed: %u\n", (unsigned)status);
+		goto fail;
+	}
+	status = cap_delegate(init->memory_allocator_cap,
+	                      process_info.pid,
+	                      CAP_CALL | CAP_READ | CAP_ALLOCATE | CAP_DELEGATE,
+	                      &allocator_cap);
+	if (status != SYSCALL_STATUS_OK) {
+		printf("init: MemoryAllocator delegation failed: %u\n", (unsigned)status);
 		goto fail;
 	}
 	status = init_server_grant(process_info.pid, &init_cap);
@@ -115,12 +123,12 @@ bool loader_launch(const struct init_state* init) {
 		goto fail;
 	}
 	startup = (struct process_startup_info){
-		.size            = sizeof(startup),
-		.heap_base       = loaded.heap_base,
-		.heap_page_count = loaded.heap_page_count,
-		.page_size       = init->page_size,
-		.serial_cap      = serial_cap,
-		.init_cap        = init_cap,
+		.size                 = sizeof(startup),
+		.heap_base            = loaded.heap_base,
+		.heap_size            = loaded.heap_size,
+		.memory_allocator_cap = allocator_cap,
+		.serial_cap           = serial_cap,
+		.init_cap             = init_cap,
 	};
 	status = process_run(loaded.process_cap, loaded.entry, &startup, sizeof(startup), &thread_cap);
 	if (status != SYSCALL_STATUS_OK) {

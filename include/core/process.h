@@ -91,7 +91,7 @@ struct process_spawn_params {
 	uintptr_t   user_entry;
 	const void* arg_data;
 	size_t      arg_size;
-	size_t      user_stack_pages;
+	size_t      user_stack_size;
 	struct cpu* preferred_cpu;
 };
 
@@ -100,7 +100,7 @@ struct process_thread_params {
 	uintptr_t   user_entry;
 	const void* arg_data;
 	size_t      arg_size;
-	size_t      user_stack_pages;
+	size_t      user_stack_size;
 	struct cpu* preferred_cpu;
 	bool        detached;
 };

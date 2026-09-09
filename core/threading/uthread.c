@@ -1,5 +1,5 @@
+#include <base/math.h>
 #include <base/thread.h>
-#include <base/vmm.h>
 #include <core/address_space.h>
 #include <core/address_transfer.h>
 #include <core/cpu.h>
@@ -20,8 +20,8 @@
 #include <stdint.h>
 
 enum {
-	UTHREAD_KERNEL_STACK_PAGES   = 4u,
-	UTHREAD_UPCALL_STACK_PAGES   = 4u,
+	UTHREAD_KERNEL_STACK_SIZE    = 16u * 1024u,
+	UTHREAD_UPCALL_STACK_SIZE    = 16u * 1024u,
 	UTHREAD_USER_STACK_ALIGNMENT = HAL_USERSPACE_STACK_ALIGNMENT,
 };
 
@@ -36,15 +36,19 @@ struct uthread_reaper {
 	bool                     starting;
 };
 
-static bool uthread_map_stack(struct address_space* space, size_t pages, bool prefault, struct mapping** out_mapping,
-                              void** out_base) {
+static bool uthread_map_stack(struct address_space* space, size_t requested_size, bool prefault,
+                              struct mapping** out_mapping, void** out_base) {
 	struct memory*  memory;
 	struct mapping* mapping;
-	if (pages > SIZE_MAX / VMM_PAGE_SIZE || !memory_create_anonymous(pages * VMM_PAGE_SIZE, &memory)) return false;
+	size_t          granule = address_space_minimum_mapping_size();
+	size_t          size, guard;
+	if (granule == 0u || !align_up_size(requested_size, granule, &size) || !align_up_size(4096u, granule, &guard) ||
+	    !memory_create_anonymous(size, &memory))
+		return false;
 	bool mapped = address_space_map(space,
 	                                &(const struct address_space_mapping_request){
 										.memory       = memory,
-										.guard_before = VMM_STACK_DEFAULT_GUARD_PAGES * VMM_PAGE_SIZE,
+										.guard_before = guard,
 										.access       = MAPPING_ACCESS_READ | MAPPING_ACCESS_WRITE,
 									},
 	                                &mapping);
@@ -372,7 +376,7 @@ static enum uthread_start_result uthread_prepare_internal(struct uthread*       
 	void*                        user_stack_base   = NULL;
 	void*                        upcall_stack_base = NULL;
 	void*                        kernel_stack_base = NULL;
-	size_t                       user_stack_pages;
+	size_t                       user_stack_size;
 	uintptr_t                    kernel_stack_top;
 	uintptr_t                    initial_user_stack_top;
 	uintptr_t                    user_arg = 0u;
@@ -419,8 +423,8 @@ static enum uthread_start_result uthread_prepare_internal(struct uthread*       
 	}
 	thread->id = id;
 
-	user_stack_pages = params->user_stack_pages != 0u ? params->user_stack_pages : UTHREAD_DEFAULT_USER_STACK_PAGES;
-	if (!uthread_map_stack(address_space, user_stack_pages, false, &thread->user_stack_mapping, &user_stack_base)) {
+	user_stack_size = params->user_stack_size != 0u ? params->user_stack_size : UTHREAD_DEFAULT_USER_STACK_SIZE;
+	if (!uthread_map_stack(address_space, user_stack_size, false, &thread->user_stack_mapping, &user_stack_base)) {
 		uthread_release_name(thread);
 		uthread_release_stacks_or_hcf(thread);
 		uthread_upcall_state_deinit(thread);
@@ -428,16 +432,16 @@ static enum uthread_start_result uthread_prepare_internal(struct uthread*       
 		return UTHREAD_START_STACK_ALLOC_FAILED;
 	}
 	if (!uthread_map_stack(
-			address_space, UTHREAD_UPCALL_STACK_PAGES, false, &thread->upcall.stack_mapping, &upcall_stack_base)) {
+			address_space, UTHREAD_UPCALL_STACK_SIZE, false, &thread->upcall.stack_mapping, &upcall_stack_base)) {
 		uthread_release_name(thread);
 		uthread_release_stacks_or_hcf(thread);
 		uthread_upcall_state_deinit(thread);
 		uthread_unregister_id(thread);
 		return UTHREAD_START_STACK_ALLOC_FAILED;
 	}
-	thread->upcall.stack_top = (uintptr_t)upcall_stack_base + UTHREAD_UPCALL_STACK_PAGES * (uintptr_t)VMM_PAGE_SIZE;
+	thread->upcall.stack_top = (uintptr_t)upcall_stack_base + mapping_size(thread->upcall.stack_mapping);
 	if (!uthread_map_stack(address_space_kernel(),
-	                       UTHREAD_KERNEL_STACK_PAGES,
+	                       UTHREAD_KERNEL_STACK_SIZE,
 	                       true,
 	                       &thread->kernel_stack_mapping,
 	                       &kernel_stack_base)) {
@@ -448,8 +452,8 @@ static enum uthread_start_result uthread_prepare_internal(struct uthread*       
 		return UTHREAD_START_STACK_ALLOC_FAILED;
 	}
 
-	thread->user_stack_top = (uintptr_t)user_stack_base + user_stack_pages * (uintptr_t)VMM_PAGE_SIZE;
-	kernel_stack_top       = (uintptr_t)kernel_stack_base + UTHREAD_KERNEL_STACK_PAGES * (uintptr_t)VMM_PAGE_SIZE;
+	thread->user_stack_top = (uintptr_t)user_stack_base + mapping_size(thread->user_stack_mapping);
+	kernel_stack_top       = (uintptr_t)kernel_stack_base + mapping_size(thread->kernel_stack_mapping);
 	initial_user_stack_top = thread->user_stack_top;
 	if (params->arg_size != 0u) {
 		if (params->arg_size > initial_user_stack_top - (uintptr_t)user_stack_base) {

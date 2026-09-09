@@ -8,8 +8,8 @@
 #define HEAP_ALIGN 16ull
 #define HEAP_USED_FLAG ((size_t)1u)
 #define HEAP_SIZE_MASK (~(size_t)(HEAP_ALIGN - 1u))
-/* Default number of pages added to the heap when it needs to grow. */
-#define HEAP_DEFAULT_GROW_PAGES 4u
+/* Default byte amount added to the heap when it needs to grow. */
+#define HEAP_DEFAULT_GROW_SIZE (16u * 1024u)
 
 /* One free or allocated chunk in the free-list heap. */
 struct heap_block {
@@ -66,11 +66,11 @@ bool grow_heap(size_t min_block_size);
 /* Return the first free block large enough for block_bytes; caller must hold the heap lock. */
 struct heap_block* find_fit_locked(size_t block_bytes);
 
-/* Add page_count freshly-allocated pages to the heap arena, returning the arena base. */
-bool heap_grow_pages(size_t page_count, void** out_base);
+/* Add one aligned byte range to the heap arena, returning its base and actual size. */
+bool heap_grow_region(size_t minimum_size, void** out_base, size_t* out_size);
 
-/* Return the platform page size used for arena growth. */
-size_t heap_page_size(void);
+/* Return the allocation granularity used for arena growth. */
+size_t heap_growth_granule(void);
 
 /* Acquire the global heap lock. */
 void heap_lock(void);

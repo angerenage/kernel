@@ -1,108 +1,120 @@
+#include <base/address_space.h>
+#include <base/memory.h>
 #include <runtime/diagnostic.h>
-#include <stdbool.h>
-#include <stdint.h>
 #include <system/capability.h>
 #include <system/memory.h>
 
-#include "syscall.h"
-
-syscall_status_t memory_create(const struct memory_create_params* params, cap_id_t* out_memory_cap) {
-	if (params == NULL) {
-		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(params);
+static syscall_status_t fixed_call(cap_id_t cap, const void* request, size_t request_size, void* response,
+                                   size_t response_size, uint64_t operation) {
+	(void)operation;
+	if (cap == CAP_ID_INVALID || request == NULL || (response_size != 0u && response == NULL))
 		return SYSCALL_STATUS_BAD_ARGUMENT;
-	}
-	if (out_memory_cap == NULL) {
-		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(out_memory_cap);
-		return SYSCALL_STATUS_BAD_ARGUMENT;
-	}
-	syscall_result_t result = syscall(SYSCALL_MEMORY_CREATE, (uintptr_t)params, sizeof(*params), 0u, 0u, 0u, 0u);
-#ifdef RUNTIME_DIAGNOSTICS
-	if (result.status == SYSCALL_STATUS_BAD_ARGUMENT) RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(params);
-	else RUNTIME_DIAGNOSTIC_SYSCALL_RESULT(SYSCALL_MEMORY_CREATE, result);
-#endif
+	syscall_result_t result = cap_call_syscall(cap, request, request_size, response, response_size);
+	RUNTIME_DIAGNOSTIC_OPERATION_RESULT(operation, result);
 	if (result.status != SYSCALL_STATUS_OK) return result.status;
-	*out_memory_cap = (cap_id_t)result.value;
-	return SYSCALL_STATUS_OK;
+	return result.value == response_size ? SYSCALL_STATUS_OK : SYSCALL_STATUS_FAILED;
 }
 
-syscall_status_t memory_get_info(cap_id_t memory_cap, struct memory_info* out_info) {
+syscall_status_t memory_allocator_info(cap_id_t allocator_cap, struct memory_allocator_info* out_info) {
+	const struct memory_allocator_info_request request = {.header = {.op = MEMORY_ALLOCATOR_OP_INFO}};
+	return fixed_call(allocator_cap, &request, sizeof(request), out_info, sizeof(*out_info), MEMORY_ALLOCATOR_OP_INFO);
+}
+
+syscall_status_t memory_allocator_derive(cap_id_t allocator_cap, const struct memory_allocator_derive_request* request,
+                                         size_t request_size, cap_id_t* out_allocator_cap) {
+	struct memory_allocator_derive_response response;
+	if (request == NULL || request_size < sizeof(*request) || out_allocator_cap == NULL)
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	*out_allocator_cap = CAP_ID_INVALID;
+	syscall_status_t status =
+		fixed_call(allocator_cap, request, request_size, &response, sizeof(response), MEMORY_ALLOCATOR_OP_DERIVE);
+	if (status == SYSCALL_STATUS_OK) *out_allocator_cap = response.allocator_cap;
+	return status;
+}
+
+syscall_status_t memory_allocator_alloc(cap_id_t allocator_cap, size_t size, cap_id_t* out_memory_cap) {
+	const struct memory_allocator_alloc_request request = {
+		.header = {.op = MEMORY_ALLOCATOR_OP_ALLOC},
+		.size   = size,
+	};
+	struct memory_allocator_alloc_response response;
+	if (out_memory_cap == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	*out_memory_cap = CAP_ID_INVALID;
+	syscall_status_t status =
+		fixed_call(allocator_cap, &request, sizeof(request), &response, sizeof(response), MEMORY_ALLOCATOR_OP_ALLOC);
+	if (status == SYSCALL_STATUS_OK) *out_memory_cap = response.memory_cap;
+	return status;
+}
+
+syscall_status_t memory_allocator_claim_physical(cap_id_t allocator_cap, uintptr_t physical_address, size_t size,
+                                                 enum memory_type memory_type, cap_id_t* out_memory_cap) {
+	const struct memory_allocator_claim_physical_request request = {
+		.header           = {.op = MEMORY_ALLOCATOR_OP_CLAIM_PHYSICAL},
+		.physical_address = physical_address,
+		.size             = size,
+		.memory_type      = memory_type,
+	};
+	struct memory_allocator_claim_physical_response response;
+	if (out_memory_cap == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	*out_memory_cap         = CAP_ID_INVALID;
+	syscall_status_t status = fixed_call(
+		allocator_cap, &request, sizeof(request), &response, sizeof(response), MEMORY_ALLOCATOR_OP_CLAIM_PHYSICAL);
+	if (status == SYSCALL_STATUS_OK) *out_memory_cap = response.memory_cap;
+	return status;
+}
+
+syscall_status_t memory_info(cap_id_t memory_cap, struct memory_info* out_info) {
 	const struct memory_info_request request = {.header = {.op = MEMORY_OP_INFO}};
-	if (memory_cap == CAP_ID_INVALID || out_info == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
-	syscall_result_t result = cap_call_syscall(memory_cap, &request, sizeof(request), out_info, sizeof(*out_info));
-	RUNTIME_DIAGNOSTIC_OPERATION_RESULT(MEMORY_OP_INFO, result);
-	return result.status == SYSCALL_STATUS_OK && result.value != sizeof(*out_info) ? SYSCALL_STATUS_FAILED
-	                                                                               : result.status;
+	return fixed_call(memory_cap, &request, sizeof(request), out_info, sizeof(*out_info), MEMORY_OP_INFO);
 }
 
-static syscall_status_t memory_transfer(cap_id_t cap, size_t offset, uintptr_t buffer, size_t size, bool reading) {
-	union {
-		struct memory_read_request  read;
-		struct memory_write_request write;
-	} request;
-	if (cap == CAP_ID_INVALID || (size != 0u && buffer == 0u)) return SYSCALL_STATUS_BAD_ARGUMENT;
-	if (reading) {
-		request.read = (struct memory_read_request){
-			.header = {.op = MEMORY_OP_READ}, .offset = offset, .destination = buffer, .size = size};
-	}
-	else {
-		request.write = (struct memory_write_request){
-			.header = {.op = MEMORY_OP_WRITE}, .source = buffer, .offset = offset, .size = size};
-	}
-	struct memory_transfer_response response;
-	syscall_result_t                result = cap_call_syscall(
-        cap, &request, reading ? sizeof(request.read) : sizeof(request.write), &response, sizeof(response));
-	RUNTIME_DIAGNOSTIC_OPERATION_RESULT(reading ? MEMORY_OP_READ : MEMORY_OP_WRITE, result);
-	if (result.status != SYSCALL_STATUS_OK) return result.status;
-	return result.value == sizeof(response) && response.bytes_transferred == size ? SYSCALL_STATUS_OK
-	                                                                              : SYSCALL_STATUS_FAILED;
+syscall_status_t memory_slice(cap_id_t memory_cap, size_t offset, size_t size, cap_id_t* out_memory_cap) {
+	const struct memory_slice_request request = {
+		.header = {.op = MEMORY_OP_SLICE},
+		.offset = offset,
+		.size   = size,
+	};
+	struct memory_slice_response response;
+	if (out_memory_cap == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	*out_memory_cap = CAP_ID_INVALID;
+	syscall_status_t status =
+		fixed_call(memory_cap, &request, sizeof(request), &response, sizeof(response), MEMORY_OP_SLICE);
+	if (status == SYSCALL_STATUS_OK) *out_memory_cap = response.memory_cap;
+	return status;
 }
 
-syscall_status_t memory_read(cap_id_t memory_cap, size_t offset, void* destination, size_t size) {
-	return memory_transfer(memory_cap, offset, (uintptr_t)destination, size, true);
+syscall_status_t address_space_info(cap_id_t address_space_cap, struct address_space_info* out_info) {
+	const struct address_space_info_request request = {.header = {.op = ADDRESS_SPACE_OP_INFO}};
+	return fixed_call(address_space_cap, &request, sizeof(request), out_info, sizeof(*out_info), ADDRESS_SPACE_OP_INFO);
 }
 
-syscall_status_t memory_write(cap_id_t memory_cap, size_t offset, const void* source, size_t size) {
-	return memory_transfer(memory_cap, offset, (uintptr_t)source, size, false);
-}
-
-syscall_status_t address_space_map(cap_id_t address_space_cap, cap_id_t memory_cap,
-                                   const struct memory_map_params*  params,
-                                   struct address_space_map_result* out_result) {
-	if (address_space_cap == CAP_ID_INVALID || memory_cap == CAP_ID_INVALID || params == NULL || out_result == NULL)
-		return SYSCALL_STATUS_BAD_ARGUMENT;
+syscall_status_t address_space_map(cap_id_t address_space_cap, cap_id_t memory_cap, memory_access_t access,
+                                   uintptr_t address, size_t alignment, size_t guard_before, size_t guard_after,
+                                   struct address_space_map_response* out_response) {
 	const struct address_space_map_request request = {
-		.header = {.op = ADDRESS_SPACE_OP_MAP}, .memory_cap = memory_cap, .params = *params};
-	syscall_result_t result =
-		cap_call_syscall(address_space_cap, &request, sizeof(request), out_result, sizeof(*out_result));
-	RUNTIME_DIAGNOSTIC_OPERATION_RESULT(ADDRESS_SPACE_OP_MAP, result);
-	return result.status == SYSCALL_STATUS_OK && result.value != sizeof(*out_result) ? SYSCALL_STATUS_FAILED
-	                                                                                 : result.status;
+		.header       = {.op = ADDRESS_SPACE_OP_MAP},
+		.memory_cap   = memory_cap,
+		.access       = access,
+		.address      = address,
+		.alignment    = alignment,
+		.guard_before = guard_before,
+		.guard_after  = guard_after,
+	};
+	return fixed_call(
+		address_space_cap, &request, sizeof(request), out_response, sizeof(*out_response), ADDRESS_SPACE_OP_MAP);
 }
 
-syscall_status_t mapping_get_info(cap_id_t mapping_cap, struct vmm_info* out_info) {
+syscall_status_t mapping_info(cap_id_t mapping_cap, struct mapping_info* out_info) {
 	const struct mapping_info_request request = {.header = {.op = MAPPING_OP_INFO}};
-	struct mapping_info_response      response;
-	if (mapping_cap == CAP_ID_INVALID || out_info == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
-	syscall_result_t result = cap_call_syscall(mapping_cap, &request, sizeof(request), &response, sizeof(response));
-	RUNTIME_DIAGNOSTIC_OPERATION_RESULT(MAPPING_OP_INFO, result);
-	if (result.status != SYSCALL_STATUS_OK) return result.status;
-	if (result.value != sizeof(response)) return SYSCALL_STATUS_FAILED;
-	*out_info = response.info;
-	return SYSCALL_STATUS_OK;
+	return fixed_call(mapping_cap, &request, sizeof(request), out_info, sizeof(*out_info), MAPPING_OP_INFO);
 }
 
-syscall_status_t mapping_protect(cap_id_t mapping_cap, vmm_prot_t prot) {
-	const struct mapping_protect_request request = {.header = {.op = MAPPING_OP_PROTECT}, .prot = prot};
-	if (mapping_cap == CAP_ID_INVALID) return SYSCALL_STATUS_BAD_ARGUMENT;
-	syscall_result_t result = cap_call_syscall(mapping_cap, &request, sizeof(request), NULL, 0u);
-	RUNTIME_DIAGNOSTIC_OPERATION_RESULT(MAPPING_OP_PROTECT, result);
-	return result.status;
+syscall_status_t mapping_protect(cap_id_t mapping_cap, memory_access_t access) {
+	const struct mapping_protect_request request = {.header = {.op = MAPPING_OP_PROTECT}, .access = access};
+	return fixed_call(mapping_cap, &request, sizeof(request), NULL, 0u, MAPPING_OP_PROTECT);
 }
 
 syscall_status_t mapping_unmap(cap_id_t mapping_cap) {
 	const struct mapping_unmap_request request = {.header = {.op = MAPPING_OP_UNMAP}};
-	if (mapping_cap == CAP_ID_INVALID) return SYSCALL_STATUS_BAD_ARGUMENT;
-	syscall_result_t result = cap_call_syscall(mapping_cap, &request, sizeof(request), NULL, 0u);
-	RUNTIME_DIAGNOSTIC_OPERATION_RESULT(MAPPING_OP_UNMAP, result);
-	return result.status;
+	return fixed_call(mapping_cap, &request, sizeof(request), NULL, 0u, MAPPING_OP_UNMAP);
 }

@@ -1,4 +1,3 @@
-#include <base/vmm.h>
 #include <core/address_space.h>
 #include <core/memory.h>
 #include <core/pmm.h>
@@ -11,15 +10,19 @@ static void kernel_selftest_vmm_demand_maps_and_releases(struct kernel_selftest_
 	struct mapping*               mapping = NULL;
 	uintptr_t                     base    = 0u;
 	struct hal_paging_translation translation;
+	size_t                        granule = address_space_minimum_mapping_size();
 
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, memory_create_anonymous(2u * VMM_PAGE_SIZE, &memory), "Memory create failed", cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+	                                granule != 0u && granule <= SIZE_MAX / 2u &&
+	                                    memory_create_anonymous(2u * granule, &memory),
+	                                "Memory create failed",
+	                                cleanup);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
 	                                address_space_map(address_space_kernel(),
 	                                                  &(const struct address_space_mapping_request){
 														  .memory       = memory,
-														  .alignment    = 2u * VMM_PAGE_SIZE,
-														  .guard_before = VMM_PAGE_SIZE,
+														  .alignment    = 2u * granule,
+														  .guard_before = granule,
 														  .access       = MAPPING_ACCESS_READ | MAPPING_ACCESS_WRITE,
 													  },
 	                                                  &mapping),
@@ -29,7 +32,7 @@ static void kernel_selftest_vmm_demand_maps_and_releases(struct kernel_selftest_
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, base != 0u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !hal_paging_query(address_space_hal(address_space_kernel()), base, NULL), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(
-		ctx, !address_space_resolve_fault(address_space_kernel(), base - VMM_PAGE_SIZE, MAPPING_ACCESS_READ), cleanup);
+		ctx, !address_space_resolve_fault(address_space_kernel(), base - granule, MAPPING_ACCESS_READ), cleanup);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
 	                                address_space_resolve_fault(address_space_kernel(), base, MAPPING_ACCESS_WRITE),
 	                                "fault resolution failed",
@@ -60,11 +63,9 @@ static void kernel_selftest_vmm_large_leaf_split(struct kernel_selftest_context*
 	size_t                        large_size = 0u;
 	uintptr_t                     virtual    = 0u;
 	struct hal_paging_translation translation;
-	size_t                        page_count            = 0u;
-	size_t                        allocation_page_count = 0u;
-	size_t                        free_after_create     = 0u;
-	bool                          mapped                = false;
-	bool                          active                = false;
+	size_t                        free_after_create = 0u;
+	bool                          mapped            = false;
+	bool                          active            = false;
 
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, paging != NULL, cleanup);
 	for (unsigned shift = 0u; shift < sizeof(size_t) * 8u; shift++) {
@@ -76,17 +77,13 @@ static void kernel_selftest_vmm_large_leaf_split(struct kernel_selftest_context*
 	}
 	if (large_size == 0u) return;
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, large_size <= UINTPTR_MAX / 2u, cleanup);
-	virtual    = (uintptr_t)large_size * 2u;
-	page_count = large_size / VMM_PAGE_SIZE + (large_size % VMM_PAGE_SIZE != 0u ? 1u : 0u);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, page_count <= SIZE_MAX / 3u, cleanup);
-	allocation_page_count = page_count * 3u;
+	virtual = (uintptr_t)large_size * 2u;
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, large_size <= SIZE_MAX / 3u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(
 		ctx,
-		pmm_alloc(&(const struct pmm_alloc_request){.size      = allocation_page_count * VMM_PAGE_SIZE,
-	                                                .alignment = VMM_PAGE_SIZE},
-	              &allocation),
+		pmm_alloc(&(const struct pmm_alloc_request){.size = 3u * large_size, .alignment = large_size}, &allocation),
 		cleanup);
-	physical     = (allocation.address + large_size - 1u) & ~(uintptr_t)(large_size - 1u);
+	physical     = allocation.address;
 	new_physical = physical + large_size;
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, hal_paging_space_create(&space), cleanup);
 	free_after_create = pmm_free_size();

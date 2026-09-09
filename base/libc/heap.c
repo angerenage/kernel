@@ -121,23 +121,20 @@ static bool add_arena_locked(void* base, size_t size_bytes) {
 
 bool grow_heap(size_t min_block_size) {
 	void*  region = NULL;
-	size_t page_size;
+	size_t granule;
 	size_t sentinel_bytes;
 	size_t request_bytes;
-	size_t grow_pages;
 	size_t grow_bytes;
 
-	page_size = heap_page_size();
-	if (page_size == 0u) return false;
+	granule = heap_growth_granule();
+	if (granule == 0u) return false;
 
 	if (mul_overflow_size(2u, heap_sentinel_size, &sentinel_bytes)) return false;
 	if (add_overflow_size(min_block_size, sentinel_bytes, &request_bytes)) return false;
-	grow_pages = request_bytes / page_size;
-	if ((request_bytes % page_size) != 0u) grow_pages++;
-	if (grow_pages < HEAP_DEFAULT_GROW_PAGES) grow_pages = HEAP_DEFAULT_GROW_PAGES;
-	if (mul_overflow_size(grow_pages, page_size, &grow_bytes)) return false;
+	if (request_bytes < HEAP_DEFAULT_GROW_SIZE) request_bytes = HEAP_DEFAULT_GROW_SIZE;
+	if (!align_up_size(request_bytes, granule, &grow_bytes)) return false;
 
-	if (!heap_grow_pages(grow_pages, &region)) return false;
+	if (!heap_grow_region(grow_bytes, &region, &grow_bytes)) return false;
 	heap_lock();
 	if (!add_arena_locked(region, grow_bytes)) {
 		heap_unlock();

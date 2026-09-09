@@ -82,13 +82,13 @@ static syscall_result_t process_run_handler(const struct cap_request* req, struc
 	result = process_prepare_main_thread(target,
 	                                     &main_thread,
 	                                     &(const struct process_thread_params){
-											 .name             = target->name,
-											 .user_entry       = request.entry,
-											 .arg_data         = arg_copy,
-											 .arg_size         = request.arg_size,
-											 .user_stack_pages = UTHREAD_DEFAULT_USER_STACK_PAGES,
-											 .preferred_cpu    = NULL,
-											 .detached         = false,
+											 .name            = target->name,
+											 .user_entry      = request.entry,
+											 .arg_data        = arg_copy,
+											 .arg_size        = request.arg_size,
+											 .user_stack_size = UTHREAD_DEFAULT_USER_STACK_SIZE,
+											 .preferred_cpu   = NULL,
+											 .detached        = false,
 										 });
 	free(arg_copy);
 	if (result != PROCESS_THREAD_SPAWN_OK) {
@@ -141,13 +141,13 @@ static syscall_result_t process_spawn_thread_handler(const struct cap_request* r
 	}
 
 	params = (struct process_thread_params){
-		.name             = name,
-		.user_entry       = request.entry,
-		.arg_data         = arg_copy,
-		.arg_size         = request.arg_size,
-		.user_stack_pages = UTHREAD_DEFAULT_USER_STACK_PAGES,
-		.preferred_cpu    = NULL,
-		.detached         = false,
+		.name            = name,
+		.user_entry      = request.entry,
+		.arg_data        = arg_copy,
+		.arg_size        = request.arg_size,
+		.user_stack_size = UTHREAD_DEFAULT_USER_STACK_SIZE,
+		.preferred_cpu   = NULL,
+		.detached        = false,
 	};
 	result = process_prepare_thread(target, &thread, &params);
 	free(name);

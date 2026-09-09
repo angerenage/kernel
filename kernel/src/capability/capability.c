@@ -9,6 +9,7 @@
 #include "../capability/boot_resource.h"
 #include "../capability/kernel_resource.h"
 #include "../capability/loader.h"
+#include "../capability/memory_allocator.h"
 #include "../capability/serial.h"
 
 cap_id_t cap_kernel_create(uint64_t object_id, cap_kernel_handler_t handler, process_id_t target, cap_rights_t rights) {
@@ -42,10 +43,12 @@ syscall_result_t cap_kernel_write_response(const struct cap_request* request, co
 	return syscall_result_ok(response_size);
 }
 
-void kernel_capability_init(void) {
+bool kernel_capability_init(void) {
+	if (!kernel_memory_allocator_init()) return false;
 	kernel_capability_serial_init();
 	kernel_capability_loader_init();
 	kernel_capability_boot_module_provider_init();
 	kernel_capability_boot_resources_init();
 	kernel_capability_resources_init();
+	return true;
 }

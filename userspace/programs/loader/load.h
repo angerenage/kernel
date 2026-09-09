@@ -7,18 +7,26 @@
 #include <stddef.h>
 #include <stdint.h>
 
+struct loader_mapping_authority {
+	cap_id_t                         cap;
+	struct loader_mapping_authority* next;
+};
+
 struct loader_loaded_program {
-	cap_id_t                      load_cap;
-	cap_id_t                      process_cap;
-	cap_id_t                      address_space_cap;
-	process_id_t                  process_id;
-	uintptr_t                     entry;
-	uintptr_t                     heap_base;
-	size_t                        heap_page_count;
-	cap_id_t                      init_cap;
-	cap_id_t                      serial_cap;
-	bool                          started;
-	struct loader_loaded_program* next;
+	cap_id_t                         load_cap;
+	cap_id_t                         process_cap;
+	cap_id_t                         address_space_cap;
+	process_id_t                     process_id;
+	uintptr_t                        entry;
+	uintptr_t                        heap_base;
+	size_t                           heap_size;
+	size_t                           mapping_granule;
+	cap_id_t                         memory_allocator_cap;
+	cap_id_t                         init_cap;
+	cap_id_t                         serial_cap;
+	struct loader_mapping_authority* mappings;
+	bool                             started;
+	struct loader_loaded_program*    next;
 };
 
 /* Build a complete, non-running process from a static ELF64 Blob. */

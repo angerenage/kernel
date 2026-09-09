@@ -12,7 +12,7 @@ typedef uint64_t uthread_id_t;
 #define UTHREAD_ID_INVALID ((uthread_id_t)0u)
 
 enum {
-	UTHREAD_DEFAULT_USER_STACK_PAGES = 4u,
+	UTHREAD_DEFAULT_USER_STACK_SIZE = 16u * 1024u,
 };
 
 enum uthread_start_result {
@@ -32,7 +32,7 @@ struct uthread_start_params {
 	uintptr_t       user_entry;
 	const void*     arg_data;
 	size_t          arg_size;
-	size_t          user_stack_pages;
+	size_t          user_stack_size;
 	struct cpu*     preferred_cpu;
 	bool            detached;
 	/* Internal process lifecycle claim for the unique initial thread. */

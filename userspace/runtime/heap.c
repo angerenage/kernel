@@ -1,38 +1,34 @@
 #include <base/heap.h>
-#include <base/vmm.h>
 #include <runtime/heap.h>
+#include <system/memory.h>
 #include <system/process.h>
 
 uintptr_t runtime_heap_base;
-size_t    runtime_heap_page_count;
-size_t    runtime_heap_used_pages;
-size_t    runtime_heap_page_size;
-cap_id_t  runtime_heap_address_space_cap = CAP_ID_INVALID;
+size_t    runtime_heap_size;
+size_t    runtime_heap_used_size;
+size_t    runtime_heap_granule;
+cap_id_t  runtime_heap_address_space_cap    = CAP_ID_INVALID;
+cap_id_t  runtime_heap_memory_allocator_cap = CAP_ID_INVALID;
 bool      runtime_heap_configured;
 
-static bool runtime_heap_configure(uintptr_t base, size_t page_count, size_t page_size, cap_id_t address_space_cap) {
-	if (base == 0u || page_count == 0u || page_size != VMM_PAGE_SIZE || (base & (page_size - 1u)) != 0u ||
-	    page_count > SIZE_MAX / page_size || address_space_cap == CAP_ID_INVALID) {
-		return false;
-	}
-	if (runtime_heap_configured) return false;
-	runtime_heap_base              = base;
-	runtime_heap_page_count        = page_count;
-	runtime_heap_used_pages        = 0u;
-	runtime_heap_page_size         = page_size;
-	runtime_heap_address_space_cap = address_space_cap;
-	runtime_heap_configured        = true;
-	return true;
-}
-
 bool runtime_heap_init(const struct process_startup_info* startup) {
-	struct self_info self;
-
-	if (startup == NULL || !syscall_status_is_success(process_self_info(&self))) return false;
-	if (!runtime_heap_configure(
-			startup->heap_base, startup->heap_page_count, startup->page_size, self.address_space_cap)) {
+	struct self_info          self;
+	struct address_space_info address_space;
+	if (startup == NULL || startup->heap_base == 0u || startup->heap_size == 0u ||
+	    startup->memory_allocator_cap == CAP_ID_INVALID || !syscall_status_is_success(process_self_info(&self)) ||
+	    !syscall_status_is_success(address_space_info(self.address_space_cap, &address_space)) ||
+	    address_space.kind != ADDRESS_SPACE_KIND_PROCESS || address_space.minimum_mapping_size == 0u ||
+	    (address_space.minimum_mapping_size & (address_space.minimum_mapping_size - 1u)) != 0u ||
+	    (startup->heap_base & (address_space.minimum_mapping_size - 1u)) != 0u ||
+	    (startup->heap_size & (address_space.minimum_mapping_size - 1u)) != 0u || runtime_heap_configured)
 		return false;
-	}
+	runtime_heap_base                 = startup->heap_base;
+	runtime_heap_size                 = startup->heap_size;
+	runtime_heap_used_size            = 0u;
+	runtime_heap_granule              = address_space.minimum_mapping_size;
+	runtime_heap_address_space_cap    = self.address_space_cap;
+	runtime_heap_memory_allocator_cap = startup->memory_allocator_cap;
+	runtime_heap_configured           = true;
 	return heap_init();
 }
 

@@ -1,7 +1,6 @@
 #include <base/cap.h>
 #include <base/framebuffer.h>
 #include <base/math.h>
-#include <base/vmm.h>
 #include <runtime/diagnostic.h>
 #include <system/capability.h>
 #include <system/framebuffer.h>
@@ -49,10 +48,8 @@ syscall_status_t framebuffer_map(cap_id_t framebuffer_cap, struct framebuffer_ma
 	result = cap_call_syscall(framebuffer_cap, &request, sizeof(request), &response, sizeof(response));
 	RUNTIME_DIAGNOSTIC_OPERATION_RESULT(FRAMEBUFFER_OP_MAP, result);
 	if (result.status != SYSCALL_STATUS_OK) return result.status;
-	if (result.value != sizeof(response) || response.mapping_cap == CAP_ID_INVALID ||
-	    response.mapping.id != VMM_ID_INVALID || response.mapping.base == NULL || response.mapping.page_count == 0u ||
-	    response.mapping.prot != (VMM_PROT_READ | VMM_PROT_WRITE) || response.mapping.guard_pages != 0u ||
-	    response.data_offset >= VMM_PAGE_SIZE) {
+	if (result.value != sizeof(response) || response.mapping_cap == CAP_ID_INVALID || response.address == 0u ||
+	    response.mapping_size == 0u || response.data_offset >= response.mapping_size) {
 		RUNTIME_DIAGNOSTIC_INVALID_STATE("FRAMEBUFFER_OP_MAP returned an invalid mapping");
 		return SYSCALL_STATUS_FAILED;
 	}

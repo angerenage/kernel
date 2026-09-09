@@ -1,27 +1,29 @@
 #include "test_support.h"
 
-#include <base/vmm.h>
+#include <test_memory.h>
 
 #define UTHREAD_TEST_ARENA_SIZE KiB(2048)
 #define UTHREAD_TEST_HEAP_SIZE KiB(64)
 
-static uint8_t uthread_test_arena[UTHREAD_TEST_ARENA_SIZE] __attribute__((aligned(VMM_PAGE_SIZE)));
-static uint8_t uthread_test_heap[UTHREAD_TEST_HEAP_SIZE] __attribute__((aligned(VMM_PAGE_SIZE)));
+static uint8_t uthread_test_arena[UTHREAD_TEST_ARENA_SIZE] __attribute__((aligned(TEST_MAPPING_GRANULE)));
+static uint8_t uthread_test_heap[UTHREAD_TEST_HEAP_SIZE] __attribute__((aligned(TEST_MAPPING_GRANULE)));
 static size_t  uthread_test_heap_offset;
 
-bool heap_grow_pages(size_t page_count, void** out_base) {
+bool heap_grow_region(size_t minimum_size, void** out_base, size_t* out_size) {
 	size_t bytes;
 	size_t offset;
 
-	if (out_base == NULL) return false;
+	if (out_base == NULL || out_size == NULL) return false;
 	*out_base = NULL;
-	bytes     = page_count * VMM_PAGE_SIZE;
+	*out_size = 0u;
+	bytes     = minimum_size;
 	for (;;) {
 		offset = __atomic_load_n(&uthread_test_heap_offset, __ATOMIC_ACQUIRE);
 		if (bytes > UTHREAD_TEST_HEAP_SIZE - offset) return false;
 		if (__atomic_compare_exchange_n(
 				&uthread_test_heap_offset, &offset, offset + bytes, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
 			*out_base = uthread_test_heap + offset;
+			*out_size = bytes;
 			return true;
 		}
 	}

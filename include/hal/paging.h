@@ -1,6 +1,6 @@
 #pragma once
 
-#include <base/vmm.h>
+#include <base/memory.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>

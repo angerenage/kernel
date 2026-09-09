@@ -30,7 +30,7 @@ syscall_status_t loader_load(cap_id_t loader_cap, cap_id_t module_cap, struct lo
 		return SYSCALL_STATUS_FAILED;
 	}
 	if (out_response->process_cap == CAP_ID_INVALID || out_response->address_space_cap == CAP_ID_INVALID ||
-	    out_response->entry == 0u || out_response->heap_base == 0u || out_response->heap_page_count == 0u) {
+	    out_response->entry == 0u || out_response->heap_base == 0u || out_response->heap_size == 0u) {
 		RUNTIME_DIAGNOSTIC_FAILED(loader_load);
 		return SYSCALL_STATUS_FAILED;
 	}

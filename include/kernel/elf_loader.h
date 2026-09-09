@@ -23,13 +23,9 @@ struct kernel_elf_process {
 	struct process* process;
 	uintptr_t       entry;
 	uintptr_t       heap_base;
-	size_t          heap_page_count;
+	size_t          heap_size;
 };
 
-/* Load an ELF boot module and a zero-initialized initial heap into a fresh process. Every byte in page-rounded segment
-
- * * mappings that does not come from the ELF file is cleared before userspace can observe it. The input module may
- * have
- * arbitrary byte alignment. The caller starts the main userspace thread. */
+/* Load an ELF boot module and zero-initialized heap into a fresh, not-yet-started process. */
 enum kernel_elf_load_result kernel_elf_load_process(const struct kernel_boot_module* module, const char* name,
                                                     struct kernel_elf_process* out_process);

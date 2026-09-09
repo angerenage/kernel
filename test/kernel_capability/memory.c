@@ -1,580 +1,247 @@
-#include "../../kernel/src/capability/memory.h"
+#include <base/address_space.h>
+#include <base/memory.h>
+#include <test_memory.h>
 
-#include <base/vmm.h>
-
-#include "../../kernel/src/syscall/memory.h"
+#include "../../kernel/src/capability/address_space.h"
+#include "../../kernel/src/capability/memory_allocator.h"
 #include "test_support.h"
 
-static cap_id_t create_memory_params(cap_rights_t rights, const struct memory_create_params* params) {
-	return kernel_memory_create(rights, params);
+static cap_id_t root_allocator(struct kernel_capability_test_context* ctx) {
+	cap_id_t cap = kernel_memory_allocator_grant_root(process_pid(ctx->process));
+	cr_assert_neq(cap, CAP_ID_INVALID);
+	return cap;
 }
 
-static cap_id_t create_memory(cap_rights_t rights, size_t page_count) {
-	const struct memory_create_params params = {.page_count = page_count};
-	return create_memory_params(rights, &params);
-}
-
-static bool drop_capability(cap_id_t id) {
-	struct capability* cap = cap_acquire(id);
-	if (cap == NULL) return false;
-	bool dropped = cap_drop(cap);
-	cap_release(cap);
-	return dropped;
-}
-
-static cap_object_id_t capability_object_id(cap_id_t id) {
-	struct capability* cap = cap_acquire(id);
-	if (cap == NULL) return CAP_OBJECT_ID_INVALID;
-	cap_object_id_t object_id = cap->cap_object_id;
-	cap_release(cap);
-	return object_id;
-}
-
-static syscall_result_t memory_info(cap_id_t cap, struct memory_info* out_info) {
-	const struct memory_info_request request = {.header = {.op = MEMORY_OP_INFO}};
-	return kernel_capability_test_call(cap, &request, sizeof(request), out_info, sizeof(*out_info));
-}
-
-static syscall_result_t memory_read_to(cap_id_t cap, size_t offset, uintptr_t destination, size_t size) {
-	const struct memory_read_request request = {
-		.header = {.op = MEMORY_OP_READ}, .offset = offset, .destination = destination, .size = size};
-	struct memory_transfer_response response;
-	return kernel_capability_test_call(cap, &request, sizeof(request), &response, sizeof(response));
-}
-
-static syscall_result_t memory_write_from(cap_id_t cap, size_t offset, uintptr_t source, size_t size) {
-	const struct memory_write_request request = {
-		.header = {.op = MEMORY_OP_WRITE}, .source = source, .offset = offset, .size = size};
-	struct memory_transfer_response response;
-	return kernel_capability_test_call(cap, &request, sizeof(request), &response, sizeof(response));
-}
-
-static syscall_result_t map_memory(cap_id_t memory_cap, process_id_t caller, struct process* target,
-                                   const struct memory_map_params* params, struct address_space_map_result* out) {
-	return kernel_memory_map(memory_cap, caller, target, params, out);
-}
-
-static syscall_result_t protect_mapping(cap_id_t cap, vmm_prot_t prot) {
-	const struct mapping_protect_request request = {.header = {.op = MAPPING_OP_PROTECT}, .prot = prot};
-	return kernel_capability_test_call(cap, &request, sizeof(request), NULL, 0u);
-}
-
-Test(kernel_capability_memory, create_syscall_grants_the_final_memory_rights) {
-	struct kernel_capability_test_context ctx;
-
-	kernel_capability_test_begin(&ctx, "kernel-cap/memory-create-rights");
-	const struct memory_create_params params = {.page_count = 1u};
-	syscall_result_t result = syscall_memory_create((uintptr_t)&params, sizeof(params), 0u, 0u, 0u, 0u);
+static cap_id_t allocate_memory(cap_id_t allocator, size_t size) {
+	const struct memory_allocator_alloc_request request = {
+		.header = {.op = MEMORY_ALLOCATOR_OP_ALLOC},
+		.size   = size,
+	};
+	struct memory_allocator_alloc_response response;
+	syscall_result_t                       result =
+		kernel_capability_test_call(allocator, &request, sizeof(request), &response, sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
-	struct capability* cap = cap_acquire((cap_id_t)result.value);
-	cr_assert_not_null(cap);
-	cr_assert_eq(cap_rights(cap), CAP_CALL | CAP_READ | CAP_WRITE | CAP_EXEC | CAP_MAP | CAP_DELEGATE);
-	cap_release(cap);
-	cr_assert(drop_capability((cap_id_t)result.value));
-	kernel_capability_test_end(&ctx);
+	cr_assert_neq(response.memory_cap, CAP_ID_INVALID);
+	return response.memory_cap;
 }
 
-Test(kernel_capability_memory, create_syscall_rejects_negative_memory_type_as_a_bad_argument) {
-	struct kernel_capability_test_context ctx;
-	struct memory_create_params           params = {.page_count = 1u, .memory_type = (enum memory_type) - 1};
-
-	kernel_capability_test_begin(&ctx, "kernel-cap/memory-invalid-type");
-	syscall_result_t result = syscall_memory_create((uintptr_t)&params, sizeof(params), 0u, 0u, 0u, 0u);
-	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
-	kernel_capability_test_end(&ctx);
+static syscall_result_t claim_memory(cap_id_t allocator, uintptr_t address, size_t size, enum memory_type type,
+                                     struct memory_allocator_claim_physical_response* out_response) {
+	const struct memory_allocator_claim_physical_request request = {
+		.header           = {.op = MEMORY_ALLOCATOR_OP_CLAIM_PHYSICAL},
+		.physical_address = address,
+		.size             = size,
+		.memory_type      = type,
+	};
+	return kernel_capability_test_call(allocator, &request, sizeof(request), out_response, sizeof(*out_response));
 }
 
-Test(kernel_capability_memory, create_reports_logical_size_and_fresh_contents_are_zero) {
+Test(kernel_capability_memory, allocator_info_alloc_and_arbitrary_slice) {
 	struct kernel_capability_test_context ctx;
+	const size_t                          size = 3u * TEST_MAPPING_GRANULE + 17u;
+	struct memory_allocator_info          allocator_info;
 	struct memory_info                    info;
-	cap_id_t                              memory_cap;
-	struct mapping*                       buffer_mapping = NULL;
-	uintptr_t                             buffer;
-	uint8_t                               byte = 0xffu;
+	cap_id_t                              allocator;
+	cap_id_t                              memory;
+	syscall_result_t                      result;
 
-	kernel_capability_test_begin(&ctx, "kernel-cap/memory-zero");
-	kernel_capability_test_poison_next_pmm_page(0xa7u);
-	memory_cap = create_memory(CAP_CALL | CAP_READ, 3u);
-	cr_assert_neq(memory_cap, CAP_ID_INVALID);
-	cr_assert_eq(memory_info(memory_cap, &info).status, SYSCALL_STATUS_OK);
-	cr_assert_eq(info.page_count, 3u);
+	kernel_capability_test_begin(&ctx, "kernel-cap/memory-alloc");
+	allocator                                                    = root_allocator(&ctx);
+	const struct memory_allocator_info_request allocator_request = {
+		.header = {.op = MEMORY_ALLOCATOR_OP_INFO},
+	};
+	result = kernel_capability_test_call(
+		allocator, &allocator_request, sizeof(allocator_request), &allocator_info, sizeof(allocator_info));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(allocator_info.claim_policy, MEMORY_ALLOCATOR_CLAIMS_UNRESTRICTED);
+	cr_assert_eq(allocator_info.physical_claim_granule, pmm_info()->allocation_granule);
+
+	memory                                        = allocate_memory(allocator, size);
+	const struct memory_info_request info_request = {.header = {.op = MEMORY_OP_INFO}};
+	result = kernel_capability_test_call(memory, &info_request, sizeof(info_request), &info, sizeof(info));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(info.size, size);
 	cr_assert_eq(info.memory_type, MEMORY_TYPE_NORMAL);
-	buffer = kernel_capability_test_alloc_user_buffer(ctx.process, 1u, &buffer_mapping);
-	cr_assert_eq(memory_read_to(memory_cap, 0u, buffer, 1u).status, SYSCALL_STATUS_OK);
-	cr_assert_eq(address_space_copy_from(process_address_space(ctx.process), buffer, &byte, 1u), ADDRESS_TRANSFER_OK);
-	cr_assert_eq(byte, 0u, "fresh memory exposed recycled PMM contents");
-	cr_assert(drop_capability(memory_cap));
-	cr_assert(address_space_unmap(process_address_space(ctx.process), buffer_mapping));
-	mapping_release(buffer_mapping);
-	kernel_capability_test_end(&ctx);
-}
 
-Test(kernel_capability_memory, legacy_fixed_managed_ram_is_scrubbed_and_device_is_rejected) {
-	struct kernel_capability_test_context ctx;
-	struct pmm_extent                     extent;
-	cap_id_t                              memory_cap;
-	struct mapping*                       buffer_mapping = NULL;
-	uintptr_t                             buffer;
-	uint8_t                               readback = 0xffu;
-
-	kernel_capability_test_begin(&ctx, "kernel-cap/memory-fixed-policy");
-	cr_assert(pmm_alloc(&(const struct pmm_alloc_request){.size = VMM_PAGE_SIZE}, &extent));
-	memset((void*)(extent.address + boot_info.direct_map_offset), 0xa5, extent.size);
-	cr_assert(pmm_free(extent));
-	struct memory_create_params params = {
-		.page_count  = 1u,
-		.memory_type = MEMORY_TYPE_NORMAL,
-		.constraints = {.physical_address = extent.address, .flags = MEMORY_CONSTRAINT_FIXED},
+	const struct memory_slice_request slice_request = {
+		.header = {.op = MEMORY_OP_SLICE},
+		.offset = 1u,
+		.size   = TEST_MAPPING_GRANULE,
 	};
-	memory_cap = create_memory_params(CAP_CALL | CAP_READ, &params);
-	cr_assert_neq(memory_cap, CAP_ID_INVALID);
-	buffer = kernel_capability_test_alloc_user_buffer(ctx.process, 1u, &buffer_mapping);
-	cr_assert_eq(memory_read_to(memory_cap, 0u, buffer, 1u).status, SYSCALL_STATUS_OK);
-	cr_assert_eq(address_space_copy_from(process_address_space(ctx.process), buffer, &readback, 1u),
-	             ADDRESS_TRANSFER_OK);
-	cr_assert_eq(readback, 0u);
-	cr_assert(drop_capability(memory_cap));
-	params.memory_type = MEMORY_TYPE_DEVICE;
-	cr_assert_eq(create_memory_params(CAP_CALL | CAP_READ, &params), CAP_ID_INVALID);
-	cr_assert(address_space_unmap(process_address_space(ctx.process), buffer_mapping));
-	mapping_release(buffer_mapping);
+	struct memory_slice_response slice;
+	result = kernel_capability_test_call(memory, &slice_request, sizeof(slice_request), &slice, sizeof(slice));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	result = kernel_capability_test_call(slice.memory_cap, &info_request, sizeof(info_request), &info, sizeof(info));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(info.size, TEST_MAPPING_GRANULE);
 	kernel_capability_test_end(&ctx);
 }
 
-Test(kernel_capability_memory, zero_grants_removes_routing_and_releases_unmapped_backing) {
+Test(kernel_capability_memory, mapping_is_whole_memory_and_last_authority_unmaps) {
 	struct kernel_capability_test_context ctx;
-	cap_id_t                              memory_cap;
-	cap_object_id_t                       object_id;
-	size_t                                free_before;
-	uint8_t                               value = 0x5au;
+	cap_id_t                              allocator;
+	cap_id_t                              memory;
+	cap_id_t                              space_cap;
+	struct address_space_map_response     mapped;
+	struct mapping_info                   info;
+	syscall_result_t                      result;
+	size_t                                mappings_before;
 
-	kernel_capability_test_begin(&ctx, "kernel-cap/memory-lifetime");
-	free_before = pmm_free_size();
-	memory_cap  = create_memory(CAP_CALL | CAP_WRITE, 1u);
-	object_id   = capability_object_id(memory_cap);
-	cr_assert_neq(object_id, CAP_OBJECT_ID_INVALID);
-	struct cap_object* object = cap_object_acquire(object_id);
-	cr_assert_not_null(object);
-	struct memory* memory = (struct memory*)(uintptr_t)object->object_id;
-	cr_assert(memory_write(memory, 0u, &value, 1u));
-	cap_object_release(object);
-	cr_assert_lt(pmm_free_size(), free_before);
-	cr_assert(drop_capability(memory_cap));
-	cr_assert_null(cap_object_acquire(object_id));
-	cr_assert_eq(pmm_free_size(), free_before);
-	kernel_capability_test_end(&ctx);
-}
-
-Test(kernel_capability_memory, delegated_grants_keep_memory_routing_alive) {
-	struct kernel_capability_test_context ctx;
-	cap_id_t                              root_cap;
-	cap_id_t                              delegated_cap;
-	cap_object_id_t                       object_id;
-
-	kernel_capability_test_begin(&ctx, "kernel-cap/memory-delegation");
-	root_cap                = create_memory(CAP_CALL | CAP_READ | CAP_DELEGATE, 1u);
-	object_id               = capability_object_id(root_cap);
-	struct capability* root = cap_acquire(root_cap);
-	cr_assert_not_null(root);
-	delegated_cap = cap_delegate_create(root, process_pid(ctx.process), CAP_CALL | CAP_READ, false);
-	cap_release(root);
-	cr_assert_neq(delegated_cap, CAP_ID_INVALID);
-	cr_assert(drop_capability(root_cap));
-	struct cap_object* object = cap_object_acquire(object_id);
-	cr_assert_not_null(object, "dropping creator grant destroyed delegated memory");
-	cap_object_release(object);
-	cr_assert(drop_capability(delegated_cap));
-	cr_assert_null(cap_object_acquire(object_id));
-	kernel_capability_test_end(&ctx);
-}
-
-Test(kernel_capability_memory, mapping_and_memory_control_caps_do_not_own_the_mapping) {
-	struct kernel_capability_test_context ctx;
-	cap_id_t                              memory_cap;
-	struct address_space_map_result       mapped;
-	cap_object_id_t                       mapping_object_id;
-	uint8_t                               written = 0x6du;
-	uint8_t                               read    = 0u;
-
-	kernel_capability_test_begin(&ctx, "kernel-cap/mapping-independence");
-	memory_cap                            = create_memory(CAP_MAP | CAP_READ | CAP_WRITE, 2u);
-	const struct memory_map_params params = {
-		.memory_page_offset = 0u, .page_count = 2u, .align_pages = 1u, .prot = VMM_PROT_READ | VMM_PROT_WRITE};
-	cr_assert_eq(map_memory(memory_cap, process_pid(ctx.process), ctx.process, &params, &mapped).status,
-	             SYSCALL_STATUS_OK);
-	cr_assert_neq(mapped.mapping_cap, CAP_ID_INVALID);
-	mapping_object_id = capability_object_id(mapped.mapping_cap);
-	cr_assert(drop_capability(mapped.mapping_cap));
-	cr_assert_null(cap_object_acquire(mapping_object_id), "zero-grant mapping control metadata remained published");
-	cr_assert_eq(address_space_validate_range(process_address_space(ctx.process),
-	                                          (uintptr_t)mapped.mapping.base,
-	                                          1u,
-	                                          ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER),
-	             ADDRESS_TRANSFER_OK);
-	cr_assert_eq(address_space_copy_to(
-					 process_address_space(ctx.process), (uintptr_t)mapped.mapping.base, &written, sizeof(written)),
-	             ADDRESS_TRANSFER_OK);
-	cr_assert(drop_capability(memory_cap));
-	cr_assert_eq(address_space_validate_range(process_address_space(ctx.process),
-	                                          (uintptr_t)mapped.mapping.base,
-	                                          1u,
-	                                          ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER),
-	             ADDRESS_TRANSFER_OK);
-	cr_assert_eq(address_space_copy_from(
-					 process_address_space(ctx.process), (uintptr_t)mapped.mapping.base, &read, sizeof(read)),
-	             ADDRESS_TRANSFER_OK);
-	cr_assert_eq(read, written);
-	kernel_capability_test_end(&ctx);
-}
-
-Test(kernel_capability_memory, mapping_rights_bound_creation_and_later_protection) {
-	struct kernel_capability_test_context ctx;
-	cap_id_t                              no_map;
-	cap_id_t                              read_only;
-	struct address_space_map_result       mapped;
-
-	kernel_capability_test_begin(&ctx, "kernel-cap/memory-rights");
-	const struct memory_map_params read_params = {.page_count = 1u, .align_pages = 1u, .prot = VMM_PROT_READ};
-	no_map                                     = create_memory(CAP_READ, 1u);
-	cr_assert_eq(map_memory(no_map, process_pid(ctx.process), ctx.process, &read_params, &mapped).status,
-	             SYSCALL_STATUS_DENIED);
-	cr_assert(drop_capability(no_map));
-	read_only = create_memory(CAP_MAP | CAP_READ, 1u);
-	cr_assert_eq(map_memory(read_only, process_pid(ctx.process), ctx.process, &read_params, &mapped).status,
-	             SYSCALL_STATUS_OK);
-	cr_assert_eq(protect_mapping(mapped.mapping_cap, VMM_PROT_WRITE).status, SYSCALL_STATUS_DENIED);
-	cr_assert_eq(protect_mapping(mapped.mapping_cap, VMM_PROT_EXEC).status, SYSCALL_STATUS_DENIED);
-	cr_assert(drop_capability(read_only));
-	cr_assert_eq(protect_mapping(mapped.mapping_cap, VMM_PROT_NONE).status, SYSCALL_STATUS_OK);
-	cr_assert_eq(protect_mapping(mapped.mapping_cap, VMM_PROT_READ).status, SYSCALL_STATUS_OK);
-	const struct mapping_unmap_request unmap = {.header = {.op = MAPPING_OP_UNMAP}};
-	cr_assert_eq(kernel_capability_test_call(mapped.mapping_cap, &unmap, sizeof(unmap), NULL, 0u).status,
-	             SYSCALL_STATUS_OK);
-	kernel_capability_test_end(&ctx);
-}
-
-Test(kernel_capability_memory, memory_read_write_rights_are_independent_of_info) {
-	struct kernel_capability_test_context ctx;
-	cap_id_t                              read_only;
-	cap_id_t                              write_only;
-	struct memory_info                    info;
-	struct mapping*                       buffer_mapping = NULL;
-	uintptr_t                             buffer;
-
-	kernel_capability_test_begin(&ctx, "kernel-cap/memory-io-rights");
-	buffer     = kernel_capability_test_alloc_user_buffer(ctx.process, 1u, &buffer_mapping);
-	read_only  = create_memory(CAP_CALL | CAP_READ, 1u);
-	write_only = create_memory(CAP_CALL | CAP_WRITE, 1u);
-	cr_assert_eq(memory_info(write_only, &info).status, SYSCALL_STATUS_OK);
-	cr_assert_eq(memory_write_from(read_only, 0u, buffer, 1u).status, SYSCALL_STATUS_DENIED);
-	cr_assert_eq(memory_read_to(write_only, 0u, buffer, 1u).status, SYSCALL_STATUS_DENIED);
-	cr_assert(drop_capability(read_only));
-	cr_assert(drop_capability(write_only));
-	cr_assert(address_space_unmap(process_address_space(ctx.process), buffer_mapping));
-	mapping_release(buffer_mapping);
-	kernel_capability_test_end(&ctx);
-}
-
-Test(kernel_capability_memory, writes_synchronize_materialized_backing_without_protection_state) {
-	struct kernel_capability_test_context ctx;
-	cap_id_t                              memory_cap;
-	struct mapping*                       buffer_mapping = NULL;
-	uintptr_t                             buffer;
-	uint8_t                               value = 0x42u;
-
-	kernel_capability_test_begin(&ctx, "kernel-cap/memory-executable-sync");
-	buffer = kernel_capability_test_alloc_user_buffer(ctx.process, 1u, &buffer_mapping);
-	cr_assert_eq(address_space_copy_to(process_address_space(ctx.process), buffer, &value, 1u), ADDRESS_TRANSFER_OK);
-	memory_cap = create_memory(CAP_CALL | CAP_WRITE, 1u);
-	cr_assert_eq(memory_write_from(memory_cap, 0u, buffer, 1u).status, SYSCALL_STATUS_OK);
-	cr_assert_eq(kernel_capability_test_executable_sync_count(), 1u);
-	cr_assert(drop_capability(memory_cap));
-	cr_assert(address_space_unmap(process_address_space(ctx.process), buffer_mapping));
-	mapping_release(buffer_mapping);
-	kernel_capability_test_end(&ctx);
-}
-
-Test(kernel_capability_memory, partial_write_failure_synchronizes_the_successfully_modified_page) {
-	struct kernel_capability_test_context ctx;
-	cap_id_t                              memory_cap;
-	struct mapping*                       buffer_mapping = NULL;
-	uintptr_t                             buffer;
-	uint8_t                               value = 0x5au;
-
-	kernel_capability_test_begin(&ctx, "kernel-cap/memory-partial-write-sync");
-	buffer = kernel_capability_test_alloc_user_buffer(ctx.process, 1u, &buffer_mapping);
-	for (size_t offset = 0u; offset < VMM_PAGE_SIZE; offset += sizeof(value)) {
-		cr_assert_eq(address_space_copy_to(process_address_space(ctx.process), buffer + offset, &value, sizeof(value)),
-		             ADDRESS_TRANSFER_OK);
-	}
-	memory_cap = create_memory(CAP_CALL | CAP_WRITE, 2u);
-	cr_assert_eq(memory_write_from(memory_cap, 0u, buffer, VMM_PAGE_SIZE + 1u).status, SYSCALL_STATUS_BAD_ARGUMENT);
-	cr_assert_eq(kernel_capability_test_executable_sync_count(), VMM_PAGE_SIZE / 256u);
-	cr_assert(drop_capability(memory_cap));
-	cr_assert(address_space_unmap(process_address_space(ctx.process), buffer_mapping));
-	mapping_release(buffer_mapping);
-	kernel_capability_test_end(&ctx);
-}
-
-Test(kernel_capability_memory, mapping_secondary_capability_resolution_does_not_require_cap_call) {
-	struct kernel_capability_test_context ctx;
-	struct address_space_map_result       mapped;
-	cap_id_t                              memory_cap;
-
-	kernel_capability_test_begin(&ctx, "kernel-cap/memory-direct-map");
-	memory_cap                            = create_memory(CAP_MAP | CAP_READ, 1u);
-	const struct memory_map_params params = {.page_count = 1u, .prot = VMM_PROT_READ};
-	cr_assert_eq(map_memory(memory_cap, process_pid(ctx.process), ctx.process, &params, &mapped).status,
-	             SYSCALL_STATUS_OK);
-	cr_assert(drop_capability(memory_cap));
-	const struct mapping_unmap_request unmap = {.header = {.op = MAPPING_OP_UNMAP}};
-	cr_assert_eq(kernel_capability_test_call(mapped.mapping_cap, &unmap, sizeof(unmap), NULL, 0u).status,
-	             SYSCALL_STATUS_OK);
-	kernel_capability_test_end(&ctx);
-}
-
-Test(kernel_capability_memory, generic_map_supports_subranges_exact_auto_alignment_and_guards) {
-	struct kernel_capability_test_context ctx;
-	cap_id_t                              memory_cap;
-	struct address_space_map_result       exact;
-	struct address_space_map_result       automatic;
-	struct address_space_map_result       rejected;
-
-	kernel_capability_test_begin(&ctx, "kernel-cap/memory-map-params");
-	memory_cap                                  = create_memory(CAP_MAP | CAP_READ, 8u);
-	const struct memory_map_params exact_params = {
-		.memory_page_offset = 2u,
-		.page_count         = 2u,
-		.address            = 0x400000u,
-		.align_pages        = 1u,
-		.guard_pages        = 1u,
-		.prot               = VMM_PROT_READ,
+	kernel_capability_test_begin(&ctx, "kernel-cap/mapping");
+	mappings_before = address_space_mapping_count(process_address_space(ctx.process));
+	allocator       = root_allocator(&ctx);
+	memory          = allocate_memory(allocator, 2u * TEST_MAPPING_GRANULE);
+	space_cap       = kernel_address_space_grant(
+        ctx.process, process_pid(ctx.process), CAP_CALL | CAP_READ | CAP_MAP | CAP_DELEGATE | CAP_WRITE | CAP_EXEC);
+	cr_assert_neq(space_cap, CAP_ID_INVALID);
+	const struct address_space_map_request map_request = {
+		.header       = {.op = ADDRESS_SPACE_OP_MAP},
+		.memory_cap   = memory,
+		.access       = MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+		.alignment    = TEST_MAPPING_GRANULE,
+		.guard_before = TEST_MAPPING_GRANULE,
 	};
-	cr_assert_eq(map_memory(memory_cap, process_pid(ctx.process), ctx.process, &exact_params, &exact).status,
-	             SYSCALL_STATUS_OK);
-	cr_assert_eq((uintptr_t)exact.mapping.base, exact_params.address);
-	cr_assert_eq(exact.mapping.page_count, 2u);
-	cr_assert_eq(exact.mapping.memory_page_offset, 2u);
-	cr_assert_eq(exact.mapping.guard_pages, 1u);
-	cr_assert_eq(exact.mapping.prot, VMM_PROT_READ);
-	cr_assert_eq(exact.mapping.memory_type, MEMORY_TYPE_NORMAL);
-	struct address_space_map_result overlap;
-	cr_assert_eq(map_memory(memory_cap, process_pid(ctx.process), ctx.process, &exact_params, &overlap).status,
-	             SYSCALL_STATUS_BAD_ARGUMENT);
-	const struct memory_map_params auto_params = {
-		.memory_page_offset = 4u, .page_count = 1u, .align_pages = 8u, .guard_pages = 2u, .prot = VMM_PROT_READ};
-	cr_assert_eq(map_memory(memory_cap, process_pid(ctx.process), ctx.process, &auto_params, &automatic).status,
-	             SYSCALL_STATUS_OK);
-	cr_assert_eq((uintptr_t)automatic.mapping.base % (8u * VMM_PAGE_SIZE), 0u);
-	struct memory_map_params invalid = {.memory_page_offset = SIZE_MAX, .page_count = 2u, .prot = VMM_PROT_READ};
-	cr_assert_eq(map_memory(memory_cap, process_pid(ctx.process), ctx.process, &invalid, &rejected).status,
-	             SYSCALL_STATUS_BAD_ARGUMENT);
-	const struct mapping_unmap_request unmap = {.header = {.op = MAPPING_OP_UNMAP}};
-	cr_assert_eq(kernel_capability_test_call(exact.mapping_cap, &unmap, sizeof(unmap), NULL, 0u).status,
-	             SYSCALL_STATUS_OK);
-	cr_assert_eq(kernel_capability_test_call(automatic.mapping_cap, &unmap, sizeof(unmap), NULL, 0u).status,
-	             SYSCALL_STATUS_OK);
-	cr_assert(drop_capability(memory_cap));
-	kernel_capability_test_end(&ctx);
-}
+	result = kernel_capability_test_call(space_cap, &map_request, sizeof(map_request), &mapped, sizeof(mapped));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(address_space_mapping_count(process_address_space(ctx.process)), mappings_before + 1u);
+	cr_assert(cap_destroy_by_id(memory));
+	cr_assert(cap_destroy_by_id(space_cap));
+	const struct mapping_info_request info_request = {.header = {.op = MAPPING_OP_INFO}};
+	result = kernel_capability_test_call(mapped.mapping_cap, &info_request, sizeof(info_request), &info, sizeof(info));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(info.address, mapped.address);
+	cr_assert_eq(info.size, 2u * TEST_MAPPING_GRANULE);
+	cr_assert_eq(info.guard_before, TEST_MAPPING_GRANULE);
 
-Test(kernel_capability_memory, target_death_invalidates_mapping_control_without_manual_unmap) {
-	struct kernel_capability_test_context ctx;
-	struct process*                       target;
-	struct uthread*                       target_main;
-	cap_id_t                              memory_cap;
-	struct address_space_map_result       mapped;
-
-	kernel_capability_test_begin(&ctx, "kernel-cap/mapping-target-death");
-	target                                = syscall_test_spawn_process("kernel-cap/mapping-target");
-	target_main                           = process_main_thread(target);
-	memory_cap                            = create_memory(CAP_MAP | CAP_READ, 1u);
-	const struct memory_map_params params = {.page_count = 1u, .prot = VMM_PROT_READ};
-	cr_assert_eq(map_memory(memory_cap, process_pid(ctx.process), target, &params, &mapped).status, SYSCALL_STATUS_OK);
-	thread_mark_zombie(&target_main->thread);
-	cr_assert(process_destroy(target));
-	cr_assert_null(cap_acquire(mapped.mapping_cap));
-	cr_assert(drop_capability(memory_cap));
-	kernel_capability_test_end(&ctx);
-}
-
-Test(kernel_capability_memory, mapping_holder_death_does_not_unmap_another_live_space) {
-	struct kernel_capability_test_context ctx;
-	struct process*                       holder;
-	struct process*                       target;
-	struct uthread*                       holder_main;
-	struct uthread*                       target_main;
-	cap_id_t                              memory_cap;
-	cap_id_t                              holder_memory;
-	struct address_space_map_result       mapped;
-
-	kernel_capability_test_begin(&ctx, "kernel-cap/mapping-holder-death");
-	holder                  = syscall_test_spawn_process("kernel-cap/mapping-holder");
-	target                  = syscall_test_spawn_process("kernel-cap/mapping-target-live");
-	holder_main             = process_main_thread(holder);
-	target_main             = process_main_thread(target);
-	memory_cap              = create_memory(CAP_MAP | CAP_READ | CAP_DELEGATE, 1u);
-	struct capability* root = cap_acquire(memory_cap);
-	holder_memory           = cap_delegate_create(root, process_pid(holder), CAP_MAP | CAP_READ, false);
-	cap_release(root);
-	const struct memory_map_params params = {.page_count = 1u, .prot = VMM_PROT_READ};
-	cr_assert_eq(map_memory(holder_memory, process_pid(holder), target, &params, &mapped).status, SYSCALL_STATUS_OK);
-	thread_mark_zombie(&holder_main->thread);
-	cr_assert(process_destroy(holder));
-	cr_assert_eq(address_space_validate_range(process_address_space(target),
-	                                          (uintptr_t)mapped.mapping.base,
-	                                          1u,
-	                                          ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER),
-	             ADDRESS_TRANSFER_OK);
-	cr_assert_null(cap_acquire(mapped.mapping_cap));
-	cr_assert(drop_capability(memory_cap));
-	thread_mark_zombie(&target_main->thread);
-	cr_assert(process_destroy(target));
-	kernel_capability_test_end(&ctx);
-}
-
-Test(kernel_capability_memory, process_teardown_drops_memory_grants_through_generic_cleanup) {
-	struct kernel_capability_test_context ctx;
-	struct process*                       holder;
-	struct uthread*                       holder_main;
-	cap_id_t                              root_cap;
-	cap_id_t                              holder_cap;
-	cap_object_id_t                       object_id;
-
-	kernel_capability_test_begin(&ctx, "kernel-cap/memory-process-cleanup");
-	holder                  = syscall_test_spawn_process("kernel-cap/memory-holder");
-	holder_main             = process_main_thread(holder);
-	root_cap                = create_memory(CAP_READ | CAP_DELEGATE, 1u);
-	object_id               = capability_object_id(root_cap);
-	struct capability* root = cap_acquire(root_cap);
-	holder_cap              = cap_delegate_create(root, process_pid(holder), CAP_READ, false);
-	cap_release(root);
-	cr_assert_neq(holder_cap, CAP_ID_INVALID);
-	cr_assert(drop_capability(root_cap));
-	thread_mark_zombie(&holder_main->thread);
-	cr_assert(process_destroy(holder));
-	cr_assert_null(cap_object_acquire(object_id));
-	kernel_capability_test_end(&ctx);
-}
-
-Test(kernel_capability_memory, one_memory_shares_backing_across_address_spaces) {
-	struct kernel_capability_test_context ctx;
-	struct process*                       other;
-	struct uthread*                       other_main;
-	cap_id_t                              memory_cap;
-	struct address_space_map_result       first;
-	struct address_space_map_result       second;
-	uint8_t                               value = 0x91u;
-	uint8_t                               observed;
-
-	kernel_capability_test_begin(&ctx, "kernel-cap/memory-sharing");
-	other                                 = syscall_test_spawn_process("kernel-cap/memory-sharing-peer");
-	other_main                            = process_main_thread(other);
-	memory_cap                            = create_memory(CAP_MAP | CAP_READ | CAP_WRITE, 1u);
-	const struct memory_map_params params = {
-		.page_count = 1u, .align_pages = 1u, .prot = VMM_PROT_READ | VMM_PROT_WRITE};
-	cr_assert_eq(map_memory(memory_cap, process_pid(ctx.process), ctx.process, &params, &first).status,
-	             SYSCALL_STATUS_OK);
-	cr_assert_eq(map_memory(memory_cap, process_pid(ctx.process), other, &params, &second).status, SYSCALL_STATUS_OK);
-	cr_assert(drop_capability(first.mapping_cap));
-	cr_assert(drop_capability(second.mapping_cap));
-	cr_assert(drop_capability(memory_cap));
-	cr_assert_eq(
-		address_space_copy_to(process_address_space(ctx.process), (uintptr_t)first.mapping.base, &value, sizeof(value)),
-		ADDRESS_TRANSFER_OK);
-	cr_assert_eq(address_space_copy_from(
-					 process_address_space(other), (uintptr_t)second.mapping.base, &observed, sizeof(observed)),
-	             ADDRESS_TRANSFER_OK);
-	cr_assert_eq(observed, value);
-	cr_assert_eq(address_space_copy_from(
-					 process_address_space(other), (uintptr_t)second.mapping.base, &observed, sizeof(observed)),
-	             ADDRESS_TRANSFER_OK);
-	cr_assert_eq(observed, value);
-	thread_mark_zombie(&other_main->thread);
-	cr_assert(process_destroy(other));
-	kernel_capability_test_end(&ctx);
-}
-
-Test(kernel_capability_memory, delegated_mapping_rights_reduce_the_protection_ceiling) {
-	struct kernel_capability_test_context ctx;
-	cap_id_t                              memory_cap;
-	struct address_space_map_result       mapped;
-
-	kernel_capability_test_begin(&ctx, "kernel-cap/mapping-protection-ceiling");
-	memory_cap                            = create_memory(CAP_MAP | CAP_READ | CAP_WRITE, 1u);
-	const struct memory_map_params params = {.page_count = 1u, .prot = VMM_PROT_READ | VMM_PROT_WRITE};
-	cr_assert_eq(map_memory(memory_cap, process_pid(ctx.process), ctx.process, &params, &mapped).status,
-	             SYSCALL_STATUS_OK);
-	cr_assert(drop_capability(memory_cap));
-	cr_assert_eq(protect_mapping(mapped.mapping_cap, VMM_PROT_NONE).status, SYSCALL_STATUS_OK);
-	cr_assert_eq(protect_mapping(mapped.mapping_cap, VMM_PROT_READ | VMM_PROT_WRITE).status, SYSCALL_STATUS_OK);
-	struct capability* mapping = cap_acquire(mapped.mapping_cap);
-	cr_assert_not_null(mapping);
-	cap_id_t reduced =
-		cap_delegate_create(mapping, process_pid(ctx.process), CAP_CALL | CAP_MAP | CAP_READ | CAP_DESTROY, false);
-	cap_release(mapping);
-	cr_assert_neq(reduced, CAP_ID_INVALID);
-	cr_assert_eq(protect_mapping(reduced, VMM_PROT_WRITE).status, SYSCALL_STATUS_DENIED);
-	cr_assert_eq(protect_mapping(reduced, VMM_PROT_READ).status, SYSCALL_STATUS_OK);
-	const struct mapping_unmap_request unmap = {.header = {.op = MAPPING_OP_UNMAP}};
-	cr_assert_eq(kernel_capability_test_call(mapped.mapping_cap, &unmap, sizeof(unmap), NULL, 0u).status,
-	             SYSCALL_STATUS_OK);
-	kernel_capability_test_end(&ctx);
-}
-
-Test(kernel_capability_memory, fixed_device_memory_is_exclusive_and_controls_mapping_type) {
-	struct kernel_capability_test_context ctx;
-	struct address_space_map_result       mapped;
-	struct memory_info                    info;
-	cap_id_t                              first;
-	cap_id_t                              second;
-
-	kernel_capability_test_begin(&ctx, "kernel-cap/memory-fixed-device");
-	const struct memory_create_params create_params = {
-		.page_count  = 2u,
-		.memory_type = MEMORY_TYPE_DEVICE,
-		.constraints = {.physical_address = 0x500000u, .flags = MEMORY_CONSTRAINT_FIXED},
+	const struct mapping_protect_request protect = {
+		.header = {.op = MAPPING_OP_PROTECT},
+		.access = MEMORY_ACCESS_READ,
 	};
-	first = create_memory_params(CAP_CALL | CAP_READ | CAP_WRITE | CAP_EXEC | CAP_MAP, &create_params);
-	cr_assert_neq(first, CAP_ID_INVALID);
-	cr_assert_eq(memory_info(first, &info).status, SYSCALL_STATUS_OK);
-	cr_assert_eq(info.page_count, 2u);
-	cr_assert_eq(info.memory_type, MEMORY_TYPE_DEVICE);
-	second = create_memory_params(CAP_CALL | CAP_MAP, &create_params);
-	cr_assert_eq(second, CAP_ID_INVALID);
-
-	const struct memory_map_params map_params = {.page_count = 2u, .prot = VMM_PROT_READ};
-	cr_assert_eq(map_memory(first, process_pid(ctx.process), ctx.process, &map_params, &mapped).status,
-	             SYSCALL_STATUS_OK);
-	cr_assert_eq(mapped.mapping.memory_type, MEMORY_TYPE_DEVICE);
-	uint8_t ignored;
-	cr_assert_eq(
-		address_space_copy_from(process_address_space(ctx.process), (uintptr_t)mapped.mapping.base, &ignored, 1u),
-		ADDRESS_TRANSFER_ACCESS_DENIED);
-	cr_assert_eq(protect_mapping(mapped.mapping_cap, VMM_PROT_EXEC).status, SYSCALL_STATUS_BAD_ARGUMENT);
-	const struct mapping_unmap_request unmap = {.header = {.op = MAPPING_OP_UNMAP}};
-	cr_assert_eq(kernel_capability_test_call(mapped.mapping_cap, &unmap, sizeof(unmap), NULL, 0u).status,
-	             SYSCALL_STATUS_OK);
-	cr_assert(drop_capability(first));
-	second = create_memory_params(CAP_CALL | CAP_MAP, &create_params);
-	cr_assert_neq(second, CAP_ID_INVALID);
-	cr_assert(drop_capability(second));
+	result = kernel_capability_test_call(mapped.mapping_cap, &protect, sizeof(protect), NULL, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert(cap_destroy_by_id(mapped.mapping_cap));
+	cr_assert_eq(address_space_mapping_count(process_address_space(ctx.process)), mappings_before);
 	kernel_capability_test_end(&ctx);
 }
 
-Test(kernel_capability_memory, create_syscall_rejects_invalid_physical_constraints) {
+Test(kernel_capability_memory, unaligned_slice_is_content_valid_but_not_mappable) {
 	struct kernel_capability_test_context ctx;
+	cap_id_t                              allocator;
+	cap_id_t                              memory;
+	cap_id_t                              space_cap;
+	struct memory_slice_response          slice;
+	struct address_space_map_response     mapped;
+	syscall_result_t                      result;
+	size_t                                mappings_before;
 
-	kernel_capability_test_begin(&ctx, "kernel-cap/memory-create-invalid-constraints");
-	const struct memory_create_params params = {
-		.page_count = 1u,
-		.constraints =
-			{
-						  .physical_min = VMM_PAGE_SIZE,
-						  .align_pages  = 2u,
-						  },
+	kernel_capability_test_begin(&ctx, "kernel-cap/unaligned-slice");
+	mappings_before                                 = address_space_mapping_count(process_address_space(ctx.process));
+	allocator                                       = root_allocator(&ctx);
+	memory                                          = allocate_memory(allocator, 2u * TEST_MAPPING_GRANULE + 1u);
+	const struct memory_slice_request slice_request = {
+		.header = {.op = MEMORY_OP_SLICE},
+		.offset = 1u,
+		.size   = TEST_MAPPING_GRANULE,
 	};
-	syscall_result_t result = syscall_memory_create((uintptr_t)&params, sizeof(params), 0u, 0u, 0u, 0u);
+	result = kernel_capability_test_call(memory, &slice_request, sizeof(slice_request), &slice, sizeof(slice));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	space_cap = kernel_address_space_grant(
+		ctx.process, process_pid(ctx.process), CAP_CALL | CAP_READ | CAP_MAP | CAP_WRITE | CAP_EXEC);
+	cr_assert_neq(space_cap, CAP_ID_INVALID);
+	const struct address_space_map_request map_request = {
+		.header     = {.op = ADDRESS_SPACE_OP_MAP},
+		.memory_cap = slice.memory_cap,
+		.access     = MEMORY_ACCESS_READ,
+	};
+	result = kernel_capability_test_call(space_cap, &map_request, sizeof(map_request), &mapped, sizeof(mapped));
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(address_space_mapping_count(process_address_space(ctx.process)), mappings_before);
+	kernel_capability_test_end(&ctx);
+}
+
+Test(kernel_capability_memory, derived_allocator_attenuates_output_policy) {
+	struct kernel_capability_test_context   ctx;
+	cap_id_t                                root;
+	struct memory_allocator_derive_response derived;
+	struct memory_allocator_info            info;
+	syscall_result_t                        result;
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/allocator-derive");
+	root                                                 = root_allocator(&ctx);
+	const struct memory_allocator_derive_request request = {
+		.header           = {.op = MEMORY_ALLOCATOR_OP_DERIVE},
+		.allocator_rights = CAP_CALL | CAP_READ | CAP_ALLOCATE,
+		.memory_rights    = CAP_READ | CAP_WRITE | CAP_MAP | CAP_DERIVE,
+		.memory_type_mask = 1ull << MEMORY_TYPE_NORMAL,
+	};
+	result = kernel_capability_test_call(root, &request, sizeof(request), &derived, sizeof(derived));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	const struct memory_allocator_info_request info_request = {
+		.header = {.op = MEMORY_ALLOCATOR_OP_INFO},
+	};
+	result =
+		kernel_capability_test_call(derived.allocator_cap, &info_request, sizeof(info_request), &info, sizeof(info));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(info.memory_rights, request.memory_rights);
+	cr_assert_eq(info.memory_type_mask, request.memory_type_mask);
+	cr_assert_eq(info.claim_policy, MEMORY_ALLOCATOR_CLAIMS_NONE);
+	cap_id_t memory = allocate_memory(derived.allocator_cap, 123u);
+	cr_assert(cap_destroy_by_id(derived.allocator_cap));
+	const struct memory_info_request memory_info_request = {.header = {.op = MEMORY_OP_INFO}};
+	struct memory_info               memory_info;
+	result = kernel_capability_test_call(
+		memory, &memory_info_request, sizeof(memory_info_request), &memory_info, sizeof(memory_info));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(memory_info.size, 123u);
+	kernel_capability_test_end(&ctx);
+}
+
+Test(kernel_capability_memory, allocator_without_normal_memory_denies_alloc) {
+	struct kernel_capability_test_context   ctx;
+	struct memory_allocator_derive_response derived;
+	struct memory_allocator_alloc_response  allocation;
+	syscall_result_t                        result;
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/allocator-no-normal");
+	cap_id_t                                     root           = root_allocator(&ctx);
+	const struct memory_allocator_derive_request derive_request = {
+		.header           = {.op = MEMORY_ALLOCATOR_OP_DERIVE},
+		.allocator_rights = CAP_CALL | CAP_ALLOCATE,
+		.memory_rights    = CAP_READ | CAP_WRITE | CAP_MAP,
+		.memory_type_mask = 0u,
+	};
+	result = kernel_capability_test_call(root, &derive_request, sizeof(derive_request), &derived, sizeof(derived));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	const struct memory_allocator_alloc_request alloc_request = {
+		.header = {.op = MEMORY_ALLOCATOR_OP_ALLOC},
+		.size   = TEST_MAPPING_GRANULE,
+	};
+	result = kernel_capability_test_call(
+		derived.allocator_cap, &alloc_request, sizeof(alloc_request), &allocation, sizeof(allocation));
+	cr_assert_eq(result.status, SYSCALL_STATUS_DENIED);
+	kernel_capability_test_end(&ctx);
+}
+
+Test(kernel_capability_memory, physical_zero_is_valid_exclusive_and_device_is_never_executable) {
+	struct kernel_capability_test_context           ctx;
+	struct memory_allocator_claim_physical_response first;
+	struct memory_allocator_claim_physical_response second;
+	struct capability*                              capability;
+	cap_id_t                                        allocator;
+	syscall_result_t                                result;
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/physical-claim");
+	allocator = root_allocator(&ctx);
+	result    = claim_memory(allocator, 0u, TEST_MAPPING_GRANULE, MEMORY_TYPE_DEVICE, &first);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	capability = cap_acquire(first.memory_cap);
+	cr_assert_not_null(capability);
+	cr_assert_eq(capability->rights & CAP_EXEC, 0u);
+	cap_release(capability);
+	result = claim_memory(allocator, 0u, TEST_MAPPING_GRANULE, MEMORY_TYPE_DEVICE, &second);
+	cr_assert_eq(result.status, SYSCALL_STATUS_FAILED);
+	cr_assert(cap_destroy_by_id(first.memory_cap));
+	result = claim_memory(allocator, 0u, TEST_MAPPING_GRANULE, MEMORY_TYPE_DEVICE, &second);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	kernel_capability_test_end(&ctx);
 }

@@ -58,15 +58,15 @@ static syscall_result_t loader_handler(const struct cap_request* req) {
 		.address_space_cap = CAP_ID_INVALID,
 		.entry             = loaded.entry,
 		.heap_base         = loaded.heap_base,
-		.heap_page_count   = loaded.heap_page_count,
+		.heap_size         = loaded.heap_size,
 	};
 	if (response.process_cap == CAP_ID_INVALID) {
 		(void)process_destroy(loaded.process);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 
-	response.address_space_cap =
-		kernel_address_space_grant(loaded.process, req->caller, CAP_CALL | CAP_MAP | CAP_READ | CAP_DELEGATE);
+	response.address_space_cap = kernel_address_space_grant(
+		loaded.process, req->caller, CAP_CALL | CAP_MAP | CAP_READ | CAP_WRITE | CAP_EXEC | CAP_DELEGATE);
 	if (response.address_space_cap == CAP_ID_INVALID) {
 		(void)cap_destroy_by_id(response.process_cap);
 		(void)process_destroy(loaded.process);

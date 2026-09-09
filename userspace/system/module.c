@@ -1,5 +1,4 @@
 #include <base/math.h>
-#include <base/vmm.h>
 #include <libc/stdlib.h>
 #include <runtime/diagnostic.h>
 #include <stddef.h>
@@ -98,9 +97,8 @@ syscall_status_t module_map(cap_id_t module_cap, struct module_map_response* out
 		RUNTIME_DIAGNOSTIC_NAMED_VALUE("MODULE_OP_MAP returned invalid response size", "response_size", result.value);
 		return SYSCALL_STATUS_FAILED;
 	}
-	if (response.mapping_cap == CAP_ID_INVALID || response.mapping.id != VMM_ID_INVALID ||
-	    response.mapping.base == NULL || response.mapping.page_count == 0u || response.mapping.prot != VMM_PROT_READ ||
-	    response.mapping.guard_pages != 0u || response.data_offset >= VMM_PAGE_SIZE) {
+	if (response.mapping_cap == CAP_ID_INVALID || response.address == 0u || response.mapping_size == 0u ||
+	    response.data_offset >= response.mapping_size) {
 		RUNTIME_DIAGNOSTIC_INVALID_STATE("MODULE_OP_MAP returned an invalid mapping");
 		return SYSCALL_STATUS_FAILED;
 	}

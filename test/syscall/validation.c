@@ -219,7 +219,7 @@ static uintptr_t allocate_self_info_output(struct process* process, struct mappi
 	void* base = NULL;
 
 	cr_assert(test_vm_map(
-		process_address_space(process), 1u, VMM_PROT_READ | VMM_PROT_WRITE, 0u, 1u, 0u, out_mapping, &base));
+		process_address_space(process), 1u, MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE, 0u, 1u, 0u, out_mapping, &base));
 	cr_assert_not_null(base);
 	return (uintptr_t)base;
 }

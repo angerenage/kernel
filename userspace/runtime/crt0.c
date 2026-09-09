@@ -25,8 +25,8 @@ void _start(const struct process_startup_info* startup) {
 	int                              main_result;
 
 	memset(__bss_start, 0, __bss_end - __bss_start);
-	if (startup == NULL || startup->size < sizeof(*startup) || startup->heap_base == 0u ||
-	    startup->heap_page_count == 0u || startup->page_size == 0u) {
+	if (startup == NULL || startup->size < sizeof(*startup) || startup->heap_base == 0u || startup->heap_size == 0u ||
+	    startup->memory_allocator_cap == CAP_ID_INVALID) {
 		exit(PROCESS_EXIT_SYSTEM_INVALID_STARTUP);
 	}
 	serial_cap_id = startup->serial_cap;

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <base/cap.h>
-#include <base/vmm.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -44,7 +43,8 @@ struct framebuffer_map_request {
 
 /* Writable caller mapping, its management capability, and the framebuffer's offset from mapping.base. */
 struct framebuffer_map_response {
-	cap_id_t        mapping_cap;
-	struct vmm_info mapping;
-	size_t          data_offset;
+	cap_id_t  mapping_cap;
+	uintptr_t address;
+	size_t    mapping_size;
+	size_t    data_offset;
 };

@@ -8,12 +8,12 @@ Test(uthread, deinit_detaches_joinable_thread_from_process) {
     };
 	uthread_id_t                worker_tid;
 	struct uthread_start_params params = {
-		.name             = "user/joinable",
-		.process          = NULL,
-		.user_entry       = 0x400000u,
-		.user_stack_pages = 2u,
-		.preferred_cpu    = NULL,
-		.detached         = false,
+		.name            = "user/joinable",
+		.process         = NULL,
+		.user_entry      = 0x400000u,
+		.user_stack_size = 2u * TEST_MAPPING_GRANULE,
+		.preferred_cpu   = NULL,
+		.detached        = false,
 	};
 
 	init_uthread_test_environment();
@@ -46,11 +46,11 @@ Test(uthread, retained_descriptor_defers_final_cleanup) {
 
 	cr_assert_eq(uthread_start(&worker,
 	                           &(const struct uthread_start_params){
-								   .name             = "user/retained",
-								   .process          = process,
-								   .user_entry       = 0x400000u,
-								   .user_stack_pages = 2u,
-								   .detached         = false,
+								   .name            = "user/retained",
+								   .process         = process,
+								   .user_entry      = 0x400000u,
+								   .user_stack_size = 2u * TEST_MAPPING_GRANULE,
+								   .detached        = false,
 							   }),
 	             UTHREAD_START_OK);
 

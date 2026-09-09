@@ -1,7 +1,6 @@
 #pragma once
 
 #include <base/upcall.h>
-#include <base/vmm.h>
 #include <core/spinlock.h>
 #include <hal/userspace.h>
 #include <stdbool.h>

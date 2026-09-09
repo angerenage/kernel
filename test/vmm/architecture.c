@@ -1,9 +1,9 @@
-#include <base/vmm.h>
+#include <test_memory.h>
 
 #include "../../core/memory/address_space_internal.h"
 #include "test_support.h"
 
-static _Alignas(VMM_PAGE_SIZE) uint8_t arena[KiB(192)];
+static _Alignas(TEST_MAPPING_GRANULE) uint8_t arena[KiB(192)];
 
 static bool map_memory(struct address_space* space, struct memory* memory, uintptr_t address, size_t alignment,
                        size_t guard_before, size_t guard_after, mapping_access_t access, struct mapping** out) {
@@ -73,20 +73,20 @@ Test(address_space, registry_survives_random_insert_and_remove_order) {
 	struct memory*       root;
 	struct memory*       views[sizeof(insert_order)]    = {0};
 	struct mapping*      mappings[sizeof(insert_order)] = {0};
-	uintptr_t            base                           = MM_KERNEL_VMM_BASE + 64u * VMM_PAGE_SIZE;
+	uintptr_t            base                           = MM_KERNEL_VMM_BASE + 64u * TEST_MAPPING_GRANULE;
 
 	init_test_vmm(arena, sizeof(arena));
-	cr_assert(memory_create_anonymous(sizeof(insert_order) * VMM_PAGE_SIZE, &root));
+	cr_assert(memory_create_anonymous(sizeof(insert_order) * TEST_MAPPING_GRANULE, &root));
 	for (size_t i = 0u; i < sizeof(insert_order); i++)
-		cr_assert(memory_slice(root, i * VMM_PAGE_SIZE, VMM_PAGE_SIZE, &views[i]));
+		cr_assert(memory_slice(root, i * TEST_MAPPING_GRANULE, TEST_MAPPING_GRANULE, &views[i]));
 	for (size_t i = 0u; i < sizeof(insert_order); i++) {
 		size_t index = insert_order[i];
 		cr_assert(map_memory(address_space_kernel(),
 		                     views[index],
-		                     base + (index * 4u + 1u) * VMM_PAGE_SIZE,
-		                     VMM_PAGE_SIZE,
-		                     VMM_PAGE_SIZE,
-		                     VMM_PAGE_SIZE,
+		                     base + (index * 4u + 1u) * TEST_MAPPING_GRANULE,
+		                     TEST_MAPPING_GRANULE,
+		                     TEST_MAPPING_GRANULE,
+		                     TEST_MAPPING_GRANULE,
 		                     MAPPING_ACCESS_READ,
 		                     &mappings[index]));
 		cr_assert_eq(address_space_mapping_count(address_space_kernel()), i + 1u);
@@ -115,27 +115,27 @@ Test(address_space, placement_obeys_bounds_alignment_and_overflow) {
 	struct mapping* mapping;
 
 	init_test_vmm(arena, sizeof(arena));
-	cr_assert(memory_create_anonymous(VMM_PAGE_SIZE, &memory));
+	cr_assert(memory_create_anonymous(TEST_MAPPING_GRANULE, &memory));
 	cr_assert_not(map_memory(address_space_kernel(),
 	                         memory,
 	                         MM_KERNEL_VMM_BASE,
-	                         VMM_PAGE_SIZE,
-	                         VMM_PAGE_SIZE,
+	                         TEST_MAPPING_GRANULE,
+	                         TEST_MAPPING_GRANULE,
 	                         0u,
 	                         MAPPING_ACCESS_READ,
 	                         &mapping));
 	cr_assert_not(map_memory(address_space_kernel(),
 	                         memory,
-	                         UINTPTR_MAX & ~(VMM_PAGE_SIZE - 1u),
-	                         VMM_PAGE_SIZE,
+	                         UINTPTR_MAX & ~(TEST_MAPPING_GRANULE - 1u),
+	                         TEST_MAPPING_GRANULE,
 	                         0u,
-	                         VMM_PAGE_SIZE,
+	                         TEST_MAPPING_GRANULE,
 	                         MAPPING_ACCESS_READ,
 	                         &mapping));
 	cr_assert_not(map_memory(address_space_kernel(),
 	                         memory,
-	                         MM_KERNEL_VMM_BASE + VMM_PAGE_SIZE,
-	                         4u * VMM_PAGE_SIZE,
+	                         MM_KERNEL_VMM_BASE + TEST_MAPPING_GRANULE,
+	                         4u * TEST_MAPPING_GRANULE,
 	                         0u,
 	                         0u,
 	                         MAPPING_ACCESS_READ,
@@ -143,12 +143,12 @@ Test(address_space, placement_obeys_bounds_alignment_and_overflow) {
 	cr_assert(map_memory(address_space_kernel(),
 	                     memory,
 	                     0u,
-	                     4u * VMM_PAGE_SIZE,
-	                     VMM_PAGE_SIZE,
-	                     VMM_PAGE_SIZE,
+	                     4u * TEST_MAPPING_GRANULE,
+	                     TEST_MAPPING_GRANULE,
+	                     TEST_MAPPING_GRANULE,
 	                     MAPPING_ACCESS_READ,
 	                     &mapping));
-	cr_assert_eq(mapping_address(mapping) & (4u * VMM_PAGE_SIZE - 1u), 0u);
+	cr_assert_eq(mapping_address(mapping) & (4u * TEST_MAPPING_GRANULE - 1u), 0u);
 	unmap_release(address_space_kernel(), mapping);
 	memory_release(memory);
 }
@@ -156,24 +156,24 @@ Test(address_space, placement_obeys_bounds_alignment_and_overflow) {
 Test(address_space, placement_alignment_guards_and_stable_identity) {
 	struct memory * root, *first_memory, *second_memory, *third_memory;
 	struct mapping *first, *second, *third;
-	uintptr_t       fixed = MM_KERNEL_VMM_BASE + 16u * VMM_PAGE_SIZE;
+	uintptr_t       fixed = MM_KERNEL_VMM_BASE + 16u * TEST_MAPPING_GRANULE;
 	init_test_vmm(arena, sizeof(arena));
-	cr_assert(memory_create_anonymous(4u * VMM_PAGE_SIZE, &root));
-	cr_assert(memory_slice(root, 0u, VMM_PAGE_SIZE, &first_memory));
-	cr_assert(memory_slice(root, VMM_PAGE_SIZE, VMM_PAGE_SIZE, &second_memory));
-	cr_assert(memory_slice(root, 2u * VMM_PAGE_SIZE, VMM_PAGE_SIZE, &third_memory));
+	cr_assert(memory_create_anonymous(4u * TEST_MAPPING_GRANULE, &root));
+	cr_assert(memory_slice(root, 0u, TEST_MAPPING_GRANULE, &first_memory));
+	cr_assert(memory_slice(root, TEST_MAPPING_GRANULE, TEST_MAPPING_GRANULE, &second_memory));
+	cr_assert(memory_slice(root, 2u * TEST_MAPPING_GRANULE, TEST_MAPPING_GRANULE, &third_memory));
 	cr_assert(map_memory(address_space_kernel(),
 	                     first_memory,
 	                     fixed,
-	                     VMM_PAGE_SIZE,
-	                     2u * VMM_PAGE_SIZE,
-	                     VMM_PAGE_SIZE,
+	                     TEST_MAPPING_GRANULE,
+	                     2u * TEST_MAPPING_GRANULE,
+	                     TEST_MAPPING_GRANULE,
 	                     MAPPING_ACCESS_READ,
 	                     &first));
 	cr_assert_not(map_memory(address_space_kernel(),
 	                         second_memory,
-	                         fixed - VMM_PAGE_SIZE,
-	                         VMM_PAGE_SIZE,
+	                         fixed - TEST_MAPPING_GRANULE,
+	                         TEST_MAPPING_GRANULE,
 	                         0u,
 	                         0u,
 	                         MAPPING_ACCESS_READ,
@@ -181,18 +181,25 @@ Test(address_space, placement_alignment_guards_and_stable_identity) {
 	cr_assert(map_memory(address_space_kernel(),
 	                     second_memory,
 	                     0u,
-	                     8u * VMM_PAGE_SIZE,
-	                     VMM_PAGE_SIZE,
+	                     8u * TEST_MAPPING_GRANULE,
+	                     TEST_MAPPING_GRANULE,
 	                     0u,
 	                     MAPPING_ACCESS_READ,
 	                     &second));
-	cr_assert(map_memory(
-		address_space_kernel(), third_memory, 0u, VMM_PAGE_SIZE, 0u, VMM_PAGE_SIZE, MAPPING_ACCESS_READ, &third));
-	cr_assert_eq(mapping_address(second) & (8u * VMM_PAGE_SIZE - 1u), 0u);
+	cr_assert(map_memory(address_space_kernel(),
+	                     third_memory,
+	                     0u,
+	                     TEST_MAPPING_GRANULE,
+	                     0u,
+	                     TEST_MAPPING_GRANULE,
+	                     MAPPING_ACCESS_READ,
+	                     &third));
+	cr_assert_eq(mapping_address(second) & (8u * TEST_MAPPING_GRANULE - 1u), 0u);
 	cr_assert_eq(address_space_mapping_count(address_space_kernel()), 3u);
 	cr_assert(address_space_contains_mapping(address_space_kernel(), first));
-	cr_assert_not(address_space_resolve_fault(address_space_kernel(), fixed - VMM_PAGE_SIZE, MAPPING_ACCESS_READ),
-	              "guard resolved as Mapping contents");
+	cr_assert_not(
+		address_space_resolve_fault(address_space_kernel(), fixed - TEST_MAPPING_GRANULE, MAPPING_ACCESS_READ),
+		"guard resolved as Mapping contents");
 	struct mapping* identity = second;
 	unmap_release(address_space_kernel(), first);
 	cr_assert_eq(second, identity, "removing another Mapping changed stable identity");
@@ -208,10 +215,12 @@ Test(address_space, rejects_unaligned_memory_view_and_geometry) {
 	struct memory * root, *slice;
 	struct mapping* mapping;
 	init_test_vmm(arena, sizeof(arena));
-	cr_assert(memory_create_anonymous(VMM_PAGE_SIZE + 1u, &root));
-	cr_assert(memory_slice(root, 1u, VMM_PAGE_SIZE, &slice));
-	cr_assert_not(map_memory(address_space_kernel(), slice, 0u, VMM_PAGE_SIZE, 0u, 0u, MAPPING_ACCESS_READ, &mapping));
-	cr_assert_not(map_memory(address_space_kernel(), root, 0u, VMM_PAGE_SIZE, 0u, 0u, MAPPING_ACCESS_READ, &mapping));
+	cr_assert(memory_create_anonymous(TEST_MAPPING_GRANULE + 1u, &root));
+	cr_assert(memory_slice(root, 1u, TEST_MAPPING_GRANULE, &slice));
+	cr_assert_not(
+		map_memory(address_space_kernel(), slice, 0u, TEST_MAPPING_GRANULE, 0u, 0u, MAPPING_ACCESS_READ, &mapping));
+	cr_assert_not(
+		map_memory(address_space_kernel(), root, 0u, TEST_MAPPING_GRANULE, 0u, 0u, MAPPING_ACCESS_READ, &mapping));
 	memory_release(slice);
 	memory_release(root);
 }
@@ -225,7 +234,7 @@ Test(address_space, physical_zero_is_a_valid_backing) {
 	cr_assert(memory_create_physical(
 		&(const struct memory_physical_request){
 			.physical_address = 0u,
-			.size             = VMM_PAGE_SIZE,
+			.size             = TEST_MAPPING_GRANULE,
 			.memory_type      = MEMORY_TYPE_NORMAL,
 		},
 		&zero));
@@ -249,7 +258,7 @@ Test(address_space, sparse_map_is_lazy_and_metadata_is_constant_size) {
 	cr_assert(memory_create_anonymous(sparse_size, &memory));
 	cr_assert(map_memory(&space, memory, 0u, 0u, 0u, 0u, MAPPING_ACCESS_READ, &mapping));
 	cr_assert_leq(
-		before - pmm_free_size(), 3u * VMM_PAGE_SIZE, "a sparse Mapping allocated size-proportional metadata");
+		before - pmm_free_size(), 3u * TEST_MAPPING_GRANULE, "a sparse Mapping allocated size-proportional metadata");
 	cr_assert_not(hal_paging_query(address_space_hal(&space), mapping_address(mapping), NULL));
 	unmap_release(&space, mapping);
 	memory_release(memory);
@@ -275,8 +284,8 @@ Test(address_space, faults_and_prefaults_expose_large_present_runs_to_hal) {
 		&memory));
 	cr_assert(map_memory(
 		address_space_kernel(), memory, first_address, large_size, 0u, 0u, MAPPING_ACCESS_READ, &fault_mapping));
-	cr_assert(
-		address_space_resolve_fault(address_space_kernel(), first_address + 17u * VMM_PAGE_SIZE, MAPPING_ACCESS_READ));
+	cr_assert(address_space_resolve_fault(
+		address_space_kernel(), first_address + 17u * TEST_MAPPING_GRANULE, MAPPING_ACCESS_READ));
 	cr_assert_eq(mock_paging_map_call_count(), 1u);
 	cr_assert_eq(mock_paging_largest_map_size(), large_size);
 
@@ -308,10 +317,10 @@ Test(address_space, a_fault_maps_at_most_one_supported_leaf) {
 		&memory));
 	cr_assert(map_memory(address_space_kernel(), memory, address, leaf_size, 0u, 0u, MAPPING_ACCESS_READ, &mapping));
 	cr_assert(address_space_resolve_fault(
-		address_space_kernel(), address + leaf_size + 17u * VMM_PAGE_SIZE, MAPPING_ACCESS_READ));
+		address_space_kernel(), address + leaf_size + 17u * TEST_MAPPING_GRANULE, MAPPING_ACCESS_READ));
 	cr_assert_eq(mock_paging_map_call_count(), 1u);
 	cr_assert_eq(mock_paging_largest_map_size(), leaf_size);
-	cr_assert_eq(mock_paging_mapping_count(), leaf_size / VMM_PAGE_SIZE);
+	cr_assert_eq(mock_paging_mapping_count(), leaf_size / TEST_MAPPING_GRANULE);
 	unmap_release(address_space_kernel(), mapping);
 	memory_release(memory);
 }
@@ -324,7 +333,7 @@ Test(address_space, shared_memory_faults_reuse_backing) {
 	init_test_vmm(arena, sizeof(arena));
 	cr_assert(address_space_create_process(&a));
 	cr_assert(address_space_create_process(&b));
-	cr_assert(memory_create_anonymous(2u * VMM_PAGE_SIZE, &memory));
+	cr_assert(memory_create_anonymous(2u * TEST_MAPPING_GRANULE, &memory));
 	cr_assert(map_memory(&a, memory, 0u, 0u, 0u, 0u, MAPPING_ACCESS_READ | MAPPING_ACCESS_WRITE, &a_mapping));
 	cr_assert(map_memory(&b, memory, 0u, 0u, 0u, 0u, MAPPING_ACCESS_READ | MAPPING_ACCESS_WRITE, &b_mapping));
 	cr_assert(address_space_resolve_fault(&a, mapping_address(a_mapping), MAPPING_ACCESS_WRITE));
@@ -345,7 +354,7 @@ Test(address_space, protect_none_preserves_contents_and_future_access) {
 	struct hal_paging_translation translation;
 	uint8_t                       value = 0x5au, readback = 0u;
 	init_test_vmm(arena, sizeof(arena));
-	cr_assert(memory_create_anonymous(2u * VMM_PAGE_SIZE, &memory));
+	cr_assert(memory_create_anonymous(2u * TEST_MAPPING_GRANULE, &memory));
 	cr_assert(map_memory(address_space_kernel(), memory, 0u, 0u, 0u, 0u, 0u, &mapping));
 	cr_assert_not(hal_paging_query(address_space_hal(address_space_kernel()), mapping_address(mapping), NULL));
 	cr_assert(address_space_protect(address_space_kernel(), mapping, MAPPING_ACCESS_READ | MAPPING_ACCESS_WRITE));
@@ -358,7 +367,7 @@ Test(address_space, protect_none_preserves_contents_and_future_access) {
 	cr_assert_not(hal_paging_query(address_space_hal(address_space_kernel()), mapping_address(mapping), NULL));
 	cr_assert(address_space_protect(address_space_kernel(), mapping, MAPPING_ACCESS_WRITE));
 	cr_assert(address_space_resolve_fault(
-		address_space_kernel(), mapping_address(mapping) + VMM_PAGE_SIZE, MAPPING_ACCESS_WRITE));
+		address_space_kernel(), mapping_address(mapping) + TEST_MAPPING_GRANULE, MAPPING_ACCESS_WRITE));
 	cr_assert(memory_read(memory, 0u, &readback, sizeof(readback)));
 	cr_assert_eq(readback, value);
 	unmap_release(address_space_kernel(), mapping);
@@ -370,13 +379,74 @@ Test(address_space, failed_pte_install_keeps_materialized_memory) {
 	struct mapping*    mapping;
 	struct memory_span span;
 	init_test_vmm(arena, sizeof(arena));
-	cr_assert(memory_create_anonymous(VMM_PAGE_SIZE, &memory));
+	cr_assert(memory_create_anonymous(TEST_MAPPING_GRANULE, &memory));
 	cr_assert(map_memory(address_space_kernel(), memory, 0u, 0u, 0u, 0u, MAPPING_ACCESS_READ, &mapping));
 	mock_paging_fail_after(0u);
 	cr_assert_not(address_space_resolve_fault(address_space_kernel(), mapping_address(mapping), MAPPING_ACCESS_READ));
-	cr_assert(memory_query(memory, 0u, VMM_PAGE_SIZE, &span));
+	cr_assert(memory_query(memory, 0u, TEST_MAPPING_GRANULE, &span));
 	cr_assert_eq(span.kind, MEMORY_SPAN_PRESENT);
 	unmap_release(address_space_kernel(), mapping);
+	memory_release(memory);
+}
+
+Test(address_space, executable_projection_synchronizes_only_present_memory) {
+	struct memory*     memory;
+	struct mapping*    mapping;
+	struct memory_span span;
+
+	init_test_vmm(arena, sizeof(arena));
+	cr_assert(memory_create_anonymous(2u * TEST_MAPPING_GRANULE, &memory));
+	cr_assert(map_memory(address_space_kernel(), memory, 0u, 0u, 0u, 0u, MAPPING_ACCESS_READ, &mapping));
+	cr_assert(address_space_resolve_fault(address_space_kernel(), mapping_address(mapping), MAPPING_ACCESS_READ));
+	cr_assert_eq(mock_cache_executable_sync_count(), 0u);
+	cr_assert(address_space_protect(address_space_kernel(), mapping, MAPPING_ACCESS_READ | MAPPING_ACCESS_EXEC));
+	cr_assert_eq(mock_cache_executable_sync_count(), 1u);
+	cr_assert(memory_query(memory, TEST_MAPPING_GRANULE, TEST_MAPPING_GRANULE, &span));
+	cr_assert_eq(span.kind, MEMORY_SPAN_HOLE);
+	cr_assert(address_space_resolve_fault(
+		address_space_kernel(), mapping_address(mapping) + TEST_MAPPING_GRANULE, MAPPING_ACCESS_EXEC));
+	cr_assert_eq(mock_cache_executable_sync_count(), 2u);
+	unmap_release(address_space_kernel(), mapping);
+	memory_release(memory);
+}
+
+Test(address_space, executable_prefault_synchronizes_present_run) {
+	struct memory*  memory;
+	struct mapping* mapping;
+
+	init_test_vmm(arena, sizeof(arena));
+	cr_assert(memory_create_anonymous(2u * TEST_MAPPING_GRANULE, &memory));
+	cr_assert(memory_materialize(memory,
+	                             &(const struct memory_materialize_request){
+									 .offset             = 0u,
+									 .size               = 2u * TEST_MAPPING_GRANULE,
+									 .alignment          = TEST_MAPPING_GRANULE,
+									 .require_contiguous = true,
+								 }));
+	cr_assert(map_memory(
+		address_space_kernel(), memory, 0u, 0u, 0u, 0u, MAPPING_ACCESS_READ | MAPPING_ACCESS_EXEC, &mapping));
+	cr_assert(address_space_prefault(address_space_kernel(), mapping, 0u, 2u * TEST_MAPPING_GRANULE));
+	cr_assert_eq(mock_cache_executable_sync_count(), 1u);
+	unmap_release(address_space_kernel(), mapping);
+	memory_release(memory);
+}
+
+Test(address_space, inaccessible_external_memory_cannot_be_executable) {
+	struct memory*  memory;
+	struct mapping* mapping = NULL;
+
+	init_test_vmm(arena, sizeof(arena));
+	cr_assert(memory_create_physical(
+		&(const struct memory_physical_request){
+			.physical_address        = (uintptr_t)arena + KiB(32),
+			.size                    = TEST_MAPPING_GRANULE,
+			.memory_type             = MEMORY_TYPE_NORMAL,
+			.external_cpu_accessible = false,
+		},
+		&memory));
+	cr_assert_not(map_memory(
+		address_space_kernel(), memory, 0u, 0u, 0u, 0u, MAPPING_ACCESS_READ | MAPPING_ACCESS_EXEC, &mapping));
+	cr_assert_null(mapping);
 	memory_release(memory);
 }
 
@@ -384,16 +454,22 @@ Test(address_space, detached_mapping_metadata_remains_readable) {
 	struct memory*  memory;
 	struct mapping* mapping;
 	init_test_vmm(arena, sizeof(arena));
-	cr_assert(memory_create_anonymous(VMM_PAGE_SIZE, &memory));
-	cr_assert(map_memory(
-		address_space_kernel(), memory, 0u, 0u, VMM_PAGE_SIZE, VMM_PAGE_SIZE, MAPPING_ACCESS_READ, &mapping));
+	cr_assert(memory_create_anonymous(TEST_MAPPING_GRANULE, &memory));
+	cr_assert(map_memory(address_space_kernel(),
+	                     memory,
+	                     0u,
+	                     0u,
+	                     TEST_MAPPING_GRANULE,
+	                     TEST_MAPPING_GRANULE,
+	                     MAPPING_ACCESS_READ,
+	                     &mapping));
 	uintptr_t address = mapping_address(mapping);
 	cr_assert(address_space_unmap(address_space_kernel(), mapping));
 	cr_assert_not(address_space_contains_mapping(address_space_kernel(), mapping));
 	cr_assert_eq(mapping_address(mapping), address);
-	cr_assert_eq(mapping_size(mapping), VMM_PAGE_SIZE);
-	cr_assert_eq(mapping_guard_before(mapping), VMM_PAGE_SIZE);
-	cr_assert_eq(mapping_guard_after(mapping), VMM_PAGE_SIZE);
+	cr_assert_eq(mapping_size(mapping), TEST_MAPPING_GRANULE);
+	cr_assert_eq(mapping_guard_before(mapping), TEST_MAPPING_GRANULE);
+	cr_assert_eq(mapping_guard_after(mapping), TEST_MAPPING_GRANULE);
 	cr_assert_eq(mapping_access(mapping), MAPPING_ACCESS_READ);
 	mapping_release(mapping);
 	memory_release(memory);
@@ -409,7 +485,7 @@ Test(address_space, process_destruction_detaches_but_preserves_mapping_metadata)
 	init_test_vmm(arena, sizeof(arena));
 	free_before = pmm_free_size();
 	cr_assert(address_space_create_process(&space));
-	cr_assert(memory_create_anonymous(VMM_PAGE_SIZE, &memory));
+	cr_assert(memory_create_anonymous(TEST_MAPPING_GRANULE, &memory));
 	cr_assert(map_memory(&space, memory, 0u, 0u, 0u, 0u, MAPPING_ACCESS_READ, &mapping));
 	address = mapping_address(mapping);
 	memory_release(memory);
@@ -418,7 +494,7 @@ Test(address_space, process_destruction_detaches_but_preserves_mapping_metadata)
 	cr_assert_not(address_space_contains_mapping(&space, mapping));
 	cr_assert_not(address_space_unmap(&space, mapping));
 	cr_assert_eq(mapping_address(mapping), address);
-	cr_assert_eq(mapping_size(mapping), VMM_PAGE_SIZE);
+	cr_assert_eq(mapping_size(mapping), TEST_MAPPING_GRANULE);
 	cr_assert_eq(mapping_access(mapping), MAPPING_ACCESS_READ);
 	mapping_release(mapping);
 	cr_assert_eq(pmm_free_size(), free_before);

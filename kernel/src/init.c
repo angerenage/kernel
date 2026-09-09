@@ -1,6 +1,5 @@
 #include <base/heap.h>
 #include <base/startup.h>
-#include <base/vmm.h>
 #include <core/address_space.h>
 #include <core/capability.h>
 #include <core/cpu.h>
@@ -26,10 +25,9 @@
 #include <stdio.h>
 
 #include "capability/kernel_resource.h"
+#include "capability/memory_allocator.h"
 
 #if KERNEL_SELFTESTS_ENABLED
-#include <base/vmm.h>
-
 #include "../test/selftest.h"
 #endif
 
@@ -79,6 +77,7 @@ static bool kernel_launch_init_process(void) {
 	enum kernel_elf_load_result      load_result;
 	enum process_thread_spawn_result start_result;
 	cap_id_t                         kernel_resources_cap;
+	cap_id_t                         memory_allocator_cap;
 
 	module = kernel_boot_module_find("init.elf");
 	if (module == NULL) {
@@ -97,22 +96,28 @@ static bool kernel_launch_init_process(void) {
 		printf("kernel: init kernel-resources capability grant failed\n");
 		return false;
 	}
+	memory_allocator_cap = kernel_memory_allocator_grant_root(process_pid(loaded.process));
+	if (memory_allocator_cap == CAP_ID_INVALID) {
+		(void)process_destroy(loaded.process);
+		printf("kernel: init MemoryAllocator capability grant failed\n");
+		return false;
+	}
 
 	startup = (struct init_startup_info){
 		.size                 = sizeof(startup),
 		.heap_base            = loaded.heap_base,
-		.heap_page_count      = loaded.heap_page_count,
-		.page_size            = VMM_PAGE_SIZE,
+		.heap_size            = loaded.heap_size,
+		.memory_allocator_cap = memory_allocator_cap,
 		.kernel_resources_cap = kernel_resources_cap,
 	};
 	thread_params = (struct process_thread_params){
-		.name             = "init/main",
-		.user_entry       = loaded.entry,
-		.arg_data         = &startup,
-		.arg_size         = sizeof(startup),
-		.user_stack_pages = UTHREAD_DEFAULT_USER_STACK_PAGES,
-		.preferred_cpu    = NULL,
-		.detached         = false,
+		.name            = "init/main",
+		.user_entry      = loaded.entry,
+		.arg_data        = &startup,
+		.arg_size        = sizeof(startup),
+		.user_stack_size = UTHREAD_DEFAULT_USER_STACK_SIZE,
+		.preferred_cpu   = NULL,
+		.detached        = false,
 	};
 	main_thread  = NULL;
 	start_result = process_start_main_thread(loaded.process, &main_thread, &thread_params);
@@ -289,7 +294,7 @@ void kernel_main(void) {
 		printf("kernel: cpu topology %zu present, %zu online\n", cpu_count(), cpu_online_count());
 
 	capability_init();
-	kernel_capability_init();
+	if (!kernel_capability_init()) boot_fail("kernel: capability initialization failed");
 
 #if KERNEL_SELFTESTS_ENABLED
 	if (kernel_selftests_requested()) {

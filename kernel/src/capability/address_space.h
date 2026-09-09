@@ -2,7 +2,6 @@
 
 #include <base/cap.h>
 #include <base/process.h>
-#include <base/vmm.h>
 #include <core/process.h>
 
 /* Grant recipient a capability for process' address space. */
