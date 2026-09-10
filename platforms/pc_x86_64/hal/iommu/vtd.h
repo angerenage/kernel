@@ -29,7 +29,8 @@ bool x86_vtd_unmap(struct hal_iommu_controller_state* controller, struct hal_iom
 
 /* Attach a hardware source to an Intel VT-d translation space. */
 bool x86_vtd_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                    uint32_t source_id);
+                    uint32_t source_id, struct hal_iommu_attachment_state* attachment);
 
 /* Detach and block a hardware source from Intel VT-d. */
-bool x86_vtd_detach(struct hal_iommu_controller_state* controller, uint32_t source_id);
+bool x86_vtd_detach(struct hal_iommu_controller_state* controller, uint32_t source_id,
+                    struct hal_iommu_attachment_state* attachment);

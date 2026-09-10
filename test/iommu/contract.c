@@ -42,8 +42,9 @@ Test(iommu, full_source_width_does_not_require_a_dense_table) {
 	descriptor.mock_info.source_id_bits = 32u;
 	cr_assert(hal_iommu_controller_init(&controller, &descriptor, &info));
 	cr_assert(hal_iommu_space_init(&controller, 1u, &space));
-	cr_assert(hal_iommu_attach(&controller, &space, UINT32_MAX));
-	cr_assert(hal_iommu_detach(&controller, UINT32_MAX));
+	struct hal_iommu_attachment_state attachment = {0};
+	cr_assert(hal_iommu_attach(&controller, &space, UINT32_MAX, &attachment));
+	cr_assert(hal_iommu_detach(&controller, UINT32_MAX, &attachment));
 	hal_iommu_space_deinit(&controller, &space);
 	hal_iommu_controller_deinit(&controller);
 }
@@ -58,6 +59,26 @@ Test(iommu, invalid_geometry_is_rejected) {
 	descriptor = iommu_descriptor();
 	descriptor.mock_info.leaf_size_mask &= ~(1ull << 12u);
 	cr_assert(!hal_iommu_controller_init(&controller, &descriptor, &info));
+}
+
+Test(iommu, full_address_width_is_valid) {
+	struct hal_iommu_controller_state      controller = {0};
+	struct hal_iommu_controller_descriptor descriptor = iommu_descriptor();
+	struct hal_iommu_space_state           space      = {0};
+	struct hal_iommu_info                  info;
+
+	descriptor.mock_info.io_address_bits       = 64u;
+	descriptor.mock_info.physical_address_bits = 64u;
+	cr_assert(hal_iommu_controller_init(&controller, &descriptor, &info));
+	cr_assert(hal_iommu_space_init(&controller, 1u, &space));
+	cr_assert(hal_iommu_map(
+		&controller,
+		&space,
+		&(const struct hal_iommu_map_request){
+			.io_address = 0x1000u, .physical_address = 0x2000u, .size = 0x1000u, .access = HAL_IOMMU_READ}));
+	cr_assert(hal_iommu_unmap(&controller, &space, 0x1000u, 0x1000u));
+	hal_iommu_space_deinit(&controller, &space);
+	hal_iommu_controller_deinit(&controller);
 }
 
 Test(iommu, spaces_validate_context_and_teardown_cleanly) {
@@ -150,14 +171,17 @@ Test(iommu, attach_never_steals_and_detach_blocks) {
 	cr_assert(hal_iommu_controller_init(&controller, &descriptor, &info));
 	cr_assert(hal_iommu_space_init(&controller, 3u, &first));
 	cr_assert(hal_iommu_space_init(&controller, 4u, &second));
-	cr_assert(hal_iommu_attach(&controller, &first, 7u));
-	cr_assert(hal_iommu_attach(&controller, &first, 7u));
-	cr_assert(!hal_iommu_attach(&controller, &second, 7u));
-	cr_assert(!hal_iommu_attach(&controller, &first, 256u));
-	cr_assert(!hal_iommu_detach(&controller, 8u));
-	cr_assert(hal_iommu_detach(&controller, 7u));
-	cr_assert(hal_iommu_attach(&controller, &second, 7u));
-	cr_assert(hal_iommu_detach(&controller, 7u));
+	struct hal_iommu_attachment_state first_attachment  = {0};
+	struct hal_iommu_attachment_state second_attachment = {0};
+	cr_assert(hal_iommu_attach(&controller, &first, 7u, &first_attachment));
+	cr_assert(!hal_iommu_attach(&controller, &first, 7u, &first_attachment));
+	cr_assert(!hal_iommu_attach(&controller, &second, 7u, &second_attachment));
+	cr_assert(!hal_iommu_attach(&controller, &first, 256u, &second_attachment));
+	cr_assert(!hal_iommu_detach(&controller, 8u, &second_attachment));
+	cr_assert(!hal_iommu_detach(&controller, 8u, &first_attachment));
+	cr_assert(hal_iommu_detach(&controller, 7u, &first_attachment));
+	cr_assert(hal_iommu_attach(&controller, &second, 7u, &second_attachment));
+	cr_assert(hal_iommu_detach(&controller, 7u, &second_attachment));
 	hal_iommu_space_deinit(&controller, &first);
 	hal_iommu_space_deinit(&controller, &second);
 	hal_iommu_controller_deinit(&controller);

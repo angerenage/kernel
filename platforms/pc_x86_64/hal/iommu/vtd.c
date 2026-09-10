@@ -2,6 +2,7 @@
 
 #include <core/mm.h>
 #include <core/pmm.h>
+#include <hal/hcf.h>
 #include <hal/iommu.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -17,6 +18,7 @@
 #define VTD_REG_GLOBAL_STATUS 0x01cu
 #define VTD_REG_ROOT_TABLE_ADDRESS 0x020u
 #define VTD_REG_CONTEXT_COMMAND 0x028u
+#define VTD_REGISTER_SPACE_SIZE 0x4000u
 #define VTD_GLOBAL_TRANSLATION_ENABLE (1u << 31u)
 #define VTD_GLOBAL_SET_ROOT_TABLE_POINTER (1u << 30u)
 #define VTD_CONTEXT_INVALIDATE (1ull << 63u)
@@ -87,7 +89,7 @@ static struct iommu_pt_format vtd_format(const struct hal_iommu_controller_state
 	return (struct iommu_pt_format){.kind                  = IOMMU_PT_INTEL_VTD,
 	                                .address_mask          = controller->address_mask,
 	                                .leaf_size_mask        = controller->leaf_size_mask,
-	                                .levels                = (uint8_t)(2u + (controller->io_address_bits - 30u) / 9u),
+	                                .levels                = controller->page_table_levels,
 	                                .io_address_bits       = controller->io_address_bits,
 	                                .physical_address_bits = controller->physical_address_bits};
 }
@@ -143,6 +145,7 @@ static bool vtd_initialize(struct hal_iommu_controller_state*            control
 	if (descriptor->register_address == 0u || pmm == NULL || pmm->allocation_granule == 0u ||
 	    (pmm->allocation_granule & (pmm->allocation_granule - 1u)) != 0u)
 		return false;
+	if (!iommu_pt_map_mmio(descriptor->register_address, VTD_REGISTER_SPACE_SIZE)) return false;
 	*controller = (struct hal_iommu_controller_state){
 		.kind      = HAL_IOMMU_KIND_INTEL_VTD,
 		.registers = iommu_pt_phys_to_virt(descriptor->register_address),
@@ -157,14 +160,19 @@ static bool vtd_initialize(struct hal_iommu_controller_state*            control
 		if ((sagaw & (1u << (agaw - 1u))) != 0u) break;
 	if (agaw == 0u) return false;
 	agaw--;
-	physical_bits = (unsigned)((capability >> 16u) & 0x3fu) + 1u;
+	physical_bits = descriptor->firmware_physical_address_bits;
 	if (physical_bits < IOMMU_PT_PAGE_SHIFT || physical_bits > 52u) return false;
 	domain_encoding = (unsigned)(capability & 0x7u);
 	if (domain_encoding > 6u) return false;
 	controller->capabilities          = capability;
 	controller->extended_capabilities = extended;
-	controller->io_address_bits       = (uint8_t)(30u + 9u * agaw);
+	unsigned adjusted_guest_bits      = 30u + 9u * agaw;
+	unsigned maximum_guest_bits       = (unsigned)((capability >> 16u) & 0x3fu) + 1u;
+	if (maximum_guest_bits < 30u) return false;
+	controller->io_address_bits =
+		(uint8_t)(maximum_guest_bits < adjusted_guest_bits ? maximum_guest_bits : adjusted_guest_bits);
 	controller->physical_address_bits = (uint8_t)physical_bits;
+	controller->page_table_levels     = (uint8_t)(2u + agaw);
 	controller->context_id_bits       = (uint8_t)(4u + 2u * domain_encoding);
 	if (controller->context_id_bits > 16u) controller->context_id_bits = 16u;
 	controller->context_limit =
@@ -191,11 +199,8 @@ static bool vtd_initialize(struct hal_iommu_controller_state*            control
 	vtd_write32(controller, VTD_REG_GLOBAL_COMMAND, controller->command | VTD_GLOBAL_SET_ROOT_TABLE_POINTER);
 	if (!vtd_wait32(controller, VTD_REG_GLOBAL_STATUS, VTD_GLOBAL_SET_ROOT_TABLE_POINTER, true) ||
 	    !vtd_context_invalidate(controller) || !vtd_iotlb_invalidate(controller) ||
-	    !vtd_set_translation(controller, true)) {
-		(void)pmm_free(root);
-		controller->source_table_address = 0u;
-		return false;
-	}
+	    !vtd_set_translation(controller, true))
+		hcf();
 	controller->initialized = true;
 	*out_info               = (struct hal_iommu_info){.kind                  = HAL_IOMMU_KIND_INTEL_VTD,
 	                                                  .minimum_leaf_size     = IOMMU_PT_PAGE_SIZE,
@@ -218,10 +223,11 @@ bool x86_vtd_controller_init(struct hal_iommu_controller_state*            contr
 void x86_vtd_controller_deinit(struct hal_iommu_controller_state* controller) {
 	if (controller == NULL || !controller->initialized || controller->kind != HAL_IOMMU_KIND_INTEL_VTD) return;
 	vtd_lock(controller);
-	if (!vtd_root_empty(controller) || !vtd_set_translation(controller, false)) {
+	if (!vtd_root_empty(controller)) {
 		vtd_unlock(controller);
 		return;
 	}
+	if (!vtd_set_translation(controller, false)) hcf();
 	(void)pmm_free(
 		(struct pmm_extent){.address = controller->source_table_address, .size = controller->table_allocation_size});
 	controller->initialized = false;
@@ -278,9 +284,9 @@ bool x86_vtd_unmap(struct hal_iommu_controller_state* controller, struct hal_iom
 }
 
 bool x86_vtd_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                    uint32_t source_id) {
+                    uint32_t source_id, struct hal_iommu_attachment_state* attachment) {
 	if (!vtd_source_valid(controller, source_id) || space == NULL || !space->table.initialized ||
-	    space->table.controller_identity != (uintptr_t)controller)
+	    space->table.controller_identity != (uintptr_t)controller || attachment == NULL || attachment->initialized)
 		return false;
 	vtd_lock(controller);
 	uint64_t*         root       = vtd_root_virt(controller);
@@ -301,38 +307,37 @@ bool x86_vtd_attach(struct hal_iommu_controller_state* controller, struct hal_io
 	}
 	context_table         = (uint64_t*)iommu_pt_phys_to_virt((uintptr_t)(*root_entry & controller->address_mask));
 	uint64_t* entry       = &context_table[devfn * 2u];
-	unsigned  agaw        = (controller->io_address_bits - 30u) / 9u;
+	unsigned  agaw        = controller->page_table_levels - 2u;
 	uint64_t  expected_lo = space->table.root_address | 1u;
 	uint64_t  expected_hi = ((uint64_t)space->table.context_id << 8u) | agaw;
 	if ((entry[0] & 1u) != 0u) {
-		bool same = entry[0] == expected_lo && entry[1] == expected_hi;
 		vtd_unlock(controller);
-		return same;
+		return false;
 	}
 	entry[1] = expected_hi;
 	__atomic_thread_fence(__ATOMIC_RELEASE);
 	entry[0] = expected_lo;
-	if (!vtd_context_invalidate(controller) || !vtd_iotlb_invalidate(controller)) goto undo;
+	if (!vtd_context_invalidate(controller) || !vtd_iotlb_invalidate(controller)) hcf();
+	*attachment = (struct hal_iommu_attachment_state){
+		.initialized = true, .controller_identity = (uintptr_t)controller, .source_id = source_id};
 	vtd_unlock(controller);
 	return true;
 
-undo:
-	entry[0] = 0u;
-	entry[1] = 0u;
-	(void)vtd_context_invalidate(controller);
-	(void)vtd_iotlb_invalidate(controller);
 fail:
 	if (allocation.size != 0u) {
 		*root_entry = 0u;
-		(void)vtd_context_invalidate(controller);
+		if (!vtd_context_invalidate(controller)) hcf();
 		(void)pmm_free(allocation);
 	}
 	vtd_unlock(controller);
 	return false;
 }
 
-bool x86_vtd_detach(struct hal_iommu_controller_state* controller, uint32_t source_id) {
-	if (!vtd_source_valid(controller, source_id)) return false;
+bool x86_vtd_detach(struct hal_iommu_controller_state* controller, uint32_t source_id,
+                    struct hal_iommu_attachment_state* attachment) {
+	if (!vtd_source_valid(controller, source_id) || attachment == NULL || !attachment->initialized ||
+	    attachment->controller_identity != (uintptr_t)controller || attachment->source_id != source_id)
+		return false;
 	vtd_lock(controller);
 	uint64_t* root       = vtd_root_virt(controller);
 	uint64_t* root_entry = &root[(source_id >> 8u) * 2u];
@@ -350,18 +355,16 @@ bool x86_vtd_detach(struct hal_iommu_controller_state* controller, uint32_t sour
 	entry[0] = 0u;
 	__atomic_thread_fence(__ATOMIC_RELEASE);
 	entry[1] = 0u;
-	if (!vtd_context_invalidate(controller) || !vtd_iotlb_invalidate(controller)) {
-		vtd_unlock(controller);
-		return false;
-	}
+	if (!vtd_context_invalidate(controller) || !vtd_iotlb_invalidate(controller)) hcf();
 	bool empty = true;
 	for (size_t index = 0u; index < 256u; index++)
 		if ((context_table[index * 2u] & 1u) != 0u) empty = false;
 	if (empty) {
 		*root_entry = 0u;
-		(void)vtd_context_invalidate(controller);
+		if (!vtd_context_invalidate(controller)) hcf();
 		(void)pmm_free((struct pmm_extent){.address = context_address, .size = controller->table_allocation_size});
 	}
+	*attachment = (struct hal_iommu_attachment_state){0};
 	vtd_unlock(controller);
 	return true;
 }

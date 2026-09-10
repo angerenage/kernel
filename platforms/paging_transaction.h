@@ -30,6 +30,10 @@ struct paging_transaction {
 	bool                             hierarchy_changed;
 };
 
+static inline bool paging_transaction_empty(const struct paging_transaction* transaction) {
+	return transaction->inline_count == 0u && transaction->newest_page.size == 0u;
+}
+
 static inline struct paging_transaction_page* paging_transaction_page_virt(uintptr_t phys) {
 	return (struct paging_transaction_page*)(phys + boot_info.direct_map_offset);
 }

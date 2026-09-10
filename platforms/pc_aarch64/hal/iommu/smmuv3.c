@@ -2,6 +2,7 @@
 
 #include <core/mm.h>
 #include <core/pmm.h>
+#include <hal/hcf.h>
 #include <hal/iommu.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -23,11 +24,7 @@
 #define SMMU_CMDQ_BASE 0x090u
 #define SMMU_CMDQ_PROD 0x098u
 #define SMMU_CMDQ_CONS 0x09cu
-#define SMMU_EVTQ_BASE 0x0a0u
-#define SMMU_EVTQ_PROD 0x0a8u
-#define SMMU_EVTQ_CONS 0x0acu
 #define SMMU_CR0_SMMUEN (1u << 0u)
-#define SMMU_CR0_EVTQEN (1u << 2u)
 #define SMMU_CR0_CMDQEN (1u << 3u)
 #define SMMU_GBPA_UPDATE (1u << 31u)
 #define SMMU_GBPA_ABORT (1u << 20u)
@@ -38,9 +35,9 @@
 #define SMMU_CMD_CFGI_ALL 0x04u
 #define SMMU_CMD_TLBI_S12_VMALL 0x28u
 #define SMMU_CMD_SYNC 0x46u
-#define SMMU_QUEUE_LOG2_ENTRIES 8u
+#define SMMU_REGISTER_SPACE_SIZE 0x1000u
+#define SMMU_DESIRED_QUEUE_LOG2_ENTRIES 8u
 #define SMMU_COMMAND_SIZE 16u
-#define SMMU_EVENT_SIZE 32u
 #define SMMU_STE_SIZE 64u
 #define SMMU_L2_STREAM_BITS 8u
 #define SMMU_WAIT_LIMIT 1000000u
@@ -213,9 +210,7 @@ static void smmu_reclaim_stream_table(struct hal_iommu_controller_state* control
 						.word = {SMMU_CMD_CFGI_ALL, 31u}
     }) ||
 	    !smmu_complete(controller)) {
-		l1[index] = entry;
-		__asm__ volatile("dsb oshst" : : : "memory");
-		return;
+		hcf();
 	}
 	(void)pmm_free((struct pmm_extent){(uintptr_t)(entry & ~0x3full), controller->table_allocation_size});
 }
@@ -224,9 +219,10 @@ bool aarch64_smmuv3_controller_init(struct hal_iommu_controller_state*          
                                     const struct hal_iommu_controller_descriptor* descriptor,
                                     struct hal_iommu_info*                        out_info) {
 	const struct pmm_info* pmm     = pmm_info();
-	struct pmm_extent      streams = {0}, commands = {0}, events = {0};
+	struct pmm_extent      streams = {0}, commands = {0};
 	if (controller == NULL || descriptor == NULL || out_info == NULL || pmm == NULL ||
-	    descriptor->kind != HAL_IOMMU_KIND_ARM_SMMUV3 || descriptor->register_address == 0u)
+	    descriptor->kind != HAL_IOMMU_KIND_ARM_SMMUV3 || descriptor->register_address == 0u ||
+	    !iommu_pt_map_mmio(descriptor->register_address, SMMU_REGISTER_SPACE_SIZE))
 		return false;
 	*controller = (struct hal_iommu_controller_state){.registers = iommu_pt_phys_to_virt(descriptor->register_address)};
 	uint32_t idr0 = smmu_read32(controller, SMMU_IDR0), idr1 = smmu_read32(controller, SMMU_IDR1);
@@ -238,26 +234,23 @@ bool aarch64_smmuv3_controller_init(struct hal_iommu_controller_state*          
 		return false;
 	if (physical_bits > 48u) physical_bits = 48u;
 	uint8_t sid_bits = idr1 & 0x3fu;
-	if (sid_bits == 0u || sid_bits > 24u) return false;
+	if (sid_bits == 0u) return false;
+	if (sid_bits > 24u) sid_bits = 24u;
 	bool   two_level   = ((idr0 >> 27u) & 3u) == 1u && sid_bits > SMMU_L2_STREAM_BITS;
 	size_t stream_size = two_level ? ((size_t)1u << (sid_bits - SMMU_L2_STREAM_BITS)) * sizeof(uint64_t)
 	                               : ((size_t)1u << sid_bits) * SMMU_STE_SIZE;
 	if (stream_size < pmm->allocation_granule) stream_size = pmm->allocation_granule;
-	size_t command_size = (size_t)SMMU_COMMAND_SIZE << SMMU_QUEUE_LOG2_ENTRIES;
-	size_t event_size   = (size_t)SMMU_EVENT_SIZE << SMMU_QUEUE_LOG2_ENTRIES;
+	uint8_t command_log2 = (uint8_t)((idr1 >> 21u) & 0x1fu);
+	if (command_log2 > SMMU_DESIRED_QUEUE_LOG2_ENTRIES) command_log2 = SMMU_DESIRED_QUEUE_LOG2_ENTRIES;
+	size_t command_size = (size_t)SMMU_COMMAND_SIZE << command_log2;
 	if (command_size < pmm->allocation_granule) command_size = pmm->allocation_granule;
-	if (event_size < pmm->allocation_granule) event_size = pmm->allocation_granule;
-	if (!iommu_pt_allocate_table(stream_size, &streams) || !iommu_pt_allocate_table(command_size, &commands) ||
-	    !iommu_pt_allocate_table(event_size, &events))
-		goto fail;
+	if (!iommu_pt_allocate_table(stream_size, &streams) || !iommu_pt_allocate_table(command_size, &commands)) goto fail;
 	uint64_t address_mask = ((1ull << physical_bits) - 1u) & ~0xfffull;
-	if (((streams.address | commands.address | events.address) & ~address_mask) != 0u) goto fail;
+	if (((streams.address | commands.address) & ~address_mask) != 0u) goto fail;
 	controller->stream_table_address       = streams.address;
 	controller->stream_table_size          = streams.size;
 	controller->command_queue_address      = commands.address;
 	controller->command_queue_size         = commands.size;
-	controller->event_queue_address        = events.address;
-	controller->event_queue_size           = events.size;
 	controller->table_allocation_size      = pmm->allocation_granule > 16384u ? pmm->allocation_granule : 16384u;
 	controller->leaf_size_mask             = (1ull << 12u) | (1ull << 21u) | (1ull << 30u);
 	controller->address_mask               = address_mask;
@@ -265,8 +258,7 @@ bool aarch64_smmuv3_controller_init(struct hal_iommu_controller_state*          
 	controller->physical_address_bits      = physical_bits;
 	controller->context_id_bits            = (idr0 & (1u << 18u)) != 0u ? 16u : 8u;
 	controller->source_id_bits             = sid_bits;
-	controller->command_queue_log2_entries = SMMU_QUEUE_LOG2_ENTRIES;
-	controller->event_queue_log2_entries   = SMMU_QUEUE_LOG2_ENTRIES;
+	controller->command_queue_log2_entries = command_log2;
 	controller->stream_table_split         = SMMU_L2_STREAM_BITS;
 	controller->stream_table_two_level     = two_level;
 	if (!smmu_update_cr0(controller, 0u)) goto fail;
@@ -275,26 +267,22 @@ bool aarch64_smmuv3_controller_init(struct hal_iommu_controller_state*          
 	smmu_write64(controller, SMMU_STRTAB_BASE, streams.address | SMMU_BASE_RA);
 	smmu_write32(
 		controller, SMMU_STRTAB_BASE_CFG, (two_level ? (1u << 16u) | (SMMU_L2_STREAM_BITS << 6u) : 0u) | sid_bits);
-	smmu_write64(controller, SMMU_CMDQ_BASE, commands.address | SMMU_BASE_RA | SMMU_QUEUE_LOG2_ENTRIES);
+	smmu_write64(controller, SMMU_CMDQ_BASE, commands.address | SMMU_BASE_RA | command_log2);
 	smmu_write32(controller, SMMU_CMDQ_PROD, 0u);
 	smmu_write32(controller, SMMU_CMDQ_CONS, 0u);
-	smmu_write64(controller, SMMU_EVTQ_BASE, events.address | SMMU_BASE_RA | SMMU_QUEUE_LOG2_ENTRIES);
-	smmu_write32(controller, SMMU_EVTQ_PROD, 0u);
-	smmu_write32(controller, SMMU_EVTQ_CONS, 0u);
 	smmu_write32(controller, SMMU_GBPA, SMMU_GBPA_UPDATE | SMMU_GBPA_ABORT);
 	for (size_t attempt = 0u;
 	     attempt < SMMU_WAIT_LIMIT && (smmu_read32(controller, SMMU_GBPA) & SMMU_GBPA_UPDATE) != 0u;
 	     attempt++)
 		__asm__ volatile("yield" : : : "memory");
-	if ((smmu_read32(controller, SMMU_GBPA) & SMMU_GBPA_UPDATE) != 0u ||
-	    !smmu_update_cr0(controller, SMMU_CR0_CMDQEN | SMMU_CR0_EVTQEN | SMMU_CR0_SMMUEN))
-		goto fail;
+	if ((smmu_read32(controller, SMMU_GBPA) & SMMU_GBPA_UPDATE) != 0u) goto fail;
+	if (!smmu_update_cr0(controller, SMMU_CR0_CMDQEN | SMMU_CR0_SMMUEN)) hcf();
 	if (!smmu_queue(controller,
 	                (struct smmu_command){
 						.word = {SMMU_CMD_CFGI_ALL, 31u}
     }) ||
 	    !smmu_complete(controller))
-		goto fail;
+		hcf();
 	controller->initialized = true;
 	*out_info               = (struct hal_iommu_info){HAL_IOMMU_KIND_ARM_SMMUV3,
 	                                                  4096u,
@@ -305,8 +293,7 @@ bool aarch64_smmuv3_controller_init(struct hal_iommu_controller_state*          
 	                                                  sid_bits};
 	return true;
 fail:
-	(void)smmu_update_cr0(controller, 0u);
-	if (events.size != 0u) (void)pmm_free(events);
+	if (!smmu_update_cr0(controller, 0u)) hcf();
 	if (commands.size != 0u) (void)pmm_free(commands);
 	if (streams.size != 0u) (void)pmm_free(streams);
 	*controller = (struct hal_iommu_controller_state){0};
@@ -316,7 +303,7 @@ fail:
 void aarch64_smmuv3_controller_deinit(struct hal_iommu_controller_state* controller) {
 	if (controller == NULL || !controller->initialized || controller->stream_count != 0u) return;
 	smmu_lock(controller);
-	(void)smmu_update_cr0(controller, 0u);
+	if (!smmu_update_cr0(controller, 0u)) hcf();
 	controller->initialized = false;
 	if (controller->stream_table_two_level) {
 		uint64_t* l1    = iommu_pt_phys_to_virt(controller->stream_table_address);
@@ -325,7 +312,6 @@ void aarch64_smmuv3_controller_deinit(struct hal_iommu_controller_state* control
 			if ((l1[i] & ~0x3full) != 0u)
 				(void)pmm_free((struct pmm_extent){(uintptr_t)(l1[i] & ~0x3full), controller->table_allocation_size});
 	}
-	(void)pmm_free((struct pmm_extent){controller->event_queue_address, controller->event_queue_size});
 	(void)pmm_free((struct pmm_extent){controller->command_queue_address, controller->command_queue_size});
 	(void)pmm_free((struct pmm_extent){controller->stream_table_address, controller->stream_table_size});
 	smmu_unlock(controller);
@@ -382,9 +368,9 @@ bool aarch64_smmuv3_unmap(struct hal_iommu_controller_state* controller, struct 
 }
 
 bool aarch64_smmuv3_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                           uint32_t source_id) {
+                           uint32_t source_id, struct hal_iommu_attachment_state* attachment) {
 	if (!smmu_source_valid(controller, source_id) || space == NULL || !space->table.initialized ||
-	    space->table.controller_identity != (uintptr_t)controller)
+	    space->table.controller_identity != (uintptr_t)controller || attachment == NULL || attachment->initialized)
 		return false;
 	smmu_lock(controller);
 	uint64_t* ste = smmu_stream_entry(controller, source_id, true);
@@ -398,9 +384,8 @@ bool aarch64_smmuv3_attach(struct hal_iommu_controller_state* controller, struct
 	uint64_t word2 = space->table.context_id | (vtcr << 32u) | (1ull << 51u) | (1ull << 54u);
 	uint64_t word3 = space->table.root_address & controller->address_mask;
 	if ((ste[0] & SMMU_STE_VALID) != 0u) {
-		bool same = ste[0] == word0 && ste[2] == word2 && ste[3] == word3;
 		smmu_unlock(controller);
-		return same;
+		return false;
 	}
 	ste[1] = 0u;
 	ste[2] = word2;
@@ -409,20 +394,19 @@ bool aarch64_smmuv3_attach(struct hal_iommu_controller_state* controller, struct
 	__asm__ volatile("dsb oshst" : : : "memory");
 	ste[0] = word0;
 	__asm__ volatile("dsb oshst" : : : "memory");
-	if (!smmu_invalidate_stream(controller, source_id)) {
-		ste[0] = 0u;
-		(void)smmu_invalidate_stream(controller, source_id);
-		smmu_reclaim_stream_table(controller, source_id);
-		smmu_unlock(controller);
-		return false;
-	}
+	if (!smmu_invalidate_stream(controller, source_id)) hcf();
 	controller->stream_count++;
+	*attachment = (struct hal_iommu_attachment_state){
+		.initialized = true, .controller_identity = (uintptr_t)controller, .source_id = source_id};
 	smmu_unlock(controller);
 	return true;
 }
 
-bool aarch64_smmuv3_detach(struct hal_iommu_controller_state* controller, uint32_t source_id) {
-	if (!smmu_source_valid(controller, source_id)) return false;
+bool aarch64_smmuv3_detach(struct hal_iommu_controller_state* controller, uint32_t source_id,
+                           struct hal_iommu_attachment_state* attachment) {
+	if (!smmu_source_valid(controller, source_id) || attachment == NULL || !attachment->initialized ||
+	    attachment->controller_identity != (uintptr_t)controller || attachment->source_id != source_id)
+		return false;
 	smmu_lock(controller);
 	uint64_t* ste = smmu_stream_entry(controller, source_id, false);
 	if (ste == NULL || (ste[0] & SMMU_STE_VALID) == 0u) {
@@ -431,12 +415,11 @@ bool aarch64_smmuv3_detach(struct hal_iommu_controller_state* controller, uint32
 	}
 	ste[0] = 0u;
 	__asm__ volatile("dsb oshst" : : : "memory");
-	bool ok = smmu_invalidate_stream(controller, source_id);
-	if (ok) {
-		memset(ste, 0, SMMU_STE_SIZE);
-		controller->stream_count--;
-		smmu_reclaim_stream_table(controller, source_id);
-	}
+	if (!smmu_invalidate_stream(controller, source_id)) hcf();
+	memset(ste, 0, SMMU_STE_SIZE);
+	controller->stream_count--;
+	smmu_reclaim_stream_table(controller, source_id);
+	*attachment = (struct hal_iommu_attachment_state){0};
 	smmu_unlock(controller);
-	return ok;
+	return true;
 }

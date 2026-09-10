@@ -2,6 +2,7 @@
 
 #include <core/mm.h>
 #include <core/pmm.h>
+#include <hal/hcf.h>
 #include <hal/iommu.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -11,6 +12,7 @@
 
 #define AMD_IOMMU_DEVICE_TABLE_SIZE ((size_t)65536u * 32u)
 #define AMD_IOMMU_COMMAND_BUFFER_SIZE ((size_t)8192u)
+#define AMD_IOMMU_V1_IO_ADDRESS_BITS 48u
 #define AMD_IOMMU_COMMAND_ENTRY_SIZE 16u
 #define AMD_IOMMU_REG_DEVICE_TABLE 0x0000u
 #define AMD_IOMMU_REG_COMMAND_BUFFER 0x0008u
@@ -19,6 +21,7 @@
 #define AMD_IOMMU_REG_COMMAND_HEAD 0x2000u
 #define AMD_IOMMU_REG_COMMAND_TAIL 0x2008u
 #define AMD_IOMMU_REG_STATUS 0x2020u
+#define AMD_IOMMU_REGISTER_SPACE_SIZE 0x4000u
 #define AMD_IOMMU_CONTROL_ENABLE (1ull << 0u)
 #define AMD_IOMMU_CONTROL_COMPLETION_WAIT (1ull << 4u)
 #define AMD_IOMMU_CONTROL_COHERENT (1ull << 10u)
@@ -65,6 +68,12 @@ static inline void amd_write64(const struct hal_iommu_controller_state* controll
 
 static inline void amd_write32(const struct hal_iommu_controller_state* controller, size_t offset, uint32_t value) {
 	*(volatile uint32_t*)(amd_registers(controller) + offset) = value;
+}
+
+static bool amd_set_control(struct hal_iommu_controller_state* controller, uint64_t value) {
+	const uint64_t mask = AMD_IOMMU_CONTROL_ENABLE | AMD_IOMMU_CONTROL_COMMAND_BUFFER;
+	amd_write64(controller, AMD_IOMMU_REG_CONTROL, value);
+	return (amd_read64(controller, AMD_IOMMU_REG_CONTROL) & mask) == (value & mask);
 }
 
 static unsigned amd_physical_address_bits(void) {
@@ -162,13 +171,16 @@ bool x86_amd_iommu_controller_init(struct hal_iommu_controller_state*           
 	if (controller == NULL || descriptor == NULL || out_info == NULL || descriptor->kind != HAL_IOMMU_KIND_AMD ||
 	    descriptor->register_address == 0u || pmm == NULL)
 		return false;
+	if (!iommu_pt_map_mmio(descriptor->register_address, AMD_IOMMU_REGISTER_SPACE_SIZE)) return false;
 	physical_bits = amd_physical_address_bits();
 	if (descriptor->firmware_physical_address_bits != 0u && descriptor->firmware_physical_address_bits < physical_bits)
 		physical_bits = descriptor->firmware_physical_address_bits;
-	if (physical_bits < 32u || physical_bits > 52u || descriptor->firmware_io_address_bits < 32u ||
-	    descriptor->firmware_io_address_bits > 48u || (descriptor->firmware_flags & (1u << 5u)) == 0u ||
+	unsigned io_bits = descriptor->firmware_io_address_bits;
+	if (io_bits == 0u) io_bits = 64u;
+	if (physical_bits < 32u || physical_bits > 52u || io_bits < 32u || io_bits > 64u ||
 	    pmm->allocation_granule > AMD_IOMMU_COMMAND_BUFFER_SIZE)
 		return false;
+	if (io_bits > AMD_IOMMU_V1_IO_ADDRESS_BITS) io_bits = AMD_IOMMU_V1_IO_ADDRESS_BITS;
 	if (!iommu_pt_allocate_table(AMD_IOMMU_DEVICE_TABLE_SIZE, &devices)) return false;
 	if (!iommu_pt_allocate_table(AMD_IOMMU_COMMAND_BUFFER_SIZE, &commands)) {
 		(void)pmm_free(devices);
@@ -190,7 +202,7 @@ bool x86_amd_iommu_controller_init(struct hal_iommu_controller_state*           
 		.source_table_size     = devices.size,
 		.command_queue_size    = commands.size,
 		.physical_address_bits = (uint8_t)physical_bits,
-		.io_address_bits       = descriptor->firmware_io_address_bits,
+		.io_address_bits       = (uint8_t)io_bits,
 		.context_id_bits       = 16u,
 		.source_id_bits        = 16u,
 		.context_limit         = UINT16_MAX,
@@ -199,9 +211,13 @@ bool x86_amd_iommu_controller_init(struct hal_iommu_controller_state*           
 		.extended_capabilities = 0u};
 	controller->extended_capabilities = amd_read64(controller, AMD_IOMMU_REG_EXTENDED_FEATURES);
 	controller->control               = amd_read64(controller, AMD_IOMMU_REG_CONTROL);
-	controller->control &= ~(AMD_IOMMU_CONTROL_ENABLE | AMD_IOMMU_CONTROL_COMMAND_BUFFER);
-	amd_write64(controller, AMD_IOMMU_REG_CONTROL, controller->control);
-	(void)amd_read64(controller, AMD_IOMMU_REG_CONTROL);
+	controller->control &= ~(AMD_IOMMU_CONTROL_ENABLE | AMD_IOMMU_CONTROL_COMMAND_BUFFER | AMD_IOMMU_CONTROL_COHERENT);
+	if ((descriptor->firmware_flags & (1u << 5u)) != 0u) controller->control |= AMD_IOMMU_CONTROL_COHERENT;
+	if (!amd_set_control(controller, controller->control)) {
+		(void)pmm_free(commands);
+		(void)pmm_free(devices);
+		return false;
+	}
 	amd_write64(controller,
 	            AMD_IOMMU_REG_DEVICE_TABLE,
 	            devices.address | (uint64_t)((devices.size >> IOMMU_PT_PAGE_SHIFT) - 1u));
@@ -210,8 +226,7 @@ bool x86_amd_iommu_controller_init(struct hal_iommu_controller_state*           
 	amd_write32(controller, AMD_IOMMU_REG_COMMAND_TAIL, 0u);
 	controller->control |=
 		AMD_IOMMU_CONTROL_ENABLE | AMD_IOMMU_CONTROL_COMMAND_BUFFER | AMD_IOMMU_CONTROL_COMPLETION_WAIT;
-	controller->control |= AMD_IOMMU_CONTROL_COHERENT;
-	amd_write64(controller, AMD_IOMMU_REG_CONTROL, controller->control);
+	if (!amd_set_control(controller, controller->control)) hcf();
 	controller->initialized = true;
 	*out_info               = (struct hal_iommu_info){.kind                  = HAL_IOMMU_KIND_AMD,
 	                                                  .minimum_leaf_size     = IOMMU_PT_PAGE_SIZE,
@@ -233,7 +248,7 @@ void x86_amd_iommu_controller_deinit(struct hal_iommu_controller_state* controll
 			return;
 		}
 	controller->control &= ~(AMD_IOMMU_CONTROL_ENABLE | AMD_IOMMU_CONTROL_COMMAND_BUFFER);
-	amd_write64(controller, AMD_IOMMU_REG_CONTROL, controller->control);
+	if (!amd_set_control(controller, controller->control)) hcf();
 	controller->initialized = false;
 	(void)pmm_free((struct pmm_extent){controller->command_queue_address, controller->command_queue_size});
 	(void)pmm_free((struct pmm_extent){controller->source_table_address, controller->source_table_size});
@@ -289,36 +304,35 @@ bool x86_amd_iommu_unmap(struct hal_iommu_controller_state* controller, struct h
 }
 
 bool x86_amd_iommu_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                          uint32_t source_id) {
+                          uint32_t source_id, struct hal_iommu_attachment_state* attachment) {
 	if (!amd_source_valid(controller, source_id) || space == NULL || !space->table.initialized ||
-	    space->table.controller_identity != (uintptr_t)controller)
+	    space->table.controller_identity != (uintptr_t)controller || attachment == NULL || attachment->initialized)
 		return false;
 	amd_lock(controller);
 	uint64_t* entry    = amd_device_entry(controller, source_id);
 	uint64_t  expected = space->table.root_address | AMD_IOMMU_DTE_VALID | AMD_IOMMU_DTE_TRANSLATION_VALID |
 	                    (4ull << 9u) | AMD_IOMMU_DTE_READ | AMD_IOMMU_DTE_WRITE;
 	if ((entry[0] & AMD_IOMMU_DTE_VALID) != 0u) {
-		bool same = entry[0] == expected && (entry[1] & UINT16_MAX) == space->table.context_id;
 		amd_unlock(controller);
-		return same;
+		return false;
 	}
 	entry[1] = space->table.context_id;
 	entry[2] = 0u;
 	entry[3] = 0u;
 	__atomic_thread_fence(__ATOMIC_RELEASE);
 	entry[0] = expected;
-	if (!amd_invalidate_device(controller, source_id)) {
-		entry[0] = 0u;
-		(void)amd_invalidate_device(controller, source_id);
-		amd_unlock(controller);
-		return false;
-	}
+	if (!amd_invalidate_device(controller, source_id)) hcf();
+	*attachment = (struct hal_iommu_attachment_state){
+		.initialized = true, .controller_identity = (uintptr_t)controller, .source_id = source_id};
 	amd_unlock(controller);
 	return true;
 }
 
-bool x86_amd_iommu_detach(struct hal_iommu_controller_state* controller, uint32_t source_id) {
-	if (!amd_source_valid(controller, source_id)) return false;
+bool x86_amd_iommu_detach(struct hal_iommu_controller_state* controller, uint32_t source_id,
+                          struct hal_iommu_attachment_state* attachment) {
+	if (!amd_source_valid(controller, source_id) || attachment == NULL || !attachment->initialized ||
+	    attachment->controller_identity != (uintptr_t)controller || attachment->source_id != source_id)
+		return false;
 	amd_lock(controller);
 	uint64_t* entry = amd_device_entry(controller, source_id);
 	if ((entry[0] & AMD_IOMMU_DTE_VALID) == 0u) {
@@ -328,7 +342,8 @@ bool x86_amd_iommu_detach(struct hal_iommu_controller_state* controller, uint32_
 	entry[0] = 0u;
 	__atomic_thread_fence(__ATOMIC_RELEASE);
 	entry[1] = entry[2] = entry[3] = 0u;
-	bool ok                        = amd_invalidate_device(controller, source_id);
+	if (!amd_invalidate_device(controller, source_id)) hcf();
+	*attachment = (struct hal_iommu_attachment_state){0};
 	amd_unlock(controller);
-	return ok;
+	return true;
 }

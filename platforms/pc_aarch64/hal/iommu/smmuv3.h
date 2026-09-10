@@ -30,7 +30,8 @@ bool aarch64_smmuv3_unmap(struct hal_iommu_controller_state* controller, struct 
 
 /* Attach a hardware stream to an Arm SMMUv3 translation space. */
 bool aarch64_smmuv3_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                           uint32_t source_id);
+                           uint32_t source_id, struct hal_iommu_attachment_state* attachment);
 
 /* Detach and block a hardware stream from an Arm SMMUv3. */
-bool aarch64_smmuv3_detach(struct hal_iommu_controller_state* controller, uint32_t source_id);
+bool aarch64_smmuv3_detach(struct hal_iommu_controller_state* controller, uint32_t source_id,
+                           struct hal_iommu_attachment_state* attachment);

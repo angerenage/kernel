@@ -2,6 +2,7 @@
 
 #include <core/mm.h>
 #include <core/pmm.h>
+#include <hal/hcf.h>
 #include <hal/iommu.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -17,6 +18,9 @@
 #define RI_CQH 0x020u
 #define RI_CQT 0x024u
 #define RI_CQCSR 0x048u
+#define RI_FQCSR 0x04cu
+#define RI_PQCSR 0x050u
+#define RI_REGISTER_SPACE_SIZE 0x1000u
 #define RI_CQEN (1u << 0u)
 #define RI_CQON (1u << 16u)
 #define RI_CQBUSY (1u << 17u)
@@ -29,6 +33,8 @@
 #define RI_CMD_IOTINVAL 1u
 #define RI_CMD_IOFENCE 2u
 #define RI_CMD_IODIR 3u
+#define RI_CMD_IOFENCE_PR (1ull << 12u)
+#define RI_CMD_IOFENCE_PW (1ull << 13u)
 
 struct ri_command {
 	uint64_t word[2];
@@ -37,6 +43,7 @@ struct ri_ddt_path {
 	uint64_t* table[3];
 	uint16_t  index[3];
 	uint8_t   depth;
+	bool      hierarchy_changed;
 };
 
 static void ri_lock(struct hal_iommu_controller_state* c) {
@@ -85,8 +92,12 @@ static bool ri_wait_ddtp(const struct hal_iommu_controller_state* c) {
 
 static struct iommu_pt_format ri_format(const struct hal_iommu_controller_state* c) {
 	uint8_t levels = c->io_address_bits == 57u ? 5u : c->io_address_bits == 48u ? 4u : 3u;
-	return (struct iommu_pt_format){
-		IOMMU_PT_RISCV, c->address_mask, c->leaf_size_mask, levels, c->io_address_bits, c->physical_address_bits};
+	return (struct iommu_pt_format){.kind                  = IOMMU_PT_RISCV,
+	                                .address_mask          = c->address_mask,
+	                                .leaf_size_mask        = c->leaf_size_mask,
+	                                .levels                = levels,
+	                                .io_address_bits       = c->io_address_bits,
+	                                .physical_address_bits = c->physical_address_bits};
 }
 
 static bool ri_queue(struct hal_iommu_controller_state* c, struct ri_command command) {
@@ -109,7 +120,7 @@ static bool ri_queue(struct hal_iommu_controller_state* c, struct ri_command com
 static bool ri_complete(struct hal_iommu_controller_state* c) {
 	if (!ri_queue(c,
 	              (struct ri_command){
-					  .word = {RI_CMD_IOFENCE, 0u}
+					  .word = {RI_CMD_IOFENCE | RI_CMD_IOFENCE_PR | RI_CMD_IOFENCE_PW, 0u}
     }))
 		return false;
 	for (size_t n = 0u; n < RI_WAIT_LIMIT; n++) {
@@ -119,13 +130,25 @@ static bool ri_complete(struct hal_iommu_controller_state* c) {
 	return false;
 }
 
-static bool ri_invalidate_device(struct hal_iommu_controller_state* c, uint32_t source_id) {
-	uint64_t command = RI_CMD_IODIR | (1ull << 33u) | ((uint64_t)source_id << 40u);
+static bool ri_queue_device_invalidation(struct hal_iommu_controller_state* c, uint32_t source_id) {
 	return ri_queue(c,
 	                (struct ri_command){
-						.word = {command, 0u}
-    }) &&
-	       ri_complete(c);
+						.word = {RI_CMD_IODIR | (1ull << 33u) | ((uint64_t)source_id << 40u), 0u}
+    });
+}
+
+static bool ri_queue_ddt_invalidation(struct hal_iommu_controller_state* c) {
+	return ri_queue(c,
+	                (struct ri_command){
+						.word = {RI_CMD_IODIR, 0u}
+    });
+}
+
+static bool ri_queue_pscid_invalidation(struct hal_iommu_controller_state* c, uint32_t pscid) {
+	return ri_queue(c,
+	                (struct ri_command){
+						.word = {RI_CMD_IOTINVAL | ((uint64_t)pscid << 12u) | (1ull << 32u), 0u}
+    });
 }
 
 static bool ri_sync(void* context, uint32_t context_id, uint64_t io_address, size_t size, bool hierarchy_changed) {
@@ -133,7 +156,7 @@ static bool ri_sync(void* context, uint32_t context_id, uint64_t io_address, siz
 	(void)size;
 	struct hal_iommu_controller_state* c       = context;
 	uint64_t                           command = RI_CMD_IOTINVAL | ((uint64_t)context_id << 12u) | (1ull << 32u);
-	if (hierarchy_changed && (c->capabilities & (1ull << 42u)) != 0u) command |= 1ull << 34u;
+	(void)hierarchy_changed;
 	return ri_queue(c,
 	                (struct ri_command){
 						.word = {command, 0u}
@@ -187,8 +210,9 @@ static uint64_t* ri_device_context(struct hal_iommu_controller_state* c, uint32_
 			allocated_index[allocated_count]  = index[slot];
 			allocated_extent[allocated_count] = child;
 			allocated_count++;
-			entry              = ((uint64_t)child.address >> 2u) | 1u;
-			table[index[slot]] = entry;
+			path.hierarchy_changed = true;
+			entry                  = ((uint64_t)child.address >> 2u) | 1u;
+			table[index[slot]]     = entry;
 			__asm__ volatile("fence w,w" : : : "memory");
 		}
 		table = iommu_pt_phys_to_virt((uintptr_t)((entry >> 10u) << 12u));
@@ -199,24 +223,44 @@ static uint64_t* ri_device_context(struct hal_iommu_controller_state* c, uint32_
 	return (uint64_t*)((uint8_t*)table + (size_t)index[0] * c->device_context_size);
 
 fail:
-	while (allocated_count != 0u) {
-		allocated_count--;
-		allocated_parent[allocated_count][allocated_index[allocated_count]] = 0u;
+	for (uint8_t i = allocated_count; i != 0u; i--) {
+		uint8_t index                                   = i - 1u;
+		allocated_parent[index][allocated_index[index]] = 0u;
 		__asm__ volatile("fence w,w" : : : "memory");
-		(void)pmm_free(allocated_extent[allocated_count]);
 	}
+	if (!ri_queue_ddt_invalidation(c) || !ri_complete(c)) hcf();
+	for (uint8_t i = 0u; i < allocated_count; i++) (void)pmm_free(allocated_extent[i]);
 	return NULL;
 }
 
 static void ri_reclaim_ddt(struct hal_iommu_controller_state* c, const struct ri_ddt_path* path) {
+	struct pmm_extent retired[2]    = {0};
+	size_t            retired_count = 0u;
 	for (uint8_t depth = 1u; depth < path->depth; depth++) {
 		uint64_t* child = path->table[depth - 1u];
 		if (!ri_table_empty(child)) break;
 		uint64_t* parent           = path->table[depth];
 		uintptr_t address          = (uintptr_t)((parent[path->index[depth]] >> 10u) << 12u);
 		parent[path->index[depth]] = 0u;
-		(void)pmm_free((struct pmm_extent){address, c->table_allocation_size});
+		retired[retired_count++]   = (struct pmm_extent){address, c->table_allocation_size};
 	}
+	if (retired_count == 0u) return;
+	__asm__ volatile("fence w,o" : : : "memory");
+	if (!ri_queue_ddt_invalidation(c) || !ri_complete(c)) hcf();
+	for (size_t i = 0u; i < retired_count; i++) (void)pmm_free(retired[i]);
+}
+
+static bool ri_disable_queues(struct hal_iommu_controller_state* c) {
+	if (!ri_wait_ddtp(c)) return false;
+	ri_write64(c, RI_DDTP, 0u);
+	if (!ri_wait_ddtp(c)) return false;
+	ri_write32(c, RI_CQCSR, 0u);
+	ri_write32(c, RI_FQCSR, 0u);
+	ri_write32(c, RI_PQCSR, 0u);
+	bool command_stopped = ri_wait32(c, RI_CQCSR, RI_CQON | RI_CQBUSY, 0u);
+	bool fault_stopped   = ri_wait32(c, RI_FQCSR, RI_CQON | RI_CQBUSY, 0u);
+	bool page_stopped    = ri_wait32(c, RI_PQCSR, RI_CQON | RI_CQBUSY, 0u);
+	return command_stopped && fault_stopped && page_stopped;
 }
 
 static bool ri_source_valid(const struct hal_iommu_controller_state* c, uint32_t source_id) {
@@ -229,7 +273,8 @@ bool riscv_iommu_controller_init(struct hal_iommu_controller_state*            c
 	const struct pmm_info* pmm       = pmm_info();
 	struct pmm_extent      directory = {0}, commands = {0};
 	if (c == NULL || descriptor == NULL || out_info == NULL || pmm == NULL ||
-	    descriptor->kind != HAL_IOMMU_KIND_RISCV || descriptor->register_address == 0u)
+	    descriptor->kind != HAL_IOMMU_KIND_RISCV || descriptor->register_address == 0u ||
+	    !iommu_pt_map_mmio(descriptor->register_address, RI_REGISTER_SPACE_SIZE))
 		return false;
 	*c = (struct hal_iommu_controller_state){.registers = iommu_pt_phys_to_virt(descriptor->register_address)};
 	uint64_t cap     = ri_read64(c, RI_CAP);
@@ -269,15 +314,13 @@ bool riscv_iommu_controller_init(struct hal_iommu_controller_state*            c
 	c->device_context_size        = (cap & (1ull << 22u)) != 0u ? 64u : 32u;
 	c->command_queue_log2_entries = RI_QUEUE_LOG2;
 	for (uint8_t level = 0u; level < pt_levels; level++) c->leaf_size_mask |= 1ull << (12u + 9u * level);
-	ri_write32(c, RI_CQCSR, 0u);
-	if (!ri_wait32(c, RI_CQCSR, RI_CQON | RI_CQBUSY, 0u)) goto fail;
+	if (!ri_disable_queues(c)) goto fail;
 	ri_write32(c, RI_FCTL, 0u);
+	if ((ri_read32(c, RI_FCTL) & 7u) != 0u) goto fail;
 	ri_write64(c, RI_CQB, ((uint64_t)commands.address >> 2u) | (RI_QUEUE_LOG2 - 1u));
 	ri_write32(c, RI_CQT, 0u);
 	ri_write32(c, RI_CQCSR, RI_CQEN);
 	if (!ri_wait32(c, RI_CQCSR, RI_CQON, RI_CQON)) goto fail;
-	ri_write64(c, RI_DDTP, 0u);
-	if (!ri_wait_ddtp(c)) goto fail;
 	for (uint8_t mode = RI_DDTP_3LVL; mode >= RI_DDTP_1LVL; mode--) {
 		ri_write64(c, RI_DDTP, ((uint64_t)directory.address >> 2u) | mode);
 		if (ri_wait_ddtp(c) && (ri_read64(c, RI_DDTP) & 0xfu) == mode) {
@@ -294,8 +337,7 @@ bool riscv_iommu_controller_init(struct hal_iommu_controller_state*            c
         HAL_IOMMU_KIND_RISCV, 4096u, c->leaf_size_mask, io_bits, physical_bits, 20u, c->source_id_bits};
 	return true;
 fail:
-	ri_write64(c, RI_DDTP, 0u);
-	ri_write32(c, RI_CQCSR, 0u);
+	if (!ri_disable_queues(c)) hcf();
 	if (commands.size != 0u) (void)pmm_free(commands);
 	if (directory.size != 0u) (void)pmm_free(directory);
 	*c = (struct hal_iommu_controller_state){0};
@@ -305,10 +347,7 @@ fail:
 void riscv_iommu_controller_deinit(struct hal_iommu_controller_state* c) {
 	if (c == NULL || !c->initialized || c->device_count != 0u) return;
 	ri_lock(c);
-	ri_write64(c, RI_DDTP, 0u);
-	(void)ri_wait_ddtp(c);
-	ri_write32(c, RI_CQCSR, 0u);
-	(void)ri_wait32(c, RI_CQCSR, RI_CQON | RI_CQBUSY, 0u);
+	if (!ri_disable_queues(c)) hcf();
 	c->initialized = false;
 	(void)pmm_free((struct pmm_extent){c->command_queue_address, c->command_queue_size});
 	(void)pmm_free((struct pmm_extent){c->device_directory_address, c->device_directory_size});
@@ -359,9 +398,10 @@ bool riscv_iommu_unmap(struct hal_iommu_controller_state* c, struct hal_iommu_sp
 	return ok;
 }
 
-bool riscv_iommu_attach(struct hal_iommu_controller_state* c, struct hal_iommu_space_state* space, uint32_t source_id) {
+bool riscv_iommu_attach(struct hal_iommu_controller_state* c, struct hal_iommu_space_state* space, uint32_t source_id,
+                        struct hal_iommu_attachment_state* attachment) {
 	if (!ri_source_valid(c, source_id) || space == NULL || !space->table.initialized ||
-	    space->table.controller_identity != (uintptr_t)c)
+	    space->table.controller_identity != (uintptr_t)c || attachment == NULL || attachment->initialized)
 		return false;
 	ri_lock(c);
 	struct ri_ddt_path path;
@@ -373,9 +413,8 @@ bool riscv_iommu_attach(struct hal_iommu_controller_state* c, struct hal_iommu_s
 	uint8_t  mode   = c->io_address_bits == 57u ? 10u : c->io_address_bits == 48u ? 9u : 8u;
 	uint64_t iosatp = ((uint64_t)mode << 60u) | ((uint64_t)space->table.root_address >> 12u);
 	if ((dc[0] & 1u) != 0u) {
-		bool same = dc[2] == ((uint64_t)space->table.context_id << 12u) && dc[3] == iosatp;
 		ri_unlock(c);
-		return same;
+		return false;
 	}
 	dc[1] = 0u;
 	dc[2] = (uint64_t)space->table.context_id << 12u;
@@ -384,20 +423,21 @@ bool riscv_iommu_attach(struct hal_iommu_controller_state* c, struct hal_iommu_s
 	__asm__ volatile("fence w,w" : : : "memory");
 	dc[0] = 1u;
 	__asm__ volatile("fence w,o" : : : "memory");
-	if (!ri_invalidate_device(c, source_id)) {
-		dc[0] = 0u;
-		memset(dc, 0, c->device_context_size);
-		ri_reclaim_ddt(c, &path);
-		ri_unlock(c);
-		return false;
-	}
+	if ((path.hierarchy_changed && !ri_queue_ddt_invalidation(c)) || !ri_queue_device_invalidation(c, source_id) ||
+	    !ri_complete(c))
+		hcf();
 	c->device_count++;
+	*attachment = (struct hal_iommu_attachment_state){
+		.initialized = true, .controller_identity = (uintptr_t)c, .source_id = source_id};
 	ri_unlock(c);
 	return true;
 }
 
-bool riscv_iommu_detach(struct hal_iommu_controller_state* c, uint32_t source_id) {
-	if (!ri_source_valid(c, source_id)) return false;
+bool riscv_iommu_detach(struct hal_iommu_controller_state* c, uint32_t source_id,
+                        struct hal_iommu_attachment_state* attachment) {
+	if (!ri_source_valid(c, source_id) || attachment == NULL || !attachment->initialized ||
+	    attachment->controller_identity != (uintptr_t)c || attachment->source_id != source_id)
+		return false;
 	ri_lock(c);
 	struct ri_ddt_path path;
 	uint64_t*          dc = ri_device_context(c, source_id, false, &path);
@@ -407,12 +447,15 @@ bool riscv_iommu_detach(struct hal_iommu_controller_state* c, uint32_t source_id
 	}
 	dc[0] = 0u;
 	__asm__ volatile("fence w,o" : : : "memory");
-	bool ok = ri_invalidate_device(c, source_id);
-	if (ok) {
-		memset(dc, 0, c->device_context_size);
-		ri_reclaim_ddt(c, &path);
-		c->device_count--;
-	}
+	uint32_t old_pscid = (uint32_t)((dc[2] >> 12u) & 0xfffffu);
+	uint64_t old_fsc   = dc[3];
+	if (!ri_queue_device_invalidation(c, source_id) ||
+	    ((old_fsc >> 60u) != 0u && !ri_queue_pscid_invalidation(c, old_pscid)) || !ri_complete(c))
+		hcf();
+	memset(dc, 0, c->device_context_size);
+	ri_reclaim_ddt(c, &path);
+	c->device_count--;
+	*attachment = (struct hal_iommu_attachment_state){0};
 	ri_unlock(c);
-	return ok;
+	return true;
 }

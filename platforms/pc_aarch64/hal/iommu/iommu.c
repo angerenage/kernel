@@ -83,10 +83,11 @@ bool hal_iommu_unmap(struct hal_iommu_controller_state* controller, struct hal_i
 }
 
 bool hal_iommu_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                      uint32_t source_id) {
-	return aarch64_smmuv3_attach(controller, space, source_id);
+                      uint32_t source_id, struct hal_iommu_attachment_state* attachment) {
+	return aarch64_smmuv3_attach(controller, space, source_id, attachment);
 }
 
-bool hal_iommu_detach(struct hal_iommu_controller_state* controller, uint32_t source_id) {
-	return aarch64_smmuv3_detach(controller, source_id);
+bool hal_iommu_detach(struct hal_iommu_controller_state* controller, uint32_t source_id,
+                      struct hal_iommu_attachment_state* attachment) {
+	return aarch64_smmuv3_detach(controller, source_id, attachment);
 }

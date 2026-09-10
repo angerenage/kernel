@@ -30,7 +30,8 @@ bool x86_amd_iommu_unmap(struct hal_iommu_controller_state* controller, struct h
 
 /* Attach a hardware source to an AMD IOMMU translation space. */
 bool x86_amd_iommu_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                          uint32_t source_id);
+                          uint32_t source_id, struct hal_iommu_attachment_state* attachment);
 
 /* Detach and block a hardware source from an AMD IOMMU. */
-bool x86_amd_iommu_detach(struct hal_iommu_controller_state* controller, uint32_t source_id);
+bool x86_amd_iommu_detach(struct hal_iommu_controller_state* controller, uint32_t source_id,
+                          struct hal_iommu_attachment_state* attachment);

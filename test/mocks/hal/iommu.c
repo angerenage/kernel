@@ -40,7 +40,7 @@ static unsigned mock_shift(size_t value) {
 static bool mock_info_valid(const struct hal_iommu_info* info) {
 	if (info == NULL || !mock_power_of_two(info->minimum_leaf_size) || info->source_id_bits > 32u ||
 	    info->context_id_bits == 0u || info->context_id_bits > 32u || info->io_address_bits == 0u ||
-	    info->io_address_bits >= 64u || info->physical_address_bits == 0u || info->physical_address_bits >= 64u)
+	    info->io_address_bits > 64u || info->physical_address_bits == 0u || info->physical_address_bits > 64u)
 		return false;
 	unsigned shift = mock_shift(info->minimum_leaf_size);
 	return shift < info->io_address_bits && shift < info->physical_address_bits &&
@@ -54,8 +54,8 @@ static int mock_leaf_compare(const void* left, const void* right) {
 }
 
 static bool mock_range_end(uint64_t start, size_t size, uint8_t bits, uint64_t* out_end) {
-	uint64_t limit = 1ull << bits;
-	if (size == 0u || start > UINT64_MAX - size || start + size > limit) return false;
+	uint64_t limit = bits == 64u ? UINT64_MAX : 1ull << bits;
+	if (size == 0u || start > UINT64_MAX - size || (bits != 64u && start + size > limit)) return false;
 	*out_end = start + size;
 	return true;
 }
@@ -224,12 +224,12 @@ bool hal_iommu_unmap(struct hal_iommu_controller_state* controller, struct hal_i
 }
 
 bool hal_iommu_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                      uint32_t source_id) {
+                      uint32_t source_id, struct hal_iommu_attachment_state* attachment) {
 	if (!mock_source_valid(controller, source_id) || space == NULL || !space->table.initialized ||
-	    space->table.controller_identity != (uintptr_t)controller)
+	    space->table.controller_identity != (uintptr_t)controller || attachment == NULL || attachment->initialized)
 		return false;
 	struct mock_iommu_source* source = mock_source_find(controller, source_id);
-	if (source != NULL) return source->space == space;
+	if (source != NULL) return false;
 	if (controller->source_count == controller->source_capacity) {
 		size_t capacity = controller->source_capacity == 0u ? 8u : controller->source_capacity * 2u;
 		if (capacity < controller->source_capacity || capacity > SIZE_MAX / sizeof(*source)) return false;
@@ -241,14 +241,20 @@ bool hal_iommu_attach(struct hal_iommu_controller_state* controller, struct hal_
 	((struct mock_iommu_source*)controller->source_entries)[controller->source_count++] =
 		(struct mock_iommu_source){.source_id = source_id, .space = space};
 	controller->invalidations++;
+	*attachment = (struct hal_iommu_attachment_state){
+		.initialized = true, .controller_identity = (uintptr_t)controller, .source_id = source_id};
 	return true;
 }
 
-bool hal_iommu_detach(struct hal_iommu_controller_state* controller, uint32_t source_id) {
-	if (!mock_source_valid(controller, source_id)) return false;
+bool hal_iommu_detach(struct hal_iommu_controller_state* controller, uint32_t source_id,
+                      struct hal_iommu_attachment_state* attachment) {
+	if (!mock_source_valid(controller, source_id) || attachment == NULL || !attachment->initialized ||
+	    attachment->controller_identity != (uintptr_t)controller || attachment->source_id != source_id)
+		return false;
 	struct mock_iommu_source* source = mock_source_find(controller, source_id);
 	if (source == NULL) return false;
 	*source = ((struct mock_iommu_source*)controller->source_entries)[--controller->source_count];
 	controller->invalidations++;
+	*attachment = (struct hal_iommu_attachment_state){0};
 	return true;
 }

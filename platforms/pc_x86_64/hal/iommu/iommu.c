@@ -7,6 +7,22 @@
 #include "amd.h"
 #include "vtd.h"
 
+static bool amd_register_previously_seen(const uint8_t* start, const uint8_t* current, uint64_t registers) {
+	const uint8_t* cursor = start;
+	while (cursor < current && (size_t)(current - cursor) >= 4u) {
+		uint16_t length;
+		memcpy(&length, cursor + 2u, sizeof(length));
+		if (length < 4u || (size_t)(current - cursor) < length) return false;
+		if ((cursor[0] == 0x10u || cursor[0] == 0x11u || cursor[0] == 0x40u) && length >= 16u) {
+			uint64_t previous;
+			memcpy(&previous, cursor + 8u, sizeof(previous));
+			if (previous == registers) return true;
+		}
+		cursor += length;
+	}
+	return false;
+}
+
 static size_t table_units(const struct iommu_acpi_header* table, size_t table_prefix, enum hal_iommu_kind kind,
                           size_t target, struct hal_iommu_controller_descriptor* out) {
 	if (table == NULL || table->length < table_prefix) return 0u;
@@ -14,19 +30,28 @@ static size_t table_units(const struct iommu_acpi_header* table, size_t table_pr
 	const uint8_t* end    = (const uint8_t*)table + table->length;
 	size_t         count  = 0u;
 	while ((size_t)(end - cursor) >= 4u) {
+		uint16_t type;
 		uint16_t length;
+		memcpy(&type, cursor, sizeof(type));
 		memcpy(&length, cursor + 2u, sizeof(length));
 		if (length < 4u || (size_t)(end - cursor) < length) return count;
 		bool selected = kind == HAL_IOMMU_KIND_INTEL_VTD
-		                    ? cursor[0] == 0u
+		                    ? type == 0u
 		                    : cursor[0] == 0x10u || cursor[0] == 0x11u || cursor[0] == 0x40u;
 		if (selected && length >= 16u) {
 			uint64_t registers;
 			memcpy(&registers, cursor + 8u, sizeof(registers));
-			if (registers != 0u) {
+			if (kind == HAL_IOMMU_KIND_AMD &&
+			    amd_register_previously_seen((const uint8_t*)table + table_prefix, cursor, registers))
+				selected = false;
+			if (selected && registers != 0u) {
 				if (out != NULL && count == target) {
 					*out = (struct hal_iommu_controller_descriptor){
-						.kind = kind, .register_address = (uintptr_t)registers, .firmware_flags = cursor[1]};
+						.kind             = kind,
+						.register_address = (uintptr_t)registers,
+						.firmware_flags   = kind == HAL_IOMMU_KIND_INTEL_VTD ? cursor[4] : cursor[1]};
+					if (kind == HAL_IOMMU_KIND_INTEL_VTD)
+						out->firmware_physical_address_bits = ((const uint8_t*)table)[36u] + 1u;
 					if (kind == HAL_IOMMU_KIND_AMD) {
 						uint32_t iv_info;
 						memcpy(&iv_info, (const uint8_t*)table + 36u, sizeof(iv_info));
@@ -141,25 +166,26 @@ bool hal_iommu_unmap(struct hal_iommu_controller_state* controller, struct hal_i
 }
 
 bool hal_iommu_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                      uint32_t source_id) {
+                      uint32_t source_id, struct hal_iommu_attachment_state* attachment) {
 	if (controller == NULL) return false;
 	switch (controller->kind) {
 	case HAL_IOMMU_KIND_INTEL_VTD:
-		return x86_vtd_attach(controller, space, source_id);
+		return x86_vtd_attach(controller, space, source_id, attachment);
 	case HAL_IOMMU_KIND_AMD:
-		return x86_amd_iommu_attach(controller, space, source_id);
+		return x86_amd_iommu_attach(controller, space, source_id, attachment);
 	default:
 		return false;
 	}
 }
 
-bool hal_iommu_detach(struct hal_iommu_controller_state* controller, uint32_t source_id) {
+bool hal_iommu_detach(struct hal_iommu_controller_state* controller, uint32_t source_id,
+                      struct hal_iommu_attachment_state* attachment) {
 	if (controller == NULL) return false;
 	switch (controller->kind) {
 	case HAL_IOMMU_KIND_INTEL_VTD:
-		return x86_vtd_detach(controller, source_id);
+		return x86_vtd_detach(controller, source_id, attachment);
 	case HAL_IOMMU_KIND_AMD:
-		return x86_amd_iommu_detach(controller, source_id);
+		return x86_amd_iommu_detach(controller, source_id, attachment);
 	default:
 		return false;
 	}

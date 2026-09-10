@@ -43,7 +43,7 @@ struct hal_iommu_controller_descriptor {
 #if defined(PLATFORM_PC_LOONGARCH64)
 	uint64_t firmware_leaf_size_mask;
 	uint32_t register_size;
-	uint32_t maximum_source_count;
+	uint32_t maximum_device_count;
 	uint32_t firmware_flags;
 	uint32_t device_id;
 	uint16_t segment;
@@ -91,6 +91,7 @@ struct hal_iommu_controller_state {
 	uint8_t             physical_address_bits;
 	uint8_t             context_id_bits;
 	uint8_t             source_id_bits;
+	uint8_t             page_table_levels;
 };
 
 #elif defined(PLATFORM_PC_AARCH64)
@@ -102,11 +103,9 @@ struct hal_iommu_controller_state {
 	volatile void* registers;
 	uintptr_t      stream_table_address;
 	uintptr_t      command_queue_address;
-	uintptr_t      event_queue_address;
 	size_t         table_allocation_size;
 	size_t         stream_table_size;
 	size_t         command_queue_size;
-	size_t         event_queue_size;
 	uint64_t       leaf_size_mask;
 	uint64_t       address_mask;
 	uint32_t       stream_count;
@@ -116,7 +115,6 @@ struct hal_iommu_controller_state {
 	uint8_t        context_id_bits;
 	uint8_t        source_id_bits;
 	uint8_t        command_queue_log2_entries;
-	uint8_t        event_queue_log2_entries;
 	uint8_t        stream_table_split;
 	bool           stream_table_two_level;
 };
@@ -149,9 +147,16 @@ struct hal_iommu_controller_state {
 
 #elif defined(PLATFORM_PC_LOONGARCH64)
 
-/* Concrete state reserved for a discovered LoongArch IOMMUv1 controller. */
+/* Concrete state of one LoongArch IOMMUv1 controller. */
 struct hal_iommu_controller_state {
-	bool initialized;
+	uint32_t       operation_lock;
+	bool           initialized;
+	volatile void* registers;
+	uint64_t       leaf_size_mask;
+	uint64_t       address_mask;
+	uint16_t       allocated_slots;
+	uint8_t        io_address_bits;
+	uint8_t        physical_address_bits;
 };
 
 #elif defined(HAL_IOMMU_MOCK)
@@ -178,6 +183,17 @@ struct hal_iommu_space_state {
 #if defined(HAL_IOMMU_MOCK)
 	void*  leaves;
 	size_t leaf_count;
+#endif
+};
+
+/* Architecture-owned state for one core-owned device attachment. */
+struct hal_iommu_attachment_state {
+	bool      initialized;
+	uintptr_t controller_identity;
+	uint32_t  source_id;
+#if defined(PLATFORM_PC_LOONGARCH64)
+	uint8_t hardware_slot;
+	uint8_t context_id;
 #endif
 };
 
@@ -240,7 +256,8 @@ bool hal_iommu_unmap(struct hal_iommu_controller_state* controller, struct hal_i
 
 /* Attach one local hardware source to a translation space. */
 bool hal_iommu_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                      uint32_t source_id);
+                      uint32_t source_id, struct hal_iommu_attachment_state* attachment);
 
 /* Detach one local hardware source and leave it blocked. */
-bool hal_iommu_detach(struct hal_iommu_controller_state* controller, uint32_t source_id);
+bool hal_iommu_detach(struct hal_iommu_controller_state* controller, uint32_t source_id,
+                      struct hal_iommu_attachment_state* attachment);
