@@ -26,6 +26,7 @@ platform_kernel_objects += [
 	files('hal/clock.c'),
 	files('hal/hcf.c'),
 	files('hal/interrupts.c'),
+	files('hal/iommu/iommu.c'),
 	files('hal/paging.c'),
 	files('hal/serial.c'),
 	files('hal/syscall.c'),

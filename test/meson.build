@@ -3,7 +3,7 @@ loader_test_inc = include_directories('../userspace/include')
 criterion = dependency('criterion', native: true, required: true)
 threads = dependency('threads', native: true)
 
-test_common_c_args = ['--coverage', '-DCORE_LOCK_DEBUG=1', '-DBASE_STDLIB_RENAME_ALLOC=1']
+test_common_c_args = ['--coverage', '-DCORE_LOCK_DEBUG=1', '-DBASE_STDLIB_RENAME_ALLOC=1', '-DHAL_IOMMU_MOCK=1']
 test_common_link_args = ['--coverage']
 elf_loader_test_c_args = []
 if platform == 'pc_x86_64'
@@ -52,6 +52,7 @@ hal_mock_sources = files(
 	'mocks/hal/cpu.c',
 	'mocks/hal/hcf.c',
 	'mocks/hal/interrupts.c',
+	'mocks/hal/iommu.c',
 	'mocks/hal/paging.c',
 	'mocks/hal/userspace.c',
 	'mocks/kernel/boot.c',
@@ -428,6 +429,13 @@ test_suites = [
 		),
 		'link_with': core_test_lib,
 		'suites': ['unit', 'memory'],
+	},
+	{
+		'name': 'iommu',
+		'sources': files(
+			'iommu/contract.c',
+		),
+		'suites': ['unit', 'hal'],
 	},
 ]
 

@@ -4,6 +4,7 @@
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/sched.h>
+#include <hal/iommu.h>
 #include <kernel/boot.h>
 #include <kernel/boot_diagnostics.h>
 #include <kernel/cmdline.h>
@@ -104,6 +105,24 @@ void kernel_boot_diagnostics_memory_summary(void) {
 	       heap_free_bytes(),
 	       heap_total_bytes(),
 	       MM_KERNEL_ADDRESS_SPACE_SIZE / address_space_minimum_mapping_size());
+}
+
+void kernel_boot_diagnostics_iommus(void) {
+	size_t count = hal_iommu_controller_count();
+
+	if (count == 0u) {
+		printf("kernel: no IOMMU controllers discovered\n");
+		return;
+	}
+	printf("kernel: IOMMU controllers:\n");
+	for (size_t index = 0u; index < count; index++) {
+		struct hal_iommu_controller_descriptor descriptor;
+		if (!hal_iommu_controller_at(index, &descriptor)) continue;
+		printf("  index: %zu, kind: %s, registers: %p\n",
+		       index,
+		       hal_iommu_kind_string(descriptor.kind),
+		       (void*)descriptor.register_address);
+	}
 }
 
 void kernel_boot_diagnostics_modules(void) {

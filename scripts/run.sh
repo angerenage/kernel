@@ -13,7 +13,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 usage() {
 	cat <<'EOF'
-Usage: run.sh [--test|-t | --kernel-selftest] [--test-name <name>] [--arch <arch> | --all] [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--headless] [--debug] [--debug-port <port>] [--timeout <seconds>] [-- <extra qemu args>]
+Usage: run.sh [--test|-t | --kernel-selftest] [--test-name <name>] [--arch <arch> | --all] [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--iommu <kind>] [--headless] [--debug] [--debug-port <port>] [--timeout <seconds>] [-- <extra qemu args>]
 
 Modes:
   Default mode         Launch QEMU. Requires --arch <arch> or --all.
@@ -35,6 +35,7 @@ QEMU options:
                        Prefix for per-architecture build directories under
                        --build-root. Defaults to build, producing build-<arch>.
   --headless           Pass --headless through to the QEMU launcher.
+  --iommu <kind>       Select auto, none, vtd, amd, smmuv3, or riscv.
   --debug              Pass --debug through to the QEMU launcher.
   --debug-port <port>  Pass --debug-port through to the QEMU launcher.
   --timeout <seconds>  Selftest mode timeout. Defaults to 30 seconds.
@@ -145,6 +146,7 @@ run_qemu_for_arch() {
 		"${SCRIPT_DIR}/run_qemu.sh"
 		--arch "$arch"
 		--builddir "$build_dir"
+		--iommu "$IOMMU_MODE"
 	)
 
 	if (( HEADLESS )); then
@@ -206,6 +208,7 @@ run_kernel_selftests() {
 		--arch "$arch"
 		--builddir "$build_dir"
 		--headless
+		--iommu "$IOMMU_MODE"
 	)
 
 	if (( DEBUG_MODE )); then
@@ -279,6 +282,7 @@ DEBUG_MODE=0
 DEBUG_PORT=1234
 DEBUG_PORT_SET=0
 HEADLESS=0
+IOMMU_MODE="auto"
 SELFTEST_TIMEOUT=30
 TEST_NAMES=()
 EXTRA_QEMU_ARGS=()
@@ -335,6 +339,15 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--headless)
 			HEADLESS=1
+			shift
+			;;
+		--iommu)
+			[[ $# -ge 2 ]] || error "missing value for --iommu"
+			IOMMU_MODE="$2"
+			shift 2
+			;;
+		--iommu=*)
+			IOMMU_MODE="${1#*=}"
 			shift
 			;;
 		--test-name)

@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
 	cat <<'EOF'
-Usage: run_qemu.sh --arch <arch> [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--headless] [--debug] [--debug-port <port>] [-- <extra qemu args>]
+Usage: run_qemu.sh --arch <arch> [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--iommu <kind>] [--headless] [--debug] [--debug-port <port>] [-- <extra qemu args>]
 
 Required arguments:
   --arch        Target architecture (x86_64, aarch64, riscv64, loongarch64).
@@ -17,6 +17,8 @@ Optional arguments:
                 Prefix for per-architecture build directories under
                 --build-root. Defaults to build, producing build-<arch>.
   --headless    Disable graphical display and keep serial on stdio.
+  --iommu       IOMMU model: auto, none, vtd, amd, smmuv3, or riscv.
+                auto enables the native emulated model when one exists.
   --debug       Start QEMU paused with a GDB stub on localhost and enable
                 QEMU debug logging in the build directory.
   --debug-port  TCP port to use for the GDB stub in --debug mode.
@@ -197,6 +199,7 @@ BUILD_PREFIX="build"
 DEBUG_MODE=0
 DEBUG_PORT=1234
 HEADLESS=0
+IOMMU_MODE="auto"
 EXTRA_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -236,6 +239,14 @@ while [[ $# -gt 0 ]]; do
 		--headless)
 			HEADLESS=1
 			shift 1
+			;;
+		--iommu)
+			IOMMU_MODE="$2"
+			shift 2
+			;;
+		--iommu=*)
+			IOMMU_MODE="${1#*=}"
+			shift
 			;;
 		--debug-port)
 			DEBUG_PORT="$2"
@@ -295,12 +306,18 @@ case "$TARGET_ARCH" in
 			-no-reboot
 			-no-shutdown
 		)
+		case "$IOMMU_MODE" in
+			auto|vtd) qemu_args+=( -device intel-iommu,intremap=off ) ;;
+			amd) qemu_args+=( -device amd-iommu,dma-remap=on,intremap=off ) ;;
+			none) ;;
+			*) error "IOMMU model '$IOMMU_MODE' is not supported on x86_64" ;;
+		esac
 		;;
 	aarch64)
 		qemu_name="qemu-system-aarch64"
 		firmware_names=("edk2-aarch64-code.fd" "AAVMF_CODE.fd" "QEMU_EFI.fd")
 		qemu_args=(
-			-M virt
+			-M virt,iommu=smmuv3
 			-smp 4
 			-cpu cortex-a72
 			-m 2G
@@ -313,13 +330,18 @@ case "$TARGET_ARCH" in
 			-no-reboot
 			-no-shutdown
 		)
+		case "$IOMMU_MODE" in
+			auto|smmuv3) ;;
+			none) qemu_args[1]="virt" ;;
+			*) error "IOMMU model '$IOMMU_MODE' is not supported on aarch64" ;;
+		esac
 		;;
 	riscv64)
 		qemu_name="qemu-system-riscv64"
 		firmware_names=("edk2-riscv-code.fd" "RISCV_VIRT_CODE.fd")
 		firmware_vars_names=("edk2-riscv-vars.fd" "RISCV_VIRT_VARS.fd")
 		qemu_args=(
-			-M virt,acpi=off,pflash0=pflash0,pflash1=pflash1
+			-M virt,acpi=off,pflash0=pflash0,pflash1=pflash1,iommu-sys=on
 			-smp 4
 			-cpu rv64,v=true,vlen=128,elen=64
 			-m 2G
@@ -334,6 +356,11 @@ case "$TARGET_ARCH" in
 			-no-reboot
 			-no-shutdown
 		)
+		case "$IOMMU_MODE" in
+			auto|riscv) ;;
+			none) qemu_args[1]="virt,acpi=off,pflash0=pflash0,pflash1=pflash1" ;;
+			*) error "IOMMU model '$IOMMU_MODE' is not supported on riscv64" ;;
+		esac
 		;;
 	loongarch64)
 		qemu_name="qemu-system-loongarch64"
@@ -354,6 +381,10 @@ case "$TARGET_ARCH" in
 			-no-reboot
 			-no-shutdown
 		)
+		case "$IOMMU_MODE" in
+			auto|none) ;;
+			*) error "QEMU does not provide a LoongArch IOMMU model" ;;
+		esac
 		;;
 	*)
 		error "unsupported architecture: $TARGET_ARCH"

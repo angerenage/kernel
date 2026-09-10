@@ -274,7 +274,10 @@ void kernel_main(void) {
 		kernel_boot_diagnostics_modules();
 	}
 	kernel_init_memory(memory_map, memory_map_count, boot_address_space.direct_map_offset);
-	if (boot_diagnostics_enabled) kernel_boot_diagnostics_memory_summary();
+	if (boot_diagnostics_enabled) {
+		kernel_boot_diagnostics_memory_summary();
+		kernel_boot_diagnostics_iommus();
+	}
 	if (kernel_boot_cpu_mp_supported() && cpu_count() > 1u && !hal_cpu_prepare_smp()) {
 		boot_fail("kernel: hal_cpu_prepare_smp failed");
 	}

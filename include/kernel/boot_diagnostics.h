@@ -17,6 +17,9 @@ void kernel_boot_diagnostics_memory_map(const struct mem_range* memory_map, size
 /* Print a high-level summary of usable/reusable/reserved memory ranges. */
 void kernel_boot_diagnostics_memory_summary(void);
 
+/* Print the IOMMU controllers discovered in platform firmware. */
+void kernel_boot_diagnostics_iommus(void);
+
 /* Print the list of boot modules the bootloader reported. */
 void kernel_boot_diagnostics_modules(void);
 
