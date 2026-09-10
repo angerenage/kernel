@@ -66,7 +66,7 @@ jobs:
         run: bash scripts/run.sh --test
 
   kernel-selftests:
-    name: Kernel selftests (${{ matrix.arch }})
+    name: Kernel selftests (${{ matrix.arch }}, ${{ matrix.iommu }})
     runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
@@ -74,12 +74,19 @@ jobs:
         include:
           - arch: x86_64
             firmware: ''
+            iommu: vtd
+          - arch: x86_64
+            firmware: ''
+            iommu: amd
           - arch: aarch64
             firmware: ''
+            iommu: smmuv3
           - arch: riscv64
             firmware: qemu-efi-riscv64
+            iommu: riscv
           - arch: loongarch64
             firmware: qemu-efi-loongarch64
+            iommu: none
 
     steps:
       - name: Checkout
@@ -142,7 +149,13 @@ jobs:
             --compile \
             --no-tests \
             --kernel-selftests \
-            --kernel-selftests-autorun
+            --kernel-selftests-autorun \
+            --kernel-selftests-iommu "${{ matrix.iommu }}"
 
       - name: Run in-kernel selftests
-        run: bash scripts/run.sh --kernel-selftest --arch "${{ matrix.arch }}" --timeout 45
+        run: |
+          bash scripts/run.sh \
+            --kernel-selftest \
+            --arch "${{ matrix.arch }}" \
+            --iommu "${{ matrix.iommu }}" \
+            --timeout 45

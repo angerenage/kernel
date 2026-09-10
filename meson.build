@@ -7,6 +7,7 @@ platform = get_option('platform')
 kernel_selftests = get_option('kernel_selftests')
 kernel_selftests_autorun = get_option('kernel_selftests_autorun')
 kernel_selftests_suite = get_option('kernel_selftests_suite')
+kernel_selftests_iommu = get_option('kernel_selftests_iommu')
 kernel_boot_debug = get_option('kernel_boot_debug')
 test_sanitizers = get_option('test_sanitizers')
 
@@ -20,6 +21,14 @@ endif
 
 if kernel_selftests_suite != '' and not kernel_selftests
 	error('kernel_selftests_suite requires -Dkernel_selftests=true')
+endif
+
+if kernel_selftests_iommu != '' and not kernel_selftests
+	error('kernel_selftests_iommu requires -Dkernel_selftests=true')
+endif
+
+if not ['', 'none', 'vtd', 'amd', 'smmuv3', 'riscv', 'loongarch-v1'].contains(kernel_selftests_iommu)
+	error('kernel_selftests_iommu must be none, vtd, amd, smmuv3, riscv, or loongarch-v1')
 endif
 
 foreach whitespace : [' ', '\t', '\n', '\r']
@@ -63,6 +72,9 @@ if kernel_selftests_autorun or kernel_selftests_suite != ''
 endif
 if kernel_selftests_suite != ''
 	limine_cmdline += ' kernel.selftest.suite=' + kernel_selftests_suite
+endif
+if kernel_selftests_iommu != ''
+	limine_cmdline += ' kernel.selftest.iommu=' + kernel_selftests_iommu
 endif
 
 limine_conf_data = configuration_data()

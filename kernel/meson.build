@@ -26,6 +26,7 @@ kernel_selftest_sources = files(
 	'test/selftests/cpu.c',
 	'test/selftests/thread_bootstrap.c',
 	'test/selftests/pmm.c',
+	'test/selftests/iommu.c',
 	'test/selftests/address_space.c',
 	'test/selftests/heap.c',
 	'test/selftests/kthread.c',

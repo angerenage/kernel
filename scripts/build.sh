@@ -13,7 +13,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 usage() {
 	cat <<'EOF'
-Usage: build.sh (--arch <arch> | --all) [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--setup|-s] [--compile|-c] [-sc] [--reconfigure] [--no-tests] [--test-sanitizers] [--kernel-selftests] [--kernel-selftests-autorun] [--kernel-selftests-suite <name>] [--kernel-boot-debug]
+Usage: build.sh (--arch <arch> | --all) [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--setup|-s] [--compile|-c] [-sc] [--reconfigure] [--no-tests] [--test-sanitizers] [--kernel-selftests] [--kernel-selftests-autorun] [--kernel-selftests-suite <name>] [--kernel-selftests-iommu <kind>] [--kernel-boot-debug]
 
 Target selection:
   --arch <arch>  Build a single architecture (x86_64, aarch64, riscv64, loongarch64).
@@ -37,6 +37,9 @@ Actions:
   --kernel-selftests-suite <name>
                   Configure Meson with -Dkernel_selftests_suite=<name>.
                   Implies --kernel-selftests and boots only that suite.
+  --kernel-selftests-iommu <kind>
+                  Require none, vtd, amd, smmuv3, riscv, or loongarch-v1.
+                  Implies --kernel-selftests.
   --kernel-boot-debug
                   Configure Meson with -Dkernel_boot_debug=true.
                   Enables verbose boot diagnostics in the generated image.
@@ -157,6 +160,7 @@ setup_arch() {
 		"-Dkernel_selftests=$( (( BUILD_KERNEL_SELFTESTS )) && printf true || printf false )"
 		"-Dkernel_selftests_autorun=$( (( KERNEL_SELFTESTS_AUTORUN )) && printf true || printf false )"
 		"-Dkernel_selftests_suite=${KERNEL_SELFTESTS_SUITE}"
+		"-Dkernel_selftests_iommu=${KERNEL_SELFTESTS_IOMMU}"
 		"-Dkernel_boot_debug=$( (( KERNEL_BOOT_DEBUG )) && printf true || printf false )"
 	)
 
@@ -172,6 +176,7 @@ setup_arch() {
 			"-Dkernel_selftests=$( (( BUILD_KERNEL_SELFTESTS )) && printf true || printf false )"
 			"-Dkernel_selftests_autorun=$( (( KERNEL_SELFTESTS_AUTORUN )) && printf true || printf false )"
 			"-Dkernel_selftests_suite=${KERNEL_SELFTESTS_SUITE}"
+			"-Dkernel_selftests_iommu=${KERNEL_SELFTESTS_IOMMU}"
 			"-Dkernel_boot_debug=$( (( KERNEL_BOOT_DEBUG )) && printf true || printf false )"
 		)
 	fi
@@ -258,6 +263,7 @@ TEST_SANITIZERS=0
 BUILD_KERNEL_SELFTESTS=0
 KERNEL_SELFTESTS_AUTORUN=0
 KERNEL_SELFTESTS_SUITE=""
+KERNEL_SELFTESTS_IOMMU=""
 KERNEL_BOOT_DEBUG=0
 
 while [[ $# -gt 0 ]]; do
@@ -351,6 +357,25 @@ while [[ $# -gt 0 ]]; do
 			[[ -n "${1#*=}" ]] || error "--kernel-selftests-suite requires a non-empty suite name"
 			BUILD_KERNEL_SELFTESTS=1
 			KERNEL_SELFTESTS_SUITE="${1#*=}"
+			shift
+			;;
+		--kernel-selftests-iommu)
+			[[ $# -ge 2 ]] || error "missing value for --kernel-selftests-iommu"
+			case "$2" in
+				none|vtd|amd|smmuv3|riscv|loongarch-v1) ;;
+				*) error "unsupported selftest IOMMU kind: $2" ;;
+			esac
+			BUILD_KERNEL_SELFTESTS=1
+			KERNEL_SELFTESTS_IOMMU="$2"
+			shift 2
+			;;
+		--kernel-selftests-iommu=*)
+			KERNEL_SELFTESTS_IOMMU="${1#*=}"
+			case "$KERNEL_SELFTESTS_IOMMU" in
+				none|vtd|amd|smmuv3|riscv|loongarch-v1) ;;
+				*) error "unsupported selftest IOMMU kind: $KERNEL_SELFTESTS_IOMMU" ;;
+			esac
+			BUILD_KERNEL_SELFTESTS=1
 			shift
 			;;
 		--kernel-boot-debug)

@@ -28,6 +28,11 @@ option('kernel_selftests_suite',
 	value : '',
 	description : 'Append kernel.selftest.suite=<name> to the generated boot image command line.')
 
+option('kernel_selftests_iommu',
+	type : 'string',
+	value : '',
+	description : 'Append kernel.selftest.iommu=<kind> to require an IOMMU backend during selftests.')
+
 option('kernel_boot_debug',
 	type : 'boolean',
 	value : false,
