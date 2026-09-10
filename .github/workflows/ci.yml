@@ -67,16 +67,19 @@ jobs:
 
   kernel-selftests:
     name: Kernel selftests (${{ matrix.arch }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
-        arch:
-          - x86_64
-          - aarch64
-          - riscv64
-          # It is a pain to get compatible loongarch64 edk2 firmware, so we skip it for now.
-          # - loongarch64
+        include:
+          - arch: x86_64
+            firmware: ''
+          - arch: aarch64
+            firmware: ''
+          - arch: riscv64
+            firmware: qemu-efi-riscv64
+          - arch: loongarch64
+            firmware: qemu-efi-loongarch64
 
     steps:
       - name: Checkout
@@ -127,9 +130,9 @@ jobs:
         if: matrix.arch == 'x86_64'
         run: sudo apt-get install -y nasm
 
-      - name: Fetch RISC-V firmware
-        if: matrix.arch == 'riscv64'
-        run: sudo apt-get install -y qemu-efi-riscv64
+      - name: Install architecture firmware
+        if: matrix.firmware != ''
+        run: sudo apt-get install -y "${{ matrix.firmware }}"
 
       - name: Build selftest image
         run: |
