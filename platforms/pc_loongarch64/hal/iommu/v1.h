@@ -29,6 +29,10 @@ bool loongarch_iommu_v1_map(struct hal_iommu_controller_state* controller, struc
 bool loongarch_iommu_v1_unmap(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
                               uint64_t io_address, size_t size);
 
+/* Change permissions on an I/O address range for a LoongArch IOMMUv1. */
+bool loongarch_iommu_v1_protect(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
+                                uint64_t io_address, size_t size, uint64_t access);
+
 /* Attach one source to an IOMMUv1 translation space. */
 bool loongarch_iommu_v1_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
                                uint32_t source_id, struct hal_iommu_attachment_state* attachment);

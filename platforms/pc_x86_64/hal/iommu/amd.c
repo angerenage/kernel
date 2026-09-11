@@ -303,6 +303,19 @@ bool x86_amd_iommu_unmap(struct hal_iommu_controller_state* controller, struct h
 	return ok;
 }
 
+bool x86_amd_iommu_protect(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
+                           uint64_t io_address, size_t size, uint64_t access) {
+	if (controller == NULL || !controller->initialized || space == NULL ||
+	    space->table.controller_identity != (uintptr_t)controller)
+		return false;
+	amd_lock(controller);
+	struct iommu_pt_format format = amd_format(controller);
+	bool                   ok =
+		iommu_pt_protect(&format, space, io_address, size, access, amd_sync, controller) && controller->initialized;
+	amd_unlock(controller);
+	return ok;
+}
+
 bool x86_amd_iommu_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
                           uint32_t source_id, struct hal_iommu_attachment_state* attachment) {
 	if (!amd_source_valid(controller, source_id) || space == NULL || !space->table.initialized ||

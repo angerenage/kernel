@@ -28,6 +28,10 @@ bool riscv_iommu_map(struct hal_iommu_controller_state* controller, struct hal_i
 bool riscv_iommu_unmap(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
                        uint64_t io_address, size_t size);
 
+/* Change permissions on an I/O address range for a RISC-V IOMMU. */
+bool riscv_iommu_protect(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
+                         uint64_t io_address, size_t size, uint64_t access);
+
 /* Attach a hardware source to a RISC-V IOMMU translation space. */
 bool riscv_iommu_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
                         uint32_t source_id, struct hal_iommu_attachment_state* attachment);

@@ -165,6 +165,19 @@ bool hal_iommu_unmap(struct hal_iommu_controller_state* controller, struct hal_i
 	}
 }
 
+bool hal_iommu_protect(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
+                       uint64_t io_address, size_t size, uint64_t access) {
+	if (controller == NULL) return false;
+	switch (controller->kind) {
+	case HAL_IOMMU_KIND_INTEL_VTD:
+		return x86_vtd_protect(controller, space, io_address, size, access);
+	case HAL_IOMMU_KIND_AMD:
+		return x86_amd_iommu_protect(controller, space, io_address, size, access);
+	default:
+		return false;
+	}
+}
+
 bool hal_iommu_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
                       uint32_t source_id, struct hal_iommu_attachment_state* attachment) {
 	if (controller == NULL) return false;

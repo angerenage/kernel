@@ -182,6 +182,18 @@ bool loongarch_iommu_v1_unmap(struct hal_iommu_controller_state* controller, str
 	return result;
 }
 
+bool loongarch_iommu_v1_protect(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
+                                uint64_t io_address, size_t size, uint64_t access) {
+	if (controller == NULL || !controller->initialized || space == NULL ||
+	    space->table.controller_identity != (uintptr_t)controller)
+		return false;
+	la_lock(controller);
+	struct iommu_pt_format format = la_format(controller);
+	bool                   result = iommu_pt_protect(&format, space, io_address, size, access, la_sync, controller);
+	la_unlock(controller);
+	return result;
+}
+
 bool loongarch_iommu_v1_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
                                uint32_t source_id, struct hal_iommu_attachment_state* attachment) {
 	if (controller == NULL || !controller->initialized || space == NULL ||

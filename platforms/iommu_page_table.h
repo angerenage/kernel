@@ -506,6 +506,98 @@ static inline bool iommu_pt_split_leaf(const struct iommu_pt_format* format, str
 	return true;
 }
 
+static inline bool iommu_pt_protect_range(const struct iommu_pt_format* format, struct hal_iommu_space_state* space,
+                                          uint64_t* table, unsigned level, uint64_t start, uint64_t end,
+                                          uint64_t access, struct paging_transaction* transaction,
+                                          iommu_pt_sync_fn sync, void* context, bool* out_changed) {
+	size_t span = iommu_pt_leaf_size(format, level);
+	while (start < end) {
+		size_t index = (start >> (iommu_pt_page_shift(format) + iommu_pt_index_bits(format) * level)) &
+		               (iommu_pt_entry_count(format) - 1u);
+		uint64_t  leaf_start = start & ~((uint64_t)span - 1u);
+		uint64_t  leaf_end   = leaf_start + span;
+		uint64_t  next       = leaf_end < end ? leaf_end : end;
+		uint64_t* slot       = &table[index];
+		uint64_t  entry      = *slot;
+		if (!iommu_pt_entry_present(format, entry)) return false;
+		if (iommu_pt_entry_leaf(format, entry, level)) {
+			if (level != 0u && (start != leaf_start || next != leaf_end) &&
+			    !iommu_pt_split_leaf(format, space, slot, level, start, transaction, sync, context))
+				return false;
+			entry = *slot;
+		}
+		if (iommu_pt_entry_leaf(format, entry, level)) {
+			uint64_t new_entry = iommu_pt_leaf_entry(format, iommu_pt_decode_address(format, entry), level, access);
+			if (entry != new_entry) {
+				if (!paging_transaction_record(transaction, slot, (struct pmm_extent){0})) return false;
+				if (format->kind == IOMMU_PT_ARM_STAGE2) {
+					*slot = 0u;
+					iommu_pt_publish();
+					if (sync != NULL && !sync(context, space->table.context_id, start, (size_t)(next - start), true))
+						hcf();
+				}
+				*slot = new_entry;
+				if (format->kind == IOMMU_PT_ARM_STAGE2) {
+					iommu_pt_publish();
+					if (sync != NULL && !sync(context, space->table.context_id, start, (size_t)(next - start), true))
+						hcf();
+				}
+				if (out_changed != NULL) *out_changed = true;
+			}
+		}
+		else {
+			if (!iommu_pt_protect_range(format,
+			                            space,
+			                            (uint64_t*)iommu_pt_phys_to_virt(iommu_pt_decode_address(format, entry)),
+			                            level - 1u,
+			                            start,
+			                            next,
+			                            access,
+			                            transaction,
+			                            sync,
+			                            context,
+			                            out_changed))
+				return false;
+		}
+		start = next;
+	}
+	return true;
+}
+
+static inline bool iommu_pt_protect(const struct iommu_pt_format* format, struct hal_iommu_space_state* space,
+                                    uint64_t io_address, size_t size, uint64_t access, iommu_pt_sync_fn sync,
+                                    void* context) {
+	struct paging_transaction       transaction = {0};
+	uint64_t                        end;
+	uint64_t*                       root;
+	struct iommu_pt_restore_context restore = {format, sync, context, space == NULL ? 0u : space->table.context_id};
+	bool                            changed = false;
+	if (format == NULL || space == NULL || !iommu_pt_access_supported(format, access) ||
+	    !iommu_pt_args(format, io_address, 0u, size, false, &end) ||
+	    !iommu_pt_range_mapped(format, space, io_address, end))
+		return false;
+	root = iommu_pt_root(space);
+	if (root == NULL ||
+	    !iommu_pt_protect_range(
+			format, space, root, format->levels - 1u, io_address, end, access, &transaction, sync, context, &changed))
+		goto rollback;
+	if (changed) {
+		iommu_pt_publish();
+		if (sync != NULL && !sync(context, space->table.context_id, io_address, size, transaction.hierarchy_changed))
+			hcf();
+	}
+	paging_transaction_commit(&transaction);
+	return true;
+
+rollback:
+	if (paging_transaction_empty(&transaction)) return false;
+	paging_transaction_rollback(&transaction, iommu_pt_restore, &restore);
+	iommu_pt_publish();
+	if (sync != NULL && !sync(context, space->table.context_id, io_address, size, true)) hcf();
+	paging_transaction_abort(&transaction);
+	return false;
+}
+
 static inline bool iommu_pt_prepare_unmap(const struct iommu_pt_format* format, struct hal_iommu_space_state* space,
                                           uint64_t* table, unsigned level, uint64_t start, uint64_t end,
                                           struct paging_transaction* transaction, iommu_pt_sync_fn sync,

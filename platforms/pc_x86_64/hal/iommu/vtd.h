@@ -27,6 +27,10 @@ bool x86_vtd_map(struct hal_iommu_controller_state* controller, struct hal_iommu
 bool x86_vtd_unmap(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
                    uint64_t io_address, size_t size);
 
+/* Change permissions on an I/O address range for Intel VT-d. */
+bool x86_vtd_protect(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
+                     uint64_t io_address, size_t size, uint64_t access);
+
 /* Attach a hardware source to an Intel VT-d translation space. */
 bool x86_vtd_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
                     uint32_t source_id, struct hal_iommu_attachment_state* attachment);

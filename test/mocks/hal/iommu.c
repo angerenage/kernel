@@ -17,14 +17,55 @@ struct mock_iommu_source {
 	struct hal_iommu_space_state* space;
 };
 
+#define MOCK_DISCOVERED_CONTROLLER_CAPACITY 8u
+
+static struct hal_iommu_controller_descriptor mock_discovered_controllers[MOCK_DISCOVERED_CONTROLLER_CAPACITY];
+static size_t                                 mock_discovered_controller_count;
+static bool                                   mock_discovery_initialized;
+
+static struct hal_iommu_controller_descriptor mock_default_descriptor(uintptr_t           register_address,
+                                                                      enum hal_iommu_kind kind) {
+	return (struct hal_iommu_controller_descriptor){
+		.kind             = kind,
+		.register_address = register_address,
+		.mock_info        = {.minimum_leaf_size     = 4096u,
+	                         .leaf_size_mask        = (1ull << 12u) | (1ull << 21u),
+	                         .io_address_bits       = 39u,
+	                         .physical_address_bits = 48u,
+	                         .context_id_bits       = 8u,
+	                         .source_id_bits        = 8u}
+    };
+}
+
+static void mock_discovery_reset_defaults(void) {
+	mock_discovered_controllers[0]   = mock_default_descriptor(0x1000u, HAL_IOMMU_KIND_INTEL_VTD);
+	mock_discovered_controllers[1]   = mock_default_descriptor(0x2000u, HAL_IOMMU_KIND_AMD);
+	mock_discovered_controller_count = 2u;
+	mock_discovery_initialized       = true;
+}
+
+void hal_iommu_mock_set_discovered_controllers(const struct hal_iommu_controller_descriptor* descriptors,
+                                               size_t                                        count) {
+	if (count > MOCK_DISCOVERED_CONTROLLER_CAPACITY) count = MOCK_DISCOVERED_CONTROLLER_CAPACITY;
+	for (size_t index = 0u; index < count; index++) mock_discovered_controllers[index] = descriptors[index];
+	mock_discovered_controller_count = count;
+	mock_discovery_initialized       = true;
+}
+
+void hal_iommu_mock_reset_discovered_controllers(void) {
+	mock_discovery_reset_defaults();
+}
+
 size_t hal_iommu_controller_count(void) {
-	return 0u;
+	if (!mock_discovery_initialized) mock_discovery_reset_defaults();
+	return mock_discovered_controller_count;
 }
 
 bool hal_iommu_controller_at(size_t index, struct hal_iommu_controller_descriptor* out_descriptor) {
-	(void)index;
-	(void)out_descriptor;
-	return false;
+	if (!mock_discovery_initialized) mock_discovery_reset_defaults();
+	if (out_descriptor == NULL || index >= mock_discovered_controller_count) return false;
+	*out_descriptor = mock_discovered_controllers[index];
+	return true;
 }
 
 static bool mock_power_of_two(size_t value) {
@@ -38,9 +79,10 @@ static unsigned mock_shift(size_t value) {
 }
 
 static bool mock_info_valid(const struct hal_iommu_info* info) {
-	if (info == NULL || !mock_power_of_two(info->minimum_leaf_size) || info->source_id_bits > 32u ||
-	    info->context_id_bits == 0u || info->context_id_bits > 32u || info->io_address_bits == 0u ||
-	    info->io_address_bits > 64u || info->physical_address_bits == 0u || info->physical_address_bits > 64u)
+	if (info == NULL || !mock_power_of_two(info->minimum_leaf_size) || info->source_id_bits == 0u ||
+	    info->source_id_bits > 32u || info->context_id_bits == 0u || info->context_id_bits > 32u ||
+	    info->io_address_bits == 0u || info->io_address_bits > 64u || info->physical_address_bits == 0u ||
+	    info->physical_address_bits > 64u)
 		return false;
 	unsigned shift = mock_shift(info->minimum_leaf_size);
 	return shift < info->io_address_bits && shift < info->physical_address_bits &&
@@ -219,6 +261,60 @@ bool hal_iommu_unmap(struct hal_iommu_controller_state* controller, struct hal_i
 	space->leaves     = replacement;
 	space->leaf_count = count;
 	space->table.mapped_size -= size;
+	controller->invalidations++;
+	return true;
+}
+
+bool hal_iommu_protect(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
+                       uint64_t io_address, size_t size, uint64_t access) {
+	uint64_t end;
+	if (!hal_iommu_mapping_supported(controller, access) || space == NULL || !space->table.initialized ||
+	    space->table.controller_identity != (uintptr_t)controller ||
+	    (io_address & (controller->info.minimum_leaf_size - 1u)) != 0u ||
+	    (size & (controller->info.minimum_leaf_size - 1u)) != 0u ||
+	    !mock_range_end(io_address, size, controller->info.io_address_bits, &end))
+		return false;
+	struct mock_iommu_leaf* old    = space->leaves;
+	uint64_t                cursor = io_address;
+	for (size_t i = 0u; i < space->leaf_count && cursor < end; i++) {
+		uint64_t leaf_end = old[i].io_address + old[i].size;
+		if (leaf_end <= cursor) continue;
+		if (old[i].io_address > cursor) return false;
+		cursor = leaf_end < end ? leaf_end : end;
+	}
+	if (cursor != end) return false;
+	size_t additions = 0u;
+	for (size_t i = 0u; i < space->leaf_count; i++) {
+		uint64_t leaf_start = old[i].io_address;
+		uint64_t leaf_end   = leaf_start + old[i].size;
+		if (leaf_end <= io_address || leaf_start >= end) continue;
+		additions += (old[i].size / controller->info.minimum_leaf_size) - 1u;
+	}
+	size_t capacity = space->leaf_count + additions;
+	if (capacity > SIZE_MAX / sizeof(*old)) return false;
+	struct mock_iommu_leaf* replacement = capacity == 0u ? NULL : malloc(capacity * sizeof(*replacement));
+	if (capacity != 0u && replacement == NULL) return false;
+	size_t count = 0u;
+	for (size_t i = 0u; i < space->leaf_count; i++) {
+		uint64_t leaf_start = old[i].io_address;
+		uint64_t leaf_end   = leaf_start + old[i].size;
+		if (leaf_end <= io_address || leaf_start >= end) {
+			replacement[count++] = old[i];
+			continue;
+		}
+		for (uint64_t part = leaf_start; part < leaf_end; part += controller->info.minimum_leaf_size) {
+			replacement[count++] = (struct mock_iommu_leaf){
+				part,
+				old[i].physical_address + (uintptr_t)(part - leaf_start),
+				controller->info.minimum_leaf_size,
+				part >= io_address && part < end ? access : old[i].access,
+			};
+		}
+	}
+	qsort(replacement, count, sizeof(*replacement), mock_leaf_compare);
+	free(old);
+	space->leaves     = replacement;
+	space->leaf_count = count;
 	controller->invalidations++;
 	return true;
 }

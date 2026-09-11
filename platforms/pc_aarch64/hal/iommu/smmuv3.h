@@ -28,6 +28,10 @@ bool aarch64_smmuv3_map(struct hal_iommu_controller_state* controller, struct ha
 bool aarch64_smmuv3_unmap(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
                           uint64_t io_address, size_t size);
 
+/* Change permissions on an I/O address range for an Arm SMMUv3. */
+bool aarch64_smmuv3_protect(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
+                            uint64_t io_address, size_t size, uint64_t access);
+
 /* Attach a hardware stream to an Arm SMMUv3 translation space. */
 bool aarch64_smmuv3_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
                            uint32_t source_id, struct hal_iommu_attachment_state* attachment);

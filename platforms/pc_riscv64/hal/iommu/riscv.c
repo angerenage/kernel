@@ -398,6 +398,16 @@ bool riscv_iommu_unmap(struct hal_iommu_controller_state* c, struct hal_iommu_sp
 	return ok;
 }
 
+bool riscv_iommu_protect(struct hal_iommu_controller_state* c, struct hal_iommu_space_state* space, uint64_t io_address,
+                         size_t size, uint64_t access) {
+	if (c == NULL || !c->initialized || space == NULL || space->table.controller_identity != (uintptr_t)c) return false;
+	ri_lock(c);
+	struct iommu_pt_format f  = ri_format(c);
+	bool                   ok = iommu_pt_protect(&f, space, io_address, size, access, ri_sync, c);
+	ri_unlock(c);
+	return ok;
+}
+
 bool riscv_iommu_attach(struct hal_iommu_controller_state* c, struct hal_iommu_space_state* space, uint32_t source_id,
                         struct hal_iommu_attachment_state* attachment) {
 	if (!ri_source_valid(c, source_id) || space == NULL || !space->table.initialized ||

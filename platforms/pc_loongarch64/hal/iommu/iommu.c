@@ -91,6 +91,11 @@ bool hal_iommu_unmap(struct hal_iommu_controller_state* controller, struct hal_i
 	return loongarch_iommu_v1_unmap(controller, space, io_address, size);
 }
 
+bool hal_iommu_protect(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
+                       uint64_t io_address, size_t size, uint64_t access) {
+	return loongarch_iommu_v1_protect(controller, space, io_address, size, access);
+}
+
 bool hal_iommu_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
                       uint32_t source_id, struct hal_iommu_attachment_state* attachment) {
 	return loongarch_iommu_v1_attach(controller, space, source_id, attachment);

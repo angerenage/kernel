@@ -367,6 +367,19 @@ bool aarch64_smmuv3_unmap(struct hal_iommu_controller_state* controller, struct 
 	return ok;
 }
 
+bool aarch64_smmuv3_protect(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
+                            uint64_t io_address, size_t size, uint64_t access) {
+	if (controller == NULL || !controller->initialized || space == NULL ||
+	    space->table.controller_identity != (uintptr_t)controller)
+		return false;
+	smmu_lock(controller);
+	struct iommu_pt_format format = smmu_format(controller);
+	bool                   ok =
+		iommu_pt_protect(&format, space, io_address, size, access, smmu_sync, controller) && controller->initialized;
+	smmu_unlock(controller);
+	return ok;
+}
+
 bool aarch64_smmuv3_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
                            uint32_t source_id, struct hal_iommu_attachment_state* attachment) {
 	if (!smmu_source_valid(controller, source_id) || space == NULL || !space->table.initialized ||

@@ -283,6 +283,19 @@ bool x86_vtd_unmap(struct hal_iommu_controller_state* controller, struct hal_iom
 	return ok;
 }
 
+bool x86_vtd_protect(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
+                     uint64_t io_address, size_t size, uint64_t access) {
+	if (controller == NULL || !controller->initialized || space == NULL ||
+	    space->table.controller_identity != (uintptr_t)controller)
+		return false;
+	vtd_lock(controller);
+	struct iommu_pt_format format = vtd_format(controller);
+	bool                   ok =
+		iommu_pt_protect(&format, space, io_address, size, access, vtd_sync, controller) && controller->initialized;
+	vtd_unlock(controller);
+	return ok;
+}
+
 bool x86_vtd_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
                     uint32_t source_id, struct hal_iommu_attachment_state* attachment) {
 	if (!vtd_source_valid(controller, source_id) || space == NULL || !space->table.initialized ||

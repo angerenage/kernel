@@ -254,6 +254,10 @@ bool hal_iommu_map(struct hal_iommu_controller_state* controller, struct hal_iom
 bool hal_iommu_unmap(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
                      uint64_t io_address, size_t size);
 
+/* Change permissions on one completely translated I/O range transactionally. */
+bool hal_iommu_protect(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
+                       uint64_t io_address, size_t size, uint64_t access);
+
 /* Attach one local hardware source to a translation space. */
 bool hal_iommu_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
                       uint32_t source_id, struct hal_iommu_attachment_state* attachment);
