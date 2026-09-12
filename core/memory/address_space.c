@@ -675,12 +675,88 @@ static bool find_placement(struct address_space* space, size_t size, size_t alig
 	}
 }
 
+static struct mapping* mapping_create(const struct address_space_mapping_request* request, size_t size) {
+	struct mapping* mapping = mapping_alloc();
+	if (mapping == NULL) return NULL;
+	mapping->reference_count = 2u;
+	if (!memory_retain(request->memory)) {
+		mapping->reference_count = 1u;
+		mapping_release(mapping);
+		return NULL;
+	}
+	mapping->memory       = request->memory;
+	mapping->size         = size;
+	mapping->guard_before = request->guard_before;
+	mapping->guard_after  = request->guard_after;
+	mapping->memory_type  = memory_type(request->memory);
+	mapping->access       = request->access;
+	return mapping;
+}
+
+static void mapping_discard(struct mapping* mapping) {
+	struct memory* memory;
+	if (mapping == NULL) return;
+	memory          = mapping->memory;
+	mapping->memory = NULL;
+	if (memory != NULL) memory_release(memory);
+	mapping_release(mapping);
+	mapping_release(mapping);
+}
+
+static bool mapping_place_locked(struct address_space* space, struct mapping* mapping, uintptr_t requested_address,
+                                 size_t alignment) {
+	struct mapping *previous = NULL, *next = NULL;
+	uintptr_t       address, start, end;
+	if (requested_address == 0u) {
+		if (!find_placement(space,
+		                    mapping->size,
+		                    alignment,
+		                    mapping->guard_before,
+		                    mapping->guard_after,
+		                    &address,
+		                    &previous,
+		                    &next))
+			return false;
+	}
+	else {
+		address = requested_address;
+		if (!placement_geometry(address, mapping->size, mapping->guard_before, mapping->guard_after, &start, &end) ||
+		    start < space->base || end > space->end)
+			return false;
+		next = lower_bound(space, start, &previous);
+		if ((previous != NULL && reserved_end(previous) > start) || (next != NULL && reserved_start(next) < end))
+			return false;
+	}
+	mapping->address  = address;
+	mapping->owner    = space;
+	mapping->previous = previous;
+	mapping->next     = next;
+	if (previous != NULL) previous->next = mapping;
+	else space->mapping_first = mapping;
+	if (next != NULL) next->previous = mapping;
+	else space->mapping_last = mapping;
+	tree_insert(space, mapping);
+	space->mapping_count++;
+	return true;
+}
+
+static void mapping_remove_locked(struct address_space* space, struct mapping* mapping) {
+	tree_remove(space, mapping);
+	if (mapping->previous != NULL) mapping->previous->next = mapping->next;
+	else space->mapping_first = mapping->next;
+	if (mapping->next != NULL) mapping->next->previous = mapping->previous;
+	else space->mapping_last = mapping->previous;
+	space->mapping_count--;
+	mapping->owner    = NULL;
+	mapping->previous = NULL;
+	mapping->next     = NULL;
+}
+
 bool address_space_map(struct address_space* space, const struct address_space_mapping_request* request,
                        struct mapping** out_mapping) {
-	struct mapping * mapping, *previous = NULL, *next = NULL;
+	struct mapping*  mapping;
 	struct irq_state state;
 	size_t           size, granule, alignment;
-	uintptr_t        address, start, end;
 	if (out_mapping != NULL) *out_mapping = NULL;
 	if (!initialized || !address_space_is_initialized(space) || request == NULL || request->memory == NULL ||
 	    out_mapping == NULL)
@@ -708,61 +784,17 @@ bool address_space_map(struct address_space* space, const struct address_space_m
 			return false;
 		if (request->access != 0u && !device_materialize_memory(request->memory, size, granule, maximum_address))
 			return false;
-		mapping = mapping_alloc();
-		if (mapping == NULL || !memory_retain(request->memory)) {
-			if (mapping != NULL) {
-				mapping->reference_count = 1u;
-				mapping_release(mapping);
-			}
-			return false;
-		}
-		mapping->memory          = request->memory;
-		mapping->size            = size;
-		mapping->guard_before    = request->guard_before;
-		mapping->guard_after     = request->guard_after;
-		mapping->memory_type     = memory_type(request->memory);
-		mapping->access          = request->access;
-		mapping->reference_count = 2u;
-		state                    = spinlock_lock_irqsave(&space->lock);
-		if (!address_space_is_initialized(space)) goto device_fail_locked;
-		if (request->address == 0u) {
-			if (!find_placement(
-					space, size, alignment, request->guard_before, request->guard_after, &address, &previous, &next))
-				goto device_fail_locked;
-		}
-		else {
-			address = request->address;
-			if (!placement_geometry(address, size, request->guard_before, request->guard_after, &start, &end) ||
-			    start < space->base || end > space->end)
-				goto device_fail_locked;
-			next = lower_bound(space, start, &previous);
-			if ((previous != NULL && reserved_end(previous) > start) || (next != NULL && reserved_start(next) < end))
-				goto device_fail_locked;
-		}
-		mapping->address  = address;
-		mapping->owner    = space;
-		mapping->previous = previous;
-		mapping->next     = next;
-		if (previous != NULL) previous->next = mapping;
-		else space->mapping_first = mapping;
-		if (next != NULL) next->previous = mapping;
-		else space->mapping_last = mapping;
-		tree_insert(space, mapping);
-		space->mapping_count++;
+		mapping = mapping_create(request, size);
+		if (mapping == NULL) return false;
+		state = spinlock_lock_irqsave(&space->lock);
+		if (!address_space_is_initialized(space) || !mapping_place_locked(space, mapping, request->address, alignment))
+			goto device_fail_locked;
 		if (request->access != 0u && !device_map_projection_locked(space, mapping, request->access, &mapped)) {
 			if (mapped != 0u && !hal_iommu_unmap(controller, &space->backend.device.hal, mapping->address, mapped))
 				hcf();
-			tree_remove(space, mapping);
-			if (mapping->previous != NULL) mapping->previous->next = mapping->next;
-			else space->mapping_first = mapping->next;
-			if (mapping->next != NULL) mapping->next->previous = mapping->previous;
-			else space->mapping_last = mapping->previous;
-			space->mapping_count--;
+			mapping_remove_locked(space, mapping);
 			spinlock_unlock_irqrestore(&space->lock, state);
-			memory_release(request->memory);
-			mapping->memory = NULL;
-			mapping_release(mapping);
-			mapping_release(mapping);
+			mapping_discard(mapping);
 			return false;
 		}
 		spinlock_unlock_irqrestore(&space->lock, state);
@@ -770,10 +802,7 @@ bool address_space_map(struct address_space* space, const struct address_space_m
 		return true;
 	device_fail_locked:
 		spinlock_unlock_irqrestore(&space->lock, state);
-		memory_release(request->memory);
-		mapping->memory = NULL;
-		mapping_release(mapping);
-		mapping_release(mapping);
+		mapping_discard(mapping);
 		return false;
 	}
 	if (((request->access & MEMORY_ACCESS_EXEC) != 0u &&
@@ -781,56 +810,17 @@ bool address_space_map(struct address_space* space, const struct address_space_m
 	    (request->access != 0u && !hal_paging_mapping_supported(address_space_paging_flags(space, request->access),
 	                                                            memory_type(request->memory))))
 		return false;
-	mapping = mapping_alloc();
-	if (mapping == NULL || !memory_retain(request->memory)) {
-		if (mapping != NULL) {
-			mapping->reference_count = 1u;
-			mapping_release(mapping);
-		}
-		return false;
-	}
-	mapping->memory          = request->memory;
-	mapping->size            = size;
-	mapping->guard_before    = request->guard_before;
-	mapping->guard_after     = request->guard_after;
-	mapping->memory_type     = memory_type(request->memory);
-	mapping->access          = request->access;
-	mapping->reference_count = 2u;
-	state                    = spinlock_lock_irqsave(&space->lock);
-	if (!address_space_is_initialized(space)) goto fail_locked;
-	if (request->address == 0u) {
-		if (!find_placement(
-				space, size, alignment, request->guard_before, request->guard_after, &address, &previous, &next))
-			goto fail_locked;
-	}
-	else {
-		address = request->address;
-		if (!placement_geometry(address, size, request->guard_before, request->guard_after, &start, &end) ||
-		    start < space->base || end > space->end)
-			goto fail_locked;
-		next = lower_bound(space, start, &previous);
-		if ((previous != NULL && reserved_end(previous) > start) || (next != NULL && reserved_start(next) < end))
-			goto fail_locked;
-	}
-	mapping->address  = address;
-	mapping->owner    = space;
-	mapping->previous = previous;
-	mapping->next     = next;
-	if (previous != NULL) previous->next = mapping;
-	else space->mapping_first = mapping;
-	if (next != NULL) next->previous = mapping;
-	else space->mapping_last = mapping;
-	tree_insert(space, mapping);
-	space->mapping_count++;
+	mapping = mapping_create(request, size);
+	if (mapping == NULL) return false;
+	state = spinlock_lock_irqsave(&space->lock);
+	if (!address_space_is_initialized(space) || !mapping_place_locked(space, mapping, request->address, alignment))
+		goto fail_locked;
 	spinlock_unlock_irqrestore(&space->lock, state);
 	*out_mapping = mapping;
 	return true;
 fail_locked:
 	spinlock_unlock_irqrestore(&space->lock, state);
-	memory_release(request->memory);
-	mapping->memory = NULL;
-	mapping_release(mapping);
-	mapping_release(mapping);
+	mapping_discard(mapping);
 	return false;
 }
 
@@ -861,16 +851,9 @@ bool address_space_unmap(struct address_space* space, struct mapping* mapping) {
 		spinlock_unlock_irqrestore(&space->lock, state);
 		return false;
 	}
-	tree_remove(space, mapping);
-	if (mapping->previous != NULL) mapping->previous->next = mapping->next;
-	else space->mapping_first = mapping->next;
-	if (mapping->next != NULL) mapping->next->previous = mapping->previous;
-	else space->mapping_last = mapping->previous;
-	space->mapping_count--;
-	memory            = mapping->memory;
-	mapping->memory   = NULL;
-	mapping->owner    = NULL;
-	mapping->previous = mapping->next = NULL;
+	mapping_remove_locked(space, mapping);
+	memory          = mapping->memory;
+	mapping->memory = NULL;
 	spinlock_unlock_irqrestore(&space->lock, state);
 	memory_release(memory);
 	mapping_release(mapping);

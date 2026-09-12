@@ -10,6 +10,8 @@ platform_userspace_c_args += [
 ]
 
 platform_kernel_objects += [
+	files('../paging_transaction.c'),
+	files('../iommu_page_table.c'),
 	clang_aarch64_elf.process(files('entry.asm')),
 	clang_aarch64_elf.process(files('interrupts.asm')),
 	clang_aarch64_elf.process(files('hal/userspace.asm')),
