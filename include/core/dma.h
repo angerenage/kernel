@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 struct address_space;
+struct mapping;
 struct dma_binding;
 
 /* Discover the available IOMMU controllers for DMA. */
@@ -15,6 +16,10 @@ bool dma_source_resolve(uint64_t controller_register_address, uint32_t local_sou
 
 /* Create a device AddressSpace compatible with one DMA source. */
 bool dma_address_space_create(dma_source_t compatibility_source, struct address_space** out_space);
+
+/* Synchronize one aligned subrange of an active DEVICE Mapping. */
+bool dma_mapping_sync(struct address_space* device_space, struct mapping* mapping, size_t offset, size_t size,
+                      enum dma_sync_target target);
 
 /* Attach a DMA source to a device AddressSpace. */
 bool dma_bind(dma_source_t source, struct address_space* device_space, struct dma_binding** out_binding);

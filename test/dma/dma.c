@@ -10,17 +10,23 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-extern void hal_iommu_mock_set_discovered_controllers(const struct hal_iommu_controller_descriptor* descriptors,
-                                                      size_t                                        count);
-extern void hal_iommu_mock_reset_discovered_controllers(void);
-extern void hal_iommu_mock_fail_map_after(size_t successful_maps);
-extern bool dma_test_init_pmm(void);
+extern void   hal_iommu_mock_set_discovered_controllers(const struct hal_iommu_controller_descriptor* descriptors,
+                                                        size_t                                        count);
+extern void   hal_iommu_mock_reset_discovered_controllers(void);
+extern void   hal_iommu_mock_fail_map_after(size_t successful_maps);
+extern bool   dma_test_init_pmm(void);
+extern void   mock_cache_reset(void);
+extern size_t mock_cache_dma_device_sync_count(void);
+extern size_t mock_cache_dma_cpu_sync_count(void);
+extern size_t mock_cache_dma_device_sync_bytes(void);
+extern size_t mock_cache_dma_cpu_sync_bytes(void);
 
 static void dma_test_prepare(void) {
 	cr_assert(dma_test_init_pmm(), "pmm_init failed");
 	if (!heap_is_initialized()) cr_assert(heap_init(), "heap_init failed");
 	cr_assert(address_space_init(), "address_space_init failed");
 	hal_iommu_mock_reset_discovered_controllers();
+	mock_cache_reset();
 }
 
 Test(dma, hal_iommu_controller_count_test) {
@@ -559,4 +565,74 @@ Test(dma, device_materialization_uses_iommu_granules) {
 	for (size_t i = 0u; i < held_count; i++)
 		if (held[i].size != 0u) cr_assert(pmm_free(held[i]));
 	for (size_t i = 0u; i < large_count; i++) cr_assert(pmm_free(large_blockers[i]));
+}
+
+Test(dma, mapping_sync_supports_aligned_subranges) {
+	dma_test_prepare();
+	cr_assert(dma_init());
+
+	dma_source_t source;
+	cr_assert(dma_source_resolve(0x1000u, 4u, &source));
+	struct address_space* space;
+	cr_assert(dma_address_space_create(source, &space));
+	size_t granule = address_space_minimum_mapping_size(space);
+	cr_assert_neq(granule, 0u);
+
+	struct memory* memory;
+	cr_assert(memory_create_anonymous(2u * granule, &memory));
+	cr_assert(memory_materialize(memory,
+	                             &(const struct memory_materialize_request){
+									 .offset             = 0u,
+									 .size               = granule,
+									 .alignment          = granule,
+									 .require_contiguous = true,
+								 }));
+	struct memory_span first;
+	cr_assert(memory_query(memory, 0u, granule, &first));
+	cr_assert_eq(first.kind, MEMORY_SPAN_PRESENT);
+	cr_assert_leq(first.physical_address, UINTPTR_MAX - 2u * granule);
+	cr_assert(memory_materialize(memory,
+	                             &(const struct memory_materialize_request){
+									 .offset             = granule,
+									 .size               = granule,
+									 .alignment          = granule,
+									 .minimum_address    = first.physical_address + 2u * granule,
+									 .require_contiguous = true,
+								 }));
+	struct memory_span second;
+	cr_assert(memory_query(memory, granule, granule, &second));
+	cr_assert_eq(second.kind, MEMORY_SPAN_PRESENT);
+	cr_assert_neq(second.physical_address, first.physical_address + granule);
+
+	struct mapping* mapping;
+	cr_assert(address_space_map(space,
+	                            &(const struct address_space_mapping_request){
+									.memory = memory, .access = MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE},
+	                            &mapping));
+
+	mock_cache_reset();
+	cr_assert(dma_mapping_sync(space, mapping, 0u, 2u * granule, DMA_SYNC_FOR_DEVICE));
+	cr_assert_eq(mock_cache_dma_device_sync_count(), 2u);
+	cr_assert_eq(mock_cache_dma_device_sync_bytes(), 2u * granule);
+	cr_assert_eq(mock_cache_dma_cpu_sync_count(), 0u);
+
+	mock_cache_reset();
+	cr_assert(dma_mapping_sync(space, mapping, granule, granule, DMA_SYNC_FOR_CPU));
+	cr_assert_eq(mock_cache_dma_cpu_sync_count(), 1u);
+	cr_assert_eq(mock_cache_dma_cpu_sync_bytes(), granule);
+	cr_assert_eq(mock_cache_dma_device_sync_count(), 0u);
+
+	cr_assert_not(dma_mapping_sync(space, mapping, 1u, granule, DMA_SYNC_FOR_CPU));
+	cr_assert_not(dma_mapping_sync(space, mapping, 0u, granule - 1u, DMA_SYNC_FOR_CPU));
+	cr_assert_not(dma_mapping_sync(space, mapping, 0u, 0u, DMA_SYNC_FOR_CPU));
+	cr_assert_not(dma_mapping_sync(space, mapping, 2u * granule, granule, DMA_SYNC_FOR_CPU));
+	cr_assert_not(dma_mapping_sync(space, mapping, 0u, granule, (enum dma_sync_target)99u));
+
+	cr_assert(address_space_protect(space, mapping, 0u));
+	cr_assert_not(dma_mapping_sync(space, mapping, 0u, granule, DMA_SYNC_FOR_DEVICE));
+
+	cr_assert(address_space_unmap(space, mapping));
+	mapping_release(mapping);
+	memory_release(memory);
+	address_space_device_release(space);
 }

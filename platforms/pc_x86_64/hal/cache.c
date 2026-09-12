@@ -29,6 +29,22 @@ static void x86_cache_serialize_local(void) {
 	__asm__ volatile("cpuid" : "+a"(eax), "=b"(ebx), "+c"(ecx), "=d"(edx) : : "memory");
 }
 
+bool hal_cache_sync_for_device(void* address, size_t size) {
+	if (address == NULL && size != 0u) return false;
+	(void)address;
+	(void)size;
+	x86_cache_serialize_local();
+	return true;
+}
+
+bool hal_cache_sync_for_cpu(void* address, size_t size) {
+	if (address == NULL && size != 0u) return false;
+	(void)address;
+	(void)size;
+	x86_cache_serialize_local();
+	return true;
+}
+
 void hal_cache_sync_executable_range(void* address, size_t size) {
 	(void)address;
 	(void)size;

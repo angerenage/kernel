@@ -1,13 +1,16 @@
 #include <base/dma.h>
 #include <core/address_space.h>
 #include <core/dma.h>
+#include <core/memory.h>
 #include <core/mm.h>
 #include <core/pmm.h>
+#include <hal/cache.h>
 #include <hal/hcf.h>
 #include <libc/stdlib.h>
 #include <libc/string.h>
 
 #include "dma_internal.h"
+#include "memory/address_space_internal.h"
 
 struct dma_binding {
 	uint64_t                          reference_count;
@@ -265,6 +268,72 @@ static bool dma_controller_acquire_context(uint32_t controller_index, uint32_t* 
 		free(retired);
 		free(replacement);
 	}
+}
+
+static bool dma_cache_sync_range(enum dma_sync_target target, void* address, size_t size) {
+	switch (target) {
+	case DMA_SYNC_FOR_DEVICE:
+		return hal_cache_sync_for_device(address, size);
+	case DMA_SYNC_FOR_CPU:
+		return hal_cache_sync_for_cpu(address, size);
+	}
+	return false;
+}
+
+bool dma_mapping_sync(struct address_space* device_space, struct mapping* mapping, size_t offset, size_t size,
+                      enum dma_sync_target target) {
+	struct memory* memory;
+	size_t         mapping_size;
+	size_t         granule;
+	size_t         end;
+	size_t         cursor;
+	bool           result = false;
+
+	if (!dma_initialized || device_space == NULL || mapping == NULL || size == 0u ||
+	    (target != DMA_SYNC_FOR_DEVICE && target != DMA_SYNC_FOR_CPU) || !address_space_device_retain(device_space))
+		return false;
+
+	struct irq_state state = spinlock_lock_irqsave(&device_space->lock);
+	granule                = address_space_minimum_mapping_size(device_space);
+	mapping_size           = mapping->size;
+	if (!address_space_is_initialized(device_space) || device_space->kind != ADDRESS_SPACE_KIND_DEVICE ||
+	    mapping->owner != device_space || mapping->memory == NULL || mapping->access == 0u || granule == 0u ||
+	    (offset & (granule - 1u)) != 0u || (size & (granule - 1u)) != 0u || offset > mapping_size ||
+	    size > mapping_size - offset || !memory_retain(mapping->memory)) {
+		spinlock_unlock_irqrestore(&device_space->lock, state);
+		address_space_device_release(device_space);
+		return false;
+	}
+	memory = mapping->memory;
+	end    = offset + size;
+	spinlock_unlock_irqrestore(&device_space->lock, state);
+	address_space_device_release(device_space);
+
+	if (!memory_can_transfer(memory)) goto done;
+
+	cursor = offset;
+	while (cursor < end) {
+		struct memory_span span;
+		if (!memory_query(memory, cursor, end - cursor, &span) || span.kind != MEMORY_SPAN_PRESENT || span.size == 0u ||
+		    span.size > end - cursor || span.physical_address > UINTPTR_MAX - boot_info.direct_map_offset)
+			goto done;
+		cursor += span.size;
+	}
+
+	cursor = offset;
+	while (cursor < end) {
+		struct memory_span span;
+		if (!memory_query(memory, cursor, end - cursor, &span) || span.kind != MEMORY_SPAN_PRESENT || span.size == 0u ||
+		    span.size > end - cursor)
+			goto done;
+		if (!dma_cache_sync_range(target, physical_to_virtual(span.physical_address), span.size)) goto done;
+		cursor += span.size;
+	}
+	result = true;
+
+done:
+	memory_release(memory);
+	return result;
 }
 
 bool dma_source_resolve(uint64_t controller_register_address, uint32_t local_source_id, dma_source_t* out_source) {

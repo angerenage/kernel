@@ -19,6 +19,44 @@ static uint64_t                          aarch64_cache_ack[AARCH64_CACHE_MAX_CPU
 static struct spinlock                   aarch64_cache_sync_lock =
 	SPINLOCK_INIT_CLASS("cache_sync_lock", SPINLOCK_ORDER_NONE, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
 
+static size_t aarch64_data_cache_line_size(void) {
+	uint64_t ctr;
+	__asm__ volatile("mrs %0, ctr_el0" : "=r"(ctr));
+	return (size_t)4u << ((ctr >> 16u) & 0xfu);
+}
+
+static bool aarch64_cache_sync_dma_range(void* address, size_t size, bool for_device) {
+	uintptr_t start = (uintptr_t)address;
+	uintptr_t first;
+	uintptr_t end;
+	uintptr_t limit;
+	size_t    line;
+	if (size == 0u) return true;
+	if (address == NULL || size > UINTPTR_MAX - start) return false;
+	line = aarch64_data_cache_line_size();
+	if (line == 0u || (line & (line - 1u)) != 0u) return false;
+	end   = start + size;
+	first = start & ~((uintptr_t)line - 1u);
+	if (end > UINTPTR_MAX - (line - 1u)) return false;
+	limit = (end + line - 1u) & ~((uintptr_t)line - 1u);
+
+	__asm__ volatile("dsb sy" : : : "memory");
+	for (uintptr_t current = first; current < limit; current += line) {
+		if (for_device) __asm__ volatile("dc civac, %0" : : "r"(current) : "memory");
+		else __asm__ volatile("dc ivac, %0" : : "r"(current) : "memory");
+	}
+	__asm__ volatile("dsb sy" : : : "memory");
+	return true;
+}
+
+bool hal_cache_sync_for_device(void* address, size_t size) {
+	return aarch64_cache_sync_dma_range(address, size, true);
+}
+
+bool hal_cache_sync_for_cpu(void* address, size_t size) {
+	return aarch64_cache_sync_dma_range(address, size, false);
+}
+
 void hal_cache_sync_executable_range(void* address, size_t size) {
 	uint64_t  ctr;
 	uintptr_t start = (uintptr_t)address;

@@ -2,6 +2,24 @@
 #include <hal/cache.h>
 #include <hal/hcf.h>
 
+bool hal_cache_sync_for_device(void* address, size_t size) {
+	if (size == 0u) return true;
+	if (address == NULL) return false;
+	(void)address;
+	/* DBAR orders accesses but is not a substitute for data-cache maintenance on non-coherent DMA. */
+	__asm__ volatile("dbar 0" : : : "memory");
+	return false;
+}
+
+bool hal_cache_sync_for_cpu(void* address, size_t size) {
+	if (size == 0u) return true;
+	if (address == NULL) return false;
+	(void)address;
+	/* Keep this unsupported until cache geometry and CACOP-based range maintenance are explicit. */
+	__asm__ volatile("dbar 0" : : : "memory");
+	return false;
+}
+
 void hal_cache_sync_executable_range(void* address, size_t size) {
 	(void)address;
 	(void)size;
