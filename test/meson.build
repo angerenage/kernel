@@ -433,9 +433,18 @@ test_suites = [
 	{
 		'name': 'iommu',
 		'sources': files(
-			'iommu/contract.c',
+			'dma/iommu.c',
 		),
 		'suites': ['unit', 'hal'],
+	},
+	{
+		'name': 'dma',
+		'sources': files(
+			'dma/test_support.c',
+			'dma/dma.c',
+		),
+		'link_with': core_test_lib,
+		'suites': ['unit', 'core'],
 	},
 ]
 

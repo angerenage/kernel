@@ -41,7 +41,7 @@ static enum address_transfer_result locate_locked(struct address_space* space, u
 	if (out_mapping != NULL) *out_mapping = NULL;
 	if (out_memory_offset != NULL) *out_memory_offset = 0u;
 	if (out_chunk != NULL) *out_chunk = 0u;
-	if (!address_space_is_initialized(space) ||
+	if (!address_space_is_initialized(space) || address_space_kind(space) != ADDRESS_SPACE_KIND_PROCESS ||
 	    (access & ~(ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_EXEC | ADDRESS_TRANSFER_USER |
 	                ADDRESS_TRANSFER_PRESENT | ADDRESS_TRANSFER_FAULT_IN)) != 0u ||
 	    ((access & ADDRESS_TRANSFER_PRESENT) != 0u && (access & ADDRESS_TRANSFER_FAULT_IN) != 0u))
@@ -56,9 +56,9 @@ static enum address_transfer_result locate_locked(struct address_space* space, u
 		if (granule == 0u) return ADDRESS_TRANSFER_FAULT_FAILED;
 		size_t    offset = (size_t)(address - mapping->address) & ~(granule - 1u);
 		uintptr_t leaf   = mapping->address + offset;
-		if (!hal_paging_query(space->hal, leaf, NULL)) {
+		if (!hal_paging_query(space->backend.process.hal, leaf, NULL)) {
 			if ((access & ADDRESS_TRANSFER_PRESENT) != 0u) return ADDRESS_TRANSFER_NOT_MAPPED;
-			if (!address_space_resolve_locked(space, mapping, offset)) return ADDRESS_TRANSFER_FAULT_FAILED;
+			if (!address_space_resolve_process_locked(space, mapping, offset)) return ADDRESS_TRANSFER_FAULT_FAILED;
 		}
 	}
 	mapping_end = mapping->address + mapping->size;

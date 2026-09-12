@@ -40,7 +40,7 @@ static bool uthread_map_stack(struct address_space* space, size_t requested_size
                               struct mapping** out_mapping, void** out_base) {
 	struct memory*  memory;
 	struct mapping* mapping;
-	size_t          granule = address_space_minimum_mapping_size();
+	size_t          granule = address_space_minimum_mapping_size(space);
 	size_t          size, guard;
 	if (granule == 0u || !align_up_size(requested_size, granule, &size) || !memory_create_anonymous(size, &memory))
 		return false;

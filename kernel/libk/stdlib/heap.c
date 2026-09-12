@@ -15,7 +15,7 @@ bool heap_grow_region(size_t minimum_size, void** out_base, size_t* out_size) {
 	struct mapping* mapping;
 	if (out_base != NULL) *out_base = NULL;
 	if (out_size != NULL) *out_size = 0u;
-	size_t granule = address_space_minimum_mapping_size();
+	size_t granule = address_space_minimum_mapping_size(address_space_kernel());
 	size_t size;
 	if (out_base == NULL || out_size == NULL || granule == 0u || !align_up_size(minimum_size, granule, &size) ||
 	    !memory_create_anonymous(size, &memory))
@@ -42,7 +42,7 @@ bool heap_grow_region(size_t minimum_size, void** out_base, size_t* out_size) {
 }
 
 size_t heap_growth_granule(void) {
-	return address_space_minimum_mapping_size();
+	return address_space_minimum_mapping_size(address_space_kernel());
 }
 
 void heap_lock(void) {

@@ -3,6 +3,7 @@
 #include <core/address_space.h>
 #include <core/capability.h>
 #include <core/cpu.h>
+#include <core/dma.h>
 #include <core/kthread.h>
 #include <core/mm.h>
 #include <core/pmm.h>
@@ -230,6 +231,10 @@ static void kernel_init_memory(const struct mem_range* memory_map, size_t range_
 
 	if (!heap_init()) {
 		boot_fail("kernel: heap_init failed");
+	}
+
+	if (!dma_init()) {
+		boot_fail("kernel: dma_init failed");
 	}
 }
 

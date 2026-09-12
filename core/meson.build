@@ -28,4 +28,5 @@ core_sources = files(
 	'memory/memory_backing.c',
 	'memory/memory.c',
 	'memory/address_space.c',
+	'dma.c',
 )

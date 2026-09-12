@@ -31,7 +31,7 @@ static syscall_result_t address_space_info_handler(const struct cap_request* req
 		.kind                 = ADDRESS_SPACE_KIND_PROCESS,
 		.minimum_address      = space->base,
 		.maximum_address      = space->end,
-		.minimum_mapping_size = address_space_minimum_mapping_size(),
+		.minimum_mapping_size = address_space_minimum_mapping_size(space),
 	};
 	return cap_kernel_write_response(req, &response, sizeof(response));
 }

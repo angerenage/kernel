@@ -153,6 +153,16 @@ static void kernel_selftest_iommu_exercise_controller(struct kernel_selftest_con
 		ctx, hal_iommu_map(&controller, &space, &request), "minimum-leaf map failed", cleanup);
 	mapping_exists = true;
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !hal_iommu_map(&controller, &space, &request), cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+	                                hal_iommu_protect(&controller, &space, io_address, map_size, HAL_IOMMU_READ),
+	                                "minimum-leaf protect failed",
+	                                cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+		ctx,
+		hal_iommu_protect(&controller, &space, io_address, map_size, HAL_IOMMU_READ | HAL_IOMMU_WRITE),
+		"minimum-leaf reprotect failed",
+		cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !hal_iommu_protect(&controller, &space, io_address, map_size, 0u), cleanup);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
 		ctx, hal_iommu_unmap(&controller, &space, io_address, map_size), "minimum-leaf unmap failed", cleanup);
 	mapping_exists = false;
@@ -173,6 +183,12 @@ static void kernel_selftest_iommu_exercise_controller(struct kernel_selftest_con
 		KERNEL_SELFTEST_ASSERT_MSG_GOTO(
 			ctx, hal_iommu_map(&controller, &space, &request), "large-leaf map failed", cleanup);
 		mapping_exists = true;
+		KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+			ctx,
+			hal_iommu_protect(
+				&controller, &space, io_address, info.minimum_leaf_size, HAL_IOMMU_READ | HAL_IOMMU_WRITE),
+			"partial large-leaf protect failed",
+			cleanup);
 		KERNEL_SELFTEST_ASSERT_MSG_GOTO(
 			ctx,
 			hal_iommu_unmap(&controller, &space, io_address + info.minimum_leaf_size, info.minimum_leaf_size),

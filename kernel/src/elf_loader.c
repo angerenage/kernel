@@ -139,7 +139,7 @@ static enum kernel_elf_load_result kernel_elf_load_segment(struct process*      
 	struct address_space* space;
 	uintptr_t             map_base;
 	size_t                mapping_size;
-	size_t                granule      = address_space_minimum_mapping_size();
+	size_t                granule;
 	struct mapping*       mapping      = NULL;
 	struct memory*        memory       = NULL;
 	memory_access_t       final_access = kernel_elf_segment_access(phdr->flags);
@@ -148,6 +148,8 @@ static enum kernel_elf_load_result kernel_elf_load_segment(struct process*      
 	if (phdr->filesz > phdr->memsz) return KERNEL_ELF_LOAD_BAD_FORMAT;
 	if (phdr->memsz == 0u) return KERNEL_ELF_LOAD_OK;
 	if (!kernel_elf_range_in_module(module->size, phdr->offset, phdr->filesz)) return KERNEL_ELF_LOAD_BAD_FORMAT;
+	space   = process_address_space(process);
+	granule = address_space_minimum_mapping_size(space);
 	if (!kernel_elf_mapping_range(phdr->vaddr, phdr->memsz, granule, &map_base, &mapping_size)) {
 		return KERNEL_ELF_LOAD_BAD_FORMAT;
 	}
@@ -156,7 +158,6 @@ static enum kernel_elf_load_result kernel_elf_load_segment(struct process*      
 		return KERNEL_ELF_LOAD_UNSUPPORTED;
 	}
 
-	space = process_address_space(process);
 	if (!memory_create_anonymous(mapping_size, &memory)) return KERNEL_ELF_LOAD_MAP_FAILED;
 	if (!address_space_map(space,
 	                       &(const struct address_space_mapping_request){
@@ -198,7 +199,7 @@ static enum kernel_elf_load_result kernel_elf_allocate_initial_heap(struct proce
 	struct memory*  memory;
 
 	if (process == NULL || out_base == NULL || out_size == NULL) return KERNEL_ELF_LOAD_INVALID_ARGUMENTS;
-	size_t granule = address_space_minimum_mapping_size();
+	size_t granule = address_space_minimum_mapping_size(process_address_space(process));
 	size_t size;
 	if (granule == 0u || !align_up_size(HEAP_DEFAULT_GROW_SIZE, granule, &size) ||
 	    !memory_create_anonymous(size, &memory))

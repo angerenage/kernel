@@ -39,7 +39,7 @@ static bool boot_module_mapping_layout(const struct kernel_boot_module*   module
 	uintptr_t module_address;
 	uintptr_t physical_address;
 	size_t    mapped_size;
-	size_t    granule = address_space_minimum_mapping_size();
+	size_t    granule = address_space_minimum_mapping_size(address_space_kernel());
 
 	if (module == NULL || out_layout == NULL || granule == 0u) return false;
 	module_address = (uintptr_t)module->address;

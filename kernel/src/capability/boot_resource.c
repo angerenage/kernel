@@ -45,7 +45,7 @@ static bool external_mapping_layout(const void* address, size_t size, struct ext
 	uintptr_t virtual_address;
 	uintptr_t physical_address;
 	size_t    mapped_size;
-	size_t    granule = address_space_minimum_mapping_size();
+	size_t    granule = address_space_minimum_mapping_size(address_space_kernel());
 
 	if (address == NULL || size == 0u || out == NULL || granule == 0u) return false;
 	virtual_address = (uintptr_t)address;

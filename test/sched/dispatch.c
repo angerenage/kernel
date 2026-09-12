@@ -104,9 +104,8 @@ Test(sched, dispatch_activates_thread_address_space) {
 	struct address_space user_space = {
 		.base = 0x1000u,
 		.end  = 0x2000u,
-		.hal  = NULL,
 	};
-	user_space.hal                                = hal_paging_mock_space(0x4242000u);
+	user_space.backend.process.hal                = hal_paging_mock_space(0x4242000u);
 	const struct thread_create_params user_params = {
 		.name              = "user",
 		.entry             = sched_test_thread_entry,

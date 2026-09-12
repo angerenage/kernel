@@ -40,13 +40,13 @@ Test(exception_fault, user_not_present_fault_materializes_only_the_current_user_
 		address_space_handle_current_fault((uintptr_t)base, ADDRESS_SPACE_FAULT_NOT_PRESENT, MEMORY_ACCESS_READ, true),
 		"valid userspace lazy fault was not resolved");
 	cr_assert_eq(mock_paging_mapping_count(), 1u, "valid userspace fault did not materialize exactly one page");
-	cr_assert(hal_paging_query(address_space_hal(&user_space), (uintptr_t)base, NULL),
+	cr_assert(hal_paging_query(address_space_paging_space(&user_space), (uintptr_t)base, NULL),
 	          "faulted page was not mapped in the current user address space");
 
 	cpu_current_thread_store(cpu_current(), NULL);
 	cr_assert(address_space_unmap(&user_space, mapping));
 	mapping_release(mapping);
-	address_space_destroy(&user_space);
+	address_space_destroy_process(&user_space);
 	hal_cpu_local_bind(NULL);
 }
 
@@ -87,7 +87,7 @@ Test(exception_fault, user_fault_cannot_materialize_a_lazy_kernel_mapping) {
 	cpu_current_thread_store(cpu_current(), NULL);
 	cr_assert(address_space_unmap(address_space_kernel(), kernel_mapping));
 	mapping_release(kernel_mapping);
-	address_space_destroy(&user_space);
+	address_space_destroy_process(&user_space);
 	hal_cpu_local_bind(NULL);
 }
 
@@ -110,17 +110,17 @@ Test(exception_fault, forbidden_user_access_does_not_materialize_lazy_backing) {
 	free_before = pmm_free_size();
 	cr_assert_not(address_space_handle_current_fault(
 		(uintptr_t)base, ADDRESS_SPACE_FAULT_NOT_PRESENT, MEMORY_ACCESS_WRITE, true));
-	cr_assert_not(hal_paging_query(address_space_hal(&user_space), (uintptr_t)base, NULL));
+	cr_assert_not(hal_paging_query(address_space_paging_space(&user_space), (uintptr_t)base, NULL));
 	cr_assert_eq(pmm_free_size(), free_before, "a rejected write fault must not allocate physical backing");
 
 	cr_assert(
 		address_space_handle_current_fault((uintptr_t)base, ADDRESS_SPACE_FAULT_NOT_PRESENT, MEMORY_ACCESS_READ, true));
-	cr_assert(hal_paging_query(address_space_hal(&user_space), (uintptr_t)base, NULL),
+	cr_assert(hal_paging_query(address_space_paging_space(&user_space), (uintptr_t)base, NULL),
 	          "an allowed read fault must still materialize userspace lazy backing");
 
 	cpu_current_thread_store(cpu_current(), NULL);
 	cr_assert(address_space_unmap(&user_space, mapping));
 	mapping_release(mapping);
-	address_space_destroy(&user_space);
+	address_space_destroy_process(&user_space);
 	hal_cpu_local_bind(NULL);
 }

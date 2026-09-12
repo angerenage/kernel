@@ -25,8 +25,8 @@ struct mapping {
 /* Find the usable Mapping containing address while the AddressSpace is locked. */
 struct mapping* address_space_find_mapping_locked(struct address_space* space, uintptr_t address);
 
-/* Convert Mapping access into exact HAL flags derived for AddressSpace. */
-uint64_t address_space_hal_flags(const struct address_space* space, memory_access_t access);
+/* Convert Mapping access into exact paging flags for a PROCESS AddressSpace. */
+uint64_t address_space_paging_flags(const struct address_space* space, memory_access_t access);
 
-/* Resolve one minimum translation unit while the AddressSpace is locked. */
-bool address_space_resolve_locked(struct address_space* space, struct mapping* mapping, size_t offset);
+/* Resolve one minimum translation unit in a locked PROCESS AddressSpace. */
+bool address_space_resolve_process_locked(struct address_space* space, struct mapping* mapping, size_t offset);

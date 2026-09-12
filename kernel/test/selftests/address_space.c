@@ -10,7 +10,7 @@ static void kernel_selftest_address_space_demand_maps_and_releases(struct kernel
 	struct mapping*               mapping = NULL;
 	uintptr_t                     base    = 0u;
 	struct hal_paging_translation translation;
-	size_t                        granule = address_space_minimum_mapping_size();
+	size_t                        granule = address_space_minimum_mapping_size(address_space_kernel());
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
 	                                granule != 0u && granule <= SIZE_MAX / 2u &&
@@ -30,7 +30,8 @@ static void kernel_selftest_address_space_demand_maps_and_releases(struct kernel
 	                                cleanup);
 	base = mapping_address(mapping);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, base != 0u, cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !hal_paging_query(address_space_hal(address_space_kernel()), base, NULL), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(
+		ctx, !hal_paging_query(address_space_paging_space(address_space_kernel()), base, NULL), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(
 		ctx, !address_space_resolve_fault(address_space_kernel(), base - granule, MEMORY_ACCESS_READ), cleanup);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
@@ -38,12 +39,12 @@ static void kernel_selftest_address_space_demand_maps_and_releases(struct kernel
 	                                "fault resolution failed",
 	                                cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(
-		ctx, hal_paging_query(address_space_hal(address_space_kernel()), base, &translation), cleanup);
+		ctx, hal_paging_query(address_space_paging_space(address_space_kernel()), base, &translation), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, (translation.flags & HAL_PAGE_WRITE) != 0u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(
 		ctx, address_space_protect(address_space_kernel(), mapping, MEMORY_ACCESS_READ), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(
-		ctx, hal_paging_query(address_space_hal(address_space_kernel()), base, &translation), cleanup);
+		ctx, hal_paging_query(address_space_paging_space(address_space_kernel()), base, &translation), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, (translation.flags & HAL_PAGE_WRITE) == 0u, cleanup);
 
 cleanup:

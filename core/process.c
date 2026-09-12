@@ -337,7 +337,7 @@ enum process_result process_create(struct process** out_process, const char* nam
 
 	id_result = id_table_alloc(&process_table, process, &pid);
 	if (id_result != ID_TABLE_OK) {
-		address_space_destroy(&process->address_space);
+		address_space_destroy_process(&process->address_space);
 		free((void*)process->name);
 		free(process);
 		return id_result == ID_TABLE_NO_MEMORY ? PROCESS_NO_MEMORY : PROCESS_PID_EXHAUSTED;
@@ -506,7 +506,7 @@ enum process_detach_result process_detach(struct process* process) {
 static void process_finalize(struct process* process) {
 	(void)process_destroy_address_space_cap_object(process);
 	(void)process_destroy_cap_object(process);
-	address_space_destroy(&process->address_space);
+	address_space_destroy_process(&process->address_space);
 	process_channel_state_deinit(&process->channel_state);
 	free((void*)process->name);
 	memset(process, 0, sizeof(*process));

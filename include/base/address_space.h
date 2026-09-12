@@ -12,6 +12,7 @@ enum address_space_op {
 
 enum address_space_kind {
 	ADDRESS_SPACE_KIND_PROCESS = 0,
+	ADDRESS_SPACE_KIND_DEVICE,
 };
 
 /* Common header for AddressSpace requests. */

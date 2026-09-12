@@ -22,6 +22,8 @@ struct mock_iommu_source {
 static struct hal_iommu_controller_descriptor mock_discovered_controllers[MOCK_DISCOVERED_CONTROLLER_CAPACITY];
 static size_t                                 mock_discovered_controller_count;
 static bool                                   mock_discovery_initialized;
+static size_t                                 mock_map_successes;
+static size_t                                 mock_map_fail_after = SIZE_MAX;
 
 static struct hal_iommu_controller_descriptor mock_default_descriptor(uintptr_t           register_address,
                                                                       enum hal_iommu_kind kind) {
@@ -54,6 +56,13 @@ void hal_iommu_mock_set_discovered_controllers(const struct hal_iommu_controller
 
 void hal_iommu_mock_reset_discovered_controllers(void) {
 	mock_discovery_reset_defaults();
+	mock_map_successes  = 0u;
+	mock_map_fail_after = SIZE_MAX;
+}
+
+void hal_iommu_mock_fail_map_after(size_t successful_maps) {
+	mock_map_successes  = 0u;
+	mock_map_fail_after = successful_maps;
 }
 
 size_t hal_iommu_controller_count(void) {
@@ -191,6 +200,7 @@ bool hal_iommu_map(struct hal_iommu_controller_state* controller, struct hal_iom
 		uint64_t leaf_end = old[i].io_address + old[i].size;
 		if (request->io_address < leaf_end && old[i].io_address < end) return false;
 	}
+	if (mock_map_successes >= mock_map_fail_after) return false;
 	size_t additions = 0u;
 	for (uint64_t io = request->io_address; io < end;) {
 		size_t leaf_size = mock_largest_leaf(
@@ -216,6 +226,7 @@ bool hal_iommu_map(struct hal_iommu_controller_state* controller, struct hal_iom
 	space->leaf_count = count;
 	space->table.mapped_size += request->size;
 	controller->invalidations++;
+	mock_map_successes++;
 	return true;
 }
 

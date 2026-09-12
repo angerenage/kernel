@@ -239,7 +239,8 @@ Test(address_space, physical_zero_is_a_valid_backing) {
 		&zero));
 	cr_assert(map_memory(address_space_kernel(), zero, 0u, 0u, 0u, 0u, MEMORY_ACCESS_READ, &mapping));
 	cr_assert(address_space_resolve_fault(address_space_kernel(), mapping_address(mapping), MEMORY_ACCESS_READ));
-	cr_assert(hal_paging_query(address_space_hal(address_space_kernel()), mapping_address(mapping), &translation));
+	cr_assert(
+		hal_paging_query(address_space_paging_space(address_space_kernel()), mapping_address(mapping), &translation));
 	cr_assert_eq(translation.physical_address, 0u);
 	unmap_release(address_space_kernel(), mapping);
 	memory_release(zero);
@@ -258,10 +259,10 @@ Test(address_space, sparse_map_is_lazy_and_metadata_is_constant_size) {
 	cr_assert(map_memory(&space, memory, 0u, 0u, 0u, 0u, MEMORY_ACCESS_READ, &mapping));
 	cr_assert_leq(
 		before - pmm_free_size(), 3u * TEST_MAPPING_GRANULE, "a sparse Mapping allocated size-proportional metadata");
-	cr_assert_not(hal_paging_query(address_space_hal(&space), mapping_address(mapping), NULL));
+	cr_assert_not(hal_paging_query(address_space_paging_space(&space), mapping_address(mapping), NULL));
 	unmap_release(&space, mapping);
 	memory_release(memory);
-	address_space_destroy(&space);
+	address_space_destroy_process(&space);
 	cr_assert_eq(pmm_free_size(), before);
 }
 
@@ -337,13 +338,13 @@ Test(address_space, shared_memory_faults_reuse_backing) {
 	cr_assert(map_memory(&b, memory, 0u, 0u, 0u, 0u, MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE, &b_mapping));
 	cr_assert(address_space_resolve_fault(&a, mapping_address(a_mapping), MEMORY_ACCESS_WRITE));
 	cr_assert(address_space_resolve_fault(&b, mapping_address(b_mapping), MEMORY_ACCESS_READ));
-	cr_assert(hal_paging_query(address_space_hal(&a), mapping_address(a_mapping), &a_translation));
-	cr_assert(hal_paging_query(address_space_hal(&b), mapping_address(b_mapping), &b_translation));
+	cr_assert(hal_paging_query(address_space_paging_space(&a), mapping_address(a_mapping), &a_translation));
+	cr_assert(hal_paging_query(address_space_paging_space(&b), mapping_address(b_mapping), &b_translation));
 	cr_assert_eq(a_translation.physical_address, b_translation.physical_address);
 	unmap_release(&a, a_mapping);
 	unmap_release(&b, b_mapping);
-	address_space_destroy(&a);
-	address_space_destroy(&b);
+	address_space_destroy_process(&a);
+	address_space_destroy_process(&b);
 	memory_release(memory);
 }
 
@@ -355,15 +356,16 @@ Test(address_space, protect_none_preserves_contents_and_future_access) {
 	init_test_address_space(arena, sizeof(arena));
 	cr_assert(memory_create_anonymous(2u * TEST_MAPPING_GRANULE, &memory));
 	cr_assert(map_memory(address_space_kernel(), memory, 0u, 0u, 0u, 0u, 0u, &mapping));
-	cr_assert_not(hal_paging_query(address_space_hal(address_space_kernel()), mapping_address(mapping), NULL));
+	cr_assert_not(hal_paging_query(address_space_paging_space(address_space_kernel()), mapping_address(mapping), NULL));
 	cr_assert(address_space_protect(address_space_kernel(), mapping, MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE));
 	cr_assert(address_space_resolve_fault(address_space_kernel(), mapping_address(mapping), MEMORY_ACCESS_WRITE));
 	cr_assert(memory_write(memory, 0u, &value, sizeof(value)));
 	cr_assert(address_space_protect(address_space_kernel(), mapping, MEMORY_ACCESS_READ));
-	cr_assert(hal_paging_query(address_space_hal(address_space_kernel()), mapping_address(mapping), &translation));
+	cr_assert(
+		hal_paging_query(address_space_paging_space(address_space_kernel()), mapping_address(mapping), &translation));
 	cr_assert_eq(translation.flags, HAL_PAGE_READ | HAL_PAGE_GLOBAL);
 	cr_assert(address_space_protect(address_space_kernel(), mapping, 0u));
-	cr_assert_not(hal_paging_query(address_space_hal(address_space_kernel()), mapping_address(mapping), NULL));
+	cr_assert_not(hal_paging_query(address_space_paging_space(address_space_kernel()), mapping_address(mapping), NULL));
 	cr_assert(address_space_protect(address_space_kernel(), mapping, MEMORY_ACCESS_WRITE));
 	cr_assert(address_space_resolve_fault(
 		address_space_kernel(), mapping_address(mapping) + TEST_MAPPING_GRANULE, MEMORY_ACCESS_WRITE));
@@ -488,7 +490,7 @@ Test(address_space, process_destruction_detaches_but_preserves_mapping_metadata)
 	cr_assert(map_memory(&space, memory, 0u, 0u, 0u, 0u, MEMORY_ACCESS_READ, &mapping));
 	address = mapping_address(mapping);
 	memory_release(memory);
-	address_space_destroy(&space);
+	address_space_destroy_process(&space);
 	cr_assert_not(address_space_is_initialized(&space));
 	cr_assert_not(address_space_contains_mapping(&space, mapping));
 	cr_assert_not(address_space_unmap(&space, mapping));

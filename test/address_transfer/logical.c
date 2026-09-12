@@ -34,7 +34,7 @@ Test(address_transfer, implicit_zero_reads_and_writes_do_not_require_ptes) {
 	cr_assert_eq(mock_paging_mapping_count(), 0u, "logical write created user PTEs");
 	cr_assert(address_space_unmap(&space, mapping));
 	mapping_release(mapping);
-	address_space_destroy(&space);
+	address_space_destroy_process(&space);
 }
 
 Test(address_transfer, crosses_mappings_and_enforces_protection) {
@@ -72,7 +72,7 @@ Test(address_transfer, crosses_mappings_and_enforces_protection) {
 	cr_assert(address_space_unmap(&space, first_mapping));
 	mapping_release(second_mapping);
 	mapping_release(first_mapping);
-	address_space_destroy(&space);
+	address_space_destroy_process(&space);
 }
 
 Test(address_transfer, overlapping_copy_has_memmove_semantics) {
@@ -100,5 +100,5 @@ Test(address_transfer, overlapping_copy_has_memmove_semantics) {
 	cr_assert_arr_eq(actual, expected, sizeof(actual));
 	cr_assert(address_space_unmap(&space, mapping));
 	mapping_release(mapping);
-	address_space_destroy(&space);
+	address_space_destroy_process(&space);
 }

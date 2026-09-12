@@ -27,7 +27,7 @@ struct kthread_reaper {
 static bool kthread_map_stack(struct mapping** out_mapping, void** out_base) {
 	struct memory*  memory;
 	struct mapping* mapping;
-	size_t          granule = address_space_minimum_mapping_size();
+	size_t          granule = address_space_minimum_mapping_size(address_space_kernel());
 	size_t          stack_size, guard_size;
 	if (granule == 0u || !align_up_size(KTHREAD_DEFAULT_STACK_SIZE, granule, &stack_size) ||
 	    !memory_create_anonymous(stack_size, &memory))

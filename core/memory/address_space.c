@@ -7,8 +7,10 @@
 #include <core/thread.h>
 #include <hal/cache.h>
 #include <hal/hcf.h>
+#include <hal/paging.h>
 #include <string.h>
 
+#include "../dma_internal.h"
 #include "address_space_internal.h"
 
 struct mapping_free_slot {
@@ -181,13 +183,25 @@ static bool space_is_kernel(const struct address_space* space) {
 	return space == &kernel_space;
 }
 
+static bool space_is_device(const struct address_space* space) {
+	return space != NULL && space->kind == ADDRESS_SPACE_KIND_DEVICE;
+}
+
 static size_t translation_granule(void) {
 	const struct hal_paging_info* info = hal_paging_info();
 	return info == NULL ? 0u : info->minimum_leaf_size;
 }
 
-size_t address_space_minimum_mapping_size(void) {
+size_t address_space_minimum_mapping_size(const struct address_space* space) {
+	if (space_is_device(space)) {
+		const struct hal_iommu_info* info = dma_controller_info(space->backend.device.controller_index);
+		return info == NULL ? 0u : info->minimum_leaf_size;
+	}
 	return translation_granule();
+}
+
+enum address_space_kind address_space_kind(const struct address_space* space) {
+	return space == NULL ? ADDRESS_SPACE_KIND_PROCESS : space->kind;
 }
 
 static uintptr_t reserved_start(const struct mapping* mapping) {
@@ -324,7 +338,7 @@ struct mapping* address_space_find_mapping_locked(struct address_space* space, u
 	return candidate != NULL && address - candidate->address < candidate->size ? candidate : NULL;
 }
 
-uint64_t address_space_hal_flags(const struct address_space* space, memory_access_t access) {
+uint64_t address_space_paging_flags(const struct address_space* space, memory_access_t access) {
 	uint64_t flags = space_is_kernel(space) ? HAL_PAGE_GLOBAL : HAL_PAGE_USER;
 	if ((access & MEMORY_ACCESS_READ) != 0u) flags |= HAL_PAGE_READ;
 	if ((access & MEMORY_ACCESS_WRITE) != 0u) flags |= HAL_PAGE_WRITE;
@@ -333,19 +347,146 @@ uint64_t address_space_hal_flags(const struct address_space* space, memory_acces
 }
 
 bool address_space_is_initialized(const struct address_space* space) {
-	return space != NULL && space->hal != NULL && space->end > space->base && !space->destroying;
+	if (space == NULL || space->destroying || space->end <= space->base) return false;
+	if (space->kind == ADDRESS_SPACE_KIND_DEVICE) return space->backend.device.hal.table.initialized;
+	return space->backend.process.hal != NULL;
 }
 
 struct address_space* address_space_kernel(void) {
 	return &kernel_space;
 }
 
-struct hal_paging_space* address_space_hal(struct address_space* space) {
-	return address_space_is_initialized(space) ? space->hal : NULL;
+struct hal_paging_space* address_space_paging_space(struct address_space* space) {
+	return address_space_is_initialized(space) && space->kind == ADDRESS_SPACE_KIND_PROCESS ? space->backend.process.hal
+	                                                                                        : NULL;
+}
+
+static void address_space_device_destroy(struct address_space* space) {
+	struct irq_state                   state;
+	struct mapping*                    mappings;
+	struct hal_iommu_controller_state* iommu_controller;
+	uint32_t                           controller_index;
+	uint32_t                           context_id;
+
+	if (space == NULL || space->kind != ADDRESS_SPACE_KIND_DEVICE || space->end <= space->base) return;
+	state             = spinlock_lock_irqsave(&space->lock);
+	space->destroying = true;
+	mappings          = space->mapping_first;
+	controller_index  = space->backend.device.controller_index;
+	context_id        = space->backend.device.context_id;
+	iommu_controller  = dma_controller_state(controller_index);
+	if (iommu_controller == NULL || !space->backend.device.hal.table.initialized) {
+		spinlock_unlock_irqrestore(&space->lock, state);
+		hcf();
+	}
+	for (struct mapping* mapping = mappings; mapping != NULL; mapping = mapping->next) {
+		if (mapping->access != 0u &&
+		    !hal_iommu_unmap(iommu_controller, &space->backend.device.hal, mapping->address, mapping->size)) {
+			spinlock_unlock_irqrestore(&space->lock, state);
+			hcf();
+		}
+	}
+
+	for (struct mapping* mapping = mappings; mapping != NULL; mapping = mapping->next) {
+		mapping->owner = NULL;
+	}
+
+	space->base = space->end = 0u;
+	space->mapping_root      = NULL;
+	space->mapping_first     = NULL;
+	space->mapping_last      = NULL;
+	space->mapping_count     = 0u;
+	spinlock_unlock_irqrestore(&space->lock, state);
+
+	hal_iommu_space_deinit(iommu_controller, &space->backend.device.hal);
+	if (!dma_controller_release_context(controller_index, context_id)) hcf();
+
+	while (mappings != NULL) {
+		struct mapping* next   = mappings->next;
+		struct memory*  memory = mappings->memory;
+		mappings->memory       = NULL;
+		mappings->previous = mappings->next = NULL;
+		memory_release(memory);
+		mapping_release(mappings);
+		mappings = next;
+	}
+}
+
+bool address_space_device_retain(struct address_space* space) {
+	uint64_t current;
+	if (space == NULL) return false;
+	if (space->kind != ADDRESS_SPACE_KIND_DEVICE) return false;
+	current = __atomic_load_n(&space->backend.device.reference_count, __ATOMIC_ACQUIRE);
+	for (;;) {
+		if (current == 0u || current == UINT64_MAX) return false;
+		if (__atomic_compare_exchange_n(&space->backend.device.reference_count,
+		                                &current,
+		                                current + 1u,
+		                                false,
+		                                __ATOMIC_ACQ_REL,
+		                                __ATOMIC_ACQUIRE))
+			return true;
+	}
+}
+
+void address_space_device_release(struct address_space* space) {
+	uint64_t old;
+	size_t   granule;
+	if (space == NULL || space->kind != ADDRESS_SPACE_KIND_DEVICE) return;
+	old = __atomic_fetch_sub(&space->backend.device.reference_count, 1u, __ATOMIC_ACQ_REL);
+	if (old == 0u) hcf();
+	if (old != 1u) return;
+	address_space_device_destroy(space);
+	granule = pmm_info() == NULL ? 0u : pmm_info()->allocation_granule;
+	if (granule == 0u) hcf();
+	if (!pmm_free((struct pmm_extent){.address = (uintptr_t)space - boot_info.direct_map_offset, .size = granule}))
+		hcf();
+}
+
+void address_space_destroy_process(struct address_space* space) {
+	if (space == NULL || space->kind != ADDRESS_SPACE_KIND_PROCESS) return;
+
+	struct irq_state         state;
+	struct mapping*          mappings;
+	struct hal_paging_space* hal;
+	bool                     kernel;
+	if (space->end <= space->base) return;
+	state             = spinlock_lock_irqsave(&space->lock);
+	space->destroying = true;
+	kernel            = space_is_kernel(space);
+	hal               = space->backend.process.hal;
+	mappings          = space->mapping_first;
+
+	if (kernel) {
+		for (struct mapping* mapping = mappings; mapping != NULL; mapping = mapping->next)
+			if (mapping->access != 0u && !hal_paging_unmap(hal, mapping->address, mapping->size)) hcf();
+	}
+
+	for (struct mapping* mapping = mappings; mapping != NULL; mapping = mapping->next) mapping->owner = NULL;
+	space->base = space->end   = 0u;
+	space->backend.process.hal = NULL;
+	space->mapping_root        = NULL;
+	space->mapping_first       = NULL;
+	space->mapping_last        = NULL;
+	space->mapping_count       = 0u;
+	spinlock_unlock_irqrestore(&space->lock, state);
+
+	if (!kernel) hal_paging_space_destroy(hal);
+
+	while (mappings != NULL) {
+		struct mapping* next   = mappings->next;
+		struct memory*  memory = mappings->memory;
+		mappings->memory       = NULL;
+		mappings->previous = mappings->next = NULL;
+		memory_release(memory);
+		mapping_release(mappings);
+		mappings = next;
+	}
 }
 
 bool address_space_activate(struct address_space* space) {
-	return address_space_is_initialized(space) && hal_paging_activate(space->hal);
+	return address_space_is_initialized(space) && space->kind == ADDRESS_SPACE_KIND_PROCESS &&
+	       hal_paging_activate(space->backend.process.hal);
 }
 
 static bool space_initialize(struct address_space* space, uintptr_t base, size_t size, struct hal_paging_space* hal) {
@@ -355,9 +496,10 @@ static bool space_initialize(struct address_space* space, uintptr_t base, size_t
 	    (size & (granule - 1u)) != 0u || add_overflow_u64(base, size, &end))
 		return false;
 	memset(space, 0, sizeof(*space));
-	space->base = base;
-	space->end  = (uintptr_t)end;
-	space->hal  = hal;
+	space->kind                = ADDRESS_SPACE_KIND_PROCESS;
+	space->base                = base;
+	space->end                 = (uintptr_t)end;
+	space->backend.process.hal = hal;
 	spinlock_init_class(&space->lock,
 	                    space_is_kernel(space) ? "kernel_address_space" : "process_address_space",
 	                    SPINLOCK_ORDER_VADDR,
@@ -368,7 +510,7 @@ static bool space_initialize(struct address_space* space, uintptr_t base, size_t
 bool address_space_init(void) {
 	struct hal_paging_space* hal;
 	initialized = false;
-	if (address_space_is_initialized(&kernel_space)) address_space_destroy(&kernel_space);
+	if (address_space_is_initialized(&kernel_space)) address_space_destroy_process(&kernel_space);
 	if (!hal_paging_init() || (hal = hal_paging_kernel_space()) == NULL ||
 	    !space_initialize(&kernel_space, MM_KERNEL_ADDRESS_SPACE_BASE, MM_KERNEL_ADDRESS_SPACE_SIZE, hal))
 		return false;
@@ -379,7 +521,7 @@ bool address_space_init(void) {
 bool address_space_create_process(struct address_space* space) {
 	struct hal_paging_space* hal;
 	if (!initialized || space == NULL || space == &kernel_space || !hal_paging_space_create(&hal)) return false;
-	if (!space_initialize(space, address_space_minimum_mapping_size(), MM_USER_ADDRESS_SPACE_SIZE, hal)) {
+	if (!space_initialize(space, translation_granule(), MM_USER_ADDRESS_SPACE_SIZE, hal)) {
 		hal_paging_space_destroy(hal);
 		return false;
 	}
@@ -390,7 +532,7 @@ static bool access_valid(memory_access_t access) {
 	return (access & ~MEMORY_ACCESS_VALID_MASK) == 0u;
 }
 
-static bool physical_layout_compatible(struct memory* memory, size_t size, size_t granule) {
+static bool physical_layout_compatible(struct memory* memory, size_t size, size_t granule, uintptr_t maximum_address) {
 	size_t    cursor            = 0u;
 	size_t    boundary_unit     = SIZE_MAX;
 	uintptr_t boundary_physical = 0u;
@@ -405,6 +547,9 @@ static bool physical_layout_compatible(struct memory* memory, size_t size, size_
 			size_t    within = cursor & (granule - 1u);
 			size_t    unit   = cursor - within;
 			uintptr_t physical;
+			if (maximum_address != 0u &&
+			    (span.physical_address >= maximum_address || span.size > maximum_address - span.physical_address))
+				return false;
 			if (span.physical_address < within) return false;
 			physical = span.physical_address - within;
 			if ((physical & (granule - 1u)) != 0u || (boundary_unit == unit && boundary_physical != physical))
@@ -421,6 +566,82 @@ static bool physical_layout_compatible(struct memory* memory, size_t size, size_
 			else boundary_unit = SIZE_MAX;
 		}
 		cursor = end;
+	}
+	return true;
+}
+
+static bool device_materialize_range(struct memory* memory, size_t offset, size_t size, size_t granule,
+                                     uintptr_t maximum_address) {
+	if (memory_materialize(memory,
+	                       &(const struct memory_materialize_request){
+							   .offset             = offset,
+							   .size               = size,
+							   .alignment          = granule,
+							   .minimum_address    = 0u,
+							   .maximum_address    = maximum_address,
+							   .require_contiguous = true,
+						   }))
+		return true;
+	if (size == granule) return false;
+	size_t left = (size / 2u) & ~(granule - 1u);
+	if (left == 0u) left = granule;
+	return device_materialize_range(memory, offset, left, granule, maximum_address) &&
+	       device_materialize_range(memory, offset + left, size - left, granule, maximum_address);
+}
+
+static bool device_materialize_memory(struct memory* memory, size_t size, size_t granule, uintptr_t maximum_address) {
+	if (memory == NULL || granule == 0u || size == 0u || (size & (granule - 1u)) != 0u ||
+	    !physical_layout_compatible(memory, size, granule, maximum_address) ||
+	    !device_materialize_range(memory, 0u, size, granule, maximum_address))
+		return false;
+	return physical_layout_compatible(memory, size, granule, maximum_address);
+}
+
+static uint64_t device_iommu_access(memory_access_t access) {
+	uint64_t result = 0u;
+	if ((access & MEMORY_ACCESS_READ) != 0u) result |= HAL_IOMMU_READ;
+	if ((access & MEMORY_ACCESS_WRITE) != 0u) result |= HAL_IOMMU_WRITE;
+	return result;
+}
+
+static bool present_run(struct memory* memory, size_t offset, size_t maximum_size, size_t granule,
+                        uintptr_t* out_physical, size_t* out_size);
+
+static bool device_map_projection_locked(struct address_space* space, struct mapping* mapping, memory_access_t access,
+                                         size_t* out_mapped) {
+	struct hal_iommu_controller_state* controller;
+	const struct hal_iommu_info*       info;
+	size_t                             granule;
+	size_t                             offset = 0u;
+	size_t                             mapped = 0u;
+	if (out_mapped != NULL) *out_mapped = 0u;
+	controller = dma_controller_state(space->backend.device.controller_index);
+	info       = dma_controller_info(space->backend.device.controller_index);
+	granule    = info == NULL ? 0u : info->minimum_leaf_size;
+	if (controller == NULL || info == NULL || granule == 0u) return false;
+	if (access == 0u) return true;
+	while (offset < mapping->size) {
+		struct memory_span span;
+		size_t             run_size;
+		uintptr_t          physical;
+		if (!memory_query(mapping->memory, offset, mapping->size - offset, &span) || span.size == 0u ||
+		    span.size > mapping->size - offset || span.kind != MEMORY_SPAN_PRESENT)
+			return false;
+		run_size = span.size;
+		if (!present_run(mapping->memory, offset, mapping->size - offset, granule, &physical, &run_size)) return false;
+		if (run_size == 0u) return false;
+		if (!hal_iommu_map(controller,
+		                   &space->backend.device.hal,
+		                   &(const struct hal_iommu_map_request){
+							   .io_address       = mapping->address + offset,
+							   .physical_address = physical,
+							   .size             = run_size,
+							   .access           = device_iommu_access(access),
+						   }))
+			return false;
+		offset += run_size;
+		mapped += run_size;
+		if (out_mapped != NULL) *out_mapped = mapped;
 	}
 	return true;
 }
@@ -461,21 +682,104 @@ bool address_space_map(struct address_space* space, const struct address_space_m
 	size_t           size, granule, alignment;
 	uintptr_t        address, start, end;
 	if (out_mapping != NULL) *out_mapping = NULL;
-	granule = translation_granule();
 	if (!initialized || !address_space_is_initialized(space) || request == NULL || request->memory == NULL ||
-	    out_mapping == NULL || granule == 0u || !access_valid(request->access))
+	    out_mapping == NULL)
 		return false;
+	granule = address_space_minimum_mapping_size(space);
+	if (granule == 0u || !access_valid(request->access)) return false;
 	size      = memory_size(request->memory);
 	alignment = request->alignment == 0u ? granule : request->alignment;
 	if (size == 0u || !memory_range_is_backing_aligned(request->memory, 0u, size, granule) || alignment < granule ||
 	    (alignment & (alignment - 1u)) != 0u || (request->guard_before & (granule - 1u)) != 0u ||
 	    (request->guard_after & (granule - 1u)) != 0u ||
 	    (request->address != 0u && (request->address & (alignment - 1u)) != 0u) ||
-	    !physical_layout_compatible(request->memory, size, granule) ||
-	    ((request->access & MEMORY_ACCESS_EXEC) != 0u &&
+	    (space->kind != ADDRESS_SPACE_KIND_DEVICE && !physical_layout_compatible(request->memory, size, granule, 0u)))
+		return false;
+	if (space->kind == ADDRESS_SPACE_KIND_DEVICE) {
+		struct hal_iommu_controller_state* controller = dma_controller_state(space->backend.device.controller_index);
+		const struct hal_iommu_info*       info       = dma_controller_info(space->backend.device.controller_index);
+		size_t                             mapped     = 0u;
+		uintptr_t                          maximum_address;
+		if (controller == NULL || info == NULL) return false;
+		maximum_address =
+			info->physical_address_bits < sizeof(uintptr_t) * 8u ? (uintptr_t)1u << info->physical_address_bits : 0u;
+		if ((request->access & MEMORY_ACCESS_EXEC) != 0u ||
+		    (request->access != 0u && !hal_iommu_mapping_supported(controller, device_iommu_access(request->access))))
+			return false;
+		if (request->access != 0u && !device_materialize_memory(request->memory, size, granule, maximum_address))
+			return false;
+		mapping = mapping_alloc();
+		if (mapping == NULL || !memory_retain(request->memory)) {
+			if (mapping != NULL) {
+				mapping->reference_count = 1u;
+				mapping_release(mapping);
+			}
+			return false;
+		}
+		mapping->memory          = request->memory;
+		mapping->size            = size;
+		mapping->guard_before    = request->guard_before;
+		mapping->guard_after     = request->guard_after;
+		mapping->memory_type     = memory_type(request->memory);
+		mapping->access          = request->access;
+		mapping->reference_count = 2u;
+		state                    = spinlock_lock_irqsave(&space->lock);
+		if (!address_space_is_initialized(space)) goto device_fail_locked;
+		if (request->address == 0u) {
+			if (!find_placement(
+					space, size, alignment, request->guard_before, request->guard_after, &address, &previous, &next))
+				goto device_fail_locked;
+		}
+		else {
+			address = request->address;
+			if (!placement_geometry(address, size, request->guard_before, request->guard_after, &start, &end) ||
+			    start < space->base || end > space->end)
+				goto device_fail_locked;
+			next = lower_bound(space, start, &previous);
+			if ((previous != NULL && reserved_end(previous) > start) || (next != NULL && reserved_start(next) < end))
+				goto device_fail_locked;
+		}
+		mapping->address  = address;
+		mapping->owner    = space;
+		mapping->previous = previous;
+		mapping->next     = next;
+		if (previous != NULL) previous->next = mapping;
+		else space->mapping_first = mapping;
+		if (next != NULL) next->previous = mapping;
+		else space->mapping_last = mapping;
+		tree_insert(space, mapping);
+		space->mapping_count++;
+		if (request->access != 0u && !device_map_projection_locked(space, mapping, request->access, &mapped)) {
+			if (mapped != 0u && !hal_iommu_unmap(controller, &space->backend.device.hal, mapping->address, mapped))
+				hcf();
+			tree_remove(space, mapping);
+			if (mapping->previous != NULL) mapping->previous->next = mapping->next;
+			else space->mapping_first = mapping->next;
+			if (mapping->next != NULL) mapping->next->previous = mapping->previous;
+			else space->mapping_last = mapping->previous;
+			space->mapping_count--;
+			spinlock_unlock_irqrestore(&space->lock, state);
+			memory_release(request->memory);
+			mapping->memory = NULL;
+			mapping_release(mapping);
+			mapping_release(mapping);
+			return false;
+		}
+		spinlock_unlock_irqrestore(&space->lock, state);
+		*out_mapping = mapping;
+		return true;
+	device_fail_locked:
+		spinlock_unlock_irqrestore(&space->lock, state);
+		memory_release(request->memory);
+		mapping->memory = NULL;
+		mapping_release(mapping);
+		mapping_release(mapping);
+		return false;
+	}
+	if (((request->access & MEMORY_ACCESS_EXEC) != 0u &&
 	     (memory_type(request->memory) != MEMORY_TYPE_NORMAL || !memory_cpu_accessible(request->memory))) ||
-	    (request->access != 0u &&
-	     !hal_paging_mapping_supported(address_space_hal_flags(space, request->access), memory_type(request->memory))))
+	    (request->access != 0u && !hal_paging_mapping_supported(address_space_paging_flags(space, request->access),
+	                                                            memory_type(request->memory))))
 		return false;
 	mapping = mapping_alloc();
 	if (mapping == NULL || !memory_retain(request->memory)) {
@@ -535,12 +839,25 @@ static bool mapping_belongs(const struct address_space* space, const struct mapp
 }
 
 bool address_space_unmap(struct address_space* space, struct mapping* mapping) {
-	struct irq_state state;
-	struct memory*   memory;
+	struct irq_state                   state;
+	struct memory*                     memory;
+	struct hal_iommu_controller_state* controller;
 	if (!initialized || !address_space_is_initialized(space) || mapping == NULL) return false;
 	state = spinlock_lock_irqsave(&space->lock);
-	if (!mapping_belongs(space, mapping) ||
-	    (mapping->access != 0u && !hal_paging_unmap(space->hal, mapping->address, mapping->size))) {
+	if (!mapping_belongs(space, mapping)) {
+		spinlock_unlock_irqrestore(&space->lock, state);
+		return false;
+	}
+	if (space->kind == ADDRESS_SPACE_KIND_DEVICE) {
+		controller = dma_controller_state(space->backend.device.controller_index);
+		if (controller == NULL ||
+		    (mapping->access != 0u &&
+		     !hal_iommu_unmap(controller, &space->backend.device.hal, mapping->address, mapping->size))) {
+			spinlock_unlock_irqrestore(&space->lock, state);
+			return false;
+		}
+	}
+	else if (mapping->access != 0u && !hal_paging_unmap(space->backend.process.hal, mapping->address, mapping->size)) {
 		spinlock_unlock_irqrestore(&space->lock, state);
 		return false;
 	}
@@ -561,13 +878,52 @@ bool address_space_unmap(struct address_space* space, struct mapping* mapping) {
 }
 
 bool address_space_protect(struct address_space* space, struct mapping* mapping, memory_access_t access) {
-	struct irq_state state;
+	struct irq_state                   state;
+	struct hal_iommu_controller_state* controller;
 	if (!initialized || !address_space_is_initialized(space) || mapping == NULL || !access_valid(access)) return false;
 	state = spinlock_lock_irqsave(&space->lock);
-	if (!mapping_belongs(space, mapping) ||
-	    ((access & MEMORY_ACCESS_EXEC) != 0u &&
+	if (!mapping_belongs(space, mapping)) goto fail;
+	if (space->kind == ADDRESS_SPACE_KIND_DEVICE) {
+		controller                        = dma_controller_state(space->backend.device.controller_index);
+		const struct hal_iommu_info* info = dma_controller_info(space->backend.device.controller_index);
+		uintptr_t maximum_address         = info == NULL || info->physical_address_bits >= sizeof(uintptr_t) * 8u
+		                                        ? 0u
+		                                        : (uintptr_t)1u << info->physical_address_bits;
+		if (controller == NULL || (access & MEMORY_ACCESS_EXEC) != 0u) goto fail;
+		if (mapping->access != 0u && access != 0u) {
+			if (!hal_iommu_protect(controller,
+			                       &space->backend.device.hal,
+			                       mapping->address,
+			                       mapping->size,
+			                       device_iommu_access(access)))
+				goto fail;
+		}
+		else if (mapping->access != 0u && access == 0u) {
+			if (!hal_iommu_unmap(controller, &space->backend.device.hal, mapping->address, mapping->size)) goto fail;
+		}
+		else if (mapping->access == 0u && access != 0u) {
+			size_t mapped  = 0u;
+			size_t granule = address_space_minimum_mapping_size(space);
+			if (!hal_iommu_mapping_supported(controller, device_iommu_access(access)) ||
+			    !device_materialize_memory(mapping->memory, mapping->size, granule, maximum_address))
+				goto fail;
+			if (!device_map_projection_locked(space, mapping, access, &mapped)) {
+				if (mapped != 0u && !hal_iommu_unmap(controller, &space->backend.device.hal, mapping->address, mapped))
+					hcf();
+				goto fail;
+			}
+			__atomic_store_n(&mapping->access, access, __ATOMIC_RELEASE);
+			spinlock_unlock_irqrestore(&space->lock, state);
+			return true;
+		}
+		__atomic_store_n(&mapping->access, access, __ATOMIC_RELEASE);
+		spinlock_unlock_irqrestore(&space->lock, state);
+		return true;
+	}
+	if (((access & MEMORY_ACCESS_EXEC) != 0u &&
 	     (mapping->memory_type != MEMORY_TYPE_NORMAL || !memory_cpu_accessible(mapping->memory))) ||
-	    (access != 0u && !hal_paging_mapping_supported(address_space_hal_flags(space, access), mapping->memory_type)))
+	    (access != 0u &&
+	     !hal_paging_mapping_supported(address_space_paging_flags(space, access), mapping->memory_type)))
 		goto fail;
 	if (mapping->access == access) {
 		spinlock_unlock_irqrestore(&space->lock, state);
@@ -583,9 +939,11 @@ bool address_space_protect(struct address_space* space, struct mapping* mapping,
 		}
 	}
 	if (mapping->access != 0u &&
-	    !(access == 0u ? hal_paging_unmap(space->hal, mapping->address, mapping->size)
-	                   : hal_paging_protect(
-							 space->hal, mapping->address, mapping->size, address_space_hal_flags(space, access))))
+	    !(access == 0u ? hal_paging_unmap(space->backend.process.hal, mapping->address, mapping->size)
+	                   : hal_paging_protect(space->backend.process.hal,
+	                                        mapping->address,
+	                                        mapping->size,
+	                                        address_space_paging_flags(space, access))))
 		goto fail;
 	__atomic_store_n(&mapping->access, access, __ATOMIC_RELEASE);
 	spinlock_unlock_irqrestore(&space->lock, state);
@@ -631,14 +989,14 @@ static bool map_present_run_locked(struct address_space* space, struct mapping* 
 		.virtual_address  = mapping->address + offset,
 		.physical_address = physical_address,
 		.size             = run_size,
-		.flags            = address_space_hal_flags(space, mapping->access),
+		.flags            = address_space_paging_flags(space, mapping->access),
 		.memory_type      = mapping->memory_type,
 	};
 	if ((mapping->access & MEMORY_ACCESS_EXEC) != 0u)
 		hal_cache_sync_executable_range_all_cpus((void*)(physical_address + boot_info.direct_map_offset), run_size);
-	if (hal_paging_map(space->hal, &request)) return true;
+	if (hal_paging_map(space->backend.process.hal, &request)) return true;
 	if (run_size == granule || required_size > granule) return false;
-	return hal_paging_map(space->hal,
+	return hal_paging_map(space->backend.process.hal,
 	                      &(const struct hal_paging_map_request){
 							  .virtual_address  = request.virtual_address,
 							  .physical_address = request.physical_address,
@@ -671,12 +1029,12 @@ static bool map_fault_leaf_locked(struct address_space* space, struct mapping* m
 		if ((mapping->access & MEMORY_ACCESS_EXEC) != 0u)
 			hal_cache_sync_executable_range_all_cpus((void*)(physical_address + boot_info.direct_map_offset),
 			                                         leaf_size);
-		if (hal_paging_map(space->hal,
+		if (hal_paging_map(space->backend.process.hal,
 		                   &(const struct hal_paging_map_request){
 							   .virtual_address  = virtual_address,
 							   .physical_address = physical_address,
 							   .size             = leaf_size,
-							   .flags            = address_space_hal_flags(space, mapping->access),
+							   .flags            = address_space_paging_flags(space, mapping->access),
 							   .memory_type      = mapping->memory_type,
 						   }))
 			return true;
@@ -684,14 +1042,14 @@ static bool map_fault_leaf_locked(struct address_space* space, struct mapping* m
 	return false;
 }
 
-bool address_space_resolve_locked(struct address_space* space, struct mapping* mapping, size_t offset) {
+bool address_space_resolve_process_locked(struct address_space* space, struct mapping* mapping, size_t offset) {
 	size_t    granule = translation_granule();
 	uintptr_t virtual_address;
 	if (granule == 0u || !mapping_belongs(space, mapping) || offset > mapping->size - granule ||
 	    (offset & (granule - 1u)) != 0u || mapping->access == 0u)
 		return false;
 	virtual_address = mapping->address + offset;
-	if (hal_paging_query(space->hal, virtual_address, NULL)) return true;
+	if (hal_paging_query(space->backend.process.hal, virtual_address, NULL)) return true;
 	if (!memory_materialize(mapping->memory,
 	                        &(const struct memory_materialize_request){
 								.offset             = offset,
@@ -702,7 +1060,6 @@ bool address_space_resolve_locked(struct address_space* space, struct mapping* m
 		return false;
 	return map_fault_leaf_locked(space, mapping, offset);
 }
-
 bool address_space_resolve_fault(struct address_space* space, uintptr_t address, memory_access_t access) {
 	struct irq_state state;
 	struct mapping*  mapping;
@@ -710,11 +1067,12 @@ bool address_space_resolve_fault(struct address_space* space, uintptr_t address,
 	size_t           granule = translation_granule();
 	if (!initialized || !address_space_is_initialized(space) || granule == 0u || !access_allowed(~0u, access))
 		return false;
+	if (space->kind != ADDRESS_SPACE_KIND_PROCESS) return false;
 	state   = spinlock_lock_irqsave(&space->lock);
 	mapping = address_space_find_mapping_locked(space, address);
 	if (mapping != NULL && access_allowed(mapping->access, access)) {
 		size_t offset = (size_t)(address - mapping->address) & ~(granule - 1u);
-		ok            = address_space_resolve_locked(space, mapping, offset);
+		ok            = address_space_resolve_process_locked(space, mapping, offset);
 	}
 	spinlock_unlock_irqrestore(&space->lock, state);
 	return ok;
@@ -726,6 +1084,7 @@ bool address_space_prefault(struct address_space* space, struct mapping* mapping
 	if (!initialized || !address_space_is_initialized(space) || mapping == NULL || granule == 0u || size == 0u ||
 	    (offset & (granule - 1u)) != 0u || (size & (granule - 1u)) != 0u)
 		return false;
+	if (space->kind != ADDRESS_SPACE_KIND_PROCESS) return false;
 	state = spinlock_lock_irqsave(&space->lock);
 	if (!mapping_belongs(space, mapping) || mapping->access == 0u || offset > mapping->size ||
 	    size > mapping->size - offset)
@@ -741,7 +1100,7 @@ bool address_space_prefault(struct address_space* space, struct mapping* mapping
 	for (size_t done = 0u; done < size;) {
 		struct hal_paging_translation translation;
 		uintptr_t                     virtual_address = mapping->address + offset + done;
-		if (hal_paging_query(space->hal, virtual_address, &translation)) {
+		if (hal_paging_query(space->backend.process.hal, virtual_address, &translation)) {
 			size_t advance = granule;
 			if (translation.leaf_size >= granule && (translation.leaf_size & (translation.leaf_size - 1u)) == 0u) {
 				advance = translation.leaf_size - (virtual_address & (translation.leaf_size - 1u));
@@ -779,45 +1138,10 @@ bool address_space_contains_mapping(struct address_space* space, const struct ma
 	return contains;
 }
 
-void address_space_destroy(struct address_space* space) {
-	struct irq_state         state;
-	struct mapping*          mappings;
-	struct hal_paging_space* hal;
-	bool                     kernel;
-	if (space == NULL || space->hal == NULL || space->end <= space->base) return;
-	state             = spinlock_lock_irqsave(&space->lock);
-	space->destroying = true;
-	hal               = space->hal;
-	kernel            = space_is_kernel(space);
-	mappings          = space->mapping_first;
-	if (kernel) {
-		for (struct mapping* mapping = mappings; mapping != NULL; mapping = mapping->next)
-			if (mapping->access != 0u && !hal_paging_unmap(hal, mapping->address, mapping->size)) hcf();
-	}
-	for (struct mapping* mapping = mappings; mapping != NULL; mapping = mapping->next) mapping->owner = NULL;
-	space->base = space->end = 0u;
-	space->hal               = NULL;
-	space->mapping_root      = NULL;
-	space->mapping_first     = NULL;
-	space->mapping_last      = NULL;
-	space->mapping_count     = 0u;
-	spinlock_unlock_irqrestore(&space->lock, state);
-	if (!kernel) hal_paging_space_destroy(hal);
-	while (mappings != NULL) {
-		struct mapping* next   = mappings->next;
-		struct memory*  memory = mappings->memory;
-		mappings->memory       = NULL;
-		mappings->previous = mappings->next = NULL;
-		memory_release(memory);
-		mapping_release(mappings);
-		mappings = next;
-	}
-}
-
 static enum address_space_fault_kind classify_fault(struct address_space* space, uintptr_t address) {
-	return address_space_is_initialized(space) && hal_paging_query(space->hal, address, NULL)
-	           ? ADDRESS_SPACE_FAULT_PROTECTION
-	           : ADDRESS_SPACE_FAULT_NOT_PRESENT;
+	if (space == NULL || space->kind != ADDRESS_SPACE_KIND_PROCESS) return ADDRESS_SPACE_FAULT_NOT_PRESENT;
+	return hal_paging_query(space->backend.process.hal, address, NULL) ? ADDRESS_SPACE_FAULT_PROTECTION
+	                                                                   : ADDRESS_SPACE_FAULT_NOT_PRESENT;
 }
 
 bool address_space_handle_current_fault(uintptr_t address, enum address_space_fault_kind kind, memory_access_t access,
