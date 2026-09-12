@@ -118,3 +118,14 @@ syscall_status_t mapping_unmap(cap_id_t mapping_cap) {
 	const struct mapping_unmap_request request = {.header = {.op = MAPPING_OP_UNMAP}};
 	return fixed_call(mapping_cap, &request, sizeof(request), NULL, 0u, MAPPING_OP_UNMAP);
 }
+
+syscall_status_t mapping_sync(cap_id_t mapping_cap, size_t offset, size_t size, enum dma_sync_target target) {
+	const struct mapping_sync_request request = {
+		.header   = {.op = MAPPING_OP_SYNC},
+		.target   = target,
+		.reserved = 0u,
+		.offset   = offset,
+		.size     = size,
+	};
+	return fixed_call(mapping_cap, &request, sizeof(request), NULL, 0u, MAPPING_OP_SYNC);
+}

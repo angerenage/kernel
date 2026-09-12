@@ -12,6 +12,7 @@ enum kernel_resource_type {
 	KERNEL_RESOURCE_TYPE_FRAMEBUFFER,
 	KERNEL_RESOURCE_TYPE_RSDP,
 	KERNEL_RESOURCE_TYPE_DTB,
+	KERNEL_RESOURCE_TYPE_DMA,
 };
 
 enum kernel_resources_op {

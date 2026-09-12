@@ -11,6 +11,9 @@ struct dma_binding;
 /* Discover the available IOMMU controllers for DMA. */
 bool dma_init(void);
 
+/* Return whether at least one IOMMU-backed DMA controller is available. */
+bool dma_available(void);
+
 /* Resolve a physical controller register address and local source ID into an opaque DMA source. */
 bool dma_source_resolve(uint64_t controller_register_address, uint32_t local_source_id, dma_source_t* out_source);
 

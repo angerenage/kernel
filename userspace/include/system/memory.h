@@ -40,3 +40,6 @@ syscall_status_t mapping_protect(cap_id_t mapping_cap, memory_access_t access);
 
 /* Explicitly destroy a Mapping and all grants to it. */
 syscall_status_t mapping_unmap(cap_id_t mapping_cap);
+
+/* Synchronize one aligned DEVICE Mapping subrange for DMA ownership transfer. */
+syscall_status_t mapping_sync(cap_id_t mapping_cap, size_t offset, size_t size, enum dma_sync_target target);

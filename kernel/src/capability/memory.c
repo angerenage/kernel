@@ -3,6 +3,7 @@
 #include <base/memory.h>
 #include <core/address_space.h>
 #include <core/capability.h>
+#include <core/dma.h>
 #include <core/process.h>
 #include <core/spinlock.h>
 #include <core/syscall.h>
@@ -12,9 +13,15 @@
 
 struct mapping_state {
 	process_id_t          space_owner;
+	struct address_space* device_space;
 	struct mapping*       mapping;
 	memory_access_t       maximum_access;
 	struct mapping_state* next;
+};
+
+struct mapping_owner_ref {
+	struct process*       process;
+	struct address_space* space;
 };
 
 #define MEMORY_CAP_RIGHTS                                                                                              \
@@ -158,14 +165,39 @@ static syscall_result_t memory_handler(const struct cap_request* req) {
 	}
 }
 
+static bool mapping_owner_acquire(const struct mapping_state* state, struct mapping_owner_ref* out) {
+	if (out != NULL) *out = (struct mapping_owner_ref){0};
+	if (state == NULL || out == NULL) return false;
+	if (state->device_space != NULL) {
+		if (!address_space_device_retain(state->device_space)) return false;
+		out->space = state->device_space;
+	}
+	else {
+		out->process = process_acquire(state->space_owner);
+		if (out->process == NULL) return false;
+		out->space = process_address_space(out->process);
+	}
+	if (out->space == NULL || !address_space_contains_mapping(out->space, state->mapping)) {
+		if (out->process != NULL) process_release(out->process);
+		else address_space_device_release(out->space);
+		*out = (struct mapping_owner_ref){0};
+		return false;
+	}
+	return true;
+}
+
+static void mapping_owner_release(struct mapping_owner_ref* owner) {
+	if (owner == NULL) return;
+	if (owner->process != NULL) process_release(owner->process);
+	else if (owner->space != NULL) address_space_device_release(owner->space);
+	*owner = (struct mapping_owner_ref){0};
+}
+
 static bool mapping_unmap_state(const struct mapping_state* state) {
-	struct process* owner;
-	bool            result;
-	if (state == NULL) return false;
-	owner = process_acquire(state->space_owner);
-	if (owner == NULL) return false;
-	result = address_space_unmap(process_address_space(owner), state->mapping);
-	process_release(owner);
+	struct mapping_owner_ref owner;
+	if (!mapping_owner_acquire(state, &owner)) return false;
+	bool result = address_space_unmap(owner.space, state->mapping);
+	mapping_owner_release(&owner);
 	return result;
 }
 
@@ -199,6 +231,7 @@ static void mapping_destroy(uint64_t object_id) {
 	mapping_resource_unregister(state);
 	(void)mapping_unmap_state(state);
 	mapping_release(state->mapping);
+	if (state->device_space != NULL) address_space_device_release(state->device_space);
 	free(state);
 }
 
@@ -210,29 +243,37 @@ static void mapping_event(struct cap_object* object, enum cap_object_event event
 
 static bool mapping_process_cleanup(uint64_t object_id, process_id_t process) {
 	const struct mapping_state* state = (const struct mapping_state*)(uintptr_t)object_id;
-	return state != NULL && state->space_owner == process;
+	return state != NULL && state->device_space == NULL && state->space_owner == process;
 }
 
-static cap_id_t mapping_publish_unique(process_id_t recipient, process_id_t owner, struct mapping* mapping,
-                                       cap_rights_t rights, memory_access_t maximum_access) {
+static cap_id_t mapping_publish_unique(process_id_t recipient, process_id_t owner, struct address_space* device_space,
+                                       struct mapping* mapping, cap_rights_t rights, memory_access_t maximum_access) {
 	struct mapping_state* state;
 	cap_object_id_t       object_id;
 	cap_id_t              cap;
-	if (recipient == PROCESS_PID_INVALID || owner == PROCESS_PID_INVALID || mapping == NULL ||
-	    (rights & CAP_CALL) == 0u || (rights & ~MAPPING_CAP_RIGHTS) != 0u || !access_valid(maximum_access))
+	if (recipient == PROCESS_PID_INVALID || mapping == NULL ||
+	    ((owner == PROCESS_PID_INVALID) == (device_space == NULL)) || (rights & CAP_CALL) == 0u ||
+	    (rights & ~MAPPING_CAP_RIGHTS) != 0u || !access_valid(maximum_access))
 		return CAP_ID_INVALID;
 	state = malloc(sizeof(*state));
 	if (state == NULL || !mapping_retain(mapping)) {
 		free(state);
 		return CAP_ID_INVALID;
 	}
+	if (device_space != NULL && !address_space_device_retain(device_space)) {
+		mapping_release(mapping);
+		free(state);
+		return CAP_ID_INVALID;
+	}
 	*state = (struct mapping_state){
 		.space_owner    = owner,
+		.device_space   = device_space,
 		.mapping        = mapping,
 		.maximum_access = maximum_access,
 	};
 	if (!mapping_resource_register(state)) {
 		mapping_release(mapping);
+		if (device_space != NULL) address_space_device_release(device_space);
 		free(state);
 		return CAP_ID_INVALID;
 	}
@@ -241,6 +282,7 @@ static cap_id_t mapping_publish_unique(process_id_t recipient, process_id_t owne
 	if (object_id == CAP_OBJECT_ID_INVALID) {
 		mapping_resource_unregister(state);
 		mapping_release(mapping);
+		if (device_space != NULL) address_space_device_release(device_space);
 		free(state);
 		return CAP_ID_INVALID;
 	}
@@ -259,8 +301,22 @@ cap_id_t kernel_mapping_publish(struct process* target, process_id_t recipient, 
 		process_release(retained);
 		return CAP_ID_INVALID;
 	}
-	cap_id_t cap = mapping_publish_unique(recipient, process_pid(retained), mapping, rights, maximum_access);
+	cap_id_t cap = mapping_publish_unique(recipient, process_pid(retained), NULL, mapping, rights, maximum_access);
 	process_release(retained);
+	return cap;
+}
+
+cap_id_t kernel_device_mapping_publish(struct address_space* space, process_id_t recipient, struct mapping* mapping,
+                                       cap_rights_t rights, memory_access_t maximum_access) {
+	if (space == NULL || recipient == PROCESS_PID_INVALID || mapping == NULL ||
+	    address_space_kind(space) != ADDRESS_SPACE_KIND_DEVICE || !address_space_device_retain(space))
+		return CAP_ID_INVALID;
+	if (!address_space_contains_mapping(space, mapping)) {
+		address_space_device_release(space);
+		return CAP_ID_INVALID;
+	}
+	cap_id_t cap = mapping_publish_unique(recipient, PROCESS_PID_INVALID, space, mapping, rights, maximum_access);
+	address_space_device_release(space);
 	return cap;
 }
 
@@ -276,13 +332,9 @@ bool kernel_mapping_discard_unpublished(cap_id_t mapping_cap, process_id_t owner
 }
 
 static syscall_result_t mapping_info_handler(const struct cap_request* req, const struct mapping_state* state) {
-	struct process* owner;
+	struct mapping_owner_ref owner;
 	if ((req->rights & CAP_READ) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
-	owner = process_acquire(state->space_owner);
-	if (owner == NULL || !address_space_contains_mapping(process_address_space(owner), state->mapping)) {
-		process_release(owner);
-		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	}
+	if (!mapping_owner_acquire(state, &owner)) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	const struct mapping_info response = {
 		.address      = mapping_address(state->mapping),
 		.size         = mapping_size(state->mapping),
@@ -292,23 +344,36 @@ static syscall_result_t mapping_info_handler(const struct cap_request* req, cons
 		.memory_type  = mapping_memory_type(state->mapping),
 	};
 	syscall_result_t result = cap_kernel_write_response(req, &response, sizeof(response));
-	process_release(owner);
+	mapping_owner_release(&owner);
 	return result;
 }
 
 static syscall_result_t mapping_protect_handler(const struct cap_request* req, const struct mapping_state* state) {
 	struct mapping_protect_request request;
-	struct process*                owner;
+	struct mapping_owner_ref       owner;
 	if (copy_request(req, &request, sizeof(request)).status != SYSCALL_STATUS_OK || !access_valid(request.access))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	cap_rights_t required = CAP_MAP | access_rights(request.access);
 	if ((req->rights & required) != required || (request.access & ~state->maximum_access) != 0u)
 		return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
-	owner = process_acquire(state->space_owner);
-	if (owner == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	bool changed = address_space_protect(process_address_space(owner), state->mapping, request.access);
-	process_release(owner);
+	if (!mapping_owner_acquire(state, &owner)) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	bool changed = address_space_protect(owner.space, state->mapping, request.access);
+	mapping_owner_release(&owner);
 	return changed ? syscall_result_ok(0u) : syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+}
+
+static syscall_result_t mapping_sync_handler(const struct cap_request* req, const struct mapping_state* state) {
+	struct mapping_sync_request request;
+	struct mapping_owner_ref    owner;
+	if ((req->rights & CAP_MAP) == 0u || copy_request(req, &request, sizeof(request)).status != SYSCALL_STATUS_OK ||
+	    request.reserved != 0u || (request.target != DMA_SYNC_FOR_DEVICE && request.target != DMA_SYNC_FOR_CPU))
+		return syscall_result_error((req->rights & CAP_MAP) == 0u ? SYSCALL_STATUS_DENIED : SYSCALL_STATUS_BAD_ARGUMENT,
+		                            0u);
+	if (state->device_space == NULL || !mapping_owner_acquire(state, &owner))
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	bool synced = dma_mapping_sync(owner.space, state->mapping, request.offset, request.size, request.target);
+	mapping_owner_release(&owner);
+	return synced ? syscall_result_ok(0u) : syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 }
 
 static syscall_result_t mapping_unmap_handler(const struct cap_request* req, const struct mapping_state* state) {
@@ -334,6 +399,8 @@ static syscall_result_t mapping_handler(const struct cap_request* req) {
 		return mapping_info_handler(req, state);
 	case MAPPING_OP_PROTECT:
 		return mapping_protect_handler(req, state);
+	case MAPPING_OP_SYNC:
+		return mapping_sync_handler(req, state);
 	case MAPPING_OP_UNMAP:
 		if ((req->rights & CAP_DESTROY) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 		return mapping_unmap_handler(req, state);

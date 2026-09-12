@@ -1,6 +1,7 @@
 #pragma once
 
 #include <base/cap.h>
+#include <base/dma.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -141,6 +142,7 @@ enum mapping_op {
 	MAPPING_OP_INFO = 0,
 	MAPPING_OP_PROTECT,
 	MAPPING_OP_UNMAP,
+	MAPPING_OP_SYNC,
 };
 
 /* Common header for Mapping requests. */
@@ -172,4 +174,13 @@ struct mapping_protect_request {
 /* Request explicit destruction of one Mapping. */
 struct mapping_unmap_request {
 	struct mapping_request_header header;
+};
+
+/* Synchronize one DEVICE Mapping byte range for a DMA ownership transition. */
+struct mapping_sync_request {
+	struct mapping_request_header header;
+	enum dma_sync_target          target;
+	uint32_t                      reserved;
+	size_t                        offset;
+	size_t                        size;
 };

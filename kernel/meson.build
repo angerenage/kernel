@@ -53,6 +53,7 @@ kernel_objs = base_sources + core_sources + kernel_libk_sources + platform_kerne
 	'src/capability/serial.c',
 	'src/capability/signal.c',
 	'src/capability/thread.c',
+	'src/capability/dma.c',
 	'src/elf_loader.c',
 	'src/init.c',
 	'src/syscall/capability.c',

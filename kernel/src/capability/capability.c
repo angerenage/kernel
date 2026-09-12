@@ -7,6 +7,7 @@
 
 #include "../capability/boot_module.h"
 #include "../capability/boot_resource.h"
+#include "../capability/dma.h"
 #include "../capability/kernel_resource.h"
 #include "../capability/loader.h"
 #include "../capability/memory_allocator.h"
@@ -44,7 +45,7 @@ syscall_result_t cap_kernel_write_response(const struct cap_request* request, co
 }
 
 bool kernel_capability_init(void) {
-	if (!kernel_memory_allocator_init()) return false;
+	if (!kernel_memory_allocator_init() || !kernel_capability_dma_init()) return false;
 	kernel_capability_serial_init();
 	kernel_capability_loader_init();
 	kernel_capability_boot_module_provider_init();

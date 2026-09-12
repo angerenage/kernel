@@ -180,6 +180,10 @@ bool dma_init(void) {
 	return true;
 }
 
+bool dma_available(void) {
+	return dma_initialized && dma_controller_count != 0u;
+}
+
 static bool dma_controller_from_register_address(uint64_t controller_register_address, uint32_t* out_controller_index) {
 	if (!dma_initialized || out_controller_index == NULL || controller_register_address == 0u) return false;
 	for (uint32_t index = 0u; index < dma_controller_count; index++) {
