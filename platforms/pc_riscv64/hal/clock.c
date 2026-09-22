@@ -1,11 +1,11 @@
+#include "clock.h"
+
 #include <core/lock.h>
 #include <core/spinlock.h>
 #include <hal/clock.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-
-#include "interrupts_private.h"
 
 #define RISCV64_SIE_STIE (1ull << 5)
 #define RISCV64_SCAUSE_INTERRUPT (1ull << 63)

@@ -1,3 +1,5 @@
+#include "syscall.h"
+
 #include <core/cpu.h>
 #include <core/exception.h>
 #include <core/mm.h>
@@ -8,7 +10,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "interrupts_private.h"
+#include "interrupts/segments.h"
+#include "interrupts/vectors.h"
+#include "utils.h"
+
+#define X86_IA32_EFER_MSR 0xc0000080u
+#define X86_IA32_EFER_SCE (1ull << 0)
+#define X86_IA32_STAR_MSR 0xc0000081u
+#define X86_IA32_LSTAR_MSR 0xc0000082u
+#define X86_IA32_FMASK_MSR 0xc0000084u
 
 #define X86_RFLAGS_CARRY (1ull << 0)
 #define X86_RFLAGS_RESERVED_ONE (1ull << 1)

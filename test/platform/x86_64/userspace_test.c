@@ -3,7 +3,8 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "../../../platforms/pc_x86_64/hal/interrupts_private.h"
+#include "../../../platforms/pc_x86_64/hal/interrupts/frame.h"
+#include "../../../platforms/pc_x86_64/hal/interrupts/segments.h"
 
 #define X86_RFLAGS_DIRECTION (1ull << 10)
 

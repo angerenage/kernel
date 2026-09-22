@@ -9,6 +9,65 @@
 #include "../selftest.h"
 #include "sync_helpers.h"
 
+#if defined(PLATFORM_PC_RISCV64) || defined(PLATFORM_PC_LOONGARCH64)
+#include "../../../platforms/iommu_fdt.h"
+#endif
+
+#if defined(PLATFORM_PC_X86_64)
+static void kernel_selftest_cpu_x86_message_ranges_are_exact(struct kernel_selftest_context* ctx) {
+	struct hal_interrupt_message_range low;
+	struct hal_interrupt_message_range high;
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_range_count() == 2u);
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_range_at(0u, &low));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_range_at(1u, &high));
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_message_range_at(2u, &high));
+	KERNEL_SELFTEST_ASSERT(ctx, low.domain == high.domain && low.delivery.domain == high.delivery.domain);
+	KERNEL_SELFTEST_ASSERT(ctx, low.delivery.base == 48u && low.delivery.limit == 0x80u);
+	KERNEL_SELFTEST_ASSERT(ctx, high.delivery.base == 0x81u && high.delivery.limit == 0xfeu);
+	struct hal_interrupt_message         message;
+	struct hal_interrupt_message_state   state   = {0};
+	struct hal_interrupt_message_request request = {
+		.domain = low.domain,
+		.target = cpu_current(),
+		.event  = {.domain = low.delivery.domain, .id = low.delivery.limit - 1u}
+    };
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_target_supported(request.domain, request.source, request.target));
+	struct cpu unsupported = {.arch_id = 256u};
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_message_target_supported(request.domain, request.source, &unsupported));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_init(&state, &request, &message));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_deinit(&state));
+	request.event.id = 0x80u;
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_message_init(&state, &request, &message));
+	request.event.id = high.delivery.base;
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_init(&state, &request, &message));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_deinit(&state));
+}
+#endif
+
+#if defined(PLATFORM_PC_AARCH64)
+static void kernel_selftest_cpu_gic_external_source_contract(struct kernel_selftest_context* ctx) {
+	struct hal_interrupt_source_domain_info domain;
+	struct hal_interrupt_source_info        info;
+	struct hal_interrupt_source             timer = {.domain = 0u, .number = 27u};
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_domain_count() == 1u);
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_domain_at(0u, &domain));
+	KERNEL_SELFTEST_ASSERT(ctx, domain.domain == 0u && domain.first_source == 32u && domain.source_count > 0u);
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_source_info(&timer, &info));
+	struct hal_interrupt_source spi = {.domain = domain.domain, .number = domain.first_source};
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_info(&spi, &info));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_target_supported(&spi, cpu_current()));
+	struct cpu unsupported = {.index = SIZE_MAX};
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_source_target_supported(&spi, &unsupported));
+	KERNEL_SELFTEST_ASSERT(ctx,
+	                       info.target_kind == HAL_INTERRUPT_TARGET_ROUTABLE && info.fixed_target == NULL &&
+	                           info.delivery.domain == 0u && info.delivery.base == spi.number &&
+	                           info.delivery.limit == spi.number + 1u);
+	struct hal_interrupt_source invalid = {.domain = domain.domain,
+	                                       .number = domain.first_source + domain.source_count};
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_source_info(&invalid, &info));
+}
+#endif
+
 #define KERNEL_SELFTEST_CPU_MAX_CPUS 64u
 #define KERNEL_SELFTEST_CPU_REMOTE_DISPATCH_TIMEOUT_MS 250u
 
@@ -16,6 +75,183 @@ static void kernel_selftest_cpu_global_executable_sync(struct kernel_selftest_co
 	hal_cache_sync_executable_range_all_cpus((void*)(uintptr_t)&kernel_selftest_cpu_global_executable_sync, 1u);
 	KERNEL_SELFTEST_ASSERT(ctx, true);
 }
+
+#if defined(PLATFORM_PC_RISCV64)
+static void kernel_selftest_cpu_plic_firmware_source_contract(struct kernel_selftest_context* ctx) {
+	uintptr_t                        controller   = 0u;
+	struct hal_interrupt_source      source       = {.domain = 1u, .number = 1u};
+	struct hal_interrupt_source      aplic_source = {.domain = 2u, .number = 1u};
+	struct hal_interrupt_source_info info;
+	size_t                           described = iommu_fdt_controllers("sifive,plic-1.0.0", 0u, &controller);
+	if (described == 0u) described = iommu_fdt_controllers("riscv,plic0", 0u, &controller);
+	bool available       = hal_interrupt_source_info(&source, &info);
+	bool aplic_available = hal_interrupt_source_info(&aplic_source, &info);
+	if (described == 0u) {
+		KERNEL_SELFTEST_ASSERT(ctx, !available);
+		struct hal_interrupt_source aggregate = {.domain = 0u, .number = 9u};
+		KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_domain_count() == (aplic_available ? 1u : 0u));
+		if (aplic_available) {
+			struct hal_interrupt_source_domain_info domain;
+			KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_domain_at(0u, &domain));
+			KERNEL_SELFTEST_ASSERT(ctx, domain.domain == 2u && domain.first_source == 1u);
+		}
+		KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_source_info(&aggregate, &info));
+		return;
+	}
+	KERNEL_SELFTEST_ASSERT(
+		ctx, iommu_fdt_compatible_present("sifive,plic-1.0.0") || iommu_fdt_compatible_present("riscv,plic0"));
+	if (described != 1u || controller == 0u || !available) {
+		KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_domain_count() == (aplic_available ? 1u : 0u));
+		return;
+	}
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_info(&source, &info));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_target_supported(&source, cpu_current()));
+	struct cpu unsupported = {.arch_id = UINT64_MAX};
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_source_target_supported(&source, &unsupported));
+	KERNEL_SELFTEST_ASSERT(ctx,
+	                       info.target_kind == HAL_INTERRUPT_TARGET_ROUTABLE && info.fixed_target == NULL &&
+	                           info.delivery.base == source.number && info.delivery.limit == source.number + 1u);
+	struct hal_interrupt_source_domain_info domain;
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_domain_count() == (aplic_available ? 2u : 1u));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_domain_at(0u, &domain));
+	KERNEL_SELFTEST_ASSERT(ctx, domain.domain == 1u && domain.first_source == 1u && domain.source_count > 0u);
+	struct hal_interrupt_source aggregate = {.domain = 0u, .number = 9u};
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_source_info(&aggregate, &info));
+	source.number = domain.first_source + domain.source_count;
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_source_info(&source, &info));
+}
+
+static void kernel_selftest_cpu_imsic_message_contract(struct kernel_selftest_context* ctx) {
+	struct hal_interrupt_message_range range;
+	bool                               described = iommu_fdt_compatible_present("riscv,imsics");
+	if (!described) {
+		KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_range_count() == 0u);
+		KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_message_range_at(0u, &range));
+		return;
+	}
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_range_count() == 1u);
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_range_at(0u, &range));
+	KERNEL_SELFTEST_ASSERT(ctx, range.delivery.base == 1u && range.delivery.limit > range.delivery.base);
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_message_range_at(1u, &range));
+	struct hal_interrupt_message_request request = {
+		.domain = range.domain,
+		.target = cpu_current(),
+		.event  = {.domain = range.delivery.domain, .id = range.delivery.limit - 1u}
+    };
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_target_supported(request.domain, request.source, request.target));
+	struct hal_interrupt_message       message;
+	struct hal_interrupt_message_state state = {0};
+	KERNEL_SELFTEST_ASSERT(
+		ctx,
+		!hal_interrupt_message_init(
+			&state,
+			&(struct hal_interrupt_message_request){
+				.domain = range.domain, .target = cpu_current(), .event = {.domain = range.delivery.domain, .id = 0u}
+    },
+			&message));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_init(&state, &request, &message));
+	KERNEL_SELFTEST_ASSERT(ctx, message.address != 0u && message.address % 4096u == 0u);
+	KERNEL_SELFTEST_ASSERT(ctx, message.data == request.event.id);
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_deinit(&state));
+	if (cpu_count() > 1u) {
+		const struct cpu* remote = cpu_by_index((cpu_current()->index + 1u) % cpu_count());
+		if (remote != NULL && cpu_state_get(remote) == CPU_STATE_ONLINE) {
+			uint64_t local_address = message.address;
+			request.target         = remote;
+			request.event.id       = range.delivery.limit - 2u;
+			KERNEL_SELFTEST_ASSERT(
+				ctx, hal_interrupt_message_target_supported(request.domain, request.source, request.target));
+			KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_init(&state, &request, &message));
+			KERNEL_SELFTEST_ASSERT(ctx, message.address != local_address);
+			KERNEL_SELFTEST_ASSERT(ctx, message.data == request.event.id);
+			KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_deinit(&state));
+		}
+	}
+}
+
+static void kernel_selftest_cpu_aplic_source_starts_masked(struct kernel_selftest_context* ctx) {
+	if (!iommu_fdt_compatible_present("qemu,aplic")) return;
+	struct hal_interrupt_source_domain_info domain;
+	if (!hal_interrupt_source_domain_at(0u, &domain) || domain.domain != 2u) return;
+	struct hal_interrupt_source      source = {.domain = domain.domain, .number = domain.source_count};
+	struct hal_interrupt_source_info info;
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_info(&source, &info));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_target_supported(&source, cpu_current()));
+	struct hal_interrupt_delivery delivery = {
+		.target   = cpu_current(),
+		.event    = {.domain = info.delivery.domain, .id = info.delivery.base},
+		.trigger  = HAL_INTERRUPT_TRIGGER_EDGE,
+		.polarity = HAL_INTERRUPT_POLARITY_HIGH
+    };
+	struct hal_interrupt_source_state state   = {0};
+	struct hal_interrupt_delivery     invalid = delivery;
+	invalid.event.id                          = info.delivery.limit;
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_source_init(&state, &source, &invalid));
+	KERNEL_SELFTEST_ASSERT(ctx, !state.initialized);
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_init(&state, &source, &delivery));
+	KERNEL_SELFTEST_ASSERT(ctx, state.initialized && state.masked);
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_mask(&state));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_deinit(&state));
+	KERNEL_SELFTEST_ASSERT(ctx, !state.initialized);
+}
+#endif
+
+#if defined(PLATFORM_PC_LOONGARCH64)
+static void kernel_selftest_cpu_loongarch_interrupt_contract(struct kernel_selftest_context* ctx) {
+	struct hal_interrupt_source_info info;
+	struct hal_interrupt_source      aggregate = {.domain = 0u, .number = 3u};
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_source_info(&aggregate, &info));
+
+	bool                                    pch_described = iommu_fdt_compatible_present("loongson,pch-pic-1.0");
+	struct hal_interrupt_source_domain_info pch_domain    = {0};
+	bool                                    found_pch     = false;
+	for (size_t index = 0u; index < hal_interrupt_source_domain_count(); index++) {
+		struct hal_interrupt_source_domain_info domain;
+		KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_domain_at(index, &domain));
+		if (domain.domain >= 16u && domain.domain < 20u) {
+			pch_domain = domain;
+			found_pch  = true;
+		}
+	}
+	if (pch_described) KERNEL_SELFTEST_ASSERT(ctx, found_pch);
+	if (found_pch) {
+		struct hal_interrupt_source source = {.domain = pch_domain.domain,
+		                                      .number = pch_domain.first_source + pch_domain.source_count - 1u};
+		KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_info(&source, &info));
+		struct hal_interrupt_delivery delivery = {
+			.target   = cpu_current(),
+			.event    = {.domain = info.delivery.domain, .id = info.delivery.base},
+			.trigger  = HAL_INTERRUPT_TRIGGER_FIRMWARE,
+			.polarity = HAL_INTERRUPT_POLARITY_FIRMWARE
+        };
+		struct hal_interrupt_source_state state = {0};
+		KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_init(&state, &source, &delivery));
+		KERNEL_SELFTEST_ASSERT(ctx, state.initialized && state.masked);
+		KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_mask(&state));
+		KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_deinit(&state));
+		KERNEL_SELFTEST_ASSERT(ctx, !state.initialized);
+	}
+
+	struct hal_interrupt_message_range message_range;
+	bool                               msi_described = iommu_fdt_compatible_present("loongson,pch-msi-1.0");
+	if (!hal_interrupt_message_range_at(0u, &message_range)) {
+		KERNEL_SELFTEST_ASSERT(ctx, !msi_described && hal_interrupt_message_range_count() == 0u);
+		return;
+	}
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_range_count() == 1u);
+	struct hal_interrupt_message_request request = {
+		.domain = message_range.domain,
+		.target = cpu_current(),
+		.event  = {.domain = message_range.delivery.domain, .id = message_range.delivery.limit - 1u}
+    };
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_target_supported(request.domain, request.source, request.target));
+	struct hal_interrupt_message       message;
+	struct hal_interrupt_message_state state = {0};
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_init(&state, &request, &message));
+	KERNEL_SELFTEST_ASSERT(ctx, message.address != 0u && message.data == request.event.id);
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_deinit(&state));
+}
+#endif
 
 static void kernel_selftest_cpu_topology_is_consistent(struct kernel_selftest_context* ctx) {
 	struct cpu_topology* topology = cpu_topology_get();
@@ -275,34 +511,48 @@ cleanup:
 }
 
 static const struct kernel_selftest_case kernel_cpu_selftests[] = {
+#if defined(PLATFORM_PC_X86_64)
+	{.name = "x86_message_ranges_are_exact", .run = kernel_selftest_cpu_x86_message_ranges_are_exact},
+#endif
+#if defined(PLATFORM_PC_AARCH64)
+	{.name = "gic_external_source_contract", .run = kernel_selftest_cpu_gic_external_source_contract},
+#endif
+#if defined(PLATFORM_PC_RISCV64)
+	{.name = "plic_firmware_source_contract", .run = kernel_selftest_cpu_plic_firmware_source_contract},
+	{.name = "aplic_source_starts_masked", .run = kernel_selftest_cpu_aplic_source_starts_masked},
+	{.name = "imsic_message_contract", .run = kernel_selftest_cpu_imsic_message_contract},
+#endif
+#if defined(PLATFORM_PC_LOONGARCH64)
+	{.name = "loongarch_interrupt_contract", .run = kernel_selftest_cpu_loongarch_interrupt_contract},
+#endif
 	{
-     .name = "topology_is_consistent",
-     .run  = kernel_selftest_cpu_topology_is_consistent,
-	 },
+								   .name = "topology_is_consistent",
+								   .run  = kernel_selftest_cpu_topology_is_consistent,
+								   },
 	{
-     .name = "ids_are_unique_and_bindings_succeeded",
-     .run  = kernel_selftest_cpu_ids_are_unique_and_bindings_succeeded,
-	 },
+								   .name = "ids_are_unique_and_bindings_succeeded",
+								   .run  = kernel_selftest_cpu_ids_are_unique_and_bindings_succeeded,
+								   },
 	{
-     .name = "current_accessors_match_bound_cpu",
-     .run  = kernel_selftest_cpu_current_accessors_match_bound_cpu,
-	 },
+								   .name = "current_accessors_match_bound_cpu",
+								   .run  = kernel_selftest_cpu_current_accessors_match_bound_cpu,
+								   },
 	{
-     .name = "irq_save_disable_tracks_nesting",
-     .run  = kernel_selftest_cpu_irq_save_disable_tracks_nesting,
-	 },
+								   .name = "irq_save_disable_tracks_nesting",
+								   .run  = kernel_selftest_cpu_irq_save_disable_tracks_nesting,
+								   },
 	{
-     .name = "spinlock_debug_checks_enforce_irqsave_and_order",
-     .run  = kernel_selftest_cpu_spinlock_debug_checks_enforce_irqsave_and_order,
-	 },
+								   .name = "spinlock_debug_checks_enforce_irqsave_and_order",
+								   .run  = kernel_selftest_cpu_spinlock_debug_checks_enforce_irqsave_and_order,
+								   },
 	{
-     .name = "remote_dispatch_reaches_application_processors",
-     .run  = kernel_selftest_cpu_remote_dispatch_reaches_application_processors,
-	 },
+								   .name = "remote_dispatch_reaches_application_processors",
+								   .run  = kernel_selftest_cpu_remote_dispatch_reaches_application_processors,
+								   },
 	{
-     .name = "global_executable_sync_reaches_online_cpus",
-     .run  = kernel_selftest_cpu_global_executable_sync,
-	 },
+								   .name = "global_executable_sync_reaches_online_cpus",
+								   .run  = kernel_selftest_cpu_global_executable_sync,
+								   },
 };
 
 const struct kernel_selftest_suite kernel_cpu_selftest_suite = {

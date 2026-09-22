@@ -9,7 +9,10 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include "interrupts_private.h"
+#include "../cache.h"
+#include "../syscall.h"
+#include "frame.h"
+#include "gic.h"
 
 static bool global_ready;
 static bool local_ready[64];
@@ -307,7 +310,7 @@ void handle_exception(struct exception_frame* frame) {
 	aarch64_cache_poll_sync();
 	if (aarch64_handle_syscall(frame, ec)) return;
 	if (!is_irq) cpu_enter_exception();
-	if (clock_handle_irq(frame)) {
+	if (aarch64_gic_handle_irq(frame)) {
 		if (!is_irq) cpu_leave_exception();
 		return;
 	}

@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "interrupts_private.h"
+#include "interrupts/frame.h"
 
 #if defined(__riscv_compressed)
 #define RISCV64_USER_INSTRUCTION_ALIGNMENT 2u

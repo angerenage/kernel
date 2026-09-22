@@ -11,7 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../../../platforms/pc_aarch64/hal/interrupts_private.h"
+#include "../../../platforms/pc_aarch64/hal/interrupts/frame.h"
 
 #define AARCH64_TEST_PSTATE_F (1ull << 6)
 #define AARCH64_TEST_PSTATE_I (1ull << 7)
@@ -110,7 +110,7 @@ void hal_cpu_fp_context_restore(const struct hal_cpu_fp_context* context) {
  * test can exercise their internal exception classification without adding
  * test-only exports to the HAL.
  */
-#include "../../../platforms/pc_aarch64/hal/interrupts.c"
+#include "../../../platforms/pc_aarch64/hal/interrupts/interrupts.c"
 #include "../../../platforms/pc_aarch64/hal/userspace.c"
 
 static void aarch64_exception_test_reset(void) {

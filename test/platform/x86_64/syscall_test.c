@@ -9,7 +9,10 @@
 #include <stdlib.h>
 #include <test_memory.h>
 
-#include "../../../platforms/pc_x86_64/hal/interrupts_private.h"
+#include "../../../platforms/pc_x86_64/hal/interrupts/frame.h"
+#include "../../../platforms/pc_x86_64/hal/interrupts/segments.h"
+#include "../../../platforms/pc_x86_64/hal/syscall.h"
+#include "../../../platforms/pc_x86_64/hal/interrupts/vectors.h"
 
 static uintptr_t                 dispatched_number;
 static uintptr_t                 dispatched_args[6];

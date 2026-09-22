@@ -1,46 +1,30 @@
+#include "clock.h"
+
 #include <core/cpu.h>
 #include <core/lock.h>
 #include <core/spinlock.h>
+#include <hal/clock.h>
+#include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-#include "interrupts_private.h"
+#include "interrupts/pic.h"
+#include "interrupts/vectors.h"
 
-static hal_clock_handler_t clock_handler;
-static void*               clock_context;
-static bool                clock_running;
-static bool                clock_initialized;
-static bool                clock_apic_routed;
-static uint32_t            clock_frequency_hz;
-static struct spinlock     clock_lock = SPINLOCK_INIT_CLASS("clock_lock", SPINLOCK_ORDER_CLOCK, SPINLOCK_FLAG_IRQSAVE);
+static hal_clock_handler_t               clock_handler;
+static void*                             clock_context;
+static bool                              clock_running;
+static bool                              clock_initialized;
+static struct hal_interrupt_source_state timer_source;
+static uint32_t                          clock_frequency_hz;
+static struct spinlock clock_lock = SPINLOCK_INIT_CLASS("clock_lock", SPINLOCK_ORDER_CLOCK, SPINLOCK_FLAG_IRQSAVE);
 
 static void clock_reset_state(void) {
-	__atomic_store_n(&clock_apic_routed, false, __ATOMIC_RELEASE);
 	__atomic_store_n(&clock_running, false, __ATOMIC_RELEASE);
 	__atomic_store_n(&clock_frequency_hz, 0u, __ATOMIC_RELEASE);
 	__atomic_store_n(&clock_handler, NULL, __ATOMIC_RELEASE);
 	__atomic_store_n(&clock_context, NULL, __ATOMIC_RELEASE);
-}
-
-static const char* clock_enable_timer_irq(void) {
-	clock_apic_routed = apic_route_isa_irq(0u, X86_IRQ_BASE);
-	if (clock_apic_routed) {
-		(void)apic_set_isa_irq_mask(0u, false);
-		return "ioapic/lapic";
-	}
-
-	pic_unmask_irq(0u);
-	return "pic";
-}
-
-static void clock_disable_timer_irq(void) {
-	if (clock_apic_routed) {
-		(void)apic_set_isa_irq_mask(0u, true);
-		return;
-	}
-
-	pic_mask_irq(0u);
 }
 
 void hal_clock_init(void) {
@@ -66,11 +50,32 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 	}
 
 	if (clock_running) {
-		clock_disable_timer_irq();
+		if (!hal_interrupt_source_deinit(&timer_source)) {
+			spinlock_unlock_irqrestore(&clock_lock, state);
+			return false;
+		}
 		clock_reset_state();
 	}
 
 	if (!pit_init(frequency_hz, &actual_frequency_hz)) {
+		clock_reset_state();
+		spinlock_unlock_irqrestore(&clock_lock, state);
+		return false;
+	}
+	struct hal_interrupt_source      source = {.domain = 0u, .number = 0u};
+	struct hal_interrupt_source_info source_info;
+	if (!hal_interrupt_source_info(&source, &source_info)) {
+		clock_reset_state();
+		spinlock_unlock_irqrestore(&clock_lock, state);
+		return false;
+	}
+	struct hal_interrupt_delivery delivery = {
+		.target   = cpu_current(),
+		.event    = {.domain = source_info.delivery.domain, .id = source_info.delivery.base},
+		.trigger  = HAL_INTERRUPT_TRIGGER_FIRMWARE,
+		.polarity = HAL_INTERRUPT_POLARITY_FIRMWARE,
+	};
+	if (!hal_interrupt_source_init(&timer_source, &source, &delivery)) {
 		clock_reset_state();
 		spinlock_unlock_irqrestore(&clock_lock, state);
 		return false;
@@ -80,7 +85,11 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 	__atomic_store_n(&clock_context, ctx, __ATOMIC_RELEASE);
 	__atomic_store_n(&clock_frequency_hz, actual_frequency_hz, __ATOMIC_RELEASE);
 	__atomic_store_n(&clock_running, true, __ATOMIC_RELEASE);
-	(void)clock_enable_timer_irq();
+	if (!hal_interrupt_source_unmask(&timer_source)) {
+		if (hal_interrupt_source_deinit(&timer_source)) clock_reset_state();
+		spinlock_unlock_irqrestore(&clock_lock, state);
+		return false;
+	}
 	spinlock_unlock_irqrestore(&clock_lock, state);
 	return true;
 }
@@ -102,8 +111,7 @@ void hal_clock_stop(void) {
 		return;
 	}
 
-	clock_disable_timer_irq();
-	clock_reset_state();
+	if (hal_interrupt_source_deinit(&timer_source)) clock_reset_state();
 	spinlock_unlock_irqrestore(&clock_lock, state);
 }
 

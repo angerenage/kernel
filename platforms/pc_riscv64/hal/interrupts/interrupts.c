@@ -1,17 +1,22 @@
+#include "interrupts.h"
+
 #include <base/process.h>
 #include <core/address_space.h>
 #include <core/cpu.h>
 #include <core/exception.h>
-#include <core/interrupt.h>
 #include <core/sched.h>
-#include <hal/cpu.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 
-#include "interrupts_private.h"
+#include "../clock.h"
+#include "../syscall.h"
+#include "aplic.h"
+#include "frame.h"
+#include "imsic.h"
+#include "plic.h"
 
 #define RISCV64_SIE_SSIE (1ull << 1)
 #define RISCV64_SIE_STIE (1ull << 5)
@@ -24,7 +29,6 @@ extern void exception_entry(void);
 
 static bool global_ready;
 static bool local_ready[64];
-static bool external_interrupt_enabled;
 struct riscv64_exception_entry_state {
 	uintptr_t old_sp;
 	uintptr_t saved_t1;
@@ -69,40 +73,91 @@ void irq_enable_local(void) {
 	__asm__ volatile("csrs sstatus, %0" : : "r"(1ull << 1) : "memory");
 }
 
-static void riscv64_sync_external_interrupt_local(void) {
+void riscv64_sync_external_interrupt_local(void) {
 	uint64_t sie;
 
-	if (!cpu_is_bsp()) return;
 	sie = read_sie();
-	if (__atomic_load_n(&external_interrupt_enabled, __ATOMIC_ACQUIRE)) sie |= RISCV64_SIE_SEIE;
+	if (riscv64_plic_cpu_has_enabled_sources(cpu_current()) || riscv64_aplic_cpu_has_interface(cpu_current()) ||
+	    riscv64_imsic_cpu_has_interface(cpu_current()))
+		sie |= RISCV64_SIE_SEIE;
 	else sie &= ~RISCV64_SIE_SEIE;
 	write_sie(sie);
 }
 
-static bool riscv64_set_external_interrupt_enabled(bool enabled) {
-	struct cpu* bsp = cpu_bsp();
-
-	if (bsp == NULL) return false;
-	__atomic_store_n(&external_interrupt_enabled, enabled, __ATOMIC_RELEASE);
-	if (cpu_current() == bsp) riscv64_sync_external_interrupt_local();
-	else hal_cpu_kick(bsp);
-	return true;
+size_t hal_interrupt_source_domain_count(void) {
+	if (!global_ready) return 0u;
+	struct hal_interrupt_source_domain_info domain;
+	return (riscv64_plic_source_domain_at(&domain) ? 1u : 0u) + (riscv64_aplic_source_domain_at(&domain) ? 1u : 0u);
 }
 
-bool hal_interrupt_attach(interrupt_id_t id) {
-	return id == RISCV64_SCAUSE_SUPERVISOR_EXTERNAL && riscv64_set_external_interrupt_enabled(true);
+bool hal_interrupt_source_domain_at(size_t index, struct hal_interrupt_source_domain_info* out_domain) {
+	if (out_domain == NULL || !global_ready) return false;
+	struct hal_interrupt_source_domain_info domain;
+	if (riscv64_plic_source_domain_at(&domain)) {
+		if (index == 0u) {
+			*out_domain = domain;
+			return true;
+		}
+		index--;
+	}
+	return index == 0u && riscv64_aplic_source_domain_at(out_domain);
 }
 
-bool hal_interrupt_mask(interrupt_id_t id) {
-	return id == RISCV64_SCAUSE_SUPERVISOR_EXTERNAL && riscv64_set_external_interrupt_enabled(false);
+bool hal_interrupt_source_info(const struct hal_interrupt_source* source, struct hal_interrupt_source_info* out_info) {
+	if (source == NULL) return false;
+	if (source->domain == 1u) return riscv64_plic_source_info(source, out_info);
+	return riscv64_aplic_source_info(source, out_info);
 }
 
-bool hal_interrupt_rearm(interrupt_id_t id) {
-	return id == RISCV64_SCAUSE_SUPERVISOR_EXTERNAL && riscv64_set_external_interrupt_enabled(true);
+bool hal_interrupt_source_target_supported(const struct hal_interrupt_source* source, const struct cpu* target) {
+	if (source == NULL) return false;
+	if (source->domain == 1u) return riscv64_plic_source_target_supported(source, target);
+	return riscv64_aplic_source_target_supported(source, target);
 }
 
-bool hal_interrupt_detach(interrupt_id_t id) {
-	return id == RISCV64_SCAUSE_SUPERVISOR_EXTERNAL && riscv64_set_external_interrupt_enabled(false);
+bool hal_interrupt_source_init(struct hal_interrupt_source_state* state, const struct hal_interrupt_source* source,
+                               const struct hal_interrupt_delivery* delivery) {
+	if (source == NULL) return false;
+	if (source->domain == 1u) return riscv64_plic_source_init(state, source, delivery);
+	return riscv64_aplic_source_init(state, source, delivery);
+}
+
+bool hal_interrupt_source_mask(struct hal_interrupt_source_state* state) {
+	if (state == NULL) return false;
+	if (state->source.domain == 1u) return riscv64_plic_source_mask(state);
+	return riscv64_aplic_source_mask(state);
+}
+
+bool hal_interrupt_source_unmask(struct hal_interrupt_source_state* state) {
+	if (state == NULL) return false;
+	if (state->source.domain == 1u) return riscv64_plic_source_unmask(state);
+	return riscv64_aplic_source_unmask(state);
+}
+
+bool hal_interrupt_source_deinit(struct hal_interrupt_source_state* state) {
+	if (state == NULL) return false;
+	if (state->source.domain == 1u) return riscv64_plic_source_deinit(state);
+	return riscv64_aplic_source_deinit(state);
+}
+
+size_t hal_interrupt_message_range_count(void) {
+	struct hal_interrupt_message_range range;
+	return global_ready && riscv64_imsic_message_range_at(&range) ? 1u : 0u;
+}
+bool hal_interrupt_message_range_at(size_t index, struct hal_interrupt_message_range* out_range) {
+	return global_ready && index == 0u && riscv64_imsic_message_range_at(out_range);
+}
+bool hal_interrupt_message_target_supported(uint32_t domain, const struct hal_interrupt_message_source* source,
+                                            const struct cpu* target) {
+	return global_ready && riscv64_imsic_message_target_supported(domain, source, target);
+}
+bool hal_interrupt_message_init(struct hal_interrupt_message_state*         state,
+                                const struct hal_interrupt_message_request* request,
+                                struct hal_interrupt_message*               out_message) {
+	return global_ready && riscv64_imsic_message_init(state, request, out_message);
+}
+bool hal_interrupt_message_deinit(struct hal_interrupt_message_state* state) {
+	return riscv64_imsic_message_deinit(state);
 }
 
 bool hal_interrupts_init_global(void) {
@@ -132,6 +187,8 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 	irq_disable_local();
 
 	local_ready[cpu->index] = true;
+	riscv64_imsic_sync_local();
+	riscv64_sync_external_interrupt_local();
 	cpu_interrupts_set_ready(cpu, true);
 	return true;
 }
@@ -260,6 +317,7 @@ void handle_exception(struct exception_frame* frame) {
 	if (!is_interrupt) cpu_enter_exception();
 	if (is_interrupt && code == RISCV64_SCAUSE_SUPERVISOR_SOFTWARE) {
 		clear_software_interrupt();
+		riscv64_imsic_sync_local();
 		riscv64_sync_external_interrupt_local();
 		return;
 	}
@@ -268,7 +326,10 @@ void handle_exception(struct exception_frame* frame) {
 		return;
 	}
 	if (is_interrupt && code == RISCV64_SCAUSE_SUPERVISOR_EXTERNAL) {
-		if (!interrupt_dispatch((interrupt_id_t)code)) (void)riscv64_set_external_interrupt_enabled(false);
+		if (riscv64_imsic_handle_external_irq()) return;
+		if (riscv64_aplic_handle_external_irq()) return;
+		if (riscv64_plic_handle_external_irq()) return;
+		riscv64_sync_external_interrupt_local();
 		return;
 	}
 

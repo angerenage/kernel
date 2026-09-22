@@ -1,8 +1,8 @@
 #pragma once
 
-#include <stdbool.h>
 #include <stdint.h>
 
+/* Register state saved by the RISC-V supervisor trap entry path. */
 struct exception_frame {
 	uint64_t ra;
 	uint64_t sp;
@@ -41,8 +41,3 @@ struct exception_frame {
 	uint64_t sstatus;
 	uint64_t reserved;
 };
-
-bool clock_handle_irq(const struct exception_frame* frame);
-bool riscv64_handle_syscall(struct exception_frame* frame, bool is_interrupt, uint64_t code);
-
-void riscv64_prepare_user_return(void);

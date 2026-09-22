@@ -5,7 +5,8 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "interrupts_private.h"
+#include "interrupts/apic.h"
+#include "interrupts/vectors.h"
 
 #define X86_64_MSR_GS_BASE 0xc0000101u
 

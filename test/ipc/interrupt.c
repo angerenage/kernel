@@ -1,67 +1,90 @@
-#include <core/interrupt.h>
-#include <core/signal.h>
+#include <core/cpu.h>
 #include <criterion/criterion.h>
+#include <hal/interrupts.h>
 
-#include "test_support.h"
+static struct cpu interrupt_test_cpu = {.index = 0u, .role = CPU_ROLE_BSP};
 
-#define INTERRUPT_TEST_OWNER ((process_id_t)42u)
-#define INTERRUPT_TEST_OTHER ((process_id_t)84u)
+extern const struct cpu* hal_interrupt_mock_last_target(void);
+extern bool              hal_interrupt_mock_unmasked_from_masked(void);
+extern void              hal_interrupt_mock_set_mask_failure(bool fail);
 
-Test(interrupt, exclusive_binding_masks_until_signal_rearm_and_publishes_kernel_signal) {
-	struct signal*        signal;
-	struct signal_message message;
-	const interrupt_id_t  id = 7u;
-	uint64_t              generation;
+Test(interrupt_hal, fixed_sources_start_masked_and_messages_compose) {
+	struct hal_interrupt_source             source;
+	struct hal_interrupt_source_state       fixed = {0};
+	struct hal_interrupt_delivery           delivery;
+	struct hal_interrupt_message_range      range;
+	struct hal_interrupt_message            message;
+	struct hal_interrupt_source_domain_info fixed_domain;
 
-	ipc_test_init_heap();
-	signal = signal_create();
-	cr_assert_not_null(signal);
-	cr_assert_eq(interrupt_attach(INTERRUPT_TEST_OWNER, id, signal), INTERRUPT_OK);
-	cr_assert_eq(interrupt_attach(INTERRUPT_TEST_OTHER, id, signal), INTERRUPT_ALREADY_ATTACHED);
-	cr_assert_eq(interrupt_attach(INTERRUPT_TEST_OWNER, id + 1u, signal), INTERRUPT_ALREADY_ATTACHED);
-
-	cr_assert(interrupt_dispatch(id));
-	cr_assert_eq(signal_read(signal, &message), SIGNAL_OK);
-	cr_assert_eq(message.sender, SIGNAL_SENDER_KERNEL);
-	cr_assert_eq(message.payload.args[0], id);
-	generation = signal_generation(signal);
-	cr_assert_neq(generation, 0u);
-
-	cr_assert(interrupt_dispatch(id));
-	cr_assert_eq(signal_generation(signal), generation, "masked interrupt published twice before re-arm");
-	cr_assert(interrupt_rearm_signal(signal_id(signal)));
-	cr_assert(interrupt_dispatch(id));
-	cr_assert_neq(signal_generation(signal), generation);
-
-	cr_assert_eq(interrupt_detach(INTERRUPT_TEST_OTHER, id), INTERRUPT_NOT_OWNER);
-	cr_assert_eq(interrupt_detach(INTERRUPT_TEST_OWNER, id), INTERRUPT_OK);
-	cr_assert_not(interrupt_dispatch(id));
-	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
-}
-
-Test(interrupt, process_cleanup_detaches_all_owned_sources) {
-	struct signal*       first;
-	struct signal*       second;
-	const interrupt_id_t first_id  = 8u;
-	const interrupt_id_t second_id = 9u;
-
-	ipc_test_init_heap();
-	first  = signal_create();
-	second = signal_create();
-	cr_assert_not_null(first);
-	cr_assert_not_null(second);
-	cr_assert_eq(interrupt_attach(INTERRUPT_TEST_OWNER, first_id, first), INTERRUPT_OK);
-	cr_assert_eq(interrupt_attach(INTERRUPT_TEST_OWNER, second_id, second), INTERRUPT_OK);
-
-	interrupt_cleanup_process(INTERRUPT_TEST_OTHER);
-	cr_assert(interrupt_dispatch(first_id));
-	cr_assert(interrupt_dispatch(second_id));
-	cr_assert(interrupt_rearm_signal(signal_id(first)));
-	cr_assert(interrupt_rearm_signal(signal_id(second)));
-
-	interrupt_cleanup_process(INTERRUPT_TEST_OWNER);
-	cr_assert_not(interrupt_dispatch(first_id));
-	cr_assert_not(interrupt_dispatch(second_id));
-	cr_assert_eq(signal_destroy(first), SIGNAL_OK);
-	cr_assert_eq(signal_destroy(second), SIGNAL_OK);
+	cpu_bind_current(&interrupt_test_cpu);
+	cr_assert_eq(hal_interrupt_source_domain_count(), 1u);
+	cr_assert(hal_interrupt_source_domain_at(0u, &fixed_domain));
+	cr_assert_eq(fixed_domain.domain, 0u);
+	cr_assert_eq(fixed_domain.source_count, 256u);
+	source = (struct hal_interrupt_source){.domain = fixed_domain.domain, .number = 7u};
+	struct hal_interrupt_source_info source_info;
+	cr_assert(hal_interrupt_source_info(&source, &source_info));
+	cr_assert_eq(source_info.delivery.base, source.number);
+	cr_assert_eq(source_info.delivery.limit, source.number + 1u);
+	cr_assert_eq(source_info.target_kind, HAL_INTERRUPT_TARGET_ROUTABLE);
+	cr_assert_null(source_info.fixed_target);
+	cr_assert(hal_interrupt_source_target_supported(&source, &interrupt_test_cpu));
+	cr_assert_not(hal_interrupt_source_target_supported(&source, NULL));
+	delivery = (struct hal_interrupt_delivery){
+		.target   = &interrupt_test_cpu,
+		.event    = {.domain = source_info.delivery.domain, .id = source_info.delivery.base},
+		.trigger  = HAL_INTERRUPT_TRIGGER_FIRMWARE,
+		.polarity = HAL_INTERRUPT_POLARITY_FIRMWARE
+    };
+	cr_assert_not(hal_interrupt_source_mask(&fixed));
+	cr_assert_not(hal_interrupt_source_unmask(&fixed));
+	cr_assert(hal_interrupt_source_init(&fixed, &source, &delivery));
+	cr_assert(fixed.initialized && fixed.masked);
+	cr_assert_not(hal_interrupt_source_init(&fixed, &source, &delivery));
+	cr_assert(fixed.initialized && fixed.masked);
+	cr_assert_eq(fixed.target, &interrupt_test_cpu);
+	cr_assert_eq(hal_interrupt_mock_last_target(), &interrupt_test_cpu);
+	cr_assert(hal_interrupt_source_unmask(&fixed));
+	cr_assert(hal_interrupt_mock_unmasked_from_masked());
+	cr_assert_not(fixed.masked);
+	cr_assert(hal_interrupt_source_mask(&fixed));
+	cr_assert(fixed.masked);
+	cr_assert(hal_interrupt_source_unmask(&fixed));
+	hal_interrupt_mock_set_mask_failure(true);
+	cr_assert_not(hal_interrupt_source_deinit(&fixed));
+	cr_assert(fixed.initialized && !fixed.masked);
+	hal_interrupt_mock_set_mask_failure(false);
+	cr_assert(hal_interrupt_source_deinit(&fixed));
+	cr_assert_not(fixed.initialized);
+	cr_assert_not(hal_interrupt_source_mask(&fixed));
+	cr_assert_not(hal_interrupt_source_unmask(&fixed));
+	struct hal_interrupt_source invalid_source = {.domain = fixed_domain.domain + 1u, .number = source.number};
+	cr_assert_not(hal_interrupt_source_init(&fixed, &invalid_source, &delivery));
+	cr_assert_not(fixed.initialized);
+	delivery.event.id = fixed_domain.source_count;
+	cr_assert_not(hal_interrupt_source_init(&fixed, &source, &delivery));
+	cr_assert_not(fixed.initialized);
+	delivery.event.id = source.number;
+	cr_assert_eq(hal_interrupt_message_range_count(), 1u);
+	cr_assert(hal_interrupt_message_range_at(0u, &range));
+	cr_assert(range.delivery.base <= 64u && range.delivery.limit > 64u);
+	struct hal_interrupt_message_request request = {
+		.domain = range.domain, .target = &interrupt_test_cpu, .event = {.domain = range.delivery.domain, .id = 64u}
+    };
+	cr_assert(hal_interrupt_message_target_supported(request.domain, request.source, request.target));
+	cr_assert_not(hal_interrupt_message_target_supported(request.domain, request.source, NULL));
+	struct hal_interrupt_message_state message_state = {0};
+	cr_assert(hal_interrupt_message_init(&message_state, &request, &message));
+	cr_assert_eq(message.address, 0xfee00000u);
+	cr_assert_eq(message.data, 64u);
+	cr_assert_not(hal_interrupt_message_init(&message_state, &request, &message));
+	cr_assert(hal_interrupt_message_deinit(&message_state));
+	struct hal_interrupt_message_source producer = {.domain = 0u, .id = 1u};
+	request.source                               = &producer;
+	cr_assert_not(hal_interrupt_message_target_supported(request.domain, request.source, request.target));
+	cr_assert_not(hal_interrupt_message_init(&message_state, &request, &message));
+	request.source = NULL;
+	request.domain++;
+	cr_assert_not(hal_interrupt_message_init(&message_state, &request, &message));
+	cr_assert(hal_interrupt_message_deinit(&message_state));
 }

@@ -4,7 +4,8 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "interrupts_private.h"
+#include "interrupts/frame.h"
+#include "interrupts/segments.h"
 
 #define X86_USER_RFLAGS 0x202ull
 #define X86_RFLAGS_DIRECTION (1ull << 10)

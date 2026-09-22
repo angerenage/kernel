@@ -28,6 +28,9 @@ struct iommu_fdt_node {
 	size_t         reg_size;
 	const uint8_t* ranges;
 	size_t         ranges_size;
+	const uint8_t* requested_property;
+	size_t         requested_property_size;
+	bool           requested_property_present;
 };
 
 static inline uint32_t iommu_fdt_u32(const void* data) {
@@ -93,28 +96,51 @@ static inline bool iommu_fdt_translate(const struct iommu_fdt_node* stack, size_
 	return true;
 }
 
-static inline bool iommu_fdt_node_address(const struct iommu_fdt_node* stack, size_t depth, uint64_t* out) {
-	const struct iommu_fdt_node* node = &stack[depth - 1u];
-	if (node->reg == NULL || node->parent_address_cells == 0u || node->parent_address_cells > 2u ||
-	    node->reg_size < (size_t)(node->parent_address_cells + node->parent_size_cells) * 4u ||
-	    !iommu_fdt_cells(node->reg, node->parent_address_cells, out))
+static inline bool iommu_fdt_node_reg_address(const struct iommu_fdt_node* stack, size_t depth, size_t ordinal,
+                                              uint64_t* out) {
+	const struct iommu_fdt_node* node       = &stack[depth - 1u];
+	size_t                       tuple_size = (size_t)(node->parent_address_cells + node->parent_size_cells) * 4u;
+	if (node->reg == NULL || node->parent_address_cells == 0u || node->parent_address_cells > 2u || tuple_size == 0u ||
+	    node->reg_size % tuple_size != 0u || ordinal >= node->reg_size / tuple_size ||
+	    !iommu_fdt_cells(node->reg + ordinal * tuple_size, node->parent_address_cells, out))
 		return false;
 	return iommu_fdt_translate(stack, depth, out);
 }
 
-static inline size_t iommu_fdt_controllers(const char* compatible, size_t target, uintptr_t* out_address) {
+static inline bool iommu_fdt_node_reg_size(const struct iommu_fdt_node* stack, size_t depth, size_t ordinal,
+                                           uint64_t* out) {
+	const struct iommu_fdt_node* node       = &stack[depth - 1u];
+	size_t                       tuple_size = (size_t)(node->parent_address_cells + node->parent_size_cells) * 4u;
+	if (node->reg == NULL || out == NULL || node->parent_size_cells == 0u || node->parent_size_cells > 2u ||
+	    tuple_size == 0u || node->reg_size % tuple_size != 0u || ordinal >= node->reg_size / tuple_size)
+		return false;
+	return iommu_fdt_cells(
+		node->reg + ordinal * tuple_size + node->parent_address_cells * 4u, node->parent_size_cells, out);
+}
+
+static inline bool iommu_fdt_node_address(const struct iommu_fdt_node* stack, size_t depth, uint64_t* out) {
+	return iommu_fdt_node_reg_address(stack, depth, 0u, out);
+}
+
+static inline size_t iommu_fdt_controllers_search(const char* compatible, size_t target, uintptr_t* out_address,
+                                                  uintptr_t* out_first_size, uintptr_t* out_second_address,
+                                                  uintptr_t* out_second_size, bool* out_present,
+                                                  const char* property_name, const uint8_t** out_property,
+                                                  size_t* out_property_size, bool* out_property_present) {
 	struct kernel_boot_data dtb;
 	struct iommu_fdt_node   stack[IOMMU_FDT_MAX_DEPTH];
 	if (!kernel_boot_dtb_get(&dtb) || dtb.address == NULL || dtb.size < 40u ||
 	    iommu_fdt_u32(dtb.address) != IOMMU_FDT_MAGIC)
 		return 0u;
 	const uint8_t* blob             = dtb.address;
+	uint32_t       total_size       = iommu_fdt_u32(blob + 4u);
 	uint32_t       structure_offset = iommu_fdt_u32(blob + 8u);
 	uint32_t       strings_offset   = iommu_fdt_u32(blob + 12u);
 	uint32_t       strings_size     = iommu_fdt_u32(blob + 32u);
 	uint32_t       structure_size   = iommu_fdt_u32(blob + 36u);
-	if (structure_offset > dtb.size || structure_size > dtb.size - structure_offset || strings_offset > dtb.size ||
-	    strings_size > dtb.size - strings_offset)
+	if (total_size < 40u || total_size > dtb.size || structure_offset > total_size ||
+	    structure_size > total_size - structure_offset || strings_offset > total_size ||
+	    strings_size > total_size - strings_offset)
 		return 0u;
 	const uint8_t* cursor  = blob + structure_offset;
 	const uint8_t* end     = cursor + structure_size;
@@ -142,9 +168,31 @@ static inline size_t iommu_fdt_controllers(const char* compatible, size_t target
 			struct iommu_fdt_node* node = &stack[depth - 1u];
 			if (iommu_fdt_node_enabled(node) &&
 			    iommu_fdt_string_list_contains(node->compatible, node->compatible_size, compatible)) {
+				if (out_present != NULL) *out_present = true;
 				uint64_t address;
 				if (iommu_fdt_node_address(stack, depth, &address) && address <= UINTPTR_MAX) {
-					if (out_address != NULL && count == target) *out_address = (uintptr_t)address;
+					if (count == target) {
+						if (out_address != NULL) *out_address = (uintptr_t)address;
+						if (out_first_size != NULL) {
+							uint64_t first_size;
+							if (!iommu_fdt_node_reg_size(stack, depth, 0u, &first_size) || first_size > UINTPTR_MAX)
+								return count;
+							*out_first_size = (uintptr_t)first_size;
+						}
+						if (out_property != NULL) *out_property = node->requested_property;
+						if (out_property_size != NULL) *out_property_size = node->requested_property_size;
+						if (out_property_present != NULL) *out_property_present = node->requested_property_present;
+						if (out_second_address != NULL || out_second_size != NULL) {
+							uint64_t second;
+							uint64_t second_size;
+							if (!iommu_fdt_node_reg_address(stack, depth, 1u, &second) || second > UINTPTR_MAX ||
+							    (out_second_size != NULL && (!iommu_fdt_node_reg_size(stack, depth, 1u, &second_size) ||
+							                                 second_size > UINTPTR_MAX)))
+								return count;
+							if (out_second_address != NULL) *out_second_address = (uintptr_t)second;
+							if (out_second_size != NULL) *out_second_size = (uintptr_t)second_size;
+						}
+					}
 					count++;
 				}
 			}
@@ -177,6 +225,11 @@ static inline size_t iommu_fdt_controllers(const char* compatible, size_t target
 				node->ranges      = cursor;
 				node->ranges_size = length;
 			}
+			if (property_name != NULL && strcmp(name, property_name) == 0) {
+				node->requested_property         = cursor;
+				node->requested_property_size    = length;
+				node->requested_property_present = true;
+			}
 			cursor += (length + 3u) & ~3u;
 		}
 		else if (token == IOMMU_FDT_NOP) continue;
@@ -185,4 +238,41 @@ static inline size_t iommu_fdt_controllers(const char* compatible, size_t target
 		if (cursor > end) return count;
 	}
 	return count;
+}
+
+static inline size_t iommu_fdt_controllers_full(const char* compatible, size_t target, uintptr_t* out_address,
+                                                uintptr_t* out_second_address) {
+	return iommu_fdt_controllers_search(
+		compatible, target, out_address, NULL, out_second_address, NULL, NULL, NULL, NULL, NULL, NULL);
+}
+
+static inline size_t iommu_fdt_controllers_second_region(const char* compatible, size_t target, uintptr_t* out_address,
+                                                         uintptr_t* out_second_address, uintptr_t* out_second_size) {
+	return iommu_fdt_controllers_search(
+		compatible, target, out_address, NULL, out_second_address, out_second_size, NULL, NULL, NULL, NULL, NULL);
+}
+
+static inline size_t iommu_fdt_controllers_region(const char* compatible, size_t target, uintptr_t* out_address,
+                                                  uintptr_t* out_size) {
+	return iommu_fdt_controllers_search(
+		compatible, target, out_address, out_size, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+}
+
+static inline bool iommu_fdt_controller_property(const char* compatible, size_t target, const char* name,
+                                                 const uint8_t** out_data, size_t* out_size) {
+	bool present = false;
+	if (iommu_fdt_controllers_search(
+			compatible, target, NULL, NULL, NULL, NULL, NULL, name, out_data, out_size, &present) <= target)
+		return false;
+	return present;
+}
+
+static inline size_t iommu_fdt_controllers(const char* compatible, size_t target, uintptr_t* out_address) {
+	return iommu_fdt_controllers_full(compatible, target, out_address, NULL);
+}
+
+static inline bool iommu_fdt_compatible_present(const char* compatible) {
+	bool present = false;
+	(void)iommu_fdt_controllers_search(compatible, 0u, NULL, NULL, NULL, NULL, &present, NULL, NULL, NULL, NULL);
+	return present;
 }

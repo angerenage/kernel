@@ -1,7 +1,7 @@
+#include "syscall.h"
+
 #include <kernel/syscall.h>
 #include <stdint.h>
-
-#include "interrupts_private.h"
 
 bool loongarch64_handle_syscall(struct exception_frame* frame, uint64_t ecode) {
 	enum syscall_frame_action action;

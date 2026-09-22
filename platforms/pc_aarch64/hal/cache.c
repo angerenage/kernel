@@ -1,11 +1,11 @@
+#include "cache.h"
+
 #include <core/cpu.h>
 #include <core/lock.h>
 #include <core/spinlock.h>
 #include <hal/cache.h>
 #include <hal/hcf.h>
 #include <stdint.h>
-
-#include "interrupts_private.h"
 
 #define AARCH64_CACHE_MAX_CPUS 64u
 

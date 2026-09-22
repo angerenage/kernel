@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "interrupts_private.h"
+#include "interrupts/frame.h"
 
 enum {
 	LOONGARCH64_USER_STACK_ALIGNMENT       = 16u,

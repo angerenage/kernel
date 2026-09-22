@@ -1,3 +1,5 @@
+#include "cache.h"
+
 #include <core/cpu.h>
 #include <core/lock.h>
 #include <core/spinlock.h>
@@ -6,7 +8,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "interrupts_private.h"
+#include "interrupts/apic.h"
 
 #define X86_CACHE_MAX_CPUS 64u
 

@@ -1,3 +1,5 @@
+#include "paging.h"
+
 #include <base/math.h>
 #include <core/cpu.h>
 #include <core/lock.h>
@@ -12,7 +14,7 @@
 #include <string.h>
 
 #include "../../paging_transaction.h"
-#include "interrupts_private.h"
+#include "interrupts/apic.h"
 
 #define X86_PTE_PRESENT (1ull << 0)
 #define X86_PTE_WRITE (1ull << 1)
@@ -64,7 +66,7 @@ static struct spinlock         paging_lock =
 static struct x86_tlb_request x86_tlb_request;
 static uint64_t               x86_tlb_ack[X86_TLB_MAX_CPUS];
 static struct spinlock        x86_tlb_shootdown_lock = SPINLOCK_INIT_CLASS(
-    "tlb_shootdown_lock", SPINLOCK_ORDER_PAGING, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
+	"tlb_shootdown_lock", SPINLOCK_ORDER_PAGING, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
 
 static inline uint64_t x86_read_cr0(void) {
 	uint64_t value;
@@ -763,12 +765,12 @@ bool hal_paging_remap(struct hal_paging_space* space, const struct hal_paging_re
 	uint64_t*                 root        = x86_space_root_table(space);
 	struct paging_transaction transaction = {0};
 	bool                      ok          = root != NULL && x86_remap_range(root,
-                                              x86_paging_levels() - 1,
-                                              request->virtual_address,
-                                              end,
-                                              request->virtual_address,
-                                              request->physical_address,
-                                              &transaction);
+	                                                                        x86_paging_levels() - 1,
+	                                                                        request->virtual_address,
+	                                                                        end,
+	                                                                        request->virtual_address,
+	                                                                        request->physical_address,
+	                                                                        &transaction);
 	x86_tlb_shootdown_range(request->virtual_address, request->size);
 	if (ok) paging_transaction_commit(&transaction);
 	else {

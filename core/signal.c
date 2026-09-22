@@ -2,7 +2,6 @@
 #include <base/upcall.h>
 #include <core/capability.h>
 #include <core/id_table.h>
-#include <core/interrupt.h>
 #include <core/sched.h>
 #include <core/signal.h>
 #include <core/user_upcall.h>
@@ -788,7 +787,6 @@ enum signal_result signal_try_wait(struct signal* signal, struct signal_message*
 	struct uthread*             current;
 	struct irq_state            state;
 	enum signal_result          result;
-	signal_id_t                 rearm_id = SIGNAL_ID_INVALID;
 
 	if (signal == NULL || out_message == NULL) return SIGNAL_INVALID_ARGUMENTS;
 	current = uthread_current();
@@ -809,11 +807,9 @@ enum signal_result signal_try_wait(struct signal* signal, struct signal_message*
 		result = SIGNAL_OK;
 	}
 	else {
-		result   = SIGNAL_WOULD_BLOCK;
-		rearm_id = signal->id;
+		result = SIGNAL_WOULD_BLOCK;
 	}
 	spinlock_unlock_irqrestore(&signal->lock, state);
-	if (rearm_id != SIGNAL_ID_INVALID) (void)interrupt_rearm_signal(rearm_id);
 	return result;
 }
 
@@ -850,12 +846,9 @@ enum signal_result signal_wait(struct signal* signal, struct signal_message* out
 		}
 		else {
 			enum sched_block_result block_result;
-			signal_id_t             rearm_id;
 
 			binding->waiting = true;
-			rearm_id         = signal->id;
 			spinlock_unlock(&signal->lock);
-			if (rearm_id != SIGNAL_ID_INVALID) (void)interrupt_rearm_signal(rearm_id);
 			block_result = sched_block_current_interruptible_locked(&signal->waiters, THREAD_BLOCK_SIGNAL, wait_state);
 			if (block_result == SCHED_BLOCK_INTERRUPTED) {
 				signal_clear_waiting(signal, current);

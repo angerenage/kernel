@@ -1,11 +1,11 @@
+#include "clock.h"
+
 #include <core/lock.h>
 #include <core/spinlock.h>
 #include <hal/clock.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-
-#include "interrupts_private.h"
 
 #define LOONGARCH64_CSR_CRMD 0x0u
 #define LOONGARCH64_CSR_ECFG 0x4u

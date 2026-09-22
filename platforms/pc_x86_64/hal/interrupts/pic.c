@@ -1,6 +1,21 @@
+#include "pic.h"
+
 #include <stddef.h>
 
-#include "interrupts_private.h"
+#include "../utils.h"
+#include "vectors.h"
+
+#define X86_PIC1_CMD 0x20u
+#define X86_PIC1_DATA 0x21u
+#define X86_PIC2_CMD 0xa0u
+#define X86_PIC2_DATA 0xa1u
+#define X86_PIC_EOI 0x20u
+#define X86_ICW1_INIT 0x10u
+#define X86_ICW1_ICW4 0x01u
+#define X86_ICW4_8086 0x01u
+#define X86_PIT_CHANNEL0 0x40u
+#define X86_PIT_COMMAND 0x43u
+#define X86_PIT_INPUT_HZ 1193182u
 
 static void pic_remap(void) {
 	uint8_t pic1_mask = inb(X86_PIC1_DATA);

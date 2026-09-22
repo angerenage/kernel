@@ -2,7 +2,6 @@
 #include <core/address_space.h>
 #include <core/cpu.h>
 #include <core/exception.h>
-#include <core/interrupt.h>
 #include <core/sched.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
@@ -12,7 +11,10 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include "interrupts_private.h"
+#include "../clock.h"
+#include "../syscall.h"
+#include "controllers.h"
+#include "frame.h"
 
 #define LOONGARCH64_CSR_ECFG 0x4u
 #define LOONGARCH64_CSR_EENTRY 0xcu
@@ -102,14 +104,10 @@ void irq_enable_local(void) {
 	__asm__ volatile("csrwr %0, 0x0" : : "r"(crmd) : "memory");
 }
 
-static bool loongarch64_interrupt_valid(interrupt_id_t id) {
-	return id < LOONGARCH64_USER_INTERRUPT_COUNT;
-}
-
-static bool loongarch64_set_interrupt_enabled(interrupt_id_t id, bool enabled) {
+static bool loongarch64_set_interrupt_enabled(uint32_t id, bool enabled) {
 	uint64_t ecfg;
 
-	if (!loongarch64_interrupt_valid(id)) return false;
+	if (id >= LOONGARCH64_USER_INTERRUPT_COUNT) return false;
 	ecfg = csrrd(LOONGARCH64_CSR_ECFG);
 	if (enabled) ecfg |= 1ull << id;
 	else ecfg &= ~(1ull << id);
@@ -117,20 +115,56 @@ static bool loongarch64_set_interrupt_enabled(interrupt_id_t id, bool enabled) {
 	return true;
 }
 
-bool hal_interrupt_attach(interrupt_id_t id) {
-	return loongarch64_set_interrupt_enabled(id, true);
+size_t hal_interrupt_source_domain_count(void) {
+	return global_ready ? loongarch64_interrupt_source_domain_count() : 0u;
 }
 
-bool hal_interrupt_mask(interrupt_id_t id) {
-	return loongarch64_set_interrupt_enabled(id, false);
+bool hal_interrupt_source_domain_at(size_t index, struct hal_interrupt_source_domain_info* out_domain) {
+	return global_ready && loongarch64_interrupt_source_domain_at(index, out_domain);
 }
 
-bool hal_interrupt_rearm(interrupt_id_t id) {
-	return loongarch64_set_interrupt_enabled(id, true);
+bool hal_interrupt_source_info(const struct hal_interrupt_source* source, struct hal_interrupt_source_info* out_info) {
+	return global_ready && loongarch64_interrupt_source_info(source, out_info);
 }
 
-bool hal_interrupt_detach(interrupt_id_t id) {
-	return loongarch64_set_interrupt_enabled(id, false);
+bool hal_interrupt_source_target_supported(const struct hal_interrupt_source* source, const struct cpu* target) {
+	return global_ready && loongarch64_interrupt_source_target_supported(source, target);
+}
+
+bool hal_interrupt_source_init(struct hal_interrupt_source_state* state, const struct hal_interrupt_source* source,
+                               const struct hal_interrupt_delivery* delivery) {
+	return global_ready && loongarch64_interrupt_source_init(state, source, delivery);
+}
+
+bool hal_interrupt_source_mask(struct hal_interrupt_source_state* state) {
+	return global_ready && loongarch64_interrupt_source_mask(state);
+}
+
+bool hal_interrupt_source_unmask(struct hal_interrupt_source_state* state) {
+	return global_ready && loongarch64_interrupt_source_unmask(state);
+}
+
+bool hal_interrupt_source_deinit(struct hal_interrupt_source_state* state) {
+	return loongarch64_interrupt_source_deinit(state);
+}
+
+size_t hal_interrupt_message_range_count(void) {
+	return global_ready ? loongarch64_interrupt_message_range_count() : 0u;
+}
+bool hal_interrupt_message_range_at(size_t index, struct hal_interrupt_message_range* out_range) {
+	return global_ready && loongarch64_interrupt_message_range_at(index, out_range);
+}
+bool hal_interrupt_message_target_supported(uint32_t domain, const struct hal_interrupt_message_source* source,
+                                            const struct cpu* target) {
+	return global_ready && loongarch64_interrupt_message_target_supported(domain, source, target);
+}
+bool hal_interrupt_message_init(struct hal_interrupt_message_state*         state,
+                                const struct hal_interrupt_message_request* request,
+                                struct hal_interrupt_message*               out_message) {
+	return global_ready && loongarch64_interrupt_message_init(state, request, out_message);
+}
+bool hal_interrupt_message_deinit(struct hal_interrupt_message_state* state) {
+	return loongarch64_interrupt_message_deinit(state);
 }
 
 bool hal_interrupts_init_global(void) {
@@ -141,6 +175,7 @@ bool hal_interrupts_init_global(void) {
 		return false;
 	}
 
+	if (!loongarch64_interrupt_controllers_discover()) return false;
 	global_ready = true;
 	return true;
 }
@@ -166,6 +201,13 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 	csrwr(cpu->kernel_entry_stack_top, LOONGARCH64_CSR_SAVE1);
 	csrwr(tlbr_entry, LOONGARCH64_CSR_TLBRENTRY);
 	csrwr(merr_entry, LOONGARCH64_CSR_MERRENTRY);
+	if (!loongarch64_interrupt_controllers_init_local(cpu)) return false;
+
+	/* CPUINTC pins are internal cascade endpoints. Fixed sources are
+	 * configured at their leaf controller and delivered through these pins. */
+	uint64_t ecfg = csrrd(LOONGARCH64_CSR_ECFG);
+	for (uint32_t id = 2u; id < 10u; id++) ecfg |= 1ull << id;
+	csrwr(ecfg, LOONGARCH64_CSR_ECFG);
 
 	local_ready[cpu->index] = true;
 	cpu_interrupts_set_ready(cpu, true);
@@ -323,9 +365,10 @@ void handle_exception(struct exception_frame* frame) {
 		bool handled = false;
 
 		is_pending = frame->estat & 0x1fffu;
-		for (interrupt_id_t id = 0u; id < LOONGARCH64_USER_INTERRUPT_COUNT; id++) {
+		if (loongarch64_interrupt_controllers_handle(is_pending)) return;
+		for (uint32_t id = 0u; id < LOONGARCH64_USER_INTERRUPT_COUNT; id++) {
 			if ((is_pending & (1ull << id)) == 0u) continue;
-			if (!interrupt_dispatch(id)) (void)hal_interrupt_mask(id);
+			(void)loongarch64_set_interrupt_enabled(id, false);
 			handled = true;
 		}
 		if (handled) return;

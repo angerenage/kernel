@@ -4,7 +4,8 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "interrupts_private.h"
+#include "cache.h"
+#include "interrupts/gic.h"
 
 enum {
 	AARCH64_THREAD_STACK_ALIGNMENT = 16u,

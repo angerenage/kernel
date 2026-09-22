@@ -34,7 +34,11 @@ struct iommu_acpi_header {
 } __attribute__((packed));
 
 static inline const void* iommu_acpi_phys_to_virt(uintptr_t address) {
-	return (const void*)(address + boot_info.direct_map_offset);
+	struct kernel_boot_address_space address_space;
+
+	if (!kernel_boot_address_space_get(&address_space) || address > UINTPTR_MAX - address_space.direct_map_offset)
+		return NULL;
+	return (const void*)(address + address_space.direct_map_offset);
 }
 
 static inline bool iommu_acpi_checksum(const void* data, size_t size) {
