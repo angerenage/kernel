@@ -47,8 +47,10 @@ bool loongarch64_pch_lpc_set_masked(struct fixed_controller* controller, uint32_
 	if (!masked) {
 		struct fixed_controller* parent = loongarch64_fixed_by_domain(LOONGARCH64_DOMAIN_PCH_PIC_BASE);
 		if (parent == NULL || controller->cascade >= parent->source_count ||
-		    !loongarch64_pch_pic_set_masked(parent, controller->cascade, false))
+		    !loongarch64_pch_pic_set_masked(parent, controller->cascade, false)) {
+			(void)loongarch64_pch_lpc_set_masked(controller, source, true);
 			return false;
+		}
 	}
 	return true;
 }

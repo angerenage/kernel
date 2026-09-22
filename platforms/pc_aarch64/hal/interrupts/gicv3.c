@@ -1,6 +1,8 @@
 #include "gicv3.h"
 
 #include <core/cpu.h>
+#include <core/lock.h>
+#include <core/spinlock.h>
 #include <hal/interrupts.h>
 #include <hal/paging.h>
 #include <kernel/boot.h>
@@ -35,21 +37,25 @@
 #define GICD_CTLR_ENABLE_G1 (1u << 0)
 #define GICD_TYPER_MBIS (1u << 16)
 
+#define GICR_CTLR 0x0000u
 #define GICR_TYPER 0x0008u
 #define GICR_WAKER 0x0014u
 #define GICR_SGI_BASE 0x10000u
+#define GICR_CTLR_RWP (1u << 3)
 #define GICR_TYPER_LAST (1u << 4)
 #define GICR_TYPER_VLPIS (1u << 1)
 #define GICR_WAKER_PROCESSOR_SLEEP (1u << 1)
 #define GICR_WAKER_CHILDREN_ASLEEP (1u << 2)
 
-static uintptr_t distributor_phys;
-static uintptr_t redistributors_phys;
-static uintptr_t redistributors_size;
-static uintptr_t redistributor_stride;
-static uintptr_t redistributor_phys[GICV3_MAX_CPUS];
-static bool      local_ready[GICV3_MAX_CPUS];
-static bool      ready;
+static uintptr_t       distributor_phys;
+static uintptr_t       redistributors_phys;
+static uintptr_t       redistributors_size;
+static uintptr_t       redistributor_stride;
+static uintptr_t       redistributor_phys[GICV3_MAX_CPUS];
+static bool            local_ready[GICV3_MAX_CPUS];
+static bool            ready;
+static struct spinlock gicv3_distributor_lock =
+	SPINLOCK_INIT_CLASS("gicv3_distributor", SPINLOCK_ORDER_INTERRUPT, SPINLOCK_FLAG_IRQSAVE);
 
 bool aarch64_gicv3_ready(void) {
 	return __atomic_load_n(&ready, __ATOMIC_ACQUIRE);
@@ -87,6 +93,32 @@ static void gicv3_write64(uintptr_t phys, uint64_t value) {
 }
 static void gicv3_write8(uintptr_t phys, uint8_t value) {
 	*(volatile uint8_t*)gicv3_virt(phys) = value;
+}
+
+/* Wait for distributor writes to reach the interrupt controller. */
+static bool gicv3_wait_rwp(void) {
+	for (uint32_t attempt = 0u; attempt < 100000u; attempt++)
+		if ((gicv3_read32(distributor_phys + GICD_CTLR) & GICD_CTLR_RWP) == 0u) return true;
+	return false;
+}
+
+/* Wait until an interrupt disable has reached its distributor or redistributor. */
+static bool gicv3_wait_disabled(uintptr_t base, uint32_t id) {
+	uintptr_t ctlr;
+	uint32_t  rwp;
+	if (id < 32u) {
+		if (base < GICR_SGI_BASE) return false;
+		ctlr = base - GICR_SGI_BASE + GICR_CTLR;
+		rwp  = GICR_CTLR_RWP;
+	}
+	else {
+		ctlr = distributor_phys + GICD_CTLR;
+		rwp  = GICD_CTLR_RWP;
+	}
+	if (!gicv3_map(ctlr)) return false;
+	for (uint32_t attempt = 0u; attempt < 100000u; attempt++)
+		if ((gicv3_read32(ctlr) & rwp) == 0u) return true;
+	return false;
 }
 
 static bool gicv3_find_acpi(uintptr_t* out_distributor, uintptr_t* out_redistributors, uintptr_t* out_size,
@@ -170,14 +202,24 @@ bool aarch64_gicv3_init_global(void) {
 	redistributors_phys  = redistributors;
 	redistributors_size  = size;
 	redistributor_stride = stride;
-	gicv3_write32(distributor_phys + GICD_CTLR, GICD_CTLR_ARE_NS | GICD_CTLR_ENABLE_G1A | GICD_CTLR_ENABLE_G1);
-	for (uint32_t attempt = 0u; attempt < 100000u; attempt++) {
-		if ((gicv3_read32(distributor_phys + GICD_CTLR) & GICD_CTLR_RWP) == 0u) {
-			__atomic_store_n(&ready, true, __ATOMIC_RELEASE);
-			return true;
-		}
-	}
-	return false;
+
+	/* Disable firmware groups without changing an already-enabled ARE_NS. */
+	uint32_t ctlr = gicv3_read32(distributor_phys + GICD_CTLR) & GICD_CTLR_ARE_NS;
+	gicv3_write32(distributor_phys + GICD_CTLR, ctlr);
+	if (!gicv3_wait_rwp()) return false;
+	/* Affinity routing must be configured before Group 1 is enabled. */
+	ctlr |= GICD_CTLR_ARE_NS;
+	gicv3_write32(distributor_phys + GICD_CTLR, ctlr);
+	if (!gicv3_wait_rwp()) return false;
+	uint32_t interrupt_count = 32u * ((gicv3_read32(distributor_phys + GICD_TYPER) & 0x1fu) + 1u);
+	if (interrupt_count > GICV3_SPURIOUS_INTID) interrupt_count = GICV3_SPURIOUS_INTID;
+	for (uint32_t bank = 1u; bank < (interrupt_count + 31u) / 32u; bank++)
+		gicv3_write32(distributor_phys + GICD_ICENABLER + bank * 4u, UINT32_MAX);
+	if (!gicv3_wait_rwp()) return false;
+	gicv3_write32(distributor_phys + GICD_CTLR, ctlr | GICD_CTLR_ENABLE_G1A | GICD_CTLR_ENABLE_G1);
+	if (!gicv3_wait_rwp()) return false;
+	__atomic_store_n(&ready, true, __ATOMIC_RELEASE);
+	return true;
 }
 
 static bool gicv3_redist_for_cpu(const struct cpu* cpu, uintptr_t* out) {
@@ -208,7 +250,7 @@ static bool gicv3_redist_for_cpu(const struct cpu* cpu, uintptr_t* out) {
 bool aarch64_gicv3_init_local(struct cpu* cpu) {
 	uintptr_t redist;
 	if (cpu == NULL || cpu != cpu_current() || cpu->index >= GICV3_MAX_CPUS) return false;
-	if (!ready) return true;
+	if (!ready) return false;
 	if (local_ready[cpu->index]) return true;
 	if (!gicv3_redist_for_cpu(cpu, &redist) || !gicv3_map(redist + GICR_SGI_BASE)) return false;
 	uint32_t waker = gicv3_read32(redist + GICR_WAKER);
@@ -227,9 +269,15 @@ bool aarch64_gicv3_init_local(struct cpu* cpu) {
 	__asm__ volatile("msr ICC_SRE_EL1, %0\n\tisb" : : "r"(sre) : "memory");
 	__asm__ volatile("mrs %0, ICC_SRE_EL1" : "=r"(sre));
 	if ((sre & 1u) == 0u) return false;
-	uintptr_t sgi   = redist + GICR_SGI_BASE;
-	uint32_t  group = gicv3_read32(sgi + GICD_IGROUPR);
+	uintptr_t sgi = redist + GICR_SGI_BASE;
+	/* SGIs and PPIs are banked: do not inherit local firmware enables. */
+	gicv3_write32(sgi + GICD_ICENABLER, UINT32_MAX);
+	__asm__ volatile("dsb sy" : : : "memory");
+	if (!gicv3_wait_disabled(sgi, 0u)) return false;
+	struct irq_state irq   = spinlock_lock_irqsave(&gicv3_distributor_lock);
+	uint32_t         group = gicv3_read32(sgi + GICD_IGROUPR);
 	gicv3_write32(sgi + GICD_IGROUPR, group | (1u << GICV3_SCHEDULER_SGI));
+	spinlock_unlock_irqrestore(&gicv3_distributor_lock, irq);
 	gicv3_write8(sgi + GICD_IPRIORITYR + GICV3_SCHEDULER_SGI, 0x40u);
 	gicv3_write32(sgi + GICD_ISENABLER, 1u << GICV3_SCHEDULER_SGI);
 	uint64_t ctlr;
@@ -287,7 +335,7 @@ static bool gicv3_set_enabled(uintptr_t base, uint32_t id, bool enabled) {
 	if (!gicv3_map(base + offset)) return false;
 	gicv3_write32(base + offset, 1u << (id % 32u));
 	__asm__ volatile("dsb sy" : : : "memory");
-	return true;
+	return enabled || gicv3_wait_disabled(base, id);
 }
 
 static bool gicv3_source_init(struct hal_interrupt_source_state* state, const struct hal_interrupt_source* source,
@@ -320,22 +368,29 @@ static bool gicv3_source_init(struct hal_interrupt_source_state* state, const st
 	    !gicv3_map(base + GICD_IPRIORITYR + source->number))
 		return false;
 	uint32_t group_offset = GICD_IGROUPR + (source->number / 32u) * 4u;
+	if (source->number >= 32u && delivery->trigger != HAL_INTERRUPT_TRIGGER_FIRMWARE) {
+		uint32_t config_offset = GICD_ICFGR + (source->number / 16u) * 4u;
+		if (!gicv3_map(distributor_phys + config_offset)) return false;
+	}
+	struct irq_state irq = spinlock_lock_irqsave(&gicv3_distributor_lock);
 	gicv3_write32(base + group_offset, gicv3_read32(base + group_offset) | (1u << (source->number % 32u)));
+	if (source->number >= 32u) {
+		if (delivery->trigger != HAL_INTERRUPT_TRIGGER_FIRMWARE) {
+			uint32_t config_offset = GICD_ICFGR + (source->number / 16u) * 4u;
+			uint32_t config        = gicv3_read32(distributor_phys + config_offset);
+			uint32_t edge          = 1u << ((source->number % 16u) * 2u + 1u);
+			if (delivery->trigger == HAL_INTERRUPT_TRIGGER_EDGE) config |= edge;
+			else config &= ~edge;
+			gicv3_write32(distributor_phys + config_offset, config);
+		}
+	}
+	spinlock_unlock_irqrestore(&gicv3_distributor_lock, irq);
 	gicv3_write8(base + GICD_IPRIORITYR + source->number, 0x80u);
 	if (source->number >= 32u) {
 		uint32_t route_offset = GICD_IROUTER + source->number * 8u;
 		if (!gicv3_map(distributor_phys + route_offset)) return false;
 		uint64_t route = delivery->target->arch_id & 0x000000ff00ffffffull;
 		gicv3_write64(distributor_phys + route_offset, route);
-		if (delivery->trigger != HAL_INTERRUPT_TRIGGER_FIRMWARE) {
-			uint32_t config_offset = GICD_ICFGR + (source->number / 16u) * 4u;
-			if (!gicv3_map(distributor_phys + config_offset)) return false;
-			uint32_t config = gicv3_read32(distributor_phys + config_offset);
-			uint32_t edge   = 1u << ((source->number % 16u) * 2u + 1u);
-			if (delivery->trigger == HAL_INTERRUPT_TRIGGER_EDGE) config |= edge;
-			else config &= ~edge;
-			gicv3_write32(distributor_phys + config_offset, config);
-		}
 	}
 	__asm__ volatile("dsb sy\n\tisb" : : : "memory");
 	*state = (struct hal_interrupt_source_state){
@@ -468,12 +523,14 @@ bool aarch64_gicv3_message_init(struct hal_interrupt_message_state*         stat
 	if (!gicv3_set_enabled(base, id, false) || !gicv3_map(base + group_offset) ||
 	    !gicv3_map(base + GICD_IPRIORITYR + id) || !gicv3_map(base + config_offset) || !gicv3_map(base + route_offset))
 		return false;
+	struct irq_state irq = spinlock_lock_irqsave(&gicv3_distributor_lock);
 	gicv3_write32(base + group_offset, gicv3_read32(base + group_offset) | (1u << (id % 32u)));
-	gicv3_write8(base + GICD_IPRIORITYR + id, 0x80u);
-	gicv3_write64(base + route_offset, request->target->arch_id & 0x000000ff00ffffffull);
 	uint32_t config = gicv3_read32(base + config_offset);
 	config |= 1u << ((id % 16u) * 2u + 1u);
 	gicv3_write32(base + config_offset, config);
+	spinlock_unlock_irqrestore(&gicv3_distributor_lock, irq);
+	gicv3_write8(base + GICD_IPRIORITYR + id, 0x80u);
+	gicv3_write64(base + route_offset, request->target->arch_id & 0x000000ff00ffffffull);
 	if (!gicv3_set_enabled(base, id, true)) return false;
 	*out   = (struct hal_interrupt_message){.address = message_base + GICD_SETSPI_NSR, .data = id};
 	*state = (struct hal_interrupt_message_state){.event = request->event, .uses_gicv3 = true, .initialized = true};
@@ -489,7 +546,7 @@ bool aarch64_gicv3_message_deinit(struct hal_interrupt_message_state* state) {
 }
 
 bool aarch64_gicv3_prepare_smp(void) {
-	return aarch64_gicv3_init_global() && aarch64_gicv3_init_local(cpu_current());
+	return aarch64_gicv3_ready() && aarch64_gicv3_init_local(cpu_current());
 }
 
 bool aarch64_gicv3_handle_irq(const struct exception_frame* frame) {

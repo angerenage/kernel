@@ -138,14 +138,14 @@ bool hal_interrupt_source_info(const struct hal_interrupt_source* source, struct
 /* Return whether an assignable external source can deliver to a CPU without changing hardware state. */
 bool hal_interrupt_source_target_supported(const struct hal_interrupt_source* source, const struct cpu* target);
 
-/* A successful initialization always leaves the fixed source masked. A failed initialization leaves it inactive. */
+/* A successful initialization leaves the source initialized and masked; failure leaves no live delivery. */
 bool hal_interrupt_source_init(struct hal_interrupt_source_state* state, const struct hal_interrupt_source* source,
                                const struct hal_interrupt_delivery* delivery);
 
-/* Mask an initialized fixed interrupt source. */
+/* Mask an initialized source and update its state; failure leaves the lifecycle state unchanged. */
 bool hal_interrupt_source_mask(struct hal_interrupt_source_state* state);
 
-/* Unmask an initialized fixed interrupt source. */
+/* Unmask an initialized source and update its state; failure must not leave an untracked live delivery. */
 bool hal_interrupt_source_unmask(struct hal_interrupt_source_state* state);
 
 /* Return true after release or if already inactive; a masking failure returns false and preserves the state. */
@@ -195,8 +195,13 @@ struct hal_interrupt_message_state {
 	uint32_t                   redirect_index;
 	bool                       initialized;
 };
+#elif defined(PLATFORM_PC_X86_64)
+/* x86 message-delivery state selected at compile time. */
+struct hal_interrupt_message_state {
+	bool initialized;
+};
 #else
-/* Stateless message-delivery state selected for x86 and hosted tests. */
+/* Stateless message-delivery state selected for hosted tests. */
 struct hal_interrupt_message_state {
 	bool initialized;
 };
@@ -218,12 +223,12 @@ bool hal_interrupt_message_range_at(size_t index, struct hal_interrupt_message_r
 bool hal_interrupt_message_target_supported(uint32_t domain, const struct hal_interrupt_message_source* source,
                                             const struct cpu* target);
 
-/* Program one core-reserved event and produce its device-programmable message. */
+/* Activate one core-reserved event and produce its message; failure leaves the state inactive and no delivery live. */
 bool hal_interrupt_message_init(struct hal_interrupt_message_state*         state,
                                 const struct hal_interrupt_message_request* request,
                                 struct hal_interrupt_message*               out_message);
 
-/* Disable and release an initialized message delivery after the device has stopped emitting it. */
+/* Disable and release a delivery; success makes it inactive, while failure preserves initialized state for retry. */
 bool hal_interrupt_message_deinit(struct hal_interrupt_message_state* state);
 
 /* Return whether the local CPU currently has maskable interrupts enabled. */

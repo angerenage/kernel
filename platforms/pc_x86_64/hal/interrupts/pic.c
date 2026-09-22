@@ -10,6 +10,7 @@
 #define X86_PIC2_CMD 0xa0u
 #define X86_PIC2_DATA 0xa1u
 #define X86_PIC_EOI 0x20u
+#define X86_PIC_OCW3_READ_ISR 0x0bu
 #define X86_ICW1_INIT 0x10u
 #define X86_ICW1_ICW4 0x01u
 #define X86_ICW4_8086 0x01u
@@ -100,8 +101,24 @@ void pic_unmask_irq(unsigned irq) {
 	}
 }
 
+static uint8_t pic_read_isr(uint16_t command_port) {
+	outb(command_port, X86_PIC_OCW3_READ_ISR);
+	return inb(command_port);
+}
+
+bool pic_is_spurious_irq(unsigned vector) {
+	if (vector == X86_IRQ_BASE + 7u) return (pic_read_isr(X86_PIC1_CMD) & (1u << 7u)) == 0u;
+	if (vector == X86_IRQ_BASE + 15u) return (pic_read_isr(X86_PIC2_CMD) & (1u << 7u)) == 0u;
+	return false;
+}
+
 void pic_send_eoi(unsigned vector) {
 	if (vector < X86_IRQ_BASE || vector >= X86_IRQ_BASE + X86_IRQ_COUNT) return;
+	if (vector == X86_IRQ_BASE + 7u && pic_is_spurious_irq(vector)) return;
+	if (vector == X86_IRQ_BASE + 15u && pic_is_spurious_irq(vector)) {
+		outb(X86_PIC1_CMD, X86_PIC_EOI);
+		return;
+	}
 	if (vector >= X86_IRQ_BASE + 8u) outb(X86_PIC2_CMD, X86_PIC_EOI);
 	outb(X86_PIC1_CMD, X86_PIC_EOI);
 }

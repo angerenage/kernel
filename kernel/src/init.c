@@ -257,15 +257,6 @@ void kernel_main(void) {
 	kernel_cpu_boot_bind_current(cpu_bsp());
 	(void)cpu_set_state(cpu_bsp(), CPU_STATE_STARTING);
 
-	if (!hal_interrupts_init_global()) {
-		boot_fail("kernel: hal_interrupts_init_global failed");
-	}
-	if (!hal_interrupts_init_local(cpu_current())) {
-		boot_fail("kernel: hal_interrupts_init_local failed");
-	}
-	irq_enable_local();
-	(void)cpu_set_state(cpu_current(), CPU_STATE_ONLINE);
-
 	if (!kernel_boot_protocol_supported()) boot_fail("kernel: boot protocol unavailable");
 	memory_map = kernel_boot_memmap(&memory_map_count);
 	if (memory_map == NULL || memory_map_count == 0u) boot_fail("kernel: memory map unavailable");
@@ -279,6 +270,16 @@ void kernel_main(void) {
 		kernel_boot_diagnostics_modules();
 	}
 	kernel_init_memory(memory_map, memory_map_count, boot_address_space.direct_map_offset);
+
+	if (!hal_interrupts_init_global()) {
+		boot_fail("kernel: hal_interrupts_init_global failed");
+	}
+	if (!hal_interrupts_init_local(cpu_current())) {
+		boot_fail("kernel: hal_interrupts_init_local failed");
+	}
+	irq_enable_local();
+	(void)cpu_set_state(cpu_current(), CPU_STATE_ONLINE);
+
 	if (boot_diagnostics_enabled) {
 		kernel_boot_diagnostics_memory_summary();
 		kernel_boot_diagnostics_iommus();

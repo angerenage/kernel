@@ -32,7 +32,6 @@
 #define REDIRECT_ADDRESS_LIMIT (1ull << 48u)
 #define REDIRECT_GPID_ALIGNMENT 64u
 #define REDIRECT_INVALIDATION_SPINS 10000000u
-#define AVEC_MESSAGE_OFFSET 0x100000u
 
 struct redirect_entry {
 	uint64_t low;
@@ -235,8 +234,8 @@ bool loongarch64_redirect_init(struct hal_interrupt_message_state*         state
 		(struct redirect_entry){.low = 1ull | (gpid_extent.address & 0x0000ffffffffffc0ull) | (0xffull << 56u)};
 	redirect_barrier();
 	loongarch64_controllers_unlock(irq);
-	*out_message =
-		(struct hal_interrupt_message){.address = (pch_msi.address - AVEC_MESSAGE_OFFSET) | (1u << 2u), .data = index};
+	*out_message = (struct hal_interrupt_message){
+		.address = (pch_msi.address - LOONGARCH64_AVEC_MESSAGE_OFFSET) | (1u << 2u), .data = index};
 	*state = (struct hal_interrupt_message_state){.domain                = LOONGARCH64_MESSAGE_DOMAIN_REDIRECT,
 	                                              .event                 = request->event,
 	                                              .redirect_gpid_address = gpid_extent.address,

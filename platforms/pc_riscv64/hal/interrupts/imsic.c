@@ -13,7 +13,7 @@
 #include "interrupts.h"
 
 #define IMSIC_MAX_CPUS 64u
-#define IMSIC_MAX_IDS 2048u
+#define IMSIC_MAX_IDS 2047u
 #define IMSIC_PAGE_SIZE 0x1000u
 #define IMSIC_EIDELIVERY 0x70u
 #define IMSIC_EITHRESHOLD 0x72u
@@ -28,6 +28,7 @@ struct imsic_hart {
 static struct {
 	struct imsic_hart harts[IMSIC_MAX_CPUS];
 	size_t            hart_count;
+	size_t            controller;
 	uint32_t          ids;
 	uint32_t          phandle;
 	uint32_t          guest_bits;
@@ -98,6 +99,7 @@ static bool imsic_find(void) {
 			imsic.harts[index] = (struct imsic_hart){.hart_id = hart, .message_address = base + index * stride};
 		}
 		imsic.hart_count = hart_count;
+		imsic.controller = controller;
 		imsic.ids        = ids;
 		imsic.phandle    = phandle;
 		imsic.guest_bits = guest_bits;
@@ -116,6 +118,12 @@ static bool imsic_probe(void) {
 	__atomic_store_n(&imsic_init_lock, 0u, __ATOMIC_RELEASE);
 	irq_restore(irq);
 	return imsic.ready;
+}
+
+bool riscv64_imsic_selected_controller(size_t* out_controller) {
+	if (out_controller == NULL || !imsic_probe()) return false;
+	*out_controller = imsic.controller;
+	return true;
 }
 
 static bool imsic_hart_for_cpu(const struct cpu* cpu, uintptr_t* out_address) {
@@ -137,7 +145,7 @@ bool riscv64_imsic_is_parent(uint32_t phandle) {
 }
 
 bool riscv64_imsic_target(const struct cpu* cpu, uint32_t id, uint32_t* out_hart_index) {
-	if (id == 0u || !imsic_probe() || id >= imsic.ids || !imsic_hart_for_cpu(cpu, NULL)) return false;
+	if (id == 0u || !imsic_probe() || id > imsic.ids || !imsic_hart_for_cpu(cpu, NULL)) return false;
 	for (size_t index = 0u; index < imsic.hart_count; index++) {
 		if (imsic.harts[index].hart_id != cpu->arch_id) continue;
 		if (out_hart_index != NULL) *out_hart_index = (uint32_t)index;
@@ -150,7 +158,7 @@ bool riscv64_imsic_message_range_at(struct hal_interrupt_message_range* out) {
 	if (out == NULL || !imsic_probe()) return false;
 	*out = (struct hal_interrupt_message_range){
 		.domain   = RISCV64_MESSAGE_DOMAIN_IMSIC,
-		.delivery = {.domain = RISCV64_DELIVERY_DOMAIN_IMSIC, .base = 1u, .limit = imsic.ids}
+		.delivery = {.domain = RISCV64_DELIVERY_DOMAIN_IMSIC, .base = 1u, .limit = imsic.ids + 1u}
     };
 	return true;
 }
@@ -172,10 +180,10 @@ void riscv64_imsic_sync_local(void) {
 	if (cpu == NULL || cpu->index >= IMSIC_MAX_CPUS || !imsic_probe() || !imsic_hart_for_cpu(cpu, NULL)) return;
 	struct irq_state irq        = irq_save_disable();
 	uint64_t         generation = __atomic_load_n(&imsic.requested[cpu->index], __ATOMIC_ACQUIRE);
-	for (uint32_t word = 0u; word <= (imsic.ids - 1u) / 64u; word++)
+	for (uint32_t word = 0u; word <= imsic.ids / 64u; word++)
 		imsic_write_indirect(IMSIC_EIE0 + word * 2u,
 		                     __atomic_load_n(&imsic.enabled[cpu->index][word], __ATOMIC_ACQUIRE));
-	for (uint32_t word = 0u; word <= (imsic.ids - 1u) / 64u; word++) {
+	for (uint32_t word = 0u; word <= imsic.ids / 64u; word++) {
 		uint64_t clear = __atomic_exchange_n(&imsic.clear_pending[cpu->index][word], 0u, __ATOMIC_ACQ_REL);
 		if (clear == 0u) continue;
 		__asm__ volatile("csrw 0x150, %0" : : "r"((uint64_t)(IMSIC_EIP0 + word * 2u)) : "memory");
@@ -203,6 +211,7 @@ bool riscv64_imsic_set_enabled(const struct cpu* cpu, uint32_t id, bool enabled)
 	if (cpu == cpu_current()) riscv64_imsic_sync_local();
 	else {
 		hal_cpu_kick(cpu);
+		/* The target is online and interrupt-ready, so its wake IPI will apply this generation. */
 		while (__atomic_load_n(&imsic.applied[cpu->index], __ATOMIC_ACQUIRE) < generation) __asm__ volatile("nop");
 	}
 	return true;

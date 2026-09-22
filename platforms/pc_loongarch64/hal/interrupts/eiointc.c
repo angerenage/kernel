@@ -88,8 +88,9 @@ bool loongarch64_eiointc_handle(void) {
 		if (pending == 0u) continue;
 		iocsr_write32(pending, EIOINTC_ISR + word * 4u);
 		while (pending != 0u) {
-			uint32_t bit = (uint32_t)__builtin_ctz(pending);
-			(void)loongarch64_pch_pic_mask_vector_leaf(word * 32u + bit);
+			uint32_t bit    = (uint32_t)__builtin_ctz(pending);
+			uint32_t vector = word * 32u + bit;
+			(void)loongarch64_pch_pic_mask_vector_leaf(vector);
 			pending &= ~(1u << bit);
 		}
 		handled = true;

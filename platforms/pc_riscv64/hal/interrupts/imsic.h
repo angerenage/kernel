@@ -12,6 +12,9 @@ bool riscv64_imsic_cpu_has_interface(const struct cpu* cpu);
 /* Return whether a firmware phandle identifies the discovered IMSIC. */
 bool riscv64_imsic_is_parent(uint32_t phandle);
 
+/* Return the firmware-controller index selected for the supervisor IMSIC. */
+bool riscv64_imsic_selected_controller(size_t* out_controller);
+
 /* Resolve a CPU and interrupt identity to an IMSIC hart index. */
 bool riscv64_imsic_target(const struct cpu* cpu, uint32_t id, uint32_t* out_hart_index);
 
@@ -33,7 +36,7 @@ bool riscv64_imsic_message_deinit(struct hal_interrupt_message_state* state);
 /* Apply the desired IMSIC enable state to the local interrupt file. */
 void riscv64_imsic_sync_local(void);
 
-/* Change one IMSIC identity's desired enable state for a CPU. */
+/* Change one IMSIC identity's desired enable state, waiting for a remote target to apply the update. */
 bool riscv64_imsic_set_enabled(const struct cpu* cpu, uint32_t id, bool enabled);
 
 /* Claim and dispatch one pending IMSIC interrupt identity. */

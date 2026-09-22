@@ -257,6 +257,9 @@ static bool plic_probe(void) {
 	plic.context_count = found.context_count;
 	memcpy(plic.contexts, found.contexts, found.context_count * sizeof(found.contexts[0]));
 	for (size_t index = 0u; index < plic.context_count; index++) {
+		uint64_t enable = PLIC_ENABLE_BASE + (uint64_t)plic.contexts[index].number * PLIC_ENABLE_STRIDE;
+		for (uint32_t word = 0u; word <= plic.ndev / 32u; word++)
+			*(volatile uint32_t*)(plic.virtual_base + (uintptr_t)enable + word * 4u) = 0u;
 		uint64_t offset = PLIC_CONTEXT_BASE + (uint64_t)plic.contexts[index].number * PLIC_CONTEXT_STRIDE;
 		*(volatile uint32_t*)(plic.virtual_base + (uintptr_t)offset) = 0u;
 	}

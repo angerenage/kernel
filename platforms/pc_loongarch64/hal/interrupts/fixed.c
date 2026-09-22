@@ -26,16 +26,26 @@ static bool fixed_probe(struct fixed_controller* controller) {
 }
 
 size_t loongarch64_fixed_source_domain_count(void) {
-	return fixed_controller_count;
+	size_t count = 0u;
+	for (size_t controller_index = 0u; controller_index < fixed_controller_count; controller_index++)
+		if (fixed_probe(&fixed_controllers[controller_index])) count++;
+	return count;
 }
 
 bool loongarch64_fixed_source_domain_at(size_t index, struct hal_interrupt_source_domain_info* out_domain) {
-	if (out_domain == NULL || index >= fixed_controller_count) return false;
-	struct fixed_controller* controller = &fixed_controllers[index];
-	if (!fixed_probe(controller)) return false;
-	*out_domain = (struct hal_interrupt_source_domain_info){
-		.domain = controller->domain, .first_source = 0u, .source_count = controller->source_count};
-	return true;
+	if (out_domain == NULL) return false;
+	for (size_t controller_index = 0u; controller_index < fixed_controller_count; controller_index++) {
+		struct fixed_controller* controller = &fixed_controllers[controller_index];
+		if (!fixed_probe(controller)) continue;
+		if (index != 0u) {
+			index--;
+			continue;
+		}
+		*out_domain = (struct hal_interrupt_source_domain_info){
+			.domain = controller->domain, .first_source = 0u, .source_count = controller->source_count};
+		return true;
+	}
+	return false;
 }
 
 static bool fixed_source_reserved(const struct fixed_controller* controller, uint32_t source) {
@@ -77,7 +87,7 @@ bool loongarch64_fixed_source_info(const struct hal_interrupt_source* source,
 }
 
 bool loongarch64_fixed_source_target_supported(const struct hal_interrupt_source* source, const struct cpu* target) {
-	if (source == NULL || target == NULL) return false;
+	if (source == NULL || target == NULL || target->index >= 64u || !target->interrupts_ready) return false;
 	struct fixed_controller* controller = loongarch64_fixed_by_domain(source->domain);
 	if (controller == NULL || !controller->ready || source->number >= controller->source_count ||
 	    fixed_source_reserved(controller, source->number) ||

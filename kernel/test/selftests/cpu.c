@@ -13,10 +13,21 @@
 #include "../../../platforms/iommu_fdt.h"
 #endif
 
+#if defined(PLATFORM_PC_RISCV64)
+#include "../../../platforms/pc_riscv64/hal/interrupts/imsic.h"
+#endif
+
+#if defined(PLATFORM_PC_LOONGARCH64)
+#include "../../../platforms/pc_loongarch64/hal/interrupts/controller.h"
+#endif
+
 #if defined(PLATFORM_PC_X86_64)
-static void kernel_selftest_cpu_x86_message_ranges_are_exact(struct kernel_selftest_context* ctx) {
+static void kernel_selftest_cpu_x86_interrupt_ranges_are_stable(struct kernel_selftest_context* ctx) {
 	struct hal_interrupt_message_range low;
 	struct hal_interrupt_message_range high;
+	struct hal_interrupt_source        source = {.domain = 0u, .number = 0u};
+	struct hal_interrupt_source_info   source_before;
+	struct hal_interrupt_source_info   source_after;
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_range_count() == 2u);
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_range_at(0u, &low));
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_range_at(1u, &high));
@@ -24,6 +35,28 @@ static void kernel_selftest_cpu_x86_message_ranges_are_exact(struct kernel_selft
 	KERNEL_SELFTEST_ASSERT(ctx, low.domain == high.domain && low.delivery.domain == high.delivery.domain);
 	KERNEL_SELFTEST_ASSERT(ctx, low.delivery.base == 48u && low.delivery.limit == 0x80u);
 	KERNEL_SELFTEST_ASSERT(ctx, high.delivery.base == 0x81u && high.delivery.limit == 0xfeu);
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_info(&source, &source_before));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_target_supported(&source, cpu_current()));
+	struct hal_interrupt_delivery source_delivery = {
+		.target   = cpu_current(),
+		.event    = {.domain = source_before.delivery.domain, .id = source_before.delivery.base},
+		.trigger  = HAL_INTERRUPT_TRIGGER_FIRMWARE,
+		.polarity = HAL_INTERRUPT_POLARITY_FIRMWARE
+    };
+	struct hal_interrupt_source_state source_state = {0};
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_init(&source_state, &source, &source_delivery));
+	KERNEL_SELFTEST_ASSERT(ctx, source_state.initialized && source_state.masked);
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_mask(&source_state));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_deinit(&source_state));
+	KERNEL_SELFTEST_ASSERT(ctx, !source_state.initialized);
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_info(&source, &source_after));
+	KERNEL_SELFTEST_ASSERT(ctx,
+	                       source_before.delivery.domain == source_after.delivery.domain &&
+	                           source_before.delivery.base == source_after.delivery.base &&
+	                           source_before.delivery.limit == source_after.delivery.limit &&
+	                           source_before.target_kind == source_after.target_kind &&
+	                           source_before.fixed_target == source_after.fixed_target);
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_range_count() == 2u);
 	struct hal_interrupt_message         message;
 	struct hal_interrupt_message_state   state   = {0};
 	struct hal_interrupt_message_request request = {
@@ -70,6 +103,69 @@ static void kernel_selftest_cpu_gic_external_source_contract(struct kernel_selft
 
 #define KERNEL_SELFTEST_CPU_MAX_CPUS 64u
 #define KERNEL_SELFTEST_CPU_REMOTE_DISPATCH_TIMEOUT_MS 250u
+
+static void kernel_selftest_cpu_interrupt_source_lifecycle(struct kernel_selftest_context* ctx) {
+	struct hal_interrupt_source             source = {0};
+	struct hal_interrupt_source_info        info;
+	struct hal_interrupt_source_domain_info domain;
+	bool                                    found = false;
+	for (size_t domain_index = 0u; domain_index < hal_interrupt_source_domain_count() && !found; domain_index++) {
+		KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_domain_at(domain_index, &domain));
+		for (uint32_t offset = 0u; offset < domain.source_count; offset++) {
+			source = (struct hal_interrupt_source){.domain = domain.domain, .number = domain.first_source + offset};
+			if (hal_interrupt_source_info(&source, &info)) {
+				found = true;
+				break;
+			}
+		}
+	}
+	if (!found) return;
+	const struct cpu* target = info.target_kind == HAL_INTERRUPT_TARGET_FIXED ? info.fixed_target : cpu_current();
+	KERNEL_SELFTEST_ASSERT(ctx, target != NULL && hal_interrupt_source_target_supported(&source, target));
+	struct hal_interrupt_delivery delivery = {
+		.target   = target,
+		.event    = {.domain = info.delivery.domain, .id = info.delivery.limit},
+		.trigger  = HAL_INTERRUPT_TRIGGER_FIRMWARE,
+		.polarity = HAL_INTERRUPT_POLARITY_FIRMWARE
+    };
+	struct hal_interrupt_source_state state = {0};
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_source_init(&state, &source, &delivery));
+	KERNEL_SELFTEST_ASSERT(ctx, !state.initialized);
+	delivery.event.id = info.delivery.base;
+	bool initialized  = hal_interrupt_source_init(&state, &source, &delivery);
+	if (!initialized) {
+		KERNEL_SELFTEST_ASSERT(ctx, !state.initialized);
+		delivery.trigger  = HAL_INTERRUPT_TRIGGER_EDGE;
+		delivery.polarity = HAL_INTERRUPT_POLARITY_HIGH;
+		initialized       = hal_interrupt_source_init(&state, &source, &delivery);
+	}
+	KERNEL_SELFTEST_ASSERT(ctx, initialized && state.initialized && state.masked);
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_mask(&state) && state.masked);
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_deinit(&state) && !state.initialized);
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_deinit(&state));
+}
+
+static void kernel_selftest_cpu_interrupt_message_lifecycle(struct kernel_selftest_context* ctx) {
+	struct hal_interrupt_message_range range;
+	if (hal_interrupt_message_range_count() == 0u) return;
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_range_at(0u, &range));
+	struct hal_interrupt_message_request request = {
+		.domain = range.domain,
+		.target = cpu_current(),
+		.event  = {.domain = range.delivery.domain, .id = range.delivery.limit}
+    };
+	if (!hal_interrupt_message_target_supported(request.domain, request.source, request.target)) return;
+	struct hal_interrupt_message       message;
+	struct hal_interrupt_message_state state = {0};
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_message_init(&state, &request, &message));
+	KERNEL_SELFTEST_ASSERT(ctx, !state.initialized);
+	request.event.id = range.delivery.base;
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_init(&state, &request, &message));
+	KERNEL_SELFTEST_ASSERT(ctx, state.initialized);
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_message_init(&state, &request, &message) && state.initialized);
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_deinit(&state) && !state.initialized);
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_deinit(&state));
+}
 
 static void kernel_selftest_cpu_global_executable_sync(struct kernel_selftest_context* ctx) {
 	hal_cache_sync_executable_range_all_cpus((void*)(uintptr_t)&kernel_selftest_cpu_global_executable_sync, 1u);
@@ -132,6 +228,15 @@ static void kernel_selftest_cpu_imsic_message_contract(struct kernel_selftest_co
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_range_count() == 1u);
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_range_at(0u, &range));
 	KERNEL_SELFTEST_ASSERT(ctx, range.delivery.base == 1u && range.delivery.limit > range.delivery.base);
+	size_t         selected_controller;
+	const uint8_t* ids_property;
+	size_t         ids_property_size;
+	KERNEL_SELFTEST_ASSERT(
+		ctx,
+		riscv64_imsic_selected_controller(&selected_controller) &&
+			iommu_fdt_controller_property(
+				"riscv,imsics", selected_controller, "riscv,num-ids", &ids_property, &ids_property_size) &&
+			ids_property_size == 4u && range.delivery.limit == iommu_fdt_u32(ids_property) + 1u);
 	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_message_range_at(1u, &range));
 	struct hal_interrupt_message_request request = {
 		.domain = range.domain,
@@ -248,7 +353,24 @@ static void kernel_selftest_cpu_loongarch_interrupt_contract(struct kernel_selft
 	struct hal_interrupt_message       message;
 	struct hal_interrupt_message_state state = {0};
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_init(&state, &request, &message));
-	KERNEL_SELFTEST_ASSERT(ctx, message.address != 0u && message.data == request.event.id);
+	KERNEL_SELFTEST_ASSERT(ctx,
+	                       message.address != 0u && state.initialized && state.event.domain == request.event.domain &&
+	                           state.event.id == request.event.id);
+	if (request.domain == LOONGARCH64_MESSAGE_DOMAIN_AVEC) {
+		uint64_t expected = (pch_msi.address - LOONGARCH64_AVEC_MESSAGE_OFFSET) | ((uint64_t)request.event.id << 4u) |
+		                    (request.target->arch_id << 12u);
+		KERNEL_SELFTEST_ASSERT(ctx, message.address == expected && message.data == 0u);
+	}
+	else if (request.domain == LOONGARCH64_MESSAGE_DOMAIN_REDIRECT) {
+		uint64_t expected = (pch_msi.address - LOONGARCH64_AVEC_MESSAGE_OFFSET) | (1u << 2u);
+		KERNEL_SELFTEST_ASSERT(
+			ctx, message.address == expected && message.data == state.redirect_index && message.data < 65536u);
+	}
+	else {
+		KERNEL_SELFTEST_ASSERT(ctx,
+		                       request.domain == LOONGARCH64_MESSAGE_DOMAIN_PCH_MSI &&
+		                           message.address == pch_msi.address && message.data == request.event.id);
+	}
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_deinit(&state));
 }
 #endif
@@ -512,7 +634,7 @@ cleanup:
 
 static const struct kernel_selftest_case kernel_cpu_selftests[] = {
 #if defined(PLATFORM_PC_X86_64)
-	{.name = "x86_message_ranges_are_exact", .run = kernel_selftest_cpu_x86_message_ranges_are_exact},
+	{.name = "x86_interrupt_ranges_are_stable", .run = kernel_selftest_cpu_x86_interrupt_ranges_are_stable},
 #endif
 #if defined(PLATFORM_PC_AARCH64)
 	{.name = "gic_external_source_contract", .run = kernel_selftest_cpu_gic_external_source_contract},
@@ -525,6 +647,8 @@ static const struct kernel_selftest_case kernel_cpu_selftests[] = {
 #if defined(PLATFORM_PC_LOONGARCH64)
 	{.name = "loongarch_interrupt_contract", .run = kernel_selftest_cpu_loongarch_interrupt_contract},
 #endif
+	{.name = "interrupt_source_lifecycle", .run = kernel_selftest_cpu_interrupt_source_lifecycle},
+	{.name = "interrupt_message_lifecycle", .run = kernel_selftest_cpu_interrupt_message_lifecycle},
 	{
 								   .name = "topology_is_consistent",
 								   .run  = kernel_selftest_cpu_topology_is_consistent,

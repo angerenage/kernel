@@ -220,17 +220,8 @@ void irq_disable_local(void) {
 
 static void interrupt_send_eoi(unsigned vector) {
 	if (!is_external_irq(vector)) return;
-	if (vector >= X86_IRQ_BASE + X86_IRQ_COUNT) {
-		apic_send_eoi();
-		return;
-	}
-
-	if (apic_is_active()) {
-		apic_send_eoi();
-		return;
-	}
-
-	pic_send_eoi(vector);
+	if (vector < 48u) pic_send_eoi(vector);
+	else apic_send_eoi();
 }
 
 static void x86_load_segments_and_tss(size_t cpu_index) {
@@ -321,6 +312,9 @@ bool hal_interrupts_init_global(void) {
 
 	__asm__ volatile("lidt %0" : : "m"(idtr));
 	pic_init();
+	if (!apic_probe_isa_irqs()) return false;
+	legacy_target = cpu_bsp();
+	if (legacy_target == NULL) return false;
 	global_ready = true;
 	return true;
 }
@@ -336,12 +330,11 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 
 	irq_disable_local();
 	if (!x86_setup_exception_stack(cpu)) return false;
-	if (apic_ipi_ready() && !apic_init_local()) return false;
+	if (!apic_init_local()) return false;
 	x86_64_syscall_init();
 	__asm__ volatile("lidt %0" : : "m"(idtr));
 	if (cpu->role == CPU_ROLE_BSP) {
 		legacy_target = cpu;
-		irq_enable_local();
 	}
 
 	local_ready[cpu->index] = true;
@@ -380,7 +373,7 @@ bool hal_interrupt_source_domain_at(size_t index, struct hal_interrupt_source_do
 bool hal_interrupt_source_info(const struct hal_interrupt_source* source, struct hal_interrupt_source_info* out_info) {
 	if (source == NULL || out_info == NULL || source->domain != 0u || !x86_fixed_interrupt_valid(source->number))
 		return false;
-	bool                                routable = apic_is_active();
+	bool                                routable = apic_isa_irq_available(source->number);
 	struct hal_interrupt_delivery_range delivery =
 		routable ? (struct hal_interrupt_delivery_range){.domain = X86_DELIVERY_DOMAIN_VECTOR,
 	                                                     .base   = 48u,
@@ -399,7 +392,9 @@ bool hal_interrupt_source_info(const struct hal_interrupt_source* source, struct
 
 bool hal_interrupt_source_target_supported(const struct hal_interrupt_source* source, const struct cpu* target) {
 	struct hal_interrupt_source_info info;
-	if (target == NULL || !hal_interrupt_source_info(source, &info)) return false;
+	if (target == NULL || target->index >= 64u || !local_ready[target->index] ||
+	    !hal_interrupt_source_info(source, &info))
+		return false;
 	if (info.target_kind == HAL_INTERRUPT_TARGET_FIXED) return target == info.fixed_target;
 	return target->arch_id <= 255u;
 }
@@ -414,13 +409,13 @@ bool hal_interrupt_source_init(struct hal_interrupt_source_state* state, const s
 	    !hal_interrupt_source_target_supported(source, delivery->target) ||
 	    delivery->trigger > HAL_INTERRUPT_TRIGGER_LEVEL || delivery->polarity > HAL_INTERRUPT_POLARITY_LOW)
 		return false;
-	if (apic_route_isa_irq(source->number,
-	                       delivery->event.id,
-	                       (uint32_t)delivery->target->arch_id,
-	                       delivery->trigger,
-	                       delivery->polarity,
-	                       &route,
-	                       &registers)) {
+	if (info.target_kind == HAL_INTERRUPT_TARGET_ROUTABLE && apic_route_isa_irq(source->number,
+	                                                                            delivery->event.id,
+	                                                                            (uint32_t)delivery->target->arch_id,
+	                                                                            delivery->trigger,
+	                                                                            delivery->polarity,
+	                                                                            &route,
+	                                                                            &registers)) {
 		*state = (struct hal_interrupt_source_state){.source           = *source,
 		                                             .ioapic_route     = route,
 		                                             .ioapic_registers = registers,
@@ -428,7 +423,7 @@ bool hal_interrupt_source_init(struct hal_interrupt_source_state* state, const s
 		                                             .masked           = true};
 		return true;
 	}
-	if (delivery->target->role != CPU_ROLE_BSP || apic_is_active() ||
+	if (info.target_kind != HAL_INTERRUPT_TARGET_FIXED || delivery->target->role != CPU_ROLE_BSP ||
 	    delivery->trigger == HAL_INTERRUPT_TRIGGER_LEVEL || delivery->polarity == HAL_INTERRUPT_POLARITY_LOW)
 		return false;
 	pic_mask_irq(source->number);
@@ -462,11 +457,11 @@ bool hal_interrupt_source_deinit(struct hal_interrupt_source_state* state) {
 }
 
 size_t hal_interrupt_message_range_count(void) {
-	return apic_ipi_ready() ? 2u : 0u;
+	return global_ready ? 2u : 0u;
 }
 
 bool hal_interrupt_message_range_at(size_t index, struct hal_interrupt_message_range* out_range) {
-	if (index >= 2u || out_range == NULL || !apic_ipi_ready()) return false;
+	if (index >= 2u || out_range == NULL || !global_ready) return false;
 	*out_range = index == 0u
 	                    ? (struct hal_interrupt_message_range){
 		                      .domain   = X86_MESSAGE_DOMAIN_MSI,
@@ -483,8 +478,8 @@ bool hal_interrupt_message_range_at(size_t index, struct hal_interrupt_message_r
 
 bool hal_interrupt_message_target_supported(uint32_t domain, const struct hal_interrupt_message_source* source,
                                             const struct cpu* target) {
-	return domain == X86_MESSAGE_DOMAIN_MSI && source == NULL && target != NULL && target->arch_id <= 255u &&
-	       apic_ipi_ready();
+	return global_ready && domain == X86_MESSAGE_DOMAIN_MSI && source == NULL && target != NULL &&
+	       target->index < 64u && target->arch_id <= 255u && local_ready[target->index];
 }
 
 static bool x86_message_request_valid(const struct hal_interrupt_message_request* request) {
@@ -550,25 +545,15 @@ void x86_64_handle_interrupt(struct interrupt_frame* frame) {
 	}
 	if (vector == X86_LAPIC_WAKE_VECTOR) {
 		apic_send_eoi();
-		cpu_leave_exception();
 		return;
 	}
 	if (is_external_irq(vector)) {
 		bool handled = clock_handle_irq((unsigned)vector);
-		if (!handled && vector < X86_IRQ_BASE + X86_IRQ_COUNT) {
+		bool pic_spurious =
+			vector >= X86_IRQ_BASE && vector < X86_IRQ_BASE + X86_IRQ_COUNT && pic_is_spurious_irq((unsigned)vector);
+		if (!handled && !pic_spurious && vector < X86_IRQ_BASE + X86_IRQ_COUNT) {
 			uint32_t id = (uint32_t)(vector - X86_IRQ_BASE);
-			if (x86_unhandled_isa_irq_valid(id)) {
-				uint32_t  route;
-				uintptr_t registers;
-				if (!apic_route_isa_irq(id,
-				                        (unsigned)vector,
-				                        (uint32_t)cpu_arch_id(),
-				                        HAL_INTERRUPT_TRIGGER_FIRMWARE,
-				                        HAL_INTERRUPT_POLARITY_FIRMWARE,
-				                        &route,
-				                        &registers))
-					pic_mask_irq(id);
-			}
+			if (x86_unhandled_isa_irq_valid(id)) pic_mask_irq(id);
 		}
 		interrupt_send_eoi((unsigned)vector);
 		return;

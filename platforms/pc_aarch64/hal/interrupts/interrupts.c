@@ -18,6 +18,12 @@ static bool global_ready;
 static bool local_ready[64];
 extern char exception_vectors[];
 
+static bool kernel_runs_at_el1(void) {
+	uint64_t current_el;
+	__asm__ volatile("mrs %0, CurrentEL" : "=r"(current_el));
+	return ((current_el >> 2u) & 0x3u) == 1u;
+}
+
 bool irq_enabled(void) {
 	uint64_t daif;
 
@@ -34,6 +40,10 @@ void irq_enable_local(void) {
 }
 
 bool hal_interrupts_init_global(void) {
+	if (global_ready) return true;
+	/* Limine's UEFI path enters the kernel at Non-secure EL1; GIC ownership is therefore Group 1. */
+	if (!kernel_runs_at_el1()) return false;
+	if (!aarch64_gic_init_global()) return false;
 	global_ready = true;
 	return true;
 }

@@ -18,11 +18,13 @@ static bool                              clock_running;
 static bool                              clock_initialized;
 static struct hal_interrupt_source_state timer_source;
 static uint32_t                          clock_frequency_hz;
+static uint32_t                          clock_vector = UINT32_MAX;
 static struct spinlock clock_lock = SPINLOCK_INIT_CLASS("clock_lock", SPINLOCK_ORDER_CLOCK, SPINLOCK_FLAG_IRQSAVE);
 
 static void clock_reset_state(void) {
 	__atomic_store_n(&clock_running, false, __ATOMIC_RELEASE);
 	__atomic_store_n(&clock_frequency_hz, 0u, __ATOMIC_RELEASE);
+	__atomic_store_n(&clock_vector, UINT32_MAX, __ATOMIC_RELEASE);
 	__atomic_store_n(&clock_handler, NULL, __ATOMIC_RELEASE);
 	__atomic_store_n(&clock_context, NULL, __ATOMIC_RELEASE);
 }
@@ -81,6 +83,7 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 		return false;
 	}
 
+	__atomic_store_n(&clock_vector, delivery.event.id, __ATOMIC_RELEASE);
 	__atomic_store_n(&clock_handler, handler, __ATOMIC_RELEASE);
 	__atomic_store_n(&clock_context, ctx, __ATOMIC_RELEASE);
 	__atomic_store_n(&clock_frequency_hz, actual_frequency_hz, __ATOMIC_RELEASE);
@@ -119,7 +122,7 @@ bool clock_handle_irq(unsigned vector) {
 	hal_clock_handler_t handler;
 	void*               ctx;
 
-	if (vector != X86_IRQ_BASE) return false;
+	if (vector != __atomic_load_n(&clock_vector, __ATOMIC_ACQUIRE)) return false;
 	if (!__atomic_load_n(&clock_running, __ATOMIC_ACQUIRE)) return true;
 
 	handler = __atomic_load_n(&clock_handler, __ATOMIC_ACQUIRE);

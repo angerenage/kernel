@@ -33,6 +33,7 @@
 #define LPC_SOURCE_COUNT 16u
 #define AVEC_VECTOR_BASE 16u
 #define AVEC_VECTOR_COUNT 256u
+#define LOONGARCH64_AVEC_MESSAGE_OFFSET 0x100000u
 
 /* Hardware classes represented by a fixed interrupt-source domain. */
 enum fixed_kind {

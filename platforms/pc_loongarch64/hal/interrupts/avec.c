@@ -15,7 +15,6 @@
 #define IOCSR_MISC_FUNC_AVEC_EN (1ull << 51)
 #define AVEC_IRR_VECTOR_MASK 0xffu
 #define AVEC_IRR_INVALID (1u << 31)
-#define AVEC_MESSAGE_OFFSET 0x100000u
 #define AVEC_VECTOR_SHIFT 4u
 #define AVEC_CPU_SHIFT 12u
 #define AVEC_CPU_LIMIT (1u << 16)
@@ -42,8 +41,9 @@ static inline uint64_t csr_read_irr(void) {
 
 void loongarch64_avec_discover(void) {
 	uint64_t features = iocsr_read64(IOCSR_FEATURES);
-	avec_available    = pch_msi.described && pch_msi.address >= AVEC_MESSAGE_OFFSET &&
-	                    pch_msi.address - AVEC_MESSAGE_OFFSET <= UINT32_MAX && (features & IOCSR_FEATURE_AVEC) != 0u;
+	avec_available    = pch_msi.described && pch_msi.address >= LOONGARCH64_AVEC_MESSAGE_OFFSET &&
+	                    pch_msi.address - LOONGARCH64_AVEC_MESSAGE_OFFSET <= UINT32_MAX &&
+	                    (features & IOCSR_FEATURE_AVEC) != 0u;
 	avec_redirect     = avec_available && (features & IOCSR_FEATURE_REDIRECT) != 0u;
 	for (size_t index = 0u; index < 64u; index++) avec_local_ready[index] = false;
 }
@@ -96,7 +96,7 @@ bool loongarch64_avec_init(struct hal_interrupt_message_state*         state,
 	    !loongarch64_avec_range(&range) || request->event.domain != range.delivery.domain ||
 	    request->event.id < range.delivery.base || request->event.id >= range.delivery.limit)
 		return false;
-	uint64_t address = pch_msi.address - AVEC_MESSAGE_OFFSET;
+	uint64_t address = pch_msi.address - LOONGARCH64_AVEC_MESSAGE_OFFSET;
 	address |= (uint64_t)request->event.id << AVEC_VECTOR_SHIFT;
 	address |= request->target->arch_id << AVEC_CPU_SHIFT;
 	*out_message = (struct hal_interrupt_message){.address = address, .data = 0u};

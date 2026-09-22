@@ -1,6 +1,8 @@
 #include "gic.h"
 
 #include <core/cpu.h>
+#include <core/lock.h>
+#include <core/spinlock.h>
 #include <hal/interrupts.h>
 #include <hal/paging.h>
 #include <kernel/boot.h>
@@ -40,9 +42,13 @@
 #define AARCH64_GICC_INTID_SPURIOUS_MIN 1020u
 
 static bool              gic_ready;
+static bool              gic_single_cpu;
 static volatile uint8_t* gicd_mmio;
 static volatile uint8_t* gicc_mmio;
+static bool              gic_local_ready[AARCH64_GIC_MAX_CPUS];
 static uint8_t           gic_target_masks[AARCH64_GIC_MAX_CPUS];
+static struct spinlock   gic_distributor_lock =
+	SPINLOCK_INIT_CLASS("gic_distributor", SPINLOCK_ORDER_INTERRUPT, SPINLOCK_FLAG_IRQSAVE);
 
 static inline uintptr_t phys_to_virt(uintptr_t phys) {
 	struct kernel_boot_address_space address_space;
@@ -142,7 +148,7 @@ static bool gic_find_fdt_v2(uintptr_t* out_distributor, uintptr_t* out_cpu_inter
 	return false;
 }
 
-static bool gic_init_global(void) {
+bool aarch64_gic_init_global(void) {
 	uintptr_t distributor;
 	uintptr_t cpu_interface;
 	if (aarch64_gicv3_described()) return aarch64_gicv3_init_global();
@@ -153,10 +159,16 @@ static bool gic_init_global(void) {
 		return false;
 	}
 
-	gicd_mmio = (volatile uint8_t*)(uintptr_t)phys_to_virt(distributor);
-	gicc_mmio = (volatile uint8_t*)(uintptr_t)phys_to_virt(cpu_interface);
+	gicd_mmio      = (volatile uint8_t*)(uintptr_t)phys_to_virt(distributor);
+	gicc_mmio      = (volatile uint8_t*)(uintptr_t)phys_to_virt(cpu_interface);
+	gic_single_cpu = cpu_count() == 1u;
 
 	mmio_write32(gicd_mmio, AARCH64_GICD_CTLR, 0u);
+	/* Do not inherit an SPI enabled by firmware before its source is initialized. */
+	uint32_t interrupt_count = 32u * ((mmio_read32(gicd_mmio, AARCH64_GICD_TYPER) & 0x1fu) + 1u);
+	if (interrupt_count > AARCH64_GICC_INTID_SPURIOUS_MIN) interrupt_count = AARCH64_GICC_INTID_SPURIOUS_MIN;
+	for (uint32_t bank = 1u; bank < (interrupt_count + 31u) / 32u; bank++)
+		mmio_write32(gicd_mmio, AARCH64_GICD_ICENABLER0 + bank * 4u, UINT32_MAX);
 	mmio_write32(gicd_mmio, AARCH64_GICD_CTLR, AARCH64_GICD_CTLR_ENABLE);
 	sync();
 
@@ -174,11 +186,17 @@ bool aarch64_gic_init_local(struct cpu* cpu) {
 	if (aarch64_gicv3_ready()) return aarch64_gicv3_init_local(cpu);
 
 	if (cpu == NULL || cpu != cpu_current() || cpu->index >= AARCH64_GIC_MAX_CPUS) return false;
-	if (!gic_is_ready()) return true;
+	if (!gic_is_ready()) return false;
+	if (__atomic_load_n(&gic_local_ready[cpu->index], __ATOMIC_ACQUIRE)) return true;
 
-	group = mmio_read32(gicd_mmio, AARCH64_GICD_IGROUPR0);
-	group &= ~(1u << AARCH64_GIC_SCHEDULER_SGI);
+	/* SGIs and PPIs are banked: start this CPU with all firmware enables cleared. */
+	mmio_write32(gicd_mmio, AARCH64_GICD_ICENABLER0, UINT32_MAX);
+	struct irq_state irq = spinlock_lock_irqsave(&gic_distributor_lock);
+	group                = mmio_read32(gicd_mmio, AARCH64_GICD_IGROUPR0);
+	/* The kernel enters at Non-secure EL1, so owned interrupts use Group 1. */
+	group |= 1u << AARCH64_GIC_SCHEDULER_SGI;
 	mmio_write32(gicd_mmio, AARCH64_GICD_IGROUPR0, group);
+	spinlock_unlock_irqrestore(&gic_distributor_lock, irq);
 	mmio_write8(gicd_mmio, AARCH64_GICD_IPRIORITYR + AARCH64_GIC_SCHEDULER_SGI, 0x40u);
 	mmio_write32(gicd_mmio, AARCH64_GICD_ISENABLER0, 1u << AARCH64_GIC_SCHEDULER_SGI);
 	mmio_write32(gicc_mmio, AARCH64_GICC_PMR, 0xffu);
@@ -188,8 +206,9 @@ bool aarch64_gic_init_local(struct cpu* cpu) {
 	/* ITARGETSR0-7 are banked and read-only for SGIs/PPIs on GICv2.
 	 * Reading one SGI byte therefore gives this CPU interface's target bit. */
 	target_mask = mmio_read8(gicd_mmio, AARCH64_GICD_ITARGETSR + AARCH64_GIC_SCHEDULER_SGI);
-	if (!gic_target_mask_valid(target_mask)) target_mask = 0u;
+	if (!gic_target_mask_valid(target_mask)) target_mask = gic_single_cpu ? 1u : 0u;
 	__atomic_store_n(&gic_target_masks[cpu->index], target_mask, __ATOMIC_RELEASE);
+	__atomic_store_n(&gic_local_ready[cpu->index], true, __ATOMIC_RELEASE);
 	return true;
 }
 
@@ -260,7 +279,7 @@ static bool gicv2_source_init(struct hal_interrupt_source_state* state, const st
 	struct hal_interrupt_source_info info;
 
 	if (state == NULL || state->initialized || source == NULL || delivery == NULL || delivery->target == NULL ||
-	    delivery->target->index >= AARCH64_GIC_MAX_CPUS || !gic_init_global() ||
+	    delivery->target->index >= AARCH64_GIC_MAX_CPUS || !aarch64_gic_init_global() ||
 	    delivery->trigger > HAL_INTERRUPT_TRIGGER_LEVEL || delivery->polarity > HAL_INTERRUPT_POLARITY_HIGH)
 		return false;
 	if (local) {
@@ -281,22 +300,24 @@ static bool gicv2_source_init(struct hal_interrupt_source_state* state, const st
 		if (!gic_target_mask_valid(target_mask)) return false;
 	}
 	if (!gic_set_fixed_enabled(source->number, false)) return false;
-	bank  = source->number / 32u;
-	bit   = 1u << (source->number % 32u);
-	group = mmio_read32(gicd_mmio, AARCH64_GICD_IGROUPR0 + bank * 4u);
-	group &= ~bit;
+	bank                 = source->number / 32u;
+	bit                  = 1u << (source->number % 32u);
+	struct irq_state irq = spinlock_lock_irqsave(&gic_distributor_lock);
+	group                = mmio_read32(gicd_mmio, AARCH64_GICD_IGROUPR0 + bank * 4u);
+	/* The kernel enters at Non-secure EL1, so owned interrupts use Group 1. */
+	group |= bit;
 	mmio_write32(gicd_mmio, AARCH64_GICD_IGROUPR0 + bank * 4u, group);
-	mmio_write8(gicd_mmio, AARCH64_GICD_IPRIORITYR + source->number, 0x80u);
-	if (source->number >= 32u) mmio_write8(gicd_mmio, AARCH64_GICD_ITARGETSR + source->number, target_mask);
 	if (delivery->trigger != HAL_INTERRUPT_TRIGGER_FIRMWARE) {
 		uint32_t config_offset = AARCH64_GICD_ICFGR + (source->number / 16u) * 4u;
 		uint32_t trigger_bit   = 1u << (((source->number % 16u) * 2u) + 1u);
 		uint32_t config        = mmio_read32(gicd_mmio, config_offset);
 		if (delivery->trigger == HAL_INTERRUPT_TRIGGER_EDGE) config |= trigger_bit;
-		else if (delivery->trigger == HAL_INTERRUPT_TRIGGER_LEVEL) config &= ~trigger_bit;
-		else return false;
+		else config &= ~trigger_bit;
 		mmio_write32(gicd_mmio, config_offset, config);
 	}
+	spinlock_unlock_irqrestore(&gic_distributor_lock, irq);
+	mmio_write8(gicd_mmio, AARCH64_GICD_IPRIORITYR + source->number, 0x80u);
+	if (source->number >= 32u) mmio_write8(gicd_mmio, AARCH64_GICD_ITARGETSR + source->number, target_mask);
 	sync();
 	*state = (struct hal_interrupt_source_state){
 		.source = *source, .target_index = delivery->target->index, .initialized = true, .masked = true};
@@ -449,10 +470,13 @@ bool hal_interrupt_message_init(struct hal_interrupt_message_state*         stat
 	if (request->event.id < spi_base || request->event.id - spi_base >= spi_count) return false;
 	uint32_t id = request->event.id;
 	if (!gic_set_fixed_enabled(id, false)) return false;
-	uint32_t bank  = id / 32u;
-	uint32_t group = mmio_read32(gicd_mmio, AARCH64_GICD_IGROUPR0 + bank * 4u);
-	group &= ~(1u << (id % 32u));
+	uint32_t         bank  = id / 32u;
+	struct irq_state irq   = spinlock_lock_irqsave(&gic_distributor_lock);
+	uint32_t         group = mmio_read32(gicd_mmio, AARCH64_GICD_IGROUPR0 + bank * 4u);
+	/* The kernel enters at Non-secure EL1, so owned interrupts use Group 1. */
+	group |= 1u << (id % 32u);
 	mmio_write32(gicd_mmio, AARCH64_GICD_IGROUPR0 + bank * 4u, group);
+	spinlock_unlock_irqrestore(&gic_distributor_lock, irq);
 	mmio_write8(gicd_mmio, AARCH64_GICD_IPRIORITYR + id, 0x80u);
 	mmio_write8(gicd_mmio, AARCH64_GICD_ITARGETSR + id, target_mask);
 	if (!gic_set_fixed_enabled(id, true)) return false;
@@ -473,7 +497,7 @@ bool hal_interrupt_message_deinit(struct hal_interrupt_message_state* state) {
 bool aarch64_gic_prepare_smp(void) {
 	if (aarch64_gicv3_described()) return aarch64_gicv3_prepare_smp();
 	if (cpu_count() > AARCH64_GIC_MAX_TARGETS) return false;
-	if (!gic_init_global()) return false;
+	if (!gic_is_ready()) return false;
 	if (!aarch64_gic_init_local(cpu_current())) return false;
 	return cpu_count() == 1u || gic_target_mask_valid(gic_target_masks[cpu_current()->index]);
 }

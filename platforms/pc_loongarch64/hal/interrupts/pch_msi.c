@@ -27,7 +27,8 @@ bool loongarch64_pch_msi_range_at(size_t index, struct hal_interrupt_message_ran
 
 bool loongarch64_pch_msi_target_supported(uint32_t domain, const struct hal_interrupt_message_source* source,
                                           const struct cpu* target) {
-	if (domain != LOONGARCH64_MESSAGE_DOMAIN_PCH_MSI || source != NULL || target == NULL || !pch_msi.described)
+	if (domain != LOONGARCH64_MESSAGE_DOMAIN_PCH_MSI || source != NULL || target == NULL || target->index >= 64u ||
+	    !target->interrupts_ready || !pch_msi.described || (!eiointc.described && !htvec.described))
 		return false;
 	return eiointc.described ? target->arch_id < 64u : target == loongarch64_fixed_target;
 }

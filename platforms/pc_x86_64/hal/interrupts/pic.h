@@ -12,6 +12,9 @@ void pic_mask_irq(unsigned irq);
 /* Unmask one legacy PIC interrupt request line. */
 void pic_unmask_irq(unsigned irq);
 
+/* Return whether a legacy PIC vector is a spurious IRQ7 or IRQ15. */
+bool pic_is_spurious_irq(unsigned vector);
+
 /* Signal end-of-interrupt for a legacy PIC vector. */
 void pic_send_eoi(unsigned vector);
 

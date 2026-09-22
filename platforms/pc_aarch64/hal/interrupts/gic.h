@@ -8,6 +8,9 @@
 
 struct cpu;
 
+/* Discover, map, and enable the architecture's global interrupt controller. */
+bool aarch64_gic_init_global(void);
+
 /* Prepare the active GIC implementation for secondary CPU startup. */
 bool aarch64_gic_prepare_smp(void);
 

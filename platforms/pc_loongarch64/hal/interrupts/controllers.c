@@ -304,6 +304,8 @@ bool loongarch64_interrupt_controllers_discover(void) {
 	memset(lio_cascade_maps, 0, sizeof(lio_cascade_maps));
 	if (!discover_fdt()) (void)discover_acpi();
 	loongarch64_avec_discover();
+	loongarch64_fixed_target = cpu_bsp();
+	if (loongarch64_fixed_target == NULL) return false;
 	controllers_discovered = true;
 	return true;
 }
