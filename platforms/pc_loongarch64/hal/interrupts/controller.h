@@ -14,11 +14,14 @@
 #define LOONGARCH64_DOMAIN_PCH_PIC_BASE 16u
 #define LOONGARCH64_DOMAIN_PCH_LPC 32u
 #define LOONGARCH64_MESSAGE_DOMAIN_PCH_MSI 0u
+#define LOONGARCH64_MESSAGE_DOMAIN_AVEC 1u
+#define LOONGARCH64_MESSAGE_DOMAIN_REDIRECT 2u
 
 /* Delivery namespaces exposed by LoongArch interrupt controllers. */
 #define LOONGARCH64_DELIVERY_DOMAIN_VECTOR 1u
 #define LOONGARCH64_DELIVERY_DOMAIN_LIOINTC 2u
 #define LOONGARCH64_DELIVERY_DOMAIN_PCH_LPC 3u
+#define LOONGARCH64_DELIVERY_DOMAIN_AVEC 4u
 
 /* Architectural input, vector, source, and group limits. */
 #define LOONGARCH64_CPU_HWI_BASE 2u
@@ -28,6 +31,8 @@
 #define LIOINTC_SOURCE_COUNT 32u
 #define HTVEC_GROUP_COUNT 8u
 #define LPC_SOURCE_COUNT 16u
+#define AVEC_VECTOR_BASE 16u
+#define AVEC_VECTOR_COUNT 256u
 
 /* Hardware classes represented by a fixed interrupt-source domain. */
 enum fixed_kind {

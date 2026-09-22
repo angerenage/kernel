@@ -24,6 +24,7 @@
 #define LOONGARCH64_CSR_MERRENTRY 0x94u
 
 #define LOONGARCH64_USER_INTERRUPT_COUNT 11u
+#define LOONGARCH64_CPU_INTERRUPT_COUNT 15u
 
 static bool global_ready;
 static bool local_ready[64];
@@ -107,7 +108,7 @@ void irq_enable_local(void) {
 static bool loongarch64_set_interrupt_enabled(uint32_t id, bool enabled) {
 	uint64_t ecfg;
 
-	if (id >= LOONGARCH64_USER_INTERRUPT_COUNT) return false;
+	if (id >= LOONGARCH64_CPU_INTERRUPT_COUNT) return false;
 	ecfg = csrrd(LOONGARCH64_CSR_ECFG);
 	if (enabled) ecfg |= 1ull << id;
 	else ecfg &= ~(1ull << id);
@@ -207,6 +208,7 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 	 * configured at their leaf controller and delivered through these pins. */
 	uint64_t ecfg = csrrd(LOONGARCH64_CSR_ECFG);
 	for (uint32_t id = 2u; id < 10u; id++) ecfg |= 1ull << id;
+	if (loongarch64_interrupt_controllers_has_avec()) ecfg |= 1ull << 14u;
 	csrwr(ecfg, LOONGARCH64_CSR_ECFG);
 
 	local_ready[cpu->index] = true;
@@ -364,7 +366,7 @@ void handle_exception(struct exception_frame* frame) {
 	if (ecode == 0u) {
 		bool handled = false;
 
-		is_pending = frame->estat & 0x1fffu;
+		is_pending = frame->estat & 0x7fffu;
 		if (loongarch64_interrupt_controllers_handle(is_pending)) return;
 		for (uint32_t id = 0u; id < LOONGARCH64_USER_INTERRUPT_COUNT; id++) {
 			if ((is_pending & (1ull << id)) == 0u) continue;
@@ -374,7 +376,7 @@ void handle_exception(struct exception_frame* frame) {
 		if (handled) return;
 	}
 
-	is_pending = frame->estat & 0x1fffu;
+	is_pending = frame->estat & 0x7fffu;
 	esubcode   = (frame->estat >> 22) & 0x1ffu;
 
 	if (is_page_invalid_exception(ecode)) {

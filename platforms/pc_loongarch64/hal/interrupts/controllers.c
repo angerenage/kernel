@@ -10,11 +10,13 @@
 
 #include "../../../iommu_acpi.h"
 #include "../../../iommu_fdt.h"
+#include "avec.h"
 #include "controller.h"
 #include "eiointc.h"
 #include "fixed.h"
 #include "liointc.h"
 #include "pch_msi.h"
+#include "redirect.h"
 
 #define LOONGARCH64_PAGE_SIZE 0x1000u
 
@@ -301,6 +303,7 @@ bool loongarch64_interrupt_controllers_discover(void) {
 	memset(lio_cascades, 0, sizeof(lio_cascades));
 	memset(lio_cascade_maps, 0, sizeof(lio_cascade_maps));
 	if (!discover_fdt()) (void)discover_acpi();
+	loongarch64_avec_discover();
 	controllers_discovered = true;
 	return true;
 }
@@ -308,7 +311,7 @@ bool loongarch64_interrupt_controllers_discover(void) {
 bool loongarch64_interrupt_controllers_init_local(const struct cpu* cpu) {
 	if (!controllers_discovered || cpu == NULL) return false;
 	if (cpu->role == CPU_ROLE_BSP) loongarch64_fixed_target = cpu;
-	return loongarch64_eiointc_init_local(cpu);
+	return loongarch64_eiointc_init_local(cpu) && loongarch64_avec_init_local(cpu);
 }
 
 size_t loongarch64_interrupt_source_domain_count(void) {
@@ -348,31 +351,52 @@ bool loongarch64_interrupt_source_deinit(struct hal_interrupt_source_state* stat
 }
 
 size_t loongarch64_interrupt_message_range_count(void) {
-	return controllers_discovered ? loongarch64_pch_msi_range_count() : 0u;
+	if (!controllers_discovered) return 0u;
+	return loongarch64_avec_available() ? 1u : loongarch64_pch_msi_range_count();
 }
 
 bool loongarch64_interrupt_message_range_at(size_t index, struct hal_interrupt_message_range* out_range) {
-	return controllers_discovered && loongarch64_pch_msi_range_at(index, out_range);
+	if (!controllers_discovered) return false;
+	return loongarch64_avec_available() ? index == 0u && loongarch64_avec_range(out_range)
+	                                    : loongarch64_pch_msi_range_at(index, out_range);
 }
 
 bool loongarch64_interrupt_message_target_supported(uint32_t domain, const struct hal_interrupt_message_source* source,
                                                     const struct cpu* target) {
-	return controllers_discovered && loongarch64_pch_msi_target_supported(domain, source, target);
+	if (!controllers_discovered) return false;
+	if (domain == LOONGARCH64_MESSAGE_DOMAIN_AVEC) return loongarch64_avec_target_supported(domain, source, target);
+	if (domain == LOONGARCH64_MESSAGE_DOMAIN_REDIRECT)
+		return loongarch64_redirect_target_supported(domain, source, target);
+	if (loongarch64_avec_available()) return false;
+	return loongarch64_pch_msi_target_supported(domain, source, target);
 }
 
 bool loongarch64_interrupt_message_init(struct hal_interrupt_message_state*         state,
                                         const struct hal_interrupt_message_request* request,
                                         struct hal_interrupt_message*               out_message) {
-	return controllers_discovered && loongarch64_pch_msi_init(state, request, out_message);
+	if (!controllers_discovered || request == NULL) return false;
+	if (request->domain == LOONGARCH64_MESSAGE_DOMAIN_AVEC) return loongarch64_avec_init(state, request, out_message);
+	if (request->domain == LOONGARCH64_MESSAGE_DOMAIN_REDIRECT)
+		return loongarch64_redirect_init(state, request, out_message);
+	if (loongarch64_avec_available()) return false;
+	return loongarch64_pch_msi_init(state, request, out_message);
 }
 
 bool loongarch64_interrupt_message_deinit(struct hal_interrupt_message_state* state) {
 	if (state == NULL) return false;
 	if (!state->initialized) return true;
-	return controllers_discovered && loongarch64_pch_msi_deinit(state);
+	if (!controllers_discovered) return false;
+	if (state->domain == LOONGARCH64_MESSAGE_DOMAIN_AVEC) return loongarch64_avec_deinit(state);
+	if (state->domain == LOONGARCH64_MESSAGE_DOMAIN_REDIRECT) return loongarch64_redirect_deinit(state);
+	return loongarch64_pch_msi_deinit(state);
 }
 
 bool loongarch64_interrupt_controllers_handle(uint64_t pending) {
+	if ((pending & (1ull << 14u)) != 0u && loongarch64_avec_handle()) return true;
 	if (eiointc.described && (pending & (1ull << eiointc.cascade)) != 0u && loongarch64_eiointc_handle()) return true;
 	return loongarch64_liointc_handle(pending);
+}
+
+bool loongarch64_interrupt_controllers_has_avec(void) {
+	return controllers_discovered && loongarch64_avec_available();
 }

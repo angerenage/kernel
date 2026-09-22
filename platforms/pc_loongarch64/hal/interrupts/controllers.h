@@ -16,6 +16,9 @@ bool loongarch64_interrupt_controllers_init_local(const struct cpu* cpu);
 /* Dispatch an interrupt pending on one or more CPU interrupt inputs. */
 bool loongarch64_interrupt_controllers_handle(uint64_t pending);
 
+/* Return whether CPUINTC must enable the AVECINTC message input. */
+bool loongarch64_interrupt_controllers_has_avec(void);
+
 /* Return the number of discovered fixed-source domains. */
 size_t loongarch64_interrupt_source_domain_count(void);
 

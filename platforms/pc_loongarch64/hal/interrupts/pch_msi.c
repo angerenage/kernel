@@ -49,14 +49,17 @@ bool loongarch64_pch_msi_init(struct hal_interrupt_message_state*         state,
 	loongarch64_htvec_set_enabled(vector, true);
 	loongarch64_controllers_unlock(irq);
 	*out_message = (struct hal_interrupt_message){.address = pch_msi.address, .data = vector};
-	*state       = (struct hal_interrupt_message_state){.event = request->event, .initialized = true};
+	*state       = (struct hal_interrupt_message_state){
+		.domain = LOONGARCH64_MESSAGE_DOMAIN_PCH_MSI, .event = request->event, .initialized = true};
 	return true;
 }
 
 bool loongarch64_pch_msi_deinit(struct hal_interrupt_message_state* state) {
 	if (state == NULL) return false;
 	if (!state->initialized) return true;
-	if (state->event.domain != LOONGARCH64_DELIVERY_DOMAIN_VECTOR) return false;
+	if (state->domain != LOONGARCH64_MESSAGE_DOMAIN_PCH_MSI ||
+	    state->event.domain != LOONGARCH64_DELIVERY_DOMAIN_VECTOR)
+		return false;
 	struct irq_state irq = loongarch64_controllers_lock();
 	loongarch64_eiointc_set_enabled(state->event.id, false);
 	loongarch64_htvec_set_enabled(state->event.id, false);

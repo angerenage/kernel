@@ -188,7 +188,11 @@ struct hal_interrupt_message_state {
 #elif defined(PLATFORM_PC_LOONGARCH64)
 /* LoongArch message-delivery state selected at compile time. */
 struct hal_interrupt_message_state {
+	uint32_t                   domain;
 	struct hal_interrupt_event event;
+	uintptr_t                  redirect_gpid_address;
+	size_t                     redirect_gpid_size;
+	uint32_t                   redirect_index;
 	bool                       initialized;
 };
 #else
