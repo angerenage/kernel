@@ -1,6 +1,7 @@
 #include "avec.h"
 
 #include <core/cpu.h>
+#include <core/interrupt.h>
 #include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -120,7 +121,8 @@ bool loongarch64_avec_handle(void) {
 	for (;;) {
 		uint64_t request = csr_read_irr();
 		if ((request & AVEC_IRR_INVALID) != 0u) break;
-		(void)(request & AVEC_IRR_VECTOR_MASK);
+		(void)interrupt_handle_event((struct hal_interrupt_event){.domain = LOONGARCH64_DELIVERY_DOMAIN_AVEC,
+		                                                          .id = (uint32_t)(request & AVEC_IRR_VECTOR_MASK)});
 		handled = true;
 	}
 	return handled;

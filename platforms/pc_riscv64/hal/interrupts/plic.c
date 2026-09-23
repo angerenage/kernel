@@ -1,6 +1,7 @@
 #include "plic.h"
 
 #include <core/cpu.h>
+#include <core/interrupt.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>
 #include <hal/paging.h>
@@ -389,7 +390,8 @@ bool riscv64_plic_handle_external_irq(void) {
 	uint64_t claim_offset = PLIC_CONTEXT_BASE + (uint64_t)context * PLIC_CONTEXT_STRIDE + PLIC_CONTEXT_CLAIM;
 	uint32_t claim        = *plic_register(claim_offset);
 	if (claim == 0u) return false;
-	if (claim <= plic.ndev) {
+	if (claim <= plic.ndev &&
+	    !interrupt_handle_event((struct hal_interrupt_event){.domain = RISCV64_DELIVERY_DOMAIN_PLIC, .id = claim})) {
 		(void)plic_set_source_enabled(context, claim, false);
 	}
 	*plic_register(claim_offset) = claim;

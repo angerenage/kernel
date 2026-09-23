@@ -1,6 +1,7 @@
 #include "liointc.h"
 
 #include <core/cpu.h>
+#include <core/interrupt.h>
 #include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -98,7 +99,15 @@ bool loongarch64_liointc_handle(uint64_t pending_cpu) {
 		if (ht_pending) handled = loongarch64_htvec_handle();
 	}
 	if (pending != 0u) {
-		loongarch64_mmio_write32(lio->virtual_base, LIOINTC_DISABLE, pending);
+		uint32_t unhandled = pending;
+		while (pending != 0u) {
+			uint32_t source = (uint32_t)__builtin_ctz(pending);
+			if (interrupt_handle_event(
+					(struct hal_interrupt_event){.domain = LOONGARCH64_DELIVERY_DOMAIN_LIOINTC, .id = source}))
+				unhandled &= ~(1u << source);
+			pending &= ~(1u << source);
+		}
+		if (unhandled != 0u) loongarch64_mmio_write32(lio->virtual_base, LIOINTC_DISABLE, unhandled);
 		handled = true;
 	}
 	return handled;

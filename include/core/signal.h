@@ -11,6 +11,7 @@
 
 struct signal_handler_binding;
 struct signal_wait_binding;
+struct interrupt;
 struct uthread;
 
 /* Multi-producer broadcast object carrying one authenticated four-word message. */
@@ -32,9 +33,11 @@ struct signal {
 	struct thread_wait_queue       waiters;
 	/* Lazily-created cap_object id for this Signal. */
 	cap_object_id_t cap_object_id;
-	uint64_t        reference_count;
-	bool            has_value;
-	bool            closing;
+	/* Interrupt binding protected by lock; the stored pointer owns one interrupt reference. */
+	struct interrupt* interrupt;
+	uint64_t          reference_count;
+	bool              has_value;
+	bool              closing;
 };
 
 /* Create and register a signal. The returned pointer owns the registry reference. */
@@ -45,6 +48,15 @@ struct signal* signal_acquire(signal_id_t id);
 
 /* Retain an existing signal reference. */
 bool signal_retain(struct signal* signal);
+
+/* Attach one retained Interrupt unless the Signal is closing or already interrupt-backed. */
+bool signal_bind_interrupt(struct signal* signal, struct interrupt* interrupt);
+
+/* Remove a matching Interrupt binding and return whether its retained reference was detached. */
+bool signal_unbind_interrupt(struct signal* signal, struct interrupt* interrupt);
+
+/* Restore a detached Interrupt binding while Signal destruction is rolling back. */
+bool signal_restore_interrupt(struct signal* signal, struct interrupt* interrupt);
 
 /* Drop a reference acquired through signal_acquire() or signal_create(). */
 void signal_release(struct signal* signal);

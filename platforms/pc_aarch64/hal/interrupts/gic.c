@@ -1,6 +1,7 @@
 #include "gic.h"
 
 #include <core/cpu.h>
+#include <core/interrupt.h>
 #include <core/lock.h>
 #include <core/spinlock.h>
 #include <hal/interrupts.h>
@@ -531,9 +532,12 @@ static bool gic_handle_external_irq(const struct exception_frame* frame) {
 		handled = true;
 	}
 	else {
-		if (intid < 32u) mmio_write32(gicd_mmio, AARCH64_GICD_ICENABLER0, 1u << intid);
-		else (void)gic_set_fixed_enabled(intid, false);
-		handled = true;
+		handled = interrupt_handle_event((struct hal_interrupt_event){.domain = 0u, .id = intid});
+		if (!handled) {
+			if (intid < 32u) mmio_write32(gicd_mmio, AARCH64_GICD_ICENABLER0, 1u << intid);
+			else (void)gic_set_fixed_enabled(intid, false);
+			handled = true;
+		}
 	}
 	mmio_write32(gicc_mmio, AARCH64_GICC_EOIR, iar);
 	return handled;

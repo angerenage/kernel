@@ -5,6 +5,7 @@ core_sources = files(
 	'cpu/cpu.c',
 	'cpu/irq.c',
 	'exception.c',
+	'interrupt.c',
 	'id_table.c',
 	'process.c',
 	'ring_buffer.c',

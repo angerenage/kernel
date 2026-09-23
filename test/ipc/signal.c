@@ -782,7 +782,8 @@ Test(signal, oneshot_handler_detaches_only_after_successful_admission) {
 	cr_assert_eq(delivery_count, 1u);
 	cr_assert_eq(signal_handler_count(signal), 0u);
 	cr_assert_eq(uthread_upcall_pending_count(&receiver), 1u);
-	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].origin, USER_UPCALL_ORIGIN_NONE);
+	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].origin, USER_UPCALL_ORIGIN_SIGNAL);
+	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].origin_id, signal_id(signal));
 	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].origin_token, 0u);
 	cr_assert((receiver.upcall.pending[receiver.upcall.head].flags & USER_UPCALL_FLAG_NON_EVICTABLE) != 0u);
 	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].args[0], SIGNAL_TEST_SENDER);
@@ -885,7 +886,8 @@ Test(signal, coalesced_oneshot_is_admitted_as_an_independent_request) {
 	cr_assert_eq(signal_send_coalesced(signal, SIGNAL_TEST_SENDER, &payload, NULL, NULL), SIGNAL_OK);
 	cr_assert_eq(signal_handler_count(signal), 0u);
 	cr_assert_eq(uthread_upcall_pending_count(&receiver), 1u);
-	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].origin, USER_UPCALL_ORIGIN_NONE);
+	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].origin, USER_UPCALL_ORIGIN_SIGNAL);
+	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].origin_id, signal_id(signal));
 	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].origin_token, 0u);
 	cr_assert((receiver.upcall.pending[receiver.upcall.head].flags & USER_UPCALL_FLAG_COALESCIBLE) != 0u);
 	cr_assert((receiver.upcall.pending[receiver.upcall.head].flags & USER_UPCALL_FLAG_NON_EVICTABLE) != 0u);
@@ -932,7 +934,8 @@ Test(signal, forced_oneshot_is_protected_and_survives_detach) {
 	cr_assert_eq(uthread_upcall_pending_count(&receiver), USER_UPCALL_QUEUE_CAPACITY);
 	cr_assert_eq(uthread_upcall_dropped_count(&receiver), 1u);
 	tail = (receiver.upcall.head + receiver.upcall.count - 1u) % USER_UPCALL_QUEUE_CAPACITY;
-	cr_assert_eq(receiver.upcall.pending[tail].origin, USER_UPCALL_ORIGIN_NONE);
+	cr_assert_eq(receiver.upcall.pending[tail].origin, USER_UPCALL_ORIGIN_SIGNAL);
+	cr_assert_eq(receiver.upcall.pending[tail].origin_id, signal_id(signal));
 	cr_assert_eq(receiver.upcall.pending[tail].origin_token, 0u);
 	cr_assert((receiver.upcall.pending[tail].flags & USER_UPCALL_FLAG_NON_EVICTABLE) != 0u);
 	cr_assert_eq(receiver.upcall.pending[tail].args[0], SIGNAL_TEST_SENDER);
@@ -1069,7 +1072,8 @@ Test(signal, failed_forced_oneshot_preflight_keeps_handler_armed_for_retry) {
 	cr_assert_eq(signal_generation(signal), 1u);
 	cr_assert_eq(uthread_upcall_pending_count(&receiver), USER_UPCALL_QUEUE_CAPACITY);
 	tail = (receiver.upcall.head + receiver.upcall.count - 1u) % USER_UPCALL_QUEUE_CAPACITY;
-	cr_assert_eq(receiver.upcall.pending[tail].origin, USER_UPCALL_ORIGIN_NONE);
+	cr_assert_eq(receiver.upcall.pending[tail].origin, USER_UPCALL_ORIGIN_SIGNAL);
+	cr_assert_eq(receiver.upcall.pending[tail].origin_id, signal_id(signal));
 	cr_assert_eq(receiver.upcall.pending[tail].args[0], SIGNAL_TEST_SECOND_SENDER);
 	cr_assert_eq(receiver.upcall.pending[tail].args[1], 99u);
 	cr_assert((receiver.upcall.pending[tail].flags & USER_UPCALL_FLAG_NON_EVICTABLE) != 0u);
@@ -1101,7 +1105,8 @@ Test(signal, thread_cleanup_reclaims_retired_oneshot_without_purging_admitted_de
 	signal_unregister_thread_receivers(&receiver);
 	cr_assert_eq(__atomic_load_n(&receiver.reference_count, __ATOMIC_ACQUIRE), 1u);
 	cr_assert_eq(uthread_upcall_pending_count(&receiver), 1u);
-	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].origin, USER_UPCALL_ORIGIN_NONE);
+	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].origin, USER_UPCALL_ORIGIN_SIGNAL);
+	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].origin_id, signal_id(signal));
 
 	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
 	cr_assert_eq(uthread_upcall_pending_count(&receiver), 1u);
@@ -1134,7 +1139,8 @@ Test(signal, rearmed_oneshot_binding_can_change_entry_and_become_persistent) {
 	cr_assert_eq(__atomic_load_n(&receiver.reference_count, __ATOMIC_ACQUIRE), 2u);
 	cr_assert_eq(signal_send(signal, SIGNAL_TEST_SECOND_SENDER, &second, NULL, NULL), SIGNAL_OK);
 	cr_assert_eq(uthread_upcall_pending_count(&receiver), 2u);
-	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].origin, USER_UPCALL_ORIGIN_NONE);
+	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].origin, USER_UPCALL_ORIGIN_SIGNAL);
+	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].origin_id, signal_id(signal));
 	cr_assert_eq(receiver.upcall.pending[receiver.upcall.head].entry, (uintptr_t)signal_test_handler);
 	second_index = (receiver.upcall.head + 1u) % USER_UPCALL_QUEUE_CAPACITY;
 	cr_assert_eq(receiver.upcall.pending[second_index].origin, USER_UPCALL_ORIGIN_SIGNAL);

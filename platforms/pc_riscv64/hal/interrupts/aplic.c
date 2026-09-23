@@ -1,6 +1,7 @@
 #include "aplic.h"
 
 #include <core/cpu.h>
+#include <core/interrupt.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>
 #include <hal/paging.h>
@@ -402,7 +403,9 @@ bool riscv64_aplic_handle_external_irq(void) {
 	uint32_t claim  = aplic_read(APLIC_IDC_BASE + (uintptr_t)hart_index * APLIC_IDC_STRIDE + APLIC_IDC_CLAIMI);
 	uint32_t source = claim >> 16u;
 	if (source == 0u) return false;
-	if (source <= aplic.sources) aplic_write(APLIC_CLRIENUM, source);
+	if (source <= aplic.sources &&
+	    !interrupt_handle_event((struct hal_interrupt_event){.domain = RISCV64_DELIVERY_DOMAIN_APLIC, .id = source}))
+		aplic_write(APLIC_CLRIENUM, source);
 	return true;
 }
 

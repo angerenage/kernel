@@ -2,6 +2,7 @@
 #include <base/upcall.h>
 #include <core/capability.h>
 #include <core/id_table.h>
+#include <core/interrupt.h>
 #include <core/sched.h>
 #include <core/signal.h>
 #include <core/user_upcall.h>
@@ -512,6 +513,48 @@ bool signal_retain(struct signal* signal) {
 	return retained;
 }
 
+bool signal_bind_interrupt(struct signal* signal, struct interrupt* interrupt) {
+	struct irq_state state;
+	bool             bound = false;
+
+	if (signal == NULL || interrupt == NULL) return false;
+	state = spinlock_lock_irqsave(&signal->lock);
+	if (!signal->closing && signal->interrupt == NULL) {
+		signal->interrupt = interrupt;
+		bound             = true;
+	}
+	spinlock_unlock_irqrestore(&signal->lock, state);
+	return bound;
+}
+
+bool signal_unbind_interrupt(struct signal* signal, struct interrupt* interrupt) {
+	struct irq_state state;
+	bool             unbound = false;
+
+	if (signal == NULL || interrupt == NULL) return false;
+	state = spinlock_lock_irqsave(&signal->lock);
+	if (signal->interrupt == interrupt) {
+		signal->interrupt = NULL;
+		unbound           = true;
+	}
+	spinlock_unlock_irqrestore(&signal->lock, state);
+	return unbound;
+}
+
+bool signal_restore_interrupt(struct signal* signal, struct interrupt* interrupt) {
+	struct irq_state state;
+	bool             restored = false;
+
+	if (signal == NULL || interrupt == NULL) return false;
+	state = spinlock_lock_irqsave(&signal->lock);
+	if (signal->closing && signal->interrupt == NULL) {
+		signal->interrupt = interrupt;
+		restored          = true;
+	}
+	spinlock_unlock_irqrestore(&signal->lock, state);
+	return restored;
+}
+
 struct signal* signal_acquire(signal_id_t id) {
 	if (id == SIGNAL_ID_INVALID) return NULL;
 	return id_table_lookup_retain(&signal_table, (id_table_id_t)id, signal_retain_callback, NULL);
@@ -526,6 +569,7 @@ void signal_release(struct signal* signal) {
 enum signal_result signal_destroy(struct signal* signal) {
 	struct signal_handler_binding* handlers;
 	struct signal_wait_binding*    waits;
+	struct interrupt*              interrupt;
 	struct irq_state               state;
 	struct signal*                 removed = NULL;
 	enum id_table_result           id_result;
@@ -538,9 +582,19 @@ enum signal_result signal_destroy(struct signal* signal) {
 		spinlock_unlock_irqrestore(&signal->lock, state);
 		return SIGNAL_CLOSED;
 	}
-	id              = signal->id;
-	signal->closing = true;
+	id                = signal->id;
+	signal->closing   = true;
+	interrupt         = signal->interrupt;
+	signal->interrupt = NULL;
 	spinlock_unlock_irqrestore(&signal->lock, state);
+
+	if (interrupt != NULL && !interrupt_signal_destroying(interrupt, signal)) {
+		state = spinlock_lock_irqsave(&signal->lock);
+		if (signal->closing) signal->closing = false;
+		spinlock_unlock_irqrestore(&signal->lock, state);
+		return SIGNAL_UNAVAILABLE;
+	}
+	if (interrupt != NULL) interrupt_release(interrupt);
 
 	id_result = id_table_remove(&signal_table, (id_table_id_t)id, (void**)&removed);
 	if (id_result != ID_TABLE_OK) {
@@ -599,10 +653,10 @@ static struct user_upcall_request signal_handler_request(const struct signal*   
 	if (signal_send_internal_is_coalesced(flags)) upcall_flags |= USER_UPCALL_FLAG_COALESCIBLE;
 	if (signal_send_internal_is_forced(flags) || oneshot) upcall_flags |= USER_UPCALL_FLAG_NON_EVICTABLE;
 	return (struct user_upcall_request){
-		.origin       = oneshot ? USER_UPCALL_ORIGIN_NONE : USER_UPCALL_ORIGIN_SIGNAL,
+		.origin       = USER_UPCALL_ORIGIN_SIGNAL,
 		.flags        = upcall_flags,
 		.origin_token = oneshot ? 0u : (uintptr_t)handler,
-		.origin_id    = oneshot ? 0u : (uint64_t)signal->id,
+		.origin_id    = (uint64_t)signal->id,
 		.entry        = handler->entry,
 		.args =
 			{
@@ -810,6 +864,7 @@ enum signal_result signal_try_wait(struct signal* signal, struct signal_message*
 		result = SIGNAL_WOULD_BLOCK;
 	}
 	spinlock_unlock_irqrestore(&signal->lock, state);
+	if (result == SIGNAL_WOULD_BLOCK) interrupt_signal_ready(signal_id(signal));
 	return result;
 }
 
@@ -847,6 +902,27 @@ enum signal_result signal_wait(struct signal* signal, struct signal_message* out
 		else {
 			enum sched_block_result block_result;
 
+			spinlock_unlock(&signal->lock);
+			spinlock_unlock_irqrestore(&signal->waiters.lock, wait_state);
+			interrupt_signal_ready(signal_id(signal));
+			/* Rearming may publish immediately; recheck before marking the receiver blocked. */
+			wait_state = spinlock_lock_irqsave(&signal->waiters.lock);
+			spinlock_lock(&signal->lock);
+			if (signal->closing) {
+				spinlock_unlock(&signal->lock);
+				spinlock_unlock_irqrestore(&signal->waiters.lock, wait_state);
+				return SIGNAL_CLOSED;
+			}
+			if ((binding = signal_find_wait_locked(signal, current, NULL)) == NULL) {
+				spinlock_unlock(&signal->lock);
+				spinlock_unlock_irqrestore(&signal->waiters.lock, wait_state);
+				return SIGNAL_WAIT_FAILED;
+			}
+			if (signal_take_wait_value_locked(signal, binding, out_message)) {
+				spinlock_unlock(&signal->lock);
+				spinlock_unlock_irqrestore(&signal->waiters.lock, wait_state);
+				return SIGNAL_OK;
+			}
 			binding->waiting = true;
 			spinlock_unlock(&signal->lock);
 			block_result = sched_block_current_interruptible_locked(&signal->waiters, THREAD_BLOCK_SIGNAL, wait_state);

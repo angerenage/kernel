@@ -1,5 +1,6 @@
 #include <core/cpu.h>
 #include <core/exception.h>
+#include <core/interrupt.h>
 #include <core/sched.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
@@ -549,6 +550,7 @@ void x86_64_handle_interrupt(struct interrupt_frame* frame) {
 	}
 	if (is_external_irq(vector)) {
 		bool handled = clock_handle_irq((unsigned)vector);
+		handled |= interrupt_handle_event((struct hal_interrupt_event){.domain = 0u, .id = (uint32_t)vector});
 		bool pic_spurious =
 			vector >= X86_IRQ_BASE && vector < X86_IRQ_BASE + X86_IRQ_COUNT && pic_is_spurious_irq((unsigned)vector);
 		if (!handled && !pic_spurious && vector < X86_IRQ_BASE + X86_IRQ_COUNT) {

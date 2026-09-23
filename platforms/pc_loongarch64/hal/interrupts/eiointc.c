@@ -1,6 +1,7 @@
 #include "eiointc.h"
 
 #include <core/cpu.h>
+#include <core/interrupt.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -90,7 +91,9 @@ bool loongarch64_eiointc_handle(void) {
 		while (pending != 0u) {
 			uint32_t bit    = (uint32_t)__builtin_ctz(pending);
 			uint32_t vector = word * 32u + bit;
-			(void)loongarch64_pch_pic_mask_vector_leaf(vector);
+			if (!interrupt_handle_event(
+					(struct hal_interrupt_event){.domain = LOONGARCH64_DELIVERY_DOMAIN_VECTOR, .id = vector}))
+				(void)loongarch64_pch_pic_mask_vector_leaf(vector);
 			pending &= ~(1u << bit);
 		}
 		handled = true;

@@ -1,6 +1,7 @@
 #include "imsic.h"
 
 #include <core/cpu.h>
+#include <core/interrupt.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>
 #include <stdbool.h>
@@ -254,5 +255,6 @@ bool riscv64_imsic_handle_external_irq(void) {
 	uint32_t id = (uint32_t)(top >> 16u);
 	if (id == 0u) return false;
 	(void)riscv64_aplic_handle_message_id(id);
+	(void)interrupt_handle_event((struct hal_interrupt_event){.domain = RISCV64_DELIVERY_DOMAIN_IMSIC, .id = id});
 	return true;
 }

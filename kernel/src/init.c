@@ -4,6 +4,7 @@
 #include <core/capability.h>
 #include <core/cpu.h>
 #include <core/dma.h>
+#include <core/interrupt.h>
 #include <core/kthread.h>
 #include <core/mm.h>
 #include <core/pmm.h>
@@ -277,6 +278,7 @@ void kernel_main(void) {
 	if (!hal_interrupts_init_local(cpu_current())) {
 		boot_fail("kernel: hal_interrupts_init_local failed");
 	}
+	if (!interrupt_init()) boot_fail("kernel: interrupt core initialization failed");
 	irq_enable_local();
 	(void)cpu_set_state(cpu_current(), CPU_STATE_ONLINE);
 

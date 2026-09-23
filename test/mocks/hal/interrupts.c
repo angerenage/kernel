@@ -1,10 +1,17 @@
 #include <core/cpu.h>
 #include <hal/interrupts.h>
 
-static _Thread_local bool hosted_irq_enabled = true;
-static const struct cpu*  last_source_target;
-static bool               last_source_unmasked_from_masked;
-static bool               source_mask_fails;
+static _Thread_local bool                 hosted_irq_enabled = true;
+static const struct cpu*                  last_source_target;
+static bool                               last_source_unmasked_from_masked;
+static bool                               source_mask_fails;
+static bool                               source_unmask_fails;
+static enum hal_interrupt_trigger         last_source_trigger;
+static enum hal_interrupt_polarity        last_source_polarity;
+static struct hal_interrupt_message_range message_ranges[4] = {
+	{.domain = 0u, .delivery = {.domain = 0u, .base = 0u, .limit = 256u}}
+};
+static size_t message_range_count = 1u;
 
 const struct cpu* hal_interrupt_mock_last_target(void) {
 	return last_source_target;
@@ -14,6 +21,21 @@ bool hal_interrupt_mock_unmasked_from_masked(void) {
 }
 void hal_interrupt_mock_set_mask_failure(bool fail) {
 	source_mask_fails = fail;
+}
+void hal_interrupt_mock_set_unmask_failure(bool fail) {
+	source_unmask_fails = fail;
+}
+enum hal_interrupt_trigger hal_interrupt_mock_last_trigger(void) {
+	return last_source_trigger;
+}
+enum hal_interrupt_polarity hal_interrupt_mock_last_polarity(void) {
+	return last_source_polarity;
+}
+void hal_interrupt_mock_set_message_ranges(const struct hal_interrupt_message_range* ranges, size_t count) {
+	if (count > sizeof(message_ranges) / sizeof(message_ranges[0]))
+		count = sizeof(message_ranges) / sizeof(message_ranges[0]);
+	for (size_t index = 0u; index < count; index++) message_ranges[index] = ranges[index];
+	message_range_count = count;
 }
 
 bool irq_enabled(void) {
@@ -74,7 +96,9 @@ bool hal_interrupt_source_init(struct hal_interrupt_source_state* state, const s
 		return false;
 	*state = (struct hal_interrupt_source_state){
 		.source = *source, .target = delivery->target, .initialized = true, .masked = true};
-	last_source_target = delivery->target;
+	last_source_target   = delivery->target;
+	last_source_trigger  = delivery->trigger;
+	last_source_polarity = delivery->polarity;
 	return true;
 }
 
@@ -85,7 +109,7 @@ bool hal_interrupt_source_mask(struct hal_interrupt_source_state* state) {
 }
 
 bool hal_interrupt_source_unmask(struct hal_interrupt_source_state* state) {
-	if (state == NULL || !state->initialized) return false;
+	if (state == NULL || !state->initialized || source_unmask_fails) return false;
 	last_source_unmasked_from_masked = state->masked;
 	state->masked                    = false;
 	return true;
@@ -100,14 +124,12 @@ bool hal_interrupt_source_deinit(struct hal_interrupt_source_state* state) {
 }
 
 size_t hal_interrupt_message_range_count(void) {
-	return 1u;
+	return message_range_count;
 }
 
 bool hal_interrupt_message_range_at(size_t index, struct hal_interrupt_message_range* out_range) {
-	if (index != 0u || out_range == NULL) return false;
-	*out_range = (struct hal_interrupt_message_range){
-		.domain = 0u, .delivery = {.domain = 0u, .base = 0u, .limit = 256u}
-    };
+	if (index >= message_range_count || out_range == NULL) return false;
+	*out_range = message_ranges[index];
 	return true;
 }
 
@@ -121,8 +143,18 @@ bool hal_interrupt_message_init(struct hal_interrupt_message_state*         stat
                                 struct hal_interrupt_message*               out_message) {
 	if (state == NULL || state->initialized || request == NULL || out_message == NULL ||
 	    !hal_interrupt_message_target_supported(request->domain, request->source, request->target) ||
-	    request->event.domain != 0u || request->event.id >= 256u)
+	    request->event.domain != 0u)
 		return false;
+	bool in_range = false;
+	for (size_t index = 0u; index < message_range_count; index++) {
+		struct hal_interrupt_delivery_range range = message_ranges[index].delivery;
+		if (message_ranges[index].domain == request->domain && request->event.domain == range.domain &&
+		    request->event.id >= range.base && request->event.id < range.limit) {
+			in_range = true;
+			break;
+		}
+	}
+	if (!in_range) return false;
 	*out_message       = (struct hal_interrupt_message){.address = 0xfee00000u, .data = request->event.id};
 	state->initialized = true;
 	return true;

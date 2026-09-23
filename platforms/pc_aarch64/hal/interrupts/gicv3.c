@@ -1,6 +1,7 @@
 #include "gicv3.h"
 
 #include <core/cpu.h>
+#include <core/interrupt.h>
 #include <core/lock.h>
 #include <core/spinlock.h>
 #include <hal/interrupts.h>
@@ -557,12 +558,14 @@ bool aarch64_gicv3_handle_irq(const struct exception_frame* frame) {
 	if (intid >= GICV3_SPURIOUS_INTID && intid < 1024u) return true;
 	if (intid == GICV3_TIMER_PPI) (void)aarch64_clock_fire();
 	else if (intid != GICV3_SCHEDULER_SGI && gicv3_source_valid(intid)) {
-		uintptr_t base = distributor_phys;
-		if (intid < 32u) {
-			uintptr_t redist;
-			if (gicv3_redist_for_cpu(cpu_current(), &redist)) base = redist + GICR_SGI_BASE;
+		if (!interrupt_handle_event((struct hal_interrupt_event){.domain = 0u, .id = intid})) {
+			uintptr_t base = distributor_phys;
+			if (intid < 32u) {
+				uintptr_t redist;
+				if (gicv3_redist_for_cpu(cpu_current(), &redist)) base = redist + GICR_SGI_BASE;
+			}
+			(void)gicv3_set_enabled(base, intid, false);
 		}
-		(void)gicv3_set_enabled(base, intid, false);
 	}
 	__asm__ volatile("msr ICC_EOIR1_EL1, %0\n\tisb" : : "r"(iar) : "memory");
 	return true;

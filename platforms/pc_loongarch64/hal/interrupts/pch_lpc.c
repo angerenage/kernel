@@ -1,5 +1,6 @@
 #include "pch_lpc.h"
 
+#include <core/interrupt.h>
 #include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -80,9 +81,17 @@ bool loongarch64_pch_lpc_handle_cascade(uint32_t parent_source) {
 		                   loongarch64_mmio_read32(controller->virtual_base, LPC_ENABLE) &
 		                   ((1u << LPC_SOURCE_COUNT) - 1u);
 		if (pending == 0u) continue;
-		loongarch64_mmio_write32(controller->virtual_base,
-		                         LPC_ENABLE,
-		                         loongarch64_mmio_read32(controller->virtual_base, LPC_ENABLE) & ~pending);
+		uint32_t unhandled = pending;
+		for (uint32_t bits = pending; bits != 0u; bits &= bits - 1u) {
+			uint32_t source = (uint32_t)__builtin_ctz(bits);
+			if (interrupt_handle_event(
+					(struct hal_interrupt_event){.domain = LOONGARCH64_DELIVERY_DOMAIN_PCH_LPC, .id = source}))
+				unhandled &= ~(1u << source);
+		}
+		if (unhandled != 0u)
+			loongarch64_mmio_write32(controller->virtual_base,
+			                         LPC_ENABLE,
+			                         loongarch64_mmio_read32(controller->virtual_base, LPC_ENABLE) & ~unhandled);
 		loongarch64_mmio_write32(controller->virtual_base, LPC_CLEAR, pending);
 		return true;
 	}
