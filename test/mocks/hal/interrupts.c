@@ -4,6 +4,7 @@
 static _Thread_local bool                 hosted_irq_enabled = true;
 static const struct cpu*                  last_source_target;
 static bool                               last_source_unmasked_from_masked;
+static size_t                             source_unmask_count;
 static bool                               source_mask_fails;
 static bool                               source_unmask_fails;
 static enum hal_interrupt_trigger         last_source_trigger;
@@ -11,13 +12,19 @@ static enum hal_interrupt_polarity        last_source_polarity;
 static struct hal_interrupt_message_range message_ranges[4] = {
 	{.domain = 0u, .delivery = {.domain = 0u, .base = 0u, .limit = 256u}}
 };
-static size_t message_range_count = 1u;
+static size_t                              message_range_count = 1u;
+static bool                                message_source_supported;
+static bool                                last_message_had_source;
+static struct hal_interrupt_message_source last_message_source;
 
 const struct cpu* hal_interrupt_mock_last_target(void) {
 	return last_source_target;
 }
 bool hal_interrupt_mock_unmasked_from_masked(void) {
 	return last_source_unmasked_from_masked;
+}
+size_t hal_interrupt_mock_unmask_count(void) {
+	return source_unmask_count;
 }
 void hal_interrupt_mock_set_mask_failure(bool fail) {
 	source_mask_fails = fail;
@@ -36,6 +43,14 @@ void hal_interrupt_mock_set_message_ranges(const struct hal_interrupt_message_ra
 		count = sizeof(message_ranges) / sizeof(message_ranges[0]);
 	for (size_t index = 0u; index < count; index++) message_ranges[index] = ranges[index];
 	message_range_count = count;
+}
+void hal_interrupt_mock_set_message_source_supported(bool supported) {
+	message_source_supported = supported;
+}
+bool hal_interrupt_mock_last_message_source(struct hal_interrupt_message_source* out_source) {
+	if (!last_message_had_source || out_source == NULL) return false;
+	*out_source = last_message_source;
+	return true;
 }
 
 bool irq_enabled(void) {
@@ -112,6 +127,7 @@ bool hal_interrupt_source_unmask(struct hal_interrupt_source_state* state) {
 	if (state == NULL || !state->initialized || source_unmask_fails) return false;
 	last_source_unmasked_from_masked = state->masked;
 	state->masked                    = false;
+	source_unmask_count++;
 	return true;
 }
 
@@ -135,7 +151,7 @@ bool hal_interrupt_message_range_at(size_t index, struct hal_interrupt_message_r
 
 bool hal_interrupt_message_target_supported(uint32_t domain, const struct hal_interrupt_message_source* source,
                                             const struct cpu* target) {
-	return domain == 0u && source == NULL && target != NULL;
+	return domain == 0u && target != NULL && (source == NULL || (message_source_supported && source->domain == domain));
 }
 
 bool hal_interrupt_message_init(struct hal_interrupt_message_state*         state,
@@ -155,6 +171,8 @@ bool hal_interrupt_message_init(struct hal_interrupt_message_state*         stat
 		}
 	}
 	if (!in_range) return false;
+	last_message_had_source = request->source != NULL;
+	if (request->source != NULL) last_message_source = *request->source;
 	*out_message       = (struct hal_interrupt_message){.address = 0xfee00000u, .data = request->event.id};
 	state->initialized = true;
 	return true;

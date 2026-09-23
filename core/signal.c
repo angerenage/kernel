@@ -275,6 +275,8 @@ static void signal_release_handlers(struct signal_handler_binding* binding) {
 		struct signal_handler_binding* next = binding->next;
 
 		(void)uthread_upcall_purge(binding->target, USER_UPCALL_ORIGIN_SIGNAL, (uintptr_t)binding);
+		if ((binding->flags & (uint32_t)SIGNAL_HANDLER_FLAG_ONESHOT) == 0u)
+			(void)uthread_upcall_purge(binding->target, USER_UPCALL_ORIGIN_INTERRUPT_SIGNAL, (uintptr_t)binding);
 		uthread_release(binding->target);
 		free(binding);
 		binding = next;
@@ -519,9 +521,10 @@ bool signal_bind_interrupt(struct signal* signal, struct interrupt* interrupt) {
 
 	if (signal == NULL || interrupt == NULL) return false;
 	state = spinlock_lock_irqsave(&signal->lock);
-	if (!signal->closing && signal->interrupt == NULL) {
-		signal->interrupt = interrupt;
-		bound             = true;
+	if (!signal->closing && signal->interrupt == NULL && signal->interrupt_upcalls_outstanding == 0u) {
+		signal->interrupt                 = interrupt;
+		signal->interrupt_rearm_requested = false;
+		bound                             = true;
 	}
 	spinlock_unlock_irqrestore(&signal->lock, state);
 	return bound;
@@ -534,8 +537,9 @@ bool signal_unbind_interrupt(struct signal* signal, struct interrupt* interrupt)
 	if (signal == NULL || interrupt == NULL) return false;
 	state = spinlock_lock_irqsave(&signal->lock);
 	if (signal->interrupt == interrupt) {
-		signal->interrupt = NULL;
-		unbound           = true;
+		signal->interrupt                 = NULL;
+		signal->interrupt_rearm_requested = false;
+		unbound                           = true;
 	}
 	spinlock_unlock_irqrestore(&signal->lock, state);
 	return unbound;
@@ -629,7 +633,8 @@ enum signal_result signal_destroy(struct signal* signal) {
 }
 
 enum signal_send_internal_flags {
-	SIGNAL_SEND_INTERNAL_FORCE = 1u << 1,
+	SIGNAL_SEND_INTERNAL_FORCE     = 1u << 1,
+	SIGNAL_SEND_INTERNAL_INTERRUPT = 1u << 2,
 };
 
 static bool signal_send_internal_is_forced(uint32_t flags) {
@@ -638,6 +643,10 @@ static bool signal_send_internal_is_forced(uint32_t flags) {
 
 static bool signal_send_internal_is_coalesced(uint32_t flags) {
 	return (flags & (uint32_t)SIGNAL_SEND_FLAG_COALESCE) != 0u;
+}
+
+static bool signal_send_internal_is_interrupt(uint32_t flags) {
+	return (flags & (uint32_t)SIGNAL_SEND_INTERNAL_INTERRUPT) != 0u;
 }
 
 static bool signal_handler_is_oneshot(const struct signal_handler_binding* handler) {
@@ -652,8 +661,10 @@ static struct user_upcall_request signal_handler_request(const struct signal*   
 
 	if (signal_send_internal_is_coalesced(flags)) upcall_flags |= USER_UPCALL_FLAG_COALESCIBLE;
 	if (signal_send_internal_is_forced(flags) || oneshot) upcall_flags |= USER_UPCALL_FLAG_NON_EVICTABLE;
+	if (signal_send_internal_is_interrupt(flags) && !oneshot) upcall_flags |= USER_UPCALL_FLAG_INTERRUPT_REARM;
 	return (struct user_upcall_request){
-		.origin       = USER_UPCALL_ORIGIN_SIGNAL,
+		.origin =
+			signal_send_internal_is_interrupt(flags) ? USER_UPCALL_ORIGIN_INTERRUPT_SIGNAL : USER_UPCALL_ORIGIN_SIGNAL,
 		.flags        = upcall_flags,
 		.origin_token = oneshot ? 0u : (uintptr_t)handler,
 		.origin_id    = (uint64_t)signal->id,
@@ -762,7 +773,11 @@ static enum signal_result signal_send_internal(struct signal* signal, process_id
 		enum user_upcall_result        upcall_result;
 
 		receiver_count++;
-		request       = signal_handler_request(signal, handler, &message, flags);
+		request = signal_handler_request(signal, handler, &message, flags);
+		if (signal_send_internal_is_interrupt(flags)) {
+			if (signal->interrupt_upcalls_outstanding == SIZE_MAX) hcf();
+			signal->interrupt_upcalls_outstanding++;
+		}
 		upcall_result = signal_enqueue_handler_locked(handler, &request, flags);
 		if (upcall_result == USER_UPCALL_OK) {
 			delivery_count++;
@@ -774,6 +789,10 @@ static enum signal_result signal_send_internal(struct signal* signal, process_id
 				continue;
 			}
 			signal_queue_handler_wake_locked(signal, handler);
+		}
+		else if (signal_send_internal_is_interrupt(flags)) {
+			if (signal->interrupt_upcalls_outstanding == 0u) hcf();
+			signal->interrupt_upcalls_outstanding--;
 		}
 		handler_previous = handler;
 		handler          = next;
@@ -816,6 +835,58 @@ enum signal_result signal_send_force(struct signal* signal, process_id_t sender,
                                      uint64_t* out_receiver_count, uint64_t* out_delivery_count) {
 	return signal_send_internal(
 		signal, sender, payload, SIGNAL_SEND_INTERNAL_FORCE, out_receiver_count, out_delivery_count);
+}
+
+enum signal_result signal_send_interrupt(struct signal* signal, process_id_t sender,
+                                         const struct signal_payload* payload, uint64_t* out_receiver_count,
+                                         uint64_t* out_delivery_count) {
+	return signal_send_internal(signal,
+	                            sender,
+	                            payload,
+	                            SIGNAL_SEND_INTERNAL_FORCE | SIGNAL_SEND_INTERNAL_INTERRUPT,
+	                            out_receiver_count,
+	                            out_delivery_count);
+}
+
+void signal_interrupt_request_ready(signal_id_t signal_id) {
+	struct signal*   signal;
+	struct irq_state state;
+	bool             ready = false;
+
+	signal = signal_acquire(signal_id);
+	if (signal == NULL) return;
+	state = spinlock_lock_irqsave(&signal->lock);
+	if (signal->interrupt != NULL) {
+		signal->interrupt_rearm_requested = true;
+		if (signal->interrupt_upcalls_outstanding == 0u) {
+			signal->interrupt_rearm_requested = false;
+			ready                             = true;
+		}
+	}
+	spinlock_unlock_irqrestore(&signal->lock, state);
+	signal_release(signal);
+	if (ready) interrupt_signal_ready(signal_id);
+}
+
+void signal_interrupt_upcall_complete(signal_id_t signal_id, bool request_rearm) {
+	struct signal*   signal;
+	struct irq_state state;
+	bool             ready = false;
+
+	signal = signal_acquire(signal_id);
+	if (signal == NULL) return;
+	state = spinlock_lock_irqsave(&signal->lock);
+	if (signal->interrupt_upcalls_outstanding != 0u) {
+		signal->interrupt_upcalls_outstanding--;
+		if (request_rearm && signal->interrupt != NULL) signal->interrupt_rearm_requested = true;
+		if (signal->interrupt_upcalls_outstanding == 0u) {
+			if (signal->interrupt != NULL && signal->interrupt_rearm_requested) ready = true;
+			signal->interrupt_rearm_requested = false;
+		}
+	}
+	spinlock_unlock_irqrestore(&signal->lock, state);
+	signal_release(signal);
+	if (ready) interrupt_signal_ready(signal_id);
 }
 
 enum signal_result signal_read(struct signal* signal, struct signal_message* out_message) {
@@ -864,7 +935,7 @@ enum signal_result signal_try_wait(struct signal* signal, struct signal_message*
 		result = SIGNAL_WOULD_BLOCK;
 	}
 	spinlock_unlock_irqrestore(&signal->lock, state);
-	if (result == SIGNAL_WOULD_BLOCK) interrupt_signal_ready(signal_id(signal));
+	if (result == SIGNAL_WOULD_BLOCK) signal_interrupt_request_ready(signal_id(signal));
 	return result;
 }
 
@@ -904,7 +975,7 @@ enum signal_result signal_wait(struct signal* signal, struct signal_message* out
 
 			spinlock_unlock(&signal->lock);
 			spinlock_unlock_irqrestore(&signal->waiters.lock, wait_state);
-			interrupt_signal_ready(signal_id(signal));
+			signal_interrupt_request_ready(signal_id(signal));
 			/* Rearming may publish immediately; recheck before marking the receiver blocked. */
 			wait_state = spinlock_lock_irqsave(&signal->waiters.lock);
 			spinlock_lock(&signal->lock);
@@ -1035,6 +1106,7 @@ enum signal_result signal_register_handler(struct signal* signal, struct uthread
 
 	if (!keep_binding) free(binding);
 	if (!keep_reference) uthread_release(target);
+	if (result == SIGNAL_OK) signal_interrupt_request_ready(signal_id(signal));
 	return result;
 }
 

@@ -549,10 +549,14 @@ void x86_64_handle_interrupt(struct interrupt_frame* frame) {
 		return;
 	}
 	if (is_external_irq(vector)) {
-		bool handled = clock_handle_irq((unsigned)vector);
-		handled |= interrupt_handle_event((struct hal_interrupt_event){.domain = 0u, .id = (uint32_t)vector});
 		bool pic_spurious =
 			vector >= X86_IRQ_BASE && vector < X86_IRQ_BASE + X86_IRQ_COUNT && pic_is_spurious_irq((unsigned)vector);
+		bool handled = false;
+		if (!pic_spurious) {
+			handled = clock_handle_irq((unsigned)vector);
+			handled |= interrupt_handle_event(
+				(struct hal_interrupt_event){.domain = X86_DELIVERY_DOMAIN_VECTOR, .id = (uint32_t)vector});
+		}
 		if (!handled && !pic_spurious && vector < X86_IRQ_BASE + X86_IRQ_COUNT) {
 			uint32_t id = (uint32_t)(vector - X86_IRQ_BASE);
 			if (x86_unhandled_isa_irq_valid(id)) pic_mask_irq(id);

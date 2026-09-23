@@ -8,7 +8,10 @@
 typedef uint64_t interrupt_source_t;
 #define INTERRUPT_SOURCE_INVALID UINT64_MAX
 
-/* Opaque token naming the kernel-managed context used for message interrupts. */
+/*
+ * Opaque, non-authoritative token naming a kernel-managed message context.
+ * Allocation authority comes from CAP_ALLOCATE on the Interrupts resource.
+ */
 typedef uint64_t interrupt_message_context_t;
 #define INTERRUPT_MESSAGE_CONTEXT_INVALID UINT64_MAX
 
@@ -67,7 +70,7 @@ struct interrupt_simple_request {
 	struct interrupt_request_header header;
 };
 
-/* Response returned by INTERRUPT_OP_INFO. */
+/* Response returned by INTERRUPT_OP_INFO; kernel producers must zero-initialize it. */
 struct interrupt_info_response {
 	struct interrupt_info info;
 };
@@ -95,12 +98,12 @@ struct interrupts_allocate_message_request {
 	interrupt_message_context_t      context;
 };
 
-/* Response returned after claiming a fixed source. */
+/* Response returned after claiming a fixed source; kernel producers must zero-initialize it. */
 struct interrupts_claim_source_response {
 	cap_id_t interrupt_cap;
 };
 
-/* Response returned after allocating a message interrupt. */
+/* Response returned after allocating a message interrupt; kernel producers must zero-initialize it. */
 struct interrupts_allocate_message_response {
 	cap_id_t interrupt_cap;
 	uint64_t message_address;

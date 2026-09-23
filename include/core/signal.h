@@ -35,9 +35,13 @@ struct signal {
 	cap_object_id_t cap_object_id;
 	/* Interrupt binding protected by lock; the stored pointer owns one interrupt reference. */
 	struct interrupt* interrupt;
-	uint64_t          reference_count;
-	bool              has_value;
-	bool              closing;
+	/* Interrupt-origin upcalls queued or executing for the current publication. */
+	size_t   interrupt_upcalls_outstanding;
+	uint64_t reference_count;
+	/* Readiness requested while interrupt-origin upcalls are still outstanding. */
+	bool interrupt_rearm_requested;
+	bool has_value;
+	bool closing;
 };
 
 /* Create and register a signal. The returned pointer owns the registry reference. */
@@ -95,6 +99,17 @@ enum signal_result signal_send_coalesced(struct signal* signal, process_id_t sen
  */
 enum signal_result signal_send_force(struct signal* signal, process_id_t sender, const struct signal_payload* payload,
                                      uint64_t* out_receiver_count, uint64_t* out_delivery_count);
+
+/* Publish a forced kernel notification whose upcall deliveries participate in Interrupt readiness. */
+enum signal_result signal_send_interrupt(struct signal* signal, process_id_t sender,
+                                         const struct signal_payload* payload, uint64_t* out_receiver_count,
+                                         uint64_t* out_delivery_count);
+
+/* Request Interrupt readiness, deferring it until all interrupt-origin upcalls have completed. */
+void signal_interrupt_request_ready(signal_id_t signal_id);
+
+/* Complete one interrupt-origin upcall and optionally request Interrupt readiness. */
+void signal_interrupt_upcall_complete(signal_id_t signal_id, bool request_rearm);
 
 /* Read the currently remembered message without creating a receiver or consuming a generation. */
 enum signal_result signal_read(struct signal* signal, struct signal_message* out_message);

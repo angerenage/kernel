@@ -3,6 +3,7 @@
 #include <core/interrupt.h>
 #include <core/signal.h>
 #include <core/spinlock.h>
+#include <hal/hcf.h>
 #include <libc/stdlib.h>
 #include <string.h>
 
@@ -55,6 +56,34 @@ static bool source_equal(struct hal_interrupt_source left, struct hal_interrupt_
 	return left.domain == right.domain && left.number == right.number;
 }
 
+/*
+ * Message contexts encode the domain in the upper 32 bits and the domain-local
+ * producer in the lower 32 bits.  UINT32_MAX denotes no producer; pairing it
+ * with domain UINT32_MAX would produce INTERRUPT_MESSAGE_CONTEXT_INVALID.
+ * This token only carries routing context and grants no allocation authority.
+ */
+#define INTERRUPT_MESSAGE_PRODUCER_NONE UINT32_MAX
+
+static bool message_context_decode(interrupt_message_context_t context, uint32_t* out_domain,
+                                   struct hal_interrupt_message_source*        out_producer,
+                                   const struct hal_interrupt_message_source** out_source) {
+	uint32_t producer_id;
+
+	if (context == INTERRUPT_MESSAGE_CONTEXT_INVALID || out_domain == NULL || out_producer == NULL ||
+	    out_source == NULL)
+		return false;
+	*out_domain = (uint32_t)(context >> 32u);
+	producer_id = (uint32_t)context;
+	if (producer_id == INTERRUPT_MESSAGE_PRODUCER_NONE) {
+		*out_source = NULL;
+	}
+	else {
+		*out_producer = (struct hal_interrupt_message_source){.domain = *out_domain, .id = producer_id};
+		*out_source   = out_producer;
+	}
+	return true;
+}
+
 static bool source_from_token(interrupt_source_t token, struct hal_interrupt_source* out_source,
                               enum hal_interrupt_trigger* out_trigger, enum hal_interrupt_polarity* out_polarity) {
 	if (out_source == NULL || out_trigger == NULL || out_polarity == NULL || token == INTERRUPT_SOURCE_INVALID)
@@ -78,7 +107,7 @@ static const struct cpu* choose_source_target(const struct hal_interrupt_source*
 	if (current != NULL && hal_interrupt_source_target_supported(source, current)) return current;
 	for (size_t index = 0u; index < cpu_count(); index++) {
 		struct cpu* cpu = cpu_by_index(index);
-		if (cpu != NULL && cpu->state == CPU_STATE_ONLINE && hal_interrupt_source_target_supported(source, cpu))
+		if (cpu != NULL && cpu_state_get(cpu) == CPU_STATE_ONLINE && hal_interrupt_source_target_supported(source, cpu))
 			return cpu;
 	}
 	return NULL;
@@ -89,7 +118,7 @@ static const struct cpu* choose_message_target(uint32_t domain, const struct hal
 	if (current != NULL && hal_interrupt_message_target_supported(domain, source, current)) return current;
 	for (size_t index = 0u; index < cpu_count(); index++) {
 		struct cpu* cpu = cpu_by_index(index);
-		if (cpu != NULL && cpu->state == CPU_STATE_ONLINE &&
+		if (cpu != NULL && cpu_state_get(cpu) == CPU_STATE_ONLINE &&
 		    hal_interrupt_message_target_supported(domain, source, cpu))
 			return cpu;
 	}
@@ -209,7 +238,12 @@ void interrupt_release(struct interrupt* interrupt) {
 	bool             free_interrupt = false;
 	if (interrupt == NULL) return;
 	state = spinlock_lock_irqsave(&interrupt->lock);
-	if (interrupt->references != 0u && --interrupt->references == 0u) free_interrupt = true;
+	if (interrupt->references == 0u) hcf();
+	interrupt->references--;
+	if (interrupt->references == 0u) {
+		if (!interrupt->destroying) hcf();
+		free_interrupt = true;
+	}
 	spinlock_unlock_irqrestore(&interrupt->lock, state);
 	if (free_interrupt) free(interrupt);
 }
@@ -258,6 +292,8 @@ enum interrupt_result interrupt_claim_source(interrupt_source_t token, struct in
 		free(interrupt);
 		return INTERRUPT_UNAVAILABLE;
 	}
+	/* The routing table owns one structural reference until interrupt_destroy(). */
+	interrupt->references++;
 	interrupt->next = interrupt_table;
 	interrupt_table = interrupt;
 	spinlock_unlock_irqrestore(&interrupt_table_lock, state);
@@ -273,24 +309,40 @@ enum interrupt_result interrupt_claim_source(interrupt_source_t token, struct in
 	return INTERRUPT_OK;
 }
 
+bool interrupt_message_context_create(uint32_t domain, const struct hal_interrupt_message_source* producer,
+                                      interrupt_message_context_t* out_context) {
+	uint32_t producer_id = INTERRUPT_MESSAGE_PRODUCER_NONE;
+
+	if (out_context == NULL) return false;
+	*out_context = INTERRUPT_MESSAGE_CONTEXT_INVALID;
+	if (producer != NULL && (producer->domain != domain || producer->id == INTERRUPT_MESSAGE_PRODUCER_NONE))
+		return false;
+	if (producer != NULL) producer_id = producer->id;
+	*out_context = ((interrupt_message_context_t)domain << 32u) | producer_id;
+	if (*out_context == INTERRUPT_MESSAGE_CONTEXT_INVALID) return false;
+	return true;
+}
+
 enum interrupt_result interrupt_allocate_message(interrupt_message_context_t context, struct interrupt** out_interrupt,
                                                  struct interrupt_message* out_message) {
-	struct hal_interrupt_message_range range;
-	struct interrupt*                  interrupt;
-	struct interrupt_quarantine*       quarantine;
-	struct irq_state                   state;
-	uint32_t                           domain;
-	const struct cpu*                  target       = NULL;
-	bool                               found_domain = false;
-	bool                               allocated    = false;
-	size_t                             range_count;
+	struct hal_interrupt_message_range         range;
+	struct hal_interrupt_message_source        producer;
+	const struct hal_interrupt_message_source* source;
+	struct interrupt*                          interrupt;
+	struct interrupt_quarantine*               quarantine;
+	struct irq_state                           state;
+	uint32_t                                   domain;
+	const struct cpu*                          target       = NULL;
+	bool                                       found_domain = false;
+	bool                                       allocated    = false;
+	size_t                                     range_count;
 
-	if (out_interrupt == NULL || out_message == NULL || context == INTERRUPT_MESSAGE_CONTEXT_INVALID)
+	if (out_interrupt == NULL || out_message == NULL || !message_context_decode(context, &domain, &producer, &source))
 		return INTERRUPT_INVALID_ARGUMENTS;
 	*out_interrupt = NULL;
-	domain         = (uint32_t)(context >> 32u);
-	range_count    = hal_interrupt_message_range_count();
-	interrupt      = calloc(1u, sizeof(*interrupt));
+	memset(out_message, 0, sizeof(*out_message));
+	range_count = hal_interrupt_message_range_count();
+	interrupt   = calloc(1u, sizeof(*interrupt));
 	if (interrupt == NULL) return INTERRUPT_NO_MEMORY;
 	quarantine = calloc(1u, sizeof(*quarantine));
 	if (quarantine == NULL) {
@@ -313,10 +365,12 @@ enum interrupt_result interrupt_allocate_message(interrupt_message_context_t con
 	for (size_t index = 0u; index < range_count; index++) {
 		if (!hal_interrupt_message_range_at(index, &range) || range.domain != domain) continue;
 		found_domain = true;
-		target       = choose_message_target(range.domain, NULL);
+		target       = choose_message_target(range.domain, source);
 		if (target == NULL) continue;
 		state = spinlock_lock_irqsave(&interrupt_table_lock);
 		if (interrupt_initialized && allocate_event_locked(range.delivery, &interrupt->event)) {
+			/* The routing table owns one structural reference until interrupt_destroy(). */
+			interrupt->references++;
 			interrupt->delivery = range.delivery;
 			interrupt->next     = interrupt_table;
 			interrupt_table     = interrupt;
@@ -332,7 +386,7 @@ enum interrupt_result interrupt_allocate_message(interrupt_message_context_t con
 	}
 	struct hal_interrupt_message         request_message;
 	struct hal_interrupt_message_request request = {
-		.domain = range.domain, .source = NULL, .target = target, .event = interrupt->event};
+		.domain = range.domain, .source = source, .target = target, .event = interrupt->event};
 	if (!hal_interrupt_message_init(&interrupt->message_state, &request, &request_message)) {
 		(void)interrupt_destroy(interrupt);
 		interrupt_release(interrupt);
@@ -345,9 +399,9 @@ enum interrupt_result interrupt_allocate_message(interrupt_message_context_t con
 	quarantine->next     = interrupt_quarantine;
 	interrupt_quarantine = quarantine;
 	spinlock_unlock_irqrestore(&interrupt_table_lock, state);
-	*out_message =
-		(struct interrupt_message){.message_address = request_message.address, .message_data = request_message.data};
-	*out_interrupt = interrupt;
+	out_message->message_address = request_message.address;
+	out_message->message_data    = request_message.data;
+	*out_interrupt               = interrupt;
 	return INTERRUPT_OK;
 }
 
@@ -359,7 +413,9 @@ enum interrupt_result interrupt_get_info(struct interrupt* interrupt, struct int
 		spinlock_unlock_irqrestore(&interrupt->lock, state);
 		return INTERRUPT_UNAVAILABLE;
 	}
-	*out_info = (struct interrupt_info){.kind = interrupt->kind, .bound = interrupt->bound};
+	memset(out_info, 0, sizeof(*out_info));
+	out_info->kind  = interrupt->kind;
+	out_info->bound = interrupt->bound;
 	spinlock_unlock_irqrestore(&interrupt->lock, state);
 	return INTERRUPT_OK;
 }
@@ -389,7 +445,7 @@ enum interrupt_result interrupt_bind(struct interrupt* interrupt, struct signal*
 		spinlock_unlock_irqrestore(&interrupt_table_lock, table_state);
 		signal_release(signal);
 		interrupt_release(interrupt);
-		return INTERRUPT_ALREADY_BOUND;
+		return INTERRUPT_UNAVAILABLE;
 	}
 	interrupt->signal    = signal;
 	interrupt->signal_id = signal_id(signal);
@@ -468,8 +524,10 @@ enum interrupt_result interrupt_destroy(struct interrupt* interrupt) {
 	}
 	for (link = &interrupt_table; *link != NULL && *link != interrupt; link = &(*link)->next) {
 	}
-	if (*link == interrupt) *link = interrupt->next;
-	signal = interrupt->signal;
+	if (*link != interrupt) hcf();
+	*link           = interrupt->next;
+	interrupt->next = NULL;
+	signal          = interrupt->signal;
 	if (signal != NULL) release_binding = signal_unbind_interrupt(signal, interrupt);
 	interrupt->signal    = NULL;
 	interrupt->signal_id = SIGNAL_ID_INVALID;
@@ -479,6 +537,8 @@ enum interrupt_result interrupt_destroy(struct interrupt* interrupt) {
 	interrupt_synchronize_dispatch(interrupt);
 	if (signal != NULL) signal_release(signal);
 	if (release_binding) interrupt_release(interrupt);
+	/* Drop the routing table's structural reference after in-flight dispatches. */
+	interrupt_release(interrupt);
 	return INTERRUPT_OK;
 }
 
@@ -563,7 +623,7 @@ bool interrupt_handle_event(struct hal_interrupt_event event) {
 		return true;
 	}
 	spinlock_unlock(&interrupt->lock);
-	send_result            = signal_send_force(signal, SIGNAL_SENDER_KERNEL, &payload, NULL, NULL);
+	send_result            = signal_send_interrupt(signal, SIGNAL_SENDER_KERNEL, &payload, NULL, NULL);
 	struct irq_state state = spinlock_lock_irqsave(&interrupt->lock);
 	interrupt_finish_publication_locked(interrupt);
 	if (send_result != SIGNAL_OK && !interrupt->destroying && interrupt->bound && interrupt->signal == signal) {
@@ -607,7 +667,7 @@ void interrupt_signal_ready(signal_id_t signal_id) {
 		spinlock_unlock(&interrupt->lock);
 		if (publish) {
 			struct signal_payload payload = {0};
-			enum signal_result    result  = signal_send_force(signal, SIGNAL_SENDER_KERNEL, &payload, NULL, NULL);
+			enum signal_result    result  = signal_send_interrupt(signal, SIGNAL_SENDER_KERNEL, &payload, NULL, NULL);
 			struct irq_state      state   = spinlock_lock_irqsave(&interrupt->lock);
 			interrupt_finish_publication_locked(interrupt);
 			if (result != SIGNAL_OK && !interrupt->destroying && interrupt->bound && interrupt->signal == signal &&

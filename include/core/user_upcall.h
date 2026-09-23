@@ -17,8 +17,12 @@ enum {
 
 /* Kernel-internal provenance used to identify and revoke queued requests. */
 enum user_upcall_origin {
+	/* Request has no revocable kernel producer. */
 	USER_UPCALL_ORIGIN_NONE = 0,
+	/* Request came from an ordinary Signal publication. */
 	USER_UPCALL_ORIGIN_SIGNAL,
+	/* Request came from an interrupt-origin Signal publication. */
+	USER_UPCALL_ORIGIN_INTERRUPT_SIGNAL,
 };
 
 /* Queue-management properties attached to one pending request. */
@@ -26,6 +30,8 @@ enum user_upcall_flags {
 	USER_UPCALL_FLAG_NONE          = 0u,
 	USER_UPCALL_FLAG_NON_EVICTABLE = 1u << 0,
 	USER_UPCALL_FLAG_COALESCIBLE   = 1u << 1,
+	/* Completion of this interrupt-origin request asks the Signal to rearm. */
+	USER_UPCALL_FLAG_INTERRUPT_REARM = 1u << 2,
 };
 
 /* One userspace entry, opaque arguments, and non-user-visible provenance. */
@@ -73,8 +79,10 @@ struct user_upcall_state {
 	size_t                       force_eviction_reservations;
 	enum user_upcall_origin      active_origin;
 	uint64_t                     active_origin_id;
-	enum user_upcall_phase       phase;
-	bool                         initialized;
+	/* Flags retained from the active request for completion processing. */
+	uint32_t               active_flags;
+	enum user_upcall_phase phase;
+	bool                   initialized;
 };
 
 /* Initialize the state and allocate its fixed-capacity pending queue. */
