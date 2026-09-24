@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* Stable identifiers for singleton kernel resources discoverable by userspace. */
 enum kernel_resource_type {
 	KERNEL_RESOURCE_TYPE_INVALID = 0u,
 	KERNEL_RESOURCE_TYPE_MODULES,
@@ -13,6 +14,7 @@ enum kernel_resource_type {
 	KERNEL_RESOURCE_TYPE_RSDP,
 	KERNEL_RESOURCE_TYPE_DTB,
 	KERNEL_RESOURCE_TYPE_DMA,
+	KERNEL_RESOURCE_TYPE_INTERRUPTS,
 };
 
 enum kernel_resources_op {

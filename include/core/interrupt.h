@@ -8,6 +8,19 @@
 struct interrupt;
 struct signal;
 
+/* Result returned by interrupt-core operations. */
+enum interrupt_result {
+	INTERRUPT_OK = 0,
+	INTERRUPT_INVALID_ARGUMENTS,
+	INTERRUPT_NOT_FOUND,
+	INTERRUPT_ALREADY_CLAIMED,
+	INTERRUPT_ALREADY_BOUND,
+	INTERRUPT_NOT_BOUND,
+	INTERRUPT_UNAVAILABLE,
+	INTERRUPT_NO_MEMORY,
+	INTERRUPT_FAILED,
+};
+
 /* Initialize the interrupt core before interrupt objects are created. */
 bool interrupt_init(void);
 

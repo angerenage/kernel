@@ -59,6 +59,7 @@ userspace_system_sources = files(
 	'system/memory.c',
 	'system/module.c',
 	'system/dma.c',
+	'system/interrupt.c',
 	'system/process.c',
 	'system/signal.c',
 	'system/thread.c',

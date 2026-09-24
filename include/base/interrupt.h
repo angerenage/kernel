@@ -21,19 +21,6 @@ enum interrupt_kind {
 	INTERRUPT_KIND_MESSAGE,
 };
 
-/* Result returned by interrupt-core operations. */
-enum interrupt_result {
-	INTERRUPT_OK = 0,
-	INTERRUPT_INVALID_ARGUMENTS,
-	INTERRUPT_NOT_FOUND,
-	INTERRUPT_ALREADY_CLAIMED,
-	INTERRUPT_ALREADY_BOUND,
-	INTERRUPT_NOT_BOUND,
-	INTERRUPT_UNAVAILABLE,
-	INTERRUPT_NO_MEMORY,
-	INTERRUPT_FAILED,
-};
-
 /* Public state that deliberately excludes all hardware delivery identities. */
 struct interrupt_info {
 	enum interrupt_kind kind;
