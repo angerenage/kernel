@@ -243,6 +243,7 @@ enum interrupt_result interrupt_claim_source(interrupt_source_t token, enum inte
 		return INTERRUPT_INVALID_ARGUMENTS;
 	*out_interrupt = NULL;
 	if (!source_from_token(token, &source) || !hal_interrupt_source_info(&source, &info)) return INTERRUPT_NOT_FOUND;
+	if (!hal_interrupt_source_claimable(&source)) return INTERRUPT_UNAVAILABLE;
 	if (!hal_interrupt_source_configuration_supported(&source, trigger, polarity)) return INTERRUPT_INVALID_ARGUMENTS;
 	target = choose_source_target(&source, &info);
 	if (target == NULL) return INTERRUPT_UNAVAILABLE;

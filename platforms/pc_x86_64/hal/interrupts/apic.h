@@ -26,6 +26,9 @@ bool apic_resolve_ioapic_source(uint64_t controller_address, uint32_t local_sour
 /* Return whether a resolved non-ISA I/O APIC source is available. */
 bool apic_ioapic_source_available(const struct hal_interrupt_source* source);
 
+/* Return whether a raw I/O APIC source may be claimed without aliasing a canonical ISA source. */
+bool apic_ioapic_source_claimable(const struct hal_interrupt_source* source);
+
 /* Program an I/O APIC route for one ISA interrupt source. */
 bool apic_route_isa_irq(unsigned irq, unsigned vector, uint32_t target_lapic_id, enum hal_interrupt_trigger trigger,
                         enum hal_interrupt_polarity polarity, uint32_t* out_route, uintptr_t* out_registers);

@@ -337,6 +337,14 @@ bool riscv64_aplic_source_resolve(uint64_t controller_address, uint32_t local_so
 	return true;
 }
 
+bool riscv64_aplic_source_claimable(const struct hal_interrupt_source* source) {
+	if (source == NULL || source->domain != APLIC_DOMAIN_ID || !aplic_probe() || source->number == 0u ||
+	    source->number > aplic.sources)
+		return false;
+	uint32_t config_offset = APLIC_SOURCECFG_BASE + (source->number - 1u) * 4u;
+	return (aplic_read(config_offset) & APLIC_SOURCECFG_DELEGATED) == 0u;
+}
+
 bool riscv64_aplic_source_init(struct hal_interrupt_source_state* state, const struct hal_interrupt_source* source,
                                const struct hal_interrupt_delivery* delivery) {
 	struct hal_interrupt_source_info info;

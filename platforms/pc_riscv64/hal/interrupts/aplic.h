@@ -9,8 +9,12 @@ struct cpu;
 /* Return the fixed-source domain exposed by the APLIC. */
 bool riscv64_aplic_source_domain_at(struct hal_interrupt_source_domain_info* out);
 
+/* Resolve a firmware-visible controller address and local ID without claiming the source. */
 bool riscv64_aplic_source_resolve(uint64_t controller_address, uint32_t local_source_id,
                                   struct hal_interrupt_source* out_source);
+
+/* Return whether ownership of an APLIC source is available to this kernel domain. */
+bool riscv64_aplic_source_claimable(const struct hal_interrupt_source* source);
 
 /* Return the delivery identity and target-routing capability of one APLIC source. */
 bool riscv64_aplic_source_info(const struct hal_interrupt_source* source, struct hal_interrupt_source_info* out);

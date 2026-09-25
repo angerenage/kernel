@@ -109,6 +109,15 @@ bool hal_interrupt_source_resolve(uint64_t controller_register_address, uint32_t
 	                        riscv64_aplic_source_resolve(controller_register_address, local_source_id, out_source));
 }
 
+bool hal_interrupt_source_claimable(const struct hal_interrupt_source* source) {
+	if (!global_ready || source == NULL) return false;
+	if (source->domain == 1u) {
+		struct hal_interrupt_source_info info;
+		return riscv64_plic_source_info(source, &info);
+	}
+	return riscv64_aplic_source_claimable(source);
+}
+
 bool hal_interrupt_source_configuration_supported(const struct hal_interrupt_source* source,
                                                   enum hal_interrupt_trigger         trigger,
                                                   enum hal_interrupt_polarity        polarity) {

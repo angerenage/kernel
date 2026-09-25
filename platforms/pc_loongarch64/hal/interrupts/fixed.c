@@ -60,12 +60,19 @@ bool loongarch64_fixed_source_resolve(uint64_t controller_address, uint32_t loca
 	for (size_t index = 0u; index < fixed_controller_count; index++) {
 		struct fixed_controller* controller = &fixed_controllers[index];
 		if (controller->physical_base != (uintptr_t)controller_address || !fixed_probe(controller) ||
-		    local_source_id >= controller->source_count || fixed_source_reserved(controller, local_source_id))
+		    local_source_id >= controller->source_count)
 			continue;
 		*out_source = (struct hal_interrupt_source){.domain = controller->domain, .number = local_source_id};
 		return true;
 	}
 	return false;
+}
+
+bool loongarch64_fixed_source_claimable(const struct hal_interrupt_source* source) {
+	if (source == NULL) return false;
+	struct fixed_controller* controller = loongarch64_fixed_by_domain(source->domain);
+	return controller != NULL && fixed_probe(controller) && source->number < controller->source_count &&
+	       !fixed_source_reserved(controller, source->number);
 }
 
 bool loongarch64_fixed_source_configuration_supported(const struct hal_interrupt_source* source,
@@ -85,7 +92,6 @@ bool loongarch64_fixed_source_info(const struct hal_interrupt_source* source,
 	if (source == NULL || out_info == NULL) return false;
 	struct fixed_controller* controller = loongarch64_fixed_by_domain(source->domain);
 	if (controller == NULL || !fixed_probe(controller) || source->number >= controller->source_count ||
-	    fixed_source_reserved(controller, source->number) ||
 	    (controller->kind == FIXED_PCH_PIC && !loongarch64_htvec_probe()))
 		return false;
 	struct hal_interrupt_delivery_range delivery;

@@ -348,7 +348,7 @@ static bool x86_unhandled_isa_irq_valid(uint32_t id) {
 }
 
 static bool x86_fixed_interrupt_valid(uint32_t id) {
-	return id < X86_IRQ_COUNT && id != 2u;
+	return id < X86_IRQ_COUNT;
 }
 
 enum {
@@ -374,6 +374,12 @@ bool hal_interrupt_source_domain_at(size_t index, struct hal_interrupt_source_do
 bool hal_interrupt_source_resolve(uint64_t controller_register_address, uint32_t local_source_id,
                                   struct hal_interrupt_source* out_source) {
 	return global_ready && apic_resolve_ioapic_source(controller_register_address, local_source_id, out_source);
+}
+
+bool hal_interrupt_source_claimable(const struct hal_interrupt_source* source) {
+	if (!global_ready || source == NULL) return false;
+	if (source->domain == 0u) return x86_unhandled_isa_irq_valid(source->number);
+	return apic_ioapic_source_claimable(source);
 }
 
 bool hal_interrupt_source_configuration_supported(const struct hal_interrupt_source* source,

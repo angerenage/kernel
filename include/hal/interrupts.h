@@ -136,6 +136,9 @@ bool hal_interrupt_source_domain_at(size_t index, struct hal_interrupt_source_do
 bool hal_interrupt_source_resolve(uint64_t controller_register_address, uint32_t local_source_id,
                                   struct hal_interrupt_source* out_source);
 
+/* Return whether platform/kernel policy allows this source identity to be claimed. */
+bool hal_interrupt_source_claimable(const struct hal_interrupt_source* source);
+
 /* Return whether a resolved source can be initialized with this electrical configuration. */
 bool hal_interrupt_source_configuration_supported(const struct hal_interrupt_source* source,
                                                   enum hal_interrupt_trigger         trigger,

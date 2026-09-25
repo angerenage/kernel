@@ -465,8 +465,6 @@ bool apic_resolve_ioapic_source(uint64_t controller_address, uint32_t local_sour
 			if (!isa_routes[irq].available || isa_routes[irq].registers != ioapics[index].registers ||
 			    isa_routes[irq].index != local_source_id)
 				continue;
-			/* IRQ0 is owned by the kernel clock and IRQ2 is the legacy cascade. */
-			if (irq == 0u || irq == 2u) return false;
 			*out_source = (struct hal_interrupt_source){.domain = 0u, .number = irq};
 			return true;
 		}
@@ -480,6 +478,17 @@ bool apic_ioapic_source_available(const struct hal_interrupt_source* source) {
 	if (source == NULL || source->domain == 0u || (!ioapic_probed && !apic_probe_isa_irqs())) return false;
 	size_t index = (size_t)source->domain - 1u;
 	return index < ioapic_count && source->number < ioapics[index].redirection_count;
+}
+
+bool apic_ioapic_source_claimable(const struct hal_interrupt_source* source) {
+	if (!apic_ioapic_source_available(source)) return false;
+	size_t index = (size_t)source->domain - 1u;
+	for (uint32_t irq = 0u; irq < X86_IRQ_COUNT; irq++) {
+		if (isa_routes[irq].available && isa_routes[irq].registers == ioapics[index].registers &&
+		    isa_routes[irq].index == source->number)
+			return false;
+	}
+	return true;
 }
 
 static bool apic_route_ioapic(const struct x86_ioapic* selected, uint32_t route, uint16_t flags, unsigned vector,

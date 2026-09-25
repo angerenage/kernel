@@ -280,6 +280,16 @@ Test(kernel_capability_interrupt, resolution_is_stable_stateless_and_read_only) 
 	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
 	cr_assert_eq(result.value, INTERRUPT_NOT_FOUND);
 
+	struct interrupts_resolve_source_request unclaimable = source_request;
+	unclaimable.local_source_id                          = 255u;
+	result = kernel_capability_test_call(resource_cap, &unclaimable, sizeof(unclaimable), &second, sizeof(second));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_neq(second.source, INTERRUPT_SOURCE_INVALID);
+	struct interrupts_claim_source_response unclaimable_claim = {0};
+	result = interrupt_test_try_claim(resource_cap, second.source, &unclaimable_claim);
+	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
+	cr_assert_eq(result.value, INTERRUPT_UNAVAILABLE);
+
 	struct interrupts_resolve_message_context_request invalid_message = {
 		.header                      = {.op = INTERRUPTS_OP_RESOLVE_MESSAGE_CONTEXT},
 		.controller_register_address = INTERRUPT_MESSAGE_CONTROLLER_AUTO,
