@@ -328,6 +328,15 @@ bool riscv64_aplic_source_domain_at(struct hal_interrupt_source_domain_info* out
 	return true;
 }
 
+bool riscv64_aplic_source_resolve(uint64_t controller_address, uint32_t local_source_id,
+                                  struct hal_interrupt_source* out_source) {
+	if (out_source == NULL || !aplic_probe() || controller_address != aplic.physical_base || local_source_id == 0u ||
+	    local_source_id > aplic.sources)
+		return false;
+	*out_source = (struct hal_interrupt_source){.domain = APLIC_DOMAIN_ID, .number = local_source_id};
+	return true;
+}
+
 bool riscv64_aplic_source_init(struct hal_interrupt_source_state* state, const struct hal_interrupt_source* source,
                                const struct hal_interrupt_delivery* delivery) {
 	struct hal_interrupt_source_info info;

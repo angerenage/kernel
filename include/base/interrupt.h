@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Opaque token naming one firmware-discovered, claimable fixed interrupt source. */
+/* Opaque, non-authoritative token naming one firmware-discovered fixed source. */
 typedef uint64_t interrupt_source_t;
 #define INTERRUPT_SOURCE_INVALID UINT64_MAX
 
@@ -14,6 +14,20 @@ typedef uint64_t interrupt_source_t;
  */
 typedef uint64_t interrupt_message_context_t;
 #define INTERRUPT_MESSAGE_CONTEXT_INVALID UINT64_MAX
+#define INTERRUPT_MESSAGE_CONTROLLER_AUTO UINT64_MAX
+#define INTERRUPT_MESSAGE_PRODUCER_NONE UINT32_MAX
+
+enum interrupt_trigger {
+	INTERRUPT_TRIGGER_FIRMWARE = 0,
+	INTERRUPT_TRIGGER_EDGE,
+	INTERRUPT_TRIGGER_LEVEL,
+};
+
+enum interrupt_polarity {
+	INTERRUPT_POLARITY_FIRMWARE = 0,
+	INTERRUPT_POLARITY_HIGH,
+	INTERRUPT_POLARITY_LOW,
+};
 
 /* Interrupt delivery mechanism selected by the kernel. */
 enum interrupt_kind {
@@ -64,7 +78,9 @@ struct interrupt_info_response {
 
 /* Operations accepted by the kernel Interrupts resource. */
 enum interrupts_op {
-	INTERRUPTS_OP_CLAIM_SOURCE = 0,
+	INTERRUPTS_OP_RESOLVE_SOURCE = 0,
+	INTERRUPTS_OP_RESOLVE_MESSAGE_CONTEXT,
+	INTERRUPTS_OP_CLAIM_SOURCE,
 	INTERRUPTS_OP_ALLOCATE_MESSAGE,
 };
 
@@ -73,10 +89,33 @@ struct interrupts_request_header {
 	enum interrupts_op op;
 };
 
-/* Request to claim one fixed hardware source. */
+struct interrupts_resolve_source_request {
+	struct interrupts_request_header header;
+	uint64_t                         controller_register_address;
+	uint32_t                         local_source_id;
+};
+
+struct interrupts_resolve_source_response {
+	interrupt_source_t source;
+};
+
+struct interrupts_resolve_message_context_request {
+	struct interrupts_request_header header;
+	uint64_t                         controller_register_address;
+	uint32_t                         producer_id;
+	uint32_t                         reserved;
+};
+
+struct interrupts_resolve_message_context_response {
+	interrupt_message_context_t context;
+};
+
+/* Request to claim and configure one fixed hardware source. */
 struct interrupts_claim_source_request {
 	struct interrupts_request_header header;
 	interrupt_source_t               source;
+	enum interrupt_trigger           trigger;
+	enum interrupt_polarity          polarity;
 };
 
 /* Request to allocate one message-signaled interrupt. */

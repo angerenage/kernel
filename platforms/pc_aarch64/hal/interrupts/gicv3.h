@@ -26,6 +26,10 @@ size_t aarch64_gicv3_source_domain_count(void);
 /* Return the GICv3 fixed-source domain at an enumeration index. */
 bool aarch64_gicv3_source_domain_at(size_t index, struct hal_interrupt_source_domain_info* out);
 
+/* Resolve a distributor physical address and SPI ID. */
+bool aarch64_gicv3_source_resolve(uint64_t controller_address, uint32_t local_source_id,
+                                  struct hal_interrupt_source* out_source);
+
 /* Return the delivery identity and target-routing capability of one GICv3 source. */
 bool aarch64_gicv3_source_info(const struct hal_interrupt_source* source, struct hal_interrupt_source_info* out);
 

@@ -46,6 +46,7 @@ static bool              gic_ready;
 static bool              gic_single_cpu;
 static volatile uint8_t* gicd_mmio;
 static volatile uint8_t* gicc_mmio;
+static uintptr_t         gicd_phys;
 static bool              gic_local_ready[AARCH64_GIC_MAX_CPUS];
 static uint8_t           gic_target_masks[AARCH64_GIC_MAX_CPUS];
 static struct spinlock   gic_distributor_lock =
@@ -162,6 +163,7 @@ bool aarch64_gic_init_global(void) {
 
 	gicd_mmio      = (volatile uint8_t*)(uintptr_t)phys_to_virt(distributor);
 	gicc_mmio      = (volatile uint8_t*)(uintptr_t)phys_to_virt(cpu_interface);
+	gicd_phys      = distributor;
 	gic_single_cpu = cpu_count() == 1u;
 
 	mmio_write32(gicd_mmio, AARCH64_GICD_CTLR, 0u);
@@ -249,6 +251,25 @@ bool hal_interrupt_source_domain_at(size_t index, struct hal_interrupt_source_do
 	*out_domain =
 		(struct hal_interrupt_source_domain_info){.domain = 0u, .first_source = 32u, .source_count = count - 32u};
 	return true;
+}
+
+bool hal_interrupt_source_resolve(uint64_t controller_register_address, uint32_t local_source_id,
+                                  struct hal_interrupt_source* out_source) {
+	if (aarch64_gicv3_described())
+		return aarch64_gicv3_source_resolve(controller_register_address, local_source_id, out_source);
+	if (out_source == NULL || !gic_is_ready() || controller_register_address != gicd_phys || local_source_id < 32u ||
+	    !gic_fixed_interrupt_valid(local_source_id))
+		return false;
+	*out_source = (struct hal_interrupt_source){.domain = 0u, .number = local_source_id};
+	return true;
+}
+
+bool hal_interrupt_source_configuration_supported(const struct hal_interrupt_source* source,
+                                                  enum hal_interrupt_trigger         trigger,
+                                                  enum hal_interrupt_polarity        polarity) {
+	struct hal_interrupt_source_info info;
+	return source != NULL && trigger <= HAL_INTERRUPT_TRIGGER_LEVEL && polarity <= HAL_INTERRUPT_POLARITY_HIGH &&
+	       hal_interrupt_source_info(source, &info);
 }
 
 bool hal_interrupt_source_info(const struct hal_interrupt_source* source, struct hal_interrupt_source_info* out_info) {
@@ -440,6 +461,16 @@ bool hal_interrupt_message_range_at(size_t index, struct hal_interrupt_message_r
 	*out_range = (struct hal_interrupt_message_range){
 		.domain = 0u, .delivery = {.domain = 0u, .base = first, .limit = first + count}
     };
+	return true;
+}
+
+bool hal_interrupt_message_resolve(uint64_t controller_register_address, uint32_t producer_id,
+                                   struct hal_interrupt_message_context* out_context) {
+	struct hal_interrupt_message_range range;
+	if (controller_register_address != UINT64_MAX || producer_id != UINT32_MAX || out_context == NULL ||
+	    !hal_interrupt_message_range_at(0u, &range))
+		return false;
+	*out_context = (struct hal_interrupt_message_context){.domain = range.domain};
 	return true;
 }
 

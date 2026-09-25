@@ -32,21 +32,11 @@ struct interrupt_quarantine {
 	struct hal_interrupt_event   event;
 };
 
-struct interrupt_source_registration {
-	struct interrupt_source_registration* next;
-	interrupt_source_t                    token;
-	struct hal_interrupt_source           source;
-	enum hal_interrupt_trigger            trigger;
-	enum hal_interrupt_polarity           polarity;
-};
-
 static struct spinlock interrupt_table_lock = SPINLOCK_INIT_CLASS(
 	"interrupt_table", SPINLOCK_ORDER_INTERRUPT, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
-static struct interrupt*                     interrupt_table;
-static struct interrupt_quarantine*          interrupt_quarantine;
-static struct interrupt_source_registration* interrupt_sources;
-static interrupt_source_t                    interrupt_next_source_token = 1u;
-static bool                                  interrupt_initialized;
+static struct interrupt*            interrupt_table;
+static struct interrupt_quarantine* interrupt_quarantine;
+static bool                         interrupt_initialized;
 
 static bool event_equal(struct hal_interrupt_event left, struct hal_interrupt_event right) {
 	return left.domain == right.domain && left.id == right.id;
@@ -56,13 +46,52 @@ static bool source_equal(struct hal_interrupt_source left, struct hal_interrupt_
 	return left.domain == right.domain && left.number == right.number;
 }
 
-/*
- * Message contexts encode the domain in the upper 32 bits and the domain-local
- * producer in the lower 32 bits.  UINT32_MAX denotes no producer; pairing it
- * with domain UINT32_MAX would produce INTERRUPT_MESSAGE_CONTEXT_INVALID.
- * This token only carries routing context and grants no allocation authority.
- */
-#define INTERRUPT_MESSAGE_PRODUCER_NONE UINT32_MAX
+static bool source_token_create(const struct hal_interrupt_source* source, interrupt_source_t* out_token) {
+	if (source == NULL || out_token == NULL) return false;
+	interrupt_source_t token = ((interrupt_source_t)source->domain << 32u) | source->number;
+	if (token == INTERRUPT_SOURCE_INVALID) return false;
+	*out_token = token;
+	return true;
+}
+
+static bool source_from_token(interrupt_source_t token, struct hal_interrupt_source* out_source) {
+	if (out_source == NULL || token == INTERRUPT_SOURCE_INVALID) return false;
+	*out_source = (struct hal_interrupt_source){.domain = (uint32_t)(token >> 32u), .number = (uint32_t)token};
+	return true;
+}
+
+static bool source_configuration_decode(enum interrupt_trigger trigger, enum interrupt_polarity polarity,
+                                        enum hal_interrupt_trigger*  out_trigger,
+                                        enum hal_interrupt_polarity* out_polarity) {
+	if (out_trigger == NULL || out_polarity == NULL) return false;
+	switch (trigger) {
+	case INTERRUPT_TRIGGER_FIRMWARE:
+		*out_trigger = HAL_INTERRUPT_TRIGGER_FIRMWARE;
+		break;
+	case INTERRUPT_TRIGGER_EDGE:
+		*out_trigger = HAL_INTERRUPT_TRIGGER_EDGE;
+		break;
+	case INTERRUPT_TRIGGER_LEVEL:
+		*out_trigger = HAL_INTERRUPT_TRIGGER_LEVEL;
+		break;
+	default:
+		return false;
+	}
+	switch (polarity) {
+	case INTERRUPT_POLARITY_FIRMWARE:
+		*out_polarity = HAL_INTERRUPT_POLARITY_FIRMWARE;
+		break;
+	case INTERRUPT_POLARITY_HIGH:
+		*out_polarity = HAL_INTERRUPT_POLARITY_HIGH;
+		break;
+	case INTERRUPT_POLARITY_LOW:
+		*out_polarity = HAL_INTERRUPT_POLARITY_LOW;
+		break;
+	default:
+		return false;
+	}
+	return true;
+}
 
 static bool message_context_decode(interrupt_message_context_t context, uint32_t* out_domain,
                                    struct hal_interrupt_message_source*        out_producer,
@@ -82,20 +111,6 @@ static bool message_context_decode(interrupt_message_context_t context, uint32_t
 		*out_source   = out_producer;
 	}
 	return true;
-}
-
-static bool source_from_token(interrupt_source_t token, struct hal_interrupt_source* out_source,
-                              enum hal_interrupt_trigger* out_trigger, enum hal_interrupt_polarity* out_polarity) {
-	if (out_source == NULL || out_trigger == NULL || out_polarity == NULL || token == INTERRUPT_SOURCE_INVALID)
-		return false;
-	for (struct interrupt_source_registration* item = interrupt_sources; item != NULL; item = item->next) {
-		if (item->token != token) continue;
-		*out_source   = item->source;
-		*out_trigger  = item->trigger;
-		*out_polarity = item->polarity;
-		return true;
-	}
-	return false;
 }
 
 static const struct cpu* choose_source_target(const struct hal_interrupt_source*      source,
@@ -173,51 +188,15 @@ bool interrupt_init(void) {
 	return true;
 }
 
-enum interrupt_result interrupt_register_source(const struct hal_interrupt_source* source,
-                                                enum hal_interrupt_trigger         trigger,
-                                                enum hal_interrupt_polarity polarity, interrupt_source_t* out_token) {
-	struct interrupt_source_registration* registration;
-	struct hal_interrupt_source_info      info;
-	struct irq_state                      state;
+enum interrupt_result interrupt_resolve_source(uint64_t controller_register_address, uint32_t local_source_id,
+                                               interrupt_source_t* out_source) {
+	struct hal_interrupt_source source;
 
-	if (source == NULL || out_token == NULL || trigger > HAL_INTERRUPT_TRIGGER_LEVEL ||
-	    polarity > HAL_INTERRUPT_POLARITY_LOW || !hal_interrupt_source_info(source, &info))
-		return INTERRUPT_INVALID_ARGUMENTS;
-	*out_token   = INTERRUPT_SOURCE_INVALID;
-	registration = malloc(sizeof(*registration));
-	if (registration == NULL) return INTERRUPT_NO_MEMORY;
-	state = spinlock_lock_irqsave(&interrupt_table_lock);
-	if (!interrupt_initialized) {
-		spinlock_unlock_irqrestore(&interrupt_table_lock, state);
-		free(registration);
-		return INTERRUPT_UNAVAILABLE;
-	}
-	for (struct interrupt_source_registration* item = interrupt_sources; item != NULL; item = item->next) {
-		if (!source_equal(item->source, *source)) continue;
-		if (item->trigger == trigger && item->polarity == polarity) {
-			*out_token = item->token;
-			spinlock_unlock_irqrestore(&interrupt_table_lock, state);
-			free(registration);
-			return INTERRUPT_OK;
-		}
-		spinlock_unlock_irqrestore(&interrupt_table_lock, state);
-		free(registration);
-		return INTERRUPT_INVALID_ARGUMENTS;
-	}
-	if (interrupt_next_source_token == INTERRUPT_SOURCE_INVALID) {
-		spinlock_unlock_irqrestore(&interrupt_table_lock, state);
-		free(registration);
-		return INTERRUPT_UNAVAILABLE;
-	}
-	*registration     = (struct interrupt_source_registration){.next     = interrupt_sources,
-	                                                           .token    = interrupt_next_source_token++,
-	                                                           .source   = *source,
-	                                                           .trigger  = trigger,
-	                                                           .polarity = polarity};
-	interrupt_sources = registration;
-	*out_token        = registration->token;
-	spinlock_unlock_irqrestore(&interrupt_table_lock, state);
-	return INTERRUPT_OK;
+	if (out_source == NULL) return INTERRUPT_INVALID_ARGUMENTS;
+	*out_source = INTERRUPT_SOURCE_INVALID;
+	if (!hal_interrupt_source_resolve(controller_register_address, local_source_id, &source))
+		return INTERRUPT_NOT_FOUND;
+	return source_token_create(&source, out_source) ? INTERRUPT_OK : INTERRUPT_FAILED;
 }
 
 bool interrupt_retain(struct interrupt* interrupt) {
@@ -248,7 +227,9 @@ void interrupt_release(struct interrupt* interrupt) {
 	if (free_interrupt) free(interrupt);
 }
 
-enum interrupt_result interrupt_claim_source(interrupt_source_t token, struct interrupt** out_interrupt) {
+enum interrupt_result interrupt_claim_source(interrupt_source_t token, enum interrupt_trigger requested_trigger,
+                                             enum interrupt_polarity requested_polarity,
+                                             struct interrupt**      out_interrupt) {
 	struct hal_interrupt_source      source;
 	struct hal_interrupt_source_info info;
 	enum hal_interrupt_trigger       trigger;
@@ -257,12 +238,12 @@ enum interrupt_result interrupt_claim_source(interrupt_source_t token, struct in
 	struct interrupt*                interrupt;
 	struct irq_state                 state;
 
-	if (out_interrupt == NULL) return INTERRUPT_INVALID_ARGUMENTS;
-	*out_interrupt    = NULL;
-	state             = spinlock_lock_irqsave(&interrupt_table_lock);
-	bool source_found = source_from_token(token, &source, &trigger, &polarity);
-	spinlock_unlock_irqrestore(&interrupt_table_lock, state);
-	if (!source_found || !hal_interrupt_source_info(&source, &info)) return INTERRUPT_NOT_FOUND;
+	if (out_interrupt == NULL ||
+	    !source_configuration_decode(requested_trigger, requested_polarity, &trigger, &polarity))
+		return INTERRUPT_INVALID_ARGUMENTS;
+	*out_interrupt = NULL;
+	if (!source_from_token(token, &source) || !hal_interrupt_source_info(&source, &info)) return INTERRUPT_NOT_FOUND;
+	if (!hal_interrupt_source_configuration_supported(&source, trigger, polarity)) return INTERRUPT_INVALID_ARGUMENTS;
 	target = choose_source_target(&source, &info);
 	if (target == NULL) return INTERRUPT_UNAVAILABLE;
 	interrupt = calloc(1u, sizeof(*interrupt));
@@ -321,6 +302,19 @@ bool interrupt_message_context_create(uint32_t domain, const struct hal_interrup
 	*out_context = ((interrupt_message_context_t)domain << 32u) | producer_id;
 	if (*out_context == INTERRUPT_MESSAGE_CONTEXT_INVALID) return false;
 	return true;
+}
+
+enum interrupt_result interrupt_resolve_message_context(uint64_t controller_register_address, uint32_t producer_id,
+                                                        interrupt_message_context_t* out_context) {
+	struct hal_interrupt_message_context resolved;
+
+	if (out_context == NULL) return INTERRUPT_INVALID_ARGUMENTS;
+	*out_context = INTERRUPT_MESSAGE_CONTEXT_INVALID;
+	if (!hal_interrupt_message_resolve(controller_register_address, producer_id, &resolved)) return INTERRUPT_NOT_FOUND;
+	if (resolved.has_source && resolved.source.domain != resolved.domain) return INTERRUPT_FAILED;
+	if (!interrupt_message_context_create(resolved.domain, resolved.has_source ? &resolved.source : NULL, out_context))
+		return INTERRUPT_FAILED;
+	return INTERRUPT_OK;
 }
 
 enum interrupt_result interrupt_allocate_message(interrupt_message_context_t context, struct interrupt** out_interrupt,

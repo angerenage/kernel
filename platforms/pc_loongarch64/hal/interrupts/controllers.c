@@ -324,6 +324,17 @@ bool loongarch64_interrupt_source_domain_at(size_t index, struct hal_interrupt_s
 	return controllers_discovered && loongarch64_fixed_source_domain_at(index, out_domain);
 }
 
+bool loongarch64_interrupt_source_resolve(uint64_t controller_address, uint32_t local_source_id,
+                                          struct hal_interrupt_source* out_source) {
+	return controllers_discovered && loongarch64_fixed_source_resolve(controller_address, local_source_id, out_source);
+}
+
+bool loongarch64_interrupt_source_configuration_supported(const struct hal_interrupt_source* source,
+                                                          enum hal_interrupt_trigger         trigger,
+                                                          enum hal_interrupt_polarity        polarity) {
+	return controllers_discovered && loongarch64_fixed_source_configuration_supported(source, trigger, polarity);
+}
+
 bool loongarch64_interrupt_source_info(const struct hal_interrupt_source* source,
                                        struct hal_interrupt_source_info*  out_info) {
 	return controllers_discovered && loongarch64_fixed_source_info(source, out_info);

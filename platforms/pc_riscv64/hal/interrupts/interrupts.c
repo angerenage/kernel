@@ -103,6 +103,27 @@ bool hal_interrupt_source_domain_at(size_t index, struct hal_interrupt_source_do
 	return index == 0u && riscv64_aplic_source_domain_at(out_domain);
 }
 
+bool hal_interrupt_source_resolve(uint64_t controller_register_address, uint32_t local_source_id,
+                                  struct hal_interrupt_source* out_source) {
+	return global_ready && (riscv64_plic_source_resolve(controller_register_address, local_source_id, out_source) ||
+	                        riscv64_aplic_source_resolve(controller_register_address, local_source_id, out_source));
+}
+
+bool hal_interrupt_source_configuration_supported(const struct hal_interrupt_source* source,
+                                                  enum hal_interrupt_trigger         trigger,
+                                                  enum hal_interrupt_polarity        polarity) {
+	struct hal_interrupt_source_info info;
+	if (source == NULL || trigger > HAL_INTERRUPT_TRIGGER_LEVEL || polarity > HAL_INTERRUPT_POLARITY_LOW) return false;
+
+	if (source->domain == 1u) {
+		if (!riscv64_plic_source_info(source, &info)) return false;
+		return trigger == HAL_INTERRUPT_TRIGGER_FIRMWARE && polarity == HAL_INTERRUPT_POLARITY_FIRMWARE;
+	}
+
+	if (!riscv64_aplic_source_info(source, &info)) return false;
+	return trigger != HAL_INTERRUPT_TRIGGER_FIRMWARE && polarity != HAL_INTERRUPT_POLARITY_FIRMWARE;
+}
+
 bool hal_interrupt_source_info(const struct hal_interrupt_source* source, struct hal_interrupt_source_info* out_info) {
 	if (source == NULL) return false;
 	if (source->domain == 1u) return riscv64_plic_source_info(source, out_info);
@@ -146,6 +167,15 @@ size_t hal_interrupt_message_range_count(void) {
 }
 bool hal_interrupt_message_range_at(size_t index, struct hal_interrupt_message_range* out_range) {
 	return global_ready && index == 0u && riscv64_imsic_message_range_at(out_range);
+}
+bool hal_interrupt_message_resolve(uint64_t controller_register_address, uint32_t producer_id,
+                                   struct hal_interrupt_message_context* out_context) {
+	struct hal_interrupt_message_range range;
+	if (controller_register_address != UINT64_MAX || producer_id != UINT32_MAX || out_context == NULL ||
+	    !hal_interrupt_message_range_at(0u, &range))
+		return false;
+	*out_context = (struct hal_interrupt_message_context){.domain = range.domain};
+	return true;
 }
 bool hal_interrupt_message_target_supported(uint32_t domain, const struct hal_interrupt_message_source* source,
                                             const struct cpu* target) {

@@ -126,11 +126,20 @@ struct hal_interrupt_source_state {
 
 /* Generic source domains exclude kernel-private local timers, IPIs, and per-CPU interrupts. */
 
-/* Return the number of assignable external-source namespaces discovered from platform firmware. */
+/* Return the number of directly enumerable external-source namespaces. */
 size_t hal_interrupt_source_domain_count(void);
 
-/* Return the assignable external-source namespace at an enumeration index. */
+/* Return one directly enumerable external-source namespace. */
 bool hal_interrupt_source_domain_at(size_t index, struct hal_interrupt_source_domain_info* out_domain);
+
+/* Resolve a firmware-visible controller address and local ID without claiming the source. */
+bool hal_interrupt_source_resolve(uint64_t controller_register_address, uint32_t local_source_id,
+                                  struct hal_interrupt_source* out_source);
+
+/* Return whether a resolved source can be initialized with this electrical configuration. */
+bool hal_interrupt_source_configuration_supported(const struct hal_interrupt_source* source,
+                                                  enum hal_interrupt_trigger         trigger,
+                                                  enum hal_interrupt_polarity        polarity);
 
 /* Return the allocatable delivery events and target constraint of one assignable external source. */
 bool hal_interrupt_source_info(const struct hal_interrupt_source* source, struct hal_interrupt_source_info* out_info);
@@ -161,6 +170,12 @@ struct hal_interrupt_message_range {
 struct hal_interrupt_message_source {
 	uint32_t domain;
 	uint32_t id;
+};
+
+struct hal_interrupt_message_context {
+	uint32_t                            domain;
+	bool                                has_source;
+	struct hal_interrupt_message_source source;
 };
 
 /* Requested message mechanism, optional producer, target, and core-reserved delivery event. */
@@ -218,6 +233,10 @@ size_t hal_interrupt_message_range_count(void);
 
 /* Return the message-signaled interrupt range at an enumeration index. */
 bool hal_interrupt_message_range_at(size_t index, struct hal_interrupt_message_range* out_range);
+
+/* Resolve a firmware-visible message controller and producer without allocating delivery. */
+bool hal_interrupt_message_resolve(uint64_t controller_register_address, uint32_t producer_id,
+                                   struct hal_interrupt_message_context* out_context);
 
 /* Return whether a message mechanism and optional producer can deliver to a CPU without changing hardware state. */
 bool hal_interrupt_message_target_supported(uint32_t domain, const struct hal_interrupt_message_source* source,

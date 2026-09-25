@@ -313,6 +313,15 @@ bool aarch64_gicv3_source_domain_at(size_t index, struct hal_interrupt_source_do
 	return true;
 }
 
+bool aarch64_gicv3_source_resolve(uint64_t controller_address, uint32_t local_source_id,
+                                  struct hal_interrupt_source* out_source) {
+	if (out_source == NULL || !ready || controller_address != distributor_phys || local_source_id < 32u ||
+	    !gicv3_source_valid(local_source_id))
+		return false;
+	*out_source = (struct hal_interrupt_source){.domain = 0u, .number = local_source_id};
+	return true;
+}
+
 bool aarch64_gicv3_source_info(const struct hal_interrupt_source* source, struct hal_interrupt_source_info* out) {
 	if (source == NULL || out == NULL || source->domain != 0u || source->number < 32u ||
 	    !gicv3_source_valid(source->number))

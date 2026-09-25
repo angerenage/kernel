@@ -86,6 +86,19 @@ bool hal_interrupt_source_domain_at(size_t index, struct hal_interrupt_source_do
 	return true;
 }
 
+bool hal_interrupt_source_resolve(uint64_t controller_register_address, uint32_t local_source_id,
+                                  struct hal_interrupt_source* out_source) {
+	if (controller_register_address != 0x10000000u || local_source_id >= 256u || out_source == NULL) return false;
+	*out_source = (struct hal_interrupt_source){.domain = 0u, .number = local_source_id};
+	return true;
+}
+
+bool hal_interrupt_source_configuration_supported(const struct hal_interrupt_source* source,
+                                                  enum hal_interrupt_trigger         trigger,
+                                                  enum hal_interrupt_polarity        polarity) {
+	return source != NULL && trigger <= HAL_INTERRUPT_TRIGGER_LEVEL && polarity <= HAL_INTERRUPT_POLARITY_LOW;
+}
+
 bool hal_interrupt_source_info(const struct hal_interrupt_source* source, struct hal_interrupt_source_info* out_info) {
 	if (source == NULL || out_info == NULL || source->domain != 0u || source->number >= 256u) return false;
 	*out_info = (struct hal_interrupt_source_info){
@@ -146,6 +159,15 @@ size_t hal_interrupt_message_range_count(void) {
 bool hal_interrupt_message_range_at(size_t index, struct hal_interrupt_message_range* out_range) {
 	if (index >= message_range_count || out_range == NULL) return false;
 	*out_range = message_ranges[index];
+	return true;
+}
+
+bool hal_interrupt_message_resolve(uint64_t controller_register_address, uint32_t producer_id,
+                                   struct hal_interrupt_message_context* out_context) {
+	if (controller_register_address != UINT64_MAX || producer_id != UINT32_MAX || out_context == NULL ||
+	    message_range_count == 0u)
+		return false;
+	*out_context = (struct hal_interrupt_message_context){.domain = message_ranges[0].domain};
 	return true;
 }
 

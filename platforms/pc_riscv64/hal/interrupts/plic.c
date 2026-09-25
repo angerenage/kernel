@@ -307,6 +307,15 @@ bool riscv64_plic_source_domain_at(struct hal_interrupt_source_domain_info* out_
 	return true;
 }
 
+bool riscv64_plic_source_resolve(uint64_t controller_address, uint32_t local_source_id,
+                                 struct hal_interrupt_source* out_source) {
+	if (out_source == NULL || !plic_probe() || controller_address != plic.physical_base || local_source_id == 0u ||
+	    local_source_id > plic.ndev)
+		return false;
+	*out_source = (struct hal_interrupt_source){.domain = 1u, .number = local_source_id};
+	return true;
+}
+
 bool riscv64_plic_source_info(const struct hal_interrupt_source* source, struct hal_interrupt_source_info* out_info) {
 	if (source == NULL || out_info == NULL || source->domain != 1u || !plic_probe() || source->number == 0u ||
 	    source->number > plic.ndev)

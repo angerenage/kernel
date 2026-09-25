@@ -371,9 +371,41 @@ bool hal_interrupt_source_domain_at(size_t index, struct hal_interrupt_source_do
 	return true;
 }
 
-bool hal_interrupt_source_info(const struct hal_interrupt_source* source, struct hal_interrupt_source_info* out_info) {
-	if (source == NULL || out_info == NULL || source->domain != 0u || !x86_fixed_interrupt_valid(source->number))
+bool hal_interrupt_source_resolve(uint64_t controller_register_address, uint32_t local_source_id,
+                                  struct hal_interrupt_source* out_source) {
+	return global_ready && apic_resolve_ioapic_source(controller_register_address, local_source_id, out_source);
+}
+
+bool hal_interrupt_source_configuration_supported(const struct hal_interrupt_source* source,
+                                                  enum hal_interrupt_trigger         trigger,
+                                                  enum hal_interrupt_polarity        polarity) {
+	struct hal_interrupt_source_info info;
+	if (source == NULL || trigger > HAL_INTERRUPT_TRIGGER_LEVEL || polarity > HAL_INTERRUPT_POLARITY_LOW ||
+	    !hal_interrupt_source_info(source, &info))
 		return false;
+
+	/* Non-ISA I/O APIC sources have no firmware trigger/polarity metadata here. */
+	if (source->domain != 0u)
+		return trigger != HAL_INTERRUPT_TRIGGER_FIRMWARE && polarity != HAL_INTERRUPT_POLARITY_FIRMWARE;
+
+	if (apic_isa_irq_available(source->number)) return true;
+
+	/* Legacy PIC fallback only supports edge/high semantics. */
+	return trigger != HAL_INTERRUPT_TRIGGER_LEVEL && polarity != HAL_INTERRUPT_POLARITY_LOW;
+}
+
+bool hal_interrupt_source_info(const struct hal_interrupt_source* source, struct hal_interrupt_source_info* out_info) {
+	if (source == NULL || out_info == NULL) return false;
+	if (source->domain != 0u) {
+		if (!apic_ioapic_source_available(source)) return false;
+		*out_info = (struct hal_interrupt_source_info){
+			.delivery     = {.domain = X86_DELIVERY_DOMAIN_VECTOR, .base = 48u, .limit = X86_SYSCALL_VECTOR},
+			.target_kind  = HAL_INTERRUPT_TARGET_ROUTABLE,
+			.fixed_target = NULL
+        };
+		return true;
+	}
+	if (!x86_fixed_interrupt_valid(source->number)) return false;
 	bool                                routable = apic_isa_irq_available(source->number);
 	struct hal_interrupt_delivery_range delivery =
 		routable ? (struct hal_interrupt_delivery_range){.domain = X86_DELIVERY_DOMAIN_VECTOR,
@@ -410,13 +442,21 @@ bool hal_interrupt_source_init(struct hal_interrupt_source_state* state, const s
 	    !hal_interrupt_source_target_supported(source, delivery->target) ||
 	    delivery->trigger > HAL_INTERRUPT_TRIGGER_LEVEL || delivery->polarity > HAL_INTERRUPT_POLARITY_LOW)
 		return false;
-	if (info.target_kind == HAL_INTERRUPT_TARGET_ROUTABLE && apic_route_isa_irq(source->number,
-	                                                                            delivery->event.id,
-	                                                                            (uint32_t)delivery->target->arch_id,
-	                                                                            delivery->trigger,
-	                                                                            delivery->polarity,
-	                                                                            &route,
-	                                                                            &registers)) {
+	bool routed = source->domain == 0u ? apic_route_isa_irq(source->number,
+	                                                        delivery->event.id,
+	                                                        (uint32_t)delivery->target->arch_id,
+	                                                        delivery->trigger,
+	                                                        delivery->polarity,
+	                                                        &route,
+	                                                        &registers)
+	                                   : apic_route_ioapic_source(source,
+	                                                              delivery->event.id,
+	                                                              (uint32_t)delivery->target->arch_id,
+	                                                              delivery->trigger,
+	                                                              delivery->polarity,
+	                                                              &route,
+	                                                              &registers);
+	if (info.target_kind == HAL_INTERRUPT_TARGET_ROUTABLE && routed) {
 		*state = (struct hal_interrupt_source_state){.source           = *source,
 		                                             .ioapic_route     = route,
 		                                             .ioapic_registers = registers,
@@ -474,6 +514,15 @@ bool hal_interrupt_message_range_at(size_t index, struct hal_interrupt_message_r
 		                      .delivery = {.domain = X86_DELIVERY_DOMAIN_VECTOR,
 		                                   .base   = X86_SYSCALL_VECTOR + 1u,
 		                                   .limit  = X86_LAPIC_WAKE_VECTOR}};
+	return true;
+}
+
+bool hal_interrupt_message_resolve(uint64_t controller_register_address, uint32_t producer_id,
+                                   struct hal_interrupt_message_context* out_context) {
+	if (!global_ready || controller_register_address != UINT64_MAX || producer_id != UINT32_MAX ||
+	    out_context == NULL || hal_interrupt_message_range_count() == 0u)
+		return false;
+	*out_context = (struct hal_interrupt_message_context){.domain = X86_MESSAGE_DOMAIN_MSI};
 	return true;
 }
 

@@ -54,6 +54,32 @@ static bool fixed_source_reserved(const struct fixed_controller* controller, uin
 	return false;
 }
 
+bool loongarch64_fixed_source_resolve(uint64_t controller_address, uint32_t local_source_id,
+                                      struct hal_interrupt_source* out_source) {
+	if (out_source == NULL || controller_address > UINTPTR_MAX) return false;
+	for (size_t index = 0u; index < fixed_controller_count; index++) {
+		struct fixed_controller* controller = &fixed_controllers[index];
+		if (controller->physical_base != (uintptr_t)controller_address || !fixed_probe(controller) ||
+		    local_source_id >= controller->source_count || fixed_source_reserved(controller, local_source_id))
+			continue;
+		*out_source = (struct hal_interrupt_source){.domain = controller->domain, .number = local_source_id};
+		return true;
+	}
+	return false;
+}
+
+bool loongarch64_fixed_source_configuration_supported(const struct hal_interrupt_source* source,
+                                                      enum hal_interrupt_trigger         trigger,
+                                                      enum hal_interrupt_polarity        polarity) {
+	struct hal_interrupt_source_info info;
+	if (source == NULL || trigger > HAL_INTERRUPT_TRIGGER_LEVEL || polarity > HAL_INTERRUPT_POLARITY_LOW ||
+	    !loongarch64_fixed_source_info(source, &info))
+		return false;
+
+	struct fixed_controller* controller = loongarch64_fixed_by_domain(source->domain);
+	return controller != NULL && !(controller->kind == FIXED_PCH_LPC && trigger == HAL_INTERRUPT_TRIGGER_EDGE);
+}
+
 bool loongarch64_fixed_source_info(const struct hal_interrupt_source* source,
                                    struct hal_interrupt_source_info*  out_info) {
 	if (source == NULL || out_info == NULL) return false;

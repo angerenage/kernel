@@ -24,13 +24,13 @@ enum interrupt_result {
 /* Initialize the interrupt core before interrupt objects are created. */
 bool interrupt_init(void);
 
-/* Register a discovered fixed source and its firmware-decoded electrical configuration. */
-enum interrupt_result interrupt_register_source(const struct hal_interrupt_source* source,
-                                                enum hal_interrupt_trigger         trigger,
-                                                enum hal_interrupt_polarity polarity, interrupt_source_t* out_token);
+/* Resolve one firmware-visible fixed-source identity into an opaque, non-authoritative token. */
+enum interrupt_result interrupt_resolve_source(uint64_t controller_register_address, uint32_t local_source_id,
+                                               interrupt_source_t* out_source);
 
-/* Claim a fixed source without enabling it.  The returned reference must be released. */
-enum interrupt_result interrupt_claim_source(interrupt_source_t source, struct interrupt** out_interrupt);
+/* Claim and configure a fixed source without enabling it.  The returned reference must be released. */
+enum interrupt_result interrupt_claim_source(interrupt_source_t source, enum interrupt_trigger trigger,
+                                             enum interrupt_polarity polarity, struct interrupt** out_interrupt);
 
 /*
  * Encode a message domain and optional domain-local producer in an opaque context token.
@@ -41,6 +41,9 @@ enum interrupt_result interrupt_claim_source(interrupt_source_t source, struct i
  */
 bool interrupt_message_context_create(uint32_t domain, const struct hal_interrupt_message_source* producer,
                                       interrupt_message_context_t* out_context);
+
+enum interrupt_result interrupt_resolve_message_context(uint64_t controller_register_address, uint32_t producer_id,
+                                                        interrupt_message_context_t* out_context);
 
 /* Allocate a message interrupt and return only its device-programmable message values. */
 enum interrupt_result interrupt_allocate_message(interrupt_message_context_t context, struct interrupt** out_interrupt,

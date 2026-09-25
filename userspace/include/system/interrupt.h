@@ -3,8 +3,17 @@
 #include <base/interrupt.h>
 #include <base/syscall.h>
 
-/* Claim one discovered fixed interrupt source and return its Interrupt capability. */
+/* Resolve a firmware-described fixed-source identity into an opaque token. */
+syscall_status_t interrupts_resolve_source(cap_id_t interrupts_cap, uint64_t controller_register_address,
+                                           uint32_t local_source_id, interrupt_source_t* out_source);
+
+/* Resolve a firmware/device message producer into an opaque allocation context. */
+syscall_status_t interrupts_resolve_message_context(cap_id_t interrupts_cap, uint64_t controller_register_address,
+                                                    uint32_t producer_id, interrupt_message_context_t* out_context);
+
+/* Claim and configure one fixed interrupt source and return its Interrupt capability. */
 syscall_status_t interrupts_claim_source(cap_id_t interrupts_cap, interrupt_source_t source,
+                                         enum interrupt_trigger trigger, enum interrupt_polarity polarity,
                                          cap_id_t* out_interrupt_cap);
 
 /* Allocate one message interrupt and return its capability and device-programmable message. */

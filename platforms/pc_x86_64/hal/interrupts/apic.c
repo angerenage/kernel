@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "../utils.h"
 #include "vectors.h"
@@ -46,6 +47,7 @@
 #define X86_ACPI_RSDP_V1_LENGTH 20u
 #define X86_ACPI_RSDP_MAX_LENGTH 4096u
 #define X86_ACPI_SDT_MAX_LENGTH (16u * 1024u * 1024u)
+#define X86_IOAPIC_MAX_CONTROLLERS 16u
 
 struct x86_acpi_rsdp {
 	char     signature[8];
@@ -121,6 +123,16 @@ struct x86_isa_route {
 };
 
 static struct x86_isa_route isa_routes[X86_IRQ_COUNT];
+
+struct x86_ioapic {
+	uintptr_t         physical_address;
+	uintptr_t         lapic_phys;
+	volatile uint8_t* registers;
+	uint32_t          redirection_count;
+};
+
+static struct x86_ioapic ioapics[X86_IOAPIC_MAX_CONTROLLERS];
+static size_t            ioapic_count;
 
 static bool boot_address_space(struct kernel_boot_address_space* out) {
 	return kernel_boot_address_space_get(out);
@@ -335,6 +347,8 @@ bool apic_prepare_ipi(void) {
 bool apic_probe_isa_irqs(void) {
 	if (ioapic_probed) return true;
 	for (uint32_t irq = 0u; irq < X86_IRQ_COUNT; irq++) isa_routes[irq] = (struct x86_isa_route){0};
+	memset(ioapics, 0, sizeof(ioapics));
+	ioapic_count                                  = 0u;
 	const struct x86_acpi_sdt_header* madt_header = acpi_find_table("APIC");
 	if (!madt_header || madt_header->length < sizeof(struct x86_acpi_madt)) {
 		ioapic_probed = true;
@@ -409,6 +423,13 @@ bool apic_probe_isa_irqs(void) {
 		}
 		ioapic_lock_release(irq);
 		uint32_t base = io_apic->global_system_interrupt_base;
+		if (ioapic_count == X86_IOAPIC_MAX_CONTROLLERS) return false;
+		for (size_t previous = 0u; previous < ioapic_count; previous++)
+			if (ioapics[previous].physical_address == address) return false;
+		ioapics[ioapic_count++] = (struct x86_ioapic){.physical_address  = address,
+		                                              .lapic_phys        = lapic_phys,
+		                                              .registers         = registers,
+		                                              .redirection_count = redir_count};
 		for (uint32_t irq = 0u; irq < X86_IRQ_COUNT; irq++) {
 			if (routed_gsi[irq] < base || routed_gsi[irq] - base >= redir_count) continue;
 			if (isa_routes[irq].available) {
@@ -432,6 +453,66 @@ bool apic_isa_irq_available(unsigned irq) {
 	return irq < X86_IRQ_COUNT && ioapic_probed && isa_routes[irq].available;
 }
 
+bool apic_resolve_ioapic_source(uint64_t controller_address, uint32_t local_source_id,
+                                struct hal_interrupt_source* out_source) {
+	if (out_source == NULL || controller_address > UINTPTR_MAX || (!ioapic_probed && !apic_probe_isa_irqs()))
+		return false;
+	for (size_t index = 0u; index < ioapic_count; index++) {
+		if (ioapics[index].physical_address != (uintptr_t)controller_address ||
+		    local_source_id >= ioapics[index].redirection_count)
+			continue;
+		for (uint32_t irq = 0u; irq < X86_IRQ_COUNT; irq++) {
+			if (!isa_routes[irq].available || isa_routes[irq].registers != ioapics[index].registers ||
+			    isa_routes[irq].index != local_source_id)
+				continue;
+			/* IRQ0 is owned by the kernel clock and IRQ2 is the legacy cascade. */
+			if (irq == 0u || irq == 2u) return false;
+			*out_source = (struct hal_interrupt_source){.domain = 0u, .number = irq};
+			return true;
+		}
+		*out_source = (struct hal_interrupt_source){.domain = (uint32_t)index + 1u, .number = local_source_id};
+		return true;
+	}
+	return false;
+}
+
+bool apic_ioapic_source_available(const struct hal_interrupt_source* source) {
+	if (source == NULL || source->domain == 0u || (!ioapic_probed && !apic_probe_isa_irqs())) return false;
+	size_t index = (size_t)source->domain - 1u;
+	return index < ioapic_count && source->number < ioapics[index].redirection_count;
+}
+
+static bool apic_route_ioapic(const struct x86_ioapic* selected, uint32_t route, uint16_t flags, unsigned vector,
+                              uint32_t target_lapic_id, enum hal_interrupt_trigger trigger,
+                              enum hal_interrupt_polarity polarity, uint32_t* out_route, uintptr_t* out_registers) {
+	if (selected == NULL || route >= selected->redirection_count || vector < 32u || vector >= 255u ||
+	    target_lapic_id > 255u || trigger > HAL_INTERRUPT_TRIGGER_LEVEL || polarity > HAL_INTERRUPT_POLARITY_LOW ||
+	    out_route == NULL || out_registers == NULL || !lapic_init(selected->lapic_phys))
+		return false;
+	uint64_t redir             = (uint64_t)vector | X86_IOAPIC_REDIR_MASK;
+	uint16_t firmware_polarity = flags & X86_ACPI_MADT_POLARITY_MASK;
+	uint16_t firmware_trigger  = flags & X86_ACPI_MADT_TRIGGER_MASK;
+	if (firmware_polarity == 2u || firmware_trigger == 8u) return false;
+	bool active_low =
+		polarity == HAL_INTERRUPT_POLARITY_LOW ||
+		(polarity == HAL_INTERRUPT_POLARITY_FIRMWARE && firmware_polarity == X86_ACPI_MADT_POLARITY_ACTIVE_LOW);
+	bool level = trigger == HAL_INTERRUPT_TRIGGER_LEVEL ||
+	             (trigger == HAL_INTERRUPT_TRIGGER_FIRMWARE && firmware_trigger == X86_ACPI_MADT_TRIGGER_LEVEL);
+	if (active_low) redir |= X86_IOAPIC_REDIR_POLARITY_LOW;
+	if (level) redir |= X86_IOAPIC_REDIR_TRIGGER_LEVEL;
+	struct irq_state route_irq_state = ioapic_lock_acquire();
+	uint8_t          low_reg         = (uint8_t)(X86_IOAPIC_REDIR_BASE + route * 2u);
+	uint32_t         current_low     = ioapic_read(selected->registers, low_reg);
+	ioapic_write(selected->registers, low_reg, current_low | X86_IOAPIC_REDIR_MASK);
+	ioapic_write(selected->registers, (uint8_t)(low_reg + 1u), target_lapic_id << 24);
+	ioapic_write(selected->registers, low_reg, (uint32_t)redir);
+	ioapic_lock_release(route_irq_state);
+	*out_route     = route;
+	*out_registers = (uintptr_t)selected->registers;
+	apic_active    = true;
+	return true;
+}
+
 bool apic_route_isa_irq(unsigned irq, unsigned vector, uint32_t target_lapic_id, enum hal_interrupt_trigger trigger,
                         enum hal_interrupt_polarity polarity, uint32_t* out_route, uintptr_t* out_registers) {
 	if (irq >= X86_IRQ_COUNT || vector < 32u || vector >= 255u || out_route == NULL || out_registers == NULL ||
@@ -439,36 +520,32 @@ bool apic_route_isa_irq(unsigned irq, unsigned vector, uint32_t target_lapic_id,
 	    (!ioapic_probed && !apic_probe_isa_irqs()) || !isa_routes[irq].available)
 		return false;
 	const struct x86_isa_route* selected = &isa_routes[irq];
-	if (!lapic_init(selected->lapic_phys)) return false;
-	uint64_t redir             = (uint64_t)vector | X86_IOAPIC_REDIR_MASK;
-	uint16_t firmware_polarity = selected->flags & X86_ACPI_MADT_POLARITY_MASK;
-	uint16_t firmware_trigger  = selected->flags & X86_ACPI_MADT_TRIGGER_MASK;
-	if (firmware_polarity == 2u || firmware_trigger == 8u) return false;
-	bool active_low =
-		polarity == HAL_INTERRUPT_POLARITY_LOW ||
-		(polarity == HAL_INTERRUPT_POLARITY_FIRMWARE && firmware_polarity == X86_ACPI_MADT_POLARITY_ACTIVE_LOW);
-	bool level = trigger == HAL_INTERRUPT_TRIGGER_LEVEL ||
-	             (trigger == HAL_INTERRUPT_TRIGGER_FIRMWARE && firmware_trigger == X86_ACPI_MADT_TRIGGER_LEVEL);
-	if (active_low) {
-		redir |= X86_IOAPIC_REDIR_POLARITY_LOW;
-	}
-	if (level) {
-		redir |= X86_IOAPIC_REDIR_TRIGGER_LEVEL;
-	}
+	struct x86_ioapic           ioapic   = {
+		.lapic_phys = selected->lapic_phys, .registers = selected->registers, .redirection_count = 120u};
+	return apic_route_ioapic(&ioapic,
+	                         selected->index,
+	                         selected->flags,
+	                         vector,
+	                         target_lapic_id,
+	                         trigger,
+	                         polarity,
+	                         out_route,
+	                         out_registers);
+}
 
-	struct irq_state route_irq_state = ioapic_lock_acquire();
-	uint8_t          low_reg         = (uint8_t)(X86_IOAPIC_REDIR_BASE + selected->index * 2u);
-	uint32_t         current_low     = ioapic_read(selected->registers, low_reg);
-	ioapic_write(selected->registers, low_reg, current_low | X86_IOAPIC_REDIR_MASK);
-	ioapic_write(
-		selected->registers, (uint8_t)(X86_IOAPIC_REDIR_BASE + selected->index * 2u + 1u), target_lapic_id << 24);
-	ioapic_write(selected->registers, low_reg, (uint32_t)redir);
-	ioapic_lock_release(route_irq_state);
-
-	*out_route     = selected->index;
-	*out_registers = (uintptr_t)selected->registers;
-	apic_active    = true;
-	return true;
+bool apic_route_ioapic_source(const struct hal_interrupt_source* source, unsigned vector, uint32_t target_lapic_id,
+                              enum hal_interrupt_trigger trigger, enum hal_interrupt_polarity polarity,
+                              uint32_t* out_route, uintptr_t* out_registers) {
+	if (!apic_ioapic_source_available(source)) return false;
+	return apic_route_ioapic(&ioapics[source->domain - 1u],
+	                         source->number,
+	                         0u,
+	                         vector,
+	                         target_lapic_id,
+	                         trigger,
+	                         polarity,
+	                         out_route,
+	                         out_registers);
 }
 
 bool apic_set_isa_irq_mask(uintptr_t registers_address, uint32_t route, bool masked) {

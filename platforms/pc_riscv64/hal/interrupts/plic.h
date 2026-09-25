@@ -8,6 +8,9 @@ struct cpu;
 /* Return the fixed-source domain exposed by the PLIC. */
 bool riscv64_plic_source_domain_at(struct hal_interrupt_source_domain_info* out_domain);
 
+bool riscv64_plic_source_resolve(uint64_t controller_address, uint32_t local_source_id,
+                                 struct hal_interrupt_source* out_source);
+
 /* Return the delivery identity and target-routing capability of one PLIC source. */
 bool riscv64_plic_source_info(const struct hal_interrupt_source* source, struct hal_interrupt_source_info* out_info);
 

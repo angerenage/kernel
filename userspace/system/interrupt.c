@@ -15,16 +15,59 @@ static syscall_status_t fixed_call(cap_id_t cap, const void* request, size_t req
 	return result.value == response_size ? SYSCALL_STATUS_OK : SYSCALL_STATUS_FAILED;
 }
 
+syscall_status_t interrupts_resolve_source(cap_id_t interrupts_cap, uint64_t controller_register_address,
+                                           uint32_t local_source_id, interrupt_source_t* out_source) {
+	const struct interrupts_resolve_source_request request = {
+		.header                      = {.op = INTERRUPTS_OP_RESOLVE_SOURCE},
+		.controller_register_address = controller_register_address,
+		.local_source_id             = local_source_id,
+	};
+	struct interrupts_resolve_source_response response = {0};
+	if (out_source == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	*out_source             = INTERRUPT_SOURCE_INVALID;
+	syscall_status_t status = fixed_call(
+		interrupts_cap, &request, sizeof(request), &response, sizeof(response), INTERRUPTS_OP_RESOLVE_SOURCE);
+	if (status == SYSCALL_STATUS_OK) {
+		if (response.source == INTERRUPT_SOURCE_INVALID) return SYSCALL_STATUS_FAILED;
+		*out_source = response.source;
+	}
+	return status;
+}
+
+syscall_status_t interrupts_resolve_message_context(cap_id_t interrupts_cap, uint64_t controller_register_address,
+                                                    uint32_t producer_id, interrupt_message_context_t* out_context) {
+	const struct interrupts_resolve_message_context_request request = {
+		.header                      = {.op = INTERRUPTS_OP_RESOLVE_MESSAGE_CONTEXT},
+		.controller_register_address = controller_register_address,
+		.producer_id                 = producer_id,
+		.reserved                    = 0u,
+	};
+	struct interrupts_resolve_message_context_response response = {0};
+	if (out_context == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	*out_context            = INTERRUPT_MESSAGE_CONTEXT_INVALID;
+	syscall_status_t status = fixed_call(
+		interrupts_cap, &request, sizeof(request), &response, sizeof(response), INTERRUPTS_OP_RESOLVE_MESSAGE_CONTEXT);
+	if (status == SYSCALL_STATUS_OK) {
+		if (response.context == INTERRUPT_MESSAGE_CONTEXT_INVALID) return SYSCALL_STATUS_FAILED;
+		*out_context = response.context;
+	}
+	return status;
+}
+
 syscall_status_t interrupts_claim_source(cap_id_t interrupts_cap, interrupt_source_t source,
+                                         enum interrupt_trigger trigger, enum interrupt_polarity polarity,
                                          cap_id_t* out_interrupt_cap) {
 	const struct interrupts_claim_source_request request = {
-		.header = {.op = INTERRUPTS_OP_CLAIM_SOURCE},
-		.source = source,
+		.header   = {.op = INTERRUPTS_OP_CLAIM_SOURCE},
+		.source   = source,
+		.trigger  = trigger,
+		.polarity = polarity,
 	};
 	struct interrupts_claim_source_response response = {0};
-	if (out_interrupt_cap == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	if (out_interrupt_cap == NULL || source == INTERRUPT_SOURCE_INVALID || trigger > INTERRUPT_TRIGGER_LEVEL ||
+	    polarity > INTERRUPT_POLARITY_LOW)
+		return SYSCALL_STATUS_BAD_ARGUMENT;
 	*out_interrupt_cap = CAP_ID_INVALID;
-	if (source == INTERRUPT_SOURCE_INVALID) return SYSCALL_STATUS_BAD_ARGUMENT;
 	syscall_status_t status =
 		fixed_call(interrupts_cap, &request, sizeof(request), &response, sizeof(response), INTERRUPTS_OP_CLAIM_SOURCE);
 	if (status == SYSCALL_STATUS_OK) {

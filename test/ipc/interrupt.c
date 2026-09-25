@@ -53,13 +53,12 @@ static struct hal_userspace_return_frame interrupt_test_frame(void) {
 }
 
 static struct interrupt* interrupt_test_bind_source(struct signal* signal, uint32_t source_number) {
-	struct hal_interrupt_source source = {.domain = 0u, .number = source_number};
-	interrupt_source_t          token;
-	struct interrupt*           interrupt;
+	interrupt_source_t token;
+	struct interrupt*  interrupt;
 
-	cr_assert(interrupt_register_source(&source, HAL_INTERRUPT_TRIGGER_EDGE, HAL_INTERRUPT_POLARITY_HIGH, &token) ==
-	          INTERRUPT_OK);
-	cr_assert(interrupt_claim_source(token, &interrupt) == INTERRUPT_OK);
+	cr_assert_eq(interrupt_resolve_source(0x10000000u, source_number, &token), INTERRUPT_OK);
+	cr_assert_eq(interrupt_claim_source(token, INTERRUPT_TRIGGER_EDGE, INTERRUPT_POLARITY_HIGH, &interrupt),
+	             INTERRUPT_OK);
 	cr_assert(interrupt_bind(interrupt, signal) == INTERRUPT_OK);
 	return interrupt;
 }
@@ -196,21 +195,19 @@ Test(interrupt_core, message_allocation_tries_every_matching_range) {
 	cr_assert_not(interrupt_message_context_create(UINT32_MAX, NULL, &context));
 }
 
-Test(interrupt_core, opaque_source_configuration_and_signal_lifecycle) {
-	const struct hal_interrupt_source source = {.domain = 0u, .number = 7u};
-	interrupt_source_t                token;
-	struct interrupt*                 interrupt;
-	struct interrupt_info             info;
-	struct signal*                    signal;
+Test(interrupt_core, source_identity_configuration_and_signal_lifecycle) {
+	interrupt_source_t    token;
+	struct interrupt*     interrupt;
+	struct interrupt_info info;
+	struct signal*        signal;
 
 	cpu_bind_current(&interrupt_test_cpu);
 	ipc_test_init_heap();
 	cr_assert(interrupt_init());
-	enum interrupt_result register_result =
-		interrupt_register_source(&source, HAL_INTERRUPT_TRIGGER_EDGE, HAL_INTERRUPT_POLARITY_LOW, &token);
-	cr_assert_eq(register_result, INTERRUPT_OK, "registration failed with %d", (int)register_result);
+	cr_assert_eq(interrupt_resolve_source(0x10000000u, 7u, &token), INTERRUPT_OK);
 	cr_assert_neq(token, INTERRUPT_SOURCE_INVALID);
-	cr_assert_eq(interrupt_claim_source(token, &interrupt), INTERRUPT_OK);
+	cr_assert_eq(interrupt_claim_source(token, INTERRUPT_TRIGGER_EDGE, INTERRUPT_POLARITY_LOW, &interrupt),
+	             INTERRUPT_OK);
 	cr_assert_eq(hal_interrupt_mock_last_trigger(), HAL_INTERRUPT_TRIGGER_EDGE);
 	cr_assert_eq(hal_interrupt_mock_last_polarity(), HAL_INTERRUPT_POLARITY_LOW);
 
@@ -396,20 +393,19 @@ Test(interrupt_core, signal_refusal_is_not_reported_as_already_bound) {
 }
 
 Test(interrupt_core, routing_table_retains_published_interrupts) {
-	const struct hal_interrupt_source source = {.domain = 0u, .number = 15u};
-	interrupt_message_context_t       context;
-	struct interrupt_message          message;
-	interrupt_source_t                token;
-	struct interrupt*                 source_interrupt;
-	struct interrupt*                 message_interrupt;
-	struct interrupt_info             info;
+	interrupt_message_context_t context;
+	struct interrupt_message    message;
+	interrupt_source_t          token;
+	struct interrupt*           source_interrupt;
+	struct interrupt*           message_interrupt;
+	struct interrupt_info       info;
 
 	cpu_bind_current(&interrupt_test_cpu);
 	ipc_test_init_heap();
 	cr_assert(interrupt_init());
-	cr_assert_eq(interrupt_register_source(&source, HAL_INTERRUPT_TRIGGER_EDGE, HAL_INTERRUPT_POLARITY_HIGH, &token),
+	cr_assert_eq(interrupt_resolve_source(0x10000000u, 15u, &token), INTERRUPT_OK);
+	cr_assert_eq(interrupt_claim_source(token, INTERRUPT_TRIGGER_EDGE, INTERRUPT_POLARITY_HIGH, &source_interrupt),
 	             INTERRUPT_OK);
-	cr_assert_eq(interrupt_claim_source(token, &source_interrupt), INTERRUPT_OK);
 	interrupt_release(source_interrupt);
 	cr_assert(interrupt_retain(source_interrupt));
 	cr_assert_eq(interrupt_get_info(source_interrupt, &info), INTERRUPT_OK);
