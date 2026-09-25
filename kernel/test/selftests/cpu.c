@@ -1,3 +1,4 @@
+#include <base/interrupt.h>
 #include <core/cpu.h>
 #include <core/sched.h>
 #include <core/spinlock.h>
@@ -26,8 +27,22 @@ static void kernel_selftest_cpu_x86_interrupt_ranges_are_stable(struct kernel_se
 	struct hal_interrupt_message_range low;
 	struct hal_interrupt_message_range high;
 	struct hal_interrupt_source        source = {.domain = 0u, .number = 0u};
+	struct hal_interrupt_source        irq0;
+	struct hal_interrupt_source        irq1;
+	struct hal_interrupt_source        irq2;
+	struct hal_interrupt_source        invalid;
 	struct hal_interrupt_source_info   source_before;
 	struct hal_interrupt_source_info   source_after;
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_resolve(INTERRUPT_SOURCE_CONTROLLER_PLATFORM, 0u, &irq0));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_resolve(INTERRUPT_SOURCE_CONTROLLER_PLATFORM, 1u, &irq1));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_resolve(INTERRUPT_SOURCE_CONTROLLER_PLATFORM, 2u, &irq2));
+	KERNEL_SELFTEST_ASSERT(ctx, irq0.domain == 0u && irq0.number == 0u);
+	KERNEL_SELFTEST_ASSERT(ctx, irq1.domain == 0u && irq1.number == 1u);
+	KERNEL_SELFTEST_ASSERT(ctx, irq2.domain == 0u && irq2.number == 2u);
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_source_claimable(&irq0));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_claimable(&irq1));
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_source_claimable(&irq2));
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_source_resolve(INTERRUPT_SOURCE_CONTROLLER_PLATFORM, 16u, &invalid));
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_range_count() == 2u);
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_range_at(0u, &low));
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_range_at(1u, &high));

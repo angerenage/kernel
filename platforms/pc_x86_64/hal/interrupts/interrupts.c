@@ -373,7 +373,13 @@ bool hal_interrupt_source_domain_at(size_t index, struct hal_interrupt_source_do
 
 bool hal_interrupt_source_resolve(uint64_t controller_register_address, uint32_t local_source_id,
                                   struct hal_interrupt_source* out_source) {
-	return global_ready && apic_resolve_ioapic_source(controller_register_address, local_source_id, out_source);
+	if (!global_ready || out_source == NULL) return false;
+	if (controller_register_address == INTERRUPT_SOURCE_CONTROLLER_PLATFORM) {
+		if (!x86_fixed_interrupt_valid(local_source_id)) return false;
+		*out_source = (struct hal_interrupt_source){.domain = 0u, .number = local_source_id};
+		return true;
+	}
+	return apic_resolve_ioapic_source(controller_register_address, local_source_id, out_source);
 }
 
 bool hal_interrupt_source_claimable(const struct hal_interrupt_source* source) {

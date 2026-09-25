@@ -1,3 +1,4 @@
+#include <base/interrupt.h>
 #include <core/cpu.h>
 #include <hal/interrupts.h>
 
@@ -88,7 +89,13 @@ bool hal_interrupt_source_domain_at(size_t index, struct hal_interrupt_source_do
 
 bool hal_interrupt_source_resolve(uint64_t controller_register_address, uint32_t local_source_id,
                                   struct hal_interrupt_source* out_source) {
-	if (controller_register_address != 0x10000000u || local_source_id >= 256u || out_source == NULL) return false;
+	if (out_source == NULL) return false;
+	if (controller_register_address == INTERRUPT_SOURCE_CONTROLLER_PLATFORM) {
+		if (local_source_id >= 16u) return false;
+		*out_source = (struct hal_interrupt_source){.domain = 0u, .number = local_source_id};
+		return true;
+	}
+	if (controller_register_address != 0x10000000u || local_source_id >= 256u) return false;
 	*out_source = (struct hal_interrupt_source){.domain = 0u, .number = local_source_id};
 	return true;
 }

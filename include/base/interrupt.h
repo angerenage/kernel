@@ -4,9 +4,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Opaque, non-authoritative token naming one firmware-discovered fixed source. */
+/* Opaque, non-authoritative token naming one platform-discovered fixed source. */
 typedef uint64_t interrupt_source_t;
 #define INTERRUPT_SOURCE_INVALID UINT64_MAX
+/* Select a platform-defined source namespace instead of a controller register address. */
+#define INTERRUPT_SOURCE_CONTROLLER_PLATFORM UINT64_MAX
 
 /*
  * Opaque, non-authoritative token naming a kernel-managed message context.

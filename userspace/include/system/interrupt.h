@@ -3,7 +3,10 @@
 #include <base/interrupt.h>
 #include <base/syscall.h>
 
-/* Resolve a firmware-described fixed-source identity into an opaque token. */
+/*
+ * Resolve a firmware/platform-described fixed-source identity into an opaque token.
+ * Use INTERRUPT_SOURCE_CONTROLLER_PLATFORM when the source is identified by a platform namespace.
+ */
 syscall_status_t interrupts_resolve_source(cap_id_t interrupts_cap, uint64_t controller_register_address,
                                            uint32_t local_source_id, interrupt_source_t* out_source);
 

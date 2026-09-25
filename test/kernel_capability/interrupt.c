@@ -267,6 +267,25 @@ Test(kernel_capability_interrupt, resolution_is_stable_stateless_and_read_only) 
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(first.source, second.source);
 
+	struct interrupts_resolve_source_request platform_request = {
+		.header                      = {.op = INTERRUPTS_OP_RESOLVE_SOURCE},
+		.controller_register_address = INTERRUPT_SOURCE_CONTROLLER_PLATFORM,
+		.local_source_id             = 5u,
+	};
+	struct interrupts_resolve_source_response platform_response = {0};
+	result                                                      = kernel_capability_test_call(
+		resource_cap, &platform_request, sizeof(platform_request), &platform_response, sizeof(platform_response));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_neq(platform_response.source, INTERRUPT_SOURCE_INVALID);
+	cap_id_t platform_interrupt = interrupt_test_claim(resource_cap, platform_response.source);
+	cr_assert_eq(interrupt_test_simple_call(platform_interrupt, INTERRUPT_OP_DESTROY).status, SYSCALL_STATUS_OK);
+
+	platform_request.local_source_id = 16u;
+	result                           = kernel_capability_test_call(
+		resource_cap, &platform_request, sizeof(platform_request), &platform_response, sizeof(platform_response));
+	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
+	cr_assert_eq(result.value, INTERRUPT_NOT_FOUND);
+
 	cap_id_t configured =
 		interrupt_test_claim_config(resource_cap, first.source, INTERRUPT_TRIGGER_LEVEL, INTERRUPT_POLARITY_LOW);
 	cr_assert_eq(interrupt_test_simple_call(configured, INTERRUPT_OP_DESTROY).status, SYSCALL_STATUS_OK);
