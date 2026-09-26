@@ -132,13 +132,13 @@ find_firmware() {
 firmware_arch_dir_suffixes() {
 	case "$1" in
 		aarch64)
-			printf '%s\n' "AAVMF" "qemu-efi-aarch64"
+			printf '%s\n' "AAVMF" "qemu-efi-aarch64" "edk2/aarch64"
 			;;
 		riscv64)
-			printf '%s\n' "qemu-efi-riscv64"
+			printf '%s\n' "qemu-efi-riscv64" "edk2/riscv64"
 			;;
 		loongarch64)
-			printf '%s\n' "qemu-efi-loongarch64"
+			printf '%s\n' "qemu-efi-loongarch64" "edk2/loongarch64"
 			;;
 	esac
 }
