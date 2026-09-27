@@ -1,14 +1,14 @@
+#include <firmware/acpi.h>
 #include <hal/iommu.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
-#include "../../../iommu_acpi.h"
 #include "v1.h"
 
 static size_t loongarch_iommu_controllers(size_t target, struct hal_iommu_controller_descriptor* out_descriptor) {
-	const struct iommu_acpi_header* table = iommu_acpi_table("IOVT");
+	const struct acpi_sdt_header* table = acpi_table_next("IOVT", NULL);
 	if (table == NULL || table->revision != 1u || table->length < 48u) return 0u;
 	uint16_t structure_count;
 	uint16_t structure_offset;

@@ -1,9 +1,9 @@
+#include <firmware/acpi.h>
 #include <hal/iommu.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
-#include "../../../iommu_acpi.h"
 #include "amd.h"
 #include "vtd.h"
 
@@ -23,7 +23,7 @@ static bool amd_register_previously_seen(const uint8_t* start, const uint8_t* cu
 	return false;
 }
 
-static size_t table_units(const struct iommu_acpi_header* table, size_t table_prefix, enum hal_iommu_kind kind,
+static size_t table_units(const struct acpi_sdt_header* table, size_t table_prefix, enum hal_iommu_kind kind,
                           size_t target, struct hal_iommu_controller_descriptor* out) {
 	if (table == NULL || table->length < table_prefix) return 0u;
 	const uint8_t* cursor = (const uint8_t*)table + table_prefix;
@@ -68,16 +68,16 @@ static size_t table_units(const struct iommu_acpi_header* table, size_t table_pr
 }
 
 size_t hal_iommu_controller_count(void) {
-	return table_units(iommu_acpi_table("DMAR"), 48u, HAL_IOMMU_KIND_INTEL_VTD, SIZE_MAX, NULL) +
-	       table_units(iommu_acpi_table("IVRS"), 48u, HAL_IOMMU_KIND_AMD, SIZE_MAX, NULL);
+	return table_units(acpi_table_next("DMAR", NULL), 48u, HAL_IOMMU_KIND_INTEL_VTD, SIZE_MAX, NULL) +
+	       table_units(acpi_table_next("IVRS", NULL), 48u, HAL_IOMMU_KIND_AMD, SIZE_MAX, NULL);
 }
 
 bool hal_iommu_controller_at(size_t index, struct hal_iommu_controller_descriptor* out_descriptor) {
 	if (out_descriptor == NULL) return false;
-	size_t count = table_units(iommu_acpi_table("DMAR"), 48u, HAL_IOMMU_KIND_INTEL_VTD, index, out_descriptor);
+	size_t count = table_units(acpi_table_next("DMAR", NULL), 48u, HAL_IOMMU_KIND_INTEL_VTD, index, out_descriptor);
 	if (index < count) return true;
 	return index - count <
-	       table_units(iommu_acpi_table("IVRS"), 48u, HAL_IOMMU_KIND_AMD, index - count, out_descriptor);
+	       table_units(acpi_table_next("IVRS", NULL), 48u, HAL_IOMMU_KIND_AMD, index - count, out_descriptor);
 }
 
 bool hal_iommu_controller_init(struct hal_iommu_controller_state*            controller,

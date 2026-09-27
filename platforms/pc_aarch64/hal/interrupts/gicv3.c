@@ -4,6 +4,7 @@
 #include <core/interrupt.h>
 #include <core/lock.h>
 #include <core/spinlock.h>
+#include <firmware/acpi.h>
 #include <hal/interrupts.h>
 #include <hal/paging.h>
 #include <kernel/boot.h>
@@ -12,7 +13,6 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "../../../iommu_acpi.h"
 #include "../../../iommu_fdt.h"
 #include "../clock.h"
 
@@ -124,11 +124,11 @@ static bool gicv3_wait_disabled(uintptr_t base, uint32_t id) {
 
 static bool gicv3_find_acpi(uintptr_t* out_distributor, uintptr_t* out_redistributors, uintptr_t* out_size,
                             bool* out_described) {
-	const struct iommu_acpi_header* madt           = iommu_acpi_table("APIC");
-	uintptr_t                       distributor    = 0u;
-	uintptr_t                       redistributors = 0u;
-	uintptr_t                       size           = 0u;
-	bool                            described      = false;
+	const struct acpi_sdt_header* madt           = acpi_table_next("APIC", NULL);
+	uintptr_t                     distributor    = 0u;
+	uintptr_t                     redistributors = 0u;
+	uintptr_t                     size           = 0u;
+	bool                          described      = false;
 	if (madt == NULL || madt->length < sizeof(*madt) + 8u) return false;
 	const uint8_t* entry = (const uint8_t*)madt + sizeof(*madt) + 8u;
 	const uint8_t* end   = (const uint8_t*)madt + madt->length;

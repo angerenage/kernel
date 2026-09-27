@@ -1,5 +1,6 @@
 #include "apic.h"
 
+#include <firmware/acpi.h>
 #include <hal/interrupts.h>
 #include <hal/paging.h>
 #include <kernel/boot.h>
@@ -44,39 +45,12 @@
 #define X86_ACPI_MADT_TRIGGER_MASK 0x000cu
 #define X86_ACPI_MADT_TRIGGER_LEVEL 0x000cu
 
-#define X86_ACPI_RSDP_V1_LENGTH 20u
-#define X86_ACPI_RSDP_MAX_LENGTH 4096u
-#define X86_ACPI_SDT_MAX_LENGTH (16u * 1024u * 1024u)
 #define X86_IOAPIC_MAX_CONTROLLERS 16u
 
-struct x86_acpi_rsdp {
-	char     signature[8];
-	uint8_t  checksum;
-	char     oem_id[6];
-	uint8_t  revision;
-	uint32_t rsdt_address;
-	uint32_t length;
-	uint64_t xsdt_address;
-	uint8_t  extended_checksum;
-	uint8_t  reserved[3];
-} __attribute__((packed));
-
-struct x86_acpi_sdt_header {
-	char     signature[4];
-	uint32_t length;
-	uint8_t  revision;
-	uint8_t  checksum;
-	char     oem_id[6];
-	char     oem_table_id[8];
-	uint32_t oem_revision;
-	uint32_t creator_id;
-	uint32_t creator_revision;
-} __attribute__((packed));
-
 struct x86_acpi_madt {
-	struct x86_acpi_sdt_header header;
-	uint32_t                   lapic_address;
-	uint32_t                   flags;
+	struct acpi_sdt_header header;
+	uint32_t               lapic_address;
+	uint32_t               flags;
 } __attribute__((packed));
 
 struct x86_acpi_madt_entry_header {
@@ -164,99 +138,6 @@ static bool map_mmio_page(uintptr_t phys) {
 							  HAL_PAGE_READ | HAL_PAGE_WRITE | HAL_PAGE_GLOBAL,
 							  MEMORY_TYPE_DEVICE,
 						  });
-}
-
-static bool acpi_signature_equals(const char* actual, const char* expected) {
-	for (size_t i = 0; i < 4u; i++) {
-		if (actual[i] != expected[i]) return false;
-	}
-
-	return true;
-}
-
-static bool acpi_rsdp_signature_valid(const struct x86_acpi_rsdp* rsdp) {
-	static const char signature[8] = {'R', 'S', 'D', ' ', 'P', 'T', 'R', ' '};
-
-	if (rsdp == NULL) return false;
-	for (size_t i = 0u; i < sizeof(signature); i++) {
-		if (rsdp->signature[i] != signature[i]) return false;
-	}
-	return true;
-}
-
-static bool acpi_checksum_valid(const void* table, size_t length) {
-	const uint8_t* bytes = (const uint8_t*)table;
-	uint8_t        sum   = 0u;
-
-	if (table == NULL || length == 0u) return false;
-	for (size_t i = 0; i < length; i++) {
-		sum = (uint8_t)(sum + bytes[i]);
-	}
-
-	return sum == 0u;
-}
-
-static bool acpi_rsdp_valid(const struct x86_acpi_rsdp* rsdp) {
-	if (!acpi_rsdp_signature_valid(rsdp) || !acpi_checksum_valid(rsdp, X86_ACPI_RSDP_V1_LENGTH)) return false;
-	if (rsdp->revision < 2u) return true;
-	if (rsdp->length < sizeof(*rsdp) || rsdp->length > X86_ACPI_RSDP_MAX_LENGTH) return false;
-	return acpi_checksum_valid(rsdp, (size_t)rsdp->length);
-}
-
-static bool acpi_sdt_valid(const struct x86_acpi_sdt_header* table) {
-	if (table == NULL || table->length < sizeof(*table) || table->length > X86_ACPI_SDT_MAX_LENGTH) return false;
-	return acpi_checksum_valid(table, (size_t)table->length);
-}
-
-static const struct x86_acpi_sdt_header* acpi_find_table(const char signature[4]) {
-	uintptr_t rsdp_address;
-
-	if (!kernel_boot_rsdp_address(&rsdp_address) || !boot_address_space_available()) return NULL;
-
-	const struct x86_acpi_rsdp* rsdp = (const struct x86_acpi_rsdp*)rsdp_address;
-	if (!acpi_rsdp_valid(rsdp)) return NULL;
-
-	if (rsdp->revision >= 2u && rsdp->xsdt_address != 0u) {
-		const struct x86_acpi_sdt_header* xsdt =
-			(const struct x86_acpi_sdt_header*)hhdm_phys_to_virt((uintptr_t)rsdp->xsdt_address);
-		if (!acpi_sdt_valid(xsdt) || !acpi_signature_equals(xsdt->signature, "XSDT")) return NULL;
-		if (((size_t)xsdt->length - sizeof(*xsdt)) % sizeof(uint64_t) != 0u) return NULL;
-
-		size_t          entry_count = (xsdt->length - sizeof(*xsdt)) / sizeof(uint64_t);
-		const uint64_t* entries     = (const uint64_t*)((const uint8_t*)xsdt + sizeof(*xsdt));
-
-		for (size_t i = 0; i < entry_count; i++) {
-			if (entries[i] == 0u) continue;
-			const struct x86_acpi_sdt_header* table =
-				(const struct x86_acpi_sdt_header*)hhdm_phys_to_virt((uintptr_t)entries[i]);
-			if (acpi_sdt_valid(table) && acpi_signature_equals(table->signature, signature)) {
-				return table;
-			}
-		}
-
-		return NULL;
-	}
-
-	if (rsdp->rsdt_address == 0u) return NULL;
-
-	const struct x86_acpi_sdt_header* rsdt =
-		(const struct x86_acpi_sdt_header*)hhdm_phys_to_virt((uintptr_t)rsdp->rsdt_address);
-	if (!acpi_sdt_valid(rsdt) || !acpi_signature_equals(rsdt->signature, "RSDT")) return NULL;
-	if (((size_t)rsdt->length - sizeof(*rsdt)) % sizeof(uint32_t) != 0u) return NULL;
-
-	size_t          entry_count = (rsdt->length - sizeof(*rsdt)) / sizeof(uint32_t);
-	const uint32_t* entries     = (const uint32_t*)((const uint8_t*)rsdt + sizeof(*rsdt));
-
-	for (size_t i = 0; i < entry_count; i++) {
-		if (entries[i] == 0u) continue;
-		const struct x86_acpi_sdt_header* table =
-			(const struct x86_acpi_sdt_header*)hhdm_phys_to_virt((uintptr_t)entries[i]);
-		if (acpi_sdt_valid(table) && acpi_signature_equals(table->signature, signature)) {
-			return table;
-		}
-	}
-
-	return NULL;
 }
 
 static uint32_t lapic_read(uint32_t reg) {
@@ -348,8 +229,8 @@ bool apic_probe_isa_irqs(void) {
 	if (ioapic_probed) return true;
 	for (uint32_t irq = 0u; irq < X86_IRQ_COUNT; irq++) isa_routes[irq] = (struct x86_isa_route){0};
 	memset(ioapics, 0, sizeof(ioapics));
-	ioapic_count                                  = 0u;
-	const struct x86_acpi_sdt_header* madt_header = acpi_find_table("APIC");
+	ioapic_count                              = 0u;
+	const struct acpi_sdt_header* madt_header = acpi_table_next("APIC", NULL);
 	if (!madt_header || madt_header->length < sizeof(struct x86_acpi_madt)) {
 		ioapic_probed = true;
 		return true;

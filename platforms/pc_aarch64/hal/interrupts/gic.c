@@ -4,6 +4,7 @@
 #include <core/interrupt.h>
 #include <core/lock.h>
 #include <core/spinlock.h>
+#include <firmware/acpi.h>
 #include <hal/interrupts.h>
 #include <hal/paging.h>
 #include <kernel/boot.h>
@@ -12,7 +13,6 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "../../../iommu_acpi.h"
 #include "../../../iommu_fdt.h"
 #include "../clock.h"
 #include "gicv3.h"
@@ -101,10 +101,10 @@ static bool gic_is_ready(void) {
 }
 
 static bool gic_find_acpi_v2(uintptr_t* out_distributor, uintptr_t* out_cpu_interface) {
-	const struct iommu_acpi_header* madt          = iommu_acpi_table("APIC");
-	uintptr_t                       distributor   = 0u;
-	uintptr_t                       cpu_interface = 0u;
-	uint8_t                         version       = 0u;
+	const struct acpi_sdt_header* madt          = acpi_table_next("APIC", NULL);
+	uintptr_t                     distributor   = 0u;
+	uintptr_t                     cpu_interface = 0u;
+	uint8_t                       version       = 0u;
 	if (madt == NULL || madt->length < sizeof(*madt) + 8u) return false;
 	const uint8_t* entry = (const uint8_t*)madt + sizeof(*madt) + 8u;
 	const uint8_t* end   = (const uint8_t*)madt + madt->length;
@@ -414,7 +414,7 @@ static bool gic_v2m_frame_phys(uintptr_t* out_frame) {
 		*out_frame = frame;
 		return true;
 	}
-	const struct iommu_acpi_header* madt = iommu_acpi_table("APIC");
+	const struct acpi_sdt_header* madt = acpi_table_next("APIC", NULL);
 	if (madt == NULL || madt->length < sizeof(*madt) + 8u) return false;
 	const uint8_t* entry = (const uint8_t*)madt + sizeof(*madt) + 8u;
 	const uint8_t* end   = (const uint8_t*)madt + madt->length;

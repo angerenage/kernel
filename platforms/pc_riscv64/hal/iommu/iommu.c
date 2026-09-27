@@ -1,12 +1,12 @@
+#include <firmware/acpi.h>
 #include <hal/iommu.h>
 #include <string.h>
 
-#include "../../../iommu_acpi.h"
 #include "../../../iommu_fdt.h"
 #include "riscv.h"
 
 static size_t acpi_controllers(size_t target, uintptr_t* out_address) {
-	const struct iommu_acpi_header* table = iommu_acpi_table("RIMT");
+	const struct acpi_sdt_header* table = acpi_table_next("RIMT", NULL);
 	if (table == NULL || table->length < 48u) return 0u;
 	uint32_t node_count;
 	uint32_t node_offset;

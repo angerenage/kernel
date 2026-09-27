@@ -1,6 +1,7 @@
 #include "controllers.h"
 
 #include <core/cpu.h>
+#include <firmware/acpi.h>
 #include <hal/paging.h>
 #include <kernel/boot.h>
 #include <stdbool.h>
@@ -8,7 +9,6 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "../../../iommu_acpi.h"
 #include "../../../iommu_fdt.h"
 #include "avec.h"
 #include "controller.h"
@@ -216,7 +216,7 @@ static bool discover_fdt(void) {
 }
 
 static bool discover_acpi(void) {
-	const struct iommu_acpi_header* madt = iommu_acpi_table("APIC");
+	const struct acpi_sdt_header* madt = acpi_table_next("APIC", NULL);
 	if (madt == NULL || madt->length < sizeof(*madt) + 8u) return false;
 	const uint8_t* entry     = (const uint8_t*)madt + sizeof(*madt) + 8u;
 	const uint8_t* end       = (const uint8_t*)madt + madt->length;
