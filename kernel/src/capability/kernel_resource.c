@@ -15,6 +15,7 @@
 #include "boot_module.h"
 #include "boot_resource.h"
 #include "dma.h"
+#include "hardware/pci.h"
 #include "interrupt.h"
 #include "loader.h"
 #include "serial.h"
@@ -44,6 +45,10 @@ static size_t kernel_resources_available(enum kernel_resource_type* ids, size_t 
 		if (ids != NULL && count < capacity) ids[count] = KERNEL_RESOURCE_TYPE_DTB;
 		count++;
 	}
+	if (kernel_capability_pci_available()) {
+		if (ids != NULL && count < capacity) ids[count] = KERNEL_RESOURCE_TYPE_PCI;
+		count++;
+	}
 	if (kernel_capability_dma_available()) {
 		if (ids != NULL && count < capacity) ids[count] = KERNEL_RESOURCE_TYPE_DMA;
 		count++;
@@ -58,7 +63,7 @@ static size_t kernel_resources_available(enum kernel_resource_type* ids, size_t 
 static syscall_result_t kernel_resources_list_handler(const struct cap_request* req) {
 	struct kernel_resources_list_request   request;
 	struct kernel_resources_list_response* response;
-	enum kernel_resource_type              available[8];
+	enum kernel_resource_type              available[KERNEL_RESOURCE_TYPE_COUNT];
 	size_t                                 available_count;
 	size_t                                 start;
 	size_t                                 returned;
@@ -104,7 +109,8 @@ static syscall_result_t kernel_resource_acquire_handler(const struct cap_request
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 	memcpy(&request, req->request, sizeof(request));
-	if (request.header.op != KERNEL_RESOURCES_OP_ACQUIRE || request.id == KERNEL_RESOURCE_TYPE_INVALID) {
+	if (request.header.op != KERNEL_RESOURCES_OP_ACQUIRE || request.id <= KERNEL_RESOURCE_TYPE_INVALID ||
+	    request.id >= KERNEL_RESOURCE_TYPE_COUNT) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 	switch (request.id) {
@@ -128,6 +134,10 @@ static syscall_result_t kernel_resource_acquire_handler(const struct cap_request
 		if (!kernel_capability_boot_data_available(request.id))
 			return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 		response.cap = kernel_capability_boot_data_grant(request.id, req->caller);
+		break;
+	case KERNEL_RESOURCE_TYPE_PCI:
+		response.cap = kernel_capability_pci_grant(req->caller);
+		if (response.cap == CAP_ID_INVALID) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 		break;
 	case KERNEL_RESOURCE_TYPE_DMA:
 		if (!kernel_capability_dma_available()) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
@@ -163,8 +173,10 @@ static syscall_result_t kernel_resources_handler(const struct cap_request* req) 
 	}
 }
 
-void kernel_capability_resources_init(void) {
+bool kernel_capability_resources_init(void) {
+	if (!kernel_capability_pci_init()) return false;
 	kernel_resources_object_id = cap_object_create_kernel(0u, kernel_resources_handler, NULL);
+	return kernel_resources_object_id != CAP_OBJECT_ID_INVALID;
 }
 
 cap_id_t kernel_capability_resources_grant(process_id_t recipient) {

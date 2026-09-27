@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Stable identifiers for singleton kernel resources discoverable by userspace. */
+/* Stable identifiers for kernel resources discoverable by userspace. */
 enum kernel_resource_type {
 	KERNEL_RESOURCE_TYPE_INVALID = 0u,
 	KERNEL_RESOURCE_TYPE_MODULES,
@@ -14,6 +14,8 @@ enum kernel_resource_type {
 	KERNEL_RESOURCE_TYPE_DTB,
 	KERNEL_RESOURCE_TYPE_DMA,
 	KERNEL_RESOURCE_TYPE_INTERRUPTS,
+	KERNEL_RESOURCE_TYPE_PCI,
+	KERNEL_RESOURCE_TYPE_COUNT,
 };
 
 enum kernel_resources_op {
@@ -39,11 +41,13 @@ struct kernel_resources_list_response {
 	enum kernel_resource_type ids[];
 };
 
+/* Request to acquire a kernel resource. */
 struct kernel_resource_acquire_request {
 	struct kernel_resources_request_header header;
 	enum kernel_resource_type              id;
 };
 
+/* Response to a kernel resource acquire request. */
 struct kernel_resource_acquire_response {
 	cap_id_t cap;
 };

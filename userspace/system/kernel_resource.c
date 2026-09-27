@@ -80,7 +80,7 @@ syscall_status_t kernel_resource_acquire(cap_id_t kernel_resources_cap, enum ker
 		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(kernel_resources_cap);
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	}
-	if (id == KERNEL_RESOURCE_TYPE_INVALID) {
+	if (id <= KERNEL_RESOURCE_TYPE_INVALID || id >= KERNEL_RESOURCE_TYPE_COUNT) {
 		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(id);
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	}

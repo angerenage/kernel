@@ -2,6 +2,7 @@
 #include <criterion/criterion.h>
 #include <firmware/acpi.h>
 #include <kernel/boot.h>
+#include <kernel/hardware/pci.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -23,6 +24,14 @@ struct test_rsdp {
 	uint64_t xsdt_address;
 	uint8_t  extended_checksum;
 	uint8_t  reserved[3];
+} __attribute__((packed));
+
+struct test_mcfg_allocation {
+	uint64_t address;
+	uint16_t segment_group;
+	uint8_t  start_bus;
+	uint8_t  end_bus;
+	uint32_t reserved;
 } __attribute__((packed));
 
 static uint8_t                          test_arena[TEST_ARENA_SIZE];
@@ -128,6 +137,17 @@ static struct acpi_sdt_header* test_fadt(size_t offset, size_t size, uint32_t ds
 		memcpy(bytes + TEST_FADT_X_DSDT_OFFSET, &x_dsdt, sizeof(x_dsdt));
 	test_checksum(fadt, size, offsetof(struct acpi_sdt_header, checksum));
 	return fadt;
+}
+
+static struct acpi_sdt_header* test_mcfg(size_t offset, const struct test_mcfg_allocation* allocations,
+                                         size_t allocation_count) {
+	size_t                  size  = sizeof(struct acpi_sdt_header) + 8u + allocation_count * sizeof(*allocations);
+	struct acpi_sdt_header* table = test_table(offset, "MCFG", size);
+
+	if (allocation_count != 0u)
+		memcpy((uint8_t*)table + sizeof(*table) + 8u, allocations, allocation_count * sizeof(*allocations));
+	test_checksum(table, size, offsetof(struct acpi_sdt_header, checksum));
+	return table;
 }
 
 Test(acpi, cursor_iteration_skips_invalid_tables_and_preserves_duplicates) {
@@ -391,4 +411,46 @@ Test(acpi, rejects_non_acpi_ranges) {
 	rsdp                = test_rsdp(true);
 	test_ranges[0].type = MEM_RANGE_RESERVED;
 	cr_assert_not(acpi_init(rsdp));
+}
+
+Test(acpi, pci_controllers_are_normalized_from_all_valid_mcfg_allocations) {
+	const uintptr_t entries[] = {
+		test_physical(0x800u),
+		test_physical(0xa00u),
+		test_physical(0xc00u),
+	};
+	const struct test_mcfg_allocation first[] = {
+		{.address = 0xe0000000u, .segment_group = 0u, .start_bus = 0u, .end_bus = 127u},
+		{		 .address = 0u, .segment_group = 1u, .start_bus = 0u, .end_bus = 255u},
+	};
+	const struct test_mcfg_allocation second[] = {
+		{.address = 0xf0000000u, .segment_group = 2u, .start_bus = 128u, .end_bus = 255u},
+	};
+	struct pci_controller controller;
+	struct test_rsdp*     rsdp;
+
+	test_reset();
+	test_mcfg(0x800u, first, sizeof(first) / sizeof(first[0]));
+	test_mcfg(0xa00u, second, sizeof(second) / sizeof(second[0]));
+	test_table(0xc00u, "MCFG", sizeof(struct acpi_sdt_header) + 9u);
+	test_root(true, entries, sizeof(entries) / sizeof(entries[0]));
+	rsdp = test_rsdp(true);
+	cr_assert(acpi_init(rsdp));
+
+	cr_assert_eq(kernel_hardware_pci_count(), 2u);
+	cr_assert(kernel_hardware_pci_get(0u, &controller));
+	cr_assert_eq(controller.access, PCI_CONFIG_ACCESS_ECAM);
+	cr_assert_eq(controller.register_address, 0xe0000000u);
+	cr_assert_eq(controller.register_size, 128u * 1024u * 1024u);
+	cr_assert_eq(controller.segment_group, 0u);
+	cr_assert_eq(controller.start_bus, 0u);
+	cr_assert_eq(controller.end_bus, 127u);
+	cr_assert(kernel_hardware_pci_get(1u, &controller));
+	cr_assert_eq(controller.register_address, 0xf8000000u);
+	cr_assert_eq(controller.register_size, 128u * 1024u * 1024u);
+	cr_assert_eq(controller.segment_group, 2u);
+	cr_assert_eq(controller.start_bus, 128u);
+	cr_assert_eq(controller.end_bus, 255u);
+	cr_assert_not(kernel_hardware_pci_get(2u, &controller));
+	cr_assert_not(kernel_hardware_pci_get(0u, NULL));
 }

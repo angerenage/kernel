@@ -47,6 +47,8 @@ kernel_objs = base_sources + core_sources + firmware_sources + kernel_libk_sourc
 	'src/capability/memory_allocator.c',
 	'src/capability/boot_module.c',
 	'src/capability/boot_resource.c',
+	'src/capability/record.c',
+	'src/capability/hardware/pci.c',
 	'src/capability/kernel_resource.c',
 	'src/capability/loader.c',
 	'src/capability/process.c',
@@ -68,6 +70,7 @@ kernel_objs = base_sources + core_sources + firmware_sources + kernel_libk_sourc
 	'src/syscall/upcall.c',
 	'src/syscall/user_frame.c',
 	'src/boot/requests.c',
+	'src/hardware/pci.c',
 ]
 if kernel_selftests
 	kernel_objs += kernel_selftest_sources

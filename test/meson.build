@@ -62,6 +62,7 @@ hal_mock_sources = files(
 	'mocks/hal/paging.c',
 	'mocks/hal/userspace.c',
 	'mocks/kernel/boot.c',
+	'mocks/kernel/hardware.c',
 )
 
 core_test_lib = static_library(
@@ -315,6 +316,7 @@ test_suites = [
 			'kernel_capability/boot_resource.c',
 			'kernel_capability/serial.c',
 			'kernel_capability/module.c',
+			'kernel_capability/record.c',
 			'kernel_capability/dma.c',
 			'kernel_capability/interrupt.c',
 			'kernel_capability/kernel_resource.c',
@@ -324,6 +326,8 @@ test_suites = [
 			'../kernel/src/capability/memory_allocator.c',
 			'../kernel/src/capability/boot_module.c',
 			'../kernel/src/capability/boot_resource.c',
+			'../kernel/src/capability/record.c',
+			'../kernel/src/capability/hardware/pci.c',
 			'../kernel/src/capability/kernel_resource.c',
 			'../kernel/src/capability/serial.c',
 			'../kernel/src/capability/dma.c',
@@ -447,9 +451,10 @@ test_suites = [
 		'sources': files(
 			'acpi_test.c',
 			'../firmware/acpi/acpi.c',
+			'../kernel/src/hardware/pci.c',
 		),
 		'link_with': base_test_lib,
-		'suites': ['unit', 'firmware'],
+		'suites': ['unit', 'firmware', 'kernel'],
 	},
 	{
 		'name': 'iommu',

@@ -56,6 +56,7 @@ void kernel_capability_test_begin(struct kernel_capability_test_context* ctx, co
 	capability_init();
 	cr_assert(kernel_memory_allocator_init());
 	kernel_boot_mock_reset();
+	hardware_mock_reset();
 	kernel_capability_test_serial_reset();
 
 	ctx->process = syscall_test_spawn_process(name);
@@ -75,6 +76,7 @@ void kernel_capability_test_end(struct kernel_capability_test_context* ctx) {
 	sched_set_current(cpu_current(), NULL);
 	cr_assert(process_destroy(ctx->process), "failed to destroy kernel capability test process");
 	kernel_boot_mock_reset();
+	hardware_mock_reset();
 	syscall_test_reset_state();
 	*ctx = (struct kernel_capability_test_context){0};
 }

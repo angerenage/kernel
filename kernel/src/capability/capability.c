@@ -52,6 +52,5 @@ bool kernel_capability_init(void) {
 	kernel_capability_loader_init();
 	kernel_capability_boot_module_provider_init();
 	kernel_capability_boot_resources_init();
-	kernel_capability_resources_init();
-	return true;
+	return kernel_capability_resources_init();
 }
