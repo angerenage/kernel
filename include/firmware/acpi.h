@@ -28,3 +28,6 @@ bool acpi_init(const void* rsdp);
 
 /* Return the next validated table matching signature, optionally advancing cursor. */
 const struct acpi_sdt_header* acpi_table_next(const char signature[4], acpi_cursor_t* cursor);
+
+/* Return the validated DSDT referenced by the FADT, if available. */
+const struct acpi_sdt_header* acpi_dsdt(void);

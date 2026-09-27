@@ -9,6 +9,8 @@
 #define ACPI_RSDP_V2_MIN_SIZE 36u
 #define ACPI_RSDP_MAX_SIZE 4096u
 #define ACPI_SDT_MAX_SIZE (16u * 1024u * 1024u)
+#define ACPI_FADT_DSDT_OFFSET 40u
+#define ACPI_FADT_X_DSDT_OFFSET 140u
 
 struct acpi_root_state {
 	const struct acpi_sdt_header* table;
@@ -16,8 +18,9 @@ struct acpi_root_state {
 	size_t                        entry_size;
 };
 
-static struct acpi_root_state acpi_root;
-static bool                   acpi_initialized;
+static struct acpi_root_state        acpi_root;
+static const struct acpi_sdt_header* acpi_dsdt_table;
+static bool                          acpi_initialized;
 
 static uint32_t acpi_read_u32(const uint8_t* value) {
 	uint32_t result;
@@ -31,6 +34,11 @@ static uint64_t acpi_read_u64(const uint8_t* value) {
 
 	memcpy(&result, value, sizeof(result));
 	return result;
+}
+
+static bool acpi_signature_valid(const char signature[4], const struct acpi_sdt_header* table) {
+	if (signature == NULL || table == NULL) return false;
+	return memcmp(signature, table->signature, sizeof(table->signature)) == 0;
 }
 
 static bool acpi_checksum_valid(const void* data, size_t size) {
@@ -86,15 +94,55 @@ static bool acpi_sdt(uintptr_t physical, const char signature[4], const struct a
 
 	if (!acpi_physical_span(physical, sizeof(*header), &bytes)) return false;
 	header = bytes;
+	if (!acpi_signature_valid(signature, header)) return false;
 	memcpy(&length, &header->length, sizeof(length));
 	if (length < sizeof(*header) || length > ACPI_SDT_MAX_SIZE || !acpi_physical_span(physical, (size_t)length, &bytes))
 		return false;
 	header = bytes;
-	if ((signature != NULL && memcmp(header->signature, signature, sizeof(header->signature)) != 0) ||
-	    !acpi_checksum_valid(header, (size_t)length))
-		return false;
+	if (!acpi_checksum_valid(header, (size_t)length)) return false;
 	if (out != NULL) *out = header;
 	return true;
+}
+
+static const struct acpi_sdt_header* acpi_root_table_next(const struct acpi_root_state* root, const char signature[4],
+                                                          acpi_cursor_t* cursor) {
+	acpi_cursor_t index = cursor == NULL ? ACPI_CURSOR_INIT : *cursor;
+
+	if (index > root->entry_count) index = root->entry_count;
+	for (; index < root->entry_count; index++) {
+		const uint8_t* entry = (const uint8_t*)root->table + sizeof(*root->table) + index * root->entry_size;
+		const struct acpi_sdt_header* table;
+		uint64_t                      physical;
+
+		physical = root->entry_size == sizeof(uint64_t) ? acpi_read_u64(entry) : acpi_read_u32(entry);
+		if (physical == 0u || physical > UINTPTR_MAX || !acpi_sdt((uintptr_t)physical, signature, &table)) continue;
+		if (cursor != NULL) *cursor = index + 1u;
+		return table;
+	}
+	if (cursor != NULL) *cursor = root->entry_count;
+	return NULL;
+}
+
+static const struct acpi_sdt_header* acpi_fadt_dsdt(const struct acpi_root_state* root) {
+	const struct acpi_sdt_header* fadt = acpi_root_table_next(root, "FACP", NULL);
+	const struct acpi_sdt_header* dsdt;
+	const uint8_t*                bytes;
+	uint64_t                      physical;
+	uint32_t                      length;
+
+	if (fadt == NULL) return NULL;
+	bytes = (const uint8_t*)fadt;
+	memcpy(&length, &fadt->length, sizeof(length));
+	if (length >= ACPI_FADT_X_DSDT_OFFSET + sizeof(uint64_t) &&
+	    (physical = acpi_read_u64(bytes + ACPI_FADT_X_DSDT_OFFSET)) != 0u) {
+		if (physical > UINTPTR_MAX) return NULL;
+	}
+	else {
+		if (length < ACPI_FADT_DSDT_OFFSET + sizeof(uint32_t)) return NULL;
+		physical = acpi_read_u32(bytes + ACPI_FADT_DSDT_OFFSET);
+	}
+	if (physical == 0u) return NULL;
+	return acpi_sdt((uintptr_t)physical, "DSDT", &dsdt) ? dsdt : NULL;
 }
 
 bool acpi_init(const void* rsdp) {
@@ -108,6 +156,7 @@ bool acpi_init(const void* rsdp) {
 	size_t                           rsdp_size = ACPI_RSDP_V1_SIZE;
 	size_t                           entry_size;
 	uint32_t                         root_length;
+	struct acpi_root_state           root_state;
 
 	if (__atomic_load_n(&acpi_initialized, __ATOMIC_ACQUIRE)) return true;
 	if (rsdp == NULL || !kernel_boot_address_space_get(&address_space)) return false;
@@ -145,37 +194,25 @@ bool acpi_init(const void* rsdp) {
 
 	memcpy(&root_length, &root->length, sizeof(root_length));
 	if (((size_t)root_length - sizeof(*root)) % entry_size != 0u) return false;
-	acpi_root = (struct acpi_root_state){
+	root_state = (struct acpi_root_state){
 		.table       = root,
 		.entry_count = ((size_t)root_length - sizeof(*root)) / entry_size,
 		.entry_size  = entry_size,
 	};
+	acpi_dsdt_table = acpi_fadt_dsdt(&root_state);
+	acpi_root       = root_state;
 	__atomic_store_n(&acpi_initialized, true, __ATOMIC_RELEASE);
 	return true;
 }
 
 const struct acpi_sdt_header* acpi_table_next(const char signature[4], acpi_cursor_t* cursor) {
-	acpi_cursor_t index;
-
 	if (signature == NULL || !__atomic_load_n(&acpi_initialized, __ATOMIC_ACQUIRE) ||
 	    memcmp(signature, "RSDT", 4u) == 0 || memcmp(signature, "XSDT", 4u) == 0)
 		return NULL;
-	index = cursor == NULL ? ACPI_CURSOR_INIT : *cursor;
-	if (index > acpi_root.entry_count) index = acpi_root.entry_count;
+	return acpi_root_table_next(&acpi_root, signature, cursor);
+}
 
-	for (; index < acpi_root.entry_count; index++) {
-		const uint8_t* entry =
-			(const uint8_t*)acpi_root.table + sizeof(*acpi_root.table) + index * acpi_root.entry_size;
-		const struct acpi_sdt_header* table;
-		uint64_t                      physical;
-
-		physical = acpi_root.entry_size == sizeof(uint64_t) ? acpi_read_u64(entry) : acpi_read_u32(entry);
-		if (physical == 0u || physical > UINTPTR_MAX || !acpi_sdt((uintptr_t)physical, NULL, &table) ||
-		    memcmp(table->signature, signature, sizeof(table->signature)) != 0)
-			continue;
-		if (cursor != NULL) *cursor = index + 1u;
-		return table;
-	}
-	if (cursor != NULL) *cursor = acpi_root.entry_count;
-	return NULL;
+const struct acpi_sdt_header* acpi_dsdt(void) {
+	if (!__atomic_load_n(&acpi_initialized, __ATOMIC_ACQUIRE)) return NULL;
+	return acpi_dsdt_table;
 }

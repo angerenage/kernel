@@ -10,6 +10,8 @@
 #define TEST_PHYSICAL_BASE 0x1000u
 #define TEST_RSDP_OFFSET 0x100u
 #define TEST_ROOT_OFFSET 0x200u
+#define TEST_FADT_DSDT_OFFSET 40u
+#define TEST_FADT_X_DSDT_OFFSET 140u
 
 struct test_rsdp {
 	char     signature[8];
@@ -27,8 +29,10 @@ static uint8_t                          test_arena[TEST_ARENA_SIZE];
 static struct mem_range                 test_ranges[3];
 static size_t                           test_range_count;
 static struct kernel_boot_address_space test_address_space;
+static size_t                           test_memmap_calls;
 
 const struct mem_range* kernel_boot_memmap(size_t* out_count) {
+	test_memmap_calls++;
 	if (out_count != NULL) *out_count = test_range_count;
 	return test_range_count == 0u ? NULL : test_ranges;
 }
@@ -64,6 +68,7 @@ static void test_reset(void) {
 	test_address_space = (struct kernel_boot_address_space){
 		.direct_map_offset = (uintptr_t)test_arena - TEST_PHYSICAL_BASE,
 	};
+	test_memmap_calls = 0u;
 }
 
 static struct acpi_sdt_header* test_table(size_t offset, const char signature[4], size_t size) {
@@ -114,6 +119,17 @@ static struct test_rsdp* test_rsdp(bool xsdt) {
 	return rsdp;
 }
 
+static struct acpi_sdt_header* test_fadt(size_t offset, size_t size, uint32_t dsdt, uint64_t x_dsdt) {
+	struct acpi_sdt_header* fadt  = test_table(offset, "FACP", size);
+	uint8_t*                bytes = (uint8_t*)fadt;
+
+	if (size >= TEST_FADT_DSDT_OFFSET + sizeof(dsdt)) memcpy(bytes + TEST_FADT_DSDT_OFFSET, &dsdt, sizeof(dsdt));
+	if (size >= TEST_FADT_X_DSDT_OFFSET + sizeof(x_dsdt))
+		memcpy(bytes + TEST_FADT_X_DSDT_OFFSET, &x_dsdt, sizeof(x_dsdt));
+	test_checksum(fadt, size, offsetof(struct acpi_sdt_header, checksum));
+	return fadt;
+}
+
 Test(acpi, cursor_iteration_skips_invalid_tables_and_preserves_duplicates) {
 	const uintptr_t entries[] = {
 		test_physical(0x400u),
@@ -160,6 +176,83 @@ Test(acpi, cursor_iteration_skips_invalid_tables_and_preserves_duplicates) {
 	cursor = SIZE_MAX;
 	cr_assert_null(acpi_table_next("APIC", &cursor));
 	cr_assert_eq(cursor, 4u);
+}
+
+Test(acpi, filters_signatures_before_validating_table_contents) {
+	const uintptr_t         entries[] = {test_physical(0x400u), test_physical(0x500u)};
+	struct acpi_sdt_header* unrelated;
+	struct acpi_sdt_header* apic;
+	struct test_rsdp*       rsdp;
+
+	test_reset();
+	unrelated = test_table(0x400u, "FACP", sizeof(*unrelated));
+	unrelated->checksum++;
+	apic = test_table(0x500u, "APIC", sizeof(*apic));
+	test_root(true, entries, sizeof(entries) / sizeof(entries[0]));
+	rsdp = test_rsdp(true);
+	cr_assert(acpi_init(rsdp));
+
+	test_memmap_calls = 0u;
+	cr_assert_eq(acpi_table_next("APIC", NULL), apic);
+	cr_assert_eq(test_memmap_calls, 3u);
+}
+
+Test(acpi, resolves_legacy_dsdt_and_keeps_fadt_accessible) {
+	const uintptr_t         entries[] = {test_physical(0x400u)};
+	struct acpi_sdt_header* fadt;
+	struct acpi_sdt_header* dsdt;
+	struct test_rsdp*       rsdp;
+
+	test_reset();
+	dsdt = test_table(0x800u, "DSDT", 64u);
+	fadt = test_fadt(0x400u, TEST_FADT_DSDT_OFFSET + sizeof(uint32_t), (uint32_t)test_physical(0x800u), 0u);
+	test_root(true, entries, sizeof(entries) / sizeof(entries[0]));
+	rsdp = test_rsdp(true);
+	cr_assert_null(acpi_dsdt());
+	cr_assert(acpi_init(rsdp));
+
+	cr_assert_eq(acpi_dsdt(), dsdt);
+	cr_assert_eq(acpi_table_next("FACP", NULL), fadt);
+	cr_assert_null(acpi_table_next("DSDT", NULL));
+}
+
+Test(acpi, prefers_extended_dsdt_address) {
+	const uintptr_t         entries[] = {test_physical(0x400u)};
+	struct acpi_sdt_header* legacy;
+	struct acpi_sdt_header* extended;
+	struct test_rsdp*       rsdp;
+
+	test_reset();
+	legacy   = test_table(0x800u, "DSDT", 64u);
+	extended = test_table(0xa00u, "DSDT", 64u);
+	test_fadt(
+		0x400u, TEST_FADT_X_DSDT_OFFSET + sizeof(uint64_t), (uint32_t)test_physical(0x800u), test_physical(0xa00u));
+	test_root(true, entries, sizeof(entries) / sizeof(entries[0]));
+	rsdp = test_rsdp(true);
+	cr_assert(acpi_init(rsdp));
+
+	cr_assert_neq(legacy, extended);
+	cr_assert_eq(acpi_dsdt(), extended);
+}
+
+Test(acpi, rejects_invalid_extended_dsdt_without_hiding_fadt) {
+	const uintptr_t         entries[] = {test_physical(0x400u)};
+	struct acpi_sdt_header* fadt;
+	struct acpi_sdt_header* extended;
+	struct test_rsdp*       rsdp;
+
+	test_reset();
+	test_table(0x800u, "DSDT", 64u);
+	extended = test_table(0xa00u, "DSDT", 64u);
+	extended->checksum++;
+	fadt = test_fadt(
+		0x400u, TEST_FADT_X_DSDT_OFFSET + sizeof(uint64_t), (uint32_t)test_physical(0x800u), test_physical(0xa00u));
+	test_root(true, entries, sizeof(entries) / sizeof(entries[0]));
+	rsdp = test_rsdp(true);
+	cr_assert(acpi_init(rsdp));
+
+	cr_assert_null(acpi_dsdt());
+	cr_assert_eq(acpi_table_next("FACP", NULL), fadt);
 }
 
 Test(acpi, unavailable_provider_leaves_cursor_unchanged) {
