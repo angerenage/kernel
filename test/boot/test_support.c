@@ -60,7 +60,6 @@ void boot_test_reset(void) {
 	memset(boot_modules, 0, sizeof(boot_modules));
 	boot_module_count = 0u;
 	boot_rsdp_address = 0u;
-	boot_rsdp_size    = 0u;
 	boot_rsdp_valid   = false;
 	boot_dtb_address  = NULL;
 	boot_dtb_size     = 0u;
@@ -95,9 +94,9 @@ void boot_test_configure_valid_base(void) {
 	};
 	memmap_entries[0] = &usable_entry;
 	memmap_response   = (struct limine_memmap_response){
-		  .entry_count = 1u,
-		  .entries     = memmap_entries,
-    };
+		.entry_count = 1u,
+		.entries     = memmap_entries,
+	};
 	hhdm_response = (struct limine_hhdm_response){.offset = 0xffff800000000000ull};
 	exec_response = (struct limine_kernel_address_response){
 		.physical_base = 0x200000u,
@@ -107,6 +106,10 @@ void boot_test_configure_valid_base(void) {
 	memmap_req.response    = &memmap_response;
 	hhdm_req.response      = &hhdm_response;
 	exec_addr_req.response = &exec_response;
+}
+
+void boot_test_configure_memory_type(uint64_t type) {
+	usable_entry.type = type;
 }
 
 void boot_test_configure_module_count(uint64_t module_count) {

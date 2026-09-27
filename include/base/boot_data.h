@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Operations supported by immutable boot-data capabilities such as RSDP and DTB. */
+/* Operations supported by immutable boot-data capabilities such as the DTB. */
 enum boot_data_op {
 	/* Return the resource type and total byte size. */
 	BOOT_DATA_OP_INFO = 0,

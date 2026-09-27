@@ -21,9 +21,7 @@ syscall_status_t boot_data_get_info(cap_id_t boot_data_cap, struct boot_data_inf
 	result = cap_call_syscall(boot_data_cap, &request, sizeof(request), out_info, sizeof(*out_info));
 	RUNTIME_DIAGNOSTIC_OPERATION_RESULT(BOOT_DATA_OP_INFO, result);
 	if (result.status != SYSCALL_STATUS_OK) return result.status;
-	if (result.value != sizeof(*out_info) ||
-	    (out_info->type != KERNEL_RESOURCE_TYPE_RSDP && out_info->type != KERNEL_RESOURCE_TYPE_DTB) ||
-	    out_info->size == 0u) {
+	if (result.value != sizeof(*out_info) || out_info->type != KERNEL_RESOURCE_TYPE_DTB || out_info->size == 0u) {
 		RUNTIME_DIAGNOSTIC_INVALID_STATE("BOOT_DATA_OP_INFO returned an invalid response");
 		return SYSCALL_STATUS_FAILED;
 	}

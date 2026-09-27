@@ -21,7 +21,6 @@
 
 #include "memory.h"
 
-static cap_object_id_t rsdp_object_id        = CAP_OBJECT_ID_INVALID;
 static cap_object_id_t dtb_object_id         = CAP_OBJECT_ID_INVALID;
 static cap_object_id_t framebuffer_object_id = CAP_OBJECT_ID_INVALID;
 static struct memory*  framebuffer_memory;
@@ -115,8 +114,6 @@ static syscall_result_t external_mapping_create(const struct cap_request* req, c
 
 static bool boot_data_get(enum kernel_resource_type type, struct kernel_boot_data* out) {
 	switch (type) {
-	case KERNEL_RESOURCE_TYPE_RSDP:
-		return kernel_boot_rsdp_get(out);
 	case KERNEL_RESOURCE_TYPE_DTB:
 		return kernel_boot_dtb_get(out);
 	default:
@@ -251,7 +248,6 @@ static syscall_result_t framebuffer_handler(const struct cap_request* req) {
 }
 
 void kernel_capability_boot_resources_init(void) {
-	rsdp_object_id        = cap_object_create_kernel(KERNEL_RESOURCE_TYPE_RSDP, boot_data_handler, NULL);
 	dtb_object_id         = cap_object_create_kernel(KERNEL_RESOURCE_TYPE_DTB, boot_data_handler, NULL);
 	framebuffer_object_id = cap_object_create_kernel(KERNEL_RESOURCE_TYPE_FRAMEBUFFER, framebuffer_handler, NULL);
 }
@@ -264,12 +260,10 @@ bool kernel_capability_boot_data_available(enum kernel_resource_type type) {
 
 cap_id_t kernel_capability_boot_data_grant(enum kernel_resource_type type, process_id_t recipient) {
 	struct kernel_boot_data data;
-	cap_object_id_t         object_id;
 
 	if (!boot_data_get(type, &data)) return CAP_ID_INVALID;
-	object_id = type == KERNEL_RESOURCE_TYPE_RSDP ? rsdp_object_id : dtb_object_id;
-	if (object_id == CAP_OBJECT_ID_INVALID) return CAP_ID_INVALID;
-	return cap_create(object_id, recipient, CAP_CALL | CAP_READ | CAP_DELEGATE, NULL);
+	if (dtb_object_id == CAP_OBJECT_ID_INVALID) return CAP_ID_INVALID;
+	return cap_create(dtb_object_id, recipient, CAP_CALL | CAP_READ | CAP_DELEGATE, NULL);
 }
 
 bool kernel_capability_framebuffer_available(void) {

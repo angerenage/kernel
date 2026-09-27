@@ -73,11 +73,8 @@ const struct kernel_boot_module* kernel_boot_module_at(size_t index);
 /* Return the first boot module matching name. The module string is matched first, then the path basename. */
 const struct kernel_boot_module* kernel_boot_module_find(const char* name);
 
-/* Return the ACPI RSDP address when the bootloader reported it. */
+/* Return the unvalidated ACPI RSDP candidate address reported by the bootloader. */
 bool kernel_boot_rsdp_address(uintptr_t* out_address);
-
-/* Return the validated ACPI RSDP byte range when available. */
-bool kernel_boot_rsdp_get(struct kernel_boot_data* out);
 
 /* Return the validated device-tree blob byte range when available. */
 bool kernel_boot_dtb_get(struct kernel_boot_data* out);

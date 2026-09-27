@@ -36,7 +36,7 @@ kernel_selftest_sources = files(
 	'test/selftests/rwlock.c',
 )
 
-kernel_objs = base_sources + core_sources + kernel_libk_sources + platform_kernel_objects + [
+kernel_objs = base_sources + core_sources + firmware_sources + kernel_libk_sources + platform_kernel_objects + [
 	'src/boot/boot.c',
 	'src/boot/cmdline.c',
 	'src/boot/diagnostics.c',

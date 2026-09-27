@@ -46,10 +46,8 @@ const char* mem_range_type_str(enum mem_range_type type) {
 		return "usable";
 	case MEM_RANGE_RESERVED:
 		return "reserved";
-	case MEM_RANGE_ACPI_RECLAIMABLE:
-		return "acpi_reclaimable";
-	case MEM_RANGE_ACPI_NVS:
-		return "acpi_nvs";
+	case MEM_RANGE_ACPI:
+		return "acpi";
 	case MEM_RANGE_BAD_MEMORY:
 		return "bad_memory";
 	case MEM_RANGE_BOOTLOADER_RECLAIMABLE:

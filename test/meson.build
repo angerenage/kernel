@@ -443,6 +443,15 @@ test_suites = [
 		'suites': ['unit', 'memory'],
 	},
 	{
+		'name': 'acpi',
+		'sources': files(
+			'acpi_test.c',
+			'../firmware/acpi/acpi.c',
+		),
+		'link_with': base_test_lib,
+		'suites': ['unit', 'firmware'],
+	},
+	{
 		'name': 'iommu',
 		'sources': files(
 			'dma/iommu.c',

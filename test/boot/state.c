@@ -58,9 +58,30 @@ Test(boot_state, successful_initialization_is_idempotent) {
 	cr_assert_eq(after.virtual_base, before.virtual_base);
 }
 
+Test(boot_state, acpi_memory_types_share_one_classification) {
+	static const uint64_t types[] = {
+		LIMINE_MEMMAP_ACPI_RECLAIMABLE,
+		LIMINE_MEMMAP_ACPI_NVS,
+		LIMINE_MEMMAP_ACPI_TABLES,
+	};
+
+	for (size_t index = 0u; index < sizeof(types) / sizeof(types[0]); index++) {
+		size_t                  count;
+		const struct mem_range* ranges;
+
+		boot_test_configure_valid_base();
+		boot_test_configure_memory_type(types[index]);
+		cr_assert(kernel_boot_init());
+		ranges = kernel_boot_memmap(&count);
+		cr_assert_not_null(ranges);
+		cr_assert_eq(count, 1u);
+		cr_assert_eq(ranges[0].type, MEM_RANGE_ACPI);
+	}
+}
+
 Test(boot_state, optional_boot_resources_are_validated_and_published) {
-	static uint8_t                            rsdp[36] = {'R', 'S', 'D', ' ', 'P', 'T', 'R', ' '};
-	static uint8_t                            dtb[40]  = {0xd0u, 0x0du, 0xfeu, 0xedu, 0u, 0u, 0u, 40u};
+	static uint8_t                            rsdp[36];
+	static uint8_t                            dtb[40] = {0xd0u, 0x0du, 0xfeu, 0xedu, 0u, 0u, 0u, 40u};
 	static uint8_t                            framebuffer_memory[4096];
 	static struct limine_rsdp_response        rsdp_response;
 	static struct limine_dtb_response         dtb_response;
@@ -69,26 +90,25 @@ Test(boot_state, optional_boot_resources_are_validated_and_published) {
 	static struct limine_framebuffer_response framebuffer_response;
 	struct kernel_boot_data                   data;
 	struct kernel_boot_framebuffer            captured;
+	uintptr_t                                 rsdp_address;
 
 	boot_test_configure_valid_base();
-	rsdp[15]              = 2u;
-	rsdp[20]              = 36u;
 	rsdp_response.address = rsdp;
 	dtb_response.dtb_ptr  = dtb;
 	framebuffer           = (struct limine_framebuffer){
-				  .address          = framebuffer_memory,
-				  .width            = 32u,
-				  .height           = 16u,
-				  .pitch            = 128u,
-				  .bpp              = 32u,
-				  .memory_model     = LIMINE_FRAMEBUFFER_RGB,
-				  .red_mask_size    = 8u,
-				  .red_mask_shift   = 16u,
-				  .green_mask_size  = 8u,
-				  .green_mask_shift = 8u,
-				  .blue_mask_size   = 8u,
-				  .blue_mask_shift  = 0u,
-    };
+		.address          = framebuffer_memory,
+		.width            = 32u,
+		.height           = 16u,
+		.pitch            = 128u,
+		.bpp              = 32u,
+		.memory_model     = LIMINE_FRAMEBUFFER_RGB,
+		.red_mask_size    = 8u,
+		.red_mask_shift   = 16u,
+		.green_mask_size  = 8u,
+		.green_mask_shift = 8u,
+		.blue_mask_size   = 8u,
+		.blue_mask_shift  = 0u,
+	};
 	framebuffers[0]      = &framebuffer;
 	framebuffer_response = (struct limine_framebuffer_response){.framebuffer_count = 1u, .framebuffers = framebuffers};
 	rsdp_req.response    = &rsdp_response;
@@ -96,9 +116,8 @@ Test(boot_state, optional_boot_resources_are_validated_and_published) {
 	fb_req.response      = &framebuffer_response;
 
 	cr_assert(kernel_boot_init());
-	cr_assert(kernel_boot_rsdp_get(&data));
-	cr_assert_eq(data.address, rsdp);
-	cr_assert_eq(data.size, sizeof(rsdp));
+	cr_assert(kernel_boot_rsdp_address(&rsdp_address));
+	cr_assert_eq(rsdp_address, (uintptr_t)rsdp);
 	cr_assert(kernel_boot_dtb_get(&data));
 	cr_assert_eq(data.address, dtb);
 	cr_assert_eq(data.size, sizeof(dtb));
