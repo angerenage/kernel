@@ -70,8 +70,8 @@ static bool acpi_physical_span(uintptr_t physical, size_t size, const void** out
 		for (size_t index = 0u; index < range_count; index++) {
 			uintptr_t range_end;
 
-			if (ranges[index].type != MEM_RANGE_ACPI || ranges[index].length == 0u ||
-			    ranges[index].length > UINTPTR_MAX - ranges[index].base)
+			if ((ranges[index].type != MEM_RANGE_ACPI && ranges[index].type != MEM_RANGE_RESERVED) ||
+			    ranges[index].length == 0u || ranges[index].length > UINTPTR_MAX - ranges[index].base)
 				continue;
 			range_end = ranges[index].base + ranges[index].length;
 			if (ranges[index].base <= cursor && range_end > covered_end) covered_end = range_end;

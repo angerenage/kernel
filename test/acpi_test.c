@@ -403,13 +403,13 @@ Test(acpi, rejects_oversized_children) {
 	cr_assert_eq(cursor, 1u);
 }
 
-Test(acpi, rejects_non_acpi_ranges) {
+Test(acpi, rejects_non_acpi_or_reserved_ranges) {
 	struct test_rsdp* rsdp;
 
 	test_reset();
 	test_root(true, NULL, 0u);
 	rsdp                = test_rsdp(true);
-	test_ranges[0].type = MEM_RANGE_RESERVED;
+	test_ranges[0].type = MEM_RANGE_OTHER;
 	cr_assert_not(acpi_init(rsdp));
 }
 

@@ -44,31 +44,32 @@ static enum mem_range_type kernel_boot_mem_range_type(uint64_t type) {
 		return MEM_RANGE_RESERVED;
 	case LIMINE_MEMMAP_ACPI_RECLAIMABLE:
 	case LIMINE_MEMMAP_ACPI_NVS:
-	case LIMINE_MEMMAP_ACPI_TABLES:
 		return MEM_RANGE_ACPI;
 	case LIMINE_MEMMAP_BAD_MEMORY:
 		return MEM_RANGE_BAD_MEMORY;
 	case LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE:
 		return MEM_RANGE_BOOTLOADER_RECLAIMABLE;
-	case LIMINE_MEMMAP_KERNEL_AND_MODULES:
+	case LIMINE_MEMMAP_EXECUTABLE_AND_MODULES:
 		return MEM_RANGE_KERNEL_AND_MODULES;
 	case LIMINE_MEMMAP_FRAMEBUFFER:
 		return MEM_RANGE_FRAMEBUFFER;
+	case LIMINE_MEMMAP_RESERVED_MAPPED:
+		return MEM_RANGE_RESERVED;
 	default:
 		return MEM_RANGE_OTHER;
 	}
 }
 
 #if defined(PLATFORM_PC_X86_64)
-static uint64_t kernel_boot_mp_info_arch_id(const struct LIMINE_MP(info) * info) {
+static uint64_t kernel_boot_mp_info_arch_id(const struct limine_mp_info* info) {
 	return info ? (uint64_t)info->lapic_id : 0u;
 }
 
-static uint64_t kernel_boot_mp_info_processor_id(const struct LIMINE_MP(info) * info) {
+static uint64_t kernel_boot_mp_info_processor_id(const struct limine_mp_info* info) {
 	return info ? (uint64_t)info->processor_id : 0u;
 }
 
-static uint64_t kernel_boot_mp_bsp_arch_id(const struct LIMINE_MP(response) * response) {
+static uint64_t kernel_boot_mp_bsp_arch_id(const struct limine_mp_response* response) {
 	return response ? (uint64_t)response->bsp_lapic_id : 0u;
 }
 
@@ -76,15 +77,15 @@ static bool kernel_boot_mp_supported(void) {
 	return true;
 }
 #elif defined(PLATFORM_PC_AARCH64)
-static uint64_t kernel_boot_mp_info_arch_id(const struct LIMINE_MP(info) * info) {
+static uint64_t kernel_boot_mp_info_arch_id(const struct limine_mp_info* info) {
 	return info ? info->mpidr : 0u;
 }
 
-static uint64_t kernel_boot_mp_info_processor_id(const struct LIMINE_MP(info) * info) {
+static uint64_t kernel_boot_mp_info_processor_id(const struct limine_mp_info* info) {
 	return info ? (uint64_t)info->processor_id : 0u;
 }
 
-static uint64_t kernel_boot_mp_bsp_arch_id(const struct LIMINE_MP(response) * response) {
+static uint64_t kernel_boot_mp_bsp_arch_id(const struct limine_mp_response* response) {
 	return response ? response->bsp_mpidr : 0u;
 }
 
@@ -92,15 +93,15 @@ static bool kernel_boot_mp_supported(void) {
 	return true;
 }
 #elif defined(PLATFORM_PC_RISCV64)
-static uint64_t kernel_boot_mp_info_arch_id(const struct LIMINE_MP(info) * info) {
+static uint64_t kernel_boot_mp_info_arch_id(const struct limine_mp_info* info) {
 	return info ? info->hartid : 0u;
 }
 
-static uint64_t kernel_boot_mp_info_processor_id(const struct LIMINE_MP(info) * info) {
+static uint64_t kernel_boot_mp_info_processor_id(const struct limine_mp_info* info) {
 	return info ? info->processor_id : 0u;
 }
 
-static uint64_t kernel_boot_mp_bsp_arch_id(const struct LIMINE_MP(response) * response) {
+static uint64_t kernel_boot_mp_bsp_arch_id(const struct limine_mp_response* response) {
 	return response ? response->bsp_hartid : 0u;
 }
 
@@ -108,17 +109,17 @@ static bool kernel_boot_mp_supported(void) {
 	return true;
 }
 #else
-static uint64_t kernel_boot_mp_info_arch_id(const struct LIMINE_MP(info) * info) {
+static uint64_t kernel_boot_mp_info_arch_id(const struct limine_mp_info* info) {
 	(void)info;
 	return 0u;
 }
 
-static uint64_t kernel_boot_mp_info_processor_id(const struct LIMINE_MP(info) * info) {
+static uint64_t kernel_boot_mp_info_processor_id(const struct limine_mp_info* info) {
 	(void)info;
 	return 0u;
 }
 
-static uint64_t kernel_boot_mp_bsp_arch_id(const struct LIMINE_MP(response) * response) {
+static uint64_t kernel_boot_mp_bsp_arch_id(const struct limine_mp_response* response) {
 	(void)response;
 	return 0u;
 }
@@ -139,7 +140,7 @@ static const char* kernel_boot_path_basename(const char* path) {
 }
 
 #if defined(PLATFORM_PC_X86_64) || defined(PLATFORM_PC_AARCH64) || defined(PLATFORM_PC_RISCV64)
-static void kernel_boot_mp_entry(struct LIMINE_MP(info) * info) {
+static void kernel_boot_mp_entry(struct limine_mp_info* info) {
 	struct kernel_boot_cpu_launch* launch;
 
 	if (info == NULL) {
@@ -208,12 +209,8 @@ bool kernel_boot_init(void) {
 			const struct limine_file* file = module_req.response->modules[i];
 
 			boot_modules[i] = (struct kernel_boot_module){
-				.path = file->path,
-#if LIMINE_API_REVISION >= 3
-				.name = file->string,
-#else
-				.name = file->cmdline,
-#endif
+				.path       = file->path,
+				.name       = file->string,
 				.address    = (void*)(uintptr_t)file->address,
 				.size       = (size_t)file->size,
 				.media_type = file->media_type,
@@ -363,7 +360,7 @@ bool kernel_boot_cpu_topology(struct cpu_init_info* init_info, size_t max_count,
 		if (mp_req.response->cpu_count > max_count || mp_req.response->cpu_count > KERNEL_BOOT_MAX_CPUS) return false;
 		cpu_count = (size_t)mp_req.response->cpu_count;
 		for (size_t i = 0u; i < cpu_count; i++) {
-			const struct LIMINE_MP(info)* info = mp_req.response->cpus[i];
+			const struct limine_mp_info* info = mp_req.response->cpus[i];
 			if (info == NULL) return false;
 			if (kernel_boot_mp_info_arch_id(info) != bsp_arch_id) continue;
 			if (bsp_found) return false;
@@ -373,11 +370,11 @@ bool kernel_boot_cpu_topology(struct cpu_init_info* init_info, size_t max_count,
 		if (!bsp_found) return false;
 
 		for (size_t i = 0; i < cpu_count; i++) {
-			const struct LIMINE_MP(info)* info = mp_req.response->cpus[i];
-			uint64_t      arch_id              = kernel_boot_mp_info_arch_id(info);
-			enum cpu_role role                 = i == bsp_index ? CPU_ROLE_BSP : CPU_ROLE_AP;
-			uintptr_t     stack_base           = role == CPU_ROLE_BSP ? boot_stack_base : 0u;
-			uintptr_t     stack_top            = role == CPU_ROLE_BSP ? boot_stack_top : 0u;
+			const struct limine_mp_info* info       = mp_req.response->cpus[i];
+			uint64_t                     arch_id    = kernel_boot_mp_info_arch_id(info);
+			enum cpu_role                role       = i == bsp_index ? CPU_ROLE_BSP : CPU_ROLE_AP;
+			uintptr_t                    stack_base = role == CPU_ROLE_BSP ? boot_stack_base : 0u;
+			uintptr_t                    stack_top  = role == CPU_ROLE_BSP ? boot_stack_top : 0u;
 
 			init_info[i] = (struct cpu_init_info){
 				.index           = i,
@@ -399,12 +396,12 @@ bool kernel_boot_cpu_topology(struct cpu_init_info* init_info, size_t max_count,
 
 bool kernel_boot_cpu_start(size_t cpu_index, kernel_boot_cpu_entry_t entry, void* arg) {
 #if defined(PLATFORM_PC_X86_64) || defined(PLATFORM_PC_AARCH64) || defined(PLATFORM_PC_RISCV64)
-	struct LIMINE_MP(info) * info;
+	struct limine_mp_info* info;
 
 	if (!boot_initialized || entry == NULL || cpu_index >= boot_cpu_count || cpu_index >= KERNEL_BOOT_MAX_CPUS)
 		return false;
 
-	info = (struct LIMINE_MP(info)*)boot_cpu_private[cpu_index];
+	info = (struct limine_mp_info*)boot_cpu_private[cpu_index];
 	if (info == NULL) return false;
 
 	boot_cpu_launch[cpu_index] = (struct kernel_boot_cpu_launch){

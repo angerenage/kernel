@@ -62,7 +62,6 @@ Test(boot_state, acpi_memory_types_share_one_classification) {
 	static const uint64_t types[] = {
 		LIMINE_MEMMAP_ACPI_RECLAIMABLE,
 		LIMINE_MEMMAP_ACPI_NVS,
-		LIMINE_MEMMAP_ACPI_TABLES,
 	};
 
 	for (size_t index = 0u; index < sizeof(types) / sizeof(types[0]); index++) {

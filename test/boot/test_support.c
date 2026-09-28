@@ -14,14 +14,14 @@
 
 #include "../../kernel/src/boot/limine_requests.h"
 
-volatile struct limine_framebuffer_request fb_req;
-volatile struct LIMINE_MP(request) mp_req;
+volatile struct limine_framebuffer_request        fb_req;
+volatile struct limine_mp_request                 mp_req;
 volatile struct limine_memmap_request             memmap_req;
 volatile struct limine_hhdm_request               hhdm_req;
 volatile struct limine_rsdp_request               rsdp_req;
 volatile struct limine_dtb_request                dtb_req;
 volatile struct limine_executable_cmdline_request cmdline_req;
-volatile struct limine_kernel_address_request     exec_addr_req;
+volatile struct limine_executable_address_request exec_addr_req;
 volatile struct limine_module_request             module_req;
 
 static bool     protocol_supported;
@@ -51,13 +51,13 @@ bool dt_node_valid(struct dt_node node) {
 
 #include "../../kernel/src/boot/boot.c"
 
-static struct limine_memmap_entry            usable_entry;
-static struct limine_memmap_entry*           memmap_entries[1];
-static struct limine_memmap_response         memmap_response;
-static struct limine_hhdm_response           hhdm_response;
-static struct limine_kernel_address_response exec_response;
-static struct limine_module_response         module_response;
-static struct LIMINE_MP(response) mp_response;
+static struct limine_memmap_entry                usable_entry;
+static struct limine_memmap_entry*               memmap_entries[1];
+static struct limine_memmap_response             memmap_response;
+static struct limine_hhdm_response               hhdm_response;
+static struct limine_executable_address_response exec_response;
+static struct limine_module_response             module_response;
+static struct limine_mp_response                 mp_response;
 
 void boot_test_reset(void) {
 	memset(boot_memmap, 0, sizeof(boot_memmap));
@@ -108,7 +108,7 @@ void boot_test_configure_valid_base(void) {
 		.entries     = memmap_entries,
 	};
 	hhdm_response = (struct limine_hhdm_response){.offset = 0xffff800000000000ull};
-	exec_response = (struct limine_kernel_address_response){
+	exec_response = (struct limine_executable_address_response){
 		.physical_base = 0x200000u,
 		.virtual_base  = 0xffffffff80000000ull,
 	};
@@ -134,8 +134,8 @@ void boot_test_set_dt_initialized(bool initialized) {
 	dt_initialized = initialized;
 }
 
-void boot_test_configure_mp(struct LIMINE_MP(info) * *cpus, uint64_t cpu_count, uint64_t bsp_arch_id) {
-	mp_response = (struct LIMINE_MP(response)){
+void boot_test_configure_mp(struct limine_mp_info** cpus, uint64_t cpu_count, uint64_t bsp_arch_id) {
+	mp_response = (struct limine_mp_response){
 		.bsp_lapic_id = (uint32_t)bsp_arch_id,
 		.cpu_count    = cpu_count,
 		.cpus         = cpus,
