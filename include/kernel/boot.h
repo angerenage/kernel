@@ -76,7 +76,10 @@ const struct kernel_boot_module* kernel_boot_module_find(const char* name);
 /* Return the unvalidated ACPI RSDP candidate address reported by the bootloader. */
 bool kernel_boot_rsdp_address(uintptr_t* out_address);
 
-/* Return the validated device-tree blob byte range when available. */
+/* Return the unvalidated Device Tree candidate address reported by the bootloader. */
+bool kernel_boot_dtb_address(uintptr_t* out_address);
+
+/* Return the provider-validated Device Tree blob for unmigrated kernel consumers. */
 bool kernel_boot_dtb_get(struct kernel_boot_data* out);
 
 /* Return the bootloader's direct-map and kernel image address-space information. */

@@ -1,5 +1,6 @@
 #include "test_support.h"
 
+#include <firmware/dt.h>
 #include <hal/cpu.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,6 +26,7 @@ volatile struct limine_module_request             module_req;
 
 static bool     protocol_supported;
 static uint64_t boot_arch_id = 0x2au;
+static bool     dt_initialized;
 
 bool kernel_limine_protocol_supported(void) {
 	return protocol_supported;
@@ -37,6 +39,14 @@ uint64_t hal_cpu_boot_arch_id(void) {
 __attribute__((noreturn))
 void hal_cpu_park(void) {
 	abort();
+}
+
+struct dt_node dt_root(void) {
+	return dt_initialized ? (struct dt_node){.id = 0u} : DT_NODE_INVALID;
+}
+
+bool dt_node_valid(struct dt_node node) {
+	return dt_initialized && node.id == 0u;
 }
 
 #include "../../kernel/src/boot/boot.c"
@@ -62,7 +72,6 @@ void boot_test_reset(void) {
 	boot_rsdp_address = 0u;
 	boot_rsdp_valid   = false;
 	boot_dtb_address  = NULL;
-	boot_dtb_size     = 0u;
 	boot_dtb_valid    = false;
 	memset(boot_cpu_launch, 0, sizeof(boot_cpu_launch));
 	memset(boot_cpu_private, 0, sizeof(boot_cpu_private));
@@ -81,6 +90,7 @@ void boot_test_reset(void) {
 
 	protocol_supported = false;
 	boot_arch_id       = 0x2au;
+	dt_initialized     = false;
 }
 
 void boot_test_configure_valid_base(void) {
@@ -118,6 +128,10 @@ void boot_test_configure_module_count(uint64_t module_count) {
 		.modules      = NULL,
 	};
 	module_req.response = &module_response;
+}
+
+void boot_test_set_dt_initialized(bool initialized) {
+	dt_initialized = initialized;
 }
 
 void boot_test_configure_mp(struct LIMINE_MP(info) * *cpus, uint64_t cpu_count, uint64_t bsp_arch_id) {

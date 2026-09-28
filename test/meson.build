@@ -457,6 +457,15 @@ test_suites = [
 		'suites': ['unit', 'firmware', 'kernel'],
 	},
 	{
+		'name': 'dt',
+		'sources': files(
+			'dt_test.c',
+			'../firmware/dt/dt.c',
+		),
+		'link_with': base_test_lib,
+		'suites': ['unit', 'firmware', 'kernel'],
+	},
+	{
 		'name': 'iommu',
 		'sources': files(
 			'dma/iommu.c',

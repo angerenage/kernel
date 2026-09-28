@@ -12,6 +12,7 @@
 #include <core/sched.h>
 #include <core/uthread.h>
 #include <firmware/acpi.h>
+#include <firmware/dt.h>
 #include <hal/clock.h>
 #include <hal/cpu.h>
 #include <hal/hcf.h>
@@ -246,6 +247,7 @@ void kernel_main(void) {
 	const struct mem_range*          memory_map       = NULL;
 	struct kernel_boot_address_space boot_address_space;
 	uintptr_t                        rsdp_address;
+	uintptr_t                        dtb_address;
 
 	if (!kernel_boot_init()) {
 		hal_serial_init();
@@ -266,6 +268,9 @@ void kernel_main(void) {
 	if (!kernel_boot_address_space_get(&boot_address_space)) boot_fail("kernel: boot address space unavailable");
 	if (kernel_boot_rsdp_address(&rsdp_address) && !acpi_init((const void*)rsdp_address)) {
 		boot_fail("kernel: ACPI initialization failed");
+	}
+	if (kernel_boot_dtb_address(&dtb_address) && !dt_init((const void*)dtb_address)) {
+		boot_fail("kernel: Device Tree initialization failed");
 	}
 
 	boot_diagnostics_enabled = kernel_boot_diagnostics_enabled();

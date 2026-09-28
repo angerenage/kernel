@@ -91,6 +91,7 @@ Test(boot_state, optional_boot_resources_are_validated_and_published) {
 	struct kernel_boot_data                   data;
 	struct kernel_boot_framebuffer            captured;
 	uintptr_t                                 rsdp_address;
+	uintptr_t                                 dtb_address;
 
 	boot_test_configure_valid_base();
 	rsdp_response.address = rsdp;
@@ -118,6 +119,10 @@ Test(boot_state, optional_boot_resources_are_validated_and_published) {
 	cr_assert(kernel_boot_init());
 	cr_assert(kernel_boot_rsdp_address(&rsdp_address));
 	cr_assert_eq(rsdp_address, (uintptr_t)rsdp);
+	cr_assert(kernel_boot_dtb_address(&dtb_address));
+	cr_assert_eq(dtb_address, (uintptr_t)dtb);
+	cr_assert_not(kernel_boot_dtb_get(&data));
+	boot_test_set_dt_initialized(true);
 	cr_assert(kernel_boot_dtb_get(&data));
 	cr_assert_eq(data.address, dtb);
 	cr_assert_eq(data.size, sizeof(dtb));
