@@ -39,6 +39,9 @@ struct dt_node dt_node_parent(struct dt_node node);
 /* Return node's stable name string, or NULL for an invalid node. */
 const char* dt_node_name(struct dt_node node);
 
+/* Return a stable view and name for the indexed direct property of node. */
+bool dt_node_property_at(struct dt_node node, size_t index, const char** out_name, struct dt_property* out);
+
 /* Return a stable view of node's named property without copying it. */
 bool dt_node_property(struct dt_node node, const char* name, struct dt_property* out);
 

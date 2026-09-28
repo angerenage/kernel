@@ -267,11 +267,16 @@ Test(dt, accepts_version_17) {
 Test(dt, unavailable_provider_rejects_navigation_without_outputs) {
 	struct dt_property output  = {.data = test_arena, .size = 17u};
 	struct dt_node     invalid = DT_NODE_INVALID;
+	const char*        name    = "unchanged";
 
 	cr_assert_not(dt_node_valid(dt_root()));
 	cr_assert_not(dt_node_valid(dt_node_child(invalid)));
 	cr_assert_not(dt_node_valid(dt_node_next(invalid)));
 	cr_assert_null(dt_node_name(invalid));
+	cr_assert_not(dt_node_property_at(invalid, 0u, &name, &output));
+	cr_assert_str_eq(name, "unchanged");
+	cr_assert_eq(output.data, test_arena);
+	cr_assert_eq(output.size, 17u);
 	cr_assert_not(dt_node_property(invalid, "value", &output));
 	cr_assert_eq(output.data, test_arena);
 	cr_assert_eq(output.size, 17u);
@@ -283,6 +288,8 @@ Test(dt, unavailable_provider_rejects_navigation_without_outputs) {
 Test(dt, traversal_properties_and_standard_predicates) {
 	struct dt_property property;
 	struct dt_property unchanged = {.data = test_arena, .size = 99u};
+	const char*        property_name;
+	const char*        unchanged_name = "unchanged";
 	struct dt_node     root;
 	struct dt_node     soc;
 	struct dt_node     child;
@@ -310,6 +317,17 @@ Test(dt, traversal_properties_and_standard_predicates) {
 	cr_assert(dt_node_compatible(soc, "vendor,soc"));
 	cr_assert(dt_node_compatible(soc, "vendor,fallback"));
 	cr_assert_not(dt_node_compatible(soc, "vendor,other"));
+	cr_assert(dt_node_property_at(soc, 0u, &property_name, &property));
+	cr_assert_str_eq(property_name, "compatible");
+	cr_assert(dt_node_property_at(soc, 1u, &property_name, &property));
+	cr_assert_str_eq(property_name, "cells");
+	cr_assert_eq(property.size, 8u);
+	cr_assert(dt_node_property_at(soc, 2u, &property_name, &property));
+	cr_assert_str_eq(property_name, "phandle");
+	cr_assert_not(dt_node_property_at(soc, 3u, &unchanged_name, &unchanged));
+	cr_assert_str_eq(unchanged_name, "unchanged");
+	cr_assert_eq(unchanged.data, test_arena);
+	cr_assert_eq(unchanged.size, 99u);
 	cr_assert(dt_node_property(soc, "cells", &property));
 	cr_assert(dt_property_read_cells(&property, 0u, 1u, &value));
 	cr_assert_eq(value, 0x12345678u);

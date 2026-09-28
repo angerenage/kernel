@@ -4,6 +4,7 @@
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/sched.h>
+#include <firmware/dt.h>
 #include <hal/iommu.h>
 #include <kernel/boot.h>
 #include <kernel/boot_diagnostics.h>
@@ -76,6 +77,66 @@ void kernel_boot_diagnostics_framebuffer(void) {
 			uint32_t* pixel      = (uint32_t*)pixel_addr;
 
 			*pixel = (red << 16) | (green << 8) | blue;
+		}
+	}
+}
+
+static void diagnostics_device_tree_indent(size_t depth) {
+	for (size_t index = 0u; index < depth; index++) printf("  ");
+}
+
+static void diagnostics_device_tree_properties(struct dt_node node, size_t depth) {
+	for (size_t index = 0u;; index++) {
+		struct dt_property property;
+		const char*        name;
+		const uint8_t*     bytes;
+
+		if (!dt_node_property_at(node, index, &name, &property)) return;
+		diagnostics_device_tree_indent(depth);
+		printf("%s (%zu bytes) =", name, property.size);
+		if (property.size == 0u) printf(" <empty>");
+		bytes = property.data;
+		for (size_t byte = 0u; byte < property.size; byte++) printf(" %02x", (unsigned)bytes[byte]);
+		printf("\n");
+	}
+}
+
+void kernel_boot_diagnostics_device_tree(void) {
+	struct dt_node node  = dt_root();
+	size_t         depth = 0u;
+
+	if (!dt_node_valid(node)) {
+		printf("kernel: no Device Tree available\n");
+		return;
+	}
+
+	printf("kernel: Device Tree:\n");
+	for (;;) {
+		struct dt_node next;
+		const char*    name = dt_node_name(node);
+
+		diagnostics_device_tree_indent(depth);
+		printf("%s {\n", name != NULL && name[0] != '\0' ? name : "/");
+		diagnostics_device_tree_properties(node, depth + 1u);
+
+		next = dt_node_child(node);
+		if (dt_node_valid(next)) {
+			node = next;
+			depth++;
+			continue;
+		}
+
+		for (;;) {
+			diagnostics_device_tree_indent(depth);
+			printf("}\n");
+			next = dt_node_next(node);
+			if (dt_node_valid(next)) {
+				node = next;
+				break;
+			}
+			node = dt_node_parent(node);
+			if (!dt_node_valid(node)) return;
+			depth--;
 		}
 	}
 }

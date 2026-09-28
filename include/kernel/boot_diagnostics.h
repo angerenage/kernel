@@ -11,6 +11,9 @@ bool kernel_boot_diagnostics_enabled(void);
 /* Print the framebuffer description captured during kernel_boot_init(), when available. */
 void kernel_boot_diagnostics_framebuffer(void);
 
+/* Print the complete validated Device Tree, when available. */
+void kernel_boot_diagnostics_device_tree(void);
+
 /* Print a per-range breakdown of the bootloader-supplied memory map. */
 void kernel_boot_diagnostics_memory_map(const struct mem_range* memory_map, size_t range_count);
 

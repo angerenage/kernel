@@ -277,6 +277,7 @@ void kernel_main(void) {
 	if (boot_diagnostics_enabled) {
 		printf("kernel: entering kernel_main\n");
 		kernel_boot_diagnostics_framebuffer();
+		kernel_boot_diagnostics_device_tree();
 		kernel_boot_diagnostics_memory_map(memory_map, memory_map_count);
 		kernel_boot_diagnostics_modules();
 	}

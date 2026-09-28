@@ -437,15 +437,18 @@ const char* dt_node_name(struct dt_node node) {
 	return (const char*)dt.structure + token.data;
 }
 
-bool dt_node_property(struct dt_node node, const char* name, struct dt_property* out) {
+static bool dt_node_property_find(struct dt_node node, size_t index, const char* name, const char** out_name,
+                                  struct dt_property* out) {
 	struct dt_token token;
 	size_t          cursor;
-	size_t          depth = 0u;
+	size_t          depth          = 0u;
+	size_t          property_index = 0u;
 
-	if (name == NULL || out == NULL || !dt_node_valid(node) || !dt_token_read(&dt, node.id, dt.structure_size, &token))
-		return false;
+	if (!dt_node_valid(node) || !dt_token_read(&dt, node.id, dt.structure_size, &token)) return false;
 	cursor = token.next;
 	while (cursor < dt.structure_size) {
+		const char* property_name;
+
 		if (!dt_token_read(&dt, cursor, dt.structure_size, &token)) return false;
 		if (token.type == DT_BEGIN_NODE) depth++;
 		else if (token.type == DT_END_NODE) {
@@ -453,14 +456,29 @@ bool dt_node_property(struct dt_node node, const char* name, struct dt_property*
 			depth--;
 		}
 		else if (token.type == DT_END) return false;
-		else if (token.type == DT_PROPERTY && depth == 0u &&
-		         strcmp((const char*)dt.strings + token.name_offset, name) == 0) {
+		else if (token.type == DT_PROPERTY && depth == 0u) {
+			property_name = (const char*)dt.strings + token.name_offset;
+			if ((name != NULL && strcmp(property_name, name) != 0) || (name == NULL && property_index++ != index)) {
+				cursor = token.next;
+				continue;
+			}
+			if (out_name != NULL) *out_name = property_name;
 			*out = (struct dt_property){.data = dt.structure + token.data, .size = token.size};
 			return true;
 		}
 		cursor = token.next;
 	}
 	return false;
+}
+
+bool dt_node_property_at(struct dt_node node, size_t index, const char** out_name, struct dt_property* out) {
+	if (out_name == NULL || out == NULL) return false;
+	return dt_node_property_find(node, index, NULL, out_name, out);
+}
+
+bool dt_node_property(struct dt_node node, const char* name, struct dt_property* out) {
+	if (name == NULL || out == NULL) return false;
+	return dt_node_property_find(node, 0u, name, NULL, out);
 }
 
 bool dt_property_read_cells(const struct dt_property* property, size_t first_cell, size_t cell_count, uint64_t* out) {
