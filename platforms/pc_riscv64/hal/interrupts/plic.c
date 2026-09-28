@@ -2,6 +2,7 @@
 
 #include <core/cpu.h>
 #include <core/interrupt.h>
+#include <firmware/dt/device.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>
 #include <hal/paging.h>
@@ -11,7 +12,6 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "../../../iommu_fdt.h"
 #include "interrupts.h"
 
 #define PLIC_MAX_CPUS 64u
@@ -24,20 +24,6 @@
 #define PLIC_CONTEXT_STRIDE 0x1000u
 #define PLIC_CONTEXT_CLAIM 0x4u
 #define PLIC_SUPERVISOR_EXTERNAL 9u
-
-struct plic_fdt_extra {
-	uint32_t       phandle;
-	bool           has_phandle;
-	const uint8_t* interrupts_extended;
-	size_t         interrupts_extended_size;
-	uint32_t       ndev;
-	bool           has_ndev;
-};
-
-struct plic_cpu_intc {
-	uint32_t phandle;
-	uint64_t hart_id;
-};
 
 struct plic_context {
 	uint64_t hart_id;
@@ -64,152 +50,58 @@ static struct {
 static uint32_t plic_init_lock;
 static uint32_t plic_register_lock;
 
-static bool plic_fdt_find(struct plic_discovery* out) {
-	struct kernel_boot_data dtb;
-	struct iommu_fdt_node   stack[IOMMU_FDT_MAX_DEPTH];
-	struct plic_fdt_extra   extras[IOMMU_FDT_MAX_DEPTH];
-	struct plic_cpu_intc    cpu_intcs[PLIC_MAX_CPUS];
-	size_t                  cpu_intc_count       = 0u;
-	const uint8_t*          plic_interrupts      = NULL;
-	size_t                  plic_interrupts_size = 0u;
-	size_t                  plic_count           = 0u;
-	if (out == NULL || !kernel_boot_dtb_get(&dtb) || dtb.address == NULL || dtb.size < 40u ||
-	    iommu_fdt_u32(dtb.address) != IOMMU_FDT_MAGIC)
-		return false;
-	const uint8_t* blob             = dtb.address;
-	uint32_t       total_size       = iommu_fdt_u32(blob + 4u);
-	uint32_t       structure_offset = iommu_fdt_u32(blob + 8u);
-	uint32_t       strings_offset   = iommu_fdt_u32(blob + 12u);
-	uint32_t       strings_size     = iommu_fdt_u32(blob + 32u);
-	uint32_t       structure_size   = iommu_fdt_u32(blob + 36u);
-	if (total_size > dtb.size || structure_offset > total_size || structure_size > total_size - structure_offset ||
-	    strings_offset > total_size || strings_size > total_size - strings_offset)
-		return false;
-	const uint8_t* cursor  = blob + structure_offset;
-	const uint8_t* end     = cursor + structure_size;
-	const uint8_t* strings = blob + strings_offset;
-	size_t         depth   = 0u;
-	memset(out, 0, sizeof(*out));
-	while ((size_t)(end - cursor) >= 4u) {
-		uint32_t token = iommu_fdt_u32(cursor);
-		cursor += 4u;
-		if (token == IOMMU_FDT_BEGIN_NODE) {
-			if (depth == IOMMU_FDT_MAX_DEPTH) return false;
-			const uint8_t* name_end = memchr(cursor, '\0', (size_t)(end - cursor));
-			if (name_end == NULL) return false;
-			uint32_t parent_address_cells = depth == 0u ? 2u : stack[depth - 1u].address_cells;
-			uint32_t parent_size_cells    = depth == 0u ? 1u : stack[depth - 1u].size_cells;
-			stack[depth]                  = (struct iommu_fdt_node){.parent_address_cells = parent_address_cells,
-			                                                        .parent_size_cells    = parent_size_cells,
-			                                                        .address_cells        = 2u,
-			                                                        .size_cells           = 1u};
-			extras[depth]                 = (struct plic_fdt_extra){0};
-			depth++;
-			cursor += ((size_t)(name_end - cursor) + 4u) & ~(size_t)3u;
+static bool plic_dt_node(struct dt_node* out) {
+	static const char* const compatibles[] = {"sifive,plic-1.0.0", "riscv,plic0"};
+	struct dt_node           found         = DT_NODE_INVALID;
+
+	if (out == NULL) return false;
+	for (size_t compatible = 0u; compatible < sizeof(compatibles) / sizeof(compatibles[0]); compatible++) {
+		size_t count = dt_device_count(compatibles[compatible]);
+
+		for (size_t index = 0u; index < count; index++) {
+			struct dt_node node = dt_device_at(compatibles[compatible], index);
+
+			if (dt_node_valid(found) && found.id != node.id) return false;
+			found = node;
 		}
-		else if (token == IOMMU_FDT_END_NODE) {
-			if (depth == 0u) return false;
-			struct iommu_fdt_node* node  = &stack[depth - 1u];
-			struct plic_fdt_extra* extra = &extras[depth - 1u];
-			if (iommu_fdt_node_enabled(node) &&
-			    iommu_fdt_string_list_contains(node->compatible, node->compatible_size, "riscv,cpu-intc")) {
-				uint64_t hart_id;
-				if (depth < 2u || !extra->has_phandle || extra->phandle == 0u || cpu_intc_count == PLIC_MAX_CPUS ||
-				    !iommu_fdt_node_enabled(&stack[depth - 2u]) ||
-				    stack[depth - 2u].reg_size < stack[depth - 2u].parent_address_cells * 4u ||
-				    !iommu_fdt_cells(stack[depth - 2u].reg, stack[depth - 2u].parent_address_cells, &hart_id))
-					return false;
-				for (size_t index = 0u; index < cpu_intc_count; index++) {
-					if (cpu_intcs[index].phandle == extra->phandle || cpu_intcs[index].hart_id == hart_id) return false;
-				}
-				cpu_intcs[cpu_intc_count++] = (struct plic_cpu_intc){.phandle = extra->phandle, .hart_id = hart_id};
-			}
-			if (iommu_fdt_node_enabled(node) &&
-			    (iommu_fdt_string_list_contains(node->compatible, node->compatible_size, "sifive,plic-1.0.0") ||
-			     iommu_fdt_string_list_contains(node->compatible, node->compatible_size, "riscv,plic0"))) {
-				uint64_t address;
-				uint64_t size;
-				if (++plic_count != 1u || !extra->has_ndev || extra->ndev == 0u || extra->ndev > PLIC_MAX_SOURCES ||
-				    node->parent_size_cells == 0u || node->parent_size_cells > 2u ||
-				    node->reg_size < (size_t)(node->parent_address_cells + node->parent_size_cells) * 4u ||
-				    !iommu_fdt_node_address(stack, depth, &address) || address > UINTPTR_MAX ||
-				    !iommu_fdt_cells(node->reg + node->parent_address_cells * 4u, node->parent_size_cells, &size) ||
-				    extra->interrupts_extended == NULL || extra->interrupts_extended_size == 0u)
-					return false;
-				out->physical_base   = (uintptr_t)address;
-				out->size            = size;
-				out->ndev            = extra->ndev;
-				plic_interrupts      = extra->interrupts_extended;
-				plic_interrupts_size = extra->interrupts_extended_size;
-			}
-			depth--;
-		}
-		else if (token == IOMMU_FDT_PROPERTY) {
-			if (depth == 0u || (size_t)(end - cursor) < 8u) return false;
-			uint32_t length      = iommu_fdt_u32(cursor);
-			uint32_t name_offset = iommu_fdt_u32(cursor + 4u);
-			cursor += 8u;
-			if (length > (size_t)(end - cursor) || name_offset >= strings_size) return false;
-			const char* name = (const char*)strings + name_offset;
-			if (memchr(name, '\0', strings_size - name_offset) == NULL) return false;
-			struct iommu_fdt_node* node  = &stack[depth - 1u];
-			struct plic_fdt_extra* extra = &extras[depth - 1u];
-			if (strcmp(name, "#address-cells") == 0 && length == 4u) node->address_cells = iommu_fdt_u32(cursor);
-			else if (strcmp(name, "#size-cells") == 0 && length == 4u) node->size_cells = iommu_fdt_u32(cursor);
-			else if (strcmp(name, "compatible") == 0) {
-				node->compatible      = cursor;
-				node->compatible_size = length;
-			}
-			else if (strcmp(name, "status") == 0) {
-				node->status      = cursor;
-				node->status_size = length;
-			}
-			else if (strcmp(name, "reg") == 0) {
-				node->reg      = cursor;
-				node->reg_size = length;
-			}
-			else if (strcmp(name, "ranges") == 0) {
-				node->ranges      = cursor;
-				node->ranges_size = length;
-			}
-			else if (strcmp(name, "phandle") == 0 && length == 4u) {
-				extra->phandle     = iommu_fdt_u32(cursor);
-				extra->has_phandle = true;
-			}
-			else if (strcmp(name, "interrupts-extended") == 0) {
-				extra->interrupts_extended      = cursor;
-				extra->interrupts_extended_size = length;
-			}
-			else if (strcmp(name, "riscv,ndev") == 0 && length == 4u) {
-				extra->ndev     = iommu_fdt_u32(cursor);
-				extra->has_ndev = true;
-			}
-			cursor += (length + 3u) & ~3u;
-		}
-		else if (token == IOMMU_FDT_NOP) continue;
-		else if (token == IOMMU_FDT_END) break;
-		else return false;
-		if (cursor > end) return false;
 	}
-	if (plic_count != 1u || depth != 0u || plic_interrupts_size % 8u != 0u) return false;
-	for (size_t offset = 0u; offset < plic_interrupts_size; offset += 8u) {
-		uint32_t phandle = iommu_fdt_u32(plic_interrupts + offset);
-		uint32_t cause   = iommu_fdt_u32(plic_interrupts + offset + 4u);
-		uint64_t hart_id = UINT64_MAX;
-		for (size_t index = 0u; index < cpu_intc_count; index++) {
-			if (cpu_intcs[index].phandle == phandle) {
-				hart_id = cpu_intcs[index].hart_id;
-				break;
-			}
-		}
-		if (hart_id == UINT64_MAX || (cause != 11u && cause != PLIC_SUPERVISOR_EXTERNAL && cause != UINT32_MAX))
+	if (!dt_node_valid(found)) return false;
+	*out = found;
+	return true;
+}
+
+static bool plic_fdt_find(struct plic_discovery* out) {
+	struct dt_node     node;
+	struct dt_property interrupts;
+	struct dt_property ndev;
+	struct dt_reg      reg;
+	uint64_t           ndev_value;
+
+	if (out == NULL || !plic_dt_node(&node) || !dt_node_reg(node, 0u, &reg) || reg.address > UINTPTR_MAX ||
+	    !dt_node_property(node, "riscv,ndev", &ndev) || ndev.size != 4u ||
+	    !dt_property_read_cells(&ndev, 0u, 1u, &ndev_value) || ndev_value == 0u || ndev_value > PLIC_MAX_SOURCES ||
+	    !dt_node_property(node, "interrupts-extended", &interrupts) || interrupts.size % 8u != 0u)
+		return false;
+	*out = (struct plic_discovery){
+		.physical_base = (uintptr_t)reg.address,
+		.size          = reg.size,
+		.ndev          = (uint32_t)ndev_value,
+	};
+	for (size_t entry = 0u; entry < interrupts.size / 8u; entry++) {
+		uint64_t phandle;
+		uint64_t cause;
+		uint64_t hart_id;
+
+		if (!dt_property_read_cells(&interrupts, entry * 2u, 1u, &phandle) ||
+		    !dt_property_read_cells(&interrupts, entry * 2u + 1u, 1u, &cause) ||
+		    !riscv64_interrupt_hart_for_phandle((uint32_t)phandle, &hart_id) ||
+		    (cause != 11u && cause != PLIC_SUPERVISOR_EXTERNAL && cause != UINT32_MAX))
 			return false;
 		if (cause != PLIC_SUPERVISOR_EXTERNAL) continue;
 		if (out->context_count == PLIC_MAX_CPUS) return false;
 		for (size_t index = 0u; index < out->context_count; index++)
 			if (out->contexts[index].hart_id == hart_id) return false;
-		out->contexts[out->context_count++] =
-			(struct plic_context){.hart_id = hart_id, .number = (uint32_t)(offset / 8u)};
+		out->contexts[out->context_count++] = (struct plic_context){.hart_id = hart_id, .number = (uint32_t)entry};
 	}
 	return out->context_count != 0u;
 }

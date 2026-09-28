@@ -460,6 +460,7 @@ test_suites = [
 		'name': 'dt',
 		'sources': files(
 			'dt_test.c',
+			'../firmware/dt/device.c',
 			'../firmware/dt/dt.c',
 		),
 		'link_with': base_test_lib,

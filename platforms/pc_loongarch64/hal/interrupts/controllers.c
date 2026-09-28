@@ -2,6 +2,7 @@
 
 #include <core/cpu.h>
 #include <firmware/acpi.h>
+#include <firmware/dt/device.h>
 #include <hal/paging.h>
 #include <kernel/boot.h>
 #include <stdbool.h>
@@ -9,7 +10,6 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "../../../iommu_fdt.h"
 #include "avec.h"
 #include "controller.h"
 #include "eiointc.h"
@@ -162,52 +162,59 @@ struct fixed_controller* loongarch64_fixed_by_domain(uint32_t domain) {
 	return NULL;
 }
 
-static bool fdt_u32_property(const char* compatible, const char* name, uint32_t* out) {
-	const uint8_t* data;
-	size_t         size;
-	if (out == NULL || !iommu_fdt_controller_property(compatible, 0u, name, &data, &size) || size != 4u) return false;
-	*out = iommu_fdt_u32(data);
+static bool dt_u32_property(struct dt_node node, const char* name, uint32_t* out) {
+	struct dt_property property;
+	uint64_t           value;
+
+	if (out == NULL || !dt_node_property(node, name, &property) || property.size != 4u ||
+	    !dt_property_read_cells(&property, 0u, 1u, &value))
+		return false;
+	*out = (uint32_t)value;
 	return true;
 }
 
 static bool discover_fdt(void) {
-	uintptr_t   eio_address    = 0u;
-	const char* eio_compatible = "loongson,ls2k2000-eiointc";
-	if (iommu_fdt_controllers(eio_compatible, 0u, &eio_address) == 0u) {
-		eio_compatible = "loongson,ls2k0500-eiointc";
-		if (iommu_fdt_controllers(eio_compatible, 0u, &eio_address) == 0u) return false;
+	struct dt_node eio_node;
+	struct dt_reg  eio_reg;
+	eio_node = dt_device_at("loongson,ls2k2000-eiointc", 0u);
+	if (!dt_node_valid(eio_node)) {
+		eio_node = dt_device_at("loongson,ls2k0500-eiointc", 0u);
+		if (!dt_node_valid(eio_node)) return false;
 		eiointc.vector_count = 128u;
 	}
 	else eiointc.vector_count = EIOINTC_VECTOR_COUNT;
+	if (!dt_node_reg(eio_node, 0u, &eio_reg) || eio_reg.address == 0u || eio_reg.address > UINTPTR_MAX) return false;
 	uint32_t cascade;
-	if (!fdt_u32_property(eio_compatible, "interrupts", &cascade) || cascade < LOONGARCH64_CPU_HWI_BASE ||
+	if (!dt_u32_property(eio_node, "interrupts", &cascade) || cascade < LOONGARCH64_CPU_HWI_BASE ||
 	    cascade >= LOONGARCH64_CPU_HWI_LIMIT)
 		return false;
 	eiointc.cascade   = cascade;
 	eiointc.node_map  = UINT64_MAX;
 	eiointc.described = true;
 
-	uintptr_t pch_address;
-	uintptr_t pch_size;
-	uint32_t  vector_base;
-	if (iommu_fdt_controllers_region("loongson,pch-pic-1.0", 0u, &pch_address, &pch_size) == 1u &&
-	    fdt_u32_property("loongson,pch-pic-1.0", "loongson,pic-base-vec", &vector_base))
+	struct dt_node pch_node = dt_device_at("loongson,pch-pic-1.0", 0u);
+	struct dt_reg  pch_reg;
+	uint32_t       vector_base;
+	if (dt_device_count("loongson,pch-pic-1.0") == 1u && dt_node_reg(pch_node, 0u, &pch_reg) &&
+	    pch_reg.address <= UINTPTR_MAX && pch_reg.size <= UINTPTR_MAX &&
+	    dt_u32_property(pch_node, "loongson,pic-base-vec", &vector_base))
 		(void)add_fixed(FIXED_PCH_PIC,
 		                LOONGARCH64_DOMAIN_PCH_PIC_BASE,
-		                pch_address,
-		                pch_size,
+		                (uintptr_t)pch_reg.address,
+		                (uintptr_t)pch_reg.size,
 		                PCH_PIC_SOURCE_COUNT,
 		                vector_base,
 		                UINT32_MAX);
 
-	uintptr_t msi_address;
-	uint32_t  msi_first;
-	uint32_t  msi_count;
-	if (iommu_fdt_controllers("loongson,pch-msi-1.0", 0u, &msi_address) == 1u &&
-	    fdt_u32_property("loongson,pch-msi-1.0", "loongson,msi-base-vec", &msi_first) &&
-	    fdt_u32_property("loongson,pch-msi-1.0", "loongson,msi-num-vecs", &msi_count) && msi_count != 0u &&
+	struct dt_node msi_node = dt_device_at("loongson,pch-msi-1.0", 0u);
+	struct dt_reg  msi_reg;
+	uint32_t       msi_first;
+	uint32_t       msi_count;
+	if (dt_device_count("loongson,pch-msi-1.0") == 1u && dt_node_reg(msi_node, 0u, &msi_reg) &&
+	    msi_reg.address <= UINTPTR_MAX && dt_u32_property(msi_node, "loongson,msi-base-vec", &msi_first) &&
+	    dt_u32_property(msi_node, "loongson,msi-num-vecs", &msi_count) && msi_count != 0u &&
 	    msi_first < eiointc.vector_count && msi_count <= eiointc.vector_count - msi_first) {
-		pch_msi.address   = msi_address;
+		pch_msi.address   = (uintptr_t)msi_reg.address;
 		pch_msi.first     = msi_first;
 		pch_msi.count     = msi_count;
 		pch_msi.described = true;

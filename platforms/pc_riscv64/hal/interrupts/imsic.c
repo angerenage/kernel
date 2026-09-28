@@ -2,6 +2,7 @@
 
 #include <core/cpu.h>
 #include <core/interrupt.h>
+#include <firmware/dt/device.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>
 #include <stdbool.h>
@@ -9,7 +10,6 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "../../../iommu_fdt.h"
 #include "aplic.h"
 #include "interrupts.h"
 
@@ -44,57 +44,66 @@ static struct {
 static uint32_t imsic_init_lock;
 
 static bool imsic_find(void) {
-	size_t count = iommu_fdt_controllers("riscv,imsics", SIZE_MAX, NULL);
+	size_t count = dt_device_count("riscv,imsics");
 	if (count == 0u || count > 2u) return false;
 	bool selected = false;
 	for (size_t controller = 0u; controller < count; controller++) {
-		const uint8_t* interrupts;
-		size_t         interrupts_size;
-		if (!iommu_fdt_controller_property(
-				"riscv,imsics", controller, "interrupts-extended", &interrupts, &interrupts_size) ||
-		    interrupts_size == 0u || interrupts_size % 8u != 0u || interrupts_size > IMSIC_MAX_CPUS * 8u)
+		struct dt_node     node = dt_device_at("riscv,imsics", controller);
+		struct dt_property interrupts;
+		if (!dt_node_property(node, "interrupts-extended", &interrupts) || interrupts.size == 0u ||
+		    interrupts.size % 8u != 0u || interrupts.size > IMSIC_MAX_CPUS * 8u)
 			return false;
-		uint32_t cause = iommu_fdt_u32(interrupts + 4u);
+		uint64_t cause;
+		if (!dt_property_read_cells(&interrupts, 1u, 1u, &cause)) return false;
 		if (cause != 9u && cause != 11u) return false;
-		for (size_t offset = 0u; offset < interrupts_size; offset += 8u)
-			if (iommu_fdt_u32(interrupts + offset + 4u) != cause) return false;
+		for (size_t index = 0u; index < interrupts.size / 8u; index++) {
+			uint64_t other;
+
+			if (!dt_property_read_cells(&interrupts, index * 2u + 1u, 1u, &other) || other != cause) return false;
+		}
 		if (cause != 9u) continue;
 		if (selected) return false;
 		selected = true;
-		uintptr_t base;
-		uintptr_t size;
-		if (iommu_fdt_controllers_region("riscv,imsics", controller, &base, &size) <= controller || base == 0u ||
-		    base % IMSIC_PAGE_SIZE != 0u)
+		struct dt_reg reg;
+		if (!dt_node_reg(node, 0u, &reg) || reg.address == 0u || reg.address > UINTPTR_MAX || reg.size > UINTPTR_MAX ||
+		    reg.address % IMSIC_PAGE_SIZE != 0u)
 			return false;
-		const uint8_t* property;
-		size_t         property_size;
-		if (!iommu_fdt_controller_property("riscv,imsics", controller, "riscv,num-ids", &property, &property_size) ||
-		    property_size != 4u)
+		uintptr_t          base = (uintptr_t)reg.address;
+		uintptr_t          size = (uintptr_t)reg.size;
+		struct dt_property property;
+		uint64_t           value;
+		if (!dt_node_property(node, "riscv,num-ids", &property) || property.size != 4u ||
+		    !dt_property_read_cells(&property, 0u, 1u, &value))
 			return false;
-		uint32_t ids = iommu_fdt_u32(property);
+		uint32_t ids = (uint32_t)value;
 		if (ids < 63u || ids > IMSIC_MAX_IDS) return false;
 		uint32_t phandle = 0u;
-		if (iommu_fdt_controller_property("riscv,imsics", controller, "phandle", &property, &property_size)) {
-			if (property_size != 4u || (phandle = iommu_fdt_u32(property)) == 0u) return false;
+		if (dt_node_property(node, "phandle", &property)) {
+			if (property.size != 4u || !dt_property_read_cells(&property, 0u, 1u, &value) || value == 0u) return false;
+			phandle = (uint32_t)value;
 		}
 		uint32_t guest_bits = 0u;
-		if (iommu_fdt_controller_property(
-				"riscv,imsics", controller, "riscv,guest-index-bits", &property, &property_size)) {
-			if (property_size != 4u || (guest_bits = iommu_fdt_u32(property)) > 7u) return false;
+		if (dt_node_property(node, "riscv,guest-index-bits", &property)) {
+			if (property.size != 4u || !dt_property_read_cells(&property, 0u, 1u, &value) || value > 7u) return false;
+			guest_bits = (uint32_t)value;
 		}
 		uint32_t group_bits = 0u;
-		if (iommu_fdt_controller_property(
-				"riscv,imsics", controller, "riscv,group-index-bits", &property, &property_size)) {
-			if (property_size != 4u || (group_bits = iommu_fdt_u32(property)) != 0u) return false;
+		if (dt_node_property(node, "riscv,group-index-bits", &property)) {
+			if (property.size != 4u || !dt_property_read_cells(&property, 0u, 1u, &value) || value != 0u) return false;
+			group_bits = (uint32_t)value;
 		}
 		/* Multi-group layouts need per-group reg/interrupt mappings; do not guess them. */
 		(void)group_bits;
-		size_t    hart_count = interrupts_size / 8u;
+		size_t    hart_count = interrupts.size / 8u;
 		uintptr_t stride     = (uintptr_t)IMSIC_PAGE_SIZE << guest_bits;
 		if (hart_count > size / stride || base > UINTPTR_MAX - size) return false;
 		for (size_t index = 0u; index < hart_count; index++) {
 			uint64_t hart;
-			if (!riscv64_interrupt_hart_for_phandle(iommu_fdt_u32(interrupts + index * 8u), &hart)) return false;
+			uint64_t phandle_value;
+
+			if (!dt_property_read_cells(&interrupts, index * 2u, 1u, &phandle_value) ||
+			    !riscv64_interrupt_hart_for_phandle((uint32_t)phandle_value, &hart))
+				return false;
 			for (size_t previous = 0u; previous < index; previous++)
 				if (imsic.harts[previous].hart_id == hart) return false;
 			imsic.harts[index] = (struct imsic_hart){.hart_id = hart, .message_address = base + index * stride};

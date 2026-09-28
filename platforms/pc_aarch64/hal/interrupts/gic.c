@@ -5,6 +5,7 @@
 #include <core/lock.h>
 #include <core/spinlock.h>
 #include <firmware/acpi.h>
+#include <firmware/dt/device.h>
 #include <hal/interrupts.h>
 #include <hal/paging.h>
 #include <kernel/boot.h>
@@ -13,7 +14,6 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "../../../iommu_fdt.h"
 #include "../clock.h"
 #include "gicv3.h"
 
@@ -139,12 +139,17 @@ static bool gic_find_fdt_v2(uintptr_t* out_distributor, uintptr_t* out_cpu_inter
 	static const char* const compatibles[] = {
 		"arm,gic-400", "arm,cortex-a15-gic", "arm,cortex-a7-gic", "arm,gic-v2", "arm,pl390"};
 	for (size_t i = 0u; i < sizeof(compatibles) / sizeof(compatibles[0]); i++) {
-		uintptr_t distributor   = 0u;
-		uintptr_t cpu_interface = 0u;
-		if (iommu_fdt_controllers_full(compatibles[i], 0u, &distributor, &cpu_interface) == 0u) continue;
-		if (distributor == 0u || cpu_interface == 0u) return false;
-		*out_distributor   = distributor;
-		*out_cpu_interface = cpu_interface;
+		struct dt_node node = dt_device_at(compatibles[i], 0u);
+		struct dt_reg  distributor;
+		struct dt_reg  cpu_interface;
+
+		if (!dt_node_valid(node)) continue;
+		if (!dt_node_reg(node, 0u, &distributor) || !dt_node_reg(node, 1u, &cpu_interface) ||
+		    distributor.address == 0u || distributor.address > UINTPTR_MAX || cpu_interface.address == 0u ||
+		    cpu_interface.address > UINTPTR_MAX)
+			return false;
+		*out_distributor   = (uintptr_t)distributor.address;
+		*out_cpu_interface = (uintptr_t)cpu_interface.address;
 		return true;
 	}
 	return false;
@@ -408,10 +413,11 @@ bool aarch64_gic_local_source_deinit(struct hal_interrupt_source_state* state) {
 }
 
 static bool gic_v2m_frame_phys(uintptr_t* out_frame) {
-	uintptr_t frame = 0u;
+	struct dt_reg frame;
 	if (out_frame == NULL) return false;
-	if (iommu_fdt_controllers("arm,gic-v2m-frame", 0u, &frame) != 0u && frame != 0u) {
-		*out_frame = frame;
+	if (dt_node_reg(dt_device_at("arm,gic-v2m-frame", 0u), 0u, &frame) && frame.address != 0u &&
+	    frame.address <= UINTPTR_MAX) {
+		*out_frame = (uintptr_t)frame.address;
 		return true;
 	}
 	const struct acpi_sdt_header* madt = acpi_table_next("APIC", NULL);

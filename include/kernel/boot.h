@@ -22,12 +22,6 @@ struct kernel_boot_framebuffer {
 	uint8_t  blue_mask_shift;
 };
 
-/* Immutable byte range supplied by the bootloader. */
-struct kernel_boot_data {
-	const void* address;
-	size_t      size;
-};
-
 /* Address-space facts reported by the bootloader for the running kernel image. */
 struct kernel_boot_address_space {
 	uintptr_t direct_map_offset;
@@ -78,9 +72,6 @@ bool kernel_boot_rsdp_address(uintptr_t* out_address);
 
 /* Return the unvalidated Device Tree candidate address reported by the bootloader. */
 bool kernel_boot_dtb_address(uintptr_t* out_address);
-
-/* Return the provider-validated Device Tree blob for unmigrated kernel consumers. */
-bool kernel_boot_dtb_get(struct kernel_boot_data* out);
 
 /* Return the bootloader's direct-map and kernel image address-space information. */
 bool kernel_boot_address_space_get(struct kernel_boot_address_space* out);

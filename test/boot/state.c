@@ -88,7 +88,6 @@ Test(boot_state, optional_boot_resources_are_validated_and_published) {
 	static struct limine_framebuffer          framebuffer;
 	static struct limine_framebuffer*         framebuffers[1];
 	static struct limine_framebuffer_response framebuffer_response;
-	struct kernel_boot_data                   data;
 	struct kernel_boot_framebuffer            captured;
 	uintptr_t                                 rsdp_address;
 	uintptr_t                                 dtb_address;
@@ -121,11 +120,6 @@ Test(boot_state, optional_boot_resources_are_validated_and_published) {
 	cr_assert_eq(rsdp_address, (uintptr_t)rsdp);
 	cr_assert(kernel_boot_dtb_address(&dtb_address));
 	cr_assert_eq(dtb_address, (uintptr_t)dtb);
-	cr_assert_not(kernel_boot_dtb_get(&data));
-	boot_test_set_dt_initialized(true);
-	cr_assert(kernel_boot_dtb_get(&data));
-	cr_assert_eq(data.address, dtb);
-	cr_assert_eq(data.size, sizeof(dtb));
 	cr_assert(kernel_boot_framebuffer_get(&captured));
 	cr_assert_eq(captured.address, framebuffer_memory);
 	cr_assert_eq(captured.pitch, 128u);

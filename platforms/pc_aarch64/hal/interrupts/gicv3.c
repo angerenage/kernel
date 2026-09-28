@@ -5,6 +5,7 @@
 #include <core/lock.h>
 #include <core/spinlock.h>
 #include <firmware/acpi.h>
+#include <firmware/dt/device.h>
 #include <hal/interrupts.h>
 #include <hal/paging.h>
 #include <kernel/boot.h>
@@ -13,7 +14,6 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "../../../iommu_fdt.h"
 #include "../clock.h"
 
 #define GICV3_PAGE_SIZE 0x1000u
@@ -168,7 +168,7 @@ bool aarch64_gicv3_described(void) {
 	uintptr_t redistributors;
 	uintptr_t size;
 	bool      described = false;
-	if (iommu_fdt_compatible_present("arm,gic-v3")) return true;
+	if (dt_device_count("arm,gic-v3") != 0u) return true;
 	(void)gicv3_find_acpi(&distributor, &redistributors, &size, &described);
 	return described;
 }
@@ -179,17 +179,26 @@ bool aarch64_gicv3_init_global(void) {
 	uintptr_t size           = 0u;
 	uintptr_t stride         = 0u;
 	if (__atomic_load_n(&ready, __ATOMIC_ACQUIRE)) return true;
-	if (iommu_fdt_compatible_present("arm,gic-v3")) {
-		if (iommu_fdt_controllers_second_region("arm,gic-v3", 0u, &distributor, &redistributors, &size) != 1u)
+	if (dt_device_count("arm,gic-v3") != 0u) {
+		struct dt_node node = dt_device_at("arm,gic-v3", 0u);
+		struct dt_reg  distributor_reg;
+		struct dt_reg  redistributors_reg;
+
+		if (dt_device_count("arm,gic-v3") != 1u || !dt_node_reg(node, 0u, &distributor_reg) ||
+		    !dt_node_reg(node, 1u, &redistributors_reg) || distributor_reg.address > UINTPTR_MAX ||
+		    redistributors_reg.address > UINTPTR_MAX || redistributors_reg.size > UINTPTR_MAX)
 			return false;
-		const uint8_t* property;
-		size_t         property_size;
-		if (iommu_fdt_controller_property("arm,gic-v3", 0u, "#redistributor-regions", &property, &property_size) &&
-		    (property_size != 4u || iommu_fdt_u32(property) != 1u))
+		distributor    = (uintptr_t)distributor_reg.address;
+		redistributors = (uintptr_t)redistributors_reg.address;
+		size           = (uintptr_t)redistributors_reg.size;
+		struct dt_property property;
+		uint64_t           value;
+		if (dt_node_property(node, "#redistributor-regions", &property) &&
+		    (property.size != 4u || !dt_property_read_cells(&property, 0u, 1u, &value) || value != 1u))
 			return false;
-		if (iommu_fdt_controller_property("arm,gic-v3", 0u, "redistributor-stride", &property, &property_size)) {
+		if (dt_node_property(node, "redistributor-stride", &property)) {
 			uint64_t value;
-			if (property_size != 8u || !iommu_fdt_cells(property, 2u, &value) || value > UINTPTR_MAX ||
+			if (property.size != 8u || !dt_property_read_cells(&property, 0u, 2u, &value) || value > UINTPTR_MAX ||
 			    value < GICV3_REDIST_STRIDE || (value & 0xffffu) != 0u)
 				return false;
 			stride = (uintptr_t)value;
@@ -446,53 +455,64 @@ bool aarch64_gicv3_source_deinit(struct hal_interrupt_source_state* state) {
 	return true;
 }
 
-static bool gicv3_mbi_ranges(const uint8_t** out_ranges, size_t* out_count) {
-	const uint8_t* ranges;
-	size_t         size;
+static bool gicv3_mbi_ranges(struct dt_property* out_ranges, size_t* out_count) {
+	struct dt_node     node = dt_device_at("arm,gic-v3", 0u);
+	struct dt_property controller;
+	struct dt_property ranges;
 	if (!ready || (gicv3_read32(distributor_phys + GICD_TYPER) & GICD_TYPER_MBIS) == 0u ||
-	    !iommu_fdt_controller_property("arm,gic-v3", 0u, "msi-controller", NULL, NULL) ||
-	    !iommu_fdt_controller_property("arm,gic-v3", 0u, "mbi-ranges", &ranges, &size) || size == 0u ||
-	    size % 8u != 0u || size > (GICV3_SPURIOUS_INTID - 32u) * 8u)
+	    !dt_node_property(node, "msi-controller", &controller) || !dt_node_property(node, "mbi-ranges", &ranges) ||
+	    ranges.size == 0u || ranges.size % 8u != 0u || ranges.size > (GICV3_SPURIOUS_INTID - 32u) * 8u)
 		return false;
-	for (size_t index = 0u; index < size / 8u; index++) {
-		uint32_t first = iommu_fdt_u32(ranges + index * 8u);
-		uint32_t count = iommu_fdt_u32(ranges + index * 8u + 4u);
+	for (size_t index = 0u; index < ranges.size / 8u; index++) {
+		uint64_t first;
+		uint64_t count;
+
+		if (!dt_property_read_cells(&ranges, index * 2u, 1u, &first) ||
+		    !dt_property_read_cells(&ranges, index * 2u + 1u, 1u, &count))
+			return false;
 		if (first < 32u || first >= GICV3_SPURIOUS_INTID || count == 0u || count > GICV3_SPURIOUS_INTID - first ||
-		    !gicv3_source_valid(first + count - 1u))
+		    !gicv3_source_valid((uint32_t)(first + count - 1u)))
 			return false;
 		for (size_t previous = 0u; previous < index; previous++) {
-			uint32_t other_first = iommu_fdt_u32(ranges + previous * 8u);
-			uint32_t other_count = iommu_fdt_u32(ranges + previous * 8u + 4u);
+			uint64_t other_first;
+			uint64_t other_count;
+
+			if (!dt_property_read_cells(&ranges, previous * 2u, 1u, &other_first) ||
+			    !dt_property_read_cells(&ranges, previous * 2u + 1u, 1u, &other_count))
+				return false;
 			if (first < other_first + other_count && other_first < first + count) return false;
 		}
 	}
 	*out_ranges = ranges;
-	*out_count  = size / 8u;
+	*out_count  = ranges.size / 8u;
 	return true;
 }
 
 size_t aarch64_gicv3_message_range_count(void) {
-	const uint8_t* ranges;
-	size_t         count;
+	struct dt_property ranges;
+	size_t             count;
 	return gicv3_mbi_ranges(&ranges, &count) ? count : 0u;
 }
 
 bool aarch64_gicv3_message_range_at(size_t index, struct hal_interrupt_message_range* out) {
-	const uint8_t* ranges;
-	size_t         count;
+	struct dt_property ranges;
+	size_t             count;
+	uint64_t           first;
+	uint64_t           span;
 	if (out == NULL || !gicv3_mbi_ranges(&ranges, &count) || index >= count) return false;
-	uint32_t first = iommu_fdt_u32(ranges + index * 8u);
-	uint32_t span  = iommu_fdt_u32(ranges + index * 8u + 4u);
-	*out           = (struct hal_interrupt_message_range){
-		.domain = 0u, .delivery = {.domain = 0u, .base = first, .limit = first + span}
+	if (!dt_property_read_cells(&ranges, index * 2u, 1u, &first) ||
+	    !dt_property_read_cells(&ranges, index * 2u + 1u, 1u, &span))
+		return false;
+	*out = (struct hal_interrupt_message_range){
+		.domain = 0u, .delivery = {.domain = 0u, .base = (uint32_t)first, .limit = (uint32_t)(first + span)}
     };
 	return true;
 }
 
 bool aarch64_gicv3_message_target_supported(uint32_t domain, const struct hal_interrupt_message_source* source,
                                             const struct cpu* target) {
-	const uint8_t* ranges;
-	size_t         count;
+	struct dt_property ranges;
+	size_t             count;
 	return domain == 0u && source == NULL && target != NULL && target->index < GICV3_MAX_CPUS &&
 	       local_ready[target->index] && gicv3_mbi_ranges(&ranges, &count);
 }
@@ -500,8 +520,8 @@ bool aarch64_gicv3_message_target_supported(uint32_t domain, const struct hal_in
 bool aarch64_gicv3_message_init(struct hal_interrupt_message_state*         state,
                                 const struct hal_interrupt_message_request* request,
                                 struct hal_interrupt_message*               out) {
-	const uint8_t* ranges;
-	size_t         count;
+	struct dt_property ranges;
+	size_t             count;
 	if (state == NULL || state->initialized || request == NULL || out == NULL ||
 	    !aarch64_gicv3_message_target_supported(request->domain, request->source, request->target) ||
 	    !gicv3_mbi_ranges(&ranges, &count))
@@ -510,20 +530,24 @@ bool aarch64_gicv3_message_init(struct hal_interrupt_message_state*         stat
 	if (request->event.domain != 0u) return false;
 	bool in_range = false;
 	for (size_t index = 0u; index < count; ++index) {
-		uint32_t first = iommu_fdt_u32(ranges + index * 8u);
-		uint32_t span  = iommu_fdt_u32(ranges + index * 8u + 4u);
+		uint64_t first;
+		uint64_t span;
+
+		if (!dt_property_read_cells(&ranges, index * 2u, 1u, &first) ||
+		    !dt_property_read_cells(&ranges, index * 2u + 1u, 1u, &span))
+			return false;
 		if (id >= first && id - first < span) {
 			in_range = true;
 			break;
 		}
 	}
 	if (!in_range) return false;
-	uint64_t       message_base = (uint64_t)distributor_phys;
-	const uint8_t* alias;
-	size_t         alias_size;
-	if (iommu_fdt_controller_property("arm,gic-v3", 0u, "mbi-alias", &alias, &alias_size) &&
-	    ((alias_size != 4u && alias_size != 8u) ||
-	     !iommu_fdt_cells(alias, (uint32_t)(alias_size / 4u), &message_base) || message_base == 0u))
+	uint64_t           message_base = (uint64_t)distributor_phys;
+	struct dt_property alias;
+	struct dt_node     node = dt_device_at("arm,gic-v3", 0u);
+	if (dt_node_property(node, "mbi-alias", &alias) &&
+	    ((alias.size != 4u && alias.size != 8u) ||
+	     !dt_property_read_cells(&alias, 0u, alias.size / 4u, &message_base) || message_base == 0u))
 		return false;
 	if (message_base > UINT64_MAX - GICD_SETSPI_NSR) return false;
 	uintptr_t base          = distributor_phys;

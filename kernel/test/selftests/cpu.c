@@ -2,6 +2,7 @@
 #include <core/cpu.h>
 #include <core/sched.h>
 #include <core/spinlock.h>
+#include <firmware/dt/device.h>
 #include <hal/cache.h>
 #include <hal/interrupts.h>
 #include <kernel/cpu_boot.h>
@@ -9,10 +10,6 @@
 
 #include "../selftest.h"
 #include "sync_helpers.h"
-
-#if defined(PLATFORM_PC_RISCV64) || defined(PLATFORM_PC_LOONGARCH64)
-#include "../../../platforms/iommu_fdt.h"
-#endif
 
 #if defined(PLATFORM_PC_RISCV64)
 #include "../../../platforms/pc_riscv64/hal/interrupts/imsic.h"
@@ -193,8 +190,11 @@ static void kernel_selftest_cpu_plic_firmware_source_contract(struct kernel_self
 	struct hal_interrupt_source      source       = {.domain = 1u, .number = 1u};
 	struct hal_interrupt_source      aplic_source = {.domain = 2u, .number = 1u};
 	struct hal_interrupt_source_info info;
-	size_t                           described = iommu_fdt_controllers("sifive,plic-1.0.0", 0u, &controller);
-	if (described == 0u) described = iommu_fdt_controllers("riscv,plic0", 0u, &controller);
+	struct dt_node                   node = dt_device_at("sifive,plic-1.0.0", 0u);
+	if (!dt_node_valid(node)) node = dt_device_at("riscv,plic0", 0u);
+	struct dt_reg reg;
+	size_t        described = dt_node_reg(node, 0u, &reg) && reg.address <= UINTPTR_MAX ? 1u : 0u;
+	if (described != 0u) controller = (uintptr_t)reg.address;
 	bool available       = hal_interrupt_source_info(&source, &info);
 	bool aplic_available = hal_interrupt_source_info(&aplic_source, &info);
 	if (described == 0u) {
@@ -209,8 +209,7 @@ static void kernel_selftest_cpu_plic_firmware_source_contract(struct kernel_self
 		KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_source_info(&aggregate, &info));
 		return;
 	}
-	KERNEL_SELFTEST_ASSERT(
-		ctx, iommu_fdt_compatible_present("sifive,plic-1.0.0") || iommu_fdt_compatible_present("riscv,plic0"));
+	KERNEL_SELFTEST_ASSERT(ctx, dt_device_count("sifive,plic-1.0.0") != 0u || dt_device_count("riscv,plic0") != 0u);
 	if (described != 1u || controller == 0u || !available) {
 		KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_domain_count() == (aplic_available ? 1u : 0u));
 		return;
@@ -234,7 +233,7 @@ static void kernel_selftest_cpu_plic_firmware_source_contract(struct kernel_self
 
 static void kernel_selftest_cpu_imsic_message_contract(struct kernel_selftest_context* ctx) {
 	struct hal_interrupt_message_range range;
-	bool                               described = iommu_fdt_compatible_present("riscv,imsics");
+	bool                               described = dt_device_count("riscv,imsics") != 0u;
 	if (!described) {
 		KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_range_count() == 0u);
 		KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_message_range_at(0u, &range));
@@ -243,15 +242,15 @@ static void kernel_selftest_cpu_imsic_message_contract(struct kernel_selftest_co
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_range_count() == 1u);
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_range_at(0u, &range));
 	KERNEL_SELFTEST_ASSERT(ctx, range.delivery.base == 1u && range.delivery.limit > range.delivery.base);
-	size_t         selected_controller;
-	const uint8_t* ids_property;
-	size_t         ids_property_size;
+	size_t             selected_controller;
+	struct dt_property ids_property;
+	uint64_t           ids;
 	KERNEL_SELFTEST_ASSERT(
 		ctx,
 		riscv64_imsic_selected_controller(&selected_controller) &&
-			iommu_fdt_controller_property(
-				"riscv,imsics", selected_controller, "riscv,num-ids", &ids_property, &ids_property_size) &&
-			ids_property_size == 4u && range.delivery.limit == iommu_fdt_u32(ids_property) + 1u);
+			dt_node_property(dt_device_at("riscv,imsics", selected_controller), "riscv,num-ids", &ids_property) &&
+			ids_property.size == 4u && dt_property_read_cells(&ids_property, 0u, 1u, &ids) &&
+			range.delivery.limit == ids + 1u);
 	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_message_range_at(1u, &range));
 	struct hal_interrupt_message_request request = {
 		.domain = range.domain,
@@ -290,7 +289,7 @@ static void kernel_selftest_cpu_imsic_message_contract(struct kernel_selftest_co
 }
 
 static void kernel_selftest_cpu_aplic_source_starts_masked(struct kernel_selftest_context* ctx) {
-	if (!iommu_fdt_compatible_present("qemu,aplic")) return;
+	if (dt_device_count("qemu,aplic") == 0u) return;
 	struct hal_interrupt_source_domain_info domain;
 	if (!hal_interrupt_source_domain_at(0u, &domain) || domain.domain != 2u) return;
 	struct hal_interrupt_source      source = {.domain = domain.domain, .number = domain.source_count};
@@ -322,7 +321,7 @@ static void kernel_selftest_cpu_loongarch_interrupt_contract(struct kernel_selft
 	struct hal_interrupt_source      aggregate = {.domain = 0u, .number = 3u};
 	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_source_info(&aggregate, &info));
 
-	bool                                    pch_described = iommu_fdt_compatible_present("loongson,pch-pic-1.0");
+	bool                                    pch_described = dt_device_count("loongson,pch-pic-1.0") != 0u;
 	struct hal_interrupt_source_domain_info pch_domain    = {0};
 	bool                                    found_pch     = false;
 	for (size_t index = 0u; index < hal_interrupt_source_domain_count(); index++) {
@@ -353,7 +352,7 @@ static void kernel_selftest_cpu_loongarch_interrupt_contract(struct kernel_selft
 	}
 
 	struct hal_interrupt_message_range message_range;
-	bool                               msi_described = iommu_fdt_compatible_present("loongson,pch-msi-1.0");
+	bool                               msi_described = dt_device_count("loongson,pch-msi-1.0") != 0u;
 	if (!hal_interrupt_message_range_at(0u, &message_range)) {
 		KERNEL_SELFTEST_ASSERT(ctx, !msi_described && hal_interrupt_message_range_count() == 0u);
 		return;

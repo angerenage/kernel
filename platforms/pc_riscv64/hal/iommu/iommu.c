@@ -1,9 +1,25 @@
 #include <firmware/acpi.h>
+#include <firmware/dt/device.h>
 #include <hal/iommu.h>
 #include <string.h>
 
-#include "../../../iommu_fdt.h"
 #include "riscv.h"
+
+static size_t dt_controllers(size_t target, uintptr_t* out_address) {
+	size_t count        = 0u;
+	size_t device_count = dt_device_count("riscv,iommu");
+
+	for (size_t index = 0u; index < device_count; index++) {
+		struct dt_reg reg;
+
+		if (!dt_node_reg(dt_device_at("riscv,iommu", index), 0u, &reg) || reg.address == 0u ||
+		    reg.address > UINTPTR_MAX)
+			continue;
+		if (count == target && out_address != NULL) *out_address = (uintptr_t)reg.address;
+		count++;
+	}
+	return count;
+}
 
 static size_t acpi_controllers(size_t target, uintptr_t* out_address) {
 	const struct acpi_sdt_header* table = acpi_table_next("RIMT", NULL);
@@ -37,13 +53,13 @@ static size_t acpi_controllers(size_t target, uintptr_t* out_address) {
 }
 
 size_t hal_iommu_controller_count(void) {
-	return iommu_fdt_controllers("riscv,iommu", SIZE_MAX, NULL) + acpi_controllers(SIZE_MAX, NULL);
+	return dt_controllers(SIZE_MAX, NULL) + acpi_controllers(SIZE_MAX, NULL);
 }
 
 bool hal_iommu_controller_at(size_t index, struct hal_iommu_controller_descriptor* out_descriptor) {
 	uintptr_t address;
 	if (out_descriptor == NULL) return false;
-	size_t count = iommu_fdt_controllers("riscv,iommu", index, &address);
+	size_t count = dt_controllers(index, &address);
 	if (index >= count && index - count >= acpi_controllers(index - count, &address)) return false;
 	*out_descriptor =
 		(struct hal_iommu_controller_descriptor){.kind = HAL_IOMMU_KIND_RISCV, .register_address = address};

@@ -36,10 +36,6 @@ static void*                            boot_cpu_private[KERNEL_BOOT_MAX_CPUS];
 static size_t                           boot_cpu_count;
 static bool                             boot_initialized;
 
-static uint32_t kernel_boot_read_be32(const uint8_t* value) {
-	return ((uint32_t)value[0] << 24u) | ((uint32_t)value[1] << 16u) | ((uint32_t)value[2] << 8u) | (uint32_t)value[3];
-}
-
 static enum mem_range_type kernel_boot_mem_range_type(uint64_t type) {
 	switch (type) {
 	case LIMINE_MEMMAP_USABLE:
@@ -327,17 +323,6 @@ bool kernel_boot_rsdp_address(uintptr_t* out_address) {
 bool kernel_boot_dtb_address(uintptr_t* out_address) {
 	if (out_address == NULL || !boot_initialized || !boot_dtb_valid) return false;
 	*out_address = (uintptr_t)boot_dtb_address;
-	return true;
-}
-
-bool kernel_boot_dtb_get(struct kernel_boot_data* out) {
-	struct dt_node root = dt_root();
-
-	if (out == NULL || !boot_initialized || !boot_dtb_valid || !dt_node_valid(root)) return false;
-	*out = (struct kernel_boot_data){
-		.address = boot_dtb_address,
-		.size    = kernel_boot_read_be32((const uint8_t*)boot_dtb_address + 4u),
-	};
 	return true;
 }
 

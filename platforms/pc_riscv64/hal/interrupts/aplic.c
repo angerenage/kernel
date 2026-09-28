@@ -2,6 +2,7 @@
 
 #include <core/cpu.h>
 #include <core/interrupt.h>
+#include <firmware/dt/device.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>
 #include <hal/paging.h>
@@ -11,7 +12,6 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "../../../iommu_fdt.h"
 #include "imsic.h"
 #include "interrupts.h"
 
@@ -58,113 +58,44 @@ static struct {
 static uint32_t aplic_init_lock;
 
 bool riscv64_interrupt_hart_for_phandle(uint32_t wanted, uint64_t* out_hart) {
-	struct kernel_boot_data dtb;
-	struct iommu_fdt_node   stack[IOMMU_FDT_MAX_DEPTH];
-	uint32_t                phandles[IOMMU_FDT_MAX_DEPTH];
-	if (wanted == 0u || out_hart == NULL || !kernel_boot_dtb_get(&dtb) || dtb.address == NULL || dtb.size < 40u ||
-	    iommu_fdt_u32(dtb.address) != IOMMU_FDT_MAGIC)
+	struct dt_node interrupt_controller;
+	struct dt_node cpu;
+	struct dt_reg  reg;
+
+	if (wanted == 0u || out_hart == NULL) return false;
+	interrupt_controller = dt_node_by_phandle(wanted);
+	if (!dt_node_enabled(interrupt_controller) || !dt_node_compatible(interrupt_controller, "riscv,cpu-intc"))
 		return false;
-	const uint8_t* blob             = dtb.address;
-	uint32_t       total            = iommu_fdt_u32(blob + 4u);
-	uint32_t       structure_offset = iommu_fdt_u32(blob + 8u);
-	uint32_t       strings_offset   = iommu_fdt_u32(blob + 12u);
-	uint32_t       strings_size     = iommu_fdt_u32(blob + 32u);
-	uint32_t       structure_size   = iommu_fdt_u32(blob + 36u);
-	if (total > dtb.size || structure_offset > total || structure_size > total - structure_offset ||
-	    strings_offset > total || strings_size > total - strings_offset)
-		return false;
-	const uint8_t* cursor  = blob + structure_offset;
-	const uint8_t* end     = cursor + structure_size;
-	const uint8_t* strings = blob + strings_offset;
-	size_t         depth   = 0u;
-	bool           found   = false;
-	while ((size_t)(end - cursor) >= 4u) {
-		uint32_t token = iommu_fdt_u32(cursor);
-		cursor += 4u;
-		if (token == IOMMU_FDT_BEGIN_NODE) {
-			if (depth == IOMMU_FDT_MAX_DEPTH) return false;
-			const uint8_t* name_end = memchr(cursor, '\0', (size_t)(end - cursor));
-			if (name_end == NULL) return false;
-			uint32_t address_cells = depth == 0u ? 2u : stack[depth - 1u].address_cells;
-			uint32_t size_cells    = depth == 0u ? 1u : stack[depth - 1u].size_cells;
-			stack[depth]           = (struct iommu_fdt_node){.parent_address_cells = address_cells,
-			                                                 .parent_size_cells    = size_cells,
-			                                                 .address_cells        = 2u,
-			                                                 .size_cells           = 1u};
-			phandles[depth++]      = 0u;
-			cursor += ((size_t)(name_end - cursor) + 4u) & ~(size_t)3u;
-		}
-		else if (token == IOMMU_FDT_END_NODE) {
-			if (depth == 0u) return false;
-			struct iommu_fdt_node* node = &stack[depth - 1u];
-			if (phandles[depth - 1u] == wanted && iommu_fdt_node_enabled(node) &&
-			    iommu_fdt_string_list_contains(node->compatible, node->compatible_size, "riscv,cpu-intc")) {
-				uint64_t hart;
-				if (found || depth < 2u || !iommu_fdt_node_enabled(&stack[depth - 2u]) ||
-				    stack[depth - 2u].reg_size < stack[depth - 2u].parent_address_cells * 4u ||
-				    !iommu_fdt_cells(stack[depth - 2u].reg, stack[depth - 2u].parent_address_cells, &hart))
-					return false;
-				*out_hart = hart;
-				found     = true;
-			}
-			depth--;
-		}
-		else if (token == IOMMU_FDT_PROPERTY) {
-			if (depth == 0u || (size_t)(end - cursor) < 8u) return false;
-			uint32_t length      = iommu_fdt_u32(cursor);
-			uint32_t name_offset = iommu_fdt_u32(cursor + 4u);
-			cursor += 8u;
-			if (length > (size_t)(end - cursor) || name_offset >= strings_size) return false;
-			const char* name = (const char*)strings + name_offset;
-			if (memchr(name, '\0', strings_size - name_offset) == NULL) return false;
-			struct iommu_fdt_node* node = &stack[depth - 1u];
-			if (strcmp(name, "#address-cells") == 0 && length == 4u) node->address_cells = iommu_fdt_u32(cursor);
-			else if (strcmp(name, "#size-cells") == 0 && length == 4u) node->size_cells = iommu_fdt_u32(cursor);
-			else if (strcmp(name, "compatible") == 0) {
-				node->compatible      = cursor;
-				node->compatible_size = length;
-			}
-			else if (strcmp(name, "status") == 0) {
-				node->status      = cursor;
-				node->status_size = length;
-			}
-			else if (strcmp(name, "reg") == 0) {
-				node->reg      = cursor;
-				node->reg_size = length;
-			}
-			else if (strcmp(name, "phandle") == 0 && length == 4u) phandles[depth - 1u] = iommu_fdt_u32(cursor);
-			cursor += (length + 3u) & ~3u;
-		}
-		else if (token == IOMMU_FDT_NOP) continue;
-		else if (token == IOMMU_FDT_END) return depth == 0u && found;
-		else return false;
-		if (cursor > end) return false;
-	}
-	return false;
+	cpu = dt_node_parent(interrupt_controller);
+	if (!dt_node_enabled(cpu) || !dt_node_reg_raw(cpu, 0u, &reg)) return false;
+	*out_hart = reg.address;
+	return true;
 }
 
 static bool aplic_find(void) {
-	size_t controller_count = iommu_fdt_controllers("riscv,aplic", SIZE_MAX, NULL);
+	size_t controller_count = dt_device_count("riscv,aplic");
 	if (controller_count == 0u || controller_count > 16u) return false;
 	bool selected = false;
 	for (size_t controller = 0u; controller < controller_count; controller++) {
-		const uint8_t* msi_parent_data;
-		size_t         msi_parent_size;
-		bool           msi =
-			iommu_fdt_controller_property("riscv,aplic", controller, "msi-parent", &msi_parent_data, &msi_parent_size);
-		if (msi && (msi_parent_size != 4u || iommu_fdt_u32(msi_parent_data) == 0u)) return false;
-		if (msi && !riscv64_imsic_is_parent(iommu_fdt_u32(msi_parent_data))) continue;
-		const uint8_t* interrupts;
-		size_t         interrupts_size;
+		struct dt_node     node = dt_device_at("riscv,aplic", controller);
+		struct dt_property msi_parent;
+		uint64_t           msi_parent_value = 0u;
+		bool               msi              = dt_node_property(node, "msi-parent", &msi_parent);
+
+		if (msi && (msi_parent.size != 4u || !dt_property_read_cells(&msi_parent, 0u, 1u, &msi_parent_value) ||
+		            msi_parent_value == 0u))
+			return false;
+		if (msi && !riscv64_imsic_is_parent((uint32_t)msi_parent_value)) continue;
+		struct dt_property interrupts;
 		if (!msi) {
-			if (!iommu_fdt_controller_property(
-					"riscv,aplic", controller, "interrupts-extended", &interrupts, &interrupts_size))
-				continue;
-			if (interrupts_size == 0u || interrupts_size % 8u != 0u || interrupts_size > APLIC_MAX_HARTS * 8u)
+			if (!dt_node_property(node, "interrupts-extended", &interrupts)) continue;
+			if (interrupts.size == 0u || interrupts.size % 8u != 0u || interrupts.size > APLIC_MAX_HARTS * 8u)
 				return false;
 			bool supervisor = false;
-			for (size_t offset = 0u; offset < interrupts_size; offset += 8u) {
-				uint32_t cause = iommu_fdt_u32(interrupts + offset + 4u);
+			for (size_t index = 0u; index < interrupts.size / 8u; index++) {
+				uint64_t cause;
+
+				if (!dt_property_read_cells(&interrupts, index * 2u + 1u, 1u, &cause)) return false;
 				if (cause != 9u && cause != 11u && cause != UINT32_MAX) return false;
 				if (cause == 9u) supervisor = true;
 			}
@@ -172,30 +103,36 @@ static bool aplic_find(void) {
 		}
 		if (selected) return false;
 		selected = true;
-		uintptr_t base;
-		uintptr_t size;
-		if (iommu_fdt_controllers_region("riscv,aplic", controller, &base, &size) <= controller || base == 0u)
+		struct dt_reg reg;
+		if (!dt_node_reg(node, 0u, &reg) || reg.address == 0u || reg.address > UINTPTR_MAX || reg.size > UINTPTR_MAX)
 			return false;
-		const uint8_t* count_data;
-		size_t         count_size;
-		if (!iommu_fdt_controller_property("riscv,aplic", controller, "riscv,num-sources", &count_data, &count_size) ||
-		    count_size != 4u)
+		uintptr_t          base = (uintptr_t)reg.address;
+		uintptr_t          size = (uintptr_t)reg.size;
+		struct dt_property count;
+		uint64_t           sources_value;
+		if (!dt_node_property(node, "riscv,num-sources", &count) || count.size != 4u ||
+		    !dt_property_read_cells(&count, 0u, 1u, &sources_value))
 			return false;
-		uint32_t sources = iommu_fdt_u32(count_data);
+		uint32_t sources = (uint32_t)sources_value;
 		if (sources == 0u || sources > APLIC_MAX_SOURCES) return false;
-		const uint8_t* indexes      = NULL;
-		size_t         indexes_size = 0u;
-		if (!msi &&
-		    iommu_fdt_controller_property("riscv,aplic", controller, "riscv,hart-indexes", &indexes, &indexes_size) &&
-		    indexes_size != interrupts_size / 2u)
-			return false;
+		struct dt_property indexes     = {0};
+		bool               has_indexes = !msi && dt_node_property(node, "riscv,hart-indexes", &indexes);
+		if (has_indexes && indexes.size != interrupts.size / 2u) return false;
 		struct aplic_hart harts[APLIC_MAX_HARTS];
 		size_t            hart_count    = 0u;
 		uint32_t          largest_index = 0u;
-		for (size_t offset = 0u; !msi && offset < interrupts_size; offset += 8u) {
-			if (iommu_fdt_u32(interrupts + offset + 4u) != 9u) continue;
-			uint32_t phandle = iommu_fdt_u32(interrupts + offset);
-			uint32_t index   = indexes == NULL ? (uint32_t)(offset / 8u) : iommu_fdt_u32(indexes + (offset / 8u) * 4u);
+		for (size_t entry = 0u; !msi && entry < interrupts.size / 8u; entry++) {
+			uint64_t phandle_value;
+			uint64_t cause;
+			uint64_t index_value = entry;
+
+			if (!dt_property_read_cells(&interrupts, entry * 2u, 1u, &phandle_value) ||
+			    !dt_property_read_cells(&interrupts, entry * 2u + 1u, 1u, &cause) ||
+			    (has_indexes && !dt_property_read_cells(&indexes, entry, 1u, &index_value)))
+				return false;
+			if (cause != 9u) continue;
+			uint32_t phandle = (uint32_t)phandle_value;
+			uint32_t index   = (uint32_t)index_value;
 			uint64_t hart;
 			if (index >= 16384u || !riscv64_interrupt_hart_for_phandle(phandle, &hart)) return false;
 			for (size_t previous = 0u; previous < hart_count; previous++)

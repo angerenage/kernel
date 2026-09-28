@@ -1,6 +1,7 @@
 #include <core/mm.h>
 #include <criterion/criterion.h>
 #include <firmware/dt.h>
+#include <firmware/dt/device.h>
 #include <kernel/boot.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -131,6 +132,7 @@ static void test_tree(uint32_t version) {
 	test_end_node();
 	test_end_node();
 	test_begin_node("off");
+	test_property(version, compatible_name, compatible, sizeof(compatible));
 	test_property(version, status_name, disabled, sizeof(disabled));
 	test_end_node();
 	test_end_node();
@@ -212,6 +214,10 @@ Test(dt, traversal_properties_and_standard_predicates) {
 	cr_assert_str_eq(dt_node_name(soc), "soc");
 	cr_assert_str_eq(dt_node_name(child), "child");
 	cr_assert_str_eq(dt_node_name(off), "off");
+	cr_assert_eq(dt_node_parent(soc).id, root.id);
+	cr_assert_eq(dt_node_parent(child).id, soc.id);
+	cr_assert_eq(dt_node_parent(off).id, root.id);
+	cr_assert_not(dt_node_valid(dt_node_parent(root)));
 	cr_assert_not(dt_node_valid(dt_node_next(child)));
 	cr_assert_not(dt_node_valid(dt_node_next(off)));
 	cr_assert(dt_node_enabled(soc));
@@ -236,6 +242,81 @@ Test(dt, traversal_properties_and_standard_predicates) {
 	cr_assert_not(dt_node_valid(dt_node_by_phandle(0u)));
 	cr_assert_not(dt_node_valid((struct dt_node){.id = SIZE_MAX}));
 	cr_assert_not(dt_node_valid((struct dt_node){.id = 2u}));
+	cr_assert_eq(dt_device_count("vendor,soc"), 1u);
+	cr_assert_eq(dt_device_at("vendor,soc", 0u).id, soc.id);
+	cr_assert_not(dt_node_valid(dt_device_at("vendor,soc", 1u)));
+	cr_assert_eq(dt_node_with_string_at("compatible", "vendor,soc", 0u).id, soc.id);
+	cr_assert_eq(dt_node_with_string_at("compatible", "vendor,soc", 1u).id, off.id);
+	cr_assert_not(dt_node_valid(dt_node_with_string_at("compatible", "missing", 0u)));
+}
+
+Test(dt, navigation_accepts_nop_before_root) {
+	struct dt_node root;
+	struct dt_node child;
+
+	test_reset();
+	test_token(4u);
+	test_begin_node("");
+	test_begin_node("child");
+	test_end_node();
+	test_end_node();
+	test_token(9u);
+	test_header(17u);
+	cr_assert(dt_init(test_arena));
+	root  = dt_root();
+	child = dt_node_child(root);
+	cr_assert_eq(root.id, 4u);
+	cr_assert_str_eq(dt_node_name(child), "child");
+	cr_assert_eq(dt_node_parent(child).id, root.id);
+}
+
+Test(dt, decodes_and_translates_device_registers) {
+	static const uint8_t root_address_cells[] = {0u, 0u, 0u, 2u};
+	static const uint8_t root_size_cells[]    = {0u, 0u, 0u, 2u};
+	static const uint8_t bus_address_cells[]  = {0u, 0u, 0u, 1u};
+	static const uint8_t bus_size_cells[]     = {0u, 0u, 0u, 1u};
+	static const uint8_t ranges[]             = {0u, 0u, 0x10u, 0u, 0u, 0u, 0u, 1u, 0u, 0u, 0u, 0u, 0u, 1u, 0u, 0u};
+	static const uint8_t compatible[]         = "vendor,device\0";
+	static const uint8_t reg[]                = {0u, 0u, 0x12u, 0u, 0u, 0u, 1u, 0u};
+	size_t               address_cells_name;
+	size_t               size_cells_name;
+	size_t               ranges_name;
+	size_t               compatible_name;
+	size_t               reg_name;
+	struct dt_node       device;
+	struct dt_reg        decoded;
+
+	test_reset();
+	address_cells_name = test_string("#address-cells");
+	size_cells_name    = test_string("#size-cells");
+	ranges_name        = test_string("ranges");
+	compatible_name    = test_string("compatible");
+	reg_name           = test_string("reg");
+	test_begin_node("");
+	test_property(17u, address_cells_name, root_address_cells, sizeof(root_address_cells));
+	test_property(17u, size_cells_name, root_size_cells, sizeof(root_size_cells));
+	test_begin_node("bus");
+	test_property(17u, address_cells_name, bus_address_cells, sizeof(bus_address_cells));
+	test_property(17u, size_cells_name, bus_size_cells, sizeof(bus_size_cells));
+	test_property(17u, ranges_name, ranges, sizeof(ranges));
+	test_begin_node("device@1200");
+	test_property(17u, compatible_name, compatible, sizeof(compatible));
+	test_property(17u, reg_name, reg, sizeof(reg));
+	test_end_node();
+	test_end_node();
+	test_end_node();
+	test_token(9u);
+	test_header(17u);
+	cr_assert(dt_init(test_arena));
+	cr_assert_eq(dt_device_count("vendor,device"), 1u);
+	device = dt_device_at("vendor,device", 0u);
+	cr_assert(dt_node_valid(device));
+	cr_assert(dt_node_reg_raw(device, 0u, &decoded));
+	cr_assert_eq(decoded.address, 0x1200u);
+	cr_assert_eq(decoded.size, 0x100u);
+	cr_assert(dt_node_reg(device, 0u, &decoded));
+	cr_assert_eq(decoded.address, UINT64_C(0x100000200));
+	cr_assert_eq(decoded.size, 0x100u);
 }
 
 Test(dt, rejects_offsets_inside_tokens) {

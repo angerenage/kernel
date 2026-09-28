@@ -1,8 +1,8 @@
 #include <core/cpu.h>
 #include <core/spinlock.h>
+#include <firmware/dt/device.h>
 #include <hal/cache.h>
 #include <hal/hcf.h>
-#include <kernel/boot.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -10,14 +10,6 @@
 
 #define RISCV_SBI_EID_RFENCE 0x52464e43ul
 #define RISCV_SBI_FID_REMOTE_FENCE_I 0ul
-
-#define RISCV_FDT_MAGIC 0xd00dfeedu
-#define RISCV_FDT_BEGIN_NODE 1u
-#define RISCV_FDT_END_NODE 2u
-#define RISCV_FDT_PROPERTY 3u
-#define RISCV_FDT_NOP 4u
-#define RISCV_FDT_END 9u
-#define RISCV_FDT_MAX_DEPTH 32u
 
 enum riscv_zicbom_state {
 	RISCV_ZICBOM_UNKNOWN = 0u,
@@ -29,19 +21,6 @@ enum riscv_zicbom_state {
 struct riscv_cache_sbi_ret {
 	long error;
 	long value;
-};
-
-struct riscv_cache_fdt_node {
-	const uint8_t* device_type;
-	size_t         device_type_size;
-	const uint8_t* status;
-	size_t         status_size;
-	const uint8_t* isa_extensions;
-	size_t         isa_extensions_size;
-	const uint8_t* isa;
-	size_t         isa_size;
-	const uint8_t* cbom_block_size;
-	size_t         cbom_block_size_size;
 };
 
 static uint32_t riscv_zicbom_state;
@@ -56,24 +35,6 @@ static struct riscv_cache_sbi_ret riscv_cache_sbi_call2(unsigned long arg0, unsi
 
 	__asm__ volatile("ecall" : "+r"(a0), "+r"(a1) : "r"(a6), "r"(a7) : "memory", "a2", "a3", "a4", "a5");
 	return (struct riscv_cache_sbi_ret){.error = (long)a0, .value = (long)a1};
-}
-
-static uint32_t riscv_fdt_u32(const void* data) {
-	const uint8_t* bytes = data;
-	return ((uint32_t)bytes[0] << 24u) | ((uint32_t)bytes[1] << 16u) | ((uint32_t)bytes[2] << 8u) | (uint32_t)bytes[3];
-}
-
-static bool riscv_fdt_string_list_contains(const uint8_t* data, size_t size, const char* wanted) {
-	if (data == NULL || wanted == NULL) return false;
-	while (size != 0u) {
-		size_t length = 0u;
-		while (length < size && data[length] != '\0') length++;
-		if (length == size) return false;
-		if (strcmp((const char*)data, wanted) == 0) return true;
-		data += length + 1u;
-		size -= length + 1u;
-	}
-	return false;
 }
 
 static bool riscv_isa_string_has_zicbom(const uint8_t* data, size_t size) {
@@ -93,100 +54,31 @@ static bool riscv_isa_string_has_zicbom(const uint8_t* data, size_t size) {
 	return false;
 }
 
-static bool riscv_fdt_node_enabled(const struct riscv_cache_fdt_node* node) {
-	return node->status == NULL || (node->status_size == 3u && memcmp(node->status, "ok\0", 3u) == 0) ||
-	       (node->status_size == 5u && memcmp(node->status, "okay\0", 5u) == 0);
-}
-
-static bool riscv_fdt_node_is_cpu(const struct riscv_cache_fdt_node* node) {
-	return node->device_type != NULL && node->device_type_size == 4u && memcmp(node->device_type, "cpu\0", 4u) == 0;
-}
-
 static bool riscv_zicbom_discover(size_t* out_block_size) {
-	struct kernel_boot_data     dtb;
-	struct riscv_cache_fdt_node stack[RISCV_FDT_MAX_DEPTH] = {0};
-	if (out_block_size == NULL || !kernel_boot_dtb_get(&dtb) || dtb.address == NULL || dtb.size < 40u ||
-	    riscv_fdt_u32(dtb.address) != RISCV_FDT_MAGIC)
-		return false;
+	size_t cpus  = 0u;
+	size_t block = 0u;
 
-	const uint8_t* blob             = dtb.address;
-	uint32_t       structure_offset = riscv_fdt_u32(blob + 8u);
-	uint32_t       strings_offset   = riscv_fdt_u32(blob + 12u);
-	uint32_t       strings_size     = riscv_fdt_u32(blob + 32u);
-	uint32_t       structure_size   = riscv_fdt_u32(blob + 36u);
-	if (structure_offset > dtb.size || structure_size > dtb.size - structure_offset || strings_offset > dtb.size ||
-	    strings_size > dtb.size - strings_offset)
-		return false;
+	if (out_block_size == NULL) return false;
+	for (size_t index = 0u;; index++) {
+		struct dt_node     node = dt_node_with_string_at("device_type", "cpu", index);
+		struct dt_property extensions;
+		struct dt_property isa;
+		struct dt_property block_size;
+		uint64_t           value;
+		bool               has_zicbom;
 
-	const uint8_t* cursor  = blob + structure_offset;
-	const uint8_t* end     = cursor + structure_size;
-	const uint8_t* strings = blob + strings_offset;
-	size_t         depth   = 0u;
-	size_t         cpus    = 0u;
-	size_t         block   = 0u;
-
-	while ((size_t)(end - cursor) >= 4u) {
-		uint32_t token = riscv_fdt_u32(cursor);
-		cursor += 4u;
-		if (token == RISCV_FDT_BEGIN_NODE) {
-			if (depth == RISCV_FDT_MAX_DEPTH) return false;
-			const uint8_t* name_end = memchr(cursor, '\0', (size_t)(end - cursor));
-			if (name_end == NULL) return false;
-			stack[depth++]   = (struct riscv_cache_fdt_node){0};
-			size_t name_size = (size_t)(name_end - cursor) + 1u;
-			cursor += (name_size + 3u) & ~(size_t)3u;
-		}
-		else if (token == RISCV_FDT_END_NODE) {
-			if (depth == 0u) return false;
-			struct riscv_cache_fdt_node* node = &stack[depth - 1u];
-			if (riscv_fdt_node_enabled(node) && riscv_fdt_node_is_cpu(node)) {
-				bool has_zicbom =
-					riscv_fdt_string_list_contains(node->isa_extensions, node->isa_extensions_size, "zicbom");
-				if (!has_zicbom) has_zicbom = riscv_isa_string_has_zicbom(node->isa, node->isa_size);
-				if (!has_zicbom || node->cbom_block_size == NULL || node->cbom_block_size_size != 4u) return false;
-				size_t cpu_block = riscv_fdt_u32(node->cbom_block_size);
-				if (cpu_block == 0u || (cpu_block & (cpu_block - 1u)) != 0u || (block != 0u && block != cpu_block))
-					return false;
-				block = cpu_block;
-				cpus++;
-			}
-			depth--;
-		}
-		else if (token == RISCV_FDT_PROPERTY) {
-			if (depth == 0u || (size_t)(end - cursor) < 8u) return false;
-			uint32_t length      = riscv_fdt_u32(cursor);
-			uint32_t name_offset = riscv_fdt_u32(cursor + 4u);
-			cursor += 8u;
-			if (length > (size_t)(end - cursor) || name_offset >= strings_size) return false;
-			const char* name = (const char*)strings + name_offset;
-			if (memchr(name, '\0', strings_size - name_offset) == NULL) return false;
-			struct riscv_cache_fdt_node* node = &stack[depth - 1u];
-			if (strcmp(name, "device_type") == 0) {
-				node->device_type      = cursor;
-				node->device_type_size = length;
-			}
-			else if (strcmp(name, "status") == 0) {
-				node->status      = cursor;
-				node->status_size = length;
-			}
-			else if (strcmp(name, "riscv,isa-extensions") == 0) {
-				node->isa_extensions      = cursor;
-				node->isa_extensions_size = length;
-			}
-			else if (strcmp(name, "riscv,isa") == 0) {
-				node->isa      = cursor;
-				node->isa_size = length;
-			}
-			else if (strcmp(name, "riscv,cbom-block-size") == 0) {
-				node->cbom_block_size      = cursor;
-				node->cbom_block_size_size = length;
-			}
-			cursor += (length + 3u) & ~(size_t)3u;
-		}
-		else if (token == RISCV_FDT_NOP) continue;
-		else if (token == RISCV_FDT_END) break;
-		else return false;
-		if (cursor > end) return false;
+		if (!dt_node_valid(node)) break;
+		if (!dt_node_enabled(node)) continue;
+		has_zicbom = dt_node_property(node, "riscv,isa-extensions", &extensions) &&
+		             dt_property_string_list_contains(&extensions, "zicbom");
+		if (!has_zicbom && dt_node_property(node, "riscv,isa", &isa))
+			has_zicbom = riscv_isa_string_has_zicbom(isa.data, isa.size);
+		if (!has_zicbom || !dt_node_property(node, "riscv,cbom-block-size", &block_size) || block_size.size != 4u ||
+		    !dt_property_read_cells(&block_size, 0u, 1u, &value) || value == 0u || (value & (value - 1u)) != 0u ||
+		    value > SIZE_MAX || (block != 0u && block != value))
+			return false;
+		block = (size_t)value;
+		cpus++;
 	}
 	if (cpus == 0u || block == 0u) return false;
 	*out_block_size = block;
