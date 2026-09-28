@@ -14,7 +14,7 @@ struct pci_controller {
 	uint64_t               register_address;
 	uint64_t               register_size;
 	enum pci_config_access access;
-	uint16_t               segment_group;
+	uint32_t               domain;
 	uint8_t                start_bus;
 	uint8_t                end_bus;
 };

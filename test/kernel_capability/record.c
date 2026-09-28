@@ -11,7 +11,7 @@ static const struct pci_controller test_controllers[] = {
      .register_address = 0xe0000000u,
      .register_size    = 128u * 1024u * 1024u,
      .access           = PCI_CONFIG_ACCESS_ECAM,
-     .segment_group    = 0u,
+     .domain           = 0u,
      .start_bus        = 0u,
      .end_bus          = 127u,
 	 },
@@ -19,7 +19,7 @@ static const struct pci_controller test_controllers[] = {
      .register_address = 0xf8000000u,
      .register_size    = 128u * 1024u * 1024u,
      .access           = PCI_CONFIG_ACCESS_ECAM,
-     .segment_group    = 2u,
+     .domain           = 2u,
      .start_bus        = 128u,
      .end_bus          = 255u,
 	 },
@@ -59,7 +59,7 @@ Test(kernel_capability_record, transports_client_typed_records_without_embedded_
 	cr_assert_eq(controller.register_address, 0xf8000000u);
 	cr_assert_eq(controller.register_size, 128u * 1024u * 1024u);
 	cr_assert_eq(controller.access, PCI_CONFIG_ACCESS_ECAM);
-	cr_assert_eq(controller.segment_group, 2u);
+	cr_assert_eq(controller.domain, 2u);
 	cr_assert_eq(controller.start_bus, 128u);
 	cr_assert_eq(controller.end_bus, 255u);
 

@@ -451,6 +451,8 @@ test_suites = [
 		'sources': files(
 			'acpi_test.c',
 			'../firmware/acpi/acpi.c',
+			'../firmware/dt/device.c',
+			'../firmware/dt/dt.c',
 			'../kernel/src/hardware/pci.c',
 		),
 		'link_with': base_test_lib,
@@ -460,8 +462,10 @@ test_suites = [
 		'name': 'dt',
 		'sources': files(
 			'dt_test.c',
+			'../firmware/acpi/acpi.c',
 			'../firmware/dt/device.c',
 			'../firmware/dt/dt.c',
+			'../kernel/src/hardware/pci.c',
 		),
 		'link_with': base_test_lib,
 		'suites': ['unit', 'firmware', 'kernel'],

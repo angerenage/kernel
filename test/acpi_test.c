@@ -442,13 +442,13 @@ Test(acpi, pci_controllers_are_normalized_from_all_valid_mcfg_allocations) {
 	cr_assert_eq(controller.access, PCI_CONFIG_ACCESS_ECAM);
 	cr_assert_eq(controller.register_address, 0xe0000000u);
 	cr_assert_eq(controller.register_size, 128u * 1024u * 1024u);
-	cr_assert_eq(controller.segment_group, 0u);
+	cr_assert_eq(controller.domain, 0u);
 	cr_assert_eq(controller.start_bus, 0u);
 	cr_assert_eq(controller.end_bus, 127u);
 	cr_assert(kernel_hardware_pci_get(1u, &controller));
 	cr_assert_eq(controller.register_address, 0xf8000000u);
 	cr_assert_eq(controller.register_size, 128u * 1024u * 1024u);
-	cr_assert_eq(controller.segment_group, 2u);
+	cr_assert_eq(controller.domain, 2u);
 	cr_assert_eq(controller.start_bus, 128u);
 	cr_assert_eq(controller.end_bus, 255u);
 	cr_assert_not(kernel_hardware_pci_get(2u, &controller));
