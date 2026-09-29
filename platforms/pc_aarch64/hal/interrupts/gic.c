@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "../cache.h"
 #include "../clock.h"
 #include "gicv3.h"
 
@@ -31,6 +32,9 @@
 #define AARCH64_GICD_IPRIORITYR 0x400u
 #define AARCH64_GICD_ITARGETSR 0x800u
 #define AARCH64_GICD_ICFGR 0xc00u
+#define AARCH64_GICD_SGIR 0xf00u
+#define AARCH64_GICD_TYPER_SECURITY_EXTENSIONS (1u << 10)
+#define AARCH64_GICD_SGIR_NSATT (1u << 15)
 
 #define AARCH64_GICC_CTLR 0x000u
 #define AARCH64_GICC_PMR 0x004u
@@ -44,6 +48,7 @@
 
 static bool              gic_ready;
 static bool              gic_single_cpu;
+static bool              gic_security_extensions;
 static volatile uint8_t* gicd_mmio;
 static volatile uint8_t* gicc_mmio;
 static uintptr_t         gicd_phys;
@@ -170,6 +175,8 @@ bool aarch64_gic_init_global(void) {
 	gicc_mmio      = (volatile uint8_t*)(uintptr_t)phys_to_virt(cpu_interface);
 	gicd_phys      = distributor;
 	gic_single_cpu = cpu_count() == 1u;
+	gic_security_extensions =
+		(mmio_read32(gicd_mmio, AARCH64_GICD_TYPER) & AARCH64_GICD_TYPER_SECURITY_EXTENSIONS) != 0u;
 
 	mmio_write32(gicd_mmio, AARCH64_GICD_CTLR, 0u);
 	/* Do not inherit an SPI enabled by firmware before its source is initialized. */
@@ -188,6 +195,12 @@ static bool gic_target_mask_valid(uint8_t mask) {
 	return mask != 0u && (mask & (uint8_t)(mask - 1u)) == 0u;
 }
 
+static uint32_t gic_kernel_group(uint32_t group, uint32_t bits) {
+	/* Non-secure accesses alias Group 1 when Security Extensions exist.
+	 * Without them, CTLR bit 0 and IAR/EOIR operate on Group 0. */
+	return gic_security_extensions ? group | bits : group & ~bits;
+}
+
 bool aarch64_gic_init_local(struct cpu* cpu) {
 	uint32_t group;
 	uint8_t  target_mask;
@@ -201,8 +214,7 @@ bool aarch64_gic_init_local(struct cpu* cpu) {
 	mmio_write32(gicd_mmio, AARCH64_GICD_ICENABLER0, UINT32_MAX);
 	struct irq_state irq = spinlock_lock_irqsave(&gic_distributor_lock);
 	group                = mmio_read32(gicd_mmio, AARCH64_GICD_IGROUPR0);
-	/* The kernel enters at Non-secure EL1, so owned interrupts use Group 1. */
-	group |= 1u << AARCH64_GIC_SCHEDULER_SGI;
+	group                = gic_kernel_group(group, 1u << AARCH64_GIC_SCHEDULER_SGI);
 	mmio_write32(gicd_mmio, AARCH64_GICD_IGROUPR0, group);
 	spinlock_unlock_irqrestore(&gic_distributor_lock, irq);
 	mmio_write8(gicd_mmio, AARCH64_GICD_IPRIORITYR + AARCH64_GIC_SCHEDULER_SGI, 0x40u);
@@ -217,6 +229,23 @@ bool aarch64_gic_init_local(struct cpu* cpu) {
 	if (!gic_target_mask_valid(target_mask)) target_mask = gic_single_cpu ? 1u : 0u;
 	__atomic_store_n(&gic_target_masks[cpu->index], target_mask, __ATOMIC_RELEASE);
 	__atomic_store_n(&gic_local_ready[cpu->index], true, __ATOMIC_RELEASE);
+	return true;
+}
+
+bool aarch64_gic_kick(const struct cpu* cpu) {
+	uint8_t target_mask;
+	if (aarch64_gicv3_ready()) return aarch64_gicv3_kick(cpu);
+	if (!gic_is_ready() || cpu == NULL || cpu->index >= AARCH64_GIC_MAX_CPUS ||
+	    !__atomic_load_n(&gic_local_ready[cpu->index], __ATOMIC_ACQUIRE))
+		return false;
+	target_mask = __atomic_load_n(&gic_target_masks[cpu->index], __ATOMIC_ACQUIRE);
+	if (!gic_target_mask_valid(target_mask)) return false;
+	/* Publish runnable work and cache requests before the target takes its SGI. */
+	__asm__ volatile("dsb ishst" : : : "memory");
+	mmio_write32(gicd_mmio,
+	             AARCH64_GICD_SGIR,
+	             ((uint32_t)target_mask << 16u) | AARCH64_GIC_SCHEDULER_SGI |
+	                 (gic_security_extensions ? AARCH64_GICD_SGIR_NSATT : 0u));
 	return true;
 }
 
@@ -335,8 +364,7 @@ static bool gicv2_source_init(struct hal_interrupt_source_state* state, const st
 	bit                  = 1u << (source->number % 32u);
 	struct irq_state irq = spinlock_lock_irqsave(&gic_distributor_lock);
 	group                = mmio_read32(gicd_mmio, AARCH64_GICD_IGROUPR0 + bank * 4u);
-	/* The kernel enters at Non-secure EL1, so owned interrupts use Group 1. */
-	group |= bit;
+	group                = gic_kernel_group(group, bit);
 	mmio_write32(gicd_mmio, AARCH64_GICD_IGROUPR0 + bank * 4u, group);
 	if (delivery->trigger != HAL_INTERRUPT_TRIGGER_FIRMWARE) {
 		uint32_t config_offset = AARCH64_GICD_ICFGR + (source->number / 16u) * 4u;
@@ -515,8 +543,7 @@ bool hal_interrupt_message_init(struct hal_interrupt_message_state*         stat
 	uint32_t         bank  = id / 32u;
 	struct irq_state irq   = spinlock_lock_irqsave(&gic_distributor_lock);
 	uint32_t         group = mmio_read32(gicd_mmio, AARCH64_GICD_IGROUPR0 + bank * 4u);
-	/* The kernel enters at Non-secure EL1, so owned interrupts use Group 1. */
-	group |= 1u << (id % 32u);
+	group                  = gic_kernel_group(group, 1u << (id % 32u));
 	mmio_write32(gicd_mmio, AARCH64_GICD_IGROUPR0 + bank * 4u, group);
 	spinlock_unlock_irqrestore(&gic_distributor_lock, irq);
 	mmio_write8(gicd_mmio, AARCH64_GICD_IPRIORITYR + id, 0x80u);
@@ -565,6 +592,11 @@ static bool gic_handle_external_irq(const struct exception_frame* frame) {
 	iar   = mmio_read32(gicc_mmio, AARCH64_GICC_IAR);
 	intid = iar & AARCH64_GICC_IAR_INTID_MASK;
 	if (intid >= AARCH64_GICC_INTID_SPURIOUS_MIN) return true;
+	/* Consume the pending SGI before publishing a cache acknowledgement.
+	 * A subsequent SGI can now become active-and-pending instead of being
+	 * coalesced with the notification we are about to consume. */
+	__asm__ volatile("dsb sy" : : : "memory");
+	aarch64_cache_poll_sync();
 	if (intid == AARCH64_GIC_SCHEDULER_SGI) {
 		handled = true;
 	}

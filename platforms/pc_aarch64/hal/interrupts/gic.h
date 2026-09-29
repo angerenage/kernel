@@ -17,6 +17,9 @@ bool aarch64_gic_prepare_smp(void);
 /* Initialize the active GIC CPU interface for one processor. */
 bool aarch64_gic_init_local(struct cpu* cpu);
 
+/* Interrupt one CPU to service remote scheduler or cache synchronization work. */
+bool aarch64_gic_kick(const struct cpu* cpu);
+
 /* Configure one kernel-private local interrupt source and leave it masked. */
 bool aarch64_gic_local_source_init(struct hal_interrupt_source_state* state, uint32_t id, const struct cpu* target);
 

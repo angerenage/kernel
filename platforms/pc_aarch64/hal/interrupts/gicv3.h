@@ -20,6 +20,9 @@ bool aarch64_gicv3_init_global(void);
 /* Initialize the GICv3 CPU interface for one processor. */
 bool aarch64_gicv3_init_local(struct cpu* cpu);
 
+/* Send the kernel scheduler SGI to one initialized CPU interface. */
+bool aarch64_gicv3_kick(const struct cpu* cpu);
+
 /* Return the number of fixed-source domains exposed by GICv3. */
 size_t aarch64_gicv3_source_domain_count(void);
 

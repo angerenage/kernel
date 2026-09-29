@@ -4,6 +4,7 @@
 #include <core/lock.h>
 #include <core/spinlock.h>
 #include <hal/cache.h>
+#include <hal/cpu.h>
 #include <hal/hcf.h>
 #include <stdint.h>
 
@@ -79,16 +80,23 @@ void hal_cache_sync_executable_range(void* address, size_t size) {
 }
 
 void aarch64_cache_poll_sync(void) {
-	struct cpu* cpu = cpu_current();
-	uint64_t    generation;
+	struct cpu*      cpu = cpu_current();
+	uint64_t         generation;
+	struct irq_state state;
 
 	if (cpu == NULL || cpu->index >= AARCH64_CACHE_MAX_CPUS) return;
+	/* A scheduler SGI must not acknowledge a newer generation while this
+	 * poll is suspended, then have its acknowledgement overwritten here. */
+	state      = irq_save_disable();
 	generation = __atomic_load_n(&aarch64_cache_request.generation, __ATOMIC_ACQUIRE);
 	if (generation == 0u || cpu->index == aarch64_cache_request.source_index ||
-	    __atomic_load_n(&aarch64_cache_ack[cpu->index], __ATOMIC_ACQUIRE) == generation)
+	    __atomic_load_n(&aarch64_cache_ack[cpu->index], __ATOMIC_ACQUIRE) == generation) {
+		irq_restore(state);
 		return;
+	}
 	__asm__ volatile("isb" : : : "memory");
 	__atomic_store_n(&aarch64_cache_ack[cpu->index], generation, __ATOMIC_RELEASE);
+	irq_restore(state);
 }
 
 void hal_cache_sync_executable_range_all_cpus(void* address, size_t size) {
@@ -118,13 +126,13 @@ void hal_cache_sync_executable_range_all_cpus(void* address, size_t size) {
 		if (target == current || cpu_state_get(target) != CPU_STATE_ONLINE) continue;
 		if (target->index >= AARCH64_CACHE_MAX_CPUS) hcf();
 		targets |= 1ull << target->index;
+		hal_cpu_kick(target);
 	}
-	/* Wake parked CPUs. Running CPUs acknowledge from their next exception. */
-	__asm__ volatile("dsb ishst\n\tsev" : : : "memory");
+	/* The scheduler SGI reaches running userspace as well as parked CPUs.
+	 * IRQ-disabled lock waiters still acknowledge through polling. */
 	for (size_t i = 0u; i < topology->cpu_count; i++) {
 		if ((targets & (1ull << i)) == 0u) continue;
-		while (__atomic_load_n(&aarch64_cache_ack[i], __ATOMIC_ACQUIRE) != generation)
-			__asm__ volatile("yield" : : : "memory");
+		while (__atomic_load_n(&aarch64_cache_ack[i], __ATOMIC_ACQUIRE) != generation) spinlock_relax();
 	}
 	spinlock_unlock_irqrestore(&aarch64_cache_sync_lock, state);
 }

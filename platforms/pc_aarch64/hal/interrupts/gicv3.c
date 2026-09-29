@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "../cache.h"
 #include "../clock.h"
 
 #define GICV3_PAGE_SIZE 0x1000u
@@ -21,6 +22,9 @@
 #define GICV3_MAX_CPUS 64u
 #define GICV3_SPURIOUS_INTID 1020u
 #define GICV3_SCHEDULER_SGI 1u
+#define GICV3_CTLR_RSS (1ull << 18u)
+#define GICV3_TYPER_RSS (1u << 26u)
+#define GICV3_SGI_IRM (1ull << 40u)
 #define GICV3_TIMER_PPI 27u
 
 #define GICD_CTLR 0x0000u
@@ -261,7 +265,7 @@ bool aarch64_gicv3_init_local(struct cpu* cpu) {
 	uintptr_t redist;
 	if (cpu == NULL || cpu != cpu_current() || cpu->index >= GICV3_MAX_CPUS) return false;
 	if (!ready) return false;
-	if (local_ready[cpu->index]) return true;
+	if (__atomic_load_n(&local_ready[cpu->index], __ATOMIC_ACQUIRE)) return true;
 	if (!gicv3_redist_for_cpu(cpu, &redist) || !gicv3_map(redist + GICR_SGI_BASE)) return false;
 	uint32_t waker = gicv3_read32(redist + GICR_WAKER);
 	gicv3_write32(redist + GICR_WAKER, waker & ~GICR_WAKER_PROCESSOR_SLEEP);
@@ -298,7 +302,32 @@ bool aarch64_gicv3_init_local(struct cpu* cpu) {
 		:
 		: "r"(ctlr), "r"(0xffull), "r"(1ull)
 		: "memory");
-	local_ready[cpu->index] = true;
+	__atomic_store_n(&local_ready[cpu->index], true, __ATOMIC_RELEASE);
+	return true;
+}
+
+bool aarch64_gicv3_kick(const struct cpu* cpu) {
+	uint64_t ctlr;
+	uint64_t request;
+	uint64_t affinity0;
+	if (!aarch64_gicv3_ready() || cpu == NULL || cpu->index >= GICV3_MAX_CPUS ||
+	    !__atomic_load_n(&local_ready[cpu->index], __ATOMIC_ACQUIRE))
+		return false;
+	affinity0 = cpu->arch_id & 0xffu;
+	__asm__ volatile("mrs %0, ICC_CTLR_EL1" : "=r"(ctlr));
+	if (affinity0 >= 16u &&
+	    ((ctlr & GICV3_CTLR_RSS) == 0u || (gicv3_read32(distributor_phys + GICD_TYPER) & GICV3_TYPER_RSS) == 0u)) {
+		/* Controllers without Range Selector support can still wake a remote
+		 * target by broadcasting. Extra scheduler interrupts are harmless. */
+		if (cpu == cpu_current()) return false;
+		request = GICV3_SGI_IRM | ((uint64_t)GICV3_SCHEDULER_SGI << 24u);
+	}
+	else {
+		request = (((cpu->arch_id >> 32u) & 0xffu) << 48u) | ((cpu->arch_id & 0xff0000u) << 16u) |
+		          ((uint64_t)GICV3_SCHEDULER_SGI << 24u) | ((cpu->arch_id & 0xff00u) << 8u) |
+		          ((affinity0 >> 4u) << 44u) | (1ull << (affinity0 & 0xfu));
+	}
+	__asm__ volatile("dsb ishst\n\tmsr ICC_SGI1R_EL1, %0\n\tisb" : : "r"(request) : "memory");
 	return true;
 }
 
@@ -345,8 +374,8 @@ bool aarch64_gicv3_source_info(const struct hal_interrupt_source* source, struct
 
 bool aarch64_gicv3_source_target_supported(const struct hal_interrupt_source* source, const struct cpu* target) {
 	struct hal_interrupt_source_info info;
-	return target != NULL && target->index < GICV3_MAX_CPUS && local_ready[target->index] &&
-	       aarch64_gicv3_source_info(source, &info);
+	return target != NULL && target->index < GICV3_MAX_CPUS &&
+	       __atomic_load_n(&local_ready[target->index], __ATOMIC_ACQUIRE) && aarch64_gicv3_source_info(source, &info);
 }
 
 static bool gicv3_set_enabled(uintptr_t base, uint32_t id, bool enabled) {
@@ -514,7 +543,7 @@ bool aarch64_gicv3_message_target_supported(uint32_t domain, const struct hal_in
 	struct dt_property ranges;
 	size_t             count;
 	return domain == 0u && source == NULL && target != NULL && target->index < GICV3_MAX_CPUS &&
-	       local_ready[target->index] && gicv3_mbi_ranges(&ranges, &count);
+	       __atomic_load_n(&local_ready[target->index], __ATOMIC_ACQUIRE) && gicv3_mbi_ranges(&ranges, &count);
 }
 
 bool aarch64_gicv3_message_init(struct hal_interrupt_message_state*         state,
@@ -586,9 +615,12 @@ bool aarch64_gicv3_prepare_smp(void) {
 bool aarch64_gicv3_handle_irq(const struct exception_frame* frame) {
 	if (frame == NULL || (frame->vector & 0x3u) != 1u || !ready) return false;
 	uint64_t iar;
-	__asm__ volatile("mrs %0, ICC_IAR1_EL1" : "=r"(iar));
+	__asm__ volatile("mrs %0, ICC_IAR1_EL1\n\tdsb sy" : "=r"(iar) : : "memory");
 	uint32_t intid = (uint32_t)(iar & 0x00ffffffu);
 	if (intid >= GICV3_SPURIOUS_INTID && intid < 1024u) return true;
+	/* Acknowledge at the GIC before the sender can reuse the same SGI for
+	 * its next cache synchronization generation. */
+	aarch64_cache_poll_sync();
 	if (intid == GICV3_TIMER_PPI) (void)aarch64_clock_fire();
 	else if (intid != GICV3_SCHEDULER_SGI && gicv3_source_valid(intid)) {
 		if (!interrupt_handle_event((struct hal_interrupt_event){.domain = 0u, .id = intid})) {

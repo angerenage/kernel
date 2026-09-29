@@ -15,10 +15,12 @@
 #include "../../../platforms/pc_riscv64/hal/interrupts/imsic.h"
 #endif
 
-#if defined(PLATFORM_PC_LOONGARCH64)
+#if defined(PLATFORM_PC_LOONGARCH64) || defined(PLATFORM_PC_AARCH64)
 #include <core/pmm.h>
 #include <hal/paging.h>
+#endif
 
+#if defined(PLATFORM_PC_LOONGARCH64)
 #include "../../../platforms/pc_loongarch64/hal/interrupts/controller.h"
 #endif
 
@@ -541,6 +543,9 @@ struct kernel_selftest_cpu_remote_dispatch_state {
 	uintptr_t   current_thread;
 	uint32_t    exception_depth;
 	uint32_t    ran;
+#if defined(PLATFORM_PC_AARCH64)
+	uint64_t stack_selection;
+#endif
 };
 
 static struct kthread* kernel_selftest_cpu_remote_workers[KERNEL_SELFTEST_CPU_MAX_CPUS];
@@ -557,6 +562,11 @@ static void kernel_selftest_cpu_remote_dispatch_worker(void* arg) {
 	__atomic_store_n(&state->actual_cpu, (uintptr_t)cpu_current(), __ATOMIC_RELEASE);
 	__atomic_store_n(&state->current_thread, (uintptr_t)kthread_current(), __ATOMIC_RELEASE);
 	__atomic_store_n(&state->exception_depth, cpu_current()->exception_depth, __ATOMIC_RELEASE);
+#if defined(PLATFORM_PC_AARCH64)
+	uint64_t stack_selection;
+	__asm__ volatile("mrs %0, spsel" : "=r"(stack_selection));
+	__atomic_store_n(&state->stack_selection, stack_selection, __ATOMIC_RELEASE);
+#endif
 	__atomic_store_n(&state->ran, 1u, __ATOMIC_RELEASE);
 }
 
@@ -630,6 +640,13 @@ static void kernel_selftest_cpu_remote_dispatch_reaches_application_processors(s
 			ctx,
 			__atomic_load_n(&kernel_selftest_cpu_remote_states[i].exception_depth, __ATOMIC_ACQUIRE) == 0u,
 			cleanup);
+#if defined(PLATFORM_PC_AARCH64)
+		KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+			ctx,
+			__atomic_load_n(&kernel_selftest_cpu_remote_states[i].stack_selection, __ATOMIC_ACQUIRE) == 1u,
+			"AP kernel thread is not using SP_EL1",
+			cleanup);
+#endif
 		KERNEL_SELFTEST_ASSERT_GOTO(ctx, sched_get_cpu_stats(cpu, &kernel_selftest_cpu_stats_after[i]), cleanup);
 		KERNEL_SELFTEST_ASSERT_GOTO(ctx,
 		                            kernel_selftest_cpu_stats_after[i].context_switch_count >
@@ -649,7 +666,7 @@ cleanup:
 	kernel_selftest_clock_scope_end(&clock);
 }
 
-#if defined(PLATFORM_PC_LOONGARCH64)
+#if defined(PLATFORM_PC_LOONGARCH64) || defined(PLATFORM_PC_AARCH64)
 static struct {
 	struct spinlock lock;
 	uint32_t        start;
@@ -668,7 +685,7 @@ static void kernel_selftest_cpu_sync_wait_worker(void* arg) {
 	irq_restore(state);
 }
 
-static void kernel_selftest_cpu_loongarch_sync_during_irq_disabled_lock_wait(struct kernel_selftest_context* ctx) {
+static void kernel_selftest_cpu_sync_during_irq_disabled_lock_wait(struct kernel_selftest_context* ctx) {
 	struct kernel_selftest_clock_scope clock      = {0};
 	struct hal_paging_space*           space      = NULL;
 	struct pmm_extent                  allocation = {0};
@@ -752,12 +769,75 @@ destroy:
 }
 #endif
 
+#if defined(PLATFORM_PC_AARCH64)
+static struct {
+	uint32_t running;
+	uint32_t stop;
+	bool     interrupts_enabled;
+} kernel_selftest_cpu_busy;
+
+static void kernel_selftest_cpu_busy_worker(void* arg) {
+	(void)arg;
+	kernel_selftest_cpu_busy.interrupts_enabled = irq_enabled();
+	__atomic_store_n(&kernel_selftest_cpu_busy.running, 1u, __ATOMIC_RELEASE);
+	/* Deliberately do not poll synchronization or call into the scheduler.
+	 * The sender must interrupt this CPU to complete its cache request. */
+	while (__atomic_load_n(&kernel_selftest_cpu_busy.stop, __ATOMIC_ACQUIRE) == 0u)
+		__asm__ volatile("yield" : : : "memory");
+}
+
+static void kernel_selftest_cpu_aarch64_sync_interrupts_busy_cpu(struct kernel_selftest_context* ctx) {
+	struct kernel_selftest_clock_scope clock  = {0};
+	struct kthread*                    worker = NULL;
+	struct cpu*                        target = NULL;
+
+	for (size_t i = 0u; i < cpu_count(); i++) {
+		struct cpu* cpu = cpu_by_index(i);
+		if (cpu != cpu_current() && cpu_state_get(cpu) == CPU_STATE_ONLINE) {
+			target = cpu;
+			break;
+		}
+	}
+	if (target == NULL) return;
+	memset(&kernel_selftest_cpu_busy, 0, sizeof(kernel_selftest_cpu_busy));
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_clock_scope_begin(&clock), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx,
+	                            kernel_selftest_thread_create_with_preferred_cpu(
+									&worker, "selftest/cpu-busy", kernel_selftest_cpu_busy_worker, NULL, target),
+	                            cleanup);
+	for (size_t spins = 0u; spins < 10000000u; spins++) {
+		if (__atomic_load_n(&kernel_selftest_cpu_busy.running, __ATOMIC_ACQUIRE) != 0u) break;
+		spinlock_relax();
+	}
+	KERNEL_SELFTEST_ASSERT_GOTO(
+		ctx, __atomic_load_n(&kernel_selftest_cpu_busy.running, __ATOMIC_ACQUIRE) != 0u, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_cpu_busy.interrupts_enabled, cleanup);
+	/* Stress reuse of the SGI: the sender must not advance a generation
+	 * before the receiver has consumed its pending interrupt at the GIC. */
+	for (size_t round = 0u; round < 256u; round++)
+		hal_cache_sync_executable_range_all_cpus((void*)(uintptr_t)&kernel_selftest_cpu_busy_worker, 1u);
+
+cleanup:
+	__atomic_store_n(&kernel_selftest_cpu_busy.stop, 1u, __ATOMIC_RELEASE);
+	if (worker != NULL) {
+		bool joined = kthread_timed_join(worker, KERNEL_SELFTEST_CPU_REMOTE_DISPATCH_TIMEOUT_MS, NULL);
+		if (ctx->failure_expr == NULL) KERNEL_SELFTEST_ASSERT_GOTO(ctx, joined, destroy);
+	}
+destroy:
+	kernel_selftest_thread_destroy(&worker);
+	kernel_selftest_clock_scope_end(&clock);
+}
+#endif
+
 static const struct kernel_selftest_case kernel_cpu_selftests[] = {
 #if defined(PLATFORM_PC_X86_64)
 	{.name = "x86_interrupt_ranges_are_stable", .run = kernel_selftest_cpu_x86_interrupt_ranges_are_stable},
 #endif
 #if defined(PLATFORM_PC_AARCH64)
 	{.name = "gic_external_source_contract", .run = kernel_selftest_cpu_gic_external_source_contract},
+	{.name = "aarch64_sync_during_irq_disabled_lock_wait",
+                                   .run  = kernel_selftest_cpu_sync_during_irq_disabled_lock_wait},
+	{.name = "aarch64_sync_interrupts_busy_cpu", .run = kernel_selftest_cpu_aarch64_sync_interrupts_busy_cpu},
 #endif
 #if defined(PLATFORM_PC_RISCV64)
 	{.name = "plic_firmware_source_contract", .run = kernel_selftest_cpu_plic_firmware_source_contract},
@@ -767,7 +847,7 @@ static const struct kernel_selftest_case kernel_cpu_selftests[] = {
 #if defined(PLATFORM_PC_LOONGARCH64)
 	{.name = "loongarch_interrupt_contract", .run = kernel_selftest_cpu_loongarch_interrupt_contract},
 	{.name = "loongarch_sync_during_irq_disabled_lock_wait",
-                                   .run  = kernel_selftest_cpu_loongarch_sync_during_irq_disabled_lock_wait},
+                                   .run  = kernel_selftest_cpu_sync_during_irq_disabled_lock_wait},
 #endif
 	{.name = "interrupt_source_lifecycle", .run = kernel_selftest_cpu_interrupt_source_lifecycle},
 	{.name = "interrupt_message_lifecycle", .run = kernel_selftest_cpu_interrupt_message_lifecycle},

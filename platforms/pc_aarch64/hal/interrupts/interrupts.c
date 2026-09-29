@@ -17,6 +17,7 @@
 static bool global_ready;
 static bool local_ready[64];
 extern char exception_vectors[];
+extern void aarch64_select_kernel_stack(void);
 
 static bool kernel_runs_at_el1(void) {
 	uint64_t current_el;
@@ -41,7 +42,8 @@ void irq_enable_local(void) {
 
 bool hal_interrupts_init_global(void) {
 	if (global_ready) return true;
-	/* Limine's UEFI path enters the kernel at Non-secure EL1; GIC ownership is therefore Group 1. */
+	/* Limine's UEFI path enters the kernel at Non-secure EL1. The GIC
+	 * backend selects the interrupt group for its Security Extensions model. */
 	if (!kernel_runs_at_el1()) return false;
 	if (!aarch64_gic_init_global()) return false;
 	global_ready = true;
@@ -56,6 +58,7 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 
 	vectors = (uintptr_t)exception_vectors;
 	irq_disable_local();
+	aarch64_select_kernel_stack();
 	__asm__ volatile("msr vbar_el1, %0\n\t"
 	                 "isb"
 	                 :
@@ -317,7 +320,10 @@ void handle_exception(struct exception_frame* frame) {
 	bool     is_irq = (frame->vector & 0x3u) == 1u;
 	uint64_t ec     = (frame->esr >> 26) & 0x3fu;
 
-	aarch64_cache_poll_sync();
+	/* IRQ cache acknowledgements belong after the GIC has consumed the
+	 * interrupt, so a subsequent generation cannot lose its SGI by coalescing
+	 * with the still-pending one. Synchronous exceptions may still poll. */
+	if (!is_irq) aarch64_cache_poll_sync();
 	if (aarch64_handle_syscall(frame, ec)) return;
 	if (!is_irq) cpu_enter_exception();
 	if (aarch64_gic_handle_irq(frame)) {

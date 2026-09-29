@@ -105,17 +105,14 @@ bool hal_cpu_prepare_smp(void) {
 
 void hal_cpu_park(void) {
 	aarch64_cache_poll_sync();
-	__asm__ volatile("sevl\n\t"
-	                 "wfe\n\t"
-	                 "wfe"
-	                 :
-	                 :
-	                 : "memory");
+	/* Do not clear an event that arrived after the poll but before WFE. */
+	__asm__ volatile("wfe" : : : "memory");
 	aarch64_cache_poll_sync();
 }
 
 void hal_cpu_kick(const struct cpu* cpu) {
 	if (cpu == NULL) return;
+	(void)aarch64_gic_kick(cpu);
 
 	__asm__ volatile("dsb ishst\n\t"
 	                 "sev"

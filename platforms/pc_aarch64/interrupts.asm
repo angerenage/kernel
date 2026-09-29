@@ -7,6 +7,16 @@
 
 .equ AARCH64_EXCEPTION_FRAME_SIZE, 304
 
+.global aarch64_select_kernel_stack
+aarch64_select_kernel_stack:
+	/* Limine APs may enter at EL1t, while the BSP selects EL1h in _start.
+	 * Preserve the live C stack when selecting SP_EL1, so userspace entry
+	 * can replace SP_EL0 without losing the kernel exception stack. */
+	mov x9, sp
+	msr spsel, #1
+	mov sp, x9
+	ret
+
 .macro VECTOR_SLOT index
 	b aarch64_vector_\index
 	.space 124
