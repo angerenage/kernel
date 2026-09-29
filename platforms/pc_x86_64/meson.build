@@ -30,6 +30,7 @@ platform_kernel_objects += [
 	files('hal/cpu.c'),
 	files('hal/clock.c'),
 	files('hal/hcf.c'),
+	files('hal/io_port.c'),
 	files('hal/interrupts/apic.c'),
 	files('hal/interrupts/interrupts.c'),
 	files('hal/interrupts/pic.c'),

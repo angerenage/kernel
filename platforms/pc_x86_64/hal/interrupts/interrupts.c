@@ -1,9 +1,12 @@
 #include <core/cpu.h>
 #include <core/exception.h>
 #include <core/interrupt.h>
+#include <core/lock.h>
 #include <core/sched.h>
+#include <core/spinlock.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
+#include <hal/io_port.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -126,22 +129,27 @@ struct gdtr {
 } __attribute__((packed));
 
 struct tss64 {
-	uint32_t reserved0;
-	uint64_t rsp0;
-	uint64_t rsp1;
-	uint64_t rsp2;
-	uint64_t reserved1;
-	uint64_t ist1;
-	uint64_t ist2;
-	uint64_t ist3;
-	uint64_t ist4;
-	uint64_t ist5;
-	uint64_t ist6;
-	uint64_t ist7;
-	uint64_t reserved2;
-	uint16_t reserved3;
-	uint16_t iomap_base;
+	uint32_t                  reserved0;
+	uint64_t                  rsp0;
+	uint64_t                  rsp1;
+	uint64_t                  rsp2;
+	uint64_t                  reserved1;
+	uint64_t                  ist1;
+	uint64_t                  ist2;
+	uint64_t                  ist3;
+	uint64_t                  ist4;
+	uint64_t                  ist5;
+	uint64_t                  ist6;
+	uint64_t                  ist7;
+	uint64_t                  reserved2;
+	uint16_t                  reserved3;
+	uint16_t                  iomap_base;
+	struct hal_io_port_bitmap io_bitmap;
 } __attribute__((packed));
+
+_Static_assert(offsetof(struct tss64, io_bitmap) <= UINT16_MAX, "x86_64 TSS I/O bitmap offset must fit");
+_Static_assert(sizeof(((struct tss64*)0)->io_bitmap) == HAL_IO_PORT_BITMAP_STORAGE_SIZE,
+               "x86_64 TSS I/O bitmap size mismatch");
 
 extern void (*x86_64_interrupt_stub_table[])(void);
 
@@ -149,10 +157,21 @@ static struct idt_entry idt[256];
 static uint64_t         gdt[64][8];
 static struct tss64     x86_tss[64];
 static _Alignas(16) uint8_t x86_exception_stack[64][X86_EXCEPTION_STACK_SIZE];
-static bool              local_ready[64];
-static uint16_t          kernel_code_selector;
-static bool              global_ready;
-static const struct cpu* legacy_target;
+static bool                             local_ready[64];
+static uint16_t                         kernel_code_selector;
+static bool                             global_ready;
+static const struct cpu*                legacy_target;
+static const struct hal_io_port_bitmap* io_port_selected_bitmap[64];
+static uint64_t                         io_port_selected_generation[64];
+static bool                             io_port_selection_valid[64];
+static struct {
+	size_t   source_index;
+	uint64_t generation;
+} io_port_invalidation_request;
+
+static uint64_t        io_port_invalidation_ack[64];
+static struct spinlock io_port_invalidation_lock =
+	SPINLOCK_INIT_CLASS("io_port_invalidation", SPINLOCK_ORDER_NONE, SPINLOCK_FLAG_IRQSAVE);
 
 static const char* const exception_names[32] = {
 	"Divide Error",
@@ -267,7 +286,8 @@ static bool x86_setup_exception_stack(struct cpu* cpu) {
 	memset(&x86_tss[cpu_index], 0, sizeof(x86_tss[cpu_index]));
 	x86_tss[cpu_index].rsp0       = (uint64_t)cpu->kernel_entry_stack_top;
 	x86_tss[cpu_index].ist1       = (uint64_t)(uintptr_t)(x86_exception_stack[cpu_index] + X86_EXCEPTION_STACK_SIZE);
-	x86_tss[cpu_index].iomap_base = (uint16_t)sizeof(x86_tss[cpu_index]);
+	x86_tss[cpu_index].iomap_base = (uint16_t)offsetof(struct tss64, io_bitmap);
+	hal_io_port_bitmap_deny_all(&x86_tss[cpu_index].io_bitmap);
 
 	base              = (uint64_t)(uintptr_t)&x86_tss[cpu_index];
 	limit             = (uint64_t)(sizeof(x86_tss[cpu_index]) - 1u);
@@ -277,6 +297,70 @@ static bool x86_setup_exception_stack(struct cpu* cpu) {
 
 	x86_load_segments_and_tss(cpu_index);
 	return true;
+}
+
+bool hal_io_port_bitmap_load(const struct hal_io_port_bitmap* bitmap) {
+	struct cpu* cpu = cpu_current();
+
+	if (cpu == NULL || cpu->index >= 64u || !local_ready[cpu->index]) return false;
+	if (bitmap == NULL) hal_io_port_bitmap_deny_all(&x86_tss[cpu->index].io_bitmap);
+	else memcpy(&x86_tss[cpu->index].io_bitmap, bitmap, sizeof(*bitmap));
+	io_port_selection_valid[cpu->index] = false;
+	/* The active task register already references this TSS memory. */
+	__asm__ volatile("" : : : "memory");
+	return true;
+}
+
+bool hal_io_port_bitmap_select(const struct hal_io_port_bitmap* bitmap, uint64_t generation) {
+	struct cpu* cpu = cpu_current();
+
+	if (cpu == NULL || cpu->index >= 64u || !local_ready[cpu->index]) return false;
+	if (io_port_selection_valid[cpu->index] && io_port_selected_bitmap[cpu->index] == bitmap &&
+	    io_port_selected_generation[cpu->index] == generation)
+		return true;
+	if (!hal_io_port_bitmap_load(bitmap)) return false;
+	io_port_selected_bitmap[cpu->index]     = bitmap;
+	io_port_selected_generation[cpu->index] = generation;
+	io_port_selection_valid[cpu->index]     = true;
+	return true;
+}
+
+void hal_io_port_bitmap_context_switch(void) {
+	if (!hal_io_port_bitmap_load(NULL)) hcf();
+}
+
+void hal_io_port_bitmap_invalidate_all(void) {
+	const struct cpu_topology* topology;
+	struct cpu*                current;
+	struct irq_state           irq;
+	uint64_t                   generation;
+	uint64_t                   targets = 0u;
+
+	irq      = spinlock_lock_irqsave(&io_port_invalidation_lock);
+	current  = cpu_current();
+	topology = cpu_topology_get();
+	if (current == NULL || topology == NULL || topology->cpus == NULL || topology->cpu_count == 0u ||
+	    topology->cpu_count > 64u || current->index >= 64u)
+		hcf();
+	if (!hal_io_port_bitmap_load(NULL)) hcf();
+	generation = __atomic_load_n(&io_port_invalidation_request.generation, __ATOMIC_RELAXED) + 1u;
+	if (generation == 0u) generation = 1u;
+	io_port_invalidation_request.source_index = current->index;
+	__atomic_store_n(&io_port_invalidation_request.generation, generation, __ATOMIC_RELEASE);
+
+	for (size_t index = 0u; index < topology->cpu_count; index++) {
+		struct cpu* target = &topology->cpus[index];
+		if (target == current || cpu_state_get(target) != CPU_STATE_ONLINE || !target->interrupts_ready) continue;
+		if (target->index >= 64u || target->arch_id > UINT32_MAX ||
+		    !apic_send_ipi((uint32_t)target->arch_id, X86_IO_PORT_INVALIDATE_VECTOR))
+			hcf();
+		targets |= 1ull << target->index;
+	}
+	for (size_t index = 0u; index < topology->cpu_count; index++) {
+		if ((targets & (1ull << index)) == 0u) continue;
+		while (__atomic_load_n(&io_port_invalidation_ack[index], __ATOMIC_ACQUIRE) != generation) spinlock_relax();
+	}
+	spinlock_unlock_irqrestore(&io_port_invalidation_lock, irq);
 }
 
 static void idt_set_entry(unsigned vector, void (*handler)(void), uint8_t ist, uint8_t type_attributes) {
@@ -521,11 +605,11 @@ bool hal_interrupt_message_range_at(size_t index, struct hal_interrupt_message_r
 		                      .delivery = {.domain = X86_DELIVERY_DOMAIN_VECTOR,
 		                                   .base   = 48u,
 		                                   .limit  = X86_SYSCALL_VECTOR}}
-	                    : (struct hal_interrupt_message_range){
+		                    : (struct hal_interrupt_message_range){
 		                      .domain   = X86_MESSAGE_DOMAIN_MSI,
 		                      .delivery = {.domain = X86_DELIVERY_DOMAIN_VECTOR,
 		                                   .base   = X86_SYSCALL_VECTOR + 1u,
-		                                   .limit  = X86_LAPIC_WAKE_VECTOR}};
+		                                   .limit  = X86_IO_PORT_INVALIDATE_VECTOR}};
 	return true;
 }
 
@@ -606,6 +690,17 @@ void x86_64_handle_interrupt(struct interrupt_frame* frame) {
 		}
 	}
 	if (vector == X86_LAPIC_WAKE_VECTOR) {
+		apic_send_eoi();
+		return;
+	}
+	if (vector == X86_IO_PORT_INVALIDATE_VECTOR) {
+		struct cpu* cpu        = cpu_current();
+		uint64_t    generation = __atomic_load_n(&io_port_invalidation_request.generation, __ATOMIC_ACQUIRE);
+		if (cpu == NULL || cpu->index >= 64u || generation == 0u ||
+		    cpu->index == io_port_invalidation_request.source_index)
+			hcf();
+		if (!hal_io_port_bitmap_load(NULL)) hcf();
+		__atomic_store_n(&io_port_invalidation_ack[cpu->index], generation, __ATOMIC_RELEASE);
 		apic_send_eoi();
 		return;
 	}

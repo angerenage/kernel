@@ -25,6 +25,38 @@
 #endif
 
 #if defined(PLATFORM_PC_X86_64)
+#include <hal/io_port.h>
+
+static void kernel_selftest_cpu_x86_io_bitmap_ranges(struct kernel_selftest_context* ctx) {
+	struct hal_io_port_bitmap bitmap;
+
+	hal_io_port_bitmap_deny_all(&bitmap);
+	KERNEL_SELFTEST_ASSERT(ctx, bitmap.bytes[HAL_IO_PORT_BITMAP_SIZE] == 0xffu);
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_io_port_bitmap_port_allowed(&bitmap, 0u));
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_io_port_bitmap_port_allowed(&bitmap, HAL_IO_PORT_COUNT - 1u));
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_io_port_bitmap_port_allowed(&bitmap, HAL_IO_PORT_COUNT));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_io_port_bitmap_allow(&bitmap, 0u, 1u));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_io_port_bitmap_allow(&bitmap, 7u, 3u));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_io_port_bitmap_allow(&bitmap, HAL_IO_PORT_COUNT - 1u, 1u));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_io_port_bitmap_port_allowed(&bitmap, 0u));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_io_port_bitmap_port_allowed(&bitmap, 7u));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_io_port_bitmap_port_allowed(&bitmap, 8u));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_io_port_bitmap_port_allowed(&bitmap, 9u));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_io_port_bitmap_port_allowed(&bitmap, HAL_IO_PORT_COUNT - 1u));
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_io_port_bitmap_port_allowed(&bitmap, 1u));
+	KERNEL_SELFTEST_ASSERT(ctx, bitmap.bytes[HAL_IO_PORT_BITMAP_SIZE] == 0xffu);
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_io_port_bitmap_allow(&bitmap, 0u, 0u));
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_io_port_bitmap_allow(&bitmap, HAL_IO_PORT_COUNT, 1u));
+	KERNEL_SELFTEST_ASSERT(ctx, !hal_io_port_bitmap_allow(&bitmap, HAL_IO_PORT_COUNT - 1u, 2u));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_io_port_bitmap_load(&bitmap));
+	KERNEL_SELFTEST_ASSERT(ctx, hal_io_port_bitmap_load(NULL));
+}
+
+static void kernel_selftest_cpu_x86_io_bitmap_invalidation_reaches_online_cpus(struct kernel_selftest_context* ctx) {
+	KERNEL_SELFTEST_ASSERT(ctx, cpu_online_count() == cpu_count());
+	hal_io_port_bitmap_invalidate_all();
+}
+
 static void kernel_selftest_cpu_x86_interrupt_ranges_are_stable(struct kernel_selftest_context* ctx) {
 	struct hal_interrupt_message_range low;
 	struct hal_interrupt_message_range high;
@@ -51,7 +83,7 @@ static void kernel_selftest_cpu_x86_interrupt_ranges_are_stable(struct kernel_se
 	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_message_range_at(2u, &high));
 	KERNEL_SELFTEST_ASSERT(ctx, low.domain == high.domain && low.delivery.domain == high.delivery.domain);
 	KERNEL_SELFTEST_ASSERT(ctx, low.delivery.base == 48u && low.delivery.limit == 0x80u);
-	KERNEL_SELFTEST_ASSERT(ctx, high.delivery.base == 0x81u && high.delivery.limit == 0xfeu);
+	KERNEL_SELFTEST_ASSERT(ctx, high.delivery.base == 0x81u && high.delivery.limit == 0xfdu);
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_info(&source, &source_before));
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_target_supported(&source, cpu_current()));
 	struct hal_interrupt_delivery source_delivery = {
@@ -831,6 +863,9 @@ destroy:
 
 static const struct kernel_selftest_case kernel_cpu_selftests[] = {
 #if defined(PLATFORM_PC_X86_64)
+	{.name = "x86_io_bitmap_ranges", .run = kernel_selftest_cpu_x86_io_bitmap_ranges},
+	{.name = "x86_io_bitmap_invalidation_reaches_online_cpus",
+                                   .run  = kernel_selftest_cpu_x86_io_bitmap_invalidation_reaches_online_cpus},
 	{.name = "x86_interrupt_ranges_are_stable", .run = kernel_selftest_cpu_x86_interrupt_ranges_are_stable},
 #endif
 #if defined(PLATFORM_PC_AARCH64)

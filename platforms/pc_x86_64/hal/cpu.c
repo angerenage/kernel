@@ -1,5 +1,6 @@
 #include <core/cpu.h>
 #include <hal/cpu.h>
+#include <hal/io_port.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -121,6 +122,7 @@ void hal_cpu_context_switch(struct thread_context* current, const struct thread_
 	if (current == NULL || next == NULL) return;
 	hal_cpu_fp_context_save(&current->fp_context);
 	hal_cpu_fp_context_restore(&next->fp_context);
+	hal_io_port_bitmap_context_switch();
 	x86_64_thread_context_switch(current, next);
 }
 
