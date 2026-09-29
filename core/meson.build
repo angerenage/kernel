@@ -30,3 +30,7 @@ core_sources = files(
 	'memory/address_space.c',
 	'dma.c',
 )
+
+if platform == 'pc_x86_64'
+	core_sources += files('io_port.c')
+endif

@@ -2,6 +2,9 @@
 #include <core/capability.h>
 #include <core/capability_call.h>
 #include <core/id_table.h>
+#if defined(PLATFORM_PC_X86_64) || defined(IO_PORT_TEST)
+#include <core/io_port.h>
+#endif
 #include <core/process.h>
 #include <core/sched.h>
 #include <core/spinlock.h>
@@ -563,6 +566,10 @@ bool process_destroy(struct process* process) {
 		if (thread == NULL) break;
 		if (!uthread_deinit(thread)) return false;
 	}
+
+#if defined(PLATFORM_PC_X86_64) || defined(IO_PORT_TEST)
+	io_port_process_deinit(process);
+#endif
 
 	removed = NULL;
 	cap_object_cleanup_for_process(process->pid);

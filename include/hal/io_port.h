@@ -1,6 +1,6 @@
 #pragma once
 
-#if !defined(PLATFORM_PC_X86_64)
+#if !defined(PLATFORM_PC_X86_64) && !defined(IO_PORT_TEST)
 #error "I/O port access is only available on x86_64"
 #endif
 

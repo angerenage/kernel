@@ -64,6 +64,10 @@ hal_mock_sources = files(
 	'mocks/kernel/boot.c',
 	'mocks/kernel/hardware.c',
 )
+if platform == 'pc_x86_64'
+	test_common_c_args += ['-DIO_PORT_TEST=1']
+	hal_mock_sources += files('mocks/hal/io_port.c')
+endif
 
 core_test_lib = static_library(
 	'core_test_lib',
@@ -487,6 +491,21 @@ test_suites = [
 		'suites': ['unit', 'core'],
 	},
 ]
+
+if platform == 'pc_x86_64'
+	test_suites += [
+		{
+			'name': 'io_port',
+			'sources': files(
+				'address_space/test_support.c',
+				'address_space/mock_paging.c',
+				'process/test_support.c',
+				'io_port/state.c',
+			),
+			'suites': ['unit', 'core'],
+		},
+	]
+endif
 
 if build_machine.cpu_family() == 'aarch64'
 	test_suites += [

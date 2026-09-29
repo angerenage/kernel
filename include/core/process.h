@@ -10,6 +10,7 @@
 #include <stdint.h>
 
 struct cpu;
+struct io_port_state;
 struct uthread;
 
 enum process_state {
@@ -125,7 +126,11 @@ struct process {
 	struct process_channel_state channel_state;
 	/* User-mode address space for this process. */
 	struct address_space address_space;
-	struct spinlock      lock;
+#if defined(PLATFORM_PC_X86_64) || defined(IO_PORT_TEST)
+	/* NULL means that every I/O port is denied. */
+	struct io_port_state* io_port_state;
+#endif
+	struct spinlock lock;
 	/* When true, the process cannot be joined anymore. */
 	bool detached;
 	/* When true, some thread has successfully joined this process. */
