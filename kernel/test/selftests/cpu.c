@@ -16,6 +16,9 @@
 #endif
 
 #if defined(PLATFORM_PC_LOONGARCH64)
+#include <core/pmm.h>
+#include <hal/paging.h>
+
 #include "../../../platforms/pc_loongarch64/hal/interrupts/controller.h"
 #endif
 
@@ -646,6 +649,109 @@ cleanup:
 	kernel_selftest_clock_scope_end(&clock);
 }
 
+#if defined(PLATFORM_PC_LOONGARCH64)
+static struct {
+	struct spinlock lock;
+	uint32_t        start;
+	uint32_t        waiting;
+	bool            irq_state_preserved;
+} kernel_selftest_cpu_sync_wait;
+
+static void kernel_selftest_cpu_sync_wait_worker(void* arg) {
+	(void)arg;
+	while (__atomic_load_n(&kernel_selftest_cpu_sync_wait.start, __ATOMIC_ACQUIRE) == 0u) spinlock_relax();
+	struct irq_state state = irq_save_disable();
+	__atomic_store_n(&kernel_selftest_cpu_sync_wait.waiting, 1u, __ATOMIC_RELEASE);
+	spinlock_lock(&kernel_selftest_cpu_sync_wait.lock);
+	kernel_selftest_cpu_sync_wait.irq_state_preserved = !irq_enabled() && cpu_current()->irq_disable_depth == 1u;
+	spinlock_unlock(&kernel_selftest_cpu_sync_wait.lock);
+	irq_restore(state);
+}
+
+static void kernel_selftest_cpu_loongarch_sync_during_irq_disabled_lock_wait(struct kernel_selftest_context* ctx) {
+	struct kernel_selftest_clock_scope clock      = {0};
+	struct hal_paging_space*           space      = NULL;
+	struct pmm_extent                  allocation = {0};
+	struct kthread*                    worker     = NULL;
+	struct cpu*                        target     = NULL;
+	struct irq_state                   state      = {0};
+	bool                               locked     = false;
+	const struct hal_paging_info*      paging     = hal_paging_info();
+
+	for (size_t i = 0u; i < cpu_count(); i++) {
+		struct cpu* cpu = cpu_by_index(i);
+		if (cpu != cpu_current() && cpu_state_get(cpu) == CPU_STATE_ONLINE) {
+			target = cpu;
+			break;
+		}
+	}
+	if (target == NULL) return;
+	memset(&kernel_selftest_cpu_sync_wait, 0, sizeof(kernel_selftest_cpu_sync_wait));
+	spinlock_init_class(
+		&kernel_selftest_cpu_sync_wait.lock, "selftest/sync-wait", SPINLOCK_ORDER_NONE, SPINLOCK_FLAG_IRQSAVE);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_clock_scope_begin(&clock), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, paging != NULL, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx,
+	                            pmm_alloc(&(const struct pmm_alloc_request){.size      = paging->minimum_leaf_size,
+	                                                                        .alignment = paging->minimum_leaf_size},
+	                                      &allocation),
+	                            cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, hal_paging_space_create(&space), cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(
+		ctx,
+		hal_paging_map(space,
+	                   &(const struct hal_paging_map_request){.virtual_address  = 0x10000u,
+	                                                          .physical_address = allocation.address,
+	                                                          .size             = paging->minimum_leaf_size,
+	                                                          .flags            = HAL_PAGE_READ | HAL_PAGE_WRITE,
+	                                                          .memory_type      = MEMORY_TYPE_NORMAL}),
+		cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx,
+	                            kernel_selftest_thread_create_with_preferred_cpu(
+									&worker, "selftest/sync-wait", kernel_selftest_cpu_sync_wait_worker, NULL, target),
+	                            cleanup);
+	state  = spinlock_lock_irqsave(&kernel_selftest_cpu_sync_wait.lock);
+	locked = true;
+	__atomic_store_n(&kernel_selftest_cpu_sync_wait.start, 1u, __ATOMIC_RELEASE);
+	for (size_t spins = 0u; spins < 10000000u; spins++) {
+		if (__atomic_load_n(&kernel_selftest_cpu_sync_wait.waiting, __ATOMIC_ACQUIRE) != 0u) break;
+		spinlock_relax();
+	}
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+	                                __atomic_load_n(&kernel_selftest_cpu_sync_wait.waiting, __ATOMIC_ACQUIRE) != 0u,
+	                                "AP did not enter the IRQ-disabled lock wait",
+	                                cleanup);
+	/* The AP cannot take a maskable IPI or acquire our lock until both
+	 * synchronization operations finish. Repeat to check generation reuse. */
+	for (size_t round = 0u; round < 4u; round++) {
+		hal_cache_sync_executable_range_all_cpus((void*)(uintptr_t)&kernel_selftest_cpu_sync_wait_worker, 1u);
+		KERNEL_SELFTEST_ASSERT_GOTO(
+			ctx,
+			hal_paging_protect(space,
+		                       0x10000u,
+		                       paging->minimum_leaf_size,
+		                       (round & 1u) == 0u ? HAL_PAGE_READ : HAL_PAGE_READ | HAL_PAGE_WRITE),
+			cleanup);
+	}
+
+cleanup:
+	if (locked) spinlock_unlock_irqrestore(&kernel_selftest_cpu_sync_wait.lock, state);
+	__atomic_store_n(&kernel_selftest_cpu_sync_wait.start, 1u, __ATOMIC_RELEASE);
+	if (worker != NULL) {
+		bool joined = kthread_timed_join(worker, KERNEL_SELFTEST_CPU_REMOTE_DISPATCH_TIMEOUT_MS, NULL);
+		if (ctx->failure_expr == NULL) {
+			KERNEL_SELFTEST_ASSERT_GOTO(ctx, joined, destroy);
+			KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_cpu_sync_wait.irq_state_preserved, destroy);
+		}
+	}
+destroy:
+	kernel_selftest_thread_destroy(&worker);
+	if (space != NULL) hal_paging_space_destroy(space);
+	if (allocation.size != 0u) (void)pmm_free(allocation);
+	kernel_selftest_clock_scope_end(&clock);
+}
+#endif
+
 static const struct kernel_selftest_case kernel_cpu_selftests[] = {
 #if defined(PLATFORM_PC_X86_64)
 	{.name = "x86_interrupt_ranges_are_stable", .run = kernel_selftest_cpu_x86_interrupt_ranges_are_stable},
@@ -660,6 +766,8 @@ static const struct kernel_selftest_case kernel_cpu_selftests[] = {
 #endif
 #if defined(PLATFORM_PC_LOONGARCH64)
 	{.name = "loongarch_interrupt_contract", .run = kernel_selftest_cpu_loongarch_interrupt_contract},
+	{.name = "loongarch_sync_during_irq_disabled_lock_wait",
+                                   .run  = kernel_selftest_cpu_loongarch_sync_during_irq_disabled_lock_wait},
 #endif
 	{.name = "interrupt_source_lifecycle", .run = kernel_selftest_cpu_interrupt_source_lifecycle},
 	{.name = "interrupt_message_lifecycle", .run = kernel_selftest_cpu_interrupt_message_lifecycle},

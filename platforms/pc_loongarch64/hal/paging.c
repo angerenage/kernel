@@ -1,3 +1,5 @@
+#include "paging.h"
+
 #include <base/math.h>
 #include <core/cpu.h>
 #include <core/lock.h>
@@ -12,6 +14,7 @@
 #include <string.h>
 
 #include "../../paging_transaction.h"
+#include "interrupts/ipi.h"
 
 #define LOONGARCH_CSR_CRMD 0x0u
 #define LOONGARCH_CSR_PGDL 0x19u
@@ -41,6 +44,8 @@
 #define LOONGARCH_PTE_NX (1ull << 62)
 #define LOONGARCH_PTE_RPLV (1ull << 63)
 
+#define LOONGARCH_TLB_MAX_CPUS 64u
+
 struct hal_paging_space {
 	uintptr_t lower_root_phys;
 	uintptr_t upper_root_phys;
@@ -58,6 +63,14 @@ static unsigned                minimum_leaf_shift;
 static struct hal_paging_space kernel_space;
 static struct spinlock         paging_lock =
 	SPINLOCK_INIT_CLASS("paging_lock", SPINLOCK_ORDER_PAGING, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
+
+struct loongarch_tlb_request {
+	size_t   source_index;
+	uint64_t generation;
+};
+
+static struct loongarch_tlb_request tlb_request;
+static uint64_t                     tlb_ack[LOONGARCH_TLB_MAX_CPUS];
 
 static inline uint64_t loongarch_csrrd(unsigned csr) {
 	uint64_t value;
@@ -145,20 +158,48 @@ static inline void loongarch_page_table_sync(void) {
 	                     : "memory");
 }
 
-static inline void loongarch_tlb_shootdown_local(void) {
+bool loongarch64_paging_handle_tlb_ipi(void) {
+	struct cpu* cpu = cpu_current();
+	uint64_t    generation;
+
+	if (cpu == NULL || cpu->index >= LOONGARCH_TLB_MAX_CPUS) hcf();
+	generation = __atomic_load_n(&tlb_request.generation, __ATOMIC_ACQUIRE);
+	if (generation == 0u || cpu->index == tlb_request.source_index ||
+	    __atomic_load_n(&tlb_ack[cpu->index], __ATOMIC_ACQUIRE) == generation)
+		return false;
+	loongarch_page_table_sync();
+	loongarch_tlb_flush_all();
+	__atomic_store_n(&tlb_ack[cpu->index], generation, __ATOMIC_RELEASE);
+	return true;
+}
+
+static inline void loongarch_tlb_shootdown(void) {
 	const struct cpu_topology* topology = cpu_topology_get();
 	struct cpu*                current  = cpu_current();
+	uint64_t                   generation;
+	uint64_t                   targets = 0u;
 
-	/* pc_loongarch64 does not currently expose SMP (hal_cpu_prepare_smp()
-	 * returns false), so every reachable paging update is single-CPU today. */
-	if (topology == NULL || topology->cpus == NULL || current == NULL) hcf();
+	if (topology == NULL || topology->cpus == NULL || current == NULL || topology->cpu_count == 0u ||
+	    topology->cpu_count > LOONGARCH_TLB_MAX_CPUS || current->index >= LOONGARCH_TLB_MAX_CPUS)
+		hcf();
+	loongarch_page_table_sync();
+	loongarch_tlb_flush_all();
+
+	generation = __atomic_load_n(&tlb_request.generation, __ATOMIC_RELAXED) + 1u;
+	if (generation == 0u) generation = 1u;
+	tlb_request.source_index = current->index;
+	__atomic_store_n(&tlb_request.generation, generation, __ATOMIC_RELEASE);
 	for (size_t i = 0u; i < topology->cpu_count; i++) {
 		struct cpu* target = &topology->cpus[i];
 
-		if (target != current && cpu_state_get(target) == CPU_STATE_ONLINE) hcf();
+		if (target == current || cpu_state_get(target) != CPU_STATE_ONLINE) continue;
+		if (target->index >= LOONGARCH_TLB_MAX_CPUS || !loongarch64_ipi_send(target, LOONGARCH64_IPI_VECTOR_TLB)) hcf();
+		targets |= 1ull << target->index;
 	}
-	loongarch_page_table_sync();
-	loongarch_tlb_flush_all();
+	for (size_t i = 0u; i < topology->cpu_count; i++) {
+		if ((targets & (1ull << i)) == 0u) continue;
+		while (__atomic_load_n(&tlb_ack[i], __ATOMIC_ACQUIRE) != generation) spinlock_relax();
+	}
 }
 
 static inline bool loongarch_upper_half(uintptr_t virt) {
@@ -558,12 +599,12 @@ bool hal_paging_unmap(struct hal_paging_space* space, uintptr_t virt, size_t siz
 	uint64_t*                 root        = root_phys == 0u ? NULL : (uint64_t*)hhdm_phys_to_virt(root_phys);
 	struct paging_transaction transaction = {0};
 	bool                      ok = root != NULL && loongarch_prepare_range(root, 3u, virt, end, &transaction) &&
-	          loongarch_change_range(root, 3u, virt, end, false, 0u, &transaction);
-	loongarch_tlb_shootdown_local();
+	                               loongarch_change_range(root, 3u, virt, end, false, 0u, &transaction);
+	loongarch_tlb_shootdown();
 	if (ok) paging_transaction_commit(&transaction);
 	else {
 		paging_transaction_rollback(&transaction, loongarch_transaction_restore, NULL);
-		loongarch_tlb_shootdown_local();
+		loongarch_tlb_shootdown();
 		paging_transaction_abort(&transaction);
 	}
 	spinlock_unlock_irqrestore(&paging_lock, state);
@@ -578,12 +619,12 @@ bool hal_paging_protect(struct hal_paging_space* space, uintptr_t virt, size_t s
 	uint64_t*                 root        = root_phys == 0u ? NULL : (uint64_t*)hhdm_phys_to_virt(root_phys);
 	struct paging_transaction transaction = {0};
 	bool                      ok = root != NULL && loongarch_prepare_range(root, 3u, virt, end, &transaction) &&
-	          loongarch_change_range(root, 3u, virt, end, true, flags, &transaction);
-	loongarch_tlb_shootdown_local();
+	                               loongarch_change_range(root, 3u, virt, end, true, flags, &transaction);
+	loongarch_tlb_shootdown();
 	if (ok) paging_transaction_commit(&transaction);
 	else {
 		paging_transaction_rollback(&transaction, loongarch_transaction_restore, NULL);
-		loongarch_tlb_shootdown_local();
+		loongarch_tlb_shootdown();
 		paging_transaction_abort(&transaction);
 	}
 	spinlock_unlock_irqrestore(&paging_lock, state);
@@ -689,11 +730,11 @@ bool hal_paging_remap(struct hal_paging_space* space, const struct hal_paging_re
 		root != NULL &&
 		loongarch_remap_range(
 			root, 3u, request->virtual_address, end, request->virtual_address, request->physical_address, &transaction);
-	loongarch_tlb_shootdown_local();
+	loongarch_tlb_shootdown();
 	if (ok) paging_transaction_commit(&transaction);
 	else {
 		paging_transaction_rollback(&transaction, loongarch_transaction_restore, NULL);
-		loongarch_tlb_shootdown_local();
+		loongarch_tlb_shootdown();
 		paging_transaction_abort(&transaction);
 	}
 	spinlock_unlock_irqrestore(&paging_lock, state);
@@ -737,11 +778,11 @@ bool hal_paging_map(struct hal_paging_space* space, const struct hal_paging_map_
 		        loongarch_leaf_flags(request->flags, request->memory_type, level != 0u);
 		mapped += loongarch_leaf_size(level);
 	}
-	loongarch_tlb_shootdown_local();
+	loongarch_tlb_shootdown();
 	if (ok) paging_transaction_commit(&transaction);
 	else {
 		paging_transaction_rollback(&transaction, loongarch_transaction_restore, NULL);
-		loongarch_tlb_shootdown_local();
+		loongarch_tlb_shootdown();
 		paging_transaction_abort(&transaction);
 	}
 	spinlock_unlock_irqrestore(&paging_lock, state);

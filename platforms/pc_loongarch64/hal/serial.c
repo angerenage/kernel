@@ -20,30 +20,22 @@
 
 #define NS16550_LSR_THRE 0x20u
 
-static volatile uint8_t* serial_base;
-static bool              serial_ready;
-static bool              serial_window_ready;
+static bool serial_ready;
 
 static inline void serial_enable_uart_window(void) {
-	if (serial_window_ready) {
-		return;
-	}
-
+	uint64_t current;
 	uint64_t window = LOONGARCH_DMW_VSEG | LOONGARCH_DMW_PLV0;
+
+	/* DMW CSRs are CPU-local, unlike the shared UART initialization state. */
+	__asm__ volatile("csrrd %0, %1" : "=r"(current) : "i"(LOONGARCH_DMW0_CSR));
+	if (current == window) return;
 	__asm__ volatile("csrwr %0, %1" : : "r"(window), "i"(LOONGARCH_DMW0_CSR) : "memory");
 	__asm__ volatile("dbar 0" ::: "memory");
-
-	serial_base         = (volatile uint8_t*)(uintptr_t)(LOONGARCH_DMW_VSEG | NS16550_BASE_PHYS);
-	serial_window_ready = true;
 }
 
 static inline volatile uint8_t* ns16550_regs(void) {
-	if (serial_base != NULL) {
-		return serial_base;
-	}
-
 	serial_enable_uart_window();
-	return serial_base;
+	return (volatile uint8_t*)(uintptr_t)(LOONGARCH_DMW_VSEG | NS16550_BASE_PHYS);
 }
 
 static inline uint8_t ns16550_read(uint32_t reg) {

@@ -28,6 +28,7 @@ platform_kernel_objects += [
 	files('hal/clock.c'),
 	files('hal/hcf.c'),
 	files('hal/interrupts/interrupts.c'),
+	files('hal/interrupts/ipi.c'),
 	files('hal/interrupts/avec.c'),
 	files('hal/interrupts/controllers.c'),
 	files('hal/interrupts/eiointc.c'),

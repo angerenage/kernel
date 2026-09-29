@@ -11,10 +11,13 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "../cache.h"
 #include "../clock.h"
+#include "../paging.h"
 #include "../syscall.h"
 #include "controllers.h"
 #include "frame.h"
+#include "ipi.h"
 
 #define LOONGARCH64_CSR_ECFG 0x4u
 #define LOONGARCH64_CSR_EENTRY 0xcu
@@ -25,6 +28,8 @@
 
 #define LOONGARCH64_USER_INTERRUPT_COUNT 11u
 #define LOONGARCH64_CPU_INTERRUPT_COUNT 15u
+#define LOONGARCH64_IPI_INTERRUPT_BIT 12u
+#define LOONGARCH64_IPI_INTERRUPT_MASK (1u << LOONGARCH64_IPI_INTERRUPT_BIT)
 
 static bool global_ready;
 static bool local_ready[64];
@@ -228,11 +233,13 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 	csrwr(tlbr_entry, LOONGARCH64_CSR_TLBRENTRY);
 	csrwr(merr_entry, LOONGARCH64_CSR_MERRENTRY);
 	if (!loongarch64_interrupt_controllers_init_local(cpu)) return false;
+	loongarch64_ipi_init_local();
 
 	/* CPUINTC pins are internal cascade endpoints. Fixed sources are
 	 * configured at their leaf controller and delivered through these pins. */
 	uint64_t ecfg = csrrd(LOONGARCH64_CSR_ECFG);
 	for (uint32_t id = 2u; id < 10u; id++) ecfg |= 1ull << id;
+	if (loongarch64_ipi_supported()) ecfg |= LOONGARCH64_IPI_INTERRUPT_MASK;
 	if (loongarch64_interrupt_controllers_has_avec()) ecfg |= 1ull << 14u;
 	csrwr(ecfg, LOONGARCH64_CSR_ECFG);
 
@@ -392,6 +399,13 @@ void handle_exception(struct exception_frame* frame) {
 		bool handled = false;
 
 		is_pending = frame->estat & 0x7fffu;
+		if ((is_pending & LOONGARCH64_IPI_INTERRUPT_MASK) != 0u) {
+			uint32_t actions = loongarch64_ipi_handle();
+
+			if ((actions & LOONGARCH64_IPI_STATUS_TLB) != 0u) (void)loongarch64_paging_handle_tlb_ipi();
+			if ((actions & LOONGARCH64_IPI_STATUS_CACHE) != 0u) (void)loongarch64_cache_handle_sync_ipi();
+			if (actions != 0u) return;
+		}
 		if (loongarch64_interrupt_controllers_handle(is_pending)) return;
 		for (uint32_t id = 0u; id < LOONGARCH64_USER_INTERRUPT_COUNT; id++) {
 			if ((is_pending & (1ull << id)) == 0u) continue;

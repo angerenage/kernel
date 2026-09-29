@@ -5,6 +5,8 @@
 
 #if defined(PLATFORM_PC_AARCH64)
 void aarch64_cache_poll_sync(void);
+#elif defined(PLATFORM_PC_LOONGARCH64)
+void loongarch64_ipi_poll_sync(void);
 #endif
 
 void spinlock_init(struct spinlock* lock) {
@@ -40,6 +42,11 @@ void spinlock_relax(void) {
 #elif defined(PLATFORM_PC_AARCH64)
 	aarch64_cache_poll_sync();
 	__asm__ volatile("yield");
+#elif defined(PLATFORM_PC_LOONGARCH64)
+	/* A lock owner may be waiting for this CPU's TLB/cache acknowledgement
+	 * while we spin with interrupts disabled. */
+	loongarch64_ipi_poll_sync();
+	__asm__ volatile("nop" ::: "memory");
 #else
 	__asm__ volatile("" ::: "memory");
 #endif

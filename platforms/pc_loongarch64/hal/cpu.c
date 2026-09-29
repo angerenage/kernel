@@ -1,8 +1,13 @@
+#include <core/cpu.h>
 #include <hal/cpu.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include "interrupts/ipi.h"
+
+#define LOONGARCH64_CSR_CPUID_MASK 0x7ffu
 
 enum {
 	LOONGARCH64_THREAD_STACK_ALIGNMENT = 16u,
@@ -28,7 +33,10 @@ _Static_assert(HAL_CPU_THREAD_CONTEXT_SPILL_WORDS > LOONGARCH64_THREAD_CTX_S7,
 _Static_assert(HAL_CPU_FP_CONTEXT_SIZE >= 1036u, "loongarch64 FP/LASX area is too small");
 
 uint64_t hal_cpu_boot_arch_id(void) {
-	return 0u;
+	uint64_t value;
+
+	__asm__ volatile("csrrd %0, 0x20" : "=r"(value));
+	return value & LOONGARCH64_CSR_CPUID_MASK;
 }
 
 void* hal_cpu_local_current(void) {
@@ -93,7 +101,14 @@ void hal_cpu_context_switch(struct thread_context* current, const struct thread_
 }
 
 bool hal_cpu_prepare_smp(void) {
-	return false;
+	const struct cpu_topology* topology = cpu_topology_get();
+
+	if (!loongarch64_ipi_supported() || topology == NULL || topology->cpus == NULL || topology->cpu_count == 0u)
+		return false;
+	for (size_t i = 0u; i < topology->cpu_count; i++) {
+		if (topology->cpus[i].arch_id > LOONGARCH64_CSR_CPUID_MASK) return false;
+	}
+	return true;
 }
 
 void hal_cpu_park(void) {
@@ -101,5 +116,5 @@ void hal_cpu_park(void) {
 }
 
 void hal_cpu_kick(const struct cpu* cpu) {
-	(void)cpu;
+	(void)loongarch64_ipi_send(cpu, LOONGARCH64_IPI_VECTOR_WAKE);
 }

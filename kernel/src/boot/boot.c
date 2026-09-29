@@ -108,6 +108,22 @@ static uint64_t kernel_boot_mp_bsp_arch_id(const struct limine_mp_response* resp
 static bool kernel_boot_mp_supported(void) {
 	return true;
 }
+#elif defined(PLATFORM_PC_LOONGARCH64)
+static uint64_t kernel_boot_mp_info_arch_id(const struct limine_mp_info* info) {
+	return info ? info->phys_id : 0u;
+}
+
+static uint64_t kernel_boot_mp_info_processor_id(const struct limine_mp_info* info) {
+	return info ? info->processor_id : 0u;
+}
+
+static uint64_t kernel_boot_mp_bsp_arch_id(const struct limine_mp_response* response) {
+	return response ? response->bsp_phys_id : 0u;
+}
+
+static bool kernel_boot_mp_supported(void) {
+	return true;
+}
 #else
 static uint64_t kernel_boot_mp_info_arch_id(const struct limine_mp_info* info) {
 	(void)info;
@@ -139,7 +155,8 @@ static const char* kernel_boot_path_basename(const char* path) {
 	return basename;
 }
 
-#if defined(PLATFORM_PC_X86_64) || defined(PLATFORM_PC_AARCH64) || defined(PLATFORM_PC_RISCV64)
+#if defined(PLATFORM_PC_X86_64) || defined(PLATFORM_PC_AARCH64) || defined(PLATFORM_PC_RISCV64) ||                     \
+	defined(PLATFORM_PC_LOONGARCH64)
 static void kernel_boot_mp_entry(struct limine_mp_info* info) {
 	struct kernel_boot_cpu_launch* launch;
 
@@ -395,7 +412,8 @@ bool kernel_boot_cpu_topology(struct cpu_init_info* init_info, size_t max_count,
 }
 
 bool kernel_boot_cpu_start(size_t cpu_index, kernel_boot_cpu_entry_t entry, void* arg) {
-#if defined(PLATFORM_PC_X86_64) || defined(PLATFORM_PC_AARCH64) || defined(PLATFORM_PC_RISCV64)
+#if defined(PLATFORM_PC_X86_64) || defined(PLATFORM_PC_AARCH64) || defined(PLATFORM_PC_RISCV64) ||                     \
+	defined(PLATFORM_PC_LOONGARCH64)
 	struct limine_mp_info* info;
 
 	if (!boot_initialized || entry == NULL || cpu_index >= boot_cpu_count || cpu_index >= KERNEL_BOOT_MAX_CPUS)
