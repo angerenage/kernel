@@ -1,5 +1,6 @@
 #pragma once
 
+#include <boot/info.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -7,25 +8,6 @@
 #define MM_KERNEL_ADDRESS_SPACE_BASE 0xffffffffa0000000ull
 #define MM_KERNEL_ADDRESS_SPACE_SIZE 0x40000000ull
 #define MM_USER_ADDRESS_SPACE_SIZE 0x40000000ull
-
-/* Boot-time memory-range classification imported from the boot protocol and reused by the physical allocator. */
-enum mem_range_type {
-	MEM_RANGE_USABLE = 0,
-	MEM_RANGE_RESERVED,
-	MEM_RANGE_ACPI,
-	MEM_RANGE_BAD_MEMORY,
-	MEM_RANGE_BOOTLOADER_RECLAIMABLE,
-	MEM_RANGE_KERNEL_AND_MODULES,
-	MEM_RANGE_FRAMEBUFFER,
-	MEM_RANGE_OTHER,
-};
-
-/* One physical memory extent from the bootloader-provided memory map. */
-struct mem_range {
-	uintptr_t           base;
-	size_t              length;
-	enum mem_range_type type;
-};
 
 /* Global boot address-space facts needed by allocators that translate physical memory through the direct map. */
 struct mm_boot_info {

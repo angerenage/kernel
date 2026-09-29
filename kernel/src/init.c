@@ -1,5 +1,7 @@
 #include <base/heap.h>
 #include <base/startup.h>
+#include <boot/info.h>
+#include <boot/protocol.h>
 #include <core/address_space.h>
 #include <core/capability.h>
 #include <core/cpu.h>
@@ -11,14 +13,12 @@
 #include <core/process.h>
 #include <core/sched.h>
 #include <core/uthread.h>
-#include <firmware/acpi.h>
-#include <firmware/dt.h>
+#include <firmware/init.h>
 #include <hal/clock.h>
 #include <hal/cpu.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
 #include <hal/serial.h>
-#include <kernel/boot.h>
 #include <kernel/boot_diagnostics.h>
 #include <kernel/capability.h>
 #include <kernel/cpu_boot.h>
@@ -73,7 +73,7 @@ static const char* kernel_elf_load_result_string(enum kernel_elf_load_result res
 }
 
 static bool kernel_launch_init_process(void) {
-	const struct kernel_boot_module* module;
+	const struct boot_module*        module;
 	struct kernel_elf_process        loaded  = {0};
 	struct init_startup_info         startup = {0};
 	struct uthread*                  main_thread;
@@ -83,7 +83,7 @@ static bool kernel_launch_init_process(void) {
 	cap_id_t                         kernel_resources_cap;
 	cap_id_t                         memory_allocator_cap;
 
-	module = kernel_boot_module_find("init.elf");
+	module = boot_module_lookup("init.elf");
 	if (module == NULL) {
 		printf("kernel: init.elf module not found\n");
 		return false;
@@ -243,18 +243,20 @@ static void kernel_init_memory(const struct mem_range* memory_map, size_t range_
 
 __attribute__((noreturn))
 void kernel_main(void) {
-	size_t                           memory_map_count = 0u;
-	const struct mem_range*          memory_map       = NULL;
-	struct kernel_boot_address_space boot_address_space;
-	uintptr_t                        rsdp_address;
-	uintptr_t                        dtb_address;
+	const struct boot_info* info;
 
-	if (!kernel_boot_init()) {
+	if (!boot_init()) {
 		hal_serial_init();
-		boot_fail("kernel: kernel_boot_init failed");
+		boot_fail("kernel: boot_init failed");
 	}
 
 	hal_serial_init();
+
+	info = boot_info_get();
+	if (info == NULL || info->memory_map == NULL || info->memory_map_count == 0u) {
+		boot_fail("kernel: boot information unavailable");
+	}
+	if (!firmware_init(info)) boot_fail("kernel: firmware initialization failed");
 
 	if (!kernel_cpu_boot_init((uintptr_t)stack_bottom, (uintptr_t)stack_top)) {
 		boot_fail("kernel: kernel_cpu_boot_init failed");
@@ -262,26 +264,15 @@ void kernel_main(void) {
 	kernel_cpu_boot_bind_current(cpu_bsp());
 	(void)cpu_set_state(cpu_bsp(), CPU_STATE_STARTING);
 
-	if (!kernel_boot_protocol_supported()) boot_fail("kernel: boot protocol unavailable");
-	memory_map = kernel_boot_memmap(&memory_map_count);
-	if (memory_map == NULL || memory_map_count == 0u) boot_fail("kernel: memory map unavailable");
-	if (!kernel_boot_address_space_get(&boot_address_space)) boot_fail("kernel: boot address space unavailable");
-	if (kernel_boot_rsdp_address(&rsdp_address) && !acpi_init((const void*)rsdp_address)) {
-		boot_fail("kernel: ACPI initialization failed");
-	}
-	if (kernel_boot_dtb_address(&dtb_address) && !dt_init((const void*)dtb_address)) {
-		boot_fail("kernel: Device Tree initialization failed");
-	}
-
 	boot_diagnostics_enabled = kernel_boot_diagnostics_enabled();
 	if (boot_diagnostics_enabled) {
 		printf("kernel: entering kernel_main\n");
 		kernel_boot_diagnostics_framebuffer();
 		kernel_boot_diagnostics_device_tree();
-		kernel_boot_diagnostics_memory_map(memory_map, memory_map_count);
+		kernel_boot_diagnostics_memory_map(info->memory_map, info->memory_map_count);
 		kernel_boot_diagnostics_modules();
 	}
-	kernel_init_memory(memory_map, memory_map_count, boot_address_space.direct_map_offset);
+	kernel_init_memory(info->memory_map, info->memory_map_count, info->direct_map_offset);
 
 	if (!hal_interrupts_init_global()) {
 		boot_fail("kernel: hal_interrupts_init_global failed");
@@ -297,10 +288,10 @@ void kernel_main(void) {
 		kernel_boot_diagnostics_memory_summary();
 		kernel_boot_diagnostics_iommus();
 	}
-	if (kernel_boot_cpu_mp_supported() && cpu_count() > 1u && !hal_cpu_prepare_smp()) {
+	if (boot_cpu_mp_supported() && cpu_count() > 1u && !hal_cpu_prepare_smp()) {
 		boot_fail("kernel: hal_cpu_prepare_smp failed");
 	}
-	if (!kernel_boot_cpu_mp_supported()) {
+	if (!boot_cpu_mp_supported()) {
 		printf("kernel: SMP boot hooks unavailable on this platform, continuing with the BSP only\n");
 	}
 	if (!sched_init()) {

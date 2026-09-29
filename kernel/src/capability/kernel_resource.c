@@ -4,8 +4,8 @@
 #include <base/kernel_resource.h>
 #include <base/math.h>
 #include <base/syscall.h>
+#include <boot/info.h>
 #include <core/capability.h>
-#include <kernel/boot.h>
 #include <kernel/capability.h>
 #include <libc/stdlib.h>
 #include <stddef.h>
@@ -25,7 +25,7 @@ static cap_object_id_t kernel_resources_object_id = CAP_OBJECT_ID_INVALID;
 static size_t kernel_resources_available(enum kernel_resource_type* ids, size_t capacity) {
 	size_t count = 0u;
 
-	if (kernel_boot_module_count() != 0u) {
+	if (boot_module_count() != 0u) {
 		if (ids != NULL && count < capacity) ids[count] = KERNEL_RESOURCE_TYPE_MODULES;
 		count++;
 	}
@@ -111,7 +111,7 @@ static syscall_result_t kernel_resource_acquire_handler(const struct cap_request
 	}
 	switch (request.id) {
 	case KERNEL_RESOURCE_TYPE_MODULES:
-		if (kernel_boot_module_count() == 0u) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+		if (boot_module_count() == 0u) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 		response.cap = kernel_capability_boot_module_provider_grant(req->caller);
 		break;
 	case KERNEL_RESOURCE_TYPE_SERIAL:

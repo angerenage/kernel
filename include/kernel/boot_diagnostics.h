@@ -1,6 +1,6 @@
 #pragma once
 
-#include <core/mm.h>
+#include <boot/info.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -8,7 +8,7 @@
 /* Return true when boot-time diagnostic logging is enabled for the current image. */
 bool kernel_boot_diagnostics_enabled(void);
 
-/* Print the framebuffer description captured during kernel_boot_init(), when available. */
+/* Print the framebuffer description captured during boot_init(), when available. */
 void kernel_boot_diagnostics_framebuffer(void);
 
 /* Print the complete validated Device Tree, when available. */

@@ -4,7 +4,7 @@
 
 Test(elf_loader_segments, loads_file_bytes_zeros_bss_and_applies_final_permissions) {
 	struct elf_test_image     image;
-	struct kernel_boot_module module;
+	struct boot_module        module;
 	struct kernel_elf_process loaded = {0};
 	struct address_space*     space;
 	uint8_t                   bytes[64];
@@ -40,7 +40,7 @@ Test(elf_loader_segments, loads_file_bytes_zeros_bss_and_applies_final_permissio
 
 Test(elf_loader_segments, keeps_text_and_data_permissions_independent) {
 	struct elf_test_image     image;
-	struct kernel_boot_module module;
+	struct boot_module        module;
 	struct kernel_elf_process loaded = {0};
 	struct address_space*     space;
 	const uint64_t            text_offset = TEST_MAPPING_GRANULE;
@@ -75,7 +75,7 @@ Test(elf_loader_segments, keeps_text_and_data_permissions_independent) {
 
 Test(elf_loader_segments, segment_page_padding_does_not_expose_recycled_physical_contents) {
 	struct elf_test_image     image;
-	struct kernel_boot_module module;
+	struct boot_module        module;
 	struct kernel_elf_process loaded = {0};
 	struct address_space*     space;
 	uint8_t                   first_byte = 0u, last_byte = 0u;
@@ -103,7 +103,7 @@ Test(elf_loader_segments, segment_page_padding_does_not_expose_recycled_physical
 
 Test(elf_loader_segments, initial_heap_does_not_expose_recycled_physical_contents) {
 	struct elf_test_image     image;
-	struct kernel_boot_module module;
+	struct boot_module        module;
 	struct kernel_elf_process loaded = {0};
 	struct address_space*     space;
 	uint8_t                   first_byte = 0u, last_byte = 0u;

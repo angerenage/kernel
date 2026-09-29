@@ -4,7 +4,7 @@
 
 Test(elf_loader_rollback, invalid_entry_after_segment_load_reclaims_everything) {
 	struct elf_test_image     image;
-	struct kernel_boot_module module;
+	struct boot_module        module;
 	struct kernel_elf_process loaded = {0};
 	size_t                    process_before, free_before;
 	const uint64_t            data_offset = TEST_MAPPING_GRANULE;
@@ -26,7 +26,7 @@ Test(elf_loader_rollback, invalid_entry_after_segment_load_reclaims_everything) 
 
 Test(elf_loader_rollback, missing_load_segments_do_not_leave_an_empty_process) {
 	struct elf_test_image     image;
-	struct kernel_boot_module module;
+	struct boot_module        module;
 	struct kernel_elf_process loaded = {0};
 	size_t                    process_before, free_before;
 	elf_test_init_environment();

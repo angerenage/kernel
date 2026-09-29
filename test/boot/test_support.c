@@ -12,7 +12,7 @@
 #define PLATFORM_PC_X86_64 1
 #endif
 
-#include "../../kernel/src/boot/limine_requests.h"
+#include "../../boot/limine/requests.h"
 
 volatile struct limine_framebuffer_request        fb_req;
 volatile struct limine_mp_request                 mp_req;
@@ -28,7 +28,7 @@ static bool     protocol_supported;
 static uint64_t boot_arch_id = 0x2au;
 static bool     dt_initialized;
 
-bool kernel_limine_protocol_supported(void) {
+bool limine_protocol_supported(void) {
 	return protocol_supported;
 }
 
@@ -49,7 +49,8 @@ bool dt_node_valid(struct dt_node node) {
 	return dt_initialized && node.id == 0u;
 }
 
-#include "../../kernel/src/boot/boot.c"
+#include "../../boot/info.c"
+#include "../../boot/limine/boot.c"
 
 static struct limine_memmap_entry                usable_entry;
 static struct limine_memmap_entry*               memmap_entries[1];
@@ -61,18 +62,9 @@ static struct limine_mp_response                 mp_response;
 
 void boot_test_reset(void) {
 	memset(boot_memmap, 0, sizeof(boot_memmap));
-	boot_memmap_count = 0u;
-	memset(&boot_framebuffer, 0, sizeof(boot_framebuffer));
-	boot_framebuffer_valid = false;
-	memset(&boot_address_space, 0, sizeof(boot_address_space));
-	boot_address_space_valid = false;
-	boot_cmdline             = NULL;
+	limine_info    = (struct boot_info){0};
+	published_info = NULL;
 	memset(boot_modules, 0, sizeof(boot_modules));
-	boot_module_count = 0u;
-	boot_rsdp_address = 0u;
-	boot_rsdp_valid   = false;
-	boot_dtb_address  = NULL;
-	boot_dtb_valid    = false;
 	memset(boot_cpu_launch, 0, sizeof(boot_cpu_launch));
 	memset(boot_cpu_private, 0, sizeof(boot_cpu_private));
 	boot_cpu_count   = 0u;

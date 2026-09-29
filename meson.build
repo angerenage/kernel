@@ -51,6 +51,7 @@ platform_limine_arch = ''
 
 subdir('base')
 subdir('core')
+subdir('boot')
 subdir('firmware')
 subdir('platforms/' + platform)
 subdir('userspace')

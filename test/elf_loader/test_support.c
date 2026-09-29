@@ -93,18 +93,18 @@ void elf_test_image_init(struct elf_test_image* image, size_t phnum) {
 	image->size = sizeof(image->bytes);
 	header      = (struct elf_test_ehdr*)image->bytes;
 	*header     = (struct elf_test_ehdr){
-			.ident     = {ELF_TEST_MAGIC0,
-	                      ELF_TEST_MAGIC1, ELF_TEST_MAGIC2,
-	                      ELF_TEST_MAGIC3, ELF_TEST_CLASS_64,
-	                      ELF_TEST_DATA_LSB, ELF_TEST_VERSION_CURRENT},
-			.type      = ELF_TEST_ET_EXEC,
-			.machine   = ELF_TEST_MACHINE,
-			.version   = ELF_TEST_VERSION_CURRENT,
-			.phoff     = sizeof(struct elf_test_ehdr),
-			.ehsize    = sizeof(struct elf_test_ehdr),
-			.phentsize = sizeof(struct elf_test_phdr),
-			.phnum     = (uint16_t)phnum,
-    };
+		.ident     = {ELF_TEST_MAGIC0,
+	                  ELF_TEST_MAGIC1, ELF_TEST_MAGIC2,
+	                  ELF_TEST_MAGIC3, ELF_TEST_CLASS_64,
+	                  ELF_TEST_DATA_LSB, ELF_TEST_VERSION_CURRENT},
+		.type      = ELF_TEST_ET_EXEC,
+		.machine   = ELF_TEST_MACHINE,
+		.version   = ELF_TEST_VERSION_CURRENT,
+		.phoff     = sizeof(struct elf_test_ehdr),
+		.ehsize    = sizeof(struct elf_test_ehdr),
+		.phentsize = sizeof(struct elf_test_phdr),
+		.phnum     = (uint16_t)phnum,
+	};
 }
 
 struct elf_test_ehdr* elf_test_header(struct elf_test_image* image) {
@@ -117,8 +117,8 @@ struct elf_test_phdr* elf_test_phdr(struct elf_test_image* image, size_t index) 
 	return (struct elf_test_phdr*)(image->bytes + header->phoff + index * sizeof(struct elf_test_phdr));
 }
 
-struct kernel_boot_module elf_test_module(struct elf_test_image* image) {
-	return (struct kernel_boot_module){
+struct boot_module elf_test_module(struct elf_test_image* image) {
+	return (struct boot_module){
 		.path    = "/boot/test.elf",
 		.name    = "test.elf",
 		.address = image == NULL ? NULL : image->bytes,

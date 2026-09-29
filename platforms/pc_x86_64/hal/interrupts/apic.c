@@ -1,9 +1,9 @@
 #include "apic.h"
 
+#include <boot/info.h>
 #include <firmware/acpi.h>
 #include <hal/interrupts.h>
 #include <hal/paging.h>
-#include <kernel/boot.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -108,18 +108,18 @@ struct x86_ioapic {
 static struct x86_ioapic ioapics[X86_IOAPIC_MAX_CONTROLLERS];
 static size_t            ioapic_count;
 
-static bool boot_address_space(struct kernel_boot_address_space* out) {
-	return kernel_boot_address_space_get(out);
+static bool boot_address_space(struct boot_address_space* out) {
+	return boot_address_space_get(out);
 }
 
 static bool boot_address_space_available(void) {
-	struct kernel_boot_address_space address_space;
+	struct boot_address_space address_space;
 
 	return boot_address_space(&address_space);
 }
 
 static uintptr_t hhdm_phys_to_virt(uintptr_t phys) {
-	struct kernel_boot_address_space address_space;
+	struct boot_address_space address_space;
 
 	if (!boot_address_space(&address_space)) return 0u;
 	return phys + address_space.direct_map_offset;

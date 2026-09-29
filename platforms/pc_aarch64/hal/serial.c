@@ -1,6 +1,6 @@
+#include <boot/info.h>
 #include <hal/paging.h>
 #include <hal/serial.h>
-#include <kernel/boot.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -48,10 +48,10 @@ static uint64_t ttbr0_l1[512] __attribute__((aligned(4096)));
 static uint64_t ttbr0_l2[512] __attribute__((aligned(4096)));
 
 static inline uint64_t kernel_virt_to_phys(const void* ptr) {
-	struct kernel_boot_address_space address_space;
+	struct boot_address_space address_space;
 
-	if (!kernel_boot_address_space_get(&address_space)) return 0u;
-	return address_space.physical_base + ((uint64_t)(uintptr_t)ptr - address_space.virtual_base);
+	if (!boot_address_space_get(&address_space)) return 0u;
+	return address_space.kernel_physical_base + ((uint64_t)(uintptr_t)ptr - address_space.kernel_virtual_base);
 }
 
 static inline void serial_tlb_flush_all(void) {
@@ -96,13 +96,13 @@ static bool serial_map_uart_identity(void) {
 }
 
 static bool serial_map_uart_direct(void) {
-	struct kernel_boot_address_space address_space;
-	struct hal_paging_space*         kernel_space;
-	uintptr_t                        page_phys;
-	uintptr_t                        page_virt;
+	struct boot_address_space address_space;
+	struct hal_paging_space*  kernel_space;
+	uintptr_t                 page_phys;
+	uintptr_t                 page_virt;
 
 	if (serial_direct_mapped) return true;
-	if (!kernel_boot_address_space_get(&address_space)) return false;
+	if (!boot_address_space_get(&address_space)) return false;
 
 	kernel_space = hal_paging_kernel_space();
 	if (kernel_space == NULL) return false;

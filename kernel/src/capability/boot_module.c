@@ -4,6 +4,7 @@
 #include <base/math.h>
 #include <base/module.h>
 #include <base/syscall.h>
+#include <boot/info.h>
 #include <core/address_space.h>
 #include <core/capability.h>
 #include <core/memory.h>
@@ -11,7 +12,6 @@
 #include <core/pmm.h>
 #include <core/process.h>
 #include <core/spinlock.h>
-#include <kernel/boot.h>
 #include <kernel/capability.h>
 #include <libc/stdlib.h>
 #include <libc/string.h>
@@ -34,7 +34,7 @@ struct boot_module_mapping_layout {
 	size_t    mapping_size;
 };
 
-static bool boot_module_mapping_layout(const struct kernel_boot_module*   module,
+static bool boot_module_mapping_layout(const struct boot_module*          module,
                                        struct boot_module_mapping_layout* out_layout) {
 	uintptr_t module_address;
 	uintptr_t physical_address;
@@ -57,7 +57,7 @@ static bool boot_module_mapping_layout(const struct kernel_boot_module*   module
 
 static cap_object_id_t* boot_module_id_slot(size_t module_index) {
 	if (boot_module_object_ids == NULL) {
-		size_t count = kernel_boot_module_count();
+		size_t count = boot_module_count();
 		if (count == 0u || module_index >= count) return NULL;
 
 		cap_object_id_t* ids      = calloc(count, sizeof(*boot_module_object_ids));
@@ -77,7 +77,7 @@ static cap_object_id_t* boot_module_id_slot(size_t module_index) {
 }
 
 static syscall_result_t boot_module_info_handler(const struct cap_request* req, module_id_t id,
-                                                 const struct kernel_boot_module* module) {
+                                                 const struct boot_module* module) {
 	struct module_info_response response = {
 		.id         = id,
 		.size       = module->size,
@@ -94,7 +94,7 @@ static syscall_result_t boot_module_info_handler(const struct cap_request* req, 
 }
 
 static syscall_result_t boot_module_map_handler(const struct cap_request* req, size_t module_index,
-                                                const struct kernel_boot_module* module) {
+                                                const struct boot_module* module) {
 	struct boot_module_mapping_layout layout;
 	struct module_map_response        response = {0};
 	struct process*                   caller;
@@ -160,8 +160,7 @@ static syscall_result_t boot_module_map_handler(const struct cap_request* req, s
 	return result;
 }
 
-static syscall_result_t boot_module_read_handler(const struct cap_request*        req,
-                                                 const struct kernel_boot_module* module) {
+static syscall_result_t boot_module_read_handler(const struct cap_request* req, const struct boot_module* module) {
 	struct module_read_request request;
 
 	if (req->request_size < sizeof(request)) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -193,9 +192,9 @@ static syscall_result_t boot_module_resolve_handler(const struct cap_request* re
 	name = (const char*)req->request + sizeof(request);
 	if (name[request.name_size - 1u] != '\0') return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 
-	count = kernel_boot_module_count();
+	count = boot_module_count();
 	for (size_t i = 0u; i < count; i++) {
-		const struct kernel_boot_module*        module = kernel_boot_module_at(i);
+		const struct boot_module*               module = boot_module_get(i);
 		struct module_provider_resolve_response response;
 		syscall_result_t                        result;
 
@@ -238,7 +237,7 @@ static syscall_result_t boot_module_handler(const struct cap_request* req) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 	memcpy(&operation, req->request, sizeof(operation));
-	const struct kernel_boot_module* module = kernel_boot_module_at((size_t)(id - 1u));
+	const struct boot_module* module = boot_module_get((size_t)(id - 1u));
 	if (module == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 
 	switch (operation) {
@@ -257,8 +256,8 @@ static syscall_result_t boot_module_handler(const struct cap_request* req) {
 }
 
 syscall_result_t kernel_capability_boot_module_get(cap_id_t module_cap, process_id_t caller,
-                                                   cap_rights_t                      required_rights,
-                                                   const struct kernel_boot_module** out_module) {
+                                                   cap_rights_t               required_rights,
+                                                   const struct boot_module** out_module) {
 	struct cap_object* object;
 	enum cap_result    result;
 	module_id_t        id;
@@ -279,7 +278,7 @@ syscall_result_t kernel_capability_boot_module_get(cap_id_t module_cap, process_
 	}
 
 	id = (module_id_t)object->object_id;
-	if (id != MODULE_ID_INVALID) *out_module = kernel_boot_module_at((size_t)(id - 1u));
+	if (id != MODULE_ID_INVALID) *out_module = boot_module_get((size_t)(id - 1u));
 	cap_object_release(object);
 	return *out_module == NULL ? syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u) : syscall_result_ok(0u);
 }
@@ -289,7 +288,7 @@ void kernel_capability_boot_module_provider_init(void) {
 }
 
 cap_id_t kernel_capability_boot_module_provider_grant(process_id_t recipient) {
-	if (boot_module_provider_object_id == CAP_OBJECT_ID_INVALID || kernel_boot_module_count() == 0u) {
+	if (boot_module_provider_object_id == CAP_OBJECT_ID_INVALID || boot_module_count() == 0u) {
 		return CAP_ID_INVALID;
 	}
 	return cap_create(boot_module_provider_object_id, recipient, CAP_CALL | CAP_READ | CAP_DELEGATE, NULL);
@@ -307,7 +306,7 @@ cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t r
 	object_id = *slot;
 	if (object_id == CAP_OBJECT_ID_INVALID) {
 		const uint64_t raw_id = (uint64_t)module_index + 1u;
-		if (kernel_boot_module_at(module_index) == NULL) return CAP_ID_INVALID;
+		if (boot_module_get(module_index) == NULL) return CAP_ID_INVALID;
 
 		object_id = cap_object_create_kernel(raw_id, boot_module_handler, &object_created);
 		if (object_id == CAP_OBJECT_ID_INVALID) return CAP_ID_INVALID;

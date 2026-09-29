@@ -11,7 +11,7 @@ Test(kernel_capability_boot_resource, framebuffer_reports_format_and_maps_writab
 	const struct framebuffer_map_request  map_request  = {.header = {.op = FRAMEBUFFER_OP_MAP}};
 	struct framebuffer_info_response      info;
 	struct framebuffer_map_response       mapping;
-	struct kernel_boot_framebuffer        framebuffer;
+	struct boot_framebuffer               framebuffer;
 	struct capability*                    root;
 	struct pmm_extent                     allocation;
 	uintptr_t                             physical;
@@ -26,7 +26,7 @@ Test(kernel_capability_boot_resource, framebuffer_reports_format_and_maps_writab
 	              &allocation));
 	physical = allocation.address;
 	cr_assert(pmm_free(allocation));
-	framebuffer = (struct kernel_boot_framebuffer){
+	framebuffer = (struct boot_framebuffer){
 		.address          = (void*)(physical + 31u),
 		.width            = 8u,
 		.height           = 4u,
@@ -39,7 +39,7 @@ Test(kernel_capability_boot_resource, framebuffer_reports_format_and_maps_writab
 		.green_mask_shift = 8u,
 		.blue_mask_size   = 8u,
 	};
-	kernel_boot_mock_set_framebuffer(&framebuffer);
+	boot_mock_set_framebuffer(&framebuffer);
 	kernel_capability_boot_resources_init();
 	cap = kernel_capability_framebuffer_grant(process_pid(ctx.process));
 	cr_assert_neq(cap, CAP_ID_INVALID);

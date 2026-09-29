@@ -5,6 +5,7 @@
 #include <base/kernel_resource.h>
 #include <base/math.h>
 #include <base/syscall.h>
+#include <boot/info.h>
 #include <core/address_space.h>
 #include <core/capability.h>
 #include <core/memory.h>
@@ -12,7 +13,6 @@
 #include <core/pmm.h>
 #include <core/process.h>
 #include <core/spinlock.h>
-#include <kernel/boot.h>
 #include <kernel/capability.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -110,17 +110,17 @@ static syscall_result_t external_mapping_create(const struct cap_request* req, c
 	return syscall_result_ok(0u);
 }
 
-static bool framebuffer_get(struct kernel_boot_framebuffer* out, size_t* out_size) {
-	if (out == NULL || out_size == NULL || !kernel_boot_framebuffer_get(out) ||
-	    (uint64_t)(size_t)out->pitch != out->pitch || (uint64_t)(size_t)out->height != out->height ||
+static bool framebuffer_get(struct boot_framebuffer* out, size_t* out_size) {
+	if (out == NULL || out_size == NULL || !boot_framebuffer_get(out) || (uint64_t)(size_t)out->pitch != out->pitch ||
+	    (uint64_t)(size_t)out->height != out->height ||
 	    mul_overflow_size((size_t)out->pitch, (size_t)out->height, out_size) || *out_size == 0u) {
 		return false;
 	}
 	return true;
 }
 
-static syscall_result_t framebuffer_info_handler(const struct cap_request*             req,
-                                                 const struct kernel_boot_framebuffer* framebuffer, size_t size) {
+static syscall_result_t framebuffer_info_handler(const struct cap_request*      req,
+                                                 const struct boot_framebuffer* framebuffer, size_t size) {
 	const struct framebuffer_info_response response = {
 		.size             = size,
 		.width            = framebuffer->width,
@@ -143,8 +143,8 @@ static syscall_result_t framebuffer_info_handler(const struct cap_request*      
 	return cap_kernel_write_response(req, &response, sizeof(response));
 }
 
-static syscall_result_t framebuffer_map_handler(const struct cap_request*             req,
-                                                const struct kernel_boot_framebuffer* framebuffer, size_t size) {
+static syscall_result_t framebuffer_map_handler(const struct cap_request*      req,
+                                                const struct boot_framebuffer* framebuffer, size_t size) {
 	struct external_mapping_result  mapping;
 	struct framebuffer_map_response response;
 	syscall_result_t                result;
@@ -170,9 +170,9 @@ static syscall_result_t framebuffer_map_handler(const struct cap_request*       
 }
 
 static syscall_result_t framebuffer_handler(const struct cap_request* req) {
-	struct kernel_boot_framebuffer framebuffer;
-	size_t                         size;
-	uint32_t                       operation;
+	struct boot_framebuffer framebuffer;
+	size_t                  size;
+	uint32_t                operation;
 
 	if (req->request == NULL || req->request_size < sizeof(operation))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -197,15 +197,15 @@ void kernel_capability_boot_resources_init(void) {
 }
 
 bool kernel_capability_framebuffer_available(void) {
-	struct kernel_boot_framebuffer framebuffer;
-	size_t                         size;
+	struct boot_framebuffer framebuffer;
+	size_t                  size;
 
 	return framebuffer_get(&framebuffer, &size);
 }
 
 cap_id_t kernel_capability_framebuffer_grant(process_id_t recipient) {
-	struct kernel_boot_framebuffer framebuffer;
-	size_t                         size;
+	struct boot_framebuffer framebuffer;
+	size_t                  size;
 
 	if (framebuffer_object_id == CAP_OBJECT_ID_INVALID || !framebuffer_get(&framebuffer, &size)) {
 		return CAP_ID_INVALID;

@@ -1,7 +1,7 @@
 #pragma once
 
+#include <boot/info.h>
 #include <core/process.h>
-#include <kernel/boot.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -27,5 +27,5 @@ struct kernel_elf_process {
 };
 
 /* Load an ELF boot module and zero-initialized heap into a fresh, not-yet-started process. */
-enum kernel_elf_load_result kernel_elf_load_process(const struct kernel_boot_module* module, const char* name,
+enum kernel_elf_load_result kernel_elf_load_process(const struct boot_module* module, const char* name,
                                                     struct kernel_elf_process* out_process);

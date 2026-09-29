@@ -1,5 +1,6 @@
 #include "gic.h"
 
+#include <boot/info.h>
 #include <core/cpu.h>
 #include <core/interrupt.h>
 #include <core/lock.h>
@@ -8,7 +9,6 @@
 #include <firmware/dt/device.h>
 #include <hal/interrupts.h>
 #include <hal/paging.h>
-#include <kernel/boot.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -58,9 +58,9 @@ static struct spinlock   gic_distributor_lock =
 	SPINLOCK_INIT_CLASS("gic_distributor", SPINLOCK_ORDER_INTERRUPT, SPINLOCK_FLAG_IRQSAVE);
 
 static inline uintptr_t phys_to_virt(uintptr_t phys) {
-	struct kernel_boot_address_space address_space;
+	struct boot_address_space address_space;
 
-	if (!kernel_boot_address_space_get(&address_space)) return 0u;
+	if (!boot_address_space_get(&address_space)) return 0u;
 	return address_space.direct_map_offset + phys;
 }
 

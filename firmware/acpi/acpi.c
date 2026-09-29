@@ -1,5 +1,4 @@
 #include <firmware/acpi.h>
-#include <kernel/boot.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -21,6 +20,7 @@ struct acpi_root_state {
 static struct acpi_root_state        acpi_root;
 static const struct acpi_sdt_header* acpi_dsdt_table;
 static bool                          acpi_initialized;
+static const struct boot_info*       acpi_boot_info;
 
 static uint32_t acpi_read_u32(const uint8_t* value) {
 	uint32_t result;
@@ -51,16 +51,16 @@ static bool acpi_checksum_valid(const void* data, size_t size) {
 }
 
 static bool acpi_physical_span(uintptr_t physical, size_t size, const void** out) {
-	struct kernel_boot_address_space address_space;
-	const struct mem_range*          ranges;
-	size_t                           range_count;
-	uintptr_t                        end;
-	uintptr_t                        cursor;
-	uintptr_t                        virtual;
+	const struct mem_range* ranges;
+	size_t                  range_count;
+	uintptr_t               end;
+	uintptr_t               cursor;
+	uintptr_t               virtual;
 
-	if (size == 0u || size > UINTPTR_MAX - physical || !kernel_boot_address_space_get(&address_space)) return false;
-	end    = physical + size;
-	ranges = kernel_boot_memmap(&range_count);
+	if (size == 0u || size > UINTPTR_MAX - physical || acpi_boot_info == NULL) return false;
+	end         = physical + size;
+	ranges      = acpi_boot_info->memory_map;
+	range_count = acpi_boot_info->memory_map_count;
 	if (ranges == NULL || range_count == 0u) return false;
 
 	cursor = physical;
@@ -80,8 +80,8 @@ static bool acpi_physical_span(uintptr_t physical, size_t size, const void** out
 		cursor = covered_end < end ? covered_end : end;
 	}
 
-	if (physical > UINTPTR_MAX - address_space.direct_map_offset) return false;
-	virtual = physical + address_space.direct_map_offset;
+	if (physical > UINTPTR_MAX - acpi_boot_info->direct_map_offset) return false;
+	virtual = physical + acpi_boot_info->direct_map_offset;
 	if (size > UINTPTR_MAX - virtual) return false;
 	if (out != NULL) *out = (const void*)virtual;
 	return true;
@@ -145,24 +145,26 @@ static const struct acpi_sdt_header* acpi_fadt_dsdt(const struct acpi_root_state
 	return acpi_sdt((uintptr_t)physical, "DSDT", &dsdt) ? dsdt : NULL;
 }
 
-bool acpi_init(const void* rsdp) {
-	struct kernel_boot_address_space address_space;
-	const struct acpi_sdt_header*    root;
-	const uint8_t*                   bytes;
-	const void*                      span;
-	uintptr_t                        rsdp_virtual;
-	uintptr_t                        rsdp_physical;
-	uintptr_t                        root_physical;
-	size_t                           rsdp_size = ACPI_RSDP_V1_SIZE;
-	size_t                           entry_size;
-	uint32_t                         root_length;
-	struct acpi_root_state           root_state;
+bool acpi_init(const struct boot_info* info) {
+	const struct acpi_sdt_header* root;
+	const uint8_t*                bytes;
+	const void*                   span;
+	uintptr_t                     rsdp_virtual;
+	uintptr_t                     rsdp_physical;
+	uintptr_t                     root_physical;
+	size_t                        rsdp_size = ACPI_RSDP_V1_SIZE;
+	size_t                        entry_size;
+	uint32_t                      root_length;
+	struct acpi_root_state        root_state;
 
+	const void* rsdp;
 	if (__atomic_load_n(&acpi_initialized, __ATOMIC_ACQUIRE)) return true;
-	if (rsdp == NULL || !kernel_boot_address_space_get(&address_space)) return false;
-	rsdp_virtual = (uintptr_t)rsdp;
-	if (rsdp_virtual < address_space.direct_map_offset) return false;
-	rsdp_physical = rsdp_virtual - address_space.direct_map_offset;
+	if (info == NULL || info->rsdp_address == 0u) return false;
+	acpi_boot_info = info;
+	rsdp           = (const void*)info->rsdp_address;
+	rsdp_virtual   = (uintptr_t)rsdp;
+	if (rsdp_virtual < info->direct_map_offset) return false;
+	rsdp_physical = rsdp_virtual - info->direct_map_offset;
 	if (!acpi_physical_span(rsdp_physical, ACPI_RSDP_V1_SIZE, &span) || span != rsdp) return false;
 	bytes = span;
 	if (memcmp(bytes, "RSD PTR ", 8u) != 0 || !acpi_checksum_valid(bytes, ACPI_RSDP_V1_SIZE)) return false;

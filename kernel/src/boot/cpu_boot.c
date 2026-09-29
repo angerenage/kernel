@@ -1,10 +1,10 @@
+#include <boot/protocol.h>
 #include <core/cpu.h>
 #include <core/sched.h>
 #include <core/spinlock.h>
 #include <hal/cpu.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
-#include <kernel/boot.h>
 #include <kernel/cpu_boot.h>
 #include <stdio.h>
 
@@ -51,7 +51,7 @@ bool kernel_cpu_boot_init(uintptr_t boot_stack_base, uintptr_t boot_stack_top) {
 		cpu_current_ok[i] = 0u;
 	}
 
-	if (!kernel_boot_cpu_topology(
+	if (!boot_cpu_topology(
 			boot_cpu_init, CPU_BOOT_MAX_COUNT, boot_stack_base, boot_stack_top, &cpu_count, &bsp_index)) {
 		return false;
 	}
@@ -83,7 +83,7 @@ bool kernel_cpu_boot_start_aps(void) {
 		if (cpu == NULL || cpu->role != CPU_ROLE_AP) continue;
 
 		(void)cpu_set_state(cpu, CPU_STATE_STARTING);
-		if (!kernel_boot_cpu_start(cpu->index, kernel_cpu_mp_entry, cpu)) {
+		if (!boot_cpu_start(cpu->index, kernel_cpu_mp_entry, cpu)) {
 			return false;
 		}
 

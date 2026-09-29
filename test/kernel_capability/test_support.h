@@ -4,6 +4,7 @@
 #include <base/hardware/pci.h>
 #include <base/memory.h>
 #include <base/module.h>
+#include <boot/info.h>
 #include <core/address_space.h>
 #include <core/address_transfer.h>
 #include <core/capability.h>
@@ -17,7 +18,6 @@
 #include <core/uthread.h>
 #include <criterion/criterion.h>
 #include <hal/serial.h>
-#include <kernel/boot.h>
 #include <kernel/capability.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -37,9 +37,9 @@ void kernel_capability_test_end(struct kernel_capability_test_context* ctx);
 void   kernel_capability_test_serial_reset(void);
 size_t kernel_capability_test_serial_bytes(void);
 
-void kernel_boot_mock_set_modules(const struct kernel_boot_module* modules, size_t count);
-void kernel_boot_mock_set_framebuffer(const struct kernel_boot_framebuffer* framebuffer);
-void kernel_boot_mock_reset(void);
+void boot_mock_set_modules(const struct boot_module* modules, size_t count);
+void boot_mock_set_framebuffer(const struct boot_framebuffer* framebuffer);
+void boot_mock_reset(void);
 
 void hardware_mock_set_pci_controllers(const struct pci_controller* controllers, size_t count);
 void hardware_mock_reset(void);

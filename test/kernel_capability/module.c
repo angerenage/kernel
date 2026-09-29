@@ -4,16 +4,16 @@
 Test(kernel_capability_module, repeated_maps_share_one_physical_backing) {
 	struct kernel_capability_test_context         ctx;
 	_Alignas(TEST_MAPPING_GRANULE) static uint8_t module_bytes[TEST_MAPPING_GRANULE];
-	const struct kernel_boot_module               modules[] = {
-        {.name = "mapped.bin", .address = module_bytes + 17u, .size = 31u},
-    };
+	const struct boot_module                      modules[] = {
+		{.name = "mapped.bin", .address = module_bytes + 17u, .size = 31u},
+	};
 	const struct module_map_request request = {.header = {.op = MODULE_OP_MAP}};
 	struct module_map_response      response;
 	cap_id_t                        cap;
 	syscall_result_t                result;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/module-shared-backing");
-	kernel_boot_mock_set_modules(modules, 1u);
+	boot_mock_set_modules(modules, 1u);
 	cap = kernel_capability_boot_module_grant(0u, process_pid(ctx.process));
 	cr_assert_neq(cap, CAP_ID_INVALID);
 	result = kernel_capability_test_call(cap, &request, sizeof(request), &response, sizeof(response));
@@ -28,15 +28,15 @@ Test(kernel_capability_module, repeated_maps_share_one_physical_backing) {
 Test(kernel_capability_module, failed_repeat_resolve_preserves_the_preexisting_module_capability) {
 	struct kernel_capability_test_context ctx;
 	static const uint8_t                  module_bytes[] = {1u, 2u, 3u, 4u};
-	const struct kernel_boot_module       modules[]      = {
-        {
+	const struct boot_module              modules[]      = {
+		{
          .name       = "sample.elf",
          .path       = "/boot/sample.elf",
          .address    = (void*)module_bytes,
          .size       = sizeof(module_bytes),
          .media_type = 0u,
-         },
-    };
+		 },
+	};
 	const struct {
 		struct module_provider_resolve_request request;
 		char                                   name[sizeof("sample.elf")];
@@ -51,7 +51,7 @@ Test(kernel_capability_module, failed_repeat_resolve_preserves_the_preexisting_m
 	syscall_result_t                        result;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/module-rollback");
-	kernel_boot_mock_set_modules(modules, 1u);
+	boot_mock_set_modules(modules, 1u);
 	kernel_capability_boot_module_provider_init();
 	provider_cap = kernel_capability_boot_module_provider_grant(process_pid(ctx.process));
 	cr_assert_neq(provider_cap, CAP_ID_INVALID);
@@ -79,9 +79,9 @@ Test(kernel_capability_module, failed_repeat_resolve_preserves_the_preexisting_m
 Test(kernel_capability_module, provider_resolves_paths_and_rejects_unterminated_names) {
 	struct kernel_capability_test_context ctx;
 	static const uint8_t                  module_bytes[] = {0x41u};
-	const struct kernel_boot_module       modules[]      = {
-        {.name = "path.bin", .path = "/boot/path.bin", .address = (void*)module_bytes, .size = sizeof(module_bytes)},
-    };
+	const struct boot_module              modules[]      = {
+		{.name = "path.bin", .path = "/boot/path.bin", .address = (void*)module_bytes, .size = sizeof(module_bytes)},
+	};
 	const struct {
 		struct module_provider_resolve_request request;
 		char                                   name[sizeof("/boot/path.bin")];
@@ -101,7 +101,7 @@ Test(kernel_capability_module, provider_resolves_paths_and_rejects_unterminated_
 	syscall_result_t                        result;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/module-provider-validation");
-	kernel_boot_mock_set_modules(modules, 1u);
+	boot_mock_set_modules(modules, 1u);
 	kernel_capability_boot_module_provider_init();
 	provider_cap = kernel_capability_boot_module_provider_grant(process_pid(ctx.process));
 	cr_assert_neq(provider_cap, CAP_ID_INVALID);
@@ -125,14 +125,14 @@ Test(kernel_capability_module, provider_resolves_paths_and_rejects_unterminated_
 Test(kernel_capability_module, zero_length_read_is_a_successful_noop) {
 	struct kernel_capability_test_context ctx;
 	static const uint8_t                  module_bytes[] = {0x11u, 0x22u};
-	const struct kernel_boot_module       modules[]      = {
-        {
+	const struct boot_module              modules[]      = {
+		{
          .name    = "bytes.bin",
          .path    = "/boot/bytes.bin",
          .address = (void*)module_bytes,
          .size    = sizeof(module_bytes),
-         },
-    };
+		 },
+	};
 	const struct module_read_request request = {
 		.header = {.op = MODULE_OP_READ},
 		.offset = sizeof(module_bytes),
@@ -142,7 +142,7 @@ Test(kernel_capability_module, zero_length_read_is_a_successful_noop) {
 	syscall_result_t result;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/module-zero-read");
-	kernel_boot_mock_set_modules(modules, 1u);
+	boot_mock_set_modules(modules, 1u);
 	cap = kernel_capability_boot_module_grant(0u, process_pid(ctx.process));
 	cr_assert_neq(cap, CAP_ID_INVALID);
 
@@ -156,12 +156,12 @@ Test(kernel_capability_module, zero_length_read_is_a_successful_noop) {
 Test(kernel_capability_module, provider_and_module_capabilities_use_distinct_protocols) {
 	struct kernel_capability_test_context ctx;
 	static const uint8_t                  module_bytes[] = {0x21u};
-	const struct kernel_boot_module       modules[]      = {
-        {.name = "distinct.bin", .address = (void*)module_bytes, .size = sizeof(module_bytes)},
-    };
+	const struct boot_module              modules[]      = {
+		{.name = "distinct.bin", .address = (void*)module_bytes, .size = sizeof(module_bytes)},
+	};
 	const struct module_info_request info_request = {.header = {.op = MODULE_OP_INFO}};
 	struct module_info_response      info_response;
-	const struct kernel_boot_module* resolved = NULL;
+	const struct boot_module*        resolved = NULL;
 	struct capability*               provider;
 	struct capability*               module;
 	cap_id_t                         provider_cap;
@@ -169,7 +169,7 @@ Test(kernel_capability_module, provider_and_module_capabilities_use_distinct_pro
 	syscall_result_t                 result;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/module-provider-distinct");
-	kernel_boot_mock_set_modules(modules, 1u);
+	boot_mock_set_modules(modules, 1u);
 	kernel_capability_boot_module_provider_init();
 	provider_cap = kernel_capability_boot_module_provider_grant(process_pid(ctx.process));
 	module_cap   = kernel_capability_boot_module_grant(0u, process_pid(ctx.process));
@@ -195,21 +195,21 @@ Test(kernel_capability_module, provider_and_module_capabilities_use_distinct_pro
 Test(kernel_capability_module, direct_resolution_uses_read_right_without_cap_call) {
 	struct kernel_capability_test_context ctx;
 	static const uint8_t                  module_bytes[] = {0x33u};
-	const struct kernel_boot_module       modules[]      = {
-        {
+	const struct boot_module              modules[]      = {
+		{
          .name    = "direct.bin",
          .path    = "/boot/direct.bin",
          .address = (void*)module_bytes,
          .size    = sizeof(module_bytes),
-         },
-    };
-	const struct kernel_boot_module* resolved = NULL;
-	struct capability*               original;
-	cap_id_t                         original_id;
-	cap_id_t                         read_only_id;
+		 },
+	};
+	const struct boot_module* resolved = NULL;
+	struct capability*        original;
+	cap_id_t                  original_id;
+	cap_id_t                  read_only_id;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/module-direct-resolution");
-	kernel_boot_mock_set_modules(modules, 1u);
+	boot_mock_set_modules(modules, 1u);
 	original_id = kernel_capability_boot_module_grant(0u, process_pid(ctx.process));
 	original    = cap_acquire(original_id);
 	cr_assert_not_null(original);

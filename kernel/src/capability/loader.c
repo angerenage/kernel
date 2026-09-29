@@ -15,7 +15,7 @@
 
 static cap_object_id_t loader_object_id = CAP_OBJECT_ID_INVALID;
 
-static const char* module_process_name(const struct kernel_boot_module* module) {
+static const char* module_process_name(const struct boot_module* module) {
 	const char* basename;
 
 	if (module->name != NULL && module->name[0] != '\0') return module->name;
@@ -29,12 +29,12 @@ static const char* module_process_name(const struct kernel_boot_module* module) 
 }
 
 static syscall_result_t loader_handler(const struct cap_request* req) {
-	struct loader_load_request       request;
-	struct loader_load_response      response;
-	const struct kernel_boot_module* module;
-	struct kernel_elf_process        loaded = {0};
-	enum kernel_elf_load_result      load_result;
-	syscall_result_t                 result;
+	struct loader_load_request  request;
+	struct loader_load_response response;
+	const struct boot_module*   module;
+	struct kernel_elf_process   loaded = {0};
+	enum kernel_elf_load_result load_result;
+	syscall_result_t            result;
 
 	if (req->request == NULL || req->request_size < sizeof(request) ||
 	    !cap_kernel_response_fits(req, sizeof(response))) {

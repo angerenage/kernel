@@ -8,3 +8,4 @@ dt_sources = files(
 )
 
 firmware_sources = acpi_sources + dt_sources
+firmware_sources += files('init.c')

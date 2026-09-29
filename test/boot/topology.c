@@ -15,10 +15,10 @@ Test(boot_topology, valid_mp_response_selects_the_reported_bsp_slot) {
 
 	boot_test_configure_valid_base();
 	boot_test_configure_mp(cpus, 2u, 0x44u);
-	cr_assert(kernel_boot_init());
+	cr_assert(boot_init());
 
 	memset(init, 0, sizeof(init));
-	cr_assert(kernel_boot_cpu_topology(init, 2u, 0x8000u, 0xa000u, &count, &bsp_index));
+	cr_assert(boot_cpu_topology(init, 2u, 0x8000u, 0xa000u, &count, &bsp_index));
 	cr_assert_eq(count, 2u);
 	cr_assert_eq(bsp_index, 1u);
 	cr_assert_eq(init[0].role, CPU_ROLE_AP);
@@ -36,9 +36,9 @@ Test(boot_topology, rejects_null_cpu_entries) {
 
 	boot_test_configure_valid_base();
 	boot_test_configure_mp(cpus, 2u, 0x55u);
-	cr_assert(kernel_boot_init());
+	cr_assert(boot_init());
 
-	cr_assert_not(kernel_boot_cpu_topology(init, 2u, 0x8000u, 0xa000u, &count, &bsp_index),
+	cr_assert_not(boot_cpu_topology(init, 2u, 0x8000u, 0xa000u, &count, &bsp_index),
 	              "NULL MP descriptors must be rejected");
 }
 
@@ -52,8 +52,8 @@ Test(boot_topology, rejects_mp_response_without_the_reported_bsp) {
 
 	boot_test_configure_valid_base();
 	boot_test_configure_mp(cpus, 2u, 0x7fu);
-	cr_assert(kernel_boot_init());
+	cr_assert(boot_init());
 
-	cr_assert_not(kernel_boot_cpu_topology(init, 2u, 0x8000u, 0xa000u, &count, &bsp_index),
+	cr_assert_not(boot_cpu_topology(init, 2u, 0x8000u, 0xa000u, &count, &bsp_index),
 	              "missing BSP must not silently relabel slot zero");
 }

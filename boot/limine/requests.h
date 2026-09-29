@@ -1,9 +1,10 @@
 #pragma once
 
-#include <limine.h>
 #include <stdbool.h>
 
-bool kernel_limine_protocol_supported(void);
+#include "limine.h"
+
+bool limine_protocol_supported(void);
 
 extern volatile struct limine_framebuffer_request        fb_req;
 extern volatile struct limine_mp_request                 mp_req;

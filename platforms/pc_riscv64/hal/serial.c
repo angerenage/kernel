@@ -1,5 +1,5 @@
+#include <boot/info.h>
 #include <hal/serial.h>
-#include <kernel/boot.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -38,10 +38,10 @@ static uint64_t serial_page_tables[4][512] __attribute__((aligned(4096)));
 static size_t   serial_page_table_count;
 
 static inline uint64_t kernel_virt_to_phys(const void* ptr) {
-	struct kernel_boot_address_space address_space;
+	struct boot_address_space address_space;
 
-	if (!kernel_boot_address_space_get(&address_space)) return 0u;
-	return address_space.physical_base + ((uint64_t)(uintptr_t)ptr - address_space.virtual_base);
+	if (!boot_address_space_get(&address_space)) return 0u;
+	return address_space.kernel_physical_base + ((uint64_t)(uintptr_t)ptr - address_space.kernel_virtual_base);
 }
 
 static inline uint64_t riscv_pte_from_phys(uint64_t phys) {
@@ -53,9 +53,9 @@ static inline uint64_t riscv_pte_to_phys(uint64_t pte) {
 }
 
 static inline uintptr_t hhdm_phys_to_virt(uint64_t phys) {
-	struct kernel_boot_address_space address_space;
+	struct boot_address_space address_space;
 
-	if (!kernel_boot_address_space_get(&address_space)) return 0u;
+	if (!boot_address_space_get(&address_space)) return 0u;
 	return address_space.direct_map_offset + phys;
 }
 
@@ -68,9 +68,9 @@ static bool serial_map_uart_hhdm(void) {
 		return true;
 	}
 
-	struct kernel_boot_address_space address_space;
+	struct boot_address_space address_space;
 
-	if (!kernel_boot_address_space_get(&address_space)) {
+	if (!boot_address_space_get(&address_space)) {
 		return false;
 	}
 

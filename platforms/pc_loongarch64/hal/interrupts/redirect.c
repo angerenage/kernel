@@ -1,9 +1,9 @@
 #include "redirect.h"
 
+#include <boot/info.h>
 #include <core/cpu.h>
 #include <core/pmm.h>
 #include <hal/interrupts.h>
-#include <kernel/boot.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -92,8 +92,8 @@ static bool redirect_allocation_size(size_t required, size_t* out_size) {
 }
 
 static void* redirect_phys_to_virt(uintptr_t physical) {
-	struct kernel_boot_address_space address_space;
-	if (!kernel_boot_address_space_get(&address_space) || physical > UINTPTR_MAX - address_space.direct_map_offset)
+	struct boot_address_space address_space;
+	if (!boot_address_space_get(&address_space) || physical > UINTPTR_MAX - address_space.direct_map_offset)
 		return NULL;
 	return (void*)(physical + address_space.direct_map_offset);
 }

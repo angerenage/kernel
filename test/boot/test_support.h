@@ -1,10 +1,11 @@
 #ifndef TEST_BOOT_TEST_SUPPORT_H
 #define TEST_BOOT_TEST_SUPPORT_H
 
-#include <kernel/boot.h>
-#include <limine.h>
+#include <boot/protocol.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+#include "../../boot/limine/limine.h"
 
 void boot_test_reset(void);
 void boot_test_configure_valid_base(void);

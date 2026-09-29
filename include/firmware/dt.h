@@ -1,5 +1,6 @@
 #pragma once
 
+#include <boot/info.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -18,8 +19,8 @@ struct dt_property {
 /* Invalid node returned when traversal cannot produce another node. */
 #define DT_NODE_INVALID ((struct dt_node){.id = SIZE_MAX})
 
-/* Validate the supplied HHDM FDT and publish its immutable structure once. */
-bool dt_init(const void* dtb);
+/* Validate the FDT described by boot info and publish its immutable structure once. */
+bool dt_init(const struct boot_info* info);
 
 /* Return whether node identifies a node in the initialized Device Tree. */
 bool dt_node_valid(struct dt_node node);

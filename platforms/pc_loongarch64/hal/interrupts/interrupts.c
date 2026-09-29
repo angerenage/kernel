@@ -1,11 +1,11 @@
 #include <base/process.h>
+#include <boot/info.h>
 #include <core/address_space.h>
 #include <core/cpu.h>
 #include <core/exception.h>
 #include <core/sched.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
-#include <kernel/boot.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -39,10 +39,10 @@ extern void tlb_refill_entry(void);
 extern void machine_error_entry(void);
 
 static inline uintptr_t kernel_virt_to_phys(const void* ptr) {
-	struct kernel_boot_address_space address_space;
+	struct boot_address_space address_space;
 
-	if (!kernel_boot_address_space_get(&address_space)) return 0u;
-	return address_space.physical_base + ((uint64_t)(uintptr_t)ptr - address_space.virtual_base);
+	if (!boot_address_space_get(&address_space)) return 0u;
+	return address_space.kernel_physical_base + ((uint64_t)(uintptr_t)ptr - address_space.kernel_virtual_base);
 }
 
 static inline uint64_t csrrd(unsigned csr) {
@@ -199,9 +199,9 @@ bool hal_interrupt_message_deinit(struct hal_interrupt_message_state* state) {
 }
 
 bool hal_interrupts_init_global(void) {
-	struct kernel_boot_address_space address_space;
+	struct boot_address_space address_space;
 
-	if (!kernel_boot_address_space_get(&address_space)) {
+	if (!boot_address_space_get(&address_space)) {
 		printf("kernel: loongarch64 kernel address response missing for trap setup\n");
 		return false;
 	}

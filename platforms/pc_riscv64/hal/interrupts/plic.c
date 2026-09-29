@@ -1,12 +1,12 @@
 #include "plic.h"
 
+#include <boot/info.h>
 #include <core/cpu.h>
 #include <core/interrupt.h>
 #include <firmware/dt/device.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>
 #include <hal/paging.h>
-#include <kernel/boot.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -129,9 +129,9 @@ static bool plic_probe(void) {
 	struct irq_state irq = irq_save_disable();
 	while (__atomic_exchange_n(&plic_init_lock, 1u, __ATOMIC_ACQUIRE) != 0u) __asm__ volatile("nop");
 	if (__atomic_load_n(&plic.ready, __ATOMIC_ACQUIRE)) goto done;
-	struct kernel_boot_address_space address_space;
-	struct plic_discovery            found;
-	if (!kernel_boot_address_space_get(&address_space) || !plic_fdt_find(&found) ||
+	struct boot_address_space address_space;
+	struct plic_discovery     found;
+	if (!boot_address_space_get(&address_space) || !plic_fdt_find(&found) ||
 	    !plic_map_offset(&found, PLIC_PRIORITY_BASE + PLIC_MAX_SOURCES * 4u, address_space.direct_map_offset))
 		goto done;
 	for (size_t index = 0u; index < found.context_count; index++) {

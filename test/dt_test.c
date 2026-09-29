@@ -1,9 +1,9 @@
+#include <boot/info.h>
 #include <core/mm.h>
 #include <criterion/criterion.h>
 #include <firmware/acpi.h>
 #include <firmware/dt.h>
 #include <firmware/dt/device.h>
-#include <kernel/boot.h>
 #include <kernel/hardware/pci.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -43,22 +43,21 @@ struct test_mcfg_allocation {
 	uint32_t reserved;
 } __attribute__((packed));
 
-static uint8_t                          test_arena[TEST_ARENA_SIZE] __attribute__((aligned(8)));
-static struct mem_range                 test_ranges[3];
-static size_t                           test_range_count;
-static struct kernel_boot_address_space test_address_space;
-static size_t                           test_structure_cursor;
-static size_t                           test_strings_cursor;
+static uint8_t          test_arena[TEST_ARENA_SIZE] __attribute__((aligned(8)));
+static struct mem_range test_ranges[3];
+static size_t           test_range_count;
+static struct boot_info test_boot_info;
+static size_t           test_structure_cursor;
+static size_t           test_strings_cursor;
 
-const struct mem_range* kernel_boot_memmap(size_t* out_count) {
-	if (out_count != NULL) *out_count = test_range_count;
-	return test_range_count == 0u ? NULL : test_ranges;
+static bool test_dt_init(const void* dtb) {
+	test_boot_info.dtb_address = (uintptr_t)dtb;
+	return dt_init(&test_boot_info);
 }
 
-bool kernel_boot_address_space_get(struct kernel_boot_address_space* out) {
-	if (out == NULL) return false;
-	*out = test_address_space;
-	return true;
+static bool test_acpi_init(const void* rsdp) {
+	test_boot_info.rsdp_address = (uintptr_t)rsdp;
+	return acpi_init(&test_boot_info);
 }
 
 static void test_write_u32(uint8_t* output, uint32_t value) {
@@ -77,7 +76,9 @@ static void test_reset(void) {
 		.length = TEST_DTB_RANGE_SIZE,
 		.type   = MEM_RANGE_BOOTLOADER_RECLAIMABLE,
 	};
-	test_address_space = (struct kernel_boot_address_space){
+	test_boot_info = (struct boot_info){
+		.memory_map        = test_ranges,
+		.memory_map_count  = test_range_count,
 		.direct_map_offset = (uintptr_t)test_arena - TEST_PHYSICAL_BASE,
 	};
 	test_structure_cursor = 0u;
@@ -137,8 +138,9 @@ static bool test_acpi_mcfg(const struct test_mcfg_allocation* allocations, size_
 		.length = TEST_ACPI_RANGE_SIZE,
 		.type   = MEM_RANGE_ACPI,
 	};
-	test_range_count = 2u;
-	return acpi_init(rsdp);
+	test_range_count                = 2u;
+	test_boot_info.memory_map_count = test_range_count;
+	return test_acpi_init(rsdp);
 }
 
 static size_t test_string(const char* value) {
@@ -232,7 +234,7 @@ static void test_version(uint32_t version) {
 	uint64_t           value;
 
 	test_tree(version);
-	cr_assert(dt_init(test_arena));
+	cr_assert(test_dt_init(test_arena));
 	root = dt_root();
 	cr_assert(dt_node_valid(root));
 	soc = dt_node_child(root);
@@ -297,7 +299,7 @@ Test(dt, traversal_properties_and_standard_predicates) {
 	uint64_t           value;
 
 	test_tree(17u);
-	cr_assert(dt_init(test_arena));
+	cr_assert(test_dt_init(test_arena));
 	root  = dt_root();
 	soc   = dt_node_child(root);
 	child = dt_node_child(soc);
@@ -365,7 +367,7 @@ Test(dt, navigation_accepts_nop_before_root) {
 	test_end_node();
 	test_token(9u);
 	test_header(17u);
-	cr_assert(dt_init(test_arena));
+	cr_assert(test_dt_init(test_arena));
 	root  = dt_root();
 	child = dt_node_child(root);
 	cr_assert_eq(root.id, 4u);
@@ -410,7 +412,7 @@ Test(dt, decodes_and_translates_device_registers) {
 	test_end_node();
 	test_token(9u);
 	test_header(17u);
-	cr_assert(dt_init(test_arena));
+	cr_assert(test_dt_init(test_arena));
 	cr_assert_eq(dt_device_count("vendor,device"), 1u);
 	device = dt_device_at("vendor,device", 0u);
 	cr_assert(dt_node_valid(device));
@@ -435,7 +437,7 @@ Test(dt, rejects_offsets_inside_tokens) {
 	test_end_node();
 	test_token(9u);
 	test_header(17u);
-	cr_assert(dt_init(test_arena));
+	cr_assert(test_dt_init(test_arena));
 	cr_assert(dt_node_property(dt_root(), "value", &property));
 	fake_id = (size_t)((const uint8_t*)property.data - (test_arena + TEST_STRUCTURE_OFFSET));
 	cr_assert_eq(fake_id & 3u, 0u);
@@ -458,10 +460,10 @@ Test(dt, accepts_property_padding_contents_but_rejects_name_padding) {
 	test_token(9u);
 	test_header(17u);
 	test_arena[TEST_STRUCTURE_OFFSET + 14u] = 1u;
-	cr_assert_not(dt_init(test_arena));
+	cr_assert_not(test_dt_init(test_arena));
 	test_arena[TEST_STRUCTURE_OFFSET + 14u] = 0u;
 	test_arena[TEST_STRUCTURE_OFFSET + 29u] = 1u;
-	cr_assert(dt_init(test_arena));
+	cr_assert(test_dt_init(test_arena));
 	child = dt_node_child(dt_root());
 	cr_assert(dt_node_property(child, "value", &property));
 	cr_assert_eq(property.size, sizeof(value));
@@ -471,17 +473,17 @@ Test(dt, accepts_property_padding_contents_but_rejects_name_padding) {
 Test(dt, failed_initialization_retries_and_success_is_immutable) {
 	test_tree(17u);
 	test_arena[0] = 0u;
-	cr_assert_not(dt_init(test_arena));
+	cr_assert_not(test_dt_init(test_arena));
 	test_write_u32(test_arena, 0xd00dfeedu);
-	cr_assert(dt_init(test_arena));
-	cr_assert(dt_init(NULL));
+	cr_assert(test_dt_init(test_arena));
+	cr_assert(test_dt_init(NULL));
 }
 
 Test(dt, validates_hhdm_alignment_and_complete_memory_coverage) {
 	test_tree(17u);
-	cr_assert_not(dt_init(test_arena + 1u));
+	cr_assert_not(test_dt_init(test_arena + 1u));
 	test_ranges[0].type = MEM_RANGE_RESERVED;
-	cr_assert_not(dt_init(test_arena));
+	cr_assert_not(test_dt_init(test_arena));
 	test_ranges[0].type   = MEM_RANGE_BOOTLOADER_RECLAIMABLE;
 	test_ranges[0].length = 0x800u;
 	test_ranges[1]        = (struct mem_range){
@@ -489,35 +491,36 @@ Test(dt, validates_hhdm_alignment_and_complete_memory_coverage) {
 		.length = TEST_DTB_RANGE_SIZE - 0x801u,
 		.type   = MEM_RANGE_BOOTLOADER_RECLAIMABLE,
 	};
-	test_range_count = 2u;
-	cr_assert_not(dt_init(test_arena));
+	test_range_count                = 2u;
+	test_boot_info.memory_map_count = test_range_count;
+	cr_assert_not(test_dt_init(test_arena));
 	test_ranges[1].base--;
 	test_ranges[1].length++;
-	cr_assert(dt_init(test_arena));
+	cr_assert(test_dt_init(test_arena));
 }
 
 Test(dt, rejects_bad_versions_sizes_blocks_and_structure) {
 	test_tree(17u);
 	test_write_u32(test_arena + 20u, 1u);
-	cr_assert_not(dt_init(test_arena));
+	cr_assert_not(test_dt_init(test_arena));
 	test_header(17u);
 	test_write_u32(test_arena + 24u, 18u);
-	cr_assert_not(dt_init(test_arena));
+	cr_assert_not(test_dt_init(test_arena));
 	test_header(17u);
 	test_write_u32(test_arena + 24u, 0u);
-	cr_assert_not(dt_init(test_arena));
+	cr_assert_not(test_dt_init(test_arena));
 	test_header(17u);
 	test_write_u32(test_arena + 4u, 16u * 1024u * 1024u + 1u);
-	cr_assert_not(dt_init(test_arena));
+	cr_assert_not(test_dt_init(test_arena));
 	test_header(17u);
 	test_write_u32(test_arena + 16u, TEST_TOTAL_SIZE - 8u);
-	cr_assert_not(dt_init(test_arena));
+	cr_assert_not(test_dt_init(test_arena));
 	test_header(17u);
 	test_write_u32(test_arena + 12u, TEST_STRUCTURE_OFFSET);
-	cr_assert_not(dt_init(test_arena));
+	cr_assert_not(test_dt_init(test_arena));
 	test_header(17u);
 	test_write_u32(test_arena + TEST_STRUCTURE_OFFSET, 8u);
-	cr_assert_not(dt_init(test_arena));
+	cr_assert_not(test_dt_init(test_arena));
 }
 
 Test(dt, resolves_legacy_phandles) {
@@ -534,7 +537,7 @@ Test(dt, resolves_legacy_phandles) {
 	test_end_node();
 	test_token(9u);
 	test_header(17u);
-	cr_assert(dt_init(test_arena));
+	cr_assert(test_dt_init(test_arena));
 	node = dt_node_by_phandle(9u);
 	cr_assert(dt_node_valid(node));
 	cr_assert_str_eq(dt_node_name(node), "legacy");
@@ -550,7 +553,7 @@ Test(dt, traverses_without_a_fixed_depth_limit) {
 	test_end_node();
 	test_token(9u);
 	test_header(17u);
-	cr_assert(dt_init(test_arena));
+	cr_assert(test_dt_init(test_arena));
 	node = dt_root();
 	for (size_t depth = 0u; depth < 40u; depth++) {
 		node = dt_node_child(node);
@@ -579,7 +582,7 @@ Test(dt, rejects_ambiguous_phandles_and_malformed_string_lists) {
 	test_end_node();
 	test_token(9u);
 	test_header(17u);
-	cr_assert(dt_init(test_arena));
+	cr_assert(test_dt_init(test_arena));
 	cr_assert_not(dt_node_valid(dt_node_by_phandle(5u)));
 	cr_assert(dt_node_property(dt_node_child(dt_root()), "compatible", &property));
 	cr_assert_not(dt_property_string_list_contains(&property, "ok"));
@@ -637,7 +640,7 @@ static void test_pci_tree(uint64_t address, uint64_t size, uint8_t start_bus, ui
 	test_end_node();
 	test_token(9u);
 	test_header(17u);
-	cr_assert(dt_init(test_arena));
+	cr_assert(test_dt_init(test_arena));
 }
 
 Test(dt, pci_controllers_are_normalized_from_generic_ecam_hosts) {
@@ -698,7 +701,7 @@ Test(dt, pci_controllers_are_normalized_from_generic_ecam_hosts) {
 	test_end_node();
 	test_token(9u);
 	test_header(17u);
-	cr_assert(dt_init(test_arena));
+	cr_assert(test_dt_init(test_arena));
 
 	cr_assert_eq(kernel_hardware_pci_count(), 2u);
 	cr_assert(kernel_hardware_pci_get(0u, &controller));
@@ -764,7 +767,7 @@ Test(dt, pci_defaults_bus_range_and_domains_when_omitted) {
 	test_end_node();
 	test_token(9u);
 	test_header(17u);
-	cr_assert(dt_init(test_arena));
+	cr_assert(test_dt_init(test_arena));
 
 	cr_assert_eq(kernel_hardware_pci_count(), 2u);
 	cr_assert(kernel_hardware_pci_get(0u, &controller));

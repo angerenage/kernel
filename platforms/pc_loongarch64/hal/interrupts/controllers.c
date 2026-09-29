@@ -1,10 +1,10 @@
 #include "controllers.h"
 
+#include <boot/info.h>
 #include <core/cpu.h>
 #include <firmware/acpi.h>
 #include <firmware/dt/device.h>
 #include <hal/paging.h>
-#include <kernel/boot.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -116,8 +116,8 @@ void loongarch64_controllers_unlock(struct irq_state state) {
 }
 
 bool loongarch64_map_mmio(uintptr_t physical, uintptr_t size, volatile uint8_t** out) {
-	struct kernel_boot_address_space address_space;
-	if (out == NULL || size == 0u || physical > UINTPTR_MAX - size || !kernel_boot_address_space_get(&address_space))
+	struct boot_address_space address_space;
+	if (out == NULL || size == 0u || physical > UINTPTR_MAX - size || !boot_address_space_get(&address_space))
 		return false;
 	uintptr_t first = physical & ~(uintptr_t)(LOONGARCH64_PAGE_SIZE - 1u);
 	uintptr_t last  = (physical + size - 1u) & ~(uintptr_t)(LOONGARCH64_PAGE_SIZE - 1u);

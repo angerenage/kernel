@@ -1,12 +1,11 @@
 #include <base/heap.h>
+#include <boot/info.h>
 #include <core/address_space.h>
 #include <core/cpu.h>
-#include <core/mm.h>
 #include <core/pmm.h>
 #include <core/sched.h>
 #include <firmware/dt.h>
 #include <hal/iommu.h>
-#include <kernel/boot.h>
 #include <kernel/boot_diagnostics.h>
 #include <kernel/cmdline.h>
 #include <libc/stdlib.h>
@@ -58,9 +57,9 @@ bool kernel_boot_diagnostics_enabled(void) {
 }
 
 void kernel_boot_diagnostics_framebuffer(void) {
-	struct kernel_boot_framebuffer fb;
+	struct boot_framebuffer fb;
 
-	if (!kernel_boot_framebuffer_get(&fb)) {
+	if (!boot_framebuffer_get(&fb)) {
 		printf("kernel: no framebuffer available, continuing in headless mode\n");
 		return;
 	}
@@ -187,7 +186,7 @@ void kernel_boot_diagnostics_iommus(void) {
 }
 
 void kernel_boot_diagnostics_modules(void) {
-	size_t module_count = kernel_boot_module_count();
+	size_t module_count = boot_module_count();
 
 	if (module_count == 0u) {
 		printf("kernel: no boot modules loaded\n");
@@ -196,7 +195,7 @@ void kernel_boot_diagnostics_modules(void) {
 
 	printf("kernel: boot modules:\n");
 	for (size_t i = 0; i < module_count; i++) {
-		const struct kernel_boot_module* module = kernel_boot_module_at(i);
+		const struct boot_module* module = boot_module_get(i);
 
 		if (module == NULL) continue;
 		printf("  name: %s, path: %s, address: %p, size: %zu bytes\n",

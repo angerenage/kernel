@@ -1,4 +1,4 @@
-#include <kernel/boot.h>
+#include <boot/info.h>
 #include <kernel/cmdline.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -52,7 +52,7 @@ bool kernel_cmdline_option_value(const char* name, const char** value, size_t* v
 	*value     = NULL;
 	*value_len = 0u;
 
-	cmdline = kernel_boot_cmdline();
+	cmdline = boot_cmdline_current();
 	if (cmdline == NULL) return false;
 
 	cursor = cmdline;

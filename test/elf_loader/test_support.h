@@ -2,6 +2,7 @@
 #define TEST_ELF_LOADER_TEST_SUPPORT_H
 
 #include <base/heap.h>
+#include <boot/info.h>
 #include <core/address_space.h>
 #include <core/address_transfer.h>
 #include <core/cpu.h>
@@ -11,7 +12,6 @@
 #include <criterion/criterion.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>
-#include <kernel/boot.h>
 #include <kernel/elf_loader.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -62,11 +62,11 @@ struct elf_test_image {
 	size_t size;
 };
 
-void                      elf_test_init_environment(void);
-void                      elf_test_image_init(struct elf_test_image* image, size_t phnum);
-struct elf_test_ehdr*     elf_test_header(struct elf_test_image* image);
-struct elf_test_phdr*     elf_test_phdr(struct elf_test_image* image, size_t index);
-struct kernel_boot_module elf_test_module(struct elf_test_image* image);
+void                  elf_test_init_environment(void);
+void                  elf_test_image_init(struct elf_test_image* image, size_t phnum);
+struct elf_test_ehdr* elf_test_header(struct elf_test_image* image);
+struct elf_test_phdr* elf_test_phdr(struct elf_test_image* image, size_t index);
+struct boot_module    elf_test_module(struct elf_test_image* image);
 void elf_test_set_load(struct elf_test_image* image, size_t index, uint64_t offset, uint64_t vaddr, uint64_t filesz,
                        uint64_t memsz, uint32_t flags);
 void elf_test_destroy_loaded(struct kernel_elf_process* loaded);

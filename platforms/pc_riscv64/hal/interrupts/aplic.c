@@ -1,12 +1,12 @@
 #include "aplic.h"
 
+#include <boot/info.h>
 #include <core/cpu.h>
 #include <core/interrupt.h>
 #include <firmware/dt/device.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>
 #include <hal/paging.h>
-#include <kernel/boot.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -156,10 +156,9 @@ static bool aplic_find(void) {
 
 static bool aplic_map(uintptr_t physical, uintptr_t offset) {
 	if (offset > aplic.size || aplic.size - offset < 4u || physical > UINTPTR_MAX - offset) return false;
-	uintptr_t                        page = (physical + offset) & ~(uintptr_t)(APLIC_PAGE_SIZE - 1u);
-	struct kernel_boot_address_space address_space;
-	if (!kernel_boot_address_space_get(&address_space) || page > UINTPTR_MAX - address_space.direct_map_offset)
-		return false;
+	uintptr_t                 page = (physical + offset) & ~(uintptr_t)(APLIC_PAGE_SIZE - 1u);
+	struct boot_address_space address_space;
+	if (!boot_address_space_get(&address_space) || page > UINTPTR_MAX - address_space.direct_map_offset) return false;
 	uintptr_t virt = page + address_space.direct_map_offset;
 	if (hal_paging_query(hal_paging_kernel_space(), virt, NULL)) return true;
 	uint64_t         flags = HAL_PAGE_READ | HAL_PAGE_WRITE | HAL_PAGE_GLOBAL;
@@ -182,8 +181,8 @@ static bool aplic_probe(void) {
 	struct irq_state irq = irq_save_disable();
 	while (__atomic_exchange_n(&aplic_init_lock, 1u, __ATOMIC_ACQUIRE) != 0u) __asm__ volatile("nop");
 	if (aplic.probed) goto done;
-	struct kernel_boot_address_space address_space;
-	if (!kernel_boot_address_space_get(&address_space) || !aplic_find() ||
+	struct boot_address_space address_space;
+	if (!boot_address_space_get(&address_space) || !aplic_find() ||
 	    aplic.physical_base > UINTPTR_MAX - address_space.direct_map_offset ||
 	    !aplic_map(aplic.physical_base, APLIC_DOMAINCFG) ||
 	    !aplic_map(aplic.physical_base, APLIC_SOURCECFG_BASE + (aplic.sources - 1u) * 4u) ||

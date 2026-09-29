@@ -36,8 +36,7 @@ kernel_selftest_sources = files(
 	'test/selftests/rwlock.c',
 )
 
-kernel_objs = base_sources + core_sources + firmware_sources + kernel_libk_sources + platform_kernel_objects + [
-	'src/boot/boot.c',
+kernel_objs = base_sources + core_sources + boot_sources + firmware_sources + kernel_libk_sources + platform_kernel_objects + [
 	'src/boot/cmdline.c',
 	'src/boot/diagnostics.c',
 	'src/boot/cpu_boot.c',
@@ -69,7 +68,6 @@ kernel_objs = base_sources + core_sources + firmware_sources + kernel_libk_sourc
 	'src/syscall/time.c',
 	'src/syscall/upcall.c',
 	'src/syscall/user_frame.c',
-	'src/boot/requests.c',
 	'src/hardware/pci.c',
 ]
 if kernel_selftests

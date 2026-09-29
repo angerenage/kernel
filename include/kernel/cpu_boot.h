@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 /*
- * Higher-level CPU bring-up helpers layered on top of kernel_boot_* and the
+ * Higher-level CPU bring-up helpers layered on top of boot_cpu_* and the
  * core CPU topology code.
  */
 

@@ -20,7 +20,7 @@ static cap_id_t init_resources(struct kernel_capability_test_context* ctx) {
 Test(kernel_capability_resource, framebuffer_is_listed_only_when_available) {
 	struct kernel_capability_test_context ctx;
 	static uint8_t                        framebuffer_bytes[64];
-	const struct kernel_boot_framebuffer  framebuffer = {
+	const struct boot_framebuffer         framebuffer = {
 		.address = framebuffer_bytes, .width = 4u, .height = 4u, .pitch = 16u, .bpp = 32u};
 	struct kernel_resources_list_request request = {
 		.header = {.op = KERNEL_RESOURCES_OP_LIST}, .offset = 0u, .capacity = 4u};
@@ -30,7 +30,7 @@ Test(kernel_capability_resource, framebuffer_is_listed_only_when_available) {
 	syscall_result_t                       result;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/resources-framebuffer");
-	kernel_boot_mock_set_framebuffer(&framebuffer);
+	boot_mock_set_framebuffer(&framebuffer);
 	root_cap = init_resources(&ctx);
 	cr_assert_neq(root_cap, CAP_ID_INVALID);
 	result = kernel_capability_test_call(root_cap, &request, sizeof(request), response, sizeof(response_storage));
@@ -43,7 +43,7 @@ Test(kernel_capability_resource, framebuffer_is_listed_only_when_available) {
 
 Test(kernel_capability_resource, empty_and_zero_capacity_lists_report_totals) {
 	struct kernel_capability_test_context ctx;
-	const struct kernel_boot_module       modules[] = {
+	const struct boot_module              modules[] = {
 		{.name = "one.bin", .size = 1u}
     };
 	struct kernel_resources_list_request request = {
@@ -60,7 +60,7 @@ Test(kernel_capability_resource, empty_and_zero_capacity_lists_report_totals) {
 	cr_assert_eq(response.total, 2u);
 	cr_assert_eq(response.returned, 0u);
 
-	kernel_boot_mock_set_modules(modules, 1u);
+	boot_mock_set_modules(modules, 1u);
 	result = kernel_capability_test_call(root_cap, &request, sizeof(request), &response, sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(response.total, 3u);
@@ -99,7 +99,7 @@ Test(kernel_capability_resource, serial_and_loader_are_acquired_from_the_registr
 
 Test(kernel_capability_resource, listing_is_paginated_and_acquisition_targets_the_caller) {
 	struct kernel_capability_test_context ctx;
-	const struct kernel_boot_module       modules[] = {
+	const struct boot_module              modules[] = {
 		{.name = "one.bin", .size = 1u}
     };
 	struct kernel_resources_list_request list_request = {
@@ -114,7 +114,7 @@ Test(kernel_capability_resource, listing_is_paginated_and_acquisition_targets_th
 	syscall_result_t                             result;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/resources-acquire");
-	kernel_boot_mock_set_modules(modules, 1u);
+	boot_mock_set_modules(modules, 1u);
 	root_cap = init_resources(&ctx);
 	cr_assert_neq(root_cap, CAP_ID_INVALID);
 	result =
@@ -143,7 +143,7 @@ Test(kernel_capability_resource, listing_is_paginated_and_acquisition_targets_th
 
 Test(kernel_capability_resource, unavailable_unknown_and_insufficient_rights_are_rejected_without_grants) {
 	struct kernel_capability_test_context ctx;
-	const struct kernel_boot_module       modules[] = {
+	const struct boot_module              modules[] = {
 		{.name = "one.bin", .size = 1u}
     };
 	struct kernel_resource_acquire_request  request = {.header = {.op = KERNEL_RESOURCES_OP_ACQUIRE},
@@ -168,7 +168,7 @@ Test(kernel_capability_resource, unavailable_unknown_and_insufficient_rights_are
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 	cr_assert_eq(capability_count(), grants_before);
 
-	kernel_boot_mock_set_modules(modules, 1u);
+	boot_mock_set_modules(modules, 1u);
 	request.id = KERNEL_RESOURCE_TYPE_MODULES;
 	result     = kernel_capability_test_call(root_cap, &request, sizeof(request), &response, sizeof(response) - 1u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);

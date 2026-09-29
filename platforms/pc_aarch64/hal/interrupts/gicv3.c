@@ -1,5 +1,6 @@
 #include "gicv3.h"
 
+#include <boot/info.h>
 #include <core/cpu.h>
 #include <core/interrupt.h>
 #include <core/lock.h>
@@ -8,7 +9,6 @@
 #include <firmware/dt/device.h>
 #include <hal/interrupts.h>
 #include <hal/paging.h>
-#include <kernel/boot.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -67,9 +67,8 @@ bool aarch64_gicv3_ready(void) {
 }
 
 static uintptr_t gicv3_virt(uintptr_t phys) {
-	struct kernel_boot_address_space address_space;
-	if (!kernel_boot_address_space_get(&address_space) || phys > UINTPTR_MAX - address_space.direct_map_offset)
-		return 0u;
+	struct boot_address_space address_space;
+	if (!boot_address_space_get(&address_space) || phys > UINTPTR_MAX - address_space.direct_map_offset) return 0u;
 	return address_space.direct_map_offset + phys;
 }
 

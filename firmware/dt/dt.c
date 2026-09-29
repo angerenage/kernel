@@ -1,5 +1,4 @@
 #include <firmware/dt.h>
-#include <kernel/boot.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -37,8 +36,9 @@ struct dt_token {
 	uint32_t name_offset;
 };
 
-static struct dt_state dt;
-static bool            dt_initialized;
+static struct dt_state         dt;
+static bool                    dt_initialized;
+static const struct boot_info* dt_boot_info;
 
 static uint32_t dt_read_u32(const uint8_t* value) {
 	return ((uint32_t)value[0] << 24u) | ((uint32_t)value[1] << 16u) | ((uint32_t)value[2] << 8u) | (uint32_t)value[3];
@@ -55,16 +55,16 @@ static bool dt_align(size_t value, size_t alignment, size_t* out) {
 }
 
 static bool dt_physical_span(uintptr_t physical, size_t size, const void** out) {
-	struct kernel_boot_address_space address_space;
-	const struct mem_range*          ranges;
-	size_t                           range_count;
-	uintptr_t                        end;
-	uintptr_t                        cursor;
-	uintptr_t                        virtual;
+	const struct mem_range* ranges;
+	size_t                  range_count;
+	uintptr_t               end;
+	uintptr_t               cursor;
+	uintptr_t               virtual;
 
-	if (size == 0u || size > UINTPTR_MAX - physical || !kernel_boot_address_space_get(&address_space)) return false;
-	end    = physical + size;
-	ranges = kernel_boot_memmap(&range_count);
+	if (size == 0u || size > UINTPTR_MAX - physical || dt_boot_info == NULL) return false;
+	end         = physical + size;
+	ranges      = dt_boot_info->memory_map;
+	range_count = dt_boot_info->memory_map_count;
 	if (ranges == NULL || range_count == 0u) return false;
 
 	cursor = physical;
@@ -84,8 +84,8 @@ static bool dt_physical_span(uintptr_t physical, size_t size, const void** out) 
 		cursor = covered_end < end ? covered_end : end;
 	}
 
-	if (physical > UINTPTR_MAX - address_space.direct_map_offset) return false;
-	virtual = physical + address_space.direct_map_offset;
+	if (physical > UINTPTR_MAX - dt_boot_info->direct_map_offset) return false;
+	virtual = physical + dt_boot_info->direct_map_offset;
 	if (size > UINTPTR_MAX - virtual) return false;
 	if (out != NULL) *out = (const void*)virtual;
 	return true;
@@ -218,32 +218,35 @@ static bool dt_reservations_validate(const uint8_t* blob, size_t total, size_t o
 	return false;
 }
 
-bool dt_init(const void* dtb) {
-	struct kernel_boot_address_space address_space;
-	const uint8_t*                   bytes;
-	const void*                      span;
-	uintptr_t                        virtual;
-	uintptr_t                        physical;
-	uint32_t                         total32;
-	uint32_t                         version;
-	uint32_t                         last_compatible;
-	size_t                           total;
-	size_t                           header_size;
-	size_t                           structure_offset;
-	size_t                           structure_limit;
-	size_t                           structure_declared;
-	size_t                           structure_size;
-	size_t                           strings_offset;
-	size_t                           strings_size;
-	size_t                           reservations_offset;
-	size_t                           reservations_size;
-	struct dt_state                  state;
+bool dt_init(const struct boot_info* info) {
+	const uint8_t*  bytes;
+	const void*     span;
+	uintptr_t       virtual;
+	uintptr_t       physical;
+	uint32_t        total32;
+	uint32_t        version;
+	uint32_t        last_compatible;
+	size_t          total;
+	size_t          header_size;
+	size_t          structure_offset;
+	size_t          structure_limit;
+	size_t          structure_declared;
+	size_t          structure_size;
+	size_t          strings_offset;
+	size_t          strings_size;
+	size_t          reservations_offset;
+	size_t          reservations_size;
+	struct dt_state state;
 
+	const void* dtb;
 	if (__atomic_load_n(&dt_initialized, __ATOMIC_ACQUIRE)) return true;
-	if (dtb == NULL || ((uintptr_t)dtb & 7u) != 0u || !kernel_boot_address_space_get(&address_space)) return false;
+	if (info == NULL || info->dtb_address == 0u) return false;
+	dt_boot_info = info;
+	dtb          = (const void*)info->dtb_address;
+	if (((uintptr_t)dtb & 7u) != 0u) return false;
 	virtual = (uintptr_t)dtb;
-	if (virtual < address_space.direct_map_offset) return false;
-	physical = virtual - address_space.direct_map_offset;
+	if (virtual < info->direct_map_offset) return false;
+	physical = virtual - info->direct_map_offset;
 	if (!dt_physical_span(physical, DT_V1_HEADER_SIZE, &span) || span != dtb) return false;
 	bytes = span;
 	if (dt_read_u32(bytes) != DT_MAGIC) return false;

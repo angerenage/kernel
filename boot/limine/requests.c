@@ -1,4 +1,4 @@
-#include "limine_requests.h"
+#include "requests.h"
 
 #define LIMINE_TARGET_BASE_REVISION 6
 
@@ -78,6 +78,6 @@ __attribute__((used, section(".limine_requests_end_marker")))
 static volatile uint64_t limine_requests_end_marker[2] =
 	LIMINE_REQUESTS_END_MARKER;
 
-bool kernel_limine_protocol_supported(void) {
+bool limine_protocol_supported(void) {
 	return LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision);
 }

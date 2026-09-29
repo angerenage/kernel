@@ -1,5 +1,6 @@
 #include <base/cap.h>
 #include <base/process.h>
+#include <boot/info.h>
 #include <core/capability.h>
 #include <core/cpu.h>
 #include <core/mm.h>
@@ -9,7 +10,6 @@
 #include <core/thread.h>
 #include <core/uthread.h>
 #include <criterion/criterion.h>
-#include <kernel/boot.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -32,7 +32,7 @@ static cap_id_t        grant_caps[GRANT_SLOT_COUNT];
 static cap_object_id_t grant_objects[GRANT_SLOT_COUNT];
 static enum grant_slot grant_fail_slot = GRANT_SLOT_COUNT;
 
-void kernel_boot_mock_reset(void);
+void boot_mock_reset(void);
 
 static syscall_result_t grant_test_handler(const struct cap_request* request) {
 	(void)request;
@@ -138,7 +138,7 @@ static void destroy_current_process(struct process* process) {
 	sched_set_current(cpu_current(), NULL);
 	grant_test_cleanup();
 	cr_assert(process_destroy(process), "failed to destroy syscall validation process");
-	kernel_boot_mock_reset();
+	boot_mock_reset();
 	syscall_test_reset_state();
 }
 

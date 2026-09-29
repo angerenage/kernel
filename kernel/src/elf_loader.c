@@ -1,12 +1,12 @@
 #include <base/heap.h>
 #include <base/math.h>
+#include <boot/info.h>
 #include <core/address_space.h>
 #include <core/address_transfer.h>
 #include <core/memory.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/process.h>
-#include <kernel/boot.h>
 #include <kernel/elf_loader.h>
 #include <libc/stdlib.h>
 #include <stdbool.h>
@@ -133,9 +133,8 @@ static cap_rights_t mapping_rights(memory_access_t access) {
 	return rights;
 }
 
-static enum kernel_elf_load_result kernel_elf_load_segment(struct process*                  process,
-                                                           const struct kernel_boot_module* module,
-                                                           const struct elf64_phdr*         phdr) {
+static enum kernel_elf_load_result kernel_elf_load_segment(struct process* process, const struct boot_module* module,
+                                                           const struct elf64_phdr* phdr) {
 	struct address_space* space;
 	uintptr_t             map_base;
 	size_t                mapping_size;
@@ -229,7 +228,7 @@ static enum kernel_elf_load_result kernel_elf_allocate_initial_heap(struct proce
 	return KERNEL_ELF_LOAD_OK;
 }
 
-enum kernel_elf_load_result kernel_elf_load_process(const struct kernel_boot_module* module, const char* name,
+enum kernel_elf_load_result kernel_elf_load_process(const struct boot_module* module, const char* name,
                                                     struct kernel_elf_process* out_process) {
 	struct elf64_ehdr   ehdr;
 	struct process*     process = NULL;

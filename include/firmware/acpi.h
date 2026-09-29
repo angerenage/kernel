@@ -1,5 +1,6 @@
 #pragma once
 
+#include <boot/info.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -23,8 +24,8 @@ struct acpi_sdt_header {
 	uint32_t creator_revision;
 } __attribute__((packed));
 
-/* Validate the supplied HHDM RSDP and publish its authoritative root table once. */
-bool acpi_init(const void* rsdp);
+/* Validate the RSDP described by boot info and publish its authoritative root table once. */
+bool acpi_init(const struct boot_info* info);
 
 /* Return the next validated table matching signature, optionally advancing cursor. */
 const struct acpi_sdt_header* acpi_table_next(const char signature[4], acpi_cursor_t* cursor);
