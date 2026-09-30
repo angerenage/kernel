@@ -471,9 +471,10 @@ test_suites = [
 			'../firmware/dt/dt.c',
 			'../kernel/src/device.c',
 			'../kernel/src/hardware/pci.c',
+			'../kernel/src/hardware/ps2.c',
 		),
 		'link_with': base_test_lib,
-		'c_args': ['-DKERNEL_DEVICE_TEST=1'],
+		'c_args': ['-DKERNEL_DEVICE_TEST=1', '-DPLATFORM_PC_X86_64=1'],
 		'suites': ['unit', 'firmware', 'kernel'],
 	},
 	{

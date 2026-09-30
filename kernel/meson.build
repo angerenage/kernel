@@ -69,6 +69,7 @@ kernel_objs = base_sources + core_sources + boot_sources + firmware_sources + ke
 	'src/syscall/user_frame.c',
 	'src/device.c',
 	'src/hardware/pci.c',
+	'src/hardware/ps2.c',
 ]
 if platform == 'pc_x86_64'
 	kernel_objs += files('src/capability/io_port.c')
