@@ -15,6 +15,9 @@ typedef syscall_result_t (*cap_kernel_handler_t)(const struct cap_request* req);
 typedef bool (*cap_kernel_process_cleanup_t)(uint64_t object_id, process_id_t process);
 /* Handler invoked when managed kernel routing metadata is finalized. */
 typedef void (*cap_kernel_destroy_t)(uint64_t object_id);
+/* Synchronous notification after one grant is removed or has rights reduced. */
+typedef void (*cap_kernel_grant_change_t)(uint64_t object_id, cap_id_t capability_id, process_id_t target,
+                                          cap_rights_t rights, bool removed);
 
 /* Lifecycle events observed by a kernel capability provider. */
 enum cap_object_event {
@@ -39,6 +42,7 @@ struct cap_object {
 	cap_kernel_handler_t         handler;
 	cap_kernel_process_cleanup_t process_cleanup;
 	cap_kernel_destroy_t         destroy;
+	cap_kernel_grant_change_t    grant_change;
 	cap_object_event_handler_t   event_handler;
 	struct cap_object*           event_next;
 	uint64_t                     reference_count;
@@ -92,6 +96,13 @@ cap_object_id_t cap_object_create_kernel_lifecycle(uint64_t object_id, cap_kerne
                                                    cap_kernel_process_cleanup_t process_cleanup,
                                                    cap_kernel_destroy_t         destroy,
                                                    cap_object_event_handler_t event_handler, bool* out_created);
+
+/* Publish a managed kernel object that observes removal and rights reduction of each individual grant. */
+cap_object_id_t cap_object_create_kernel_observed(uint64_t object_id, cap_kernel_handler_t handler,
+                                                  cap_kernel_process_cleanup_t process_cleanup,
+                                                  cap_kernel_destroy_t         destroy,
+                                                  cap_object_event_handler_t   event_handler,
+                                                  cap_kernel_grant_change_t grant_change, bool* out_created);
 
 /* Look up an existing object. The returned pointer is borrowed and requires external lifetime synchronisation. */
 struct cap_object* cap_object_lookup(struct channel* endpoint, uint64_t object_id);
