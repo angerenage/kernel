@@ -104,7 +104,7 @@ Test(kernel_capability_record, exposes_pci_as_a_separate_read_only_kernel_resour
 	result = kernel_capability_test_call(
 		resources_cap, &list_request, sizeof(list_request), list_response, sizeof(list_storage));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
-	cr_assert_eq(list_response->total, 1u);
+	cr_assert_eq(list_response->total, 2u);
 	cr_assert_eq(list_response->returned, 1u);
 	cr_assert_eq(list_response->ids[0], KERNEL_RESOURCE_TYPE_PCI);
 

@@ -102,9 +102,10 @@ Test(kernel_capability_interrupt, resource_is_listed_and_granted_with_expected_r
 	syscall_result_t                       result =
 		kernel_capability_test_call(resources_cap, &list_request, sizeof(list_request), list, sizeof(storage));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
-	cr_assert_eq(list->total, 1u);
-	cr_assert_eq(list->returned, 1u);
+	cr_assert_eq(list->total, 2u);
+	cr_assert_eq(list->returned, 2u);
 	cr_assert_eq(list->ids[0], KERNEL_RESOURCE_TYPE_INTERRUPTS);
+	cr_assert_eq(list->ids[1], KERNEL_RESOURCE_TYPE_DEVICES);
 
 	const struct kernel_resource_acquire_request acquire_request  = {.header = {.op = KERNEL_RESOURCES_OP_ACQUIRE},
 	                                                                 .id     = KERNEL_RESOURCE_TYPE_INTERRUPTS};

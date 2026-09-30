@@ -46,6 +46,7 @@ kernel_objs = base_sources + core_sources + boot_sources + firmware_sources + ke
 	'src/capability/memory_allocator.c',
 	'src/capability/boot_module.c',
 	'src/capability/boot_resource.c',
+	'src/capability/device.c',
 	'src/capability/record.c',
 	'src/capability/hardware/pci.c',
 	'src/capability/kernel_resource.c',
@@ -68,6 +69,7 @@ kernel_objs = base_sources + core_sources + boot_sources + firmware_sources + ke
 	'src/syscall/time.c',
 	'src/syscall/upcall.c',
 	'src/syscall/user_frame.c',
+	'src/device.c',
 	'src/hardware/pci.c',
 ]
 if platform == 'pc_x86_64'

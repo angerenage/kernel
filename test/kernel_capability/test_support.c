@@ -1,6 +1,7 @@
 #include "test_support.h"
 
 #include <hal/cache.h>
+#include <kernel/device.h>
 #include <test_memory.h>
 
 #include "../../kernel/src/capability/memory_allocator.h"
@@ -57,6 +58,7 @@ void kernel_capability_test_begin(struct kernel_capability_test_context* ctx, co
 	cr_assert(kernel_memory_allocator_init());
 	boot_mock_reset();
 	hardware_mock_reset();
+	kernel_device_reset_for_test();
 	kernel_capability_test_serial_reset();
 
 	ctx->process = syscall_test_spawn_process(name);
@@ -77,6 +79,7 @@ void kernel_capability_test_end(struct kernel_capability_test_context* ctx) {
 	cr_assert(process_destroy(ctx->process), "failed to destroy kernel capability test process");
 	boot_mock_reset();
 	hardware_mock_reset();
+	kernel_device_reset_for_test();
 	syscall_test_reset_state();
 	*ctx = (struct kernel_capability_test_context){0};
 }

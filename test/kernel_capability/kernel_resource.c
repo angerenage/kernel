@@ -35,8 +35,8 @@ Test(kernel_capability_resource, framebuffer_is_listed_only_when_available) {
 	const struct boot_framebuffer         framebuffer = {
 		.address = framebuffer_bytes, .width = 4u, .height = 4u, .pitch = 16u, .bpp = 32u};
 	struct kernel_resources_list_request request = {
-		.header = {.op = KERNEL_RESOURCES_OP_LIST}, .offset = 0u, .capacity = 4u};
-	uint8_t response_storage[sizeof(struct kernel_resources_list_response) + 4u * sizeof(enum kernel_resource_type)];
+		.header = {.op = KERNEL_RESOURCES_OP_LIST}, .offset = 0u, .capacity = 5u};
+	uint8_t response_storage[sizeof(struct kernel_resources_list_response) + 5u * sizeof(enum kernel_resource_type)];
 	struct kernel_resources_list_response* response = (void*)response_storage;
 	cap_id_t                               root_cap;
 	syscall_result_t                       result;
@@ -47,11 +47,12 @@ Test(kernel_capability_resource, framebuffer_is_listed_only_when_available) {
 	cr_assert_neq(root_cap, CAP_ID_INVALID);
 	result = kernel_capability_test_call(root_cap, &request, sizeof(request), response, sizeof(response_storage));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
-	cr_assert_eq(response->total, 3u + IO_PORT_RESOURCE_EXTRA);
-	cr_assert_eq(response->returned, 3u + IO_PORT_RESOURCE_EXTRA);
+	cr_assert_eq(response->total, 4u + IO_PORT_RESOURCE_EXTRA);
+	cr_assert_eq(response->returned, 4u + IO_PORT_RESOURCE_EXTRA);
 	cr_assert_eq(response->ids[2], KERNEL_RESOURCE_TYPE_FRAMEBUFFER);
+	cr_assert_eq(response->ids[3], KERNEL_RESOURCE_TYPE_DEVICES);
 #if defined(IO_PORT_TEST)
-	cr_assert_eq(response->ids[3], KERNEL_RESOURCE_TYPE_IO_PORTS);
+	cr_assert_eq(response->ids[4], KERNEL_RESOURCE_TYPE_IO_PORTS);
 #endif
 	kernel_capability_test_end(&ctx);
 }
@@ -72,13 +73,13 @@ Test(kernel_capability_resource, empty_and_zero_capacity_lists_report_totals) {
 	cr_assert_neq(root_cap, CAP_ID_INVALID);
 	result = kernel_capability_test_call(root_cap, &request, sizeof(request), &response, sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
-	cr_assert_eq(response.total, 2u + IO_PORT_RESOURCE_EXTRA);
+	cr_assert_eq(response.total, 3u + IO_PORT_RESOURCE_EXTRA);
 	cr_assert_eq(response.returned, 0u);
 
 	boot_mock_set_modules(modules, 1u);
 	result = kernel_capability_test_call(root_cap, &request, sizeof(request), &response, sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
-	cr_assert_eq(response.total, 3u + IO_PORT_RESOURCE_EXTRA);
+	cr_assert_eq(response.total, 4u + IO_PORT_RESOURCE_EXTRA);
 	cr_assert_eq(response.returned, 0u);
 	kernel_capability_test_end(&ctx);
 }
@@ -157,14 +158,14 @@ Test(kernel_capability_resource, listing_is_paginated_and_acquisition_targets_th
 	result =
 		kernel_capability_test_call(root_cap, &list_request, sizeof(list_request), list_response, sizeof(list_storage));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
-	cr_assert_eq(list_response->total, 3u + IO_PORT_RESOURCE_EXTRA);
+	cr_assert_eq(list_response->total, 4u + IO_PORT_RESOURCE_EXTRA);
 	cr_assert_eq(list_response->returned, 1u);
 	cr_assert_eq(list_response->ids[0], KERNEL_RESOURCE_TYPE_MODULES);
-	list_request.offset = 3u + IO_PORT_RESOURCE_EXTRA;
+	list_request.offset = 4u + IO_PORT_RESOURCE_EXTRA;
 	result =
 		kernel_capability_test_call(root_cap, &list_request, sizeof(list_request), list_response, sizeof(list_storage));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
-	cr_assert_eq(list_response->total, 3u + IO_PORT_RESOURCE_EXTRA);
+	cr_assert_eq(list_response->total, 4u + IO_PORT_RESOURCE_EXTRA);
 	cr_assert_eq(list_response->returned, 0u);
 
 	result = kernel_capability_test_call(

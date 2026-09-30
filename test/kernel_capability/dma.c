@@ -60,9 +60,10 @@ Test(kernel_capability_dma, kernel_resource_lists_and_grants_dma_control) {
 	syscall_result_t                       result =
 		kernel_capability_test_call(resources_cap, &list_request, sizeof(list_request), list, sizeof(storage));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
-	cr_assert_eq(list->total, 1u);
-	cr_assert_eq(list->returned, 1u);
+	cr_assert_eq(list->total, 2u);
+	cr_assert_eq(list->returned, 2u);
 	cr_assert_eq(list->ids[0], KERNEL_RESOURCE_TYPE_DMA);
+	cr_assert_eq(list->ids[1], KERNEL_RESOURCE_TYPE_DEVICES);
 
 	const struct kernel_resource_acquire_request acquire_request = {.header = {.op = KERNEL_RESOURCES_OP_ACQUIRE},
 	                                                                .id     = KERNEL_RESOURCE_TYPE_DMA};
@@ -88,7 +89,7 @@ Test(kernel_capability_dma, device_resources_map_sync_bind_recover_and_unbind) {
 	                                                                .source = source};
 	struct dma_create_address_space_response      create_response;
 	syscall_result_t                              result = kernel_capability_test_call(
-        dma_cap, &create_request, sizeof(create_request), &create_response, sizeof(create_response));
+		dma_cap, &create_request, sizeof(create_request), &create_response, sizeof(create_response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_neq(create_response.address_space_cap, CAP_ID_INVALID);
 
@@ -190,7 +191,7 @@ Test(kernel_capability_dma, source_tokens_do_not_bypass_dma_capability_rights) {
 	                                                                .source = source};
 	struct dma_create_address_space_response      create_response;
 	syscall_result_t                              result = kernel_capability_test_call(
-        read_only, &create_request, sizeof(create_request), &create_response, sizeof(create_response));
+		read_only, &create_request, sizeof(create_request), &create_response, sizeof(create_response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_DENIED);
 
 	const struct dma_recover_request recover_request = {.header = {.op = DMA_OP_RECOVER}, .source = source};
