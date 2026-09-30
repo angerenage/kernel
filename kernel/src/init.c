@@ -30,6 +30,7 @@
 
 #include "capability/kernel_resource.h"
 #include "capability/memory_allocator.h"
+#include "hardware/pci.h"
 
 #if KERNEL_SELFTESTS_ENABLED
 #include "../test/selftest.h"
@@ -306,6 +307,7 @@ void kernel_main(void) {
 	if (boot_diagnostics_enabled)
 		printf("kernel: cpu topology %zu present, %zu online\n", cpu_count(), cpu_online_count());
 
+	if (!kernel_device_register_pci()) boot_fail("kernel: PCI device registration failed");
 	capability_init();
 	if (!kernel_capability_init()) boot_fail("kernel: capability initialization failed");
 

@@ -1,6 +1,10 @@
+#include "pci.h"
+
+#include <base/device.h>
+#include <base/hardware/pci.h>
 #include <firmware/acpi.h>
 #include <firmware/dt/device.h>
-#include <kernel/hardware/pci.h>
+#include <kernel/device.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -384,13 +388,17 @@ static bool pci_reconciled_find(size_t target, struct pci_controller* out_contro
 	return false;
 }
 
-size_t kernel_hardware_pci_count(void) {
+bool kernel_device_register_pci(void) {
 	size_t count = 0u;
 
+	if (!kernel_device_register_type(KERNEL_DEVICE_TYPE_PCI, sizeof(struct pci_controller))) return false;
 	(void)pci_reconciled_find(SIZE_MAX, NULL, &count);
-	return count;
-}
+	for (size_t index = 0u; index < count; index++) {
+		struct pci_controller controller;
 
-bool kernel_hardware_pci_get(size_t index, struct pci_controller* out_controller) {
-	return out_controller != NULL && pci_reconciled_find(index, out_controller, NULL);
+		if (!pci_reconciled_find(index, &controller, NULL) ||
+		    !kernel_device_register(KERNEL_DEVICE_TYPE_PCI, &controller, sizeof(controller)))
+			return false;
+	}
+	return true;
 }

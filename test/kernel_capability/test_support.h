@@ -1,7 +1,6 @@
 #pragma once
 
 #include <base/cap.h>
-#include <base/hardware/pci.h>
 #include <base/memory.h>
 #include <base/module.h>
 #include <boot/info.h>
@@ -40,9 +39,6 @@ size_t kernel_capability_test_serial_bytes(void);
 void boot_mock_set_modules(const struct boot_module* modules, size_t count);
 void boot_mock_set_framebuffer(const struct boot_framebuffer* framebuffer);
 void boot_mock_reset(void);
-
-void hardware_mock_set_pci_controllers(const struct pci_controller* controllers, size_t count);
-void hardware_mock_reset(void);
 
 syscall_result_t kernel_capability_test_call(cap_id_t cap, const void* request, size_t request_size, void* response,
                                              size_t response_capacity);

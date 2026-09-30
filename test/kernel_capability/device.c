@@ -1,6 +1,7 @@
 #include "../../kernel/src/capability/device.h"
 
 #include <base/device.h>
+#include <base/hardware/pci.h>
 #include <base/kernel_resource.h>
 #include <core/capability.h>
 #include <kernel/device.h>
@@ -8,19 +9,12 @@
 #include "../../kernel/src/capability/kernel_resource.h"
 #include "test_support.h"
 
-#define TEST_DEVICE_TYPE ((enum kernel_device_type)0x70000001u)
 #define TEST_OTHER_DEVICE_TYPE ((enum kernel_device_type)0x70000002u)
 
-struct test_device_descriptor {
-	uint64_t address;
-	uint32_t kind;
-	uint32_t flags;
-};
-
-static const struct test_device_descriptor test_devices[] = {
-	{.address = 0x1000u, .kind = 1u, .flags = 0x10u},
-	{.address = 0x2000u, .kind = 2u, .flags = 0x20u},
-	{.address = 0x3000u, .kind = 3u, .flags = 0x30u},
+static const struct pci_controller test_devices[] = {
+	{.register_address = 0x1000u, .register_size = 0x100000u, .access = PCI_CONFIG_ACCESS_ECAM, .domain = 1u},
+	{.register_address = 0x2000u, .register_size = 0x100000u, .access = PCI_CONFIG_ACCESS_ECAM, .domain = 2u},
+	{.register_address = 0x3000u, .register_size = 0x100000u, .access = PCI_CONFIG_ACCESS_ECAM, .domain = 3u},
 };
 
 static cap_id_t initialize_devices(struct kernel_capability_test_context* ctx) {
@@ -32,32 +26,32 @@ static cap_id_t initialize_devices(struct kernel_capability_test_context* ctx) {
 
 Test(kernel_capability_device, copies_and_paginates_typed_descriptors) {
 	struct kernel_capability_test_context     ctx;
-	struct test_device_descriptor             first         = test_devices[0];
+	struct pci_controller                     first         = test_devices[0];
 	const struct kernel_devices_count_request count_request = {.header = {.op = KERNEL_DEVICES_OP_COUNT},
-	                                                           .type   = TEST_DEVICE_TYPE};
+	                                                           .type   = KERNEL_DEVICE_TYPE_PCI};
 	struct kernel_devices_count_response      count_response;
 	struct kernel_devices_count_request       other_count_request = {.header = {.op = KERNEL_DEVICES_OP_COUNT},
 	                                                                 .type   = TEST_OTHER_DEVICE_TYPE};
 	struct kernel_devices_list_request        list_request        = {
 		.header       = {.op = KERNEL_DEVICES_OP_LIST},
-		.type         = TEST_DEVICE_TYPE,
+		.type         = KERNEL_DEVICE_TYPE_PCI,
 		.offset       = 1u,
 		.length       = 2u,
-		.element_size = sizeof(struct test_device_descriptor),
+		.element_size = sizeof(struct pci_controller),
 	};
-	uint8_t list_storage[sizeof(struct kernel_devices_list_response) + 2u * sizeof(struct test_device_descriptor)];
+	uint8_t list_storage[sizeof(struct kernel_devices_list_response) + 2u * sizeof(struct pci_controller)];
 	struct kernel_devices_list_response* list_response = (void*)list_storage;
-	struct test_device_descriptor*       listed        = (void*)list_response->entries;
+	struct pci_controller*               listed        = (void*)list_response->entries;
 	syscall_result_t                     result;
 	cap_id_t                             devices_cap;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/devices-list");
-	cr_assert(kernel_device_register_type(TEST_DEVICE_TYPE, sizeof(first)));
+	cr_assert(kernel_device_register_type(KERNEL_DEVICE_TYPE_PCI, sizeof(first)));
 	cr_assert(kernel_device_register_type(TEST_OTHER_DEVICE_TYPE, sizeof(first)));
-	cr_assert(kernel_device_register(TEST_DEVICE_TYPE, &first, sizeof(first)));
-	first.address = 0xffffu;
-	cr_assert(kernel_device_register(TEST_DEVICE_TYPE, &test_devices[1], sizeof(test_devices[1])));
-	cr_assert(kernel_device_register(TEST_DEVICE_TYPE, &test_devices[2], sizeof(test_devices[2])));
+	cr_assert(kernel_device_register(KERNEL_DEVICE_TYPE_PCI, &first, sizeof(first)));
+	first.register_address = 0xffffu;
+	cr_assert(kernel_device_register(KERNEL_DEVICE_TYPE_PCI, &test_devices[1], sizeof(test_devices[1])));
+	cr_assert(kernel_device_register(KERNEL_DEVICE_TYPE_PCI, &test_devices[2], sizeof(test_devices[2])));
 	devices_cap = initialize_devices(&ctx);
 
 	result = kernel_capability_test_call(
@@ -73,10 +67,10 @@ Test(kernel_capability_device, copies_and_paginates_typed_descriptors) {
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(result.value, sizeof(list_storage));
 	cr_assert_eq(list_response->returned, 2u);
-	cr_assert_eq(listed[0].address, test_devices[1].address);
-	cr_assert_eq(listed[0].kind, test_devices[1].kind);
-	cr_assert_eq(listed[1].address, test_devices[2].address);
-	cr_assert_eq(listed[1].flags, test_devices[2].flags);
+	cr_assert_eq(listed[0].register_address, test_devices[1].register_address);
+	cr_assert_eq(listed[0].domain, test_devices[1].domain);
+	cr_assert_eq(listed[1].register_address, test_devices[2].register_address);
+	cr_assert_eq(listed[1].register_size, test_devices[2].register_size);
 
 	list_request.offset = 0u;
 	list_request.length = 1u;
@@ -84,10 +78,10 @@ Test(kernel_capability_device, copies_and_paginates_typed_descriptors) {
 	                                                  &list_request,
 	                                                  sizeof(list_request),
 	                                                  list_response,
-	                                                  sizeof(*list_response) + sizeof(struct test_device_descriptor));
+	                                                  sizeof(*list_response) + sizeof(struct pci_controller));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(list_response->returned, 1u);
-	cr_assert_eq(listed[0].address, test_devices[0].address, "registered descriptors must be copied");
+	cr_assert_eq(listed[0].register_address, test_devices[0].register_address, "registered descriptors must be copied");
 
 	list_request.offset = 99u;
 	list_request.length = 2u;
@@ -109,48 +103,48 @@ Test(kernel_capability_device, copies_and_paginates_typed_descriptors) {
 
 Test(kernel_capability_device, validates_registration_and_freezes_the_inventory) {
 	struct kernel_capability_test_context ctx;
-	struct test_device_descriptor         descriptor = test_devices[0];
+	struct pci_controller                 descriptor = test_devices[0];
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/devices-registration");
 	cr_assert_not(kernel_device_register_type(KERNEL_DEVICE_TYPE_INVALID, sizeof(descriptor)));
-	cr_assert_not(kernel_device_register_type(TEST_DEVICE_TYPE, 0u));
+	cr_assert_not(kernel_device_register_type(KERNEL_DEVICE_TYPE_PCI, 0u));
 	cr_assert_not(kernel_device_register_type(
-		TEST_DEVICE_TYPE, CAP_MAX_RESPONSE_SIZE - sizeof(struct kernel_devices_list_response) + 1u));
-	cr_assert(kernel_device_register_type(TEST_DEVICE_TYPE, sizeof(descriptor)));
-	cr_assert_not(kernel_device_register_type(TEST_DEVICE_TYPE, sizeof(descriptor)));
+		KERNEL_DEVICE_TYPE_PCI, CAP_MAX_RESPONSE_SIZE - sizeof(struct kernel_devices_list_response) + 1u));
+	cr_assert(kernel_device_register_type(KERNEL_DEVICE_TYPE_PCI, sizeof(descriptor)));
+	cr_assert_not(kernel_device_register_type(KERNEL_DEVICE_TYPE_PCI, sizeof(descriptor)));
 	cr_assert_not(kernel_device_register(TEST_OTHER_DEVICE_TYPE, &descriptor, sizeof(descriptor)));
-	cr_assert_not(kernel_device_register(TEST_DEVICE_TYPE, NULL, sizeof(descriptor)));
-	cr_assert_not(kernel_device_register(TEST_DEVICE_TYPE, &descriptor, sizeof(descriptor) - 1u));
-	cr_assert(kernel_device_register(TEST_DEVICE_TYPE, &descriptor, sizeof(descriptor)));
+	cr_assert_not(kernel_device_register(KERNEL_DEVICE_TYPE_PCI, NULL, sizeof(descriptor)));
+	cr_assert_not(kernel_device_register(KERNEL_DEVICE_TYPE_PCI, &descriptor, sizeof(descriptor) - 1u));
+	cr_assert(kernel_device_register(KERNEL_DEVICE_TYPE_PCI, &descriptor, sizeof(descriptor)));
 	(void)initialize_devices(&ctx);
 	cr_assert_not(kernel_device_register_type(TEST_OTHER_DEVICE_TYPE, sizeof(descriptor)));
-	cr_assert_not(kernel_device_register(TEST_DEVICE_TYPE, &descriptor, sizeof(descriptor)));
+	cr_assert_not(kernel_device_register(KERNEL_DEVICE_TYPE_PCI, &descriptor, sizeof(descriptor)));
 	kernel_capability_test_end(&ctx);
 }
 
 Test(kernel_capability_device, rejects_malformed_requests_and_missing_read_rights) {
 	struct kernel_capability_test_context     ctx;
 	const struct kernel_devices_count_request count_request   = {.header = {.op = KERNEL_DEVICES_OP_COUNT},
-	                                                             .type   = TEST_DEVICE_TYPE};
+	                                                             .type   = KERNEL_DEVICE_TYPE_PCI};
 	struct kernel_devices_count_request       unknown_request = {.header = {.op = KERNEL_DEVICES_OP_COUNT},
 	                                                             .type   = TEST_OTHER_DEVICE_TYPE};
 	struct kernel_devices_count_response      count_response;
 	struct kernel_devices_list_request        list_request = {
 		.header       = {.op = KERNEL_DEVICES_OP_LIST},
-		.type         = TEST_DEVICE_TYPE,
+		.type         = KERNEL_DEVICE_TYPE_PCI,
 		.offset       = 0u,
 		.length       = 1u,
-		.element_size = sizeof(struct test_device_descriptor),
+		.element_size = sizeof(struct pci_controller),
 	};
-	uint8_t list_storage[sizeof(struct kernel_devices_list_response) + sizeof(struct test_device_descriptor)];
+	uint8_t            list_storage[sizeof(struct kernel_devices_list_response) + sizeof(struct pci_controller)];
 	struct capability* root;
 	cap_id_t           devices_cap;
 	cap_id_t           call_only_cap;
 	syscall_result_t   result;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/devices-errors");
-	cr_assert(kernel_device_register_type(TEST_DEVICE_TYPE, sizeof(struct test_device_descriptor)));
-	cr_assert(kernel_device_register(TEST_DEVICE_TYPE, &test_devices[0], sizeof(test_devices[0])));
+	cr_assert(kernel_device_register_type(KERNEL_DEVICE_TYPE_PCI, sizeof(struct pci_controller)));
+	cr_assert(kernel_device_register(KERNEL_DEVICE_TYPE_PCI, &test_devices[0], sizeof(test_devices[0])));
 	devices_cap = initialize_devices(&ctx);
 
 	result = kernel_capability_test_call(
@@ -172,7 +166,7 @@ Test(kernel_capability_device, rejects_malformed_requests_and_missing_read_right
 	result = kernel_capability_test_call(
 		devices_cap, &list_request, sizeof(list_request), list_storage, sizeof(list_storage));
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
-	list_request.element_size = sizeof(struct test_device_descriptor);
+	list_request.element_size = sizeof(struct pci_controller);
 	result                    = kernel_capability_test_call(
 		devices_cap, &list_request, sizeof(list_request), list_storage, sizeof(list_storage) - 1u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);

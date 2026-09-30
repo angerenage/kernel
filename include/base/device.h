@@ -5,6 +5,7 @@
 /* Stable identifiers for device descriptor structures exposed by the kernel. */
 enum kernel_device_type {
 	KERNEL_DEVICE_TYPE_INVALID = 0u,
+	KERNEL_DEVICE_TYPE_PCI,
 };
 
 /* Operations accepted by the kernel Devices resource. */

@@ -1,11 +1,16 @@
+#include <base/device.h>
+#include <base/hardware/pci.h>
 #include <boot/info.h>
 #include <core/mm.h>
 #include <criterion/criterion.h>
 #include <firmware/acpi.h>
-#include <kernel/hardware/pci.h>
+#include <kernel/device.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include "../kernel/src/hardware/pci.h"
+#include "heap/test_support.h"
 
 #define TEST_ARENA_SIZE 0x4000u
 #define TEST_PHYSICAL_BASE 0x1000u
@@ -35,6 +40,7 @@ struct test_mcfg_allocation {
 } __attribute__((packed));
 
 static uint8_t          test_arena[TEST_ARENA_SIZE];
+static uint8_t          test_heap[64u * 1024u] __attribute__((aligned(4096)));
 static struct mem_range test_ranges[3];
 static size_t           test_range_count;
 static struct boot_info test_boot_info;
@@ -58,6 +64,8 @@ static void test_checksum(void* data, size_t size, size_t checksum_offset) {
 }
 
 static void test_reset(void) {
+	kernel_device_reset_for_test();
+	if (!heap_is_initialized()) init_test_heap(test_heap, sizeof(test_heap));
 	memset(test_arena, 0, sizeof(test_arena));
 	memset(test_ranges, 0, sizeof(test_ranges));
 	test_range_count = 1u;
@@ -71,6 +79,18 @@ static void test_reset(void) {
 		.memory_map_count  = test_range_count,
 		.direct_map_offset = (uintptr_t)test_arena - TEST_PHYSICAL_BASE,
 	};
+}
+
+static size_t test_pci_controllers(struct pci_controller* controllers, size_t capacity) {
+	size_t count;
+	size_t returned;
+
+	cr_assert(kernel_device_register_pci());
+	kernel_device_freeze();
+	cr_assert(kernel_device_count(KERNEL_DEVICE_TYPE_PCI, &count));
+	cr_assert(kernel_device_list(KERNEL_DEVICE_TYPE_PCI, 0u, capacity, sizeof(*controllers), controllers, &returned));
+	cr_assert_eq(returned, count < capacity ? count : capacity);
+	return count;
 }
 
 static struct acpi_sdt_header* test_table(size_t offset, const char signature[4], size_t size) {
@@ -419,7 +439,7 @@ Test(acpi, pci_controllers_are_normalized_from_all_valid_mcfg_allocations) {
 	const struct test_mcfg_allocation second[] = {
 		{.address = 0xf0000000u, .segment_group = 2u, .start_bus = 128u, .end_bus = 255u},
 	};
-	struct pci_controller controller;
+	struct pci_controller controllers[3];
 	struct test_rsdp*     rsdp;
 
 	test_reset();
@@ -430,20 +450,16 @@ Test(acpi, pci_controllers_are_normalized_from_all_valid_mcfg_allocations) {
 	rsdp = test_rsdp(true);
 	cr_assert(test_acpi_init(rsdp));
 
-	cr_assert_eq(kernel_hardware_pci_count(), 2u);
-	cr_assert(kernel_hardware_pci_get(0u, &controller));
-	cr_assert_eq(controller.access, PCI_CONFIG_ACCESS_ECAM);
-	cr_assert_eq(controller.register_address, 0xe0000000u);
-	cr_assert_eq(controller.register_size, 128u * 1024u * 1024u);
-	cr_assert_eq(controller.domain, 0u);
-	cr_assert_eq(controller.start_bus, 0u);
-	cr_assert_eq(controller.end_bus, 127u);
-	cr_assert(kernel_hardware_pci_get(1u, &controller));
-	cr_assert_eq(controller.register_address, 0xf8000000u);
-	cr_assert_eq(controller.register_size, 128u * 1024u * 1024u);
-	cr_assert_eq(controller.domain, 2u);
-	cr_assert_eq(controller.start_bus, 128u);
-	cr_assert_eq(controller.end_bus, 255u);
-	cr_assert_not(kernel_hardware_pci_get(2u, &controller));
-	cr_assert_not(kernel_hardware_pci_get(0u, NULL));
+	cr_assert_eq(test_pci_controllers(controllers, 3u), 2u);
+	cr_assert_eq(controllers[0].access, PCI_CONFIG_ACCESS_ECAM);
+	cr_assert_eq(controllers[0].register_address, 0xe0000000u);
+	cr_assert_eq(controllers[0].register_size, 128u * 1024u * 1024u);
+	cr_assert_eq(controllers[0].domain, 0u);
+	cr_assert_eq(controllers[0].start_bus, 0u);
+	cr_assert_eq(controllers[0].end_bus, 127u);
+	cr_assert_eq(controllers[1].register_address, 0xf8000000u);
+	cr_assert_eq(controllers[1].register_size, 128u * 1024u * 1024u);
+	cr_assert_eq(controllers[1].domain, 2u);
+	cr_assert_eq(controllers[1].start_bus, 128u);
+	cr_assert_eq(controllers[1].end_bus, 255u);
 }
