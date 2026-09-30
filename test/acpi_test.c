@@ -1,6 +1,7 @@
 #include <base/device.h>
 #include <base/hardware/pci.h>
 #include <base/hardware/ps2.h>
+#include <base/hardware/tpm.h>
 #include <boot/info.h>
 #include <core/mm.h>
 #include <criterion/criterion.h>
@@ -12,6 +13,7 @@
 
 #include "../kernel/src/hardware/pci.h"
 #include "../kernel/src/hardware/ps2.h"
+#include "../kernel/src/hardware/tpm.h"
 #include "heap/test_support.h"
 
 #define TEST_ARENA_SIZE 0x4000u
@@ -41,6 +43,14 @@ struct test_mcfg_allocation {
 	uint8_t  start_bus;
 	uint8_t  end_bus;
 	uint32_t reserved;
+} __attribute__((packed));
+
+struct test_acpi_tpm2 {
+	struct acpi_sdt_header header;
+	uint16_t               platform_class;
+	uint16_t               reserved;
+	uint64_t               control_address;
+	uint32_t               start_method;
 } __attribute__((packed));
 
 static uint8_t          test_arena[TEST_ARENA_SIZE];
@@ -106,6 +116,18 @@ static size_t test_ps2_controllers(struct ps2_controller* controllers, size_t ca
 	cr_assert(kernel_device_count(KERNEL_DEVICE_TYPE_PS2_CONTROLLER, &count));
 	cr_assert(kernel_device_list(
 		KERNEL_DEVICE_TYPE_PS2_CONTROLLER, 0u, capacity, sizeof(*controllers), controllers, &returned));
+	cr_assert_eq(returned, count < capacity ? count : capacity);
+	return count;
+}
+
+static size_t test_tpms(struct tpm_device* devices, size_t capacity) {
+	size_t count;
+	size_t returned;
+
+	cr_assert(kernel_device_register_tpms());
+	kernel_device_freeze();
+	cr_assert(kernel_device_count(KERNEL_DEVICE_TYPE_TPM, &count));
+	cr_assert(kernel_device_list(KERNEL_DEVICE_TYPE_TPM, 0u, capacity, sizeof(*devices), devices, &returned));
 	cr_assert_eq(returned, count < capacity ? count : capacity);
 	return count;
 }
@@ -187,6 +209,19 @@ static struct acpi_sdt_header* test_mcfg(size_t offset, const struct test_mcfg_a
 	if (allocation_count != 0u)
 		memcpy((uint8_t*)table + sizeof(*table) + 8u, allocations, allocation_count * sizeof(*allocations));
 	test_checksum(table, size, offsetof(struct acpi_sdt_header, checksum));
+	return table;
+}
+
+static struct test_acpi_tpm2* test_tpm2(size_t offset, uint16_t platform_class, uint16_t reserved,
+                                        uint64_t control_address, uint32_t start_method) {
+	struct test_acpi_tpm2* table = (struct test_acpi_tpm2*)test_table(offset, "TPM2", sizeof(*table));
+
+	table->header.revision = 4u;
+	table->platform_class  = platform_class;
+	table->reserved        = reserved;
+	table->control_address = control_address;
+	table->start_method    = start_method;
+	test_checksum(table, sizeof(*table), offsetof(struct acpi_sdt_header, checksum));
 	return table;
 }
 
@@ -554,4 +589,54 @@ Test(acpi, ps2_controller_is_absent_when_fadt_revision_predates_boot_flags) {
 	cr_assert(test_acpi_init(rsdp));
 
 	cr_assert_eq(test_ps2_controllers(controllers, 1u), 0u);
+}
+
+Test(acpi, tpm_devices_expose_fifo_and_crb_interfaces) {
+	const uintptr_t entries[] = {
+		test_physical(0x800u),
+		test_physical(0xa00u),
+		test_physical(0xc00u),
+	};
+	struct tpm_device devices[3];
+	struct test_rsdp* rsdp;
+
+	test_reset();
+	test_tpm2(0x800u, 0u, 0u, 0u, 6u);
+	test_tpm2(0xa00u, 1u, 0u, UINT64_C(0xfed40040), 7u);
+	test_tpm2(0xc00u, 0u, 0u, UINT64_C(0xfed40040), 8u);
+	test_root(true, entries, sizeof(entries) / sizeof(entries[0]));
+	rsdp = test_rsdp(true);
+	cr_assert(test_acpi_init(rsdp));
+
+	cr_assert_eq(test_tpms(devices, 3u), 2u);
+	cr_assert_eq(devices[0].family, TPM_FAMILY_2_0);
+	cr_assert_eq(devices[0].interface, TPM_INTERFACE_FIFO_MMIO);
+	cr_assert_eq(devices[0].access.fifo_mmio.register_address, UINT64_C(0xfed40000));
+	cr_assert_eq(devices[0].access.fifo_mmio.register_size, UINT64_C(0x5000));
+	cr_assert_eq(devices[1].family, TPM_FAMILY_2_0);
+	cr_assert_eq(devices[1].interface, TPM_INTERFACE_CRB);
+	cr_assert_eq(devices[1].access.crb.control_area_address, UINT64_C(0xfed40040));
+}
+
+Test(acpi, tpm_devices_reject_invalid_tables) {
+	const uintptr_t entries[] = {
+		test_physical(0x800u),
+		test_physical(0xa00u),
+		test_physical(0xc00u),
+	};
+	struct test_acpi_tpm2* legacy;
+	struct tpm_device      device;
+	struct test_rsdp*      rsdp;
+
+	test_reset();
+	legacy                  = test_tpm2(0x800u, 0u, 0u, UINT64_C(0xfed40040), 7u);
+	legacy->header.revision = 3u;
+	test_checksum(legacy, sizeof(*legacy), offsetof(struct acpi_sdt_header, checksum));
+	test_tpm2(0xa00u, 0u, 1u, UINT64_C(0xfed40040), 7u);
+	test_tpm2(0xc00u, 2u, 0u, UINT64_C(0xfed40000), 6u);
+	test_root(true, entries, sizeof(entries) / sizeof(entries[0]));
+	rsdp = test_rsdp(true);
+	cr_assert(test_acpi_init(rsdp));
+
+	cr_assert_eq(test_tpms(&device, 1u), 0u);
 }

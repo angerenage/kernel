@@ -32,6 +32,7 @@
 #include "capability/memory_allocator.h"
 #include "hardware/pci.h"
 #include "hardware/ps2.h"
+#include "hardware/tpm.h"
 
 #if KERNEL_SELFTESTS_ENABLED
 #include "../test/selftest.h"
@@ -310,6 +311,7 @@ void kernel_main(void) {
 
 	if (!kernel_device_register_pci()) boot_fail("kernel: PCI device registration failed");
 	if (!kernel_device_register_ps2_controllers()) boot_fail("kernel: PS/2 device registration failed");
+	if (!kernel_device_register_tpms()) boot_fail("kernel: TPM device registration failed");
 	capability_init();
 	if (!kernel_capability_init()) boot_fail("kernel: capability initialization failed");
 

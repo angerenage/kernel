@@ -1,5 +1,6 @@
 #include <base/device.h>
 #include <base/hardware/pci.h>
+#include <base/hardware/tpm.h>
 #include <boot/info.h>
 #include <core/mm.h>
 #include <criterion/criterion.h>
@@ -13,6 +14,7 @@
 #include <string.h>
 
 #include "../kernel/src/hardware/pci.h"
+#include "../kernel/src/hardware/tpm.h"
 #include "heap/test_support.h"
 
 #define TEST_ARENA_SIZE 0x5000u
@@ -101,6 +103,18 @@ static size_t test_pci_controllers(struct pci_controller* controllers, size_t ca
 	kernel_device_freeze();
 	cr_assert(kernel_device_count(KERNEL_DEVICE_TYPE_PCI, &count));
 	cr_assert(kernel_device_list(KERNEL_DEVICE_TYPE_PCI, 0u, capacity, sizeof(*controllers), controllers, &returned));
+	cr_assert_eq(returned, count < capacity ? count : capacity);
+	return count;
+}
+
+static size_t test_tpms(struct tpm_device* devices, size_t capacity) {
+	size_t count;
+	size_t returned;
+
+	cr_assert(kernel_device_register_tpms());
+	kernel_device_freeze();
+	cr_assert(kernel_device_count(KERNEL_DEVICE_TYPE_TPM, &count));
+	cr_assert(kernel_device_list(KERNEL_DEVICE_TYPE_TPM, 0u, capacity, sizeof(*devices), devices, &returned));
 	cr_assert_eq(returned, count < capacity ? count : capacity);
 	return count;
 }
@@ -836,4 +850,64 @@ Test(dt, pci_rejects_conflicting_acpi_and_dt_controllers) {
 
 	cr_assert_eq(test_pci_controllers(&unchanged, 1u), 0u);
 	cr_assert_eq(unchanged.register_address, 1u);
+}
+
+Test(dt, tpm_devices_are_discovered_from_tis_mmio_nodes) {
+	static const uint8_t root_address_cells[] = {0u, 0u, 0u, 2u};
+	static const uint8_t root_size_cells[]    = {0u, 0u, 0u, 2u};
+	static const uint8_t compatible[]         = "vendor,tpm\0tcg,tpm-tis-mmio\0";
+	uint8_t              first_reg[16];
+	uint8_t              duplicate_reg[16];
+	uint8_t              second_reg[16];
+	uint8_t              invalid_reg[16];
+	size_t               address_cells_name;
+	size_t               size_cells_name;
+	size_t               compatible_name;
+	size_t               reg_name;
+	struct tpm_device    devices[3];
+
+	test_reset();
+	test_write_u32(first_reg, 0u);
+	test_write_u32(first_reg + 4u, 0xfe000000u);
+	test_write_u32(first_reg + 8u, 0u);
+	test_write_u32(first_reg + 12u, 0x6000u);
+	memcpy(duplicate_reg, first_reg, sizeof(duplicate_reg));
+	test_write_u32(duplicate_reg + 12u, 0x8000u);
+	test_write_u32(second_reg, 0u);
+	test_write_u32(second_reg + 4u, 0xfe100000u);
+	test_write_u32(second_reg + 8u, 0u);
+	test_write_u32(second_reg + 12u, 0x5000u);
+	test_write_u32(invalid_reg, 0u);
+	test_write_u32(invalid_reg + 4u, 0xfe200000u);
+	test_write_u32(invalid_reg + 8u, 0u);
+	test_write_u32(invalid_reg + 12u, 0x4000u);
+	address_cells_name = test_string("#address-cells");
+	size_cells_name    = test_string("#size-cells");
+	compatible_name    = test_string("compatible");
+	reg_name           = test_string("reg");
+	test_begin_node("");
+	test_property(17u, address_cells_name, root_address_cells, sizeof(root_address_cells));
+	test_property(17u, size_cells_name, root_size_cells, sizeof(root_size_cells));
+	const uint8_t* registers[] = {first_reg, duplicate_reg, second_reg, invalid_reg};
+	const char*    names[]     = {"tpm@fe000000", "tpm-duplicate@fe000000", "tpm@fe100000", "tpm@fe200000"};
+	for (size_t index = 0u; index < sizeof(registers) / sizeof(registers[0]); index++) {
+		test_begin_node(names[index]);
+		test_property(17u, compatible_name, compatible, sizeof(compatible));
+		test_property(17u, reg_name, registers[index], 16u);
+		test_end_node();
+	}
+	test_end_node();
+	test_token(9u);
+	test_header(17u);
+	cr_assert(test_dt_init(test_arena));
+
+	cr_assert_eq(test_tpms(devices, 3u), 2u);
+	cr_assert_eq(devices[0].family, TPM_FAMILY_UNSPECIFIED);
+	cr_assert_eq(devices[0].interface, TPM_INTERFACE_FIFO_MMIO);
+	cr_assert_eq(devices[0].access.fifo_mmio.register_address, UINT64_C(0xfe000000));
+	cr_assert_eq(devices[0].access.fifo_mmio.register_size, UINT64_C(0x6000));
+	cr_assert_eq(devices[1].family, TPM_FAMILY_UNSPECIFIED);
+	cr_assert_eq(devices[1].interface, TPM_INTERFACE_FIFO_MMIO);
+	cr_assert_eq(devices[1].access.fifo_mmio.register_address, UINT64_C(0xfe100000));
+	cr_assert_eq(devices[1].access.fifo_mmio.register_size, UINT64_C(0x5000));
 }
