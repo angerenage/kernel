@@ -67,6 +67,9 @@ userspace_system_sources = files(
 	'system/upcall.c',
 	'platforms/' + platform + '/syscall.c',
 )
+if platform == 'pc_x86_64'
+	userspace_system_sources += base_io_port_sources + files('system/io_port.c')
+endif
 
 userspace_libc = static_library('userspace_libc',
 	sources : base_libc_sources + userspace_base_sources,

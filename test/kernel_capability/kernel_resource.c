@@ -6,13 +6,25 @@
 #include "../../kernel/src/capability/boot_resource.h"
 #include "../../kernel/src/capability/loader.h"
 #include "../../kernel/src/capability/serial.h"
+#if defined(IO_PORT_TEST)
+#include "../../kernel/src/capability/io_port.h"
+#endif
 #include "test_support.h"
+
+#if defined(IO_PORT_TEST)
+#define IO_PORT_RESOURCE_EXTRA 1u
+#else
+#define IO_PORT_RESOURCE_EXTRA 0u
+#endif
 
 static cap_id_t init_resources(struct kernel_capability_test_context* ctx) {
 	kernel_capability_boot_module_provider_init();
 	kernel_capability_boot_resources_init();
 	kernel_capability_serial_init();
 	kernel_capability_loader_init();
+#if defined(IO_PORT_TEST)
+	cr_assert(kernel_capability_io_ports_init());
+#endif
 	kernel_capability_resources_init();
 	return kernel_capability_resources_grant(process_pid(ctx->process));
 }
@@ -35,9 +47,12 @@ Test(kernel_capability_resource, framebuffer_is_listed_only_when_available) {
 	cr_assert_neq(root_cap, CAP_ID_INVALID);
 	result = kernel_capability_test_call(root_cap, &request, sizeof(request), response, sizeof(response_storage));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
-	cr_assert_eq(response->total, 3u);
-	cr_assert_eq(response->returned, 3u);
+	cr_assert_eq(response->total, 3u + IO_PORT_RESOURCE_EXTRA);
+	cr_assert_eq(response->returned, 3u + IO_PORT_RESOURCE_EXTRA);
 	cr_assert_eq(response->ids[2], KERNEL_RESOURCE_TYPE_FRAMEBUFFER);
+#if defined(IO_PORT_TEST)
+	cr_assert_eq(response->ids[3], KERNEL_RESOURCE_TYPE_IO_PORTS);
+#endif
 	kernel_capability_test_end(&ctx);
 }
 
@@ -57,13 +72,13 @@ Test(kernel_capability_resource, empty_and_zero_capacity_lists_report_totals) {
 	cr_assert_neq(root_cap, CAP_ID_INVALID);
 	result = kernel_capability_test_call(root_cap, &request, sizeof(request), &response, sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
-	cr_assert_eq(response.total, 2u);
+	cr_assert_eq(response.total, 2u + IO_PORT_RESOURCE_EXTRA);
 	cr_assert_eq(response.returned, 0u);
 
 	boot_mock_set_modules(modules, 1u);
 	result = kernel_capability_test_call(root_cap, &request, sizeof(request), &response, sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
-	cr_assert_eq(response.total, 3u);
+	cr_assert_eq(response.total, 3u + IO_PORT_RESOURCE_EXTRA);
 	cr_assert_eq(response.returned, 0u);
 	kernel_capability_test_end(&ctx);
 }
@@ -97,6 +112,28 @@ Test(kernel_capability_resource, serial_and_loader_are_acquired_from_the_registr
 	kernel_capability_test_end(&ctx);
 }
 
+#if defined(IO_PORT_TEST)
+Test(kernel_capability_resource, io_ports_are_acquired_only_on_x86_64) {
+	struct kernel_capability_test_context        ctx;
+	const struct kernel_resource_acquire_request request = {.header = {.op = KERNEL_RESOURCES_OP_ACQUIRE},
+	                                                        .id     = KERNEL_RESOURCE_TYPE_IO_PORTS};
+	struct kernel_resource_acquire_response      response;
+	struct capability*                           acquired;
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/resources-io-ports");
+	cap_id_t root_cap = init_resources(&ctx);
+	cr_assert_neq(root_cap, CAP_ID_INVALID);
+	syscall_result_t result =
+		kernel_capability_test_call(root_cap, &request, sizeof(request), &response, sizeof(response));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	acquired = cap_acquire(response.cap);
+	cr_assert_not_null(acquired);
+	cr_assert_eq(cap_rights(acquired), CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP | CAP_DERIVE | CAP_DELEGATE);
+	cap_release(acquired);
+	kernel_capability_test_end(&ctx);
+}
+#endif
+
 Test(kernel_capability_resource, listing_is_paginated_and_acquisition_targets_the_caller) {
 	struct kernel_capability_test_context ctx;
 	const struct boot_module              modules[] = {
@@ -120,14 +157,14 @@ Test(kernel_capability_resource, listing_is_paginated_and_acquisition_targets_th
 	result =
 		kernel_capability_test_call(root_cap, &list_request, sizeof(list_request), list_response, sizeof(list_storage));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
-	cr_assert_eq(list_response->total, 3u);
+	cr_assert_eq(list_response->total, 3u + IO_PORT_RESOURCE_EXTRA);
 	cr_assert_eq(list_response->returned, 1u);
 	cr_assert_eq(list_response->ids[0], KERNEL_RESOURCE_TYPE_MODULES);
-	list_request.offset = 3u;
+	list_request.offset = 3u + IO_PORT_RESOURCE_EXTRA;
 	result =
 		kernel_capability_test_call(root_cap, &list_request, sizeof(list_request), list_response, sizeof(list_storage));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
-	cr_assert_eq(list_response->total, 3u);
+	cr_assert_eq(list_response->total, 3u + IO_PORT_RESOURCE_EXTRA);
 	cr_assert_eq(list_response->returned, 0u);
 
 	result = kernel_capability_test_call(

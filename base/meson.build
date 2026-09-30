@@ -22,7 +22,13 @@ base_libc_sources = files(
 	'libc/math.c',
 )
 
+base_io_port_sources = []
+if platform == 'pc_x86_64'
+	base_io_port_sources += files('io_ports.c')
+endif
+
 base_sources = (
 	base_libc_sources
 	+ files('time.c')
+	+ base_io_port_sources
 )

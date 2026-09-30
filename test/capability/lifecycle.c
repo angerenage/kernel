@@ -8,6 +8,13 @@
 static size_t lifecycle_callback_count;
 static bool   lifecycle_callback_unpublish;
 static size_t direct_use_destroy_count;
+static struct {
+	cap_id_t     capability;
+	process_id_t target;
+	cap_rights_t rights;
+	bool         removed;
+} grant_changes[8];
+static size_t grant_change_count;
 
 struct direct_use_race {
 	cap_id_t           cap_id;
@@ -55,6 +62,18 @@ static void lifecycle_callback(struct cap_object* object, enum cap_object_event 
 	if (lifecycle_callback_unpublish) cr_assert(cap_object_destroy(object));
 }
 
+static void grant_change_callback(uint64_t object_id, cap_id_t capability, process_id_t target, cap_rights_t rights,
+                                  bool removed) {
+	cr_assert_eq(object_id, 0x304u);
+	cr_assert_lt(grant_change_count, sizeof(grant_changes) / sizeof(grant_changes[0]));
+	grant_changes[grant_change_count++] = (typeof(grant_changes[0])){
+		.capability = capability,
+		.target     = target,
+		.rights     = rights,
+		.removed    = removed,
+	};
+}
+
 static struct cap_object* create_userspace_object(struct channel* endpoint, uint64_t object_id,
                                                   cap_object_id_t* out_id) {
 	*out_id = cap_object_create(object_id, endpoint, NULL);
@@ -75,8 +94,56 @@ static bool receive_zero_event(struct channel* endpoint, uint64_t* out_object_id
 }
 
 Test(capability, lifecycle_state_fits_in_the_reduced_cap_object_layout) {
-	cr_assert_eq(sizeof(struct cap_object), 96u);
-	cr_assert_lt(sizeof(struct cap_object), 104u);
+	cr_assert_eq(sizeof(struct cap_object), 104u);
+	cr_assert_lt(sizeof(struct cap_object), 112u);
+}
+
+Test(capability, managed_objects_observe_individual_grant_changes) {
+	struct cap_object* object;
+	struct capability* root;
+	struct capability* child;
+	cap_object_id_t    object_id;
+	cap_id_t           root_id;
+	cap_id_t           child_id;
+
+	cap_test_setup();
+	grant_change_count = 0u;
+	object_id =
+		cap_object_create_kernel_observed(0x304u, lifecycle_handler, NULL, NULL, NULL, grant_change_callback, NULL);
+	cr_assert_neq(object_id, CAP_OBJECT_ID_INVALID);
+	object  = cap_object_acquire(object_id);
+	root_id = cap_create(object_id, 20u, CAP_READ | CAP_WRITE | CAP_DELEGATE, NULL);
+	root    = cap_acquire(root_id);
+	cr_assert_not_null(object);
+	cr_assert_not_null(root);
+	child_id = cap_delegate_create(root, 21u, CAP_READ | CAP_WRITE, false);
+	child    = cap_acquire(child_id);
+	cr_assert_not_null(child);
+
+	cr_assert(cap_remove_rights(root, CAP_WRITE));
+	cr_assert_eq(grant_change_count, 2u);
+	cr_assert_eq(grant_changes[0].capability, root_id);
+	cr_assert_eq(grant_changes[0].target, 20u);
+	cr_assert_eq(grant_changes[0].rights, CAP_READ | CAP_DELEGATE);
+	cr_assert(!grant_changes[0].removed);
+	cr_assert_eq(grant_changes[1].capability, child_id);
+	cr_assert_eq(grant_changes[1].target, 21u);
+	cr_assert_eq(grant_changes[1].rights, CAP_READ);
+	cr_assert(!grant_changes[1].removed);
+
+	cr_assert(cap_revoke_direct_child(20u, child));
+	cr_assert_eq(grant_change_count, 3u);
+	cr_assert_eq(grant_changes[2].capability, child_id);
+	cr_assert(grant_changes[2].removed);
+	cr_assert(cap_destroy(root));
+	cr_assert_eq(grant_change_count, 4u);
+	cr_assert_eq(grant_changes[3].capability, root_id);
+	cr_assert(grant_changes[3].removed);
+
+	cap_release(child);
+	cap_release(root);
+	cr_assert(cap_object_destroy(object));
+	cap_object_release(object);
 }
 
 Test(capability, direct_use_linearizes_against_drop) {

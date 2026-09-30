@@ -13,6 +13,9 @@
 #include "../capability/loader.h"
 #include "../capability/memory_allocator.h"
 #include "../capability/serial.h"
+#if defined(PLATFORM_PC_X86_64) || defined(IO_PORT_TEST)
+#include "../capability/io_port.h"
+#endif
 
 cap_id_t cap_kernel_create(uint64_t object_id, cap_kernel_handler_t handler, process_id_t target, cap_rights_t rights) {
 	cap_object_id_t cap_object_id;
@@ -48,6 +51,9 @@ syscall_result_t cap_kernel_write_response(const struct cap_request* request, co
 bool kernel_capability_init(void) {
 	if (!kernel_memory_allocator_init() || !kernel_capability_dma_init() || !kernel_capability_interrupts_init())
 		return false;
+#if defined(PLATFORM_PC_X86_64) || defined(IO_PORT_TEST)
+	if (!kernel_capability_io_ports_init()) return false;
+#endif
 	kernel_capability_serial_init();
 	kernel_capability_loader_init();
 	kernel_capability_boot_module_provider_init();

@@ -13,6 +13,7 @@ test_common_c_args = [
 test_common_link_args = ['--coverage']
 elf_loader_test_c_args = []
 if platform == 'pc_x86_64'
+	test_common_c_args += ['-DIO_PORT_TEST=1']
 	elf_loader_test_c_args += ['-DPLATFORM_PC_X86_64']
 elif platform == 'pc_aarch64'
 	elf_loader_test_c_args += ['-DPLATFORM_PC_AARCH64']
@@ -65,8 +66,10 @@ hal_mock_sources = files(
 	'mocks/kernel/hardware.c',
 )
 if platform == 'pc_x86_64'
-	test_common_c_args += ['-DIO_PORT_TEST=1']
-	hal_mock_sources += files('mocks/hal/io_port.c')
+	hal_mock_sources += files(
+		'mocks/base/io_port.c',
+		'mocks/hal/io_port.c',
+	)
 endif
 
 core_test_lib = static_library(
@@ -78,6 +81,14 @@ core_test_lib = static_library(
 	link_args: test_common_link_args,
 	install: false,
 )
+
+kernel_capability_platform_sources = []
+if platform == 'pc_x86_64'
+	kernel_capability_platform_sources += files(
+		'kernel_capability/io_port.c',
+		'../kernel/src/capability/io_port.c',
+	)
+endif
 
 test_suites = [
 	{
@@ -338,7 +349,7 @@ test_suites = [
 			'../kernel/src/capability/interrupt.c',
 			'../kernel/src/capability/signal.c',
 			'../kernel/src/syscall/capability.c',
-		),
+		) + kernel_capability_platform_sources,
 		'c_args': ['-DKERNEL_CAPABILITY_INTERRUPT_TEST=1'],
 		'suites': ['unit', 'kernel'],
 	},

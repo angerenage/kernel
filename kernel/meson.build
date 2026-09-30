@@ -70,6 +70,9 @@ kernel_objs = base_sources + core_sources + boot_sources + firmware_sources + ke
 	'src/syscall/user_frame.c',
 	'src/hardware/pci.c',
 ]
+if platform == 'pc_x86_64'
+	kernel_objs += files('src/capability/io_port.c')
+endif
 if kernel_selftests
 	kernel_objs += kernel_selftest_sources
 endif

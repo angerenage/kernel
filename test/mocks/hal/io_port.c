@@ -9,8 +9,7 @@ static size_t                           invalidation_count;
 static const struct hal_io_port_bitmap* selected_bitmap;
 static uint64_t                         selected_generation;
 static bool                             selection_valid;
-
-void hal_io_port_bitmap_deny_all(struct hal_io_port_bitmap* bitmap) {
+void                                    hal_io_port_bitmap_deny_all(struct hal_io_port_bitmap* bitmap) {
 	if (bitmap == NULL) return;
 	memset(bitmap->bytes, 0xff, sizeof(bitmap->bytes));
 }

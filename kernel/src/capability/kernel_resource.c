@@ -19,6 +19,9 @@
 #include "interrupt.h"
 #include "loader.h"
 #include "serial.h"
+#if defined(PLATFORM_PC_X86_64) || defined(IO_PORT_TEST)
+#include "io_port.h"
+#endif
 
 static cap_object_id_t kernel_resources_object_id = CAP_OBJECT_ID_INVALID;
 
@@ -53,6 +56,12 @@ static size_t kernel_resources_available(enum kernel_resource_type* ids, size_t 
 		if (ids != NULL && count < capacity) ids[count] = KERNEL_RESOURCE_TYPE_INTERRUPTS;
 		count++;
 	}
+#if defined(PLATFORM_PC_X86_64) || defined(IO_PORT_TEST)
+	if (kernel_capability_io_ports_available()) {
+		if (ids != NULL && count < capacity) ids[count] = KERNEL_RESOURCE_TYPE_IO_PORTS;
+		count++;
+	}
+#endif
 	return count;
 }
 
@@ -138,6 +147,12 @@ static syscall_result_t kernel_resource_acquire_handler(const struct cap_request
 		if (!kernel_capability_interrupts_available()) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 		response.cap = kernel_capability_interrupts_grant(req->caller);
 		break;
+#if defined(PLATFORM_PC_X86_64) || defined(IO_PORT_TEST)
+	case KERNEL_RESOURCE_TYPE_IO_PORTS:
+		if (!kernel_capability_io_ports_available()) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+		response.cap = kernel_capability_io_ports_grant(req->caller);
+		break;
+#endif
 	default:
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
