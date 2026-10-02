@@ -57,6 +57,7 @@ void kernel_capability_test_begin(struct kernel_capability_test_context* ctx, co
 	capability_init();
 	cr_assert(kernel_memory_allocator_init());
 	boot_mock_reset();
+	acpi_mock_reset();
 	kernel_device_reset_for_test();
 	kernel_capability_test_serial_reset();
 
@@ -77,6 +78,7 @@ void kernel_capability_test_end(struct kernel_capability_test_context* ctx) {
 	sched_set_current(cpu_current(), NULL);
 	cr_assert(process_destroy(ctx->process), "failed to destroy kernel capability test process");
 	boot_mock_reset();
+	acpi_mock_reset();
 	kernel_device_reset_for_test();
 	syscall_test_reset_state();
 	*ctx = (struct kernel_capability_test_context){0};
@@ -115,7 +117,7 @@ void kernel_capability_test_poison_next_pmm_page(uint8_t value) {
 
 	cr_assert(
 		pmm_alloc(&(const struct pmm_alloc_request){.size = TEST_MAPPING_GRANULE, .alignment = TEST_MAPPING_GRANULE},
-	              &allocation));
+		          &allocation));
 	memset((void*)(allocation.address + boot_info.direct_map_offset), value, allocation.size);
 	cr_assert(pmm_free(allocation), "failed to return poisoned PMM extent");
 }

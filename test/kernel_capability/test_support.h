@@ -40,6 +40,9 @@ void boot_mock_set_modules(const struct boot_module* modules, size_t count);
 void boot_mock_set_framebuffer(const struct boot_framebuffer* framebuffer);
 void boot_mock_reset(void);
 
+void acpi_mock_reset(void);
+void acpi_mock_set_available(bool available);
+
 syscall_result_t kernel_capability_test_call(cap_id_t cap, const void* request, size_t request_size, void* response,
                                              size_t response_capacity);
 

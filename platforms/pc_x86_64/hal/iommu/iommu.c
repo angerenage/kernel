@@ -7,6 +7,9 @@
 #include "amd.h"
 #include "vtd.h"
 
+ACPI_TABLE_EXCLUDE(DMAR);
+ACPI_TABLE_EXCLUDE(IVRS);
+
 static bool amd_register_previously_seen(const uint8_t* start, const uint8_t* current, uint64_t registers) {
 	const uint8_t* cursor = start;
 	while (cursor < current && (size_t)(current - cursor) >= 4u) {

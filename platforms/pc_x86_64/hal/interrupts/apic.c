@@ -12,6 +12,8 @@
 #include "../utils.h"
 #include "vectors.h"
 
+ACPI_TABLE_EXCLUDE(APIC);
+
 #define X86_PAGE_SIZE 0x1000u
 #define X86_IA32_APIC_BASE_MSR 0x1bu
 #define X86_IA32_APIC_BASE_ENABLE (1ull << 11)

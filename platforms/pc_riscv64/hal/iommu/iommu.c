@@ -5,6 +5,8 @@
 
 #include "riscv.h"
 
+ACPI_TABLE_EXCLUDE(RIMT);
+
 static size_t dt_controllers(size_t target, uintptr_t* out_address) {
 	size_t count        = 0u;
 	size_t device_count = dt_device_count("riscv,iommu");

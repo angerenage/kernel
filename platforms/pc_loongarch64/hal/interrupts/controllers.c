@@ -18,6 +18,8 @@
 #include "pch_msi.h"
 #include "redirect.h"
 
+ACPI_TABLE_EXCLUDE(APIC);
+
 #define LOONGARCH64_PAGE_SIZE 0x1000u
 
 struct acpi_madt_lio_pic {

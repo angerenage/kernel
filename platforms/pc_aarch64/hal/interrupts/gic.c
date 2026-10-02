@@ -18,6 +18,8 @@
 #include "../clock.h"
 #include "gicv3.h"
 
+ACPI_TABLE_EXCLUDE(APIC);
+
 #define AARCH64_MMIO_PAGE_SIZE 0x1000u
 #define AARCH64_GIC_MAX_CPUS 64u
 #define AARCH64_GIC_MAX_TARGETS 8u

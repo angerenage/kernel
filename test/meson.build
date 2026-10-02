@@ -326,6 +326,7 @@ test_suites = [
 			'address_space/mock_paging.c',
 			'syscall/test_support.c',
 			'kernel_capability/test_support.c',
+			'kernel_capability/acpi.c',
 			'kernel_capability/memory.c',
 			'kernel_capability/boot_resource.c',
 			'kernel_capability/device.c',
@@ -335,6 +336,7 @@ test_suites = [
 			'kernel_capability/interrupt.c',
 			'kernel_capability/kernel_resource.c',
 			'../kernel/src/capability/capability.c',
+			'../kernel/src/capability/acpi.c',
 			'../kernel/src/capability/address_space.c',
 			'../kernel/src/capability/memory.c',
 			'../kernel/src/capability/memory_allocator.c',
@@ -349,7 +351,11 @@ test_suites = [
 			'../kernel/src/device.c',
 			'../kernel/src/syscall/capability.c',
 		) + kernel_capability_platform_sources,
-		'c_args': ['-DKERNEL_CAPABILITY_INTERRUPT_TEST=1', '-DKERNEL_DEVICE_TEST=1'],
+		'c_args': [
+			'-DKERNEL_CAPABILITY_ACPI_TEST=1',
+			'-DKERNEL_CAPABILITY_INTERRUPT_TEST=1',
+			'-DKERNEL_DEVICE_TEST=1',
+		],
 		'suites': ['unit', 'kernel'],
 	},
 	{

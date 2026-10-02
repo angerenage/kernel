@@ -41,6 +41,7 @@ kernel_objs = base_sources + core_sources + boot_sources + firmware_sources + ke
 	'src/boot/diagnostics.c',
 	'src/boot/cpu_boot.c',
 	'src/capability/capability.c',
+	'src/capability/acpi.c',
 	'src/capability/address_space.c',
 	'src/capability/memory.c',
 	'src/capability/memory_allocator.c',

@@ -22,6 +22,8 @@ static const struct acpi_sdt_header* acpi_dsdt_table;
 static bool                          acpi_initialized;
 static const struct boot_info*       acpi_boot_info;
 
+ACPI_TABLE_EXCLUDE(FACP);
+
 static uint32_t acpi_read_u32(const uint8_t* value) {
 	uint32_t result;
 
@@ -205,6 +207,10 @@ bool acpi_init(const struct boot_info* info) {
 	acpi_root       = root_state;
 	__atomic_store_n(&acpi_initialized, true, __ATOMIC_RELEASE);
 	return true;
+}
+
+bool acpi_available(void) {
+	return __atomic_load_n(&acpi_initialized, __ATOMIC_ACQUIRE);
 }
 
 const struct acpi_sdt_header* acpi_table_next(const char signature[4], acpi_cursor_t* cursor) {

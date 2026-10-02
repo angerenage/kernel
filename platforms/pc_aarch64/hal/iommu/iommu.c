@@ -5,6 +5,8 @@
 
 #include "smmuv3.h"
 
+ACPI_TABLE_EXCLUDE(IORT);
+
 static size_t smmuv3_dt_controllers(size_t target, uintptr_t* out_address) {
 	size_t count        = 0u;
 	size_t device_count = dt_device_count("arm,smmu-v3");

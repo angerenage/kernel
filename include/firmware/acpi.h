@@ -24,8 +24,20 @@ struct acpi_sdt_header {
 	uint32_t creator_revision;
 } __attribute__((packed));
 
+/* Declare one ACPI signature as unavailable to userspace. */
+#define ACPI_TABLE_EXCLUDE_STRINGIFY_(signature) #signature
+#define ACPI_TABLE_EXCLUDE_STRINGIFY(signature) ACPI_TABLE_EXCLUDE_STRINGIFY_(signature)
+#define ACPI_TABLE_EXCLUDE(signature)                                                                                  \
+	_Static_assert(sizeof(ACPI_TABLE_EXCLUDE_STRINGIFY(signature)) == 5u, "ACPI signatures contain four bytes");       \
+	const char acpi_excluded_table_##signature[4]                                                                      \
+		__attribute__((nonstring, used, section("acpi_excluded_tables"), aligned(1))) =                                \
+			ACPI_TABLE_EXCLUDE_STRINGIFY(signature)
+
 /* Validate the RSDP described by boot info and publish its authoritative root table once. */
 bool acpi_init(const struct boot_info* info);
+
+/* Return whether a validated ACPI root table has been published. */
+bool acpi_available(void);
 
 /* Return the next validated table matching signature, optionally advancing cursor. */
 const struct acpi_sdt_header* acpi_table_next(const char signature[4], acpi_cursor_t* cursor);

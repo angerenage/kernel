@@ -31,6 +31,11 @@ SECTIONS {
 	} > virt AT> phys :text
 
 	.rodata : ALIGN(0x1000) {
+		__start_acpi_excluded_tables = .;
+		KEEP(*(acpi_excluded_tables))
+		__stop_acpi_excluded_tables = .;
+		ASSERT(((__stop_acpi_excluded_tables - __start_acpi_excluded_tables) % 4) == 0,
+		       "ACPI exclusion records must contain exactly four bytes")
 		*(.rodata*)
 		*(.srodata*)
 		*(.sdata2*)
