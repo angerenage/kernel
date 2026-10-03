@@ -115,5 +115,6 @@ userspace_programs = []
 
 subdir('programs/init')
 subdir('programs/loader')
+subdir('programs/device_manager')
 
 alias_target('userspace', userspace_programs)

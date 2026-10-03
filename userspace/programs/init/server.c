@@ -7,6 +7,7 @@
 #include <system/process.h>
 #include <system/signal.h>
 
+#include "device_manager.h"
 #include "launcher.h"
 #include "registry.h"
 
@@ -187,7 +188,8 @@ int server_run(const struct init_state* init) {
 	} buffer;
 	struct cap_request request;
 	bool               received;
-	bool               loader_started = false;
+	bool               device_manager_started = false;
+	bool               loader_started         = false;
 	syscall_status_t   status;
 
 	if (server_endpoint == CHANNEL_ID_INVALID || init == NULL) return 1;
@@ -216,6 +218,15 @@ int server_run(const struct init_state* init) {
 			if (!loader_launch(init)) return 1;
 			loader_started = true;
 			continue;
+		}
+		if (!device_manager_started) {
+			enum device_manager_launch_result result = device_manager_launch(init);
+
+			if (result == DEVICE_MANAGER_LAUNCH_FAILED) return 1;
+			if (result == DEVICE_MANAGER_LAUNCH_SUCCESS) {
+				device_manager_started = true;
+				continue;
+			}
 		}
 		struct signal_message activity;
 		status = signal_wait(server_activity, &activity);
