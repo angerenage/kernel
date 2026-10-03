@@ -8,6 +8,7 @@
 .equ RISCV64_EXCEPTION_FRAME_SIZE, 288
 .equ RISCV64_EXCEPTION_META_SIZE, 8
 .equ RISCV64_EXCEPTION_STATE_KERNEL_STACK_TOP, 32
+.equ RISCV64_EXCEPTION_STATE_CPU_LOCAL, 40
 .equ RISCV64_SSTATUS_SPP, 0x100
 
 .balign 4
@@ -85,6 +86,11 @@ exception_entry:
 	csrr t0, sstatus
 	sd t0, 272(sp)
 	sd zero, 280(sp)
+
+	/* tp belongs to userspace at the trap boundary. Use the CPU pointer
+	 * recorded in the per-hart sscratch state while running kernel code. */
+	csrr t0, sscratch
+	ld tp, RISCV64_EXCEPTION_STATE_CPU_LOCAL(t0)
 
 	mv a0, sp
 	call handle_exception

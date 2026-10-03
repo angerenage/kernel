@@ -12,6 +12,7 @@
 .equ LOONGARCH64_CSR_SAVE1, 0x31
 .equ LOONGARCH64_CSR_SAVE2, 0x32
 .equ LOONGARCH64_CSR_SAVE3, 0x33
+.equ LOONGARCH64_CSR_SAVE4, 0x34
 .equ LOONGARCH64_CSR_PGD, 0x1b
 .equ LOONGARCH64_CSR_TLBRSAVE, 0x8c
 
@@ -101,6 +102,10 @@ exception_entry:
 	st.d $r12, $sp, 272
 	csrrd $r12, LOONGARCH64_CSR_PRMD
 	st.d $r12, $sp, 280
+
+	/* $tp belongs to userspace at the trap boundary. Use the CPU pointer
+	 * kept in a privileged SAVE CSR while running kernel code. */
+	csrrd $tp, LOONGARCH64_CSR_SAVE4
 
 	addi.d $a0, $sp, 0
 	bl handle_exception

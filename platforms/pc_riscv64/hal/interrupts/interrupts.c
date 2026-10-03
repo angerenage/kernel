@@ -35,10 +35,13 @@ struct riscv64_exception_entry_state {
 	uintptr_t saved_t2;
 	uintptr_t scratch;
 	uintptr_t kernel_stack_top;
+	uintptr_t cpu_local;
 } riscv64_exception_entry_state[64];
 
 _Static_assert(offsetof(struct riscv64_exception_entry_state, kernel_stack_top) == 32u,
                "riscv64 exception entry assembly kernel_stack_top offset mismatch");
+_Static_assert(offsetof(struct riscv64_exception_entry_state, cpu_local) == 40u,
+               "riscv64 exception entry assembly cpu_local offset mismatch");
 
 static inline uint64_t read_sie(void) {
 	uint64_t value;
@@ -218,6 +221,7 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 	sie &= ~(RISCV64_SIE_STIE | RISCV64_SIE_SEIE);
 	sie |= RISCV64_SIE_SSIE;
 	entry_state->kernel_stack_top = cpu->kernel_entry_stack_top;
+	entry_state->cpu_local        = (uintptr_t)cpu;
 
 	__asm__ volatile("csrw stvec, %0" : : "r"(entry) : "memory");
 	write_sscratch((uint64_t)(uintptr_t)entry_state);

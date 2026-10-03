@@ -23,6 +23,7 @@
 #define LOONGARCH64_CSR_EENTRY 0xcu
 #define LOONGARCH64_CSR_PRMD 0x1u
 #define LOONGARCH64_CSR_SAVE1 0x31u
+#define LOONGARCH64_CSR_SAVE4 0x34u
 #define LOONGARCH64_CSR_TLBRENTRY 0x88u
 #define LOONGARCH64_CSR_MERRENTRY 0x94u
 
@@ -67,6 +68,9 @@ static inline void csrwr(uint64_t value, unsigned csr) {
 		break;
 	case LOONGARCH64_CSR_SAVE1:
 		__asm__ volatile("csrwr %0, 0x31" : : "r"(value) : "memory");
+		break;
+	case LOONGARCH64_CSR_SAVE4:
+		__asm__ volatile("csrwr %0, 0x34" : : "r"(value) : "memory");
 		break;
 	case LOONGARCH64_CSR_TLBRENTRY:
 		__asm__ volatile("csrwr %0, 0x88" : : "r"(value) : "memory");
@@ -230,6 +234,7 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 	csrwr(0u, LOONGARCH64_CSR_ECFG);
 	csrwr(trap_entry, LOONGARCH64_CSR_EENTRY);
 	csrwr(cpu->kernel_entry_stack_top, LOONGARCH64_CSR_SAVE1);
+	csrwr((uintptr_t)cpu, LOONGARCH64_CSR_SAVE4);
 	csrwr(tlbr_entry, LOONGARCH64_CSR_TLBRENTRY);
 	csrwr(merr_entry, LOONGARCH64_CSR_MERRENTRY);
 	if (!loongarch64_interrupt_controllers_init_local(cpu)) return false;

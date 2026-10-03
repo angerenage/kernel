@@ -13,6 +13,7 @@ riscv64_userspace_enter:
 	csrs sstatus, t0
 	mv a0, s1
 	mv sp, s2
+	mv tp, zero
 	sret
 
 .section .note.GNU-stack,"",@progbits
