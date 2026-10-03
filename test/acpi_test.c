@@ -496,7 +496,7 @@ Test(acpi, pci_controllers_are_normalized_from_all_valid_mcfg_allocations) {
 	};
 	const struct test_mcfg_allocation first[] = {
 		{.address = 0xe0000000u, .segment_group = 0u, .start_bus = 0u, .end_bus = 127u},
-		{		 .address = 0u, .segment_group = 1u, .start_bus = 0u, .end_bus = 255u},
+		{         .address = 0u, .segment_group = 1u, .start_bus = 0u, .end_bus = 255u},
 	};
 	const struct test_mcfg_allocation second[] = {
 		{.address = 0xf0000000u, .segment_group = 2u, .start_bus = 128u, .end_bus = 255u},

@@ -119,9 +119,9 @@ cleanup:
 
 static const struct kernel_selftest_case kernel_pmm_selftests[] = {
 	{.name = "allocates_contiguous_extents_and_restores_state",
-     .run  = kernel_selftest_pmm_allocates_contiguous_extents_and_restores_state                                   },
-	{						   .name = "reuses_freed_extents",     .run = kernel_selftest_pmm_reuses_freed_extents},
-	{					   .name = "rejects_invalid_requests", .run = kernel_selftest_pmm_rejects_invalid_requests},
+	 .run  = kernel_selftest_pmm_allocates_contiguous_extents_and_restores_state                                   },
+	{                           .name = "reuses_freed_extents",     .run = kernel_selftest_pmm_reuses_freed_extents},
+	{                       .name = "rejects_invalid_requests", .run = kernel_selftest_pmm_rejects_invalid_requests},
 };
 
 const struct kernel_selftest_suite kernel_pmm_selftest_suite = {

@@ -143,20 +143,20 @@ cleanup:
 
 static const struct kernel_selftest_case kernel_heap_selftests[] = {
 	{
-     .name = "allocates_and_restores_heap",
-     .run  = kernel_selftest_heap_allocates_and_restores,
+	 .name = "allocates_and_restores_heap",
+	 .run  = kernel_selftest_heap_allocates_and_restores,
 	 },
 	{
-     .name = "calloc_zeroes_and_realloc_preserves_contents",
-     .run  = kernel_selftest_heap_calloc_zeroes_and_realloc_preserves_contents,
+	 .name = "calloc_zeroes_and_realloc_preserves_contents",
+	 .run  = kernel_selftest_heap_calloc_zeroes_and_realloc_preserves_contents,
 	 },
 	{
-     .name = "grows_when_initial_arena_is_exhausted",
-     .run  = kernel_selftest_heap_grows_when_initial_arena_is_exhausted,
+	 .name = "grows_when_initial_arena_is_exhausted",
+	 .run  = kernel_selftest_heap_grows_when_initial_arena_is_exhausted,
 	 },
 	{
-     .name = "realloc_special_cases_restore_state",
-     .run  = kernel_selftest_heap_realloc_special_cases_restore_state,
+	 .name = "realloc_special_cases_restore_state",
+	 .run  = kernel_selftest_heap_realloc_special_cases_restore_state,
 	 },
 };
 

@@ -440,9 +440,9 @@ static void kernel_selftest_mutex_unlock_wakes_single_waiter(struct kernel_selft
 		KERNEL_SELFTEST_ASSERT_MSG_GOTO(
 			ctx,
 			kernel_selftest_thread_create(&waiters[i],
-		                                  i == 0u ? "selftest/mutex-single-waiter-b" : "selftest/mutex-single-waiter-c",
-		                                  kernel_selftest_mutex_single_wake_waiter_worker,
-		                                  &state.waiter_args[i]),
+			                              i == 0u ? "selftest/mutex-single-waiter-b" : "selftest/mutex-single-waiter-c",
+			                              kernel_selftest_mutex_single_wake_waiter_worker,
+			                              &state.waiter_args[i]),
 			"failed to create mutex single-wake waiter thread",
 			cleanup);
 	}
@@ -595,28 +595,28 @@ cleanup:
 
 static const struct kernel_selftest_case kernel_sched_mutex_selftests[] = {
 	{
-     .name = "yield_dispatches_runnable_thread",
-     .run  = kernel_selftest_sched_yield_dispatches_runnable_thread,
+	 .name = "yield_dispatches_runnable_thread",
+	 .run  = kernel_selftest_sched_yield_dispatches_runnable_thread,
 	 },
 	{
-     .name = "sleep_wakes_after_deadline",
-     .run  = kernel_selftest_sched_sleep_wakes_after_deadline,
+	 .name = "sleep_wakes_after_deadline",
+	 .run  = kernel_selftest_sched_sleep_wakes_after_deadline,
 	 },
 	{
-     .name = "mutex_contention_blocks_and_wakes_waiter",
-     .run  = kernel_selftest_mutex_contention_blocks_and_wakes_waiter,
+	 .name = "mutex_contention_blocks_and_wakes_waiter",
+	 .run  = kernel_selftest_mutex_contention_blocks_and_wakes_waiter,
 	 },
 	{
-     .name = "mutex_timed_lock_times_out_when_owner_never_unlocks",
-     .run  = kernel_selftest_mutex_timed_lock_times_out_when_owner_never_unlocks,
+	 .name = "mutex_timed_lock_times_out_when_owner_never_unlocks",
+	 .run  = kernel_selftest_mutex_timed_lock_times_out_when_owner_never_unlocks,
 	 },
 	{
-     .name = "mutex_unlock_wakes_single_waiter",
-     .run  = kernel_selftest_mutex_unlock_wakes_single_waiter,
+	 .name = "mutex_unlock_wakes_single_waiter",
+	 .run  = kernel_selftest_mutex_unlock_wakes_single_waiter,
 	 },
 	{
-     .name = "sleep_ms_wakes_after_deadline",
-     .run  = kernel_selftest_sleep_ms_wakes_after_deadline,
+	 .name = "sleep_ms_wakes_after_deadline",
+	 .run  = kernel_selftest_sleep_ms_wakes_after_deadline,
 	 },
 };
 

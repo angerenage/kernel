@@ -19,8 +19,8 @@ bool loongarch64_pch_msi_range_at(size_t index, struct hal_interrupt_message_ran
 	*out_range = (struct hal_interrupt_message_range){
 		.domain   = LOONGARCH64_MESSAGE_DOMAIN_PCH_MSI,
 		.delivery = {.domain = LOONGARCH64_DELIVERY_DOMAIN_VECTOR,
-	                 .base   = pch_msi.first,
-	                 .limit  = pch_msi.first + pch_msi.count}
+		             .base   = pch_msi.first,
+		             .limit  = pch_msi.first + pch_msi.count}
     };
 	return true;
 }

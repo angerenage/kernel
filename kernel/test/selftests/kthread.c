@@ -337,24 +337,24 @@ cleanup:
 
 static const struct kernel_selftest_case kernel_kthread_selftests[] = {
 	{
-     .name = "join_waits_for_exit_and_returns_exit_code",
-     .run  = kernel_selftest_kthread_join_waits_for_exit_and_returns_exit_code,
+	 .name = "join_waits_for_exit_and_returns_exit_code",
+	 .run  = kernel_selftest_kthread_join_waits_for_exit_and_returns_exit_code,
 	 },
 	{
-     .name = "scheduler_selects_cpu_without_preference",
-     .run  = kernel_selftest_kthread_scheduler_selects_cpu_without_preference,
+	 .name = "scheduler_selects_cpu_without_preference",
+	 .run  = kernel_selftest_kthread_scheduler_selects_cpu_without_preference,
 	 },
 	{
-     .name = "timed_join_times_out_without_detaching_target",
-     .run  = kernel_selftest_kthread_timed_join_times_out_without_detaching_target,
+	 .name = "timed_join_times_out_without_detaching_target",
+	 .run  = kernel_selftest_kthread_timed_join_times_out_without_detaching_target,
 	 },
 	{
-     .name = "detach_prevents_join_but_thread_still_runs",
-     .run  = kernel_selftest_kthread_detach_prevents_join_but_thread_still_runs,
+	 .name = "detach_prevents_join_but_thread_still_runs",
+	 .run  = kernel_selftest_kthread_detach_prevents_join_but_thread_still_runs,
 	 },
 	{
-     .name = "cancel_wakes_sleeping_thread_and_returns_cancel_code",
-     .run  = kernel_selftest_kthread_cancel_wakes_sleeping_thread_and_returns_cancel_code,
+	 .name = "cancel_wakes_sleeping_thread_and_returns_cancel_code",
+	 .run  = kernel_selftest_kthread_cancel_wakes_sleeping_thread_and_returns_cancel_code,
 	 },
 };
 

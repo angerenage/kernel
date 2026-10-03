@@ -11,8 +11,8 @@
 
 #include "../../../platforms/pc_x86_64/hal/interrupts/frame.h"
 #include "../../../platforms/pc_x86_64/hal/interrupts/segments.h"
-#include "../../../platforms/pc_x86_64/hal/syscall.h"
 #include "../../../platforms/pc_x86_64/hal/interrupts/vectors.h"
+#include "../../../platforms/pc_x86_64/hal/syscall.h"
 
 static uintptr_t                 dispatched_number;
 static uintptr_t                 dispatched_args[6];

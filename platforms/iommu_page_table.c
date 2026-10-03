@@ -231,11 +231,11 @@ bool iommu_pt_space_init(const struct iommu_pt_format* format, uintptr_t control
 	}
 	*space = (struct hal_iommu_space_state){
 		.table = {.initialized           = true,
-	              .root_address          = root.address,
-	              .table_allocation_size = allocation_size,
-	              .controller_identity   = controller_identity,
-	              .context_id            = context_id,
-	              .levels                = format->levels}
+		          .root_address          = root.address,
+		          .table_allocation_size = allocation_size,
+		          .controller_identity   = controller_identity,
+		          .context_id            = context_id,
+		          .levels                = format->levels}
     };
 	return true;
 }
@@ -280,8 +280,8 @@ static inline bool iommu_pt_table_range_unmapped(const struct iommu_pt_format* f
                                                  unsigned level, uint64_t start, uint64_t end) {
 	size_t span = iommu_pt_leaf_size(format, level);
 	while (start < end) {
-		size_t index = (start >> (iommu_pt_page_shift(format) + iommu_pt_index_bits(format) * level)) &
-		               (iommu_pt_entry_count(format) - 1u);
+		size_t   index     = (start >> (iommu_pt_page_shift(format) + iommu_pt_index_bits(format) * level)) &
+		                     (iommu_pt_entry_count(format) - 1u);
 		uint64_t entry     = table[index];
 		uint64_t entry_end = (start & ~((uint64_t)span - 1u)) + span;
 		uint64_t next      = entry_end < end ? entry_end : end;
@@ -331,8 +331,8 @@ static inline bool iommu_pt_walk(const struct iommu_pt_format* format, struct ha
 	uint64_t* table = iommu_pt_root(space);
 	if (table == NULL || target_level >= format->levels) return false;
 	for (unsigned level = format->levels - 1u; level > target_level; level--) {
-		size_t index = (io_address >> (iommu_pt_page_shift(format) + iommu_pt_index_bits(format) * level)) &
-		               (iommu_pt_entry_count(format) - 1u);
+		size_t   index = (io_address >> (iommu_pt_page_shift(format) + iommu_pt_index_bits(format) * level)) &
+		                 (iommu_pt_entry_count(format) - 1u);
 		uint64_t entry = table[index];
 		if (!iommu_pt_entry_present(format, entry)) {
 			struct pmm_extent allocation;
@@ -481,8 +481,8 @@ static inline bool iommu_pt_protect_range(const struct iommu_pt_format* format, 
                                           iommu_pt_sync_fn sync, void* context, bool* out_changed) {
 	size_t span = iommu_pt_leaf_size(format, level);
 	while (start < end) {
-		size_t index = (start >> (iommu_pt_page_shift(format) + iommu_pt_index_bits(format) * level)) &
-		               (iommu_pt_entry_count(format) - 1u);
+		size_t    index      = (start >> (iommu_pt_page_shift(format) + iommu_pt_index_bits(format) * level)) &
+		                       (iommu_pt_entry_count(format) - 1u);
 		uint64_t  leaf_start = start & ~((uint64_t)span - 1u);
 		uint64_t  leaf_end   = leaf_start + span;
 		uint64_t  next       = leaf_end < end ? leaf_end : end;
@@ -572,8 +572,8 @@ static inline bool iommu_pt_prepare_unmap(const struct iommu_pt_format* format, 
                                           void* context) {
 	size_t span = iommu_pt_leaf_size(format, level);
 	while (start < end) {
-		size_t index = (start >> (iommu_pt_page_shift(format) + iommu_pt_index_bits(format) * level)) &
-		               (iommu_pt_entry_count(format) - 1u);
+		size_t    index      = (start >> (iommu_pt_page_shift(format) + iommu_pt_index_bits(format) * level)) &
+		                       (iommu_pt_entry_count(format) - 1u);
 		uint64_t  leaf_start = start & ~((uint64_t)span - 1u);
 		uint64_t  leaf_end   = leaf_start + span;
 		uint64_t  next       = leaf_end < end ? leaf_end : end;
@@ -613,8 +613,8 @@ static inline bool iommu_pt_remove_range(const struct iommu_pt_format* format, s
                                          struct paging_transaction* transaction) {
 	size_t span = iommu_pt_leaf_size(format, level);
 	while (start < end) {
-		size_t index = (start >> (iommu_pt_page_shift(format) + iommu_pt_index_bits(format) * level)) &
-		               (iommu_pt_entry_count(format) - 1u);
+		size_t   index      = (start >> (iommu_pt_page_shift(format) + iommu_pt_index_bits(format) * level)) &
+		                      (iommu_pt_entry_count(format) - 1u);
 		uint64_t leaf_start = start & ~((uint64_t)span - 1u);
 		uint64_t leaf_end   = leaf_start + span;
 		uint64_t next       = leaf_end < end ? leaf_end : end;

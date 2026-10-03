@@ -121,7 +121,7 @@ static void notify_watches(const struct registry_advertisement* old_ad, const st
 		struct registry_watch* watch   = *cursor;
 		bool                   valid   = false;
 		bool                   matches = (old_ad != NULL && query_matches(&watch->query, old_ad)) ||
-		               (new_ad != NULL && query_matches(&watch->query, new_ad));
+		                                 (new_ad != NULL && query_matches(&watch->query, new_ad));
 
 		if (cap_valid(watch->signal_capability, &valid) != SYSCALL_STATUS_OK || !valid) {
 			*cursor = watch->next;

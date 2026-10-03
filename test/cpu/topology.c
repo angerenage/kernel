@@ -3,28 +3,28 @@
 Test(cpu, topology_initializes_from_generic_descriptors) {
 	const struct cpu_init_info init_info[] = {
 		{
-         .index           = 0u,
-         .processor_id    = 10u,
-         .arch_id         = 0x20u,
-         .role            = CPU_ROLE_AP,
-         .boot_stack_base = 0x210000u,
-         .boot_stack_top  = 0x214000u,
+		 .index           = 0u,
+		 .processor_id    = 10u,
+		 .arch_id         = 0x20u,
+		 .role            = CPU_ROLE_AP,
+		 .boot_stack_base = 0x210000u,
+		 .boot_stack_top  = 0x214000u,
 		 },
 		{
-         .index           = 1u,
-         .processor_id    = 11u,
-         .arch_id         = 0x21u,
-         .role            = CPU_ROLE_BSP,
-         .boot_stack_base = 0x200000u,
-         .boot_stack_top  = 0x204000u,
+		 .index           = 1u,
+		 .processor_id    = 11u,
+		 .arch_id         = 0x21u,
+		 .role            = CPU_ROLE_BSP,
+		 .boot_stack_base = 0x200000u,
+		 .boot_stack_top  = 0x204000u,
 		 },
 		{
-         .index           = 2u,
-         .processor_id    = 12u,
-         .arch_id         = 0x22u,
-         .role            = CPU_ROLE_AP,
-         .boot_stack_base = 0x220000u,
-         .boot_stack_top  = 0x224000u,
+		 .index           = 2u,
+		 .processor_id    = 12u,
+		 .arch_id         = 0x22u,
+		 .role            = CPU_ROLE_AP,
+		 .boot_stack_base = 0x220000u,
+		 .boot_stack_top  = 0x224000u,
 		 },
 	};
 	struct cpu_topology* topology;
@@ -62,12 +62,12 @@ Test(cpu, topology_initializes_from_generic_descriptors) {
 Test(cpu_irq, topology_rejects_invalid_inputs_and_bootstrap_accessors_work) {
 	const struct cpu_init_info init_info[] = {
 		{
-         .index           = 0u,
-         .processor_id    = 1u,
-         .arch_id         = 2u,
-         .role            = CPU_ROLE_AP,
-         .boot_stack_base = 0x200000u,
-         .boot_stack_top  = 0x204000u,
+		 .index           = 0u,
+		 .processor_id    = 1u,
+		 .arch_id         = 2u,
+		 .role            = CPU_ROLE_AP,
+		 .boot_stack_base = 0x200000u,
+		 .boot_stack_top  = 0x204000u,
 		 },
 	};
 

@@ -53,8 +53,8 @@ static syscall_result_t loader_handler(const struct cap_request* req) {
 	response = (struct loader_load_response){
 		.process_cap =
 			kernel_process_grant(loaded.process,
-	                             req->caller,
-	                             CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_EXEC | CAP_DELEGATE),
+			                     req->caller,
+			                     CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_EXEC | CAP_DELEGATE),
 		.address_space_cap = CAP_ID_INVALID,
 		.entry             = loaded.entry,
 		.heap_base         = loaded.heap_base,

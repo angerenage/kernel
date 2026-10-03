@@ -655,12 +655,12 @@ bool hal_paging_remap(struct hal_paging_space* space, const struct hal_paging_re
 	uint64_t*                 root        = riscv_space_root_table(space);
 	struct paging_transaction transaction = {0};
 	bool                      ok          = root != NULL && riscv_remap_range(root,
-                                                paging_levels - 1,
-                                                request->virtual_address,
-                                                end,
-                                                request->virtual_address,
-                                                request->physical_address,
-                                                &transaction);
+	                                                                          paging_levels - 1,
+	                                                                          request->virtual_address,
+	                                                                          end,
+	                                                                          request->virtual_address,
+	                                                                          request->physical_address,
+	                                                                          &transaction);
 	riscv_tlb_shootdown(request->virtual_address, request->size, transaction.hierarchy_changed);
 	if (ok) paging_transaction_commit(&transaction);
 	else {

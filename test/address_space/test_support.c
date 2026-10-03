@@ -7,19 +7,19 @@
 void init_test_address_space(uint8_t* arena, size_t arena_size) {
 	const struct mem_range memory_map[] = {
 		{
-         .base   = (uintptr_t)arena,
-         .length = KiB(24),
-         .type   = MEM_RANGE_USABLE,
+		 .base   = (uintptr_t)arena,
+		 .length = KiB(24),
+		 .type   = MEM_RANGE_USABLE,
 		 },
 		{
-         .base   = (uintptr_t)(arena + KiB(32)),
-         .length = KiB(8),
-         .type   = MEM_RANGE_RESERVED,
+		 .base   = (uintptr_t)(arena + KiB(32)),
+		 .length = KiB(8),
+		 .type   = MEM_RANGE_RESERVED,
 		 },
 		{
-         .base   = (uintptr_t)(arena + KiB(64)),
-         .length = KiB(128),
-         .type   = MEM_RANGE_USABLE,
+		 .base   = (uintptr_t)(arena + KiB(64)),
+		 .length = KiB(128),
+		 .type   = MEM_RANGE_USABLE,
 		 },
 	};
 

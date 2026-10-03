@@ -189,20 +189,20 @@ cleanup:
 
 static const struct kernel_selftest_case kernel_semaphore_selftests[] = {
 	{
-     .name = "counts_and_overflow_behave",
-     .run  = kernel_selftest_semaphore_counts_and_overflow_behave,
+	 .name = "counts_and_overflow_behave",
+	 .run  = kernel_selftest_semaphore_counts_and_overflow_behave,
 	 },
 	{
-     .name = "release_wakes_blocked_waiter",
-     .run  = kernel_selftest_semaphore_release_wakes_blocked_waiter,
+	 .name = "release_wakes_blocked_waiter",
+	 .run  = kernel_selftest_semaphore_release_wakes_blocked_waiter,
 	 },
 	{
-     .name = "timed_acquire_times_out_without_permit",
-     .run  = kernel_selftest_semaphore_timed_acquire_times_out_without_permit,
+	 .name = "timed_acquire_times_out_without_permit",
+	 .run  = kernel_selftest_semaphore_timed_acquire_times_out_without_permit,
 	 },
 	{
-     .name = "timed_acquire_zero_timeout_is_non_blocking",
-     .run  = kernel_selftest_semaphore_timed_acquire_zero_timeout_is_non_blocking,
+	 .name = "timed_acquire_zero_timeout_is_non_blocking",
+	 .run  = kernel_selftest_semaphore_timed_acquire_zero_timeout_is_non_blocking,
 	 },
 };
 

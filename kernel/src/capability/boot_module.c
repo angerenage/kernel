@@ -269,8 +269,8 @@ syscall_result_t kernel_capability_boot_module_get(cap_id_t module_cap, process_
 	result      = cap_object_acquire_for_use(caller, module_cap, required_rights, &object, NULL);
 	if (result != CAP_OK)
 		return syscall_result_error(result == CAP_NOT_AUTHORIZED || result == CAP_RIGHTS_EXCEEDED
-		                                ? SYSCALL_STATUS_DENIED
-		                                : SYSCALL_STATUS_BAD_ARGUMENT,
+										? SYSCALL_STATUS_DENIED
+										: SYSCALL_STATUS_BAD_ARGUMENT,
 		                            0u);
 	if (object == NULL || object->handler != boot_module_handler) {
 		cap_object_release(object);

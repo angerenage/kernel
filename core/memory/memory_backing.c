@@ -473,16 +473,16 @@ static bool next_noncontiguous_plan_locked(struct memory_backing*               
 	}
 	size_t hole_end = extent != NULL && extent->logical_start < end ? extent->logical_start : end;
 	*plan           = (struct materialize_plan){
-				  .logical_start = *cursor,
-				  .size          = hole_end - *cursor,
-				  .allocation =
-            {
-                         .alignment       = request->alignment,
-                         .minimum_address = request->minimum_address,
-                         .maximum_address = request->maximum_address,
+		.logical_start = *cursor,
+		.size          = hole_end - *cursor,
+		.allocation =
+			{
+						 .alignment       = request->alignment,
+						 .minimum_address = request->minimum_address,
+						 .maximum_address = request->maximum_address,
 						 },
-				  .allow_smaller = true,
-    };
+		.allow_smaller = true,
+	};
 	*cursor = hole_end;
 	return true;
 }

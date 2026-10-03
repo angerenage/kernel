@@ -184,7 +184,7 @@ enum address_transfer_result address_space_copy_between(struct address_space* ds
 			uintptr_t src_last = src_address + size - done - 1u;
 			uintptr_t dst_last = dst_address + size - done - 1u;
 			result             = locate_locked(
-                src_space, src_last, ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER, &src_mapping, &src_offset, NULL);
+				src_space, src_last, ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER, &src_mapping, &src_offset, NULL);
 			if (result != ADDRESS_TRANSFER_OK) break;
 			result = locate_locked(
 				dst_space, dst_last, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER, &dst_mapping, &dst_offset, NULL);

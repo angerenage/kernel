@@ -391,8 +391,8 @@ bool aarch64_smmuv3_attach(struct hal_iommu_controller_state* controller, struct
 		smmu_unlock(controller);
 		return false;
 	}
-	uint64_t vtcr = 16u | (2ull << 6u) | (1ull << 8u) | (1ull << 10u) | (3ull << 12u) |
-	                ((uint64_t)smmu_ps_encoding(controller->physical_address_bits) << 16u);
+	uint64_t vtcr  = 16u | (2ull << 6u) | (1ull << 8u) | (1ull << 10u) | (3ull << 12u) |
+	                 ((uint64_t)smmu_ps_encoding(controller->physical_address_bits) << 16u);
 	uint64_t word0 = SMMU_STE_VALID | SMMU_STE_CFG_S2;
 	uint64_t word2 = space->table.context_id | (vtcr << 32u) | (1ull << 51u) | (1ull << 54u);
 	uint64_t word3 = space->table.root_address & controller->address_mask;

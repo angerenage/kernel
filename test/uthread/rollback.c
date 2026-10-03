@@ -3,9 +3,9 @@
 Test(uthread, context_initialization_failure_rolls_back_all_allocated_resources) {
 	struct process* process = NULL;
 	struct uthread  worker  = {
-		  .user_stack_mapping   = NULL,
-		  .kernel_stack_mapping = NULL,
-    };
+		.user_stack_mapping   = NULL,
+		.kernel_stack_mapping = NULL,
+	};
 	size_t                    user_regions_before;
 	size_t                    kernel_regions_before;
 	size_t                    process_threads_before;

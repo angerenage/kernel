@@ -85,8 +85,8 @@ cleanup:
 
 static const struct kernel_selftest_case kernel_thread_bootstrap_selftests[] = {
 	{
-     .name = "create_start_join_worker",
-     .run  = kernel_selftest_thread_bootstrap_create_start_join_worker,
+	 .name = "create_start_join_worker",
+	 .run  = kernel_selftest_thread_bootstrap_create_start_join_worker,
 	 },
 };
 

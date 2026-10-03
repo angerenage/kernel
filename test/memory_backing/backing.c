@@ -207,8 +207,8 @@ struct materialize_thread_context {
 static void* materialize_worker(void* argument) {
 	struct materialize_thread_context* context = argument;
 	context->result                            = memory_backing_materialize(
-        context->backing,
-        &(const struct memory_backing_materialize_request){.offset = context->granule, .size = context->granule});
+		context->backing,
+		&(const struct memory_backing_materialize_request){.offset = context->granule, .size = context->granule});
 	return NULL;
 }
 

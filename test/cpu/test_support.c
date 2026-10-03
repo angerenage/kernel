@@ -2,20 +2,20 @@
 
 const struct cpu_init_info cpu_test_valid_topology[2] = {
 	{
-     .index           = 0u,
-     .processor_id    = 10u,
-     .arch_id         = 0x20u,
-     .role            = CPU_ROLE_BSP,
-     .boot_stack_base = 0x200000u,
-     .boot_stack_top  = 0x204000u,
+	 .index           = 0u,
+	 .processor_id    = 10u,
+	 .arch_id         = 0x20u,
+	 .role            = CPU_ROLE_BSP,
+	 .boot_stack_base = 0x200000u,
+	 .boot_stack_top  = 0x204000u,
 	 },
 	{
-     .index           = 1u,
-     .processor_id    = 11u,
-     .arch_id         = 0x21u,
-     .role            = CPU_ROLE_AP,
-     .boot_stack_base = 0x210000u,
-     .boot_stack_top  = 0x214000u,
+	 .index           = 1u,
+	 .processor_id    = 11u,
+	 .arch_id         = 0x21u,
+	 .role            = CPU_ROLE_AP,
+	 .boot_stack_base = 0x210000u,
+	 .boot_stack_top  = 0x214000u,
 	 },
 };
 

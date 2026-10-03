@@ -4,8 +4,8 @@
 
 #define EXTENT_FROM_NODE(node)                                                                                         \
 	((node) == NULL                                                                                                    \
-	     ? NULL                                                                                                        \
-	     : (struct memory_backing_extent*)((uint8_t*)(node) - offsetof(struct memory_backing_extent, tree_node)))
+		 ? NULL                                                                                                        \
+		 : (struct memory_backing_extent*)((uint8_t*)(node) - offsetof(struct memory_backing_extent, tree_node)))
 
 static bool node_is_red(const struct memory_backing_rb_node* node) {
 	return node != NULL && node->red;

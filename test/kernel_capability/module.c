@@ -30,11 +30,11 @@ Test(kernel_capability_module, failed_repeat_resolve_preserves_the_preexisting_m
 	static const uint8_t                  module_bytes[] = {1u, 2u, 3u, 4u};
 	const struct boot_module              modules[]      = {
 		{
-         .name       = "sample.elf",
-         .path       = "/boot/sample.elf",
-         .address    = (void*)module_bytes,
-         .size       = sizeof(module_bytes),
-         .media_type = 0u,
+		 .name       = "sample.elf",
+		 .path       = "/boot/sample.elf",
+		 .address    = (void*)module_bytes,
+		 .size       = sizeof(module_bytes),
+		 .media_type = 0u,
 		 },
 	};
 	const struct {
@@ -127,10 +127,10 @@ Test(kernel_capability_module, zero_length_read_is_a_successful_noop) {
 	static const uint8_t                  module_bytes[] = {0x11u, 0x22u};
 	const struct boot_module              modules[]      = {
 		{
-         .name    = "bytes.bin",
-         .path    = "/boot/bytes.bin",
-         .address = (void*)module_bytes,
-         .size    = sizeof(module_bytes),
+		 .name    = "bytes.bin",
+		 .path    = "/boot/bytes.bin",
+		 .address = (void*)module_bytes,
+		 .size    = sizeof(module_bytes),
 		 },
 	};
 	const struct module_read_request request = {
@@ -197,10 +197,10 @@ Test(kernel_capability_module, direct_resolution_uses_read_right_without_cap_cal
 	static const uint8_t                  module_bytes[] = {0x33u};
 	const struct boot_module              modules[]      = {
 		{
-         .name    = "direct.bin",
-         .path    = "/boot/direct.bin",
-         .address = (void*)module_bytes,
-         .size    = sizeof(module_bytes),
+		 .name    = "direct.bin",
+		 .path    = "/boot/direct.bin",
+		 .address = (void*)module_bytes,
+		 .size    = sizeof(module_bytes),
 		 },
 	};
 	const struct boot_module* resolved = NULL;

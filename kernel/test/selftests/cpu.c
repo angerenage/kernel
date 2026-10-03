@@ -631,10 +631,10 @@ static void kernel_selftest_cpu_remote_dispatch_reaches_application_processors(s
 		KERNEL_SELFTEST_ASSERT_MSG_GOTO(
 			ctx,
 			kernel_selftest_thread_create_with_preferred_cpu(&kernel_selftest_cpu_remote_workers[i],
-		                                                     "selftest/cpu-remote-dispatch",
-		                                                     kernel_selftest_cpu_remote_dispatch_worker,
-		                                                     &kernel_selftest_cpu_remote_states[i],
-		                                                     cpu),
+			                                                 "selftest/cpu-remote-dispatch",
+			                                                 kernel_selftest_cpu_remote_dispatch_worker,
+			                                                 &kernel_selftest_cpu_remote_states[i],
+			                                                 cpu),
 			"failed to create AP-targeted worker thread",
 			cleanup);
 		kernel_selftest_cpu_remote_created[i] = true;
@@ -749,11 +749,11 @@ static void kernel_selftest_cpu_sync_during_irq_disabled_lock_wait(struct kernel
 	KERNEL_SELFTEST_ASSERT_GOTO(
 		ctx,
 		hal_paging_map(space,
-	                   &(const struct hal_paging_map_request){.virtual_address  = 0x10000u,
-	                                                          .physical_address = allocation.address,
-	                                                          .size             = paging->minimum_leaf_size,
-	                                                          .flags            = HAL_PAGE_READ | HAL_PAGE_WRITE,
-	                                                          .memory_type      = MEMORY_TYPE_NORMAL}),
+		               &(const struct hal_paging_map_request){.virtual_address  = 0x10000u,
+		                                                      .physical_address = allocation.address,
+		                                                      .size             = paging->minimum_leaf_size,
+		                                                      .flags            = HAL_PAGE_READ | HAL_PAGE_WRITE,
+		                                                      .memory_type      = MEMORY_TYPE_NORMAL}),
 		cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx,
 	                            kernel_selftest_thread_create_with_preferred_cpu(
@@ -777,9 +777,9 @@ static void kernel_selftest_cpu_sync_during_irq_disabled_lock_wait(struct kernel
 		KERNEL_SELFTEST_ASSERT_GOTO(
 			ctx,
 			hal_paging_protect(space,
-		                       0x10000u,
-		                       paging->minimum_leaf_size,
-		                       (round & 1u) == 0u ? HAL_PAGE_READ : HAL_PAGE_READ | HAL_PAGE_WRITE),
+			                   0x10000u,
+			                   paging->minimum_leaf_size,
+			                   (round & 1u) == 0u ? HAL_PAGE_READ : HAL_PAGE_READ | HAL_PAGE_WRITE),
 			cleanup);
 	}
 
@@ -865,13 +865,13 @@ static const struct kernel_selftest_case kernel_cpu_selftests[] = {
 #if defined(PLATFORM_PC_X86_64)
 	{.name = "x86_io_bitmap_ranges", .run = kernel_selftest_cpu_x86_io_bitmap_ranges},
 	{.name = "x86_io_bitmap_invalidation_reaches_online_cpus",
-                                   .run  = kernel_selftest_cpu_x86_io_bitmap_invalidation_reaches_online_cpus},
+	                               .run  = kernel_selftest_cpu_x86_io_bitmap_invalidation_reaches_online_cpus},
 	{.name = "x86_interrupt_ranges_are_stable", .run = kernel_selftest_cpu_x86_interrupt_ranges_are_stable},
 #endif
 #if defined(PLATFORM_PC_AARCH64)
 	{.name = "gic_external_source_contract", .run = kernel_selftest_cpu_gic_external_source_contract},
 	{.name = "aarch64_sync_during_irq_disabled_lock_wait",
-                                   .run  = kernel_selftest_cpu_sync_during_irq_disabled_lock_wait},
+	                               .run  = kernel_selftest_cpu_sync_during_irq_disabled_lock_wait},
 	{.name = "aarch64_sync_interrupts_busy_cpu", .run = kernel_selftest_cpu_aarch64_sync_interrupts_busy_cpu},
 #endif
 #if defined(PLATFORM_PC_RISCV64)
@@ -882,7 +882,7 @@ static const struct kernel_selftest_case kernel_cpu_selftests[] = {
 #if defined(PLATFORM_PC_LOONGARCH64)
 	{.name = "loongarch_interrupt_contract", .run = kernel_selftest_cpu_loongarch_interrupt_contract},
 	{.name = "loongarch_sync_during_irq_disabled_lock_wait",
-                                   .run  = kernel_selftest_cpu_sync_during_irq_disabled_lock_wait},
+	                               .run  = kernel_selftest_cpu_sync_during_irq_disabled_lock_wait},
 #endif
 	{.name = "interrupt_source_lifecycle", .run = kernel_selftest_cpu_interrupt_source_lifecycle},
 	{.name = "interrupt_message_lifecycle", .run = kernel_selftest_cpu_interrupt_message_lifecycle},

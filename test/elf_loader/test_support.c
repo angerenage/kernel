@@ -94,9 +94,9 @@ void elf_test_image_init(struct elf_test_image* image, size_t phnum) {
 	header      = (struct elf_test_ehdr*)image->bytes;
 	*header     = (struct elf_test_ehdr){
 		.ident     = {ELF_TEST_MAGIC0,
-	                  ELF_TEST_MAGIC1, ELF_TEST_MAGIC2,
-	                  ELF_TEST_MAGIC3, ELF_TEST_CLASS_64,
-	                  ELF_TEST_DATA_LSB, ELF_TEST_VERSION_CURRENT},
+		              ELF_TEST_MAGIC1, ELF_TEST_MAGIC2,
+		              ELF_TEST_MAGIC3, ELF_TEST_CLASS_64,
+		              ELF_TEST_DATA_LSB, ELF_TEST_VERSION_CURRENT},
 		.type      = ELF_TEST_ET_EXEC,
 		.machine   = ELF_TEST_MACHINE,
 		.version   = ELF_TEST_VERSION_CURRENT,

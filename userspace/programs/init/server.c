@@ -114,11 +114,11 @@ static bool dispatch_request(const struct cap_request* request, const void* data
 		response->returned = 0u;
 		response->total    = 0u;
 		response->status   = registry_enumerate(&enumerate->query,
-                                              enumerate->offset,
-                                              enumerate->size,
-                                              response->entries,
-                                              &response->returned,
-                                              &response->total);
+		                                        enumerate->offset,
+		                                        enumerate->size,
+		                                        response->entries,
+		                                        &response->returned,
+		                                        &response->total);
 		response_size      = sizeof(*response) + (size_t)response->returned * sizeof(struct init_service_info);
 		bool replied       = reply_request(request->call_id, response, response_size, SYSCALL_STATUS_OK);
 		free(response);
@@ -142,11 +142,11 @@ static bool dispatch_request(const struct cap_request* request, const void* data
 		response->returned = 0u;
 		response->total    = 0u;
 		response->status   = registry_browse(browse->namespace_path,
-                                           browse->offset,
-                                           browse->size,
-                                           response->entries,
-                                           &response->returned,
-                                           &response->total);
+		                                     browse->offset,
+		                                     browse->size,
+		                                     response->entries,
+		                                     &response->returned,
+		                                     &response->total);
 		response_size      = sizeof(*response) + (size_t)response->returned * sizeof(struct init_browse_entry);
 		bool replied       = reply_request(request->call_id, response, response_size, SYSCALL_STATUS_OK);
 		free(response);

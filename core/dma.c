@@ -146,7 +146,7 @@ static bool dma_controller_initialize(struct dma_controller* controller) {
 static struct dma_binding* dma_binding_find(struct dma_controller* controller, dma_source_t source) {
 	for (struct dma_binding* binding = controller == NULL ? NULL : controller->bindings; binding != NULL;
 	     binding                     = binding->next)
-        if (binding->source == source && binding->active) return binding;
+		if (binding->source == source && binding->active) return binding;
 	return NULL;
 }
 

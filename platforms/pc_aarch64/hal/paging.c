@@ -398,10 +398,10 @@ bool hal_paging_init(void) {
 
 	normal_attrs_template = entry & (AARCH64_LOWER_MASK | AARCH64_UPPER_MASK);
 	kernel_space          = (struct hal_paging_space){
-				 .lower_root_phys = (uintptr_t)(aarch64_read_ttbr0_el1() & pte_address_mask),
-				 .upper_root_phys = (uintptr_t)(aarch64_read_ttbr1_el1() & pte_address_mask),
-				 .flags           = 0u,
-    };
+		.lower_root_phys = (uintptr_t)(aarch64_read_ttbr0_el1() & pte_address_mask),
+		.upper_root_phys = (uintptr_t)(aarch64_read_ttbr1_el1() & pte_address_mask),
+		.flags           = 0u,
+	};
 	initialized = true;
 	spinlock_unlock_irqrestore(&paging_lock, state);
 	return true;
@@ -633,8 +633,8 @@ bool hal_paging_unmap(struct hal_paging_space* space, uintptr_t virt, size_t siz
 	struct irq_state          state       = spinlock_lock_irqsave(&paging_lock);
 	uint64_t*                 root        = (uint64_t*)hhdm_phys_to_virt((uintptr_t)params.root_phys);
 	struct paging_transaction transaction = {0};
-	bool                      ok          = aarch64_prepare_range(root, params.levels - 1u, virt, end, &transaction) &&
-	          aarch64_change_range(root, params.levels - 1u, virt, end, false, 0u, &transaction);
+	bool                      ok = aarch64_prepare_range(root, params.levels - 1u, virt, end, &transaction) &&
+	                               aarch64_change_range(root, params.levels - 1u, virt, end, false, 0u, &transaction);
 	if (ok) {
 		aarch64_tlb_flush_all();
 		paging_transaction_commit(&transaction);
@@ -655,8 +655,8 @@ bool hal_paging_protect(struct hal_paging_space* space, uintptr_t virt, size_t s
 	struct irq_state          state       = spinlock_lock_irqsave(&paging_lock);
 	uint64_t*                 root        = (uint64_t*)hhdm_phys_to_virt((uintptr_t)params.root_phys);
 	struct paging_transaction transaction = {0};
-	bool                      ok          = aarch64_prepare_range(root, params.levels - 1u, virt, end, &transaction) &&
-	          aarch64_change_range(root, params.levels - 1u, virt, end, true, flags, &transaction);
+	bool                      ok = aarch64_prepare_range(root, params.levels - 1u, virt, end, &transaction) &&
+	                               aarch64_change_range(root, params.levels - 1u, virt, end, true, flags, &transaction);
 	aarch64_tlb_shootdown_range(virt, size);
 	if (ok) paging_transaction_commit(&transaction);
 	else {
@@ -773,12 +773,12 @@ bool hal_paging_remap(struct hal_paging_space* space, const struct hal_paging_re
 	uint64_t*                 root        = (uint64_t*)hhdm_phys_to_virt((uintptr_t)params.root_phys);
 	struct paging_transaction transaction = {0};
 	bool                      ok          = aarch64_remap_range(root,
-                                  params.levels - 1u,
-                                  request->virtual_address,
-                                  end,
-                                  request->virtual_address,
-                                  request->physical_address,
-                                  &transaction);
+	                                                            params.levels - 1u,
+	                                                            request->virtual_address,
+	                                                            end,
+	                                                            request->virtual_address,
+	                                                            request->physical_address,
+	                                                            &transaction);
 	aarch64_tlb_shootdown_range(request->virtual_address, request->size);
 	if (ok) paging_transaction_commit(&transaction);
 	else {

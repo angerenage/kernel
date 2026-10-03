@@ -505,11 +505,11 @@ bool hal_interrupt_source_info(const struct hal_interrupt_source* source, struct
 	bool                                routable = apic_isa_irq_available(source->number);
 	struct hal_interrupt_delivery_range delivery =
 		routable ? (struct hal_interrupt_delivery_range){.domain = X86_DELIVERY_DOMAIN_VECTOR,
-	                                                     .base   = 48u,
-	                                                     .limit  = X86_SYSCALL_VECTOR}
-				 : (struct hal_interrupt_delivery_range){.domain = X86_DELIVERY_DOMAIN_VECTOR,
-	                                                     .base   = X86_IRQ_BASE + source->number,
-	                                                     .limit  = X86_IRQ_BASE + source->number + 1u};
+		                                                 .base   = 48u,
+		                                                 .limit  = X86_SYSCALL_VECTOR}
+		         : (struct hal_interrupt_delivery_range){.domain = X86_DELIVERY_DOMAIN_VECTOR,
+		                                                 .base   = X86_IRQ_BASE + source->number,
+		                                                 .limit  = X86_IRQ_BASE + source->number + 1u};
 	const struct cpu* fixed_target = routable ? NULL : legacy_target;
 	if (!routable && fixed_target == NULL) return false;
 	*out_info = (struct hal_interrupt_source_info){.delivery     = delivery,

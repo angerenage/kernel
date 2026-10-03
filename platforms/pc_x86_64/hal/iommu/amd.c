@@ -148,9 +148,9 @@ static bool amd_invalidate_domain(struct hal_iommu_controller_state* controller,
 	const uint64_t           address = 0x7ffffffffffff000ull;
 	struct amd_iommu_command command = {
 		.data = {0u,
-	             context_id | (AMD_IOMMU_COMMAND_INVALIDATE_PAGES << 28u),
-	             (uint32_t)address | 1u | (hierarchy_changed ? 2u : 0u),
-	             (uint32_t)(address >> 32u)}
+		         context_id | (AMD_IOMMU_COMMAND_INVALIDATE_PAGES << 28u),
+		         (uint32_t)address | 1u | (hierarchy_changed ? 2u : 0u),
+		         (uint32_t)(address >> 32u)}
     };
 	return amd_queue(controller, command) && amd_complete(controller);
 }
@@ -324,7 +324,7 @@ bool x86_amd_iommu_attach(struct hal_iommu_controller_state* controller, struct 
 	amd_lock(controller);
 	uint64_t* entry    = amd_device_entry(controller, source_id);
 	uint64_t  expected = space->table.root_address | AMD_IOMMU_DTE_VALID | AMD_IOMMU_DTE_TRANSLATION_VALID |
-	                    (4ull << 9u) | AMD_IOMMU_DTE_READ | AMD_IOMMU_DTE_WRITE;
+	                     (4ull << 9u) | AMD_IOMMU_DTE_READ | AMD_IOMMU_DTE_WRITE;
 	if ((entry[0] & AMD_IOMMU_DTE_VALID) != 0u) {
 		amd_unlock(controller);
 		return false;

@@ -97,9 +97,9 @@ static bool handle_load(const struct cap_request* call, const void* data) {
 	program->next   = loaded_programs;
 	loaded_programs = program;
 	response        = (struct loader_v1_load_response){
-			   .load_cap   = load_cap,
-			   .process_id = program->process_id,
-    };
+		.load_cap   = load_cap,
+		.process_id = program->process_id,
+	};
 	if (reply_request(call->call_id, &response, sizeof(response), SYSCALL_STATUS_OK)) return true;
 	(void)loader_unpublish_terminal(loader_endpoint, program);
 	unlink_loaded(program);

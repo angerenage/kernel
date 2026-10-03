@@ -460,8 +460,8 @@ Test(dma, device_fragmented_map_failure_rolls_back_prefix) {
 	struct mapping* mapping = NULL;
 	cr_assert_not(
 		address_space_map(space,
-	                      &(const struct address_space_mapping_request){.memory = memory, .access = MEMORY_ACCESS_READ},
-	                      &mapping));
+		                  &(const struct address_space_mapping_request){.memory = memory, .access = MEMORY_ACCESS_READ},
+		                  &mapping));
 	cr_assert_null(mapping);
 	cr_assert_eq(space->backend.device.hal.table.mapped_size, 0u);
 	hal_iommu_mock_fail_map_after(SIZE_MAX);
@@ -474,10 +474,10 @@ Test(dma, device_materialization_uses_iommu_granules) {
 	dma_test_prepare();
 	const size_t                           iommu_granule = 16u * 1024u;
 	struct hal_iommu_controller_descriptor descriptor    = {
-		   .kind             = HAL_IOMMU_KIND_INTEL_VTD,
-		   .register_address = 0x3000u,
-		   .mock_info =
-            {
+		.kind             = HAL_IOMMU_KIND_INTEL_VTD,
+		.register_address = 0x3000u,
+		.mock_info =
+			{
 						.minimum_leaf_size     = iommu_granule,
 						.leaf_size_mask        = 1ull << 14u,
 						.io_address_bits       = 39u,
@@ -485,7 +485,7 @@ Test(dma, device_materialization_uses_iommu_granules) {
 						.context_id_bits       = 8u,
 						.source_id_bits        = 8u,
 						},
-    };
+	};
 	hal_iommu_mock_set_discovered_controllers(&descriptor, 1u);
 	cr_assert(dma_init());
 	cr_assert_lt(pmm_info()->allocation_granule, iommu_granule);

@@ -23,20 +23,20 @@ Test(cpu, current_thread_snapshot_uses_the_explicit_publication_api) {
 Test(cpu_irq, state_transitions_track_online_count_without_double_counting) {
 	const struct cpu_init_info init_info[] = {
 		{
-         .index           = 0u,
-         .processor_id    = 10u,
-         .arch_id         = 0x20u,
-         .role            = CPU_ROLE_BSP,
-         .boot_stack_base = 0x200000u,
-         .boot_stack_top  = 0x204000u,
+		 .index           = 0u,
+		 .processor_id    = 10u,
+		 .arch_id         = 0x20u,
+		 .role            = CPU_ROLE_BSP,
+		 .boot_stack_base = 0x200000u,
+		 .boot_stack_top  = 0x204000u,
 		 },
 		{
-         .index           = 1u,
-         .processor_id    = 11u,
-         .arch_id         = 0x21u,
-         .role            = CPU_ROLE_AP,
-         .boot_stack_base = 0x210000u,
-         .boot_stack_top  = 0x214000u,
+		 .index           = 1u,
+		 .processor_id    = 11u,
+		 .arch_id         = 0x21u,
+		 .role            = CPU_ROLE_AP,
+		 .boot_stack_base = 0x210000u,
+		 .boot_stack_top  = 0x214000u,
 		 },
 	};
 	struct cpu* bsp;

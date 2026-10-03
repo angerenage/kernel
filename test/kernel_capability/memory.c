@@ -94,7 +94,7 @@ Test(kernel_capability_memory, mapping_is_whole_memory_and_last_authority_unmaps
 	allocator       = root_allocator(&ctx);
 	memory          = allocate_memory(allocator, 2u * TEST_MAPPING_GRANULE);
 	space_cap       = kernel_address_space_grant(
-        ctx.process, process_pid(ctx.process), CAP_CALL | CAP_READ | CAP_MAP | CAP_DELEGATE | CAP_WRITE | CAP_EXEC);
+		ctx.process, process_pid(ctx.process), CAP_CALL | CAP_READ | CAP_MAP | CAP_DELEGATE | CAP_WRITE | CAP_EXEC);
 	cr_assert_neq(space_cap, CAP_ID_INVALID);
 	const struct address_space_map_request map_request = {
 		.header       = {.op = ADDRESS_SPACE_OP_MAP},
@@ -246,7 +246,7 @@ Test(kernel_capability_memory, restricted_allocator_enforces_and_inherits_claim_
 	request->claim_range_count = 1u;
 	request->claim_ranges[0]   = (struct memory_allocator_physical_range){base, 4u * granule};
 	result                     = kernel_capability_test_call(
-        root, request, sizeof(*request) + sizeof(request->claim_ranges[0]), &restricted, sizeof(restricted));
+		root, request, sizeof(*request) + sizeof(request->claim_ranges[0]), &restricted, sizeof(restricted));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 
 	result = claim_memory(restricted.allocator_cap, base + granule, granule, MEMORY_TYPE_DEVICE, &claimed);
@@ -337,10 +337,10 @@ Test(kernel_capability_memory, revoking_parent_memory_revokes_slices) {
 	cap_id_t                          allocator = root_allocator(&ctx);
 	cap_id_t                          memory    = allocate_memory(allocator, 2u * TEST_MAPPING_GRANULE);
 	const struct memory_slice_request request   = {
-		  .header = {.op = MEMORY_OP_SLICE},
-		  .offset = TEST_MAPPING_GRANULE,
-		  .size   = TEST_MAPPING_GRANULE,
-    };
+		.header = {.op = MEMORY_OP_SLICE},
+		.offset = TEST_MAPPING_GRANULE,
+		.size   = TEST_MAPPING_GRANULE,
+	};
 	result = kernel_capability_test_call(memory, &request, sizeof(request), &slice, sizeof(slice));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	struct capability* slice_cap = cap_acquire(slice.memory_cap);

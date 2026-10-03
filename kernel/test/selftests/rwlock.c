@@ -244,9 +244,9 @@ static void kernel_selftest_rwlock_writer_unlock_wakes_all_readers(struct kernel
 		KERNEL_SELFTEST_ASSERT_MSG_GOTO(
 			ctx,
 			kernel_selftest_thread_create(&readers[i],
-		                                  i == 0u ? "selftest/rwlock-reader-a" : "selftest/rwlock-reader-b",
-		                                  kernel_selftest_rwlock_reader_broadcast_worker,
-		                                  &state.reader_args[i]),
+			                              i == 0u ? "selftest/rwlock-reader-a" : "selftest/rwlock-reader-b",
+			                              kernel_selftest_rwlock_reader_broadcast_worker,
+			                              &state.reader_args[i]),
 			"failed to create rwlock reader waiter",
 			cleanup);
 	}
@@ -661,20 +661,20 @@ cleanup:
 
 static const struct kernel_selftest_case kernel_rwlock_selftests[] = {
 	{
-     .name = "last_reader_wakes_writer_and_blocks_new_readers",
-     .run  = kernel_selftest_rwlock_last_reader_wakes_writer_and_blocks_new_readers,
+	 .name = "last_reader_wakes_writer_and_blocks_new_readers",
+	 .run  = kernel_selftest_rwlock_last_reader_wakes_writer_and_blocks_new_readers,
 	 },
 	{
-     .name = "writer_unlock_wakes_all_readers",
-     .run  = kernel_selftest_rwlock_writer_unlock_wakes_all_readers,
+	 .name = "writer_unlock_wakes_all_readers",
+	 .run  = kernel_selftest_rwlock_writer_unlock_wakes_all_readers,
 	 },
 	{
-     .name = "timed_writer_timeout_wakes_blocked_readers",
-     .run  = kernel_selftest_rwlock_timed_writer_timeout_wakes_blocked_readers,
+	 .name = "timed_writer_timeout_wakes_blocked_readers",
+	 .run  = kernel_selftest_rwlock_timed_writer_timeout_wakes_blocked_readers,
 	 },
 	{
-     .name = "downgrade_preserves_waiting_writer_priority",
-     .run  = kernel_selftest_rwlock_downgrade_preserves_waiting_writer_priority,
+	 .name = "downgrade_preserves_waiting_writer_priority",
+	 .run  = kernel_selftest_rwlock_downgrade_preserves_waiting_writer_priority,
 	 },
 };
 

@@ -38,7 +38,7 @@ Test(syscall, kernel_handler_call_defers_zero_grants_until_handler_returns) {
 	sched_set_current(cpu_current(), &main_thread->thread);
 	kernel_call_lifecycle_events = 0u;
 	kernel_call_object_id        = cap_object_create_kernel_lifecycle(
-        0x600u, kernel_call_lifecycle_handler, NULL, NULL, kernel_call_lifecycle_callback, &created);
+		0x600u, kernel_call_lifecycle_handler, NULL, NULL, kernel_call_lifecycle_callback, &created);
 	cr_assert(created);
 	capability_id = cap_create(kernel_call_object_id, process_pid(process), CAP_CALL, NULL);
 	cr_assert_neq(capability_id, CAP_ID_INVALID);

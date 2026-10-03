@@ -89,9 +89,9 @@ cap_id_t kernel_self_grant(struct process* process) {
 	if (process == NULL) return CAP_ID_INVALID;
 	cap_id_t cap =
 		ensure_test_grant(GRANT_SELF,
-	                      0xf101u,
-	                      process_pid(process),
-	                      CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_EXEC | CAP_DELEGATE);
+		                  0xf101u,
+		                  process_pid(process),
+		                  CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_EXEC | CAP_DELEGATE);
 	if (cap != CAP_ID_INVALID) process_set_cap_object_id(process, grant_objects[GRANT_SELF]);
 	return cap;
 }

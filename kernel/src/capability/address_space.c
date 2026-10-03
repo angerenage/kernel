@@ -85,8 +85,8 @@ static syscall_result_t address_space_map_handler(const struct cap_request* req,
 
 	response.mapping_cap =
 		process_owner != NULL
-			? kernel_mapping_publish(process_owner, req->caller, mapping, mapping_rights, maximum_access)
-			: kernel_device_mapping_publish(space, req->caller, mapping, mapping_rights, maximum_access);
+	        ? kernel_mapping_publish(process_owner, req->caller, mapping, mapping_rights, maximum_access)
+	        : kernel_device_mapping_publish(space, req->caller, mapping, mapping_rights, maximum_access);
 	response.address = mapping_address(mapping);
 	if (response.mapping_cap == CAP_ID_INVALID) {
 		(void)address_space_unmap(space, mapping);
@@ -234,8 +234,8 @@ syscall_result_t kernel_device_address_space_acquire(cap_id_t address_space_cap,
 	enum cap_result result = cap_object_acquire_for_use(caller, address_space_cap, required_rights, &object, &rights);
 	if (result != CAP_OK) {
 		return syscall_result_error(result == CAP_NOT_AUTHORIZED || result == CAP_RIGHTS_EXCEEDED
-		                                ? SYSCALL_STATUS_DENIED
-		                                : SYSCALL_STATUS_BAD_ARGUMENT,
+										? SYSCALL_STATUS_DENIED
+										: SYSCALL_STATUS_BAD_ARGUMENT,
 		                            0u);
 	}
 	if (object == NULL || object->handler != device_address_space_handler || object->object_id == 0u) {

@@ -31,17 +31,17 @@ void sched_test_set_one_tick_timeslice(struct thread* thread) {
 void init_started_dual_cpu_topology(struct cpu** out_bsp, struct cpu** out_ap) {
 	const struct cpu_init_info info[] = {
 		{.index           = 0u,
-	     .processor_id    = 10u,
-	     .arch_id         = 0x20u,
-	     .role            = CPU_ROLE_BSP,
-	     .boot_stack_base = 0x200000u,
-	     .boot_stack_top  = 0x204000u},
+		 .processor_id    = 10u,
+		 .arch_id         = 0x20u,
+		 .role            = CPU_ROLE_BSP,
+		 .boot_stack_base = 0x200000u,
+		 .boot_stack_top  = 0x204000u},
 		{.index           = 1u,
-	     .processor_id    = 11u,
-	     .arch_id         = 0x21u,
-	     .role            = CPU_ROLE_AP,
-	     .boot_stack_base = 0x210000u,
-	     .boot_stack_top  = 0x214000u},
+		 .processor_id    = 11u,
+		 .arch_id         = 0x21u,
+		 .role            = CPU_ROLE_AP,
+		 .boot_stack_base = 0x210000u,
+		 .boot_stack_top  = 0x214000u},
 	};
 	struct cpu* bsp;
 	struct cpu* ap;
@@ -86,17 +86,17 @@ void sched_regression_init_single_cpu(void) {
 void sched_regression_init_dual_cpu(struct cpu** out_bsp, struct cpu** out_ap) {
 	const struct cpu_init_info info[] = {
 		{.index           = 0u,
-	     .processor_id    = 10u,
-	     .arch_id         = 0x20u,
-	     .role            = CPU_ROLE_BSP,
-	     .boot_stack_base = 0x200000u,
-	     .boot_stack_top  = 0x204000u},
+		 .processor_id    = 10u,
+		 .arch_id         = 0x20u,
+		 .role            = CPU_ROLE_BSP,
+		 .boot_stack_base = 0x200000u,
+		 .boot_stack_top  = 0x204000u},
 		{.index           = 1u,
-	     .processor_id    = 11u,
-	     .arch_id         = 0x21u,
-	     .role            = CPU_ROLE_AP,
-	     .boot_stack_base = 0x210000u,
-	     .boot_stack_top  = 0x214000u},
+		 .processor_id    = 11u,
+		 .arch_id         = 0x21u,
+		 .role            = CPU_ROLE_AP,
+		 .boot_stack_base = 0x210000u,
+		 .boot_stack_top  = 0x214000u},
 	};
 	struct cpu* bsp;
 	struct cpu* ap;

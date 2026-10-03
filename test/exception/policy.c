@@ -64,25 +64,25 @@ Test(exception_core, page_faults_preserve_kind_access_address_and_origin) {
 		bool                          user_mode;
 	} cases[] = {
 		{
-         .core_kind   = CORE_EXCEPTION_PAGE_FAULT_NOT_PRESENT,
-         .core_access = CORE_EXCEPTION_ACCESS_READ,
-         .fault_kind  = ADDRESS_SPACE_FAULT_NOT_PRESENT,
-         .access      = MEMORY_ACCESS_READ,
-         .user_mode   = true,
+		 .core_kind   = CORE_EXCEPTION_PAGE_FAULT_NOT_PRESENT,
+		 .core_access = CORE_EXCEPTION_ACCESS_READ,
+		 .fault_kind  = ADDRESS_SPACE_FAULT_NOT_PRESENT,
+		 .access      = MEMORY_ACCESS_READ,
+		 .user_mode   = true,
 		 },
 		{
-         .core_kind   = CORE_EXCEPTION_PAGE_FAULT_PROTECTION,
-         .core_access = CORE_EXCEPTION_ACCESS_WRITE,
-         .fault_kind  = ADDRESS_SPACE_FAULT_PROTECTION,
-         .access      = MEMORY_ACCESS_WRITE,
-         .user_mode   = true,
+		 .core_kind   = CORE_EXCEPTION_PAGE_FAULT_PROTECTION,
+		 .core_access = CORE_EXCEPTION_ACCESS_WRITE,
+		 .fault_kind  = ADDRESS_SPACE_FAULT_PROTECTION,
+		 .access      = MEMORY_ACCESS_WRITE,
+		 .user_mode   = true,
 		 },
 		{
-         .core_kind   = CORE_EXCEPTION_PAGE_FAULT_INVALID,
-         .core_access = CORE_EXCEPTION_ACCESS_EXEC,
-         .fault_kind  = ADDRESS_SPACE_FAULT_INVALID,
-         .access      = MEMORY_ACCESS_EXEC,
-         .user_mode   = false,
+		 .core_kind   = CORE_EXCEPTION_PAGE_FAULT_INVALID,
+		 .core_access = CORE_EXCEPTION_ACCESS_EXEC,
+		 .fault_kind  = ADDRESS_SPACE_FAULT_INVALID,
+		 .access      = MEMORY_ACCESS_EXEC,
+		 .user_mode   = false,
 		 },
 	};
 
@@ -109,19 +109,19 @@ Test(exception_core, public_user_faults_publish_their_stable_process_exit_codes)
 		uintptr_t                exit_code;
 	} cases[] = {
 		{   CORE_EXCEPTION_ARITHMETIC_DIVIDE_BY_ZERO,    PROCESS_EXIT_ARITHMETIC_DIVIDE_BY_ZERO},
-		{		 CORE_EXCEPTION_ARITHMETIC_OVERFLOW,          PROCESS_EXIT_ARITHMETIC_OVERFLOW},
+		{         CORE_EXCEPTION_ARITHMETIC_OVERFLOW,          PROCESS_EXIT_ARITHMETIC_OVERFLOW},
 		{      CORE_EXCEPTION_ARITHMETIC_BOUND_RANGE,       PROCESS_EXIT_ARITHMETIC_BOUND_RANGE},
-		{		 CORE_EXCEPTION_INSTRUCTION_ILLEGAL,          PROCESS_EXIT_INSTRUCTION_ILLEGAL},
+		{         CORE_EXCEPTION_INSTRUCTION_ILLEGAL,          PROCESS_EXIT_INSTRUCTION_ILLEGAL},
 		{CORE_EXCEPTION_PRIVILEGE_GENERAL_PROTECTION, PROCESS_EXIT_PRIVILEGE_GENERAL_PROTECTION},
-		{				   CORE_EXCEPTION_ALIGNMENT,              PROCESS_EXIT_ALIGNMENT_FAULT},
+		{                   CORE_EXCEPTION_ALIGNMENT,              PROCESS_EXIT_ALIGNMENT_FAULT},
 		{    CORE_EXCEPTION_ACCESS_INSTRUCTION_ABORT,     PROCESS_EXIT_ACCESS_INSTRUCTION_ABORT},
-		{		   CORE_EXCEPTION_ACCESS_DATA_ABORT,            PROCESS_EXIT_ACCESS_DATA_ABORT},
+		{           CORE_EXCEPTION_ACCESS_DATA_ABORT,            PROCESS_EXIT_ACCESS_DATA_ABORT},
 		{  CORE_EXCEPTION_ACCESS_ADDRESS_ERROR_FETCH,   PROCESS_EXIT_ACCESS_ADDRESS_ERROR_FETCH},
 		{ CORE_EXCEPTION_ACCESS_ADDRESS_ERROR_MEMORY,  PROCESS_EXIT_ACCESS_ADDRESS_ERROR_MEMORY},
-		{				   CORE_EXCEPTION_BUS_ERROR,                    PROCESS_EXIT_BUS_ERROR},
-		{			  CORE_EXCEPTION_FLOATING_POINT,         PROCESS_EXIT_FLOATING_POINT_ERROR},
-		{		 CORE_EXCEPTION_FLOATING_POINT_SIMD,          PROCESS_EXIT_FLOATING_POINT_SIMD},
-		{		   CORE_EXCEPTION_MEMORY_PROTECTION,            PROCESS_EXIT_MEMORY_PROTECTION},
+		{                   CORE_EXCEPTION_BUS_ERROR,                    PROCESS_EXIT_BUS_ERROR},
+		{              CORE_EXCEPTION_FLOATING_POINT,         PROCESS_EXIT_FLOATING_POINT_ERROR},
+		{         CORE_EXCEPTION_FLOATING_POINT_SIMD,          PROCESS_EXIT_FLOATING_POINT_SIMD},
+		{           CORE_EXCEPTION_MEMORY_PROTECTION,            PROCESS_EXIT_MEMORY_PROTECTION},
 	};
 
 	for (size_t i = 0u; i < sizeof(cases) / sizeof(cases[0]); i++) {

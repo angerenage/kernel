@@ -184,8 +184,8 @@ enum elf64_parse_result elf64_image_parse(cap_id_t blob_cap, struct elf64_image*
 			.memsz  = phdr.memsz,
 			.align  = phdr.align,
 			.flags  = ((phdr.flags & ELF_PF_X) != 0u ? ELF64_SEGMENT_EXEC : 0u) |
-		             ((phdr.flags & ELF_PF_W) != 0u ? ELF64_SEGMENT_WRITE : 0u) |
-		             ((phdr.flags & ELF_PF_R) != 0u ? ELF64_SEGMENT_READ : 0u),
+			          ((phdr.flags & ELF_PF_W) != 0u ? ELF64_SEGMENT_WRITE : 0u) |
+			          ((phdr.flags & ELF_PF_R) != 0u ? ELF64_SEGMENT_READ : 0u),
 		};
 	}
 

@@ -207,7 +207,7 @@ cleanup:
 
 static const struct kernel_selftest_case kernel_address_space_selftests[] = {
 	{.name = "demand_maps_and_releases", .run = kernel_selftest_address_space_demand_maps_and_releases},
-	{		.name = "large_leaf_split",         .run = kernel_selftest_address_space_large_leaf_split},
+	{        .name = "large_leaf_split",         .run = kernel_selftest_address_space_large_leaf_split},
 };
 
 const struct kernel_selftest_suite kernel_address_space_selftest_suite = {

@@ -26,7 +26,7 @@ struct mapping_slab {
 
 static struct address_space kernel_space = {
 	.lock = SPINLOCK_INIT_CLASS("kernel_address_space", SPINLOCK_ORDER_VADDR,
-                                SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION),
+	                            SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION),
 };
 static struct mapping_slab* mapping_slabs;
 static struct spinlock      mapping_allocator_lock =

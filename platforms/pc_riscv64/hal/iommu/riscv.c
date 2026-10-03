@@ -334,7 +334,7 @@ bool riscv_iommu_controller_init(struct hal_iommu_controller_state*            c
 	if (c->source_id_bits > 24u) c->source_id_bits = 24u;
 	c->initialized = true;
 	*out_info      = (struct hal_iommu_info){
-        HAL_IOMMU_KIND_RISCV, 4096u, c->leaf_size_mask, io_bits, physical_bits, 20u, c->source_id_bits};
+		HAL_IOMMU_KIND_RISCV, 4096u, c->leaf_size_mask, io_bits, physical_bits, 20u, c->source_id_bits};
 	return true;
 fail:
 	if (!ri_disable_queues(c)) hcf();

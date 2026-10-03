@@ -3,9 +3,9 @@
 Test(pmm, rejects_overlapping_usable_ranges) {
 	_Alignas(PMM_TEST_ARENA_ALIGNMENT) uint8_t arena[KiB(128)];
 	const struct mem_range                     memory_map[] = {
-        {            .base = (uintptr_t)arena, .length = KiB(64), .type = MEM_RANGE_USABLE},
-        {.base = (uintptr_t)(arena + KiB(32)), .length = KiB(64), .type = MEM_RANGE_USABLE},
-    };
+		{            .base = (uintptr_t)arena, .length = KiB(64), .type = MEM_RANGE_USABLE},
+		{.base = (uintptr_t)(arena + KiB(32)), .length = KiB(64), .type = MEM_RANGE_USABLE},
+	};
 
 	cr_assert_not(pmm_init(memory_map, sizeof(memory_map) / sizeof(memory_map[0]), 0u));
 }
@@ -13,9 +13,9 @@ Test(pmm, rejects_overlapping_usable_ranges) {
 Test(pmm, rejects_overlapping_usable_and_reserved_ranges) {
 	_Alignas(PMM_TEST_ARENA_ALIGNMENT) uint8_t arena[KiB(128)];
 	const struct mem_range                     memory_map[] = {
-        {            .base = (uintptr_t)arena, .length = KiB(64),   .type = MEM_RANGE_USABLE},
-        {.base = (uintptr_t)(arena + KiB(32)),  .length = KiB(8), .type = MEM_RANGE_RESERVED},
-    };
+		{            .base = (uintptr_t)arena, .length = KiB(64),   .type = MEM_RANGE_USABLE},
+		{.base = (uintptr_t)(arena + KiB(32)),  .length = KiB(8), .type = MEM_RANGE_RESERVED},
+	};
 
 	cr_assert_not(pmm_init(memory_map, sizeof(memory_map) / sizeof(memory_map[0]), 0u));
 }
@@ -23,9 +23,9 @@ Test(pmm, rejects_overlapping_usable_and_reserved_ranges) {
 Test(pmm, adjacent_unordered_usable_extents_form_one_contiguous_range) {
 	_Alignas(PMM_TEST_ARENA_ALIGNMENT) uint8_t arena[KiB(64)];
 	const struct mem_range                     memory_map[] = {
-        {.base = (uintptr_t)(arena + KiB(32)), .length = KiB(32), .type = MEM_RANGE_USABLE},
-        {            .base = (uintptr_t)arena, .length = KiB(32), .type = MEM_RANGE_USABLE},
-    };
+		{.base = (uintptr_t)(arena + KiB(32)), .length = KiB(32), .type = MEM_RANGE_USABLE},
+		{            .base = (uintptr_t)arena, .length = KiB(32), .type = MEM_RANGE_USABLE},
+	};
 	struct pmm_extent run;
 
 	cr_assert(pmm_init(memory_map, sizeof(memory_map) / sizeof(memory_map[0]), 0u));
@@ -38,10 +38,10 @@ Test(pmm, adjacent_unordered_usable_extents_form_one_contiguous_range) {
 Test(pmm, trims_partial_granules_at_usable_range_boundaries) {
 	_Alignas(PMM_TEST_ARENA_ALIGNMENT) uint8_t arena[KiB(32)];
 	const struct mem_range                     memory_map = {
-							.base   = (uintptr_t)arena + 1u,
-							.length = 3u * PMM_TEST_GRANULE + PMM_TEST_GRANULE - 2u,
-							.type   = MEM_RANGE_USABLE,
-    };
+		.base   = (uintptr_t)arena + 1u,
+		.length = 3u * PMM_TEST_GRANULE + PMM_TEST_GRANULE - 2u,
+		.type   = MEM_RANGE_USABLE,
+	};
 	struct pmm_extent allocation;
 
 	cr_assert(pmm_init(&memory_map, 1u, 0u));

@@ -69,12 +69,12 @@ Test(capability_syscall, publish_output_failure_rolls_back_new_capability_and_ob
 	objects_before = capability_object_count();
 	caps_before    = capability_count();
 	result         = syscall_dispatch(SYSCALL_CAP_CREATE,
-                              (uintptr_t)channel->id,
-                              (uintptr_t)process_pid(process),
-                              (uintptr_t)object_id,
-                              (uintptr_t)CAP_READ,
-                              invalid_cap_output_pointer(),
-                              0u);
+	                                  (uintptr_t)channel->id,
+	                                  (uintptr_t)process_pid(process),
+	                                  (uintptr_t)object_id,
+	                                  (uintptr_t)CAP_READ,
+	                                  invalid_cap_output_pointer(),
+	                                  0u);
 
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 	cr_assert_eq(capability_count(), caps_before, "failed publish left an unreachable capability record");
@@ -223,12 +223,12 @@ Test(capability_syscall, call_validates_response_before_handler_side_effects) {
 
 	cap_call_side_effect_count = 0u;
 	result                     = syscall_dispatch(SYSCALL_CAP_CALL,
-                              (uintptr_t)capability_id,
-                              (uintptr_t)request_buffer,
-                              1u,
-                              invalid_cap_output_pointer(),
-                              sizeof(response_value),
-                              0u);
+	                                              (uintptr_t)capability_id,
+	                                              (uintptr_t)request_buffer,
+	                                              1u,
+	                                              invalid_cap_output_pointer(),
+	                                              sizeof(response_value),
+	                                              0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 	cr_assert_eq(result.value, 3u, "invalid response buffer should be reported as the response argument");
 	cr_assert_eq(cap_call_side_effect_count, 0u, "handler ran before the response buffer was validated");

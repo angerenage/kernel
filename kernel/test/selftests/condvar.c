@@ -251,9 +251,9 @@ static void kernel_selftest_condvar_broadcast_wakes_all_waiters(struct kernel_se
 		KERNEL_SELFTEST_ASSERT_MSG_GOTO(
 			ctx,
 			kernel_selftest_thread_create(&waiters[i],
-		                                  i == 0u ? "selftest/condvar-broadcast-a" : "selftest/condvar-broadcast-b",
-		                                  kernel_selftest_condvar_broadcast_waiter_worker,
-		                                  &state.waiter_args[i]),
+			                              i == 0u ? "selftest/condvar-broadcast-a" : "selftest/condvar-broadcast-b",
+			                              kernel_selftest_condvar_broadcast_waiter_worker,
+			                              &state.waiter_args[i]),
 			"failed to create broadcast waiter thread",
 			cleanup);
 	}
@@ -362,9 +362,9 @@ static void kernel_selftest_condvar_signal_wakes_single_waiter(struct kernel_sel
 		KERNEL_SELFTEST_ASSERT_MSG_GOTO(
 			ctx,
 			kernel_selftest_thread_create(&waiters[i],
-		                                  i == 0u ? "selftest/condvar-signal-a" : "selftest/condvar-signal-b",
-		                                  kernel_selftest_condvar_single_signal_waiter_worker,
-		                                  &state.waiter_args[i]),
+			                              i == 0u ? "selftest/condvar-signal-a" : "selftest/condvar-signal-b",
+			                              kernel_selftest_condvar_single_signal_waiter_worker,
+			                              &state.waiter_args[i]),
 			"failed to create condvar signal waiter thread",
 			cleanup);
 	}
@@ -420,24 +420,24 @@ cleanup:
 
 static const struct kernel_selftest_case kernel_condvar_selftests[] = {
 	{
-     .name = "empty_queue_signal_and_broadcast_are_noops",
-     .run  = kernel_selftest_condvar_empty_queue_signal_and_broadcast_are_noops,
+	 .name = "empty_queue_signal_and_broadcast_are_noops",
+	 .run  = kernel_selftest_condvar_empty_queue_signal_and_broadcast_are_noops,
 	 },
 	{
-     .name = "wait_releases_mutex_and_reacquires_after_signal",
-     .run  = kernel_selftest_condvar_wait_releases_mutex_and_reacquires_after_signal,
+	 .name = "wait_releases_mutex_and_reacquires_after_signal",
+	 .run  = kernel_selftest_condvar_wait_releases_mutex_and_reacquires_after_signal,
 	 },
 	{
-     .name = "timed_wait_times_out_and_reacquires_mutex",
-     .run  = kernel_selftest_condvar_timed_wait_times_out_and_reacquires_mutex,
+	 .name = "timed_wait_times_out_and_reacquires_mutex",
+	 .run  = kernel_selftest_condvar_timed_wait_times_out_and_reacquires_mutex,
 	 },
 	{
-     .name = "broadcast_wakes_all_waiters",
-     .run  = kernel_selftest_condvar_broadcast_wakes_all_waiters,
+	 .name = "broadcast_wakes_all_waiters",
+	 .run  = kernel_selftest_condvar_broadcast_wakes_all_waiters,
 	 },
 	{
-     .name = "signal_wakes_single_waiter",
-     .run  = kernel_selftest_condvar_signal_wakes_single_waiter,
+	 .name = "signal_wakes_single_waiter",
+	 .run  = kernel_selftest_condvar_signal_wakes_single_waiter,
 	 },
 };
 

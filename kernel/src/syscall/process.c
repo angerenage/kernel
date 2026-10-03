@@ -53,9 +53,9 @@ syscall_result_t syscall_self(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, ui
 	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 	validation_result =
 		address_space_validate_range(process_address_space(process),
-	                                 arg0,
-	                                 sizeof(info),
-	                                 ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
+		                             arg0,
+		                             sizeof(info),
+		                             ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
 	if (validation_result != ADDRESS_TRANSFER_OK) return syscall_result_from_address_transfer(validation_result, 0u);
 
 	thread      = uthread_current();

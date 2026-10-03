@@ -23,7 +23,7 @@ Test(kernel_capability_boot_resource, framebuffer_reports_format_and_maps_writab
 	kernel_capability_test_begin(&ctx, "kernel-cap/framebuffer");
 	cr_assert(
 		pmm_alloc(&(const struct pmm_alloc_request){.size = TEST_MAPPING_GRANULE, .alignment = TEST_MAPPING_GRANULE},
-	              &allocation));
+		          &allocation));
 	physical = allocation.address;
 	cr_assert(pmm_free(allocation));
 	framebuffer = (struct boot_framebuffer){

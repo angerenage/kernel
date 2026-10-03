@@ -3,9 +3,9 @@
 Test(uthread, detached_start_registers_finalizer_before_queueing) {
 	struct process* process = NULL;
 	struct uthread  worker  = {
-		  .user_stack_mapping   = NULL,
-		  .kernel_stack_mapping = NULL,
-    };
+		.user_stack_mapping   = NULL,
+		.kernel_stack_mapping = NULL,
+	};
 	enum uthread_start_result   result;
 	struct uthread_start_params params = {
 		.name            = "user/detached",

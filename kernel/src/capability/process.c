@@ -154,8 +154,8 @@ static syscall_result_t process_spawn_thread_handler(const struct cap_request* r
 	free(arg_copy);
 	if (result != PROCESS_THREAD_SPAWN_OK) {
 		return result == PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS
-		           ? syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, (uintptr_t)result)
-		           : syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
+				   ? syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, (uintptr_t)result)
+				   : syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
 	}
 
 	response.thread_cap = kernel_thread_grant_full(thread, req->caller);

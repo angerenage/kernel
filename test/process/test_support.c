@@ -93,14 +93,14 @@ enum process_result create_process_with_main_thread(struct process**            
 	if (process_result != PROCESS_OK) return process_result;
 	thread_result =
 		process_spawn_thread(process,
-	                         &main_thread,
-	                         &(const struct process_thread_params){.name            = params->name,
-	                                                               .user_entry      = params->user_entry,
-	                                                               .arg_data        = params->arg_data,
-	                                                               .arg_size        = params->arg_size,
-	                                                               .user_stack_size = params->user_stack_size,
-	                                                               .preferred_cpu   = params->preferred_cpu,
-	                                                               .detached        = false});
+		                     &main_thread,
+		                     &(const struct process_thread_params){.name            = params->name,
+		                                                           .user_entry      = params->user_entry,
+		                                                           .arg_data        = params->arg_data,
+		                                                           .arg_size        = params->arg_size,
+		                                                           .user_stack_size = params->user_stack_size,
+		                                                           .preferred_cpu   = params->preferred_cpu,
+		                                                           .detached        = false});
 	if (thread_result != PROCESS_THREAD_SPAWN_OK) {
 		(void)process_destroy(process);
 		return process_test_result_from_thread_spawn(thread_result);

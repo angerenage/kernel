@@ -31,11 +31,11 @@ static struct hal_iommu_controller_descriptor mock_default_descriptor(uintptr_t 
 		.kind             = kind,
 		.register_address = register_address,
 		.mock_info        = {.minimum_leaf_size     = 4096u,
-	                         .leaf_size_mask        = (1ull << 12u) | (1ull << 21u),
-	                         .io_address_bits       = 39u,
-	                         .physical_address_bits = 48u,
-	                         .context_id_bits       = 8u,
-	                         .source_id_bits        = 8u}
+		                     .leaf_size_mask        = (1ull << 12u) | (1ull << 21u),
+		                     .io_address_bits       = 39u,
+		                     .physical_address_bits = 48u,
+		                     .context_id_bits       = 8u,
+		                     .source_id_bits        = 8u}
     };
 }
 

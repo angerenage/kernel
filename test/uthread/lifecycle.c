@@ -3,9 +3,9 @@
 Test(uthread, deinit_detaches_joinable_thread_from_process) {
 	struct process* process = NULL;
 	struct uthread  worker  = {
-		  .user_stack_mapping   = NULL,
-		  .kernel_stack_mapping = NULL,
-    };
+		.user_stack_mapping   = NULL,
+		.kernel_stack_mapping = NULL,
+	};
 	uthread_id_t                worker_tid;
 	struct uthread_start_params params = {
 		.name            = "user/joinable",
@@ -35,9 +35,9 @@ Test(uthread, deinit_detaches_joinable_thread_from_process) {
 Test(uthread, retained_descriptor_defers_final_cleanup) {
 	struct process* process = NULL;
 	struct uthread  worker  = {
-		  .user_stack_mapping   = NULL,
-		  .kernel_stack_mapping = NULL,
-    };
+		.user_stack_mapping   = NULL,
+		.kernel_stack_mapping = NULL,
+	};
 	struct uthread* held;
 	uthread_id_t    worker_tid;
 

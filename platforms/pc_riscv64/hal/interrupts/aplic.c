@@ -239,9 +239,9 @@ bool riscv64_aplic_source_info(const struct hal_interrupt_source* source, struct
 	if (aplic.msi && !riscv64_imsic_message_range_at(&message_range)) return false;
 	*out = (struct hal_interrupt_source_info){
 		.delivery     = aplic.msi ? message_range.delivery
-	                              : (struct hal_interrupt_delivery_range){.domain = RISCV64_DELIVERY_DOMAIN_APLIC,
-	                                                                      .base   = source->number,
-	                                                                      .limit  = source->number + 1u},
+		                          : (struct hal_interrupt_delivery_range){.domain = RISCV64_DELIVERY_DOMAIN_APLIC,
+		                                                                  .base   = source->number,
+		                                                                  .limit  = source->number + 1u},
 		.target_kind  = HAL_INTERRUPT_TARGET_ROUTABLE,
 		.fixed_target = NULL
     };

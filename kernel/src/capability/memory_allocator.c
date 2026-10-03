@@ -150,8 +150,8 @@ static syscall_result_t allocator_info(const struct cap_request* req, const stru
 		.memory_rights          = allocator->memory_rights,
 		.memory_type_mask       = allocator->memory_type_mask,
 		.claim_policy           = allocator->unrestricted_physical_claims ? MEMORY_ALLOCATOR_CLAIMS_UNRESTRICTED
-	                              : allocator->claim_range_count == 0u    ? MEMORY_ALLOCATOR_CLAIMS_NONE
-	                                                                      : MEMORY_ALLOCATOR_CLAIMS_RESTRICTED,
+		                          : allocator->claim_range_count == 0u    ? MEMORY_ALLOCATOR_CLAIMS_NONE
+		                                                                  : MEMORY_ALLOCATOR_CLAIMS_RESTRICTED,
 		.claim_range_count      = allocator->claim_range_count,
 		.physical_claim_granule = pmm == NULL ? 0u : pmm->allocation_granule,
 	};

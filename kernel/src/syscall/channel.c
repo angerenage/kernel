@@ -58,9 +58,9 @@ syscall_result_t syscall_channel_create(uintptr_t arg0, uintptr_t arg1, uintptr_
 	if (space != NULL) {
 		transfer_result =
 			address_space_validate_range(space,
-		                                 arg0,
-		                                 sizeof(channel_id_t),
-		                                 ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
+			                             arg0,
+			                             sizeof(channel_id_t),
+			                             ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
 		if (transfer_result != ADDRESS_TRANSFER_OK) return syscall_result_from_address_transfer(transfer_result, 0u);
 		if (arg1 != 0u) {
 			transfer_result = address_space_validate_range(space,

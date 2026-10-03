@@ -7,19 +7,19 @@ bool phys_in_range(uintptr_t phys, uintptr_t base, size_t length) {
 void init_test_pmm(uint8_t* arena, size_t arena_size) {
 	const struct mem_range memory_map[] = {
 		{
-         .base   = (uint64_t)(uintptr_t)(arena + PMM_TEST_LOW_OFFSET),
-         .length = PMM_TEST_LOW_LENGTH,
-         .type   = MEM_RANGE_USABLE,
+		 .base   = (uint64_t)(uintptr_t)(arena + PMM_TEST_LOW_OFFSET),
+		 .length = PMM_TEST_LOW_LENGTH,
+		 .type   = MEM_RANGE_USABLE,
 		 },
 		{
-         .base   = (uint64_t)(uintptr_t)(arena + KiB(32)),
-         .length = KiB(8),
-         .type   = MEM_RANGE_RESERVED,
+		 .base   = (uint64_t)(uintptr_t)(arena + KiB(32)),
+		 .length = KiB(8),
+		 .type   = MEM_RANGE_RESERVED,
 		 },
 		{
-         .base   = (uint64_t)(uintptr_t)(arena + PMM_TEST_HIGH_OFFSET),
-         .length = PMM_TEST_HIGH_LENGTH,
-         .type   = MEM_RANGE_USABLE,
+		 .base   = (uint64_t)(uintptr_t)(arena + PMM_TEST_HIGH_OFFSET),
+		 .length = PMM_TEST_HIGH_LENGTH,
+		 .type   = MEM_RANGE_USABLE,
 		 },
 	};
 

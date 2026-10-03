@@ -104,8 +104,8 @@ syscall_result_t kernel_memory_acquire(cap_id_t memory_cap, process_id_t caller,
 	enum cap_result result = cap_object_acquire_for_use(caller, memory_cap, required_rights, &object, &rights);
 	if (result != CAP_OK)
 		return syscall_result_error(result == CAP_NOT_AUTHORIZED || result == CAP_RIGHTS_EXCEEDED
-		                                ? SYSCALL_STATUS_DENIED
-		                                : SYSCALL_STATUS_BAD_ARGUMENT,
+										? SYSCALL_STATUS_DENIED
+										: SYSCALL_STATUS_BAD_ARGUMENT,
 		                            0u);
 	if (object == NULL || object->handler != memory_handler || object->object_id == 0u) {
 		cap_object_release(object);

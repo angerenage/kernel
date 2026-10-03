@@ -192,9 +192,9 @@ Test(pmm, rejects_malformed_byte_requests_atomically) {
 		{.size = info->allocation_granule, .alignment = info->allocation_granule / 2u},
 		{.size = info->allocation_granule, .alignment = info->allocation_granule + 1u},
 		{.size            = info->allocation_granule,
-	     .alignment       = info->allocation_granule,
-	     .minimum_address = (uintptr_t)arena,
-	     .maximum_address = (uintptr_t)arena},
+		 .alignment       = info->allocation_granule,
+		 .minimum_address = (uintptr_t)arena,
+		 .maximum_address = (uintptr_t)arena},
 	};
 	for (size_t i = 0u; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
 		output = (struct pmm_extent){.address = UINTPTR_MAX, .size = SIZE_MAX};
