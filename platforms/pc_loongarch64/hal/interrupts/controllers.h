@@ -1,5 +1,6 @@
 #pragma once
 
+#include <hal/acpi.h>
 #include <hal/device_tree.h>
 #include <hal/interrupts.h>
 #include <stdbool.h>
@@ -7,6 +8,9 @@
 #include <stdint.h>
 
 struct cpu;
+
+/* List ACPI tables consumed by interrupt-controller discovery. */
+size_t loongarch64_interrupt_acpi_consumed_tables(struct hal_acpi_consumed_table* tables, size_t capacity);
 
 /* List Device Tree nodes consumed by interrupt-controller discovery. */
 size_t loongarch64_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity);

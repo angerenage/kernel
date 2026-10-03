@@ -12,8 +12,6 @@
 #define PCI_ECAM_BUS_SIZE (1ull << 20u)
 #define PCI_DT_COMPATIBLE "pci-host-ecam-generic"
 
-ACPI_TABLE_EXCLUDE(MCFG);
-
 struct acpi_mcfg {
 	struct acpi_sdt_header header;
 	uint64_t               reserved;

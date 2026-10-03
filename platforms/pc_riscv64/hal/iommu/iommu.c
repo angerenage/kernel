@@ -8,8 +8,6 @@
 
 #include "riscv.h"
 
-ACPI_TABLE_EXCLUDE(RIMT);
-
 static size_t dt_controllers(size_t target, uintptr_t* out_address) {
 	size_t count        = 0u;
 	size_t device_count = dt_device_count("riscv,iommu");
@@ -24,6 +22,11 @@ static size_t dt_controllers(size_t target, uintptr_t* out_address) {
 		count++;
 	}
 	return count;
+}
+
+size_t riscv64_iommu_acpi_consumed_tables(struct hal_acpi_consumed_table* tables, size_t capacity) {
+	if (tables != NULL && capacity != 0u) tables[0] = (struct hal_acpi_consumed_table){.signature = "RIMT"};
+	return 1u;
 }
 
 size_t riscv64_iommu_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity) {

@@ -22,8 +22,6 @@ static const struct acpi_sdt_header* acpi_dsdt_table;
 static bool                          acpi_initialized;
 static const struct boot_info*       acpi_boot_info;
 
-ACPI_TABLE_EXCLUDE(FACP);
-
 static uint32_t acpi_read_u32(const uint8_t* value) {
 	uint32_t result;
 

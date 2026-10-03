@@ -18,8 +18,6 @@
 #include "../clock.h"
 #include "gicv3.h"
 
-ACPI_TABLE_EXCLUDE(APIC);
-
 #define AARCH64_MMIO_PAGE_SIZE 0x1000u
 #define AARCH64_GIC_MAX_CPUS 64u
 #define AARCH64_GIC_MAX_TARGETS 8u
@@ -162,6 +160,11 @@ static bool gic_find_fdt_v2(uintptr_t* out_distributor, uintptr_t* out_cpu_inter
 		return true;
 	}
 	return false;
+}
+
+size_t aarch64_gic_acpi_consumed_tables(struct hal_acpi_consumed_table* tables, size_t capacity) {
+	if (tables != NULL && capacity != 0u) tables[0] = (struct hal_acpi_consumed_table){.signature = "APIC"};
+	return 1u;
 }
 
 size_t aarch64_gic_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity) {

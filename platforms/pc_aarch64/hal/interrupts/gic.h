@@ -1,5 +1,6 @@
 #pragma once
 
+#include <hal/acpi.h>
 #include <hal/device_tree.h>
 #include <hal/interrupts.h>
 #include <stdbool.h>
@@ -8,6 +9,9 @@
 #include "frame.h"
 
 struct cpu;
+
+/* List ACPI tables consumed by GIC discovery. */
+size_t aarch64_gic_acpi_consumed_tables(struct hal_acpi_consumed_table* tables, size_t capacity);
 
 /* List Device Tree nodes consumed by the GICv2 implementation. */
 size_t aarch64_gic_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity);

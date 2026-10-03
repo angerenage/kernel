@@ -15,8 +15,6 @@
 #define TPM2_ACPI_START_METHOD_FIFO_MMIO 6u
 #define TPM2_ACPI_START_METHOD_CRB 7u
 
-ACPI_TABLE_EXCLUDE(TPM2);
-
 struct acpi_tpm2 {
 	struct acpi_sdt_header header;
 	uint16_t               platform_class;

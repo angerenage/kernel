@@ -18,9 +18,12 @@
 #include "pch_msi.h"
 #include "redirect.h"
 
-ACPI_TABLE_EXCLUDE(APIC);
-
 #define LOONGARCH64_PAGE_SIZE 0x1000u
+
+size_t loongarch64_interrupt_acpi_consumed_tables(struct hal_acpi_consumed_table* tables, size_t capacity) {
+	if (tables != NULL && capacity != 0u) tables[0] = (struct hal_acpi_consumed_table){.signature = "APIC"};
+	return 1u;
+}
 
 struct acpi_madt_lio_pic {
 	uint8_t  type;

@@ -5,7 +5,9 @@
 #include <base/syscall.h>
 #include <core/capability.h>
 #include <firmware/acpi.h>
+#include <hal/acpi.h>
 #include <kernel/capability.h>
+#include <libc/stdlib.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -13,20 +15,22 @@
 #define ACPI_PROVIDER_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_MANAGE | CAP_DELEGATE))
 #define ACPI_TABLE_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_DELEGATE))
 
-ACPI_TABLE_EXCLUDE(DSDT);
-ACPI_TABLE_EXCLUDE(SSDT);
-ACPI_TABLE_EXCLUDE(PSDT);
-ACPI_TABLE_EXCLUDE(MSDM);
-ACPI_TABLE_EXCLUDE(SLIC);
-ACPI_TABLE_EXCLUDE(WPBT);
-ACPI_TABLE_EXCLUDE(IBFT);
-ACPI_TABLE_EXCLUDE(NBFT);
-ACPI_TABLE_EXCLUDE(UEFI);
+static const struct hal_acpi_consumed_table acpi_hidden_tables[] = {
+	{.signature = "FACP"},
+	{.signature = "DSDT"},
+	{.signature = "SSDT"},
+	{.signature = "PSDT"},
+	{.signature = "MSDM"},
+	{.signature = "SLIC"},
+	{.signature = "WPBT"},
+	{.signature = "IBFT"},
+	{.signature = "NBFT"},
+	{.signature = "UEFI"},
+};
 
-extern const char __start_acpi_excluded_tables[];
-extern const char __stop_acpi_excluded_tables[];
-
-static cap_object_id_t acpi_provider_object_id = CAP_OBJECT_ID_INVALID;
+static cap_object_id_t                 acpi_provider_object_id = CAP_OBJECT_ID_INVALID;
+static struct hal_acpi_consumed_table* acpi_consumed_tables;
+static size_t                          acpi_consumed_table_count;
 
 #if defined(KERNEL_CAPABILITY_ACPI_TEST)
 static bool     fail_next_claim_response;
@@ -43,15 +47,32 @@ cap_id_t kernel_capability_acpi_test_last_rollback_cap(void) {
 #endif
 
 static bool acpi_signature_excluded(const char signature[4]) {
-	const char* cursor = __start_acpi_excluded_tables;
-
 	if (signature == NULL) return true;
-	while (cursor < __stop_acpi_excluded_tables) {
-		if ((size_t)(__stop_acpi_excluded_tables - cursor) < 4u) return true;
-		if (memcmp(cursor, signature, 4u) == 0) return true;
-		cursor += 4u;
-	}
+	for (size_t index = 0u; index < sizeof(acpi_hidden_tables) / sizeof(acpi_hidden_tables[0]); index++)
+		if (memcmp(acpi_hidden_tables[index].signature, signature, 4u) == 0) return true;
+	for (size_t index = 0u; index < acpi_consumed_table_count; index++)
+		if (memcmp(acpi_consumed_tables[index].signature, signature, 4u) == 0) return true;
 	return false;
+}
+
+static bool acpi_collect_consumed_tables(void) {
+	size_t upper_bound = hal_acpi_consumed_tables(NULL, 0u);
+	size_t allocation_size;
+	size_t written;
+
+	if (upper_bound == 0u) return true;
+	if (upper_bound > SIZE_MAX / sizeof(*acpi_consumed_tables)) return false;
+	allocation_size      = upper_bound * sizeof(*acpi_consumed_tables);
+	acpi_consumed_tables = malloc(allocation_size);
+	if (acpi_consumed_tables == NULL) return false;
+	written = hal_acpi_consumed_tables(acpi_consumed_tables, upper_bound);
+	if (written > upper_bound) {
+		free(acpi_consumed_tables);
+		acpi_consumed_tables = NULL;
+		return false;
+	}
+	acpi_consumed_table_count = written;
+	return true;
 }
 
 static const struct acpi_sdt_header* acpi_visible_table_at(const char signature[4], uint64_t target,
@@ -214,7 +235,13 @@ static syscall_result_t acpi_provider_handler(const struct cap_request* req) {
 
 bool kernel_capability_acpi_init(void) {
 	if (!acpi_available() || acpi_provider_object_id != CAP_OBJECT_ID_INVALID) return true;
+	if (!acpi_collect_consumed_tables()) return false;
 	acpi_provider_object_id = cap_object_create_kernel(0u, acpi_provider_handler, NULL);
+	if (acpi_provider_object_id == CAP_OBJECT_ID_INVALID) {
+		free(acpi_consumed_tables);
+		acpi_consumed_tables      = NULL;
+		acpi_consumed_table_count = 0u;
+	}
 	return acpi_provider_object_id != CAP_OBJECT_ID_INVALID;
 }
 

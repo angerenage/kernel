@@ -1,3 +1,5 @@
+#include "iommu.h"
+
 #include <firmware/acpi.h>
 #include <hal/iommu.h>
 #include <stddef.h>
@@ -6,9 +8,6 @@
 
 #include "amd.h"
 #include "vtd.h"
-
-ACPI_TABLE_EXCLUDE(DMAR);
-ACPI_TABLE_EXCLUDE(IVRS);
 
 static bool amd_register_previously_seen(const uint8_t* start, const uint8_t* current, uint64_t registers) {
 	const uint8_t* cursor = start;
@@ -24,6 +23,18 @@ static bool amd_register_previously_seen(const uint8_t* start, const uint8_t* cu
 		cursor += length;
 	}
 	return false;
+}
+
+size_t x86_64_iommu_acpi_consumed_tables(struct hal_acpi_consumed_table* tables, size_t capacity) {
+	static const struct hal_acpi_consumed_table consumed[] = {
+		{.signature = "DMAR"},
+		{.signature = "IVRS"},
+	};
+	size_t written =
+		capacity < sizeof(consumed) / sizeof(consumed[0]) ? capacity : sizeof(consumed) / sizeof(consumed[0]);
+
+	if (tables != NULL && written != 0u) memcpy(tables, consumed, written * sizeof(*tables));
+	return sizeof(consumed) / sizeof(consumed[0]);
 }
 
 static size_t table_units(const struct acpi_sdt_header* table, size_t table_prefix, enum hal_iommu_kind kind,

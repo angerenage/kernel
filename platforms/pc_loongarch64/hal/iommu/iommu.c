@@ -1,3 +1,5 @@
+#include "iommu.h"
+
 #include <firmware/acpi.h>
 #include <hal/iommu.h>
 #include <stdbool.h>
@@ -6,8 +8,6 @@
 #include <string.h>
 
 #include "v1.h"
-
-ACPI_TABLE_EXCLUDE(IOVT);
 
 static size_t loongarch_iommu_controllers(size_t target, struct hal_iommu_controller_descriptor* out_descriptor) {
 	const struct acpi_sdt_header* table = acpi_table_next("IOVT", NULL);
@@ -50,6 +50,11 @@ static size_t loongarch_iommu_controllers(size_t target, struct hal_iommu_contro
 		cursor += length;
 	}
 	return count;
+}
+
+size_t loongarch64_iommu_acpi_consumed_tables(struct hal_acpi_consumed_table* tables, size_t capacity) {
+	if (tables != NULL && capacity != 0u) tables[0] = (struct hal_acpi_consumed_table){.signature = "IOVT"};
+	return 1u;
 }
 
 size_t hal_iommu_controller_count(void) {

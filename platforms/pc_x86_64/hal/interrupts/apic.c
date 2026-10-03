@@ -12,8 +12,6 @@
 #include "../utils.h"
 #include "vectors.h"
 
-ACPI_TABLE_EXCLUDE(APIC);
-
 #define X86_PAGE_SIZE 0x1000u
 #define X86_IA32_APIC_BASE_MSR 0x1bu
 #define X86_IA32_APIC_BASE_ENABLE (1ull << 11)
@@ -176,6 +174,11 @@ static uint32_t ioapic_read(volatile uint8_t* registers, uint8_t reg) {
 static void ioapic_write(volatile uint8_t* registers, uint8_t reg, uint32_t value) {
 	*(volatile uint32_t*)(registers + X86_IOAPIC_REGSEL) = reg;
 	*(volatile uint32_t*)(registers + X86_IOAPIC_WINDOW) = value;
+}
+
+size_t x86_64_apic_acpi_consumed_tables(struct hal_acpi_consumed_table* tables, size_t capacity) {
+	if (tables != NULL && capacity != 0u) tables[0] = (struct hal_acpi_consumed_table){.signature = "APIC"};
+	return 1u;
 }
 
 bool apic_init_local(void) {

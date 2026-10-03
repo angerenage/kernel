@@ -8,8 +8,6 @@
 
 #include "smmuv3.h"
 
-ACPI_TABLE_EXCLUDE(IORT);
-
 static size_t smmuv3_dt_controllers(size_t target, uintptr_t* out_address) {
 	size_t count        = 0u;
 	size_t device_count = dt_device_count("arm,smmu-v3");
@@ -24,6 +22,11 @@ static size_t smmuv3_dt_controllers(size_t target, uintptr_t* out_address) {
 		count++;
 	}
 	return count;
+}
+
+size_t aarch64_iommu_acpi_consumed_tables(struct hal_acpi_consumed_table* tables, size_t capacity) {
+	if (tables != NULL && capacity != 0u) tables[0] = (struct hal_acpi_consumed_table){.signature = "IORT"};
+	return 1u;
 }
 
 size_t aarch64_iommu_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity) {

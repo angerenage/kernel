@@ -6,6 +6,7 @@
 #include <core/capability.h>
 #include <criterion/criterion.h>
 #include <firmware/acpi.h>
+#include <hal/acpi.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -20,15 +21,15 @@ struct acpi_test_table {
 	uint8_t                body[ACPI_TEST_BODY_CAPACITY];
 };
 
-ACPI_TABLE_EXCLUDE(KERN);
-
-extern const char __start_acpi_excluded_tables[];
-extern const char __stop_acpi_excluded_tables[];
-
 static bool                          acpi_test_available;
 static struct acpi_test_table        acpi_test_storage[ACPI_TEST_TABLE_CAPACITY];
 static const struct acpi_sdt_header* acpi_test_tables[ACPI_TEST_TABLE_CAPACITY];
 static size_t                        acpi_test_table_count;
+
+size_t hal_acpi_consumed_tables(struct hal_acpi_consumed_table* tables, size_t capacity) {
+	if (tables != NULL && capacity != 0u) tables[0] = (struct hal_acpi_consumed_table){.signature = "KERN"};
+	return 1u;
+}
 
 void acpi_mock_reset(void) {
 	acpi_test_available   = false;
@@ -129,7 +130,10 @@ Test(kernel_capability_acpi, static_policy_blocks_owned_and_sensitive_tables) {
 	acpi_mock_add("TEST", 1u, body, sizeof(body));
 	cap_id_t provider = acpi_test_provider(&ctx);
 
-	cr_assert_eq((size_t)(__stop_acpi_excluded_tables - __start_acpi_excluded_tables) % 4u, 0u);
+	struct hal_acpi_consumed_table consumed;
+	cr_assert_eq(hal_acpi_consumed_tables(NULL, 0u), 1u);
+	cr_assert_eq(hal_acpi_consumed_tables(&consumed, 1u), 1u);
+	cr_assert_eq(memcmp(consumed.signature, "KERN", 4u), 0);
 	cr_assert_eq(acpi_test_count(provider, "KERN", &count).status, SYSCALL_STATUS_OK);
 	cr_assert_eq(count, 0u);
 	cr_assert_eq(acpi_test_count(provider, "MSDM", &count).status, SYSCALL_STATUS_OK);

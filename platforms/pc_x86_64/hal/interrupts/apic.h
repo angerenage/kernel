@@ -1,8 +1,12 @@
 #pragma once
 
+#include <hal/acpi.h>
 #include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+/* List ACPI tables consumed by APIC discovery. */
+size_t x86_64_apic_acpi_consumed_tables(struct hal_acpi_consumed_table* tables, size_t capacity);
 
 /* Discover the local and I/O APICs needed before secondary CPU startup. */
 bool apic_prepare_ipi(void);
