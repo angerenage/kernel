@@ -7,9 +7,10 @@
 /*
  * Process environment copied onto the main thread's user stack.
  *
- * argv_offset and argv_size describe a region containing exactly argc
- * consecutive NUL-terminated strings. argv_offset is relative to
- * the beginning of this structure. argc == 0 requires both values to be zero.
+ * capv_offset describes capc positional capability IDs.
+ * argv_offset and argv_size describe exactly argc consecutive NUL-terminated
+ * strings. Offsets are relative to this structure and zero for empty lists.
+ * Capability IDs, including invalid IDs, are passed through without interpretation.
  */
 struct process_startup_info {
 	uint32_t  size;
@@ -18,6 +19,8 @@ struct process_startup_info {
 	cap_id_t  memory_allocator_cap;
 	cap_id_t  serial_cap;
 	cap_id_t  init_cap;
+	uint32_t  capc;
+	uint32_t  capv_offset;
 	uint32_t  argc;
 	uint32_t  argv_offset;
 	uint32_t  argv_size;

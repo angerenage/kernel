@@ -175,6 +175,17 @@ test_suites = [
 		'suites': ['unit', 'userspace'],
 	},
 	{
+		'name': 'runtime_startup',
+		'sources': files(
+			'runtime/startup.c',
+			'../userspace/runtime/startup.c',
+		),
+		'include_directories': [loader_test_inc],
+		'link_with': base_test_lib,
+		'c_args': ['-UBASE_STDLIB_RENAME_ALLOC'],
+		'suites': ['unit', 'userspace'],
+	},
+	{
 		'name': 'rwlock',
 		'sources': files(
 			'core/rwlock_test.c',

@@ -72,9 +72,10 @@ struct loader_v1_load_response {
 /*
  * Start a previously loaded program.
  *
- * RUN is issued on load_cap, not on the loader service capability. The argv
- * payload immediately follows this structure and consists of argc consecutive
- * NUL-terminated strings occupying exactly argv_size bytes.
+ * RUN is issued on load_cap, not on the loader service capability. Exactly
+ * capc child-local capability IDs follow this structure, followed
+ * by argc consecutive NUL-terminated strings occupying argv_size bytes. Invalid
+ * IDs are preserved; any separators or sub-list conventions are program-defined.
  *
  * argc == 0 requires argv_size == 0. Validation failures leave the loading
  * object prepared and may be retried. Once the loader begins starting the
@@ -87,6 +88,8 @@ struct loader_v1_run_request {
 	struct loader_v1_request_header header;
 	uint32_t                        argc;
 	uint32_t                        argv_size;
+	uint32_t                        capc;
+	uint32_t                        reserved[2];
 };
 
 struct loader_v1_run_response {

@@ -25,13 +25,18 @@ struct program_run_result {
 	cap_id_t thread_cap;
 };
 
+struct program_capability_argument {
+	cap_id_t     capability;
+	cap_rights_t rights;
+};
+
 /* Resolve a loader service if necessary and prepare a program from blob_cap. */
 syscall_status_t program_load(const char* service, cap_id_t blob_cap, const char* name, size_t name_size,
                               struct program_load_result* out_result);
 
-/* Start a loading object and receive normal process and main-thread control. */
-syscall_status_t program_run(cap_id_t load_cap, size_t argc, const char* const argv[],
-                             struct program_run_result* out_result);
+/* Delegate ordered capability arguments, start a loading object and receive process control. */
+syscall_status_t program_run(const struct program_load_result* load, size_t argc, const char* const argv[], size_t capc,
+                             const struct program_capability_argument capv[], struct program_run_result* out_result);
 
 /* Abandon a loading object returned by program_load() without starting it. */
 syscall_status_t program_cancel(cap_id_t load_cap);

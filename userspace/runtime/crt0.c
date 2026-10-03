@@ -7,7 +7,7 @@
 #include <system/display.h>
 #include <system/process.h>
 
-int main(int argc, char** argv);
+int main(int argc, char** argv, size_t capc, const cap_id_t* capv);
 
 extern unsigned char __bss_start[];
 extern unsigned char __bss_end[];
@@ -19,9 +19,8 @@ void exit(uintptr_t code) {
 
 __attribute__((noreturn))
 void _start(const struct process_startup_info* startup) {
-	enum runtime_startup_argv_result argv_result;
-	char**                           argv = NULL;
-	int                              argc = 0;
+	struct runtime_startup_arguments arguments;
+	enum runtime_startup_result      startup_result;
 	int                              main_result;
 
 	memset(__bss_start, 0, __bss_end - __bss_start);
@@ -35,15 +34,15 @@ void _start(const struct process_startup_info* startup) {
 		exit(PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
 	}
 
-	argv_result = runtime_startup_unpack_argv(startup, &argc, &argv);
-	if (argv_result == RUNTIME_STARTUP_ARGV_INVALID) {
+	startup_result = runtime_startup_unpack(startup, &arguments);
+	if (startup_result == RUNTIME_STARTUP_INVALID) {
 		exit(PROCESS_EXIT_SYSTEM_INVALID_STARTUP);
 	}
-	if (argv_result == RUNTIME_STARTUP_ARGV_NO_MEMORY) {
+	if (startup_result == RUNTIME_STARTUP_NO_MEMORY) {
 		exit(PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
 	}
 
-	main_result = main(argc, argv);
-	runtime_startup_free_argv(argv);
+	main_result = main(arguments.argc, arguments.argv, arguments.capc, arguments.capv);
+	runtime_startup_arguments_deinit(&arguments);
 	exit((uintptr_t)main_result);
 }

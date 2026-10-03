@@ -33,9 +33,9 @@ struct loader_loaded_program {
 syscall_status_t loader_prepare_program(cap_id_t blob_cap, const char* name, size_t name_size,
                                         struct loader_loaded_program** out_program);
 
-/* Start a prepared process with the serialized argv payload from LOADER_V1_OP_RUN. */
+/* Start a prepared process with the positional arguments from LOADER_V1_OP_RUN. */
 syscall_status_t loader_start_program(struct loader_loaded_program* program, uint32_t argc, const void* argv_data,
-                                      size_t argv_size, cap_id_t* out_thread_cap);
+                                      size_t argv_size, uint32_t capc, const cap_id_t* capv, cap_id_t* out_thread_cap);
 
 /* Destroy a prepared process and release the loader's local state. */
 void loader_discard_program(struct loader_loaded_program* program);

@@ -172,43 +172,61 @@ static syscall_status_t argv_wire_size(size_t argc, const char* const argv[], si
 	return SYSCALL_STATUS_OK;
 }
 
-syscall_status_t program_run(cap_id_t load_cap, size_t argc, const char* const argv[],
-                             struct program_run_result* out_result) {
+syscall_status_t program_run(const struct program_load_result* load, size_t argc, const char* const argv[], size_t capc,
+                             const struct program_capability_argument capv[], struct program_run_result* out_result) {
 	struct loader_v1_run_request* request;
 	struct loader_v1_run_response response;
+	cap_id_t*                     delegated;
 	char*                         cursor;
 	size_t                        argv_size;
+	size_t                        capability_size;
 	size_t                        request_size;
 	size_t                        response_size = 0u;
 	syscall_status_t              status;
 
-	if (load_cap == CAP_ID_INVALID || out_result == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	if (load == NULL || load->load_cap == CAP_ID_INVALID || load->process_id == PROCESS_PID_INVALID ||
+	    capc > UINT32_MAX || (capc != 0u && capv == NULL) || out_result == NULL)
+		return SYSCALL_STATUS_BAD_ARGUMENT;
 	*out_result = (struct program_run_result){
 		.process_cap = CAP_ID_INVALID,
 		.thread_cap  = CAP_ID_INVALID,
 	};
 	status = argv_wire_size(argc, argv, &argv_size);
 	if (status != SYSCALL_STATUS_OK) return status;
-	if (argv_size > CAP_MAX_REQUEST_SIZE - sizeof(*request)) return SYSCALL_STATUS_BAD_ARGUMENT;
+	if (capc > (CAP_MAX_REQUEST_SIZE - sizeof(*request)) / sizeof(*delegated)) return SYSCALL_STATUS_BAD_ARGUMENT;
+	capability_size = capc * sizeof(*delegated);
+	if (argv_size > CAP_MAX_REQUEST_SIZE - sizeof(*request) - capability_size) return SYSCALL_STATUS_BAD_ARGUMENT;
 
-	request_size = sizeof(*request) + argv_size;
+	request_size = sizeof(*request) + capability_size + argv_size;
 	request      = malloc(request_size);
 	if (request == NULL) return SYSCALL_STATUS_FAILED;
 	*request = (struct loader_v1_run_request){
 		.header    = {.op = LOADER_V1_OP_RUN},
 		.argc      = (uint32_t)argc,
 		.argv_size = (uint32_t)argv_size,
+		.capc      = (uint32_t)capc,
 	};
-	cursor = (char*)(request + 1);
+	delegated = (cap_id_t*)(request + 1);
+	for (size_t i = 0u; i < capc; i++) delegated[i] = CAP_ID_INVALID;
+	for (size_t i = 0u; i < capc; i++) {
+		if (capv[i].capability == CAP_ID_INVALID) continue;
+		if (capv[i].rights == 0u) {
+			status = SYSCALL_STATUS_BAD_ARGUMENT;
+			goto rollback;
+		}
+		status = cap_delegate(capv[i].capability, load->process_id, capv[i].rights, &delegated[i]);
+		if (status != SYSCALL_STATUS_OK) goto rollback;
+	}
+	cursor = (char*)(delegated + capc);
 	for (size_t i = 0u; i < argc; i++) {
 		size_t length = strlen(argv[i]) + 1u;
 		memcpy(cursor, argv[i], length);
 		cursor += length;
 	}
 
-	status = cap_call(load_cap, request, request_size, &response, sizeof(response), &response_size);
+	status = cap_call(load->load_cap, request, request_size, &response, sizeof(response), &response_size);
+	if (status != SYSCALL_STATUS_OK) goto rollback;
 	free(request);
-	if (status != SYSCALL_STATUS_OK) return status;
 	if (response_size != sizeof(response) || response.process_cap == CAP_ID_INVALID ||
 	    response.thread_cap == CAP_ID_INVALID)
 		return SYSCALL_STATUS_FAILED;
@@ -217,6 +235,13 @@ syscall_status_t program_run(cap_id_t load_cap, size_t argc, const char* const a
 		.thread_cap  = response.thread_cap,
 	};
 	return SYSCALL_STATUS_OK;
+
+rollback:
+	for (size_t i = 0u; i < capc; i++) {
+		if (delegated[i] != CAP_ID_INVALID) (void)cap_revoke(delegated[i], 0u);
+	}
+	free(request);
+	return status;
 }
 
 syscall_status_t program_cancel(cap_id_t load_cap) {

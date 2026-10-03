@@ -217,14 +217,19 @@ static bool argv_payload_valid(uint32_t argc, const void* data, size_t size) {
 }
 
 syscall_status_t loader_start_program(struct loader_loaded_program* program, uint32_t argc, const void* argv_data,
-                                      size_t argv_size, cap_id_t* out_thread_cap) {
+                                      size_t argv_size, uint32_t capc, const cap_id_t* capv, cap_id_t* out_thread_cap) {
 	struct process_startup_info* startup;
+	size_t                       capability_size;
+	size_t                       startup_size;
 	if (program == NULL || out_thread_cap == NULL || program->started ||
-	    !argv_payload_valid(argc, argv_data, argv_size) || argv_size > THREAD_START_ARG_MAX_SIZE - sizeof(*startup))
+	    !argv_payload_valid(argc, argv_data, argv_size) || (capc != 0u && capv == NULL) ||
+	    capc > (THREAD_START_ARG_MAX_SIZE - sizeof(*startup)) / sizeof(*capv))
 		return SYSCALL_STATUS_BAD_ARGUMENT;
-	*out_thread_cap     = CAP_ID_INVALID;
-	size_t startup_size = sizeof(*startup) + argv_size;
-	startup             = malloc(startup_size);
+	capability_size = (size_t)capc * sizeof(*capv);
+	if (argv_size > THREAD_START_ARG_MAX_SIZE - sizeof(*startup) - capability_size) return SYSCALL_STATUS_BAD_ARGUMENT;
+	*out_thread_cap = CAP_ID_INVALID;
+	startup_size    = sizeof(*startup) + capability_size + argv_size;
+	startup         = malloc(startup_size);
 	if (startup == NULL) return SYSCALL_STATUS_FAILED;
 	*startup = (struct process_startup_info){
 		.size                 = (uint32_t)startup_size,
@@ -233,11 +238,14 @@ syscall_status_t loader_start_program(struct loader_loaded_program* program, uin
 		.memory_allocator_cap = program->memory_allocator_cap,
 		.serial_cap           = program->serial_cap,
 		.init_cap             = program->init_cap,
+		.capc                 = capc,
+		.capv_offset          = capc == 0u ? 0u : (uint32_t)sizeof(*startup),
 		.argc                 = argc,
-		.argv_offset          = argc == 0u ? 0u : (uint32_t)sizeof(*startup),
+		.argv_offset          = argc == 0u ? 0u : (uint32_t)(sizeof(*startup) + capability_size),
 		.argv_size            = (uint32_t)argv_size,
 	};
-	if (argv_size != 0u) memcpy(startup + 1, argv_data, argv_size);
+	if (capability_size != 0u) memcpy(startup + 1, capv, capability_size);
+	if (argv_size != 0u) memcpy((uint8_t*)(startup + 1) + capability_size, argv_data, argv_size);
 	syscall_status_t status = process_run(program->process_cap, program->entry, startup, startup_size, out_thread_cap);
 	if (status == SYSCALL_STATUS_OK) program->started = true;
 	free(startup);

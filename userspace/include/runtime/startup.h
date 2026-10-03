@@ -2,16 +2,23 @@
 
 #include <base/startup.h>
 
-/* Result of rebuilding the conventional argv pointer vector from startup data. */
-enum runtime_startup_argv_result {
-	RUNTIME_STARTUP_ARGV_OK = 0,
-	RUNTIME_STARTUP_ARGV_INVALID,
-	RUNTIME_STARTUP_ARGV_NO_MEMORY,
+/* Result of rebuilding a program's positional startup arguments. */
+enum runtime_startup_result {
+	RUNTIME_STARTUP_OK = 0,
+	RUNTIME_STARTUP_INVALID,
+	RUNTIME_STARTUP_NO_MEMORY,
 };
 
-/* Rebuild argv from the serialized startup payload. Runtime heap must already be initialized. argv[argc] is NULL. */
-enum runtime_startup_argv_result runtime_startup_unpack_argv(const struct process_startup_info* startup, int* out_argc,
-                                                             char*** out_argv);
+struct runtime_startup_arguments {
+	int             argc;
+	char**          argv;
+	size_t          capc;
+	const cap_id_t* capv;
+};
 
-/* Release the pointer vector returned by runtime_startup_unpack_argv(). */
-void runtime_startup_free_argv(char** argv);
+/* Rebuild argv and expose the ordered capability list from one startup payload. */
+enum runtime_startup_result runtime_startup_unpack(const struct process_startup_info* startup,
+                                                   struct runtime_startup_arguments*  out_arguments);
+
+/* Release allocations owned by runtime_startup_arguments. */
+void runtime_startup_arguments_deinit(struct runtime_startup_arguments* arguments);

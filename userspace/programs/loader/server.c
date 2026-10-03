@@ -114,21 +114,30 @@ static bool handle_run(const struct cap_request* call, struct loader_loaded_prog
 		.thread_cap  = CAP_ID_INVALID,
 	};
 	cap_id_t         loader_thread_cap = CAP_ID_INVALID;
+	size_t           capability_size;
 	uint64_t         expected_size;
 	syscall_status_t status;
 
 	if (program == NULL || program->started || !copy_request(call, data, &request, sizeof(request)))
 		return reply_request(call->call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
-	if (request.argv_size > CAP_MAX_REQUEST_SIZE - sizeof(request) ||
-	    (expected_size = sizeof(request) + (uint64_t)request.argv_size) != call->request_size ||
+	if (request.reserved[0] != 0u || request.reserved[1] != 0u ||
+	    request.capc > (CAP_MAX_REQUEST_SIZE - sizeof(request)) / sizeof(cap_id_t))
+		return reply_request(call->call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	capability_size = (size_t)request.capc * sizeof(cap_id_t);
+	if (request.argv_size > CAP_MAX_REQUEST_SIZE - sizeof(request) - capability_size ||
+	    (expected_size = sizeof(request) + (uint64_t)capability_size + (uint64_t)request.argv_size) !=
+	        call->request_size ||
 	    (request.argc == 0u) != (request.argv_size == 0u) || call->response_capacity < sizeof(response))
 		return reply_request(call->call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 
-	status = loader_start_program(program,
-	                              request.argc,
-	                              request.argv_size == 0u ? NULL : (const uint8_t*)data + sizeof(request),
-	                              request.argv_size,
-	                              &loader_thread_cap);
+	status =
+		loader_start_program(program,
+		                     request.argc,
+		                     request.argv_size == 0u ? NULL : (const uint8_t*)data + sizeof(request) + capability_size,
+		                     request.argv_size,
+		                     request.capc,
+		                     request.capc == 0u ? NULL : (const cap_id_t*)((const uint8_t*)data + sizeof(request)),
+		                     &loader_thread_cap);
 	if (status != SYSCALL_STATUS_OK) {
 		if (program->started) {
 			(void)loader_unpublish_terminal(loader_endpoint, program);
