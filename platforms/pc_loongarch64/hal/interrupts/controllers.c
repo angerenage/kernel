@@ -88,7 +88,10 @@ uint32_t                lio_cascade_maps[2];
 bool                    controllers_discovered;
 const struct cpu*       loongarch64_fixed_target;
 
-static uint8_t controller_lock;
+static uint8_t        controller_lock;
+static struct dt_node eio_dt_node = DT_NODE_INVALID;
+static struct dt_node pch_dt_node = DT_NODE_INVALID;
+static struct dt_node msi_dt_node = DT_NODE_INVALID;
 
 uint32_t loongarch64_mmio_read32(volatile uint8_t* base, uint32_t offset) {
 	return *(volatile uint32_t*)(base + offset);
@@ -193,6 +196,7 @@ static bool discover_fdt(void) {
 	eiointc.cascade   = cascade;
 	eiointc.node_map  = UINT64_MAX;
 	eiointc.described = true;
+	eio_dt_node       = eio_node;
 
 	struct dt_node pch_node = dt_device_at("loongson,pch-pic-1.0", 0u);
 	struct dt_reg  pch_reg;
@@ -200,13 +204,14 @@ static bool discover_fdt(void) {
 	if (dt_device_count("loongson,pch-pic-1.0") == 1u && dt_node_reg(pch_node, 0u, &pch_reg) &&
 	    pch_reg.address <= UINTPTR_MAX && pch_reg.size <= UINTPTR_MAX &&
 	    dt_u32_property(pch_node, "loongson,pic-base-vec", &vector_base))
-		(void)add_fixed(FIXED_PCH_PIC,
-		                LOONGARCH64_DOMAIN_PCH_PIC_BASE,
-		                (uintptr_t)pch_reg.address,
-		                (uintptr_t)pch_reg.size,
-		                PCH_PIC_SOURCE_COUNT,
-		                vector_base,
-		                UINT32_MAX);
+		if (add_fixed(FIXED_PCH_PIC,
+		              LOONGARCH64_DOMAIN_PCH_PIC_BASE,
+		              (uintptr_t)pch_reg.address,
+		              (uintptr_t)pch_reg.size,
+		              PCH_PIC_SOURCE_COUNT,
+		              vector_base,
+		              UINT32_MAX))
+			pch_dt_node = pch_node;
 
 	struct dt_node msi_node = dt_device_at("loongson,pch-msi-1.0", 0u);
 	struct dt_reg  msi_reg;
@@ -220,8 +225,43 @@ static bool discover_fdt(void) {
 		pch_msi.first     = msi_first;
 		pch_msi.count     = msi_count;
 		pch_msi.described = true;
+		msi_dt_node       = msi_node;
 	}
 	return true;
+}
+
+size_t loongarch64_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity) {
+	size_t count = 0u;
+
+	if (!controllers_discovered) return 0u;
+	if (dt_node_valid(eio_dt_node)) {
+		if (nodes != NULL && count < capacity) {
+			nodes[count] = (struct hal_device_tree_consumed_node){
+				.node = eio_dt_node, .kind = HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED, .value = 0u};
+		}
+		count++;
+	}
+	if (dt_node_valid(pch_dt_node)) {
+		struct dt_reg reg;
+
+		if (!dt_node_reg(pch_dt_node, 0u, &reg)) return count;
+		if (nodes != NULL && count < capacity) {
+			nodes[count] = (struct hal_device_tree_consumed_node){
+				.node  = pch_dt_node,
+				.kind  = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER,
+				.value = reg.address,
+			};
+		}
+		count++;
+	}
+	if (dt_node_valid(msi_dt_node)) {
+		if (nodes != NULL && count < capacity) {
+			nodes[count] = (struct hal_device_tree_consumed_node){
+				.node = msi_dt_node, .kind = HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED, .value = 0u};
+		}
+		count++;
+	}
+	return count;
 }
 
 static bool discover_acpi(void) {

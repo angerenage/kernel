@@ -1,5 +1,6 @@
 #pragma once
 
+#include <hal/device_tree.h>
 #include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -7,6 +8,9 @@
 #include "frame.h"
 
 struct cpu;
+
+/* List Device Tree nodes consumed by the GICv2 implementation. */
+size_t aarch64_gic_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity);
 
 /* Discover, map, and enable the architecture's global interrupt controller. */
 bool aarch64_gic_init_global(void);

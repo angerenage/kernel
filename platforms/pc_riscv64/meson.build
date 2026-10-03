@@ -21,6 +21,7 @@ platform_kernel_objects += [
 	clang_riscv64_elf.process(files('thread.asm')),
 	files('hal/cache.c'),
 	files('hal/cpu.c'),
+	files('hal/device_tree.c'),
 	files('hal/clock.c'),
 	files('hal/hcf.c'),
 	files('hal/interrupts/interrupts.c'),

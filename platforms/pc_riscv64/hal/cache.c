@@ -1,3 +1,5 @@
+#include "cache.h"
+
 #include <core/cpu.h>
 #include <core/spinlock.h>
 #include <firmware/dt/device.h>
@@ -25,6 +27,23 @@ struct riscv_cache_sbi_ret {
 
 static uint32_t riscv_zicbom_state;
 static size_t   riscv_zicbom_block_size;
+
+size_t riscv64_cache_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity) {
+	size_t count = 0u;
+
+	for (size_t index = 0u;; index++) {
+		struct dt_node node = dt_node_with_string_at("device_type", "cpu", index);
+
+		if (!dt_node_valid(node)) break;
+		if (!dt_node_enabled(node)) continue;
+		if (nodes != NULL && count < capacity) {
+			nodes[count] = (struct hal_device_tree_consumed_node){
+				.node = node, .kind = HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED, .value = 0u};
+		}
+		count++;
+	}
+	return count;
+}
 
 static struct riscv_cache_sbi_ret riscv_cache_sbi_call2(unsigned long arg0, unsigned long arg1, unsigned long fid,
                                                         unsigned long eid) {

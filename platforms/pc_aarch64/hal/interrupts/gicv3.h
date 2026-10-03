@@ -1,5 +1,6 @@
 #pragma once
 
+#include <hal/device_tree.h>
 #include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -7,6 +8,9 @@
 #include "frame.h"
 
 struct cpu;
+
+/* List Device Tree nodes consumed by the GICv3 implementation. */
+size_t aarch64_gicv3_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity);
 
 /* Return whether firmware describes a usable GICv3 controller. */
 bool aarch64_gicv3_described(void);

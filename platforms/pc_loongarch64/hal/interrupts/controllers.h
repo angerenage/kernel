@@ -1,11 +1,15 @@
 #pragma once
 
+#include <hal/device_tree.h>
 #include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 struct cpu;
+
+/* List Device Tree nodes consumed by interrupt-controller discovery. */
+size_t loongarch64_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity);
 
 /* Discover the platform interrupt-controller topology from firmware. */
 bool loongarch64_interrupt_controllers_discover(void);

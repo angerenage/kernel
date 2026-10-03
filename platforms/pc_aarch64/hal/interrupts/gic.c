@@ -54,6 +54,7 @@ static bool              gic_security_extensions;
 static volatile uint8_t* gicd_mmio;
 static volatile uint8_t* gicc_mmio;
 static uintptr_t         gicd_phys;
+static struct dt_node    gic_dt_node = DT_NODE_INVALID;
 static bool              gic_local_ready[AARCH64_GIC_MAX_CPUS];
 static uint8_t           gic_target_masks[AARCH64_GIC_MAX_CPUS];
 static struct spinlock   gic_distributor_lock =
@@ -157,9 +158,36 @@ static bool gic_find_fdt_v2(uintptr_t* out_distributor, uintptr_t* out_cpu_inter
 			return false;
 		*out_distributor   = (uintptr_t)distributor.address;
 		*out_cpu_interface = (uintptr_t)cpu_interface.address;
+		gic_dt_node        = node;
 		return true;
 	}
 	return false;
+}
+
+size_t aarch64_gic_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity) {
+	size_t count = 0u;
+
+	if (!gic_is_ready() || aarch64_gicv3_described()) return 0u;
+	if (dt_node_valid(gic_dt_node)) {
+		if (nodes != NULL && count < capacity) {
+			nodes[count] = (struct hal_device_tree_consumed_node){
+				.node  = gic_dt_node,
+				.kind  = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER,
+				.value = gicd_phys,
+			};
+		}
+		count++;
+	}
+	struct dt_node frame_node = dt_device_at("arm,gic-v2m-frame", 0u);
+	struct dt_reg  frame;
+	if (dt_node_reg(frame_node, 0u, &frame) && frame.address != 0u && frame.address <= UINTPTR_MAX) {
+		if (nodes != NULL && count < capacity) {
+			nodes[count] = (struct hal_device_tree_consumed_node){
+				.node = frame_node, .kind = HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED, .value = 0u};
+		}
+		count++;
+	}
+	return count;
 }
 
 bool aarch64_gic_init_global(void) {

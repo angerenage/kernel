@@ -16,6 +16,7 @@
 #include "boot_module.h"
 #include "boot_resource.h"
 #include "device.h"
+#include "device_tree.h"
 #include "dma.h"
 #include "interrupt.h"
 #include "loader.h"
@@ -57,6 +58,10 @@ static size_t kernel_resources_available(enum kernel_resource_type* ids, size_t 
 	count++;
 	if (kernel_capability_acpi_available()) {
 		if (ids != NULL && count < capacity) ids[count] = KERNEL_RESOURCE_TYPE_ACPI;
+		count++;
+	}
+	if (kernel_capability_device_tree_available()) {
+		if (ids != NULL && count < capacity) ids[count] = KERNEL_RESOURCE_TYPE_DEVICE_TREE;
 		count++;
 	}
 #if defined(PLATFORM_PC_X86_64) || defined(IO_PORT_TEST)
@@ -152,6 +157,10 @@ static syscall_result_t kernel_resource_acquire_handler(const struct cap_request
 	case KERNEL_RESOURCE_TYPE_ACPI:
 		if (!kernel_capability_acpi_available()) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 		response.cap = kernel_capability_acpi_grant(req->caller);
+		break;
+	case KERNEL_RESOURCE_TYPE_DEVICE_TREE:
+		if (!kernel_capability_device_tree_available()) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+		response.cap = kernel_capability_device_tree_grant(req->caller);
 		break;
 #if defined(PLATFORM_PC_X86_64) || defined(IO_PORT_TEST)
 	case KERNEL_RESOURCE_TYPE_IO_PORTS:

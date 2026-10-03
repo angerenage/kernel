@@ -57,6 +57,25 @@ static struct {
 } aplic;
 static uint32_t aplic_init_lock;
 
+size_t riscv64_aplic_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity) {
+	size_t count        = 0u;
+	size_t device_count = dt_device_count("riscv,aplic");
+
+	for (size_t index = 0u; index < device_count; index++) {
+		struct dt_node node = dt_device_at("riscv,aplic", index);
+		struct dt_reg  reg;
+
+		if (!dt_node_reg(node, 0u, &reg) || reg.address == 0u || reg.address > UINTPTR_MAX || reg.size > UINTPTR_MAX)
+			continue;
+		if (nodes != NULL && count < capacity) {
+			nodes[count] = (struct hal_device_tree_consumed_node){
+				.node = node, .kind = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER, .value = reg.address};
+		}
+		count++;
+	}
+	return count;
+}
+
 bool riscv64_interrupt_hart_for_phandle(uint32_t wanted, uint64_t* out_hart) {
 	struct dt_node interrupt_controller;
 	struct dt_node cpu;

@@ -66,6 +66,20 @@ bool aarch64_gicv3_ready(void) {
 	return __atomic_load_n(&ready, __ATOMIC_ACQUIRE);
 }
 
+size_t aarch64_gicv3_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity) {
+	struct dt_node node = dt_device_at("arm,gic-v3", 0u);
+	struct dt_reg  distributor;
+
+	if (!aarch64_gicv3_ready() || dt_device_count("arm,gic-v3") != 1u || !dt_node_reg(node, 0u, &distributor) ||
+	    distributor.address != distributor_phys)
+		return 0u;
+	if (nodes != NULL && capacity != 0u) {
+		nodes[0] = (struct hal_device_tree_consumed_node){
+			.node = node, .kind = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER, .value = distributor.address};
+	}
+	return 1u;
+}
+
 static uintptr_t gicv3_virt(uintptr_t phys) {
 	struct boot_address_space address_space;
 	if (!boot_address_space_get(&address_space) || phys > UINTPTR_MAX - address_space.direct_map_offset) return 0u;

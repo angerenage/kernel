@@ -53,6 +53,7 @@ userspace_system_sources = files(
 	'system/capability.c',
 	'system/channel.c',
 	'system/device.c',
+	'system/device_tree.c',
 	'system/display.c',
 	'system/framebuffer.c',
 	'system/kernel_resource.c',

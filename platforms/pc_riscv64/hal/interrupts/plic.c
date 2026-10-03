@@ -31,6 +31,7 @@ struct plic_context {
 };
 
 struct plic_discovery {
+	struct dt_node      node;
 	uintptr_t           physical_base;
 	uint64_t            size;
 	uint32_t            ndev;
@@ -83,6 +84,7 @@ static bool plic_fdt_find(struct plic_discovery* out) {
 	    !dt_node_property(node, "interrupts-extended", &interrupts) || interrupts.size % 8u != 0u)
 		return false;
 	*out = (struct plic_discovery){
+		.node          = node,
 		.physical_base = (uintptr_t)reg.address,
 		.size          = reg.size,
 		.ndev          = (uint32_t)ndev_value,
@@ -104,6 +106,20 @@ static bool plic_fdt_find(struct plic_discovery* out) {
 		out->contexts[out->context_count++] = (struct plic_context){.hart_id = hart_id, .number = (uint32_t)entry};
 	}
 	return out->context_count != 0u;
+}
+
+size_t riscv64_plic_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity) {
+	struct plic_discovery found;
+
+	if (!plic_fdt_find(&found)) return 0u;
+	if (nodes != NULL && capacity != 0u) {
+		nodes[0] = (struct hal_device_tree_consumed_node){
+			.node  = found.node,
+			.kind  = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER,
+			.value = found.physical_base,
+		};
+	}
+	return 1u;
 }
 
 static bool plic_map_page(uintptr_t physical, uintptr_t direct_map_offset) {

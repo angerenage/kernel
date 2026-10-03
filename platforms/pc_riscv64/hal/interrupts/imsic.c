@@ -43,6 +43,25 @@ static struct {
 } imsic;
 static uint32_t imsic_init_lock;
 
+size_t riscv64_imsic_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity) {
+	size_t count        = 0u;
+	size_t device_count = dt_device_count("riscv,imsics");
+
+	for (size_t index = 0u; index < device_count; index++) {
+		struct dt_node node = dt_device_at("riscv,imsics", index);
+		struct dt_reg  reg;
+
+		if (!dt_node_reg(node, 0u, &reg) || reg.address == 0u || reg.address > UINTPTR_MAX || reg.size > UINTPTR_MAX)
+			continue;
+		if (nodes != NULL && count < capacity) {
+			nodes[count] = (struct hal_device_tree_consumed_node){
+				.node = node, .kind = HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED, .value = 0u};
+		}
+		count++;
+	}
+	return count;
+}
+
 static bool imsic_find(void) {
 	size_t count = dt_device_count("riscv,imsics");
 	if (count == 0u || count > 2u) return false;

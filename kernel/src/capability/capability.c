@@ -8,6 +8,7 @@
 #include "../capability/acpi.h"
 #include "../capability/boot_module.h"
 #include "../capability/boot_resource.h"
+#include "../capability/device_tree.h"
 #include "../capability/dma.h"
 #include "../capability/interrupt.h"
 #include "../capability/kernel_resource.h"
@@ -51,7 +52,7 @@ syscall_result_t cap_kernel_write_response(const struct cap_request* request, co
 
 bool kernel_capability_init(void) {
 	if (!kernel_memory_allocator_init() || !kernel_capability_dma_init() || !kernel_capability_interrupts_init() ||
-	    !kernel_capability_acpi_init())
+	    !kernel_capability_acpi_init() || !kernel_capability_device_tree_init())
 		return false;
 #if defined(PLATFORM_PC_X86_64) || defined(IO_PORT_TEST)
 	if (!kernel_capability_io_ports_init()) return false;

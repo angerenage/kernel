@@ -48,6 +48,7 @@ kernel_objs = base_sources + core_sources + boot_sources + firmware_sources + ke
 	'src/capability/boot_module.c',
 	'src/capability/boot_resource.c',
 	'src/capability/device.c',
+	'src/capability/device_tree.c',
 	'src/capability/kernel_resource.c',
 	'src/capability/loader.c',
 	'src/capability/process.c',

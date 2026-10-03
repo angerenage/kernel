@@ -1,5 +1,8 @@
+#include "iommu.h"
+
 #include <firmware/acpi.h>
 #include <firmware/dt/device.h>
+#include <hal/device_tree.h>
 #include <hal/iommu.h>
 #include <string.h>
 
@@ -18,6 +21,24 @@ static size_t dt_controllers(size_t target, uintptr_t* out_address) {
 		    reg.address > UINTPTR_MAX)
 			continue;
 		if (count == target && out_address != NULL) *out_address = (uintptr_t)reg.address;
+		count++;
+	}
+	return count;
+}
+
+size_t riscv64_iommu_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity) {
+	size_t count        = 0u;
+	size_t device_count = dt_device_count("riscv,iommu");
+
+	for (size_t index = 0u; index < device_count; index++) {
+		struct dt_node node = dt_device_at("riscv,iommu", index);
+		struct dt_reg  reg;
+
+		if (!dt_node_reg(node, 0u, &reg) || reg.address == 0u || reg.address > UINTPTR_MAX) continue;
+		if (nodes != NULL && count < capacity) {
+			nodes[count] = (struct hal_device_tree_consumed_node){
+				.node = node, .kind = HAL_DEVICE_TREE_REFERENCE_DMA_CONTROLLER, .value = reg.address};
+		}
 		count++;
 	}
 	return count;

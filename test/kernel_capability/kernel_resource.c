@@ -5,6 +5,7 @@
 #include "../../kernel/src/capability/acpi.h"
 #include "../../kernel/src/capability/boot_module.h"
 #include "../../kernel/src/capability/boot_resource.h"
+#include "../../kernel/src/capability/device_tree.h"
 #include "../../kernel/src/capability/loader.h"
 #include "../../kernel/src/capability/serial.h"
 #if defined(IO_PORT_TEST)
@@ -17,6 +18,8 @@
 #else
 #define IO_PORT_RESOURCE_EXTRA 0u
 #endif
+
+void dt_mock_set_available(bool available);
 
 static cap_id_t init_resources(struct kernel_capability_test_context* ctx) {
 	kernel_capability_boot_module_provider_init();
@@ -143,6 +146,47 @@ Test(kernel_capability_resource, acpi_is_listed_and_acquired_only_when_firmware_
 	acquired = cap_acquire(acquire_response.cap);
 	cr_assert_not_null(acquired);
 	cr_assert_eq(cap_rights(acquired), CAP_CALL | CAP_READ | CAP_MANAGE | CAP_DELEGATE);
+	cap_release(acquired);
+	kernel_capability_test_end(&ctx);
+}
+
+Test(kernel_capability_resource, device_tree_is_listed_and_acquired_only_when_firmware_is_available) {
+	struct kernel_capability_test_context ctx;
+	struct kernel_resources_list_request  list_request = {
+		.header = {.op = KERNEL_RESOURCES_OP_LIST}, .offset = 0u, .capacity = 5u};
+	uint8_t list_storage[sizeof(struct kernel_resources_list_response) + 5u * sizeof(enum kernel_resource_type)];
+	struct kernel_resources_list_response*       list_response   = (void*)list_storage;
+	const struct kernel_resource_acquire_request acquire_request = {.header = {.op = KERNEL_RESOURCES_OP_ACQUIRE},
+	                                                                .id     = KERNEL_RESOURCE_TYPE_DEVICE_TREE};
+	struct kernel_resource_acquire_response      acquire_response;
+	struct capability*                           acquired;
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/resources-device-tree");
+	cap_id_t root_cap = init_resources(&ctx);
+	cr_assert_neq(root_cap, CAP_ID_INVALID);
+	syscall_result_t result =
+		kernel_capability_test_call(root_cap, &list_request, sizeof(list_request), list_response, sizeof(list_storage));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(list_response->total, 3u + IO_PORT_RESOURCE_EXTRA);
+	result = kernel_capability_test_call(
+		root_cap, &acquire_request, sizeof(acquire_request), &acquire_response, sizeof(acquire_response));
+	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
+
+	dt_mock_set_available(true);
+	cr_assert(kernel_capability_device_tree_init());
+	result =
+		kernel_capability_test_call(root_cap, &list_request, sizeof(list_request), list_response, sizeof(list_storage));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(list_response->total, 4u + IO_PORT_RESOURCE_EXTRA);
+	cr_assert_eq(list_response->returned, 4u + IO_PORT_RESOURCE_EXTRA);
+	cr_assert_eq(list_response->ids[3], KERNEL_RESOURCE_TYPE_DEVICE_TREE);
+
+	result = kernel_capability_test_call(
+		root_cap, &acquire_request, sizeof(acquire_request), &acquire_response, sizeof(acquire_response));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	acquired = cap_acquire(acquire_response.cap);
+	cr_assert_not_null(acquired);
+	cr_assert_eq(cap_rights(acquired), CAP_CALL | CAP_READ | CAP_DELEGATE);
 	cap_release(acquired);
 	kernel_capability_test_end(&ctx);
 }

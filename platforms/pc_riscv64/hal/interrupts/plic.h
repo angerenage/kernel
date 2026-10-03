@@ -1,9 +1,13 @@
 #pragma once
 
+#include <hal/device_tree.h>
 #include <hal/interrupts.h>
 #include <stdbool.h>
 
 struct cpu;
+
+/* List Device Tree nodes consumed by PLIC discovery. */
+size_t riscv64_plic_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity);
 
 /* Return the fixed-source domain exposed by the PLIC. */
 bool riscv64_plic_source_domain_at(struct hal_interrupt_source_domain_info* out_domain);

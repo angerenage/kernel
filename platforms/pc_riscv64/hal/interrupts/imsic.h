@@ -1,10 +1,14 @@
 #pragma once
 
+#include <hal/device_tree.h>
 #include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stdint.h>
 
 struct cpu;
+
+/* List Device Tree nodes consumed by IMSIC discovery. */
+size_t riscv64_imsic_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity);
 
 /* Return whether a CPU has a firmware-described IMSIC interrupt file. */
 bool riscv64_imsic_cpu_has_interface(const struct cpu* cpu);
