@@ -51,15 +51,18 @@ bool loader_launch(const struct init_state* init) {
 	struct module_provider_resolve_response module = {.cap = CAP_ID_INVALID};
 	struct loader_load_response             loaded;
 	struct process_info_response            process_info;
-	struct process_startup_info             startup;
-	cap_id_t                                init_cap      = CAP_ID_INVALID;
-	cap_id_t                                loader_cap    = CAP_ID_INVALID;
-	cap_id_t                                modules_cap   = CAP_ID_INVALID;
-	cap_id_t                                allocator_cap = CAP_ID_INVALID;
-	cap_id_t                                serial_cap    = CAP_ID_INVALID;
-	cap_id_t                                thread_cap    = CAP_ID_INVALID;
-	syscall_status_t                        status;
-	bool                                    temporary_caps_released;
+	struct {
+		struct process_startup_info info;
+		cap_id_t                    capabilities[PROCESS_STARTUP_CAP_COUNT];
+	} startup;
+	cap_id_t         init_cap          = CAP_ID_INVALID;
+	cap_id_t         loader_cap        = CAP_ID_INVALID;
+	cap_id_t         modules_cap       = CAP_ID_INVALID;
+	cap_id_t         allocator_cap     = CAP_ID_INVALID;
+	cap_id_t         serial_stream_cap = CAP_ID_INVALID;
+	cap_id_t         thread_cap        = CAP_ID_INVALID;
+	syscall_status_t status;
+	bool             temporary_caps_released;
 
 	if (init == NULL) return false;
 	loaded.process_cap       = CAP_ID_INVALID;
@@ -116,19 +119,28 @@ bool loader_launch(const struct init_state* init) {
 		printf("init: init capability publication failed: %u\n", (unsigned)status);
 		goto fail;
 	}
-	status = cap_delegate(
-		init->serial_cap, process_info.pid, CAP_WRITE | CAP_CALL | CAP_DELEGATE | CAP_DELEGATE_PEER, &serial_cap);
+	status = cap_delegate(init->serial_stream_cap, process_info.pid, CAP_WRITE | CAP_CALL, &serial_stream_cap);
 	if (status != SYSCALL_STATUS_OK) {
-		printf("init: serial capability delegation failed: %u\n", (unsigned)status);
+		printf("init: serial stream delegation failed: %u\n", (unsigned)status);
 		goto fail;
 	}
-	startup = (struct process_startup_info){
-		.size                 = sizeof(startup),
-		.heap_base            = loaded.heap_base,
-		.heap_size            = loaded.heap_size,
-		.memory_allocator_cap = allocator_cap,
-		.serial_cap           = serial_cap,
-		.init_cap             = init_cap,
+	startup = (typeof(startup)){
+		.info =
+			{
+				   .size                 = sizeof(startup),
+				   .heap_base            = loaded.heap_base,
+				   .heap_size            = loaded.heap_size,
+				   .memory_allocator_cap = allocator_cap,
+				   .init_cap             = init_cap,
+				   .capc                 = PROCESS_STARTUP_CAP_COUNT,
+				   .capv_offset          = sizeof(startup.info),
+				   },
+		.capabilities =
+			{
+				   [PROCESS_STARTUP_CAP_STDIN]  = CAP_ID_INVALID,
+				   [PROCESS_STARTUP_CAP_STDOUT] = serial_stream_cap,
+				   [PROCESS_STARTUP_CAP_STDERR] = serial_stream_cap,
+				   },
 	};
 	status = process_run(loaded.process_cap, loaded.entry, &startup, sizeof(startup), &thread_cap);
 	if (status != SYSCALL_STATUS_OK) {

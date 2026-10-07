@@ -12,11 +12,14 @@ enum runtime_startup_result {
 struct runtime_startup_arguments {
 	int             argc;
 	char**          argv;
+	cap_id_t        stdin_cap;
+	cap_id_t        stdout_cap;
+	cap_id_t        stderr_cap;
 	size_t          capc;
 	const cap_id_t* capv;
 };
 
-/* Rebuild argv and expose the ordered capability list from one startup payload. */
+/* Rebuild argv, extract the standard streams, and expose the remaining capability arguments. */
 enum runtime_startup_result runtime_startup_unpack(const struct process_startup_info* startup,
                                                    struct runtime_startup_arguments*  out_arguments);
 

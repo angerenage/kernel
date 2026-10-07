@@ -1,53 +1,42 @@
-#include <base/cap.h>
-#include <base/display.h>
-#include <base/syscall.h>
-#include <runtime/diagnostic.h>
+#include <runtime/stream.h>
 #include <stddef.h>
 #include <stdint.h>
 
-#include "syscall.h"
+static cap_id_t stdin_stream_cap  = CAP_ID_INVALID;
+static cap_id_t stdout_stream_cap = CAP_ID_INVALID;
+static cap_id_t stderr_stream_cap = CAP_ID_INVALID;
 
-cap_id_t serial_cap_id = CAP_ID_INVALID;
+void display_set_standard_streams(cap_id_t stdin_cap, cap_id_t stdout_cap, cap_id_t stderr_cap) {
+	stdin_stream_cap  = stdin_cap;
+	stdout_stream_cap = stdout_cap;
+	stderr_stream_cap = stderr_cap;
+}
+
+syscall_status_t display_read(void* data, size_t capacity, size_t* out_read) {
+	if (out_read != NULL) *out_read = 0u;
+	if (stdin_stream_cap == CAP_ID_INVALID) return SYSCALL_STATUS_UNAVAILABLE;
+	return stream_read(stdin_stream_cap, data, capacity, out_read);
+}
+
+static syscall_status_t display_write_stream(cap_id_t stream_cap, const char* data, size_t length) {
+	size_t offset = 0u;
+
+	if (stream_cap == CAP_ID_INVALID) return SYSCALL_STATUS_UNAVAILABLE;
+	if (length != 0u && data == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	while (offset < length) {
+		size_t           written = 0u;
+		syscall_status_t status  = stream_write(stream_cap, data + offset, length - offset, &written);
+		if (status != SYSCALL_STATUS_OK) return status;
+		if (written == 0u || written > length - offset) return SYSCALL_STATUS_FAILED;
+		offset += written;
+	}
+	return SYSCALL_STATUS_OK;
+}
 
 syscall_status_t display_write(const char* data, size_t length) {
-	syscall_result_t result;
-	size_t           offset = 0u;
+	return display_write_stream(stdout_stream_cap, data, length);
+}
 
-	if (serial_cap_id == CAP_ID_INVALID) {
-		RUNTIME_DIAGNOSTIC_INVALID_STATE("serial capability is unavailable");
-		return SYSCALL_STATUS_FAILED;
-	}
-	if (length != 0u && data == NULL) {
-		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(data);
-		return SYSCALL_STATUS_BAD_ARGUMENT;
-	}
-
-	do {
-		size_t chunk = length - offset;
-		if (chunk > CAP_MAX_REQUEST_SIZE) chunk = CAP_MAX_REQUEST_SIZE;
-
-		result =
-			syscall(SYSCALL_CAP_CALL, (uintptr_t)serial_cap_id, (uintptr_t)data + offset, (uintptr_t)chunk, 0u, 0u, 0u);
-		if (result.status != SYSCALL_STATUS_OK) break;
-		offset += chunk;
-	} while (offset < length);
-
-#ifdef RUNTIME_DIAGNOSTICS
-	if (result.status == SYSCALL_STATUS_BAD_ARGUMENT) {
-		if (result.value == 1u) {
-			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(data);
-		}
-		else if (result.value == 2u) {
-			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(length);
-		}
-		else {
-			RUNTIME_DIAGNOSTIC_INVALID_PARAMETER_INDEX(display_write, result.value);
-		}
-	}
-	else {
-		RUNTIME_DIAGNOSTIC_SYSCALL_RESULT(display_write, result);
-	}
-#endif
-
-	return result.status;
+syscall_status_t display_error_write(const char* data, size_t length) {
+	return display_write_stream(stderr_stream_cap, data, length);
 }

@@ -28,8 +28,7 @@ void _start(const struct process_startup_info* startup) {
 	    startup->memory_allocator_cap == CAP_ID_INVALID) {
 		exit(PROCESS_EXIT_SYSTEM_INVALID_STARTUP);
 	}
-	serial_cap_id = startup->serial_cap;
-	init_cap_id   = startup->init_cap;
+	init_cap_id = startup->init_cap;
 	if (!runtime_heap_init(startup)) {
 		exit(PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
 	}
@@ -41,6 +40,7 @@ void _start(const struct process_startup_info* startup) {
 	if (startup_result == RUNTIME_STARTUP_NO_MEMORY) {
 		exit(PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
 	}
+	display_set_standard_streams(arguments.stdin_cap, arguments.stdout_cap, arguments.stderr_cap);
 
 	main_result = main(arguments.argc, arguments.argv, arguments.capc, arguments.capv);
 	runtime_startup_arguments_deinit(&arguments);

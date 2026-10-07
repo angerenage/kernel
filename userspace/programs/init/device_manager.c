@@ -2,6 +2,7 @@
 
 #include <base/kernel_resource.h>
 #include <base/module.h>
+#include <base/startup.h>
 #include <protocol/device_manager.h>
 #include <protocol/loader.h>
 #include <runtime/init.h>
@@ -158,19 +159,34 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 	if (status == SYSCALL_STATUS_OK)
 		status = device_manager_optional_resource(init, KERNEL_RESOURCE_TYPE_DEVICE_TREE, &dt_cap);
 	if (status == SYSCALL_STATUS_OK) {
-		const struct program_capability_argument capv[DEVICE_MANAGER_CAPABILITY_COUNT] = {
-			[DEVICE_MANAGER_CAPABILITY_ACPI] =
+		const struct program_capability_argument capv[PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_COUNT] = {
+			[PROCESS_STARTUP_CAP_STDIN] =
 				{
-												  .capability = acpi_cap,
-												  .rights     = CAP_CALL | CAP_READ | CAP_MANAGE | CAP_DELEGATE,
-												  },
-			[DEVICE_MANAGER_CAPABILITY_DEVICE_TREE] =
+											 .capability = CAP_ID_INVALID,
+											 },
+			[PROCESS_STARTUP_CAP_STDOUT] =
 				{
-												  .capability = dt_cap,
-												  .rights     = CAP_CALL | CAP_READ | CAP_DELEGATE,
-												  },
+											 .capability = init->serial_stream_cap,
+											 .rights     = CAP_CALL | CAP_WRITE,
+											 },
+			[PROCESS_STARTUP_CAP_STDERR] =
+				{
+											 .capability = init->serial_stream_cap,
+											 .rights     = CAP_CALL | CAP_WRITE,
+											 },
+			[PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_ACPI] =
+				{
+											 .capability = acpi_cap,
+											 .rights     = CAP_CALL | CAP_READ | CAP_MANAGE | CAP_DELEGATE,
+											 },
+			[PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_DEVICE_TREE] =
+				{
+											 .capability = dt_cap,
+											 .rights     = CAP_CALL | CAP_READ | CAP_DELEGATE,
+											 },
 		};
-		status = program_run(&loaded, 0u, NULL, DEVICE_MANAGER_CAPABILITY_COUNT, capv, &running);
+		status =
+			program_run(&loaded, 0u, NULL, PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_COUNT, capv, &running);
 	}
 	if (!device_manager_drop_capability(&acpi_cap, "ACPI provider")) temporary_caps_released = false;
 	if (!device_manager_drop_capability(&dt_cap, "Device Tree provider")) temporary_caps_released = false;

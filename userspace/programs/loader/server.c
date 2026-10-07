@@ -2,6 +2,7 @@
 
 #include <base/cap.h>
 #include <base/process.h>
+#include <base/startup.h>
 #include <protocol/loader.h>
 #include <runtime/init.h>
 #include <runtime/program.h>
@@ -120,7 +121,7 @@ static bool handle_run(const struct cap_request* call, struct loader_loaded_prog
 
 	if (program == NULL || program->started || !copy_request(call, data, &request, sizeof(request)))
 		return reply_request(call->call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
-	if (request.reserved[0] != 0u || request.reserved[1] != 0u ||
+	if (request.reserved[0] != 0u || request.reserved[1] != 0u || request.capc < PROCESS_STARTUP_CAP_COUNT ||
 	    request.capc > (CAP_MAX_REQUEST_SIZE - sizeof(request)) / sizeof(cap_id_t))
 		return reply_request(call->call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	capability_size = (size_t)request.capc * sizeof(cap_id_t);

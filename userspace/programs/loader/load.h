@@ -23,7 +23,6 @@ struct loader_loaded_program {
 	size_t                           mapping_granule;
 	cap_id_t                         memory_allocator_cap;
 	cap_id_t                         init_cap;
-	cap_id_t                         serial_cap;
 	struct loader_mapping_authority* mappings;
 	bool                             started;
 	struct loader_loaded_program*    next;

@@ -3,7 +3,6 @@
 #include <base/startup.h>
 #include <runtime/heap.h>
 #include <string.h>
-#include <system/display.h>
 #include <system/kernel_resource.h>
 #include <system/process.h>
 
@@ -37,13 +36,11 @@ void _start(const struct init_startup_info* startup) {
 	}
 	g_init.kernel_resources_cap = startup->kernel_resources_cap;
 	g_init.memory_allocator_cap = startup->memory_allocator_cap;
-	serial_cap_id               = g_init.serial_cap;
 	runtime_startup             = (struct process_startup_info){
 		.size                 = sizeof(runtime_startup),
 		.heap_base            = startup->heap_base,
 		.heap_size            = startup->heap_size,
 		.memory_allocator_cap = startup->memory_allocator_cap,
-		.serial_cap           = g_init.serial_cap,
 		.init_cap             = CAP_ID_INVALID,
 	};
 	if (!runtime_heap_init(&runtime_startup)) {

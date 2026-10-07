@@ -1,3 +1,4 @@
+#include <base/startup.h>
 #include <libc/stdlib.h>
 #include <libc/string.h>
 #include <protocol/loader.h>
@@ -185,7 +186,7 @@ syscall_status_t program_run(const struct program_load_result* load, size_t argc
 	syscall_status_t              status;
 
 	if (load == NULL || load->load_cap == CAP_ID_INVALID || load->process_id == PROCESS_PID_INVALID ||
-	    capc > UINT32_MAX || (capc != 0u && capv == NULL) || out_result == NULL)
+	    capc < PROCESS_STARTUP_CAP_COUNT || capc > UINT32_MAX || capv == NULL || out_result == NULL)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	*out_result = (struct program_run_result){
 		.process_cap = CAP_ID_INVALID,

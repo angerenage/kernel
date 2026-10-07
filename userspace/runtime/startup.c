@@ -13,27 +13,31 @@ static char* bounded_nul(char* begin, char* end) {
 
 enum runtime_startup_result runtime_startup_unpack(const struct process_startup_info* startup,
                                                    struct runtime_startup_arguments*  out_arguments) {
-	char** argv;
-	char*  cursor;
-	char*  end;
-	size_t capability_size;
-	size_t payload_offset;
+	char**          argv;
+	char*           cursor;
+	char*           end;
+	const cap_id_t* capabilities;
+	size_t          capability_size;
+	size_t          payload_offset;
 
 	if (out_arguments == NULL) return RUNTIME_STARTUP_INVALID;
 	*out_arguments = (struct runtime_startup_arguments){0};
 
-	if (startup == NULL || startup->size < sizeof(*startup) || startup->argc > INT_MAX) {
+	if (startup == NULL || startup->size < sizeof(*startup) || startup->argc > INT_MAX ||
+	    startup->capc < PROCESS_STARTUP_CAP_COUNT) {
 		return RUNTIME_STARTUP_INVALID;
 	}
 	capability_size = (size_t)startup->capc * sizeof(cap_id_t);
 	payload_offset  = sizeof(*startup) + capability_size;
-	if ((startup->capc == 0u && startup->capv_offset != 0u) ||
-	    (startup->capc != 0u && startup->capv_offset != sizeof(*startup)) || payload_offset > startup->size) {
+	if (startup->capv_offset != sizeof(*startup) || payload_offset > startup->size) {
 		return RUNTIME_STARTUP_INVALID;
 	}
-	out_arguments->capc = startup->capc;
-	out_arguments->capv =
-		startup->capc == 0u ? NULL : (const cap_id_t*)((const uint8_t*)startup + startup->capv_offset);
+	capabilities              = (const cap_id_t*)((const uint8_t*)startup + startup->capv_offset);
+	out_arguments->stdin_cap  = capabilities[PROCESS_STARTUP_CAP_STDIN];
+	out_arguments->stdout_cap = capabilities[PROCESS_STARTUP_CAP_STDOUT];
+	out_arguments->stderr_cap = capabilities[PROCESS_STARTUP_CAP_STDERR];
+	out_arguments->capc       = startup->capc - PROCESS_STARTUP_CAP_COUNT;
+	out_arguments->capv       = out_arguments->capc == 0u ? NULL : capabilities + PROCESS_STARTUP_CAP_COUNT;
 	if (startup->argc == 0u) {
 		if (startup->argv_offset != 0u || startup->argv_size != 0u || payload_offset != startup->size)
 			return RUNTIME_STARTUP_INVALID;
