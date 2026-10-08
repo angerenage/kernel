@@ -1,6 +1,6 @@
 #include "elf64.h"
 
-#include <runtime/blob.h>
+#include <runtime/filesystem.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -77,20 +77,33 @@ static bool mul_u64(uint64_t left, uint64_t right, uint64_t* out) {
 	return true;
 }
 
-static bool range_valid(uint64_t blob_size, uint64_t offset, uint64_t size) {
+static bool range_valid(uint64_t file_size, uint64_t offset, uint64_t size) {
 	uint64_t end;
-	return add_u64(offset, size, &end) && end <= blob_size;
+	return add_u64(offset, size, &end) && end <= file_size;
 }
 
-static bool read_exact(cap_id_t blob_cap, uint64_t offset, void* buffer, size_t size) {
-	return blob_read(blob_cap, offset, buffer, size) == SYSCALL_STATUS_OK;
+static bool read_exact(cap_id_t file_cap, uint64_t offset, void* buffer, size_t size) {
+	uint8_t* cursor = buffer;
+
+	while (size != 0u) {
+		struct filesystem_call_result result;
+		size_t                        read = 0u;
+
+		result = filesystem_file_read(file_cap, offset, cursor, size, &read);
+		if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK || read == 0u)
+			return false;
+		offset += read;
+		cursor += read;
+		size -= read;
+	}
+	return true;
 }
 
 static bool power_of_two_u64(uint64_t value) {
 	return value != 0u && (value & (value - 1u)) == 0u;
 }
 
-static enum elf64_parse_result validate_header(uint64_t blob_size, const struct elf64_ehdr* header) {
+static enum elf64_parse_result validate_header(uint64_t file_size, const struct elf64_ehdr* header) {
 	uint64_t table_size;
 
 	if (header->ident[0] != ELF_MAGIC0 || header->ident[1] != ELF_MAGIC1 || header->ident[2] != ELF_MAGIC2 ||
@@ -103,16 +116,16 @@ static enum elf64_parse_result validate_header(uint64_t blob_size, const struct 
 	if (header->ehsize != sizeof(*header) || header->phentsize != sizeof(struct elf64_phdr) || header->phnum == 0u)
 		return ELF64_PARSE_BAD_FORMAT;
 	if (!mul_u64((uint64_t)header->phentsize, (uint64_t)header->phnum, &table_size) ||
-	    !range_valid(blob_size, header->phoff, table_size))
+	    !range_valid(file_size, header->phoff, table_size))
 		return ELF64_PARSE_BAD_FORMAT;
 	return ELF64_PARSE_OK;
 }
 
-static enum elf64_parse_result validate_load_segment(uint64_t blob_size, const struct elf64_phdr* phdr) {
+static enum elf64_parse_result validate_load_segment(uint64_t file_size, const struct elf64_phdr* phdr) {
 	uint64_t memory_end;
 
 	if (phdr->filesz > phdr->memsz) return ELF64_PARSE_BAD_FORMAT;
-	if (!range_valid(blob_size, phdr->offset, phdr->filesz)) return ELF64_PARSE_BAD_FORMAT;
+	if (!range_valid(file_size, phdr->offset, phdr->filesz)) return ELF64_PARSE_BAD_FORMAT;
 	if (!add_u64(phdr->vaddr, phdr->memsz, &memory_end)) return ELF64_PARSE_BAD_FORMAT;
 	(void)memory_end;
 
@@ -135,19 +148,22 @@ void elf64_image_deinit(struct elf64_image* image) {
 	*image = (struct elf64_image){0};
 }
 
-enum elf64_parse_result elf64_image_parse(cap_id_t blob_cap, struct elf64_image* out_image) {
-	struct blob_info_response info;
-	struct elf64_ehdr         header;
-	struct elf64_segment*     segments;
-	size_t                    segment_count = 0u;
-	bool                      entry_valid   = false;
-	enum elf64_parse_result   result;
+enum elf64_parse_result elf64_image_parse(cap_id_t file_cap, struct elf64_image* out_image) {
+	struct filesystem_node_info   info;
+	struct filesystem_call_result info_result;
+	struct elf64_ehdr             header;
+	struct elf64_segment*         segments;
+	size_t                        segment_count = 0u;
+	bool                          entry_valid   = false;
+	enum elf64_parse_result       result;
 
 	if (out_image != NULL) *out_image = (struct elf64_image){0};
-	if (blob_cap == CAP_ID_INVALID || out_image == NULL) return ELF64_PARSE_INVALID_ARGUMENT;
-	if (blob_get_info(blob_cap, &info) != SYSCALL_STATUS_OK) return ELF64_PARSE_IO_ERROR;
+	if (file_cap == CAP_ID_INVALID || out_image == NULL) return ELF64_PARSE_INVALID_ARGUMENT;
+	info_result = filesystem_file_info(file_cap, &info);
+	if (info_result.transport_status != SYSCALL_STATUS_OK || info_result.status != FILESYSTEM_STATUS_OK)
+		return ELF64_PARSE_IO_ERROR;
 	if (info.size < sizeof(header)) return ELF64_PARSE_BAD_FORMAT;
-	if (!read_exact(blob_cap, 0u, &header, sizeof(header))) return ELF64_PARSE_IO_ERROR;
+	if (!read_exact(file_cap, 0u, &header, sizeof(header))) return ELF64_PARSE_IO_ERROR;
 	result = validate_header(info.size, &header);
 	if (result != ELF64_PARSE_OK) return result;
 
@@ -163,7 +179,7 @@ enum elf64_parse_result elf64_image_parse(cap_id_t blob_cap, struct elf64_image*
 			result = ELF64_PARSE_BAD_FORMAT;
 			goto fail;
 		}
-		if (!read_exact(blob_cap, offset, &phdr, sizeof(phdr))) {
+		if (!read_exact(file_cap, offset, &phdr, sizeof(phdr))) {
 			result = ELF64_PARSE_IO_ERROR;
 			goto fail;
 		}

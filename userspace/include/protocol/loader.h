@@ -3,7 +3,7 @@
 /*
  * Program loader protocol.
  *
- * Loader services create processes from executable images exposed as Blob
+ * Loader services create processes from executable file
  * capabilities. LOAD prepares a complete but non-running process and returns
  * a capability representing that loading state. The caller then completes the
  * loading lifecycle with either RUN, which starts the program, or CANCEL,
@@ -20,7 +20,7 @@
 
 /* Rights are part of the protocol contract and must be granted exactly. */
 #define LOADER_V1_SERVICE_CAP_RIGHTS ((cap_rights_t)(CAP_CALL))
-#define LOADER_V1_BLOB_CAP_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_REVOKE))
+#define LOADER_V1_FILE_CAP_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ))
 #define LOADER_V1_LOAD_CAP_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_DELEGATE))
 #define LOADER_V1_PROCESS_CAP_RIGHTS                                                                                   \
 	((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_EXEC | CAP_DELEGATE))
@@ -38,11 +38,11 @@ struct loader_v1_request_header {
 };
 
 /*
- * Prepare a program from a Blob capability owned by the loader process.
+ * Prepare a program from a file capability owned by the loader process.
  *
- * The caller is responsible for delegating blob_cap to the loader before the
- * call. The delegated capability must grant exactly LOADER_V1_BLOB_CAP_RIGHTS.
- * The loader may use the delegated Blob only while servicing LOAD and must not
+ * The caller is responsible for delegating file_cap to the loader before the
+ * call. The delegated capability must grant exactly LOADER_V1_FILE_CAP_RIGHTS.
+ * The loader may use the delegated file only while servicing LOAD and must not
  * retain it after replying. The caller must revoke the temporary delegated
  * capability after LOAD returns, whether the operation succeeds or fails.
  *
@@ -51,7 +51,7 @@ struct loader_v1_request_header {
  */
 struct loader_v1_load_request {
 	struct loader_v1_request_header header;
-	cap_id_t                        blob_cap;
+	cap_id_t                        file_cap;
 	uint32_t                        name_size;
 	uint32_t                        reserved;
 };

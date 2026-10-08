@@ -34,8 +34,8 @@ struct elf64_image {
 	size_t                segment_count;
 };
 
-/* Parse and validate a static ELF64 executable exposed by a Blob capability. */
-enum elf64_parse_result elf64_image_parse(cap_id_t blob_cap, struct elf64_image* out_image);
+/* Parse and validate a static ELF64 executable exposed by a file capability. */
+enum elf64_parse_result elf64_image_parse(cap_id_t file_cap, struct elf64_image* out_image);
 
 /* Release resources owned by an image returned by elf64_image_parse(). */
 void elf64_image_deinit(struct elf64_image* image);

@@ -4,7 +4,7 @@
 #include <base/math.h>
 #include <base/startup.h>
 #include <base/thread.h>
-#include <runtime/blob.h>
+#include <runtime/filesystem.h>
 #include <runtime/heap.h>
 #include <runtime/init.h>
 #include <stdint.h>
@@ -72,21 +72,39 @@ static syscall_status_t record_mapping(struct loader_loaded_program* program, ca
 	return SYSCALL_STATUS_OK;
 }
 
-static syscall_status_t populate_region(cap_id_t blob_cap, uintptr_t destination, const struct elf64_image* image,
-                                        const struct loader_elf_load_region* region) {
-	for (size_t i = 0u; i < image->segment_count; i++) {
-		const struct elf64_segment* segment = &image->segments[i];
-		if (!segment_in_region(segment, region) || segment->filesz == 0u) continue;
-		uint64_t offset = segment->vaddr - region->virtual_base;
-		if (offset > SIZE_MAX || segment->filesz > SIZE_MAX ||
-		    blob_read(blob_cap, segment->offset, (void*)(destination + (size_t)offset), (size_t)segment->filesz) !=
-		        SYSCALL_STATUS_OK)
-			return SYSCALL_STATUS_FAILED;
+static syscall_status_t read_exact(cap_id_t file_cap, uint64_t offset, void* buffer, size_t size) {
+	uint8_t* cursor = buffer;
+
+	while (size != 0u) {
+		struct filesystem_call_result result;
+		size_t                        read = 0u;
+
+		result = filesystem_file_read(file_cap, offset, cursor, size, &read);
+		if (result.transport_status != SYSCALL_STATUS_OK) return result.transport_status;
+		if (result.status != FILESYSTEM_STATUS_OK || read == 0u) return SYSCALL_STATUS_FAILED;
+		offset += read;
+		cursor += read;
+		size -= read;
 	}
 	return SYSCALL_STATUS_OK;
 }
 
-static syscall_status_t load_region(struct loader_loaded_program* program, cap_id_t blob_cap,
+static syscall_status_t populate_region(cap_id_t file_cap, uintptr_t destination, const struct elf64_image* image,
+                                        const struct loader_elf_load_region* region) {
+	for (size_t i = 0u; i < image->segment_count; i++) {
+		const struct elf64_segment* segment = &image->segments[i];
+		syscall_status_t            status;
+
+		if (!segment_in_region(segment, region) || segment->filesz == 0u) continue;
+		uint64_t offset = segment->vaddr - region->virtual_base;
+		if (offset > SIZE_MAX || segment->filesz > SIZE_MAX) return SYSCALL_STATUS_FAILED;
+		status = read_exact(file_cap, segment->offset, (void*)(destination + (size_t)offset), (size_t)segment->filesz);
+		if (status != SYSCALL_STATUS_OK) return status;
+	}
+	return SYSCALL_STATUS_OK;
+}
+
+static syscall_status_t load_region(struct loader_loaded_program* program, cap_id_t file_cap,
                                     const struct elf64_image* image, const struct loader_elf_load_plan* plan,
                                     const struct loader_elf_load_region* region) {
 	cap_id_t                          memory_cap = CAP_ID_INVALID;
@@ -104,7 +122,7 @@ static syscall_status_t load_region(struct loader_loaded_program* program, cap_i
 	                           0u,
 	                           &temporary);
 	if (status != SYSCALL_STATUS_OK) goto cleanup;
-	status = populate_region(blob_cap, temporary.address, image, region);
+	status = populate_region(file_cap, temporary.address, image, region);
 	if (status != SYSCALL_STATUS_OK) goto cleanup;
 	status = mapping_unmap(temporary.mapping_cap);
 	if (status != SYSCALL_STATUS_OK) goto cleanup;
@@ -264,7 +282,7 @@ void loader_discard_program(struct loader_loaded_program* program) {
 	free(program);
 }
 
-syscall_status_t loader_prepare_program(cap_id_t blob_cap, const char* name, size_t name_size,
+syscall_status_t loader_prepare_program(cap_id_t file_cap, const char* name, size_t name_size,
                                         struct loader_loaded_program** out_program) {
 	struct elf64_image                image   = {0};
 	struct loader_elf_load_plan       plan    = {0};
@@ -275,11 +293,11 @@ syscall_status_t loader_prepare_program(cap_id_t blob_cap, const char* name, siz
 	struct address_space_info         space_info;
 	char*                             process_name = NULL;
 	syscall_status_t                  status;
-	if (blob_cap == CAP_ID_INVALID || name == NULL || name_size == 0u || name_size == SIZE_MAX || out_program == NULL ||
+	if (file_cap == CAP_ID_INVALID || name == NULL || name_size == 0u || name_size == SIZE_MAX || out_program == NULL ||
 	    memchr(name, '\0', name_size) != NULL)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	*out_program = NULL;
-	status       = parse_status(elf64_image_parse(blob_cap, &image));
+	status       = parse_status(elf64_image_parse(file_cap, &image));
 	if (status != SYSCALL_STATUS_OK) return status;
 	program      = calloc(1u, sizeof(*program));
 	process_name = malloc(name_size + 1u);
@@ -317,7 +335,7 @@ syscall_status_t loader_prepare_program(cap_id_t blob_cap, const char* name, siz
 		goto failed;
 	}
 	for (size_t i = 0u; i < plan.region_count; i++) {
-		status = load_region(program, blob_cap, &image, &plan, &plan.regions[i]);
+		status = load_region(program, file_cap, &image, &plan, &plan.regions[i]);
 		if (status != SYSCALL_STATUS_OK) goto failed;
 	}
 	status = allocate_heap(program);

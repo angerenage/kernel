@@ -1,25 +1,24 @@
 #include "device_manager.h"
 
 #include <base/kernel_resource.h>
-#include <base/module.h>
 #include <base/startup.h>
 #include <protocol/device_manager.h>
 #include <protocol/loader.h>
+#include <protocol/vfs.h>
 #include <runtime/init.h>
 #include <runtime/program.h>
+#include <runtime/vfs.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #include <system/capability.h>
 #include <system/kernel_resource.h>
-#include <system/module.h>
 #include <system/process.h>
 
-#include "module_blob.h"
 #include "registry.h"
 
-#define DEVICE_MANAGER_MODULE_NAME "device_manager.elf"
+#define DEVICE_MANAGER_FILE_PATH "/boot/device_manager.elf"
 #define DEVICE_MANAGER_PROCESS_NAME "device-manager"
 #define DEVICE_MANAGER_LOADER_SERVICE "elf64"
 #define DEVICE_MANAGER_LOADER_MAJOR 1u
@@ -38,7 +37,7 @@ static bool device_manager_drop_capability(cap_id_t* capability, const char* des
 	return true;
 }
 
-static syscall_status_t device_manager_load(const struct init_service_handle* loader, cap_id_t blob_cap,
+static syscall_status_t device_manager_load(const struct init_service_handle* loader, cap_id_t file_cap,
                                             struct program_load_result* out_load) {
 	struct {
 		struct loader_v1_load_request request;
@@ -51,21 +50,21 @@ static syscall_status_t device_manager_load(const struct init_service_handle* lo
 					  },
 	};
 	struct loader_v1_load_response response       = {.load_cap = CAP_ID_INVALID, .process_id = PROCESS_PID_INVALID};
-	cap_id_t                       delegated_blob = CAP_ID_INVALID;
+	cap_id_t                       delegated_file = CAP_ID_INVALID;
 	size_t                         response_size  = 0u;
 	syscall_status_t               cleanup_status;
 	syscall_status_t               status;
 
 	if (loader == NULL || loader->capability == CAP_ID_INVALID || loader->owner == PROCESS_PID_INVALID ||
-	    blob_cap == CAP_ID_INVALID || out_load == NULL)
+	    file_cap == CAP_ID_INVALID || out_load == NULL)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	*out_load = (struct program_load_result){
 		.load_cap   = CAP_ID_INVALID,
 		.process_id = PROCESS_PID_INVALID,
 	};
-	status = cap_delegate(blob_cap, loader->owner, LOADER_V1_BLOB_CAP_RIGHTS, &delegated_blob);
+	status = cap_delegate(file_cap, loader->owner, LOADER_V1_FILE_CAP_RIGHTS, &delegated_file);
 	if (status != SYSCALL_STATUS_OK) return status;
-	payload.request.blob_cap = delegated_blob;
+	payload.request.file_cap = delegated_file;
 	memcpy(payload.name, DEVICE_MANAGER_PROCESS_NAME, sizeof(payload.name));
 	status         = cap_call(loader->capability,
 	                          &payload,
@@ -73,7 +72,7 @@ static syscall_status_t device_manager_load(const struct init_service_handle* lo
 	                          &response,
 	                          sizeof(response),
 	                          &response_size);
-	cleanup_status = cap_revoke(delegated_blob, 0u);
+	cleanup_status = cap_revoke(delegated_file, 0u);
 	if (status == SYSCALL_STATUS_OK && cleanup_status != SYSCALL_STATUS_OK) status = cleanup_status;
 	if (status != SYSCALL_STATUS_OK || response_size != sizeof(response) || response.load_cap == CAP_ID_INVALID ||
 	    response.process_id == PROCESS_PID_INVALID) {
@@ -103,21 +102,27 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 		.major          = DEVICE_MANAGER_LOADER_MAJOR,
 		.minor          = DEVICE_MANAGER_LOADER_MINOR,
 	};
-	struct module_provider_resolve_response module = {.cap = CAP_ID_INVALID};
-	struct init_service_handle              loader = {.capability = CAP_ID_INVALID};
-	struct program_load_result              loaded = {
+	static const struct init_protocol_query vfs_query = {
+		.namespace_path = VFS_NAMESPACE,
+		.protocol       = VFS_PROTOCOL_NAME,
+		.major          = VFS_PROTOCOL_VERSION_MAJOR,
+		.minor          = VFS_PROTOCOL_VERSION_MINOR,
+	};
+	struct init_service_handle    loader     = {.capability = CAP_ID_INVALID};
+	struct init_service_handle    vfs        = {.capability = CAP_ID_INVALID};
+	struct filesystem_node_handle executable = {.capability = CAP_ID_INVALID};
+	struct filesystem_call_result open_result;
+	struct program_load_result    loaded = {
 		.load_cap   = CAP_ID_INVALID,
 		.process_id = PROCESS_PID_INVALID,
 	};
 	struct program_run_result running;
 	struct self_info          self;
-	cap_id_t                  acpi_cap    = CAP_ID_INVALID;
-	cap_id_t                  blob_cap    = CAP_ID_INVALID;
-	cap_id_t                  dt_cap      = CAP_ID_INVALID;
-	cap_id_t                  modules_cap = CAP_ID_INVALID;
+	cap_id_t                  acpi_cap = CAP_ID_INVALID;
+	cap_id_t                  dt_cap   = CAP_ID_INVALID;
 	enum init_registry_status registry_status;
 	syscall_status_t          status;
-	bool                      temporary_caps_released;
+	bool                      temporary_caps_released = true;
 
 	if (init == NULL) return DEVICE_MANAGER_LAUNCH_FAILED;
 	status = process_self_info(&self);
@@ -131,24 +136,34 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 		printf("init: device manager loader acquisition failed: %u\n", (unsigned)registry_status);
 		return DEVICE_MANAGER_LAUNCH_FAILED;
 	}
-	status = kernel_resource_acquire(init->kernel_resources_cap, KERNEL_RESOURCE_TYPE_MODULES, &modules_cap);
-	if (status != SYSCALL_STATUS_OK) {
-		printf("init: device manager modules provider acquisition failed: %u\n", (unsigned)status);
+	registry_status = registry_acquire(self.pid, &vfs_query, VFS_SERVICE_NAME, &vfs);
+	if (registry_status == INIT_REGISTRY_NOT_FOUND) {
+		if (!device_manager_drop_capability(&loader.capability, "loader")) return DEVICE_MANAGER_LAUNCH_FAILED;
+		return DEVICE_MANAGER_LAUNCH_UNAVAILABLE;
+	}
+	if (registry_status != INIT_REGISTRY_OK) {
+		printf("init: device manager VFS acquisition failed: %u\n", (unsigned)registry_status);
 		(void)device_manager_drop_capability(&loader.capability, "loader");
 		return DEVICE_MANAGER_LAUNCH_FAILED;
 	}
-	status = module_resolve(modules_cap, DEVICE_MANAGER_MODULE_NAME, sizeof(DEVICE_MANAGER_MODULE_NAME), &module);
-	if (status != SYSCALL_STATUS_OK) {
-		printf("init: device_manager.elf module resolution failed: %u\n", (unsigned)status);
+	open_result = vfs_open(vfs.capability,
+	                       DEVICE_MANAGER_FILE_PATH,
+	                       sizeof(DEVICE_MANAGER_FILE_PATH) - 1u,
+	                       CAP_READ | CAP_DELEGATE,
+	                       &executable);
+	if (open_result.transport_status != SYSCALL_STATUS_OK || open_result.status != FILESYSTEM_STATUS_OK ||
+	    executable.info.type != FILESYSTEM_NODE_FILE) {
+		printf("init: device manager file open failed: transport=%u status=%u\n",
+		       (unsigned)open_result.transport_status,
+		       (unsigned)open_result.status);
+		status =
+			open_result.transport_status == SYSCALL_STATUS_OK ? SYSCALL_STATUS_FAILED : open_result.transport_status;
 	}
-	temporary_caps_released = device_manager_drop_capability(&modules_cap, "modules provider");
-	if (status == SYSCALL_STATUS_OK) {
-		status = module_blob_create(module.cap, module.size, &blob_cap);
-		if (status == SYSCALL_STATUS_OK) module.cap = CAP_ID_INVALID;
+	else {
+		status = device_manager_load(&loader, executable.capability, &loaded);
 	}
-	if (status == SYSCALL_STATUS_OK) status = device_manager_load(&loader, blob_cap, &loaded);
-	if (module.cap != CAP_ID_INVALID && !device_manager_drop_capability(&module.cap, "module"))
-		temporary_caps_released = false;
+	if (!device_manager_drop_capability(&executable.capability, "executable file")) temporary_caps_released = false;
+	if (!device_manager_drop_capability(&vfs.capability, "VFS")) temporary_caps_released = false;
 	if (!device_manager_drop_capability(&loader.capability, "loader")) temporary_caps_released = false;
 	if (status != SYSCALL_STATUS_OK || !temporary_caps_released) {
 		if (status != SYSCALL_STATUS_OK) printf("init: device manager load failed: %u\n", (unsigned)status);

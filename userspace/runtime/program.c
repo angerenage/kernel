@@ -91,7 +91,7 @@ static syscall_status_t resolve_loader(const char* service, struct cached_loader
 	return SYSCALL_STATUS_OK;
 }
 
-static syscall_status_t loader_load(cap_id_t loader_cap, cap_id_t blob_cap, const char* name, size_t name_size,
+static syscall_status_t loader_load(cap_id_t loader_cap, cap_id_t file_cap, const char* name, size_t name_size,
                                     struct program_load_result* out_result) {
 	struct loader_v1_load_request* request;
 	struct loader_v1_load_response response;
@@ -107,7 +107,7 @@ static syscall_status_t loader_load(cap_id_t loader_cap, cap_id_t blob_cap, cons
 
 	*request = (struct loader_v1_load_request){
 		.header    = {.op = LOADER_V1_OP_LOAD},
-		.blob_cap  = blob_cap,
+		.file_cap  = file_cap,
 		.name_size = (uint32_t)name_size,
 	};
 	memcpy(request + 1, name, name_size);
@@ -124,14 +124,14 @@ static syscall_status_t loader_load(cap_id_t loader_cap, cap_id_t blob_cap, cons
 	return SYSCALL_STATUS_OK;
 }
 
-syscall_status_t program_load(const char* service, cap_id_t blob_cap, const char* name, size_t name_size,
+syscall_status_t program_load(const char* service, cap_id_t file_cap, const char* name, size_t name_size,
                               struct program_load_result* out_result) {
 	struct cached_loader loader;
-	cap_id_t             delegated_blob = CAP_ID_INVALID;
+	cap_id_t             delegated_file = CAP_ID_INVALID;
 	syscall_status_t     cleanup_status;
 	syscall_status_t     status;
 
-	if (service == NULL || blob_cap == CAP_ID_INVALID || name == NULL || name_size == 0u || out_result == NULL ||
+	if (service == NULL || file_cap == CAP_ID_INVALID || name == NULL || name_size == 0u || out_result == NULL ||
 	    memchr(name, '\0', name_size) != NULL)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	*out_result = (struct program_load_result){
@@ -141,10 +141,10 @@ syscall_status_t program_load(const char* service, cap_id_t blob_cap, const char
 
 	status = resolve_loader(service, &loader);
 	if (status != SYSCALL_STATUS_OK) return status;
-	status = cap_delegate(blob_cap, loader.owner, LOADER_V1_BLOB_CAP_RIGHTS, &delegated_blob);
+	status = cap_delegate(file_cap, loader.owner, LOADER_V1_FILE_CAP_RIGHTS, &delegated_file);
 	if (status != SYSCALL_STATUS_OK) return status;
-	status         = loader_load(loader.capability, delegated_blob, name, name_size, out_result);
-	cleanup_status = cap_revoke(delegated_blob, 0u);
+	status         = loader_load(loader.capability, delegated_file, name, name_size, out_result);
+	cleanup_status = cap_revoke(delegated_file, 0u);
 	if (cleanup_status != SYSCALL_STATUS_OK) {
 		if (status == SYSCALL_STATUS_OK && out_result->load_cap != CAP_ID_INVALID &&
 		    program_cancel(out_result->load_cap) == SYSCALL_STATUS_OK) {

@@ -5,7 +5,7 @@
  *
  * These helpers are intentionally separate from the loader protocol itself.
  * They use init's service registry, cache the selected loader advertisement,
- * delegate Blob capabilities to its provider and perform the loader protocol
+ * delegate file capabilities to its provider and perform the loader protocol
  * calls on behalf of the caller.
  */
 
@@ -30,8 +30,8 @@ struct program_capability_argument {
 	cap_rights_t rights;
 };
 
-/* Resolve a loader service if necessary and prepare a program from blob_cap. */
-syscall_status_t program_load(const char* service, cap_id_t blob_cap, const char* name, size_t name_size,
+/* Resolve a loader service if necessary and prepare a program from file_cap. */
+syscall_status_t program_load(const char* service, cap_id_t file_cap, const char* name, size_t name_size,
                               struct program_load_result* out_result);
 
 /* Delegate ordered capability arguments, start a loading object and receive process control. */

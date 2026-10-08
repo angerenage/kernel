@@ -28,8 +28,8 @@ struct loader_loaded_program {
 	struct loader_loaded_program*    next;
 };
 
-/* Build a complete, non-running process from a static ELF64 Blob. */
-syscall_status_t loader_prepare_program(cap_id_t blob_cap, const char* name, size_t name_size,
+/* Build a complete, non-running process from a static ELF64 file. */
+syscall_status_t loader_prepare_program(cap_id_t file_cap, const char* name, size_t name_size,
                                         struct loader_loaded_program** out_program);
 
 /* Start a prepared process with the positional arguments from LOADER_V1_OP_RUN. */

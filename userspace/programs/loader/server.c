@@ -74,13 +74,13 @@ static bool handle_load(const struct cap_request* call, const void* data) {
 
 	if (!copy_request(call, data, &request, sizeof(request)))
 		return reply_request(call->call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
-	if (request.reserved != 0u || request.name_size == 0u || request.blob_cap == CAP_ID_INVALID ||
+	if (request.reserved != 0u || request.name_size == 0u || request.file_cap == CAP_ID_INVALID ||
 	    request.name_size > CAP_MAX_REQUEST_SIZE - sizeof(request) ||
 	    (expected_size = sizeof(request) + (uint64_t)request.name_size) != call->request_size ||
 	    call->response_capacity < sizeof(response))
 		return reply_request(call->call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 
-	status = loader_prepare_program(request.blob_cap, (const char*)data + sizeof(request), request.name_size, &program);
+	status = loader_prepare_program(request.file_cap, (const char*)data + sizeof(request), request.name_size, &program);
 	if (status != SYSCALL_STATUS_OK) return reply_request(call->call_id, NULL, 0u, status);
 
 	object_id = loaded_object_id(program);
