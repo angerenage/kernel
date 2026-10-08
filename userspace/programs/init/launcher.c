@@ -1,9 +1,12 @@
 #include "launcher.h"
 
 #include <base/loader.h>
+#include <base/math.h>
 #include <base/module.h>
 #include <base/startup.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <system/capability.h>
 #include <system/kernel_resource.h>
@@ -49,24 +52,35 @@ static void rollback_bootstrap_process(struct loader_load_response* loaded, cap_
 	(void)drop_owned_capability(&loaded->process_cap, description);
 }
 
-bool bootstrap_launch(const struct init_state* init, const char* module_name, const char* description) {
+bool bootstrap_launch(const struct init_state* init, const char* module_name, const char* description,
+                      size_t capability_count, const struct program_capability_argument capabilities[]) {
 	struct module_provider_resolve_response module = {.cap = CAP_ID_INVALID};
 	struct loader_load_response             loaded;
 	struct process_info_response            process_info;
-	struct {
-		struct process_startup_info info;
-		cap_id_t                    capabilities[PROCESS_STARTUP_CAP_COUNT];
-	} startup;
-	cap_id_t         init_cap          = CAP_ID_INVALID;
-	cap_id_t         loader_cap        = CAP_ID_INVALID;
-	cap_id_t         modules_cap       = CAP_ID_INVALID;
-	cap_id_t         allocator_cap     = CAP_ID_INVALID;
-	cap_id_t         serial_stream_cap = CAP_ID_INVALID;
-	cap_id_t         thread_cap        = CAP_ID_INVALID;
-	syscall_status_t status;
-	bool             temporary_caps_released;
+	struct process_startup_info*            startup = NULL;
+	cap_id_t*                               startup_capabilities;
+	size_t                                  startup_capability_count;
+	size_t                                  startup_capability_size;
+	size_t                                  startup_size;
+	cap_id_t                                init_cap          = CAP_ID_INVALID;
+	cap_id_t                                loader_cap        = CAP_ID_INVALID;
+	cap_id_t                                modules_cap       = CAP_ID_INVALID;
+	cap_id_t                                allocator_cap     = CAP_ID_INVALID;
+	cap_id_t                                serial_stream_cap = CAP_ID_INVALID;
+	cap_id_t                                thread_cap        = CAP_ID_INVALID;
+	syscall_status_t                        status;
+	bool                                    temporary_caps_released;
 
-	if (init == NULL || module_name == NULL || module_name[0] == '\0' || description == NULL) return false;
+	if (init == NULL || module_name == NULL || module_name[0] == '\0' || description == NULL ||
+	    (capability_count != 0u && capabilities == NULL) || capability_count > UINT32_MAX - PROCESS_STARTUP_CAP_COUNT)
+		return false;
+	startup_capability_count = PROCESS_STARTUP_CAP_COUNT + capability_count;
+	if (mul_overflow_size(startup_capability_count, sizeof(*startup_capabilities), &startup_capability_size) ||
+	    add_overflow_size(sizeof(*startup), startup_capability_size, &startup_size) || startup_size > UINT32_MAX)
+		return false;
+	for (size_t i = 0u; i < capability_count; i++) {
+		if (capabilities[i].capability != CAP_ID_INVALID && capabilities[i].rights == 0u) return false;
+	}
 	loaded.process_cap       = CAP_ID_INVALID;
 	loaded.address_space_cap = CAP_ID_INVALID;
 	status = kernel_resource_acquire(init->kernel_resources_cap, KERNEL_RESOURCE_TYPE_LOADER, &loader_cap);
@@ -126,25 +140,35 @@ bool bootstrap_launch(const struct init_state* init, const char* module_name, co
 		printf("init: serial stream delegation failed: %u\n", (unsigned)status);
 		goto fail;
 	}
-	startup = (typeof(startup)){
-		.info =
-			{
-				   .size                 = sizeof(startup),
-				   .heap_base            = loaded.heap_base,
-				   .heap_size            = loaded.heap_size,
-				   .memory_allocator_cap = allocator_cap,
-				   .init_cap             = init_cap,
-				   .capc                 = PROCESS_STARTUP_CAP_COUNT,
-				   .capv_offset          = sizeof(startup.info),
-				   },
-		.capabilities =
-			{
-				   [PROCESS_STARTUP_CAP_STDIN]  = CAP_ID_INVALID,
-				   [PROCESS_STARTUP_CAP_STDOUT] = serial_stream_cap,
-				   [PROCESS_STARTUP_CAP_STDERR] = serial_stream_cap,
-				   },
+	startup = calloc(1u, startup_size);
+	if (startup == NULL) goto fail;
+	*startup = (struct process_startup_info){
+		.size                 = (uint32_t)startup_size,
+		.heap_base            = loaded.heap_base,
+		.heap_size            = loaded.heap_size,
+		.memory_allocator_cap = allocator_cap,
+		.init_cap             = init_cap,
+		.capc                 = (uint32_t)startup_capability_count,
+		.capv_offset          = sizeof(*startup),
 	};
-	status = process_run(loaded.process_cap, loaded.entry, &startup, sizeof(startup), &thread_cap);
+	startup_capabilities                             = (cap_id_t*)((uint8_t*)startup + startup->capv_offset);
+	startup_capabilities[PROCESS_STARTUP_CAP_STDIN]  = CAP_ID_INVALID;
+	startup_capabilities[PROCESS_STARTUP_CAP_STDOUT] = serial_stream_cap;
+	startup_capabilities[PROCESS_STARTUP_CAP_STDERR] = serial_stream_cap;
+	for (size_t i = 0u; i < capability_count; i++) {
+		if (capabilities[i].capability == CAP_ID_INVALID) continue;
+		status = cap_delegate(capabilities[i].capability,
+		                      process_info.pid,
+		                      capabilities[i].rights,
+		                      &startup_capabilities[PROCESS_STARTUP_CAP_COUNT + i]);
+		if (status != SYSCALL_STATUS_OK) {
+			printf("init: %s capability delegation failed: %u\n", description, (unsigned)status);
+			goto fail;
+		}
+	}
+	status = process_run(loaded.process_cap, loaded.entry, startup, startup_size, &thread_cap);
+	free(startup);
+	startup = NULL;
 	if (status != SYSCALL_STATUS_OK) {
 		printf("init: %s process start failed: %u\n", description, (unsigned)status);
 		goto fail;
@@ -160,6 +184,7 @@ bool bootstrap_launch(const struct init_state* init, const char* module_name, co
 	return true;
 
 fail:
+	free(startup);
 	rollback_bootstrap_process(&loaded, &thread_cap, description);
 	return false;
 }
