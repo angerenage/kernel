@@ -218,6 +218,51 @@ static syscall_result_t boot_module_resolve_handler(const struct cap_request* re
 	return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 }
 
+static syscall_result_t boot_module_enumerate_handler(const struct cap_request* req) {
+	struct module_provider_enumerate_request   request;
+	struct module_provider_enumerate_response* response;
+	size_t                                     maximum_count;
+	size_t                                     offset;
+	size_t                                     returned;
+	size_t                                     response_size;
+	size_t                                     total;
+	syscall_result_t                           result;
+
+	if ((req->rights & CAP_READ) != CAP_READ) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
+	if (req->request == NULL || req->request_size != sizeof(request) || req->response_capacity < sizeof(*response))
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	memcpy(&request, req->request, sizeof(request));
+	maximum_count = (CAP_MAX_RESPONSE_SIZE - sizeof(*response)) / sizeof(struct module_provider_entry);
+	if (request.header.op != MODULE_PROVIDER_OP_ENUMERATE || request.reserved != 0u || request.count > maximum_count ||
+	    request.count > (req->response_capacity - sizeof(*response)) / sizeof(struct module_provider_entry))
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+
+	total    = boot_module_count();
+	offset   = request.offset > total ? total : (size_t)request.offset;
+	returned = total - offset;
+	if (returned > (size_t)request.count) returned = (size_t)request.count;
+	response_size = sizeof(*response) + returned * sizeof(struct module_provider_entry);
+	response      = calloc(1u, response_size);
+	if (response == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
+	response->total    = total;
+	response->returned = returned;
+	for (size_t i = 0u; i < returned; i++) {
+		const struct boot_module* module = boot_module_get(offset + i);
+		if (module == NULL) {
+			free(response);
+			return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
+		}
+		response->entries[i].id         = (module_id_t)(offset + i) + 1u;
+		response->entries[i].size       = module->size;
+		response->entries[i].media_type = module->media_type;
+		strlcpy(response->entries[i].name, module->name != NULL ? module->name : "", sizeof(response->entries[i].name));
+		strlcpy(response->entries[i].path, module->path != NULL ? module->path : "", sizeof(response->entries[i].path));
+	}
+	result = cap_kernel_write_response(req, response, response_size);
+	free(response);
+	return result;
+}
+
 static syscall_result_t boot_module_provider_handler(const struct cap_request* req) {
 	uint32_t operation;
 
@@ -225,8 +270,14 @@ static syscall_result_t boot_module_provider_handler(const struct cap_request* r
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 	memcpy(&operation, req->request, sizeof(operation));
-	if (operation != MODULE_PROVIDER_OP_RESOLVE) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	return boot_module_resolve_handler(req);
+	switch (operation) {
+	case MODULE_PROVIDER_OP_RESOLVE:
+		return boot_module_resolve_handler(req);
+	case MODULE_PROVIDER_OP_ENUMERATE:
+		return boot_module_enumerate_handler(req);
+	default:
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
 }
 
 static syscall_result_t boot_module_handler(const struct cap_request* req) {

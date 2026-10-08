@@ -12,7 +12,8 @@ typedef uint64_t module_id_t;
 
 /* Operations supported by the modules-provider capability. */
 enum module_provider_op {
-	MODULE_PROVIDER_OP_RESOLVE = 0,
+	MODULE_PROVIDER_OP_RESOLVE   = 0,
+	MODULE_PROVIDER_OP_ENUMERATE = 1,
 };
 
 struct module_provider_request_header {
@@ -33,6 +34,31 @@ struct module_provider_resolve_response {
 	uint32_t    media_type;
 	char        name[MODULE_NAME_CAPACITY];
 	char        path[MODULE_PATH_CAPACITY];
+};
+
+/* Request one stable page of boot-module metadata in provider order. */
+struct module_provider_enumerate_request {
+	struct module_provider_request_header header;
+	uint32_t                              reserved;
+	uint64_t                              offset;
+	uint64_t                              count;
+};
+
+/* Fixed-size boot-module descriptor returned by provider enumeration. */
+struct module_provider_entry {
+	module_id_t id;
+	uint64_t    size;
+	uint32_t    media_type;
+	uint32_t    reserved;
+	char        name[MODULE_NAME_CAPACITY];
+	char        path[MODULE_PATH_CAPACITY];
+};
+
+/* Total provider size and the descriptors returned for the requested page. */
+struct module_provider_enumerate_response {
+	uint64_t                     total;
+	uint64_t                     returned;
+	struct module_provider_entry entries[];
 };
 
 /* Operation codes for boot-module capability requests. */

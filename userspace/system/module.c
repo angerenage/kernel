@@ -1,6 +1,7 @@
 #include <base/math.h>
 #include <libc/stdlib.h>
 #include <runtime/diagnostic.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -8,6 +9,12 @@
 #include <system/module.h>
 
 #include "syscall.h"
+
+static bool module_provider_entry_valid(const struct module_provider_entry* entry) {
+	return entry->id != MODULE_ID_INVALID && entry->reserved == 0u &&
+	       memchr(entry->name, '\0', sizeof(entry->name)) != NULL &&
+	       memchr(entry->path, '\0', sizeof(entry->path)) != NULL;
+}
 
 syscall_status_t module_resolve(cap_id_t modules_provider_cap, const char* name, size_t name_length,
                                 struct module_provider_resolve_response* out_module) {
@@ -51,6 +58,55 @@ syscall_status_t module_resolve(cap_id_t modules_provider_cap, const char* name,
 		RUNTIME_DIAGNOSTIC_INVALID_STATE("MODULE_PROVIDER_OP_RESOLVE returned an invalid response");
 		return SYSCALL_STATUS_FAILED;
 	}
+	return SYSCALL_STATUS_OK;
+}
+
+syscall_status_t module_enumerate(cap_id_t modules_provider_cap, uint64_t offset, struct module_provider_entry* entries,
+                                  size_t count, size_t* out_returned, uint64_t* out_total) {
+	const size_t maximum_count =
+		(CAP_MAX_RESPONSE_SIZE - sizeof(struct module_provider_enumerate_response)) / sizeof(*entries);
+	struct module_provider_enumerate_request request = {
+		.header   = {.op = MODULE_PROVIDER_OP_ENUMERATE},
+		.reserved = 0u,
+		.offset   = offset,
+	};
+	struct module_provider_enumerate_response* response;
+	syscall_result_t                           result;
+	size_t                                     capacity;
+	size_t                                     transfer_count;
+
+	if (out_returned == NULL || out_total == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	*out_returned = 0u;
+	*out_total    = 0u;
+	if (modules_provider_cap == CAP_ID_INVALID || (count != 0u && entries == NULL)) return SYSCALL_STATUS_BAD_ARGUMENT;
+	transfer_count = count > maximum_count ? maximum_count : count;
+	request.count  = transfer_count;
+	capacity       = sizeof(*response) + transfer_count * sizeof(*entries);
+	response       = malloc(capacity);
+	if (response == NULL) return SYSCALL_STATUS_FAILED;
+	result = cap_call_syscall(modules_provider_cap, &request, sizeof(request), response, capacity);
+	RUNTIME_DIAGNOSTIC_OPERATION_RESULT(MODULE_PROVIDER_OP_ENUMERATE, result);
+	if (result.status != SYSCALL_STATUS_OK) {
+		free(response);
+		return result.status;
+	}
+	if (result.value < sizeof(*response) || response->returned > transfer_count ||
+	    response->returned > response->total ||
+	    (response->returned != 0u && (offset > response->total || response->returned > response->total - offset)) ||
+	    result.value != sizeof(*response) + (size_t)response->returned * sizeof(*entries)) {
+		free(response);
+		return SYSCALL_STATUS_FAILED;
+	}
+	for (size_t i = 0u; i < (size_t)response->returned; i++) {
+		if (!module_provider_entry_valid(&response->entries[i])) {
+			free(response);
+			return SYSCALL_STATUS_FAILED;
+		}
+	}
+	if (response->returned != 0u) memcpy(entries, response->entries, (size_t)response->returned * sizeof(*entries));
+	*out_returned = (size_t)response->returned;
+	*out_total    = response->total;
+	free(response);
 	return SYSCALL_STATUS_OK;
 }
 

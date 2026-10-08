@@ -10,6 +10,10 @@
 syscall_status_t module_resolve(cap_id_t modules_provider_cap, const char* name, size_t name_length,
                                 struct module_provider_resolve_response* out_module);
 
+/* Read up to count boot-module descriptors starting at offset. */
+syscall_status_t module_enumerate(cap_id_t modules_provider_cap, uint64_t offset, struct module_provider_entry* entries,
+                                  size_t count, size_t* out_returned, uint64_t* out_total);
+
 /* Read descriptive metadata through a boot-module capability. */
 syscall_status_t module_get_info(cap_id_t module_cap, struct module_info_response* out_info);
 
