@@ -14,6 +14,9 @@ enum init_registry_status registry_withdraw(process_id_t owner, const struct ini
 enum init_registry_status registry_acquire(process_id_t caller, const struct init_protocol_query* query,
                                            const char* service, struct init_service_handle* out_handle);
 
+/* Report whether one exact service is currently advertised. */
+bool registry_contains(const struct init_service_selector* selector);
+
 /* Fetch an offset/size page of compatible service metadata and the current total. */
 enum init_registry_status registry_enumerate(const struct init_protocol_query* query, uint64_t offset, uint64_t size,
                                              struct init_service_info* entries, uint64_t* out_returned,

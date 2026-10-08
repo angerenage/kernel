@@ -4,6 +4,7 @@
 #include <base/module.h>
 #include <base/startup.h>
 #include <stdio.h>
+#include <string.h>
 #include <system/capability.h>
 #include <system/kernel_resource.h>
 #include <system/loader.h>
@@ -25,16 +26,17 @@ static bool drop_owned_capability(cap_id_t* capability, const char* description)
 	return true;
 }
 
-static void rollback_loader_process(struct loader_load_response* loaded, cap_id_t* thread_cap) {
+static void rollback_bootstrap_process(struct loader_load_response* loaded, cap_id_t* thread_cap,
+                                       const char* description) {
 	syscall_status_t status;
 
 	if (loaded == NULL || loaded->process_cap == CAP_ID_INVALID) return;
-	(void)drop_owned_capability(thread_cap, "loader thread");
-	(void)drop_owned_capability(&loaded->address_space_cap, "loader address-space");
+	(void)drop_owned_capability(thread_cap, "bootstrap thread");
+	(void)drop_owned_capability(&loaded->address_space_cap, "bootstrap address-space");
 
 	status = process_kill(loaded->process_cap, PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
 	if (status != SYSCALL_STATUS_OK) {
-		printf("init: loader process kill during rollback failed: %u\n", (unsigned)status);
+		printf("init: %s process kill during rollback failed: %u\n", description, (unsigned)status);
 	}
 	status = process_wait(loaded->process_cap, NULL);
 	if (status == SYSCALL_STATUS_OK) {
@@ -43,11 +45,11 @@ static void rollback_loader_process(struct loader_load_response* loaded, cap_id_
 		if (thread_cap != NULL) *thread_cap = CAP_ID_INVALID;
 		return;
 	}
-	printf("init: loader process wait during rollback failed: %u\n", (unsigned)status);
-	(void)drop_owned_capability(&loaded->process_cap, "loader process");
+	printf("init: %s process wait during rollback failed: %u\n", description, (unsigned)status);
+	(void)drop_owned_capability(&loaded->process_cap, description);
 }
 
-bool loader_launch(const struct init_state* init) {
+bool bootstrap_launch(const struct init_state* init, const char* module_name, const char* description) {
 	struct module_provider_resolve_response module = {.cap = CAP_ID_INVALID};
 	struct loader_load_response             loaded;
 	struct process_info_response            process_info;
@@ -64,7 +66,7 @@ bool loader_launch(const struct init_state* init) {
 	syscall_status_t status;
 	bool             temporary_caps_released;
 
-	if (init == NULL) return false;
+	if (init == NULL || module_name == NULL || module_name[0] == '\0' || description == NULL) return false;
 	loaded.process_cap       = CAP_ID_INVALID;
 	loaded.address_space_cap = CAP_ID_INVALID;
 	status = kernel_resource_acquire(init->kernel_resources_cap, KERNEL_RESOURCE_TYPE_LOADER, &loader_cap);
@@ -78,32 +80,32 @@ bool loader_launch(const struct init_state* init) {
 		(void)drop_owned_capability(&loader_cap, "kernel loader");
 		return false;
 	}
-	status = module_resolve(modules_cap, "loader.elf", sizeof("loader.elf"), &module);
+	status = module_resolve(modules_cap, module_name, strlen(module_name) + 1u, &module);
 	if (!drop_owned_capability(&modules_cap, "modules provider")) {
-		(void)drop_owned_capability(&module.cap, "loader module");
+		(void)drop_owned_capability(&module.cap, "bootstrap module");
 		(void)drop_owned_capability(&loader_cap, "kernel loader");
 		return false;
 	}
 	if (status != SYSCALL_STATUS_OK) {
-		printf("init: loader.elf module resolution failed: %u\n", (unsigned)status);
+		printf("init: %s module resolution failed: %u\n", module_name, (unsigned)status);
 		(void)drop_owned_capability(&loader_cap, "kernel loader");
 		return false;
 	}
 	status = loader_load(loader_cap, module.cap, &loaded);
 	if (status != SYSCALL_STATUS_OK) {
-		printf("init: loader.elf load failed: %u\n", (unsigned)status);
+		printf("init: %s load failed: %u\n", module_name, (unsigned)status);
 	}
-	temporary_caps_released = drop_owned_capability(&module.cap, "loader module");
+	temporary_caps_released = drop_owned_capability(&module.cap, "bootstrap module");
 	if (!drop_owned_capability(&loader_cap, "kernel loader")) temporary_caps_released = false;
 	if (status != SYSCALL_STATUS_OK) {
-		rollback_loader_process(&loaded, &thread_cap);
+		rollback_bootstrap_process(&loaded, &thread_cap, description);
 		return false;
 	}
 	if (!temporary_caps_released) goto fail;
-	if (!drop_owned_capability(&loaded.address_space_cap, "loader address-space")) goto fail;
+	if (!drop_owned_capability(&loaded.address_space_cap, "bootstrap address-space")) goto fail;
 	status = process_get_info(loaded.process_cap, &process_info);
 	if (status != SYSCALL_STATUS_OK) {
-		printf("init: loaded process query failed: %u\n", (unsigned)status);
+		printf("init: %s process query failed: %u\n", description, (unsigned)status);
 		goto fail;
 	}
 	status = cap_delegate(init->memory_allocator_cap,
@@ -144,20 +146,20 @@ bool loader_launch(const struct init_state* init) {
 	};
 	status = process_run(loaded.process_cap, loaded.entry, &startup, sizeof(startup), &thread_cap);
 	if (status != SYSCALL_STATUS_OK) {
-		printf("init: loader process start failed: %u\n", (unsigned)status);
+		printf("init: %s process start failed: %u\n", description, (unsigned)status);
 		goto fail;
 	}
-	if (!drop_owned_capability(&thread_cap, "loader thread")) goto fail;
+	if (!drop_owned_capability(&thread_cap, "bootstrap thread")) goto fail;
 	status = process_detach(loaded.process_cap);
 	if (status != SYSCALL_STATUS_OK) {
-		printf("init: loader process detach failed: %u\n", (unsigned)status);
+		printf("init: %s process detach failed: %u\n", description, (unsigned)status);
 		goto fail;
 	}
 
-	(void)drop_owned_capability(&loaded.process_cap, "loader process");
+	(void)drop_owned_capability(&loaded.process_cap, "bootstrap process");
 	return true;
 
 fail:
-	rollback_loader_process(&loaded, &thread_cap);
+	rollback_bootstrap_process(&loaded, &thread_cap, description);
 	return false;
 }

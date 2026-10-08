@@ -117,6 +117,7 @@ userspace_link_libs = [
 userspace_programs = []
 
 subdir('programs/init')
+subdir('programs/vfs')
 subdir('programs/loader')
 subdir('programs/device_manager')
 

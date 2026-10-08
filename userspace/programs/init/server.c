@@ -1,5 +1,7 @@
 #include "server.h"
 
+#include <protocol/vfs.h>
+#include <runtime/vfs.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <system/capability.h>
@@ -15,12 +17,51 @@ static channel_id_t server_endpoint = CHANNEL_ID_INVALID;
 static cap_id_t     server_activity = CAP_ID_INVALID;
 static process_id_t server_pid      = PROCESS_PID_INVALID;
 
+enum vfs_readiness {
+	VFS_READINESS_WAIT,
+	VFS_READINESS_READY,
+	VFS_READINESS_FAILED,
+};
+
 static bool reply_request(cap_call_id_t call_id, const void* response, size_t response_size,
                           syscall_status_t response_status) {
 	syscall_status_t status = channel_reply(call_id, response, response_size, response_status);
 	if (status == SYSCALL_STATUS_OK) return true;
 	printf("init: channel reply failed: %u\n", (unsigned)status);
 	return false;
+}
+
+static enum vfs_readiness check_vfs_readiness(const struct init_service_selector* selector) {
+	const struct init_protocol_query query = {
+		.namespace_path = VFS_NAMESPACE,
+		.protocol       = VFS_PROTOCOL_NAME,
+		.major          = VFS_PROTOCOL_VERSION_MAJOR,
+		.minor          = VFS_PROTOCOL_VERSION_MINOR,
+	};
+	struct init_service_handle    service = {.capability = CAP_ID_INVALID};
+	struct filesystem_node_handle root    = {.capability = CAP_ID_INVALID};
+	struct filesystem_call_result result;
+	enum init_registry_status     registry_status;
+	syscall_status_t              cleanup_status = SYSCALL_STATUS_OK;
+
+	if (!registry_contains(selector)) return VFS_READINESS_WAIT;
+	registry_status = registry_acquire(server_pid, &query, VFS_SERVICE_NAME, &service);
+	if (registry_status != INIT_REGISTRY_OK) {
+		printf("init: VFS readiness acquisition failed: %u\n", (unsigned)registry_status);
+		return VFS_READINESS_FAILED;
+	}
+	result = vfs_open(service.capability, "/", 1u, CAP_READ, &root);
+	if (root.capability != CAP_ID_INVALID && cap_drop(root.capability) != SYSCALL_STATUS_OK)
+		cleanup_status = SYSCALL_STATUS_FAILED;
+	if (cap_drop(service.capability) != SYSCALL_STATUS_OK) cleanup_status = SYSCALL_STATUS_FAILED;
+	if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK ||
+	    root.info.type != FILESYSTEM_NODE_DIRECTORY || cleanup_status != SYSCALL_STATUS_OK) {
+		printf("init: VFS readiness check failed: transport=%u status=%u\n",
+		       (unsigned)result.transport_status,
+		       (unsigned)result.status);
+		return VFS_READINESS_FAILED;
+	}
+	return VFS_READINESS_READY;
 }
 
 bool server_init(void) {
@@ -176,6 +217,12 @@ static bool dispatch_request(const struct cap_request* request, const void* data
 }
 
 int server_run(const struct init_state* init) {
+	static const struct init_service_selector vfs_selector = {
+		.namespace_path = VFS_NAMESPACE,
+		.protocol       = VFS_PROTOCOL_NAME,
+		.major          = VFS_PROTOCOL_VERSION_MAJOR,
+		.service        = VFS_SERVICE_NAME,
+	};
 	union {
 		struct init_request_header    header;
 		struct init_advertise_request advertise;
@@ -190,6 +237,7 @@ int server_run(const struct init_state* init) {
 	bool               received;
 	bool               device_manager_started = false;
 	bool               loader_started         = false;
+	bool               vfs_started            = false;
 	syscall_status_t   status;
 
 	if (server_endpoint == CHANNEL_ID_INVALID || init == NULL) return 1;
@@ -214,12 +262,21 @@ int server_run(const struct init_state* init) {
 			status = channel_event_recv(server_endpoint, &event, &received);
 			if (status != SYSCALL_STATUS_OK) return 1;
 		} while (received);
-		if (!loader_started) {
-			if (!loader_launch(init)) return 1;
-			loader_started = true;
+		if (!vfs_started) {
+			if (!bootstrap_launch(init, "vfs.elf", "VFS")) return 1;
+			vfs_started = true;
 			continue;
 		}
-		if (!device_manager_started) {
+		if (!loader_started) {
+			enum vfs_readiness readiness = check_vfs_readiness(&vfs_selector);
+			if (readiness == VFS_READINESS_FAILED) return 1;
+			if (readiness == VFS_READINESS_READY) {
+				if (!bootstrap_launch(init, "loader.elf", "loader")) return 1;
+				loader_started = true;
+				continue;
+			}
+		}
+		if (loader_started && !device_manager_started) {
 			enum device_manager_launch_result result = device_manager_launch(init);
 
 			if (result == DEVICE_MANAGER_LAUNCH_FAILED) return 1;

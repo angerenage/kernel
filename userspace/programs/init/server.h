@@ -15,5 +15,5 @@ void server_deinit(void);
 /* Grant a process permission to call and delegate the init service capability. */
 syscall_status_t init_server_grant(process_id_t target, cap_id_t* out_cap);
 
-/* Start the loader once the registry is ready, then serve registry requests. */
+/* Start the VFS and loader, then serve registry requests. */
 int server_run(const struct init_state* init);

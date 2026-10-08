@@ -249,6 +249,15 @@ enum init_registry_status registry_acquire(process_id_t caller, const struct ini
 	return INIT_REGISTRY_NOT_FOUND;
 }
 
+bool registry_contains(const struct init_service_selector* selector) {
+	if (!registry_selector_valid(selector)) return false;
+	prune_dead_advertisements();
+	for (const struct registry_advertisement* ad = advertisements; ad != NULL; ad = ad->next) {
+		if (selector_compare(&ad->selector, selector) == 0) return true;
+	}
+	return false;
+}
+
 enum init_registry_status registry_enumerate(const struct init_protocol_query* query, uint64_t offset, uint64_t size,
                                              struct init_service_info* entries, uint64_t* out_returned,
                                              uint64_t* out_total) {
