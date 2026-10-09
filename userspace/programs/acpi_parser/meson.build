@@ -2,6 +2,7 @@ acpi_parser_src = files(
 	'src/main.c',
 	'src/parser.c',
 	'src/device.c',
+	'src/tables/fadt.c',
 	'src/tables/mcfg.c',
 	'src/tables/tpm2.c',
 )

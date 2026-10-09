@@ -16,6 +16,7 @@
 enum device_manager_capability_argument {
 	DEVICE_MANAGER_CAPABILITY_ACPI = 0u,
 	DEVICE_MANAGER_CAPABILITY_DEVICE_TREE,
+	DEVICE_MANAGER_CAPABILITY_IO_PORTS,
 	DEVICE_MANAGER_CAPABILITY_COUNT,
 };
 
@@ -23,8 +24,13 @@ enum device_manager_capability_argument {
 enum device_parser_capability_argument {
 	DEVICE_PARSER_CAPABILITY_FIRMWARE = 0u,
 	DEVICE_PARSER_CAPABILITY_DEVICE_ROOT,
+	DEVICE_PARSER_CAPABILITY_IO_PORTS,
 	DEVICE_PARSER_CAPABILITY_COUNT,
 };
 
 /* Exact rights delegated to a parser for constructing root devices. */
 #define DEVICE_PARSER_ROOT_CAP_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_MANAGE))
+
+/* Rights required to derive driver-facing I/O-port ranges from the optional x86 provider. */
+#define DEVICE_PARSER_IO_PORTS_CAP_RIGHTS                                                                              \
+	((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP | CAP_DERIVE | CAP_DELEGATE))

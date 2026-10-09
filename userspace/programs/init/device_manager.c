@@ -120,9 +120,10 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 	};
 	struct program_run_result running;
 	struct self_info          self;
-	cap_id_t                  acpi_cap = CAP_ID_INVALID;
-	cap_id_t                  dt_cap   = CAP_ID_INVALID;
-	const char**              argv     = NULL;
+	cap_id_t                  acpi_cap     = CAP_ID_INVALID;
+	cap_id_t                  dt_cap       = CAP_ID_INVALID;
+	cap_id_t                  io_ports_cap = CAP_ID_INVALID;
+	const char**              argv         = NULL;
 	enum init_registry_status registry_status;
 	syscall_status_t          status;
 	bool                      temporary_caps_released = true;
@@ -176,6 +177,10 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 	status = device_manager_optional_resource(init, KERNEL_RESOURCE_TYPE_ACPI, &acpi_cap);
 	if (status == SYSCALL_STATUS_OK)
 		status = device_manager_optional_resource(init, KERNEL_RESOURCE_TYPE_DEVICE_TREE, &dt_cap);
+#if defined(__x86_64__)
+	if (status == SYSCALL_STATUS_OK)
+		status = device_manager_optional_resource(init, KERNEL_RESOURCE_TYPE_IO_PORTS, &io_ports_cap);
+#endif
 	if (status == SYSCALL_STATUS_OK && !init_arguments_vector(init, &argv)) status = SYSCALL_STATUS_FAILED;
 	if (status == SYSCALL_STATUS_OK) {
 		const struct program_capability_argument capv[PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_COUNT] = {
@@ -203,6 +208,11 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 											 .capability = dt_cap,
 											 .rights     = CAP_CALL | CAP_READ | CAP_DELEGATE,
 											 },
+			[PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_IO_PORTS] =
+				{
+											 .capability = io_ports_cap,
+											 .rights     = io_ports_cap == CAP_ID_INVALID ? 0u : DEVICE_PARSER_IO_PORTS_CAP_RIGHTS,
+											 },
 		};
 		status = program_run(
 			&loaded, init->argc, argv, PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_COUNT, capv, &running);
@@ -210,6 +220,7 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 	free(argv);
 	if (!device_manager_drop_capability(&acpi_cap, "ACPI provider")) temporary_caps_released = false;
 	if (!device_manager_drop_capability(&dt_cap, "Device Tree provider")) temporary_caps_released = false;
+	if (!device_manager_drop_capability(&io_ports_cap, "I/O ports")) temporary_caps_released = false;
 	if (status != SYSCALL_STATUS_OK) {
 		printf("init: device manager start failed: %u\n", (unsigned)status);
 		(void)program_cancel(loaded.load_cap);
