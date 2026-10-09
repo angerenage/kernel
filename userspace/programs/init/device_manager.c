@@ -11,11 +11,13 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <system/capability.h>
 #include <system/kernel_resource.h>
 #include <system/process.h>
 
+#include "arguments.h"
 #include "registry.h"
 
 #define DEVICE_MANAGER_FILE_PATH "/boot/device_manager.elf"
@@ -120,6 +122,7 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 	struct self_info          self;
 	cap_id_t                  acpi_cap = CAP_ID_INVALID;
 	cap_id_t                  dt_cap   = CAP_ID_INVALID;
+	const char**              argv     = NULL;
 	enum init_registry_status registry_status;
 	syscall_status_t          status;
 	bool                      temporary_caps_released = true;
@@ -173,6 +176,7 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 	status = device_manager_optional_resource(init, KERNEL_RESOURCE_TYPE_ACPI, &acpi_cap);
 	if (status == SYSCALL_STATUS_OK)
 		status = device_manager_optional_resource(init, KERNEL_RESOURCE_TYPE_DEVICE_TREE, &dt_cap);
+	if (status == SYSCALL_STATUS_OK && !init_arguments_vector(init, &argv)) status = SYSCALL_STATUS_FAILED;
 	if (status == SYSCALL_STATUS_OK) {
 		const struct program_capability_argument capv[PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_COUNT] = {
 			[PROCESS_STARTUP_CAP_STDIN] =
@@ -200,9 +204,10 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 											 .rights     = CAP_CALL | CAP_READ | CAP_DELEGATE,
 											 },
 		};
-		status =
-			program_run(&loaded, 0u, NULL, PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_COUNT, capv, &running);
+		status = program_run(
+			&loaded, init->argc, argv, PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_COUNT, capv, &running);
 	}
+	free(argv);
 	if (!device_manager_drop_capability(&acpi_cap, "ACPI provider")) temporary_caps_released = false;
 	if (!device_manager_drop_capability(&dt_cap, "Device Tree provider")) temporary_caps_released = false;
 	if (status != SYSCALL_STATUS_OK) {

@@ -43,4 +43,7 @@ struct init_startup_info {
 	size_t    heap_size;
 	cap_id_t  memory_allocator_cap;
 	cap_id_t  kernel_resources_cap;
+	uint32_t  argc;
+	uint32_t  argv_offset;
+	uint32_t  argv_size;
 };

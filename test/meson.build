@@ -175,6 +175,25 @@ test_suites = [
 		'suites': ['unit', 'userspace'],
 	},
 	{
+		'name': 'kernel_cmdline',
+		'sources': files(
+			'boot/cmdline.c',
+			'../kernel/src/boot/cmdline.c',
+		),
+		'link_with': base_test_lib,
+		'suites': ['unit', 'kernel'],
+	},
+	{
+		'name': 'init_arguments',
+		'sources': files(
+			'init/arguments.c',
+			'../userspace/programs/init/arguments.c',
+		),
+		'include_directories': [loader_test_inc],
+		'link_with': base_test_lib,
+		'suites': ['unit', 'userspace'],
+	},
+	{
 		'name': 'runtime_startup',
 		'sources': files(
 			'runtime/startup.c',

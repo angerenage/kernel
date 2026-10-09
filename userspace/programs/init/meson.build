@@ -2,6 +2,7 @@ init_elf = executable('init.elf',
 	sources : files(
 		'main.c',
 		'init_crt0.c',
+		'arguments.c',
 		'launcher.c',
 		'device_manager.c',
 		'registry.c',
