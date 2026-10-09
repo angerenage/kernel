@@ -350,7 +350,20 @@ bool device_server_dispatch(struct device_server* server, const struct cap_reque
 
 void device_server_handle_event(struct device_server* server, const struct channel_event* event) {
 	struct dm_builder* builder;
-	if (server == NULL || event == NULL || event->type != CHANNEL_EVENT_CAP_ZERO_GRANTS) return;
+	if (server == NULL || event == NULL || event->type != CHANNEL_EVENT_CAP_ZERO_GRANTS || event->reserved != 0u)
+		return;
+	if (event->object_id == DEVICE_ROOT_OBJECT_ID) {
+		size_t root_count = 0u;
+		if (!server->root_published ||
+		    cap_unpublish_if_unused(server->endpoint, DEVICE_ROOT_OBJECT_ID) != SYSCALL_STATUS_OK)
+			return;
+		server->root_cap       = CAP_ID_INVALID;
+		server->root_published = false;
+		for (const struct dm_device* device = server->state.devices; device != NULL; device = device->next)
+			if (device->parent == NULL) root_count++;
+		printf("device-manager: parser completed with %zu root device(s)\n", root_count);
+		return;
+	}
 	builder = dm_state_find_builder(&server->state, event->object_id);
 	if (builder == NULL || cap_unpublish_if_unused(server->endpoint, event->object_id) != SYSCALL_STATUS_OK) return;
 	dm_builder_abort(&server->state, builder);
@@ -373,6 +386,7 @@ bool device_server_init(struct device_server* server) {
 	status =
 		cap_publish(server->endpoint, DEVICE_ROOT_OBJECT_ID, server->pid, DEVICE_ROOT_CAP_RIGHTS, &server->root_cap);
 	if (status != SYSCALL_STATUS_OK) goto fail;
+	server->root_published = true;
 	return true;
 fail:
 	device_server_deinit(server);
@@ -386,7 +400,7 @@ void device_server_deinit(struct device_server* server) {
 			(void)cap_unpublish(server->endpoint, builder->object_id);
 		for (struct dm_device* device = server->state.devices; device != NULL; device = device->next)
 			(void)cap_unpublish(server->endpoint, device->id);
-		(void)cap_unpublish(server->endpoint, DEVICE_ROOT_OBJECT_ID);
+		if (server->root_published) (void)cap_unpublish(server->endpoint, DEVICE_ROOT_OBJECT_ID);
 	}
 	dm_state_deinit(&server->state);
 	if (server->activity != CAP_ID_INVALID) (void)cap_drop(server->activity);

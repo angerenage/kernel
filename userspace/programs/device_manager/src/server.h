@@ -13,6 +13,7 @@ struct device_server {
 	channel_id_t    endpoint;
 	cap_id_t        activity;
 	cap_id_t        root_cap;
+	bool            root_published;
 	process_id_t    pid;
 	struct dm_state state;
 };

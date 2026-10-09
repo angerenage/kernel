@@ -1,7 +1,9 @@
 device_manager_src = files(
+	'src/bootstrap.c',
 	'src/device.c',
 	'src/main.c',
 	'src/server.c',
+	'src/source.c',
 )
 
 device_manager_elf = executable('device_manager.elf',
