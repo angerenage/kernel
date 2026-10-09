@@ -122,5 +122,6 @@ subdir('programs/vfs')
 subdir('programs/bootfs')
 subdir('programs/loader')
 subdir('programs/device_manager')
+subdir('programs/acpi_parser')
 
 alias_target('userspace', userspace_programs)
