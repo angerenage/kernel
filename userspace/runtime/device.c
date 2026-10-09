@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <system/capability.h>
+#include <system/memory.h>
 
 static bool identifier_valid(const void* value, size_t size) {
 	const uint8_t* bytes = value;
@@ -231,6 +232,26 @@ syscall_status_t device_builder_add_resource(const struct device_builder* builde
 	status = call_empty(builder->capability, request, request_size);
 	free(request);
 	if (status != SYSCALL_STATUS_OK) (void)cap_revoke(delegated, 0u);
+	return status;
+}
+
+syscall_status_t device_builder_add_mmio_resource(const struct device_builder* builder, cap_id_t memory_allocator_cap,
+                                                  const char* name, size_t name_size, uintptr_t physical_address,
+                                                  size_t size) {
+	static const cap_rights_t driver_rights = CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP;
+	cap_id_t                  memory_cap    = CAP_ID_INVALID;
+	syscall_status_t          status;
+	syscall_status_t          cleanup_status;
+
+	if (memory_allocator_cap == CAP_ID_INVALID || size == 0u) return SYSCALL_STATUS_BAD_ARGUMENT;
+	status =
+		memory_allocator_claim_physical(memory_allocator_cap, physical_address, size, MEMORY_TYPE_DEVICE, &memory_cap);
+	if (status == SYSCALL_STATUS_OK)
+		status = device_builder_add_resource(builder, name, name_size, memory_cap, driver_rights);
+	if (memory_cap != CAP_ID_INVALID) {
+		cleanup_status = cap_drop(memory_cap);
+		if (status == SYSCALL_STATUS_OK) status = cleanup_status;
+	}
 	return status;
 }
 

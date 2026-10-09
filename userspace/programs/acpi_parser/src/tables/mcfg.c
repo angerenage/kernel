@@ -17,12 +17,11 @@
 /* MCFG describes an ACPI ECAM configuration window, not an AML PCI host bridge. */
 #define PCI_COMPATIBLE_ECAM "acpi:pci_ecam"
 
-#define PCI_PROPERTY_REGISTER_ADDRESS "register_address"
-#define PCI_PROPERTY_REGISTER_SIZE "register_size"
 #define PCI_PROPERTY_CONFIG_ACCESS "config_access"
 #define PCI_PROPERTY_DOMAIN "domain"
 #define PCI_PROPERTY_START_BUS "start_bus"
 #define PCI_PROPERTY_END_BUS "end_bus"
+#define PCI_RESOURCE_REGISTERS "registers"
 
 struct acpi_mcfg_allocation {
 	uint64_t register_address;
@@ -79,16 +78,20 @@ static bool mcfg_allocation_decode(const uint8_t                bytes[ACPI_MCFG_
 	return true;
 }
 
-static syscall_status_t submit_mcfg_allocation(cap_id_t root_cap, const struct acpi_mcfg_allocation* allocation) {
+static syscall_status_t submit_mcfg_allocation(cap_id_t root_cap, cap_id_t memory_allocator_cap,
+                                               const struct acpi_mcfg_allocation* allocation) {
 	struct device_builder builder = {.capability = CAP_ID_INVALID, .manager_pid = PROCESS_PID_INVALID};
 	syscall_status_t      status;
 
 	status = device_builder_begin_root(root_cap, &builder);
 	if (status == SYSCALL_STATUS_OK) status = acpi_device_add_compatible(&builder, PCI_COMPATIBLE_ECAM);
 	if (status == SYSCALL_STATUS_OK)
-		status = acpi_device_add_u64(&builder, PCI_PROPERTY_REGISTER_ADDRESS, allocation->register_address);
-	if (status == SYSCALL_STATUS_OK)
-		status = acpi_device_add_u64(&builder, PCI_PROPERTY_REGISTER_SIZE, allocation->register_size);
+		status = device_builder_add_mmio_resource(&builder,
+		                                          memory_allocator_cap,
+		                                          PCI_RESOURCE_REGISTERS,
+		                                          sizeof(PCI_RESOURCE_REGISTERS) - 1u,
+		                                          (uintptr_t)allocation->register_address,
+		                                          (size_t)allocation->register_size);
 	if (status == SYSCALL_STATUS_OK) status = acpi_device_add_string(&builder, PCI_PROPERTY_CONFIG_ACCESS, "ecam");
 	if (status == SYSCALL_STATUS_OK)
 		status = acpi_device_add_u64(&builder, PCI_PROPERTY_DOMAIN, allocation->segment_group);
@@ -100,7 +103,8 @@ static syscall_status_t submit_mcfg_allocation(cap_id_t root_cap, const struct a
 	return status;
 }
 
-static syscall_status_t parse_mcfg_table(cap_id_t table_cap, cap_id_t root_cap, size_t* device_count) {
+static syscall_status_t parse_mcfg_table(cap_id_t table_cap, cap_id_t root_cap, cap_id_t memory_allocator_cap,
+                                         size_t* device_count) {
 	struct acpi_table_info_response info;
 	uint8_t                         reserved[ACPI_MCFG_RESERVED_SIZE];
 	uint64_t                        allocation_count;
@@ -126,18 +130,20 @@ static syscall_status_t parse_mcfg_table(cap_id_t table_cap, cap_id_t root_cap, 
 		if (status != SYSCALL_STATUS_OK) return status;
 		if (!mcfg_allocation_decode(bytes, &allocation)) continue;
 		if (*device_count == SIZE_MAX) return SYSCALL_STATUS_FAILED;
-		status = submit_mcfg_allocation(root_cap, &allocation);
+		status = submit_mcfg_allocation(root_cap, memory_allocator_cap, &allocation);
 		if (status != SYSCALL_STATUS_OK) return status;
 		(*device_count)++;
 	}
 	return SYSCALL_STATUS_OK;
 }
 
-syscall_status_t acpi_mcfg_parse(cap_id_t provider_cap, cap_id_t root_cap, size_t* device_count) {
+syscall_status_t acpi_mcfg_parse(cap_id_t provider_cap, cap_id_t root_cap, cap_id_t memory_allocator_cap,
+                                 size_t* device_count) {
 	uint64_t         table_count;
 	syscall_status_t status;
 
-	if (provider_cap == CAP_ID_INVALID || root_cap == CAP_ID_INVALID || device_count == NULL)
+	if (provider_cap == CAP_ID_INVALID || root_cap == CAP_ID_INVALID || memory_allocator_cap == CAP_ID_INVALID ||
+	    device_count == NULL)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	status = acpi_table_count(provider_cap, "MCFG", &table_count);
 	if (status != SYSCALL_STATUS_OK) return status;
@@ -145,7 +151,8 @@ syscall_status_t acpi_mcfg_parse(cap_id_t provider_cap, cap_id_t root_cap, size_
 		cap_id_t table_cap = CAP_ID_INVALID;
 
 		status = acpi_table_claim(provider_cap, "MCFG", index, &table_cap);
-		if (status == SYSCALL_STATUS_OK) status = parse_mcfg_table(table_cap, root_cap, device_count);
+		if (status == SYSCALL_STATUS_OK)
+			status = parse_mcfg_table(table_cap, root_cap, memory_allocator_cap, device_count);
 		if (table_cap != CAP_ID_INVALID) {
 			syscall_status_t drop_status = cap_drop(table_cap);
 			if (status == SYSCALL_STATUS_OK) status = drop_status;

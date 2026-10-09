@@ -38,9 +38,6 @@ uint32_t dt_parser_read_u32_le(const uint8_t value[4]);
 /* Encode one canonical little-endian 32-bit value. */
 void dt_parser_write_u32_le(uint8_t value[4], uint32_t input);
 
-/* Encode one canonical little-endian 64-bit value. */
-void dt_parser_write_u64_le(uint8_t value[8], uint64_t input);
-
 /* Validate one length-delimited, NUL-free UTF-8 string. */
 bool dt_parser_utf8_valid(const uint8_t* value, size_t size);
 

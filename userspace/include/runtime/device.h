@@ -41,6 +41,11 @@ syscall_status_t device_builder_finish_property(const struct device_builder* bui
 syscall_status_t device_builder_add_resource(const struct device_builder* builder, const char* name, size_t name_size,
                                              cap_id_t resource_cap, cap_rights_t rights);
 
+/* Claim one physical MMIO range and attach its device-memory capability as a named resource. */
+syscall_status_t device_builder_add_mmio_resource(const struct device_builder* builder, cap_id_t memory_allocator_cap,
+                                                  const char* name, size_t name_size, uintptr_t physical_address,
+                                                  size_t size);
+
 /* Atomically install the immutable device and invalidate the builder on success. */
 syscall_status_t device_builder_commit(struct device_builder* builder);
 

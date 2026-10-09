@@ -22,10 +22,6 @@ void dt_parser_write_u32_le(uint8_t value[4], uint32_t input) {
 	for (size_t index = 0u; index < 4u; index++) value[index] = (uint8_t)(input >> (index * 8u));
 }
 
-void dt_parser_write_u64_le(uint8_t value[8], uint64_t input) {
-	for (size_t index = 0u; index < 8u; index++) value[index] = (uint8_t)(input >> (index * 8u));
-}
-
 bool dt_parser_utf8_valid(const uint8_t* value, size_t size) {
 	size_t index = 0u;
 
@@ -313,7 +309,9 @@ syscall_status_t dt_parser_ranges_read(cap_id_t provider_cap, device_tree_node_i
 	    property.value_size % (tuple_cells * 4u) != 0u)
 		return SYSCALL_STATUS_UNAVAILABLE;
 	tuple_count = (size_t)(property.value_size / (tuple_cells * 4u));
-	if (tuple_count == 0u || tuple_count > DEVICE_MAX_STATE_SIZE / sizeof(*ranges)) return SYSCALL_STATUS_UNAVAILABLE;
+	if (tuple_count == 0u || tuple_count > DEVICE_MAX_RESOURCES ||
+	    tuple_count > DEVICE_MAX_STATE_SIZE / sizeof(*ranges))
+		return SYSCALL_STATUS_UNAVAILABLE;
 	ranges = calloc(tuple_count, sizeof(*ranges));
 	if (ranges == NULL) return SYSCALL_STATUS_FAILED;
 	for (size_t index = 0u; index < tuple_count; index++) {

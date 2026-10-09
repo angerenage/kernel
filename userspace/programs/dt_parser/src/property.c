@@ -12,8 +12,8 @@ static bool source_name_is(const char* name, size_t name_size, const char* expec
 	return name_size == expected_size && memcmp(name, expected, name_size) == 0;
 }
 
-static bool normalize_name(const char* source, size_t source_size, char output[DEVICE_IDENTIFIER_MAX],
-                           size_t* out_size) {
+bool dt_parser_name_normalize(const char* source, size_t source_size, char output[DEVICE_IDENTIFIER_MAX],
+                              size_t* out_size) {
 	size_t written   = 0u;
 	bool   separator = false;
 
@@ -183,11 +183,12 @@ syscall_status_t dt_parser_property_append(cap_id_t provider_cap, device_tree_no
 	if (status != SYSCALL_STATUS_OK) goto cleanup;
 	if (source_name_is(source_name, (size_t)info.name_size, "compatible") ||
 	    source_name_is(source_name, (size_t)info.name_size, "status") ||
-	    (registers_translated && source_name_is(source_name, (size_t)info.name_size, "reg"))) {
+	    (registers_translated && (source_name_is(source_name, (size_t)info.name_size, "reg") ||
+	                              source_name_is(source_name, (size_t)info.name_size, "reg-names")))) {
 		status = SYSCALL_STATUS_OK;
 		goto cleanup;
 	}
-	if (!normalize_name(source_name, (size_t)info.name_size, normalized, &normalized_size)) {
+	if (!dt_parser_name_normalize(source_name, (size_t)info.name_size, normalized, &normalized_size)) {
 		status = SYSCALL_STATUS_OK;
 		goto cleanup;
 	}

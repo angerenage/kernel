@@ -59,7 +59,7 @@ static bool parser_description_get(enum device_manager_firmware_source source, s
 }
 
 bool device_manager_parser_launch(struct device_server* server, enum device_manager_firmware_source source,
-                                  cap_id_t* firmware_cap, cap_id_t io_ports_cap) {
+                                  cap_id_t* firmware_cap, cap_id_t memory_allocator_cap, cap_id_t io_ports_cap) {
 	static const struct init_protocol_query vfs_query = {
 		.namespace_path = VFS_NAMESPACE,
 		.protocol       = VFS_PROTOCOL_NAME,
@@ -83,7 +83,8 @@ bool device_manager_parser_launch(struct device_server* server, enum device_mana
 	bool                    cleanup_ok = true;
 
 	if (server == NULL || firmware_cap == NULL || *firmware_cap == CAP_ID_INVALID ||
-	    server->root_cap == CAP_ID_INVALID || !server->root_published || !parser_description_get(source, &parser))
+	    memory_allocator_cap == CAP_ID_INVALID || server->root_cap == CAP_ID_INVALID || !server->root_published ||
+	    !parser_description_get(source, &parser))
 		return false;
 	acquire_result = init_acquire(&vfs_query, VFS_SERVICE_NAME, &vfs);
 	if (acquire_result.transport_status != SYSCALL_STATUS_OK || acquire_result.status != INIT_REGISTRY_OK) {
@@ -124,6 +125,11 @@ bool device_manager_parser_launch(struct device_server* server, enum device_mana
 		capv[PROCESS_STARTUP_CAP_COUNT + DEVICE_PARSER_CAPABILITY_DEVICE_ROOT] = (struct program_capability_argument){
 			.capability = server->root_cap,
 			.rights     = DEVICE_PARSER_ROOT_CAP_RIGHTS,
+		};
+		capv[PROCESS_STARTUP_CAP_COUNT + DEVICE_PARSER_CAPABILITY_MEMORY_ALLOCATOR] =
+			(struct program_capability_argument){
+				.capability = memory_allocator_cap,
+				.rights     = DEVICE_PARSER_MEMORY_ALLOCATOR_CAP_RIGHTS,
 		};
 		if (source == DEVICE_MANAGER_FIRMWARE_SOURCE_ACPI && io_ports_cap != CAP_ID_INVALID)
 			capv[PROCESS_STARTUP_CAP_COUNT + DEVICE_PARSER_CAPABILITY_IO_PORTS] = (struct program_capability_argument){

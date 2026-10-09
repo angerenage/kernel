@@ -208,6 +208,11 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 											 .capability = dt_cap,
 											 .rights     = CAP_CALL | CAP_READ | CAP_DELEGATE,
 											 },
+			[PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_MEMORY_ALLOCATOR] =
+				{
+											 .capability = init->memory_allocator_cap,
+											 .rights     = DEVICE_MANAGER_MEMORY_ALLOCATOR_CAP_RIGHTS,
+											 },
 			[PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_IO_PORTS] =
 				{
 											 .capability = io_ports_cap,

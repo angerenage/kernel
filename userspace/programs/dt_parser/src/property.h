@@ -20,6 +20,10 @@ struct dt_parser_name_set {
 	struct dt_parser_name* first;
 };
 
+/* Convert one Device Tree name into the device protocol's lower-snake-case form. */
+bool dt_parser_name_normalize(const char* source, size_t source_size, char output[DEVICE_IDENTIFIER_MAX],
+                              size_t* out_size);
+
 /* Reserve one lower-snake-case name, rejecting canonicalization collisions. */
 syscall_status_t dt_parser_name_set_add(struct dt_parser_name_set* names, const char* name, size_t name_size);
 

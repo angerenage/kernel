@@ -23,9 +23,8 @@
 
 #define TPM_PROPERTY_FAMILY "family"
 #define TPM_PROPERTY_INTERFACE "interface"
-#define TPM_PROPERTY_REGISTER_ADDRESS "register_address"
-#define TPM_PROPERTY_REGISTER_SIZE "register_size"
 #define TPM_PROPERTY_CONTROL_AREA_ADDRESS "control_area_address"
+#define TPM_RESOURCE_REGISTERS "registers"
 
 struct acpi_tpm2_device {
 	uint64_t control_address;
@@ -75,7 +74,8 @@ static bool tpm2_device_decode(const struct acpi_table_info_response* info, cons
 	return true;
 }
 
-static syscall_status_t submit_tpm2_device(cap_id_t root_cap, const struct acpi_tpm2_device* device) {
+static syscall_status_t submit_tpm2_device(cap_id_t root_cap, cap_id_t memory_allocator_cap,
+                                           const struct acpi_tpm2_device* device) {
 	struct device_builder builder = {.capability = CAP_ID_INVALID, .manager_pid = PROCESS_PID_INVALID};
 	const char*           compatible;
 	const char*           interface;
@@ -95,9 +95,12 @@ static syscall_status_t submit_tpm2_device(cap_id_t root_cap, const struct acpi_
 	if (status == SYSCALL_STATUS_OK) status = acpi_device_add_string(&builder, TPM_PROPERTY_FAMILY, "2.0");
 	if (status == SYSCALL_STATUS_OK) status = acpi_device_add_string(&builder, TPM_PROPERTY_INTERFACE, interface);
 	if (status == SYSCALL_STATUS_OK && device->start_method == TPM2_START_METHOD_FIFO_MMIO)
-		status = acpi_device_add_u64(&builder, TPM_PROPERTY_REGISTER_ADDRESS, device->control_address);
-	if (status == SYSCALL_STATUS_OK && device->start_method == TPM2_START_METHOD_FIFO_MMIO)
-		status = acpi_device_add_u64(&builder, TPM_PROPERTY_REGISTER_SIZE, TPM_FIFO_REGISTER_SIZE);
+		status = device_builder_add_mmio_resource(&builder,
+		                                          memory_allocator_cap,
+		                                          TPM_RESOURCE_REGISTERS,
+		                                          sizeof(TPM_RESOURCE_REGISTERS) - 1u,
+		                                          (uintptr_t)device->control_address,
+		                                          TPM_FIFO_REGISTER_SIZE);
 	if (status == SYSCALL_STATUS_OK && device->start_method == TPM2_START_METHOD_CRB)
 		status = acpi_device_add_u64(&builder, TPM_PROPERTY_CONTROL_AREA_ADDRESS, device->control_address);
 	if (status == SYSCALL_STATUS_OK) status = device_builder_commit(&builder);
@@ -105,7 +108,8 @@ static syscall_status_t submit_tpm2_device(cap_id_t root_cap, const struct acpi_
 	return status;
 }
 
-static syscall_status_t parse_tpm2_table(cap_id_t table_cap, cap_id_t root_cap, size_t* device_count) {
+static syscall_status_t parse_tpm2_table(cap_id_t table_cap, cap_id_t root_cap, cap_id_t memory_allocator_cap,
+                                         size_t* device_count) {
 	struct acpi_table_info_response info;
 	struct acpi_tpm2_device         device;
 	uint8_t                         body[ACPI_TPM2_BODY_SIZE];
@@ -118,17 +122,19 @@ static syscall_status_t parse_tpm2_table(cap_id_t table_cap, cap_id_t root_cap, 
 	if (status != SYSCALL_STATUS_OK) return status;
 	if (!tpm2_device_decode(&info, body, &device)) return SYSCALL_STATUS_OK;
 	if (*device_count == SIZE_MAX) return SYSCALL_STATUS_FAILED;
-	status = submit_tpm2_device(root_cap, &device);
+	status = submit_tpm2_device(root_cap, memory_allocator_cap, &device);
 	if (status != SYSCALL_STATUS_OK) return status;
 	(*device_count)++;
 	return SYSCALL_STATUS_OK;
 }
 
-syscall_status_t acpi_tpm2_parse(cap_id_t provider_cap, cap_id_t root_cap, size_t* device_count) {
+syscall_status_t acpi_tpm2_parse(cap_id_t provider_cap, cap_id_t root_cap, cap_id_t memory_allocator_cap,
+                                 size_t* device_count) {
 	uint64_t         table_count;
 	syscall_status_t status;
 
-	if (provider_cap == CAP_ID_INVALID || root_cap == CAP_ID_INVALID || device_count == NULL)
+	if (provider_cap == CAP_ID_INVALID || root_cap == CAP_ID_INVALID || memory_allocator_cap == CAP_ID_INVALID ||
+	    device_count == NULL)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	status = acpi_table_count(provider_cap, "TPM2", &table_count);
 	if (status != SYSCALL_STATUS_OK) return status;
@@ -136,7 +142,8 @@ syscall_status_t acpi_tpm2_parse(cap_id_t provider_cap, cap_id_t root_cap, size_
 		cap_id_t table_cap = CAP_ID_INVALID;
 
 		status = acpi_table_claim(provider_cap, "TPM2", index, &table_cap);
-		if (status == SYSCALL_STATUS_OK) status = parse_tpm2_table(table_cap, root_cap, device_count);
+		if (status == SYSCALL_STATUS_OK)
+			status = parse_tpm2_table(table_cap, root_cap, memory_allocator_cap, device_count);
 		if (table_cap != CAP_ID_INVALID) {
 			syscall_status_t drop_status = cap_drop(table_cap);
 			if (status == SYSCALL_STATUS_OK) status = drop_status;

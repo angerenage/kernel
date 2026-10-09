@@ -14,15 +14,19 @@ int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 	(void)argv;
 	if (capc != DEVICE_PARSER_CAPABILITY_COUNT || capv == NULL ||
 	    capv[DEVICE_PARSER_CAPABILITY_FIRMWARE] == CAP_ID_INVALID ||
-	    capv[DEVICE_PARSER_CAPABILITY_DEVICE_ROOT] == CAP_ID_INVALID)
+	    capv[DEVICE_PARSER_CAPABILITY_DEVICE_ROOT] == CAP_ID_INVALID ||
+	    capv[DEVICE_PARSER_CAPABILITY_MEMORY_ALLOCATOR] == CAP_ID_INVALID)
 		return 1;
 	status = acpi_parser_parse(capv[DEVICE_PARSER_CAPABILITY_FIRMWARE],
 	                           capv[DEVICE_PARSER_CAPABILITY_DEVICE_ROOT],
+	                           capv[DEVICE_PARSER_CAPABILITY_MEMORY_ALLOCATOR],
 	                           capv[DEVICE_PARSER_CAPABILITY_IO_PORTS],
 	                           &devices);
 	if (cap_drop(capv[DEVICE_PARSER_CAPABILITY_FIRMWARE]) != SYSCALL_STATUS_OK && status == SYSCALL_STATUS_OK)
 		status = SYSCALL_STATUS_FAILED;
 	if (cap_drop(capv[DEVICE_PARSER_CAPABILITY_DEVICE_ROOT]) != SYSCALL_STATUS_OK && status == SYSCALL_STATUS_OK)
+		status = SYSCALL_STATUS_FAILED;
+	if (cap_drop(capv[DEVICE_PARSER_CAPABILITY_MEMORY_ALLOCATOR]) != SYSCALL_STATUS_OK && status == SYSCALL_STATUS_OK)
 		status = SYSCALL_STATUS_FAILED;
 	if (capv[DEVICE_PARSER_CAPABILITY_IO_PORTS] != CAP_ID_INVALID &&
 	    cap_drop(capv[DEVICE_PARSER_CAPABILITY_IO_PORTS]) != SYSCALL_STATUS_OK && status == SYSCALL_STATUS_OK)
