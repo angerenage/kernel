@@ -14,7 +14,11 @@
 #include "test_support.h"
 
 #define ACPI_TEST_TABLE_CAPACITY 8u
-#define ACPI_TEST_BODY_CAPACITY 32u
+#define ACPI_TEST_BODY_CAPACITY 128u
+#define ACPI_TEST_FADT_PM_PROFILE_OFFSET 45u
+#define ACPI_TEST_FADT_IAPC_BOOT_ARCH_OFFSET 109u
+#define ACPI_TEST_FADT_FLAGS_OFFSET 112u
+#define ACPI_TEST_FADT_ARM_BOOT_ARCH_OFFSET 129u
 
 struct acpi_test_table {
 	struct acpi_sdt_header header;
@@ -74,6 +78,32 @@ static const struct acpi_sdt_header* acpi_mock_add(const char signature[4], uint
 	return &table->header;
 }
 
+static const struct acpi_sdt_header* acpi_mock_fadt(uint8_t revision, size_t length) {
+	uint8_t        body[ACPI_TEST_BODY_CAPACITY] = {0};
+	const uint8_t  pm_profile                    = 3u;
+	const uint16_t iapc_boot_arch                = UINT16_C(0xa5c3);
+	const uint16_t arm_boot_arch                 = 1u;
+	const uint32_t flags                         = 0x12345678u;
+	const size_t   header_size                   = sizeof(struct acpi_sdt_header);
+
+	cr_assert_geq(length, header_size);
+	cr_assert_leq(length - header_size, sizeof(body));
+	if (length >= ACPI_TEST_FADT_PM_PROFILE_OFFSET + sizeof(pm_profile))
+		memcpy(body + ACPI_TEST_FADT_PM_PROFILE_OFFSET - header_size, &pm_profile, sizeof(pm_profile));
+	if (length >= ACPI_TEST_FADT_IAPC_BOOT_ARCH_OFFSET + sizeof(iapc_boot_arch))
+		memcpy(body + ACPI_TEST_FADT_IAPC_BOOT_ARCH_OFFSET - header_size, &iapc_boot_arch, sizeof(iapc_boot_arch));
+	if (length >= ACPI_TEST_FADT_FLAGS_OFFSET + sizeof(flags))
+		memcpy(body + ACPI_TEST_FADT_FLAGS_OFFSET - header_size, &flags, sizeof(flags));
+	if (length >= ACPI_TEST_FADT_ARM_BOOT_ARCH_OFFSET + sizeof(arm_boot_arch))
+		memcpy(body + ACPI_TEST_FADT_ARM_BOOT_ARCH_OFFSET - header_size, &arm_boot_arch, sizeof(arm_boot_arch));
+	return acpi_mock_add("FACP", revision, body, length - header_size);
+}
+
+static syscall_result_t acpi_test_fadt_info(cap_id_t provider, struct acpi_provider_fadt_read_response* info) {
+	const struct acpi_provider_fadt_read_request request = {.header = {.op = ACPI_PROVIDER_OP_FADT_READ}};
+	return kernel_capability_test_call(provider, &request, sizeof(request), info, sizeof(*info));
+}
+
 static void acpi_mock_add_alias(const struct acpi_sdt_header* table) {
 	cr_assert_not_null(table);
 	cr_assert_lt(acpi_test_table_count, ACPI_TEST_TABLE_CAPACITY);
@@ -117,6 +147,82 @@ static cap_id_t acpi_test_claim_ok(cap_id_t provider, const char signature[4], u
 	cr_assert_eq(result.value, sizeof(response));
 	cr_assert_neq(response.table_cap, CAP_ID_INVALID);
 	return response.table_cap;
+}
+
+Test(kernel_capability_acpi, fadt_info_is_sanitized_and_requires_only_read_rights) {
+	struct kernel_capability_test_context   ctx;
+	struct acpi_provider_fadt_read_response info;
+	uint64_t                                count = UINT64_MAX;
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/acpi-fadt");
+	acpi_mock_fadt(5u, ACPI_TEST_FADT_ARM_BOOT_ARCH_OFFSET + sizeof(uint16_t));
+	cap_id_t provider = acpi_test_provider(&ctx);
+	cr_assert_eq(acpi_test_count(provider, "FACP", &count).status, SYSCALL_STATUS_OK);
+	cr_assert_eq(count, 0u);
+	struct acpi_provider_claim_response claimed = {.table_cap = CAP_ID_INVALID};
+	cr_assert_eq(acpi_test_claim(provider, "FACP", 0u, &claimed).status, SYSCALL_STATUS_UNAVAILABLE);
+	cr_assert_eq(acpi_test_fadt_info(provider, &info).status, SYSCALL_STATUS_OK);
+	cr_assert_eq(info.flags, 0x12345678u);
+	cr_assert_eq(info.iapc_boot_arch, UINT16_C(0xa5c3));
+	cr_assert_eq(info.arm_boot_arch, 1u);
+	cr_assert_eq(info.preferred_pm_profile, 3u);
+	for (size_t i = 0u; i < sizeof(info.reserved); ++i) cr_assert_eq(info.reserved[i], 0u);
+
+	struct capability* grant = cap_acquire(provider);
+	cr_assert_not_null(grant);
+	cap_id_t read_only = cap_delegate_create(grant, process_pid(ctx.process), CAP_CALL | CAP_READ, false);
+	cap_id_t call_only = cap_delegate_create(grant, process_pid(ctx.process), CAP_CALL, false);
+	cap_release(grant);
+	cr_assert_neq(read_only, CAP_ID_INVALID);
+	cr_assert_neq(call_only, CAP_ID_INVALID);
+	cr_assert_eq(acpi_test_fadt_info(read_only, &info).status, SYSCALL_STATUS_OK);
+	cr_assert_eq(acpi_test_fadt_info(call_only, &info).status, SYSCALL_STATUS_DENIED);
+	const struct acpi_provider_fadt_read_request request = {.header = {.op = ACPI_PROVIDER_OP_FADT_READ}};
+	cr_assert_eq(kernel_capability_test_call(provider, &request, sizeof(request) - 1u, &info, sizeof(info)).status,
+	             SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(kernel_capability_test_call(provider, &request, sizeof(request), &info, sizeof(info) - 1u).status,
+	             SYSCALL_STATUS_BAD_ARGUMENT);
+	kernel_capability_test_end(&ctx);
+}
+
+Test(kernel_capability_acpi, fadt_info_returns_zero_for_fields_unavailable_in_firmware) {
+	struct kernel_capability_test_context   ctx;
+	struct acpi_provider_fadt_read_response info;
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/acpi-fadt-revision");
+	acpi_mock_fadt(1u, ACPI_TEST_FADT_ARM_BOOT_ARCH_OFFSET + sizeof(uint16_t));
+	cap_id_t provider = acpi_test_provider(&ctx);
+	cr_assert_eq(acpi_test_fadt_info(provider, &info).status, SYSCALL_STATUS_OK);
+	cr_assert_eq(info.preferred_pm_profile, 3u);
+	cr_assert_eq(info.iapc_boot_arch, 0u);
+	cr_assert_eq(info.flags, 0u);
+	cr_assert_eq(info.arm_boot_arch, 0u);
+	kernel_capability_test_end(&ctx);
+}
+
+Test(kernel_capability_acpi, fadt_info_rejects_missing_table) {
+	struct kernel_capability_test_context   ctx;
+	struct acpi_provider_fadt_read_response info;
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/acpi-fadt-missing");
+	cap_id_t provider = acpi_test_provider(&ctx);
+	cr_assert_eq(acpi_test_fadt_info(provider, &info).status, SYSCALL_STATUS_UNAVAILABLE);
+	kernel_capability_test_end(&ctx);
+}
+
+Test(kernel_capability_acpi, fadt_info_ignores_truncated_fields) {
+	struct kernel_capability_test_context   ctx;
+	struct acpi_provider_fadt_read_response info;
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/acpi-fadt-short");
+	acpi_mock_fadt(5u, ACPI_TEST_FADT_IAPC_BOOT_ARCH_OFFSET + sizeof(uint8_t));
+	cap_id_t provider = acpi_test_provider(&ctx);
+	cr_assert_eq(acpi_test_fadt_info(provider, &info).status, SYSCALL_STATUS_OK);
+	cr_assert_eq(info.preferred_pm_profile, 3u);
+	cr_assert_eq(info.iapc_boot_arch, 0u);
+	cr_assert_eq(info.flags, 0u);
+	cr_assert_eq(info.arm_boot_arch, 0u);
+	kernel_capability_test_end(&ctx);
 }
 
 Test(kernel_capability_acpi, static_policy_blocks_owned_and_sensitive_tables) {

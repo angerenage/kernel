@@ -15,6 +15,11 @@
 #define ACPI_PROVIDER_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_MANAGE | CAP_DELEGATE))
 #define ACPI_TABLE_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_DELEGATE))
 
+#define ACPI_FADT_PREFERRED_PM_PROFILE_OFFSET 45u
+#define ACPI_FADT_IAPC_BOOT_ARCH_OFFSET 109u
+#define ACPI_FADT_FLAGS_OFFSET 112u
+#define ACPI_FADT_ARM_BOOT_ARCH_OFFSET 129u
+
 static const struct hal_acpi_consumed_table acpi_hidden_tables[] = {
 	{.signature = "FACP"},
 	{.signature = "DSDT"},
@@ -217,6 +222,39 @@ static syscall_result_t acpi_provider_claim_handler(const struct cap_request* re
 	return result;
 }
 
+static syscall_result_t acpi_provider_fadt_info_handler(const struct cap_request* req) {
+	struct acpi_provider_fadt_read_request  request;
+	struct acpi_provider_fadt_read_response response = {0};
+	const struct acpi_sdt_header*           table;
+	const uint8_t*                          bytes;
+	uint32_t                                length;
+
+	if ((req->rights & CAP_READ) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
+	if (req->request == NULL || req->request_size != sizeof(request) ||
+	    !cap_kernel_response_fits(req, sizeof(response)))
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	memcpy(&request, req->request, sizeof(request));
+	if (request.header.op != ACPI_PROVIDER_OP_FADT_READ) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+
+	table = acpi_table_next("FACP", NULL);
+	if (table == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	memcpy(&length, &table->length, sizeof(length));
+	bytes = (const uint8_t*)table;
+	if (length >= ACPI_FADT_PREFERRED_PM_PROFILE_OFFSET + sizeof(response.preferred_pm_profile))
+		memcpy(&response.preferred_pm_profile,
+		       bytes + ACPI_FADT_PREFERRED_PM_PROFILE_OFFSET,
+		       sizeof(response.preferred_pm_profile));
+	if (table->revision >= 2u) {
+		if (length >= ACPI_FADT_IAPC_BOOT_ARCH_OFFSET + sizeof(response.iapc_boot_arch))
+			memcpy(&response.iapc_boot_arch, bytes + ACPI_FADT_IAPC_BOOT_ARCH_OFFSET, sizeof(response.iapc_boot_arch));
+		if (length >= ACPI_FADT_FLAGS_OFFSET + sizeof(response.flags))
+			memcpy(&response.flags, bytes + ACPI_FADT_FLAGS_OFFSET, sizeof(response.flags));
+	}
+	if (table->revision >= 5u && length >= ACPI_FADT_ARM_BOOT_ARCH_OFFSET + sizeof(response.arm_boot_arch))
+		memcpy(&response.arm_boot_arch, bytes + ACPI_FADT_ARM_BOOT_ARCH_OFFSET, sizeof(response.arm_boot_arch));
+	return cap_kernel_write_response(req, &response, sizeof(response));
+}
+
 static syscall_result_t acpi_provider_handler(const struct cap_request* req) {
 	struct acpi_provider_request_header header;
 
@@ -228,6 +266,8 @@ static syscall_result_t acpi_provider_handler(const struct cap_request* req) {
 		return acpi_provider_count_handler(req);
 	case ACPI_PROVIDER_OP_CLAIM:
 		return acpi_provider_claim_handler(req);
+	case ACPI_PROVIDER_OP_FADT_READ:
+		return acpi_provider_fadt_info_handler(req);
 	default:
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}

@@ -44,6 +44,18 @@ syscall_status_t acpi_table_claim(cap_id_t provider_cap, const char signature[4]
 	return SYSCALL_STATUS_OK;
 }
 
+syscall_status_t acpi_fadt_read(cap_id_t provider_cap, struct acpi_provider_fadt_read_response* out_info) {
+	const struct acpi_provider_fadt_read_request request = {.header = {.op = ACPI_PROVIDER_OP_FADT_READ}};
+	syscall_result_t                             result;
+
+	if (provider_cap == CAP_ID_INVALID || out_info == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	memset(out_info, 0, sizeof(*out_info));
+	result = cap_call_syscall(provider_cap, &request, sizeof(request), out_info, sizeof(*out_info));
+	RUNTIME_DIAGNOSTIC_OPERATION_RESULT(ACPI_PROVIDER_OP_FADT_READ, result);
+	if (result.status != SYSCALL_STATUS_OK) return result.status;
+	return result.value == sizeof(*out_info) ? SYSCALL_STATUS_OK : SYSCALL_STATUS_FAILED;
+}
+
 syscall_status_t acpi_table_info(cap_id_t table_cap, struct acpi_table_info_response* out_info) {
 	const struct acpi_table_info_request request = {.header = {.op = ACPI_TABLE_OP_INFO}};
 	syscall_result_t                     result;

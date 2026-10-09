@@ -7,6 +7,7 @@
 enum acpi_provider_op {
 	ACPI_PROVIDER_OP_COUNT = 0,
 	ACPI_PROVIDER_OP_CLAIM,
+	ACPI_PROVIDER_OP_FADT_READ,
 };
 
 struct acpi_provider_request_header {
@@ -32,6 +33,19 @@ struct acpi_provider_claim_request {
 
 struct acpi_provider_claim_response {
 	cap_id_t table_cap;
+};
+
+/* Read a cleaned and validated subset of the FADT fields. */
+struct acpi_provider_fadt_read_request {
+	struct acpi_provider_request_header header;
+};
+
+struct acpi_provider_fadt_read_response {
+	uint32_t flags;
+	uint16_t iapc_boot_arch;
+	uint16_t arm_boot_arch;
+	uint8_t  preferred_pm_profile;
+	uint8_t  reserved[3];
 };
 
 /* Operations accepted by one exclusively claimed ACPI-table capability. */
