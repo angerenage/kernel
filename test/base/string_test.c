@@ -8,6 +8,19 @@ Test(base_string, strlen_counts_until_nul) {
 	cr_assert_eq(strlen("with space"), 10);
 }
 
+Test(base_string, strncmp_compares_bounded_strings) {
+	const char high_byte[] = {(char)0xff, '\0'};
+	const char low_byte[]  = {(char)0x7f, '\0'};
+
+	cr_assert_eq(strncmp("kernel", "kernel", 6u), 0);
+	cr_assert_eq(strncmp("kernel", "different", 0u), 0);
+	cr_assert_eq(strncmp("kernel", "kernels", 6u), 0);
+	cr_assert_lt(strncmp("kernel", "kernels", 7u), 0);
+	cr_assert_lt(strncmp("abc", "abd", 3u), 0);
+	cr_assert_gt(strncmp("abd", "abc", 3u), 0);
+	cr_assert_gt(strncmp(high_byte, low_byte, 1u), 0);
+}
+
 Test(base_string, strlcpy_copies_and_reports_source_length) {
 	char destination[8] = "stale";
 

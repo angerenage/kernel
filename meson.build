@@ -54,6 +54,7 @@ subdir('core')
 subdir('boot')
 subdir('firmware')
 subdir('platforms/' + platform)
+subdir('third_party/libyaml')
 subdir('userspace')
 subdir('kernel')
 

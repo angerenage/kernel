@@ -81,6 +81,22 @@ core_test_lib = static_library(
 	install: false,
 )
 
+libyaml_test_inc = include_directories(
+	'../third_party/libyaml',
+	'../third_party/libyaml/include',
+	'../third_party/libyaml/src',
+)
+
+libyaml_test_lib = static_library(
+	'libyaml_test_lib',
+	libyaml_sources,
+	include_directories: libyaml_test_inc,
+	native: true,
+	c_args: test_common_c_args + ['-DHAVE_CONFIG_H=1'],
+	link_args: test_common_link_args,
+	install: false,
+)
+
 kernel_capability_platform_sources = []
 if platform == 'pc_x86_64'
 	kernel_capability_platform_sources += files(
@@ -225,6 +241,25 @@ test_suites = [
 		'include_directories': [loader_test_inc],
 		'link_with': base_test_lib,
 		'c_args': ['-UBASE_STDLIB_RENAME_ALLOC'],
+		'suites': ['unit', 'userspace'],
+	},
+	{
+		'name': 'runtime_stdio',
+		'sources': files(
+			'runtime/stdio.c',
+		),
+		'include_directories': [loader_test_inc],
+		'link_with': base_test_lib,
+		'c_args': ['-UBASE_STDLIB_RENAME_ALLOC'],
+		'suites': ['unit', 'userspace'],
+	},
+	{
+		'name': 'libyaml',
+		'sources': files(
+			'libyaml/yaml.c',
+		),
+		'include_directories': [libyaml_test_inc],
+		'link_with': libyaml_test_lib,
 		'suites': ['unit', 'userspace'],
 	},
 	{

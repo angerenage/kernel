@@ -5,6 +5,7 @@ base_libc_sources = files(
 	'libc/string/memmove.c',
 	'libc/string/memset.c',
 	'libc/string/strcmp.c',
+	'libc/string/strncmp.c',
 	'libc/string/strlcpy.c',
 	'libc/string/strdup.c',
 	'libc/string/strndup.c',

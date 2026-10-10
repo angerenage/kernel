@@ -1,1 +1,4 @@
 *.sh text eol=lf
+*.build whitespace=cr-at-eol
+
+third_party/** -whitespace conflict-marker-size=999

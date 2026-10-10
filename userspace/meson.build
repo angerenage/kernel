@@ -47,6 +47,7 @@ userspace_runtime_sources = files(
 	'runtime/blob.c',
 	'runtime/filesystem.c',
 	'runtime/program.c',
+	'runtime/stdio.c',
 	'runtime/startup.c',
 	'runtime/stream.c',
 	'runtime/vfs.c',
@@ -125,4 +126,4 @@ subdir('programs/device_manager')
 subdir('programs/acpi_parser')
 subdir('programs/dt_parser')
 
-alias_target('userspace', userspace_programs)
+alias_target('userspace', userspace_programs + [userspace_yaml])
