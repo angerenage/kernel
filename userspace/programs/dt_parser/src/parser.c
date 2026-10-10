@@ -15,6 +15,7 @@
 #include "tree.h"
 
 #define DT_DEFAULT_REGISTER_RESOURCE "registers"
+#define DT_DEFAULT_DMA_RESOURCE "dma"
 #define DT_DEFAULT_INTERRUPT_RESOURCE "interrupt"
 
 struct dt_parser_resource_names {
@@ -96,7 +97,7 @@ static syscall_status_t resource_names_read(cap_id_t provider_cap, device_tree_n
 	size_t                    offset;
 	syscall_status_t          status;
 
-	if (names_property == NULL || default_name == NULL || default_name_size == 0u ||
+	if (default_name == NULL || default_name_size == 0u ||
 	    default_name_size + 1u + 3u * sizeof(size_t) > DEVICE_IDENTIFIER_MAX || out_names == NULL || count == 0u ||
 	    count > DEVICE_MAX_RESOURCES)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
@@ -108,7 +109,13 @@ static syscall_status_t resource_names_read(cap_id_t provider_cap, device_tree_n
 		goto fail;
 	}
 	out_names->count = count;
-	status           = dt_parser_property_find(provider_cap, node, names_property, &property);
+	if (names_property == NULL) {
+		for (size_t index = 0u; index < count; index++)
+			resource_name_default(
+				out_names->values[index], &out_names->sizes[index], default_name, default_name_size, index, count);
+		return SYSCALL_STATUS_OK;
+	}
+	status = dt_parser_property_find(provider_cap, node, names_property, &property);
 	if (status == SYSCALL_STATUS_UNAVAILABLE) {
 		for (size_t index = 0u; index < count; index++)
 			resource_name_default(
@@ -220,13 +227,34 @@ static syscall_status_t add_interrupt_resources(const struct device_builder* bui
 	return SYSCALL_STATUS_OK;
 }
 
+static syscall_status_t add_dma_resources(const struct device_builder* builder, cap_id_t dma_cap,
+                                          const struct dt_parser_dma_sources*    sources,
+                                          const struct dt_parser_resource_names* resource_names) {
+	if (sources == NULL || resource_names == NULL || sources->count != resource_names->count)
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	for (size_t index = 0u; index < sources->count; index++) {
+		const struct dt_parser_dma_source* source = &sources->values[index];
+		syscall_status_t                   status = device_builder_add_dma_resource(builder,
+		                                                                            dma_cap,
+		                                                                            resource_names->values[index],
+		                                                                            resource_names->sizes[index],
+		                                                                            source->controller_register_address,
+		                                                                            source->local_source_id);
+		if (status != SYSCALL_STATUS_OK) return status;
+	}
+	return SYSCALL_STATUS_OK;
+}
+
 static syscall_status_t submit_node(cap_id_t provider_cap, cap_id_t root_cap, cap_id_t memory_allocator_cap,
-                                    cap_id_t interrupts_cap, device_tree_node_id_t node, bool* out_committed) {
+                                    cap_id_t dma_cap, cap_id_t interrupts_cap, device_tree_node_id_t node,
+                                    bool* out_committed) {
 	struct device_tree_node_info_response info;
 	struct dt_parser_string_list          compatibles              = {0};
 	struct dt_parser_ranges               ranges                   = {0};
+	struct dt_parser_dma_sources          dma_sources              = {0};
 	struct dt_parser_interrupts           interrupts               = {0};
 	struct dt_parser_resource_names       register_resource_names  = {0};
+	struct dt_parser_resource_names       dma_resource_names       = {0};
 	struct dt_parser_resource_names       interrupt_resource_names = {0};
 	struct dt_parser_name_set             names                    = {0};
 	struct device_builder                 builder                  = {
@@ -234,6 +262,7 @@ static syscall_status_t submit_node(cap_id_t provider_cap, cap_id_t root_cap, ca
 		.manager_pid = PROCESS_PID_INVALID,
 	};
 	bool             registers        = false;
+	bool             dma              = false;
 	bool             fixed_interrupts = false;
 	syscall_status_t status;
 
@@ -257,6 +286,21 @@ static syscall_status_t submit_node(cap_id_t provider_cap, cap_id_t root_cap, ca
 		registers = true;
 	}
 	else if (status != SYSCALL_STATUS_UNAVAILABLE) goto cleanup;
+	if (dma_cap != CAP_ID_INVALID) {
+		status = dt_parser_dma_sources_read(provider_cap, node, &dma_sources);
+		if (status == SYSCALL_STATUS_OK) {
+			status = resource_names_read(provider_cap,
+			                             node,
+			                             NULL,
+			                             DT_DEFAULT_DMA_RESOURCE,
+			                             sizeof(DT_DEFAULT_DMA_RESOURCE) - 1u,
+			                             dma_sources.count,
+			                             &dma_resource_names);
+			if (status != SYSCALL_STATUS_OK) goto cleanup;
+			dma = true;
+		}
+		else if (status != SYSCALL_STATUS_UNAVAILABLE) goto cleanup;
+	}
 	status = dt_parser_interrupts_read(provider_cap, node, &interrupts);
 	if (status == SYSCALL_STATUS_OK) {
 		status = resource_names_read(provider_cap,
@@ -267,24 +311,30 @@ static syscall_status_t submit_node(cap_id_t provider_cap, cap_id_t root_cap, ca
 		                             interrupts.count,
 		                             &interrupt_resource_names);
 		if (status != SYSCALL_STATUS_OK) goto cleanup;
-		if (ranges.count > DEVICE_MAX_RESOURCES - interrupts.count ||
-		    resource_names_overlap(&register_resource_names, &interrupt_resource_names)) {
-			status = SYSCALL_STATUS_UNAVAILABLE;
-			goto cleanup;
-		}
 		fixed_interrupts = true;
 	}
 	else if (status != SYSCALL_STATUS_UNAVAILABLE) goto cleanup;
+	if (ranges.count > DEVICE_MAX_RESOURCES - dma_sources.count ||
+	    ranges.count + dma_sources.count > DEVICE_MAX_RESOURCES - interrupts.count ||
+	    resource_names_overlap(&register_resource_names, &dma_resource_names) ||
+	    resource_names_overlap(&register_resource_names, &interrupt_resource_names) ||
+	    resource_names_overlap(&dma_resource_names, &interrupt_resource_names)) {
+		status = SYSCALL_STATUS_UNAVAILABLE;
+		goto cleanup;
+	}
 	status = device_builder_begin_root(root_cap, &builder);
 	if (status != SYSCALL_STATUS_OK) goto cleanup;
 	status = add_compatibles(&builder, &compatibles);
 	if (status == SYSCALL_STATUS_OK) status = set_node_name(provider_cap, node, &info, &builder);
 	if (status == SYSCALL_STATUS_OK && registers)
 		status = add_mmio_resources(&builder, memory_allocator_cap, &ranges, &register_resource_names);
+	if (status == SYSCALL_STATUS_OK && dma)
+		status = add_dma_resources(&builder, dma_cap, &dma_sources, &dma_resource_names);
 	if (status == SYSCALL_STATUS_OK && fixed_interrupts)
 		status = add_interrupt_resources(&builder, interrupts_cap, &interrupts, &interrupt_resource_names);
 	for (uint64_t index = 0u; status == SYSCALL_STATUS_OK && index < info.property_count; index++)
-		status = dt_parser_property_append(provider_cap, node, index, registers, fixed_interrupts, &builder, &names);
+		status =
+			dt_parser_property_append(provider_cap, node, index, registers, dma, fixed_interrupts, &builder, &names);
 	if (status == SYSCALL_STATUS_OK) status = device_builder_commit(&builder);
 	if (status == SYSCALL_STATUS_OK) *out_committed = true;
 	else {
@@ -297,15 +347,17 @@ cleanup:
 	if (status == SYSCALL_STATUS_BAD_ARGUMENT || status == SYSCALL_STATUS_UNAVAILABLE) status = SYSCALL_STATUS_OK;
 	dt_parser_name_set_deinit(&names);
 	resource_names_deinit(&interrupt_resource_names);
+	resource_names_deinit(&dma_resource_names);
 	resource_names_deinit(&register_resource_names);
 	dt_parser_interrupts_deinit(&interrupts);
+	dt_parser_dma_sources_deinit(&dma_sources);
 	dt_parser_ranges_deinit(&ranges);
 	dt_parser_string_list_deinit(&compatibles);
 	return status;
 }
 
 syscall_status_t dt_parser_parse(cap_id_t provider_cap, cap_id_t root_cap, cap_id_t memory_allocator_cap,
-                                 cap_id_t interrupts_cap, size_t* device_count) {
+                                 cap_id_t dma_cap, cap_id_t interrupts_cap, size_t* device_count) {
 	device_tree_node_id_t node;
 	syscall_status_t      status;
 
@@ -323,7 +375,8 @@ syscall_status_t dt_parser_parse(cap_id_t provider_cap, cap_id_t root_cap, cap_i
 		status = dt_parser_node_enabled(provider_cap, node, &enabled);
 		if (status != SYSCALL_STATUS_OK) return status;
 		if (enabled) {
-			status = submit_node(provider_cap, root_cap, memory_allocator_cap, interrupts_cap, node, &committed);
+			status =
+				submit_node(provider_cap, root_cap, memory_allocator_cap, dma_cap, interrupts_cap, node, &committed);
 			if (status != SYSCALL_STATUS_OK) return status;
 			if (committed && device_count != NULL) {
 				if (*device_count == SIZE_MAX) return SYSCALL_STATUS_FAILED;

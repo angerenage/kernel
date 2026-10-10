@@ -21,6 +21,7 @@ int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 	status = acpi_parser_parse(capv[DEVICE_PARSER_CAPABILITY_FIRMWARE],
 	                           capv[DEVICE_PARSER_CAPABILITY_DEVICE_ROOT],
 	                           capv[DEVICE_PARSER_CAPABILITY_MEMORY_ALLOCATOR],
+	                           capv[DEVICE_PARSER_CAPABILITY_DMA],
 	                           capv[DEVICE_PARSER_CAPABILITY_INTERRUPTS],
 	                           capv[DEVICE_PARSER_CAPABILITY_IO_PORTS],
 	                           &devices);
@@ -29,6 +30,9 @@ int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 	if (cap_drop(capv[DEVICE_PARSER_CAPABILITY_DEVICE_ROOT]) != SYSCALL_STATUS_OK && status == SYSCALL_STATUS_OK)
 		status = SYSCALL_STATUS_FAILED;
 	if (cap_drop(capv[DEVICE_PARSER_CAPABILITY_MEMORY_ALLOCATOR]) != SYSCALL_STATUS_OK && status == SYSCALL_STATUS_OK)
+		status = SYSCALL_STATUS_FAILED;
+	if (capv[DEVICE_PARSER_CAPABILITY_DMA] != CAP_ID_INVALID &&
+	    cap_drop(capv[DEVICE_PARSER_CAPABILITY_DMA]) != SYSCALL_STATUS_OK && status == SYSCALL_STATUS_OK)
 		status = SYSCALL_STATUS_FAILED;
 	if (cap_drop(capv[DEVICE_PARSER_CAPABILITY_INTERRUPTS]) != SYSCALL_STATUS_OK && status == SYSCALL_STATUS_OK)
 		status = SYSCALL_STATUS_FAILED;

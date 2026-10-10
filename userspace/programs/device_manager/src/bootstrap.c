@@ -59,8 +59,8 @@ static bool parser_description_get(enum device_manager_firmware_source source, s
 }
 
 bool device_manager_parser_launch(struct device_server* server, enum device_manager_firmware_source source,
-                                  cap_id_t* firmware_cap, cap_id_t memory_allocator_cap, cap_id_t interrupts_cap,
-                                  cap_id_t io_ports_cap) {
+                                  cap_id_t* firmware_cap, cap_id_t memory_allocator_cap, cap_id_t dma_cap,
+                                  cap_id_t interrupts_cap, cap_id_t io_ports_cap) {
 	static const struct init_protocol_query vfs_query = {
 		.namespace_path = VFS_NAMESPACE,
 		.protocol       = VFS_PROTOCOL_NAME,
@@ -131,6 +131,10 @@ bool device_manager_parser_launch(struct device_server* server, enum device_mana
 			(struct program_capability_argument){
 				.capability = memory_allocator_cap,
 				.rights     = DEVICE_PARSER_MEMORY_ALLOCATOR_CAP_RIGHTS,
+		};
+		capv[PROCESS_STARTUP_CAP_COUNT + DEVICE_PARSER_CAPABILITY_DMA] = (struct program_capability_argument){
+			.capability = dma_cap,
+			.rights     = dma_cap == CAP_ID_INVALID ? 0u : DEVICE_PARSER_DMA_CAP_RIGHTS,
 		};
 		capv[PROCESS_STARTUP_CAP_COUNT + DEVICE_PARSER_CAPABILITY_INTERRUPTS] = (struct program_capability_argument){
 			.capability = interrupts_cap,

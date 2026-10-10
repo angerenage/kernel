@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <system/capability.h>
+#include <system/dma.h>
 #include <system/interrupt.h>
 #include <system/memory.h>
 
@@ -251,6 +252,27 @@ syscall_status_t device_builder_add_mmio_resource(const struct device_builder* b
 		status = device_builder_add_resource(builder, name, name_size, memory_cap, driver_rights);
 	if (memory_cap != CAP_ID_INVALID) {
 		cleanup_status = cap_drop(memory_cap);
+		if (status == SYSCALL_STATUS_OK) status = cleanup_status;
+	}
+	return status;
+}
+
+syscall_status_t device_builder_add_dma_resource(const struct device_builder* builder, cap_id_t dma_cap,
+                                                 const char* name, size_t name_size,
+                                                 uint64_t controller_register_address, uint32_t local_source_id) {
+	static const cap_rights_t driver_rights = CAP_CALL | CAP_ALLOCATE | CAP_MANAGE;
+	dma_source_t              source        = DMA_SOURCE_INVALID;
+	cap_id_t                  source_cap    = CAP_ID_INVALID;
+	syscall_status_t          status;
+	syscall_status_t          cleanup_status;
+
+	if (dma_cap == CAP_ID_INVALID) return SYSCALL_STATUS_BAD_ARGUMENT;
+	status = dma_resolve_source(dma_cap, controller_register_address, local_source_id, &source);
+	if (status == SYSCALL_STATUS_OK) status = dma_claim_source(dma_cap, source, &source_cap);
+	if (status == SYSCALL_STATUS_OK)
+		status = device_builder_add_resource(builder, name, name_size, source_cap, driver_rights);
+	if (source_cap != CAP_ID_INVALID) {
+		cleanup_status = cap_drop(source_cap);
 		if (status == SYSCALL_STATUS_OK) status = cleanup_status;
 	}
 	return status;

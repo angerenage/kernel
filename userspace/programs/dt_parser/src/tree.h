@@ -39,6 +39,18 @@ struct dt_parser_interrupts {
 	size_t                      count;
 };
 
+/* One canonical IOMMU input source translated by the Device Tree provider. */
+struct dt_parser_dma_source {
+	uint64_t controller_register_address;
+	uint32_t local_source_id;
+};
+
+/* Owned collection of firmware-described IOMMU input sources. */
+struct dt_parser_dma_sources {
+	struct dt_parser_dma_source* values;
+	size_t                       count;
+};
+
 /* Owned length-prefixed compatible-ID sequence in provider order. */
 struct dt_parser_string_list {
 	uint8_t* value;
@@ -84,6 +96,13 @@ syscall_status_t dt_parser_interrupts_read(cap_id_t provider_cap, device_tree_no
 
 /* Release a translated interrupt collection. */
 void dt_parser_interrupts_deinit(struct dt_parser_interrupts* interrupts);
+
+/* Read every IOMMU input source that the firmware provider can translate for a node. */
+syscall_status_t dt_parser_dma_sources_read(cap_id_t provider_cap, device_tree_node_id_t node,
+                                            struct dt_parser_dma_sources* out_sources);
+
+/* Release a translated DMA-source collection. */
+void dt_parser_dma_sources_deinit(struct dt_parser_dma_sources* sources);
 
 /* Decode a node's ordered, unique, UTF-8 compatible IDs. */
 syscall_status_t dt_parser_compatibles_read(cap_id_t provider_cap, device_tree_node_id_t node,

@@ -160,7 +160,7 @@ static syscall_status_t append_bytes(const struct device_builder* builder, const
 }
 
 syscall_status_t dt_parser_property_append(cap_id_t provider_cap, device_tree_node_id_t node, uint64_t property_index,
-                                           bool registers_translated, bool interrupts_translated,
+                                           bool registers_translated, bool dma_translated, bool interrupts_translated,
                                            const struct device_builder* builder, struct dt_parser_name_set* names) {
 	struct device_tree_property_info_response info;
 	struct dt_parser_property                 property;
@@ -185,6 +185,7 @@ syscall_status_t dt_parser_property_append(cap_id_t provider_cap, device_tree_no
 	    source_name_is(source_name, (size_t)info.name_size, "status") ||
 	    (registers_translated && (source_name_is(source_name, (size_t)info.name_size, "reg") ||
 	                              source_name_is(source_name, (size_t)info.name_size, "reg-names"))) ||
+	    (dma_translated && source_name_is(source_name, (size_t)info.name_size, "iommus")) ||
 	    (interrupts_translated && (source_name_is(source_name, (size_t)info.name_size, "interrupts") ||
 	                               source_name_is(source_name, (size_t)info.name_size, "interrupts-extended") ||
 	                               source_name_is(source_name, (size_t)info.name_size, "interrupt-parent") ||

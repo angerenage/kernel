@@ -461,6 +461,70 @@ void dt_parser_interrupts_deinit(struct dt_parser_interrupts* interrupts) {
 	*interrupts = (struct dt_parser_interrupts){0};
 }
 
+syscall_status_t dt_parser_dma_sources_read(cap_id_t provider_cap, device_tree_node_id_t node,
+                                            struct dt_parser_dma_sources* out_sources) {
+	struct dt_parser_property property;
+	syscall_status_t          status;
+
+	if (out_sources == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	*out_sources = (struct dt_parser_dma_sources){0};
+	status       = dt_parser_property_find(provider_cap, node, "iommus", &property);
+	if (status != SYSCALL_STATUS_OK) return status;
+	if (property.value_size == 0u || property.value_size % sizeof(uint32_t) != 0u ||
+	    property.value_size / sizeof(uint32_t) > SIZE_MAX)
+		return SYSCALL_STATUS_UNAVAILABLE;
+
+	size_t cell_count = (size_t)(property.value_size / sizeof(uint32_t));
+	for (size_t cell = 0u; cell < cell_count;) {
+		uint64_t                                    phandle_value;
+		struct device_tree_resolve_phandle_response reference;
+		uint32_t                                    cells[DEVICE_TREE_REFERENCE_MAX_SPECIFIER_CELLS];
+
+		status = property_cells(provider_cap, node, &property, cell++, 1u, &phandle_value);
+		if (status != SYSCALL_STATUS_OK || phandle_value == 0u) goto fail;
+		status = device_tree_resolve_phandle(provider_cap, (uint32_t)phandle_value, &reference);
+		if (status != SYSCALL_STATUS_OK || reference.kind != DEVICE_TREE_REFERENCE_DMA_CONTROLLER ||
+		    reference.specifier_cell_count == 0u || reference.specifier_cell_count > cell_count - cell)
+			goto fail;
+		for (size_t index = 0u; index < reference.specifier_cell_count; index++) {
+			uint64_t value;
+			status = property_cells(provider_cap, node, &property, cell + index, 1u, &value);
+			if (status != SYSCALL_STATUS_OK) goto fail;
+			cells[index] = (uint32_t)value;
+		}
+		status = device_tree_resolve_phandle_specifier(
+			provider_cap, (uint32_t)phandle_value, cells, reference.specifier_cell_count, &reference);
+		if (status != SYSCALL_STATUS_OK || reference.dma_claim_valid == 0u) goto fail;
+		if (out_sources->count == DEVICE_MAX_RESOURCES) {
+			status = SYSCALL_STATUS_UNAVAILABLE;
+			goto fail;
+		}
+		struct dt_parser_dma_source* resized =
+			realloc(out_sources->values, (out_sources->count + 1u) * sizeof(*resized));
+		if (resized == NULL) {
+			status = SYSCALL_STATUS_FAILED;
+			goto fail;
+		}
+		out_sources->values                       = resized;
+		out_sources->values[out_sources->count++] = (struct dt_parser_dma_source){
+			.controller_register_address = reference.value,
+			.local_source_id             = reference.local_source_id,
+		};
+		cell += reference.specifier_cell_count;
+	}
+	return out_sources->count == 0u ? SYSCALL_STATUS_UNAVAILABLE : SYSCALL_STATUS_OK;
+
+fail:
+	dt_parser_dma_sources_deinit(out_sources);
+	return status == SYSCALL_STATUS_OK ? SYSCALL_STATUS_UNAVAILABLE : status;
+}
+
+void dt_parser_dma_sources_deinit(struct dt_parser_dma_sources* sources) {
+	if (sources == NULL) return;
+	free(sources->values);
+	*sources = (struct dt_parser_dma_sources){0};
+}
+
 static bool compatible_duplicate(const uint8_t* raw, size_t current_offset, const uint8_t* value, size_t value_size) {
 	size_t offset = 0u;
 

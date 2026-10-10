@@ -122,6 +122,7 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 	struct self_info          self;
 	cap_id_t                  acpi_cap       = CAP_ID_INVALID;
 	cap_id_t                  dt_cap         = CAP_ID_INVALID;
+	cap_id_t                  dma_cap        = CAP_ID_INVALID;
 	cap_id_t                  interrupts_cap = CAP_ID_INVALID;
 	cap_id_t                  io_ports_cap   = CAP_ID_INVALID;
 	const char**              argv           = NULL;
@@ -179,6 +180,8 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 	if (status == SYSCALL_STATUS_OK)
 		status = device_manager_optional_resource(init, KERNEL_RESOURCE_TYPE_DEVICE_TREE, &dt_cap);
 	if (status == SYSCALL_STATUS_OK)
+		status = device_manager_optional_resource(init, KERNEL_RESOURCE_TYPE_DMA, &dma_cap);
+	if (status == SYSCALL_STATUS_OK)
 		status = kernel_resource_acquire(init->kernel_resources_cap, KERNEL_RESOURCE_TYPE_INTERRUPTS, &interrupts_cap);
 #if defined(__x86_64__)
 	if (status == SYSCALL_STATUS_OK)
@@ -216,6 +219,11 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 											 .capability = init->memory_allocator_cap,
 											 .rights     = DEVICE_MANAGER_MEMORY_ALLOCATOR_CAP_RIGHTS,
 											 },
+			[PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_DMA] =
+				{
+											 .capability = dma_cap,
+											 .rights     = dma_cap == CAP_ID_INVALID ? 0u : DEVICE_MANAGER_DMA_CAP_RIGHTS,
+											 },
 			[PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_INTERRUPTS] =
 				{
 											 .capability = interrupts_cap,
@@ -233,6 +241,7 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 	free(argv);
 	if (!device_manager_drop_capability(&acpi_cap, "ACPI provider")) temporary_caps_released = false;
 	if (!device_manager_drop_capability(&dt_cap, "Device Tree provider")) temporary_caps_released = false;
+	if (!device_manager_drop_capability(&dma_cap, "DMA")) temporary_caps_released = false;
 	if (!device_manager_drop_capability(&interrupts_cap, "interrupts")) temporary_caps_released = false;
 	if (!device_manager_drop_capability(&io_ports_cap, "I/O ports")) temporary_caps_released = false;
 	if (status != SYSCALL_STATUS_OK) {
