@@ -126,11 +126,11 @@ struct dt_node dt_node_by_phandle(uint32_t phandle) {
 
 size_t hal_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity) {
 	struct hal_device_tree_consumed_node records[6] = {
-		{  {.id = DT_TEST_INTERRUPT},          HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED,      0u},
-		{  {.id = DT_TEST_INTERRUPT}, HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER, 0x1000u},
-		{        {.id = DT_TEST_DMA},       HAL_DEVICE_TREE_REFERENCE_DMA_CONTROLLER, 0x2000u},
-		{{.id = DT_TEST_UNSUPPORTED},          HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED,      0u},
-		{  {.id = DT_TEST_INTERRUPT}, HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER, 0x3000u},
+		{  .node = {.id = DT_TEST_INTERRUPT},          .kind = HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED,      .value = 0u},
+		{  .node = {.id = DT_TEST_INTERRUPT}, .kind = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER, .value = 0x1000u},
+		{        .node = {.id = DT_TEST_DMA},       .kind = HAL_DEVICE_TREE_REFERENCE_DMA_CONTROLLER, .value = 0x2000u},
+		{.node = {.id = DT_TEST_UNSUPPORTED},          .kind = HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED,      .value = 0u},
+		{  .node = {.id = DT_TEST_INTERRUPT}, .kind = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER, .value = 0x3000u},
 	};
 	size_t count = dt_test_conflict ? 5u : 4u;
 	if (dt_test_invalid_report.id != SIZE_MAX) {
@@ -146,6 +146,19 @@ size_t hal_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* node
 		memcpy(nodes, records, copy_count * sizeof(*nodes));
 	}
 	return count;
+}
+
+bool hal_device_tree_interrupt_translate(const struct hal_device_tree_consumed_node* controller, const uint32_t* cells,
+                                         size_t cell_count, uint32_t* out_local_source_id,
+                                         enum hal_interrupt_trigger*  out_trigger,
+                                         enum hal_interrupt_polarity* out_polarity) {
+	(void)controller;
+	(void)cells;
+	(void)cell_count;
+	(void)out_local_source_id;
+	(void)out_trigger;
+	(void)out_polarity;
+	return false;
 }
 
 static cap_id_t dt_test_provider(struct kernel_capability_test_context* ctx) {

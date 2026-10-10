@@ -10,6 +10,11 @@ struct cpu;
 /* List Device Tree nodes consumed by APLIC discovery. */
 size_t riscv64_aplic_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity);
 
+/* Translate one APLIC Device Tree interrupt specifier. */
+bool riscv64_aplic_device_tree_interrupt(const uint32_t* cells, size_t cell_count, uint32_t* out_local_source_id,
+                                         enum hal_interrupt_trigger*  out_trigger,
+                                         enum hal_interrupt_polarity* out_polarity);
+
 /* Return the fixed-source domain exposed by the APLIC. */
 bool riscv64_aplic_source_domain_at(struct hal_interrupt_source_domain_info* out);
 

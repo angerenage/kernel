@@ -4,6 +4,7 @@
 #include <runtime/diagnostic.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 #include <system/capability.h>
 #include <system/device_tree.h>
 
@@ -93,12 +94,42 @@ syscall_status_t device_tree_property_read(cap_id_t provider_cap, device_tree_no
 	return device_tree_read(provider_cap, DEVICE_TREE_READ_PROPERTY_VALUE, node, property_index, offset, buffer, size);
 }
 
+static syscall_status_t device_tree_resolve(cap_id_t provider_cap, uint32_t phandle, const uint32_t* cells,
+                                            size_t                                       cell_count,
+                                            struct device_tree_resolve_phandle_response* out_reference) {
+	struct device_tree_resolve_phandle_request request = {0};
+
+	if (out_reference == NULL || phandle == 0u || cell_count > DEVICE_TREE_REFERENCE_MAX_SPECIFIER_CELLS ||
+	    (cell_count != 0u && cells == NULL))
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	request.header.op            = DEVICE_TREE_OP_RESOLVE_PHANDLE;
+	request.phandle              = phandle;
+	request.specifier_cell_count = (uint32_t)cell_count;
+	if (cell_count != 0u) memcpy(request.specifier_cells, cells, cell_count * sizeof(*cells));
+	syscall_status_t status = device_tree_fixed_call(
+		provider_cap, &request, sizeof(request), out_reference, sizeof(*out_reference), DEVICE_TREE_OP_RESOLVE_PHANDLE);
+	if (status == SYSCALL_STATUS_OK &&
+	    ((unsigned int)out_reference->kind > DEVICE_TREE_REFERENCE_UNSUPPORTED ||
+	     (out_reference->interrupt_claim_valid != 0u && out_reference->interrupt_claim_valid != 1u) ||
+	     out_reference->specifier_cell_count > DEVICE_TREE_REFERENCE_MAX_SPECIFIER_CELLS ||
+	     (out_reference->kind != DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER &&
+	      (out_reference->specifier_cell_count != 0u || out_reference->interrupt_claim_valid != 0u)) ||
+	     (out_reference->interrupt_claim_valid != 0u &&
+	      (out_reference->kind != DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER || cell_count == 0u ||
+	       out_reference->specifier_cell_count != cell_count || out_reference->trigger > INTERRUPT_TRIGGER_LEVEL ||
+	       out_reference->polarity > INTERRUPT_POLARITY_LOW))))
+		return SYSCALL_STATUS_FAILED;
+	return status;
+}
+
 syscall_status_t device_tree_resolve_phandle(cap_id_t provider_cap, uint32_t phandle,
                                              struct device_tree_resolve_phandle_response* out_reference) {
-	const struct device_tree_resolve_phandle_request request = {.header  = {.op = DEVICE_TREE_OP_RESOLVE_PHANDLE},
-	                                                            .phandle = phandle};
+	return device_tree_resolve(provider_cap, phandle, NULL, 0u, out_reference);
+}
 
-	if (out_reference == NULL || phandle == 0u) return SYSCALL_STATUS_BAD_ARGUMENT;
-	return device_tree_fixed_call(
-		provider_cap, &request, sizeof(request), out_reference, sizeof(*out_reference), DEVICE_TREE_OP_RESOLVE_PHANDLE);
+syscall_status_t device_tree_resolve_phandle_specifier(cap_id_t provider_cap, uint32_t phandle, const uint32_t* cells,
+                                                       size_t                                       cell_count,
+                                                       struct device_tree_resolve_phandle_response* out_reference) {
+	if (cell_count == 0u) return SYSCALL_STATUS_BAD_ARGUMENT;
+	return device_tree_resolve(provider_cap, phandle, cells, cell_count, out_reference);
 }

@@ -233,6 +233,35 @@ static bool discover_fdt(void) {
 	return true;
 }
 
+bool loongarch64_device_tree_interrupt(const uint32_t* cells, size_t cell_count, uint32_t* out_local_source_id,
+                                       enum hal_interrupt_trigger*  out_trigger,
+                                       enum hal_interrupt_polarity* out_polarity) {
+	if (cells == NULL || cell_count != 2u || out_local_source_id == NULL || out_trigger == NULL || out_polarity == NULL)
+		return false;
+	switch (cells[1]) {
+	case 1u:
+		*out_trigger  = HAL_INTERRUPT_TRIGGER_EDGE;
+		*out_polarity = HAL_INTERRUPT_POLARITY_HIGH;
+		break;
+	case 2u:
+		*out_trigger  = HAL_INTERRUPT_TRIGGER_EDGE;
+		*out_polarity = HAL_INTERRUPT_POLARITY_LOW;
+		break;
+	case 4u:
+		*out_trigger  = HAL_INTERRUPT_TRIGGER_LEVEL;
+		*out_polarity = HAL_INTERRUPT_POLARITY_HIGH;
+		break;
+	case 8u:
+		*out_trigger  = HAL_INTERRUPT_TRIGGER_LEVEL;
+		*out_polarity = HAL_INTERRUPT_POLARITY_LOW;
+		break;
+	default:
+		return false;
+	}
+	*out_local_source_id = cells[0];
+	return true;
+}
+
 size_t loongarch64_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity) {
 	size_t count = 0u;
 
@@ -250,9 +279,10 @@ size_t loongarch64_device_tree_consumed_nodes(struct hal_device_tree_consumed_no
 		if (!dt_node_reg(pch_dt_node, 0u, &reg)) return count;
 		if (nodes != NULL && count < capacity) {
 			nodes[count] = (struct hal_device_tree_consumed_node){
-				.node  = pch_dt_node,
-				.kind  = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER,
-				.value = reg.address,
+				.node            = pch_dt_node,
+				.kind            = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER,
+				.value           = reg.address,
+				.specifier_cells = 2u,
 			};
 		}
 		count++;

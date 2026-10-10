@@ -75,7 +75,11 @@ size_t aarch64_gicv3_device_tree_consumed_nodes(struct hal_device_tree_consumed_
 		return 0u;
 	if (nodes != NULL && capacity != 0u) {
 		nodes[0] = (struct hal_device_tree_consumed_node){
-			.node = node, .kind = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER, .value = distributor.address};
+			.node            = node,
+			.kind            = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER,
+			.value           = distributor.address,
+			.specifier_cells = 3u,
+		};
 	}
 	return 1u;
 }

@@ -15,6 +15,11 @@ size_t loongarch64_interrupt_acpi_consumed_tables(struct hal_acpi_consumed_table
 /* List Device Tree nodes consumed by interrupt-controller discovery. */
 size_t loongarch64_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity);
 
+/* Translate one Loongson PCH PIC Device Tree interrupt specifier. */
+bool loongarch64_device_tree_interrupt(const uint32_t* cells, size_t cell_count, uint32_t* out_local_source_id,
+                                       enum hal_interrupt_trigger*  out_trigger,
+                                       enum hal_interrupt_polarity* out_polarity);
+
 /* Discover the platform interrupt-controller topology from firmware. */
 bool loongarch64_interrupt_controllers_discover(void);
 

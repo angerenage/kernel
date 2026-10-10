@@ -63,7 +63,10 @@ static bool device_tree_consumed_merge(struct hal_device_tree_consumed_node reco
 	if (!dt_node_valid(record.node) || record.node.id == dt_root().id ||
 	    (unsigned int)record.kind > HAL_DEVICE_TREE_REFERENCE_DMA_CONTROLLER ||
 	    (record.kind == HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED && record.value != 0u) ||
-	    (record.kind != HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED && record.value == 0u))
+	    (record.kind != HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED && record.value == 0u) ||
+	    (record.kind == HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER &&
+	     record.specifier_cells > DEVICE_TREE_REFERENCE_MAX_SPECIFIER_CELLS) ||
+	    (record.kind != HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER && record.specifier_cells != 0u))
 		return false;
 	existing = device_tree_consumed_find(record.node);
 	if (existing == NULL) {
@@ -75,7 +78,8 @@ static bool device_tree_consumed_merge(struct hal_device_tree_consumed_node reco
 		return true;
 	}
 	if (record.kind == HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED) return true;
-	return existing->kind == record.kind && existing->value == record.value;
+	return existing->kind == record.kind && existing->value == record.value &&
+	       existing->specifier_cells == record.specifier_cells;
 }
 
 static bool device_tree_collect_consumed(void) {
@@ -297,25 +301,69 @@ static syscall_result_t device_tree_resolve_phandle_handler(const struct cap_req
 	    !cap_kernel_response_fits(req, sizeof(response)))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	memcpy(&request, req->request, sizeof(request));
-	if (request.header.op != DEVICE_TREE_OP_RESOLVE_PHANDLE || request.phandle == 0u)
+	if (request.header.op != DEVICE_TREE_OP_RESOLVE_PHANDLE || request.phandle == 0u || request.reserved != 0u ||
+	    request.specifier_cell_count > DEVICE_TREE_REFERENCE_MAX_SPECIFIER_CELLS)
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	for (size_t index = request.specifier_cell_count; index < DEVICE_TREE_REFERENCE_MAX_SPECIFIER_CELLS; index++)
+		if (request.specifier_cells[index] != 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	node = dt_node_by_phandle(request.phandle);
 	if (!dt_node_valid(node)) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 	public_id = device_tree_public_id(node);
 	if (public_id != DEVICE_TREE_NODE_INVALID) {
+		if (request.specifier_cell_count != 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 		response.kind  = DEVICE_TREE_REFERENCE_NODE;
 		response.value = public_id;
 		return cap_kernel_write_response(req, &response, sizeof(response));
 	}
 	consumed = device_tree_consumed_find(node);
 	if (consumed == NULL || consumed->kind == HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED) {
+		if (request.specifier_cell_count != 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 		response.kind = DEVICE_TREE_REFERENCE_UNSUPPORTED;
 	}
 	else if (consumed->kind == HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER) {
-		response.kind  = DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER;
-		response.value = consumed->value;
+		response.kind                 = DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER;
+		response.specifier_cell_count = consumed->specifier_cells;
+		response.value                = consumed->value;
+		if (request.specifier_cell_count != 0u) {
+			enum hal_interrupt_trigger  trigger  = HAL_INTERRUPT_TRIGGER_FIRMWARE;
+			enum hal_interrupt_polarity polarity = HAL_INTERRUPT_POLARITY_FIRMWARE;
+
+			if (request.specifier_cell_count != consumed->specifier_cells || consumed->specifier_cells == 0u ||
+			    !hal_device_tree_interrupt_translate(consumed,
+			                                         request.specifier_cells,
+			                                         request.specifier_cell_count,
+			                                         &response.local_source_id,
+			                                         &trigger,
+			                                         &polarity) ||
+			    trigger > HAL_INTERRUPT_TRIGGER_LEVEL || polarity > HAL_INTERRUPT_POLARITY_LOW)
+				return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+			response.interrupt_claim_valid = 1u;
+			switch (trigger) {
+			case HAL_INTERRUPT_TRIGGER_FIRMWARE:
+				response.trigger = INTERRUPT_TRIGGER_FIRMWARE;
+				break;
+			case HAL_INTERRUPT_TRIGGER_EDGE:
+				response.trigger = INTERRUPT_TRIGGER_EDGE;
+				break;
+			case HAL_INTERRUPT_TRIGGER_LEVEL:
+				response.trigger = INTERRUPT_TRIGGER_LEVEL;
+				break;
+			}
+			switch (polarity) {
+			case HAL_INTERRUPT_POLARITY_FIRMWARE:
+				response.polarity = INTERRUPT_POLARITY_FIRMWARE;
+				break;
+			case HAL_INTERRUPT_POLARITY_HIGH:
+				response.polarity = INTERRUPT_POLARITY_HIGH;
+				break;
+			case HAL_INTERRUPT_POLARITY_LOW:
+				response.polarity = INTERRUPT_POLARITY_LOW;
+				break;
+			}
+		}
 	}
 	else {
+		if (request.specifier_cell_count != 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 		response.kind  = DEVICE_TREE_REFERENCE_DMA_CONTROLLER;
 		response.value = consumed->value;
 	}

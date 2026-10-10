@@ -57,6 +57,36 @@ static struct {
 } aplic;
 static uint32_t aplic_init_lock;
 
+bool riscv64_aplic_device_tree_interrupt(const uint32_t* cells, size_t cell_count, uint32_t* out_local_source_id,
+                                         enum hal_interrupt_trigger*  out_trigger,
+                                         enum hal_interrupt_polarity* out_polarity) {
+	if (cells == NULL || cell_count != 2u || out_local_source_id == NULL || out_trigger == NULL ||
+	    out_polarity == NULL || cells[0] == 0u)
+		return false;
+	switch (cells[1]) {
+	case 1u:
+		*out_trigger  = HAL_INTERRUPT_TRIGGER_EDGE;
+		*out_polarity = HAL_INTERRUPT_POLARITY_HIGH;
+		break;
+	case 2u:
+		*out_trigger  = HAL_INTERRUPT_TRIGGER_EDGE;
+		*out_polarity = HAL_INTERRUPT_POLARITY_LOW;
+		break;
+	case 4u:
+		*out_trigger  = HAL_INTERRUPT_TRIGGER_LEVEL;
+		*out_polarity = HAL_INTERRUPT_POLARITY_HIGH;
+		break;
+	case 8u:
+		*out_trigger  = HAL_INTERRUPT_TRIGGER_LEVEL;
+		*out_polarity = HAL_INTERRUPT_POLARITY_LOW;
+		break;
+	default:
+		return false;
+	}
+	*out_local_source_id = cells[0];
+	return true;
+}
+
 size_t riscv64_aplic_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity) {
 	size_t count        = 0u;
 	size_t device_count = dt_device_count("riscv,aplic");
@@ -69,7 +99,11 @@ size_t riscv64_aplic_device_tree_consumed_nodes(struct hal_device_tree_consumed_
 			continue;
 		if (nodes != NULL && count < capacity) {
 			nodes[count] = (struct hal_device_tree_consumed_node){
-				.node = node, .kind = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER, .value = reg.address};
+				.node            = node,
+				.kind            = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER,
+				.value           = reg.address,
+				.specifier_cells = 2u,
+			};
 		}
 		count++;
 	}

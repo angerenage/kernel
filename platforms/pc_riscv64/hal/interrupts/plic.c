@@ -51,6 +51,18 @@ static struct {
 static uint32_t plic_init_lock;
 static uint32_t plic_register_lock;
 
+bool riscv64_plic_device_tree_interrupt(const uint32_t* cells, size_t cell_count, uint32_t* out_local_source_id,
+                                        enum hal_interrupt_trigger*  out_trigger,
+                                        enum hal_interrupt_polarity* out_polarity) {
+	if (cells == NULL || cell_count != 1u || out_local_source_id == NULL || out_trigger == NULL ||
+	    out_polarity == NULL || cells[0] == 0u)
+		return false;
+	*out_local_source_id = cells[0];
+	*out_trigger         = HAL_INTERRUPT_TRIGGER_FIRMWARE;
+	*out_polarity        = HAL_INTERRUPT_POLARITY_FIRMWARE;
+	return true;
+}
+
 static bool plic_dt_node(struct dt_node* out) {
 	static const char* const compatibles[] = {"sifive,plic-1.0.0", "riscv,plic0"};
 	struct dt_node           found         = DT_NODE_INVALID;
@@ -114,9 +126,10 @@ size_t riscv64_plic_device_tree_consumed_nodes(struct hal_device_tree_consumed_n
 	if (!plic_fdt_find(&found)) return 0u;
 	if (nodes != NULL && capacity != 0u) {
 		nodes[0] = (struct hal_device_tree_consumed_node){
-			.node  = found.node,
-			.kind  = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER,
-			.value = found.physical_base,
+			.node            = found.node,
+			.kind            = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER,
+			.value           = found.physical_base,
+			.specifier_cells = 1u,
 		};
 	}
 	return 1u;

@@ -174,9 +174,10 @@ size_t aarch64_gic_device_tree_consumed_nodes(struct hal_device_tree_consumed_no
 	if (dt_node_valid(gic_dt_node)) {
 		if (nodes != NULL && count < capacity) {
 			nodes[count] = (struct hal_device_tree_consumed_node){
-				.node  = gic_dt_node,
-				.kind  = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER,
-				.value = gicd_phys,
+				.node            = gic_dt_node,
+				.kind            = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER,
+				.value           = gicd_phys,
+				.specifier_cells = 3u,
 			};
 		}
 		count++;
@@ -191,6 +192,20 @@ size_t aarch64_gic_device_tree_consumed_nodes(struct hal_device_tree_consumed_no
 		count++;
 	}
 	return count;
+}
+
+bool aarch64_gic_device_tree_interrupt(const uint32_t* cells, size_t cell_count, uint32_t* out_local_source_id,
+                                       enum hal_interrupt_trigger*  out_trigger,
+                                       enum hal_interrupt_polarity* out_polarity) {
+	if (cells == NULL || cell_count != 3u || out_local_source_id == NULL || out_trigger == NULL ||
+	    out_polarity == NULL || cells[0] != 0u || cells[1] > UINT32_MAX - 32u)
+		return false;
+	if (cells[2] == 1u) *out_trigger = HAL_INTERRUPT_TRIGGER_EDGE;
+	else if (cells[2] == 4u) *out_trigger = HAL_INTERRUPT_TRIGGER_LEVEL;
+	else return false;
+	*out_local_source_id = cells[1] + 32u;
+	*out_polarity        = HAL_INTERRUPT_POLARITY_HIGH;
+	return true;
 }
 
 bool aarch64_gic_init_global(void) {

@@ -32,3 +32,8 @@ syscall_status_t device_tree_property_read(cap_id_t provider_cap, device_tree_no
 /* Resolve a firmware phandle without exposing hidden nodes. */
 syscall_status_t device_tree_resolve_phandle(cap_id_t provider_cap, uint32_t phandle,
                                              struct device_tree_resolve_phandle_response* out_reference);
+
+/* Resolve a phandle together with its controller-specific specifier cells. */
+syscall_status_t device_tree_resolve_phandle_specifier(cap_id_t provider_cap, uint32_t phandle, const uint32_t* cells,
+                                                       size_t                                       cell_count,
+                                                       struct device_tree_resolve_phandle_response* out_reference);
