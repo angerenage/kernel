@@ -25,6 +25,20 @@ struct dt_parser_ranges {
 	size_t                  count;
 };
 
+/* One canonical fixed interrupt translated by the Device Tree provider. */
+struct dt_parser_interrupt {
+	uint64_t                controller_register_address;
+	uint32_t                local_source_id;
+	enum interrupt_trigger  trigger;
+	enum interrupt_polarity polarity;
+};
+
+/* Owned collection of firmware-described fixed interrupts. */
+struct dt_parser_interrupts {
+	struct dt_parser_interrupt* values;
+	size_t                      count;
+};
+
 /* Owned length-prefixed compatible-ID sequence in provider order. */
 struct dt_parser_string_list {
 	uint8_t* value;
@@ -63,6 +77,13 @@ syscall_status_t dt_parser_ranges_read(cap_id_t provider_cap, device_tree_node_i
 
 /* Release a translated reg collection. */
 void dt_parser_ranges_deinit(struct dt_parser_ranges* ranges);
+
+/* Read every interrupt that the firmware provider can translate for a node. */
+syscall_status_t dt_parser_interrupts_read(cap_id_t provider_cap, device_tree_node_id_t node,
+                                           struct dt_parser_interrupts* out_interrupts);
+
+/* Release a translated interrupt collection. */
+void dt_parser_interrupts_deinit(struct dt_parser_interrupts* interrupts);
 
 /* Decode a node's ordered, unique, UTF-8 compatible IDs. */
 syscall_status_t dt_parser_compatibles_read(cap_id_t provider_cap, device_tree_node_id_t node,

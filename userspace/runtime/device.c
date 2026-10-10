@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <system/capability.h>
+#include <system/interrupt.h>
 #include <system/memory.h>
 
 static bool identifier_valid(const void* value, size_t size) {
@@ -250,6 +251,30 @@ syscall_status_t device_builder_add_mmio_resource(const struct device_builder* b
 		status = device_builder_add_resource(builder, name, name_size, memory_cap, driver_rights);
 	if (memory_cap != CAP_ID_INVALID) {
 		cleanup_status = cap_drop(memory_cap);
+		if (status == SYSCALL_STATUS_OK) status = cleanup_status;
+	}
+	return status;
+}
+
+syscall_status_t device_builder_add_interrupt_resource(const struct device_builder* builder, cap_id_t interrupts_cap,
+                                                       const char* name, size_t name_size,
+                                                       uint64_t controller_register_address, uint32_t local_source_id,
+                                                       enum interrupt_trigger  trigger,
+                                                       enum interrupt_polarity polarity) {
+	static const cap_rights_t driver_rights = CAP_CALL | CAP_READ | CAP_MANAGE;
+	interrupt_source_t        source        = INTERRUPT_SOURCE_INVALID;
+	cap_id_t                  interrupt_cap = CAP_ID_INVALID;
+	syscall_status_t          status;
+	syscall_status_t          cleanup_status;
+
+	if (interrupts_cap == CAP_ID_INVALID) return SYSCALL_STATUS_BAD_ARGUMENT;
+	status = interrupts_resolve_source(interrupts_cap, controller_register_address, local_source_id, &source);
+	if (status == SYSCALL_STATUS_OK)
+		status = interrupts_claim_source(interrupts_cap, source, trigger, polarity, &interrupt_cap);
+	if (status == SYSCALL_STATUS_OK)
+		status = device_builder_add_resource(builder, name, name_size, interrupt_cap, driver_rights);
+	if (interrupt_cap != CAP_ID_INVALID) {
+		cleanup_status = cap_drop(interrupt_cap);
 		if (status == SYSCALL_STATUS_OK) status = cleanup_status;
 	}
 	return status;

@@ -1,6 +1,7 @@
 #include "fadt.h"
 
 #include <base/acpi.h>
+#include <base/interrupt.h>
 #include <runtime/device.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -19,14 +20,18 @@
 #define I8042_COMMAND_PORT 0x64u
 
 #define I8042_COMPATIBLE "acpi:i8042"
+#define I8042_KEYBOARD_INTERRUPT_RESOURCE "keyboard_interrupt"
+#define I8042_MOUSE_INTERRUPT_RESOURCE "mouse_interrupt"
 #define I8042_DATA_RESOURCE "data_port"
 #define I8042_COMMAND_RESOURCE "status_command_port"
+#define I8042_KEYBOARD_INTERRUPT 1u
+#define I8042_MOUSE_INTERRUPT 12u
 
 /* The builder delegates resources to the manager, so the temporary caps need CAP_DELEGATE. */
 #define I8042_DRIVER_PORT_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP))
 #define I8042_PARSER_PORT_RIGHTS (I8042_DRIVER_PORT_RIGHTS | CAP_DELEGATE)
 
-static syscall_status_t submit_i8042(cap_id_t root_cap, cap_id_t io_ports_cap) {
+static syscall_status_t submit_i8042(cap_id_t root_cap, cap_id_t interrupts_cap, cap_id_t io_ports_cap) {
 	struct device_builder builder = {.capability = CAP_ID_INVALID, .manager_pid = PROCESS_PID_INVALID};
 	struct io_port_info   range;
 	cap_id_t              data_cap    = CAP_ID_INVALID;
@@ -46,6 +51,24 @@ static syscall_status_t submit_i8042(cap_id_t root_cap, cap_id_t io_ports_cap) {
 
 	status = device_builder_begin_root(root_cap, &builder);
 	if (status == SYSCALL_STATUS_OK) status = acpi_device_add_compatible(&builder, I8042_COMPATIBLE);
+	if (status == SYSCALL_STATUS_OK)
+		status = device_builder_add_interrupt_resource(&builder,
+		                                               interrupts_cap,
+		                                               I8042_KEYBOARD_INTERRUPT_RESOURCE,
+		                                               sizeof(I8042_KEYBOARD_INTERRUPT_RESOURCE) - 1u,
+		                                               INTERRUPT_SOURCE_CONTROLLER_PLATFORM,
+		                                               I8042_KEYBOARD_INTERRUPT,
+		                                               INTERRUPT_TRIGGER_FIRMWARE,
+		                                               INTERRUPT_POLARITY_FIRMWARE);
+	if (status == SYSCALL_STATUS_OK)
+		status = device_builder_add_interrupt_resource(&builder,
+		                                               interrupts_cap,
+		                                               I8042_MOUSE_INTERRUPT_RESOURCE,
+		                                               sizeof(I8042_MOUSE_INTERRUPT_RESOURCE) - 1u,
+		                                               INTERRUPT_SOURCE_CONTROLLER_PLATFORM,
+		                                               I8042_MOUSE_INTERRUPT,
+		                                               INTERRUPT_TRIGGER_FIRMWARE,
+		                                               INTERRUPT_POLARITY_FIRMWARE);
 	if (status == SYSCALL_STATUS_OK)
 		status = device_builder_add_resource(
 			&builder, I8042_DATA_RESOURCE, sizeof(I8042_DATA_RESOURCE) - 1u, data_cap, I8042_DRIVER_PORT_RIGHTS);
@@ -71,8 +94,8 @@ cleanup:
 }
 #endif
 
-syscall_status_t acpi_fadt_parse(cap_id_t provider_cap, cap_id_t root_cap, cap_id_t io_ports_cap,
-                                 size_t* device_count) {
+syscall_status_t acpi_fadt_parse(cap_id_t provider_cap, cap_id_t root_cap, cap_id_t interrupts_cap,
+                                 cap_id_t io_ports_cap, size_t* device_count) {
 #if defined(__x86_64__)
 	struct acpi_provider_fadt_read_response fadt;
 	syscall_status_t                        status;
@@ -85,12 +108,13 @@ syscall_status_t acpi_fadt_parse(cap_id_t provider_cap, cap_id_t root_cap, cap_i
 	if (status == SYSCALL_STATUS_UNAVAILABLE) return SYSCALL_STATUS_OK;
 	if (status != SYSCALL_STATUS_OK) return status;
 	if ((fadt.iapc_boot_arch & FADT_IAPC_BOOT_ARCH_8042) == 0u) return SYSCALL_STATUS_OK;
-	if (io_ports_cap == CAP_ID_INVALID) return SYSCALL_STATUS_UNAVAILABLE;
+	if (interrupts_cap == CAP_ID_INVALID || io_ports_cap == CAP_ID_INVALID) return SYSCALL_STATUS_UNAVAILABLE;
 	if (*device_count == SIZE_MAX) return SYSCALL_STATUS_FAILED;
-	status = submit_i8042(root_cap, io_ports_cap);
+	status = submit_i8042(root_cap, interrupts_cap, io_ports_cap);
 	if (status != SYSCALL_STATUS_OK) return status;
 	(*device_count)++;
 #else
+	(void)interrupts_cap;
 	(void)io_ports_cap;
 #endif
 	return SYSCALL_STATUS_OK;

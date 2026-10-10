@@ -348,6 +348,119 @@ void dt_parser_ranges_deinit(struct dt_parser_ranges* ranges) {
 	*ranges = (struct dt_parser_ranges){0};
 }
 
+syscall_status_t dt_parser_interrupts_read(cap_id_t provider_cap, device_tree_node_id_t node,
+                                           struct dt_parser_interrupts* out_interrupts) {
+	struct dt_parser_property property;
+	syscall_status_t          status;
+
+	if (out_interrupts == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	*out_interrupts = (struct dt_parser_interrupts){0};
+	status          = dt_parser_property_find(provider_cap, node, "interrupts-extended", &property);
+	if (status == SYSCALL_STATUS_OK) {
+		if (property.value_size == 0u || property.value_size % sizeof(uint32_t) != 0u ||
+		    property.value_size / sizeof(uint32_t) > SIZE_MAX)
+			return SYSCALL_STATUS_UNAVAILABLE;
+		size_t cell_count = (size_t)(property.value_size / sizeof(uint32_t));
+		for (size_t cell = 0u; cell < cell_count;) {
+			uint64_t                                    phandle_value;
+			struct device_tree_resolve_phandle_response reference;
+			uint32_t                                    cells[DEVICE_TREE_REFERENCE_MAX_SPECIFIER_CELLS];
+
+			status = property_cells(provider_cap, node, &property, cell++, 1u, &phandle_value);
+			if (status != SYSCALL_STATUS_OK || phandle_value == 0u) goto fail;
+			status = device_tree_resolve_phandle(provider_cap, (uint32_t)phandle_value, &reference);
+			if (status != SYSCALL_STATUS_OK || reference.kind != DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER ||
+			    reference.specifier_cell_count == 0u || reference.specifier_cell_count > cell_count - cell)
+				goto fail;
+			for (size_t index = 0u; index < reference.specifier_cell_count; index++) {
+				uint64_t value;
+				status = property_cells(provider_cap, node, &property, cell + index, 1u, &value);
+				if (status != SYSCALL_STATUS_OK) goto fail;
+				cells[index] = (uint32_t)value;
+			}
+			status = device_tree_resolve_phandle_specifier(
+				provider_cap, (uint32_t)phandle_value, cells, reference.specifier_cell_count, &reference);
+			if (status != SYSCALL_STATUS_OK || reference.interrupt_claim_valid == 0u) goto fail;
+			if (out_interrupts->count == DEVICE_MAX_RESOURCES) {
+				status = SYSCALL_STATUS_UNAVAILABLE;
+				goto fail;
+			}
+			struct dt_parser_interrupt* resized =
+				realloc(out_interrupts->values, (out_interrupts->count + 1u) * sizeof(*resized));
+			if (resized == NULL) {
+				status = SYSCALL_STATUS_FAILED;
+				goto fail;
+			}
+			out_interrupts->values                          = resized;
+			out_interrupts->values[out_interrupts->count++] = (struct dt_parser_interrupt){
+				.controller_register_address = reference.value,
+				.local_source_id             = reference.local_source_id,
+				.trigger                     = reference.trigger,
+				.polarity                    = reference.polarity,
+			};
+			cell += reference.specifier_cell_count;
+		}
+		return out_interrupts->count == 0u ? SYSCALL_STATUS_UNAVAILABLE : SYSCALL_STATUS_OK;
+	}
+	if (status != SYSCALL_STATUS_UNAVAILABLE) return status;
+	status = dt_parser_property_find(provider_cap, node, "interrupts", &property);
+	if (status != SYSCALL_STATUS_OK) return status;
+	uint32_t              phandle = 0u;
+	device_tree_node_id_t cursor  = node;
+	while (cursor != DEVICE_TREE_NODE_INVALID) {
+		status = property_u32(provider_cap, cursor, "interrupt-parent", &phandle);
+		if (status == SYSCALL_STATUS_OK) break;
+		if (status != SYSCALL_STATUS_UNAVAILABLE) return status;
+		struct device_tree_node_info_response info;
+		status = device_tree_node_info(provider_cap, cursor, &info);
+		if (status != SYSCALL_STATUS_OK) return status;
+		cursor = info.parent;
+	}
+	if (phandle == 0u) return SYSCALL_STATUS_UNAVAILABLE;
+	struct device_tree_resolve_phandle_response reference;
+	status = device_tree_resolve_phandle(provider_cap, phandle, &reference);
+	if (status != SYSCALL_STATUS_OK || reference.kind != DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER ||
+	    reference.specifier_cell_count == 0u || property.value_size == 0u ||
+	    property.value_size % ((uint64_t)reference.specifier_cell_count * sizeof(uint32_t)) != 0u)
+		return SYSCALL_STATUS_UNAVAILABLE;
+	uint64_t interrupt_count = property.value_size / ((uint64_t)reference.specifier_cell_count * sizeof(uint32_t));
+	if (interrupt_count == 0u || interrupt_count > DEVICE_MAX_RESOURCES || interrupt_count > SIZE_MAX)
+		return SYSCALL_STATUS_UNAVAILABLE;
+	out_interrupts->values = calloc((size_t)interrupt_count, sizeof(*out_interrupts->values));
+	if (out_interrupts->values == NULL) return SYSCALL_STATUS_FAILED;
+	for (size_t interrupt = 0u; interrupt < (size_t)interrupt_count; interrupt++) {
+		uint32_t cells[DEVICE_TREE_REFERENCE_MAX_SPECIFIER_CELLS];
+		for (size_t index = 0u; index < reference.specifier_cell_count; index++) {
+			uint64_t value;
+			status = property_cells(
+				provider_cap, node, &property, interrupt * reference.specifier_cell_count + index, 1u, &value);
+			if (status != SYSCALL_STATUS_OK) goto fail;
+			cells[index] = (uint32_t)value;
+		}
+		status = device_tree_resolve_phandle_specifier(
+			provider_cap, phandle, cells, reference.specifier_cell_count, &reference);
+		if (status != SYSCALL_STATUS_OK || reference.interrupt_claim_valid == 0u) goto fail;
+		out_interrupts->values[interrupt] = (struct dt_parser_interrupt){
+			.controller_register_address = reference.value,
+			.local_source_id             = reference.local_source_id,
+			.trigger                     = reference.trigger,
+			.polarity                    = reference.polarity,
+		};
+		out_interrupts->count++;
+	}
+	return SYSCALL_STATUS_OK;
+
+fail:
+	dt_parser_interrupts_deinit(out_interrupts);
+	return status == SYSCALL_STATUS_OK ? SYSCALL_STATUS_UNAVAILABLE : status;
+}
+
+void dt_parser_interrupts_deinit(struct dt_parser_interrupts* interrupts) {
+	if (interrupts == NULL) return;
+	free(interrupts->values);
+	*interrupts = (struct dt_parser_interrupts){0};
+}
+
 static bool compatible_duplicate(const uint8_t* raw, size_t current_offset, const uint8_t* value, size_t value_size) {
 	size_t offset = 0u;
 

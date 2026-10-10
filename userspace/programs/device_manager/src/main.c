@@ -22,6 +22,7 @@ int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 	cap_id_t                               acpi_cap;
 	cap_id_t                               device_tree_cap;
 	cap_id_t                               memory_allocator_cap;
+	cap_id_t                               interrupts_cap;
 	cap_id_t                               io_ports_cap;
 	cap_id_t                               unused_cap;
 
@@ -29,11 +30,13 @@ int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 	acpi_cap             = capv[DEVICE_MANAGER_CAPABILITY_ACPI];
 	device_tree_cap      = capv[DEVICE_MANAGER_CAPABILITY_DEVICE_TREE];
 	memory_allocator_cap = capv[DEVICE_MANAGER_CAPABILITY_MEMORY_ALLOCATOR];
+	interrupts_cap       = capv[DEVICE_MANAGER_CAPABILITY_INTERRUPTS];
 	io_ports_cap         = capv[DEVICE_MANAGER_CAPABILITY_IO_PORTS];
-	if (memory_allocator_cap == CAP_ID_INVALID) {
+	if (memory_allocator_cap == CAP_ID_INVALID || interrupts_cap == CAP_ID_INVALID) {
 		(void)release_source(acpi_cap, "ACPI");
 		if (device_tree_cap != acpi_cap) (void)release_source(device_tree_cap, "Device Tree");
 		(void)release_source(memory_allocator_cap, "memory allocator");
+		(void)release_source(interrupts_cap, "interrupts");
 		(void)release_source(io_ports_cap, "I/O ports");
 		return 1;
 	}
@@ -43,6 +46,7 @@ int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 		(void)release_source(acpi_cap, "ACPI");
 		if (device_tree_cap != acpi_cap) (void)release_source(device_tree_cap, "Device Tree");
 		(void)release_source(memory_allocator_cap, "memory allocator");
+		(void)release_source(interrupts_cap, "interrupts");
 		(void)release_source(io_ports_cap, "I/O ports");
 		return 1;
 	}
@@ -52,6 +56,7 @@ int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 	    !release_source(unused_cap, unused_name)) {
 		(void)release_source(selection.capability, "selected firmware");
 		(void)release_source(memory_allocator_cap, "memory allocator");
+		(void)release_source(interrupts_cap, "interrupts");
 		(void)release_source(io_ports_cap, "I/O ports");
 		return 1;
 	}
@@ -59,20 +64,23 @@ int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 		printf("device-manager: initialization failed\n");
 		(void)release_source(selection.capability, "selected firmware");
 		(void)release_source(memory_allocator_cap, "memory allocator");
+		(void)release_source(interrupts_cap, "interrupts");
 		(void)release_source(io_ports_cap, "I/O ports");
 		return 1;
 	}
 	printf("device-manager: selected %s firmware\n",
 	       selection.source == DEVICE_MANAGER_FIRMWARE_SOURCE_DEVICE_TREE ? "Device Tree" : "ACPI");
 	if (!device_manager_parser_launch(
-			&server, selection.source, &selection.capability, memory_allocator_cap, io_ports_cap)) {
+			&server, selection.source, &selection.capability, memory_allocator_cap, interrupts_cap, io_ports_cap)) {
 		(void)release_source(selection.capability, "selected firmware");
 		(void)release_source(memory_allocator_cap, "memory allocator");
+		(void)release_source(interrupts_cap, "interrupts");
 		(void)release_source(io_ports_cap, "I/O ports");
 		device_server_deinit(&server);
 		return 1;
 	}
 	bool parser_resources_released = release_source(memory_allocator_cap, "memory allocator");
+	if (!release_source(interrupts_cap, "interrupts")) parser_resources_released = false;
 	if (!release_source(io_ports_cap, "I/O ports")) parser_resources_released = false;
 	if (!parser_resources_released) {
 		device_server_deinit(&server);

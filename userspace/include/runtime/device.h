@@ -1,6 +1,7 @@
 #pragma once
 
 #include <base/cap.h>
+#include <base/interrupt.h>
 #include <base/syscall.h>
 #include <protocol/device.h>
 #include <stdbool.h>
@@ -45,6 +46,13 @@ syscall_status_t device_builder_add_resource(const struct device_builder* builde
 syscall_status_t device_builder_add_mmio_resource(const struct device_builder* builder, cap_id_t memory_allocator_cap,
                                                   const char* name, size_t name_size, uintptr_t physical_address,
                                                   size_t size);
+
+/* Claim one fixed interrupt source and attach its Interrupt capability as a named resource. */
+syscall_status_t device_builder_add_interrupt_resource(const struct device_builder* builder, cap_id_t interrupts_cap,
+                                                       const char* name, size_t name_size,
+                                                       uint64_t controller_register_address, uint32_t local_source_id,
+                                                       enum interrupt_trigger  trigger,
+                                                       enum interrupt_polarity polarity);
 
 /* Atomically install the immutable device and invalidate the builder on success. */
 syscall_status_t device_builder_commit(struct device_builder* builder);

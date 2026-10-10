@@ -32,5 +32,5 @@ void dt_parser_name_set_deinit(struct dt_parser_name_set* names);
 
 /* Normalize and append one non-structural Device Tree property. */
 syscall_status_t dt_parser_property_append(cap_id_t provider_cap, device_tree_node_id_t node, uint64_t property_index,
-                                           bool registers_translated, const struct device_builder* builder,
-                                           struct dt_parser_name_set* names);
+                                           bool registers_translated, bool interrupts_translated,
+                                           const struct device_builder* builder, struct dt_parser_name_set* names);
