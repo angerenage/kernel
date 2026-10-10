@@ -111,13 +111,25 @@ static syscall_status_t device_tree_resolve(cap_id_t provider_cap, uint32_t phan
 	if (status == SYSCALL_STATUS_OK &&
 	    ((unsigned int)out_reference->kind > DEVICE_TREE_REFERENCE_UNSUPPORTED ||
 	     (out_reference->interrupt_claim_valid != 0u && out_reference->interrupt_claim_valid != 1u) ||
+	     (out_reference->dma_claim_valid != 0u && out_reference->dma_claim_valid != 1u) ||
+	     (out_reference->interrupt_claim_valid != 0u && out_reference->dma_claim_valid != 0u) ||
 	     out_reference->specifier_cell_count > DEVICE_TREE_REFERENCE_MAX_SPECIFIER_CELLS ||
-	     (out_reference->kind != DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER &&
-	      (out_reference->specifier_cell_count != 0u || out_reference->interrupt_claim_valid != 0u)) ||
+	     ((out_reference->kind == DEVICE_TREE_REFERENCE_NODE ||
+	       out_reference->kind == DEVICE_TREE_REFERENCE_UNSUPPORTED) &&
+	      (out_reference->specifier_cell_count != 0u || out_reference->interrupt_claim_valid != 0u ||
+	       out_reference->dma_claim_valid != 0u)) ||
+	     (cell_count == 0u && (out_reference->interrupt_claim_valid != 0u || out_reference->dma_claim_valid != 0u)) ||
+	     (cell_count != 0u && out_reference->specifier_cell_count != cell_count) ||
 	     (out_reference->interrupt_claim_valid != 0u &&
 	      (out_reference->kind != DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER || cell_count == 0u ||
-	       out_reference->specifier_cell_count != cell_count || out_reference->trigger > INTERRUPT_TRIGGER_LEVEL ||
-	       out_reference->polarity > INTERRUPT_POLARITY_LOW))))
+	       out_reference->trigger > INTERRUPT_TRIGGER_LEVEL || out_reference->polarity > INTERRUPT_POLARITY_LOW))))
+		return SYSCALL_STATUS_FAILED;
+	if (status == SYSCALL_STATUS_OK && cell_count != 0u &&
+	    ((out_reference->kind == DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER &&
+	      out_reference->interrupt_claim_valid == 0u) ||
+	     (out_reference->kind == DEVICE_TREE_REFERENCE_DMA_CONTROLLER && out_reference->dma_claim_valid == 0u) ||
+	     (out_reference->kind != DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER &&
+	      out_reference->kind != DEVICE_TREE_REFERENCE_DMA_CONTROLLER)))
 		return SYSCALL_STATUS_FAILED;
 	return status;
 }

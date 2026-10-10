@@ -408,6 +408,7 @@ test_suites = [
 		) + kernel_capability_platform_sources,
 		'c_args': [
 			'-DKERNEL_CAPABILITY_ACPI_TEST=1',
+			'-DKERNEL_CAPABILITY_DMA_TEST=1',
 			'-DKERNEL_CAPABILITY_INTERRUPT_TEST=1',
 			'-DKERNEL_DEVICE_TEST=1',
 		],

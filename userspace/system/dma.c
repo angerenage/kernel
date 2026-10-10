@@ -26,50 +26,74 @@ syscall_status_t dma_resolve_source(cap_id_t dma_cap, uint64_t controller_regist
 	*out_source = DMA_SOURCE_INVALID;
 	syscall_status_t status =
 		fixed_call(dma_cap, &request, sizeof(request), &response, sizeof(response), DMA_OP_RESOLVE_SOURCE);
-	if (status == SYSCALL_STATUS_OK) *out_source = response.source;
+	if (status == SYSCALL_STATUS_OK) {
+		if (response.source == DMA_SOURCE_INVALID) return SYSCALL_STATUS_FAILED;
+		*out_source = response.source;
+	}
 	return status;
 }
 
-syscall_status_t dma_create_address_space(cap_id_t dma_cap, dma_source_t source, cap_id_t* out_address_space_cap) {
-	const struct dma_create_address_space_request request = {
-		.header = {.op = DMA_OP_CREATE_ADDRESS_SPACE},
+syscall_status_t dma_claim_source(cap_id_t dma_cap, dma_source_t source, cap_id_t* out_source_cap) {
+	const struct dma_claim_source_request request = {
+		.header = {.op = DMA_OP_CLAIM_SOURCE},
 		.source = source,
 	};
-	struct dma_create_address_space_response response = {.address_space_cap = CAP_ID_INVALID};
-	if (out_address_space_cap == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
-	*out_address_space_cap = CAP_ID_INVALID;
+	struct dma_claim_source_response response = {.source_cap = CAP_ID_INVALID};
+	if (out_source_cap == NULL || source == DMA_SOURCE_INVALID) return SYSCALL_STATUS_BAD_ARGUMENT;
+	*out_source_cap = CAP_ID_INVALID;
 	syscall_status_t status =
-		fixed_call(dma_cap, &request, sizeof(request), &response, sizeof(response), DMA_OP_CREATE_ADDRESS_SPACE);
-	if (status == SYSCALL_STATUS_OK) *out_address_space_cap = response.address_space_cap;
+		fixed_call(dma_cap, &request, sizeof(request), &response, sizeof(response), DMA_OP_CLAIM_SOURCE);
+	if (status == SYSCALL_STATUS_OK) {
+		if (response.source_cap == CAP_ID_INVALID) return SYSCALL_STATUS_FAILED;
+		*out_source_cap = response.source_cap;
+	}
 	return status;
 }
 
-syscall_status_t dma_bind(cap_id_t dma_cap, dma_source_t source, cap_id_t address_space_cap,
-                          cap_id_t* out_binding_cap) {
-	const struct dma_bind_request request = {
-		.header            = {.op = DMA_OP_BIND},
-		.source            = source,
+syscall_status_t dma_source_create_address_space(cap_id_t source_cap, cap_id_t* out_address_space_cap) {
+	const struct dma_source_create_address_space_request request = {
+		.header = {.op = DMA_SOURCE_OP_CREATE_ADDRESS_SPACE},
+	};
+	struct dma_source_create_address_space_response response = {.address_space_cap = CAP_ID_INVALID};
+	if (out_address_space_cap == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	*out_address_space_cap  = CAP_ID_INVALID;
+	syscall_status_t status = fixed_call(
+		source_cap, &request, sizeof(request), &response, sizeof(response), DMA_SOURCE_OP_CREATE_ADDRESS_SPACE);
+	if (status == SYSCALL_STATUS_OK) {
+		if (response.address_space_cap == CAP_ID_INVALID) return SYSCALL_STATUS_FAILED;
+		*out_address_space_cap = response.address_space_cap;
+	}
+	return status;
+}
+
+syscall_status_t dma_source_bind(cap_id_t source_cap, cap_id_t address_space_cap, cap_id_t* out_binding_cap) {
+	const struct dma_source_bind_request request = {
+		.header            = {.op = DMA_SOURCE_OP_BIND},
 		.address_space_cap = address_space_cap,
 	};
-	struct dma_bind_response response = {.binding_cap = CAP_ID_INVALID};
-	if (out_binding_cap == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
-	*out_binding_cap        = CAP_ID_INVALID;
-	syscall_status_t status = fixed_call(dma_cap, &request, sizeof(request), &response, sizeof(response), DMA_OP_BIND);
-	if (status == SYSCALL_STATUS_OK) *out_binding_cap = response.binding_cap;
+	struct dma_source_bind_response response = {.binding_cap = CAP_ID_INVALID};
+	if (address_space_cap == CAP_ID_INVALID || out_binding_cap == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	*out_binding_cap = CAP_ID_INVALID;
+	syscall_status_t status =
+		fixed_call(source_cap, &request, sizeof(request), &response, sizeof(response), DMA_SOURCE_OP_BIND);
+	if (status == SYSCALL_STATUS_OK) {
+		if (response.binding_cap == CAP_ID_INVALID) return SYSCALL_STATUS_FAILED;
+		*out_binding_cap = response.binding_cap;
+	}
 	return status;
 }
 
-syscall_status_t dma_recover(cap_id_t dma_cap, dma_source_t source, cap_id_t* out_binding_cap) {
-	const struct dma_recover_request request = {
-		.header = {.op = DMA_OP_RECOVER},
-		.source = source,
-	};
-	struct dma_recover_response response = {.binding_cap = CAP_ID_INVALID};
+syscall_status_t dma_source_recover(cap_id_t source_cap, cap_id_t* out_binding_cap) {
+	const struct dma_source_recover_request request  = {.header = {.op = DMA_SOURCE_OP_RECOVER}};
+	struct dma_source_recover_response      response = {.binding_cap = CAP_ID_INVALID};
 	if (out_binding_cap == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	*out_binding_cap = CAP_ID_INVALID;
 	syscall_status_t status =
-		fixed_call(dma_cap, &request, sizeof(request), &response, sizeof(response), DMA_OP_RECOVER);
-	if (status == SYSCALL_STATUS_OK) *out_binding_cap = response.binding_cap;
+		fixed_call(source_cap, &request, sizeof(request), &response, sizeof(response), DMA_SOURCE_OP_RECOVER);
+	if (status == SYSCALL_STATUS_OK) {
+		if (response.binding_cap == CAP_ID_INVALID) return SYSCALL_STATUS_FAILED;
+		*out_binding_cap = response.binding_cap;
+	}
 	return status;
 }
 

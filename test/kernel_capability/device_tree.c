@@ -126,11 +126,14 @@ struct dt_node dt_node_by_phandle(uint32_t phandle) {
 
 size_t hal_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity) {
 	struct hal_device_tree_consumed_node records[6] = {
-		{  .node = {.id = DT_TEST_INTERRUPT},          .kind = HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED,      .value = 0u},
-		{  .node = {.id = DT_TEST_INTERRUPT}, .kind = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER, .value = 0x1000u},
-		{        .node = {.id = DT_TEST_DMA},       .kind = HAL_DEVICE_TREE_REFERENCE_DMA_CONTROLLER, .value = 0x2000u},
-		{.node = {.id = DT_TEST_UNSUPPORTED},          .kind = HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED,      .value = 0u},
-		{  .node = {.id = DT_TEST_INTERRUPT}, .kind = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER, .value = 0x3000u},
+		{.node = {.id = DT_TEST_INTERRUPT}, .kind = HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED, .value = 0u},
+		{.node = {.id = DT_TEST_INTERRUPT}, .kind = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER, .value = 0x1000u},
+		{.node            = {.id = DT_TEST_DMA},
+		 .kind            = HAL_DEVICE_TREE_REFERENCE_DMA_CONTROLLER,
+		 .value           = 0x2000u,
+		 .specifier_cells = 1u},
+		{.node = {.id = DT_TEST_UNSUPPORTED}, .kind = HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED, .value = 0u},
+		{.node = {.id = DT_TEST_INTERRUPT}, .kind = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER, .value = 0x3000u},
 	};
 	size_t count = dt_test_conflict ? 5u : 4u;
 	if (dt_test_invalid_report.id != SIZE_MAX) {
@@ -159,6 +162,15 @@ bool hal_device_tree_interrupt_translate(const struct hal_device_tree_consumed_n
 	(void)out_trigger;
 	(void)out_polarity;
 	return false;
+}
+
+bool hal_device_tree_dma_translate(const struct hal_device_tree_consumed_node* controller, const uint32_t* cells,
+                                   size_t cell_count, uint32_t* out_local_source_id) {
+	if (controller == NULL || controller->kind != HAL_DEVICE_TREE_REFERENCE_DMA_CONTROLLER || cells == NULL ||
+	    cell_count != 1u || out_local_source_id == NULL)
+		return false;
+	*out_local_source_id = cells[0];
+	return true;
 }
 
 static cap_id_t dt_test_provider(struct kernel_capability_test_context* ctx) {
@@ -281,6 +293,19 @@ Test(kernel_capability_device_tree, navigation_reads_and_phandles_use_the_filter
 		cr_assert_eq(response.kind, kinds[phandle - 1u]);
 		cr_assert_eq(response.value, values[phandle - 1u]);
 	}
+	struct device_tree_resolve_phandle_request dma_request = {
+		.header               = {.op = DEVICE_TREE_OP_RESOLVE_PHANDLE},
+		.phandle              = 4u,
+		.specifier_cell_count = 1u,
+		.specifier_cells      = {37u},
+	};
+	struct device_tree_resolve_phandle_response dma_response;
+	cr_assert_eq(dt_test_call(provider, &dma_request, sizeof(dma_request), &dma_response, sizeof(dma_response)).status,
+	             SYSCALL_STATUS_OK);
+	cr_assert_eq(dma_response.kind, DEVICE_TREE_REFERENCE_DMA_CONTROLLER);
+	cr_assert_eq(dma_response.value, 0x2000u);
+	cr_assert_eq(dma_response.dma_claim_valid, 1u);
+	cr_assert_eq(dma_response.local_source_id, 37u);
 	struct device_tree_resolve_phandle_request  missing_request = {.header  = {.op = DEVICE_TREE_OP_RESOLVE_PHANDLE},
 	                                                               .phandle = 99u};
 	struct device_tree_resolve_phandle_response missing_response;

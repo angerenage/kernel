@@ -17,6 +17,9 @@ bool dma_available(void);
 /* Resolve a physical controller register address and local source ID into an opaque DMA source. */
 bool dma_source_resolve(uint64_t controller_register_address, uint32_t local_source_id, dma_source_t* out_source);
 
+/* Validate that a DMA source names an input implemented by an initialized controller. */
+bool dma_source_valid(dma_source_t source);
+
 /* Create a device AddressSpace compatible with one DMA source. */
 bool dma_address_space_create(dma_source_t compatibility_source, struct address_space** out_space);
 

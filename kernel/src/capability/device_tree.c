@@ -64,9 +64,12 @@ static bool device_tree_consumed_merge(struct hal_device_tree_consumed_node reco
 	    (unsigned int)record.kind > HAL_DEVICE_TREE_REFERENCE_DMA_CONTROLLER ||
 	    (record.kind == HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED && record.value != 0u) ||
 	    (record.kind != HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED && record.value == 0u) ||
-	    (record.kind == HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER &&
+	    ((record.kind == HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER ||
+	      record.kind == HAL_DEVICE_TREE_REFERENCE_DMA_CONTROLLER) &&
 	     record.specifier_cells > DEVICE_TREE_REFERENCE_MAX_SPECIFIER_CELLS) ||
-	    (record.kind != HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER && record.specifier_cells != 0u))
+	    ((record.kind != HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER &&
+	      record.kind != HAL_DEVICE_TREE_REFERENCE_DMA_CONTROLLER) &&
+	     record.specifier_cells != 0u))
 		return false;
 	existing = device_tree_consumed_find(record.node);
 	if (existing == NULL) {
@@ -363,9 +366,16 @@ static syscall_result_t device_tree_resolve_phandle_handler(const struct cap_req
 		}
 	}
 	else {
-		if (request.specifier_cell_count != 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-		response.kind  = DEVICE_TREE_REFERENCE_DMA_CONTROLLER;
-		response.value = consumed->value;
+		response.kind                 = DEVICE_TREE_REFERENCE_DMA_CONTROLLER;
+		response.specifier_cell_count = consumed->specifier_cells;
+		response.value                = consumed->value;
+		if (request.specifier_cell_count != 0u) {
+			if (request.specifier_cell_count != consumed->specifier_cells || consumed->specifier_cells == 0u ||
+			    !hal_device_tree_dma_translate(
+					consumed, request.specifier_cells, request.specifier_cell_count, &response.local_source_id))
+				return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+			response.dma_claim_valid = 1u;
+		}
 	}
 	return cap_kernel_write_response(req, &response, sizeof(response));
 }

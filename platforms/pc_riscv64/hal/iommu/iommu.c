@@ -40,7 +40,11 @@ size_t riscv64_iommu_device_tree_consumed_nodes(struct hal_device_tree_consumed_
 		if (!dt_node_reg(node, 0u, &reg) || reg.address == 0u || reg.address > UINTPTR_MAX) continue;
 		if (nodes != NULL && count < capacity) {
 			nodes[count] = (struct hal_device_tree_consumed_node){
-				.node = node, .kind = HAL_DEVICE_TREE_REFERENCE_DMA_CONTROLLER, .value = reg.address};
+				.node            = node,
+				.kind            = HAL_DEVICE_TREE_REFERENCE_DMA_CONTROLLER,
+				.value           = reg.address,
+				.specifier_cells = 1u,
+			};
 		}
 		count++;
 	}

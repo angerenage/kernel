@@ -87,12 +87,13 @@ struct device_tree_resolve_phandle_request {
 	uint32_t                          specifier_cells[DEVICE_TREE_REFERENCE_MAX_SPECIFIER_CELLS];
 };
 
-/* Resolved target plus canonical fixed-interrupt claim inputs when interrupt_claim_valid is set. */
+/* Resolved target plus canonical resource-claim inputs when the corresponding valid flag is set. */
 struct device_tree_resolve_phandle_response {
 	enum device_tree_reference_kind kind;
 	uint32_t                        specifier_cell_count;
 	uint64_t                        value;
 	uint32_t                        interrupt_claim_valid;
+	uint32_t                        dma_claim_valid;
 	uint32_t                        local_source_id;
 	enum interrupt_trigger          trigger;
 	enum interrupt_polarity         polarity;

@@ -349,6 +349,17 @@ bool dma_source_resolve(uint64_t controller_register_address, uint32_t local_sou
 	return true;
 }
 
+bool dma_source_valid(dma_source_t source) {
+	uint32_t               controller_index;
+	uint32_t               local_source_id;
+	struct dma_controller* controller;
+
+	if (!dma_controller_decode_source(source, &controller_index, &local_source_id)) return false;
+	controller = dma_controller_at_index(controller_index);
+	if (controller == NULL || !dma_controller_initialize(controller)) return false;
+	return controller->info.source_id_bits == 32u || local_source_id < (1u << controller->info.source_id_bits);
+}
+
 bool dma_address_space_create(dma_source_t compatibility_source, struct address_space** out_space) {
 	uint32_t               controller_index;
 	uint32_t               local_source_id;

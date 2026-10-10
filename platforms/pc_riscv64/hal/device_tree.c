@@ -40,3 +40,12 @@ bool hal_device_tree_interrupt_translate(const struct hal_device_tree_consumed_n
 		return riscv64_aplic_device_tree_interrupt(cells, cell_count, out_local_source_id, out_trigger, out_polarity);
 	return false;
 }
+
+bool hal_device_tree_dma_translate(const struct hal_device_tree_consumed_node* controller, const uint32_t* cells,
+                                   size_t cell_count, uint32_t* out_local_source_id) {
+	if (controller == NULL || controller->kind != HAL_DEVICE_TREE_REFERENCE_DMA_CONTROLLER || cells == NULL ||
+	    out_local_source_id == NULL || controller->specifier_cells != 1u || cell_count != 1u)
+		return false;
+	*out_local_source_id = cells[0];
+	return true;
+}
