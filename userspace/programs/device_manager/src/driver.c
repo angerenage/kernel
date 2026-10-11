@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <system/capability.h>
 #include <yaml.h>
 
 static bool string_equal(const struct dm_string* string, const void* bytes, size_t size) {
@@ -37,6 +38,7 @@ static bool string_copy(struct dm_string* out, const void* bytes, size_t size) {
 
 static void driver_deinit(struct dm_driver* driver) {
 	if (driver == NULL) return;
+	if (driver->executable_cap != CAP_ID_INVALID) (void)cap_drop(driver->executable_cap);
 	free(driver->name.data);
 	free(driver->executable.data);
 	for (size_t index = 0u; index < driver->compatible_count; index++) free(driver->compatible_ids[index].data);
@@ -145,6 +147,7 @@ static enum dm_driver_catalog_status parse_driver(struct dm_driver_catalog* cata
 	}
 	driver = calloc(1u, sizeof(*driver));
 	if (driver == NULL) return DM_DRIVER_CATALOG_NO_MEMORY;
+	driver->executable_cap = CAP_ID_INVALID;
 	if (!string_copy(&driver->name, name_node->data.scalar.value, name_node->data.scalar.length)) {
 		status = DM_DRIVER_CATALOG_NO_MEMORY;
 		goto fail;

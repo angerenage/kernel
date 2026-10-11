@@ -149,20 +149,24 @@ struct dm_builder* dm_state_find_builder(const struct dm_state* state, uint64_t 
 	return NULL;
 }
 
-syscall_status_t dm_builder_begin(struct dm_state* state, struct dm_device* parent, struct dm_builder** out_builder) {
+syscall_status_t dm_builder_begin(struct dm_state* state, struct dm_device* parent,
+                                  struct dm_driver_binding* owner_binding, uint64_t owner_generation,
+                                  struct dm_builder** out_builder) {
 	struct dm_builder* builder;
 	uint64_t           id;
-	if (state == NULL || out_builder == NULL || state->next_builder_id >= DEVICE_BUILDER_OBJECT_BIT - 1u)
+	if (state == NULL || out_builder == NULL || state->next_builder_id >= DEVICE_OBJECT_ID_LIMIT)
 		return SYSCALL_STATUS_FAILED;
 	builder = calloc(1u, sizeof(*builder));
 	if (builder == NULL) return SYSCALL_STATUS_FAILED;
-	id                      = state->next_builder_id++;
-	builder->object_id      = DEVICE_BUILDER_OBJECT_BIT | id;
-	builder->parent         = parent;
-	builder->accounted_size = sizeof(*builder);
-	builder->next           = state->builders;
-	state->builders         = builder;
-	*out_builder            = builder;
+	id                        = state->next_builder_id++;
+	builder->object_id        = DEVICE_BUILDER_OBJECT_BASE | id;
+	builder->parent           = parent;
+	builder->owner_binding    = owner_binding;
+	builder->owner_generation = owner_generation;
+	builder->accounted_size   = sizeof(*builder);
+	builder->next             = state->builders;
+	state->builders           = builder;
+	*out_builder              = builder;
 	return SYSCALL_STATUS_OK;
 }
 
@@ -381,20 +385,22 @@ syscall_status_t dm_builder_commit(struct dm_state* state, struct dm_builder* bu
 	if (state == NULL || out_device == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	syscall_status_t validation = dm_builder_validate_commit(builder);
 	if (validation != SYSCALL_STATUS_OK) return validation;
-	if (state->next_device_id >= DEVICE_BUILDER_OBJECT_BIT) return SYSCALL_STATUS_FAILED;
+	if (state->next_device_id >= DEVICE_OBJECT_ID_LIMIT) return SYSCALL_STATUS_FAILED;
 	device = calloc(1u, sizeof(*device));
 	if (device == NULL) return SYSCALL_STATUS_FAILED;
-	device->id               = state->next_device_id++;
-	device->parent           = builder->parent;
-	device->name             = builder->name;
-	device->compatible_ids   = builder->compatible_ids;
-	device->compatible_count = builder->compatible_count;
-	device->properties       = builder->properties;
-	device->properties_tail  = builder->properties_tail;
-	device->property_count   = builder->property_count;
-	device->resources        = builder->resources;
-	device->resources_tail   = builder->resources_tail;
-	device->resource_count   = builder->resource_count;
+	device->id                  = state->next_device_id++;
+	device->parent              = builder->parent;
+	device->name                = builder->name;
+	device->compatible_ids      = builder->compatible_ids;
+	device->compatible_count    = builder->compatible_count;
+	device->properties          = builder->properties;
+	device->properties_tail     = builder->properties_tail;
+	device->property_count      = builder->property_count;
+	device->resources           = builder->resources;
+	device->resources_tail      = builder->resources_tail;
+	device->resource_count      = builder->resource_count;
+	device->provider_binding    = builder->owner_binding;
+	device->provider_generation = builder->owner_generation;
 	if (device->parent != NULL) {
 		if (device->parent->last_child == NULL) device->parent->first_child = device;
 		else device->parent->last_child->next_sibling = device;

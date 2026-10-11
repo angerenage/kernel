@@ -5,6 +5,7 @@ device_manager_src = files(
 	'src/main.c',
 	'src/server.c',
 	'src/source.c',
+	'src/supervisor.c',
 )
 
 device_manager_elf = executable('device_manager.elf',

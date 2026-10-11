@@ -17,6 +17,7 @@
 struct kernel_interrupt {
 	struct interrupt* interrupt;
 	cap_object_id_t   cap_object_id;
+	process_id_t      bound_process;
 	bool              destroyed;
 };
 
@@ -83,7 +84,23 @@ static enum interrupt_result kernel_interrupt_destroy(struct kernel_interrupt* m
 	if (managed == NULL || __atomic_load_n(&managed->destroyed, __ATOMIC_ACQUIRE)) return INTERRUPT_UNAVAILABLE;
 	result = interrupt_destroy(managed->interrupt);
 	if (result == INTERRUPT_OK) __atomic_store_n(&managed->destroyed, true, __ATOMIC_RELEASE);
+	if (result == INTERRUPT_OK) __atomic_store_n(&managed->bound_process, PROCESS_PID_INVALID, __ATOMIC_RELEASE);
 	return result;
+}
+
+static bool kernel_interrupt_process_cleanup(uint64_t object_id, process_id_t process) {
+	struct kernel_interrupt* managed = (struct kernel_interrupt*)(uintptr_t)object_id;
+	process_id_t             expected;
+	if (managed == NULL || process == PROCESS_PID_INVALID ||
+	    __atomic_load_n(&managed->bound_process, __ATOMIC_ACQUIRE) != process)
+		return false;
+	enum interrupt_result result = interrupt_unbind(managed->interrupt);
+	if (result == INTERRUPT_OK || result == INTERRUPT_NOT_BOUND) {
+		expected = process;
+		(void)__atomic_compare_exchange_n(
+			&managed->bound_process, &expected, PROCESS_PID_INVALID, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+	}
+	return false;
 }
 
 static void kernel_interrupt_object_destroy(uint64_t object_id) {
@@ -122,7 +139,7 @@ static cap_id_t kernel_interrupt_publish(struct interrupt* interrupt, process_id
 	managed->interrupt = interrupt;
 	object_id          = cap_object_create_kernel_lifecycle((uint64_t)(uintptr_t)managed,
 	                                                        kernel_interrupt_handler,
-	                                                        NULL,
+	                                                        kernel_interrupt_process_cleanup,
 	                                                        kernel_interrupt_object_destroy,
 	                                                        kernel_interrupt_object_event,
 	                                                        &created);
@@ -168,6 +185,7 @@ static syscall_result_t kernel_interrupt_bind_handler(const struct cap_request* 
 	if (result.status != SYSCALL_STATUS_OK) return result;
 	enum interrupt_result interrupt_result = interrupt_bind(managed->interrupt, signal);
 	signal_release(signal);
+	if (interrupt_result == INTERRUPT_OK) __atomic_store_n(&managed->bound_process, req->caller, __ATOMIC_RELEASE);
 	return interrupt_result_to_syscall(interrupt_result);
 }
 
@@ -176,7 +194,9 @@ static syscall_result_t kernel_interrupt_unbind_handler(const struct cap_request
 	struct interrupt_simple_request request;
 	if ((req->rights & CAP_MANAGE) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (!copy_request(req, &request, sizeof(request))) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	return interrupt_result_to_syscall(interrupt_unbind(managed->interrupt));
+	enum interrupt_result result = interrupt_unbind(managed->interrupt);
+	if (result == INTERRUPT_OK) __atomic_store_n(&managed->bound_process, PROCESS_PID_INVALID, __ATOMIC_RELEASE);
+	return interrupt_result_to_syscall(result);
 }
 
 static syscall_result_t kernel_interrupt_destroy_handler(const struct cap_request* req,

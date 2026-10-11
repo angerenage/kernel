@@ -180,6 +180,34 @@ Test(kernel_capability_interrupt, successful_zero_grants_destroy_releases_source
 	kernel_capability_test_end(&ctx);
 }
 
+Test(kernel_capability_interrupt, process_cleanup_unbinds_owned_signal) {
+	struct kernel_capability_test_context ctx;
+	kernel_capability_test_begin(&ctx, "kernel-cap/interrupt-process-cleanup");
+	cap_id_t resource_cap  = interrupt_test_resource_grant(&ctx);
+	cap_id_t interrupt_cap = interrupt_test_claim(resource_cap, interrupt_test_source(45u));
+
+	struct signal* signal = signal_create();
+	cr_assert_not_null(signal);
+	cap_id_t signal_cap = kernel_signal_grant_full(signal, process_pid(ctx.process));
+	cr_assert_neq(signal_cap, CAP_ID_INVALID);
+	const struct interrupt_bind_request bind_request = {.header = {.op = INTERRUPT_OP_BIND}, .signal_cap = signal_cap};
+	cr_assert_eq(kernel_capability_test_call(interrupt_cap, &bind_request, sizeof(bind_request), NULL, 0u).status,
+	             SYSCALL_STATUS_OK);
+
+	cap_object_cleanup_for_process(process_pid(ctx.process));
+	struct interrupt_info_response        response     = {0};
+	const struct interrupt_simple_request info_request = {.header = {.op = INTERRUPT_OP_INFO}};
+	syscall_result_t                      result =
+		kernel_capability_test_call(interrupt_cap, &info_request, sizeof(info_request), &response, sizeof(response));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert(!response.info.bound);
+
+	cr_assert_eq(interrupt_test_simple_call(interrupt_cap, INTERRUPT_OP_DESTROY).status, SYSCALL_STATUS_OK);
+	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
+	signal_release(signal);
+	kernel_capability_test_end(&ctx);
+}
+
 Test(kernel_capability_interrupt, failed_zero_grants_destroy_quarantines_source) {
 	struct kernel_capability_test_context ctx;
 	kernel_capability_test_begin(&ctx, "kernel-cap/interrupt-zero-grants-failure");

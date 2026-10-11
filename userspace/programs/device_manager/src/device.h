@@ -8,7 +8,11 @@
 #include <stdint.h>
 
 #define DEVICE_ROOT_OBJECT_ID UINT64_MAX
-#define DEVICE_BUILDER_OBJECT_BIT (1ull << 63)
+#define DEVICE_OBJECT_ID_LIMIT (1ull << 62)
+#define DEVICE_BUILDER_OBJECT_BASE (2ull << 62)
+#define DEVICE_INTERNAL_OBJECT_BASE (3ull << 62)
+
+struct dm_driver_binding;
 
 /* Owned length-delimited byte string used by internal immutable state. */
 struct dm_string {
@@ -52,6 +56,11 @@ struct dm_device {
 	struct dm_resource* resources;
 	struct dm_resource* resources_tail;
 	size_t              resource_count;
+	/* Driver generation that constructed this device, or NULL for a firmware root. */
+	struct dm_driver_binding* provider_binding;
+	uint64_t                  provider_generation;
+	/* Supervisor binding selected for this device, if its compatible IDs match. */
+	struct dm_driver_binding* binding;
 };
 
 /* Mutable state retained only for the lifetime of one construction transaction. */
@@ -70,7 +79,10 @@ struct dm_builder {
 	struct dm_resource* resources_tail;
 	size_t              resource_count;
 	size_t              accounted_size;
-	struct dm_builder*  next;
+	/* Active driver generation authorized to commit this child transaction. */
+	struct dm_driver_binding* owner_binding;
+	uint64_t                  owner_generation;
+	struct dm_builder*        next;
 };
 
 /* Complete independently testable device tree and in-progress builder state. */
@@ -95,7 +107,9 @@ struct dm_device* dm_state_find_device(const struct dm_state* state, uint64_t id
 struct dm_builder* dm_state_find_builder(const struct dm_state* state, uint64_t object_id);
 
 /* Allocate and link a root or direct-child builder. */
-syscall_status_t dm_builder_begin(struct dm_state* state, struct dm_device* parent, struct dm_builder** out_builder);
+syscall_status_t dm_builder_begin(struct dm_state* state, struct dm_device* parent,
+                                  struct dm_driver_binding* owner_binding, uint64_t owner_generation,
+                                  struct dm_builder** out_builder);
 
 /* Set a builder's optional UTF-8 diagnostic name. */
 syscall_status_t dm_builder_set_name(struct dm_builder* builder, const void* name, size_t name_size);

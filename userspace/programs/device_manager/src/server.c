@@ -32,12 +32,13 @@ static bool variable_request(const struct cap_request* call, size_t header_size,
 	return tail_size <= SIZE_MAX - header_size && call->request_size == header_size + tail_size;
 }
 
-static bool begin_builder(struct device_server* server, const struct cap_request* call, struct dm_device* parent) {
+static bool begin_builder(struct device_server* server, const struct cap_request* call, struct dm_device* parent,
+                          struct dm_driver_binding* owner_binding, uint64_t owner_generation) {
 	struct device_builder_begin_response response = {0};
 	struct dm_builder*                   builder  = NULL;
 	syscall_status_t                     status;
 	if (call->response_capacity < sizeof(response)) return reply_status(call, SYSCALL_STATUS_BAD_ARGUMENT);
-	status = dm_builder_begin(&server->state, parent, &builder);
+	status = dm_builder_begin(&server->state, parent, owner_binding, owner_generation, &builder);
 	if (status != SYSCALL_STATUS_OK) return reply_status(call, status);
 	status = cap_publish(
 		server->endpoint, builder->object_id, call->caller, DEVICE_BUILDER_CAP_RIGHTS, &response.builder_cap);
@@ -67,7 +68,7 @@ static bool dispatch_root(struct device_server* server, const struct cap_request
 	if (!exact_request(call, sizeof(request))) return reply_status(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	memcpy(&request, data, sizeof(request));
 	if (request.op != DEVICE_ROOT_OP_BEGIN) return reply_status(call, SYSCALL_STATUS_BAD_ARGUMENT);
-	return begin_builder(server, call, NULL);
+	return begin_builder(server, call, NULL, NULL, 0u);
 }
 
 static bool builder_set_name(struct dm_builder* builder, const struct cap_request* call, const void* data) {
@@ -145,7 +146,10 @@ static bool builder_commit(struct device_server* server, struct dm_builder* buil
 		dm_device_rollback(&server->state, device);
 		return reply_status(call, status);
 	}
-	if (reply_status(call, SYSCALL_STATUS_OK)) return true;
+	if (reply_status(call, SYSCALL_STATUS_OK)) {
+		if (!server->root_published || device->parent != NULL) dm_supervisor_device_committed(server, device);
+		return true;
+	}
 	(void)cap_unpublish(server->endpoint, device->id);
 	dm_device_rollback(&server->state, device);
 	return false;
@@ -326,10 +330,14 @@ static bool dispatch_device(struct device_server* server, struct dm_device* devi
 	if (call->request_size < sizeof(header)) return reply_status(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	memcpy(&header, data, sizeof(header));
 	if (header.op == DEVICE_OBJECT_OP_BEGIN_CHILD) {
+		struct dm_driver_binding* owner;
+		uint64_t                  generation;
 		if (!has_rights(call, CAP_MANAGE)) return reply_status(call, SYSCALL_STATUS_DENIED);
 		if (!exact_request(call, sizeof(struct device_object_simple_request)))
 			return reply_status(call, SYSCALL_STATUS_BAD_ARGUMENT);
-		return begin_builder(server, call, device);
+		if (!dm_supervisor_authorize_child(server, device, call->caller, &owner, &generation))
+			return reply_status(call, SYSCALL_STATUS_DENIED);
+		return begin_builder(server, call, device, owner, generation);
 	}
 	if (header.op == DEVICE_OBJECT_OP_ACQUIRE_RESOURCE) return acquire_resource(device, call, data);
 	return dispatch_device_read(device, call, data, header.op);
@@ -341,6 +349,10 @@ bool device_server_dispatch(struct device_server* server, const struct cap_reque
 	if (server == NULL || call == NULL || (request == NULL && call->request_size != 0u)) return false;
 	if (!has_rights(call, CAP_CALL)) return reply_status(call, SYSCALL_STATUS_DENIED);
 	if (call->object_id == DEVICE_ROOT_OBJECT_ID) return dispatch_root(server, call, request);
+	if (call->object_id >= DEVICE_INTERNAL_OBJECT_BASE) {
+		if (dm_supervisor_dispatch(server, call, request)) return true;
+		return reply_status(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	}
 	builder = dm_state_find_builder(&server->state, call->object_id);
 	if (builder != NULL) return dispatch_builder(server, builder, call, request);
 	device = dm_state_find_device(&server->state, call->object_id);
@@ -362,6 +374,7 @@ void device_server_handle_event(struct device_server* server, const struct chann
 		for (const struct dm_device* device = server->state.devices; device != NULL; device = device->next)
 			if (device->parent == NULL) root_count++;
 		printf("device-manager: parser completed with %zu root device(s)\n", root_count);
+		dm_supervisor_reconcile(server);
 		return;
 	}
 	builder = dm_state_find_builder(&server->state, event->object_id);
@@ -373,17 +386,28 @@ bool device_server_init(struct device_server* server) {
 	struct self_info self;
 	syscall_status_t status;
 	if (server == NULL) return false;
-	*server = (struct device_server){.endpoint = CHANNEL_ID_INVALID,
-	                                 .activity = CAP_ID_INVALID,
-	                                 .root_cap = CAP_ID_INVALID,
-	                                 .pid      = PROCESS_PID_INVALID};
+	*server = (struct device_server){
+		.endpoint   = CHANNEL_ID_INVALID,
+		.activity   = CAP_ID_INVALID,
+		.root_cap   = CAP_ID_INVALID,
+		.pid        = PROCESS_PID_INVALID,
+		.supervisor = {.self_cap    = CAP_ID_INVALID,
+		               .control_cap = CAP_ID_INVALID,
+		               .stdout_cap  = CAP_ID_INVALID,
+		               .stderr_cap  = CAP_ID_INVALID}
+    };
 	dm_state_init(&server->state);
 	dm_driver_catalog_init(&server->drivers);
 	status = process_self_info(&self);
 	if (status != SYSCALL_STATUS_OK || self.pid == PROCESS_PID_INVALID) goto fail;
-	server->pid = self.pid;
-	status      = channel_create(&server->endpoint, &server->activity);
+	server->pid                 = self.pid;
+	server->supervisor.self_cap = self.self_cap;
+	self.self_cap               = CAP_ID_INVALID;
+	if (self.address_space_cap != CAP_ID_INVALID) (void)cap_drop(self.address_space_cap);
+	if (self.main_thread_cap != CAP_ID_INVALID) (void)cap_drop(self.main_thread_cap);
+	status = channel_create(&server->endpoint, &server->activity);
 	if (status != SYSCALL_STATUS_OK) goto fail;
+	if (!dm_supervisor_init(server, server->supervisor.self_cap)) goto fail;
 	status =
 		cap_publish(server->endpoint, DEVICE_ROOT_OBJECT_ID, server->pid, DEVICE_ROOT_CAP_RIGHTS, &server->root_cap);
 	if (status != SYSCALL_STATUS_OK) goto fail;
@@ -396,6 +420,7 @@ fail:
 
 void device_server_deinit(struct device_server* server) {
 	if (server == NULL) return;
+	dm_supervisor_deinit(server);
 	if (server->endpoint != CHANNEL_ID_INVALID) {
 		for (struct dm_builder* builder = server->state.builders; builder != NULL; builder = builder->next)
 			(void)cap_unpublish(server->endpoint, builder->object_id);
@@ -407,10 +432,16 @@ void device_server_deinit(struct device_server* server) {
 	dm_driver_catalog_deinit(&server->drivers);
 	if (server->activity != CAP_ID_INVALID) (void)cap_drop(server->activity);
 	if (server->endpoint != CHANNEL_ID_INVALID) (void)channel_destroy(server->endpoint);
-	*server = (struct device_server){.endpoint = CHANNEL_ID_INVALID,
-	                                 .activity = CAP_ID_INVALID,
-	                                 .root_cap = CAP_ID_INVALID,
-	                                 .pid      = PROCESS_PID_INVALID};
+	*server = (struct device_server){
+		.endpoint   = CHANNEL_ID_INVALID,
+		.activity   = CAP_ID_INVALID,
+		.root_cap   = CAP_ID_INVALID,
+		.pid        = PROCESS_PID_INVALID,
+		.supervisor = {.self_cap    = CAP_ID_INVALID,
+		               .control_cap = CAP_ID_INVALID,
+		               .stdout_cap  = CAP_ID_INVALID,
+		               .stderr_cap  = CAP_ID_INVALID}
+    };
 }
 
 syscall_status_t device_server_grant(struct device_server* server, uint64_t device_id, process_id_t target,

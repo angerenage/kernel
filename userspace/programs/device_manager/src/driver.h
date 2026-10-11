@@ -1,5 +1,6 @@
 #pragma once
 
+#include <base/cap.h>
 #include <stddef.h>
 
 #include "device.h"
@@ -21,6 +22,7 @@ struct dm_driver {
 	struct dm_string  executable;
 	struct dm_string* compatible_ids;
 	size_t            compatible_count;
+	cap_id_t          executable_cap;
 	struct dm_driver* next;
 };
 

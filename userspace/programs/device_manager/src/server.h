@@ -8,16 +8,18 @@
 
 #include "device.h"
 #include "driver.h"
+#include "supervisor.h"
 
 /* Channel ownership, private root authority, device state, and catalog for one server instance. */
 struct device_server {
-	channel_id_t             endpoint;
-	cap_id_t                 activity;
-	cap_id_t                 root_cap;
-	bool                     root_published;
-	process_id_t             pid;
-	struct dm_state          state;
-	struct dm_driver_catalog drivers;
+	channel_id_t                endpoint;
+	cap_id_t                    activity;
+	cap_id_t                    root_cap;
+	bool                        root_published;
+	process_id_t                pid;
+	struct dm_state             state;
+	struct dm_driver_catalog    drivers;
+	struct dm_driver_supervisor supervisor;
 };
 
 /* Create the endpoint and publish the root constructor only to the manager itself. */

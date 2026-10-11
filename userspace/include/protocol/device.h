@@ -14,6 +14,12 @@
 #define DEVICE_MAX_COMPATIBLE_IDS 64u
 #define DEVICE_MAX_RESOURCES 64u
 
+/* Ordered application capability arguments supplied to a bound driver. */
+enum device_driver_capability_index {
+	DEVICE_DRIVER_CAPABILITY_DEVICE = 0u,
+	DEVICE_DRIVER_CAPABILITY_COUNT,
+};
+
 /* Rights held by the manager on its private root-construction capability. */
 #define DEVICE_ROOT_CAP_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_MANAGE | CAP_DELEGATE))
 /* Exact rights granted on a non-delegable construction capability. */
