@@ -90,8 +90,8 @@ limine_config = configure_file(
 )
 
 limine_module_args = []
-foreach userspace_program : userspace_programs
-	limine_module_args += ['--module', userspace_program]
+foreach userspace_module : userspace_boot_modules
+	limine_module_args += ['--module', userspace_module]
 endforeach
 
 limine_image = custom_target('limine_image',

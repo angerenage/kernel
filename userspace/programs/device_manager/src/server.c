@@ -378,6 +378,7 @@ bool device_server_init(struct device_server* server) {
 	                                 .root_cap = CAP_ID_INVALID,
 	                                 .pid      = PROCESS_PID_INVALID};
 	dm_state_init(&server->state);
+	dm_driver_catalog_init(&server->drivers);
 	status = process_self_info(&self);
 	if (status != SYSCALL_STATUS_OK || self.pid == PROCESS_PID_INVALID) goto fail;
 	server->pid = self.pid;
@@ -403,6 +404,7 @@ void device_server_deinit(struct device_server* server) {
 		if (server->root_published) (void)cap_unpublish(server->endpoint, DEVICE_ROOT_OBJECT_ID);
 	}
 	dm_state_deinit(&server->state);
+	dm_driver_catalog_deinit(&server->drivers);
 	if (server->activity != CAP_ID_INVALID) (void)cap_drop(server->activity);
 	if (server->endpoint != CHANNEL_ID_INVALID) (void)channel_destroy(server->endpoint);
 	*server = (struct device_server){.endpoint = CHANNEL_ID_INVALID,

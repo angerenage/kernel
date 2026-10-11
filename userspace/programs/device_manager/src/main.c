@@ -19,6 +19,7 @@ int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 	struct device_manager_source_selection selection;
 	enum device_manager_source_result      selection_result;
 	struct device_server                   server;
+	enum dm_driver_catalog_status          catalog_status;
 	cap_id_t                               acpi_cap;
 	cap_id_t                               device_tree_cap;
 	cap_id_t                               memory_allocator_cap;
@@ -74,6 +75,18 @@ int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 		(void)release_source(io_ports_cap, "I/O ports");
 		return 1;
 	}
+	catalog_status = dm_driver_catalog_load(&server.drivers, DM_DRIVER_CATALOG_PATH);
+	if (catalog_status != DM_DRIVER_CATALOG_OK) {
+		printf("device-manager: driver catalog load failed: %s\n", dm_driver_catalog_status_string(catalog_status));
+		(void)release_source(selection.capability, "selected firmware");
+		(void)release_source(memory_allocator_cap, "memory allocator");
+		(void)release_source(dma_cap, "DMA");
+		(void)release_source(interrupts_cap, "interrupts");
+		(void)release_source(io_ports_cap, "I/O ports");
+		device_server_deinit(&server);
+		return 1;
+	}
+	printf("device-manager: loaded %zu driver declaration(s)\n", server.drivers.driver_count);
 	printf("device-manager: selected %s firmware\n",
 	       selection.source == DEVICE_MANAGER_FIRMWARE_SOURCE_DEVICE_TREE ? "Device Tree" : "ACPI");
 	if (!device_manager_parser_launch(&server,

@@ -126,4 +126,12 @@ subdir('programs/device_manager')
 subdir('programs/acpi_parser')
 subdir('programs/dt_parser')
 
+driver_catalog = configure_file(
+	input : 'config/drivers.yaml',
+	output : 'drivers.yaml',
+	copy : true,
+)
+
+userspace_boot_modules = userspace_programs + [driver_catalog]
+
 alias_target('userspace', userspace_programs + [userspace_yaml])
