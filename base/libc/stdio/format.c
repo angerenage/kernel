@@ -5,19 +5,21 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define DISPLAY_BUFFER_SIZE 256u
+
 struct format_ctx {
 	char*  buffer;
+	size_t capacity;
 	size_t index;
 	int    count;
 };
 
 static void emit_char(struct format_ctx* ctx, char ch) {
-	if (ctx->buffer) {
-		ctx->buffer[ctx->index++] = ch;
+	if (ctx->index == ctx->capacity) {
+		base_display_write(ctx->buffer, ctx->index);
+		ctx->index = 0u;
 	}
-	else {
-		base_display_write(&ch, 1u);
-	}
+	ctx->buffer[ctx->index++] = ch;
 	ctx->count++;
 }
 
@@ -259,13 +261,16 @@ static void format_internal(struct format_ctx* ctx, const char* format, va_list*
 }
 
 int format_to_display(const char* format, va_list* args) {
+	char              buffer[DISPLAY_BUFFER_SIZE];
 	struct format_ctx ctx = {
-		.buffer = NULL,
-		.index  = 0,
-		.count  = 0,
+		.buffer   = buffer,
+		.capacity = sizeof(buffer),
+		.index    = 0u,
+		.count    = 0,
 	};
 
 	format_internal(&ctx, format, args);
+	if (ctx.index != 0u) base_display_write(ctx.buffer, ctx.index);
 	return ctx.count;
 }
 
@@ -273,9 +278,10 @@ int format_to_buffer(char* buffer, const char* format, va_list* args) {
 	if (!buffer) return -1;
 
 	struct format_ctx ctx = {
-		.buffer = buffer,
-		.index  = 0,
-		.count  = 0,
+		.buffer   = buffer,
+		.capacity = SIZE_MAX,
+		.index    = 0u,
+		.count    = 0,
 	};
 
 	format_internal(&ctx, format, args);

@@ -581,14 +581,9 @@ bool i8042_driver_run(cap_id_t device_cap) {
 		report_error("i8042: interrupt or controller startup failed\n");
 		goto done;
 	}
-	{
-		char message[96];
-		int  size = sprintf(message,
-		                    "i8042: controller online (primary=%s, auxiliary=%s)\n",
-		                    controller.keyboard.present ? "yes" : "no",
-		                    controller.mouse.present ? "yes" : "no");
-		if (size > 0) (void)fwrite(message, 1u, (size_t)size, stdout);
-	}
+	printf("i8042: controller online (primary=%s, auxiliary=%s)\n",
+	       controller.keyboard.present ? "yes" : "no",
+	       controller.mouse.present ? "yes" : "no");
 	success = serve(&controller);
 
 done:
