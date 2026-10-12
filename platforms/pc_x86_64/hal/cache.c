@@ -93,8 +93,7 @@ void hal_cache_sync_executable_range_all_cpus(void* address, size_t size) {
 	for (size_t i = 0u; i < topology->cpu_count; i++) {
 		struct cpu* target = &topology->cpus[i];
 		if (target == current || cpu_state_get(target) != CPU_STATE_ONLINE) continue;
-		if (target->index >= X86_CACHE_MAX_CPUS || !apic_ipi_ready() || !apic_send_nmi((uint32_t)target->arch_id))
-			hcf();
+		if (target->index >= X86_CACHE_MAX_CPUS || !apic_send_sync_nmi(target->index, (uint32_t)target->arch_id)) hcf();
 		targets |= 1ull << target->index;
 	}
 	for (size_t i = 0u; i < topology->cpu_count; i++) {

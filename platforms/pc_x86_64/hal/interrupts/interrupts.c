@@ -504,12 +504,15 @@ bool hal_interrupt_source_info(const struct hal_interrupt_source* source, struct
 	if (!x86_fixed_interrupt_valid(source->number)) return false;
 	bool                                routable = apic_isa_irq_available(source->number);
 	struct hal_interrupt_delivery_range delivery =
-		routable ? (struct hal_interrupt_delivery_range){.domain = X86_DELIVERY_DOMAIN_VECTOR,
-		                                                 .base   = 48u,
-		                                                 .limit  = X86_SYSCALL_VECTOR}
-		         : (struct hal_interrupt_delivery_range){.domain = X86_DELIVERY_DOMAIN_VECTOR,
-		                                                 .base   = X86_IRQ_BASE + source->number,
-		                                                 .limit  = X86_IRQ_BASE + source->number + 1u};
+		source->number == 0u ? (struct hal_interrupt_delivery_range){.domain = X86_DELIVERY_DOMAIN_VECTOR,
+		                                                             .base   = X86_IRQ_BASE,
+		                                                             .limit  = X86_IRQ_BASE + 1u}
+		: routable           ? (struct hal_interrupt_delivery_range){.domain = X86_DELIVERY_DOMAIN_VECTOR,
+		                                                             .base   = 48u,
+		                                                             .limit  = X86_SYSCALL_VECTOR}
+		                     : (struct hal_interrupt_delivery_range){.domain = X86_DELIVERY_DOMAIN_VECTOR,
+		                                                             .base   = X86_IRQ_BASE + source->number,
+		                                                             .limit  = X86_IRQ_BASE + source->number + 1u};
 	const struct cpu* fixed_target = routable ? NULL : legacy_target;
 	if (!routable && fixed_target == NULL) return false;
 	*out_info = (struct hal_interrupt_source_info){.delivery     = delivery,
@@ -682,9 +685,16 @@ void x86_64_handle_interrupt(struct interrupt_frame* frame) {
 	if (vector == X86_LAPIC_SPURIOUS_VECTOR) return;
 	if (trap_context) cpu_enter_exception();
 	if (vector == 2u) {
-		bool handled = x86_64_cache_handle_sync_nmi();
+		struct cpu* cpu      = cpu_current();
+		bool        internal = cpu != NULL && apic_sync_nmi_armed(cpu->index);
+		bool        handled  = x86_64_cache_handle_sync_nmi();
 		handled |= x86_64_paging_handle_tlb_nmi();
-		if (handled) {
+		if (internal) {
+			apic_sync_nmi_disarm(cpu->index);
+			handled |= x86_64_cache_handle_sync_nmi();
+			handled |= x86_64_paging_handle_tlb_nmi();
+		}
+		if (internal || handled) {
 			cpu_leave_exception();
 			return;
 		}

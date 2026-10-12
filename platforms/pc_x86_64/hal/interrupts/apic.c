@@ -46,6 +46,7 @@
 #define X86_ACPI_MADT_TRIGGER_LEVEL 0x000cu
 
 #define X86_IOAPIC_MAX_CONTROLLERS 16u
+#define X86_APIC_MAX_CPUS 64u
 
 struct x86_acpi_madt {
 	struct acpi_sdt_header header;
@@ -85,6 +86,7 @@ static bool              lapic_ready;
 static volatile uint8_t* lapic_mmio;
 static uint32_t          ioapic_register_lock;
 static bool              ioapic_probed;
+static bool              sync_nmi_armed[X86_APIC_MAX_CPUS];
 
 static bool lapic_init(uintptr_t lapic_phys);
 
@@ -479,12 +481,24 @@ bool apic_send_ipi(uint32_t lapic_id, unsigned vector) {
 	return true;
 }
 
-bool apic_send_nmi(uint32_t lapic_id) {
-	if (!apic_ipi_ready() || lapic_mmio == NULL) return false;
+bool apic_send_sync_nmi(size_t target_index, uint32_t lapic_id) {
+	if (!apic_ipi_ready() || lapic_mmio == NULL || target_index >= X86_APIC_MAX_CPUS || lapic_id > UINT8_MAX)
+		return false;
+	if (__atomic_exchange_n(&sync_nmi_armed[target_index], true, __ATOMIC_ACQ_REL)) return true;
 
 	lapic_wait_icr_idle();
 	lapic_write(X86_LAPIC_ICR_HIGH_REG, lapic_id << 24);
 	lapic_write(X86_LAPIC_ICR_LOW_REG, 4u << 8);
 	lapic_wait_icr_idle();
 	return true;
+}
+
+bool apic_sync_nmi_armed(size_t cpu_index) {
+	return cpu_index < X86_APIC_MAX_CPUS && __atomic_load_n(&sync_nmi_armed[cpu_index], __ATOMIC_ACQUIRE);
+}
+
+void apic_sync_nmi_disarm(size_t cpu_index) {
+	if (cpu_index >= X86_APIC_MAX_CPUS) return;
+	/* Acquire any request published by a sender that observed the armed state. */
+	(void)__atomic_exchange_n(&sync_nmi_armed[cpu_index], false, __ATOMIC_ACQ_REL);
 }

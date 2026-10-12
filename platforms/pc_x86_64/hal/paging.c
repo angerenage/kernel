@@ -203,7 +203,7 @@ static void x86_tlb_shootdown_range(uintptr_t start, size_t size) {
 			continue;
 		}
 		targets |= 1ull << target->index;
-		if (!apic_send_nmi((uint32_t)target->arch_id)) hcf();
+		if (!apic_send_sync_nmi(target->index, (uint32_t)target->arch_id)) hcf();
 	}
 
 	for (size_t target_index = 0u; target_index < cpu_total; target_index++) {

@@ -637,42 +637,51 @@ bool interrupt_handle_event(struct hal_interrupt_event event) {
 }
 
 void interrupt_signal_ready(signal_id_t signal_id) {
-	struct signal*   signal      = NULL;
-	bool             publish     = false;
-	struct irq_state table_state = spinlock_lock_irqsave(&interrupt_table_lock);
-	for (struct interrupt* interrupt = interrupt_table; interrupt != NULL; interrupt = interrupt->next) {
-		spinlock_lock(&interrupt->lock);
-		if (interrupt->signal_id != signal_id) {
-			spinlock_unlock(&interrupt->lock);
-			continue;
+	struct interrupt* interrupt = NULL;
+	struct signal*    signal    = NULL;
+	bool              publish   = false;
+	struct irq_state  table_state;
+	struct irq_state  state;
+
+	table_state = spinlock_lock_irqsave(&interrupt_table_lock);
+	for (struct interrupt* candidate = interrupt_table; candidate != NULL; candidate = candidate->next) {
+		spinlock_lock(&candidate->lock);
+		if (candidate->signal_id == signal_id && !candidate->destroying && candidate->references != UINT64_MAX) {
+			candidate->references++;
+			interrupt = candidate;
 		}
-		spinlock_unlock_irqrestore(&interrupt_table_lock, table_state);
-		if (interrupt->bound && interrupt->pending) {
-			if (interrupt->kind == INTERRUPT_KIND_SOURCE) {
-				if (hal_interrupt_source_unmask(&interrupt->source_state)) interrupt->pending = false;
-			}
-			else if (interrupt->retriggered) {
-				if (interrupt_prepare_publication_locked(interrupt, &signal)) {
-					interrupt->retriggered = false;
-					publish                = true;
-				}
-			}
-			else interrupt->pending = false;
-		}
-		spinlock_unlock(&interrupt->lock);
-		if (publish) {
-			struct signal_payload payload = {0};
-			enum signal_result    result  = signal_send_interrupt(signal, SIGNAL_SENDER_KERNEL, &payload, NULL, NULL);
-			struct irq_state      state   = spinlock_lock_irqsave(&interrupt->lock);
-			interrupt_finish_publication_locked(interrupt);
-			if (result != SIGNAL_OK && !interrupt->destroying && interrupt->bound && interrupt->signal == signal &&
-			    interrupt->pending)
-				interrupt->retriggered = true;
-			spinlock_unlock_irqrestore(&interrupt->lock, state);
-			signal_release(signal);
-			interrupt_release(interrupt);
-		}
-		return;
+		spinlock_unlock(&candidate->lock);
+		if (interrupt != NULL) break;
 	}
 	spinlock_unlock_irqrestore(&interrupt_table_lock, table_state);
+	if (interrupt == NULL) return;
+
+	state = spinlock_lock_irqsave(&interrupt->lock);
+	if (interrupt->signal_id == signal_id && interrupt->bound && interrupt->pending) {
+		if (interrupt->kind == INTERRUPT_KIND_SOURCE) {
+			if (hal_interrupt_source_unmask(&interrupt->source_state)) interrupt->pending = false;
+		}
+		else if (interrupt->retriggered) {
+			if (interrupt_prepare_publication_locked(interrupt, &signal)) {
+				interrupt->retriggered = false;
+				publish                = true;
+			}
+		}
+		else interrupt->pending = false;
+	}
+	spinlock_unlock_irqrestore(&interrupt->lock, state);
+	if (publish) {
+		struct signal_payload payload = {0};
+		enum signal_result    result  = signal_send_interrupt(signal, SIGNAL_SENDER_KERNEL, &payload, NULL, NULL);
+
+		state = spinlock_lock_irqsave(&interrupt->lock);
+		interrupt_finish_publication_locked(interrupt);
+		if (result != SIGNAL_OK && !interrupt->destroying && interrupt->bound && interrupt->signal == signal &&
+		    interrupt->pending)
+			interrupt->retriggered = true;
+		spinlock_unlock_irqrestore(&interrupt->lock, state);
+		signal_release(signal);
+		interrupt_release(interrupt);
+	}
+	interrupt_release(interrupt);
 }

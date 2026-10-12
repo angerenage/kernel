@@ -51,5 +51,11 @@ void apic_send_eoi(void);
 /* Send a fixed-vector inter-processor interrupt through the local APIC. */
 bool apic_send_ipi(uint32_t lapic_id, unsigned vector);
 
-/* Send a non-maskable interrupt through the local APIC. */
-bool apic_send_nmi(uint32_t lapic_id);
+/* Ensure that a synchronization NMI is pending for the target processor. */
+bool apic_send_sync_nmi(size_t target_index, uint32_t lapic_id);
+
+/* Return whether the current NMI was requested for internal synchronization. */
+bool apic_sync_nmi_armed(size_t cpu_index);
+
+/* Allow a later synchronization request to send another NMI to the processor. */
+void apic_sync_nmi_disarm(size_t cpu_index);
