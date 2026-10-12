@@ -125,6 +125,9 @@ subdir('programs/loader')
 subdir('programs/device_manager')
 subdir('programs/acpi_parser')
 subdir('programs/dt_parser')
+if platform == 'pc_x86_64'
+	subdir('programs/i8042_driver')
+endif
 
 driver_catalog = configure_file(
 	input : 'config/drivers.yaml',
