@@ -356,6 +356,7 @@ int server_run(const struct init_state* init) {
 	bool               bootfs_mounted         = false;
 	bool               bootfs_started         = false;
 	bool               device_manager_started = false;
+	bool               input_manager_started  = false;
 	bool               loader_started         = false;
 	bool               vfs_ready              = false;
 	bool               vfs_started            = false;
@@ -414,7 +415,12 @@ int server_run(const struct init_state* init) {
 			loader_started = true;
 			continue;
 		}
-		if (loader_started && !device_manager_started) {
+		if (loader_started && !input_manager_started) {
+			if (!bootstrap_launch(init, "input_manager.elf", "input manager", 0u, NULL)) return 1;
+			input_manager_started = true;
+			continue;
+		}
+		if (input_manager_started && !device_manager_started) {
 			enum device_manager_launch_result result = device_manager_launch(init);
 
 			if (result == DEVICE_MANAGER_LAUNCH_FAILED) return 1;

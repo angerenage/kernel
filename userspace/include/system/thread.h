@@ -6,6 +6,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* Terminate only the calling thread with the supplied exit code. */
+__attribute__((noreturn))
+void thread_exit(uintptr_t code);
+
 /* Wait for a thread to terminate and copy out its exit code. */
 syscall_status_t thread_join(cap_id_t cap, uintptr_t* out_exit_code);
 

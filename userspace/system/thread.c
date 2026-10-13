@@ -6,6 +6,11 @@
 
 #include "syscall.h"
 
+__attribute__((noreturn))
+void thread_exit(uintptr_t code) {
+	for (;;) (void)syscall(SYSCALL_EXIT_THREAD, code, 0u, 0u, 0u, 0u, 0u);
+}
+
 syscall_status_t thread_join(cap_id_t cap, uintptr_t* out_exit_code) {
 	struct thread_join_request  request = {.header = {.op = THREAD_OP_JOIN}};
 	struct thread_join_response response;

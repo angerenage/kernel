@@ -124,6 +124,7 @@ subdir('programs/vfs')
 userspace_link_libs += vfs_client
 subdir('programs/loader')
 subdir('programs/device_manager')
+subdir('programs/input_manager')
 subdir('programs/init')
 subdir('programs/bootfs')
 subdir('programs/acpi_parser')
