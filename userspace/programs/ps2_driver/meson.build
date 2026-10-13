@@ -6,6 +6,7 @@ ps2_dep = declare_dependency(
 
 ps2_driver_sources = files(
 	'src/events.c',
+	'src/input.c',
 	'src/keyboard.c',
 	'src/main.c',
 	'src/mouse.c',

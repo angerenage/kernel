@@ -1,19 +1,17 @@
 #include "events.h"
 
 #include <protocol/input.h>
-#include <runtime/input.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #include <system/capability.h>
 #include <system/process.h>
 
+#include "input.h"
+
 #define PS2_MOUSE_ID_STANDARD 0x00u
 #define PS2_MOUSE_ID_WHEEL 0x03u
 #define PS2_MOUSE_ID_FIVE_BUTTON 0x04u
-
-#define PS2_INPUT_PROTOCOL_VERSION_MAJOR 1u
-#define PS2_INPUT_PROTOCOL_VERSION_MINOR 0u
 
 enum ps2_mouse_control_id {
 	PS2_MOUSE_CONTROL_X = 1u,
@@ -143,12 +141,12 @@ static const struct scan_code_mapping extended_keys[] = {
 	{0x7du,       INPUT_KEY_PAGE_UP},
 };
 
-static struct input_provider* provider;
-static enum ps2_device_kind   advertised_kind;
-static uint8_t                advertised_mouse_id;
-static bool                   key_state[INPUT_KEY_KEYPAD_DECIMAL + 1u];
-static uint8_t                mouse_buttons;
-static bool                   publication_failed;
+static struct ps2_input_server* server;
+static enum ps2_device_kind     advertised_kind;
+static uint8_t                  advertised_mouse_id;
+static bool                     key_state[INPUT_KEY_KEYPAD_DECIMAL + 1u];
+static uint8_t                  mouse_buttons;
+static bool                     publication_failed;
 
 static enum input_key_code map_key(uint8_t scan_code, bool extended) {
 	const struct scan_code_mapping* mappings = extended ? extended_keys : base_keys;
@@ -160,8 +158,8 @@ static enum input_key_code map_key(uint8_t scan_code, bool extended) {
 	return INPUT_KEY_INVALID;
 }
 
-static bool publish(const struct input_control_value* values, size_t count) {
-	if (input_provider_publish(provider, values, count) == SYSCALL_STATUS_OK) return true;
+static bool publish(const struct ps2_input_value* values, size_t count) {
+	if (ps2_input_server_publish(server, values, count) == SYSCALL_STATUS_OK) return true;
 	publication_failed = true;
 	return false;
 }
@@ -177,13 +175,11 @@ static bool create_keyboard_provider(const char* service) {
 			.logical_maximum = 1,
 		};
 	}
-	return input_provider_create(service,
-	                             PS2_INPUT_PROTOCOL_VERSION_MAJOR,
-	                             PS2_INPUT_PROTOCOL_VERSION_MINOR,
-	                             INPUT_DEVICE_CLASS_KEYBOARD,
-	                             descriptors,
-	                             sizeof(descriptors) / sizeof(descriptors[0]),
-	                             &provider) == SYSCALL_STATUS_OK;
+	return ps2_input_server_create(service,
+	                               INPUT_DEVICE_CLASS_KEYBOARD,
+	                               descriptors,
+	                               sizeof(descriptors) / sizeof(descriptors[0]),
+	                               &server) == SYSCALL_STATUS_OK;
 }
 
 static void set_relative_descriptor(struct input_control_descriptor* descriptor, uint32_t id,
@@ -220,19 +216,14 @@ static bool create_mouse_provider(const char* service, uint8_t mouse_id) {
 		set_button_descriptor(&descriptors[count++], PS2_MOUSE_CONTROL_BACK, INPUT_BUTTON_BACK);
 		set_button_descriptor(&descriptors[count++], PS2_MOUSE_CONTROL_FORWARD, INPUT_BUTTON_FORWARD);
 	}
-	return input_provider_create(service,
-	                             PS2_INPUT_PROTOCOL_VERSION_MAJOR,
-	                             PS2_INPUT_PROTOCOL_VERSION_MINOR,
-	                             INPUT_DEVICE_CLASS_POINTER,
-	                             descriptors,
-	                             count,
-	                             &provider) == SYSCALL_STATUS_OK;
+	return ps2_input_server_create(service, INPUT_DEVICE_CLASS_POINTER, descriptors, count, &server) ==
+	       SYSCALL_STATUS_OK;
 }
 
 bool ps2_events_initialize(enum ps2_device_kind kind, uint8_t mouse_id) {
 	struct self_info self;
 	char             service[32];
-	if (provider != NULL || (kind != PS2_DEVICE_KEYBOARD && kind != PS2_DEVICE_MOUSE) ||
+	if (server != NULL || (kind != PS2_DEVICE_KEYBOARD && kind != PS2_DEVICE_MOUSE) ||
 	    process_self_info(&self) != SYSCALL_STATUS_OK)
 		return false;
 	int service_size = sprintf(service, "ps2_%llu", (unsigned long long)self.pid);
@@ -249,40 +240,40 @@ bool ps2_events_initialize(enum ps2_device_kind kind, uint8_t mouse_id) {
 }
 
 bool ps2_events_match(enum ps2_device_kind kind, uint8_t mouse_id) {
-	return provider != NULL && advertised_kind == kind && (kind != PS2_DEVICE_MOUSE || advertised_mouse_id == mouse_id);
+	return server != NULL && advertised_kind == kind && (kind != PS2_DEVICE_MOUSE || advertised_mouse_id == mouse_id);
 }
 
 bool ps2_event_key(uint8_t scan_code, bool extended, bool pressed) {
 	enum input_key_code key = map_key(scan_code, extended);
 	if (key == INPUT_KEY_INVALID || key_state[key] == pressed) return true;
-	const struct input_control_value value = {.control_id = key, .value = pressed ? 1 : 0};
+	const struct ps2_input_value value = {.control_id = key, .value = pressed ? 1 : 0};
 	if (!publish(&value, 1u)) return false;
 	key_state[key] = pressed;
 	return true;
 }
 
 bool ps2_event_pause(void) {
-	const struct input_control_value pressed  = {.control_id = INPUT_KEY_PAUSE, .value = 1};
-	const struct input_control_value released = {.control_id = INPUT_KEY_PAUSE, .value = 0};
+	const struct ps2_input_value pressed  = {.control_id = INPUT_KEY_PAUSE, .value = 1};
+	const struct ps2_input_value released = {.control_id = INPUT_KEY_PAUSE, .value = 0};
 	return publish(&pressed, 1u) && publish(&released, 1u);
 }
 
-static void append_mouse_button(struct input_control_value* values, size_t* count, uint8_t old_buttons,
-                                uint8_t new_buttons, uint8_t mask, uint32_t control_id) {
+static void append_mouse_button(struct ps2_input_value* values, size_t* count, uint8_t old_buttons, uint8_t new_buttons,
+                                uint8_t mask, uint32_t control_id) {
 	if (((old_buttons ^ new_buttons) & mask) == 0u) return;
-	values[(*count)++] = (struct input_control_value){
+	values[(*count)++] = (struct ps2_input_value){
 		.control_id = control_id,
 		.value      = (new_buttons & mask) != 0u ? 1 : 0,
 	};
 }
 
 bool ps2_event_mouse(int16_t delta_x, int16_t delta_y, int8_t wheel, uint8_t buttons) {
-	struct input_control_value values[8];
-	size_t                     count = 0u;
-	if (delta_x != 0) values[count++] = (struct input_control_value){PS2_MOUSE_CONTROL_X, delta_x};
-	if (delta_y != 0) values[count++] = (struct input_control_value){PS2_MOUSE_CONTROL_Y, delta_y};
+	struct ps2_input_value values[8];
+	size_t                 count = 0u;
+	if (delta_x != 0) values[count++] = (struct ps2_input_value){PS2_MOUSE_CONTROL_X, delta_x};
+	if (delta_y != 0) values[count++] = (struct ps2_input_value){PS2_MOUSE_CONTROL_Y, delta_y};
 	if (wheel != 0 && advertised_mouse_id != PS2_MOUSE_ID_STANDARD)
-		values[count++] = (struct input_control_value){PS2_MOUSE_CONTROL_WHEEL, wheel};
+		values[count++] = (struct ps2_input_value){PS2_MOUSE_CONTROL_WHEEL, wheel};
 	append_mouse_button(values, &count, mouse_buttons, buttons, 1u << 0u, PS2_MOUSE_CONTROL_PRIMARY);
 	append_mouse_button(values, &count, mouse_buttons, buttons, 1u << 1u, PS2_MOUSE_CONTROL_SECONDARY);
 	append_mouse_button(values, &count, mouse_buttons, buttons, 1u << 2u, PS2_MOUSE_CONTROL_MIDDLE);
@@ -298,7 +289,7 @@ bool ps2_event_mouse(int16_t delta_x, int16_t delta_y, int8_t wheel, uint8_t but
 bool ps2_events_reset(void) {
 	memset(key_state, 0, sizeof(key_state));
 	mouse_buttons = 0u;
-	if (input_provider_reset(provider) == SYSCALL_STATUS_OK) return true;
+	if (ps2_input_server_reset(server) == SYSCALL_STATUS_OK) return true;
 	publication_failed = true;
 	return false;
 }

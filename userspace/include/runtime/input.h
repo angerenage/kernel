@@ -6,18 +6,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Maximum number of updates accepted by the runtime provider in one frame. */
-#define INPUT_PROVIDER_MAX_FRAME_EVENTS 128u
-
-/* Opaque process-lifetime input provider created by a hardware driver. */
-struct input_provider;
-
-/* One control value supplied while constructing an input frame. */
-struct input_control_value {
-	uint32_t control_id;
-	int64_t  value;
-};
-
 /* Metadata accompanying one validated retained-event page. */
 struct input_event_page {
 	uint64_t oldest_sequence;
@@ -40,16 +28,3 @@ syscall_status_t input_read_events(cap_id_t input_cap, uint64_t after_sequence, 
 
 /* Acquire the producer's coalesced event-notification signal with CAP_WAIT. */
 syscall_status_t input_acquire_event_signal(cap_id_t input_cap, cap_id_t* out_signal_cap);
-
-/* Create and advertise a provider after copying its immutable descriptors. */
-syscall_status_t input_provider_create(const char* service, uint32_t protocol_major, uint32_t protocol_minor,
-                                       enum input_device_class                device_class,
-                                       const struct input_control_descriptor* descriptors, size_t descriptor_count,
-                                       struct input_provider** out_provider);
-
-/* Atomically append one nonempty coherent frame and notify waiting clients. */
-syscall_status_t input_provider_publish(struct input_provider* provider, const struct input_control_value* values,
-                                        size_t count);
-
-/* Append a state-reset frame after loss, reinitialization, or desynchronization. */
-syscall_status_t input_provider_reset(struct input_provider* provider);
