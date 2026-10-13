@@ -22,3 +22,10 @@ drivers:
     executable: "/boot/i8042_driver.elf"
     compatible_ids:
       - "acpi:i8042"
+
+  ps2:
+    executable: "/boot/ps2_driver.elf"
+    compatible_ids:
+      - "ps2:keyboard"
+      - "ps2:mouse"
+      - "ps2:device"
