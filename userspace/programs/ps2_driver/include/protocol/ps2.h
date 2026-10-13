@@ -1,5 +1,7 @@
 #pragma once
 
+/* Controller-independent PS/2 byte transport protocol. */
+
 #include <base/cap.h>
 #include <stdint.h>
 

@@ -1,6 +1,11 @@
 userspace_libc_inc = include_directories('../include/libc', '../include', 'include')
 userspace_system_inc = include_directories('../include/libc', '../include', 'include')
-userspace_runtime_inc = include_directories('../include/libc', '../include', 'include')
+userspace_runtime_inc = include_directories(
+	'../include/libc',
+	'../include',
+	'include',
+	'programs/vfs/include',
+)
 userspace_inc = include_directories('../include/libc', '../include', 'include')
 
 userspace_linker_file = meson.current_source_dir() + '/linker.ld'
@@ -41,16 +46,13 @@ userspace_base_sources = files(
 
 userspace_runtime_sources = files(
 	'runtime/diagnostic.c',
-	'runtime/device.c',
+	'runtime/filesystem.c',
 	'runtime/heap.c',
 	'runtime/init.c',
 	'runtime/blob.c',
-	'runtime/filesystem.c',
-	'runtime/program.c',
 	'runtime/stdio.c',
 	'runtime/startup.c',
 	'runtime/stream.c',
-	'runtime/vfs.c',
 )
 
 userspace_system_sources = files(
@@ -117,13 +119,15 @@ userspace_link_libs = [
 
 userspace_programs = []
 
-subdir('programs/init')
 subdir('programs/vfs')
-subdir('programs/bootfs')
+userspace_link_libs += vfs_client
 subdir('programs/loader')
 subdir('programs/device_manager')
+subdir('programs/init')
+subdir('programs/bootfs')
 subdir('programs/acpi_parser')
 subdir('programs/dt_parser')
+subdir('programs/ps2_driver')
 if platform == 'pc_x86_64'
 	subdir('programs/i8042_driver')
 endif

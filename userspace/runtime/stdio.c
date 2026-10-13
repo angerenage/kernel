@@ -13,6 +13,9 @@
 #include <system/capability.h>
 #include <system/display.h>
 
+#define VFS_PROTOCOL_VERSION_MAJOR 1u
+#define VFS_PROTOCOL_VERSION_MINOR 0u
+
 enum file_kind {
 	FILE_KIND_STANDARD_INPUT,
 	FILE_KIND_STANDARD_OUTPUT,

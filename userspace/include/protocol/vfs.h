@@ -15,8 +15,6 @@
 #define VFS_NAMESPACE "fs"
 #define VFS_PROTOCOL_NAME "vfs"
 #define VFS_SERVICE_NAME "root"
-#define VFS_PROTOCOL_VERSION_MAJOR 1u
-#define VFS_PROTOCOL_VERSION_MINOR 0u
 
 enum vfs_op {
 	VFS_OP_OPEN             = 0u,

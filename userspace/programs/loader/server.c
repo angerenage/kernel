@@ -22,7 +22,6 @@
 #define LOADER_SERVICE_NAME "elf64"
 #define LOADER_PROTOCOL_VERSION_MAJOR 1u
 #define LOADER_PROTOCOL_VERSION_MINOR 0u
-
 #define LOADER_SERVICE_OBJECT_ID 1u
 
 static channel_id_t                  loader_endpoint = CHANNEL_ID_INVALID;

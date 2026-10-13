@@ -23,8 +23,10 @@
 #define DEVICE_MANAGER_FILE_PATH "/boot/device_manager.elf"
 #define DEVICE_MANAGER_PROCESS_NAME "device-manager"
 #define DEVICE_MANAGER_LOADER_SERVICE "elf64"
-#define DEVICE_MANAGER_LOADER_MAJOR 1u
-#define DEVICE_MANAGER_LOADER_MINOR 0u
+#define LOADER_PROTOCOL_VERSION_MAJOR 1u
+#define LOADER_PROTOCOL_VERSION_MINOR 0u
+#define VFS_PROTOCOL_VERSION_MAJOR 1u
+#define VFS_PROTOCOL_VERSION_MINOR 0u
 
 static bool device_manager_drop_capability(cap_id_t* capability, const char* description) {
 	syscall_status_t status;
@@ -101,8 +103,8 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 	static const struct init_protocol_query loader_query = {
 		.namespace_path = PROGRAM_LOADER_NAMESPACE,
 		.protocol       = LOADER_PROTOCOL_NAME,
-		.major          = DEVICE_MANAGER_LOADER_MAJOR,
-		.minor          = DEVICE_MANAGER_LOADER_MINOR,
+		.major          = LOADER_PROTOCOL_VERSION_MAJOR,
+		.minor          = LOADER_PROTOCOL_VERSION_MINOR,
 	};
 	static const struct init_protocol_query vfs_query = {
 		.namespace_path = VFS_NAMESPACE,

@@ -1,3 +1,18 @@
+device_manager_include = include_directories('include')
+
+device_client = static_library('device_client',
+	sources : files('lib/device.c'),
+	c_args : userspace_c_args,
+	include_directories : [userspace_runtime_inc, device_manager_include],
+	pic : false,
+	install : false,
+)
+
+device_manager_dep = declare_dependency(
+	include_directories : device_manager_include,
+	link_with : device_client,
+)
+
 device_manager_src = files(
 	'src/bootstrap.c',
 	'src/device.c',
@@ -11,8 +26,8 @@ device_manager_src = files(
 device_manager_elf = executable('device_manager.elf',
 	sources : device_manager_src,
 	c_args : userspace_c_args,
-	include_directories : userspace_inc,
-	dependencies : userspace_yaml_dep,
+	include_directories : [userspace_inc, device_manager_include],
+	dependencies : [userspace_yaml_dep, loader_dep, vfs_dep],
 	link_whole : userspace_crt,
 	link_with : userspace_link_libs,
 	link_args : userspace_link_args,

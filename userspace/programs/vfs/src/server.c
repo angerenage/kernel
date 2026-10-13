@@ -17,6 +17,8 @@
 #include <system/signal.h>
 
 #define VFS_SERVICE_OBJECT_ID 1u
+#define VFS_PROTOCOL_VERSION_MAJOR 1u
+#define VFS_PROTOCOL_VERSION_MINOR 0u
 #define VFS_SERVICE_CLIENT_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE | CAP_MANAGE))
 
 struct vfs_mount {

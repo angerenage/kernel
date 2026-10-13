@@ -17,6 +17,10 @@
 #include "registry.h"
 
 #define BOOTFS_SERVICE_NAME "boot"
+#define VFS_PROTOCOL_VERSION_MAJOR 1u
+#define VFS_PROTOCOL_VERSION_MINOR 0u
+#define FILESYSTEM_PROTOCOL_VERSION_MAJOR 1u
+#define FILESYSTEM_PROTOCOL_VERSION_MINOR 0u
 
 static channel_id_t server_endpoint = CHANNEL_ID_INVALID;
 static cap_id_t     server_activity = CAP_ID_INVALID;

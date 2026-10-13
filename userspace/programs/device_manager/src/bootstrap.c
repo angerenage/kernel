@@ -13,6 +13,8 @@
 #include <system/process.h>
 
 #define DEVICE_MANAGER_LOADER_SERVICE "elf64"
+#define VFS_PROTOCOL_VERSION_MAJOR 1u
+#define VFS_PROTOCOL_VERSION_MINOR 0u
 
 struct parser_description {
 	const char*  path;

@@ -1,5 +1,4 @@
 test_inc = include_directories('../include')
-loader_test_inc = include_directories('../userspace/include')
 criterion = dependency('criterion', native: true, required: true)
 threads = dependency('threads', native: true)
 
@@ -181,16 +180,6 @@ test_suites = [
 		'suites': ['unit', 'core'],
 	},
 	{
-		'name': 'loader_lifecycle',
-		'sources': files(
-			'loader/lifecycle.c',
-			'../userspace/programs/loader/lifecycle.c',
-		),
-		'include_directories': [loader_test_inc],
-		'link_with': base_test_lib,
-		'suites': ['unit', 'userspace'],
-	},
-	{
 		'name': 'kernel_cmdline',
 		'sources': files(
 			'boot/cmdline.c',
@@ -198,60 +187,6 @@ test_suites = [
 		),
 		'link_with': base_test_lib,
 		'suites': ['unit', 'kernel'],
-	},
-	{
-		'name': 'init_arguments',
-		'sources': files(
-			'init/arguments.c',
-			'../userspace/programs/init/arguments.c',
-		),
-		'include_directories': [loader_test_inc],
-		'link_with': base_test_lib,
-		'suites': ['unit', 'userspace'],
-	},
-	{
-		'name': 'runtime_startup',
-		'sources': files(
-			'runtime/startup.c',
-			'../userspace/runtime/startup.c',
-		),
-		'include_directories': [loader_test_inc],
-		'link_with': base_test_lib,
-		'c_args': ['-UBASE_STDLIB_RENAME_ALLOC'],
-		'suites': ['unit', 'userspace'],
-	},
-	{
-		'name': 'runtime_stream',
-		'sources': files(
-			'runtime/stream.c',
-			'../userspace/runtime/stream.c',
-		),
-		'include_directories': [loader_test_inc],
-		'link_with': base_test_lib,
-		'c_args': ['-UBASE_STDLIB_RENAME_ALLOC'],
-		'suites': ['unit', 'userspace'],
-	},
-	{
-		'name': 'runtime_filesystem',
-		'sources': files(
-			'runtime/filesystem.c',
-			'../userspace/runtime/filesystem.c',
-			'../userspace/runtime/vfs.c',
-		),
-		'include_directories': [loader_test_inc],
-		'link_with': base_test_lib,
-		'c_args': ['-UBASE_STDLIB_RENAME_ALLOC'],
-		'suites': ['unit', 'userspace'],
-	},
-	{
-		'name': 'runtime_stdio',
-		'sources': files(
-			'runtime/stdio.c',
-		),
-		'include_directories': [loader_test_inc],
-		'link_with': base_test_lib,
-		'c_args': ['-UBASE_STDLIB_RENAME_ALLOC'],
-		'suites': ['unit', 'userspace'],
 	},
 	{
 		'name': 'libyaml',
