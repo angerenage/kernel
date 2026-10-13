@@ -15,7 +15,6 @@
 #include "acpi.h"
 #include "boot_module.h"
 #include "boot_resource.h"
-#include "device.h"
 #include "device_tree.h"
 #include "dma.h"
 #include "interrupt.h"
@@ -54,8 +53,6 @@ static size_t kernel_resources_available(enum kernel_resource_type* ids, size_t 
 		if (ids != NULL && count < capacity) ids[count] = KERNEL_RESOURCE_TYPE_INTERRUPTS;
 		count++;
 	}
-	if (ids != NULL && count < capacity) ids[count] = KERNEL_RESOURCE_TYPE_DEVICES;
-	count++;
 	if (kernel_capability_acpi_available()) {
 		if (ids != NULL && count < capacity) ids[count] = KERNEL_RESOURCE_TYPE_ACPI;
 		count++;
@@ -151,9 +148,6 @@ static syscall_result_t kernel_resource_acquire_handler(const struct cap_request
 		if (!kernel_capability_interrupts_available()) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 		response.cap = kernel_capability_interrupts_grant(req->caller);
 		break;
-	case KERNEL_RESOURCE_TYPE_DEVICES:
-		response.cap = kernel_capability_devices_grant(req->caller);
-		break;
 	case KERNEL_RESOURCE_TYPE_ACPI:
 		if (!kernel_capability_acpi_available()) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 		response.cap = kernel_capability_acpi_grant(req->caller);
@@ -195,7 +189,6 @@ static syscall_result_t kernel_resources_handler(const struct cap_request* req) 
 }
 
 bool kernel_capability_resources_init(void) {
-	if (!kernel_capability_devices_init()) return false;
 	kernel_resources_object_id = cap_object_create_kernel(0u, kernel_resources_handler, NULL);
 	return kernel_resources_object_id != CAP_OBJECT_ID_INVALID;
 }

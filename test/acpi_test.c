@@ -1,19 +1,11 @@
-#include <base/device.h>
-#include <base/hardware/pci.h>
-#include <base/hardware/ps2.h>
-#include <base/hardware/tpm.h>
 #include <boot/info.h>
 #include <core/mm.h>
 #include <criterion/criterion.h>
 #include <firmware/acpi.h>
-#include <kernel/device.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
-#include "../kernel/src/hardware/pci.h"
-#include "../kernel/src/hardware/ps2.h"
-#include "../kernel/src/hardware/tpm.h"
 #include "heap/test_support.h"
 
 #define TEST_ARENA_SIZE 0x4000u
@@ -21,8 +13,6 @@
 #define TEST_RSDP_OFFSET 0x100u
 #define TEST_ROOT_OFFSET 0x200u
 #define TEST_FADT_DSDT_OFFSET 40u
-#define TEST_FADT_IAPC_BOOT_ARCH_OFFSET 109u
-#define TEST_FADT_IAPC_BOOT_ARCH_8042 (1u << 1u)
 #define TEST_FADT_X_DSDT_OFFSET 140u
 
 struct test_rsdp {
@@ -35,22 +25,6 @@ struct test_rsdp {
 	uint64_t xsdt_address;
 	uint8_t  extended_checksum;
 	uint8_t  reserved[3];
-} __attribute__((packed));
-
-struct test_mcfg_allocation {
-	uint64_t address;
-	uint16_t segment_group;
-	uint8_t  start_bus;
-	uint8_t  end_bus;
-	uint32_t reserved;
-} __attribute__((packed));
-
-struct test_acpi_tpm2 {
-	struct acpi_sdt_header header;
-	uint16_t               platform_class;
-	uint16_t               reserved;
-	uint64_t               control_address;
-	uint32_t               start_method;
 } __attribute__((packed));
 
 static uint8_t          test_arena[TEST_ARENA_SIZE];
@@ -78,7 +52,6 @@ static void test_checksum(void* data, size_t size, size_t checksum_offset) {
 }
 
 static void test_reset(void) {
-	kernel_device_reset_for_test();
 	if (!heap_is_initialized()) init_test_heap(test_heap, sizeof(test_heap));
 	memset(test_arena, 0, sizeof(test_arena));
 	memset(test_ranges, 0, sizeof(test_ranges));
@@ -93,43 +66,6 @@ static void test_reset(void) {
 		.memory_map_count  = test_range_count,
 		.direct_map_offset = (uintptr_t)test_arena - TEST_PHYSICAL_BASE,
 	};
-}
-
-static size_t test_pci_controllers(struct pci_controller* controllers, size_t capacity) {
-	size_t count;
-	size_t returned;
-
-	cr_assert(kernel_device_register_pci());
-	kernel_device_freeze();
-	cr_assert(kernel_device_count(KERNEL_DEVICE_TYPE_PCI, &count));
-	cr_assert(kernel_device_list(KERNEL_DEVICE_TYPE_PCI, 0u, capacity, sizeof(*controllers), controllers, &returned));
-	cr_assert_eq(returned, count < capacity ? count : capacity);
-	return count;
-}
-
-static size_t test_ps2_controllers(struct ps2_controller* controllers, size_t capacity) {
-	size_t count;
-	size_t returned;
-
-	cr_assert(kernel_device_register_ps2_controllers());
-	kernel_device_freeze();
-	cr_assert(kernel_device_count(KERNEL_DEVICE_TYPE_PS2_CONTROLLER, &count));
-	cr_assert(kernel_device_list(
-		KERNEL_DEVICE_TYPE_PS2_CONTROLLER, 0u, capacity, sizeof(*controllers), controllers, &returned));
-	cr_assert_eq(returned, count < capacity ? count : capacity);
-	return count;
-}
-
-static size_t test_tpms(struct tpm_device* devices, size_t capacity) {
-	size_t count;
-	size_t returned;
-
-	cr_assert(kernel_device_register_tpms());
-	kernel_device_freeze();
-	cr_assert(kernel_device_count(KERNEL_DEVICE_TYPE_TPM, &count));
-	cr_assert(kernel_device_list(KERNEL_DEVICE_TYPE_TPM, 0u, capacity, sizeof(*devices), devices, &returned));
-	cr_assert_eq(returned, count < capacity ? count : capacity);
-	return count;
 }
 
 static struct acpi_sdt_header* test_table(size_t offset, const char signature[4], size_t size) {
@@ -189,40 +125,6 @@ static struct acpi_sdt_header* test_fadt(size_t offset, size_t size, uint32_t ds
 		memcpy(bytes + TEST_FADT_X_DSDT_OFFSET, &x_dsdt, sizeof(x_dsdt));
 	test_checksum(fadt, size, offsetof(struct acpi_sdt_header, checksum));
 	return fadt;
-}
-
-static struct acpi_sdt_header* test_fadt_boot_arch(size_t offset, size_t size, uint16_t boot_arch) {
-	struct acpi_sdt_header* fadt = test_table(offset, "FACP", size);
-
-	fadt->revision = 2u;
-	if (size >= TEST_FADT_IAPC_BOOT_ARCH_OFFSET + sizeof(boot_arch))
-		memcpy((uint8_t*)fadt + TEST_FADT_IAPC_BOOT_ARCH_OFFSET, &boot_arch, sizeof(boot_arch));
-	test_checksum(fadt, size, offsetof(struct acpi_sdt_header, checksum));
-	return fadt;
-}
-
-static struct acpi_sdt_header* test_mcfg(size_t offset, const struct test_mcfg_allocation* allocations,
-                                         size_t allocation_count) {
-	size_t                  size  = sizeof(struct acpi_sdt_header) + 8u + allocation_count * sizeof(*allocations);
-	struct acpi_sdt_header* table = test_table(offset, "MCFG", size);
-
-	if (allocation_count != 0u)
-		memcpy((uint8_t*)table + sizeof(*table) + 8u, allocations, allocation_count * sizeof(*allocations));
-	test_checksum(table, size, offsetof(struct acpi_sdt_header, checksum));
-	return table;
-}
-
-static struct test_acpi_tpm2* test_tpm2(size_t offset, uint16_t platform_class, uint16_t reserved,
-                                        uint64_t control_address, uint32_t start_method) {
-	struct test_acpi_tpm2* table = (struct test_acpi_tpm2*)test_table(offset, "TPM2", sizeof(*table));
-
-	table->header.revision = 4u;
-	table->platform_class  = platform_class;
-	table->reserved        = reserved;
-	table->control_address = control_address;
-	table->start_method    = start_method;
-	test_checksum(table, sizeof(*table), offsetof(struct acpi_sdt_header, checksum));
-	return table;
 }
 
 Test(acpi, cursor_iteration_skips_invalid_tables_and_preserves_duplicates) {
@@ -486,157 +388,4 @@ Test(acpi, rejects_non_acpi_or_reserved_ranges) {
 	rsdp                = test_rsdp(true);
 	test_ranges[0].type = MEM_RANGE_OTHER;
 	cr_assert_not(test_acpi_init(rsdp));
-}
-
-Test(acpi, pci_controllers_are_normalized_from_all_valid_mcfg_allocations) {
-	const uintptr_t entries[] = {
-		test_physical(0x800u),
-		test_physical(0xa00u),
-		test_physical(0xc00u),
-	};
-	const struct test_mcfg_allocation first[] = {
-		{.address = 0xe0000000u, .segment_group = 0u, .start_bus = 0u, .end_bus = 127u},
-		{         .address = 0u, .segment_group = 1u, .start_bus = 0u, .end_bus = 255u},
-	};
-	const struct test_mcfg_allocation second[] = {
-		{.address = 0xf0000000u, .segment_group = 2u, .start_bus = 128u, .end_bus = 255u},
-	};
-	struct pci_controller controllers[3];
-	struct test_rsdp*     rsdp;
-
-	test_reset();
-	test_mcfg(0x800u, first, sizeof(first) / sizeof(first[0]));
-	test_mcfg(0xa00u, second, sizeof(second) / sizeof(second[0]));
-	test_table(0xc00u, "MCFG", sizeof(struct acpi_sdt_header) + 9u);
-	test_root(true, entries, sizeof(entries) / sizeof(entries[0]));
-	rsdp = test_rsdp(true);
-	cr_assert(test_acpi_init(rsdp));
-
-	cr_assert_eq(test_pci_controllers(controllers, 3u), 2u);
-	cr_assert_eq(controllers[0].access, PCI_CONFIG_ACCESS_ECAM);
-	cr_assert_eq(controllers[0].register_address, 0xe0000000u);
-	cr_assert_eq(controllers[0].register_size, 128u * 1024u * 1024u);
-	cr_assert_eq(controllers[0].domain, 0u);
-	cr_assert_eq(controllers[0].start_bus, 0u);
-	cr_assert_eq(controllers[0].end_bus, 127u);
-	cr_assert_eq(controllers[1].register_address, 0xf8000000u);
-	cr_assert_eq(controllers[1].register_size, 128u * 1024u * 1024u);
-	cr_assert_eq(controllers[1].domain, 2u);
-	cr_assert_eq(controllers[1].start_bus, 128u);
-	cr_assert_eq(controllers[1].end_bus, 255u);
-}
-
-Test(acpi, ps2_controller_is_published_from_i8042_boot_flag) {
-	const uintptr_t       entries[] = {test_physical(0x400u)};
-	struct ps2_controller controllers[1];
-	struct test_rsdp*     rsdp;
-
-	test_reset();
-	test_fadt_boot_arch(0x400u, TEST_FADT_IAPC_BOOT_ARCH_OFFSET + sizeof(uint16_t), TEST_FADT_IAPC_BOOT_ARCH_8042);
-	test_root(true, entries, sizeof(entries) / sizeof(entries[0]));
-	rsdp = test_rsdp(true);
-	cr_assert(test_acpi_init(rsdp));
-
-	cr_assert_eq(test_ps2_controllers(controllers, 1u), 1u);
-	cr_assert_eq(controllers[0].interface, PS2_CONTROLLER_INTERFACE_I8042_IO_PORT);
-	cr_assert_eq(controllers[0].reserved, 0u);
-	cr_assert_eq(controllers[0].access.i8042_io_port.data_port, 0x60u);
-	cr_assert_eq(controllers[0].access.i8042_io_port.status_command_port, 0x64u);
-}
-
-Test(acpi, ps2_controller_is_absent_when_i8042_boot_flag_is_clear) {
-	const uintptr_t       entries[]      = {test_physical(0x400u)};
-	struct ps2_controller controllers[1] = {{.interface = PS2_CONTROLLER_INTERFACE_COUNT}};
-	struct test_rsdp*     rsdp;
-
-	test_reset();
-	test_fadt_boot_arch(0x400u, TEST_FADT_IAPC_BOOT_ARCH_OFFSET + sizeof(uint16_t), 0u);
-	test_root(true, entries, sizeof(entries) / sizeof(entries[0]));
-	rsdp = test_rsdp(true);
-	cr_assert(test_acpi_init(rsdp));
-
-	cr_assert_eq(test_ps2_controllers(controllers, 1u), 0u);
-	cr_assert_eq(controllers[0].interface, PS2_CONTROLLER_INTERFACE_COUNT);
-}
-
-Test(acpi, ps2_controller_is_absent_when_fadt_omits_boot_flags) {
-	const uintptr_t       entries[] = {test_physical(0x400u)};
-	struct ps2_controller controllers[1];
-	struct test_rsdp*     rsdp;
-
-	test_reset();
-	test_fadt_boot_arch(0x400u, TEST_FADT_IAPC_BOOT_ARCH_OFFSET + sizeof(uint8_t), UINT16_MAX);
-	test_root(true, entries, sizeof(entries) / sizeof(entries[0]));
-	rsdp = test_rsdp(true);
-	cr_assert(test_acpi_init(rsdp));
-
-	cr_assert_eq(test_ps2_controllers(controllers, 1u), 0u);
-}
-
-Test(acpi, ps2_controller_is_absent_when_fadt_revision_predates_boot_flags) {
-	const uintptr_t         entries[] = {test_physical(0x400u)};
-	struct ps2_controller   controllers[1];
-	struct acpi_sdt_header* fadt;
-	struct test_rsdp*       rsdp;
-
-	test_reset();
-	fadt =
-		test_fadt_boot_arch(0x400u, TEST_FADT_IAPC_BOOT_ARCH_OFFSET + sizeof(uint16_t), TEST_FADT_IAPC_BOOT_ARCH_8042);
-	fadt->revision = 1u;
-	test_checksum(fadt, fadt->length, offsetof(struct acpi_sdt_header, checksum));
-	test_root(true, entries, sizeof(entries) / sizeof(entries[0]));
-	rsdp = test_rsdp(true);
-	cr_assert(test_acpi_init(rsdp));
-
-	cr_assert_eq(test_ps2_controllers(controllers, 1u), 0u);
-}
-
-Test(acpi, tpm_devices_expose_fifo_and_crb_interfaces) {
-	const uintptr_t entries[] = {
-		test_physical(0x800u),
-		test_physical(0xa00u),
-		test_physical(0xc00u),
-	};
-	struct tpm_device devices[3];
-	struct test_rsdp* rsdp;
-
-	test_reset();
-	test_tpm2(0x800u, 0u, 0u, 0u, 6u);
-	test_tpm2(0xa00u, 1u, 0u, UINT64_C(0xfed40040), 7u);
-	test_tpm2(0xc00u, 0u, 0u, UINT64_C(0xfed40040), 8u);
-	test_root(true, entries, sizeof(entries) / sizeof(entries[0]));
-	rsdp = test_rsdp(true);
-	cr_assert(test_acpi_init(rsdp));
-
-	cr_assert_eq(test_tpms(devices, 3u), 2u);
-	cr_assert_eq(devices[0].family, TPM_FAMILY_2_0);
-	cr_assert_eq(devices[0].interface, TPM_INTERFACE_FIFO_MMIO);
-	cr_assert_eq(devices[0].access.fifo_mmio.register_address, UINT64_C(0xfed40000));
-	cr_assert_eq(devices[0].access.fifo_mmio.register_size, UINT64_C(0x5000));
-	cr_assert_eq(devices[1].family, TPM_FAMILY_2_0);
-	cr_assert_eq(devices[1].interface, TPM_INTERFACE_CRB);
-	cr_assert_eq(devices[1].access.crb.control_area_address, UINT64_C(0xfed40040));
-}
-
-Test(acpi, tpm_devices_reject_invalid_tables) {
-	const uintptr_t entries[] = {
-		test_physical(0x800u),
-		test_physical(0xa00u),
-		test_physical(0xc00u),
-	};
-	struct test_acpi_tpm2* legacy;
-	struct tpm_device      device;
-	struct test_rsdp*      rsdp;
-
-	test_reset();
-	legacy                  = test_tpm2(0x800u, 0u, 0u, UINT64_C(0xfed40040), 7u);
-	legacy->header.revision = 3u;
-	test_checksum(legacy, sizeof(*legacy), offsetof(struct acpi_sdt_header, checksum));
-	test_tpm2(0xa00u, 0u, 1u, UINT64_C(0xfed40040), 7u);
-	test_tpm2(0xc00u, 2u, 0u, UINT64_C(0xfed40000), 6u);
-	test_root(true, entries, sizeof(entries) / sizeof(entries[0]));
-	rsdp = test_rsdp(true);
-	cr_assert(test_acpi_init(rsdp));
-
-	cr_assert_eq(test_tpms(&device, 1u), 0u);
 }

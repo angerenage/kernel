@@ -1,20 +1,13 @@
-#include <base/device.h>
-#include <base/hardware/pci.h>
-#include <base/hardware/tpm.h>
 #include <boot/info.h>
 #include <core/mm.h>
 #include <criterion/criterion.h>
-#include <firmware/acpi.h>
 #include <firmware/dt.h>
 #include <firmware/dt/device.h>
-#include <kernel/device.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
-#include "../kernel/src/hardware/pci.h"
-#include "../kernel/src/hardware/tpm.h"
 #include "heap/test_support.h"
 
 #define TEST_ARENA_SIZE 0x5000u
@@ -24,31 +17,6 @@
 #define TEST_STRUCTURE_OFFSET 0x100u
 #define TEST_STRINGS_OFFSET 0x1000u
 #define TEST_TOTAL_SIZE 0x1800u
-#define TEST_ACPI_RSDP_OFFSET 0x3100u
-#define TEST_ACPI_ROOT_OFFSET 0x3200u
-#define TEST_ACPI_MCFG_OFFSET 0x3400u
-#define TEST_ACPI_RANGE_OFFSET 0x3000u
-#define TEST_ACPI_RANGE_SIZE 0x1000u
-
-struct test_rsdp {
-	char     signature[8];
-	uint8_t  checksum;
-	char     oem_id[6];
-	uint8_t  revision;
-	uint32_t rsdt_address;
-	uint32_t length;
-	uint64_t xsdt_address;
-	uint8_t  extended_checksum;
-	uint8_t  reserved[3];
-} __attribute__((packed));
-
-struct test_mcfg_allocation {
-	uint64_t address;
-	uint16_t segment_group;
-	uint8_t  start_bus;
-	uint8_t  end_bus;
-	uint32_t reserved;
-} __attribute__((packed));
 
 static uint8_t          test_arena[TEST_ARENA_SIZE] __attribute__((aligned(8)));
 static uint8_t          test_heap[64u * 1024u] __attribute__((aligned(4096)));
@@ -63,11 +31,6 @@ static bool test_dt_init(const void* dtb) {
 	return dt_init(&test_boot_info);
 }
 
-static bool test_acpi_init(const void* rsdp) {
-	test_boot_info.rsdp_address = (uintptr_t)rsdp;
-	return acpi_init(&test_boot_info);
-}
-
 static void test_write_u32(uint8_t* output, uint32_t value) {
 	output[0] = (uint8_t)(value >> 24u);
 	output[1] = (uint8_t)(value >> 16u);
@@ -76,7 +39,6 @@ static void test_write_u32(uint8_t* output, uint32_t value) {
 }
 
 static void test_reset(void) {
-	kernel_device_reset_for_test();
 	if (!heap_is_initialized()) init_test_heap(test_heap, sizeof(test_heap));
 	memset(test_arena, 0, sizeof(test_arena));
 	memset(test_ranges, 0, sizeof(test_ranges));
@@ -93,88 +55,6 @@ static void test_reset(void) {
 	};
 	test_structure_cursor = 0u;
 	test_strings_cursor   = 0u;
-}
-
-static size_t test_pci_controllers(struct pci_controller* controllers, size_t capacity) {
-	size_t count;
-	size_t returned;
-
-	cr_assert(kernel_device_register_pci());
-	kernel_device_freeze();
-	cr_assert(kernel_device_count(KERNEL_DEVICE_TYPE_PCI, &count));
-	cr_assert(kernel_device_list(KERNEL_DEVICE_TYPE_PCI, 0u, capacity, sizeof(*controllers), controllers, &returned));
-	cr_assert_eq(returned, count < capacity ? count : capacity);
-	return count;
-}
-
-static size_t test_tpms(struct tpm_device* devices, size_t capacity) {
-	size_t count;
-	size_t returned;
-
-	cr_assert(kernel_device_register_tpms());
-	kernel_device_freeze();
-	cr_assert(kernel_device_count(KERNEL_DEVICE_TYPE_TPM, &count));
-	cr_assert(kernel_device_list(KERNEL_DEVICE_TYPE_TPM, 0u, capacity, sizeof(*devices), devices, &returned));
-	cr_assert_eq(returned, count < capacity ? count : capacity);
-	return count;
-}
-
-static uintptr_t test_physical(size_t offset) {
-	return TEST_PHYSICAL_BASE + offset;
-}
-
-static void test_checksum(void* data, size_t size, size_t checksum_offset) {
-	uint8_t* bytes = data;
-	uint8_t  sum   = 0u;
-
-	bytes[checksum_offset] = 0u;
-	for (size_t index = 0u; index < size; index++) sum = (uint8_t)(sum + bytes[index]);
-	bytes[checksum_offset] = (uint8_t)(0u - sum);
-}
-
-static struct acpi_sdt_header* test_acpi_table(size_t offset, const char signature[4], size_t size) {
-	struct acpi_sdt_header* table = (struct acpi_sdt_header*)(test_arena + offset);
-
-	memset(table, 0, size);
-	memcpy(table->signature, signature, 4u);
-	table->length   = (uint32_t)size;
-	table->revision = 1u;
-	test_checksum(table, size, offsetof(struct acpi_sdt_header, checksum));
-	return table;
-}
-
-static bool test_acpi_mcfg(const struct test_mcfg_allocation* allocations, size_t allocation_count) {
-	size_t                  mcfg_size = sizeof(struct acpi_sdt_header) + 8u + allocation_count * sizeof(*allocations);
-	struct acpi_sdt_header* mcfg      = test_acpi_table(TEST_ACPI_MCFG_OFFSET, "MCFG", mcfg_size);
-	struct acpi_sdt_header* root =
-		test_acpi_table(TEST_ACPI_ROOT_OFFSET, "XSDT", sizeof(struct acpi_sdt_header) + sizeof(uint64_t));
-	struct test_rsdp* rsdp         = (struct test_rsdp*)(test_arena + TEST_ACPI_RSDP_OFFSET);
-	uint64_t          mcfg_address = test_physical(TEST_ACPI_MCFG_OFFSET);
-
-	if (allocation_count != 0u)
-		memcpy((uint8_t*)mcfg + sizeof(*mcfg) + 8u, allocations, allocation_count * sizeof(*allocations));
-	test_checksum(mcfg, mcfg_size, offsetof(struct acpi_sdt_header, checksum));
-	memcpy((uint8_t*)root + sizeof(*root), &mcfg_address, sizeof(mcfg_address));
-	test_checksum(root, root->length, offsetof(struct acpi_sdt_header, checksum));
-
-	memset(rsdp, 0, sizeof(*rsdp));
-	memcpy(rsdp->signature, "RSD PTR ", 8u);
-	memcpy(rsdp->oem_id, "CODEX ", 6u);
-	rsdp->revision     = 2u;
-	rsdp->length       = sizeof(*rsdp);
-	rsdp->rsdt_address = (uint32_t)test_physical(TEST_ACPI_ROOT_OFFSET);
-	rsdp->xsdt_address = test_physical(TEST_ACPI_ROOT_OFFSET);
-	test_checksum(rsdp, 20u, offsetof(struct test_rsdp, checksum));
-	test_checksum(rsdp, sizeof(*rsdp), offsetof(struct test_rsdp, extended_checksum));
-
-	test_ranges[1] = (struct mem_range){
-		.base   = test_physical(TEST_ACPI_RANGE_OFFSET),
-		.length = TEST_ACPI_RANGE_SIZE,
-		.type   = MEM_RANGE_ACPI,
-	};
-	test_range_count                = 2u;
-	test_boot_info.memory_map_count = test_range_count;
-	return test_acpi_init(rsdp);
 }
 
 static size_t test_string(const char* value) {
@@ -620,294 +500,4 @@ Test(dt, rejects_ambiguous_phandles_and_malformed_string_lists) {
 	cr_assert_not(dt_node_valid(dt_node_by_phandle(5u)));
 	cr_assert(dt_node_property(dt_node_child(dt_root()), "compatible", &property));
 	cr_assert_not(dt_property_string_list_contains(&property, "ok"));
-}
-
-static void test_pci_tree(uint64_t address, uint64_t size, uint8_t start_bus, uint8_t end_bus, bool domain_present,
-                          uint32_t domain) {
-	static const uint8_t root_address_cells[] = {0u, 0u, 0u, 2u};
-	static const uint8_t root_size_cells[]    = {0u, 0u, 0u, 2u};
-	static const uint8_t address_cells[]      = {0u, 0u, 0u, 3u};
-	static const uint8_t size_cells[]         = {0u, 0u, 0u, 2u};
-	static const uint8_t compatible[]         = "pci-host-ecam-generic";
-	static const uint8_t device_type[]        = "pci";
-	uint8_t              reg[16];
-	uint8_t              bus_range[8];
-	uint8_t              domain_value[4];
-	size_t               address_cells_name;
-	size_t               size_cells_name;
-	size_t               compatible_name;
-	size_t               device_type_name;
-	size_t               ranges_name;
-	size_t               reg_name;
-	size_t               bus_range_name;
-	size_t               domain_name;
-
-	test_reset();
-	test_write_u32(reg, (uint32_t)(address >> 32u));
-	test_write_u32(reg + 4u, (uint32_t)address);
-	test_write_u32(reg + 8u, (uint32_t)(size >> 32u));
-	test_write_u32(reg + 12u, (uint32_t)size);
-	test_write_u32(bus_range, start_bus);
-	test_write_u32(bus_range + 4u, end_bus);
-	test_write_u32(domain_value, domain);
-	address_cells_name = test_string("#address-cells");
-	size_cells_name    = test_string("#size-cells");
-	compatible_name    = test_string("compatible");
-	device_type_name   = test_string("device_type");
-	ranges_name        = test_string("ranges");
-	reg_name           = test_string("reg");
-	bus_range_name     = test_string("bus-range");
-	domain_name        = test_string("linux,pci-domain");
-	test_begin_node("");
-	test_property(17u, address_cells_name, root_address_cells, sizeof(root_address_cells));
-	test_property(17u, size_cells_name, root_size_cells, sizeof(root_size_cells));
-	test_begin_node("pci@0");
-	test_property(17u, compatible_name, compatible, sizeof(compatible));
-	test_property(17u, device_type_name, device_type, sizeof(device_type));
-	test_property(17u, address_cells_name, address_cells, sizeof(address_cells));
-	test_property(17u, size_cells_name, size_cells, sizeof(size_cells));
-	test_property(17u, ranges_name, reg, sizeof(reg));
-	test_property(17u, reg_name, reg, sizeof(reg));
-	test_property(17u, bus_range_name, bus_range, sizeof(bus_range));
-	if (domain_present) test_property(17u, domain_name, domain_value, sizeof(domain_value));
-	test_end_node();
-	test_end_node();
-	test_token(9u);
-	test_header(17u);
-	cr_assert(test_dt_init(test_arena));
-}
-
-Test(dt, pci_controllers_are_normalized_from_generic_ecam_hosts) {
-	static const uint8_t  root_address_cells[] = {0u, 0u, 0u, 2u};
-	static const uint8_t  root_size_cells[]    = {0u, 0u, 0u, 2u};
-	static const uint8_t  address_cells[]      = {0u, 0u, 0u, 3u};
-	static const uint8_t  size_cells[]         = {0u, 0u, 0u, 2u};
-	static const uint8_t  compatible[]         = "pci-host-ecam-generic";
-	static const uint8_t  device_type[]        = "pci";
-	static const uint8_t  first_reg[]          = {0u, 0u, 0u, 0u, 0x30u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0x10u, 0u, 0u, 0u};
-	static const uint8_t  first_bus_range[]    = {0u, 0u, 0u, 0u, 0u, 0u, 0u, 0xffu};
-	static const uint8_t  first_domain[]       = {0u, 0u, 0u, 0u};
-	static const uint8_t  second_reg[]         = {0u, 0u, 0u, 0u, 0x50u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 8u, 0u, 0u, 0u};
-	static const uint8_t  second_bus_range[]   = {0u, 0u, 0u, 0x80u, 0u, 0u, 0u, 0xffu};
-	static const uint8_t  second_domain[]      = {0u, 1u, 0u, 2u};
-	size_t                address_cells_name;
-	size_t                size_cells_name;
-	size_t                compatible_name;
-	size_t                device_type_name;
-	size_t                ranges_name;
-	size_t                reg_name;
-	size_t                bus_range_name;
-	size_t                domain_name;
-	struct pci_controller controllers[3];
-
-	test_reset();
-	address_cells_name = test_string("#address-cells");
-	size_cells_name    = test_string("#size-cells");
-	compatible_name    = test_string("compatible");
-	device_type_name   = test_string("device_type");
-	ranges_name        = test_string("ranges");
-	reg_name           = test_string("reg");
-	bus_range_name     = test_string("bus-range");
-	domain_name        = test_string("linux,pci-domain");
-	test_begin_node("");
-	test_property(17u, address_cells_name, root_address_cells, sizeof(root_address_cells));
-	test_property(17u, size_cells_name, root_size_cells, sizeof(root_size_cells));
-	test_begin_node("pcie@30000000");
-	test_property(17u, compatible_name, compatible, sizeof(compatible));
-	test_property(17u, device_type_name, device_type, sizeof(device_type));
-	test_property(17u, address_cells_name, address_cells, sizeof(address_cells));
-	test_property(17u, size_cells_name, size_cells, sizeof(size_cells));
-	test_property(17u, ranges_name, first_reg, sizeof(first_reg));
-	test_property(17u, reg_name, first_reg, sizeof(first_reg));
-	test_property(17u, bus_range_name, first_bus_range, sizeof(first_bus_range));
-	test_property(17u, domain_name, first_domain, sizeof(first_domain));
-	test_end_node();
-	test_begin_node("pcie@50000000");
-	test_property(17u, compatible_name, compatible, sizeof(compatible));
-	test_property(17u, device_type_name, device_type, sizeof(device_type));
-	test_property(17u, address_cells_name, address_cells, sizeof(address_cells));
-	test_property(17u, size_cells_name, size_cells, sizeof(size_cells));
-	test_property(17u, ranges_name, second_reg, sizeof(second_reg));
-	test_property(17u, reg_name, second_reg, sizeof(second_reg));
-	test_property(17u, bus_range_name, second_bus_range, sizeof(second_bus_range));
-	test_property(17u, domain_name, second_domain, sizeof(second_domain));
-	test_end_node();
-	test_end_node();
-	test_token(9u);
-	test_header(17u);
-	cr_assert(test_dt_init(test_arena));
-
-	cr_assert_eq(test_pci_controllers(controllers, 3u), 2u);
-	cr_assert_eq(controllers[0].register_address, 0x30000000u);
-	cr_assert_eq(controllers[0].register_size, 256u * 1024u * 1024u);
-	cr_assert_eq(controllers[0].access, PCI_CONFIG_ACCESS_ECAM);
-	cr_assert_eq(controllers[0].domain, 0u);
-	cr_assert_eq(controllers[0].start_bus, 0u);
-	cr_assert_eq(controllers[0].end_bus, 255u);
-	cr_assert_eq(controllers[1].register_address, 0x50000000u);
-	cr_assert_eq(controllers[1].register_size, 128u * 1024u * 1024u);
-	cr_assert_eq(controllers[1].domain, 0x10002u);
-	cr_assert_eq(controllers[1].start_bus, 128u);
-	cr_assert_eq(controllers[1].end_bus, 255u);
-}
-
-Test(dt, pci_defaults_bus_range_and_domains_when_omitted) {
-	static const uint8_t  root_address_cells[] = {0u, 0u, 0u, 2u};
-	static const uint8_t  root_size_cells[]    = {0u, 0u, 0u, 2u};
-	static const uint8_t  address_cells[]      = {0u, 0u, 0u, 3u};
-	static const uint8_t  size_cells[]         = {0u, 0u, 0u, 2u};
-	static const uint8_t  compatible[]         = "pci-host-ecam-generic";
-	static const uint8_t  device_type[]        = "pci";
-	static const uint8_t  first_reg[]          = {0u, 0u, 0u, 0u, 0x30u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 4u, 0u, 0u, 0u};
-	static const uint8_t  second_reg[]         = {0u, 0u, 0u, 0u, 0x40u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 2u, 0u, 0u, 0u};
-	size_t                address_cells_name;
-	size_t                size_cells_name;
-	size_t                compatible_name;
-	size_t                device_type_name;
-	size_t                ranges_name;
-	size_t                reg_name;
-	struct pci_controller controllers[2];
-
-	test_reset();
-	address_cells_name = test_string("#address-cells");
-	size_cells_name    = test_string("#size-cells");
-	compatible_name    = test_string("compatible");
-	device_type_name   = test_string("device_type");
-	ranges_name        = test_string("ranges");
-	reg_name           = test_string("reg");
-	test_begin_node("");
-	test_property(17u, address_cells_name, root_address_cells, sizeof(root_address_cells));
-	test_property(17u, size_cells_name, root_size_cells, sizeof(root_size_cells));
-	test_begin_node("pcie@30000000");
-	test_property(17u, compatible_name, compatible, sizeof(compatible));
-	test_property(17u, device_type_name, device_type, sizeof(device_type));
-	test_property(17u, address_cells_name, address_cells, sizeof(address_cells));
-	test_property(17u, size_cells_name, size_cells, sizeof(size_cells));
-	test_property(17u, ranges_name, first_reg, sizeof(first_reg));
-	test_property(17u, reg_name, first_reg, sizeof(first_reg));
-	test_end_node();
-	test_begin_node("pcie@40000000");
-	test_property(17u, compatible_name, compatible, sizeof(compatible));
-	test_property(17u, device_type_name, device_type, sizeof(device_type));
-	test_property(17u, address_cells_name, address_cells, sizeof(address_cells));
-	test_property(17u, size_cells_name, size_cells, sizeof(size_cells));
-	test_property(17u, ranges_name, second_reg, sizeof(second_reg));
-	test_property(17u, reg_name, second_reg, sizeof(second_reg));
-	test_end_node();
-	test_end_node();
-	test_token(9u);
-	test_header(17u);
-	cr_assert(test_dt_init(test_arena));
-
-	cr_assert_eq(test_pci_controllers(controllers, 2u), 2u);
-	cr_assert_eq(controllers[0].register_size, 64u * 1024u * 1024u);
-	cr_assert_eq(controllers[0].domain, 0u);
-	cr_assert_eq(controllers[0].start_bus, 0u);
-	cr_assert_eq(controllers[0].end_bus, 63u);
-	cr_assert_eq(controllers[1].register_size, 32u * 1024u * 1024u);
-	cr_assert_eq(controllers[1].domain, 1u);
-	cr_assert_eq(controllers[1].end_bus, 31u);
-}
-
-Test(dt, pci_merges_matching_acpi_and_dt_controllers) {
-	const struct test_mcfg_allocation allocation = {
-		.address = 0x30000000u, .segment_group = 7u, .start_bus = 0u, .end_bus = 255u};
-	struct pci_controller controller;
-
-	test_pci_tree(0x30000000u, 256u * 1024u * 1024u, 0u, 255u, false, 0u);
-	cr_assert(test_acpi_mcfg(&allocation, 1u));
-
-	cr_assert_eq(test_pci_controllers(&controller, 1u), 1u);
-	cr_assert_eq(controller.register_address, 0x30000000u);
-	cr_assert_eq(controller.register_size, 256u * 1024u * 1024u);
-	cr_assert_eq(controller.domain, 7u);
-	cr_assert_eq(controller.start_bus, 0u);
-	cr_assert_eq(controller.end_bus, 255u);
-}
-
-Test(dt, pci_keeps_distinct_acpi_and_dt_controllers) {
-	const struct test_mcfg_allocation allocation = {
-		.address = 0x50000000u, .segment_group = 0u, .start_bus = 0u, .end_bus = 127u};
-	struct pci_controller controllers[2];
-
-	test_pci_tree(0x30000000u, 256u * 1024u * 1024u, 0u, 255u, false, 0u);
-	cr_assert(test_acpi_mcfg(&allocation, 1u));
-
-	cr_assert_eq(test_pci_controllers(controllers, 2u), 2u);
-	cr_assert_eq(controllers[0].register_address, 0x30000000u);
-	cr_assert_eq(controllers[0].domain, 1u);
-	cr_assert_eq(controllers[1].register_address, 0x50000000u);
-	cr_assert_eq(controllers[1].domain, 0u);
-}
-
-Test(dt, pci_rejects_conflicting_acpi_and_dt_controllers) {
-	const struct test_mcfg_allocation allocation = {
-		.address = 0x30000000u, .segment_group = 2u, .start_bus = 0u, .end_bus = 255u};
-	struct pci_controller unchanged = {.register_address = 1u};
-
-	test_pci_tree(0x30000000u, 256u * 1024u * 1024u, 0u, 255u, true, 1u);
-	cr_assert(test_acpi_mcfg(&allocation, 1u));
-
-	cr_assert_eq(test_pci_controllers(&unchanged, 1u), 0u);
-	cr_assert_eq(unchanged.register_address, 1u);
-}
-
-Test(dt, tpm_devices_are_discovered_from_tis_mmio_nodes) {
-	static const uint8_t root_address_cells[] = {0u, 0u, 0u, 2u};
-	static const uint8_t root_size_cells[]    = {0u, 0u, 0u, 2u};
-	static const uint8_t compatible[]         = "vendor,tpm\0tcg,tpm-tis-mmio\0";
-	uint8_t              first_reg[16];
-	uint8_t              duplicate_reg[16];
-	uint8_t              second_reg[16];
-	uint8_t              invalid_reg[16];
-	size_t               address_cells_name;
-	size_t               size_cells_name;
-	size_t               compatible_name;
-	size_t               reg_name;
-	struct tpm_device    devices[3];
-
-	test_reset();
-	test_write_u32(first_reg, 0u);
-	test_write_u32(first_reg + 4u, 0xfe000000u);
-	test_write_u32(first_reg + 8u, 0u);
-	test_write_u32(first_reg + 12u, 0x6000u);
-	memcpy(duplicate_reg, first_reg, sizeof(duplicate_reg));
-	test_write_u32(duplicate_reg + 12u, 0x8000u);
-	test_write_u32(second_reg, 0u);
-	test_write_u32(second_reg + 4u, 0xfe100000u);
-	test_write_u32(second_reg + 8u, 0u);
-	test_write_u32(second_reg + 12u, 0x5000u);
-	test_write_u32(invalid_reg, 0u);
-	test_write_u32(invalid_reg + 4u, 0xfe200000u);
-	test_write_u32(invalid_reg + 8u, 0u);
-	test_write_u32(invalid_reg + 12u, 0x4000u);
-	address_cells_name = test_string("#address-cells");
-	size_cells_name    = test_string("#size-cells");
-	compatible_name    = test_string("compatible");
-	reg_name           = test_string("reg");
-	test_begin_node("");
-	test_property(17u, address_cells_name, root_address_cells, sizeof(root_address_cells));
-	test_property(17u, size_cells_name, root_size_cells, sizeof(root_size_cells));
-	const uint8_t* registers[] = {first_reg, duplicate_reg, second_reg, invalid_reg};
-	const char*    names[]     = {"tpm@fe000000", "tpm-duplicate@fe000000", "tpm@fe100000", "tpm@fe200000"};
-	for (size_t index = 0u; index < sizeof(registers) / sizeof(registers[0]); index++) {
-		test_begin_node(names[index]);
-		test_property(17u, compatible_name, compatible, sizeof(compatible));
-		test_property(17u, reg_name, registers[index], 16u);
-		test_end_node();
-	}
-	test_end_node();
-	test_token(9u);
-	test_header(17u);
-	cr_assert(test_dt_init(test_arena));
-
-	cr_assert_eq(test_tpms(devices, 3u), 2u);
-	cr_assert_eq(devices[0].family, TPM_FAMILY_UNSPECIFIED);
-	cr_assert_eq(devices[0].interface, TPM_INTERFACE_FIFO_MMIO);
-	cr_assert_eq(devices[0].access.fifo_mmio.register_address, UINT64_C(0xfe000000));
-	cr_assert_eq(devices[0].access.fifo_mmio.register_size, UINT64_C(0x6000));
-	cr_assert_eq(devices[1].family, TPM_FAMILY_UNSPECIFIED);
-	cr_assert_eq(devices[1].interface, TPM_INTERFACE_FIFO_MMIO);
-	cr_assert_eq(devices[1].access.fifo_mmio.register_address, UINT64_C(0xfe100000));
-	cr_assert_eq(devices[1].access.fifo_mmio.register_size, UINT64_C(0x5000));
 }
