@@ -74,7 +74,8 @@ static bool sched_thread_should_preempt_current(struct cpu* cpu, const struct th
 	if (cpu == NULL || thread == NULL) return false;
 
 	current = cpu_current_thread_load(cpu);
-	if (current == NULL || thread_is_idle(current) || thread_is_terminated(current)) return false;
+	if (current == NULL || thread_is_terminated(current)) return false;
+	if (thread_is_idle(current)) return true;
 
 	return sched_effective_priority(thread) > sched_effective_priority(current);
 }
@@ -531,7 +532,7 @@ static bool sched_make_waiter_runnable(struct thread* thread) {
 
 	if (thread == NULL) return false;
 	cpu = thread->cpu;
-	if (cpu_current_thread_load(cpu) == thread) return sched_make_runnable_on_cpu(cpu, thread, true);
+	if (cpu != NULL) return sched_make_runnable_on_cpu(cpu, thread, true);
 	return sched_make_runnable(thread);
 }
 

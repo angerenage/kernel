@@ -224,3 +224,37 @@ Test(sched, wake_one_is_exactly_once_for_a_pending_waiter) {
 
 	sched_regression_reset();
 }
+
+Test(sched, wake_one_keeps_blocked_continuation_on_its_cpu) {
+	struct cpu*              bsp;
+	struct cpu*              ap;
+	struct thread            running;
+	struct thread            waiter;
+	struct thread_wait_queue queue;
+
+	sched_regression_init_dual_cpu(&bsp, &ap);
+	sched_regression_init_thread(&running, "ap-running", 0x318000u, THREAD_PRIORITY_DEFAULT, ap, NULL);
+	sched_regression_init_thread(&waiter, "ap-waiter", 0x31c000u, THREAD_PRIORITY_DEFAULT, NULL, NULL);
+	thread_wait_queue_init(&queue);
+
+	cpu_bind_current(ap);
+	sched_set_current(ap, &running);
+	thread_mark_running(&waiter, ap);
+	thread_mark_blocked(&waiter, THREAD_BLOCK_WAIT_QUEUE);
+	waiter.blocked_queue = &queue;
+	waiter.wait_status   = THREAD_WAIT_STATUS_PENDING;
+	queue.head           = &waiter;
+	queue.tail           = &waiter;
+	queue.depth          = 1u;
+
+	cpu_bind_current(bsp);
+	hal_cpu_mock_reset_kicks();
+	cr_assert(sched_wake_one(&queue), "remote waiter wake failed");
+	cr_assert_eq(waiter.cpu, ap, "a blocked continuation must resume on the CPU where it blocked");
+	cr_assert_eq(sched_run_queue_depth(bsp), 0u, "the waking CPU must not steal a blocked continuation");
+	cr_assert_eq(sched_run_queue_depth(ap), 1u, "the original CPU must receive the woken waiter");
+	cr_assert(sched_reschedule_pending(ap), "the original CPU must receive a reschedule request");
+	cr_assert_eq(hal_cpu_mock_kick_count(ap), 1u, "the original CPU must be kicked after a remote wake");
+
+	sched_regression_reset();
+}

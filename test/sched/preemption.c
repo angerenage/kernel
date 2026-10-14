@@ -1,5 +1,20 @@
 #include "test_support.h"
 
+Test(sched, runnable_thread_preempts_idle_at_interrupt_exit) {
+	struct thread ready;
+
+	sched_regression_init_single_cpu();
+	sched_regression_init_thread(&ready, "ready-over-idle", 0x306000u, THREAD_PRIORITY_DEFAULT, cpu_current(), NULL);
+
+	cr_assert_eq(sched_current_thread(), sched_idle_thread(cpu_current()), "idle thread should initially be current");
+	cr_assert(sched_make_runnable(&ready), "failed to make thread runnable over idle");
+	cr_assert(sched_reschedule_pending(cpu_current()), "runnable work must request preemption of idle");
+	cr_assert(sched_handle_interrupt_exit(), "interrupt exit should dispatch runnable work over idle");
+	cr_assert_eq(sched_current_thread(), &ready, "runnable thread should replace idle");
+
+	sched_regression_reset();
+}
+
 Test(sched, high_priority_thread_preempts_lower_priority_current_at_interrupt_exit) {
 	const struct thread_create_params low_params = {
 		.name              = "low_current",
