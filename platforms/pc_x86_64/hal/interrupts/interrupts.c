@@ -240,8 +240,16 @@ void irq_disable_local(void) {
 
 static void interrupt_send_eoi(unsigned vector) {
 	if (!is_external_irq(vector)) return;
-	if (vector < 48u) pic_send_eoi(vector);
-	else apic_send_eoi();
+	/* IRQ0 retains its architectural PIC vector even when routed through the I/O APIC. */
+	if (vector == X86_IRQ_BASE && apic_isa_irq_available(0u)) {
+		apic_send_eoi();
+	}
+	else if (vector < 48u) {
+		pic_send_eoi(vector);
+	}
+	else {
+		apic_send_eoi();
+	}
 }
 
 static void x86_load_segments_and_tss(size_t cpu_index) {
