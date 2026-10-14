@@ -238,6 +238,15 @@ static void binding_launch(struct device_server* server, struct dm_driver_bindin
 	binding->process_id  = PROCESS_PID_INVALID;
 	binding->process_cap = CAP_ID_INVALID;
 	status               = open_executable(binding->driver);
+	if (status == SYSCALL_STATUS_UNAVAILABLE) {
+		binding->last_wait_status = status;
+		binding->state            = DM_DRIVER_QUARANTINED;
+		printf("device-manager: driver executable unavailable for %.*s on device %llu\n",
+		       (int)binding->driver->name.size,
+		       binding->driver->name.data,
+		       (unsigned long long)binding->device->id);
+		return;
+	}
 	if (status != SYSCALL_STATUS_OK) goto failed;
 	status = program_load(DM_DRIVER_LOADER_SERVICE,
 	                      binding->driver->executable_cap,
