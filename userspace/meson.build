@@ -143,4 +143,4 @@ driver_catalog = configure_file(
 
 userspace_boot_modules = userspace_programs + [driver_catalog]
 
-alias_target('userspace', userspace_programs + [userspace_yaml])
+alias_target('userspace', userspace_programs + [userspace_utf8proc, userspace_yaml])

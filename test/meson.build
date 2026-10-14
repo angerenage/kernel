@@ -96,6 +96,18 @@ libyaml_test_lib = static_library(
 	install: false,
 )
 
+utf8proc_test_inc = include_directories('../third_party/utf8proc')
+
+utf8proc_test_lib = static_library(
+	'utf8proc_test_lib',
+	utf8proc_sources,
+	include_directories: utf8proc_test_inc,
+	native: true,
+	c_args: test_common_c_args + ['-DUTF8PROC_STATIC'],
+	link_args: test_common_link_args,
+	install: false,
+)
+
 kernel_capability_platform_sources = []
 if platform == 'pc_x86_64'
 	kernel_capability_platform_sources += files(
@@ -195,6 +207,15 @@ test_suites = [
 		),
 		'include_directories': [libyaml_test_inc],
 		'link_with': libyaml_test_lib,
+		'suites': ['unit', 'userspace'],
+	},
+	{
+		'name': 'utf8proc',
+		'sources': files(
+			'utf8proc/normalization.c',
+		),
+		'include_directories': [utf8proc_test_inc],
+		'link_with': utf8proc_test_lib,
 		'suites': ['unit', 'userspace'],
 	},
 	{
