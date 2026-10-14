@@ -626,15 +626,17 @@ static enum drain_result append_source_controls(struct input_manager* manager, s
 	if (!success || !notify_consumers(manager)) return DRAIN_RESULT_MANAGER_FAILED;
 	for (size_t i = 0u; i < source->pending_count; i++) {
 		const struct input_manager_event* event = &source->pending[i];
-		printf("input manager: source %llu frame=%llu sequence=%llu control=%u kind=%u code=%u group=%u value=%lld\n",
-		       (unsigned long long)event->source_id,
-		       (unsigned long long)event->frame,
-		       (unsigned long long)event->sequence,
-		       (unsigned)event->control_id,
-		       (unsigned)event->control_kind,
-		       (unsigned)event->control_code,
-		       (unsigned)event->group_id,
-		       (long long)event->value);
+		if (source->device_class != INPUT_DEVICE_CLASS_KEYBOARD)
+			printf("input manager: source %llu frame=%llu sequence=%llu control=%u kind=%u code=%u group=%u "
+			       "value=%lld\n",
+			       (unsigned long long)event->source_id,
+			       (unsigned long long)event->frame,
+			       (unsigned long long)event->sequence,
+			       (unsigned)event->control_id,
+			       (unsigned)event->control_kind,
+			       (unsigned)event->control_code,
+			       (unsigned)event->group_id,
+			       (long long)event->value);
 	}
 	source->pending_count = 0u;
 	source->pending_frame = 0u;

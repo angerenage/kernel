@@ -353,13 +353,14 @@ int server_run(const struct init_state* init) {
 	} buffer;
 	struct cap_request request;
 	bool               received;
-	bool               bootfs_mounted         = false;
-	bool               bootfs_started         = false;
-	bool               device_manager_started = false;
-	bool               input_manager_started  = false;
-	bool               loader_started         = false;
-	bool               vfs_ready              = false;
-	bool               vfs_started            = false;
+	bool               bootfs_mounted              = false;
+	bool               bootfs_started              = false;
+	bool               device_manager_started      = false;
+	bool               input_manager_started       = false;
+	bool               keyboard_controller_started = false;
+	bool               loader_started              = false;
+	bool               vfs_ready                   = false;
+	bool               vfs_started                 = false;
 	syscall_status_t   status;
 
 	if (server_endpoint == CHANNEL_ID_INVALID || init == NULL) return 1;
@@ -420,7 +421,12 @@ int server_run(const struct init_state* init) {
 			input_manager_started = true;
 			continue;
 		}
-		if (input_manager_started && !device_manager_started) {
+		if (input_manager_started && !keyboard_controller_started) {
+			if (!bootstrap_launch(init, "keyboard_controller.elf", "keyboard controller", 0u, NULL)) return 1;
+			keyboard_controller_started = true;
+			continue;
+		}
+		if (keyboard_controller_started && !device_manager_started) {
 			enum device_manager_launch_result result = device_manager_launch(init);
 
 			if (result == DEVICE_MANAGER_LAUNCH_FAILED) return 1;
