@@ -4,6 +4,20 @@
 #include <string.h>
 #include <system/capability.h>
 
+static bool output_descriptor_valid(const struct input_output_descriptor* descriptor) {
+	if (descriptor->id == 0u || descriptor->code <= INPUT_OUTPUT_CODE_INVALID ||
+	    descriptor->code > INPUT_OUTPUT_CODE_SCROLL_LOCK_INDICATOR)
+		return false;
+	switch (descriptor->kind) {
+	case INPUT_OUTPUT_KIND_BOOLEAN:
+		return descriptor->logical_minimum == 0 && descriptor->logical_maximum == 1;
+	case INPUT_OUTPUT_KIND_BOUNDED_VALUE:
+		return descriptor->logical_minimum < descriptor->logical_maximum;
+	default:
+		return false;
+	}
+}
+
 syscall_status_t input_get_info(cap_id_t input_cap, struct input_get_info_response* out_info) {
 	const struct input_get_info_request request = {.header = {.op = INPUT_OP_GET_INFO}};
 	struct input_get_info_response      response;
@@ -15,7 +29,9 @@ syscall_status_t input_get_info(cap_id_t input_cap, struct input_get_info_respon
 	if (status != SYSCALL_STATUS_OK) return status;
 	if (response_size != sizeof(response) || response.device_class <= INPUT_DEVICE_CLASS_INVALID ||
 	    response.device_class > INPUT_DEVICE_CLASS_OTHER || response.descriptor_count == 0u ||
-	    response.queue_capacity == 0u || response.maximum_frame_events == 0u)
+	    response.queue_capacity == 0u || response.maximum_frame_events == 0u ||
+	    (response.output_descriptor_count == 0u) != (response.maximum_output_values == 0u) ||
+	    response.maximum_output_values > response.output_descriptor_count)
 		return SYSCALL_STATUS_FAILED;
 	*out_info = response;
 	return SYSCALL_STATUS_OK;
@@ -132,4 +148,83 @@ syscall_status_t input_acquire_event_signal(cap_id_t input_cap, cap_id_t* out_si
 	if (response_size != sizeof(response) || response.capability == CAP_ID_INVALID) return SYSCALL_STATUS_FAILED;
 	*out_signal_cap = response.capability;
 	return SYSCALL_STATUS_OK;
+}
+
+syscall_status_t input_read_output_descriptors(cap_id_t input_cap, uint64_t offset,
+                                               struct input_output_descriptor* descriptors, size_t capacity,
+                                               size_t* out_returned, uint64_t* out_total) {
+	struct input_read_output_descriptors_response*     response;
+	const struct input_read_output_descriptors_request request = {
+		.header = {.op = INPUT_OP_READ_OUTPUT_DESCRIPTORS},
+		.offset = offset,
+		.count  = capacity,
+	};
+	size_t           response_capacity;
+	size_t           response_size = 0u;
+	syscall_status_t status;
+
+	if (out_returned != NULL) *out_returned = 0u;
+	if (out_total != NULL) *out_total = 0u;
+	if (input_cap == CAP_ID_INVALID || descriptors == NULL || capacity == 0u || out_returned == NULL ||
+	    out_total == NULL || capacity > (CAP_MAX_RESPONSE_SIZE - sizeof(*response)) / sizeof(*descriptors))
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	response_capacity = sizeof(*response) + capacity * sizeof(*descriptors);
+	response          = malloc(response_capacity);
+	if (response == NULL) return SYSCALL_STATUS_FAILED;
+	status = cap_call(input_cap, &request, sizeof(request), response, response_capacity, &response_size);
+	if (status != SYSCALL_STATUS_OK) {
+		free(response);
+		return status;
+	}
+	if (response_size < sizeof(*response) || response->returned > capacity || response->returned > SIZE_MAX ||
+	    response->returned > response->total || offset > response->total ||
+	    (offset < response->total && response->returned == 0u) ||
+	    response_size != sizeof(*response) + (size_t)response->returned * sizeof(*descriptors)) {
+		free(response);
+		return SYSCALL_STATUS_FAILED;
+	}
+	for (size_t i = 0u; i < (size_t)response->returned; i++) {
+		if (!output_descriptor_valid(&response->descriptors[i])) {
+			free(response);
+			return SYSCALL_STATUS_FAILED;
+		}
+		for (size_t previous = 0u; previous < i; previous++) {
+			if (response->descriptors[previous].id == response->descriptors[i].id) {
+				free(response);
+				return SYSCALL_STATUS_FAILED;
+			}
+		}
+	}
+	if (response->returned != 0u)
+		memcpy(descriptors, response->descriptors, (size_t)response->returned * sizeof(*descriptors));
+	*out_returned = (size_t)response->returned;
+	*out_total    = response->total;
+	free(response);
+	return SYSCALL_STATUS_OK;
+}
+
+syscall_status_t input_set_outputs(cap_id_t input_cap, const struct input_output_value* values, size_t count) {
+	struct input_set_outputs_request* request;
+	size_t                            request_size;
+	size_t                            response_size = 0u;
+
+	if (input_cap == CAP_ID_INVALID || values == NULL || count == 0u ||
+	    count > (CAP_MAX_REQUEST_SIZE - sizeof(*request)) / sizeof(*values))
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	for (size_t i = 0u; i < count; i++) {
+		if (values[i].output_id == 0u || values[i].reserved != 0u) return SYSCALL_STATUS_BAD_ARGUMENT;
+		for (size_t previous = 0u; previous < i; previous++)
+			if (values[previous].output_id == values[i].output_id) return SYSCALL_STATUS_BAD_ARGUMENT;
+	}
+	request_size = sizeof(*request) + count * sizeof(*values);
+	request      = malloc(request_size);
+	if (request == NULL) return SYSCALL_STATUS_FAILED;
+	request->header   = (struct input_request_header){.op = INPUT_OP_SET_OUTPUTS};
+	request->reserved = 0u;
+	request->count    = count;
+	memcpy(request->values, values, count * sizeof(*values));
+	syscall_status_t status = cap_call(input_cap, request, request_size, NULL, 0u, &response_size);
+	free(request);
+	if (status != SYSCALL_STATUS_OK) return status;
+	return response_size == 0u ? SYSCALL_STATUS_OK : SYSCALL_STATUS_FAILED;
 }

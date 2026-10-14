@@ -1,5 +1,6 @@
 #include <base/cap.h>
 #include <protocol/input_manager.h>
+#include <runtime/input.h>
 #include <stdlib.h>
 #include <string.h>
 #include <system/capability.h>
@@ -74,9 +75,11 @@ static bool dispatch_enumerate_sources(struct input_manager* manager, const stru
 			continue;
 		}
 		response->sources[returned++] = (struct input_manager_source){
-			.id               = source->id,
-			.device_class     = source->device_class,
-			.descriptor_count = (uint32_t)source->descriptor_count,
+			.id                      = source->id,
+			.device_class            = source->device_class,
+			.descriptor_count        = (uint32_t)source->descriptor_count,
+			.output_descriptor_count = (uint32_t)source->output_descriptor_count,
+			.maximum_output_values   = (uint32_t)source->maximum_output_values,
 		};
 	}
 	response->topology_generation = manager->topology_generation;
@@ -182,15 +185,110 @@ static bool dispatch_acquire_signal(struct input_manager* manager, const struct 
 	return false;
 }
 
+static bool dispatch_read_output_descriptors(struct input_manager* manager, const struct cap_request* call,
+                                             const void* request_data, void* response_buffer) {
+	struct input_manager_read_output_descriptors_request   request;
+	struct input_manager_read_output_descriptors_response* response = response_buffer;
+
+	if (call->request_size != sizeof(request)) return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	memcpy(&request, request_data, sizeof(request));
+	if (call->response_capacity < sizeof(*response) || request.reserved != 0u || request.topology_generation == 0u ||
+	    request.source_id == 0u || request.count == 0u ||
+	    request.count > (call->response_capacity - sizeof(*response)) / sizeof(*response->descriptors))
+		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	input_manager_lock(manager);
+	if (request.topology_generation != manager->topology_generation) {
+		input_manager_unlock(manager);
+		return reply(call, NULL, 0u, SYSCALL_STATUS_UNAVAILABLE);
+	}
+	struct managed_input_source* source = find_active_source(manager, request.source_id);
+	if (source == NULL) {
+		input_manager_unlock(manager);
+		return reply(call, NULL, 0u, SYSCALL_STATUS_UNAVAILABLE);
+	}
+	if (request.offset > source->output_descriptor_count) {
+		input_manager_unlock(manager);
+		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	}
+	size_t returned = source->output_descriptor_count - (size_t)request.offset;
+	if (returned > (size_t)request.count) returned = (size_t)request.count;
+	if (returned != 0u)
+		memcpy(response->descriptors,
+		       source->output_descriptors + (size_t)request.offset,
+		       returned * sizeof(*response->descriptors));
+	response->topology_generation = manager->topology_generation;
+	response->total               = source->output_descriptor_count;
+	response->returned            = returned;
+	input_manager_unlock(manager);
+	return reply(call, response, sizeof(*response) + returned * sizeof(*response->descriptors), SYSCALL_STATUS_OK);
+}
+
+static const struct input_output_descriptor* find_output_descriptor(const struct managed_input_source* source,
+                                                                    uint32_t                           id) {
+	for (size_t i = 0u; i < source->output_descriptor_count; i++)
+		if (source->output_descriptors[i].id == id) return &source->output_descriptors[i];
+	return NULL;
+}
+
+static bool output_value_valid(const struct input_output_descriptor* descriptor, int64_t value) {
+	return value >= descriptor->logical_minimum && value <= descriptor->logical_maximum;
+}
+
+static bool dispatch_set_outputs(struct input_manager* manager, const struct cap_request* call,
+                                 const void* request_data) {
+	struct input_manager_set_outputs_request header;
+	if (call->request_size < sizeof(header)) return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	memcpy(&header, request_data, sizeof(header));
+	if (header.reserved != 0u || header.topology_generation == 0u || header.source_id == 0u || header.count == 0u ||
+	    header.count > (CAP_MAX_REQUEST_SIZE - sizeof(header)) / sizeof(struct input_output_value) ||
+	    call->request_size != sizeof(header) + (size_t)header.count * sizeof(struct input_output_value))
+		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	const struct input_manager_set_outputs_request* request = request_data;
+	input_manager_lock(manager);
+	if (request->topology_generation != manager->topology_generation) {
+		input_manager_unlock(manager);
+		return reply(call, NULL, 0u, SYSCALL_STATUS_UNAVAILABLE);
+	}
+	struct managed_input_source* source = find_active_source(manager, request->source_id);
+	if (source == NULL) {
+		input_manager_unlock(manager);
+		return reply(call, NULL, 0u, SYSCALL_STATUS_UNAVAILABLE);
+	}
+	if (request->count > source->maximum_output_values) {
+		input_manager_unlock(manager);
+		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	}
+	for (size_t i = 0u; i < (size_t)request->count; i++) {
+		const struct input_output_value*      value      = &request->values[i];
+		const struct input_output_descriptor* descriptor = find_output_descriptor(source, value->output_id);
+		if (value->reserved != 0u || descriptor == NULL || !output_value_valid(descriptor, value->value)) {
+			input_manager_unlock(manager);
+			return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+		}
+		for (size_t previous = 0u; previous < i; previous++) {
+			if (request->values[previous].output_id == value->output_id) {
+				input_manager_unlock(manager);
+				return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+			}
+		}
+	}
+	syscall_status_t status = input_set_outputs(source->input_cap, request->values, (size_t)request->count);
+	input_manager_unlock(manager);
+	return reply(call, NULL, 0u, status);
+}
+
 static bool dispatch(struct input_manager* manager, const struct cap_request* call, const void* request_data,
                      void* response_buffer) {
 	struct input_manager_request_header header;
 	if (call->object_id != INPUT_MANAGER_OBJECT_ID) return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
-	if ((call->rights & (CAP_CALL | CAP_READ)) != (CAP_CALL | CAP_READ))
-		return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
+	if ((call->rights & CAP_CALL) == 0u) return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
 	if (request_data == NULL || call->request_size < sizeof(header))
 		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	memcpy(&header, request_data, sizeof(header));
+	if (header.op == INPUT_MANAGER_OP_SET_OUTPUTS) {
+		if ((call->rights & CAP_WRITE) == 0u) return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
+	}
+	else if ((call->rights & CAP_READ) == 0u) return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
 	switch (header.op) {
 	case INPUT_MANAGER_OP_GET_INFO:
 		return dispatch_get_info(manager, call);
@@ -202,6 +300,10 @@ static bool dispatch(struct input_manager* manager, const struct cap_request* ca
 		return dispatch_read_events(manager, call, request_data, response_buffer);
 	case INPUT_MANAGER_OP_ACQUIRE_EVENT_SIGNAL:
 		return dispatch_acquire_signal(manager, call);
+	case INPUT_MANAGER_OP_READ_OUTPUT_DESCRIPTORS:
+		return dispatch_read_output_descriptors(manager, call, request_data, response_buffer);
+	case INPUT_MANAGER_OP_SET_OUTPUTS:
+		return dispatch_set_outputs(manager, call, request_data);
 	default:
 		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	}

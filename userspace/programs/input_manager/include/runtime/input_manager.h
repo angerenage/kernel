@@ -34,3 +34,13 @@ syscall_status_t input_manager_read_events(cap_id_t manager_cap, uint64_t after_
 
 /* Acquire the aggregate service's coalesced event signal with CAP_WAIT. */
 syscall_status_t input_manager_acquire_event_signal(cap_id_t manager_cap, cap_id_t* out_signal_cap);
+
+/* Read one page of immutable output descriptors from an exact topology snapshot. */
+syscall_status_t input_manager_read_output_descriptors(cap_id_t manager_cap, uint64_t topology_generation,
+                                                       uint64_t source_id, uint64_t offset,
+                                                       struct input_output_descriptor* descriptors, size_t capacity,
+                                                       size_t* out_returned, uint64_t* out_total);
+
+/* Route one nonempty atomic output batch to a source synchronously. */
+syscall_status_t input_manager_set_outputs(cap_id_t manager_cap, uint64_t topology_generation, uint64_t source_id,
+                                           const struct input_output_value* values, size_t count);

@@ -17,6 +17,8 @@ struct ps2_input_server;
 /* Create and advertise the PS/2 process's input service. */
 syscall_status_t ps2_input_server_create(const char* service, enum input_device_class device_class,
                                          const struct input_control_descriptor* descriptors, size_t descriptor_count,
+                                         const struct input_output_descriptor* output_descriptors,
+                                         size_t output_descriptor_count, cap_id_t driver_activity_cap,
                                          struct ps2_input_server** out_server);
 
 /* Append one nonempty coherent control frame and notify waiting clients. */
@@ -25,3 +27,10 @@ syscall_status_t ps2_input_server_publish(struct ps2_input_server* server, const
 
 /* Append a state-reset frame after transport loss or device reinitialization. */
 syscall_status_t ps2_input_server_reset(struct ps2_input_server* server);
+
+/* Take the next validated output batch for execution by the transport owner. */
+bool ps2_input_server_take_outputs(struct ps2_input_server* server, struct input_output_value* values, size_t capacity,
+                                   size_t* out_count);
+
+/* Complete the output batch currently owned by the transport thread. */
+bool ps2_input_server_complete_outputs(struct ps2_input_server* server, syscall_status_t status);

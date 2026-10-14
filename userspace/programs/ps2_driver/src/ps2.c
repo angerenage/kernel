@@ -8,7 +8,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <system/capability.h>
+#include <system/process.h>
 #include <system/signal.h>
+#include <system/thread.h>
 #include <system/time.h>
 
 #include "events.h"
@@ -23,6 +25,7 @@
 #define PS2_COMMAND_IDENTIFY 0xf2u
 #define PS2_COMMAND_ENABLE_SCANNING 0xf4u
 #define PS2_COMMAND_DISABLE_SCANNING 0xf5u
+#define PS2_COMMAND_SET_LEDS 0xedu
 #define PS2_COMMAND_SET_SCAN_CODE_SET 0xf0u
 #define PS2_COMMAND_SET_SAMPLE_RATE 0xf3u
 
@@ -49,8 +52,17 @@ enum ps2_receive_result {
 struct ps2_device {
 	cap_id_t             transport_cap;
 	cap_id_t             receive_signal_cap;
+	cap_id_t             activity_cap;
+	cap_id_t             transport_waiter_cap;
 	enum ps2_device_kind kind;
 	uint8_t              mouse_id;
+	uint8_t              keyboard_leds;
+	bool                 transport_failed;
+};
+
+/* Copied onto the transport waiter's initial stack. */
+struct ps2_transport_waiter_argument {
+	struct ps2_device* device;
 };
 
 struct ps2_read_buffer {
@@ -118,6 +130,57 @@ static syscall_status_t transport_acquire_receive_signal(cap_id_t transport_cap,
 	if (response_size != sizeof(response) || response.capability == CAP_ID_INVALID) return SYSCALL_STATUS_FAILED;
 	*out_signal_cap = response.capability;
 	return SYSCALL_STATUS_OK;
+}
+
+static void transport_waiter(void* opaque) {
+	const struct ps2_transport_waiter_argument* argument = opaque;
+	struct ps2_device*                          device   = argument->device;
+	for (;;) {
+		struct signal_message message;
+		syscall_status_t      status = signal_wait(device->receive_signal_cap, &message);
+		if (status == SYSCALL_STATUS_INTERRUPTED) continue;
+		if (status != SYSCALL_STATUS_OK) __atomic_store_n(&device->transport_failed, true, __ATOMIC_RELEASE);
+		struct signal_send_response response;
+		if (signal_send(device->activity_cap, 1u, 0u, 0u, 0u, SIGNAL_SEND_FLAG_COALESCE, &response) !=
+		    SYSCALL_STATUS_OK)
+			thread_exit(1u);
+		if (status != SYSCALL_STATUS_OK) thread_exit(1u);
+	}
+}
+
+static bool start_transport_waiter(struct ps2_device* device) {
+	struct self_info self = {
+		.self_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .main_thread_cap = CAP_ID_INVALID};
+	if (signal_create(&device->activity_cap) != SYSCALL_STATUS_OK) return false;
+	syscall_status_t status = process_self_info(&self);
+	if (status == SYSCALL_STATUS_OK) {
+		const struct ps2_transport_waiter_argument argument = {.device = device};
+		status                                              = process_spawn_thread(self.self_cap,
+		                                                                           (uintptr_t)transport_waiter,
+		                                                                           &argument,
+		                                                                           sizeof(argument),
+		                                                                           "PS/2 transport waiter",
+		                                                                           sizeof("PS/2 transport waiter"),
+		                                                                           &device->transport_waiter_cap);
+	}
+	if (self.self_cap != CAP_ID_INVALID) (void)cap_drop(self.self_cap);
+	if (self.address_space_cap != CAP_ID_INVALID) (void)cap_drop(self.address_space_cap);
+	if (self.main_thread_cap != CAP_ID_INVALID) (void)cap_drop(self.main_thread_cap);
+	return status == SYSCALL_STATUS_OK;
+}
+
+static bool stop_transport_waiter(struct ps2_device* device) {
+	bool success = true;
+	if (device->transport_waiter_cap != CAP_ID_INVALID) {
+		(void)thread_cancel(device->transport_waiter_cap);
+		if (thread_join(device->transport_waiter_cap, NULL) != SYSCALL_STATUS_OK) success = false;
+		device->transport_waiter_cap = CAP_ID_INVALID;
+	}
+	if (device->activity_cap != CAP_ID_INVALID) {
+		if (signal_destroy(device->activity_cap) != SYSCALL_STATUS_OK) success = false;
+		device->activity_cap = CAP_ID_INVALID;
+	}
+	return success;
 }
 
 static bool is_mouse_id(uint8_t value) {
@@ -243,13 +306,64 @@ static bool configure_device(struct ps2_device* device) {
 	if (!reset_and_identify(device)) return false;
 	if (device->kind == PS2_DEVICE_KEYBOARD)
 		return command_with_value(device, PS2_COMMAND_SET_SCAN_CODE_SET, PS2_SCAN_CODE_SET_2) &&
+		       command_with_value(device, PS2_COMMAND_SET_LEDS, device->keyboard_leds) &&
 		       command_acknowledged(device, PS2_COMMAND_ENABLE_SCANNING);
 	return configure_mouse(device);
 }
 
-static bool wait_for_notification(struct ps2_device* device) {
+static bool wait_for_activity(struct ps2_device* device) {
 	struct signal_message message;
-	return signal_wait(device->receive_signal_cap, &message) == SYSCALL_STATUS_OK;
+	for (;;) {
+		syscall_status_t status = signal_wait(device->activity_cap, &message);
+		if (status == SYSCALL_STATUS_INTERRUPTED) continue;
+		return status == SYSCALL_STATUS_OK && !__atomic_load_n(&device->transport_failed, __ATOMIC_ACQUIRE);
+	}
+}
+
+static bool keyboard_command_acknowledged(struct ps2_device* device, struct ps2_keyboard_decoder* decoder,
+                                          uint8_t command) {
+	for (size_t attempt = 0u; attempt < PS2_COMMAND_ATTEMPTS; attempt++) {
+		if (transport_write(device->transport_cap, command) != SYSCALL_STATUS_OK) return false;
+		for (size_t skipped = 0u; skipped < PS2_UNEXPECTED_RESPONSE_LIMIT; skipped++) {
+			uint8_t                 response;
+			enum ps2_receive_result result = receive_byte(device, PS2_RESPONSE_POLL_LIMIT, &response);
+			if (result != PS2_RECEIVE_OK) return false;
+			if (response == PS2_ACK) return true;
+			if (response == PS2_RESEND) break;
+			if (!ps2_keyboard_decoder_feed(decoder, response) || ps2_events_failed()) return false;
+		}
+	}
+	return false;
+}
+
+static bool keyboard_set_leds(struct ps2_device* device, struct ps2_keyboard_decoder* decoder, uint8_t mask) {
+	return keyboard_command_acknowledged(device, decoder, PS2_COMMAND_SET_LEDS) &&
+	       keyboard_command_acknowledged(device, decoder, mask);
+}
+
+static bool keyboard_output_mask(struct ps2_device* device, const struct input_output_value* values, size_t count,
+                                 uint8_t* out_mask) {
+	uint8_t mask = device->keyboard_leds;
+	for (size_t i = 0u; i < count; i++) {
+		uint8_t bit;
+		switch (values[i].output_id) {
+		case PS2_KEYBOARD_OUTPUT_NUM_LOCK:
+			bit = 1u << 1u;
+			break;
+		case PS2_KEYBOARD_OUTPUT_CAPS_LOCK:
+			bit = 1u << 2u;
+			break;
+		case PS2_KEYBOARD_OUTPUT_SCROLL_LOCK:
+			bit = 1u << 0u;
+			break;
+		default:
+			return false;
+		}
+		if (values[i].value != 0) mask |= bit;
+		else mask &= (uint8_t)~bit;
+	}
+	*out_mask = mask;
+	return true;
 }
 
 static bool serve_keyboard(struct ps2_device* device, bool* out_reinitialize) {
@@ -257,11 +371,27 @@ static bool serve_keyboard(struct ps2_device* device, bool* out_reinitialize) {
 	uint8_t                     bytes[PS2_SERVICE_READ_SIZE];
 	ps2_keyboard_decoder_init(&decoder);
 	for (;;) {
+		struct input_output_value outputs[3];
+		size_t                    output_count;
+		if (ps2_outputs_take(outputs, sizeof(outputs) / sizeof(outputs[0]), &output_count)) {
+			uint8_t mask;
+			bool    applied =
+				keyboard_output_mask(device, outputs, output_count, &mask) && keyboard_set_leds(device, &decoder, mask);
+			if (applied) device->keyboard_leds = mask;
+			if (!ps2_outputs_complete(applied ? SYSCALL_STATUS_OK : SYSCALL_STATUS_FAILED)) return false;
+			if (!applied) {
+				if (ps2_events_failed() || !ps2_events_reset()) return false;
+				*out_reinitialize = true;
+				return true;
+			}
+			continue;
+		}
+
 		size_t           size;
 		bool             overrun;
 		syscall_status_t status = transport_read(device->transport_cap, bytes, sizeof(bytes), &size, &overrun);
 		if (status == SYSCALL_STATUS_UNAVAILABLE) {
-			if (!wait_for_notification(device)) return false;
+			if (!wait_for_activity(device)) return false;
 			continue;
 		}
 		if (status != SYSCALL_STATUS_OK) return false;
@@ -289,7 +419,7 @@ static bool serve_mouse(struct ps2_device* device, bool* out_reinitialize) {
 		bool             overrun;
 		syscall_status_t status = transport_read(device->transport_cap, bytes, sizeof(bytes), &size, &overrun);
 		if (status == SYSCALL_STATUS_UNAVAILABLE) {
-			if (!wait_for_notification(device)) return false;
+			if (!wait_for_activity(device)) return false;
 			continue;
 		}
 		if (status != SYSCALL_STATUS_OK) return false;
@@ -315,8 +445,10 @@ static bool serve_device(struct ps2_device* device, bool* out_reinitialize) {
 
 bool ps2_driver_run(cap_id_t device_cap) {
 	struct ps2_device device = {
-		.transport_cap      = CAP_ID_INVALID,
-		.receive_signal_cap = CAP_ID_INVALID,
+		.transport_cap        = CAP_ID_INVALID,
+		.receive_signal_cap   = CAP_ID_INVALID,
+		.activity_cap         = CAP_ID_INVALID,
+		.transport_waiter_cap = CAP_ID_INVALID,
 	};
 	bool success           = false;
 	bool input_initialized = false;
@@ -333,12 +465,16 @@ bool ps2_driver_run(cap_id_t device_cap) {
 		printf("ps2: could not acquire the receive signal\n");
 		goto done;
 	}
+	if (!start_transport_waiter(&device)) {
+		printf("ps2: could not start the transport waiter\n");
+		goto done;
+	}
 	for (;;) {
 		if (!configure_device(&device)) {
 			printf("ps2: device identification or configuration failed\n");
 			goto done;
 		}
-		if ((!input_initialized && !ps2_events_initialize(device.kind, device.mouse_id)) ||
+		if ((!input_initialized && !ps2_events_initialize(device.kind, device.mouse_id, device.activity_cap)) ||
 		    (input_initialized && !ps2_events_match(device.kind, device.mouse_id))) {
 			printf("ps2: could not publish a stable input service\n");
 			goto done;
@@ -354,6 +490,7 @@ bool ps2_driver_run(cap_id_t device_cap) {
 	success = true;
 
 done:
+	if (!stop_transport_waiter(&device)) success = false;
 	if (device.receive_signal_cap != CAP_ID_INVALID) (void)cap_drop(device.receive_signal_cap);
 	if (device.transport_cap != CAP_ID_INVALID) (void)cap_drop(device.transport_cap);
 	return success;

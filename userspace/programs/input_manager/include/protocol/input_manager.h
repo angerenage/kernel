@@ -5,8 +5,8 @@
  *
  * The input manager combines dynamically changing input-device services into
  * one retained stream while preserving device identity, physical controls,
- * and provider frame boundaries. It deliberately defines no text, layout,
- * modifier, lock, repeat, or output semantics.
+ * and provider frame boundaries. It also routes synchronous device-output
+ * requests without assigning text, layout, modifier, lock, or repeat policy.
  *
  * Current specification version: 1.0-beta
  */
@@ -21,7 +21,7 @@
 #define INPUT_MANAGER_SERVICE_NAME "default"
 
 /* Exact rights granted to aggregate-input clients and their event signal. */
-#define INPUT_MANAGER_CLIENT_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ))
+#define INPUT_MANAGER_CLIENT_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE))
 #define INPUT_MANAGER_EVENT_SIGNAL_RIGHTS ((cap_rights_t)CAP_WAIT)
 
 /* One currently attached input source in a coherent topology snapshot. */
@@ -29,6 +29,8 @@ struct input_manager_source {
 	uint64_t                id;
 	enum input_device_class device_class;
 	uint32_t                descriptor_count;
+	uint32_t                output_descriptor_count;
+	uint32_t                maximum_output_values;
 };
 
 /* Kinds of records retained in the aggregate event history. */
@@ -71,6 +73,8 @@ enum input_manager_op {
 	INPUT_MANAGER_OP_READ_DESCRIPTORS,
 	INPUT_MANAGER_OP_READ_EVENTS,
 	INPUT_MANAGER_OP_ACQUIRE_EVENT_SIGNAL,
+	INPUT_MANAGER_OP_READ_OUTPUT_DESCRIPTORS,
+	INPUT_MANAGER_OP_SET_OUTPUTS,
 };
 
 /* Common operation header for aggregate input requests. */
@@ -160,4 +164,32 @@ struct input_manager_acquire_event_signal_request {
 /* Event signal delegated to the caller with exactly CAP_WAIT. */
 struct input_manager_acquire_event_signal_response {
 	cap_id_t capability;
+};
+
+/* Request output descriptors for one source in an exact topology generation. */
+struct input_manager_read_output_descriptors_request {
+	struct input_manager_request_header header;
+	uint32_t                            reserved;
+	uint64_t                            topology_generation;
+	uint64_t                            source_id;
+	uint64_t                            offset;
+	uint64_t                            count;
+};
+
+/* Output descriptors follow this successful response header. */
+struct input_manager_read_output_descriptors_response {
+	uint64_t                       topology_generation;
+	uint64_t                       total;
+	uint64_t                       returned;
+	struct input_output_descriptor descriptors[];
+};
+
+/* Route one atomic output batch to a source in an exact topology generation. */
+struct input_manager_set_outputs_request {
+	struct input_manager_request_header header;
+	uint32_t                            reserved;
+	uint64_t                            topology_generation;
+	uint64_t                            source_id;
+	uint64_t                            count;
+	struct input_output_value           values[];
 };

@@ -4,9 +4,9 @@
  * Unified input-device capability protocol.
  *
  * Logical input producers expose immutable control descriptors, a retained
- * framed event stream, and a coalesced signal for announcing new events.
- * Consumers keep independent sequence cursors, so reading does not consume
- * events for other clients.
+ * framed event stream, synchronous output controls, and a coalesced signal
+ * for announcing new events. Consumers keep independent sequence cursors, so
+ * reading does not consume events for other clients.
  *
  * Current specification version: 1.0-beta
  */
@@ -19,7 +19,7 @@
 #define INPUT_PROTOCOL_NAME "input"
 
 /* Rights granted to input-service clients and their notification signals. */
-#define INPUT_SERVICE_CLIENT_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ))
+#define INPUT_SERVICE_CLIENT_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE))
 #define INPUT_EVENT_SIGNAL_RIGHTS ((cap_rights_t)CAP_WAIT)
 
 /* Broad logical function exposed by one input-service instance. */
@@ -183,6 +183,38 @@ struct input_control_descriptor {
 	int64_t                 logical_maximum;
 };
 
+/* Value representation used by one synchronous device output. */
+enum input_output_kind {
+	INPUT_OUTPUT_KIND_INVALID = 0,
+	INPUT_OUTPUT_KIND_BOOLEAN,
+	INPUT_OUTPUT_KIND_BOUNDED_VALUE,
+};
+
+/* Project-defined output functions currently understood by input clients. */
+enum input_output_code {
+	INPUT_OUTPUT_CODE_INVALID = 0,
+	INPUT_OUTPUT_CODE_NUM_LOCK_INDICATOR,
+	INPUT_OUTPUT_CODE_CAPS_LOCK_INDICATOR,
+	INPUT_OUTPUT_CODE_SCROLL_LOCK_INDICATOR,
+};
+
+/* Immutable description of one producer-local output ID. */
+struct input_output_descriptor {
+	uint32_t               id;
+	enum input_output_kind kind;
+	uint32_t               code;
+	uint32_t               group_id;
+	int64_t                logical_minimum;
+	int64_t                logical_maximum;
+};
+
+/* One requested value in an atomic output batch. */
+struct input_output_value {
+	uint32_t output_id;
+	uint32_t reserved;
+	int64_t  value;
+};
+
 /* Record kinds retained in the ordered event history. */
 enum input_event_type {
 	INPUT_EVENT_TYPE_INVALID = 0,
@@ -213,6 +245,8 @@ enum input_op {
 	INPUT_OP_READ_DESCRIPTORS,
 	INPUT_OP_READ_EVENTS,
 	INPUT_OP_ACQUIRE_EVENT_SIGNAL,
+	INPUT_OP_READ_OUTPUT_DESCRIPTORS,
+	INPUT_OP_SET_OUTPUTS,
 };
 
 /* Common operation header for input-service requests. */
@@ -229,8 +263,10 @@ struct input_get_info_request {
 struct input_get_info_response {
 	enum input_device_class device_class;
 	uint32_t                descriptor_count;
+	uint32_t                output_descriptor_count;
 	uint32_t                queue_capacity;
 	uint32_t                maximum_frame_events;
+	uint32_t                maximum_output_values;
 };
 
 /* Request a provider-ordered page of immutable control descriptors. */
@@ -280,4 +316,27 @@ struct input_acquire_event_signal_request {
 /* Event signal delegated to the caller with exactly CAP_WAIT. */
 struct input_acquire_event_signal_response {
 	cap_id_t capability;
+};
+
+/* Request a provider-ordered page of immutable output descriptors. */
+struct input_read_output_descriptors_request {
+	struct input_request_header header;
+	uint32_t                    reserved;
+	uint64_t                    offset;
+	uint64_t                    count;
+};
+
+/* Output descriptor entries follow this successful response header. */
+struct input_read_output_descriptors_response {
+	uint64_t                       total;
+	uint64_t                       returned;
+	struct input_output_descriptor descriptors[];
+};
+
+/* Apply one nonempty atomic batch of producer-local output values. */
+struct input_set_outputs_request {
+	struct input_request_header header;
+	uint32_t                    reserved;
+	uint64_t                    count;
+	struct input_output_value   values[];
 };

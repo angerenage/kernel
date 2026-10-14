@@ -28,3 +28,11 @@ syscall_status_t input_read_events(cap_id_t input_cap, uint64_t after_sequence, 
 
 /* Acquire the producer's coalesced event-notification signal with CAP_WAIT. */
 syscall_status_t input_acquire_event_signal(cap_id_t input_cap, cap_id_t* out_signal_cap);
+
+/* Read one provider-ordered page of immutable output descriptors. */
+syscall_status_t input_read_output_descriptors(cap_id_t input_cap, uint64_t offset,
+                                               struct input_output_descriptor* descriptors, size_t capacity,
+                                               size_t* out_returned, uint64_t* out_total);
+
+/* Apply one nonempty atomic batch of output values synchronously. */
+syscall_status_t input_set_outputs(cap_id_t input_cap, const struct input_output_value* values, size_t count);

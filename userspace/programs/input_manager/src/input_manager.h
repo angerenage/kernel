@@ -13,6 +13,8 @@
 #define INPUT_MANAGER_EVENT_QUEUE_CAPACITY 4096u
 #define INPUT_MANAGER_MAXIMUM_FRAME_EVENTS 128u
 #define INPUT_MANAGER_MAXIMUM_DESCRIPTORS 1024u
+#define INPUT_MANAGER_MAXIMUM_OUTPUT_DESCRIPTORS 1024u
+#define INPUT_MANAGER_MAXIMUM_OUTPUT_VALUES 128u
 #define INPUT_MANAGER_MAXIMUM_SOURCES 1024u
 #define INPUT_MANAGER_OBJECT_ID 1u
 
@@ -25,6 +27,9 @@ struct managed_input_source {
 	enum input_device_class          device_class;
 	struct input_control_descriptor* descriptors;
 	size_t                           descriptor_count;
+	struct input_output_descriptor*  output_descriptors;
+	size_t                           output_descriptor_count;
+	size_t                           maximum_output_values;
 	cap_id_t                         input_cap;
 	cap_id_t                         signal_cap;
 	cap_id_t                         waiter_cap;

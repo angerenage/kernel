@@ -19,12 +19,15 @@
 #define PS2_INPUT_MAXIMUM_DESCRIPTORS 1024u
 #define PS2_INPUT_EVENT_QUEUE_CAPACITY 512u
 #define PS2_INPUT_MAXIMUM_FRAME_EVENTS 128u
+#define PS2_INPUT_MAXIMUM_OUTPUT_VALUES 128u
 
 /* Retained input state shared by the PS/2 decoder and its server thread. */
 struct ps2_input_state {
 	enum input_device_class          device_class;
 	struct input_control_descriptor* descriptors;
 	size_t                           descriptor_count;
+	struct input_output_descriptor*  output_descriptors;
+	size_t                           output_descriptor_count;
 	struct input_event               events[PS2_INPUT_EVENT_QUEUE_CAPACITY];
 	size_t                           event_tail;
 	size_t                           event_count;
@@ -47,8 +50,16 @@ struct ps2_input_server {
 	channel_id_t                 endpoint;
 	cap_id_t                     activity_cap;
 	cap_id_t                     event_signal_cap;
+	cap_id_t                     driver_activity_cap;
+	cap_id_t                     output_completion_cap;
 	cap_id_t                     service_cap;
 	struct init_service_selector selector;
+	struct input_output_value    pending_outputs[PS2_INPUT_MAXIMUM_OUTPUT_VALUES];
+	size_t                       pending_output_count;
+	syscall_status_t             pending_output_status;
+	bool                         output_pending;
+	bool                         output_taken;
+	bool                         output_complete;
 };
 
 /* Copied onto the detached server thread's initial stack. */
@@ -98,25 +109,64 @@ static bool descriptors_valid(const struct input_control_descriptor* descriptors
 	return true;
 }
 
+static bool output_descriptor_valid(const struct input_output_descriptor* descriptor) {
+	if (descriptor->id == 0u || descriptor->code <= INPUT_OUTPUT_CODE_INVALID ||
+	    descriptor->code > INPUT_OUTPUT_CODE_SCROLL_LOCK_INDICATOR)
+		return false;
+	switch (descriptor->kind) {
+	case INPUT_OUTPUT_KIND_BOOLEAN:
+		return descriptor->logical_minimum == 0 && descriptor->logical_maximum == 1;
+	case INPUT_OUTPUT_KIND_BOUNDED_VALUE:
+		return descriptor->logical_minimum < descriptor->logical_maximum;
+	default:
+		return false;
+	}
+}
+
+static bool output_descriptors_valid(const struct input_output_descriptor* descriptors, size_t count) {
+	if ((descriptors == NULL) != (count == 0u) || count > PS2_INPUT_MAXIMUM_OUTPUT_VALUES) return false;
+	for (size_t i = 0u; i < count; i++) {
+		if (!output_descriptor_valid(&descriptors[i])) return false;
+		for (size_t previous = 0u; previous < i; previous++)
+			if (descriptors[previous].id == descriptors[i].id) return false;
+	}
+	return true;
+}
+
 static syscall_status_t state_initialize(struct ps2_input_state* state, enum input_device_class device_class,
-                                         const struct input_control_descriptor* descriptors, size_t descriptor_count) {
-	if (state == NULL || !device_class_valid(device_class) || !descriptors_valid(descriptors, descriptor_count))
+                                         const struct input_control_descriptor* descriptors, size_t descriptor_count,
+                                         const struct input_output_descriptor* output_descriptors,
+                                         size_t                                output_descriptor_count) {
+	if (state == NULL || !device_class_valid(device_class) || !descriptors_valid(descriptors, descriptor_count) ||
+	    !output_descriptors_valid(output_descriptors, output_descriptor_count))
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	struct input_control_descriptor* copy = malloc(descriptor_count * sizeof(*copy));
 	if (copy == NULL) return SYSCALL_STATUS_FAILED;
+	struct input_output_descriptor* output_copy = NULL;
+	if (output_descriptor_count != 0u) {
+		output_copy = malloc(output_descriptor_count * sizeof(*output_copy));
+		if (output_copy == NULL) {
+			free(copy);
+			return SYSCALL_STATUS_FAILED;
+		}
+		memcpy(output_copy, output_descriptors, output_descriptor_count * sizeof(*output_copy));
+	}
 	memcpy(copy, descriptors, descriptor_count * sizeof(*copy));
 	memset(state, 0, sizeof(*state));
-	state->device_class     = device_class;
-	state->descriptors      = copy;
-	state->descriptor_count = descriptor_count;
-	state->next_sequence    = 1u;
-	state->next_frame       = 1u;
+	state->device_class            = device_class;
+	state->descriptors             = copy;
+	state->descriptor_count        = descriptor_count;
+	state->output_descriptors      = output_copy;
+	state->output_descriptor_count = output_descriptor_count;
+	state->next_sequence           = 1u;
+	state->next_frame              = 1u;
 	return SYSCALL_STATUS_OK;
 }
 
 static void state_destroy(struct ps2_input_state* state) {
 	if (state == NULL) return;
 	free(state->descriptors);
+	free(state->output_descriptors);
 	memset(state, 0, sizeof(*state));
 }
 
@@ -134,6 +184,33 @@ static syscall_status_t state_read_descriptors(struct ps2_input_state* state, ui
 	*out_returned = returned;
 	*out_total    = state->descriptor_count;
 	return SYSCALL_STATUS_OK;
+}
+
+static syscall_status_t state_read_output_descriptors(struct ps2_input_state* state, uint64_t offset,
+                                                      struct input_output_descriptor* descriptors, size_t capacity,
+                                                      size_t* out_returned, uint64_t* out_total) {
+	if (out_returned != NULL) *out_returned = 0u;
+	if (out_total != NULL) *out_total = 0u;
+	if (state == NULL || descriptors == NULL || capacity == 0u || out_returned == NULL || out_total == NULL ||
+	    offset > state->output_descriptor_count)
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	size_t returned = state->output_descriptor_count - (size_t)offset;
+	if (returned > capacity) returned = capacity;
+	if (returned != 0u)
+		memcpy(descriptors, state->output_descriptors + (size_t)offset, returned * sizeof(*descriptors));
+	*out_returned = returned;
+	*out_total    = state->output_descriptor_count;
+	return SYSCALL_STATUS_OK;
+}
+
+static const struct input_output_descriptor* find_output_descriptor(const struct ps2_input_state* state, uint32_t id) {
+	for (size_t i = 0u; i < state->output_descriptor_count; i++)
+		if (state->output_descriptors[i].id == id) return &state->output_descriptors[i];
+	return NULL;
+}
+
+static bool output_value_valid(const struct input_output_descriptor* descriptor, int64_t value) {
+	return value >= descriptor->logical_minimum && value <= descriptor->logical_maximum;
 }
 
 static const struct input_control_descriptor* find_descriptor(const struct ps2_input_state* state, uint32_t id) {
@@ -286,16 +363,49 @@ syscall_status_t ps2_input_server_reset(struct ps2_input_server* server) {
 	return signal_send(server->event_signal_cap, newest, 0u, 0u, 0u, SIGNAL_SEND_FLAG_COALESCE, &response);
 }
 
+bool ps2_input_server_take_outputs(struct ps2_input_server* server, struct input_output_value* values, size_t capacity,
+                                   size_t* out_count) {
+	if (out_count != NULL) *out_count = 0u;
+	if (server == NULL || values == NULL || capacity == 0u || out_count == NULL) return false;
+	state_lock(&server->state);
+	if (!server->output_pending || server->output_taken || server->pending_output_count > capacity) {
+		state_unlock(&server->state);
+		return false;
+	}
+	memcpy(values, server->pending_outputs, server->pending_output_count * sizeof(*values));
+	*out_count           = server->pending_output_count;
+	server->output_taken = true;
+	state_unlock(&server->state);
+	return true;
+}
+
+bool ps2_input_server_complete_outputs(struct ps2_input_server* server, syscall_status_t status) {
+	if (server == NULL || (status != SYSCALL_STATUS_OK && status != SYSCALL_STATUS_FAILED)) return false;
+	state_lock(&server->state);
+	if (!server->output_pending || !server->output_taken || server->output_complete) {
+		state_unlock(&server->state);
+		return false;
+	}
+	server->pending_output_status = status;
+	server->output_complete       = true;
+	state_unlock(&server->state);
+	struct signal_send_response response;
+	return signal_send(server->output_completion_cap, 1u, 0u, 0u, 0u, SIGNAL_SEND_FLAG_COALESCE, &response) ==
+	       SYSCALL_STATUS_OK;
+}
+
 static bool reply(const struct cap_request* call, const void* response, size_t response_size, syscall_status_t status) {
 	return channel_reply(call->call_id, response, response_size, status) == SYSCALL_STATUS_OK;
 }
 
 static bool dispatch_get_info(struct ps2_input_server* server, const struct cap_request* call) {
 	const struct input_get_info_response response = {
-		.device_class         = server->state.device_class,
-		.descriptor_count     = (uint32_t)server->state.descriptor_count,
-		.queue_capacity       = PS2_INPUT_EVENT_QUEUE_CAPACITY,
-		.maximum_frame_events = PS2_INPUT_MAXIMUM_FRAME_EVENTS,
+		.device_class            = server->state.device_class,
+		.descriptor_count        = (uint32_t)server->state.descriptor_count,
+		.output_descriptor_count = (uint32_t)server->state.output_descriptor_count,
+		.queue_capacity          = PS2_INPUT_EVENT_QUEUE_CAPACITY,
+		.maximum_frame_events    = PS2_INPUT_MAXIMUM_FRAME_EVENTS,
+		.maximum_output_values   = (uint32_t)server->state.output_descriptor_count,
 	};
 	if (call->request_size != sizeof(struct input_get_info_request) || call->response_capacity < sizeof(response))
 		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
@@ -356,13 +466,104 @@ static bool dispatch_acquire_signal(struct ps2_input_server* server, const struc
 	return false;
 }
 
+static bool dispatch_read_output_descriptors(struct ps2_input_server* server, const struct cap_request* call,
+                                             const void* request_data, void* response_buffer) {
+	struct input_read_output_descriptors_request   request;
+	struct input_read_output_descriptors_response* response = response_buffer;
+	if (call->request_size != sizeof(request)) return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	memcpy(&request, request_data, sizeof(request));
+	if (call->response_capacity < sizeof(*response) || request.reserved != 0u || request.count == 0u ||
+	    request.count > (call->response_capacity - sizeof(*response)) / sizeof(*response->descriptors))
+		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	size_t   returned;
+	uint64_t total;
+	if (state_read_output_descriptors(
+			&server->state, request.offset, response->descriptors, (size_t)request.count, &returned, &total) !=
+	    SYSCALL_STATUS_OK)
+		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	response->total    = total;
+	response->returned = returned;
+	return reply(call, response, sizeof(*response) + returned * sizeof(*response->descriptors), SYSCALL_STATUS_OK);
+}
+
+static bool dispatch_set_outputs(struct ps2_input_server* server, const struct cap_request* call,
+                                 const void* request_data) {
+	struct input_set_outputs_request header;
+	if (call->request_size < sizeof(header)) return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	memcpy(&header, request_data, sizeof(header));
+	if (header.reserved != 0u || header.count == 0u || header.count > server->state.output_descriptor_count ||
+	    header.count > (CAP_MAX_REQUEST_SIZE - sizeof(header)) / sizeof(struct input_output_value) ||
+	    call->request_size != sizeof(header) + (size_t)header.count * sizeof(struct input_output_value))
+		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	const struct input_set_outputs_request* request = request_data;
+	for (size_t i = 0u; i < (size_t)request->count; i++) {
+		const struct input_output_value*      value      = &request->values[i];
+		const struct input_output_descriptor* descriptor = find_output_descriptor(&server->state, value->output_id);
+		if (value->reserved != 0u || descriptor == NULL || !output_value_valid(descriptor, value->value))
+			return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+		for (size_t previous = 0u; previous < i; previous++)
+			if (request->values[previous].output_id == value->output_id)
+				return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	}
+	state_lock(&server->state);
+	if (server->output_pending) {
+		state_unlock(&server->state);
+		return reply(call, NULL, 0u, SYSCALL_STATUS_UNAVAILABLE);
+	}
+	memcpy(server->pending_outputs, request->values, (size_t)request->count * sizeof(*request->values));
+	server->pending_output_count  = (size_t)request->count;
+	server->pending_output_status = SYSCALL_STATUS_FAILED;
+	server->output_pending        = true;
+	server->output_taken          = false;
+	server->output_complete       = false;
+	state_unlock(&server->state);
+	struct signal_send_response send_response;
+	if (signal_send(server->driver_activity_cap, 1u, 0u, 0u, 0u, SIGNAL_SEND_FLAG_COALESCE, &send_response) !=
+	    SYSCALL_STATUS_OK) {
+		state_lock(&server->state);
+		server->output_pending = false;
+		state_unlock(&server->state);
+		return reply(call, NULL, 0u, SYSCALL_STATUS_FAILED);
+	}
+	for (;;) {
+		struct signal_message message;
+		syscall_status_t      status = signal_wait(server->output_completion_cap, &message);
+		if (status == SYSCALL_STATUS_INTERRUPTED) continue;
+		if (status != SYSCALL_STATUS_OK) {
+			state_lock(&server->state);
+			server->pending_output_count = 0u;
+			server->output_pending       = false;
+			server->output_taken         = false;
+			server->output_complete      = false;
+			state_unlock(&server->state);
+			return reply(call, NULL, 0u, SYSCALL_STATUS_FAILED);
+		}
+		state_lock(&server->state);
+		if (!server->output_complete) {
+			state_unlock(&server->state);
+			continue;
+		}
+		status                       = server->pending_output_status;
+		server->pending_output_count = 0u;
+		server->output_pending       = false;
+		server->output_taken         = false;
+		server->output_complete      = false;
+		state_unlock(&server->state);
+		return reply(call, NULL, 0u, status);
+	}
+}
+
 static bool dispatch(struct ps2_input_server* server, const struct cap_request* call, const void* request_data,
                      void* response_buffer) {
 	struct input_request_header header;
-	if ((call->rights & CAP_READ) == 0u) return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
+	if ((call->rights & CAP_CALL) == 0u) return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
 	if (request_data == NULL || call->request_size < sizeof(header))
 		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	memcpy(&header, request_data, sizeof(header));
+	if (header.op == INPUT_OP_SET_OUTPUTS) {
+		if ((call->rights & CAP_WRITE) == 0u) return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
+	}
+	else if ((call->rights & CAP_READ) == 0u) return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
 	switch (header.op) {
 	case INPUT_OP_GET_INFO:
 		return dispatch_get_info(server, call);
@@ -372,24 +573,29 @@ static bool dispatch(struct ps2_input_server* server, const struct cap_request* 
 		return dispatch_read_events(server, call, request_data, response_buffer);
 	case INPUT_OP_ACQUIRE_EVENT_SIGNAL:
 		return dispatch_acquire_signal(server, call);
+	case INPUT_OP_READ_OUTPUT_DESCRIPTORS:
+		return dispatch_read_output_descriptors(server, call, request_data, response_buffer);
+	case INPUT_OP_SET_OUTPUTS:
+		return dispatch_set_outputs(server, call, request_data);
 	default:
 		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	}
 }
 
 static void run_server(void* opaque) {
-	const struct ps2_input_server_argument* argument = opaque;
-	struct ps2_input_server*                server   = argument->server;
-	uint8_t                                 request_buffer[sizeof(struct input_read_descriptors_request)];
+	const struct ps2_input_server_argument* argument        = opaque;
+	struct ps2_input_server*                server          = argument->server;
+	void*                                   request_buffer  = malloc(CAP_MAX_REQUEST_SIZE);
 	void*                                   response_buffer = malloc(CAP_MAX_RESPONSE_SIZE);
-	if (server == NULL || response_buffer == NULL) process_exit(PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
+	if (server == NULL || request_buffer == NULL || response_buffer == NULL)
+		process_exit(PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
 	for (;;) {
 		bool             received;
 		syscall_status_t status;
 		do {
 			struct cap_request call;
 			received = false;
-			status   = channel_recv(server->endpoint, &call, request_buffer, sizeof(request_buffer), &received);
+			status   = channel_recv(server->endpoint, &call, request_buffer, CAP_MAX_REQUEST_SIZE, &received);
 			if (status != SYSCALL_STATUS_OK || (received && !dispatch(server, &call, request_buffer, response_buffer)))
 				process_exit(PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
 		} while (received);
@@ -417,12 +623,15 @@ static void cleanup_unstarted(struct ps2_input_server* server) {
 	if (server->service_cap != CAP_ID_INVALID) (void)cap_drop(server->service_cap);
 	if (server->endpoint != CHANNEL_ID_INVALID) (void)channel_destroy(server->endpoint);
 	if (server->event_signal_cap != CAP_ID_INVALID) (void)signal_destroy(server->event_signal_cap);
+	if (server->output_completion_cap != CAP_ID_INVALID) (void)signal_destroy(server->output_completion_cap);
 	state_destroy(&server->state);
 	free(server);
 }
 
 syscall_status_t ps2_input_server_create(const char* service, enum input_device_class device_class,
                                          const struct input_control_descriptor* descriptors, size_t descriptor_count,
+                                         const struct input_output_descriptor* output_descriptors,
+                                         size_t output_descriptor_count, cap_id_t driver_activity_cap,
                                          struct ps2_input_server** out_server) {
 	struct ps2_input_server* server;
 	struct self_info         self = {
@@ -433,19 +642,24 @@ syscall_status_t ps2_input_server_create(const char* service, enum input_device_
 	bool             server_started = false;
 
 	if (out_server != NULL) *out_server = NULL;
-	if (!service_name_valid(service) || out_server == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	if (!service_name_valid(service) || out_server == NULL ||
+	    (output_descriptor_count != 0u && driver_activity_cap == CAP_ID_INVALID))
+		return SYSCALL_STATUS_BAD_ARGUMENT;
 	server = calloc(1u, sizeof(*server));
 	if (server == NULL) return SYSCALL_STATUS_FAILED;
-	status = state_initialize(&server->state, device_class, descriptors, descriptor_count);
+	status = state_initialize(
+		&server->state, device_class, descriptors, descriptor_count, output_descriptors, output_descriptor_count);
 	if (status != SYSCALL_STATUS_OK) {
 		free(server);
 		return status;
 	}
-	server->endpoint         = CHANNEL_ID_INVALID;
-	server->activity_cap     = CAP_ID_INVALID;
-	server->event_signal_cap = CAP_ID_INVALID;
-	server->service_cap      = CAP_ID_INVALID;
-	server->selector         = (struct init_service_selector){
+	server->endpoint              = CHANNEL_ID_INVALID;
+	server->activity_cap          = CAP_ID_INVALID;
+	server->event_signal_cap      = CAP_ID_INVALID;
+	server->driver_activity_cap   = driver_activity_cap;
+	server->output_completion_cap = CAP_ID_INVALID;
+	server->service_cap           = CAP_ID_INVALID;
+	server->selector              = (struct init_service_selector){
 		.namespace_path = INPUT_NAMESPACE,
 		.protocol       = INPUT_PROTOCOL_NAME,
 		.major          = PS2_INPUT_PROTOCOL_VERSION_MAJOR,
@@ -454,12 +668,14 @@ syscall_status_t ps2_input_server_create(const char* service, enum input_device_
 
 	status = process_self_info(&self);
 	if (status == SYSCALL_STATUS_OK) status = signal_create(&server->event_signal_cap);
+	if (status == SYSCALL_STATUS_OK && output_descriptor_count != 0u)
+		status = signal_create(&server->output_completion_cap);
 	if (status == SYSCALL_STATUS_OK) status = channel_create(&server->endpoint, &server->activity_cap);
 	if (status == SYSCALL_STATUS_OK) {
 		status = cap_publish(server->endpoint,
 		                     PS2_INPUT_SERVER_OBJECT_ID,
 		                     self.pid,
-		                     CAP_CALL | CAP_READ | CAP_DELEGATE,
+		                     CAP_CALL | CAP_READ | CAP_WRITE | CAP_DELEGATE,
 		                     &server->service_cap);
 	}
 	if (status == SYSCALL_STATUS_OK) {

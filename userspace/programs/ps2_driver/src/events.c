@@ -164,8 +164,31 @@ static bool publish(const struct ps2_input_value* values, size_t count) {
 	return false;
 }
 
-static bool create_keyboard_provider(const char* service) {
-	struct input_control_descriptor descriptors[INPUT_KEY_KEYPAD_DECIMAL];
+static bool create_keyboard_provider(const char* service, cap_id_t driver_activity_cap) {
+	struct input_control_descriptor      descriptors[INPUT_KEY_KEYPAD_DECIMAL];
+	const struct input_output_descriptor outputs[] = {
+		{
+		 .id              = PS2_KEYBOARD_OUTPUT_NUM_LOCK,
+		 .kind            = INPUT_OUTPUT_KIND_BOOLEAN,
+		 .code            = INPUT_OUTPUT_CODE_NUM_LOCK_INDICATOR,
+		 .logical_minimum = 0,
+		 .logical_maximum = 1,
+		 },
+		{
+		 .id              = PS2_KEYBOARD_OUTPUT_CAPS_LOCK,
+		 .kind            = INPUT_OUTPUT_KIND_BOOLEAN,
+		 .code            = INPUT_OUTPUT_CODE_CAPS_LOCK_INDICATOR,
+		 .logical_minimum = 0,
+		 .logical_maximum = 1,
+		 },
+		{
+		 .id              = PS2_KEYBOARD_OUTPUT_SCROLL_LOCK,
+		 .kind            = INPUT_OUTPUT_KIND_BOOLEAN,
+		 .code            = INPUT_OUTPUT_CODE_SCROLL_LOCK_INDICATOR,
+		 .logical_minimum = 0,
+		 .logical_maximum = 1,
+		 },
+	};
 	for (uint32_t key = INPUT_KEY_ESCAPE; key <= INPUT_KEY_KEYPAD_DECIMAL; key++) {
 		descriptors[key - 1u] = (struct input_control_descriptor){
 			.id              = key,
@@ -179,6 +202,9 @@ static bool create_keyboard_provider(const char* service) {
 	                               INPUT_DEVICE_CLASS_KEYBOARD,
 	                               descriptors,
 	                               sizeof(descriptors) / sizeof(descriptors[0]),
+	                               outputs,
+	                               sizeof(outputs) / sizeof(outputs[0]),
+	                               driver_activity_cap,
 	                               &server) == SYSCALL_STATUS_OK;
 }
 
@@ -202,7 +228,7 @@ static void set_button_descriptor(struct input_control_descriptor* descriptor, u
 	};
 }
 
-static bool create_mouse_provider(const char* service, uint8_t mouse_id) {
+static bool create_mouse_provider(const char* service, uint8_t mouse_id, cap_id_t driver_activity_cap) {
 	struct input_control_descriptor descriptors[8];
 	size_t                          count = 0u;
 	set_relative_descriptor(&descriptors[count++], PS2_MOUSE_CONTROL_X, INPUT_AXIS_X);
@@ -216,11 +242,12 @@ static bool create_mouse_provider(const char* service, uint8_t mouse_id) {
 		set_button_descriptor(&descriptors[count++], PS2_MOUSE_CONTROL_BACK, INPUT_BUTTON_BACK);
 		set_button_descriptor(&descriptors[count++], PS2_MOUSE_CONTROL_FORWARD, INPUT_BUTTON_FORWARD);
 	}
-	return ps2_input_server_create(service, INPUT_DEVICE_CLASS_POINTER, descriptors, count, &server) ==
+	return ps2_input_server_create(
+			   service, INPUT_DEVICE_CLASS_POINTER, descriptors, count, NULL, 0u, driver_activity_cap, &server) ==
 	       SYSCALL_STATUS_OK;
 }
 
-bool ps2_events_initialize(enum ps2_device_kind kind, uint8_t mouse_id) {
+bool ps2_events_initialize(enum ps2_device_kind kind, uint8_t mouse_id, cap_id_t driver_activity_cap) {
 	struct self_info self;
 	char             service[32];
 	if (server != NULL || (kind != PS2_DEVICE_KEYBOARD && kind != PS2_DEVICE_MOUSE) ||
@@ -231,8 +258,8 @@ bool ps2_events_initialize(enum ps2_device_kind kind, uint8_t mouse_id) {
 	if (self.address_space_cap != CAP_ID_INVALID) (void)cap_drop(self.address_space_cap);
 	if (self.main_thread_cap != CAP_ID_INVALID) (void)cap_drop(self.main_thread_cap);
 	if (service_size <= 0 || (size_t)service_size >= sizeof(service)) return false;
-	bool created =
-		kind == PS2_DEVICE_KEYBOARD ? create_keyboard_provider(service) : create_mouse_provider(service, mouse_id);
+	bool created = kind == PS2_DEVICE_KEYBOARD ? create_keyboard_provider(service, driver_activity_cap)
+	                                           : create_mouse_provider(service, mouse_id, driver_activity_cap);
 	if (!created) return false;
 	advertised_kind     = kind;
 	advertised_mouse_id = mouse_id;
@@ -296,4 +323,12 @@ bool ps2_events_reset(void) {
 
 bool ps2_events_failed(void) {
 	return publication_failed;
+}
+
+bool ps2_outputs_take(struct input_output_value* values, size_t capacity, size_t* out_count) {
+	return ps2_input_server_take_outputs(server, values, capacity, out_count);
+}
+
+bool ps2_outputs_complete(syscall_status_t status) {
+	return ps2_input_server_complete_outputs(server, status);
 }

@@ -135,6 +135,20 @@ static bool descriptor_valid(const struct input_control_descriptor* descriptor) 
 	}
 }
 
+static bool output_descriptor_valid(const struct input_output_descriptor* descriptor) {
+	if (descriptor->id == 0u || descriptor->code <= INPUT_OUTPUT_CODE_INVALID ||
+	    descriptor->code > INPUT_OUTPUT_CODE_SCROLL_LOCK_INDICATOR)
+		return false;
+	switch (descriptor->kind) {
+	case INPUT_OUTPUT_KIND_BOOLEAN:
+		return descriptor->logical_minimum == 0 && descriptor->logical_maximum == 1;
+	case INPUT_OUTPUT_KIND_BOUNDED_VALUE:
+		return descriptor->logical_minimum < descriptor->logical_maximum;
+	default:
+		return false;
+	}
+}
+
 static const struct input_control_descriptor* find_descriptor(const struct managed_input_source* source, uint32_t id) {
 	for (size_t i = 0u; i < source->descriptor_count; i++)
 		if (source->descriptors[i].id == id) return &source->descriptors[i];
@@ -229,10 +243,14 @@ static bool stop_source(struct managed_input_source* source) {
 		source->input_cap = CAP_ID_INVALID;
 	}
 	free(source->descriptors);
-	source->descriptors      = NULL;
-	source->descriptor_count = 0u;
-	source->pending_count    = 0u;
-	source->pending_frame    = 0u;
+	free(source->output_descriptors);
+	source->descriptors             = NULL;
+	source->descriptor_count        = 0u;
+	source->output_descriptors      = NULL;
+	source->output_descriptor_count = 0u;
+	source->maximum_output_values   = 0u;
+	source->pending_count           = 0u;
+	source->pending_frame           = 0u;
 	return success;
 }
 
@@ -280,11 +298,12 @@ static bool install_source(struct input_manager* manager, struct managed_input_s
 	}
 	input_manager_unlock(manager);
 	if (!success || !notify_consumers(manager)) return false;
-	printf("input manager: attached source %llu (%s), class=%u controls=%zu\n",
+	printf("input manager: attached source %llu (%s), class=%u controls=%zu outputs=%zu\n",
 	       (unsigned long long)source->id,
 	       source->service.selector.service,
 	       (unsigned)source->device_class,
-	       source->descriptor_count);
+	       source->descriptor_count,
+	       source->output_descriptor_count);
 	return true;
 }
 
@@ -342,6 +361,15 @@ static bool descriptors_valid(const struct input_control_descriptor* descriptors
 	return true;
 }
 
+static bool output_descriptors_valid(const struct input_output_descriptor* descriptors, size_t count) {
+	for (size_t i = 0u; i < count; i++) {
+		if (!output_descriptor_valid(&descriptors[i])) return false;
+		for (size_t previous = 0u; previous < i; previous++)
+			if (descriptors[previous].id == descriptors[i].id) return false;
+	}
+	return true;
+}
+
 static enum attach_result quarantine_acquired_source(struct input_manager*        manager,
                                                      struct managed_input_source* source) {
 	if (!stop_source(source)) {
@@ -384,7 +412,11 @@ static enum attach_result attach_source(struct input_manager* manager, const str
 	if (input_get_info(source->input_cap, &info) != SYSCALL_STATUS_OK || info.descriptor_count == 0u ||
 	    info.descriptor_count > INPUT_MANAGER_MAXIMUM_DESCRIPTORS || info.queue_capacity == 0u ||
 	    info.maximum_frame_events == 0u || info.maximum_frame_events > INPUT_MANAGER_MAXIMUM_FRAME_EVENTS ||
-	    info.maximum_frame_events > info.queue_capacity)
+	    info.maximum_frame_events > info.queue_capacity ||
+	    info.output_descriptor_count > INPUT_MANAGER_MAXIMUM_OUTPUT_DESCRIPTORS ||
+	    info.maximum_output_values > INPUT_MANAGER_MAXIMUM_OUTPUT_VALUES ||
+	    (info.output_descriptor_count == 0u) != (info.maximum_output_values == 0u) ||
+	    info.maximum_output_values > info.output_descriptor_count)
 		return quarantine_acquired_source(manager, source);
 	source->device_class     = info.device_class;
 	source->descriptor_count = info.descriptor_count;
@@ -409,6 +441,30 @@ static enum attach_result attach_source(struct input_manager* manager, const str
 	}
 	if (!descriptors_valid(source->descriptors, source->descriptor_count))
 		return quarantine_acquired_source(manager, source);
+	source->output_descriptor_count = info.output_descriptor_count;
+	source->maximum_output_values   = info.maximum_output_values;
+	if (source->output_descriptor_count != 0u) {
+		source->output_descriptors = malloc(source->output_descriptor_count * sizeof(*source->output_descriptors));
+		if (source->output_descriptors == NULL) {
+			(void)stop_source(source);
+			free(source);
+			return ATTACH_RESULT_FAILED;
+		}
+		for (size_t offset = 0u; offset < source->output_descriptor_count;) {
+			size_t capacity = source->output_descriptor_count - offset;
+			if (capacity > INPUT_MANAGER_DESCRIPTOR_PAGE_SIZE) capacity = INPUT_MANAGER_DESCRIPTOR_PAGE_SIZE;
+			size_t   returned = 0u;
+			uint64_t total    = 0u;
+			if (input_read_output_descriptors(
+					source->input_cap, offset, source->output_descriptors + offset, capacity, &returned, &total) !=
+			        SYSCALL_STATUS_OK ||
+			    total != source->output_descriptor_count || returned == 0u || returned > capacity)
+				return quarantine_acquired_source(manager, source);
+			offset += returned;
+		}
+		if (!output_descriptors_valid(source->output_descriptors, source->output_descriptor_count))
+			return quarantine_acquired_source(manager, source);
+	}
 	if (input_acquire_event_signal(source->input_cap, &source->signal_cap) != SYSCALL_STATUS_OK ||
 	    source->signal_cap == CAP_ID_INVALID)
 		return quarantine_acquired_source(manager, source);
@@ -705,7 +761,7 @@ bool input_manager_initialize(struct input_manager* manager) {
 		status = cap_publish(manager->endpoint,
 		                     INPUT_MANAGER_OBJECT_ID,
 		                     manager->pid,
-		                     CAP_CALL | CAP_READ | CAP_DELEGATE,
+		                     CAP_CALL | CAP_READ | CAP_WRITE | CAP_DELEGATE,
 		                     &manager->service_cap);
 	if (status == SYSCALL_STATUS_OK && !input_manager_server_start(manager)) status = SYSCALL_STATUS_FAILED;
 	if (status == SYSCALL_STATUS_OK) {
