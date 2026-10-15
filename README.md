@@ -113,6 +113,14 @@ For the non-`x86_64` targets, QEMU also needs UEFI firmware. The bundled filenam
 
 ## Configure
 
+Initialize the pinned third-party dependencies after cloning the repository:
+
+```sh
+git submodule update --init --recursive
+```
+
+Alternatively, clone the repository with `--recurse-submodules`.
+
 The recommended entry point is the build helper:
 
 ```sh

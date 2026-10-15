@@ -8,20 +8,20 @@ configure_file(
 )
 
 mxml_inc = include_directories(
-	'.',
+	'mxml',
 	'../../include/libc',
 )
 
 mxml_sources = files(
-	'mxml-attr.c',
-	'mxml-file.c',
-	'mxml-get.c',
-	'mxml-index.c',
-	'mxml-node.c',
-	'mxml-options.c',
-	'mxml-private.c',
-	'mxml-search.c',
-	'mxml-set.c',
+	'mxml/mxml-attr.c',
+	'mxml/mxml-file.c',
+	'mxml/mxml-get.c',
+	'mxml/mxml-index.c',
+	'mxml/mxml-node.c',
+	'mxml/mxml-options.c',
+	'mxml/mxml-private.c',
+	'mxml/mxml-search.c',
+	'mxml/mxml-set.c',
 )
 
 userspace_mxml = static_library(
@@ -35,6 +35,5 @@ userspace_mxml = static_library(
 
 userspace_mxml_dep = declare_dependency(
 	link_with : userspace_mxml,
-	include_directories : include_directories('.'),
+	include_directories : include_directories('mxml'),
 )
-

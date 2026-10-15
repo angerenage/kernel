@@ -7,4 +7,3 @@
 #include <string.h>
 
 #define MXML_VERSION "@MXML_VERSION@"
-

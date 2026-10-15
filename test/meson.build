@@ -83,8 +83,9 @@ core_test_lib = static_library(
 
 libyaml_test_inc = include_directories(
 	'../third_party/libyaml',
-	'../third_party/libyaml/include',
-	'../third_party/libyaml/src',
+	'../third_party/libyaml/libyaml',
+	'../third_party/libyaml/libyaml/include',
+	'../third_party/libyaml/libyaml/src',
 )
 
 libyaml_test_lib = static_library(
@@ -97,7 +98,7 @@ libyaml_test_lib = static_library(
 	install: false,
 )
 
-utf8proc_test_inc = include_directories('../third_party/utf8proc')
+utf8proc_test_inc = include_directories('../third_party/utf8proc/utf8proc')
 
 utf8proc_test_lib = static_library(
 	'utf8proc_test_lib',
@@ -109,7 +110,10 @@ utf8proc_test_lib = static_library(
 	install: false,
 )
 
-mxml_test_inc = include_directories('../third_party/mxml')
+mxml_test_inc = include_directories(
+	'../third_party/mxml',
+	'../third_party/mxml/mxml',
+)
 
 mxml_test_lib = static_library(
 	'mxml_test_lib',
