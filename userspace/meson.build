@@ -134,6 +134,7 @@ subdir('programs/loader')
 subdir('programs/device_manager')
 subdir('programs/input_manager')
 subdir('programs/keyboard_controller')
+subdir('programs/text_input')
 subdir('programs/init')
 subdir('programs/bootfs')
 subdir('programs/acpi_parser')
@@ -149,6 +150,29 @@ driver_catalog = configure_file(
 	copy : true,
 )
 
-userspace_boot_modules = userspace_programs + [driver_catalog]
+system_configuration = configure_file(
+	input : 'config/system.yaml',
+	output : 'system.yaml',
+	copy : true,
+)
+
+keyboard_qwerty_layout = configure_file(
+	input : 'config/keyboard_qwerty.xml',
+	output : 'keyboard_qwerty.xml',
+	copy : true,
+)
+
+keyboard_azerty_layout = configure_file(
+	input : 'config/keyboard_azerty.xml',
+	output : 'keyboard_azerty.xml',
+	copy : true,
+)
+
+userspace_boot_modules = userspace_programs + [
+	driver_catalog,
+	system_configuration,
+	keyboard_qwerty_layout,
+	keyboard_azerty_layout,
+]
 
 alias_target('userspace', userspace_programs + [userspace_utf8proc, userspace_yaml, userspace_mxml])

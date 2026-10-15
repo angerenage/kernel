@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<keyboard3 xmlns="https://schemas.unicode.org/cldr/45/keyboard3" conformsTo="45" locale="en-US-t-k0-qwerty">
+  <info name="US QWERTY"/>
+  <keys>
+    <key id="grave" output="`"/>
+    <key id="one" output="1"/>
+    <key id="two" output="2"/>
+    <key id="three" output="3"/>
+    <key id="four" output="4"/>
+    <key id="five" output="5"/>
+    <key id="six" output="6"/>
+    <key id="seven" output="7"/>
+    <key id="eight" output="8"/>
+    <key id="nine" output="9"/>
+    <key id="zero" output="0"/>
+    <key id="minus" output="-"/>
+    <key id="equal" output="="/>
+    <key id="tilde" output="~"/>
+    <key id="exclamation" output="!"/>
+    <key id="at" output="@"/>
+    <key id="hash" output="#"/>
+    <key id="dollar" output="$"/>
+    <key id="percent" output="%"/>
+    <key id="caret" output="^"/>
+    <key id="ampersand" output="&amp;"/>
+    <key id="asterisk" output="*"/>
+    <key id="left_parenthesis" output="("/>
+    <key id="right_parenthesis" output=")"/>
+    <key id="underscore" output="_"/>
+    <key id="plus" output="+"/>
+    <key id="q" output="q"/><key id="w" output="w"/><key id="e" output="e"/>
+    <key id="r" output="r"/><key id="t" output="t"/><key id="y" output="y"/>
+    <key id="u" output="u"/><key id="i" output="i"/><key id="o" output="o"/>
+    <key id="p" output="p"/><key id="a" output="a"/><key id="s" output="s"/>
+    <key id="d" output="d"/><key id="f" output="f"/><key id="g" output="g"/>
+    <key id="h" output="h"/><key id="j" output="j"/><key id="k" output="k"/>
+    <key id="l" output="l"/><key id="z" output="z"/><key id="x" output="x"/>
+    <key id="c" output="c"/><key id="v" output="v"/><key id="b" output="b"/>
+    <key id="n" output="n"/><key id="m" output="m"/>
+    <key id="Q" output="Q"/><key id="W" output="W"/><key id="E" output="E"/>
+    <key id="R" output="R"/><key id="T" output="T"/><key id="Y" output="Y"/>
+    <key id="U" output="U"/><key id="I" output="I"/><key id="O" output="O"/>
+    <key id="P" output="P"/><key id="A" output="A"/><key id="S" output="S"/>
+    <key id="D" output="D"/><key id="F" output="F"/><key id="G" output="G"/>
+    <key id="H" output="H"/><key id="J" output="J"/><key id="K" output="K"/>
+    <key id="L" output="L"/><key id="Z" output="Z"/><key id="X" output="X"/>
+    <key id="C" output="C"/><key id="V" output="V"/><key id="B" output="B"/>
+    <key id="N" output="N"/><key id="M" output="M"/>
+    <key id="left_bracket" output="["/><key id="right_bracket" output="]"/>
+    <key id="backslash" output="\u{005c}"/><key id="semicolon" output=";"/>
+    <key id="apostrophe" output="'"/><key id="comma" output=","/>
+    <key id="period" output="."/><key id="slash" output="/"/>
+    <key id="left_brace" output="{"/><key id="right_brace" output="}"/>
+    <key id="pipe" output="|"/><key id="colon" output=":"/>
+    <key id="quote" output="&quot;"/><key id="less" output="&lt;"/>
+    <key id="greater" output="&gt;"/><key id="question" output="?"/>
+  </keys>
+  <layers formId="us">
+    <layer modifiers="none">
+      <row keys="grave one two three four five six seven eight nine zero minus equal"/>
+      <row keys="q w e r t y u i o p left_bracket right_bracket backslash"/>
+      <row keys="a s d f g h j k l semicolon apostrophe"/>
+      <row keys="z x c v b n m comma period slash"/>
+    </layer>
+    <layer modifiers="shift">
+      <row keys="tilde exclamation at hash dollar percent caret ampersand asterisk left_parenthesis right_parenthesis underscore plus"/>
+      <row keys="Q W E R T Y U I O P left_brace right_brace pipe"/>
+      <row keys="A S D F G H J K L colon quote"/>
+      <row keys="Z X C V B N M less greater question"/>
+    </layer>
+    <layer modifiers="caps">
+      <row keys="grave one two three four five six seven eight nine zero minus equal"/>
+      <row keys="Q W E R T Y U I O P left_bracket right_bracket backslash"/>
+      <row keys="A S D F G H J K L semicolon apostrophe"/>
+      <row keys="Z X C V B N M comma period slash"/>
+    </layer>
+    <layer modifiers="shift caps">
+      <row keys="tilde exclamation at hash dollar percent caret ampersand asterisk left_parenthesis right_parenthesis underscore plus"/>
+      <row keys="q w e r t y u i o p left_brace right_brace pipe"/>
+      <row keys="a s d f g h j k l colon quote"/>
+      <row keys="z x c v b n m less greater question"/>
+    </layer>
+  </layers>
+</keyboard3>

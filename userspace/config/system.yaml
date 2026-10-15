@@ -1,0 +1,5 @@
+format_version: 1
+
+text_input:
+  #keyboard_layout: "/boot/keyboard_qwerty.xml"
+  keyboard_layout: "/boot/keyboard_azerty.xml"

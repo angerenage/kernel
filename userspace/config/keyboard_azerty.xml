@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<keyboard3 xmlns="https://schemas.unicode.org/cldr/45/keyboard3" conformsTo="45" locale="fr-FR-t-k0-azerty">
+  <info name="French AZERTY"/>
+  <keys>
+    <key id="empty" gap="true"/>
+    <key id="superscript_two" output="²"/><key id="ampersand" output="&amp;"/>
+    <key id="e_acute" output="é"/><key id="quote" output="&quot;"/>
+    <key id="apostrophe" output="'"/><key id="left_parenthesis" output="("/>
+    <key id="minus" output="-"/><key id="e_grave" output="è"/>
+    <key id="underscore" output="_"/><key id="c_cedilla" output="ç"/>
+    <key id="a_grave" output="à"/><key id="right_parenthesis" output=")"/>
+    <key id="equal" output="="/><key id="one" output="1"/><key id="two" output="2"/>
+    <key id="three" output="3"/><key id="four" output="4"/><key id="five" output="5"/>
+    <key id="six" output="6"/><key id="seven" output="7"/><key id="eight" output="8"/>
+    <key id="nine" output="9"/><key id="zero" output="0"/><key id="degree" output="°"/>
+    <key id="plus" output="+"/><key id="tilde" output="~"/>
+    <key id="a" output="a"/><key id="z" output="z"/><key id="e" output="e"/>
+    <key id="r" output="r"/><key id="t" output="t"/><key id="y" output="y"/>
+    <key id="u" output="u"/><key id="i" output="i"/><key id="o" output="o"/>
+    <key id="p" output="p"/><key id="q" output="q"/><key id="s" output="s"/>
+    <key id="d" output="d"/><key id="f" output="f"/><key id="g" output="g"/>
+    <key id="h" output="h"/><key id="j" output="j"/><key id="k" output="k"/>
+    <key id="l" output="l"/><key id="m" output="m"/><key id="w" output="w"/>
+    <key id="x" output="x"/><key id="c" output="c"/><key id="v" output="v"/>
+    <key id="b" output="b"/><key id="n" output="n"/>
+    <key id="A" output="A"/><key id="Z" output="Z"/><key id="E" output="E"/>
+    <key id="R" output="R"/><key id="T" output="T"/><key id="Y" output="Y"/>
+    <key id="U" output="U"/><key id="I" output="I"/><key id="O" output="O"/>
+    <key id="P" output="P"/><key id="Q" output="Q"/><key id="S" output="S"/>
+    <key id="D" output="D"/><key id="F" output="F"/><key id="G" output="G"/>
+    <key id="H" output="H"/><key id="J" output="J"/><key id="K" output="K"/>
+    <key id="L" output="L"/><key id="M" output="M"/><key id="W" output="W"/>
+    <key id="X" output="X"/><key id="C" output="C"/><key id="V" output="V"/>
+    <key id="B" output="B"/><key id="N" output="N"/>
+    <key id="circumflex" output="^"/><key id="diaeresis" output="¨"/>
+    <key id="dollar" output="$"/><key id="pound" output="£"/><key id="currency" output="¤"/>
+    <key id="u_grave" output="ù"/><key id="percent" output="%"/><key id="asterisk" output="*"/>
+    <key id="mu" output="µ"/><key id="less" output="&lt;"/><key id="greater" output="&gt;"/>
+    <key id="comma" output=","/><key id="question" output="?"/><key id="semicolon" output=";"/>
+    <key id="period" output="."/><key id="colon" output=":"/><key id="slash" output="/"/>
+    <key id="exclamation" output="!"/><key id="section" output="§"/>
+    <key id="not_sign" output="¬"/><key id="hash" output="#"/><key id="left_brace" output="{"/>
+    <key id="left_bracket" output="["/><key id="pipe" output="|"/><key id="grave" output="`"/>
+    <key id="backslash" output="\u{005c}"/><key id="at" output="@"/><key id="right_bracket" output="]"/>
+    <key id="right_brace" output="}"/><key id="euro" output="€"/>
+  </keys>
+  <layers formId="iso">
+    <layer modifiers="none">
+      <row keys="superscript_two ampersand e_acute quote apostrophe left_parenthesis minus e_grave underscore c_cedilla a_grave right_parenthesis equal"/>
+      <row keys="a z e r t y u i o p circumflex dollar"/>
+      <row keys="q s d f g h j k l m u_grave asterisk"/>
+      <row keys="less w x c v b n comma semicolon colon exclamation"/>
+    </layer>
+    <layer modifiers="shift">
+      <row keys="tilde one two three four five six seven eight nine zero degree plus"/>
+      <row keys="A Z E R T Y U I O P diaeresis pound"/>
+      <row keys="Q S D F G H J K L M percent mu"/>
+      <row keys="greater W X C V B N question period slash section"/>
+    </layer>
+    <layer modifiers="caps">
+      <row keys="superscript_two ampersand e_acute quote apostrophe left_parenthesis minus e_grave underscore c_cedilla a_grave right_parenthesis equal"/>
+      <row keys="A Z E R T Y U I O P circumflex dollar"/>
+      <row keys="Q S D F G H J K L M u_grave asterisk"/>
+      <row keys="less W X C V B N comma semicolon colon exclamation"/>
+    </layer>
+    <layer modifiers="shift caps">
+      <row keys="tilde one two three four five six seven eight nine zero degree plus"/>
+      <row keys="a z e r t y u i o p diaeresis pound"/>
+      <row keys="q s d f g h j k l m percent mu"/>
+      <row keys="greater w x c v b n question period slash section"/>
+    </layer>
+    <layer modifiers="altR, altR caps">
+      <row keys="not_sign empty tilde hash left_brace left_bracket pipe grave backslash circumflex at right_bracket right_brace"/>
+      <row keys="empty empty euro empty empty empty empty empty empty empty empty currency"/>
+      <row keys="empty empty empty empty empty empty empty empty empty empty empty empty"/>
+      <row keys="empty empty empty empty empty empty empty empty empty empty empty"/>
+    </layer>
+    <layer modifiers="altR shift, altR shift caps">
+      <row keys="not_sign empty tilde hash left_brace left_bracket pipe grave backslash circumflex at right_bracket right_brace"/>
+      <row keys="empty empty euro empty empty empty empty empty empty empty empty currency"/>
+      <row keys="empty empty empty empty empty empty empty empty empty empty empty empty"/>
+      <row keys="empty empty empty empty empty empty empty empty empty empty empty"/>
+    </layer>
+  </layers>
+  <transforms type="simple">
+    <transformGroup>
+      <transform from="\u{005e}a" to="â"/><transform from="\u{005e}A" to="Â"/>
+      <transform from="\u{005e}e" to="ê"/><transform from="\u{005e}E" to="Ê"/>
+      <transform from="\u{005e}i" to="î"/><transform from="\u{005e}I" to="Î"/>
+      <transform from="\u{005e}o" to="ô"/><transform from="\u{005e}O" to="Ô"/>
+      <transform from="\u{005e}u" to="û"/><transform from="\u{005e}U" to="Û"/>
+      <transform from="\u{005e} " to="^"/><transform from="\u{005e}\u{005e}" to="^"/>
+      <transform from="¨a" to="ä"/><transform from="¨A" to="Ä"/>
+      <transform from="¨e" to="ë"/><transform from="¨E" to="Ë"/>
+      <transform from="¨i" to="ï"/><transform from="¨I" to="Ï"/>
+      <transform from="¨o" to="ö"/><transform from="¨O" to="Ö"/>
+      <transform from="¨u" to="ü"/><transform from="¨U" to="Ü"/>
+      <transform from="¨y" to="ÿ"/><transform from="¨Y" to="Ÿ"/>
+      <transform from="¨ " to="¨"/><transform from="¨¨" to="¨"/>
+    </transformGroup>
+  </transforms>
+</keyboard3>

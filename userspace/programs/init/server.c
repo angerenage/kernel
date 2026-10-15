@@ -6,12 +6,14 @@
 #include <runtime/vfs.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <system/capability.h>
 #include <system/channel.h>
 #include <system/kernel_resource.h>
 #include <system/process.h>
 #include <system/signal.h>
 
+#include "configuration.h"
 #include "device_manager.h"
 #include "launcher.h"
 #include "registry.h"
@@ -21,6 +23,12 @@
 #define VFS_PROTOCOL_VERSION_MINOR 0u
 #define FILESYSTEM_PROTOCOL_VERSION_MAJOR 1u
 #define FILESYSTEM_PROTOCOL_VERSION_MINOR 0u
+#define TEXT_INPUT_LAYOUT_OPTION "text_input.layout"
+#define TEXT_INPUT_LAYOUT_QWERTY "qwerty"
+#define TEXT_INPUT_LAYOUT_AZERTY "azerty"
+#define TEXT_INPUT_QWERTY_PATH "/boot/keyboard_qwerty.xml"
+#define TEXT_INPUT_AZERTY_PATH "/boot/keyboard_azerty.xml"
+#define SYSTEM_CONFIGURATION_PATH "/boot/system.yaml"
 
 static channel_id_t server_endpoint = CHANNEL_ID_INVALID;
 static cap_id_t     server_activity = CAP_ID_INVALID;
@@ -94,7 +102,7 @@ static bool launch_bootfs(const struct init_state* init) {
 		.capability = modules_cap,
 		.rights     = CAP_CALL | CAP_READ,
 	};
-	launched = bootstrap_launch(init, "bootfs.elf", "bootfs", 1u, &argument);
+	launched = bootstrap_launch(init, "bootfs.elf", "bootfs", 0u, NULL, 1u, &argument);
 	status   = cap_drop(modules_cap);
 	if (status != SYSCALL_STATUS_OK) {
 		printf("init: bootfs modules provider capability drop failed: %u\n", (unsigned)status);
@@ -174,6 +182,65 @@ cleanup:
 	if (!mounted || !cleanup_ok) return BOOTFS_MOUNT_FAILED;
 	printf("init: mounted bootfs at /\n");
 	return BOOTFS_MOUNT_READY;
+}
+
+static bool text_input_layout_override(const struct init_state* init, const char** out_path) {
+	static const char prefix[] = TEXT_INPUT_LAYOUT_OPTION "=";
+	const char*       selected = NULL;
+	const char*       argument;
+
+	if (init == NULL || out_path == NULL) return false;
+	*out_path = NULL;
+	argument  = init->argv_data;
+	for (uint32_t index = 0u; index < init->argc; index++) {
+		if (strcmp(argument, TEXT_INPUT_LAYOUT_OPTION) == 0) return false;
+		if (strncmp(argument, prefix, sizeof(prefix) - 1u) == 0) {
+			if (selected != NULL) return false;
+			selected = argument + sizeof(prefix) - 1u;
+		}
+		argument += strlen(argument) + 1u;
+	}
+	if (selected == NULL) return true;
+	if (strcmp(selected, TEXT_INPUT_LAYOUT_QWERTY) == 0) {
+		*out_path = TEXT_INPUT_QWERTY_PATH;
+		return true;
+	}
+	if (strcmp(selected, TEXT_INPUT_LAYOUT_AZERTY) == 0) {
+		*out_path = TEXT_INPUT_AZERTY_PATH;
+		return true;
+	}
+	return false;
+}
+
+static bool load_system_configuration(struct init_configuration* configuration) {
+	const struct init_protocol_query query = {
+		.namespace_path = VFS_NAMESPACE,
+		.protocol       = VFS_PROTOCOL_NAME,
+		.major          = VFS_PROTOCOL_VERSION_MAJOR,
+		.minor          = VFS_PROTOCOL_VERSION_MINOR,
+	};
+	struct init_service_handle     service = {.capability = CAP_ID_INVALID};
+	enum init_registry_status      registry_status;
+	enum init_configuration_status configuration_status;
+	syscall_status_t               status;
+	bool                           success = true;
+
+	registry_status = registry_acquire(server_pid, &query, VFS_SERVICE_NAME, &service);
+	if (registry_status != INIT_REGISTRY_OK) {
+		printf("init: VFS acquisition for system configuration failed: %u\n", (unsigned)registry_status);
+		return false;
+	}
+	configuration_status = init_configuration_load(service.capability, SYSTEM_CONFIGURATION_PATH, configuration);
+	status               = cap_drop(service.capability);
+	if (status != SYSCALL_STATUS_OK) {
+		printf("init: VFS capability drop after system configuration failed: %u\n", (unsigned)status);
+		success = false;
+	}
+	if (configuration_status != INIT_CONFIGURATION_OK) {
+		printf("init: system configuration load failed: %s\n", init_configuration_status_string(configuration_status));
+		success = false;
+	}
+	return success;
 }
 
 bool server_init(void) {
@@ -329,6 +396,7 @@ static bool dispatch_request(const struct cap_request* request, const void* data
 }
 
 int server_run(const struct init_state* init) {
+	struct init_configuration                 configuration;
 	static const struct init_service_selector vfs_selector = {
 		.namespace_path = VFS_NAMESPACE,
 		.protocol       = VFS_PROTOCOL_NAME,
@@ -355,15 +423,23 @@ int server_run(const struct init_state* init) {
 	bool               received;
 	bool               bootfs_mounted              = false;
 	bool               bootfs_started              = false;
+	bool               configuration_loaded        = false;
 	bool               device_manager_started      = false;
 	bool               input_manager_started       = false;
 	bool               keyboard_controller_started = false;
+	bool               text_input_started          = false;
 	bool               loader_started              = false;
 	bool               vfs_ready                   = false;
 	bool               vfs_started                 = false;
+	const char*        text_input_layout_override_path;
+	const char*        text_input_layout = NULL;
 	syscall_status_t   status;
 
 	if (server_endpoint == CHANNEL_ID_INVALID || init == NULL) return 1;
+	if (!text_input_layout_override(init, &text_input_layout_override_path)) {
+		printf("init: invalid or duplicate %s boot option\n", TEXT_INPUT_LAYOUT_OPTION);
+		return 1;
+	}
 	for (;;) {
 		do {
 			received = false;
@@ -386,7 +462,7 @@ int server_run(const struct init_state* init) {
 			if (status != SYSCALL_STATUS_OK) return 1;
 		} while (received);
 		if (!vfs_started) {
-			if (!bootstrap_launch(init, "vfs.elf", "VFS", 0u, NULL)) return 1;
+			if (!bootstrap_launch(init, "vfs.elf", "VFS", 0u, NULL, 0u, NULL)) return 1;
 			vfs_started = true;
 			continue;
 		}
@@ -411,22 +487,35 @@ int server_run(const struct init_state* init) {
 				continue;
 			}
 		}
-		if (bootfs_mounted && !loader_started) {
-			if (!bootstrap_launch(init, "loader.elf", "loader", 0u, NULL)) return 1;
+		if (bootfs_mounted && !configuration_loaded) {
+			if (!load_system_configuration(&configuration)) return 1;
+			text_input_layout    = text_input_layout_override_path == NULL ? configuration.text_input_layout
+			                                                               : text_input_layout_override_path;
+			configuration_loaded = true;
+			continue;
+		}
+		if (configuration_loaded && !loader_started) {
+			if (!bootstrap_launch(init, "loader.elf", "loader", 0u, NULL, 0u, NULL)) return 1;
 			loader_started = true;
 			continue;
 		}
 		if (loader_started && !input_manager_started) {
-			if (!bootstrap_launch(init, "input_manager.elf", "input manager", 0u, NULL)) return 1;
+			if (!bootstrap_launch(init, "input_manager.elf", "input manager", 0u, NULL, 0u, NULL)) return 1;
 			input_manager_started = true;
 			continue;
 		}
 		if (input_manager_started && !keyboard_controller_started) {
-			if (!bootstrap_launch(init, "keyboard_controller.elf", "keyboard controller", 0u, NULL)) return 1;
+			if (!bootstrap_launch(init, "keyboard_controller.elf", "keyboard controller", 0u, NULL, 0u, NULL)) return 1;
 			keyboard_controller_started = true;
 			continue;
 		}
-		if (keyboard_controller_started && !device_manager_started) {
+		if (keyboard_controller_started && !text_input_started) {
+			const char* arguments[] = {text_input_layout};
+			if (!bootstrap_launch(init, "text_input.elf", "text input", 1u, arguments, 0u, NULL)) return 1;
+			text_input_started = true;
+			continue;
+		}
+		if (text_input_started && !device_manager_started) {
 			enum device_manager_launch_result result = device_manager_launch(init);
 
 			if (result == DEVICE_MANAGER_LAUNCH_FAILED) return 1;

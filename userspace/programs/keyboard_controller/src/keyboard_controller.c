@@ -161,28 +161,6 @@ static bool key_repeatable(enum input_key_code key) {
 	       key != INPUT_KEY_PAUSE && key != INPUT_KEY_PRINT_SCREEN;
 }
 
-static const char* key_action_name(enum keyboard_key_action action) {
-	switch (action) {
-	case KEYBOARD_KEY_ACTION_PRESSED:
-		return "pressed";
-	case KEYBOARD_KEY_ACTION_RELEASED:
-		return "released";
-	case KEYBOARD_KEY_ACTION_REPEATED:
-		return "repeated";
-	default:
-		return "invalid";
-	}
-}
-
-static void log_key_event(const struct keyboard_event* event) {
-	printf("keyboard controller: keyboard %llu key=%u %s modifiers=0x%02x locks=0x%02x\n",
-	       (unsigned long long)event->keyboard_id,
-	       (unsigned)event->key,
-	       key_action_name(event->action),
-	       (unsigned)event->modifiers,
-	       (unsigned)event->locks);
-}
-
 static uint32_t recompute_modifiers(const struct managed_keyboard* keyboard) {
 	uint32_t modifiers = 0u;
 	for (enum input_key_code key = INPUT_KEY_ESCAPE; key <= INPUT_KEY_KEYPAD_DECIMAL; key++)
@@ -681,7 +659,6 @@ static bool process_key_frame(struct keyboard_controller* controller) {
 	keyboard_controller_unlock(controller);
 	if (!wake_repeat_thread(controller)) return false;
 	if (success && output_count != 0u) {
-		for (size_t i = 0u; i < output_count; i++) log_key_event(&output[i]);
 		success = notify_consumers(controller);
 	}
 	return success;
@@ -826,7 +803,6 @@ static void repeat_thread(void* opaque) {
 				success = false;
 				break;
 			}
-			log_key_event(&event);
 			published = true;
 		}
 		keyboard_controller_unlock(controller);

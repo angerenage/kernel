@@ -4,6 +4,7 @@
 #include <base/math.h>
 #include <base/module.h>
 #include <base/startup.h>
+#include <base/thread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,8 +53,9 @@ static void rollback_bootstrap_process(struct loader_load_response* loaded, cap_
 	(void)drop_owned_capability(&loaded->process_cap, description);
 }
 
-bool bootstrap_launch(const struct init_state* init, const char* module_name, const char* description,
-                      size_t capability_count, const struct program_capability_argument capabilities[]) {
+bool bootstrap_launch(const struct init_state* init, const char* module_name, const char* description, size_t argc,
+                      const char* const argv[], size_t capability_count,
+                      const struct program_capability_argument capabilities[]) {
 	struct module_provider_resolve_response module = {.cap = CAP_ID_INVALID};
 	struct loader_load_response             loaded;
 	struct process_info_response            process_info;
@@ -61,6 +63,7 @@ bool bootstrap_launch(const struct init_state* init, const char* module_name, co
 	cap_id_t*                               startup_capabilities;
 	size_t                                  startup_capability_count;
 	size_t                                  startup_capability_size;
+	size_t                                  startup_argv_size = 0u;
 	size_t                                  startup_size;
 	cap_id_t                                init_cap          = CAP_ID_INVALID;
 	cap_id_t                                loader_cap        = CAP_ID_INVALID;
@@ -72,11 +75,18 @@ bool bootstrap_launch(const struct init_state* init, const char* module_name, co
 	bool                                    temporary_caps_released;
 
 	if (init == NULL || module_name == NULL || module_name[0] == '\0' || description == NULL ||
-	    (capability_count != 0u && capabilities == NULL) || capability_count > UINT32_MAX - PROCESS_STARTUP_CAP_COUNT)
+	    (argc != 0u && argv == NULL) || argc > UINT32_MAX || (capability_count != 0u && capabilities == NULL) ||
+	    capability_count > UINT32_MAX - PROCESS_STARTUP_CAP_COUNT)
 		return false;
+	for (size_t i = 0u; i < argc; i++) {
+		if (argv[i] == NULL) return false;
+		size_t length = strlen(argv[i]);
+		if (length == SIZE_MAX || add_overflow_size(startup_argv_size, length + 1u, &startup_argv_size)) return false;
+	}
 	startup_capability_count = PROCESS_STARTUP_CAP_COUNT + capability_count;
 	if (mul_overflow_size(startup_capability_count, sizeof(*startup_capabilities), &startup_capability_size) ||
-	    add_overflow_size(sizeof(*startup), startup_capability_size, &startup_size) || startup_size > UINT32_MAX)
+	    add_overflow_size(sizeof(*startup), startup_capability_size, &startup_size) ||
+	    add_overflow_size(startup_size, startup_argv_size, &startup_size) || startup_size > THREAD_START_ARG_MAX_SIZE)
 		return false;
 	for (size_t i = 0u; i < capability_count; i++) {
 		if (capabilities[i].capability != CAP_ID_INVALID && capabilities[i].rights == 0u) return false;
@@ -150,6 +160,9 @@ bool bootstrap_launch(const struct init_state* init, const char* module_name, co
 		.init_cap             = init_cap,
 		.capc                 = (uint32_t)startup_capability_count,
 		.capv_offset          = sizeof(*startup),
+		.argc                 = (uint32_t)argc,
+		.argv_offset          = argc == 0u ? 0u : (uint32_t)(sizeof(*startup) + startup_capability_size),
+		.argv_size            = (uint32_t)startup_argv_size,
 	};
 	startup_capabilities                             = (cap_id_t*)((uint8_t*)startup + startup->capv_offset);
 	startup_capabilities[PROCESS_STARTUP_CAP_STDIN]  = CAP_ID_INVALID;
@@ -165,6 +178,12 @@ bool bootstrap_launch(const struct init_state* init, const char* module_name, co
 			printf("init: %s capability delegation failed: %u\n", description, (unsigned)status);
 			goto fail;
 		}
+	}
+	char* argument_cursor = (char*)startup + startup->argv_offset;
+	for (size_t i = 0u; i < argc; i++) {
+		size_t length = strlen(argv[i]) + 1u;
+		memcpy(argument_cursor, argv[i], length);
+		argument_cursor += length;
 	}
 	status = process_run(loaded.process_cap, loaded.entry, startup, startup_size, &thread_cap);
 	free(startup);
