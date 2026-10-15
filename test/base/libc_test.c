@@ -20,11 +20,42 @@ Test(base_libc, classifies_ascii_characters) {
 Test(base_libc, searches_strings) {
 	const char* value = "keyboard layout";
 	cr_assert_eq(strchr(value, 'b'), value + 3);
+	cr_assert_eq(strrchr(value, 'a'), value + 10);
+	cr_assert_eq(strrchr(value, '\0'), value + strlen(value));
 	cr_assert_eq(strchr(value, '\0'), value + strlen(value));
 	cr_assert_null(strchr(value, 'z'));
+	cr_assert_null(strrchr(value, 'z'));
 	cr_assert_eq(strstr(value, "board"), value + 3);
 	cr_assert_eq(strstr(value, ""), value);
 	cr_assert_null(strstr(value, "mouse"));
+}
+
+Test(base_libc, copies_and_concatenates_strings) {
+	char buffer[16];
+	char padded[8]                                                      = {'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x'};
+	char* (*copy_bounded)(char* restrict, const char* restrict, size_t) = strncpy;
+
+	cr_assert_eq(strcpy(buffer, "frame"), buffer);
+	cr_assert_eq(strcat(buffer, "buffer"), buffer);
+	cr_assert_str_eq(buffer, "framebuffer");
+	cr_assert_eq(strncpy(padded, "PS/2", sizeof(padded)), padded);
+	cr_assert_arr_eq(padded, ((const char[8]){'P', 'S', '/', '2', 0, 0, 0, 0}), sizeof(padded));
+	copy_bounded(padded, "keyboard", 4u);
+	cr_assert_arr_eq(padded, ((const char[4]){'k', 'e', 'y', 'b'}), 4u);
+}
+
+static int compare_ints(const void* left, const void* right) {
+	int lhs = *(const int*)left;
+	int rhs = *(const int*)right;
+	return (lhs > rhs) - (lhs < rhs);
+}
+
+Test(base_libc, sorts_arrays) {
+	int values[]   = {4, -2, 4, 0, 9, 1};
+	int expected[] = {-2, 0, 1, 4, 4, 9};
+
+	qsort(values, sizeof(values) / sizeof(values[0]), sizeof(values[0]), compare_ints);
+	cr_assert_arr_eq(values, expected, sizeof(values));
 }
 
 Test(base_libc, converts_integers_and_reals) {

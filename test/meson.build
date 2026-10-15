@@ -125,6 +125,21 @@ mxml_test_lib = static_library(
 	install: false,
 )
 
+freetype_test_inc = include_directories(
+	'../third_party/freetype',
+	'../third_party/freetype/freetype/include',
+)
+
+freetype_test_lib = static_library(
+	'freetype_test_lib',
+	freetype_sources,
+	include_directories : freetype_test_inc,
+	native : true,
+	c_args : test_common_c_args + freetype_build_args,
+	link_args : test_common_link_args,
+	install : false,
+)
+
 kernel_capability_platform_sources = []
 if platform == 'pc_x86_64'
 	kernel_capability_platform_sources += files(
@@ -250,6 +265,15 @@ test_suites = [
 		),
 		'include_directories': [mxml_test_inc],
 		'link_with': mxml_test_lib,
+		'suites': ['unit', 'userspace'],
+	},
+	{
+		'name': 'freetype',
+		'sources': files(
+			'freetype/freetype.c',
+		),
+		'include_directories': [freetype_test_inc],
+		'link_with': freetype_test_lib,
 		'suites': ['unit', 'userspace'],
 	},
 	{

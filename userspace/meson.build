@@ -50,6 +50,16 @@ userspace_libc_sources = files(
 	'libc/strtod.c',
 )
 
+if platform == 'pc_x86_64'
+	userspace_setjmp_object = clang_x86_64_elf.process(files('platforms/pc_x86_64/setjmp.asm'))
+elif platform == 'pc_aarch64'
+	userspace_setjmp_object = clang_aarch64_elf.process(files('platforms/pc_aarch64/setjmp.asm'))
+elif platform == 'pc_riscv64'
+	userspace_setjmp_object = clang_riscv64_elf.process(files('platforms/pc_riscv64/setjmp.asm'))
+elif platform == 'pc_loongarch64'
+	userspace_setjmp_object = clang_loongarch64_elf.process(files('platforms/pc_loongarch64/setjmp.asm'))
+endif
+
 userspace_runtime_sources = files(
 	'runtime/diagnostic.c',
 	'runtime/filesystem.c',
@@ -89,7 +99,7 @@ if platform == 'pc_x86_64'
 endif
 
 userspace_libc = static_library('userspace_libc',
-	sources : base_libc_sources + userspace_libc_sources + userspace_base_sources,
+	sources : base_libc_sources + userspace_libc_sources + userspace_base_sources + [userspace_setjmp_object],
 	c_args : userspace_c_args,
 	include_directories : userspace_libc_inc,
 	pic : false,
@@ -175,4 +185,7 @@ userspace_boot_modules = userspace_programs + [
 	keyboard_azerty_layout,
 ]
 
-alias_target('userspace', userspace_programs + [userspace_utf8proc, userspace_yaml, userspace_mxml])
+alias_target(
+	'userspace',
+	userspace_programs + [userspace_utf8proc, userspace_yaml, userspace_mxml, userspace_freetype],
+)

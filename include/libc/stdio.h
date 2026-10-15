@@ -4,6 +4,9 @@
 #include <stddef.h>
 
 #define EOF (-1)
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
 
 typedef struct libc_file FILE;
 
@@ -16,6 +19,8 @@ int   fclose(FILE* stream);
 
 size_t fread(void* restrict buffer, size_t size, size_t count, FILE* restrict stream);
 size_t fwrite(const void* restrict buffer, size_t size, size_t count, FILE* restrict stream);
+int    fseek(FILE* stream, long offset, int origin);
+long   ftell(FILE* stream);
 
 int  feof(FILE* stream);
 int  ferror(FILE* stream);

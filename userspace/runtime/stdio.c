@@ -1,5 +1,6 @@
 #include <base/cap.h>
 #include <base/syscall.h>
+#include <libc/limits.h>
 #include <libc/stdio.h>
 #include <libc/stdlib.h>
 #include <libc/string.h>
@@ -322,6 +323,68 @@ void clearerr(FILE* stream) {
 	stream->end_of_file = false;
 	stream->error       = false;
 	file_unlock(stream);
+}
+
+static bool seek_offset(uint64_t base, long offset, uint64_t* result) {
+	if (offset >= 0) {
+		if ((uint64_t)offset > UINT64_MAX - base) return false;
+		*result = base + (uint64_t)offset;
+		return true;
+	}
+	uint64_t magnitude = (uint64_t)(-(offset + 1l)) + 1u;
+	if (magnitude > base) return false;
+	*result = base - magnitude;
+	return true;
+}
+
+int fseek(FILE* stream, long offset, int origin) {
+	struct filesystem_node_info info;
+	uint64_t                    base;
+	uint64_t                    position;
+
+	if (stream == NULL) return EOF;
+	file_lock(stream);
+	if (stream->kind != FILE_KIND_VFS || stream->capability == CAP_ID_INVALID) goto error;
+	switch (origin) {
+	case SEEK_SET:
+		base = 0u;
+		break;
+	case SEEK_CUR:
+		base = stream->offset;
+		break;
+	case SEEK_END:
+		if (!call_succeeded(filesystem_file_info(stream->capability, &info))) goto error;
+		base = info.size;
+		break;
+	default:
+		goto error;
+	}
+	if (!seek_offset(base, offset, &position)) goto error;
+	stream->offset      = position;
+	stream->end_of_file = false;
+	file_unlock(stream);
+	return 0;
+
+error:
+	stream->error = true;
+	file_unlock(stream);
+	return EOF;
+}
+
+long ftell(FILE* stream) {
+	long result;
+
+	if (stream == NULL) return -1l;
+	file_lock(stream);
+	if (stream->kind != FILE_KIND_VFS || stream->capability == CAP_ID_INVALID || stream->offset > LONG_MAX) {
+		stream->error = true;
+		result        = -1l;
+	}
+	else {
+		result = (long)stream->offset;
+	}
+	file_unlock(stream);
+	return result;
 }
 
 int fflush(FILE* stream) {
