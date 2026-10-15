@@ -1,6 +1,7 @@
 #include "format.h"
 
 #include <base/display.h>
+#include <libc/limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -12,9 +13,16 @@ struct format_ctx {
 	size_t capacity;
 	size_t index;
 	int    count;
+	bool   bounded;
 };
 
 static void emit_char(struct format_ctx* ctx, char ch) {
+	if (ctx->bounded) {
+		if (ctx->capacity != 0u && ctx->index < ctx->capacity - 1u) ctx->buffer[ctx->index] = ch;
+		ctx->index++;
+		ctx->count++;
+		return;
+	}
 	if (ctx->index == ctx->capacity) {
 		base_display_write(ctx->buffer, ctx->index);
 		ctx->index = 0u;
@@ -111,6 +119,104 @@ static void emit_signed_number(struct format_ctx* ctx, long long value, int widt
 		emit_char(ctx, buffer[--idx]);
 	}
 }
+
+#ifdef BASE_FORMAT_FLOAT
+static void emit_general_float(struct format_ctx* ctx, double value, int width, int precision, bool zero_pad) {
+	char   output[384];
+	char   digits[17];
+	size_t size     = 0u;
+	bool   negative = __builtin_signbit(value);
+
+	if (negative) value = -value;
+	if (__builtin_isnan(value)) {
+		output[size++] = 'n';
+		output[size++] = 'a';
+		output[size++] = 'n';
+	}
+	else if (__builtin_isinf(value)) {
+		if (negative) output[size++] = '-';
+		output[size++] = 'i';
+		output[size++] = 'n';
+		output[size++] = 'f';
+	}
+	else if (value == 0.0) {
+		if (negative) output[size++] = '-';
+		output[size++] = '0';
+	}
+	else {
+		int    exponent   = 0;
+		double normalized = value;
+		if (precision < 0) precision = 6;
+		if (precision == 0) precision = 1;
+		if (precision > (int)sizeof(digits)) precision = (int)sizeof(digits);
+
+		while (normalized >= 10.0) {
+			normalized /= 10.0;
+			exponent++;
+		}
+		while (normalized < 1.0) {
+			normalized *= 10.0;
+			exponent--;
+		}
+		double rounding = 0.5;
+		for (int index = 1; index < precision; index++) rounding /= 10.0;
+		normalized += rounding;
+		if (normalized >= 10.0) {
+			normalized /= 10.0;
+			exponent++;
+		}
+		for (int index = 0; index < precision; index++) {
+			int digit     = (int)normalized;
+			digits[index] = (char)('0' + digit);
+			normalized    = (normalized - (double)digit) * 10.0;
+		}
+		int significant = precision;
+		while (significant > 1 && digits[significant - 1] == '0') significant--;
+		if (negative) output[size++] = '-';
+		if (exponent < -4 || exponent >= precision) {
+			output[size++] = digits[0];
+			if (significant > 1) {
+				output[size++] = '.';
+				for (int index = 1; index < significant; index++) output[size++] = digits[index];
+			}
+			output[size++]          = 'e';
+			output[size++]          = exponent < 0 ? '-' : '+';
+			unsigned exponent_value = exponent < 0 ? (unsigned)-exponent : (unsigned)exponent;
+			char     exponent_digits[3];
+			size_t   exponent_size = 0u;
+			do {
+				exponent_digits[exponent_size++] = (char)('0' + exponent_value % 10u);
+				exponent_value /= 10u;
+			} while (exponent_value != 0u);
+			while (exponent_size < 2u) exponent_digits[exponent_size++] = '0';
+			while (exponent_size != 0u) output[size++] = exponent_digits[--exponent_size];
+		}
+		else if (exponent >= 0) {
+			for (int index = 0; index <= exponent; index++) output[size++] = index < precision ? digits[index] : '0';
+			if (significant > exponent + 1) {
+				output[size++] = '.';
+				for (int index = exponent + 1; index < significant; index++) output[size++] = digits[index];
+			}
+		}
+		else {
+			output[size++] = '0';
+			output[size++] = '.';
+			for (int index = -1; index > exponent; index--) output[size++] = '0';
+			for (int index = 0; index < significant; index++) output[size++] = digits[index];
+		}
+	}
+
+	int padding = width - (int)size;
+	if (padding > 0 && zero_pad && size != 0u && output[0] == '-') {
+		emit_char(ctx, '-');
+		emit_padding(ctx, padding, '0');
+		for (size_t index = 1u; index < size; index++) emit_char(ctx, output[index]);
+		return;
+	}
+	if (padding > 0) emit_padding(ctx, padding, zero_pad ? '0' : ' ');
+	for (size_t index = 0u; index < size; index++) emit_char(ctx, output[index]);
+}
+#endif
 
 static unsigned long long read_unsigned(va_list* args, int length) {
 	switch (length) {
@@ -250,6 +356,12 @@ static void format_internal(struct format_ctx* ctx, const char* format, va_list*
 			emit_unsigned_number(ctx, value, 16u, false, width ? width : (int)(sizeof(uintptr_t) * 2), '0');
 			break;
 		}
+#ifdef BASE_FORMAT_FLOAT
+		case 'g':
+		case 'G':
+			emit_general_float(ctx, va_arg(*args, double), width, precision, zero_pad);
+			break;
+#endif
 		default:
 			emit_char(ctx, '%');
 			if (spec) {
@@ -275,16 +387,21 @@ int format_to_display(const char* format, va_list* args) {
 }
 
 int format_to_buffer(char* buffer, const char* format, va_list* args) {
-	if (!buffer) return -1;
+	return format_to_buffer_size(buffer, SIZE_MAX, format, args);
+}
+
+int format_to_buffer_size(char* buffer, size_t size, const char* format, va_list* args) {
+	if (format == NULL || (buffer == NULL && size != 0u)) return -1;
 
 	struct format_ctx ctx = {
 		.buffer   = buffer,
-		.capacity = SIZE_MAX,
+		.capacity = size,
 		.index    = 0u,
 		.count    = 0,
+		.bounded  = true,
 	};
 
 	format_internal(&ctx, format, args);
-	ctx.buffer[ctx.index] = '\0';
+	if (size != 0u) ctx.buffer[ctx.index < size ? ctx.index : size - 1u] = '\0';
 	return ctx.count;
 }

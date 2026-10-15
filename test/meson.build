@@ -6,6 +6,7 @@ test_common_c_args = [
 	'-std=gnu17',
 	'--coverage',
 	'-DCORE_LOCK_DEBUG=1',
+	'-DBASE_FORMAT_FLOAT=1',
 	'-DBASE_STDLIB_RENAME_ALLOC=1',
 	'-DHAL_IOMMU_MOCK=1'
 ]
@@ -41,7 +42,7 @@ endif
 
 base_test_lib = static_library(
 	'base_test_lib',
-	base_sources,
+	base_sources + userspace_libc_sources,
 	include_directories: test_inc,
 	native: true,
 	c_args: test_common_c_args,
@@ -108,6 +109,18 @@ utf8proc_test_lib = static_library(
 	install: false,
 )
 
+mxml_test_inc = include_directories('../third_party/mxml')
+
+mxml_test_lib = static_library(
+	'mxml_test_lib',
+	mxml_sources,
+	include_directories: mxml_test_inc,
+	native: true,
+	c_args: test_common_c_args + ['-Wno-implicit-fallthrough'],
+	link_args: test_common_link_args,
+	install: false,
+)
+
 kernel_capability_platform_sources = []
 if platform == 'pc_x86_64'
 	kernel_capability_platform_sources += files(
@@ -129,6 +142,14 @@ test_suites = [
 		'name': 'base_math',
 		'sources': files(
 			'base/math_test.c',
+		),
+		'link_with': base_test_lib,
+		'suites': ['unit', 'base'],
+	},
+	{
+		'name': 'base_libc',
+		'sources': files(
+			'base/libc_test.c',
 		),
 		'link_with': base_test_lib,
 		'suites': ['unit', 'base'],
@@ -216,6 +237,15 @@ test_suites = [
 		),
 		'include_directories': [utf8proc_test_inc],
 		'link_with': utf8proc_test_lib,
+		'suites': ['unit', 'userspace'],
+	},
+	{
+		'name': 'mxml',
+		'sources': files(
+			'mxml/xml.c',
+		),
+		'include_directories': [mxml_test_inc],
+		'link_with': mxml_test_lib,
 		'suites': ['unit', 'userspace'],
 	},
 	{

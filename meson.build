@@ -56,6 +56,7 @@ subdir('firmware')
 subdir('platforms/' + platform)
 subdir('third_party/utf8proc')
 subdir('third_party/libyaml')
+subdir('third_party/mxml')
 subdir('userspace')
 subdir('kernel')
 

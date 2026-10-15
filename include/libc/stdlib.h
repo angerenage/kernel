@@ -2,6 +2,9 @@
 
 #include <stddef.h>
 
+long   strtol(const char* restrict string, char** restrict end, int base);
+double strtod(const char* restrict string, char** restrict end);
+
 #ifdef BASE_STDLIB_RENAME_ALLOC
 void* heap_malloc(size_t);
 void* heap_calloc(size_t, size_t);

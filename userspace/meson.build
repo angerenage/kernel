@@ -11,6 +11,7 @@ userspace_inc = include_directories('../include/libc', '../include', 'include')
 userspace_linker_file = meson.current_source_dir() + '/linker.ld'
 
 userspace_c_args = freestanding_c_args + [
+	'-DBASE_FORMAT_FLOAT=1',
 	'-fno-pic',
 	'-fno-pie',
 ]
@@ -44,9 +45,15 @@ userspace_base_sources = files(
 	'base/heap.c',
 )
 
+userspace_libc_sources = files(
+	'libc/locale.c',
+	'libc/strtod.c',
+)
+
 userspace_runtime_sources = files(
 	'runtime/diagnostic.c',
 	'runtime/filesystem.c',
+	'runtime/file_output.c',
 	'runtime/heap.c',
 	'runtime/init.c',
 	'runtime/input.c',
@@ -54,6 +61,7 @@ userspace_runtime_sources = files(
 	'runtime/stdio.c',
 	'runtime/startup.c',
 	'runtime/stream.c',
+	'runtime/unistd.c',
 )
 
 userspace_system_sources = files(
@@ -81,7 +89,7 @@ if platform == 'pc_x86_64'
 endif
 
 userspace_libc = static_library('userspace_libc',
-	sources : base_libc_sources + userspace_base_sources,
+	sources : base_libc_sources + userspace_libc_sources + userspace_base_sources,
 	c_args : userspace_c_args,
 	include_directories : userspace_libc_inc,
 	pic : false,
@@ -143,4 +151,4 @@ driver_catalog = configure_file(
 
 userspace_boot_modules = userspace_programs + [driver_catalog]
 
-alias_target('userspace', userspace_programs + [userspace_utf8proc, userspace_yaml])
+alias_target('userspace', userspace_programs + [userspace_utf8proc, userspace_yaml, userspace_mxml])
