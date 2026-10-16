@@ -9,6 +9,12 @@ static bool is_space(char value) {
 	return value == ' ' || value == '\t';
 }
 
+enum word_parse_result {
+	WORD_PARSE_OK,
+	WORD_PARSE_UNTERMINATED_QUOTE,
+	WORD_PARSE_FAILED,
+};
+
 static bool report_change_directory(enum shell_change_directory_result result) {
 	switch (result) {
 	case SHELL_CHANGE_DIRECTORY_OK:
@@ -48,32 +54,62 @@ static bool execute_program(struct shell* shell, size_t argc, char* const argv[]
 	}
 }
 
-static bool parse_words(const char* line, size_t size, char*** out_argv, size_t* out_argc) {
+static enum word_parse_result parse_words(const char* line, size_t size, char*** out_argv, size_t* out_argc) {
 	char*  storage;
 	char** argv;
 	size_t argc = 0u;
-	size_t offset;
+	size_t input;
+	size_t output;
+	char   quote   = '\0';
+	bool   in_word = false;
 
-	if (line == NULL || size == 0u || out_argv == NULL || out_argc == NULL) return false;
+	if (line == NULL || size == 0u || out_argv == NULL || out_argc == NULL) return WORD_PARSE_FAILED;
 	storage = malloc(size + 1u);
 	argv    = malloc((size / 2u + 1u) * sizeof(*argv));
 	if (storage == NULL || argv == NULL) {
 		free(argv);
 		free(storage);
-		return false;
+		return WORD_PARSE_FAILED;
 	}
-	memcpy(storage, line, size);
-	storage[size] = '\0';
-	offset        = 0u;
-	while (offset < size) {
-		while (offset < size && is_space(storage[offset])) storage[offset++] = '\0';
-		if (offset == size) break;
-		argv[argc++] = storage + offset;
-		while (offset < size && !is_space(storage[offset])) offset++;
+	input  = 0u;
+	output = 0u;
+	while (input < size) {
+		char value = line[input++];
+		if (quote != '\0') {
+			if (value == quote) quote = '\0';
+			else storage[output++] = value;
+			continue;
+		}
+		if (value == '\'' || value == '"') {
+			if (!in_word) {
+				argv[argc++] = storage + output;
+				in_word      = true;
+			}
+			quote = value;
+		}
+		else if (is_space(value)) {
+			if (in_word) {
+				storage[output++] = '\0';
+				in_word           = false;
+			}
+		}
+		else {
+			if (!in_word) {
+				argv[argc++] = storage + output;
+				in_word      = true;
+			}
+			storage[output++] = value;
+		}
 	}
+	if (quote != '\0') {
+		free(argv);
+		free(storage);
+		return WORD_PARSE_UNTERMINATED_QUOTE;
+	}
+	if (in_word) storage[output++] = '\0';
 	*out_argv = argv;
 	*out_argc = argc;
-	return true;
+	return WORD_PARSE_OK;
 }
 
 static void free_words(char** argv) {
@@ -83,19 +119,23 @@ static void free_words(char** argv) {
 }
 
 bool shell_execute_line(struct shell* shell, const char* line, size_t size) {
-	char** argv = NULL;
-	size_t argc;
-	size_t start = 0u;
-	size_t end   = size;
-	bool   success;
+	char**                 argv = NULL;
+	size_t                 argc;
+	size_t                 start = 0u;
+	size_t                 end   = size;
+	bool                   success;
+	enum word_parse_result parse_result;
 
 	if (shell == NULL || (line == NULL && size != 0u)) return false;
 	while (start < size && is_space(line[start])) start++;
 	while (end > start && is_space(line[end - 1u])) end--;
 	if (start == end) return true;
 	line += start;
-	size = end - start;
-	if (!parse_words(line, size, &argv, &argc) || argc == 0u) return false;
+	size         = end - start;
+	parse_result = parse_words(line, size, &argv, &argc);
+	if (parse_result == WORD_PARSE_UNTERMINATED_QUOTE)
+		return shell_write_command_error("shell", "unterminated quoted string");
+	if (parse_result != WORD_PARSE_OK || argc == 0u) return false;
 	if (strcmp(argv[0], "cd") == 0) success = execute_change_directory(shell, argc - 1u, argv + 1u);
 	else if (strcmp(argv[0], "clear") == 0) {
 		if (argc != 1u) success = shell_write_command_error("clear", "expected no arguments");
