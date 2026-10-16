@@ -37,6 +37,10 @@ void text_layout_destroy(struct text_layout* layout);
 const char* text_layout_map(const struct text_layout* layout, enum input_key_code key, uint32_t modifiers,
                             uint32_t locks);
 
+/* Resolve the layout label used to identify a shortcut independently of shortcut modifiers. */
+const char* text_layout_shortcut_map(const struct text_layout* layout, enum input_key_code key, uint32_t modifiers,
+                                     uint32_t locks);
+
 /* Apply literal simple transforms to one mapped output in normalized form. */
 enum text_layout_result text_layout_apply(const struct text_layout* layout, const uint8_t* context, size_t context_size,
                                           const char* output, uint8_t* next_context, size_t* next_context_size,

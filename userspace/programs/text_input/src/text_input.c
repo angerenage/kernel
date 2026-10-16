@@ -128,71 +128,177 @@ static void clear_keyboards(struct text_input* input) {
 	}
 }
 
-static bool cancel_composition(struct text_input* input, struct keyboard_text_state* keyboard) {
-	const struct text_input_action action = {
-		.type           = TEXT_INPUT_EVENT_PREEDIT,
-		.source_id      = keyboard->source_id,
-		.composition_id = keyboard->composition_id,
-	};
-	if (!text_input_publish_actions(input, &action, 1u)) return false;
-	keyboard->composition_id = 0u;
-	keyboard->context_size   = 0u;
-	return true;
-}
-
-static bool publish_pending(struct text_input* input, struct keyboard_text_state* keyboard, const uint8_t* context,
-                            size_t context_size) {
-	if (keyboard->composition_id == 0u) {
-		keyboard->composition_id = text_input_allocate_composition_id(input);
-		if (keyboard->composition_id == 0u) return false;
+static enum text_input_key_action logical_key_action(enum keyboard_key_action action) {
+	switch (action) {
+	case KEYBOARD_KEY_ACTION_PRESSED:
+		return TEXT_INPUT_KEY_ACTION_PRESSED;
+	case KEYBOARD_KEY_ACTION_RELEASED:
+		return TEXT_INPUT_KEY_ACTION_RELEASED;
+	case KEYBOARD_KEY_ACTION_REPEATED:
+		return TEXT_INPUT_KEY_ACTION_REPEATED;
+	default:
+		return TEXT_INPUT_KEY_ACTION_INVALID;
 	}
-	const struct text_input_action action = {
-		.type            = TEXT_INPUT_EVENT_PREEDIT,
-		.source_id       = keyboard->source_id,
-		.composition_id  = keyboard->composition_id,
-		.text            = context,
-		.text_size       = context_size,
-		.selection_start = (uint32_t)context_size,
-		.selection_end   = (uint32_t)context_size,
-	};
-	if (!text_input_publish_actions(input, &action, 1u)) return false;
-	memcpy(keyboard->context, context, context_size);
-	keyboard->context_size = context_size;
-	return true;
 }
 
-static bool publish_commit(struct text_input* input, struct keyboard_text_state* keyboard, const uint8_t* text,
-                           size_t text_size) {
-	struct text_input_action actions[2];
-	size_t                   count = 0u;
-	if (keyboard->composition_id != 0u) {
-		actions[count++] = (struct text_input_action){
+static uint32_t logical_key_modifiers(uint32_t modifiers) {
+	uint32_t result = 0u;
+	if ((modifiers & KEYBOARD_MODIFIER_LEFT_SHIFT) != 0u) result |= TEXT_INPUT_KEY_MODIFIER_LEFT_SHIFT;
+	if ((modifiers & KEYBOARD_MODIFIER_RIGHT_SHIFT) != 0u) result |= TEXT_INPUT_KEY_MODIFIER_RIGHT_SHIFT;
+	if ((modifiers & KEYBOARD_MODIFIER_LEFT_CONTROL) != 0u) result |= TEXT_INPUT_KEY_MODIFIER_LEFT_CONTROL;
+	if ((modifiers & KEYBOARD_MODIFIER_RIGHT_CONTROL) != 0u) result |= TEXT_INPUT_KEY_MODIFIER_RIGHT_CONTROL;
+	if ((modifiers & KEYBOARD_MODIFIER_LEFT_ALT) != 0u) result |= TEXT_INPUT_KEY_MODIFIER_LEFT_ALT;
+	if ((modifiers & KEYBOARD_MODIFIER_RIGHT_ALT) != 0u) result |= TEXT_INPUT_KEY_MODIFIER_RIGHT_ALT;
+	if ((modifiers & KEYBOARD_MODIFIER_LEFT_META) != 0u) result |= TEXT_INPUT_KEY_MODIFIER_LEFT_META;
+	if ((modifiers & KEYBOARD_MODIFIER_RIGHT_META) != 0u) result |= TEXT_INPUT_KEY_MODIFIER_RIGHT_META;
+	return result;
+}
+
+static enum text_input_key_code logical_key_code(enum input_key_code key, uint32_t locks, const char* shortcut_text) {
+	if (shortcut_text != NULL && shortcut_text[0] != '\0' && key != INPUT_KEY_TAB && key != INPUT_KEY_ENTER &&
+	    key != INPUT_KEY_KEYPAD_ENTER)
+		return TEXT_INPUT_KEY_TEXT;
+	switch (key) {
+	case INPUT_KEY_ESCAPE:
+		return TEXT_INPUT_KEY_ESCAPE;
+	case INPUT_KEY_F1:
+		return TEXT_INPUT_KEY_F1;
+	case INPUT_KEY_F2:
+		return TEXT_INPUT_KEY_F2;
+	case INPUT_KEY_F3:
+		return TEXT_INPUT_KEY_F3;
+	case INPUT_KEY_F4:
+		return TEXT_INPUT_KEY_F4;
+	case INPUT_KEY_F5:
+		return TEXT_INPUT_KEY_F5;
+	case INPUT_KEY_F6:
+		return TEXT_INPUT_KEY_F6;
+	case INPUT_KEY_F7:
+		return TEXT_INPUT_KEY_F7;
+	case INPUT_KEY_F8:
+		return TEXT_INPUT_KEY_F8;
+	case INPUT_KEY_F9:
+		return TEXT_INPUT_KEY_F9;
+	case INPUT_KEY_F10:
+		return TEXT_INPUT_KEY_F10;
+	case INPUT_KEY_F11:
+		return TEXT_INPUT_KEY_F11;
+	case INPUT_KEY_F12:
+		return TEXT_INPUT_KEY_F12;
+	case INPUT_KEY_PRINT_SCREEN:
+		return TEXT_INPUT_KEY_PRINT_SCREEN;
+	case INPUT_KEY_SCROLL_LOCK:
+		return TEXT_INPUT_KEY_SCROLL_LOCK;
+	case INPUT_KEY_PAUSE:
+		return TEXT_INPUT_KEY_PAUSE;
+	case INPUT_KEY_BACKSPACE:
+		return TEXT_INPUT_KEY_BACKSPACE;
+	case INPUT_KEY_TAB:
+		return TEXT_INPUT_KEY_TAB;
+	case INPUT_KEY_ENTER:
+	case INPUT_KEY_KEYPAD_ENTER:
+		return TEXT_INPUT_KEY_ENTER;
+	case INPUT_KEY_CAPS_LOCK:
+		return TEXT_INPUT_KEY_CAPS_LOCK;
+	case INPUT_KEY_LEFT_SHIFT:
+		return TEXT_INPUT_KEY_LEFT_SHIFT;
+	case INPUT_KEY_RIGHT_SHIFT:
+		return TEXT_INPUT_KEY_RIGHT_SHIFT;
+	case INPUT_KEY_LEFT_CONTROL:
+		return TEXT_INPUT_KEY_LEFT_CONTROL;
+	case INPUT_KEY_RIGHT_CONTROL:
+		return TEXT_INPUT_KEY_RIGHT_CONTROL;
+	case INPUT_KEY_LEFT_ALT:
+		return TEXT_INPUT_KEY_LEFT_ALT;
+	case INPUT_KEY_RIGHT_ALT:
+		return TEXT_INPUT_KEY_RIGHT_ALT;
+	case INPUT_KEY_LEFT_META:
+		return TEXT_INPUT_KEY_LEFT_META;
+	case INPUT_KEY_RIGHT_META:
+		return TEXT_INPUT_KEY_RIGHT_META;
+	case INPUT_KEY_MENU:
+		return TEXT_INPUT_KEY_MENU;
+	case INPUT_KEY_INSERT:
+		return TEXT_INPUT_KEY_INSERT;
+	case INPUT_KEY_HOME:
+		return TEXT_INPUT_KEY_HOME;
+	case INPUT_KEY_PAGE_UP:
+		return TEXT_INPUT_KEY_PAGE_UP;
+	case INPUT_KEY_DELETE:
+		return TEXT_INPUT_KEY_DELETE;
+	case INPUT_KEY_END:
+		return TEXT_INPUT_KEY_END;
+	case INPUT_KEY_PAGE_DOWN:
+		return TEXT_INPUT_KEY_PAGE_DOWN;
+	case INPUT_KEY_UP:
+		return TEXT_INPUT_KEY_UP;
+	case INPUT_KEY_LEFT:
+		return TEXT_INPUT_KEY_LEFT;
+	case INPUT_KEY_DOWN:
+		return TEXT_INPUT_KEY_DOWN;
+	case INPUT_KEY_RIGHT:
+		return TEXT_INPUT_KEY_RIGHT;
+	case INPUT_KEY_NUM_LOCK:
+		return TEXT_INPUT_KEY_NUM_LOCK;
+	case INPUT_KEY_KEYPAD_0:
+		return (locks & KEYBOARD_LOCK_NUM_LOCK) == 0u ? TEXT_INPUT_KEY_INSERT : TEXT_INPUT_KEY_INVALID;
+	case INPUT_KEY_KEYPAD_1:
+		return (locks & KEYBOARD_LOCK_NUM_LOCK) == 0u ? TEXT_INPUT_KEY_END : TEXT_INPUT_KEY_INVALID;
+	case INPUT_KEY_KEYPAD_2:
+		return (locks & KEYBOARD_LOCK_NUM_LOCK) == 0u ? TEXT_INPUT_KEY_DOWN : TEXT_INPUT_KEY_INVALID;
+	case INPUT_KEY_KEYPAD_3:
+		return (locks & KEYBOARD_LOCK_NUM_LOCK) == 0u ? TEXT_INPUT_KEY_PAGE_DOWN : TEXT_INPUT_KEY_INVALID;
+	case INPUT_KEY_KEYPAD_4:
+		return (locks & KEYBOARD_LOCK_NUM_LOCK) == 0u ? TEXT_INPUT_KEY_LEFT : TEXT_INPUT_KEY_INVALID;
+	case INPUT_KEY_KEYPAD_5:
+		return (locks & KEYBOARD_LOCK_NUM_LOCK) == 0u ? TEXT_INPUT_KEY_CENTER : TEXT_INPUT_KEY_INVALID;
+	case INPUT_KEY_KEYPAD_6:
+		return (locks & KEYBOARD_LOCK_NUM_LOCK) == 0u ? TEXT_INPUT_KEY_RIGHT : TEXT_INPUT_KEY_INVALID;
+	case INPUT_KEY_KEYPAD_7:
+		return (locks & KEYBOARD_LOCK_NUM_LOCK) == 0u ? TEXT_INPUT_KEY_HOME : TEXT_INPUT_KEY_INVALID;
+	case INPUT_KEY_KEYPAD_8:
+		return (locks & KEYBOARD_LOCK_NUM_LOCK) == 0u ? TEXT_INPUT_KEY_UP : TEXT_INPUT_KEY_INVALID;
+	case INPUT_KEY_KEYPAD_9:
+		return (locks & KEYBOARD_LOCK_NUM_LOCK) == 0u ? TEXT_INPUT_KEY_PAGE_UP : TEXT_INPUT_KEY_INVALID;
+	case INPUT_KEY_KEYPAD_DECIMAL:
+		return (locks & KEYBOARD_LOCK_NUM_LOCK) == 0u ? TEXT_INPUT_KEY_DELETE : TEXT_INPUT_KEY_INVALID;
+	default:
+		return TEXT_INPUT_KEY_INVALID;
+	}
+}
+
+static bool translate_key(struct text_input* input, const struct keyboard_event* event) {
+	struct keyboard_text_state* keyboard = ensure_keyboard(input, event->keyboard_id);
+	if (keyboard == NULL) return false;
+	const char* shortcut_text = text_layout_shortcut_map(&input->layout, event->key, event->modifiers, event->locks);
+	enum text_input_key_code   key        = logical_key_code(event->key, event->locks, shortcut_text);
+	enum text_input_key_action key_action = logical_key_action(event->action);
+	if (key == TEXT_INPUT_KEY_INVALID || key_action == TEXT_INPUT_KEY_ACTION_INVALID) return true;
+	struct text_input_action actions[3] = {0};
+	actions[0]                          = (struct text_input_action){
+		.type          = TEXT_INPUT_EVENT_KEY,
+		.source_id     = keyboard->source_id,
+		.text          = key == TEXT_INPUT_KEY_TEXT ? (const uint8_t*)shortcut_text : NULL,
+		.text_size     = key == TEXT_INPUT_KEY_TEXT ? strlen(shortcut_text) : 0u,
+		.key           = key,
+		.key_action    = key_action,
+		.key_modifiers = logical_key_modifiers(event->modifiers),
+	};
+	if (keyboard->context_size != 0u && event->action != KEYBOARD_KEY_ACTION_RELEASED &&
+	    (event->key == INPUT_KEY_ESCAPE || event->key == INPUT_KEY_BACKSPACE)) {
+		actions[1] = (struct text_input_action){
 			.type           = TEXT_INPUT_EVENT_PREEDIT,
 			.source_id      = keyboard->source_id,
 			.composition_id = keyboard->composition_id,
 		};
+		if (!text_input_publish_actions(input, actions, 2u)) return false;
+		keyboard->composition_id = 0u;
+		keyboard->context_size   = 0u;
+		return true;
 	}
-	actions[count++] = (struct text_input_action){
-		.type           = TEXT_INPUT_EVENT_COMMIT,
-		.source_id      = keyboard->source_id,
-		.composition_id = keyboard->composition_id,
-		.text           = text,
-		.text_size      = text_size,
-	};
-	if (!text_input_publish_actions(input, actions, count)) return false;
-	keyboard->composition_id = 0u;
-	keyboard->context_size   = 0u;
-	return true;
-}
-
-static bool translate_key(struct text_input* input, const struct keyboard_event* event) {
-	if (event->action == KEYBOARD_KEY_ACTION_RELEASED) return true;
-	struct keyboard_text_state* keyboard = ensure_keyboard(input, event->keyboard_id);
-	if (keyboard == NULL) return false;
-	if (keyboard->context_size != 0u && (event->key == INPUT_KEY_ESCAPE || event->key == INPUT_KEY_BACKSPACE))
-		return cancel_composition(input, keyboard);
+	if (event->action == KEYBOARD_KEY_ACTION_RELEASED) return text_input_publish_actions(input, actions, 1u);
 	const char* output = text_layout_map(&input->layout, event->key, event->modifiers, event->locks);
-	if (output == NULL) return true;
+	if (output == NULL) return text_input_publish_actions(input, actions, 1u);
 	uint8_t*                committed = NULL;
 	size_t                  committed_size;
 	uint8_t                 next_context[TEXT_LAYOUT_CONTEXT_CAPACITY];
@@ -205,12 +311,49 @@ static bool translate_key(struct text_input* input, const struct keyboard_event*
 	                                                   &next_context_size,
 	                                                   &committed,
 	                                                   &committed_size);
-	if (result == TEXT_LAYOUT_RESULT_PENDING) return publish_pending(input, keyboard, next_context, next_context_size);
+	if (result == TEXT_LAYOUT_RESULT_PENDING) {
+		if (keyboard->composition_id == 0u) {
+			keyboard->composition_id = text_input_allocate_composition_id(input);
+			if (keyboard->composition_id == 0u) return false;
+		}
+		actions[1] = (struct text_input_action){
+			.type            = TEXT_INPUT_EVENT_PREEDIT,
+			.source_id       = keyboard->source_id,
+			.composition_id  = keyboard->composition_id,
+			.text            = next_context,
+			.text_size       = next_context_size,
+			.selection_start = (uint32_t)next_context_size,
+			.selection_end   = (uint32_t)next_context_size,
+		};
+		if (!text_input_publish_actions(input, actions, 2u)) return false;
+		memcpy(keyboard->context, next_context, next_context_size);
+		keyboard->context_size = next_context_size;
+		return true;
+	}
 	if (result != TEXT_LAYOUT_RESULT_COMMIT || committed == NULL || committed_size == 0u) {
 		if (committed != NULL) utf8proc_free(committed);
 		return false;
 	}
-	bool success = publish_commit(input, keyboard, committed, committed_size);
+	size_t action_count = 1u;
+	if (keyboard->composition_id != 0u) {
+		actions[action_count++] = (struct text_input_action){
+			.type           = TEXT_INPUT_EVENT_PREEDIT,
+			.source_id      = keyboard->source_id,
+			.composition_id = keyboard->composition_id,
+		};
+	}
+	actions[action_count++] = (struct text_input_action){
+		.type           = TEXT_INPUT_EVENT_COMMIT,
+		.source_id      = keyboard->source_id,
+		.composition_id = keyboard->composition_id,
+		.text           = committed,
+		.text_size      = committed_size,
+	};
+	bool success = text_input_publish_actions(input, actions, action_count);
+	if (success) {
+		keyboard->composition_id = 0u;
+		keyboard->context_size   = 0u;
+	}
 	utf8proc_free(committed);
 	return success;
 }
@@ -374,22 +517,39 @@ static bool utf8_valid(const uint8_t* text, size_t size) {
 }
 
 static bool action_valid(const struct text_input_action* action) {
+	const uint32_t modifier_mask = TEXT_INPUT_KEY_MODIFIER_LEFT_SHIFT | TEXT_INPUT_KEY_MODIFIER_RIGHT_SHIFT |
+	                               TEXT_INPUT_KEY_MODIFIER_LEFT_CONTROL | TEXT_INPUT_KEY_MODIFIER_RIGHT_CONTROL |
+	                               TEXT_INPUT_KEY_MODIFIER_LEFT_ALT | TEXT_INPUT_KEY_MODIFIER_RIGHT_ALT |
+	                               TEXT_INPUT_KEY_MODIFIER_LEFT_META | TEXT_INPUT_KEY_MODIFIER_RIGHT_META;
 	if (action->source_id == 0u || action->text_size > UINT32_MAX ||
-	    (action->text_size != 0u && action->text == NULL) || !utf8_valid(action->text, action->text_size))
+	    (action->text_size != 0u && action->text == NULL) || (action->key_modifiers & ~modifier_mask) != 0u ||
+	    !utf8_valid(action->text, action->text_size))
 		return false;
 	switch (action->type) {
 	case TEXT_INPUT_EVENT_RESET:
 		return action->composition_id == 0u && action->text_size == 0u && action->selection_start == 0u &&
-		       action->selection_end == 0u && action->delete_before == 0u && action->delete_after == 0u;
+		       action->selection_end == 0u && action->delete_before == 0u && action->delete_after == 0u &&
+		       action->key == TEXT_INPUT_KEY_INVALID && action->key_action == TEXT_INPUT_KEY_ACTION_INVALID &&
+		       action->key_modifiers == 0u;
 	case TEXT_INPUT_EVENT_PREEDIT:
 		return action->composition_id != 0u && action->selection_start <= action->selection_end &&
-		       action->selection_end <= action->text_size && action->delete_before == 0u && action->delete_after == 0u;
+		       action->selection_end <= action->text_size && action->delete_before == 0u &&
+		       action->delete_after == 0u && action->key == TEXT_INPUT_KEY_INVALID &&
+		       action->key_action == TEXT_INPUT_KEY_ACTION_INVALID && action->key_modifiers == 0u;
 	case TEXT_INPUT_EVENT_COMMIT:
 		return action->text_size != 0u && action->selection_start == 0u && action->selection_end == 0u &&
-		       action->delete_before == 0u && action->delete_after == 0u;
+		       action->delete_before == 0u && action->delete_after == 0u && action->key == TEXT_INPUT_KEY_INVALID &&
+		       action->key_action == TEXT_INPUT_KEY_ACTION_INVALID && action->key_modifiers == 0u;
 	case TEXT_INPUT_EVENT_DELETE_SURROUNDING:
 		return action->text_size == 0u && action->selection_start == 0u && action->selection_end == 0u &&
-		       (action->delete_before != 0u || action->delete_after != 0u);
+		       (action->delete_before != 0u || action->delete_after != 0u) && action->key == TEXT_INPUT_KEY_INVALID &&
+		       action->key_action == TEXT_INPUT_KEY_ACTION_INVALID && action->key_modifiers == 0u;
+	case TEXT_INPUT_EVENT_KEY:
+		return action->composition_id == 0u && action->selection_start == 0u && action->selection_end == 0u &&
+		       action->delete_before == 0u && action->delete_after == 0u && action->key > TEXT_INPUT_KEY_INVALID &&
+		       action->key <= TEXT_INPUT_KEY_NUM_LOCK && action->key_action > TEXT_INPUT_KEY_ACTION_INVALID &&
+		       action->key_action <= TEXT_INPUT_KEY_ACTION_REPEATED &&
+		       ((action->key == TEXT_INPUT_KEY_TEXT) == (action->text_size != 0u));
 	default:
 		return false;
 	}
@@ -437,6 +597,9 @@ bool text_input_publish_actions(struct text_input* input, const struct text_inpu
 				.selection_end   = actions[i].selection_end,
 				.delete_before   = actions[i].delete_before,
 				.delete_after    = actions[i].delete_after,
+				.key             = actions[i].key,
+				.key_action      = actions[i].key_action,
+				.key_modifiers   = actions[i].key_modifiers,
 			};
 			if (chunk != 0u) memcpy(events[index].text, chunk_text, chunk);
 			offset += chunk;

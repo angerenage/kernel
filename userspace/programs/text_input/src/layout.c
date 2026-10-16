@@ -601,6 +601,14 @@ const char* text_layout_map(const struct text_layout* layout, enum input_key_cod
 	return layout->mappings[state][key];
 }
 
+const char* text_layout_shortcut_map(const struct text_layout* layout, enum input_key_code key, uint32_t modifiers,
+                                     uint32_t locks) {
+	const uint32_t shortcut_modifiers = KEYBOARD_MODIFIER_LEFT_CONTROL | KEYBOARD_MODIFIER_RIGHT_CONTROL |
+	                                    KEYBOARD_MODIFIER_LEFT_ALT | KEYBOARD_MODIFIER_LEFT_META |
+	                                    KEYBOARD_MODIFIER_RIGHT_META;
+	return text_layout_map(layout, key, modifiers & ~shortcut_modifiers, locks);
+}
+
 enum text_layout_result text_layout_apply(const struct text_layout* layout, const uint8_t* context, size_t context_size,
                                           const char* output, uint8_t* next_context, size_t* next_context_size,
                                           uint8_t** committed, size_t* committed_size) {

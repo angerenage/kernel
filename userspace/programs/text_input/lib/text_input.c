@@ -52,10 +52,15 @@ static bool utf8_valid(const uint8_t* text, size_t size) {
 }
 
 static bool event_valid(const struct text_input_event* event) {
+	const uint32_t modifier_mask = TEXT_INPUT_KEY_MODIFIER_LEFT_SHIFT | TEXT_INPUT_KEY_MODIFIER_RIGHT_SHIFT |
+	                               TEXT_INPUT_KEY_MODIFIER_LEFT_CONTROL | TEXT_INPUT_KEY_MODIFIER_RIGHT_CONTROL |
+	                               TEXT_INPUT_KEY_MODIFIER_LEFT_ALT | TEXT_INPUT_KEY_MODIFIER_RIGHT_ALT |
+	                               TEXT_INPUT_KEY_MODIFIER_LEFT_META | TEXT_INPUT_KEY_MODIFIER_RIGHT_META;
 	if (event->sequence == 0u || event->frame == 0u || event->source_id == 0u ||
 	    (event->flags & ~(uint32_t)(TEXT_INPUT_EVENT_FLAG_TEXT_END | TEXT_INPUT_EVENT_FLAG_FRAME_END)) != 0u ||
 	    event->text_size > TEXT_INPUT_EVENT_TEXT_CAPACITY || event->text_offset > event->text_total_size ||
-	    event->text_size > event->text_total_size - event->text_offset || !utf8_valid(event->text, event->text_size))
+	    event->text_size > event->text_total_size - event->text_offset || event->reserved != 0u ||
+	    (event->key_modifiers & ~modifier_mask) != 0u || !utf8_valid(event->text, event->text_size))
 		return false;
 	for (size_t i = event->text_size; i < TEXT_INPUT_EVENT_TEXT_CAPACITY; i++)
 		if (event->text[i] != 0u) return false;
@@ -63,20 +68,30 @@ static bool event_valid(const struct text_input_event* event) {
 	case TEXT_INPUT_EVENT_RESET:
 		return event->composition_id == 0u && event->text_offset == 0u && event->text_size == 0u &&
 		       event->text_total_size == 0u && event->selection_start == 0u && event->selection_end == 0u &&
-		       event->delete_before == 0u && event->delete_after == 0u &&
+		       event->delete_before == 0u && event->delete_after == 0u && event->key == TEXT_INPUT_KEY_INVALID &&
+		       event->key_action == TEXT_INPUT_KEY_ACTION_INVALID && event->key_modifiers == 0u &&
 		       (event->flags & TEXT_INPUT_EVENT_FLAG_TEXT_END) != 0u;
 	case TEXT_INPUT_EVENT_PREEDIT:
 		return event->composition_id != 0u && event->selection_start <= event->selection_end &&
 		       event->selection_end <= event->text_total_size && event->delete_before == 0u &&
-		       event->delete_after == 0u;
+		       event->delete_after == 0u && event->key == TEXT_INPUT_KEY_INVALID &&
+		       event->key_action == TEXT_INPUT_KEY_ACTION_INVALID && event->key_modifiers == 0u;
 	case TEXT_INPUT_EVENT_COMMIT:
 		return event->text_total_size != 0u && event->selection_start == 0u && event->selection_end == 0u &&
-		       event->delete_before == 0u && event->delete_after == 0u;
+		       event->delete_before == 0u && event->delete_after == 0u && event->key == TEXT_INPUT_KEY_INVALID &&
+		       event->key_action == TEXT_INPUT_KEY_ACTION_INVALID && event->key_modifiers == 0u;
 	case TEXT_INPUT_EVENT_DELETE_SURROUNDING:
 		return event->text_offset == 0u && event->text_size == 0u && event->text_total_size == 0u &&
 		       event->selection_start == 0u && event->selection_end == 0u &&
-		       (event->delete_before != 0u || event->delete_after != 0u) &&
+		       (event->delete_before != 0u || event->delete_after != 0u) && event->key == TEXT_INPUT_KEY_INVALID &&
+		       event->key_action == TEXT_INPUT_KEY_ACTION_INVALID && event->key_modifiers == 0u &&
 		       (event->flags & TEXT_INPUT_EVENT_FLAG_TEXT_END) != 0u;
+	case TEXT_INPUT_EVENT_KEY:
+		return event->composition_id == 0u && event->selection_start == 0u && event->selection_end == 0u &&
+		       event->delete_before == 0u && event->delete_after == 0u && event->key > TEXT_INPUT_KEY_INVALID &&
+		       event->key <= TEXT_INPUT_KEY_NUM_LOCK && event->key_action > TEXT_INPUT_KEY_ACTION_INVALID &&
+		       event->key_action <= TEXT_INPUT_KEY_ACTION_REPEATED &&
+		       ((event->key == TEXT_INPUT_KEY_TEXT) == (event->text_total_size != 0u));
 	default:
 		return false;
 	}
@@ -121,7 +136,9 @@ static bool events_valid(const struct text_input_event* events, size_t count) {
 			    event->text_total_size != previous->text_total_size ||
 			    event->selection_start != previous->selection_start ||
 			    event->selection_end != previous->selection_end || event->delete_before != previous->delete_before ||
-			    event->delete_after != previous->delete_after || event->text_offset != text_offset)
+			    event->delete_after != previous->delete_after || event->key != previous->key ||
+			    event->key_action != previous->key_action || event->key_modifiers != previous->key_modifiers ||
+			    event->text_offset != text_offset)
 				return false;
 		}
 		text_offset += event->text_size;

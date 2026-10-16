@@ -3,9 +3,10 @@
 /*
  * System Unicode text-input protocol.
  *
- * The text-input service publishes committed text and replaceable pre-edit
- * state as retained, framed UTF-8 records. It does not expose keyboard layout
- * positions or make application-focus decisions.
+ * The text-input service publishes committed text, replaceable pre-edit state,
+ * and layout-resolved logical key transitions as retained, framed records. It
+ * does not expose physical keyboard positions or make application-focus
+ * decisions.
  *
  * Current specification version: 1.0-beta
  */
@@ -32,6 +33,75 @@ enum text_input_event_type {
 	TEXT_INPUT_EVENT_PREEDIT,
 	TEXT_INPUT_EVENT_COMMIT,
 	TEXT_INPUT_EVENT_DELETE_SURROUNDING,
+	TEXT_INPUT_EVENT_KEY,
+};
+
+/* Layout-resolved or non-textual identity of one key transition. */
+enum text_input_key_code {
+	TEXT_INPUT_KEY_INVALID = 0,
+	TEXT_INPUT_KEY_TEXT,
+	TEXT_INPUT_KEY_ESCAPE,
+	TEXT_INPUT_KEY_F1,
+	TEXT_INPUT_KEY_F2,
+	TEXT_INPUT_KEY_F3,
+	TEXT_INPUT_KEY_F4,
+	TEXT_INPUT_KEY_F5,
+	TEXT_INPUT_KEY_F6,
+	TEXT_INPUT_KEY_F7,
+	TEXT_INPUT_KEY_F8,
+	TEXT_INPUT_KEY_F9,
+	TEXT_INPUT_KEY_F10,
+	TEXT_INPUT_KEY_F11,
+	TEXT_INPUT_KEY_F12,
+	TEXT_INPUT_KEY_PRINT_SCREEN,
+	TEXT_INPUT_KEY_SCROLL_LOCK,
+	TEXT_INPUT_KEY_PAUSE,
+	TEXT_INPUT_KEY_BACKSPACE,
+	TEXT_INPUT_KEY_TAB,
+	TEXT_INPUT_KEY_ENTER,
+	TEXT_INPUT_KEY_CAPS_LOCK,
+	TEXT_INPUT_KEY_LEFT_SHIFT,
+	TEXT_INPUT_KEY_RIGHT_SHIFT,
+	TEXT_INPUT_KEY_LEFT_CONTROL,
+	TEXT_INPUT_KEY_RIGHT_CONTROL,
+	TEXT_INPUT_KEY_LEFT_ALT,
+	TEXT_INPUT_KEY_RIGHT_ALT,
+	TEXT_INPUT_KEY_LEFT_META,
+	TEXT_INPUT_KEY_RIGHT_META,
+	TEXT_INPUT_KEY_MENU,
+	TEXT_INPUT_KEY_INSERT,
+	TEXT_INPUT_KEY_HOME,
+	TEXT_INPUT_KEY_PAGE_UP,
+	TEXT_INPUT_KEY_DELETE,
+	TEXT_INPUT_KEY_END,
+	TEXT_INPUT_KEY_PAGE_DOWN,
+	TEXT_INPUT_KEY_UP,
+	TEXT_INPUT_KEY_LEFT,
+	TEXT_INPUT_KEY_DOWN,
+	TEXT_INPUT_KEY_RIGHT,
+	TEXT_INPUT_KEY_CENTER,
+	TEXT_INPUT_KEY_NUM_LOCK,
+};
+
+/* Transition represented by one logical key action. */
+enum text_input_key_action {
+	TEXT_INPUT_KEY_ACTION_INVALID = 0,
+	TEXT_INPUT_KEY_ACTION_PRESSED,
+	TEXT_INPUT_KEY_ACTION_RELEASED,
+	TEXT_INPUT_KEY_ACTION_REPEATED,
+};
+
+/* Physical modifier keys held when a logical key transition is published. */
+enum text_input_key_modifier {
+	TEXT_INPUT_KEY_MODIFIER_NONE          = 0u,
+	TEXT_INPUT_KEY_MODIFIER_LEFT_SHIFT    = 1u << 0u,
+	TEXT_INPUT_KEY_MODIFIER_RIGHT_SHIFT   = 1u << 1u,
+	TEXT_INPUT_KEY_MODIFIER_LEFT_CONTROL  = 1u << 2u,
+	TEXT_INPUT_KEY_MODIFIER_RIGHT_CONTROL = 1u << 3u,
+	TEXT_INPUT_KEY_MODIFIER_LEFT_ALT      = 1u << 4u,
+	TEXT_INPUT_KEY_MODIFIER_RIGHT_ALT     = 1u << 5u,
+	TEXT_INPUT_KEY_MODIFIER_LEFT_META     = 1u << 6u,
+	TEXT_INPUT_KEY_MODIFIER_RIGHT_META    = 1u << 7u,
 };
 
 /* Boundaries attached to one retained text-input record. */
@@ -52,7 +122,13 @@ enum text_input_event_flags {
  * Empty pre-edit text cancels the composition. COMMIT records contain
  * immutable text to insert. DELETE_SURROUNDING uses delete_before and
  * delete_after as UTF-8 byte counts and carries no text. RESET discards all
- * provisional state for its source. No Unicode normalization is implied.
+ * provisional state for its source. KEY describes a press, release, or repeat
+ * after applying the keyboard layout. TEXT keys carry their layout-resolved
+ * label in text; other keys carry no text. Key labels identify shortcuts and
+ * are not committed text. A KEY and the PREEDIT or COMMIT actions caused by
+ * the same transition share one frame. Clients process the complete frame to
+ * resolve shortcuts and composition handling before accepting text. No
+ * Unicode normalization is implied.
  */
 struct text_input_event {
 	uint64_t                   sequence;
@@ -68,6 +144,10 @@ struct text_input_event {
 	uint32_t                   selection_end;
 	uint32_t                   delete_before;
 	uint32_t                   delete_after;
+	enum text_input_key_code   key;
+	enum text_input_key_action key_action;
+	uint32_t                   key_modifiers;
+	uint32_t                   reserved;
 	uint8_t                    text[TEXT_INPUT_EVENT_TEXT_CAPACITY];
 };
 

@@ -36,6 +36,9 @@ struct text_input_action {
 	uint32_t                   selection_end;
 	uint32_t                   delete_before;
 	uint32_t                   delete_after;
+	enum text_input_key_code   key;
+	enum text_input_key_action key_action;
+	uint32_t                   key_modifiers;
 };
 
 /* State shared by the text translator and its capability-server thread. */
