@@ -225,11 +225,18 @@ static bool bitmap_alpha(const FT_Bitmap* bitmap, const uint8_t* row, size_t col
 }
 
 static bool draw_bitmap(const struct drawing_surface* surface, const FT_Bitmap* bitmap, int64_t x, int64_t y,
-                        struct color foreground, struct color background) {
+                        size_t clip_x, size_t clip_y, size_t clip_width, size_t clip_height, struct color foreground,
+                        struct color background) {
 	size_t stride;
 	size_t minimum_stride;
+	size_t clip_right;
+	size_t clip_bottom;
 
-	if (surface == NULL || bitmap == NULL || bitmap->pitch == INT_MIN) return false;
+	if (surface == NULL || bitmap == NULL || bitmap->pitch == INT_MIN || clip_x > surface->width ||
+	    clip_y > surface->height || clip_width > surface->width - clip_x || clip_height > surface->height - clip_y)
+		return false;
+	clip_right  = clip_x + clip_width;
+	clip_bottom = clip_y + clip_height;
 	if (bitmap->width == 0u || bitmap->rows == 0u) return true;
 	if (bitmap->buffer == NULL) return false;
 	stride = (size_t)(bitmap->pitch < 0 ? -bitmap->pitch : bitmap->pitch);
@@ -248,8 +255,9 @@ static bool draw_bitmap(const struct drawing_surface* surface, const FT_Bitmap* 
 			uint8_t alpha;
 
 			if (!bitmap_alpha(bitmap, bitmap->buffer + source_offset, column, &alpha)) return false;
-			if (alpha == 0u || destination_x < 0 || destination_y < 0 || (uint64_t)destination_x >= surface->width ||
-			    (uint64_t)destination_y >= surface->height)
+			if (alpha == 0u || destination_x < 0 || destination_y < 0 || (uint64_t)destination_x < clip_x ||
+			    (uint64_t)destination_x >= clip_right || (uint64_t)destination_y < clip_y ||
+			    (uint64_t)destination_y >= clip_bottom)
 				continue;
 			volatile uint8_t* destination = surface->framebuffer + (size_t)destination_y * surface->pitch +
 			                                (size_t)destination_x * surface->format.bytes_per_pixel;
@@ -356,7 +364,17 @@ static bool draw_cell_value(struct terminal* terminal, const struct terminal_cel
 		glyph   = terminal->face->glyph;
 		glyph_x = (int64_t)cell_x + glyph->bitmap_left;
 		glyph_y = (int64_t)cell_y + (int64_t)terminal->ascender - glyph->bitmap_top;
-		if (!draw_bitmap(&terminal->surface, &glyph->bitmap, glyph_x, glyph_y, foreground, background)) return false;
+		if (!draw_bitmap(&terminal->surface,
+		                 &glyph->bitmap,
+		                 glyph_x,
+		                 glyph_y,
+		                 cell_x,
+		                 cell_y,
+		                 terminal->cell_width,
+		                 terminal->cell_height,
+		                 foreground,
+		                 background))
+			return false;
 	}
 	if (cell->underline && !cursor) {
 		size_t underline_y = cell_y + terminal->ascender + 1u;
@@ -800,9 +818,36 @@ static bool process_text_byte(struct terminal* terminal, uint8_t byte) {
 	return process_utf8_byte(terminal, byte);
 }
 
+static bool positive_metric_pixels(FT_Pos value, size_t* out_pixels) {
+	uintmax_t raw;
+	uintmax_t pixels;
+
+	if (value <= 0 || out_pixels == NULL) return false;
+	raw    = (uintmax_t)value;
+	pixels = raw / 64u + (raw % 64u != 0u ? 1u : 0u);
+	if (pixels > SIZE_MAX) return false;
+	*out_pixels = (size_t)pixels;
+	return true;
+}
+
+static bool descender_metric_pixels(FT_Pos value, size_t* out_pixels) {
+	uintmax_t raw;
+	uintmax_t pixels;
+
+	if (value > 0 || out_pixels == NULL) return false;
+	raw    = value == LONG_MIN ? (uintmax_t)LONG_MAX + 1u : (uintmax_t)-value;
+	pixels = raw / 64u + (raw % 64u != 0u ? 1u : 0u);
+	if (pixels > SIZE_MAX) return false;
+	*out_pixels = (size_t)pixels;
+	return true;
+}
+
 struct terminal* terminal_create(volatile uint8_t* framebuffer, const struct framebuffer_info_response* info) {
 	struct terminal* terminal = NULL;
 	size_t           font_size;
+	size_t           metrics_height;
+	size_t           descender;
+	size_t           glyph_height;
 	size_t           visible_row_size;
 	size_t           visible_size;
 	FT_Pos           advance;
@@ -830,13 +875,17 @@ struct terminal* terminal_create(volatile uint8_t* framebuffer, const struct fra
 	        FT_Err_Ok ||
 	    FT_Set_Pixel_Sizes(terminal->face, 0u, TERMINAL_FONT_PIXEL_HEIGHT) != FT_Err_Ok ||
 	    terminal->face->size->metrics.height <= 0 || terminal->face->size->metrics.ascender <= 0 ||
-	    FT_Load_Char(terminal->face, 'M', FT_LOAD_DEFAULT) != FT_Err_Ok)
+	    terminal->face->size->metrics.descender > 0 || FT_Load_Char(terminal->face, 'M', FT_LOAD_DEFAULT) != FT_Err_Ok)
 		goto fail;
 	advance = terminal->face->glyph->advance.x;
 	if (advance <= 0) goto fail;
-	terminal->cell_width  = (size_t)((advance + 63) >> 6u);
-	terminal->cell_height = (size_t)((terminal->face->size->metrics.height + 63) >> 6u);
-	terminal->ascender    = (size_t)((terminal->face->size->metrics.ascender + 63) >> 6u);
+	if (!positive_metric_pixels(advance, &terminal->cell_width) ||
+	    !positive_metric_pixels(terminal->face->size->metrics.height, &metrics_height) ||
+	    !positive_metric_pixels(terminal->face->size->metrics.ascender, &terminal->ascender) ||
+	    !descender_metric_pixels(terminal->face->size->metrics.descender, &descender) ||
+	    add_overflow_size(terminal->ascender, descender, &glyph_height))
+		goto fail;
+	terminal->cell_height = metrics_height > glyph_height ? metrics_height : glyph_height;
 	if (terminal->cell_width == 0u || terminal->cell_height == 0u || terminal->ascender > terminal->cell_height)
 		goto fail;
 	terminal->columns = terminal->surface.width / terminal->cell_width;
