@@ -33,6 +33,15 @@ static bool execute_change_directory(struct shell* shell, size_t argc, char* con
 	return report_change_directory(shell_change_directory(shell, argv[0], strlen(argv[0])));
 }
 
+static bool execute_print_directory(const struct shell* shell, size_t argc, char* const argv[]) {
+	/* Paths are kept lexically normalized and there are no symbolic links, so -L and -P are equivalent. */
+	for (size_t i = 0u; i < argc; i++) {
+		if (strcmp(argv[i], "-L") != 0 && strcmp(argv[i], "-P") != 0)
+			return shell_write_command_error("pwd", "unexpected argument");
+	}
+	return shell_write(shell->current_directory, shell->current_directory_size) && shell_write_string("\n");
+}
+
 static bool execute_program(struct shell* shell, size_t argc, char* const argv[]) {
 	size_t command_size = strlen(argv[0]);
 	switch (shell_run_program(shell, argv[0], command_size, argc - 1u, (const char* const*)(argv + 1u))) {
@@ -97,6 +106,7 @@ bool shell_execute_line(struct shell* shell, const char* line, size_t size) {
 	size = end - start;
 	if (!parse_words(line, size, &argv, &argc) || argc == 0u) return false;
 	if (strcmp(argv[0], "cd") == 0) success = execute_change_directory(shell, argc - 1u, argv + 1u);
+	else if (strcmp(argv[0], "pwd") == 0) success = execute_print_directory(shell, argc - 1u, argv + 1u);
 	else if (strcmp(argv[0], "clear") == 0) {
 		if (argc != 1u) success = shell_write_command_error("clear", "expected no arguments");
 		else success = shell_write_string("\x1b[2J\x1b[H");
