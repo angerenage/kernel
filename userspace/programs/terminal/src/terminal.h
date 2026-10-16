@@ -15,3 +15,6 @@ void terminal_destroy(struct terminal* terminal);
 
 /* Consume a prefix of one UTF-8 terminal byte stream write. */
 bool terminal_write(struct terminal* terminal, const uint8_t* data, size_t size, size_t* out_written);
+
+/* Replace the transient, underlined UTF-8 composition shown at the cursor. */
+bool terminal_set_preedit(struct terminal* terminal, const uint8_t* text, size_t size, size_t selection_end);

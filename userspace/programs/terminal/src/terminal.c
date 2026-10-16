@@ -57,6 +57,11 @@ struct terminal_cell {
 	bool         underline;
 };
 
+struct terminal_overlay_cell {
+	size_t               index;
+	struct terminal_cell cell;
+};
+
 enum escape_state {
 	ESCAPE_STATE_TEXT,
 	ESCAPE_STATE_ESCAPE,
@@ -64,42 +69,50 @@ enum escape_state {
 };
 
 struct terminal {
-	struct drawing_surface surface;
-	FT_Library             library;
-	FT_Face                face;
-	uint8_t*               font_data;
-	size_t                 cell_width;
-	size_t                 cell_height;
-	size_t                 ascender;
-	size_t                 columns;
-	size_t                 rows;
-	size_t                 column;
-	size_t                 row;
-	struct terminal_cell*  cells;
-	size_t                 cell_count;
-	size_t                 saved_column;
-	size_t                 saved_row;
-	bool                   saved_cursor;
-	bool                   cursor_visible;
-	bool                   cursor_drawn;
-	bool                   wrap_pending;
-	bool                   foreground_default;
-	bool                   background_default;
-	bool                   bold;
-	bool                   reverse;
-	bool                   underline;
-	uint8_t                foreground;
-	uint8_t                background;
-	uint32_t               utf8_value;
-	uint32_t               utf8_minimum;
-	uint8_t                utf8_remaining;
-	enum escape_state      escape_state;
-	uint16_t               csi_parameters[TERMINAL_CSI_PARAMETER_CAPACITY];
-	size_t                 csi_parameter_count;
-	uint16_t               csi_value;
-	bool                   csi_has_value;
-	bool                   csi_invalid;
-	bool                   csi_private;
+	struct drawing_surface        surface;
+	FT_Library                    library;
+	FT_Face                       face;
+	uint8_t*                      font_data;
+	size_t                        cell_width;
+	size_t                        cell_height;
+	size_t                        ascender;
+	size_t                        columns;
+	size_t                        rows;
+	size_t                        column;
+	size_t                        row;
+	struct terminal_cell*         cells;
+	size_t                        cell_count;
+	size_t                        saved_column;
+	size_t                        saved_row;
+	bool                          saved_cursor;
+	bool                          cursor_visible;
+	bool                          cursor_drawn;
+	size_t                        cursor_drawn_row;
+	size_t                        cursor_drawn_column;
+	bool                          wrap_pending;
+	bool                          locked;
+	uint32_t*                     preedit_codepoints;
+	size_t                        preedit_count;
+	size_t                        preedit_caret;
+	struct terminal_overlay_cell* overlay;
+	size_t                        overlay_count;
+	bool                          foreground_default;
+	bool                          background_default;
+	bool                          bold;
+	bool                          reverse;
+	bool                          underline;
+	uint8_t                       foreground;
+	uint8_t                       background;
+	uint32_t                      utf8_value;
+	uint32_t                      utf8_minimum;
+	uint8_t                       utf8_remaining;
+	enum escape_state             escape_state;
+	uint16_t                      csi_parameters[TERMINAL_CSI_PARAMETER_CAPACITY];
+	size_t                        csi_parameter_count;
+	uint16_t                      csi_value;
+	bool                          csi_has_value;
+	bool                          csi_invalid;
+	bool                          csi_private;
 };
 
 static const struct terminal_theme theme = {
@@ -317,12 +330,12 @@ static struct terminal_cell blank_cell(const struct terminal* terminal) {
 	};
 }
 
-static bool draw_cell(struct terminal* terminal, size_t row, size_t column, bool cursor) {
-	const struct terminal_cell* cell = &terminal->cells[row * terminal->columns + column];
-	struct color                foreground;
-	struct color                background;
-	size_t                      cell_x = column * terminal->cell_width;
-	size_t                      cell_y = row * terminal->cell_height;
+static bool draw_cell_value(struct terminal* terminal, const struct terminal_cell* cell, size_t row, size_t column,
+                            bool cursor) {
+	struct color foreground;
+	struct color background;
+	size_t       cell_x = column * terminal->cell_width;
+	size_t       cell_y = row * terminal->cell_height;
 
 	foreground = cursor ? theme.cursor_text : cell->foreground;
 	background = cursor ? theme.cursor : cell->background;
@@ -360,17 +373,94 @@ static bool draw_cell(struct terminal* terminal, size_t row, size_t column, bool
 	return true;
 }
 
+static bool draw_cell(struct terminal* terminal, size_t row, size_t column, bool cursor) {
+	return draw_cell_value(terminal, &terminal->cells[row * terminal->columns + column], row, column, cursor);
+}
+
+static const struct terminal_cell* overlay_cell_at(const struct terminal* terminal, size_t index) {
+	for (size_t i = 0u; i < terminal->overlay_count; i++)
+		if (terminal->overlay[i].index == index) return &terminal->overlay[i].cell;
+	return NULL;
+}
+
+static bool redraw_screen_cell(struct terminal* terminal, size_t row, size_t column, bool cursor) {
+	size_t                      index = row * terminal->columns + column;
+	const struct terminal_cell* cell  = overlay_cell_at(terminal, index);
+	return cell == NULL ? draw_cell(terminal, row, column, cursor)
+	                    : draw_cell_value(terminal, cell, row, column, cursor);
+}
+
 static bool hide_cursor(struct terminal* terminal) {
 	if (!terminal->cursor_drawn) return true;
 	terminal->cursor_drawn = false;
-	return draw_cell(terminal, terminal->row, terminal->column, false);
+	return redraw_screen_cell(terminal, terminal->cursor_drawn_row, terminal->cursor_drawn_column, false);
 }
 
 static bool show_cursor(struct terminal* terminal) {
+	size_t row    = terminal->row;
+	size_t column = terminal->column;
 	if (!terminal->cursor_visible || terminal->cursor_drawn) return true;
-	if (!draw_cell(terminal, terminal->row, terminal->column, true)) return false;
-	terminal->cursor_drawn = true;
+	if (terminal->overlay_count != 0u) {
+		size_t caret =
+			terminal->preedit_caret < terminal->overlay_count ? terminal->preedit_caret : terminal->overlay_count;
+		size_t index = terminal->overlay[0].index + caret;
+		if (index >= terminal->cell_count) index = terminal->cell_count - 1u;
+		row    = index / terminal->columns;
+		column = index % terminal->columns;
+	}
+	if (!redraw_screen_cell(terminal, row, column, true)) return false;
+	terminal->cursor_drawn        = true;
+	terminal->cursor_drawn_row    = row;
+	terminal->cursor_drawn_column = column;
 	return true;
+}
+
+static bool erase_overlay(struct terminal* terminal) {
+	bool success = true;
+	for (size_t i = 0u; i < terminal->overlay_count; i++) {
+		size_t index = terminal->overlay[i].index;
+		if (!draw_cell(terminal, index / terminal->columns, index % terminal->columns, false)) success = false;
+	}
+	terminal->overlay_count = 0u;
+	return success;
+}
+
+static bool draw_overlay(struct terminal* terminal) {
+	if (terminal->preedit_count == 0u) return true;
+	size_t first = terminal->row * terminal->columns + terminal->column;
+	if (terminal->wrap_pending) {
+		if (first + 1u >= terminal->cell_count) return true;
+		first++;
+	}
+	terminal->overlay_count = terminal->preedit_count;
+	if (terminal->overlay_count > terminal->cell_count - first) terminal->overlay_count = terminal->cell_count - first;
+	for (size_t i = 0u; i < terminal->overlay_count; i++) {
+		terminal->overlay[i] = (struct terminal_overlay_cell){
+			.index = first + i,
+			.cell =
+				{
+					   .codepoint  = terminal->preedit_codepoints[i],
+					   .foreground = selected_foreground(terminal),
+					   .background = selected_background(terminal),
+					   .underline  = true,
+					   },
+		};
+		if (!draw_cell_value(terminal,
+		                     &terminal->overlay[i].cell,
+		                     terminal->overlay[i].index / terminal->columns,
+		                     terminal->overlay[i].index % terminal->columns,
+		                     false))
+			return false;
+	}
+	return true;
+}
+
+static void terminal_lock(struct terminal* terminal) {
+	while (__atomic_test_and_set(&terminal->locked, __ATOMIC_ACQUIRE)) __asm__ volatile("" ::: "memory");
+}
+
+static void terminal_unlock(struct terminal* terminal) {
+	__atomic_clear(&terminal->locked, __ATOMIC_RELEASE);
 }
 
 static void clear_display(struct terminal* terminal) {
@@ -774,18 +864,119 @@ void terminal_destroy(struct terminal* terminal) {
 	if (terminal->library != NULL) (void)FT_Done_FreeType(terminal->library);
 	free(terminal->font_data);
 	free(terminal->cells);
+	free(terminal->preedit_codepoints);
+	free(terminal->overlay);
 	free(terminal);
 }
 
 bool terminal_write(struct terminal* terminal, const uint8_t* data, size_t size, size_t* out_written) {
 	size_t written = 0u;
+	bool   success;
 
 	if (out_written == NULL) return false;
 	*out_written = 0u;
 	if (terminal == NULL || (size != 0u && data == NULL)) return false;
 	if (size == 0u) return true;
-	if (!hide_cursor(terminal)) return false;
+	terminal_lock(terminal);
+	if (!hide_cursor(terminal) || !erase_overlay(terminal)) {
+		terminal_unlock(terminal);
+		return false;
+	}
 	while (written < size && process_text_byte(terminal, data[written])) written++;
 	*out_written = written;
-	return show_cursor(terminal) && written == size;
+	success      = draw_overlay(terminal) && show_cursor(terminal) && written == size;
+	terminal_unlock(terminal);
+	return success;
+}
+
+static bool decode_utf8(const uint8_t* text, size_t size, uint32_t* codepoints, size_t* out_count, size_t selection_end,
+                        size_t* out_caret) {
+	size_t offset = 0u;
+	size_t count  = 0u;
+	size_t caret  = SIZE_MAX;
+
+	if (out_count == NULL || out_caret == NULL || selection_end > size ||
+	    (size != 0u && (text == NULL || codepoints == NULL)))
+		return false;
+	while (offset < size) {
+		uint8_t  first = text[offset];
+		uint32_t value;
+		size_t   length;
+		if (offset == selection_end) caret = count;
+		if (first < 0x80u) {
+			value  = first;
+			length = 1u;
+		}
+		else if (first >= 0xc2u && first <= 0xdfu) {
+			value  = first & 0x1fu;
+			length = 2u;
+		}
+		else if (first >= 0xe0u && first <= 0xefu) {
+			value  = first & 0x0fu;
+			length = 3u;
+		}
+		else if (first >= 0xf0u && first <= 0xf4u) {
+			value  = first & 0x07u;
+			length = 4u;
+		}
+		else return false;
+		if (length > size - offset || (selection_end > offset && selection_end < offset + length)) return false;
+		for (size_t i = 1u; i < length; i++) {
+			if ((text[offset + i] & 0xc0u) != 0x80u) return false;
+			value = (value << 6u) | (text[offset + i] & 0x3fu);
+		}
+		uint32_t minimum = length == 1u ? 0u : length == 2u ? 0x80u : length == 3u ? 0x800u : 0x10000u;
+		if (value < minimum || value > 0x10ffffu || (value >= 0xd800u && value <= 0xdfffu)) return false;
+		codepoints[count++] = value;
+		offset += length;
+	}
+	if (selection_end == size) caret = count;
+	if (caret == SIZE_MAX) return false;
+	*out_count = count;
+	*out_caret = caret;
+	return true;
+}
+
+bool terminal_set_preedit(struct terminal* terminal, const uint8_t* text, size_t size, size_t selection_end) {
+	uint32_t*                     codepoints = NULL;
+	struct terminal_overlay_cell* overlay    = NULL;
+	size_t                        count;
+	size_t                        caret;
+	bool                          success;
+
+	if (terminal == NULL || selection_end > size || (size != 0u && text == NULL) ||
+	    size > SIZE_MAX / sizeof(*codepoints) || size > SIZE_MAX / sizeof(*overlay))
+		return false;
+	if (size != 0u) {
+		codepoints = malloc(size * sizeof(*codepoints));
+		overlay    = malloc(size * sizeof(*overlay));
+		if (codepoints == NULL || overlay == NULL ||
+		    !decode_utf8(text, size, codepoints, &count, selection_end, &caret)) {
+			free(codepoints);
+			free(overlay);
+			return false;
+		}
+	}
+	else {
+		count = 0u;
+		caret = 0u;
+	}
+
+	terminal_lock(terminal);
+	success = hide_cursor(terminal) && erase_overlay(terminal);
+	if (success) {
+		free(terminal->preedit_codepoints);
+		free(terminal->overlay);
+		terminal->preedit_codepoints = codepoints;
+		terminal->preedit_count      = count;
+		terminal->preedit_caret      = caret;
+		terminal->overlay            = overlay;
+		codepoints                   = NULL;
+		overlay                      = NULL;
+		success                      = draw_overlay(terminal) && show_cursor(terminal);
+	}
+	terminal_unlock(terminal);
+	free(codepoints);
+	free(overlay);
+	return success;
 }

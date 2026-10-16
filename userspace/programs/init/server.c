@@ -152,7 +152,8 @@ static bool use_terminal_output(void) {
 		.major          = TERMINAL_PROTOCOL_VERSION_MAJOR,
 		.minor          = TERMINAL_PROTOCOL_VERSION_MINOR,
 	};
-	struct init_service_handle terminal = {.capability = CAP_ID_INVALID};
+	struct init_service_handle terminal   = {.capability = CAP_ID_INVALID};
+	cap_id_t                   output_cap = CAP_ID_INVALID;
 	enum init_registry_status  status;
 
 	status = registry_acquire(server_pid, &query, TERMINAL_SERVICE_NAME, &terminal);
@@ -160,7 +161,13 @@ static bool use_terminal_output(void) {
 		printf("init: terminal output acquisition failed: %u\n", (unsigned)status);
 		return false;
 	}
-	display_set_standard_streams(CAP_ID_INVALID, terminal.capability, terminal.capability);
+	if (cap_delegate(terminal.capability, server_pid, TERMINAL_OUTPUT_RIGHTS, &output_cap) != SYSCALL_STATUS_OK ||
+	    cap_drop(terminal.capability) != SYSCALL_STATUS_OK) {
+		if (output_cap != CAP_ID_INVALID) (void)cap_drop(output_cap);
+		printf("init: terminal output rights reduction failed\n");
+		return false;
+	}
+	display_set_standard_streams(CAP_ID_INVALID, output_cap, output_cap);
 	serial_stream_disable();
 	return true;
 }

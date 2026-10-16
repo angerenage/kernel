@@ -7,6 +7,7 @@ terminal_protocol_dep = declare_dependency(
 terminal_elf = executable(
 	'terminal.elf',
 	sources : files(
+		'src/input.c',
 		'src/main.c',
 		'src/server.c',
 		'src/terminal.c',
@@ -15,7 +16,7 @@ terminal_elf = executable(
 	include_directories : [userspace_inc, terminal_include],
 	link_whole : userspace_crt,
 	link_with : userspace_link_libs,
-	dependencies : userspace_freetype_dep,
+	dependencies : [userspace_freetype_dep, text_input_dep],
 	link_args : userspace_link_args,
 	install : false,
 	link_depends : files(userspace_linker_file),

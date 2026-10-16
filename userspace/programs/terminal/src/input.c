@@ -1,0 +1,468 @@
+#include "input.h"
+
+#include <base/process.h>
+#include <protocol/text_input.h>
+#include <runtime/init.h>
+#include <runtime/stream.h>
+#include <runtime/text_input.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <system/capability.h>
+#include <system/channel.h>
+#include <system/process.h>
+#include <system/signal.h>
+#include <system/thread.h>
+#include <system/time.h>
+
+#include "terminal.h"
+
+#define TERMINAL_INPUT_BUFFER_CAPACITY (64u * 1024u)
+#define TERMINAL_INPUT_PENDING_CAPACITY 64u
+#define TERMINAL_INPUT_RETRY_DELAY_MS 100u
+#define TERMINAL_TEXT_PROTOCOL_VERSION_MAJOR 1u
+#define TERMINAL_TEXT_EVENT_PAGE_SIZE                                                                                  \
+	((CAP_MAX_RESPONSE_SIZE - sizeof(struct text_input_read_events_response)) / sizeof(struct text_input_event))
+
+struct pending_read {
+	cap_call_id_t call_id;
+	size_t        size;
+};
+
+struct terminal_input {
+	struct terminal*    terminal;
+	uint8_t             bytes[TERMINAL_INPUT_BUFFER_CAPACITY];
+	size_t              byte_head;
+	size_t              byte_count;
+	struct pending_read pending[TERMINAL_INPUT_PENDING_CAPACITY];
+	size_t              pending_head;
+	size_t              pending_count;
+	bool                locked;
+	bool                stopping;
+	cap_id_t            text_thread_cap;
+};
+
+static void input_lock(struct terminal_input* input) {
+	while (__atomic_test_and_set(&input->locked, __ATOMIC_ACQUIRE)) __asm__ volatile("" ::: "memory");
+}
+
+static void input_unlock(struct terminal_input* input) {
+	__atomic_clear(&input->locked, __ATOMIC_RELEASE);
+}
+
+static bool reply(const struct cap_request* call, const void* response, size_t response_size, syscall_status_t status) {
+	return channel_reply(call->call_id, response, response_size, status) == SYSCALL_STATUS_OK;
+}
+
+static void consume_bytes(struct terminal_input* input, size_t count) {
+	input->byte_head = (input->byte_head + count) % TERMINAL_INPUT_BUFFER_CAPACITY;
+	input->byte_count -= count;
+}
+
+static size_t copy_bytes(const struct terminal_input* input, uint8_t* output, size_t capacity) {
+	size_t count = input->byte_count < capacity ? input->byte_count : capacity;
+	for (size_t i = 0u; i < count; i++)
+		output[i] = input->bytes[(input->byte_head + i) % TERMINAL_INPUT_BUFFER_CAPACITY];
+	return count;
+}
+
+static void service_pending_reads(struct terminal_input* input) {
+	uint8_t response[CAP_MAX_RESPONSE_SIZE];
+	while (input->pending_count != 0u && input->byte_count != 0u) {
+		struct pending_read* pending = &input->pending[input->pending_head];
+		size_t               count   = copy_bytes(input, response, pending->size);
+		if (channel_reply(pending->call_id, response, count, SYSCALL_STATUS_OK) == SYSCALL_STATUS_OK)
+			consume_bytes(input, count);
+		input->pending_head = (input->pending_head + 1u) % TERMINAL_INPUT_PENDING_CAPACITY;
+		input->pending_count--;
+	}
+}
+
+static bool publish_bytes(struct terminal_input* input, const uint8_t* bytes, size_t size) {
+	if (input == NULL || (size != 0u && bytes == NULL)) return false;
+	input_lock(input);
+	service_pending_reads(input);
+	if (size > TERMINAL_INPUT_BUFFER_CAPACITY - input->byte_count) {
+		input_unlock(input);
+		return false;
+	}
+	for (size_t i = 0u; i < size; i++) {
+		size_t tail        = (input->byte_head + input->byte_count) % TERMINAL_INPUT_BUFFER_CAPACITY;
+		input->bytes[tail] = bytes[i];
+		input->byte_count++;
+	}
+	service_pending_reads(input);
+	input_unlock(input);
+	return true;
+}
+
+bool terminal_input_read(struct terminal_input* input, const struct cap_request* call, const uint8_t* request_data) {
+	struct stream_read_request request;
+	uint8_t                    response[CAP_MAX_RESPONSE_SIZE];
+
+	if (call == NULL) return false;
+	if (input == NULL || request_data == NULL || call->request_size != sizeof(request))
+		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	memcpy(&request, request_data, sizeof(request));
+	if (request.header.op != STREAM_OP_READ || request.reserved != 0u || request.size > CAP_MAX_RESPONSE_SIZE ||
+	    request.size > call->response_capacity)
+		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	if (request.size == 0u) return reply(call, NULL, 0u, SYSCALL_STATUS_OK);
+
+	input_lock(input);
+	service_pending_reads(input);
+	if (input->byte_count != 0u) {
+		size_t count   = copy_bytes(input, response, (size_t)request.size);
+		bool   success = reply(call, response, count, SYSCALL_STATUS_OK);
+		if (success) consume_bytes(input, count);
+		input_unlock(input);
+		return success;
+	}
+	if (input->pending_count == TERMINAL_INPUT_PENDING_CAPACITY) {
+		input_unlock(input);
+		return reply(call, NULL, 0u, SYSCALL_STATUS_FAILED);
+	}
+	size_t tail          = (input->pending_head + input->pending_count) % TERMINAL_INPUT_PENDING_CAPACITY;
+	input->pending[tail] = (struct pending_read){.call_id = call->call_id, .size = (size_t)request.size};
+	input->pending_count++;
+	input_unlock(input);
+	return true;
+}
+
+static bool text_handle_valid(const struct init_service_handle* handle) {
+	return handle->capability != CAP_ID_INVALID && handle->owner != PROCESS_PID_INVALID &&
+	       strcmp(handle->info.selector.namespace_path, TEXT_INPUT_NAMESPACE) == 0 &&
+	       strcmp(handle->info.selector.protocol, TEXT_INPUT_PROTOCOL_NAME) == 0 &&
+	       handle->info.selector.major == TERMINAL_TEXT_PROTOCOL_VERSION_MAJOR &&
+	       strcmp(handle->info.selector.service, TEXT_INPUT_SERVICE_NAME) == 0 &&
+	       handle->info.rights == TEXT_INPUT_CLIENT_RIGHTS;
+}
+
+static bool wait_for_retry(struct terminal_input* input) {
+	return !__atomic_load_n(&input->stopping, __ATOMIC_ACQUIRE) &&
+	       sleep_ms(TERMINAL_INPUT_RETRY_DELAY_MS) == SYSCALL_STATUS_OK;
+}
+
+static bool process_logical_key(struct terminal_input* input, const struct text_input_event* event, const uint8_t* text,
+                                size_t text_size, bool* handled);
+
+static bool process_text_events(struct terminal_input* input, const struct text_input_event* events, size_t count,
+                                uint64_t* active_source, uint64_t* active_composition) {
+	uint8_t  text[CAP_MAX_RESPONSE_SIZE];
+	uint64_t frame       = 0u;
+	bool     key_handled = false;
+	for (size_t first = 0u; first < count;) {
+		const struct text_input_event* action = &events[first];
+		size_t                         last   = first;
+		size_t                         size   = 0u;
+		if (action->frame != frame) {
+			frame       = action->frame;
+			key_handled = false;
+		}
+		while (last < count) {
+			if (size > sizeof(text) - events[last].text_size) return false;
+			memcpy(text + size, events[last].text, events[last].text_size);
+			size += events[last].text_size;
+			if ((events[last].flags & TEXT_INPUT_EVENT_FLAG_TEXT_END) != 0u) break;
+			last++;
+		}
+		if (last == count || size != action->text_total_size) return false;
+		switch (action->type) {
+		case TEXT_INPUT_EVENT_RESET:
+			if (*active_source == action->source_id) {
+				if (!terminal_set_preedit(input->terminal, NULL, 0u, 0u)) return false;
+				*active_source      = 0u;
+				*active_composition = 0u;
+			}
+			break;
+		case TEXT_INPUT_EVENT_PREEDIT:
+			if (size == 0u) {
+				if (*active_source == action->source_id && *active_composition == action->composition_id) {
+					if (!terminal_set_preedit(input->terminal, NULL, 0u, 0u)) return false;
+					*active_source      = 0u;
+					*active_composition = 0u;
+				}
+			}
+			else {
+				if (!terminal_set_preedit(input->terminal, text, size, action->selection_end)) return false;
+				*active_source      = action->source_id;
+				*active_composition = action->composition_id;
+			}
+			break;
+		case TEXT_INPUT_EVENT_COMMIT:
+			if (*active_source == action->source_id && *active_composition == action->composition_id) {
+				if (!terminal_set_preedit(input->terminal, NULL, 0u, 0u)) return false;
+				*active_source      = 0u;
+				*active_composition = 0u;
+			}
+			if (!key_handled && !publish_bytes(input, text, size)) return false;
+			break;
+		case TEXT_INPUT_EVENT_DELETE_SURROUNDING:
+			/* A sequential terminal stream cannot express arbitrary surrounding-text edits. */
+			break;
+		case TEXT_INPUT_EVENT_KEY: {
+			bool handled;
+			if (!process_logical_key(input, action, text, size, &handled)) return false;
+			key_handled = key_handled || handled;
+			break;
+		}
+		default:
+			return false;
+		}
+		first = last + 1u;
+	}
+	return true;
+}
+
+static void text_thread(void* opaque) {
+	struct terminal_input* input              = *(struct terminal_input**)opaque;
+	uint64_t               active_source      = 0u;
+	uint64_t               active_composition = 0u;
+	for (;;) {
+		struct init_service_handle handle   = {.capability = CAP_ID_INVALID};
+		struct init_call_result    acquired = text_input_acquire(&handle);
+		if (__atomic_load_n(&input->stopping, __ATOMIC_ACQUIRE)) thread_exit(0u);
+		if (acquired.transport_status != SYSCALL_STATUS_OK || acquired.status != INIT_REGISTRY_OK ||
+		    !text_handle_valid(&handle)) {
+			if (handle.capability != CAP_ID_INVALID) (void)cap_drop(handle.capability);
+			if (!wait_for_retry(input)) thread_exit(1u);
+			continue;
+		}
+		struct text_input_get_info_response info       = {0};
+		cap_id_t                            signal_cap = CAP_ID_INVALID;
+		syscall_status_t                    status     = text_input_get_info(handle.capability, &info);
+		if (status == SYSCALL_STATUS_OK) status = text_input_acquire_event_signal(handle.capability, &signal_cap);
+		uint64_t cursor = info.newest_sequence;
+		while (status == SYSCALL_STATUS_OK && !__atomic_load_n(&input->stopping, __ATOMIC_ACQUIRE)) {
+			struct text_input_event      events[TERMINAL_TEXT_EVENT_PAGE_SIZE];
+			struct text_input_event_page page;
+			status = text_input_read_events(handle.capability, cursor, events, TERMINAL_TEXT_EVENT_PAGE_SIZE, &page);
+			if (status == SYSCALL_STATUS_UNAVAILABLE) {
+				struct signal_message message;
+				do {
+					status = signal_wait(signal_cap, &message);
+					if (__atomic_load_n(&input->stopping, __ATOMIC_ACQUIRE)) break;
+				} while (status == SYSCALL_STATUS_INTERRUPTED);
+				continue;
+			}
+			if (status != SYSCALL_STATUS_OK) break;
+			if ((page.flags & TEXT_INPUT_READ_EVENT_FLAG_GAP) != 0u) {
+				if (!terminal_set_preedit(input->terminal, NULL, 0u, 0u)) status = SYSCALL_STATUS_FAILED;
+				active_source      = 0u;
+				active_composition = 0u;
+			}
+			if (status == SYSCALL_STATUS_OK &&
+			    !process_text_events(input, events, page.returned, &active_source, &active_composition))
+				status = SYSCALL_STATUS_FAILED;
+			if (status == SYSCALL_STATUS_OK) cursor = events[page.returned - 1u].sequence;
+		}
+		if (signal_cap != CAP_ID_INVALID) (void)cap_drop(signal_cap);
+		(void)cap_drop(handle.capability);
+		if (active_source != 0u) (void)terminal_set_preedit(input->terminal, NULL, 0u, 0u);
+		active_source      = 0u;
+		active_composition = 0u;
+		if (__atomic_load_n(&input->stopping, __ATOMIC_ACQUIRE)) thread_exit(0u);
+		if (!wait_for_retry(input)) thread_exit(1u);
+	}
+}
+
+static const char* terminal_key_sequence(enum text_input_key_code key, size_t* size) {
+	const char* sequence = NULL;
+	switch (key) {
+	case TEXT_INPUT_KEY_ESCAPE:
+		sequence = "\x1b";
+		break;
+	case TEXT_INPUT_KEY_BACKSPACE:
+		sequence = "\x7f";
+		break;
+	case TEXT_INPUT_KEY_INSERT:
+		sequence = "\x1b[2~";
+		break;
+	case TEXT_INPUT_KEY_HOME:
+		sequence = "\x1b[H";
+		break;
+	case TEXT_INPUT_KEY_PAGE_UP:
+		sequence = "\x1b[5~";
+		break;
+	case TEXT_INPUT_KEY_DELETE:
+		sequence = "\x1b[3~";
+		break;
+	case TEXT_INPUT_KEY_END:
+		sequence = "\x1b[F";
+		break;
+	case TEXT_INPUT_KEY_PAGE_DOWN:
+		sequence = "\x1b[6~";
+		break;
+	case TEXT_INPUT_KEY_UP:
+		sequence = "\x1b[A";
+		break;
+	case TEXT_INPUT_KEY_LEFT:
+		sequence = "\x1b[D";
+		break;
+	case TEXT_INPUT_KEY_DOWN:
+		sequence = "\x1b[B";
+		break;
+	case TEXT_INPUT_KEY_RIGHT:
+		sequence = "\x1b[C";
+		break;
+	case TEXT_INPUT_KEY_CENTER:
+		sequence = "\x1b[E";
+		break;
+	case TEXT_INPUT_KEY_F1:
+		sequence = "\x1bOP";
+		break;
+	case TEXT_INPUT_KEY_F2:
+		sequence = "\x1bOQ";
+		break;
+	case TEXT_INPUT_KEY_F3:
+		sequence = "\x1bOR";
+		break;
+	case TEXT_INPUT_KEY_F4:
+		sequence = "\x1bOS";
+		break;
+	case TEXT_INPUT_KEY_F5:
+		sequence = "\x1b[15~";
+		break;
+	case TEXT_INPUT_KEY_F6:
+		sequence = "\x1b[17~";
+		break;
+	case TEXT_INPUT_KEY_F7:
+		sequence = "\x1b[18~";
+		break;
+	case TEXT_INPUT_KEY_F8:
+		sequence = "\x1b[19~";
+		break;
+	case TEXT_INPUT_KEY_F9:
+		sequence = "\x1b[20~";
+		break;
+	case TEXT_INPUT_KEY_F10:
+		sequence = "\x1b[21~";
+		break;
+	case TEXT_INPUT_KEY_F11:
+		sequence = "\x1b[23~";
+		break;
+	case TEXT_INPUT_KEY_F12:
+		sequence = "\x1b[24~";
+		break;
+	default:
+		break;
+	}
+	if (sequence != NULL) *size = strlen(sequence);
+	return sequence;
+}
+
+static bool control_byte(const uint8_t* text, size_t size, uint8_t* output) {
+	if (text == NULL || size != 1u || output == NULL) return false;
+	uint8_t character = text[0];
+	if (character >= 'a' && character <= 'z') character = (uint8_t)(character - ('a' - 'A'));
+	if (character >= 'A' && character <= 'Z') {
+		*output = (uint8_t)(character - 'A' + 1u);
+		return true;
+	}
+	switch (character) {
+	case ' ':
+	case '@':
+		*output = 0x00u;
+		return true;
+	case '[':
+		*output = 0x1bu;
+		return true;
+	case '\\':
+		*output = 0x1cu;
+		return true;
+	case ']':
+		*output = 0x1du;
+		return true;
+	case '^':
+		*output = 0x1eu;
+		return true;
+	case '_':
+		*output = 0x1fu;
+		return true;
+	case '?':
+		*output = 0x7fu;
+		return true;
+	default:
+		return false;
+	}
+}
+
+static bool process_logical_key(struct terminal_input* input, const struct text_input_event* event, const uint8_t* text,
+                                size_t text_size, bool* handled) {
+	const uint32_t control = TEXT_INPUT_KEY_MODIFIER_LEFT_CONTROL | TEXT_INPUT_KEY_MODIFIER_RIGHT_CONTROL;
+	const uint32_t command = TEXT_INPUT_KEY_MODIFIER_LEFT_ALT | TEXT_INPUT_KEY_MODIFIER_RIGHT_ALT |
+	                         TEXT_INPUT_KEY_MODIFIER_LEFT_META | TEXT_INPUT_KEY_MODIFIER_RIGHT_META;
+	if (handled == NULL) return false;
+	*handled = false;
+	if (event->key_action == TEXT_INPUT_KEY_ACTION_RELEASED) return true;
+	if (event->key == TEXT_INPUT_KEY_TEXT && (event->key_modifiers & control) != 0u &&
+	    (event->key_modifiers & command) == 0u) {
+		uint8_t byte;
+		if (control_byte(text, text_size, &byte)) {
+			*handled = true;
+			return publish_bytes(input, &byte, 1u);
+		}
+		return true;
+	}
+	size_t      size;
+	const char* sequence = terminal_key_sequence(event->key, &size);
+	if (sequence == NULL) return true;
+	*handled = true;
+	return publish_bytes(input, (const uint8_t*)sequence, size);
+}
+
+struct terminal_input* terminal_input_create(struct terminal* terminal) {
+	if (terminal == NULL) return NULL;
+	struct terminal_input* input = calloc(1u, sizeof(*input));
+	if (input == NULL) return NULL;
+	input->terminal        = terminal;
+	input->text_thread_cap = CAP_ID_INVALID;
+	return input;
+}
+
+bool terminal_input_start(struct terminal_input* input) {
+	struct self_info self = {
+		.self_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .main_thread_cap = CAP_ID_INVALID};
+	if (input == NULL) return false;
+	syscall_status_t status = process_self_info(&self);
+	if (status != SYSCALL_STATUS_OK) printf("terminal: process query for input workers failed: %u\n", (unsigned)status);
+	if (status == SYSCALL_STATUS_OK) {
+		struct terminal_input* argument = input;
+		status                          = process_spawn_thread(self.self_cap,
+		                                                       (uintptr_t)text_thread,
+		                                                       &argument,
+		                                                       sizeof(argument),
+		                                                       "terminal-text-input",
+		                                                       sizeof("terminal-text-input"),
+		                                                       &input->text_thread_cap);
+		if (status != SYSCALL_STATUS_OK) printf("terminal: text input worker spawn failed: %u\n", (unsigned)status);
+	}
+	if (self.self_cap != CAP_ID_INVALID) (void)cap_drop(self.self_cap);
+	if (self.address_space_cap != CAP_ID_INVALID) (void)cap_drop(self.address_space_cap);
+	if (self.main_thread_cap != CAP_ID_INVALID) (void)cap_drop(self.main_thread_cap);
+	if (status != SYSCALL_STATUS_OK) {
+		return false;
+	}
+	return true;
+}
+
+void terminal_input_destroy(struct terminal_input* input) {
+	if (input == NULL) return;
+	__atomic_store_n(&input->stopping, true, __ATOMIC_RELEASE);
+	if (input->text_thread_cap != CAP_ID_INVALID) {
+		(void)thread_cancel(input->text_thread_cap);
+		(void)thread_join(input->text_thread_cap, NULL);
+	}
+	input_lock(input);
+	while (input->pending_count != 0u) {
+		struct pending_read* pending = &input->pending[input->pending_head];
+		(void)channel_reply(pending->call_id, NULL, 0u, SYSCALL_STATUS_FAILED);
+		input->pending_head = (input->pending_head + 1u) % TERMINAL_INPUT_PENDING_CAPACITY;
+		input->pending_count--;
+	}
+	input_unlock(input);
+	free(input);
+}

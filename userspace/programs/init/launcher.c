@@ -67,17 +67,38 @@ static syscall_status_t delegate_output_stream(const struct init_state* init, pr
 		.minor          = TERMINAL_PROTOCOL_VERSION_MINOR,
 	};
 	struct init_service_handle terminal = {.capability = CAP_ID_INVALID};
-	enum init_registry_status  registry_status;
+	struct self_info           self     = {
+		.self_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .main_thread_cap = CAP_ID_INVALID};
+	enum init_registry_status registry_status;
+	syscall_status_t          status;
 
 	if (init == NULL || target == PROCESS_PID_INVALID || out_capability == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	*out_capability = CAP_ID_INVALID;
-	registry_status = registry_acquire(target, &query, TERMINAL_SERVICE_NAME, &terminal);
-	if (registry_status == INIT_REGISTRY_OK) {
-		*out_capability = terminal.capability;
-		return SYSCALL_STATUS_OK;
+	status          = process_self_info(&self);
+	if (status != SYSCALL_STATUS_OK) goto cleanup;
+	if (self.pid == PROCESS_PID_INVALID) {
+		status = SYSCALL_STATUS_FAILED;
+		goto cleanup;
 	}
-	if (registry_status != INIT_REGISTRY_NOT_FOUND) return SYSCALL_STATUS_FAILED;
-	return cap_delegate(init->serial_stream_cap, target, CAP_WRITE | CAP_CALL, out_capability);
+	registry_status = registry_acquire(self.pid, &query, TERMINAL_SERVICE_NAME, &terminal);
+	if (registry_status == INIT_REGISTRY_OK) {
+		status = cap_delegate(terminal.capability, target, TERMINAL_OUTPUT_RIGHTS, out_capability);
+		goto cleanup;
+	}
+	if (registry_status != INIT_REGISTRY_NOT_FOUND) {
+		status = SYSCALL_STATUS_FAILED;
+		goto cleanup;
+	}
+	status = cap_delegate(init->serial_stream_cap, target, CAP_WRITE | CAP_CALL, out_capability);
+
+cleanup:
+	if (terminal.capability != CAP_ID_INVALID && cap_drop(terminal.capability) != SYSCALL_STATUS_OK &&
+	    status == SYSCALL_STATUS_OK)
+		status = SYSCALL_STATUS_FAILED;
+	if (self.self_cap != CAP_ID_INVALID) (void)cap_drop(self.self_cap);
+	if (self.address_space_cap != CAP_ID_INVALID) (void)cap_drop(self.address_space_cap);
+	if (self.main_thread_cap != CAP_ID_INVALID) (void)cap_drop(self.main_thread_cap);
+	return status;
 }
 
 bool bootstrap_launch(const struct init_state* init, const char* module_name, const char* description, size_t argc,

@@ -16,6 +16,7 @@
 #include <system/process.h>
 #include <system/signal.h>
 
+#include "input.h"
 #include "terminal.h"
 
 #define TERMINAL_PROTOCOL_VERSION_MAJOR 1u
@@ -27,7 +28,8 @@ static bool reply_request(const struct cap_request* call, const void* response, 
 	return channel_reply(call->call_id, response, response_size, status) == SYSCALL_STATUS_OK;
 }
 
-static bool dispatch_request(struct terminal* terminal, const struct cap_request* call, const uint8_t* data) {
+static bool dispatch_request(struct terminal* terminal, struct terminal_input* input, const struct cap_request* call,
+                             const uint8_t* data) {
 	struct stream_request_header header;
 	struct stream_write_request  request;
 	struct stream_write_response response;
@@ -38,9 +40,10 @@ static bool dispatch_request(struct terminal* terminal, const struct cap_request
 	    call->request_size < sizeof(header))
 		return reply_request(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	memcpy(&header, data, sizeof(header));
-	if (header.op == STREAM_OP_READ)
-		return reply_request(
-			call, NULL, 0u, (call->rights & CAP_READ) == 0u ? SYSCALL_STATUS_DENIED : SYSCALL_STATUS_UNAVAILABLE);
+	if (header.op == STREAM_OP_READ) {
+		if ((call->rights & CAP_READ) == 0u) return reply_request(call, NULL, 0u, SYSCALL_STATUS_DENIED);
+		return terminal_input_read(input, call, data);
+	}
 	if (header.op != STREAM_OP_WRITE) return reply_request(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	if ((call->rights & CAP_WRITE) == 0u) return reply_request(call, NULL, 0u, SYSCALL_STATUS_DENIED);
 	if (call->request_size < sizeof(request) || call->response_capacity < sizeof(response))
@@ -77,7 +80,7 @@ static bool advertise_terminal(channel_id_t* out_endpoint, cap_id_t* out_activit
 	status = cap_publish(*out_endpoint,
 	                     TERMINAL_SERVICE_OBJECT_ID,
 	                     self.pid,
-	                     CAP_CALL | CAP_WRITE | CAP_DELEGATE | CAP_DELEGATE_PEER,
+	                     CAP_CALL | CAP_READ | CAP_WRITE | CAP_DELEGATE | CAP_DELEGATE_PEER,
 	                     &service_cap);
 	if (status != SYSCALL_STATUS_OK) goto fail;
 	result = init_advertise(&selector, TERMINAL_PROTOCOL_VERSION_MINOR, service_cap, TERMINAL_CLIENT_RIGHTS);
@@ -93,13 +96,23 @@ fail:
 }
 
 int terminal_server_run(struct terminal* terminal) {
-	static uint8_t request_data[CAP_MAX_REQUEST_SIZE];
-	channel_id_t   endpoint;
-	cap_id_t       activity_cap;
+	static uint8_t         request_data[CAP_MAX_REQUEST_SIZE];
+	channel_id_t           endpoint;
+	cap_id_t               activity_cap;
+	struct terminal_input* input  = NULL;
+	int                    result = 1;
 
-	if (terminal == NULL || !advertise_terminal(&endpoint, &activity_cap)) {
+	if (terminal == NULL || (input = terminal_input_create(terminal)) == NULL) {
+		printf("terminal: input allocation failed\n");
+		goto cleanup;
+	}
+	if (!terminal_input_start(input)) {
+		printf("terminal: input startup failed\n");
+		goto cleanup;
+	}
+	if (!advertise_terminal(&endpoint, &activity_cap)) {
 		printf("terminal: advertisement failed\n");
-		return 1;
+		goto cleanup;
 	}
 	for (;;) {
 		bool             received;
@@ -109,14 +122,19 @@ int terminal_server_run(struct terminal* terminal) {
 			struct cap_request call;
 			received = false;
 			status   = channel_recv(endpoint, &call, request_data, sizeof(request_data), &received);
-			if (status != SYSCALL_STATUS_OK || (received && !dispatch_request(terminal, &call, request_data))) return 1;
+			if (status != SYSCALL_STATUS_OK || (received && !dispatch_request(terminal, input, &call, request_data)))
+				goto cleanup;
 		} while (received);
 		do {
 			struct channel_event event;
 			status = channel_event_recv(endpoint, &event, &received);
-			if (status != SYSCALL_STATUS_OK) return 1;
+			if (status != SYSCALL_STATUS_OK) goto cleanup;
 		} while (received);
 		struct signal_message activity;
-		if (signal_wait(activity_cap, &activity) != SYSCALL_STATUS_OK) return 1;
+		if (signal_wait(activity_cap, &activity) != SYSCALL_STATUS_OK) goto cleanup;
 	}
+
+cleanup:
+	terminal_input_destroy(input);
+	return result;
 }
