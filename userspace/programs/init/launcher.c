@@ -101,9 +101,47 @@ cleanup:
 	return status;
 }
 
-bool bootstrap_launch(const struct init_state* init, const char* module_name, const char* description, size_t argc,
-                      const char* const argv[], size_t capability_count,
-                      const struct program_capability_argument capabilities[]) {
+static syscall_status_t delegate_input_stream(process_id_t target, cap_id_t* out_capability) {
+	const struct init_protocol_query query = {
+		.namespace_path = TERMINAL_NAMESPACE,
+		.protocol       = TERMINAL_PROTOCOL_NAME,
+		.major          = TERMINAL_PROTOCOL_VERSION_MAJOR,
+		.minor          = TERMINAL_PROTOCOL_VERSION_MINOR,
+	};
+	struct init_service_handle terminal = {.capability = CAP_ID_INVALID};
+	struct self_info           self     = {
+		.self_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .main_thread_cap = CAP_ID_INVALID};
+	enum init_registry_status registry_status;
+	syscall_status_t          status;
+
+	if (target == PROCESS_PID_INVALID || out_capability == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	*out_capability = CAP_ID_INVALID;
+	status          = process_self_info(&self);
+	if (status != SYSCALL_STATUS_OK) goto cleanup;
+	if (self.pid == PROCESS_PID_INVALID) {
+		status = SYSCALL_STATUS_FAILED;
+		goto cleanup;
+	}
+	registry_status = registry_acquire(self.pid, &query, TERMINAL_SERVICE_NAME, &terminal);
+	if (registry_status != INIT_REGISTRY_OK) {
+		status = registry_status == INIT_REGISTRY_NOT_FOUND ? SYSCALL_STATUS_UNAVAILABLE : SYSCALL_STATUS_FAILED;
+		goto cleanup;
+	}
+	status = cap_delegate(terminal.capability, target, TERMINAL_INPUT_RIGHTS, out_capability);
+
+cleanup:
+	if (terminal.capability != CAP_ID_INVALID && cap_drop(terminal.capability) != SYSCALL_STATUS_OK &&
+	    status == SYSCALL_STATUS_OK)
+		status = SYSCALL_STATUS_FAILED;
+	if (self.self_cap != CAP_ID_INVALID) (void)cap_drop(self.self_cap);
+	if (self.address_space_cap != CAP_ID_INVALID) (void)cap_drop(self.address_space_cap);
+	if (self.main_thread_cap != CAP_ID_INVALID) (void)cap_drop(self.main_thread_cap);
+	return status;
+}
+
+static bool bootstrap_launch_internal(const struct init_state* init, const char* module_name, const char* description,
+                                      size_t argc, const char* const argv[], size_t capability_count,
+                                      const struct program_capability_argument capabilities[], bool terminal_input) {
 	struct module_provider_resolve_response module = {.cap = CAP_ID_INVALID};
 	struct loader_load_response             loaded;
 	struct process_info_response            process_info;
@@ -117,6 +155,7 @@ bool bootstrap_launch(const struct init_state* init, const char* module_name, co
 	cap_id_t                                loader_cap        = CAP_ID_INVALID;
 	cap_id_t                                modules_cap       = CAP_ID_INVALID;
 	cap_id_t                                allocator_cap     = CAP_ID_INVALID;
+	cap_id_t                                input_stream_cap  = CAP_ID_INVALID;
 	cap_id_t                                output_stream_cap = CAP_ID_INVALID;
 	cap_id_t                                thread_cap        = CAP_ID_INVALID;
 	syscall_status_t                        status;
@@ -198,6 +237,13 @@ bool bootstrap_launch(const struct init_state* init, const char* module_name, co
 		printf("init: output stream delegation failed: %u\n", (unsigned)status);
 		goto fail;
 	}
+	if (terminal_input) {
+		status = delegate_input_stream(process_info.pid, &input_stream_cap);
+		if (status != SYSCALL_STATUS_OK) {
+			printf("init: input stream delegation failed: %u\n", (unsigned)status);
+			goto fail;
+		}
+	}
 	startup = calloc(1u, startup_size);
 	if (startup == NULL) goto fail;
 	*startup = (struct process_startup_info){
@@ -213,7 +259,7 @@ bool bootstrap_launch(const struct init_state* init, const char* module_name, co
 		.argv_size            = (uint32_t)startup_argv_size,
 	};
 	startup_capabilities                             = (cap_id_t*)((uint8_t*)startup + startup->capv_offset);
-	startup_capabilities[PROCESS_STARTUP_CAP_STDIN]  = CAP_ID_INVALID;
+	startup_capabilities[PROCESS_STARTUP_CAP_STDIN]  = input_stream_cap;
 	startup_capabilities[PROCESS_STARTUP_CAP_STDOUT] = output_stream_cap;
 	startup_capabilities[PROCESS_STARTUP_CAP_STDERR] = output_stream_cap;
 	for (size_t i = 0u; i < capability_count; i++) {
@@ -254,4 +300,16 @@ fail:
 	free(startup);
 	rollback_bootstrap_process(&loaded, &thread_cap, description);
 	return false;
+}
+
+bool bootstrap_launch(const struct init_state* init, const char* module_name, const char* description, size_t argc,
+                      const char* const argv[], size_t capability_count,
+                      const struct program_capability_argument capabilities[]) {
+	return bootstrap_launch_internal(init, module_name, description, argc, argv, capability_count, capabilities, false);
+}
+
+bool bootstrap_launch_interactive(const struct init_state* init, const char* module_name, const char* description,
+                                  size_t argc, const char* const argv[], size_t capability_count,
+                                  const struct program_capability_argument capabilities[]) {
+	return bootstrap_launch_internal(init, module_name, description, argc, argv, capability_count, capabilities, true);
 }

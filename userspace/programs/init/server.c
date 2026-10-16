@@ -2,6 +2,7 @@
 
 #include <protocol/filesystem.h>
 #include <protocol/terminal.h>
+#include <protocol/text_input.h>
 #include <protocol/vfs.h>
 #include <runtime/program.h>
 #include <runtime/vfs.h>
@@ -51,6 +52,7 @@ enum bootfs_mount_readiness {
 
 #define TERMINAL_PROTOCOL_VERSION_MAJOR 1u
 #define TERMINAL_PROTOCOL_VERSION_MINOR 0u
+#define TEXT_INPUT_PROTOCOL_VERSION_MAJOR 1u
 
 static bool reply_request(cap_call_id_t call_id, const void* response, size_t response_size,
                           syscall_status_t response_status) {
@@ -476,6 +478,12 @@ int server_run(const struct init_state* init) {
 		.major          = TERMINAL_PROTOCOL_VERSION_MAJOR,
 		.service        = TERMINAL_SERVICE_NAME,
 	};
+	static const struct init_service_selector text_input_selector = {
+		.namespace_path = TEXT_INPUT_NAMESPACE,
+		.protocol       = TEXT_INPUT_PROTOCOL_NAME,
+		.major          = TEXT_INPUT_PROTOCOL_VERSION_MAJOR,
+		.service        = TEXT_INPUT_SERVICE_NAME,
+	};
 	union {
 		struct init_request_header    header;
 		struct init_advertise_request advertise;
@@ -494,9 +502,11 @@ int server_run(const struct init_state* init) {
 	bool               device_manager_started      = false;
 	bool               terminal_started            = false;
 	bool               terminal_ready              = false;
+	bool               terminal_available          = false;
 	bool               input_manager_started       = false;
 	bool               keyboard_controller_started = false;
 	bool               text_input_started          = false;
+	bool               shell_started               = false;
 	bool               loader_started              = false;
 	bool               vfs_ready                   = false;
 	bool               vfs_started                 = false;
@@ -559,8 +569,9 @@ int server_run(const struct init_state* init) {
 		if (bootfs_mounted && !terminal_started) {
 			bool terminal_launched;
 			if (!launch_terminal(init, &terminal_launched)) return 1;
-			terminal_started = true;
-			terminal_ready   = !terminal_launched;
+			terminal_started   = true;
+			terminal_ready     = !terminal_launched;
+			terminal_available = terminal_launched;
 			continue;
 		}
 		if (terminal_started && !terminal_ready && registry_contains(&terminal_selector)) {
@@ -602,6 +613,17 @@ int server_run(const struct init_state* init) {
 			if (result == DEVICE_MANAGER_LAUNCH_FAILED) return 1;
 			if (result == DEVICE_MANAGER_LAUNCH_SUCCESS) {
 				device_manager_started = true;
+				continue;
+			}
+		}
+		if (device_manager_started && !shell_started) {
+			if (!terminal_available) {
+				shell_started = true;
+				continue;
+			}
+			if (registry_contains(&text_input_selector)) {
+				if (!bootstrap_launch_interactive(init, "shell.elf", "shell", 0u, NULL, 0u, NULL)) return 1;
+				shell_started = true;
 				continue;
 			}
 		}
