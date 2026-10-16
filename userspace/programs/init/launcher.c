@@ -5,6 +5,7 @@
 #include <base/module.h>
 #include <base/startup.h>
 #include <base/thread.h>
+#include <protocol/terminal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,7 +16,11 @@
 #include <system/module.h>
 #include <system/process.h>
 
+#include "registry.h"
 #include "server.h"
+
+#define TERMINAL_PROTOCOL_VERSION_MAJOR 1u
+#define TERMINAL_PROTOCOL_VERSION_MINOR 0u
 
 static bool drop_owned_capability(cap_id_t* capability, const char* description) {
 	syscall_status_t status;
@@ -53,6 +58,28 @@ static void rollback_bootstrap_process(struct loader_load_response* loaded, cap_
 	(void)drop_owned_capability(&loaded->process_cap, description);
 }
 
+static syscall_status_t delegate_output_stream(const struct init_state* init, process_id_t target,
+                                               cap_id_t* out_capability) {
+	const struct init_protocol_query query = {
+		.namespace_path = TERMINAL_NAMESPACE,
+		.protocol       = TERMINAL_PROTOCOL_NAME,
+		.major          = TERMINAL_PROTOCOL_VERSION_MAJOR,
+		.minor          = TERMINAL_PROTOCOL_VERSION_MINOR,
+	};
+	struct init_service_handle terminal = {.capability = CAP_ID_INVALID};
+	enum init_registry_status  registry_status;
+
+	if (init == NULL || target == PROCESS_PID_INVALID || out_capability == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	*out_capability = CAP_ID_INVALID;
+	registry_status = registry_acquire(target, &query, TERMINAL_SERVICE_NAME, &terminal);
+	if (registry_status == INIT_REGISTRY_OK) {
+		*out_capability = terminal.capability;
+		return SYSCALL_STATUS_OK;
+	}
+	if (registry_status != INIT_REGISTRY_NOT_FOUND) return SYSCALL_STATUS_FAILED;
+	return cap_delegate(init->serial_stream_cap, target, CAP_WRITE | CAP_CALL, out_capability);
+}
+
 bool bootstrap_launch(const struct init_state* init, const char* module_name, const char* description, size_t argc,
                       const char* const argv[], size_t capability_count,
                       const struct program_capability_argument capabilities[]) {
@@ -69,7 +96,7 @@ bool bootstrap_launch(const struct init_state* init, const char* module_name, co
 	cap_id_t                                loader_cap        = CAP_ID_INVALID;
 	cap_id_t                                modules_cap       = CAP_ID_INVALID;
 	cap_id_t                                allocator_cap     = CAP_ID_INVALID;
-	cap_id_t                                serial_stream_cap = CAP_ID_INVALID;
+	cap_id_t                                output_stream_cap = CAP_ID_INVALID;
 	cap_id_t                                thread_cap        = CAP_ID_INVALID;
 	syscall_status_t                        status;
 	bool                                    temporary_caps_released;
@@ -145,9 +172,9 @@ bool bootstrap_launch(const struct init_state* init, const char* module_name, co
 		printf("init: init capability publication failed: %u\n", (unsigned)status);
 		goto fail;
 	}
-	status = cap_delegate(init->serial_stream_cap, process_info.pid, CAP_WRITE | CAP_CALL, &serial_stream_cap);
+	status = delegate_output_stream(init, process_info.pid, &output_stream_cap);
 	if (status != SYSCALL_STATUS_OK) {
-		printf("init: serial stream delegation failed: %u\n", (unsigned)status);
+		printf("init: output stream delegation failed: %u\n", (unsigned)status);
 		goto fail;
 	}
 	startup = calloc(1u, startup_size);
@@ -166,8 +193,8 @@ bool bootstrap_launch(const struct init_state* init, const char* module_name, co
 	};
 	startup_capabilities                             = (cap_id_t*)((uint8_t*)startup + startup->capv_offset);
 	startup_capabilities[PROCESS_STARTUP_CAP_STDIN]  = CAP_ID_INVALID;
-	startup_capabilities[PROCESS_STARTUP_CAP_STDOUT] = serial_stream_cap;
-	startup_capabilities[PROCESS_STARTUP_CAP_STDERR] = serial_stream_cap;
+	startup_capabilities[PROCESS_STARTUP_CAP_STDOUT] = output_stream_cap;
+	startup_capabilities[PROCESS_STARTUP_CAP_STDERR] = output_stream_cap;
 	for (size_t i = 0u; i < capability_count; i++) {
 		if (capabilities[i].capability == CAP_ID_INVALID) continue;
 		status = cap_delegate(capabilities[i].capability,

@@ -1,6 +1,7 @@
 #include "server.h"
 
 #include <protocol/filesystem.h>
+#include <protocol/terminal.h>
 #include <protocol/vfs.h>
 #include <runtime/program.h>
 #include <runtime/vfs.h>
@@ -9,6 +10,7 @@
 #include <string.h>
 #include <system/capability.h>
 #include <system/channel.h>
+#include <system/display.h>
 #include <system/kernel_resource.h>
 #include <system/process.h>
 #include <system/signal.h>
@@ -17,6 +19,7 @@
 #include "device_manager.h"
 #include "launcher.h"
 #include "registry.h"
+#include "serial_stream.h"
 
 #define BOOTFS_SERVICE_NAME "boot"
 #define VFS_PROTOCOL_VERSION_MAJOR 1u
@@ -45,6 +48,9 @@ enum bootfs_mount_readiness {
 	BOOTFS_MOUNT_READY,
 	BOOTFS_MOUNT_FAILED,
 };
+
+#define TERMINAL_PROTOCOL_VERSION_MAJOR 1u
+#define TERMINAL_PROTOCOL_VERSION_MINOR 0u
 
 static bool reply_request(cap_call_id_t call_id, const void* response, size_t response_size,
                           syscall_status_t response_status) {
@@ -109,6 +115,54 @@ static bool launch_bootfs(const struct init_state* init) {
 		return false;
 	}
 	return launched;
+}
+
+static bool launch_terminal(const struct init_state* init, bool* out_launched) {
+	struct program_capability_argument argument;
+	cap_id_t                           framebuffer_cap = CAP_ID_INVALID;
+	syscall_status_t                   status;
+	bool                               launched;
+
+	if (out_launched == NULL) return false;
+	*out_launched = false;
+	status = kernel_resource_acquire(init->kernel_resources_cap, KERNEL_RESOURCE_TYPE_FRAMEBUFFER, &framebuffer_cap);
+	if (status == SYSCALL_STATUS_UNAVAILABLE) return true;
+	if (status != SYSCALL_STATUS_OK) {
+		printf("init: framebuffer acquisition failed: %u\n", (unsigned)status);
+		return false;
+	}
+	argument = (struct program_capability_argument){
+		.capability = framebuffer_cap,
+		.rights     = CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP,
+	};
+	launched = bootstrap_launch(init, "terminal.elf", "terminal", 0u, NULL, 1u, &argument);
+	if (launched) *out_launched = true;
+	status = cap_drop(framebuffer_cap);
+	if (status != SYSCALL_STATUS_OK) {
+		printf("init: framebuffer capability drop failed: %u\n", (unsigned)status);
+		return false;
+	}
+	return launched;
+}
+
+static bool use_terminal_output(void) {
+	const struct init_protocol_query query = {
+		.namespace_path = TERMINAL_NAMESPACE,
+		.protocol       = TERMINAL_PROTOCOL_NAME,
+		.major          = TERMINAL_PROTOCOL_VERSION_MAJOR,
+		.minor          = TERMINAL_PROTOCOL_VERSION_MINOR,
+	};
+	struct init_service_handle terminal = {.capability = CAP_ID_INVALID};
+	enum init_registry_status  status;
+
+	status = registry_acquire(server_pid, &query, TERMINAL_SERVICE_NAME, &terminal);
+	if (status != INIT_REGISTRY_OK) {
+		printf("init: terminal output acquisition failed: %u\n", (unsigned)status);
+		return false;
+	}
+	display_set_standard_streams(CAP_ID_INVALID, terminal.capability, terminal.capability);
+	serial_stream_disable();
+	return true;
 }
 
 static enum bootfs_mount_readiness mount_bootfs(const struct init_service_selector* selector) {
@@ -409,6 +463,12 @@ int server_run(const struct init_state* init) {
 		.major          = FILESYSTEM_PROTOCOL_VERSION_MAJOR,
 		.service        = BOOTFS_SERVICE_NAME,
 	};
+	static const struct init_service_selector terminal_selector = {
+		.namespace_path = TERMINAL_NAMESPACE,
+		.protocol       = TERMINAL_PROTOCOL_NAME,
+		.major          = TERMINAL_PROTOCOL_VERSION_MAJOR,
+		.service        = TERMINAL_SERVICE_NAME,
+	};
 	union {
 		struct init_request_header    header;
 		struct init_advertise_request advertise;
@@ -425,6 +485,8 @@ int server_run(const struct init_state* init) {
 	bool               bootfs_started              = false;
 	bool               configuration_loaded        = false;
 	bool               device_manager_started      = false;
+	bool               terminal_started            = false;
+	bool               terminal_ready              = false;
 	bool               input_manager_started       = false;
 	bool               keyboard_controller_started = false;
 	bool               text_input_started          = false;
@@ -487,7 +549,19 @@ int server_run(const struct init_state* init) {
 				continue;
 			}
 		}
-		if (bootfs_mounted && !configuration_loaded) {
+		if (bootfs_mounted && !terminal_started) {
+			bool terminal_launched;
+			if (!launch_terminal(init, &terminal_launched)) return 1;
+			terminal_started = true;
+			terminal_ready   = !terminal_launched;
+			continue;
+		}
+		if (terminal_started && !terminal_ready && registry_contains(&terminal_selector)) {
+			if (!use_terminal_output()) return 1;
+			terminal_ready = true;
+			continue;
+		}
+		if (terminal_ready && !configuration_loaded) {
 			if (!load_system_configuration(&configuration)) return 1;
 			text_input_layout    = text_input_layout_override_path == NULL ? configuration.text_input_layout
 			                                                               : text_input_layout_override_path;

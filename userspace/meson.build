@@ -55,9 +55,9 @@ if platform == 'pc_x86_64'
 elif platform == 'pc_aarch64'
 	userspace_setjmp_object = clang_aarch64_elf.process(files('platforms/pc_aarch64/setjmp.asm'))
 elif platform == 'pc_riscv64'
-	userspace_setjmp_object = clang_riscv64_elf.process(files('platforms/pc_riscv64/setjmp.asm'))
+	userspace_setjmp_object = clang_riscv64_userspace_elf.process(files('platforms/pc_riscv64/setjmp.asm'))
 elif platform == 'pc_loongarch64'
-	userspace_setjmp_object = clang_loongarch64_elf.process(files('platforms/pc_loongarch64/setjmp.asm'))
+	userspace_setjmp_object = clang_loongarch64_userspace_elf.process(files('platforms/pc_loongarch64/setjmp.asm'))
 endif
 
 userspace_runtime_sources = files(
@@ -145,6 +145,7 @@ subdir('programs/device_manager')
 subdir('programs/input_manager')
 subdir('programs/keyboard_controller')
 subdir('programs/text_input')
+subdir('programs/terminal')
 subdir('programs/init')
 subdir('programs/bootfs')
 subdir('programs/acpi_parser')
@@ -183,6 +184,8 @@ userspace_boot_modules = userspace_programs + [
 	system_configuration,
 	keyboard_qwerty_layout,
 	keyboard_azerty_layout,
+	commit_mono_regular_font,
+	commit_mono_license,
 ]
 
 alias_target(

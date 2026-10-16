@@ -4,6 +4,7 @@
 #include <base/startup.h>
 #include <protocol/device_manager.h>
 #include <protocol/loader.h>
+#include <protocol/terminal.h>
 #include <protocol/vfs.h>
 #include <runtime/init.h>
 #include <runtime/program.h>
@@ -25,6 +26,8 @@
 #define DEVICE_MANAGER_LOADER_SERVICE "elf64"
 #define LOADER_PROTOCOL_VERSION_MAJOR 1u
 #define LOADER_PROTOCOL_VERSION_MINOR 0u
+#define TERMINAL_PROTOCOL_VERSION_MAJOR 1u
+#define TERMINAL_PROTOCOL_VERSION_MINOR 0u
 #define VFS_PROTOCOL_VERSION_MAJOR 1u
 #define VFS_PROTOCOL_VERSION_MINOR 0u
 
@@ -39,6 +42,32 @@ static bool device_manager_drop_capability(cap_id_t* capability, const char* des
 	}
 	*capability = CAP_ID_INVALID;
 	return true;
+}
+
+static syscall_status_t device_manager_output_stream(const struct init_state* init, process_id_t init_pid,
+                                                     cap_id_t* out_capability, bool* out_owned) {
+	const struct init_protocol_query query = {
+		.namespace_path = TERMINAL_NAMESPACE,
+		.protocol       = TERMINAL_PROTOCOL_NAME,
+		.major          = TERMINAL_PROTOCOL_VERSION_MAJOR,
+		.minor          = TERMINAL_PROTOCOL_VERSION_MINOR,
+	};
+	struct init_service_handle terminal = {.capability = CAP_ID_INVALID};
+	enum init_registry_status  registry_status;
+
+	if (init == NULL || init_pid == PROCESS_PID_INVALID || out_capability == NULL || out_owned == NULL)
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	*out_capability = CAP_ID_INVALID;
+	*out_owned      = false;
+	registry_status = registry_acquire(init_pid, &query, TERMINAL_SERVICE_NAME, &terminal);
+	if (registry_status == INIT_REGISTRY_OK) {
+		*out_capability = terminal.capability;
+		*out_owned      = true;
+		return SYSCALL_STATUS_OK;
+	}
+	if (registry_status != INIT_REGISTRY_NOT_FOUND) return SYSCALL_STATUS_FAILED;
+	*out_capability = init->serial_stream_cap;
+	return SYSCALL_STATUS_OK;
 }
 
 static syscall_status_t device_manager_load(const struct init_service_handle* loader, cap_id_t file_cap,
@@ -127,10 +156,12 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 	cap_id_t                  dma_cap        = CAP_ID_INVALID;
 	cap_id_t                  interrupts_cap = CAP_ID_INVALID;
 	cap_id_t                  io_ports_cap   = CAP_ID_INVALID;
+	cap_id_t                  output_cap     = CAP_ID_INVALID;
 	const char**              argv           = NULL;
 	enum init_registry_status registry_status;
 	syscall_status_t          status;
 	bool                      temporary_caps_released = true;
+	bool                      output_cap_owned        = false;
 
 	if (init == NULL) return DEVICE_MANAGER_LAUNCH_FAILED;
 	status = process_self_info(&self);
@@ -190,6 +221,8 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 		status = device_manager_optional_resource(init, KERNEL_RESOURCE_TYPE_IO_PORTS, &io_ports_cap);
 #endif
 	if (status == SYSCALL_STATUS_OK && !init_arguments_vector(init, &argv)) status = SYSCALL_STATUS_FAILED;
+	if (status == SYSCALL_STATUS_OK)
+		status = device_manager_output_stream(init, self.pid, &output_cap, &output_cap_owned);
 	if (status == SYSCALL_STATUS_OK) {
 		const struct program_capability_argument capv[PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_COUNT] = {
 			[PROCESS_STARTUP_CAP_STDIN] =
@@ -198,12 +231,12 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 											 },
 			[PROCESS_STARTUP_CAP_STDOUT] =
 				{
-											 .capability = init->serial_stream_cap,
+											 .capability = output_cap,
 											 .rights     = CAP_CALL | CAP_WRITE,
 											 },
 			[PROCESS_STARTUP_CAP_STDERR] =
 				{
-											 .capability = init->serial_stream_cap,
+											 .capability = output_cap,
 											 .rights     = CAP_CALL | CAP_WRITE,
 											 },
 			[PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_ACPI] =
@@ -241,6 +274,8 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 			&loaded, init->argc, argv, PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_COUNT, capv, &running);
 	}
 	free(argv);
+	if (output_cap_owned && !device_manager_drop_capability(&output_cap, "terminal output"))
+		temporary_caps_released = false;
 	if (!device_manager_drop_capability(&acpi_cap, "ACPI provider")) temporary_caps_released = false;
 	if (!device_manager_drop_capability(&dt_cap, "Device Tree provider")) temporary_caps_released = false;
 	if (!device_manager_drop_capability(&dma_cap, "DMA")) temporary_caps_released = false;

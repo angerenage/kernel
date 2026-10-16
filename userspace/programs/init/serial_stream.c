@@ -19,6 +19,7 @@ static channel_id_t serial_stream_endpoint = CHANNEL_ID_INVALID;
 static cap_id_t     serial_stream_activity = CAP_ID_INVALID;
 static cap_id_t     serial_stream_serial   = CAP_ID_INVALID;
 static uint8_t      serial_stream_request[CAP_MAX_REQUEST_SIZE];
+static bool         serial_stream_enabled = true;
 
 static bool serial_stream_reply(const struct cap_request* call, const void* response, size_t response_size,
                                 syscall_status_t status) {
@@ -47,7 +48,7 @@ static bool serial_stream_dispatch(const struct cap_request* call, const void* d
 	if (request.reserved != 0u || request.size > CAP_MAX_REQUEST_SIZE - sizeof(request) ||
 	    call->request_size != sizeof(request) + (size_t)request.size)
 		return serial_stream_reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
-	if (request.size != 0u) {
+	if (request.size != 0u && __atomic_load_n(&serial_stream_enabled, __ATOMIC_ACQUIRE)) {
 		syscall_result_t result = cap_call_syscall(
 			serial_stream_serial, (const uint8_t*)data + sizeof(request), (size_t)request.size, NULL, 0u);
 		status = result.status;
@@ -126,4 +127,8 @@ syscall_status_t serial_stream_create(cap_id_t serial_cap, cap_id_t* out_stream_
 	serial_stream_activity = CAP_ID_INVALID;
 	serial_stream_serial   = CAP_ID_INVALID;
 	return status;
+}
+
+void serial_stream_disable(void) {
+	__atomic_store_n(&serial_stream_enabled, false, __ATOMIC_RELEASE);
 }

@@ -12,7 +12,7 @@ typedef uint64_t uthread_id_t;
 #define UTHREAD_ID_INVALID ((uthread_id_t)0u)
 
 enum {
-	UTHREAD_DEFAULT_USER_STACK_SIZE = 16u * 1024u,
+	UTHREAD_DEFAULT_USER_STACK_SIZE = 64u * 1024u,
 };
 
 enum uthread_start_result {

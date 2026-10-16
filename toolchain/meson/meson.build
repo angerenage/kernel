@@ -21,3 +21,15 @@ clang_loongarch64_elf = generator(clang,
 	arguments : ['--target=loongarch64-unknown-none-gnusf', '-mlasx',
 		'-c', '-x', 'assembler', '-o', '@OUTPUT@', '@INPUT@']
 )
+
+clang_riscv64_userspace_elf = generator(clang,
+	output : ['@BASENAME@.o'],
+	arguments : ['--target=riscv64-elf', '-march=rv64gcv', '-mabi=lp64d',
+		'-c', '-x', 'assembler', '-o', '@OUTPUT@', '@INPUT@']
+)
+
+clang_loongarch64_userspace_elf = generator(clang,
+	output : ['@BASENAME@.o'],
+	arguments : ['--target=loongarch64-unknown-elf', '-mabi=lp64d', '-mlasx',
+		'-c', '-x', 'assembler', '-o', '@OUTPUT@', '@INPUT@']
+)
