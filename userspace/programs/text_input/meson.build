@@ -1,5 +1,9 @@
 text_input_include = include_directories('include')
 
+text_input_protocol_dep = declare_dependency(
+	include_directories : text_input_include,
+)
+
 text_input_client = static_library('text_input_client',
 	sources : files('lib/text_input.c'),
 	c_args : userspace_c_args,

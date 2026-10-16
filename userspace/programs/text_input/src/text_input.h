@@ -57,6 +57,7 @@ struct text_input {
 	uint64_t                    next_source_id;
 	uint64_t                    next_composition_id;
 	bool                        locked;
+	bool                        advertised;
 	struct text_layout          layout;
 	struct keyboard_text_state* keyboards;
 	struct keyboard_event       keyboard_events[TEXT_INPUT_KEYBOARD_EVENT_PAGE_SIZE];
@@ -65,7 +66,7 @@ struct text_input {
 	size_t                      event_count;
 };
 
-/* Load an LDML layout, then initialize and advertise an empty service. */
+/* Load an LDML layout and initialize a service that is advertised once usable. */
 bool text_input_initialize(struct text_input* input, const char* layout_path);
 
 /* Allocate a nonzero input-source identifier that is never reused. */

@@ -27,6 +27,21 @@ static const struct init_service_selector text_input_selector = {
 	.service        = TEXT_INPUT_SERVICE_NAME,
 };
 
+static bool advertise(struct text_input* input) {
+	if (input->advertised) return true;
+	struct init_call_result result = init_advertise(
+		&text_input_selector, TEXT_INPUT_PROTOCOL_VERSION_MINOR, input->service_cap, TEXT_INPUT_CLIENT_RIGHTS);
+	if (result.transport_status != SYSCALL_STATUS_OK || result.status != INIT_REGISTRY_OK) return false;
+	input->advertised = true;
+	printf("text input: advertised %s/%s@%u.%u/%s\n",
+	       TEXT_INPUT_NAMESPACE,
+	       TEXT_INPUT_PROTOCOL_NAME,
+	       TEXT_INPUT_PROTOCOL_VERSION_MAJOR,
+	       TEXT_INPUT_PROTOCOL_VERSION_MINOR,
+	       TEXT_INPUT_SERVICE_NAME);
+	return true;
+}
+
 void text_input_lock(struct text_input* input) {
 	while (__atomic_test_and_set(&input->locked, __ATOMIC_ACQUIRE)) __asm__ volatile("" ::: "memory");
 }
@@ -371,7 +386,7 @@ static bool handle_event(struct text_input* input, const struct keyboard_event* 
 	case KEYBOARD_EVENT_ADDED:
 		if (ensure_keyboard(input, event->keyboard_id) == NULL) return false;
 		printf("text input: attached keyboard %llu\n", (unsigned long long)event->keyboard_id);
-		return true;
+		return advertise(input);
 	case KEYBOARD_EVENT_REMOVED: {
 		struct keyboard_text_state* keyboard = find_keyboard(input, event->keyboard_id);
 		if (keyboard != NULL && !publish_reset(input, keyboard->source_id)) return false;
@@ -446,6 +461,7 @@ static enum service_result consume_service(struct text_input* input) {
 	}
 	input->keyboard_cursor = info.newest_sequence;
 	printf("text input: connected to keyboard controller with %s layout\n", input->layout.locale);
+	if (input->keyboards != NULL && !advertise(input)) return SERVICE_RESULT_FAILED;
 	for (;;) {
 		enum drain_result result = drain_events(input);
 		if (result == DRAIN_RESULT_FAILED) return SERVICE_RESULT_FAILED;
@@ -665,12 +681,6 @@ bool text_input_initialize(struct text_input* input, const char* layout_path) {
 		status = cap_publish(
 			input->endpoint, TEXT_INPUT_OBJECT_ID, input->pid, CAP_CALL | CAP_READ | CAP_DELEGATE, &input->service_cap);
 	if (status == SYSCALL_STATUS_OK && !text_input_server_start(input)) status = SYSCALL_STATUS_FAILED;
-	if (status == SYSCALL_STATUS_OK) {
-		struct init_call_result result = init_advertise(
-			&text_input_selector, TEXT_INPUT_PROTOCOL_VERSION_MINOR, input->service_cap, TEXT_INPUT_CLIENT_RIGHTS);
-		if (result.transport_status != SYSCALL_STATUS_OK || result.status != INIT_REGISTRY_OK)
-			status = SYSCALL_STATUS_FAILED;
-	}
 	if (self.address_space_cap != CAP_ID_INVALID) (void)cap_drop(self.address_space_cap);
 	if (self.main_thread_cap != CAP_ID_INVALID) (void)cap_drop(self.main_thread_cap);
 	if (self.self_cap != CAP_ID_INVALID) (void)cap_drop(self.self_cap);
@@ -679,11 +689,5 @@ bool text_input_initialize(struct text_input* input, const char* layout_path) {
 		return false;
 	}
 	printf("text input: loaded LDML layout %s from %s\n", input->layout.locale, layout_path);
-	printf("text input: advertised %s/%s@%u.%u/%s\n",
-	       TEXT_INPUT_NAMESPACE,
-	       TEXT_INPUT_PROTOCOL_NAME,
-	       TEXT_INPUT_PROTOCOL_VERSION_MAJOR,
-	       TEXT_INPUT_PROTOCOL_VERSION_MINOR,
-	       TEXT_INPUT_SERVICE_NAME);
 	return true;
 }

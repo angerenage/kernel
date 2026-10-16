@@ -11,6 +11,7 @@
 #define TEXT_LAYOUT_MAXIMUM_LAYERS 32u
 #define TEXT_LAYOUT_MAXIMUM_TRANSFORMS 256u
 #define TEXT_LAYOUT_MAXIMUM_VALUE_SIZE 256u
+#define TEXT_LAYOUT_MAXIMUM_FILE_SIZE (1024u * 1024u)
 
 #define LAYOUT_MODIFIER_SHIFT (1u << 0u)
 #define LAYOUT_MODIFIER_CAPS (1u << 1u)
@@ -144,6 +145,32 @@ static const enum input_key_code lower_row_iso[] = {
 static void layout_error(void* data, const char* message) {
 	(void)data;
 	printf("text input: LDML parse error: %s\n", message);
+}
+
+static char* read_layout_file(const char* path) {
+	FILE* file = fopen(path, "r");
+	if (file == NULL) return NULL;
+	char* data = NULL;
+	if (fseek(file, 0l, SEEK_END) != 0) goto cleanup;
+	long file_size = ftell(file);
+	if (file_size <= 0l || (unsigned long)file_size > TEXT_LAYOUT_MAXIMUM_FILE_SIZE) goto cleanup;
+	if (fseek(file, 0l, SEEK_SET) != 0) goto cleanup;
+	size_t size = (size_t)file_size;
+	data        = malloc(size + 1u);
+	if (data == NULL) goto cleanup;
+	if (fread(data, 1u, size, file) != size || ferror(file) || memchr(data, '\0', size) != NULL) {
+		free(data);
+		data = NULL;
+		goto cleanup;
+	}
+	data[size] = '\0';
+
+cleanup:
+	if (fclose(file) != 0) {
+		free(data);
+		data = NULL;
+	}
+	return data;
 }
 
 static bool is_element(const mxml_node_t* node, const char* name) {
@@ -508,11 +535,17 @@ static bool parse_document(struct text_layout* layout, mxml_node_t* tree) {
 bool text_layout_load(struct text_layout* layout, const char* path) {
 	if (layout == NULL || path == NULL || path[0] != '/') return false;
 	memset(layout, 0, sizeof(*layout));
+	char* document = read_layout_file(path);
+	if (document == NULL) return false;
 	mxml_options_t* options = mxmlOptionsNew();
-	if (options == NULL) return false;
+	if (options == NULL) {
+		free(document);
+		return false;
+	}
 	mxmlOptionsSetErrorCallback(options, layout_error, NULL);
-	mxml_node_t* tree = mxmlLoadFilename(NULL, options, path);
+	mxml_node_t* tree = mxmlLoadString(NULL, options, document);
 	mxmlOptionsDelete(options);
+	free(document);
 	if (tree == NULL) return false;
 	bool success = parse_document(layout, tree);
 	mxmlDelete(tree);
