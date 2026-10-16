@@ -1,5 +1,6 @@
 #include <base/cap.h>
 #include <base/startup.h>
+#include <runtime/filesystem.h>
 #include <runtime/heap.h>
 #include <runtime/init.h>
 #include <runtime/startup.h>
@@ -41,6 +42,7 @@ void _start(const struct process_startup_info* startup) {
 		exit(PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
 	}
 	display_set_standard_streams(arguments.stdin_cap, arguments.stdout_cap, arguments.stderr_cap);
+	filesystem_set_working_directory(arguments.working_directory_cap);
 
 	main_result = main(arguments.argc, arguments.argv, arguments.capc, arguments.capv);
 	runtime_startup_arguments_deinit(&arguments);

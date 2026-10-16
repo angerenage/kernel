@@ -20,6 +20,12 @@ struct filesystem_node_handle {
 	cap_id_t                    capability;
 };
 
+/* Install the borrowed VFS-directory capability extracted during startup. */
+void filesystem_set_working_directory(cap_id_t directory_cap);
+
+/* Return the borrowed VFS-directory capability, or CAP_ID_INVALID when unavailable. */
+cap_id_t filesystem_get_working_directory(void);
+
 /* Read metadata from a file capability. */
 struct filesystem_call_result filesystem_file_info(cap_id_t file_cap, struct filesystem_node_info* out_info);
 

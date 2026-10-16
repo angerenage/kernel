@@ -32,12 +32,13 @@ enum runtime_startup_result runtime_startup_unpack(const struct process_startup_
 	if (startup->capv_offset != sizeof(*startup) || payload_offset > startup->size) {
 		return RUNTIME_STARTUP_INVALID;
 	}
-	capabilities              = (const cap_id_t*)((const uint8_t*)startup + startup->capv_offset);
-	out_arguments->stdin_cap  = capabilities[PROCESS_STARTUP_CAP_STDIN];
-	out_arguments->stdout_cap = capabilities[PROCESS_STARTUP_CAP_STDOUT];
-	out_arguments->stderr_cap = capabilities[PROCESS_STARTUP_CAP_STDERR];
-	out_arguments->capc       = startup->capc - PROCESS_STARTUP_CAP_COUNT;
-	out_arguments->capv       = out_arguments->capc == 0u ? NULL : capabilities + PROCESS_STARTUP_CAP_COUNT;
+	capabilities                         = (const cap_id_t*)((const uint8_t*)startup + startup->capv_offset);
+	out_arguments->stdin_cap             = capabilities[PROCESS_STARTUP_CAP_STDIN];
+	out_arguments->stdout_cap            = capabilities[PROCESS_STARTUP_CAP_STDOUT];
+	out_arguments->stderr_cap            = capabilities[PROCESS_STARTUP_CAP_STDERR];
+	out_arguments->working_directory_cap = capabilities[PROCESS_STARTUP_CAP_WORKING_DIRECTORY];
+	out_arguments->capc                  = startup->capc - PROCESS_STARTUP_CAP_COUNT;
+	out_arguments->capv                  = out_arguments->capc == 0u ? NULL : capabilities + PROCESS_STARTUP_CAP_COUNT;
 	if (startup->argc == 0u) {
 		if (startup->argv_offset != 0u || startup->argv_size != 0u || payload_offset != startup->size)
 			return RUNTIME_STARTUP_INVALID;

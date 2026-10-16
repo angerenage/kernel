@@ -75,9 +75,9 @@ struct loader_v1_load_response {
  * RUN is issued on load_cap, not on the loader service capability. Exactly
  * capc child-local capability IDs follow this structure, followed by argc
  * consecutive NUL-terminated strings occupying argv_size bytes. The first
- * three capability IDs are stdin, stdout, and stderr. crt0 installs them as
- * standard streams and does not expose them to main(). Invalid IDs are
- * preserved and represent unavailable application capabilities.
+ * four capability IDs are stdin, stdout, stderr, and the working directory.
+ * crt0 installs them as process state and does not expose them to main().
+ * Invalid IDs are preserved and represent unavailable capabilities.
  *
  * argc == 0 requires argv_size == 0. Validation failures leave the loading
  * object prepared and may be retried. Once the loader begins starting the

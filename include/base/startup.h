@@ -7,10 +7,10 @@
 /*
  * Process environment copied onto the main thread's user stack.
  *
- * capv_offset describes capc positional capability IDs. The first three are
- * stdin, stdout, and stderr respectively. The C runtime installs them as the
- * process standard streams and removes them from the capability arguments
- * exposed to main(). Invalid IDs represent unavailable standard streams.
+ * capv_offset describes capc positional capability IDs. The first four are
+ * stdin, stdout, stderr, and the working directory respectively. The C runtime
+ * installs them as process state and removes them from the capability arguments
+ * exposed to main(). Invalid IDs represent unavailable standard resources.
  * argv_offset and argv_size describe exactly argc consecutive NUL-terminated
  * strings. Offsets are relative to this structure and zero for empty lists.
  * Application capability IDs, including invalid IDs, retain their positional order.
@@ -20,6 +20,7 @@ enum process_startup_capability_index {
 	PROCESS_STARTUP_CAP_STDIN = 0u,
 	PROCESS_STARTUP_CAP_STDOUT,
 	PROCESS_STARTUP_CAP_STDERR,
+	PROCESS_STARTUP_CAP_WORKING_DIRECTORY,
 	PROCESS_STARTUP_CAP_COUNT,
 };
 

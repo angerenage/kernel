@@ -18,6 +18,7 @@ struct shell_history_entry {
 /* Mutable state owned by one shell process. */
 struct shell {
 	cap_id_t                   vfs_cap;
+	cap_id_t                   current_directory_cap;
 	char                       current_directory[SHELL_PATH_CAPACITY];
 	size_t                     current_directory_size;
 	struct shell_history_entry history[SHELL_HISTORY_CAPACITY];

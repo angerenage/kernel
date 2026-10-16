@@ -4,6 +4,16 @@
 #include <stdbool.h>
 #include <system/capability.h>
 
+static cap_id_t working_directory_cap = CAP_ID_INVALID;
+
+void filesystem_set_working_directory(cap_id_t directory_cap) {
+	working_directory_cap = directory_cap;
+}
+
+cap_id_t filesystem_get_working_directory(void) {
+	return working_directory_cap;
+}
+
 static struct filesystem_call_result result(enum filesystem_status status, syscall_status_t transport_status) {
 	return (struct filesystem_call_result){.transport_status = transport_status, .status = status};
 }
