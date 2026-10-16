@@ -39,6 +39,13 @@ enum shell_change_directory_result {
 	SHELL_CHANGE_DIRECTORY_FAILED,
 };
 
+enum shell_program_result {
+	SHELL_PROGRAM_OK,
+	SHELL_PROGRAM_NOT_FOUND,
+	SHELL_PROGRAM_EXIT_FAILED,
+	SHELL_PROGRAM_FAILED,
+};
+
 /* Acquire the VFS service and initialize the shell in the root directory. */
 bool shell_initialize(struct shell* shell);
 
@@ -47,6 +54,13 @@ bool shell_destroy(struct shell* shell);
 
 /* Resolve and enter an absolute or shell-relative directory. */
 enum shell_change_directory_result shell_change_directory(struct shell* shell, const char* path, size_t path_size);
+
+/* Normalize an absolute or shell-relative path without accessing it. */
+bool shell_resolve_path(const struct shell* shell, const char* path, size_t path_size, char* output, size_t* out_size);
+
+/* Load, run, and wait for one foreground program. */
+enum shell_program_result shell_run_program(struct shell* shell, const char* command, size_t command_size, size_t argc,
+                                            const char* const argv[]);
 
 /* Read and locally edit one line, including navigation through shell history. */
 enum shell_input_result shell_read_line(struct shell* shell, char* line, size_t capacity, size_t* out_size);

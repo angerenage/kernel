@@ -8,6 +8,9 @@
 /* Install the standard Stream capabilities extracted from process_startup_info. */
 void display_set_standard_streams(cap_id_t stdin_cap, cap_id_t stdout_cap, cap_id_t stderr_cap);
 
+/* Read the installed standard Stream capability IDs without transferring ownership. */
+void display_get_standard_streams(cap_id_t* out_stdin_cap, cap_id_t* out_stdout_cap, cap_id_t* out_stderr_cap);
+
 /* Read from the process standard input Stream. */
 syscall_status_t display_read(void* data, size_t capacity, size_t* out_read);
 

@@ -1,3 +1,4 @@
+#include <libc/stdlib.h>
 #include <libc/string.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -6,11 +7,6 @@
 
 static bool is_space(char value) {
 	return value == ' ' || value == '\t';
-}
-
-static bool command_is(const char* line, size_t size, const char* command) {
-	size_t command_size = strlen(command);
-	return size == command_size && memcmp(line, command, command_size) == 0;
 }
 
 static bool report_change_directory(enum shell_change_directory_result result) {
@@ -31,23 +27,67 @@ static bool report_change_directory(enum shell_change_directory_result result) {
 	}
 }
 
-static bool execute_change_directory(struct shell* shell, const char* arguments, size_t size) {
-	size_t path_start = 0u;
-	size_t path_end   = size;
+static bool execute_change_directory(struct shell* shell, size_t argc, char* const argv[]) {
+	if (argc == 0u) return shell_write_command_error("cd", "missing directory");
+	if (argc != 1u) return shell_write_command_error("cd", "expected one directory");
+	return report_change_directory(shell_change_directory(shell, argv[0], strlen(argv[0])));
+}
 
-	while (path_start < size && is_space(arguments[path_start])) path_start++;
-	while (path_end > path_start && is_space(arguments[path_end - 1u])) path_end--;
-	if (path_start == path_end) return shell_write_command_error("cd", "missing directory");
-	for (size_t i = path_start; i < path_end; i++) {
-		if (is_space(arguments[i])) return shell_write_command_error("cd", "expected one directory");
+static bool execute_program(struct shell* shell, size_t argc, char* const argv[]) {
+	size_t command_size = strlen(argv[0]);
+	switch (shell_run_program(shell, argv[0], command_size, argc - 1u, (const char* const*)(argv + 1u))) {
+	case SHELL_PROGRAM_OK:
+		return true;
+	case SHELL_PROGRAM_NOT_FOUND:
+		return shell_write_unknown_command(argv[0], command_size);
+	case SHELL_PROGRAM_EXIT_FAILED:
+		return shell_write_command_error(argv[0], "program exited unsuccessfully");
+	case SHELL_PROGRAM_FAILED:
+	default:
+		return shell_write_command_error(argv[0], "unable to launch program");
 	}
-	return report_change_directory(shell_change_directory(shell, arguments + path_start, path_end - path_start));
+}
+
+static bool parse_words(const char* line, size_t size, char*** out_argv, size_t* out_argc) {
+	char*  storage;
+	char** argv;
+	size_t argc = 0u;
+	size_t offset;
+
+	if (line == NULL || size == 0u || out_argv == NULL || out_argc == NULL) return false;
+	storage = malloc(size + 1u);
+	argv    = malloc((size / 2u + 1u) * sizeof(*argv));
+	if (storage == NULL || argv == NULL) {
+		free(argv);
+		free(storage);
+		return false;
+	}
+	memcpy(storage, line, size);
+	storage[size] = '\0';
+	offset        = 0u;
+	while (offset < size) {
+		while (offset < size && is_space(storage[offset])) storage[offset++] = '\0';
+		if (offset == size) break;
+		argv[argc++] = storage + offset;
+		while (offset < size && !is_space(storage[offset])) offset++;
+	}
+	*out_argv = argv;
+	*out_argc = argc;
+	return true;
+}
+
+static void free_words(char** argv) {
+	if (argv == NULL) return;
+	free(argv[0]);
+	free(argv);
 }
 
 bool shell_execute_line(struct shell* shell, const char* line, size_t size) {
-	size_t start       = 0u;
-	size_t end         = size;
-	size_t command_end = 0u;
+	char** argv = NULL;
+	size_t argc;
+	size_t start = 0u;
+	size_t end   = size;
+	bool   success;
 
 	if (shell == NULL || (line == NULL && size != 0u)) return false;
 	while (start < size && is_space(line[start])) start++;
@@ -55,12 +95,13 @@ bool shell_execute_line(struct shell* shell, const char* line, size_t size) {
 	if (start == end) return true;
 	line += start;
 	size = end - start;
-	while (command_end < size && !is_space(line[command_end])) command_end++;
-	if (command_is(line, command_end, "cd"))
-		return execute_change_directory(shell, line + command_end, size - command_end);
-	if (command_is(line, command_end, "clear")) {
-		if (command_end != size) return shell_write_command_error("clear", "expected no arguments");
-		return shell_write_string("\x1b[2J\x1b[H");
+	if (!parse_words(line, size, &argv, &argc) || argc == 0u) return false;
+	if (strcmp(argv[0], "cd") == 0) success = execute_change_directory(shell, argc - 1u, argv + 1u);
+	else if (strcmp(argv[0], "clear") == 0) {
+		if (argc != 1u) success = shell_write_command_error("clear", "expected no arguments");
+		else success = shell_write_string("\x1b[2J\x1b[H");
 	}
-	return shell_write_unknown_command(line, command_end);
+	else success = execute_program(shell, argc, argv);
+	free_words(argv);
+	return success;
 }

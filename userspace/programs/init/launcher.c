@@ -58,7 +58,7 @@ static void rollback_bootstrap_process(struct loader_load_response* loaded, cap_
 	(void)drop_owned_capability(&loaded->process_cap, description);
 }
 
-static syscall_status_t delegate_output_stream(const struct init_state* init, process_id_t target,
+static syscall_status_t delegate_output_stream(const struct init_state* init, process_id_t target, bool delegatable,
                                                cap_id_t* out_capability) {
 	const struct init_protocol_query query = {
 		.namespace_path = TERMINAL_NAMESPACE,
@@ -71,6 +71,7 @@ static syscall_status_t delegate_output_stream(const struct init_state* init, pr
 		.self_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .main_thread_cap = CAP_ID_INVALID};
 	enum init_registry_status registry_status;
 	syscall_status_t          status;
+	cap_rights_t              rights = TERMINAL_OUTPUT_RIGHTS | (delegatable ? CAP_DELEGATE : 0u);
 
 	if (init == NULL || target == PROCESS_PID_INVALID || out_capability == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	*out_capability = CAP_ID_INVALID;
@@ -82,14 +83,14 @@ static syscall_status_t delegate_output_stream(const struct init_state* init, pr
 	}
 	registry_status = registry_acquire(self.pid, &query, TERMINAL_SERVICE_NAME, &terminal);
 	if (registry_status == INIT_REGISTRY_OK) {
-		status = cap_delegate(terminal.capability, target, TERMINAL_OUTPUT_RIGHTS, out_capability);
+		status = cap_delegate(terminal.capability, target, rights, out_capability);
 		goto cleanup;
 	}
 	if (registry_status != INIT_REGISTRY_NOT_FOUND) {
 		status = SYSCALL_STATUS_FAILED;
 		goto cleanup;
 	}
-	status = cap_delegate(init->serial_stream_cap, target, CAP_WRITE | CAP_CALL, out_capability);
+	status = cap_delegate(init->serial_stream_cap, target, rights, out_capability);
 
 cleanup:
 	if (terminal.capability != CAP_ID_INVALID && cap_drop(terminal.capability) != SYSCALL_STATUS_OK &&
@@ -127,7 +128,7 @@ static syscall_status_t delegate_input_stream(process_id_t target, cap_id_t* out
 		status = registry_status == INIT_REGISTRY_NOT_FOUND ? SYSCALL_STATUS_UNAVAILABLE : SYSCALL_STATUS_FAILED;
 		goto cleanup;
 	}
-	status = cap_delegate(terminal.capability, target, TERMINAL_INPUT_RIGHTS, out_capability);
+	status = cap_delegate(terminal.capability, target, TERMINAL_INPUT_RIGHTS | CAP_DELEGATE, out_capability);
 
 cleanup:
 	if (terminal.capability != CAP_ID_INVALID && cap_drop(terminal.capability) != SYSCALL_STATUS_OK &&
@@ -232,7 +233,7 @@ static bool bootstrap_launch_internal(const struct init_state* init, const char*
 		printf("init: init capability publication failed: %u\n", (unsigned)status);
 		goto fail;
 	}
-	status = delegate_output_stream(init, process_info.pid, &output_stream_cap);
+	status = delegate_output_stream(init, process_info.pid, terminal_input, &output_stream_cap);
 	if (status != SYSCALL_STATUS_OK) {
 		printf("init: output stream delegation failed: %u\n", (unsigned)status);
 		goto fail;

@@ -12,6 +12,12 @@ void display_set_standard_streams(cap_id_t stdin_cap, cap_id_t stdout_cap, cap_i
 	stderr_stream_cap = stderr_cap;
 }
 
+void display_get_standard_streams(cap_id_t* out_stdin_cap, cap_id_t* out_stdout_cap, cap_id_t* out_stderr_cap) {
+	if (out_stdin_cap != NULL) *out_stdin_cap = stdin_stream_cap;
+	if (out_stdout_cap != NULL) *out_stdout_cap = stdout_stream_cap;
+	if (out_stderr_cap != NULL) *out_stderr_cap = stderr_stream_cap;
+}
+
 syscall_status_t display_read(void* data, size_t capacity, size_t* out_read) {
 	if (out_read != NULL) *out_read = 0u;
 	if (stdin_stream_cap == CAP_ID_INVALID) return SYSCALL_STATUS_UNAVAILABLE;

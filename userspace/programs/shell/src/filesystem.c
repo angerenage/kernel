@@ -30,8 +30,7 @@ static void remove_component(char* output, size_t* output_size) {
 	if (*output_size > 1u) (*output_size)--;
 }
 
-static bool normalize_path(const struct shell* shell, const char* path, size_t path_size, char* output,
-                           size_t* out_size) {
+bool shell_resolve_path(const struct shell* shell, const char* path, size_t path_size, char* output, size_t* out_size) {
 	size_t output_size;
 	size_t offset = 0u;
 
@@ -104,7 +103,7 @@ enum shell_change_directory_result shell_change_directory(struct shell* shell, c
 	size_t                        normalized_size;
 
 	if (shell == NULL || shell->vfs_cap == CAP_ID_INVALID ||
-	    !normalize_path(shell, path, path_size, normalized, &normalized_size))
+	    !shell_resolve_path(shell, path, path_size, normalized, &normalized_size))
 		return SHELL_CHANGE_DIRECTORY_INVALID_PATH;
 	result = vfs_open(shell->vfs_cap, normalized, normalized_size, CAP_READ, &node);
 	if (result.transport_status != SYSCALL_STATUS_OK) return SHELL_CHANGE_DIRECTORY_FAILED;
