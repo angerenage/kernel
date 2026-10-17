@@ -19,7 +19,6 @@
 #define FILESYSTEM_PROTOCOL_VERSION_MINOR 1u
 #define RAMFS_ROOT_OBJECT_ID 1u
 #define RAMFS_CLIENT_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE | CAP_MANAGE | CAP_DELEGATE))
-#define RAMFS_SOURCE_RIGHTS RAMFS_CLIENT_RIGHTS
 
 /* One file, directory or symbolic link; attached nodes and open handles each hold a reference. */
 struct ramfs_node {
@@ -33,6 +32,7 @@ struct ramfs_node {
 	size_t             name_size;
 	uint8_t*           data;
 	size_t             size;
+	size_t             capacity;
 };
 
 struct ramfs_handle {
@@ -141,14 +141,18 @@ static struct ramfs_node* create_node(struct ramfs_node* parent, uint32_t type, 
 
 static bool resize_node(struct ramfs_node* node, uint64_t size) {
 	uint8_t* data;
+	size_t   capacity;
 
 	if (size > SIZE_MAX) return false;
-	if ((size_t)size > node->size) {
-		data = realloc(node->data, (size_t)size);
+	if ((size_t)size > node->capacity) {
+		capacity = node->capacity > SIZE_MAX / 2u ? SIZE_MAX : node->capacity * 2u;
+		if (capacity < (size_t)size) capacity = (size_t)size;
+		data = realloc(node->data, capacity);
 		if (data == NULL) return false;
-		memset(data + node->size, 0, (size_t)size - node->size);
-		node->data = data;
+		node->data     = data;
+		node->capacity = capacity;
 	}
+	if ((size_t)size > node->size) memset(node->data + node->size, 0, (size_t)size - node->size);
 	node->size = (size_t)size;
 	return true;
 }
@@ -163,6 +167,7 @@ static enum filesystem_status walk(struct ramfs_node* base, const uint8_t* path,
 	struct ramfs_node* node  = base;
 	size_t             start = 0u;
 
+	if (node_detached(base)) return FILESYSTEM_STATUS_NOT_FOUND;
 	for (size_t i = 0u; i <= path_size; i++) {
 		const uint8_t*     name;
 		size_t             name_size;
@@ -173,7 +178,6 @@ static enum filesystem_status walk(struct ramfs_node* base, const uint8_t* path,
 		name      = path + start;
 		name_size = i - start;
 		start     = i + 1u;
-		if (node_detached(node)) return FILESYSTEM_STATUS_NOT_FOUND;
 		if (final && parent_only) {
 			*out_node      = node;
 			*out_name      = name;
@@ -231,10 +235,6 @@ static bool reply_open_node(const struct cap_request* call, struct ramfs_node* n
 	if (handle == NULL) return reply_transport(call, SYSCALL_STATUS_FAILED);
 	handle->node = node;
 	node->references++;
-	if (handle_object_id(handle) == 0u || handle_object_id(handle) == RAMFS_ROOT_OBJECT_ID) {
-		release_handle(handle);
-		return reply_transport(call, SYSCALL_STATUS_FAILED);
-	}
 	status =
 		cap_derive(ramfs_root_cap, call->caller, handle_object_id(handle), CAP_CALL | rights, &response.capability);
 	if (status != SYSCALL_STATUS_OK) {
@@ -265,47 +265,34 @@ static bool handle_node_info(const struct cap_request* call, const void* data, c
 }
 
 /* Validate an open-shaped request (OPEN and creation) and return its path. */
-static const uint8_t* open_request_path(const struct cap_request* call, const void* data, cap_rights_t required,
-                                        struct filesystem_directory_open_request* out_request, bool* out_replied) {
-	const uint8_t* path;
-
-	*out_replied = true;
-	if (!request_has_rights(call, CAP_CALL | required)) {
-		*out_replied = reply_transport(call, SYSCALL_STATUS_DENIED);
-		return NULL;
-	}
+static syscall_status_t open_request_path(const struct cap_request* call, const void* data, cap_rights_t required,
+                                          struct filesystem_directory_open_request* out_request,
+                                          const uint8_t**                           out_path) {
+	if (!request_has_rights(call, CAP_CALL | required)) return SYSCALL_STATUS_DENIED;
 	if (!copy_request(call, data, out_request, sizeof(*out_request)) || out_request->path_size == 0u ||
 	    out_request->path_size > CAP_MAX_REQUEST_SIZE - sizeof(*out_request) ||
 	    sizeof(*out_request) + out_request->path_size != call->request_size ||
 	    call->response_capacity < sizeof(struct filesystem_open_response) ||
-	    !node_rights_valid(call, out_request->rights) ||
-	    !filesystem_relative_path_valid((path = (const uint8_t*)data + sizeof(*out_request)), out_request->path_size)) {
-		*out_replied = reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
-		return NULL;
-	}
-	return path;
+	    !node_rights_valid(call, out_request->rights))
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	*out_path = (const uint8_t*)data + sizeof(*out_request);
+	return filesystem_relative_path_valid(*out_path, out_request->path_size) ? SYSCALL_STATUS_OK
+	                                                                         : SYSCALL_STATUS_BAD_ARGUMENT;
 }
 
 /* Validate a filesystem_directory_path_request and return its path. */
-static const uint8_t* path_request_path(const struct cap_request* call, const void* data, cap_rights_t required,
-                                        size_t response_size, size_t* out_size, bool* out_replied) {
+static syscall_status_t path_request_path(const struct cap_request* call, const void* data, cap_rights_t required,
+                                          size_t response_size, const uint8_t** out_path, size_t* out_size) {
 	struct filesystem_directory_path_request request;
-	const uint8_t*                           path;
 
-	*out_replied = true;
-	if (!request_has_rights(call, CAP_CALL | required)) {
-		*out_replied = reply_transport(call, SYSCALL_STATUS_DENIED);
-		return NULL;
-	}
+	if (!request_has_rights(call, CAP_CALL | required)) return SYSCALL_STATUS_DENIED;
 	if (!copy_request(call, data, &request, sizeof(request)) || request.path_size == 0u ||
 	    request.path_size > CAP_MAX_REQUEST_SIZE - sizeof(request) ||
-	    sizeof(request) + request.path_size != call->request_size || call->response_capacity < response_size ||
-	    !filesystem_relative_path_valid((path = (const uint8_t*)data + sizeof(request)), request.path_size)) {
-		*out_replied = reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
-		return NULL;
-	}
+	    sizeof(request) + request.path_size != call->request_size || call->response_capacity < response_size)
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	*out_path = (const uint8_t*)data + sizeof(request);
 	*out_size = request.path_size;
-	return path;
+	return filesystem_relative_path_valid(*out_path, *out_size) ? SYSCALL_STATUS_OK : SYSCALL_STATUS_BAD_ARGUMENT;
 }
 
 static bool handle_directory_open(const struct cap_request* call, const void* data, struct ramfs_node* directory) {
@@ -313,34 +300,43 @@ static bool handle_directory_open(const struct cap_request* call, const void* da
 	struct ramfs_node*                       node;
 	enum filesystem_status                   status;
 	const uint8_t*                           path;
-	bool                                     replied;
+	syscall_status_t                         transport;
 
-	path = open_request_path(call, data, CAP_READ, &request, &replied);
-	if (path == NULL) return replied;
+	transport = open_request_path(call, data, CAP_READ, &request, &path);
+	if (transport != SYSCALL_STATUS_OK) return reply_transport(call, transport);
 	status = walk(directory, path, request.path_size, false, &node, NULL, NULL);
 	if (status != FILESYSTEM_STATUS_OK) return reply_domain(call, status);
 	if (node->type == FILESYSTEM_NODE_SYMBOLIC_LINK) return reply_domain(call, FILESYSTEM_STATUS_SYMBOLIC_LINK);
 	return reply_open_node(call, node, request.rights);
 }
 
+/* Create a new child named by the final component of path. */
+static enum filesystem_status create_child(struct ramfs_node* directory, const uint8_t* path, size_t path_size,
+                                           uint32_t type, struct ramfs_node** out_node) {
+	struct ramfs_node*     parent;
+	enum filesystem_status status;
+	const uint8_t*         name;
+	size_t                 name_size;
+
+	status = walk(directory, path, path_size, true, &parent, &name, &name_size);
+	if (status != FILESYSTEM_STATUS_OK) return status;
+	if (find_child(parent, name, name_size) != NULL) return FILESYSTEM_STATUS_ALREADY_EXISTS;
+	*out_node = create_node(parent, type, name, name_size);
+	return *out_node == NULL ? FILESYSTEM_STATUS_NO_SPACE : FILESYSTEM_STATUS_OK;
+}
+
 static bool handle_directory_create(const struct cap_request* call, const void* data, struct ramfs_node* directory,
                                     uint32_t type) {
 	struct filesystem_directory_open_request request;
-	struct ramfs_node*                       parent;
 	struct ramfs_node*                       node;
 	enum filesystem_status                   status;
 	const uint8_t*                           path;
-	const uint8_t*                           name;
-	size_t                                   name_size;
-	bool                                     replied;
+	syscall_status_t                         transport;
 
-	path = open_request_path(call, data, CAP_WRITE, &request, &replied);
-	if (path == NULL) return replied;
-	status = walk(directory, path, request.path_size, true, &parent, &name, &name_size);
+	transport = open_request_path(call, data, CAP_WRITE, &request, &path);
+	if (transport != SYSCALL_STATUS_OK) return reply_transport(call, transport);
+	status = create_child(directory, path, request.path_size, type, &node);
 	if (status != FILESYSTEM_STATUS_OK) return reply_domain(call, status);
-	if (find_child(parent, name, name_size) != NULL) return reply_domain(call, FILESYSTEM_STATUS_ALREADY_EXISTS);
-	node = create_node(parent, type, name, name_size);
-	if (node == NULL) return reply_domain(call, FILESYSTEM_STATUS_NO_SPACE);
 	return reply_open_node(call, node, request.rights);
 }
 
@@ -387,10 +383,10 @@ static bool handle_directory_lookup(const struct cap_request* call, const void* 
 	enum filesystem_status status;
 	const uint8_t*         path;
 	size_t                 path_size;
-	bool                   replied;
+	syscall_status_t       transport;
 
-	path = path_request_path(call, data, CAP_READ, sizeof(response), &path_size, &replied);
-	if (path == NULL) return replied;
+	transport = path_request_path(call, data, CAP_READ, sizeof(response), &path, &path_size);
+	if (transport != SYSCALL_STATUS_OK) return reply_transport(call, transport);
 	status = walk(directory, path, path_size, false, &node, NULL, NULL);
 	if (status != FILESYSTEM_STATUS_OK) return reply_domain(call, status);
 	response.info = node_info(node);
@@ -404,10 +400,10 @@ static bool handle_directory_read_symbolic_link(const struct cap_request* call, 
 	enum filesystem_status                         status;
 	const uint8_t*                                 path;
 	size_t                                         path_size;
-	bool                                           replied;
+	syscall_status_t                               transport;
 
-	path = path_request_path(call, data, CAP_READ, sizeof(*response), &path_size, &replied);
-	if (path == NULL) return replied;
+	transport = path_request_path(call, data, CAP_READ, sizeof(*response), &path, &path_size);
+	if (transport != SYSCALL_STATUS_OK) return reply_transport(call, transport);
 	status = walk(directory, path, path_size, false, &node, NULL, NULL);
 	if (status != FILESYSTEM_STATUS_OK) return reply_domain(call, status);
 	if (node->type != FILESYSTEM_NODE_SYMBOLIC_LINK) return reply_domain(call, FILESYSTEM_STATUS_INVALID_ARGUMENT);
@@ -421,13 +417,10 @@ static bool handle_directory_read_symbolic_link(const struct cap_request* call, 
 static bool handle_directory_create_symbolic_link(const struct cap_request* call, const void* data,
                                                   struct ramfs_node* directory) {
 	struct filesystem_directory_symbolic_link_request request;
-	struct ramfs_node*                                parent;
 	struct ramfs_node*                                node;
 	enum filesystem_status                            status;
 	const uint8_t*                                    path;
 	const uint8_t*                                    target;
-	const uint8_t*                                    name;
-	size_t                                            name_size;
 
 	if (!request_has_rights(call, CAP_CALL | CAP_WRITE)) return reply_transport(call, SYSCALL_STATUS_DENIED);
 	if (!copy_request(call, data, &request, sizeof(request)) || request.reserved != 0u || request.path_size == 0u ||
@@ -441,11 +434,8 @@ static bool handle_directory_create_symbolic_link(const struct cap_request* call
 	if (!filesystem_relative_path_valid(path, request.path_size) ||
 	    !filesystem_symbolic_link_target_valid(target, request.target_size))
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
-	status = walk(directory, path, request.path_size, true, &parent, &name, &name_size);
+	status = create_child(directory, path, request.path_size, FILESYSTEM_NODE_SYMBOLIC_LINK, &node);
 	if (status != FILESYSTEM_STATUS_OK) return reply_domain(call, status);
-	if (find_child(parent, name, name_size) != NULL) return reply_domain(call, FILESYSTEM_STATUS_ALREADY_EXISTS);
-	node = create_node(parent, FILESYSTEM_NODE_SYMBOLIC_LINK, name, name_size);
-	if (node == NULL) return reply_domain(call, FILESYSTEM_STATUS_NO_SPACE);
 	node->data = malloc(request.target_size);
 	if (node->data == NULL) {
 		unlink_node(node);
@@ -453,7 +443,8 @@ static bool handle_directory_create_symbolic_link(const struct cap_request* call
 		return reply_domain(call, FILESYSTEM_STATUS_NO_SPACE);
 	}
 	memcpy(node->data, target, request.target_size);
-	node->size = request.target_size;
+	node->size     = request.target_size;
+	node->capacity = request.target_size;
 	return reply_domain(call, FILESYSTEM_STATUS_OK);
 }
 
@@ -462,10 +453,10 @@ static bool handle_directory_remove(const struct cap_request* call, const void* 
 	enum filesystem_status status;
 	const uint8_t*         path;
 	size_t                 path_size;
-	bool                   replied;
+	syscall_status_t       transport;
 
-	path = path_request_path(call, data, CAP_WRITE, sizeof(struct filesystem_response_header), &path_size, &replied);
-	if (path == NULL) return replied;
+	transport = path_request_path(call, data, CAP_WRITE, sizeof(struct filesystem_response_header), &path, &path_size);
+	if (transport != SYSCALL_STATUS_OK) return reply_transport(call, transport);
 	status = walk(directory, path, path_size, false, &node, NULL, NULL);
 	if (status != FILESYSTEM_STATUS_OK) return reply_domain(call, status);
 	if (node->type == FILESYSTEM_NODE_DIRECTORY && node->child_count != 0u)
@@ -581,7 +572,8 @@ static bool handle_file_write(const struct cap_request* call, const void* data, 
 	    call->response_capacity < sizeof(response))
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	if (request.offset > SIZE_MAX - request.size) return reply_domain(call, FILESYSTEM_STATUS_NO_SPACE);
-	if (request.offset + request.size > file->size && !resize_node(file, request.offset + request.size))
+	if (request.size != 0u && request.offset + request.size > file->size &&
+	    !resize_node(file, request.offset + request.size))
 		return reply_domain(call, FILESYSTEM_STATUS_NO_SPACE);
 	if (request.size != 0u) memcpy(file->data + request.offset, (const uint8_t*)data + sizeof(request), request.size);
 	response.size = request.size;
@@ -649,7 +641,7 @@ static bool advertise_ramfs(void) {
 	if (status != SYSCALL_STATUS_OK || self.pid == PROCESS_PID_INVALID) return false;
 	status = channel_create(&ramfs_endpoint, &ramfs_activity);
 	if (status != SYSCALL_STATUS_OK) return false;
-	status = cap_publish(ramfs_endpoint, RAMFS_ROOT_OBJECT_ID, self.pid, RAMFS_SOURCE_RIGHTS, &ramfs_root_cap);
+	status = cap_publish(ramfs_endpoint, RAMFS_ROOT_OBJECT_ID, self.pid, RAMFS_CLIENT_RIGHTS, &ramfs_root_cap);
 	if (status != SYSCALL_STATUS_OK) return false;
 	result = init_advertise(&selector, FILESYSTEM_PROTOCOL_VERSION_MINOR, ramfs_root_cap, RAMFS_CLIENT_RIGHTS);
 	return result.status == INIT_REGISTRY_OK && result.transport_status == SYSCALL_STATUS_OK;

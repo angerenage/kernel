@@ -3,7 +3,6 @@
 #include <runtime/filesystem.h>
 #include <runtime/init.h>
 #include <runtime/vfs.h>
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -11,27 +10,6 @@
 
 #define VFS_PROTOCOL_VERSION_MAJOR 1u
 #define VFS_PROTOCOL_VERSION_MINOR 1u
-
-static const char* status_message(struct filesystem_call_result result) {
-	if (result.transport_status == SYSCALL_STATUS_DENIED) return "permission denied";
-	if (result.transport_status != SYSCALL_STATUS_OK) return "filesystem operation failed";
-	switch (result.status) {
-	case FILESYSTEM_STATUS_ALREADY_EXISTS:
-		return "file exists";
-	case FILESYSTEM_STATUS_NOT_FOUND:
-		return "no such file or directory";
-	case FILESYSTEM_STATUS_NOT_DIRECTORY:
-		return "not a directory";
-	case FILESYSTEM_STATUS_READ_ONLY:
-		return "read-only file system";
-	case FILESYSTEM_STATUS_LOOP:
-		return "too many levels of symbolic links";
-	case FILESYSTEM_STATUS_ACCESS_DENIED:
-		return "permission denied";
-	default:
-		return "filesystem operation failed";
-	}
-}
 
 /* Create the link through the VFS service for an absolute path, or below the working directory otherwise. */
 static struct filesystem_call_result create_link(const char* path, const char* target) {
@@ -74,10 +52,6 @@ int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 	}
 	result = create_link(argv[index + 1], argv[index]);
 	if (result.transport_status == SYSCALL_STATUS_OK && result.status == FILESYSTEM_STATUS_OK) return 0;
-	if (result.transport_status == SYSCALL_STATUS_BAD_ARGUMENT) {
-		fprintf(stderr, "ln: invalid target or link path\n");
-		return 1;
-	}
-	fprintf(stderr, "ln: %s: %s\n", argv[index + 1], status_message(result));
+	fprintf(stderr, "ln: %s: %s\n", argv[index + 1], filesystem_status_message(result));
 	return 1;
 }

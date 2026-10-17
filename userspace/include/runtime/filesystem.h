@@ -89,3 +89,6 @@ bool filesystem_relative_path_valid(const void* path, size_t path_size);
 
 /* Validate a symbolic-link target: 1 to FILESYSTEM_SYMBOLIC_LINK_MAX bytes without NUL. */
 bool filesystem_symbolic_link_target_valid(const void* target, size_t target_size);
+
+/* Describe a failed filesystem call for diagnostics. */
+const char* filesystem_status_message(struct filesystem_call_result result);

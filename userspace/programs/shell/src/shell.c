@@ -13,7 +13,7 @@
 #include <system/process.h>
 
 #define VFS_PROTOCOL_VERSION_MAJOR 1u
-#define VFS_PROTOCOL_VERSION_MINOR 0u
+#define VFS_PROTOCOL_VERSION_MINOR 1u
 
 bool shell_initialize(struct shell* shell) {
 	static const struct init_protocol_query query = {

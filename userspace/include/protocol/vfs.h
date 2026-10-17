@@ -17,8 +17,9 @@
 #define VFS_PROTOCOL_NAME "vfs"
 #define VFS_SERVICE_NAME "root"
 
+/* Every path a request can carry fits in VFS_PATH_MAX, which also fits in a path response. */
 enum {
-	VFS_PATH_MAX                 = 4096u,
+	VFS_PATH_MAX                 = CAP_MAX_RESPONSE_SIZE - sizeof(struct filesystem_response_header),
 	VFS_SYMBOLIC_LINK_FOLLOW_MAX = 40u,
 };
 
@@ -130,7 +131,8 @@ struct vfs_directory_mount_request {
  *
  * OPEN follows symbolic links in every component. LOOKUP, READ_SYMBOLIC_LINK,
  * CREATE_SYMBOLIC_LINK, creation, REMOVE and RENAME follow links in every
- * component but the final one, which they act on directly. LOOKUP and
+ * component but the final one, which they act on directly; CREATE_FILE alone
+ * also follows a final link whose target is missing and creates that target. LOOKUP and
  * READ_SYMBOLIC_LINK use vfs_path_request and the raw LOOKUP and
  * READ_SYMBOLIC_LINK responses. RESOLVE uses vfs_path_request, follows every
  * component, and answers with vfs_path_response naming the existing node.

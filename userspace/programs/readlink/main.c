@@ -13,22 +13,9 @@
 #define VFS_PROTOCOL_VERSION_MINOR 1u
 
 static const char* status_message(struct filesystem_call_result result) {
-	if (result.transport_status == SYSCALL_STATUS_BAD_ARGUMENT) return "invalid path";
-	if (result.transport_status != SYSCALL_STATUS_OK) return "filesystem operation failed";
-	switch (result.status) {
-	case FILESYSTEM_STATUS_INVALID_ARGUMENT:
+	if (result.transport_status == SYSCALL_STATUS_OK && result.status == FILESYSTEM_STATUS_INVALID_ARGUMENT)
 		return "not a symbolic link";
-	case FILESYSTEM_STATUS_NOT_FOUND:
-		return "no such file or directory";
-	case FILESYSTEM_STATUS_NOT_DIRECTORY:
-		return "not a directory";
-	case FILESYSTEM_STATUS_LOOP:
-		return "too many levels of symbolic links";
-	case FILESYSTEM_STATUS_ACCESS_DENIED:
-		return "permission denied";
-	default:
-		return "filesystem operation failed";
-	}
+	return filesystem_status_message(result);
 }
 
 /*
