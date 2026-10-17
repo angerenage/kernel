@@ -1,7 +1,20 @@
 terminal_include = include_directories('include')
 
+terminal_client = static_library('terminal_client',
+	sources : files('lib/terminal.c'),
+	c_args : userspace_c_args,
+	include_directories : [userspace_runtime_inc, terminal_include],
+	pic : false,
+	install : false,
+)
+
 terminal_protocol_dep = declare_dependency(
 	include_directories : terminal_include,
+)
+
+terminal_dep = declare_dependency(
+	include_directories : terminal_include,
+	link_with : terminal_client,
 )
 
 terminal_elf = executable(

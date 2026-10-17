@@ -10,6 +10,7 @@
 #include <system/capability.h>
 #include <system/display.h>
 #include <system/process.h>
+#include <system/thread.h>
 
 #include "shell.h"
 
@@ -57,8 +58,54 @@ static void stop_process(struct program_run_result* running) {
 	}
 }
 
+struct foreground_input_argument {
+	struct shell* shell;
+	cap_id_t      process_cap;
+};
+
+static void monitor_foreground_input(void* opaque) {
+	const struct foreground_input_argument* argument = opaque;
+
+	for (;;) {
+		uint8_t byte;
+		size_t  size = 0u;
+		if (display_read(&byte, 1u, &size) != SYSCALL_STATUS_OK || size != 1u) thread_exit(1u);
+		if (byte == 0x03u) {
+			syscall_status_t status = process_kill(argument->process_cap, PROCESS_EXIT_SYSTEM_INTERRUPTED);
+			thread_exit(status == SYSCALL_STATUS_OK || status == SYSCALL_STATUS_UNAVAILABLE ? 0u : 1u);
+		}
+		if (argument->shell->pending_input_count < SHELL_PENDING_INPUT_CAPACITY) {
+			size_t tail = (argument->shell->pending_input_head + argument->shell->pending_input_count) %
+			              SHELL_PENDING_INPUT_CAPACITY;
+			argument->shell->pending_input[tail] = byte;
+			argument->shell->pending_input_count++;
+		}
+	}
+}
+
+static syscall_status_t start_foreground_input_monitor(struct shell* shell, cap_id_t process_cap,
+                                                       cap_id_t* out_thread_cap) {
+	const struct foreground_input_argument argument = {
+		.shell       = shell,
+		.process_cap = process_cap,
+	};
+	if (shell == NULL || shell->self_cap == CAP_ID_INVALID || out_thread_cap == NULL)
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	*out_thread_cap = CAP_ID_INVALID;
+	return process_spawn_thread(
+		shell->self_cap, (uintptr_t)monitor_foreground_input, &argument, sizeof(argument), NULL, 0u, out_thread_cap);
+}
+
+static bool stop_foreground_input_monitor(cap_id_t* thread_cap) {
+	if (*thread_cap == CAP_ID_INVALID) return true;
+	(void)thread_cancel(*thread_cap);
+	bool success = thread_join(*thread_cap, NULL) == SYSCALL_STATUS_OK;
+	*thread_cap  = CAP_ID_INVALID;
+	return success;
+}
+
 enum shell_program_result shell_run_program(struct shell* shell, const char* command, size_t command_size, size_t argc,
-                                            const char* const argv[]) {
+                                            const char* const argv[], uintptr_t* out_exit_code) {
 	struct filesystem_node_handle executable = {.capability = CAP_ID_INVALID};
 	struct program_load_result    loaded     = {
 		.load_cap   = CAP_ID_INVALID,
@@ -74,16 +121,20 @@ enum shell_program_result shell_run_program(struct shell* shell, const char* com
 	const char*                        name;
 	size_t                             name_size;
 	size_t                             path_size;
-	uintptr_t                          exit_code = PROCESS_EXIT_SYSTEM_UNKNOWN;
+	uintptr_t                          exit_code                   = PROCESS_EXIT_SYSTEM_UNKNOWN;
+	cap_id_t                           foreground_input_thread_cap = CAP_ID_INVALID;
 	syscall_status_t                   status;
 	enum shell_program_result          result = SHELL_PROGRAM_FAILED;
 
+	if (out_exit_code != NULL) *out_exit_code = PROCESS_EXIT_SYSTEM_UNKNOWN;
 	if (shell == NULL || shell->vfs_cap == CAP_ID_INVALID || command == NULL || command_size == 0u ||
 	    (argc != 0u && argv == NULL) || !executable_path(shell, command, command_size, path, &path_size))
 		return SHELL_PROGRAM_FAILED;
 	opened = vfs_open(shell->vfs_cap, path, path_size, CAP_READ | CAP_DELEGATE, &executable);
-	if (opened.transport_status == SYSCALL_STATUS_OK && opened.status == FILESYSTEM_STATUS_NOT_FOUND)
+	if (opened.transport_status == SYSCALL_STATUS_OK && opened.status == FILESYSTEM_STATUS_NOT_FOUND) {
+		if (executable.capability != CAP_ID_INVALID) (void)cap_drop(executable.capability);
 		return SHELL_PROGRAM_NOT_FOUND;
+	}
 	if (opened.transport_status != SYSCALL_STATUS_OK || opened.status != FILESYSTEM_STATUS_OK ||
 	    executable.info.type != FILESYSTEM_NODE_FILE || executable.capability == CAP_ID_INVALID)
 		goto cleanup;
@@ -96,10 +147,9 @@ enum shell_program_result shell_run_program(struct shell* shell, const char* com
 	}
 	executable.capability = CAP_ID_INVALID;
 	if (status != SYSCALL_STATUS_OK) goto cleanup;
-	display_get_standard_streams(&capabilities[PROCESS_STARTUP_CAP_STDIN].capability,
+	display_get_standard_streams(NULL,
 	                             &capabilities[PROCESS_STARTUP_CAP_STDOUT].capability,
 	                             &capabilities[PROCESS_STARTUP_CAP_STDERR].capability);
-	capabilities[PROCESS_STARTUP_CAP_STDIN].rights      = CAP_CALL | CAP_READ;
 	capabilities[PROCESS_STARTUP_CAP_STDOUT].rights     = CAP_CALL | CAP_WRITE;
 	capabilities[PROCESS_STARTUP_CAP_STDERR].rights     = CAP_CALL | CAP_WRITE;
 	capabilities[PROCESS_STARTUP_CAP_WORKING_DIRECTORY] = (struct program_capability_argument){
@@ -111,14 +161,19 @@ enum shell_program_result shell_run_program(struct shell* shell, const char* com
 	status = program_run(&loaded, argc, argv, PROCESS_STARTUP_CAP_COUNT, capabilities, &running);
 	if (status != SYSCALL_STATUS_OK) goto cleanup;
 	loaded.load_cap = CAP_ID_INVALID;
-	if (cap_drop(running.thread_cap) != SYSCALL_STATUS_OK) goto cleanup;
+	status          = start_foreground_input_monitor(shell, running.process_cap, &foreground_input_thread_cap);
+	if (status != SYSCALL_STATUS_OK) goto cleanup;
+	status = cap_drop(running.thread_cap);
+	if (status != SYSCALL_STATUS_OK) goto cleanup;
 	running.thread_cap = CAP_ID_INVALID;
 	status             = process_wait(running.process_cap, &exit_code);
 	if (status != SYSCALL_STATUS_OK) goto cleanup;
 	running.process_cap = CAP_ID_INVALID;
-	result              = exit_code == PROCESS_EXIT_SUCCESS ? SHELL_PROGRAM_OK : SHELL_PROGRAM_EXIT_FAILED;
+	if (out_exit_code != NULL) *out_exit_code = exit_code;
+	result = exit_code == PROCESS_EXIT_SUCCESS ? SHELL_PROGRAM_OK : SHELL_PROGRAM_EXIT_FAILED;
 
 cleanup:
+	if (!stop_foreground_input_monitor(&foreground_input_thread_cap)) result = SHELL_PROGRAM_FAILED;
 	if (executable.capability != CAP_ID_INVALID) (void)cap_drop(executable.capability);
 	if (loaded.load_cap != CAP_ID_INVALID) (void)program_cancel(loaded.load_cap);
 	stop_process(&running);

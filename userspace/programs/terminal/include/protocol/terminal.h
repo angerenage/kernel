@@ -15,10 +15,14 @@
  * is a steady block that is hidden while a write is applied and redrawn
  * afterward. Other escape sequences are ignored.
  *
+ * Besides the Stream operations, clients may query the immutable terminal
+ * dimensions.
+ *
  * Current specification version: 1.0-beta
  */
 
 #include <base/cap.h>
+#include <stdint.h>
 
 /* Registry identity of the single framebuffer terminal. */
 #define TERMINAL_NAMESPACE "io"
@@ -33,3 +37,24 @@
 
 /* Rights required by a process that only renders terminal output. */
 #define TERMINAL_OUTPUT_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_WRITE))
+
+/* Terminal-specific operations following the generic Stream operations. */
+enum terminal_op {
+	TERMINAL_OP_GET_INFO = 2u,
+};
+
+/* Common header for terminal-specific requests. */
+struct terminal_request_header {
+	enum terminal_op op;
+};
+
+/* Request immutable terminal dimensions. */
+struct terminal_get_info_request {
+	struct terminal_request_header header;
+};
+
+/* Terminal dimensions measured in fixed-width character cells. */
+struct terminal_get_info_response {
+	uint64_t columns;
+	uint64_t rows;
+};

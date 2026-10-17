@@ -1,17 +1,11 @@
-#include <libc/stdlib.h>
 #include <libc/string.h>
 #include <protocol/filesystem.h>
-#include <protocol/vfs.h>
-#include <runtime/init.h>
 #include <runtime/vfs.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <system/capability.h>
 
 #include "shell.h"
-
-#define VFS_PROTOCOL_VERSION_MAJOR 1u
-#define VFS_PROTOCOL_VERSION_MINOR 0u
 
 static bool append_component(char* output, size_t* output_size, const char* component, size_t component_size) {
 	size_t separator_size = *output_size == 1u ? 0u : 1u;
@@ -63,52 +57,6 @@ bool shell_resolve_path(const struct shell* shell, const char* path, size_t path
 	return true;
 }
 
-bool shell_initialize(struct shell* shell) {
-	static const struct init_protocol_query query = {
-		.namespace_path = VFS_NAMESPACE,
-		.protocol       = VFS_PROTOCOL_NAME,
-		.major          = VFS_PROTOCOL_VERSION_MAJOR,
-		.minor          = VFS_PROTOCOL_VERSION_MINOR,
-	};
-	struct init_service_handle    service = {.capability = CAP_ID_INVALID};
-	struct filesystem_node_handle node    = {.capability = CAP_ID_INVALID};
-	struct init_call_result       acquired;
-	struct filesystem_call_result opened;
-
-	if (shell == NULL) return false;
-	*shell   = (struct shell){.vfs_cap = CAP_ID_INVALID, .current_directory_cap = CAP_ID_INVALID};
-	acquired = init_acquire(&query, VFS_SERVICE_NAME, &service);
-	if (acquired.transport_status != SYSCALL_STATUS_OK || acquired.status != INIT_REGISTRY_OK ||
-	    service.capability == CAP_ID_INVALID)
-		return false;
-	opened = vfs_open(service.capability, "/", 1u, CAP_READ | CAP_DELEGATE, &node);
-	if (opened.transport_status != SYSCALL_STATUS_OK || opened.status != FILESYSTEM_STATUS_OK ||
-	    node.info.type != FILESYSTEM_NODE_DIRECTORY || node.capability == CAP_ID_INVALID) {
-		if (node.capability != CAP_ID_INVALID) (void)cap_drop(node.capability);
-		(void)cap_drop(service.capability);
-		return false;
-	}
-	shell->vfs_cap                = service.capability;
-	shell->current_directory_cap  = node.capability;
-	shell->current_directory[0]   = '/';
-	shell->current_directory_size = 1u;
-	return true;
-}
-
-bool shell_destroy(struct shell* shell) {
-	bool success = true;
-
-	if (shell == NULL) return false;
-	for (size_t i = 0u; i < shell->history_count; i++) free(shell->history[i].line);
-	shell->history_count = 0u;
-	if (shell->current_directory_cap != CAP_ID_INVALID && cap_drop(shell->current_directory_cap) != SYSCALL_STATUS_OK)
-		success = false;
-	shell->current_directory_cap = CAP_ID_INVALID;
-	if (shell->vfs_cap != CAP_ID_INVALID && cap_drop(shell->vfs_cap) != SYSCALL_STATUS_OK) success = false;
-	shell->vfs_cap = CAP_ID_INVALID;
-	return success;
-}
-
 enum shell_change_directory_result shell_change_directory(struct shell* shell, const char* path, size_t path_size) {
 	struct filesystem_node_handle node = {.capability = CAP_ID_INVALID};
 	struct filesystem_call_result result;
@@ -119,8 +67,12 @@ enum shell_change_directory_result shell_change_directory(struct shell* shell, c
 	    !shell_resolve_path(shell, path, path_size, normalized, &normalized_size))
 		return SHELL_CHANGE_DIRECTORY_INVALID_PATH;
 	result = vfs_open(shell->vfs_cap, normalized, normalized_size, CAP_READ | CAP_DELEGATE, &node);
-	if (result.transport_status != SYSCALL_STATUS_OK) return SHELL_CHANGE_DIRECTORY_FAILED;
+	if (result.transport_status != SYSCALL_STATUS_OK) {
+		if (node.capability != CAP_ID_INVALID) (void)cap_drop(node.capability);
+		return SHELL_CHANGE_DIRECTORY_FAILED;
+	}
 	if (result.status != FILESYSTEM_STATUS_OK) {
+		if (node.capability != CAP_ID_INVALID) (void)cap_drop(node.capability);
 		switch (result.status) {
 		case FILESYSTEM_STATUS_NOT_FOUND:
 			return SHELL_CHANGE_DIRECTORY_NOT_FOUND;

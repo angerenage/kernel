@@ -918,6 +918,14 @@ void terminal_destroy(struct terminal* terminal) {
 	free(terminal);
 }
 
+bool terminal_get_dimensions(const struct terminal* terminal, size_t* out_columns, size_t* out_rows) {
+	if (terminal == NULL || out_columns == NULL || out_rows == NULL || terminal->columns == 0u || terminal->rows == 0u)
+		return false;
+	*out_columns = terminal->columns;
+	*out_rows    = terminal->rows;
+	return true;
+}
+
 bool terminal_write(struct terminal* terminal, const uint8_t* data, size_t size, size_t* out_written) {
 	size_t written = 0u;
 	bool   success;

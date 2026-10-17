@@ -40,6 +40,17 @@ static bool dispatch_request(struct terminal* terminal, struct terminal_input* i
 	    call->request_size < sizeof(header))
 		return reply_request(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	memcpy(&header, data, sizeof(header));
+	if (header.op == TERMINAL_OP_GET_INFO) {
+		struct terminal_get_info_response info;
+		size_t                            columns;
+		size_t                            rows;
+		if ((call->rights & CAP_READ) == 0u) return reply_request(call, NULL, 0u, SYSCALL_STATUS_DENIED);
+		if (call->request_size != sizeof(struct terminal_get_info_request) || call->response_capacity < sizeof(info) ||
+		    !terminal_get_dimensions(terminal, &columns, &rows))
+			return reply_request(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+		info = (struct terminal_get_info_response){.columns = columns, .rows = rows};
+		return reply_request(call, &info, sizeof(info), SYSCALL_STATUS_OK);
+	}
 	if (header.op == STREAM_OP_READ) {
 		if ((call->rights & CAP_READ) == 0u) return reply_request(call, NULL, 0u, SYSCALL_STATUS_DENIED);
 		return terminal_input_read(input, call, data);

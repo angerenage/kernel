@@ -6,7 +6,6 @@
 int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 	struct shell shell;
 	char         line[SHELL_LINE_CAPACITY];
-	int          result = 1;
 
 	(void)argv;
 	if (argc != 0 || capc != 0u || capv != NULL) return 1;
@@ -23,6 +22,6 @@ int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 	}
 
 cleanup:
-	if (!shell_destroy(&shell)) result = 1;
-	return result;
+	shell_destroy(&shell);
+	return 1;
 }

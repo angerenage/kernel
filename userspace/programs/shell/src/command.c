@@ -2,8 +2,29 @@
 #include <libc/string.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
 
 #include "shell.h"
+
+#define SHELL_ERROR_PREFIX "\x1b[1;31mshell:\x1b[0m "
+
+static bool write_error(const char* command, const char* message) {
+	if (message == NULL) return false;
+	if (command == NULL) return printf(SHELL_ERROR_PREFIX "%s\n", message) >= 0;
+	return printf(SHELL_ERROR_PREFIX "%s: %s\n", command, message) >= 0;
+}
+
+static bool write_unknown_command(const char* command) {
+	return command != NULL && printf(SHELL_ERROR_PREFIX "command not found: %s\n", command) >= 0;
+}
+
+static bool write_program_exit(const char* command, uintptr_t exit_code) {
+	return command != NULL && printf(SHELL_ERROR_PREFIX "%s: exited with code %llu (0x%llx)\n",
+	                                 command,
+	                                 (unsigned long long)exit_code,
+	                                 (unsigned long long)exit_code) >= 0;
+}
 
 static bool is_space(char value) {
 	return value == ' ' || value == '\t';
@@ -12,6 +33,7 @@ static bool is_space(char value) {
 enum word_parse_result {
 	WORD_PARSE_OK,
 	WORD_PARSE_UNTERMINATED_QUOTE,
+	WORD_PARSE_TRAILING_ESCAPE,
 	WORD_PARSE_FAILED,
 };
 
@@ -20,37 +42,38 @@ static bool report_change_directory(enum shell_change_directory_result result) {
 	case SHELL_CHANGE_DIRECTORY_OK:
 		return true;
 	case SHELL_CHANGE_DIRECTORY_INVALID_PATH:
-		return shell_write_command_error("cd", "invalid path");
+		return write_error("cd", "invalid path");
 	case SHELL_CHANGE_DIRECTORY_NOT_FOUND:
-		return shell_write_command_error("cd", "directory not found");
+		return write_error("cd", "directory not found");
 	case SHELL_CHANGE_DIRECTORY_NOT_DIRECTORY:
-		return shell_write_command_error("cd", "not a directory");
+		return write_error("cd", "not a directory");
 	case SHELL_CHANGE_DIRECTORY_DENIED:
-		return shell_write_command_error("cd", "permission denied");
+		return write_error("cd", "permission denied");
 	case SHELL_CHANGE_DIRECTORY_FAILED:
 	default:
-		return shell_write_command_error("cd", "filesystem operation failed");
+		return write_error("cd", "filesystem operation failed");
 	}
 }
 
 static bool execute_change_directory(struct shell* shell, size_t argc, char* const argv[]) {
-	if (argc == 0u) return shell_write_command_error("cd", "missing directory");
-	if (argc != 1u) return shell_write_command_error("cd", "expected one directory");
+	if (argc == 0u) return write_error("cd", "missing directory");
+	if (argc != 1u) return write_error("cd", "expected one directory");
 	return report_change_directory(shell_change_directory(shell, argv[0], strlen(argv[0])));
 }
 
 static bool execute_program(struct shell* shell, size_t argc, char* const argv[]) {
-	size_t command_size = strlen(argv[0]);
-	switch (shell_run_program(shell, argv[0], command_size, argc - 1u, (const char* const*)(argv + 1u))) {
+	size_t    command_size = strlen(argv[0]);
+	uintptr_t exit_code;
+	switch (shell_run_program(shell, argv[0], command_size, argc - 1u, (const char* const*)(argv + 1u), &exit_code)) {
 	case SHELL_PROGRAM_OK:
 		return true;
 	case SHELL_PROGRAM_NOT_FOUND:
-		return shell_write_unknown_command(argv[0], command_size);
+		return write_unknown_command(argv[0]);
 	case SHELL_PROGRAM_EXIT_FAILED:
-		return shell_write_command_error(argv[0], "program exited unsuccessfully");
+		return write_program_exit(argv[0], exit_code);
 	case SHELL_PROGRAM_FAILED:
 	default:
-		return shell_write_command_error(argv[0], "unable to launch program");
+		return write_error(argv[0], "unable to launch program");
 	}
 }
 
@@ -75,6 +98,19 @@ static enum word_parse_result parse_words(const char* line, size_t size, char***
 	output = 0u;
 	while (input < size) {
 		char value = line[input++];
+		if (value == '\\') {
+			if (input == size) {
+				free(argv);
+				free(storage);
+				return WORD_PARSE_TRAILING_ESCAPE;
+			}
+			if (!in_word) {
+				argv[argc++] = storage + output;
+				in_word      = true;
+			}
+			storage[output++] = line[input++];
+			continue;
+		}
 		if (quote != '\0') {
 			if (value == quote) quote = '\0';
 			else storage[output++] = value;
@@ -133,13 +169,13 @@ bool shell_execute_line(struct shell* shell, const char* line, size_t size) {
 	line += start;
 	size         = end - start;
 	parse_result = parse_words(line, size, &argv, &argc);
-	if (parse_result == WORD_PARSE_UNTERMINATED_QUOTE)
-		return shell_write_command_error("shell", "unterminated quoted string");
+	if (parse_result == WORD_PARSE_UNTERMINATED_QUOTE) return write_error(NULL, "unterminated quoted string");
+	if (parse_result == WORD_PARSE_TRAILING_ESCAPE) return write_error(NULL, "trailing escape character");
 	if (parse_result != WORD_PARSE_OK || argc == 0u) return false;
 	if (strcmp(argv[0], "cd") == 0) success = execute_change_directory(shell, argc - 1u, argv + 1u);
 	else if (strcmp(argv[0], "clear") == 0) {
-		if (argc != 1u) success = shell_write_command_error("clear", "expected no arguments");
-		else success = shell_write_string("\x1b[2J\x1b[H");
+		if (argc != 1u) success = write_error("clear", "expected no arguments");
+		else success = printf("\x1b[2J\x1b[H") >= 0;
 	}
 	else success = execute_program(shell, argc, argv);
 	free_words(argv);

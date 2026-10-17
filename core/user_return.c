@@ -3,6 +3,8 @@
 #include <core/io_port.h>
 #endif
 #include <core/process.h>
+#include <core/sched.h>
+#include <core/thread.h>
 #include <core/user_return.h>
 #include <core/user_upcall.h>
 #include <core/uthread.h>
@@ -36,6 +38,7 @@ void core_finalize_user_return(struct hal_userspace_return_frame* frame) {
 
 	current = uthread_current();
 	if (current == NULL || current->process == NULL) hcf();
+	if (thread_should_cancel(&current->thread)) sched_exit_current(THREAD_EXIT_CODE_CANCELLED);
 #if defined(PLATFORM_PC_X86_64)
 	io_port_process_load(current->process);
 #endif

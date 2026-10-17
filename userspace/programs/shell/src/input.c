@@ -5,10 +5,8 @@
 #include <stdint.h>
 #include <unistd.h>
 
+#include "editor.h"
 #include "shell.h"
-
-#define SHELL_QUOTE_COLOR "\x1b[33m"
-#define SHELL_DEFAULT_COLOR "\x1b[0m"
 
 enum input_state {
 	INPUT_STATE_TEXT,
@@ -23,65 +21,27 @@ enum character_read_result {
 	CHARACTER_READ_FAILED,
 };
 
-static size_t previous_codepoint(const char* line, size_t cursor) {
-	if (cursor == 0u) return 0u;
-	cursor--;
-	while (cursor != 0u && ((uint8_t)line[cursor] & 0xc0u) == 0x80u) cursor--;
-	return cursor;
-}
+struct history_navigation {
+	char   draft[SHELL_LINE_CAPACITY];
+	size_t draft_size;
+	size_t draft_cursor;
+	size_t index;
+	bool   draft_saved;
+};
 
-static size_t next_codepoint(const char* line, size_t size, size_t cursor) {
-	if (cursor == size) return size;
-	cursor++;
-	while (cursor != size && ((uint8_t)line[cursor] & 0xc0u) == 0x80u) cursor++;
-	return cursor;
-}
-
-static size_t count_codepoints(const char* text, size_t size) {
-	size_t count = 0u;
-	for (size_t i = 0u; i < size; i++) {
-		if (((uint8_t)text[i] & 0xc0u) != 0x80u) count++;
+static bool read_input_byte(struct shell* shell, uint8_t* out_byte) {
+	if (shell == NULL || out_byte == NULL) return false;
+	if (shell->pending_input_count != 0u) {
+		*out_byte                 = shell->pending_input[shell->pending_input_head];
+		shell->pending_input_head = (shell->pending_input_head + 1u) % SHELL_PENDING_INPUT_CAPACITY;
+		shell->pending_input_count--;
+		return true;
 	}
-	return count;
+	return read(0, out_byte, 1u) == 1;
 }
 
-static char quote_before(const char* line, size_t offset) {
-	char quote = '\0';
-
-	for (size_t i = 0u; i < offset; i++) {
-		if (quote == '\0' && (line[i] == '\'' || line[i] == '"')) quote = line[i];
-		else if (line[i] == quote) quote = '\0';
-	}
-	return quote;
-}
-
-static bool write_colored_line(const char* line, size_t size, size_t start) {
-	char   quote  = quote_before(line, start);
-	size_t offset = start;
-
-	while (offset < size) {
-		size_t begin = offset;
-		if (quote == '\0') {
-			while (offset < size && line[offset] != '\'' && line[offset] != '"') offset++;
-			if (offset != begin && !shell_write(line + begin, offset - begin)) return false;
-			if (offset == size) break;
-			quote = line[offset++];
-			begin = offset - 1u;
-		}
-		while (offset < size) {
-			if (line[offset++] == quote) {
-				quote = '\0';
-				break;
-			}
-		}
-		if (!shell_write_string(SHELL_QUOTE_COLOR) || !shell_write(line + begin, offset - begin) ||
-		    !shell_write_string(SHELL_DEFAULT_COLOR))
-			return false;
-	}
-	return true;
-}
-
-static enum character_read_result read_character(uint8_t first, char character[4], size_t* out_size) {
+static enum character_read_result read_character(struct shell* shell, uint8_t first, char character[4],
+                                                 size_t* out_size) {
 	size_t size;
 
 	character[0] = (char)first;
@@ -92,7 +52,7 @@ static enum character_read_result read_character(uint8_t first, char character[4
 	else return CHARACTER_READ_INVALID;
 	for (size_t i = 1u; i < size; i++) {
 		uint8_t byte;
-		if (read(0, &byte, 1u) != 1) return CHARACTER_READ_FAILED;
+		if (!read_input_byte(shell, &byte)) return CHARACTER_READ_FAILED;
 		if ((byte & 0xc0u) != 0x80u) return CHARACTER_READ_INVALID;
 		character[i] = (char)byte;
 	}
@@ -118,107 +78,66 @@ static void append_history(struct shell* shell, const char* line, size_t size) {
 	shell->history[shell->history_count++] = (struct shell_history_entry){.line = copy, .size = size};
 }
 
-static bool move_cursor_left(size_t count) {
-	char   sequence[3u + sizeof(size_t) * 3u];
-	size_t end = sizeof(sequence);
-	size_t i   = end;
-
-	if (count == 0u) return true;
-	sequence[--i] = 'D';
-	do {
-		sequence[--i] = (char)('0' + count % 10u);
-		count /= 10u;
-	} while (count != 0u);
-	sequence[--i] = '[';
-	sequence[--i] = '\x1b';
-	return shell_write(sequence + i, end - i);
-}
-
-static bool redraw_line(const struct shell* shell, const char* line, size_t size, size_t cursor) {
-	return shell_write_string("\r\x1b[2K") && shell_write_prompt(shell) && write_colored_line(line, size, 0u) &&
-	       move_cursor_left(count_codepoints(line + cursor, size - cursor));
-}
-
-static bool erase_before_cursor(char* line, size_t* size, size_t* cursor) {
-	size_t old_cursor = *cursor;
-	size_t previous   = previous_codepoint(line, old_cursor);
-	size_t tail_size  = *size - old_cursor;
-
-	memmove(line + previous, line + old_cursor, tail_size);
-	*size -= old_cursor - previous;
-	*cursor = previous;
-	if (tail_size == 0u) return shell_write_string("\b \b");
-	return shell_write_string("\x1b[D") && write_colored_line(line, *size, previous) && shell_write_string(" ") &&
-	       move_cursor_left(count_codepoints(line + previous, *size - previous) + 1u);
-}
-
-static bool erase_after_cursor(char* line, size_t* size, size_t cursor) {
-	size_t next      = next_codepoint(line, *size, cursor);
-	size_t tail_size = *size - next;
-
-	memmove(line + cursor, line + next, tail_size);
-	*size -= next - cursor;
-	return write_colored_line(line, *size, cursor) && shell_write_string(" ") &&
-	       move_cursor_left(count_codepoints(line + cursor, tail_size) + 1u);
-}
-
-static bool insert_character(char* line, size_t* size, size_t* cursor, const char* character, size_t character_size) {
-	size_t insertion = *cursor;
-	size_t tail_size = *size - insertion;
-
-	memmove(line + insertion + character_size, line + insertion, tail_size);
-	memcpy(line + insertion, character, character_size);
-	*cursor += character_size;
-	*size += character_size;
-	return write_colored_line(line, *size, insertion) &&
-	       move_cursor_left(count_codepoints(line + *cursor, *size - *cursor));
-}
-
-static bool select_history(const struct shell* shell, bool older, size_t* history_index, char* line, size_t capacity,
-                           size_t* size, size_t* cursor, const char* draft, size_t draft_size, size_t draft_cursor) {
+static bool select_history(const struct shell* shell, struct shell_line_editor* editor,
+                           struct history_navigation* navigation, bool older) {
+	if (!navigation->draft_saved) {
+		memcpy(navigation->draft, editor->line, editor->size);
+		navigation->draft_size   = editor->size;
+		navigation->draft_cursor = editor->cursor;
+		navigation->draft_saved  = true;
+	}
 	if (older) {
-		if (*history_index == 0u) return true;
-		(*history_index)--;
+		if (navigation->index == 0u) return true;
+		navigation->index--;
 	}
 	else {
-		if (*history_index == shell->history_count) return true;
-		(*history_index)++;
+		if (navigation->index == shell->history_count) return true;
+		navigation->index++;
 	}
-	if (*history_index == shell->history_count) {
-		memcpy(line, draft, draft_size);
-		*size   = draft_size;
-		*cursor = draft_cursor;
+	if (navigation->index == shell->history_count) {
+		return shell_line_editor_replace(editor, navigation->draft, navigation->draft_size, navigation->draft_cursor);
 	}
-	else {
-		const struct shell_history_entry* entry = &shell->history[*history_index];
-		if (entry->size > capacity) return false;
-		memcpy(line, entry->line, entry->size);
-		*size   = entry->size;
-		*cursor = entry->size;
+	const struct shell_history_entry* entry = &shell->history[navigation->index];
+	return shell_line_editor_replace(editor, entry->line, entry->size, entry->size);
+}
+
+static bool handle_escape_key(struct shell* shell, struct shell_line_editor* editor,
+                              struct history_navigation* navigation, uint8_t key, bool delete_key) {
+	switch (key) {
+	case 'A':
+		return select_history(shell, editor, navigation, true);
+	case 'B':
+		return select_history(shell, editor, navigation, false);
+	case 'C':
+		return shell_line_editor_move_right(editor);
+	case 'D':
+		return shell_line_editor_move_left(editor);
+	case '~':
+		return !delete_key || shell_line_editor_delete(editor);
+	default:
+		return true;
 	}
-	return redraw_line(shell, line, *size, *cursor);
 }
 
 enum shell_input_result shell_read_line(struct shell* shell, char* line, size_t capacity, size_t* out_size) {
-	char             draft[SHELL_LINE_CAPACITY];
-	size_t           draft_size   = 0u;
-	size_t           draft_cursor = 0u;
-	size_t           history_index;
-	size_t           size        = 0u;
-	size_t           cursor      = 0u;
-	enum input_state state       = INPUT_STATE_TEXT;
-	bool             draft_saved = false;
-	bool             csi_plain   = true;
-	bool             csi_delete  = false;
+	struct shell_line_editor  editor;
+	struct history_navigation navigation;
+	enum input_state          state      = INPUT_STATE_TEXT;
+	bool                      csi_plain  = true;
+	bool                      csi_delete = false;
+	enum shell_input_result   input_result;
 
-	if (shell == NULL || line == NULL || capacity == 0u || capacity > sizeof(draft) || out_size == NULL)
+	if (shell == NULL || line == NULL || capacity == 0u || capacity > SHELL_LINE_CAPACITY || out_size == NULL)
 		return SHELL_INPUT_FAILED;
-	history_index = shell->history_count;
-	*out_size     = 0u;
+	if (!shell_line_editor_initialize(&editor, shell, line, capacity)) return SHELL_INPUT_FAILED;
+	navigation = (struct history_navigation){.index = shell->history_count};
+	*out_size  = 0u;
 	for (;;) {
 		uint8_t byte;
-		ssize_t count = read(0, &byte, 1u);
-		if (count != 1) return SHELL_INPUT_FAILED;
+		if (!read_input_byte(shell, &byte)) {
+			input_result = SHELL_INPUT_FAILED;
+			break;
+		}
 
 		if (state == INPUT_STATE_ESCAPE) {
 			if (byte == '[') {
@@ -232,35 +151,10 @@ enum shell_input_result shell_read_line(struct shell* shell, char* line, size_t 
 		}
 		if (state == INPUT_STATE_CSI) {
 			if (byte >= 0x40u && byte <= 0x7eu) {
-				if (csi_plain && (byte == 'A' || byte == 'B')) {
-					if (!draft_saved) {
-						memcpy(draft, line, size);
-						draft_size   = size;
-						draft_cursor = cursor;
-						draft_saved  = true;
-					}
-					if (!select_history(shell,
-					                    byte == 'A',
-					                    &history_index,
-					                    line,
-					                    capacity,
-					                    &size,
-					                    &cursor,
-					                    draft,
-					                    draft_size,
-					                    draft_cursor))
-						return SHELL_INPUT_FAILED;
-				}
-				else if (csi_plain && byte == 'D' && cursor != 0u) {
-					cursor = previous_codepoint(line, cursor);
-					if (!shell_write_string("\x1b[D")) return SHELL_INPUT_FAILED;
-				}
-				else if (csi_plain && byte == 'C' && cursor != size) {
-					cursor = next_codepoint(line, size, cursor);
-					if (!shell_write_string("\x1b[C")) return SHELL_INPUT_FAILED;
-				}
-				else if (csi_delete && byte == '~' && cursor != size) {
-					if (!erase_after_cursor(line, &size, cursor)) return SHELL_INPUT_FAILED;
+				if ((csi_plain || (csi_delete && byte == '~')) &&
+				    !handle_escape_key(shell, &editor, &navigation, byte, csi_delete)) {
+					input_result = SHELL_INPUT_FAILED;
+					break;
 				}
 				state = INPUT_STATE_TEXT;
 			}
@@ -271,32 +165,9 @@ enum shell_input_result shell_read_line(struct shell* shell, char* line, size_t 
 			continue;
 		}
 		if (state == INPUT_STATE_SS3) {
-			if (byte == 'A' || byte == 'B') {
-				if (!draft_saved) {
-					memcpy(draft, line, size);
-					draft_size   = size;
-					draft_cursor = cursor;
-					draft_saved  = true;
-				}
-				if (!select_history(shell,
-				                    byte == 'A',
-				                    &history_index,
-				                    line,
-				                    capacity,
-				                    &size,
-				                    &cursor,
-				                    draft,
-				                    draft_size,
-				                    draft_cursor))
-					return SHELL_INPUT_FAILED;
-			}
-			else if (byte == 'D' && cursor != 0u) {
-				cursor = previous_codepoint(line, cursor);
-				if (!shell_write_string("\x1b[D")) return SHELL_INPUT_FAILED;
-			}
-			else if (byte == 'C' && cursor != size) {
-				cursor = next_codepoint(line, size, cursor);
-				if (!shell_write_string("\x1b[C")) return SHELL_INPUT_FAILED;
+			if (!handle_escape_key(shell, &editor, &navigation, byte, false)) {
+				input_result = SHELL_INPUT_FAILED;
+				break;
 			}
 			state = INPUT_STATE_TEXT;
 			continue;
@@ -306,27 +177,40 @@ enum shell_input_result shell_read_line(struct shell* shell, char* line, size_t 
 			continue;
 		}
 		if (byte == '\n' || byte == '\r') {
-			if (!shell_write_string("\n")) return SHELL_INPUT_FAILED;
-			append_history(shell, line, size);
-			*out_size = size;
-			return SHELL_INPUT_SUBMITTED;
+			if (!shell_line_editor_finish(&editor)) {
+				input_result = SHELL_INPUT_FAILED;
+				break;
+			}
+			append_history(shell, editor.line, editor.size);
+			*out_size    = editor.size;
+			input_result = SHELL_INPUT_SUBMITTED;
+			break;
 		}
 		if (byte == 0x03u) {
-			if (!shell_write_string("^C\n")) return SHELL_INPUT_FAILED;
-			return SHELL_INPUT_INTERRUPTED;
+			input_result = shell_line_editor_interrupt(&editor) ? SHELL_INPUT_INTERRUPTED : SHELL_INPUT_FAILED;
+			break;
 		}
 		if (byte == '\b' || byte == 0x7fu) {
-			if (cursor != 0u) {
-				if (!erase_before_cursor(line, &size, &cursor)) return SHELL_INPUT_FAILED;
+			if (!shell_line_editor_backspace(&editor)) {
+				input_result = SHELL_INPUT_FAILED;
+				break;
 			}
 			continue;
 		}
 		if (byte < 0x20u) continue;
 		char                       character[4];
 		size_t                     character_size;
-		enum character_read_result result = read_character(byte, character, &character_size);
-		if (result == CHARACTER_READ_FAILED) return SHELL_INPUT_FAILED;
-		if (result == CHARACTER_READ_INVALID || character_size > capacity - size) continue;
-		if (!insert_character(line, &size, &cursor, character, character_size)) return SHELL_INPUT_FAILED;
+		enum character_read_result result = read_character(shell, byte, character, &character_size);
+		if (result == CHARACTER_READ_FAILED) {
+			input_result = SHELL_INPUT_FAILED;
+			break;
+		}
+		if (result == CHARACTER_READ_INVALID || character_size > editor.capacity - editor.size) continue;
+		if (!shell_line_editor_insert(&editor, character, character_size)) {
+			input_result = SHELL_INPUT_FAILED;
+			break;
+		}
 	}
+	shell_line_editor_destroy(&editor);
+	return input_result;
 }

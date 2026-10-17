@@ -6,6 +6,7 @@
 #include <criterion/criterion.h>
 #include <hal/hcf.h>
 #include <hal/userspace.h>
+#include <setjmp.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -25,6 +26,9 @@ static struct uthread*         current_thread;
 static size_t                  terminate_checks;
 static struct process*         terminated_process;
 static uintptr_t               terminated_exit_code;
+static bool                    cancel_pending;
+static jmp_buf                 cancel_return;
+static uintptr_t               cancel_exit_code;
 
 bool hal_userspace_frame_is_user(const struct hal_userspace_return_frame* frame) {
 	frame_checks++;
@@ -50,6 +54,17 @@ bool process_terminate(struct process* process, uintptr_t exit_code) {
 	return true;
 }
 
+bool thread_should_cancel(const struct thread* thread) {
+	cr_assert_eq(thread, &fake_current.thread);
+	return cancel_pending;
+}
+
+__attribute__((noreturn))
+void sched_exit_current(uintptr_t exit_code) {
+	cancel_exit_code = exit_code;
+	longjmp(cancel_return, 1);
+}
+
 __attribute__((noreturn))
 void hcf(void) {
 	abort();
@@ -63,9 +78,30 @@ static void user_return_test_reset(void) {
 	terminate_checks     = 0u;
 	terminated_process   = NULL;
 	terminated_exit_code = 0u;
+	cancel_pending       = false;
+	cancel_exit_code     = 0u;
 	fake_current         = (struct uthread){0};
 	fake_current.process = (struct process*)(uintptr_t)1u;
 	current_thread       = &fake_current;
+}
+
+Test(user_return, exits_a_cancelled_userspace_thread_before_delivering_upcalls) {
+	struct hal_userspace_return_frame frame = {
+		.user   = true,
+		.marker = 0x123456789abcdef0ull,
+	};
+
+	user_return_test_reset();
+	cancel_pending = true;
+	if (setjmp(cancel_return) == 0) {
+		core_finalize_user_return(&frame);
+		cr_assert_fail("cancelled userspace return unexpectedly completed");
+	}
+
+	cr_assert_eq(frame_checks, 1u);
+	cr_assert_eq(current_checks, 1u);
+	cr_assert_eq(delivery_checks, 0u);
+	cr_assert_eq(cancel_exit_code, THREAD_EXIT_CODE_CANCELLED);
 }
 
 Test(user_return, ignores_null_frame) {
