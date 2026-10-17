@@ -62,11 +62,18 @@ enum shell_change_directory_result shell_change_directory(struct shell* shell, c
 	struct filesystem_call_result result;
 	char                          normalized[SHELL_PATH_CAPACITY];
 	size_t                        normalized_size;
+	cap_rights_t                  requested_rights = CAP_READ | CAP_WRITE | CAP_DELEGATE;
 
 	if (shell == NULL || shell->vfs_cap == CAP_ID_INVALID ||
 	    !shell_resolve_path(shell, path, path_size, normalized, &normalized_size))
 		return SHELL_CHANGE_DIRECTORY_INVALID_PATH;
-	result = vfs_open(shell->vfs_cap, normalized, normalized_size, CAP_READ | CAP_DELEGATE, &node);
+	result = vfs_open(shell->vfs_cap, normalized, normalized_size, requested_rights, &node);
+	if (result.transport_status == SYSCALL_STATUS_OK &&
+	    (result.status == FILESYSTEM_STATUS_READ_ONLY || result.status == FILESYSTEM_STATUS_ACCESS_DENIED)) {
+		if (node.capability != CAP_ID_INVALID) (void)cap_drop(node.capability);
+		requested_rights = CAP_READ | CAP_DELEGATE;
+		result           = vfs_open(shell->vfs_cap, normalized, normalized_size, requested_rights, &node);
+	}
 	if (result.transport_status != SYSCALL_STATUS_OK) {
 		if (node.capability != CAP_ID_INVALID) (void)cap_drop(node.capability);
 		return SHELL_CHANGE_DIRECTORY_FAILED;
@@ -95,7 +102,9 @@ enum shell_change_directory_result shell_change_directory(struct shell* shell, c
 		(void)cap_drop(node.capability);
 		return SHELL_CHANGE_DIRECTORY_FAILED;
 	}
-	shell->current_directory_cap = node.capability;
+	shell->current_directory_cap    = node.capability;
+	shell->current_directory_rights = CAP_CALL | CAP_READ;
+	if ((requested_rights & CAP_WRITE) != 0u) shell->current_directory_rights |= CAP_WRITE;
 	memcpy(shell->current_directory, normalized, normalized_size);
 	shell->current_directory_size = normalized_size;
 	return SHELL_CHANGE_DIRECTORY_OK;

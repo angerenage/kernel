@@ -24,10 +24,30 @@ struct filesystem_call_result vfs_rename(cap_id_t vfs_cap, const void* old_path,
 /* Read metadata from a VFS-directory capability. */
 struct filesystem_call_result vfs_directory_info(cap_id_t directory_cap, struct filesystem_node_info* out_info);
 
+/* Open a normalized relative path below a VFS directory. */
+struct filesystem_call_result vfs_directory_open(cap_id_t directory_cap, const void* path, size_t path_size,
+                                                 cap_rights_t rights, struct filesystem_node_handle* out_node);
+
+/* Create and open a file at a normalized path below a VFS directory. */
+struct filesystem_call_result vfs_directory_create_file(cap_id_t directory_cap, const void* path, size_t path_size,
+                                                        cap_rights_t rights, struct filesystem_node_handle* out_node);
+
+/* Create and open a directory at a normalized path below a VFS directory. */
+struct filesystem_call_result vfs_directory_create_directory(cap_id_t directory_cap, const void* path, size_t path_size,
+                                                             cap_rights_t                   rights,
+                                                             struct filesystem_node_handle* out_node);
+
 /* Read up to count VFS-directory entries starting at offset. */
 struct filesystem_call_result vfs_directory_enumerate(cap_id_t directory_cap, uint64_t offset,
                                                       struct filesystem_directory_entry* entries, size_t count,
                                                       size_t* out_returned, uint64_t* out_total);
+
+/* Remove a normalized relative path below a VFS directory. */
+struct filesystem_call_result vfs_directory_remove(cap_id_t directory_cap, const void* path, size_t path_size);
+
+/* Rename between normalized relative paths below one VFS directory. */
+struct filesystem_call_result vfs_directory_rename(cap_id_t directory_cap, const void* old_path, size_t old_path_size,
+                                                   const void* new_path, size_t new_path_size);
 
 /* Mount a delegated raw root on a VFS directory. */
 struct filesystem_call_result vfs_directory_mount(cap_id_t directory_cap, cap_id_t fs_root_cap, uint32_t flags);

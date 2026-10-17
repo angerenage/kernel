@@ -1,11 +1,9 @@
 #include "shell.h"
 
 #include <libc/stdlib.h>
-#include <protocol/filesystem.h>
 #include <protocol/vfs.h>
 #include <runtime/init.h>
 #include <runtime/terminal.h>
-#include <runtime/vfs.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -25,9 +23,7 @@ bool shell_initialize(struct shell* shell) {
 		.minor          = VFS_PROTOCOL_VERSION_MINOR,
 	};
 	struct init_service_handle        service = {.capability = CAP_ID_INVALID};
-	struct filesystem_node_handle     root    = {.capability = CAP_ID_INVALID};
 	struct init_call_result           acquired;
-	struct filesystem_call_result     opened;
 	struct terminal_get_info_response terminal_info;
 	struct self_info                  self = {
 		.self_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .main_thread_cap = CAP_ID_INVALID};
@@ -58,19 +54,11 @@ bool shell_initialize(struct shell* shell) {
 		shell_destroy(shell);
 		return false;
 	}
-	opened = vfs_open(service.capability, "/", 1u, CAP_READ | CAP_DELEGATE, &root);
-	if (opened.transport_status != SYSCALL_STATUS_OK || opened.status != FILESYSTEM_STATUS_OK ||
-	    root.info.type != FILESYSTEM_NODE_DIRECTORY || root.capability == CAP_ID_INVALID) {
-		if (root.capability != CAP_ID_INVALID) (void)cap_drop(root.capability);
-		(void)cap_drop(service.capability);
+	shell->vfs_cap = service.capability;
+	if (shell_change_directory(shell, "/", 1u) != SHELL_CHANGE_DIRECTORY_OK) {
 		shell_destroy(shell);
 		return false;
 	}
-
-	shell->vfs_cap                = service.capability;
-	shell->current_directory_cap  = root.capability;
-	shell->current_directory[0]   = '/';
-	shell->current_directory_size = 1u;
 	return true;
 }
 
@@ -79,7 +67,8 @@ void shell_destroy(struct shell* shell) {
 	for (size_t i = 0u; i < shell->history_count; i++) free(shell->history[i].line);
 	shell->history_count = 0u;
 	if (shell->current_directory_cap != CAP_ID_INVALID) (void)cap_drop(shell->current_directory_cap);
-	shell->current_directory_cap = CAP_ID_INVALID;
+	shell->current_directory_cap    = CAP_ID_INVALID;
+	shell->current_directory_rights = 0u;
 	if (shell->vfs_cap != CAP_ID_INVALID) (void)cap_drop(shell->vfs_cap);
 	shell->vfs_cap = CAP_ID_INVALID;
 	if (shell->self_cap != CAP_ID_INVALID) (void)cap_drop(shell->self_cap);

@@ -49,10 +49,15 @@ struct vfs_rename_request {
 };
 
 enum vfs_directory_op {
-	VFS_DIRECTORY_OP_INFO      = 0u,
-	VFS_DIRECTORY_OP_ENUMERATE = 1u,
-	VFS_DIRECTORY_OP_MOUNT     = 2u,
-	VFS_DIRECTORY_OP_UNMOUNT   = 3u,
+	VFS_DIRECTORY_OP_INFO             = 0u,
+	VFS_DIRECTORY_OP_ENUMERATE        = 1u,
+	VFS_DIRECTORY_OP_MOUNT            = 2u,
+	VFS_DIRECTORY_OP_UNMOUNT          = 3u,
+	VFS_DIRECTORY_OP_OPEN             = 4u,
+	VFS_DIRECTORY_OP_CREATE_FILE      = 5u,
+	VFS_DIRECTORY_OP_CREATE_DIRECTORY = 6u,
+	VFS_DIRECTORY_OP_REMOVE           = 7u,
+	VFS_DIRECTORY_OP_RENAME           = 8u,
 };
 
 enum vfs_mount_flag {
@@ -69,13 +74,20 @@ struct vfs_directory_mount_request {
  * Namespace reads require CAP_CALL | CAP_READ, mutations require CAP_CALL |
  * CAP_WRITE, and mount management requires CAP_CALL | CAP_MANAGE.
  *
- * MOUNT is called on the target VFS-directory capability. root_capability is
- * a raw root-directory capability already delegated to the VFS process. The
- * VFS retains it only when the domain result is FILESYSTEM_STATUS_OK, and
- * drops it on UNMOUNT. The mount overlays covered contents, they reappear on
- * unmount. Existing node capabilities remain valid, and nested mounts make
- * their ancestor mount busy. A mounted directory reports
- * FILESYSTEM_NODE_MOUNT_POINT in its metadata.
+ * OPEN, creation, REMOVE, and RENAME use the corresponding raw-filesystem
+ * request structures, but resolve their normalized relative paths through the
+ * VFS directory. This preserves mount traversal without exposing the
+ * directory's absolute namespace path. Requested child rights cannot exceed
+ * the directory capability's rights. Path operations on a directory detached
+ * by removal or unmount return FILESYSTEM_STATUS_BUSY.
+ *
+ * MOUNT is called on the target VFS-directory capability. root_capability is a
+ * raw root-directory capability already delegated to the VFS process. The VFS
+ * retains it only when the domain result is FILESYSTEM_STATUS_OK, and drops it
+ * on UNMOUNT. The mount overlays covered contents, they reappear on unmount.
+ * Existing node capabilities remain valid, and nested mounts make their
+ * ancestor mount busy. A mounted directory reports FILESYSTEM_NODE_MOUNT_POINT
+ * in its metadata.
  *
  * Namespace paths are normalized absolute paths. '/' names the global root;
  * all other paths use the raw-filesystem component rules. RENAME across mount

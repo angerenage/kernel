@@ -24,6 +24,7 @@ struct shell {
 	process_id_t               pid;
 	cap_id_t                   vfs_cap;
 	cap_id_t                   current_directory_cap;
+	cap_rights_t               current_directory_rights;
 	char                       current_directory[SHELL_PATH_CAPACITY];
 	size_t                     current_directory_size;
 	size_t                     terminal_columns;

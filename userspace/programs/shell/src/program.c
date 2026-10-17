@@ -112,7 +112,7 @@ enum shell_program_result shell_run_program(struct shell* shell, const char* com
 	capabilities[PROCESS_STARTUP_CAP_STDERR].rights     = CAP_CALL | CAP_WRITE;
 	capabilities[PROCESS_STARTUP_CAP_WORKING_DIRECTORY] = (struct program_capability_argument){
 		.capability = shell->current_directory_cap,
-		.rights     = CAP_CALL | CAP_READ,
+		.rights     = shell->current_directory_rights,
 	};
 	for (size_t i = 0u; i < PROCESS_STARTUP_CAP_COUNT; i++)
 		if (capabilities[i].capability == CAP_ID_INVALID) capabilities[i].rights = 0u;

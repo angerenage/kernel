@@ -354,13 +354,32 @@ static struct filesystem_call_result open_raw_node(struct vfs_mount* mount, cons
 	};
 }
 
-static bool handle_open(const struct cap_request* call, const void* data) {
-	struct vfs_open_request       request;
+static bool open_path(const struct cap_request* call, const char* path, size_t path_size, cap_rights_t rights) {
 	struct vfs_mount*             mount;
 	struct filesystem_node_handle node;
 	struct filesystem_call_result result;
-	const char*                   path;
-	size_t                        expected_size;
+
+	mount = find_mount(path, path_size);
+	if (mount == NULL) {
+		struct filesystem_node_info info = {
+			.type  = FILESYSTEM_NODE_DIRECTORY,
+			.flags = FILESYSTEM_NODE_READ_ONLY,
+			.size  = 0u,
+		};
+		if (path_size != 1u) return reply_domain(call, FILESYSTEM_STATUS_NOT_FOUND);
+		return reply_open_directory(call, path, path_size, CAP_ID_INVALID, 0u, true, rights, info);
+	}
+	if (mount->read_only && (rights & CAP_WRITE) != 0u) return reply_domain(call, FILESYSTEM_STATUS_READ_ONLY);
+	result = open_raw_node(mount, path, path_size, rights, &node);
+	if (result.transport_status != SYSCALL_STATUS_OK) return reply_call_failure(call, result);
+	if (result.status != FILESYSTEM_STATUS_OK) return reply_call_failure(call, result);
+	return reply_open_node(call, path, path_size, rights, &node, mount);
+}
+
+static bool handle_open(const struct cap_request* call, const void* data) {
+	struct vfs_open_request request;
+	const char*             path;
+	size_t                  expected_size;
 
 	if (!request_has_rights(call, CAP_CALL | CAP_READ)) return reply_transport(call, SYSCALL_STATUS_DENIED);
 	if (!copy_request(call, data, &request, sizeof(request)) || request.path_size == 0u ||
@@ -370,34 +389,40 @@ static bool handle_open(const struct cap_request* call, const void* data) {
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	path = (const char*)data + sizeof(request);
 	if (!absolute_path_valid(path, request.path_size)) return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
-
-	mount = find_mount(path, request.path_size);
-	if (mount == NULL) {
-		struct filesystem_node_info info = {
-			.type  = FILESYSTEM_NODE_DIRECTORY,
-			.flags = FILESYSTEM_NODE_READ_ONLY,
-			.size  = 0u,
-		};
-		if (request.path_size != 1u) return reply_domain(call, FILESYSTEM_STATUS_NOT_FOUND);
-		return reply_open_directory(call, path, request.path_size, CAP_ID_INVALID, 0u, true, request.rights, info);
-	}
-	if (mount->read_only && (request.rights & CAP_WRITE) != 0u) return reply_domain(call, FILESYSTEM_STATUS_READ_ONLY);
-	result = open_raw_node(mount, path, request.path_size, request.rights, &node);
-	if (result.transport_status != SYSCALL_STATUS_OK) return reply_call_failure(call, result);
-	if (result.status != FILESYSTEM_STATUS_OK) return reply_call_failure(call, result);
-	return reply_open_node(call, path, request.path_size, request.rights, &node, mount);
+	return open_path(call, path, request.path_size, request.rights);
 }
 
-static bool handle_create(const struct cap_request* call, const void* data, uint32_t expected_type) {
-	struct vfs_open_request       request;
+static bool create_path(const struct cap_request* call, const char* path, size_t path_size, cap_rights_t rights,
+                        uint32_t expected_type) {
 	struct vfs_mount*             mount;
 	struct filesystem_node_handle node = {.capability = CAP_ID_INVALID};
 	struct filesystem_call_result result;
-	const char*                   path;
 	const void*                   relative;
-	size_t                        expected_size;
 	size_t                        relative_size;
 	cap_rights_t                  raw_rights;
+
+	if (path_size == 1u || find_exact_mount(path, path_size) != NULL)
+		return reply_domain(call, FILESYSTEM_STATUS_ALREADY_EXISTS);
+	mount = find_mount(path, path_size);
+	if (mount == NULL || mount->read_only) return reply_domain(call, FILESYSTEM_STATUS_READ_ONLY);
+	relative_path(mount, path, path_size, &relative, &relative_size);
+	if (relative_size == 0u) return reply_domain(call, FILESYSTEM_STATUS_ALREADY_EXISTS);
+	raw_rights = expected_type == FILESYSTEM_NODE_FILE ? rights | CAP_DELEGATE : CAP_READ;
+	if (expected_type == FILESYSTEM_NODE_FILE) {
+		result = filesystem_directory_create_file(mount->root_cap, relative, relative_size, raw_rights, &node);
+	}
+	else {
+		result = filesystem_directory_create_directory(mount->root_cap, relative, relative_size, raw_rights, &node);
+	}
+	if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK)
+		return reply_call_failure(call, result);
+	return reply_open_node(call, path, path_size, rights, &node, mount);
+}
+
+static bool handle_create(const struct cap_request* call, const void* data, uint32_t expected_type) {
+	struct vfs_open_request request;
+	const char*             path;
+	size_t                  expected_size;
 
 	if (!request_has_rights(call, CAP_CALL | CAP_WRITE)) return reply_transport(call, SYSCALL_STATUS_DENIED);
 	if (!copy_request(call, data, &request, sizeof(request)) || request.path_size == 0u ||
@@ -407,22 +432,7 @@ static bool handle_create(const struct cap_request* call, const void* data, uint
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	path = (const char*)data + sizeof(request);
 	if (!absolute_path_valid(path, request.path_size)) return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
-	if (request.path_size == 1u || find_exact_mount(path, request.path_size) != NULL)
-		return reply_domain(call, FILESYSTEM_STATUS_ALREADY_EXISTS);
-	mount = find_mount(path, request.path_size);
-	if (mount == NULL || mount->read_only) return reply_domain(call, FILESYSTEM_STATUS_READ_ONLY);
-	relative_path(mount, path, request.path_size, &relative, &relative_size);
-	if (relative_size == 0u) return reply_domain(call, FILESYSTEM_STATUS_ALREADY_EXISTS);
-	raw_rights = expected_type == FILESYSTEM_NODE_FILE ? request.rights | CAP_DELEGATE : CAP_READ;
-	if (expected_type == FILESYSTEM_NODE_FILE) {
-		result = filesystem_directory_create_file(mount->root_cap, relative, relative_size, raw_rights, &node);
-	}
-	else {
-		result = filesystem_directory_create_directory(mount->root_cap, relative, relative_size, raw_rights, &node);
-	}
-	if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK)
-		return reply_call_failure(call, result);
-	return reply_open_node(call, path, request.path_size, request.rights, &node, mount);
+	return create_path(call, path, request.path_size, request.rights, expected_type);
 }
 
 static void detach_directories(uint64_t mount_id, const char* path, size_t path_size) {
@@ -433,14 +443,27 @@ static void detach_directories(uint64_t mount_id, const char* path, size_t path_
 	}
 }
 
-static bool handle_remove(const struct cap_request* call, const void* data) {
-	struct vfs_path_request       request;
+static bool remove_path(const struct cap_request* call, const char* path, size_t path_size) {
 	struct vfs_mount*             mount;
 	struct filesystem_call_result result;
-	const char*                   path;
 	const void*                   relative;
-	size_t                        expected_size;
 	size_t                        relative_size;
+
+	if (path_size == 1u || mount_at_or_below(path, path_size)) return reply_domain(call, FILESYSTEM_STATUS_BUSY);
+	mount = find_mount(path, path_size);
+	if (mount == NULL || mount->read_only) return reply_domain(call, FILESYSTEM_STATUS_READ_ONLY);
+	relative_path(mount, path, path_size, &relative, &relative_size);
+	result = filesystem_directory_remove(mount->root_cap, relative, relative_size);
+	if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK)
+		return reply_call_failure(call, result);
+	detach_directories(mount->id, path, path_size);
+	return reply_domain(call, FILESYSTEM_STATUS_OK);
+}
+
+static bool handle_remove(const struct cap_request* call, const void* data) {
+	struct vfs_path_request request;
+	const char*             path;
+	size_t                  expected_size;
 
 	if (!request_has_rights(call, CAP_CALL | CAP_WRITE)) return reply_transport(call, SYSCALL_STATUS_DENIED);
 	if (!copy_request(call, data, &request, sizeof(request)) || request.path_size == 0u ||
@@ -450,16 +473,7 @@ static bool handle_remove(const struct cap_request* call, const void* data) {
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	path = (const char*)data + sizeof(request);
 	if (!absolute_path_valid(path, request.path_size)) return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
-	if (request.path_size == 1u || mount_at_or_below(path, request.path_size))
-		return reply_domain(call, FILESYSTEM_STATUS_BUSY);
-	mount = find_mount(path, request.path_size);
-	if (mount == NULL || mount->read_only) return reply_domain(call, FILESYSTEM_STATUS_READ_ONLY);
-	relative_path(mount, path, request.path_size, &relative, &relative_size);
-	result = filesystem_directory_remove(mount->root_cap, relative, relative_size);
-	if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK)
-		return reply_call_failure(call, result);
-	detach_directories(mount->id, path, request.path_size);
-	return reply_domain(call, FILESYSTEM_STATUS_OK);
+	return remove_path(call, path, request.path_size);
 }
 
 static void free_rename_updates(struct rename_update* updates) {
@@ -516,46 +530,32 @@ static void apply_rename_updates(struct rename_update* updates) {
 	}
 }
 
-static bool handle_rename(const struct cap_request* call, const void* data) {
-	struct vfs_rename_request     request;
+static bool rename_path(const struct cap_request* call, const char* old_path, size_t old_path_size,
+                        const char* new_path, size_t new_path_size) {
 	struct vfs_mount*             old_mount;
 	struct vfs_mount*             new_mount;
 	struct filesystem_call_result result;
 	struct rename_update*         updates;
-	const char*                   old_path;
-	const char*                   new_path;
 	const void*                   old_relative;
 	const void*                   new_relative;
-	size_t                        expected_size;
 	size_t                        old_relative_size;
 	size_t                        new_relative_size;
 
-	if (!request_has_rights(call, CAP_CALL | CAP_WRITE)) return reply_transport(call, SYSCALL_STATUS_DENIED);
-	if (!copy_request(call, data, &request, sizeof(request)) || request.reserved != 0u || request.old_path_size == 0u ||
-	    request.new_path_size == 0u || request.old_path_size > CAP_MAX_REQUEST_SIZE - sizeof(request) ||
-	    request.new_path_size > CAP_MAX_REQUEST_SIZE - sizeof(request) - request.old_path_size ||
-	    (expected_size = sizeof(request) + request.old_path_size + request.new_path_size) != call->request_size ||
-	    call->response_capacity < sizeof(struct filesystem_response_header))
-		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
-	old_path = (const char*)data + sizeof(request);
-	new_path = old_path + request.old_path_size;
-	if (!absolute_path_valid(old_path, request.old_path_size) || !absolute_path_valid(new_path, request.new_path_size))
-		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
-	if (request.old_path_size == 1u || request.new_path_size == 1u ||
-	    mount_at_or_below(old_path, request.old_path_size) || mount_at_or_below(new_path, request.new_path_size))
+	if (old_path_size == 1u || new_path_size == 1u || mount_at_or_below(old_path, old_path_size) ||
+	    mount_at_or_below(new_path, new_path_size))
 		return reply_domain(call, FILESYSTEM_STATUS_BUSY);
-	old_mount = find_mount(old_path, request.old_path_size);
-	new_mount = find_mount(new_path, request.new_path_size);
+	old_mount = find_mount(old_path, old_path_size);
+	new_mount = find_mount(new_path, new_path_size);
 	if (old_mount != new_mount) return reply_domain(call, FILESYSTEM_STATUS_CROSS_FILESYSTEM);
 	if (old_mount == NULL || old_mount->read_only) return reply_domain(call, FILESYSTEM_STATUS_READ_ONLY);
-	relative_path(old_mount, old_path, request.old_path_size, &old_relative, &old_relative_size);
-	relative_path(new_mount, new_path, request.new_path_size, &new_relative, &new_relative_size);
-	updates = prepare_rename_updates(old_mount->id, old_path, request.old_path_size, new_path, request.new_path_size);
+	relative_path(old_mount, old_path, old_path_size, &old_relative, &old_relative_size);
+	relative_path(new_mount, new_path, new_path_size, &new_relative, &new_relative_size);
+	updates = prepare_rename_updates(old_mount->id, old_path, old_path_size, new_path, new_path_size);
 	if (updates == NULL) {
 		bool needs_update = false;
 		for (struct vfs_directory* directory = directories; directory != NULL; directory = directory->next) {
 			if (directory->attached && directory->mount_id == old_mount->id &&
-			    path_contains(old_path, request.old_path_size, directory->path, directory->path_size)) {
+			    path_contains(old_path, old_path_size, directory->path, directory->path_size)) {
 				needs_update = true;
 				break;
 			}
@@ -570,6 +570,145 @@ static bool handle_rename(const struct cap_request* call, const void* data) {
 	}
 	apply_rename_updates(updates);
 	return reply_domain(call, FILESYSTEM_STATUS_OK);
+}
+
+static bool handle_rename(const struct cap_request* call, const void* data) {
+	struct vfs_rename_request request;
+	const char*               old_path;
+	const char*               new_path;
+	size_t                    expected_size;
+
+	if (!request_has_rights(call, CAP_CALL | CAP_WRITE)) return reply_transport(call, SYSCALL_STATUS_DENIED);
+	if (!copy_request(call, data, &request, sizeof(request)) || request.reserved != 0u || request.old_path_size == 0u ||
+	    request.new_path_size == 0u || request.old_path_size > CAP_MAX_REQUEST_SIZE - sizeof(request) ||
+	    request.new_path_size > CAP_MAX_REQUEST_SIZE - sizeof(request) - request.old_path_size ||
+	    (expected_size = sizeof(request) + request.old_path_size + request.new_path_size) != call->request_size ||
+	    call->response_capacity < sizeof(struct filesystem_response_header))
+		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	old_path = (const char*)data + sizeof(request);
+	new_path = old_path + request.old_path_size;
+	if (!absolute_path_valid(old_path, request.old_path_size) || !absolute_path_valid(new_path, request.new_path_size))
+		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	return rename_path(call, old_path, request.old_path_size, new_path, request.new_path_size);
+}
+
+static syscall_status_t resolve_directory_path(const struct vfs_directory* directory, const void* relative,
+                                               size_t relative_size, char** out_path, size_t* out_size) {
+	size_t separator_size;
+	size_t path_size;
+	char*  path;
+
+	if (directory == NULL || relative == NULL || relative_size == 0u || out_path == NULL || out_size == NULL)
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	*out_path      = NULL;
+	*out_size      = 0u;
+	separator_size = directory->path_size == 1u ? 0u : 1u;
+	if (directory->path_size > SIZE_MAX - separator_size ||
+	    relative_size > SIZE_MAX - directory->path_size - separator_size)
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	path_size = directory->path_size + separator_size + relative_size;
+	path      = malloc(path_size);
+	if (path == NULL) return SYSCALL_STATUS_FAILED;
+	memcpy(path, directory->path, directory->path_size);
+	if (separator_size != 0u) path[directory->path_size] = '/';
+	memcpy(path + directory->path_size + separator_size, relative, relative_size);
+	*out_path = path;
+	*out_size = path_size;
+	return SYSCALL_STATUS_OK;
+}
+
+static bool handle_directory_open_path(const struct cap_request* call, struct vfs_directory* directory,
+                                       const void* data, uint32_t expected_type) {
+	struct filesystem_directory_open_request request;
+	const void*                              relative;
+	char*                                    path = NULL;
+	size_t                                   expected_size;
+	size_t                                   path_size;
+	syscall_status_t                         status;
+	bool                                     replied;
+
+	if (!request_has_rights(call, CAP_CALL | (expected_type == FILESYSTEM_NODE_INVALID ? CAP_READ : CAP_WRITE)))
+		return reply_transport(call, SYSCALL_STATUS_DENIED);
+	if (!copy_request(call, data, &request, sizeof(request)) || request.path_size == 0u ||
+	    request.path_size > CAP_MAX_REQUEST_SIZE - sizeof(request) ||
+	    (expected_size = sizeof(request) + request.path_size) != call->request_size ||
+	    call->response_capacity < sizeof(struct filesystem_open_response) || !node_rights_valid(request.rights))
+		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	if ((request.rights & ~call->rights) != 0u) return reply_transport(call, SYSCALL_STATUS_DENIED);
+	relative = (const uint8_t*)data + sizeof(request);
+	if (!filesystem_relative_path_valid(relative, request.path_size))
+		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	if (!directory->attached) return reply_domain(call, FILESYSTEM_STATUS_BUSY);
+	status = resolve_directory_path(directory, relative, request.path_size, &path, &path_size);
+	if (status != SYSCALL_STATUS_OK) return reply_transport(call, status);
+	if (expected_type == FILESYSTEM_NODE_INVALID) replied = open_path(call, path, path_size, request.rights);
+	else replied = create_path(call, path, path_size, request.rights, expected_type);
+	free(path);
+	return replied;
+}
+
+static bool handle_directory_remove(const struct cap_request* call, struct vfs_directory* directory, const void* data) {
+	struct filesystem_directory_path_request request;
+	const void*                              relative;
+	char*                                    path = NULL;
+	size_t                                   expected_size;
+	size_t                                   path_size;
+	syscall_status_t                         status;
+	bool                                     replied;
+
+	if (!request_has_rights(call, CAP_CALL | CAP_WRITE)) return reply_transport(call, SYSCALL_STATUS_DENIED);
+	if (!copy_request(call, data, &request, sizeof(request)) || request.path_size == 0u ||
+	    request.path_size > CAP_MAX_REQUEST_SIZE - sizeof(request) ||
+	    (expected_size = sizeof(request) + request.path_size) != call->request_size ||
+	    call->response_capacity < sizeof(struct filesystem_response_header))
+		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	relative = (const uint8_t*)data + sizeof(request);
+	if (!filesystem_relative_path_valid(relative, request.path_size))
+		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	if (!directory->attached) return reply_domain(call, FILESYSTEM_STATUS_BUSY);
+	status = resolve_directory_path(directory, relative, request.path_size, &path, &path_size);
+	if (status != SYSCALL_STATUS_OK) return reply_transport(call, status);
+	replied = remove_path(call, path, path_size);
+	free(path);
+	return replied;
+}
+
+static bool handle_directory_rename(const struct cap_request* call, struct vfs_directory* directory, const void* data) {
+	struct filesystem_directory_rename_request request;
+	const void*                                old_relative;
+	const void*                                new_relative;
+	char*                                      old_path = NULL;
+	char*                                      new_path = NULL;
+	size_t                                     expected_size;
+	size_t                                     old_path_size;
+	size_t                                     new_path_size;
+	syscall_status_t                           status;
+	bool                                       replied;
+
+	if (!request_has_rights(call, CAP_CALL | CAP_WRITE)) return reply_transport(call, SYSCALL_STATUS_DENIED);
+	if (!copy_request(call, data, &request, sizeof(request)) || request.reserved != 0u || request.old_path_size == 0u ||
+	    request.new_path_size == 0u || request.old_path_size > CAP_MAX_REQUEST_SIZE - sizeof(request) ||
+	    request.new_path_size > CAP_MAX_REQUEST_SIZE - sizeof(request) - request.old_path_size ||
+	    (expected_size = sizeof(request) + request.old_path_size + request.new_path_size) != call->request_size ||
+	    call->response_capacity < sizeof(struct filesystem_response_header))
+		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	old_relative = (const uint8_t*)data + sizeof(request);
+	new_relative = (const uint8_t*)old_relative + request.old_path_size;
+	if (!filesystem_relative_path_valid(old_relative, request.old_path_size) ||
+	    !filesystem_relative_path_valid(new_relative, request.new_path_size))
+		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	if (!directory->attached) return reply_domain(call, FILESYSTEM_STATUS_BUSY);
+	status = resolve_directory_path(directory, old_relative, request.old_path_size, &old_path, &old_path_size);
+	if (status == SYSCALL_STATUS_OK)
+		status = resolve_directory_path(directory, new_relative, request.new_path_size, &new_path, &new_path_size);
+	if (status != SYSCALL_STATUS_OK) {
+		free(old_path);
+		return reply_transport(call, status);
+	}
+	replied = rename_path(call, old_path, old_path_size, new_path, new_path_size);
+	free(new_path);
+	free(old_path);
+	return replied;
 }
 
 static bool handle_directory_info(const struct cap_request* call, struct vfs_directory* directory, const void* data) {
@@ -743,6 +882,16 @@ static bool dispatch_directory(const struct cap_request* call, struct vfs_direct
 		return handle_directory_mount(call, directory, data);
 	case VFS_DIRECTORY_OP_UNMOUNT:
 		return handle_directory_unmount(call, directory, data);
+	case VFS_DIRECTORY_OP_OPEN:
+		return handle_directory_open_path(call, directory, data, FILESYSTEM_NODE_INVALID);
+	case VFS_DIRECTORY_OP_CREATE_FILE:
+		return handle_directory_open_path(call, directory, data, FILESYSTEM_NODE_FILE);
+	case VFS_DIRECTORY_OP_CREATE_DIRECTORY:
+		return handle_directory_open_path(call, directory, data, FILESYSTEM_NODE_DIRECTORY);
+	case VFS_DIRECTORY_OP_REMOVE:
+		return handle_directory_remove(call, directory, data);
+	case VFS_DIRECTORY_OP_RENAME:
+		return handle_directory_rename(call, directory, data);
 	default:
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	}

@@ -119,20 +119,31 @@ FILE* fopen(const char* restrict path, const char* restrict mode) {
 	cap_rights_t                  rights = 0u;
 	FILE*                         stream = NULL;
 	size_t                        path_size;
+	cap_id_t                      working_directory;
+	bool                          absolute;
 	bool                          success = false;
 
 	if (path == NULL || !file_mode_parse(mode, &parsed_mode)) return NULL;
-	path_size = strlen(path);
-	if (!vfs_absolute_path_valid(path, path_size)) return NULL;
+	path_size         = strlen(path);
+	absolute          = path_size != 0u && path[0] == '/';
+	working_directory = filesystem_get_working_directory();
+	if (absolute ? !vfs_absolute_path_valid(path, path_size)
+	             : working_directory == CAP_ID_INVALID || !filesystem_relative_path_valid(path, path_size))
+		return NULL;
 	if (parsed_mode.readable) rights |= CAP_READ;
 	if (parsed_mode.writable) rights |= CAP_WRITE;
 
-	acquire_result = init_acquire(&vfs_query, VFS_SERVICE_NAME, &vfs);
-	if (acquire_result.transport_status != SYSCALL_STATUS_OK || acquire_result.status != INIT_REGISTRY_OK) goto cleanup;
-	open_result = vfs_open(vfs.capability, path, path_size, rights, &node);
+	if (absolute) {
+		acquire_result = init_acquire(&vfs_query, VFS_SERVICE_NAME, &vfs);
+		if (acquire_result.transport_status != SYSCALL_STATUS_OK || acquire_result.status != INIT_REGISTRY_OK)
+			goto cleanup;
+		open_result = vfs_open(vfs.capability, path, path_size, rights, &node);
+	}
+	else open_result = vfs_directory_open(working_directory, path, path_size, rights, &node);
 	if (!call_succeeded(open_result) && parsed_mode.create && open_result.transport_status == SYSCALL_STATUS_OK &&
 	    open_result.status == FILESYSTEM_STATUS_NOT_FOUND) {
-		open_result = vfs_create_file(vfs.capability, path, path_size, rights, &node);
+		if (absolute) open_result = vfs_create_file(vfs.capability, path, path_size, rights, &node);
+		else open_result = vfs_directory_create_file(working_directory, path, path_size, rights, &node);
 	}
 	if (!call_succeeded(open_result) || node.info.type != FILESYSTEM_NODE_FILE) goto cleanup;
 	if (parsed_mode.truncate && !call_succeeded(filesystem_file_resize(node.capability, 0u))) goto cleanup;
