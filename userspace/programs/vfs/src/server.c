@@ -18,7 +18,7 @@
 
 #define VFS_SERVICE_OBJECT_ID 1u
 #define VFS_PROTOCOL_VERSION_MAJOR 1u
-#define VFS_PROTOCOL_VERSION_MINOR 0u
+#define VFS_PROTOCOL_VERSION_MINOR 1u
 #define VFS_SERVICE_CLIENT_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE | CAP_MANAGE))
 
 struct vfs_mount {
@@ -48,6 +48,11 @@ struct rename_update {
 	struct rename_update* next;
 };
 
+struct vfs_path {
+	char   bytes[VFS_PATH_MAX];
+	size_t size;
+};
+
 static channel_id_t          vfs_endpoint    = CHANNEL_ID_INVALID;
 static cap_id_t              vfs_activity    = CAP_ID_INVALID;
 static cap_id_t              vfs_service_cap = CAP_ID_INVALID;
@@ -56,6 +61,7 @@ static struct vfs_mount*     mounts;
 static struct vfs_directory* directories;
 static uint64_t              next_mount_id = 1u;
 static uint8_t               request_buffer[CAP_MAX_REQUEST_SIZE];
+static uint8_t               response_buffer[CAP_MAX_RESPONSE_SIZE];
 
 static bool reply_request(cap_call_id_t call_id, const void* response, size_t response_size, syscall_status_t status) {
 	return channel_reply(call_id, response, response_size, status) == SYSCALL_STATUS_OK;
@@ -210,6 +216,137 @@ static void relative_path(const struct vfs_mount* mount, const char* path, size_
 	*out_size = path_size - mount->path_size - 1u;
 }
 
+static struct filesystem_call_result domain_result(enum filesystem_status status) {
+	return (struct filesystem_call_result){.status = status, .transport_status = SYSCALL_STATUS_OK};
+}
+
+static bool call_succeeded(struct filesystem_call_result result) {
+	return result.transport_status == SYSCALL_STATUS_OK && result.status == FILESYSTEM_STATUS_OK;
+}
+
+/* Read metadata of an absolute path without following a final symbolic link. */
+static struct filesystem_call_result lookup_path(const char* path, size_t path_size,
+                                                 struct filesystem_node_info* out_info) {
+	struct vfs_mount* mount = find_mount(path, path_size);
+	const void*       relative;
+	size_t            relative_size;
+
+	if (mount == NULL) {
+		if (path_size != 1u) return domain_result(FILESYSTEM_STATUS_NOT_FOUND);
+		*out_info = (struct filesystem_node_info){
+			.type  = FILESYSTEM_NODE_DIRECTORY,
+			.flags = FILESYSTEM_NODE_READ_ONLY,
+			.size  = 0u,
+		};
+		return domain_result(FILESYSTEM_STATUS_OK);
+	}
+	relative_path(mount, path, path_size, &relative, &relative_size);
+	if (relative_size == 0u) {
+		*out_info = mount->root_info;
+		return domain_result(FILESYSTEM_STATUS_OK);
+	}
+	return filesystem_directory_lookup(mount->root_cap, relative, relative_size, out_info);
+}
+
+static struct filesystem_call_result read_link_path(const char* path, size_t path_size, char* target,
+                                                    size_t* out_size) {
+	struct vfs_mount* mount = find_mount(path, path_size);
+	const void*       relative;
+	size_t            relative_size;
+
+	if (mount == NULL)
+		return domain_result(path_size == 1u ? FILESYSTEM_STATUS_INVALID_ARGUMENT : FILESYSTEM_STATUS_NOT_FOUND);
+	relative_path(mount, path, path_size, &relative, &relative_size);
+	if (relative_size == 0u) return domain_result(FILESYSTEM_STATUS_INVALID_ARGUMENT);
+	return filesystem_directory_read_symbolic_link(
+		mount->root_cap, relative, relative_size, target, FILESYSTEM_SYMBOLIC_LINK_MAX, out_size);
+}
+
+static bool resolved_append(struct vfs_path* path, const char* component, size_t component_size) {
+	size_t separator_size = path->size == 1u ? 0u : 1u;
+
+	if (separator_size + component_size > sizeof(path->bytes) - path->size) return false;
+	if (separator_size != 0u) path->bytes[path->size++] = '/';
+	memcpy(path->bytes + path->size, component, component_size);
+	path->size += component_size;
+	return true;
+}
+
+static void resolved_parent(struct vfs_path* path) {
+	while (path->size > 1u && path->bytes[path->size - 1u] != '/') path->size--;
+	if (path->size > 1u) path->size--;
+}
+
+/*
+ * Resolve every symbolic link along a normalized absolute path. The final
+ * component is followed only when follow_final is set; a missing final
+ * component is not an error so callers can report or create it themselves.
+ */
+static struct filesystem_call_result resolve_path(const char* path, size_t path_size, bool follow_final,
+                                                  struct vfs_path* out) {
+	static char                   pending[VFS_PATH_MAX];
+	static char                   target[FILESYSTEM_SYMBOLIC_LINK_MAX];
+	size_t                        pending_size = path_size;
+	size_t                        offset       = 0u;
+	uint32_t                      links        = 0u;
+	struct filesystem_node_info   info;
+	struct filesystem_call_result result;
+
+	if (path_size > sizeof(pending)) return domain_result(FILESYSTEM_STATUS_INVALID_ARGUMENT);
+	memcpy(pending, path, path_size);
+	out->bytes[0] = '/';
+	out->size     = 1u;
+	while (offset < pending_size) {
+		size_t start;
+		size_t size;
+		size_t parent_size;
+		size_t target_size = 0u;
+		bool   final;
+
+		while (offset < pending_size && pending[offset] == '/') offset++;
+		start = offset;
+		while (offset < pending_size && pending[offset] != '/') offset++;
+		size = offset - start;
+		if (size == 0u) break;
+		final = true;
+		for (size_t i = offset; i < pending_size; i++) {
+			if (pending[i] != '/') {
+				final = false;
+				break;
+			}
+		}
+		if (size == 1u && pending[start] == '.') continue;
+		if (size == 2u && pending[start] == '.' && pending[start + 1u] == '.') {
+			resolved_parent(out);
+			continue;
+		}
+		parent_size = out->size;
+		if (size > FILESYSTEM_NAME_MAX || !resolved_append(out, pending + start, size))
+			return domain_result(FILESYSTEM_STATUS_INVALID_ARGUMENT);
+		if (final && !follow_final) break;
+		result = lookup_path(out->bytes, out->size, &info);
+		if (result.transport_status == SYSCALL_STATUS_OK && result.status == FILESYSTEM_STATUS_NOT_FOUND && final)
+			break;
+		if (!call_succeeded(result)) return result;
+		if (info.type == FILESYSTEM_NODE_SYMBOLIC_LINK) {
+			if (++links > VFS_SYMBOLIC_LINK_FOLLOW_MAX) return domain_result(FILESYSTEM_STATUS_LOOP);
+			result = read_link_path(out->bytes, out->size, target, &target_size);
+			if (!call_succeeded(result)) return result;
+			if (target_size + 1u > sizeof(pending) - (pending_size - offset))
+				return domain_result(FILESYSTEM_STATUS_INVALID_ARGUMENT);
+			memmove(pending + target_size + 1u, pending + offset, pending_size - offset);
+			memcpy(pending, target, target_size);
+			pending[target_size] = '/';
+			pending_size         = target_size + 1u + pending_size - offset;
+			offset               = 0u;
+			out->size            = target[0] == '/' ? 1u : parent_size;
+			continue;
+		}
+		if (!final && info.type != FILESYSTEM_NODE_DIRECTORY) return domain_result(FILESYSTEM_STATUS_NOT_DIRECTORY);
+	}
+	return domain_result(FILESYSTEM_STATUS_OK);
+}
+
 static void apply_mount_flags(const char* path, size_t path_size, bool read_only, struct filesystem_node_info* info) {
 	const struct vfs_mount* exact = find_exact_mount(path, path_size);
 	if (read_only || (exact != NULL && exact->read_only)) info->flags |= FILESYSTEM_NODE_READ_ONLY;
@@ -354,7 +491,10 @@ static struct filesystem_call_result open_raw_node(struct vfs_mount* mount, cons
 	};
 }
 
-static bool open_path(const struct cap_request* call, const char* path, size_t path_size, cap_rights_t rights) {
+/* Open a namespace path; when follow is set, a symbolic link reported by the raw provider restarts resolution. */
+static bool open_path(const struct cap_request* call, const char* path, size_t path_size, cap_rights_t rights,
+                      bool follow) {
+	static struct vfs_path        resolved;
 	struct vfs_mount*             mount;
 	struct filesystem_node_handle node;
 	struct filesystem_call_result result;
@@ -371,8 +511,13 @@ static bool open_path(const struct cap_request* call, const char* path, size_t p
 	}
 	if (mount->read_only && (rights & CAP_WRITE) != 0u) return reply_domain(call, FILESYSTEM_STATUS_READ_ONLY);
 	result = open_raw_node(mount, path, path_size, rights, &node);
-	if (result.transport_status != SYSCALL_STATUS_OK) return reply_call_failure(call, result);
-	if (result.status != FILESYSTEM_STATUS_OK) return reply_call_failure(call, result);
+	if (result.transport_status == SYSCALL_STATUS_OK && result.status == FILESYSTEM_STATUS_SYMBOLIC_LINK) {
+		if (!follow) return reply_domain(call, FILESYSTEM_STATUS_LOOP);
+		result = resolve_path(path, path_size, true, &resolved);
+		if (!call_succeeded(result)) return reply_call_failure(call, result);
+		return open_path(call, resolved.bytes, resolved.size, rights, false);
+	}
+	if (!call_succeeded(result)) return reply_call_failure(call, result);
 	return reply_open_node(call, path, path_size, rights, &node, mount);
 }
 
@@ -389,11 +534,12 @@ static bool handle_open(const struct cap_request* call, const void* data) {
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	path = (const char*)data + sizeof(request);
 	if (!absolute_path_valid(path, request.path_size)) return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
-	return open_path(call, path, request.path_size, request.rights);
+	return open_path(call, path, request.path_size, request.rights, true);
 }
 
 static bool create_path(const struct cap_request* call, const char* path, size_t path_size, cap_rights_t rights,
                         uint32_t expected_type) {
+	static struct vfs_path        resolved;
 	struct vfs_mount*             mount;
 	struct filesystem_node_handle node = {.capability = CAP_ID_INVALID};
 	struct filesystem_call_result result;
@@ -401,6 +547,10 @@ static bool create_path(const struct cap_request* call, const char* path, size_t
 	size_t                        relative_size;
 	cap_rights_t                  raw_rights;
 
+	result = resolve_path(path, path_size, false, &resolved);
+	if (!call_succeeded(result)) return reply_call_failure(call, result);
+	path      = resolved.bytes;
+	path_size = resolved.size;
 	if (path_size == 1u || find_exact_mount(path, path_size) != NULL)
 		return reply_domain(call, FILESYSTEM_STATUS_ALREADY_EXISTS);
 	mount = find_mount(path, path_size);
@@ -444,11 +594,16 @@ static void detach_directories(uint64_t mount_id, const char* path, size_t path_
 }
 
 static bool remove_path(const struct cap_request* call, const char* path, size_t path_size) {
+	static struct vfs_path        resolved;
 	struct vfs_mount*             mount;
 	struct filesystem_call_result result;
 	const void*                   relative;
 	size_t                        relative_size;
 
+	result = resolve_path(path, path_size, false, &resolved);
+	if (!call_succeeded(result)) return reply_call_failure(call, result);
+	path      = resolved.bytes;
+	path_size = resolved.size;
 	if (path_size == 1u || mount_at_or_below(path, path_size)) return reply_domain(call, FILESYSTEM_STATUS_BUSY);
 	mount = find_mount(path, path_size);
 	if (mount == NULL || mount->read_only) return reply_domain(call, FILESYSTEM_STATUS_READ_ONLY);
@@ -540,7 +695,17 @@ static bool rename_path(const struct cap_request* call, const char* old_path, si
 	const void*                   new_relative;
 	size_t                        old_relative_size;
 	size_t                        new_relative_size;
+	static struct vfs_path        old_resolved;
+	static struct vfs_path        new_resolved;
 
+	result = resolve_path(old_path, old_path_size, false, &old_resolved);
+	if (!call_succeeded(result)) return reply_call_failure(call, result);
+	result = resolve_path(new_path, new_path_size, false, &new_resolved);
+	if (!call_succeeded(result)) return reply_call_failure(call, result);
+	old_path      = old_resolved.bytes;
+	old_path_size = old_resolved.size;
+	new_path      = new_resolved.bytes;
+	new_path_size = new_resolved.size;
 	if (old_path_size == 1u || new_path_size == 1u || mount_at_or_below(old_path, old_path_size) ||
 	    mount_at_or_below(new_path, new_path_size))
 		return reply_domain(call, FILESYSTEM_STATUS_BUSY);
@@ -592,6 +757,169 @@ static bool handle_rename(const struct cap_request* call, const void* data) {
 	return rename_path(call, old_path, request.old_path_size, new_path, request.new_path_size);
 }
 
+static bool reply_path(const struct cap_request* call, const char* path, size_t path_size) {
+	struct vfs_path_response* response = (void*)response_buffer;
+
+	if (call->response_capacity < sizeof(*response) + path_size)
+		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	response->header = (struct filesystem_response_header){.status = FILESYSTEM_STATUS_OK, .reserved = 0u};
+	memcpy(response->path, path, path_size);
+	return reply_request(call->call_id, response, sizeof(*response) + path_size, SYSCALL_STATUS_OK);
+}
+
+static bool lookup_reply(const struct cap_request* call, const char* path, size_t path_size) {
+	static struct vfs_path          resolved;
+	struct filesystem_info_response response;
+	struct filesystem_call_result   result;
+	struct vfs_mount*               mount;
+
+	result = resolve_path(path, path_size, false, &resolved);
+	if (call_succeeded(result)) result = lookup_path(resolved.bytes, resolved.size, &response.info);
+	if (!call_succeeded(result)) return reply_call_failure(call, result);
+	mount = find_mount(resolved.bytes, resolved.size);
+	apply_mount_flags(resolved.bytes, resolved.size, mount == NULL || mount->read_only, &response.info);
+	response.header = (struct filesystem_response_header){.status = FILESYSTEM_STATUS_OK, .reserved = 0u};
+	return reply_request(call->call_id, &response, sizeof(response), SYSCALL_STATUS_OK);
+}
+
+static bool read_symbolic_link_reply(const struct cap_request* call, const char* path, size_t path_size) {
+	static struct vfs_path                         resolved;
+	struct filesystem_symbolic_link_read_response* response = (void*)response_buffer;
+	struct filesystem_call_result                  result;
+	size_t                                         target_size = 0u;
+
+	result = resolve_path(path, path_size, false, &resolved);
+	if (call_succeeded(result))
+		result = read_link_path(resolved.bytes, resolved.size, (char*)response->target, &target_size);
+	if (!call_succeeded(result)) return reply_call_failure(call, result);
+	if (call->response_capacity < sizeof(*response) + target_size)
+		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	response->header = (struct filesystem_response_header){.status = FILESYSTEM_STATUS_OK, .reserved = 0u};
+	return reply_request(call->call_id, response, sizeof(*response) + target_size, SYSCALL_STATUS_OK);
+}
+
+static bool create_symbolic_link_path(const struct cap_request* call, const char* path, size_t path_size,
+                                      const char* target, size_t target_size) {
+	static struct vfs_path        resolved;
+	struct vfs_mount*             mount;
+	struct filesystem_call_result result;
+	const void*                   relative;
+	size_t                        relative_size;
+
+	result = resolve_path(path, path_size, false, &resolved);
+	if (!call_succeeded(result)) return reply_call_failure(call, result);
+	if (resolved.size == 1u || find_exact_mount(resolved.bytes, resolved.size) != NULL)
+		return reply_domain(call, FILESYSTEM_STATUS_ALREADY_EXISTS);
+	mount = find_mount(resolved.bytes, resolved.size);
+	if (mount == NULL || mount->read_only) return reply_domain(call, FILESYSTEM_STATUS_READ_ONLY);
+	relative_path(mount, resolved.bytes, resolved.size, &relative, &relative_size);
+	result = filesystem_directory_create_symbolic_link(mount->root_cap, relative, relative_size, target, target_size);
+	if (!call_succeeded(result)) return reply_call_failure(call, result);
+	return reply_domain(call, FILESYSTEM_STATUS_OK);
+}
+
+/* Validate a path request whose path is absolute for the service or relative for a directory. */
+static const char* path_request_path(const struct cap_request* call, const void* data, cap_rights_t rights,
+                                     size_t response_size, bool absolute, size_t* out_size, bool* out_replied) {
+	struct vfs_path_request request;
+	const char*             path;
+
+	*out_replied = true;
+	if (!request_has_rights(call, CAP_CALL | rights)) {
+		*out_replied = reply_transport(call, SYSCALL_STATUS_DENIED);
+		return NULL;
+	}
+	if (!copy_request(call, data, &request, sizeof(request)) || request.path_size == 0u ||
+	    request.path_size > CAP_MAX_REQUEST_SIZE - sizeof(request) ||
+	    sizeof(request) + request.path_size != call->request_size || call->response_capacity < response_size) {
+		*out_replied = reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+		return NULL;
+	}
+	path = (const char*)data + sizeof(request);
+	if (absolute ? !absolute_path_valid(path, request.path_size)
+	             : !filesystem_relative_path_valid(path, request.path_size)) {
+		*out_replied = reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+		return NULL;
+	}
+	*out_size = request.path_size;
+	return path;
+}
+
+/* Validate a symbolic-link creation request and return its path; the target follows the path. */
+static const char* symbolic_link_request_path(const struct cap_request* call, const void* data, bool absolute,
+                                              struct vfs_symbolic_link_request* out_request, bool* out_replied) {
+	const char* path;
+
+	*out_replied = true;
+	if (!request_has_rights(call, CAP_CALL | CAP_WRITE)) {
+		*out_replied = reply_transport(call, SYSCALL_STATUS_DENIED);
+		return NULL;
+	}
+	if (!copy_request(call, data, out_request, sizeof(*out_request)) || out_request->reserved != 0u ||
+	    out_request->path_size == 0u || out_request->path_size > CAP_MAX_REQUEST_SIZE - sizeof(*out_request) ||
+	    out_request->target_size > CAP_MAX_REQUEST_SIZE - sizeof(*out_request) - out_request->path_size ||
+	    sizeof(*out_request) + out_request->path_size + out_request->target_size != call->request_size ||
+	    call->response_capacity < sizeof(struct filesystem_response_header)) {
+		*out_replied = reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+		return NULL;
+	}
+	path = (const char*)data + sizeof(*out_request);
+	if ((absolute ? !absolute_path_valid(path, out_request->path_size)
+	              : !filesystem_relative_path_valid(path, out_request->path_size)) ||
+	    !filesystem_symbolic_link_target_valid(path + out_request->path_size, out_request->target_size)) {
+		*out_replied = reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+		return NULL;
+	}
+	return path;
+}
+
+static bool handle_lookup(const struct cap_request* call, const void* data) {
+	const char* path;
+	size_t      path_size;
+	bool        replied;
+
+	path = path_request_path(call, data, CAP_READ, sizeof(struct filesystem_info_response), true, &path_size, &replied);
+	if (path == NULL) return replied;
+	return lookup_reply(call, path, path_size);
+}
+
+static bool handle_read_symbolic_link(const struct cap_request* call, const void* data) {
+	const char* path;
+	size_t      path_size;
+	bool        replied;
+
+	path = path_request_path(
+		call, data, CAP_READ, sizeof(struct filesystem_symbolic_link_read_response), true, &path_size, &replied);
+	if (path == NULL) return replied;
+	return read_symbolic_link_reply(call, path, path_size);
+}
+
+static bool handle_resolve(const struct cap_request* call, const void* data) {
+	static struct vfs_path        resolved;
+	struct filesystem_node_info   info;
+	struct filesystem_call_result result;
+	const char*                   path;
+	size_t                        path_size;
+	bool                          replied;
+
+	path = path_request_path(call, data, CAP_READ, sizeof(struct vfs_path_response), true, &path_size, &replied);
+	if (path == NULL) return replied;
+	result = resolve_path(path, path_size, true, &resolved);
+	if (call_succeeded(result)) result = lookup_path(resolved.bytes, resolved.size, &info);
+	if (!call_succeeded(result)) return reply_call_failure(call, result);
+	return reply_path(call, resolved.bytes, resolved.size);
+}
+
+static bool handle_create_symbolic_link(const struct cap_request* call, const void* data) {
+	struct vfs_symbolic_link_request request;
+	const char*                      path;
+	bool                             replied;
+
+	path = symbolic_link_request_path(call, data, true, &request, &replied);
+	if (path == NULL) return replied;
+	return create_symbolic_link_path(call, path, request.path_size, path + request.path_size, request.target_size);
+}
+
 static syscall_status_t resolve_directory_path(const struct vfs_directory* directory, const void* relative,
                                                size_t relative_size, char** out_path, size_t* out_size) {
 	size_t separator_size;
@@ -641,7 +969,7 @@ static bool handle_directory_open_path(const struct cap_request* call, struct vf
 	if (!directory->attached) return reply_domain(call, FILESYSTEM_STATUS_BUSY);
 	status = resolve_directory_path(directory, relative, request.path_size, &path, &path_size);
 	if (status != SYSCALL_STATUS_OK) return reply_transport(call, status);
-	if (expected_type == FILESYSTEM_NODE_INVALID) replied = open_path(call, path, path_size, request.rights);
+	if (expected_type == FILESYSTEM_NODE_INVALID) replied = open_path(call, path, path_size, request.rights, true);
 	else replied = create_path(call, path, path_size, request.rights, expected_type);
 	free(path);
 	return replied;
@@ -708,6 +1036,47 @@ static bool handle_directory_rename(const struct cap_request* call, struct vfs_d
 	replied = rename_path(call, old_path, old_path_size, new_path, new_path_size);
 	free(new_path);
 	free(old_path);
+	return replied;
+}
+
+/* Handle LOOKUP and READ_SYMBOLIC_LINK below a VFS directory. */
+static bool handle_directory_path_read(const struct cap_request* call, struct vfs_directory* directory,
+                                       const void* data, bool read_link) {
+	const char* relative;
+	char*       path = NULL;
+	size_t      relative_size;
+	size_t      path_size;
+	size_t      response_size;
+	bool        replied;
+
+	response_size =
+		read_link ? sizeof(struct filesystem_symbolic_link_read_response) : sizeof(struct filesystem_info_response);
+	relative = path_request_path(call, data, CAP_READ, response_size, false, &relative_size, &replied);
+	if (relative == NULL) return replied;
+	if (!directory->attached) return reply_domain(call, FILESYSTEM_STATUS_BUSY);
+	syscall_status_t status = resolve_directory_path(directory, relative, relative_size, &path, &path_size);
+	if (status != SYSCALL_STATUS_OK) return reply_transport(call, status);
+	replied = read_link ? read_symbolic_link_reply(call, path, path_size) : lookup_reply(call, path, path_size);
+	free(path);
+	return replied;
+}
+
+static bool handle_directory_create_symbolic_link(const struct cap_request* call, struct vfs_directory* directory,
+                                                  const void* data) {
+	struct vfs_symbolic_link_request request;
+	const char*                      relative;
+	char*                            path = NULL;
+	size_t                           path_size;
+	syscall_status_t                 status;
+	bool                             replied;
+
+	relative = symbolic_link_request_path(call, data, false, &request, &replied);
+	if (relative == NULL) return replied;
+	if (!directory->attached) return reply_domain(call, FILESYSTEM_STATUS_BUSY);
+	status = resolve_directory_path(directory, relative, request.path_size, &path, &path_size);
+	if (status != SYSCALL_STATUS_OK) return reply_transport(call, status);
+	replied = create_symbolic_link_path(call, path, path_size, relative + request.path_size, request.target_size);
+	free(path);
 	return replied;
 }
 
@@ -866,6 +1235,14 @@ static bool dispatch_service(const struct cap_request* call, const void* data,
 		return handle_remove(call, data);
 	case VFS_OP_RENAME:
 		return handle_rename(call, data);
+	case VFS_OP_LOOKUP:
+		return handle_lookup(call, data);
+	case VFS_OP_CREATE_SYMBOLIC_LINK:
+		return handle_create_symbolic_link(call, data);
+	case VFS_OP_READ_SYMBOLIC_LINK:
+		return handle_read_symbolic_link(call, data);
+	case VFS_OP_RESOLVE:
+		return handle_resolve(call, data);
 	default:
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	}
@@ -892,6 +1269,12 @@ static bool dispatch_directory(const struct cap_request* call, struct vfs_direct
 		return handle_directory_remove(call, directory, data);
 	case VFS_DIRECTORY_OP_RENAME:
 		return handle_directory_rename(call, directory, data);
+	case VFS_DIRECTORY_OP_LOOKUP:
+		return handle_directory_path_read(call, directory, data, false);
+	case VFS_DIRECTORY_OP_CREATE_SYMBOLIC_LINK:
+		return handle_directory_create_symbolic_link(call, directory, data);
+	case VFS_DIRECTORY_OP_READ_SYMBOLIC_LINK:
+		return handle_directory_path_read(call, directory, data, true);
 	default:
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	}

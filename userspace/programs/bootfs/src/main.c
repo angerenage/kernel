@@ -18,7 +18,7 @@
 
 #define BOOTFS_SERVICE_NAME "boot"
 #define FILESYSTEM_PROTOCOL_VERSION_MAJOR 1u
-#define FILESYSTEM_PROTOCOL_VERSION_MINOR 0u
+#define FILESYSTEM_PROTOCOL_VERSION_MINOR 1u
 #define BOOTFS_ROOT_OBJECT_ID 1u
 #define BOOTFS_BOOT_OBJECT_ID 2u
 #define BOOTFS_CLIENT_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_DELEGATE))
@@ -239,6 +239,22 @@ static bool handle_directory_info(const struct cap_request* call, const void* da
 	return reply_request(call->call_id, &response, sizeof(response), SYSCALL_STATUS_OK);
 }
 
+/* Find the node named by a validated relative path: the boot directory (module stays NULL) or one module. */
+static bool find_node(const uint8_t* path, size_t path_size, bool root,
+                      const struct module_provider_entry** out_module) {
+	*out_module = NULL;
+	if (root && path_size == sizeof("boot") - 1u && memcmp(path, "boot", sizeof("boot") - 1u) == 0) return true;
+	if (root && path_size > sizeof("boot/") - 1u && memcmp(path, "boot/", sizeof("boot/") - 1u) == 0) {
+		path += sizeof("boot/") - 1u;
+		path_size -= sizeof("boot/") - 1u;
+	}
+	else if (root) {
+		return false;
+	}
+	*out_module = find_module(path, path_size);
+	return *out_module != NULL;
+}
+
 static bool handle_directory_open(const struct cap_request* call, const void* data, bool root) {
 	struct filesystem_directory_open_request request;
 	const struct module_provider_entry*      module = NULL;
@@ -255,18 +271,33 @@ static bool handle_directory_open(const struct cap_request* call, const void* da
 	if (!filesystem_relative_path_valid(path, request.path_size))
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	if ((request.rights & CAP_WRITE) != 0u) return reply_domain(call, FILESYSTEM_STATUS_READ_ONLY);
-	if (root && request.path_size == sizeof("boot") - 1u && memcmp(path, "boot", sizeof("boot") - 1u) == 0)
-		return reply_open_directory(call, request.rights);
-	if (root && request.path_size > sizeof("boot/") - 1u && memcmp(path, "boot/", sizeof("boot/") - 1u) == 0) {
-		path += sizeof("boot/") - 1u;
-		request.path_size -= sizeof("boot/") - 1u;
-	}
-	else if (root) {
-		return reply_domain(call, FILESYSTEM_STATUS_NOT_FOUND);
-	}
-	module = find_module(path, request.path_size);
-	if (module == NULL) return reply_domain(call, FILESYSTEM_STATUS_NOT_FOUND);
+	if (!find_node(path, request.path_size, root, &module)) return reply_domain(call, FILESYSTEM_STATUS_NOT_FOUND);
+	if (module == NULL) return reply_open_directory(call, request.rights);
 	return reply_open_file(call, module, request.rights);
+}
+
+/* Handle LOOKUP and READ_SYMBOLIC_LINK; bootfs holds no symbolic links. */
+static bool handle_directory_path_read(const struct cap_request* call, const void* data, bool root, bool read_link) {
+	struct filesystem_directory_path_request request;
+	struct filesystem_info_response          response = {
+				 .header = {.status = FILESYSTEM_STATUS_OK, .reserved = 0u},
+    };
+	const struct module_provider_entry* module = NULL;
+	const uint8_t*                      path;
+
+	if (!request_has_rights(call, CAP_CALL | CAP_READ)) return reply_transport(call, SYSCALL_STATUS_DENIED);
+	if (!copy_request(call, data, &request, sizeof(request)) || request.path_size == 0u ||
+	    request.path_size > CAP_MAX_REQUEST_SIZE - sizeof(request) ||
+	    sizeof(request) + request.path_size != call->request_size ||
+	    call->response_capacity < (read_link ? sizeof(struct filesystem_response_header) : sizeof(response)))
+		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	path = (const uint8_t*)data + sizeof(request);
+	if (!filesystem_relative_path_valid(path, request.path_size))
+		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	if (!find_node(path, request.path_size, root, &module)) return reply_domain(call, FILESYSTEM_STATUS_NOT_FOUND);
+	if (read_link) return reply_domain(call, FILESYSTEM_STATUS_INVALID_ARGUMENT);
+	response.info = module == NULL ? directory_info() : file_info(module);
+	return reply_request(call->call_id, &response, sizeof(response), SYSCALL_STATUS_OK);
 }
 
 static void fill_directory_entry(struct filesystem_directory_entry* entry, const char* name,
@@ -324,10 +355,15 @@ static bool dispatch_directory(const struct cap_request* call, const void* data,
 		return handle_directory_open(call, data, root);
 	case FILESYSTEM_DIRECTORY_OP_ENUMERATE:
 		return handle_directory_enumerate(call, data, root);
+	case FILESYSTEM_DIRECTORY_OP_LOOKUP:
+		return handle_directory_path_read(call, data, root, false);
+	case FILESYSTEM_DIRECTORY_OP_READ_SYMBOLIC_LINK:
+		return handle_directory_path_read(call, data, root, true);
 	case FILESYSTEM_DIRECTORY_OP_CREATE_FILE:
 	case FILESYSTEM_DIRECTORY_OP_CREATE_DIRECTORY:
 	case FILESYSTEM_DIRECTORY_OP_REMOVE:
 	case FILESYSTEM_DIRECTORY_OP_RENAME:
+	case FILESYSTEM_DIRECTORY_OP_CREATE_SYMBOLIC_LINK:
 		if (!request_has_rights(call, CAP_CALL | CAP_WRITE)) return reply_transport(call, SYSCALL_STATUS_DENIED);
 		return reply_domain(call, FILESYSTEM_STATUS_READ_ONLY);
 	default:

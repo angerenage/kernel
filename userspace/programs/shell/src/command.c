@@ -1,5 +1,7 @@
 #include <libc/stdlib.h>
 #include <libc/string.h>
+#include <protocol/vfs.h>
+#include <runtime/vfs.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -49,25 +51,54 @@ static bool report_change_directory(enum shell_change_directory_result result) {
 		return write_error("cd", "not a directory");
 	case SHELL_CHANGE_DIRECTORY_DENIED:
 		return write_error("cd", "permission denied");
+	case SHELL_CHANGE_DIRECTORY_LOOP:
+		return write_error("cd", "too many levels of symbolic links");
 	case SHELL_CHANGE_DIRECTORY_FAILED:
 	default:
 		return write_error("cd", "filesystem operation failed");
 	}
 }
 
+/* Consume leading -L and -P options; the last one wins and -L is the default. */
+static size_t parse_physical_option(size_t argc, char* const argv[], bool* out_physical) {
+	size_t index = 0u;
+
+	*out_physical = false;
+	while (index < argc && (strcmp(argv[index], "-L") == 0 || strcmp(argv[index], "-P") == 0)) {
+		*out_physical = argv[index][1] == 'P';
+		index++;
+	}
+	return index;
+}
+
 static bool execute_change_directory(struct shell* shell, size_t argc, char* const argv[]) {
-	if (argc == 0u) return write_error("cd", "missing directory");
-	if (argc != 1u) return write_error("cd", "expected one directory");
-	return report_change_directory(shell_change_directory(shell, argv[0], strlen(argv[0])));
+	bool   physical;
+	size_t index = parse_physical_option(argc, argv, &physical);
+
+	if (index == argc) return write_error("cd", "missing directory");
+	if (argc - index != 1u) return write_error("cd", "expected one directory");
+	return report_change_directory(shell_change_directory(shell, argv[index], strlen(argv[index]), physical));
 }
 
 static bool execute_print_directory(const struct shell* shell, size_t argc, char* const argv[]) {
-	/* Paths are kept lexically normalized and there are no symbolic links, so -L and -P are equivalent. */
-	for (size_t i = 0u; i < argc; i++) {
-		if (strcmp(argv[i], "-L") != 0 && strcmp(argv[i], "-P") != 0) return write_error("pwd", "unexpected argument");
-	}
-	return shell->current_directory_size <= INT32_MAX &&
-	       printf("%.*s\n", (int)shell->current_directory_size, shell->current_directory) >= 0;
+	static char                   resolved[VFS_PATH_MAX];
+	struct filesystem_call_result result;
+	size_t                        resolved_size;
+	bool                          physical;
+
+	if (parse_physical_option(argc, argv, &physical) != argc) return write_error("pwd", "unexpected argument");
+	if (!physical)
+		return shell->current_directory_size <= INT32_MAX &&
+		       printf("%.*s\n", (int)shell->current_directory_size, shell->current_directory) >= 0;
+	result = vfs_resolve(shell->vfs_cap,
+	                     shell->current_directory,
+	                     shell->current_directory_size,
+	                     resolved,
+	                     sizeof(resolved),
+	                     &resolved_size);
+	if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK)
+		return write_error("pwd", "unable to resolve the working directory");
+	return printf("%.*s\n", (int)resolved_size, resolved) >= 0;
 }
 
 static bool execute_program(struct shell* shell, size_t argc, char* const argv[]) {
