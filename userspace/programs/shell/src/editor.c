@@ -2,10 +2,12 @@
 
 #include <libc/stdlib.h>
 #include <libc/string.h>
+#include <runtime/terminal.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <system/display.h>
 
 #include "shell.h"
 
@@ -94,7 +96,7 @@ static bool append_csi(struct shell_line_editor* editor, size_t value, char fina
 	return append_bytes(editor, sequence + i, end - i);
 }
 
-static bool append_cursor_move(struct shell_line_editor* editor, size_t from, size_t to) {
+static bool append_screen_cursor_move(struct shell_line_editor* editor, size_t from, size_t to) {
 	size_t columns = editor->shell->terminal_columns;
 	size_t from_row;
 	size_t to_row;
@@ -111,8 +113,49 @@ static bool append_cursor_move(struct shell_line_editor* editor, size_t from, si
 	return from_column == to_column || append_csi(editor, to_column + 1u, 'G');
 }
 
-static bool append_normalized_wrap(struct shell_line_editor* editor, size_t position) {
-	return position == 0u || position % editor->shell->terminal_columns != 0u || append_string(editor, "\n");
+static bool position_screen_row(const struct shell_line_editor* editor, size_t position, int64_t origin,
+                                int64_t* out_row) {
+	size_t row = position / editor->shell->terminal_columns;
+
+	if (row > INT64_MAX || out_row == NULL) return false;
+	*out_row = origin + (int64_t)row;
+	return true;
+}
+
+static bool position_visible_at(const struct shell_line_editor* editor, size_t position, int64_t origin) {
+	int64_t row;
+
+	return position_screen_row(editor, position, origin, &row) && row >= 0 &&
+	       (uint64_t)row < editor->shell->terminal_rows;
+}
+
+static bool position_visible(const struct shell_line_editor* editor, size_t position) {
+	return position_visible_at(editor, position, editor->screen_origin_row);
+}
+
+static size_t screen_position(const struct shell_line_editor* editor, size_t position) {
+	int64_t row;
+
+	(void)position_screen_row(editor, position, editor->screen_origin_row, &row);
+	return (size_t)row * editor->shell->terminal_columns + position % editor->shell->terminal_columns;
+}
+
+static bool append_cursor_move(struct shell_line_editor* editor, size_t from, size_t to) {
+	if (!position_visible(editor, from) || !position_visible(editor, to)) return false;
+	return append_screen_cursor_move(editor, screen_position(editor, from), screen_position(editor, to));
+}
+
+static bool append_normalized_wrap(struct shell_line_editor* editor, size_t start, size_t end) {
+	return end <= start || end % editor->shell->terminal_columns != 0u || append_string(editor, "\n");
+}
+
+static int64_t origin_after_render(const struct shell_line_editor* editor, size_t furthest_position) {
+	int64_t origin = editor->screen_origin_row;
+	int64_t row;
+
+	if (!position_screen_row(editor, furthest_position, origin, &row)) return origin;
+	if (row >= (int64_t)editor->shell->terminal_rows) origin -= row - ((int64_t)editor->shell->terminal_rows - 1);
+	return origin;
 }
 
 static void advance_quote_state(struct quote_state* state, char value) {
@@ -135,11 +178,11 @@ static struct quote_state quote_state_before(const struct shell_line_editor* edi
 	return state;
 }
 
-static bool append_colored_line(struct shell_line_editor* editor, size_t start) {
+static bool append_colored_line(struct shell_line_editor* editor, size_t start, size_t end) {
 	struct quote_state state  = quote_state_before(editor, start);
 	bool               yellow = false;
 
-	for (size_t offset = start; offset < editor->size; offset++) {
+	for (size_t offset = start; offset < end; offset++) {
 		bool next_yellow =
 			state.quote != '\0' || (!state.escaped && (editor->line[offset] == '\'' || editor->line[offset] == '"'));
 		if (next_yellow != yellow && !append_string(editor, next_yellow ? SHELL_QUOTE_COLOR : SHELL_DEFAULT_COLOR))
@@ -149,6 +192,14 @@ static bool append_colored_line(struct shell_line_editor* editor, size_t start) 
 		advance_quote_state(&state, editor->line[offset]);
 	}
 	return !yellow || append_string(editor, SHELL_DEFAULT_COLOR);
+}
+
+static size_t byte_offset_for_codepoints(const struct shell_line_editor* editor, size_t count) {
+	size_t offset = 0u;
+
+	for (size_t seen = 0u; offset < editor->size && seen < count; seen++)
+		offset = next_codepoint(editor->line, editor->size, offset);
+	return offset;
 }
 
 static bool write_render(struct shell_line_editor* editor) {
@@ -169,24 +220,99 @@ static bool append_spaces(struct shell_line_editor* editor, size_t count) {
 	return true;
 }
 
-static bool refresh_suffix(struct shell_line_editor* editor, size_t start, size_t old_cursor_position,
-                           size_t old_end_position) {
-	size_t start_position   = line_position(editor, start);
-	size_t end_position     = line_position(editor, editor->size);
-	size_t cursor_position  = line_position(editor, editor->cursor);
-	size_t current_position = end_position;
+static bool redraw_window(struct shell_line_editor* editor, size_t target_position) {
+	size_t columns         = editor->shell->terminal_columns;
+	size_t rows            = editor->shell->terminal_rows;
+	size_t prompt_position = shell_prompt_width(editor->shell);
+	size_t end_position    = line_position(editor, editor->size);
+	size_t target_row      = target_position / columns;
+	size_t last_row        = target_row;
+	size_t render_end_position;
+	size_t end_codepoint;
+	size_t end_offset;
+	size_t current_position;
+
+	if (rows == 0u || target_position > end_position || target_row > SIZE_MAX - rows / 2u) return false;
+	last_row += rows / 2u;
+	if (last_row > end_position / columns) last_row = end_position / columns;
+	if (last_row == SIZE_MAX || last_row + 1u > SIZE_MAX / columns) return false;
+	render_end_position = (last_row + 1u) * columns - 1u;
+	if (render_end_position > end_position) render_end_position = end_position;
+	end_codepoint = render_end_position > prompt_position ? render_end_position - prompt_position : 0u;
+	end_offset    = byte_offset_for_codepoints(editor, end_codepoint);
 
 	editor->render_size = 0u;
-	if (!append_cursor_move(editor, old_cursor_position, start_position) || !append_colored_line(editor, start) ||
-	    !append_normalized_wrap(editor, end_position))
+	if (!append_string(editor, "\x1b[2J\x1b[H") || !write_render(editor)) return false;
+	editor->screen_origin_row = 0;
+	if (!shell_write_prompt(editor->shell)) return false;
+	editor->screen_origin_row = origin_after_render(editor, prompt_position);
+	current_position          = prompt_position + count_codepoints(editor->line, end_offset);
+	editor->render_size       = 0u;
+	if (!append_colored_line(editor, 0u, end_offset) ||
+	    !append_normalized_wrap(editor, prompt_position, current_position))
+		return false;
+	editor->screen_origin_row = origin_after_render(editor, current_position);
+	if (!append_cursor_move(editor, current_position, target_position)) return false;
+	return write_render(editor);
+}
+
+static bool refresh_visible_suffix(struct shell_line_editor* editor, size_t start, size_t start_position,
+                                   size_t old_cursor_position, size_t cursor_position) {
+	int64_t logical_rows = (int64_t)editor->shell->terminal_rows - editor->screen_origin_row;
+	size_t  limit_position;
+	size_t  limit_codepoint;
+	size_t  limit_offset;
+	size_t  last_screen_position;
+	size_t  target_screen_position;
+
+	if (logical_rows <= 0 || (uint64_t)logical_rows > SIZE_MAX / editor->shell->terminal_columns) return false;
+	limit_position = (size_t)logical_rows * editor->shell->terminal_columns;
+	if (limit_position <= shell_prompt_width(editor->shell)) return false;
+	limit_codepoint = limit_position - shell_prompt_width(editor->shell);
+	limit_offset    = byte_offset_for_codepoints(editor, limit_codepoint);
+	if (limit_offset <= start) return false;
+	last_screen_position   = editor->shell->terminal_rows * editor->shell->terminal_columns - 1u;
+	target_screen_position = screen_position(editor, cursor_position);
+
+	editor->render_size = 0u;
+	if (!append_cursor_move(editor, old_cursor_position, start_position) ||
+	    !append_colored_line(editor, start, limit_offset) ||
+	    !append_screen_cursor_move(editor, last_screen_position, target_screen_position))
+		return false;
+	if (last_screen_position == target_screen_position &&
+	    !append_csi(editor, target_screen_position % editor->shell->terminal_columns + 1u, 'G'))
+		return false;
+	return write_render(editor);
+}
+
+static bool refresh_suffix(struct shell_line_editor* editor, size_t start, size_t old_cursor_position,
+                           size_t old_end_position) {
+	size_t  start_position    = line_position(editor, start);
+	size_t  end_position      = line_position(editor, editor->size);
+	size_t  cursor_position   = line_position(editor, editor->cursor);
+	size_t  rendered_position = old_end_position > end_position ? old_end_position : end_position;
+	int64_t next_origin       = origin_after_render(editor, rendered_position);
+
+	if (position_visible(editor, old_cursor_position) && position_visible(editor, start_position) &&
+	    position_visible(editor, cursor_position) && !position_visible(editor, old_end_position) &&
+	    !position_visible(editor, end_position))
+		return refresh_visible_suffix(editor, start, start_position, old_cursor_position, cursor_position);
+	if (!position_visible(editor, old_cursor_position) || !position_visible(editor, start_position) ||
+	    !position_visible(editor, old_end_position) || !position_visible_at(editor, end_position, next_origin) ||
+	    !position_visible_at(editor, cursor_position, next_origin))
+		return redraw_window(editor, cursor_position);
+	editor->render_size = 0u;
+	if (!append_cursor_move(editor, old_cursor_position, start_position) ||
+	    !append_colored_line(editor, start, editor->size) ||
+	    !append_normalized_wrap(editor, start_position, end_position))
 		return false;
 	if (old_end_position > end_position) {
 		if (!append_spaces(editor, old_end_position - end_position) ||
-		    !append_normalized_wrap(editor, old_end_position))
+		    !append_normalized_wrap(editor, end_position, old_end_position))
 			return false;
-		current_position = old_end_position;
 	}
-	if (!append_cursor_move(editor, current_position, cursor_position)) return false;
+	editor->screen_origin_row = next_origin;
+	if (!append_cursor_move(editor, rendered_position, cursor_position)) return false;
 	return write_render(editor);
 }
 
@@ -194,6 +320,11 @@ static bool move_cursor(struct shell_line_editor* editor, size_t next) {
 	size_t from = line_position(editor, editor->cursor);
 	size_t to   = line_position(editor, next);
 
+	if (!position_visible(editor, to)) {
+		if (!redraw_window(editor, to)) return false;
+		editor->cursor = next;
+		return true;
+	}
 	editor->render_size = 0u;
 	if (!append_cursor_move(editor, from, to) || !write_render(editor)) return false;
 	editor->cursor = next;
@@ -202,12 +333,25 @@ static bool move_cursor(struct shell_line_editor* editor, size_t next) {
 
 bool shell_line_editor_initialize(struct shell_line_editor* editor, const struct shell* shell, char* line,
                                   size_t capacity) {
-	if (editor == NULL || shell == NULL || shell->terminal_columns == 0u || line == NULL || capacity == 0u)
+	struct terminal_get_cursor_response cursor;
+	cap_id_t                            terminal_cap;
+	size_t                              prompt_rows;
+
+	if (editor == NULL || shell == NULL || shell->terminal_columns == 0u || shell->terminal_rows == 0u ||
+	    line == NULL || capacity == 0u)
 		return false;
+	display_get_standard_streams(&terminal_cap, NULL, NULL);
+	if (terminal_get_cursor(terminal_cap, &cursor) != SYSCALL_STATUS_OK || cursor.column >= shell->terminal_columns ||
+	    cursor.row >= shell->terminal_rows || cursor.row > INT64_MAX ||
+	    cursor.column != shell_prompt_width(shell) % shell->terminal_columns)
+		return false;
+	prompt_rows = shell_prompt_width(shell) / shell->terminal_columns;
+	if (prompt_rows > INT64_MAX) return false;
 	*editor = (struct shell_line_editor){
-		.shell    = shell,
-		.line     = line,
-		.capacity = capacity,
+		.shell             = shell,
+		.line              = line,
+		.capacity          = capacity,
+		.screen_origin_row = (int64_t)cursor.row - (int64_t)prompt_rows,
 	};
 	return true;
 }
@@ -295,7 +439,8 @@ bool shell_line_editor_finish(struct shell_line_editor* editor) {
 	size_t end_position;
 
 	if (editor == NULL) return false;
-	end_position        = line_position(editor, editor->size);
+	end_position = line_position(editor, editor->size);
+	if (!position_visible(editor, end_position) && !redraw_window(editor, end_position)) return false;
 	editor->render_size = 0u;
 	if (!append_cursor_move(editor, line_position(editor, editor->cursor), end_position) ||
 	    (end_position % editor->shell->terminal_columns != 0u && !append_string(editor, "\n")))

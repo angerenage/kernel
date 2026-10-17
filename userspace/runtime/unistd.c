@@ -1,6 +1,7 @@
 #include <libc/errno.h>
 #include <libc/stdio.h>
 #include <libc/unistd.h>
+#include <system/display.h>
 
 ssize_t read(int descriptor, void* buffer, size_t count) {
 	if (descriptor != 0) {
@@ -11,8 +12,10 @@ ssize_t read(int descriptor, void* buffer, size_t count) {
 		errno = EINVAL;
 		return -1;
 	}
-	size_t result = fread(buffer, 1u, count, stdin);
-	if (result == 0u && count != 0u && ferror(stdin)) {
+	if (count == 0u) return 0;
+	size_t           result = 0u;
+	syscall_status_t status = display_read(buffer, count, &result);
+	if (status != SYSCALL_STATUS_OK) {
 		errno = EIO;
 		return -1;
 	}

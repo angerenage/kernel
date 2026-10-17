@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 struct shell;
 
@@ -15,6 +16,7 @@ struct shell_line_editor {
 	char*               render_data;
 	size_t              render_size;
 	size_t              render_capacity;
+	int64_t             screen_origin_row;
 };
 
 /* Initialize an editor after its prompt has been rendered. */

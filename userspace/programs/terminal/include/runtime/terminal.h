@@ -6,3 +6,6 @@
 
 /* Read the framebuffer terminal's immutable character-cell dimensions. */
 syscall_status_t terminal_get_info(cap_id_t terminal_cap, struct terminal_get_info_response* out_info);
+
+/* Read the framebuffer terminal's current character-cell cursor position. */
+syscall_status_t terminal_get_cursor(cap_id_t terminal_cap, struct terminal_get_cursor_response* out_cursor);

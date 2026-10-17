@@ -1,6 +1,7 @@
 #pragma once
 
 #include <base/cap.h>
+#include <base/process.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -20,11 +21,13 @@ struct shell_history_entry {
 /* Mutable state owned by one shell process. */
 struct shell {
 	cap_id_t                   self_cap;
+	process_id_t               pid;
 	cap_id_t                   vfs_cap;
 	cap_id_t                   current_directory_cap;
 	char                       current_directory[SHELL_PATH_CAPACITY];
 	size_t                     current_directory_size;
 	size_t                     terminal_columns;
+	size_t                     terminal_rows;
 	uint8_t                    pending_input[SHELL_PENDING_INPUT_CAPACITY];
 	size_t                     pending_input_head;
 	size_t                     pending_input_count;

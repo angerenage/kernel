@@ -167,16 +167,14 @@ bool shell_execute_line(struct shell* shell, const char* line, size_t size) {
 	char**                 argv = NULL;
 	size_t                 argc;
 	size_t                 start = 0u;
-	size_t                 end   = size;
 	bool                   success;
 	enum word_parse_result parse_result;
 
 	if (shell == NULL || (line == NULL && size != 0u)) return false;
 	while (start < size && is_space(line[start])) start++;
-	while (end > start && is_space(line[end - 1u])) end--;
-	if (start == end) return true;
+	if (start == size) return true;
 	line += start;
-	size         = end - start;
+	size -= start;
 	parse_result = parse_words(line, size, &argv, &argc);
 	if (parse_result == WORD_PARSE_UNTERMINATED_QUOTE) return write_error(NULL, "unterminated quoted string");
 	if (parse_result == WORD_PARSE_TRAILING_ESCAPE) return write_error(NULL, "trailing escape character");

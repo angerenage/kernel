@@ -13,6 +13,9 @@ struct terminal* terminal_create(volatile uint8_t* framebuffer, const struct fra
 /* Read the immutable fixed-width character-cell dimensions. */
 bool terminal_get_dimensions(const struct terminal* terminal, size_t* out_columns, size_t* out_rows);
 
+/* Read the current zero-based character-cell cursor position. */
+bool terminal_get_cursor_position(struct terminal* terminal, size_t* out_column, size_t* out_row);
+
 /* Release all state owned by a terminal. */
 void terminal_destroy(struct terminal* terminal);
 

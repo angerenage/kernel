@@ -926,6 +926,15 @@ bool terminal_get_dimensions(const struct terminal* terminal, size_t* out_column
 	return true;
 }
 
+bool terminal_get_cursor_position(struct terminal* terminal, size_t* out_column, size_t* out_row) {
+	if (terminal == NULL || out_column == NULL || out_row == NULL) return false;
+	terminal_lock(terminal);
+	*out_column = terminal->column;
+	*out_row    = terminal->row;
+	terminal_unlock(terminal);
+	return true;
+}
+
 bool terminal_write(struct terminal* terminal, const uint8_t* data, size_t size, size_t* out_written) {
 	size_t written = 0u;
 	bool   success;

@@ -16,7 +16,7 @@
  * afterward. Other escape sequences are ignored.
  *
  * Besides the Stream operations, clients may query the immutable terminal
- * dimensions.
+ * dimensions and its current cursor position.
  *
  * Current specification version: 1.0-beta
  */
@@ -41,6 +41,7 @@
 /* Terminal-specific operations following the generic Stream operations. */
 enum terminal_op {
 	TERMINAL_OP_GET_INFO = 2u,
+	TERMINAL_OP_GET_CURSOR,
 };
 
 /* Common header for terminal-specific requests. */
@@ -57,4 +58,15 @@ struct terminal_get_info_request {
 struct terminal_get_info_response {
 	uint64_t columns;
 	uint64_t rows;
+};
+
+/* Request the current terminal cursor position. */
+struct terminal_get_cursor_request {
+	struct terminal_request_header header;
+};
+
+/* Current cursor position measured in zero-based character cells. */
+struct terminal_get_cursor_response {
+	uint64_t column;
+	uint64_t row;
 };

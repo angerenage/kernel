@@ -16,3 +16,17 @@ syscall_status_t terminal_get_info(cap_id_t terminal_cap, struct terminal_get_in
 		return SYSCALL_STATUS_FAILED;
 	return SYSCALL_STATUS_OK;
 }
+
+syscall_status_t terminal_get_cursor(cap_id_t terminal_cap, struct terminal_get_cursor_response* out_cursor) {
+	const struct terminal_get_cursor_request request = {
+		.header = {.op = TERMINAL_OP_GET_CURSOR},
+	};
+	size_t response_size = 0u;
+
+	if (terminal_cap == CAP_ID_INVALID || out_cursor == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	syscall_status_t status =
+		cap_call(terminal_cap, &request, sizeof(request), out_cursor, sizeof(*out_cursor), &response_size);
+	if (status != SYSCALL_STATUS_OK) return status;
+	if (response_size != sizeof(*out_cursor)) return SYSCALL_STATUS_FAILED;
+	return SYSCALL_STATUS_OK;
+}

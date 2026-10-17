@@ -51,6 +51,17 @@ static bool dispatch_request(struct terminal* terminal, struct terminal_input* i
 		info = (struct terminal_get_info_response){.columns = columns, .rows = rows};
 		return reply_request(call, &info, sizeof(info), SYSCALL_STATUS_OK);
 	}
+	if (header.op == TERMINAL_OP_GET_CURSOR) {
+		struct terminal_get_cursor_response cursor;
+		size_t                              column;
+		size_t                              row;
+		if ((call->rights & CAP_READ) == 0u) return reply_request(call, NULL, 0u, SYSCALL_STATUS_DENIED);
+		if (call->request_size != sizeof(struct terminal_get_cursor_request) ||
+		    call->response_capacity < sizeof(cursor) || !terminal_get_cursor_position(terminal, &column, &row))
+			return reply_request(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+		cursor = (struct terminal_get_cursor_response){.column = column, .row = row};
+		return reply_request(call, &cursor, sizeof(cursor), SYSCALL_STATUS_OK);
+	}
 	if (header.op == STREAM_OP_READ) {
 		if ((call->rights & CAP_READ) == 0u) return reply_request(call, NULL, 0u, SYSCALL_STATUS_DENIED);
 		return terminal_input_read(input, call, data);

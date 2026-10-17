@@ -34,15 +34,20 @@ bool shell_initialize(struct shell* shell) {
 	cap_id_t terminal_cap;
 
 	if (shell == NULL) return false;
-	*shell =
-		(struct shell){.self_cap = CAP_ID_INVALID, .vfs_cap = CAP_ID_INVALID, .current_directory_cap = CAP_ID_INVALID};
+	*shell = (struct shell){.self_cap              = CAP_ID_INVALID,
+	                        .pid                   = PROCESS_PID_INVALID,
+	                        .vfs_cap               = CAP_ID_INVALID,
+	                        .current_directory_cap = CAP_ID_INVALID};
 	display_get_standard_streams(&terminal_cap, NULL, NULL);
 	if (terminal_get_info(terminal_cap, &terminal_info) != SYSCALL_STATUS_OK || terminal_info.columns == 0u ||
-	    terminal_info.columns > SIZE_MAX)
+	    terminal_info.columns > SIZE_MAX || terminal_info.rows == 0u || terminal_info.rows > INT64_MAX ||
+	    terminal_info.rows > SIZE_MAX / terminal_info.columns)
 		return false;
 	shell->terminal_columns = (size_t)terminal_info.columns;
+	shell->terminal_rows    = (size_t)terminal_info.rows;
 	if (process_self_info(&self) != SYSCALL_STATUS_OK) return false;
 	shell->self_cap = self.self_cap;
+	shell->pid      = self.pid;
 	if (self.address_space_cap != CAP_ID_INVALID) (void)cap_drop(self.address_space_cap);
 	if (self.main_thread_cap != CAP_ID_INVALID) (void)cap_drop(self.main_thread_cap);
 	if (shell->self_cap == CAP_ID_INVALID) return false;
@@ -79,6 +84,7 @@ void shell_destroy(struct shell* shell) {
 	shell->vfs_cap = CAP_ID_INVALID;
 	if (shell->self_cap != CAP_ID_INVALID) (void)cap_drop(shell->self_cap);
 	shell->self_cap = CAP_ID_INVALID;
+	shell->pid      = PROCESS_PID_INVALID;
 }
 
 size_t shell_prompt_width(const struct shell* shell) {
