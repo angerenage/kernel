@@ -104,14 +104,15 @@ cap_call_id_t cap_pending_call_id(const struct cap_pending_call* call) {
 	return call == NULL ? CAP_CALL_ID_INVALID : call->id;
 }
 
-void cap_pending_call_wait(struct cap_pending_call* call, syscall_result_t* out_result, const void** out_response) {
+bool cap_pending_call_wait(struct cap_pending_call* call, syscall_result_t* out_result, const void** out_response) {
 	if (out_result != NULL) *out_result = syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	if (out_response != NULL) *out_response = NULL;
-	if (call == NULL) return;
+	if (call == NULL) return false;
 
-	if (!semaphore_try_acquire(&call->completion)) semaphore_acquire(&call->completion);
+	if (!semaphore_try_acquire(&call->completion) && !semaphore_acquire_cancelable(&call->completion)) return false;
 	if (out_result != NULL) *out_result = call->result;
 	if (out_response != NULL) *out_response = call->response;
+	return true;
 }
 
 void cap_pending_call_destroy(struct cap_pending_call* call) {

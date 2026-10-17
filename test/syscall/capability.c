@@ -254,6 +254,35 @@ Test(syscall, capability_reply_reports_failed_caller_delivery) {
 	syscall_test_reset_state();
 }
 
+Test(syscall, pending_capability_call_wait_returns_for_cancellation_cleanup) {
+	struct process*          caller;
+	struct uthread*          caller_thread;
+	struct cap_pending_call* pending;
+	cap_call_id_t            call_id;
+	struct cap_pending_reply reply;
+	syscall_result_t         call_result;
+
+	syscall_test_init_process_environment();
+	capability_init();
+	caller        = syscall_test_spawn_process("syscall/canceled-cap-call");
+	caller_thread = process_main_thread(caller);
+	cr_assert_not_null(caller_thread);
+	sched_set_current(cpu_current(), &caller_thread->thread);
+
+	pending = cap_pending_call_create(NULL, 11u, 2u, process_pid(caller), 0u);
+	cr_assert_not_null(pending);
+	call_id = cap_pending_call_id(pending);
+	cr_assert(thread_request_cancel(&caller_thread->thread));
+	cr_assert_not(cap_pending_call_wait(pending, &call_result, NULL),
+	              "a canceled caller must regain control before its pending call is destroyed");
+	cap_pending_call_destroy(pending);
+	cr_assert_eq(cap_pending_call_prepare_reply(call_id, 2u, 0u, &reply),
+	             CAP_PENDING_REPLY_NOT_FOUND,
+	             "cancellation cleanup must remove the pending call");
+
+	syscall_test_reset_state();
+}
+
 Test(syscall, capability_direct_delegator_can_revoke_child_without_revoke_right) {
 	struct process*  service;
 	struct process*  delegator;

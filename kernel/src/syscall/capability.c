@@ -7,6 +7,7 @@
 #include <core/capability.h>
 #include <core/capability_call.h>
 #include <core/channel.h>
+#include <core/kthread.h>
 #include <core/process.h>
 #include <core/ring_buffer.h>
 #include <core/sched.h>
@@ -298,6 +299,7 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 	void*              kernel_response;
 	syscall_result_t   call_result;
 	cap_rights_t       granted_rights;
+	bool               completed;
 
 	(void)arg5;
 
@@ -442,8 +444,12 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 	channel_release(endpoint);
 
 	cap_release(cap);
-	cap_pending_call_wait(pending, &call_result, NULL);
+	completed = cap_pending_call_wait(pending, &call_result, NULL);
 	cap_pending_call_destroy(pending);
+	if (!completed) {
+		kthread_testcancel();
+		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
+	}
 	return call_result;
 }
 

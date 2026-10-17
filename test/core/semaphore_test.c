@@ -14,6 +14,7 @@ static bool              semaphore_test_hook_active;
 static size_t            semaphore_test_hook_runs;
 static struct semaphore* semaphore_test_semaphore;
 static struct thread*    semaphore_test_signaler;
+static struct thread*    semaphore_test_waiter;
 
 static void init_bound_bootstrap_cpu(void) {
 	irq_enable_local();
@@ -30,6 +31,7 @@ static void reset_test_state(void) {
 	semaphore_test_hook_runs   = 0u;
 	semaphore_test_semaphore   = NULL;
 	semaphore_test_signaler    = NULL;
+	semaphore_test_waiter      = NULL;
 	hal_cpu_local_bind(NULL);
 }
 
@@ -72,6 +74,21 @@ static void semaphore_test_timeout_context_switch_hook(struct thread_context*   
 	(void)sched_handle_interrupt_exit();
 	sched_tick();
 	(void)sched_handle_interrupt_exit();
+	semaphore_test_hook_active = false;
+}
+
+static void semaphore_test_cancel_context_switch_hook(struct thread_context*       current,
+                                                      const struct thread_context* next) {
+	(void)current;
+	(void)next;
+
+	if (semaphore_test_hook_active || semaphore_test_hook_runs != 0u) return;
+
+	semaphore_test_hook_active = true;
+	semaphore_test_hook_runs++;
+	cr_assert_eq(sched_current_thread(), semaphore_test_signaler, "canceler should run while the waiter is blocked");
+	cr_assert(thread_request_cancel(semaphore_test_waiter), "waiter cancellation should succeed");
+	sched_yield();
 	semaphore_test_hook_active = false;
 }
 
@@ -154,6 +171,53 @@ Test(semaphore, acquire_blocks_and_release_wakes_waiter) {
 	cr_assert_eq(waiter.state, THREAD_STATE_RUNNING, "waiter should return to running after acquire completes");
 	cr_assert_eq(semaphore_count(&semaphore), 0u, "woken waiter should consume the published permit");
 	cr_assert_eq(semaphore_waiter_count(&semaphore), 0u, "wait queue should be empty after wake");
+
+	reset_test_state();
+}
+
+Test(semaphore, cancelable_acquire_returns_after_cancellation_without_exiting) {
+	const struct thread_create_params waiter_params = {
+		.name              = "semaphore_waiter",
+		.entry             = semaphore_test_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x470000u,
+		.kernel_stack_top  = 0x474000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	const struct thread_create_params canceler_params = {
+		.name              = "semaphore_canceler",
+		.entry             = semaphore_test_entry,
+		.arg               = NULL,
+		.kernel_stack_base = 0x480000u,
+		.kernel_stack_top  = 0x484000u,
+		.preferred_cpu     = NULL,
+		.detached          = false,
+	};
+	struct semaphore semaphore;
+	struct thread    waiter;
+	struct thread    canceler;
+
+	init_bound_bootstrap_cpu();
+	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
+
+	semaphore_init(&semaphore, 0u);
+	cr_assert(thread_init(&waiter, &waiter_params), "waiter thread_init failed");
+	cr_assert(thread_init(&canceler, &canceler_params), "canceler thread_init failed");
+	cr_assert(sched_make_runnable(&canceler), "canceler should become runnable");
+
+	semaphore_test_signaler = &canceler;
+	semaphore_test_waiter   = &waiter;
+	hal_cpu_mock_set_context_switch_hook(semaphore_test_cancel_context_switch_hook);
+
+	sched_set_current(cpu_current(), &waiter);
+	cr_assert_not(semaphore_acquire_cancelable(&semaphore),
+	              "cancelable acquire must return control to its caller for cleanup");
+	cr_assert_eq(semaphore_test_hook_runs, 1u, "cancel hook should run exactly once");
+	cr_assert_eq(sched_current_thread(), &waiter, "canceled waiter should resume at its caller");
+	cr_assert(thread_should_cancel(&waiter), "deferred cancellation must remain pending");
+	cr_assert_eq(semaphore_waiter_count(&semaphore), 0u, "canceled waiter must leave the semaphore queue");
 
 	reset_test_state();
 }

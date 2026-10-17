@@ -22,6 +22,9 @@ bool semaphore_try_acquire(struct semaphore* semaphore);
 /* Sleep until one permit becomes available, then consume it. */
 void semaphore_acquire(struct semaphore* semaphore);
 
+/* Consume a permit, returning false without exiting when cancellation or wait setup prevents acquisition. */
+bool semaphore_acquire_cancelable(struct semaphore* semaphore);
+
 /* Try to consume one permit before timeout_ms elapses. Returns false on timeout or invalid input. */
 bool semaphore_timed_acquire(struct semaphore* semaphore, uint64_t timeout_ms);
 

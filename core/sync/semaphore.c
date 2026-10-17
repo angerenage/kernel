@@ -32,26 +32,42 @@ void semaphore_acquire(struct semaphore* semaphore) {
 	if (semaphore == NULL) return;
 	if (sched_current_thread() == NULL) hcf();
 	kthread_testcancel();
+	if (!semaphore_acquire_cancelable(semaphore)) {
+		kthread_testcancel();
+		hcf();
+	}
+}
+
+bool semaphore_acquire_cancelable(struct semaphore* semaphore) {
+	struct thread* current;
+
+	if (semaphore == NULL) return false;
+	current = sched_current_thread();
+	if (current == NULL) return false;
 
 	for (;;) {
 		struct irq_state semaphore_state;
 		struct irq_state wait_state;
 
 		semaphore_state = spinlock_lock_irqsave(&semaphore->lock);
+		if (thread_should_cancel(current)) {
+			spinlock_unlock_irqrestore(&semaphore->lock, semaphore_state);
+			return false;
+		}
 		if (semaphore->count != 0u) {
 			semaphore->count--;
 			spinlock_unlock_irqrestore(&semaphore->lock, semaphore_state);
-			return;
+			return true;
 		}
 
 		wait_state = spinlock_lock_irqsave(&semaphore->waiters.lock);
 		spinlock_unlock(&semaphore->lock);
 		if (!sched_block_current_locked(&semaphore->waiters, THREAD_BLOCK_SEMAPHORE, wait_state)) {
 			irq_restore(semaphore_state);
-			hcf();
+			return false;
 		}
 		irq_restore(semaphore_state);
-		kthread_testcancel();
+		if (thread_should_cancel(current)) return false;
 	}
 }
 

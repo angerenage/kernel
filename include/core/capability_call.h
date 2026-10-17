@@ -62,8 +62,8 @@ struct cap_pending_call* cap_pending_call_create(struct cap_object* object, chan
 /* Return the stable identifier of a pending call. */
 cap_call_id_t cap_pending_call_id(const struct cap_pending_call* call);
 
-/* Wait for a pending call to reach a terminal result. */
-void cap_pending_call_wait(struct cap_pending_call* call, syscall_result_t* out_result, const void** out_response);
+/* Wait for a pending call to reach a terminal result, or return false so cancellation cleanup can run. */
+bool cap_pending_call_wait(struct cap_pending_call* call, syscall_result_t* out_result, const void** out_response);
 
 /* Remove and release a pending call. */
 void cap_pending_call_destroy(struct cap_pending_call* call);
