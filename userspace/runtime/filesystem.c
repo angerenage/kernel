@@ -34,6 +34,10 @@ static bool node_info_valid(const struct filesystem_node_info* info) {
 	return info->type == FILESYSTEM_NODE_FILE || info->type == FILESYSTEM_NODE_DIRECTORY;
 }
 
+static bool entry_info_valid(const struct filesystem_node_info* info) {
+	return node_info_valid(info) || info->type == FILESYSTEM_NODE_SYMBOLIC_LINK;
+}
+
 static bool rights_valid(cap_rights_t rights) {
 	return (rights & ~FILESYSTEM_NODE_REQUEST_RIGHTS) == 0u;
 }
@@ -59,6 +63,11 @@ bool filesystem_relative_path_valid(const void* path, size_t path_size) {
 		component_start = i + 1u;
 	}
 	return component_valid(bytes + component_start, path_size - component_start);
+}
+
+bool filesystem_symbolic_link_target_valid(const void* target, size_t target_size) {
+	return target != NULL && target_size != 0u && target_size <= FILESYSTEM_SYMBOLIC_LINK_MAX &&
+	       memchr(target, '\0', target_size) == NULL;
 }
 
 static bool response_header_valid(const struct filesystem_response_header* header) {
@@ -265,7 +274,7 @@ struct filesystem_call_result filesystem_directory_create_directory(cap_id_t dir
 }
 
 static bool directory_entry_valid(const struct filesystem_directory_entry* entry) {
-	return entry->reserved == 0u && node_info_valid(&entry->info) && component_valid(entry->name, entry->name_size);
+	return entry->reserved == 0u && entry_info_valid(&entry->info) && component_valid(entry->name, entry->name_size);
 }
 
 struct filesystem_call_result filesystem_directory_enumerate(cap_id_t directory_cap, uint64_t offset,
@@ -329,31 +338,45 @@ struct filesystem_call_result filesystem_directory_enumerate(cap_id_t directory_
 	return call_result;
 }
 
-static struct filesystem_call_result directory_path_call(cap_id_t directory_cap, uint32_t op, const void* path,
-                                                         size_t path_size) {
+static struct filesystem_directory_path_request* directory_path_request(uint32_t op, const void* path, size_t path_size,
+                                                                        size_t* out_size) {
 	struct filesystem_directory_path_request* request;
-	struct filesystem_response_header         response;
-	struct filesystem_call_result             call_result;
-	size_t                                    request_size;
 
-	if (directory_cap == CAP_ID_INVALID || path_size > CAP_MAX_REQUEST_SIZE - sizeof(*request) ||
-	    !filesystem_relative_path_valid(path, path_size))
-		return local_error();
-	request_size = sizeof(*request) + path_size;
-	request      = malloc(request_size);
-	if (request == NULL) return result(FILESYSTEM_STATUS_NONE, SYSCALL_STATUS_FAILED);
+	*out_size = sizeof(*request) + path_size;
+	request   = malloc(*out_size);
+	if (request == NULL) return NULL;
 	*request = (struct filesystem_directory_path_request){
 		.header    = {.op = op},
 		.path_size = (uint32_t)path_size,
 	};
 	memcpy(request->path, path, path_size);
-	call_result = call_fixed(directory_cap, request, request_size, &response, sizeof(response));
+	return request;
+}
+
+static bool directory_path_valid(cap_id_t directory_cap, const void* path, size_t path_size) {
+	return directory_cap != CAP_ID_INVALID &&
+	       path_size <= CAP_MAX_REQUEST_SIZE - sizeof(struct filesystem_directory_path_request) &&
+	       filesystem_relative_path_valid(path, path_size);
+}
+
+static struct filesystem_call_result directory_path_call(cap_id_t directory_cap, uint32_t op, const void* path,
+                                                         size_t path_size, void* response, size_t response_size) {
+	struct filesystem_directory_path_request* request;
+	struct filesystem_call_result             call_result;
+	size_t                                    request_size;
+
+	if (!directory_path_valid(directory_cap, path, path_size)) return local_error();
+	request = directory_path_request(op, path, path_size, &request_size);
+	if (request == NULL) return result(FILESYSTEM_STATUS_NONE, SYSCALL_STATUS_FAILED);
+	call_result = call_fixed(directory_cap, request, request_size, response, response_size);
 	free(request);
 	return call_result;
 }
 
 struct filesystem_call_result filesystem_directory_remove(cap_id_t directory_cap, const void* path, size_t path_size) {
-	return directory_path_call(directory_cap, FILESYSTEM_DIRECTORY_OP_REMOVE, path, path_size);
+	struct filesystem_response_header response;
+	return directory_path_call(
+		directory_cap, FILESYSTEM_DIRECTORY_OP_REMOVE, path, path_size, &response, sizeof(response));
 }
 
 struct filesystem_call_result filesystem_directory_rename(cap_id_t directory_cap, const void* old_path,
@@ -383,4 +406,138 @@ struct filesystem_call_result filesystem_directory_rename(cap_id_t directory_cap
 	call_result = call_fixed(directory_cap, request, request_size, &response, sizeof(response));
 	free(request);
 	return call_result;
+}
+
+struct filesystem_call_result filesystem_directory_lookup(cap_id_t directory_cap, const void* path, size_t path_size,
+                                                          struct filesystem_node_info* out_info) {
+	struct filesystem_info_response response;
+	struct filesystem_call_result   call_result;
+
+	if (out_info == NULL) return local_error();
+	*out_info   = (struct filesystem_node_info){0};
+	call_result = directory_path_call(
+		directory_cap, FILESYSTEM_DIRECTORY_OP_LOOKUP, path, path_size, &response, sizeof(response));
+	if (call_result.transport_status != SYSCALL_STATUS_OK || call_result.status != FILESYSTEM_STATUS_OK)
+		return call_result;
+	if (!entry_info_valid(&response.info)) return failed_response();
+	*out_info = response.info;
+	return call_result;
+}
+
+struct filesystem_call_result filesystem_directory_create_symbolic_link(cap_id_t directory_cap, const void* path,
+                                                                        size_t path_size, const void* target,
+                                                                        size_t target_size) {
+	struct filesystem_directory_symbolic_link_request* request;
+	struct filesystem_response_header                  response;
+	struct filesystem_call_result                      call_result;
+	size_t                                             request_size;
+
+	if (directory_cap == CAP_ID_INVALID || path_size > CAP_MAX_REQUEST_SIZE - sizeof(*request) ||
+	    target_size > CAP_MAX_REQUEST_SIZE - sizeof(*request) - path_size ||
+	    !filesystem_relative_path_valid(path, path_size) || !filesystem_symbolic_link_target_valid(target, target_size))
+		return local_error();
+	request_size = sizeof(*request) + path_size + target_size;
+	request      = malloc(request_size);
+	if (request == NULL) return result(FILESYSTEM_STATUS_NONE, SYSCALL_STATUS_FAILED);
+	*request = (struct filesystem_directory_symbolic_link_request){
+		.header      = {.op = FILESYSTEM_DIRECTORY_OP_CREATE_SYMBOLIC_LINK},
+		.path_size   = (uint32_t)path_size,
+		.target_size = (uint32_t)target_size,
+		.reserved    = 0u,
+	};
+	memcpy(request->data, path, path_size);
+	memcpy(request->data + path_size, target, target_size);
+	call_result = call_fixed(directory_cap, request, request_size, &response, sizeof(response));
+	free(request);
+	return call_result;
+}
+
+/* Issue a request whose success response is a header followed by up to capacity bytes. */
+static struct filesystem_call_result call_variable(cap_id_t cap, const void* request, size_t request_size, void* data,
+                                                   size_t capacity, size_t* out_size) {
+	struct filesystem_response_header* response;
+	struct filesystem_call_result      call_result;
+	size_t                             response_size = 0u;
+	syscall_status_t                   status;
+
+	response = malloc(sizeof(*response) + capacity);
+	if (response == NULL) return result(FILESYSTEM_STATUS_NONE, SYSCALL_STATUS_FAILED);
+	status = cap_call(cap, request, request_size, response, sizeof(*response) + capacity, &response_size);
+	if (status != SYSCALL_STATUS_OK) {
+		free(response);
+		return result(FILESYSTEM_STATUS_NONE, status);
+	}
+	if (response_size < sizeof(*response) || response_size > sizeof(*response) + capacity ||
+	    !response_header_valid(response)) {
+		free(response);
+		return failed_response();
+	}
+	call_result = result((enum filesystem_status)response->status, SYSCALL_STATUS_OK);
+	if (response->status != FILESYSTEM_STATUS_OK) {
+		if (response_size != sizeof(*response)) call_result = failed_response();
+		free(response);
+		return call_result;
+	}
+	*out_size = response_size - sizeof(*response);
+	memcpy(data, response + 1, *out_size);
+	free(response);
+	return call_result;
+}
+
+struct filesystem_call_result filesystem_directory_read_symbolic_link(cap_id_t directory_cap, const void* path,
+                                                                      size_t path_size, void* target, size_t capacity,
+                                                                      size_t* out_size) {
+	struct filesystem_directory_path_request* request;
+	struct filesystem_call_result             call_result;
+	size_t                                    request_size;
+	size_t                                    size = 0u;
+
+	if (out_size == NULL) return local_error();
+	*out_size = 0u;
+	if (target == NULL || capacity < FILESYSTEM_SYMBOLIC_LINK_MAX ||
+	    !directory_path_valid(directory_cap, path, path_size))
+		return local_error();
+	request = directory_path_request(FILESYSTEM_DIRECTORY_OP_READ_SYMBOLIC_LINK, path, path_size, &request_size);
+	if (request == NULL) return result(FILESYSTEM_STATUS_NONE, SYSCALL_STATUS_FAILED);
+	call_result = call_variable(directory_cap, request, request_size, target, FILESYSTEM_SYMBOLIC_LINK_MAX, &size);
+	free(request);
+	if (call_result.transport_status != SYSCALL_STATUS_OK || call_result.status != FILESYSTEM_STATUS_OK)
+		return call_result;
+	if (!filesystem_symbolic_link_target_valid(target, size)) return failed_response();
+	*out_size = size;
+	return call_result;
+}
+
+const char* filesystem_status_message(struct filesystem_call_result result) {
+	if (result.transport_status == SYSCALL_STATUS_DENIED) return "permission denied";
+	if (result.transport_status == SYSCALL_STATUS_BAD_ARGUMENT) return "invalid path";
+	if (result.transport_status != SYSCALL_STATUS_OK) return "filesystem operation failed";
+	switch (result.status) {
+	case FILESYSTEM_STATUS_INVALID_ARGUMENT:
+		return "invalid argument";
+	case FILESYSTEM_STATUS_NOT_FOUND:
+		return "no such file or directory";
+	case FILESYSTEM_STATUS_ALREADY_EXISTS:
+		return "file exists";
+	case FILESYSTEM_STATUS_NOT_DIRECTORY:
+		return "not a directory";
+	case FILESYSTEM_STATUS_IS_DIRECTORY:
+		return "is a directory";
+	case FILESYSTEM_STATUS_DIRECTORY_NOT_EMPTY:
+		return "directory not empty";
+	case FILESYSTEM_STATUS_READ_ONLY:
+		return "read-only file system";
+	case FILESYSTEM_STATUS_ACCESS_DENIED:
+		return "permission denied";
+	case FILESYSTEM_STATUS_NO_SPACE:
+		return "no space left";
+	case FILESYSTEM_STATUS_CROSS_FILESYSTEM:
+		return "cross-filesystem operation";
+	case FILESYSTEM_STATUS_BUSY:
+		return "resource busy";
+	case FILESYSTEM_STATUS_LOOP:
+		return "too many levels of symbolic links";
+	default:
+		return "filesystem operation failed";
+	}
 }

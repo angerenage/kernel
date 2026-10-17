@@ -70,5 +70,25 @@ struct filesystem_call_result filesystem_directory_rename(cap_id_t directory_cap
                                                           size_t old_path_size, const void* new_path,
                                                           size_t new_path_size);
 
+/* Read metadata of the node named by a normalized relative path without following a final symbolic link. */
+struct filesystem_call_result filesystem_directory_lookup(cap_id_t directory_cap, const void* path, size_t path_size,
+                                                          struct filesystem_node_info* out_info);
+
+/* Create a symbolic link holding target at a normalized relative path. */
+struct filesystem_call_result filesystem_directory_create_symbolic_link(cap_id_t directory_cap, const void* path,
+                                                                        size_t path_size, const void* target,
+                                                                        size_t target_size);
+
+/* Read a link target into a buffer of at least FILESYSTEM_SYMBOLIC_LINK_MAX bytes. */
+struct filesystem_call_result filesystem_directory_read_symbolic_link(cap_id_t directory_cap, const void* path,
+                                                                      size_t path_size, void* target, size_t capacity,
+                                                                      size_t* out_size);
+
 /* Validate the exact byte sequence used by raw-directory path requests. */
 bool filesystem_relative_path_valid(const void* path, size_t path_size);
+
+/* Validate a symbolic-link target: 1 to FILESYSTEM_SYMBOLIC_LINK_MAX bytes without NUL. */
+bool filesystem_symbolic_link_target_valid(const void* target, size_t target_size);
+
+/* Describe a failed filesystem call for diagnostics. */
+const char* filesystem_status_message(struct filesystem_call_result result);

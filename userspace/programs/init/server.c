@@ -23,10 +23,11 @@
 #include "serial_stream.h"
 
 #define BOOTFS_SERVICE_NAME "boot"
+#define RAMFS_SERVICE_NAME "ram"
 #define VFS_PROTOCOL_VERSION_MAJOR 1u
 #define VFS_PROTOCOL_VERSION_MINOR 0u
 #define FILESYSTEM_PROTOCOL_VERSION_MAJOR 1u
-#define FILESYSTEM_PROTOCOL_VERSION_MINOR 0u
+#define FILESYSTEM_PROTOCOL_VERSION_MINOR 1u
 #define TEXT_INPUT_LAYOUT_OPTION "text_input.layout"
 #define TEXT_INPUT_LAYOUT_QWERTY "qwerty"
 #define TEXT_INPUT_LAYOUT_AZERTY "azerty"
@@ -44,10 +45,10 @@ enum vfs_readiness {
 	VFS_READINESS_FAILED,
 };
 
-enum bootfs_mount_readiness {
-	BOOTFS_MOUNT_WAIT,
-	BOOTFS_MOUNT_READY,
-	BOOTFS_MOUNT_FAILED,
+enum filesystem_mount_readiness {
+	FILESYSTEM_MOUNT_WAIT,
+	FILESYSTEM_MOUNT_READY,
+	FILESYSTEM_MOUNT_FAILED,
 };
 
 #define TERMINAL_PROTOCOL_VERSION_MAJOR 1u
@@ -174,62 +175,89 @@ static bool use_terminal_output(void) {
 	return true;
 }
 
-static enum bootfs_mount_readiness mount_bootfs(const struct init_service_selector* selector) {
+/*
+ * Mount one raw filesystem provider on an absolute VFS path. source names a
+ * directory inside the provider, or NULL for its root; a missing target
+ * directory is created in the covering filesystem first.
+ */
+static enum filesystem_mount_readiness mount_filesystem(const struct init_service_selector* selector,
+                                                        const char* source, const char* target, cap_rights_t rights,
+                                                        uint32_t flags) {
 	const struct init_protocol_query vfs_query = {
 		.namespace_path = VFS_NAMESPACE,
 		.protocol       = VFS_PROTOCOL_NAME,
 		.major          = VFS_PROTOCOL_VERSION_MAJOR,
 		.minor          = VFS_PROTOCOL_VERSION_MINOR,
 	};
-	const struct init_protocol_query bootfs_query = {
+	const struct init_protocol_query filesystem_query = {
 		.namespace_path = FILESYSTEM_NAMESPACE,
 		.protocol       = FILESYSTEM_PROTOCOL_NAME,
 		.major          = FILESYSTEM_PROTOCOL_VERSION_MAJOR,
 		.minor          = FILESYSTEM_PROTOCOL_VERSION_MINOR,
 	};
-	struct init_service_handle    vfs_service    = {.capability = CAP_ID_INVALID};
-	struct init_service_handle    bootfs_service = {.capability = CAP_ID_INVALID};
-	struct filesystem_node_handle root           = {.capability = CAP_ID_INVALID};
+	struct init_service_handle    vfs_service        = {.capability = CAP_ID_INVALID};
+	struct init_service_handle    filesystem_service = {.capability = CAP_ID_INVALID};
+	struct filesystem_node_handle source_node        = {.capability = CAP_ID_INVALID};
+	struct filesystem_node_handle root               = {.capability = CAP_ID_INVALID};
 	struct filesystem_call_result result;
 	enum init_registry_status     registry_status;
+	cap_id_t                      source_cap     = CAP_ID_INVALID;
 	cap_id_t                      delegated_root = CAP_ID_INVALID;
 	syscall_status_t              status;
 	bool                          cleanup_ok = true;
 	bool                          mounted    = false;
 
-	if (!registry_contains(selector)) return BOOTFS_MOUNT_WAIT;
+	if (!registry_contains(selector)) return FILESYSTEM_MOUNT_WAIT;
 	registry_status = registry_acquire(server_pid, &vfs_query, VFS_SERVICE_NAME, &vfs_service);
 	if (registry_status != INIT_REGISTRY_OK) {
-		printf("init: VFS acquisition for bootfs mount failed: %u\n", (unsigned)registry_status);
-		return BOOTFS_MOUNT_FAILED;
+		printf("init: VFS acquisition for %s mount failed: %u\n", selector->service, (unsigned)registry_status);
+		return FILESYSTEM_MOUNT_FAILED;
 	}
-	registry_status = registry_acquire(server_pid, &bootfs_query, BOOTFS_SERVICE_NAME, &bootfs_service);
+	registry_status = registry_acquire(server_pid, &filesystem_query, selector->service, &filesystem_service);
 	if (registry_status != INIT_REGISTRY_OK) {
-		printf("init: bootfs acquisition failed: %u\n", (unsigned)registry_status);
+		printf("init: %s acquisition failed: %u\n", selector->service, (unsigned)registry_status);
 		goto cleanup;
 	}
-	result = vfs_open(vfs_service.capability, "/", 1u, CAP_READ | CAP_MANAGE, &root);
+	source_cap = filesystem_service.capability;
+	if (source != NULL) {
+		result = filesystem_directory_open(
+			filesystem_service.capability, source, strlen(source), CAP_READ | CAP_DELEGATE, &source_node);
+		if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK ||
+		    source_node.info.type != FILESYSTEM_NODE_DIRECTORY) {
+			printf("init: %s source directory open failed: transport=%u status=%u\n",
+			       selector->service,
+			       (unsigned)result.transport_status,
+			       (unsigned)result.status);
+			goto cleanup;
+		}
+		source_cap = source_node.capability;
+	}
+	result = vfs_open(vfs_service.capability, target, strlen(target), CAP_READ | CAP_MANAGE, &root);
+	if (result.transport_status == SYSCALL_STATUS_OK && result.status == FILESYSTEM_STATUS_NOT_FOUND)
+		result = vfs_create_directory(vfs_service.capability, target, strlen(target), CAP_READ | CAP_MANAGE, &root);
 	if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK ||
 	    root.info.type != FILESYSTEM_NODE_DIRECTORY) {
-		printf("init: VFS root open for bootfs mount failed: transport=%u status=%u\n",
+		printf("init: VFS target %s open for %s mount failed: transport=%u status=%u\n",
+		       target,
+		       selector->service,
 		       (unsigned)result.transport_status,
 		       (unsigned)result.status);
 		goto cleanup;
 	}
-	status =
-		cap_delegate(bootfs_service.capability, vfs_service.owner, CAP_CALL | CAP_READ | CAP_DELEGATE, &delegated_root);
+	status = cap_delegate(source_cap, vfs_service.owner, rights, &delegated_root);
 	if (status != SYSCALL_STATUS_OK) {
-		printf("init: bootfs root delegation failed: %u\n", (unsigned)status);
+		printf("init: %s root delegation failed: %u\n", selector->service, (unsigned)status);
 		goto cleanup;
 	}
-	result = vfs_directory_mount(root.capability, delegated_root, VFS_MOUNT_READ_ONLY);
+	result = vfs_directory_mount(root.capability, delegated_root, flags);
 	if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK) {
-		printf("init: bootfs mount failed: transport=%u status=%u\n",
+		printf("init: %s mount failed: transport=%u status=%u\n",
+		       selector->service,
 		       (unsigned)result.transport_status,
 		       (unsigned)result.status);
 		status = cap_revoke(delegated_root, 0u);
 		if (status != SYSCALL_STATUS_OK) {
-			printf("init: bootfs delegated root revocation failed: %u\n", (unsigned)status);
+			printf("init: %s delegated root revocation failed: %u\n", selector->service, (unsigned)status);
 			cleanup_ok = false;
 		}
 		goto cleanup;
@@ -238,13 +266,15 @@ static enum bootfs_mount_readiness mount_bootfs(const struct init_service_select
 
 cleanup:
 	if (root.capability != CAP_ID_INVALID && cap_drop(root.capability) != SYSCALL_STATUS_OK) cleanup_ok = false;
-	if (bootfs_service.capability != CAP_ID_INVALID && cap_drop(bootfs_service.capability) != SYSCALL_STATUS_OK)
+	if (source_node.capability != CAP_ID_INVALID && cap_drop(source_node.capability) != SYSCALL_STATUS_OK)
+		cleanup_ok = false;
+	if (filesystem_service.capability != CAP_ID_INVALID && cap_drop(filesystem_service.capability) != SYSCALL_STATUS_OK)
 		cleanup_ok = false;
 	if (vfs_service.capability != CAP_ID_INVALID && cap_drop(vfs_service.capability) != SYSCALL_STATUS_OK)
 		cleanup_ok = false;
-	if (!mounted || !cleanup_ok) return BOOTFS_MOUNT_FAILED;
-	printf("init: mounted bootfs at /\n");
-	return BOOTFS_MOUNT_READY;
+	if (!mounted || !cleanup_ok) return FILESYSTEM_MOUNT_FAILED;
+	printf("init: mounted %s at %s\n", selector->service, target);
+	return FILESYSTEM_MOUNT_READY;
 }
 
 static bool text_input_layout_override(const struct init_state* init, const char** out_path) {
@@ -472,6 +502,12 @@ int server_run(const struct init_state* init) {
 		.major          = FILESYSTEM_PROTOCOL_VERSION_MAJOR,
 		.service        = BOOTFS_SERVICE_NAME,
 	};
+	static const struct init_service_selector ramfs_selector = {
+		.namespace_path = FILESYSTEM_NAMESPACE,
+		.protocol       = FILESYSTEM_PROTOCOL_NAME,
+		.major          = FILESYSTEM_PROTOCOL_VERSION_MAJOR,
+		.service        = RAMFS_SERVICE_NAME,
+	};
 	static const struct init_service_selector terminal_selector = {
 		.namespace_path = TERMINAL_NAMESPACE,
 		.protocol       = TERMINAL_PROTOCOL_NAME,
@@ -497,6 +533,8 @@ int server_run(const struct init_state* init) {
 	struct cap_request request;
 	bool               received;
 	bool               bootfs_mounted              = false;
+	bool               ramfs_mounted               = false;
+	bool               ramfs_started               = false;
 	bool               bootfs_started              = false;
 	bool               configuration_loaded        = false;
 	bool               device_manager_started      = false;
@@ -553,15 +591,30 @@ int server_run(const struct init_state* init) {
 				continue;
 			}
 		}
-		if (vfs_ready && !bootfs_started) {
+		if (vfs_ready && !ramfs_started) {
+			if (!bootstrap_launch(init, "ramfs.elf", "ramfs", 0u, NULL, 0u, NULL)) return 1;
+			ramfs_started = true;
+			continue;
+		}
+		if (ramfs_started && !ramfs_mounted) {
+			enum filesystem_mount_readiness readiness = mount_filesystem(
+				&ramfs_selector, NULL, "/", CAP_CALL | CAP_READ | CAP_WRITE | CAP_MANAGE | CAP_DELEGATE, 0u);
+			if (readiness == FILESYSTEM_MOUNT_FAILED) return 1;
+			if (readiness == FILESYSTEM_MOUNT_READY) {
+				ramfs_mounted = true;
+				continue;
+			}
+		}
+		if (ramfs_mounted && !bootfs_started) {
 			if (!launch_bootfs(init)) return 1;
 			bootfs_started = true;
 			continue;
 		}
 		if (bootfs_started && !bootfs_mounted) {
-			enum bootfs_mount_readiness readiness = mount_bootfs(&bootfs_selector);
-			if (readiness == BOOTFS_MOUNT_FAILED) return 1;
-			if (readiness == BOOTFS_MOUNT_READY) {
+			enum filesystem_mount_readiness readiness = mount_filesystem(
+				&bootfs_selector, "boot", "/boot", CAP_CALL | CAP_READ | CAP_DELEGATE, VFS_MOUNT_READ_ONLY);
+			if (readiness == FILESYSTEM_MOUNT_FAILED) return 1;
+			if (readiness == FILESYSTEM_MOUNT_READY) {
 				bootfs_mounted = true;
 				continue;
 			}

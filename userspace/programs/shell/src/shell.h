@@ -48,6 +48,7 @@ enum shell_change_directory_result {
 	SHELL_CHANGE_DIRECTORY_NOT_FOUND,
 	SHELL_CHANGE_DIRECTORY_NOT_DIRECTORY,
 	SHELL_CHANGE_DIRECTORY_DENIED,
+	SHELL_CHANGE_DIRECTORY_LOOP,
 	SHELL_CHANGE_DIRECTORY_FAILED,
 };
 
@@ -64,8 +65,9 @@ bool shell_initialize(struct shell* shell);
 /* Release resources retained by the shell. */
 void shell_destroy(struct shell* shell);
 
-/* Resolve and enter an absolute or shell-relative directory. */
-enum shell_change_directory_result shell_change_directory(struct shell* shell, const char* path, size_t path_size);
+/* Resolve and enter an absolute or shell-relative directory, following every symbolic link when physical. */
+enum shell_change_directory_result shell_change_directory(struct shell* shell, const char* path, size_t path_size,
+                                                          bool physical);
 
 /* Normalize an absolute or shell-relative path without accessing it. */
 bool shell_resolve_path(const struct shell* shell, const char* path, size_t path_size, char* output, size_t* out_size);

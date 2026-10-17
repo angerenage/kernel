@@ -13,7 +13,7 @@
 #include <system/process.h>
 
 #define VFS_PROTOCOL_VERSION_MAJOR 1u
-#define VFS_PROTOCOL_VERSION_MINOR 0u
+#define VFS_PROTOCOL_VERSION_MINOR 1u
 
 bool shell_initialize(struct shell* shell) {
 	static const struct init_protocol_query query = {
@@ -55,7 +55,7 @@ bool shell_initialize(struct shell* shell) {
 		return false;
 	}
 	shell->vfs_cap = service.capability;
-	if (shell_change_directory(shell, "/", 1u) != SHELL_CHANGE_DIRECTORY_OK) {
+	if (shell_change_directory(shell, "/", 1u, false) != SHELL_CHANGE_DIRECTORY_OK) {
 		shell_destroy(shell);
 		return false;
 	}

@@ -3,11 +3,12 @@
 /*
  * Generic raw-filesystem capability protocol.
  *
- * Raw filesystems expose files and directories but do not interpret mounts.
- * File I/O is positional, directory paths are normalized relative paths, and
- * capability lifetime controls the lifetime of opened nodes.
+ * Raw filesystems expose files, directories and symbolic links but interpret
+ * neither mounts nor link targets. File I/O is positional, directory paths are
+ * normalized relative paths, and capability lifetime controls the lifetime of
+ * opened nodes.
  *
- * Current specification version: 1.0-beta
+ * Current specification version: 1.1-beta
  */
 
 #include <base/cap.h>
@@ -17,7 +18,8 @@
 #define FILESYSTEM_PROTOCOL_NAME "filesystem"
 
 enum {
-	FILESYSTEM_NAME_MAX = 255u,
+	FILESYSTEM_NAME_MAX          = 255u,
+	FILESYSTEM_SYMBOLIC_LINK_MAX = 4095u,
 };
 
 enum filesystem_status {
@@ -35,6 +37,8 @@ enum filesystem_status {
 	FILESYSTEM_STATUS_BUSY,
 	FILESYSTEM_STATUS_UNSUPPORTED,
 	FILESYSTEM_STATUS_IO_ERROR,
+	FILESYSTEM_STATUS_SYMBOLIC_LINK,
+	FILESYSTEM_STATUS_LOOP,
 	FILESYSTEM_STATUS_COUNT,
 
 	/* Helper-only sentinel: no domain response was received. */
@@ -42,9 +46,10 @@ enum filesystem_status {
 };
 
 enum filesystem_node_type {
-	FILESYSTEM_NODE_INVALID   = 0u,
-	FILESYSTEM_NODE_FILE      = 1u,
-	FILESYSTEM_NODE_DIRECTORY = 2u,
+	FILESYSTEM_NODE_INVALID       = 0u,
+	FILESYSTEM_NODE_FILE          = 1u,
+	FILESYSTEM_NODE_DIRECTORY     = 2u,
+	FILESYSTEM_NODE_SYMBOLIC_LINK = 3u,
 };
 
 enum filesystem_node_flag {
@@ -131,13 +136,16 @@ struct filesystem_file_resize_request {
 };
 
 enum filesystem_directory_op {
-	FILESYSTEM_DIRECTORY_OP_INFO             = 0u,
-	FILESYSTEM_DIRECTORY_OP_OPEN             = 1u,
-	FILESYSTEM_DIRECTORY_OP_ENUMERATE        = 2u,
-	FILESYSTEM_DIRECTORY_OP_CREATE_FILE      = 3u,
-	FILESYSTEM_DIRECTORY_OP_CREATE_DIRECTORY = 4u,
-	FILESYSTEM_DIRECTORY_OP_REMOVE           = 5u,
-	FILESYSTEM_DIRECTORY_OP_RENAME           = 6u,
+	FILESYSTEM_DIRECTORY_OP_INFO                 = 0u,
+	FILESYSTEM_DIRECTORY_OP_OPEN                 = 1u,
+	FILESYSTEM_DIRECTORY_OP_ENUMERATE            = 2u,
+	FILESYSTEM_DIRECTORY_OP_CREATE_FILE          = 3u,
+	FILESYSTEM_DIRECTORY_OP_CREATE_DIRECTORY     = 4u,
+	FILESYSTEM_DIRECTORY_OP_REMOVE               = 5u,
+	FILESYSTEM_DIRECTORY_OP_RENAME               = 6u,
+	FILESYSTEM_DIRECTORY_OP_LOOKUP               = 7u,
+	FILESYSTEM_DIRECTORY_OP_CREATE_SYMBOLIC_LINK = 8u,
+	FILESYSTEM_DIRECTORY_OP_READ_SYMBOLIC_LINK   = 9u,
 };
 
 /* Followed by path_size bytes containing one normalized relative path. */
@@ -186,9 +194,25 @@ struct filesystem_directory_rename_request {
 	uint8_t                          paths[];
 };
 
+/* Followed by path_size bytes containing one normalized relative path and then target_size target bytes. */
+struct filesystem_directory_symbolic_link_request {
+	struct filesystem_request_header header;
+	uint32_t                         path_size;
+	uint32_t                         target_size;
+	uint32_t                         reserved;
+	uint8_t                          data[];
+};
+
+/* A successful response is followed by the complete link target. */
+struct filesystem_symbolic_link_read_response {
+	struct filesystem_response_header header;
+	uint8_t                           target[];
+};
+
 /*
- * Calls require CAP_CALL. INFO, READ, OPEN and ENUMERATE additionally require
- * CAP_READ; WRITE, RESIZE, creation, REMOVE and RENAME require CAP_WRITE.
+ * Calls require CAP_CALL. INFO, READ, OPEN, ENUMERATE, LOOKUP and
+ * READ_SYMBOLIC_LINK additionally require CAP_READ; WRITE, RESIZE, creation,
+ * REMOVE and RENAME require CAP_WRITE.
  *
  * A domain error response consists only of filesystem_response_header. A
  * successful response has the complete operation-specific shape above. A
@@ -213,6 +237,19 @@ struct filesystem_directory_rename_request {
  * may instead retain their syscall-level failure status without a domain
  * response. A recognized operation which a provider cannot implement returns
  * FILESYSTEM_STATUS_UNSUPPORTED.
+ *
+ * LOOKUP uses filesystem_directory_path_request and answers with
+ * filesystem_info_response for the named node itself. READ_SYMBOLIC_LINK uses
+ * the same request; a node which is not a symbolic link returns
+ * FILESYSTEM_STATUS_INVALID_ARGUMENT. A link target holds 1 to
+ * FILESYSTEM_SYMBOLIC_LINK_MAX bytes without NUL, is stored verbatim, and
+ * reports its byte count as the node size.
+ *
+ * Raw providers never follow symbolic links. Any path operation whose
+ * non-final component names a symbolic link returns
+ * FILESYSTEM_STATUS_SYMBOLIC_LINK, as does OPEN when the final component is a
+ * link. LOOKUP, READ_SYMBOLIC_LINK, REMOVE and RENAME act on the link itself.
+ * FILESYSTEM_STATUS_LOOP is reserved for resolvers which follow links.
  *
  * Raw providers give the VFS brokerable node capabilities. The VFS delegates
  * CAP_CALL plus only the rights requested by its client.
