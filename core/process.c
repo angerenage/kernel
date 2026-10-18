@@ -376,7 +376,7 @@ bool process_terminate(struct process* process, uintptr_t exit_code) {
 		spinlock_unlock_irqrestore(&process->lock, state);
 		spinlock_unlock_irqrestore(&process->join_wait_queue.lock, wait_state);
 		process_release(process);
-		return false;
+		return true;
 	}
 
 	if (process->state != PROCESS_STATE_EXITING) {

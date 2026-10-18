@@ -58,6 +58,7 @@ Test(process, join_returns_zombie_exit_code_once) {
 	cr_assert(process_terminate(process, 123u));
 	thread_mark_zombie(&process->main_thread->thread);
 	process_notify_thread_exit(process, &process->main_thread->thread, 123u);
+	cr_assert(process_terminate(process, 456u), "terminating a zombie process should be idempotent");
 
 	cr_assert_eq(process_join(process, &exit_code), PROCESS_JOIN_OK, "join should accept a zombie process");
 	cr_assert_eq(exit_code, 123u, "join should publish the process exit code");

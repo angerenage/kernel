@@ -5,7 +5,9 @@
  *
  * The single system terminal uses the generic Stream protocol. Reads block
  * until keyboard input is available and return committed UTF-8 text or
- * conventional terminal control bytes and escape sequences. Writes render UTF-8,
+ * conventional terminal control bytes and escape sequences. The managing TTY
+ * receives the interrupt character through a separate coalesced signal so it
+ * remains observable while ordinary input is backpressured. Writes render UTF-8,
  * with LF line breaks, CR, BS, and four-column tabs. The renderer recognizes
  * ANSI SGR reset, normal and bright 16-color foreground and background selections,
  * default colors, bold-color selection, underline, reverse video,
@@ -38,10 +40,18 @@
 /* Rights required by a process that only renders terminal output. */
 #define TERMINAL_OUTPUT_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_WRITE))
 
+/* Rights retained by the TTY session for input routing. */
+#define TERMINAL_TTY_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_MANAGE))
+
+/* Rights granted on the terminal interrupt notification signal. */
+#define TERMINAL_INTERRUPT_SIGNAL_RIGHTS ((cap_rights_t)CAP_WAIT)
+
 /* Terminal-specific operations following the generic Stream operations. */
 enum terminal_op {
 	TERMINAL_OP_GET_INFO = 2u,
 	TERMINAL_OP_GET_CURSOR,
+	TERMINAL_OP_ACQUIRE_INTERRUPT_SIGNAL,
+	TERMINAL_OP_DISCARD_INPUT,
 };
 
 /* Common header for terminal-specific requests. */
@@ -69,4 +79,24 @@ struct terminal_get_cursor_request {
 struct terminal_get_cursor_response {
 	uint64_t column;
 	uint64_t row;
+};
+
+/* Acquire notification of interrupt characters independently of buffered input. */
+struct terminal_acquire_interrupt_signal_request {
+	struct terminal_request_header header;
+};
+
+/* Capability for the coalesced interrupt notification signal. */
+struct terminal_acquire_interrupt_signal_response {
+	cap_id_t capability;
+};
+
+/* Discard buffered terminal input before changing its recipient. */
+struct terminal_discard_input_request {
+	struct terminal_request_header header;
+};
+
+/* Interrupt generation current at the input-discard boundary. */
+struct terminal_discard_input_response {
+	uint64_t interrupt_generation;
 };

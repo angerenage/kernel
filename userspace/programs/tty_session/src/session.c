@@ -39,11 +39,17 @@ struct tty_session {
 	channel_id_t        endpoint;
 	cap_id_t            activity_cap;
 	cap_id_t            input_space_cap;
+	cap_id_t            interrupt_signal_cap;
 	cap_id_t            service_cap;
 	process_id_t        session_pid;
 	process_id_t        foreground_pid;
 	cap_id_t            foreground_process_cap;
+	cap_id_t            retired_process_cap;
+	cap_id_t            busy_process_cap;
 	bool                foreground_interrupt_pending;
+	bool                input_paused;
+	uint64_t            input_epoch;
+	uint64_t            interrupt_generation;
 	uint8_t             input[TTY_SESSION_INPUT_CAPACITY];
 	size_t              input_head;
 	size_t              input_count;
@@ -84,6 +90,14 @@ static bool consume_input(struct tty_session* session, size_t count) {
 	session->input_head = (session->input_head + count) % TTY_SESSION_INPUT_CAPACITY;
 	session->input_count -= count;
 	return was_full && count != 0u;
+}
+
+/* Discard bytes owned by the previous foreground epoch. */
+static bool discard_input(struct tty_session* session) {
+	bool was_full        = session->input_count == TTY_SESSION_INPUT_CAPACITY;
+	session->input_head  = 0u;
+	session->input_count = 0u;
+	return was_full;
 }
 
 /* Wake the terminal-input thread after a reader releases queue capacity. */
@@ -147,36 +161,98 @@ static void lock_input_space(struct tty_session* session) {
 		struct signal_message message;
 
 		session_lock(session);
-		if (session->input_count != TTY_SESSION_INPUT_CAPACITY) return;
+		if (!session->input_paused && session->input_count != TTY_SESSION_INPUT_CAPACITY) return;
 		session_unlock(session);
 		if (signal_wait(session->input_space_cap, &message) != SYSCALL_STATUS_OK)
 			fail_session(session, "input availability wait failed");
 	}
 }
 
-/* Consume terminal input continuously and route interrupts at the session boundary. */
+/* Pause byte ingestion and flush the terminal's upstream queue for a foreground transition. */
+static bool pause_and_discard_input(struct tty_session* session) {
+	uint64_t interrupt_generation;
+
+	session_lock(session);
+	session->input_paused = true;
+	session->input_epoch++;
+	if (session->input_epoch == 0u) session->input_epoch = 1u;
+	session_unlock(session);
+	if (terminal_discard_input(session->terminal_cap, &interrupt_generation) == SYSCALL_STATUS_OK) {
+		session_lock(session);
+		session->interrupt_generation = interrupt_generation;
+		session_unlock(session);
+		return true;
+	}
+	session_lock(session);
+	session->input_paused = false;
+	session_unlock(session);
+	(void)notify_input_space(session);
+	return false;
+}
+
+/* Compare wrapping nonzero interrupt generations within their practical half-range. */
+static bool interrupt_generation_after(uint64_t generation, uint64_t previous) {
+	return generation != 0u && generation != previous && generation - previous < ((uint64_t)1u << 63u);
+}
+
+/* Attempt to terminate a process capability that may already have been reaped. */
+static syscall_status_t interrupt_process(cap_id_t process_cap) {
+	bool valid;
+
+	if (process_cap == CAP_ID_INVALID) return SYSCALL_STATUS_OK;
+	if (cap_valid(process_cap, &valid) != SYSCALL_STATUS_OK) return SYSCALL_STATUS_FAILED;
+	if (!valid) return SYSCALL_STATUS_OK;
+	return process_kill(process_cap, PROCESS_EXIT_SYSTEM_INTERRUPTED);
+}
+
+/* Release a process capability retired while an interrupt was in progress. */
+static void finish_process_interrupt(struct tty_session* session, cap_id_t process_cap) {
+	for (;;) {
+		cap_id_t retired = CAP_ID_INVALID;
+		cap_id_t next    = CAP_ID_INVALID;
+
+		session_lock(session);
+		if (session->busy_process_cap == process_cap) session->busy_process_cap = CAP_ID_INVALID;
+		if (session->retired_process_cap == process_cap) {
+			retired                      = session->retired_process_cap;
+			session->retired_process_cap = CAP_ID_INVALID;
+		}
+		if (session->foreground_interrupt_pending && session->foreground_process_cap != CAP_ID_INVALID &&
+		    session->busy_process_cap == CAP_ID_INVALID) {
+			next                                  = session->foreground_process_cap;
+			session->busy_process_cap             = next;
+			session->foreground_interrupt_pending = false;
+		}
+		session_unlock(session);
+		if (!drop_process_capability(retired)) printf("tty session: retired process capability drop failed\n");
+		if (next == CAP_ID_INVALID) return;
+		syscall_status_t status = interrupt_process(next);
+		if (status != SYSCALL_STATUS_OK && status != SYSCALL_STATUS_UNAVAILABLE &&
+		    status != SYSCALL_STATUS_BAD_ARGUMENT)
+			printf("tty session: foreground interrupt failed: %u\n", (unsigned)status);
+		process_cap = next;
+	}
+}
+
+/* Consume ordinary terminal input continuously. */
 static void input_thread(void* opaque) {
 	struct tty_session* session = *(struct tty_session**)opaque;
 
 	for (;;) {
-		uint8_t byte;
-		size_t  size = 0u;
+		uint8_t          byte;
+		size_t           size = 0u;
+		uint64_t         epoch;
+		syscall_status_t status;
 		lock_input_space(session);
+		epoch = session->input_epoch;
 		session_unlock(session);
-		if (display_read(&byte, 1u, &size) != SYSCALL_STATUS_OK || size != 1u)
-			fail_session(session, "terminal input failed");
+		status = display_read(&byte, 1u, &size);
+		if (status == SYSCALL_STATUS_UNAVAILABLE) continue;
+		if (status != SYSCALL_STATUS_OK || size != 1u) fail_session(session, "terminal input failed");
 
 		session_lock(session);
-		if (byte == TTY_SESSION_INTERRUPT_BYTE && session->foreground_pid != PROCESS_PID_INVALID) {
-			if (session->foreground_process_cap == CAP_ID_INVALID) {
-				session->foreground_interrupt_pending = true;
-				session_unlock(session);
-				continue;
-			}
-			syscall_status_t status = process_kill(session->foreground_process_cap, PROCESS_EXIT_SYSTEM_INTERRUPTED);
+		if (session->input_paused || session->input_epoch != epoch) {
 			session_unlock(session);
-			if (status != SYSCALL_STATUS_OK && status != SYSCALL_STATUS_UNAVAILABLE)
-				fail_session(session, "foreground interrupt failed");
 			continue;
 		}
 		size_t tail          = (session->input_head + session->input_count) % TTY_SESSION_INPUT_CAPACITY;
@@ -184,6 +260,58 @@ static void input_thread(void* opaque) {
 		session->input_count++;
 		session_unlock(session);
 		service_pending_reads(session);
+	}
+}
+
+/* Route interrupt characters independently of ordinary input backpressure. */
+static void interrupt_thread(void* opaque) {
+	struct tty_session* session = *(struct tty_session**)opaque;
+
+	for (;;) {
+		struct signal_message message;
+		cap_id_t              process_cap = CAP_ID_INVALID;
+		bool                  notify_space;
+
+		if (signal_wait(session->interrupt_signal_cap, &message) != SYSCALL_STATUS_OK)
+			fail_session(session, "terminal interrupt wait failed");
+		session_lock(session);
+		if (session->input_paused ||
+		    !interrupt_generation_after(message.payload.args[0], session->interrupt_generation)) {
+			session_unlock(session);
+			continue;
+		}
+		session->interrupt_generation = message.payload.args[0];
+		notify_space                  = discard_input(session);
+		if (session->foreground_pid == PROCESS_PID_INVALID) {
+			size_t tail          = (session->input_head + session->input_count) % TTY_SESSION_INPUT_CAPACITY;
+			session->input[tail] = TTY_SESSION_INTERRUPT_BYTE;
+			session->input_count++;
+			session_unlock(session);
+			if (notify_space && !notify_input_space(session))
+				fail_session(session, "input availability notification failed");
+			service_pending_reads(session);
+			continue;
+		}
+		reject_pending_reads(session);
+		if (session->foreground_process_cap == CAP_ID_INVALID) {
+			session->foreground_interrupt_pending = true;
+		}
+		else if (session->busy_process_cap == CAP_ID_INVALID) {
+			process_cap               = session->foreground_process_cap;
+			session->busy_process_cap = process_cap;
+		}
+		else if (session->busy_process_cap != session->foreground_process_cap) {
+			session->foreground_interrupt_pending = true;
+		}
+		session_unlock(session);
+		if (notify_space && !notify_input_space(session))
+			fail_session(session, "input availability notification failed");
+		if (process_cap == CAP_ID_INVALID) continue;
+		syscall_status_t status = interrupt_process(process_cap);
+		if (status != SYSCALL_STATUS_OK && status != SYSCALL_STATUS_UNAVAILABLE &&
+		    status != SYSCALL_STATUS_BAD_ARGUMENT)
+			printf("tty session: foreground interrupt failed: %u\n", (unsigned)status);
+		finish_process_interrupt(session, process_cap);
 	}
 }
 
@@ -284,14 +412,20 @@ static bool dispatch_begin_foreground(struct tty_session* session, const struct 
 		session_unlock(session);
 		return reply(call, NULL, 0u, SYSCALL_STATUS_UNAVAILABLE);
 	}
+	session_unlock(session);
+	if (!pause_and_discard_input(session)) return reply(call, NULL, 0u, SYSCALL_STATUS_FAILED);
+
+	session_lock(session);
 	bool success = reply(call, NULL, 0u, SYSCALL_STATUS_OK);
 	if (success) {
 		reject_pending_reads(session);
+		(void)discard_input(session);
 		session->foreground_pid               = request.process_id;
 		session->foreground_interrupt_pending = false;
 	}
+	session->input_paused = false;
 	session_unlock(session);
-	return success;
+	return success && notify_input_space(session);
 }
 
 /* Install the process-control capability after the selected child starts. */
@@ -316,12 +450,21 @@ static bool dispatch_attach_foreground(struct tty_session* session, const struct
 	}
 	bool success = reply(call, NULL, 0u, SYSCALL_STATUS_OK);
 	if (success) {
-		session->foreground_process_cap       = request.process_cap;
-		interrupt_pending                     = session->foreground_interrupt_pending;
-		session->foreground_interrupt_pending = false;
+		session->foreground_process_cap = request.process_cap;
+		interrupt_pending = session->foreground_interrupt_pending && session->busy_process_cap == CAP_ID_INVALID;
+		if (interrupt_pending) {
+			session->busy_process_cap             = request.process_cap;
+			session->foreground_interrupt_pending = false;
+		}
 	}
 	session_unlock(session);
-	if (success && interrupt_pending) (void)process_kill(request.process_cap, PROCESS_EXIT_SYSTEM_INTERRUPTED);
+	if (success && interrupt_pending) {
+		syscall_status_t status = interrupt_process(request.process_cap);
+		if (status != SYSCALL_STATUS_OK && status != SYSCALL_STATUS_UNAVAILABLE &&
+		    status != SYSCALL_STATUS_BAD_ARGUMENT)
+			printf("tty session: foreground interrupt failed: %u\n", (unsigned)status);
+		finish_process_interrupt(session, request.process_cap);
+	}
 	return success;
 }
 
@@ -332,19 +475,27 @@ static bool dispatch_restore_foreground(struct tty_session* session, const struc
 	if ((call->rights & CAP_MANAGE) == 0u) return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
 	if (call->request_size != sizeof(struct tty_session_restore_foreground_request) || call->response_capacity != 0u)
 		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	if (!pause_and_discard_input(session)) return reply(call, NULL, 0u, SYSCALL_STATUS_FAILED);
+
 	session_lock(session);
 	bool success = reply(call, NULL, 0u, SYSCALL_STATUS_OK);
 	if (success) {
 		reject_pending_reads(session);
+		(void)discard_input(session);
 		process_cap                           = session->foreground_process_cap;
 		session->foreground_process_cap       = CAP_ID_INVALID;
 		session->foreground_pid               = PROCESS_PID_INVALID;
 		session->foreground_interrupt_pending = false;
+		if (session->busy_process_cap == process_cap) {
+			session->retired_process_cap = process_cap;
+			process_cap                  = CAP_ID_INVALID;
+		}
 	}
+	session->input_paused = false;
 	session_unlock(session);
 	if (success && !drop_process_capability(process_cap))
 		printf("tty session: foreground process capability drop failed\n");
-	return success;
+	return success && notify_input_space(session);
 }
 
 /* Decode and dispatch one request to the session object. */
@@ -406,13 +557,18 @@ int tty_session_run(void) {
 		.endpoint               = CHANNEL_ID_INVALID,
 		.activity_cap           = CAP_ID_INVALID,
 		.input_space_cap        = CAP_ID_INVALID,
+		.interrupt_signal_cap   = CAP_ID_INVALID,
 		.service_cap            = CAP_ID_INVALID,
 		.session_pid            = PROCESS_PID_INVALID,
 		.foreground_pid         = PROCESS_PID_INVALID,
 		.foreground_process_cap = CAP_ID_INVALID,
+		.retired_process_cap    = CAP_ID_INVALID,
+		.busy_process_cap       = CAP_ID_INVALID,
+		.input_epoch            = 1u,
 	};
 	struct self_info self;
-	cap_id_t         input_thread_cap = CAP_ID_INVALID;
+	cap_id_t         input_thread_cap     = CAP_ID_INVALID;
+	cap_id_t         interrupt_thread_cap = CAP_ID_INVALID;
 
 	display_get_standard_streams(&session.terminal_cap, NULL, NULL);
 	if (session.terminal_cap == CAP_ID_INVALID || process_self_info(&self) != SYSCALL_STATUS_OK ||
@@ -424,7 +580,10 @@ int tty_session_run(void) {
 	session.session_pid = self.pid;
 	if (self.address_space_cap != CAP_ID_INVALID) (void)cap_drop(self.address_space_cap);
 	if (self.main_thread_cap != CAP_ID_INVALID) (void)cap_drop(self.main_thread_cap);
-	if (signal_create(&session.input_space_cap) != SYSCALL_STATUS_OK || !advertise_session(&session, self.pid)) {
+	if (signal_create(&session.input_space_cap) != SYSCALL_STATUS_OK ||
+	    terminal_acquire_interrupt_signal(session.terminal_cap, &session.interrupt_signal_cap) != SYSCALL_STATUS_OK ||
+	    terminal_discard_input(session.terminal_cap, &session.interrupt_generation) != SYSCALL_STATUS_OK ||
+	    !advertise_session(&session, self.pid)) {
 		printf("tty session: advertisement failed\n");
 		return 1;
 	}
@@ -432,7 +591,15 @@ int tty_session_run(void) {
 	if (process_spawn_thread(
 			session.self_cap, (uintptr_t)input_thread, &argument, sizeof(argument), NULL, 0u, &input_thread_cap) !=
 	        SYSCALL_STATUS_OK ||
-	    thread_detach(input_thread_cap) != SYSCALL_STATUS_OK) {
+	    thread_detach(input_thread_cap) != SYSCALL_STATUS_OK ||
+	    process_spawn_thread(session.self_cap,
+	                         (uintptr_t)interrupt_thread,
+	                         &argument,
+	                         sizeof(argument),
+	                         NULL,
+	                         0u,
+	                         &interrupt_thread_cap) != SYSCALL_STATUS_OK ||
+	    thread_detach(interrupt_thread_cap) != SYSCALL_STATUS_OK) {
 		printf("tty session: input thread startup failed\n");
 		return 1;
 	}

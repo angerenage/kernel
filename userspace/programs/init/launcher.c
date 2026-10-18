@@ -114,11 +114,9 @@ cleanup:
 static syscall_status_t install_input_stream(process_id_t target, enum bootstrap_input_source source,
                                              cap_id_t* out_capability) {
 	struct init_protocol_query query = {0};
-	struct init_service_handle input = {.capability = CAP_ID_INVALID};
-	struct self_info           self  = {
-		.self_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .main_thread_cap = CAP_ID_INVALID};
-	enum init_registry_status registry_status;
-	syscall_status_t          status;
+	enum init_registry_status  registry_status;
+	const char*                service;
+	cap_rights_t               rights;
 
 	if (target == PROCESS_PID_INVALID || source == BOOTSTRAP_INPUT_NONE || out_capability == NULL)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
@@ -127,43 +125,22 @@ static syscall_status_t install_input_stream(process_id_t target, enum bootstrap
 		(void)strlcpy(query.protocol, TERMINAL_PROTOCOL_NAME, sizeof(query.protocol));
 		query.major = TERMINAL_PROTOCOL_VERSION_MAJOR;
 		query.minor = TERMINAL_PROTOCOL_VERSION_MINOR;
+		service     = TERMINAL_SERVICE_NAME;
+		rights      = TERMINAL_TTY_RIGHTS;
 	}
 	else if (source == BOOTSTRAP_INPUT_TTY_SESSION) {
 		(void)strlcpy(query.namespace_path, TTY_SESSION_NAMESPACE, sizeof(query.namespace_path));
 		(void)strlcpy(query.protocol, TTY_SESSION_PROTOCOL_NAME, sizeof(query.protocol));
 		query.major = TTY_SESSION_PROTOCOL_VERSION_MAJOR;
 		query.minor = TTY_SESSION_PROTOCOL_VERSION_MINOR;
+		service     = TTY_SESSION_SERVICE_NAME;
+		rights      = TTY_SESSION_CONTROL_RIGHTS;
 	}
 	else return SYSCALL_STATUS_BAD_ARGUMENT;
 	*out_capability = CAP_ID_INVALID;
-	if (source == BOOTSTRAP_INPUT_TTY_SESSION) {
-		registry_status =
-			registry_grant(target, &query, TTY_SESSION_SERVICE_NAME, TTY_SESSION_CONTROL_RIGHTS, out_capability);
-		if (registry_status != INIT_REGISTRY_OK)
-			return registry_status == INIT_REGISTRY_NOT_FOUND ? SYSCALL_STATUS_UNAVAILABLE : SYSCALL_STATUS_FAILED;
-		return SYSCALL_STATUS_OK;
-	}
-	status = process_self_info(&self);
-	if (status != SYSCALL_STATUS_OK) goto cleanup;
-	if (self.pid == PROCESS_PID_INVALID) {
-		status = SYSCALL_STATUS_FAILED;
-		goto cleanup;
-	}
-	registry_status = registry_acquire(self.pid, &query, TERMINAL_SERVICE_NAME, &input);
-	if (registry_status != INIT_REGISTRY_OK) {
-		status = registry_status == INIT_REGISTRY_NOT_FOUND ? SYSCALL_STATUS_UNAVAILABLE : SYSCALL_STATUS_FAILED;
-		goto cleanup;
-	}
-	status = cap_delegate(input.capability, target, TERMINAL_INPUT_RIGHTS, out_capability);
-
-cleanup:
-	if (input.capability != CAP_ID_INVALID && cap_drop(input.capability) != SYSCALL_STATUS_OK &&
-	    status == SYSCALL_STATUS_OK)
-		status = SYSCALL_STATUS_FAILED;
-	if (self.self_cap != CAP_ID_INVALID) (void)cap_drop(self.self_cap);
-	if (self.address_space_cap != CAP_ID_INVALID) (void)cap_drop(self.address_space_cap);
-	if (self.main_thread_cap != CAP_ID_INVALID) (void)cap_drop(self.main_thread_cap);
-	return status;
+	registry_status = registry_grant(target, &query, service, rights, out_capability);
+	if (registry_status == INIT_REGISTRY_OK) return SYSCALL_STATUS_OK;
+	return registry_status == INIT_REGISTRY_NOT_FOUND ? SYSCALL_STATUS_UNAVAILABLE : SYSCALL_STATUS_FAILED;
 }
 
 static bool bootstrap_launch_internal(const struct init_state* init, const char* module_name, const char* description,

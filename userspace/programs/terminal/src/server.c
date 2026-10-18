@@ -62,6 +62,27 @@ static bool dispatch_request(struct terminal* terminal, struct terminal_input* i
 		cursor = (struct terminal_get_cursor_response){.column = column, .row = row};
 		return reply_request(call, &cursor, sizeof(cursor), SYSCALL_STATUS_OK);
 	}
+	if (header.op == TERMINAL_OP_ACQUIRE_INTERRUPT_SIGNAL) {
+		struct terminal_acquire_interrupt_signal_response response = {.capability = CAP_ID_INVALID};
+		if ((call->rights & CAP_MANAGE) == 0u) return reply_request(call, NULL, 0u, SYSCALL_STATUS_DENIED);
+		if (call->request_size != sizeof(struct terminal_acquire_interrupt_signal_request) ||
+		    call->response_capacity < sizeof(response))
+			return reply_request(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+		if (!terminal_input_acquire_interrupt_signal(input, call->caller, &response.capability))
+			return reply_request(call, NULL, 0u, SYSCALL_STATUS_FAILED);
+		bool success = reply_request(call, &response, sizeof(response), SYSCALL_STATUS_OK);
+		if (!success) (void)cap_revoke(response.capability, 0u);
+		return success;
+	}
+	if (header.op == TERMINAL_OP_DISCARD_INPUT) {
+		struct terminal_discard_input_response response;
+		if ((call->rights & CAP_MANAGE) == 0u) return reply_request(call, NULL, 0u, SYSCALL_STATUS_DENIED);
+		if (call->request_size != sizeof(struct terminal_discard_input_request) ||
+		    call->response_capacity < sizeof(response))
+			return reply_request(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+		response.interrupt_generation = terminal_input_discard(input);
+		return reply_request(call, &response, sizeof(response), SYSCALL_STATUS_OK);
+	}
 	if (header.op == STREAM_OP_READ) {
 		if ((call->rights & CAP_READ) == 0u) return reply_request(call, NULL, 0u, SYSCALL_STATUS_DENIED);
 		return terminal_input_read(input, call, data);
@@ -102,10 +123,14 @@ static bool advertise_terminal(channel_id_t* out_endpoint, cap_id_t* out_activit
 	status = cap_publish(*out_endpoint,
 	                     TERMINAL_SERVICE_OBJECT_ID,
 	                     self.pid,
-	                     CAP_CALL | CAP_READ | CAP_WRITE | CAP_DELEGATE | CAP_DELEGATE_PEER,
+	                     TERMINAL_CLIENT_RIGHTS | CAP_MANAGE | CAP_DELEGATE_PEER,
 	                     &service_cap);
 	if (status != SYSCALL_STATUS_OK) goto fail;
-	result = init_advertise(&selector, TERMINAL_PROTOCOL_VERSION_MINOR, service_cap, TERMINAL_CLIENT_RIGHTS);
+	result = init_advertise_with_rights(&selector,
+	                                    TERMINAL_PROTOCOL_VERSION_MINOR,
+	                                    service_cap,
+	                                    TERMINAL_CLIENT_RIGHTS | CAP_MANAGE,
+	                                    TERMINAL_CLIENT_RIGHTS);
 	if (result.status != INIT_REGISTRY_OK || result.transport_status != SYSCALL_STATUS_OK) goto fail;
 	return true;
 
