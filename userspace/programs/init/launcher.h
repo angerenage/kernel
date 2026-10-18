@@ -11,7 +11,12 @@ bool bootstrap_launch(const struct init_state* init, const char* module_name, co
                       const char* const argv[], size_t capability_count,
                       const struct program_capability_argument capabilities[]);
 
-/* Launch a userspace boot program with the system terminal connected to standard input. */
+/* Launch the TTY session with the system terminal connected to standard input. */
+bool bootstrap_launch_terminal_session(const struct init_state* init, const char* module_name, const char* description,
+                                       size_t argc, const char* const argv[], size_t capability_count,
+                                       const struct program_capability_argument capabilities[]);
+
+/* Launch a program with the TTY session as delegable standard input and output. */
 bool bootstrap_launch_interactive(const struct init_state* init, const char* module_name, const char* description,
                                   size_t argc, const char* const argv[], size_t capability_count,
                                   const struct program_capability_argument capabilities[]);

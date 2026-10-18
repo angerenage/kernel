@@ -31,12 +31,6 @@ struct history_navigation {
 
 static bool read_input_byte(struct shell* shell, uint8_t* out_byte) {
 	if (shell == NULL || out_byte == NULL) return false;
-	if (shell->pending_input_count != 0u) {
-		*out_byte                 = shell->pending_input[shell->pending_input_head];
-		shell->pending_input_head = (shell->pending_input_head + 1u) % SHELL_PENDING_INPUT_CAPACITY;
-		shell->pending_input_count--;
-		return true;
-	}
 	return read(0, out_byte, 1u) == 1;
 }
 

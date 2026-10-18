@@ -7,10 +7,9 @@
 #include <stdint.h>
 
 enum {
-	SHELL_LINE_CAPACITY          = 4096u,
-	SHELL_PATH_CAPACITY          = 4096u,
-	SHELL_HISTORY_CAPACITY       = 64u,
-	SHELL_PENDING_INPUT_CAPACITY = 4096u,
+	SHELL_LINE_CAPACITY    = 4096u,
+	SHELL_PATH_CAPACITY    = 4096u,
+	SHELL_HISTORY_CAPACITY = 64u,
 };
 
 struct shell_history_entry {
@@ -20,8 +19,8 @@ struct shell_history_entry {
 
 /* Mutable state owned by one shell process. */
 struct shell {
-	cap_id_t                   self_cap;
-	process_id_t               pid;
+	cap_id_t                   tty_cap;
+	process_id_t               tty_owner;
 	cap_id_t                   vfs_cap;
 	cap_id_t                   current_directory_cap;
 	cap_rights_t               current_directory_rights;
@@ -29,9 +28,6 @@ struct shell {
 	size_t                     current_directory_size;
 	size_t                     terminal_columns;
 	size_t                     terminal_rows;
-	uint8_t                    pending_input[SHELL_PENDING_INPUT_CAPACITY];
-	size_t                     pending_input_head;
-	size_t                     pending_input_count;
 	struct shell_history_entry history[SHELL_HISTORY_CAPACITY];
 	size_t                     history_count;
 };

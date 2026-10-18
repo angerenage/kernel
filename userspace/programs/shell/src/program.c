@@ -3,6 +3,7 @@
 #include <libc/string.h>
 #include <protocol/filesystem.h>
 #include <runtime/program.h>
+#include <runtime/tty_session.h>
 #include <runtime/vfs.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -11,7 +12,6 @@
 #include <system/display.h>
 #include <system/process.h>
 
-#include "foreground_input.h"
 #include "shell.h"
 
 #define SHELL_LOADER_SERVICE "elf64"
@@ -75,10 +75,10 @@ enum shell_program_result shell_run_program(struct shell* shell, const char* com
 	const char*                        name;
 	size_t                             name_size;
 	size_t                             path_size;
-	uintptr_t                          exit_code        = PROCESS_EXIT_SYSTEM_UNKNOWN;
-	struct shell_foreground_input*     foreground_input = NULL;
+	uintptr_t                          exit_code = PROCESS_EXIT_SYSTEM_UNKNOWN;
 	syscall_status_t                   status;
-	enum shell_program_result          result = SHELL_PROGRAM_FAILED;
+	enum shell_program_result          result              = SHELL_PROGRAM_FAILED;
+	bool                               foreground_selected = false;
 
 	if (out_exit_code != NULL) *out_exit_code = PROCESS_EXIT_SYSTEM_UNKNOWN;
 	if (shell == NULL || shell->vfs_cap == CAP_ID_INVALID || command == NULL || command_size == 0u ||
@@ -101,13 +101,10 @@ enum shell_program_result shell_run_program(struct shell* shell, const char* com
 	}
 	executable.capability = CAP_ID_INVALID;
 	if (status != SYSCALL_STATUS_OK) goto cleanup;
-	foreground_input = shell_foreground_input_create(shell);
-	if (foreground_input == NULL) goto cleanup;
-	capabilities[PROCESS_STARTUP_CAP_STDIN].capability = shell_foreground_input_capability(foreground_input);
-	capabilities[PROCESS_STARTUP_CAP_STDIN].rights     = CAP_CALL | CAP_READ;
-	display_get_standard_streams(NULL,
+	display_get_standard_streams(&capabilities[PROCESS_STARTUP_CAP_STDIN].capability,
 	                             &capabilities[PROCESS_STARTUP_CAP_STDOUT].capability,
 	                             &capabilities[PROCESS_STARTUP_CAP_STDERR].capability);
+	capabilities[PROCESS_STARTUP_CAP_STDIN].rights      = TTY_SESSION_INPUT_RIGHTS;
 	capabilities[PROCESS_STARTUP_CAP_STDOUT].rights     = CAP_CALL | CAP_WRITE;
 	capabilities[PROCESS_STARTUP_CAP_STDERR].rights     = CAP_CALL | CAP_WRITE;
 	capabilities[PROCESS_STARTUP_CAP_WORKING_DIRECTORY] = (struct program_capability_argument){
@@ -116,10 +113,14 @@ enum shell_program_result shell_run_program(struct shell* shell, const char* com
 	};
 	for (size_t i = 0u; i < PROCESS_STARTUP_CAP_COUNT; i++)
 		if (capabilities[i].capability == CAP_ID_INVALID) capabilities[i].rights = 0u;
-	status = program_run(&loaded, argc, argv, PROCESS_STARTUP_CAP_COUNT, capabilities, &running);
+	status = tty_session_begin_foreground(shell->tty_cap, loaded.process_id);
+	if (status != SYSCALL_STATUS_OK) goto cleanup;
+	foreground_selected = true;
+	status              = program_run(&loaded, argc, argv, PROCESS_STARTUP_CAP_COUNT, capabilities, &running);
 	if (status != SYSCALL_STATUS_OK) goto cleanup;
 	loaded.load_cap = CAP_ID_INVALID;
-	if (!shell_foreground_input_start(foreground_input, running.process_cap)) goto cleanup;
+	status = tty_session_attach_foreground(shell->tty_cap, shell->tty_owner, running.process_cap, loaded.process_id);
+	if (status != SYSCALL_STATUS_OK) goto cleanup;
 	status = cap_drop(running.thread_cap);
 	if (status != SYSCALL_STATUS_OK) goto cleanup;
 	running.thread_cap = CAP_ID_INVALID;
@@ -130,7 +131,8 @@ enum shell_program_result shell_run_program(struct shell* shell, const char* com
 	result = exit_code == PROCESS_EXIT_SUCCESS ? SHELL_PROGRAM_OK : SHELL_PROGRAM_EXIT_FAILED;
 
 cleanup:
-	if (!shell_foreground_input_destroy(foreground_input)) result = SHELL_PROGRAM_FAILED;
+	if (foreground_selected && tty_session_restore_foreground(shell->tty_cap) != SYSCALL_STATUS_OK)
+		result = SHELL_PROGRAM_FAILED;
 	if (executable.capability != CAP_ID_INVALID) (void)cap_drop(executable.capability);
 	if (loaded.load_cap != CAP_ID_INVALID) (void)program_cancel(loaded.load_cap);
 	stop_process(&running);

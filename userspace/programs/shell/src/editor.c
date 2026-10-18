@@ -2,7 +2,7 @@
 
 #include <libc/stdlib.h>
 #include <libc/string.h>
-#include <runtime/terminal.h>
+#include <runtime/tty_session.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -333,16 +333,14 @@ static bool move_cursor(struct shell_line_editor* editor, size_t next) {
 
 bool shell_line_editor_initialize(struct shell_line_editor* editor, const struct shell* shell, char* line,
                                   size_t capacity) {
-	struct terminal_get_cursor_response cursor;
-	cap_id_t                            terminal_cap;
-	size_t                              prompt_rows;
+	struct tty_session_get_cursor_response cursor;
+	size_t                                 prompt_rows;
 
 	if (editor == NULL || shell == NULL || shell->terminal_columns == 0u || shell->terminal_rows == 0u ||
 	    line == NULL || capacity == 0u)
 		return false;
-	display_get_standard_streams(&terminal_cap, NULL, NULL);
-	if (terminal_get_cursor(terminal_cap, &cursor) != SYSCALL_STATUS_OK || cursor.column >= shell->terminal_columns ||
-	    cursor.row >= shell->terminal_rows || cursor.row > INT64_MAX ||
+	if (tty_session_get_cursor(shell->tty_cap, &cursor) != SYSCALL_STATUS_OK ||
+	    cursor.column >= shell->terminal_columns || cursor.row >= shell->terminal_rows || cursor.row > INT64_MAX ||
 	    cursor.column != shell_prompt_width(shell) % shell->terminal_columns)
 		return false;
 	prompt_rows = shell_prompt_width(shell) / shell->terminal_columns;

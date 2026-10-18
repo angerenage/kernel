@@ -3,6 +3,7 @@
 #include <protocol/filesystem.h>
 #include <protocol/terminal.h>
 #include <protocol/text_input.h>
+#include <protocol/tty_session.h>
 #include <protocol/vfs.h>
 #include <runtime/program.h>
 #include <runtime/vfs.h>
@@ -52,6 +53,7 @@ enum bootfs_mount_readiness {
 
 #define TERMINAL_PROTOCOL_VERSION_MAJOR 1u
 #define TERMINAL_PROTOCOL_VERSION_MINOR 0u
+#define TTY_SESSION_PROTOCOL_VERSION_MAJOR 1u
 #define TEXT_INPUT_PROTOCOL_VERSION_MAJOR 1u
 
 static bool reply_request(cap_call_id_t call_id, const void* response, size_t response_size,
@@ -484,6 +486,12 @@ int server_run(const struct init_state* init) {
 		.major          = TEXT_INPUT_PROTOCOL_VERSION_MAJOR,
 		.service        = TEXT_INPUT_SERVICE_NAME,
 	};
+	static const struct init_service_selector tty_session_selector = {
+		.namespace_path = TTY_SESSION_NAMESPACE,
+		.protocol       = TTY_SESSION_PROTOCOL_NAME,
+		.major          = TTY_SESSION_PROTOCOL_VERSION_MAJOR,
+		.service        = TTY_SESSION_SERVICE_NAME,
+	};
 	union {
 		struct init_request_header    header;
 		struct init_advertise_request advertise;
@@ -506,6 +514,8 @@ int server_run(const struct init_state* init) {
 	bool               input_manager_started       = false;
 	bool               keyboard_controller_started = false;
 	bool               text_input_started          = false;
+	bool               tty_session_started         = false;
+	bool               tty_session_ready           = false;
 	bool               shell_started               = false;
 	bool               loader_started              = false;
 	bool               vfs_ready                   = false;
@@ -579,7 +589,22 @@ int server_run(const struct init_state* init) {
 			terminal_ready = true;
 			continue;
 		}
-		if (terminal_ready && !configuration_loaded) {
+		if (terminal_ready && !tty_session_started) {
+			if (!terminal_available) {
+				tty_session_started = true;
+				tty_session_ready   = true;
+				continue;
+			}
+			if (!bootstrap_launch_terminal_session(init, "tty_session.elf", "TTY session", 0u, NULL, 0u, NULL))
+				return 1;
+			tty_session_started = true;
+			continue;
+		}
+		if (tty_session_started && !tty_session_ready && registry_contains(&tty_session_selector)) {
+			tty_session_ready = true;
+			continue;
+		}
+		if (tty_session_ready && !configuration_loaded) {
 			if (!load_system_configuration(&configuration)) return 1;
 			text_input_layout    = text_input_layout_override_path == NULL ? configuration.text_input_layout
 			                                                               : text_input_layout_override_path;
@@ -621,7 +646,7 @@ int server_run(const struct init_state* init) {
 				shell_started = true;
 				continue;
 			}
-			if (registry_contains(&text_input_selector)) {
+			if (registry_contains(&text_input_selector) && registry_contains(&tty_session_selector)) {
 				if (!bootstrap_launch_interactive(init, "shell.elf", "shell", 0u, NULL, 0u, NULL)) return 1;
 				shell_started = true;
 				continue;

@@ -6,6 +6,7 @@
 #include <base/startup.h>
 #include <base/thread.h>
 #include <protocol/terminal.h>
+#include <protocol/tty_session.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +22,14 @@
 
 #define TERMINAL_PROTOCOL_VERSION_MAJOR 1u
 #define TERMINAL_PROTOCOL_VERSION_MINOR 0u
+#define TTY_SESSION_PROTOCOL_VERSION_MAJOR 1u
+#define TTY_SESSION_PROTOCOL_VERSION_MINOR 0u
+
+enum bootstrap_input_source {
+	BOOTSTRAP_INPUT_NONE,
+	BOOTSTRAP_INPUT_TERMINAL,
+	BOOTSTRAP_INPUT_TTY_SESSION,
+};
 
 static bool drop_owned_capability(cap_id_t* capability, const char* description) {
 	syscall_status_t status;
@@ -102,20 +111,30 @@ cleanup:
 	return status;
 }
 
-static syscall_status_t delegate_input_stream(process_id_t target, cap_id_t* out_capability) {
-	const struct init_protocol_query query = {
-		.namespace_path = TERMINAL_NAMESPACE,
-		.protocol       = TERMINAL_PROTOCOL_NAME,
-		.major          = TERMINAL_PROTOCOL_VERSION_MAJOR,
-		.minor          = TERMINAL_PROTOCOL_VERSION_MINOR,
-	};
-	struct init_service_handle terminal = {.capability = CAP_ID_INVALID};
-	struct self_info           self     = {
+static syscall_status_t delegate_input_stream(process_id_t target, enum bootstrap_input_source source,
+                                              cap_id_t* out_capability) {
+	struct init_protocol_query query = {0};
+	struct init_service_handle input = {.capability = CAP_ID_INVALID};
+	struct self_info           self  = {
 		.self_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .main_thread_cap = CAP_ID_INVALID};
 	enum init_registry_status registry_status;
 	syscall_status_t          status;
 
-	if (target == PROCESS_PID_INVALID || out_capability == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	if (target == PROCESS_PID_INVALID || source == BOOTSTRAP_INPUT_NONE || out_capability == NULL)
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	if (source == BOOTSTRAP_INPUT_TERMINAL) {
+		(void)strlcpy(query.namespace_path, TERMINAL_NAMESPACE, sizeof(query.namespace_path));
+		(void)strlcpy(query.protocol, TERMINAL_PROTOCOL_NAME, sizeof(query.protocol));
+		query.major = TERMINAL_PROTOCOL_VERSION_MAJOR;
+		query.minor = TERMINAL_PROTOCOL_VERSION_MINOR;
+	}
+	else if (source == BOOTSTRAP_INPUT_TTY_SESSION) {
+		(void)strlcpy(query.namespace_path, TTY_SESSION_NAMESPACE, sizeof(query.namespace_path));
+		(void)strlcpy(query.protocol, TTY_SESSION_PROTOCOL_NAME, sizeof(query.protocol));
+		query.major = TTY_SESSION_PROTOCOL_VERSION_MAJOR;
+		query.minor = TTY_SESSION_PROTOCOL_VERSION_MINOR;
+	}
+	else return SYSCALL_STATUS_BAD_ARGUMENT;
 	*out_capability = CAP_ID_INVALID;
 	status          = process_self_info(&self);
 	if (status != SYSCALL_STATUS_OK) goto cleanup;
@@ -123,15 +142,17 @@ static syscall_status_t delegate_input_stream(process_id_t target, cap_id_t* out
 		status = SYSCALL_STATUS_FAILED;
 		goto cleanup;
 	}
-	registry_status = registry_acquire(self.pid, &query, TERMINAL_SERVICE_NAME, &terminal);
+	const char* service = source == BOOTSTRAP_INPUT_TERMINAL ? TERMINAL_SERVICE_NAME : TTY_SESSION_SERVICE_NAME;
+	registry_status     = registry_acquire(self.pid, &query, service, &input);
 	if (registry_status != INIT_REGISTRY_OK) {
 		status = registry_status == INIT_REGISTRY_NOT_FOUND ? SYSCALL_STATUS_UNAVAILABLE : SYSCALL_STATUS_FAILED;
 		goto cleanup;
 	}
-	status = cap_delegate(terminal.capability, target, TERMINAL_INPUT_RIGHTS | CAP_DELEGATE, out_capability);
+	cap_rights_t rights = source == BOOTSTRAP_INPUT_TERMINAL ? TERMINAL_INPUT_RIGHTS : TTY_SESSION_CLIENT_RIGHTS;
+	status              = cap_delegate(input.capability, target, rights, out_capability);
 
 cleanup:
-	if (terminal.capability != CAP_ID_INVALID && cap_drop(terminal.capability) != SYSCALL_STATUS_OK &&
+	if (input.capability != CAP_ID_INVALID && cap_drop(input.capability) != SYSCALL_STATUS_OK &&
 	    status == SYSCALL_STATUS_OK)
 		status = SYSCALL_STATUS_FAILED;
 	if (self.self_cap != CAP_ID_INVALID) (void)cap_drop(self.self_cap);
@@ -142,7 +163,8 @@ cleanup:
 
 static bool bootstrap_launch_internal(const struct init_state* init, const char* module_name, const char* description,
                                       size_t argc, const char* const argv[], size_t capability_count,
-                                      const struct program_capability_argument capabilities[], bool terminal_input) {
+                                      const struct program_capability_argument capabilities[],
+                                      enum bootstrap_input_source input_source, bool delegatable_output) {
 	struct module_provider_resolve_response module = {.cap = CAP_ID_INVALID};
 	struct loader_load_response             loaded;
 	struct process_info_response            process_info;
@@ -233,13 +255,13 @@ static bool bootstrap_launch_internal(const struct init_state* init, const char*
 		printf("init: init capability publication failed: %u\n", (unsigned)status);
 		goto fail;
 	}
-	status = delegate_output_stream(init, process_info.pid, terminal_input, &output_stream_cap);
+	status = delegate_output_stream(init, process_info.pid, delegatable_output, &output_stream_cap);
 	if (status != SYSCALL_STATUS_OK) {
 		printf("init: output stream delegation failed: %u\n", (unsigned)status);
 		goto fail;
 	}
-	if (terminal_input) {
-		status = delegate_input_stream(process_info.pid, &input_stream_cap);
+	if (input_source != BOOTSTRAP_INPUT_NONE) {
+		status = delegate_input_stream(process_info.pid, input_source, &input_stream_cap);
 		if (status != SYSCALL_STATUS_OK) {
 			printf("init: input stream delegation failed: %u\n", (unsigned)status);
 			goto fail;
@@ -306,11 +328,20 @@ fail:
 bool bootstrap_launch(const struct init_state* init, const char* module_name, const char* description, size_t argc,
                       const char* const argv[], size_t capability_count,
                       const struct program_capability_argument capabilities[]) {
-	return bootstrap_launch_internal(init, module_name, description, argc, argv, capability_count, capabilities, false);
+	return bootstrap_launch_internal(
+		init, module_name, description, argc, argv, capability_count, capabilities, BOOTSTRAP_INPUT_NONE, false);
+}
+
+bool bootstrap_launch_terminal_session(const struct init_state* init, const char* module_name, const char* description,
+                                       size_t argc, const char* const argv[], size_t capability_count,
+                                       const struct program_capability_argument capabilities[]) {
+	return bootstrap_launch_internal(
+		init, module_name, description, argc, argv, capability_count, capabilities, BOOTSTRAP_INPUT_TERMINAL, false);
 }
 
 bool bootstrap_launch_interactive(const struct init_state* init, const char* module_name, const char* description,
                                   size_t argc, const char* const argv[], size_t capability_count,
                                   const struct program_capability_argument capabilities[]) {
-	return bootstrap_launch_internal(init, module_name, description, argc, argv, capability_count, capabilities, true);
+	return bootstrap_launch_internal(
+		init, module_name, description, argc, argv, capability_count, capabilities, BOOTSTRAP_INPUT_TTY_SESSION, true);
 }
