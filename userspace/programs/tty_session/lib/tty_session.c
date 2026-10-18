@@ -38,7 +38,8 @@ syscall_status_t tty_session_get_info(cap_id_t session_cap, struct tty_session_g
 	if (out_info == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	status = fixed_call(session_cap, &request, sizeof(request), out_info, sizeof(*out_info));
 	if (status != SYSCALL_STATUS_OK) return status;
-	if (out_info->columns == 0u || out_info->rows == 0u) return SYSCALL_STATUS_FAILED;
+	if (out_info->columns == 0u || out_info->rows == 0u || out_info->session_pid == PROCESS_PID_INVALID)
+		return SYSCALL_STATUS_FAILED;
 	return SYSCALL_STATUS_OK;
 }
 
@@ -49,13 +50,6 @@ syscall_status_t tty_session_get_cursor(cap_id_t session_cap, struct tty_session
 
 	if (out_cursor == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	return fixed_call(session_cap, &request, sizeof(request), out_cursor, sizeof(*out_cursor));
-}
-
-syscall_status_t tty_session_claim(cap_id_t session_cap) {
-	const struct tty_session_claim_request request = {
-		.header = {.op = TTY_SESSION_OP_CLAIM},
-	};
-	return fixed_call(session_cap, &request, sizeof(request), NULL, 0u);
 }
 
 syscall_status_t tty_session_begin_foreground(cap_id_t session_cap, process_id_t process_id) {
@@ -79,7 +73,7 @@ syscall_status_t tty_session_attach_foreground(cap_id_t session_cap, process_id_
 	if (session_cap == CAP_ID_INVALID || session_owner == PROCESS_PID_INVALID || process_cap == CAP_ID_INVALID ||
 	    process_id == PROCESS_PID_INVALID)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
-	status = cap_delegate(process_cap, session_owner, CAP_CALL | CAP_READ | CAP_MANAGE, &request.process_cap);
+	status = cap_delegate(process_cap, session_owner, CAP_CALL | CAP_READ | CAP_DESTROY, &request.process_cap);
 	if (status != SYSCALL_STATUS_OK) return status;
 	status = fixed_call(session_cap, &request, sizeof(request), NULL, 0u);
 	if (status != SYSCALL_STATUS_OK) (void)cap_revoke(request.process_cap, 0u);

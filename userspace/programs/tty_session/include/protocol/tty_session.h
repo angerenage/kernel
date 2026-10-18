@@ -4,9 +4,10 @@
  * Foreground process and terminal input session protocol.
  *
  * The single system TTY session presents a generic readable Stream. A shell
- * claims the session and selects one foreground child at a time. Input is
- * delivered only to the foreground process; Control-C terminates a selected
- * child and is otherwise delivered to the shell as an ordinary control byte.
+ * receives a managing capability from init and selects one foreground child at
+ * a time. Input is delivered only to the foreground process; Control-C
+ * terminates a selected child and is otherwise delivered to the shell as an
+ * ordinary control byte.
  * Terminal geometry and cursor queries are forwarded without exposing the
  * underlying terminal capability to clients.
  *
@@ -22,8 +23,11 @@
 #define TTY_SESSION_PROTOCOL_NAME "tty"
 #define TTY_SESSION_SERVICE_NAME "default"
 
-/* Maximum rights granted when the TTY session is acquired. */
-#define TTY_SESSION_CLIENT_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_MANAGE | CAP_DELEGATE))
+/* Rights granted to ordinary clients through the init registry. */
+#define TTY_SESSION_CLIENT_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ))
+
+/* Rights installed by init on the controlling shell's standard input. */
+#define TTY_SESSION_CONTROL_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_MANAGE | CAP_DELEGATE))
 
 /* Rights delegated when the TTY session is used only as standard input. */
 #define TTY_SESSION_INPUT_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ))
@@ -32,7 +36,6 @@
 enum tty_session_op {
 	TTY_SESSION_OP_GET_INFO = 2u,
 	TTY_SESSION_OP_GET_CURSOR,
-	TTY_SESSION_OP_CLAIM,
 	TTY_SESSION_OP_BEGIN_FOREGROUND,
 	TTY_SESSION_OP_ATTACH_FOREGROUND,
 	TTY_SESSION_OP_RESTORE_FOREGROUND,
@@ -50,8 +53,9 @@ struct tty_session_get_info_request {
 
 /* Terminal dimensions measured in fixed-width character cells. */
 struct tty_session_get_info_response {
-	uint64_t columns;
-	uint64_t rows;
+	uint64_t     columns;
+	uint64_t     rows;
+	process_id_t session_pid;
 };
 
 /* Request the current terminal cursor position. */
@@ -63,11 +67,6 @@ struct tty_session_get_cursor_request {
 struct tty_session_get_cursor_response {
 	uint64_t column;
 	uint64_t row;
-};
-
-/* Claim responsibility for foreground selection for the calling shell. */
-struct tty_session_claim_request {
-	struct tty_session_request_header header;
 };
 
 /* Select a prepared child process as the foreground input recipient. */

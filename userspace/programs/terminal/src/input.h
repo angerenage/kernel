@@ -1,6 +1,7 @@
 #pragma once
 
 #include <base/cap.h>
+#include <base/process.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -18,3 +19,10 @@ void terminal_input_destroy(struct terminal_input* input);
 
 /* Validate and either complete or retain one blocking Stream read. */
 bool terminal_input_read(struct terminal_input* input, const struct cap_request* call, const uint8_t* request_data);
+
+/* Grant one caller access to out-of-band interrupt notifications. */
+bool terminal_input_acquire_interrupt_signal(struct terminal_input* input, process_id_t caller,
+                                             cap_id_t* out_signal_cap);
+
+/* Discard unread bytes and return the current interrupt generation. */
+uint64_t terminal_input_discard(struct terminal_input* input);

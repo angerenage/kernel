@@ -230,23 +230,50 @@ static void fill_service_info(const struct registry_advertisement* ad, struct in
 	};
 }
 
+static struct registry_advertisement* find_advertisement(const struct init_protocol_query* query, const char* service) {
+	for (struct registry_advertisement* ad = advertisements; ad != NULL; ad = ad->next) {
+		if (query_matches(query, ad) && strcmp(service, ad->selector.service) == 0) return ad;
+	}
+	return NULL;
+}
+
+static enum init_registry_status grant_advertisement(const struct registry_advertisement* ad, process_id_t target,
+                                                     cap_rights_t rights, struct init_service_handle* out_handle) {
+	cap_id_t delegated;
+
+	if (cap_delegate(ad->capability, target, rights, &delegated) != SYSCALL_STATUS_OK)
+		return INIT_REGISTRY_RESOURCE_FAILURE;
+	fill_service_info(ad, &out_handle->info);
+	out_handle->owner      = ad->owner;
+	out_handle->capability = delegated;
+	return INIT_REGISTRY_OK;
+}
+
 enum init_registry_status registry_acquire(process_id_t caller, const struct init_protocol_query* query,
                                            const char* service, struct init_service_handle* out_handle) {
-	cap_id_t delegated;
+	struct registry_advertisement* ad;
+
 	if (caller == PROCESS_PID_INVALID || !registry_query_valid(query) || !registry_name_valid(service) ||
 	    out_handle == NULL)
 		return INIT_REGISTRY_INVALID_ARGUMENT;
 	prune_dead_advertisements();
-	for (struct registry_advertisement* ad = advertisements; ad != NULL; ad = ad->next) {
-		if (!query_matches(query, ad) || strcmp(service, ad->selector.service) != 0) continue;
-		if (cap_delegate(ad->capability, caller, ad->client_rights, &delegated) != SYSCALL_STATUS_OK)
-			return INIT_REGISTRY_RESOURCE_FAILURE;
-		fill_service_info(ad, &out_handle->info);
-		out_handle->owner      = ad->owner;
-		out_handle->capability = delegated;
-		return INIT_REGISTRY_OK;
-	}
-	return INIT_REGISTRY_NOT_FOUND;
+	ad = find_advertisement(query, service);
+	return ad == NULL ? INIT_REGISTRY_NOT_FOUND : grant_advertisement(ad, caller, ad->client_rights, out_handle);
+}
+
+enum init_registry_status registry_grant(process_id_t target, const struct init_protocol_query* query,
+                                         const char* service, cap_rights_t rights, cap_id_t* out_capability) {
+	struct registry_advertisement* ad;
+
+	if (target == PROCESS_PID_INVALID || !registry_query_valid(query) || !registry_name_valid(service) ||
+	    rights == 0u || out_capability == NULL)
+		return INIT_REGISTRY_INVALID_ARGUMENT;
+	prune_dead_advertisements();
+	ad = find_advertisement(query, service);
+	if (ad == NULL) return INIT_REGISTRY_NOT_FOUND;
+	return cap_delegate(ad->capability, target, rights, out_capability) == SYSCALL_STATUS_OK
+			   ? INIT_REGISTRY_OK
+			   : INIT_REGISTRY_RESOURCE_FAILURE;
 }
 
 bool registry_contains(const struct init_service_selector* selector) {

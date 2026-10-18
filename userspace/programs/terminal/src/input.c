@@ -1,6 +1,7 @@
 #include "input.h"
 
 #include <base/process.h>
+#include <protocol/terminal.h>
 #include <protocol/text_input.h>
 #include <runtime/init.h>
 #include <runtime/stream.h>
@@ -43,6 +44,8 @@ struct terminal_input {
 	bool                locked;
 	bool                stopping;
 	cap_id_t            text_thread_cap;
+	cap_id_t            interrupt_signal_cap;
+	uint64_t            interrupt_counter;
 };
 
 static void input_lock(struct terminal_input* input) {
@@ -87,7 +90,7 @@ static bool publish_bytes(struct terminal_input* input, const uint8_t* bytes, si
 	service_pending_reads(input);
 	if (size > TERMINAL_INPUT_BUFFER_CAPACITY - input->byte_count) {
 		input_unlock(input);
-		return false;
+		return true;
 	}
 	for (size_t i = 0u; i < size; i++) {
 		size_t tail        = (input->byte_head + input->byte_count) % TERMINAL_INPUT_BUFFER_CAPACITY;
@@ -97,6 +100,19 @@ static bool publish_bytes(struct terminal_input* input, const uint8_t* bytes, si
 	service_pending_reads(input);
 	input_unlock(input);
 	return true;
+}
+
+static bool publish_interrupt(struct terminal_input* input) {
+	struct signal_send_response response;
+	uint64_t                    counter;
+
+	input_lock(input);
+	input->interrupt_counter++;
+	if (input->interrupt_counter == 0u) input->interrupt_counter = 1u;
+	counter = input->interrupt_counter;
+	input_unlock(input);
+	return signal_send(input->interrupt_signal_cap, counter, 0u, 0u, 0u, SIGNAL_SEND_FLAG_COALESCE, &response) ==
+	       SYSCALL_STATUS_OK;
 }
 
 bool terminal_input_read(struct terminal_input* input, const struct cap_request* call, const uint8_t* request_data) {
@@ -130,6 +146,32 @@ bool terminal_input_read(struct terminal_input* input, const struct cap_request*
 	input->pending_count++;
 	input_unlock(input);
 	return true;
+}
+
+bool terminal_input_acquire_interrupt_signal(struct terminal_input* input, process_id_t caller,
+                                             cap_id_t* out_signal_cap) {
+	if (input == NULL || caller == PROCESS_PID_INVALID || out_signal_cap == NULL) return false;
+	*out_signal_cap = CAP_ID_INVALID;
+	return cap_delegate(input->interrupt_signal_cap, caller, TERMINAL_INTERRUPT_SIGNAL_RIGHTS, out_signal_cap) ==
+	       SYSCALL_STATUS_OK;
+}
+
+uint64_t terminal_input_discard(struct terminal_input* input) {
+	uint64_t interrupt_generation;
+
+	if (input == NULL) return 0u;
+	input_lock(input);
+	input->byte_head  = 0u;
+	input->byte_count = 0u;
+	while (input->pending_count != 0u) {
+		struct pending_read* pending = &input->pending[input->pending_head];
+		(void)channel_reply(pending->call_id, NULL, 0u, SYSCALL_STATUS_UNAVAILABLE);
+		input->pending_head = (input->pending_head + 1u) % TERMINAL_INPUT_PENDING_CAPACITY;
+		input->pending_count--;
+	}
+	interrupt_generation = input->interrupt_counter;
+	input_unlock(input);
+	return interrupt_generation;
 }
 
 static bool text_handle_valid(const struct init_service_handle* handle) {
@@ -403,6 +445,7 @@ static bool process_logical_key(struct terminal_input* input, const struct text_
 		uint8_t byte;
 		if (control_byte(text, text_size, &byte)) {
 			*handled = true;
+			if (byte == 0x03u) return publish_interrupt(input);
 			return publish_bytes(input, &byte, 1u);
 		}
 		return true;
@@ -418,8 +461,13 @@ struct terminal_input* terminal_input_create(struct terminal* terminal) {
 	if (terminal == NULL) return NULL;
 	struct terminal_input* input = calloc(1u, sizeof(*input));
 	if (input == NULL) return NULL;
-	input->terminal        = terminal;
-	input->text_thread_cap = CAP_ID_INVALID;
+	input->terminal             = terminal;
+	input->text_thread_cap      = CAP_ID_INVALID;
+	input->interrupt_signal_cap = CAP_ID_INVALID;
+	if (signal_create(&input->interrupt_signal_cap) != SYSCALL_STATUS_OK) {
+		free(input);
+		return NULL;
+	}
 	return input;
 }
 
@@ -464,5 +512,6 @@ void terminal_input_destroy(struct terminal_input* input) {
 		input->pending_count--;
 	}
 	input_unlock(input);
+	if (input->interrupt_signal_cap != CAP_ID_INVALID) (void)signal_destroy(input->interrupt_signal_cap);
 	free(input);
 }

@@ -15,9 +15,6 @@ syscall_status_t tty_session_get_info(cap_id_t session_cap, struct tty_session_g
 /* Read the current character-cell cursor position behind a TTY session. */
 syscall_status_t tty_session_get_cursor(cap_id_t session_cap, struct tty_session_get_cursor_response* out_cursor);
 
-/* Claim foreground-process control for the calling shell. */
-syscall_status_t tty_session_claim(cap_id_t session_cap);
-
 /* Select a prepared child process before starting it. */
 syscall_status_t tty_session_begin_foreground(cap_id_t session_cap, process_id_t process_id);
 
