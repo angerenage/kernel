@@ -27,8 +27,55 @@ syscall_status_t terminal_get_cursor(cap_id_t terminal_cap, struct terminal_get_
 	syscall_status_t status =
 		cap_call(terminal_cap, &request, sizeof(request), out_cursor, sizeof(*out_cursor), &response_size);
 	if (status != SYSCALL_STATUS_OK) return status;
-	if (response_size != sizeof(*out_cursor)) return SYSCALL_STATUS_FAILED;
+	if (response_size != sizeof(*out_cursor) || out_cursor->line == 0u) return SYSCALL_STATUS_FAILED;
 	return SYSCALL_STATUS_OK;
+}
+
+syscall_status_t terminal_get_selection(cap_id_t terminal_cap, struct terminal_get_selection_response* out_selection) {
+	const struct terminal_get_selection_request request = {
+		.header = {.op = TERMINAL_OP_GET_SELECTION},
+	};
+	size_t response_size = 0u;
+
+	if (terminal_cap == CAP_ID_INVALID || out_selection == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	syscall_status_t status =
+		cap_call(terminal_cap, &request, sizeof(request), out_selection, sizeof(*out_selection), &response_size);
+	if (status != SYSCALL_STATUS_OK) return status;
+	if (response_size != sizeof(*out_selection) || out_selection->anchor.line == 0u ||
+	    out_selection->focus.line == 0u ||
+	    (out_selection->anchor.line == out_selection->focus.line &&
+	     out_selection->anchor.column == out_selection->focus.column))
+		return SYSCALL_STATUS_FAILED;
+	return SYSCALL_STATUS_OK;
+}
+
+syscall_status_t terminal_set_selection(cap_id_t terminal_cap, struct terminal_selection_position anchor,
+                                        struct terminal_selection_position focus) {
+	const struct terminal_set_selection_request request = {
+		.header = {.op = TERMINAL_OP_SET_SELECTION},
+		.anchor = anchor,
+		.focus  = focus,
+	};
+	size_t response_size = 0u;
+
+	if (terminal_cap == CAP_ID_INVALID || anchor.line == 0u || focus.line == 0u ||
+	    (anchor.line == focus.line && anchor.column == focus.column))
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	syscall_status_t status = cap_call(terminal_cap, &request, sizeof(request), NULL, 0u, &response_size);
+	if (status != SYSCALL_STATUS_OK) return status;
+	return response_size == 0u ? SYSCALL_STATUS_OK : SYSCALL_STATUS_FAILED;
+}
+
+syscall_status_t terminal_clear_selection(cap_id_t terminal_cap) {
+	const struct terminal_clear_selection_request request = {
+		.header = {.op = TERMINAL_OP_CLEAR_SELECTION},
+	};
+	size_t response_size = 0u;
+
+	if (terminal_cap == CAP_ID_INVALID) return SYSCALL_STATUS_BAD_ARGUMENT;
+	syscall_status_t status = cap_call(terminal_cap, &request, sizeof(request), NULL, 0u, &response_size);
+	if (status != SYSCALL_STATUS_OK) return status;
+	return response_size == 0u ? SYSCALL_STATUS_OK : SYSCALL_STATUS_FAILED;
 }
 
 syscall_status_t terminal_acquire_interrupt_signal(cap_id_t terminal_cap, cap_id_t* out_signal_cap) {

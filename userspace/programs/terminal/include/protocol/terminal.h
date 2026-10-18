@@ -18,7 +18,9 @@
  * afterward. Other escape sequences are ignored.
  *
  * Besides the Stream operations, clients may query the immutable terminal
- * dimensions and its current cursor position.
+ * dimensions and its current cursor position. Selection operations use stable,
+ * monotonically assigned line identities and half-open cell ranges; anchor and
+ * focus order is preserved so clients can extend either end of a selection.
  *
  * Current specification version: 1.0-beta
  */
@@ -52,6 +54,9 @@ enum terminal_op {
 	TERMINAL_OP_GET_CURSOR,
 	TERMINAL_OP_ACQUIRE_INTERRUPT_SIGNAL,
 	TERMINAL_OP_DISCARD_INPUT,
+	TERMINAL_OP_GET_SELECTION,
+	TERMINAL_OP_SET_SELECTION,
+	TERMINAL_OP_CLEAR_SELECTION,
 };
 
 /* Common header for terminal-specific requests. */
@@ -79,6 +84,36 @@ struct terminal_get_cursor_request {
 struct terminal_get_cursor_response {
 	uint64_t column;
 	uint64_t row;
+	uint64_t line;
+};
+
+/* One cell boundary on a stable retained terminal line. */
+struct terminal_selection_position {
+	uint64_t line;
+	uint64_t column;
+};
+
+/* Request the currently active selection. */
+struct terminal_get_selection_request {
+	struct terminal_request_header header;
+};
+
+/* Directional endpoints of the currently active half-open selection. */
+struct terminal_get_selection_response {
+	struct terminal_selection_position anchor;
+	struct terminal_selection_position focus;
+};
+
+/* Replace the selection with one nonempty retained cell range. */
+struct terminal_set_selection_request {
+	struct terminal_request_header     header;
+	struct terminal_selection_position anchor;
+	struct terminal_selection_position focus;
+};
+
+/* Clear the current selection, succeeding when none is active. */
+struct terminal_clear_selection_request {
+	struct terminal_request_header header;
 };
 
 /* Acquire notification of interrupt characters independently of buffered input. */

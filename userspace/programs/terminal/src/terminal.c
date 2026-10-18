@@ -64,6 +64,12 @@ struct terminal_overlay_cell {
 	struct terminal_cell cell;
 };
 
+struct terminal_selection_state {
+	struct terminal_selection_position anchor;
+	struct terminal_selection_position focus;
+	bool                               active;
+};
+
 enum escape_state {
 	ESCAPE_STATE_TEXT,
 	ESCAPE_STATE_ESCAPE,
@@ -71,56 +77,58 @@ enum escape_state {
 };
 
 struct terminal {
-	struct drawing_surface        surface;
-	FT_Library                    library;
-	FT_Face                       face;
-	struct terminal_glyph_cache*  glyph_cache;
-	uint8_t*                      font_data;
-	size_t                        cell_width;
-	size_t                        cell_height;
-	size_t                        ascender;
-	size_t                        columns;
-	size_t                        rows;
-	size_t                        column;
-	size_t                        row;
-	struct terminal_cell*         cells;
-	size_t                        cell_count;
-	struct terminal_cell*         history;
-	size_t                        history_count;
-	size_t                        history_head;
-	size_t                        viewport_offset;
-	bool                          viewport_dirty;
-	size_t                        saved_column;
-	size_t                        saved_row;
-	bool                          saved_cursor;
-	bool                          cursor_visible;
-	bool                          cursor_drawn;
-	size_t                        cursor_drawn_row;
-	size_t                        cursor_drawn_column;
-	bool                          wrap_pending;
-	bool                          locked;
-	uint32_t*                     preedit_codepoints;
-	size_t                        preedit_count;
-	size_t                        preedit_caret;
-	struct terminal_overlay_cell* overlay;
-	size_t                        overlay_count;
-	bool                          foreground_default;
-	bool                          background_default;
-	bool                          bold;
-	bool                          reverse;
-	bool                          underline;
-	uint8_t                       foreground;
-	uint8_t                       background;
-	uint32_t                      utf8_value;
-	uint32_t                      utf8_minimum;
-	uint8_t                       utf8_remaining;
-	enum escape_state             escape_state;
-	uint16_t                      csi_parameters[TERMINAL_CSI_PARAMETER_CAPACITY];
-	size_t                        csi_parameter_count;
-	uint16_t                      csi_value;
-	bool                          csi_has_value;
-	bool                          csi_invalid;
-	bool                          csi_private;
+	struct drawing_surface          surface;
+	FT_Library                      library;
+	FT_Face                         face;
+	struct terminal_glyph_cache*    glyph_cache;
+	uint8_t*                        font_data;
+	size_t                          cell_width;
+	size_t                          cell_height;
+	size_t                          ascender;
+	size_t                          columns;
+	size_t                          rows;
+	size_t                          column;
+	size_t                          row;
+	struct terminal_cell*           cells;
+	size_t                          cell_count;
+	struct terminal_cell*           history;
+	size_t                          history_count;
+	size_t                          history_head;
+	uint64_t                        screen_origin;
+	size_t                          viewport_offset;
+	bool                            viewport_dirty;
+	struct terminal_selection_state selection;
+	size_t                          saved_column;
+	size_t                          saved_row;
+	bool                            saved_cursor;
+	bool                            cursor_visible;
+	bool                            cursor_drawn;
+	size_t                          cursor_drawn_row;
+	size_t                          cursor_drawn_column;
+	bool                            wrap_pending;
+	bool                            locked;
+	uint32_t*                       preedit_codepoints;
+	size_t                          preedit_count;
+	size_t                          preedit_caret;
+	struct terminal_overlay_cell*   overlay;
+	size_t                          overlay_count;
+	bool                            foreground_default;
+	bool                            background_default;
+	bool                            bold;
+	bool                            reverse;
+	bool                            underline;
+	uint8_t                         foreground;
+	uint8_t                         background;
+	uint32_t                        utf8_value;
+	uint32_t                        utf8_minimum;
+	uint8_t                         utf8_remaining;
+	enum escape_state               escape_state;
+	uint16_t                        csi_parameters[TERMINAL_CSI_PARAMETER_CAPACITY];
+	size_t                          csi_parameter_count;
+	uint16_t                        csi_value;
+	bool                            csi_has_value;
+	bool                            csi_invalid;
+	bool                            csi_private;
 };
 
 static const struct terminal_theme theme = {
@@ -334,15 +342,40 @@ static struct terminal_cell blank_cell(const struct terminal* terminal) {
 	};
 }
 
+static int position_compare(struct terminal_selection_position left, struct terminal_selection_position right) {
+	if (left.line < right.line) return -1;
+	if (left.line > right.line) return 1;
+	if (left.column < right.column) return -1;
+	if (left.column > right.column) return 1;
+	return 0;
+}
+
+static bool selection_contains(const struct terminal_selection_state* selection, uint64_t line, size_t column) {
+	struct terminal_selection_position position = {.line = line, .column = column};
+	struct terminal_selection_position first;
+	struct terminal_selection_position last;
+
+	if (!selection->active) return false;
+	if (position_compare(selection->anchor, selection->focus) < 0) {
+		first = selection->anchor;
+		last  = selection->focus;
+	}
+	else {
+		first = selection->focus;
+		last  = selection->anchor;
+	}
+	return position_compare(position, first) >= 0 && position_compare(position, last) < 0;
+}
+
 static bool draw_cell_value(struct terminal* terminal, const struct terminal_cell* cell, size_t row, size_t column,
-                            bool cursor) {
+                            bool cursor, bool selected) {
 	struct color foreground;
 	struct color background;
 	size_t       cell_x = column * terminal->cell_width;
 	size_t       cell_y = row * terminal->cell_height;
 
-	foreground = cursor ? theme.cursor_text : cell->foreground;
-	background = cursor ? theme.cursor : cell->background;
+	foreground = cursor ? theme.cursor_text : selected ? theme.selection_foreground : cell->foreground;
+	background = cursor ? theme.cursor : selected ? theme.selection_background : cell->background;
 	fill_rectangle(terminal->surface.framebuffer,
 	               terminal->surface.pitch,
 	               &terminal->surface.format,
@@ -395,7 +428,12 @@ static bool draw_cell(struct terminal* terminal, size_t row, size_t column, bool
 		if (live_row_visible(terminal, row)) terminal->viewport_dirty = true;
 		return true;
 	}
-	return draw_cell_value(terminal, &terminal->cells[row * terminal->columns + column], row, column, cursor);
+	return draw_cell_value(terminal,
+	                       &terminal->cells[row * terminal->columns + column],
+	                       row,
+	                       column,
+	                       cursor,
+	                       selection_contains(&terminal->selection, terminal->screen_origin + row, column));
 }
 
 static const struct terminal_cell* history_line(const struct terminal* terminal, size_t line) {
@@ -404,13 +442,16 @@ static const struct terminal_cell* history_line(const struct terminal* terminal,
 }
 
 static bool redraw_viewport_row(struct terminal* terminal, size_t row) {
-	size_t                      line = terminal->history_count - terminal->viewport_offset + row;
+	size_t                      stored_line = terminal->history_count - terminal->viewport_offset + row;
+	uint64_t                    line        = terminal->screen_origin - terminal->viewport_offset + row;
 	const struct terminal_cell* cells;
 
-	if (line < terminal->history_count) cells = history_line(terminal, line);
-	else cells = terminal->cells + (line - terminal->history_count) * terminal->columns;
+	if (stored_line < terminal->history_count) cells = history_line(terminal, stored_line);
+	else cells = terminal->cells + (stored_line - terminal->history_count) * terminal->columns;
 	for (size_t column = 0u; column < terminal->columns; column++)
-		if (!draw_cell_value(terminal, &cells[column], row, column, false)) return false;
+		if (!draw_cell_value(
+				terminal, &cells[column], row, column, false, selection_contains(&terminal->selection, line, column)))
+			return false;
 	return true;
 }
 
@@ -459,11 +500,46 @@ static const struct terminal_cell* overlay_cell_at(const struct terminal* termin
 	return NULL;
 }
 
+static bool redraw_viewport_cell(struct terminal* terminal, size_t row, size_t column) {
+	size_t                      stored_line = terminal->history_count - terminal->viewport_offset + row;
+	uint64_t                    line        = terminal->screen_origin - terminal->viewport_offset + row;
+	const struct terminal_cell* cell;
+
+	if (stored_line < terminal->history_count) cell = &history_line(terminal, stored_line)[column];
+	else {
+		size_t live_row = stored_line - terminal->history_count;
+		cell            = &terminal->cells[live_row * terminal->columns + column];
+		if (terminal->viewport_offset == 0u) {
+			const struct terminal_cell* overlay = overlay_cell_at(terminal, live_row * terminal->columns + column);
+			if (overlay != NULL) cell = overlay;
+		}
+	}
+	return draw_cell_value(terminal, cell, row, column, false, selection_contains(&terminal->selection, line, column));
+}
+
+static bool redraw_selection_difference(struct terminal* terminal, const struct terminal_selection_state* previous) {
+	for (size_t row = 0u; row < terminal->rows; row++) {
+		uint64_t line = terminal->screen_origin - terminal->viewport_offset + row;
+		for (size_t column = 0u; column < terminal->columns; column++) {
+			if (selection_contains(previous, line, column) == selection_contains(&terminal->selection, line, column))
+				continue;
+			if (!redraw_viewport_cell(terminal, row, column)) return false;
+		}
+	}
+	return true;
+}
+
 static bool redraw_screen_cell(struct terminal* terminal, size_t row, size_t column, bool cursor) {
 	size_t                      index = row * terminal->columns + column;
 	const struct terminal_cell* cell  = overlay_cell_at(terminal, index);
-	return cell == NULL ? draw_cell(terminal, row, column, cursor)
-	                    : draw_cell_value(terminal, cell, row, column, cursor);
+	return cell == NULL
+			   ? draw_cell(terminal, row, column, cursor)
+			   : draw_cell_value(terminal,
+			                     cell,
+			                     row,
+			                     column,
+			                     cursor,
+			                     selection_contains(&terminal->selection, terminal->screen_origin + row, column));
 }
 
 static bool hide_cursor(struct terminal* terminal) {
@@ -523,11 +599,15 @@ static bool draw_overlay(struct terminal* terminal) {
 					   .underline  = true,
 					   },
 		};
-		if (terminal->viewport_offset == 0u && !draw_cell_value(terminal,
-		                                                        &terminal->overlay[i].cell,
-		                                                        terminal->overlay[i].index / terminal->columns,
-		                                                        terminal->overlay[i].index % terminal->columns,
-		                                                        false))
+		size_t row    = terminal->overlay[i].index / terminal->columns;
+		size_t column = terminal->overlay[i].index % terminal->columns;
+		if (terminal->viewport_offset == 0u &&
+		    !draw_cell_value(terminal,
+		                     &terminal->overlay[i].cell,
+		                     row,
+		                     column,
+		                     false,
+		                     selection_contains(&terminal->selection, terminal->screen_origin + row, column)))
 			return false;
 	}
 	return true;
@@ -578,6 +658,16 @@ static void append_history_line(struct terminal* terminal, const struct terminal
 	else terminal->viewport_dirty = true;
 }
 
+static void expire_evicted_selection(struct terminal* terminal) {
+	uint64_t first = terminal->screen_origin - terminal->history_count;
+
+	if (!terminal->selection.active ||
+	    (terminal->selection.anchor.line >= first && terminal->selection.focus.line >= first))
+		return;
+	terminal->selection.active = false;
+	terminal->viewport_dirty   = true;
+}
+
 static void scroll_screen(struct terminal* terminal) {
 	size_t               width  = terminal->columns * terminal->cell_width * terminal->surface.format.bytes_per_pixel;
 	size_t               height = terminal->rows * terminal->cell_height;
@@ -585,6 +675,8 @@ static void scroll_screen(struct terminal* terminal) {
 	struct terminal_cell blank       = blank_cell(terminal);
 
 	append_history_line(terminal, terminal->cells);
+	terminal->screen_origin++;
+	expire_evicted_selection(terminal);
 	if (terminal->viewport_offset == 0u) {
 		for (size_t row = 0u; row < copied_rows; row++) {
 			volatile uint8_t* destination = terminal->surface.framebuffer + row * terminal->surface.pitch;
@@ -976,7 +1068,7 @@ struct terminal* terminal_create(volatile uint8_t* framebuffer, const struct fra
 		goto fail;
 	terminal->columns = terminal->surface.width / terminal->cell_width;
 	terminal->rows    = terminal->surface.height / terminal->cell_height;
-	if (terminal->columns == 0u || terminal->rows == 0u ||
+	if (terminal->columns == 0u || terminal->rows == 0u || terminal->rows > UINT64_MAX - 1u ||
 	    mul_overflow_size(terminal->columns, terminal->rows, &terminal->cell_count) ||
 	    terminal->cell_count > SIZE_MAX / sizeof(*terminal->cells) ||
 	    mul_overflow_size(terminal->columns, TERMINAL_SCROLLBACK_LINE_CAPACITY, &history_cell_count) ||
@@ -986,6 +1078,7 @@ struct terminal* terminal_create(volatile uint8_t* framebuffer, const struct fra
 	terminal->history     = malloc(history_cell_count * sizeof(*terminal->history));
 	terminal->glyph_cache = terminal_glyph_cache_create(terminal->face);
 	if (terminal->cells == NULL || terminal->history == NULL || terminal->glyph_cache == NULL) goto fail;
+	terminal->screen_origin = 1u;
 	reset_attributes(terminal);
 	terminal->cursor_visible = true;
 	clear_display(terminal);
@@ -1018,11 +1111,12 @@ bool terminal_get_dimensions(const struct terminal* terminal, size_t* out_column
 	return true;
 }
 
-bool terminal_get_cursor_position(struct terminal* terminal, size_t* out_column, size_t* out_row) {
-	if (terminal == NULL || out_column == NULL || out_row == NULL) return false;
+bool terminal_get_cursor_position(struct terminal* terminal, size_t* out_column, size_t* out_row, uint64_t* out_line) {
+	if (terminal == NULL || out_column == NULL || out_row == NULL || out_line == NULL) return false;
 	terminal_lock(terminal);
 	*out_column = terminal->column;
 	*out_row    = terminal->row;
+	*out_line   = terminal->screen_origin + terminal->row;
 	terminal_unlock(terminal);
 	return true;
 }
@@ -1167,6 +1261,84 @@ bool terminal_scroll_view(struct terminal* terminal, int64_t lines) {
 	if (terminal->viewport_dirty) success = redraw_viewport(terminal);
 	else success = moved == 0u || move_viewport(terminal, terminal->viewport_offset > offset, moved);
 	success = success && draw_overlay(terminal) && show_cursor(terminal);
+	terminal_unlock(terminal);
+	return success;
+}
+
+bool terminal_selection_get(struct terminal* terminal, struct terminal_get_selection_response* out_selection) {
+	if (terminal == NULL || out_selection == NULL) return false;
+	terminal_lock(terminal);
+	if (!terminal->selection.active) {
+		terminal_unlock(terminal);
+		return false;
+	}
+	*out_selection = (struct terminal_get_selection_response){
+		.anchor = terminal->selection.anchor,
+		.focus  = terminal->selection.focus,
+	};
+	terminal_unlock(terminal);
+	return true;
+}
+
+static bool selection_position_valid(const struct terminal* terminal, struct terminal_selection_position position) {
+	uint64_t first = terminal->screen_origin - terminal->history_count;
+	uint64_t last;
+
+	if (terminal->rows - 1u > UINT64_MAX - terminal->screen_origin) return false;
+	last = terminal->screen_origin + terminal->rows - 1u;
+	return position.line >= first && position.line <= last && position.column <= terminal->columns;
+}
+
+static bool selection_state_equal(const struct terminal_selection_state* left,
+                                  const struct terminal_selection_state* right) {
+	return left->active == right->active && (!left->active || (position_compare(left->anchor, right->anchor) == 0 &&
+	                                                           position_compare(left->focus, right->focus) == 0));
+}
+
+bool terminal_selection_set(struct terminal* terminal, struct terminal_selection_position anchor,
+                            struct terminal_selection_position focus) {
+	struct terminal_selection_state previous;
+	struct terminal_selection_state next = {.anchor = anchor, .focus = focus, .active = true};
+	bool                            success;
+
+	if (terminal == NULL || position_compare(anchor, focus) == 0) return false;
+	terminal_lock(terminal);
+	if (!selection_position_valid(terminal, anchor) || !selection_position_valid(terminal, focus)) {
+		terminal_unlock(terminal);
+		return false;
+	}
+	previous = terminal->selection;
+	if (selection_state_equal(&previous, &next)) {
+		terminal_unlock(terminal);
+		return true;
+	}
+	if (!hide_cursor(terminal)) {
+		terminal_unlock(terminal);
+		return false;
+	}
+	terminal->selection = next;
+	success             = redraw_selection_difference(terminal, &previous) && show_cursor(terminal);
+	terminal_unlock(terminal);
+	return success;
+}
+
+bool terminal_selection_clear(struct terminal* terminal) {
+	struct terminal_selection_state previous;
+	bool                            success;
+
+	if (terminal == NULL) return false;
+	terminal_lock(terminal);
+	if (!terminal->selection.active) {
+		terminal_unlock(terminal);
+		return true;
+	}
+	previous = terminal->selection;
+	if (!hide_cursor(terminal)) {
+		terminal_unlock(terminal);
+		return false;
+	}
+	terminal->selection.active = false;
+	success                    = redraw_selection_difference(terminal, &previous) && show_cursor(terminal);
 	terminal_unlock(terminal);
 	return success;
 }

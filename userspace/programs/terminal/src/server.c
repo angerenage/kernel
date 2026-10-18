@@ -55,12 +55,41 @@ static bool dispatch_request(struct terminal* terminal, struct terminal_input* i
 		struct terminal_get_cursor_response cursor;
 		size_t                              column;
 		size_t                              row;
+		uint64_t                            line;
 		if ((call->rights & CAP_READ) == 0u) return reply_request(call, NULL, 0u, SYSCALL_STATUS_DENIED);
 		if (call->request_size != sizeof(struct terminal_get_cursor_request) ||
-		    call->response_capacity < sizeof(cursor) || !terminal_get_cursor_position(terminal, &column, &row))
+		    call->response_capacity < sizeof(cursor) || !terminal_get_cursor_position(terminal, &column, &row, &line))
 			return reply_request(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
-		cursor = (struct terminal_get_cursor_response){.column = column, .row = row};
+		cursor = (struct terminal_get_cursor_response){.column = column, .row = row, .line = line};
 		return reply_request(call, &cursor, sizeof(cursor), SYSCALL_STATUS_OK);
+	}
+	if (header.op == TERMINAL_OP_GET_SELECTION) {
+		struct terminal_get_selection_response selection;
+		if ((call->rights & CAP_READ) == 0u) return reply_request(call, NULL, 0u, SYSCALL_STATUS_DENIED);
+		if (call->request_size != sizeof(struct terminal_get_selection_request) ||
+		    call->response_capacity < sizeof(selection))
+			return reply_request(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+		if (!terminal_selection_get(terminal, &selection))
+			return reply_request(call, NULL, 0u, SYSCALL_STATUS_UNAVAILABLE);
+		return reply_request(call, &selection, sizeof(selection), SYSCALL_STATUS_OK);
+	}
+	if (header.op == TERMINAL_OP_SET_SELECTION) {
+		struct terminal_set_selection_request selection;
+		if ((call->rights & CAP_WRITE) == 0u) return reply_request(call, NULL, 0u, SYSCALL_STATUS_DENIED);
+		if (call->request_size != sizeof(selection)) return reply_request(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+		memcpy(&selection, data, sizeof(selection));
+		if (selection.anchor.line == 0u || selection.focus.line == 0u ||
+		    (selection.anchor.line == selection.focus.line && selection.anchor.column == selection.focus.column) ||
+		    !terminal_selection_set(terminal, selection.anchor, selection.focus))
+			return reply_request(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+		return reply_request(call, NULL, 0u, SYSCALL_STATUS_OK);
+	}
+	if (header.op == TERMINAL_OP_CLEAR_SELECTION) {
+		if ((call->rights & CAP_WRITE) == 0u) return reply_request(call, NULL, 0u, SYSCALL_STATUS_DENIED);
+		if (call->request_size != sizeof(struct terminal_clear_selection_request))
+			return reply_request(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+		return reply_request(
+			call, NULL, 0u, terminal_selection_clear(terminal) ? SYSCALL_STATUS_OK : SYSCALL_STATUS_FAILED);
 	}
 	if (header.op == TERMINAL_OP_ACQUIRE_INTERRUPT_SIGNAL) {
 		struct terminal_acquire_interrupt_signal_response response = {.capability = CAP_ID_INVALID};

@@ -10,6 +10,16 @@ syscall_status_t terminal_get_info(cap_id_t terminal_cap, struct terminal_get_in
 /* Read the framebuffer terminal's current character-cell cursor position. */
 syscall_status_t terminal_get_cursor(cap_id_t terminal_cap, struct terminal_get_cursor_response* out_cursor);
 
+/* Read the active directional selection. */
+syscall_status_t terminal_get_selection(cap_id_t terminal_cap, struct terminal_get_selection_response* out_selection);
+
+/* Replace the active selection with one retained half-open cell range. */
+syscall_status_t terminal_set_selection(cap_id_t terminal_cap, struct terminal_selection_position anchor,
+                                        struct terminal_selection_position focus);
+
+/* Clear the active selection. */
+syscall_status_t terminal_clear_selection(cap_id_t terminal_cap);
+
 /* Acquire the terminal's coalesced interrupt notification signal. */
 syscall_status_t terminal_acquire_interrupt_signal(cap_id_t terminal_cap, cap_id_t* out_signal_cap);
 
