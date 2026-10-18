@@ -20,6 +20,7 @@ terminal_dep = declare_dependency(
 terminal_elf = executable(
 	'terminal.elf',
 	sources : files(
+		'src/glyph_cache.c',
 		'src/input.c',
 		'src/main.c',
 		'src/server.c',

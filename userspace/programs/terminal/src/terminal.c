@@ -1,14 +1,14 @@
 #include "terminal.h"
 
 #include <base/math.h>
-#include <ft2build.h>
-#include FT_FREETYPE_H
 #include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+#include "glyph_cache.h"
 
 #define FRAMEBUFFER_MEMORY_MODEL_RGB 1u
 #define TERMINAL_FONT_PATH "/boot/CommitMono.otf"
@@ -72,6 +72,7 @@ struct terminal {
 	struct drawing_surface        surface;
 	FT_Library                    library;
 	FT_Face                       face;
+	struct terminal_glyph_cache*  glyph_cache;
 	uint8_t*                      font_data;
 	size_t                        cell_width;
 	size_t                        cell_height;
@@ -211,50 +212,26 @@ static struct color blend_color(struct color foreground, struct color background
 	};
 }
 
-static bool bitmap_alpha(const FT_Bitmap* bitmap, const uint8_t* row, size_t column, uint8_t* alpha) {
-	if (bitmap->pixel_mode == FT_PIXEL_MODE_GRAY) {
-		if (bitmap->num_grays <= 1u) return false;
-		*alpha = (uint8_t)(((uint32_t)row[column] * 255u) / (bitmap->num_grays - 1u));
-		return true;
-	}
-	if (bitmap->pixel_mode == FT_PIXEL_MODE_MONO) {
-		*alpha = (row[column / 8u] & (uint8_t)(0x80u >> (column % 8u))) != 0u ? 255u : 0u;
-		return true;
-	}
-	return false;
-}
-
-static bool draw_bitmap(const struct drawing_surface* surface, const FT_Bitmap* bitmap, int64_t x, int64_t y,
-                        size_t clip_x, size_t clip_y, size_t clip_width, size_t clip_height, struct color foreground,
-                        struct color background) {
-	size_t stride;
-	size_t minimum_stride;
+static bool draw_glyph(const struct drawing_surface* surface, const struct terminal_glyph* glyph, int64_t x, int64_t y,
+                       size_t clip_x, size_t clip_y, size_t clip_width, size_t clip_height, struct color foreground,
+                       struct color background) {
 	size_t clip_right;
 	size_t clip_bottom;
 
-	if (surface == NULL || bitmap == NULL || bitmap->pitch == INT_MIN || clip_x > surface->width ||
-	    clip_y > surface->height || clip_width > surface->width - clip_x || clip_height > surface->height - clip_y)
+	if (surface == NULL || glyph == NULL || clip_x > surface->width || clip_y > surface->height ||
+	    clip_width > surface->width - clip_x || clip_height > surface->height - clip_y)
 		return false;
 	clip_right  = clip_x + clip_width;
 	clip_bottom = clip_y + clip_height;
-	if (bitmap->width == 0u || bitmap->rows == 0u) return true;
-	if (bitmap->buffer == NULL) return false;
-	stride = (size_t)(bitmap->pitch < 0 ? -bitmap->pitch : bitmap->pitch);
-	if (bitmap->pixel_mode == FT_PIXEL_MODE_GRAY) minimum_stride = bitmap->width;
-	else if (bitmap->pixel_mode == FT_PIXEL_MODE_MONO) minimum_stride = (bitmap->width + 7u) / 8u;
-	else return false;
-	if (stride < minimum_stride) return false;
+	if (glyph->width == 0u || glyph->height == 0u) return true;
+	if (glyph->alpha == NULL) return false;
 
-	for (size_t row = 0u; row < bitmap->rows; row++) {
-		size_t source_row = bitmap->pitch < 0 ? bitmap->rows - row - 1u : row;
-		size_t source_offset;
-		if (mul_overflow_size(source_row, stride, &source_offset)) return false;
-		for (size_t column = 0u; column < bitmap->width; column++) {
+	for (size_t row = 0u; row < glyph->height; row++) {
+		for (size_t column = 0u; column < glyph->width; column++) {
 			int64_t destination_x = x + (int64_t)column;
 			int64_t destination_y = y + (int64_t)row;
-			uint8_t alpha;
+			uint8_t alpha         = glyph->alpha[row * glyph->width + column];
 
-			if (!bitmap_alpha(bitmap, bitmap->buffer + source_offset, column, &alpha)) return false;
 			if (alpha == 0u || destination_x < 0 || destination_y < 0 || (uint64_t)destination_x < clip_x ||
 			    (uint64_t)destination_x >= clip_right || (uint64_t)destination_y < clip_y ||
 			    (uint64_t)destination_y >= clip_bottom)
@@ -356,24 +333,23 @@ static bool draw_cell_value(struct terminal* terminal, const struct terminal_cel
 	               terminal->cell_height,
 	               background);
 	if (cell->codepoint != ' ') {
-		FT_GlyphSlot glyph;
-		int64_t      glyph_x;
-		int64_t      glyph_y;
+		const struct terminal_glyph* glyph;
+		int64_t                      glyph_x;
+		int64_t                      glyph_y;
 
-		if (FT_Load_Char(terminal->face, cell->codepoint, FT_LOAD_RENDER) != FT_Err_Ok) return false;
-		glyph   = terminal->face->glyph;
-		glyph_x = (int64_t)cell_x + glyph->bitmap_left;
-		glyph_y = (int64_t)cell_y + (int64_t)terminal->ascender - glyph->bitmap_top;
-		if (!draw_bitmap(&terminal->surface,
-		                 &glyph->bitmap,
-		                 glyph_x,
-		                 glyph_y,
-		                 cell_x,
-		                 cell_y,
-		                 terminal->cell_width,
-		                 terminal->cell_height,
-		                 foreground,
-		                 background))
+		if (!terminal_glyph_cache_get(terminal->glyph_cache, cell->codepoint, &glyph)) return false;
+		glyph_x = (int64_t)cell_x + glyph->left;
+		glyph_y = (int64_t)cell_y + (int64_t)terminal->ascender - glyph->top;
+		if (!draw_glyph(&terminal->surface,
+		                glyph,
+		                glyph_x,
+		                glyph_y,
+		                cell_x,
+		                cell_y,
+		                terminal->cell_width,
+		                terminal->cell_height,
+		                foreground,
+		                background))
 			return false;
 	}
 	if (cell->underline && !cursor) {
@@ -894,8 +870,9 @@ struct terminal* terminal_create(volatile uint8_t* framebuffer, const struct fra
 	    mul_overflow_size(terminal->columns, terminal->rows, &terminal->cell_count) ||
 	    terminal->cell_count > SIZE_MAX / sizeof(*terminal->cells))
 		goto fail;
-	terminal->cells = calloc(terminal->cell_count, sizeof(*terminal->cells));
-	if (terminal->cells == NULL) goto fail;
+	terminal->cells       = calloc(terminal->cell_count, sizeof(*terminal->cells));
+	terminal->glyph_cache = terminal_glyph_cache_create(terminal->face);
+	if (terminal->cells == NULL || terminal->glyph_cache == NULL) goto fail;
 	reset_attributes(terminal);
 	terminal->cursor_visible = true;
 	clear_display(terminal);
@@ -909,6 +886,7 @@ fail:
 
 void terminal_destroy(struct terminal* terminal) {
 	if (terminal == NULL) return;
+	terminal_glyph_cache_destroy(terminal->glyph_cache);
 	if (terminal->face != NULL) (void)FT_Done_Face(terminal->face);
 	if (terminal->library != NULL) (void)FT_Done_FreeType(terminal->library);
 	free(terminal->font_data);
