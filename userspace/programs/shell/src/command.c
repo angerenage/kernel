@@ -70,6 +70,13 @@ static bool execute_print_directory(const struct shell* shell, size_t argc, char
 	       printf("%.*s\n", (int)shell->current_directory_size, shell->current_directory) >= 0;
 }
 
+static bool execute_echo(size_t argc, char* const argv[]) {
+	for (size_t i = 0u; i < argc; i++) {
+		if (printf(i == 0u ? "%s" : " %s", argv[i]) < 0) return false;
+	}
+	return printf("\n") >= 0;
+}
+
 static bool execute_program(struct shell* shell, size_t argc, char* const argv[]) {
 	size_t    command_size = strlen(argv[0]);
 	uintptr_t exit_code;
@@ -181,6 +188,7 @@ bool shell_execute_line(struct shell* shell, const char* line, size_t size) {
 	if (parse_result != WORD_PARSE_OK || argc == 0u) return false;
 	if (strcmp(argv[0], "cd") == 0) success = execute_change_directory(shell, argc - 1u, argv + 1u);
 	else if (strcmp(argv[0], "pwd") == 0) success = execute_print_directory(shell, argc - 1u, argv + 1u);
+	else if (strcmp(argv[0], "echo") == 0) success = execute_echo(argc - 1u, argv + 1u);
 	else if (strcmp(argv[0], "clear") == 0) {
 		if (argc != 1u) success = write_error("clear", "expected no arguments");
 		else success = printf("\x1b[2J\x1b[H") >= 0;
