@@ -319,8 +319,8 @@ static bool dispatch_restore_foreground(struct tty_session* session, const struc
 	session->foreground_pid               = session->controller_pid;
 	session->foreground_interrupt_pending = false;
 	session_unlock(session);
-	if (process_cap != CAP_ID_INVALID && cap_drop(process_cap) != SYSCALL_STATUS_OK)
-		return reply(call, NULL, 0u, SYSCALL_STATUS_FAILED);
+	/* Reaping the foreground process destroys its object, which already removed this capability. */
+	if (process_cap != CAP_ID_INVALID) (void)cap_drop(process_cap);
 	return reply(call, NULL, 0u, SYSCALL_STATUS_OK);
 }
 
