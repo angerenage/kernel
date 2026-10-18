@@ -87,8 +87,21 @@ size_t shell_prompt_width(const struct shell* shell) {
 }
 
 bool shell_write_prompt(const struct shell* shell) {
-	if (shell == NULL || shell->terminal_columns == 0u || shell->current_directory_size > INT32_MAX ||
-	    printf("\x1b[1;34mkernel\x1b[0m:\x1b[1;36m%.*s\x1b[0m\x1b[1;32m$\x1b[0m ",
+	struct terminal_get_cursor_response cursor;
+	cap_id_t                            terminal_cap;
+	bool                                unfinished_line;
+
+	if (shell == NULL || shell->terminal_columns == 0u || shell->current_directory_size > INT32_MAX) return false;
+	/*
+	 * The line editor anchors the prompt at column zero. CAN cancels an escape
+	 * or UTF-8 sequence that earlier output left unfinished, then output left
+	 * without a final newline is ended.
+	 */
+	display_get_standard_streams(&terminal_cap, NULL, NULL);
+	if (putchar('\x18') == EOF) return false;
+	unfinished_line = terminal_get_cursor(terminal_cap, &cursor) == SYSCALL_STATUS_OK && cursor.column != 0u;
+	if (printf("%s\x1b[1;34mkernel\x1b[0m:\x1b[1;36m%.*s\x1b[0m\x1b[1;32m$\x1b[0m ",
+	           unfinished_line ? "\n" : "",
 	           (int)shell->current_directory_size,
 	           shell->current_directory) < 0)
 		return false;
