@@ -172,6 +172,11 @@ struct init_unwatch_request {
 struct init_call_result init_advertise(const struct init_service_selector* selector, uint32_t minor,
                                        cap_id_t service_capability, cap_rights_t client_rights);
 
+/* Advertise a service while retaining broader capability rights inside init. */
+struct init_call_result init_advertise_with_rights(const struct init_service_selector* selector, uint32_t minor,
+                                                   cap_id_t service_capability, cap_rights_t init_rights,
+                                                   cap_rights_t client_rights);
+
 /* Remove the calling process's advertisement for one service identity. */
 struct init_call_result init_withdraw(const struct init_service_selector* selector);
 

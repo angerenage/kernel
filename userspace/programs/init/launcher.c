@@ -111,8 +111,8 @@ cleanup:
 	return status;
 }
 
-static syscall_status_t delegate_input_stream(process_id_t target, enum bootstrap_input_source source,
-                                              cap_id_t* out_capability) {
+static syscall_status_t install_input_stream(process_id_t target, enum bootstrap_input_source source,
+                                             cap_id_t* out_capability) {
 	struct init_protocol_query query = {0};
 	struct init_service_handle input = {.capability = CAP_ID_INVALID};
 	struct self_info           self  = {
@@ -136,20 +136,25 @@ static syscall_status_t delegate_input_stream(process_id_t target, enum bootstra
 	}
 	else return SYSCALL_STATUS_BAD_ARGUMENT;
 	*out_capability = CAP_ID_INVALID;
-	status          = process_self_info(&self);
+	if (source == BOOTSTRAP_INPUT_TTY_SESSION) {
+		registry_status =
+			registry_grant(target, &query, TTY_SESSION_SERVICE_NAME, TTY_SESSION_CONTROL_RIGHTS, out_capability);
+		if (registry_status != INIT_REGISTRY_OK)
+			return registry_status == INIT_REGISTRY_NOT_FOUND ? SYSCALL_STATUS_UNAVAILABLE : SYSCALL_STATUS_FAILED;
+		return SYSCALL_STATUS_OK;
+	}
+	status = process_self_info(&self);
 	if (status != SYSCALL_STATUS_OK) goto cleanup;
 	if (self.pid == PROCESS_PID_INVALID) {
 		status = SYSCALL_STATUS_FAILED;
 		goto cleanup;
 	}
-	const char* service = source == BOOTSTRAP_INPUT_TERMINAL ? TERMINAL_SERVICE_NAME : TTY_SESSION_SERVICE_NAME;
-	registry_status     = registry_acquire(self.pid, &query, service, &input);
+	registry_status = registry_acquire(self.pid, &query, TERMINAL_SERVICE_NAME, &input);
 	if (registry_status != INIT_REGISTRY_OK) {
 		status = registry_status == INIT_REGISTRY_NOT_FOUND ? SYSCALL_STATUS_UNAVAILABLE : SYSCALL_STATUS_FAILED;
 		goto cleanup;
 	}
-	cap_rights_t rights = source == BOOTSTRAP_INPUT_TERMINAL ? TERMINAL_INPUT_RIGHTS : TTY_SESSION_CLIENT_RIGHTS;
-	status              = cap_delegate(input.capability, target, rights, out_capability);
+	status = cap_delegate(input.capability, target, TERMINAL_INPUT_RIGHTS, out_capability);
 
 cleanup:
 	if (input.capability != CAP_ID_INVALID && cap_drop(input.capability) != SYSCALL_STATUS_OK &&
@@ -261,9 +266,9 @@ static bool bootstrap_launch_internal(const struct init_state* init, const char*
 		goto fail;
 	}
 	if (input_source != BOOTSTRAP_INPUT_NONE) {
-		status = delegate_input_stream(process_info.pid, input_source, &input_stream_cap);
+		status = install_input_stream(process_info.pid, input_source, &input_stream_cap);
 		if (status != SYSCALL_STATUS_OK) {
-			printf("init: input stream delegation failed: %u\n", (unsigned)status);
+			printf("init: input stream installation failed: %u\n", (unsigned)status);
 			goto fail;
 		}
 	}

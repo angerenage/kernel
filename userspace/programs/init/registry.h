@@ -14,6 +14,10 @@ enum init_registry_status registry_withdraw(process_id_t owner, const struct ini
 enum init_registry_status registry_acquire(process_id_t caller, const struct init_protocol_query* query,
                                            const char* service, struct init_service_handle* out_handle);
 
+/* Grant an advertised capability directly to a launched process with selected rights. */
+enum init_registry_status registry_grant(process_id_t target, const struct init_protocol_query* query,
+                                         const char* service, cap_rights_t rights, cap_id_t* out_capability);
+
 /* Report whether one exact service is currently advertised. */
 bool registry_contains(const struct init_service_selector* selector);
 

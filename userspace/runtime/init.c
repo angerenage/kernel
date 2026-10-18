@@ -47,8 +47,9 @@ static struct init_call_result init_get_pid(process_id_t* out_pid) {
 	return local_error(INIT_REGISTRY_OK, SYSCALL_STATUS_OK);
 }
 
-struct init_call_result init_advertise(const struct init_service_selector* selector, uint32_t minor,
-                                       cap_id_t service_capability, cap_rights_t client_rights) {
+struct init_call_result init_advertise_with_rights(const struct init_service_selector* selector, uint32_t minor,
+                                                   cap_id_t service_capability, cap_rights_t init_rights,
+                                                   cap_rights_t client_rights) {
 	struct init_advertise_request request = {.header = {.op = INIT_OP_ADVERTISE}};
 	struct init_registry_response response;
 	struct init_call_result       result;
@@ -56,11 +57,12 @@ struct init_call_result init_advertise(const struct init_service_selector* selec
 	cap_id_t                      delegated = CAP_ID_INVALID;
 	syscall_status_t              status;
 
-	if (selector == NULL || service_capability == CAP_ID_INVALID || client_rights == 0u)
+	if (selector == NULL || service_capability == CAP_ID_INVALID || client_rights == 0u ||
+	    (init_rights & (client_rights | CAP_DELEGATE)) != (client_rights | CAP_DELEGATE))
 		return local_error(INIT_REGISTRY_INVALID_ARGUMENT, SYSCALL_STATUS_BAD_ARGUMENT);
 	result = init_get_pid(&init_pid);
 	if (result.status != INIT_REGISTRY_OK) return result;
-	status = cap_delegate(service_capability, init_pid, client_rights | CAP_DELEGATE, &delegated);
+	status = cap_delegate(service_capability, init_pid, init_rights, &delegated);
 	if (status != SYSCALL_STATUS_OK) return local_error(INIT_REGISTRY_RESOURCE_FAILURE, status);
 	request.selector      = *selector;
 	request.minor         = minor;
@@ -70,6 +72,11 @@ struct init_call_result init_advertise(const struct init_service_selector* selec
 	if (result.status == INIT_REGISTRY_OK) result.status = response.status;
 	if (result.status != INIT_REGISTRY_OK) (void)cap_revoke(delegated, 0u);
 	return result;
+}
+
+struct init_call_result init_advertise(const struct init_service_selector* selector, uint32_t minor,
+                                       cap_id_t service_capability, cap_rights_t client_rights) {
+	return init_advertise_with_rights(selector, minor, service_capability, client_rights | CAP_DELEGATE, client_rights);
 }
 
 struct init_call_result init_withdraw(const struct init_service_selector* selector) {

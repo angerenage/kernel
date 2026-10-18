@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <system/capability.h>
+#include <system/display.h>
 
 #define VFS_PROTOCOL_VERSION_MAJOR 1u
 #define VFS_PROTOCOL_VERSION_MINOR 0u
@@ -22,29 +23,20 @@ bool shell_initialize(struct shell* shell) {
 	};
 	struct init_service_handle           service = {.capability = CAP_ID_INVALID};
 	struct init_call_result              acquired;
-	struct init_service_handle           tty = {.capability = CAP_ID_INVALID};
-	struct init_call_result              tty_acquired;
 	struct tty_session_get_info_response terminal_info;
 
 	if (shell == NULL) return false;
-	*shell       = (struct shell){.tty_cap               = CAP_ID_INVALID,
-	                              .tty_owner             = PROCESS_PID_INVALID,
-	                              .vfs_cap               = CAP_ID_INVALID,
-	                              .current_directory_cap = CAP_ID_INVALID};
-	tty_acquired = tty_session_acquire(&tty);
-	if (tty_acquired.transport_status != SYSCALL_STATUS_OK || tty_acquired.status != INIT_REGISTRY_OK ||
-	    tty.capability == CAP_ID_INVALID || tty.owner == PROCESS_PID_INVALID ||
-	    tty.info.rights != TTY_SESSION_CLIENT_RIGHTS) {
-		if (tty.capability != CAP_ID_INVALID) (void)cap_drop(tty.capability);
-		return false;
-	}
-	shell->tty_cap   = tty.capability;
-	shell->tty_owner = tty.owner;
-	if (tty_session_claim(shell->tty_cap) != SYSCALL_STATUS_OK ||
-	    tty_session_get_info(shell->tty_cap, &terminal_info) != SYSCALL_STATUS_OK || terminal_info.columns == 0u ||
+	*shell = (struct shell){.tty_cap               = CAP_ID_INVALID,
+	                        .tty_owner             = PROCESS_PID_INVALID,
+	                        .vfs_cap               = CAP_ID_INVALID,
+	                        .current_directory_cap = CAP_ID_INVALID};
+	display_get_standard_streams(&shell->tty_cap, NULL, NULL);
+	if (shell->tty_cap == CAP_ID_INVALID || tty_session_get_info(shell->tty_cap, &terminal_info) != SYSCALL_STATUS_OK ||
+	    terminal_info.session_pid == PROCESS_PID_INVALID || terminal_info.columns == 0u ||
 	    terminal_info.columns > SIZE_MAX || terminal_info.rows == 0u || terminal_info.rows > INT64_MAX ||
 	    terminal_info.rows > SIZE_MAX / terminal_info.columns)
 		goto fail;
+	shell->tty_owner        = terminal_info.session_pid;
 	shell->terminal_columns = (size_t)terminal_info.columns;
 	shell->terminal_rows    = (size_t)terminal_info.rows;
 

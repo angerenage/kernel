@@ -38,8 +38,9 @@ struct tty_session {
 	cap_id_t            terminal_cap;
 	channel_id_t        endpoint;
 	cap_id_t            activity_cap;
+	cap_id_t            input_space_cap;
 	cap_id_t            service_cap;
-	process_id_t        controller_pid;
+	process_id_t        session_pid;
 	process_id_t        foreground_pid;
 	cap_id_t            foreground_process_cap;
 	bool                foreground_interrupt_pending;
@@ -51,6 +52,8 @@ struct tty_session {
 	size_t              pending_count;
 	bool                locked;
 };
+
+static void fail_session(struct tty_session* session, const char* message);
 
 /* Serialize input, pending reads, and foreground ownership. */
 static void session_lock(struct tty_session* session) {
@@ -75,27 +78,50 @@ static size_t copy_input(const struct tty_session* session, uint8_t* output, siz
 	return count;
 }
 
-/* Consume bytes from the shared input queue. The caller holds the state lock. */
-static void consume_input(struct tty_session* session, size_t count) {
+/* Consume bytes and report whether a full queue became writable. */
+static bool consume_input(struct tty_session* session, size_t count) {
+	bool was_full       = session->input_count == TTY_SESSION_INPUT_CAPACITY;
 	session->input_head = (session->input_head + count) % TTY_SESSION_INPUT_CAPACITY;
 	session->input_count -= count;
+	return was_full && count != 0u;
+}
+
+/* Wake the terminal-input thread after a reader releases queue capacity. */
+static bool notify_input_space(struct tty_session* session) {
+	struct signal_send_response response;
+
+	return signal_send(session->input_space_cap, 1u, 0u, 0u, 0u, SIGNAL_SEND_FLAG_COALESCE, &response) ==
+	       SYSCALL_STATUS_OK;
+}
+
+/* Drop a process capability unless reaping the process already destroyed it. */
+static bool drop_process_capability(cap_id_t capability) {
+	bool valid;
+
+	if (capability == CAP_ID_INVALID) return true;
+	if (cap_valid(capability, &valid) != SYSCALL_STATUS_OK) return false;
+	return !valid || cap_drop(capability) == SYSCALL_STATUS_OK;
 }
 
 /* Complete queued reads belonging to the current foreground process. */
 static void service_pending_reads(struct tty_session* session) {
 	uint8_t response[CAP_MAX_RESPONSE_SIZE];
+	bool    space_available = false;
 
 	session_lock(session);
 	while (session->pending_count != 0u && session->input_count != 0u) {
 		struct pending_read* pending = &session->pending[session->pending_head];
-		if (pending->caller != session->foreground_pid) break;
+		if (session->foreground_pid != PROCESS_PID_INVALID && pending->caller != session->foreground_pid) break;
 		size_t count = copy_input(session, response, pending->size);
-		if (channel_reply(pending->call_id, response, count, SYSCALL_STATUS_OK) == SYSCALL_STATUS_OK)
-			consume_input(session, count);
+		if (channel_reply(pending->call_id, response, count, SYSCALL_STATUS_OK) == SYSCALL_STATUS_OK &&
+		    consume_input(session, count))
+			space_available = true;
 		session->pending_head = (session->pending_head + 1u) % TTY_SESSION_PENDING_CAPACITY;
 		session->pending_count--;
 	}
 	session_unlock(session);
+	if (space_available && !notify_input_space(session))
+		fail_session(session, "input availability notification failed");
 }
 
 /* Reject reads left behind by the previous foreground process. */
@@ -115,6 +141,19 @@ static void fail_session(struct tty_session* session, const char* message) {
 	thread_exit(1u);
 }
 
+/* Acquire the state lock only after the input queue has writable capacity. */
+static void lock_input_space(struct tty_session* session) {
+	for (;;) {
+		struct signal_message message;
+
+		session_lock(session);
+		if (session->input_count != TTY_SESSION_INPUT_CAPACITY) return;
+		session_unlock(session);
+		if (signal_wait(session->input_space_cap, &message) != SYSCALL_STATUS_OK)
+			fail_session(session, "input availability wait failed");
+	}
+}
+
 /* Consume terminal input continuously and route interrupts at the session boundary. */
 static void input_thread(void* opaque) {
 	struct tty_session* session = *(struct tty_session**)opaque;
@@ -122,11 +161,13 @@ static void input_thread(void* opaque) {
 	for (;;) {
 		uint8_t byte;
 		size_t  size = 0u;
+		lock_input_space(session);
+		session_unlock(session);
 		if (display_read(&byte, 1u, &size) != SYSCALL_STATUS_OK || size != 1u)
 			fail_session(session, "terminal input failed");
 
 		session_lock(session);
-		if (byte == TTY_SESSION_INTERRUPT_BYTE && session->foreground_pid != session->controller_pid) {
+		if (byte == TTY_SESSION_INTERRUPT_BYTE && session->foreground_pid != PROCESS_PID_INVALID) {
 			if (session->foreground_process_cap == CAP_ID_INVALID) {
 				session->foreground_interrupt_pending = true;
 				session_unlock(session);
@@ -137,10 +178,6 @@ static void input_thread(void* opaque) {
 			if (status != SYSCALL_STATUS_OK && status != SYSCALL_STATUS_UNAVAILABLE)
 				fail_session(session, "foreground interrupt failed");
 			continue;
-		}
-		if (session->input_count == TTY_SESSION_INPUT_CAPACITY) {
-			session_unlock(session);
-			fail_session(session, "input queue overflow");
 		}
 		size_t tail          = (session->input_head + session->input_count) % TTY_SESSION_INPUT_CAPACITY;
 		session->input[tail] = byte;
@@ -164,16 +201,22 @@ static bool dispatch_read(struct tty_session* session, const struct cap_request*
 	if (request.size == 0u) return reply(call, NULL, 0u, SYSCALL_STATUS_OK);
 
 	session_lock(session);
-	if (session->controller_pid == PROCESS_PID_INVALID || call->caller != session->foreground_pid) {
+	if (session->foreground_pid == PROCESS_PID_INVALID) {
+		if ((call->rights & CAP_MANAGE) == 0u) {
+			session_unlock(session);
+			return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
+		}
+	}
+	else if (call->caller != session->foreground_pid) {
 		session_unlock(session);
 		return reply(call, NULL, 0u, SYSCALL_STATUS_UNAVAILABLE);
 	}
 	if (session->input_count != 0u) {
-		size_t count   = copy_input(session, response, (size_t)request.size);
-		bool   success = reply(call, response, count, SYSCALL_STATUS_OK);
-		if (success) consume_input(session, count);
+		size_t count           = copy_input(session, response, (size_t)request.size);
+		bool   success         = reply(call, response, count, SYSCALL_STATUS_OK);
+		bool   space_available = success && consume_input(session, count);
 		session_unlock(session);
-		return success;
+		return success && (!space_available || notify_input_space(session));
 	}
 	if (session->pending_count == TTY_SESSION_PENDING_CAPACITY) {
 		session_unlock(session);
@@ -201,8 +244,9 @@ static bool dispatch_get_info(struct tty_session* session, const struct cap_requ
 	syscall_status_t status = terminal_get_info(session->terminal_cap, &terminal_info);
 	if (status != SYSCALL_STATUS_OK) return reply(call, NULL, 0u, status);
 	response = (struct tty_session_get_info_response){
-		.columns = terminal_info.columns,
-		.rows    = terminal_info.rows,
+		.columns     = terminal_info.columns,
+		.rows        = terminal_info.rows,
+		.session_pid = session->session_pid,
 	};
 	return reply(call, &response, sizeof(response), SYSCALL_STATUS_OK);
 }
@@ -225,24 +269,6 @@ static bool dispatch_get_cursor(struct tty_session* session, const struct cap_re
 	return reply(call, &response, sizeof(response), SYSCALL_STATUS_OK);
 }
 
-/* Claim the previously unowned session for one controlling shell process. */
-static bool dispatch_claim(struct tty_session* session, const struct cap_request* call) {
-	if ((call->rights & CAP_MANAGE) == 0u) return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
-	if (call->request_size != sizeof(struct tty_session_claim_request) || call->response_capacity != 0u)
-		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
-	session_lock(session);
-	if (session->controller_pid != PROCESS_PID_INVALID && session->controller_pid != call->caller) {
-		session_unlock(session);
-		return reply(call, NULL, 0u, SYSCALL_STATUS_UNAVAILABLE);
-	}
-	if (session->controller_pid == PROCESS_PID_INVALID) {
-		session->controller_pid = call->caller;
-		session->foreground_pid = call->caller;
-	}
-	session_unlock(session);
-	return reply(call, NULL, 0u, SYSCALL_STATUS_OK);
-}
-
 /* Select a prepared child before it starts running. */
 static bool dispatch_begin_foreground(struct tty_session* session, const struct cap_request* call, const void* data) {
 	struct tty_session_begin_foreground_request request;
@@ -254,26 +280,25 @@ static bool dispatch_begin_foreground(struct tty_session* session, const struct 
 	if (request.process_id == PROCESS_PID_INVALID) return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 
 	session_lock(session);
-	if (session->controller_pid != call->caller) {
-		session_unlock(session);
-		return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
-	}
-	if (session->foreground_pid != session->controller_pid || request.process_id == session->controller_pid) {
+	if (session->foreground_pid != PROCESS_PID_INVALID || request.process_id == call->caller) {
 		session_unlock(session);
 		return reply(call, NULL, 0u, SYSCALL_STATUS_UNAVAILABLE);
 	}
-	reject_pending_reads(session);
-	session->foreground_pid               = request.process_id;
-	session->foreground_interrupt_pending = false;
+	bool success = reply(call, NULL, 0u, SYSCALL_STATUS_OK);
+	if (success) {
+		reject_pending_reads(session);
+		session->foreground_pid               = request.process_id;
+		session->foreground_interrupt_pending = false;
+	}
 	session_unlock(session);
-	return reply(call, NULL, 0u, SYSCALL_STATUS_OK);
+	return success;
 }
 
 /* Install the process-control capability after the selected child starts. */
 static bool dispatch_attach_foreground(struct tty_session* session, const struct cap_request* call, const void* data) {
 	struct tty_session_attach_foreground_request request;
 	struct process_info_response                 info;
-	bool                                         interrupt_pending;
+	bool                                         interrupt_pending = false;
 
 	if ((call->rights & CAP_MANAGE) == 0u) return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
 	if (call->request_size != sizeof(request) || call->response_capacity != 0u)
@@ -284,44 +309,42 @@ static bool dispatch_attach_foreground(struct tty_session* session, const struct
 		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 
 	session_lock(session);
-	if (session->controller_pid != call->caller) {
-		session_unlock(session);
-		return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
-	}
 	if (session->foreground_process_cap != CAP_ID_INVALID || request.process_id != session->foreground_pid ||
-	    request.process_id == session->controller_pid) {
+	    request.process_id == call->caller) {
 		session_unlock(session);
 		return reply(call, NULL, 0u, SYSCALL_STATUS_UNAVAILABLE);
 	}
-	session->foreground_process_cap       = request.process_cap;
-	interrupt_pending                     = session->foreground_interrupt_pending;
-	session->foreground_interrupt_pending = false;
+	bool success = reply(call, NULL, 0u, SYSCALL_STATUS_OK);
+	if (success) {
+		session->foreground_process_cap       = request.process_cap;
+		interrupt_pending                     = session->foreground_interrupt_pending;
+		session->foreground_interrupt_pending = false;
+	}
 	session_unlock(session);
-	if (interrupt_pending) (void)process_kill(request.process_cap, PROCESS_EXIT_SYSTEM_INTERRUPTED);
-	return reply(call, NULL, 0u, SYSCALL_STATUS_OK);
+	if (success && interrupt_pending) (void)process_kill(request.process_cap, PROCESS_EXIT_SYSTEM_INTERRUPTED);
+	return success;
 }
 
 /* Return foreground ownership to the controlling shell. */
 static bool dispatch_restore_foreground(struct tty_session* session, const struct cap_request* call) {
-	cap_id_t process_cap;
+	cap_id_t process_cap = CAP_ID_INVALID;
 
 	if ((call->rights & CAP_MANAGE) == 0u) return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
 	if (call->request_size != sizeof(struct tty_session_restore_foreground_request) || call->response_capacity != 0u)
 		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	session_lock(session);
-	if (session->controller_pid != call->caller) {
-		session_unlock(session);
-		return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
+	bool success = reply(call, NULL, 0u, SYSCALL_STATUS_OK);
+	if (success) {
+		reject_pending_reads(session);
+		process_cap                           = session->foreground_process_cap;
+		session->foreground_process_cap       = CAP_ID_INVALID;
+		session->foreground_pid               = PROCESS_PID_INVALID;
+		session->foreground_interrupt_pending = false;
 	}
-	reject_pending_reads(session);
-	process_cap                           = session->foreground_process_cap;
-	session->foreground_process_cap       = CAP_ID_INVALID;
-	session->foreground_pid               = session->controller_pid;
-	session->foreground_interrupt_pending = false;
 	session_unlock(session);
-	if (process_cap != CAP_ID_INVALID && cap_drop(process_cap) != SYSCALL_STATUS_OK)
-		return reply(call, NULL, 0u, SYSCALL_STATUS_FAILED);
-	return reply(call, NULL, 0u, SYSCALL_STATUS_OK);
+	if (success && !drop_process_capability(process_cap))
+		printf("tty session: foreground process capability drop failed\n");
+	return success;
 }
 
 /* Decode and dispatch one request to the session object. */
@@ -341,8 +364,6 @@ static bool dispatch_request(struct tty_session* session, const struct cap_reque
 		return dispatch_get_info(session, call);
 	case TTY_SESSION_OP_GET_CURSOR:
 		return dispatch_get_cursor(session, call);
-	case TTY_SESSION_OP_CLAIM:
-		return dispatch_claim(session, call);
 	case TTY_SESSION_OP_BEGIN_FOREGROUND:
 		return dispatch_begin_foreground(session, call, data);
 	case TTY_SESSION_OP_ATTACH_FOREGROUND:
@@ -365,14 +386,15 @@ static bool advertise_session(struct tty_session* session, process_id_t pid) {
 	struct init_call_result result;
 
 	if (channel_create(&session->endpoint, &session->activity_cap) != SYSCALL_STATUS_OK) return false;
-	if (cap_publish(session->endpoint,
-	                TTY_SESSION_SERVICE_OBJECT_ID,
-	                pid,
-	                TTY_SESSION_CLIENT_RIGHTS | CAP_DELEGATE_PEER,
-	                &session->service_cap) != SYSCALL_STATUS_OK)
+	if (cap_publish(
+			session->endpoint, TTY_SESSION_SERVICE_OBJECT_ID, pid, TTY_SESSION_CONTROL_RIGHTS, &session->service_cap) !=
+	    SYSCALL_STATUS_OK)
 		return false;
-	result =
-		init_advertise(&selector, TTY_SESSION_PROTOCOL_VERSION_MINOR, session->service_cap, TTY_SESSION_CLIENT_RIGHTS);
+	result = init_advertise_with_rights(&selector,
+	                                    TTY_SESSION_PROTOCOL_VERSION_MINOR,
+	                                    session->service_cap,
+	                                    TTY_SESSION_CONTROL_RIGHTS,
+	                                    TTY_SESSION_CLIENT_RIGHTS);
 	return result.transport_status == SYSCALL_STATUS_OK && result.status == INIT_REGISTRY_OK;
 }
 
@@ -383,8 +405,9 @@ int tty_session_run(void) {
 		.terminal_cap           = CAP_ID_INVALID,
 		.endpoint               = CHANNEL_ID_INVALID,
 		.activity_cap           = CAP_ID_INVALID,
+		.input_space_cap        = CAP_ID_INVALID,
 		.service_cap            = CAP_ID_INVALID,
-		.controller_pid         = PROCESS_PID_INVALID,
+		.session_pid            = PROCESS_PID_INVALID,
 		.foreground_pid         = PROCESS_PID_INVALID,
 		.foreground_process_cap = CAP_ID_INVALID,
 	};
@@ -397,10 +420,11 @@ int tty_session_run(void) {
 		printf("tty session: initialization failed\n");
 		return 1;
 	}
-	session.self_cap = self.self_cap;
+	session.self_cap    = self.self_cap;
+	session.session_pid = self.pid;
 	if (self.address_space_cap != CAP_ID_INVALID) (void)cap_drop(self.address_space_cap);
 	if (self.main_thread_cap != CAP_ID_INVALID) (void)cap_drop(self.main_thread_cap);
-	if (!advertise_session(&session, self.pid)) {
+	if (signal_create(&session.input_space_cap) != SYSCALL_STATUS_OK || !advertise_session(&session, self.pid)) {
 		printf("tty session: advertisement failed\n");
 		return 1;
 	}
