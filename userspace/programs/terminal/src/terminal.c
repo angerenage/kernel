@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "glyph_cache.h"
 
@@ -15,6 +16,7 @@
 #define TERMINAL_FONT_PIXEL_HEIGHT 18u
 #define TERMINAL_TAB_WIDTH 4u
 #define TERMINAL_CSI_PARAMETER_CAPACITY 16u
+#define TERMINAL_SCROLLBACK_LINE_CAPACITY 4096u
 
 struct color {
 	uint8_t red;
@@ -83,6 +85,11 @@ struct terminal {
 	size_t                        row;
 	struct terminal_cell*         cells;
 	size_t                        cell_count;
+	struct terminal_cell*         history;
+	size_t                        history_count;
+	size_t                        history_head;
+	size_t                        viewport_offset;
+	bool                          viewport_dirty;
 	size_t                        saved_column;
 	size_t                        saved_row;
 	bool                          saved_cursor;
@@ -201,6 +208,18 @@ static void fill_rectangle(volatile uint8_t* framebuffer, size_t pitch, const st
 			destination += format->bytes_per_pixel;
 		}
 	}
+}
+
+static void copy_framebuffer_row(volatile uint8_t* destination, const volatile uint8_t* source, size_t size) {
+	if ((((uintptr_t)destination | (uintptr_t)source) & (sizeof(uint64_t) - 1u)) == 0u) {
+		size_t words = size / sizeof(uint64_t);
+		for (size_t word = 0u; word < words; word++)
+			((volatile uint64_t*)destination)[word] = ((const volatile uint64_t*)source)[word];
+		destination += words * sizeof(uint64_t);
+		source += words * sizeof(uint64_t);
+		size -= words * sizeof(uint64_t);
+	}
+	for (size_t byte = 0u; byte < size; byte++) destination[byte] = source[byte];
 }
 
 static struct color blend_color(struct color foreground, struct color background, uint8_t alpha) {
@@ -367,8 +386,71 @@ static bool draw_cell_value(struct terminal* terminal, const struct terminal_cel
 	return true;
 }
 
+static bool live_row_visible(const struct terminal* terminal, size_t row) {
+	return terminal->viewport_offset < terminal->rows && row < terminal->rows - terminal->viewport_offset;
+}
+
 static bool draw_cell(struct terminal* terminal, size_t row, size_t column, bool cursor) {
+	if (terminal->viewport_offset != 0u) {
+		if (live_row_visible(terminal, row)) terminal->viewport_dirty = true;
+		return true;
+	}
 	return draw_cell_value(terminal, &terminal->cells[row * terminal->columns + column], row, column, cursor);
+}
+
+static const struct terminal_cell* history_line(const struct terminal* terminal, size_t line) {
+	size_t slot = (terminal->history_head + line) % TERMINAL_SCROLLBACK_LINE_CAPACITY;
+	return terminal->history + slot * terminal->columns;
+}
+
+static bool redraw_viewport_row(struct terminal* terminal, size_t row) {
+	size_t                      line = terminal->history_count - terminal->viewport_offset + row;
+	const struct terminal_cell* cells;
+
+	if (line < terminal->history_count) cells = history_line(terminal, line);
+	else cells = terminal->cells + (line - terminal->history_count) * terminal->columns;
+	for (size_t column = 0u; column < terminal->columns; column++)
+		if (!draw_cell_value(terminal, &cells[column], row, column, false)) return false;
+	return true;
+}
+
+static bool redraw_viewport(struct terminal* terminal) {
+	for (size_t row = 0u; row < terminal->rows; row++)
+		if (!redraw_viewport_row(terminal, row)) return false;
+	terminal->viewport_dirty = false;
+	return true;
+}
+
+static bool move_viewport(struct terminal* terminal, bool older, size_t lines) {
+	size_t width  = terminal->columns * terminal->cell_width * terminal->surface.format.bytes_per_pixel;
+	size_t height = terminal->rows * terminal->cell_height;
+	size_t pixel_lines;
+
+	if (lines >= terminal->rows || mul_overflow_size(lines, terminal->cell_height, &pixel_lines) ||
+	    pixel_lines >= height)
+		return redraw_viewport(terminal);
+	if (older) {
+		for (size_t row = height - pixel_lines; row != 0u; row--) {
+			size_t            source_row = row - 1u;
+			volatile uint8_t* destination =
+				terminal->surface.framebuffer + (source_row + pixel_lines) * terminal->surface.pitch;
+			volatile uint8_t* source = terminal->surface.framebuffer + source_row * terminal->surface.pitch;
+			copy_framebuffer_row(destination, source, width);
+		}
+		for (size_t row = 0u; row < lines; row++)
+			if (!redraw_viewport_row(terminal, row)) return false;
+	}
+	else {
+		for (size_t row = 0u; row < height - pixel_lines; row++) {
+			volatile uint8_t* destination = terminal->surface.framebuffer + row * terminal->surface.pitch;
+			volatile uint8_t* source = terminal->surface.framebuffer + (row + pixel_lines) * terminal->surface.pitch;
+			copy_framebuffer_row(destination, source, width);
+		}
+		for (size_t row = terminal->rows - lines; row < terminal->rows; row++)
+			if (!redraw_viewport_row(terminal, row)) return false;
+	}
+	terminal->viewport_dirty = false;
+	return true;
 }
 
 static const struct terminal_cell* overlay_cell_at(const struct terminal* terminal, size_t index) {
@@ -393,7 +475,7 @@ static bool hide_cursor(struct terminal* terminal) {
 static bool show_cursor(struct terminal* terminal) {
 	size_t row    = terminal->row;
 	size_t column = terminal->column;
-	if (!terminal->cursor_visible || terminal->cursor_drawn) return true;
+	if (!terminal->cursor_visible || terminal->cursor_drawn || terminal->viewport_offset != 0u) return true;
 	if (terminal->overlay_count != 0u) {
 		size_t caret =
 			terminal->preedit_caret < terminal->overlay_count ? terminal->preedit_caret : terminal->overlay_count;
@@ -413,7 +495,9 @@ static bool erase_overlay(struct terminal* terminal) {
 	bool success = true;
 	for (size_t i = 0u; i < terminal->overlay_count; i++) {
 		size_t index = terminal->overlay[i].index;
-		if (!draw_cell(terminal, index / terminal->columns, index % terminal->columns, false)) success = false;
+		if (terminal->viewport_offset == 0u &&
+		    !draw_cell(terminal, index / terminal->columns, index % terminal->columns, false))
+			success = false;
 	}
 	terminal->overlay_count = 0u;
 	return success;
@@ -439,11 +523,11 @@ static bool draw_overlay(struct terminal* terminal) {
 					   .underline  = true,
 					   },
 		};
-		if (!draw_cell_value(terminal,
-		                     &terminal->overlay[i].cell,
-		                     terminal->overlay[i].index / terminal->columns,
-		                     terminal->overlay[i].index % terminal->columns,
-		                     false))
+		if (terminal->viewport_offset == 0u && !draw_cell_value(terminal,
+		                                                        &terminal->overlay[i].cell,
+		                                                        terminal->overlay[i].index / terminal->columns,
+		                                                        terminal->overlay[i].index % terminal->columns,
+		                                                        false))
 			return false;
 	}
 	return true;
@@ -460,51 +544,76 @@ static void terminal_unlock(struct terminal* terminal) {
 static void clear_display(struct terminal* terminal) {
 	struct terminal_cell blank = blank_cell(terminal);
 
-	fill_rectangle(terminal->surface.framebuffer,
-	               terminal->surface.pitch,
-	               &terminal->surface.format,
-	               0u,
-	               0u,
-	               terminal->surface.width,
-	               terminal->surface.height,
-	               blank.background);
+	if (terminal->viewport_offset == 0u)
+		fill_rectangle(terminal->surface.framebuffer,
+		               terminal->surface.pitch,
+		               &terminal->surface.format,
+		               0u,
+		               0u,
+		               terminal->surface.width,
+		               terminal->surface.height,
+		               blank.background);
+	else if (terminal->viewport_offset < terminal->rows) terminal->viewport_dirty = true;
 	for (size_t index = 0u; index < terminal->cell_count; index++) terminal->cells[index] = blank;
 	terminal->column       = 0u;
 	terminal->row          = 0u;
 	terminal->wrap_pending = false;
 }
 
-static void scroll(struct terminal* terminal) {
+static void append_history_line(struct terminal* terminal, const struct terminal_cell* cells) {
+	bool   full = terminal->history_count == TERMINAL_SCROLLBACK_LINE_CAPACITY;
+	size_t slot;
+
+	if (full) {
+		slot                   = terminal->history_head;
+		terminal->history_head = (terminal->history_head + 1u) % TERMINAL_SCROLLBACK_LINE_CAPACITY;
+	}
+	else {
+		slot = (terminal->history_head + terminal->history_count) % TERMINAL_SCROLLBACK_LINE_CAPACITY;
+		terminal->history_count++;
+	}
+	memcpy(terminal->history + slot * terminal->columns, cells, terminal->columns * sizeof(*cells));
+	if (terminal->viewport_offset == 0u) return;
+	if (!full || terminal->viewport_offset < terminal->history_count) terminal->viewport_offset++;
+	else terminal->viewport_dirty = true;
+}
+
+static void scroll_screen(struct terminal* terminal) {
 	size_t               width  = terminal->columns * terminal->cell_width * terminal->surface.format.bytes_per_pixel;
 	size_t               height = terminal->rows * terminal->cell_height;
 	size_t               copied_rows = height - terminal->cell_height;
 	struct terminal_cell blank       = blank_cell(terminal);
 
-	for (size_t row = 0u; row < copied_rows; row++) {
-		volatile uint8_t* destination = terminal->surface.framebuffer + row * terminal->surface.pitch;
-		volatile uint8_t* source =
-			terminal->surface.framebuffer + (row + terminal->cell_height) * terminal->surface.pitch;
-		for (size_t byte = 0u; byte < width; byte++) destination[byte] = source[byte];
+	append_history_line(terminal, terminal->cells);
+	if (terminal->viewport_offset == 0u) {
+		for (size_t row = 0u; row < copied_rows; row++) {
+			volatile uint8_t* destination = terminal->surface.framebuffer + row * terminal->surface.pitch;
+			volatile uint8_t* source =
+				terminal->surface.framebuffer + (row + terminal->cell_height) * terminal->surface.pitch;
+			copy_framebuffer_row(destination, source, width);
+		}
 	}
-	for (size_t index = 0u; index < terminal->cell_count - terminal->columns; index++)
-		terminal->cells[index] = terminal->cells[index + terminal->columns];
+	memmove(terminal->cells,
+	        terminal->cells + terminal->columns,
+	        (terminal->cell_count - terminal->columns) * sizeof(*terminal->cells));
 	for (size_t index = terminal->cell_count - terminal->columns; index < terminal->cell_count; index++)
 		terminal->cells[index] = blank;
-	fill_rectangle(terminal->surface.framebuffer,
-	               terminal->surface.pitch,
-	               &terminal->surface.format,
-	               0u,
-	               copied_rows,
-	               terminal->columns * terminal->cell_width,
-	               terminal->cell_height,
-	               blank.background);
+	if (terminal->viewport_offset == 0u)
+		fill_rectangle(terminal->surface.framebuffer,
+		               terminal->surface.pitch,
+		               &terminal->surface.format,
+		               0u,
+		               copied_rows,
+		               terminal->columns * terminal->cell_width,
+		               terminal->cell_height,
+		               blank.background);
 }
 
 static void next_line(struct terminal* terminal) {
 	terminal->column       = 0u;
 	terminal->wrap_pending = false;
 	if (terminal->row + 1u < terminal->rows) terminal->row++;
-	else scroll(terminal);
+	else scroll_screen(terminal);
 }
 
 static bool draw_codepoint(struct terminal* terminal, uint32_t codepoint) {
@@ -826,6 +935,7 @@ struct terminal* terminal_create(volatile uint8_t* framebuffer, const struct fra
 	size_t           glyph_height;
 	size_t           visible_row_size;
 	size_t           visible_size;
+	size_t           history_cell_count;
 	FT_Pos           advance;
 
 	if (framebuffer == NULL || info == NULL) return NULL;
@@ -868,11 +978,14 @@ struct terminal* terminal_create(volatile uint8_t* framebuffer, const struct fra
 	terminal->rows    = terminal->surface.height / terminal->cell_height;
 	if (terminal->columns == 0u || terminal->rows == 0u ||
 	    mul_overflow_size(terminal->columns, terminal->rows, &terminal->cell_count) ||
-	    terminal->cell_count > SIZE_MAX / sizeof(*terminal->cells))
+	    terminal->cell_count > SIZE_MAX / sizeof(*terminal->cells) ||
+	    mul_overflow_size(terminal->columns, TERMINAL_SCROLLBACK_LINE_CAPACITY, &history_cell_count) ||
+	    history_cell_count > SIZE_MAX / sizeof(*terminal->history))
 		goto fail;
 	terminal->cells       = calloc(terminal->cell_count, sizeof(*terminal->cells));
+	terminal->history     = malloc(history_cell_count * sizeof(*terminal->history));
 	terminal->glyph_cache = terminal_glyph_cache_create(terminal->face);
-	if (terminal->cells == NULL || terminal->glyph_cache == NULL) goto fail;
+	if (terminal->cells == NULL || terminal->history == NULL || terminal->glyph_cache == NULL) goto fail;
 	reset_attributes(terminal);
 	terminal->cursor_visible = true;
 	clear_display(terminal);
@@ -891,6 +1004,7 @@ void terminal_destroy(struct terminal* terminal) {
 	if (terminal->library != NULL) (void)FT_Done_FreeType(terminal->library);
 	free(terminal->font_data);
 	free(terminal->cells);
+	free(terminal->history);
 	free(terminal->preedit_codepoints);
 	free(terminal->overlay);
 	free(terminal);
@@ -928,7 +1042,8 @@ bool terminal_write(struct terminal* terminal, const uint8_t* data, size_t size,
 	}
 	while (written < size && process_text_byte(terminal, data[written])) written++;
 	*out_written = written;
-	success      = draw_overlay(terminal) && show_cursor(terminal) && written == size;
+	success      = (!terminal->viewport_dirty || redraw_viewport(terminal)) && draw_overlay(terminal) &&
+	               show_cursor(terminal) && written == size;
 	terminal_unlock(terminal);
 	return success;
 }
@@ -1022,5 +1137,36 @@ bool terminal_set_preedit(struct terminal* terminal, const uint8_t* text, size_t
 	terminal_unlock(terminal);
 	free(codepoints);
 	free(overlay);
+	return success;
+}
+
+bool terminal_scroll_view(struct terminal* terminal, int64_t lines) {
+	size_t amount;
+	size_t offset;
+	size_t moved;
+	bool   success;
+
+	if (terminal == NULL) return false;
+	if (lines > 0) amount = (uint64_t)lines > SIZE_MAX ? SIZE_MAX : (size_t)lines;
+	else {
+		uint64_t magnitude = lines == INT64_MIN ? (uint64_t)INT64_MAX + 1u : (uint64_t)-lines;
+		amount             = magnitude > SIZE_MAX ? SIZE_MAX : (size_t)magnitude;
+	}
+	terminal_lock(terminal);
+	if (!hide_cursor(terminal) || !erase_overlay(terminal)) {
+		terminal_unlock(terminal);
+		return false;
+	}
+	offset = terminal->viewport_offset;
+	if (lines > 0)
+		terminal->viewport_offset =
+			amount > terminal->history_count - offset ? terminal->history_count : offset + amount;
+	else if (lines < 0) terminal->viewport_offset = amount > offset ? 0u : offset - amount;
+	moved =
+		terminal->viewport_offset > offset ? terminal->viewport_offset - offset : offset - terminal->viewport_offset;
+	if (terminal->viewport_dirty) success = redraw_viewport(terminal);
+	else success = moved == 0u || move_viewport(terminal, terminal->viewport_offset > offset, moved);
+	success = success && draw_overlay(terminal) && show_cursor(terminal);
+	terminal_unlock(terminal);
 	return success;
 }

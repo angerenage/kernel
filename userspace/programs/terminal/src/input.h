@@ -11,7 +11,7 @@ struct terminal_input;
 /* Allocate terminal input state bound to one renderer. */
 struct terminal_input* terminal_input_create(struct terminal* terminal);
 
-/* Start the text-input consumer. */
+/* Start the text and pointer input consumers. */
 bool terminal_input_start(struct terminal_input* input);
 
 /* Cancel the consumers, fail pending reads, and release input state. */

@@ -1,9 +1,11 @@
 #include "input.h"
 
 #include <base/process.h>
+#include <protocol/input_manager.h>
 #include <protocol/terminal.h>
 #include <protocol/text_input.h>
 #include <runtime/init.h>
+#include <runtime/input_manager.h>
 #include <runtime/stream.h>
 #include <runtime/text_input.h>
 #include <stdbool.h>
@@ -24,9 +26,14 @@
 #define TERMINAL_INPUT_BUFFER_CAPACITY (64u * 1024u)
 #define TERMINAL_INPUT_PENDING_CAPACITY 64u
 #define TERMINAL_INPUT_RETRY_DELAY_MS 100u
+#define TERMINAL_INPUT_MANAGER_PROTOCOL_VERSION_MAJOR 1u
+#define TERMINAL_INPUT_MANAGER_PROTOCOL_VERSION_MINOR 0u
+#define TERMINAL_INPUT_MANAGER_EVENT_PAGE_SIZE                                                                         \
+	((CAP_MAX_RESPONSE_SIZE - sizeof(struct input_manager_read_events_response)) / sizeof(struct input_manager_event))
 #define TERMINAL_TEXT_PROTOCOL_VERSION_MAJOR 1u
 #define TERMINAL_TEXT_EVENT_PAGE_SIZE                                                                                  \
 	((CAP_MAX_RESPONSE_SIZE - sizeof(struct text_input_read_events_response)) / sizeof(struct text_input_event))
+#define TERMINAL_WHEEL_LINES 3u
 
 struct pending_read {
 	cap_call_id_t call_id;
@@ -44,8 +51,16 @@ struct terminal_input {
 	bool                locked;
 	bool                stopping;
 	cap_id_t            text_thread_cap;
+	cap_id_t            pointer_thread_cap;
 	cap_id_t            interrupt_signal_cap;
 	uint64_t            interrupt_counter;
+};
+
+static const struct init_protocol_query input_manager_query = {
+	.namespace_path = INPUT_MANAGER_NAMESPACE,
+	.protocol       = INPUT_MANAGER_PROTOCOL_NAME,
+	.major          = TERMINAL_INPUT_MANAGER_PROTOCOL_VERSION_MAJOR,
+	.minor          = TERMINAL_INPUT_MANAGER_PROTOCOL_VERSION_MINOR,
 };
 
 static void input_lock(struct terminal_input* input) {
@@ -183,6 +198,15 @@ static bool text_handle_valid(const struct init_service_handle* handle) {
 	       handle->info.rights == TEXT_INPUT_CLIENT_RIGHTS;
 }
 
+static bool input_manager_handle_valid(const struct init_service_handle* handle) {
+	return handle->capability != CAP_ID_INVALID && handle->owner != PROCESS_PID_INVALID &&
+	       strcmp(handle->info.selector.namespace_path, INPUT_MANAGER_NAMESPACE) == 0 &&
+	       strcmp(handle->info.selector.protocol, INPUT_MANAGER_PROTOCOL_NAME) == 0 &&
+	       handle->info.selector.major == TERMINAL_INPUT_MANAGER_PROTOCOL_VERSION_MAJOR &&
+	       strcmp(handle->info.selector.service, INPUT_MANAGER_SERVICE_NAME) == 0 &&
+	       handle->info.rights == INPUT_MANAGER_CLIENT_RIGHTS;
+}
+
 static bool wait_for_retry(struct terminal_input* input) {
 	return !__atomic_load_n(&input->stopping, __ATOMIC_ACQUIRE) &&
 	       sleep_ms(TERMINAL_INPUT_RETRY_DELAY_MS) == SYSCALL_STATUS_OK;
@@ -306,6 +330,68 @@ static void text_thread(void* opaque) {
 		if (active_source != 0u) (void)terminal_set_preedit(input->terminal, NULL, 0u, 0u);
 		active_source      = 0u;
 		active_composition = 0u;
+		if (__atomic_load_n(&input->stopping, __ATOMIC_ACQUIRE)) thread_exit(0u);
+		if (!wait_for_retry(input)) thread_exit(1u);
+	}
+}
+
+static int64_t add_saturated(int64_t left, int64_t right) {
+	if (right > 0 && left > INT64_MAX - right) return INT64_MAX;
+	if (right < 0 && left < INT64_MIN - right) return INT64_MIN;
+	return left + right;
+}
+
+static int64_t wheel_lines(int64_t value) {
+	if (value > INT64_MAX / TERMINAL_WHEEL_LINES) return INT64_MIN;
+	if (value < INT64_MIN / TERMINAL_WHEEL_LINES) return INT64_MAX;
+	return -(value * TERMINAL_WHEEL_LINES);
+}
+
+static void pointer_thread(void* opaque) {
+	struct terminal_input* input = *(struct terminal_input**)opaque;
+	for (;;) {
+		struct init_service_handle handle   = {.capability = CAP_ID_INVALID};
+		struct init_call_result    acquired = init_acquire(&input_manager_query, INPUT_MANAGER_SERVICE_NAME, &handle);
+		if (__atomic_load_n(&input->stopping, __ATOMIC_ACQUIRE)) thread_exit(0u);
+		if (acquired.transport_status != SYSCALL_STATUS_OK || acquired.status != INIT_REGISTRY_OK ||
+		    !input_manager_handle_valid(&handle)) {
+			if (handle.capability != CAP_ID_INVALID) (void)cap_drop(handle.capability);
+			if (!wait_for_retry(input)) thread_exit(1u);
+			continue;
+		}
+		struct input_manager_get_info_response info;
+		cap_id_t                               signal_cap = CAP_ID_INVALID;
+		syscall_status_t                       status     = input_manager_get_info(handle.capability, &info);
+		if (status == SYSCALL_STATUS_OK) status = input_manager_acquire_event_signal(handle.capability, &signal_cap);
+		uint64_t cursor = info.newest_sequence;
+		while (status == SYSCALL_STATUS_OK && !__atomic_load_n(&input->stopping, __ATOMIC_ACQUIRE)) {
+			struct input_manager_event      events[TERMINAL_INPUT_MANAGER_EVENT_PAGE_SIZE];
+			struct input_manager_event_page page;
+			status = input_manager_read_events(
+				handle.capability, cursor, events, TERMINAL_INPUT_MANAGER_EVENT_PAGE_SIZE, &page);
+			if (status == SYSCALL_STATUS_UNAVAILABLE) {
+				struct signal_message message;
+				do {
+					status = signal_wait(signal_cap, &message);
+					if (__atomic_load_n(&input->stopping, __ATOMIC_ACQUIRE)) break;
+				} while (status == SYSCALL_STATUS_INTERRUPTED);
+				continue;
+			}
+			if (status != SYSCALL_STATUS_OK) break;
+			int64_t delta = 0;
+			for (size_t i = 0u; i < page.returned; i++) {
+				const struct input_manager_event* event = &events[i];
+				if (event->type == INPUT_MANAGER_EVENT_CONTROL && event->device_class == INPUT_DEVICE_CLASS_POINTER &&
+				    event->control_kind == INPUT_CONTROL_KIND_RELATIVE_AXIS &&
+				    event->control_code == INPUT_AXIS_VERTICAL_SCROLL)
+					delta = add_saturated(delta, event->value);
+			}
+			cursor = events[page.returned - 1u].sequence;
+			if (delta != 0 && !terminal_scroll_view(input->terminal, wheel_lines(delta)))
+				status = SYSCALL_STATUS_FAILED;
+		}
+		if (signal_cap != CAP_ID_INVALID) (void)cap_drop(signal_cap);
+		(void)cap_drop(handle.capability);
 		if (__atomic_load_n(&input->stopping, __ATOMIC_ACQUIRE)) thread_exit(0u);
 		if (!wait_for_retry(input)) thread_exit(1u);
 	}
@@ -463,6 +549,7 @@ struct terminal_input* terminal_input_create(struct terminal* terminal) {
 	if (input == NULL) return NULL;
 	input->terminal             = terminal;
 	input->text_thread_cap      = CAP_ID_INVALID;
+	input->pointer_thread_cap   = CAP_ID_INVALID;
 	input->interrupt_signal_cap = CAP_ID_INVALID;
 	if (signal_create(&input->interrupt_signal_cap) != SYSCALL_STATUS_OK) {
 		free(input);
@@ -488,6 +575,17 @@ bool terminal_input_start(struct terminal_input* input) {
 		                                                       &input->text_thread_cap);
 		if (status != SYSCALL_STATUS_OK) printf("terminal: text input worker spawn failed: %u\n", (unsigned)status);
 	}
+	if (status == SYSCALL_STATUS_OK) {
+		struct terminal_input* argument = input;
+		status                          = process_spawn_thread(self.self_cap,
+		                                                       (uintptr_t)pointer_thread,
+		                                                       &argument,
+		                                                       sizeof(argument),
+		                                                       "terminal-pointer-input",
+		                                                       sizeof("terminal-pointer-input"),
+		                                                       &input->pointer_thread_cap);
+		if (status != SYSCALL_STATUS_OK) printf("terminal: pointer input worker spawn failed: %u\n", (unsigned)status);
+	}
 	if (self.self_cap != CAP_ID_INVALID) (void)cap_drop(self.self_cap);
 	if (self.address_space_cap != CAP_ID_INVALID) (void)cap_drop(self.address_space_cap);
 	if (self.main_thread_cap != CAP_ID_INVALID) (void)cap_drop(self.main_thread_cap);
@@ -503,6 +601,10 @@ void terminal_input_destroy(struct terminal_input* input) {
 	if (input->text_thread_cap != CAP_ID_INVALID) {
 		(void)thread_cancel(input->text_thread_cap);
 		(void)thread_join(input->text_thread_cap, NULL);
+	}
+	if (input->pointer_thread_cap != CAP_ID_INVALID) {
+		(void)thread_cancel(input->pointer_thread_cap);
+		(void)thread_join(input->pointer_thread_cap, NULL);
 	}
 	input_lock(input);
 	while (input->pending_count != 0u) {

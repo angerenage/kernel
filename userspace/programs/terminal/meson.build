@@ -30,7 +30,7 @@ terminal_elf = executable(
 	include_directories : [userspace_inc, terminal_include],
 	link_whole : userspace_crt,
 	link_with : userspace_link_libs,
-	dependencies : [userspace_freetype_dep, text_input_dep],
+	dependencies : [userspace_freetype_dep, input_manager_dep, text_input_dep],
 	link_args : userspace_link_args,
 	install : false,
 	link_depends : files(userspace_linker_file),

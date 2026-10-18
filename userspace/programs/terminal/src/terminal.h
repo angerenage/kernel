@@ -24,3 +24,6 @@ bool terminal_write(struct terminal* terminal, const uint8_t* data, size_t size,
 
 /* Replace the transient, underlined UTF-8 composition shown at the cursor. */
 bool terminal_set_preedit(struct terminal* terminal, const uint8_t* text, size_t size, size_t selection_end);
+
+/* Move the visible viewport by signed lines, with positive values revealing older output. */
+bool terminal_scroll_view(struct terminal* terminal, int64_t lines);
