@@ -347,9 +347,68 @@ static int64_t wheel_lines(int64_t value) {
 	return -(value * TERMINAL_WHEEL_LINES);
 }
 
+struct pointer_frame {
+	uint64_t frame;
+	uint64_t source_id;
+	int64_t  delta_x;
+	int64_t  delta_y;
+	int64_t  wheel;
+	bool     primary_changed;
+	bool     primary_pressed;
+	bool     active;
+};
+
+static bool process_pointer_event(struct terminal_input* input, struct pointer_frame* frame,
+                                  const struct input_manager_event* event) {
+	if (event->device_class != INPUT_DEVICE_CLASS_POINTER) return true;
+	if (event->type == INPUT_MANAGER_EVENT_SOURCE_REMOVED || event->type == INPUT_MANAGER_EVENT_SOURCE_RESET) {
+		terminal_pointer_cancel(input->terminal, event->source_id);
+		return true;
+	}
+	if (event->type != INPUT_MANAGER_EVENT_CONTROL) return true;
+	if (!frame->active) {
+		*frame = (struct pointer_frame){.frame = event->frame, .source_id = event->source_id, .active = true};
+	}
+	else if (event->frame != frame->frame || event->source_id != frame->source_id) return false;
+
+	if (event->control_kind == INPUT_CONTROL_KIND_RELATIVE_AXIS) {
+		switch ((enum input_axis_code)event->control_code) {
+		case INPUT_AXIS_X:
+			frame->delta_x = add_saturated(frame->delta_x, event->value);
+			break;
+		case INPUT_AXIS_Y:
+			frame->delta_y = add_saturated(frame->delta_y, event->value);
+			break;
+		case INPUT_AXIS_VERTICAL_SCROLL:
+			frame->wheel = add_saturated(frame->wheel, event->value);
+			break;
+		default:
+			break;
+		}
+	}
+	else if (event->control_kind == INPUT_CONTROL_KIND_BUTTON && event->control_code == INPUT_BUTTON_PRIMARY &&
+	         (event->value == 0 || event->value == 1)) {
+		frame->primary_changed = true;
+		frame->primary_pressed = event->value != 0;
+	}
+	if ((event->flags & INPUT_MANAGER_EVENT_FLAG_FRAME_END) == 0u) return true;
+	if (frame->wheel != 0 && !terminal_scroll_view(input->terminal, wheel_lines(frame->wheel))) return false;
+	if ((frame->delta_x != 0 || frame->delta_y != 0 || frame->wheel != 0 || frame->primary_changed) &&
+	    !terminal_pointer_update(input->terminal,
+	                             frame->source_id,
+	                             frame->delta_x,
+	                             frame->delta_y,
+	                             frame->primary_changed,
+	                             frame->primary_pressed))
+		return false;
+	*frame = (struct pointer_frame){0};
+	return true;
+}
+
 static void pointer_thread(void* opaque) {
 	struct terminal_input* input = *(struct terminal_input**)opaque;
 	for (;;) {
+		struct pointer_frame       frame    = {0};
 		struct init_service_handle handle   = {.capability = CAP_ID_INVALID};
 		struct init_call_result    acquired = init_acquire(&input_manager_query, INPUT_MANAGER_SERVICE_NAME, &handle);
 		if (__atomic_load_n(&input->stopping, __ATOMIC_ACQUIRE)) thread_exit(0u);
@@ -378,18 +437,19 @@ static void pointer_thread(void* opaque) {
 				continue;
 			}
 			if (status != SYSCALL_STATUS_OK) break;
-			int64_t delta = 0;
-			for (size_t i = 0u; i < page.returned; i++) {
-				const struct input_manager_event* event = &events[i];
-				if (event->type == INPUT_MANAGER_EVENT_CONTROL && event->device_class == INPUT_DEVICE_CLASS_POINTER &&
-				    event->control_kind == INPUT_CONTROL_KIND_RELATIVE_AXIS &&
-				    event->control_code == INPUT_AXIS_VERTICAL_SCROLL)
-					delta = add_saturated(delta, event->value);
+			if ((page.flags & INPUT_MANAGER_READ_EVENT_FLAG_GAP) != 0u) {
+				frame = (struct pointer_frame){0};
+				terminal_pointer_cancel(input->terminal, 0u);
 			}
-			cursor = events[page.returned - 1u].sequence;
-			if (delta != 0 && !terminal_scroll_view(input->terminal, wheel_lines(delta)))
-				status = SYSCALL_STATUS_FAILED;
+			for (size_t i = 0u; i < page.returned; i++) {
+				if (!process_pointer_event(input, &frame, &events[i])) {
+					status = SYSCALL_STATUS_FAILED;
+					break;
+				}
+			}
+			if (status == SYSCALL_STATUS_OK) cursor = events[page.returned - 1u].sequence;
 		}
+		terminal_pointer_cancel(input->terminal, 0u);
 		if (signal_cap != CAP_ID_INVALID) (void)cap_drop(signal_cap);
 		(void)cap_drop(handle.capability);
 		if (__atomic_load_n(&input->stopping, __ATOMIC_ACQUIRE)) thread_exit(0u);
