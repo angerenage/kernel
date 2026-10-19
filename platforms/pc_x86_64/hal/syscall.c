@@ -103,7 +103,8 @@ static bool x86_64_user_rflags_valid(uint64_t rflags) {
 }
 
 void x86_64_syscall_init(void) {
-	uint64_t star = ((uint64_t)X86_GDT_KERNEL_CODE_SELECTOR << 32) | ((uint64_t)X86_GDT_USER_COMPAT_SELECTOR << 48);
+	uint64_t star =
+		((uint64_t)X86_GDT_KERNEL_CODE_SELECTOR << 32) | (((uint64_t)X86_GDT_USER_COMPAT_SELECTOR | 0x3ull) << 48);
 
 	write_msr(X86_IA32_STAR_MSR, star);
 	write_msr(X86_IA32_LSTAR_MSR, (uint64_t)(uintptr_t)x86_64_syscall_entry);
