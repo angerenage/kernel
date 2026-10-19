@@ -13,9 +13,9 @@
  * default colors, bold-color selection, underline, reverse video,
  * and the equivalent 38;5/48;5 palette selections. Standard CSI cursor
  * movement and positioning, save/restore, line/display erasure,
- * and DEC ?25 cursor visibility sequences are also supported. The cursor
- * is a steady block that is hidden while a write is applied and redrawn
- * afterward. Other escape sequences are ignored.
+ * saved-line erasure with CSI 3 J, and DEC ?25 cursor visibility sequences
+ * are also supported. The cursor is a steady block that is hidden while a
+ * write is applied and redrawn afterward. Other escape sequences are ignored.
  * Modified cursor, editing, and function keys use conventional xterm modifier
  * parameters. Non-text keys without a legacy representation and modified text
  * shortcuts that cannot be represented losslessly use CSI-u.

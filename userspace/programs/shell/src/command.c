@@ -315,7 +315,7 @@ bool shell_execute_line(struct shell* shell, const char* line, size_t size) {
 	else if (strcmp(argv[0], "echo") == 0) success = execute_echo(argc - 1u, argv + 1u);
 	else if (strcmp(argv[0], "clear") == 0) {
 		if (argc != 1u) success = write_error("clear", "expected no arguments");
-		else success = printf("\x1b[2J\x1b[H") >= 0;
+		else success = printf("\x1b[2J\x1b[3J\x1b[H") >= 0;
 	}
 	else success = execute_program(shell, argc, argv);
 	free_words(argv);

@@ -969,12 +969,26 @@ static bool erase_cells(struct terminal* terminal, size_t first, size_t last) {
 	return true;
 }
 
+static bool erase_scrollback(struct terminal* terminal) {
+	terminal->history_head             = 0u;
+	terminal->history_count            = 0u;
+	terminal->viewport_offset          = 0u;
+	terminal->selection                = (struct terminal_selection_state){0};
+	terminal->pointer_primary_pressed  = false;
+	terminal->pointer_selecting        = false;
+	terminal->pointer_selection_source = 0u;
+	terminal->pointer_selection_anchor = (struct terminal_selection_position){0};
+	terminal->viewport_dirty           = false;
+	return redraw_viewport(terminal);
+}
+
 static bool erase_display(struct terminal* terminal, size_t mode) {
 	size_t cursor = terminal->row * terminal->columns + terminal->column;
 
 	if (mode == 0u) return erase_cells(terminal, cursor, terminal->cell_count - 1u);
 	if (mode == 1u) return erase_cells(terminal, 0u, cursor);
-	if (mode == 2u || mode == 3u) return erase_cells(terminal, 0u, terminal->cell_count - 1u);
+	if (mode == 2u) return erase_cells(terminal, 0u, terminal->cell_count - 1u);
+	if (mode == 3u) return erase_scrollback(terminal);
 	return true;
 }
 
