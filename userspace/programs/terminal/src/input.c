@@ -34,6 +34,7 @@
 #define TERMINAL_TEXT_EVENT_PAGE_SIZE                                                                                  \
 	((CAP_MAX_RESPONSE_SIZE - sizeof(struct text_input_read_events_response)) / sizeof(struct text_input_event))
 #define TERMINAL_WHEEL_LINES 3u
+#define TERMINAL_KEY_SEQUENCE_CAPACITY 32u
 
 struct pending_read {
 	cap_call_id_t call_id;
@@ -213,20 +214,31 @@ static bool wait_for_retry(struct terminal_input* input) {
 }
 
 static bool process_logical_key(struct terminal_input* input, const struct text_input_event* event, const uint8_t* text,
-                                size_t text_size, bool* handled);
+                                size_t text_size, bool text_generated, bool* handled);
+
+static bool frame_generates_text(const struct text_input_event* events, size_t count, size_t first) {
+	uint64_t frame = events[first].frame;
+
+	for (size_t i = first; i < count && events[i].frame == frame; i++) {
+		if (events[i].type == TEXT_INPUT_EVENT_PREEDIT || events[i].type == TEXT_INPUT_EVENT_COMMIT) return true;
+	}
+	return false;
+}
 
 static bool process_text_events(struct terminal_input* input, const struct text_input_event* events, size_t count,
                                 uint64_t* active_source, uint64_t* active_composition) {
 	uint8_t  text[CAP_MAX_RESPONSE_SIZE];
-	uint64_t frame       = 0u;
-	bool     key_handled = false;
+	uint64_t frame          = 0u;
+	bool     key_handled    = false;
+	bool     text_generated = false;
 	for (size_t first = 0u; first < count;) {
 		const struct text_input_event* action = &events[first];
 		size_t                         last   = first;
 		size_t                         size   = 0u;
 		if (action->frame != frame) {
-			frame       = action->frame;
-			key_handled = false;
+			frame          = action->frame;
+			key_handled    = false;
+			text_generated = frame_generates_text(events, count, first);
 		}
 		while (last < count) {
 			if (size > sizeof(text) - events[last].text_size) return false;
@@ -271,7 +283,7 @@ static bool process_text_events(struct terminal_input* input, const struct text_
 			break;
 		case TEXT_INPUT_EVENT_KEY: {
 			bool handled;
-			if (!process_logical_key(input, action, text, size, &handled)) return false;
+			if (!process_logical_key(input, action, text, size, text_generated, &handled)) return false;
 			key_handled = key_handled || handled;
 			break;
 		}
@@ -457,89 +469,179 @@ static void pointer_thread(void* opaque) {
 	}
 }
 
-static const char* terminal_key_sequence(enum text_input_key_code key, size_t* size) {
-	const char* sequence = NULL;
+static uint32_t terminal_modifier_parameter(uint32_t modifiers) {
+	const uint32_t shift   = TEXT_INPUT_KEY_MODIFIER_LEFT_SHIFT | TEXT_INPUT_KEY_MODIFIER_RIGHT_SHIFT;
+	const uint32_t control = TEXT_INPUT_KEY_MODIFIER_LEFT_CONTROL | TEXT_INPUT_KEY_MODIFIER_RIGHT_CONTROL;
+	const uint32_t alt     = TEXT_INPUT_KEY_MODIFIER_LEFT_ALT | TEXT_INPUT_KEY_MODIFIER_RIGHT_ALT;
+	const uint32_t meta    = TEXT_INPUT_KEY_MODIFIER_LEFT_META | TEXT_INPUT_KEY_MODIFIER_RIGHT_META;
+	uint32_t       result  = 1u;
+
+	if ((modifiers & shift) != 0u) result += 1u;
+	if ((modifiers & alt) != 0u) result += 2u;
+	if ((modifiers & control) != 0u) result += 4u;
+	if ((modifiers & meta) != 0u) result += 8u;
+	return result;
+}
+
+static bool terminal_key_sequence(enum text_input_key_code key, uint32_t modifiers, uint8_t* output, size_t capacity,
+                                  size_t* out_size) {
+	const char* legacy_sequence = NULL;
+	uint32_t    parameter       = 0u;
+	uint32_t    unicode         = 0u;
+	char        final           = '\0';
+	bool        ss3_unmodified  = false;
+	uint32_t    modifier        = terminal_modifier_parameter(modifiers);
+
+	if (output == NULL || out_size == NULL) return false;
+	*out_size = 0u;
 	switch (key) {
 	case TEXT_INPUT_KEY_ESCAPE:
-		sequence = "\x1b";
+		if (modifier == 1u) legacy_sequence = "\x1b";
+		else unicode = 27u;
 		break;
 	case TEXT_INPUT_KEY_BACKSPACE:
-		sequence = "\x7f";
+		if (modifier == 1u) legacy_sequence = "\x7f";
+		else unicode = 127u;
+		break;
+	case TEXT_INPUT_KEY_TAB:
+		if (modifier != 1u) unicode = 9u;
+		break;
+	case TEXT_INPUT_KEY_ENTER:
+		if (modifier != 1u) unicode = 13u;
 		break;
 	case TEXT_INPUT_KEY_INSERT:
-		sequence = "\x1b[2~";
+		parameter = 2u;
+		final     = '~';
 		break;
 	case TEXT_INPUT_KEY_HOME:
-		sequence = "\x1b[H";
+		parameter = 1u;
+		final     = 'H';
 		break;
 	case TEXT_INPUT_KEY_PAGE_UP:
-		sequence = "\x1b[5~";
+		parameter = 5u;
+		final     = '~';
 		break;
 	case TEXT_INPUT_KEY_DELETE:
-		sequence = "\x1b[3~";
+		parameter = 3u;
+		final     = '~';
 		break;
 	case TEXT_INPUT_KEY_END:
-		sequence = "\x1b[F";
+		parameter = 1u;
+		final     = 'F';
 		break;
 	case TEXT_INPUT_KEY_PAGE_DOWN:
-		sequence = "\x1b[6~";
+		parameter = 6u;
+		final     = '~';
 		break;
 	case TEXT_INPUT_KEY_UP:
-		sequence = "\x1b[A";
+		parameter = 1u;
+		final     = 'A';
 		break;
 	case TEXT_INPUT_KEY_LEFT:
-		sequence = "\x1b[D";
+		parameter = 1u;
+		final     = 'D';
 		break;
 	case TEXT_INPUT_KEY_DOWN:
-		sequence = "\x1b[B";
+		parameter = 1u;
+		final     = 'B';
 		break;
 	case TEXT_INPUT_KEY_RIGHT:
-		sequence = "\x1b[C";
+		parameter = 1u;
+		final     = 'C';
 		break;
 	case TEXT_INPUT_KEY_CENTER:
-		sequence = "\x1b[E";
+		parameter = 1u;
+		final     = 'E';
 		break;
 	case TEXT_INPUT_KEY_F1:
-		sequence = "\x1bOP";
+		parameter      = 1u;
+		final          = 'P';
+		ss3_unmodified = true;
 		break;
 	case TEXT_INPUT_KEY_F2:
-		sequence = "\x1bOQ";
+		parameter      = 1u;
+		final          = 'Q';
+		ss3_unmodified = true;
 		break;
 	case TEXT_INPUT_KEY_F3:
-		sequence = "\x1bOR";
+		parameter      = 1u;
+		final          = 'R';
+		ss3_unmodified = true;
 		break;
 	case TEXT_INPUT_KEY_F4:
-		sequence = "\x1bOS";
+		parameter      = 1u;
+		final          = 'S';
+		ss3_unmodified = true;
 		break;
 	case TEXT_INPUT_KEY_F5:
-		sequence = "\x1b[15~";
+		parameter = 15u;
+		final     = '~';
 		break;
 	case TEXT_INPUT_KEY_F6:
-		sequence = "\x1b[17~";
+		parameter = 17u;
+		final     = '~';
 		break;
 	case TEXT_INPUT_KEY_F7:
-		sequence = "\x1b[18~";
+		parameter = 18u;
+		final     = '~';
 		break;
 	case TEXT_INPUT_KEY_F8:
-		sequence = "\x1b[19~";
+		parameter = 19u;
+		final     = '~';
 		break;
 	case TEXT_INPUT_KEY_F9:
-		sequence = "\x1b[20~";
+		parameter = 20u;
+		final     = '~';
 		break;
 	case TEXT_INPUT_KEY_F10:
-		sequence = "\x1b[21~";
+		parameter = 21u;
+		final     = '~';
 		break;
 	case TEXT_INPUT_KEY_F11:
-		sequence = "\x1b[23~";
+		parameter = 23u;
+		final     = '~';
 		break;
 	case TEXT_INPUT_KEY_F12:
-		sequence = "\x1b[24~";
+		parameter = 24u;
+		final     = '~';
+		break;
+	case TEXT_INPUT_KEY_CAPS_LOCK:
+		unicode = 57358u;
+		break;
+	case TEXT_INPUT_KEY_SCROLL_LOCK:
+		unicode = 57359u;
+		break;
+	case TEXT_INPUT_KEY_NUM_LOCK:
+		unicode = 57360u;
+		break;
+	case TEXT_INPUT_KEY_PRINT_SCREEN:
+		unicode = 57361u;
+		break;
+	case TEXT_INPUT_KEY_PAUSE:
+		unicode = 57362u;
+		break;
+	case TEXT_INPUT_KEY_MENU:
+		unicode = 57363u;
 		break;
 	default:
-		break;
+		return true;
 	}
-	if (sequence != NULL) *size = strlen(sequence);
-	return sequence;
+	int length;
+	if (legacy_sequence != NULL) length = snprintf((char*)output, capacity, "%s", legacy_sequence);
+	else if (unicode != 0u) {
+		if (modifier == 1u) length = snprintf((char*)output, capacity, "\x1b[%uu", (unsigned)unicode);
+		else length = snprintf((char*)output, capacity, "\x1b[%u;%uu", (unsigned)unicode, (unsigned)modifier);
+	}
+	else if (final == '\0') return true;
+	else if (modifier == 1u) {
+		if (ss3_unmodified) length = snprintf((char*)output, capacity, "\x1bO%c", final);
+		else if (parameter == 1u) length = snprintf((char*)output, capacity, "\x1b[%c", final);
+		else length = snprintf((char*)output, capacity, "\x1b[%u%c", (unsigned)parameter, final);
+	}
+	else length = snprintf((char*)output, capacity, "\x1b[%u;%u%c", (unsigned)parameter, (unsigned)modifier, final);
+	if (length < 0 || (size_t)length >= capacity) return false;
+	*out_size = (size_t)length;
+	return true;
 }
 
 static bool control_byte(const uint8_t* text, size_t size, uint8_t* output) {
@@ -578,6 +680,65 @@ static bool control_byte(const uint8_t* text, size_t size, uint8_t* output) {
 	}
 }
 
+static bool single_codepoint(const uint8_t* text, size_t size, uint32_t* out_codepoint) {
+	uint32_t codepoint;
+	size_t   length;
+
+	if (text == NULL || size == 0u || out_codepoint == NULL) return false;
+	if (text[0] < 0x80u) {
+		codepoint = text[0];
+		length    = 1u;
+	}
+	else if (text[0] >= 0xc2u && text[0] <= 0xdfu) {
+		codepoint = text[0] & 0x1fu;
+		length    = 2u;
+	}
+	else if (text[0] >= 0xe0u && text[0] <= 0xefu) {
+		codepoint = text[0] & 0x0fu;
+		length    = 3u;
+	}
+	else if (text[0] >= 0xf0u && text[0] <= 0xf4u) {
+		codepoint = text[0] & 0x07u;
+		length    = 4u;
+	}
+	else return false;
+	if (length != size) return false;
+	for (size_t i = 1u; i < length; i++) codepoint = (codepoint << 6u) | (text[i] & 0x3fu);
+	*out_codepoint = codepoint;
+	return true;
+}
+
+static bool publish_text_shortcut(struct terminal_input* input, const uint8_t* text, size_t text_size,
+                                  uint32_t modifiers, bool* handled) {
+	const uint32_t shift    = TEXT_INPUT_KEY_MODIFIER_LEFT_SHIFT | TEXT_INPUT_KEY_MODIFIER_RIGHT_SHIFT;
+	const uint32_t control  = TEXT_INPUT_KEY_MODIFIER_LEFT_CONTROL | TEXT_INPUT_KEY_MODIFIER_RIGHT_CONTROL;
+	const uint32_t alt      = TEXT_INPUT_KEY_MODIFIER_LEFT_ALT | TEXT_INPUT_KEY_MODIFIER_RIGHT_ALT;
+	const uint32_t meta     = TEXT_INPUT_KEY_MODIFIER_LEFT_META | TEXT_INPUT_KEY_MODIFIER_RIGHT_META;
+	uint32_t       relevant = modifiers & (shift | control | alt | meta);
+
+	if (relevant == 0u || (relevant & ~(uint32_t)shift) == 0u) return true;
+	if ((relevant & alt) != 0u && (relevant & meta) == 0u && ((relevant & control) == 0u || (relevant & shift) == 0u)) {
+		uint8_t escape = 0x1bu;
+		uint8_t byte;
+
+		*handled = true;
+		if (!publish_bytes(input, &escape, 1u)) return false;
+		if ((relevant & control) != 0u && control_byte(text, text_size, &byte)) return publish_bytes(input, &byte, 1u);
+		return publish_bytes(input, text, text_size);
+	}
+	uint32_t codepoint;
+	if (!single_codepoint(text, text_size, &codepoint)) return true;
+	uint8_t sequence[TERMINAL_KEY_SEQUENCE_CAPACITY];
+	int     length = snprintf((char*)sequence,
+	                          sizeof(sequence),
+	                          "\x1b[%u;%uu",
+	                          (unsigned)codepoint,
+	                          (unsigned)terminal_modifier_parameter(relevant));
+	if (length < 0 || (size_t)length >= sizeof(sequence)) return false;
+	*handled = true;
+	return publish_bytes(input, sequence, (size_t)length);
+}
+
 static bool paste_clipboard(struct terminal_input* input) {
 	uint8_t* clipboard;
 	size_t   clipboard_size;
@@ -595,7 +756,8 @@ static bool paste_clipboard(struct terminal_input* input) {
 }
 
 static bool process_logical_key(struct terminal_input* input, const struct text_input_event* event, const uint8_t* text,
-                                size_t text_size, bool* handled) {
+                                size_t text_size, bool text_generated, bool* handled) {
+	const uint32_t shift   = TEXT_INPUT_KEY_MODIFIER_LEFT_SHIFT | TEXT_INPUT_KEY_MODIFIER_RIGHT_SHIFT;
 	const uint32_t control = TEXT_INPUT_KEY_MODIFIER_LEFT_CONTROL | TEXT_INPUT_KEY_MODIFIER_RIGHT_CONTROL;
 	const uint32_t command = TEXT_INPUT_KEY_MODIFIER_LEFT_ALT | TEXT_INPUT_KEY_MODIFIER_RIGHT_ALT |
 	                         TEXT_INPUT_KEY_MODIFIER_LEFT_META | TEXT_INPUT_KEY_MODIFIER_RIGHT_META;
@@ -606,22 +768,32 @@ static bool process_logical_key(struct terminal_input* input, const struct text_
 	    (event->key_modifiers & command) == 0u) {
 		uint8_t byte;
 		if (control_byte(text, text_size, &byte)) {
-			*handled = true;
 			if (byte == 0x03u) {
+				*handled                                   = true;
 				enum terminal_clipboard_copy_result result = terminal_clipboard_copy_selection(input->terminal);
 				if (result == TERMINAL_CLIPBOARD_COPY_UNAVAILABLE) return publish_interrupt(input);
 				return true;
 			}
-			if (byte == 0x16u) return paste_clipboard(input);
-			return publish_bytes(input, &byte, 1u);
+			if (byte == 0x16u) {
+				*handled = true;
+				return paste_clipboard(input);
+			}
+			if ((event->key_modifiers & shift) == 0u) {
+				*handled = true;
+				return publish_bytes(input, &byte, 1u);
+			}
 		}
-		return true;
 	}
-	size_t      size;
-	const char* sequence = terminal_key_sequence(event->key, &size);
-	if (sequence == NULL) return true;
+	if (event->key == TEXT_INPUT_KEY_TEXT) {
+		if (text_generated) return true;
+		return publish_text_shortcut(input, text, text_size, event->key_modifiers, handled);
+	}
+	uint8_t sequence[TERMINAL_KEY_SEQUENCE_CAPACITY];
+	size_t  size;
+	if (!terminal_key_sequence(event->key, event->key_modifiers, sequence, sizeof(sequence), &size)) return false;
+	if (size == 0u) return true;
 	*handled = true;
-	return publish_bytes(input, (const uint8_t*)sequence, size);
+	return publish_bytes(input, sequence, size);
 }
 
 struct terminal_input* terminal_input_create(struct terminal* terminal) {

@@ -16,6 +16,9 @@
  * and DEC ?25 cursor visibility sequences are also supported. The cursor
  * is a steady block that is hidden while a write is applied and redrawn
  * afterward. Other escape sequences are ignored.
+ * Modified cursor, editing, and function keys use conventional xterm modifier
+ * parameters. Non-text keys without a legacy representation and modified text
+ * shortcuts that cannot be represented losslessly use CSI-u.
  *
  * Besides the Stream operations, clients may query the immutable terminal
  * dimensions and its current cursor position. Selection operations use stable,
