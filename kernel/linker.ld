@@ -30,7 +30,13 @@ SECTIONS {
 		*(.text*)
 	} > virt AT> phys :text
 
-	.rodata : ALIGN(0x1000) {
+	.note.gnu.build-id ALIGN(0x1000) : {
+		__kernel_build_id_note_start = .;
+		KEEP(*(.note.gnu.build-id))
+		__kernel_build_id_note_end = .;
+	} > virt AT> phys :rodata
+
+	.rodata : {
 		*(.rodata*)
 		*(.srodata*)
 		*(.sdata2*)

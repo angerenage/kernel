@@ -11,10 +11,30 @@ kernel_ld_args = [
 	'-Wl,-z,max-page-size=0x1000',
 	'-Wl,-T,' + linker_file,
 	'-Wl,-no-pie',
+	'-Wl,--build-id=sha1',
 ]
 kernel_ld_args += platform_kernel_link_args
 
 kernel_inc = include_directories('../include/libc', '../include', '../')
+
+git_program = find_program('git', native: true, required: false)
+if git_program.found()
+	kernel_build_config = vcs_tag(
+		input: 'config.h.in',
+		output: 'kernel_config.h',
+		command: [git_program, 'rev-parse', '--verify', 'HEAD'],
+		fallback: 'unknown',
+		replace_string: '@KERNEL_GIT_COMMIT@',
+	)
+else
+	kernel_build_config_data = configuration_data()
+	kernel_build_config_data.set('KERNEL_GIT_COMMIT', 'unknown')
+	kernel_build_config = configure_file(
+		input: 'config.h.in',
+		output: 'kernel_config.h',
+		configuration: kernel_build_config_data,
+	)
+endif
 
 kernel_libk_sources = files(
 	'libk/stdio/display.c',
@@ -37,6 +57,9 @@ kernel_selftest_sources = files(
 )
 
 kernel_objs = base_sources + core_sources + boot_sources + firmware_sources + kernel_libk_sources + platform_kernel_objects + [
+	kernel_build_config,
+	'src/crash.c',
+	'src/crash_record.c',
 	'src/boot/cmdline.c',
 	'src/boot/diagnostics.c',
 	'src/boot/cpu_boot.c',

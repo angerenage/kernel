@@ -7,6 +7,7 @@
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
 #include <hal/io_port.h>
+#include <kernel/crash.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -172,41 +173,6 @@ static struct {
 static uint64_t        io_port_invalidation_ack[64];
 static struct spinlock io_port_invalidation_lock =
 	SPINLOCK_INIT_CLASS("io_port_invalidation", SPINLOCK_ORDER_NONE, SPINLOCK_FLAG_IRQSAVE);
-
-static const char* const exception_names[32] = {
-	"Divide Error",
-	"Debug",
-	"Non-Maskable Interrupt",
-	"Breakpoint",
-	"Overflow",
-	"Bound Range Exceeded",
-	"Invalid Opcode",
-	"Device Not Available",
-	"Double Fault",
-	"Coprocessor Segment Overrun",
-	"Invalid TSS",
-	"Segment Not Present",
-	"Stack-Segment Fault",
-	"General Protection Fault",
-	"Page Fault",
-	"Reserved",
-	"x87 Floating-Point Exception",
-	"Alignment Check",
-	"Machine Check",
-	"SIMD Floating-Point Exception",
-	"Virtualization Exception",
-	"Control Protection Exception",
-	"Reserved",
-	"Reserved",
-	"Reserved",
-	"Reserved",
-	"Reserved",
-	"Reserved",
-	"Hypervisor Injection Exception",
-	"VMM Communication Exception",
-	"Security Exception",
-	"Reserved",
-};
 
 static bool is_external_irq(unsigned long long vector) {
 	return vector >= X86_IRQ_BASE && vector < X86_LAPIC_SPURIOUS_VECTOR && vector != X86_SYSCALL_VECTOR;
@@ -761,34 +727,40 @@ void x86_64_handle_interrupt(struct interrupt_frame* frame) {
 		if (trap_context) cpu_enter_exception();
 	}
 
-	if (vector < 32u) {
-		printf("kernel: exception %llu (%s)\n", vector, exception_names[vector]);
-	}
-	else {
-		printf("kernel: unexpected interrupt %llu\n", vector);
-	}
+	struct kernel_crash_record* record =
+		kernel_crash_begin(KERNEL_CRASH_ARCH_X86_64,
+		                   vector < 32u ? KERNEL_CRASH_CAUSE_EXCEPTION : KERNEL_CRASH_CAUSE_UNEXPECTED_INTERRUPT);
+	struct kernel_crash_panic panic;
 
-	if (vector == 14u) {
-		printf("  error=0x%016llx cr2=0x%016llx rip=0x%016llx cs=0x%016llx rflags=0x%016llx\n",
-		       frame->error_code,
-		       fault_addr,
-		       frame->rip,
-		       frame->cs,
-		       frame->rflags);
+	if (kernel_crash_take_panic(&panic)) {
+		record->cause        = KERNEL_CRASH_CAUSE_PANIC;
+		record->panic_reason = panic.reason;
+		record->panic_detail = panic.detail;
 	}
-	else {
-		printf("  error=0x%016llx rip=0x%016llx cs=0x%016llx rflags=0x%016llx\n",
-		       frame->error_code,
-		       frame->rip,
-		       frame->cs,
-		       frame->rflags);
-	}
-	printf(
-		"  rax=0x%016llx rbx=0x%016llx rcx=0x%016llx rdx=0x%016llx\n", frame->rax, frame->rbx, frame->rcx, frame->rdx);
-	printf("  rbp=0x%016llx rdi=0x%016llx rsi=0x%016llx\n", frame->rbp, frame->rdi, frame->rsi);
-	printf("  r8 =0x%016llx r9 =0x%016llx r10=0x%016llx r11=0x%016llx\n", frame->r8, frame->r9, frame->r10, frame->r11);
-	printf(
-		"  r12=0x%016llx r13=0x%016llx r14=0x%016llx r15=0x%016llx\n", frame->r12, frame->r13, frame->r14, frame->r15);
-
-	hcf();
+	record->exception_code      = vector;
+	record->error_code          = frame->error_code;
+	record->fault_address       = fault_addr;
+	record->instruction_pointer = frame->rip;
+	record->frame_pointer       = frame->rbp;
+	record->status              = frame->rflags;
+	record->stack_pointer       = (frame->cs & 3u) != 0u || x86_ist_for_vector((unsigned)vector) != X86_IDT_NO_IST
+	                                  ? ((const struct user_interrupt_frame*)frame)->rsp
+	                                  : (uintptr_t)frame + sizeof(*frame);
+	record->register_count      = 15u;
+	record->registers[0]        = frame->rax;
+	record->registers[1]        = frame->rbx;
+	record->registers[2]        = frame->rcx;
+	record->registers[3]        = frame->rdx;
+	record->registers[4]        = frame->rbp;
+	record->registers[5]        = frame->rdi;
+	record->registers[6]        = frame->rsi;
+	record->registers[7]        = frame->r8;
+	record->registers[8]        = frame->r9;
+	record->registers[9]        = frame->r10;
+	record->registers[10]       = frame->r11;
+	record->registers[11]       = frame->r12;
+	record->registers[12]       = frame->r13;
+	record->registers[13]       = frame->r14;
+	record->registers[14]       = frame->r15;
+	kernel_crash_finish(record);
 }

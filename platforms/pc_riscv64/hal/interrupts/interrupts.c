@@ -7,9 +7,11 @@
 #include <core/sched.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
+#include <kernel/crash.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "../clock.h"
 #include "../syscall.h"
@@ -248,52 +250,6 @@ void riscv64_prepare_user_return(void) {
 	__asm__ volatile("" : : : "memory");
 }
 
-static const char* interrupt_name(uint64_t code) {
-	switch (code) {
-	case 1:
-		return "Supervisor software interrupt";
-	case 5:
-		return "Supervisor timer interrupt";
-	case 9:
-		return "Supervisor external interrupt";
-	default:
-		return "Reserved/platform interrupt";
-	}
-}
-
-static const char* exception_name(uint64_t code) {
-	switch (code) {
-	case 0:
-		return "Instruction address misaligned";
-	case 1:
-		return "Instruction access fault";
-	case 2:
-		return "Illegal instruction";
-	case 3:
-		return "Breakpoint";
-	case 4:
-		return "Load address misaligned";
-	case 5:
-		return "Load access fault";
-	case 6:
-		return "Store/AMO address misaligned";
-	case 7:
-		return "Store/AMO access fault";
-	case 8:
-		return "Environment call from U-mode";
-	case 9:
-		return "Environment call from S-mode";
-	case 12:
-		return "Instruction page fault";
-	case 13:
-		return "Load page fault";
-	case 15:
-		return "Store/AMO page fault";
-	default:
-		return "Reserved/custom exception";
-	}
-}
-
 static bool is_page_fault_exception(uint64_t code) {
 	return code == 12u || code == 13u || code == 15u;
 }
@@ -393,18 +349,24 @@ void handle_exception(struct exception_frame* frame) {
 		cpu_enter_exception();
 	}
 
-	printf("kernel: riscv64 %s %llu (%s)\n",
-	       is_interrupt ? "interrupt" : "exception",
-	       code,
-	       is_interrupt ? interrupt_name(code) : exception_name(code));
-	printf("  scause=0x%016llx sepc=0x%016llx stval=0x%016llx sstatus=0x%016llx\n",
-	       frame->scause,
-	       frame->sepc,
-	       frame->stval,
-	       frame->sstatus);
-	printf("  ra=0x%016llx sp=0x%016llx gp=0x%016llx tp=0x%016llx\n", frame->ra, frame->sp, frame->gp, frame->tp);
-	printf("  a0=0x%016llx a1=0x%016llx a2=0x%016llx a3=0x%016llx\n", frame->a0, frame->a1, frame->a2, frame->a3);
-	printf("  a4=0x%016llx a5=0x%016llx a6=0x%016llx a7=0x%016llx\n", frame->a4, frame->a5, frame->a6, frame->a7);
+	struct kernel_crash_record* record =
+		kernel_crash_begin(KERNEL_CRASH_ARCH_RISCV64,
+		                   is_interrupt ? KERNEL_CRASH_CAUSE_UNEXPECTED_INTERRUPT : KERNEL_CRASH_CAUSE_EXCEPTION);
+	struct kernel_crash_panic panic;
 
-	hcf();
+	if (kernel_crash_take_panic(&panic)) {
+		record->cause        = KERNEL_CRASH_CAUSE_PANIC;
+		record->panic_reason = panic.reason;
+		record->panic_detail = panic.detail;
+	}
+	record->exception_code      = code;
+	record->error_code          = frame->scause;
+	record->fault_address       = frame->stval;
+	record->instruction_pointer = frame->sepc;
+	record->stack_pointer       = frame->sp;
+	record->frame_pointer       = frame->s0;
+	record->status              = frame->sstatus;
+	record->register_count      = 31u;
+	memcpy(record->registers, &frame->ra, record->register_count * sizeof(record->registers[0]));
+	kernel_crash_finish(record);
 }

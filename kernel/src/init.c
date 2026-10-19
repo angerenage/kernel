@@ -23,6 +23,7 @@
 #include <kernel/capability.h>
 #include <kernel/cmdline.h>
 #include <kernel/cpu_boot.h>
+#include <kernel/crash.h>
 #include <kernel/elf_loader.h>
 #include <libc/stdlib.h>
 #include <stdbool.h>
@@ -302,6 +303,7 @@ void kernel_main(void) {
 		kernel_boot_diagnostics_modules();
 	}
 	kernel_init_memory(info->memory_map, info->memory_map_count, info->direct_map_offset);
+	kernel_crash_publish_system_metadata();
 
 	if (!hal_interrupts_init_global()) {
 		boot_fail("kernel: hal_interrupts_init_global failed");

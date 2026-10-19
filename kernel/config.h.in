@@ -1,0 +1,3 @@
+#pragma once
+
+#define KERNEL_GIT_COMMIT "@KERNEL_GIT_COMMIT@"

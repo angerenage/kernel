@@ -150,6 +150,17 @@ endif
 
 test_suites = [
 	{
+		'name': 'crash_record',
+		'sources': files(
+			'crash/record.c',
+			'mocks/base/display.c',
+			'../kernel/src/crash_record.c',
+		) + [kernel_build_config],
+		'link_with': base_test_lib,
+		'include_directories': [include_directories('../kernel')],
+		'suites': ['unit', 'kernel'],
+	},
+	{
 		'name': 'base_string',
 		'sources': files(
 			'base/string_test.c',
