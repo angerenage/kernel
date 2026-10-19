@@ -17,6 +17,9 @@ struct shell_line_editor {
 	size_t              render_size;
 	size_t              render_capacity;
 	int64_t             screen_origin_row;
+	uint64_t            screen_origin_line;
+	size_t              selection_anchor;
+	bool                selection_active;
 };
 
 /* Initialize an editor after its prompt has been rendered. */
@@ -35,9 +38,19 @@ bool shell_line_editor_backspace(struct shell_line_editor* editor);
 /* Delete the code point at the cursor. */
 bool shell_line_editor_delete(struct shell_line_editor* editor);
 
+/* Copy and delete an active selection wholly contained by the command. */
+bool shell_line_editor_cut(struct shell_line_editor* editor);
+
 /* Move the cursor by one UTF-8 code point when possible. */
 bool shell_line_editor_move_left(struct shell_line_editor* editor);
 bool shell_line_editor_move_right(struct shell_line_editor* editor);
+
+/* Extend the selection by one UTF-8 code point from its fixed anchor. */
+bool shell_line_editor_select_left(struct shell_line_editor* editor);
+bool shell_line_editor_select_right(struct shell_line_editor* editor);
+
+/* Select the complete command and place its focus at the end. */
+bool shell_line_editor_select_all(struct shell_line_editor* editor);
 
 /* Replace the edited line and repaint its complete visual extent. */
 bool shell_line_editor_replace(struct shell_line_editor* editor, const char* line, size_t size, size_t cursor);

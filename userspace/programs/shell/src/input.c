@@ -96,16 +96,16 @@ static bool select_history(const struct shell* shell, struct shell_line_editor* 
 }
 
 static bool handle_escape_key(struct shell* shell, struct shell_line_editor* editor,
-                              struct history_navigation* navigation, uint8_t key, bool delete_key) {
+                              struct history_navigation* navigation, uint8_t key, bool shifted, bool delete_key) {
 	switch (key) {
 	case 'A':
-		return select_history(shell, editor, navigation, true);
+		return shifted || select_history(shell, editor, navigation, true);
 	case 'B':
-		return select_history(shell, editor, navigation, false);
+		return shifted || select_history(shell, editor, navigation, false);
 	case 'C':
-		return shell_line_editor_move_right(editor);
+		return shifted ? shell_line_editor_select_right(editor) : shell_line_editor_move_right(editor);
 	case 'D':
-		return shell_line_editor_move_left(editor);
+		return shifted ? shell_line_editor_select_left(editor) : shell_line_editor_move_left(editor);
 	case '~':
 		return !delete_key || shell_line_editor_delete(editor);
 	default:
@@ -116,9 +116,10 @@ static bool handle_escape_key(struct shell* shell, struct shell_line_editor* edi
 enum shell_input_result shell_read_line(struct shell* shell, char* line, size_t capacity, size_t* out_size) {
 	struct shell_line_editor  editor;
 	struct history_navigation navigation;
-	enum input_state          state      = INPUT_STATE_TEXT;
-	bool                      csi_plain  = true;
-	bool                      csi_delete = false;
+	char                      csi_parameters[8];
+	size_t                    csi_parameter_size = 0u;
+	enum input_state          state              = INPUT_STATE_TEXT;
+	bool                      csi_valid          = true;
 	enum shell_input_result   input_result;
 
 	if (shell == NULL || line == NULL || capacity == 0u || capacity > SHELL_LINE_CAPACITY || out_size == NULL)
@@ -135,9 +136,9 @@ enum shell_input_result shell_read_line(struct shell* shell, char* line, size_t 
 
 		if (state == INPUT_STATE_ESCAPE) {
 			if (byte == '[') {
-				state      = INPUT_STATE_CSI;
-				csi_plain  = true;
-				csi_delete = false;
+				state              = INPUT_STATE_CSI;
+				csi_parameter_size = 0u;
+				csi_valid          = true;
 			}
 			else if (byte == 'O') state = INPUT_STATE_SS3;
 			else state = INPUT_STATE_TEXT;
@@ -145,21 +146,25 @@ enum shell_input_result shell_read_line(struct shell* shell, char* line, size_t 
 		}
 		if (state == INPUT_STATE_CSI) {
 			if (byte >= 0x40u && byte <= 0x7eu) {
-				if ((csi_plain || (csi_delete && byte == '~')) &&
-				    !handle_escape_key(shell, &editor, &navigation, byte, csi_delete)) {
+				bool plain = csi_valid && csi_parameter_size == 0u;
+				bool shifted =
+					csi_valid && csi_parameter_size == 3u && memcmp(csi_parameters, "1;2", csi_parameter_size) == 0;
+				bool delete_key = csi_valid && byte == '~' && csi_parameter_size == 1u && csi_parameters[0] == '3';
+				if ((plain || shifted || delete_key) &&
+				    !handle_escape_key(shell, &editor, &navigation, byte, shifted, delete_key)) {
 					input_result = SHELL_INPUT_FAILED;
 					break;
 				}
 				state = INPUT_STATE_TEXT;
 			}
 			else {
-				csi_delete = csi_plain && byte == '3';
-				csi_plain  = false;
+				if (byte < 0x30u || byte > 0x3fu || csi_parameter_size == sizeof(csi_parameters)) csi_valid = false;
+				else csi_parameters[csi_parameter_size++] = (char)byte;
 			}
 			continue;
 		}
 		if (state == INPUT_STATE_SS3) {
-			if (!handle_escape_key(shell, &editor, &navigation, byte, false)) {
+			if (!handle_escape_key(shell, &editor, &navigation, byte, false, false)) {
 				input_result = SHELL_INPUT_FAILED;
 				break;
 			}
@@ -183,6 +188,20 @@ enum shell_input_result shell_read_line(struct shell* shell, char* line, size_t 
 		if (byte == 0x03u) {
 			input_result = shell_line_editor_interrupt(&editor) ? SHELL_INPUT_INTERRUPTED : SHELL_INPUT_FAILED;
 			break;
+		}
+		if (byte == 0x01u) {
+			if (!shell_line_editor_select_all(&editor)) {
+				input_result = SHELL_INPUT_FAILED;
+				break;
+			}
+			continue;
+		}
+		if (byte == 0x18u) {
+			if (!shell_line_editor_cut(&editor)) {
+				input_result = SHELL_INPUT_FAILED;
+				break;
+			}
+			continue;
 		}
 		if (byte == '\b' || byte == 0x7fu) {
 			if (!shell_line_editor_backspace(&editor)) {
