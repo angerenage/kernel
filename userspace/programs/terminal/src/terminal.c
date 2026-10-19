@@ -450,20 +450,25 @@ static int position_compare(struct terminal_selection_position left, struct term
 	return 0;
 }
 
+static void selection_bounds(const struct terminal_selection_state* selection,
+                             struct terminal_selection_position* first, struct terminal_selection_position* last) {
+	if (position_compare(selection->anchor, selection->focus) < 0) {
+		*first = selection->anchor;
+		*last  = selection->focus;
+	}
+	else {
+		*first = selection->focus;
+		*last  = selection->anchor;
+	}
+}
+
 static bool selection_contains(const struct terminal_selection_state* selection, uint64_t line, size_t column) {
 	struct terminal_selection_position position = {.line = line, .column = column};
 	struct terminal_selection_position first;
 	struct terminal_selection_position last;
 
 	if (!selection->active) return false;
-	if (position_compare(selection->anchor, selection->focus) < 0) {
-		first = selection->anchor;
-		last  = selection->focus;
-	}
-	else {
-		first = selection->focus;
-		last  = selection->anchor;
-	}
+	selection_bounds(selection, &first, &last);
 	return position_compare(position, first) >= 0 && position_compare(position, last) < 0;
 }
 
@@ -617,15 +622,61 @@ static bool redraw_viewport_cell(struct terminal* terminal, size_t row, size_t c
 	return draw_cell_value(terminal, cell, row, column, false, selection_contains(&terminal->selection, line, column));
 }
 
-static bool redraw_selection_difference(struct terminal* terminal, const struct terminal_selection_state* previous) {
-	for (size_t row = 0u; row < terminal->rows; row++) {
-		uint64_t line = terminal->screen_origin - terminal->viewport_offset + row;
-		for (size_t column = 0u; column < terminal->columns; column++) {
-			if (selection_contains(previous, line, column) == selection_contains(&terminal->selection, line, column))
+static bool redraw_selection_range(struct terminal* terminal, struct terminal_selection_position first,
+                                   struct terminal_selection_position last) {
+	uint64_t visible_first = terminal->screen_origin - terminal->viewport_offset;
+	uint64_t visible_last =
+		terminal->rows - 1u > UINT64_MAX - visible_first ? UINT64_MAX : visible_first + terminal->rows - 1u;
+	uint64_t first_line;
+	uint64_t last_line;
+
+	if (position_compare(first, last) >= 0 || last.line < visible_first || first.line > visible_last) return true;
+	first_line = first.line < visible_first ? visible_first : first.line;
+	last_line  = last.line > visible_last ? visible_last : last.line;
+	for (uint64_t line = first_line;; line++) {
+		size_t row          = (size_t)(line - visible_first);
+		size_t first_column = line == first.line ? first.column : 0u;
+		size_t last_column  = line == last.line ? last.column : terminal->columns;
+
+		if (first_column > terminal->columns) first_column = terminal->columns;
+		if (last_column > terminal->columns) last_column = terminal->columns;
+		for (size_t column = first_column; column < last_column; column++) {
+			if (terminal->cursor_drawn && row == terminal->cursor_drawn_row && column == terminal->cursor_drawn_column)
 				continue;
 			if (!redraw_viewport_cell(terminal, row, column)) return false;
 		}
+		if (line == last_line) break;
 	}
+	return true;
+}
+
+static bool redraw_selection_difference(struct terminal* terminal, const struct terminal_selection_state* previous) {
+	struct terminal_selection_position previous_first;
+	struct terminal_selection_position previous_last;
+	struct terminal_selection_position next_first;
+	struct terminal_selection_position next_last;
+
+	if (!previous->active) {
+		if (!terminal->selection.active) return true;
+		selection_bounds(&terminal->selection, &next_first, &next_last);
+		return redraw_selection_range(terminal, next_first, next_last);
+	}
+	selection_bounds(previous, &previous_first, &previous_last);
+	if (!terminal->selection.active) return redraw_selection_range(terminal, previous_first, previous_last);
+	selection_bounds(&terminal->selection, &next_first, &next_last);
+	if (position_compare(previous_last, next_first) <= 0 || position_compare(next_last, previous_first) <= 0)
+		return redraw_selection_range(terminal, previous_first, previous_last) &&
+		       redraw_selection_range(terminal, next_first, next_last);
+	if (position_compare(previous_first, next_first) < 0) {
+		if (!redraw_selection_range(terminal, previous_first, next_first)) return false;
+	}
+	else if (position_compare(next_first, previous_first) < 0 &&
+	         !redraw_selection_range(terminal, next_first, previous_first))
+		return false;
+	if (position_compare(previous_last, next_last) < 0)
+		return redraw_selection_range(terminal, previous_last, next_last);
+	if (position_compare(next_last, previous_last) < 0)
+		return redraw_selection_range(terminal, next_last, previous_last);
 	return true;
 }
 
@@ -1415,9 +1466,8 @@ static bool set_selection_locked(struct terminal* terminal, struct terminal_sele
 	struct terminal_selection_state previous = terminal->selection;
 
 	if (selection_state_equal(&previous, &next)) return true;
-	if (!hide_cursor(terminal)) return false;
 	terminal->selection = next;
-	return redraw_selection_difference(terminal, &previous) && show_cursor(terminal);
+	return redraw_selection_difference(terminal, &previous);
 }
 
 bool terminal_selection_set(struct terminal* terminal, struct terminal_selection_position anchor,
