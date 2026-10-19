@@ -578,6 +578,22 @@ static bool control_byte(const uint8_t* text, size_t size, uint8_t* output) {
 	}
 }
 
+static bool paste_clipboard(struct terminal_input* input) {
+	uint8_t* clipboard;
+	size_t   clipboard_size;
+	size_t   text_size = 0u;
+
+	if (!terminal_clipboard_snapshot(input->terminal, &clipboard, &clipboard_size)) return false;
+	for (size_t i = 0u; i < clipboard_size; i++) {
+		uint8_t byte = clipboard[i];
+		if (byte < 0x20u || byte == 0x7fu) continue;
+		clipboard[text_size++] = byte;
+	}
+	bool success = publish_bytes(input, clipboard, text_size);
+	free(clipboard);
+	return success;
+}
+
 static bool process_logical_key(struct terminal_input* input, const struct text_input_event* event, const uint8_t* text,
                                 size_t text_size, bool* handled) {
 	const uint32_t control = TEXT_INPUT_KEY_MODIFIER_LEFT_CONTROL | TEXT_INPUT_KEY_MODIFIER_RIGHT_CONTROL;
@@ -591,7 +607,12 @@ static bool process_logical_key(struct terminal_input* input, const struct text_
 		uint8_t byte;
 		if (control_byte(text, text_size, &byte)) {
 			*handled = true;
-			if (byte == 0x03u) return publish_interrupt(input);
+			if (byte == 0x03u) {
+				enum terminal_clipboard_copy_result result = terminal_clipboard_copy_selection(input->terminal);
+				if (result == TERMINAL_CLIPBOARD_COPY_UNAVAILABLE) return publish_interrupt(input);
+				return true;
+			}
+			if (byte == 0x16u) return paste_clipboard(input);
 			return publish_bytes(input, &byte, 1u);
 		}
 		return true;

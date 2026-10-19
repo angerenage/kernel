@@ -110,6 +110,8 @@ struct terminal {
 	size_t                          viewport_offset;
 	bool                            viewport_dirty;
 	struct terminal_selection_state selection;
+	uint8_t*                        clipboard;
+	size_t                          clipboard_size;
 	size_t                          saved_column;
 	size_t                          saved_row;
 	bool                            saved_cursor;
@@ -1259,6 +1261,7 @@ void terminal_destroy(struct terminal* terminal) {
 	free(terminal->history);
 	free(terminal->preedit_codepoints);
 	free(terminal->overlay);
+	free(terminal->clipboard);
 	free(terminal);
 }
 
@@ -1503,6 +1506,205 @@ bool terminal_selection_clear(struct terminal* terminal) {
 	show_pointer_cursor(terminal);
 	terminal_unlock(terminal);
 	return success;
+}
+
+static bool clipboard_codepoint_allowed(uint32_t codepoint) {
+	return codepoint <= 0x10ffffu && !(codepoint >= 0xd800u && codepoint <= 0xdfffu) &&
+	       (codepoint >= 0x20u || codepoint == '\t' || codepoint == '\n' || codepoint == '\r') &&
+	       !(codepoint >= 0x7fu && codepoint <= 0x9fu);
+}
+
+bool terminal_clipboard_text_valid(const void* contents, size_t size) {
+	const uint8_t* text   = contents;
+	size_t         offset = 0u;
+
+	if (size != 0u && text == NULL) return false;
+	while (offset < size) {
+		uint8_t  first = text[offset];
+		uint32_t value;
+		size_t   length;
+
+		if (first < 0x80u) {
+			value  = first;
+			length = 1u;
+		}
+		else if (first >= 0xc2u && first <= 0xdfu) {
+			value  = first & 0x1fu;
+			length = 2u;
+		}
+		else if (first >= 0xe0u && first <= 0xefu) {
+			value  = first & 0x0fu;
+			length = 3u;
+		}
+		else if (first >= 0xf0u && first <= 0xf4u) {
+			value  = first & 0x07u;
+			length = 4u;
+		}
+		else return false;
+		if (length > size - offset) return false;
+		for (size_t i = 1u; i < length; i++) {
+			if ((text[offset + i] & 0xc0u) != 0x80u) return false;
+			value = (value << 6u) | (text[offset + i] & 0x3fu);
+		}
+		uint32_t minimum = length == 1u ? 0u : length == 2u ? 0x80u : length == 3u ? 0x800u : 0x10000u;
+		if (value < minimum || !clipboard_codepoint_allowed(value)) return false;
+		offset += length;
+	}
+	return true;
+}
+
+static size_t clipboard_codepoint_size(uint32_t codepoint) {
+	if (!clipboard_codepoint_allowed(codepoint)) return 0u;
+	if (codepoint < 0x80u) return 1u;
+	if (codepoint < 0x800u) return 2u;
+	if (codepoint < 0x10000u) return 3u;
+	return 4u;
+}
+
+static size_t clipboard_encode_codepoint(uint8_t* output, uint32_t codepoint) {
+	size_t size = clipboard_codepoint_size(codepoint);
+
+	if (size == 1u) output[0] = (uint8_t)codepoint;
+	else if (size == 2u) {
+		output[0] = (uint8_t)(0xc0u | (codepoint >> 6u));
+		output[1] = (uint8_t)(0x80u | (codepoint & 0x3fu));
+	}
+	else if (size == 3u) {
+		output[0] = (uint8_t)(0xe0u | (codepoint >> 12u));
+		output[1] = (uint8_t)(0x80u | ((codepoint >> 6u) & 0x3fu));
+		output[2] = (uint8_t)(0x80u | (codepoint & 0x3fu));
+	}
+	else if (size == 4u) {
+		output[0] = (uint8_t)(0xf0u | (codepoint >> 18u));
+		output[1] = (uint8_t)(0x80u | ((codepoint >> 12u) & 0x3fu));
+		output[2] = (uint8_t)(0x80u | ((codepoint >> 6u) & 0x3fu));
+		output[3] = (uint8_t)(0x80u | (codepoint & 0x3fu));
+	}
+	return size;
+}
+
+static const struct terminal_cell* retained_line_cells(const struct terminal* terminal, uint64_t line) {
+	uint64_t first = terminal->screen_origin - terminal->history_count;
+
+	if (line < first || line - first >= terminal->history_count + terminal->rows) return NULL;
+	if (line < terminal->screen_origin) return history_line(terminal, (size_t)(line - first));
+	return terminal->cells + (size_t)(line - terminal->screen_origin) * terminal->columns;
+}
+
+static size_t selected_line_end(const struct terminal_cell* cells, size_t first, size_t last) {
+	while (last > first && cells[last - 1u].codepoint == ' ') last--;
+	return last;
+}
+
+enum terminal_clipboard_copy_result terminal_clipboard_copy_selection(struct terminal* terminal) {
+	struct terminal_selection_position first;
+	struct terminal_selection_position last;
+	uint8_t*                           clipboard      = NULL;
+	size_t                             clipboard_size = 0u;
+	size_t                             offset         = 0u;
+
+	if (terminal == NULL) return TERMINAL_CLIPBOARD_COPY_FAILED;
+	terminal_lock(terminal);
+	if (!terminal->selection.active) {
+		terminal_unlock(terminal);
+		return TERMINAL_CLIPBOARD_COPY_UNAVAILABLE;
+	}
+	selection_bounds(&terminal->selection, &first, &last);
+	for (uint64_t line = first.line;; line++) {
+		const struct terminal_cell* cells = retained_line_cells(terminal, line);
+		size_t                      begin = line == first.line ? (size_t)first.column : 0u;
+		size_t                      end   = line == last.line ? (size_t)last.column : terminal->columns;
+
+		if (cells == NULL || begin > terminal->columns || end > terminal->columns || begin > end) goto failed;
+		end = selected_line_end(cells, begin, end);
+		for (size_t column = begin; column < end; column++) {
+			size_t encoded = clipboard_codepoint_size(cells[column].codepoint);
+			if (encoded > TERMINAL_CLIPBOARD_CAPACITY - clipboard_size) goto failed;
+			clipboard_size += encoded;
+		}
+		if (line == last.line) break;
+		if (clipboard_size == TERMINAL_CLIPBOARD_CAPACITY) goto failed;
+		clipboard_size++;
+	}
+	if (clipboard_size != 0u) {
+		clipboard = malloc(clipboard_size);
+		if (clipboard == NULL) goto failed;
+	}
+	for (uint64_t line = first.line;; line++) {
+		const struct terminal_cell* cells = retained_line_cells(terminal, line);
+		size_t                      begin = line == first.line ? (size_t)first.column : 0u;
+		size_t                      end   = line == last.line ? (size_t)last.column : terminal->columns;
+
+		end = selected_line_end(cells, begin, end);
+		for (size_t column = begin; column < end; column++) {
+			size_t encoded = clipboard_codepoint_size(cells[column].codepoint);
+			if (encoded != 0u) offset += clipboard_encode_codepoint(clipboard + offset, cells[column].codepoint);
+		}
+		if (line == last.line) break;
+		clipboard[offset++] = '\n';
+	}
+	free(terminal->clipboard);
+	terminal->clipboard      = clipboard;
+	terminal->clipboard_size = clipboard_size;
+	terminal_unlock(terminal);
+	return TERMINAL_CLIPBOARD_COPY_OK;
+
+failed:
+	terminal_unlock(terminal);
+	free(clipboard);
+	return TERMINAL_CLIPBOARD_COPY_FAILED;
+}
+
+bool terminal_clipboard_get(struct terminal* terminal, void* buffer, size_t capacity, size_t* out_size) {
+	if (terminal == NULL || out_size == NULL || (capacity != 0u && buffer == NULL)) return false;
+	terminal_lock(terminal);
+	*out_size = terminal->clipboard_size;
+	if (capacity < terminal->clipboard_size) {
+		terminal_unlock(terminal);
+		return false;
+	}
+	if (terminal->clipboard_size != 0u) memcpy(buffer, terminal->clipboard, terminal->clipboard_size);
+	terminal_unlock(terminal);
+	return true;
+}
+
+bool terminal_clipboard_snapshot(struct terminal* terminal, uint8_t** out_text, size_t* out_size) {
+	uint8_t* text = NULL;
+
+	if (terminal == NULL || out_text == NULL || out_size == NULL) return false;
+	*out_text = NULL;
+	*out_size = 0u;
+	terminal_lock(terminal);
+	if (terminal->clipboard_size != 0u) {
+		text = malloc(terminal->clipboard_size);
+		if (text == NULL) {
+			terminal_unlock(terminal);
+			return false;
+		}
+		memcpy(text, terminal->clipboard, terminal->clipboard_size);
+	}
+	*out_text = text;
+	*out_size = terminal->clipboard_size;
+	terminal_unlock(terminal);
+	return true;
+}
+
+bool terminal_clipboard_set(struct terminal* terminal, const void* text, size_t size) {
+	uint8_t* copy = NULL;
+
+	if (terminal == NULL || size > TERMINAL_CLIPBOARD_CAPACITY || !terminal_clipboard_text_valid(text, size))
+		return false;
+	if (size != 0u) {
+		copy = malloc(size);
+		if (copy == NULL) return false;
+		memcpy(copy, text, size);
+	}
+	terminal_lock(terminal);
+	free(terminal->clipboard);
+	terminal->clipboard      = copy;
+	terminal->clipboard_size = size;
+	terminal_unlock(terminal);
+	return true;
 }
 
 static size_t move_pointer_axis(size_t current, size_t maximum, int64_t delta) {

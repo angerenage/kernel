@@ -91,6 +91,37 @@ static bool dispatch_request(struct terminal* terminal, struct terminal_input* i
 		return reply_request(
 			call, NULL, 0u, terminal_selection_clear(terminal) ? SYSCALL_STATUS_OK : SYSCALL_STATUS_FAILED);
 	}
+	if (header.op == TERMINAL_OP_GET_CLIPBOARD) {
+		uint8_t                                 response_data[CAP_MAX_RESPONSE_SIZE];
+		struct terminal_get_clipboard_response* clipboard = (void*)response_data;
+		size_t                                  clipboard_size;
+		size_t                                  response_size;
+
+		if ((call->rights & CAP_READ) == 0u) return reply_request(call, NULL, 0u, SYSCALL_STATUS_DENIED);
+		if (call->request_size != sizeof(struct terminal_get_clipboard_request) ||
+		    !terminal_clipboard_get(
+				terminal, clipboard->text, CAP_MAX_RESPONSE_SIZE - sizeof(*clipboard), &clipboard_size))
+			return reply_request(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+		response_size = sizeof(*clipboard) + clipboard_size;
+		if (call->response_capacity < response_size) return reply_request(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+		clipboard->size     = (uint32_t)clipboard_size;
+		clipboard->reserved = 0u;
+		return reply_request(call, clipboard, response_size, SYSCALL_STATUS_OK);
+	}
+	if (header.op == TERMINAL_OP_SET_CLIPBOARD) {
+		struct terminal_set_clipboard_request clipboard;
+
+		if ((call->rights & CAP_WRITE) == 0u) return reply_request(call, NULL, 0u, SYSCALL_STATUS_DENIED);
+		if (call->request_size < sizeof(clipboard)) return reply_request(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+		memcpy(&clipboard, data, sizeof(clipboard));
+		if (clipboard.reserved != 0u || clipboard.size > TERMINAL_CLIPBOARD_CAPACITY ||
+		    call->request_size != sizeof(clipboard) + clipboard.size ||
+		    !terminal_clipboard_text_valid(data + sizeof(clipboard), clipboard.size))
+			return reply_request(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+		if (!terminal_clipboard_set(terminal, data + sizeof(clipboard), clipboard.size))
+			return reply_request(call, NULL, 0u, SYSCALL_STATUS_FAILED);
+		return reply_request(call, NULL, 0u, SYSCALL_STATUS_OK);
+	}
 	if (header.op == TERMINAL_OP_ACQUIRE_INTERRUPT_SIGNAL) {
 		struct terminal_acquire_interrupt_signal_response response = {.capability = CAP_ID_INVALID};
 		if ((call->rights & CAP_MANAGE) == 0u) return reply_request(call, NULL, 0u, SYSCALL_STATUS_DENIED);

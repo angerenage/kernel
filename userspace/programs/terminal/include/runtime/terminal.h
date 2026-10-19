@@ -20,6 +20,12 @@ syscall_status_t terminal_set_selection(cap_id_t terminal_cap, struct terminal_s
 /* Clear the active selection. */
 syscall_status_t terminal_clear_selection(cap_id_t terminal_cap);
 
+/* Read the clipboard, or query its byte size with a null buffer and zero capacity. */
+syscall_status_t terminal_get_clipboard(cap_id_t terminal_cap, void* buffer, size_t capacity, size_t* out_size);
+
+/* Atomically replace the terminal-owned plain-text clipboard. */
+syscall_status_t terminal_set_clipboard(cap_id_t terminal_cap, const void* text, size_t size);
+
 /* Acquire the terminal's coalesced interrupt notification signal. */
 syscall_status_t terminal_acquire_interrupt_signal(cap_id_t terminal_cap, cap_id_t* out_signal_cap);
 

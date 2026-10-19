@@ -21,6 +21,10 @@
  * dimensions and its current cursor position. Selection operations use stable,
  * monotonically assigned line identities and half-open cell ranges; anchor and
  * focus order is preserved so clients can extend either end of a selection.
+ * The terminal also owns a bounded, length-delimited UTF-8 clipboard. Clipboard
+ * text is plain text: terminal styling is never represented in its contents.
+ * Tab, LF, and CR are the only permitted control characters; NUL, other C0,
+ * DEL, and C1 controls are rejected.
  *
  * Current specification version: 1.0-beta
  */
@@ -57,6 +61,8 @@ enum terminal_op {
 	TERMINAL_OP_GET_SELECTION,
 	TERMINAL_OP_SET_SELECTION,
 	TERMINAL_OP_CLEAR_SELECTION,
+	TERMINAL_OP_GET_CLIPBOARD,
+	TERMINAL_OP_SET_CLIPBOARD,
 };
 
 /* Common header for terminal-specific requests. */
@@ -115,6 +121,29 @@ struct terminal_set_selection_request {
 struct terminal_clear_selection_request {
 	struct terminal_request_header header;
 };
+
+/* Request the terminal-owned plain-text clipboard. */
+struct terminal_get_clipboard_request {
+	struct terminal_request_header header;
+};
+
+/* Clipboard metadata followed by size bytes of UTF-8 text. */
+struct terminal_get_clipboard_response {
+	uint32_t size;
+	uint32_t reserved;
+	uint8_t  text[];
+};
+
+/* Replace the clipboard with the size bytes of UTF-8 text that follow. */
+struct terminal_set_clipboard_request {
+	struct terminal_request_header header;
+	uint32_t                       size;
+	uint32_t                       reserved;
+	uint8_t                        text[];
+};
+
+/* Largest clipboard value that can be replaced atomically. */
+#define TERMINAL_CLIPBOARD_CAPACITY (CAP_MAX_REQUEST_SIZE - sizeof(struct terminal_set_clipboard_request))
 
 /* Acquire notification of interrupt characters independently of buffered input. */
 struct terminal_acquire_interrupt_signal_request {
