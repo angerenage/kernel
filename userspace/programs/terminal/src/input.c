@@ -102,6 +102,7 @@ static void service_pending_reads(struct terminal_input* input) {
 
 static bool publish_bytes(struct terminal_input* input, const uint8_t* bytes, size_t size) {
 	if (input == NULL || (size != 0u && bytes == NULL)) return false;
+	if (size != 0u && !terminal_scroll_to_bottom(input->terminal)) return false;
 	input_lock(input);
 	service_pending_reads(input);
 	if (size > TERMINAL_INPUT_BUFFER_CAPACITY - input->byte_count) {
@@ -122,6 +123,7 @@ static bool publish_interrupt(struct terminal_input* input) {
 	struct signal_send_response response;
 	uint64_t                    counter;
 
+	if (!terminal_scroll_to_bottom(input->terminal)) return false;
 	input_lock(input);
 	input->interrupt_counter++;
 	if (input->interrupt_counter == 0u) input->interrupt_counter = 1u;
@@ -265,6 +267,7 @@ static bool process_text_events(struct terminal_input* input, const struct text_
 				}
 			}
 			else {
+				if (!terminal_scroll_to_bottom(input->terminal)) return false;
 				if (!terminal_set_preedit(input->terminal, text, size, action->selection_end)) return false;
 				*active_source      = action->source_id;
 				*active_composition = action->composition_id;

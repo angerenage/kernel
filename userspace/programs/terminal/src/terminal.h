@@ -36,6 +36,9 @@ bool terminal_set_preedit(struct terminal* terminal, const uint8_t* text, size_t
 /* Move the visible viewport by signed lines, with positive values revealing older output. */
 bool terminal_scroll_view(struct terminal* terminal, int64_t lines);
 
+/* Return the visible viewport to the live terminal screen. */
+bool terminal_scroll_to_bottom(struct terminal* terminal);
+
 /* Read the active directional selection. */
 bool terminal_selection_get(struct terminal* terminal, struct terminal_get_selection_response* out_selection);
 

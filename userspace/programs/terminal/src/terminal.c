@@ -1449,6 +1449,32 @@ bool terminal_scroll_view(struct terminal* terminal, int64_t lines) {
 	return success;
 }
 
+bool terminal_scroll_to_bottom(struct terminal* terminal) {
+	size_t offset;
+	bool   success;
+
+	if (terminal == NULL) return false;
+	terminal_lock(terminal);
+	if (terminal->viewport_offset == 0u) {
+		terminal_unlock(terminal);
+		return true;
+	}
+	hide_pointer_cursor(terminal);
+	if (!hide_cursor(terminal) || !erase_overlay(terminal)) {
+		show_pointer_cursor(terminal);
+		terminal_unlock(terminal);
+		return false;
+	}
+	offset                    = terminal->viewport_offset;
+	terminal->viewport_offset = 0u;
+	if (terminal->viewport_dirty) success = redraw_viewport(terminal);
+	else success = move_viewport(terminal, false, offset);
+	success = success && draw_overlay(terminal) && show_cursor(terminal);
+	show_pointer_cursor(terminal);
+	terminal_unlock(terminal);
+	return success;
+}
+
 bool terminal_selection_get(struct terminal* terminal, struct terminal_get_selection_response* out_selection) {
 	if (terminal == NULL || out_selection == NULL) return false;
 	terminal_lock(terminal);
