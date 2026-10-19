@@ -1,3 +1,4 @@
+#include <boot/info.h>
 #include <core/cpu.h>
 #include <core/pmm.h>
 #include <core/thread.h>
@@ -5,6 +6,7 @@
 #include <hal/interrupts.h>
 #include <hal/serial.h>
 #include <kernel/crash.h>
+#include <kernel/crash_qr.h>
 #include <string.h>
 
 #include "kernel_config.h"
@@ -23,6 +25,9 @@ static struct panic_slot          panic_slots[KERNEL_CRASH_MAX_CPUS];
 static char                       crash_render_buffer[KERNEL_CRASH_RENDER_SIZE];
 static uint8_t                    crash_wire_buffer[KERNEL_CRASH_WIRE_MAX_SIZE];
 static char                       crash_url_buffer[KERNEL_CRASH_URL_SIZE];
+static struct kernel_crash_qr     crash_qr;
+static struct boot_framebuffer    crash_framebuffer;
+static uint32_t                   crash_framebuffer_ready;
 static uint32_t                   crash_owner;
 static uint64_t                   crash_cpu_count;
 static uint64_t                   crash_total_memory;
@@ -58,11 +63,16 @@ struct kernel_crash_record* kernel_crash_begin(enum kernel_crash_arch arch, enum
 }
 
 void kernel_crash_publish_system_metadata(void) {
-	uint64_t discovered_cpu_count = (uint64_t)cpu_count();
-	uint64_t discovered_memory    = (uint64_t)pmm_total_size();
+	struct boot_framebuffer discovered_framebuffer;
+	uint64_t                discovered_cpu_count = (uint64_t)cpu_count();
+	uint64_t                discovered_memory    = (uint64_t)pmm_total_size();
 
 	__atomic_store_n(&crash_cpu_count, discovered_cpu_count, __ATOMIC_RELEASE);
 	__atomic_store_n(&crash_total_memory, discovered_memory, __ATOMIC_RELEASE);
+	if (boot_framebuffer_get(&discovered_framebuffer)) {
+		crash_framebuffer = discovered_framebuffer;
+		__atomic_store_n(&crash_framebuffer_ready, 1u, __ATOMIC_RELEASE);
+	}
 }
 
 bool kernel_crash_take_panic(struct kernel_crash_panic* panic) {
@@ -115,6 +125,13 @@ static void crash_find_stack_bounds(const struct kernel_crash_record* record, ui
 }
 
 __attribute__((noreturn))
+static void crash_present_qr_and_halt(bool qr_ready) {
+	if (qr_ready && __atomic_load_n(&crash_framebuffer_ready, __ATOMIC_ACQUIRE) != 0u)
+		(void)kernel_crash_qr_draw(&crash_qr, &crash_framebuffer);
+	hcf_silent();
+}
+
+__attribute__((noreturn))
 void kernel_crash_finish(struct kernel_crash_record* record) {
 	static const char              url_prefix[] = "crash.url=";
 	uintptr_t                      stack_base;
@@ -122,6 +139,8 @@ void kernel_crash_finish(struct kernel_crash_record* record) {
 	enum kernel_crash_frame_layout layout;
 	size_t                         wire_size;
 	size_t                         url_size;
+	size_t                         qr_url_size;
+	bool                           qr_ready = false;
 
 	if (record == NULL) hcf_silent();
 	crash_find_stack_bounds(record, &stack_base, &stack_top);
@@ -139,9 +158,11 @@ void kernel_crash_finish(struct kernel_crash_record* record) {
 	                                               crash_url_buffer + sizeof(url_prefix) - 1u,
 	                                               sizeof(crash_url_buffer) - sizeof(url_prefix))) {
 		url_size                     = strlen(crash_url_buffer);
+		qr_url_size                  = url_size - (sizeof(url_prefix) - 1u);
 		crash_url_buffer[url_size++] = '\n';
 		crash_url_buffer[url_size]   = '\0';
 		(void)hal_serial_write_emergency(crash_url_buffer, url_size);
+		qr_ready = kernel_crash_qr_encode(&crash_qr, crash_url_buffer + sizeof(url_prefix) - 1u, qr_url_size);
 	}
-	hcf_silent();
+	crash_present_qr_and_halt(qr_ready);
 }

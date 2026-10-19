@@ -18,6 +18,7 @@ base_libc_sources = files(
 	'libc/string/strdup.c',
 	'libc/string/strndup.c',
 	'libc/string/strlen.c',
+	'libc/stdlib/abs.c',
 	'libc/stdlib/calloc.c',
 	'libc/stdlib/free.c',
 	'libc/stdlib/malloc.c',

@@ -150,6 +150,16 @@ endif
 
 test_suites = [
 	{
+		'name': 'crash_qr',
+		'sources': files(
+			'crash/qr.c',
+			'../kernel/src/crash_qr.c',
+		) + qrcodegen_sources,
+		'link_with': base_test_lib,
+		'include_directories': [qrcodegen_inc],
+		'suites': ['unit', 'kernel'],
+	},
+	{
 		'name': 'crash_record',
 		'sources': files(
 			'crash/record.c',

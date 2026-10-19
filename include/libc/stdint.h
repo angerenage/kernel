@@ -40,3 +40,5 @@ typedef __UINTMAX_TYPE__ uintmax_t;
 #define INTMAX_MIN (-__INTMAX_MAX__ - 1)
 #define INTMAX_MAX __INTMAX_MAX__
 #define UINTMAX_MAX __UINTMAX_MAX__
+
+#define UINT32_C(x) x##U

@@ -15,7 +15,7 @@ kernel_ld_args = [
 ]
 kernel_ld_args += platform_kernel_link_args
 
-kernel_inc = include_directories('../include/libc', '../include', '../')
+kernel_inc = [include_directories('../include/libc', '../include', '../'), qrcodegen_inc]
 
 kernel_build_config_data = configuration_data()
 kernel_build_config_data.set('KERNEL_GIT_COMMIT', '@KERNEL_GIT_COMMIT@')
@@ -66,9 +66,10 @@ kernel_selftest_sources = files(
 	'test/selftests/rwlock.c',
 )
 
-kernel_objs = base_sources + core_sources + boot_sources + firmware_sources + kernel_libk_sources + platform_kernel_objects + [
+kernel_objs = base_sources + core_sources + boot_sources + firmware_sources + kernel_libk_sources + qrcodegen_sources + platform_kernel_objects + [
 	kernel_build_config,
 	'src/crash.c',
+	'src/crash_qr.c',
 	'src/crash_record.c',
 	'src/boot/cmdline.c',
 	'src/boot/diagnostics.c',
