@@ -29,6 +29,7 @@
 #define PL011_CR_RXE (1u << 9)
 
 #define PL011_INT_ALL 0x7FFu
+#define SERIAL_EMERGENCY_POLL_LIMIT 1000000u
 
 #define AARCH64_TT_DESC_VALID (1ull << 0)
 #define AARCH64_TT_DESC_TABLE (1ull << 1)
@@ -40,6 +41,7 @@
 
 static volatile uint32_t* serial_base;
 static bool               serial_ready;
+static bool               serial_emergency_active;
 static bool               serial_identity_mapped;
 static bool               serial_direct_mapped;
 
@@ -164,7 +166,7 @@ static inline void pl011_wait_tx_ready(void) {
 
 void hal_serial_init(void) {
 	volatile uint32_t* regs = pl011_regs();
-	if (serial_ready || regs == NULL) {
+	if (__atomic_load_n(&serial_ready, __ATOMIC_ACQUIRE) || regs == NULL) {
 		return;
 	}
 
@@ -184,19 +186,21 @@ void hal_serial_init(void) {
 	pl011_write(PL011_LCRH, PL011_LCRH_FEN | PL011_LCRH_WLEN_8BIT);
 	pl011_write(PL011_CR, PL011_CR_UARTEN | PL011_CR_TXE | PL011_CR_RXE);
 
-	serial_ready = true;
+	__atomic_store_n(&serial_ready, true, __ATOMIC_RELEASE);
 }
 
 void hal_serial_write_char(char ch) {
-	if (!serial_ready) {
+	if (__atomic_load_n(&serial_emergency_active, __ATOMIC_ACQUIRE)) return;
+	if (!__atomic_load_n(&serial_ready, __ATOMIC_ACQUIRE)) {
 		hal_serial_init();
 	}
 
-	if (!serial_ready) {
+	if (!__atomic_load_n(&serial_ready, __ATOMIC_ACQUIRE)) {
 		return;
 	}
 
 	pl011_wait_tx_ready();
+	if (__atomic_load_n(&serial_emergency_active, __ATOMIC_ACQUIRE)) return;
 	pl011_write(PL011_DR, (uint32_t)(uint8_t)ch);
 }
 
@@ -204,4 +208,29 @@ void hal_serial_write(const char* data, size_t length) {
 	for (size_t i = 0; i < length; i++) {
 		hal_serial_write_char(data[i]);
 	}
+}
+
+static bool serial_emergency_write_char(volatile uint32_t* regs, char ch) {
+	for (size_t attempt = 0u; attempt < SERIAL_EMERGENCY_POLL_LIMIT; attempt++) {
+		if ((regs[PL011_FR / sizeof(uint32_t)] & PL011_FR_TXFF) == 0u) {
+			regs[PL011_DR / sizeof(uint32_t)] = (uint32_t)(uint8_t)ch;
+			return true;
+		}
+		serial_relax();
+	}
+	return false;
+}
+
+bool hal_serial_write_emergency(const char* data, size_t length) {
+	volatile uint32_t* regs;
+
+	__atomic_store_n(&serial_emergency_active, true, __ATOMIC_RELEASE);
+	if (data == NULL || !__atomic_load_n(&serial_ready, __ATOMIC_ACQUIRE)) return false;
+	regs = serial_base;
+	if (regs == NULL) return false;
+	for (size_t i = 0u; i < length; i++) {
+		if (data[i] == '\n' && !serial_emergency_write_char(regs, '\r')) return false;
+		if (!serial_emergency_write_char(regs, data[i])) return false;
+	}
+	return true;
 }

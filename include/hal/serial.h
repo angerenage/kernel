@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 
 /*
@@ -14,3 +15,6 @@ void hal_serial_write_char(char ch);
 
 /* Transmit an arbitrary byte range in order. */
 void hal_serial_write(const char* data, size_t length);
+
+/* Transmit crash output without initialization, mapping, locking, or unbounded polling. */
+bool hal_serial_write_emergency(const char* data, size_t length);

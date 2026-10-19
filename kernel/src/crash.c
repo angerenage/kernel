@@ -3,8 +3,9 @@
 #include <core/thread.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
+#include <hal/serial.h>
 #include <kernel/crash.h>
-#include <stdio.h>
+#include <string.h>
 
 extern const uint8_t __kernel_build_id_note_start[];
 extern const uint8_t __kernel_build_id_note_end[];
@@ -122,6 +123,6 @@ void kernel_crash_finish(struct kernel_crash_record* record) {
 	             : KERNEL_CRASH_FRAME_RECORD_AT_FP;
 	kernel_crash_walk_stack(record, stack_base, stack_top, layout);
 	if (kernel_crash_render(record, crash_render_buffer, sizeof(crash_render_buffer)))
-		printf("%s", crash_render_buffer);
+		(void)hal_serial_write_emergency(crash_render_buffer, strlen(crash_render_buffer));
 	hcf_silent();
 }

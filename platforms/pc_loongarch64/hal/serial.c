@@ -19,8 +19,10 @@
 #define NS16550_FCR_FIFO 0xC7u
 
 #define NS16550_LSR_THRE 0x20u
+#define SERIAL_EMERGENCY_POLL_LIMIT 1000000u
 
 static bool serial_ready;
+static bool serial_emergency_active;
 
 static inline void serial_enable_uart_window(void) {
 	uint64_t current;
@@ -60,7 +62,7 @@ static inline void ns16550_wait_tx_ready(void) {
 
 void hal_serial_init(void) {
 	volatile uint8_t* regs = ns16550_regs();
-	if (serial_ready || regs == NULL) {
+	if (__atomic_load_n(&serial_ready, __ATOMIC_ACQUIRE) || regs == NULL) {
 		return;
 	}
 
@@ -71,19 +73,21 @@ void hal_serial_init(void) {
 	ns16550_write(NS16550_LCR, NS16550_LCR_8N1);
 	ns16550_write(NS16550_FCR, NS16550_FCR_FIFO);
 
-	serial_ready = true;
+	__atomic_store_n(&serial_ready, true, __ATOMIC_RELEASE);
 }
 
 void hal_serial_write_char(char ch) {
-	if (!serial_ready) {
+	if (__atomic_load_n(&serial_emergency_active, __ATOMIC_ACQUIRE)) return;
+	if (!__atomic_load_n(&serial_ready, __ATOMIC_ACQUIRE)) {
 		hal_serial_init();
 	}
 
-	if (!serial_ready) {
+	if (!__atomic_load_n(&serial_ready, __ATOMIC_ACQUIRE)) {
 		return;
 	}
 
 	ns16550_wait_tx_ready();
+	if (__atomic_load_n(&serial_emergency_active, __ATOMIC_ACQUIRE)) return;
 	ns16550_write(NS16550_THR, (uint8_t)ch);
 }
 
@@ -91,4 +95,29 @@ void hal_serial_write(const char* data, size_t length) {
 	for (size_t i = 0; i < length; i++) {
 		hal_serial_write_char(data[i]);
 	}
+}
+
+static bool serial_emergency_write_char(volatile uint8_t* regs, char ch) {
+	for (size_t attempt = 0u; attempt < SERIAL_EMERGENCY_POLL_LIMIT; attempt++) {
+		if ((regs[NS16550_LSR] & NS16550_LSR_THRE) != 0u) {
+			regs[NS16550_THR] = (uint8_t)ch;
+			return true;
+		}
+		serial_relax();
+	}
+	return false;
+}
+
+bool hal_serial_write_emergency(const char* data, size_t length) {
+	volatile uint8_t* regs;
+
+	__atomic_store_n(&serial_emergency_active, true, __ATOMIC_RELEASE);
+	if (data == NULL || !__atomic_load_n(&serial_ready, __ATOMIC_ACQUIRE)) return false;
+	serial_enable_uart_window();
+	regs = (volatile uint8_t*)(uintptr_t)(LOONGARCH_DMW_VSEG | NS16550_BASE_PHYS);
+	for (size_t i = 0u; i < length; i++) {
+		if (data[i] == '\n' && !serial_emergency_write_char(regs, '\r')) return false;
+		if (!serial_emergency_write_char(regs, data[i])) return false;
+	}
+	return true;
 }
