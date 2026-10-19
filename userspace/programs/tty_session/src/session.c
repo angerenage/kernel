@@ -393,8 +393,90 @@ static bool dispatch_get_cursor(struct tty_session* session, const struct cap_re
 	response = (struct tty_session_get_cursor_response){
 		.column = terminal_cursor.column,
 		.row    = terminal_cursor.row,
+		.line   = terminal_cursor.line,
 	};
 	return reply(call, &response, sizeof(response), SYSCALL_STATUS_OK);
+}
+
+/* Forward a terminal-selection query through the session. */
+static bool dispatch_get_selection(struct tty_session* session, const struct cap_request* call) {
+	struct terminal_get_selection_response    terminal_selection;
+	struct tty_session_get_selection_response response;
+
+	if ((call->rights & CAP_READ) == 0u) return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
+	if (call->request_size != sizeof(struct tty_session_get_selection_request) ||
+	    call->response_capacity < sizeof(response))
+		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	syscall_status_t status = terminal_get_selection(session->terminal_cap, &terminal_selection);
+	if (status != SYSCALL_STATUS_OK) return reply(call, NULL, 0u, status);
+	response = (struct tty_session_get_selection_response){
+		.anchor = {.line = terminal_selection.anchor.line, .column = terminal_selection.anchor.column},
+		.focus  = { .line = terminal_selection.focus.line,  .column = terminal_selection.focus.column},
+	};
+	return reply(call, &response, sizeof(response), SYSCALL_STATUS_OK);
+}
+
+/* Forward a controlling shell's selection replacement to the terminal. */
+static bool dispatch_set_selection(struct tty_session* session, const struct cap_request* call, const void* data) {
+	struct tty_session_set_selection_request request;
+	struct terminal_selection_position       anchor;
+	struct terminal_selection_position       focus;
+
+	if ((call->rights & CAP_MANAGE) == 0u) return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
+	if (call->request_size != sizeof(request) || call->response_capacity != 0u)
+		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	memcpy(&request, data, sizeof(request));
+	if (request.anchor.line == 0u || request.focus.line == 0u ||
+	    (request.anchor.line == request.focus.line && request.anchor.column == request.focus.column))
+		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	anchor = (struct terminal_selection_position){.line = request.anchor.line, .column = request.anchor.column};
+	focus  = (struct terminal_selection_position){.line = request.focus.line, .column = request.focus.column};
+	return reply(call, NULL, 0u, terminal_set_selection(session->terminal_cap, anchor, focus));
+}
+
+/* Forward a controlling shell's selection clear to the terminal. */
+static bool dispatch_clear_selection(struct tty_session* session, const struct cap_request* call) {
+	if ((call->rights & CAP_MANAGE) == 0u) return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
+	if (call->request_size != sizeof(struct tty_session_clear_selection_request) || call->response_capacity != 0u)
+		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	return reply(call, NULL, 0u, terminal_clear_selection(session->terminal_cap));
+}
+
+/* Forward a clipboard query through the session. */
+static bool dispatch_get_clipboard(struct tty_session* session, const struct cap_request* call) {
+	uint8_t                                    response_data[CAP_MAX_RESPONSE_SIZE];
+	struct tty_session_get_clipboard_response* response = (void*)response_data;
+	size_t                                     size;
+	size_t                                     response_size;
+
+	if ((call->rights & CAP_READ) == 0u) return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
+	if (call->request_size != sizeof(struct tty_session_get_clipboard_request))
+		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	syscall_status_t status =
+		terminal_get_clipboard(session->terminal_cap, response->text, TTY_SESSION_CLIPBOARD_CAPACITY, &size);
+	if (status != SYSCALL_STATUS_OK) return reply(call, NULL, 0u, status);
+	response_size = sizeof(*response) + size;
+	if (call->response_capacity < response_size) return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	response->size     = (uint32_t)size;
+	response->reserved = 0u;
+	return reply(call, response, response_size, SYSCALL_STATUS_OK);
+}
+
+/* Forward a controlling shell's clipboard replacement to the terminal. */
+static bool dispatch_set_clipboard(struct tty_session* session, const struct cap_request* call, const void* data) {
+	struct tty_session_set_clipboard_request request;
+
+	if ((call->rights & CAP_MANAGE) == 0u) return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
+	if (call->request_size < sizeof(request) || call->response_capacity != 0u)
+		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	memcpy(&request, data, sizeof(request));
+	if (request.reserved != 0u || request.size > TTY_SESSION_CLIPBOARD_CAPACITY ||
+	    call->request_size != sizeof(request) + request.size)
+		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	return reply(call,
+	             NULL,
+	             0u,
+	             terminal_set_clipboard(session->terminal_cap, (const uint8_t*)data + sizeof(request), request.size));
 }
 
 /* Select a prepared child before it starts running. */
@@ -515,12 +597,22 @@ static bool dispatch_request(struct tty_session* session, const struct cap_reque
 		return dispatch_get_info(session, call);
 	case TTY_SESSION_OP_GET_CURSOR:
 		return dispatch_get_cursor(session, call);
+	case TTY_SESSION_OP_GET_SELECTION:
+		return dispatch_get_selection(session, call);
+	case TTY_SESSION_OP_GET_CLIPBOARD:
+		return dispatch_get_clipboard(session, call);
+	case TTY_SESSION_OP_SET_CLIPBOARD:
+		return dispatch_set_clipboard(session, call, data);
 	case TTY_SESSION_OP_BEGIN_FOREGROUND:
 		return dispatch_begin_foreground(session, call, data);
 	case TTY_SESSION_OP_ATTACH_FOREGROUND:
 		return dispatch_attach_foreground(session, call, data);
 	case TTY_SESSION_OP_RESTORE_FOREGROUND:
 		return dispatch_restore_foreground(session, call);
+	case TTY_SESSION_OP_SET_SELECTION:
+		return dispatch_set_selection(session, call, data);
+	case TTY_SESSION_OP_CLEAR_SELECTION:
+		return dispatch_clear_selection(session, call);
 	default:
 		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	}

@@ -46,8 +46,8 @@
 /* Rights required by a process that only renders terminal output. */
 #define TERMINAL_OUTPUT_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_WRITE))
 
-/* Rights retained by the TTY session for input routing. */
-#define TERMINAL_TTY_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_MANAGE))
+/* Rights retained by the TTY session for input routing and selection forwarding. */
+#define TERMINAL_TTY_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE | CAP_MANAGE))
 
 /* Rights granted on the terminal interrupt notification signal. */
 #define TERMINAL_INTERRUPT_SIGNAL_RIGHTS ((cap_rights_t)CAP_WAIT)

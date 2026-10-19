@@ -8,8 +8,9 @@
  * a time. Input is delivered only to the foreground process; Control-C
  * terminates a selected child and is otherwise delivered to the shell as an
  * ordinary control byte.
- * Terminal geometry and cursor queries are forwarded without exposing the
- * underlying terminal capability to clients.
+ * Terminal geometry, cursor, selection, and plain-text clipboard operations
+ * are forwarded without exposing the underlying terminal capability to
+ * clients.
  *
  * Current specification version: 1.0-beta
  */
@@ -39,6 +40,11 @@ enum tty_session_op {
 	TTY_SESSION_OP_BEGIN_FOREGROUND,
 	TTY_SESSION_OP_ATTACH_FOREGROUND,
 	TTY_SESSION_OP_RESTORE_FOREGROUND,
+	TTY_SESSION_OP_GET_SELECTION,
+	TTY_SESSION_OP_SET_SELECTION,
+	TTY_SESSION_OP_CLEAR_SELECTION,
+	TTY_SESSION_OP_GET_CLIPBOARD,
+	TTY_SESSION_OP_SET_CLIPBOARD,
 };
 
 /* Common header for TTY-specific requests. */
@@ -67,7 +73,60 @@ struct tty_session_get_cursor_request {
 struct tty_session_get_cursor_response {
 	uint64_t column;
 	uint64_t row;
+	uint64_t line;
 };
+
+/* One cell boundary on a stable retained terminal line. */
+struct tty_session_selection_position {
+	uint64_t line;
+	uint64_t column;
+};
+
+/* Request the currently active terminal selection. */
+struct tty_session_get_selection_request {
+	struct tty_session_request_header header;
+};
+
+/* Directional endpoints of the currently active half-open selection. */
+struct tty_session_get_selection_response {
+	struct tty_session_selection_position anchor;
+	struct tty_session_selection_position focus;
+};
+
+/* Replace the terminal selection with one nonempty half-open cell range. */
+struct tty_session_set_selection_request {
+	struct tty_session_request_header     header;
+	struct tty_session_selection_position anchor;
+	struct tty_session_selection_position focus;
+};
+
+/* Clear the terminal selection, succeeding when none is active. */
+struct tty_session_clear_selection_request {
+	struct tty_session_request_header header;
+};
+
+/* Request the terminal-owned plain-text clipboard. */
+struct tty_session_get_clipboard_request {
+	struct tty_session_request_header header;
+};
+
+/* Clipboard metadata followed by size bytes of UTF-8 text. */
+struct tty_session_get_clipboard_response {
+	uint32_t size;
+	uint32_t reserved;
+	uint8_t  text[];
+};
+
+/* Replace the clipboard with the size bytes of UTF-8 text that follow. */
+struct tty_session_set_clipboard_request {
+	struct tty_session_request_header header;
+	uint32_t                          size;
+	uint32_t                          reserved;
+	uint8_t                           text[];
+};
+
+/* Largest clipboard value that can be replaced atomically. */
+#define TTY_SESSION_CLIPBOARD_CAPACITY (CAP_MAX_REQUEST_SIZE - sizeof(struct tty_session_set_clipboard_request))
 
 /* Select a prepared child process as the foreground input recipient. */
 struct tty_session_begin_foreground_request {
