@@ -37,3 +37,8 @@ option('kernel_boot_debug',
 	type : 'boolean',
 	value : false,
 	description : 'Append loglevel=debug to the generated boot image command line for verbose boot diagnostics.')
+
+option('crash_server_url',
+	type : 'string',
+	value : '',
+	description : 'Base URL used to print browser-decodable crash frame links.')

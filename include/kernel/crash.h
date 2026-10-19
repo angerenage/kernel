@@ -37,13 +37,23 @@ enum kernel_crash_frame_layout {
 };
 
 enum {
-	KERNEL_CRASH_SCHEMA_VERSION = 1u,
-	KERNEL_CRASH_BUILD_ID_SIZE  = 20u,
-	KERNEL_CRASH_GIT_ID_SIZE    = 41u,
-	KERNEL_CRASH_MAX_REGISTERS  = 32u,
-	KERNEL_CRASH_MAX_TRACE      = 8u,
-	KERNEL_CRASH_MAX_CPUS       = 64u,
-	KERNEL_CRASH_RENDER_SIZE    = 4096u,
+	KERNEL_CRASH_SCHEMA_VERSION   = 1u,
+	KERNEL_CRASH_BUILD_ID_SIZE    = 20u,
+	KERNEL_CRASH_GIT_ID_SIZE      = 41u,
+	KERNEL_CRASH_MAX_REGISTERS    = 32u,
+	KERNEL_CRASH_MAX_TRACE        = 8u,
+	KERNEL_CRASH_MAX_CPUS         = 64u,
+	KERNEL_CRASH_RENDER_SIZE      = 4096u,
+	KERNEL_CRASH_WIRE_HEADER_SIZE = 50u,
+	KERNEL_CRASH_WIRE_FIXED_WORDS = 16u,
+	KERNEL_CRASH_WIRE_MAX_SIZE    = KERNEL_CRASH_WIRE_HEADER_SIZE +
+		(KERNEL_CRASH_WIRE_FIXED_WORDS + KERNEL_CRASH_MAX_REGISTERS + KERNEL_CRASH_MAX_TRACE) * (sizeof(uint64_t) + 1u),
+	KERNEL_CRASH_URL_SIZE = 1024u,
+};
+
+enum kernel_crash_wire_flags {
+	KERNEL_CRASH_WIRE_GIT_VALID      = 1u << 0,
+	KERNEL_CRASH_WIRE_BUILD_ID_VALID = 1u << 1,
 };
 
 struct kernel_crash_record {
@@ -96,6 +106,13 @@ const char* kernel_crash_register_name(enum kernel_crash_arch arch, uint32_t ind
 
 /* Render a crash record into a bounded readable key/value buffer. */
 bool kernel_crash_render(const struct kernel_crash_record* record, char* output, size_t output_size);
+
+/* Encode a crash record into the bounded schema-v1 binary wire representation. */
+size_t kernel_crash_encode_wire(const struct kernel_crash_record* record, uint8_t* output, size_t output_size);
+
+/* Format a crash wire payload as a browser-local base64url fragment. */
+bool kernel_crash_format_url(const uint8_t* wire, size_t wire_size, const char* server_url, char* output,
+                             size_t output_size);
 
 /* Atomically claim an unowned crash-report slot for one-based CPU identity. */
 bool kernel_crash_try_claim(uint32_t* owner, uint32_t candidate);

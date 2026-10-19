@@ -11,6 +11,40 @@ static uint32_t crash_read_u32(const uint8_t* bytes) {
 	return value;
 }
 
+static size_t crash_write_compact_u64(uint8_t* output, size_t cursor, uint64_t value) {
+	size_t zero_length = sizeof(value);
+	size_t ones_length = sizeof(value);
+	size_t length;
+	bool   fill_ones;
+
+	while (zero_length > 0u && (uint8_t)(value >> (8u * (zero_length - 1u))) == 0u) zero_length--;
+	while (ones_length > 0u && (uint8_t)(value >> (8u * (ones_length - 1u))) == 0xffu) ones_length--;
+	fill_ones        = ones_length < zero_length;
+	length           = fill_ones ? ones_length : zero_length;
+	output[cursor++] = (uint8_t)length | (fill_ones ? 0x10u : 0u);
+	for (size_t i = 0u; i < length; i++) output[cursor++] = (uint8_t)(value >> (8u * i));
+	return cursor;
+}
+
+static int crash_hex_nibble(char ch) {
+	if (ch >= '0' && ch <= '9') return ch - '0';
+	if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+	if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+	return -1;
+}
+
+static bool crash_decode_git_id(const char* git_commit, uint8_t output[KERNEL_CRASH_BUILD_ID_SIZE]) {
+	if (git_commit == NULL || strlen(git_commit) != 2u * KERNEL_CRASH_BUILD_ID_SIZE) return false;
+	for (size_t i = 0u; i < KERNEL_CRASH_BUILD_ID_SIZE; i++) {
+		int high = crash_hex_nibble(git_commit[2u * i]);
+		int low  = crash_hex_nibble(git_commit[2u * i + 1u]);
+
+		if (high < 0 || low < 0) return false;
+		output[i] = (uint8_t)((unsigned)high << 4u) | (uint8_t)low;
+	}
+	return true;
+}
+
 static size_t crash_align4(size_t value) {
 	return (value + 3u) & ~(size_t)3u;
 }
@@ -245,6 +279,104 @@ bool kernel_crash_render(const struct kernel_crash_record* record, char* output,
 				output, output_size, &length, "trace.%u=0x%016llx\n", i, (unsigned long long)record->trace[i]))
 			return false;
 	return crash_append_format(output, output_size, &length, "--- END KERNEL CRASH FRAME ---\n");
+}
+
+size_t kernel_crash_encode_wire(const struct kernel_crash_record* record, uint8_t* output, size_t output_size) {
+	uint32_t register_count;
+	uint32_t trace_count;
+	size_t   cursor;
+
+	if (record == NULL || output == NULL) return 0u;
+	register_count =
+		record->register_count < KERNEL_CRASH_MAX_REGISTERS ? record->register_count : KERNEL_CRASH_MAX_REGISTERS;
+	trace_count = record->trace_count < KERNEL_CRASH_MAX_TRACE ? record->trace_count : KERNEL_CRASH_MAX_TRACE;
+	if (output_size < KERNEL_CRASH_WIRE_MAX_SIZE) return 0u;
+	memset(output, 0, KERNEL_CRASH_WIRE_HEADER_SIZE);
+	memcpy(output, "KCF1", 4u);
+	output[4] = (uint8_t)record->schema_version;
+	output[5] = (uint8_t)record->arch;
+	output[6] = (uint8_t)record->cause;
+	if (crash_decode_git_id(record->git_commit, output + 10u)) output[7] |= KERNEL_CRASH_WIRE_GIT_VALID;
+	if (record->build_id_valid) {
+		output[7] |= KERNEL_CRASH_WIRE_BUILD_ID_VALID;
+		memcpy(output + 30u, record->build_id, KERNEL_CRASH_BUILD_ID_SIZE);
+	}
+	output[8] = (uint8_t)register_count;
+	output[9] = (uint8_t)trace_count;
+	cursor    = KERNEL_CRASH_WIRE_HEADER_SIZE;
+	cursor    = crash_write_compact_u64(output, cursor, record->trace_flags);
+	cursor    = crash_write_compact_u64(output, cursor, record->cpu_index);
+	cursor    = crash_write_compact_u64(output, cursor, record->processor_id);
+	cursor    = crash_write_compact_u64(output, cursor, record->arch_id);
+	cursor    = crash_write_compact_u64(output, cursor, record->cpu_count);
+	cursor    = crash_write_compact_u64(output, cursor, record->total_memory);
+	cursor    = crash_write_compact_u64(output, cursor, record->exception_code);
+	cursor    = crash_write_compact_u64(output, cursor, record->exception_subcode);
+	cursor    = crash_write_compact_u64(output, cursor, record->error_code);
+	cursor    = crash_write_compact_u64(output, cursor, record->fault_address);
+	cursor    = crash_write_compact_u64(output, cursor, record->instruction_pointer);
+	cursor    = crash_write_compact_u64(output, cursor, record->stack_pointer);
+	cursor    = crash_write_compact_u64(output, cursor, record->frame_pointer);
+	cursor    = crash_write_compact_u64(output, cursor, record->status);
+	cursor    = crash_write_compact_u64(output, cursor, (uint32_t)record->panic_reason);
+	cursor    = crash_write_compact_u64(output, cursor, record->panic_detail);
+	for (uint32_t i = 0u; i < register_count; i++)
+		cursor = crash_write_compact_u64(output, cursor, record->registers[i]);
+	for (uint32_t i = 0u; i < trace_count; i++) cursor = crash_write_compact_u64(output, cursor, record->trace[i]);
+	return cursor;
+}
+
+bool kernel_crash_format_url(const uint8_t* wire, size_t wire_size, const char* server_url, char* output,
+                             size_t output_size) {
+	static const char base64url[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+	static const char suffix[]    = "crash#v1.";
+	size_t            server_size;
+	size_t            encoded_size;
+	size_t            cursor;
+	size_t            output_cursor;
+	size_t            required_size;
+	bool              add_slash;
+
+	if (wire == NULL || wire_size == 0u || server_url == NULL || server_url[0] == '\0' || output == NULL) return false;
+	server_size = strlen(server_url);
+	add_slash   = server_url[server_size - 1u] != '/';
+	if (wire_size / 3u > (SIZE_MAX - 3u) / 4u) return false;
+	encoded_size = (wire_size / 3u) * 4u + (wire_size % 3u == 0u ? 0u : wire_size % 3u + 1u);
+	if (server_size > SIZE_MAX - (add_slash ? 1u : 0u)) return false;
+	required_size = server_size + (add_slash ? 1u : 0u);
+	if (required_size > SIZE_MAX - (sizeof(suffix) - 1u)) return false;
+	required_size += sizeof(suffix) - 1u;
+	if (required_size > SIZE_MAX - encoded_size) return false;
+	required_size += encoded_size;
+	if (output_size <= required_size) return false;
+	memcpy(output, server_url, server_size);
+	output_cursor = server_size;
+	if (add_slash) output[output_cursor++] = '/';
+	memcpy(output + output_cursor, suffix, sizeof(suffix) - 1u);
+	output_cursor += sizeof(suffix) - 1u;
+	for (cursor = 0u; cursor + 3u <= wire_size; cursor += 3u) {
+		uint32_t value = (uint32_t)wire[cursor] << 16u | (uint32_t)wire[cursor + 1u] << 8u | wire[cursor + 2u];
+
+		output[output_cursor++] = base64url[(value >> 18u) & 0x3fu];
+		output[output_cursor++] = base64url[(value >> 12u) & 0x3fu];
+		output[output_cursor++] = base64url[(value >> 6u) & 0x3fu];
+		output[output_cursor++] = base64url[value & 0x3fu];
+	}
+	if (wire_size - cursor == 1u) {
+		uint32_t value = (uint32_t)wire[cursor] << 16u;
+
+		output[output_cursor++] = base64url[(value >> 18u) & 0x3fu];
+		output[output_cursor++] = base64url[(value >> 12u) & 0x3fu];
+	}
+	else if (wire_size - cursor == 2u) {
+		uint32_t value = (uint32_t)wire[cursor] << 16u | (uint32_t)wire[cursor + 1u] << 8u;
+
+		output[output_cursor++] = base64url[(value >> 18u) & 0x3fu];
+		output[output_cursor++] = base64url[(value >> 12u) & 0x3fu];
+		output[output_cursor++] = base64url[(value >> 6u) & 0x3fu];
+	}
+	output[output_cursor] = '\0';
+	return true;
 }
 
 bool kernel_crash_try_claim(uint32_t* owner, uint32_t candidate) {

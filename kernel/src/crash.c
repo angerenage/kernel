@@ -7,6 +7,8 @@
 #include <kernel/crash.h>
 #include <string.h>
 
+#include "kernel_config.h"
+
 extern const uint8_t __kernel_build_id_note_start[];
 extern const uint8_t __kernel_build_id_note_end[];
 
@@ -19,6 +21,8 @@ struct panic_slot {
 static struct kernel_crash_record crash_records[KERNEL_CRASH_MAX_CPUS];
 static struct panic_slot          panic_slots[KERNEL_CRASH_MAX_CPUS];
 static char                       crash_render_buffer[KERNEL_CRASH_RENDER_SIZE];
+static uint8_t                    crash_wire_buffer[KERNEL_CRASH_WIRE_MAX_SIZE];
+static char                       crash_url_buffer[KERNEL_CRASH_URL_SIZE];
 static uint32_t                   crash_owner;
 static uint64_t                   crash_cpu_count;
 static uint64_t                   crash_total_memory;
@@ -112,9 +116,12 @@ static void crash_find_stack_bounds(const struct kernel_crash_record* record, ui
 
 __attribute__((noreturn))
 void kernel_crash_finish(struct kernel_crash_record* record) {
+	static const char              url_prefix[] = "crash.url=";
 	uintptr_t                      stack_base;
 	uintptr_t                      stack_top;
 	enum kernel_crash_frame_layout layout;
+	size_t                         wire_size;
+	size_t                         url_size;
 
 	if (record == NULL) hcf_silent();
 	crash_find_stack_bounds(record, &stack_base, &stack_top);
@@ -124,5 +131,17 @@ void kernel_crash_finish(struct kernel_crash_record* record) {
 	kernel_crash_walk_stack(record, stack_base, stack_top, layout);
 	if (kernel_crash_render(record, crash_render_buffer, sizeof(crash_render_buffer)))
 		(void)hal_serial_write_emergency(crash_render_buffer, strlen(crash_render_buffer));
+	wire_size = kernel_crash_encode_wire(record, crash_wire_buffer, sizeof(crash_wire_buffer));
+	memcpy(crash_url_buffer, url_prefix, sizeof(url_prefix) - 1u);
+	if (wire_size != 0u && kernel_crash_format_url(crash_wire_buffer,
+	                                               wire_size,
+	                                               KERNEL_CRASH_SERVER_URL,
+	                                               crash_url_buffer + sizeof(url_prefix) - 1u,
+	                                               sizeof(crash_url_buffer) - sizeof(url_prefix))) {
+		url_size                     = strlen(crash_url_buffer);
+		crash_url_buffer[url_size++] = '\n';
+		crash_url_buffer[url_size]   = '\0';
+		(void)hal_serial_write_emergency(crash_url_buffer, url_size);
+	}
 	hcf_silent();
 }

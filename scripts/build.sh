@@ -13,7 +13,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 usage() {
 	cat <<'EOF'
-Usage: build.sh (--arch <arch> | --all) [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--setup|-s] [--compile|-c] [-sc] [--reconfigure] [--no-tests] [--test-sanitizers] [--kernel-selftests] [--kernel-selftests-autorun] [--kernel-selftests-suite <name>] [--kernel-selftests-iommu <kind>] [--kernel-boot-debug]
+Usage: build.sh (--arch <arch> | --all) [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--setup|-s] [--compile|-c] [-sc] [--reconfigure] [--no-tests] [--test-sanitizers] [--kernel-selftests] [--kernel-selftests-autorun] [--kernel-selftests-suite <name>] [--kernel-selftests-iommu <kind>] [--kernel-boot-debug] [--crash-server-url <url>]
 
 Target selection:
   --arch <arch>  Build a single architecture (x86_64, aarch64, riscv64, loongarch64).
@@ -43,6 +43,8 @@ Actions:
   --kernel-boot-debug
                   Configure Meson with -Dkernel_boot_debug=true.
                   Enables verbose boot diagnostics in the generated image.
+  --crash-server-url <url>
+                  Embed the HTTP(S) base URL used for crash decoder links.
 
 Build directories:
   --builddir <path>
@@ -180,6 +182,9 @@ setup_arch() {
 			"-Dkernel_boot_debug=$( (( KERNEL_BOOT_DEBUG )) && printf true || printf false )"
 		)
 	fi
+	if [[ -n "$CRASH_SERVER_URL" ]]; then
+		meson_args+=("-Dcrash_server_url=${CRASH_SERVER_URL}")
+	fi
 
 	log_arch "$arch" "configuring in ${build_dir}"
 	(
@@ -265,6 +270,7 @@ KERNEL_SELFTESTS_AUTORUN=0
 KERNEL_SELFTESTS_SUITE=""
 KERNEL_SELFTESTS_IOMMU=""
 KERNEL_BOOT_DEBUG=0
+CRASH_SERVER_URL=""
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -380,6 +386,17 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--kernel-boot-debug)
 			KERNEL_BOOT_DEBUG=1
+			shift
+			;;
+		--crash-server-url)
+			[[ $# -ge 2 ]] || error "missing value for --crash-server-url"
+			[[ -n "$2" ]] || error "--crash-server-url requires a non-empty URL"
+			CRASH_SERVER_URL="$2"
+			shift 2
+			;;
+		--crash-server-url=*)
+			CRASH_SERVER_URL="${1#*=}"
+			[[ -n "$CRASH_SERVER_URL" ]] || error "--crash-server-url requires a non-empty URL"
 			shift
 			;;
 		-h|--help)

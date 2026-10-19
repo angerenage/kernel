@@ -9,6 +9,18 @@ static void write_u32(uint8_t* bytes, uint32_t value) {
 	memcpy(bytes, &value, sizeof(value));
 }
 
+static uint64_t read_compact_u64(const uint8_t* bytes, size_t* cursor) {
+	uint8_t  tag    = bytes[(*cursor)++];
+	size_t   length = tag & 0x0fu;
+	uint64_t value  = (tag & 0x10u) != 0u ? UINT64_MAX : 0u;
+
+	for (size_t i = 0u; i < length; i++) {
+		value &= ~((uint64_t)0xffu << (8u * i));
+		value |= (uint64_t)bytes[(*cursor)++] << (8u * i);
+	}
+	return value;
+}
+
 Test(crash_record, reset_publishes_schema_source_and_architecture) {
 	struct kernel_crash_record record;
 
@@ -174,4 +186,56 @@ Test(crash_record, ownership_is_first_writer_wins) {
 	cr_assert_not(kernel_crash_try_claim(&owner, 4u));
 	cr_assert_eq(owner, 3u);
 	cr_assert_not(kernel_crash_try_claim(&owner, 0u));
+}
+
+Test(crash_record, encodes_the_bounded_wire_format) {
+	struct kernel_crash_record record;
+	uint8_t                    wire[KERNEL_CRASH_WIRE_MAX_SIZE];
+	size_t                     wire_size;
+	size_t                     cursor;
+
+	kernel_crash_record_reset(&record, KERNEL_CRASH_ARCH_X86_64, KERNEL_CRASH_CAUSE_EXCEPTION);
+	strlcpy(record.git_commit, "00112233445566778899aabbccddeeff00112233", sizeof(record.git_commit));
+	record.build_id_valid      = true;
+	record.build_id[0]         = 0xabu;
+	record.cpu_count           = 4u;
+	record.instruction_pointer = 0x123456789abcdef0ull;
+	record.register_count      = 1u;
+	record.registers[0]        = 0x55u;
+	record.trace_count         = 1u;
+	record.trace[0]            = 0x66u;
+	wire_size                  = kernel_crash_encode_wire(&record, wire, sizeof(wire));
+
+	cr_assert_gt(wire_size, KERNEL_CRASH_WIRE_HEADER_SIZE);
+	cr_assert_lt(wire_size, 100u);
+	cr_assert_eq(memcmp(wire, "KCF1", 4u), 0);
+	cr_assert_eq(wire[4], KERNEL_CRASH_SCHEMA_VERSION);
+	cr_assert_eq(wire[7], KERNEL_CRASH_WIRE_GIT_VALID | KERNEL_CRASH_WIRE_BUILD_ID_VALID);
+	cr_assert_eq(wire[8], 1u);
+	cr_assert_eq(wire[9], 1u);
+	cr_assert_eq(wire[10], 0x00u);
+	cr_assert_eq(wire[11], 0x11u);
+	cr_assert_eq(wire[30], 0xabu);
+	cursor = KERNEL_CRASH_WIRE_HEADER_SIZE;
+	for (size_t i = 0u; i < 4u; i++) (void)read_compact_u64(wire, &cursor);
+	cr_assert_eq(read_compact_u64(wire, &cursor), 4u);
+	for (size_t i = 0u; i < 5u; i++) (void)read_compact_u64(wire, &cursor);
+	cr_assert_eq(read_compact_u64(wire, &cursor), 0x123456789abcdef0ull);
+	for (size_t i = 0u; i < 5u; i++) (void)read_compact_u64(wire, &cursor);
+	cr_assert_eq(read_compact_u64(wire, &cursor), 0x55u);
+	cr_assert_eq(read_compact_u64(wire, &cursor), 0x66u);
+	cr_assert_eq(cursor, wire_size);
+	cr_assert_eq(kernel_crash_encode_wire(&record, wire, wire_size - 1u), 0u);
+}
+
+Test(crash_record, formats_an_unpadded_base64url_fragment) {
+	const uint8_t wire[] = {0xfbu, 0xffu, 0xefu};
+	char          url[64];
+
+	cr_assert(kernel_crash_format_url(wire, sizeof(wire), "https://crash.example", url, sizeof(url)));
+	cr_assert_str_eq(url, "https://crash.example/crash#v1.-__v");
+	cr_assert(kernel_crash_format_url(wire, 2u, "http://localhost:3000/", url, sizeof(url)));
+	cr_assert_str_eq(url, "http://localhost:3000/crash#v1.-_8");
+	cr_assert_not(kernel_crash_format_url(wire, sizeof(wire), "", url, sizeof(url)));
+	cr_assert_not(kernel_crash_format_url(wire, sizeof(wire), "https://crash.example", url, 8u));
 }

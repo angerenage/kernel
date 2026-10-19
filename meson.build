@@ -9,6 +9,7 @@ kernel_selftests_autorun = get_option('kernel_selftests_autorun')
 kernel_selftests_suite = get_option('kernel_selftests_suite')
 kernel_selftests_iommu = get_option('kernel_selftests_iommu')
 kernel_boot_debug = get_option('kernel_boot_debug')
+crash_server_url = get_option('crash_server_url')
 test_sanitizers = get_option('test_sanitizers')
 
 if test_sanitizers and not get_option('tests')
@@ -30,6 +31,16 @@ endif
 if not ['', 'none', 'vtd', 'amd', 'smmuv3', 'riscv', 'loongarch-v1'].contains(kernel_selftests_iommu)
 	error('kernel_selftests_iommu must be none, vtd, amd, smmuv3, riscv, or loongarch-v1')
 endif
+
+if crash_server_url != '' and not crash_server_url.startswith('https://') and not crash_server_url.startswith('http://')
+	error('crash_server_url must be empty or start with http:// or https://')
+endif
+
+foreach forbidden : ['"', ' ', '\t', '\n', '\r', '?', '#']
+	if crash_server_url.contains(forbidden)
+		error('crash_server_url must not contain quotes or newlines')
+	endif
+endforeach
 
 foreach whitespace : [' ', '\t', '\n', '\r']
 	if kernel_selftests_suite.contains(whitespace)

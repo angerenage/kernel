@@ -17,10 +17,19 @@ kernel_ld_args += platform_kernel_link_args
 
 kernel_inc = include_directories('../include/libc', '../include', '../')
 
+kernel_build_config_data = configuration_data()
+kernel_build_config_data.set('KERNEL_GIT_COMMIT', '@KERNEL_GIT_COMMIT@')
+kernel_build_config_data.set('KERNEL_CRASH_SERVER_URL', crash_server_url)
+kernel_build_config_template = configure_file(
+	input: 'config.h.in',
+	output: 'kernel_config.h.in',
+	configuration: kernel_build_config_data,
+)
+
 git_program = find_program('git', native: true, required: false)
 if git_program.found()
 	kernel_build_config = vcs_tag(
-		input: 'config.h.in',
+		input: kernel_build_config_template,
 		output: 'kernel_config.h',
 		command: [git_program, 'rev-parse', '--verify', 'HEAD'],
 		fallback: 'unknown',
@@ -29,6 +38,7 @@ if git_program.found()
 else
 	kernel_build_config_data = configuration_data()
 	kernel_build_config_data.set('KERNEL_GIT_COMMIT', 'unknown')
+	kernel_build_config_data.set('KERNEL_CRASH_SERVER_URL', crash_server_url)
 	kernel_build_config = configure_file(
 		input: 'config.h.in',
 		output: 'kernel_config.h',
