@@ -170,8 +170,11 @@ bool loongarch64_fixed_source_init(struct hal_interrupt_source_state* state, con
 	uint32_t route = delivery->event.id;
 	if (!fixed_set_masked(controller, source->number, route, true)) return false;
 	if (!fixed_configure(controller, source->number, route, delivery)) return false;
-	*state =
-		(struct hal_interrupt_source_state){.source = *source, .route = route, .initialized = true, .masked = true};
+	*state = (struct hal_interrupt_source_state){.source         = *source,
+	                                             .route          = route,
+	                                             .initialized    = true,
+	                                             .masked         = true,
+	                                             .edge_triggered = delivery->trigger == HAL_INTERRUPT_TRIGGER_EDGE};
 	return true;
 }
 

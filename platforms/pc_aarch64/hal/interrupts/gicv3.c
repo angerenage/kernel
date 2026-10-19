@@ -458,8 +458,11 @@ static bool gicv3_source_init(struct hal_interrupt_source_state* state, const st
 		gicv3_write64(distributor_phys + route_offset, route);
 	}
 	__asm__ volatile("dsb sy\n\tisb" : : : "memory");
-	*state = (struct hal_interrupt_source_state){
-		.source = *source, .register_base = base, .initialized = true, .masked = true};
+	*state = (struct hal_interrupt_source_state){.source         = *source,
+	                                             .register_base  = base,
+	                                             .initialized    = true,
+	                                             .masked         = true,
+	                                             .edge_triggered = delivery->trigger == HAL_INTERRUPT_TRIGGER_EDGE};
 	return true;
 }
 

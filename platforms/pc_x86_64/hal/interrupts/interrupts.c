@@ -544,6 +544,7 @@ bool hal_interrupt_source_init(struct hal_interrupt_source_state* state, const s
 	struct hal_interrupt_source_info info;
 	uint32_t                         route;
 	uintptr_t                        registers;
+	bool                             edge_triggered = false;
 	if (state == NULL || state->initialized || delivery == NULL || !hal_interrupt_source_info(source, &info) ||
 	    !x86_event_in_range(delivery->event, info.delivery) ||
 	    !hal_interrupt_source_target_supported(source, delivery->target) ||
@@ -555,28 +556,31 @@ bool hal_interrupt_source_init(struct hal_interrupt_source_state* state, const s
 	                                                        delivery->trigger,
 	                                                        delivery->polarity,
 	                                                        &route,
-	                                                        &registers)
+	                                                        &registers,
+	                                                        &edge_triggered)
 	                                   : apic_route_ioapic_source(source,
 	                                                              delivery->event.id,
 	                                                              (uint32_t)delivery->target->arch_id,
 	                                                              delivery->trigger,
 	                                                              delivery->polarity,
 	                                                              &route,
-	                                                              &registers);
+	                                                              &registers,
+	                                                              &edge_triggered);
 	if (info.target_kind == HAL_INTERRUPT_TARGET_ROUTABLE && routed) {
 		*state = (struct hal_interrupt_source_state){.source           = *source,
 		                                             .ioapic_route     = route,
 		                                             .ioapic_registers = registers,
 		                                             .initialized      = true,
-		                                             .masked           = true};
+		                                             .masked           = true,
+		                                             .edge_triggered   = edge_triggered};
 		return true;
 	}
 	if (info.target_kind != HAL_INTERRUPT_TARGET_FIXED || delivery->target->role != CPU_ROLE_BSP ||
 	    delivery->trigger == HAL_INTERRUPT_TRIGGER_LEVEL || delivery->polarity == HAL_INTERRUPT_POLARITY_LOW)
 		return false;
 	pic_mask_irq(source->number);
-	*state =
-		(struct hal_interrupt_source_state){.source = *source, .uses_pic = true, .initialized = true, .masked = true};
+	*state = (struct hal_interrupt_source_state){
+		.source = *source, .uses_pic = true, .initialized = true, .masked = true, .edge_triggered = true};
 	return true;
 }
 

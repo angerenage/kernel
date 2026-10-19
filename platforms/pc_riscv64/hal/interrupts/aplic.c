@@ -365,11 +365,12 @@ bool riscv64_aplic_source_init(struct hal_interrupt_source_state* state, const s
 		aplic_write(config_offset, 0u);
 		return false;
 	}
-	*state = (struct hal_interrupt_source_state){.source      = *source,
-	                                             .target      = delivery->target,
-	                                             .route       = aplic.msi ? delivery->event.id : hart_index,
-	                                             .initialized = true,
-	                                             .masked      = true};
+	*state = (struct hal_interrupt_source_state){.source         = *source,
+	                                             .target         = delivery->target,
+	                                             .route          = aplic.msi ? delivery->event.id : hart_index,
+	                                             .initialized    = true,
+	                                             .masked         = true,
+	                                             .edge_triggered = delivery->trigger == HAL_INTERRUPT_TRIGGER_EDGE};
 	return true;
 }
 

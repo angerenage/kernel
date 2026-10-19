@@ -426,8 +426,11 @@ static bool gicv2_source_init(struct hal_interrupt_source_state* state, const st
 	mmio_write8(gicd_mmio, AARCH64_GICD_IPRIORITYR + source->number, 0x80u);
 	if (source->number >= 32u) mmio_write8(gicd_mmio, AARCH64_GICD_ITARGETSR + source->number, target_mask);
 	sync();
-	*state = (struct hal_interrupt_source_state){
-		.source = *source, .target_index = delivery->target->index, .initialized = true, .masked = true};
+	*state = (struct hal_interrupt_source_state){.source         = *source,
+	                                             .target_index   = delivery->target->index,
+	                                             .initialized    = true,
+	                                             .masked         = true,
+	                                             .edge_triggered = delivery->trigger == HAL_INTERRUPT_TRIGGER_EDGE};
 	return true;
 }
 

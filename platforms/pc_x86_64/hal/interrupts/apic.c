@@ -381,10 +381,11 @@ bool apic_ioapic_source_claimable(const struct hal_interrupt_source* source) {
 
 static bool apic_route_ioapic(const struct x86_ioapic* selected, uint32_t route, uint16_t flags, unsigned vector,
                               uint32_t target_lapic_id, enum hal_interrupt_trigger trigger,
-                              enum hal_interrupt_polarity polarity, uint32_t* out_route, uintptr_t* out_registers) {
+                              enum hal_interrupt_polarity polarity, uint32_t* out_route, uintptr_t* out_registers,
+                              bool* out_edge_triggered) {
 	if (selected == NULL || route >= selected->redirection_count || vector < 32u || vector >= 255u ||
 	    target_lapic_id > 255u || trigger > HAL_INTERRUPT_TRIGGER_LEVEL || polarity > HAL_INTERRUPT_POLARITY_LOW ||
-	    out_route == NULL || out_registers == NULL || !lapic_init(selected->lapic_phys))
+	    out_route == NULL || out_registers == NULL || out_edge_triggered == NULL || !lapic_init(selected->lapic_phys))
 		return false;
 	uint64_t redir             = (uint64_t)vector | X86_IOAPIC_REDIR_MASK;
 	uint16_t firmware_polarity = flags & X86_ACPI_MADT_POLARITY_MASK;
@@ -404,17 +405,20 @@ static bool apic_route_ioapic(const struct x86_ioapic* selected, uint32_t route,
 	ioapic_write(selected->registers, (uint8_t)(low_reg + 1u), target_lapic_id << 24);
 	ioapic_write(selected->registers, low_reg, (uint32_t)redir);
 	ioapic_lock_release(route_irq_state);
-	*out_route     = route;
-	*out_registers = (uintptr_t)selected->registers;
-	apic_active    = true;
+	*out_route          = route;
+	*out_registers      = (uintptr_t)selected->registers;
+	*out_edge_triggered = !level;
+	apic_active         = true;
 	return true;
 }
 
 bool apic_route_isa_irq(unsigned irq, unsigned vector, uint32_t target_lapic_id, enum hal_interrupt_trigger trigger,
-                        enum hal_interrupt_polarity polarity, uint32_t* out_route, uintptr_t* out_registers) {
+                        enum hal_interrupt_polarity polarity, uint32_t* out_route, uintptr_t* out_registers,
+                        bool* out_edge_triggered) {
 	if (irq >= X86_IRQ_COUNT || vector < 32u || vector >= 255u || out_route == NULL || out_registers == NULL ||
-	    target_lapic_id > 255u || trigger > HAL_INTERRUPT_TRIGGER_LEVEL || polarity > HAL_INTERRUPT_POLARITY_LOW ||
-	    (!ioapic_probed && !apic_probe_isa_irqs()) || !isa_routes[irq].available)
+	    out_edge_triggered == NULL || target_lapic_id > 255u || trigger > HAL_INTERRUPT_TRIGGER_LEVEL ||
+	    polarity > HAL_INTERRUPT_POLARITY_LOW || (!ioapic_probed && !apic_probe_isa_irqs()) ||
+	    !isa_routes[irq].available)
 		return false;
 	const struct x86_isa_route* selected = &isa_routes[irq];
 	struct x86_ioapic           ioapic   = {
@@ -427,12 +431,13 @@ bool apic_route_isa_irq(unsigned irq, unsigned vector, uint32_t target_lapic_id,
 	                         trigger,
 	                         polarity,
 	                         out_route,
-	                         out_registers);
+	                         out_registers,
+	                         out_edge_triggered);
 }
 
 bool apic_route_ioapic_source(const struct hal_interrupt_source* source, unsigned vector, uint32_t target_lapic_id,
                               enum hal_interrupt_trigger trigger, enum hal_interrupt_polarity polarity,
-                              uint32_t* out_route, uintptr_t* out_registers) {
+                              uint32_t* out_route, uintptr_t* out_registers, bool* out_edge_triggered) {
 	if (!apic_ioapic_source_available(source)) return false;
 	return apic_route_ioapic(&ioapics[source->domain - 1u],
 	                         source->number,
@@ -442,7 +447,8 @@ bool apic_route_ioapic_source(const struct hal_interrupt_source* source, unsigne
 	                         trigger,
 	                         polarity,
 	                         out_route,
-	                         out_registers);
+	                         out_registers,
+	                         out_edge_triggered);
 }
 
 bool apic_set_isa_irq_mask(uintptr_t registers_address, uint32_t route, bool masked) {

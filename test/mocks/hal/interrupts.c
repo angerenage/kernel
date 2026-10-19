@@ -6,6 +6,7 @@ static _Thread_local bool                 hosted_irq_enabled = true;
 static const struct cpu*                  last_source_target;
 static bool                               last_source_unmasked_from_masked;
 static size_t                             source_unmask_count;
+static size_t                             source_mask_count;
 static bool                               source_mask_fails;
 static bool                               source_unmask_fails;
 static enum hal_interrupt_trigger         last_source_trigger;
@@ -26,6 +27,9 @@ bool hal_interrupt_mock_unmasked_from_masked(void) {
 }
 size_t hal_interrupt_mock_unmask_count(void) {
 	return source_unmask_count;
+}
+size_t hal_interrupt_mock_mask_count(void) {
+	return source_mask_count;
 }
 void hal_interrupt_mock_set_mask_failure(bool fail) {
 	source_mask_fails = fail;
@@ -133,8 +137,11 @@ bool hal_interrupt_source_init(struct hal_interrupt_source_state* state, const s
 	    delivery->event.id >= info.delivery.limit || !hal_interrupt_source_target_supported(source, delivery->target) ||
 	    delivery->trigger > HAL_INTERRUPT_TRIGGER_LEVEL || delivery->polarity > HAL_INTERRUPT_POLARITY_LOW)
 		return false;
-	*state = (struct hal_interrupt_source_state){
-		.source = *source, .target = delivery->target, .initialized = true, .masked = true};
+	*state = (struct hal_interrupt_source_state){.source         = *source,
+	                                             .target         = delivery->target,
+	                                             .initialized    = true,
+	                                             .masked         = true,
+	                                             .edge_triggered = delivery->trigger == HAL_INTERRUPT_TRIGGER_EDGE};
 	last_source_target   = delivery->target;
 	last_source_trigger  = delivery->trigger;
 	last_source_polarity = delivery->polarity;
@@ -144,6 +151,7 @@ bool hal_interrupt_source_init(struct hal_interrupt_source_state* state, const s
 bool hal_interrupt_source_mask(struct hal_interrupt_source_state* state) {
 	if (state == NULL || !state->initialized || source_mask_fails) return false;
 	state->masked = true;
+	source_mask_count++;
 	return true;
 }
 

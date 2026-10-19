@@ -15,6 +15,7 @@ static struct cpu interrupt_test_cpu = {.index = 0u, .role = CPU_ROLE_BSP};
 extern const struct cpu*           hal_interrupt_mock_last_target(void);
 extern bool                        hal_interrupt_mock_unmasked_from_masked(void);
 extern size_t                      hal_interrupt_mock_unmask_count(void);
+extern size_t                      hal_interrupt_mock_mask_count(void);
 extern void                        hal_interrupt_mock_set_mask_failure(bool fail);
 extern void                        hal_interrupt_mock_set_unmask_failure(bool fail);
 extern enum hal_interrupt_trigger  hal_interrupt_mock_last_trigger(void);
@@ -57,9 +58,20 @@ static struct interrupt* interrupt_test_bind_source(struct signal* signal, uint3
 	struct interrupt*  interrupt;
 
 	cr_assert_eq(interrupt_resolve_source(0x10000000u, source_number, &token), INTERRUPT_OK);
-	cr_assert_eq(interrupt_claim_source(token, INTERRUPT_TRIGGER_EDGE, INTERRUPT_POLARITY_HIGH, &interrupt),
+	cr_assert_eq(interrupt_claim_source(token, INTERRUPT_TRIGGER_LEVEL, INTERRUPT_POLARITY_HIGH, &interrupt),
 	             INTERRUPT_OK);
 	cr_assert(interrupt_bind(interrupt, signal) == INTERRUPT_OK);
+	return interrupt;
+}
+
+static struct interrupt* interrupt_test_bind_edge_source(struct signal* signal, uint32_t source_number) {
+	interrupt_source_t token;
+	struct interrupt*  interrupt;
+
+	cr_assert_eq(interrupt_resolve_source(0x10000000u, source_number, &token), INTERRUPT_OK);
+	cr_assert_eq(interrupt_claim_source(token, INTERRUPT_TRIGGER_EDGE, INTERRUPT_POLARITY_HIGH, &interrupt),
+	             INTERRUPT_OK);
+	cr_assert_eq(interrupt_bind(interrupt, signal), INTERRUPT_OK);
 	return interrupt;
 }
 
@@ -206,9 +218,9 @@ Test(interrupt_core, source_identity_configuration_and_signal_lifecycle) {
 	cr_assert(interrupt_init());
 	cr_assert_eq(interrupt_resolve_source(0x10000000u, 7u, &token), INTERRUPT_OK);
 	cr_assert_neq(token, INTERRUPT_SOURCE_INVALID);
-	cr_assert_eq(interrupt_claim_source(token, INTERRUPT_TRIGGER_EDGE, INTERRUPT_POLARITY_LOW, &interrupt),
+	cr_assert_eq(interrupt_claim_source(token, INTERRUPT_TRIGGER_LEVEL, INTERRUPT_POLARITY_LOW, &interrupt),
 	             INTERRUPT_OK);
-	cr_assert_eq(hal_interrupt_mock_last_trigger(), HAL_INTERRUPT_TRIGGER_EDGE);
+	cr_assert_eq(hal_interrupt_mock_last_trigger(), HAL_INTERRUPT_TRIGGER_LEVEL);
 	cr_assert_eq(hal_interrupt_mock_last_polarity(), HAL_INTERRUPT_POLARITY_LOW);
 
 	signal = signal_create();
@@ -233,6 +245,53 @@ Test(interrupt_core, source_identity_configuration_and_signal_lifecycle) {
 	cr_assert_not(info.bound);
 	cr_assert_eq(interrupt_destroy(interrupt), INTERRUPT_OK);
 	interrupt_release(interrupt);
+}
+
+/* Edge IRQs stay unmasked while userspace handles the previous event. A second
+ * edge is remembered and delivered once the first interrupt upcall completes. */
+Test(interrupt_core, edge_sources_remain_unmasked_and_retrigger) {
+	struct signal*                    signal;
+	struct interrupt*                 interrupt;
+	struct uthread                    target;
+	struct hal_userspace_return_frame frame = interrupt_test_frame();
+	size_t                            unmask_count;
+	size_t                            mask_count;
+
+	cpu_bind_current(&interrupt_test_cpu);
+	ipc_test_init_heap();
+	cr_assert(interrupt_init());
+	signal = signal_create();
+	cr_assert_not_null(signal);
+	interrupt_test_init_uthread(&target, 0x9000u);
+	cr_assert_eq(signal_register_handler(signal, &target, interrupt_test_handler, SIGNAL_HANDLER_FLAG_NONE), SIGNAL_OK);
+	interrupt    = interrupt_test_bind_edge_source(signal, 16u);
+	unmask_count = hal_interrupt_mock_unmask_count();
+	mask_count   = hal_interrupt_mock_mask_count();
+
+	cr_assert(interrupt_handle_event((struct hal_interrupt_event){.domain = 0u, .id = 16u}));
+	cr_assert_not_null(target.upcall.pending);
+	cr_assert_eq(target.upcall.count, 1u);
+	cr_assert(interrupt_handle_event((struct hal_interrupt_event){.domain = 0u, .id = 16u}));
+	cr_assert_eq(target.upcall.count, 1u);
+	cr_assert_eq(hal_interrupt_mock_mask_count(), mask_count);
+	cr_assert_eq(hal_interrupt_mock_unmask_count(), unmask_count);
+
+	cr_assert_eq(uthread_upcall_deliver(&target, &frame), USER_UPCALL_OK);
+	cr_assert_eq(uthread_upcall_restore(&target, &frame), USER_UPCALL_OK);
+	cr_assert_eq(target.upcall.count, 1u);
+	cr_assert_eq(hal_interrupt_mock_mask_count(), mask_count);
+	cr_assert_eq(hal_interrupt_mock_unmask_count(), unmask_count);
+	cr_assert_eq(uthread_upcall_deliver(&target, &frame), USER_UPCALL_DEFERRED);
+	cr_assert_eq(uthread_upcall_deliver(&target, &frame), USER_UPCALL_OK);
+	cr_assert_eq(uthread_upcall_restore(&target, &frame), USER_UPCALL_OK);
+	cr_assert_eq(target.upcall.count, 0u);
+	cr_assert_eq(hal_interrupt_mock_unmask_count(), unmask_count);
+
+	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
+	cr_assert_eq(interrupt_destroy(interrupt), INTERRUPT_OK);
+	interrupt_release(interrupt);
+	cr_assert_eq(__atomic_load_n(&target.reference_count, __ATOMIC_ACQUIRE), 1u);
+	uthread_upcall_state_deinit(&target);
 }
 
 Test(interrupt_core, interrupt_upcalls_form_a_completion_barrier) {

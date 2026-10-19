@@ -591,10 +591,11 @@ bool interrupt_handle_event(struct hal_interrupt_event event) {
 	}
 	if (interrupt->kind == INTERRUPT_KIND_SOURCE) {
 		if (interrupt->pending) {
+			if (interrupt->source_state.edge_triggered) interrupt->retriggered = true;
 			spinlock_unlock(&interrupt->lock);
 			return true;
 		}
-		if (!hal_interrupt_source_mask(&interrupt->source_state)) {
+		if (!interrupt->source_state.edge_triggered && !hal_interrupt_source_mask(&interrupt->source_state)) {
 			spinlock_unlock(&interrupt->lock);
 			return true;
 		}
@@ -607,7 +608,7 @@ bool interrupt_handle_event(struct hal_interrupt_event event) {
 	}
 	else interrupt->pending = true;
 	if (!interrupt_prepare_publication_locked(interrupt, &signal)) {
-		if (interrupt->kind == INTERRUPT_KIND_SOURCE) {
+		if (interrupt->kind == INTERRUPT_KIND_SOURCE && !interrupt->source_state.edge_triggered) {
 			if (hal_interrupt_source_unmask(&interrupt->source_state)) interrupt->pending = false;
 		}
 		else {
@@ -622,7 +623,7 @@ bool interrupt_handle_event(struct hal_interrupt_event event) {
 	struct irq_state state = spinlock_lock_irqsave(&interrupt->lock);
 	interrupt_finish_publication_locked(interrupt);
 	if (send_result != SIGNAL_OK && !interrupt->destroying && interrupt->bound && interrupt->signal == signal) {
-		if (interrupt->kind == INTERRUPT_KIND_SOURCE) {
+		if (interrupt->kind == INTERRUPT_KIND_SOURCE && !interrupt->source_state.edge_triggered) {
 			if (hal_interrupt_source_unmask(&interrupt->source_state)) interrupt->pending = false;
 		}
 		else {
@@ -658,7 +659,7 @@ void interrupt_signal_ready(signal_id_t signal_id) {
 
 	state = spinlock_lock_irqsave(&interrupt->lock);
 	if (interrupt->signal_id == signal_id && interrupt->bound && interrupt->pending) {
-		if (interrupt->kind == INTERRUPT_KIND_SOURCE) {
+		if (interrupt->kind == INTERRUPT_KIND_SOURCE && !interrupt->source_state.edge_triggered) {
 			if (hal_interrupt_source_unmask(&interrupt->source_state)) interrupt->pending = false;
 		}
 		else if (interrupt->retriggered) {

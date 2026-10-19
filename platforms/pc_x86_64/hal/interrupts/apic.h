@@ -35,12 +35,13 @@ bool apic_ioapic_source_claimable(const struct hal_interrupt_source* source);
 
 /* Program an I/O APIC route for one ISA interrupt source. */
 bool apic_route_isa_irq(unsigned irq, unsigned vector, uint32_t target_lapic_id, enum hal_interrupt_trigger trigger,
-                        enum hal_interrupt_polarity polarity, uint32_t* out_route, uintptr_t* out_registers);
+                        enum hal_interrupt_polarity polarity, uint32_t* out_route, uintptr_t* out_registers,
+                        bool* out_edge_triggered);
 
 /* Program one resolved non-ISA I/O APIC source. */
 bool apic_route_ioapic_source(const struct hal_interrupt_source* source, unsigned vector, uint32_t target_lapic_id,
                               enum hal_interrupt_trigger trigger, enum hal_interrupt_polarity polarity,
-                              uint32_t* out_route, uintptr_t* out_registers);
+                              uint32_t* out_route, uintptr_t* out_registers, bool* out_edge_triggered);
 
 /* Change the mask state of an I/O APIC ISA route. */
 bool apic_set_isa_irq_mask(uintptr_t registers, uint32_t route, bool masked);

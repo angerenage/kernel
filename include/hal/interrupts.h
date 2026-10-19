@@ -87,6 +87,7 @@ struct hal_interrupt_source_state {
 	bool                        uses_pic;
 	bool                        initialized;
 	bool                        masked;
+	bool                        edge_triggered;
 };
 #elif defined(PLATFORM_PC_AARCH64)
 /* AArch64 fixed-source state selected at compile time. */
@@ -96,6 +97,7 @@ struct hal_interrupt_source_state {
 	uint32_t                    target_index;
 	bool                        initialized;
 	bool                        masked;
+	bool                        edge_triggered;
 };
 #elif defined(PLATFORM_PC_RISCV64)
 /* RISC-V fixed-source state selected at compile time. */
@@ -105,6 +107,7 @@ struct hal_interrupt_source_state {
 	uint32_t                    route;
 	bool                        initialized;
 	bool                        masked;
+	bool                        edge_triggered;
 };
 #elif defined(PLATFORM_PC_LOONGARCH64)
 /* LoongArch fixed-source state selected at compile time. */
@@ -113,6 +116,7 @@ struct hal_interrupt_source_state {
 	uint32_t                    route;
 	bool                        initialized;
 	bool                        masked;
+	bool                        edge_triggered;
 };
 #else
 /* Hosted-test fixed-source state selected when no kernel platform is active. */
@@ -121,6 +125,7 @@ struct hal_interrupt_source_state {
 	const struct cpu*           target;
 	bool                        initialized;
 	bool                        masked;
+	bool                        edge_triggered;
 };
 #endif
 
