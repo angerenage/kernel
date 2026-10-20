@@ -107,6 +107,8 @@ need_cmd make
 need_cmd xorriso
 
 LIMINE_REPO="https://github.com/limine-bootloader/limine.git"
+# v12.9.4 BIOS images hang before entering the kernel under QEMU/SeaBIOS.
+LIMINE_REF="v12.9.3"
 
 EFI_BOOT_FILE=""
 configure_args=()
@@ -191,13 +193,19 @@ if (( UPDATE_LIMINE )); then
 	rm -rf "$limine_root"
 fi
 
+if [[ -d "${limine_root}/.git" ]] &&
+	[[ "$(git -C "$limine_root" describe --tags --exact-match 2>/dev/null || true)" != "$LIMINE_REF" ]]; then
+	log "cached Limine checkout does not match ${LIMINE_REF}; replacing it"
+	rm -rf "$limine_root"
+fi
+
 if [[ ! -d "${limine_root}/.git" ]]; then
 	if [[ -e "$limine_root" ]]; then
 		log "removing stale Limine cache at ${limine_root}"
 		rm -rf "$limine_root"
 	fi
-	log "cloning Limine from ${LIMINE_REPO}"
-	git clone --depth=1 "$LIMINE_REPO" "$limine_root"
+	log "cloning Limine ${LIMINE_REF} from ${LIMINE_REPO}"
+	git clone --depth=1 --branch "$LIMINE_REF" "$LIMINE_REPO" "$limine_root"
 else
 	log "using cached Limine repository at ${limine_root}"
 fi
