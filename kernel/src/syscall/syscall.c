@@ -13,9 +13,10 @@
 static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 	[SYSCALL_NOP] = syscall_nop,
 
-	[SYSCALL_YIELD]      = syscall_yield,
-	[SYSCALL_SLEEP_MS]   = syscall_sleep_ms,
-	[SYSCALL_TICK_COUNT] = syscall_tick_count,
+	[SYSCALL_YIELD]             = syscall_yield,
+	[SYSCALL_SLEEP_MS]          = syscall_sleep_ms,
+	[SYSCALL_TICK_COUNT]        = syscall_tick_count,
+	[SYSCALL_MONOTONIC_TIME_NS] = syscall_monotonic_time_ns,
 
 	[SYSCALL_SELF] = syscall_self,
 

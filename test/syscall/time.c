@@ -1,3 +1,6 @@
+#include <core/time.h>
+
+#include "../mocks/hal/clock.h"
 #include "test_support.h"
 
 Test(syscall, sleep_ms_fails_without_clock) {
@@ -39,6 +42,30 @@ Test(syscall, tick_count_returns_scheduler_ticks) {
 	cr_assert_eq(result.value, 2u);
 
 	syscall_test_reset_state();
+}
+
+Test(syscall, monotonic_time_ns_returns_elapsed_nanoseconds) {
+	syscall_result_t result;
+
+	hal_clock_init();
+	hal_clock_mock_set_monotonic(1000000000u, 100u, true);
+	cr_assert(time_monotonic_init());
+	hal_clock_mock_set_monotonic_counter(125u);
+
+	result = syscall_dispatch(SYSCALL_MONOTONIC_TIME_NS, 0u, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(result.value, 25u);
+}
+
+Test(syscall, monotonic_time_ns_reports_an_unavailable_clock) {
+	syscall_result_t result;
+
+	hal_clock_init();
+	cr_assert_not(time_monotonic_init());
+
+	result = syscall_dispatch(SYSCALL_MONOTONIC_TIME_NS, 0u, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
+	cr_assert_eq(result.value, 0u);
 }
 
 Test(syscall, sleep_ms_zero_yields) {

@@ -12,3 +12,6 @@ syscall_status_t sleep_ms(size_t milliseconds);
 
 /* Read the scheduler's monotonic tick counter. */
 syscall_status_t tick_count(uint64_t* out_ticks);
+
+/* Read elapsed monotonic time in nanoseconds from the kernel-defined epoch. */
+syscall_status_t monotonic_time_ns(uint64_t* out_nanoseconds);

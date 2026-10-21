@@ -3,6 +3,7 @@
 #include <base/time.h>
 #include <core/sched.h>
 #include <core/syscall.h>
+#include <core/time.h>
 #include <hal/clock.h>
 #include <stdint.h>
 
@@ -55,4 +56,19 @@ syscall_result_t syscall_tick_count(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 	(void)arg5;
 
 	return syscall_result_ok((uintptr_t)sched_tick_count());
+}
+
+syscall_result_t syscall_monotonic_time_ns(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
+                                           uintptr_t arg4, uintptr_t arg5) {
+	uint64_t nanoseconds;
+
+	(void)arg0;
+	(void)arg1;
+	(void)arg2;
+	(void)arg3;
+	(void)arg4;
+	(void)arg5;
+
+	if (!time_monotonic_now(&nanoseconds)) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	return syscall_result_ok((uintptr_t)nanoseconds);
 }

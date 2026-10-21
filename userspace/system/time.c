@@ -38,3 +38,18 @@ syscall_status_t tick_count(uint64_t* out_ticks) {
 	*out_ticks = (uint64_t)result.value;
 	return SYSCALL_STATUS_OK;
 }
+
+syscall_status_t monotonic_time_ns(uint64_t* out_nanoseconds) {
+	syscall_result_t result;
+
+	if (out_nanoseconds == NULL) {
+		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(out_nanoseconds);
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	}
+
+	result = syscall(SYSCALL_MONOTONIC_TIME_NS, 0u, 0u, 0u, 0u, 0u, 0u);
+	RUNTIME_DIAGNOSTIC_SYSCALL_RESULT(SYSCALL_MONOTONIC_TIME_NS, result);
+	if (result.status != SYSCALL_STATUS_OK) return result.status;
+	*out_nanoseconds = (uint64_t)result.value;
+	return SYSCALL_STATUS_OK;
+}
