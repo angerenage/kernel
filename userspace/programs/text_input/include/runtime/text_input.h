@@ -3,7 +3,7 @@
 #include <base/cap.h>
 #include <base/syscall.h>
 #include <protocol/text_input.h>
-#include <runtime/init.h>
+#include <runtime/registry.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -16,7 +16,7 @@ struct text_input_event_page {
 };
 
 /* Acquire the default system text-input service through init. */
-struct init_call_result text_input_acquire(struct init_service_handle* out_handle);
+struct registry_call_result text_input_acquire(struct registry_service_handle* out_handle);
 
 /* Read the text-input service's limits and retained-stream cursors. */
 syscall_status_t text_input_get_info(cap_id_t text_input_cap, struct text_input_get_info_response* out_info);

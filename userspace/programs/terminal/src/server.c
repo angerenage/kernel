@@ -4,7 +4,7 @@
 #include <base/channel.h>
 #include <base/process.h>
 #include <protocol/terminal.h>
-#include <runtime/init.h>
+#include <runtime/registry.h>
 #include <runtime/stream.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -162,16 +162,16 @@ static bool dispatch_request(struct terminal* terminal, struct terminal_input* i
 }
 
 static bool advertise_terminal(channel_id_t* out_endpoint, cap_id_t* out_activity) {
-	const struct init_service_selector selector = {
+	const struct registry_service_selector selector = {
 		.namespace_path = TERMINAL_NAMESPACE,
 		.protocol       = TERMINAL_PROTOCOL_NAME,
 		.major          = TERMINAL_PROTOCOL_VERSION_MAJOR,
 		.service        = TERMINAL_SERVICE_NAME,
 	};
-	struct self_info        self;
-	struct init_call_result result;
-	cap_id_t                service_cap = CAP_ID_INVALID;
-	syscall_status_t        status;
+	struct self_info            self;
+	struct registry_call_result result;
+	cap_id_t                    service_cap = CAP_ID_INVALID;
+	syscall_status_t            status;
 
 	if (out_endpoint == NULL || out_activity == NULL) return false;
 	*out_endpoint = CHANNEL_ID_INVALID;
@@ -186,12 +186,12 @@ static bool advertise_terminal(channel_id_t* out_endpoint, cap_id_t* out_activit
 	                     TERMINAL_CLIENT_RIGHTS | CAP_MANAGE | CAP_DELEGATE_PEER,
 	                     &service_cap);
 	if (status != SYSCALL_STATUS_OK) goto fail;
-	result = init_advertise_with_rights(&selector,
-	                                    TERMINAL_PROTOCOL_VERSION_MINOR,
-	                                    service_cap,
-	                                    TERMINAL_CLIENT_RIGHTS | CAP_MANAGE,
-	                                    TERMINAL_CLIENT_RIGHTS);
-	if (result.status != INIT_REGISTRY_OK || result.transport_status != SYSCALL_STATUS_OK) goto fail;
+	result = registry_advertise_with_rights(&selector,
+	                                        TERMINAL_PROTOCOL_VERSION_MINOR,
+	                                        service_cap,
+	                                        TERMINAL_CLIENT_RIGHTS | CAP_MANAGE,
+	                                        TERMINAL_CLIENT_RIGHTS);
+	if (result.status != REGISTRY_STATUS_OK || result.transport_status != SYSCALL_STATUS_OK) goto fail;
 	return true;
 
 fail:

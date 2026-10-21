@@ -30,14 +30,14 @@ struct source_waiter_argument {
 	struct managed_input_source* source;
 };
 
-static const struct init_protocol_query input_query = {
+static const struct registry_protocol_query input_query = {
 	.namespace_path = INPUT_NAMESPACE,
 	.protocol       = INPUT_PROTOCOL_NAME,
 	.major          = INPUT_PROTOCOL_VERSION_MAJOR,
 	.minor          = INPUT_PROTOCOL_VERSION_MINOR,
 };
 
-static const struct init_service_selector manager_selector = {
+static const struct registry_service_selector manager_selector = {
 	.namespace_path = INPUT_MANAGER_NAMESPACE,
 	.protocol       = INPUT_MANAGER_PROTOCOL_NAME,
 	.major          = INPUT_MANAGER_PROTOCOL_VERSION_MAJOR,
@@ -169,18 +169,19 @@ static bool value_valid(const struct input_control_descriptor* descriptor, int64
 	}
 }
 
-static bool selector_equal(const struct init_service_selector* left, const struct init_service_selector* right) {
+static bool selector_equal(const struct registry_service_selector* left,
+                           const struct registry_service_selector* right) {
 	return left->major == right->major && strcmp(left->namespace_path, right->namespace_path) == 0 &&
 	       strcmp(left->protocol, right->protocol) == 0 && strcmp(left->service, right->service) == 0;
 }
 
-static bool service_equal(const struct init_service_info* left, const struct init_service_info* right) {
+static bool service_equal(const struct registry_service_info* left, const struct registry_service_info* right) {
 	return selector_equal(&left->selector, &right->selector) && left->minor == right->minor &&
 	       left->rights == right->rights;
 }
 
-static struct managed_input_source* find_source(struct input_manager*               manager,
-                                                const struct init_service_selector* selector) {
+static struct managed_input_source* find_source(struct input_manager*                   manager,
+                                                const struct registry_service_selector* selector) {
 	for (struct managed_input_source* source = manager->sources; source != NULL; source = source->next)
 		if (selector_equal(&source->service.selector, selector)) return source;
 	return NULL;
@@ -380,11 +381,11 @@ static enum attach_result quarantine_acquired_source(struct input_manager*      
 	return ATTACH_RESULT_QUARANTINED;
 }
 
-static enum attach_result attach_source(struct input_manager* manager, const struct init_service_info* service) {
+static enum attach_result attach_source(struct input_manager* manager, const struct registry_service_info* service) {
 	struct managed_input_source*   source = calloc(1u, sizeof(*source));
-	struct init_service_handle     handle = {.capability = CAP_ID_INVALID};
+	struct registry_service_handle handle = {.capability = CAP_ID_INVALID};
 	struct input_get_info_response info;
-	struct init_call_result        acquire;
+	struct registry_call_result    acquire;
 	if (source == NULL) return ATTACH_RESULT_FAILED;
 	source->service    = *service;
 	source->owner      = PROCESS_PID_INVALID;
@@ -392,17 +393,17 @@ static enum attach_result attach_source(struct input_manager* manager, const str
 	source->signal_cap = CAP_ID_INVALID;
 	source->waiter_cap = CAP_ID_INVALID;
 
-	acquire = init_acquire(&input_query, service->selector.service, &handle);
+	acquire = registry_acquire(&input_query, service->selector.service, &handle);
 	if (acquire.transport_status != SYSCALL_STATUS_OK) {
 		free(source);
 		return ATTACH_RESULT_FAILED;
 	}
-	if (acquire.status == INIT_REGISTRY_NOT_FOUND) {
+	if (acquire.status == REGISTRY_STATUS_NOT_FOUND) {
 		free(source);
 		__atomic_store_n(&manager->registry_dirty, true, __ATOMIC_RELEASE);
 		return ATTACH_RESULT_RETRY;
 	}
-	if (acquire.status != INIT_REGISTRY_OK) return quarantine_acquired_source(manager, source);
+	if (acquire.status != REGISTRY_STATUS_OK) return quarantine_acquired_source(manager, source);
 	source->owner     = handle.owner;
 	source->input_cap = handle.capability;
 	if (handle.capability == CAP_ID_INVALID || handle.owner == PROCESS_PID_INVALID ||
@@ -490,19 +491,19 @@ static enum attach_result attach_source(struct input_manager* manager, const str
 	return ATTACH_RESULT_ATTACHED;
 }
 
-static bool enumerate_sources(struct init_service_info** out_services, size_t* out_count, bool* out_retry) {
+static bool enumerate_sources(struct registry_service_info** out_services, size_t* out_count, bool* out_retry) {
 	*out_services = NULL;
 	*out_count    = 0u;
 	*out_retry    = false;
 	for (unsigned attempt = 0u; attempt < 3u; attempt++) {
-		uint64_t                total = 0u;
-		uint64_t                returned;
-		struct init_call_result result = init_enumerate(&input_query, 0u, 0u, NULL, &returned, &total);
-		if (result.transport_status != SYSCALL_STATUS_OK || result.status != INIT_REGISTRY_OK ||
+		uint64_t                    total = 0u;
+		uint64_t                    returned;
+		struct registry_call_result result = registry_enumerate(&input_query, 0u, 0u, NULL, &returned, &total);
+		if (result.transport_status != SYSCALL_STATUS_OK || result.status != REGISTRY_STATUS_OK ||
 		    total > INPUT_MANAGER_MAXIMUM_SOURCES)
 			return false;
 		if (total == 0u) return true;
-		struct init_service_info* services = malloc((size_t)total * sizeof(*services));
+		struct registry_service_info* services = malloc((size_t)total * sizeof(*services));
 		if (services == NULL) return false;
 		uint64_t offset = 0u;
 		bool     stable = true;
@@ -510,8 +511,9 @@ static bool enumerate_sources(struct init_service_info** out_services, size_t* o
 			uint64_t count = total - offset;
 			if (count > INPUT_MANAGER_REGISTRY_PAGE_SIZE) count = INPUT_MANAGER_REGISTRY_PAGE_SIZE;
 			uint64_t current_total = 0u;
-			result = init_enumerate(&input_query, offset, count, services + (size_t)offset, &returned, &current_total);
-			if (result.transport_status != SYSCALL_STATUS_OK || result.status != INIT_REGISTRY_OK) {
+			result =
+				registry_enumerate(&input_query, offset, count, services + (size_t)offset, &returned, &current_total);
+			if (result.transport_status != SYSCALL_STATUS_OK || result.status != REGISTRY_STATUS_OK) {
 				free(services);
 				return false;
 			}
@@ -534,26 +536,26 @@ static bool enumerate_sources(struct init_service_info** out_services, size_t* o
 
 static bool source_identity_is_same(struct input_manager* manager, struct managed_input_source* source,
                                     bool* out_same) {
-	struct init_service_handle handle = {.capability = CAP_ID_INVALID};
-	struct init_call_result    result = init_acquire(&input_query, source->service.selector.service, &handle);
-	*out_same                         = true;
+	struct registry_service_handle handle = {.capability = CAP_ID_INVALID};
+	struct registry_call_result    result = registry_acquire(&input_query, source->service.selector.service, &handle);
+	*out_same                             = true;
 	if (result.transport_status != SYSCALL_STATUS_OK) return false;
-	if (result.status == INIT_REGISTRY_NOT_FOUND) {
+	if (result.status == REGISTRY_STATUS_NOT_FOUND) {
 		*out_same = false;
 		__atomic_store_n(&manager->registry_dirty, true, __ATOMIC_RELEASE);
 		return true;
 	}
-	if (result.status != INIT_REGISTRY_OK) return true;
+	if (result.status != REGISTRY_STATUS_OK) return true;
 	*out_same = handle.owner == source->owner && service_equal(&handle.info, &source->service);
 	if (handle.capability != CAP_ID_INVALID && cap_drop(handle.capability) != SYSCALL_STATUS_OK) return false;
 	return true;
 }
 
 static bool reconcile_sources(struct input_manager* manager) {
-	struct init_service_info* services;
-	size_t                    service_count;
-	bool                      retry;
-	uint64_t                  revision = __atomic_load_n(&manager->registry_revision, __ATOMIC_ACQUIRE);
+	struct registry_service_info* services;
+	size_t                        service_count;
+	bool                          retry;
+	uint64_t                      revision = __atomic_load_n(&manager->registry_revision, __ATOMIC_ACQUIRE);
 	if (!enumerate_sources(&services, &service_count, &retry)) return false;
 	if (retry) {
 		__atomic_store_n(&manager->registry_dirty, true, __ATOMIC_RELEASE);
@@ -753,16 +755,16 @@ bool input_manager_initialize(struct input_manager* manager) {
 		                     &manager->service_cap);
 	if (status == SYSCALL_STATUS_OK && !input_manager_server_start(manager)) status = SYSCALL_STATUS_FAILED;
 	if (status == SYSCALL_STATUS_OK) {
-		struct init_call_result result = init_advertise(
+		struct registry_call_result result = registry_advertise(
 			&manager_selector, INPUT_MANAGER_PROTOCOL_VERSION_MINOR, manager->service_cap, INPUT_MANAGER_CLIENT_RIGHTS);
-		if (result.transport_status != SYSCALL_STATUS_OK || result.status != INIT_REGISTRY_OK)
+		if (result.transport_status != SYSCALL_STATUS_OK || result.status != REGISTRY_STATUS_OK)
 			status = SYSCALL_STATUS_FAILED;
 	}
 	if (status == SYSCALL_STATUS_OK) {
-		uint64_t                counter;
-		struct init_call_result result =
-			init_watch(&input_query, manager->registry_signal_cap, &manager->registry_subscription, &counter);
-		if (result.transport_status != SYSCALL_STATUS_OK || result.status != INIT_REGISTRY_OK || counter == 0u)
+		uint64_t                    counter;
+		struct registry_call_result result =
+			registry_watch(&input_query, manager->registry_signal_cap, &manager->registry_subscription, &counter);
+		if (result.transport_status != SYSCALL_STATUS_OK || result.status != REGISTRY_STATUS_OK || counter == 0u)
 			status = SYSCALL_STATUS_FAILED;
 		else __atomic_store_n(&manager->registry_dirty, true, __ATOMIC_RELEASE);
 	}

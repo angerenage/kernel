@@ -10,6 +10,7 @@ struct init_state {
 	cap_id_t    serial_cap; /* Raw kernel serial capability, private to init. */
 	cap_id_t    serial_stream_cap;
 	cap_id_t    memory_allocator_cap;
+	cap_id_t    registry_cap;
 	uint32_t    argc;
 	const char* argv_data;
 	size_t      argv_size;

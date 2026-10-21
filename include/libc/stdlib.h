@@ -2,9 +2,10 @@
 
 #include <stddef.h>
 
-long   strtol(const char* restrict string, char** restrict end, int base);
-double strtod(const char* restrict string, char** restrict end);
-void   qsort(void* base, size_t count, size_t size, int (*compare)(const void*, const void*));
+long               strtol(const char* restrict string, char** restrict end, int base);
+unsigned long long strtoull(const char* restrict string, char** restrict end, int base);
+double             strtod(const char* restrict string, char** restrict end);
+void               qsort(void* base, size_t count, size_t size, int (*compare)(const void*, const void*));
 
 int  abs(int value);
 long labs(long value);

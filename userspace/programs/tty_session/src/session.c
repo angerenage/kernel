@@ -5,7 +5,7 @@
 #include <base/process.h>
 #include <protocol/terminal.h>
 #include <protocol/tty_session.h>
-#include <runtime/init.h>
+#include <runtime/registry.h>
 #include <runtime/stream.h>
 #include <runtime/terminal.h>
 #include <stdbool.h>
@@ -620,25 +620,25 @@ static bool dispatch_request(struct tty_session* session, const struct cap_reque
 
 /* Create and advertise the public session capability. */
 static bool advertise_session(struct tty_session* session, process_id_t pid) {
-	const struct init_service_selector selector = {
+	const struct registry_service_selector selector = {
 		.namespace_path = TTY_SESSION_NAMESPACE,
 		.protocol       = TTY_SESSION_PROTOCOL_NAME,
 		.major          = TTY_SESSION_PROTOCOL_VERSION_MAJOR,
 		.service        = TTY_SESSION_SERVICE_NAME,
 	};
-	struct init_call_result result;
+	struct registry_call_result result;
 
 	if (channel_create(&session->endpoint, &session->activity_cap) != SYSCALL_STATUS_OK) return false;
 	if (cap_publish(
 			session->endpoint, TTY_SESSION_SERVICE_OBJECT_ID, pid, TTY_SESSION_CONTROL_RIGHTS, &session->service_cap) !=
 	    SYSCALL_STATUS_OK)
 		return false;
-	result = init_advertise_with_rights(&selector,
-	                                    TTY_SESSION_PROTOCOL_VERSION_MINOR,
-	                                    session->service_cap,
-	                                    TTY_SESSION_CONTROL_RIGHTS,
-	                                    TTY_SESSION_CLIENT_RIGHTS);
-	return result.transport_status == SYSCALL_STATUS_OK && result.status == INIT_REGISTRY_OK;
+	result = registry_advertise_with_rights(&selector,
+	                                        TTY_SESSION_PROTOCOL_VERSION_MINOR,
+	                                        session->service_cap,
+	                                        TTY_SESSION_CONTROL_RIGHTS,
+	                                        TTY_SESSION_CLIENT_RIGHTS);
+	return result.transport_status == SYSCALL_STATUS_OK && result.status == REGISTRY_STATUS_OK;
 }
 
 int tty_session_run(void) {

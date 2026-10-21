@@ -3,8 +3,8 @@
 #include <protocol/input.h>
 #include <protocol/keyboard.h>
 #include <protocol/text_input.h>
-#include <runtime/init.h>
 #include <runtime/keyboard.h>
+#include <runtime/registry.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,7 +20,7 @@
 #define TEXT_INPUT_PROTOCOL_VERSION_MAJOR 1u
 #define TEXT_INPUT_PROTOCOL_VERSION_MINOR 0u
 
-static const struct init_service_selector text_input_selector = {
+static const struct registry_service_selector text_input_selector = {
 	.namespace_path = TEXT_INPUT_NAMESPACE,
 	.protocol       = TEXT_INPUT_PROTOCOL_NAME,
 	.major          = TEXT_INPUT_PROTOCOL_VERSION_MAJOR,
@@ -29,9 +29,9 @@ static const struct init_service_selector text_input_selector = {
 
 static bool advertise(struct text_input* input) {
 	if (input->advertised) return true;
-	struct init_call_result result = init_advertise(
+	struct registry_call_result result = registry_advertise(
 		&text_input_selector, TEXT_INPUT_PROTOCOL_VERSION_MINOR, input->service_cap, TEXT_INPUT_CLIENT_RIGHTS);
-	if (result.transport_status != SYSCALL_STATUS_OK || result.status != INIT_REGISTRY_OK) return false;
+	if (result.transport_status != SYSCALL_STATUS_OK || result.status != REGISTRY_STATUS_OK) return false;
 	input->advertised = true;
 	printf("text input: advertised %s/%s@%u.%u/%s\n",
 	       TEXT_INPUT_NAMESPACE,
@@ -92,7 +92,7 @@ enum drain_result {
 	DRAIN_RESULT_FAILED,
 };
 
-static bool keyboard_handle_valid(const struct init_service_handle* handle) {
+static bool keyboard_handle_valid(const struct registry_service_handle* handle) {
 	return handle->capability != CAP_ID_INVALID && handle->owner != PROCESS_PID_INVALID &&
 	       strcmp(handle->info.selector.namespace_path, KEYBOARD_NAMESPACE) == 0 &&
 	       strcmp(handle->info.selector.protocol, KEYBOARD_PROTOCOL_NAME) == 0 &&
@@ -489,10 +489,10 @@ static bool disconnect(struct text_input* input) {
 int text_input_run(struct text_input* input) {
 	bool waiting_logged = false;
 	for (;;) {
-		struct init_service_handle handle = {.capability = CAP_ID_INVALID};
-		struct init_call_result    result = keyboard_acquire(&handle);
+		struct registry_service_handle handle = {.capability = CAP_ID_INVALID};
+		struct registry_call_result    result = keyboard_acquire(&handle);
 		if (result.transport_status != SYSCALL_STATUS_OK) return 1;
-		if (result.status == INIT_REGISTRY_NOT_FOUND) {
+		if (result.status == REGISTRY_STATUS_NOT_FOUND) {
 			if (!waiting_logged) {
 				printf("text input: waiting for keyboard controller\n");
 				waiting_logged = true;
@@ -500,7 +500,7 @@ int text_input_run(struct text_input* input) {
 			if (sleep_ms(TEXT_INPUT_RETRY_DELAY_MS) != SYSCALL_STATUS_OK) return 1;
 			continue;
 		}
-		if (result.status != INIT_REGISTRY_OK || !keyboard_handle_valid(&handle)) {
+		if (result.status != REGISTRY_STATUS_OK || !keyboard_handle_valid(&handle)) {
 			if (handle.capability != CAP_ID_INVALID) (void)cap_drop(handle.capability);
 			return 1;
 		}

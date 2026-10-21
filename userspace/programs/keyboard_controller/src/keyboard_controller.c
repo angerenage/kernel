@@ -2,8 +2,8 @@
 
 #include <limits.h>
 #include <protocol/input_manager.h>
-#include <runtime/init.h>
 #include <runtime/input_manager.h>
+#include <runtime/registry.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,14 +33,14 @@ struct manager_waiter_argument {
 	struct keyboard_controller* controller;
 };
 
-static const struct init_protocol_query manager_query = {
+static const struct registry_protocol_query manager_query = {
 	.namespace_path = INPUT_MANAGER_NAMESPACE,
 	.protocol       = INPUT_MANAGER_PROTOCOL_NAME,
 	.major          = INPUT_MANAGER_PROTOCOL_VERSION_MAJOR,
 	.minor          = INPUT_MANAGER_PROTOCOL_VERSION_MINOR,
 };
 
-static const struct init_service_selector keyboard_selector = {
+static const struct registry_service_selector keyboard_selector = {
 	.namespace_path = KEYBOARD_NAMESPACE,
 	.protocol       = KEYBOARD_PROTOCOL_NAME,
 	.major          = KEYBOARD_PROTOCOL_VERSION_MAJOR,
@@ -315,7 +315,7 @@ static bool remove_all_keyboards(struct keyboard_controller* controller) {
 	return true;
 }
 
-static bool manager_handle_valid(const struct init_service_handle* handle) {
+static bool manager_handle_valid(const struct registry_service_handle* handle) {
 	return handle->capability != CAP_ID_INVALID && handle->owner != PROCESS_PID_INVALID &&
 	       strcmp(handle->info.selector.namespace_path, INPUT_MANAGER_NAMESPACE) == 0 &&
 	       strcmp(handle->info.selector.protocol, INPUT_MANAGER_PROTOCOL_NAME) == 0 &&
@@ -325,17 +325,17 @@ static bool manager_handle_valid(const struct init_service_handle* handle) {
 }
 
 static bool connect_manager(struct keyboard_controller* controller) {
-	struct init_service_handle handle = {.capability = CAP_ID_INVALID};
-	struct init_call_result    result = init_acquire(&manager_query, INPUT_MANAGER_SERVICE_NAME, &handle);
+	struct registry_service_handle handle = {.capability = CAP_ID_INVALID};
+	struct registry_call_result    result = registry_acquire(&manager_query, INPUT_MANAGER_SERVICE_NAME, &handle);
 	if (result.transport_status != SYSCALL_STATUS_OK) return false;
-	if (result.status == INIT_REGISTRY_NOT_FOUND) {
+	if (result.status == REGISTRY_STATUS_NOT_FOUND) {
 		if (controller->manager_cap != CAP_ID_INVALID) {
 			if (!stop_manager(controller) || !remove_all_keyboards(controller)) return false;
 			printf("keyboard controller: input manager unavailable\n");
 		}
 		return true;
 	}
-	if (result.status != INIT_REGISTRY_OK || !manager_handle_valid(&handle)) {
+	if (result.status != REGISTRY_STATUS_OK || !manager_handle_valid(&handle)) {
 		if (handle.capability != CAP_ID_INVALID) (void)cap_drop(handle.capability);
 		return false;
 	}
@@ -865,16 +865,16 @@ bool keyboard_controller_initialize(struct keyboard_controller* controller) {
 		                     &controller->service_cap);
 	if (status == SYSCALL_STATUS_OK && !keyboard_controller_server_start(controller)) status = SYSCALL_STATUS_FAILED;
 	if (status == SYSCALL_STATUS_OK) {
-		struct init_call_result result = init_advertise(
+		struct registry_call_result result = registry_advertise(
 			&keyboard_selector, KEYBOARD_PROTOCOL_VERSION_MINOR, controller->service_cap, KEYBOARD_CLIENT_RIGHTS);
-		if (result.transport_status != SYSCALL_STATUS_OK || result.status != INIT_REGISTRY_OK)
+		if (result.transport_status != SYSCALL_STATUS_OK || result.status != REGISTRY_STATUS_OK)
 			status = SYSCALL_STATUS_FAILED;
 	}
 	if (status == SYSCALL_STATUS_OK) {
-		uint64_t                counter;
-		struct init_call_result result =
-			init_watch(&manager_query, controller->registry_signal_cap, &controller->registry_subscription, &counter);
-		if (result.transport_status != SYSCALL_STATUS_OK || result.status != INIT_REGISTRY_OK || counter == 0u)
+		uint64_t                    counter;
+		struct registry_call_result result = registry_watch(
+			&manager_query, controller->registry_signal_cap, &controller->registry_subscription, &counter);
+		if (result.transport_status != SYSCALL_STATUS_OK || result.status != REGISTRY_STATUS_OK || counter == 0u)
 			status = SYSCALL_STATUS_FAILED;
 		else __atomic_store_n(&controller->registry_dirty, true, __ATOMIC_RELEASE);
 	}

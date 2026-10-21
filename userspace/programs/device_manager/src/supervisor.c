@@ -4,8 +4,8 @@
 #include <protocol/device.h>
 #include <protocol/vfs.h>
 #include <runtime/diagnostic.h>
-#include <runtime/init.h>
 #include <runtime/program.h>
+#include <runtime/registry.h>
 #include <runtime/stream.h>
 #include <runtime/vfs.h>
 #include <stdio.h>
@@ -112,22 +112,22 @@ static struct dm_driver* match_driver(struct device_server* server, const struct
 }
 
 static syscall_status_t open_executable(struct dm_driver* driver) {
-	static const struct init_protocol_query vfs_query = {
+	static const struct registry_protocol_query vfs_query = {
 		.namespace_path = VFS_NAMESPACE,
 		.protocol       = VFS_PROTOCOL_NAME,
 		.major          = VFS_PROTOCOL_VERSION_MAJOR,
 		.minor          = VFS_PROTOCOL_VERSION_MINOR,
 	};
-	struct init_service_handle    vfs        = {.capability = CAP_ID_INVALID};
-	struct filesystem_node_handle executable = {.capability = CAP_ID_INVALID};
-	struct init_call_result       acquire;
-	struct filesystem_call_result opened;
-	syscall_status_t              status;
+	struct registry_service_handle vfs        = {.capability = CAP_ID_INVALID};
+	struct filesystem_node_handle  executable = {.capability = CAP_ID_INVALID};
+	struct registry_call_result    acquire;
+	struct filesystem_call_result  opened;
+	syscall_status_t               status;
 
 	if (driver->executable_cap != CAP_ID_INVALID) return SYSCALL_STATUS_OK;
-	acquire = init_acquire(&vfs_query, VFS_SERVICE_NAME, &vfs);
+	acquire = registry_acquire(&vfs_query, VFS_SERVICE_NAME, &vfs);
 	if (acquire.transport_status != SYSCALL_STATUS_OK) return acquire.transport_status;
-	if (acquire.status != INIT_REGISTRY_OK) return SYSCALL_STATUS_UNAVAILABLE;
+	if (acquire.status != REGISTRY_STATUS_OK) return SYSCALL_STATUS_UNAVAILABLE;
 	opened = vfs_open(
 		vfs.capability, driver->executable.data, driver->executable.size, CAP_READ | CAP_DELEGATE, &executable);
 	status = cap_drop(vfs.capability);

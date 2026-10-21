@@ -4,8 +4,8 @@
 #include <protocol/input_manager.h>
 #include <protocol/terminal.h>
 #include <protocol/text_input.h>
-#include <runtime/init.h>
 #include <runtime/input_manager.h>
+#include <runtime/registry.h>
 #include <runtime/stream.h>
 #include <runtime/text_input.h>
 #include <stdbool.h>
@@ -57,7 +57,7 @@ struct terminal_input {
 	uint64_t            interrupt_counter;
 };
 
-static const struct init_protocol_query input_manager_query = {
+static const struct registry_protocol_query input_manager_query = {
 	.namespace_path = INPUT_MANAGER_NAMESPACE,
 	.protocol       = INPUT_MANAGER_PROTOCOL_NAME,
 	.major          = TERMINAL_INPUT_MANAGER_PROTOCOL_VERSION_MAJOR,
@@ -192,7 +192,7 @@ uint64_t terminal_input_discard(struct terminal_input* input) {
 	return interrupt_generation;
 }
 
-static bool text_handle_valid(const struct init_service_handle* handle) {
+static bool text_handle_valid(const struct registry_service_handle* handle) {
 	return handle->capability != CAP_ID_INVALID && handle->owner != PROCESS_PID_INVALID &&
 	       strcmp(handle->info.selector.namespace_path, TEXT_INPUT_NAMESPACE) == 0 &&
 	       strcmp(handle->info.selector.protocol, TEXT_INPUT_PROTOCOL_NAME) == 0 &&
@@ -201,7 +201,7 @@ static bool text_handle_valid(const struct init_service_handle* handle) {
 	       handle->info.rights == TEXT_INPUT_CLIENT_RIGHTS;
 }
 
-static bool input_manager_handle_valid(const struct init_service_handle* handle) {
+static bool input_manager_handle_valid(const struct registry_service_handle* handle) {
 	return handle->capability != CAP_ID_INVALID && handle->owner != PROCESS_PID_INVALID &&
 	       strcmp(handle->info.selector.namespace_path, INPUT_MANAGER_NAMESPACE) == 0 &&
 	       strcmp(handle->info.selector.protocol, INPUT_MANAGER_PROTOCOL_NAME) == 0 &&
@@ -303,10 +303,10 @@ static void text_thread(void* opaque) {
 	uint64_t               active_source      = 0u;
 	uint64_t               active_composition = 0u;
 	for (;;) {
-		struct init_service_handle handle   = {.capability = CAP_ID_INVALID};
-		struct init_call_result    acquired = text_input_acquire(&handle);
+		struct registry_service_handle handle   = {.capability = CAP_ID_INVALID};
+		struct registry_call_result    acquired = text_input_acquire(&handle);
 		if (__atomic_load_n(&input->stopping, __ATOMIC_ACQUIRE)) thread_exit(0u);
-		if (acquired.transport_status != SYSCALL_STATUS_OK || acquired.status != INIT_REGISTRY_OK ||
+		if (acquired.transport_status != SYSCALL_STATUS_OK || acquired.status != REGISTRY_STATUS_OK ||
 		    !text_handle_valid(&handle)) {
 			if (handle.capability != CAP_ID_INVALID) (void)cap_drop(handle.capability);
 			if (!wait_for_retry(input)) thread_exit(1u);
@@ -423,11 +423,12 @@ static bool process_pointer_event(struct terminal_input* input, struct pointer_f
 static void pointer_thread(void* opaque) {
 	struct terminal_input* input = *(struct terminal_input**)opaque;
 	for (;;) {
-		struct pointer_frame       frame    = {0};
-		struct init_service_handle handle   = {.capability = CAP_ID_INVALID};
-		struct init_call_result    acquired = init_acquire(&input_manager_query, INPUT_MANAGER_SERVICE_NAME, &handle);
+		struct pointer_frame           frame  = {0};
+		struct registry_service_handle handle = {.capability = CAP_ID_INVALID};
+		struct registry_call_result    acquired =
+			registry_acquire(&input_manager_query, INPUT_MANAGER_SERVICE_NAME, &handle);
 		if (__atomic_load_n(&input->stopping, __ATOMIC_ACQUIRE)) thread_exit(0u);
-		if (acquired.transport_status != SYSCALL_STATUS_OK || acquired.status != INIT_REGISTRY_OK ||
+		if (acquired.transport_status != SYSCALL_STATUS_OK || acquired.status != REGISTRY_STATUS_OK ||
 		    !input_manager_handle_valid(&handle)) {
 			if (handle.capability != CAP_ID_INVALID) (void)cap_drop(handle.capability);
 			if (!wait_for_retry(input)) thread_exit(1u);

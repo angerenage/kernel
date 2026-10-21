@@ -3,8 +3,8 @@
 #include <base/startup.h>
 #include <protocol/device_manager.h>
 #include <protocol/vfs.h>
-#include <runtime/init.h>
 #include <runtime/program.h>
+#include <runtime/registry.h>
 #include <runtime/vfs.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -63,17 +63,17 @@ static bool parser_description_get(enum device_manager_firmware_source source, s
 bool device_manager_parser_launch(struct device_server* server, enum device_manager_firmware_source source,
                                   cap_id_t* firmware_cap, cap_id_t memory_allocator_cap, cap_id_t dma_cap,
                                   cap_id_t interrupts_cap, cap_id_t io_ports_cap) {
-	static const struct init_protocol_query vfs_query = {
+	static const struct registry_protocol_query vfs_query = {
 		.namespace_path = VFS_NAMESPACE,
 		.protocol       = VFS_PROTOCOL_NAME,
 		.major          = VFS_PROTOCOL_VERSION_MAJOR,
 		.minor          = VFS_PROTOCOL_VERSION_MINOR,
 	};
-	struct parser_description     parser;
-	struct init_service_handle    vfs        = {.capability = CAP_ID_INVALID};
-	struct filesystem_node_handle executable = {.capability = CAP_ID_INVALID};
-	struct filesystem_call_result open_result;
-	struct program_load_result    loaded = {
+	struct parser_description      parser;
+	struct registry_service_handle vfs        = {.capability = CAP_ID_INVALID};
+	struct filesystem_node_handle  executable = {.capability = CAP_ID_INVALID};
+	struct filesystem_call_result  open_result;
+	struct program_load_result     loaded = {
 		.load_cap   = CAP_ID_INVALID,
 		.process_id = PROCESS_PID_INVALID,
 	};
@@ -81,16 +81,16 @@ bool device_manager_parser_launch(struct device_server* server, enum device_mana
 		.process_cap = CAP_ID_INVALID,
 		.thread_cap  = CAP_ID_INVALID,
 	};
-	struct init_call_result acquire_result;
-	syscall_status_t        status     = SYSCALL_STATUS_FAILED;
-	bool                    cleanup_ok = true;
+	struct registry_call_result acquire_result;
+	syscall_status_t            status     = SYSCALL_STATUS_FAILED;
+	bool                        cleanup_ok = true;
 
 	if (server == NULL || firmware_cap == NULL || *firmware_cap == CAP_ID_INVALID ||
 	    memory_allocator_cap == CAP_ID_INVALID || interrupts_cap == CAP_ID_INVALID ||
 	    server->root_cap == CAP_ID_INVALID || !server->root_published || !parser_description_get(source, &parser))
 		return false;
-	acquire_result = init_acquire(&vfs_query, VFS_SERVICE_NAME, &vfs);
-	if (acquire_result.transport_status != SYSCALL_STATUS_OK || acquire_result.status != INIT_REGISTRY_OK) {
+	acquire_result = registry_acquire(&vfs_query, VFS_SERVICE_NAME, &vfs);
+	if (acquire_result.transport_status != SYSCALL_STATUS_OK || acquire_result.status != REGISTRY_STATUS_OK) {
 		printf("device-manager: VFS acquisition for %s failed: transport=%u status=%u\n",
 		       parser.display_name,
 		       (unsigned)acquire_result.transport_status,

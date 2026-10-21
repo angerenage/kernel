@@ -3,7 +3,7 @@
 #include <base/cap.h>
 #include <base/syscall.h>
 #include <protocol/keyboard.h>
-#include <runtime/init.h>
+#include <runtime/registry.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -25,7 +25,7 @@ struct keyboard_event_page {
 };
 
 /* Acquire the default system keyboard service through init. */
-struct init_call_result keyboard_acquire(struct init_service_handle* out_handle);
+struct registry_call_result keyboard_acquire(struct registry_service_handle* out_handle);
 
 /* Read controller metadata and the current coherent topology cursor. */
 syscall_status_t keyboard_get_info(cap_id_t keyboard_cap, struct keyboard_get_info_response* out_info);

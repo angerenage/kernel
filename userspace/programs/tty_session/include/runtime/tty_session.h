@@ -4,11 +4,11 @@
 #include <base/process.h>
 #include <base/syscall.h>
 #include <protocol/tty_session.h>
-#include <runtime/init.h>
+#include <runtime/registry.h>
 #include <stddef.h>
 
 /* Acquire the single system TTY session. */
-struct init_call_result tty_session_acquire(struct init_service_handle* out_handle);
+struct registry_call_result tty_session_acquire(struct registry_service_handle* out_handle);
 
 /* Read the character-cell dimensions of the terminal behind a TTY session. */
 syscall_status_t tty_session_get_info(cap_id_t session_cap, struct tty_session_get_info_response* out_info);

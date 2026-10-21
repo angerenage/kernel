@@ -2,7 +2,7 @@
 
 #include <libc/stdlib.h>
 #include <protocol/vfs.h>
-#include <runtime/init.h>
+#include <runtime/registry.h>
 #include <runtime/tty_session.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -15,14 +15,14 @@
 #define VFS_PROTOCOL_VERSION_MINOR 0u
 
 bool shell_initialize(struct shell* shell) {
-	static const struct init_protocol_query query = {
+	static const struct registry_protocol_query query = {
 		.namespace_path = VFS_NAMESPACE,
 		.protocol       = VFS_PROTOCOL_NAME,
 		.major          = VFS_PROTOCOL_VERSION_MAJOR,
 		.minor          = VFS_PROTOCOL_VERSION_MINOR,
 	};
-	struct init_service_handle           service = {.capability = CAP_ID_INVALID};
-	struct init_call_result              acquired;
+	struct registry_service_handle       service = {.capability = CAP_ID_INVALID};
+	struct registry_call_result          acquired;
 	struct tty_session_get_info_response terminal_info;
 
 	if (shell == NULL) return false;
@@ -40,8 +40,8 @@ bool shell_initialize(struct shell* shell) {
 	shell->terminal_columns = (size_t)terminal_info.columns;
 	shell->terminal_rows    = (size_t)terminal_info.rows;
 
-	acquired = init_acquire(&query, VFS_SERVICE_NAME, &service);
-	if (acquired.transport_status != SYSCALL_STATUS_OK || acquired.status != INIT_REGISTRY_OK ||
+	acquired = registry_acquire(&query, VFS_SERVICE_NAME, &service);
+	if (acquired.transport_status != SYSCALL_STATUS_OK || acquired.status != REGISTRY_STATUS_OK ||
 	    service.capability == CAP_ID_INVALID) {
 		shell_destroy(shell);
 		return false;

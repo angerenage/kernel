@@ -1,5 +1,5 @@
 #include <protocol/tty_session.h>
-#include <runtime/init.h>
+#include <runtime/registry.h>
 #include <runtime/tty_session.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -64,14 +64,14 @@ static bool clipboard_text_valid(const uint8_t* text, size_t size) {
 	return true;
 }
 
-struct init_call_result tty_session_acquire(struct init_service_handle* out_handle) {
-	static const struct init_protocol_query query = {
+struct registry_call_result tty_session_acquire(struct registry_service_handle* out_handle) {
+	static const struct registry_protocol_query query = {
 		.namespace_path = TTY_SESSION_NAMESPACE,
 		.protocol       = TTY_SESSION_PROTOCOL_NAME,
 		.major          = TTY_SESSION_PROTOCOL_VERSION_MAJOR,
 		.minor          = TTY_SESSION_PROTOCOL_VERSION_MINOR,
 	};
-	return init_acquire(&query, TTY_SESSION_SERVICE_NAME, out_handle);
+	return registry_acquire(&query, TTY_SESSION_SERVICE_NAME, out_handle);
 }
 
 syscall_status_t tty_session_get_info(cap_id_t session_cap, struct tty_session_get_info_response* out_info) {

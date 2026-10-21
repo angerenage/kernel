@@ -4,8 +4,8 @@
 #include <base/process.h>
 #include <base/startup.h>
 #include <protocol/loader.h>
-#include <runtime/init.h>
 #include <runtime/program.h>
+#include <runtime/registry.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -214,16 +214,16 @@ static bool dispatch_request(const struct cap_request* call, const void* data) {
 }
 
 static bool advertise_loader(void) {
-	const struct init_service_selector selector = {
+	const struct registry_service_selector selector = {
 		.namespace_path = PROGRAM_LOADER_NAMESPACE,
 		.protocol       = LOADER_PROTOCOL_NAME,
 		.major          = LOADER_PROTOCOL_VERSION_MAJOR,
 		.service        = LOADER_SERVICE_NAME,
 	};
-	struct self_info        self;
-	struct init_call_result result;
-	cap_id_t                service_cap = CAP_ID_INVALID;
-	syscall_status_t        status;
+	struct self_info            self;
+	struct registry_call_result result;
+	cap_id_t                    service_cap = CAP_ID_INVALID;
+	syscall_status_t            status;
 
 	status = process_self_info(&self);
 	if (status != SYSCALL_STATUS_OK || self.pid == PROCESS_PID_INVALID) return false;
@@ -232,8 +232,8 @@ static bool advertise_loader(void) {
 	status = cap_publish(
 		loader_endpoint, LOADER_SERVICE_OBJECT_ID, self.pid, CAP_CALL | CAP_DELEGATE | CAP_DELEGATE_PEER, &service_cap);
 	if (status != SYSCALL_STATUS_OK) return false;
-	result = init_advertise(&selector, LOADER_PROTOCOL_VERSION_MINOR, service_cap, LOADER_V1_SERVICE_CAP_RIGHTS);
-	if (result.status == INIT_REGISTRY_OK && result.transport_status == SYSCALL_STATUS_OK) return true;
+	result = registry_advertise(&selector, LOADER_PROTOCOL_VERSION_MINOR, service_cap, LOADER_V1_SERVICE_CAP_RIGHTS);
+	if (result.status == REGISTRY_STATUS_OK && result.transport_status == SYSCALL_STATUS_OK) return true;
 	(void)cap_drop(service_cap);
 	return false;
 }

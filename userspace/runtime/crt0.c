@@ -2,7 +2,7 @@
 #include <base/startup.h>
 #include <runtime/filesystem.h>
 #include <runtime/heap.h>
-#include <runtime/init.h>
+#include <runtime/registry.h>
 #include <runtime/startup.h>
 #include <string.h>
 #include <system/display.h>
@@ -29,7 +29,7 @@ void _start(const struct process_startup_info* startup) {
 	    startup->memory_allocator_cap == CAP_ID_INVALID) {
 		exit(PROCESS_EXIT_SYSTEM_INVALID_STARTUP);
 	}
-	init_cap_id = startup->init_cap;
+	registry_cap_id = startup->registry_cap;
 	if (!runtime_heap_init(startup)) {
 		exit(PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
 	}

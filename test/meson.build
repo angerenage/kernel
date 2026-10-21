@@ -190,6 +190,7 @@ test_suites = [
 		'name': 'base_libc',
 		'sources': files(
 			'base/libc_test.c',
+			'mocks/base/display.c',
 		),
 		'link_with': base_test_lib,
 		'suites': ['unit', 'base'],

@@ -13,18 +13,18 @@ static const uint32_t modifier_mask = KEYBOARD_MODIFIER_LEFT_SHIFT | KEYBOARD_MO
                                       KEYBOARD_MODIFIER_LEFT_META | KEYBOARD_MODIFIER_RIGHT_META;
 static const uint32_t lock_mask     = KEYBOARD_LOCK_CAPS_LOCK | KEYBOARD_LOCK_NUM_LOCK | KEYBOARD_LOCK_SCROLL_LOCK;
 
-struct init_call_result keyboard_acquire(struct init_service_handle* out_handle) {
-	const struct init_protocol_query query = {
+struct registry_call_result keyboard_acquire(struct registry_service_handle* out_handle) {
+	const struct registry_protocol_query query = {
 		.namespace_path = KEYBOARD_NAMESPACE,
 		.protocol       = KEYBOARD_PROTOCOL_NAME,
 		.major          = KEYBOARD_PROTOCOL_VERSION_MAJOR,
 		.minor          = KEYBOARD_PROTOCOL_VERSION_MINOR,
 	};
 	if (out_handle == NULL)
-		return (struct init_call_result){.status           = INIT_REGISTRY_INVALID_ARGUMENT,
-		                                 .transport_status = SYSCALL_STATUS_BAD_ARGUMENT};
-	*out_handle = (struct init_service_handle){.capability = CAP_ID_INVALID};
-	return init_acquire(&query, KEYBOARD_SERVICE_NAME, out_handle);
+		return (struct registry_call_result){.status           = REGISTRY_STATUS_INVALID_ARGUMENT,
+		                                     .transport_status = SYSCALL_STATUS_BAD_ARGUMENT};
+	*out_handle = (struct registry_service_handle){.capability = CAP_ID_INVALID};
+	return registry_acquire(&query, KEYBOARD_SERVICE_NAME, out_handle);
 }
 
 syscall_status_t keyboard_get_info(cap_id_t keyboard_cap, struct keyboard_get_info_response* out_info) {

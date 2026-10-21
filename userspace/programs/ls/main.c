@@ -2,7 +2,7 @@
 #include <libc/stdlib.h>
 #include <libc/string.h>
 #include <protocol/vfs.h>
-#include <runtime/init.h>
+#include <runtime/registry.h>
 #include <runtime/tty_session.h>
 #include <runtime/vfs.h>
 #include <stdbool.h>
@@ -129,18 +129,18 @@ static const char* normalize_path(const char* operand, struct list_path* out) {
 }
 
 static bool acquire_vfs(struct list_context* context) {
-	static const struct init_protocol_query query = {
+	static const struct registry_protocol_query query = {
 		.namespace_path = VFS_NAMESPACE,
 		.protocol       = VFS_PROTOCOL_NAME,
 		.major          = VFS_PROTOCOL_VERSION_MAJOR,
 		.minor          = VFS_PROTOCOL_VERSION_MINOR,
 	};
-	struct init_service_handle service = {.capability = CAP_ID_INVALID};
-	struct init_call_result    acquired;
+	struct registry_service_handle service = {.capability = CAP_ID_INVALID};
+	struct registry_call_result    acquired;
 
 	if (context->vfs_cap != CAP_ID_INVALID) return true;
-	acquired = init_acquire(&query, VFS_SERVICE_NAME, &service);
-	if (acquired.transport_status != SYSCALL_STATUS_OK || acquired.status != INIT_REGISTRY_OK) {
+	acquired = registry_acquire(&query, VFS_SERVICE_NAME, &service);
+	if (acquired.transport_status != SYSCALL_STATUS_OK || acquired.status != REGISTRY_STATUS_OK) {
 		if (service.capability != CAP_ID_INVALID) (void)cap_drop(service.capability);
 		return false;
 	}
@@ -260,9 +260,9 @@ static void output_append_long(struct list_output* output, const struct list_con
 	char size[24];
 	int  size_length = snprintf(size, sizeof(size), "%llu", (unsigned long long)item->info.size);
 	char mode[]      = {item->info.type == FILESYSTEM_NODE_DIRECTORY ? 'd' : '-',
-	               'r',
-	               (item->info.flags & FILESYSTEM_NODE_READ_ONLY) != 0u ? '-' : 'w',
-	               ' '};
+	                    'r',
+	                    (item->info.flags & FILESYSTEM_NODE_READ_ONLY) != 0u ? '-' : 'w',
+	                    ' '};
 
 	output_append(output, mode, sizeof(mode));
 	output_append_padding(output, size_width - (size_t)size_length);

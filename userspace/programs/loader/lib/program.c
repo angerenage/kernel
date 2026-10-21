@@ -2,8 +2,8 @@
 #include <libc/stdlib.h>
 #include <libc/string.h>
 #include <protocol/loader.h>
-#include <runtime/init.h>
 #include <runtime/program.h>
+#include <runtime/registry.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <system/capability.h>
@@ -12,7 +12,7 @@
 #define LOADER_PROTOCOL_VERSION_MINOR 0u
 
 struct cached_loader {
-	char         service[INIT_NAME_MAX + 1u];
+	char         service[REGISTRY_NAME_MAX + 1u];
 	process_id_t owner;
 	cap_id_t     capability;
 };
@@ -22,16 +22,16 @@ static struct cached_loader loader_cache = {
 	.capability = CAP_ID_INVALID,
 };
 
-static syscall_status_t registry_result_status(struct init_call_result result) {
+static syscall_status_t registry_result_status(struct registry_call_result result) {
 	if (result.transport_status != SYSCALL_STATUS_OK) return result.transport_status;
 	switch (result.status) {
-	case INIT_REGISTRY_OK:
+	case REGISTRY_STATUS_OK:
 		return SYSCALL_STATUS_OK;
-	case INIT_REGISTRY_INVALID_ARGUMENT:
+	case REGISTRY_STATUS_INVALID_ARGUMENT:
 		return SYSCALL_STATUS_BAD_ARGUMENT;
-	case INIT_REGISTRY_NOT_FOUND:
+	case REGISTRY_STATUS_NOT_FOUND:
 		return SYSCALL_STATUS_UNAVAILABLE;
-	case INIT_REGISTRY_DENIED:
+	case REGISTRY_STATUS_DENIED:
 		return SYSCALL_STATUS_DENIED;
 	default:
 		return SYSCALL_STATUS_FAILED;
@@ -50,16 +50,16 @@ static bool cached_loader_matches(const char* service) {
 }
 
 static syscall_status_t resolve_loader(const char* service, struct cached_loader* out_loader) {
-	static const struct init_protocol_query query = {
+	static const struct registry_protocol_query query = {
 		.namespace_path = PROGRAM_LOADER_NAMESPACE,
 		.protocol       = LOADER_PROTOCOL_NAME,
 		.major          = LOADER_PROTOCOL_VERSION_MAJOR,
 		.minor          = LOADER_PROTOCOL_VERSION_MINOR,
 	};
-	struct init_service_handle handle;
-	struct init_call_result    result;
-	struct cached_loader       replacement;
-	syscall_status_t           cleanup_status;
+	struct registry_service_handle handle;
+	struct registry_call_result    result;
+	struct cached_loader           replacement;
+	syscall_status_t               cleanup_status;
 
 	if (service == NULL || out_loader == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	if (cached_loader_matches(service)) {
@@ -67,8 +67,8 @@ static syscall_status_t resolve_loader(const char* service, struct cached_loader
 		return SYSCALL_STATUS_OK;
 	}
 
-	result = init_acquire(&query, service, &handle);
-	if (result.status != INIT_REGISTRY_OK || result.transport_status != SYSCALL_STATUS_OK)
+	result = registry_acquire(&query, service, &handle);
+	if (result.status != REGISTRY_STATUS_OK || result.transport_status != SYSCALL_STATUS_OK)
 		return registry_result_status(result);
 	if (handle.capability == CAP_ID_INVALID || handle.owner == PROCESS_PID_INVALID) return SYSCALL_STATUS_FAILED;
 

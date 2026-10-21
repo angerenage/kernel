@@ -6,8 +6,8 @@
 #include <protocol/loader.h>
 #include <protocol/terminal.h>
 #include <protocol/vfs.h>
-#include <runtime/init.h>
 #include <runtime/program.h>
+#include <runtime/registry.h>
 #include <runtime/vfs.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -19,8 +19,6 @@
 #include <system/process.h>
 
 #include "arguments.h"
-#include "registry.h"
-
 #define DEVICE_MANAGER_FILE_PATH "/boot/device_manager.elf"
 #define DEVICE_MANAGER_PROCESS_NAME "device-manager"
 #define DEVICE_MANAGER_LOADER_SERVICE "elf64"
@@ -44,33 +42,32 @@ static bool device_manager_drop_capability(cap_id_t* capability, const char* des
 	return true;
 }
 
-static syscall_status_t device_manager_output_stream(const struct init_state* init, process_id_t init_pid,
-                                                     cap_id_t* out_capability, bool* out_owned) {
-	const struct init_protocol_query query = {
+static syscall_status_t device_manager_output_stream(const struct init_state* init, cap_id_t* out_capability,
+                                                     bool* out_owned) {
+	const struct registry_protocol_query query = {
 		.namespace_path = TERMINAL_NAMESPACE,
 		.protocol       = TERMINAL_PROTOCOL_NAME,
 		.major          = TERMINAL_PROTOCOL_VERSION_MAJOR,
 		.minor          = TERMINAL_PROTOCOL_VERSION_MINOR,
 	};
-	struct init_service_handle terminal = {.capability = CAP_ID_INVALID};
-	enum init_registry_status  registry_status;
+	struct registry_service_handle terminal = {.capability = CAP_ID_INVALID};
+	enum registry_status           registry_status;
 
-	if (init == NULL || init_pid == PROCESS_PID_INVALID || out_capability == NULL || out_owned == NULL)
-		return SYSCALL_STATUS_BAD_ARGUMENT;
+	if (init == NULL || out_capability == NULL || out_owned == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	*out_capability = CAP_ID_INVALID;
 	*out_owned      = false;
-	registry_status = registry_acquire(init_pid, &query, TERMINAL_SERVICE_NAME, &terminal);
-	if (registry_status == INIT_REGISTRY_OK) {
+	registry_status = registry_acquire(&query, TERMINAL_SERVICE_NAME, &terminal).status;
+	if (registry_status == REGISTRY_STATUS_OK) {
 		*out_capability = terminal.capability;
 		*out_owned      = true;
 		return SYSCALL_STATUS_OK;
 	}
-	if (registry_status != INIT_REGISTRY_NOT_FOUND) return SYSCALL_STATUS_FAILED;
+	if (registry_status != REGISTRY_STATUS_NOT_FOUND) return SYSCALL_STATUS_FAILED;
 	*out_capability = init->serial_stream_cap;
 	return SYSCALL_STATUS_OK;
 }
 
-static syscall_status_t device_manager_load(const struct init_service_handle* loader, cap_id_t file_cap,
+static syscall_status_t device_manager_load(const struct registry_service_handle* loader, cap_id_t file_cap,
                                             struct program_load_result* out_load) {
 	struct {
 		struct loader_v1_load_request request;
@@ -129,28 +126,27 @@ static syscall_status_t device_manager_optional_resource(const struct init_state
 }
 
 enum device_manager_launch_result device_manager_launch(const struct init_state* init) {
-	static const struct init_protocol_query loader_query = {
+	static const struct registry_protocol_query loader_query = {
 		.namespace_path = PROGRAM_LOADER_NAMESPACE,
 		.protocol       = LOADER_PROTOCOL_NAME,
 		.major          = LOADER_PROTOCOL_VERSION_MAJOR,
 		.minor          = LOADER_PROTOCOL_VERSION_MINOR,
 	};
-	static const struct init_protocol_query vfs_query = {
+	static const struct registry_protocol_query vfs_query = {
 		.namespace_path = VFS_NAMESPACE,
 		.protocol       = VFS_PROTOCOL_NAME,
 		.major          = VFS_PROTOCOL_VERSION_MAJOR,
 		.minor          = VFS_PROTOCOL_VERSION_MINOR,
 	};
-	struct init_service_handle    loader     = {.capability = CAP_ID_INVALID};
-	struct init_service_handle    vfs        = {.capability = CAP_ID_INVALID};
-	struct filesystem_node_handle executable = {.capability = CAP_ID_INVALID};
-	struct filesystem_call_result open_result;
-	struct program_load_result    loaded = {
+	struct registry_service_handle loader     = {.capability = CAP_ID_INVALID};
+	struct registry_service_handle vfs        = {.capability = CAP_ID_INVALID};
+	struct filesystem_node_handle  executable = {.capability = CAP_ID_INVALID};
+	struct filesystem_call_result  open_result;
+	struct program_load_result     loaded = {
 		.load_cap   = CAP_ID_INVALID,
 		.process_id = PROCESS_PID_INVALID,
 	};
 	struct program_run_result running;
-	struct self_info          self;
 	cap_id_t                  acpi_cap       = CAP_ID_INVALID;
 	cap_id_t                  dt_cap         = CAP_ID_INVALID;
 	cap_id_t                  dma_cap        = CAP_ID_INVALID;
@@ -158,29 +154,24 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 	cap_id_t                  io_ports_cap   = CAP_ID_INVALID;
 	cap_id_t                  output_cap     = CAP_ID_INVALID;
 	const char**              argv           = NULL;
-	enum init_registry_status registry_status;
+	enum registry_status      registry_status;
 	syscall_status_t          status;
 	bool                      temporary_caps_released = true;
 	bool                      output_cap_owned        = false;
 
 	if (init == NULL) return DEVICE_MANAGER_LAUNCH_FAILED;
-	status = process_self_info(&self);
-	if (status != SYSCALL_STATUS_OK || self.pid == PROCESS_PID_INVALID) {
-		printf("init: self process query for device manager failed: %u\n", (unsigned)status);
-		return DEVICE_MANAGER_LAUNCH_FAILED;
-	}
-	registry_status = registry_acquire(self.pid, &loader_query, DEVICE_MANAGER_LOADER_SERVICE, &loader);
-	if (registry_status == INIT_REGISTRY_NOT_FOUND) return DEVICE_MANAGER_LAUNCH_UNAVAILABLE;
-	if (registry_status != INIT_REGISTRY_OK) {
+	registry_status = registry_acquire(&loader_query, DEVICE_MANAGER_LOADER_SERVICE, &loader).status;
+	if (registry_status == REGISTRY_STATUS_NOT_FOUND) return DEVICE_MANAGER_LAUNCH_UNAVAILABLE;
+	if (registry_status != REGISTRY_STATUS_OK) {
 		printf("init: device manager loader acquisition failed: %u\n", (unsigned)registry_status);
 		return DEVICE_MANAGER_LAUNCH_FAILED;
 	}
-	registry_status = registry_acquire(self.pid, &vfs_query, VFS_SERVICE_NAME, &vfs);
-	if (registry_status == INIT_REGISTRY_NOT_FOUND) {
+	registry_status = registry_acquire(&vfs_query, VFS_SERVICE_NAME, &vfs).status;
+	if (registry_status == REGISTRY_STATUS_NOT_FOUND) {
 		if (!device_manager_drop_capability(&loader.capability, "loader")) return DEVICE_MANAGER_LAUNCH_FAILED;
 		return DEVICE_MANAGER_LAUNCH_UNAVAILABLE;
 	}
-	if (registry_status != INIT_REGISTRY_OK) {
+	if (registry_status != REGISTRY_STATUS_OK) {
 		printf("init: device manager VFS acquisition failed: %u\n", (unsigned)registry_status);
 		(void)device_manager_drop_capability(&loader.capability, "loader");
 		return DEVICE_MANAGER_LAUNCH_FAILED;
@@ -221,8 +212,7 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 		status = device_manager_optional_resource(init, KERNEL_RESOURCE_TYPE_IO_PORTS, &io_ports_cap);
 #endif
 	if (status == SYSCALL_STATUS_OK && !init_arguments_vector(init, &argv)) status = SYSCALL_STATUS_FAILED;
-	if (status == SYSCALL_STATUS_OK)
-		status = device_manager_output_stream(init, self.pid, &output_cap, &output_cap_owned);
+	if (status == SYSCALL_STATUS_OK) status = device_manager_output_stream(init, &output_cap, &output_cap_owned);
 	if (status == SYSCALL_STATUS_OK) {
 		const struct program_capability_argument capv[PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_COUNT] = {
 			[PROCESS_STARTUP_CAP_STDIN] =

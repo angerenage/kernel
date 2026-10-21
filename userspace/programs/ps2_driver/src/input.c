@@ -3,7 +3,7 @@
 #include <base/channel.h>
 #include <base/process.h>
 #include <limits.h>
-#include <runtime/init.h>
+#include <runtime/registry.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,20 +46,20 @@ struct ps2_input_event_page {
 
 /* Input-protocol server state owned by one PS/2 driver process. */
 struct ps2_input_server {
-	struct ps2_input_state       state;
-	channel_id_t                 endpoint;
-	cap_id_t                     activity_cap;
-	cap_id_t                     event_signal_cap;
-	cap_id_t                     driver_activity_cap;
-	cap_id_t                     output_completion_cap;
-	cap_id_t                     service_cap;
-	struct init_service_selector selector;
-	struct input_output_value    pending_outputs[PS2_INPUT_MAXIMUM_OUTPUT_VALUES];
-	size_t                       pending_output_count;
-	syscall_status_t             pending_output_status;
-	bool                         output_pending;
-	bool                         output_taken;
-	bool                         output_complete;
+	struct ps2_input_state           state;
+	channel_id_t                     endpoint;
+	cap_id_t                         activity_cap;
+	cap_id_t                         event_signal_cap;
+	cap_id_t                         driver_activity_cap;
+	cap_id_t                         output_completion_cap;
+	cap_id_t                         service_cap;
+	struct registry_service_selector selector;
+	struct input_output_value        pending_outputs[PS2_INPUT_MAXIMUM_OUTPUT_VALUES];
+	size_t                           pending_output_count;
+	syscall_status_t                 pending_output_status;
+	bool                             output_pending;
+	bool                             output_taken;
+	bool                             output_complete;
 };
 
 /* Copied onto the detached server thread's initial stack. */
@@ -334,7 +334,7 @@ static syscall_status_t state_read_events(struct ps2_input_state* state, uint64_
 
 static bool service_name_valid(const char* service) {
 	if (service == NULL || service[0] == '\0') return false;
-	for (size_t i = 0u; i <= INIT_NAME_MAX; i++) {
+	for (size_t i = 0u; i <= REGISTRY_NAME_MAX; i++) {
 		char value = service[i];
 		if (value == '\0') return i != 0u;
 		if (!((value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') || (value >= '0' && value <= '9') ||
@@ -659,7 +659,7 @@ syscall_status_t ps2_input_server_create(const char* service, enum input_device_
 	server->driver_activity_cap   = driver_activity_cap;
 	server->output_completion_cap = CAP_ID_INVALID;
 	server->service_cap           = CAP_ID_INVALID;
-	server->selector              = (struct init_service_selector){
+	server->selector              = (struct registry_service_selector){
 		.namespace_path = INPUT_NAMESPACE,
 		.protocol       = INPUT_PROTOCOL_NAME,
 		.major          = PS2_INPUT_PROTOCOL_VERSION_MAJOR,
@@ -690,15 +690,15 @@ syscall_status_t ps2_input_server_create(const char* service, enum input_device_
 		if (status == SYSCALL_STATUS_OK && drop_status != SYSCALL_STATUS_OK) status = drop_status;
 	}
 	if (status == SYSCALL_STATUS_OK) {
-		struct init_call_result result = init_advertise(
+		struct registry_call_result result = registry_advertise(
 			&server->selector, PS2_INPUT_PROTOCOL_VERSION_MINOR, server->service_cap, INPUT_SERVICE_CLIENT_RIGHTS);
 		status     = result.transport_status;
-		advertised = result.status == INIT_REGISTRY_OK;
+		advertised = result.status == REGISTRY_STATUS_OK;
 		if (!advertised && status == SYSCALL_STATUS_OK) status = SYSCALL_STATUS_FAILED;
 	}
 	drop_self_info(&self);
 	if (status != SYSCALL_STATUS_OK) {
-		if (advertised) (void)init_withdraw(&server->selector);
+		if (advertised) (void)registry_withdraw(&server->selector);
 		/* A successfully spawned server retains its state until the process exits. */
 		if (!server_started) cleanup_unstarted(server);
 		return status;

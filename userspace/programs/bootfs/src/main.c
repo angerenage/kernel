@@ -3,7 +3,7 @@
 #include <base/process.h>
 #include <protocol/filesystem.h>
 #include <runtime/filesystem.h>
-#include <runtime/init.h>
+#include <runtime/registry.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -402,15 +402,15 @@ static bool dispatch_request(const struct cap_request* call, const void* data) {
 }
 
 static bool advertise_bootfs(void) {
-	const struct init_service_selector selector = {
+	const struct registry_service_selector selector = {
 		.namespace_path = FILESYSTEM_NAMESPACE,
 		.protocol       = FILESYSTEM_PROTOCOL_NAME,
 		.major          = FILESYSTEM_PROTOCOL_VERSION_MAJOR,
 		.service        = BOOTFS_SERVICE_NAME,
 	};
-	struct init_call_result result;
-	struct self_info        self;
-	syscall_status_t        status;
+	struct registry_call_result result;
+	struct self_info            self;
+	syscall_status_t            status;
 
 	status = process_self_info(&self);
 	if (status != SYSCALL_STATUS_OK || self.pid == PROCESS_PID_INVALID) return false;
@@ -418,8 +418,8 @@ static bool advertise_bootfs(void) {
 	if (status != SYSCALL_STATUS_OK) return false;
 	status = cap_publish(bootfs_endpoint, BOOTFS_ROOT_OBJECT_ID, self.pid, BOOTFS_SOURCE_RIGHTS, &bootfs_root_cap);
 	if (status != SYSCALL_STATUS_OK) return false;
-	result = init_advertise(&selector, FILESYSTEM_PROTOCOL_VERSION_MINOR, bootfs_root_cap, BOOTFS_CLIENT_RIGHTS);
-	return result.status == INIT_REGISTRY_OK && result.transport_status == SYSCALL_STATUS_OK;
+	result = registry_advertise(&selector, FILESYSTEM_PROTOCOL_VERSION_MINOR, bootfs_root_cap, BOOTFS_CLIENT_RIGHTS);
+	return result.status == REGISTRY_STATUS_OK && result.transport_status == SYSCALL_STATUS_OK;
 }
 
 static void handle_channel_event(const struct channel_event* event) {

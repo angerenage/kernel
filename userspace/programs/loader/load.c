@@ -6,7 +6,7 @@
 #include <base/thread.h>
 #include <runtime/filesystem.h>
 #include <runtime/heap.h>
-#include <runtime/init.h>
+#include <runtime/registry.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -187,9 +187,9 @@ cleanup:
 }
 
 static syscall_status_t delegate_runtime_caps(struct loader_loaded_program* program) {
-	if (init_cap_id == CAP_ID_INVALID || runtime_heap_memory_allocator_cap == CAP_ID_INVALID)
+	if (registry_cap_id == CAP_ID_INVALID || runtime_heap_memory_allocator_cap == CAP_ID_INVALID)
 		return SYSCALL_STATUS_UNAVAILABLE;
-	syscall_status_t status = cap_delegate_peer(init_cap_id, program->process_id, CAP_CALL, &program->init_cap);
+	syscall_status_t status = cap_delegate_peer(registry_cap_id, program->process_id, CAP_CALL, &program->registry_cap);
 	if (status != SYSCALL_STATUS_OK) return status;
 	return cap_delegate(runtime_heap_memory_allocator_cap,
 	                    program->process_id,
@@ -250,7 +250,7 @@ syscall_status_t loader_start_program(struct loader_loaded_program* program, uin
 		.heap_base            = program->heap_base,
 		.heap_size            = program->heap_size,
 		.memory_allocator_cap = program->memory_allocator_cap,
-		.init_cap             = program->init_cap,
+		.registry_cap         = program->registry_cap,
 		.capc                 = capc,
 		.capv_offset          = (uint32_t)sizeof(*startup),
 		.argc                 = argc,
@@ -304,7 +304,7 @@ syscall_status_t loader_prepare_program(cap_id_t file_cap, const char* name, siz
 	if (program == NULL || process_name == NULL) goto failed;
 	program->load_cap = program->process_cap = program->address_space_cap = CAP_ID_INVALID;
 	program->process_id                                                   = PROCESS_PID_INVALID;
-	program->init_cap = program->memory_allocator_cap = CAP_ID_INVALID;
+	program->registry_cap = program->memory_allocator_cap = CAP_ID_INVALID;
 	memcpy(process_name, name, name_size);
 	process_name[name_size] = '\0';
 	status                  = process_create(process_name, name_size + 1u, &created);

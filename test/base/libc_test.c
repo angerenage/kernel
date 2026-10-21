@@ -63,6 +63,11 @@ Test(base_libc, converts_integers_and_reals) {
 	cr_assert_eq(strtol(" -0x2a trailing", &end, 0), -42);
 	cr_assert_str_eq(end, " trailing");
 	cr_assert_eq(strtol("999999999999999999999999", &end, 10), LONG_MAX);
+	cr_assert_eq(strtoull("18446744073709551615!", &end, 10), ULLONG_MAX);
+	cr_assert_str_eq(end, "!");
+	cr_assert_eq(strtoull("18446744073709551616", &end, 10), ULLONG_MAX);
+	cr_assert_eq(strtoull("-1", &end, 10), ULLONG_MAX);
+	cr_assert_str_eq(end, "");
 
 	double value = strtod("  -12.5e2!", &end);
 	cr_assert_float_eq(value, -1250.0, 0.000001);

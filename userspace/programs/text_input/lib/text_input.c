@@ -8,18 +8,18 @@
 #define TEXT_INPUT_PROTOCOL_VERSION_MAJOR 1u
 #define TEXT_INPUT_PROTOCOL_VERSION_MINOR 0u
 
-struct init_call_result text_input_acquire(struct init_service_handle* out_handle) {
-	const struct init_protocol_query query = {
+struct registry_call_result text_input_acquire(struct registry_service_handle* out_handle) {
+	const struct registry_protocol_query query = {
 		.namespace_path = TEXT_INPUT_NAMESPACE,
 		.protocol       = TEXT_INPUT_PROTOCOL_NAME,
 		.major          = TEXT_INPUT_PROTOCOL_VERSION_MAJOR,
 		.minor          = TEXT_INPUT_PROTOCOL_VERSION_MINOR,
 	};
 	if (out_handle == NULL)
-		return (struct init_call_result){.status           = INIT_REGISTRY_INVALID_ARGUMENT,
-		                                 .transport_status = SYSCALL_STATUS_BAD_ARGUMENT};
-	*out_handle = (struct init_service_handle){.capability = CAP_ID_INVALID};
-	return init_acquire(&query, TEXT_INPUT_SERVICE_NAME, out_handle);
+		return (struct registry_call_result){.status           = REGISTRY_STATUS_INVALID_ARGUMENT,
+		                                     .transport_status = SYSCALL_STATUS_BAD_ARGUMENT};
+	*out_handle = (struct registry_service_handle){.capability = CAP_ID_INVALID};
+	return registry_acquire(&query, TEXT_INPUT_SERVICE_NAME, out_handle);
 }
 
 syscall_status_t text_input_get_info(cap_id_t text_input_cap, struct text_input_get_info_response* out_info) {

@@ -4,7 +4,7 @@
 #include <base/process.h>
 #include <protocol/input.h>
 #include <protocol/input_manager.h>
-#include <runtime/init.h>
+#include <runtime/registry.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -21,7 +21,7 @@
 /* One registry identity and its validated, process-lifetime attachment state. */
 struct managed_input_source {
 	struct managed_input_source*     next;
-	struct init_service_info         service;
+	struct registry_service_info     service;
 	process_id_t                     owner;
 	uint64_t                         id;
 	enum input_device_class          device_class;

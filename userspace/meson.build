@@ -65,7 +65,7 @@ userspace_runtime_sources = files(
 	'runtime/filesystem.c',
 	'runtime/file_output.c',
 	'runtime/heap.c',
-	'runtime/init.c',
+	'runtime/registry.c',
 	'runtime/input.c',
 	'runtime/blob.c',
 	'runtime/stdio.c',
@@ -149,6 +149,7 @@ subdir('programs/terminal')
 subdir('programs/tty_session')
 subdir('programs/ls')
 subdir('programs/shell')
+subdir('programs/registry')
 subdir('programs/init')
 subdir('programs/bootfs')
 subdir('programs/acpi_parser')

@@ -51,6 +51,7 @@ void _start(const struct init_startup_info* startup) {
 	}
 	g_init.kernel_resources_cap = startup->kernel_resources_cap;
 	g_init.memory_allocator_cap = startup->memory_allocator_cap;
+	g_init.registry_cap         = CAP_ID_INVALID;
 	g_init.argc                 = startup->argc;
 	g_init.argv_data            = argv_data;
 	g_init.argv_size            = startup->argv_size;
@@ -59,7 +60,7 @@ void _start(const struct init_startup_info* startup) {
 		.heap_base            = startup->heap_base,
 		.heap_size            = startup->heap_size,
 		.memory_allocator_cap = startup->memory_allocator_cap,
-		.init_cap             = CAP_ID_INVALID,
+		.registry_cap         = CAP_ID_INVALID,
 	};
 	if (!runtime_heap_init(&runtime_startup)) {
 		exit(PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);

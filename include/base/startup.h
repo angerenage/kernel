@@ -29,7 +29,7 @@ struct process_startup_info {
 	uintptr_t heap_base;
 	size_t    heap_size;
 	cap_id_t  memory_allocator_cap;
-	cap_id_t  init_cap;
+	cap_id_t  registry_cap;
 	uint32_t  capc;
 	uint32_t  capv_offset;
 	uint32_t  argc;

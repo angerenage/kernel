@@ -7,7 +7,7 @@
 #include <protocol/filesystem.h>
 #include <protocol/vfs.h>
 #include <runtime/filesystem.h>
-#include <runtime/init.h>
+#include <runtime/registry.h>
 #include <runtime/vfs.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -105,23 +105,23 @@ static void file_capability_drop(cap_id_t* capability) {
 }
 
 FILE* fopen(const char* restrict path, const char* restrict mode) {
-	static const struct init_protocol_query vfs_query = {
+	static const struct registry_protocol_query vfs_query = {
 		.namespace_path = VFS_NAMESPACE,
 		.protocol       = VFS_PROTOCOL_NAME,
 		.major          = VFS_PROTOCOL_VERSION_MAJOR,
 		.minor          = VFS_PROTOCOL_VERSION_MINOR,
 	};
-	struct init_service_handle    vfs  = {.capability = CAP_ID_INVALID};
-	struct filesystem_node_handle node = {.capability = CAP_ID_INVALID};
-	struct filesystem_call_result open_result;
-	struct init_call_result       acquire_result;
-	struct file_mode              parsed_mode;
-	cap_rights_t                  rights = 0u;
-	FILE*                         stream = NULL;
-	size_t                        path_size;
-	cap_id_t                      working_directory;
-	bool                          absolute;
-	bool                          success = false;
+	struct registry_service_handle vfs  = {.capability = CAP_ID_INVALID};
+	struct filesystem_node_handle  node = {.capability = CAP_ID_INVALID};
+	struct filesystem_call_result  open_result;
+	struct registry_call_result    acquire_result;
+	struct file_mode               parsed_mode;
+	cap_rights_t                   rights = 0u;
+	FILE*                          stream = NULL;
+	size_t                         path_size;
+	cap_id_t                       working_directory;
+	bool                           absolute;
+	bool                           success = false;
 
 	if (path == NULL || !file_mode_parse(mode, &parsed_mode)) return NULL;
 	path_size         = strlen(path);
@@ -134,8 +134,8 @@ FILE* fopen(const char* restrict path, const char* restrict mode) {
 	if (parsed_mode.writable) rights |= CAP_WRITE;
 
 	if (absolute) {
-		acquire_result = init_acquire(&vfs_query, VFS_SERVICE_NAME, &vfs);
-		if (acquire_result.transport_status != SYSCALL_STATUS_OK || acquire_result.status != INIT_REGISTRY_OK)
+		acquire_result = registry_acquire(&vfs_query, VFS_SERVICE_NAME, &vfs);
+		if (acquire_result.transport_status != SYSCALL_STATUS_OK || acquire_result.status != REGISTRY_STATUS_OK)
 			goto cleanup;
 		open_result = vfs_open(vfs.capability, path, path_size, rights, &node);
 	}

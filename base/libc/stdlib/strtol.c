@@ -54,3 +54,43 @@ long strtol(const char* restrict string, char** restrict end, int base) {
 	if (negative && value == (unsigned long)LONG_MAX + 1u) return LONG_MIN;
 	return negative ? -(long)value : (long)value;
 }
+
+unsigned long long strtoull(const char* restrict string, char** restrict end, int base) {
+	const char*        cursor = string;
+	bool               negative;
+	bool               any      = false;
+	unsigned long long value    = 0u;
+	bool               overflow = false;
+
+	if (end != NULL) *end = (char*)string;
+	if (string == NULL || base < 0 || base == 1 || base > 36) {
+		errno = EINVAL;
+		return 0u;
+	}
+	while (isspace((unsigned char)*cursor)) cursor++;
+	negative = *cursor == '-';
+	if (*cursor == '-' || *cursor == '+') cursor++;
+	if ((base == 0 || base == 16) && cursor[0] == '0' && (cursor[1] == 'x' || cursor[1] == 'X') &&
+	    digit_value((unsigned char)cursor[2]) >= 0 && digit_value((unsigned char)cursor[2]) < 16) {
+		base = 16;
+		cursor += 2;
+	}
+	else if (base == 0) {
+		base = cursor[0] == '0' ? 8 : 10;
+	}
+	for (;;) {
+		int digit = digit_value((unsigned char)*cursor);
+		if (digit < 0 || digit >= base) break;
+		any = true;
+		if (value > (ULLONG_MAX - (unsigned long long)digit) / (unsigned long long)base) overflow = true;
+		else value = value * (unsigned long long)base + (unsigned long long)digit;
+		cursor++;
+	}
+	if (!any) return 0u;
+	if (end != NULL) *end = (char*)cursor;
+	if (overflow) {
+		errno = ERANGE;
+		return ULLONG_MAX;
+	}
+	return negative ? 0u - value : value;
+}
