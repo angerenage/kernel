@@ -16,6 +16,15 @@ syscall_status_t acpi_table_claim(cap_id_t provider_cap, const char signature[4]
 /* Read selected normalized FADT fields directly through the ACPI provider. */
 syscall_status_t acpi_fadt_read(cap_id_t provider_cap, struct acpi_provider_fadt_read_response* out_info);
 
+/* Return the number of validated AML definition blocks in interpreter load order. */
+syscall_status_t acpi_aml_count(cap_id_t provider_cap, uint64_t* out_count);
+
+/* Read selected metadata for one AML definition block. */
+syscall_status_t acpi_aml_info(cap_id_t provider_cap, uint64_t index, struct acpi_provider_aml_info_response* out_info);
+
+/* Copy an exact range from one headerless AML definition block. */
+syscall_status_t acpi_aml_read(cap_id_t provider_cap, uint64_t index, uint64_t offset, void* buffer, size_t size);
+
 /* Read revision and headerless body size from a claimed table. */
 syscall_status_t acpi_table_info(cap_id_t table_cap, struct acpi_table_info_response* out_info);
 

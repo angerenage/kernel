@@ -26,6 +26,8 @@ struct acpi_test_table {
 };
 
 static bool                          acpi_test_available;
+static struct acpi_test_table        acpi_test_dsdt_storage;
+static struct acpi_sdt_header*       acpi_test_dsdt;
 static struct acpi_test_table        acpi_test_storage[ACPI_TEST_TABLE_CAPACITY];
 static const struct acpi_sdt_header* acpi_test_tables[ACPI_TEST_TABLE_CAPACITY];
 static size_t                        acpi_test_table_count;
@@ -37,7 +39,9 @@ size_t hal_acpi_consumed_tables(struct hal_acpi_consumed_table* tables, size_t c
 
 void acpi_mock_reset(void) {
 	acpi_test_available   = false;
+	acpi_test_dsdt        = NULL;
 	acpi_test_table_count = 0u;
+	memset(&acpi_test_dsdt_storage, 0, sizeof(acpi_test_dsdt_storage));
 	memset(acpi_test_storage, 0, sizeof(acpi_test_storage));
 	memset(acpi_test_tables, 0, sizeof(acpi_test_tables));
 }
@@ -63,8 +67,12 @@ const struct acpi_sdt_header* acpi_table_next(const char signature[4], acpi_curs
 	return NULL;
 }
 
-static const struct acpi_sdt_header* acpi_mock_add(const char signature[4], uint8_t revision, const void* body,
-                                                   size_t body_size) {
+const struct acpi_sdt_header* acpi_dsdt(void) {
+	return acpi_test_available ? acpi_test_dsdt : NULL;
+}
+
+static struct acpi_sdt_header* acpi_mock_add(const char signature[4], uint8_t revision, const void* body,
+                                             size_t body_size) {
 	struct acpi_test_table* table;
 
 	cr_assert_lt(acpi_test_table_count, ACPI_TEST_TABLE_CAPACITY);
@@ -76,6 +84,52 @@ static const struct acpi_sdt_header* acpi_mock_add(const char signature[4], uint
 	if (body_size != 0u) memcpy(table->body, body, body_size);
 	acpi_test_tables[acpi_test_table_count++] = &table->header;
 	return &table->header;
+}
+
+static struct acpi_sdt_header* acpi_mock_dsdt(uint8_t revision, const void* body, size_t body_size) {
+	cr_assert_leq(body_size, ACPI_TEST_BODY_CAPACITY);
+	memcpy(acpi_test_dsdt_storage.header.signature, "DSDT", 4u);
+	acpi_test_dsdt_storage.header.length   = (uint32_t)(sizeof(acpi_test_dsdt_storage.header) + body_size);
+	acpi_test_dsdt_storage.header.revision = revision;
+	if (body_size != 0u) memcpy(acpi_test_dsdt_storage.body, body, body_size);
+	acpi_test_dsdt = &acpi_test_dsdt_storage.header;
+	return acpi_test_dsdt;
+}
+
+static void acpi_mock_identity(struct acpi_sdt_header* table, const char oem_id[6], const char oem_table_id[8],
+                               uint32_t oem_revision) {
+	cr_assert_not_null(table);
+	memcpy(table->oem_id, oem_id, sizeof(table->oem_id));
+	memcpy(table->oem_table_id, oem_table_id, sizeof(table->oem_table_id));
+	memcpy(&table->oem_revision, &oem_revision, sizeof(table->oem_revision));
+}
+
+static syscall_result_t acpi_test_aml_count(cap_id_t provider, uint64_t* count) {
+	const struct acpi_provider_aml_count_request request  = {.header = {.op = ACPI_PROVIDER_OP_AML_COUNT}};
+	struct acpi_provider_aml_count_response      response = {0};
+	syscall_result_t                             result;
+
+	result = kernel_capability_test_call(provider, &request, sizeof(request), &response, sizeof(response));
+	if (result.status == SYSCALL_STATUS_OK && count != NULL) *count = response.count;
+	return result;
+}
+
+static syscall_result_t acpi_test_aml_info(cap_id_t provider, uint64_t index,
+                                           struct acpi_provider_aml_info_response* info) {
+	const struct acpi_provider_aml_info_request request = {
+		.header = {.op = ACPI_PROVIDER_OP_AML_INFO}, .reserved = 0u, .index = index};
+	return kernel_capability_test_call(provider, &request, sizeof(request), info, sizeof(*info));
+}
+
+static syscall_result_t acpi_test_aml_read(cap_id_t provider, uint64_t index, uint64_t offset, uint64_t size,
+                                           void* output, size_t capacity) {
+	const struct acpi_provider_aml_read_request request = {
+		.header = {.op = ACPI_PROVIDER_OP_AML_READ},
+		.index  = index,
+		.offset = offset,
+		.size   = size,
+	};
+	return kernel_capability_test_call(provider, &request, sizeof(request), output, capacity);
 }
 
 static const struct acpi_sdt_header* acpi_mock_fadt(uint8_t revision, size_t length) {
@@ -147,6 +201,143 @@ static cap_id_t acpi_test_claim_ok(cap_id_t provider, const char signature[4], u
 	cr_assert_eq(result.value, sizeof(response));
 	cr_assert_neq(response.table_cap, CAP_ID_INVALID);
 	return response.table_cap;
+}
+
+Test(kernel_capability_acpi, aml_definitions_are_ordered_sanitized_and_readable) {
+	struct kernel_capability_test_context  ctx;
+	const uint8_t                          dsdt_body[]  = {0x10u, 0x11u, 0x12u, 0x13u};
+	const uint8_t                          ssdt_body[]  = {0x20u, 0x21u, 0x22u};
+	const uint8_t                          other_body[] = {0x30u};
+	struct acpi_provider_aml_info_response info;
+	uint8_t                                output[2] = {0};
+	uint64_t                               count     = 0u;
+
+	cr_assert_eq(ACPI_AML_DEFINITION_DSDT, 0u);
+	cr_assert_eq(ACPI_AML_DEFINITION_SSDT, 1u);
+	kernel_capability_test_begin(&ctx, "kernel-cap/acpi-aml");
+	struct acpi_sdt_header* dsdt = acpi_mock_dsdt(2u, dsdt_body, sizeof(dsdt_body));
+	struct acpi_sdt_header* ssdt = acpi_mock_add("SSDT", 3u, ssdt_body, sizeof(ssdt_body));
+	acpi_mock_add("TEST", 1u, other_body, sizeof(other_body));
+	acpi_mock_add_alias(ssdt);
+	acpi_mock_identity(dsdt, "OEMID0", "DSDTTAB0", UINT32_C(0x10203040));
+	acpi_mock_identity(ssdt, "OEMID1", "SSDTTAB1", UINT32_C(0x50607080));
+	cap_id_t provider = acpi_test_provider(&ctx);
+
+	syscall_result_t result = acpi_test_aml_count(provider, &count);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(result.value, sizeof(struct acpi_provider_aml_count_response));
+	cr_assert_eq(count, 3u);
+
+	memset(&info, 0xff, sizeof(info));
+	result = acpi_test_aml_info(provider, 0u, &info);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(result.value, sizeof(info));
+	cr_assert_eq(info.kind, ACPI_AML_DEFINITION_DSDT);
+	cr_assert_eq(info.revision, 2u);
+	cr_assert_eq(info.aml_size, sizeof(dsdt_body));
+	cr_assert_eq(info.oem_revision, UINT32_C(0x10203040));
+	cr_assert_eq(memcmp(info.oem_id, "OEMID0", sizeof(info.oem_id)), 0);
+	cr_assert_eq(memcmp(info.oem_table_id, "DSDTTAB0", sizeof(info.oem_table_id)), 0);
+	for (size_t index = 0u; index < sizeof(info.reserved); index++) cr_assert_eq(info.reserved[index], 0u);
+
+	memset(&info, 0xff, sizeof(info));
+	result = acpi_test_aml_info(provider, 1u, &info);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(info.kind, ACPI_AML_DEFINITION_SSDT);
+	cr_assert_eq(info.revision, 3u);
+	cr_assert_eq(info.aml_size, sizeof(ssdt_body));
+	cr_assert_eq(info.oem_revision, UINT32_C(0x50607080));
+	cr_assert_eq(memcmp(info.oem_id, "OEMID1", sizeof(info.oem_id)), 0);
+	cr_assert_eq(memcmp(info.oem_table_id, "SSDTTAB1", sizeof(info.oem_table_id)), 0);
+	for (size_t index = 0u; index < sizeof(info.reserved); index++) cr_assert_eq(info.reserved[index], 0u);
+
+	result = acpi_test_aml_info(provider, 2u, &info);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(info.kind, ACPI_AML_DEFINITION_SSDT);
+	result = acpi_test_aml_read(provider, 0u, 1u, sizeof(output), output, sizeof(output));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(result.value, sizeof(output));
+	cr_assert_eq(memcmp(output, dsdt_body + 1u, sizeof(output)), 0);
+	result = acpi_test_aml_read(provider, 1u, sizeof(ssdt_body), 0u, NULL, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(result.value, 0u);
+	kernel_capability_test_end(&ctx);
+}
+
+Test(kernel_capability_acpi, aml_requires_a_dsdt) {
+	struct kernel_capability_test_context  ctx;
+	const uint8_t                          body[] = {0x44u};
+	struct acpi_provider_aml_info_response info;
+	uint64_t                               count = UINT64_MAX;
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/acpi-aml-no-dsdt");
+	acpi_mock_add("SSDT", 2u, body, sizeof(body));
+	cap_id_t provider = acpi_test_provider(&ctx);
+	cr_assert_eq(acpi_test_aml_count(provider, &count).status, SYSCALL_STATUS_OK);
+	cr_assert_eq(count, 0u);
+	cr_assert_eq(acpi_test_aml_info(provider, 0u, &info).status, SYSCALL_STATUS_UNAVAILABLE);
+	cr_assert_eq(acpi_test_aml_read(provider, 0u, 0u, 0u, NULL, 0u).status, SYSCALL_STATUS_UNAVAILABLE);
+	kernel_capability_test_end(&ctx);
+}
+
+Test(kernel_capability_acpi, aml_rights_and_malformed_requests_are_rejected) {
+	struct kernel_capability_test_context  ctx;
+	const uint8_t                          body[] = {0x55u, 0x56u};
+	struct acpi_provider_aml_info_response info;
+	uint8_t                                output[2];
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/acpi-aml-errors");
+	acpi_mock_dsdt(2u, body, sizeof(body));
+	cap_id_t           provider = acpi_test_provider(&ctx);
+	struct capability* grant    = cap_acquire(provider);
+	cr_assert_not_null(grant);
+	cap_id_t call_only = cap_delegate_create(grant, process_pid(ctx.process), CAP_CALL, false);
+	cap_release(grant);
+	cr_assert_neq(call_only, CAP_ID_INVALID);
+	uint64_t count;
+	cr_assert_eq(acpi_test_aml_count(call_only, &count).status, SYSCALL_STATUS_DENIED);
+	cr_assert_eq(acpi_test_aml_info(call_only, 0u, &info).status, SYSCALL_STATUS_DENIED);
+	cr_assert_eq(acpi_test_aml_read(call_only, 0u, 0u, 1u, output, sizeof(output)).status, SYSCALL_STATUS_DENIED);
+	const struct acpi_provider_aml_count_request count_request = {.header = {.op = ACPI_PROVIDER_OP_AML_COUNT}};
+	struct acpi_provider_aml_count_response      count_response;
+	cr_assert_eq(kernel_capability_test_call(
+					 provider, &count_request, sizeof(count_request) - 1u, &count_response, sizeof(count_response))
+	                 .status,
+	             SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(kernel_capability_test_call(
+					 provider, &count_request, sizeof(count_request), &count_response, sizeof(count_response) - 1u)
+	                 .status,
+	             SYSCALL_STATUS_BAD_ARGUMENT);
+
+	struct acpi_provider_aml_info_request info_request = {
+		.header = {.op = ACPI_PROVIDER_OP_AML_INFO}, .reserved = 1u, .index = 0u};
+	cr_assert_eq(kernel_capability_test_call(provider, &info_request, sizeof(info_request), &info, sizeof(info)).status,
+	             SYSCALL_STATUS_BAD_ARGUMENT);
+	info_request.reserved = 0u;
+	cr_assert_eq(
+		kernel_capability_test_call(provider, &info_request, sizeof(info_request) - 1u, &info, sizeof(info)).status,
+		SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(
+		kernel_capability_test_call(provider, &info_request, sizeof(info_request), &info, sizeof(info) - 1u).status,
+		SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(acpi_test_aml_info(provider, UINT64_MAX, &info).status, SYSCALL_STATUS_UNAVAILABLE);
+
+	struct acpi_provider_aml_read_request read_request = {
+		.header = {.op = ACPI_PROVIDER_OP_AML_READ},
+		.index  = 0u,
+		.offset = 0u,
+		.size   = 0u,
+	};
+	cr_assert_eq(kernel_capability_test_call(provider, &read_request, sizeof(read_request) - 1u, NULL, 0u).status,
+	             SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(acpi_test_aml_read(provider, 0u, sizeof(body), 1u, output, sizeof(output)).status,
+	             SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(acpi_test_aml_read(provider, 0u, 0u, CAP_MAX_RESPONSE_SIZE + 1u, output, sizeof(output)).status,
+	             SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(acpi_test_aml_read(provider, 1u, 0u, 0u, NULL, 0u).status, SYSCALL_STATUS_UNAVAILABLE);
+	cr_assert_eq(acpi_test_aml_read(provider, 0u, 0u, sizeof(body), output, sizeof(output) - 1u).status,
+	             SYSCALL_STATUS_BAD_ARGUMENT);
+	kernel_capability_test_end(&ctx);
 }
 
 Test(kernel_capability_acpi, fadt_info_is_sanitized_and_requires_only_read_rights) {

@@ -8,6 +8,9 @@ enum acpi_provider_op {
 	ACPI_PROVIDER_OP_COUNT = 0,
 	ACPI_PROVIDER_OP_CLAIM,
 	ACPI_PROVIDER_OP_FADT_READ,
+	ACPI_PROVIDER_OP_AML_COUNT,
+	ACPI_PROVIDER_OP_AML_INFO,
+	ACPI_PROVIDER_OP_AML_READ,
 };
 
 struct acpi_provider_request_header {
@@ -46,6 +49,45 @@ struct acpi_provider_fadt_read_response {
 	uint16_t arm_boot_arch;
 	uint8_t  preferred_pm_profile;
 	uint8_t  reserved[3];
+};
+
+enum acpi_aml_definition_kind {
+	ACPI_AML_DEFINITION_DSDT = 0,
+	ACPI_AML_DEFINITION_SSDT,
+};
+
+/* Count validated AML definition blocks in interpreter load order. */
+struct acpi_provider_aml_count_request {
+	struct acpi_provider_request_header header;
+};
+
+struct acpi_provider_aml_count_response {
+	uint64_t count;
+};
+
+/* Read selected metadata for one headerless AML definition block. */
+struct acpi_provider_aml_info_request {
+	struct acpi_provider_request_header header;
+	uint32_t                            reserved;
+	uint64_t                            index;
+};
+
+struct acpi_provider_aml_info_response {
+	uint64_t aml_size;
+	uint32_t oem_revision;
+	char     oem_id[6];
+	char     oem_table_id[8];
+	uint8_t  kind;
+	uint8_t  revision;
+	uint8_t  reserved[4];
+};
+
+/* Read an exact range from one headerless AML definition block. */
+struct acpi_provider_aml_read_request {
+	struct acpi_provider_request_header header;
+	uint64_t                            index;
+	uint64_t                            offset;
+	uint64_t                            size;
 };
 
 /* Operations accepted by one exclusively claimed ACPI-table capability. */
