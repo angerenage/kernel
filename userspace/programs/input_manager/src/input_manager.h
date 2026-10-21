@@ -36,6 +36,7 @@ struct managed_input_source {
 	uint64_t                         cursor;
 	uint64_t                         pending_frame;
 	uint64_t                         last_frame;
+	uint64_t                         last_timestamp_ns;
 	struct input_manager_event       pending[INPUT_MANAGER_MAXIMUM_FRAME_EVENTS];
 	size_t                           pending_count;
 	bool                             active;

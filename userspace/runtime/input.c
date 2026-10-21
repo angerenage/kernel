@@ -115,9 +115,16 @@ syscall_status_t input_read_events(cap_id_t input_cap, uint64_t after_sequence, 
 		    event->type <= INPUT_EVENT_TYPE_INVALID || event->type > INPUT_EVENT_TYPE_STATE_RESET ||
 		    (event->flags & ~(uint32_t)INPUT_EVENT_FLAG_FRAME_END) != 0u ||
 		    (i != 0u && event->sequence != response->events[i - 1u].sequence + 1u) ||
+		    (i != 0u && event->timestamp_ns < response->events[i - 1u].timestamp_ns) ||
+		    (i != 0u && (response->events[i - 1u].flags & INPUT_EVENT_FLAG_FRAME_END) == 0u &&
+		     (event->frame != response->events[i - 1u].frame ||
+		      event->timestamp_ns != response->events[i - 1u].timestamp_ns)) ||
+		    (i != 0u && (response->events[i - 1u].flags & INPUT_EVENT_FLAG_FRAME_END) != 0u &&
+		     event->frame <= response->events[i - 1u].frame) ||
 		    event->sequence < response->oldest_sequence || event->sequence > response->newest_sequence ||
 		    (event->type == INPUT_EVENT_TYPE_CONTROL && event->control_id == 0u) ||
-		    (event->type == INPUT_EVENT_TYPE_STATE_RESET && (event->control_id != 0u || event->value != 0))) {
+		    (event->type == INPUT_EVENT_TYPE_STATE_RESET &&
+		     ((event->flags & INPUT_EVENT_FLAG_FRAME_END) == 0u || event->control_id != 0u || event->value != 0))) {
 			free(response);
 			return SYSCALL_STATUS_FAILED;
 		}

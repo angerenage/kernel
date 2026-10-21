@@ -126,13 +126,15 @@ enum text_input_event_flags {
  * after applying the keyboard layout. TEXT keys carry their layout-resolved
  * label in text; other keys carry no text. Key labels identify shortcuts and
  * are not committed text. A KEY and the PREEDIT or COMMIT actions caused by
- * the same transition share one frame. Clients process the complete frame to
- * resolve shortcuts and composition handling before accepting text. No
- * Unicode normalization is implied.
+ * the same transition share one frame and the originating monotonic
+ * timestamp. Clients process the complete frame to resolve shortcuts and
+ * composition handling before accepting text. No Unicode normalization is
+ * implied.
  */
 struct text_input_event {
 	uint64_t                   sequence;
 	uint64_t                   frame;
+	uint64_t                   timestamp_ns;
 	uint64_t                   source_id;
 	uint64_t                   composition_id;
 	enum text_input_event_type type;

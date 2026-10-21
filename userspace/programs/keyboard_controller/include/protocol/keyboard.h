@@ -77,6 +77,7 @@ enum keyboard_event_flags {
 struct keyboard_event {
 	uint64_t                 sequence;
 	uint64_t                 frame;
+	uint64_t                 timestamp_ns;
 	uint64_t                 keyboard_id;
 	enum keyboard_event_type type;
 	enum keyboard_key_action action;

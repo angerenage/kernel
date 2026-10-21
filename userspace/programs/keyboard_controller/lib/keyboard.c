@@ -195,6 +195,7 @@ syscall_status_t keyboard_read_events(cap_id_t keyboard_cap, uint64_t after_sequ
 		    (i != 0u && response->events[i].sequence != response->events[i - 1u].sequence + 1u) ||
 		    (i != 0u && (response->events[i - 1u].flags & KEYBOARD_EVENT_FLAG_FRAME_END) == 0u &&
 		     (response->events[i].frame != response->events[i - 1u].frame ||
+		      response->events[i].timestamp_ns != response->events[i - 1u].timestamp_ns ||
 		      response->events[i].keyboard_id != response->events[i - 1u].keyboard_id ||
 		      response->events[i].type != KEYBOARD_EVENT_KEY || response->events[i - 1u].type != KEYBOARD_EVENT_KEY)) ||
 		    (i != 0u && (response->events[i - 1u].flags & KEYBOARD_EVENT_FLAG_FRAME_END) != 0u &&

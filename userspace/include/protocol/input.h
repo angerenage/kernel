@@ -228,10 +228,16 @@ enum input_event_flags {
 	INPUT_EVENT_FLAG_FRAME_END = 1u << 0u,
 };
 
-/* One value update or state reset within a coherent input frame. */
+/*
+ * One value update or state reset within a coherent input frame. timestamp_ns
+ * is captured by the producer as close as possible to observing the hardware
+ * event, or is zero when the system clock is unavailable. Every record in a
+ * frame carries the same timestamp.
+ */
 struct input_event {
 	uint64_t              sequence;
 	uint64_t              frame;
+	uint64_t              timestamp_ns;
 	enum input_event_type type;
 	uint32_t              control_id;
 	int64_t               value;

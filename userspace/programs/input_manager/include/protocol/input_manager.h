@@ -52,6 +52,7 @@ enum input_manager_event_flags {
 struct input_manager_event {
 	uint64_t                      sequence;
 	uint64_t                      frame;
+	uint64_t                      timestamp_ns;
 	uint64_t                      source_id;
 	enum input_manager_event_type type;
 	enum input_device_class       device_class;

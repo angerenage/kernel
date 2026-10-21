@@ -28,6 +28,7 @@ struct keyboard_text_state {
 /* One logical action published atomically with the other actions in a frame. */
 struct text_input_action {
 	enum text_input_event_type type;
+	uint64_t                   timestamp_ns;
 	uint64_t                   source_id;
 	uint64_t                   composition_id;
 	const uint8_t*             text;

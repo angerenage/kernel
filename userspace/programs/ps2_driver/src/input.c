@@ -12,6 +12,7 @@
 #include <system/process.h>
 #include <system/signal.h>
 #include <system/thread.h>
+#include <system/time.h>
 
 #define PS2_INPUT_PROTOCOL_VERSION_MAJOR 1u
 #define PS2_INPUT_PROTOCOL_VERSION_MINOR 0u
@@ -255,6 +256,9 @@ static syscall_status_t append_frame(struct ps2_input_state* state, enum input_e
 	    (type == INPUT_EVENT_TYPE_STATE_RESET && (values != NULL || count != 1u)) ||
 	    count > PS2_INPUT_MAXIMUM_FRAME_EVENTS)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
+	uint64_t         timestamp_ns = 0u;
+	syscall_status_t time_status  = monotonic_time_ns(&timestamp_ns);
+	if (time_status != SYSCALL_STATUS_OK && time_status != SYSCALL_STATUS_UNAVAILABLE) return time_status;
 	state_lock(state);
 	if (type == INPUT_EVENT_TYPE_CONTROL) {
 		for (size_t i = 0u; i < count; i++) {
@@ -280,12 +284,13 @@ static syscall_status_t append_frame(struct ps2_input_state* state, enum input_e
 	for (size_t i = 0u; i < count; i++) {
 		size_t index         = event_index(state, state->event_count);
 		state->events[index] = (struct input_event){
-			.sequence   = state->next_sequence++,
-			.frame      = state->next_frame,
-			.type       = type,
-			.control_id = type == INPUT_EVENT_TYPE_CONTROL ? values[i].control_id : 0u,
-			.value      = type == INPUT_EVENT_TYPE_CONTROL ? values[i].value : 0,
-			.flags      = i + 1u == count ? INPUT_EVENT_FLAG_FRAME_END : INPUT_EVENT_FLAG_NONE,
+			.sequence     = state->next_sequence++,
+			.frame        = state->next_frame,
+			.timestamp_ns = timestamp_ns,
+			.type         = type,
+			.control_id   = type == INPUT_EVENT_TYPE_CONTROL ? values[i].control_id : 0u,
+			.value        = type == INPUT_EVENT_TYPE_CONTROL ? values[i].value : 0,
+			.flags        = i + 1u == count ? INPUT_EVENT_FLAG_FRAME_END : INPUT_EVENT_FLAG_NONE,
 		};
 		state->event_count++;
 	}

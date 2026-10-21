@@ -110,6 +110,7 @@ static bool text_boundary(const struct text_input_event* events, size_t first, s
 static bool events_valid(const struct text_input_event* events, size_t count) {
 	bool     action_open  = false;
 	uint64_t frame        = 0u;
+	uint64_t timestamp_ns = 0u;
 	uint64_t source_id    = 0u;
 	uint32_t text_offset  = 0u;
 	size_t   action_start = 0u;
@@ -118,10 +119,11 @@ static bool events_valid(const struct text_input_event* events, size_t count) {
 		if (!event_valid(event) || (i != 0u && event->sequence != events[i - 1u].sequence + 1u)) return false;
 		if (i == 0u || (events[i - 1u].flags & TEXT_INPUT_EVENT_FLAG_FRAME_END) != 0u) {
 			if (action_open || event->text_offset != 0u || (i != 0u && event->frame <= frame)) return false;
-			frame     = event->frame;
-			source_id = event->source_id;
+			frame        = event->frame;
+			timestamp_ns = event->timestamp_ns;
+			source_id    = event->source_id;
 		}
-		else if (event->frame != frame || event->source_id != source_id) {
+		else if (event->frame != frame || event->timestamp_ns != timestamp_ns || event->source_id != source_id) {
 			return false;
 		}
 		if (!action_open) {

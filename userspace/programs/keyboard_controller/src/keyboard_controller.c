@@ -96,6 +96,8 @@ static bool append_frame_locked(struct keyboard_controller* controller, struct k
 	    controller->next_frame == UINT64_MAX || controller->next_sequence == 0u ||
 	    controller->next_sequence > UINT64_MAX - count)
 		return false;
+	for (size_t i = 1u; i < count; i++)
+		if (events[i].timestamp_ns != events[0].timestamp_ns) return false;
 	while (KEYBOARD_CONTROLLER_EVENT_QUEUE_CAPACITY - controller->event_count < count) evict_oldest_frame(controller);
 	uint64_t frame = controller->next_frame++;
 	for (size_t i = 0u; i < count; i++) {
@@ -105,6 +107,12 @@ static bool append_frame_locked(struct keyboard_controller* controller, struct k
 		controller->events[event_index(controller, controller->event_count++)] = events[i];
 	}
 	return true;
+}
+
+static uint64_t timestamp_now(void) {
+	uint64_t timestamp_ns = 0u;
+	(void)monotonic_time_ns(&timestamp_ns);
+	return timestamp_ns;
 }
 
 static struct managed_keyboard* find_keyboard_by_source(struct keyboard_controller* controller, uint64_t source_id) {
@@ -180,12 +188,14 @@ static enum input_key_code most_recent_repeatable_key(const struct managed_keybo
 	return selected;
 }
 
-static struct keyboard_event lifecycle_event(const struct managed_keyboard* keyboard, enum keyboard_event_type type) {
+static struct keyboard_event lifecycle_event(const struct managed_keyboard* keyboard, enum keyboard_event_type type,
+                                             uint64_t timestamp_ns) {
 	return (struct keyboard_event){
-		.keyboard_id = keyboard->id,
-		.type        = type,
-		.modifiers   = type == KEYBOARD_EVENT_REMOVED ? 0u : keyboard->modifiers,
-		.locks       = type == KEYBOARD_EVENT_REMOVED ? 0u : keyboard->locks,
+		.timestamp_ns = timestamp_ns,
+		.keyboard_id  = keyboard->id,
+		.type         = type,
+		.modifiers    = type == KEYBOARD_EVENT_REMOVED ? 0u : keyboard->modifiers,
+		.locks        = type == KEYBOARD_EVENT_REMOVED ? 0u : keyboard->locks,
 	};
 }
 
@@ -204,7 +214,7 @@ static bool remove_keyboard(struct keyboard_controller* controller, struct manag
 		keyboard_controller_unlock(controller);
 		return false;
 	}
-	struct keyboard_event event = lifecycle_event(keyboard, KEYBOARD_EVENT_REMOVED);
+	struct keyboard_event event = lifecycle_event(keyboard, KEYBOARD_EVENT_REMOVED, timestamp_now());
 	*cursor                     = keyboard->next;
 	controller->keyboard_count--;
 	controller->topology_generation++;
@@ -216,8 +226,8 @@ static bool remove_keyboard(struct keyboard_controller* controller, struct manag
 	return success;
 }
 
-static bool reset_keyboard(struct keyboard_controller* controller, struct managed_keyboard* keyboard,
-                           bool clear_locks) {
+static bool reset_keyboard(struct keyboard_controller* controller, struct managed_keyboard* keyboard, bool clear_locks,
+                           uint64_t timestamp_ns) {
 	keyboard_controller_lock(controller);
 	memset(keyboard->pressed, 0, sizeof(keyboard->pressed));
 	memset(keyboard->press_order, 0, sizeof(keyboard->press_order));
@@ -226,7 +236,7 @@ static bool reset_keyboard(struct keyboard_controller* controller, struct manage
 	keyboard->repeat_remaining_ms = 0u;
 	if (clear_locks) keyboard->locks = 0u;
 	keyboard->led_dirty           = true;
-	struct keyboard_event event   = lifecycle_event(keyboard, KEYBOARD_EVENT_RESET);
+	struct keyboard_event event   = lifecycle_event(keyboard, KEYBOARD_EVENT_RESET, timestamp_ns);
 	bool                  success = append_frame_locked(controller, &event, 1u);
 	keyboard_controller_unlock(controller);
 	if (!wake_repeat_thread(controller)) success = false;
@@ -238,9 +248,9 @@ static bool reset_keyboard(struct keyboard_controller* controller, struct manage
 	return success;
 }
 
-static bool reset_all_keyboards(struct keyboard_controller* controller, bool clear_locks) {
+static bool reset_all_keyboards(struct keyboard_controller* controller, bool clear_locks, uint64_t timestamp_ns) {
 	for (struct managed_keyboard* keyboard = controller->keyboards; keyboard != NULL; keyboard = keyboard->next)
-		if (!reset_keyboard(controller, keyboard, clear_locks)) return false;
+		if (!reset_keyboard(controller, keyboard, clear_locks, timestamp_ns)) return false;
 	return true;
 }
 
@@ -506,7 +516,7 @@ static enum attach_result attach_keyboard(struct keyboard_controller*        con
 	controller->keyboards = keyboard;
 	controller->keyboard_count++;
 	controller->topology_generation++;
-	struct keyboard_event event   = lifecycle_event(keyboard, KEYBOARD_EVENT_ADDED);
+	struct keyboard_event event   = lifecycle_event(keyboard, KEYBOARD_EVENT_ADDED, timestamp_now());
 	bool                  success = append_frame_locked(controller, &event, 1u);
 	if (!success) {
 		controller->keyboards = keyboard->next;
@@ -634,10 +644,11 @@ static bool process_key_frame(struct keyboard_controller* controller) {
 		}
 		else keyboard->press_order[key] = 0u;
 		output[output_count++] = (struct keyboard_event){
-			.keyboard_id = keyboard->id,
-			.type        = KEYBOARD_EVENT_KEY,
-			.action      = pressed ? KEYBOARD_KEY_ACTION_PRESSED : KEYBOARD_KEY_ACTION_RELEASED,
-			.key         = key,
+			.timestamp_ns = controller->pending[0].timestamp_ns,
+			.keyboard_id  = keyboard->id,
+			.type         = KEYBOARD_EVENT_KEY,
+			.action       = pressed ? KEYBOARD_KEY_ACTION_PRESSED : KEYBOARD_KEY_ACTION_RELEASED,
+			.key          = key,
 		};
 	}
 	keyboard->modifiers = recompute_modifiers(keyboard);
@@ -674,14 +685,15 @@ static bool handle_manager_event(struct keyboard_controller* controller, const s
 	case INPUT_MANAGER_EVENT_SOURCE_RESET: {
 		if (controller->pending_count != 0u) return false;
 		struct managed_keyboard* keyboard = find_keyboard_by_source(controller, event->source_id);
-		return keyboard == NULL || reset_keyboard(controller, keyboard, false);
+		return keyboard == NULL || reset_keyboard(controller, keyboard, false, event->timestamp_ns);
 	}
 	case INPUT_MANAGER_EVENT_CONTROL:
 		if (controller->pending_count == 0u) {
 			controller->pending_frame  = event->frame;
 			controller->pending_source = event->source_id;
 		}
-		else if (controller->pending_frame != event->frame || controller->pending_source != event->source_id)
+		else if (controller->pending_frame != event->frame || controller->pending_source != event->source_id ||
+		         controller->pending[0].timestamp_ns != event->timestamp_ns)
 			return false;
 		if (controller->pending_count >= KEYBOARD_CONTROLLER_MAXIMUM_FRAME_EVENTS) return false;
 		controller->pending[controller->pending_count++] = *event;
@@ -714,7 +726,7 @@ static bool drain_manager(struct keyboard_controller* controller) {
 			controller->pending_count  = 0u;
 			controller->pending_frame  = 0u;
 			controller->pending_source = 0u;
-			if (!reset_all_keyboards(controller, true)) return false;
+			if (!reset_all_keyboards(controller, true, timestamp_now())) return false;
 		}
 		for (size_t i = 0u; i < page.returned; i++) {
 			if (!handle_manager_event(controller, &events[i])) return false;
@@ -792,12 +804,13 @@ static void repeat_thread(void* opaque) {
 			                                    ? KEYBOARD_CONTROLLER_REPEAT_INTERVAL_MS - remainder
 			                                    : 1u;
 			struct keyboard_event event   = {
-				.keyboard_id = keyboard->id,
-				.type        = KEYBOARD_EVENT_KEY,
-				.action      = KEYBOARD_KEY_ACTION_REPEATED,
-				.key         = keyboard->repeat_key,
-				.modifiers   = keyboard->modifiers,
-				.locks       = keyboard->locks,
+				.timestamp_ns = timestamp_now(),
+				.keyboard_id  = keyboard->id,
+				.type         = KEYBOARD_EVENT_KEY,
+				.action       = KEYBOARD_KEY_ACTION_REPEATED,
+				.key          = keyboard->repeat_key,
+				.modifiers    = keyboard->modifiers,
+				.locks        = keyboard->locks,
 			};
 			if (!append_frame_locked(controller, &event, 1u)) {
 				success = false;

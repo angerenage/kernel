@@ -265,6 +265,7 @@ syscall_status_t input_manager_read_events(cap_id_t manager_cap, uint64_t after_
 		    (i != 0u && event->sequence != response->events[i - 1u].sequence + 1u) ||
 		    (i != 0u && (response->events[i - 1u].flags & INPUT_MANAGER_EVENT_FLAG_FRAME_END) == 0u &&
 		     (event->frame != response->events[i - 1u].frame ||
+		      event->timestamp_ns != response->events[i - 1u].timestamp_ns ||
 		      event->source_id != response->events[i - 1u].source_id || event->type != INPUT_MANAGER_EVENT_CONTROL ||
 		      response->events[i - 1u].type != INPUT_MANAGER_EVENT_CONTROL)) ||
 		    (i != 0u && (response->events[i - 1u].flags & INPUT_MANAGER_EVENT_FLAG_FRAME_END) != 0u &&

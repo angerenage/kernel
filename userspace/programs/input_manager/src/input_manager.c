@@ -10,6 +10,7 @@
 #include <system/process.h>
 #include <system/signal.h>
 #include <system/thread.h>
+#include <system/time.h>
 
 #define INPUT_PROTOCOL_VERSION_MAJOR 1u
 #define INPUT_PROTOCOL_VERSION_MINOR 0u
@@ -97,22 +98,20 @@ static bool append_frame_locked(struct input_manager* manager, struct input_mana
 	return true;
 }
 
+static uint64_t timestamp_now(void) {
+	uint64_t timestamp_ns = 0u;
+	(void)monotonic_time_ns(&timestamp_ns);
+	return timestamp_ns;
+}
+
 static struct input_manager_event lifecycle_event(const struct managed_input_source* source,
-                                                  enum input_manager_event_type      type) {
+                                                  enum input_manager_event_type type, uint64_t timestamp_ns) {
 	return (struct input_manager_event){
+		.timestamp_ns = timestamp_ns,
 		.source_id    = source->id,
 		.type         = type,
 		.device_class = source->device_class,
 	};
-}
-
-static bool append_lifecycle_frame(struct input_manager* manager, const struct managed_input_source* source,
-                                   enum input_manager_event_type type) {
-	struct input_manager_event event = lifecycle_event(source, type);
-	input_manager_lock(manager);
-	bool success = append_frame_locked(manager, &event, 1u);
-	input_manager_unlock(manager);
-	return success && notify_consumers(manager);
 }
 
 static bool descriptor_valid(const struct input_control_descriptor* descriptor) {
@@ -287,7 +286,7 @@ static bool install_source(struct input_manager* manager, struct managed_input_s
 	manager->sources          = source;
 	manager->source_count++;
 	manager->topology_generation++;
-	event   = lifecycle_event(source, INPUT_MANAGER_EVENT_SOURCE_ADDED);
+	event   = lifecycle_event(source, INPUT_MANAGER_EVENT_SOURCE_ADDED, timestamp_now());
 	success = append_frame_locked(manager, &event, 1u);
 	if (!success) {
 		manager->sources = source->next;
@@ -311,7 +310,7 @@ static bool install_source(struct input_manager* manager, struct managed_input_s
 static bool deactivate_source(struct input_manager* manager, struct managed_input_source* source, bool quarantine) {
 	bool success = true;
 	if (source->active) {
-		struct input_manager_event event = lifecycle_event(source, INPUT_MANAGER_EVENT_SOURCE_REMOVED);
+		struct input_manager_event event = lifecycle_event(source, INPUT_MANAGER_EVENT_SOURCE_REMOVED, timestamp_now());
 		input_manager_lock(manager);
 		if (manager->topology_generation == UINT64_MAX || manager->source_count == 0u) {
 			success = false;
@@ -615,8 +614,13 @@ enum drain_result {
 	DRAIN_RESULT_MANAGER_FAILED,
 };
 
-static enum drain_result append_source_reset(struct input_manager* manager, const struct managed_input_source* source) {
-	if (!append_lifecycle_frame(manager, source, INPUT_MANAGER_EVENT_SOURCE_RESET)) return DRAIN_RESULT_MANAGER_FAILED;
+static enum drain_result append_source_reset(struct input_manager* manager, const struct managed_input_source* source,
+                                             uint64_t timestamp_ns) {
+	struct input_manager_event event = lifecycle_event(source, INPUT_MANAGER_EVENT_SOURCE_RESET, timestamp_ns);
+	input_manager_lock(manager);
+	bool success = append_frame_locked(manager, &event, 1u);
+	input_manager_unlock(manager);
+	if (!success || !notify_consumers(manager)) return DRAIN_RESULT_MANAGER_FAILED;
 	printf("input manager: source %llu state reset\n", (unsigned long long)source->id);
 	return DRAIN_RESULT_OK;
 }
@@ -647,19 +651,21 @@ static enum drain_result drain_source(struct input_manager* manager, struct mana
 			source->pending_count    = 0u;
 			source->pending_frame    = 0u;
 			source->last_frame       = 0u;
-			enum drain_result result = append_source_reset(manager, source);
+			enum drain_result result = append_source_reset(manager, source, timestamp_now());
 			if (result != DRAIN_RESULT_OK) return result;
 		}
 		for (size_t i = 0u; i < page.returned; i++) {
 			const struct input_event* event = &events[i];
 			if (i != 0u && event->sequence != source->cursor + 1u) return DRAIN_RESULT_PROVIDER_FAILED;
+			if (event->timestamp_ns < source->last_timestamp_ns) return DRAIN_RESULT_PROVIDER_FAILED;
 			source->cursor = event->sequence;
 			if (event->type == INPUT_EVENT_TYPE_STATE_RESET) {
 				if (source->pending_count != 0u || (event->flags & INPUT_EVENT_FLAG_FRAME_END) == 0u ||
 				    event->frame == source->last_frame)
 					return DRAIN_RESULT_PROVIDER_FAILED;
-				source->last_frame       = event->frame;
-				enum drain_result result = append_source_reset(manager, source);
+				source->last_frame        = event->frame;
+				source->last_timestamp_ns = event->timestamp_ns;
+				enum drain_result result  = append_source_reset(manager, source, event->timestamp_ns);
 				if (result != DRAIN_RESULT_OK) return result;
 				continue;
 			}
@@ -671,8 +677,10 @@ static enum drain_result drain_source(struct input_manager* manager, struct mana
 				if (event->frame == source->last_frame) return DRAIN_RESULT_PROVIDER_FAILED;
 				source->pending_frame = event->frame;
 			}
-			else if (source->pending_frame != event->frame) return DRAIN_RESULT_PROVIDER_FAILED;
+			else if (source->pending_frame != event->frame || source->pending[0].timestamp_ns != event->timestamp_ns)
+				return DRAIN_RESULT_PROVIDER_FAILED;
 			source->pending[source->pending_count++] = (struct input_manager_event){
+				.timestamp_ns    = event->timestamp_ns,
 				.source_id       = source->id,
 				.type            = INPUT_MANAGER_EVENT_CONTROL,
 				.device_class    = source->device_class,
@@ -685,8 +693,9 @@ static enum drain_result drain_source(struct input_manager* manager, struct mana
 				.logical_maximum = descriptor->logical_maximum,
 			};
 			if ((event->flags & INPUT_EVENT_FLAG_FRAME_END) != 0u) {
-				source->last_frame       = event->frame;
-				enum drain_result result = append_source_controls(manager, source);
+				source->last_frame        = event->frame;
+				source->last_timestamp_ns = event->timestamp_ns;
+				enum drain_result result  = append_source_controls(manager, source);
 				if (result != DRAIN_RESULT_OK) return result;
 			}
 		}

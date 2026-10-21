@@ -50,6 +50,12 @@ void text_input_unlock(struct text_input* input) {
 	__atomic_clear(&input->locked, __ATOMIC_RELEASE);
 }
 
+static uint64_t timestamp_now(void) {
+	uint64_t timestamp_ns = 0u;
+	(void)monotonic_time_ns(&timestamp_ns);
+	return timestamp_ns;
+}
+
 static size_t event_index(const struct text_input* input, size_t offset) {
 	return (input->event_tail + offset) % TEXT_INPUT_EVENT_QUEUE_CAPACITY;
 }
@@ -292,6 +298,7 @@ static bool translate_key(struct text_input* input, const struct keyboard_event*
 	struct text_input_action actions[3] = {0};
 	actions[0]                          = (struct text_input_action){
 		.type          = TEXT_INPUT_EVENT_KEY,
+		.timestamp_ns  = event->timestamp_ns,
 		.source_id     = keyboard->source_id,
 		.text          = key == TEXT_INPUT_KEY_TEXT ? (const uint8_t*)shortcut_text : NULL,
 		.text_size     = key == TEXT_INPUT_KEY_TEXT ? strlen(shortcut_text) : 0u,
@@ -303,6 +310,7 @@ static bool translate_key(struct text_input* input, const struct keyboard_event*
 	    (event->key == INPUT_KEY_ESCAPE || event->key == INPUT_KEY_BACKSPACE)) {
 		actions[1] = (struct text_input_action){
 			.type           = TEXT_INPUT_EVENT_PREEDIT,
+			.timestamp_ns   = event->timestamp_ns,
 			.source_id      = keyboard->source_id,
 			.composition_id = keyboard->composition_id,
 		};
@@ -333,6 +341,7 @@ static bool translate_key(struct text_input* input, const struct keyboard_event*
 		}
 		actions[1] = (struct text_input_action){
 			.type            = TEXT_INPUT_EVENT_PREEDIT,
+			.timestamp_ns    = event->timestamp_ns,
 			.source_id       = keyboard->source_id,
 			.composition_id  = keyboard->composition_id,
 			.text            = next_context,
@@ -353,12 +362,14 @@ static bool translate_key(struct text_input* input, const struct keyboard_event*
 	if (keyboard->composition_id != 0u) {
 		actions[action_count++] = (struct text_input_action){
 			.type           = TEXT_INPUT_EVENT_PREEDIT,
+			.timestamp_ns   = event->timestamp_ns,
 			.source_id      = keyboard->source_id,
 			.composition_id = keyboard->composition_id,
 		};
 	}
 	actions[action_count++] = (struct text_input_action){
 		.type           = TEXT_INPUT_EVENT_COMMIT,
+		.timestamp_ns   = event->timestamp_ns,
 		.source_id      = keyboard->source_id,
 		.composition_id = keyboard->composition_id,
 		.text           = committed,
@@ -373,10 +384,11 @@ static bool translate_key(struct text_input* input, const struct keyboard_event*
 	return success;
 }
 
-static bool publish_reset(struct text_input* input, uint64_t source_id) {
+static bool publish_reset(struct text_input* input, uint64_t source_id, uint64_t timestamp_ns) {
 	const struct text_input_action action = {
-		.type      = TEXT_INPUT_EVENT_RESET,
-		.source_id = source_id,
+		.type         = TEXT_INPUT_EVENT_RESET,
+		.timestamp_ns = timestamp_ns,
+		.source_id    = source_id,
 	};
 	return text_input_publish_actions(input, &action, 1u);
 }
@@ -389,7 +401,7 @@ static bool handle_event(struct text_input* input, const struct keyboard_event* 
 		return advertise(input);
 	case KEYBOARD_EVENT_REMOVED: {
 		struct keyboard_text_state* keyboard = find_keyboard(input, event->keyboard_id);
-		if (keyboard != NULL && !publish_reset(input, keyboard->source_id)) return false;
+		if (keyboard != NULL && !publish_reset(input, keyboard->source_id, event->timestamp_ns)) return false;
 		remove_keyboard(input, event->keyboard_id);
 		printf("text input: removed keyboard %llu\n", (unsigned long long)event->keyboard_id);
 		return true;
@@ -397,7 +409,7 @@ static bool handle_event(struct text_input* input, const struct keyboard_event* 
 	case KEYBOARD_EVENT_RESET: {
 		struct keyboard_text_state* keyboard = ensure_keyboard(input, event->keyboard_id);
 		if (keyboard == NULL) return false;
-		if (!publish_reset(input, keyboard->source_id)) return false;
+		if (!publish_reset(input, keyboard->source_id, event->timestamp_ns)) return false;
 		keyboard->composition_id = 0u;
 		keyboard->context_size   = 0u;
 		printf("text input: reset keyboard %llu\n", (unsigned long long)event->keyboard_id);
@@ -421,8 +433,9 @@ static enum drain_result drain_events(struct text_input* input) {
 		if (status == SYSCALL_STATUS_UNAVAILABLE) return DRAIN_RESULT_IDLE;
 		if (status != SYSCALL_STATUS_OK) return DRAIN_RESULT_RECONNECT;
 		if ((page.flags & KEYBOARD_READ_EVENT_FLAG_GAP) != 0u) {
+			uint64_t timestamp_ns = timestamp_now();
 			for (struct keyboard_text_state* keyboard = input->keyboards; keyboard != NULL; keyboard = keyboard->next)
-				if (!publish_reset(input, keyboard->source_id)) return DRAIN_RESULT_FAILED;
+				if (!publish_reset(input, keyboard->source_id, timestamp_ns)) return DRAIN_RESULT_FAILED;
 			clear_keyboards(input);
 			printf("text input: keyboard history gap; discarded composition state\n");
 		}
@@ -474,9 +487,10 @@ static enum service_result consume_service(struct text_input* input) {
 }
 
 static bool disconnect(struct text_input* input) {
-	bool success = true;
+	bool     success      = true;
+	uint64_t timestamp_ns = timestamp_now();
 	for (struct keyboard_text_state* keyboard = input->keyboards; keyboard != NULL; keyboard = keyboard->next)
-		if (!publish_reset(input, keyboard->source_id)) success = false;
+		if (!publish_reset(input, keyboard->source_id, timestamp_ns)) success = false;
 	if (input->keyboard_signal_cap != CAP_ID_INVALID) (void)cap_drop(input->keyboard_signal_cap);
 	if (input->keyboard_cap != CAP_ID_INVALID) (void)cap_drop(input->keyboard_cap);
 	input->keyboard_signal_cap = CAP_ID_INVALID;
@@ -583,7 +597,9 @@ bool text_input_publish_actions(struct text_input* input, const struct text_inpu
 	if (input == NULL || actions == NULL || action_count == 0u) return false;
 	size_t event_count = 0u;
 	for (size_t i = 0u; i < action_count; i++) {
-		if (!action_valid(&actions[i]) || (i != 0u && actions[i].source_id != actions[0].source_id)) return false;
+		if (!action_valid(&actions[i]) || (i != 0u && (actions[i].source_id != actions[0].source_id ||
+		                                               actions[i].timestamp_ns != actions[0].timestamp_ns)))
+			return false;
 		size_t offset = 0u;
 		do {
 			const uint8_t* chunk_text = actions[i].text_size == 0u ? NULL : actions[i].text + offset;
@@ -603,6 +619,7 @@ bool text_input_publish_actions(struct text_input* input, const struct text_inpu
 			const uint8_t* chunk_text = actions[i].text_size == 0u ? NULL : actions[i].text + offset;
 			size_t         chunk      = utf8_chunk_size(chunk_text, actions[i].text_size - offset);
 			events[index]             = (struct text_input_event){
+				.timestamp_ns    = actions[i].timestamp_ns,
 				.source_id       = actions[i].source_id,
 				.composition_id  = actions[i].composition_id,
 				.type            = actions[i].type,
