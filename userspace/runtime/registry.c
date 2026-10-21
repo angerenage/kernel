@@ -111,6 +111,27 @@ struct registry_call_result registry_acquire(const struct registry_protocol_quer
 	return result;
 }
 
+struct registry_call_result registry_grant(process_id_t target, const struct registry_protocol_query* query,
+                                           const char* service, cap_rights_t rights, cap_id_t* out_capability) {
+	struct registry_grant_request  request = {.header = {.op = REGISTRY_OP_GRANT}};
+	struct registry_grant_response response;
+	struct registry_call_result    result;
+
+	if (target == PROCESS_PID_INVALID || query == NULL || service == NULL || rights == 0u || out_capability == NULL)
+		return local_error(REGISTRY_STATUS_INVALID_ARGUMENT, SYSCALL_STATUS_BAD_ARGUMENT);
+	*out_capability = CAP_ID_INVALID;
+	if (strlcpy(request.service, service, sizeof(request.service)) >= sizeof(request.service))
+		return local_error(REGISTRY_STATUS_INVALID_ARGUMENT, SYSCALL_STATUS_BAD_ARGUMENT);
+	request.query  = *query;
+	request.target = target;
+	request.rights = rights;
+	result         = call_fixed(&request, sizeof(request), &response, sizeof(response));
+	if (result.status != REGISTRY_STATUS_OK) return result;
+	result.status = response.status;
+	if (response.status == REGISTRY_STATUS_OK) *out_capability = response.capability;
+	return result;
+}
+
 struct registry_call_result registry_enumerate(const struct registry_protocol_query* query, uint64_t offset,
                                                uint64_t size, struct registry_service_info* entries,
                                                uint64_t* out_returned, uint64_t* out_total) {

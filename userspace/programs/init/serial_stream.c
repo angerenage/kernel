@@ -129,6 +129,10 @@ syscall_status_t serial_stream_create(cap_id_t serial_cap, cap_id_t* out_stream_
 	return status;
 }
 
+void serial_stream_enable(void) {
+	__atomic_store_n(&serial_stream_enabled, true, __ATOMIC_RELEASE);
+}
+
 void serial_stream_disable(void) {
 	__atomic_store_n(&serial_stream_enabled, false, __ATOMIC_RELEASE);
 }

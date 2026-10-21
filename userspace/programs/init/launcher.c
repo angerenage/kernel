@@ -118,7 +118,6 @@ cleanup:
 static syscall_status_t install_input_stream(process_id_t target, enum bootstrap_input_source source,
                                              cap_id_t* out_capability) {
 	struct registry_protocol_query query = {0};
-	enum registry_status           registry_status;
 	const char*                    service;
 	cap_rights_t                   rights;
 
@@ -141,24 +140,17 @@ static syscall_status_t install_input_stream(process_id_t target, enum bootstrap
 		rights      = TTY_SESSION_CONTROL_RIGHTS;
 	}
 	else return SYSCALL_STATUS_BAD_ARGUMENT;
-	*out_capability                       = CAP_ID_INVALID;
-	struct registry_service_handle handle = {.capability = CAP_ID_INVALID};
-	struct registry_call_result    result = registry_acquire(&query, service, &handle);
-	registry_status                       = result.status;
-	if (registry_status == REGISTRY_STATUS_OK) {
-		syscall_status_t status = cap_delegate(handle.capability, target, rights, out_capability);
-		if (cap_drop(handle.capability) != SYSCALL_STATUS_OK && status == SYSCALL_STATUS_OK)
-			status = SYSCALL_STATUS_FAILED;
-		return status;
-	}
-	return registry_status == REGISTRY_STATUS_NOT_FOUND ? SYSCALL_STATUS_UNAVAILABLE : SYSCALL_STATUS_FAILED;
+	*out_capability                    = CAP_ID_INVALID;
+	struct registry_call_result result = registry_grant(target, &query, service, rights, out_capability);
+	if (result.status == REGISTRY_STATUS_OK) return SYSCALL_STATUS_OK;
+	return result.status == REGISTRY_STATUS_NOT_FOUND ? SYSCALL_STATUS_UNAVAILABLE : SYSCALL_STATUS_FAILED;
 }
 
 static bool bootstrap_launch_internal(const struct init_state* init, const char* module_name, const char* description,
                                       size_t argc, const char* const argv[], size_t capability_count,
                                       const struct program_capability_argument capabilities[],
                                       enum bootstrap_input_source input_source, bool delegatable_output,
-                                      process_id_t* out_pid) {
+                                      process_id_t* out_pid, cap_id_t* out_process_cap) {
 	struct module_provider_resolve_response module = {.cap = CAP_ID_INVALID};
 	struct loader_load_response             loaded;
 	struct process_info_response            process_info;
@@ -180,7 +172,8 @@ static bool bootstrap_launch_internal(const struct init_state* init, const char*
 
 	if (init == NULL || module_name == NULL || module_name[0] == '\0' || description == NULL ||
 	    (argc != 0u && argv == NULL) || argc > UINT32_MAX || (capability_count != 0u && capabilities == NULL) ||
-	    capability_count > UINT32_MAX - PROCESS_STARTUP_CAP_COUNT)
+	    capability_count > UINT32_MAX - PROCESS_STARTUP_CAP_COUNT ||
+	    (out_process_cap != NULL && *out_process_cap != CAP_ID_INVALID))
 		return false;
 	for (size_t i = 0u; i < argc; i++) {
 		if (argv[i] == NULL) return false;
@@ -307,14 +300,19 @@ static bool bootstrap_launch_internal(const struct init_state* init, const char*
 		goto fail;
 	}
 	if (!drop_owned_capability(&thread_cap, "bootstrap thread")) goto fail;
-	status = process_detach(loaded.process_cap);
-	if (status != SYSCALL_STATUS_OK) {
-		printf("init: %s process detach failed: %u\n", description, (unsigned)status);
-		goto fail;
-	}
 	if (out_pid != NULL) *out_pid = process_info.pid;
-
-	(void)drop_owned_capability(&loaded.process_cap, "bootstrap process");
+	if (out_process_cap != NULL) {
+		*out_process_cap   = loaded.process_cap;
+		loaded.process_cap = CAP_ID_INVALID;
+	}
+	else {
+		status = process_detach(loaded.process_cap);
+		if (status != SYSCALL_STATUS_OK) {
+			printf("init: %s process detach failed: %u\n", description, (unsigned)status);
+			goto fail;
+		}
+		(void)drop_owned_capability(&loaded.process_cap, "bootstrap process");
+	}
 	return true;
 
 fail:
@@ -341,8 +339,17 @@ bool bootstrap_launch_registry(struct init_state* init) {
 	status = signal_create(&ready_cap);
 	if (status != SYSCALL_STATUS_OK) return false;
 	capability = (struct program_capability_argument){.capability = ready_cap, .rights = CAP_SIGNAL};
-	launched   = bootstrap_launch_internal(
-		init, "registry.elf", "registry", 1u, arguments, 1u, &capability, BOOTSTRAP_INPUT_NONE, false, &registry_pid);
+	launched   = bootstrap_launch_internal(init,
+	                                       "registry.elf",
+	                                       "registry",
+	                                       1u,
+	                                       arguments,
+	                                       1u,
+	                                       &capability,
+	                                       BOOTSTRAP_INPUT_NONE,
+	                                       false,
+	                                       &registry_pid,
+	                                       NULL);
 	if (!launched) {
 		(void)signal_destroy(ready_cap);
 		return false;
@@ -358,14 +365,24 @@ bool bootstrap_launch_registry(struct init_state* init) {
 
 bool bootstrap_launch(const struct init_state* init, const char* module_name, const char* description, size_t argc,
                       const char* const argv[], size_t capability_count,
-                      const struct program_capability_argument capabilities[]) {
-	return bootstrap_launch_internal(
-		init, module_name, description, argc, argv, capability_count, capabilities, BOOTSTRAP_INPUT_NONE, false, NULL);
+                      const struct program_capability_argument capabilities[], cap_id_t* out_process_cap) {
+	return bootstrap_launch_internal(init,
+	                                 module_name,
+	                                 description,
+	                                 argc,
+	                                 argv,
+	                                 capability_count,
+	                                 capabilities,
+	                                 BOOTSTRAP_INPUT_NONE,
+	                                 false,
+	                                 NULL,
+	                                 out_process_cap);
 }
 
 bool bootstrap_launch_terminal_session(const struct init_state* init, const char* module_name, const char* description,
                                        size_t argc, const char* const argv[], size_t capability_count,
-                                       const struct program_capability_argument capabilities[]) {
+                                       const struct program_capability_argument capabilities[],
+                                       cap_id_t*                                out_process_cap) {
 	return bootstrap_launch_internal(init,
 	                                 module_name,
 	                                 description,
@@ -375,12 +392,13 @@ bool bootstrap_launch_terminal_session(const struct init_state* init, const char
 	                                 capabilities,
 	                                 BOOTSTRAP_INPUT_TERMINAL,
 	                                 false,
-	                                 NULL);
+	                                 NULL,
+	                                 out_process_cap);
 }
 
 bool bootstrap_launch_interactive(const struct init_state* init, const char* module_name, const char* description,
                                   size_t argc, const char* const argv[], size_t capability_count,
-                                  const struct program_capability_argument capabilities[]) {
+                                  const struct program_capability_argument capabilities[], cap_id_t* out_process_cap) {
 	return bootstrap_launch_internal(init,
 	                                 module_name,
 	                                 description,
@@ -390,5 +408,6 @@ bool bootstrap_launch_interactive(const struct init_state* init, const char* mod
 	                                 capabilities,
 	                                 BOOTSTRAP_INPUT_TTY_SESSION,
 	                                 true,
-	                                 NULL);
+	                                 NULL,
+	                                 out_process_cap);
 }

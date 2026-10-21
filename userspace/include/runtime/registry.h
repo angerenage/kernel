@@ -21,6 +21,7 @@ enum registry_op {
 	REGISTRY_OP_ADVERTISE,
 	REGISTRY_OP_WITHDRAW,
 	REGISTRY_OP_ACQUIRE,
+	REGISTRY_OP_GRANT,
 	REGISTRY_OP_ENUMERATE,
 	REGISTRY_OP_BROWSE,
 	REGISTRY_OP_WATCH,
@@ -123,6 +124,19 @@ struct registry_acquire_response {
 	struct registry_service_handle handle;
 };
 
+struct registry_grant_request {
+	struct registry_request_header header;
+	struct registry_protocol_query query;
+	process_id_t                   target;
+	cap_rights_t                   rights;
+	char                           service[REGISTRY_NAME_MAX + 1u];
+};
+
+struct registry_grant_response {
+	enum registry_status status;
+	cap_id_t             capability;
+};
+
 struct registry_enumerate_request {
 	struct registry_request_header header;
 	struct registry_protocol_query query;
@@ -183,6 +197,10 @@ struct registry_call_result registry_withdraw(const struct registry_service_sele
 /* Acquire one named service compatible with the requested protocol revision. */
 struct registry_call_result registry_acquire(const struct registry_protocol_query* query, const char* service,
                                              struct registry_service_handle* out_handle);
+
+/* Grant one named service directly to a process. This operation is restricted to init. */
+struct registry_call_result registry_grant(process_id_t target, const struct registry_protocol_query* query,
+                                           const char* service, cap_rights_t rights, cap_id_t* out_capability);
 
 /* Fetch one offset/size page of compatible service metadata. */
 struct registry_call_result registry_enumerate(const struct registry_protocol_query* query, uint64_t offset,

@@ -125,7 +125,7 @@ static syscall_status_t device_manager_optional_resource(const struct init_state
 	return status == SYSCALL_STATUS_UNAVAILABLE ? SYSCALL_STATUS_OK : status;
 }
 
-enum device_manager_launch_result device_manager_launch(const struct init_state* init) {
+enum device_manager_launch_result device_manager_launch(const struct init_state* init, cap_id_t* out_process_cap) {
 	static const struct registry_protocol_query loader_query = {
 		.namespace_path = PROGRAM_LOADER_NAMESPACE,
 		.protocol       = LOADER_PROTOCOL_NAME,
@@ -159,7 +159,8 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 	bool                      temporary_caps_released = true;
 	bool                      output_cap_owned        = false;
 
-	if (init == NULL) return DEVICE_MANAGER_LAUNCH_FAILED;
+	if (init == NULL || out_process_cap == NULL || *out_process_cap != CAP_ID_INVALID)
+		return DEVICE_MANAGER_LAUNCH_FAILED;
 	registry_status = registry_acquire(&loader_query, DEVICE_MANAGER_LOADER_SERVICE, &loader).status;
 	if (registry_status == REGISTRY_STATUS_NOT_FOUND) return DEVICE_MANAGER_LAUNCH_UNAVAILABLE;
 	if (registry_status != REGISTRY_STATUS_OK) {
@@ -276,12 +277,12 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 		(void)program_cancel(loaded.load_cap);
 		return DEVICE_MANAGER_LAUNCH_FAILED;
 	}
-	status = process_detach(running.process_cap);
-	if (status != SYSCALL_STATUS_OK) {
-		printf("init: device manager detach failed: %u\n", (unsigned)status);
-	}
 	if (!device_manager_drop_capability(&running.thread_cap, "thread")) temporary_caps_released = false;
-	if (!device_manager_drop_capability(&running.process_cap, "process")) temporary_caps_released = false;
-	return status == SYSCALL_STATUS_OK && temporary_caps_released ? DEVICE_MANAGER_LAUNCH_SUCCESS
-	                                                              : DEVICE_MANAGER_LAUNCH_FAILED;
+	if (!temporary_caps_released) {
+		(void)process_kill(running.process_cap, PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
+		(void)process_wait(running.process_cap, NULL);
+		return DEVICE_MANAGER_LAUNCH_FAILED;
+	}
+	*out_process_cap = running.process_cap;
+	return DEVICE_MANAGER_LAUNCH_SUCCESS;
 }

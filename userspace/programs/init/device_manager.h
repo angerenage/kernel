@@ -9,4 +9,4 @@ enum device_manager_launch_result {
 };
 
 /* Load and start the device manager through the userspace loader. */
-enum device_manager_launch_result device_manager_launch(const struct init_state* init);
+enum device_manager_launch_result device_manager_launch(const struct init_state* init, cap_id_t* out_process_cap);

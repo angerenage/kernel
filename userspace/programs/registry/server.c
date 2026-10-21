@@ -13,6 +13,7 @@
 
 static channel_id_t registry_endpoint = CHANNEL_ID_INVALID;
 static process_id_t registry_pid      = PROCESS_PID_INVALID;
+static process_id_t init_pid          = PROCESS_PID_INVALID;
 
 static bool reply_request(cap_call_id_t call_id, const void* response, size_t response_size,
                           syscall_status_t response_status) {
@@ -63,6 +64,21 @@ static bool dispatch_request(const struct cap_request* request, const void* data
 		replied         = reply_request(request->call_id, &response, sizeof(response), SYSCALL_STATUS_OK);
 		if (!replied && response.status == REGISTRY_STATUS_OK && response.handle.capability != CAP_ID_INVALID)
 			(void)cap_revoke(response.handle.capability, 0u);
+		return replied;
+	}
+	case REGISTRY_OP_GRANT: {
+		const struct registry_grant_request* grant    = data;
+		struct registry_grant_response       response = {0};
+		bool                                 replied;
+		if (request->request_size != sizeof(*grant) || request->response_capacity < sizeof(response))
+			return reply_request(request->call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+		if (request->caller != init_pid) response.status = REGISTRY_STATUS_DENIED;
+		else
+			response.status =
+				registry_state_grant(grant->target, &grant->query, grant->service, grant->rights, &response.capability);
+		replied = reply_request(request->call_id, &response, sizeof(response), SYSCALL_STATUS_OK);
+		if (!replied && response.status == REGISTRY_STATUS_OK && response.capability != CAP_ID_INVALID)
+			(void)cap_revoke(response.capability, 0u);
 		return replied;
 	}
 	case REGISTRY_OP_ENUMERATE: {
@@ -143,12 +159,13 @@ static bool dispatch_request(const struct cap_request* request, const void* data
 	}
 }
 
-int registry_server_run(process_id_t init_pid, cap_id_t ready_cap) {
+int registry_server_run(process_id_t expected_init_pid, cap_id_t ready_cap) {
 	union {
 		struct registry_request_header    header;
 		struct registry_advertise_request advertise;
 		struct registry_withdraw_request  withdraw;
 		struct registry_acquire_request   acquire;
+		struct registry_grant_request     grant;
 		struct registry_enumerate_request enumerate;
 		struct registry_browse_request    browse;
 		struct registry_watch_request     watch;
@@ -165,11 +182,12 @@ int registry_server_run(process_id_t init_pid, cap_id_t ready_cap) {
 	status = process_self_info(&self);
 	if (status != SYSCALL_STATUS_OK || self.pid == PROCESS_PID_INVALID) return 1;
 	registry_pid = self.pid;
+	init_pid     = expected_init_pid;
 	status       = channel_create(&registry_endpoint, &activity);
 	if (status == SYSCALL_STATUS_OK)
 		status = cap_publish(registry_endpoint,
 		                     REGISTRY_SERVICE_OBJECT_ID,
-		                     init_pid,
+		                     expected_init_pid,
 		                     CAP_CALL | CAP_DELEGATE | CAP_DELEGATE_PEER,
 		                     &registry_cap);
 	if (status == SYSCALL_STATUS_OK)
