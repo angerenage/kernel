@@ -313,6 +313,13 @@ bool shell_execute_line(struct shell* shell, const char* line, size_t size) {
 	if (strcmp(argv[0], "cd") == 0) success = execute_change_directory(shell, argc - 1u, argv + 1u);
 	else if (strcmp(argv[0], "pwd") == 0) success = execute_print_directory(shell, argc - 1u, argv + 1u);
 	else if (strcmp(argv[0], "echo") == 0) success = execute_echo(argc - 1u, argv + 1u);
+	else if (strcmp(argv[0], "exit") == 0) {
+		if (argc != 1u) success = write_error("exit", "expected no arguments");
+		else {
+			shell->exit_requested = true;
+			success               = true;
+		}
+	}
 	else if (strcmp(argv[0], "clear") == 0) {
 		if (argc != 1u) success = write_error("clear", "expected no arguments");
 		else success = printf("\x1b[2J\x1b[3J\x1b[H") >= 0;

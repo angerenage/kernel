@@ -28,6 +28,7 @@ struct shell {
 	size_t                     current_directory_size;
 	size_t                     terminal_columns;
 	size_t                     terminal_rows;
+	bool                       exit_requested;
 	struct shell_history_entry history[SHELL_HISTORY_CAPACITY];
 	size_t                     history_count;
 };
