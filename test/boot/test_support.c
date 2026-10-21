@@ -23,6 +23,7 @@ volatile struct limine_dtb_request                dtb_req;
 volatile struct limine_executable_cmdline_request cmdline_req;
 volatile struct limine_executable_address_request exec_addr_req;
 volatile struct limine_module_request             module_req;
+volatile struct limine_tsc_frequency_request      tsc_frequency_req;
 
 static bool     protocol_supported;
 static uint64_t boot_arch_id = 0x2au;
@@ -79,6 +80,7 @@ void boot_test_reset(void) {
 	memset((void*)&cmdline_req, 0, sizeof(cmdline_req));
 	memset((void*)&exec_addr_req, 0, sizeof(exec_addr_req));
 	memset((void*)&module_req, 0, sizeof(module_req));
+	memset((void*)&tsc_frequency_req, 0, sizeof(tsc_frequency_req));
 
 	protocol_supported = false;
 	boot_arch_id       = 0x2au;

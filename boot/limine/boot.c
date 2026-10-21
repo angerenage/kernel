@@ -250,6 +250,13 @@ bool limine_boot_init(void) {
 		limine_info.dtb_address = (uintptr_t)dtb_req.response->dtb_ptr;
 	}
 
+	limine_info.monotonic_counter_frequency_hz = 0u;
+#if defined(PLATFORM_PC_X86_64)
+	if (tsc_frequency_req.response != NULL) {
+		limine_info.monotonic_counter_frequency_hz = tsc_frequency_req.response->frequency;
+	}
+#endif
+
 	for (size_t i = 0; i < KERNEL_BOOT_MAX_CPUS; i++) {
 		boot_cpu_private[i] = NULL;
 		boot_cpu_launch[i]  = (struct boot_cpu_launch){0};

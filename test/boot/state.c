@@ -16,10 +16,12 @@ Test(boot_state, failed_initialization_does_not_publish_partial_boot_state) {
 }
 
 Test(boot_state, successful_initialization_publishes_a_coherent_snapshot) {
-	struct boot_address_space address_space = {0};
-	const struct boot_info*   info;
+	struct boot_address_space                   address_space = {0};
+	const struct boot_info*                     info;
+	static struct limine_tsc_frequency_response tsc_response = {.frequency = 2400000000u};
 
 	boot_test_configure_valid_base();
+	tsc_frequency_req.response = &tsc_response;
 	cr_assert(boot_init());
 	info = boot_info_get();
 	cr_assert_not_null(info);
@@ -29,6 +31,7 @@ Test(boot_state, successful_initialization_publishes_a_coherent_snapshot) {
 	cr_assert_eq(info->memory_map[0].base, 0x100000u);
 	cr_assert_eq(info->memory_map[0].length, 0x400000u);
 	cr_assert_eq(info->memory_map[0].type, MEM_RANGE_USABLE);
+	cr_assert_eq(info->monotonic_counter_frequency_hz, 2400000000u);
 
 	cr_assert(boot_address_space_get(&address_space));
 	cr_assert_eq(address_space.direct_map_offset, 0xffff800000000000ull);

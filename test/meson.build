@@ -204,6 +204,13 @@ test_suites = [
 		'suites': ['unit', 'base'],
 	},
 	{
+		'name': 'core_time',
+		'sources': files(
+			'core/time_test.c',
+		),
+		'suites': ['unit', 'core'],
+	},
+	{
 		'name': 'condvar',
 		'sources': files(
 			'core/condvar_test.c',

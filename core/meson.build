@@ -1,4 +1,5 @@
 core_sources = files(
+	'time.c',
 	'capability.c',
 	'capability_call.c',
 	'channel.c',

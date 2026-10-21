@@ -25,6 +25,7 @@ static void*               clock_context;
 static bool                clock_initialized;
 static bool                clock_running;
 static uint32_t            clock_frequency_hz;
+static uint64_t            monotonic_frequency_hz;
 static struct spinlock     clock_lock = SPINLOCK_INIT_CLASS("clock_lock", SPINLOCK_ORDER_CLOCK, SPINLOCK_FLAG_IRQSAVE);
 
 static inline uint32_t cpucfg_word(unsigned word) {
@@ -85,6 +86,12 @@ static uint64_t timer_frequency_hz(void) {
 	return (base_frequency * multiplier) / divisor;
 }
 
+static inline uint64_t read_time(void) {
+	uint64_t value;
+	__asm__ volatile("rdtime.d %0, $zero" : "=r"(value));
+	return value;
+}
+
 void hal_clock_init(void) {
 	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
 
@@ -95,8 +102,19 @@ void hal_clock_init(void) {
 	csrwr(0u, LOONGARCH64_CSR_TCFG);
 	csrwr(LOONGARCH64_TICLR_CLEAR, LOONGARCH64_CSR_TICLR);
 
-	clock_initialized = true;
+	monotonic_frequency_hz = timer_frequency_hz();
+	clock_initialized      = true;
 	spinlock_unlock_irqrestore(&clock_lock, state);
+}
+
+uint64_t hal_clock_monotonic_frequency(void) {
+	return __atomic_load_n(&monotonic_frequency_hz, __ATOMIC_ACQUIRE);
+}
+
+bool hal_clock_monotonic_counter(uint64_t* out_counter) {
+	if (out_counter == NULL || hal_clock_monotonic_frequency() == 0u) return false;
+	*out_counter = read_time();
+	return true;
 }
 
 bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* ctx) {
@@ -122,7 +140,7 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 		clock_context      = NULL;
 	}
 
-	timer_hz = timer_frequency_hz();
+	timer_hz = monotonic_frequency_hz;
 	if (timer_hz == 0u) {
 		spinlock_unlock_irqrestore(&clock_lock, state);
 		return false;

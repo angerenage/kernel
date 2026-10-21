@@ -20,6 +20,7 @@ static bool                clock_running;
 static uint32_t            clock_frequency_hz;
 static uint64_t            clock_interval_ticks;
 static uint64_t            clock_next_deadline;
+static uint64_t            monotonic_frequency_hz;
 static struct spinlock     clock_lock = SPINLOCK_INIT_CLASS("clock_lock", SPINLOCK_ORDER_CLOCK, SPINLOCK_FLAG_IRQSAVE);
 static struct hal_interrupt_source_state timer_source;
 
@@ -57,9 +58,20 @@ void hal_clock_init(void) {
 	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
 	if (!clock_initialized) {
 		write_timer_control(0u);
-		clock_initialized = true;
+		monotonic_frequency_hz = read_counter_frequency();
+		clock_initialized      = true;
 	}
 	spinlock_unlock_irqrestore(&clock_lock, state);
+}
+
+uint64_t hal_clock_monotonic_frequency(void) {
+	return __atomic_load_n(&monotonic_frequency_hz, __ATOMIC_ACQUIRE);
+}
+
+bool hal_clock_monotonic_counter(uint64_t* out_counter) {
+	if (out_counter == NULL || hal_clock_monotonic_frequency() == 0u) return false;
+	*out_counter = read_counter();
+	return true;
 }
 
 bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* ctx) {

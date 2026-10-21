@@ -2,17 +2,18 @@
 
 #include <core/lock.h>
 #include <core/spinlock.h>
+#include <firmware/dt.h>
 #include <hal/clock.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #define RISCV64_SIE_STIE (1ull << 5)
 #define RISCV64_SCAUSE_INTERRUPT (1ull << 63)
 #define RISCV64_SCAUSE_CODE_MASK ((1ull << 63) - 1u)
 #define RISCV64_SCAUSE_SUPERVISOR_TIMER 5u
 
-#define RISCV64_QEMU_VIRT_TIMEBASE_HZ 10000000ull
 #define RISCV64_SBI_EID_TIME 0x54494d45ul
 #define RISCV64_SBI_FID_SET_TIMER 0ul
 
@@ -28,12 +29,30 @@ static bool                clock_running;
 static uint32_t            clock_frequency_hz;
 static uint64_t            clock_interval_ticks;
 static uint64_t            clock_next_deadline;
+static uint64_t            monotonic_frequency_hz;
 static struct spinlock     clock_lock = SPINLOCK_INIT_CLASS("clock_lock", SPINLOCK_ORDER_CLOCK, SPINLOCK_FLAG_IRQSAVE);
 
 static inline uint64_t read_time(void) {
 	uint64_t value;
 	__asm__ volatile("csrr %0, time" : "=r"(value));
 	return value;
+}
+
+static uint64_t discover_timebase_frequency(void) {
+	struct dt_node     node;
+	struct dt_property property;
+	uint64_t           frequency;
+
+	for (node = dt_node_child(dt_root()); dt_node_valid(node); node = dt_node_next(node)) {
+		const char* name = dt_node_name(node);
+
+		if (name == NULL || (strcmp(name, "cpus") != 0 && strncmp(name, "cpus@", 5u) != 0)) continue;
+		if (!dt_node_property(node, "timebase-frequency", &property) || property.size != 4u ||
+		    !dt_property_read_cells(&property, 0u, 1u, &frequency) || frequency == 0u)
+			return 0u;
+		return frequency;
+	}
+	return 0u;
 }
 
 static inline uint64_t read_sie(void) {
@@ -83,8 +102,19 @@ void hal_clock_init(void) {
 		return;
 	}
 
-	clock_initialized = true;
+	monotonic_frequency_hz = discover_timebase_frequency();
+	clock_initialized      = true;
 	spinlock_unlock_irqrestore(&clock_lock, state);
+}
+
+uint64_t hal_clock_monotonic_frequency(void) {
+	return __atomic_load_n(&monotonic_frequency_hz, __ATOMIC_ACQUIRE);
+}
+
+bool hal_clock_monotonic_counter(uint64_t* out_counter) {
+	if (out_counter == NULL || hal_clock_monotonic_frequency() == 0u) return false;
+	*out_counter = read_time();
+	return true;
 }
 
 bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* ctx) {
@@ -110,14 +140,18 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 		clock_context        = NULL;
 	}
 
-	interval_ticks = RISCV64_QEMU_VIRT_TIMEBASE_HZ / frequency_hz;
+	if (monotonic_frequency_hz == 0u) {
+		spinlock_unlock_irqrestore(&clock_lock, state);
+		return false;
+	}
+	interval_ticks = monotonic_frequency_hz / frequency_hz;
 	if (interval_ticks == 0u) interval_ticks = 1u;
 
 	clock_handler        = handler;
 	clock_context        = ctx;
 	clock_interval_ticks = interval_ticks;
 	clock_next_deadline  = read_time() + clock_interval_ticks;
-	clock_frequency_hz   = (uint32_t)(RISCV64_QEMU_VIRT_TIMEBASE_HZ / clock_interval_ticks);
+	clock_frequency_hz   = (uint32_t)(monotonic_frequency_hz / clock_interval_ticks);
 	clock_running        = true;
 
 	if (!set_timer(clock_next_deadline)) {

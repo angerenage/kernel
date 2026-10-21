@@ -1,5 +1,6 @@
 #include "clock.h"
 
+#include <boot/info.h>
 #include <core/cpu.h>
 #include <core/lock.h>
 #include <core/spinlock.h>
@@ -19,7 +20,28 @@ static bool                              clock_initialized;
 static struct hal_interrupt_source_state timer_source;
 static uint32_t                          clock_frequency_hz;
 static uint32_t                          clock_vector = UINT32_MAX;
+static uint64_t                          monotonic_frequency_hz;
 static struct spinlock clock_lock = SPINLOCK_INIT_CLASS("clock_lock", SPINLOCK_ORDER_CLOCK, SPINLOCK_FLAG_IRQSAVE);
+
+static bool invariant_tsc_available(void) {
+	uint32_t eax;
+	uint32_t ebx;
+	uint32_t ecx;
+	uint32_t edx;
+
+	__asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(0x80000000u), "c"(0u));
+	if (eax < 0x80000007u) return false;
+	__asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(0x80000007u), "c"(0u));
+	return (edx & (1u << 8)) != 0u;
+}
+
+static uint64_t read_tsc(void) {
+	uint32_t low;
+	uint32_t high;
+
+	__asm__ volatile("lfence\n\trdtsc\n\tlfence" : "=a"(low), "=d"(high) : : "memory");
+	return ((uint64_t)high << 32u) | low;
+}
 
 static void clock_reset_state(void) {
 	__atomic_store_n(&clock_running, false, __ATOMIC_RELEASE);
@@ -30,7 +52,8 @@ static void clock_reset_state(void) {
 }
 
 void hal_clock_init(void) {
-	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
+	struct irq_state        state = spinlock_lock_irqsave(&clock_lock);
+	const struct boot_info* info;
 
 	if (clock_initialized) {
 		spinlock_unlock_irqrestore(&clock_lock, state);
@@ -38,8 +61,20 @@ void hal_clock_init(void) {
 	}
 
 	clock_reset_state();
-	clock_initialized = true;
+	info                   = boot_info_get();
+	monotonic_frequency_hz = info != NULL && invariant_tsc_available() ? info->monotonic_counter_frequency_hz : 0u;
+	clock_initialized      = true;
 	spinlock_unlock_irqrestore(&clock_lock, state);
+}
+
+uint64_t hal_clock_monotonic_frequency(void) {
+	return __atomic_load_n(&monotonic_frequency_hz, __ATOMIC_ACQUIRE);
+}
+
+bool hal_clock_monotonic_counter(uint64_t* out_counter) {
+	if (out_counter == NULL || hal_clock_monotonic_frequency() == 0u) return false;
+	*out_counter = read_tsc();
+	return true;
 }
 
 bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* ctx) {

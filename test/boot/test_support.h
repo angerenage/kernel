@@ -7,6 +7,8 @@
 
 #include "../../boot/limine/limine.h"
 
+extern volatile struct limine_tsc_frequency_request tsc_frequency_req;
+
 void boot_test_reset(void);
 void boot_test_configure_valid_base(void);
 void boot_test_configure_memory_type(uint64_t type);

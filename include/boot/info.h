@@ -63,6 +63,7 @@ struct boot_info {
 	uintptr_t                 kernel_virtual_base;
 	uintptr_t                 rsdp_address;
 	uintptr_t                 dtb_address;
+	uint64_t                  monotonic_counter_frequency_hz;
 	const struct boot_module* modules;
 	size_t                    module_count;
 	const char*               command_line;

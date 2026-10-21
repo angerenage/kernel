@@ -12,6 +12,7 @@
 #include <core/pmm.h>
 #include <core/process.h>
 #include <core/sched.h>
+#include <core/time.h>
 #include <core/uthread.h>
 #include <firmware/init.h>
 #include <hal/clock.h>
@@ -243,14 +244,15 @@ static void boot_start_timer_counter(void) {
 	hal_clock_init();
 	if (!hal_clock_start(KERNEL_TIMER_HZ, boot_clock_tick, NULL)) {
 		printf("kernel: boot clock unavailable\n");
-		return;
 	}
-	boot_timer_frequency_hz = hal_clock_frequency();
-	if (boot_timer_frequency_hz == 0u) {
-		printf("kernel: boot clock frequency unavailable\n");
-		hal_clock_stop();
-		return;
+	else {
+		boot_timer_frequency_hz = hal_clock_frequency();
+		if (boot_timer_frequency_hz == 0u) {
+			printf("kernel: boot clock frequency unavailable\n");
+			hal_clock_stop();
+		}
 	}
+	if (!time_monotonic_init()) printf("kernel: monotonic clock unavailable\n");
 }
 
 static void kernel_init_memory(const struct mem_range* memory_map, size_t range_count, uintptr_t direct_map_offset) {

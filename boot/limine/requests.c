@@ -67,6 +67,15 @@ volatile struct limine_dtb_request dtb_req = {
 	.revision = 0,
 };
 
+#if defined(PLATFORM_PC_X86_64)
+/* Invariant TSC frequency, used by the x86-64 monotonic clock backend. */
+__attribute__((used, section(".limine_requests")))
+volatile struct limine_tsc_frequency_request tsc_frequency_req = {
+	.id       = LIMINE_TSC_FREQUENCY_REQUEST_ID,
+	.revision = 0,
+};
+#endif
+
 /* Executable address */
 __attribute__((used, section(".limine_requests")))
 volatile struct limine_executable_address_request exec_addr_req = {
