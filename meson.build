@@ -71,6 +71,7 @@ subdir('third_party/mxml')
 subdir('third_party/commit_mono')
 subdir('third_party/freetype')
 subdir('third_party/qrcodegen')
+subdir('third_party/uacpi')
 subdir('userspace')
 subdir('kernel')
 

@@ -13,3 +13,6 @@
 [submodule "third_party/commit_mono/commit_mono"]
 	path = third_party/commit_mono/commit_mono
 	url = https://github.com/eigilnikolajsen/commit-mono.git
+[submodule "third_party/uacpi/uacpi"]
+	path = third_party/uacpi/uacpi
+	url = https://github.com/uACPI/uACPI.git
