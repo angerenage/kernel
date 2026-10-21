@@ -121,6 +121,7 @@ struct terminal {
 	size_t                          cursor_drawn_column;
 	size_t                          pointer_x;
 	size_t                          pointer_y;
+	bool                            pointer_moved;
 	bool                            pointer_drawn;
 	size_t                          pointer_saved_x;
 	size_t                          pointer_saved_y;
@@ -279,7 +280,7 @@ static void show_pointer_cursor(struct terminal* terminal) {
 	uint64_t                             outline = encode_color(&terminal->surface.format, theme.cursor_text);
 	uint64_t                             fill    = encode_color(&terminal->surface.format, theme.cursor);
 
-	if (terminal->pointer_drawn) return;
+	if (!terminal->pointer_moved || terminal->pointer_drawn) return;
 	if (terminal->pointer_x < shape->hotspot_x) source_x = shape->hotspot_x - terminal->pointer_x;
 	if (terminal->pointer_y < shape->hotspot_y) source_y = shape->hotspot_y - terminal->pointer_y;
 	destination_x = terminal->pointer_x < shape->hotspot_x ? 0u : terminal->pointer_x - shape->hotspot_x;
@@ -1257,7 +1258,6 @@ struct terminal* terminal_create(volatile uint8_t* framebuffer, const struct fra
 	terminal->pointer_y      = terminal->surface.height / 2u;
 	clear_display(terminal);
 	if (!show_cursor(terminal)) goto fail;
-	show_pointer_cursor(terminal);
 	return terminal;
 
 fail:
@@ -1778,6 +1778,7 @@ bool terminal_pointer_update(struct terminal* terminal, uint64_t source_id, int6
 	if (terminal == NULL || source_id == 0u) return false;
 	terminal_lock(terminal);
 	hide_pointer_cursor(terminal);
+	if (delta_x != 0 || delta_y != 0) terminal->pointer_moved = true;
 	terminal->pointer_x = move_pointer_axis(terminal->pointer_x, terminal->surface.width - 1u, delta_x);
 	terminal->pointer_y = move_pointer_axis(terminal->pointer_y, terminal->surface.height - 1u, delta_y);
 	position            = pointer_selection_position(terminal);
