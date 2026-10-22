@@ -6,21 +6,23 @@ drivers:
   pci:
     executable: "/boot/pci_driver.elf"
     compatible_ids:
-      - "acpi:pci_ecam"
+      - "acpi:PNP0A08"
+      - "acpi:PNP0A03"
+      - "acpi:MCFG"
       - "dt:pci-host-ecam-generic"
 
   tpm:
     executable: "/boot/tpm_driver.elf"
     compatible_ids:
-      - "acpi:tpm2_fifo_mmio"
-      - "acpi:tpm2_crb"
-      - "acpi:tpm2"
+      - "acpi:MSFT0101"
+      - "acpi:TPM2"
       - "dt:tcg,tpm-tis-mmio"
       - "dt:tcg,tpm-crb"
 
   i8042:
     executable: "/boot/i8042_driver.elf"
     compatible_ids:
+      - "acpi:PNP0303"
       - "acpi:i8042"
 
   ps2:

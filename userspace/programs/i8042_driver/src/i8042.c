@@ -26,6 +26,10 @@
 #define I8042_COMMAND_RESOURCE "status_command_port"
 #define I8042_KEYBOARD_INTERRUPT_RESOURCE "keyboard_interrupt"
 #define I8042_MOUSE_INTERRUPT_RESOURCE "mouse_interrupt"
+#define ACPI_IO_RESOURCE_0 "io_0"
+#define ACPI_IO_RESOURCE_1 "io_1"
+#define ACPI_INTERRUPT_RESOURCE_0 "interrupt_0"
+#define ACPI_INTERRUPT_RESOURCE_1 "interrupt_1"
 
 #define I8042_DATA_PORT 0x60u
 #define I8042_COMMAND_PORT 0x64u
@@ -64,6 +68,7 @@
 #define I8042_RESPONSE_LIMIT 4u
 #define I8042_DRAIN_LIMIT 256u
 #define I8042_QUEUE_CAPACITY 256u
+#define I8042_POLL_INTERVAL_MS 1u
 
 #define I8042_KEYBOARD_OBJECT_ID 1u
 #define I8042_MOUSE_OBJECT_ID 2u
@@ -218,34 +223,65 @@ static bool validate_interrupt(cap_id_t cap) {
 	return interrupt_info(cap, &info) == SYSCALL_STATUS_OK && info.kind == INTERRUPT_KIND_SOURCE && !info.bound;
 }
 
+static bool acquire_resource(cap_id_t device_cap, const char* name, cap_rights_t rights, cap_id_t* out_cap) {
+	return device_resource_acquire(device_cap, name, strlen(name), rights, out_cap) == SYSCALL_STATUS_OK;
+}
+
+static void drop_resource(cap_id_t* cap) {
+	if (*cap != CAP_ID_INVALID) (void)cap_drop(*cap);
+	*cap = CAP_ID_INVALID;
+}
+
+static bool acquire_ports(cap_id_t device_cap, struct i8042* controller) {
+	struct io_port_info first;
+	struct io_port_info second;
+	cap_id_t            first_cap  = CAP_ID_INVALID;
+	cap_id_t            second_cap = CAP_ID_INVALID;
+
+	if (acquire_resource(device_cap, I8042_DATA_RESOURCE, I8042_PORT_RIGHTS, &controller->data_cap) &&
+	    acquire_resource(device_cap, I8042_COMMAND_RESOURCE, I8042_PORT_RIGHTS, &controller->command_cap))
+		return true;
+	drop_resource(&controller->command_cap);
+	drop_resource(&controller->data_cap);
+	if (!acquire_resource(device_cap, ACPI_IO_RESOURCE_0, I8042_PORT_RIGHTS, &first_cap) ||
+	    !acquire_resource(device_cap, ACPI_IO_RESOURCE_1, I8042_PORT_RIGHTS, &second_cap) ||
+	    io_port_info(first_cap, &first) != SYSCALL_STATUS_OK ||
+	    io_port_info(second_cap, &second) != SYSCALL_STATUS_OK || first.count != 1u || second.count != 1u ||
+	    !((first.base == I8042_DATA_PORT && second.base == I8042_COMMAND_PORT) ||
+	      (first.base == I8042_COMMAND_PORT && second.base == I8042_DATA_PORT))) {
+		drop_resource(&second_cap);
+		drop_resource(&first_cap);
+		return false;
+	}
+	if (first.base == I8042_DATA_PORT) {
+		controller->data_cap    = first_cap;
+		controller->command_cap = second_cap;
+	}
+	else {
+		controller->data_cap    = second_cap;
+		controller->command_cap = first_cap;
+	}
+	return true;
+}
+
 static bool acquire_resources(cap_id_t device_cap, struct i8042* controller) {
 	struct device_info info;
-	if (device_get_info(device_cap, &info) != SYSCALL_STATUS_OK || info.resource_count < 4u) return false;
-	if (device_resource_acquire(device_cap,
-	                            I8042_DATA_RESOURCE,
-	                            sizeof(I8042_DATA_RESOURCE) - 1u,
-	                            I8042_PORT_RIGHTS,
-	                            &controller->data_cap) != SYSCALL_STATUS_OK)
+	if (device_get_info(device_cap, &info) != SYSCALL_STATUS_OK || info.resource_count < 3u ||
+	    !acquire_ports(device_cap, controller))
 		return false;
-	if (device_resource_acquire(device_cap,
-	                            I8042_COMMAND_RESOURCE,
-	                            sizeof(I8042_COMMAND_RESOURCE) - 1u,
-	                            I8042_PORT_RIGHTS,
-	                            &controller->command_cap) != SYSCALL_STATUS_OK)
+	if (!acquire_resource(device_cap,
+	                      I8042_KEYBOARD_INTERRUPT_RESOURCE,
+	                      I8042_INTERRUPT_RIGHTS,
+	                      &controller->keyboard.interrupt_cap) &&
+	    !acquire_resource(
+			device_cap, ACPI_INTERRUPT_RESOURCE_0, I8042_INTERRUPT_RIGHTS, &controller->keyboard.interrupt_cap))
 		return false;
-	if (device_resource_acquire(device_cap,
-	                            I8042_KEYBOARD_INTERRUPT_RESOURCE,
-	                            sizeof(I8042_KEYBOARD_INTERRUPT_RESOURCE) - 1u,
-	                            I8042_INTERRUPT_RIGHTS,
-	                            &controller->keyboard.interrupt_cap) != SYSCALL_STATUS_OK)
-		return false;
-	if (device_resource_acquire(device_cap,
-	                            I8042_MOUSE_INTERRUPT_RESOURCE,
-	                            sizeof(I8042_MOUSE_INTERRUPT_RESOURCE) - 1u,
-	                            I8042_INTERRUPT_RIGHTS,
-	                            &controller->mouse.interrupt_cap) != SYSCALL_STATUS_OK)
-		return false;
-	if (!validate_interrupt(controller->keyboard.interrupt_cap) || !validate_interrupt(controller->mouse.interrupt_cap))
+	if (!acquire_resource(
+			device_cap, I8042_MOUSE_INTERRUPT_RESOURCE, I8042_INTERRUPT_RIGHTS, &controller->mouse.interrupt_cap))
+		(void)acquire_resource(
+			device_cap, ACPI_INTERRUPT_RESOURCE_1, I8042_INTERRUPT_RIGHTS, &controller->mouse.interrupt_cap);
+	if (!validate_interrupt(controller->keyboard.interrupt_cap) ||
+	    (controller->mouse.interrupt_cap != CAP_ID_INVALID && !validate_interrupt(controller->mouse.interrupt_cap)))
 		return false;
 	controller->data_mapped = map_port(controller->data_cap, I8042_DATA_PORT);
 	if (!controller->data_mapped) return false;
@@ -325,7 +361,7 @@ DEFINE_UPCALL_HANDLER(i8042_interrupt, sender, arg0, arg1, arg2, arg3) {
 }
 
 static bool bind_interrupt(struct i8042_ps2_port* port) {
-	if (!port->present) return true;
+	if (!port->present || port->interrupt_cap == CAP_ID_INVALID) return true;
 	if (signal_create(&port->interrupt_signal_cap) != SYSCALL_STATUS_OK ||
 	    signal_set_handler(port->interrupt_signal_cap, i8042_interrupt, SIGNAL_HANDLER_FLAG_NONE) !=
 	        SYSCALL_STATUS_OK ||
@@ -341,7 +377,8 @@ static bool start_controller(struct i8042* controller, uint8_t config) {
 		config &= (uint8_t)~I8042_CONFIG_KEYBOARD_DISABLED;
 	}
 	if (controller->mouse.present) {
-		config |= I8042_CONFIG_MOUSE_INTERRUPT;
+		if (controller->mouse.interrupt_cap != CAP_ID_INVALID) config |= I8042_CONFIG_MOUSE_INTERRUPT;
+		else config &= (uint8_t)~I8042_CONFIG_MOUSE_INTERRUPT;
 		config &= (uint8_t)~I8042_CONFIG_MOUSE_DISABLED;
 	}
 	return write_config(config);
@@ -481,6 +518,9 @@ static bool send_notification(struct i8042_ps2_port* port) {
 }
 
 static bool serve(struct i8042* controller) {
+	/* ACPI commonly places IRQ12 on a separate PNP0Fxx node instead of the PNP0303 controller node. */
+	bool poll = controller->mouse.present && controller->mouse.interrupt_cap == CAP_ID_INVALID;
+
 	for (;;) {
 		struct cap_request call;
 		bool               received;
@@ -497,11 +537,17 @@ static bool serve(struct i8042* controller) {
 			status   = channel_event_recv(controller->endpoint, &event, &received);
 			if (status != SYSCALL_STATUS_OK) return false;
 		} while (received);
+		if (poll) drain_interrupt_data();
 		if (!send_notification(&controller->keyboard) || !send_notification(&controller->mouse)) return false;
 
-		struct signal_message activity;
-		status = signal_wait(controller->activity_cap, &activity);
-		if (status != SYSCALL_STATUS_OK && status != SYSCALL_STATUS_INTERRUPTED) return false;
+		if (poll) {
+			if (sleep_ms(I8042_POLL_INTERVAL_MS) != SYSCALL_STATUS_OK) return false;
+		}
+		else {
+			struct signal_message activity;
+			status = signal_wait(controller->activity_cap, &activity);
+			if (status != SYSCALL_STATUS_OK && status != SYSCALL_STATUS_INTERRUPTED) return false;
+		}
 	}
 }
 
