@@ -34,11 +34,14 @@
 #define PS2_MOUSE_ID_WHEEL 0x03u
 #define PS2_MOUSE_ID_FIVE_BUTTON 0x04u
 
-#define PS2_RESPONSE_POLL_LIMIT 4000u
-#define PS2_OPTIONAL_ID_POLL_LIMIT 320u
 #define PS2_COMMAND_ATTEMPTS 3u
 #define PS2_UNEXPECTED_RESPONSE_LIMIT 16u
 #define PS2_SERVICE_READ_SIZE 64u
+#define PS2_POLL_INTERVAL_MS 1u
+#define PS2_RESPONSE_TIMEOUT_MS 500u
+#define PS2_RESET_TIMEOUT_MS 1000u
+#define PS2_OPTIONAL_ID_TIMEOUT_MS 100u
+#define NANOSECONDS_PER_MILLISECOND 1000000ull
 
 /* Result of waiting for one byte from a nonblocking transport. */
 enum ps2_receive_result {
@@ -188,8 +191,17 @@ static bool is_mouse_id(uint8_t value) {
 }
 
 /* Initialization cannot block on the notification signal because it needs a bounded response window. */
-static enum ps2_receive_result receive_byte(struct ps2_device* device, size_t poll_limit, uint8_t* out_value) {
-	for (size_t attempt = 0u; attempt < poll_limit; attempt++) {
+static enum ps2_receive_result receive_byte(struct ps2_device* device, uint64_t timeout_ms, uint8_t* out_value) {
+	uint64_t now;
+	uint64_t duration;
+	uint64_t deadline;
+
+	if (timeout_ms == 0u || timeout_ms > UINT64_MAX / NANOSECONDS_PER_MILLISECOND ||
+	    monotonic_time_ns(&now) != SYSCALL_STATUS_OK)
+		return PS2_RECEIVE_FAILED;
+	duration = timeout_ms * NANOSECONDS_PER_MILLISECOND;
+	deadline = now > UINT64_MAX - duration ? UINT64_MAX : now + duration;
+	for (;;) {
 		size_t           size;
 		bool             overrun;
 		syscall_status_t status = transport_read(device->transport_cap, out_value, 1u, &size, &overrun);
@@ -199,9 +211,10 @@ static enum ps2_receive_result receive_byte(struct ps2_device* device, size_t po
 			return PS2_RECEIVE_FAILED;
 		}
 		if (status != SYSCALL_STATUS_UNAVAILABLE) return PS2_RECEIVE_FAILED;
-		if (sched_yield() != SYSCALL_STATUS_OK) return PS2_RECEIVE_FAILED;
+		if (monotonic_time_ns(&now) != SYSCALL_STATUS_OK) return PS2_RECEIVE_FAILED;
+		if (now >= deadline) return PS2_RECEIVE_TIMEOUT;
+		if (sleep_ms(PS2_POLL_INTERVAL_MS) != SYSCALL_STATUS_OK) return PS2_RECEIVE_FAILED;
 	}
-	return PS2_RECEIVE_TIMEOUT;
 }
 
 static bool drain_transport(struct ps2_device* device) {
@@ -222,7 +235,7 @@ static bool command_acknowledged(struct ps2_device* device, uint8_t command) {
 		if (transport_write(device->transport_cap, command) != SYSCALL_STATUS_OK) return false;
 		for (size_t skipped = 0u; skipped < PS2_UNEXPECTED_RESPONSE_LIMIT; skipped++) {
 			uint8_t                 response;
-			enum ps2_receive_result result = receive_byte(device, PS2_RESPONSE_POLL_LIMIT, &response);
+			enum ps2_receive_result result = receive_byte(device, PS2_RESPONSE_TIMEOUT_MS, &response);
 			if (result != PS2_RECEIVE_OK) return false;
 			if (response == PS2_ACK) return true;
 			if (response == PS2_RESEND) break;
@@ -238,12 +251,14 @@ static bool command_with_value(struct ps2_device* device, uint8_t command, uint8
 static bool identify(struct ps2_device* device, uint8_t* out_first, uint8_t* out_second, size_t* out_size) {
 	*out_size = 0u;
 	if (!command_acknowledged(device, PS2_COMMAND_IDENTIFY)) return false;
-	enum ps2_receive_result result = receive_byte(device, PS2_OPTIONAL_ID_POLL_LIMIT, out_first);
+	enum ps2_receive_result result = receive_byte(device, PS2_OPTIONAL_ID_TIMEOUT_MS, out_first);
 	if (result == PS2_RECEIVE_TIMEOUT) return true;
 	if (result != PS2_RECEIVE_OK) return false;
 	*out_size = 1u;
 	if (*out_first != 0xabu) return true;
-	result = receive_byte(device, PS2_OPTIONAL_ID_POLL_LIMIT, out_second);
+	result = receive_byte(device, PS2_RESPONSE_TIMEOUT_MS, out_second);
+	/* The second byte only identifies the keyboard subtype, which this driver does not use. */
+	if (result == PS2_RECEIVE_TIMEOUT) return true;
 	if (result != PS2_RECEIVE_OK) return false;
 	*out_size = 2u;
 	return true;
@@ -257,7 +272,7 @@ static bool reset_and_identify(struct ps2_device* device) {
 	device->kind     = PS2_DEVICE_UNKNOWN;
 	device->mouse_id = PS2_MOUSE_ID_STANDARD;
 	if (!drain_transport(device) || !command_acknowledged(device, PS2_COMMAND_RESET)) return false;
-	if (receive_byte(device, PS2_RESPONSE_POLL_LIMIT, &first) != PS2_RECEIVE_OK || first != PS2_SELF_TEST_SUCCESS)
+	if (receive_byte(device, PS2_RESET_TIMEOUT_MS, &first) != PS2_RECEIVE_OK || first != PS2_SELF_TEST_SUCCESS)
 		return false;
 	if (!command_acknowledged(device, PS2_COMMAND_DISABLE_SCANNING) || !identify(device, &first, &second, &id_size))
 		return false;
@@ -266,8 +281,7 @@ static bool reset_and_identify(struct ps2_device* device) {
 		device->kind     = PS2_DEVICE_MOUSE;
 		device->mouse_id = first;
 	}
-	else if (id_size == 2u && first == 0xabu) {
-		(void)second;
+	else if (id_size >= 1u && first == 0xabu) {
 		device->kind = PS2_DEVICE_KEYBOARD;
 	}
 	else if (id_size == 0u) device->kind = PS2_DEVICE_KEYBOARD;
@@ -326,7 +340,7 @@ static bool keyboard_command_acknowledged(struct ps2_device* device, struct ps2_
 		if (transport_write(device->transport_cap, command) != SYSCALL_STATUS_OK) return false;
 		for (size_t skipped = 0u; skipped < PS2_UNEXPECTED_RESPONSE_LIMIT; skipped++) {
 			uint8_t                 response;
-			enum ps2_receive_result result = receive_byte(device, PS2_RESPONSE_POLL_LIMIT, &response);
+			enum ps2_receive_result result = receive_byte(device, PS2_RESPONSE_TIMEOUT_MS, &response);
 			if (result != PS2_RECEIVE_OK) return false;
 			if (response == PS2_ACK) return true;
 			if (response == PS2_RESEND) break;

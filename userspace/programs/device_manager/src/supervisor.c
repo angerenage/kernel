@@ -157,7 +157,8 @@ static void monitor_process(void* opaque) {
 	uintptr_t exit_code = 0u;
 	request.wait_status = process_wait(argument->process_cap, &exit_code);
 	request.exit_code   = exit_code;
-	(void)cap_call(argument->control_cap, &request, sizeof(request), NULL, 0u, NULL);
+	thread_exit(cap_call(argument->control_cap, &request, sizeof(request), NULL, 0u, NULL) == SYSCALL_STATUS_OK ? 0u
+	                                                                                                            : 1u);
 }
 
 static void retry_process(void* opaque) {
@@ -168,7 +169,8 @@ static void retry_process(void* opaque) {
 		.generation = argument->generation,
 	};
 	(void)sleep_ms(argument->delay_ms);
-	(void)cap_call(argument->control_cap, &request, sizeof(request), NULL, 0u, NULL);
+	thread_exit(cap_call(argument->control_cap, &request, sizeof(request), NULL, 0u, NULL) == SYSCALL_STATUS_OK ? 0u
+	                                                                                                            : 1u);
 }
 
 static bool spawn_worker(struct device_server* server, uintptr_t entry, const void* argument, size_t argument_size,

@@ -63,12 +63,14 @@
 #define PS2_DEVICE_DISABLE_SCANNING 0xf5u
 #define PS2_DEVICE_SELF_TEST_SUCCESS 0xaau
 
-#define I8042_WAIT_ATTEMPTS 500u
 #define I8042_COMMAND_ATTEMPTS 3u
 #define I8042_RESPONSE_LIMIT 4u
 #define I8042_DRAIN_LIMIT 256u
 #define I8042_QUEUE_CAPACITY 256u
 #define I8042_POLL_INTERVAL_MS 1u
+#define I8042_IO_TIMEOUT_MS 50u
+#define PS2_RESET_TIMEOUT_MS 500u
+#define NANOSECONDS_PER_MILLISECOND 1000000ull
 
 #define I8042_KEYBOARD_OBJECT_ID 1u
 #define I8042_MOUSE_OBJECT_ID 2u
@@ -126,12 +128,33 @@ static uint8_t read_status(void) {
 	return io_read8(I8042_COMMAND_PORT);
 }
 
+static bool deadline_after_ms(uint64_t timeout_ms, uint64_t* out_deadline) {
+	uint64_t now;
+	uint64_t duration;
+
+	if (out_deadline == NULL || timeout_ms == 0u || timeout_ms > UINT64_MAX / NANOSECONDS_PER_MILLISECOND ||
+	    monotonic_time_ns(&now) != SYSCALL_STATUS_OK)
+		return false;
+	duration      = timeout_ms * NANOSECONDS_PER_MILLISECOND;
+	*out_deadline = now > UINT64_MAX - duration ? UINT64_MAX : now + duration;
+	return true;
+}
+
+static bool wait_until_deadline(uint64_t deadline) {
+	uint64_t now;
+
+	if (monotonic_time_ns(&now) != SYSCALL_STATUS_OK || now >= deadline) return false;
+	return sleep_ms(I8042_POLL_INTERVAL_MS) == SYSCALL_STATUS_OK;
+}
+
 static bool wait_input_empty(void) {
-	for (size_t attempt = 0u; attempt < I8042_WAIT_ATTEMPTS; attempt++) {
+	uint64_t deadline;
+
+	if (!deadline_after_ms(I8042_IO_TIMEOUT_MS, &deadline)) return false;
+	for (;;) {
 		if ((read_status() & I8042_STATUS_INPUT_FULL) == 0u) return true;
-		if (sched_yield() != SYSCALL_STATUS_OK) return false;
+		if (!wait_until_deadline(deadline)) return false;
 	}
-	return false;
 }
 
 static bool write_command(uint8_t command) {
@@ -151,8 +174,11 @@ static bool write_device(bool auxiliary, uint8_t value) {
 	return write_data(value);
 }
 
-static bool read_output_attempts(bool auxiliary, size_t attempt_limit, uint8_t* out_value) {
-	for (size_t attempt = 0u; attempt < attempt_limit; attempt++) {
+static bool read_output_timeout(bool auxiliary, uint64_t timeout_ms, uint8_t* out_value) {
+	uint64_t deadline;
+
+	if (out_value == NULL || !deadline_after_ms(timeout_ms, &deadline)) return false;
+	for (;;) {
 		uint8_t status = read_status();
 		if ((status & I8042_STATUS_OUTPUT_FULL) != 0u) {
 			uint8_t value = io_read8(I8042_DATA_PORT);
@@ -161,13 +187,12 @@ static bool read_output_attempts(bool auxiliary, size_t attempt_limit, uint8_t* 
 				return true;
 			}
 		}
-		if (sched_yield() != SYSCALL_STATUS_OK) return false;
+		if (!wait_until_deadline(deadline)) return false;
 	}
-	return false;
 }
 
 static bool read_output(bool auxiliary, uint8_t* out_value) {
-	return read_output_attempts(auxiliary, I8042_WAIT_ATTEMPTS, out_value);
+	return read_output_timeout(auxiliary, I8042_IO_TIMEOUT_MS, out_value);
 }
 
 static bool flush_output(void) {
@@ -205,8 +230,8 @@ static bool probe_command(bool auxiliary, uint8_t command) {
 
 static bool reset_for_probe(bool auxiliary) {
 	uint8_t response;
-	if (!probe_command(auxiliary, PS2_DEVICE_RESET) || !read_output(auxiliary, &response) ||
-	    response != PS2_DEVICE_SELF_TEST_SUCCESS)
+	if (!probe_command(auxiliary, PS2_DEVICE_RESET) ||
+	    !read_output_timeout(auxiliary, PS2_RESET_TIMEOUT_MS, &response) || response != PS2_DEVICE_SELF_TEST_SUCCESS)
 		return false;
 	/* A mouse ID following BAT is ignored by probe_command while it waits for the disable ACK. */
 	return probe_command(auxiliary, PS2_DEVICE_DISABLE_SCANNING);
