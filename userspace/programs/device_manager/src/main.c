@@ -104,15 +104,11 @@ int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 		device_server_deinit(&server);
 		return 1;
 	}
-	bool parser_resources_released = release_source(memory_allocator_cap, "memory allocator");
-	if (!release_source(dma_cap, "DMA")) parser_resources_released = false;
-	if (!release_source(interrupts_cap, "interrupts")) parser_resources_released = false;
-	if (!release_source(io_ports_cap, "I/O ports")) parser_resources_released = false;
-	if (!parser_resources_released) {
-		device_server_deinit(&server);
-		return 1;
-	}
-	int result = device_server_run(&server);
+	server.memory_allocator_cap = memory_allocator_cap;
+	server.dma_cap              = dma_cap;
+	server.interrupts_cap       = interrupts_cap;
+	server.io_ports_cap         = io_ports_cap;
+	int result                  = device_server_run(&server);
 	device_server_deinit(&server);
 	return result;
 }

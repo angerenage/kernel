@@ -17,8 +17,22 @@
 /* Ordered application capability arguments supplied to a bound driver. */
 enum device_driver_capability_index {
 	DEVICE_DRIVER_CAPABILITY_DEVICE = 0u,
+	DEVICE_DRIVER_CAPABILITY_MEMORY_ALLOCATOR,
+	DEVICE_DRIVER_CAPABILITY_DMA,
+	DEVICE_DRIVER_CAPABILITY_INTERRUPTS,
+	DEVICE_DRIVER_CAPABILITY_IO_PORTS,
 	DEVICE_DRIVER_CAPABILITY_COUNT,
 };
+
+/* Rights granted when a catalog entry requests the physical-memory allocator. */
+#define DEVICE_DRIVER_MEMORY_ALLOCATOR_CAP_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_MANAGE))
+/* Rights granted when a catalog entry requests the DMA root. */
+#define DEVICE_DRIVER_DMA_CAP_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_MANAGE))
+/* Rights granted when a catalog entry requests the interrupt root, including MSI allocation. */
+#define DEVICE_DRIVER_INTERRUPTS_CAP_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_MANAGE | CAP_ALLOCATE))
+/* Rights granted when a catalog entry requests the x86 I/O-port root. */
+#define DEVICE_DRIVER_IO_PORTS_CAP_RIGHTS                                                                              \
+	((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP | CAP_DERIVE | CAP_DELEGATE))
 
 /* Rights held by the manager on its private root-construction capability. */
 #define DEVICE_ROOT_CAP_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_MANAGE | CAP_DELEGATE))

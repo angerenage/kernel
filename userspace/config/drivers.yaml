@@ -5,6 +5,10 @@ format_version: 1
 drivers:
   pci:
     executable: "/boot/pci_driver.elf"
+    root_capabilities:
+      - "memory_allocator"
+      - "interrupts"
+      - "io_ports"
     compatible_ids:
       - "acpi:PNP0A08"
       - "acpi:PNP0A03"

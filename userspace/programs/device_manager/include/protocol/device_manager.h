@@ -49,8 +49,9 @@ enum device_parser_capability_argument {
 /* Rights required by a parser to resolve and claim firmware-described DMA sources. */
 #define DEVICE_PARSER_DMA_CAP_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_MANAGE))
 
-/* Rights retained by the manager while forwarding fixed-interrupt claim authority. */
-#define DEVICE_MANAGER_INTERRUPTS_CAP_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_MANAGE | CAP_DELEGATE))
+/* Rights retained by the manager while forwarding fixed and message-interrupt authority. */
+#define DEVICE_MANAGER_INTERRUPTS_CAP_RIGHTS                                                                           \
+	((cap_rights_t)(CAP_CALL | CAP_READ | CAP_MANAGE | CAP_ALLOCATE | CAP_DELEGATE))
 
 /* Rights required by a parser to resolve and claim firmware-described fixed interrupts. */
 #define DEVICE_PARSER_INTERRUPTS_CAP_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_MANAGE))

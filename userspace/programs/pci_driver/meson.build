@@ -1,10 +1,12 @@
 pci_driver_sources = files(
+	'src/claim.c',
 	'src/config.c',
 	'src/ecam.c',
 	'src/enumerate.c',
 	'src/host.c',
 	'src/main.c',
 	'src/pci.c',
+	'src/resource.c',
 )
 
 pci_driver_elf = executable('pci_driver.elf',

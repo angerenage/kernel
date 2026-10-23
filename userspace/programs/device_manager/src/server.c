@@ -387,14 +387,18 @@ bool device_server_init(struct device_server* server) {
 	syscall_status_t status;
 	if (server == NULL) return false;
 	*server = (struct device_server){
-		.endpoint   = CHANNEL_ID_INVALID,
-		.activity   = CAP_ID_INVALID,
-		.root_cap   = CAP_ID_INVALID,
-		.pid        = PROCESS_PID_INVALID,
-		.supervisor = {.self_cap    = CAP_ID_INVALID,
-		               .control_cap = CAP_ID_INVALID,
-		               .stdout_cap  = CAP_ID_INVALID,
-		               .stderr_cap  = CAP_ID_INVALID}
+		.endpoint             = CHANNEL_ID_INVALID,
+		.activity             = CAP_ID_INVALID,
+		.root_cap             = CAP_ID_INVALID,
+		.memory_allocator_cap = CAP_ID_INVALID,
+		.dma_cap              = CAP_ID_INVALID,
+		.interrupts_cap       = CAP_ID_INVALID,
+		.io_ports_cap         = CAP_ID_INVALID,
+		.pid                  = PROCESS_PID_INVALID,
+		.supervisor           = {.self_cap    = CAP_ID_INVALID,
+		                         .control_cap = CAP_ID_INVALID,
+		                         .stdout_cap  = CAP_ID_INVALID,
+		                         .stderr_cap  = CAP_ID_INVALID}
     };
 	dm_state_init(&server->state);
 	dm_driver_catalog_init(&server->drivers);
@@ -430,17 +434,25 @@ void device_server_deinit(struct device_server* server) {
 	}
 	dm_state_deinit(&server->state);
 	dm_driver_catalog_deinit(&server->drivers);
+	if (server->memory_allocator_cap != CAP_ID_INVALID) (void)cap_drop(server->memory_allocator_cap);
+	if (server->dma_cap != CAP_ID_INVALID) (void)cap_drop(server->dma_cap);
+	if (server->interrupts_cap != CAP_ID_INVALID) (void)cap_drop(server->interrupts_cap);
+	if (server->io_ports_cap != CAP_ID_INVALID) (void)cap_drop(server->io_ports_cap);
 	if (server->activity != CAP_ID_INVALID) (void)cap_drop(server->activity);
 	if (server->endpoint != CHANNEL_ID_INVALID) (void)channel_destroy(server->endpoint);
 	*server = (struct device_server){
-		.endpoint   = CHANNEL_ID_INVALID,
-		.activity   = CAP_ID_INVALID,
-		.root_cap   = CAP_ID_INVALID,
-		.pid        = PROCESS_PID_INVALID,
-		.supervisor = {.self_cap    = CAP_ID_INVALID,
-		               .control_cap = CAP_ID_INVALID,
-		               .stdout_cap  = CAP_ID_INVALID,
-		               .stderr_cap  = CAP_ID_INVALID}
+		.endpoint             = CHANNEL_ID_INVALID,
+		.activity             = CAP_ID_INVALID,
+		.root_cap             = CAP_ID_INVALID,
+		.memory_allocator_cap = CAP_ID_INVALID,
+		.dma_cap              = CAP_ID_INVALID,
+		.interrupts_cap       = CAP_ID_INVALID,
+		.io_ports_cap         = CAP_ID_INVALID,
+		.pid                  = PROCESS_PID_INVALID,
+		.supervisor           = {.self_cap    = CAP_ID_INVALID,
+		                         .control_cap = CAP_ID_INVALID,
+		                         .stdout_cap  = CAP_ID_INVALID,
+		                         .stderr_cap  = CAP_ID_INVALID}
     };
 }
 

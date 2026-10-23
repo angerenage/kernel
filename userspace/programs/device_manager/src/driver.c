@@ -130,12 +130,31 @@ static enum dm_driver_catalog_status parse_executable(struct dm_driver* driver, 
 	return DM_DRIVER_CATALOG_OK;
 }
 
+static enum dm_driver_catalog_status parse_capabilities(struct dm_driver* driver, yaml_document_t* document,
+                                                        const yaml_node_t* node) {
+	if (node == NULL || node->type != YAML_SEQUENCE_NODE) return DM_DRIVER_CATALOG_INVALID;
+	for (yaml_node_item_t* item = node->data.sequence.items.start; item != node->data.sequence.items.top; item++) {
+		const yaml_node_t* capability = yaml_document_get_node(document, *item);
+		uint32_t           flag;
+
+		if (scalar_equal(capability, "memory_allocator")) flag = DM_DRIVER_CAPABILITY_MEMORY_ALLOCATOR;
+		else if (scalar_equal(capability, "dma")) flag = DM_DRIVER_CAPABILITY_DMA;
+		else if (scalar_equal(capability, "interrupts")) flag = DM_DRIVER_CAPABILITY_INTERRUPTS;
+		else if (scalar_equal(capability, "io_ports")) flag = DM_DRIVER_CAPABILITY_IO_PORTS;
+		else return DM_DRIVER_CATALOG_INVALID;
+		if ((driver->root_capabilities & flag) != 0u) return DM_DRIVER_CATALOG_INVALID;
+		driver->root_capabilities |= flag;
+	}
+	return DM_DRIVER_CATALOG_OK;
+}
+
 static enum dm_driver_catalog_status parse_driver(struct dm_driver_catalog* catalog, yaml_document_t* document,
                                                   const yaml_node_t* name_node, const yaml_node_t* declaration) {
 	struct dm_driver*             driver;
 	enum dm_driver_catalog_status status              = DM_DRIVER_CATALOG_INVALID;
 	bool                          have_executable     = false;
 	bool                          have_compatible_ids = false;
+	bool                          have_capabilities   = false;
 
 	if (name_node == NULL || name_node->type != YAML_SCALAR_NODE ||
 	    !dm_identifier_valid(name_node->data.scalar.value, name_node->data.scalar.length) || declaration == NULL ||
@@ -166,6 +185,11 @@ static enum dm_driver_catalog_status parse_driver(struct dm_driver_catalog* cata
 			if (have_compatible_ids) goto fail;
 			have_compatible_ids = true;
 			status              = parse_compatible_ids(catalog, driver, document, value);
+		}
+		else if (scalar_equal(key, "root_capabilities")) {
+			if (have_capabilities) goto fail;
+			have_capabilities = true;
+			status            = parse_capabilities(driver, document, value);
 		}
 		else goto fail;
 		if (status != DM_DRIVER_CATALOG_OK) goto fail;

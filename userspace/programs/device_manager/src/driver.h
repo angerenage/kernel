@@ -16,12 +16,21 @@ enum dm_driver_catalog_status {
 	DM_DRIVER_CATALOG_NO_MEMORY,
 };
 
+/* Root authorities that a catalog entry may explicitly request. */
+enum dm_driver_capability {
+	DM_DRIVER_CAPABILITY_MEMORY_ALLOCATOR = 1u << 0u,
+	DM_DRIVER_CAPABILITY_DMA              = 1u << 1u,
+	DM_DRIVER_CAPABILITY_INTERRUPTS       = 1u << 2u,
+	DM_DRIVER_CAPABILITY_IO_PORTS         = 1u << 3u,
+};
+
 /* One immutable driver declaration from the catalog. */
 struct dm_driver {
 	struct dm_string  name;
 	struct dm_string  executable;
 	struct dm_string* compatible_ids;
 	size_t            compatible_count;
+	uint32_t          root_capabilities;
 	cap_id_t          executable_cap;
 	struct dm_driver* next;
 };

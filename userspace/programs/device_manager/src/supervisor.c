@@ -272,6 +272,28 @@ static void binding_launch(struct device_server* server, struct dm_driver_bindin
 			.capability = binding->device->manager_cap,
 			.rights     = CAP_CALL | CAP_READ | CAP_MANAGE,
 		};
+		if ((binding->driver->root_capabilities & DM_DRIVER_CAPABILITY_MEMORY_ALLOCATOR) != 0u)
+			capv[PROCESS_STARTUP_CAP_COUNT + DEVICE_DRIVER_CAPABILITY_MEMORY_ALLOCATOR] =
+				(struct program_capability_argument){
+					.capability = server->memory_allocator_cap,
+					.rights     = DEVICE_DRIVER_MEMORY_ALLOCATOR_CAP_RIGHTS,
+			};
+		if ((binding->driver->root_capabilities & DM_DRIVER_CAPABILITY_DMA) != 0u)
+			capv[PROCESS_STARTUP_CAP_COUNT + DEVICE_DRIVER_CAPABILITY_DMA] = (struct program_capability_argument){
+				.capability = server->dma_cap,
+				.rights     = server->dma_cap == CAP_ID_INVALID ? 0u : DEVICE_DRIVER_DMA_CAP_RIGHTS,
+			};
+		if ((binding->driver->root_capabilities & DM_DRIVER_CAPABILITY_INTERRUPTS) != 0u)
+			capv[PROCESS_STARTUP_CAP_COUNT + DEVICE_DRIVER_CAPABILITY_INTERRUPTS] =
+				(struct program_capability_argument){
+					.capability = server->interrupts_cap,
+					.rights     = DEVICE_DRIVER_INTERRUPTS_CAP_RIGHTS,
+			};
+		if ((binding->driver->root_capabilities & DM_DRIVER_CAPABILITY_IO_PORTS) != 0u)
+			capv[PROCESS_STARTUP_CAP_COUNT + DEVICE_DRIVER_CAPABILITY_IO_PORTS] = (struct program_capability_argument){
+				.capability = server->io_ports_cap,
+				.rights     = server->io_ports_cap == CAP_ID_INVALID ? 0u : DEVICE_DRIVER_IO_PORTS_CAP_RIGHTS,
+			};
 		status =
 			program_run(&loaded, 0u, NULL, PROCESS_STARTUP_CAP_COUNT + DEVICE_DRIVER_CAPABILITY_COUNT, capv, &running);
 	}

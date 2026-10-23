@@ -3,6 +3,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <system/capability.h>
+
+#include "claim.h"
+#include "resource.h"
 
 #define PCI_DEVICE_COUNT 32u
 #define PCI_FUNCTION_COUNT 8u
@@ -24,17 +29,6 @@
 
 #define PCI_CLASS_BRIDGE 0x06u
 #define PCI_SUBCLASS_PCI_TO_PCI 0x04u
-
-struct pci_function {
-	struct pci_address address;
-	uint16_t           vendor_id;
-	uint16_t           device_id;
-	uint8_t            revision_id;
-	uint8_t            programming_interface;
-	uint8_t            subclass;
-	uint8_t            class_code;
-	uint8_t            header_type;
-};
 
 static bool function_read(const struct pci_config* config, struct pci_address address, uint16_t vendor_id,
                           struct pci_function* out_function) {
@@ -76,8 +70,14 @@ static void function_print(const struct pci_function* function) {
 	       function_kind(function));
 }
 
-bool pci_enumerate(const struct pci_host* host) {
-	if (host == NULL) return false;
+bool pci_enumerate(struct pci_host* host, cap_id_t memory_allocator_cap, cap_id_t interrupts_cap, cap_id_t io_ports_cap,
+                   struct pci_inventory* out_inventory) {
+	struct pci_claim_context claims;
+	struct pci_inventory     inventory = {0};
+
+	if (host == NULL || out_inventory == NULL ||
+	    !pci_claim_initialize(memory_allocator_cap, interrupts_cap, io_ports_cap, &claims))
+		return false;
 	for (uint16_t bus = host->first_bus; bus <= host->last_bus; bus++) {
 		for (uint8_t device = 0u; device < PCI_DEVICE_COUNT; device++) {
 			struct pci_address function_zero = {
@@ -86,22 +86,48 @@ bool pci_enumerate(const struct pci_host* host) {
 			uint8_t  header_type;
 			uint8_t  function_count;
 
-			if (!pci_config_read16(&host->config, function_zero, PCI_VENDOR_ID_OFFSET, &vendor)) return false;
+			if (!pci_config_read16(&host->config, function_zero, PCI_VENDOR_ID_OFFSET, &vendor)) goto fail;
 			if (vendor == 0u || vendor == PCI_INVALID_VENDOR_ID) continue;
-			if (!pci_config_read8(&host->config, function_zero, PCI_HEADER_TYPE_OFFSET, &header_type)) return false;
+			if (!pci_config_read8(&host->config, function_zero, PCI_HEADER_TYPE_OFFSET, &header_type)) goto fail;
 			function_count = (header_type & PCI_HEADER_MULTIFUNCTION) != 0u ? PCI_FUNCTION_COUNT : 1u;
 			for (uint8_t function_index = 0u; function_index < function_count; function_index++) {
-				struct pci_address  address = function_zero;
-				struct pci_function function;
+				struct pci_address   address = function_zero;
+				struct pci_function* function;
 
 				address.function = function_index;
-				if (!pci_config_read16(&host->config, address, PCI_VENDOR_ID_OFFSET, &vendor)) return false;
+				if (!pci_config_read16(&host->config, address, PCI_VENDOR_ID_OFFSET, &vendor)) goto fail;
 				if (vendor == 0u || vendor == PCI_INVALID_VENDOR_ID) continue;
-				if (!function_read(&host->config, address, vendor, &function)) return false;
-				function_print(&function);
+				function = calloc(1u, sizeof(*function));
+				if (function == NULL || !function_read(&host->config, address, vendor, function) ||
+				    !pci_resources_detect(&host->config, address, function->header_type, &function->resources)) {
+					free(function);
+					goto fail;
+				}
+				function_print(function);
+				inventory.resource_count += pci_resources_claim(&claims, &address, &function->resources);
+				if (inventory.functions_tail == NULL) inventory.functions = function;
+				else inventory.functions_tail->next = function;
+				inventory.functions_tail = function;
+				inventory.function_count++;
 			}
 		}
 		if (bus == UINT8_MAX) break;
 	}
+	*out_inventory = inventory;
 	return true;
+
+fail:
+	pci_inventory_deinitialize(&inventory);
+	return false;
+}
+
+void pci_inventory_deinitialize(struct pci_inventory* inventory) {
+	if (inventory == NULL) return;
+	while (inventory->functions != NULL) {
+		struct pci_function* next = inventory->functions->next;
+		pci_resources_release(&inventory->functions->resources);
+		free(inventory->functions);
+		inventory->functions = next;
+	}
+	*inventory = (struct pci_inventory){0};
 }
