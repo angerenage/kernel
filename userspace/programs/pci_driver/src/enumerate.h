@@ -10,11 +10,14 @@ struct pci_function {
 	struct pci_address   address;
 	uint16_t             vendor_id;
 	uint16_t             device_id;
+	uint16_t             subsystem_vendor_id;
+	uint16_t             subsystem_id;
 	uint8_t              revision_id;
 	uint8_t              programming_interface;
 	uint8_t              subclass;
 	uint8_t              class_code;
 	uint8_t              header_type;
+	bool                 has_subsystem_ids;
 	struct pci_resources resources;
 	struct pci_function* next;
 };

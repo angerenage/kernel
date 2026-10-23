@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <system/time.h>
 
+#include "device.h"
 #include "enumerate.h"
 #include "host.h"
 
@@ -23,7 +24,14 @@ bool pci_driver_run(cap_id_t device_cap, cap_id_t memory_allocator_cap, cap_id_t
 		pci_host_deinitialize(&host);
 		return false;
 	}
-	printf("pci: discovered %zu function(s), claimed %zu resource(s)\n",
+	syscall_status_t publish_status = pci_devices_publish(device_cap, &inventory);
+	if (publish_status != SYSCALL_STATUS_OK) {
+		fprintf(stderr, "pci: could not publish the discovered functions: %u\n", (unsigned)publish_status);
+		pci_inventory_deinitialize(&inventory);
+		pci_host_deinitialize(&host);
+		return false;
+	}
+	printf("pci: published %zu function(s) with %zu claimed resource(s)\n",
 	       inventory.function_count,
 	       inventory.resource_count);
 	for (;;)

@@ -130,8 +130,12 @@ size_t pci_resources_claim(const struct pci_claim_context* context, const struct
 
 void pci_resources_release(struct pci_resources* resources) {
 	if (resources == NULL) return;
-	for (uint8_t index = 0u; index < resources->bar_count; index++)
+	for (uint8_t index = 0u; index < resources->bar_count; index++) {
 		if (resources->bars[index].capability != CAP_ID_INVALID) (void)cap_drop(resources->bars[index].capability);
+		resources->bars[index].capability = CAP_ID_INVALID;
+	}
 	if (resources->rom.capability != CAP_ID_INVALID) (void)cap_drop(resources->rom.capability);
+	resources->rom.capability = CAP_ID_INVALID;
 	if (resources->msi.capability != CAP_ID_INVALID) (void)cap_drop(resources->msi.capability);
+	resources->msi.capability = CAP_ID_INVALID;
 }

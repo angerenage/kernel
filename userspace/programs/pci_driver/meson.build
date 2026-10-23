@@ -1,6 +1,7 @@
 pci_driver_sources = files(
 	'src/claim.c',
 	'src/config.c',
+	'src/device.c',
 	'src/ecam.c',
 	'src/enumerate.c',
 	'src/host.c',

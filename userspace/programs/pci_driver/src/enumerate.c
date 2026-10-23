@@ -20,6 +20,8 @@
 #define PCI_SUBCLASS_OFFSET 0x0au
 #define PCI_CLASS_CODE_OFFSET 0x0bu
 #define PCI_HEADER_TYPE_OFFSET 0x0eu
+#define PCI_SUBSYSTEM_VENDOR_ID_OFFSET 0x2cu
+#define PCI_SUBSYSTEM_ID_OFFSET 0x2eu
 
 #define PCI_HEADER_LAYOUT_MASK 0x7fu
 #define PCI_HEADER_MULTIFUNCTION (1u << 7u)
@@ -41,6 +43,13 @@ static bool function_read(const struct pci_config* config, struct pci_address ad
 	    !pci_config_read8(config, address, PCI_CLASS_CODE_OFFSET, &function.class_code) ||
 	    !pci_config_read8(config, address, PCI_HEADER_TYPE_OFFSET, &function.header_type))
 		return false;
+	if ((function.header_type & PCI_HEADER_LAYOUT_MASK) == PCI_HEADER_ENDPOINT) {
+		if (!pci_config_read16(config, address, PCI_SUBSYSTEM_VENDOR_ID_OFFSET, &function.subsystem_vendor_id) ||
+		    !pci_config_read16(config, address, PCI_SUBSYSTEM_ID_OFFSET, &function.subsystem_id))
+			return false;
+		function.has_subsystem_ids =
+			function.subsystem_vendor_id != 0u && function.subsystem_vendor_id != PCI_INVALID_VENDOR_ID;
+	}
 	*out_function = function;
 	return true;
 }
