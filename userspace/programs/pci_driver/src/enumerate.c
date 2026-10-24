@@ -85,7 +85,7 @@ bool pci_enumerate(struct pci_host* host, cap_id_t memory_allocator_cap, cap_id_
 	struct pci_inventory     inventory = {0};
 
 	if (host == NULL || out_inventory == NULL ||
-	    !pci_claim_initialize(memory_allocator_cap, interrupts_cap, io_ports_cap, &claims))
+	    !pci_claim_initialize(&host->ranges, memory_allocator_cap, interrupts_cap, io_ports_cap, &claims))
 		return false;
 	for (uint16_t bus = host->first_bus; bus <= host->last_bus; bus++) {
 		for (uint8_t device = 0u; device < PCI_DEVICE_COUNT; device++) {
@@ -122,10 +122,12 @@ bool pci_enumerate(struct pci_host* host, cap_id_t memory_allocator_cap, cap_id_
 		}
 		if (bus == UINT8_MAX) break;
 	}
+	pci_claim_deinitialize(&claims);
 	*out_inventory = inventory;
 	return true;
 
 fail:
+	pci_claim_deinitialize(&claims);
 	pci_inventory_deinitialize(&inventory);
 	return false;
 }

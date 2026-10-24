@@ -24,6 +24,7 @@ struct pci_bar_resource {
 	uint8_t           index;
 	uint64_t          address; /* PCI bus address; firmware translation may still be required. */
 	uint64_t          size;
+	uint64_t          mapping_offset; /* Byte offset of the BAR within its page-aligned Memory capability. */
 	bool              prefetchable;
 	cap_id_t          capability;
 };
@@ -32,6 +33,7 @@ struct pci_bar_resource {
 struct pci_rom_resource {
 	uint64_t address; /* PCI bus address; firmware translation may still be required. */
 	uint64_t size;
+	uint64_t mapping_offset;
 	bool     present;
 	bool     enabled;
 	cap_id_t capability;

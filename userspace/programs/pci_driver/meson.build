@@ -7,6 +7,7 @@ pci_driver_sources = files(
 	'src/host.c',
 	'src/main.c',
 	'src/pci.c',
+	'src/ranges.c',
 	'src/resource.c',
 )
 

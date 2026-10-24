@@ -142,6 +142,8 @@ static syscall_status_t add_bar(const struct device_builder* builder, const stru
 			(resources->command & (bar->kind == PCI_BAR_IO ? PCI_COMMAND_IO_ENABLE : PCI_COMMAND_MEMORY_ENABLE)) != 0u);
 	if (!format(name, sizeof(name), &size, "bar_%u_claimed", bar->index)) return SYSCALL_STATUS_FAILED;
 	if (status == SYSCALL_STATUS_OK) status = add_bool(builder, name, bar->capability != CAP_ID_INVALID);
+	if (!format(name, sizeof(name), &size, "bar_%u_mapping_offset", bar->index)) return SYSCALL_STATUS_FAILED;
+	if (status == SYSCALL_STATUS_OK) status = add_u64(builder, name, bar->mapping_offset);
 	if (memory) {
 		if (!format(name, sizeof(name), &size, "bar_%u_prefetchable", bar->index)) return SYSCALL_STATUS_FAILED;
 		if (status == SYSCALL_STATUS_OK) status = add_bool(builder, name, bar->prefetchable);
@@ -170,6 +172,7 @@ static syscall_status_t add_rom(const struct device_builder* builder, const stru
 	if (status == SYSCALL_STATUS_OK) status = add_bool(builder, "expansion_rom_enabled", rom->enabled);
 	if (status == SYSCALL_STATUS_OK)
 		status = add_bool(builder, "expansion_rom_claimed", rom->capability != CAP_ID_INVALID);
+	if (status == SYSCALL_STATUS_OK) status = add_u64(builder, "expansion_rom_mapping_offset", rom->mapping_offset);
 	if (status == SYSCALL_STATUS_OK && rom->capability != CAP_ID_INVALID)
 		status = device_builder_add_resource(
 			builder, "expansion_rom", sizeof("expansion_rom") - 1u, rom->capability, PCI_MEMORY_RESOURCE_RIGHTS);

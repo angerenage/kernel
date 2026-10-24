@@ -25,12 +25,12 @@ static void claim_error(const struct pci_address* address, const char* resource,
 	        (unsigned)status);
 }
 
-bool pci_claim_initialize(cap_id_t memory_allocator_cap, cap_id_t interrupts_cap, cap_id_t io_ports_cap,
-                          struct pci_claim_context* out_context) {
+bool pci_claim_initialize(const struct pci_host_ranges* ranges, cap_id_t memory_allocator_cap, cap_id_t interrupts_cap,
+                          cap_id_t io_ports_cap, struct pci_claim_context* out_context) {
 	struct memory_allocator_info memory;
 
-	if (out_context == NULL || memory_allocator_cap == CAP_ID_INVALID || interrupts_cap == CAP_ID_INVALID ||
-	    memory_allocator_info(memory_allocator_cap, &memory) != SYSCALL_STATUS_OK ||
+	if (ranges == NULL || out_context == NULL || memory_allocator_cap == CAP_ID_INVALID ||
+	    interrupts_cap == CAP_ID_INVALID || memory_allocator_info(memory_allocator_cap, &memory) != SYSCALL_STATUS_OK ||
 	    memory.physical_claim_granule == 0u ||
 	    (memory.physical_claim_granule & (memory.physical_claim_granule - 1u)) != 0u)
 		return false;
@@ -39,7 +39,26 @@ bool pci_claim_initialize(cap_id_t memory_allocator_cap, cap_id_t interrupts_cap
 		.interrupts_cap       = interrupts_cap,
 		.io_ports_cap         = io_ports_cap,
 		.memory_granule       = memory.physical_claim_granule,
+		.ranges               = ranges,
 	};
+#if !defined(__x86_64__)
+	for (size_t index = 0u; index < ranges->count; index++) {
+		const struct pci_host_range* range = &ranges->values[index];
+		syscall_status_t             status;
+
+		if (range->cpu_address > UINTPTR_MAX || range->size > SIZE_MAX ||
+		    (range->cpu_address & (memory.physical_claim_granule - 1u)) != 0u ||
+		    (range->size & (memory.physical_claim_granule - 1u)) != 0u)
+			continue;
+		status = memory_allocator_claim_physical(memory_allocator_cap,
+		                                         (uintptr_t)range->cpu_address,
+		                                         (size_t)range->size,
+		                                         MEMORY_TYPE_DEVICE,
+		                                         &out_context->host_memory_caps[index]);
+		if (status != SYSCALL_STATUS_OK)
+			fprintf(stderr, "pci: could not claim Device Tree host range %zu: %u\n", index, (unsigned)status);
+	}
+#endif
 #if defined(__x86_64__)
 	if (io_ports_cap != CAP_ID_INVALID) {
 		struct io_port_info ports;
@@ -53,28 +72,41 @@ bool pci_claim_initialize(cap_id_t memory_allocator_cap, cap_id_t interrupts_cap
 	return true;
 }
 
-#if defined(__x86_64__)
 static bool claim_memory(const struct pci_claim_context* context, const struct pci_address* address, uint64_t base,
-                         uint64_t size, cap_id_t* out_cap) {
+                         uint64_t size, cap_id_t* out_cap, uint64_t* out_mapping_offset) {
 	syscall_status_t status;
+	size_t           mapping_offset;
+	uintptr_t        claim_base;
+	size_t           required_size;
+	size_t           claimed_size;
 
-	if (base == 0u || size == 0u) return false;
-	if (base > UINTPTR_MAX || size > SIZE_MAX || base > UINTPTR_MAX - (size - 1u) ||
-	    (base & (context->memory_granule - 1u)) != 0u || size > SIZE_MAX - (context->memory_granule - 1u)) {
-		claim_error(address, "unaligned MMIO range", SYSCALL_STATUS_BAD_ARGUMENT);
-		return false;
-	}
-	size_t claimed_size = ((size_t)size + context->memory_granule - 1u) & ~(context->memory_granule - 1u);
-	if (claimed_size > UINTPTR_MAX - (uintptr_t)base) {
+	if (base == 0u || size == 0u || out_mapping_offset == NULL) return false;
+	*out_mapping_offset = 0u;
+	if (base > UINTPTR_MAX || size > SIZE_MAX || base > UINTPTR_MAX - (size - 1u)) {
 		claim_error(address, "MMIO range", SYSCALL_STATUS_BAD_ARGUMENT);
 		return false;
 	}
+	mapping_offset = (size_t)base & (context->memory_granule - 1u);
+	claim_base     = (uintptr_t)base - mapping_offset;
+	if ((size_t)size > SIZE_MAX - mapping_offset) {
+		claim_error(address, "MMIO range", SYSCALL_STATUS_BAD_ARGUMENT);
+		return false;
+	}
+	required_size = mapping_offset + (size_t)size;
+	if (required_size > SIZE_MAX - (context->memory_granule - 1u)) {
+		claim_error(address, "MMIO range", SYSCALL_STATUS_BAD_ARGUMENT);
+		return false;
+	}
+	claimed_size = (required_size + context->memory_granule - 1u) & ~(context->memory_granule - 1u);
+	if (claimed_size > UINTPTR_MAX - claim_base) return false;
 	status = memory_allocator_claim_physical(
-		context->memory_allocator_cap, (uintptr_t)base, claimed_size, MEMORY_TYPE_DEVICE, out_cap);
+		context->memory_allocator_cap, claim_base, claimed_size, MEMORY_TYPE_DEVICE, out_cap);
 	if (status != SYSCALL_STATUS_OK) claim_error(address, "MMIO range", status);
+	else *out_mapping_offset = mapping_offset;
 	return status == SYSCALL_STATUS_OK;
 }
 
+#if defined(__x86_64__)
 static bool claim_io(const struct pci_claim_context* context, const struct pci_address* address, uint64_t base,
                      uint64_t size, cap_id_t* out_cap) {
 	syscall_status_t status;
@@ -92,6 +124,48 @@ static bool claim_io(const struct pci_claim_context* context, const struct pci_a
 	return status == SYSCALL_STATUS_OK;
 }
 #endif
+
+static bool claim_host_memory(const struct pci_claim_context* context, const struct pci_address* address,
+                              enum pci_host_range_kind kind, uint64_t bus_address, uint64_t size, cap_id_t* out_cap,
+                              uint64_t* out_mapping_offset) {
+	size_t   range_index;
+	uint64_t offset;
+	uint64_t cpu_address;
+
+	if (out_mapping_offset == NULL) return false;
+	*out_mapping_offset = 0u;
+	if (!pci_host_ranges_locate(context->ranges, kind, bus_address, size, &range_index, &offset, &cpu_address)) {
+		claim_error(address, "untranslated host range", SYSCALL_STATUS_UNAVAILABLE);
+		return false;
+	}
+	if (context->ranges->identity)
+		return claim_memory(context, address, cpu_address, size, out_cap, out_mapping_offset);
+#if !defined(__x86_64__)
+	if (range_index >= PCI_HOST_RANGE_COUNT || context->host_memory_caps[range_index] == CAP_ID_INVALID ||
+	    offset > SIZE_MAX || size > SIZE_MAX) {
+		claim_error(address, "host range", SYSCALL_STATUS_UNAVAILABLE);
+		return false;
+	}
+	size_t mapping_offset = (size_t)offset & (context->memory_granule - 1u);
+	size_t slice_offset   = (size_t)offset - mapping_offset;
+	if ((size_t)size > SIZE_MAX - mapping_offset) {
+		claim_error(address, "host range", SYSCALL_STATUS_BAD_ARGUMENT);
+		return false;
+	}
+	size_t required = mapping_offset + (size_t)size;
+	if (required > SIZE_MAX - (context->memory_granule - 1u)) {
+		claim_error(address, "host range", SYSCALL_STATUS_BAD_ARGUMENT);
+		return false;
+	}
+	size_t           slice_size = (required + context->memory_granule - 1u) & ~(context->memory_granule - 1u);
+	syscall_status_t status = memory_slice(context->host_memory_caps[range_index], slice_offset, slice_size, out_cap);
+	if (status != SYSCALL_STATUS_OK) claim_error(address, "host range", status);
+	else *out_mapping_offset = mapping_offset;
+	return status == SYSCALL_STATUS_OK;
+#else
+	return false;
+#endif
+}
 
 static bool claim_msi(const struct pci_claim_context* context, const struct pci_address* address,
                       struct pci_msi_resource* msi) {
@@ -112,20 +186,41 @@ size_t pci_resources_claim(const struct pci_claim_context* context, const struct
 	size_t count = 0u;
 
 	if (context == NULL || address == NULL || resources == NULL) return 0u;
-#if defined(__x86_64__)
-	/* PCI bus addresses are identity-mapped on PC x86; other hosts still need ranges translation. */
 	for (uint8_t index = 0u; index < resources->bar_count; index++) {
 		struct pci_bar_resource* bar = &resources->bars[index];
+#if defined(__x86_64__)
 		if (bar->kind == PCI_BAR_IO) count += claim_io(context, address, bar->address, bar->size, &bar->capability);
-		else if (bar->kind == PCI_BAR_MEMORY32 || bar->kind == PCI_BAR_MEMORY64)
-			count += claim_memory(context, address, bar->address, bar->size, &bar->capability);
-	}
-	if (resources->rom.present)
-		count +=
-			claim_memory(context, address, resources->rom.address, resources->rom.size, &resources->rom.capability);
+#else
+		if (bar->kind == PCI_BAR_IO && !context->ranges->identity)
+			count += claim_host_memory(
+				context, address, PCI_HOST_RANGE_IO, bar->address, bar->size, &bar->capability, &bar->mapping_offset);
 #endif
+		else if (bar->kind == PCI_BAR_MEMORY32 || bar->kind == PCI_BAR_MEMORY64)
+			count += claim_host_memory(context,
+			                           address,
+			                           PCI_HOST_RANGE_MEMORY,
+			                           bar->address,
+			                           bar->size,
+			                           &bar->capability,
+			                           &bar->mapping_offset);
+	}
+	if (resources->rom.present && resources->rom.address != 0u)
+		count += claim_host_memory(context,
+		                           address,
+		                           PCI_HOST_RANGE_MEMORY,
+		                           resources->rom.address,
+		                           resources->rom.size,
+		                           &resources->rom.capability,
+		                           &resources->rom.mapping_offset);
 	count += claim_msi(context, address, &resources->msi);
 	return count;
+}
+
+void pci_claim_deinitialize(struct pci_claim_context* context) {
+	if (context == NULL) return;
+	for (size_t index = 0u; index < PCI_HOST_RANGE_COUNT; index++)
+		if (context->host_memory_caps[index] != CAP_ID_INVALID) (void)cap_drop(context->host_memory_caps[index]);
+	*context = (struct pci_claim_context){0};
 }
 
 void pci_resources_release(struct pci_resources* resources) {

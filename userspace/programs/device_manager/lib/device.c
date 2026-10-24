@@ -240,7 +240,7 @@ syscall_status_t device_builder_add_resource(const struct device_builder* builde
 syscall_status_t device_builder_add_mmio_resource(const struct device_builder* builder, cap_id_t memory_allocator_cap,
                                                   const char* name, size_t name_size, uintptr_t physical_address,
                                                   size_t size) {
-	static const cap_rights_t    driver_rights = CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP;
+	static const cap_rights_t    driver_rights = CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP | CAP_DERIVE;
 	struct memory_allocator_info allocator;
 	cap_id_t                     memory_cap = CAP_ID_INVALID;
 	size_t                       claimed_size;
