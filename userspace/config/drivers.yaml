@@ -15,6 +15,11 @@ drivers:
       - "acpi:MCFG"
       - "dt:pci-host-ecam-generic"
 
+  ahci:
+    executable: "/boot/ahci_driver.elf"
+    compatible_ids:
+      - "pci:class:01:06:01"
+
   tpm:
     executable: "/boot/tpm_driver.elf"
     compatible_ids:
