@@ -155,7 +155,7 @@ static inline uint64_t riscv_leaf_flags(uint64_t flags, enum memory_type memory_
 	if ((flags & HAL_PAGE_EXEC) != 0) entry |= RISCV_PTE_X;
 	if ((flags & HAL_PAGE_GLOBAL) != 0) entry |= RISCV_PTE_G;
 	if ((flags & HAL_PAGE_USER) != 0) entry |= RISCV_PTE_U;
-	if (memory_type == MEMORY_TYPE_DEVICE) entry |= RISCV_PTE_PBMT_IO;
+	if (memory_type == MEMORY_TYPE_DEVICE && svpbmt_available) entry |= RISCV_PTE_PBMT_IO;
 
 	return entry;
 }
@@ -309,8 +309,7 @@ static bool riscv_protection_supported(uint64_t flags) {
 
 bool hal_paging_mapping_supported(uint64_t flags, enum memory_type memory_type) {
 	return riscv_protection_supported(flags) &&
-	       (memory_type == MEMORY_TYPE_NORMAL || (memory_type == MEMORY_TYPE_DEVICE && svpbmt_available)) &&
-	       memory_type < MEMORY_TYPE_COUNT;
+	       (memory_type == MEMORY_TYPE_NORMAL || memory_type == MEMORY_TYPE_DEVICE) && memory_type < MEMORY_TYPE_COUNT;
 }
 
 struct hal_paging_space* hal_paging_kernel_space(void) {
