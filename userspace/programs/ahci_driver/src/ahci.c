@@ -14,6 +14,7 @@
 #include <system/process.h>
 #include <system/time.h>
 
+#include "dma.h"
 #include "registers.h"
 
 #define AHCI_PCI_CLASS_MASS_STORAGE 0x01u
@@ -203,14 +204,25 @@ static bool inspect_ports(const struct ahci_mapping* mapping, uint32_t capabilit
 }
 
 bool ahci_driver_run(cap_id_t device_cap) {
-	struct ahci_mapping mapping;
-	uint64_t            bar_size;
-	uint64_t            mapping_offset;
-	uint32_t            capabilities;
-	uint32_t            version;
-	uint32_t            implemented;
-	uint32_t            control;
-	bool                success;
+	struct ahci_mapping     mapping;
+	struct ahci_dma_context dma = {
+		.source_cap           = CAP_ID_INVALID,
+		.memory_allocator_cap = CAP_ID_INVALID,
+		.device_space_cap     = CAP_ID_INVALID,
+		.binding_cap          = CAP_ID_INVALID,
+		.process_space_cap    = CAP_ID_INVALID,
+	};
+	struct ahci_dma_buffer control_buffer = {
+		.cpu_mapping_cap    = CAP_ID_INVALID,
+		.device_mapping_cap = CAP_ID_INVALID,
+	};
+	uint64_t bar_size;
+	uint64_t mapping_offset;
+	uint32_t capabilities;
+	uint32_t version;
+	uint32_t implemented;
+	uint32_t control;
+	bool     success;
 
 	if (device_cap == CAP_ID_INVALID || !validate_device(device_cap, &bar_size, &mapping_offset)) return false;
 	if (!mapping_initialize(device_cap, bar_size, mapping_offset, &mapping)) {
@@ -231,7 +243,18 @@ bool ahci_driver_run(cap_id_t device_cap) {
 	       (capabilities & AHCI_CAP_SNCQ) != 0u ? "yes" : "no",
 	       (control & AHCI_GHC_AE) != 0u ? "AHCI" : "legacy");
 	success = inspect_ports(&mapping, capabilities, implemented);
+	if (success && !ahci_dma_initialize(device_cap, &dma)) success = false;
+	if (success && !ahci_dma_buffer_allocate(&dma, 4096u, MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE, &control_buffer)) {
+		fprintf(stderr, "ahci: unable to allocate DMA control memory\n");
+		success = false;
+	}
+	if (success)
+		printf("ahci: DMA control memory mapped at device address %p (%zu bytes)\n",
+		       (void*)control_buffer.device_address,
+		       control_buffer.size);
 	while (success) success = sleep_ms(1000u) == SYSCALL_STATUS_OK;
+	if (control_buffer.device_mapping_cap != CAP_ID_INVALID) ahci_dma_buffer_release(&control_buffer);
+	if (dma.source_cap != CAP_ID_INVALID) ahci_dma_deinitialize(&dma);
 	mapping_release(&mapping);
 	return success;
 }

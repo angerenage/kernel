@@ -1,5 +1,6 @@
 ahci_driver_sources = files(
 	'src/ahci.c',
+	'src/dma.c',
 	'src/main.c',
 )
 
