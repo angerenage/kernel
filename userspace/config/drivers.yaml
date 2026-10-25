@@ -21,6 +21,11 @@ drivers:
     compatible_ids:
       - "pci:class:01:06:01"
 
+  sata:
+    executable: "/boot/sata_driver.elf"
+    compatible_ids:
+      - "ahci:sata"
+
   tpm:
     executable: "/boot/tpm_driver.elf"
     compatible_ids:
