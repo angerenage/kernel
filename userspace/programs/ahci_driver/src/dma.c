@@ -16,7 +16,7 @@
 #define AHCI_DMA_ALLOCATOR_RESOURCE "dma_allocator"
 #define AHCI_DMA_SOURCE_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_ALLOCATE | CAP_MANAGE))
 #define AHCI_DMA_ALLOCATOR_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_ALLOCATE))
-#define AHCI_DMA_MEMORY_RIGHTS ((cap_rights_t)(CAP_READ | CAP_WRITE | CAP_MAP))
+#define AHCI_DMA_MEMORY_RIGHTS ((cap_rights_t)(CAP_READ | CAP_WRITE | CAP_MAP | CAP_DELEGATE))
 
 static bool align_up(size_t value, size_t alignment, size_t* out_value) {
 	if (out_value == NULL || alignment == 0u || (alignment & (alignment - 1u)) != 0u ||
@@ -121,7 +121,9 @@ void ahci_dma_buffer_release(struct ahci_dma_buffer* buffer) {
 	if (buffer == NULL) return;
 	if (buffer->device_mapping_cap != CAP_ID_INVALID) (void)mapping_unmap(buffer->device_mapping_cap);
 	if (buffer->cpu_mapping_cap != CAP_ID_INVALID) (void)mapping_unmap(buffer->cpu_mapping_cap);
+	if (buffer->memory_cap != CAP_ID_INVALID) (void)cap_drop(buffer->memory_cap);
 	*buffer = (struct ahci_dma_buffer){
+		.memory_cap         = CAP_ID_INVALID,
 		.cpu_mapping_cap    = CAP_ID_INVALID,
 		.device_mapping_cap = CAP_ID_INVALID,
 	};
@@ -142,6 +144,7 @@ bool ahci_dma_buffer_allocate(const struct ahci_dma_context* context, size_t siz
 	    (device_access & ~MEMORY_ACCESS_VALID_MASK) != 0u || (device_access & MEMORY_ACCESS_EXEC) != 0u)
 		return false;
 	*out_buffer = (struct ahci_dma_buffer){
+		.memory_cap         = CAP_ID_INVALID,
 		.cpu_mapping_cap    = CAP_ID_INVALID,
 		.device_mapping_cap = CAP_ID_INVALID,
 	};
@@ -172,18 +175,18 @@ bool ahci_dma_buffer_allocate(const struct ahci_dma_context* context, size_t siz
 	                      &device_mapping) != SYSCALL_STATUS_OK ||
 	    device_mapping.mapping_cap == CAP_ID_INVALID || device_mapping.address == 0u)
 		goto fail;
-	(void)cap_drop(memory_cap);
-	memory_cap = CAP_ID_INVALID;
 	memset((void*)cpu_mapping.address, 0, allocation_size);
 	if (mapping_sync(device_mapping.mapping_cap, 0u, allocation_size, DMA_SYNC_FOR_DEVICE) != SYSCALL_STATUS_OK)
 		goto fail;
 	*out_buffer = (struct ahci_dma_buffer){
+		.memory_cap         = memory_cap,
 		.cpu_mapping_cap    = cpu_mapping.mapping_cap,
 		.device_mapping_cap = device_mapping.mapping_cap,
 		.cpu_address        = (void*)cpu_mapping.address,
 		.device_address     = device_mapping.address,
 		.size               = allocation_size,
 	};
+	memory_cap = CAP_ID_INVALID;
 	return true;
 
 fail:

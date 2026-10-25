@@ -243,7 +243,7 @@ syscall_status_t pci_claim_dma_allocator(const struct device_builder* builder, c
 	const struct memory_allocator_derive_request request = {
 		.header           = {.op = MEMORY_ALLOCATOR_OP_DERIVE},
 		.allocator_rights = CAP_CALL | CAP_READ | CAP_ALLOCATE | CAP_DELEGATE,
-		.memory_rights    = CAP_READ | CAP_WRITE | CAP_MAP,
+		.memory_rights    = CAP_READ | CAP_WRITE | CAP_MAP | CAP_DELEGATE,
 		.memory_type_mask = 1ull << MEMORY_TYPE_NORMAL,
 	};
 	cap_id_t         allocator_cap = CAP_ID_INVALID;

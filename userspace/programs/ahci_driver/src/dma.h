@@ -18,6 +18,7 @@ struct ahci_dma_context {
 
 /* One allocation projected into both CPU and device address spaces. */
 struct ahci_dma_buffer {
+	cap_id_t  memory_cap;
 	cap_id_t  cpu_mapping_cap;
 	cap_id_t  device_mapping_cap;
 	void*     cpu_address;
@@ -32,7 +33,7 @@ bool ahci_dma_initialize(cap_id_t device_cap, struct ahci_dma_context* out_conte
 bool ahci_dma_buffer_allocate(const struct ahci_dma_context* context, size_t size, memory_access_t device_access,
                               struct ahci_dma_buffer* out_buffer);
 
-/* Destroy both projections of a DMA allocation. */
+/* Destroy the allocation and both of its projections. */
 void ahci_dma_buffer_release(struct ahci_dma_buffer* buffer);
 
 /* Unbind and release a DMA context after all buffers have been released. */

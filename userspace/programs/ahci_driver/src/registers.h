@@ -26,6 +26,18 @@
 #define AHCI_PORT_SIGNATURE_SEMB 0xc33c0101u
 #define AHCI_PORT_SIGNATURE_MULTIPLIER 0x96690101u
 
+#define AHCI_PORT_CMD_ST (1u << 0u)
+#define AHCI_PORT_CMD_FRE (1u << 4u)
+#define AHCI_PORT_CMD_FR (1u << 14u)
+#define AHCI_PORT_CMD_CR (1u << 15u)
+
+#define AHCI_PORT_TFD_ERR (1u << 0u)
+#define AHCI_PORT_TFD_DRQ (1u << 3u)
+#define AHCI_PORT_TFD_DF (1u << 5u)
+#define AHCI_PORT_TFD_BSY (1u << 7u)
+
+#define AHCI_PORT_IS_TFES (1u << 30u)
+
 /* AHCI generic host-control register block. */
 struct ahci_host_registers {
 	uint32_t capabilities;
