@@ -7,6 +7,9 @@
 /* Return the initialized IOMMU information for a controller. */
 const struct hal_iommu_info* dma_controller_info(uint32_t controller_index);
 
+/* Return whether an index represents the identity-mapped DMA backend. */
+bool dma_controller_is_direct(uint32_t controller_index);
+
 /* Return the initialized HAL state for an IOMMU controller. */
 struct hal_iommu_controller_state* dma_controller_state(uint32_t controller_index);
 

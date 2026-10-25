@@ -44,6 +44,7 @@ struct dma_controller {
 
 static struct dma_controller* dma_controllers;
 static size_t                 dma_controller_count;
+static struct dma_controller  dma_direct_controller;
 static bool                   dma_initialized;
 
 static void* physical_to_virtual(uintptr_t address) {
@@ -51,7 +52,9 @@ static void* physical_to_virtual(uintptr_t address) {
 }
 
 static struct dma_controller* dma_controller_at_index(uint32_t index) {
-	return dma_initialized && index < dma_controller_count ? &dma_controllers[index] : NULL;
+	if (!dma_initialized) return NULL;
+	if (index == DMA_DIRECT_CONTROLLER_INDEX) return &dma_direct_controller;
+	return index < dma_controller_count ? &dma_controllers[index] : NULL;
 }
 static bool dma_context_growth_capacity(size_t current_capacity, size_t required_capacity, size_t* out_capacity) {
 	size_t capacity;
@@ -151,7 +154,8 @@ static struct dma_binding* dma_binding_find(struct dma_controller* controller, d
 }
 
 bool dma_init(void) {
-	size_t count = hal_iommu_controller_count();
+	size_t                 count = hal_iommu_controller_count();
+	const struct pmm_info* pmm;
 	if (dma_initialized) return true;
 	if (count > UINT32_MAX) return false;
 	dma_controllers = count == 0u ? NULL : calloc(count, sizeof(*dma_controllers));
@@ -176,12 +180,34 @@ bool dma_init(void) {
 		spinlock_init_class(
 			&dma_controllers[index].lock, "dma_controller", SPINLOCK_ORDER_DMA_CONTROLLER, SPINLOCK_FLAG_IRQSAVE);
 	}
+	pmm = pmm_info();
+	if (pmm == NULL || pmm->allocation_granule == 0u ||
+	    (pmm->allocation_granule & (pmm->allocation_granule - 1u)) != 0u) {
+		free(dma_controllers);
+		dma_controllers      = NULL;
+		dma_controller_count = 0u;
+		return false;
+	}
+	dma_direct_controller = (struct dma_controller){
+		.init_state = DMA_CONTROLLER_INITIALIZED,
+		.info =
+			{
+				   .minimum_leaf_size     = pmm->allocation_granule,
+				   .leaf_size_mask        = 1ull << size_shift(pmm->allocation_granule),
+				   .io_address_bits       = sizeof(uintptr_t) * 8u,
+				   .physical_address_bits = sizeof(uintptr_t) * 8u,
+				   .context_id_bits       = 32u,
+				   .source_id_bits        = 32u,
+				   },
+	};
+	spinlock_init_class(
+		&dma_direct_controller.lock, "dma_direct", SPINLOCK_ORDER_DMA_CONTROLLER, SPINLOCK_FLAG_IRQSAVE);
 	dma_initialized = true;
 	return true;
 }
 
 bool dma_available(void) {
-	return dma_initialized && dma_controller_count != 0u;
+	return dma_initialized;
 }
 
 static bool dma_controller_from_register_address(uint64_t controller_register_address, uint32_t* out_controller_index) {
@@ -200,12 +226,16 @@ static bool dma_controller_decode_source(dma_source_t source, uint32_t* out_cont
 	if (out_controller_index == NULL || out_local_source_id == NULL || source == DMA_SOURCE_INVALID) return false;
 	*out_controller_index = (uint32_t)(source >> 32u);
 	*out_local_source_id  = (uint32_t)source;
-	return *out_controller_index < dma_controller_count;
+	return *out_controller_index == DMA_DIRECT_CONTROLLER_INDEX || *out_controller_index < dma_controller_count;
 }
 
 const struct hal_iommu_info* dma_controller_info(uint32_t controller_index) {
 	struct dma_controller* controller = dma_controller_at_index(controller_index);
 	return dma_controller_is_initialized(controller) ? &controller->info : NULL;
+}
+
+bool dma_controller_is_direct(uint32_t controller_index) {
+	return dma_initialized && controller_index == DMA_DIRECT_CONTROLLER_INDEX;
 }
 
 struct hal_iommu_controller_state* dma_controller_state(uint32_t controller_index) {
@@ -363,7 +393,11 @@ bool dma_pci_source_resolve(uint16_t segment, uint16_t requester_id, dma_source_
 		source  = ((dma_source_t)index << 32u) | local_source_id;
 		matched = true;
 	}
-	if (!matched) return false;
+	if (!matched) {
+		uint32_t identity = ((uint32_t)segment << 16u) | requester_id;
+		source            = ((dma_source_t)DMA_DIRECT_CONTROLLER_INDEX << 32u) | identity;
+		if (source == DMA_SOURCE_INVALID) return false;
+	}
 	*out_source = source;
 	return true;
 }
@@ -374,6 +408,7 @@ bool dma_source_valid(dma_source_t source) {
 	struct dma_controller* controller;
 
 	if (!dma_controller_decode_source(source, &controller_index, &local_source_id)) return false;
+	if (dma_controller_is_direct(controller_index)) return true;
 	controller = dma_controller_at_index(controller_index);
 	if (controller == NULL || !dma_controller_initialize(controller)) return false;
 	return controller->info.source_id_bits == 32u || local_source_id < (1u << controller->info.source_id_bits);
@@ -394,11 +429,13 @@ bool dma_address_space_create(dma_source_t compatibility_source, struct address_
 	if (controller == NULL || !dma_controller_initialize(controller)) return false;
 	if (controller->info.source_id_bits < 32u && local_source_id >= (1u << controller->info.source_id_bits))
 		return false;
-	if (!dma_controller_acquire_context(controller_index, &context_id)) return false;
+	bool direct = dma_controller_is_direct(controller_index);
+	context_id  = 0u;
+	if (!direct && !dma_controller_acquire_context(controller_index, &context_id)) return false;
 	granule = pmm_info() == NULL ? 0u : pmm_info()->allocation_granule;
 	if (granule == 0u ||
 	    !pmm_alloc(&(const struct pmm_alloc_request){.size = granule, .alignment = granule}, &allocation)) {
-		if (!dma_controller_release_context(controller_index, context_id)) hcf();
+		if (!direct && !dma_controller_release_context(controller_index, context_id)) hcf();
 		return false;
 	}
 	space = physical_to_virtual(allocation.address);
@@ -414,8 +451,9 @@ bool dma_address_space_create(dma_source_t compatibility_source, struct address_
 	                    SPINLOCK_ORDER_VADDR,
 	                    SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
 	if (space->end <= space->base ||
-	    !hal_iommu_space_init(&controller->hal, space->backend.device.context_id, &space->backend.device.hal)) {
-		if (!dma_controller_release_context(controller_index, space->backend.device.context_id)) hcf();
+	    (!direct &&
+	     !hal_iommu_space_init(&controller->hal, space->backend.device.context_id, &space->backend.device.hal))) {
+		if (!direct && !dma_controller_release_context(controller_index, space->backend.device.context_id)) hcf();
 		(void)pmm_free(allocation);
 		return false;
 	}
@@ -508,7 +546,9 @@ bool dma_bind(dma_source_t source, struct address_space* device_space, struct dm
 
 	struct irq_state state = spinlock_lock_irqsave(&controller->lock);
 	if (dma_binding_find(controller, source) != NULL ||
-	    !hal_iommu_attach(&controller->hal, &device_space->backend.device.hal, local_source_id, &binding->attachment)) {
+	    (!dma_controller_is_direct(controller_index) &&
+	     !hal_iommu_attach(
+			 &controller->hal, &device_space->backend.device.hal, local_source_id, &binding->attachment))) {
 		spinlock_unlock_irqrestore(&controller->lock, state);
 		address_space_device_release(device_space);
 		free(binding);
@@ -542,7 +582,8 @@ bool dma_unbind(struct dma_binding* binding) {
 	}
 	for (link = &controller->bindings; *link != NULL && *link != binding; link = &(*link)->next) {
 	}
-	if (*link != binding || !hal_iommu_detach(&controller->hal, local_source_id, &binding->attachment)) {
+	if (*link != binding || (!dma_controller_is_direct(controller_index) &&
+	                         !hal_iommu_detach(&controller->hal, local_source_id, &binding->attachment))) {
 		spinlock_unlock_irqrestore(&controller->lock, state);
 		return false;
 	}

@@ -8,16 +8,22 @@ struct address_space;
 struct mapping;
 struct dma_binding;
 
+/* Reserved controller index used by identity-mapped DMA sources. */
+#define DMA_DIRECT_CONTROLLER_INDEX UINT32_MAX
+
 /* Discover the available IOMMU controllers for DMA. */
 bool dma_init(void);
 
-/* Return whether at least one IOMMU-backed DMA controller is available. */
+/* Return whether DMA source management is available. */
 bool dma_available(void);
+
+/* Return whether an index represents the identity-mapped DMA backend. */
+bool dma_controller_is_direct(uint32_t controller_index);
 
 /* Resolve a physical controller register address and local source ID into an opaque DMA source. */
 bool dma_source_resolve(uint64_t controller_register_address, uint32_t local_source_id, dma_source_t* out_source);
 
-/* Resolve firmware IOMMU routing for one PCI requester. */
+/* Resolve one PCI requester through firmware IOMMU routing or direct DMA. */
 bool dma_pci_source_resolve(uint16_t segment, uint16_t requester_id, dma_source_t* out_source);
 
 /* Validate that a DMA source names an input implemented by an initialized controller. */

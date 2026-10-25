@@ -187,6 +187,10 @@ static bool space_is_device(const struct address_space* space) {
 	return space != NULL && space->kind == ADDRESS_SPACE_KIND_DEVICE;
 }
 
+static bool space_is_direct_device(const struct address_space* space) {
+	return space_is_device(space) && dma_controller_is_direct(space->backend.device.controller_index);
+}
+
 static size_t translation_granule(void) {
 	const struct hal_paging_info* info = hal_paging_info();
 	return info == NULL ? 0u : info->minimum_leaf_size;
@@ -194,6 +198,10 @@ static size_t translation_granule(void) {
 
 size_t address_space_minimum_mapping_size(const struct address_space* space) {
 	if (space_is_device(space)) {
+		if (space_is_direct_device(space)) {
+			const struct pmm_info* pmm = pmm_info();
+			return pmm == NULL ? 0u : pmm->allocation_granule;
+		}
 		const struct hal_iommu_info* info = dma_controller_info(space->backend.device.controller_index);
 		return info == NULL ? 0u : info->minimum_leaf_size;
 	}
@@ -348,7 +356,8 @@ uint64_t address_space_paging_flags(const struct address_space* space, memory_ac
 
 bool address_space_is_initialized(const struct address_space* space) {
 	if (space == NULL || space->destroying || space->end <= space->base) return false;
-	if (space->kind == ADDRESS_SPACE_KIND_DEVICE) return space->backend.device.hal.table.initialized;
+	if (space->kind == ADDRESS_SPACE_KIND_DEVICE)
+		return space_is_direct_device(space) || space->backend.device.hal.table.initialized;
 	return space->backend.process.hal != NULL;
 }
 
@@ -375,11 +384,12 @@ static void address_space_device_destroy(struct address_space* space) {
 	controller_index  = space->backend.device.controller_index;
 	context_id        = space->backend.device.context_id;
 	iommu_controller  = dma_controller_state(controller_index);
-	if (iommu_controller == NULL || !space->backend.device.hal.table.initialized) {
+	bool direct       = dma_controller_is_direct(controller_index);
+	if (!direct && (iommu_controller == NULL || !space->backend.device.hal.table.initialized)) {
 		spinlock_unlock_irqrestore(&space->lock, state);
 		hcf();
 	}
-	for (struct mapping* mapping = mappings; mapping != NULL; mapping = mapping->next) {
+	for (struct mapping* mapping = direct ? NULL : mappings; mapping != NULL; mapping = mapping->next) {
 		if (mapping->access != 0u &&
 		    !hal_iommu_unmap(iommu_controller, &space->backend.device.hal, mapping->address, mapping->size)) {
 			spinlock_unlock_irqrestore(&space->lock, state);
@@ -398,8 +408,10 @@ static void address_space_device_destroy(struct address_space* space) {
 	space->mapping_count     = 0u;
 	spinlock_unlock_irqrestore(&space->lock, state);
 
-	hal_iommu_space_deinit(iommu_controller, &space->backend.device.hal);
-	if (!dma_controller_release_context(controller_index, context_id)) hcf();
+	if (!direct) {
+		hal_iommu_space_deinit(iommu_controller, &space->backend.device.hal);
+		if (!dma_controller_release_context(controller_index, context_id)) hcf();
+	}
 
 	while (mappings != NULL) {
 		struct mapping* next   = mappings->next;
@@ -597,6 +609,34 @@ static bool device_materialize_memory(struct memory* memory, size_t size, size_t
 	return physical_layout_compatible(memory, size, granule, maximum_address);
 }
 
+static bool direct_materialize_memory(struct memory* memory, size_t size, size_t alignment, uintptr_t* out_physical) {
+	struct memory_span span;
+	uintptr_t          base   = 0u;
+	size_t             cursor = 0u;
+
+	if (memory == NULL || size == 0u || alignment == 0u || out_physical == NULL ||
+	    !memory_materialize(memory,
+	                        &(const struct memory_materialize_request){
+								.offset             = 0u,
+								.size               = size,
+								.alignment          = alignment,
+								.require_contiguous = true,
+							}))
+		return false;
+	while (cursor < size) {
+		if (!memory_query(memory, cursor, size - cursor, &span) || span.kind != MEMORY_SPAN_PRESENT ||
+		    span.size == 0u || span.size > size - cursor)
+			return false;
+		if (cursor == 0u) base = span.physical_address;
+		else if (cursor > UINTPTR_MAX - base || span.physical_address != base + cursor) return false;
+		cursor += span.size;
+	}
+	/* Zero is reserved by mapping placement to request an automatically selected address. */
+	if (base == 0u || (base & (alignment - 1u)) != 0u) return false;
+	*out_physical = base;
+	return true;
+}
+
 static uint64_t device_iommu_access(memory_access_t access) {
 	uint64_t result = 0u;
 	if ((access & MEMORY_ACCESS_READ) != 0u) result |= HAL_IOMMU_READ;
@@ -772,6 +812,20 @@ bool address_space_map(struct address_space* space, const struct address_space_m
 	    (space->kind != ADDRESS_SPACE_KIND_DEVICE && !physical_layout_compatible(request->memory, size, granule, 0u)))
 		return false;
 	if (space->kind == ADDRESS_SPACE_KIND_DEVICE) {
+		if (space_is_direct_device(space)) {
+			uintptr_t physical;
+			if ((request->access & MEMORY_ACCESS_EXEC) != 0u ||
+			    !direct_materialize_memory(request->memory, size, alignment, &physical))
+				return false;
+			mapping = mapping_create(request, size);
+			if (mapping == NULL) return false;
+			state = spinlock_lock_irqsave(&space->lock);
+			if (!address_space_is_initialized(space) || !mapping_place_locked(space, mapping, physical, alignment))
+				goto device_fail_locked;
+			spinlock_unlock_irqrestore(&space->lock, state);
+			*out_mapping = mapping;
+			return true;
+		}
 		struct hal_iommu_controller_state* controller = dma_controller_state(space->backend.device.controller_index);
 		const struct hal_iommu_info*       info       = dma_controller_info(space->backend.device.controller_index);
 		size_t                             mapped     = 0u;
@@ -840,8 +894,8 @@ bool address_space_unmap(struct address_space* space, struct mapping* mapping) {
 	}
 	if (space->kind == ADDRESS_SPACE_KIND_DEVICE) {
 		controller = dma_controller_state(space->backend.device.controller_index);
-		if (controller == NULL ||
-		    (mapping->access != 0u &&
+		if ((!space_is_direct_device(space) && controller == NULL) ||
+		    (mapping->access != 0u && !space_is_direct_device(space) &&
 		     !hal_iommu_unmap(controller, &space->backend.device.hal, mapping->address, mapping->size))) {
 			spinlock_unlock_irqrestore(&space->lock, state);
 			return false;
@@ -867,6 +921,12 @@ bool address_space_protect(struct address_space* space, struct mapping* mapping,
 	state = spinlock_lock_irqsave(&space->lock);
 	if (!mapping_belongs(space, mapping)) goto fail;
 	if (space->kind == ADDRESS_SPACE_KIND_DEVICE) {
+		if (space_is_direct_device(space)) {
+			if ((access & MEMORY_ACCESS_EXEC) != 0u) goto fail;
+			__atomic_store_n(&mapping->access, access, __ATOMIC_RELEASE);
+			spinlock_unlock_irqrestore(&space->lock, state);
+			return true;
+		}
 		controller                        = dma_controller_state(space->backend.device.controller_index);
 		const struct hal_iommu_info* info = dma_controller_info(space->backend.device.controller_index);
 		uintptr_t maximum_address         = info == NULL || info->physical_address_bits >= sizeof(uintptr_t) * 8u

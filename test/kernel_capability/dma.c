@@ -255,7 +255,9 @@ Test(kernel_capability_dma, pci_source_claim_resolves_routes_and_remains_exclusi
 	struct dma_claim_pci_source_request unrouted = request;
 	unrouted.segment                             = 1u;
 	result = kernel_capability_test_call(dma_cap, &unrouted, sizeof(unrouted), &response, sizeof(response));
-	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_neq(response.source_cap, CAP_ID_INVALID);
+	cr_assert(cap_destroy_by_id(response.source_cap));
 	kernel_capability_test_end(&ctx);
 }
 

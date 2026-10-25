@@ -83,7 +83,46 @@ Test(dma, pci_requesters_resolve_through_platform_routing) {
 	cr_assert_eq((uint32_t)first, 5u);
 	cr_assert_eq((uint32_t)(second >> 32u), 1u);
 	cr_assert_eq((uint32_t)second, 200u);
-	cr_assert_not(dma_pci_source_resolve(1u, 5u, &first));
+	cr_assert(dma_pci_source_resolve(1u, 5u, &first));
+	cr_assert_eq((uint32_t)(first >> 32u), DMA_DIRECT_CONTROLLER_INDEX);
+	cr_assert_eq((uint32_t)first, 0x00010005u);
+}
+
+Test(dma, unrouted_pci_requesters_use_contiguous_direct_dma) {
+	dma_test_prepare();
+	hal_iommu_mock_set_discovered_controllers(NULL, 0u);
+	cr_assert(dma_init());
+	cr_assert(dma_available());
+
+	dma_source_t source;
+	cr_assert(dma_pci_source_resolve(1u, 5u, &source));
+	struct address_space* space;
+	cr_assert(dma_address_space_create(source, &space));
+	size_t granule = address_space_minimum_mapping_size(space);
+	cr_assert_eq(granule, pmm_info()->allocation_granule);
+
+	struct memory* memory;
+	cr_assert(memory_create_anonymous(2u * granule, &memory));
+	struct mapping* mapping;
+	cr_assert(address_space_map(space,
+	                            &(const struct address_space_mapping_request){
+									.memory = memory, .access = MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE},
+	                            &mapping));
+	struct memory_span span;
+	cr_assert(memory_query(memory, 0u, 2u * granule, &span));
+	cr_assert_eq(span.kind, MEMORY_SPAN_PRESENT);
+	cr_assert_eq(mapping_address(mapping), span.physical_address);
+	cr_assert_eq(mapping_size(mapping), 2u * granule);
+
+	struct dma_binding* binding;
+	cr_assert(dma_bind(source, space, &binding));
+	cr_assert(dma_mapping_sync(space, mapping, 0u, 2u * granule, DMA_SYNC_FOR_DEVICE));
+	cr_assert(dma_unbind(binding));
+	dma_binding_release(binding);
+	cr_assert(address_space_unmap(space, mapping));
+	mapping_release(mapping);
+	memory_release(memory);
+	address_space_device_release(space);
 }
 
 Test(dma, context_uniqueness_and_reuse) {

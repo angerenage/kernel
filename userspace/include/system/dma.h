@@ -10,7 +10,7 @@ syscall_status_t dma_resolve_source(cap_id_t dma_cap, uint64_t controller_regist
 /* Exclusively claim one resolved DMA source and return its source capability. */
 syscall_status_t dma_claim_source(cap_id_t dma_cap, dma_source_t source, cap_id_t* out_source_cap);
 
-/* Resolve and exclusively claim the DMA source belonging to one PCI requester. */
+/* Resolve and exclusively claim the translated or direct DMA source of one PCI requester. */
 syscall_status_t dma_claim_pci_source(cap_id_t dma_cap, uint16_t segment, uint16_t requester_id,
                                       cap_id_t* out_source_cap);
 
