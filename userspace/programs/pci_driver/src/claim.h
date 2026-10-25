@@ -41,5 +41,9 @@ size_t pci_resources_claim(const struct pci_claim_context* context, const struct
 syscall_status_t pci_claim_dma_resource(const struct device_builder* builder, cap_id_t dma_cap, const char* name,
                                         size_t name_size, uint16_t segment, uint16_t requester_id);
 
+/* Derive and attach a restricted allocator for one PCI function's DMA buffers. */
+syscall_status_t pci_claim_dma_allocator(const struct device_builder* builder, cap_id_t memory_allocator_cap,
+                                         const char* name, size_t name_size);
+
 /* Release all claims retained in one resource description. */
 void pci_resources_release(struct pci_resources* resources);

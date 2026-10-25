@@ -39,7 +39,7 @@ enum device_parser_capability_argument {
 
 /* Rights retained by the manager while forwarding physical-memory claim authority. */
 #define DEVICE_MANAGER_MEMORY_ALLOCATOR_CAP_RIGHTS                                                                     \
-	((cap_rights_t)(CAP_CALL | CAP_READ | CAP_ALLOCATE | CAP_MANAGE | CAP_DELEGATE))
+	((cap_rights_t)(CAP_CALL | CAP_READ | CAP_ALLOCATE | CAP_DERIVE | CAP_MANAGE | CAP_DELEGATE))
 
 /* Rights required by a parser to inspect the allocator and claim discovered MMIO ranges. */
 #define DEVICE_PARSER_MEMORY_ALLOCATOR_CAP_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_MANAGE))

@@ -17,6 +17,7 @@
 
 #define PCI_IO_RESOURCE_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP | CAP_DELEGATE))
 #define PCI_DMA_RESOURCE_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_ALLOCATE | CAP_MANAGE))
+#define PCI_DMA_ALLOCATOR_RESOURCE_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_ALLOCATE))
 
 static void claim_error(const struct pci_address* address, const char* resource, syscall_status_t status) {
 	fprintf(stderr,
@@ -232,6 +233,30 @@ syscall_status_t pci_claim_dma_resource(const struct device_builder* builder, ca
 		status = device_builder_add_resource(builder, name, name_size, source_cap, PCI_DMA_RESOURCE_RIGHTS);
 	if (source_cap != CAP_ID_INVALID) {
 		syscall_status_t cleanup_status = cap_drop(source_cap);
+		if (status == SYSCALL_STATUS_OK) status = cleanup_status;
+	}
+	return status;
+}
+
+syscall_status_t pci_claim_dma_allocator(const struct device_builder* builder, cap_id_t memory_allocator_cap,
+                                         const char* name, size_t name_size) {
+	const struct memory_allocator_derive_request request = {
+		.header           = {.op = MEMORY_ALLOCATOR_OP_DERIVE},
+		.allocator_rights = CAP_CALL | CAP_READ | CAP_ALLOCATE | CAP_DELEGATE,
+		.memory_rights    = CAP_READ | CAP_WRITE | CAP_MAP,
+		.memory_type_mask = 1ull << MEMORY_TYPE_NORMAL,
+	};
+	cap_id_t         allocator_cap = CAP_ID_INVALID;
+	syscall_status_t status;
+
+	if (builder == NULL || memory_allocator_cap == CAP_ID_INVALID || name == NULL || name_size == 0u)
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	status = memory_allocator_derive(memory_allocator_cap, &request, sizeof(request), &allocator_cap);
+	if (status == SYSCALL_STATUS_OK)
+		status =
+			device_builder_add_resource(builder, name, name_size, allocator_cap, PCI_DMA_ALLOCATOR_RESOURCE_RIGHTS);
+	if (allocator_cap != CAP_ID_INVALID) {
+		syscall_status_t cleanup_status = cap_drop(allocator_cap);
 		if (status == SYSCALL_STATUS_OK) status = cleanup_status;
 	}
 	return status;
