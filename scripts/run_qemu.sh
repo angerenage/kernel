@@ -301,7 +301,9 @@ case "$TARGET_ARCH" in
 		qemu_args=(
 			-M q35
 			-smp 4
-			-cdrom "$ISO_PATH"
+			-device ich9-ahci,id=ahci
+			-drive file="$ISO_PATH",if=none,id=disk,format=raw
+			-device ide-hd,drive=disk,bus=ahci.0
 			-serial stdio
 			-no-reboot
 			-no-shutdown
@@ -321,11 +323,11 @@ case "$TARGET_ARCH" in
 			-smp 4
 			-cpu cortex-a72
 			-m 2G
+			-cdrom "$ISO_PATH"
 			-device virtio-gpu-pci
 			-device qemu-xhci
 			-device usb-kbd
 			-device usb-mouse
-			-cdrom "$ISO_PATH"
 			-serial stdio
 			-no-reboot
 			-no-shutdown
@@ -345,9 +347,11 @@ case "$TARGET_ARCH" in
 			-smp 4
 			-cpu rv64,v=true,vlen=128,elen=64
 			-m 2G
-			-device virtio-scsi-pci,id=scsi0
-			-drive "file=${ISO_PATH},format=raw,media=cdrom,if=none,id=cdrom0,readonly=on"
-			-device scsi-cd,drive=cdrom0,bootindex=1
+			# Boot drive
+			-cdrom "$ISO_PATH"
+			-device ich9-ahci,id=ahci
+			-drive "file=${ISO_PATH},format=raw,if=none,id=sata_os,snapshot=on"
+			-device ide-hd,drive=sata_os,bus=ahci.0
 			-device virtio-gpu-pci
 			-device qemu-xhci
 			-device usb-kbd
@@ -370,9 +374,9 @@ case "$TARGET_ARCH" in
 			-smp 4
 			-cpu la464
 			-m 2G
-			-device virtio-scsi-pci,id=scsi0
-			-drive "file=${ISO_PATH},format=raw,media=cdrom,if=none,id=cdrom0,readonly=on"
-			-device scsi-cd,drive=cdrom0,bootindex=1
+			-device ich9-ahci,id=ahci
+			-drive file="$ISO_PATH",if=none,id=disk,format=raw
+			-device ide-hd,drive=disk,bus=ahci.0
 			-device virtio-gpu-pci
 			-device qemu-xhci
 			-device usb-kbd
