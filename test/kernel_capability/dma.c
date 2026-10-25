@@ -231,6 +231,34 @@ Test(kernel_capability_dma, source_tokens_do_not_bypass_dma_capability_rights) {
 	kernel_capability_test_end(&ctx);
 }
 
+Test(kernel_capability_dma, pci_source_claim_resolves_routes_and_remains_exclusive) {
+	struct kernel_capability_test_context ctx;
+	kernel_capability_test_begin(&ctx, "kernel-cap/dma-pci-claim");
+	cap_id_t dma_cap = dma_test_grant(&ctx);
+
+	const struct dma_claim_pci_source_request request = {
+		.header       = {.op = DMA_OP_CLAIM_PCI_SOURCE},
+		.segment      = 0u,
+		.requester_id = 7u,
+	};
+	struct dma_claim_source_response response;
+	syscall_result_t                 result =
+		kernel_capability_test_call(dma_cap, &request, sizeof(request), &response, sizeof(response));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_neq(response.source_cap, CAP_ID_INVALID);
+
+	struct dma_claim_source_response duplicate;
+	result = kernel_capability_test_call(dma_cap, &request, sizeof(request), &duplicate, sizeof(duplicate));
+	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
+	cr_assert(cap_destroy_by_id(response.source_cap));
+
+	struct dma_claim_pci_source_request unrouted = request;
+	unrouted.segment                             = 1u;
+	result = kernel_capability_test_call(dma_cap, &unrouted, sizeof(unrouted), &response, sizeof(response));
+	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
+	kernel_capability_test_end(&ctx);
+}
+
 Test(kernel_capability_dma, source_claims_are_exclusive_releasable_and_transactional) {
 	struct kernel_capability_test_context ctx;
 	kernel_capability_test_begin(&ctx, "kernel-cap/dma-claims");

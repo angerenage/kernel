@@ -26,6 +26,7 @@ platform_kernel_objects += [
 	files('hal/interrupts/gic.c'),
 	files('hal/interrupts/gicv3.c'),
 	files('hal/iommu/iommu.c'),
+	files('hal/iommu/iort.c'),
 	files('hal/iommu/smmuv3.c'),
 	files('hal/paging.c'),
 	files('hal/serial.c'),

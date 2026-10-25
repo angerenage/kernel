@@ -18,6 +18,7 @@ typedef uint64_t dma_source_t;
 enum dma_op {
 	DMA_OP_RESOLVE_SOURCE = 0,
 	DMA_OP_CLAIM_SOURCE,
+	DMA_OP_CLAIM_PCI_SOURCE,
 };
 
 /* Common header for root DMA-resource requests. */
@@ -47,6 +48,14 @@ struct dma_claim_source_request {
 /* Response returned after claiming one DMA source. */
 struct dma_claim_source_response {
 	cap_id_t source_cap;
+};
+
+/* Request exclusive DMA authority for one PCI requester. */
+struct dma_claim_pci_source_request {
+	struct dma_request_header header;
+	uint16_t                  segment;
+	uint16_t                  requester_id;
+	uint32_t                  reserved;
 };
 
 /* Operations accepted by a claimed DMA-source capability. */

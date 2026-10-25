@@ -50,6 +50,25 @@ syscall_status_t dma_claim_source(cap_id_t dma_cap, dma_source_t source, cap_id_
 	return status;
 }
 
+syscall_status_t dma_claim_pci_source(cap_id_t dma_cap, uint16_t segment, uint16_t requester_id,
+                                      cap_id_t* out_source_cap) {
+	const struct dma_claim_pci_source_request request = {
+		.header       = {.op = DMA_OP_CLAIM_PCI_SOURCE},
+		.segment      = segment,
+		.requester_id = requester_id,
+	};
+	struct dma_claim_source_response response = {.source_cap = CAP_ID_INVALID};
+	if (out_source_cap == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	*out_source_cap = CAP_ID_INVALID;
+	syscall_status_t status =
+		fixed_call(dma_cap, &request, sizeof(request), &response, sizeof(response), DMA_OP_CLAIM_PCI_SOURCE);
+	if (status == SYSCALL_STATUS_OK) {
+		if (response.source_cap == CAP_ID_INVALID) return SYSCALL_STATUS_FAILED;
+		*out_source_cap = response.source_cap;
+	}
+	return status;
+}
+
 syscall_status_t dma_source_create_address_space(cap_id_t source_cap, cap_id_t* out_address_space_cap) {
 	const struct dma_source_create_address_space_request request = {
 		.header = {.op = DMA_SOURCE_OP_CREATE_ADDRESS_SPACE},

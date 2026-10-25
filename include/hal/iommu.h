@@ -36,9 +36,10 @@ struct hal_iommu_controller_descriptor {
 	enum hal_iommu_kind kind;
 	uintptr_t           register_address;
 #if defined(PLATFORM_PC_X86_64)
-	uint8_t firmware_flags;
-	uint8_t firmware_io_address_bits;
-	uint8_t firmware_physical_address_bits;
+	uint8_t  firmware_flags;
+	uint8_t  firmware_io_address_bits;
+	uint8_t  firmware_physical_address_bits;
+	uint16_t firmware_segment;
 #endif
 #if defined(PLATFORM_PC_LOONGARCH64)
 	uint64_t firmware_leaf_size_mask;
@@ -210,6 +211,10 @@ size_t hal_iommu_controller_count(void);
 
 /* Return one discovered controller descriptor by stable platform order. */
 bool hal_iommu_controller_at(size_t index, struct hal_iommu_controller_descriptor* out_descriptor);
+
+/* Resolve a PCI requester routed through one controller descriptor. */
+bool hal_iommu_pci_source(const struct hal_iommu_controller_descriptor* descriptor, uint16_t segment,
+                          uint16_t requester_id, uint32_t* out_source_id);
 
 /* Convert an IOMMU hardware kind to a short diagnostic name. */
 static inline const char* hal_iommu_kind_string(enum hal_iommu_kind kind) {

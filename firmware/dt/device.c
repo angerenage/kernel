@@ -166,3 +166,80 @@ bool dt_node_reg(struct dt_node node, size_t index, struct dt_reg* out) {
 	*out = reg;
 	return true;
 }
+
+static bool dt_node_u32(struct dt_node node, const char* name, uint32_t* out_value) {
+	struct dt_property property;
+	uint64_t           value;
+
+	if (out_value == NULL || !dt_node_property(node, name, &property) || property.size != sizeof(uint32_t) ||
+	    !dt_property_read_cells(&property, 0u, 1u, &value) || value > UINT32_MAX)
+		return false;
+	*out_value = (uint32_t)value;
+	return true;
+}
+
+bool dt_pci_iommu_route(uint16_t segment, uint16_t requester_id, uint64_t* out_controller_address,
+                        uint32_t* out_source_id) {
+	struct dt_node host    = dt_root();
+	bool           matched = false;
+
+	if (out_controller_address == NULL || out_source_id == NULL) return false;
+	while (dt_node_valid(host)) {
+		struct dt_property map;
+		struct dt_property mask_property;
+		struct dt_property device_type;
+		uint32_t           domain = 0u;
+		uint32_t           mask   = UINT32_MAX;
+
+		if (!dt_node_enabled(host) || !dt_node_property(host, "device_type", &device_type) ||
+		    !dt_property_string_list_contains(&device_type, "pci") || !dt_node_property(host, "iommu-map", &map)) {
+			host = dt_walk_next(host);
+			continue;
+		}
+		(void)dt_node_u32(host, "linux,pci-domain", &domain);
+		if (domain != segment || map.size == 0u || map.size % sizeof(uint32_t) != 0u) {
+			host = dt_walk_next(host);
+			continue;
+		}
+		if (dt_node_property(host, "iommu-map-mask", &mask_property)) {
+			uint64_t value;
+			if (mask_property.size != sizeof(uint32_t) || !dt_property_read_cells(&mask_property, 0u, 1u, &value) ||
+			    value > UINT32_MAX)
+				return false;
+			mask = (uint32_t)value;
+		}
+		uint32_t routed_id = requester_id & mask;
+		for (size_t cell = 0u; cell < map.size / sizeof(uint32_t);) {
+			uint64_t       rid_base;
+			uint64_t       phandle;
+			uint64_t       source_base;
+			uint64_t       length;
+			struct dt_node controller;
+			uint32_t       iommu_cells;
+			struct dt_reg  registers;
+
+			if (cell + 2u > map.size / sizeof(uint32_t) || !dt_property_read_cells(&map, cell, 1u, &rid_base) ||
+			    !dt_property_read_cells(&map, cell + 1u, 1u, &phandle) || phandle == 0u || phandle > UINT32_MAX)
+				return false;
+			controller = dt_node_by_phandle((uint32_t)phandle);
+			if (!dt_node_valid(controller) || !dt_node_u32(controller, "#iommu-cells", &iommu_cells) ||
+			    iommu_cells != 1u || cell + 3u + iommu_cells > map.size / sizeof(uint32_t) ||
+			    !dt_property_read_cells(&map, cell + 2u, iommu_cells, &source_base) ||
+			    !dt_property_read_cells(&map, cell + 2u + iommu_cells, 1u, &length) || length == 0u ||
+			    rid_base > UINT32_MAX || source_base > UINT32_MAX || length > UINT32_MAX)
+				return false;
+			if (routed_id >= rid_base && routed_id - rid_base < length) {
+				uint64_t source = source_base + (routed_id - rid_base);
+				if (source > UINT32_MAX || !dt_node_reg(controller, 0u, &registers) || registers.address == 0u ||
+				    matched)
+					return false;
+				*out_controller_address = registers.address;
+				*out_source_id          = (uint32_t)source;
+				matched                 = true;
+			}
+			cell += 3u + iommu_cells;
+		}
+		host = dt_walk_next(host);
+	}
+	return matched;
+}

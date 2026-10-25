@@ -77,6 +77,16 @@ bool hal_iommu_controller_at(size_t index, struct hal_iommu_controller_descripto
 	return true;
 }
 
+bool hal_iommu_pci_source(const struct hal_iommu_controller_descriptor* descriptor, uint16_t segment,
+                          uint16_t requester_id, uint32_t* out_source_id) {
+	if (descriptor == NULL || out_source_id == NULL || segment != 0u) return false;
+	if ((descriptor->register_address == 0x1000u && requester_id >= 128u) ||
+	    (descriptor->register_address == 0x2000u && requester_id < 128u))
+		return false;
+	*out_source_id = requester_id;
+	return true;
+}
+
 static bool mock_power_of_two(size_t value) {
 	return value != 0u && (value & (value - 1u)) == 0u;
 }

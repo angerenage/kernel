@@ -71,6 +71,21 @@ Test(dma, source_resolution_and_lazy_init) {
 	address_space_device_release(space);
 }
 
+Test(dma, pci_requesters_resolve_through_platform_routing) {
+	dma_test_prepare();
+	cr_assert(dma_init());
+
+	dma_source_t first;
+	dma_source_t second;
+	cr_assert(dma_pci_source_resolve(0u, 5u, &first));
+	cr_assert(dma_pci_source_resolve(0u, 200u, &second));
+	cr_assert_eq((uint32_t)(first >> 32u), 0u);
+	cr_assert_eq((uint32_t)first, 5u);
+	cr_assert_eq((uint32_t)(second >> 32u), 1u);
+	cr_assert_eq((uint32_t)second, 200u);
+	cr_assert_not(dma_pci_source_resolve(1u, 5u, &first));
+}
+
 Test(dma, context_uniqueness_and_reuse) {
 	dma_test_prepare();
 	cr_assert(dma_init());

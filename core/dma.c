@@ -349,6 +349,25 @@ bool dma_source_resolve(uint64_t controller_register_address, uint32_t local_sou
 	return true;
 }
 
+bool dma_pci_source_resolve(uint16_t segment, uint16_t requester_id, dma_source_t* out_source) {
+	bool         matched = false;
+	dma_source_t source  = DMA_SOURCE_INVALID;
+
+	if (!dma_initialized || out_source == NULL) return false;
+	for (size_t index = 0u; index < dma_controller_count; index++) {
+		uint32_t local_source_id;
+
+		if (!hal_iommu_pci_source(&dma_controllers[index].descriptor, segment, requester_id, &local_source_id))
+			continue;
+		if (matched || index > UINT32_MAX) return false;
+		source  = ((dma_source_t)index << 32u) | local_source_id;
+		matched = true;
+	}
+	if (!matched) return false;
+	*out_source = source;
+	return true;
+}
+
 bool dma_source_valid(dma_source_t source) {
 	uint32_t               controller_index;
 	uint32_t               local_source_id;

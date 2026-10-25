@@ -189,6 +189,26 @@ static syscall_result_t dma_claim_source_handler(const struct cap_request* req) 
 	return result;
 }
 
+static syscall_result_t dma_claim_pci_source_handler(const struct cap_request* req) {
+	struct dma_claim_pci_source_request request;
+	struct dma_claim_source_response    response = {.source_cap = CAP_ID_INVALID};
+	dma_source_t                        source;
+	bool                                unavailable;
+
+	if ((req->rights & CAP_MANAGE) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
+	if (!copy_request(req, &request, sizeof(request)) || request.reserved != 0u ||
+	    !cap_kernel_response_fits(req, sizeof(response)))
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	if (!dma_pci_source_resolve(request.segment, request.requester_id, &source) || !dma_source_valid(source))
+		return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	response.source_cap = dma_source_claim(source, req->caller, &unavailable);
+	if (response.source_cap == CAP_ID_INVALID)
+		return syscall_result_error(unavailable ? SYSCALL_STATUS_UNAVAILABLE : SYSCALL_STATUS_FAILED, 0u);
+	syscall_result_t result = write_claim_response(req, &response);
+	if (result.status != SYSCALL_STATUS_OK) (void)cap_destroy_by_id(response.source_cap);
+	return result;
+}
+
 static syscall_result_t dma_source_create_address_space_handler(const struct cap_request* req, dma_source_t source) {
 	struct dma_source_create_address_space_request  request;
 	struct dma_source_create_address_space_response response = {.address_space_cap = CAP_ID_INVALID};
@@ -274,6 +294,8 @@ static syscall_result_t dma_handler(const struct cap_request* req) {
 		return dma_resolve_source_handler(req);
 	case DMA_OP_CLAIM_SOURCE:
 		return dma_claim_source_handler(req);
+	case DMA_OP_CLAIM_PCI_SOURCE:
+		return dma_claim_pci_source_handler(req);
 	default:
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}

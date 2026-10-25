@@ -66,11 +66,13 @@ static size_t table_units(const struct acpi_sdt_header* table, size_t table_pref
 						.firmware_flags   = kind == HAL_IOMMU_KIND_INTEL_VTD ? cursor[4] : cursor[1]};
 					if (kind == HAL_IOMMU_KIND_INTEL_VTD)
 						out->firmware_physical_address_bits = ((const uint8_t*)table)[36u] + 1u;
+					if (kind == HAL_IOMMU_KIND_INTEL_VTD) memcpy(&out->firmware_segment, cursor + 6u, sizeof(uint16_t));
 					if (kind == HAL_IOMMU_KIND_AMD) {
 						uint32_t iv_info;
 						memcpy(&iv_info, (const uint8_t*)table + 36u, sizeof(iv_info));
 						out->firmware_physical_address_bits = (uint8_t)((iv_info >> 8u) & 0x7fu);
 						out->firmware_io_address_bits       = (uint8_t)((iv_info >> 15u) & 0x7fu);
+						if (length >= 18u) memcpy(&out->firmware_segment, cursor + 16u, sizeof(uint16_t));
 					}
 				}
 				count++;
@@ -79,6 +81,16 @@ static size_t table_units(const struct acpi_sdt_header* table, size_t table_pref
 		cursor += length;
 	}
 	return count;
+}
+
+bool hal_iommu_pci_source(const struct hal_iommu_controller_descriptor* descriptor, uint16_t segment,
+                          uint16_t requester_id, uint32_t* out_source_id) {
+	if (descriptor == NULL || out_source_id == NULL || descriptor->firmware_segment != segment) return false;
+	/* A VT-d include-all DRHD or a sole-segment AMD IVHD owns requester IDs directly. */
+	if (descriptor->kind == HAL_IOMMU_KIND_INTEL_VTD && (descriptor->firmware_flags & 1u) == 0u) return false;
+	if (descriptor->kind != HAL_IOMMU_KIND_INTEL_VTD && descriptor->kind != HAL_IOMMU_KIND_AMD) return false;
+	*out_source_id = requester_id;
+	return true;
 }
 
 size_t hal_iommu_controller_count(void) {

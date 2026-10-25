@@ -6,6 +6,7 @@
 #include <hal/iommu.h>
 #include <string.h>
 
+#include "iort.h"
 #include "smmuv3.h"
 
 static size_t smmuv3_dt_controllers(size_t target, uintptr_t* out_address) {
@@ -91,6 +92,33 @@ bool hal_iommu_controller_at(size_t index, struct hal_iommu_controller_descripto
 	if (index >= count && index - count >= smmuv3_acpi_controllers(index - count, &address)) return false;
 	*out_descriptor =
 		(struct hal_iommu_controller_descriptor){.kind = HAL_IOMMU_KIND_ARM_SMMUV3, .register_address = address};
+	return true;
+}
+
+bool hal_iommu_pci_source(const struct hal_iommu_controller_descriptor* descriptor, uint16_t segment,
+                          uint16_t requester_id, uint32_t* out_source_id) {
+	uint64_t dt_controller_address;
+	uint64_t acpi_controller_address;
+	uint32_t dt_source_id;
+	uint32_t acpi_source_id;
+	bool     dt_routed;
+	bool     acpi_routed;
+
+	if (descriptor == NULL || out_source_id == NULL) return false;
+	dt_routed   = dt_pci_iommu_route(segment, requester_id, &dt_controller_address, &dt_source_id);
+	acpi_routed = aarch64_iort_pci_route(segment, requester_id, &acpi_controller_address, &acpi_source_id);
+	if (dt_routed && acpi_routed &&
+	    (dt_controller_address != acpi_controller_address || dt_source_id != acpi_source_id))
+		return false;
+	if (dt_routed) {
+		if (dt_controller_address != descriptor->register_address) return false;
+		*out_source_id = dt_source_id;
+	}
+	else if (acpi_routed) {
+		if (acpi_controller_address != descriptor->register_address) return false;
+		*out_source_id = acpi_source_id;
+	}
+	else return false;
 	return true;
 }
 

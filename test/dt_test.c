@@ -457,6 +457,70 @@ Test(dt, resolves_legacy_phandles) {
 	cr_assert_str_eq(dt_node_name(node), "legacy");
 }
 
+Test(dt, resolves_pci_iommu_maps) {
+	static const uint8_t pci_type[] = "pci";
+	uint8_t              one_cell[4];
+	uint8_t              registers[16];
+	uint8_t              iommu_map[16];
+	uint64_t             controller_address;
+	uint32_t             source_id;
+	size_t               address_cells_name;
+	size_t               size_cells_name;
+	size_t               phandle_name;
+	size_t               iommu_cells_name;
+	size_t               reg_name;
+	size_t               device_type_name;
+	size_t               domain_name;
+	size_t               map_name;
+	size_t               mask_name;
+
+	test_reset();
+	address_cells_name = test_string("#address-cells");
+	size_cells_name    = test_string("#size-cells");
+	phandle_name       = test_string("phandle");
+	iommu_cells_name   = test_string("#iommu-cells");
+	reg_name           = test_string("reg");
+	device_type_name   = test_string("device_type");
+	domain_name        = test_string("linux,pci-domain");
+	map_name           = test_string("iommu-map");
+	mask_name          = test_string("iommu-map-mask");
+	test_write_u32(one_cell, 2u);
+	test_write_u32(registers, 0u);
+	test_write_u32(registers + 4u, 0x100000u);
+	test_write_u32(registers + 8u, 0u);
+	test_write_u32(registers + 12u, 0x1000u);
+	test_write_u32(iommu_map, 0x100u);
+	test_write_u32(iommu_map + 4u, 1u);
+	test_write_u32(iommu_map + 8u, 0x200u);
+	test_write_u32(iommu_map + 12u, 0x100u);
+	test_begin_node("");
+	test_property(17u, address_cells_name, one_cell, sizeof(one_cell));
+	test_property(17u, size_cells_name, one_cell, sizeof(one_cell));
+	test_begin_node("iommu@100000");
+	test_write_u32(one_cell, 1u);
+	test_property(17u, phandle_name, one_cell, sizeof(one_cell));
+	test_property(17u, iommu_cells_name, one_cell, sizeof(one_cell));
+	test_property(17u, reg_name, registers, sizeof(registers));
+	test_end_node();
+	test_begin_node("pcie@200000");
+	test_property(17u, device_type_name, pci_type, sizeof(pci_type));
+	test_write_u32(one_cell, 0u);
+	test_property(17u, domain_name, one_cell, sizeof(one_cell));
+	test_write_u32(one_cell, 0xffffu);
+	test_property(17u, mask_name, one_cell, sizeof(one_cell));
+	test_property(17u, map_name, iommu_map, sizeof(iommu_map));
+	test_end_node();
+	test_end_node();
+	test_token(9u);
+	test_header(17u);
+	cr_assert(test_dt_init(test_arena));
+	cr_assert(dt_pci_iommu_route(0u, 0x120u, &controller_address, &source_id));
+	cr_assert_eq(controller_address, 0x100000u);
+	cr_assert_eq(source_id, 0x220u);
+	cr_assert_not(dt_pci_iommu_route(0u, 0x200u, &controller_address, &source_id));
+	cr_assert_not(dt_pci_iommu_route(1u, 0x120u, &controller_address, &source_id));
+}
+
 Test(dt, traverses_without_a_fixed_depth_limit) {
 	struct dt_node node;
 

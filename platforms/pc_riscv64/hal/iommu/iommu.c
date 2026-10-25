@@ -96,6 +96,19 @@ bool hal_iommu_controller_at(size_t index, struct hal_iommu_controller_descripto
 	return true;
 }
 
+bool hal_iommu_pci_source(const struct hal_iommu_controller_descriptor* descriptor, uint16_t segment,
+                          uint16_t requester_id, uint32_t* out_source_id) {
+	uint64_t controller_address;
+	uint32_t source_id;
+
+	if (descriptor == NULL || out_source_id == NULL ||
+	    !dt_pci_iommu_route(segment, requester_id, &controller_address, &source_id) ||
+	    controller_address != descriptor->register_address)
+		return false;
+	*out_source_id = source_id;
+	return true;
+}
+
 bool hal_iommu_controller_init(struct hal_iommu_controller_state*            controller,
                                const struct hal_iommu_controller_descriptor* descriptor,
                                struct hal_iommu_info*                        out_info) {

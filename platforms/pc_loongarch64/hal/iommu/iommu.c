@@ -65,6 +65,15 @@ bool hal_iommu_controller_at(size_t index, struct hal_iommu_controller_descripto
 	return out_descriptor != NULL && index < loongarch_iommu_controllers(index, out_descriptor);
 }
 
+bool hal_iommu_pci_source(const struct hal_iommu_controller_descriptor* descriptor, uint16_t segment,
+                          uint16_t requester_id, uint32_t* out_source_id) {
+	if (descriptor == NULL || out_source_id == NULL || descriptor->segment != segment ||
+	    requester_id >= descriptor->maximum_device_count)
+		return false;
+	*out_source_id = requester_id;
+	return true;
+}
+
 bool hal_iommu_controller_init(struct hal_iommu_controller_state*            controller,
                                const struct hal_iommu_controller_descriptor* descriptor,
                                struct hal_iommu_info*                        out_info) {

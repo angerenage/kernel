@@ -25,3 +25,7 @@ bool dt_node_reg_raw(struct dt_node node, size_t index, struct dt_reg* out);
 
 /* Decode one reg entry and translate its address into the root address space. */
 bool dt_node_reg(struct dt_node node, size_t index, struct dt_reg* out);
+
+/* Resolve a PCI requester through a host bridge's standard iommu-map property. */
+bool dt_pci_iommu_route(uint16_t segment, uint16_t requester_id, uint64_t* out_controller_address,
+                        uint32_t* out_source_id);
