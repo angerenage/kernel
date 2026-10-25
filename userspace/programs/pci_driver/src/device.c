@@ -245,7 +245,7 @@ static syscall_status_t add_bridge(const struct device_builder* builder, const s
 	return status;
 }
 
-static syscall_status_t pci_device_publish(cap_id_t host_cap, struct pci_function* function) {
+static syscall_status_t pci_device_publish(cap_id_t host_cap, cap_id_t dma_cap, struct pci_function* function) {
 	struct device_builder builder = {.capability = CAP_ID_INVALID, .manager_pid = PROCESS_PID_INVALID};
 	char                  name[32];
 	size_t                name_size;
@@ -273,6 +273,11 @@ static syscall_status_t pci_device_publish(cap_id_t host_cap, struct pci_functio
 	if (status == SYSCALL_STATUS_OK) status = add_interrupts(&builder, &function->resources);
 	if (status == SYSCALL_STATUS_OK) status = add_msix(&builder, &function->resources.msix);
 	if (status == SYSCALL_STATUS_OK) status = add_bridge(&builder, &function->resources.bridge);
+	if (status == SYSCALL_STATUS_OK && dma_cap != CAP_ID_INVALID) {
+		syscall_status_t dma_status = pci_claim_dma_resource(
+			&builder, dma_cap, "dma", sizeof("dma") - 1u, function->address.segment, function->resources.requester_id);
+		if (dma_status != SYSCALL_STATUS_OK && dma_status != SYSCALL_STATUS_UNAVAILABLE) status = dma_status;
+	}
 	if (status == SYSCALL_STATUS_OK) status = device_builder_commit(&builder);
 	if (status == SYSCALL_STATUS_OK) {
 		pci_resources_release(&function->resources);
@@ -284,10 +289,10 @@ failed:
 	return status;
 }
 
-syscall_status_t pci_devices_publish(cap_id_t host_cap, struct pci_inventory* inventory) {
+syscall_status_t pci_devices_publish(cap_id_t host_cap, cap_id_t dma_cap, struct pci_inventory* inventory) {
 	if (host_cap == CAP_ID_INVALID || inventory == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	for (struct pci_function* function = inventory->functions; function != NULL; function = function->next) {
-		syscall_status_t status = pci_device_publish(host_cap, function);
+		syscall_status_t status = pci_device_publish(host_cap, dma_cap, function);
 		if (status != SYSCALL_STATUS_OK) return status;
 	}
 	return SYSCALL_STATUS_OK;

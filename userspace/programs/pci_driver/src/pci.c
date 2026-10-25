@@ -7,7 +7,7 @@
 #include "enumerate.h"
 #include "host.h"
 
-bool pci_driver_run(cap_id_t device_cap, cap_id_t memory_allocator_cap, cap_id_t interrupts_cap,
+bool pci_driver_run(cap_id_t device_cap, cap_id_t memory_allocator_cap, cap_id_t dma_cap, cap_id_t interrupts_cap,
                     cap_id_t io_ports_cap) {
 	struct pci_host      host;
 	struct pci_inventory inventory = {0};
@@ -24,7 +24,7 @@ bool pci_driver_run(cap_id_t device_cap, cap_id_t memory_allocator_cap, cap_id_t
 		pci_host_deinitialize(&host);
 		return false;
 	}
-	syscall_status_t publish_status = pci_devices_publish(device_cap, &inventory);
+	syscall_status_t publish_status = pci_devices_publish(device_cap, dma_cap, &inventory);
 	if (publish_status != SYSCALL_STATUS_OK) {
 		fprintf(stderr, "pci: could not publish the discovered functions: %u\n", (unsigned)publish_status);
 		pci_inventory_deinitialize(&inventory);

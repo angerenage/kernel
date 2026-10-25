@@ -1,10 +1,13 @@
 #include "claim.h"
 
+#include <base/dma.h>
 #include <base/interrupt.h>
 #include <base/memory.h>
 #include <limits.h>
+#include <runtime/device.h>
 #include <stdio.h>
 #include <system/capability.h>
+#include <system/dma.h>
 #include <system/interrupt.h>
 #include <system/memory.h>
 
@@ -13,6 +16,7 @@
 #endif
 
 #define PCI_IO_RESOURCE_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP | CAP_DELEGATE))
+#define PCI_DMA_RESOURCE_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_ALLOCATE | CAP_MANAGE))
 
 static void claim_error(const struct pci_address* address, const char* resource, syscall_status_t status) {
 	fprintf(stderr,
@@ -214,6 +218,23 @@ size_t pci_resources_claim(const struct pci_claim_context* context, const struct
 		                           &resources->rom.mapping_offset);
 	count += claim_msi(context, address, &resources->msi);
 	return count;
+}
+
+syscall_status_t pci_claim_dma_resource(const struct device_builder* builder, cap_id_t dma_cap, const char* name,
+                                        size_t name_size, uint16_t segment, uint16_t requester_id) {
+	cap_id_t         source_cap = CAP_ID_INVALID;
+	syscall_status_t status;
+
+	if (builder == NULL || dma_cap == CAP_ID_INVALID || name == NULL || name_size == 0u)
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	status = dma_claim_pci_source(dma_cap, segment, requester_id, &source_cap);
+	if (status == SYSCALL_STATUS_OK)
+		status = device_builder_add_resource(builder, name, name_size, source_cap, PCI_DMA_RESOURCE_RIGHTS);
+	if (source_cap != CAP_ID_INVALID) {
+		syscall_status_t cleanup_status = cap_drop(source_cap);
+		if (status == SYSCALL_STATUS_OK) status = cleanup_status;
+	}
+	return status;
 }
 
 void pci_claim_deinitialize(struct pci_claim_context* context) {

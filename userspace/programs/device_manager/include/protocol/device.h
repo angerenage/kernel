@@ -25,7 +25,7 @@ enum device_driver_capability_index {
 };
 
 /* Rights granted when a catalog entry requests the physical-memory allocator. */
-#define DEVICE_DRIVER_MEMORY_ALLOCATOR_CAP_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_MANAGE))
+#define DEVICE_DRIVER_MEMORY_ALLOCATOR_CAP_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_ALLOCATE | CAP_MANAGE))
 /* Rights granted when a catalog entry requests the DMA root. */
 #define DEVICE_DRIVER_DMA_CAP_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_MANAGE))
 /* Rights granted when a catalog entry requests the interrupt root, including MSI allocation. */

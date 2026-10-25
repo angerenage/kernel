@@ -1,6 +1,7 @@
 #pragma once
 
 #include <base/cap.h>
+#include <base/syscall.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -8,6 +9,8 @@
 #include "config.h"
 #include "ranges.h"
 #include "resource.h"
+
+struct device_builder;
 
 /* Root authorities and cached geometry used while claiming PCI resources. */
 struct pci_claim_context {
@@ -33,6 +36,10 @@ void pci_claim_deinitialize(struct pci_claim_context* context);
 /* Claim every currently supported, assigned resource of one PCI function. */
 size_t pci_resources_claim(const struct pci_claim_context* context, const struct pci_address* address,
                            struct pci_resources* resources);
+
+/* Claim one PCI requester's DMA source and attach it to a device being published. */
+syscall_status_t pci_claim_dma_resource(const struct device_builder* builder, cap_id_t dma_cap, const char* name,
+                                        size_t name_size, uint16_t segment, uint16_t requester_id);
 
 /* Release all claims retained in one resource description. */
 void pci_resources_release(struct pci_resources* resources);
