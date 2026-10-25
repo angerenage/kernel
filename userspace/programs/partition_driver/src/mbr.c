@@ -41,6 +41,10 @@ enum mbr_result mbr_parse(const uint8_t* block, size_t size, uint64_t disk_block
 	return MBR_RESULT_VALID;
 }
 
+bool mbr_is_legacy_usable(const struct mbr_table* table) {
+	return table != NULL && !table->protective;
+}
+
 void mbr_print(const struct mbr_table* table) {
 	if (table == NULL) return;
 	printf("partition: MBR partition table%s\n", table->protective ? " (protective or hybrid)" : "");

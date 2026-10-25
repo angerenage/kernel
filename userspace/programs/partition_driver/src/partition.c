@@ -10,6 +10,7 @@
 #include "table.h"
 
 static bool append_mbr_partitions(const struct mbr_table* mbr, struct partition_table* table) {
+	if (!mbr_is_legacy_usable(mbr) || table == NULL) return false;
 	for (size_t index = 0u; index < MBR_PARTITION_COUNT; index++) {
 		const struct mbr_partition* source = &mbr->partitions[index];
 		if (source->type == 0u) continue;
@@ -39,6 +40,10 @@ static enum partition_probe_result probe_partition_table(struct block_device*   
 
 	if (gpt == GPT_RESULT_VALID) return partitions->count == 0u ? PARTITION_PROBE_EMPTY : PARTITION_PROBE_FOUND;
 	if (gpt == GPT_RESULT_IO_ERROR || gpt == GPT_RESULT_NO_MEMORY) return PARTITION_PROBE_ERROR;
+	if (gpt == GPT_RESULT_INVALID) {
+		printf("partition: refusing MBR fallback because the GPT is corrupted\n");
+		return PARTITION_PROBE_EMPTY;
+	}
 
 	if (block_buffer_allocate(device, device->block_size, &buffer) != SYSCALL_STATUS_OK) goto done;
 	if (block_read(device, &buffer, 0u, 0u, 1u) != SYSCALL_STATUS_OK) goto done;
@@ -47,7 +52,11 @@ static enum partition_probe_result probe_partition_table(struct block_device*   
 		block_buffer_release(device, &buffer);
 		return PARTITION_PROBE_EMPTY;
 	}
-	if (table.protective) printf("partition: protective MBR has no valid GPT; falling back to MBR\n");
+	if (!mbr_is_legacy_usable(&table)) {
+		printf("partition: refusing protective or hybrid MBR without a valid GPT\n");
+		block_buffer_release(device, &buffer);
+		return PARTITION_PROBE_EMPTY;
+	}
 	if (!append_mbr_partitions(&table, partitions)) goto done;
 	mbr_print(&table);
 	block_buffer_release(device, &buffer);

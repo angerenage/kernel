@@ -14,7 +14,7 @@ struct mbr_partition {
 	uint32_t block_count;
 };
 
-/* The four primary records and whether one advertises a GPT. */
+/* The four primary records and whether one makes the table unsafe for legacy-MBR use. */
 struct mbr_table {
 	struct mbr_partition partitions[MBR_PARTITION_COUNT];
 	bool                 protective;
@@ -27,6 +27,9 @@ enum mbr_result {
 
 /* Validate and decode the four primary MBR partition records. */
 enum mbr_result mbr_parse(const uint8_t* block, size_t size, uint64_t disk_blocks, struct mbr_table* out_table);
+
+/* Return whether a parsed table can safely be interpreted as legacy MBR. */
+bool mbr_is_legacy_usable(const struct mbr_table* table);
 
 /* Print the populated primary MBR partition records. */
 void mbr_print(const struct mbr_table* table);
