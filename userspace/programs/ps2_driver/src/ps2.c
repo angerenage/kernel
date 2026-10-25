@@ -264,18 +264,24 @@ static bool identify(struct ps2_device* device, uint8_t* out_first, uint8_t* out
 	return true;
 }
 
-static bool reset_and_identify(struct ps2_device* device) {
+enum ps2_configure_result {
+	PS2_CONFIGURE_OK = 0u,
+	PS2_CONFIGURE_UNSUPPORTED,
+	PS2_CONFIGURE_ERROR,
+};
+
+static enum ps2_configure_result reset_and_identify(struct ps2_device* device) {
 	uint8_t first;
 	uint8_t second;
 	size_t  id_size;
 
 	device->kind     = PS2_DEVICE_UNKNOWN;
 	device->mouse_id = PS2_MOUSE_ID_STANDARD;
-	if (!drain_transport(device) || !command_acknowledged(device, PS2_COMMAND_RESET)) return false;
+	if (!drain_transport(device) || !command_acknowledged(device, PS2_COMMAND_RESET)) return PS2_CONFIGURE_ERROR;
 	if (receive_byte(device, PS2_RESET_TIMEOUT_MS, &first) != PS2_RECEIVE_OK || first != PS2_SELF_TEST_SUCCESS)
-		return false;
+		return PS2_CONFIGURE_ERROR;
 	if (!command_acknowledged(device, PS2_COMMAND_DISABLE_SCANNING) || !identify(device, &first, &second, &id_size))
-		return false;
+		return PS2_CONFIGURE_ERROR;
 
 	if (id_size >= 1u && is_mouse_id(first)) {
 		device->kind     = PS2_DEVICE_MOUSE;
@@ -285,7 +291,7 @@ static bool reset_and_identify(struct ps2_device* device) {
 		device->kind = PS2_DEVICE_KEYBOARD;
 	}
 	else if (id_size == 0u) device->kind = PS2_DEVICE_KEYBOARD;
-	return device->kind != PS2_DEVICE_UNKNOWN;
+	return device->kind == PS2_DEVICE_UNKNOWN ? PS2_CONFIGURE_UNSUPPORTED : PS2_CONFIGURE_OK;
 }
 
 static bool read_mouse_id(struct ps2_device* device, uint8_t* out_id) {
@@ -316,13 +322,17 @@ static bool configure_mouse(struct ps2_device* device) {
 	return command_acknowledged(device, PS2_COMMAND_ENABLE_SCANNING);
 }
 
-static bool configure_device(struct ps2_device* device) {
-	if (!reset_and_identify(device)) return false;
+static enum ps2_configure_result configure_device(struct ps2_device* device) {
+	enum ps2_configure_result result = reset_and_identify(device);
+	bool                      configured;
+
+	if (result != PS2_CONFIGURE_OK) return result;
 	if (device->kind == PS2_DEVICE_KEYBOARD)
-		return command_with_value(device, PS2_COMMAND_SET_SCAN_CODE_SET, PS2_SCAN_CODE_SET_2) &&
-		       command_with_value(device, PS2_COMMAND_SET_LEDS, device->keyboard_leds) &&
-		       command_acknowledged(device, PS2_COMMAND_ENABLE_SCANNING);
-	return configure_mouse(device);
+		configured = command_with_value(device, PS2_COMMAND_SET_SCAN_CODE_SET, PS2_SCAN_CODE_SET_2) &&
+		             command_with_value(device, PS2_COMMAND_SET_LEDS, device->keyboard_leds) &&
+		             command_acknowledged(device, PS2_COMMAND_ENABLE_SCANNING);
+	else configured = configure_mouse(device);
+	return configured ? PS2_CONFIGURE_OK : PS2_CONFIGURE_ERROR;
 }
 
 static bool wait_for_activity(struct ps2_device* device) {
@@ -457,15 +467,15 @@ static bool serve_device(struct ps2_device* device, bool* out_reinitialize) {
 	                                           : serve_mouse(device, out_reinitialize);
 }
 
-bool ps2_driver_run(cap_id_t device_cap) {
+enum device_driver_result ps2_driver_run(cap_id_t device_cap) {
 	struct ps2_device device = {
 		.transport_cap        = CAP_ID_INVALID,
 		.receive_signal_cap   = CAP_ID_INVALID,
 		.activity_cap         = CAP_ID_INVALID,
 		.transport_waiter_cap = CAP_ID_INVALID,
 	};
-	bool success           = false;
-	bool input_initialized = false;
+	bool                      input_initialized = false;
+	enum device_driver_result result            = DEVICE_DRIVER_ERROR;
 
 	if (device_resource_acquire(device_cap,
 	                            PS2_TRANSPORT_RESOURCE,
@@ -484,7 +494,13 @@ bool ps2_driver_run(cap_id_t device_cap) {
 		goto done;
 	}
 	for (;;) {
-		if (!configure_device(&device)) {
+		enum ps2_configure_result configured = configure_device(&device);
+		if (configured == PS2_CONFIGURE_UNSUPPORTED) {
+			printf("ps2: device reported an unsupported identity\n");
+			if (!input_initialized) result = DEVICE_DRIVER_UNSUPPORTED;
+			goto done;
+		}
+		if (configured != PS2_CONFIGURE_OK) {
 			printf("ps2: device identification or configuration failed\n");
 			goto done;
 		}
@@ -501,11 +517,9 @@ bool ps2_driver_run(cap_id_t device_cap) {
 		if (!reinitialize) break;
 		printf("ps2: transport lost synchronization; reinitializing device\n");
 	}
-	success = true;
-
 done:
-	if (!stop_transport_waiter(&device)) success = false;
+	if (!stop_transport_waiter(&device)) result = DEVICE_DRIVER_ERROR;
 	if (device.receive_signal_cap != CAP_ID_INVALID) (void)cap_drop(device.receive_signal_cap);
 	if (device.transport_cap != CAP_ID_INVALID) (void)cap_drop(device.transport_cap);
-	return success;
+	return result;
 }

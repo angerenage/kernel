@@ -51,7 +51,7 @@ void dm_driver_catalog_deinit(struct dm_driver_catalog* catalog);
 /* Load one strict version-one YAML catalog without exposing partial state. */
 enum dm_driver_catalog_status dm_driver_catalog_load(struct dm_driver_catalog* catalog, const char* path);
 
-/* Find the unique driver claiming an exact compatible ID. */
+/* Find the first catalog-ordered driver claiming an exact compatible ID. */
 const struct dm_driver* dm_driver_catalog_find_compatible(const struct dm_driver_catalog* catalog,
                                                           const void* compatible_id, size_t compatible_id_size);
 

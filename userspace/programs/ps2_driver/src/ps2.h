@@ -1,6 +1,7 @@
 #pragma once
 
 #include <base/cap.h>
+#include <protocol/device.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -12,4 +13,4 @@ enum ps2_device_kind {
 };
 
 /* Acquire, identify, configure, and serve one controller-independent PS/2 child. */
-bool ps2_driver_run(cap_id_t device_cap);
+enum device_driver_result ps2_driver_run(cap_id_t device_cap);

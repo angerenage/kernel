@@ -74,8 +74,7 @@ const struct dm_driver* dm_driver_catalog_find_compatible(const struct dm_driver
 	return NULL;
 }
 
-static enum dm_driver_catalog_status append_compatible(struct dm_driver_catalog* catalog, struct dm_driver* driver,
-                                                       const yaml_node_t* node) {
+static enum dm_driver_catalog_status append_compatible(struct dm_driver* driver, const yaml_node_t* node) {
 	struct dm_string* resized;
 	struct dm_string  compatible = {0};
 	size_t            size;
@@ -88,8 +87,6 @@ static enum dm_driver_catalog_status append_compatible(struct dm_driver_catalog*
 		if (string_equal(&driver->compatible_ids[index], node->data.scalar.value, size))
 			return DM_DRIVER_CATALOG_INVALID;
 	}
-	if (dm_driver_catalog_find_compatible(catalog, node->data.scalar.value, size) != NULL)
-		return DM_DRIVER_CATALOG_INVALID;
 	if (driver->compatible_count == SIZE_MAX ||
 	    driver->compatible_count + 1u > SIZE_MAX / sizeof(*driver->compatible_ids))
 		return DM_DRIVER_CATALOG_NO_MEMORY;
@@ -104,15 +101,15 @@ static enum dm_driver_catalog_status append_compatible(struct dm_driver_catalog*
 	return DM_DRIVER_CATALOG_OK;
 }
 
-static enum dm_driver_catalog_status parse_compatible_ids(struct dm_driver_catalog* catalog, struct dm_driver* driver,
-                                                          yaml_document_t* document, const yaml_node_t* node) {
+static enum dm_driver_catalog_status parse_compatible_ids(struct dm_driver* driver, yaml_document_t* document,
+                                                          const yaml_node_t* node) {
 	enum dm_driver_catalog_status status;
 
 	if (node == NULL || node->type != YAML_SEQUENCE_NODE ||
 	    node->data.sequence.items.start == node->data.sequence.items.top)
 		return DM_DRIVER_CATALOG_INVALID;
 	for (yaml_node_item_t* item = node->data.sequence.items.start; item != node->data.sequence.items.top; item++) {
-		status = append_compatible(catalog, driver, yaml_document_get_node(document, *item));
+		status = append_compatible(driver, yaml_document_get_node(document, *item));
 		if (status != DM_DRIVER_CATALOG_OK) return status;
 	}
 	return DM_DRIVER_CATALOG_OK;
@@ -184,7 +181,7 @@ static enum dm_driver_catalog_status parse_driver(struct dm_driver_catalog* cata
 		else if (scalar_equal(key, "compatible_ids")) {
 			if (have_compatible_ids) goto fail;
 			have_compatible_ids = true;
-			status              = parse_compatible_ids(catalog, driver, document, value);
+			status              = parse_compatible_ids(driver, document, value);
 		}
 		else if (scalar_equal(key, "root_capabilities")) {
 			if (have_capabilities) goto fail;

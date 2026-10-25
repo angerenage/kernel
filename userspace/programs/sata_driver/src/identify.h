@@ -15,5 +15,12 @@ struct sata_device_info {
 	bool     flush_cache_ext;
 };
 
+enum sata_identify_result {
+	SATA_IDENTIFY_OK = 0u,
+	SATA_IDENTIFY_UNSUPPORTED,
+	SATA_IDENTIFY_ERROR,
+};
+
 /* Issue IDENTIFY DEVICE and report the disk identity and basic capabilities. */
-bool sata_identify_device(const struct sata_transport* transport, struct sata_device_info* out_info);
+enum sata_identify_result sata_identify_device(const struct sata_transport* transport,
+                                               struct sata_device_info*     out_info);

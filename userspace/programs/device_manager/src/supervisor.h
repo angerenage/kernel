@@ -19,8 +19,10 @@ enum dm_driver_binding_state {
 	DM_DRIVER_RUNNING,
 	DM_DRIVER_BACKOFF,
 	DM_DRIVER_WAITING_FOR_CHILDREN,
+	DM_DRIVER_WAITING_FOR_FALLBACK,
 	DM_DRIVER_STOPPING,
 	DM_DRIVER_STOPPED,
+	DM_DRIVER_UNSUPPORTED,
 	DM_DRIVER_QUARANTINED,
 };
 
@@ -30,7 +32,7 @@ struct dm_driver_log {
 	size_t   size;
 };
 
-/* Runtime state for the unique driver selected for one immutable device. */
+/* Runtime state for the active driver and any drivers that declined one device. */
 struct dm_driver_binding {
 	struct dm_device*            device;
 	struct dm_driver*            driver;
@@ -41,6 +43,8 @@ struct dm_driver_binding {
 	cap_id_t                     process_cap;
 	syscall_status_t             last_wait_status;
 	uintptr_t                    last_exit_code;
+	struct dm_driver**           rejected_drivers;
+	size_t                       rejected_count;
 	struct dm_driver_log         stdout_log;
 	struct dm_driver_log         stderr_log;
 	struct dm_driver_binding*    next;

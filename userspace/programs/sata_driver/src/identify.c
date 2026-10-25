@@ -105,11 +105,12 @@ static void print_identify(uint32_t port, const uint8_t* identify, const struct 
 	       rotation == 1u ? "solid-state" : "rotating/unspecified");
 }
 
-bool sata_identify_device(const struct sata_transport* transport, struct sata_device_info* out_info) {
+enum sata_identify_result sata_identify_device(const struct sata_transport* transport,
+                                               struct sata_device_info*     out_info) {
 	struct sata_buffer buffer = {
 		.memory_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .mapping_cap = CAP_ID_INVALID};
 	struct ahci_transport_execute_response response;
-	bool                                   success = false;
+	enum sata_identify_result              result = SATA_IDENTIFY_ERROR;
 
 	if (transport == NULL || out_info == NULL || transport->max_transfer_size < ATA_IDENTIFY_SIZE ||
 	    !sata_buffer_allocate(transport, ATA_IDENTIFY_SIZE, &buffer))
@@ -121,16 +122,20 @@ bool sata_identify_device(const struct sata_transport* transport, struct sata_de
 		.direction     = AHCI_DATA_FROM_DEVICE,
 		.command       = ATA_COMMAND_IDENTIFY_DEVICE,
 	};
-	if (!sata_transport_execute(transport, &request, &response) || response.transferred_size != ATA_IDENTIFY_SIZE ||
-	    (identify_word(buffer.address, 0u) & (1u << 15u)) != 0u) {
+	if (!sata_transport_execute(transport, &request, &response) || response.transferred_size != ATA_IDENTIFY_SIZE) {
 		fprintf(stderr, "sata: port %u IDENTIFY DEVICE failed\n", transport->port);
+		goto done;
+	}
+	if ((identify_word(buffer.address, 0u) & (1u << 15u)) != 0u) {
+		fprintf(stderr, "sata: port %u is not an ATA block device\n", transport->port);
+		result = SATA_IDENTIFY_UNSUPPORTED;
 		goto done;
 	}
 	read_device_info(buffer.address, out_info);
 	print_identify(transport->port, buffer.address, out_info);
-	success = true;
+	result = SATA_IDENTIFY_OK;
 
 done:
 	sata_buffer_release(transport, &buffer);
-	return success;
+	return result;
 }

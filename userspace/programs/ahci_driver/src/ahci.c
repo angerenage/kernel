@@ -38,7 +38,14 @@ static bool read_property(cap_id_t device_cap, const char* name, uint64_t* out_v
 	return device_property_read_u64(device_cap, name, out_value) == SYSCALL_STATUS_OK;
 }
 
-static bool validate_device(cap_id_t device_cap, uint64_t* out_bar_size, uint64_t* out_mapping_offset) {
+enum ahci_validation_result {
+	AHCI_VALIDATION_VALID = 0u,
+	AHCI_VALIDATION_UNSUPPORTED,
+	AHCI_VALIDATION_ERROR,
+};
+
+static enum ahci_validation_result validate_device(cap_id_t device_cap, uint64_t* out_bar_size,
+                                                   uint64_t* out_mapping_offset) {
 	uint64_t class_code;
 	uint64_t subclass;
 	uint64_t interface;
@@ -47,10 +54,14 @@ static bool validate_device(cap_id_t device_cap, uint64_t* out_bar_size, uint64_
 	bool     bar_claimed;
 
 	if (!read_property(device_cap, "class_code", &class_code) || !read_property(device_cap, "subclass", &subclass) ||
-	    !read_property(device_cap, "programming_interface", &interface) || class_code != AHCI_PCI_CLASS_MASS_STORAGE ||
-	    subclass != AHCI_PCI_SUBCLASS_SATA || interface != AHCI_PCI_INTERFACE_AHCI) {
+	    !read_property(device_cap, "programming_interface", &interface)) {
+		fprintf(stderr, "ahci: PCI identity properties are unavailable\n");
+		return AHCI_VALIDATION_ERROR;
+	}
+	if (class_code != AHCI_PCI_CLASS_MASS_STORAGE || subclass != AHCI_PCI_SUBCLASS_SATA ||
+	    interface != AHCI_PCI_INTERFACE_AHCI) {
 		fprintf(stderr, "ahci: device is not a PCI AHCI controller\n");
-		return false;
+		return AHCI_VALIDATION_UNSUPPORTED;
 	}
 	if (!read_property(device_cap, "bar_5_kind", &bar_kind) || !read_property(device_cap, "bar_5_size", out_bar_size) ||
 	    !read_property(device_cap, "bar_5_mapping_offset", out_mapping_offset) ||
@@ -59,9 +70,9 @@ static bool validate_device(cap_id_t device_cap, uint64_t* out_bar_size, uint64_
 	    (bar_kind != AHCI_PCI_BAR_MEMORY32 && bar_kind != AHCI_PCI_BAR_MEMORY64) ||
 	    *out_bar_size < AHCI_GENERIC_REGISTERS_SIZE || !bar_enabled || !bar_claimed) {
 		fprintf(stderr, "ahci: ABAR is missing, disabled, or unavailable\n");
-		return false;
+		return AHCI_VALIDATION_ERROR;
 	}
-	return true;
+	return AHCI_VALIDATION_VALID;
 }
 
 static void mapping_release(struct ahci_mapping* mapping) {
@@ -204,7 +215,7 @@ static bool inspect_ports(const struct ahci_mapping* mapping, uint32_t capabilit
 	return true;
 }
 
-bool ahci_driver_run(cap_id_t device_cap) {
+enum device_driver_result ahci_driver_run(cap_id_t device_cap) {
 	struct ahci_mapping     mapping;
 	struct ahci_dma_context dma = {
 		.source_cap           = CAP_ID_INVALID,
@@ -213,18 +224,22 @@ bool ahci_driver_run(cap_id_t device_cap) {
 		.binding_cap          = CAP_ID_INVALID,
 		.process_space_cap    = CAP_ID_INVALID,
 	};
-	uint64_t bar_size;
-	uint64_t mapping_offset;
-	uint32_t capabilities;
-	uint32_t version;
-	uint32_t implemented;
-	uint32_t control;
-	bool     success;
+	uint64_t                    bar_size;
+	uint64_t                    mapping_offset;
+	uint32_t                    capabilities;
+	uint32_t                    version;
+	uint32_t                    implemented;
+	uint32_t                    control;
+	bool                        success;
+	enum ahci_validation_result validation;
 
-	if (device_cap == CAP_ID_INVALID || !validate_device(device_cap, &bar_size, &mapping_offset)) return false;
+	if (device_cap == CAP_ID_INVALID) return DEVICE_DRIVER_ERROR;
+	validation = validate_device(device_cap, &bar_size, &mapping_offset);
+	if (validation == AHCI_VALIDATION_UNSUPPORTED) return DEVICE_DRIVER_UNSUPPORTED;
+	if (validation != AHCI_VALIDATION_VALID) return DEVICE_DRIVER_ERROR;
 	if (!mapping_initialize(device_cap, bar_size, mapping_offset, &mapping)) {
 		fprintf(stderr, "ahci: unable to map ABAR\n");
-		return false;
+		return DEVICE_DRIVER_ERROR;
 	}
 	capabilities = mapping.registers->capabilities;
 	control      = mapping.registers->global_host_control;
@@ -245,5 +260,5 @@ bool ahci_driver_run(cap_id_t device_cap) {
 		success = ahci_transport_run(device_cap, mapping.registers, mapping.bar_size, capabilities, implemented, &dma);
 	if (dma.source_cap != CAP_ID_INVALID) ahci_dma_deinitialize(&dma);
 	mapping_release(&mapping);
-	return success;
+	return DEVICE_DRIVER_ERROR;
 }

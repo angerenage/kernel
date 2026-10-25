@@ -1,7 +1,7 @@
 format_version: 1
 
-# Compatible-ID order here has no priority. Device-provided order determines
-# specificity when matching.
+# Device-provided compatible-ID order determines specificity. When several
+# drivers claim the same ID, declaration order here determines fallback order.
 drivers:
   pci:
     executable: "/boot/pci_driver.elf"

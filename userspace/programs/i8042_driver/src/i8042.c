@@ -596,7 +596,7 @@ static void cleanup(struct i8042* controller) {
 	if (controller->data_cap != CAP_ID_INVALID) (void)cap_drop(controller->data_cap);
 }
 
-bool i8042_driver_run(cap_id_t device_cap) {
+enum device_driver_result i8042_driver_run(cap_id_t device_cap) {
 	struct i8042 controller = {
 		.data_cap     = CAP_ID_INVALID,
 		.command_cap  = CAP_ID_INVALID,
@@ -615,10 +615,10 @@ bool i8042_driver_run(cap_id_t device_cap) {
 		                 .transport_cap        = CAP_ID_INVALID,
 		                 .object_id            = I8042_MOUSE_OBJECT_ID},
 	};
-	struct self_info self;
-	uint8_t          config;
-	bool             mouse_port;
-	bool             success = false;
+	struct self_info          self;
+	uint8_t                   config;
+	bool                      mouse_port;
+	enum device_driver_result result = DEVICE_DRIVER_ERROR;
 
 	if (process_self_info(&self) != SYSCALL_STATUS_OK) {
 		report_error("i8042: could not identify the controller process\n");
@@ -640,6 +640,7 @@ bool i8042_driver_run(cap_id_t device_cap) {
 	controller.mouse.present    = mouse_port && probe_device(true);
 	if (!controller.keyboard.present && !controller.mouse.present) {
 		report_error("i8042: no populated PS/2 ports\n");
+		result = DEVICE_DRIVER_UNSUPPORTED;
 		goto done;
 	}
 	if (!flush_output() || !initialize_service(&controller, device_cap)) {
@@ -655,9 +656,9 @@ bool i8042_driver_run(cap_id_t device_cap) {
 	printf("i8042: controller online (primary=%s, auxiliary=%s)\n",
 	       controller.keyboard.present ? "yes" : "no",
 	       controller.mouse.present ? "yes" : "no");
-	success = serve(&controller);
+	(void)serve(&controller);
 
 done:
 	cleanup(&controller);
-	return success;
+	return result;
 }

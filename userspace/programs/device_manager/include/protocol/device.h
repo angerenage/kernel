@@ -24,6 +24,15 @@ enum device_driver_capability_index {
 	DEVICE_DRIVER_CAPABILITY_COUNT,
 };
 
+/* A clean driver exit indicating that another matching driver should be tried. */
+#define DEVICE_DRIVER_EXIT_UNSUPPORTED 2u
+
+/* Terminal outcomes returned by a driver implementation to its entry point. */
+enum device_driver_result {
+	DEVICE_DRIVER_ERROR = 0u,
+	DEVICE_DRIVER_UNSUPPORTED,
+};
+
 /* Rights granted when a catalog entry requests the physical-memory allocator. */
 #define DEVICE_DRIVER_MEMORY_ALLOCATOR_CAP_RIGHTS                                                                      \
 	((cap_rights_t)(CAP_CALL | CAP_READ | CAP_ALLOCATE | CAP_DERIVE | CAP_MANAGE | CAP_DELEGATE))
