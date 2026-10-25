@@ -11,6 +11,7 @@
 #define BLOCK_COMPATIBLE_DISK "block:disk"
 
 #define BLOCK_DRIVER_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE))
+#define BLOCK_BUFFER_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP | CAP_DELEGATE))
 
 enum block_op {
 	BLOCK_OP_OPEN = 0u,

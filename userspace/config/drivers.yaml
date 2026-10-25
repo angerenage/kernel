@@ -26,6 +26,11 @@ drivers:
     compatible_ids:
       - "ahci:sata"
 
+  partition:
+    executable: "/boot/partition_driver.elf"
+    compatible_ids:
+      - "block:disk"
+
   tpm:
     executable: "/boot/tpm_driver.elf"
     compatible_ids:
