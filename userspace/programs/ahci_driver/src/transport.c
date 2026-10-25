@@ -272,10 +272,12 @@ static bool add_port(struct ahci_transport* transport, volatile struct ahci_port
 	if (cap_publish(
 			transport->endpoint, port->object_id, transport->pid, AHCI_PORT_PROVIDER_RIGHTS, &port->transport_cap) !=
 	    SYSCALL_STATUS_OK) {
+		fprintf(stderr, "ahci: port %u could not publish its transport capability\n", index);
 		ahci_port_deinitialize(port);
 		return false;
 	}
 	if (!create_child(transport->parent_device_cap, port)) {
+		fprintf(stderr, "ahci: port %u child-device creation failed\n", index);
 		(void)cap_unpublish(transport->endpoint, port->object_id);
 		ahci_port_deinitialize(port);
 		return false;

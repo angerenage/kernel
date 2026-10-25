@@ -51,10 +51,23 @@ bool ahci_port_initialize(struct ahci_port* port, volatile struct ahci_port_regi
 		                  .cpu_mapping_cap    = CAP_ID_INVALID,
 		                  .device_mapping_cap = CAP_ID_INVALID},
 	};
-	if (!ahci_port_stop(port) || registers->command_issue != 0u || registers->sata_active != 0u) return false;
-	if (!ahci_dma_buffer_allocate(
-			dma, AHCI_COMMAND_DMA_SIZE, MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE, &port->command_dma))
+	if (!ahci_port_stop(port)) {
+		fprintf(stderr, "ahci: port %u command engine did not stop during initialization\n", index);
 		return false;
+	}
+	if (registers->command_issue != 0u || registers->sata_active != 0u) {
+		fprintf(stderr,
+		        "ahci: port %u retained active commands (ci=%08x sact=%08x)\n",
+		        index,
+		        registers->command_issue,
+		        registers->sata_active);
+		return false;
+	}
+	if (!ahci_dma_buffer_allocate(
+			dma, AHCI_COMMAND_DMA_SIZE, MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE, &port->command_dma)) {
+		fprintf(stderr, "ahci: port %u could not allocate command DMA memory\n", index);
+		return false;
+	}
 	if (!address_64bit && (port->command_dma.device_address > UINT32_MAX ||
 	                       port->command_dma.size - 1u > UINT32_MAX - port->command_dma.device_address)) {
 		fprintf(stderr, "ahci: port %u command memory exceeds the controller address width\n", index);

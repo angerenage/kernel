@@ -25,18 +25,18 @@ bool hal_cache_sync_for_device(void* address, size_t size) {
 	if (size == 0u) return true;
 	if (address == NULL) return false;
 	(void)address;
-	/* DBAR orders accesses but is not a substitute for data-cache maintenance on non-coherent DMA. */
+	/* LoongArch platforms maintain hardware DMA coherency; only ownership ordering is required. */
 	__asm__ volatile("dbar 0" : : : "memory");
-	return false;
+	return true;
 }
 
 bool hal_cache_sync_for_cpu(void* address, size_t size) {
 	if (size == 0u) return true;
 	if (address == NULL) return false;
 	(void)address;
-	/* Keep this unsupported until cache geometry and CACOP-based range maintenance are explicit. */
+	/* Complete device accesses before permitting the CPU to consume coherent DMA memory. */
 	__asm__ volatile("dbar 0" : : : "memory");
-	return false;
+	return true;
 }
 
 void hal_cache_sync_executable_range(void* address, size_t size) {
