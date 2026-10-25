@@ -58,23 +58,34 @@ static const char* sata_speed(const uint8_t* identify) {
 	return "unknown";
 }
 
-static void print_identify(uint32_t port, const uint8_t* identify) {
+static void read_device_info(const uint8_t* identify, struct sata_device_info* info) {
+	uint16_t command_sets = identify_word(identify, 83u);
+	bool     valid        = (command_sets & 0xc000u) == 0x4000u;
+
+	info->logical_sector_size = logical_sector_size(identify);
+	info->sector_count        = sector_count(identify, &info->lba48);
+	info->dma                 = (identify_word(identify, 49u) & (1u << 8u)) != 0u;
+	info->flush_cache         = valid && (identify_word(identify, 82u) & (1u << 12u)) != 0u;
+	info->flush_cache_ext     = valid && (command_sets & (1u << 13u)) != 0u;
+}
+
+static void print_identify(uint32_t port, const uint8_t* identify, const struct sata_device_info* info) {
 	char     serial[21];
 	char     firmware[9];
 	char     model[41];
 	char     capacity[32];
-	bool     lba48;
-	uint64_t sectors     = sector_count(identify, &lba48);
-	uint32_t sector_size = logical_sector_size(identify);
-	uint16_t sata_caps   = identify_word(identify, 76u);
-	uint16_t rotation    = identify_word(identify, 217u);
-	bool     ncq         = sata_caps != 0u && sata_caps != UINT16_MAX && (sata_caps & (1u << 8u)) != 0u;
+	uint16_t sata_caps = identify_word(identify, 76u);
+	uint16_t rotation  = identify_word(identify, 217u);
+	bool     ncq       = sata_caps != 0u && sata_caps != UINT16_MAX && (sata_caps & (1u << 8u)) != 0u;
 
 	identify_string(identify, 10u, 10u, serial);
 	identify_string(identify, 23u, 4u, firmware);
 	identify_string(identify, 27u, 20u, model);
-	if (sector_size != 0u && sectors <= UINT64_MAX / sector_size)
-		(void)snprintf(capacity, sizeof(capacity), "%llu bytes", (unsigned long long)(sectors * sector_size));
+	if (info->logical_sector_size != 0u && info->sector_count <= UINT64_MAX / info->logical_sector_size)
+		(void)snprintf(capacity,
+		               sizeof(capacity),
+		               "%llu bytes",
+		               (unsigned long long)(info->sector_count * info->logical_sector_size));
 	else (void)snprintf(capacity, sizeof(capacity), "overflow");
 	printf("sata: port %u model=\"%s\" serial=\"%s\" firmware=\"%s\" sectors=%llu sector_size=%u capacity=%s "
 	       "lba48=%s ncq=%s queue_depth=%u trim=%s smart=%s speed=%s medium=%s\n",
@@ -82,10 +93,10 @@ static void print_identify(uint32_t port, const uint8_t* identify) {
 	       model,
 	       serial,
 	       firmware,
-	       (unsigned long long)sectors,
-	       sector_size,
+	       (unsigned long long)info->sector_count,
+	       info->logical_sector_size,
 	       capacity,
-	       lba48 ? "yes" : "no",
+	       info->lba48 ? "yes" : "no",
 	       ncq ? "yes" : "no",
 	       ncq ? (identify_word(identify, 75u) & 0x1fu) + 1u : 1u,
 	       (identify_word(identify, 169u) & 1u) != 0u ? "yes" : "no",
@@ -94,13 +105,13 @@ static void print_identify(uint32_t port, const uint8_t* identify) {
 	       rotation == 1u ? "solid-state" : "rotating/unspecified");
 }
 
-bool sata_identify_device(const struct sata_transport* transport) {
+bool sata_identify_device(const struct sata_transport* transport, struct sata_device_info* out_info) {
 	struct sata_buffer buffer = {
 		.memory_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .mapping_cap = CAP_ID_INVALID};
 	struct ahci_transport_execute_response response;
 	bool                                   success = false;
 
-	if (transport == NULL || transport->max_transfer_size < ATA_IDENTIFY_SIZE ||
+	if (transport == NULL || out_info == NULL || transport->max_transfer_size < ATA_IDENTIFY_SIZE ||
 	    !sata_buffer_allocate(transport, ATA_IDENTIFY_SIZE, &buffer))
 		goto done;
 	const struct ahci_transport_execute_request request = {
@@ -115,7 +126,8 @@ bool sata_identify_device(const struct sata_transport* transport) {
 		fprintf(stderr, "sata: port %u IDENTIFY DEVICE failed\n", transport->port);
 		goto done;
 	}
-	print_identify(transport->port, buffer.address);
+	read_device_info(buffer.address, out_info);
+	print_identify(transport->port, buffer.address, out_info);
 	success = true;
 
 done:

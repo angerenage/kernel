@@ -1,4 +1,5 @@
 sata_driver_sources = files(
+	'src/commands.c',
 	'src/identify.c',
 	'src/main.c',
 	'src/sata.c',
