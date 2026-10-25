@@ -62,6 +62,7 @@ endif
 
 userspace_runtime_sources = files(
 	'runtime/diagnostic.c',
+	'runtime/block.c',
 	'runtime/filesystem.c',
 	'runtime/file_output.c',
 	'runtime/heap.c',

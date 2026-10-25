@@ -3,6 +3,7 @@ sata_driver_sources = files(
 	'src/identify.c',
 	'src/main.c',
 	'src/sata.c',
+	'src/service.c',
 	'src/transport.c',
 )
 

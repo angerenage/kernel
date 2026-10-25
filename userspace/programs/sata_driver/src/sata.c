@@ -1,10 +1,10 @@
 #include "sata.h"
 
 #include <stdio.h>
-#include <system/time.h>
 
 #include "commands.h"
 #include "identify.h"
+#include "service.h"
 #include "transport.h"
 
 static bool probe_dma_commands(const struct sata_transport* transport, const struct sata_device_info* info) {
@@ -35,7 +35,7 @@ bool sata_driver_run(cap_id_t device_cap) {
 
 	if (success) success = sata_identify_device(&transport, &info);
 	if (success) success = probe_dma_commands(&transport, &info);
-	while (success) success = sleep_ms(1000u) == SYSCALL_STATUS_OK;
+	if (success) success = sata_block_service_run(device_cap, &transport, &info);
 	sata_transport_deinitialize(&transport);
 	return success;
 }
