@@ -9,6 +9,7 @@
 #define BLOCK_RESOURCE "block"
 #define BLOCK_COMPATIBLE_DEVICE "block:device"
 #define BLOCK_COMPATIBLE_DISK "block:disk"
+#define BLOCK_COMPATIBLE_PARTITION "block:partition"
 
 #define BLOCK_DRIVER_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE))
 #define BLOCK_BUFFER_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP | CAP_DELEGATE))

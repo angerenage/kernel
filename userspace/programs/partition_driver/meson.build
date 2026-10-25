@@ -3,6 +3,8 @@ partition_driver_sources = files(
 	'src/main.c',
 	'src/mbr.c',
 	'src/partition.c',
+	'src/service.c',
+	'src/table.c',
 )
 
 partition_driver_elf = executable('partition_driver.elf',

@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "table.h"
+
 #define GPT_HEADER_MIN_SIZE 92u
 #define GPT_ENTRY_MIN_SIZE 128u
 #define GPT_ENTRY_ALIGNMENT 8u
@@ -196,23 +198,6 @@ static enum gpt_result validate_entries(const struct block_device* device, struc
 	return ~crc == header->entries_crc ? GPT_RESULT_VALID : GPT_RESULT_INVALID;
 }
 
-static void format_guid(const uint8_t* guid, char output[37]) {
-	(void)snprintf(output,
-	               37u,
-	               "%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-	               read_u32_le(guid),
-	               (unsigned)((uint16_t)guid[4] | (uint16_t)guid[5] << 8u),
-	               (unsigned)((uint16_t)guid[6] | (uint16_t)guid[7] << 8u),
-	               guid[8],
-	               guid[9],
-	               guid[10],
-	               guid[11],
-	               guid[12],
-	               guid[13],
-	               guid[14],
-	               guid[15]);
-}
-
 static void format_name(const uint8_t* entry, char output[GPT_NAME_CODE_UNITS + 1u]) {
 	size_t size = 0u;
 	for (; size < GPT_NAME_CODE_UNITS; size++) {
@@ -223,8 +208,9 @@ static void format_name(const uint8_t* entry, char output[GPT_NAME_CODE_UNITS + 
 	output[size] = '\0';
 }
 
-static enum gpt_result print_entries(const struct block_device* device, struct block_buffer* buffer,
-                                     const struct gpt_header* header, bool backup, bool fully_loaded) {
+static enum gpt_result collect_entries(const struct block_device* device, struct block_buffer* buffer,
+                                       const struct gpt_header* header, bool backup, bool fully_loaded,
+                                       struct partition_table* table) {
 	uint32_t populated = 0u;
 
 	printf("partition: valid %sGPT partition table\n", backup ? "backup " : "");
@@ -242,19 +228,26 @@ static enum gpt_result print_entries(const struct block_device* device, struct b
 			const uint8_t* entry = entries + (size_t)offset * header->entry_size;
 			if (all_zero(entry, 16u)) continue;
 			if (!valid_entry(entry, header)) return GPT_RESULT_INVALID;
-			uint64_t first_lba = read_u64_le(entry + 32u);
-			uint64_t last_lba  = read_u64_le(entry + 40u);
-			char     type[37];
-			char     name[GPT_NAME_CODE_UNITS + 1u];
-			format_guid(entry, type);
-			format_name(entry, name);
+			uint64_t               first_lba = read_u64_le(entry + 32u);
+			uint64_t               last_lba  = read_u64_le(entry + 40u);
+			struct partition_entry partition = {.scheme      = PARTITION_SCHEME_GPT,
+			                                    .table_index = index + offset + 1u,
+			                                    .first_lba   = first_lba,
+			                                    .block_count = last_lba - first_lba + 1u};
+			char                   type[PARTITION_GUID_STRING_SIZE];
+			memcpy(partition.gpt.type_guid, entry, sizeof(partition.gpt.type_guid));
+			memcpy(partition.gpt.unique_guid, entry + 16u, sizeof(partition.gpt.unique_guid));
+			partition.gpt.attributes = read_u64_le(entry + 48u);
+			format_name(entry, partition.gpt.name);
+			if (!partition_table_append(table, &partition)) return GPT_RESULT_NO_MEMORY;
+			partition_format_guid(partition.gpt.type_guid, type);
 			printf("partition: GPT entry %u type=%s first_lba=%llu last_lba=%llu blocks=%llu name=\"%s\"\n",
-			       index + offset + 1u,
+			       partition.table_index,
 			       type,
 			       (unsigned long long)first_lba,
 			       (unsigned long long)last_lba,
-			       (unsigned long long)(last_lba - first_lba + 1u),
-			       name);
+			       (unsigned long long)partition.block_count,
+			       partition.gpt.name);
 			populated++;
 		}
 		index += count;
@@ -263,7 +256,8 @@ static enum gpt_result print_entries(const struct block_device* device, struct b
 	return GPT_RESULT_VALID;
 }
 
-static enum gpt_result probe_copy(const struct block_device* device, uint64_t lba, bool backup) {
+static enum gpt_result probe_copy(const struct block_device* device, uint64_t lba, bool backup,
+                                  struct partition_table* table) {
 	struct gpt_header   header;
 	struct block_buffer buffer = {
 		.memory_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .mapping_cap = CAP_ID_INVALID};
@@ -273,18 +267,22 @@ static enum gpt_result probe_copy(const struct block_device* device, uint64_t lb
 	result = allocate_entry_buffer(device, &header, &buffer);
 	if (result != GPT_RESULT_VALID) return result;
 	result = validate_entries(device, &buffer, &header, &fully_loaded);
-	if (result == GPT_RESULT_VALID) result = print_entries(device, &buffer, &header, backup, fully_loaded);
+	if (result == GPT_RESULT_VALID) result = collect_entries(device, &buffer, &header, backup, fully_loaded, table);
 	block_buffer_release(device, &buffer);
 	return result;
 }
 
-enum gpt_result gpt_probe(const struct block_device* device) {
-	if (device == NULL || device->block_size < GPT_HEADER_MIN_SIZE || device->block_count < 2u)
+enum gpt_result gpt_probe(const struct block_device* device, struct partition_table* table) {
+	if (device == NULL || table == NULL || table->count != 0u || device->block_size < GPT_HEADER_MIN_SIZE ||
+	    device->block_count < 2u)
 		return GPT_RESULT_INVALID;
-	enum gpt_result primary = probe_copy(device, 1u, false);
-	if (primary == GPT_RESULT_VALID || primary == GPT_RESULT_IO_ERROR) return primary;
-	enum gpt_result backup = probe_copy(device, device->block_count - 1u, true);
-	if (backup == GPT_RESULT_VALID || backup == GPT_RESULT_IO_ERROR) return backup;
+	enum gpt_result primary = probe_copy(device, 1u, false, table);
+	if (primary == GPT_RESULT_VALID || primary == GPT_RESULT_IO_ERROR || primary == GPT_RESULT_NO_MEMORY)
+		return primary;
+	table->count           = 0u;
+	enum gpt_result backup = probe_copy(device, device->block_count - 1u, true, table);
+	if (backup == GPT_RESULT_VALID || backup == GPT_RESULT_IO_ERROR || backup == GPT_RESULT_NO_MEMORY) return backup;
+	table->count = 0u;
 	return primary == GPT_RESULT_NOT_PRESENT && backup == GPT_RESULT_NOT_PRESENT ? GPT_RESULT_NOT_PRESENT
 	                                                                             : GPT_RESULT_INVALID;
 }
