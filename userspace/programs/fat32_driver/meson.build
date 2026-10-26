@@ -2,6 +2,7 @@ fat32_driver_sources = files(
 	'src/directory.c',
 	'src/fat32.c',
 	'src/main.c',
+	'src/server.c',
 	'src/volume.c',
 	'src/write.c',
 )
