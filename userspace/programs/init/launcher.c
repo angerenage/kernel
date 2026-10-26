@@ -5,9 +5,13 @@
 #include <base/module.h>
 #include <base/startup.h>
 #include <base/thread.h>
+#include <protocol/filesystem.h>
 #include <protocol/terminal.h>
 #include <protocol/tty_session.h>
+#include <protocol/vfs.h>
+#include <runtime/program.h>
 #include <runtime/registry.h>
+#include <runtime/vfs.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,6 +27,10 @@
 #define TERMINAL_PROTOCOL_VERSION_MINOR 0u
 #define TTY_SESSION_PROTOCOL_VERSION_MAJOR 1u
 #define TTY_SESSION_PROTOCOL_VERSION_MINOR 0u
+#define VFS_PROTOCOL_VERSION_MAJOR 1u
+#define VFS_PROTOCOL_VERSION_MINOR 0u
+#define INSTALLED_PROGRAM_DIRECTORY "/bin/"
+#define INSTALLED_PROGRAM_LOADER "elf64"
 
 enum bootstrap_input_source {
 	BOOTSTRAP_INPUT_NONE,
@@ -115,7 +123,7 @@ cleanup:
 	return status;
 }
 
-static syscall_status_t install_input_stream(process_id_t target, enum bootstrap_input_source source,
+static syscall_status_t install_input_stream(process_id_t target, enum bootstrap_input_source source, bool delegatable,
                                              cap_id_t* out_capability) {
 	struct registry_protocol_query query = {0};
 	const char*                    service;
@@ -140,6 +148,7 @@ static syscall_status_t install_input_stream(process_id_t target, enum bootstrap
 		rights      = TTY_SESSION_CONTROL_RIGHTS;
 	}
 	else return SYSCALL_STATUS_BAD_ARGUMENT;
+	if (delegatable) rights |= CAP_DELEGATE;
 	*out_capability                    = CAP_ID_INVALID;
 	struct registry_call_result result = registry_grant(target, &query, service, rights, out_capability);
 	if (result.status == REGISTRY_STATUS_OK) return SYSCALL_STATUS_OK;
@@ -251,7 +260,7 @@ static bool bootstrap_launch_internal(const struct init_state* init, const char*
 		goto fail;
 	}
 	if (input_source != BOOTSTRAP_INPUT_NONE) {
-		status = install_input_stream(process_info.pid, input_source, &input_stream_cap);
+		status = install_input_stream(process_info.pid, input_source, false, &input_stream_cap);
 		if (status != SYSCALL_STATUS_OK) {
 			printf("init: input stream installation failed: %u\n", (unsigned)status);
 			goto fail;
@@ -409,5 +418,196 @@ bool bootstrap_launch_interactive(const struct init_state* init, const char* mod
 	                                 BOOTSTRAP_INPUT_TTY_SESSION,
 	                                 true,
 	                                 NULL,
+	                                 out_process_cap);
+}
+
+static syscall_status_t acquire_output_stream(const struct init_state* init, cap_id_t* out_capability,
+                                              bool* out_owned) {
+	const struct registry_protocol_query query = {
+		.namespace_path = TERMINAL_NAMESPACE,
+		.protocol       = TERMINAL_PROTOCOL_NAME,
+		.major          = TERMINAL_PROTOCOL_VERSION_MAJOR,
+		.minor          = TERMINAL_PROTOCOL_VERSION_MINOR,
+	};
+	struct registry_service_handle terminal = {.capability = CAP_ID_INVALID};
+	struct registry_call_result    result;
+
+	if (init == NULL || out_capability == NULL || out_owned == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	*out_capability = CAP_ID_INVALID;
+	*out_owned      = false;
+	result          = registry_acquire(&query, TERMINAL_SERVICE_NAME, &terminal);
+	if (result.status == REGISTRY_STATUS_OK && result.transport_status == SYSCALL_STATUS_OK) {
+		*out_capability = terminal.capability;
+		*out_owned      = true;
+		return SYSCALL_STATUS_OK;
+	}
+	if (result.status != REGISTRY_STATUS_NOT_FOUND) return SYSCALL_STATUS_FAILED;
+	*out_capability = init->serial_stream_cap;
+	return SYSCALL_STATUS_OK;
+}
+
+static bool installed_launch_internal(const struct init_state* init, const char* file_name, const char* description,
+                                      size_t argc, const char* const argv[], size_t capability_count,
+                                      const struct program_capability_argument capabilities[],
+                                      enum bootstrap_input_source input_source, bool delegatable_output,
+                                      cap_id_t* out_process_cap) {
+	const struct registry_protocol_query vfs_query = {
+		.namespace_path = VFS_NAMESPACE,
+		.protocol       = VFS_PROTOCOL_NAME,
+		.major          = VFS_PROTOCOL_VERSION_MAJOR,
+		.minor          = VFS_PROTOCOL_VERSION_MINOR,
+	};
+	struct registry_service_handle      vfs        = {.capability = CAP_ID_INVALID};
+	struct filesystem_node_handle       executable = {.capability = CAP_ID_INVALID};
+	struct program_load_result          loaded     = {.load_cap = CAP_ID_INVALID, .process_id = PROCESS_PID_INVALID};
+	struct program_run_result           running    = {.process_cap = CAP_ID_INVALID, .thread_cap = CAP_ID_INVALID};
+	struct program_capability_argument* capv       = NULL;
+	cap_id_t                            input_cap  = CAP_ID_INVALID;
+	cap_id_t                            output_cap = CAP_ID_INVALID;
+	char*                               path       = NULL;
+	size_t                              file_name_size;
+	size_t                              path_size;
+	syscall_status_t                    status;
+	bool                                output_owned = false;
+	bool                                success      = false;
+	process_id_t                        init_pid     = PROCESS_PID_INVALID;
+
+	if (init == NULL || file_name == NULL || file_name[0] == '\0' || strchr(file_name, '/') != NULL ||
+	    description == NULL || (argc != 0u && argv == NULL) || (capability_count != 0u && capabilities == NULL) ||
+	    capability_count > SIZE_MAX - PROCESS_STARTUP_CAP_COUNT || out_process_cap == NULL ||
+	    *out_process_cap != CAP_ID_INVALID)
+		return false;
+	file_name_size = strlen(file_name);
+	if (file_name_size > SIZE_MAX - sizeof(INSTALLED_PROGRAM_DIRECTORY)) return false;
+	path_size = sizeof(INSTALLED_PROGRAM_DIRECTORY) - 1u + file_name_size;
+	path      = malloc(path_size + 1u);
+	if (path == NULL) goto cleanup;
+	memcpy(path, INSTALLED_PROGRAM_DIRECTORY, sizeof(INSTALLED_PROGRAM_DIRECTORY) - 1u);
+	memcpy(path + sizeof(INSTALLED_PROGRAM_DIRECTORY) - 1u, file_name, file_name_size + 1u);
+	struct registry_call_result registry_result = registry_acquire(&vfs_query, VFS_SERVICE_NAME, &vfs);
+	if (registry_result.status != REGISTRY_STATUS_OK || registry_result.transport_status != SYSCALL_STATUS_OK) {
+		printf("init: VFS acquisition for %s failed: %u\n", description, (unsigned)registry_result.status);
+		goto cleanup;
+	}
+	struct filesystem_call_result open_result =
+		vfs_open(vfs.capability, path, path_size, CAP_READ | CAP_DELEGATE, &executable);
+	if (open_result.transport_status != SYSCALL_STATUS_OK || open_result.status != FILESYSTEM_STATUS_OK ||
+	    executable.info.type != FILESYSTEM_NODE_FILE) {
+		printf("init: opening %s failed: transport=%u status=%u\n",
+		       path,
+		       (unsigned)open_result.transport_status,
+		       (unsigned)open_result.status);
+		goto cleanup;
+	}
+	status = program_load(INSTALLED_PROGRAM_LOADER, executable.capability, file_name, file_name_size, &loaded);
+	if (status != SYSCALL_STATUS_OK) {
+		printf("init: loading %s failed: %u\n", path, (unsigned)status);
+		goto cleanup;
+	}
+	if (input_source != BOOTSTRAP_INPUT_NONE) {
+		struct self_info self = {
+			.self_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .main_thread_cap = CAP_ID_INVALID};
+		status = process_self_info(&self);
+		if (status == SYSCALL_STATUS_OK) init_pid = self.pid;
+		if (self.self_cap != CAP_ID_INVALID) (void)cap_drop(self.self_cap);
+		if (self.address_space_cap != CAP_ID_INVALID) (void)cap_drop(self.address_space_cap);
+		if (self.main_thread_cap != CAP_ID_INVALID) (void)cap_drop(self.main_thread_cap);
+		if (status != SYSCALL_STATUS_OK || init_pid == PROCESS_PID_INVALID) goto cleanup;
+		status = install_input_stream(init_pid, input_source, true, &input_cap);
+		if (status != SYSCALL_STATUS_OK) {
+			printf("init: input stream acquisition for %s failed: %u\n", description, (unsigned)status);
+			goto cleanup;
+		}
+	}
+	status = acquire_output_stream(init, &output_cap, &output_owned);
+	if (status != SYSCALL_STATUS_OK) {
+		printf("init: output stream acquisition for %s failed: %u\n", description, (unsigned)status);
+		goto cleanup;
+	}
+	capv = calloc(PROCESS_STARTUP_CAP_COUNT + capability_count, sizeof(*capv));
+	if (capv == NULL) goto cleanup;
+	capv[PROCESS_STARTUP_CAP_STDIN] = (struct program_capability_argument){
+		.capability = input_cap,
+		.rights = input_cap == CAP_ID_INVALID
+		              ? 0u
+		              : (input_source == BOOTSTRAP_INPUT_TERMINAL ? TERMINAL_TTY_RIGHTS : TTY_SESSION_CONTROL_RIGHTS),
+	};
+	capv[PROCESS_STARTUP_CAP_STDOUT] = (struct program_capability_argument){
+		.capability = output_cap,
+		.rights     = TERMINAL_OUTPUT_RIGHTS | (delegatable_output ? CAP_DELEGATE : 0u),
+	};
+	capv[PROCESS_STARTUP_CAP_STDERR] = capv[PROCESS_STARTUP_CAP_STDOUT];
+	for (size_t index = 0u; index < capability_count; index++)
+		capv[PROCESS_STARTUP_CAP_COUNT + index] = capabilities[index];
+	status = program_run(&loaded, argc, argv, PROCESS_STARTUP_CAP_COUNT + capability_count, capv, &running);
+	if (status != SYSCALL_STATUS_OK) {
+		printf("init: starting %s failed: %u\n", path, (unsigned)status);
+		goto cleanup;
+	}
+	loaded.load_cap = CAP_ID_INVALID;
+	if (!drop_owned_capability(&running.thread_cap, "installed program thread")) goto cleanup;
+	*out_process_cap    = running.process_cap;
+	running.process_cap = CAP_ID_INVALID;
+	success             = true;
+
+cleanup:
+	free(capv);
+	free(path);
+	if (output_owned) (void)drop_owned_capability(&output_cap, "installed program output");
+	if (input_cap != CAP_ID_INVALID) (void)drop_owned_capability(&input_cap, "installed program input");
+	if (executable.capability != CAP_ID_INVALID)
+		(void)drop_owned_capability(&executable.capability, "installed executable");
+	if (vfs.capability != CAP_ID_INVALID) (void)drop_owned_capability(&vfs.capability, "VFS");
+	if (loaded.load_cap != CAP_ID_INVALID) (void)program_cancel(loaded.load_cap);
+	if (!success && running.process_cap != CAP_ID_INVALID) {
+		(void)process_kill(running.process_cap, PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
+		(void)process_wait(running.process_cap, NULL);
+	}
+	return success;
+}
+
+bool installed_launch(const struct init_state* init, const char* file_name, const char* description, size_t argc,
+                      const char* const argv[], size_t capability_count,
+                      const struct program_capability_argument capabilities[], cap_id_t* out_process_cap) {
+	return installed_launch_internal(init,
+	                                 file_name,
+	                                 description,
+	                                 argc,
+	                                 argv,
+	                                 capability_count,
+	                                 capabilities,
+	                                 BOOTSTRAP_INPUT_NONE,
+	                                 false,
+	                                 out_process_cap);
+}
+
+bool installed_launch_terminal_session(const struct init_state* init, const char* file_name, const char* description,
+                                       size_t argc, const char* const argv[], size_t capability_count,
+                                       const struct program_capability_argument capabilities[],
+                                       cap_id_t*                                out_process_cap) {
+	return installed_launch_internal(init,
+	                                 file_name,
+	                                 description,
+	                                 argc,
+	                                 argv,
+	                                 capability_count,
+	                                 capabilities,
+	                                 BOOTSTRAP_INPUT_TERMINAL,
+	                                 false,
+	                                 out_process_cap);
+}
+
+bool installed_launch_interactive(const struct init_state* init, const char* file_name, const char* description,
+                                  size_t argc, const char* const argv[], size_t capability_count,
+                                  const struct program_capability_argument capabilities[], cap_id_t* out_process_cap) {
+	return installed_launch_internal(init,
+	                                 file_name,
+	                                 description,
+	                                 argc,
+	                                 argv,
+	                                 capability_count,
+	                                 capabilities,
+	                                 BOOTSTRAP_INPUT_TTY_SESSION,
+	                                 true,
 	                                 out_process_cap);
 }

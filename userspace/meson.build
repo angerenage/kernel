@@ -172,6 +172,12 @@ driver_catalog = configure_file(
 	copy : true,
 )
 
+boot_driver_catalog = configure_file(
+	input : 'config/boot_drivers.yaml',
+	output : 'boot-drivers.yaml',
+	copy : true,
+)
+
 system_configuration = configure_file(
 	input : 'config/system.yaml',
 	output : 'system.yaml',
@@ -190,13 +196,27 @@ keyboard_azerty_layout = configure_file(
 	copy : true,
 )
 
-userspace_boot_modules = userspace_programs + [
-	driver_catalog,
+userspace_boot_programs = [
+	init_elf,
+	registry_elf,
+	vfs_elf,
+	bootfs_elf,
+	loader_elf,
+	device_manager_elf,
+	terminal_elf,
+	acpi_parser_elf,
+	dt_parser_elf,
+	pci_driver_elf,
+	ahci_driver_elf,
+	sata_driver_elf,
+	partition_driver_elf,
+	fat32_driver_elf,
+]
+
+userspace_boot_modules = userspace_boot_programs + [
+	boot_driver_catalog,
 	system_configuration,
-	keyboard_qwerty_layout,
-	keyboard_azerty_layout,
 	commit_mono_regular_font,
-	commit_mono_license,
 ]
 
 userspace_root_programs = userspace_programs

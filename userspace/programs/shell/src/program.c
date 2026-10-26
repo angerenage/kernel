@@ -15,7 +15,7 @@
 #include "shell.h"
 
 #define SHELL_LOADER_SERVICE "elf64"
-#define SHELL_PROGRAM_DIRECTORY "/boot/"
+#define SHELL_PROGRAM_DIRECTORY "/bin/"
 #define SHELL_PROGRAM_SUFFIX ".elf"
 
 static bool command_has_suffix(const char* command, size_t size) {

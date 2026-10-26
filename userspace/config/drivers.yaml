@@ -4,7 +4,7 @@ format_version: 1
 # drivers claim the same ID, declaration order here determines fallback order.
 drivers:
   pci:
-    executable: "/boot/pci_driver.elf"
+    executable: "/bin/pci_driver.elf"
     root_capabilities:
       - "memory_allocator"
       - "dma"
@@ -17,44 +17,36 @@ drivers:
       - "dt:pci-host-ecam-generic"
 
   ahci:
-    executable: "/boot/ahci_driver.elf"
+    executable: "/bin/ahci_driver.elf"
     compatible_ids:
       - "pci:class:01:06:01"
 
   sata:
-    executable: "/boot/sata_driver.elf"
+    executable: "/bin/sata_driver.elf"
     compatible_ids:
       - "ahci:sata"
 
   partition:
-    executable: "/boot/partition_driver.elf"
+    executable: "/bin/partition_driver.elf"
     compatible_ids:
       - "block:disk"
 
   fat32:
-    executable: "/boot/fat32_driver.elf"
+    executable: "/bin/fat32_driver.elf"
     compatible_ids:
       - "gpt:ebd0a0a2-b9e5-4433-87c0-68b6b72699c7"
       - "mbr:0b"
       - "mbr:0c"
       - "block:partition"
 
-  tpm:
-    executable: "/boot/tpm_driver.elf"
-    compatible_ids:
-      - "acpi:MSFT0101"
-      - "acpi:TPM2"
-      - "dt:tcg,tpm-tis-mmio"
-      - "dt:tcg,tpm-crb"
-
   i8042:
-    executable: "/boot/i8042_driver.elf"
+    executable: "/bin/i8042_driver.elf"
     compatible_ids:
       - "acpi:PNP0303"
       - "acpi:i8042"
 
   ps2:
-    executable: "/boot/ps2_driver.elf"
+    executable: "/bin/ps2_driver.elf"
     compatible_ids:
       - "ps2:keyboard"
       - "ps2:mouse"

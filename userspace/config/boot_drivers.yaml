@@ -1,0 +1,40 @@
+format_version: 1
+
+# Only the storage path required to mount the FAT32 system volume belongs in
+# the boot catalog. The complete catalog is activated from /etc after pivot.
+drivers:
+  pci:
+    executable: "/boot/pci_driver.elf"
+    root_capabilities:
+      - "memory_allocator"
+      - "dma"
+      - "interrupts"
+      - "io_ports"
+    compatible_ids:
+      - "acpi:PNP0A08"
+      - "acpi:PNP0A03"
+      - "acpi:MCFG"
+      - "dt:pci-host-ecam-generic"
+
+  ahci:
+    executable: "/boot/ahci_driver.elf"
+    compatible_ids:
+      - "pci:class:01:06:01"
+
+  sata:
+    executable: "/boot/sata_driver.elf"
+    compatible_ids:
+      - "ahci:sata"
+
+  partition:
+    executable: "/boot/partition_driver.elf"
+    compatible_ids:
+      - "block:disk"
+
+  fat32:
+    executable: "/boot/fat32_driver.elf"
+    compatible_ids:
+      - "gpt:ebd0a0a2-b9e5-4433-87c0-68b6b72699c7"
+      - "mbr:0b"
+      - "mbr:0c"
+      - "block:partition"

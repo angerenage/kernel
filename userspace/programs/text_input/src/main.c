@@ -4,7 +4,7 @@
 
 #include "text_input.h"
 
-#define TEXT_INPUT_DEFAULT_LAYOUT_PATH "/boot/keyboard_qwerty.xml"
+#define TEXT_INPUT_DEFAULT_LAYOUT_PATH "/etc/keyboard_qwerty.xml"
 
 int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 	static struct text_input input;

@@ -5,7 +5,7 @@
 
 #include "device.h"
 
-#define DM_DRIVER_CATALOG_PATH "/boot/drivers.yaml"
+#define DM_DRIVER_CATALOG_PATH "/boot/boot-drivers.yaml"
 
 /* Result of loading and validating one driver catalog. */
 enum dm_driver_catalog_status {

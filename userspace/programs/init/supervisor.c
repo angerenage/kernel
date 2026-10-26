@@ -1,12 +1,14 @@
 #include "supervisor.h"
 
 #include <limits.h>
+#include <protocol/device_manager_control.h>
 #include <protocol/filesystem.h>
 #include <protocol/loader.h>
 #include <protocol/terminal.h>
 #include <protocol/text_input.h>
 #include <protocol/tty_session.h>
 #include <protocol/vfs.h>
+#include <runtime/device_manager.h>
 #include <runtime/program.h>
 #include <runtime/vfs.h>
 #include <stdint.h>
@@ -36,9 +38,10 @@
 #define TEXT_INPUT_LAYOUT_OPTION "text_input.layout"
 #define TEXT_INPUT_LAYOUT_QWERTY "qwerty"
 #define TEXT_INPUT_LAYOUT_AZERTY "azerty"
-#define TEXT_INPUT_QWERTY_PATH "/boot/keyboard_qwerty.xml"
-#define TEXT_INPUT_AZERTY_PATH "/boot/keyboard_azerty.xml"
+#define TEXT_INPUT_QWERTY_PATH "/etc/keyboard_qwerty.xml"
+#define TEXT_INPUT_AZERTY_PATH "/etc/keyboard_azerty.xml"
 #define SYSTEM_CONFIGURATION_PATH "/boot/system.yaml"
+#define DRIVER_CATALOG_PATH "/etc/drivers.yaml"
 #define SUPERVISOR_RESTART_BASE_MS 250u
 #define SUPERVISOR_RESTART_MAX_MS 4000u
 #define SUPERVISOR_CONTROL_OBJECT_ID 1u
@@ -341,7 +344,6 @@ static bool use_terminal_output(void) {
 		return false;
 	}
 	display_set_standard_streams(CAP_ID_INVALID, output_cap, output_cap);
-	serial_stream_disable();
 	return true;
 }
 
@@ -499,6 +501,47 @@ enum configured_mount_readiness {
 	CONFIGURED_MOUNTS_READY,
 	CONFIGURED_MOUNTS_FAILED,
 };
+
+enum driver_catalog_readiness {
+	DRIVER_CATALOG_WAIT,
+	DRIVER_CATALOG_READY,
+	DRIVER_CATALOG_FAILED,
+};
+
+static enum driver_catalog_readiness update_driver_catalog(void) {
+	const struct registry_protocol_query query = {
+		.namespace_path = DEVICE_MANAGER_NAMESPACE,
+		.protocol       = DEVICE_MANAGER_PROTOCOL_NAME,
+		.major          = DEVICE_MANAGER_PROTOCOL_VERSION_MAJOR,
+		.minor          = DEVICE_MANAGER_PROTOCOL_VERSION_MINOR,
+	};
+	struct device_manager_update_catalog_response response;
+	cap_id_t                                      control = CAP_ID_INVALID;
+	struct registry_call_result                   result =
+		registry_grant(supervisor_pid, &query, DEVICE_MANAGER_SERVICE_NAME, DEVICE_MANAGER_CONTROL_RIGHTS, &control);
+	if (result.status == REGISTRY_STATUS_NOT_FOUND) return DRIVER_CATALOG_WAIT;
+	if (result.transport_status != SYSCALL_STATUS_OK || result.status != REGISTRY_STATUS_OK) {
+		printf("init: device-manager control acquisition failed: transport=%u status=%u\n",
+		       (unsigned)result.transport_status,
+		       (unsigned)result.status);
+		return DRIVER_CATALOG_FAILED;
+	}
+	syscall_status_t status =
+		device_manager_update_catalog(control, DRIVER_CATALOG_PATH, sizeof(DRIVER_CATALOG_PATH) - 1u, &response);
+	if (cap_drop(control) != SYSCALL_STATUS_OK) return DRIVER_CATALOG_FAILED;
+	if (status != SYSCALL_STATUS_OK) {
+		printf("init: device-manager catalog update call failed: %u\n", (unsigned)status);
+		return DRIVER_CATALOG_FAILED;
+	}
+	if (response.status != DEVICE_MANAGER_CATALOG_UPDATE_OK) {
+		printf("init: driver catalog update failed: %u\n", (unsigned)response.status);
+		return DRIVER_CATALOG_FAILED;
+	}
+	printf("init: activated driver catalog generation %llu with %llu declaration(s)\n",
+	       (unsigned long long)response.catalog.generation,
+	       (unsigned long long)response.catalog.driver_count);
+	return DRIVER_CATALOG_READY;
+}
 
 static enum configured_mount_readiness mount_configured_filesystems(const struct init_configuration* configuration,
                                                                     bool* mounted, bool* bootfs_at_root) {
@@ -670,6 +713,12 @@ int supervisor_run(const struct init_state* init) {
 		.major          = 1u,
 		.service        = "elf64",
 	};
+	static const struct registry_service_selector device_manager_selector = {
+		.namespace_path = DEVICE_MANAGER_NAMESPACE,
+		.protocol       = DEVICE_MANAGER_PROTOCOL_NAME,
+		.major          = DEVICE_MANAGER_PROTOCOL_VERSION_MAJOR,
+		.service        = DEVICE_MANAGER_SERVICE_NAME,
+	};
 	bool             bootfs_mounted                                   = false;
 	bool             bootfs_at_root                                   = true;
 	bool             bootfs_started                                   = false;
@@ -677,6 +726,7 @@ int supervisor_run(const struct init_state* init) {
 	bool             configured_mounts_ready                          = false;
 	bool             configured_mounts[INIT_CONFIGURATION_MAX_MOUNTS] = {false};
 	bool             device_manager_started                           = false;
+	bool             driver_catalog_updated                           = false;
 	bool             terminal_started                                 = false;
 	bool             terminal_ready                                   = false;
 	bool             terminal_available                               = false;
@@ -712,7 +762,9 @@ int supervisor_run(const struct init_state* init) {
 	if (status != SYSCALL_STATUS_OK || !watch_service(registry_activity, &vfs_selector) ||
 	    !watch_service(registry_activity, &bootfs_selector) || !watch_service(registry_activity, &terminal_selector) ||
 	    !watch_service(registry_activity, &tty_session_selector) ||
-	    !watch_service(registry_activity, &text_input_selector) || !watch_service(registry_activity, &loader_selector))
+	    !watch_service(registry_activity, &text_input_selector) ||
+	    !watch_service(registry_activity, &loader_selector) ||
+	    !watch_service(registry_activity, &device_manager_selector))
 		return 1;
 	status = channel_create(&supervisor_endpoint, &supervisor_activity);
 	if (status == SYSCALL_STATUS_OK)
@@ -810,7 +862,7 @@ int supervisor_run(const struct init_state* init) {
 			terminal_ready = true;
 			continue;
 		}
-		if (terminal_ready && !tty_session_started) {
+		if (driver_catalog_updated && terminal_ready && !tty_session_started) {
 			if (!terminal_available) {
 				processes[SUPERVISED_TTY_SESSION].state = SUPERVISED_PROCESS_DISABLED;
 				tty_session_started                     = true;
@@ -820,7 +872,7 @@ int supervisor_run(const struct init_state* init) {
 			if (processes[SUPERVISED_TTY_SESSION].state == SUPERVISED_PROCESS_STOPPED) {
 				cap_id_t process_cap = CAP_ID_INVALID;
 				process_begin_launch(&processes[SUPERVISED_TTY_SESSION]);
-				bool launched = bootstrap_launch_terminal_session(
+				bool launched = installed_launch_terminal_session(
 					init, "tty_session.elf", "TTY session", 0u, NULL, 0u, NULL, &process_cap);
 				if (!process_finish_launch(&processes[SUPERVISED_TTY_SESSION],
 				                           SUPERVISED_TTY_SESSION,
@@ -837,7 +889,7 @@ int supervisor_run(const struct init_state* init) {
 			tty_session_ready = true;
 			continue;
 		}
-		if (tty_session_ready && !configuration_loaded) {
+		if (terminal_ready && !configuration_loaded) {
 			if (!load_system_configuration(&configuration)) return 1;
 			text_input_layout    = text_input_layout_override_path == NULL ? configuration.text_input_layout
 			                                                               : text_input_layout_override_path;
@@ -859,12 +911,12 @@ int supervisor_run(const struct init_state* init) {
 			loader_started = processes[SUPERVISED_LOADER].state == SUPERVISED_PROCESS_RUNNING;
 			continue;
 		}
-		if (loader_started && !input_manager_started &&
+		if (driver_catalog_updated && !input_manager_started &&
 		    processes[SUPERVISED_INPUT_MANAGER].state == SUPERVISED_PROCESS_STOPPED) {
 			cap_id_t process_cap = CAP_ID_INVALID;
 			process_begin_launch(&processes[SUPERVISED_INPUT_MANAGER]);
 			bool launched =
-				bootstrap_launch(init, "input_manager.elf", "input manager", 0u, NULL, 0u, NULL, &process_cap);
+				installed_launch(init, "input_manager.elf", "input manager", 0u, NULL, 0u, NULL, &process_cap);
 			if (!process_finish_launch(&processes[SUPERVISED_INPUT_MANAGER],
 			                           SUPERVISED_INPUT_MANAGER,
 			                           self.self_cap,
@@ -879,7 +931,7 @@ int supervisor_run(const struct init_state* init) {
 		    processes[SUPERVISED_KEYBOARD_CONTROLLER].state == SUPERVISED_PROCESS_STOPPED) {
 			cap_id_t process_cap = CAP_ID_INVALID;
 			process_begin_launch(&processes[SUPERVISED_KEYBOARD_CONTROLLER]);
-			bool launched = bootstrap_launch(
+			bool launched = installed_launch(
 				init, "keyboard_controller.elf", "keyboard controller", 0u, NULL, 0u, NULL, &process_cap);
 			if (!process_finish_launch(&processes[SUPERVISED_KEYBOARD_CONTROLLER],
 			                           SUPERVISED_KEYBOARD_CONTROLLER,
@@ -897,7 +949,7 @@ int supervisor_run(const struct init_state* init) {
 			cap_id_t    process_cap = CAP_ID_INVALID;
 			process_begin_launch(&processes[SUPERVISED_TEXT_INPUT]);
 			bool launched =
-				bootstrap_launch(init, "text_input.elf", "text input", 1u, arguments, 0u, NULL, &process_cap);
+				installed_launch(init, "text_input.elf", "text input", 1u, arguments, 0u, NULL, &process_cap);
 			if (!process_finish_launch(&processes[SUPERVISED_TEXT_INPUT],
 			                           SUPERVISED_TEXT_INPUT,
 			                           self.self_cap,
@@ -908,7 +960,7 @@ int supervisor_run(const struct init_state* init) {
 			text_input_started = processes[SUPERVISED_TEXT_INPUT].state == SUPERVISED_PROCESS_RUNNING;
 			continue;
 		}
-		if (text_input_started && !device_manager_started &&
+		if (loader_started && !device_manager_started &&
 		    processes[SUPERVISED_DEVICE_MANAGER].state == SUPERVISED_PROCESS_STOPPED) {
 			cap_id_t process_cap = CAP_ID_INVALID;
 			process_begin_launch(&processes[SUPERVISED_DEVICE_MANAGER]);
@@ -944,7 +996,15 @@ int supervisor_run(const struct init_state* init) {
 				continue;
 			}
 		}
-		if (device_manager_started && configured_mounts_ready && !shell_started) {
+		if (configured_mounts_ready && !driver_catalog_updated) {
+			enum driver_catalog_readiness readiness = update_driver_catalog();
+			if (readiness == DRIVER_CATALOG_FAILED) return 1;
+			if (readiness == DRIVER_CATALOG_READY) {
+				driver_catalog_updated = true;
+				continue;
+			}
+		}
+		if (driver_catalog_updated && !shell_started) {
 			if (!terminal_available) {
 				processes[SUPERVISED_SHELL].state = SUPERVISED_PROCESS_DISABLED;
 				shell_started                     = true;
@@ -955,7 +1015,7 @@ int supervisor_run(const struct init_state* init) {
 				cap_id_t process_cap = CAP_ID_INVALID;
 				process_begin_launch(&processes[SUPERVISED_SHELL]);
 				bool launched =
-					bootstrap_launch_interactive(init, "shell.elf", "shell", 0u, NULL, 0u, NULL, &process_cap);
+					installed_launch_interactive(init, "shell.elf", "shell", 0u, NULL, 0u, NULL, &process_cap);
 				if (!process_finish_launch(&processes[SUPERVISED_SHELL],
 				                           SUPERVISED_SHELL,
 				                           self.self_cap,
@@ -1016,6 +1076,7 @@ int supervisor_run(const struct init_state* init) {
 				bootfs_mounted          = false;
 				bootfs_at_root          = true;
 				configured_mounts_ready = false;
+				driver_catalog_updated  = false;
 				memset(configured_mounts, 0, sizeof(configured_mounts));
 				break;
 			case SUPERVISED_BOOTFS:
@@ -1026,7 +1087,6 @@ int supervisor_run(const struct init_state* init) {
 				terminal_started   = false;
 				terminal_ready     = false;
 				terminal_available = false;
-				serial_stream_enable();
 				display_set_standard_streams(CAP_ID_INVALID, init->serial_stream_cap, init->serial_stream_cap);
 				break;
 			case SUPERVISED_TTY_SESSION:
@@ -1047,6 +1107,7 @@ int supervisor_run(const struct init_state* init) {
 				break;
 			case SUPERVISED_DEVICE_MANAGER:
 				device_manager_started = false;
+				driver_catalog_updated = false;
 				break;
 			case SUPERVISED_SHELL:
 				shell_started = false;
