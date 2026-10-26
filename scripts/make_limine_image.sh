@@ -489,11 +489,11 @@ if [[ "$TARGET_ARCH" == "x86_64" ]]; then
 	bios_boot_image="${work_dir}/bios-boot.img"
 	truncate -s 1M "$bios_boot_image"
 	fat_partition_args+=(
-		-append_partition 4 21686148-6449-6E6F-744E-656564454649 "$bios_boot_image"
+		-append_partition 3 21686148-6449-6E6F-744E-656564454649 "$bios_boot_image"
 	)
 fi
 fat_partition_args+=(
-	-append_partition 5 EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 "$fat_image"
+	-append_partition 4 EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 "$fat_image"
 )
 
 log "creating bootable image at $output_abs"
