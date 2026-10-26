@@ -1,7 +1,7 @@
 device_manager_include = include_directories('include')
 
 device_client = static_library('device_client',
-	sources : files('lib/device.c'),
+	sources : files('lib/device.c', 'lib/manager.c'),
 	c_args : userspace_c_args,
 	include_directories : [userspace_runtime_inc, device_manager_include],
 	pic : false,

@@ -68,6 +68,9 @@ void dm_supervisor_deinit(struct device_server* server);
 /* Match and start drivers for all currently unbound devices. */
 void dm_supervisor_reconcile(struct device_server* server);
 
+/* Retry unbound and previously unsupported devices against a replacement catalog. */
+void dm_supervisor_catalog_updated(struct device_server* server);
+
 /* Match a newly committed device after its construction reply succeeds. */
 void dm_supervisor_device_committed(struct device_server* server, struct dm_device* device);
 

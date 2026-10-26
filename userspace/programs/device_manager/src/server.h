@@ -10,24 +10,37 @@
 #include "driver.h"
 #include "supervisor.h"
 
+/* A superseded catalog retained while live bindings still reference its declarations. */
+struct dm_retired_driver_catalog {
+	struct dm_driver_catalog          catalog;
+	struct dm_retired_driver_catalog* next;
+};
+
 /* Channel ownership, private root authority, device state, and catalog for one server instance. */
 struct device_server {
-	channel_id_t                endpoint;
-	cap_id_t                    activity;
-	cap_id_t                    root_cap;
-	cap_id_t                    memory_allocator_cap;
-	cap_id_t                    dma_cap;
-	cap_id_t                    interrupts_cap;
-	cap_id_t                    io_ports_cap;
-	bool                        root_published;
-	process_id_t                pid;
-	struct dm_state             state;
-	struct dm_driver_catalog    drivers;
-	struct dm_driver_supervisor supervisor;
+	channel_id_t                      endpoint;
+	cap_id_t                          activity;
+	cap_id_t                          root_cap;
+	cap_id_t                          service_cap;
+	cap_id_t                          memory_allocator_cap;
+	cap_id_t                          dma_cap;
+	cap_id_t                          interrupts_cap;
+	cap_id_t                          io_ports_cap;
+	bool                              root_published;
+	bool                              service_advertised;
+	process_id_t                      pid;
+	uint64_t                          catalog_generation;
+	struct dm_state                   state;
+	struct dm_driver_catalog          drivers;
+	struct dm_retired_driver_catalog* retired_drivers;
+	struct dm_driver_supervisor       supervisor;
 };
 
 /* Create the endpoint and publish the root constructor only to the manager itself. */
 bool device_server_init(struct device_server* server);
+
+/* Advertise the public read-only and init-grantable control service. */
+bool device_server_advertise(struct device_server* server);
 
 /* Unpublish every object and release all channel, device, and catalog state. */
 void device_server_deinit(struct device_server* server);

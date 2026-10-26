@@ -99,8 +99,12 @@ static struct dm_driver_binding* find_binding_by_process(struct device_server* s
 
 static bool driver_rejected(const struct dm_driver_binding* binding, const struct dm_driver* driver) {
 	if (binding == NULL) return false;
-	for (size_t index = 0u; index < binding->rejected_count; index++)
-		if (binding->rejected_drivers[index] == driver) return true;
+	for (size_t index = 0u; index < binding->rejected_count; index++) {
+		const struct dm_driver* rejected = binding->rejected_drivers[index];
+		if (rejected == driver || (rejected->name.size == driver->name.size &&
+		                           memcmp(rejected->name.data, driver->name.data, driver->name.size) == 0u))
+			return true;
+	}
 	return false;
 }
 
@@ -665,6 +669,24 @@ void dm_supervisor_reconcile(struct device_server* server) {
 	if (server == NULL) return;
 	for (struct dm_device* device = server->state.devices; device != NULL; device = device->next)
 		dm_supervisor_device_committed(server, device);
+}
+
+void dm_supervisor_catalog_updated(struct device_server* server) {
+	if (server == NULL) return;
+	for (struct dm_driver_binding* binding = server->supervisor.bindings; binding != NULL; binding = binding->next) {
+		if (binding->state != DM_DRIVER_UNSUPPORTED) continue;
+		struct dm_driver* driver = match_driver(server, binding->device, binding);
+		if (driver == NULL) continue;
+		binding->driver        = driver;
+		binding->restart_count = 0u;
+		binding->state         = DM_DRIVER_UNBOUND;
+		free(binding->stdout_log.data);
+		free(binding->stderr_log.data);
+		binding->stdout_log = (struct dm_driver_log){0};
+		binding->stderr_log = (struct dm_driver_log){0};
+		binding_launch(server, binding);
+	}
+	dm_supervisor_reconcile(server);
 }
 
 bool dm_supervisor_authorize_child(struct device_server* server, const struct dm_device* parent, process_id_t caller,

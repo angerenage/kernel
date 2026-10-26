@@ -87,6 +87,16 @@ int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 		return 1;
 	}
 	printf("device-manager: loaded %zu driver declaration(s)\n", server.drivers.driver_count);
+	if (!device_server_advertise(&server)) {
+		printf("device-manager: control service advertisement failed\n");
+		(void)release_source(selection.capability, "selected firmware");
+		(void)release_source(memory_allocator_cap, "memory allocator");
+		(void)release_source(dma_cap, "DMA");
+		(void)release_source(interrupts_cap, "interrupts");
+		(void)release_source(io_ports_cap, "I/O ports");
+		device_server_deinit(&server);
+		return 1;
+	}
 	printf("device-manager: selected %s firmware\n",
 	       selection.source == DEVICE_MANAGER_FIRMWARE_SOURCE_DEVICE_TREE ? "Device Tree" : "ACPI");
 	if (!device_manager_parser_launch(&server,
