@@ -254,22 +254,24 @@ static bool handle_enumerate(struct fat32_server* server, const struct cap_reque
 	    request.reserved != 0u || call->response_capacity < sizeof(*response) || request.count > maximum ||
 	    request.count > (call->response_capacity - sizeof(*response)) / sizeof(struct filesystem_directory_entry))
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
-	uint64_t total    = 0u;
-	size_t   returned = 0u;
-	for (; returned < request.count; returned++) {
-		struct fat32_directory_entry entry;
-		enum fat32_result            result = fat32_directory_enumerate(
-			server->volume, node_cluster(server, directory), request.offset + returned, &entry, &total);
-		if (result == FAT32_RESULT_NOT_FOUND) break;
-		if (result != FAT32_RESULT_OK) return reply_domain(call, fat_status(result));
-		fill_entry(server, &response->entries[returned], &entry);
+	struct fat32_directory_entry* entries =
+		request.count == 0u ? NULL : malloc((size_t)request.count * sizeof(*entries));
+	if (request.count != 0u && entries == NULL) return reply_transport(call, SYSCALL_STATUS_FAILED);
+	uint64_t          total;
+	size_t            returned;
+	enum fat32_result result = fat32_directory_enumerate(server->volume,
+	                                                     node_cluster(server, directory),
+	                                                     request.offset,
+	                                                     entries,
+	                                                     (size_t)request.count,
+	                                                     &returned,
+	                                                     &total);
+	if (result != FAT32_RESULT_OK) {
+		free(entries);
+		return reply_domain(call, fat_status(result));
 	}
-	if (request.count == 0u || returned == request.count) {
-		struct fat32_directory_entry ignored;
-		enum fat32_result            result =
-			fat32_directory_enumerate(server->volume, node_cluster(server, directory), UINT64_MAX, &ignored, &total);
-		if (result != FAT32_RESULT_NOT_FOUND) return reply_domain(call, fat_status(result));
-	}
+	for (size_t index = 0u; index < returned; index++) fill_entry(server, &response->entries[index], &entries[index]);
+	free(entries);
 	response->header   = (struct filesystem_response_header){.status = FILESYSTEM_STATUS_OK, .reserved = 0u};
 	response->total    = total;
 	response->returned = returned;

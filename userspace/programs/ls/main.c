@@ -16,7 +16,9 @@
 #define VFS_PROTOCOL_VERSION_MINOR 0u
 
 enum {
-	LIST_PATH_CAPACITY = 4096u,
+	LIST_PATH_CAPACITY          = 4096u,
+	LIST_INITIAL_ENTRY_CAPACITY = (CAP_MAX_RESPONSE_SIZE - sizeof(struct filesystem_directory_enumerate_response)) /
+		sizeof(struct filesystem_directory_entry),
 };
 
 enum list_option {
@@ -337,7 +339,7 @@ static const char* read_directory(cap_id_t directory_cap, struct filesystem_dire
 
 		if (count == capacity) {
 			struct filesystem_directory_entry* grown;
-			size_t                             next = capacity == 0u ? 16u : capacity * 2u;
+			size_t                             next = capacity == 0u ? LIST_INITIAL_ENTRY_CAPACITY : capacity * 2u;
 
 			if (total > next && total <= SIZE_MAX / sizeof(*entries)) next = (size_t)total;
 			grown = next > SIZE_MAX / sizeof(*entries) ? NULL : realloc(entries, next * sizeof(*entries));

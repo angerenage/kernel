@@ -4,7 +4,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <string.h>
 
 #define FAT32_DIRECTORY_ENTRY_SIZE 32u
@@ -231,13 +230,13 @@ static bool ascii_equal(const char* left, const void* right, size_t right_size) 
 }
 
 static enum fat32_result scan_directory(struct fat32_volume* volume, uint32_t directory_cluster, const void* name,
-                                        size_t name_size, uint64_t wanted, struct fat32_directory_entry* out_entry,
-                                        uint64_t* out_total) {
+                                        size_t name_size, uint64_t first_index, struct fat32_directory_entry* entries,
+                                        size_t capacity, size_t* out_returned, uint64_t* out_total) {
 	if (volume == NULL || !fat32_volume_cluster_valid(volume, directory_cluster)) return FAT32_RESULT_UNSUPPORTED;
 	uint32_t               cluster    = directory_cluster;
 	uint64_t               live_index = 0u;
 	size_t                 slots_seen = 0u;
-	bool                   found      = false;
+	size_t                 returned   = 0u;
 	struct long_name_state long_name  = {0};
 
 	for (;;) {
@@ -270,14 +269,12 @@ static enum fat32_result scan_directory(struct fat32_volume* volume, uint32_t di
 				if ((entry.name[0u] == '.' && entry.name[1u] == '\0') ||
 				    (entry.name[0u] == '.' && entry.name[1u] == '.' && entry.name[2u] == '\0'))
 					continue;
-				if ((!found && name != NULL &&
-				     (ascii_equal(entry.name, name, name_size) ||
-				      (have_long_name && ascii_equal(short_name, name, name_size)))) ||
-				    (!found && name == NULL && live_index == wanted)) {
-					if (out_entry != NULL) *out_entry = entry;
-					found = true;
-					if (name != NULL) return FAT32_RESULT_OK;
+				if (name != NULL && (ascii_equal(entry.name, name, name_size) ||
+				                     (have_long_name && ascii_equal(short_name, name, name_size)))) {
+					*entries = entry;
+					return FAT32_RESULT_OK;
 				}
+				if (name == NULL && live_index >= first_index && returned < capacity) entries[returned++] = entry;
 				live_index++;
 			}
 		}
@@ -292,20 +289,25 @@ static enum fat32_result scan_directory(struct fat32_volume* volume, uint32_t di
 	}
 
 complete:
+	if (out_returned != NULL) *out_returned = returned;
 	if (out_total != NULL) *out_total = live_index;
-	return found ? FAT32_RESULT_OK : FAT32_RESULT_NOT_FOUND;
+	return name == NULL ? FAT32_RESULT_OK : FAT32_RESULT_NOT_FOUND;
 }
 
 enum fat32_result fat32_directory_lookup(struct fat32_volume* volume, uint32_t directory_cluster, const void* name,
                                          size_t name_size, struct fat32_directory_entry* out_entry) {
 	if (name == NULL || name_size == 0u || out_entry == NULL) return FAT32_RESULT_UNSUPPORTED;
-	return scan_directory(volume, directory_cluster, name, name_size, 0u, out_entry, NULL);
+	return scan_directory(volume, directory_cluster, name, name_size, 0u, out_entry, 1u, NULL, NULL);
 }
 
-enum fat32_result fat32_directory_enumerate(struct fat32_volume* volume, uint32_t directory_cluster, uint64_t index,
-                                            struct fat32_directory_entry* out_entry, uint64_t* out_total) {
-	if (out_total == NULL) return FAT32_RESULT_UNSUPPORTED;
-	return scan_directory(volume, directory_cluster, NULL, 0u, index, out_entry, out_total);
+enum fat32_result fat32_directory_enumerate(struct fat32_volume* volume, uint32_t directory_cluster, uint64_t offset,
+                                            struct fat32_directory_entry* entries, size_t capacity,
+                                            size_t* out_returned, uint64_t* out_total) {
+	if ((capacity != 0u && entries == NULL) || out_returned == NULL || out_total == NULL)
+		return FAT32_RESULT_UNSUPPORTED;
+	*out_returned = 0u;
+	*out_total    = 0u;
+	return scan_directory(volume, directory_cluster, NULL, 0u, offset, entries, capacity, out_returned, out_total);
 }
 
 enum fat32_result fat32_file_read(struct fat32_volume* volume, const struct fat32_directory_entry* entry,
@@ -351,22 +353,5 @@ enum fat32_result fat32_file_read(struct fat32_volume* volume, const struct fat3
 		cluster_offset = 0u;
 	}
 	*out_read = copied;
-	return FAT32_RESULT_OK;
-}
-
-enum fat32_result fat32_list_root(struct fat32_volume* volume) {
-	uint64_t index = 0u;
-	uint64_t total = 0u;
-	for (;;) {
-		struct fat32_directory_entry entry;
-		enum fat32_result result = fat32_directory_enumerate(volume, volume->root_cluster, index, &entry, &total);
-		if (result == FAT32_RESULT_NOT_FOUND) break;
-		if (result != FAT32_RESULT_OK) return result;
-		if ((entry.attributes & FAT32_ATTRIBUTE_DIRECTORY) != 0u)
-			printf("fat32: root directory \"%s\" cluster=%u\n", entry.name, entry.cluster);
-		else printf("fat32: root file \"%s\" size=%u cluster=%u\n", entry.name, entry.size, entry.cluster);
-		index++;
-	}
-	printf("fat32: root directory contains %llu live entr%s\n", (unsigned long long)total, total == 1u ? "y" : "ies");
 	return FAT32_RESULT_OK;
 }

@@ -768,15 +768,13 @@ static bool handle_directory_enumerate(const struct cap_request* call, struct vf
 	if (response == NULL) return reply_transport(call, SYSCALL_STATUS_FAILED);
 	uint64_t raw_total = 0u;
 	if (directory->raw_cap != CAP_ID_INVALID) {
-		size_t ignored;
-		result = filesystem_directory_enumerate(directory->raw_cap, 0u, NULL, 0u, &ignored, &raw_total);
-		if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK) {
-			free(response);
-			return reply_call_failure(call, result);
-		}
-		if (request.offset < raw_total && request.count != 0u)
+		if (request.count != 0u)
 			result = filesystem_directory_enumerate(
 				directory->raw_cap, request.offset, response->entries, (size_t)request.count, &returned, &raw_total);
+		else {
+			size_t ignored;
+			result = filesystem_directory_enumerate(directory->raw_cap, 0u, NULL, 0u, &ignored, &raw_total);
+		}
 		if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK) {
 			free(response);
 			return reply_call_failure(call, result);
