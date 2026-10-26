@@ -1,5 +1,6 @@
 #include "directory.h"
 
+#include <runtime/filesystem.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -11,6 +12,17 @@
 #define FAT32_ATTRIBUTE_VOLUME_ID 0x08u
 #define FAT32_ATTRIBUTE_DIRECTORY 0x10u
 #define FAT32_ATTRIBUTE_LONG_NAME 0x0fu
+#define FAT32_LONG_NAME_LAST 0x40u
+#define FAT32_LONG_NAME_CHARACTERS_PER_SLOT 13u
+#define FAT32_LONG_NAME_MAXIMUM_SLOTS 20u
+
+struct long_name_state {
+	uint16_t units[FAT32_LONG_NAME_CHARACTERS_PER_SLOT * FAT32_LONG_NAME_MAXIMUM_SLOTS];
+	uint8_t  checksum;
+	uint8_t  expected_order;
+	uint8_t  slot_count;
+	bool     active;
+};
 
 static uint16_t read_u16_le(const uint8_t* value) {
 	return (uint16_t)value[0] | (uint16_t)value[1] << 8u;
@@ -18,6 +30,129 @@ static uint16_t read_u16_le(const uint8_t* value) {
 
 static uint32_t read_u32_le(const uint8_t* value) {
 	return (uint32_t)value[0] | (uint32_t)value[1] << 8u | (uint32_t)value[2] << 16u | (uint32_t)value[3] << 24u;
+}
+
+static void long_name_reset(struct long_name_state* state) {
+	*state = (struct long_name_state){0};
+}
+
+static uint16_t long_name_unit(const uint8_t* entry, size_t index) {
+	static const uint8_t offsets[FAT32_LONG_NAME_CHARACTERS_PER_SLOT] = {
+		1u,
+		3u,
+		5u,
+		7u,
+		9u,
+		14u,
+		16u,
+		18u,
+		20u,
+		22u,
+		24u,
+		28u,
+		30u,
+	};
+	return read_u16_le(entry + offsets[index]);
+}
+
+static void long_name_consume(struct long_name_state* state, const uint8_t* entry) {
+	uint8_t raw_order = entry[0u];
+	uint8_t order     = raw_order & 0x1fu;
+	bool    last      = (raw_order & FAT32_LONG_NAME_LAST) != 0u;
+
+	if ((raw_order & 0xa0u) != 0u || order == 0u || order > FAT32_LONG_NAME_MAXIMUM_SLOTS || entry[12u] != 0u ||
+	    read_u16_le(entry + 26u) != 0u) {
+		long_name_reset(state);
+		return;
+	}
+	if (last) {
+		long_name_reset(state);
+		state->active         = true;
+		state->checksum       = entry[13u];
+		state->expected_order = order;
+		state->slot_count     = order;
+	}
+	if (!state->active || state->checksum != entry[13u] || state->expected_order != order) {
+		long_name_reset(state);
+		return;
+	}
+	size_t base = (size_t)(order - 1u) * FAT32_LONG_NAME_CHARACTERS_PER_SLOT;
+	for (size_t index = 0u; index < FAT32_LONG_NAME_CHARACTERS_PER_SLOT; index++)
+		state->units[base + index] = long_name_unit(entry, index);
+	state->expected_order--;
+}
+
+static uint8_t short_name_checksum(const uint8_t* entry) {
+	uint8_t checksum = 0u;
+	for (size_t index = 0u; index < 11u; index++)
+		checksum = (uint8_t)(((checksum & 1u) != 0u ? 0x80u : 0u) + (checksum >> 1u) + entry[index]);
+	return checksum;
+}
+
+static bool append_utf8(uint32_t codepoint, char output[FILESYSTEM_NAME_MAX + 1u], size_t* size) {
+	uint8_t bytes[4];
+	size_t  count;
+	if (codepoint <= 0x7fu) {
+		bytes[0u] = (uint8_t)codepoint;
+		count     = 1u;
+	}
+	else if (codepoint <= 0x7ffu) {
+		bytes[0u] = (uint8_t)(0xc0u | codepoint >> 6u);
+		bytes[1u] = (uint8_t)(0x80u | (codepoint & 0x3fu));
+		count     = 2u;
+	}
+	else if (codepoint <= 0xffffu) {
+		if (codepoint >= 0xd800u && codepoint <= 0xdfffu) return false;
+		bytes[0u] = (uint8_t)(0xe0u | codepoint >> 12u);
+		bytes[1u] = (uint8_t)(0x80u | ((codepoint >> 6u) & 0x3fu));
+		bytes[2u] = (uint8_t)(0x80u | (codepoint & 0x3fu));
+		count     = 3u;
+	}
+	else if (codepoint <= 0x10ffffu) {
+		bytes[0u] = (uint8_t)(0xf0u | codepoint >> 18u);
+		bytes[1u] = (uint8_t)(0x80u | ((codepoint >> 12u) & 0x3fu));
+		bytes[2u] = (uint8_t)(0x80u | ((codepoint >> 6u) & 0x3fu));
+		bytes[3u] = (uint8_t)(0x80u | (codepoint & 0x3fu));
+		count     = 4u;
+	}
+	else return false;
+	if (*size > FILESYSTEM_NAME_MAX - count) return false;
+	for (size_t index = 0u; index < count; index++) output[(*size)++] = (char)bytes[index];
+	return true;
+}
+
+static bool long_name_decode(const struct long_name_state* state, const uint8_t* short_entry,
+                             char output[FILESYSTEM_NAME_MAX + 1u]) {
+	if (!state->active || state->expected_order != 0u || state->slot_count == 0u ||
+	    state->checksum != short_name_checksum(short_entry))
+		return false;
+	size_t size       = 0u;
+	size_t unit_count = (size_t)state->slot_count * FAT32_LONG_NAME_CHARACTERS_PER_SLOT;
+	bool   terminated = false;
+	for (size_t index = 0u; index < unit_count; index++) {
+		uint16_t unit = state->units[index];
+		if (terminated) {
+			if (unit != 0xffffu) return false;
+			continue;
+		}
+		if (unit == 0u) {
+			terminated = true;
+			continue;
+		}
+		if (unit == 0xffffu || index >= FILESYSTEM_NAME_MAX) return false;
+		uint32_t codepoint = unit;
+		if (unit >= 0xd800u && unit <= 0xdbffu) {
+			if (++index >= unit_count) return false;
+			uint16_t low = state->units[index];
+			if (low < 0xdc00u || low > 0xdfffu) return false;
+			codepoint = 0x10000u + ((uint32_t)(unit - 0xd800u) << 10u) + (low - 0xdc00u);
+		}
+		else if (unit >= 0xdc00u && unit <= 0xdfffu) return false;
+		if (!append_utf8(codepoint, output, &size)) return false;
+	}
+	if (size == 0u || !filesystem_relative_path_valid(output, size)) return false;
+	output[size] = '\0';
+	return true;
 }
 
 static char name_character(uint8_t value, bool lowercase) {
@@ -99,10 +234,11 @@ static enum fat32_result scan_directory(struct fat32_volume* volume, uint32_t di
                                         size_t name_size, uint64_t wanted, struct fat32_directory_entry* out_entry,
                                         uint64_t* out_total) {
 	if (volume == NULL || !fat32_volume_cluster_valid(volume, directory_cluster)) return FAT32_RESULT_UNSUPPORTED;
-	uint32_t cluster    = directory_cluster;
-	uint64_t live_index = 0u;
-	size_t   slots_seen = 0u;
-	bool     found      = false;
+	uint32_t               cluster    = directory_cluster;
+	uint64_t               live_index = 0u;
+	size_t                 slots_seen = 0u;
+	bool                   found      = false;
+	struct long_name_state long_name  = {0};
 
 	for (;;) {
 		uint64_t first_sector = fat32_volume_cluster_sector(volume, cluster);
@@ -113,14 +249,30 @@ static enum fat32_result scan_directory(struct fat32_volume* volume, uint32_t di
 				const uint8_t* raw = volume->buffer.address + offset;
 				if (raw[0u] == 0u) goto complete;
 				if (++slots_seen > FAT32_DIRECTORY_MAX_SLOTS) return FAT32_RESULT_UNSUPPORTED;
+				if (raw[11u] == FAT32_ATTRIBUTE_LONG_NAME) {
+					if (raw[0u] == 0xe5u) long_name_reset(&long_name);
+					else long_name_consume(&long_name, raw);
+					continue;
+				}
 				struct fat32_directory_entry entry;
 				enum fat32_result            decode = entry_decode(volume, raw, &entry);
-				if (decode == FAT32_RESULT_NOT_FOUND) continue;
+				if (decode == FAT32_RESULT_NOT_FOUND) {
+					long_name_reset(&long_name);
+					continue;
+				}
 				if (decode != FAT32_RESULT_OK) return decode;
+				char short_name[FAT32_SHORT_NAME_CAPACITY];
+				memcpy(short_name, entry.name, strlen(entry.name) + 1u);
+				char decoded_name[FILESYSTEM_NAME_MAX + 1u];
+				bool have_long_name = long_name_decode(&long_name, raw, decoded_name);
+				if (have_long_name) memcpy(entry.name, decoded_name, strlen(decoded_name) + 1u);
+				long_name_reset(&long_name);
 				if ((entry.name[0u] == '.' && entry.name[1u] == '\0') ||
 				    (entry.name[0u] == '.' && entry.name[1u] == '.' && entry.name[2u] == '\0'))
 					continue;
-				if ((!found && name != NULL && ascii_equal(entry.name, name, name_size)) ||
+				if ((!found && name != NULL &&
+				     (ascii_equal(entry.name, name, name_size) ||
+				      (have_long_name && ascii_equal(short_name, name, name_size)))) ||
 				    (!found && name == NULL && live_index == wanted)) {
 					if (out_entry != NULL) *out_entry = entry;
 					found = true;
