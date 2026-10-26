@@ -130,6 +130,17 @@ static enum fat32_result refresh_node(struct fat32_server* server, struct fat32_
 		server->volume, node->parent_cluster, node->entry.name, strlen(node->entry.name), &node->entry);
 }
 
+static enum fat32_result refresh_matching_nodes(struct fat32_server* server, const struct fat32_node* changed) {
+	struct fat32_directory_entry entry;
+	enum fat32_result            result = fat32_directory_lookup(
+		server->volume, changed->parent_cluster, changed->entry.name, strlen(changed->entry.name), &entry);
+	if (result != FAT32_RESULT_OK) return result;
+	for (struct fat32_node* node = server->nodes; node != NULL; node = node->next)
+		if (node->parent_cluster == changed->parent_cluster && strcmp(node->entry.name, changed->entry.name) == 0)
+			node->entry = entry;
+	return FAT32_RESULT_OK;
+}
+
 static bool publish_node(struct fat32_server* server, const struct cap_request* call,
                          const struct fat32_directory_entry* entry, uint32_t parent_cluster, cap_rights_t rights) {
 	struct filesystem_open_response response;
@@ -320,10 +331,9 @@ static bool handle_file_read(struct fat32_server* server, const struct cap_reque
 	    request.reserved != 0u || request.size > CAP_MAX_RESPONSE_SIZE - sizeof(*response) ||
 	    call->response_capacity < sizeof(*response) || request.size > call->response_capacity - sizeof(*response))
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
-	enum fat32_result result = refresh_node(server, node);
-	if (result != FAT32_RESULT_OK) return reply_domain(call, fat_status(result));
-	size_t read;
-	result = fat32_file_read(server->volume, &node->entry, request.offset, response->data, (size_t)request.size, &read);
+	size_t            read;
+	enum fat32_result result =
+		fat32_file_read(server->volume, &node->entry, request.offset, response->data, (size_t)request.size, &read);
 	if (result != FAT32_RESULT_OK) return reply_domain(call, fat_status(result));
 	response->header = (struct filesystem_response_header){.status = FILESYSTEM_STATUS_OK, .reserved = 0u};
 	return reply_request(call, response, sizeof(*response) + read, SYSCALL_STATUS_OK);
@@ -348,7 +358,7 @@ static enum fat32_result replace_file(struct fat32_server* server, struct fat32_
 	if (result == FAT32_RESULT_OK)
 		result = fat32_write_root_file(server->volume, node->entry.name, contents, (size_t)final_size);
 	free(contents);
-	if (result == FAT32_RESULT_OK) result = refresh_node(server, node);
+	if (result == FAT32_RESULT_OK) result = refresh_matching_nodes(server, node);
 	return result;
 }
 
@@ -363,8 +373,6 @@ static bool handle_file_write(struct fat32_server* server, const struct cap_requ
 	    call->response_capacity < sizeof(struct filesystem_file_write_response) ||
 	    request.offset > UINT64_MAX - request.size)
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
-	enum fat32_result refresh = refresh_node(server, node);
-	if (refresh != FAT32_RESULT_OK) return reply_domain(call, fat_status(refresh));
 	uint64_t final_size = node->entry.size;
 	if (request.size != 0u && request.offset + request.size > final_size) final_size = request.offset + request.size;
 	enum fat32_result result = replace_file(

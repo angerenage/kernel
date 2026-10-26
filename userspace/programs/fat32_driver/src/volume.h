@@ -12,10 +12,11 @@ enum fat32_result {
 	FAT32_RESULT_ERROR,
 };
 
-/* Validated geometry and one reusable logical-sector buffer. */
+/* Validated geometry with reusable bulk-I/O and FAT-sector buffers. */
 struct fat32_volume {
 	struct block_device device;
 	struct block_buffer buffer;
+	struct block_buffer fat_buffer;
 	uint64_t            total_sectors;
 	uint64_t            fat_base;
 	uint64_t            fat_start;
@@ -28,15 +29,17 @@ struct fat32_volume {
 	uint32_t            volume_id;
 	char                label[12];
 	uint32_t            allocation_hint;
+	uint64_t            cached_fat_sector;
 	uint16_t            fsinfo_sector;
 	uint16_t            backup_sector;
 	bool                fat_mirrored;
+	bool                fat_cache_valid;
 };
 
 /* Open a block partition and validate its FAT32 boot metadata. */
 enum fat32_result fat32_volume_open(cap_id_t device_cap, struct fat32_volume* out_volume);
 
-/* Release the reusable buffer and block session. */
+/* Release the reusable buffers and block session. */
 void fat32_volume_close(struct fat32_volume* volume);
 
 /* Read one volume-relative logical sector into the reusable buffer. */

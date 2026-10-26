@@ -13,6 +13,7 @@
 #define FAT32_FSINFO_LEAD_SIGNATURE 0x41615252u
 #define FAT32_FSINFO_STRUCTURE_SIGNATURE 0x61417272u
 #define FAT32_FSINFO_TRAIL_SIGNATURE 0xaa550000u
+#define FAT32_IO_BUFFER_BLOCKS 128u
 
 static uint16_t read_u16_le(const uint8_t* value) {
 	return (uint16_t)value[0] | (uint16_t)value[1] << 8u;
@@ -30,11 +31,15 @@ static void volume_reset(struct fat32_volume* volume) {
 	*volume = (struct fat32_volume){
 		.device = {.root_cap = CAP_ID_INVALID, .session_cap = CAP_ID_INVALID},
 		.buffer = {.memory_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .mapping_cap = CAP_ID_INVALID},
+		.fat_buffer = {.memory_cap        = CAP_ID_INVALID,
+		           .address_space_cap = CAP_ID_INVALID,
+		           .mapping_cap       = CAP_ID_INVALID},
 	};
 }
 
 void fat32_volume_close(struct fat32_volume* volume) {
 	if (volume == NULL) return;
+	block_buffer_release(&volume->device, &volume->fat_buffer);
 	block_buffer_release(&volume->device, &volume->buffer);
 	block_device_close(&volume->device);
 	volume_reset(volume);
@@ -68,9 +73,13 @@ enum fat32_result fat32_volume_read_fat(struct fat32_volume* volume, uint32_t cl
 	uint32_t offset      = (uint32_t)(byte_offset % volume->device.block_size);
 
 	if (offset > volume->device.block_size - sizeof(uint32_t)) return FAT32_RESULT_UNSUPPORTED;
-	enum fat32_result result = fat32_volume_read_sector(volume, sector);
-	if (result != FAT32_RESULT_OK) return result;
-	*out_value = read_u32_le(volume->buffer.address + offset) & FAT32_ENTRY_MASK;
+	if (!volume->fat_cache_valid || volume->cached_fat_sector != sector) {
+		if (block_read(&volume->device, &volume->fat_buffer, 0u, sector, 1u) != SYSCALL_STATUS_OK)
+			return FAT32_RESULT_ERROR;
+		volume->cached_fat_sector = sector;
+		volume->fat_cache_valid   = true;
+	}
+	*out_value = read_u32_le(volume->fat_buffer.address + offset) & FAT32_ENTRY_MASK;
 	return FAT32_RESULT_OK;
 }
 
@@ -87,14 +96,15 @@ enum fat32_result fat32_volume_write_fat(struct fat32_volume* volume, uint32_t c
 	for (uint32_t copy = first_copy; copy < copy_count; copy++) {
 		uint64_t sector =
 			volume->fat_base + (uint64_t)copy * volume->fat_size + byte_offset / volume->device.block_size;
-		enum fat32_result result = fat32_volume_read_sector(volume, sector);
-		if (result != FAT32_RESULT_OK) return result;
-		uint32_t original = read_u32_le(volume->buffer.address + offset);
+		if (block_read(&volume->device, &volume->fat_buffer, 0u, sector, 1u) != SYSCALL_STATUS_OK)
+			return FAT32_RESULT_ERROR;
+		uint32_t original = read_u32_le(volume->fat_buffer.address + offset);
 		uint32_t encoded  = (original & ~FAT32_ENTRY_MASK) | (value & FAT32_ENTRY_MASK);
 		for (size_t index = 0u; index < sizeof(encoded); index++)
-			volume->buffer.address[offset + index] = (uint8_t)(encoded >> (index * 8u));
-		result = fat32_volume_write_sector(volume, sector);
-		if (result != FAT32_RESULT_OK) return result;
+			volume->fat_buffer.address[offset + index] = (uint8_t)(encoded >> (index * 8u));
+		if (block_write(&volume->device, &volume->fat_buffer, 0u, sector, 1u) != SYSCALL_STATUS_OK)
+			return FAT32_RESULT_ERROR;
+		volume->fat_cache_valid = false;
 	}
 	return FAT32_RESULT_OK;
 }
@@ -180,9 +190,14 @@ enum fat32_result fat32_volume_open(cap_id_t device_cap, struct fat32_volume* ou
 	if (block_device_open(device_cap, &out_volume->device) != SYSCALL_STATUS_OK &&
 	    block_device_open_read_only(device_cap, &out_volume->device) != SYSCALL_STATUS_OK)
 		return FAT32_RESULT_ERROR;
-	uint32_t block_size = out_volume->device.block_size;
+	uint32_t block_size    = out_volume->device.block_size;
+	uint32_t buffer_blocks = out_volume->device.max_transfer_blocks < FAT32_IO_BUFFER_BLOCKS
+	                             ? out_volume->device.max_transfer_blocks
+	                             : FAT32_IO_BUFFER_BLOCKS;
 	if (block_size < 512u || block_size > 4096u || !power_of_two(block_size) ||
-	    block_buffer_allocate(&out_volume->device, block_size, &out_volume->buffer) != SYSCALL_STATUS_OK) {
+	    block_buffer_allocate(&out_volume->device, block_size * buffer_blocks, &out_volume->buffer) !=
+	        SYSCALL_STATUS_OK ||
+	    block_buffer_allocate(&out_volume->device, block_size, &out_volume->fat_buffer) != SYSCALL_STATUS_OK) {
 		fat32_volume_close(out_volume);
 		return block_size < 512u || block_size > 4096u || !power_of_two(block_size) ? FAT32_RESULT_UNSUPPORTED
 		                                                                            : FAT32_RESULT_ERROR;
