@@ -26,14 +26,15 @@ static syscall_status_t open_session(cap_id_t root_cap, struct block_open_respon
 			   : SYSCALL_STATUS_FAILED;
 }
 
-syscall_status_t block_device_open(cap_id_t device_cap, struct block_device* out_device) {
+static syscall_status_t block_device_open_with_rights(cap_id_t device_cap, cap_rights_t rights,
+                                                      struct block_device* out_device) {
 	struct block_open_response response = {.session_cap = CAP_ID_INVALID};
 	syscall_status_t           status;
 
 	if (out_device == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	*out_device = (struct block_device){.root_cap = CAP_ID_INVALID, .session_cap = CAP_ID_INVALID};
-	status      = device_resource_acquire(
-		device_cap, BLOCK_RESOURCE, sizeof(BLOCK_RESOURCE) - 1u, BLOCK_DRIVER_RIGHTS, &out_device->root_cap);
+	status =
+		device_resource_acquire(device_cap, BLOCK_RESOURCE, sizeof(BLOCK_RESOURCE) - 1u, rights, &out_device->root_cap);
 	if (status == SYSCALL_STATUS_OK) status = open_session(out_device->root_cap, &response);
 	if (status != SYSCALL_STATUS_OK) {
 		block_device_close(out_device);
@@ -45,6 +46,14 @@ syscall_status_t block_device_open(cap_id_t device_cap, struct block_device* out
 	out_device->max_transfer_blocks = response.max_transfer_blocks;
 	out_device->flags               = response.flags;
 	return SYSCALL_STATUS_OK;
+}
+
+syscall_status_t block_device_open(cap_id_t device_cap, struct block_device* out_device) {
+	return block_device_open_with_rights(device_cap, BLOCK_DRIVER_RIGHTS, out_device);
+}
+
+syscall_status_t block_device_open_read_only(cap_id_t device_cap, struct block_device* out_device) {
+	return block_device_open_with_rights(device_cap, BLOCK_READER_RIGHTS, out_device);
 }
 
 void block_device_close(struct block_device* device) {

@@ -31,6 +31,14 @@ drivers:
     compatible_ids:
       - "block:disk"
 
+  fat32:
+    executable: "/boot/fat32_driver.elf"
+    compatible_ids:
+      - "gpt:ebd0a0a2-b9e5-4433-87c0-68b6b72699c7"
+      - "mbr:0b"
+      - "mbr:0c"
+      - "block:partition"
+
   tpm:
     executable: "/boot/tpm_driver.elf"
     compatible_ids:

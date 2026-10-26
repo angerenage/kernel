@@ -11,6 +11,7 @@
 #define BLOCK_COMPATIBLE_DISK "block:disk"
 #define BLOCK_COMPATIBLE_PARTITION "block:partition"
 
+#define BLOCK_READER_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ))
 #define BLOCK_DRIVER_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE))
 #define BLOCK_BUFFER_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP | CAP_DELEGATE))
 
@@ -109,6 +110,9 @@ struct block_buffer {
 
 /* Acquire a device's block resource and open an isolated session. */
 syscall_status_t block_device_open(cap_id_t device_cap, struct block_device* out_device);
+
+/* Open an isolated session without requesting write authority. */
+syscall_status_t block_device_open_read_only(cap_id_t device_cap, struct block_device* out_device);
 
 /* Close a session after releasing all of its buffers. */
 void block_device_close(struct block_device* device);

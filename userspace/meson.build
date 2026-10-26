@@ -160,6 +160,7 @@ subdir('programs/pci_driver')
 subdir('programs/ahci_driver')
 subdir('programs/sata_driver')
 subdir('programs/partition_driver')
+subdir('programs/fat32_driver')
 subdir('programs/ps2_driver')
 if platform == 'pc_x86_64'
 	subdir('programs/i8042_driver')
