@@ -4,6 +4,7 @@
 #include <protocol/keyboard.h>
 #include <protocol/text_input.h>
 #include <runtime/keyboard.h>
+#include <runtime/log.h>
 #include <runtime/registry.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -397,13 +398,13 @@ static bool handle_event(struct text_input* input, const struct keyboard_event* 
 	switch (event->type) {
 	case KEYBOARD_EVENT_ADDED:
 		if (ensure_keyboard(input, event->keyboard_id) == NULL) return false;
-		printf("text input: attached keyboard %llu\n", (unsigned long long)event->keyboard_id);
+		RUNTIME_DEBUG_LOG("text input: attached keyboard %llu\n", (unsigned long long)event->keyboard_id);
 		return advertise(input);
 	case KEYBOARD_EVENT_REMOVED: {
 		struct keyboard_text_state* keyboard = find_keyboard(input, event->keyboard_id);
 		if (keyboard != NULL && !publish_reset(input, keyboard->source_id, event->timestamp_ns)) return false;
 		remove_keyboard(input, event->keyboard_id);
-		printf("text input: removed keyboard %llu\n", (unsigned long long)event->keyboard_id);
+		RUNTIME_DEBUG_LOG("text input: removed keyboard %llu\n", (unsigned long long)event->keyboard_id);
 		return true;
 	}
 	case KEYBOARD_EVENT_RESET: {
@@ -412,7 +413,7 @@ static bool handle_event(struct text_input* input, const struct keyboard_event* 
 		if (!publish_reset(input, keyboard->source_id, event->timestamp_ns)) return false;
 		keyboard->composition_id = 0u;
 		keyboard->context_size   = 0u;
-		printf("text input: reset keyboard %llu\n", (unsigned long long)event->keyboard_id);
+		RUNTIME_DEBUG_LOG("text input: reset keyboard %llu\n", (unsigned long long)event->keyboard_id);
 		return true;
 	}
 	case KEYBOARD_EVENT_KEY:
@@ -468,12 +469,12 @@ static enum service_result consume_service(struct text_input* input) {
 		for (size_t i = 0u; i < returned; i++) {
 			if (find_keyboard(input, keyboards[i].id) != NULL || ensure_keyboard(input, keyboards[i].id) == NULL)
 				return SERVICE_RESULT_FAILED;
-			printf("text input: attached keyboard %llu\n", (unsigned long long)keyboards[i].id);
+			RUNTIME_DEBUG_LOG("text input: attached keyboard %llu\n", (unsigned long long)keyboards[i].id);
 		}
 		offset += returned;
 	}
 	input->keyboard_cursor = info.newest_sequence;
-	printf("text input: connected to keyboard controller with %s layout\n", input->layout.locale);
+	RUNTIME_DEBUG_LOG("text input: connected to keyboard controller with %s layout\n", input->layout.locale);
 	if (input->keyboards != NULL && !advertise(input)) return SERVICE_RESULT_FAILED;
 	for (;;) {
 		enum drain_result result = drain_events(input);
@@ -508,7 +509,7 @@ int text_input_run(struct text_input* input) {
 		if (result.transport_status != SYSCALL_STATUS_OK) return 1;
 		if (result.status == REGISTRY_STATUS_NOT_FOUND) {
 			if (!waiting_logged) {
-				printf("text input: waiting for keyboard controller\n");
+				RUNTIME_DEBUG_LOG("text input: waiting for keyboard controller\n");
 				waiting_logged = true;
 			}
 			if (sleep_ms(TEXT_INPUT_RETRY_DELAY_MS) != SYSCALL_STATUS_OK) return 1;
@@ -523,7 +524,7 @@ int text_input_run(struct text_input* input) {
 		enum service_result service = consume_service(input);
 		if (!disconnect(input)) return 1;
 		if (service == SERVICE_RESULT_FAILED) return 1;
-		printf("text input: lost keyboard controller; reconnecting\n");
+		RUNTIME_DEBUG_LOG("text input: lost keyboard controller; reconnecting\n");
 		if (sleep_ms(TEXT_INPUT_RETRY_DELAY_MS) != SYSCALL_STATUS_OK) return 1;
 	}
 }
@@ -705,6 +706,6 @@ bool text_input_initialize(struct text_input* input, const char* layout_path) {
 		text_layout_destroy(&input->layout);
 		return false;
 	}
-	printf("text input: loaded LDML layout %s from %s\n", input->layout.locale, layout_path);
+	RUNTIME_DEBUG_LOG("text input: loaded LDML layout %s from %s\n", input->layout.locale, layout_path);
 	return true;
 }

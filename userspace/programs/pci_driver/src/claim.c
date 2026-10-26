@@ -5,6 +5,7 @@
 #include <base/memory.h>
 #include <limits.h>
 #include <runtime/device.h>
+#include <runtime/log.h>
 #include <stdio.h>
 #include <system/capability.h>
 #include <system/dma.h>
@@ -20,14 +21,13 @@
 #define PCI_DMA_ALLOCATOR_RESOURCE_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_ALLOCATE))
 
 static void claim_error(const struct pci_address* address, const char* resource, syscall_status_t status) {
-	fprintf(stderr,
-	        "pci: %04x:%02x:%02x.%u could not claim %s: %u\n",
-	        address->segment,
-	        address->bus,
-	        address->device,
-	        address->function,
-	        resource,
-	        (unsigned)status);
+	RUNTIME_DEBUG_ERROR("pci: %04x:%02x:%02x.%u could not claim %s: %u\n",
+	                    address->segment,
+	                    address->bus,
+	                    address->device,
+	                    address->function,
+	                    resource,
+	                    (unsigned)status);
 }
 
 bool pci_claim_initialize(const struct pci_host_ranges* ranges, cap_id_t memory_allocator_cap, cap_id_t interrupts_cap,
@@ -61,7 +61,7 @@ bool pci_claim_initialize(const struct pci_host_ranges* ranges, cap_id_t memory_
 		                                         MEMORY_TYPE_DEVICE,
 		                                         &out_context->host_memory_caps[index]);
 		if (status != SYSCALL_STATUS_OK)
-			fprintf(stderr, "pci: could not claim Device Tree host range %zu: %u\n", index, (unsigned)status);
+			RUNTIME_DEBUG_ERROR("pci: could not claim Device Tree host range %zu: %u\n", index, (unsigned)status);
 	}
 #endif
 #if defined(__x86_64__)

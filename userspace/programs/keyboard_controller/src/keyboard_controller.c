@@ -3,6 +3,7 @@
 #include <limits.h>
 #include <protocol/input_manager.h>
 #include <runtime/input_manager.h>
+#include <runtime/log.h>
 #include <runtime/registry.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -221,7 +222,7 @@ static bool remove_keyboard(struct keyboard_controller* controller, struct manag
 	success = append_frame_locked(controller, &event, 1u);
 	keyboard_controller_unlock(controller);
 	if (success) success = notify_consumers(controller);
-	printf("keyboard controller: removed keyboard %llu\n", (unsigned long long)keyboard->id);
+	RUNTIME_DEBUG_LOG("keyboard controller: removed keyboard %llu\n", (unsigned long long)keyboard->id);
 	free_keyboard(keyboard);
 	return success;
 }
@@ -242,9 +243,9 @@ static bool reset_keyboard(struct keyboard_controller* controller, struct manage
 	if (!wake_repeat_thread(controller)) success = false;
 	if (success) success = notify_consumers(controller);
 	if (success)
-		printf("keyboard controller: reset keyboard %llu%s\n",
-		       (unsigned long long)keyboard->id,
-		       clear_locks ? " after an input-history gap" : "");
+		RUNTIME_DEBUG_LOG("keyboard controller: reset keyboard %llu%s\n",
+		                  (unsigned long long)keyboard->id,
+		                  clear_locks ? " after an input-history gap" : "");
 	return success;
 }
 
@@ -341,7 +342,7 @@ static bool connect_manager(struct keyboard_controller* controller) {
 	if (result.status == REGISTRY_STATUS_NOT_FOUND) {
 		if (controller->manager_cap != CAP_ID_INVALID) {
 			if (!stop_manager(controller) || !remove_all_keyboards(controller)) return false;
-			printf("keyboard controller: input manager unavailable\n");
+			RUNTIME_DEBUG_LOG("keyboard controller: input manager unavailable\n");
 		}
 		return true;
 	}
@@ -382,7 +383,7 @@ static bool connect_manager(struct keyboard_controller* controller) {
 	}
 	__atomic_store_n(&controller->manager_dead, false, __ATOMIC_RELEASE);
 	__atomic_store_n(&controller->manager_dirty, true, __ATOMIC_RELEASE);
-	printf("keyboard controller: connected to input manager\n");
+	RUNTIME_DEBUG_LOG("keyboard controller: connected to input manager\n");
 	return true;
 }
 
@@ -529,9 +530,9 @@ static enum attach_result attach_keyboard(struct keyboard_controller*        con
 		if (!success) free_keyboard(keyboard);
 		return ATTACH_RESULT_FAILED;
 	}
-	printf("keyboard controller: attached keyboard %llu from source %llu\n",
-	       (unsigned long long)keyboard->id,
-	       (unsigned long long)keyboard->source_id);
+	RUNTIME_DEBUG_LOG("keyboard controller: attached keyboard %llu from source %llu\n",
+	                  (unsigned long long)keyboard->id,
+	                  (unsigned long long)keyboard->source_id);
 	return ATTACH_RESULT_OK;
 }
 
@@ -942,7 +943,7 @@ int keyboard_controller_run(struct keyboard_controller* controller) {
 			return 1;
 		if (__atomic_exchange_n(&controller->manager_dead, false, __ATOMIC_ACQ_REL)) {
 			if (!stop_manager(controller) || !remove_all_keyboards(controller)) return 1;
-			printf("keyboard controller: lost input manager\n");
+			RUNTIME_DEBUG_LOG("keyboard controller: lost input manager\n");
 		}
 		if (__atomic_exchange_n(&controller->registry_dirty, false, __ATOMIC_ACQ_REL) && !connect_manager(controller))
 			return 1;

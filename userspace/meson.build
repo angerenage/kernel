@@ -22,6 +22,10 @@ if get_option('debug')
 	userspace_c_args += ['-DRUNTIME_DIAGNOSTICS=1']
 endif
 
+if kernel_boot_debug
+	userspace_c_args += ['-DBOOT_DEBUG_LOGGING=1']
+endif
+
 if platform == 'pc_x86_64'
 	userspace_c_args += [
 		'-mno-red-zone',

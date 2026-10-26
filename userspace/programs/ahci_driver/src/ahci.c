@@ -5,6 +5,7 @@
 #include <base/process.h>
 #include <protocol/device.h>
 #include <runtime/device.h>
+#include <runtime/log.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -60,7 +61,7 @@ static enum ahci_validation_result validate_device(cap_id_t device_cap, uint64_t
 	}
 	if (class_code != AHCI_PCI_CLASS_MASS_STORAGE || subclass != AHCI_PCI_SUBCLASS_SATA ||
 	    interface != AHCI_PCI_INTERFACE_AHCI) {
-		fprintf(stderr, "ahci: device is not a PCI AHCI controller\n");
+		RUNTIME_DEBUG_ERROR("ahci: device is not a PCI AHCI controller\n");
 		return AHCI_VALIDATION_UNSUPPORTED;
 	}
 	if (!read_property(device_cap, "bar_5_kind", &bar_kind) || !read_property(device_cap, "bar_5_size", out_bar_size) ||
@@ -205,12 +206,12 @@ static bool inspect_ports(const struct ahci_mapping* mapping, uint32_t capabilit
 		port      = (volatile struct ahci_port_registers*)((volatile uint8_t*)mapping->registers + offset);
 		status    = port->sata_status;
 		signature = port->signature;
-		printf("ahci: port %u link=%s signature=%08x (%s) task_file=%08x\n",
-		       index,
-		       link_state(status),
-		       signature,
-		       device_signature(signature),
-		       port->task_file_data);
+		RUNTIME_DEBUG_LOG("ahci: port %u link=%s signature=%08x (%s) task_file=%08x\n",
+		                  index,
+		                  link_state(status),
+		                  signature,
+		                  device_signature(signature),
+		                  port->task_file_data);
 	}
 	return true;
 }
@@ -245,15 +246,15 @@ enum device_driver_result ahci_driver_run(cap_id_t device_cap) {
 	control      = mapping.registers->global_host_control;
 	implemented  = mapping.registers->ports_implemented;
 	version      = mapping.registers->version;
-	printf("ahci: version %x.%02x, %u port(s), %u command slot(s), speed=%s, 64-bit=%s, ncq=%s, mode=%s\n",
-	       version >> 16u,
-	       version & 0xffffu,
-	       (capabilities & AHCI_CAP_NP_MASK) + 1u,
-	       ((capabilities & AHCI_CAP_NCS_MASK) >> AHCI_CAP_NCS_SHIFT) + 1u,
-	       interface_speed(capabilities),
-	       (capabilities & AHCI_CAP_S64A) != 0u ? "yes" : "no",
-	       (capabilities & AHCI_CAP_SNCQ) != 0u ? "yes" : "no",
-	       (control & AHCI_GHC_AE) != 0u ? "AHCI" : "legacy");
+	RUNTIME_DEBUG_LOG("ahci: version %x.%02x, %u port(s), %u command slot(s), speed=%s, 64-bit=%s, ncq=%s, mode=%s\n",
+	                  version >> 16u,
+	                  version & 0xffffu,
+	                  (capabilities & AHCI_CAP_NP_MASK) + 1u,
+	                  ((capabilities & AHCI_CAP_NCS_MASK) >> AHCI_CAP_NCS_SHIFT) + 1u,
+	                  interface_speed(capabilities),
+	                  (capabilities & AHCI_CAP_S64A) != 0u ? "yes" : "no",
+	                  (capabilities & AHCI_CAP_SNCQ) != 0u ? "yes" : "no",
+	                  (control & AHCI_GHC_AE) != 0u ? "AHCI" : "legacy");
 	success = inspect_ports(&mapping, capabilities, implemented);
 	if (success && !ahci_dma_initialize(device_cap, &dma)) success = false;
 	if (success)

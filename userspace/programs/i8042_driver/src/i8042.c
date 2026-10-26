@@ -8,6 +8,7 @@
 #include <protocol/device.h>
 #include <protocol/ps2.h>
 #include <runtime/device.h>
+#include <runtime/log.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -639,7 +640,7 @@ enum device_driver_result i8042_driver_run(cap_id_t device_cap) {
 	controller.keyboard.present = probe_device(false);
 	controller.mouse.present    = mouse_port && probe_device(true);
 	if (!controller.keyboard.present && !controller.mouse.present) {
-		report_error("i8042: no populated PS/2 ports\n");
+		RUNTIME_DEBUG_ERROR("i8042: no populated PS/2 ports\n");
 		result = DEVICE_DRIVER_UNSUPPORTED;
 		goto done;
 	}

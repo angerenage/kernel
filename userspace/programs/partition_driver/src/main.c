@@ -1,6 +1,5 @@
 #include <protocol/device.h>
 #include <stddef.h>
-#include <stdio.h>
 #include <system/capability.h>
 
 #include "partition.h"
@@ -18,6 +17,5 @@ int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 	result     = partition_driver_run(device_cap);
 	if (cap_drop(device_cap) != SYSCALL_STATUS_OK) result = DEVICE_DRIVER_ERROR;
 	if (result == DEVICE_DRIVER_UNSUPPORTED) return DEVICE_DRIVER_EXIT_UNSUPPORTED;
-	fprintf(stderr, "partition: driver stopped after an error\n");
 	return 1;
 }

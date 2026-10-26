@@ -7,6 +7,7 @@
 #include <protocol/ahci.h>
 #include <protocol/device.h>
 #include <runtime/device.h>
+#include <runtime/log.h>
 #include <stdio.h>
 #include <string.h>
 #include <system/capability.h>
@@ -370,7 +371,7 @@ bool ahci_transport_run(cap_id_t device_cap, volatile struct ahci_host_registers
 		}
 	}
 	if (transport.port_count == 0u) {
-		printf("ahci: no supported devices attached\n");
+		RUNTIME_DEBUG_LOG("ahci: no supported devices attached\n");
 	}
 	success = serve(&transport);
 

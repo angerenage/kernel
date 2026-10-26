@@ -2,6 +2,7 @@
 
 #include <limits.h>
 #include <runtime/input.h>
+#include <runtime/log.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -298,12 +299,12 @@ static bool install_source(struct input_manager* manager, struct managed_input_s
 	}
 	input_manager_unlock(manager);
 	if (!success || !notify_consumers(manager)) return false;
-	printf("input manager: attached source %llu (%s), class=%u controls=%zu outputs=%zu\n",
-	       (unsigned long long)source->id,
-	       source->service.selector.service,
-	       (unsigned)source->device_class,
-	       source->descriptor_count,
-	       source->output_descriptor_count);
+	RUNTIME_DEBUG_LOG("input manager: attached source %llu (%s), class=%u controls=%zu outputs=%zu\n",
+	                  (unsigned long long)source->id,
+	                  source->service.selector.service,
+	                  (unsigned)source->device_class,
+	                  source->descriptor_count,
+	                  source->output_descriptor_count);
 	return true;
 }
 
@@ -323,9 +324,9 @@ static bool deactivate_source(struct input_manager* manager, struct managed_inpu
 		}
 		input_manager_unlock(manager);
 		if (success) success = notify_consumers(manager);
-		printf("input manager: removed source %llu (%s)\n",
-		       (unsigned long long)source->id,
-		       source->service.selector.service);
+		RUNTIME_DEBUG_LOG("input manager: removed source %llu (%s)\n",
+		                  (unsigned long long)source->id,
+		                  source->service.selector.service);
 	}
 	if (!stop_source(source)) success = false;
 	source->quarantined = quarantine;
@@ -621,7 +622,7 @@ static enum drain_result append_source_reset(struct input_manager* manager, cons
 	bool success = append_frame_locked(manager, &event, 1u);
 	input_manager_unlock(manager);
 	if (!success || !notify_consumers(manager)) return DRAIN_RESULT_MANAGER_FAILED;
-	printf("input manager: source %llu state reset\n", (unsigned long long)source->id);
+	RUNTIME_DEBUG_LOG("input manager: source %llu state reset\n", (unsigned long long)source->id);
 	return DRAIN_RESULT_OK;
 }
 

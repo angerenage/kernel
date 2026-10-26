@@ -1,6 +1,7 @@
 #include "gpt.h"
 
 #include <runtime/block.h>
+#include <runtime/log.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -213,7 +214,6 @@ static enum gpt_result collect_entries(const struct block_device* device, struct
                                        struct partition_table* table) {
 	uint32_t populated = 0u;
 
-	printf("partition: valid %sGPT partition table\n", backup ? "backup " : "");
 	for (uint32_t index = 0u; index < header->entry_count;) {
 		const uint8_t* entries;
 		uint32_t       count;
@@ -241,18 +241,21 @@ static enum gpt_result collect_entries(const struct block_device* device, struct
 			format_name(entry, partition.gpt.name);
 			if (!partition_table_append(table, &partition)) return GPT_RESULT_NO_MEMORY;
 			partition_format_guid(partition.gpt.type_guid, type);
-			printf("partition: GPT entry %u type=%s first_lba=%llu last_lba=%llu blocks=%llu name=\"%s\"\n",
-			       partition.table_index,
-			       type,
-			       (unsigned long long)first_lba,
-			       (unsigned long long)last_lba,
-			       (unsigned long long)partition.block_count,
-			       partition.gpt.name);
+			RUNTIME_DEBUG_LOG("partition: GPT entry %u type=%s first_lba=%llu last_lba=%llu blocks=%llu name=\"%s\"\n",
+			                  partition.table_index,
+			                  type,
+			                  (unsigned long long)first_lba,
+			                  (unsigned long long)last_lba,
+			                  (unsigned long long)partition.block_count,
+			                  partition.gpt.name);
 			populated++;
 		}
 		index += count;
 	}
-	printf("partition: GPT contains %u populated partition entr%s\n", populated, populated == 1u ? "y" : "ies");
+	printf("partition: %sGPT table contains %u partition%s\n",
+	       backup ? "backup " : "",
+	       populated,
+	       populated == 1u ? "" : "s");
 	return GPT_RESULT_VALID;
 }
 

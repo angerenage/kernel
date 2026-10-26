@@ -2,6 +2,7 @@
 
 #include <protocol/device.h>
 #include <protocol/device_manager_control.h>
+#include <runtime/log.h>
 #include <runtime/registry.h>
 #include <runtime/vfs.h>
 #include <stddef.h>
@@ -113,9 +114,9 @@ static bool update_catalog(struct device_server* server, const struct cap_reques
 	server->catalog_generation++;
 	response.status  = DEVICE_MANAGER_CATALOG_UPDATE_OK;
 	response.catalog = catalog_info(server);
-	printf("device-manager: activated driver catalog generation %llu with %zu declaration(s)\n",
-	       (unsigned long long)server->catalog_generation,
-	       server->drivers.driver_count);
+	RUNTIME_DEBUG_LOG("device-manager: activated driver catalog generation %llu with %zu declaration(s)\n",
+	                  (unsigned long long)server->catalog_generation,
+	                  server->drivers.driver_count);
 	dm_supervisor_catalog_updated(server);
 	return reply(call, &response, sizeof(response), SYSCALL_STATUS_OK);
 }

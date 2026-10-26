@@ -3,6 +3,7 @@
 #include <base/startup.h>
 #include <protocol/device_manager.h>
 #include <protocol/vfs.h>
+#include <runtime/log.h>
 #include <runtime/program.h>
 #include <runtime/registry.h>
 #include <runtime/vfs.h>
@@ -164,7 +165,7 @@ bool device_manager_parser_launch(struct device_server* server, enum device_mana
 	}
 	if (!drop_capability(&running.thread_cap, "parser thread")) cleanup_ok = false;
 	if (!drop_capability(&running.process_cap, "parser process")) cleanup_ok = false;
-	if (cleanup_ok) printf("device-manager: launched %s\n", parser.display_name);
+	if (cleanup_ok) RUNTIME_DEBUG_LOG("device-manager: launched %s\n", parser.display_name);
 
 cleanup:
 	if (executable.capability != CAP_ID_INVALID && !drop_capability(&executable.capability, "parser executable"))

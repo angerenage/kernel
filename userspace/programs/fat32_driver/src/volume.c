@@ -1,5 +1,6 @@
 #include "volume.h"
 
+#include <runtime/log.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -239,7 +240,6 @@ enum fat32_result fat32_volume_open(cap_id_t device_cap, struct fat32_volume* ou
 	    (boot[66u] != 0x28u && boot[66u] != 0x29u) || memcmp(boot + 82u, "FAT32   ", 8u) != 0 ||
 	    data_start >= total_sectors || cluster_count < FAT32_MIN_CLUSTERS || cluster_count > FAT32_MAX_CLUSTERS ||
 	    fat_entries < cluster_count + 2u || root_cluster < 2u || root_cluster - 2u >= cluster_count) {
-		printf("fat32: partition does not contain a valid FAT32 volume\n");
 		fat32_volume_close(out_volume);
 		return FAT32_RESULT_UNSUPPORTED;
 	}
@@ -270,11 +270,11 @@ enum fat32_result fat32_volume_open(cap_id_t device_cap, struct fat32_volume* ou
 		fat32_volume_close(out_volume);
 		return result;
 	}
-	printf("fat32: volume label=\"%s\" sectors=%u sector_size=%u cluster_size=%u root_cluster=%u\n",
-	       out_volume->label,
-	       total_sectors,
-	       block_size,
-	       sectors_per_cluster * block_size,
-	       root_cluster);
+	RUNTIME_DEBUG_LOG("fat32: volume label=\"%s\" sectors=%u sector_size=%u cluster_size=%u root_cluster=%u\n",
+	                  out_volume->label,
+	                  total_sectors,
+	                  block_size,
+	                  sectors_per_cluster * block_size,
+	                  root_cluster);
 	return FAT32_RESULT_OK;
 }

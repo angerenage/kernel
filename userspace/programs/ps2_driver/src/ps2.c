@@ -3,6 +3,7 @@
 #include <protocol/device.h>
 #include <protocol/ps2.h>
 #include <runtime/device.h>
+#include <runtime/log.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -496,7 +497,7 @@ enum device_driver_result ps2_driver_run(cap_id_t device_cap) {
 	for (;;) {
 		enum ps2_configure_result configured = configure_device(&device);
 		if (configured == PS2_CONFIGURE_UNSUPPORTED) {
-			printf("ps2: device reported an unsupported identity\n");
+			RUNTIME_DEBUG_LOG("ps2: device reported an unsupported identity\n");
 			if (!input_initialized) result = DEVICE_DRIVER_UNSUPPORTED;
 			goto done;
 		}

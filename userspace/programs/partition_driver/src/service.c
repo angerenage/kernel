@@ -6,6 +6,7 @@
 #include <protocol/device.h>
 #include <runtime/block.h>
 #include <runtime/device.h>
+#include <runtime/log.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -443,12 +444,13 @@ bool partition_service_run(cap_id_t device_cap, const struct block_device* paren
 		else {
 			(void)snprintf(precise, sizeof(precise), "mbr:%02x", partitions->entries[index].mbr.type);
 		}
-		printf("partition: published partition-%u as block:partition (%s, first_lba=%llu, blocks=%llu)\n",
-		       partitions->entries[index].table_index,
-		       precise,
-		       (unsigned long long)partitions->entries[index].first_lba,
-		       (unsigned long long)partitions->entries[index].block_count);
+		RUNTIME_DEBUG_LOG("partition: published partition-%u as block:partition (%s, first_lba=%llu, blocks=%llu)\n",
+		                  partitions->entries[index].table_index,
+		                  precise,
+		                  (unsigned long long)partitions->entries[index].first_lba,
+		                  (unsigned long long)partitions->entries[index].block_count);
 	}
+	printf("partition: published %zu partition device%s\n", partitions->count, partitions->count == 1u ? "" : "s");
 	success = serve(&service);
 
 done:

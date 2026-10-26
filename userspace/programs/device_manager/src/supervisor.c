@@ -4,6 +4,7 @@
 #include <protocol/device.h>
 #include <protocol/vfs.h>
 #include <runtime/diagnostic.h>
+#include <runtime/log.h>
 #include <runtime/program.h>
 #include <runtime/registry.h>
 #include <runtime/stream.h>
@@ -342,11 +343,11 @@ static void binding_launch(struct device_server* server, struct dm_driver_bindin
 		goto running_failed;
 	}
 	binding->state = DM_DRIVER_RUNNING;
-	printf("device-manager: started %.*s for device %llu (generation %llu)\n",
-	       (int)binding->driver->name.size,
-	       binding->driver->name.data,
-	       (unsigned long long)binding->device->id,
-	       (unsigned long long)binding->generation);
+	RUNTIME_DEBUG_LOG("device-manager: started %.*s for device %llu (generation %llu)\n",
+	                  (int)binding->driver->name.size,
+	                  binding->driver->name.data,
+	                  (unsigned long long)binding->device->id,
+	                  (unsigned long long)binding->generation);
 	return;
 
 running_failed:
@@ -358,11 +359,11 @@ failed:
 	if (loaded.load_cap != CAP_ID_INVALID) (void)program_cancel(loaded.load_cap);
 	binding->process_id       = PROCESS_PID_INVALID;
 	binding->last_wait_status = status;
-	printf("device-manager: failed to start %.*s for device %llu: %u\n",
-	       (int)binding->driver->name.size,
-	       binding->driver->name.data,
-	       (unsigned long long)binding->device->id,
-	       (unsigned)status);
+	RUNTIME_DEBUG_LOG("device-manager: failed to start %.*s for device %llu: %u\n",
+	                  (int)binding->driver->name.size,
+	                  binding->driver->name.data,
+	                  (unsigned long long)binding->device->id,
+	                  (unsigned)status);
 	binding_schedule_retry(server, binding);
 }
 
@@ -376,15 +377,16 @@ static void binding_try_fallback(struct device_server* server, struct dm_driver_
 	struct dm_driver* next = match_driver(server, binding->device, binding);
 	if (next == NULL) {
 		binding->state = DM_DRIVER_UNSUPPORTED;
-		printf("device-manager: no remaining driver supports device %llu\n", (unsigned long long)binding->device->id);
+		RUNTIME_DEBUG_LOG("device-manager: no remaining driver supports device %llu\n",
+		                  (unsigned long long)binding->device->id);
 		return;
 	}
-	printf("device-manager: trying %.*s for device %llu after %.*s declined it\n",
-	       (int)next->name.size,
-	       next->name.data,
-	       (unsigned long long)binding->device->id,
-	       (int)binding->driver->name.size,
-	       binding->driver->name.data);
+	RUNTIME_DEBUG_LOG("device-manager: trying %.*s for device %llu after %.*s declined it\n",
+	                  (int)next->name.size,
+	                  next->name.data,
+	                  (unsigned long long)binding->device->id,
+	                  (int)binding->driver->name.size,
+	                  binding->driver->name.data);
 	binding->driver        = next;
 	binding->restart_count = 0u;
 	binding->state         = DM_DRIVER_UNBOUND;
@@ -515,17 +517,17 @@ static void binding_exited(struct device_server* server, struct dm_driver_bindin
 		return;
 	}
 	if (unsupported)
-		printf("device-manager: %.*s declined device %llu\n",
-		       (int)binding->driver->name.size,
-		       binding->driver->name.data,
-		       (unsigned long long)binding->device->id);
+		RUNTIME_DEBUG_LOG("device-manager: %.*s declined device %llu\n",
+		                  (int)binding->driver->name.size,
+		                  binding->driver->name.data,
+		                  (unsigned long long)binding->device->id);
 	else
-		printf("device-manager: %.*s for device %llu exited: wait=%u code=%llu\n",
-		       (int)binding->driver->name.size,
-		       binding->driver->name.data,
-		       (unsigned long long)binding->device->id,
-		       (unsigned)wait_status,
-		       (unsigned long long)exit_code);
+		RUNTIME_DEBUG_LOG("device-manager: %.*s for device %llu exited: wait=%u code=%llu\n",
+		                  (int)binding->driver->name.size,
+		                  binding->driver->name.data,
+		                  (unsigned long long)binding->device->id,
+		                  (unsigned)wait_status,
+		                  (unsigned long long)exit_code);
 	abort_owned_builders(server, binding, binding->generation);
 	binding->state = unsupported ? DM_DRIVER_WAITING_FOR_FALLBACK : DM_DRIVER_WAITING_FOR_CHILDREN;
 	stop_descendant_bindings(server, binding, binding->generation);

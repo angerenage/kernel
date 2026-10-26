@@ -1,6 +1,7 @@
 #include "partition.h"
 
 #include <runtime/block.h>
+#include <runtime/log.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -48,7 +49,6 @@ static enum partition_probe_result probe_partition_table(struct block_device*   
 	if (block_buffer_allocate(device, device->block_size, &buffer) != SYSCALL_STATUS_OK) goto done;
 	if (block_read(device, &buffer, 0u, 0u, 1u) != SYSCALL_STATUS_OK) goto done;
 	if (mbr_parse(buffer.address, device->block_size, device->block_count, &table) != MBR_RESULT_VALID) {
-		printf("partition: no valid MBR or GPT partition table found\n");
 		block_buffer_release(device, &buffer);
 		return PARTITION_PROBE_EMPTY;
 	}
@@ -74,11 +74,12 @@ enum device_driver_result partition_driver_run(cap_id_t device_cap) {
 	bool                      success    = block_device_open(device_cap, &device) == SYSCALL_STATUS_OK;
 
 	if (success)
-		printf("partition: probing disk with %llu blocks of %u bytes (max transfer %u blocks, writable=%s)\n",
-		       (unsigned long long)device.block_count,
-		       device.block_size,
-		       device.max_transfer_blocks,
-		       (device.flags & BLOCK_DEVICE_WRITABLE) != 0u ? "yes" : "no");
+		RUNTIME_DEBUG_LOG("partition: probing disk with %llu blocks of %u bytes "
+		                  "(max transfer %u blocks, writable=%s)\n",
+		                  (unsigned long long)device.block_count,
+		                  device.block_size,
+		                  device.max_transfer_blocks,
+		                  (device.flags & BLOCK_DEVICE_WRITABLE) != 0u ? "yes" : "no");
 	if (success) {
 		enum partition_probe_result probe = probe_partition_table(&device, &partitions);
 		if (probe == PARTITION_PROBE_EMPTY) result = DEVICE_DRIVER_UNSUPPORTED;

@@ -1,5 +1,6 @@
 #include "sata.h"
 
+#include <runtime/log.h>
 #include <stdio.h>
 
 #include "commands.h"
@@ -20,7 +21,6 @@ static bool probe_dma_commands(const struct sata_transport* transport, const str
 	if (success && info->lba48) success = sata_read_dma_ext(transport, &buffer, 0u, 0u, 1u, info->logical_sector_size);
 	if (success && info->flush_cache) success = sata_flush_cache(transport);
 	if (success && info->lba48 && info->flush_cache_ext) success = sata_flush_cache_ext(transport);
-	if (success) printf("sata: port %u DMA command probe completed\n", transport->port);
 
 done:
 	if (!success) fprintf(stderr, "sata: port %u DMA command probe failed\n", transport->port);

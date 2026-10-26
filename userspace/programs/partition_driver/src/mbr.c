@@ -1,5 +1,6 @@
 #include "mbr.h"
 
+#include <runtime/log.h>
 #include <stdio.h>
 
 #define MBR_SIZE 512u
@@ -47,15 +48,18 @@ bool mbr_is_legacy_usable(const struct mbr_table* table) {
 
 void mbr_print(const struct mbr_table* table) {
 	if (table == NULL) return;
-	printf("partition: MBR partition table%s\n", table->protective ? " (protective or hybrid)" : "");
+	size_t populated = 0u;
+	for (size_t index = 0u; index < MBR_PARTITION_COUNT; index++)
+		if (table->partitions[index].type != 0u) populated++;
+	printf("partition: MBR table contains %zu partition%s\n", populated, populated == 1u ? "" : "s");
 	for (size_t index = 0u; index < MBR_PARTITION_COUNT; index++) {
 		const struct mbr_partition* entry = &table->partitions[index];
 		if (entry->type == 0u) continue;
-		printf("partition: MBR entry %zu type=%02x first_lba=%u blocks=%u bootable=%s\n",
-		       index + 1u,
-		       entry->type,
-		       entry->first_lba,
-		       entry->block_count,
-		       entry->bootable ? "yes" : "no");
+		RUNTIME_DEBUG_LOG("partition: MBR entry %zu type=%02x first_lba=%u blocks=%u bootable=%s\n",
+		                  index + 1u,
+		                  entry->type,
+		                  entry->first_lba,
+		                  entry->block_count,
+		                  entry->bootable ? "yes" : "no");
 	}
 }

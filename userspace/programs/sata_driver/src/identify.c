@@ -1,6 +1,7 @@
 #include "identify.h"
 
 #include <protocol/ahci.h>
+#include <runtime/log.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -87,22 +88,23 @@ static void print_identify(uint32_t port, const uint8_t* identify, const struct 
 		               "%llu bytes",
 		               (unsigned long long)(info->sector_count * info->logical_sector_size));
 	else (void)snprintf(capacity, sizeof(capacity), "overflow");
-	printf("sata: port %u model=\"%s\" serial=\"%s\" firmware=\"%s\" sectors=%llu sector_size=%u capacity=%s "
-	       "lba48=%s ncq=%s queue_depth=%u trim=%s smart=%s speed=%s medium=%s\n",
-	       port,
-	       model,
-	       serial,
-	       firmware,
-	       (unsigned long long)info->sector_count,
-	       info->logical_sector_size,
-	       capacity,
-	       info->lba48 ? "yes" : "no",
-	       ncq ? "yes" : "no",
-	       ncq ? (identify_word(identify, 75u) & 0x1fu) + 1u : 1u,
-	       (identify_word(identify, 169u) & 1u) != 0u ? "yes" : "no",
-	       (identify_word(identify, 82u) & 1u) != 0u ? "yes" : "no",
-	       sata_speed(identify),
-	       rotation == 1u ? "solid-state" : "rotating/unspecified");
+	RUNTIME_DEBUG_LOG(
+		"sata: port %u model=\"%s\" serial=\"%s\" firmware=\"%s\" sectors=%llu sector_size=%u capacity=%s "
+		"lba48=%s ncq=%s queue_depth=%u trim=%s smart=%s speed=%s medium=%s\n",
+		port,
+		model,
+		serial,
+		firmware,
+		(unsigned long long)info->sector_count,
+		info->logical_sector_size,
+		capacity,
+		info->lba48 ? "yes" : "no",
+		ncq ? "yes" : "no",
+		ncq ? (identify_word(identify, 75u) & 0x1fu) + 1u : 1u,
+		(identify_word(identify, 169u) & 1u) != 0u ? "yes" : "no",
+		(identify_word(identify, 82u) & 1u) != 0u ? "yes" : "no",
+		sata_speed(identify),
+		rotation == 1u ? "solid-state" : "rotating/unspecified");
 }
 
 enum sata_identify_result sata_identify_device(const struct sata_transport* transport,
@@ -127,7 +129,7 @@ enum sata_identify_result sata_identify_device(const struct sata_transport* tran
 		goto done;
 	}
 	if ((identify_word(buffer.address, 0u) & (1u << 15u)) != 0u) {
-		fprintf(stderr, "sata: port %u is not an ATA block device\n", transport->port);
+		RUNTIME_DEBUG_ERROR("sata: port %u is not an ATA block device\n", transport->port);
 		result = SATA_IDENTIFY_UNSUPPORTED;
 		goto done;
 	}

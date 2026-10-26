@@ -1,5 +1,6 @@
 #include "enumerate.h"
 
+#include <runtime/log.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -65,18 +66,18 @@ static const char* function_kind(const struct pci_function* function) {
 }
 
 static void function_print(const struct pci_function* function) {
-	printf("pci: %04x:%02x:%02x.%u %04x:%04x class=%02x:%02x:%02x revision=%02x (%s)\n",
-	       function->address.segment,
-	       function->address.bus,
-	       function->address.device,
-	       function->address.function,
-	       function->vendor_id,
-	       function->device_id,
-	       function->class_code,
-	       function->subclass,
-	       function->programming_interface,
-	       function->revision_id,
-	       function_kind(function));
+	RUNTIME_DEBUG_LOG("pci: %04x:%02x:%02x.%u %04x:%04x class=%02x:%02x:%02x revision=%02x (%s)\n",
+	                  function->address.segment,
+	                  function->address.bus,
+	                  function->address.device,
+	                  function->address.function,
+	                  function->vendor_id,
+	                  function->device_id,
+	                  function->class_code,
+	                  function->subclass,
+	                  function->programming_interface,
+	                  function->revision_id,
+	                  function_kind(function));
 }
 
 bool pci_enumerate(struct pci_host* host, cap_id_t memory_allocator_cap, cap_id_t interrupts_cap, cap_id_t io_ports_cap,
