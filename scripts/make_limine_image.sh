@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
 	cat <<'EOF'
-Usage: make_limine_image.sh --arch <arch> --kernel <path> --config <path> --output <path> --builddir <path> [--module <path>]...
+Usage: make_limine_image.sh --arch <arch> --kernel <path> --config <path> --output <path> --builddir <path> [options]
 
 Required arguments:
   --arch        Limine target architecture (x86_64, aarch64, riscv64, loongarch64).
@@ -11,9 +11,13 @@ Required arguments:
   --config      Path to the limine.conf configuration file.
   --output      Path of the image file to generate.
   --builddir    Meson build directory used for caching helper assets.
-  --module      Path to a module file to embed. May be passed more than once.
 
 Optional arguments:
+  --module <path>
+                Module file to embed. May be passed more than once.
+  --root-file <source> <destination>
+                File and relative destination to add to the FAT32 root
+                filesystem. May be passed more than once.
   --update-limine
                 Refresh the cached Limine clone before building.
   -h, --help    Show this help and exit.
@@ -49,6 +53,8 @@ BUILD_DIR=""
 TARGET_ARCH=""
 UPDATE_LIMINE=0
 MODULE_PATHS=()
+ROOT_FILE_PATHS=()
+ROOT_FILE_DESTINATIONS=()
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -76,6 +82,11 @@ while [[ $# -gt 0 ]]; do
 			MODULE_PATHS+=( "$2" )
 			shift 2
 			;;
+		--root-file)
+			ROOT_FILE_PATHS+=( "$2" )
+			ROOT_FILE_DESTINATIONS+=( "$3" )
+			shift 3
+			;;
 		--update-limine)
 			UPDATE_LIMINE=1
 			shift 1
@@ -101,9 +112,16 @@ done
 for module_path in "${MODULE_PATHS[@]}"; do
 	[[ -f "$module_path" ]] || error "module file not found: $module_path"
 done
+for root_file_path in "${ROOT_FILE_PATHS[@]}"; do
+	[[ -f "$root_file_path" ]] || error "root filesystem file not found: $root_file_path"
+done
 
 need_cmd git
 need_cmd make
+need_cmd mcopy
+need_cmd mformat
+need_cmd mmd
+need_cmd truncate
 need_cmd xorriso
 
 LIMINE_REPO="https://github.com/limine-bootloader/limine.git"
@@ -404,10 +422,85 @@ if [[ "$TARGET_ARCH" == "x86_64" ]]; then
 	fi
 fi
 
+fat_image="${work_dir}/rootfs.img"
+truncate -s 64M "$fat_image"
+mformat -i "$fat_image" -F -N 0x4b524e4c -v ROOTFS ::
+
+declare -A fat_directories=()
+declare -A fat_destinations=()
+
+validate_root_destination() {
+	local destination="$1"
+	local component
+	local components=()
+
+	case "$destination" in
+		""|/*|*/|*//*|*\\*|*:*|*\**|*\?*|*\"*|*\<*|*\>*|*\|*) return 1 ;;
+	esac
+	[[ "$destination" != *$'\n'* && "$destination" != *$'\r'* && "$destination" != *$'\t'* ]] || return 1
+	IFS='/' read -r -a components <<< "$destination"
+	for component in "${components[@]}"; do
+		[[ -n "$component" && "$component" != "." && "$component" != ".." ]] || return 1
+	done
+	return 0
+}
+
+create_fat_parent_directories() {
+	local destination="$1"
+	local parent
+	local component
+	local current=""
+	local key
+	local components=()
+
+	[[ "$destination" == */* ]] || return 0
+	parent="${destination%/*}"
+	IFS='/' read -r -a components <<< "$parent"
+	for component in "${components[@]}"; do
+		current="${current:+${current}/}${component}"
+		key="${current,,}"
+		if [[ -z "${fat_directories[$key]+present}" ]]; then
+			mmd -i "$fat_image" "::/${current}"
+			fat_directories[$key]=1
+		fi
+	done
+}
+
+if (( ${#ROOT_FILE_PATHS[@]} > 0 )); then
+	log "populating FAT32 root filesystem"
+	for (( index = 0; index < ${#ROOT_FILE_PATHS[@]}; index++ )); do
+		root_file_path="${ROOT_FILE_PATHS[$index]}"
+		root_file_destination="${ROOT_FILE_DESTINATIONS[$index]}"
+		validate_root_destination "$root_file_destination" ||
+			error "invalid FAT32 root filesystem destination: ${root_file_destination}"
+		destination_key="${root_file_destination,,}"
+		[[ -z "${fat_destinations[$destination_key]+present}" ]] ||
+			error "duplicate FAT32 root filesystem destination: ${root_file_destination}"
+		create_fat_parent_directories "$root_file_destination"
+		mcopy -i "$fat_image" "$(abspath "$root_file_path")" "::/${root_file_destination}"
+		fat_destinations[$destination_key]=1
+	done
+fi
+
+fat_partition_args=(
+	-appended_part_as_gpt
+)
+if [[ "$TARGET_ARCH" == "x86_64" ]]; then
+	bios_boot_image="${work_dir}/bios-boot.img"
+	truncate -s 1M "$bios_boot_image"
+	fat_partition_args+=(
+		-append_partition 4 21686148-6449-6E6F-744E-656564454649 "$bios_boot_image"
+	)
+fi
+fat_partition_args+=(
+	-append_partition 5 EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 "$fat_image"
+)
+
 log "creating bootable image at $output_abs"
 xorriso_cmd=(
 	xorriso -as mkisofs
 	-R -J -joliet-long -iso-level 3
+	"${fat_partition_args[@]}"
 	-o "$output_abs" "$iso_root"
 )
 
@@ -420,6 +513,7 @@ if [[ "$TARGET_ARCH" == "x86_64" ]]; then
 		-hfsplus -apm-block-size 2048
 		--efi-boot limine-uefi-cd.bin
 		-efi-boot-part --efi-boot-image --protective-msdos-label
+		"${fat_partition_args[@]}"
 		-o "$output_abs" "$iso_root"
 	)
 else
@@ -429,6 +523,7 @@ else
 		-hfsplus -apm-block-size 2048
 		--efi-boot limine-uefi-cd.bin
 		-efi-boot-part --efi-boot-image --protective-msdos-label
+		"${fat_partition_args[@]}"
 		-o "$output_abs" "$iso_root"
 	)
 fi
@@ -440,9 +535,9 @@ if [[ "$TARGET_ARCH" == "x86_64" ]]; then
 	(
 		cd "$limine_root"
 		if [[ "$(basename "$deploy_tool")" = "limine-deploy" ]]; then
-			"$deploy_tool" "$output_abs"
+			"$deploy_tool" --no-gpt-to-mbr-isohybrid-conversion "$output_abs"
 		else
-			"$deploy_tool" bios-install "$output_abs"
+			"$deploy_tool" bios-install --no-gpt-to-mbr-isohybrid-conversion "$output_abs"
 		fi
 	)
 fi

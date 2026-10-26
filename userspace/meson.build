@@ -199,6 +199,16 @@ userspace_boot_modules = userspace_programs + [
 	commit_mono_license,
 ]
 
+userspace_root_programs = userspace_programs
+userspace_root_files = [
+	[driver_catalog, 'etc/drivers.yaml'],
+	[system_configuration, 'etc/system.yaml'],
+	[keyboard_qwerty_layout, 'etc/keyboard_qwerty.xml'],
+	[keyboard_azerty_layout, 'etc/keyboard_azerty.xml'],
+	[commit_mono_regular_font, 'share/fonts/CommitMono.otf'],
+	[commit_mono_license, 'share/licenses/CommitMono-LICENSE.txt'],
+]
+
 alias_target(
 	'userspace',
 	userspace_programs + [userspace_utf8proc, userspace_yaml, userspace_mxml, userspace_freetype],

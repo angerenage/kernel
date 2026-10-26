@@ -111,6 +111,14 @@ foreach userspace_module : userspace_boot_modules
 	limine_module_args += ['--module', userspace_module]
 endforeach
 
+root_filesystem_args = []
+foreach userspace_program : userspace_root_programs
+	root_filesystem_args += ['--root-file', userspace_program, 'bin/' + userspace_program.name()]
+endforeach
+foreach root_file : userspace_root_files
+	root_filesystem_args += ['--root-file', root_file[0], root_file[1]]
+endforeach
+
 limine_image = custom_target('limine_image',
 	input : kernel_elf,
 	output : 'kernel.iso',
@@ -122,7 +130,7 @@ limine_image = custom_target('limine_image',
 		'--config', limine_config,
 		'--output', '@OUTPUT@',
 		'--builddir', meson.project_build_root(),
-	] + limine_module_args,
+	] + limine_module_args + root_filesystem_args,
 	depend_files : [limine_config, limine_script[0]],
 	build_by_default : true
 )

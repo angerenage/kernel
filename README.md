@@ -103,11 +103,12 @@ Make sure these tools are available on your `PATH`:
 - `git`
 - `bash`
 - `make`
+- `mtools` (`mcopy`, `mformat`, and `mmd`)
 - `xorriso`
 
 If you want to build and run the native test targets, you also need Criterion (`criterion`).
 
-On Windows, the ISO generation step depends on Unix-style tools (`bash`, `make`, `xorriso`). In practice, this project is easiest to build from an MSYS2 or similar shell environment with those tools installed.
+On Windows, the ISO generation step depends on Unix-style tools (`bash`, `make`, `mtools`, `truncate`, and `xorriso`). In practice, this project is easiest to build from an MSYS2 or similar shell environment with those tools installed.
 
 For the non-`x86_64` targets, QEMU also needs UEFI firmware. The bundled filenames vary by package, so the recommended launch path is `scripts/run.sh` or `scripts/run_qemu.sh`, which auto-detect the firmware near the installed QEMU binary or use `QEMU_FIRMWARE_DIR` if you set it explicitly.
 

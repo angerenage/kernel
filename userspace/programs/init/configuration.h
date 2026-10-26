@@ -1,8 +1,19 @@
 #pragma once
 
 #include <base/cap.h>
+#include <stdbool.h>
+#include <stddef.h>
 
 #define INIT_CONFIGURATION_LAYOUT_PATH_CAPACITY 256u
+#define INIT_CONFIGURATION_MAX_MOUNTS 16u
+#define INIT_CONFIGURATION_SERVICE_CAPACITY 64u
+#define INIT_CONFIGURATION_MOUNT_PATH_CAPACITY 256u
+
+struct init_mount_configuration {
+	char service[INIT_CONFIGURATION_SERVICE_CAPACITY];
+	char mount_point[INIT_CONFIGURATION_MOUNT_PATH_CAPACITY];
+	bool read_only;
+};
 
 /* Result of loading and validating the system configuration. */
 enum init_configuration_status {
@@ -15,7 +26,9 @@ enum init_configuration_status {
 
 /* System-wide settings selected before launching bootstrap programs. */
 struct init_configuration {
-	char text_input_layout[INIT_CONFIGURATION_LAYOUT_PATH_CAPACITY];
+	char                            text_input_layout[INIT_CONFIGURATION_LAYOUT_PATH_CAPACITY];
+	size_t                          mount_count;
+	struct init_mount_configuration mounts[INIT_CONFIGURATION_MAX_MOUNTS];
 };
 
 /* Load the version-one YAML configuration from an absolute VFS path. */

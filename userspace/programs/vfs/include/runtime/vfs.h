@@ -21,6 +21,13 @@ struct filesystem_call_result vfs_remove(cap_id_t vfs_cap, const void* path, siz
 struct filesystem_call_result vfs_rename(cap_id_t vfs_cap, const void* old_path, size_t old_path_size,
                                          const void* new_path, size_t new_path_size);
 
+/* Mount a delegated raw root at an existing or synthetic absolute directory. */
+struct filesystem_call_result vfs_directory_mount(cap_id_t vfs_cap, const void* path, size_t path_size,
+                                                  cap_id_t fs_root_cap, uint32_t flags);
+
+/* Unmount the raw filesystem covering exactly one absolute path. */
+struct filesystem_call_result vfs_directory_unmount(cap_id_t vfs_cap, const void* path, size_t path_size);
+
 /* Read metadata from a VFS-directory capability. */
 struct filesystem_call_result vfs_directory_info(cap_id_t directory_cap, struct filesystem_node_info* out_info);
 
@@ -48,12 +55,6 @@ struct filesystem_call_result vfs_directory_remove(cap_id_t directory_cap, const
 /* Rename between normalized relative paths below one VFS directory. */
 struct filesystem_call_result vfs_directory_rename(cap_id_t directory_cap, const void* old_path, size_t old_path_size,
                                                    const void* new_path, size_t new_path_size);
-
-/* Mount a delegated raw root on a VFS directory. */
-struct filesystem_call_result vfs_directory_mount(cap_id_t directory_cap, cap_id_t fs_root_cap, uint32_t flags);
-
-/* Unmount the raw filesystem covering a VFS directory. */
-struct filesystem_call_result vfs_directory_unmount(cap_id_t directory_cap);
 
 /* Validate the exact byte sequence used by VFS namespace requests. */
 bool vfs_absolute_path_valid(const void* path, size_t path_size);

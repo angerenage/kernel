@@ -28,6 +28,7 @@ struct vfs_mount {
 	cap_id_t                    root_cap;
 	struct filesystem_node_info root_info;
 	bool                        read_only;
+	bool                        synthetic;
 	struct vfs_mount*           next;
 };
 
@@ -216,8 +217,8 @@ static void apply_mount_flags(const char* path, size_t path_size, bool read_only
 	if (exact != NULL) info->flags |= FILESYSTEM_NODE_MOUNT_POINT;
 }
 
-static bool mount_is_direct_child(const struct vfs_mount* mount, const struct vfs_directory* directory,
-                                  const struct filesystem_directory_entry* entry) {
+static bool mount_child_name(const struct vfs_mount* mount, const struct vfs_directory* directory,
+                             const char** out_name, size_t* out_size) {
 	const char* name;
 	size_t      name_size;
 
@@ -233,16 +234,21 @@ static bool mount_is_direct_child(const struct vfs_mount* mount, const struct vf
 		name      = mount->path + directory->path_size + 1u;
 		name_size = mount->path_size - directory->path_size - 1u;
 	}
-	return memchr(name, '/', name_size) == NULL && entry->name_size == name_size &&
-	       memcmp(entry->name, name, name_size) == 0;
+	if (memchr(name, '/', name_size) != NULL) return false;
+	*out_name = name;
+	*out_size = name_size;
+	return true;
 }
 
 static void patch_enumeration(struct vfs_directory* directory, struct filesystem_directory_entry* entries,
                               size_t count) {
 	if (!directory->attached) return;
 	for (struct vfs_mount* mount = mounts; mount != NULL; mount = mount->next) {
+		const char* name;
+		size_t      name_size;
+		if (!mount_child_name(mount, directory, &name, &name_size)) continue;
 		for (size_t i = 0u; i < count; i++) {
-			if (!mount_is_direct_child(mount, directory, &entries[i])) continue;
+			if (entries[i].name_size != name_size || memcmp(entries[i].name, name, name_size) != 0) continue;
 			entries[i].info = mount->root_info;
 			entries[i].info.flags |= FILESYSTEM_NODE_MOUNT_POINT;
 			if (mount->read_only) entries[i].info.flags |= FILESYSTEM_NODE_READ_ONLY;
@@ -760,15 +766,48 @@ static bool handle_directory_enumerate(const struct cap_request* call, struct vf
 	capacity = sizeof(*response) + (size_t)request.count * sizeof(struct filesystem_directory_entry);
 	response = malloc(capacity);
 	if (response == NULL) return reply_transport(call, SYSCALL_STATUS_FAILED);
+	uint64_t raw_total = 0u;
 	if (directory->raw_cap != CAP_ID_INVALID) {
-		result = filesystem_directory_enumerate(
-			directory->raw_cap, request.offset, response->entries, (size_t)request.count, &returned, &total);
+		size_t ignored;
+		result = filesystem_directory_enumerate(directory->raw_cap, 0u, NULL, 0u, &ignored, &raw_total);
+		if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK) {
+			free(response);
+			return reply_call_failure(call, result);
+		}
+		if (request.offset < raw_total && request.count != 0u)
+			result = filesystem_directory_enumerate(
+				directory->raw_cap, request.offset, response->entries, (size_t)request.count, &returned, &raw_total);
 		if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK) {
 			free(response);
 			return reply_call_failure(call, result);
 		}
 	}
 	patch_enumeration(directory, response->entries, returned);
+	uint64_t synthetic_count = 0u;
+	for (struct vfs_mount* mount = mounts; mount != NULL; mount = mount->next) {
+		const char* name;
+		size_t      name_size;
+		if (mount->synthetic && mount_child_name(mount, directory, &name, &name_size)) synthetic_count++;
+	}
+	total                     = raw_total + synthetic_count;
+	uint64_t synthetic_offset = request.offset > raw_total ? request.offset - raw_total : 0u;
+	if (request.offset >= raw_total || returned >= raw_total - request.offset) {
+		uint64_t index = 0u;
+		for (struct vfs_mount* mount = mounts; mount != NULL && returned < request.count; mount = mount->next) {
+			const char* name;
+			size_t      name_size;
+			if (!mount->synthetic || !mount_child_name(mount, directory, &name, &name_size)) continue;
+			if (index++ < synthetic_offset) continue;
+			struct filesystem_directory_entry* entry = &response->entries[returned++];
+			*entry                                   = (struct filesystem_directory_entry){
+				.name_size = (uint32_t)name_size,
+				.info      = mount->root_info,
+			};
+			entry->info.flags |= FILESYSTEM_NODE_MOUNT_POINT;
+			if (mount->read_only) entry->info.flags |= FILESYSTEM_NODE_READ_ONLY;
+			memcpy(entry->name, name, name_size);
+		}
+	}
 	response->header   = (struct filesystem_response_header){.status = FILESYSTEM_STATUS_OK, .reserved = 0u};
 	response->total    = total;
 	response->returned = returned;
@@ -786,40 +825,33 @@ static uint64_t allocate_mount_id(void) {
 	return id;
 }
 
-static bool handle_directory_mount(const struct cap_request* call, struct vfs_directory* directory, const void* data) {
-	struct vfs_directory_mount_request request;
-	struct filesystem_node_info        info;
-	struct filesystem_call_result      result;
-	struct vfs_mount*                  mount;
-	cap_id_t                           probe = CAP_ID_INVALID;
-	syscall_status_t                   status;
+static bool install_mount(const struct cap_request* call, const char* path, size_t path_size, cap_id_t root_capability,
+                          uint32_t flags, bool synthetic) {
+	struct filesystem_node_info   info;
+	struct filesystem_call_result result = filesystem_directory_info(root_capability, &info);
+	struct vfs_mount*             mount;
+	cap_id_t                      probe = CAP_ID_INVALID;
+	syscall_status_t              status;
 
-	if (!request_has_rights(call, CAP_CALL | CAP_MANAGE)) return reply_transport(call, SYSCALL_STATUS_DENIED);
-	if (!copy_request(call, data, &request, sizeof(request)) || call->request_size != sizeof(request) ||
-	    call->response_capacity < sizeof(struct filesystem_response_header) ||
-	    (request.flags & ~VFS_MOUNT_READ_ONLY) != 0u || request.root_capability == CAP_ID_INVALID)
-		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
-	if (!directory->attached) return reply_domain(call, FILESYSTEM_STATUS_BUSY);
-	if (find_exact_mount(directory->path, directory->path_size) != NULL)
-		return reply_domain(call, FILESYSTEM_STATUS_ALREADY_EXISTS);
-	result = filesystem_directory_info(request.root_capability, &info);
 	if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK)
 		return reply_call_failure(call, result);
-	status = cap_delegate(request.root_capability, vfs_pid, CAP_CALL | CAP_READ, &probe);
+	if (info.type != FILESYSTEM_NODE_DIRECTORY) return reply_domain(call, FILESYSTEM_STATUS_NOT_DIRECTORY);
+	status = cap_delegate(root_capability, vfs_pid, CAP_CALL | CAP_READ, &probe);
 	if (status == SYSCALL_STATUS_OK) status = cap_drop(probe);
 	if (status != SYSCALL_STATUS_OK) return reply_transport(call, status);
 	mount = calloc(1u, sizeof(*mount));
 	if (mount == NULL) return reply_transport(call, SYSCALL_STATUS_FAILED);
-	mount->path = path_copy(directory->path, directory->path_size);
+	mount->path = path_copy(path, path_size);
 	if (mount->path == NULL) {
 		free(mount);
 		return reply_transport(call, SYSCALL_STATUS_FAILED);
 	}
 	mount->id        = allocate_mount_id();
-	mount->path_size = directory->path_size;
-	mount->root_cap  = request.root_capability;
+	mount->path_size = path_size;
+	mount->root_cap  = root_capability;
 	mount->root_info = info;
-	mount->read_only = (request.flags & VFS_MOUNT_READ_ONLY) != 0u || (info.flags & FILESYSTEM_NODE_READ_ONLY) != 0u;
+	mount->read_only = (flags & VFS_MOUNT_READ_ONLY) != 0u || (info.flags & FILESYSTEM_NODE_READ_ONLY) != 0u;
+	mount->synthetic = synthetic;
 	insert_mount(mount);
 	if (reply_domain(call, FILESYSTEM_STATUS_OK)) return true;
 	unlink_mount(mount);
@@ -828,18 +860,65 @@ static bool handle_directory_mount(const struct cap_request* call, struct vfs_di
 	return false;
 }
 
-static bool handle_directory_unmount(const struct cap_request* call, struct vfs_directory* directory,
-                                     const void* data) {
-	struct filesystem_info_request request;
-	struct vfs_mount*              mount;
-	syscall_status_t               status;
+static struct filesystem_call_result inspect_path(const char* path, size_t path_size,
+                                                  struct filesystem_node_handle* out_node) {
+	struct vfs_mount* mount = find_mount(path, path_size);
+	if (mount == NULL)
+		return (struct filesystem_call_result){
+			.status           = FILESYSTEM_STATUS_NOT_FOUND,
+			.transport_status = SYSCALL_STATUS_OK,
+		};
+	return open_raw_node(mount, path, path_size, CAP_READ, out_node);
+}
+
+static bool handle_mount(const struct cap_request* call, const void* data) {
+	struct vfs_mount_request      request;
+	struct filesystem_node_handle node = {.capability = CAP_ID_INVALID};
+	struct filesystem_call_result result;
+	const char*                   path;
+	size_t                        expected_size;
+	size_t                        parent_size;
+	bool                          synthetic = false;
 
 	if (!request_has_rights(call, CAP_CALL | CAP_MANAGE)) return reply_transport(call, SYSCALL_STATUS_DENIED);
-	if (!copy_request(call, data, &request, sizeof(request)) || call->request_size != sizeof(request) ||
-	    request.reserved != 0u || call->response_capacity < sizeof(struct filesystem_response_header))
+	if (!copy_request(call, data, &request, sizeof(request)) || request.path_size == 0u ||
+	    request.path_size > CAP_MAX_REQUEST_SIZE - sizeof(request) ||
+	    (expected_size = sizeof(request) + request.path_size) != call->request_size ||
+	    call->response_capacity < sizeof(struct filesystem_response_header) ||
+	    (request.flags & ~VFS_MOUNT_READ_ONLY) != 0u || request.root_capability == CAP_ID_INVALID)
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
-	if (!directory->attached) return reply_domain(call, FILESYSTEM_STATUS_BUSY);
-	mount = find_exact_mount(directory->path, directory->path_size);
+	path = (const char*)data + sizeof(request);
+	if (!absolute_path_valid(path, request.path_size)) return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	if (find_exact_mount(path, request.path_size) != NULL) return reply_domain(call, FILESYSTEM_STATUS_ALREADY_EXISTS);
+	result = inspect_path(path, request.path_size, &node);
+	if (result.transport_status != SYSCALL_STATUS_OK) return reply_call_failure(call, result);
+	if (result.status == FILESYSTEM_STATUS_OK) {
+		if (node.capability != CAP_ID_INVALID) (void)cap_drop(node.capability);
+		if (node.info.type != FILESYSTEM_NODE_DIRECTORY) return reply_domain(call, FILESYSTEM_STATUS_NOT_DIRECTORY);
+	}
+	else if (result.status == FILESYSTEM_STATUS_NOT_FOUND && request.path_size == 1u && mounts == NULL) {
+		synthetic = true;
+	}
+	else if (result.status == FILESYSTEM_STATUS_NOT_FOUND && request.path_size > 1u) {
+		synthetic   = true;
+		parent_size = request.path_size;
+		while (parent_size > 1u && path[parent_size - 1u] != '/') parent_size--;
+		if (parent_size > 1u) parent_size--;
+		result = inspect_path(path, parent_size, &node);
+		if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK)
+			return reply_call_failure(call, result);
+		if (node.capability != CAP_ID_INVALID) (void)cap_drop(node.capability);
+		if (node.info.type != FILESYSTEM_NODE_DIRECTORY) return reply_domain(call, FILESYSTEM_STATUS_NOT_DIRECTORY);
+	}
+	else {
+		return reply_call_failure(call, result);
+	}
+	return install_mount(call, path, request.path_size, request.root_capability, request.flags, synthetic);
+}
+
+static bool remove_mount(const struct cap_request* call, struct vfs_mount* mount) {
+	syscall_status_t status;
+
 	if (mount == NULL) return reply_domain(call, FILESYSTEM_STATUS_NOT_FOUND);
 	if (mount_has_children(mount)) return reply_domain(call, FILESYSTEM_STATUS_BUSY);
 	status = cap_drop(mount->root_cap);
@@ -851,6 +930,22 @@ static bool handle_directory_unmount(const struct cap_request* call, struct vfs_
 	free(mount->path);
 	free(mount);
 	return reply_domain(call, FILESYSTEM_STATUS_OK);
+}
+
+static bool handle_unmount(const struct cap_request* call, const void* data) {
+	struct vfs_path_request request;
+	const char*             path;
+	size_t                  expected_size;
+
+	if (!request_has_rights(call, CAP_CALL | CAP_MANAGE)) return reply_transport(call, SYSCALL_STATUS_DENIED);
+	if (!copy_request(call, data, &request, sizeof(request)) || request.path_size == 0u ||
+	    request.path_size > CAP_MAX_REQUEST_SIZE - sizeof(request) ||
+	    (expected_size = sizeof(request) + request.path_size) != call->request_size ||
+	    call->response_capacity < sizeof(struct filesystem_response_header))
+		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	path = (const char*)data + sizeof(request);
+	if (!absolute_path_valid(path, request.path_size)) return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	return remove_mount(call, find_exact_mount(path, request.path_size));
 }
 
 static bool dispatch_service(const struct cap_request* call, const void* data,
@@ -866,6 +961,10 @@ static bool dispatch_service(const struct cap_request* call, const void* data,
 		return handle_remove(call, data);
 	case VFS_OP_RENAME:
 		return handle_rename(call, data);
+	case VFS_OP_MOUNT:
+		return handle_mount(call, data);
+	case VFS_OP_UNMOUNT:
+		return handle_unmount(call, data);
 	default:
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	}
@@ -878,10 +977,6 @@ static bool dispatch_directory(const struct cap_request* call, struct vfs_direct
 		return handle_directory_info(call, directory, data);
 	case VFS_DIRECTORY_OP_ENUMERATE:
 		return handle_directory_enumerate(call, directory, data);
-	case VFS_DIRECTORY_OP_MOUNT:
-		return handle_directory_mount(call, directory, data);
-	case VFS_DIRECTORY_OP_UNMOUNT:
-		return handle_directory_unmount(call, directory, data);
 	case VFS_DIRECTORY_OP_OPEN:
 		return handle_directory_open_path(call, directory, data, FILESYSTEM_NODE_INVALID);
 	case VFS_DIRECTORY_OP_CREATE_FILE:

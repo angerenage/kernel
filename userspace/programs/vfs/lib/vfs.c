@@ -166,6 +166,35 @@ struct filesystem_call_result vfs_rename(cap_id_t vfs_cap, const void* old_path,
 	return rename_path(vfs_cap, VFS_OP_RENAME, old_path, old_path_size, new_path, new_path_size, true);
 }
 
+struct filesystem_call_result vfs_directory_mount(cap_id_t vfs_cap, const void* path, size_t path_size,
+                                                  cap_id_t fs_root_cap, uint32_t flags) {
+	struct vfs_mount_request*         request;
+	struct filesystem_response_header response;
+	struct filesystem_call_result     call_result;
+	size_t                            request_size;
+
+	if (vfs_cap == CAP_ID_INVALID || fs_root_cap == CAP_ID_INVALID || !vfs_absolute_path_valid(path, path_size) ||
+	    path_size > CAP_MAX_REQUEST_SIZE - sizeof(*request) || (flags & ~VFS_MOUNT_READ_ONLY) != 0u)
+		return local_error();
+	request_size = sizeof(*request) + path_size;
+	request      = malloc(request_size);
+	if (request == NULL) return result(FILESYSTEM_STATUS_NONE, SYSCALL_STATUS_FAILED);
+	*request = (struct vfs_mount_request){
+		.header          = {.op = VFS_OP_MOUNT},
+		.path_size       = (uint32_t)path_size,
+		.flags           = flags,
+		.root_capability = fs_root_cap,
+	};
+	memcpy(request->path, path, path_size);
+	call_result = call_fixed(vfs_cap, request, request_size, &response, sizeof(response));
+	free(request);
+	return call_result;
+}
+
+struct filesystem_call_result vfs_directory_unmount(cap_id_t vfs_cap, const void* path, size_t path_size) {
+	return path_call(vfs_cap, VFS_OP_UNMOUNT, path, path_size, true);
+}
+
 struct filesystem_call_result vfs_directory_info(cap_id_t directory_cap, struct filesystem_node_info* out_info) {
 	return filesystem_directory_info(directory_cap, out_info);
 }
@@ -269,28 +298,4 @@ struct filesystem_call_result vfs_directory_remove(cap_id_t directory_cap, const
 struct filesystem_call_result vfs_directory_rename(cap_id_t directory_cap, const void* old_path, size_t old_path_size,
                                                    const void* new_path, size_t new_path_size) {
 	return rename_path(directory_cap, VFS_DIRECTORY_OP_RENAME, old_path, old_path_size, new_path, new_path_size, false);
-}
-
-struct filesystem_call_result vfs_directory_mount(cap_id_t directory_cap, cap_id_t fs_root_cap, uint32_t flags) {
-	const struct vfs_directory_mount_request request = {
-		.header          = {.op = VFS_DIRECTORY_OP_MOUNT},
-		.flags           = flags,
-		.root_capability = fs_root_cap,
-	};
-	struct filesystem_response_header response;
-
-	if (directory_cap == CAP_ID_INVALID || fs_root_cap == CAP_ID_INVALID || (flags & ~VFS_MOUNT_READ_ONLY) != 0u)
-		return local_error();
-	return call_fixed(directory_cap, &request, sizeof(request), &response, sizeof(response));
-}
-
-struct filesystem_call_result vfs_directory_unmount(cap_id_t directory_cap) {
-	const struct filesystem_info_request request = {
-		.header   = {.op = VFS_DIRECTORY_OP_UNMOUNT},
-		.reserved = 0u,
-	};
-	struct filesystem_response_header response;
-
-	if (directory_cap == CAP_ID_INVALID) return local_error();
-	return call_fixed(directory_cap, &request, sizeof(request), &response, sizeof(response));
 }

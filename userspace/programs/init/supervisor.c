@@ -25,6 +25,7 @@
 #include "configuration.h"
 #include "device_manager.h"
 #include "launcher.h"
+#include "root_pivot.h"
 #include "serial_stream.h"
 
 #define BOOTFS_SERVICE_NAME "boot"
@@ -344,7 +345,7 @@ static bool use_terminal_output(void) {
 	return true;
 }
 
-static enum bootfs_mount_readiness mount_bootfs(const struct registry_service_selector* selector) {
+static enum bootfs_mount_readiness mount_bootfs(const struct registry_service_selector* selector, bool at_root) {
 	const struct registry_protocol_query vfs_query = {
 		.namespace_path = VFS_NAMESPACE,
 		.protocol       = VFS_PROTOCOL_NAME,
@@ -359,7 +360,7 @@ static enum bootfs_mount_readiness mount_bootfs(const struct registry_service_se
 	};
 	struct registry_service_handle vfs_service    = {.capability = CAP_ID_INVALID};
 	struct registry_service_handle bootfs_service = {.capability = CAP_ID_INVALID};
-	struct filesystem_node_handle  root           = {.capability = CAP_ID_INVALID};
+	struct filesystem_node_handle  module_root    = {.capability = CAP_ID_INVALID};
 	struct filesystem_call_result  result;
 	enum registry_status           registry_status;
 	cap_id_t                       delegated_root = CAP_ID_INVALID;
@@ -382,42 +383,55 @@ static enum bootfs_mount_readiness mount_bootfs(const struct registry_service_se
 		printf("init: bootfs acquisition failed: %u\n", (unsigned)registry_status);
 		goto cleanup;
 	}
-	result = vfs_open(vfs_service.capability, "/", 1u, CAP_READ | CAP_MANAGE, &root);
-	if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK ||
-	    root.info.type != FILESYSTEM_NODE_DIRECTORY) {
-		printf("init: VFS root open for bootfs mount failed: transport=%u status=%u\n",
-		       (unsigned)result.transport_status,
-		       (unsigned)result.status);
-		goto cleanup;
+	if (!at_root) {
+		result = filesystem_directory_open(
+			bootfs_service.capability, "boot", sizeof("boot") - 1u, CAP_READ | CAP_DELEGATE, &module_root);
+		if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK ||
+		    module_root.info.type != FILESYSTEM_NODE_DIRECTORY) {
+			printf("init: bootfs module-directory acquisition failed: transport=%u status=%u\n",
+			       (unsigned)result.transport_status,
+			       (unsigned)result.status);
+			goto cleanup;
+		}
 	}
-	status =
-		cap_delegate(bootfs_service.capability, vfs_service.owner, CAP_CALL | CAP_READ | CAP_DELEGATE, &delegated_root);
+	status = cap_delegate(at_root ? bootfs_service.capability : module_root.capability,
+	                      vfs_service.owner,
+	                      CAP_CALL | CAP_READ | CAP_DELEGATE,
+	                      &delegated_root);
 	if (status != SYSCALL_STATUS_OK) {
 		printf("init: bootfs root delegation failed: %u\n", (unsigned)status);
 		goto cleanup;
 	}
-	result = vfs_directory_mount(root.capability, delegated_root, VFS_MOUNT_READ_ONLY);
+	const char* mount_path = at_root ? "/" : "/boot";
+	result                 = vfs_directory_unmount(vfs_service.capability, mount_path, strlen(mount_path));
+	if (result.transport_status != SYSCALL_STATUS_OK ||
+	    (result.status != FILESYSTEM_STATUS_OK && result.status != FILESYSTEM_STATUS_NOT_FOUND)) {
+		printf("init: old bootfs mount removal failed: transport=%u status=%u\n",
+		       (unsigned)result.transport_status,
+		       (unsigned)result.status);
+		goto cleanup;
+	}
+	result = vfs_directory_mount(
+		vfs_service.capability, mount_path, strlen(mount_path), delegated_root, VFS_MOUNT_READ_ONLY);
 	if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK) {
 		printf("init: bootfs mount failed: transport=%u status=%u\n",
 		       (unsigned)result.transport_status,
 		       (unsigned)result.status);
-		status = cap_revoke(delegated_root, 0u);
-		if (status != SYSCALL_STATUS_OK) {
-			printf("init: bootfs delegated root revocation failed: %u\n", (unsigned)status);
-			cleanup_ok = false;
-		}
 		goto cleanup;
 	}
 	mounted = true;
 
 cleanup:
-	if (root.capability != CAP_ID_INVALID && cap_drop(root.capability) != SYSCALL_STATUS_OK) cleanup_ok = false;
+	if (!mounted && delegated_root != CAP_ID_INVALID && cap_revoke(delegated_root, 0u) != SYSCALL_STATUS_OK)
+		cleanup_ok = false;
+	if (module_root.capability != CAP_ID_INVALID && cap_drop(module_root.capability) != SYSCALL_STATUS_OK)
+		cleanup_ok = false;
 	if (bootfs_service.capability != CAP_ID_INVALID && cap_drop(bootfs_service.capability) != SYSCALL_STATUS_OK)
 		cleanup_ok = false;
 	if (vfs_service.capability != CAP_ID_INVALID && cap_drop(vfs_service.capability) != SYSCALL_STATUS_OK)
 		cleanup_ok = false;
 	if (!mounted || !cleanup_ok) return BOOTFS_MOUNT_FAILED;
-	printf("init: mounted bootfs at /\n");
+	printf("init: mounted bootfs at %s\n", at_root ? "/" : "/boot");
 	return BOOTFS_MOUNT_READY;
 }
 
@@ -478,6 +492,104 @@ static bool load_system_configuration(struct init_configuration* configuration) 
 		success = false;
 	}
 	return success;
+}
+
+enum configured_mount_readiness {
+	CONFIGURED_MOUNTS_WAIT,
+	CONFIGURED_MOUNTS_READY,
+	CONFIGURED_MOUNTS_FAILED,
+};
+
+static enum configured_mount_readiness mount_configured_filesystems(const struct init_configuration* configuration,
+                                                                    bool* mounted, bool* bootfs_at_root) {
+	const struct registry_protocol_query vfs_query = {
+		.namespace_path = VFS_NAMESPACE,
+		.protocol       = VFS_PROTOCOL_NAME,
+		.major          = VFS_PROTOCOL_VERSION_MAJOR,
+		.minor          = VFS_PROTOCOL_VERSION_MINOR,
+	};
+	const struct registry_protocol_query filesystem_query = {
+		.namespace_path = FILESYSTEM_NAMESPACE,
+		.protocol       = FILESYSTEM_PROTOCOL_NAME,
+		.major          = FILESYSTEM_PROTOCOL_VERSION_MAJOR,
+		.minor          = FILESYSTEM_PROTOCOL_VERSION_MINOR,
+	};
+	struct registry_service_handle vfs     = {.capability = CAP_ID_INVALID};
+	bool                           waiting = false;
+	if (bootfs_at_root == NULL || registry_acquire(&vfs_query, VFS_SERVICE_NAME, &vfs).status != REGISTRY_STATUS_OK)
+		return CONFIGURED_MOUNTS_FAILED;
+	for (size_t order = 0u; order < 2u; order++) {
+		for (size_t index = 0u; index < configuration->mount_count; index++) {
+			bool root_mount = strcmp(configuration->mounts[index].mount_point, "/") == 0;
+			if ((order == 0u) != root_mount) continue;
+			if (mounted[index]) continue;
+			const struct init_mount_configuration* mount      = &configuration->mounts[index];
+			struct registry_service_handle         filesystem = {.capability = CAP_ID_INVALID};
+			struct registry_call_result acquire = registry_acquire(&filesystem_query, mount->service, &filesystem);
+			if (acquire.status == REGISTRY_STATUS_NOT_FOUND) {
+				waiting = true;
+				continue;
+			}
+			if (acquire.status != REGISTRY_STATUS_OK) {
+				printf("init: filesystem %s acquisition failed: %u\n", mount->service, (unsigned)acquire.status);
+				(void)cap_drop(vfs.capability);
+				return CONFIGURED_MOUNTS_FAILED;
+			}
+			bool         read_only = mount->read_only || (filesystem.info.rights & CAP_WRITE) == 0u;
+			cap_rights_t rights    = CAP_CALL | CAP_READ | CAP_DELEGATE;
+			if (!read_only) rights |= CAP_WRITE;
+			cap_id_t                      delegated = CAP_ID_INVALID;
+			syscall_status_t              status = cap_delegate(filesystem.capability, vfs.owner, rights, &delegated);
+			struct filesystem_call_result result = {.status = FILESYSTEM_STATUS_NONE, .transport_status = status};
+			bool                          delegated_consumed = false;
+			if (status == SYSCALL_STATUS_OK && root_mount) {
+				delegated_consumed = true;
+				if (init_root_pivot(&vfs, delegated, read_only ? VFS_MOUNT_READ_ONLY : 0u))
+					result = (struct filesystem_call_result){
+						.status           = FILESYSTEM_STATUS_OK,
+						.transport_status = SYSCALL_STATUS_OK,
+					};
+				else result.transport_status = SYSCALL_STATUS_FAILED;
+			}
+			else if (status == SYSCALL_STATUS_OK)
+				result = vfs_directory_mount(vfs.capability,
+				                             mount->mount_point,
+				                             strlen(mount->mount_point),
+				                             delegated,
+				                             read_only ? VFS_MOUNT_READ_ONLY : 0u);
+			if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK) {
+				if (!delegated_consumed && delegated != CAP_ID_INVALID) (void)cap_revoke(delegated, 0u);
+				(void)cap_drop(filesystem.capability);
+				(void)cap_drop(vfs.capability);
+				printf("init: mounting filesystem %s at %s failed: transport=%u status=%u\n",
+				       mount->service,
+				       mount->mount_point,
+				       (unsigned)result.transport_status,
+				       (unsigned)result.status);
+				return CONFIGURED_MOUNTS_FAILED;
+			}
+			if (cap_drop(filesystem.capability) != SYSCALL_STATUS_OK) {
+				(void)cap_drop(vfs.capability);
+				return CONFIGURED_MOUNTS_FAILED;
+			}
+			mounted[index] = true;
+			if (root_mount) *bootfs_at_root = false;
+			printf("init: mounted filesystem %s at %s%s\n",
+			       mount->service,
+			       mount->mount_point,
+			       read_only ? " read-only" : "");
+		}
+		if (order == 0u) {
+			for (size_t index = 0u; index < configuration->mount_count; index++) {
+				if (strcmp(configuration->mounts[index].mount_point, "/") == 0 && !mounted[index]) {
+					(void)cap_drop(vfs.capability);
+					return CONFIGURED_MOUNTS_WAIT;
+				}
+			}
+		}
+	}
+	if (cap_drop(vfs.capability) != SYSCALL_STATUS_OK) return CONFIGURED_MOUNTS_FAILED;
+	return waiting ? CONFIGURED_MOUNTS_WAIT : CONFIGURED_MOUNTS_READY;
 }
 
 static bool service_available(const struct registry_service_selector* selector) {
@@ -558,22 +670,25 @@ int supervisor_run(const struct init_state* init) {
 		.major          = 1u,
 		.service        = "elf64",
 	};
-	bool             bootfs_mounted              = false;
-	bool             bootfs_started              = false;
-	bool             configuration_loaded        = false;
-	bool             device_manager_started      = false;
-	bool             terminal_started            = false;
-	bool             terminal_ready              = false;
-	bool             terminal_available          = false;
-	bool             input_manager_started       = false;
-	bool             keyboard_controller_started = false;
-	bool             text_input_started          = false;
-	bool             tty_session_started         = false;
-	bool             tty_session_ready           = false;
-	bool             shell_started               = false;
-	bool             loader_started              = false;
-	bool             vfs_ready                   = false;
-	bool             vfs_started                 = false;
+	bool             bootfs_mounted                                   = false;
+	bool             bootfs_at_root                                   = true;
+	bool             bootfs_started                                   = false;
+	bool             configuration_loaded                             = false;
+	bool             configured_mounts_ready                          = false;
+	bool             configured_mounts[INIT_CONFIGURATION_MAX_MOUNTS] = {false};
+	bool             device_manager_started                           = false;
+	bool             terminal_started                                 = false;
+	bool             terminal_ready                                   = false;
+	bool             terminal_available                               = false;
+	bool             input_manager_started                            = false;
+	bool             keyboard_controller_started                      = false;
+	bool             text_input_started                               = false;
+	bool             tty_session_started                              = false;
+	bool             tty_session_ready                                = false;
+	bool             shell_started                                    = false;
+	bool             loader_started                                   = false;
+	bool             vfs_ready                                        = false;
+	bool             vfs_started                                      = false;
 	const char*      text_input_layout_override_path;
 	const char*      text_input_layout = NULL;
 	struct self_info self;
@@ -654,7 +769,7 @@ int supervisor_run(const struct init_state* init) {
 			continue;
 		}
 		if (bootfs_started && !bootfs_mounted) {
-			enum bootfs_mount_readiness readiness = mount_bootfs(&bootfs_selector);
+			enum bootfs_mount_readiness readiness = mount_bootfs(&bootfs_selector, bootfs_at_root);
 			if (readiness == BOOTFS_MOUNT_FAILED) return 1;
 			if (readiness == BOOTFS_MOUNT_READY) {
 				bootfs_mounted = true;
@@ -820,7 +935,16 @@ int supervisor_run(const struct init_state* init) {
 			}
 			processes[SUPERVISED_DEVICE_MANAGER].state = SUPERVISED_PROCESS_STOPPED;
 		}
-		if (device_manager_started && !shell_started) {
+		if (device_manager_started && !configured_mounts_ready) {
+			enum configured_mount_readiness readiness =
+				mount_configured_filesystems(&configuration, configured_mounts, &bootfs_at_root);
+			if (readiness == CONFIGURED_MOUNTS_FAILED) return 1;
+			if (readiness == CONFIGURED_MOUNTS_READY) {
+				configured_mounts_ready = true;
+				continue;
+			}
+		}
+		if (device_manager_started && configured_mounts_ready && !shell_started) {
 			if (!terminal_available) {
 				processes[SUPERVISED_SHELL].state = SUPERVISED_PROCESS_DISABLED;
 				shell_started                     = true;
@@ -887,9 +1011,12 @@ int supervisor_run(const struct init_state* init) {
 			process->process_cap = CAP_ID_INVALID;
 			switch (event.process) {
 			case SUPERVISED_VFS:
-				vfs_started    = false;
-				vfs_ready      = false;
-				bootfs_mounted = false;
+				vfs_started             = false;
+				vfs_ready               = false;
+				bootfs_mounted          = false;
+				bootfs_at_root          = true;
+				configured_mounts_ready = false;
+				memset(configured_mounts, 0, sizeof(configured_mounts));
 				break;
 			case SUPERVISED_BOOTFS:
 				bootfs_started = false;
