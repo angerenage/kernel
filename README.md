@@ -105,6 +105,7 @@ Make sure these tools are available on your `PATH`:
 - `make`
 - `mtools` (`mcopy`, `mformat`, and `mmd`)
 - `xorriso`
+- `python3`
 
 If you want to build and run the native test targets, you also need Criterion (`criterion`).
 
@@ -275,6 +276,38 @@ bash scripts/run_qemu.sh --arch riscv64
 bash scripts/run_qemu.sh --arch loongarch64
 bash scripts/run_qemu.sh --arch x86_64 --builddir build-debug-x86_64
 ```
+
+## Tracing and Profiling
+
+Tracing is compiled out by default. To build an instrumented kernel and capture an interactive profiling session under QEMU:
+
+```sh
+bash scripts/build.sh --arch x86_64 --kernel-trace \
+  --kernel-trace-duration-ms 60000 \
+  --kernel-trace-buffer-kb 256
+bash scripts/run.sh --arch x86_64 --profile \
+  --profile-timeout 90 \
+  --profile-output traces/boot.pftrace
+```
+
+Profiling keeps QEMU's normal graphical display and input devices enabled. The trace clock starts during kernel initialization, so choose a duration long enough to include boot plus the manual workload or stress test you want to perform. When that duration expires, the run stops QEMU, extracts the trace, and produces `traces/boot.pftrace` for the Perfetto UI, `traces/boot.ktrace` with the validated binary trace, and `traces/boot.serial.log` with the complete guest log. `--profile-timeout` is the host-side safety limit and must be longer than the kernel trace duration.
+
+Open the JSON file at [ui.perfetto.dev](https://ui.perfetto.dev/) to inspect scheduler slices, blocking and wakeups, and syscall spans. Each CPU has a fixed-size, lock-free writer buffer; the trace metadata reports dropped records so a full buffer cannot silently invalidate a comparison. Add `--headless` to the run command when you want an unattended profiling run instead.
+
+`--profile` uses QEMU's monitor to copy the finalized trace directly from guest physical memory. Capture, validation, and conversion are implemented by `scripts/ktrace.py` using only Python's standard library.
+
+For real hardware, build with the serial fallback instead:
+
+```sh
+bash scripts/build.sh --arch x86_64 --kernel-trace \
+  --kernel-trace-transport serial
+
+# Capture the machine's serial output into serial.log, then run:
+python3 scripts/ktrace.py extract-serial serial.log boot.ktrace
+python3 scripts/ktrace.py decode boot.ktrace boot.pftrace
+```
+
+The binary header carries the clock frequency, session identifier, per-CPU record counts, drop counts, and a checksum. Keep the `.ktrace` files when comparing revisions so they can be decoded again as the visualization evolves.
 
 ## In-Kernel Selftests
 

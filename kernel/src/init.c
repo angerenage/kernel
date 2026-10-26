@@ -26,6 +26,7 @@
 #include <kernel/cpu_boot.h>
 #include <kernel/crash.h>
 #include <kernel/elf_loader.h>
+#include <kernel/trace.h>
 #include <libc/stdlib.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -349,9 +350,15 @@ void kernel_main(void) {
 #endif
 
 	boot_start_timer_counter();
+	if (kernel_cmdline_option_enabled("kernel.trace") && !kernel_trace_init()) {
+		printf("ktrace: initialization failed\n");
+	}
 
 	if (!kernel_launch_init_process()) {
 		boot_fail("kernel: init launch failed");
+	}
+	if (kernel_cmdline_option_enabled("kernel.trace") && !kernel_trace_start_autostop()) {
+		printf("ktrace: automatic stop unavailable\n");
 	}
 	boot_start_diagnostics_reporter();
 

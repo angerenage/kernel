@@ -7,6 +7,7 @@
 #include <core/uthread.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>
+#include <kernel/trace.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -489,6 +490,10 @@ static void sched_dispatch_next(struct cpu* cpu) {
 		interrupts_enabled = irq_enabled();
 		irq_disable_local();
 	}
+	kernel_trace_emit(KERNEL_TRACE_EVENT_SCHED_SWITCH,
+	                  KERNEL_TRACE_RECORD_INSTANT,
+	                  kernel_trace_thread_id(previous),
+	                  kernel_trace_thread_id(next));
 
 	if (previous != NULL && previous->state == THREAD_STATE_EXITING) {
 		__atomic_store_n(&cpu->context_switch_in_progress, true, __ATOMIC_RELEASE);
@@ -528,12 +533,21 @@ static bool sched_make_runnable_on_cpu(struct cpu* cpu, struct thread* thread, b
 }
 
 static bool sched_make_waiter_runnable(struct thread* thread) {
-	struct cpu* cpu;
+	struct cpu*              cpu;
+	enum thread_block_reason reason;
+	bool                     runnable;
 
 	if (thread == NULL) return false;
-	cpu = thread->cpu;
-	if (cpu != NULL) return sched_make_runnable_on_cpu(cpu, thread, true);
-	return sched_make_runnable(thread);
+	cpu      = thread->cpu;
+	reason   = thread->block_reason;
+	runnable = cpu != NULL ? sched_make_runnable_on_cpu(cpu, thread, true) : sched_make_runnable(thread);
+	if (runnable) {
+		kernel_trace_emit(KERNEL_TRACE_EVENT_SCHED_WAKE,
+		                  KERNEL_TRACE_RECORD_INSTANT,
+		                  kernel_trace_thread_id(thread),
+		                  (uint64_t)reason);
+	}
+	return runnable;
 }
 
 bool sched_init(void) {
@@ -814,6 +828,10 @@ bool sched_sleep_until_tick(uint64_t deadline_tick) {
 	}
 	spinlock_unlock_irqrestore(&sched_sleep_lock, state);
 
+	kernel_trace_emit(KERNEL_TRACE_EVENT_SCHED_BLOCK,
+	                  KERNEL_TRACE_RECORD_INSTANT,
+	                  kernel_trace_thread_id(current),
+	                  THREAD_BLOCK_SLEEP);
 	sched_dispatch_next(cpu);
 	wait_status = sched_thread_wait_status_load(current);
 	sched_thread_wait_status_store(current, THREAD_WAIT_STATUS_NONE);
@@ -925,6 +943,8 @@ bool sched_block_current_locked(struct thread_wait_queue* queue, enum thread_blo
 		return false;
 	}
 
+	kernel_trace_emit(
+		KERNEL_TRACE_EVENT_SCHED_BLOCK, KERNEL_TRACE_RECORD_INSTANT, kernel_trace_thread_id(current), (uint64_t)reason);
 	sched_dispatch_next(cpu);
 	sched_thread_wait_status_store(current, THREAD_WAIT_STATUS_NONE);
 	return true;
@@ -982,6 +1002,8 @@ enum sched_block_result sched_block_current_interruptible_locked(struct thread_w
 		return interrupted ? SCHED_BLOCK_INTERRUPTED : SCHED_BLOCK_FAILED;
 	}
 
+	kernel_trace_emit(
+		KERNEL_TRACE_EVENT_SCHED_BLOCK, KERNEL_TRACE_RECORD_INSTANT, kernel_trace_thread_id(current), (uint64_t)reason);
 	sched_dispatch_next(cpu);
 	wait_status = sched_thread_wait_status_load(current);
 	sched_thread_wait_status_store(current, THREAD_WAIT_STATUS_NONE);
@@ -1043,6 +1065,8 @@ bool sched_block_current_until_locked(struct thread_wait_queue* queue, enum thre
 		return false;
 	}
 
+	kernel_trace_emit(
+		KERNEL_TRACE_EVENT_SCHED_BLOCK, KERNEL_TRACE_RECORD_INSTANT, kernel_trace_thread_id(current), (uint64_t)reason);
 	sched_dispatch_next(cpu);
 	wait_status = sched_thread_wait_status_load(current);
 	__atomic_store_n(&current->wait_status, THREAD_WAIT_STATUS_NONE, __ATOMIC_RELEASE);

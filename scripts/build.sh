@@ -13,7 +13,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 usage() {
 	cat <<'EOF'
-Usage: build.sh (--arch <arch> | --all) [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--setup|-s] [--compile|-c] [-sc] [--reconfigure] [--no-tests] [--test-sanitizers] [--kernel-selftests] [--kernel-selftests-autorun] [--kernel-selftests-suite <name>] [--kernel-selftests-iommu <kind>] [--kernel-boot-debug] [--crash-server-url <url>]
+Usage: build.sh (--arch <arch> | --all) [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--setup|-s] [--compile|-c] [-sc] [--reconfigure] [--no-tests] [--test-sanitizers] [--kernel-selftests] [--kernel-selftests-autorun] [--kernel-selftests-suite <name>] [--kernel-selftests-iommu <kind>] [--kernel-boot-debug] [--kernel-trace] [--kernel-trace-duration-ms <ms>] [--kernel-trace-buffer-kb <KiB>] [--kernel-trace-transport <qemu|serial>] [--crash-server-url <url>]
 
 Target selection:
   --arch <arch>  Build a single architecture (x86_64, aarch64, riscv64, loongarch64).
@@ -43,6 +43,13 @@ Actions:
   --kernel-boot-debug
                   Configure Meson with -Dkernel_boot_debug=true.
                   Enables verbose boot diagnostics in the generated image.
+  --kernel-trace  Compile tracing and enable one boot-time profiling session.
+  --kernel-trace-duration-ms <ms>
+                  Stop and export the trace after this many milliseconds.
+  --kernel-trace-buffer-kb <KiB>
+                  Reserve this many KiB of trace records per CPU.
+  --kernel-trace-transport <qemu|serial>
+                  Export through a QEMU RAM marker or a framed serial stream.
   --crash-server-url <url>
                   Embed the HTTP(S) base URL used for crash decoder links.
 
@@ -164,6 +171,10 @@ setup_arch() {
 		"-Dkernel_selftests_suite=${KERNEL_SELFTESTS_SUITE}"
 		"-Dkernel_selftests_iommu=${KERNEL_SELFTESTS_IOMMU}"
 		"-Dkernel_boot_debug=$( (( KERNEL_BOOT_DEBUG )) && printf true || printf false )"
+		"-Dkernel_trace=$( (( KERNEL_TRACE )) && printf true || printf false )"
+		"-Dkernel_trace_duration_ms=${KERNEL_TRACE_DURATION_MS}"
+		"-Dkernel_trace_buffer_kb=${KERNEL_TRACE_BUFFER_KB}"
+		"-Dkernel_trace_transport=${KERNEL_TRACE_TRANSPORT}"
 	)
 
 	if (( RECONFIGURE )) || [[ -d "$build_dir" ]]; then
@@ -180,6 +191,10 @@ setup_arch() {
 			"-Dkernel_selftests_suite=${KERNEL_SELFTESTS_SUITE}"
 			"-Dkernel_selftests_iommu=${KERNEL_SELFTESTS_IOMMU}"
 			"-Dkernel_boot_debug=$( (( KERNEL_BOOT_DEBUG )) && printf true || printf false )"
+			"-Dkernel_trace=$( (( KERNEL_TRACE )) && printf true || printf false )"
+			"-Dkernel_trace_duration_ms=${KERNEL_TRACE_DURATION_MS}"
+			"-Dkernel_trace_buffer_kb=${KERNEL_TRACE_BUFFER_KB}"
+			"-Dkernel_trace_transport=${KERNEL_TRACE_TRANSPORT}"
 		)
 	fi
 	if [[ -n "$CRASH_SERVER_URL" ]]; then
@@ -270,6 +285,10 @@ KERNEL_SELFTESTS_AUTORUN=0
 KERNEL_SELFTESTS_SUITE=""
 KERNEL_SELFTESTS_IOMMU=""
 KERNEL_BOOT_DEBUG=0
+KERNEL_TRACE=0
+KERNEL_TRACE_DURATION_MS=5000
+KERNEL_TRACE_BUFFER_KB=256
+KERNEL_TRACE_TRANSPORT="qemu"
 CRASH_SERVER_URL=""
 
 while [[ $# -gt 0 ]]; do
@@ -387,6 +406,29 @@ while [[ $# -gt 0 ]]; do
 		--kernel-boot-debug)
 			KERNEL_BOOT_DEBUG=1
 			shift
+			;;
+		--kernel-trace)
+			KERNEL_TRACE=1
+			shift
+			;;
+		--kernel-trace-duration-ms)
+			[[ $# -ge 2 && "$2" =~ ^[1-9][0-9]*$ ]] || error "--kernel-trace-duration-ms requires a positive integer"
+			KERNEL_TRACE=1
+			KERNEL_TRACE_DURATION_MS="$2"
+			shift 2
+			;;
+		--kernel-trace-buffer-kb)
+			[[ $# -ge 2 && "$2" =~ ^[1-9][0-9]*$ ]] || error "--kernel-trace-buffer-kb requires a positive integer"
+			KERNEL_TRACE=1
+			KERNEL_TRACE_BUFFER_KB="$2"
+			shift 2
+			;;
+		--kernel-trace-transport)
+			[[ $# -ge 2 ]] || error "missing value for --kernel-trace-transport"
+			case "$2" in qemu|serial) ;; *) error "unsupported kernel trace transport: $2" ;; esac
+			KERNEL_TRACE=1
+			KERNEL_TRACE_TRANSPORT="$2"
+			shift 2
 			;;
 		--crash-server-url)
 			[[ $# -ge 2 ]] || error "missing value for --crash-server-url"

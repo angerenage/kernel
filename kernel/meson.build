@@ -6,6 +6,9 @@ kernel_c_args = freestanding_c_args + [
 kernel_c_args += platform_kernel_c_args
 kernel_c_args += '-DKERNEL_SELFTESTS_ENABLED=' + (kernel_selftests ? '1' : '0')
 kernel_c_args += '-DCORE_LOCK_DEBUG=' + (kernel_selftests ? '1' : '0')
+kernel_c_args += '-DKERNEL_TRACE_ENABLED=' + (kernel_trace ? '1' : '0')
+kernel_c_args += '-DKERNEL_TRACE_DURATION_MS=' + kernel_trace_duration_ms.to_string()
+kernel_c_args += '-DKERNEL_TRACE_BUFFER_KB=' + kernel_trace_buffer_kb.to_string()
 kernel_ld_args = [
 	'-nostdlib',
 	'-Wl,-z,max-page-size=0x1000',
@@ -71,6 +74,7 @@ kernel_objs = base_sources + core_sources + boot_sources + firmware_sources + ke
 	'src/crash.c',
 	'src/crash_qr.c',
 	'src/crash_record.c',
+	'src/trace.c',
 	'src/boot/cmdline.c',
 	'src/boot/diagnostics.c',
 	'src/boot/cpu_boot.c',

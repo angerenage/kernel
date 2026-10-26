@@ -31,6 +31,9 @@ static bool cmdline_token_recognized(const char* token, size_t token_len) {
 		"selftest.suite",
 		"kernel.selftest.suite",
 		"kernel.selftest.iommu",
+		"kernel.trace",
+		"kernel.trace.duration_ms",
+		"kernel.trace.transport",
 	};
 
 	for (size_t index = 0u; index < sizeof(recognized) / sizeof(recognized[0]); index++)

@@ -1,0 +1,89 @@
+#pragma once
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#ifndef KERNEL_TRACE_ENABLED
+#define KERNEL_TRACE_ENABLED 0
+#endif
+
+#define KERNEL_TRACE_MAGIC 0x313045434152544bull /* "KTRACE01" in little-endian byte order. */
+#define KERNEL_TRACE_VERSION 1u
+#define KERNEL_TRACE_MAX_CPUS 64u
+
+struct thread;
+
+enum kernel_trace_record_type {
+	KERNEL_TRACE_RECORD_INSTANT = 0u,
+	KERNEL_TRACE_RECORD_BEGIN,
+	KERNEL_TRACE_RECORD_END,
+	KERNEL_TRACE_RECORD_COUNTER,
+};
+
+enum kernel_trace_event {
+	KERNEL_TRACE_EVENT_SCHED_SWITCH = 1u,
+	KERNEL_TRACE_EVENT_SCHED_BLOCK,
+	KERNEL_TRACE_EVENT_SCHED_WAKE,
+	KERNEL_TRACE_EVENT_SYSCALL,
+};
+
+struct kernel_trace_record {
+	uint64_t timestamp;
+	uint64_t arg0;
+	uint64_t arg1;
+	uint32_t event_id;
+	uint16_t cpu;
+	uint8_t  type;
+	uint8_t  flags;
+};
+
+struct kernel_trace_cpu_descriptor {
+	uint64_t offset;
+	uint64_t capacity;
+	uint64_t committed;
+	uint64_t dropped;
+};
+
+struct kernel_trace_file_header {
+	uint64_t                           magic;
+	uint32_t                           version;
+	uint32_t                           header_size;
+	uint64_t                           total_size;
+	uint64_t                           clock_frequency;
+	uint32_t                           record_size;
+	uint32_t                           cpu_count;
+	uint64_t                           session_id;
+	uint32_t                           flags;
+	uint32_t                           reserved;
+	uint64_t                           checksum;
+	struct kernel_trace_cpu_descriptor cpus[KERNEL_TRACE_MAX_CPUS];
+};
+
+_Static_assert(sizeof(struct kernel_trace_record) == 32u, "trace record format must remain stable");
+_Static_assert(offsetof(struct kernel_trace_file_header, checksum) == 56u, "trace checksum offset changed");
+
+#if KERNEL_TRACE_ENABLED
+bool     kernel_trace_init(void);
+bool     kernel_trace_start_autostop(void);
+void     kernel_trace_finalize(void);
+uint64_t kernel_trace_thread_id(const struct thread* thread);
+void     kernel_trace_emit(uint32_t event_id, enum kernel_trace_record_type type, uint64_t arg0, uint64_t arg1);
+#else
+static inline bool kernel_trace_init(void) {
+	return false;
+}
+static inline bool kernel_trace_start_autostop(void) {
+	return false;
+}
+static inline void kernel_trace_finalize(void) {
+}
+#define kernel_trace_thread_id(thread) ((uint64_t)(uintptr_t)(thread))
+#define kernel_trace_emit(event_id, type, arg0, arg1)                                                                  \
+	do {                                                                                                               \
+		(void)sizeof(event_id);                                                                                        \
+		(void)sizeof(type);                                                                                            \
+		(void)sizeof(arg0);                                                                                            \
+		(void)sizeof(arg1);                                                                                            \
+	} while (0)
+#endif

@@ -1,9 +1,13 @@
 #include <base/process.h>
 #include <core/process.h>
+#if KERNEL_TRACE_ENABLED
+#include <core/sched.h>
+#endif
 #include <core/user_upcall.h>
 #include <core/uthread.h>
 #include <hal/userspace.h>
 #include <kernel/syscall.h>
+#include <kernel/trace.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -32,7 +36,14 @@ enum syscall_frame_action syscall_dispatch_user_frame(struct hal_userspace_retur
 
 	if (out_result == NULL) return SYSCALL_FRAME_WRITE_RESULT;
 	if (number != SYSCALL_UPCALL_RETURN) {
+#if KERNEL_TRACE_ENABLED
+		uint64_t trace_thread = kernel_trace_thread_id(sched_current_thread());
+		kernel_trace_emit(KERNEL_TRACE_EVENT_SYSCALL, KERNEL_TRACE_RECORD_BEGIN, trace_thread, number);
+#endif
 		*out_result = syscall_dispatch(number, arg0, arg1, arg2, arg3, arg4, arg5);
+#if KERNEL_TRACE_ENABLED
+		kernel_trace_emit(KERNEL_TRACE_EVENT_SYSCALL, KERNEL_TRACE_RECORD_END, trace_thread, out_result->status);
+#endif
 		return SYSCALL_FRAME_WRITE_RESULT;
 	}
 	if (frame == NULL || !hal_userspace_frame_is_user(frame)) {

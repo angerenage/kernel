@@ -13,7 +13,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 usage() {
 	cat <<'EOF'
-Usage: run.sh [--test|-t | --kernel-selftest] [--test-name <name>] [--arch <arch> | --all] [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--iommu <kind>] [--headless] [--debug] [--debug-port <port>] [--timeout <seconds>] [-- <extra qemu args>]
+Usage: run.sh [--test|-t | --kernel-selftest] [--test-name <name>] [--arch <arch> | --all] [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--iommu <kind>] [--headless] [--debug] [--debug-port <port>] [--timeout <seconds>] [--profile] [--profile-output <path>] [--profile-timeout <seconds>] [-- <extra qemu args>]
 
 Modes:
   Default mode         Launch QEMU. Requires --arch <arch> or --all.
@@ -34,11 +34,16 @@ QEMU options:
   --build-prefix <name>
                        Prefix for per-architecture build directories under
                        --build-root. Defaults to build, producing build-<arch>.
-  --headless           Pass --headless through to the QEMU launcher.
+  --headless           Disable the graphical display, including during profiling.
   --iommu <kind>       Select auto, none, vtd, amd, smmuv3, or riscv.
   --debug              Pass --debug through to the QEMU launcher.
   --debug-port <port>  Pass --debug-port through to the QEMU launcher.
   --timeout <seconds>  Selftest mode timeout. Defaults to 30 seconds.
+  --profile            Capture KTRACE_READY through QEMU and exit after conversion.
+  --profile-output <path>
+                       Perfetto-compatible JSON output path.
+  --profile-timeout <seconds>
+                       Maximum wait for a completed trace. Defaults to 30 seconds.
 
 Test options:
   --test-name <name>   Run only the named Meson test (repeatable).
@@ -56,6 +61,8 @@ Examples:
   bash scripts/run.sh --arch riscv64 --debug
   bash scripts/run.sh --all
   bash scripts/run.sh --arch x86_64 --builddir build-debug-x86_64
+  bash scripts/run.sh --arch x86_64 --profile --profile-output traces/interactive.pftrace
+  bash scripts/run.sh --arch x86_64 --profile --headless
   bash scripts/run.sh --all --build-prefix build-debug
   bash scripts/run.sh --test
   bash scripts/run.sh --test --builddir build-debug-x86_64
@@ -72,6 +79,10 @@ error() {
 
 log() {
 	echo "[run] $*"
+}
+
+need_cmd() {
+	command -v "$1" >/dev/null 2>&1 || error "required tool '$1' not found in PATH"
 }
 
 abspath() {
@@ -137,6 +148,25 @@ run_tests() {
 	)
 }
 
+capture_qemu_profile() {
+	local arch="$1"
+	local build_dir="$2"
+	local output="${PROFILE_OUTPUT:-${build_dir}/kernel-trace-${arch}.pftrace}"
+	local -a command
+	shift 2
+	command=( bash "$@" --qmp-socket "@QMP_SOCKET@" )
+	if (( ${#EXTRA_QEMU_ARGS[@]} > 0 )); then
+		command+=( -- "${EXTRA_QEMU_ARGS[@]}" )
+	fi
+
+	need_cmd python3
+	python3 "${SCRIPT_DIR}/ktrace.py" capture-qemu \
+		--output "$(abspath "$output")" \
+		--timeout "$PROFILE_TIMEOUT" \
+		--cwd "$REPO_ROOT" \
+		-- "${command[@]}"
+}
+
 run_qemu_for_arch() {
 	local arch="$1"
 	local build_dir="$2"
@@ -157,15 +187,18 @@ run_qemu_for_arch() {
 		qemu_args+=( --debug --debug-port "$DEBUG_PORT" )
 	fi
 
-	if (( ${#EXTRA_QEMU_ARGS[@]} > 0 )); then
-		qemu_args+=( -- "${EXTRA_QEMU_ARGS[@]}" )
-	fi
-
 	log "launching QEMU for ${arch} from ${build_dir}"
-	(
-		cd "$REPO_ROOT"
-		bash "${qemu_args[@]}"
-	)
+	if (( PROFILE_MODE )); then
+		capture_qemu_profile "$arch" "$build_dir" "${qemu_args[@]}"
+	else
+		if (( ${#EXTRA_QEMU_ARGS[@]} > 0 )); then
+			qemu_args+=( -- "${EXTRA_QEMU_ARGS[@]}" )
+		fi
+		(
+			cd "$REPO_ROOT"
+			bash "${qemu_args[@]}"
+		)
+	fi
 }
 
 stop_process() {
@@ -286,6 +319,9 @@ IOMMU_MODE="auto"
 SELFTEST_TIMEOUT=30
 TEST_NAMES=()
 EXTRA_QEMU_ARGS=()
+PROFILE_MODE=0
+PROFILE_OUTPUT=""
+PROFILE_TIMEOUT=30
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -383,6 +419,28 @@ while [[ $# -gt 0 ]]; do
 			SELFTEST_TIMEOUT="${1#*=}"
 			shift
 			;;
+		--profile)
+			PROFILE_MODE=1
+			shift
+			;;
+		--profile-output)
+			[[ $# -ge 2 ]] || error "missing value for --profile-output"
+			PROFILE_OUTPUT="$2"
+			shift 2
+			;;
+		--profile-output=*)
+			PROFILE_OUTPUT="${1#*=}"
+			shift
+			;;
+		--profile-timeout)
+			[[ $# -ge 2 ]] || error "missing value for --profile-timeout"
+			PROFILE_TIMEOUT="$2"
+			shift 2
+			;;
+		--profile-timeout=*)
+			PROFILE_TIMEOUT="${1#*=}"
+			shift
+			;;
 		--)
 			shift
 			EXTRA_QEMU_ARGS=( "$@" )
@@ -400,6 +458,19 @@ done
 
 if (( ALL_ARCHES )) && [[ -n "$TARGET_ARCH" ]]; then
 	error "use either --arch <arch> or --all, not both"
+fi
+
+if (( PROFILE_MODE )) && (( ALL_ARCHES )); then
+	error "--profile currently requires one --arch target"
+fi
+if (( PROFILE_MODE )) && (( DO_TEST || DO_KERNEL_SELFTEST )); then
+	error "--profile is only available in normal QEMU mode"
+fi
+if [[ -n "$PROFILE_OUTPUT" ]] && (( ! PROFILE_MODE )); then
+	error "--profile-output requires --profile"
+fi
+if (( PROFILE_MODE )) && [[ ! "$PROFILE_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
+	error "--profile-timeout requires a positive integer"
 fi
 
 if (( ALL_ARCHES )) && [[ -n "$BUILD_DIR" ]]; then

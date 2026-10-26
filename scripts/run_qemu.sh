@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
 	cat <<'EOF'
-Usage: run_qemu.sh --arch <arch> [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--iommu <kind>] [--headless] [--debug] [--debug-port <port>] [-- <extra qemu args>]
+Usage: run_qemu.sh --arch <arch> [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--iommu <kind>] [--headless] [--debug] [--debug-port <port>] [--qmp-socket <path>] [-- <extra qemu args>]
 
 Required arguments:
   --arch        Target architecture (x86_64, aarch64, riscv64, loongarch64).
@@ -23,6 +23,7 @@ Optional arguments:
                 QEMU debug logging in the build directory.
   --debug-port  TCP port to use for the GDB stub in --debug mode.
                 Defaults to 1234.
+  --qmp-socket  Listen for a QMP client on this Unix-domain socket.
 
 Optional environment:
   QEMU_FIRMWARE_DIR
@@ -201,6 +202,7 @@ DEBUG_PORT=1234
 HEADLESS=0
 IOMMU_MODE="auto"
 EXTRA_ARGS=()
+QMP_SOCKET=""
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -250,6 +252,11 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--debug-port)
 			DEBUG_PORT="$2"
+			shift 2
+			;;
+		--qmp-socket)
+			[[ $# -ge 2 ]] || error "missing value for --qmp-socket"
+			QMP_SOCKET="$(abspath "$2")"
 			shift 2
 			;;
 		--)
@@ -426,6 +433,10 @@ if (( DEBUG_MODE )); then
 		-d guest_errors,int,cpu_reset
 		-D "$DEBUG_LOG_PATH"
 	)
+fi
+
+if [[ -n "$QMP_SOCKET" ]]; then
+	qemu_args+=( -qmp "unix:${QMP_SOCKET},server=on,wait=off" )
 fi
 
 if (( HEADLESS )); then

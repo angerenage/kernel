@@ -17,6 +17,7 @@ build*/
 coverage/
 *.profraw
 *.profdata
+*.ktrace
 
 # IDEs / editors
 .vscode/
@@ -33,3 +34,6 @@ __pycache__/
 # Generated docs or artifacts
 docs/generated/
 doc/html/
+
+# Traces
+traces/

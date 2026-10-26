@@ -9,6 +9,10 @@ kernel_selftests_autorun = get_option('kernel_selftests_autorun')
 kernel_selftests_suite = get_option('kernel_selftests_suite')
 kernel_selftests_iommu = get_option('kernel_selftests_iommu')
 kernel_boot_debug = get_option('kernel_boot_debug')
+kernel_trace = get_option('kernel_trace')
+kernel_trace_duration_ms = get_option('kernel_trace_duration_ms')
+kernel_trace_buffer_kb = get_option('kernel_trace_buffer_kb')
+kernel_trace_transport = get_option('kernel_trace_transport')
 crash_server_url = get_option('crash_server_url')
 test_sanitizers = get_option('test_sanitizers')
 
@@ -86,6 +90,11 @@ limine_script = files('scripts/make_limine_image.sh')
 limine_cmdline = ''
 if kernel_boot_debug
 	limine_cmdline += 'loglevel=debug'
+endif
+if kernel_trace
+	limine_cmdline += (limine_cmdline == '' ? '' : ' ') + 'kernel.trace=1'
+	limine_cmdline += ' kernel.trace.duration_ms=' + kernel_trace_duration_ms.to_string()
+	limine_cmdline += ' kernel.trace.transport=' + kernel_trace_transport
 endif
 if kernel_selftests_autorun or kernel_selftests_suite != ''
 	limine_cmdline += (limine_cmdline == '' ? '' : ' ') + 'kernel.selftest=1'

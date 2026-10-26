@@ -38,6 +38,29 @@ option('kernel_boot_debug',
 	value : false,
 	description : 'Append loglevel=debug to the generated boot image command line for verbose boot diagnostics.')
 
+option('kernel_trace',
+	type : 'boolean',
+	value : false,
+	description : 'Compile kernel tracing and enable one boot-time profiling session.')
+
+option('kernel_trace_duration_ms',
+	type : 'integer',
+	value : 5000,
+	min : 1,
+	description : 'Duration of an enabled boot-time profiling session in milliseconds.')
+
+option('kernel_trace_buffer_kb',
+	type : 'integer',
+	value : 256,
+	min : 4,
+	description : 'Trace buffer capacity per CPU in KiB.')
+
+option('kernel_trace_transport',
+	type : 'combo',
+	choices : ['qemu', 'serial'],
+	value : 'qemu',
+	description : 'Completed-trace export transport.')
+
 option('crash_server_url',
 	type : 'string',
 	value : '',
