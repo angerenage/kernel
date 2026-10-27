@@ -160,7 +160,8 @@ bool x86_64_paging_handle_tlb_nmi(void) {
 }
 
 static void x86_tlb_shootdown_range(const struct hal_paging_space* space, uintptr_t start, size_t size) {
-	uint64_t                   targets = 0u;
+	uint64_t                   active_cpus;
+	uint64_t                   targets;
 	struct cpu*                current = cpu_current();
 	const struct cpu_topology* topology;
 	size_t                     cpu_total;
@@ -170,6 +171,17 @@ static void x86_tlb_shootdown_range(const struct hal_paging_space* space, uintpt
 
 	if (size == 0u) return;
 	trace_tid = kernel_trace_thread_id(sched_current_thread());
+	if (current == NULL || current->index >= X86_TLB_MAX_CPUS) hcf();
+	active_cpus = space == &kernel_space ? UINT64_MAX : space->active_cpus;
+	if ((active_cpus & (1ull << current->index)) != 0u) {
+		kernel_trace_emit(
+			KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_LOCAL);
+		x86_tlb_flush_range_local(start, size);
+		kernel_trace_emit(
+			KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_LOCAL);
+	}
+	targets = active_cpus & ~(1ull << current->index);
+	if (targets == 0u) return;
 
 	kernel_trace_emit(
 		KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_LOCK);
@@ -179,21 +191,21 @@ static void x86_tlb_shootdown_range(const struct hal_paging_space* space, uintpt
 	kernel_trace_emit(
 		KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_TARGETS);
 	topology = cpu_topology_get();
-	if (current == NULL || topology == NULL || topology->cpus == NULL || current->index >= X86_TLB_MAX_CPUS ||
-	    topology->cpu_count == 0u || topology->cpu_count > X86_TLB_MAX_CPUS) {
+	if (topology == NULL || topology->cpus == NULL || topology->cpu_count == 0u ||
+	    topology->cpu_count > X86_TLB_MAX_CPUS) {
 		hcf();
 	}
 	cpu_total = topology->cpu_count;
 
-	uint64_t active_cpus = space == &kernel_space ? UINT64_MAX : space->active_cpus;
-	if ((active_cpus & (1ull << current->index)) != 0u) x86_tlb_flush_range_local(start, size);
+	uint64_t online_targets = 0u;
 	for (size_t i = 0u; i < cpu_total; i++) {
 		struct cpu* target = &topology->cpus[i];
 		if (target == current || target->index >= X86_TLB_MAX_CPUS || cpu_state_get(target) != CPU_STATE_ONLINE ||
-		    (active_cpus & (1ull << target->index)) == 0u)
+		    (targets & (1ull << target->index)) == 0u)
 			continue;
-		targets |= 1ull << target->index;
+		online_targets |= 1ull << target->index;
 	}
+	targets = online_targets;
 	kernel_trace_emit(
 		KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_TARGETS);
 	if (targets == 0u) {
