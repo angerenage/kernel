@@ -32,6 +32,7 @@
 #define X86_CR4_PGE (1ull << 7)
 #define X86_CR4_LA57 (1ull << 12)
 #define X86_TLB_MAX_CPUS 64u
+#define X86_TLB_FULL_FLUSH_PAGE_THRESHOLD 32u
 #define X86_MSR_EFER 0xc0000080u
 #define X86_MSR_PAT 0x277u
 #define X86_EFER_NXE (1ull << 11)
@@ -59,6 +60,7 @@ struct x86_tlb_request {
 	uintptr_t start;
 	size_t    size;
 	size_t    source_index;
+	bool      full_flush;
 	uint64_t  targets;
 	uint64_t  generation;
 };
@@ -132,7 +134,11 @@ static inline void x86_invlpg(uintptr_t virt) {
 	__asm__ volatile("invlpg (%0)" : : "r"((void*)virt) : "memory");
 }
 
-static void x86_tlb_flush_range_local(uintptr_t start, size_t size) {
+static void x86_tlb_flush_range_local(uintptr_t start, size_t size, bool full_flush) {
+	if (full_flush) {
+		x86_write_cr3(x86_read_cr3());
+		return;
+	}
 	for (size_t offset = 0u; offset < size; offset += paging_info.minimum_leaf_size) {
 		x86_invlpg(start + offset);
 	}
@@ -150,7 +156,7 @@ static bool x86_tlb_process_request_for_current_cpu(void) {
 	acknowledged = __atomic_load_n(&x86_tlb_ack[cpu->index], __ATOMIC_ACQUIRE);
 	if (acknowledged == generation) return false;
 
-	x86_tlb_flush_range_local(x86_tlb_request.start, x86_tlb_request.size);
+	x86_tlb_flush_range_local(x86_tlb_request.start, x86_tlb_request.size, x86_tlb_request.full_flush);
 	__atomic_store_n(&x86_tlb_ack[cpu->index], generation, __ATOMIC_RELEASE);
 	return true;
 }
@@ -167,12 +173,14 @@ static void x86_tlb_shootdown_range(const struct hal_paging_space* space, uintpt
 	size_t                     cpu_total;
 	uint64_t                   generation;
 	uint64_t                   trace_tid;
+	bool                       full_flush;
 	struct irq_state           shootdown_state;
 
 	if (size == 0u) return;
 	trace_tid = kernel_trace_thread_id(sched_current_thread());
 	if (current == NULL || current->index >= X86_TLB_MAX_CPUS) hcf();
 	active_cpus = space == &kernel_space ? UINT64_MAX : space->active_cpus;
+	full_flush  = space != &kernel_space && size / paging_info.minimum_leaf_size >= X86_TLB_FULL_FLUSH_PAGE_THRESHOLD;
 	if ((active_cpus & (1ull << current->index)) != 0u) {
 		kernel_trace_emit(KERNEL_TRACE_EVENT_VM_TLB_RANGE,
 		                  KERNEL_TRACE_RECORD_INSTANT,
@@ -180,7 +188,7 @@ static void x86_tlb_shootdown_range(const struct hal_paging_space* space, uintpt
 		                  size / paging_info.minimum_leaf_size);
 		kernel_trace_emit(
 			KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_LOCAL);
-		x86_tlb_flush_range_local(start, size);
+		x86_tlb_flush_range_local(start, size, full_flush);
 		kernel_trace_emit(
 			KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_LOCAL);
 	}
@@ -224,6 +232,7 @@ static void x86_tlb_shootdown_range(const struct hal_paging_space* space, uintpt
 	x86_tlb_request.start        = start;
 	x86_tlb_request.size         = size;
 	x86_tlb_request.source_index = current->index;
+	x86_tlb_request.full_flush   = full_flush;
 	__atomic_store_n(&x86_tlb_request.targets, targets, __ATOMIC_RELAXED);
 	__atomic_store_n(&x86_tlb_request.generation, generation, __ATOMIC_RELEASE);
 	/* Publish the request before the LAPIC MMIO write that delivers the NMI. */
