@@ -12,7 +12,7 @@ struct paging_transaction_record {
 	struct pmm_extent commit_free;
 };
 
-#define PAGING_TRANSACTION_INLINE_RECORDS 16u
+#define PAGING_TRANSACTION_INLINE_RECORDS 32u
 
 typedef void (*paging_transaction_restore_fn)(uint64_t* slot, uint64_t previous, void* context);
 

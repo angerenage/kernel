@@ -140,6 +140,10 @@ VM_PHASE_NAMES = (
     "paging_change",
     "paging_shootdown",
     "paging_commit",
+    "paging_change_record",
+    "paging_change_descend",
+    "paging_change_empty_scan",
+    "paging_change_retire",
 )
 
 SCHED_PHASE_NAMES = (
@@ -154,6 +158,9 @@ SCHED_PHASE_NAMES = (
     "switch_fp_save",
     "switch_fp_restore",
     "switch_io_bitmap",
+    "address_space_lock",
+    "address_space_track",
+    "address_space_cr3",
 )
 
 

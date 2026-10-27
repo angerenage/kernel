@@ -513,9 +513,17 @@ void hal_paging_space_destroy(struct hal_paging_space* space) {
 bool hal_paging_activate(const struct hal_paging_space* space) {
 	struct irq_state state;
 	struct cpu*      current;
+	uint64_t         trace_tid;
 
 	if (space == NULL || space->lower_root_phys == 0u || !initialized) return false;
-	state   = spinlock_lock_irqsave(&paging_lock);
+	trace_tid = kernel_trace_thread_id(sched_current_thread());
+	kernel_trace_emit(
+		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_SCHED_ADDRESS_SPACE_LOCK);
+	state = spinlock_lock_irqsave(&paging_lock);
+	kernel_trace_emit(
+		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_SCHED_ADDRESS_SPACE_LOCK);
+	kernel_trace_emit(
+		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_SCHED_ADDRESS_SPACE_TRACK);
 	current = cpu_current();
 	if (current != NULL && current->index < X86_TLB_MAX_CPUS) {
 		struct hal_paging_space* previous = x86_active_space[current->index];
@@ -523,7 +531,13 @@ bool hal_paging_activate(const struct hal_paging_space* space) {
 		((struct hal_paging_space*)space)->active_cpus |= 1ull << current->index;
 		x86_active_space[current->index] = (struct hal_paging_space*)space;
 	}
+	kernel_trace_emit(
+		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_SCHED_ADDRESS_SPACE_TRACK);
+	kernel_trace_emit(
+		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_SCHED_ADDRESS_SPACE_CR3);
 	x86_write_cr3(space->lower_root_phys & pte_address_mask);
+	kernel_trace_emit(
+		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_SCHED_ADDRESS_SPACE_CR3);
 	spinlock_unlock_irqrestore(&paging_lock, state);
 	return true;
 }
@@ -606,7 +620,17 @@ static bool x86_change_range(uint64_t* table, int level, uintptr_t start, uintpt
 		uint64_t  entry = table[index];
 		if ((entry & X86_PTE_PRESENT) != 0u) {
 			if (level == 0 || (entry & X86_PTE_LARGE) != 0u) {
-				if (!paging_transaction_record(transaction, &table[index], (struct pmm_extent){0})) return false;
+				uint64_t trace_tid = kernel_trace_thread_id(sched_current_thread());
+				kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
+				                  KERNEL_TRACE_RECORD_BEGIN,
+				                  trace_tid,
+				                  KERNEL_TRACE_VM_PAGING_CHANGE_RECORD);
+				bool recorded = paging_transaction_record(transaction, &table[index], (struct pmm_extent){0});
+				kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
+				                  KERNEL_TRACE_RECORD_END,
+				                  trace_tid,
+				                  KERNEL_TRACE_VM_PAGING_CHANGE_RECORD);
+				if (!recorded) return false;
 				if (protect) table[index] = x86_leaf_apply_protection(entry, flags);
 				else table[index] = 0u;
 			}
@@ -617,13 +641,43 @@ static bool x86_change_range(uint64_t* table, int level, uintptr_t start, uintpt
 					if (!paging_transaction_record(transaction, &table[index], (struct pmm_extent){0})) return false;
 					table[index] |= X86_PTE_USER;
 				}
-				if (!x86_change_range(child, level - 1, start, next, protect, flags, transaction)) return false;
-				if (!protect && x86_table_empty(child)) {
-					if (!paging_transaction_retire(
-							transaction,
-							&table[index],
-							(struct pmm_extent){.address = child_phys, .size = paging_info.minimum_leaf_size}))
-						return false;
+				uint64_t trace_tid = kernel_trace_thread_id(sched_current_thread());
+				kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
+				                  KERNEL_TRACE_RECORD_BEGIN,
+				                  trace_tid,
+				                  KERNEL_TRACE_VM_PAGING_CHANGE_DESCEND);
+				bool changed = x86_change_range(child, level - 1, start, next, protect, flags, transaction);
+				kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
+				                  KERNEL_TRACE_RECORD_END,
+				                  trace_tid,
+				                  KERNEL_TRACE_VM_PAGING_CHANGE_DESCEND);
+				if (!changed) return false;
+				bool empty = false;
+				if (!protect) {
+					kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
+					                  KERNEL_TRACE_RECORD_BEGIN,
+					                  trace_tid,
+					                  KERNEL_TRACE_VM_PAGING_CHANGE_EMPTY_SCAN);
+					empty = x86_table_empty(child);
+					kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
+					                  KERNEL_TRACE_RECORD_END,
+					                  trace_tid,
+					                  KERNEL_TRACE_VM_PAGING_CHANGE_EMPTY_SCAN);
+				}
+				if (empty) {
+					kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
+					                  KERNEL_TRACE_RECORD_BEGIN,
+					                  trace_tid,
+					                  KERNEL_TRACE_VM_PAGING_CHANGE_RETIRE);
+					bool retired = paging_transaction_retire(
+						transaction,
+						&table[index],
+						(struct pmm_extent){.address = child_phys, .size = paging_info.minimum_leaf_size});
+					kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
+					                  KERNEL_TRACE_RECORD_END,
+					                  trace_tid,
+					                  KERNEL_TRACE_VM_PAGING_CHANGE_RETIRE);
+					if (!retired) return false;
 					table[index] = 0u;
 				}
 			}
