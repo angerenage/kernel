@@ -13,10 +13,20 @@
 #include <core/sched.h>
 #include <core/syscall.h>
 #include <core/thread.h>
+#include <kernel/trace.h>
 #include <libc/stdlib.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
+
+#define TRACE_CAP_CALL_PHASE(phase, type)                                                                              \
+	kernel_trace_emit(KERNEL_TRACE_EVENT_CAP_CALL_PHASE, type, kernel_trace_thread_id(sched_current_thread()), phase)
+
+#define TRACE_CAP_CALL_HANDLER(handler, type)                                                                          \
+	kernel_trace_emit(KERNEL_TRACE_EVENT_CAP_CALL_HANDLER,                                                             \
+	                  type,                                                                                            \
+	                  kernel_trace_thread_id(sched_current_thread()),                                                  \
+	                  (uint64_t)(uintptr_t)(handler))
 
 static syscall_result_t syscall_cap_result_to_syscall(enum cap_result result, uintptr_t arg_index) {
 	switch (result) {
@@ -309,7 +319,9 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 	caller_pid = process_pid(process);
 
 	if (arg0 == CAP_ID_INVALID) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_CAP_ACQUIRE, KERNEL_TRACE_RECORD_BEGIN);
 	cap = cap_acquire((cap_id_t)arg0);
+	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_CAP_ACQUIRE, KERNEL_TRACE_RECORD_END);
 	if (cap == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 
 	request_size      = (size_t)arg2;
@@ -331,25 +343,33 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 3u);
 	}
 
+	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_REQUEST_ALLOC, KERNEL_TRACE_RECORD_BEGIN);
 	kernel_request = malloc(request_size);
+	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_REQUEST_ALLOC, KERNEL_TRACE_RECORD_END);
 	if (kernel_request == NULL) {
 		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 2u);
 	}
+	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_REQUEST_COPY, KERNEL_TRACE_RECORD_BEGIN);
 	call_result = syscall_copy_from_user(syscall_current_user_space(), arg1, kernel_request, request_size, 1u);
+	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_REQUEST_COPY, KERNEL_TRACE_RECORD_END);
 	if (call_result.status != SYSCALL_STATUS_OK) {
 		free(kernel_request);
 		cap_release(cap);
 		return call_result;
 	}
+	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_RESPONSE_VALIDATE, KERNEL_TRACE_RECORD_BEGIN);
 	call_result = syscall_cap_validate_response_buffer(arg3, response_capacity);
+	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_RESPONSE_VALIDATE, KERNEL_TRACE_RECORD_END);
 	if (call_result.status != SYSCALL_STATUS_OK) {
 		free(kernel_request);
 		cap_release(cap);
 		return call_result;
 	}
 
+	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_BEGIN, KERNEL_TRACE_RECORD_BEGIN);
 	begin_result = cap_object_begin_call(caller_pid, cap, &object, &granted_rights);
+	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_BEGIN, KERNEL_TRACE_RECORD_END);
 	if (begin_result != CAP_OK) {
 		free(kernel_request);
 		cap_release(cap);
@@ -363,7 +383,9 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 			cap_release(cap);
 			return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 		}
+		TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_KERNEL_RESPONSE_ALLOC, KERNEL_TRACE_RECORD_BEGIN);
 		kernel_response = response_capacity == 0u ? NULL : malloc(response_capacity);
+		TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_KERNEL_RESPONSE_ALLOC, KERNEL_TRACE_RECORD_END);
 		if (response_capacity != 0u && kernel_response == NULL) {
 			free(kernel_request);
 			cap_object_end_call(object);
@@ -381,7 +403,11 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 		req.response          = kernel_response;
 		req.response_capacity = response_capacity;
 
+		TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_KERNEL_HANDLER, KERNEL_TRACE_RECORD_BEGIN);
+		TRACE_CAP_CALL_HANDLER(object->handler, KERNEL_TRACE_RECORD_BEGIN);
 		call_result = object->handler(&req);
+		TRACE_CAP_CALL_HANDLER(object->handler, KERNEL_TRACE_RECORD_END);
+		TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_KERNEL_HANDLER, KERNEL_TRACE_RECORD_END);
 		cap_object_end_call(object);
 		cap_release(cap);
 		if (call_result.status == SYSCALL_STATUS_OK && call_result.value > response_capacity) {
@@ -390,8 +416,10 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 			return syscall_result_error(SYSCALL_STATUS_FAILED, 4u);
 		}
 		if (call_result.status == SYSCALL_STATUS_OK && call_result.value != 0u) {
+			TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_KERNEL_RESPONSE_COPY, KERNEL_TRACE_RECORD_BEGIN);
 			syscall_result_t copy_result = syscall_copy_to_user(
 				syscall_current_user_space(), arg3, kernel_response, (size_t)call_result.value, 3u);
+			TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_KERNEL_RESPONSE_COPY, KERNEL_TRACE_RECORD_END);
 			if (copy_result.status != SYSCALL_STATUS_OK) call_result = copy_result;
 		}
 		free(kernel_response);
@@ -400,12 +428,15 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 	}
 
 	endpoint = object->endpoint;
+	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_ENDPOINT_RETAIN, KERNEL_TRACE_RECORD_BEGIN);
 	if (!channel_retain(endpoint)) {
+		TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_ENDPOINT_RETAIN, KERNEL_TRACE_RECORD_END);
 		free(kernel_request);
 		cap_object_end_call(object);
 		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 	}
+	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_ENDPOINT_RETAIN, KERNEL_TRACE_RECORD_END);
 	req.call_id           = CAP_CALL_ID_INVALID;
 	req.caller            = caller_pid;
 	req.cap_id            = cap->cap_id;
@@ -415,8 +446,10 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 	req.request_size      = request_size;
 	req.response          = NULL;
 	req.response_capacity = response_capacity;
+	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_PENDING_CREATE, KERNEL_TRACE_RECORD_BEGIN);
 	struct cap_pending_call* pending =
 		cap_pending_call_create(object, endpoint->id, endpoint->owner_pid, caller_pid, response_capacity);
+	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_PENDING_CREATE, KERNEL_TRACE_RECORD_END);
 	if (pending == NULL) {
 		channel_release(endpoint);
 		free(kernel_request);
@@ -426,26 +459,40 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 	}
 	pending->response_address = arg3;
 	req.call_id               = cap_pending_call_id(pending);
+	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_REQUEST_ATTACH, KERNEL_TRACE_RECORD_BEGIN);
 	if (!cap_pending_call_attach_request(pending, kernel_request, request_size)) {
+		TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_REQUEST_ATTACH, KERNEL_TRACE_RECORD_END);
+		TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_PENDING_DESTROY, KERNEL_TRACE_RECORD_BEGIN);
 		cap_pending_call_destroy(pending);
+		TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_PENDING_DESTROY, KERNEL_TRACE_RECORD_END);
 		channel_release(endpoint);
 		free(kernel_request);
 		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
+	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_REQUEST_ATTACH, KERNEL_TRACE_RECORD_END);
 	kernel_request = NULL;
 
+	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_CHANNEL_ENQUEUE, KERNEL_TRACE_RECORD_BEGIN);
 	if (!channel_enqueue_cap_request(endpoint, &req)) {
+		TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_CHANNEL_ENQUEUE, KERNEL_TRACE_RECORD_END);
+		TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_PENDING_DESTROY, KERNEL_TRACE_RECORD_BEGIN);
 		cap_pending_call_destroy(pending);
+		TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_PENDING_DESTROY, KERNEL_TRACE_RECORD_END);
 		channel_release(endpoint);
 		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
+	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_CHANNEL_ENQUEUE, KERNEL_TRACE_RECORD_END);
 	channel_release(endpoint);
 
 	cap_release(cap);
+	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_REPLY_WAIT, KERNEL_TRACE_RECORD_BEGIN);
 	completed = cap_pending_call_wait(pending, &call_result, NULL);
+	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_REPLY_WAIT, KERNEL_TRACE_RECORD_END);
+	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_PENDING_DESTROY, KERNEL_TRACE_RECORD_BEGIN);
 	cap_pending_call_destroy(pending);
+	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_PENDING_DESTROY, KERNEL_TRACE_RECORD_END);
 	if (!completed) {
 		kthread_testcancel();
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);

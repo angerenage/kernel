@@ -5,9 +5,11 @@
 #include <core/capability.h>
 #include <core/dma.h>
 #include <core/process.h>
+#include <core/sched.h>
 #include <core/spinlock.h>
 #include <core/syscall.h>
 #include <kernel/capability.h>
+#include <kernel/trace.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -30,6 +32,12 @@ struct mapping_owner_ref {
 	((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE | CAP_EXEC | CAP_MAP | CAP_DESTROY | CAP_DELEGATE |                \
 	                CAP_DELEGATE_PEER))
 #define MAPPING_RESOURCE_BUCKET_COUNT 64u
+
+#define TRACE_CAP_OPERATION(operation, type)                                                                           \
+	kernel_trace_emit(                                                                                                 \
+		KERNEL_TRACE_EVENT_CAP_CALL_OPERATION, type, kernel_trace_thread_id(sched_current_thread()), operation)
+#define TRACE_VM_PHASE(phase, type)                                                                                    \
+	kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE, type, kernel_trace_thread_id(sched_current_thread()), phase)
 
 static struct spinlock mapping_resource_lock =
 	SPINLOCK_INIT_CLASS("mapping_resources", SPINLOCK_ORDER_CAPABILITY, SPINLOCK_FLAG_IRQSAVE);
@@ -152,17 +160,24 @@ static syscall_result_t memory_slice_handler(const struct cap_request* req, stru
 
 static syscall_result_t memory_handler(const struct cap_request* req) {
 	struct memory_request_header header;
+	syscall_result_t             result;
 	if (req == NULL || req->object_id == 0u || copy_request(req, &header, sizeof(header)).status != SYSCALL_STATUS_OK)
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	struct memory* memory = (struct memory*)(uintptr_t)req->object_id;
+	TRACE_CAP_OPERATION(KERNEL_TRACE_CAP_CALL_MEMORY_INFO + header.op, KERNEL_TRACE_RECORD_BEGIN);
 	switch (header.op) {
 	case MEMORY_OP_INFO:
-		return memory_info_handler(req, memory);
+		result = memory_info_handler(req, memory);
+		break;
 	case MEMORY_OP_SLICE:
-		return memory_slice_handler(req, memory);
+		result = memory_slice_handler(req, memory);
+		break;
 	default:
-		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+		result = syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+		break;
 	}
+	TRACE_CAP_OPERATION(KERNEL_TRACE_CAP_CALL_MEMORY_INFO + header.op, KERNEL_TRACE_RECORD_END);
+	return result;
 }
 
 static bool mapping_owner_acquire(const struct mapping_state* state, struct mapping_owner_ref* out) {
@@ -377,34 +392,50 @@ static syscall_result_t mapping_sync_handler(const struct cap_request* req, cons
 }
 
 static syscall_result_t mapping_unmap_handler(const struct cap_request* req, const struct mapping_state* state) {
+	TRACE_VM_PHASE(KERNEL_TRACE_VM_MAPPING_CAP_ACQUIRE, KERNEL_TRACE_RECORD_BEGIN);
 	struct capability* cap = cap_acquire(req->cap_id);
+	TRACE_VM_PHASE(KERNEL_TRACE_VM_MAPPING_CAP_ACQUIRE, KERNEL_TRACE_RECORD_END);
 	if (cap == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 	cap_object_id_t object_id = cap->cap_object_id;
+	TRACE_VM_PHASE(KERNEL_TRACE_VM_MAPPING_ADDRESS_SPACE_UNMAP, KERNEL_TRACE_RECORD_BEGIN);
 	if (!mapping_unmap_state(state)) {
+		TRACE_VM_PHASE(KERNEL_TRACE_VM_MAPPING_ADDRESS_SPACE_UNMAP, KERNEL_TRACE_RECORD_END);
 		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
+	TRACE_VM_PHASE(KERNEL_TRACE_VM_MAPPING_ADDRESS_SPACE_UNMAP, KERNEL_TRACE_RECORD_END);
+	TRACE_VM_PHASE(KERNEL_TRACE_VM_MAPPING_OBJECT_DESTROY, KERNEL_TRACE_RECORD_BEGIN);
 	bool destroyed = cap_object_destroy_with_id(object_id);
+	TRACE_VM_PHASE(KERNEL_TRACE_VM_MAPPING_OBJECT_DESTROY, KERNEL_TRACE_RECORD_END);
 	cap_release(cap);
 	return destroyed ? syscall_result_ok(0u) : syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 }
 
 static syscall_result_t mapping_handler(const struct cap_request* req) {
 	struct mapping_request_header header;
+	syscall_result_t              result;
 	if (req == NULL || req->object_id == 0u || copy_request(req, &header, sizeof(header)).status != SYSCALL_STATUS_OK)
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	const struct mapping_state* state = (const struct mapping_state*)(uintptr_t)req->object_id;
+	TRACE_CAP_OPERATION(KERNEL_TRACE_CAP_CALL_MAPPING_INFO + header.op, KERNEL_TRACE_RECORD_BEGIN);
 	switch (header.op) {
 	case MAPPING_OP_INFO:
-		return mapping_info_handler(req, state);
+		result = mapping_info_handler(req, state);
+		break;
 	case MAPPING_OP_PROTECT:
-		return mapping_protect_handler(req, state);
+		result = mapping_protect_handler(req, state);
+		break;
 	case MAPPING_OP_SYNC:
-		return mapping_sync_handler(req, state);
+		result = mapping_sync_handler(req, state);
+		break;
 	case MAPPING_OP_UNMAP:
-		if ((req->rights & CAP_DESTROY) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
-		return mapping_unmap_handler(req, state);
+		result = (req->rights & CAP_DESTROY) == 0u ? syscall_result_error(SYSCALL_STATUS_DENIED, 0u)
+		                                           : mapping_unmap_handler(req, state);
+		break;
 	default:
-		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+		result = syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+		break;
 	}
+	TRACE_CAP_OPERATION(KERNEL_TRACE_CAP_CALL_MAPPING_INFO + header.op, KERNEL_TRACE_RECORD_END);
+	return result;
 }

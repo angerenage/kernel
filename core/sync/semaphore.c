@@ -4,6 +4,10 @@
 #include <core/semaphore.h>
 #include <hal/clock.h>
 #include <hal/hcf.h>
+#include <kernel/trace.h>
+
+#define TRACE_SEMAPHORE_PHASE(phase, type)                                                                             \
+	kernel_trace_emit(KERNEL_TRACE_EVENT_SEMAPHORE_PHASE, type, kernel_trace_thread_id(sched_current_thread()), phase)
 
 void semaphore_init(struct semaphore* semaphore, size_t initial_count) {
 	if (semaphore == NULL) return;
@@ -48,26 +52,39 @@ bool semaphore_acquire_cancelable(struct semaphore* semaphore) {
 	for (;;) {
 		struct irq_state semaphore_state;
 		struct irq_state wait_state;
+		bool             blocked;
 
+		TRACE_SEMAPHORE_PHASE(KERNEL_TRACE_SEMAPHORE_CHECK, KERNEL_TRACE_RECORD_BEGIN);
 		semaphore_state = spinlock_lock_irqsave(&semaphore->lock);
 		if (thread_should_cancel(current)) {
 			spinlock_unlock_irqrestore(&semaphore->lock, semaphore_state);
+			TRACE_SEMAPHORE_PHASE(KERNEL_TRACE_SEMAPHORE_CHECK, KERNEL_TRACE_RECORD_END);
 			return false;
 		}
 		if (semaphore->count != 0u) {
 			semaphore->count--;
 			spinlock_unlock_irqrestore(&semaphore->lock, semaphore_state);
+			TRACE_SEMAPHORE_PHASE(KERNEL_TRACE_SEMAPHORE_CHECK, KERNEL_TRACE_RECORD_END);
 			return true;
 		}
+		TRACE_SEMAPHORE_PHASE(KERNEL_TRACE_SEMAPHORE_CHECK, KERNEL_TRACE_RECORD_END);
 
+		TRACE_SEMAPHORE_PHASE(KERNEL_TRACE_SEMAPHORE_QUEUE_LOCK, KERNEL_TRACE_RECORD_BEGIN);
 		wait_state = spinlock_lock_irqsave(&semaphore->waiters.lock);
 		spinlock_unlock(&semaphore->lock);
-		if (!sched_block_current_locked(&semaphore->waiters, THREAD_BLOCK_SEMAPHORE, wait_state)) {
+		TRACE_SEMAPHORE_PHASE(KERNEL_TRACE_SEMAPHORE_QUEUE_LOCK, KERNEL_TRACE_RECORD_END);
+		TRACE_SEMAPHORE_PHASE(KERNEL_TRACE_SEMAPHORE_SCHED_BLOCK, KERNEL_TRACE_RECORD_BEGIN);
+		blocked = sched_block_current_locked(&semaphore->waiters, THREAD_BLOCK_SEMAPHORE, wait_state);
+		TRACE_SEMAPHORE_PHASE(KERNEL_TRACE_SEMAPHORE_SCHED_BLOCK, KERNEL_TRACE_RECORD_END);
+		if (!blocked) {
 			irq_restore(semaphore_state);
 			return false;
 		}
 		irq_restore(semaphore_state);
-		if (thread_should_cancel(current)) return false;
+		TRACE_SEMAPHORE_PHASE(KERNEL_TRACE_SEMAPHORE_CANCEL_CHECK, KERNEL_TRACE_RECORD_BEGIN);
+		blocked = !thread_should_cancel(current);
+		TRACE_SEMAPHORE_PHASE(KERNEL_TRACE_SEMAPHORE_CANCEL_CHECK, KERNEL_TRACE_RECORD_END);
+		if (!blocked) return false;
 	}
 }
 

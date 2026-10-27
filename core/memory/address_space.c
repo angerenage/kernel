@@ -8,6 +8,7 @@
 #include <hal/cache.h>
 #include <hal/hcf.h>
 #include <hal/paging.h>
+#include <kernel/trace.h>
 #include <string.h>
 
 #include "../dma_internal.h"
@@ -901,16 +902,43 @@ bool address_space_unmap(struct address_space* space, struct mapping* mapping) {
 			return false;
 		}
 	}
-	else if (mapping->access != 0u && !hal_paging_unmap(space->backend.process.hal, mapping->address, mapping->size)) {
-		spinlock_unlock_irqrestore(&space->lock, state);
-		return false;
+	else if (mapping->access != 0u) {
+		kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
+		                  KERNEL_TRACE_RECORD_BEGIN,
+		                  kernel_trace_thread_id(sched_current_thread()),
+		                  KERNEL_TRACE_VM_ADDRESS_SPACE_HAL_UNMAP);
+		bool unmapped = hal_paging_unmap(space->backend.process.hal, mapping->address, mapping->size);
+		kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
+		                  KERNEL_TRACE_RECORD_END,
+		                  kernel_trace_thread_id(sched_current_thread()),
+		                  KERNEL_TRACE_VM_ADDRESS_SPACE_HAL_UNMAP);
+		if (!unmapped) {
+			spinlock_unlock_irqrestore(&space->lock, state);
+			return false;
+		}
 	}
+	kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
+	                  KERNEL_TRACE_RECORD_BEGIN,
+	                  kernel_trace_thread_id(sched_current_thread()),
+	                  KERNEL_TRACE_VM_ADDRESS_SPACE_REMOVE);
 	mapping_remove_locked(space, mapping);
+	kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
+	                  KERNEL_TRACE_RECORD_END,
+	                  kernel_trace_thread_id(sched_current_thread()),
+	                  KERNEL_TRACE_VM_ADDRESS_SPACE_REMOVE);
 	memory          = mapping->memory;
 	mapping->memory = NULL;
 	spinlock_unlock_irqrestore(&space->lock, state);
+	kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
+	                  KERNEL_TRACE_RECORD_BEGIN,
+	                  kernel_trace_thread_id(sched_current_thread()),
+	                  KERNEL_TRACE_VM_ADDRESS_SPACE_RELEASE);
 	memory_release(memory);
 	mapping_release(mapping);
+	kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
+	                  KERNEL_TRACE_RECORD_END,
+	                  kernel_trace_thread_id(sched_current_thread()),
+	                  KERNEL_TRACE_VM_ADDRESS_SPACE_RELEASE);
 	return true;
 }
 

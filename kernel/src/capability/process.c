@@ -5,13 +5,19 @@
 #include <base/thread.h>
 #include <core/capability.h>
 #include <core/process.h>
+#include <core/sched.h>
 #include <core/syscall.h>
 #include <core/uthread.h>
 #include <kernel/capability.h>
+#include <kernel/trace.h>
 #include <libc/stdlib.h>
 #include <string.h>
 
 #include "thread.h"
+
+#define TRACE_CAP_OPERATION(operation, type)                                                                           \
+	kernel_trace_emit(                                                                                                 \
+		KERNEL_TRACE_EVENT_CAP_CALL_OPERATION, type, kernel_trace_thread_id(sched_current_thread()), operation)
 
 /* Extract the operation code from a request buffer. Returns -1 if the buffer is too small. */
 static enum process_op process_op_from_request(const void* request, size_t request_size) {
@@ -281,6 +287,7 @@ static syscall_result_t process_handler(const struct cap_request* req) {
 		return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	}
 
+	TRACE_CAP_OPERATION(KERNEL_TRACE_CAP_CALL_PROCESS_INFO + (uint32_t)op, KERNEL_TRACE_RECORD_BEGIN);
 	switch (op) {
 	case PROCESS_OP_INFO:
 		result = process_info_handler(req, process);
@@ -304,6 +311,7 @@ static syscall_result_t process_handler(const struct cap_request* req) {
 		result = syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 		break;
 	}
+	TRACE_CAP_OPERATION(KERNEL_TRACE_CAP_CALL_PROCESS_INFO + (uint32_t)op, KERNEL_TRACE_RECORD_END);
 
 	process_release(process);
 	return result;

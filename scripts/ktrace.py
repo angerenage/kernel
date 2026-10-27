@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 
 import argparse
+import bisect
 import json
 import os
 from pathlib import Path
 import re
+import shutil
 import socket
 import struct
 import subprocess
@@ -28,6 +30,11 @@ EVENT_SCHED_SWITCH = 1
 EVENT_SCHED_BLOCK = 2
 EVENT_SCHED_WAKE = 3
 EVENT_SYSCALL = 4
+EVENT_CAP_CALL_PHASE = 5
+EVENT_CAP_CALL_HANDLER = 6
+EVENT_CAP_CALL_OPERATION = 7
+EVENT_SEMAPHORE_PHASE = 8
+EVENT_VM_PHASE = 9
 
 HEADER = struct.Struct("<QIIQQIIQIIQ")
 CPU_DESCRIPTOR = struct.Struct("<QQQQ")
@@ -79,9 +86,108 @@ BLOCK_REASONS = (
     "parked",
 )
 
+CAP_CALL_PHASE_NAMES = (
+    "cap_acquire",
+    "request_alloc",
+    "request_copy",
+    "response_validate",
+    "begin_call",
+    "kernel_response_alloc",
+    "kernel_handler",
+    "kernel_response_copy",
+    "endpoint_retain",
+    "pending_create",
+    "request_attach",
+    "channel_enqueue",
+    "reply_wait",
+    "pending_destroy",
+    "wait_try_acquire",
+    "wait_block",
+    "wait_result",
+)
+
+CAP_CALL_OPERATION_NAMES = (
+    "process_info",
+    "process_run",
+    "process_wait",
+    "process_detach",
+    "process_kill",
+    "process_spawn_thread",
+    "mapping_info",
+    "mapping_protect",
+    "mapping_unmap",
+    "mapping_sync",
+    "memory_info",
+    "memory_slice",
+)
+
+SEMAPHORE_PHASE_NAMES = (
+    "check",
+    "queue_lock",
+    "sched_block",
+    "cancel_check",
+)
+
+VM_PHASE_NAMES = (
+    "mapping_cap_acquire",
+    "mapping_address_space_unmap",
+    "mapping_object_destroy",
+    "address_space_hal_unmap",
+    "address_space_remove",
+    "address_space_release",
+    "paging_prepare",
+    "paging_change",
+    "paging_shootdown",
+    "paging_commit",
+)
+
 
 class TraceError(Exception):
     pass
+
+
+class SymbolTable:
+    def __init__(self, addresses, names):
+        self.addresses = addresses
+        self.names = names
+
+    def resolve(self, address):
+        index = bisect.bisect_right(self.addresses, address) - 1
+        if index < 0:
+            return f"0x{address:x}"
+        offset = address - self.addresses[index]
+        if offset == 0:
+            return self.names[index]
+        return f"{self.names[index]}+0x{offset:x}"
+
+
+def load_symbols(kernel_elf):
+    if kernel_elf is None:
+        return None
+    tool = shutil.which("llvm-nm") or shutil.which("nm")
+    if tool is None:
+        raise TraceError("llvm-nm or nm is required to symbolize kernel handlers")
+    result = subprocess.run(
+        [tool, "-n", "--defined-only", str(kernel_elf)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    symbols = []
+    for line in result.stdout.splitlines():
+        fields = line.split(maxsplit=2)
+        if len(fields) != 3:
+            continue
+        try:
+            address = int(fields[0], 16)
+        except ValueError:
+            continue
+        symbols.append((address, fields[2]))
+    if not symbols:
+        raise TraceError(f"no symbols found in {kernel_elf}")
+    return SymbolTable(
+        [symbol[0] for symbol in symbols], [symbol[1] for symbol in symbols]
+    )
 
 
 def indexed_name(names, index, prefix):
@@ -158,8 +264,9 @@ def parse_trace(path):
     }
 
 
-def decode_trace(input_path, output_path):
+def decode_trace(input_path, output_path, kernel_elf=None):
     trace = parse_trace(input_path)
+    symbols = load_symbols(kernel_elf)
     records = trace["records"]
     frequency = trace["frequency"]
     origin = records[0][0] if records else 0
@@ -290,6 +397,113 @@ def decode_trace(input_path, output_path):
                         "args": {"status": arg1},
                     }
                 )
+            elif event_id == EVENT_CAP_CALL_PHASE and record_type == RECORD_BEGIN:
+                emit(
+                    {
+                        "ph": "B",
+                        "cat": "cap_call",
+                        "name": indexed_name(CAP_CALL_PHASE_NAMES, arg1, "phase"),
+                        "pid": 1,
+                        "tid": tid,
+                        "ts": timestamp_us(timestamp),
+                    }
+                )
+            elif event_id == EVENT_CAP_CALL_PHASE and record_type == RECORD_END:
+                emit(
+                    {
+                        "ph": "E",
+                        "cat": "cap_call",
+                        "pid": 1,
+                        "tid": tid,
+                        "ts": timestamp_us(timestamp),
+                    }
+                )
+            elif event_id == EVENT_CAP_CALL_HANDLER and record_type == RECORD_BEGIN:
+                handler_name = symbols.resolve(arg1) if symbols is not None else f"handler 0x{arg1:x}"
+                emit(
+                    {
+                        "ph": "B",
+                        "cat": "cap_handler",
+                        "name": handler_name,
+                        "pid": 1,
+                        "tid": tid,
+                        "ts": timestamp_us(timestamp),
+                        "args": {"address": f"0x{arg1:x}"},
+                    }
+                )
+            elif event_id == EVENT_CAP_CALL_HANDLER and record_type == RECORD_END:
+                emit(
+                    {
+                        "ph": "E",
+                        "cat": "cap_handler",
+                        "pid": 1,
+                        "tid": tid,
+                        "ts": timestamp_us(timestamp),
+                    }
+                )
+            elif event_id == EVENT_CAP_CALL_OPERATION and record_type == RECORD_BEGIN:
+                emit(
+                    {
+                        "ph": "B",
+                        "cat": "cap_operation",
+                        "name": indexed_name(CAP_CALL_OPERATION_NAMES, arg1, "operation"),
+                        "pid": 1,
+                        "tid": tid,
+                        "ts": timestamp_us(timestamp),
+                    }
+                )
+            elif event_id == EVENT_CAP_CALL_OPERATION and record_type == RECORD_END:
+                emit(
+                    {
+                        "ph": "E",
+                        "cat": "cap_operation",
+                        "pid": 1,
+                        "tid": tid,
+                        "ts": timestamp_us(timestamp),
+                    }
+                )
+            elif event_id == EVENT_SEMAPHORE_PHASE and record_type == RECORD_BEGIN:
+                emit(
+                    {
+                        "ph": "B",
+                        "cat": "semaphore",
+                        "name": indexed_name(SEMAPHORE_PHASE_NAMES, arg1, "phase"),
+                        "pid": 1,
+                        "tid": tid,
+                        "ts": timestamp_us(timestamp),
+                    }
+                )
+            elif event_id == EVENT_SEMAPHORE_PHASE and record_type == RECORD_END:
+                emit(
+                    {
+                        "ph": "E",
+                        "cat": "semaphore",
+                        "pid": 1,
+                        "tid": tid,
+                        "ts": timestamp_us(timestamp),
+                    }
+                )
+            elif event_id == EVENT_VM_PHASE and record_type == RECORD_BEGIN:
+                emit(
+                    {
+                        "ph": "B",
+                        "cat": "vm",
+                        "name": indexed_name(VM_PHASE_NAMES, arg1, "phase"),
+                        "pid": 1,
+                        "tid": tid,
+                        "ts": timestamp_us(timestamp),
+                    }
+                )
+            elif event_id == EVENT_VM_PHASE and record_type == RECORD_END:
+                emit(
+                    {
+                        "ph": "E",
+                        "cat": "vm",
+                        "pid": 1,
+                        "tid": tid,
+                        "ts": timestamp_us(timestamp),
+                    }
+                )
             else:
                 emit(
                     {
@@ -381,7 +595,7 @@ def qmp_command(stream, execute, arguments=None):
         return response.get("return")
 
 
-def capture_qemu(output_path, timeout, cwd, command):
+def capture_qemu(output_path, timeout, cwd, command, kernel_elf=None):
     if command and command[0] == "--":
         command = command[1:]
     if not command:
@@ -457,7 +671,7 @@ def capture_qemu(output_path, timeout, cwd, command):
 
     if not raw_path.is_file():
         raise TraceError(f"QEMU did not create the raw trace: {raw_path}")
-    decode_trace(raw_path, output)
+    decode_trace(raw_path, output, kernel_elf)
     print(f"ktrace: raw trace: {raw_path}")
     print(f"ktrace: Perfetto JSON: {output}")
     print(f"ktrace: serial log: {log_path}")
@@ -470,6 +684,7 @@ def parse_args():
     decode = subparsers.add_parser("decode", help="convert a binary trace to Perfetto JSON")
     decode.add_argument("input")
     decode.add_argument("output")
+    decode.add_argument("--kernel-elf", help="unstripped kernel ELF used for symbolization")
 
     serial = subparsers.add_parser(
         "extract-serial", help="extract a binary trace from a serial capture"
@@ -483,6 +698,7 @@ def parse_args():
     capture.add_argument("--output", required=True)
     capture.add_argument("--timeout", type=float, default=30)
     capture.add_argument("--cwd", default=os.getcwd())
+    capture.add_argument("--kernel-elf", help="unstripped kernel ELF used for symbolization")
     capture.add_argument("command", nargs=argparse.REMAINDER)
     return parser.parse_args()
 
@@ -491,11 +707,13 @@ def main():
     args = parse_args()
     try:
         if args.operation == "decode":
-            decode_trace(args.input, args.output)
+            decode_trace(args.input, args.output, args.kernel_elf)
         elif args.operation == "extract-serial":
             extract_serial(args.input, args.output)
         elif args.operation == "capture-qemu":
-            capture_qemu(args.output, args.timeout, args.cwd, args.command)
+            capture_qemu(
+                args.output, args.timeout, args.cwd, args.command, args.kernel_elf
+            )
     except (OSError, ValueError, TraceError, subprocess.SubprocessError) as error:
         print(f"ktrace: {error}", file=sys.stderr)
         return 1

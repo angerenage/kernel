@@ -164,6 +164,7 @@ capture_qemu_profile() {
 		--output "$(abspath "$output")" \
 		--timeout "$PROFILE_TIMEOUT" \
 		--cwd "$REPO_ROOT" \
+		--kernel-elf "${build_dir}/kernel/kernel.elf" \
 		-- "${command[@]}"
 }
 

@@ -5,9 +5,11 @@
 #include <core/lock.h>
 #include <core/mm.h>
 #include <core/pmm.h>
+#include <core/sched.h>
 #include <core/spinlock.h>
 #include <hal/hcf.h>
 #include <hal/paging.h>
+#include <kernel/trace.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -631,15 +633,49 @@ bool hal_paging_unmap(struct hal_paging_space* space, uintptr_t virt, size_t siz
 	struct irq_state          state       = spinlock_lock_irqsave(&paging_lock);
 	uint64_t*                 root        = x86_space_root_table(space);
 	struct paging_transaction transaction = {0};
-	bool ok = root != NULL && x86_prepare_range(root, x86_paging_levels() - 1, virt, end, &transaction) &&
-	          x86_change_range(root, x86_paging_levels() - 1, virt, end, false, 0u, &transaction);
+	kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
+	                  KERNEL_TRACE_RECORD_BEGIN,
+	                  kernel_trace_thread_id(sched_current_thread()),
+	                  KERNEL_TRACE_VM_PAGING_PREPARE);
+	bool ok = root != NULL && x86_prepare_range(root, x86_paging_levels() - 1, virt, end, &transaction);
+	kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
+	                  KERNEL_TRACE_RECORD_END,
+	                  kernel_trace_thread_id(sched_current_thread()),
+	                  KERNEL_TRACE_VM_PAGING_PREPARE);
+	if (ok) {
+		kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
+		                  KERNEL_TRACE_RECORD_BEGIN,
+		                  kernel_trace_thread_id(sched_current_thread()),
+		                  KERNEL_TRACE_VM_PAGING_CHANGE);
+		ok = x86_change_range(root, x86_paging_levels() - 1, virt, end, false, 0u, &transaction);
+		kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
+		                  KERNEL_TRACE_RECORD_END,
+		                  kernel_trace_thread_id(sched_current_thread()),
+		                  KERNEL_TRACE_VM_PAGING_CHANGE);
+	}
+	kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
+	                  KERNEL_TRACE_RECORD_BEGIN,
+	                  kernel_trace_thread_id(sched_current_thread()),
+	                  KERNEL_TRACE_VM_PAGING_SHOOTDOWN);
 	x86_tlb_shootdown_range(virt, size);
+	kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
+	                  KERNEL_TRACE_RECORD_END,
+	                  kernel_trace_thread_id(sched_current_thread()),
+	                  KERNEL_TRACE_VM_PAGING_SHOOTDOWN);
+	kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
+	                  KERNEL_TRACE_RECORD_BEGIN,
+	                  kernel_trace_thread_id(sched_current_thread()),
+	                  KERNEL_TRACE_VM_PAGING_COMMIT);
 	if (ok) paging_transaction_commit(&transaction);
 	else {
 		paging_transaction_rollback(&transaction, x86_transaction_restore, NULL);
 		x86_tlb_shootdown_range(virt, size);
 		paging_transaction_abort(&transaction);
 	}
+	kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
+	                  KERNEL_TRACE_RECORD_END,
+	                  kernel_trace_thread_id(sched_current_thread()),
+	                  KERNEL_TRACE_VM_PAGING_COMMIT);
 	spinlock_unlock_irqrestore(&paging_lock, state);
 	return ok;
 }

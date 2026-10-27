@@ -1,13 +1,18 @@
 #include <core/capability_call.h>
 #include <core/id_table.h>
 #include <core/lock.h>
+#include <core/sched.h>
 #include <core/semaphore.h>
+#include <kernel/trace.h>
 #include <libc/stdlib.h>
 #include <stdint.h>
 
 #define CAP_CALL_ID_MIN 1u
 #define CAP_CALL_ID_MAX UINT64_MAX
 #define CAP_CALL_CANCEL_BATCH 16u
+
+#define TRACE_CAP_WAIT_PHASE(phase, type)                                                                              \
+	kernel_trace_emit(KERNEL_TRACE_EVENT_CAP_CALL_PHASE, type, kernel_trace_thread_id(sched_current_thread()), phase)
 
 enum cap_pending_state {
 	CAP_PENDING_STATE_WAITING = 0,
@@ -105,13 +110,25 @@ cap_call_id_t cap_pending_call_id(const struct cap_pending_call* call) {
 }
 
 bool cap_pending_call_wait(struct cap_pending_call* call, syscall_result_t* out_result, const void** out_response) {
+	bool acquired;
+
 	if (out_result != NULL) *out_result = syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	if (out_response != NULL) *out_response = NULL;
 	if (call == NULL) return false;
 
-	if (!semaphore_try_acquire(&call->completion) && !semaphore_acquire_cancelable(&call->completion)) return false;
+	TRACE_CAP_WAIT_PHASE(KERNEL_TRACE_CAP_CALL_WAIT_TRY_ACQUIRE, KERNEL_TRACE_RECORD_BEGIN);
+	acquired = semaphore_try_acquire(&call->completion);
+	TRACE_CAP_WAIT_PHASE(KERNEL_TRACE_CAP_CALL_WAIT_TRY_ACQUIRE, KERNEL_TRACE_RECORD_END);
+	if (!acquired) {
+		TRACE_CAP_WAIT_PHASE(KERNEL_TRACE_CAP_CALL_WAIT_BLOCK, KERNEL_TRACE_RECORD_BEGIN);
+		acquired = semaphore_acquire_cancelable(&call->completion);
+		TRACE_CAP_WAIT_PHASE(KERNEL_TRACE_CAP_CALL_WAIT_BLOCK, KERNEL_TRACE_RECORD_END);
+		if (!acquired) return false;
+	}
+	TRACE_CAP_WAIT_PHASE(KERNEL_TRACE_CAP_CALL_WAIT_RESULT, KERNEL_TRACE_RECORD_BEGIN);
 	if (out_result != NULL) *out_result = call->result;
 	if (out_response != NULL) *out_response = call->response;
+	TRACE_CAP_WAIT_PHASE(KERNEL_TRACE_CAP_CALL_WAIT_RESULT, KERNEL_TRACE_RECORD_END);
 	return true;
 }
 
