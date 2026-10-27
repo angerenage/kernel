@@ -174,6 +174,10 @@ static void x86_tlb_shootdown_range(const struct hal_paging_space* space, uintpt
 	if (current == NULL || current->index >= X86_TLB_MAX_CPUS) hcf();
 	active_cpus = space == &kernel_space ? UINT64_MAX : space->active_cpus;
 	if ((active_cpus & (1ull << current->index)) != 0u) {
+		kernel_trace_emit(KERNEL_TRACE_EVENT_VM_TLB_RANGE,
+		                  KERNEL_TRACE_RECORD_INSTANT,
+		                  trace_tid,
+		                  size / paging_info.minimum_leaf_size);
 		kernel_trace_emit(
 			KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_LOCAL);
 		x86_tlb_flush_range_local(start, size);

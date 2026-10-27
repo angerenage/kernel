@@ -36,6 +36,7 @@ EVENT_CAP_CALL_OPERATION = 7
 EVENT_SEMAPHORE_PHASE = 8
 EVENT_VM_PHASE = 9
 EVENT_SCHED_PHASE = 10
+EVENT_VM_TLB_RANGE = 11
 
 HEADER = struct.Struct("<QIIQQIIQIIQ")
 CPU_DESCRIPTOR = struct.Struct("<QQQQ")
@@ -550,6 +551,19 @@ def decode_trace(input_path, output_path, kernel_elf=None):
                         "pid": 1,
                         "tid": tid,
                         "ts": timestamp_us(timestamp),
+                    }
+                )
+            elif event_id == EVENT_VM_TLB_RANGE:
+                emit(
+                    {
+                        "ph": "i",
+                        "s": "t",
+                        "cat": "vm",
+                        "name": "tlb_invalidation_range",
+                        "pid": 1,
+                        "tid": tid,
+                        "ts": timestamp_us(timestamp),
+                        "args": {"pages": arg1},
                     }
                 )
             else:

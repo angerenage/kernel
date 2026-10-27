@@ -32,6 +32,7 @@ enum kernel_trace_event {
 	KERNEL_TRACE_EVENT_SEMAPHORE_PHASE,
 	KERNEL_TRACE_EVENT_VM_PHASE,
 	KERNEL_TRACE_EVENT_SCHED_PHASE,
+	KERNEL_TRACE_EVENT_VM_TLB_RANGE,
 };
 
 enum kernel_trace_cap_call_phase {
