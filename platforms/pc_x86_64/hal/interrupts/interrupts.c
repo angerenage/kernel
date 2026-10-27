@@ -149,6 +149,7 @@ struct tss64 {
 } __attribute__((packed));
 
 _Static_assert(offsetof(struct tss64, io_bitmap) <= UINT16_MAX, "x86_64 TSS I/O bitmap offset must fit");
+_Static_assert(sizeof(struct tss64) <= UINT16_MAX, "x86_64 TSS size must fit the I/O bitmap offset field");
 _Static_assert(sizeof(((struct tss64*)0)->io_bitmap) == HAL_IO_PORT_BITMAP_STORAGE_SIZE,
                "x86_64 TSS I/O bitmap size mismatch");
 
@@ -260,8 +261,7 @@ static bool x86_setup_exception_stack(struct cpu* cpu) {
 	memset(&x86_tss[cpu_index], 0, sizeof(x86_tss[cpu_index]));
 	x86_tss[cpu_index].rsp0       = (uint64_t)cpu->kernel_entry_stack_top;
 	x86_tss[cpu_index].ist1       = (uint64_t)(uintptr_t)(x86_exception_stack[cpu_index] + X86_EXCEPTION_STACK_SIZE);
-	x86_tss[cpu_index].iomap_base = (uint16_t)offsetof(struct tss64, io_bitmap);
-	hal_io_port_bitmap_deny_all(&x86_tss[cpu_index].io_bitmap);
+	x86_tss[cpu_index].iomap_base = (uint16_t)sizeof(struct tss64);
 
 	base              = (uint64_t)(uintptr_t)&x86_tss[cpu_index];
 	limit             = (uint64_t)(sizeof(x86_tss[cpu_index]) - 1u);
@@ -277,8 +277,14 @@ bool hal_io_port_bitmap_load(const struct hal_io_port_bitmap* bitmap) {
 	struct cpu* cpu = cpu_current();
 
 	if (cpu == NULL || cpu->index >= 64u || !local_ready[cpu->index]) return false;
-	if (bitmap == NULL) hal_io_port_bitmap_deny_all(&x86_tss[cpu->index].io_bitmap);
-	else memcpy(&x86_tss[cpu->index].io_bitmap, bitmap, sizeof(*bitmap));
+	if (bitmap == NULL) {
+		x86_tss[cpu->index].iomap_base = (uint16_t)sizeof(struct tss64);
+	}
+	else {
+		memcpy(&x86_tss[cpu->index].io_bitmap, bitmap, sizeof(*bitmap));
+		__asm__ volatile("" : : : "memory");
+		x86_tss[cpu->index].iomap_base = (uint16_t)offsetof(struct tss64, io_bitmap);
+	}
 	io_port_selection_valid[cpu->index] = false;
 	/* The active task register already references this TSS memory. */
 	__asm__ volatile("" : : : "memory");
