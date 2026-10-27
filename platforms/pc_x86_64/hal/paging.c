@@ -46,6 +46,7 @@ struct hal_paging_space {
 	uintptr_t upper_root_phys;
 	uint64_t  flags;
 	uintptr_t storage_phys;
+	uint64_t  active_cpus;
 };
 
 static struct hal_paging_info paging_info;
@@ -58,6 +59,7 @@ struct x86_tlb_request {
 	uintptr_t start;
 	size_t    size;
 	size_t    source_index;
+	uint64_t  targets;
 	uint64_t  generation;
 };
 
@@ -65,9 +67,10 @@ static bool                    initialized;
 static struct hal_paging_space kernel_space;
 static struct spinlock         paging_lock =
 	SPINLOCK_INIT_CLASS("paging_lock", SPINLOCK_ORDER_PAGING, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
-static struct x86_tlb_request x86_tlb_request;
-static uint64_t               x86_tlb_ack[X86_TLB_MAX_CPUS];
-static struct spinlock        x86_tlb_shootdown_lock = SPINLOCK_INIT_CLASS(
+static struct x86_tlb_request   x86_tlb_request;
+static uint64_t                 x86_tlb_ack[X86_TLB_MAX_CPUS];
+static struct hal_paging_space* x86_active_space[X86_TLB_MAX_CPUS];
+static struct spinlock          x86_tlb_shootdown_lock = SPINLOCK_INIT_CLASS(
 	"tlb_shootdown_lock", SPINLOCK_ORDER_PAGING, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
 
 static inline uint64_t x86_read_cr0(void) {
@@ -143,6 +146,7 @@ static bool x86_tlb_process_request_for_current_cpu(void) {
 	if (cpu == NULL || cpu->index >= X86_TLB_MAX_CPUS) hcf();
 	generation = __atomic_load_n(&x86_tlb_request.generation, __ATOMIC_ACQUIRE);
 	if (generation == 0u || cpu->index == x86_tlb_request.source_index) return false;
+	if ((__atomic_load_n(&x86_tlb_request.targets, __ATOMIC_ACQUIRE) & (1ull << cpu->index)) == 0u) return false;
 	acknowledged = __atomic_load_n(&x86_tlb_ack[cpu->index], __ATOMIC_ACQUIRE);
 	if (acknowledged == generation) return false;
 
@@ -155,7 +159,7 @@ bool x86_64_paging_handle_tlb_nmi(void) {
 	return x86_tlb_process_request_for_current_cpu();
 }
 
-static void x86_tlb_shootdown_range(uintptr_t start, size_t size) {
+static void x86_tlb_shootdown_range(const struct hal_paging_space* space, uintptr_t start, size_t size) {
 	uint64_t                   targets = 0u;
 	struct cpu*                current = cpu_current();
 	const struct cpu_topology* topology;
@@ -165,24 +169,23 @@ static void x86_tlb_shootdown_range(uintptr_t start, size_t size) {
 
 	if (size == 0u) return;
 	shootdown_state = spinlock_lock_irqsave(&x86_tlb_shootdown_lock);
-	x86_tlb_flush_range_local(start, size);
-
-	topology = cpu_topology_get();
+	topology        = cpu_topology_get();
 	if (current == NULL || topology == NULL || topology->cpus == NULL || current->index >= X86_TLB_MAX_CPUS ||
 	    topology->cpu_count == 0u || topology->cpu_count > X86_TLB_MAX_CPUS) {
 		hcf();
 	}
 	cpu_total = topology->cpu_count;
 
-	bool has_remote_target = false;
+	uint64_t active_cpus = space == &kernel_space ? UINT64_MAX : space->active_cpus;
+	if ((active_cpus & (1ull << current->index)) != 0u) x86_tlb_flush_range_local(start, size);
 	for (size_t i = 0u; i < cpu_total; i++) {
 		struct cpu* target = &topology->cpus[i];
-		if (target != current && cpu_state_get(target) == CPU_STATE_ONLINE) {
-			has_remote_target = true;
-			break;
-		}
+		if (target == current || target->index >= X86_TLB_MAX_CPUS || cpu_state_get(target) != CPU_STATE_ONLINE ||
+		    (active_cpus & (1ull << target->index)) == 0u)
+			continue;
+		targets |= 1ull << target->index;
 	}
-	if (!has_remote_target) {
+	if (targets == 0u) {
 		spinlock_unlock_irqrestore(&x86_tlb_shootdown_lock, shootdown_state);
 		return;
 	}
@@ -194,6 +197,7 @@ static void x86_tlb_shootdown_range(uintptr_t start, size_t size) {
 	x86_tlb_request.start        = start;
 	x86_tlb_request.size         = size;
 	x86_tlb_request.source_index = current->index;
+	__atomic_store_n(&x86_tlb_request.targets, targets, __ATOMIC_RELAXED);
 	__atomic_store_n(&x86_tlb_request.generation, generation, __ATOMIC_RELEASE);
 	/* Publish the request before the LAPIC MMIO write that delivers the NMI. */
 	__atomic_thread_fence(__ATOMIC_SEQ_CST);
@@ -204,11 +208,11 @@ static void x86_tlb_shootdown_range(uintptr_t start, size_t size) {
 		if (target == current || target->index >= X86_TLB_MAX_CPUS || cpu_state_get(target) != CPU_STATE_ONLINE) {
 			continue;
 		}
-		targets |= 1ull << target->index;
+		if ((targets & (1ull << target->index)) == 0u) continue;
 		if (!apic_send_sync_nmi(target->index, (uint32_t)target->arch_id)) hcf();
 	}
 
-	for (size_t target_index = 0u; target_index < cpu_total; target_index++) {
+	for (size_t target_index = 0u; target_index < X86_TLB_MAX_CPUS; target_index++) {
 		if ((targets & (1ull << target_index)) == 0u) continue;
 		while (__atomic_load_n(&x86_tlb_ack[target_index], __ATOMIC_ACQUIRE) != generation) {
 			__asm__ volatile("pause" : : : "memory");
@@ -372,7 +376,12 @@ bool hal_paging_init(void) {
 		.upper_root_phys = 0u,
 		.flags           = (uint64_t)x86_paging_levels(),
 	};
-	initialized = x86_space_root_table(&kernel_space) != NULL;
+	initialized         = x86_space_root_table(&kernel_space) != NULL;
+	struct cpu* current = cpu_current();
+	if (initialized && current != NULL && current->index < X86_TLB_MAX_CPUS) {
+		kernel_space.active_cpus         = 1ull << current->index;
+		x86_active_space[current->index] = &kernel_space;
+	}
 	spinlock_unlock_irqrestore(&paging_lock, state);
 	return initialized;
 }
@@ -503,9 +512,17 @@ void hal_paging_space_destroy(struct hal_paging_space* space) {
 
 bool hal_paging_activate(const struct hal_paging_space* space) {
 	struct irq_state state;
+	struct cpu*      current;
 
 	if (space == NULL || space->lower_root_phys == 0u || !initialized) return false;
-	state = spinlock_lock_irqsave(&paging_lock);
+	state   = spinlock_lock_irqsave(&paging_lock);
+	current = cpu_current();
+	if (current != NULL && current->index < X86_TLB_MAX_CPUS) {
+		struct hal_paging_space* previous = x86_active_space[current->index];
+		if (previous != NULL) previous->active_cpus &= ~(1ull << current->index);
+		((struct hal_paging_space*)space)->active_cpus |= 1ull << current->index;
+		x86_active_space[current->index] = (struct hal_paging_space*)space;
+	}
 	x86_write_cr3(space->lower_root_phys & pte_address_mask);
 	spinlock_unlock_irqrestore(&paging_lock, state);
 	return true;
@@ -657,7 +674,7 @@ bool hal_paging_unmap(struct hal_paging_space* space, uintptr_t virt, size_t siz
 	                  KERNEL_TRACE_RECORD_BEGIN,
 	                  kernel_trace_thread_id(sched_current_thread()),
 	                  KERNEL_TRACE_VM_PAGING_SHOOTDOWN);
-	x86_tlb_shootdown_range(virt, size);
+	x86_tlb_shootdown_range(space, virt, size);
 	kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
 	                  KERNEL_TRACE_RECORD_END,
 	                  kernel_trace_thread_id(sched_current_thread()),
@@ -669,7 +686,7 @@ bool hal_paging_unmap(struct hal_paging_space* space, uintptr_t virt, size_t siz
 	if (ok) paging_transaction_commit(&transaction);
 	else {
 		paging_transaction_rollback(&transaction, x86_transaction_restore, NULL);
-		x86_tlb_shootdown_range(virt, size);
+		x86_tlb_shootdown_range(space, virt, size);
 		paging_transaction_abort(&transaction);
 	}
 	kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
@@ -688,11 +705,11 @@ bool hal_paging_protect(struct hal_paging_space* space, uintptr_t virt, size_t s
 	struct paging_transaction transaction = {0};
 	bool ok = root != NULL && x86_prepare_range(root, x86_paging_levels() - 1, virt, end, &transaction) &&
 	          x86_change_range(root, x86_paging_levels() - 1, virt, end, true, flags, &transaction);
-	x86_tlb_shootdown_range(virt, size);
+	x86_tlb_shootdown_range(space, virt, size);
 	if (ok) paging_transaction_commit(&transaction);
 	else {
 		paging_transaction_rollback(&transaction, x86_transaction_restore, NULL);
-		x86_tlb_shootdown_range(virt, size);
+		x86_tlb_shootdown_range(space, virt, size);
 		paging_transaction_abort(&transaction);
 	}
 	spinlock_unlock_irqrestore(&paging_lock, state);
@@ -807,11 +824,11 @@ bool hal_paging_remap(struct hal_paging_space* space, const struct hal_paging_re
 	                                                                        request->virtual_address,
 	                                                                        request->physical_address,
 	                                                                        &transaction);
-	x86_tlb_shootdown_range(request->virtual_address, request->size);
+	x86_tlb_shootdown_range(space, request->virtual_address, request->size);
 	if (ok) paging_transaction_commit(&transaction);
 	else {
 		paging_transaction_rollback(&transaction, x86_transaction_restore, NULL);
-		x86_tlb_shootdown_range(request->virtual_address, request->size);
+		x86_tlb_shootdown_range(space, request->virtual_address, request->size);
 		paging_transaction_abort(&transaction);
 	}
 	spinlock_unlock_irqrestore(&paging_lock, state);
@@ -859,11 +876,11 @@ bool hal_paging_map(struct hal_paging_space* space, const struct hal_paging_map_
 		if (level > 0) *slot |= X86_PTE_LARGE;
 		mapped += x86_leaf_size(level);
 	}
-	x86_tlb_shootdown_range(request->virtual_address, request->size);
+	x86_tlb_shootdown_range(space, request->virtual_address, request->size);
 	if (ok) paging_transaction_commit(&transaction);
 	else {
 		paging_transaction_rollback(&transaction, x86_transaction_restore, NULL);
-		x86_tlb_shootdown_range(request->virtual_address, request->size);
+		x86_tlb_shootdown_range(space, request->virtual_address, request->size);
 		paging_transaction_abort(&transaction);
 	}
 	spinlock_unlock_irqrestore(&paging_lock, state);
