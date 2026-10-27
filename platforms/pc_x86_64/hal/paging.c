@@ -165,11 +165,20 @@ static void x86_tlb_shootdown_range(const struct hal_paging_space* space, uintpt
 	const struct cpu_topology* topology;
 	size_t                     cpu_total;
 	uint64_t                   generation;
+	uint64_t                   trace_tid;
 	struct irq_state           shootdown_state;
 
 	if (size == 0u) return;
+	trace_tid = kernel_trace_thread_id(sched_current_thread());
+
+	kernel_trace_emit(
+		KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_LOCK);
 	shootdown_state = spinlock_lock_irqsave(&x86_tlb_shootdown_lock);
-	topology        = cpu_topology_get();
+	kernel_trace_emit(
+		KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_LOCK);
+	kernel_trace_emit(
+		KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_TARGETS);
+	topology = cpu_topology_get();
 	if (current == NULL || topology == NULL || topology->cpus == NULL || current->index >= X86_TLB_MAX_CPUS ||
 	    topology->cpu_count == 0u || topology->cpu_count > X86_TLB_MAX_CPUS) {
 		hcf();
@@ -185,6 +194,8 @@ static void x86_tlb_shootdown_range(const struct hal_paging_space* space, uintpt
 			continue;
 		targets |= 1ull << target->index;
 	}
+	kernel_trace_emit(
+		KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_TARGETS);
 	if (targets == 0u) {
 		spinlock_unlock_irqrestore(&x86_tlb_shootdown_lock, shootdown_state);
 		return;
@@ -202,6 +213,8 @@ static void x86_tlb_shootdown_range(const struct hal_paging_space* space, uintpt
 	/* Publish the request before the LAPIC MMIO write that delivers the NMI. */
 	__atomic_thread_fence(__ATOMIC_SEQ_CST);
 
+	kernel_trace_emit(
+		KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_SEND);
 	for (size_t i = 0u; i < cpu_total; i++) {
 		struct cpu* target = &topology->cpus[i];
 
@@ -211,13 +224,19 @@ static void x86_tlb_shootdown_range(const struct hal_paging_space* space, uintpt
 		if ((targets & (1ull << target->index)) == 0u) continue;
 		if (!apic_send_sync_nmi(target->index, (uint32_t)target->arch_id)) hcf();
 	}
+	kernel_trace_emit(
+		KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_SEND);
 
+	kernel_trace_emit(
+		KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_WAIT);
 	for (size_t target_index = 0u; target_index < X86_TLB_MAX_CPUS; target_index++) {
 		if ((targets & (1ull << target_index)) == 0u) continue;
 		while (__atomic_load_n(&x86_tlb_ack[target_index], __ATOMIC_ACQUIRE) != generation) {
 			__asm__ volatile("pause" : : : "memory");
 		}
 	}
+	kernel_trace_emit(
+		KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_WAIT);
 	spinlock_unlock_irqrestore(&x86_tlb_shootdown_lock, shootdown_state);
 }
 

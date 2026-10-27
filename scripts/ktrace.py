@@ -144,6 +144,11 @@ VM_PHASE_NAMES = (
     "paging_change_descend",
     "paging_change_empty_scan",
     "paging_change_retire",
+    "tlb_shootdown_lock",
+    "tlb_shootdown_local",
+    "tlb_shootdown_targets",
+    "tlb_shootdown_send",
+    "tlb_shootdown_wait",
 )
 
 SCHED_PHASE_NAMES = (
