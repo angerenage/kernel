@@ -14,6 +14,9 @@
 #define SCHED_MAX_CPU_COUNT 64u
 #define SCHED_IDLE_NAME_MAX 16u
 
+#define TRACE_SCHED_PHASE(phase, type)                                                                                 \
+	kernel_trace_emit(KERNEL_TRACE_EVENT_SCHED_PHASE, type, kernel_trace_thread_id(sched_current_thread()), phase)
+
 enum sched_cpu_activity {
 	SCHED_CPU_ACTIVITY_KERNEL = 0,
 	SCHED_CPU_ACTIVITY_THREAD,
@@ -458,16 +461,24 @@ static void sched_dispatch_next(struct cpu* cpu) {
 	struct sched_cpu_state* state;
 	struct thread*          next;
 	struct thread*          previous;
+	uint64_t                switch_trace_tid;
 	bool                    interrupts_enabled = false;
 
 	if (cpu == NULL) return;
 
+	TRACE_SCHED_PHASE(KERNEL_TRACE_SCHED_DISPATCH_FINISH_PREVIOUS, KERNEL_TRACE_RECORD_BEGIN);
 	sched_finish_context_switch();
+	TRACE_SCHED_PHASE(KERNEL_TRACE_SCHED_DISPATCH_FINISH_PREVIOUS, KERNEL_TRACE_RECORD_END);
 	state    = sched_state_for_cpu(cpu);
 	previous = cpu_current_thread_load(cpu);
-	next     = sched_select_next(cpu);
+	TRACE_SCHED_PHASE(KERNEL_TRACE_SCHED_DISPATCH_SELECT, KERNEL_TRACE_RECORD_BEGIN);
+	next = sched_select_next(cpu);
+	TRACE_SCHED_PHASE(KERNEL_TRACE_SCHED_DISPATCH_SELECT, KERNEL_TRACE_RECORD_END);
 	if (next == NULL) return;
-	if (!sched_activate_thread_address_space(previous, next)) {
+	TRACE_SCHED_PHASE(KERNEL_TRACE_SCHED_DISPATCH_ADDRESS_SPACE, KERNEL_TRACE_RECORD_BEGIN);
+	bool activated = sched_activate_thread_address_space(previous, next);
+	TRACE_SCHED_PHASE(KERNEL_TRACE_SCHED_DISPATCH_ADDRESS_SPACE, KERNEL_TRACE_RECORD_END);
+	if (!activated) {
 		/* Selection consumed the runnable candidate. Preserve it for a later attempt
 		 * and restore the still-active descriptor when yield/preemption had temporarily queued it. */
 		if (!thread_is_idle(next) && !thread_is_terminated(next)) {
@@ -480,12 +491,25 @@ static void sched_dispatch_next(struct cpu* cpu) {
 		}
 		return;
 	}
+	switch_trace_tid = kernel_trace_thread_id(previous != NULL ? previous : next);
 
 	if (previous == next) {
+		kernel_trace_emit(KERNEL_TRACE_EVENT_SCHED_PHASE,
+		                  KERNEL_TRACE_RECORD_BEGIN,
+		                  switch_trace_tid,
+		                  KERNEL_TRACE_SCHED_DISPATCH_SWITCH);
 		sched_set_current(cpu, next);
+		kernel_trace_emit(KERNEL_TRACE_EVENT_SCHED_PHASE,
+		                  KERNEL_TRACE_RECORD_END,
+		                  switch_trace_tid,
+		                  KERNEL_TRACE_SCHED_DISPATCH_SWITCH);
 		return;
 	}
 
+	kernel_trace_emit(KERNEL_TRACE_EVENT_SCHED_PHASE,
+	                  KERNEL_TRACE_RECORD_BEGIN,
+	                  switch_trace_tid,
+	                  KERNEL_TRACE_SCHED_DISPATCH_SWITCH);
 	if (previous != NULL) {
 		interrupts_enabled = irq_enabled();
 		irq_disable_local();
@@ -507,6 +531,8 @@ static void sched_dispatch_next(struct cpu* cpu) {
 		sched_complete_context_switch();
 		if (interrupts_enabled) irq_enable_local();
 	}
+	kernel_trace_emit(
+		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_END, switch_trace_tid, KERNEL_TRACE_SCHED_DISPATCH_SWITCH);
 }
 
 static bool sched_make_runnable_on_cpu(struct cpu* cpu, struct thread* thread, bool allow_current) {
@@ -926,13 +952,23 @@ bool sched_block_current_locked(struct thread_wait_queue* queue, enum thread_blo
 
 	if (reason == THREAD_BLOCK_NONE) reason = THREAD_BLOCK_WAIT_QUEUE;
 
+	TRACE_SCHED_PHASE(KERNEL_TRACE_SCHED_BLOCK_PREPARE, KERNEL_TRACE_RECORD_BEGIN);
 	sched_set_cpu_activity(cpu, SCHED_CPU_ACTIVITY_KERNEL);
 	thread_mark_blocked(current, reason);
 	current->blocked_queue = queue;
 	sched_thread_wait_status_store(current, THREAD_WAIT_STATUS_PENDING);
+	TRACE_SCHED_PHASE(KERNEL_TRACE_SCHED_BLOCK_PREPARE, KERNEL_TRACE_RECORD_END);
+	TRACE_SCHED_PHASE(KERNEL_TRACE_SCHED_BLOCK_ENQUEUE, KERNEL_TRACE_RECORD_BEGIN);
 	queued = sched_wait_queue_enqueue_locked(queue, current);
-	if (queued) cancelled = sched_abort_cancelled_block_locked(queue, current, cpu);
+	TRACE_SCHED_PHASE(KERNEL_TRACE_SCHED_BLOCK_ENQUEUE, KERNEL_TRACE_RECORD_END);
+	if (queued) {
+		TRACE_SCHED_PHASE(KERNEL_TRACE_SCHED_BLOCK_CANCEL_CHECK, KERNEL_TRACE_RECORD_BEGIN);
+		cancelled = sched_abort_cancelled_block_locked(queue, current, cpu);
+		TRACE_SCHED_PHASE(KERNEL_TRACE_SCHED_BLOCK_CANCEL_CHECK, KERNEL_TRACE_RECORD_END);
+	}
+	TRACE_SCHED_PHASE(KERNEL_TRACE_SCHED_BLOCK_QUEUE_UNLOCK, KERNEL_TRACE_RECORD_BEGIN);
 	spinlock_unlock_irqrestore(&queue->lock, queue_irq_state);
+	TRACE_SCHED_PHASE(KERNEL_TRACE_SCHED_BLOCK_QUEUE_UNLOCK, KERNEL_TRACE_RECORD_END);
 
 	if (!queued || cancelled) {
 		if (!cancelled) {

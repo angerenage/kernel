@@ -1,6 +1,7 @@
 #include <core/cpu.h>
 #include <hal/cpu.h>
 #include <hal/io_port.h>
+#include <kernel/trace.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -119,10 +120,25 @@ void hal_cpu_fp_context_restore(const struct hal_cpu_fp_context* context) {
 }
 
 void hal_cpu_context_switch(struct thread_context* current, const struct thread_context* next) {
+	uint64_t trace_tid;
+
 	if (current == NULL || next == NULL) return;
+	trace_tid = (uint64_t)(uintptr_t)current;
+	kernel_trace_emit(
+		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_SCHED_SWITCH_FP_SAVE);
 	hal_cpu_fp_context_save(&current->fp_context);
+	kernel_trace_emit(
+		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_SCHED_SWITCH_FP_SAVE);
+	kernel_trace_emit(
+		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_SCHED_SWITCH_FP_RESTORE);
 	hal_cpu_fp_context_restore(&next->fp_context);
+	kernel_trace_emit(
+		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_SCHED_SWITCH_FP_RESTORE);
+	kernel_trace_emit(
+		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_SCHED_SWITCH_IO_BITMAP);
 	hal_io_port_bitmap_context_switch();
+	kernel_trace_emit(
+		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_SCHED_SWITCH_IO_BITMAP);
 	x86_64_thread_context_switch(current, next);
 }
 

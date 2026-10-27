@@ -35,6 +35,7 @@ EVENT_CAP_CALL_HANDLER = 6
 EVENT_CAP_CALL_OPERATION = 7
 EVENT_SEMAPHORE_PHASE = 8
 EVENT_VM_PHASE = 9
+EVENT_SCHED_PHASE = 10
 
 HEADER = struct.Struct("<QIIQQIIQIIQ")
 CPU_DESCRIPTOR = struct.Struct("<QQQQ")
@@ -139,6 +140,20 @@ VM_PHASE_NAMES = (
     "paging_change",
     "paging_shootdown",
     "paging_commit",
+)
+
+SCHED_PHASE_NAMES = (
+    "block_prepare",
+    "block_enqueue",
+    "block_cancel_check",
+    "block_queue_unlock",
+    "dispatch_finish_previous",
+    "dispatch_select",
+    "dispatch_address_space",
+    "dispatch_switch",
+    "switch_fp_save",
+    "switch_fp_restore",
+    "switch_io_bitmap",
 )
 
 
@@ -499,6 +514,27 @@ def decode_trace(input_path, output_path, kernel_elf=None):
                     {
                         "ph": "E",
                         "cat": "vm",
+                        "pid": 1,
+                        "tid": tid,
+                        "ts": timestamp_us(timestamp),
+                    }
+                )
+            elif event_id == EVENT_SCHED_PHASE and record_type == RECORD_BEGIN:
+                emit(
+                    {
+                        "ph": "B",
+                        "cat": "sched",
+                        "name": indexed_name(SCHED_PHASE_NAMES, arg1, "phase"),
+                        "pid": 1,
+                        "tid": tid,
+                        "ts": timestamp_us(timestamp),
+                    }
+                )
+            elif event_id == EVENT_SCHED_PHASE and record_type == RECORD_END:
+                emit(
+                    {
+                        "ph": "E",
+                        "cat": "sched",
                         "pid": 1,
                         "tid": tid,
                         "ts": timestamp_us(timestamp),
