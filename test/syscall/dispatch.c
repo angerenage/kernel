@@ -45,6 +45,8 @@ DEFINE_SYSCALL_STUB(syscall_cap_recv, SYSCALL_CAP_RECV)
 DEFINE_SYSCALL_STUB(syscall_cap_valid, SYSCALL_CAP_VALID)
 DEFINE_SYSCALL_STUB(syscall_cap_drop, SYSCALL_CAP_DROP)
 DEFINE_SYSCALL_STUB(syscall_cap_unpublish, SYSCALL_CAP_UNPUBLISH)
+DEFINE_SYSCALL_STUB(syscall_trace_register, SYSCALL_TRACE_REGISTER)
+DEFINE_SYSCALL_STUB(syscall_trace_event, SYSCALL_TRACE_EVENT)
 DEFINE_SYSCALL_STUB(syscall_upcall_dropped_count, SYSCALL_UPCALL_DROPPED_COUNT)
 
 static const uintptr_t ordinary_syscalls[] = {
@@ -76,6 +78,8 @@ static const uintptr_t ordinary_syscalls[] = {
 	SYSCALL_CAP_VALID,
 	SYSCALL_CAP_DROP,
 	SYSCALL_CAP_UNPUBLISH,
+	SYSCALL_TRACE_REGISTER,
+	SYSCALL_TRACE_EVENT,
 	SYSCALL_UPCALL_DROPPED_COUNT,
 };
 

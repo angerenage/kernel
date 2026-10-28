@@ -10,6 +10,7 @@
 #include <core/spinlock.h>
 #include <core/thread.h>
 #include <core/uthread.h>
+#include <kernel/trace.h>
 #include <libc/stdlib.h>
 #include <libc/string.h>
 #include <stdbool.h>
@@ -17,6 +18,13 @@
 #include <stdint.h>
 
 static struct id_table process_table = ID_TABLE_INITIALIZER("process_table", 1u, UINT64_MAX);
+static uint64_t        next_process_trace_id;
+
+static uint64_t process_allocate_trace_id(void) {
+	uint64_t id = __atomic_add_fetch(&next_process_trace_id, 1u, __ATOMIC_RELAXED);
+	if (id == 0u) id = __atomic_add_fetch(&next_process_trace_id, 1u, __ATOMIC_RELAXED);
+	return id;
+}
 
 static enum process_thread_spawn_result process_thread_spawn_result_from_uthread(enum uthread_start_result result) {
 	switch (result) {
@@ -339,7 +347,9 @@ enum process_result process_create(struct process** out_process, const char* nam
 		free(process);
 		return id_result == ID_TABLE_NO_MEMORY ? PROCESS_NO_MEMORY : PROCESS_PID_EXHAUSTED;
 	}
-	process->pid = pid;
+	process->pid      = pid;
+	process->trace_id = process_allocate_trace_id();
+	kernel_trace_register_process(process->trace_id, process->pid, process->name);
 
 	*out_process = process;
 	return PROCESS_OK;

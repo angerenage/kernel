@@ -37,12 +37,17 @@ enum syscall_frame_action syscall_dispatch_user_frame(struct hal_userspace_retur
 	if (out_result == NULL) return SYSCALL_FRAME_WRITE_RESULT;
 	if (number != SYSCALL_UPCALL_RETURN) {
 #if KERNEL_TRACE_ENABLED
-		uint64_t trace_thread = kernel_trace_thread_id(sched_current_thread());
-		kernel_trace_emit(KERNEL_TRACE_EVENT_SYSCALL, KERNEL_TRACE_RECORD_BEGIN, trace_thread, number);
+		bool     trace_syscall = number != SYSCALL_TRACE_REGISTER && number != SYSCALL_TRACE_EVENT;
+		uint64_t trace_thread  = kernel_trace_thread_id(sched_current_thread());
+		if (trace_syscall) {
+			kernel_trace_emit(KERNEL_TRACE_EVENT_SYSCALL, KERNEL_TRACE_RECORD_BEGIN, trace_thread, number);
+		}
 #endif
 		*out_result = syscall_dispatch(number, arg0, arg1, arg2, arg3, arg4, arg5);
 #if KERNEL_TRACE_ENABLED
-		kernel_trace_emit(KERNEL_TRACE_EVENT_SYSCALL, KERNEL_TRACE_RECORD_END, trace_thread, out_result->status);
+		if (trace_syscall) {
+			kernel_trace_emit(KERNEL_TRACE_EVENT_SYSCALL, KERNEL_TRACE_RECORD_END, trace_thread, out_result->status);
+		}
 #endif
 		return SYSCALL_FRAME_WRITE_RESULT;
 	}

@@ -108,7 +108,9 @@ struct process_thread_params {
 
 /* Aggregate state of one process: its address space, threads, and lifecycle bookkeeping. */
 struct process {
-	process_id_t       pid;
+	process_id_t pid;
+	/* Monotonic identity used to keep reused PIDs separate in traces. */
+	uint64_t           trace_id;
 	const char*        name;
 	enum process_state state;
 	/* Exit code produced when the process terminates. */

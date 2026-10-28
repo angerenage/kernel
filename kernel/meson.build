@@ -104,6 +104,7 @@ kernel_objs = base_sources + core_sources + boot_sources + firmware_sources + ke
 	'src/syscall/syscall.c',
 	'src/syscall/thread.c',
 	'src/syscall/time.c',
+	'src/syscall/trace.c',
 	'src/syscall/upcall.c',
 	'src/syscall/user_frame.c',
 ]

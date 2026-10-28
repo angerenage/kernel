@@ -25,6 +25,7 @@ FLAG_VIRTUAL_TSC = 1 << 1
 RECORD_INSTANT = 0
 RECORD_BEGIN = 1
 RECORD_END = 2
+RECORD_METADATA = 4
 
 EVENT_SCHED_SWITCH = 1
 EVENT_SCHED_BLOCK = 2
@@ -38,6 +39,13 @@ EVENT_VM_PHASE = 9
 EVENT_SCHED_PHASE = 10
 EVENT_VM_TLB_RANGE = 11
 EVENT_VM_BACKING_WRITE = 12
+EVENT_USERSPACE = 13
+EVENT_STRING = 14
+EVENT_PROCESS_NAME = 15
+EVENT_THREAD_PROCESS = 16
+EVENT_THREAD_NAME = 17
+EVENT_THREAD_ID = 18
+EVENT_PROCESS_ID = 19
 
 HEADER = struct.Struct("<QIIQQIIQIIQ")
 CPU_DESCRIPTOR = struct.Struct("<QQQQ")
@@ -75,6 +83,8 @@ SYSCALL_NAMES = (
     "cap_unpublish",
     "upcall_dropped_count",
     "upcall_return",
+    "trace_register",
+    "trace_event",
 )
 
 BLOCK_REASONS = (
@@ -302,13 +312,55 @@ def decode_trace(input_path, output_path, kernel_elf=None):
     origin = records[0][0] if records else 0
     maximum = records[-1][0] if records else origin
     thread_ids = {}
+    string_chunks = {}
+    string_final_chunks = {}
+    process_name_labels = {}
+    process_ids = {}
+    thread_processes = {}
+    thread_name_labels = {}
+    user_thread_ids = {}
     cpu_seen = [False] * trace["cpu_count"]
 
-    for _timestamp, arg0, arg1, event_id, _cpu, _record_type, _flags in records:
-        referenced_threads = (arg0, arg1) if event_id == EVENT_SCHED_SWITCH else (arg0,)
+    for _timestamp, arg0, arg1, event_id, _cpu, record_type, flags in records:
+        if event_id == EVENT_STRING and record_type == RECORD_METADATA:
+            chunk_index = flags & 0x7F
+            chunks = string_chunks.setdefault(arg0, {})
+            chunk = struct.pack("<Q", arg1)
+            if chunk_index in chunks and chunks[chunk_index] != chunk:
+                raise TraceError(f"trace string hash collision for 0x{arg0:x}")
+            chunks[chunk_index] = chunk
+            if flags & 0x80:
+                previous = string_final_chunks.setdefault(arg0, chunk_index)
+                if previous != chunk_index:
+                    raise TraceError(f"trace string length collision for 0x{arg0:x}")
+        elif event_id == EVENT_PROCESS_NAME and record_type == RECORD_METADATA:
+            process_name_labels[arg0] = arg1
+        elif event_id == EVENT_PROCESS_ID and record_type == RECORD_METADATA:
+            process_ids[arg0] = arg1
+        elif event_id == EVENT_THREAD_PROCESS and record_type == RECORD_METADATA:
+            thread_processes[arg0] = arg1
+        elif event_id == EVENT_THREAD_NAME and record_type == RECORD_METADATA:
+            thread_name_labels[arg0] = arg1
+        elif event_id == EVENT_THREAD_ID and record_type == RECORD_METADATA:
+            user_thread_ids[arg0] = arg1
+
+        if event_id == EVENT_SCHED_SWITCH:
+            referenced_threads = (arg0, arg1)
+        elif event_id in (EVENT_STRING, EVENT_PROCESS_NAME, EVENT_PROCESS_ID):
+            referenced_threads = ()
+        else:
+            referenced_threads = (arg0,)
         for raw in referenced_threads:
             if raw != 0 and raw not in thread_ids:
                 thread_ids[raw] = len(thread_ids) + 1
+
+    strings = {}
+    for label, final_chunk in string_final_chunks.items():
+        chunks = string_chunks.get(label, {})
+        if any(index not in chunks for index in range(final_chunk + 1)):
+            continue
+        encoded = b"".join(chunks[index] for index in range(final_chunk + 1))
+        strings[label] = encoded.split(b"\0", 1)[0].decode("utf-8", errors="replace")
 
     def timestamp_us(ticks, start=origin):
         return (ticks - start) * 1_000_000.0 / frequency
@@ -317,6 +369,16 @@ def decode_trace(input_path, output_path, kernel_elf=None):
         if raw == 0:
             return 0
         return thread_ids[raw]
+
+    def process_track_id(process_id):
+        return 10000 + process_id
+
+    def thread_process_id(raw):
+        process_id = thread_processes.get(raw)
+        return 1 if process_id is None else process_track_id(process_id)
+
+    def string_name(label, fallback):
+        return strings.get(label, fallback)
 
     def metadata(name, pid, display_name, tid=0):
         return {
@@ -342,10 +404,26 @@ def decode_trace(input_path, output_path, kernel_elf=None):
 
         emit(metadata("process_name", 0, "kernel CPUs"))
         emit(metadata("process_name", 1, "kernel threads"))
+        trace_process_ids = set(process_name_labels) | set(thread_processes.values())
+        for trace_process_id in sorted(trace_process_ids):
+            process_id = process_ids.get(trace_process_id)
+            fallback_id = process_id if process_id is not None else trace_process_id
+            name = string_name(process_name_labels.get(trace_process_id), f"process {fallback_id}")
+            display_name = name if process_id is None else f"{name} [{process_id}]"
+            emit(metadata("process_name", process_track_id(trace_process_id), display_name))
         for cpu in range(trace["cpu_count"]):
             emit(metadata("thread_name", 0, f"CPU {cpu}", 1000 + cpu))
         for raw, tid in thread_ids.items():
-            emit(metadata("thread_name", 1, f"kernel thread {tid} (0x{raw:x})", tid))
+            process_id = thread_processes.get(raw)
+            if process_id is None:
+                display_name = f"kernel thread {tid} (0x{raw:x})"
+            else:
+                user_tid = user_thread_ids.get(raw)
+                fallback = f"thread {user_tid}" if user_tid is not None else f"thread {tid}"
+                display_name = string_name(thread_name_labels.get(raw), fallback)
+                if user_tid is not None:
+                    display_name = f"{display_name} [{user_tid}]"
+            emit(metadata("thread_name", thread_process_id(raw), display_name, tid))
         emit(
             {
                 "ph": "i",
@@ -380,7 +458,10 @@ def decode_trace(input_path, output_path, kernel_elf=None):
                     {
                         "ph": "B",
                         "cat": "scheduler",
-                        "name": f"thread {thread_number(arg1)}",
+                        "name": string_name(
+                            thread_name_labels.get(arg1),
+                            f"thread {user_thread_ids.get(arg1, thread_number(arg1))}",
+                        ),
                         "pid": 0,
                         "tid": 1000 + cpu,
                         "ts": timestamp_us(timestamp),
@@ -389,7 +470,17 @@ def decode_trace(input_path, output_path, kernel_elf=None):
                 )
                 continue
 
+            if event_id in (
+                EVENT_STRING,
+                EVENT_PROCESS_NAME,
+                EVENT_THREAD_PROCESS,
+                EVENT_THREAD_NAME,
+                EVENT_THREAD_ID,
+                EVENT_PROCESS_ID,
+            ):
+                continue
             tid = thread_number(arg0)
+            pid = thread_process_id(arg0)
             if event_id in (EVENT_SCHED_BLOCK, EVENT_SCHED_WAKE):
                 emit(
                     {
@@ -397,7 +488,7 @@ def decode_trace(input_path, output_path, kernel_elf=None):
                         "s": "t",
                         "cat": "scheduler",
                         "name": "block" if event_id == EVENT_SCHED_BLOCK else "wake",
-                        "pid": 1,
+                        "pid": pid,
                         "tid": tid,
                         "ts": timestamp_us(timestamp),
                         "args": {
@@ -411,7 +502,7 @@ def decode_trace(input_path, output_path, kernel_elf=None):
                         "ph": "B",
                         "cat": "syscall",
                         "name": indexed_name(SYSCALL_NAMES, arg1, "syscall"),
-                        "pid": 1,
+                        "pid": pid,
                         "tid": tid,
                         "ts": timestamp_us(timestamp),
                     }
@@ -421,7 +512,7 @@ def decode_trace(input_path, output_path, kernel_elf=None):
                     {
                         "ph": "E",
                         "cat": "syscall",
-                        "pid": 1,
+                        "pid": pid,
                         "tid": tid,
                         "ts": timestamp_us(timestamp),
                         "args": {"status": arg1},
@@ -433,7 +524,7 @@ def decode_trace(input_path, output_path, kernel_elf=None):
                         "ph": "B",
                         "cat": "cap_call",
                         "name": indexed_name(CAP_CALL_PHASE_NAMES, arg1, "phase"),
-                        "pid": 1,
+                        "pid": pid,
                         "tid": tid,
                         "ts": timestamp_us(timestamp),
                     }
@@ -443,7 +534,7 @@ def decode_trace(input_path, output_path, kernel_elf=None):
                     {
                         "ph": "E",
                         "cat": "cap_call",
-                        "pid": 1,
+                        "pid": pid,
                         "tid": tid,
                         "ts": timestamp_us(timestamp),
                     }
@@ -455,7 +546,7 @@ def decode_trace(input_path, output_path, kernel_elf=None):
                         "ph": "B",
                         "cat": "cap_handler",
                         "name": handler_name,
-                        "pid": 1,
+                        "pid": pid,
                         "tid": tid,
                         "ts": timestamp_us(timestamp),
                         "args": {"address": f"0x{arg1:x}"},
@@ -466,7 +557,7 @@ def decode_trace(input_path, output_path, kernel_elf=None):
                     {
                         "ph": "E",
                         "cat": "cap_handler",
-                        "pid": 1,
+                        "pid": pid,
                         "tid": tid,
                         "ts": timestamp_us(timestamp),
                     }
@@ -477,7 +568,7 @@ def decode_trace(input_path, output_path, kernel_elf=None):
                         "ph": "B",
                         "cat": "cap_operation",
                         "name": indexed_name(CAP_CALL_OPERATION_NAMES, arg1, "operation"),
-                        "pid": 1,
+                        "pid": pid,
                         "tid": tid,
                         "ts": timestamp_us(timestamp),
                     }
@@ -487,7 +578,7 @@ def decode_trace(input_path, output_path, kernel_elf=None):
                     {
                         "ph": "E",
                         "cat": "cap_operation",
-                        "pid": 1,
+                        "pid": pid,
                         "tid": tid,
                         "ts": timestamp_us(timestamp),
                     }
@@ -498,7 +589,7 @@ def decode_trace(input_path, output_path, kernel_elf=None):
                         "ph": "B",
                         "cat": "semaphore",
                         "name": indexed_name(SEMAPHORE_PHASE_NAMES, arg1, "phase"),
-                        "pid": 1,
+                        "pid": pid,
                         "tid": tid,
                         "ts": timestamp_us(timestamp),
                     }
@@ -508,7 +599,7 @@ def decode_trace(input_path, output_path, kernel_elf=None):
                     {
                         "ph": "E",
                         "cat": "semaphore",
-                        "pid": 1,
+                        "pid": pid,
                         "tid": tid,
                         "ts": timestamp_us(timestamp),
                     }
@@ -519,7 +610,7 @@ def decode_trace(input_path, output_path, kernel_elf=None):
                         "ph": "B",
                         "cat": "vm",
                         "name": indexed_name(VM_PHASE_NAMES, arg1, "phase"),
-                        "pid": 1,
+                        "pid": pid,
                         "tid": tid,
                         "ts": timestamp_us(timestamp),
                     }
@@ -529,7 +620,7 @@ def decode_trace(input_path, output_path, kernel_elf=None):
                     {
                         "ph": "E",
                         "cat": "vm",
-                        "pid": 1,
+                        "pid": pid,
                         "tid": tid,
                         "ts": timestamp_us(timestamp),
                     }
@@ -540,7 +631,7 @@ def decode_trace(input_path, output_path, kernel_elf=None):
                         "ph": "B",
                         "cat": "sched",
                         "name": indexed_name(SCHED_PHASE_NAMES, arg1, "phase"),
-                        "pid": 1,
+                        "pid": pid,
                         "tid": tid,
                         "ts": timestamp_us(timestamp),
                     }
@@ -550,7 +641,7 @@ def decode_trace(input_path, output_path, kernel_elf=None):
                     {
                         "ph": "E",
                         "cat": "sched",
-                        "pid": 1,
+                        "pid": pid,
                         "tid": tid,
                         "ts": timestamp_us(timestamp),
                     }
@@ -562,7 +653,7 @@ def decode_trace(input_path, output_path, kernel_elf=None):
                         "s": "t",
                         "cat": "vm",
                         "name": "tlb_invalidation_range",
-                        "pid": 1,
+                        "pid": pid,
                         "tid": tid,
                         "ts": timestamp_us(timestamp),
                         "args": {"pages": arg1},
@@ -575,10 +666,44 @@ def decode_trace(input_path, output_path, kernel_elf=None):
                         "s": "t",
                         "cat": "vm",
                         "name": "backing_write",
-                        "pid": 1,
+                        "pid": pid,
                         "tid": tid,
                         "ts": timestamp_us(timestamp),
                         "args": {"bytes": arg1},
+                    }
+                )
+            elif event_id == EVENT_USERSPACE and record_type == RECORD_BEGIN:
+                emit(
+                    {
+                        "ph": "B",
+                        "cat": "userspace",
+                        "name": string_name(arg1, f"label 0x{arg1:x}"),
+                        "pid": pid,
+                        "tid": tid,
+                        "ts": timestamp_us(timestamp),
+                    }
+                )
+            elif event_id == EVENT_USERSPACE and record_type == RECORD_END:
+                emit(
+                    {
+                        "ph": "E",
+                        "cat": "userspace",
+                        "pid": pid,
+                        "tid": tid,
+                        "ts": timestamp_us(timestamp),
+                        "args": {"label": string_name(arg1, f"0x{arg1:x}")},
+                    }
+                )
+            elif event_id == EVENT_USERSPACE and record_type == RECORD_INSTANT:
+                emit(
+                    {
+                        "ph": "i",
+                        "s": "t",
+                        "cat": "userspace",
+                        "name": string_name(arg1, f"label 0x{arg1:x}"),
+                        "pid": pid,
+                        "tid": tid,
+                        "ts": timestamp_us(timestamp),
                     }
                 )
             else:
@@ -588,7 +713,7 @@ def decode_trace(input_path, output_path, kernel_elf=None):
                         "s": "t",
                         "cat": "kernel",
                         "name": f"event_{event_id}",
-                        "pid": 1,
+                        "pid": pid,
                         "tid": tid,
                         "ts": timestamp_us(timestamp),
                         "args": {"arg1": arg1},

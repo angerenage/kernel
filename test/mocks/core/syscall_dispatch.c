@@ -7,6 +7,7 @@
 #include "../../../kernel/src/syscall/process.h"
 #include "../../../kernel/src/syscall/thread.h"
 #include "../../../kernel/src/syscall/time.h"
+#include "../../../kernel/src/syscall/trace.h"
 #include "../../../kernel/src/syscall/upcall.h"
 
 static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
@@ -34,6 +35,9 @@ static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 	[SYSCALL_CAP_VALID]     = syscall_cap_valid,
 	[SYSCALL_CAP_DROP]      = syscall_cap_drop,
 	[SYSCALL_CAP_UNPUBLISH] = syscall_cap_unpublish,
+
+	[SYSCALL_TRACE_REGISTER] = syscall_trace_register,
+	[SYSCALL_TRACE_EVENT]    = syscall_trace_event,
 
 	[SYSCALL_UPCALL_DROPPED_COUNT] = syscall_upcall_dropped_count,
 };

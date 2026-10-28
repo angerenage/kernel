@@ -199,10 +199,15 @@ bool kernel_trace_init(void) {
 }
 
 uint64_t kernel_trace_thread_id(const struct thread* thread) {
-	return (uint64_t)(uintptr_t)thread;
+	return thread == NULL ? 0u : thread->trace_id;
 }
 
-void kernel_trace_emit(uint32_t event_id, enum kernel_trace_record_type type, uint64_t arg0, uint64_t arg1) {
+bool kernel_trace_is_active(void) {
+	return __atomic_load_n(&trace_active, __ATOMIC_ACQUIRE);
+}
+
+static void trace_emit_record(uint32_t event_id, enum kernel_trace_record_type type, uint8_t flags, uint64_t arg0,
+                              uint64_t arg1) {
 	struct kernel_trace_cpu_descriptor* descriptor;
 	struct kernel_trace_record*         records;
 	struct irq_state                    irq_state;
@@ -239,11 +244,84 @@ void kernel_trace_emit(uint32_t event_id, enum kernel_trace_record_type type, ui
 			.event_id  = event_id,
 			.cpu       = (uint16_t)cpu,
 			.type      = (uint8_t)type,
+			.flags     = flags,
 		};
 		__atomic_store_n(&descriptor->committed, index + 1u, __ATOMIC_RELEASE);
 	}
 	(void)__atomic_fetch_sub(&trace_writers, 1u, __ATOMIC_RELEASE);
 	irq_restore(irq_state);
+}
+
+void kernel_trace_emit(uint32_t event_id, enum kernel_trace_record_type type, uint64_t arg0, uint64_t arg1) {
+	trace_emit_record(event_id, type, 0u, arg0, arg1);
+}
+
+static trace_label_id_t trace_string_hash(const char* string, size_t length) {
+	trace_label_id_t hash = 14695981039346656037ull;
+
+	for (size_t i = 0u; i < length; i++) {
+		hash ^= (uint8_t)string[i];
+		hash *= 1099511628211ull;
+	}
+	if (hash == TRACE_LABEL_ID_INVALID || hash == UINT64_MAX) hash ^= 0x9e3779b97f4a7c15ull;
+	return hash;
+}
+
+static size_t trace_string_length(const char* string) {
+	size_t length = 0u;
+	while (length < TRACE_LABEL_NAME_MAX && string[length] != '\0') length++;
+	return length;
+}
+
+trace_label_id_t kernel_trace_register_string(const char* string, size_t length) {
+	trace_label_id_t label;
+	size_t           chunks;
+
+	if (!kernel_trace_is_active() || string == NULL || length == 0u || length > TRACE_LABEL_NAME_MAX) {
+		return TRACE_LABEL_ID_INVALID;
+	}
+	label  = trace_string_hash(string, length);
+	chunks = length / sizeof(uint64_t) + 1u;
+	for (size_t chunk_index = 0u; chunk_index < chunks; chunk_index++) {
+		uint64_t chunk      = 0u;
+		size_t   offset     = chunk_index * sizeof(chunk);
+		size_t   chunk_size = length > offset ? length - offset : 0u;
+		if (chunk_size > sizeof(chunk)) chunk_size = sizeof(chunk);
+		if (chunk_size != 0u) memcpy(&chunk, string + offset, chunk_size);
+		trace_emit_record(KERNEL_TRACE_EVENT_STRING,
+		                  KERNEL_TRACE_RECORD_METADATA,
+		                  (uint8_t)(chunk_index | (chunk_index + 1u == chunks ? 0x80u : 0u)),
+		                  label,
+		                  chunk);
+	}
+	return label;
+}
+
+void kernel_trace_register_process(uint64_t trace_process_id, uint64_t process_id, const char* name) {
+	trace_label_id_t label;
+
+	if (!kernel_trace_is_active() || trace_process_id == 0u || process_id == 0u) return;
+	if (name == NULL || name[0] == '\0') name = "process";
+	label = kernel_trace_register_string(name, trace_string_length(name));
+	if (label == TRACE_LABEL_ID_INVALID) return;
+	kernel_trace_emit(KERNEL_TRACE_EVENT_PROCESS_ID, KERNEL_TRACE_RECORD_METADATA, trace_process_id, process_id);
+	kernel_trace_emit(KERNEL_TRACE_EVENT_PROCESS_NAME, KERNEL_TRACE_RECORD_METADATA, trace_process_id, label);
+}
+
+void kernel_trace_register_user_thread(const struct thread* thread, uint64_t trace_process_id, uint64_t thread_id,
+                                       const char* name) {
+	trace_label_id_t label;
+	uint64_t         trace_thread;
+
+	if (!kernel_trace_is_active() || thread == NULL || trace_process_id == 0u || thread_id == 0u) return;
+	trace_thread = kernel_trace_thread_id(thread);
+	if (name == NULL || name[0] == '\0') name = "thread";
+	label = kernel_trace_register_string(name, trace_string_length(name));
+	kernel_trace_emit(KERNEL_TRACE_EVENT_THREAD_PROCESS, KERNEL_TRACE_RECORD_METADATA, trace_thread, trace_process_id);
+	kernel_trace_emit(KERNEL_TRACE_EVENT_THREAD_ID, KERNEL_TRACE_RECORD_METADATA, trace_thread, thread_id);
+	if (label != TRACE_LABEL_ID_INVALID) {
+		kernel_trace_emit(KERNEL_TRACE_EVENT_THREAD_NAME, KERNEL_TRACE_RECORD_METADATA, trace_thread, label);
+	}
 }
 
 void kernel_trace_finalize(void) {

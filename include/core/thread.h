@@ -123,7 +123,9 @@ struct thread_wait_queue {
 
 /* Core thread descriptor shared by scheduler, wait queues, and higher-level thread wrappers. */
 struct thread {
-	const char*               name;
+	const char* name;
+	/* Monotonic identity used instead of an address in traces. */
+	uint64_t                  trace_id;
 	struct cpu*               cpu;
 	struct cpu*               preferred_cpu;
 	enum thread_state         state;

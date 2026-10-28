@@ -8,6 +8,7 @@
 #include "signal.h"
 #include "thread.h"
 #include "time.h"
+#include "trace.h"
 #include "upcall.h"
 
 static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
@@ -45,6 +46,9 @@ static syscall_fn_t syscall_table[SYSCALL_COUNT] = {
 	[SYSCALL_CAP_VALID]     = syscall_cap_valid,
 	[SYSCALL_CAP_DROP]      = syscall_cap_drop,
 	[SYSCALL_CAP_UNPUBLISH] = syscall_cap_unpublish,
+
+	[SYSCALL_TRACE_REGISTER] = syscall_trace_register,
+	[SYSCALL_TRACE_EVENT]    = syscall_trace_event,
 
 	[SYSCALL_UPCALL_DROPPED_COUNT] = syscall_upcall_dropped_count,
 };

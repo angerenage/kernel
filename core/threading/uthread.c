@@ -14,6 +14,7 @@
 #include <core/uthread.h>
 #include <hal/hcf.h>
 #include <hal/userspace.h>
+#include <kernel/trace.h>
 #include <libc/stdlib.h>
 #include <libc/string.h>
 #include <stddef.h>
@@ -529,6 +530,7 @@ enum uthread_start_result uthread_commit_prepared(struct uthread* thread, bool m
 		thread->thread.state = THREAD_STATE_NEW;
 		return UTHREAD_START_SCHEDULER_REJECTED;
 	}
+	kernel_trace_register_user_thread(&thread->thread, process->trace_id, thread->id, thread->thread.name);
 	return UTHREAD_START_OK;
 }
 

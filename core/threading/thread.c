@@ -2,6 +2,14 @@
 #include <core/thread.h>
 #include <hal/interrupts.h>
 
+static uint64_t next_thread_trace_id;
+
+static uint64_t thread_allocate_trace_id(void) {
+	uint64_t id = __atomic_add_fetch(&next_thread_trace_id, 1u, __ATOMIC_RELAXED);
+	if (id == 0u) id = __atomic_add_fetch(&next_thread_trace_id, 1u, __ATOMIC_RELAXED);
+	return id;
+}
+
 int32_t thread_priority_clamp(int32_t priority) {
 	if (priority < THREAD_PRIORITY_MIN) return THREAD_PRIORITY_MIN;
 	if (priority > THREAD_PRIORITY_MAX) return THREAD_PRIORITY_MAX;
@@ -64,6 +72,7 @@ enum thread_init_result thread_init_context(struct thread* thread, const struct 
 	priority = thread_priority_clamp(params->base_priority);
 	*thread  = (struct thread){
 		.name                = params->name,
+		.trace_id            = thread_allocate_trace_id(),
 		.cpu                 = NULL,
 		.preferred_cpu       = params->preferred_cpu,
 		.state               = THREAD_STATE_NEW,
@@ -139,6 +148,7 @@ void thread_init_idle(struct thread* thread, struct cpu* cpu, const char* name) 
 
 	*thread = (struct thread){
 		.name                = name,
+		.trace_id            = thread_allocate_trace_id(),
 		.cpu                 = cpu,
 		.preferred_cpu       = cpu,
 		.state               = THREAD_STATE_IDLE,
