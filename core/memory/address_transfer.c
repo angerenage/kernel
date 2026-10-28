@@ -69,13 +69,25 @@ static enum address_transfer_result locate_locked(struct address_space* space, u
 }
 
 static enum address_transfer_result validate_locked(struct address_space* space, uintptr_t address, size_t size,
-                                                    uint32_t access) {
+                                                    uint32_t access, struct mapping** out_first_mapping,
+                                                    size_t* out_first_memory_offset, size_t* out_first_chunk) {
 	size_t done = 0u;
+	if (out_first_mapping != NULL) *out_first_mapping = NULL;
+	if (out_first_memory_offset != NULL) *out_first_memory_offset = 0u;
+	if (out_first_chunk != NULL) *out_first_chunk = 0u;
 	while (done < size) {
+		struct mapping*              mapping;
+		size_t                       memory_offset;
 		size_t                       chunk;
-		enum address_transfer_result result = locate_locked(space, address + done, access, NULL, NULL, &chunk);
+		enum address_transfer_result result =
+			locate_locked(space, address + done, access, &mapping, &memory_offset, &chunk);
 		if (result != ADDRESS_TRANSFER_OK) return result;
 		if (chunk > size - done) chunk = size - done;
+		if (done == 0u) {
+			if (out_first_mapping != NULL) *out_first_mapping = mapping;
+			if (out_first_memory_offset != NULL) *out_first_memory_offset = memory_offset;
+			if (out_first_chunk != NULL) *out_first_chunk = chunk;
+		}
 		done += chunk;
 	}
 	return ADDRESS_TRANSFER_OK;
@@ -88,7 +100,7 @@ enum address_transfer_result address_space_validate_range(struct address_space* 
 	if (!range_end(address, size, NULL)) return ADDRESS_TRANSFER_ADDRESS_OVERFLOW;
 	if (!address_space_is_initialized(space)) return ADDRESS_TRANSFER_INVALID_ARGUMENTS;
 	state                               = spinlock_lock_irqsave(&space->lock);
-	enum address_transfer_result result = validate_locked(space, address, size, access);
+	enum address_transfer_result result = validate_locked(space, address, size, access, NULL, NULL, NULL);
 	spinlock_unlock_irqrestore(&space->lock, state);
 	return result;
 }
@@ -96,19 +108,22 @@ enum address_transfer_result address_space_validate_range(struct address_space* 
 enum address_transfer_result address_space_copy_from(struct address_space* space, uintptr_t address, void* dst,
                                                      size_t size) {
 	struct irq_state state;
+	struct mapping*  mapping;
+	size_t           object_offset;
+	size_t           chunk;
 	size_t           done = 0u;
 	if (size == 0u) return ADDRESS_TRANSFER_OK;
 	if (dst == NULL || !address_space_is_initialized(space)) return ADDRESS_TRANSFER_INVALID_ARGUMENTS;
 	if (!range_end(address, size, NULL)) return ADDRESS_TRANSFER_ADDRESS_OVERFLOW;
-	state = spinlock_lock_irqsave(&space->lock);
-	enum address_transfer_result result =
-		validate_locked(space, address, size, ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER);
+	state                               = spinlock_lock_irqsave(&space->lock);
+	enum address_transfer_result result = validate_locked(
+		space, address, size, ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER, &mapping, &object_offset, &chunk);
 	while (result == ADDRESS_TRANSFER_OK && done < size) {
-		struct mapping* mapping;
-		size_t          object_offset, chunk;
-		result = locate_locked(
-			space, address + done, ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER, &mapping, &object_offset, &chunk);
-		if (chunk > size - done) chunk = size - done;
+		if (done != 0u) {
+			result = locate_locked(
+				space, address + done, ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER, &mapping, &object_offset, &chunk);
+			if (chunk > size - done) chunk = size - done;
+		}
 		if (result == ADDRESS_TRANSFER_OK && !memory_read(mapping->memory, object_offset, (uint8_t*)dst + done, chunk))
 			result = ADDRESS_TRANSFER_FAULT_FAILED;
 		done += chunk;
@@ -120,19 +135,26 @@ enum address_transfer_result address_space_copy_from(struct address_space* space
 enum address_transfer_result address_space_copy_to(struct address_space* space, uintptr_t address, const void* src,
                                                    size_t size) {
 	struct irq_state state;
+	struct mapping*  mapping;
+	size_t           object_offset;
+	size_t           chunk;
 	size_t           done = 0u;
 	if (size == 0u) return ADDRESS_TRANSFER_OK;
 	if (src == NULL || !address_space_is_initialized(space)) return ADDRESS_TRANSFER_INVALID_ARGUMENTS;
 	if (!range_end(address, size, NULL)) return ADDRESS_TRANSFER_ADDRESS_OVERFLOW;
-	state = spinlock_lock_irqsave(&space->lock);
-	enum address_transfer_result result =
-		validate_locked(space, address, size, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER);
+	state                               = spinlock_lock_irqsave(&space->lock);
+	enum address_transfer_result result = validate_locked(
+		space, address, size, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER, &mapping, &object_offset, &chunk);
 	while (result == ADDRESS_TRANSFER_OK && done < size) {
-		struct mapping* mapping;
-		size_t          object_offset, chunk;
-		result = locate_locked(
-			space, address + done, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER, &mapping, &object_offset, &chunk);
-		if (chunk > size - done) chunk = size - done;
+		if (done != 0u) {
+			result = locate_locked(space,
+			                       address + done,
+			                       ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER,
+			                       &mapping,
+			                       &object_offset,
+			                       &chunk);
+			if (chunk > size - done) chunk = size - done;
+		}
 		if (result == ADDRESS_TRANSFER_OK &&
 		    !memory_write(mapping->memory, object_offset, (const uint8_t*)src + done, chunk))
 			result = ADDRESS_TRANSFER_FAULT_FAILED;
@@ -171,9 +193,10 @@ enum address_transfer_result address_space_copy_between(struct address_space* ds
 		return ADDRESS_TRANSFER_ADDRESS_OVERFLOW;
 	lock_spaces(src_space, dst_space, &state, &first, &second);
 	enum address_transfer_result result =
-		validate_locked(src_space, src_address, size, ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER);
+		validate_locked(src_space, src_address, size, ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER, NULL, NULL, NULL);
 	if (result == ADDRESS_TRANSFER_OK)
-		result = validate_locked(dst_space, dst_address, size, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER);
+		result = validate_locked(
+			dst_space, dst_address, size, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER, NULL, NULL, NULL);
 	backward = src_space == dst_space && dst_address > src_address && dst_address < src_end;
 	while (result == ADDRESS_TRANSFER_OK && done < size) {
 		struct mapping *src_mapping, *dst_mapping;
