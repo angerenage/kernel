@@ -6,6 +6,7 @@
 #include <kernel/trace.h>
 #include <libc/stdlib.h>
 #include <stdint.h>
+#include <string.h>
 
 #define CAP_CALL_ID_MIN 1u
 #define CAP_CALL_ID_MAX UINT64_MAX
@@ -45,7 +46,6 @@ static void cap_pending_call_release(struct cap_pending_call* call) {
 	if (__atomic_sub_fetch(&call->reference_count, 1u, __ATOMIC_ACQ_REL) != 0u) return;
 	if (call->object != NULL) cap_object_end_call(call->object);
 	free(call->request);
-	free(call->response);
 	free(call);
 }
 
@@ -79,13 +79,6 @@ struct cap_pending_call* cap_pending_call_create(struct cap_object* object, chan
 	}
 	call = calloc(1u, sizeof(*call));
 	if (call == NULL) return NULL;
-	if (response_capacity != 0u) {
-		call->response = malloc(response_capacity);
-		if (call->response == NULL) {
-			free(call);
-			return NULL;
-		}
-	}
 
 	call->endpoint_id       = endpoint_id;
 	call->provider          = provider;
@@ -109,11 +102,10 @@ cap_call_id_t cap_pending_call_id(const struct cap_pending_call* call) {
 	return call == NULL ? CAP_CALL_ID_INVALID : call->id;
 }
 
-bool cap_pending_call_wait(struct cap_pending_call* call, syscall_result_t* out_result, const void** out_response) {
+bool cap_pending_call_wait(struct cap_pending_call* call, syscall_result_t* out_result) {
 	bool acquired;
 
 	if (out_result != NULL) *out_result = syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
-	if (out_response != NULL) *out_response = NULL;
 	if (call == NULL) return false;
 
 	TRACE_CAP_WAIT_PHASE(KERNEL_TRACE_CAP_CALL_WAIT_TRY_ACQUIRE, KERNEL_TRACE_RECORD_BEGIN);
@@ -127,7 +119,6 @@ bool cap_pending_call_wait(struct cap_pending_call* call, syscall_result_t* out_
 	}
 	TRACE_CAP_WAIT_PHASE(KERNEL_TRACE_CAP_CALL_WAIT_RESULT, KERNEL_TRACE_RECORD_BEGIN);
 	if (out_result != NULL) *out_result = call->result;
-	if (out_response != NULL) *out_response = call->response;
 	TRACE_CAP_WAIT_PHASE(KERNEL_TRACE_CAP_CALL_WAIT_RESULT, KERNEL_TRACE_RECORD_END);
 	return true;
 }
@@ -186,9 +177,8 @@ enum cap_pending_reply_result cap_pending_call_prepare_reply(cap_call_id_t id, p
 	struct cap_pending_call* call;
 
 	if (out_reply == NULL) return CAP_PENDING_REPLY_NOT_FOUND;
-	out_reply->call     = NULL;
-	out_reply->response = NULL;
-	call                = cap_pending_call_acquire(id);
+	out_reply->call = NULL;
+	call            = cap_pending_call_acquire(id);
 	if (call == NULL) return CAP_PENDING_REPLY_NOT_FOUND;
 	if (call->provider != provider) {
 		cap_pending_call_release(call);
@@ -203,8 +193,7 @@ enum cap_pending_reply_result cap_pending_call_prepare_reply(cap_call_id_t id, p
 		return CAP_PENDING_REPLY_ALREADY_COMPLETED;
 	}
 
-	out_reply->call     = call;
-	out_reply->response = call->response;
+	out_reply->call = call;
 	return CAP_PENDING_REPLY_OK;
 }
 
@@ -214,25 +203,7 @@ void cap_pending_call_finish_reply(struct cap_pending_reply* reply, syscall_stat
 	if (reply == NULL || reply->call == NULL) return;
 	call = reply->call;
 	cap_pending_call_complete(call, status, response_size);
-	reply->call     = NULL;
-	reply->response = NULL;
-	cap_pending_call_release(call);
-}
-
-void cap_pending_call_abort_reply(struct cap_pending_reply* reply) {
-	struct cap_pending_call* call;
-
-	if (reply == NULL || reply->call == NULL) return;
-	call = reply->call;
-	if (__atomic_load_n(&call->channel_closed, __ATOMIC_ACQUIRE) != 0u ||
-	    __atomic_load_n(&call->caller_closed, __ATOMIC_ACQUIRE) != 0u) {
-		cap_pending_call_complete(call, SYSCALL_STATUS_UNAVAILABLE, 0u);
-	}
-	else {
-		__atomic_store_n(&call->state, CAP_PENDING_STATE_WAITING, __ATOMIC_RELEASE);
-	}
-	reply->call     = NULL;
-	reply->response = NULL;
+	reply->call = NULL;
 	cap_pending_call_release(call);
 }
 

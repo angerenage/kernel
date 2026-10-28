@@ -155,10 +155,12 @@ Test(syscall, capability_reply_delivers_to_caller_before_success) {
 	struct process*          caller;
 	struct uthread*          provider_thread;
 	struct cap_pending_call* pending;
-	struct mapping*          response_mapping = NULL;
-	void*                    response_address = NULL;
-	const uint32_t           reply_value      = 0x55aa55aau;
-	uint32_t                 delivered        = 0u;
+	struct mapping*          provider_mapping  = NULL;
+	struct mapping*          response_mapping  = NULL;
+	void*                    provider_response = NULL;
+	void*                    response_address  = NULL;
+	const uint32_t           reply_value       = 0x55aa55aau;
+	uint32_t                 delivered         = 0u;
 	syscall_result_t         result;
 	syscall_result_t         call_result;
 
@@ -168,9 +170,19 @@ Test(syscall, capability_reply_delivers_to_caller_before_success) {
 	caller          = syscall_test_spawn_process("syscall/cap-reply-caller");
 	provider_thread = process_main_thread(provider);
 	cr_assert_not_null(provider_thread);
-	provider_thread->thread.address_space = NULL;
 	sched_set_current(cpu_current(), &provider_thread->thread);
 
+	cr_assert(test_address_space_map(process_address_space(provider),
+	                                 TEST_MAPPING_GRANULE,
+	                                 MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+	                                 0u,
+	                                 TEST_MAPPING_GRANULE,
+	                                 0u,
+	                                 &provider_mapping,
+	                                 &provider_response));
+	cr_assert_eq(address_space_copy_to(
+					 process_address_space(provider), (uintptr_t)provider_response, &reply_value, sizeof(reply_value)),
+	             ADDRESS_TRANSFER_OK);
 	cr_assert(test_address_space_map(process_address_space(caller),
 	                                 TEST_MAPPING_GRANULE,
 	                                 MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
@@ -185,7 +197,7 @@ Test(syscall, capability_reply_delivers_to_caller_before_success) {
 
 	result = syscall_dispatch(SYSCALL_CAP_REPLY,
 	                          cap_pending_call_id(pending),
-	                          (uintptr_t)&reply_value,
+	                          (uintptr_t)provider_response,
 	                          sizeof(reply_value),
 	                          SYSCALL_STATUS_OK,
 	                          0u,
@@ -196,10 +208,12 @@ Test(syscall, capability_reply_delivers_to_caller_before_success) {
 	             ADDRESS_TRANSFER_OK);
 	cr_assert_eq(delivered, reply_value, "CAP_REPLY returned success before delivering the caller response");
 
-	cap_pending_call_wait(pending, &call_result, NULL);
+	cap_pending_call_wait(pending, &call_result);
 	cr_assert_eq(call_result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(call_result.value, sizeof(reply_value));
 	cap_pending_call_destroy(pending);
+	cr_assert(address_space_unmap(process_address_space(provider), provider_mapping));
+	mapping_release(provider_mapping);
 	cr_assert(address_space_unmap(process_address_space(caller), response_mapping));
 	mapping_release(response_mapping);
 	syscall_test_reset_state();
@@ -247,7 +261,7 @@ Test(syscall, capability_reply_reports_failed_caller_delivery) {
 	                          0u,
 	                          0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
-	cap_pending_call_wait(pending, &call_result, NULL);
+	cap_pending_call_wait(pending, &call_result);
 	cr_assert_eq(call_result.status, SYSCALL_STATUS_UNAVAILABLE);
 	cr_assert_eq(call_result.value, 0u);
 	cap_pending_call_destroy(pending);
@@ -273,7 +287,7 @@ Test(syscall, pending_capability_call_wait_returns_for_cancellation_cleanup) {
 	cr_assert_not_null(pending);
 	call_id = cap_pending_call_id(pending);
 	cr_assert(thread_request_cancel(&caller_thread->thread));
-	cr_assert_not(cap_pending_call_wait(pending, &call_result, NULL),
+	cr_assert_not(cap_pending_call_wait(pending, &call_result),
 	              "a canceled caller must regain control before its pending call is destroyed");
 	cap_pending_call_destroy(pending);
 	cr_assert_eq(cap_pending_call_prepare_reply(call_id, 2u, 0u, &reply),

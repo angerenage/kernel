@@ -20,7 +20,6 @@ struct cap_pending_call {
 	size_t             response_capacity;
 	void*              request;
 	size_t             request_size;
-	void*              response;
 	syscall_result_t   result;
 	struct semaphore   completion;
 	struct cap_object* object;
@@ -30,10 +29,9 @@ struct cap_pending_call {
 	uint64_t           reference_count;
 };
 
-/* A claimed provider reply and its writable response buffer. */
+/* A claimed provider reply. */
 struct cap_pending_reply {
 	struct cap_pending_call* call;
-	void*                    response;
 };
 
 /* A pinned provider request and its immutable request buffer. */
@@ -63,7 +61,7 @@ struct cap_pending_call* cap_pending_call_create(struct cap_object* object, chan
 cap_call_id_t cap_pending_call_id(const struct cap_pending_call* call);
 
 /* Wait for a pending call to reach a terminal result, or return false so cancellation cleanup can run. */
-bool cap_pending_call_wait(struct cap_pending_call* call, syscall_result_t* out_result, const void** out_response);
+bool cap_pending_call_wait(struct cap_pending_call* call, syscall_result_t* out_result);
 
 /* Remove and release a pending call. */
 void cap_pending_call_destroy(struct cap_pending_call* call);
@@ -86,9 +84,6 @@ enum cap_pending_reply_result cap_pending_call_prepare_reply(cap_call_id_t id, p
 
 /* Publish the terminal result of a claimed provider reply. */
 void cap_pending_call_finish_reply(struct cap_pending_reply* reply, syscall_status_t status, size_t response_size);
-
-/* Release a reply claim so it can be retried or canceled. */
-void cap_pending_call_abort_reply(struct cap_pending_reply* reply);
 
 /* Complete one pending call with an error status. */
 bool cap_pending_call_fail(cap_call_id_t id, syscall_status_t status);

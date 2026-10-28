@@ -488,7 +488,7 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 
 	cap_release(cap);
 	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_REPLY_WAIT, KERNEL_TRACE_RECORD_BEGIN);
-	completed = cap_pending_call_wait(pending, &call_result, NULL);
+	completed = cap_pending_call_wait(pending, &call_result);
 	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_REPLY_WAIT, KERNEL_TRACE_RECORD_END);
 	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_PENDING_DESTROY, KERNEL_TRACE_RECORD_BEGIN);
 	cap_pending_call_destroy(pending);
@@ -514,7 +514,9 @@ static bool cap_reply_status_is_valid(syscall_status_t status) {
 	}
 }
 
-static syscall_status_t syscall_cap_reply_deliver(const struct cap_pending_reply* reply, size_t response_size) {
+static syscall_status_t syscall_cap_reply_deliver(const struct cap_pending_reply* reply,
+                                                  struct address_space* provider_space, uintptr_t response,
+                                                  size_t response_size) {
 	struct process*              caller;
 	enum address_transfer_result transfer_result;
 
@@ -526,8 +528,14 @@ static syscall_status_t syscall_cap_reply_deliver(const struct cap_pending_reply
 		return SYSCALL_STATUS_OK;
 	}
 
-	transfer_result = address_space_copy_to(
-		process_address_space(caller), reply->call->response_address, reply->response, response_size);
+	if (provider_space == NULL) {
+		transfer_result = address_space_copy_to(
+			process_address_space(caller), reply->call->response_address, (const void*)response, response_size);
+	}
+	else {
+		transfer_result = address_space_copy_between(
+			process_address_space(caller), reply->call->response_address, provider_space, response, response_size);
+	}
 	process_release(caller);
 	return transfer_result == ADDRESS_TRANSFER_OK ? SYSCALL_STATUS_OK : SYSCALL_STATUS_UNAVAILABLE;
 }
@@ -541,6 +549,7 @@ syscall_result_t syscall_cap_reply(uintptr_t arg0, uintptr_t arg1, uintptr_t arg
 	syscall_status_t              delivery_status;
 	enum cap_pending_reply_result prepare_result;
 	syscall_result_t              copy_result;
+	struct address_space*         provider_space;
 
 	(void)arg4;
 	(void)arg5;
@@ -555,6 +564,13 @@ syscall_result_t syscall_cap_reply(uintptr_t arg0, uintptr_t arg1, uintptr_t arg
 	if (!cap_reply_status_is_valid(status)) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 3u);
 	if (status != SYSCALL_STATUS_OK && response_size != 0u) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 2u);
+	}
+	provider_space = syscall_current_user_space();
+	if (response_size != 0u && provider_space != NULL) {
+		enum address_transfer_result transfer_result = address_space_validate_range(
+			provider_space, arg1, response_size, ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER);
+		copy_result = syscall_result_from_address_transfer(transfer_result, 1u);
+		if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
 	}
 
 	prepare_result = cap_pending_call_prepare_reply((cap_call_id_t)arg0, process_pid(process), response_size, &reply);
@@ -571,13 +587,7 @@ syscall_result_t syscall_cap_reply(uintptr_t arg0, uintptr_t arg1, uintptr_t arg
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
-	copy_result = syscall_copy_from_user(syscall_current_user_space(), arg1, reply.response, response_size, 1u);
-	if (copy_result.status != SYSCALL_STATUS_OK) {
-		cap_pending_call_abort_reply(&reply);
-		return copy_result;
-	}
-
-	delivery_status = syscall_cap_reply_deliver(&reply, response_size);
+	delivery_status = syscall_cap_reply_deliver(&reply, provider_space, arg1, response_size);
 	if (delivery_status != SYSCALL_STATUS_OK) {
 		cap_pending_call_finish_reply(&reply, delivery_status, 0u);
 		return syscall_result_error(delivery_status, 0u);

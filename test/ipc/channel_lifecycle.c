@@ -85,7 +85,7 @@ Test(channel, destroy_completes_pending_calls_as_unavailable) {
 	cr_assert_not_null(call);
 
 	cr_assert_eq(channel_destroy(channel, 77u), CHANNEL_OK);
-	cap_pending_call_wait(call, &result, NULL);
+	cap_pending_call_wait(call, &result);
 	cr_assert_eq(result.status,
 	             SYSCALL_STATUS_UNAVAILABLE,
 	             "closing the endpoint must wake callers waiting for a provider reply");
