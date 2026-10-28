@@ -13,7 +13,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 usage() {
 	cat <<'EOF'
-Usage: build.sh (--arch <arch> | --all) [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--setup|-s] [--compile|-c] [-sc] [--reconfigure] [--no-tests] [--test-sanitizers] [--kernel-selftests] [--kernel-selftests-autorun] [--kernel-selftests-suite <name>] [--kernel-selftests-iommu <kind>] [--kernel-boot-debug] [--kernel-trace] [--kernel-trace-duration-ms <ms>] [--kernel-trace-buffer-kb <KiB>] [--kernel-trace-transport <qemu|serial>] [--crash-server-url <url>]
+Usage: build.sh (--arch <arch> | --all) [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--setup|-s] [--compile|-c] [-sc] [--reconfigure] [--optimization <level>] [--no-tests] [--test-sanitizers] [--kernel-selftests] [--kernel-selftests-autorun] [--kernel-selftests-suite <name>] [--kernel-selftests-iommu <kind>] [--kernel-boot-debug] [--kernel-trace] [--kernel-trace-duration-ms <ms>] [--kernel-trace-buffer-kb <KiB>] [--kernel-trace-transport <qemu|serial>] [--crash-server-url <url>]
 
 Target selection:
   --arch <arch>  Build a single architecture (x86_64, aarch64, riscv64, loongarch64).
@@ -25,6 +25,9 @@ Actions:
                     When neither --setup nor --compile is passed, both are run.
   -sc            Short form for running both setup and compile.
   --reconfigure  Force Meson reconfiguration for existing build directories.
+  --optimization <level>
+                  Meson optimization level: plain, 0, g, 1, 2, 3, or s.
+                  Defaults to 0.
   --no-tests     Configure Meson with -Dtests=false.
   --test-sanitizers
                   Instrument native tests with AddressSanitizer and
@@ -164,6 +167,7 @@ setup_arch() {
 		"$build_dir"
 		"--cross-file" "$cross_file"
 		"-Dplatform=${platform}"
+		"-Doptimization=${OPTIMIZATION}"
 		"-Dtests=$( (( BUILD_TESTS )) && printf true || printf false )"
 		"-Dtest_sanitizers=$( (( TEST_SANITIZERS )) && printf true || printf false )"
 		"-Dkernel_selftests=$( (( BUILD_KERNEL_SELFTESTS )) && printf true || printf false )"
@@ -184,6 +188,7 @@ setup_arch() {
 			"--reconfigure"
 			"--cross-file" "$cross_file"
 			"-Dplatform=${platform}"
+			"-Doptimization=${OPTIMIZATION}"
 			"-Dtests=$( (( BUILD_TESTS )) && printf true || printf false )"
 			"-Dtest_sanitizers=$( (( TEST_SANITIZERS )) && printf true || printf false )"
 			"-Dkernel_selftests=$( (( BUILD_KERNEL_SELFTESTS )) && printf true || printf false )"
@@ -278,6 +283,7 @@ BUILD_PREFIX="build"
 DO_SETUP=0
 DO_COMPILE=0
 RECONFIGURE=0
+OPTIMIZATION="0"
 BUILD_TESTS=1
 TEST_SANITIZERS=0
 BUILD_KERNEL_SELFTESTS=0
@@ -352,6 +358,17 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--reconfigure)
 			RECONFIGURE=1
+			shift
+			;;
+		--optimization)
+			[[ $# -ge 2 ]] || error "missing value for --optimization"
+			case "$2" in plain|0|g|1|2|3|s) ;; *) error "unsupported optimization level: $2" ;; esac
+			OPTIMIZATION="$2"
+			shift 2
+			;;
+		--optimization=*)
+			OPTIMIZATION="${1#*=}"
+			case "$OPTIMIZATION" in plain|0|g|1|2|3|s) ;; *) error "unsupported optimization level: $OPTIMIZATION" ;; esac
 			shift
 			;;
 		--no-tests)
