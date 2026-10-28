@@ -16,12 +16,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-static struct id_table process_table = {
-	.lock    = SPINLOCK_INIT_CLASS("process_table", SPINLOCK_ORDER_ID_TABLE, SPINLOCK_FLAG_IRQSAVE),
-	.next_id = 1u,
-	.min_id  = 1u,
-	.max_id  = UINT64_MAX,
-};
+static struct id_table process_table = ID_TABLE_INITIALIZER("process_table", 1u, UINT64_MAX);
 
 static enum process_thread_spawn_result process_thread_spawn_result_from_uthread(enum uthread_start_result result) {
 	switch (result) {

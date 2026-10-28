@@ -68,12 +68,7 @@ static struct uthread_reaper uthread_reapers[UTHREAD_REAPER_MAX_CPUS];
 static struct spinlock       uthread_reaper_init_lock =
 	SPINLOCK_INIT_CLASS("uthread_reaper_init", SPINLOCK_ORDER_SCHED, SPINLOCK_FLAG_IRQSAVE);
 static bool            uthread_reapers_initialized;
-static struct id_table uthread_table = {
-	.lock    = SPINLOCK_INIT_CLASS("uthread_table", SPINLOCK_ORDER_ID_TABLE, SPINLOCK_FLAG_IRQSAVE),
-	.next_id = 1u,
-	.min_id  = 1u,
-	.max_id  = UINT64_MAX,
-};
+static struct id_table uthread_table = ID_TABLE_INITIALIZER("uthread_table", 1u, UINT64_MAX);
 
 static void uthread_reaper_entry(void* arg);
 

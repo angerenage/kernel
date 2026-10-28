@@ -10,12 +10,7 @@
 #include <stdbool.h>
 #include <string.h>
 
-static struct id_table channel_table = {
-	.lock    = SPINLOCK_INIT_CLASS("channel_table", SPINLOCK_ORDER_ID_TABLE, SPINLOCK_FLAG_IRQSAVE),
-	.next_id = 1u,
-	.min_id  = 1u,
-	.max_id  = UINT64_MAX,
-};
+static struct id_table channel_table = ID_TABLE_INITIALIZER("channel_table", 1u, UINT64_MAX);
 
 struct channel* channel_create(process_id_t owner_pid, bool with_activity_signal) {
 	struct channel*      ch;

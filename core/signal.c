@@ -37,12 +37,7 @@ struct signal_wait_binding {
 	bool                        waiting;
 };
 
-static struct id_table signal_table = {
-	.lock    = SPINLOCK_INIT_CLASS("signal_table", SPINLOCK_ORDER_ID_TABLE, SPINLOCK_FLAG_IRQSAVE),
-	.next_id = 1u,
-	.min_id  = 1u,
-	.max_id  = UINT64_MAX,
-};
+static struct id_table signal_table = ID_TABLE_INITIALIZER("signal_table", 1u, UINT64_MAX);
 
 static bool signal_retain_callback(void* value, void* context) {
 	(void)context;
@@ -1147,8 +1142,8 @@ void signal_unregister_thread_receivers(struct uthread* target) {
 	if (target == NULL) return;
 
 	table_state = spinlock_lock_irqsave(&signal_table.lock);
-	for (size_t table_index = 0u; table_index < signal_table.capacity; table_index++) {
-		struct signal*                 signal = signal_table.slots[table_index];
+	for (size_t table_index = 0u; table_index < id_table_extent_locked(&signal_table); table_index++) {
+		struct signal*                 signal = id_table_lookup_index_locked(&signal_table, table_index);
 		struct signal_handler_binding* handler_previous;
 		struct signal_handler_binding* handler;
 		struct signal_handler_binding* retired_previous;

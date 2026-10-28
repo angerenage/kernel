@@ -21,12 +21,8 @@ enum cap_pending_state {
 	CAP_PENDING_STATE_COMPLETED,
 };
 
-static struct id_table pending_call_table = {
-	.lock    = SPINLOCK_INIT_CLASS("pending_call_table", SPINLOCK_ORDER_ID_TABLE, SPINLOCK_FLAG_IRQSAVE),
-	.next_id = CAP_CALL_ID_MIN,
-	.min_id  = CAP_CALL_ID_MIN,
-	.max_id  = CAP_CALL_ID_MAX,
-};
+static struct id_table pending_call_table =
+	ID_TABLE_INITIALIZER("pending_call_table", CAP_CALL_ID_MIN, CAP_CALL_ID_MAX);
 
 static bool cap_pending_call_retain_callback(void* value, void* context) {
 	struct cap_pending_call* call = value;
@@ -230,8 +226,8 @@ void cap_pending_call_cancel_channel(channel_id_t endpoint_id) {
 		bool                     finished;
 		struct irq_state         irq_state = spinlock_lock_irqsave(&pending_call_table.lock);
 
-		while (cursor < pending_call_table.capacity && count < CAP_CALL_CANCEL_BATCH) {
-			struct cap_pending_call* call = pending_call_table.slots[cursor++];
+		while (cursor < id_table_extent_locked(&pending_call_table) && count < CAP_CALL_CANCEL_BATCH) {
+			struct cap_pending_call* call = id_table_lookup_index_locked(&pending_call_table, cursor++);
 			if (call == NULL || call->endpoint_id != endpoint_id ||
 			    __atomic_load_n(&call->state, __ATOMIC_ACQUIRE) == CAP_PENDING_STATE_COMPLETED) {
 				continue;
@@ -239,7 +235,7 @@ void cap_pending_call_cancel_channel(channel_id_t endpoint_id) {
 			(void)__atomic_add_fetch(&call->reference_count, 1u, __ATOMIC_RELAXED);
 			batch[count++] = call;
 		}
-		finished = cursor >= pending_call_table.capacity;
+		finished = cursor >= id_table_extent_locked(&pending_call_table);
 		spinlock_unlock_irqrestore(&pending_call_table.lock, irq_state);
 
 		for (size_t i = 0u; i < count; i++) {
@@ -263,8 +259,8 @@ void cap_pending_call_cancel_caller(process_id_t caller) {
 		bool                     finished;
 		struct irq_state         irq_state = spinlock_lock_irqsave(&pending_call_table.lock);
 
-		while (cursor < pending_call_table.capacity && count < CAP_CALL_CANCEL_BATCH) {
-			struct cap_pending_call* call = pending_call_table.slots[cursor++];
+		while (cursor < id_table_extent_locked(&pending_call_table) && count < CAP_CALL_CANCEL_BATCH) {
+			struct cap_pending_call* call = id_table_lookup_index_locked(&pending_call_table, cursor++);
 			if (call == NULL || call->caller != caller ||
 			    __atomic_load_n(&call->state, __ATOMIC_ACQUIRE) == CAP_PENDING_STATE_COMPLETED) {
 				continue;
@@ -272,7 +268,7 @@ void cap_pending_call_cancel_caller(process_id_t caller) {
 			(void)__atomic_add_fetch(&call->reference_count, 1u, __ATOMIC_RELAXED);
 			batch[count++] = call;
 		}
-		finished = cursor >= pending_call_table.capacity;
+		finished = cursor >= id_table_extent_locked(&pending_call_table);
 		spinlock_unlock_irqrestore(&pending_call_table.lock, irq_state);
 
 		for (size_t i = 0u; i < count; i++) {
@@ -296,8 +292,8 @@ void cap_pending_call_cancel_provider(process_id_t provider) {
 		bool                     finished;
 		struct irq_state         irq_state = spinlock_lock_irqsave(&pending_call_table.lock);
 
-		while (cursor < pending_call_table.capacity && count < CAP_CALL_CANCEL_BATCH) {
-			struct cap_pending_call* call = pending_call_table.slots[cursor++];
+		while (cursor < id_table_extent_locked(&pending_call_table) && count < CAP_CALL_CANCEL_BATCH) {
+			struct cap_pending_call* call = id_table_lookup_index_locked(&pending_call_table, cursor++);
 			if (call == NULL || call->provider != provider ||
 			    __atomic_load_n(&call->state, __ATOMIC_ACQUIRE) == CAP_PENDING_STATE_COMPLETED) {
 				continue;
@@ -305,7 +301,7 @@ void cap_pending_call_cancel_provider(process_id_t provider) {
 			(void)__atomic_add_fetch(&call->reference_count, 1u, __ATOMIC_RELAXED);
 			batch[count++] = call;
 		}
-		finished = cursor >= pending_call_table.capacity;
+		finished = cursor >= id_table_extent_locked(&pending_call_table);
 		spinlock_unlock_irqrestore(&pending_call_table.lock, irq_state);
 
 		for (size_t i = 0u; i < count; i++) {

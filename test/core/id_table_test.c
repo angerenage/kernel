@@ -88,11 +88,16 @@ Test(id_table, rejects_invalid_arguments_and_exhaustion) {
 	cr_assert_eq(id, ID_TABLE_ID_INVALID, "failed allocation should clear output ID");
 	cr_assert_null(id_table_lookup(&table, ID_TABLE_ID_INVALID), "invalid ID should not resolve");
 	cr_assert_eq(id_table_remove(&table, 8u, NULL), ID_TABLE_OUT_OF_RANGE, "out-of-range remove should fail");
+	cr_assert_eq(id_table_remove(&table, 7u, NULL), ID_TABLE_OK, "removing the only ID should succeed");
+	cr_assert_eq(
+		id_table_alloc(&table, &second_object, &id), ID_TABLE_OK, "the removed ID should become available again");
+	cr_assert_eq(id, 7u, "single-ID table should recycle its ID");
+	cr_assert_eq(id_table_lookup(&table, id), &second_object, "recycled ID should resolve to the new object");
 
 	id_table_deinit(&table);
 }
 
-Test(id_table, grows_slot_storage_without_reusing_removed_ids) {
+Test(id_table, grows_slot_storage_and_reuses_removed_ids) {
 	struct id_table table;
 	int             objects[40];
 	id_table_id_t   ids[40];
@@ -113,8 +118,59 @@ Test(id_table, grows_slot_storage_without_reusing_removed_ids) {
 	cr_assert_eq(id_table_remove(&table, ids[3], &removed), ID_TABLE_OK, "remove before next allocation failed");
 	cr_assert_eq(removed, &objects[3], "remove returned wrong object");
 	cr_assert_eq(id_table_alloc(&table, &objects[3], &ids[3]), ID_TABLE_OK, "allocation after remove failed");
-	cr_assert_eq(ids[3], 41u, "removed ID should not be reused in the simple table");
+	cr_assert_eq(ids[3], 4u, "removed ID should be reused before growing the table");
+	cr_assert_eq(id_table_lookup(&table, ids[3]), &objects[3], "reused ID should resolve to the replacement object");
 	cr_assert_eq(id_table_count(&table), 40u, "count should track live objects after remove and alloc");
+
+	id_table_deinit(&table);
+}
+
+Test(id_table, reuses_multiple_removed_ids_without_growing) {
+	struct id_table table;
+	int             objects[6];
+	id_table_id_t   ids[6];
+	size_t          capacity;
+
+	init_id_table_test_heap();
+
+	cr_assert_eq(id_table_init(&table, "id_table_test", 10u, 64u), ID_TABLE_OK, "id_table_init failed");
+	for (size_t i = 0u; i < 6u; i++) {
+		objects[i] = (int)i;
+		cr_assert_eq(id_table_alloc(&table, &objects[i], &ids[i]), ID_TABLE_OK, "allocation %zu failed", i);
+	}
+	capacity = table.capacity;
+
+	cr_assert_eq(id_table_remove(&table, ids[1], NULL), ID_TABLE_OK, "first removal failed");
+	cr_assert_eq(id_table_remove(&table, ids[4], NULL), ID_TABLE_OK, "second removal failed");
+	cr_assert_eq(id_table_alloc(&table, &objects[4], &ids[4]), ID_TABLE_OK, "first recycled allocation failed");
+	cr_assert_eq(ids[4], 14u, "most recently removed ID should be recycled first");
+	cr_assert_eq(id_table_alloc(&table, &objects[1], &ids[1]), ID_TABLE_OK, "second recycled allocation failed");
+	cr_assert_eq(ids[1], 11u, "free-list tail should remain available");
+	cr_assert_eq(table.capacity, capacity, "recycling IDs should not grow storage");
+	cr_assert_eq(id_table_count(&table), 6u, "recycling should restore the live count");
+
+	id_table_deinit(&table);
+}
+
+Test(id_table, fresh_allocation_bypasses_recycled_ids) {
+	struct id_table table;
+	int             objects[4];
+	id_table_id_t   first;
+	id_table_id_t   second;
+	id_table_id_t   fresh;
+	id_table_id_t   recycled;
+
+	init_id_table_test_heap();
+
+	cr_assert_eq(id_table_init(&table, "id_table_test", 1u, 16u), ID_TABLE_OK, "id_table_init failed");
+	cr_assert_eq(id_table_alloc(&table, &objects[0], &first), ID_TABLE_OK, "first allocation failed");
+	cr_assert_eq(id_table_alloc(&table, &objects[1], &second), ID_TABLE_OK, "second allocation failed");
+	cr_assert_eq(id_table_remove(&table, first, NULL), ID_TABLE_OK, "removal failed");
+	cr_assert_eq(id_table_alloc_fresh(&table, &objects[2], &fresh), ID_TABLE_OK, "fresh allocation failed");
+	cr_assert_eq(fresh, 3u, "fresh allocation must not consume a removed ID");
+	cr_assert_eq(id_table_alloc(&table, &objects[3], &recycled), ID_TABLE_OK, "recycled allocation failed");
+	cr_assert_eq(recycled, first, "normal allocation should preserve the bypassed recycled ID");
+	cr_assert_eq(id_table_lookup(&table, second), &objects[1], "existing allocation was disturbed");
 
 	id_table_deinit(&table);
 }

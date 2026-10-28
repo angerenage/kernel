@@ -20,19 +20,9 @@ struct cap_event_batch {
 	struct cap_object* tail;
 };
 
-static struct id_table cap_object_table = {
-	.lock    = SPINLOCK_INIT_CLASS("cap_object_table", SPINLOCK_ORDER_ID_TABLE, SPINLOCK_FLAG_IRQSAVE),
-	.next_id = CAP_ID_TABLE_MIN,
-	.min_id  = CAP_ID_TABLE_MIN,
-	.max_id  = CAP_ID_TABLE_MAX,
-};
+static struct id_table cap_object_table = ID_TABLE_INITIALIZER("cap_object_table", CAP_ID_TABLE_MIN, CAP_ID_TABLE_MAX);
 
-static struct id_table capability_table = {
-	.lock    = SPINLOCK_INIT_CLASS("capability_table", SPINLOCK_ORDER_ID_TABLE, SPINLOCK_FLAG_IRQSAVE),
-	.next_id = CAP_ID_TABLE_MIN,
-	.min_id  = CAP_ID_TABLE_MIN,
-	.max_id  = CAP_ID_TABLE_MAX,
-};
+static struct id_table capability_table = ID_TABLE_INITIALIZER("capability_table", CAP_ID_TABLE_MIN, CAP_ID_TABLE_MAX);
 
 static struct spinlock capability_topology_lock =
 	SPINLOCK_INIT_CLASS("capability_topology", SPINLOCK_ORDER_CAPABILITY, SPINLOCK_FLAG_IRQSAVE);
@@ -301,8 +291,8 @@ static void capability_remove_object_subtrees_locked(cap_object_id_t object_id, 
 		struct capability* candidate   = NULL;
 		struct irq_state   table_state = spinlock_lock_irqsave(&capability_table.lock);
 
-		for (; cursor < capability_table.capacity; cursor++) {
-			struct capability* capability = capability_table.slots[cursor];
+		for (; cursor < id_table_extent_locked(&capability_table); cursor++) {
+			struct capability* capability = id_table_lookup_index_locked(&capability_table, cursor);
 			if (capability == NULL || capability->cap_object_id != object_id) continue;
 			candidate = capability;
 			cursor++;
@@ -344,14 +334,12 @@ cap_object_create_locked(uint64_t object_id, struct channel* endpoint, cap_kerne
 
 static struct cap_object* cap_object_find_locked(struct channel* endpoint, uint64_t object_id,
                                                  cap_kernel_handler_t handler) {
-	for (size_t i = 0; i < cap_object_table.capacity; i++) {
-		if (cap_object_table.slots[i] != NULL) {
-			struct cap_object* obj = (struct cap_object*)cap_object_table.slots[i];
-			if (obj->object_id != object_id) continue;
-			if (obj->endpoint != endpoint) continue;
-			if (handler != NULL && obj->handler != handler) continue;
-			return obj;
-		}
+	for (size_t i = 0; i < id_table_extent_locked(&cap_object_table); i++) {
+		struct cap_object* obj = id_table_lookup_index_locked(&cap_object_table, i);
+		if (obj == NULL || obj->object_id != object_id) continue;
+		if (obj->endpoint != endpoint) continue;
+		if (handler != NULL && obj->handler != handler) continue;
+		return obj;
 	}
 	return NULL;
 }
@@ -470,13 +458,11 @@ struct cap_object* cap_object_lookup(struct channel* endpoint, uint64_t object_i
 	struct cap_object* object = NULL;
 
 	state = spinlock_lock_irqsave(&cap_object_table.lock);
-	for (size_t i = 0; i < cap_object_table.capacity; i++) {
-		if (cap_object_table.slots[i] != NULL) {
-			struct cap_object* obj = (struct cap_object*)cap_object_table.slots[i];
-			if (obj->object_id == object_id && obj->endpoint == endpoint) {
-				object = obj;
-				break;
-			}
+	for (size_t i = 0; i < id_table_extent_locked(&cap_object_table); i++) {
+		struct cap_object* obj = id_table_lookup_index_locked(&cap_object_table, i);
+		if (obj != NULL && obj->object_id == object_id && obj->endpoint == endpoint) {
+			object = obj;
+			break;
 		}
 	}
 	spinlock_unlock_irqrestore(&cap_object_table.lock, state);
@@ -606,8 +592,8 @@ void cap_object_unregister_endpoint(struct channel* endpoint) {
 	do {
 		struct irq_state state = spinlock_lock_irqsave(&cap_object_table.lock);
 		count                  = 0u;
-		for (size_t i = 0u; i < cap_object_table.capacity && count < CAP_OBJECT_UNREGISTER_BATCH; i++) {
-			struct cap_object* object = cap_object_table.slots[i];
+		for (size_t i = 0u; i < id_table_extent_locked(&cap_object_table) && count < CAP_OBJECT_UNREGISTER_BATCH; i++) {
+			struct cap_object* object = id_table_lookup_index_locked(&cap_object_table, i);
 			if (object == NULL || object->endpoint != endpoint) continue;
 			ids[count++] = object->cap_object_id;
 		}
@@ -626,8 +612,8 @@ void cap_object_cleanup_for_process(process_id_t process) {
 		for (;;) {
 			struct cap_object* object = NULL;
 			struct irq_state   state  = spinlock_lock_irqsave(&cap_object_table.lock);
-			for (; cursor < cap_object_table.capacity; cursor++) {
-				struct cap_object* candidate = cap_object_table.slots[cursor];
+			for (; cursor < id_table_extent_locked(&cap_object_table); cursor++) {
+				struct cap_object* candidate = id_table_lookup_index_locked(&cap_object_table, cursor);
 				if (candidate == NULL || candidate->process_cleanup == NULL) continue;
 				(void)__atomic_add_fetch(&candidate->reference_count, 1u, __ATOMIC_RELAXED);
 				object = candidate;
@@ -742,7 +728,8 @@ static cap_id_t capability_publish_locked(struct capability* capability, struct 
 		goto out;
 	}
 
-	if (id_table_alloc(&capability_table, capability, &id) != ID_TABLE_OK) goto out;
+	/* Reusing a grant ID could make a stale userspace handle name a new capability. */
+	if (id_table_alloc_fresh(&capability_table, capability, &id) != ID_TABLE_OK) goto out;
 
 	capability->cap_id = (cap_id_t)id;
 	capability_attach_locked(capability);
@@ -900,8 +887,8 @@ void cap_drop_for_process(process_id_t target) {
 		struct capability* candidate   = NULL;
 		struct irq_state   table_state = spinlock_lock_irqsave(&capability_table.lock);
 
-		for (size_t i = 0u; i < capability_table.capacity; i++) {
-			struct capability* cap = capability_table.slots[i];
+		for (size_t i = 0u; i < id_table_extent_locked(&capability_table); i++) {
+			struct capability* cap = id_table_lookup_index_locked(&capability_table, i);
 			if (cap == NULL || cap->target != target) continue;
 			candidate = cap;
 			break;
