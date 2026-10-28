@@ -37,6 +37,7 @@ EVENT_SEMAPHORE_PHASE = 8
 EVENT_VM_PHASE = 9
 EVENT_SCHED_PHASE = 10
 EVENT_VM_TLB_RANGE = 11
+EVENT_VM_BACKING_WRITE = 12
 
 HEADER = struct.Struct("<QIIQQIIQIIQ")
 CPU_DESCRIPTOR = struct.Struct("<QQQQ")
@@ -150,6 +151,7 @@ VM_PHASE_NAMES = (
     "tlb_shootdown_targets",
     "tlb_shootdown_send",
     "tlb_shootdown_wait",
+    "backing_materialize",
 )
 
 SCHED_PHASE_NAMES = (
@@ -564,6 +566,19 @@ def decode_trace(input_path, output_path, kernel_elf=None):
                         "tid": tid,
                         "ts": timestamp_us(timestamp),
                         "args": {"pages": arg1},
+                    }
+                )
+            elif event_id == EVENT_VM_BACKING_WRITE:
+                emit(
+                    {
+                        "ph": "i",
+                        "s": "t",
+                        "cat": "vm",
+                        "name": "backing_write",
+                        "pid": 1,
+                        "tid": tid,
+                        "ts": timestamp_us(timestamp),
+                        "args": {"bytes": arg1},
                     }
                 )
             else:

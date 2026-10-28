@@ -2,12 +2,17 @@
 #include <core/memory_backing.h>
 #include <core/mm.h>
 #include <core/pmm.h>
+#include <core/sched.h>
 #include <core/spinlock.h>
 #include <hal/hcf.h>
+#include <kernel/trace.h>
 #include <stddef.h>
 #include <string.h>
 
 #include "memory_backing_tree.h"
+
+#define TRACE_BACKING_PHASE(phase, type)                                                                               \
+	kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE, type, kernel_trace_thread_id(sched_current_thread()), phase)
 
 struct memory_backing {
 	struct spinlock               lock;
@@ -642,6 +647,10 @@ bool memory_backing_write(struct memory_backing* backing, size_t offset, const v
 	size_t                     materialize_start;
 	size_t                     materialize_end;
 	size_t                     end;
+	kernel_trace_emit(KERNEL_TRACE_EVENT_VM_BACKING_WRITE,
+	                  KERNEL_TRACE_RECORD_INSTANT,
+	                  kernel_trace_thread_id(sched_current_thread()),
+	                  size);
 	if (size == 0u) return valid_range(backing, offset, 0u);
 	if (source == NULL || granule == 0u || !valid_range(backing, offset, size) ||
 	    !memory_backing_cpu_accessible(backing))
@@ -649,12 +658,14 @@ bool memory_backing_write(struct memory_backing* backing, size_t offset, const v
 	if (backing->kind == MEMORY_BACKING_ANONYMOUS) {
 		materialize_start = offset & ~(granule - 1u);
 		materialize_end   = (offset + size + granule - 1u) & ~(granule - 1u);
-		if (!memory_backing_materialize(backing,
-		                                &(const struct memory_backing_materialize_request){
-											.offset = materialize_start,
-											.size   = materialize_end - materialize_start,
-										}))
-			return false;
+		TRACE_BACKING_PHASE(KERNEL_TRACE_VM_BACKING_MATERIALIZE, KERNEL_TRACE_RECORD_BEGIN);
+		bool materialized = memory_backing_materialize(backing,
+		                                               &(const struct memory_backing_materialize_request){
+														   .offset = materialize_start,
+														   .size   = materialize_end - materialize_start,
+													   });
+		TRACE_BACKING_PHASE(KERNEL_TRACE_VM_BACKING_MATERIALIZE, KERNEL_TRACE_RECORD_END);
+		if (!materialized) return false;
 	}
 	end = offset + size;
 	for (size_t cursor = offset; cursor < end; cursor += span.size) {
