@@ -97,6 +97,7 @@ userspace_system_sources = files(
 	'system/signal.c',
 	'system/thread.c',
 	'system/time.c',
+	'system/trace.c',
 	'system/upcall.c',
 	'platforms/' + platform + '/syscall.c',
 )
