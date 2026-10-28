@@ -222,6 +222,29 @@ static bool builder_append_property(struct dm_builder* builder, const struct cap
 			builder, request.offset, (const uint8_t*)data + sizeof(request), call->request_size - sizeof(request)));
 }
 
+static bool builder_add_property(struct dm_builder* builder, const struct cap_request* call, const void* data) {
+	struct device_builder_add_property_request request;
+	size_t                                     value_size;
+	size_t                                     payload_size;
+	syscall_status_t                           status;
+
+	if (call->request_size < sizeof(request)) return reply_status(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	memcpy(&request, data, sizeof(request));
+	if (request.reserved != 0u || request.value_size > SIZE_MAX ||
+	    request.name_size > SIZE_MAX - (size_t)request.value_size)
+		return reply_status(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	value_size   = (size_t)request.value_size;
+	payload_size = (size_t)request.name_size + value_size;
+	if (!variable_request(call, sizeof(request), payload_size)) return reply_status(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	const uint8_t* name  = (const uint8_t*)data + sizeof(request);
+	const uint8_t* value = name + request.name_size;
+	status               = dm_builder_begin_property(
+		builder, name, request.name_size, request.type, request.element_count, request.value_size);
+	if (status == SYSCALL_STATUS_OK) status = dm_builder_append_property(builder, 0u, value, value_size);
+	if (status == SYSCALL_STATUS_OK) status = dm_builder_finish_property(builder);
+	return reply_status(call, status);
+}
+
 static bool builder_add_resource(struct dm_builder* builder, const struct cap_request* call, const void* data) {
 	struct device_builder_add_resource_request request;
 	if (call->request_size < sizeof(request)) return reply_status(call, SYSCALL_STATUS_BAD_ARGUMENT);
@@ -280,6 +303,8 @@ static bool dispatch_builder(struct device_server* server, struct dm_builder* bu
 		if (!exact_request(call, sizeof(struct device_builder_simple_request)))
 			return reply_status(call, SYSCALL_STATUS_BAD_ARGUMENT);
 		return reply_status(call, dm_builder_finish_property(builder));
+	case DEVICE_BUILDER_OP_ADD_PROPERTY:
+		return builder_add_property(builder, call, data);
 	case DEVICE_BUILDER_OP_ADD_RESOURCE:
 		return builder_add_resource(builder, call, data);
 	case DEVICE_BUILDER_OP_COMMIT:

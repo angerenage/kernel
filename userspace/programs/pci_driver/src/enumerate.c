@@ -13,6 +13,7 @@
 
 #define PCI_DEVICE_COUNT 32u
 #define PCI_FUNCTION_COUNT 8u
+#define PCI_BUS_COUNT 256u
 #define PCI_INVALID_VENDOR_ID 0xffffu
 
 #define PCI_VENDOR_ID_OFFSET 0x00u
@@ -92,6 +93,10 @@ bool pci_enumerate(struct pci_host* host, cap_id_t memory_allocator_cap, cap_id_
                    struct pci_inventory* out_inventory) {
 	struct pci_claim_context claims;
 	struct pci_inventory     inventory = {0};
+	uint8_t                  bus_queue[PCI_BUS_COUNT];
+	bool                     bus_queued[PCI_BUS_COUNT] = {false};
+	size_t                   bus_head                  = 0u;
+	size_t                   bus_tail                  = 0u;
 	bool                     success;
 
 	if (host == NULL || out_inventory == NULL) return false;
@@ -100,14 +105,16 @@ bool pci_enumerate(struct pci_host* host, cap_id_t memory_allocator_cap, cap_id_
 		success = pci_claim_initialize(&host->ranges, memory_allocator_cap, interrupts_cap, io_ports_cap, &claims);
 	}
 	if (!success) return false;
-	for (uint16_t bus = host->first_bus; bus <= host->last_bus; bus++) {
+	bus_queue[bus_tail++]       = host->first_bus;
+	bus_queued[host->first_bus] = true;
+	while (bus_head < bus_tail) {
+		uint8_t bus = bus_queue[bus_head++];
 		TRACE_SCOPE(bus_trace, &trace_scan_bus);
 		for (uint8_t device = 0u; device < PCI_DEVICE_COUNT; device++) {
-			struct pci_address function_zero = {
-				.segment = host->segment, .bus = (uint8_t)bus, .device = device, .function = 0u};
-			uint16_t vendor;
-			uint8_t  header_type;
-			uint8_t  function_count;
+			struct pci_address function_zero = {.segment = host->segment, .bus = bus, .device = device, .function = 0u};
+			uint16_t           vendor;
+			uint8_t            header_type;
+			uint8_t            function_count;
 
 			if (!pci_config_read16(&host->config, function_zero, PCI_VENDOR_ID_OFFSET, &vendor)) goto fail;
 			if (vendor == 0u || vendor == PCI_INVALID_VENDOR_ID) continue;
@@ -138,6 +145,16 @@ bool pci_enumerate(struct pci_host* host, cap_id_t memory_allocator_cap, cap_id_
 					free(function);
 					goto fail;
 				}
+				if (function->resources.bridge.present) {
+					uint8_t secondary   = function->resources.bridge.secondary_bus;
+					uint8_t subordinate = function->resources.bridge.subordinate_bus;
+
+					if (secondary >= host->first_bus && secondary <= host->last_bus && secondary <= subordinate &&
+					    !bus_queued[secondary]) {
+						bus_queue[bus_tail++] = secondary;
+						bus_queued[secondary] = true;
+					}
+				}
 				{
 					TRACE_SCOPE(trace, &trace_function_print);
 					function_print(function);
@@ -152,7 +169,6 @@ bool pci_enumerate(struct pci_host* host, cap_id_t memory_allocator_cap, cap_id_
 				inventory.function_count++;
 			}
 		}
-		if (bus == UINT8_MAX) break;
 	}
 	pci_claim_deinitialize(&claims);
 	*out_inventory = inventory;

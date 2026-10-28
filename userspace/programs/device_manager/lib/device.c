@@ -205,6 +205,36 @@ syscall_status_t device_builder_finish_property(const struct device_builder* bui
 	return builder_simple(builder, DEVICE_BUILDER_OP_FINISH_PROPERTY);
 }
 
+syscall_status_t device_builder_add_property(const struct device_builder* builder, const char* name, size_t name_size,
+                                             enum device_property_type type, uint64_t element_count, const void* value,
+                                             size_t value_size) {
+	struct device_builder_add_property_request* request;
+	struct device_property_info info = {.type = type, .element_count = element_count, .value_size = value_size};
+	size_t                      request_size;
+	syscall_status_t            status;
+
+	if (builder == NULL || builder->capability == CAP_ID_INVALID || !identifier_valid(name, name_size) ||
+	    !property_shape_valid(&info) || (value_size != 0u && value == NULL) || name_size > UINT32_MAX ||
+	    name_size > CAP_MAX_REQUEST_SIZE - sizeof(*request) ||
+	    value_size > CAP_MAX_REQUEST_SIZE - sizeof(*request) - name_size)
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	request_size = sizeof(*request) + name_size + value_size;
+	request      = calloc(1u, request_size);
+	if (request == NULL) return SYSCALL_STATUS_FAILED;
+	*request = (struct device_builder_add_property_request){
+		.header        = {.op = DEVICE_BUILDER_OP_ADD_PROPERTY},
+		.type          = type,
+		.name_size     = (uint32_t)name_size,
+		.element_count = element_count,
+		.value_size    = value_size,
+	};
+	memcpy(request->data, name, name_size);
+	if (value_size != 0u) memcpy(request->data + name_size, value, value_size);
+	status = call_empty(builder->capability, request, request_size);
+	free(request);
+	return status;
+}
+
 syscall_status_t device_builder_add_resource(const struct device_builder* builder, const char* name, size_t name_size,
                                              cap_id_t resource_cap, cap_rights_t rights) {
 	struct device_builder_add_resource_request* request;

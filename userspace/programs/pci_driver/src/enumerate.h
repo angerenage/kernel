@@ -30,7 +30,7 @@ struct pci_inventory {
 	size_t               resource_count;
 };
 
-/* Scan the firmware-described bus range and retain every discovered function. */
+/* Scan the root bus and bridge-discovered secondary buses, retaining every discovered function. */
 bool pci_enumerate(struct pci_host* host, cap_id_t memory_allocator_cap, cap_id_t interrupts_cap, cap_id_t io_ports_cap,
                    struct pci_inventory* out_inventory);
 

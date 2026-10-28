@@ -39,6 +39,11 @@ syscall_status_t device_builder_append_property(const struct device_builder* bui
 /* Validate and finish the active property after exactly value_size bytes. */
 syscall_status_t device_builder_finish_property(const struct device_builder* builder);
 
+/* Add one complete property in a single call. Prefer this when its value fits in one request. */
+syscall_status_t device_builder_add_property(const struct device_builder* builder, const char* name, size_t name_size,
+                                             enum device_property_type type, uint64_t element_count, const void* value,
+                                             size_t value_size);
+
 /* Delegate a named resource to the manager and record its maximum driver rights. */
 syscall_status_t device_builder_add_resource(const struct device_builder* builder, const char* name, size_t name_size,
                                              cap_id_t resource_cap, cap_rights_t rights);

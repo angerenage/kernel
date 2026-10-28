@@ -181,6 +181,7 @@ enum device_builder_op {
 	DEVICE_BUILDER_OP_BEGIN_PROPERTY,
 	DEVICE_BUILDER_OP_APPEND_PROPERTY,
 	DEVICE_BUILDER_OP_FINISH_PROPERTY,
+	DEVICE_BUILDER_OP_ADD_PROPERTY,
 	DEVICE_BUILDER_OP_ADD_RESOURCE,
 	DEVICE_BUILDER_OP_COMMIT,
 	DEVICE_BUILDER_OP_ABORT,
@@ -222,6 +223,17 @@ struct device_builder_append_property_request {
 	uint32_t                             reserved;
 	uint64_t                             offset;
 	uint8_t                              bytes[];
+};
+
+/* A complete property name followed immediately by its complete encoded value. */
+struct device_builder_add_property_request {
+	struct device_builder_request_header header;
+	enum device_property_type            type;
+	uint32_t                             name_size;
+	uint32_t                             reserved;
+	uint64_t                             element_count;
+	uint64_t                             value_size;
+	uint8_t                              data[];
 };
 
 /* The lower-snake-case resource name follows this header. */

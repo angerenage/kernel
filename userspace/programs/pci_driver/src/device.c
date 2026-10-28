@@ -42,20 +42,14 @@ static syscall_status_t add_u64(const struct device_builder* builder, const char
 	uint8_t encoded[sizeof(value)];
 
 	for (size_t index = 0u; index < sizeof(encoded); index++) encoded[index] = (uint8_t)(value >> (index * 8u));
-	syscall_status_t status =
-		device_builder_begin_property(builder, name, strlen(name), DEVICE_PROPERTY_UNSIGNED, 1u, sizeof(encoded));
-	if (status == SYSCALL_STATUS_OK) status = device_builder_append_property(builder, 0u, encoded, sizeof(encoded));
-	if (status == SYSCALL_STATUS_OK) status = device_builder_finish_property(builder);
-	return status;
+	return device_builder_add_property(
+		builder, name, strlen(name), DEVICE_PROPERTY_UNSIGNED, 1u, encoded, sizeof(encoded));
 }
 
 static syscall_status_t add_bool(const struct device_builder* builder, const char* name, bool value) {
-	uint8_t          encoded = value ? 1u : 0u;
-	syscall_status_t status =
-		device_builder_begin_property(builder, name, strlen(name), DEVICE_PROPERTY_BOOLEAN, 1u, sizeof(encoded));
-	if (status == SYSCALL_STATUS_OK) status = device_builder_append_property(builder, 0u, &encoded, sizeof(encoded));
-	if (status == SYSCALL_STATUS_OK) status = device_builder_finish_property(builder);
-	return status;
+	uint8_t encoded = value ? 1u : 0u;
+	return device_builder_add_property(
+		builder, name, strlen(name), DEVICE_PROPERTY_BOOLEAN, 1u, &encoded, sizeof(encoded));
 }
 
 static bool format(char* buffer, size_t capacity, size_t* out_size, const char* pattern, ...) {
