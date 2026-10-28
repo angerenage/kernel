@@ -15,6 +15,7 @@
 #include <system/channel.h>
 #include <system/process.h>
 #include <system/signal.h>
+#include <system/trace.h>
 
 #include "lifecycle.h"
 #include "load.h"
@@ -23,6 +24,10 @@
 #define LOADER_PROTOCOL_VERSION_MAJOR 1u
 #define LOADER_PROTOCOL_VERSION_MINOR 0u
 #define LOADER_SERVICE_OBJECT_ID 1u
+
+TRACE_LABEL(trace_handle_load, "loader/server/load");
+TRACE_LABEL(trace_handle_run, "loader/server/run");
+TRACE_LABEL(trace_handle_cancel, "loader/server/cancel");
 
 static channel_id_t                  loader_endpoint = CHANNEL_ID_INVALID;
 static cap_id_t                      loader_activity = CAP_ID_INVALID;
@@ -70,6 +75,7 @@ static bool handle_load(const struct cap_request* call, const void* data) {
 	uint64_t                       expected_size;
 	uint64_t                       object_id;
 	syscall_status_t               status;
+	TRACE_SCOPE(trace, &trace_handle_load);
 
 	if (!copy_request(call, data, &request, sizeof(request)))
 		return reply_request(call->call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
@@ -117,6 +123,7 @@ static bool handle_run(const struct cap_request* call, struct loader_loaded_prog
 	size_t           capability_size;
 	uint64_t         expected_size;
 	syscall_status_t status;
+	TRACE_SCOPE(trace, &trace_handle_run);
 
 	if (program == NULL || program->started || !copy_request(call, data, &request, sizeof(request)))
 		return reply_request(call->call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
@@ -183,6 +190,7 @@ static bool handle_run(const struct cap_request* call, struct loader_loaded_prog
 static bool handle_cancel(const struct cap_request* call, struct loader_loaded_program* program, const void* data) {
 	struct loader_v1_cancel_request request;
 	syscall_status_t                status;
+	TRACE_SCOPE(trace, &trace_handle_cancel);
 
 	if (program == NULL || program->started || !copy_request(call, data, &request, sizeof(request)) ||
 	    call->request_size != sizeof(request))

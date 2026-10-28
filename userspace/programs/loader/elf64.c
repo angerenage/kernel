@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <system/trace.h>
 
 #define ELF_MAGIC0 0x7fu
 #define ELF_MAGIC1 'E'
@@ -24,6 +25,9 @@
 #define ELF_PF_X 1u
 #define ELF_PF_W 2u
 #define ELF_PF_R 4u
+
+TRACE_LABEL(trace_elf_parse, "loader/elf/parse");
+TRACE_LABEL(trace_elf_read, "loader/elf/read");
 
 #if defined(PLATFORM_PC_X86_64) || defined(__x86_64__)
 #define ELF_TARGET_MACHINE 62u
@@ -84,6 +88,7 @@ static bool range_valid(uint64_t file_size, uint64_t offset, uint64_t size) {
 
 static bool read_exact(cap_id_t file_cap, uint64_t offset, void* buffer, size_t size) {
 	uint8_t* cursor = buffer;
+	TRACE_SCOPE(trace, &trace_elf_read);
 
 	while (size != 0u) {
 		struct filesystem_call_result result;
@@ -156,6 +161,7 @@ enum elf64_parse_result elf64_image_parse(cap_id_t file_cap, struct elf64_image*
 	size_t                        segment_count = 0u;
 	bool                          entry_valid   = false;
 	enum elf64_parse_result       result;
+	TRACE_SCOPE(trace, &trace_elf_parse);
 
 	if (out_image != NULL) *out_image = (struct elf64_image){0};
 	if (file_cap == CAP_ID_INVALID || out_image == NULL) return ELF64_PARSE_INVALID_ARGUMENT;

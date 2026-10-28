@@ -13,9 +13,25 @@
 #include <system/capability.h>
 #include <system/memory.h>
 #include <system/process.h>
+#include <system/trace.h>
 
 #include "elf64.h"
 #include "load_plan.h"
+
+TRACE_LABEL(trace_prepare, "loader/prepare");
+TRACE_LABEL(trace_process_create, "loader/process_create");
+TRACE_LABEL(trace_process_info, "loader/process_info");
+TRACE_LABEL(trace_plan_create, "loader/plan_create");
+TRACE_LABEL(trace_region_load, "loader/region/load");
+TRACE_LABEL(trace_region_read, "loader/region/read");
+TRACE_LABEL(trace_memory_alloc, "loader/region/memory_alloc");
+TRACE_LABEL(trace_temporary_map, "loader/region/temporary_map");
+TRACE_LABEL(trace_temporary_unmap, "loader/region/temporary_unmap");
+TRACE_LABEL(trace_target_map, "loader/region/target_map");
+TRACE_LABEL(trace_heap_allocate, "loader/heap_allocate");
+TRACE_LABEL(trace_delegate_caps, "loader/delegate_runtime_caps");
+TRACE_LABEL(trace_transfer_mappings, "loader/transfer_mappings");
+TRACE_LABEL(trace_start, "loader/start");
 
 static syscall_status_t parse_status(enum elf64_parse_result result) {
 	switch (result) {
@@ -74,6 +90,7 @@ static syscall_status_t record_mapping(struct loader_loaded_program* program, ca
 
 static syscall_status_t read_exact(cap_id_t file_cap, uint64_t offset, void* buffer, size_t size) {
 	uint8_t* cursor = buffer;
+	TRACE_SCOPE(trace, &trace_region_read);
 
 	while (size != 0u) {
 		struct filesystem_call_result result;
@@ -110,46 +127,59 @@ static syscall_status_t load_region(struct loader_loaded_program* program, cap_i
 	cap_id_t                          memory_cap = CAP_ID_INVALID;
 	struct address_space_map_response temporary  = {.mapping_cap = CAP_ID_INVALID};
 	syscall_status_t                  status;
+	TRACE_SCOPE(region_trace, &trace_region_load);
 	if (region->virtual_base > UINTPTR_MAX) return SYSCALL_STATUS_BAD_ARGUMENT;
-	status = memory_allocator_alloc(runtime_heap_memory_allocator_cap, region->size, &memory_cap);
+	{
+		TRACE_SCOPE(trace, &trace_memory_alloc);
+		status = memory_allocator_alloc(runtime_heap_memory_allocator_cap, region->size, &memory_cap);
+	}
 	if (status != SYSCALL_STATUS_OK) return status;
-	status = address_space_map(runtime_heap_address_space_cap,
-	                           memory_cap,
-	                           MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
-	                           0u,
-	                           program->mapping_granule,
-	                           0u,
-	                           0u,
-	                           &temporary);
-	if (status != SYSCALL_STATUS_OK) goto cleanup;
-	status = populate_region(file_cap, temporary.address, image, region);
-	if (status != SYSCALL_STATUS_OK) goto cleanup;
-	status = mapping_unmap(temporary.mapping_cap);
-	if (status != SYSCALL_STATUS_OK) goto cleanup;
-	temporary.mapping_cap = CAP_ID_INVALID;
-
-	for (size_t i = 0u; i < region->run_count; i++) {
-		const struct loader_elf_load_run* run    = &plan->runs[region->first_run + i];
-		cap_id_t                          view   = memory_cap;
-		struct address_space_map_response mapped = {.mapping_cap = CAP_ID_INVALID};
-		if (run->object_offset != 0u || run->size != region->size) {
-			status = memory_slice(memory_cap, run->object_offset, run->size, &view);
-			if (status != SYSCALL_STATUS_OK) goto cleanup;
-		}
-		status = address_space_map(program->address_space_cap,
-		                           view,
-		                           run->access,
-		                           (uintptr_t)(region->virtual_base + run->object_offset),
+	{
+		TRACE_SCOPE(trace, &trace_temporary_map);
+		status = address_space_map(runtime_heap_address_space_cap,
+		                           memory_cap,
+		                           MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+		                           0u,
 		                           program->mapping_granule,
 		                           0u,
 		                           0u,
-		                           &mapped);
-		if (view != memory_cap) (void)cap_drop(view);
-		if (status != SYSCALL_STATUS_OK) goto cleanup;
-		status = record_mapping(program, mapped.mapping_cap);
-		if (status != SYSCALL_STATUS_OK) {
-			(void)mapping_unmap(mapped.mapping_cap);
-			goto cleanup;
+		                           &temporary);
+	}
+	if (status != SYSCALL_STATUS_OK) goto cleanup;
+	status = populate_region(file_cap, temporary.address, image, region);
+	if (status != SYSCALL_STATUS_OK) goto cleanup;
+	{
+		TRACE_SCOPE(trace, &trace_temporary_unmap);
+		status = mapping_unmap(temporary.mapping_cap);
+	}
+	if (status != SYSCALL_STATUS_OK) goto cleanup;
+	temporary.mapping_cap = CAP_ID_INVALID;
+
+	{
+		TRACE_SCOPE(trace, &trace_target_map);
+		for (size_t i = 0u; i < region->run_count; i++) {
+			const struct loader_elf_load_run* run    = &plan->runs[region->first_run + i];
+			cap_id_t                          view   = memory_cap;
+			struct address_space_map_response mapped = {.mapping_cap = CAP_ID_INVALID};
+			if (run->object_offset != 0u || run->size != region->size) {
+				status = memory_slice(memory_cap, run->object_offset, run->size, &view);
+				if (status != SYSCALL_STATUS_OK) goto cleanup;
+			}
+			status = address_space_map(program->address_space_cap,
+			                           view,
+			                           run->access,
+			                           (uintptr_t)(region->virtual_base + run->object_offset),
+			                           program->mapping_granule,
+			                           0u,
+			                           0u,
+			                           &mapped);
+			if (view != memory_cap) (void)cap_drop(view);
+			if (status != SYSCALL_STATUS_OK) goto cleanup;
+			status = record_mapping(program, mapped.mapping_cap);
+			if (status != SYSCALL_STATUS_OK) {
+				(void)mapping_unmap(mapped.mapping_cap);
+				goto cleanup;
+			}
 		}
 	}
 	status = cap_drop(memory_cap);
@@ -165,6 +195,7 @@ static syscall_status_t allocate_heap(struct loader_loaded_program* program) {
 	cap_id_t                          memory_cap = CAP_ID_INVALID;
 	struct address_space_map_response mapped     = {.mapping_cap = CAP_ID_INVALID};
 	size_t                            size;
+	TRACE_SCOPE(trace, &trace_heap_allocate);
 	if (!align_up_size(HEAP_DEFAULT_GROW_SIZE, program->mapping_granule, &size)) return SYSCALL_STATUS_FAILED;
 	syscall_status_t status = memory_allocator_alloc(runtime_heap_memory_allocator_cap, size, &memory_cap);
 	if (status != SYSCALL_STATUS_OK) return status;
@@ -187,6 +218,7 @@ cleanup:
 }
 
 static syscall_status_t delegate_runtime_caps(struct loader_loaded_program* program) {
+	TRACE_SCOPE(trace, &trace_delegate_caps);
 	if (registry_cap_id == CAP_ID_INVALID || runtime_heap_memory_allocator_cap == CAP_ID_INVALID)
 		return SYSCALL_STATUS_UNAVAILABLE;
 	syscall_status_t status = cap_delegate_peer(registry_cap_id, program->process_id, CAP_CALL, &program->registry_cap);
@@ -198,6 +230,7 @@ static syscall_status_t delegate_runtime_caps(struct loader_loaded_program* prog
 }
 
 static syscall_status_t transfer_mappings(struct loader_loaded_program* program) {
+	TRACE_SCOPE(trace, &trace_transfer_mappings);
 	for (struct loader_mapping_authority* item = program->mappings; item != NULL; item = item->next) {
 		struct mapping_info info;
 		cap_id_t            delegated;
@@ -235,6 +268,7 @@ syscall_status_t loader_start_program(struct loader_loaded_program* program, uin
 	struct process_startup_info* startup;
 	size_t                       capability_size;
 	size_t                       startup_size;
+	TRACE_SCOPE(trace, &trace_start);
 	if (program == NULL || out_thread_cap == NULL || program->started ||
 	    !argv_payload_valid(argc, argv_data, argv_size) || (capc != 0u && capv == NULL) ||
 	    capc < PROCESS_STARTUP_CAP_COUNT || capc > (THREAD_START_ARG_MAX_SIZE - sizeof(*startup)) / sizeof(*capv))
@@ -293,6 +327,8 @@ syscall_status_t loader_prepare_program(cap_id_t file_cap, const char* name, siz
 	struct address_space_info         space_info;
 	char*                             process_name = NULL;
 	syscall_status_t                  status;
+	bool                              success;
+	TRACE_SCOPE(prepare_trace, &trace_prepare);
 	if (file_cap == CAP_ID_INVALID || name == NULL || name_size == 0u || name_size == SIZE_MAX || out_program == NULL ||
 	    memchr(name, '\0', name_size) != NULL)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
@@ -307,13 +343,20 @@ syscall_status_t loader_prepare_program(cap_id_t file_cap, const char* name, siz
 	program->registry_cap = program->memory_allocator_cap = CAP_ID_INVALID;
 	memcpy(process_name, name, name_size);
 	process_name[name_size] = '\0';
-	status                  = process_create(process_name, name_size + 1u, &created);
+	{
+		TRACE_SCOPE(trace, &trace_process_create);
+		status = process_create(process_name, name_size + 1u, &created);
+	}
 	if (status != SYSCALL_STATUS_OK) goto failed;
 	program->process_cap       = created.process_cap;
 	program->address_space_cap = created.address_space_cap;
-	if (process_get_info(program->process_cap, &process_info) != SYSCALL_STATUS_OK ||
-	    address_space_info(program->address_space_cap, &space_info) != SYSCALL_STATUS_OK ||
-	    process_info.pid == PROCESS_PID_INVALID || space_info.minimum_mapping_size == 0u) {
+	{
+		TRACE_SCOPE(trace, &trace_process_info);
+		success = process_get_info(program->process_cap, &process_info) == SYSCALL_STATUS_OK &&
+		          address_space_info(program->address_space_cap, &space_info) == SYSCALL_STATUS_OK &&
+		          process_info.pid != PROCESS_PID_INVALID && space_info.minimum_mapping_size != 0u;
+	}
+	if (!success) {
 		status = SYSCALL_STATUS_FAILED;
 		goto failed;
 	}
@@ -328,7 +371,10 @@ syscall_status_t loader_prepare_program(cap_id_t file_cap, const char* name, siz
 			.memsz  = image.segments[i].memsz,
 			.access = segment_access(image.segments[i].flags),
 		};
-	status = plan_status(loader_elf_plan_create(layouts, image.segment_count, program->mapping_granule, &plan));
+	{
+		TRACE_SCOPE(trace, &trace_plan_create);
+		status = plan_status(loader_elf_plan_create(layouts, image.segment_count, program->mapping_granule, &plan));
+	}
 	if (status != SYSCALL_STATUS_OK || image.entry > UINTPTR_MAX ||
 	    !loader_elf_entry_is_executable(layouts, image.segment_count, image.entry)) {
 		if (status == SYSCALL_STATUS_OK) status = SYSCALL_STATUS_BAD_ARGUMENT;
