@@ -1,6 +1,7 @@
 #include "resource.h"
 
 #include <stddef.h>
+#include <system/trace.h>
 
 #define PCI_COMMAND_OFFSET 0x04u
 #define PCI_STATUS_OFFSET 0x06u
@@ -63,6 +64,11 @@
 #define PCI_BRIDGE_RANGE_TYPE_MASK 0x0fu
 #define PCI_BRIDGE_IO_RANGE_32BIT 0x01u
 #define PCI_BRIDGE_MEMORY_RANGE_64BIT 0x01u
+
+TRACE_LABEL(trace_detect_bars, "pci/resources/detect_bars");
+TRACE_LABEL(trace_detect_rom, "pci/resources/detect_rom");
+TRACE_LABEL(trace_detect_capabilities, "pci/resources/detect_capabilities");
+TRACE_LABEL(trace_detect_bridge, "pci/resources/detect_bridge");
 
 static uint64_t range_size(uint64_t base, uint64_t limit) {
 	return base <= limit ? limit - base + 1u : 0u;
@@ -322,6 +328,7 @@ bool pci_resources_detect(struct pci_config* config, struct pci_address address,
 	uint8_t              header_layout = header_type & PCI_HEADER_LAYOUT_MASK;
 	uint16_t             disabled_command;
 	bool                 success;
+	bool                 step_success;
 
 	if (config == NULL || out_resources == NULL) return false;
 	resources.requester_id =
@@ -335,14 +342,28 @@ bool pci_resources_detect(struct pci_config* config, struct pci_address address,
 	if (disabled_command != resources.command &&
 	    !pci_config_write16(config, address, PCI_COMMAND_OFFSET, disabled_command))
 		return false;
-	success = detect_bars(config, address, header_layout, &resources) &&
-	          detect_rom(config, address, header_layout, &resources.rom);
+	{
+		TRACE_SCOPE(trace, &trace_detect_bars);
+		success = detect_bars(config, address, header_layout, &resources);
+	}
+	if (success) {
+		TRACE_SCOPE(trace, &trace_detect_rom);
+		success = detect_rom(config, address, header_layout, &resources.rom);
+	}
 	if (disabled_command != resources.command &&
 	    !pci_config_write16(config, address, PCI_COMMAND_OFFSET, resources.command))
 		success = false;
-	if (!success || !detect_capabilities(config, address, header_layout, &resources) ||
-	    (header_layout == PCI_HEADER_BRIDGE && !detect_bridge(config, address, &resources.bridge)))
-		return false;
+	if (!success) return false;
+	{
+		TRACE_SCOPE(trace, &trace_detect_capabilities);
+		step_success = detect_capabilities(config, address, header_layout, &resources);
+	}
+	if (!step_success) return false;
+	if (header_layout == PCI_HEADER_BRIDGE) {
+		TRACE_SCOPE(trace, &trace_detect_bridge);
+		step_success = detect_bridge(config, address, &resources.bridge);
+		if (!step_success) return false;
+	}
 	*out_resources = resources;
 	return true;
 }

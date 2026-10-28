@@ -11,6 +11,7 @@
 #include <system/dma.h>
 #include <system/interrupt.h>
 #include <system/memory.h>
+#include <system/trace.h>
 
 #if defined(__x86_64__)
 #include <system/io_port.h>
@@ -19,6 +20,10 @@
 #define PCI_IO_RESOURCE_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP | CAP_DELEGATE))
 #define PCI_DMA_RESOURCE_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_ALLOCATE | CAP_MANAGE))
 #define PCI_DMA_ALLOCATOR_RESOURCE_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_ALLOCATE))
+
+TRACE_LABEL(trace_claim_bars, "pci/claim/bars");
+TRACE_LABEL(trace_claim_rom, "pci/claim/rom");
+TRACE_LABEL(trace_claim_msi, "pci/claim/msi");
 
 static void claim_error(const struct pci_address* address, const char* resource, syscall_status_t status) {
 	RUNTIME_DEBUG_ERROR("pci: %04x:%02x:%02x.%u could not claim %s: %u\n",
@@ -191,25 +196,34 @@ size_t pci_resources_claim(const struct pci_claim_context* context, const struct
 	size_t count = 0u;
 
 	if (context == NULL || address == NULL || resources == NULL) return 0u;
-	for (uint8_t index = 0u; index < resources->bar_count; index++) {
-		struct pci_bar_resource* bar = &resources->bars[index];
+	{
+		TRACE_SCOPE(trace, &trace_claim_bars);
+		for (uint8_t index = 0u; index < resources->bar_count; index++) {
+			struct pci_bar_resource* bar = &resources->bars[index];
 #if defined(__x86_64__)
-		if (bar->kind == PCI_BAR_IO) count += claim_io(context, address, bar->address, bar->size, &bar->capability);
+			if (bar->kind == PCI_BAR_IO) count += claim_io(context, address, bar->address, bar->size, &bar->capability);
 #else
-		if (bar->kind == PCI_BAR_IO && !context->ranges->identity)
-			count += claim_host_memory(
-				context, address, PCI_HOST_RANGE_IO, bar->address, bar->size, &bar->capability, &bar->mapping_offset);
+			if (bar->kind == PCI_BAR_IO && !context->ranges->identity)
+				count += claim_host_memory(context,
+				                           address,
+				                           PCI_HOST_RANGE_IO,
+				                           bar->address,
+				                           bar->size,
+				                           &bar->capability,
+				                           &bar->mapping_offset);
 #endif
-		else if (bar->kind == PCI_BAR_MEMORY32 || bar->kind == PCI_BAR_MEMORY64)
-			count += claim_host_memory(context,
-			                           address,
-			                           PCI_HOST_RANGE_MEMORY,
-			                           bar->address,
-			                           bar->size,
-			                           &bar->capability,
-			                           &bar->mapping_offset);
+			else if (bar->kind == PCI_BAR_MEMORY32 || bar->kind == PCI_BAR_MEMORY64)
+				count += claim_host_memory(context,
+				                           address,
+				                           PCI_HOST_RANGE_MEMORY,
+				                           bar->address,
+				                           bar->size,
+				                           &bar->capability,
+				                           &bar->mapping_offset);
+		}
 	}
-	if (resources->rom.present && resources->rom.address != 0u)
+	if (resources->rom.present && resources->rom.address != 0u) {
+		TRACE_SCOPE(trace, &trace_claim_rom);
 		count += claim_host_memory(context,
 		                           address,
 		                           PCI_HOST_RANGE_MEMORY,
@@ -217,7 +231,11 @@ size_t pci_resources_claim(const struct pci_claim_context* context, const struct
 		                           resources->rom.size,
 		                           &resources->rom.capability,
 		                           &resources->rom.mapping_offset);
-	count += claim_msi(context, address, &resources->msi);
+	}
+	{
+		TRACE_SCOPE(trace, &trace_claim_msi);
+		count += claim_msi(context, address, &resources->msi);
+	}
 	return count;
 }
 

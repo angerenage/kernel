@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <system/trace.h>
 
 #include "claim.h"
 #include "resource.h"
@@ -21,6 +22,21 @@
 #define PCI_MEMORY_RESOURCE_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP))
 #define PCI_IO_RESOURCE_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP))
 #define PCI_INTERRUPT_RESOURCE_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_MANAGE))
+
+TRACE_LABEL(trace_publish_device, "pci/publish/device");
+TRACE_LABEL(trace_publish_begin, "pci/publish/begin");
+TRACE_LABEL(trace_publish_properties, "pci/publish/properties");
+TRACE_LABEL(trace_publish_resources, "pci/publish/resources");
+TRACE_LABEL(trace_publish_set_name, "pci/publish/set_name");
+TRACE_LABEL(trace_publish_compatible, "pci/publish/compatible");
+TRACE_LABEL(trace_publish_identity, "pci/publish/identity");
+TRACE_LABEL(trace_publish_bars, "pci/publish/bars");
+TRACE_LABEL(trace_publish_rom, "pci/publish/rom");
+TRACE_LABEL(trace_publish_interrupts, "pci/publish/interrupts");
+TRACE_LABEL(trace_publish_msix, "pci/publish/msix");
+TRACE_LABEL(trace_publish_bridge, "pci/publish/bridge");
+TRACE_LABEL(trace_publish_dma, "pci/publish/dma");
+TRACE_LABEL(trace_publish_commit, "pci/publish/commit");
 
 static syscall_status_t add_u64(const struct device_builder* builder, const char* name, uint64_t value) {
 	uint8_t encoded[sizeof(value)];
@@ -253,7 +269,11 @@ static syscall_status_t pci_device_publish(cap_id_t host_cap, cap_id_t memory_al
 	syscall_status_t      status;
 
 	if (host_cap == CAP_ID_INVALID || function == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
-	status = device_builder_begin_child(host_cap, &builder);
+	TRACE_SCOPE(device_trace, &trace_publish_device);
+	{
+		TRACE_SCOPE(trace, &trace_publish_begin);
+		status = device_builder_begin_child(host_cap, &builder);
+	}
 	if (status != SYSCALL_STATUS_OK) return status;
 	if (!format(name,
 	            sizeof(name),
@@ -266,15 +286,46 @@ static syscall_status_t pci_device_publish(cap_id_t host_cap, cap_id_t memory_al
 		status = SYSCALL_STATUS_FAILED;
 		goto failed;
 	}
-	status = device_builder_set_name(&builder, name, name_size);
-	if (status == SYSCALL_STATUS_OK) status = add_compatible_ids(&builder, function);
-	if (status == SYSCALL_STATUS_OK) status = add_identity(&builder, function);
-	if (status == SYSCALL_STATUS_OK) status = add_bars(&builder, &function->resources);
-	if (status == SYSCALL_STATUS_OK) status = add_rom(&builder, &function->resources.rom);
-	if (status == SYSCALL_STATUS_OK) status = add_interrupts(&builder, &function->resources);
-	if (status == SYSCALL_STATUS_OK) status = add_msix(&builder, &function->resources.msix);
-	if (status == SYSCALL_STATUS_OK) status = add_bridge(&builder, &function->resources.bridge);
+	{
+		TRACE_SCOPE(trace, &trace_publish_properties);
+		{
+			TRACE_SCOPE(step_trace, &trace_publish_set_name);
+			status = device_builder_set_name(&builder, name, name_size);
+		}
+		if (status == SYSCALL_STATUS_OK) {
+			TRACE_SCOPE(step_trace, &trace_publish_compatible);
+			status = add_compatible_ids(&builder, function);
+		}
+		if (status == SYSCALL_STATUS_OK) {
+			TRACE_SCOPE(step_trace, &trace_publish_identity);
+			status = add_identity(&builder, function);
+		}
+	}
+	if (status == SYSCALL_STATUS_OK) {
+		TRACE_SCOPE(trace, &trace_publish_resources);
+		{
+			TRACE_SCOPE(step_trace, &trace_publish_bars);
+			status = add_bars(&builder, &function->resources);
+		}
+		if (status == SYSCALL_STATUS_OK) {
+			TRACE_SCOPE(step_trace, &trace_publish_rom);
+			status = add_rom(&builder, &function->resources.rom);
+		}
+		if (status == SYSCALL_STATUS_OK) {
+			TRACE_SCOPE(step_trace, &trace_publish_interrupts);
+			status = add_interrupts(&builder, &function->resources);
+		}
+		if (status == SYSCALL_STATUS_OK) {
+			TRACE_SCOPE(step_trace, &trace_publish_msix);
+			status = add_msix(&builder, &function->resources.msix);
+		}
+		if (status == SYSCALL_STATUS_OK) {
+			TRACE_SCOPE(step_trace, &trace_publish_bridge);
+			status = add_bridge(&builder, &function->resources.bridge);
+		}
+	}
 	if (status == SYSCALL_STATUS_OK && dma_cap != CAP_ID_INVALID) {
+		TRACE_SCOPE(trace, &trace_publish_dma);
 		syscall_status_t dma_status = pci_claim_dma_resource(
 			&builder, dma_cap, "dma", sizeof("dma") - 1u, function->address.segment, function->resources.requester_id);
 		if (dma_status == SYSCALL_STATUS_OK)
@@ -282,7 +333,10 @@ static syscall_status_t pci_device_publish(cap_id_t host_cap, cap_id_t memory_al
 				pci_claim_dma_allocator(&builder, memory_allocator_cap, "dma_allocator", sizeof("dma_allocator") - 1u);
 		else if (dma_status != SYSCALL_STATUS_UNAVAILABLE) status = dma_status;
 	}
-	if (status == SYSCALL_STATUS_OK) status = device_builder_commit(&builder);
+	if (status == SYSCALL_STATUS_OK) {
+		TRACE_SCOPE(trace, &trace_publish_commit);
+		status = device_builder_commit(&builder);
+	}
 	if (status == SYSCALL_STATUS_OK) {
 		pci_resources_release(&function->resources);
 		return SYSCALL_STATUS_OK;

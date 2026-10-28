@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <system/capability.h>
 #include <system/memory.h>
+#include <system/trace.h>
 
 #define PCI_ECAM_BUS_SIZE (1u << 20u)
 #define PCI_ECAM_DEVICE_SIZE (1u << 15u)
@@ -11,32 +12,55 @@
 #define PCI_DEVICE_COUNT 32u
 #define PCI_FUNCTION_COUNT 8u
 
+TRACE_LABEL(trace_ecam_map_bus, "pci/ecam/map_bus");
+TRACE_LABEL(trace_ecam_unmap_bus, "pci/ecam/unmap_bus");
+TRACE_LABEL(trace_ecam_slice_bus, "pci/ecam/slice_bus");
+TRACE_LABEL(trace_ecam_map_memory, "pci/ecam/map_memory");
+TRACE_LABEL(trace_ecam_drop_slice, "pci/ecam/drop_slice");
+
 static bool map_bus(struct pci_ecam* ecam, uint8_t bus) {
 	struct address_space_map_response mapping = {.mapping_cap = CAP_ID_INVALID};
 	cap_id_t                          bus_cap = CAP_ID_INVALID;
 	size_t                            bus_offset;
+	syscall_status_t                  status;
 
 	if (ecam->bus_mapped && ecam->mapped_bus == bus) return true;
+	TRACE_SCOPE(trace, &trace_ecam_map_bus);
 	if (ecam->mapping_cap != CAP_ID_INVALID) {
-		if (mapping_unmap(ecam->mapping_cap) != SYSCALL_STATUS_OK) return false;
+		{
+			TRACE_SCOPE(step_trace, &trace_ecam_unmap_bus);
+			status = mapping_unmap(ecam->mapping_cap);
+		}
+		if (status != SYSCALL_STATUS_OK) return false;
 		ecam->mapping_cap = CAP_ID_INVALID;
 		ecam->base        = NULL;
 		ecam->bus_mapped  = false;
 	}
 	bus_offset = ((size_t)bus - ecam->first_bus) * PCI_ECAM_BUS_SIZE;
-	if (memory_slice(ecam->memory_cap, bus_offset, PCI_ECAM_BUS_SIZE, &bus_cap) != SYSCALL_STATUS_OK) return false;
-	if (address_space_map(ecam->address_space_cap,
-	                      bus_cap,
-	                      MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
-	                      0u,
-	                      PCI_ECAM_FUNCTION_SIZE,
-	                      0u,
-	                      0u,
-	                      &mapping) != SYSCALL_STATUS_OK) {
+	{
+		TRACE_SCOPE(step_trace, &trace_ecam_slice_bus);
+		status = memory_slice(ecam->memory_cap, bus_offset, PCI_ECAM_BUS_SIZE, &bus_cap);
+	}
+	if (status != SYSCALL_STATUS_OK) return false;
+	{
+		TRACE_SCOPE(step_trace, &trace_ecam_map_memory);
+		status = address_space_map(ecam->address_space_cap,
+		                           bus_cap,
+		                           MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+		                           0u,
+		                           PCI_ECAM_FUNCTION_SIZE,
+		                           0u,
+		                           0u,
+		                           &mapping);
+	}
+	if (status != SYSCALL_STATUS_OK) {
 		(void)cap_drop(bus_cap);
 		return false;
 	}
-	(void)cap_drop(bus_cap);
+	{
+		TRACE_SCOPE(step_trace, &trace_ecam_drop_slice);
+		(void)cap_drop(bus_cap);
+	}
 	if (mapping.mapping_cap == CAP_ID_INVALID || mapping.address == 0u) {
 		if (mapping.mapping_cap != CAP_ID_INVALID) (void)mapping_unmap(mapping.mapping_cap);
 		return false;

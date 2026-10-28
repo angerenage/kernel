@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <system/capability.h>
+#include <system/trace.h>
 
 #include "claim.h"
 #include "resource.h"
@@ -32,6 +33,13 @@
 
 #define PCI_CLASS_BRIDGE 0x06u
 #define PCI_SUBCLASS_PCI_TO_PCI 0x04u
+
+TRACE_LABEL(trace_claim_initialize, "pci/enumerate/claim_initialize");
+TRACE_LABEL(trace_scan_bus, "pci/enumerate/scan_bus");
+TRACE_LABEL(trace_function_read, "pci/enumerate/function_read");
+TRACE_LABEL(trace_resource_detect, "pci/enumerate/resource_detect");
+TRACE_LABEL(trace_function_print, "pci/enumerate/function_print");
+TRACE_LABEL(trace_resource_claim, "pci/enumerate/resource_claim");
 
 static bool function_read(const struct pci_config* config, struct pci_address address, uint16_t vendor_id,
                           struct pci_function* out_function) {
@@ -84,11 +92,16 @@ bool pci_enumerate(struct pci_host* host, cap_id_t memory_allocator_cap, cap_id_
                    struct pci_inventory* out_inventory) {
 	struct pci_claim_context claims;
 	struct pci_inventory     inventory = {0};
+	bool                     success;
 
-	if (host == NULL || out_inventory == NULL ||
-	    !pci_claim_initialize(&host->ranges, memory_allocator_cap, interrupts_cap, io_ports_cap, &claims))
-		return false;
+	if (host == NULL || out_inventory == NULL) return false;
+	{
+		TRACE_SCOPE(trace, &trace_claim_initialize);
+		success = pci_claim_initialize(&host->ranges, memory_allocator_cap, interrupts_cap, io_ports_cap, &claims);
+	}
+	if (!success) return false;
 	for (uint16_t bus = host->first_bus; bus <= host->last_bus; bus++) {
+		TRACE_SCOPE(bus_trace, &trace_scan_bus);
 		for (uint8_t device = 0u; device < PCI_DEVICE_COUNT; device++) {
 			struct pci_address function_zero = {
 				.segment = host->segment, .bus = (uint8_t)bus, .device = device, .function = 0u};
@@ -108,13 +121,31 @@ bool pci_enumerate(struct pci_host* host, cap_id_t memory_allocator_cap, cap_id_
 				if (!pci_config_read16(&host->config, address, PCI_VENDOR_ID_OFFSET, &vendor)) goto fail;
 				if (vendor == 0u || vendor == PCI_INVALID_VENDOR_ID) continue;
 				function = calloc(1u, sizeof(*function));
-				if (function == NULL || !function_read(&host->config, address, vendor, function) ||
-				    !pci_resources_detect(&host->config, address, function->header_type, &function->resources)) {
+				if (function == NULL) goto fail;
+				{
+					TRACE_SCOPE(trace, &trace_function_read);
+					success = function_read(&host->config, address, vendor, function);
+				}
+				if (!success) {
 					free(function);
 					goto fail;
 				}
-				function_print(function);
-				inventory.resource_count += pci_resources_claim(&claims, &address, &function->resources);
+				{
+					TRACE_SCOPE(trace, &trace_resource_detect);
+					success = pci_resources_detect(&host->config, address, function->header_type, &function->resources);
+				}
+				if (!success) {
+					free(function);
+					goto fail;
+				}
+				{
+					TRACE_SCOPE(trace, &trace_function_print);
+					function_print(function);
+				}
+				{
+					TRACE_SCOPE(trace, &trace_resource_claim);
+					inventory.resource_count += pci_resources_claim(&claims, &address, &function->resources);
+				}
 				if (inventory.functions_tail == NULL) inventory.functions = function;
 				else inventory.functions_tail->next = function;
 				inventory.functions_tail = function;

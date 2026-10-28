@@ -12,6 +12,7 @@
 #include <system/capability.h>
 #include <system/memory.h>
 #include <system/process.h>
+#include <system/trace.h>
 
 #define PCI_ECAM_BUS_SIZE (1u << 20u)
 #define PCI_MEMORY_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP | CAP_DERIVE))
@@ -22,6 +23,9 @@
 #define MCFG_PROPERTY_END_BUS "mcfg_end_bus"
 #define DT_PROPERTY_BUS_RANGE "bus_range"
 #define DT_PROPERTY_DOMAIN "linux_pci_domain"
+
+TRACE_LABEL(trace_host_description, "pci/host/read_description");
+TRACE_LABEL(trace_host_map, "pci/host/map_configuration");
 
 static uint32_t read_u32_be(const uint8_t value[4]) {
 	return ((uint32_t)value[0] << 24u) | ((uint32_t)value[1] << 16u) | ((uint32_t)value[2] << 8u) | (uint32_t)value[3];
@@ -156,10 +160,21 @@ static bool map_configuration(struct pci_host* host) {
 }
 
 bool pci_host_initialize(cap_id_t device_cap, struct pci_host* out_host) {
+	bool success;
+
 	if (out_host == NULL) return false;
 	*out_host = (struct pci_host){.memory_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID};
 	if (device_cap == CAP_ID_INVALID) return false;
-	return read_description(device_cap, out_host) && map_configuration(out_host);
+	{
+		TRACE_SCOPE(trace, &trace_host_description);
+		success = read_description(device_cap, out_host);
+	}
+	if (!success) return false;
+	{
+		TRACE_SCOPE(trace, &trace_host_map);
+		success = map_configuration(out_host);
+	}
+	return success;
 }
 
 void pci_host_deinitialize(struct pci_host* host) {
