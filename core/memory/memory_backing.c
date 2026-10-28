@@ -549,7 +549,13 @@ static void commit_pending_locked(struct memory_backing* backing, struct memory_
 
 bool memory_backing_materialize(struct memory_backing*                           backing,
                                 const struct memory_backing_materialize_request* request) {
+	struct memory_backing_span span;
+	struct irq_state           state;
 	if (!request_valid(backing, request)) return false;
+	state = spinlock_lock_irqsave(&backing->lock);
+	query_locked(backing, request->offset, request->size, &span);
+	spinlock_unlock_irqrestore(&backing->lock, state);
+	if (span.kind == MEMORY_BACKING_SPAN_PRESENT && span.size == request->size) return true;
 	for (;;) {
 		struct memory_backing_extent* pending = NULL;
 		struct materialize_plan       plan;
