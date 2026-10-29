@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <system/trace.h>
 
 #include "glyph_cache.h"
 
@@ -20,6 +21,13 @@
 #define TERMINAL_POINTER_MAX_WIDTH 11u
 #define TERMINAL_POINTER_MAX_HEIGHT 20u
 #define TERMINAL_POINTER_MAX_PIXEL_SIZE 8u
+#define TERMINAL_TRACE_SAMPLE_INTERVAL 8u
+
+TRACE_LABEL(trace_terminal_write_setup, "terminal/write/setup");
+TRACE_LABEL(trace_terminal_write_text, "terminal/write/text");
+TRACE_LABEL(trace_terminal_write_finalize, "terminal/write/finalize");
+
+static uint64_t terminal_write_sequence;
 
 struct color {
 	uint8_t red;
@@ -1300,23 +1308,36 @@ bool terminal_get_cursor_position(struct terminal* terminal, size_t* out_column,
 bool terminal_write(struct terminal* terminal, const uint8_t* data, size_t size, size_t* out_written) {
 	size_t written = 0u;
 	bool   success;
+	bool   trace_sample;
 
 	if (out_written == NULL) return false;
 	*out_written = 0u;
 	if (terminal == NULL || (size != 0u && data == NULL)) return false;
 	if (size == 0u) return true;
 	terminal_lock(terminal);
+	trace_sample = terminal_write_sequence++ % TERMINAL_TRACE_SAMPLE_INTERVAL == 0u;
+	if (trace_sample) (void)trace_begin(&trace_terminal_write_setup);
 	hide_pointer_cursor(terminal);
 	if (!hide_cursor(terminal) || !erase_overlay(terminal)) {
+		if (trace_sample) (void)trace_end(&trace_terminal_write_setup);
 		show_pointer_cursor(terminal);
 		terminal_unlock(terminal);
 		return false;
 	}
+	if (trace_sample) {
+		(void)trace_end(&trace_terminal_write_setup);
+		(void)trace_begin(&trace_terminal_write_text);
+	}
 	while (written < size && process_text_byte(terminal, data[written])) written++;
+	if (trace_sample) {
+		(void)trace_end(&trace_terminal_write_text);
+		(void)trace_begin(&trace_terminal_write_finalize);
+	}
 	*out_written = written;
 	success      = (!terminal->viewport_dirty || redraw_viewport(terminal)) && draw_overlay(terminal) &&
 	               show_cursor(terminal) && written == size;
 	show_pointer_cursor(terminal);
+	if (trace_sample) (void)trace_end(&trace_terminal_write_finalize);
 	terminal_unlock(terminal);
 	return success;
 }
