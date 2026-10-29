@@ -27,8 +27,6 @@ static const char* kernel_selftest_thread_bootstrap_spawn_failure_message(enum k
 		return "thread bootstrap stack allocation failed";
 	case KTHREAD_SPAWN_START_FAILED:
 		return "thread bootstrap worker could not be made runnable";
-	case KTHREAD_SPAWN_REAPER_UNAVAILABLE:
-		return "thread bootstrap reaper unavailable";
 	case KTHREAD_SPAWN_OK:
 	default:
 		return "thread bootstrap worker spawn failed";

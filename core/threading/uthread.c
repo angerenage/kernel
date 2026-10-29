@@ -2,11 +2,8 @@
 #include <base/thread.h>
 #include <core/address_space.h>
 #include <core/address_transfer.h>
-#include <core/cpu.h>
 #include <core/id_table.h>
-#include <core/kthread.h>
 #include <core/memory.h>
-#include <core/pmm.h>
 #include <core/process.h>
 #include <core/sched.h>
 #include <core/signal.h>
@@ -26,19 +23,8 @@ enum {
 	UTHREAD_USER_STACK_ALIGNMENT = HAL_USERSPACE_STACK_ALIGNMENT,
 };
 
-#define UTHREAD_REAPER_MAX_CPUS 64u
-
 #define TRACE_UTHREAD_PHASE(phase, type)                                                                               \
 	kernel_trace_emit(KERNEL_TRACE_EVENT_UTHREAD_PHASE, type, kernel_trace_thread_id(sched_current_thread()), phase)
-
-struct uthread_reaper {
-	struct thread_wait_queue wait_queue;
-	struct uthread*          head;
-	struct uthread*          tail;
-	struct kthread*          thread;
-	bool                     started;
-	bool                     starting;
-};
 
 static bool uthread_map_stack(struct address_space* space, size_t requested_size, bool prefault,
                               struct mapping** out_mapping, void** out_base) {
@@ -77,13 +63,7 @@ static bool uthread_map_stack(struct address_space* space, size_t requested_size
 	return false;
 }
 
-static struct uthread_reaper uthread_reapers[UTHREAD_REAPER_MAX_CPUS];
-static struct spinlock       uthread_reaper_init_lock =
-	SPINLOCK_INIT_CLASS("uthread_reaper_init", SPINLOCK_ORDER_SCHED, SPINLOCK_FLAG_IRQSAVE);
-static bool            uthread_reapers_initialized;
 static struct id_table uthread_table = ID_TABLE_INITIALIZER("uthread_table", 1u, UINT64_MAX);
-
-static void uthread_reaper_entry(void* arg);
 
 static void uthread_unregister_id(struct uthread* thread) {
 	if (thread == NULL || thread->id == UTHREAD_ID_INVALID) return;
@@ -271,35 +251,6 @@ static bool uthread_free(struct uthread* thread) {
 	return true;
 }
 
-static void uthread_reapers_init_once(void) {
-	struct irq_state state;
-
-	state = spinlock_lock_irqsave(&uthread_reaper_init_lock);
-	if (!uthread_reapers_initialized) {
-		for (size_t i = 0; i < UTHREAD_REAPER_MAX_CPUS; i++) {
-			thread_wait_queue_init(&uthread_reapers[i].wait_queue);
-			uthread_reapers[i].head     = NULL;
-			uthread_reapers[i].tail     = NULL;
-			uthread_reapers[i].thread   = NULL;
-			uthread_reapers[i].started  = false;
-			uthread_reapers[i].starting = false;
-		}
-		uthread_reapers_initialized = true;
-	}
-	spinlock_unlock_irqrestore(&uthread_reaper_init_lock, state);
-}
-
-static struct uthread_reaper* uthread_reaper_for_cpu(const struct cpu* cpu) {
-	if (cpu == NULL || cpu->index >= UTHREAD_REAPER_MAX_CPUS) return NULL;
-
-	uthread_reapers_init_once();
-	return &uthread_reapers[cpu->index];
-}
-
-static bool uthread_cpu_online(const struct cpu* cpu) {
-	return cpu != NULL && cpu_state_get(cpu) == CPU_STATE_ONLINE;
-}
-
 static void uthread_reap_callback(struct thread* thread, void* ctx) {
 	struct uthread* target = (struct uthread*)ctx;
 	struct process* process;
@@ -318,65 +269,20 @@ static void uthread_reap_callback(struct thread* thread, void* ctx) {
 	}
 }
 
-static bool __attribute__((unused))
-uthread_reaper_start_cpu(struct cpu* cpu) {
-	struct uthread_reaper*    reaper;
-	struct irq_state          state;
-	struct kthread*           reaper_thread = NULL;
-	enum kthread_spawn_result result;
-
-	reaper = uthread_reaper_for_cpu(cpu);
-	if (reaper == NULL || !uthread_cpu_online(cpu)) return false;
-
-	for (;;) {
-		state = spinlock_lock_irqsave(&reaper->wait_queue.lock);
-		if (reaper->started) {
-			spinlock_unlock_irqrestore(&reaper->wait_queue.lock, state);
-			return true;
-		}
-		if (!reaper->starting) {
-			reaper->starting = true;
-			spinlock_unlock_irqrestore(&reaper->wait_queue.lock, state);
-			break;
-		}
-		spinlock_unlock_irqrestore(&reaper->wait_queue.lock, state);
-		spinlock_relax();
-	}
-
-	result = kthread_spawn_on_cpu(&reaper_thread, "uthread/reaper", uthread_reaper_entry, reaper, cpu);
-
-	state            = spinlock_lock_irqsave(&reaper->wait_queue.lock);
-	reaper->starting = false;
-	if (result == KTHREAD_SPAWN_OK) {
-		reaper->thread  = reaper_thread;
-		reaper->started = true;
-	}
-	spinlock_unlock_irqrestore(&reaper->wait_queue.lock, state);
-
-	if (result != KTHREAD_SPAWN_OK) {
-		(void)kthread_destroy(reaper_thread);
-		return false;
-	}
-	return true;
-}
-
-static enum uthread_start_result uthread_prepare_internal(struct uthread*                    thread,
-                                                          const struct uthread_start_params* params,
-                                                          bool heap_allocated, bool reap_on_exit);
+static enum uthread_start_result
+uthread_prepare_internal(struct uthread* thread, const struct uthread_start_params* params, bool heap_allocated);
 static enum uthread_start_result uthread_start_prepared(struct uthread*                    thread,
-                                                        const struct uthread_start_params* params, bool heap_allocated,
-                                                        bool reap_on_exit);
+                                                        const struct uthread_start_params* params, bool heap_allocated);
 
 static enum uthread_start_result
 uthread_start_internal(struct uthread* thread, const struct uthread_start_params* params, bool heap_allocated) {
 	if (thread == NULL || params == NULL) return UTHREAD_START_INVALID_ARGUMENTS;
 
-	return uthread_start_prepared(thread, params, heap_allocated, true);
+	return uthread_start_prepared(thread, params, heap_allocated);
 }
 
-static enum uthread_start_result uthread_prepare_internal(struct uthread*                    thread,
-                                                          const struct uthread_start_params* params,
-                                                          bool heap_allocated, bool reap_on_exit) {
+static enum uthread_start_result
+uthread_prepare_internal(struct uthread* thread, const struct uthread_start_params* params, bool heap_allocated) {
 	struct thread_context        context;
 	struct thread_context_params thread_params;
 	struct address_space*        address_space;
@@ -411,7 +317,6 @@ static enum uthread_start_result uthread_prepare_internal(struct uthread*       
 		.thread               = {.name = name},
 		.user_stack_mapping   = NULL,
 		.kernel_stack_mapping = NULL,
-		.reaper_next          = NULL,
 		.cap_object_id        = CAP_OBJECT_ID_INVALID,
 		.reference_count      = 1u,
 		.dying                = 0u,
@@ -536,12 +441,12 @@ static enum uthread_start_result uthread_prepare_internal(struct uthread*       
 	}
 	thread->thread.owner_kind = THREAD_OWNER_UTHREAD;
 	thread->thread.owner      = thread;
-	if (reap_on_exit) thread_set_reap_callback(&thread->thread, uthread_reap_callback, thread);
+	thread_set_reap_callback(&thread->thread, uthread_reap_callback, thread);
 	return UTHREAD_START_OK;
 }
 
 enum uthread_start_result uthread_prepare(struct uthread* thread, const struct uthread_start_params* params) {
-	return uthread_prepare_internal(thread, params, false, true);
+	return uthread_prepare_internal(thread, params, false);
 }
 
 enum uthread_start_result uthread_commit_prepared(struct uthread* thread, bool main_thread) {
@@ -591,12 +496,11 @@ bool uthread_abort_prepared(struct uthread* thread) {
 	return true;
 }
 
-static enum uthread_start_result uthread_start_prepared(struct uthread*                    thread,
-                                                        const struct uthread_start_params* params, bool heap_allocated,
-                                                        bool reap_on_exit) {
+static enum uthread_start_result
+uthread_start_prepared(struct uthread* thread, const struct uthread_start_params* params, bool heap_allocated) {
 	enum uthread_start_result result;
 
-	result = uthread_prepare_internal(thread, params, heap_allocated, reap_on_exit);
+	result = uthread_prepare_internal(thread, params, heap_allocated);
 	if (result != UTHREAD_START_OK) return result;
 
 	result = uthread_commit_prepared(thread, params->main_thread);
@@ -755,45 +659,4 @@ bool uthread_destroy_cap_object(struct uthread* thread) {
 	id                    = thread->cap_object_id;
 	thread->cap_object_id = CAP_OBJECT_ID_INVALID;
 	return id != CAP_OBJECT_ID_INVALID && cap_object_destroy_with_id(id);
-}
-
-static struct uthread* uthread_reaper_dequeue(struct uthread_reaper* reaper) {
-	struct irq_state state;
-	struct uthread*  target;
-
-	if (reaper == NULL) return NULL;
-
-	state  = spinlock_lock_irqsave(&reaper->wait_queue.lock);
-	target = reaper->head;
-	if (target != NULL) {
-		reaper->head = target->reaper_next;
-		if (reaper->head == NULL) reaper->tail = NULL;
-		target->reaper_next = NULL;
-	}
-	spinlock_unlock_irqrestore(&reaper->wait_queue.lock, state);
-	return target;
-}
-
-static void uthread_reaper_entry(void* arg) {
-	struct uthread_reaper* reaper = arg;
-
-	thread_set_cancel_enabled(kthread_current(), false);
-	for (;;) {
-		struct uthread* target = uthread_reaper_dequeue(reaper);
-
-		if (target != NULL) {
-			thread_mark_zombie(&target->thread);
-			process_notify_thread_exit(target->process, &target->thread, target->thread.exit_code);
-			(void)sched_wake_all(&target->thread.join_wait_queue);
-
-			if (!thread_is_joinable(&target->thread) && uthread_begin_destroy(target)) {
-				uthread_commit_destroy(target);
-				uthread_release(target);
-			}
-			continue;
-		}
-
-		if (reaper != NULL) sched_block_current(&reaper->wait_queue, THREAD_BLOCK_WAIT_QUEUE);
-		else sched_yield();
-	}
 }

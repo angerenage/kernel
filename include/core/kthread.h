@@ -17,14 +17,12 @@ enum kthread_spawn_result {
 	KTHREAD_SPAWN_STACK_ALLOC_FAILED,
 	KTHREAD_SPAWN_CONTEXT_UNSUPPORTED,
 	KTHREAD_SPAWN_START_FAILED,
-	KTHREAD_SPAWN_REAPER_UNAVAILABLE,
 };
 
 struct kthread {
 	struct thread   thread;
 	struct mapping* stack_mapping;
 	size_t          stack_size;
-	struct kthread* reaper_next;
 };
 
 /* Return the thread descriptor currently associated with the running CPU. */
@@ -44,9 +42,6 @@ enum kthread_spawn_result kthread_spawn_detached(const char* name, thread_entry_
 enum kthread_spawn_result kthread_spawn_detached_on_cpu(const char* name, thread_entry_t entry, void* arg,
                                                         struct cpu* preferred_cpu);
 
-/* Compatibility hook; finalization is completed by the scheduler after context switches. */
-bool kthread_reaper_start(struct cpu* preferred_cpu);
-
 /* Block until target exits (or is already exited), then publish its exit code. */
 bool kthread_join(struct kthread* target, thread_exit_code_t* out_exit_code);
 
@@ -56,7 +51,7 @@ bool kthread_timed_join(struct kthread* target, uint64_t timeout_ms, thread_exit
 /* Reclaim a terminated joinable kthread handle. */
 bool kthread_destroy(struct kthread* target);
 
-/* Mark target as detached so no thread may join it; the reaper will reclaim it after exit. */
+/* Mark target as detached so no thread may join it; deferred finalization reclaims it after exit. */
 bool kthread_detach(struct kthread* target);
 
 /* Request deferred cancellation on target thread. */

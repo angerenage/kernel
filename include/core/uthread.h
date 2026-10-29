@@ -22,7 +22,6 @@ enum uthread_start_result {
 	UTHREAD_START_STACK_ALLOC_FAILED,
 	UTHREAD_START_CONTEXT_UNSUPPORTED,
 	UTHREAD_START_SCHEDULER_REJECTED,
-	UTHREAD_START_REAPER_UNAVAILABLE,
 	UTHREAD_START_ID_EXHAUSTED,
 };
 
@@ -47,7 +46,6 @@ struct uthread {
 	struct mapping*          user_stack_mapping;
 	struct mapping*          kernel_stack_mapping;
 	uintptr_t                user_stack_top;
-	struct uthread*          reaper_next;
 	struct uthread*          process_next;
 	/* Lazily-created cap_object id for this thread. */
 	cap_object_id_t cap_object_id;
@@ -75,7 +73,7 @@ enum uthread_start_result uthread_start(struct uthread* thread, const struct uth
 /*
  * Allocate, initialize, and queue a detached userspace thread.
  * The process remains caller-owned; the thread descriptor and stacks are
- * reclaimed by the user-thread reaper after exit.
+ * reclaimed by the scheduler's deferred reap callback after exit.
  */
 enum uthread_start_result uthread_spawn_detached(struct uthread**                   out_thread,
                                                  const struct uthread_start_params* params);
