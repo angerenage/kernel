@@ -974,8 +974,9 @@ bool hal_paging_map(struct hal_paging_space* space, const struct hal_paging_map_
 		if (level > 0) *slot |= X86_PTE_LARGE;
 		mapped += x86_leaf_size(level);
 	}
-	x86_tlb_shootdown_range(space, request->virtual_address, request->size);
-	if (ok) paging_transaction_commit(&transaction);
+	if (ok) {
+		paging_transaction_commit(&transaction);
+	}
 	else {
 		paging_transaction_rollback(&transaction, x86_transaction_restore, NULL);
 		x86_tlb_shootdown_range(space, request->virtual_address, request->size);
