@@ -94,6 +94,8 @@ void ahci_port_deinitialize(struct ahci_port* port) {
 	if (port->running && !ahci_port_stop(port))
 		fprintf(stderr, "ahci: port %u command engine did not stop\n", port->index);
 	if (port->registers != NULL) {
+		port->registers->interrupt_enable      = 0u;
+		port->registers->interrupt_status      = UINT32_MAX;
 		port->registers->command_list_base_low = port->registers->command_list_base_high = 0u;
 		port->registers->fis_base_low = port->registers->fis_base_high = 0u;
 	}

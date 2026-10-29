@@ -1,6 +1,7 @@
 #include "transport.h"
 
 #include <base/channel.h>
+#include <base/interrupt.h>
 #include <base/memory.h>
 #include <base/process.h>
 #include <base/signal.h>
@@ -12,8 +13,10 @@
 #include <string.h>
 #include <system/capability.h>
 #include <system/channel.h>
+#include <system/interrupt.h>
 #include <system/process.h>
 #include <system/signal.h>
+#include <system/upcall.h>
 
 #include "command.h"
 #include "dma.h"
@@ -25,6 +28,8 @@
 #define AHCI_PORT_PROVIDER_RIGHTS (AHCI_TRANSPORT_DRIVER_RIGHTS | CAP_DELEGATE)
 #define AHCI_SESSION_RIGHTS AHCI_TRANSPORT_DRIVER_RIGHTS
 #define AHCI_CLIENT_MEMORY_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP | CAP_DELEGATE))
+#define AHCI_MSI_RESOURCE "msi"
+#define AHCI_INTERRUPT_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_MANAGE))
 
 struct ahci_client_buffer {
 	bool                   used;
@@ -43,18 +48,71 @@ struct ahci_session {
 };
 
 struct ahci_transport {
-	channel_id_t                   endpoint;
-	cap_id_t                       activity_cap;
-	process_id_t                   pid;
-	cap_id_t                       parent_device_cap;
-	const struct ahci_dma_context* dma;
-	struct ahci_port               ports[AHCI_PORT_COUNT];
-	struct ahci_session            sessions[AHCI_PORT_COUNT];
-	uint32_t                       port_count;
-	uint64_t                       next_session_id;
+	channel_id_t                         endpoint;
+	cap_id_t                             activity_cap;
+	cap_id_t                             interrupt_cap;
+	cap_id_t                             interrupt_signal_cap;
+	bool                                 interrupt_bound;
+	process_id_t                         pid;
+	cap_id_t                             parent_device_cap;
+	volatile struct ahci_host_registers* registers;
+	const struct ahci_dma_context*       dma;
+	struct ahci_port                     ports[AHCI_PORT_COUNT];
+	struct ahci_session                  sessions[AHCI_PORT_COUNT];
+	uint32_t                             port_count;
+	uint64_t                             next_session_id;
 };
 
-static uint8_t request_buffer[CAP_MAX_REQUEST_SIZE];
+static struct ahci_transport* active_transport;
+static uint8_t                request_buffer[CAP_MAX_REQUEST_SIZE];
+
+DEFINE_UPCALL_HANDLER(ahci_interrupt, sender, arg0, arg1, arg2, arg3) {
+	(void)arg0;
+	(void)arg1;
+	(void)arg2;
+	(void)arg3;
+	struct ahci_transport* transport = active_transport;
+	if ((process_id_t)sender != SIGNAL_SENDER_KERNEL || transport == NULL) return;
+	uint32_t host_status = transport->registers->interrupt_status;
+	for (uint32_t index = 0u; index < transport->port_count; index++) {
+		struct ahci_port* port = &transport->ports[index];
+		if ((host_status & (1u << port->index)) == 0u) continue;
+		uint32_t status = port->registers->interrupt_status;
+		if (status == 0u) continue;
+		port->registers->interrupt_status = status;
+		(void)__atomic_fetch_or(&port->interrupt_status, status, __ATOMIC_RELEASE);
+	}
+	transport->registers->interrupt_status = host_status;
+}
+
+static bool initialize_interrupts(struct ahci_transport* transport) {
+	struct interrupt_info info;
+
+	if (device_resource_acquire(transport->parent_device_cap,
+	                            AHCI_MSI_RESOURCE,
+	                            sizeof(AHCI_MSI_RESOURCE) - 1u,
+	                            AHCI_INTERRUPT_RIGHTS,
+	                            &transport->interrupt_cap) != SYSCALL_STATUS_OK ||
+	    interrupt_info(transport->interrupt_cap, &info) != SYSCALL_STATUS_OK || info.kind != INTERRUPT_KIND_MESSAGE ||
+	    info.bound || signal_create(&transport->interrupt_signal_cap) != SYSCALL_STATUS_OK ||
+	    signal_set_handler(transport->interrupt_signal_cap, ahci_interrupt, SIGNAL_HANDLER_FLAG_NONE) !=
+	        SYSCALL_STATUS_OK)
+		return false;
+	active_transport = transport;
+	if (interrupt_bind(transport->interrupt_cap, transport->interrupt_signal_cap) != SYSCALL_STATUS_OK) {
+		active_transport = NULL;
+		return false;
+	}
+	transport->interrupt_bound             = true;
+	transport->registers->interrupt_status = UINT32_MAX;
+	for (uint32_t index = 0u; index < transport->port_count; index++) {
+		transport->ports[index].registers->interrupt_status = UINT32_MAX;
+		transport->ports[index].registers->interrupt_enable = AHCI_PORT_IE_COMMAND;
+	}
+	transport->registers->global_host_control |= AHCI_GHC_IE;
+	RUNTIME_DEBUG_LOG("ahci: MSI command completion enabled\n");
+	return true;
+}
 
 static bool reply(const struct cap_request* call, const void* data, size_t size, syscall_status_t status) {
 	return channel_reply(call->call_id, data, size, status) == SYSCALL_STATUS_OK;
@@ -290,6 +348,17 @@ static bool add_port(struct ahci_transport* transport, volatile struct ahci_port
 }
 
 static void cleanup(struct ahci_transport* transport) {
+	if (transport->registers != NULL) transport->registers->global_host_control &= ~AHCI_GHC_IE;
+	for (uint32_t index = 0u; index < transport->port_count; index++)
+		transport->ports[index].registers->interrupt_enable = 0u;
+	if (transport->interrupt_bound) (void)interrupt_unbind(transport->interrupt_cap);
+	transport->interrupt_bound = false;
+	active_transport           = NULL;
+	if (transport->interrupt_signal_cap != CAP_ID_INVALID) {
+		(void)signal_clear_handler(transport->interrupt_signal_cap);
+		(void)signal_destroy(transport->interrupt_signal_cap);
+	}
+	if (transport->interrupt_cap != CAP_ID_INVALID) (void)cap_drop(transport->interrupt_cap);
 	for (size_t index = 0u; index < AHCI_PORT_COUNT; index++) {
 		if (transport->sessions[index].active) {
 			(void)cap_unpublish(transport->endpoint, transport->sessions[index].object_id);
@@ -338,11 +407,14 @@ static bool serve(struct ahci_transport* transport) {
 bool ahci_transport_run(cap_id_t device_cap, volatile struct ahci_host_registers* registers, size_t bar_size,
                         uint32_t capabilities, uint32_t implemented, const struct ahci_dma_context* dma) {
 	struct ahci_transport transport = {
-		.endpoint          = CHANNEL_ID_INVALID,
-		.activity_cap      = CAP_ID_INVALID,
-		.parent_device_cap = device_cap,
-		.dma               = dma,
-		.next_session_id   = 1u,
+		.endpoint             = CHANNEL_ID_INVALID,
+		.activity_cap         = CAP_ID_INVALID,
+		.interrupt_cap        = CAP_ID_INVALID,
+		.interrupt_signal_cap = CAP_ID_INVALID,
+		.parent_device_cap    = device_cap,
+		.registers            = registers,
+		.dma                  = dma,
+		.next_session_id      = 1u,
 	};
 	struct self_info self;
 	uint32_t         port_limit = (capabilities & AHCI_CAP_NP_MASK) + 1u;
@@ -362,6 +434,8 @@ bool ahci_transport_run(cap_id_t device_cap, volatile struct ahci_host_registers
 		if (offset > bar_size || sizeof(struct ahci_port_registers) > bar_size - offset) goto done;
 		volatile struct ahci_port_registers* port =
 			(volatile struct ahci_port_registers*)((volatile uint8_t*)registers + offset);
+		port->interrupt_enable = 0u;
+		port->interrupt_status = UINT32_MAX;
 		if ((port->sata_status & AHCI_PORT_SSTS_DET_MASK) != 3u) continue;
 		if (port->signature == AHCI_PORT_SIGNATURE_ATA) {
 			if (!add_port(&transport, port, index, AHCI_DEVICE_SATA, (capabilities & AHCI_CAP_S64A) != 0u)) goto done;
@@ -372,6 +446,10 @@ bool ahci_transport_run(cap_id_t device_cap, volatile struct ahci_host_registers
 	}
 	if (transport.port_count == 0u) {
 		RUNTIME_DEBUG_LOG("ahci: no supported devices attached\n");
+	}
+	else if (!initialize_interrupts(&transport)) {
+		fprintf(stderr, "ahci: unable to initialize MSI command completion\n");
+		goto done;
 	}
 	success = serve(&transport);
 

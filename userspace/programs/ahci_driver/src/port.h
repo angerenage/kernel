@@ -24,6 +24,7 @@ struct ahci_port {
 	uint64_t                             object_id;
 	uint32_t                             index;
 	enum ahci_device_kind                kind;
+	uint32_t                             interrupt_status;
 	bool                                 running;
 	bool                                 published;
 };

@@ -20,6 +20,15 @@
 #define PCI_IO_RESOURCE_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP | CAP_DELEGATE))
 #define PCI_DMA_RESOURCE_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_ALLOCATE | CAP_MANAGE))
 #define PCI_DMA_ALLOCATOR_RESOURCE_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_ALLOCATE))
+#define PCI_MSI_CONTROL_OFFSET 2u
+#define PCI_MSI_ADDRESS_OFFSET 4u
+#define PCI_MSI_ADDRESS_HIGH_OFFSET 8u
+#define PCI_MSI_DATA_32BIT_OFFSET 8u
+#define PCI_MSI_DATA_64BIT_OFFSET 12u
+#define PCI_MSI_MASK_32BIT_OFFSET 12u
+#define PCI_MSI_MASK_64BIT_OFFSET 16u
+#define PCI_MSI_CONTROL_ENABLE (1u << 0u)
+#define PCI_MSI_CONTROL_MULTIPLE_ENABLE_MASK (7u << 4u)
 
 TRACE_LABEL(trace_claim_bars, "pci/claim/bars");
 TRACE_LABEL(trace_claim_rom, "pci/claim/rom");
@@ -35,16 +44,18 @@ static void claim_error(const struct pci_address* address, const char* resource,
 	                    (unsigned)status);
 }
 
-bool pci_claim_initialize(const struct pci_host_ranges* ranges, cap_id_t memory_allocator_cap, cap_id_t interrupts_cap,
-                          cap_id_t io_ports_cap, struct pci_claim_context* out_context) {
+bool pci_claim_initialize(struct pci_config* config, const struct pci_host_ranges* ranges,
+                          cap_id_t memory_allocator_cap, cap_id_t interrupts_cap, cap_id_t io_ports_cap,
+                          struct pci_claim_context* out_context) {
 	struct memory_allocator_info memory;
 
-	if (ranges == NULL || out_context == NULL || memory_allocator_cap == CAP_ID_INVALID ||
+	if (config == NULL || ranges == NULL || out_context == NULL || memory_allocator_cap == CAP_ID_INVALID ||
 	    interrupts_cap == CAP_ID_INVALID || memory_allocator_info(memory_allocator_cap, &memory) != SYSCALL_STATUS_OK ||
 	    memory.physical_claim_granule == 0u ||
 	    (memory.physical_claim_granule & (memory.physical_claim_granule - 1u)) != 0u)
 		return false;
 	*out_context = (struct pci_claim_context){
+		.config               = config,
 		.memory_allocator_cap = memory_allocator_cap,
 		.interrupts_cap       = interrupts_cap,
 		.io_ports_cap         = io_ports_cap,
@@ -180,6 +191,10 @@ static bool claim_host_memory(const struct pci_claim_context* context, const str
 static bool claim_msi(const struct pci_claim_context* context, const struct pci_address* address,
                       struct pci_msi_resource* msi) {
 	interrupt_message_context_t message_context;
+	uint16_t                    control;
+	uint16_t                    data_offset;
+	uint16_t                    mask_offset;
+	bool                        control_valid = false;
 	syscall_status_t            status;
 
 	if (!msi->present) return false;
@@ -187,7 +202,49 @@ static bool claim_msi(const struct pci_claim_context* context, const struct pci_
 		context->interrupts_cap, INTERRUPT_MESSAGE_CONTROLLER_AUTO, INTERRUPT_MESSAGE_PRODUCER_NONE, &message_context);
 	if (status == SYSCALL_STATUS_OK)
 		status = interrupts_allocate_message(context->interrupts_cap, message_context, &msi->capability, &msi->message);
-	if (status != SYSCALL_STATUS_OK) claim_error(address, "MSI", status);
+	if (status == SYSCALL_STATUS_OK) {
+		uint16_t capability = msi->capability_offset;
+		if ((!msi->address_64bit && msi->message.message_address > UINT32_MAX) ||
+		    msi->message.message_data > UINT16_MAX ||
+		    !pci_config_read16(context->config, *address, capability + PCI_MSI_CONTROL_OFFSET, &control)) {
+			status = SYSCALL_STATUS_FAILED;
+		}
+		else {
+			control_valid = true;
+			control &= (uint16_t)~(PCI_MSI_CONTROL_ENABLE | PCI_MSI_CONTROL_MULTIPLE_ENABLE_MASK);
+			data_offset = msi->address_64bit ? PCI_MSI_DATA_64BIT_OFFSET : PCI_MSI_DATA_32BIT_OFFSET;
+			mask_offset = msi->address_64bit ? PCI_MSI_MASK_64BIT_OFFSET : PCI_MSI_MASK_32BIT_OFFSET;
+			if (!pci_config_write16(context->config, *address, capability + PCI_MSI_CONTROL_OFFSET, control) ||
+			    !pci_config_write32(context->config,
+			                        *address,
+			                        capability + PCI_MSI_ADDRESS_OFFSET,
+			                        (uint32_t)msi->message.message_address) ||
+			    (msi->address_64bit && !pci_config_write32(context->config,
+			                                               *address,
+			                                               capability + PCI_MSI_ADDRESS_HIGH_OFFSET,
+			                                               (uint32_t)(msi->message.message_address >> 32u))) ||
+			    !pci_config_write16(
+					context->config, *address, capability + data_offset, (uint16_t)msi->message.message_data) ||
+			    (msi->per_vector_masking &&
+			     !pci_config_write32(context->config, *address, capability + mask_offset, 0u)) ||
+			    !pci_config_write16(
+					context->config, *address, capability + PCI_MSI_CONTROL_OFFSET, control | PCI_MSI_CONTROL_ENABLE))
+				status = SYSCALL_STATUS_FAILED;
+			else msi->enabled = true;
+		}
+	}
+	if (status != SYSCALL_STATUS_OK) {
+		if (control_valid)
+			(void)pci_config_write16(context->config,
+			                         *address,
+			                         msi->capability_offset + PCI_MSI_CONTROL_OFFSET,
+			                         control & (uint16_t)~PCI_MSI_CONTROL_ENABLE);
+		if (msi->capability != CAP_ID_INVALID) {
+			(void)interrupt_destroy(msi->capability);
+			msi->capability = CAP_ID_INVALID;
+		}
+		claim_error(address, "MSI", status);
+	}
 	return status == SYSCALL_STATUS_OK;
 }
 

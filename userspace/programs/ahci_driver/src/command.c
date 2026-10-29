@@ -72,7 +72,8 @@ static uint32_t address_high(uintptr_t address) {
 static bool wait_device_ready(volatile uint32_t* task_file) {
 	for (size_t elapsed = 0u; elapsed < 1000u; elapsed++) {
 		if ((*task_file & (AHCI_PORT_TFD_BSY | AHCI_PORT_TFD_DRQ)) == 0u) return true;
-		if (sleep_ms(1u) != SYSCALL_STATUS_OK) return false;
+		syscall_status_t status = sleep_ms(1u);
+		if (status != SYSCALL_STATUS_OK && status != SYSCALL_STATUS_INTERRUPTED) return false;
 	}
 	return (*task_file & (AHCI_PORT_TFD_BSY | AHCI_PORT_TFD_DRQ)) == 0u;
 }
@@ -134,13 +135,16 @@ bool ahci_command_execute(struct ahci_port* port, const struct ahci_transport_ex
 		return false;
 	port->registers->interrupt_status = UINT32_MAX;
 	port->registers->sata_error       = UINT32_MAX;
+	__atomic_store_n(&port->interrupt_status, 0u, __ATOMIC_RELEASE);
 	__atomic_thread_fence(__ATOMIC_SEQ_CST);
 	if (!wait_device_ready(&port->registers->task_file_data)) return false;
 	port->registers->command_issue = 1u;
 	for (size_t elapsed = 0u; elapsed < AHCI_COMMAND_TIMEOUT_MS; elapsed++) {
-		uint32_t interrupt_status = port->registers->interrupt_status;
+		uint32_t interrupt_status =
+			__atomic_load_n(&port->interrupt_status, __ATOMIC_ACQUIRE) | port->registers->interrupt_status;
 		if ((interrupt_status & AHCI_PORT_IS_TFES) != 0u) break;
 		if ((port->registers->command_issue & 1u) == 0u) {
+			port->registers->interrupt_status = interrupt_status;
 			if (mapping_sync(port->command_dma.device_mapping_cap, 0u, port->command_dma.size, DMA_SYNC_FOR_CPU) !=
 			    SYSCALL_STATUS_OK)
 				return false;
@@ -154,11 +158,14 @@ bool ahci_command_execute(struct ahci_port* port, const struct ahci_transport_ex
 				return false;
 			return true;
 		}
-		if (sleep_ms(1u) != SYSCALL_STATUS_OK) return false;
+		syscall_status_t status = sleep_ms(1u);
+		if (status != SYSCALL_STATUS_OK && status != SYSCALL_STATUS_INTERRUPTED) return false;
 	}
-	response->task_file_data   = port->registers->task_file_data;
-	response->interrupt_status = port->registers->interrupt_status;
-	response->transferred_size = 0u;
-	response->reserved         = 0u;
+	response->task_file_data = port->registers->task_file_data;
+	response->interrupt_status =
+		__atomic_load_n(&port->interrupt_status, __ATOMIC_ACQUIRE) | port->registers->interrupt_status;
+	port->registers->interrupt_status = response->interrupt_status;
+	response->transferred_size        = 0u;
+	response->reserved                = 0u;
 	return false;
 }

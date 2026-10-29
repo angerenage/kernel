@@ -16,6 +16,7 @@
 #define AHCI_CAP_S64A (1u << 31u)
 
 #define AHCI_GHC_AE (1u << 31u)
+#define AHCI_GHC_IE (1u << 1u)
 
 #define AHCI_PORT_SSTS_DET_MASK 0x0fu
 #define AHCI_PORT_SSTS_IPM_MASK (0x0fu << 8u)
@@ -37,6 +38,9 @@
 #define AHCI_PORT_TFD_BSY (1u << 7u)
 
 #define AHCI_PORT_IS_TFES (1u << 30u)
+#define AHCI_PORT_IE_COMPLETION ((1u << 0u) | (1u << 1u) | (1u << 2u) | (1u << 3u) | (1u << 5u))
+#define AHCI_PORT_IE_ERROR ((1u << 24u) | (1u << 26u) | (1u << 27u) | (1u << 28u) | (1u << 29u) | AHCI_PORT_IS_TFES)
+#define AHCI_PORT_IE_COMMAND (AHCI_PORT_IE_COMPLETION | AHCI_PORT_IE_ERROR)
 
 /* AHCI generic host-control register block. */
 struct ahci_host_registers {

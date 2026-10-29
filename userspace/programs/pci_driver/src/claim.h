@@ -14,6 +14,7 @@ struct device_builder;
 
 /* Root authorities and cached geometry used while claiming PCI resources. */
 struct pci_claim_context {
+	struct pci_config*            config;
 	cap_id_t                      memory_allocator_cap;
 	cap_id_t                      interrupts_cap;
 	cap_id_t                      io_ports_cap;
@@ -27,8 +28,9 @@ struct pci_claim_context {
 };
 
 /* Validate the configured root capabilities and cache their public geometry. */
-bool pci_claim_initialize(const struct pci_host_ranges* ranges, cap_id_t memory_allocator_cap, cap_id_t interrupts_cap,
-                          cap_id_t io_ports_cap, struct pci_claim_context* out_context);
+bool pci_claim_initialize(struct pci_config* config, const struct pci_host_ranges* ranges,
+                          cap_id_t memory_allocator_cap, cap_id_t interrupts_cap, cap_id_t io_ports_cap,
+                          struct pci_claim_context* out_context);
 
 /* Release the host-window capabilities retained by a claim context. */
 void pci_claim_deinitialize(struct pci_claim_context* context);

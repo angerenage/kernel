@@ -102,7 +102,8 @@ bool pci_enumerate(struct pci_host* host, cap_id_t memory_allocator_cap, cap_id_
 	if (host == NULL || out_inventory == NULL) return false;
 	{
 		TRACE_SCOPE(trace, &trace_claim_initialize);
-		success = pci_claim_initialize(&host->ranges, memory_allocator_cap, interrupts_cap, io_ports_cap, &claims);
+		success = pci_claim_initialize(
+			&host->config, &host->ranges, memory_allocator_cap, interrupts_cap, io_ports_cap, &claims);
 	}
 	if (!success) return false;
 	bus_queue[bus_tail++]       = host->first_bus;
