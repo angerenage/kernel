@@ -45,15 +45,24 @@ struct fat32_read_cache {
 	bool     unavailable;
 };
 
+struct fat32_directory_cache {
+	struct fat32_directory_entry* entries;
+	size_t                        capacity;
+	size_t                        count;
+	uint32_t                      cluster;
+	bool                          valid;
+};
+
 struct fat32_server {
-	struct fat32_volume*    volume;
-	channel_id_t            endpoint;
-	cap_id_t                activity_cap;
-	cap_id_t                root_cap;
-	process_id_t            pid;
-	char                    service[REGISTRY_NAME_MAX + 1u];
-	struct fat32_node*      nodes;
-	struct fat32_read_cache read_cache;
+	struct fat32_volume*         volume;
+	channel_id_t                 endpoint;
+	cap_id_t                     activity_cap;
+	cap_id_t                     root_cap;
+	process_id_t                 pid;
+	char                         service[REGISTRY_NAME_MAX + 1u];
+	struct fat32_node*           nodes;
+	struct fat32_read_cache      read_cache;
+	struct fat32_directory_cache directory_cache;
 };
 
 static uint8_t request_buffer[CAP_MAX_REQUEST_SIZE];
@@ -148,6 +157,24 @@ static void invalidate_read_cache(struct fat32_server* server) {
 	server->read_cache.file_cluster = 0u;
 	server->read_cache.file_size    = 0u;
 	server->read_cache.valid        = false;
+}
+
+static void invalidate_directory_cache(struct fat32_server* server) {
+	server->directory_cache.count   = 0u;
+	server->directory_cache.cluster = 0u;
+	server->directory_cache.valid   = false;
+}
+
+static bool reserve_directory_cache(struct fat32_server* server, size_t capacity) {
+	struct fat32_directory_cache* cache = &server->directory_cache;
+	struct fat32_directory_entry* entries;
+	if (capacity <= cache->capacity) return true;
+	if (capacity > SIZE_MAX / sizeof(*entries)) return false;
+	entries = realloc(cache->entries, capacity * sizeof(*entries));
+	if (entries == NULL) return false;
+	cache->entries  = entries;
+	cache->capacity = capacity;
+	return true;
 }
 
 static bool initialize_read_cache(struct fat32_server* server) {
@@ -324,6 +351,7 @@ static bool handle_enumerate(struct fat32_server* server, const struct cap_reque
                              struct fat32_node* directory) {
 	struct filesystem_directory_enumerate_request   request;
 	struct filesystem_directory_enumerate_response* response = (void*)response_buffer;
+	struct fat32_directory_cache*                   cache    = &server->directory_cache;
 	size_t maximum = (CAP_MAX_RESPONSE_SIZE - sizeof(*response)) / sizeof(struct filesystem_directory_entry);
 	TRACE_SCOPE(trace, &trace_directory_enumerate);
 	if (!request_has_rights(call, CAP_CALL | CAP_READ)) return reply_transport(call, SYSCALL_STATUS_DENIED);
@@ -331,24 +359,29 @@ static bool handle_enumerate(struct fat32_server* server, const struct cap_reque
 	    request.reserved != 0u || call->response_capacity < sizeof(*response) || request.count > maximum ||
 	    request.count > (call->response_capacity - sizeof(*response)) / sizeof(struct filesystem_directory_entry))
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
-	struct fat32_directory_entry* entries =
-		request.count == 0u ? NULL : malloc((size_t)request.count * sizeof(*entries));
-	if (request.count != 0u && entries == NULL) return reply_transport(call, SYSCALL_STATUS_FAILED);
-	uint64_t          total;
-	size_t            returned;
-	enum fat32_result result = fat32_directory_enumerate(server->volume,
-	                                                     node_cluster(server, directory),
-	                                                     request.offset,
-	                                                     entries,
-	                                                     (size_t)request.count,
-	                                                     &returned,
-	                                                     &total);
-	if (result != FAT32_RESULT_OK) {
-		free(entries);
-		return reply_domain(call, fat_status(result));
+	uint32_t cluster = node_cluster(server, directory);
+	uint64_t total;
+	size_t   returned;
+	if (cache->valid && cache->cluster == cluster) {
+		total              = cache->count;
+		uint64_t available = request.offset < total ? total - request.offset : 0u;
+		returned           = available < request.count ? (size_t)available : (size_t)request.count;
 	}
-	for (size_t index = 0u; index < returned; index++) fill_entry(server, &response->entries[index], &entries[index]);
-	free(entries);
+	else {
+		if (!reserve_directory_cache(server, (size_t)request.count))
+			return reply_transport(call, SYSCALL_STATUS_FAILED);
+		enum fat32_result result = fat32_directory_enumerate(
+			server->volume, cluster, request.offset, cache->entries, (size_t)request.count, &returned, &total);
+		if (result != FAT32_RESULT_OK) return reply_domain(call, fat_status(result));
+		cache->valid = request.offset == 0u && returned == total;
+		if (cache->valid) {
+			cache->cluster = cluster;
+			cache->count   = returned;
+		}
+	}
+	size_t cache_offset = cache->valid ? (size_t)request.offset : 0u;
+	for (size_t index = 0u; index < returned; index++)
+		fill_entry(server, &response->entries[index], &cache->entries[cache_offset + index]);
 	response->header   = (struct filesystem_response_header){.status = FILESYSTEM_STATUS_OK, .reserved = 0u};
 	response->total    = total;
 	response->returned = returned;
@@ -382,6 +415,7 @@ static bool handle_create_file(struct fat32_server* server, const struct cap_req
 	if (result == FAT32_RESULT_OK) return reply_domain(call, FILESYSTEM_STATUS_ALREADY_EXISTS);
 	if (result != FAT32_RESULT_NOT_FOUND) return reply_domain(call, fat_status(result));
 	result = fat32_write_root_file(server->volume, name, NULL, 0u);
+	invalidate_directory_cache(server);
 	if (result != FAT32_RESULT_OK) return reply_domain(call, fat_status(result));
 	result = fat32_directory_lookup(server->volume, server->volume->root_cluster, path, request.path_size, &entry);
 	if (result != FAT32_RESULT_OK) return reply_domain(call, fat_status(result));
@@ -422,6 +456,7 @@ static enum fat32_result replace_file(struct fat32_server* server, struct fat32_
 	if (result == FAT32_RESULT_OK && size != 0u) memcpy(contents + offset, data, size);
 	if (result == FAT32_RESULT_OK)
 		result = fat32_write_root_file(server->volume, node->entry.name, contents, (size_t)final_size);
+	invalidate_directory_cache(server);
 	free(contents);
 	if (result == FAT32_RESULT_OK) {
 		invalidate_read_cache(server);
