@@ -46,6 +46,7 @@ EVENT_THREAD_PROCESS = 16
 EVENT_THREAD_NAME = 17
 EVENT_THREAD_ID = 18
 EVENT_PROCESS_ID = 19
+EVENT_UTHREAD_PHASE = 20
 
 HEADER = struct.Struct("<QIIQQIIQIIQ")
 CPU_DESCRIPTOR = struct.Struct("<QQQQ")
@@ -179,6 +180,22 @@ SCHED_PHASE_NAMES = (
     "address_space_lock",
     "address_space_track",
     "address_space_cr3",
+)
+
+UTHREAD_PHASE_NAMES = (
+    "upcall_init",
+    "id_alloc",
+    "user_stack_map",
+    "upcall_stack_map",
+    "kernel_stack_map",
+    "argument_copy",
+    "context_init",
+    "thread_init",
+    "process_attach",
+    "sched_runnable",
+    "stack_memory_create",
+    "stack_address_map",
+    "stack_prefault",
 )
 
 
@@ -641,6 +658,27 @@ def decode_trace(input_path, output_path, kernel_elf=None):
                     {
                         "ph": "E",
                         "cat": "sched",
+                        "pid": pid,
+                        "tid": tid,
+                        "ts": timestamp_us(timestamp),
+                    }
+                )
+            elif event_id == EVENT_UTHREAD_PHASE and record_type == RECORD_BEGIN:
+                emit(
+                    {
+                        "ph": "B",
+                        "cat": "uthread",
+                        "name": indexed_name(UTHREAD_PHASE_NAMES, arg1, "phase"),
+                        "pid": pid,
+                        "tid": tid,
+                        "ts": timestamp_us(timestamp),
+                    }
+                )
+            elif event_id == EVENT_UTHREAD_PHASE and record_type == RECORD_END:
+                emit(
+                    {
+                        "ph": "E",
+                        "cat": "uthread",
                         "pid": pid,
                         "tid": tid,
                         "ts": timestamp_us(timestamp),

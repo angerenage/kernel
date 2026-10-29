@@ -28,6 +28,9 @@ enum {
 
 #define UTHREAD_REAPER_MAX_CPUS 64u
 
+#define TRACE_UTHREAD_PHASE(phase, type)                                                                               \
+	kernel_trace_emit(KERNEL_TRACE_EVENT_UTHREAD_PHASE, type, kernel_trace_thread_id(sched_current_thread()), phase)
+
 struct uthread_reaper {
 	struct thread_wait_queue wait_queue;
 	struct uthread*          head;
@@ -43,9 +46,13 @@ static bool uthread_map_stack(struct address_space* space, size_t requested_size
 	struct mapping* mapping;
 	size_t          granule = address_space_minimum_mapping_size(space);
 	size_t          size, guard;
-	if (granule == 0u || !align_up_size(requested_size, granule, &size) || !memory_create_anonymous(size, &memory))
-		return false;
-	guard       = granule;
+	if (granule == 0u || !align_up_size(requested_size, granule, &size)) return false;
+	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_STACK_MEMORY_CREATE, KERNEL_TRACE_RECORD_BEGIN);
+	bool memory_created = memory_create_anonymous(size, &memory);
+	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_STACK_MEMORY_CREATE, KERNEL_TRACE_RECORD_END);
+	if (!memory_created) return false;
+	guard = granule;
+	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_STACK_ADDRESS_MAP, KERNEL_TRACE_RECORD_BEGIN);
 	bool mapped = address_space_map(space,
 	                                &(const struct address_space_mapping_request){
 										.memory       = memory,
@@ -53,11 +60,16 @@ static bool uthread_map_stack(struct address_space* space, size_t requested_size
 										.access       = MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
 									},
 	                                &mapping);
+	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_STACK_ADDRESS_MAP, KERNEL_TRACE_RECORD_END);
 	memory_release(memory);
 	if (!mapped) return false;
 	*out_mapping = mapping;
 	*out_base    = (void*)mapping_address(mapping);
-	if (!prefault || address_space_prefault(space, mapping, 0u, mapping_size(mapping))) return true;
+	if (!prefault) return true;
+	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_STACK_PREFAULT, KERNEL_TRACE_RECORD_BEGIN);
+	bool prefaulted = address_space_prefault(space, mapping, 0u, mapping_size(mapping));
+	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_STACK_PREFAULT, KERNEL_TRACE_RECORD_END);
+	if (prefaulted) return true;
 	(void)address_space_unmap(space, mapping);
 	mapping_release(mapping);
 	*out_mapping = NULL;
@@ -406,12 +418,17 @@ static enum uthread_start_result uthread_prepare_internal(struct uthread*       
 		.process_main_thread  = params->main_thread,
 		.heap_allocated       = heap_allocated,
 	};
-	if (!uthread_upcall_state_init(thread)) {
+	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_UPCALL_INIT, KERNEL_TRACE_RECORD_BEGIN);
+	bool upcall_initialized = uthread_upcall_state_init(thread);
+	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_UPCALL_INIT, KERNEL_TRACE_RECORD_END);
+	if (!upcall_initialized) {
 		uthread_release_name(thread);
 		uthread_upcall_state_deinit(thread);
 		return UTHREAD_START_NO_MEMORY;
 	}
+	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_ID_ALLOC, KERNEL_TRACE_RECORD_BEGIN);
 	id_result = id_table_alloc(&uthread_table, thread, &id);
+	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_ID_ALLOC, KERNEL_TRACE_RECORD_END);
 	if (id_result != ID_TABLE_OK) {
 		uthread_release_name(thread);
 		uthread_upcall_state_deinit(thread);
@@ -420,15 +437,22 @@ static enum uthread_start_result uthread_prepare_internal(struct uthread*       
 	thread->id = id;
 
 	user_stack_size = params->user_stack_size != 0u ? params->user_stack_size : UTHREAD_DEFAULT_USER_STACK_SIZE;
-	if (!uthread_map_stack(address_space, user_stack_size, false, &thread->user_stack_mapping, &user_stack_base)) {
+	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_USER_STACK_MAP, KERNEL_TRACE_RECORD_BEGIN);
+	bool user_stack_mapped =
+		uthread_map_stack(address_space, user_stack_size, false, &thread->user_stack_mapping, &user_stack_base);
+	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_USER_STACK_MAP, KERNEL_TRACE_RECORD_END);
+	if (!user_stack_mapped) {
 		uthread_release_name(thread);
 		uthread_release_stacks_or_hcf(thread);
 		uthread_upcall_state_deinit(thread);
 		uthread_unregister_id(thread);
 		return UTHREAD_START_STACK_ALLOC_FAILED;
 	}
-	if (!uthread_map_stack(
-			address_space, UTHREAD_UPCALL_STACK_SIZE, false, &thread->upcall.stack_mapping, &upcall_stack_base)) {
+	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_UPCALL_STACK_MAP, KERNEL_TRACE_RECORD_BEGIN);
+	bool upcall_stack_mapped = uthread_map_stack(
+		address_space, UTHREAD_UPCALL_STACK_SIZE, false, &thread->upcall.stack_mapping, &upcall_stack_base);
+	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_UPCALL_STACK_MAP, KERNEL_TRACE_RECORD_END);
+	if (!upcall_stack_mapped) {
 		uthread_release_name(thread);
 		uthread_release_stacks_or_hcf(thread);
 		uthread_upcall_state_deinit(thread);
@@ -436,11 +460,11 @@ static enum uthread_start_result uthread_prepare_internal(struct uthread*       
 		return UTHREAD_START_STACK_ALLOC_FAILED;
 	}
 	thread->upcall.stack_top = (uintptr_t)upcall_stack_base + mapping_size(thread->upcall.stack_mapping);
-	if (!uthread_map_stack(address_space_kernel(),
-	                       UTHREAD_KERNEL_STACK_SIZE,
-	                       true,
-	                       &thread->kernel_stack_mapping,
-	                       &kernel_stack_base)) {
+	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_KERNEL_STACK_MAP, KERNEL_TRACE_RECORD_BEGIN);
+	bool kernel_stack_mapped = uthread_map_stack(
+		address_space_kernel(), UTHREAD_KERNEL_STACK_SIZE, true, &thread->kernel_stack_mapping, &kernel_stack_base);
+	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_KERNEL_STACK_MAP, KERNEL_TRACE_RECORD_END);
+	if (!kernel_stack_mapped) {
 		uthread_release_name(thread);
 		uthread_release_stacks_or_hcf(thread);
 		uthread_upcall_state_deinit(thread);
@@ -460,8 +484,13 @@ static enum uthread_start_result uthread_prepare_internal(struct uthread*       
 			return UTHREAD_START_INVALID_ARGUMENTS;
 		}
 		user_arg = (initial_user_stack_top - params->arg_size) & ~((uintptr_t)UTHREAD_USER_STACK_ALIGNMENT - 1u);
-		if (user_arg <= (uintptr_t)user_stack_base ||
-		    address_space_copy_to(address_space, user_arg, params->arg_data, params->arg_size) != ADDRESS_TRANSFER_OK) {
+		TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_ARGUMENT_COPY, KERNEL_TRACE_RECORD_BEGIN);
+		enum address_transfer_result argument_copy =
+			user_arg <= (uintptr_t)user_stack_base
+		        ? ADDRESS_TRANSFER_INVALID_ARGUMENTS
+		        : address_space_copy_to(address_space, user_arg, params->arg_data, params->arg_size);
+		TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_ARGUMENT_COPY, KERNEL_TRACE_RECORD_END);
+		if (argument_copy != ADDRESS_TRANSFER_OK) {
 			uthread_release_name(thread);
 			uthread_release_stacks_or_hcf(thread);
 			uthread_upcall_state_deinit(thread);
@@ -471,8 +500,11 @@ static enum uthread_start_result uthread_prepare_internal(struct uthread*       
 		initial_user_stack_top = user_arg;
 	}
 
-	if (!hal_userspace_thread_context_init(
-			&context, kernel_stack_top, params->user_entry, initial_user_stack_top, user_arg)) {
+	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_CONTEXT_INIT, KERNEL_TRACE_RECORD_BEGIN);
+	bool context_initialized = hal_userspace_thread_context_init(
+		&context, kernel_stack_top, params->user_entry, initial_user_stack_top, user_arg);
+	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_CONTEXT_INIT, KERNEL_TRACE_RECORD_END);
+	if (!context_initialized) {
 		uthread_release_name(thread);
 		uthread_release_stacks_or_hcf(thread);
 		uthread_upcall_state_deinit(thread);
@@ -492,7 +524,9 @@ static enum uthread_start_result uthread_prepare_internal(struct uthread*       
 		.entry             = NULL,
 		.arg               = NULL,
 	};
+	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_THREAD_INIT, KERNEL_TRACE_RECORD_BEGIN);
 	init_result = thread_init_context(&thread->thread, &thread_params);
+	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_THREAD_INIT, KERNEL_TRACE_RECORD_END);
 	if (init_result != THREAD_INIT_OK) {
 		uthread_release_name(thread);
 		uthread_release_stacks_or_hcf(thread);
@@ -523,8 +557,14 @@ enum uthread_start_result uthread_commit_prepared(struct uthread* thread, bool m
 
 	process     = thread->process;
 	restore_new = process_get_state(process) == PROCESS_STATE_NEW;
-	if (!uthread_attach_process(thread, process, main_thread)) return UTHREAD_START_INVALID_ARGUMENTS;
-	if (!sched_make_runnable(&thread->thread)) {
+	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_PROCESS_ATTACH, KERNEL_TRACE_RECORD_BEGIN);
+	bool attached = uthread_attach_process(thread, process, main_thread);
+	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_PROCESS_ATTACH, KERNEL_TRACE_RECORD_END);
+	if (!attached) return UTHREAD_START_INVALID_ARGUMENTS;
+	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_SCHED_RUNNABLE, KERNEL_TRACE_RECORD_BEGIN);
+	bool runnable = sched_make_runnable(&thread->thread);
+	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_SCHED_RUNNABLE, KERNEL_TRACE_RECORD_END);
+	if (!runnable) {
 		if (!uthread_remove_process_attachment(thread, true, restore_new)) hcf();
 		thread->thread.cpu   = NULL;
 		thread->thread.state = THREAD_STATE_NEW;
