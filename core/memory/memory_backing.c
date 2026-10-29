@@ -402,17 +402,24 @@ static bool allocate_plan(struct memory_backing_extent** pending, const struct m
 		size_t                        attempt = size;
 		for (;;) {
 			request.size = attempt;
-			if (pmm_alloc(&request, &allocation)) break;
+			TRACE_BACKING_PHASE(KERNEL_TRACE_VM_BACKING_PMM_ALLOC, KERNEL_TRACE_RECORD_BEGIN);
+			bool allocated = pmm_alloc(&request, &allocation);
+			TRACE_BACKING_PHASE(KERNEL_TRACE_VM_BACKING_PMM_ALLOC, KERNEL_TRACE_RECORD_END);
+			if (allocated) break;
 			if (!plan->allow_smaller || attempt == backing_granule()) return false;
 			attempt = ((attempt / 2u) / backing_granule()) * backing_granule();
 			if (attempt == 0u) attempt = backing_granule();
 		}
+		TRACE_BACKING_PHASE(KERNEL_TRACE_VM_BACKING_METADATA_ALLOC, KERNEL_TRACE_RECORD_BEGIN);
 		extent = metadata_alloc();
+		TRACE_BACKING_PHASE(KERNEL_TRACE_VM_BACKING_METADATA_ALLOC, KERNEL_TRACE_RECORD_END);
 		if (extent == NULL) {
 			if (!pmm_free(allocation)) hcf();
 			return false;
 		}
+		TRACE_BACKING_PHASE(KERNEL_TRACE_VM_BACKING_ZERO, KERNEL_TRACE_RECORD_BEGIN);
 		memset(physical_to_virtual(allocation.address), 0, allocation.size);
+		TRACE_BACKING_PHASE(KERNEL_TRACE_VM_BACKING_ZERO, KERNEL_TRACE_RECORD_END);
 		*extent = (struct memory_backing_extent){
 			.logical_start  = logical_start,
 			.size           = allocation.size,
@@ -621,7 +628,9 @@ bool memory_backing_materialize(struct memory_backing*                          
 		if (!retry) {
 			state = spinlock_lock_irqsave(&backing->lock);
 			if (generation == backing->topology_generation) {
+				TRACE_BACKING_PHASE(KERNEL_TRACE_VM_BACKING_COMMIT, KERNEL_TRACE_RECORD_BEGIN);
 				commit_pending_locked(backing, pending);
+				TRACE_BACKING_PHASE(KERNEL_TRACE_VM_BACKING_COMMIT, KERNEL_TRACE_RECORD_END);
 				spinlock_unlock_irqrestore(&backing->lock, state);
 				return true;
 			}

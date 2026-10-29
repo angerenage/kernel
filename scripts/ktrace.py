@@ -163,6 +163,10 @@ VM_PHASE_NAMES = (
     "tlb_shootdown_send",
     "tlb_shootdown_wait",
     "backing_materialize",
+    "backing_pmm_alloc",
+    "backing_metadata_alloc",
+    "backing_zero",
+    "backing_commit",
 )
 
 SCHED_PHASE_NAMES = (
