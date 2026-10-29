@@ -330,15 +330,7 @@ static void fill_rectangle(volatile uint8_t* framebuffer, size_t pitch, const st
 }
 
 static void copy_framebuffer_row(volatile uint8_t* destination, const volatile uint8_t* source, size_t size) {
-	if ((((uintptr_t)destination | (uintptr_t)source) & (sizeof(uint64_t) - 1u)) == 0u) {
-		size_t words = size / sizeof(uint64_t);
-		for (size_t word = 0u; word < words; word++)
-			((volatile uint64_t*)destination)[word] = ((const volatile uint64_t*)source)[word];
-		destination += words * sizeof(uint64_t);
-		source += words * sizeof(uint64_t);
-		size -= words * sizeof(uint64_t);
-	}
-	for (size_t byte = 0u; byte < size; byte++) destination[byte] = source[byte];
+	memcpy((void*)destination, (const void*)source, size);
 }
 
 static struct color blend_color(struct color foreground, struct color background, uint8_t alpha) {
