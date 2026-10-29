@@ -61,6 +61,7 @@ static uint8_t response_buffer[CAP_MAX_RESPONSE_SIZE];
 
 TRACE_LABEL(trace_file_read, "fat32/file/read");
 TRACE_LABEL(trace_cache_fill, "fat32/file/cache_fill");
+TRACE_LABEL(trace_directory_enumerate, "fat32/directory/enumerate");
 
 static bool reply_request(const struct cap_request* call, const void* response, size_t size, syscall_status_t status) {
 	return channel_reply(call->call_id, response, size, status) == SYSCALL_STATUS_OK;
@@ -324,6 +325,7 @@ static bool handle_enumerate(struct fat32_server* server, const struct cap_reque
 	struct filesystem_directory_enumerate_request   request;
 	struct filesystem_directory_enumerate_response* response = (void*)response_buffer;
 	size_t maximum = (CAP_MAX_RESPONSE_SIZE - sizeof(*response)) / sizeof(struct filesystem_directory_entry);
+	TRACE_SCOPE(trace, &trace_directory_enumerate);
 	if (!request_has_rights(call, CAP_CALL | CAP_READ)) return reply_transport(call, SYSCALL_STATUS_DENIED);
 	if (!copy_request(call, data, &request, sizeof(request)) || call->request_size != sizeof(request) ||
 	    request.reserved != 0u || call->response_capacity < sizeof(*response) || request.count > maximum ||

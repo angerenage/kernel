@@ -15,6 +15,7 @@
 #include <system/channel.h>
 #include <system/process.h>
 #include <system/signal.h>
+#include <system/trace.h>
 
 #include "input.h"
 #include "terminal.h"
@@ -22,6 +23,8 @@
 #define TERMINAL_PROTOCOL_VERSION_MAJOR 1u
 #define TERMINAL_PROTOCOL_VERSION_MINOR 0u
 #define TERMINAL_SERVICE_OBJECT_ID 1u
+
+TRACE_LABEL(trace_terminal_write, "terminal/write");
 
 static bool reply_request(const struct cap_request* call, const void* response, size_t response_size,
                           syscall_status_t status) {
@@ -155,7 +158,10 @@ static bool dispatch_request(struct terminal* terminal, struct terminal_input* i
 	if (request.reserved != 0u || request.size > CAP_MAX_REQUEST_SIZE - sizeof(request) ||
 	    call->request_size != sizeof(request) + (size_t)request.size)
 		return reply_request(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
-	complete = terminal_write(terminal, data + sizeof(request), (size_t)request.size, &written);
+	{
+		TRACE_SCOPE(trace, &trace_terminal_write);
+		complete = terminal_write(terminal, data + sizeof(request), (size_t)request.size, &written);
+	}
 	if (!complete && written == 0u) return reply_request(call, NULL, 0u, SYSCALL_STATUS_FAILED);
 	response.size = written;
 	return reply_request(call, &response, sizeof(response), SYSCALL_STATUS_OK);

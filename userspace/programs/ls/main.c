@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <system/capability.h>
 #include <system/display.h>
+#include <system/trace.h>
 
 #define VFS_PROTOCOL_VERSION_MAJOR 1u
 #define VFS_PROTOCOL_VERSION_MINOR 0u
@@ -63,6 +64,10 @@ struct list_output {
 	size_t capacity;
 	bool   failed;
 };
+
+TRACE_LABEL(trace_ls_main, "ls/main");
+TRACE_LABEL(trace_ls_enumerate, "ls/directory/enumerate");
+TRACE_LABEL(trace_ls_output, "ls/output");
 
 static bool write_error(const char* operand, const char* message) {
 	if (operand == NULL) return fprintf(stderr, "ls: %s\n", message) >= 0;
@@ -210,6 +215,7 @@ static void output_append_padding(struct list_output* output, size_t count) {
 
 static bool flush_output(struct list_output* output) {
 	bool success;
+	TRACE_SCOPE(trace, &trace_ls_output);
 
 	if (output->failed) success = write_error(NULL, "out of memory");
 	else success = output->size == 0u || fwrite(output->bytes, 1u, output->size, stdout) == output->size;
@@ -332,6 +338,7 @@ static const char* read_directory(cap_id_t directory_cap, struct filesystem_dire
 	size_t                             count    = 0u;
 	size_t                             capacity = 0u;
 	uint64_t                           total    = 0u;
+	TRACE_SCOPE(trace, &trace_ls_enumerate);
 
 	for (;;) {
 		struct filesystem_call_result result;
@@ -468,6 +475,7 @@ int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 	bool                   after_separator = false;
 	bool                   printed         = false;
 	bool                   success         = true;
+	TRACE_SCOPE(trace, &trace_ls_main);
 
 	if (argc < 0 || (argc != 0 && argv == NULL) || capc != 0u || capv != NULL) return 1;
 	for (int i = 0; i < argc; i++) {

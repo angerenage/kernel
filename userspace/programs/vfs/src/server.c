@@ -15,11 +15,14 @@
 #include <system/channel.h>
 #include <system/process.h>
 #include <system/signal.h>
+#include <system/trace.h>
 
 #define VFS_SERVICE_OBJECT_ID 1u
 #define VFS_PROTOCOL_VERSION_MAJOR 1u
 #define VFS_PROTOCOL_VERSION_MINOR 0u
 #define VFS_SERVICE_CLIENT_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE | CAP_MANAGE))
+
+TRACE_LABEL(trace_directory_enumerate, "vfs/directory/enumerate");
 
 struct vfs_mount {
 	uint64_t                    id;
@@ -754,6 +757,7 @@ static bool handle_directory_enumerate(const struct cap_request* call, struct vf
 	size_t                                          maximum_count;
 	size_t                                          returned = 0u;
 	uint64_t                                        total    = 0u;
+	TRACE_SCOPE(trace, &trace_directory_enumerate);
 
 	if (!request_has_rights(call, CAP_CALL | CAP_READ)) return reply_transport(call, SYSCALL_STATUS_DENIED);
 	maximum_count = (CAP_MAX_RESPONSE_SIZE - sizeof(*response)) / sizeof(struct filesystem_directory_entry);
