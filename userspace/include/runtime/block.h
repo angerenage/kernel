@@ -17,6 +17,7 @@
 
 enum block_op {
 	BLOCK_OP_OPEN = 0u,
+	BLOCK_OP_SLICE,
 	BLOCK_OP_ALLOCATE_BUFFER,
 	BLOCK_OP_READ,
 	BLOCK_OP_WRITE,
@@ -46,6 +47,18 @@ struct block_open_response {
 	uint32_t max_transfer_blocks;
 	uint32_t flags;
 	uint32_t reserved;
+};
+
+/* Derive a transferable block root restricted to a subrange of this root. */
+struct block_slice_request {
+	struct block_request_header header;
+	uint32_t                    reserved;
+	uint64_t                    block_index;
+	uint64_t                    block_count;
+};
+
+struct block_slice_response {
+	cap_id_t root_cap;
 };
 
 /* Allocate storage that is directly usable by the provider's DMA engine. */
@@ -116,6 +129,10 @@ syscall_status_t block_device_open_read_only(cap_id_t device_cap, struct block_d
 
 /* Close a session after releasing all of its buffers. */
 void block_device_close(struct block_device* device);
+
+/* Create a block root whose block zero is block_index in this device. */
+syscall_status_t block_device_slice(const struct block_device* device, uint64_t block_index, uint64_t block_count,
+                                    cap_id_t* out_root_cap);
 
 /* Allocate and map a buffer suitable for this block provider. */
 syscall_status_t block_buffer_allocate(const struct block_device* device, uint32_t size,

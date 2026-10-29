@@ -21,7 +21,9 @@
 #include "transport.h"
 
 #define SATA_BLOCK_ROOT_OBJECT 1u
+#define SATA_BLOCK_SLICE_OBJECT_BASE 0x10000ull
 #define SATA_BLOCK_SESSION_OBJECT_BASE 0x100000000ull
+#define SATA_BLOCK_MAX_SLICES 32u
 #define SATA_BLOCK_MAX_SESSIONS 8u
 #define SATA_BLOCK_MAX_BUFFERS 8u
 #define SATA_BLOCK_PROVIDER_RIGHTS (BLOCK_DRIVER_RIGHTS | CAP_DELEGATE)
@@ -38,8 +40,17 @@ struct sata_block_session {
 	bool                     active;
 	uint64_t                 object_id;
 	process_id_t             caller;
+	uint64_t                 block_offset;
+	uint64_t                 block_count;
 	uint64_t                 next_buffer_id;
 	struct sata_block_buffer buffers[SATA_BLOCK_MAX_BUFFERS];
+};
+
+struct sata_block_slice {
+	bool     active;
+	uint64_t object_id;
+	uint64_t block_offset;
+	uint64_t block_count;
 };
 
 struct sata_block_service {
@@ -49,7 +60,9 @@ struct sata_block_service {
 	process_id_t                   pid;
 	const struct sata_transport*   transport;
 	const struct sata_device_info* info;
+	uint64_t                       next_slice_id;
 	uint64_t                       next_session_id;
+	struct sata_block_slice        slices[SATA_BLOCK_MAX_SLICES];
 	struct sata_block_session      sessions[SATA_BLOCK_MAX_SESSIONS];
 };
 
@@ -118,6 +131,31 @@ static struct sata_block_session* find_session(struct sata_block_service* servic
 	return NULL;
 }
 
+static bool find_region(struct sata_block_service* service, uint64_t object_id, uint64_t* out_offset,
+                        uint64_t* out_count) {
+	if (object_id == SATA_BLOCK_ROOT_OBJECT) {
+		*out_offset = 0u;
+		*out_count  = service->info->sector_count;
+		return true;
+	}
+	for (size_t index = 0u; index < SATA_BLOCK_MAX_SLICES; index++) {
+		const struct sata_block_slice* slice = &service->slices[index];
+		if (slice->active && slice->object_id == object_id) {
+			*out_offset = slice->block_offset;
+			*out_count  = slice->block_count;
+			return true;
+		}
+	}
+	return false;
+}
+
+static struct sata_block_slice* find_slice(struct sata_block_service* service, uint64_t object_id) {
+	for (size_t index = 0u; index < SATA_BLOCK_MAX_SLICES; index++)
+		if (service->slices[index].active && service->slices[index].object_id == object_id)
+			return &service->slices[index];
+	return NULL;
+}
+
 static struct sata_block_buffer* find_buffer(struct sata_block_session* session, uint64_t id) {
 	for (size_t index = 0u; index < SATA_BLOCK_MAX_BUFFERS; index++)
 		if (session->buffers[index].used && session->buffers[index].id == id) return &session->buffers[index];
@@ -145,7 +183,8 @@ static uint32_t max_transfer_blocks(const struct sata_block_service* service) {
 	return transfer_block_limit(service->transport, service->info);
 }
 
-static bool dispatch_open(struct sata_block_service* service, const struct cap_request* call) {
+static bool dispatch_open(struct sata_block_service* service, uint64_t block_offset, uint64_t block_count,
+                          const struct cap_request* call) {
 	struct block_open_response response = {0};
 	struct sata_block_session* session  = NULL;
 
@@ -158,9 +197,11 @@ static bool dispatch_open(struct sata_block_service* service, const struct cap_r
 			break;
 		}
 	if (session == NULL) return reply(call, NULL, 0u, SYSCALL_STATUS_UNAVAILABLE);
-	*session = (struct sata_block_session){.active    = true,
-	                                       .object_id = SATA_BLOCK_SESSION_OBJECT_BASE + service->next_session_id++,
-	                                       .caller    = call->caller,
+	*session = (struct sata_block_session){.active       = true,
+	                                       .object_id    = SATA_BLOCK_SESSION_OBJECT_BASE + service->next_session_id++,
+	                                       .caller       = call->caller,
+	                                       .block_offset = block_offset,
+	                                       .block_count  = block_count,
 	                                       .next_buffer_id = 1u};
 	for (size_t index = 0u; index < SATA_BLOCK_MAX_BUFFERS; index++) {
 		session->buffers[index].client_cap             = CAP_ID_INVALID;
@@ -168,7 +209,7 @@ static bool dispatch_open(struct sata_block_service* service, const struct cap_r
 		session->buffers[index].sata.address_space_cap = CAP_ID_INVALID;
 		session->buffers[index].sata.mapping_cap       = CAP_ID_INVALID;
 	}
-	response.block_count         = service->info->sector_count;
+	response.block_count         = block_count;
 	response.block_size          = service->info->logical_sector_size;
 	response.max_transfer_blocks = max_transfer_blocks(service);
 	response.flags               = (call->rights & CAP_WRITE) != 0u ? BLOCK_DEVICE_WRITABLE : 0u;
@@ -185,6 +226,43 @@ static bool dispatch_open(struct sata_block_service* service, const struct cap_r
 	if (reply(call, &response, sizeof(response), SYSCALL_STATUS_OK)) return true;
 	(void)cap_unpublish(service->endpoint, session->object_id);
 	release_session(service->transport, session);
+	return false;
+}
+
+static bool dispatch_slice(struct sata_block_service* service, uint64_t parent_offset, uint64_t parent_count,
+                           const struct cap_request* call, const void* data) {
+	struct block_slice_request  request;
+	struct block_slice_response response = {.root_cap = CAP_ID_INVALID};
+	struct sata_block_slice*    slice    = NULL;
+
+	if ((call->rights & CAP_READ) == 0u) return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
+	if (call->request_size != sizeof(request) || call->response_capacity < sizeof(response))
+		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	memcpy(&request, data, sizeof(request));
+	if (request.reserved != 0u || request.block_count == 0u || request.block_index >= parent_count ||
+	    request.block_count > parent_count - request.block_index)
+		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	for (size_t index = 0u; index < SATA_BLOCK_MAX_SLICES; index++)
+		if (!service->slices[index].active) {
+			slice = &service->slices[index];
+			break;
+		}
+	if (slice == NULL) return reply(call, NULL, 0u, SYSCALL_STATUS_UNAVAILABLE);
+	*slice = (struct sata_block_slice){.active       = true,
+	                                   .object_id    = SATA_BLOCK_SLICE_OBJECT_BASE + service->next_slice_id++,
+	                                   .block_offset = parent_offset + request.block_index,
+	                                   .block_count  = request.block_count};
+	if (cap_publish(service->endpoint,
+	                slice->object_id,
+	                call->caller,
+	                (call->rights & SATA_BLOCK_SESSION_RIGHTS) | CAP_DELEGATE,
+	                &response.root_cap) != SYSCALL_STATUS_OK) {
+		*slice = (struct sata_block_slice){0};
+		return reply(call, NULL, 0u, SYSCALL_STATUS_FAILED);
+	}
+	if (reply(call, &response, sizeof(response), SYSCALL_STATUS_OK)) return true;
+	(void)cap_unpublish(service->endpoint, slice->object_id);
+	*slice = (struct sata_block_slice){0};
 	return false;
 }
 
@@ -226,11 +304,11 @@ static bool dispatch_allocate(struct sata_block_service* service, struct sata_bl
 	return false;
 }
 
-static bool transfer_valid(const struct sata_block_service* service, const struct block_transfer_request* request,
-                           const struct sata_block_buffer* buffer) {
+static bool transfer_valid(const struct sata_block_service* service, const struct sata_block_session* session,
+                           const struct block_transfer_request* request, const struct sata_block_buffer* buffer) {
 	if (request->reserved != 0u || request->block_count == 0u || request->block_count > max_transfer_blocks(service) ||
-	    request->block_index >= service->info->sector_count ||
-	    request->block_count > service->info->sector_count - request->block_index ||
+	    request->block_index >= session->block_count ||
+	    request->block_count > session->block_count - request->block_index ||
 	    request->block_count > UINT32_MAX / service->info->logical_sector_size)
 		return false;
 	uint32_t size = request->block_count * service->info->logical_sector_size;
@@ -249,32 +327,33 @@ static bool dispatch_transfer(struct sata_block_service* service, struct sata_bl
 		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	memcpy(&request, data, sizeof(request));
 	buffer = find_buffer(session, request.buffer_id);
-	if (buffer == NULL || !transfer_valid(service, &request, buffer))
+	if (buffer == NULL || !transfer_valid(service, session, &request, buffer))
 		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	uint64_t block_index = session->block_offset + request.block_index;
 	if (service->info->lba48)
 		success = write ? sata_write_dma_ext(service->transport,
 		                                     &buffer->sata,
 		                                     request.buffer_offset,
-		                                     request.block_index,
+		                                     block_index,
 		                                     (uint16_t)request.block_count,
 		                                     service->info->logical_sector_size)
 		                : sata_read_dma_ext(service->transport,
 		                                    &buffer->sata,
 		                                    request.buffer_offset,
-		                                    request.block_index,
+		                                    block_index,
 		                                    (uint16_t)request.block_count,
 		                                    service->info->logical_sector_size);
 	else
 		success = write ? sata_write_dma(service->transport,
 		                                 &buffer->sata,
 		                                 request.buffer_offset,
-		                                 (uint32_t)request.block_index,
+		                                 (uint32_t)block_index,
 		                                 (uint16_t)request.block_count,
 		                                 service->info->logical_sector_size)
 		                : sata_read_dma(service->transport,
 		                                &buffer->sata,
 		                                request.buffer_offset,
-		                                (uint32_t)request.block_index,
+		                                (uint32_t)block_index,
 		                                (uint16_t)request.block_count,
 		                                service->info->logical_sector_size);
 	if (!success) return reply(call, NULL, 0u, SYSCALL_STATUS_FAILED);
@@ -312,12 +391,16 @@ static bool dispatch_release(struct sata_block_service* service, struct sata_blo
 static bool dispatch(struct sata_block_service* service, const struct cap_request* call, const void* data) {
 	struct block_request_header header;
 	struct sata_block_session*  session;
+	uint64_t                    block_offset;
+	uint64_t                    block_count;
 
 	if (data == NULL || call->request_size < sizeof(header)) return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	memcpy(&header, data, sizeof(header));
-	if (call->object_id == SATA_BLOCK_ROOT_OBJECT)
-		return header.op == BLOCK_OP_OPEN ? dispatch_open(service, call)
-		                                  : reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	if (find_region(service, call->object_id, &block_offset, &block_count)) {
+		if (header.op == BLOCK_OP_OPEN) return dispatch_open(service, block_offset, block_count, call);
+		if (header.op == BLOCK_OP_SLICE) return dispatch_slice(service, block_offset, block_count, call, data);
+		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
+	}
 	session = find_session(service, call->object_id);
 	if (session == NULL || session->caller != call->caller) return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
 	switch (header.op) {
@@ -358,6 +441,12 @@ static bool serve(struct sata_block_service* service) {
 					(void)cap_unpublish_if_unused(service->endpoint, session->object_id);
 					release_session(service->transport, session);
 				}
+				else {
+					struct sata_block_slice* slice = find_slice(service, event.object_id);
+					if (slice != NULL &&
+					    cap_unpublish_if_unused(service->endpoint, slice->object_id) == SYSCALL_STATUS_OK)
+						*slice = (struct sata_block_slice){0};
+				}
 			}
 		} while (received);
 		struct signal_message activity;
@@ -372,6 +461,8 @@ static void cleanup(struct sata_block_service* service) {
 		(void)cap_unpublish(service->endpoint, service->sessions[index].object_id);
 		release_session(service->transport, &service->sessions[index]);
 	}
+	for (size_t index = 0u; index < SATA_BLOCK_MAX_SLICES; index++)
+		if (service->slices[index].active) (void)cap_unpublish(service->endpoint, service->slices[index].object_id);
 	if (service->root_cap != CAP_ID_INVALID) (void)cap_unpublish(service->endpoint, SATA_BLOCK_ROOT_OBJECT);
 	if (service->activity_cap != CAP_ID_INVALID) (void)cap_drop(service->activity_cap);
 	if (service->endpoint != CHANNEL_ID_INVALID) (void)channel_destroy(service->endpoint);
@@ -384,6 +475,7 @@ bool sata_block_service_run(cap_id_t device_cap, const struct sata_transport* tr
 	                                     .root_cap        = CAP_ID_INVALID,
 	                                     .transport       = transport,
 	                                     .info            = info,
+	                                     .next_slice_id   = 1u,
 	                                     .next_session_id = 1u};
 	struct self_info          self    = {
 		.self_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .main_thread_cap = CAP_ID_INVALID};

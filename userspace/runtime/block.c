@@ -63,6 +63,25 @@ void block_device_close(struct block_device* device) {
 	*device = (struct block_device){.root_cap = CAP_ID_INVALID, .session_cap = CAP_ID_INVALID};
 }
 
+syscall_status_t block_device_slice(const struct block_device* device, uint64_t block_index, uint64_t block_count,
+                                    cap_id_t* out_root_cap) {
+	const struct block_slice_request request = {
+		.header = {.op = BLOCK_OP_SLICE}, .block_index = block_index, .block_count = block_count};
+	struct block_slice_response response = {.root_cap = CAP_ID_INVALID};
+	size_t                      response_size;
+
+	if (device == NULL || out_root_cap == NULL || device->root_cap == CAP_ID_INVALID || block_count == 0u ||
+	    block_index >= device->block_count || block_count > device->block_count - block_index)
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	*out_root_cap = CAP_ID_INVALID;
+	syscall_status_t status =
+		cap_call(device->root_cap, &request, sizeof(request), &response, sizeof(response), &response_size);
+	if (status != SYSCALL_STATUS_OK) return status;
+	if (response_size != sizeof(response) || response.root_cap == CAP_ID_INVALID) return SYSCALL_STATUS_FAILED;
+	*out_root_cap = response.root_cap;
+	return SYSCALL_STATUS_OK;
+}
+
 syscall_status_t block_buffer_allocate(const struct block_device* device, uint32_t size,
                                        struct block_buffer* out_buffer) {
 	const struct block_allocate_buffer_request request  = {.header = {.op = BLOCK_OP_ALLOCATE_BUFFER}, .size = size};
