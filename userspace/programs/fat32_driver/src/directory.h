@@ -10,6 +10,7 @@
 
 struct fat32_directory_entry {
 	char     name[FILESYSTEM_NAME_MAX + 1u];
+	uint8_t  short_name[11u];
 	uint32_t cluster;
 	uint32_t size;
 	uint8_t  attributes;

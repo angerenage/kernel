@@ -211,6 +211,7 @@ static enum fat32_result entry_decode(const struct fat32_volume* volume, const u
 		.size       = size,
 		.attributes = attributes,
 	};
+	memcpy(out_entry->short_name, raw, sizeof(out_entry->short_name));
 	format_short_name(raw, out_entry->name);
 	return out_entry->name[0u] == '\0' || strchr(out_entry->name, '?') != NULL ? FAT32_RESULT_UNSUPPORTED
 	                                                                           : FAT32_RESULT_OK;

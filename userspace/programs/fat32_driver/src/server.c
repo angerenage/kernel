@@ -101,6 +101,12 @@ static enum filesystem_status fat_status(enum fat32_result result) {
 		return FILESYSTEM_STATUS_OK;
 	case FAT32_RESULT_NOT_FOUND:
 		return FILESYSTEM_STATUS_NOT_FOUND;
+	case FAT32_RESULT_ALREADY_EXISTS:
+		return FILESYSTEM_STATUS_ALREADY_EXISTS;
+	case FAT32_RESULT_NOT_DIRECTORY:
+		return FILESYSTEM_STATUS_NOT_DIRECTORY;
+	case FAT32_RESULT_NOT_EMPTY:
+		return FILESYSTEM_STATUS_DIRECTORY_NOT_EMPTY;
 	case FAT32_RESULT_UNSUPPORTED:
 		return FILESYSTEM_STATUS_UNSUPPORTED;
 	case FAT32_RESULT_ERROR:
@@ -288,6 +294,22 @@ static enum fat32_result lookup_path(struct fat32_server* server, uint32_t start
 	}
 }
 
+static enum fat32_result lookup_parent(struct fat32_server* server, uint32_t start_cluster, const uint8_t* path,
+                                       size_t path_size, uint32_t* out_parent_cluster, size_t* out_name_offset) {
+	size_t offset = path_size;
+	while (offset != 0u && path[offset - 1u] != '/') offset--;
+	*out_parent_cluster = start_cluster;
+	*out_name_offset    = offset;
+	if (offset == 0u) return FAT32_RESULT_OK;
+	struct fat32_directory_entry parent;
+	uint32_t                     parent_parent;
+	enum fat32_result result = lookup_path(server, start_cluster, path, offset - 1u, &parent, &parent_parent);
+	if (result != FAT32_RESULT_OK) return result;
+	if ((parent.attributes & FAT32_ATTRIBUTE_DIRECTORY) == 0u) return FAT32_RESULT_NOT_DIRECTORY;
+	*out_parent_cluster = parent.cluster;
+	return FAT32_RESULT_OK;
+}
+
 static bool handle_info(struct fat32_server* server, const struct cap_request* call, const void* data,
                         struct fat32_node* node) {
 	struct filesystem_info_request request;
@@ -422,6 +444,167 @@ static bool handle_create_file(struct fat32_server* server, const struct cap_req
 	return publish_node(server, call, &entry, server->volume->root_cluster, request.rights);
 }
 
+static bool handle_create_directory(struct fat32_server* server, const struct cap_request* call, const void* data,
+                                    struct fat32_node* directory) {
+	struct filesystem_directory_open_request request;
+	struct fat32_directory_entry             entry;
+	uint32_t                                 parent_cluster;
+	size_t                                   expected_size;
+
+	if (!request_has_rights(call, CAP_CALL | CAP_WRITE)) return reply_transport(call, SYSCALL_STATUS_DENIED);
+	if (!copy_request(call, data, &request, sizeof(request)) || request.path_size == 0u ||
+	    request.path_size > CAP_MAX_REQUEST_SIZE - sizeof(request) ||
+	    (expected_size = sizeof(request) + request.path_size) != call->request_size ||
+	    call->response_capacity < sizeof(struct filesystem_open_response) ||
+	    (request.rights & ~FILESYSTEM_NODE_REQUEST_RIGHTS) != 0u || (request.rights & ~call->rights) != 0u)
+		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	const uint8_t* path = (const uint8_t*)data + sizeof(request);
+	if (!filesystem_relative_path_valid(path, request.path_size))
+		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+
+	size_t            name_offset;
+	enum fat32_result result =
+		lookup_parent(server, node_cluster(server, directory), path, request.path_size, &parent_cluster, &name_offset);
+	if (result == FAT32_RESULT_NOT_DIRECTORY) return reply_domain(call, FILESYSTEM_STATUS_NOT_DIRECTORY);
+	if (result != FAT32_RESULT_OK) return reply_domain(call, fat_status(result));
+	size_t name_size = request.path_size - name_offset;
+	result           = fat32_directory_lookup(server->volume, parent_cluster, path + name_offset, name_size, &entry);
+	if (result == FAT32_RESULT_OK) return reply_domain(call, FILESYSTEM_STATUS_ALREADY_EXISTS);
+	if (result != FAT32_RESULT_NOT_FOUND) return reply_domain(call, fat_status(result));
+	result = fat32_create_directory(server->volume, parent_cluster, path + name_offset, name_size);
+	if (result != FAT32_RESULT_OK) return reply_domain(call, fat_status(result));
+	invalidate_directory_cache(server);
+	result = fat32_directory_lookup(server->volume, parent_cluster, path + name_offset, name_size, &entry);
+	if (result != FAT32_RESULT_OK) return reply_domain(call, fat_status(result));
+	return publish_node(server, call, &entry, parent_cluster, request.rights);
+}
+
+static bool handle_remove(struct fat32_server* server, const struct cap_request* call, const void* data,
+                          struct fat32_node* directory) {
+	struct filesystem_directory_path_request request;
+	size_t                                   expected_size;
+
+	if (!request_has_rights(call, CAP_CALL | CAP_WRITE)) return reply_transport(call, SYSCALL_STATUS_DENIED);
+	if (!copy_request(call, data, &request, sizeof(request)) || request.path_size == 0u ||
+	    request.path_size > CAP_MAX_REQUEST_SIZE - sizeof(request) ||
+	    (expected_size = sizeof(request) + request.path_size) != call->request_size ||
+	    call->response_capacity < sizeof(struct filesystem_response_header))
+		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	const uint8_t* path = (const uint8_t*)data + sizeof(request);
+	if (!filesystem_relative_path_valid(path, request.path_size))
+		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	uint32_t          parent_cluster;
+	size_t            name_offset;
+	enum fat32_result result =
+		lookup_parent(server, node_cluster(server, directory), path, request.path_size, &parent_cluster, &name_offset);
+	if (result != FAT32_RESULT_OK) return reply_domain(call, fat_status(result));
+	result = fat32_remove_node(server->volume, parent_cluster, path + name_offset, request.path_size - name_offset);
+	if (result != FAT32_RESULT_OK) return reply_domain(call, fat_status(result));
+	invalidate_directory_cache(server);
+	invalidate_read_cache(server);
+	return reply_domain(call, FILESYSTEM_STATUS_OK);
+}
+
+static bool path_contains(const uint8_t* parent, size_t parent_size, const uint8_t* path, size_t path_size) {
+	if (path_size < parent_size || (path_size != parent_size && path[parent_size] != '/')) return false;
+	for (size_t index = 0u; index < parent_size; index++) {
+		uint8_t left  = parent[index];
+		uint8_t right = path[index];
+		if (left >= 'a' && left <= 'z') left -= 'a' - 'A';
+		if (right >= 'a' && right <= 'z') right -= 'a' - 'A';
+		if (left != right) return false;
+	}
+	return true;
+}
+
+static bool path_reaches_directory(struct fat32_server* server, uint32_t start_cluster, const uint8_t* path,
+                                   size_t path_size, uint32_t target_cluster) {
+	uint32_t cluster = start_cluster;
+	size_t   start   = 0u;
+	if (cluster == target_cluster) return true;
+	while (start < path_size) {
+		size_t end = start;
+		while (end < path_size && path[end] != '/') end++;
+		struct fat32_directory_entry entry;
+		if (fat32_directory_lookup(server->volume, cluster, path + start, end - start, &entry) != FAT32_RESULT_OK ||
+		    (entry.attributes & FAT32_ATTRIBUTE_DIRECTORY) == 0u)
+			return false;
+		cluster = entry.cluster;
+		if (cluster == target_cluster) return true;
+		start = end + 1u;
+	}
+	return false;
+}
+
+static void refresh_renamed_nodes(struct fat32_server* server, uint32_t old_parent, const uint8_t old_short_name[11u],
+                                  uint32_t new_parent, const struct fat32_directory_entry* replacement) {
+	for (struct fat32_node* node = server->nodes; node != NULL; node = node->next) {
+		if (node->parent_cluster != old_parent ||
+		    memcmp(node->entry.short_name, old_short_name, sizeof(node->entry.short_name)) != 0)
+			continue;
+		node->parent_cluster = new_parent;
+		node->entry          = *replacement;
+	}
+}
+
+static bool handle_rename(struct fat32_server* server, const struct cap_request* call, const void* data,
+                          struct fat32_node* directory) {
+	struct filesystem_directory_rename_request request;
+	size_t                                     expected_size;
+
+	if (!request_has_rights(call, CAP_CALL | CAP_WRITE)) return reply_transport(call, SYSCALL_STATUS_DENIED);
+	if (!copy_request(call, data, &request, sizeof(request)) || request.reserved != 0u || request.old_path_size == 0u ||
+	    request.new_path_size == 0u || request.old_path_size > CAP_MAX_REQUEST_SIZE - sizeof(request) ||
+	    request.new_path_size > CAP_MAX_REQUEST_SIZE - sizeof(request) - request.old_path_size ||
+	    (expected_size = sizeof(request) + request.old_path_size + request.new_path_size) != call->request_size ||
+	    call->response_capacity < sizeof(struct filesystem_response_header))
+		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	const uint8_t* old_path = (const uint8_t*)data + sizeof(request);
+	const uint8_t* new_path = old_path + request.old_path_size;
+	if (!filesystem_relative_path_valid(old_path, request.old_path_size) ||
+	    !filesystem_relative_path_valid(new_path, request.new_path_size))
+		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	if (request.old_path_size == request.new_path_size && memcmp(old_path, new_path, request.old_path_size) == 0)
+		return reply_domain(call, FILESYSTEM_STATUS_OK);
+	uint32_t          start_cluster = node_cluster(server, directory);
+	uint32_t          old_parent;
+	uint32_t          new_parent;
+	size_t            old_name_offset;
+	size_t            new_name_offset;
+	enum fat32_result result =
+		lookup_parent(server, start_cluster, old_path, request.old_path_size, &old_parent, &old_name_offset);
+	if (result != FAT32_RESULT_OK) return reply_domain(call, fat_status(result));
+	result = lookup_parent(server, start_cluster, new_path, request.new_path_size, &new_parent, &new_name_offset);
+	if (result != FAT32_RESULT_OK) return reply_domain(call, fat_status(result));
+	struct fat32_directory_entry old_entry;
+	result = fat32_directory_lookup(
+		server->volume, old_parent, old_path + old_name_offset, request.old_path_size - old_name_offset, &old_entry);
+	if (result != FAT32_RESULT_OK) return reply_domain(call, fat_status(result));
+	if ((old_entry.attributes & FAT32_ATTRIBUTE_DIRECTORY) != 0u &&
+	    (path_contains(old_path, request.old_path_size, new_path, request.new_path_size) ||
+	     path_reaches_directory(
+			 server, start_cluster, new_path, new_name_offset == 0u ? 0u : new_name_offset - 1u, old_entry.cluster)))
+		return reply_domain(call, FILESYSTEM_STATUS_INVALID_ARGUMENT);
+	uint8_t old_short_name[11u];
+	memcpy(old_short_name, old_entry.short_name, sizeof(old_short_name));
+	result = fat32_rename_node(server->volume,
+	                           old_parent,
+	                           old_path + old_name_offset,
+	                           request.old_path_size - old_name_offset,
+	                           new_parent,
+	                           new_path + new_name_offset,
+	                           request.new_path_size - new_name_offset);
+	if (result != FAT32_RESULT_OK) return reply_domain(call, fat_status(result));
+	struct fat32_directory_entry replacement;
+	result = fat32_directory_lookup(
+		server->volume, new_parent, new_path + new_name_offset, request.new_path_size - new_name_offset, &replacement);
+	if (result != FAT32_RESULT_OK) return reply_domain(call, fat_status(result));
+	refresh_renamed_nodes(server, old_parent, old_short_name, new_parent, &replacement);
+	invalidate_directory_cache(server);
+	invalidate_read_cache(server);
+	return reply_domain(call, FILESYSTEM_STATUS_OK);
+}
+
 static bool handle_file_read(struct fat32_server* server, const struct cap_request* call, const void* data,
                              struct fat32_node* node) {
 	struct filesystem_file_read_request   request;
@@ -512,10 +695,11 @@ static bool dispatch_directory(struct fat32_server* server, const struct cap_req
 	case FILESYSTEM_DIRECTORY_OP_CREATE_FILE:
 		return handle_create_file(server, call, data, node);
 	case FILESYSTEM_DIRECTORY_OP_CREATE_DIRECTORY:
+		return handle_create_directory(server, call, data, node);
 	case FILESYSTEM_DIRECTORY_OP_REMOVE:
+		return handle_remove(server, call, data, node);
 	case FILESYSTEM_DIRECTORY_OP_RENAME:
-		if (!request_has_rights(call, CAP_CALL | CAP_WRITE)) return reply_transport(call, SYSCALL_STATUS_DENIED);
-		return reply_domain(call, FILESYSTEM_STATUS_UNSUPPORTED);
+		return handle_rename(server, call, data, node);
 	default:
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	}
