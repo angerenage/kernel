@@ -128,15 +128,17 @@ static syscall_result_t process_spawn_thread_handler(const struct cap_request* r
 	char*                                name     = NULL;
 	void*                                arg_copy = NULL;
 	syscall_result_t                     copy_result;
+	bool                                 detached;
 
 	if (req->request == NULL || req->request_size < sizeof(request)) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
-	if (!cap_kernel_response_fits(req, sizeof(response))) {
-		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	}
 	memcpy(&request, req->request, sizeof(request));
-	if (request.entry == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	detached = (request.flags & PROCESS_SPAWN_THREAD_DETACHED) != 0u;
+	if ((request.flags & ~PROCESS_SPAWN_THREAD_DETACHED) != 0u || request.reserved != 0u || request.entry == 0u ||
+	    (detached ? req->response != NULL || req->response_capacity != 0u
+	              : !cap_kernel_response_fits(req, sizeof(response))))
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	copy_result = process_copy_thread_arg(req, request.arg_data, request.arg_size, &arg_copy);
 	if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
 
@@ -153,7 +155,7 @@ static syscall_result_t process_spawn_thread_handler(const struct cap_request* r
 		.arg_size        = request.arg_size,
 		.user_stack_size = UTHREAD_DEFAULT_USER_STACK_SIZE,
 		.preferred_cpu   = NULL,
-		.detached        = false,
+		.detached        = detached,
 	};
 	result = process_prepare_thread(target, &thread, &params);
 	free(name);
@@ -162,6 +164,14 @@ static syscall_result_t process_spawn_thread_handler(const struct cap_request* r
 		return result == PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS
 				   ? syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, (uintptr_t)result)
 				   : syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
+	}
+	if (detached) {
+		result = process_commit_thread(target, thread);
+		if (result != PROCESS_THREAD_SPAWN_OK) {
+			(void)process_abort_thread(target, thread);
+			return syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
+		}
+		return syscall_result_ok(0u);
 	}
 
 	response.thread_cap = kernel_thread_grant_full(thread, req->caller);

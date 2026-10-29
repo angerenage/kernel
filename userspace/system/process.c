@@ -1,5 +1,6 @@
 #include <base/cap.h>
 #include <runtime/diagnostic.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <system/capability.h>
@@ -139,10 +140,12 @@ syscall_status_t process_run(cap_id_t cap, uintptr_t entry, const void* arg_data
 	return SYSCALL_STATUS_OK;
 }
 
-syscall_status_t process_spawn_thread(cap_id_t cap, uintptr_t entry, const void* arg_data, size_t arg_size,
-                                      const char* name, size_t name_length, cap_id_t* out_thread_cap) {
+static syscall_status_t process_spawn_thread_with_flags(cap_id_t cap, uintptr_t entry, const void* arg_data,
+                                                        size_t arg_size, const char* name, size_t name_length,
+                                                        uint32_t flags, cap_id_t* out_thread_cap) {
 	struct process_spawn_thread_request request = {
 		.header      = {.op = PROCESS_OP_SPAWN_THREAD},
+		.flags       = flags,
 		.entry       = entry,
 		.arg_data    = arg_data,
 		.arg_size    = arg_size,
@@ -151,6 +154,7 @@ syscall_status_t process_spawn_thread(cap_id_t cap, uintptr_t entry, const void*
 	};
 	struct process_spawn_thread_response response;
 	syscall_result_t                     result;
+	bool                                 detached = (flags & PROCESS_SPAWN_THREAD_DETACHED) != 0u;
 
 	if (cap == CAP_ID_INVALID) {
 		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(cap);
@@ -160,10 +164,11 @@ syscall_status_t process_spawn_thread(cap_id_t cap, uintptr_t entry, const void*
 		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(entry);
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	}
-	if (out_thread_cap == NULL) {
+	if (!detached && out_thread_cap == NULL) {
 		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(out_thread_cap);
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	}
+	if ((flags & ~PROCESS_SPAWN_THREAD_DETACHED) != 0u) return SYSCALL_STATUS_BAD_ARGUMENT;
 	if ((arg_data == NULL) != (arg_size == 0u)) {
 		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(arg_data);
 		return SYSCALL_STATUS_BAD_ARGUMENT;
@@ -177,20 +182,34 @@ syscall_status_t process_spawn_thread(cap_id_t cap, uintptr_t entry, const void*
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	}
 
-	result = cap_call_syscall(cap, &request, sizeof(request), &response, sizeof(response));
+	result =
+		cap_call_syscall(cap, &request, sizeof(request), detached ? NULL : &response, detached ? 0u : sizeof(response));
 	RUNTIME_DIAGNOSTIC_OPERATION_RESULT(PROCESS_OP_SPAWN_THREAD, result);
 	if (result.status != SYSCALL_STATUS_OK) return result.status;
-	if (result.value != sizeof(response)) {
+	size_t expected_size = detached ? 0u : sizeof(response);
+	if (result.value != expected_size) {
 		RUNTIME_DIAGNOSTIC_NAMED_VALUE(
 			"PROCESS_OP_SPAWN_THREAD returned invalid response size", "response_size", result.value);
 		return SYSCALL_STATUS_FAILED;
 	}
+	if (detached) return SYSCALL_STATUS_OK;
 	*out_thread_cap = response.thread_cap;
 	if (response.thread_cap == CAP_ID_INVALID) {
 		RUNTIME_DIAGNOSTIC_FAILED(PROCESS_OP_SPAWN_THREAD);
 		return SYSCALL_STATUS_FAILED;
 	}
 	return SYSCALL_STATUS_OK;
+}
+
+syscall_status_t process_spawn_thread(cap_id_t cap, uintptr_t entry, const void* arg_data, size_t arg_size,
+                                      const char* name, size_t name_length, cap_id_t* out_thread_cap) {
+	return process_spawn_thread_with_flags(cap, entry, arg_data, arg_size, name, name_length, 0u, out_thread_cap);
+}
+
+syscall_status_t process_spawn_detached_thread(cap_id_t cap, uintptr_t entry, const void* arg_data, size_t arg_size,
+                                               const char* name, size_t name_length) {
+	return process_spawn_thread_with_flags(
+		cap, entry, arg_data, arg_size, name, name_length, PROCESS_SPAWN_THREAD_DETACHED, NULL);
 }
 
 syscall_status_t process_wait(cap_id_t cap, uintptr_t* out_exit_code) {

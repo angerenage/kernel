@@ -149,15 +149,7 @@ static void monitor_registry(void* opaque) {
 }
 
 static bool spawn_worker(cap_id_t self_cap, uintptr_t entry, const void* argument, size_t argument_size) {
-	cap_id_t         thread_cap = CAP_ID_INVALID;
-	syscall_status_t status     = process_spawn_thread(self_cap, entry, argument, argument_size, NULL, 0u, &thread_cap);
-
-	if (status == SYSCALL_STATUS_OK) status = thread_detach(thread_cap);
-	if (thread_cap != CAP_ID_INVALID) {
-		syscall_status_t drop_status = cap_drop(thread_cap);
-		if (status == SYSCALL_STATUS_OK) status = drop_status;
-	}
-	return status == SYSCALL_STATUS_OK;
+	return process_spawn_detached_thread(self_cap, entry, argument, argument_size, NULL, 0u) == SYSCALL_STATUS_OK;
 }
 
 static void process_begin_launch(struct supervised_process* process) {

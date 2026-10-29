@@ -102,6 +102,10 @@ struct process_spawn_thread_response {
 	cap_id_t thread_cap;
 };
 
+enum process_spawn_thread_flags {
+	PROCESS_SPAWN_THREAD_DETACHED = 1u << 0u,
+};
+
 /* Operation codes for process capability requests. */
 enum process_op {
 	PROCESS_OP_INFO         = 0,
@@ -149,6 +153,8 @@ struct process_run_request {
 /* Request to create a joinable thread. arg_data is copied from the caller onto the new thread's stack. */
 struct process_spawn_thread_request {
 	struct process_request_header header;
+	uint32_t                      flags;
+	uint32_t                      reserved;
 	uintptr_t                     entry;
 	const void*                   arg_data;
 	size_t                        arg_size;

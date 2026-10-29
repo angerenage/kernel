@@ -23,6 +23,10 @@ syscall_status_t process_run(cap_id_t cap, uintptr_t entry, const void* arg_data
 syscall_status_t process_spawn_thread(cap_id_t cap, uintptr_t entry, const void* arg_data, size_t arg_size,
                                       const char* name, size_t name_length, cap_id_t* out_thread_cap);
 
+/* Copy an argument onto a new detached thread's stack and start it without creating a thread capability. */
+syscall_status_t process_spawn_detached_thread(cap_id_t cap, uintptr_t entry, const void* arg_data, size_t arg_size,
+                                               const char* name, size_t name_length);
+
 /* Wait for a process to terminate through its capability. */
 syscall_status_t process_wait(cap_id_t cap, uintptr_t* out_exit_code);
 

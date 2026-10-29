@@ -202,10 +202,9 @@ static void retry_process(void* opaque) {
 
 static bool spawn_worker(struct device_server* server, uintptr_t entry, const void* argument, size_t argument_size,
                          const char* name) {
-	cap_id_t thread_cap = CAP_ID_INVALID;
 	/* Keep names local: an executable mapping is not necessarily readable as syscall string data. */
 	syscall_status_t status =
-		process_spawn_thread(server->supervisor.self_cap, entry, argument, argument_size, NULL, 0u, &thread_cap);
+		process_spawn_detached_thread(server->supervisor.self_cap, entry, argument, argument_size, NULL, 0u);
 	if (status != SYSCALL_STATUS_OK) {
 		char* diagnostic = runtime_diagnostic_get();
 		printf("device-manager: worker %s spawn failed: %u%s%s\n",
@@ -214,17 +213,6 @@ static bool spawn_worker(struct device_server* server, uintptr_t entry, const vo
 		       diagnostic == NULL ? "" : ": ",
 		       diagnostic == NULL ? "" : diagnostic);
 		free(diagnostic);
-	}
-	if (status == SYSCALL_STATUS_OK) {
-		status = thread_detach(thread_cap);
-		if (status != SYSCALL_STATUS_OK)
-			printf("device-manager: worker %s detach failed: %u\n", name, (unsigned)status);
-	}
-	if (thread_cap != CAP_ID_INVALID) {
-		syscall_status_t drop_status = cap_drop(thread_cap);
-		if (drop_status != SYSCALL_STATUS_OK)
-			printf("device-manager: worker %s capability drop failed: %u\n", name, (unsigned)drop_status);
-		if (status == SYSCALL_STATUS_OK) status = drop_status;
 	}
 	return status == SYSCALL_STATUS_OK;
 }
