@@ -157,6 +157,7 @@ enum elf64_parse_result elf64_image_parse(cap_id_t file_cap, struct elf64_image*
 	struct filesystem_node_info   info;
 	struct filesystem_call_result info_result;
 	struct elf64_ehdr             header;
+	struct elf64_phdr*            phdrs = NULL;
 	struct elf64_segment*         segments;
 	size_t                        segment_count = 0u;
 	bool                          entry_valid   = false;
@@ -174,40 +175,38 @@ enum elf64_parse_result elf64_image_parse(cap_id_t file_cap, struct elf64_image*
 	if (result != ELF64_PARSE_OK) return result;
 
 	segments = calloc((size_t)header.phnum, sizeof(*segments));
-	if (segments == NULL) return ELF64_PARSE_NO_MEMORY;
+	phdrs    = malloc((size_t)header.phnum * sizeof(*phdrs));
+	if (segments == NULL || phdrs == NULL) {
+		free(phdrs);
+		free(segments);
+		return ELF64_PARSE_NO_MEMORY;
+	}
+	if (!read_exact(file_cap, header.phoff, phdrs, (size_t)header.phnum * sizeof(*phdrs))) {
+		result = ELF64_PARSE_IO_ERROR;
+		goto fail;
+	}
 
 	for (size_t i = 0u; i < (size_t)header.phnum; i++) {
-		struct elf64_phdr phdr;
-		uint64_t          offset;
-		uint64_t          index_offset;
+		const struct elf64_phdr* phdr = &phdrs[i];
 
-		if (!mul_u64((uint64_t)i, sizeof(phdr), &index_offset) || !add_u64(header.phoff, index_offset, &offset)) {
-			result = ELF64_PARSE_BAD_FORMAT;
-			goto fail;
-		}
-		if (!read_exact(file_cap, offset, &phdr, sizeof(phdr))) {
-			result = ELF64_PARSE_IO_ERROR;
-			goto fail;
-		}
-
-		if (phdr.type == ELF_PT_INTERP || phdr.type == ELF_PT_DYNAMIC || phdr.type == ELF_PT_TLS) {
+		if (phdr->type == ELF_PT_INTERP || phdr->type == ELF_PT_DYNAMIC || phdr->type == ELF_PT_TLS) {
 			result = ELF64_PARSE_UNSUPPORTED;
 			goto fail;
 		}
-		if (phdr.type != ELF_PT_LOAD) continue;
+		if (phdr->type != ELF_PT_LOAD) continue;
 
-		result = validate_load_segment(info.size, &phdr);
+		result = validate_load_segment(info.size, phdr);
 		if (result != ELF64_PARSE_OK) goto fail;
-		if (entry_in_segment(header.entry, &phdr)) entry_valid = true;
+		if (entry_in_segment(header.entry, phdr)) entry_valid = true;
 		segments[segment_count++] = (struct elf64_segment){
-			.offset = phdr.offset,
-			.vaddr  = phdr.vaddr,
-			.filesz = phdr.filesz,
-			.memsz  = phdr.memsz,
-			.align  = phdr.align,
-			.flags  = ((phdr.flags & ELF_PF_X) != 0u ? ELF64_SEGMENT_EXEC : 0u) |
-			          ((phdr.flags & ELF_PF_W) != 0u ? ELF64_SEGMENT_WRITE : 0u) |
-			          ((phdr.flags & ELF_PF_R) != 0u ? ELF64_SEGMENT_READ : 0u),
+			.offset = phdr->offset,
+			.vaddr  = phdr->vaddr,
+			.filesz = phdr->filesz,
+			.memsz  = phdr->memsz,
+			.align  = phdr->align,
+			.flags  = ((phdr->flags & ELF_PF_X) != 0u ? ELF64_SEGMENT_EXEC : 0u) |
+			          ((phdr->flags & ELF_PF_W) != 0u ? ELF64_SEGMENT_WRITE : 0u) |
+			          ((phdr->flags & ELF_PF_R) != 0u ? ELF64_SEGMENT_READ : 0u),
 		};
 	}
 
@@ -221,9 +220,11 @@ enum elf64_parse_result elf64_image_parse(cap_id_t file_cap, struct elf64_image*
 		.segments      = segments,
 		.segment_count = segment_count,
 	};
+	free(phdrs);
 	return ELF64_PARSE_OK;
 
 fail:
+	free(phdrs);
 	free(segments);
 	return result;
 }
