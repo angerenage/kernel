@@ -295,6 +295,21 @@ struct filesystem_call_result vfs_directory_remove(cap_id_t directory_cap, const
 	return path_call(directory_cap, VFS_DIRECTORY_OP_REMOVE, path, path_size, false);
 }
 
+struct filesystem_call_result vfs_directory_remove_deferred(cap_id_t directory_cap, const void* path,
+                                                            size_t path_size) {
+	return path_call(directory_cap, VFS_DIRECTORY_OP_REMOVE_DEFERRED, path, path_size, false);
+}
+
+struct filesystem_call_result vfs_directory_sync(cap_id_t directory_cap) {
+	const struct filesystem_info_request request = {
+		.header   = {.op = VFS_DIRECTORY_OP_SYNC},
+		.reserved = 0u,
+	};
+	struct filesystem_response_header response;
+	if (directory_cap == CAP_ID_INVALID) return local_error();
+	return call_fixed(directory_cap, &request, sizeof(request), &response, sizeof(response));
+}
+
 struct filesystem_call_result vfs_directory_rename(cap_id_t directory_cap, const void* old_path, size_t old_path_size,
                                                    const void* new_path, size_t new_path_size) {
 	return rename_path(directory_cap, VFS_DIRECTORY_OP_RENAME, old_path, old_path_size, new_path, new_path_size, false);

@@ -37,6 +37,7 @@ struct fat32_volume {
 	uint16_t            backup_sector;
 	bool                fat_mirrored;
 	bool                fat_cache_valid;
+	bool                fsinfo_dirty;
 };
 
 /* Open a block partition and validate its FAT32 boot metadata. */
@@ -57,6 +58,9 @@ enum fat32_result fat32_volume_read_fat(struct fat32_volume* volume, uint32_t cl
 /* Update one entry in every active FAT copy. */
 enum fat32_result fat32_volume_write_fat(struct fat32_volume* volume, uint32_t cluster, uint32_t value);
 
+/* Clear a sorted set of FAT entries with one read/write per affected FAT sector. */
+enum fat32_result fat32_volume_clear_clusters(struct fat32_volume* volume, const uint32_t* clusters, size_t count);
+
 /* Resolve one FAT entry and report whether it terminates the chain. */
 enum fat32_result fat32_volume_next_cluster(struct fat32_volume* volume, uint32_t cluster, uint32_t* out_next,
                                             bool* out_end);
@@ -66,6 +70,12 @@ enum fat32_result fat32_volume_zero_cluster(struct fat32_volume* volume, uint32_
 
 /* Mark the primary and any valid backup FSInfo allocation hints unknown. */
 enum fat32_result fat32_volume_invalidate_fsinfo(struct fat32_volume* volume);
+
+/* Record that allocation metadata must be invalidated before the next sync. */
+void fat32_volume_mark_fsinfo_dirty(struct fat32_volume* volume);
+
+/* Commit allocation metadata and completed writes to durable media. */
+enum fat32_result fat32_volume_sync(struct fat32_volume* volume);
 
 /* Commit completed writes when the provider supports flushing. */
 enum fat32_result fat32_volume_flush(struct fat32_volume* volume);

@@ -36,6 +36,12 @@ struct root_entry {
 	bool     slot_available;
 };
 
+static int compare_clusters(const void* left, const void* right) {
+	uint32_t a = *(const uint32_t*)left;
+	uint32_t b = *(const uint32_t*)right;
+	return a < b ? -1 : a != b;
+}
+
 static uint16_t read_u16_le(const uint8_t* value) {
 	return (uint16_t)value[0] | (uint16_t)value[1] << 8u;
 }
@@ -624,11 +630,15 @@ static enum fat32_result delete_entry_slots(struct fat32_volume* volume, uint32_
 	size_t                count;
 	enum fat32_result     result = locate_entry_slots(volume, directory_cluster, short_name, slots, &count);
 	if (result != FAT32_RESULT_OK) return result;
-	for (size_t index = 0u; index < count; index++) {
-		result = fat32_volume_read_sector(volume, slots[index].sector);
+	for (size_t index = 0u; index < count;) {
+		uint64_t sector = slots[index].sector;
+		result          = fat32_volume_read_sector(volume, sector);
 		if (result != FAT32_RESULT_OK) return result;
-		volume->buffer.address[slots[index].offset] = 0xe5u;
-		result                                      = fat32_volume_write_sector(volume, slots[index].sector);
+		do {
+			volume->buffer.address[slots[index].offset] = 0xe5u;
+			index++;
+		} while (index < count && slots[index].sector == sector);
+		result = fat32_volume_write_sector(volume, sector);
 		if (result != FAT32_RESULT_OK) return result;
 	}
 	return FAT32_RESULT_OK;
@@ -774,22 +784,49 @@ uncertain_commit:
 }
 
 static enum fat32_result release_chain(struct fat32_volume* volume, uint32_t first_cluster) {
-	uint32_t cluster = first_cluster;
-	for (uint32_t count = 0u; count < volume->cluster_count; count++) {
+	uint32_t* clusters = NULL;
+	size_t    count    = 0u;
+	size_t    capacity = 0u;
+	uint32_t  cluster  = first_cluster;
+	bool      complete = false;
+	while (count < volume->cluster_count) {
+		if (count == capacity) {
+			size_t next_capacity = capacity == 0u ? 64u : capacity * 2u;
+			if (next_capacity > volume->cluster_count) next_capacity = volume->cluster_count;
+			uint32_t* grown = realloc(clusters, next_capacity * sizeof(*clusters));
+			if (grown == NULL) {
+				free(clusters);
+				return FAT32_RESULT_ERROR;
+			}
+			clusters = grown;
+			capacity = next_capacity;
+		}
+		clusters[count++] = cluster;
 		uint32_t          next;
 		bool              end;
 		enum fat32_result result = fat32_volume_next_cluster(volume, cluster, &next, &end);
-		if (result != FAT32_RESULT_OK) return result;
-		result = fat32_volume_write_fat(volume, cluster, 0u);
-		if (result != FAT32_RESULT_OK) return result;
-		if (end) return FAT32_RESULT_OK;
+		if (result != FAT32_RESULT_OK) {
+			free(clusters);
+			return result;
+		}
+		if (end) {
+			complete = true;
+			break;
+		}
 		cluster = next;
 	}
-	return FAT32_RESULT_UNSUPPORTED;
+	if (!complete) {
+		free(clusters);
+		return FAT32_RESULT_UNSUPPORTED;
+	}
+	qsort(clusters, count, sizeof(*clusters), compare_clusters);
+	enum fat32_result result = fat32_volume_clear_clusters(volume, clusters, count);
+	free(clusters);
+	return result;
 }
 
 enum fat32_result fat32_remove_node(struct fat32_volume* volume, uint32_t parent_cluster, const void* name,
-                                    size_t name_size) {
+                                    size_t name_size, bool defer_sync) {
 	struct fat32_directory_entry entry;
 	enum fat32_result            result;
 
@@ -813,9 +850,8 @@ enum fat32_result fat32_remove_node(struct fat32_volume* volume, uint32_t parent
 		result = release_chain(volume, entry.cluster);
 		if (result != FAT32_RESULT_OK) return result;
 	}
-	result = fat32_volume_invalidate_fsinfo(volume);
-	if (result == FAT32_RESULT_OK) result = fat32_volume_flush(volume);
-	return result;
+	fat32_volume_mark_fsinfo_dirty(volume);
+	return defer_sync ? FAT32_RESULT_OK : fat32_volume_sync(volume);
 }
 
 static enum fat32_result update_parent_entry(struct fat32_volume* volume, uint32_t directory_cluster,

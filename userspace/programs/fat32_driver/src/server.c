@@ -396,9 +396,20 @@ static bool handle_enumerate(struct fat32_server* server, const struct cap_reque
 			server->volume, cluster, request.offset, cache->entries, (size_t)request.count, &returned, &total);
 		if (result != FAT32_RESULT_OK) return reply_domain(call, fat_status(result));
 		cache->valid = request.offset == 0u && returned == total;
+		if (!cache->valid && request.offset == 0u && total <= SIZE_MAX &&
+		    reserve_directory_cache(server, (size_t)total)) {
+			size_t   cached_count;
+			uint64_t cached_total;
+			result = fat32_directory_enumerate(
+				server->volume, cluster, 0u, cache->entries, (size_t)total, &cached_count, &cached_total);
+			cache->valid = result == FAT32_RESULT_OK && cached_count == total && cached_total == total;
+			if (result != FAT32_RESULT_OK) return reply_domain(call, fat_status(result));
+		}
 		if (cache->valid) {
-			cache->cluster = cluster;
-			cache->count   = returned;
+			cache->cluster     = cluster;
+			cache->count       = (size_t)total;
+			uint64_t available = request.offset < total ? total - request.offset : 0u;
+			returned           = available < request.count ? (size_t)available : (size_t)request.count;
 		}
 	}
 	size_t cache_offset = cache->valid ? (size_t)request.offset : 0u;
@@ -480,7 +491,7 @@ static bool handle_create_directory(struct fat32_server* server, const struct ca
 }
 
 static bool handle_remove(struct fat32_server* server, const struct cap_request* call, const void* data,
-                          struct fat32_node* directory) {
+                          struct fat32_node* directory, bool defer_sync) {
 	struct filesystem_directory_path_request request;
 	size_t                                   expected_size;
 
@@ -498,11 +509,21 @@ static bool handle_remove(struct fat32_server* server, const struct cap_request*
 	enum fat32_result result =
 		lookup_parent(server, node_cluster(server, directory), path, request.path_size, &parent_cluster, &name_offset);
 	if (result != FAT32_RESULT_OK) return reply_domain(call, fat_status(result));
-	result = fat32_remove_node(server->volume, parent_cluster, path + name_offset, request.path_size - name_offset);
+	result = fat32_remove_node(
+		server->volume, parent_cluster, path + name_offset, request.path_size - name_offset, defer_sync);
 	if (result != FAT32_RESULT_OK) return reply_domain(call, fat_status(result));
 	invalidate_directory_cache(server);
 	invalidate_read_cache(server);
 	return reply_domain(call, FILESYSTEM_STATUS_OK);
+}
+
+static bool handle_sync(struct fat32_server* server, const struct cap_request* call, const void* data) {
+	struct filesystem_info_request request;
+	if (!request_has_rights(call, CAP_CALL | CAP_WRITE)) return reply_transport(call, SYSCALL_STATUS_DENIED);
+	if (!copy_request(call, data, &request, sizeof(request)) || call->request_size != sizeof(request) ||
+	    request.reserved != 0u || call->response_capacity < sizeof(struct filesystem_response_header))
+		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	return reply_domain(call, fat_status(fat32_volume_sync(server->volume)));
 }
 
 static bool path_contains(const uint8_t* parent, size_t parent_size, const uint8_t* path, size_t path_size) {
@@ -697,9 +718,13 @@ static bool dispatch_directory(struct fat32_server* server, const struct cap_req
 	case FILESYSTEM_DIRECTORY_OP_CREATE_DIRECTORY:
 		return handle_create_directory(server, call, data, node);
 	case FILESYSTEM_DIRECTORY_OP_REMOVE:
-		return handle_remove(server, call, data, node);
+		return handle_remove(server, call, data, node, false);
 	case FILESYSTEM_DIRECTORY_OP_RENAME:
 		return handle_rename(server, call, data, node);
+	case FILESYSTEM_DIRECTORY_OP_REMOVE_DEFERRED:
+		return handle_remove(server, call, data, node, true);
+	case FILESYSTEM_DIRECTORY_OP_SYNC:
+		return handle_sync(server, call, data);
 	default:
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	}

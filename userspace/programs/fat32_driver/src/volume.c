@@ -24,6 +24,10 @@ static uint32_t read_u32_le(const uint8_t* value) {
 	return (uint32_t)value[0] | (uint32_t)value[1] << 8u | (uint32_t)value[2] << 16u | (uint32_t)value[3] << 24u;
 }
 
+static void write_u32_le(uint8_t* output, uint32_t value) {
+	for (size_t index = 0u; index < sizeof(value); index++) output[index] = (uint8_t)(value >> (index * 8u));
+}
+
 static bool power_of_two(uint32_t value) {
 	return value != 0u && (value & (value - 1u)) == 0u;
 }
@@ -110,6 +114,42 @@ enum fat32_result fat32_volume_write_fat(struct fat32_volume* volume, uint32_t c
 	return FAT32_RESULT_OK;
 }
 
+enum fat32_result fat32_volume_clear_clusters(struct fat32_volume* volume, const uint32_t* clusters, size_t count) {
+	if (volume == NULL || (count != 0u && clusters == NULL) || (volume->device.flags & BLOCK_DEVICE_WRITABLE) == 0u)
+		return FAT32_RESULT_UNSUPPORTED;
+	for (size_t index = 0u; index < count; index++)
+		if (!fat32_volume_cluster_valid(volume, clusters[index]) ||
+		    (index != 0u && clusters[index - 1u] >= clusters[index]))
+			return FAT32_RESULT_UNSUPPORTED;
+	volume->fat_cache_valid = false;
+	uint32_t first_copy =
+		volume->fat_mirrored ? 0u : (uint32_t)((volume->fat_start - volume->fat_base) / volume->fat_size);
+	uint32_t copy_count = volume->fat_mirrored ? volume->fat_count : first_copy + 1u;
+	for (uint32_t copy = first_copy; copy < copy_count; copy++) {
+		uint64_t loaded_sector = UINT64_MAX;
+		for (size_t index = 0u; index < count; index++) {
+			uint64_t byte_offset = (uint64_t)clusters[index] * sizeof(uint32_t);
+			uint64_t sector =
+				volume->fat_base + (uint64_t)copy * volume->fat_size + byte_offset / volume->device.block_size;
+			uint32_t offset = (uint32_t)(byte_offset % volume->device.block_size);
+			if (sector != loaded_sector) {
+				if (loaded_sector != UINT64_MAX &&
+				    block_write(&volume->device, &volume->fat_buffer, 0u, loaded_sector, 1u) != SYSCALL_STATUS_OK)
+					return FAT32_RESULT_ERROR;
+				if (block_read(&volume->device, &volume->fat_buffer, 0u, sector, 1u) != SYSCALL_STATUS_OK)
+					return FAT32_RESULT_ERROR;
+				loaded_sector = sector;
+			}
+			uint32_t original = read_u32_le(volume->fat_buffer.address + offset);
+			write_u32_le(volume->fat_buffer.address + offset, original & ~FAT32_ENTRY_MASK);
+		}
+		if (loaded_sector != UINT64_MAX &&
+		    block_write(&volume->device, &volume->fat_buffer, 0u, loaded_sector, 1u) != SYSCALL_STATUS_OK)
+			return FAT32_RESULT_ERROR;
+	}
+	return FAT32_RESULT_OK;
+}
+
 enum fat32_result fat32_volume_next_cluster(struct fat32_volume* volume, uint32_t cluster, uint32_t* out_next,
                                             bool* out_end) {
 	if (out_next == NULL || out_end == NULL) return FAT32_RESULT_UNSUPPORTED;
@@ -151,7 +191,10 @@ static enum fat32_result invalidate_fsinfo_copy(struct fat32_volume* volume, uin
 
 enum fat32_result fat32_volume_invalidate_fsinfo(struct fat32_volume* volume) {
 	if (volume == NULL) return FAT32_RESULT_UNSUPPORTED;
-	if (volume->fsinfo_sector == UINT16_MAX) return FAT32_RESULT_OK;
+	if (volume->fsinfo_sector == UINT16_MAX) {
+		volume->fsinfo_dirty = false;
+		return FAT32_RESULT_OK;
+	}
 	enum fat32_result result = invalidate_fsinfo_copy(volume, volume->fsinfo_sector);
 	if (result != FAT32_RESULT_OK) return result;
 	if (volume->backup_sector != 0u && volume->backup_sector != UINT16_MAX &&
@@ -160,13 +203,27 @@ enum fat32_result fat32_volume_invalidate_fsinfo(struct fat32_volume* volume) {
 			invalidate_fsinfo_copy(volume, (uint32_t)volume->backup_sector + volume->fsinfo_sector);
 		if (backup == FAT32_RESULT_ERROR) result = backup;
 	}
+	if (result == FAT32_RESULT_OK) volume->fsinfo_dirty = false;
 	return result;
+}
+
+void fat32_volume_mark_fsinfo_dirty(struct fat32_volume* volume) {
+	if (volume != NULL) volume->fsinfo_dirty = true;
 }
 
 enum fat32_result fat32_volume_flush(struct fat32_volume* volume) {
 	if (volume == NULL || (volume->device.flags & BLOCK_DEVICE_WRITABLE) == 0u) return FAT32_RESULT_UNSUPPORTED;
 	if ((volume->device.flags & BLOCK_DEVICE_FLUSH_SUPPORTED) == 0u) return FAT32_RESULT_OK;
 	return block_flush(&volume->device) == SYSCALL_STATUS_OK ? FAT32_RESULT_OK : FAT32_RESULT_ERROR;
+}
+
+enum fat32_result fat32_volume_sync(struct fat32_volume* volume) {
+	if (volume == NULL) return FAT32_RESULT_UNSUPPORTED;
+	if (volume->fsinfo_dirty) {
+		enum fat32_result result = fat32_volume_invalidate_fsinfo(volume);
+		if (result != FAT32_RESULT_OK) return result;
+	}
+	return fat32_volume_flush(volume);
 }
 
 static enum fat32_result validate_fsinfo(struct fat32_volume* volume, uint16_t sector, uint16_t reserved_sectors,

@@ -65,6 +65,13 @@ struct filesystem_call_result filesystem_directory_create_directory(cap_id_t dir
 /* Remove a file or empty directory at a normalized relative path. */
 struct filesystem_call_result filesystem_directory_remove(cap_id_t directory_cap, const void* path, size_t path_size);
 
+/* Remove a node while deferring durable-media synchronization until SYNC. */
+struct filesystem_call_result filesystem_directory_remove_deferred(cap_id_t directory_cap, const void* path,
+                                                                   size_t path_size);
+
+/* Commit deferred mutations on the filesystem backing this directory. */
+struct filesystem_call_result filesystem_directory_sync(cap_id_t directory_cap);
+
 /* Atomically rename one normalized relative path to another. */
 struct filesystem_call_result filesystem_directory_rename(cap_id_t directory_cap, const void* old_path,
                                                           size_t old_path_size, const void* new_path,

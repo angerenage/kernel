@@ -453,7 +453,7 @@ static void detach_directories(uint64_t mount_id, const char* path, size_t path_
 	}
 }
 
-static bool remove_path(const struct cap_request* call, const char* path, size_t path_size) {
+static bool remove_path(const struct cap_request* call, const char* path, size_t path_size, bool deferred) {
 	struct vfs_mount*             mount;
 	struct filesystem_call_result result;
 	const void*                   relative;
@@ -463,7 +463,10 @@ static bool remove_path(const struct cap_request* call, const char* path, size_t
 	mount = find_mount(path, path_size);
 	if (mount == NULL || mount->read_only) return reply_domain(call, FILESYSTEM_STATUS_READ_ONLY);
 	relative_path(mount, path, path_size, &relative, &relative_size);
-	result = filesystem_directory_remove(mount->root_cap, relative, relative_size);
+	result = deferred ? filesystem_directory_remove_deferred(mount->root_cap, relative, relative_size)
+	                  : filesystem_directory_remove(mount->root_cap, relative, relative_size);
+	if (deferred && result.transport_status == SYSCALL_STATUS_BAD_ARGUMENT)
+		return reply_domain(call, FILESYSTEM_STATUS_UNSUPPORTED);
 	if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK)
 		return reply_call_failure(call, result);
 	detach_directories(mount->id, path, path_size);
@@ -483,7 +486,7 @@ static bool handle_remove(const struct cap_request* call, const void* data) {
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	path = (const char*)data + sizeof(request);
 	if (!absolute_path_valid(path, request.path_size)) return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
-	return remove_path(call, path, request.path_size);
+	return remove_path(call, path, request.path_size, false);
 }
 
 static void free_rename_updates(struct rename_update* updates) {
@@ -659,7 +662,8 @@ static bool handle_directory_open_path(const struct cap_request* call, struct vf
 	return replied;
 }
 
-static bool handle_directory_remove(const struct cap_request* call, struct vfs_directory* directory, const void* data) {
+static bool handle_directory_remove(const struct cap_request* call, struct vfs_directory* directory, const void* data,
+                                    bool deferred) {
 	struct filesystem_directory_path_request request;
 	const void*                              relative;
 	char*                                    path = NULL;
@@ -680,9 +684,21 @@ static bool handle_directory_remove(const struct cap_request* call, struct vfs_d
 	if (!directory->attached) return reply_domain(call, FILESYSTEM_STATUS_BUSY);
 	status = resolve_directory_path(directory, relative, request.path_size, &path, &path_size);
 	if (status != SYSCALL_STATUS_OK) return reply_transport(call, status);
-	replied = remove_path(call, path, path_size);
+	replied = remove_path(call, path, path_size, deferred);
 	free(path);
 	return replied;
+}
+
+static bool handle_directory_sync(const struct cap_request* call, struct vfs_directory* directory, const void* data) {
+	struct filesystem_info_request request;
+	if (!request_has_rights(call, CAP_CALL | CAP_WRITE)) return reply_transport(call, SYSCALL_STATUS_DENIED);
+	if (!copy_request(call, data, &request, sizeof(request)) || call->request_size != sizeof(request) ||
+	    request.reserved != 0u || call->response_capacity < sizeof(struct filesystem_response_header))
+		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
+	if (!directory->attached) return reply_domain(call, FILESYSTEM_STATUS_BUSY);
+	struct filesystem_call_result result = filesystem_directory_sync(directory->raw_cap);
+	return result.transport_status == SYSCALL_STATUS_OK ? reply_domain(call, result.status)
+	                                                    : reply_transport(call, result.transport_status);
 }
 
 static bool handle_directory_rename(const struct cap_request* call, struct vfs_directory* directory, const void* data) {
@@ -989,9 +1005,13 @@ static bool dispatch_directory(const struct cap_request* call, struct vfs_direct
 	case VFS_DIRECTORY_OP_CREATE_DIRECTORY:
 		return handle_directory_open_path(call, directory, data, FILESYSTEM_NODE_DIRECTORY);
 	case VFS_DIRECTORY_OP_REMOVE:
-		return handle_directory_remove(call, directory, data);
+		return handle_directory_remove(call, directory, data, false);
 	case VFS_DIRECTORY_OP_RENAME:
 		return handle_directory_rename(call, directory, data);
+	case VFS_DIRECTORY_OP_REMOVE_DEFERRED:
+		return handle_directory_remove(call, directory, data, true);
+	case VFS_DIRECTORY_OP_SYNC:
+		return handle_directory_sync(call, directory, data);
 	default:
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	}

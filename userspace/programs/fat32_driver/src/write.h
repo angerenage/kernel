@@ -13,7 +13,7 @@ enum fat32_result fat32_create_directory(struct fat32_volume* volume, uint32_t p
 
 /* Remove a file or empty directory, including all of its long-name slots. */
 enum fat32_result fat32_remove_node(struct fat32_volume* volume, uint32_t parent_cluster, const void* name,
-                                    size_t name_size);
+                                    size_t name_size, bool defer_sync);
 
 /* Rename or move a node between directories on this volume. */
 enum fat32_result fat32_rename_node(struct fat32_volume* volume, uint32_t old_parent_cluster, const void* old_name,

@@ -58,6 +58,8 @@ enum vfs_directory_op {
 	VFS_DIRECTORY_OP_CREATE_DIRECTORY = 6u,
 	VFS_DIRECTORY_OP_REMOVE           = 7u,
 	VFS_DIRECTORY_OP_RENAME           = 8u,
+	VFS_DIRECTORY_OP_REMOVE_DEFERRED  = 9u,
+	VFS_DIRECTORY_OP_SYNC             = 10u,
 };
 
 enum vfs_mount_flag {
@@ -77,10 +79,11 @@ struct vfs_mount_request {
  * Namespace reads require CAP_CALL | CAP_READ, mutations require CAP_CALL |
  * CAP_WRITE, and mount management requires CAP_CALL | CAP_MANAGE.
  *
- * OPEN, creation, REMOVE, and RENAME use the corresponding raw-filesystem
+ * OPEN, creation, REMOVE, REMOVE_DEFERRED, and RENAME use the corresponding raw-filesystem
  * request structures, but resolve their normalized relative paths through the
  * VFS directory. This preserves mount traversal without exposing the
- * directory's absolute namespace path. Requested child rights cannot exceed
+ * directory's absolute namespace path. SYNC commits deferred removals on the
+ * directory's backing filesystem. Requested child rights cannot exceed
  * the directory capability's rights. Path operations on a directory detached
  * by removal or unmount return FILESYSTEM_STATUS_BUSY.
  *

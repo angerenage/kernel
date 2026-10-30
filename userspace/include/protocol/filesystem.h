@@ -138,6 +138,8 @@ enum filesystem_directory_op {
 	FILESYSTEM_DIRECTORY_OP_CREATE_DIRECTORY = 4u,
 	FILESYSTEM_DIRECTORY_OP_REMOVE           = 5u,
 	FILESYSTEM_DIRECTORY_OP_RENAME           = 6u,
+	FILESYSTEM_DIRECTORY_OP_REMOVE_DEFERRED  = 7u,
+	FILESYSTEM_DIRECTORY_OP_SYNC             = 8u,
 };
 
 /* Followed by path_size bytes containing one normalized relative path. */
@@ -200,8 +202,12 @@ struct filesystem_directory_rename_request {
  * Enumeration offsets are zero-based. Ordering remains stable only while the
  * directory is unchanged; enumeration is not a snapshot. OPEN, creation and
  * RENAME never replace an existing destination. REMOVE accepts files and
- * empty directories. A raw-filesystem RENAME is atomic, or reports
- * FILESYSTEM_STATUS_CROSS_FILESYSTEM when the provider cannot perform it.
+ * empty directories. REMOVE_DEFERRED has identical namespace semantics but
+ * may defer durable-media synchronization until SYNC is called on a directory
+ * capability from the same filesystem. Providers which cannot defer safely
+ * report FILESYSTEM_STATUS_UNSUPPORTED without removing the node. A
+ * raw-filesystem RENAME is atomic, or reports FILESYSTEM_STATUS_CROSS_FILESYSTEM
+ * when the provider cannot perform it.
  *
  * Relative paths contain no leading or trailing '/', empty component, '.' or
  * '..'. Each component is at most FILESYSTEM_NAME_MAX bytes. Path bytes are

@@ -52,6 +52,12 @@ struct filesystem_call_result vfs_directory_enumerate(cap_id_t directory_cap, ui
 /* Remove a path relative to a VFS directory. */
 struct filesystem_call_result vfs_directory_remove(cap_id_t directory_cap, const void* path, size_t path_size);
 
+/* Remove a path while deferring backing-device synchronization until SYNC. */
+struct filesystem_call_result vfs_directory_remove_deferred(cap_id_t directory_cap, const void* path, size_t path_size);
+
+/* Commit deferred mutations on the filesystem backing this directory. */
+struct filesystem_call_result vfs_directory_sync(cap_id_t directory_cap);
+
 /* Rename between paths relative to one VFS directory. */
 struct filesystem_call_result vfs_directory_rename(cap_id_t directory_cap, const void* old_path, size_t old_path_size,
                                                    const void* new_path, size_t new_path_size);
