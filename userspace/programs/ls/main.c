@@ -97,7 +97,22 @@ static const char* filesystem_error_message(struct filesystem_call_result result
 static bool remove_component(struct list_path* path) {
 	size_t root = path->absolute ? 1u : 0u;
 
-	if (path->size == root) return path->absolute;
+	if (path->size == root) {
+		if (path->absolute) return true;
+		if (sizeof(path->bytes) < 2u) return false;
+		memcpy(path->bytes, "..", 2u);
+		path->size = 2u;
+		return true;
+	}
+	size_t component = path->size;
+	while (component > root && path->bytes[component - 1u] != '/') component--;
+	if (!path->absolute && path->size - component == 2u && path->bytes[component] == '.' &&
+	    path->bytes[component + 1u] == '.') {
+		if (sizeof(path->bytes) - path->size < 3u) return false;
+		memcpy(path->bytes + path->size, "/..", 3u);
+		path->size += 3u;
+		return true;
+	}
 	while (path->size > root && path->bytes[path->size - 1u] != '/') path->size--;
 	if (path->size > root) path->size--;
 	return true;
@@ -122,8 +137,7 @@ static const char* normalize_path(const char* operand, struct list_path* out) {
 		size = offset - start;
 		if (size == 0u || (size == 1u && operand[start] == '.')) continue;
 		if (size == 2u && operand[start] == '.' && operand[start + 1u] == '.') {
-			/* Programs only hold the working directory, not a path to its parent. */
-			if (!remove_component(out)) return "parent of the working directory is not reachable";
+			if (!remove_component(out)) return "invalid path";
 			continue;
 		}
 		separator_size = out->size > (out->absolute ? 1u : 0u) ? 1u : 0u;
