@@ -31,15 +31,15 @@ struct filesystem_call_result vfs_directory_unmount(cap_id_t vfs_cap, const void
 /* Read metadata from a VFS-directory capability. */
 struct filesystem_call_result vfs_directory_info(cap_id_t directory_cap, struct filesystem_node_info* out_info);
 
-/* Open a normalized relative path below a VFS directory. */
+/* Open a relative path from a VFS directory. */
 struct filesystem_call_result vfs_directory_open(cap_id_t directory_cap, const void* path, size_t path_size,
                                                  cap_rights_t rights, struct filesystem_node_handle* out_node);
 
-/* Create and open a file at a normalized path below a VFS directory. */
+/* Create and open a file at a path relative to a VFS directory. */
 struct filesystem_call_result vfs_directory_create_file(cap_id_t directory_cap, const void* path, size_t path_size,
                                                         cap_rights_t rights, struct filesystem_node_handle* out_node);
 
-/* Create and open a directory at a normalized path below a VFS directory. */
+/* Create and open a directory at a path relative to a VFS directory. */
 struct filesystem_call_result vfs_directory_create_directory(cap_id_t directory_cap, const void* path, size_t path_size,
                                                              cap_rights_t                   rights,
                                                              struct filesystem_node_handle* out_node);
@@ -49,12 +49,19 @@ struct filesystem_call_result vfs_directory_enumerate(cap_id_t directory_cap, ui
                                                       struct filesystem_directory_entry* entries, size_t count,
                                                       size_t* out_returned, uint64_t* out_total);
 
-/* Remove a normalized relative path below a VFS directory. */
+/* Remove a path relative to a VFS directory. */
 struct filesystem_call_result vfs_directory_remove(cap_id_t directory_cap, const void* path, size_t path_size);
 
-/* Rename between normalized relative paths below one VFS directory. */
+/* Rename between paths relative to one VFS directory. */
 struct filesystem_call_result vfs_directory_rename(cap_id_t directory_cap, const void* old_path, size_t old_path_size,
                                                    const void* new_path, size_t new_path_size);
 
 /* Validate the exact byte sequence used by VFS namespace requests. */
 bool vfs_absolute_path_valid(const void* path, size_t path_size);
+
+/* Validate a relative VFS path. */
+bool vfs_relative_path_valid(const void* path, size_t path_size);
+
+/* Resolve a relative VFS path against a normalized absolute directory path. */
+bool vfs_resolve_directory_path(const void* directory, size_t directory_size, const void* relative,
+                                size_t relative_size, void* output, size_t output_capacity, size_t* out_size);

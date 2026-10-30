@@ -1,7 +1,7 @@
 vfs_include = include_directories('include')
 
 vfs_client = static_library('vfs_client',
-	sources : files('lib/vfs.c'),
+	sources : files('lib/path.c', 'lib/vfs.c'),
 	c_args : userspace_c_args,
 	include_directories : [userspace_runtime_inc, vfs_include],
 	pic : false,

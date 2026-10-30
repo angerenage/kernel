@@ -5,6 +5,7 @@
 #include <protocol/vfs.h>
 #include <runtime/filesystem.h>
 #include <runtime/registry.h>
+#include <runtime/vfs.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -615,12 +616,14 @@ static syscall_status_t resolve_directory_path(const struct vfs_directory* direc
 	if (directory->path_size > SIZE_MAX - separator_size ||
 	    relative_size > SIZE_MAX - directory->path_size - separator_size)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
-	path_size = directory->path_size + separator_size + relative_size;
-	path      = malloc(path_size);
+	size_t capacity = directory->path_size + separator_size + relative_size;
+	path            = malloc(capacity);
 	if (path == NULL) return SYSCALL_STATUS_FAILED;
-	memcpy(path, directory->path, directory->path_size);
-	if (separator_size != 0u) path[directory->path_size] = '/';
-	memcpy(path + directory->path_size + separator_size, relative, relative_size);
+	if (!vfs_resolve_directory_path(
+			directory->path, directory->path_size, relative, relative_size, path, capacity, &path_size)) {
+		free(path);
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	}
 	*out_path = path;
 	*out_size = path_size;
 	return SYSCALL_STATUS_OK;
@@ -645,7 +648,7 @@ static bool handle_directory_open_path(const struct cap_request* call, struct vf
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	if ((request.rights & ~call->rights) != 0u) return reply_transport(call, SYSCALL_STATUS_DENIED);
 	relative = (const uint8_t*)data + sizeof(request);
-	if (!filesystem_relative_path_valid(relative, request.path_size))
+	if (!vfs_relative_path_valid(relative, request.path_size))
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	if (!directory->attached) return reply_domain(call, FILESYSTEM_STATUS_BUSY);
 	status = resolve_directory_path(directory, relative, request.path_size, &path, &path_size);
@@ -672,7 +675,7 @@ static bool handle_directory_remove(const struct cap_request* call, struct vfs_d
 	    call->response_capacity < sizeof(struct filesystem_response_header))
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	relative = (const uint8_t*)data + sizeof(request);
-	if (!filesystem_relative_path_valid(relative, request.path_size))
+	if (!vfs_relative_path_valid(relative, request.path_size))
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	if (!directory->attached) return reply_domain(call, FILESYSTEM_STATUS_BUSY);
 	status = resolve_directory_path(directory, relative, request.path_size, &path, &path_size);
@@ -703,8 +706,8 @@ static bool handle_directory_rename(const struct cap_request* call, struct vfs_d
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	old_relative = (const uint8_t*)data + sizeof(request);
 	new_relative = (const uint8_t*)old_relative + request.old_path_size;
-	if (!filesystem_relative_path_valid(old_relative, request.old_path_size) ||
-	    !filesystem_relative_path_valid(new_relative, request.new_path_size))
+	if (!vfs_relative_path_valid(old_relative, request.old_path_size) ||
+	    !vfs_relative_path_valid(new_relative, request.new_path_size))
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	if (!directory->attached) return reply_domain(call, FILESYSTEM_STATUS_BUSY);
 	status = resolve_directory_path(directory, old_relative, request.old_path_size, &old_path, &old_path_size);

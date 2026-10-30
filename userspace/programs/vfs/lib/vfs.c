@@ -65,7 +65,7 @@ static struct filesystem_call_result open_node(cap_id_t cap, uint32_t op, const 
 	if (out_node == NULL) return local_error();
 	*out_node = (struct filesystem_node_handle){.capability = CAP_ID_INVALID};
 	if (cap == CAP_ID_INVALID || path_size > CAP_MAX_REQUEST_SIZE - sizeof(*request) || !rights_valid(rights) ||
-	    (absolute ? !vfs_absolute_path_valid(path, path_size) : !filesystem_relative_path_valid(path, path_size)))
+	    (absolute ? !vfs_absolute_path_valid(path, path_size) : !vfs_relative_path_valid(path, path_size)))
 		return local_error();
 	request_size = sizeof(*request) + path_size;
 	request      = malloc(request_size);
@@ -112,7 +112,7 @@ static struct filesystem_call_result path_call(cap_id_t cap, uint32_t op, const 
 	size_t                            request_size;
 
 	if (cap == CAP_ID_INVALID || path_size > CAP_MAX_REQUEST_SIZE - sizeof(*request) ||
-	    (absolute ? !vfs_absolute_path_valid(path, path_size) : !filesystem_relative_path_valid(path, path_size)))
+	    (absolute ? !vfs_absolute_path_valid(path, path_size) : !vfs_relative_path_valid(path, path_size)))
 		return local_error();
 	request_size = sizeof(*request) + path_size;
 	request      = malloc(request_size);
@@ -142,8 +142,8 @@ static struct filesystem_call_result rename_path(cap_id_t cap, uint32_t op, cons
 	    new_path_size > CAP_MAX_REQUEST_SIZE - sizeof(*request) - old_path_size ||
 	    (absolute
 			 ? (!vfs_absolute_path_valid(old_path, old_path_size) || !vfs_absolute_path_valid(new_path, new_path_size))
-			 : (!filesystem_relative_path_valid(old_path, old_path_size) ||
-			    !filesystem_relative_path_valid(new_path, new_path_size))))
+			 : (!vfs_relative_path_valid(old_path, old_path_size) ||
+			    !vfs_relative_path_valid(new_path, new_path_size))))
 		return local_error();
 	request_size = sizeof(*request) + old_path_size + new_path_size;
 	request      = malloc(request_size);
