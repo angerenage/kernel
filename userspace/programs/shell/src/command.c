@@ -4,27 +4,30 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <system/display.h>
 
 #include "parse.h"
+#include "redirect.h"
 #include "shell.h"
 
 #define SHELL_ERROR_PREFIX "\x1b[1;31mshell:\x1b[0m "
 
 static bool write_error(const char* command, const char* message) {
 	if (message == NULL) return false;
-	if (command == NULL) return printf(SHELL_ERROR_PREFIX "%s\n", message) >= 0;
-	return printf(SHELL_ERROR_PREFIX "%s: %s\n", command, message) >= 0;
+	if (command == NULL) return fprintf(stderr, SHELL_ERROR_PREFIX "%s\n", message) >= 0;
+	return fprintf(stderr, SHELL_ERROR_PREFIX "%s: %s\n", command, message) >= 0;
 }
 
 static bool write_unknown_command(const char* command) {
-	return command != NULL && printf(SHELL_ERROR_PREFIX "command not found: %s\n", command) >= 0;
+	return command != NULL && fprintf(stderr, SHELL_ERROR_PREFIX "command not found: %s\n", command) >= 0;
 }
 
 static bool write_program_exit(const char* command, uintptr_t exit_code) {
-	return command != NULL && printf(SHELL_ERROR_PREFIX "%s: exited with code %llu (0x%llx)\n",
-	                                 command,
-	                                 (unsigned long long)exit_code,
-	                                 (unsigned long long)exit_code) >= 0;
+	return command != NULL && fprintf(stderr,
+	                                  SHELL_ERROR_PREFIX "%s: exited with code %llu (0x%llx)\n",
+	                                  command,
+	                                  (unsigned long long)exit_code,
+	                                  (unsigned long long)exit_code) >= 0;
 }
 
 static bool report_change_directory(enum shell_change_directory_result result) {
@@ -206,12 +209,17 @@ static bool execute_program(struct shell* shell, size_t argc, char* const argv[]
 }
 
 bool shell_execute_line(struct shell* shell, const char* line, size_t size) {
-	struct shell_pipeline   pipeline = {0};
-	struct shell_command*   command;
-	char**                  argv;
-	size_t                  argc;
-	bool                    success;
-	enum shell_parse_result parse_result;
+	struct shell_pipeline         pipeline = {0};
+	struct shell_command*         command;
+	struct shell_redirect_streams redirects       = {0};
+	cap_id_t                      original_input  = CAP_ID_INVALID;
+	cap_id_t                      original_output = CAP_ID_INVALID;
+	cap_id_t                      original_error  = CAP_ID_INVALID;
+	char**                        argv;
+	size_t                        argc;
+	bool                          success    = true;
+	bool                          redirected = false;
+	enum shell_parse_result       parse_result;
 
 	if (shell == NULL || (line == NULL && size != 0u)) return false;
 	parse_result = shell_parse_line(line, size, &pipeline);
@@ -248,17 +256,30 @@ bool shell_execute_line(struct shell* shell, const char* line, size_t size) {
 		shell_pipeline_destroy(&pipeline);
 		return true;
 	}
-	if (pipeline.command_count != 1u || pipeline.commands[0].redirection_count != 0u) {
+	if (pipeline.command_count != 1u) {
 		shell_pipeline_destroy(&pipeline);
-		return write_error(NULL, "redirections and pipes are not supported yet");
+		return write_error(NULL, "pipes are not supported yet");
 	}
 	command = &pipeline.commands[0];
 	argc    = command->argc;
 	argv    = command->argv;
-	if (argc == 0u) {
-		shell_pipeline_destroy(&pipeline);
-		return true;
+
+	if (command->redirection_count != 0u) {
+		const char* error_path;
+		const char* error_message;
+		if (!shell_redirect_prepare(shell, command, &redirects, &error_path, &error_message)) {
+			(void)write_error(error_path, error_message);
+			shell_pipeline_destroy(&pipeline);
+			return true;
+		}
+		display_get_standard_streams(&original_input, &original_output, &original_error);
+		display_set_standard_streams(redirects.input_changed ? redirects.input : original_input,
+		                             redirects.output_changed ? redirects.output : original_output,
+		                             original_error);
+		redirected = true;
 	}
+
+	if (argc == 0u) goto cleanup;
 	if (strcmp(argv[0], "cd") == 0) success = execute_change_directory(shell, argc - 1u, argv + 1u);
 	else if (strcmp(argv[0], "pwd") == 0) success = execute_print_directory(shell, argc - 1u, argv + 1u);
 	else if (strcmp(argv[0], "echo") == 0) success = execute_echo(argc - 1u, argv + 1u);
@@ -274,6 +295,17 @@ bool shell_execute_line(struct shell* shell, const char* line, size_t size) {
 		else success = printf("\x1b[2J\x1b[3J\x1b[H") >= 0;
 	}
 	else success = execute_program(shell, argc, argv);
+
+cleanup:
+	if (redirected) {
+		display_set_standard_streams(original_input, original_output, original_error);
+		clearerr(stdin);
+		clearerr(stdout);
+		if (!shell_redirect_finish()) {
+			(void)write_error(NULL, "redirected stream I/O or cleanup failed");
+			success = true;
+		}
+	}
 	shell_pipeline_destroy(&pipeline);
 	return success;
 }
