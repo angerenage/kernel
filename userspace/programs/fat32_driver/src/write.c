@@ -644,10 +644,10 @@ static enum fat32_result delete_entry_slots(struct fat32_volume* volume, uint32_
 	return FAT32_RESULT_OK;
 }
 
-static enum fat32_result verify_file(struct fat32_volume* volume, const uint8_t name[11], const uint8_t* data,
-                                     size_t size) {
+static enum fat32_result verify_file(struct fat32_volume* volume, uint32_t directory_cluster, const uint8_t name[11],
+                                     const uint8_t* data, size_t size) {
 	struct root_entry entry;
-	enum fat32_result result = find_directory_entry(volume, volume->root_cluster, name, &entry);
+	enum fat32_result result = find_directory_entry(volume, directory_cluster, name, &entry);
 	if (result != FAT32_RESULT_OK || !entry.found || entry.size != size) return FAT32_RESULT_UNSUPPORTED;
 	uint32_t* clusters;
 	size_t    count;
@@ -669,15 +669,25 @@ static enum fat32_result verify_file(struct fat32_volume* volume, const uint8_t 
 	return result == FAT32_RESULT_OK && position == size ? FAT32_RESULT_OK : FAT32_RESULT_UNSUPPORTED;
 }
 
-enum fat32_result fat32_write_root_file(struct fat32_volume* volume, const char* name, const void* data, size_t size) {
-	if (volume == NULL || (data == NULL && size != 0u) || size > UINT32_MAX ||
+enum fat32_result fat32_write_file(struct fat32_volume* volume, uint32_t directory_cluster, const void* name,
+                                   size_t name_size, const void* data, size_t size) {
+	if (volume == NULL || !fat32_volume_cluster_valid(volume, directory_cluster) || name == NULL || name_size == 0u ||
+	    name_size > FILESYSTEM_NAME_MAX || (data == NULL && size != 0u) || size > UINT32_MAX ||
 	    (volume->device.flags & BLOCK_DEVICE_WRITABLE) == 0u)
 		return FAT32_RESULT_UNSUPPORTED;
-	uint8_t encoded_name[11];
-	if (!encode_short_name(name, encoded_name)) return FAT32_RESULT_UNSUPPORTED;
-	struct root_entry location;
-	enum fat32_result result = find_directory_entry(volume, volume->root_cluster, encoded_name, &location);
-	if (result != FAT32_RESULT_OK) return result;
+
+	struct fat32_directory_entry existing;
+	enum fat32_result            result = fat32_directory_lookup(volume, directory_cluster, name, name_size, &existing);
+	if (result != FAT32_RESULT_OK && result != FAT32_RESULT_NOT_FOUND) return result;
+	bool              found            = result == FAT32_RESULT_OK;
+	uint8_t           encoded_name[11] = {0};
+	struct root_entry location         = {0};
+	if (found) {
+		memcpy(encoded_name, existing.short_name, sizeof(encoded_name));
+		result = find_directory_entry(volume, directory_cluster, encoded_name, &location);
+		if (result != FAT32_RESULT_OK) return result;
+		if (!location.found) return FAT32_RESULT_ERROR;
+	}
 	uint32_t* old_clusters = NULL;
 	size_t    old_count    = 0u;
 	if (location.found) {
@@ -692,24 +702,46 @@ enum fat32_result fat32_write_root_file(struct fat32_volume* volume, const char*
 	if (result != FAT32_RESULT_OK) goto done;
 	result = write_chain(volume, new_clusters, new_count, data, size);
 	if (result != FAT32_RESULT_OK) goto rollback;
-	if (!location.slot_available) {
-		result = extend_directory(volume, &location);
-		if (result != FAT32_RESULT_OK) goto rollback;
+	if (found) {
+		result = write_directory_entry(volume,
+		                               &location,
+		                               encoded_name,
+		                               FAT32_ATTRIBUTE_ARCHIVE,
+		                               new_count == 0u ? 0u : new_clusters[0u],
+		                               (uint32_t)size);
 	}
-	result = write_directory_entry(volume,
-	                               &location,
-	                               encoded_name,
-	                               FAT32_ATTRIBUTE_ARCHIVE,
-	                               new_count == 0u ? 0u : new_clusters[0u],
-	                               (uint32_t)size);
-	if (result != FAT32_RESULT_OK) goto uncertain_commit;
+	else {
+		result = create_named_entry(volume,
+		                            directory_cluster,
+		                            name,
+		                            name_size,
+		                            FAT32_ATTRIBUTE_ARCHIVE,
+		                            new_count == 0u ? 0u : new_clusters[0u],
+		                            (uint32_t)size,
+		                            NULL,
+		                            NULL);
+		if (result == FAT32_RESULT_OK) {
+			struct fat32_directory_entry created;
+			result = fat32_directory_lookup(volume, directory_cluster, name, name_size, &created);
+			if (result == FAT32_RESULT_OK) memcpy(encoded_name, created.short_name, sizeof(encoded_name));
+		}
+	}
+	if (result != FAT32_RESULT_OK) {
+		if (!found) {
+			struct fat32_directory_entry committed;
+			enum fat32_result lookup = fat32_directory_lookup(volume, directory_cluster, name, name_size, &committed);
+			if (lookup != FAT32_RESULT_OK || committed.cluster != (new_count == 0u ? 0u : new_clusters[0u]))
+				goto rollback;
+		}
+		goto uncertain_commit;
+	}
 	result = release_clusters(volume, old_clusters, old_count);
 	if (result != FAT32_RESULT_OK) goto committed;
 	result = fat32_volume_invalidate_fsinfo(volume);
 
 committed:
 	if (result == FAT32_RESULT_OK) result = fat32_volume_flush(volume);
-	if (result == FAT32_RESULT_OK) result = verify_file(volume, encoded_name, data, size);
+	if (result == FAT32_RESULT_OK) result = verify_file(volume, directory_cluster, encoded_name, data, size);
 	free(new_clusters);
 	goto done;
 
