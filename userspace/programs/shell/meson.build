@@ -1,6 +1,7 @@
 shell_elf = executable('shell.elf',
 	sources : files(
 		'src/command.c',
+		'src/parse.c',
 		'src/editor.c',
 		'src/filesystem.c',
 		'src/input.c',

@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "parse.h"
 #include "shell.h"
 
 #define SHELL_ERROR_PREFIX "\x1b[1;31mshell:\x1b[0m "
@@ -25,17 +26,6 @@ static bool write_program_exit(const char* command, uintptr_t exit_code) {
 	                                 (unsigned long long)exit_code,
 	                                 (unsigned long long)exit_code) >= 0;
 }
-
-static bool is_space(char value) {
-	return value == ' ' || value == '\t';
-}
-
-enum word_parse_result {
-	WORD_PARSE_OK,
-	WORD_PARSE_UNTERMINATED_QUOTE,
-	WORD_PARSE_TRAILING_ESCAPE,
-	WORD_PARSE_FAILED,
-};
 
 static bool report_change_directory(enum shell_change_directory_result result) {
 	switch (result) {
@@ -215,101 +205,60 @@ static bool execute_program(struct shell* shell, size_t argc, char* const argv[]
 	}
 }
 
-static enum word_parse_result parse_words(const char* line, size_t size, char*** out_argv, size_t* out_argc) {
-	char*  storage;
-	char** argv;
-	size_t argc = 0u;
-	size_t input;
-	size_t output;
-	char   quote   = '\0';
-	bool   in_word = false;
-
-	if (line == NULL || size == 0u || out_argv == NULL || out_argc == NULL) return WORD_PARSE_FAILED;
-	storage = malloc(size + 1u);
-	argv    = malloc((size / 2u + 1u) * sizeof(*argv));
-	if (storage == NULL || argv == NULL) {
-		free(argv);
-		free(storage);
-		return WORD_PARSE_FAILED;
-	}
-	input  = 0u;
-	output = 0u;
-	while (input < size) {
-		char value = line[input++];
-		if (value == '\\' && quote != '\'') {
-			if (input == size) {
-				free(argv);
-				free(storage);
-				return WORD_PARSE_TRAILING_ESCAPE;
-			}
-			if (!in_word) {
-				argv[argc++] = storage + output;
-				in_word      = true;
-			}
-			/* Inside double quotes a backslash only escapes the characters POSIX gives a special meaning. */
-			if (quote == '"' && memchr("\"\\$`", line[input], 4u) == NULL) storage[output++] = '\\';
-			storage[output++] = line[input++];
-			continue;
-		}
-		if (quote != '\0') {
-			if (value == quote) quote = '\0';
-			else storage[output++] = value;
-			continue;
-		}
-		if (value == '\'' || value == '"') {
-			if (!in_word) {
-				argv[argc++] = storage + output;
-				in_word      = true;
-			}
-			quote = value;
-		}
-		else if (is_space(value)) {
-			if (in_word) {
-				storage[output++] = '\0';
-				in_word           = false;
-			}
-		}
-		else {
-			if (!in_word) {
-				argv[argc++] = storage + output;
-				in_word      = true;
-			}
-			storage[output++] = value;
-		}
-	}
-	if (quote != '\0') {
-		free(argv);
-		free(storage);
-		return WORD_PARSE_UNTERMINATED_QUOTE;
-	}
-	if (in_word) storage[output++] = '\0';
-	*out_argv = argv;
-	*out_argc = argc;
-	return WORD_PARSE_OK;
-}
-
-static void free_words(char** argv) {
-	if (argv == NULL) return;
-	free(argv[0]);
-	free(argv);
-}
-
 bool shell_execute_line(struct shell* shell, const char* line, size_t size) {
-	char**                 argv = NULL;
-	size_t                 argc;
-	size_t                 start = 0u;
-	bool                   success;
-	enum word_parse_result parse_result;
+	struct shell_pipeline   pipeline = {0};
+	struct shell_command*   command;
+	char**                  argv;
+	size_t                  argc;
+	bool                    success;
+	enum shell_parse_result parse_result;
 
 	if (shell == NULL || (line == NULL && size != 0u)) return false;
-	while (start < size && is_space(line[start])) start++;
-	if (start == size) return true;
-	line += start;
-	size -= start;
-	parse_result = parse_words(line, size, &argv, &argc);
-	if (parse_result == WORD_PARSE_UNTERMINATED_QUOTE) return write_error(NULL, "unterminated quoted string");
-	if (parse_result == WORD_PARSE_TRAILING_ESCAPE) return write_error(NULL, "trailing escape character");
-	if (parse_result != WORD_PARSE_OK || argc == 0u) return false;
+	parse_result = shell_parse_line(line, size, &pipeline);
+	if (parse_result != SHELL_PARSE_OK) {
+		const char* message;
+		switch (parse_result) {
+		case SHELL_PARSE_UNTERMINATED_QUOTE:
+			message = "unterminated quoted string";
+			break;
+		case SHELL_PARSE_TRAILING_ESCAPE:
+			message = "trailing escape character";
+			break;
+		case SHELL_PARSE_MISSING_COMMAND:
+			message = "missing command before or after pipe";
+			break;
+		case SHELL_PARSE_MISSING_REDIRECTION_TARGET:
+			message = "missing redirection target";
+			break;
+		case SHELL_PARSE_UNSUPPORTED_OPERATOR:
+			message = "unsupported shell operator";
+			break;
+		case SHELL_PARSE_NO_MEMORY:
+			message = "out of memory";
+			break;
+		case SHELL_PARSE_INVALID_ARGUMENT:
+		case SHELL_PARSE_OK:
+		default:
+			message = "invalid command line";
+			break;
+		}
+		return write_error(NULL, message);
+	}
+	if (pipeline.command_count == 0u) {
+		shell_pipeline_destroy(&pipeline);
+		return true;
+	}
+	if (pipeline.command_count != 1u || pipeline.commands[0].redirection_count != 0u) {
+		shell_pipeline_destroy(&pipeline);
+		return write_error(NULL, "redirections and pipes are not supported yet");
+	}
+	command = &pipeline.commands[0];
+	argc    = command->argc;
+	argv    = command->argv;
+	if (argc == 0u) {
+		shell_pipeline_destroy(&pipeline);
+		return true;
+	}
 	if (strcmp(argv[0], "cd") == 0) success = execute_change_directory(shell, argc - 1u, argv + 1u);
 	else if (strcmp(argv[0], "pwd") == 0) success = execute_print_directory(shell, argc - 1u, argv + 1u);
 	else if (strcmp(argv[0], "echo") == 0) success = execute_echo(argc - 1u, argv + 1u);
@@ -325,6 +274,6 @@ bool shell_execute_line(struct shell* shell, const char* line, size_t size) {
 		else success = printf("\x1b[2J\x1b[3J\x1b[H") >= 0;
 	}
 	else success = execute_program(shell, argc, argv);
-	free_words(argv);
+	shell_pipeline_destroy(&pipeline);
 	return success;
 }
