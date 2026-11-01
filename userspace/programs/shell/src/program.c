@@ -138,3 +138,73 @@ cleanup:
 	stop_process(&running);
 	return result;
 }
+
+enum shell_program_result shell_pipeline_start_program(struct shell* shell, const char* name, size_t argc,
+                                                       const char* const argv[], cap_id_t input, cap_id_t output,
+                                                       cap_id_t error, bool foreground, cap_id_t* out_process) {
+	struct filesystem_node_handle      executable = {.capability = CAP_ID_INVALID};
+	struct program_load_result         loaded     = {.load_cap = CAP_ID_INVALID, .process_id = PROCESS_PID_INVALID};
+	struct program_run_result          running    = {.process_cap = CAP_ID_INVALID, .thread_cap = CAP_ID_INVALID};
+	struct program_capability_argument caps[PROCESS_STARTUP_CAP_COUNT] = {0};
+	struct filesystem_call_result      opened;
+	char                               path[SHELL_PATH_CAPACITY];
+	size_t                             path_size;
+	bool                               selected = false;
+	enum shell_program_result          result   = SHELL_PROGRAM_FAILED;
+	if (out_process == NULL) return result;
+	*out_process = CAP_ID_INVALID;
+	if (shell == NULL || name == NULL || !executable_path(shell, name, strlen(name), path, &path_size)) return result;
+	opened = vfs_open(shell->vfs_cap, path, path_size, CAP_READ | CAP_DELEGATE, &executable);
+	if (opened.transport_status == SYSCALL_STATUS_OK && opened.status == FILESYSTEM_STATUS_NOT_FOUND) {
+		result = SHELL_PROGRAM_NOT_FOUND;
+		goto cleanup;
+	}
+	if (opened.transport_status != SYSCALL_STATUS_OK || opened.status != FILESYSTEM_STATUS_OK ||
+	    executable.info.type != FILESYSTEM_NODE_FILE || executable.capability == CAP_ID_INVALID)
+		goto cleanup;
+	const char* exec_name;
+	size_t      exec_name_size;
+	process_name(name, strlen(name), &exec_name, &exec_name_size);
+	if (exec_name_size == 0u) goto cleanup;
+	if (program_load(SHELL_LOADER_SERVICE, executable.capability, exec_name, exec_name_size, &loaded) !=
+	    SYSCALL_STATUS_OK)
+		goto cleanup;
+	(void)cap_drop(executable.capability);
+	executable.capability = CAP_ID_INVALID;
+	caps[PROCESS_STARTUP_CAP_STDIN] =
+		(struct program_capability_argument){.capability = input, .rights = CAP_CALL | CAP_READ};
+	caps[PROCESS_STARTUP_CAP_STDOUT] =
+		(struct program_capability_argument){.capability = output, .rights = CAP_CALL | CAP_WRITE};
+	caps[PROCESS_STARTUP_CAP_STDERR] =
+		(struct program_capability_argument){.capability = error, .rights = CAP_CALL | CAP_WRITE};
+	caps[PROCESS_STARTUP_CAP_WORKING_DIRECTORY] = (struct program_capability_argument){
+		.capability = shell->current_directory_cap, .rights = shell->current_directory_rights};
+	for (size_t i = 0u; i < PROCESS_STARTUP_CAP_COUNT; i++)
+		if (caps[i].capability == CAP_ID_INVALID) caps[i].rights = 0u;
+	if (foreground) {
+		if (tty_session_begin_foreground(shell->tty_cap, loaded.process_id) != SYSCALL_STATUS_OK) goto cleanup;
+		selected = true;
+	}
+	if (program_run(&loaded, argc, argv, PROCESS_STARTUP_CAP_COUNT, caps, &running) != SYSCALL_STATUS_OK) goto cleanup;
+	loaded.load_cap = CAP_ID_INVALID;
+	if (foreground &&
+	    tty_session_attach_foreground(shell->tty_cap, shell->tty_owner, running.process_cap, loaded.process_id) !=
+	        SYSCALL_STATUS_OK)
+		goto cleanup;
+	if (cap_drop(running.thread_cap) != SYSCALL_STATUS_OK) goto cleanup;
+	running.thread_cap  = CAP_ID_INVALID;
+	*out_process        = running.process_cap;
+	running.process_cap = CAP_ID_INVALID;
+	selected            = false; /* Foreground remains selected until caller restores it. */
+	result              = SHELL_PROGRAM_OK;
+cleanup:
+	if (selected) (void)tty_session_restore_foreground(shell->tty_cap);
+	if (executable.capability != CAP_ID_INVALID) (void)cap_drop(executable.capability);
+	if (loaded.load_cap != CAP_ID_INVALID) (void)program_cancel(loaded.load_cap);
+	if (running.thread_cap != CAP_ID_INVALID) (void)cap_drop(running.thread_cap);
+	if (running.process_cap != CAP_ID_INVALID) {
+		(void)process_kill(running.process_cap, PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
+		if (process_wait(running.process_cap, NULL) != SYSCALL_STATUS_OK) (void)cap_drop(running.process_cap);
+	}
+	return result;
+}

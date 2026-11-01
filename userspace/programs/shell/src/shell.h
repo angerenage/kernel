@@ -1,5 +1,7 @@
 #pragma once
 
+struct shell_command;
+
 #include <base/cap.h>
 #include <base/process.h>
 #include <stdbool.h>
@@ -70,6 +72,15 @@ bool shell_resolve_path(const struct shell* shell, const char* path, size_t path
 /* Load, run, and wait for one foreground program. */
 enum shell_program_result shell_run_program(struct shell* shell, const char* command, size_t command_size, size_t argc,
                                             const char* const argv[], uintptr_t* out_exit_code);
+
+/* Launch one child without waiting, for concurrent pipeline execution. */
+enum shell_program_result shell_pipeline_start_program(struct shell* shell, const char* name, size_t argc,
+                                                       const char* const argv[], cap_id_t input, cap_id_t output,
+                                                       cap_id_t error, bool foreground, cap_id_t* out_process);
+
+/* Builtins may be used in a pipeline without creating a separate process. */
+bool shell_is_builtin(const char* name);
+bool shell_execute_builtin(struct shell* shell, const struct shell_command* command, bool* handled);
 
 /* Read and locally edit one line, including navigation through shell history. */
 enum shell_input_result shell_read_line(struct shell* shell, char* line, size_t capacity, size_t* out_size);

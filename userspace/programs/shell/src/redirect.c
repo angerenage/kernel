@@ -17,13 +17,14 @@
 #include "parse.h"
 #include "shell.h"
 
-enum { REDIRECT_INPUT_ID = 1u, REDIRECT_OUTPUT_ID = 2u };
+enum { REDIRECT_MAX_SLOTS = 32u };
 
 struct redirect_slot {
 	cap_id_t file;
 	cap_id_t stream;
 	uint64_t offset;
 	bool     active;
+	bool     input;
 	bool     failed;
 };
 
@@ -31,16 +32,14 @@ struct redirect_server {
 	channel_id_t         endpoint;
 	process_id_t         owner;
 	cap_id_t             activity;
-	struct redirect_slot input;
-	struct redirect_slot output;
+	struct redirect_slot slots[REDIRECT_MAX_SLOTS];
+	size_t               count;
 	bool                 running;
 };
 
 static struct redirect_server server = {
 	.endpoint = CHANNEL_ID_INVALID,
 	.activity = CAP_ID_INVALID,
-	.input    = {.file = CAP_ID_INVALID, .stream = CAP_ID_INVALID},
-	.output   = {.file = CAP_ID_INVALID, .stream = CAP_ID_INVALID},
 };
 
 static bool succeeded(struct filesystem_call_result result) {
@@ -79,16 +78,15 @@ static bool reply(const struct cap_request* call, const void* bytes, size_t size
 }
 
 static void handle_request(const struct cap_request* call, const uint8_t* request) {
-	struct redirect_slot*        slot = call->object_id == REDIRECT_INPUT_ID    ? &server.input
-	                                    : call->object_id == REDIRECT_OUTPUT_ID ? &server.output
-	                                                                            : NULL;
+	struct redirect_slot* slot =
+		call->object_id >= 1u && call->object_id <= server.count ? &server.slots[call->object_id - 1u] : NULL;
 	struct stream_request_header header;
 	if (slot == NULL || !slot->active || slot->file == CAP_ID_INVALID || call->request_size < sizeof(header)) {
 		(void)reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 		return;
 	}
 	memcpy(&header, request, sizeof(header));
-	if (header.op == STREAM_OP_READ && slot == &server.input) {
+	if (header.op == STREAM_OP_READ && slot->input) {
 		struct stream_read_request    read_request;
 		uint8_t                       data[CAP_MAX_RESPONSE_SIZE];
 		size_t                        count = 0u;
@@ -115,10 +113,10 @@ static void handle_request(const struct cap_request* call, const uint8_t* reques
 			return;
 		}
 		slot->offset += count;
-		(void)reply(call, data, count, SYSCALL_STATUS_OK);
+		(void)reply(call, count != 0u ? data : NULL, count, SYSCALL_STATUS_OK);
 		return;
 	}
-	if (header.op == STREAM_OP_WRITE && slot == &server.output) {
+	if (header.op == STREAM_OP_WRITE && !slot->input) {
 		struct stream_write_request   write_request;
 		struct stream_write_response  response;
 		struct filesystem_call_result result;
@@ -225,13 +223,15 @@ static bool discard_slot(struct redirect_slot* slot, uint64_t object_id) {
 }
 
 bool shell_redirect_finish(void) {
-	bool failed = __atomic_load_n(&server.input.failed, __ATOMIC_ACQUIRE) ||
-	              __atomic_load_n(&server.output.failed, __ATOMIC_ACQUIRE);
-	bool ok     = discard_slot(&server.input, REDIRECT_INPUT_ID);
-	if (!discard_slot(&server.output, REDIRECT_OUTPUT_ID)) ok = false;
-	__atomic_store_n(&server.input.failed, false, __ATOMIC_RELEASE);
-	__atomic_store_n(&server.output.failed, false, __ATOMIC_RELEASE);
-	return ok && !failed;
+	bool ok = true;
+	for (size_t i = 0u; i < server.count; i++) {
+		struct redirect_slot* slot = &server.slots[i];
+		if (__atomic_load_n(&slot->failed, __ATOMIC_ACQUIRE)) ok = false;
+		if (!discard_slot(slot, i + 1u)) ok = false;
+		*slot = (struct redirect_slot){.file = CAP_ID_INVALID, .stream = CAP_ID_INVALID};
+	}
+	server.count = 0u;
+	return ok;
 }
 
 static bool open_redirect(const struct shell* shell, const struct shell_redirection* redirect,
@@ -274,46 +274,50 @@ static bool open_redirect(const struct shell* shell, const struct shell_redirect
 	return true;
 }
 
-static bool publish_slot(struct redirect_slot* slot, uint64_t id, cap_rights_t rights) {
-	return cap_publish(server.endpoint, id, server.owner, rights | CAP_CALL | CAP_DELEGATE, &slot->stream) ==
-	       SYSCALL_STATUS_OK;
+static bool publish_prepared(struct redirect_slot* slot, cap_rights_t rights, cap_id_t* out_cap) {
+	if (!slot->active) return true;
+	if (server.count == REDIRECT_MAX_SLOTS) return false;
+	size_t index        = server.count++;
+	server.slots[index] = *slot;
+	*slot               = (struct redirect_slot){.file = CAP_ID_INVALID, .stream = CAP_ID_INVALID};
+	if (cap_publish(
+			server.endpoint, index + 1u, server.owner, rights | CAP_CALL | CAP_DELEGATE, &server.slots[index].stream) !=
+	    SYSCALL_STATUS_OK)
+		return false;
+	*out_cap = server.slots[index].stream;
+	return true;
 }
 
 bool shell_redirect_prepare(const struct shell* shell, const struct shell_command* command,
                             struct shell_redirect_streams* out_streams, const char** error_path,
                             const char** error_message) {
+	struct redirect_slot input  = {.file = CAP_ID_INVALID, .stream = CAP_ID_INVALID, .input = true};
+	struct redirect_slot output = {.file = CAP_ID_INVALID, .stream = CAP_ID_INVALID};
+	bool                 ok     = false;
 	if (out_streams == NULL || error_path == NULL || error_message == NULL || shell == NULL || command == NULL)
 		return false;
 	*out_streams   = (struct shell_redirect_streams){0};
 	*error_path    = NULL;
 	*error_message = "failed to initialize stream redirection";
 	if (!start_server()) return false;
-	/* The previous command is completely finished before entering this function. */
-	(void)shell_redirect_finish();
 	for (size_t i = 0u; i < command->redirection_count; i++) {
 		const struct shell_redirection* redir = &command->redirections[i];
-		struct redirect_slot*           slot  = redir->kind == SHELL_REDIRECT_INPUT ? &server.input : &server.output;
+		struct redirect_slot*           slot  = redir->kind == SHELL_REDIRECT_INPUT ? &input : &output;
 		*error_path                           = redir->path;
-		if (!discard_slot(slot, slot == &server.input ? REDIRECT_INPUT_ID : REDIRECT_OUTPUT_ID) ||
-		    !open_redirect(shell, redir, slot, error_message)) {
-			(void)shell_redirect_finish();
-			return false;
-		}
+		if (!discard_slot(slot, 0u) || !open_redirect(shell, redir, slot, error_message)) goto done;
 	}
-	if (server.input.active) {
-		if (!publish_slot(&server.input, REDIRECT_INPUT_ID, CAP_READ)) goto fail;
-		out_streams->input         = server.input.stream;
-		out_streams->input_changed = true;
+	if (!publish_prepared(&input, CAP_READ, &out_streams->input) ||
+	    !publish_prepared(&output, CAP_WRITE, &out_streams->output)) {
+		*error_path    = NULL;
+		*error_message = "failed to publish redirected stream";
+		goto done;
 	}
-	if (server.output.active) {
-		if (!publish_slot(&server.output, REDIRECT_OUTPUT_ID, CAP_WRITE)) goto fail;
-		out_streams->output         = server.output.stream;
-		out_streams->output_changed = true;
-	}
-	return true;
-fail:
-	*error_path    = NULL;
-	*error_message = "failed to publish redirected stream";
-	(void)shell_redirect_finish();
-	return false;
+	out_streams->input_changed  = out_streams->input != CAP_ID_INVALID;
+	out_streams->output_changed = out_streams->output != CAP_ID_INVALID;
+	ok                          = true;
+done:
+	(void)discard_slot(&input, 0u);
+	(void)discard_slot(&output, 0u);
+	if (!ok) (void)shell_redirect_finish();
+	return ok;
 }

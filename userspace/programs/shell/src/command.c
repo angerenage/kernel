@@ -7,6 +7,7 @@
 #include <system/display.h>
 
 #include "parse.h"
+#include "pipeline.h"
 #include "redirect.h"
 #include "shell.h"
 
@@ -208,6 +209,29 @@ static bool execute_program(struct shell* shell, size_t argc, char* const argv[]
 	}
 }
 
+bool shell_is_builtin(const char* name) {
+	return strcmp(name, "cd") == 0 || strcmp(name, "pwd") == 0 || strcmp(name, "echo") == 0 ||
+	       strcmp(name, "exit") == 0 || strcmp(name, "clear") == 0;
+}
+
+bool shell_execute_builtin(struct shell* shell, const struct shell_command* command, bool* handled) {
+	char** argv = command->argv;
+	size_t argc = command->argc;
+	if (handled == NULL) return false;
+	*handled = argc != 0u && shell_is_builtin(argv[0]);
+	if (!*handled) return true;
+	if (strcmp(argv[0], "cd") == 0) return execute_change_directory(shell, argc - 1u, argv + 1u);
+	if (strcmp(argv[0], "pwd") == 0) return execute_print_directory(shell, argc - 1u, argv + 1u);
+	if (strcmp(argv[0], "echo") == 0) return execute_echo(argc - 1u, argv + 1u);
+	if (strcmp(argv[0], "exit") == 0) {
+		if (argc != 1u) return write_error("exit", "expected no arguments");
+		shell->exit_requested = true;
+		return true;
+	}
+	if (argc != 1u) return write_error("clear", "expected no arguments");
+	return printf("\x1b[2J\x1b[3J\x1b[H") >= 0;
+}
+
 bool shell_execute_line(struct shell* shell, const char* line, size_t size) {
 	struct shell_pipeline         pipeline = {0};
 	struct shell_command*         command;
@@ -257,8 +281,9 @@ bool shell_execute_line(struct shell* shell, const char* line, size_t size) {
 		return true;
 	}
 	if (pipeline.command_count != 1u) {
+		bool pipeline_ok = shell_execute_pipeline(shell, &pipeline);
 		shell_pipeline_destroy(&pipeline);
-		return write_error(NULL, "pipes are not supported yet");
+		return pipeline_ok;
 	}
 	command = &pipeline.commands[0];
 	argc    = command->argc;
@@ -267,6 +292,7 @@ bool shell_execute_line(struct shell* shell, const char* line, size_t size) {
 	if (command->redirection_count != 0u) {
 		const char* error_path;
 		const char* error_message;
+		(void)shell_redirect_finish();
 		if (!shell_redirect_prepare(shell, command, &redirects, &error_path, &error_message)) {
 			(void)write_error(error_path, error_message);
 			shell_pipeline_destroy(&pipeline);
@@ -280,21 +306,9 @@ bool shell_execute_line(struct shell* shell, const char* line, size_t size) {
 	}
 
 	if (argc == 0u) goto cleanup;
-	if (strcmp(argv[0], "cd") == 0) success = execute_change_directory(shell, argc - 1u, argv + 1u);
-	else if (strcmp(argv[0], "pwd") == 0) success = execute_print_directory(shell, argc - 1u, argv + 1u);
-	else if (strcmp(argv[0], "echo") == 0) success = execute_echo(argc - 1u, argv + 1u);
-	else if (strcmp(argv[0], "exit") == 0) {
-		if (argc != 1u) success = write_error("exit", "expected no arguments");
-		else {
-			shell->exit_requested = true;
-			success               = true;
-		}
-	}
-	else if (strcmp(argv[0], "clear") == 0) {
-		if (argc != 1u) success = write_error("clear", "expected no arguments");
-		else success = printf("\x1b[2J\x1b[3J\x1b[H") >= 0;
-	}
-	else success = execute_program(shell, argc, argv);
+	bool handled = false;
+	success      = shell_execute_builtin(shell, command, &handled);
+	if (!handled) success = execute_program(shell, argc, argv);
 
 cleanup:
 	if (redirected) {
