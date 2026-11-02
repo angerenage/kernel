@@ -1,5 +1,6 @@
 #pragma once
 
+#include <base/interrupt.h>
 #include <base/syscall.h>
 #include <runtime/device.h>
 #include <stdbool.h>
@@ -55,3 +56,17 @@ syscall_status_t acpi_device_add_u64(const struct device_builder* builder, const
 
 /* Append one UTF-8 string property without its C terminator. */
 syscall_status_t acpi_device_add_string(const struct device_builder* builder, const char* name, const char* value);
+
+/* Stage a memory-mapped I/O region for the specified ACPI device. */
+syscall_status_t acpi_device_stage_mmio(struct acpi_device* device, const char* name, uintptr_t address, size_t size);
+
+/* Stage an I/O port region for the specified ACPI device. */
+syscall_status_t acpi_device_stage_io(struct acpi_device* device, const char* name, uint32_t address, uint32_t size);
+
+/* Stage an interrupt for the specified ACPI device. */
+syscall_status_t acpi_device_stage_interrupt(struct acpi_device* device, const char* name, uint32_t source,
+                                             enum interrupt_trigger trigger, enum interrupt_polarity polarity);
+
+/* Publish staged resources for all devices in the set after parsing allocations are freed. */
+syscall_status_t acpi_device_set_publish_resources(struct acpi_device_set* set, cap_id_t memory_allocator_cap,
+                                                   cap_id_t interrupts_cap, cap_id_t io_ports_cap);

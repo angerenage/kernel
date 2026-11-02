@@ -74,8 +74,7 @@ static bool tpm2_device_decode(const struct acpi_table_info_response* info, cons
 	return true;
 }
 
-static syscall_status_t submit_tpm2_device(struct acpi_device_set* devices, cap_id_t memory_allocator_cap,
-                                           const struct acpi_tpm2_device* device) {
+static syscall_status_t submit_tpm2_device(struct acpi_device_set* devices, const struct acpi_tpm2_device* device) {
 	struct acpi_device*    staged;
 	struct device_builder* builder;
 	syscall_status_t       status;
@@ -97,17 +96,12 @@ static syscall_status_t submit_tpm2_device(struct acpi_device_set* devices, cap_
 	if (status == SYSCALL_STATUS_OK)
 		status = acpi_device_add_u64(builder, TPM_PROPERTY_CONTROL_AREA_ADDRESS, device->control_address);
 	if (status == SYSCALL_STATUS_OK && !from_aml && device->start_method == TPM2_START_METHOD_FIFO_MMIO)
-		status = device_builder_add_mmio_resource(builder,
-		                                          memory_allocator_cap,
-		                                          TPM_RESOURCE_CONTROL_AREA,
-		                                          sizeof(TPM_RESOURCE_CONTROL_AREA) - 1u,
-		                                          (uintptr_t)device->control_address,
-		                                          TPM_FIFO_REGISTER_SIZE);
+		status = acpi_device_stage_mmio(
+			staged, TPM_RESOURCE_CONTROL_AREA, (uintptr_t)device->control_address, TPM_FIFO_REGISTER_SIZE);
 	return status;
 }
 
-static syscall_status_t parse_tpm2_table(cap_id_t table_cap, struct acpi_device_set* devices,
-                                         cap_id_t memory_allocator_cap) {
+static syscall_status_t parse_tpm2_table(cap_id_t table_cap, struct acpi_device_set* devices) {
 	struct acpi_table_info_response info;
 	struct acpi_tpm2_device         device;
 	uint8_t                         body[ACPI_TPM2_BODY_SIZE];
@@ -119,23 +113,21 @@ static syscall_status_t parse_tpm2_table(cap_id_t table_cap, struct acpi_device_
 	status = acpi_table_read(table_cap, 0u, body, sizeof(body));
 	if (status != SYSCALL_STATUS_OK) return status;
 	if (!tpm2_device_decode(&info, body, &device)) return SYSCALL_STATUS_OK;
-	return submit_tpm2_device(devices, memory_allocator_cap, &device);
+	return submit_tpm2_device(devices, &device);
 }
 
-syscall_status_t acpi_tpm2_parse(cap_id_t provider_cap, struct acpi_device_set* devices,
-                                 cap_id_t memory_allocator_cap) {
+syscall_status_t acpi_tpm2_parse(cap_id_t provider_cap, struct acpi_device_set* devices) {
 	uint64_t         table_count;
 	syscall_status_t status;
 
-	if (provider_cap == CAP_ID_INVALID || devices == NULL || memory_allocator_cap == CAP_ID_INVALID)
-		return SYSCALL_STATUS_BAD_ARGUMENT;
+	if (provider_cap == CAP_ID_INVALID || devices == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	status = acpi_table_count(provider_cap, "TPM2", &table_count);
 	if (status != SYSCALL_STATUS_OK) return status;
 	for (uint64_t index = 0u; index < table_count; index++) {
 		cap_id_t table_cap = CAP_ID_INVALID;
 
 		status = acpi_table_claim(provider_cap, "TPM2", index, &table_cap);
-		if (status == SYSCALL_STATUS_OK) status = parse_tpm2_table(table_cap, devices, memory_allocator_cap);
+		if (status == SYSCALL_STATUS_OK) status = parse_tpm2_table(table_cap, devices);
 		if (table_cap != CAP_ID_INVALID) {
 			syscall_status_t drop_status = cap_drop(table_cap);
 			if (status == SYSCALL_STATUS_OK) status = drop_status;

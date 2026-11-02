@@ -99,7 +99,7 @@ static struct acpi_device* find_pci_host(struct acpi_device_set*            devi
 	return NULL;
 }
 
-static syscall_status_t submit_mcfg_allocation(struct acpi_device_set* devices, cap_id_t memory_allocator_cap,
+static syscall_status_t submit_mcfg_allocation(struct acpi_device_set*            devices,
                                                const struct acpi_mcfg_allocation* allocation) {
 	struct acpi_device*    device = find_pci_host(devices, allocation);
 	struct device_builder* builder;
@@ -112,12 +112,10 @@ static syscall_status_t submit_mcfg_allocation(struct acpi_device_set* devices, 
 		if (status != SYSCALL_STATUS_OK) return status;
 	}
 	builder = acpi_device_builder(device);
-	status  = device_builder_add_mmio_resource(builder,
-	                                           memory_allocator_cap,
-	                                           MCFG_RESOURCE_CONFIGURATION_SPACE,
-	                                           sizeof(MCFG_RESOURCE_CONFIGURATION_SPACE) - 1u,
-	                                           (uintptr_t)allocation->register_address,
-	                                           (size_t)allocation->register_size);
+	status  = acpi_device_stage_mmio(device,
+	                                 MCFG_RESOURCE_CONFIGURATION_SPACE,
+	                                 (uintptr_t)allocation->register_address,
+	                                 (size_t)allocation->register_size);
 	if (status == SYSCALL_STATUS_OK)
 		status = acpi_device_add_u64(builder, MCFG_PROPERTY_SEGMENT_GROUP, allocation->segment_group);
 	if (status == SYSCALL_STATUS_OK)
@@ -126,8 +124,7 @@ static syscall_status_t submit_mcfg_allocation(struct acpi_device_set* devices, 
 	return status;
 }
 
-static syscall_status_t parse_mcfg_table(cap_id_t table_cap, struct acpi_device_set* devices,
-                                         cap_id_t memory_allocator_cap) {
+static syscall_status_t parse_mcfg_table(cap_id_t table_cap, struct acpi_device_set* devices) {
 	struct acpi_table_info_response info;
 	uint8_t                         reserved[ACPI_MCFG_RESERVED_SIZE];
 	uint64_t                        allocation_count;
@@ -152,26 +149,24 @@ static syscall_status_t parse_mcfg_table(cap_id_t table_cap, struct acpi_device_
 		status = acpi_table_read(table_cap, offset, bytes, sizeof(bytes));
 		if (status != SYSCALL_STATUS_OK) return status;
 		if (!mcfg_allocation_decode(bytes, &allocation)) continue;
-		status = submit_mcfg_allocation(devices, memory_allocator_cap, &allocation);
+		status = submit_mcfg_allocation(devices, &allocation);
 		if (status != SYSCALL_STATUS_OK) return status;
 	}
 	return SYSCALL_STATUS_OK;
 }
 
-syscall_status_t acpi_mcfg_parse(cap_id_t provider_cap, struct acpi_device_set* devices,
-                                 cap_id_t memory_allocator_cap) {
+syscall_status_t acpi_mcfg_parse(cap_id_t provider_cap, struct acpi_device_set* devices) {
 	uint64_t         table_count;
 	syscall_status_t status;
 
-	if (provider_cap == CAP_ID_INVALID || devices == NULL || memory_allocator_cap == CAP_ID_INVALID)
-		return SYSCALL_STATUS_BAD_ARGUMENT;
+	if (provider_cap == CAP_ID_INVALID || devices == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	status = acpi_table_count(provider_cap, "MCFG", &table_count);
 	if (status != SYSCALL_STATUS_OK) return status;
 	for (uint64_t index = 0u; index < table_count; index++) {
 		cap_id_t table_cap = CAP_ID_INVALID;
 
 		status = acpi_table_claim(provider_cap, "MCFG", index, &table_cap);
-		if (status == SYSCALL_STATUS_OK) status = parse_mcfg_table(table_cap, devices, memory_allocator_cap);
+		if (status == SYSCALL_STATUS_OK) status = parse_mcfg_table(table_cap, devices);
 		if (table_cap != CAP_ID_INVALID) {
 			syscall_status_t drop_status = cap_drop(table_cap);
 			if (status == SYSCALL_STATUS_OK) status = drop_status;

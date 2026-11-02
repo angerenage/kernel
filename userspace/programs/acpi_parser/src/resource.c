@@ -19,14 +19,14 @@
 #define ACPI_RESOURCE_NAME_CAPACITY 32u
 
 struct acpi_resource_context {
-	struct device_builder* builder;
-	cap_id_t               memory_allocator_cap;
-	cap_id_t               interrupts_cap;
-	cap_id_t               io_ports_cap;
-	size_t                 memory_count;
-	size_t                 io_count;
-	size_t                 interrupt_count;
-	syscall_status_t       status;
+	struct acpi_device* device;
+	cap_id_t            memory_allocator_cap;
+	cap_id_t            interrupts_cap;
+	cap_id_t            io_ports_cap;
+	size_t              memory_count;
+	size_t              io_count;
+	size_t              interrupt_count;
+	syscall_status_t    status;
 };
 
 static bool resource_name(char output[ACPI_RESOURCE_NAME_CAPACITY], const char* kind, size_t index, size_t* out_size) {
@@ -40,26 +40,20 @@ static bool resource_name(char output[ACPI_RESOURCE_NAME_CAPACITY], const char* 
 static syscall_status_t add_memory(struct acpi_resource_context* context, uint64_t address, uint64_t size) {
 	char   name[ACPI_RESOURCE_NAME_CAPACITY];
 	size_t name_size;
-
 	if (size == 0u || address > UINTPTR_MAX || size > SIZE_MAX || address > UINTPTR_MAX - (size - 1u))
 		return SYSCALL_STATUS_OK;
 	if (!resource_name(name, "memory", context->memory_count, &name_size)) return SYSCALL_STATUS_FAILED;
-	syscall_status_t status = device_builder_add_mmio_resource(
-		context->builder, context->memory_allocator_cap, name, name_size, (uintptr_t)address, (size_t)size);
+	syscall_status_t status = acpi_device_stage_mmio(context->device, name, (uintptr_t)address, (size_t)size);
 	if (status == SYSCALL_STATUS_OK) context->memory_count++;
 	return status;
 }
 
 static syscall_status_t add_io(struct acpi_resource_context* context, uint64_t address, uint64_t size) {
 #if defined(__x86_64__)
-	static const cap_rights_t driver_rights = CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP;
-	static const cap_rights_t parser_rights = driver_rights | CAP_DELEGATE;
-	struct io_port_info       range;
-	char                      name[ACPI_RESOURCE_NAME_CAPACITY];
-	size_t                    name_size;
-	cap_id_t                  cap = CAP_ID_INVALID;
-	syscall_status_t          status;
-
+	struct io_port_info range;
+	char                name[ACPI_RESOURCE_NAME_CAPACITY];
+	size_t              name_size;
+	syscall_status_t    status;
 	if (context->io_ports_cap == CAP_ID_INVALID || size == 0u || address > UINT32_MAX || size > UINT32_MAX ||
 	    address > UINT32_MAX - (size - 1u))
 		return SYSCALL_STATUS_OK;
@@ -68,14 +62,7 @@ static syscall_status_t add_io(struct acpi_resource_context* context, uint64_t a
 	if (address < range.base || address - range.base > range.count || size > range.count - (address - range.base))
 		return SYSCALL_STATUS_OK;
 	if (!resource_name(name, "io", context->io_count, &name_size)) return SYSCALL_STATUS_FAILED;
-	status =
-		io_port_derive(context->io_ports_cap, (uint32_t)(address - range.base), (uint32_t)size, parser_rights, &cap);
-	if (status == SYSCALL_STATUS_OK)
-		status = device_builder_add_resource(context->builder, name, name_size, cap, driver_rights);
-	if (cap != CAP_ID_INVALID) {
-		syscall_status_t drop_status = cap_drop(cap);
-		if (status == SYSCALL_STATUS_OK) status = drop_status;
-	}
+	status = acpi_device_stage_io(context->device, name, (uint32_t)address, (uint32_t)size);
 	if (status == SYSCALL_STATUS_OK) context->io_count++;
 	return status;
 #else
@@ -99,14 +86,7 @@ static syscall_status_t add_interrupt(struct acpi_resource_context* context, uin
 	else if (polarity == UACPI_POLARITY_ACTIVE_LOW) active = INTERRUPT_POLARITY_LOW;
 	else return SYSCALL_STATUS_OK;
 	if (!resource_name(name, "interrupt", context->interrupt_count, &name_size)) return SYSCALL_STATUS_FAILED;
-	syscall_status_t status = device_builder_add_interrupt_resource(context->builder,
-	                                                                context->interrupts_cap,
-	                                                                name,
-	                                                                name_size,
-	                                                                INTERRUPT_SOURCE_CONTROLLER_PLATFORM,
-	                                                                source,
-	                                                                trigger,
-	                                                                active);
+	syscall_status_t status = acpi_device_stage_interrupt(context->device, name, source, trigger, active);
 	if (status == SYSCALL_STATUS_OK) context->interrupt_count++;
 	return status;
 }
@@ -196,7 +176,7 @@ syscall_status_t acpi_resources_add_current(struct acpi_device* device, uacpi_na
 
 	if (device == NULL || node == NULL || memory_allocator_cap == CAP_ID_INVALID) return SYSCALL_STATUS_BAD_ARGUMENT;
 	context = (struct acpi_resource_context){
-		.builder              = acpi_device_builder(device),
+		.device               = device,
 		.memory_allocator_cap = memory_allocator_cap,
 		.interrupts_cap       = interrupts_cap,
 		.io_ports_cap         = io_ports_cap,
@@ -209,6 +189,6 @@ syscall_status_t acpi_resources_add_current(struct acpi_device* device, uacpi_na
 		return SYSCALL_STATUS_OK;
 	}
 	if (context.status != SYSCALL_STATUS_OK)
-		printf("acpi-parser: unable to publish an _CRS resource: %u\n", (unsigned)context.status);
+		printf("acpi-parser: unable to stage an _CRS resource: %u\n", (unsigned)context.status);
 	return SYSCALL_STATUS_OK;
 }

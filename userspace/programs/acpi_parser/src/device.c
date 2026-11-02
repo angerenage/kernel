@@ -3,8 +3,15 @@
 #include <base/cap.h>
 #include <base/process.h>
 #include <protocol/device.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <system/capability.h>
+
+#if defined(__x86_64__)
+#include <base/io_port.h>
+#include <system/io_port.h>
+#endif
 
 struct acpi_compatible {
 	struct acpi_compatible* next;
@@ -12,11 +19,25 @@ struct acpi_compatible {
 	char                    value[];
 };
 
+enum acpi_staged_resource_kind { ACPI_STAGED_MMIO, ACPI_STAGED_IO, ACPI_STAGED_INTERRUPT };
+struct acpi_staged_resource {
+	struct acpi_staged_resource*   next;
+	char*                          name;
+	enum acpi_staged_resource_kind kind;
+	uintptr_t                      address;
+	size_t                         size;
+	uint32_t                       source;
+	enum interrupt_trigger         trigger;
+	enum interrupt_polarity        polarity;
+};
+
 struct acpi_device {
-	struct acpi_device*     next;
-	struct device_builder   builder;
-	struct acpi_compatible* compatibles;
-	void*                   source;
+	struct acpi_device*          next;
+	struct device_builder        builder;
+	struct acpi_compatible*      compatibles;
+	void*                        source;
+	struct acpi_staged_resource* resources;
+	struct acpi_staged_resource* resources_tail;
 };
 
 syscall_status_t acpi_device_set_initialize(struct acpi_device_set* set, cap_id_t root_cap) {
@@ -37,6 +58,12 @@ void acpi_device_set_deinitialize(struct acpi_device_set* set) {
 
 			device->compatibles = compatible->next;
 			free(compatible);
+		}
+		while (device->resources != NULL) {
+			struct acpi_staged_resource* resource = device->resources;
+			device->resources                     = resource->next;
+			free(resource->name);
+			free(resource);
 		}
 		free(device);
 	}
@@ -169,4 +196,121 @@ syscall_status_t acpi_device_add_string(const struct device_builder* builder, co
 		status = device_builder_append_property(builder, 0u, value, value_size);
 	if (status == SYSCALL_STATUS_OK) status = device_builder_finish_property(builder);
 	return status;
+}
+
+static syscall_status_t stage_resource(struct acpi_device* device, const char* name,
+                                       enum acpi_staged_resource_kind kind, uintptr_t address, size_t size,
+                                       uint32_t source, enum interrupt_trigger trigger,
+                                       enum interrupt_polarity polarity) {
+	struct acpi_staged_resource* resource;
+	size_t                       length;
+	if (device == NULL || name == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	length = strlen(name);
+	if (length == 0u || length > DEVICE_IDENTIFIER_MAX) return SYSCALL_STATUS_BAD_ARGUMENT;
+	resource = calloc(1u, sizeof(*resource));
+	if (resource == NULL) return SYSCALL_STATUS_FAILED;
+	resource->name = malloc(length + 1u);
+	if (resource->name == NULL) {
+		free(resource);
+		return SYSCALL_STATUS_FAILED;
+	}
+	memcpy(resource->name, name, length + 1u);
+	resource->kind     = kind;
+	resource->address  = address;
+	resource->size     = size;
+	resource->source   = source;
+	resource->trigger  = trigger;
+	resource->polarity = polarity;
+	if (device->resources_tail == NULL) device->resources = resource;
+	else device->resources_tail->next = resource;
+	device->resources_tail = resource;
+	return SYSCALL_STATUS_OK;
+}
+
+syscall_status_t acpi_device_stage_mmio(struct acpi_device* device, const char* name, uintptr_t address, size_t size) {
+	if (size == 0u || address > UINTPTR_MAX - (size - 1u)) return SYSCALL_STATUS_BAD_ARGUMENT;
+	return stage_resource(device, name, ACPI_STAGED_MMIO, address, size, 0u, 0, 0);
+}
+
+syscall_status_t acpi_device_stage_io(struct acpi_device* device, const char* name, uint32_t address, uint32_t size) {
+	if (size == 0u || (uint64_t)address + size > (uint64_t)UINT32_MAX + 1u) return SYSCALL_STATUS_BAD_ARGUMENT;
+	return stage_resource(device, name, ACPI_STAGED_IO, address, size, 0u, 0, 0);
+}
+
+syscall_status_t acpi_device_stage_interrupt(struct acpi_device* device, const char* name, uint32_t source,
+                                             enum interrupt_trigger trigger, enum interrupt_polarity polarity) {
+	return stage_resource(device, name, ACPI_STAGED_INTERRUPT, 0u, 0u, source, trigger, polarity);
+}
+
+static syscall_status_t publish_one(struct acpi_device* device, const struct acpi_staged_resource* resource,
+                                    cap_id_t memory_allocator_cap, cap_id_t interrupts_cap, cap_id_t io_ports_cap) {
+	struct device_builder* builder   = &device->builder;
+	size_t                 name_size = strlen(resource->name);
+	switch (resource->kind) {
+	case ACPI_STAGED_MMIO:
+		return device_builder_add_mmio_resource(
+			builder, memory_allocator_cap, resource->name, name_size, resource->address, resource->size);
+	case ACPI_STAGED_INTERRUPT:
+		if (interrupts_cap == CAP_ID_INVALID) return SYSCALL_STATUS_OK;
+		return device_builder_add_interrupt_resource(builder,
+		                                             interrupts_cap,
+		                                             resource->name,
+		                                             name_size,
+		                                             INTERRUPT_SOURCE_CONTROLLER_PLATFORM,
+		                                             resource->source,
+		                                             resource->trigger,
+		                                             resource->polarity);
+	case ACPI_STAGED_IO:
+#if defined(__x86_64__)
+	{
+		static const cap_rights_t driver_rights = CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP;
+		struct io_port_info       range;
+		cap_id_t                  cap = CAP_ID_INVALID;
+		syscall_status_t          status;
+		if (io_ports_cap == CAP_ID_INVALID) return SYSCALL_STATUS_OK;
+		status = io_port_info(io_ports_cap, &range);
+		if (status != SYSCALL_STATUS_OK) return status;
+		if (resource->address < range.base || resource->address - range.base > range.count ||
+		    resource->size > range.count - (resource->address - range.base))
+			return SYSCALL_STATUS_OK;
+		status = io_port_derive(io_ports_cap,
+		                        (uint32_t)(resource->address - range.base),
+		                        (uint32_t)resource->size,
+		                        driver_rights | CAP_DELEGATE,
+		                        &cap);
+		if (status == SYSCALL_STATUS_OK)
+			status = device_builder_add_resource(builder, resource->name, name_size, cap, driver_rights);
+		if (cap != CAP_ID_INVALID) {
+			syscall_status_t drop_status = cap_drop(cap);
+			if (status == SYSCALL_STATUS_OK) status = drop_status;
+		}
+		return status;
+	}
+#else
+		(void)io_ports_cap;
+		return SYSCALL_STATUS_OK;
+#endif
+	}
+	return SYSCALL_STATUS_BAD_ARGUMENT;
+}
+
+syscall_status_t acpi_device_set_publish_resources(struct acpi_device_set* set, cap_id_t memory_allocator_cap,
+                                                   cap_id_t interrupts_cap, cap_id_t io_ports_cap) {
+	if (set == NULL || memory_allocator_cap == CAP_ID_INVALID) return SYSCALL_STATUS_BAD_ARGUMENT;
+	size_t failed = 0u;
+	for (struct acpi_device* device = set->head; device != NULL; device = device->next) {
+		for (struct acpi_staged_resource* resource = device->resources; resource != NULL; resource = resource->next) {
+			syscall_status_t status = publish_one(device, resource, memory_allocator_cap, interrupts_cap, io_ports_cap);
+			if (status != SYSCALL_STATUS_OK) {
+				if (failed < 4u)
+					printf("acpi: resource skipped name=%s kind=%u status=%u\n",
+					       resource->name,
+					       (unsigned)resource->kind,
+					       (unsigned)status);
+				failed++;
+			}
+		}
+	}
+	if (failed != 0u) printf("acpi: %zu resource(s) skipped during publication\n", failed);
+	return SYSCALL_STATUS_OK;
 }

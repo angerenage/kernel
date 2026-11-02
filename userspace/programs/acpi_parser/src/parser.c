@@ -1,5 +1,6 @@
 #include "parser.h"
 
+#include <stdio.h>
 #include <system/capability.h>
 
 #include "aml.h"
@@ -21,11 +22,19 @@ syscall_status_t acpi_parser_parse(cap_id_t provider_cap, cap_id_t root_cap, cap
 	status = acpi_device_set_initialize(&devices, root_cap);
 	if (status != SYSCALL_STATUS_OK) return status;
 	status = acpi_aml_initialize(provider_cap, &devices, memory_allocator_cap, interrupts_cap, io_ports_cap, &aml);
-	if (status == SYSCALL_STATUS_OK) (void)acpi_mcfg_parse(provider_cap, &devices, memory_allocator_cap);
-	if (status == SYSCALL_STATUS_OK) (void)acpi_tpm2_parse(provider_cap, &devices, memory_allocator_cap);
-	if (status == SYSCALL_STATUS_OK) (void)acpi_fadt_parse(provider_cap, &devices, interrupts_cap, io_ports_cap);
+	if (status == SYSCALL_STATUS_OK) {
+		syscall_status_t table_status = acpi_mcfg_parse(provider_cap, &devices);
+		if (table_status != SYSCALL_STATUS_OK) printf("acpi: MCFG discovery failed: %u\n", (unsigned)table_status);
+		table_status = acpi_tpm2_parse(provider_cap, &devices);
+		if (table_status != SYSCALL_STATUS_OK) printf("acpi: TPM2 discovery failed: %u\n", (unsigned)table_status);
+		table_status = acpi_fadt_parse(provider_cap, &devices);
+		if (table_status != SYSCALL_STATUS_OK) printf("acpi: FADT discovery failed: %u\n", (unsigned)table_status);
+	}
 	if (status == SYSCALL_STATUS_OK) status = acpi_aml_add_resources(aml);
 	acpi_aml_deinitialize(aml);
+
+	if (status == SYSCALL_STATUS_OK)
+		status = acpi_device_set_publish_resources(&devices, memory_allocator_cap, interrupts_cap, io_ports_cap);
 	if (status == SYSCALL_STATUS_OK) status = acpi_device_set_commit(&devices, &device_count);
 	acpi_device_set_deinitialize(&devices);
 	if (status != SYSCALL_STATUS_OK) return status;
