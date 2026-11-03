@@ -74,11 +74,6 @@ static void write_reg(const struct xhci_controller* c, size_t offset, uint32_t v
 	*(volatile uint32_t*)(c->mmio + offset) = value;
 }
 
-static void write_reg64(const struct xhci_controller* c, size_t offset, uint64_t value) {
-	write_reg(c, offset, (uint32_t)value);
-	write_reg(c, offset + 4u, (uint32_t)(value >> 32u));
-}
-
 static bool sync_dma(struct xhci_dma_buffer* buffer, enum dma_sync_target direction) {
 	return mapping_sync(buffer->device_mapping_cap, 0u, buffer->size, direction) == SYSCALL_STATUS_OK;
 }
@@ -93,27 +88,30 @@ static bool allocate_dma(struct xhci_controller* c, struct xhci_dma_buffer* buff
 	return true;
 }
 
-/* One event consumer, shared by command and transfer completion waits. */
 static bool wait_event(struct xhci_controller* c, uint32_t expected_type, uint64_t expected_pointer,
                        struct xhci_trb* completion, bool allow_short) {
 	for (unsigned elapsed = 0u; elapsed < XHCI_DEVICE_TIMEOUT_MS; elapsed++) {
+		for (unsigned index = 0u; index < c->pending_count; index++) {
+			struct xhci_trb event   = c->pending[index];
+			uint32_t        type    = (event.control >> XHCI_TRB_TYPE_SHIFT) & 63u;
+			uint64_t        pointer = (uint64_t)event.parameter_low | ((uint64_t)event.parameter_high << 32u);
+			if (type != expected_type || pointer != expected_pointer) continue;
+			c->pending[index] = c->pending[--c->pending_count];
+			*completion       = event;
+			uint32_t code     = event.status >> XHCI_TRB_COMPLETION_SHIFT;
+			if (code != XHCI_TRB_SUCCESS && !(allow_short && code == XHCI_TRB_SHORT_PACKET))
+				fprintf(stderr, "xhci: completion error type=%u code=%u\n", type, code);
+			return code == XHCI_TRB_SUCCESS || (allow_short && code == XHCI_TRB_SHORT_PACKET);
+		}
 		struct xhci_trb event;
-		if (xhci_ring_event(&c->events, &event)) {
+		if (xhci_controller_next_event(c, &event)) {
 			uint32_t type = (event.control >> XHCI_TRB_TYPE_SHIFT) & 63u;
-			uint64_t ptr  = (uint64_t)event.parameter_low | ((uint64_t)event.parameter_high << 32u);
-			uint32_t code = event.status >> XHCI_TRB_COMPLETION_SHIFT;
-			write_reg64(
-				c,
-				(size_t)c->runtime + XHCI_RT_IR0 + XHCI_IR_ERDP,
-				((uint64_t)c->events.dma.device_address + (uint64_t)c->events.dequeue * sizeof(struct xhci_trb)) | 8u);
-			if (type == expected_type && ptr == expected_pointer) {
-				*completion = event;
-				if (code != XHCI_TRB_SUCCESS && !(allow_short && code == XHCI_TRB_SHORT_PACKET))
-					fprintf(stderr, "xhci: completion error type=%u code=%u\n", type, code);
-				return code == XHCI_TRB_SUCCESS || (allow_short && code == XHCI_TRB_SHORT_PACKET);
+			if (type == XHCI_TRB_COMMAND_COMPLETION || type == XHCI_TRB_TRANSFER_EVENT) {
+				if (!xhci_controller_queue_event(c, event)) return false;
 			}
-			if (type != XHCI_TRB_PORT_STATUS)
-				printf("xhci: ignored event type=%u code=%u ptr=%llx\n", type, code, (unsigned long long)ptr);
+			else if (type != XHCI_TRB_PORT_STATUS) {
+				printf("xhci: event type=%u completion=%u\n", type, event.status >> XHCI_TRB_COMPLETION_SHIFT);
+			}
 			continue;
 		}
 		if (sleep_ms(1u) != SYSCALL_STATUS_OK) return false;

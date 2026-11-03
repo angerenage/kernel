@@ -160,18 +160,33 @@ bool xhci_controller_start(struct xhci_controller* c, cap_id_t device_cap) {
 	return false;
 }
 
+bool xhci_controller_next_event(struct xhci_controller* c, struct xhci_trb* event) {
+	if (!xhci_ring_event(&c->events, event)) return false;
+	wr64(c,
+	     (size_t)c->runtime + XHCI_RT_IR0 + XHCI_IR_ERDP,
+	     ((uint64_t)c->events.dma.device_address + (uint64_t)c->events.dequeue * sizeof(*event)) | 8u);
+	return true;
+}
+
+bool xhci_controller_queue_event(struct xhci_controller* c, struct xhci_trb event) {
+	if (c->pending_count == XHCI_PENDING_EVENTS) {
+		fprintf(stderr, "xhci: pending completion queue exhausted\n");
+		return false;
+	}
+	c->pending[c->pending_count++] = event;
+	return true;
+}
+
 bool xhci_controller_poll(struct xhci_controller* c) {
-	size_t          ir = (size_t)c->runtime + XHCI_RT_IR0;
 	struct xhci_trb event;
-	for (unsigned i = 0u; i < XHCI_RING_TRBS; i++) {
-		if (!xhci_ring_event(&c->events, &event)) break;
+	for (unsigned i = 0u; i < XHCI_RING_TRBS && xhci_controller_next_event(c, &event); i++) {
 		uint32_t type = (event.control >> XHCI_TRB_TYPE_SHIFT) & 0x3fu;
-		uint32_t code = event.status >> XHCI_TRB_COMPLETION_SHIFT;
-		if (type != 34u) /* Port Status Change Event */
-			printf("xhci: event type=%u completion=%u\n", type, code);
-		wr64(c,
-		     ir + XHCI_IR_ERDP,
-		     ((uint64_t)c->events.dma.device_address + (uint64_t)c->events.dequeue * sizeof(event)) | 8u);
+		if (type == XHCI_TRB_COMMAND_COMPLETION || type == 32u) {
+			if (!xhci_controller_queue_event(c, event)) return false;
+		}
+		else if (type != 34u) {
+			printf("xhci: event type=%u completion=%u\n", type, event.status >> XHCI_TRB_COMPLETION_SHIFT);
+		}
 	}
 	if ((reg(c, c->op + XHCI_OP_USBSTS) & (1u << 2u)) != 0u) {
 		fprintf(stderr, "xhci: host system error\n");
