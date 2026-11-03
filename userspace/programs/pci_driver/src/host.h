@@ -23,7 +23,7 @@ struct pci_host {
 };
 
 /* Acquire, validate, map, and configure one firmware-described ECAM host. */
-bool pci_host_initialize(cap_id_t device_cap, struct pci_host* out_host);
+bool pci_host_initialize(cap_id_t device_cap, struct pci_host* out_host, bool* out_missing_configuration);
 
 /* Unmap and release every capability owned by a PCI host. */
 void pci_host_deinitialize(struct pci_host* host);

@@ -17,16 +17,17 @@ enum device_driver_result pci_driver_run(cap_id_t device_cap, cap_id_t memory_al
 	struct pci_host      host;
 	struct pci_inventory inventory = {0};
 	bool                 success;
+	bool                 missing_configuration = false;
 
 	{
 		TRACE_SCOPE(trace, &trace_host_initialize);
-		success = pci_host_initialize(device_cap, &host);
+		success = pci_host_initialize(device_cap, &host, &missing_configuration);
 	}
 	if (!success) {
 		static const char message[] = "pci: invalid or missing ECAM host resources\n";
 		(void)fwrite(message, 1u, sizeof(message) - 1u, stderr);
 		pci_host_deinitialize(&host);
-		return DEVICE_DRIVER_ERROR;
+		return missing_configuration ? DEVICE_DRIVER_UNSUPPORTED : DEVICE_DRIVER_ERROR;
 	}
 	{
 		TRACE_SCOPE(trace, &trace_enumerate);

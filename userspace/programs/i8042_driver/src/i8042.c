@@ -617,6 +617,7 @@ enum device_driver_result i8042_driver_run(cap_id_t device_cap) {
 		                 .object_id            = I8042_MOUSE_OBJECT_ID},
 	};
 	struct self_info          self;
+	struct device_info        info;
 	uint8_t                   config;
 	bool                      mouse_port;
 	enum device_driver_result result = DEVICE_DRIVER_ERROR;
@@ -629,6 +630,11 @@ enum device_driver_result i8042_driver_run(cap_id_t device_cap) {
 	if (self.self_cap != CAP_ID_INVALID) (void)cap_drop(self.self_cap);
 	if (self.address_space_cap != CAP_ID_INVALID) (void)cap_drop(self.address_space_cap);
 	if (self.main_thread_cap != CAP_ID_INVALID) (void)cap_drop(self.main_thread_cap);
+	if (device_get_info(device_cap, &info) == SYSCALL_STATUS_OK && info.resource_count < 3u) {
+		report_error("i8042: required controller resources are absent\n");
+		result = DEVICE_DRIVER_UNSUPPORTED;
+		goto done;
+	}
 	if (!acquire_resources(device_cap, &controller)) {
 		report_error("i8042: could not acquire the controller resources\n");
 		goto done;

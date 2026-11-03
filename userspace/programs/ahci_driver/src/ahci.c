@@ -64,14 +64,22 @@ static enum ahci_validation_result validate_device(cap_id_t device_cap, uint64_t
 		RUNTIME_DEBUG_ERROR("ahci: device is not a PCI AHCI controller\n");
 		return AHCI_VALIDATION_UNSUPPORTED;
 	}
-	if (!read_property(device_cap, "bar_5_kind", &bar_kind) || !read_property(device_cap, "bar_5_size", out_bar_size) ||
-	    !read_property(device_cap, "bar_5_mapping_offset", out_mapping_offset) ||
-	    device_property_read_bool(device_cap, "bar_5_enabled", &bar_enabled) != SYSCALL_STATUS_OK ||
-	    device_property_read_bool(device_cap, "bar_5_claimed", &bar_claimed) != SYSCALL_STATUS_OK ||
-	    (bar_kind != AHCI_PCI_BAR_MEMORY32 && bar_kind != AHCI_PCI_BAR_MEMORY64) ||
+	syscall_status_t statuses[] = {
+		device_property_read_u64(device_cap, "bar_5_kind", &bar_kind),
+		device_property_read_u64(device_cap, "bar_5_size", out_bar_size),
+		device_property_read_u64(device_cap, "bar_5_mapping_offset", out_mapping_offset),
+		device_property_read_bool(device_cap, "bar_5_enabled", &bar_enabled),
+		device_property_read_bool(device_cap, "bar_5_claimed", &bar_claimed),
+	};
+	bool missing = false;
+	for (size_t i = 0u; i < sizeof(statuses) / sizeof(statuses[0]); i++) {
+		if (statuses[i] == SYSCALL_STATUS_UNAVAILABLE) missing = true;
+		else if (statuses[i] != SYSCALL_STATUS_OK) return AHCI_VALIDATION_ERROR;
+	}
+	if (missing || (bar_kind != AHCI_PCI_BAR_MEMORY32 && bar_kind != AHCI_PCI_BAR_MEMORY64) ||
 	    *out_bar_size < AHCI_GENERIC_REGISTERS_SIZE || !bar_enabled || !bar_claimed) {
 		fprintf(stderr, "ahci: ABAR is missing, disabled, or unavailable\n");
-		return AHCI_VALIDATION_ERROR;
+		return AHCI_VALIDATION_UNSUPPORTED;
 	}
 	return AHCI_VALIDATION_VALID;
 }

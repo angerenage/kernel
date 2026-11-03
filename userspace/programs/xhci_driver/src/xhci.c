@@ -170,14 +170,21 @@ enum device_driver_result xhci_driver_run(cap_id_t device_cap) {
 	    device_property_read_u64(device_cap, "programming_interface", &interface) != SYSCALL_STATUS_OK)
 		return DEVICE_DRIVER_ERROR;
 	if (cls != XHCI_CLASS || subclass != XHCI_SUBCLASS || interface != XHCI_PROGIF) return DEVICE_DRIVER_UNSUPPORTED;
-	if (device_property_read_u64(device_cap, "bar_0_kind", &kind) != SYSCALL_STATUS_OK ||
-	    device_property_read_u64(device_cap, "bar_0_size", &size) != SYSCALL_STATUS_OK ||
-	    device_property_read_u64(device_cap, "bar_0_mapping_offset", &offset) != SYSCALL_STATUS_OK ||
-	    device_property_read_bool(device_cap, "bar_0_enabled", &enabled) != SYSCALL_STATUS_OK ||
-	    device_property_read_bool(device_cap, "bar_0_claimed", &claimed) != SYSCALL_STATUS_OK ||
-	    (kind != XHCI_BAR_MEMORY32 && kind != XHCI_BAR_MEMORY64) || !enabled || !claimed || size < 0x500u) {
+	syscall_status_t statuses[] = {
+		device_property_read_u64(device_cap, "bar_0_kind", &kind),
+		device_property_read_u64(device_cap, "bar_0_size", &size),
+		device_property_read_u64(device_cap, "bar_0_mapping_offset", &offset),
+		device_property_read_bool(device_cap, "bar_0_enabled", &enabled),
+		device_property_read_bool(device_cap, "bar_0_claimed", &claimed),
+	};
+	bool missing = false;
+	for (size_t i = 0u; i < sizeof(statuses) / sizeof(statuses[0]); i++) {
+		if (statuses[i] == SYSCALL_STATUS_UNAVAILABLE) missing = true;
+		else if (statuses[i] != SYSCALL_STATUS_OK) return DEVICE_DRIVER_ERROR;
+	}
+	if (missing || (kind != XHCI_BAR_MEMORY32 && kind != XHCI_BAR_MEMORY64) || !enabled || !claimed || size < 0x500u) {
 		fprintf(stderr, "xhci: BAR0 missing, disabled or unclaimed\n");
-		return DEVICE_DRIVER_ERROR;
+		return DEVICE_DRIVER_UNSUPPORTED;
 	}
 	struct xhci_mapping mapping;
 	if (!map_bar(device_cap, size, offset, &mapping)) {

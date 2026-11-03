@@ -66,7 +66,7 @@ static bool read_dt_bus_range(cap_id_t device_cap, uint8_t* out_first, uint8_t* 
 	return true;
 }
 
-static bool acquire_configuration(cap_id_t device_cap, cap_id_t* out_cap) {
+static bool acquire_configuration(cap_id_t device_cap, cap_id_t* out_cap, bool* out_missing) {
 	static const char* names[] = {
 		MCFG_RESOURCE_CONFIGURATION_SPACE,
 		"configuration_space",
@@ -76,16 +76,19 @@ static bool acquire_configuration(cap_id_t device_cap, cap_id_t* out_cap) {
 		"registers_0",
 	};
 
-	*out_cap = CAP_ID_INVALID;
-	for (size_t index = 0u; index < sizeof(names) / sizeof(names[0]); index++)
-		if (device_resource_acquire(device_cap, names[index], strlen(names[index]), PCI_MEMORY_RIGHTS, out_cap) ==
-		    SYSCALL_STATUS_OK)
-			return true;
+	*out_cap     = CAP_ID_INVALID;
+	*out_missing = true;
+	for (size_t index = 0u; index < sizeof(names) / sizeof(names[0]); index++) {
+		syscall_status_t status =
+			device_resource_acquire(device_cap, names[index], strlen(names[index]), PCI_MEMORY_RIGHTS, out_cap);
+		if (status == SYSCALL_STATUS_OK) return true;
+		if (status != SYSCALL_STATUS_UNAVAILABLE) *out_missing = false;
+	}
 	fprintf(stderr, "pci: configuration-space resource is unavailable\n");
 	return false;
 }
 
-static bool read_description(cap_id_t device_cap, struct pci_host* host) {
+static bool read_description(cap_id_t device_cap, struct pci_host* host, bool* out_missing_configuration) {
 	struct memory_info memory;
 	uint64_t           segment;
 	uint64_t           first;
@@ -96,7 +99,7 @@ static bool read_description(cap_id_t device_cap, struct pci_host* host) {
 	syscall_status_t   first_status;
 	syscall_status_t   last_status;
 
-	if (!acquire_configuration(device_cap, &host->memory_cap)) return false;
+	if (!acquire_configuration(device_cap, &host->memory_cap, out_missing_configuration)) return false;
 	if (memory_info(host->memory_cap, &memory) != SYSCALL_STATUS_OK || memory.memory_type != MEMORY_TYPE_DEVICE ||
 	    memory.size == 0u || memory.size % PCI_ECAM_BUS_SIZE != 0u || memory.size / PCI_ECAM_BUS_SIZE > 256u) {
 		fprintf(stderr, "pci: invalid ECAM memory capability\n");
@@ -159,15 +162,16 @@ static bool map_configuration(struct pci_host* host) {
 	                           &host->config);
 }
 
-bool pci_host_initialize(cap_id_t device_cap, struct pci_host* out_host) {
+bool pci_host_initialize(cap_id_t device_cap, struct pci_host* out_host, bool* out_missing_configuration) {
 	bool success;
 
-	if (out_host == NULL) return false;
-	*out_host = (struct pci_host){.memory_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID};
+	if (out_host == NULL || out_missing_configuration == NULL) return false;
+	*out_missing_configuration = false;
+	*out_host                  = (struct pci_host){.memory_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID};
 	if (device_cap == CAP_ID_INVALID) return false;
 	{
 		TRACE_SCOPE(trace, &trace_host_description);
-		success = read_description(device_cap, out_host);
+		success = read_description(device_cap, out_host, out_missing_configuration);
 	}
 	if (!success) return false;
 	{
