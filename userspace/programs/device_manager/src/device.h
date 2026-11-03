@@ -61,6 +61,7 @@ struct dm_device {
 	uint64_t                  provider_generation;
 	/* Supervisor binding selected for this device, if its compatible IDs match. */
 	struct dm_driver_binding* binding;
+	bool                      removing;
 };
 
 /* Mutable state retained only for the lifetime of one construction transaction. */

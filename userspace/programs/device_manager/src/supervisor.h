@@ -78,5 +78,8 @@ void dm_supervisor_device_committed(struct device_server* server, struct dm_devi
 bool dm_supervisor_authorize_child(struct device_server* server, const struct dm_device* parent, process_id_t caller,
                                    struct dm_driver_binding** out_binding, uint64_t* out_generation);
 
+/* Schedule removal of a child subtree after its drivers stop. */
+syscall_status_t dm_supervisor_remove_child(struct device_server* server, struct dm_device* child);
+
 /* Dispatch a private supervisor-control or driver-output call. */
 bool dm_supervisor_dispatch(struct device_server* server, const struct cap_request* call, const void* request);

@@ -481,6 +481,46 @@ static void remove_generation_devices(struct device_server* server, const struct
 	}
 }
 
+static bool in_device_subtree(const struct dm_device* device, const struct dm_device* root) {
+	for (const struct dm_device* item = device; item != NULL; item = item->parent)
+		if (item == root) return true;
+	return false;
+}
+
+static void finish_removed_children(struct device_server* server) {
+	for (;;) {
+		struct dm_device* root = NULL;
+		for (struct dm_device* device = server->state.devices; device != NULL; device = device->next) {
+			if (!device->removing) continue;
+			bool active = false;
+			for (struct dm_driver_binding* binding = server->supervisor.bindings; binding != NULL;
+			     binding                           = binding->next) {
+				if (!in_device_subtree(binding->device, device)) continue;
+				if (binding->state == DM_DRIVER_RUNNING || binding->state == DM_DRIVER_STARTING ||
+				    binding->state == DM_DRIVER_STOPPING)
+					active = true;
+			}
+			if (!active) {
+				root = device;
+				break;
+			}
+		}
+		if (root == NULL) return;
+		struct dm_driver_binding** cursor = &server->supervisor.bindings;
+		while (*cursor != NULL) {
+			struct dm_driver_binding* binding = *cursor;
+			if (!in_device_subtree(binding->device, root)) {
+				cursor = &binding->next;
+				continue;
+			}
+			binding->device->binding = NULL;
+			*cursor                  = binding->next;
+			free_binding(binding);
+		}
+		remove_device_subtree(server, root);
+	}
+}
+
 static void finish_teardowns(struct device_server* server) {
 	for (struct dm_driver_binding* owner = server->supervisor.bindings; owner != NULL; owner = owner->next) {
 		if ((owner->state != DM_DRIVER_WAITING_FOR_CHILDREN && owner->state != DM_DRIVER_WAITING_FOR_FALLBACK) ||
@@ -495,6 +535,7 @@ static void finish_teardowns(struct device_server* server) {
 		}
 		if (fallback) binding_try_fallback(server, owner);
 	}
+	finish_removed_children(server);
 }
 
 static void binding_exited(struct device_server* server, struct dm_driver_binding* binding,
@@ -644,6 +685,8 @@ void dm_supervisor_deinit(struct device_server* server) {
 
 void dm_supervisor_device_committed(struct device_server* server, struct dm_device* device) {
 	if (server == NULL || device == NULL || device->binding != NULL) return;
+	for (const struct dm_device* parent = device; parent != NULL; parent = parent->parent)
+		if (parent->removing) return;
 	struct dm_driver* driver = match_driver(server, device, NULL);
 	if (driver == NULL) return;
 	struct dm_driver_binding* binding = calloc(1u, sizeof(*binding));
@@ -690,9 +733,39 @@ void dm_supervisor_catalog_updated(struct device_server* server) {
 	dm_supervisor_reconcile(server);
 }
 
+syscall_status_t dm_supervisor_remove_child(struct device_server* server, struct dm_device* child) {
+	if (child == NULL || child->parent == NULL || child->removing) return SYSCALL_STATUS_BAD_ARGUMENT;
+	child->removing            = true;
+	struct dm_builder* builder = server->state.builders;
+	while (builder != NULL) {
+		struct dm_builder* next = builder->next;
+		if (builder->parent != NULL && in_device_subtree(builder->parent, child)) {
+			(void)cap_unpublish(server->endpoint, builder->object_id);
+			dm_builder_abort(&server->state, builder);
+		}
+		builder = next;
+	}
+	for (struct dm_driver_binding* binding = server->supervisor.bindings; binding != NULL; binding = binding->next) {
+		if (!in_device_subtree(binding->device, child)) continue;
+		if (binding->state == DM_DRIVER_RUNNING || binding->state == DM_DRIVER_STARTING) {
+			binding->state = DM_DRIVER_STOPPING;
+			if (binding->process_cap != CAP_ID_INVALID)
+				(void)process_kill(binding->process_cap, PROCESS_EXIT_SYSTEM_UNKNOWN);
+		}
+		else if (binding->state != DM_DRIVER_STOPPING) {
+			binding->generation++;
+			binding->state = DM_DRIVER_STOPPED;
+		}
+	}
+	finish_teardowns(server);
+	return SYSCALL_STATUS_OK;
+}
+
 bool dm_supervisor_authorize_child(struct device_server* server, const struct dm_device* parent, process_id_t caller,
                                    struct dm_driver_binding** out_binding, uint64_t* out_generation) {
 	if (server == NULL || parent == NULL || out_binding == NULL || out_generation == NULL) return false;
+	for (const struct dm_device* item = parent; item != NULL; item = item->parent)
+		if (item->removing) return false;
 	struct dm_driver_binding* binding = parent->binding;
 	if (binding == NULL || binding->state != DM_DRIVER_RUNNING || binding->process_id != caller) return false;
 	*out_binding    = binding;

@@ -21,6 +21,9 @@ syscall_status_t device_builder_begin_root(cap_id_t root_cap, struct device_buil
 /* Begin a direct-child transaction through a device capability with CAP_MANAGE. */
 syscall_status_t device_builder_begin_child(cap_id_t device_cap, struct device_builder* out_builder);
 
+/* Request asynchronous removal of a direct child by name. */
+syscall_status_t device_remove_child(cap_id_t parent_cap, const char* name, size_t name_size);
+
 /* Set the builder's optional length-delimited UTF-8 diagnostic name. */
 syscall_status_t device_builder_set_name(const struct device_builder* builder, const char* name, size_t name_size);
 

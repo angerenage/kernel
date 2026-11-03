@@ -470,6 +470,31 @@ static bool dispatch_device(struct device_server* server, struct dm_device* devi
 			return reply_status(call, SYSCALL_STATUS_DENIED);
 		return begin_builder(server, call, device, owner, generation);
 	}
+	if (header.op == DEVICE_OBJECT_OP_REMOVE_CHILD) {
+		struct device_object_remove_child_request request;
+		struct dm_driver_binding*                 owner;
+		uint64_t                                  generation;
+		if (!has_rights(call, CAP_MANAGE)) return reply_status(call, SYSCALL_STATUS_DENIED);
+		if (call->request_size < sizeof(request)) return reply_status(call, SYSCALL_STATUS_BAD_ARGUMENT);
+		memcpy(&request, data, sizeof(request));
+		if (request.reserved != 0u || request.name_size == 0u || request.name_size > DEVICE_NAME_MAX ||
+		    !variable_request(call, sizeof(request), request.name_size))
+			return reply_status(call, SYSCALL_STATUS_BAD_ARGUMENT);
+		if (!dm_supervisor_authorize_child(server, device, call->caller, &owner, &generation))
+			return reply_status(call, SYSCALL_STATUS_DENIED);
+		const char*       name  = (const char*)data + sizeof(request);
+		struct dm_device* match = NULL;
+		for (struct dm_device* child = device->first_child; child != NULL; child = child->next_sibling) {
+			if (child->name.size != request.name_size || memcmp(child->name.data, name, request.name_size) != 0)
+				continue;
+			if (child->provider_binding != owner || child->provider_generation != generation)
+				return reply_status(call, SYSCALL_STATUS_DENIED);
+			if (match != NULL) return reply_status(call, SYSCALL_STATUS_BAD_ARGUMENT);
+			match = child;
+		}
+		if (match == NULL) return reply_status(call, SYSCALL_STATUS_UNAVAILABLE);
+		return reply_status(call, dm_supervisor_remove_child(server, match));
+	}
 	if (header.op == DEVICE_OBJECT_OP_ACQUIRE_RESOURCE) return acquire_resource(device, call, data);
 	return dispatch_device_read(device, call, data, header.op);
 }

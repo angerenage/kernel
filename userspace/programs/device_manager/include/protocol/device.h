@@ -101,6 +101,7 @@ enum device_object_op {
 	DEVICE_OBJECT_OP_READ_RESOURCE_NAME,
 	DEVICE_OBJECT_OP_ACQUIRE_RESOURCE,
 	DEVICE_OBJECT_OP_BEGIN_CHILD,
+	DEVICE_OBJECT_OP_REMOVE_CHILD,
 };
 
 /* Common operation header for committed-device requests. */
@@ -111,6 +112,13 @@ struct device_object_request_header {
 /* Request containing only a committed-device operation. */
 struct device_object_simple_request {
 	struct device_object_request_header header;
+};
+
+/* Request to remove a direct child by its unique name. */
+struct device_object_remove_child_request {
+	struct device_object_request_header header;
+	uint32_t                            name_size;
+	uint32_t                            reserved;
 };
 
 /* Request selecting one compatible ID or resource by provider-order index. */

@@ -114,6 +114,21 @@ syscall_status_t device_builder_begin_child(cap_id_t device_cap, struct device_b
 	return begin_builder(device_cap, DEVICE_OBJECT_OP_BEGIN_CHILD, out_builder);
 }
 
+syscall_status_t device_remove_child(cap_id_t parent_cap, const char* name, size_t name_size) {
+	if (parent_cap == CAP_ID_INVALID || name_size == 0u || name_size > DEVICE_NAME_MAX ||
+	    !utf8_valid(name, name_size) ||
+	    name_size > CAP_MAX_REQUEST_SIZE - sizeof(struct device_object_remove_child_request))
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	uint8_t request[sizeof(struct device_object_remove_child_request) + DEVICE_NAME_MAX];
+	struct device_object_remove_child_request header = {
+		.header    = {.op = DEVICE_OBJECT_OP_REMOVE_CHILD},
+		.name_size = (uint32_t)name_size,
+	};
+	memcpy(request, &header, sizeof(header));
+	memcpy(request + sizeof(header), name, name_size);
+	return call_empty(parent_cap, request, sizeof(header) + name_size);
+}
+
 static syscall_status_t builder_string_call(const struct device_builder* builder, uint32_t operation, const char* value,
                                             size_t value_size, size_t header_size) {
 	uint8_t*         request;
