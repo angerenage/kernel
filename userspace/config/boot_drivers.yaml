@@ -21,6 +21,11 @@ drivers:
     compatible_ids:
       - "pci:class:01:06:01"
 
+  xhci:
+    executable: "/boot/xhci_driver.elf"
+    compatible_ids:
+      - "pci:class:0c:03:30"
+
   sata:
     executable: "/boot/sata_driver.elf"
     compatible_ids:

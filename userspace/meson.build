@@ -166,6 +166,7 @@ subdir('programs/acpi_parser')
 subdir('programs/dt_parser')
 subdir('programs/pci_driver')
 subdir('programs/ahci_driver')
+subdir('programs/xhci_driver')
 subdir('programs/sata_driver')
 subdir('programs/partition_driver')
 subdir('programs/fat32_driver')
@@ -216,6 +217,7 @@ userspace_boot_programs = [
 	dt_parser_elf,
 	pci_driver_elf,
 	ahci_driver_elf,
+	xhci_driver_elf,
 	sata_driver_elf,
 	partition_driver_elf,
 	fat32_driver_elf,
