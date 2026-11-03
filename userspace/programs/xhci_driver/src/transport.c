@@ -17,12 +17,12 @@ static bool reply(const struct cap_request* call, const void* data, size_t size,
 	return channel_reply(call->call_id, data, size, status) == SYSCALL_STATUS_OK;
 }
 
-static bool publish_child(struct xhci_transport* t, cap_id_t parent, unsigned port) {
+static bool publish_child(struct xhci_transport* t, unsigned port) {
 	struct device_builder builder = {.capability = CAP_ID_INVALID, .manager_pid = PROCESS_PID_INVALID};
-	char                  name[24];
-	int                   n = snprintf(name, sizeof(name), "usb_port_%u", port);
+	char                  name[48];
+	int n = snprintf(name, sizeof(name), "usb_port_%u_%llu", port, (unsigned long long)t->generation[port - 1u]);
 	if (n < 0 || (size_t)n >= sizeof(name)) return false;
-	syscall_status_t status = device_builder_begin_child(parent, &builder);
+	syscall_status_t status = device_builder_begin_child(t->parent, &builder);
 	if (status == SYSCALL_STATUS_OK) status = device_builder_set_name(&builder, name, (size_t)n);
 	if (status == SYSCALL_STATUS_OK)
 		status = device_builder_add_compatible(&builder, USB_COMPATIBLE_DEVICE, sizeof(USB_COMPATIBLE_DEVICE) - 1u);
@@ -50,12 +50,13 @@ bool xhci_transport_init(struct xhci_transport* t, struct xhci_controller* c, ca
 	if (channel_create(&t->channel, &t->activity) != SYSCALL_STATUS_OK) return false;
 	for (unsigned i = 0u; i < c->ports; i++) {
 		if (c->devices[i] == NULL) continue;
-		if (cap_publish(t->channel, i + 1u, t->pid, USB_TRANSPORT_RIGHTS | CAP_DELEGATE, &t->providers[i]) !=
-		        SYSCALL_STATUS_OK ||
-		    !publish_child(t, parent, i + 1u))
-			return false;
-		t->published[i]  = true;
 		t->generation[i] = c->port_generation[i];
+		t->object_ids[i] = ++t->next_object_id;
+		if (cap_publish(t->channel, t->object_ids[i], t->pid, USB_TRANSPORT_RIGHTS | CAP_DELEGATE, &t->providers[i]) !=
+		        SYSCALL_STATUS_OK ||
+		    !publish_child(t, i + 1u))
+			return false;
+		t->published[i] = true;
 	}
 	return true;
 }
@@ -63,15 +64,25 @@ bool xhci_transport_init(struct xhci_transport* t, struct xhci_controller* c, ca
 bool xhci_transport_poll(struct xhci_transport* t) {
 	for (unsigned i = 0u; i < t->controller->ports; i++) {
 		if (t->published[i] &&
-		    (t->controller->devices[i] == NULL || t->generation[i] != t->controller->port_generation[i]))
-			return false;
-		if (!t->published[i] && t->controller->devices[i] != NULL) {
-			if (cap_publish(t->channel, i + 1u, t->pid, USB_TRANSPORT_RIGHTS | CAP_DELEGATE, &t->providers[i]) !=
-			        SYSCALL_STATUS_OK ||
-			    !publish_child(t, t->parent, i + 1u))
+		    (t->controller->devices[i] == NULL || t->generation[i] != t->controller->port_generation[i])) {
+			char name[48];
+			int  n = snprintf(name, sizeof(name), "usb_port_%u_%llu", i + 1u, (unsigned long long)t->generation[i]);
+			if (n < 0 || (size_t)n >= sizeof(name) ||
+			    device_remove_child(t->parent, name, (size_t)n) != SYSCALL_STATUS_OK ||
+			    cap_unpublish(t->channel, t->object_ids[i]) != SYSCALL_STATUS_OK)
 				return false;
-			t->published[i]  = true;
+			t->providers[i] = CAP_ID_INVALID;
+			t->published[i] = false;
+		}
+		if (!t->published[i] && t->controller->devices[i] != NULL) {
 			t->generation[i] = t->controller->port_generation[i];
+			t->object_ids[i] = ++t->next_object_id;
+			if (cap_publish(
+					t->channel, t->object_ids[i], t->pid, USB_TRANSPORT_RIGHTS | CAP_DELEGATE, &t->providers[i]) !=
+			        SYSCALL_STATUS_OK ||
+			    !publish_child(t, i + 1u))
+				return false;
+			t->published[i] = true;
 		}
 	}
 	for (;;) {
@@ -80,12 +91,16 @@ bool xhci_transport_poll(struct xhci_transport* t) {
 		if (channel_recv(t->channel, &call, request_buffer, sizeof(request_buffer), &received) != SYSCALL_STATUS_OK)
 			return false;
 		if (!received) break;
-		if (call.object_id == 0u || call.object_id > t->controller->ports || !t->published[call.object_id - 1u] ||
-		    (call.rights & CAP_CALL) == 0u || call.request_size < sizeof(struct usb_transport_header)) {
+		unsigned port = 0u;
+		for (unsigned i = 0u; i < t->controller->ports; i++)
+			if (t->published[i] && t->object_ids[i] == call.object_id) {
+				port = i + 1u;
+				break;
+			}
+		if (port == 0u || (call.rights & CAP_CALL) == 0u || call.request_size < sizeof(struct usb_transport_header)) {
 			if (!reply(&call, NULL, 0u, SYSCALL_STATUS_DENIED)) return false;
 			continue;
 		}
-		unsigned                    port = (unsigned)call.object_id;
 		struct usb_transport_header header;
 		memcpy(&header, request_buffer, sizeof(header));
 		if (header.op == USB_TRANSPORT_OP_INFO) {
@@ -143,7 +158,7 @@ bool xhci_transport_poll(struct xhci_transport* t) {
 void xhci_transport_release(struct xhci_transport* t) {
 	if (t->channel != CHANNEL_ID_INVALID) {
 		for (unsigned i = 0u; i < t->controller->ports; i++)
-			if (t->providers[i] != CAP_ID_INVALID) (void)cap_unpublish(t->channel, i + 1u);
+			if (t->providers[i] != CAP_ID_INVALID) (void)cap_unpublish(t->channel, t->object_ids[i]);
 		(void)channel_destroy(t->channel);
 	}
 	if (t->activity != CAP_ID_INVALID) (void)cap_drop(t->activity);

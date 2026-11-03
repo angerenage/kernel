@@ -16,12 +16,14 @@ struct xhci_transport {
 	cap_id_t                providers[255];
 	bool                    published[255];
 	uint64_t                generation[255];
+	uint64_t                object_ids[255];
+	uint64_t                next_object_id;
 };
 
 /* Publish one transport resource for each enumerated USB child. */
 bool xhci_transport_init(struct xhci_transport* transport, struct xhci_controller* controller, cap_id_t parent);
 
-/* Process child transport requests and detect removed children. */
+/* Process child requests and remove disconnected devices. */
 bool xhci_transport_poll(struct xhci_transport* transport);
 
 /* Release transport capabilities and its channel. */
