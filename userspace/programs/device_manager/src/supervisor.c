@@ -219,8 +219,8 @@ static bool spawn_worker(struct device_server* server, uintptr_t entry, const vo
 
 static void binding_schedule_retry(struct device_server* server, struct dm_driver_binding* binding) {
 	if (binding->restart_count >= DM_DRIVER_RESTART_LIMIT) {
-		binding->state = DM_DRIVER_QUARANTINED;
-		printf("device-manager: quarantined %.*s for device %llu after %u failures\n",
+		binding->state = DM_DRIVER_WAITING_FOR_FALLBACK;
+		printf("device-manager: rejecting %.*s for device %llu after %u restarts\n",
 		       (int)binding->driver->name.size,
 		       binding->driver->name.data,
 		       (unsigned long long)binding->device->id,
@@ -257,7 +257,7 @@ static void binding_launch(struct device_server* server, struct dm_driver_bindin
 	status               = open_executable(binding->driver);
 	if (status == SYSCALL_STATUS_UNAVAILABLE) {
 		binding->last_wait_status = status;
-		binding->state            = DM_DRIVER_QUARANTINED;
+		binding->state            = DM_DRIVER_WAITING_FOR_FALLBACK;
 		printf("device-manager: driver executable unavailable for %.*s on device %llu\n",
 		       (int)binding->driver->name.size,
 		       binding->driver->name.data,
@@ -356,33 +356,36 @@ failed:
 }
 
 static void binding_try_fallback(struct device_server* server, struct dm_driver_binding* binding) {
-	if (!binding_reject_driver(binding)) {
-		binding->state = DM_DRIVER_QUARANTINED;
-		printf("device-manager: unable to record rejected driver for device %llu\n",
-		       (unsigned long long)binding->device->id);
-		return;
+	for (;;) {
+		if (!binding_reject_driver(binding)) {
+			binding->state = DM_DRIVER_QUARANTINED;
+			printf("device-manager: unable to record rejected driver for device %llu\n",
+			       (unsigned long long)binding->device->id);
+			return;
+		}
+		struct dm_driver* next = match_driver(server, binding->device, binding);
+		if (next == NULL) {
+			binding->state = DM_DRIVER_UNSUPPORTED;
+			RUNTIME_DEBUG_LOG("device-manager: no remaining driver supports device %llu\n",
+			                  (unsigned long long)binding->device->id);
+			return;
+		}
+		RUNTIME_DEBUG_LOG("device-manager: trying %.*s for device %llu after rejecting %.*s\n",
+		                  (int)next->name.size,
+		                  next->name.data,
+		                  (unsigned long long)binding->device->id,
+		                  (int)binding->driver->name.size,
+		                  binding->driver->name.data);
+		binding->driver        = next;
+		binding->restart_count = 0u;
+		binding->state         = DM_DRIVER_UNBOUND;
+		free(binding->stdout_log.data);
+		free(binding->stderr_log.data);
+		binding->stdout_log = (struct dm_driver_log){0};
+		binding->stderr_log = (struct dm_driver_log){0};
+		binding_launch(server, binding);
+		if (binding->state != DM_DRIVER_WAITING_FOR_FALLBACK) return;
 	}
-	struct dm_driver* next = match_driver(server, binding->device, binding);
-	if (next == NULL) {
-		binding->state = DM_DRIVER_UNSUPPORTED;
-		RUNTIME_DEBUG_LOG("device-manager: no remaining driver supports device %llu\n",
-		                  (unsigned long long)binding->device->id);
-		return;
-	}
-	RUNTIME_DEBUG_LOG("device-manager: trying %.*s for device %llu after %.*s declined it\n",
-	                  (int)next->name.size,
-	                  next->name.data,
-	                  (unsigned long long)binding->device->id,
-	                  (int)binding->driver->name.size,
-	                  binding->driver->name.data);
-	binding->driver        = next;
-	binding->restart_count = 0u;
-	binding->state         = DM_DRIVER_UNBOUND;
-	free(binding->stdout_log.data);
-	free(binding->stderr_log.data);
-	binding->stdout_log = (struct dm_driver_log){0};
-	binding->stderr_log = (struct dm_driver_log){0};
-	binding_launch(server, binding);
 }
 
 static bool in_generation_subtree(const struct dm_device* device, const struct dm_driver_binding* owner,
@@ -486,8 +489,11 @@ static void finish_teardowns(struct device_server* server) {
 		bool fallback = owner->state == DM_DRIVER_WAITING_FOR_FALLBACK;
 		remove_descendant_bindings(server, owner, owner->generation);
 		remove_generation_devices(server, owner, owner->generation);
+		if (!fallback) {
+			binding_schedule_retry(server, owner);
+			fallback = owner->state == DM_DRIVER_WAITING_FOR_FALLBACK;
+		}
 		if (fallback) binding_try_fallback(server, owner);
-		else binding_schedule_retry(server, owner);
 	}
 }
 
@@ -536,7 +542,10 @@ static bool dispatch_control(struct device_server* server, const struct cap_requ
 		binding_exited(server, binding, (syscall_status_t)request.wait_status, (uintptr_t)request.exit_code);
 	}
 	else if (request.op == DM_SUPERVISOR_OP_RETRY_READY) {
-		if (binding->state == DM_DRIVER_BACKOFF) binding_launch(server, binding);
+		if (binding->state == DM_DRIVER_BACKOFF) {
+			binding_launch(server, binding);
+			if (binding->state == DM_DRIVER_WAITING_FOR_FALLBACK) finish_teardowns(server);
+		}
 	}
 	else return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	return reply(call, NULL, 0u, SYSCALL_STATUS_OK);
@@ -653,6 +662,7 @@ void dm_supervisor_device_committed(struct device_server* server, struct dm_devi
 	server->supervisor.bindings = binding;
 	device->binding             = binding;
 	binding_launch(server, binding);
+	if (binding->state == DM_DRIVER_WAITING_FOR_FALLBACK) finish_teardowns(server);
 }
 
 void dm_supervisor_reconcile(struct device_server* server) {
@@ -675,6 +685,7 @@ void dm_supervisor_catalog_updated(struct device_server* server) {
 		binding->stdout_log = (struct dm_driver_log){0};
 		binding->stderr_log = (struct dm_driver_log){0};
 		binding_launch(server, binding);
+		if (binding->state == DM_DRIVER_WAITING_FOR_FALLBACK) finish_teardowns(server);
 	}
 	dm_supervisor_reconcile(server);
 }
