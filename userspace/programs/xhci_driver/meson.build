@@ -1,6 +1,9 @@
 xhci_driver_sources = files(
 	'src/main.c',
 	'src/xhci.c',
+	'src/controller.c',
+	'src/dma.c',
+	'src/ring.c',
 )
 
 xhci_driver_elf = executable('xhci_driver.elf',

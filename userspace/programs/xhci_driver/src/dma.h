@@ -1,0 +1,40 @@
+#pragma once
+
+#include <base/cap.h>
+#include <base/memory.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+/* Translated or direct DMA context exclusively bound to one XHCI PCI function. */
+struct xhci_dma_context {
+	cap_id_t source_cap;
+	cap_id_t memory_allocator_cap;
+	cap_id_t device_space_cap;
+	cap_id_t binding_cap;
+	cap_id_t process_space_cap;
+	size_t   mapping_granule;
+};
+
+/* One allocation projected into both CPU and device address spaces. */
+struct xhci_dma_buffer {
+	cap_id_t  memory_cap;
+	cap_id_t  cpu_mapping_cap;
+	cap_id_t  device_mapping_cap;
+	void*     cpu_address;
+	uintptr_t device_address;
+	size_t    size;
+};
+
+/* Acquire the device's DMA source and allocator, then bind a fresh device address space. */
+bool xhci_dma_initialize(cap_id_t device_cap, struct xhci_dma_context* out_context);
+
+/* Allocate zeroed DMA memory visible to both the driver and controller. */
+bool xhci_dma_buffer_allocate(const struct xhci_dma_context* context, size_t size, memory_access_t device_access,
+                              struct xhci_dma_buffer* out_buffer);
+
+/* Destroy the allocation and both of its projections. */
+void xhci_dma_buffer_release(struct xhci_dma_buffer* buffer);
+
+/* Unbind and release a DMA context after all buffers have been released. */
+void xhci_dma_deinitialize(struct xhci_dma_context* context);

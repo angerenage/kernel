@@ -13,6 +13,8 @@
 #include <system/process.h>
 #include <system/time.h>
 
+#include "controller.h"
+
 /* xHCI specification, capability / operational register layout. */
 #define XHCI_CLASS 0x0cu
 #define XHCI_SUBCLASS 0x03u
@@ -102,7 +104,7 @@ fail:
 	return false;
 }
 
-static bool probe_controller(const struct xhci_mapping* m) {
+static bool probe_controller(const struct xhci_mapping* m, struct xhci_controller* controller) {
 	if (!contains(m->bar_size, XHCI_RTSOFF, sizeof(uint32_t))) return false;
 	uint32_t cap_header = read32(m, XHCI_CAPLENGTH);
 	uint8_t  caplength  = (uint8_t)(cap_header & 0xffu);
@@ -158,7 +160,34 @@ static bool probe_controller(const struct xhci_mapping* m) {
 			       (unsigned)((portsc & XHCI_PORTSC_PP) != 0u),
 			       (unsigned)((portsc >> XHCI_PORTSC_SPEED_SHIFT) & XHCI_PORTSC_SPEED_MASK));
 	}
-	printf("xhci: connected ports=%u/%u (read-only probe)\n", connected, ports);
+	printf("xhci: connected ports=%u/%u (initial probe)\n", connected, ports);
+	if (!contains(m->bar_size, (size_t)rtsoff + 0x20u, 0x20u) || !contains(m->bar_size, dboff, 4u) ||
+	    interrupters == 0u)
+		return false;
+	*controller = (struct xhci_controller){
+		.mmio     = m->registers,
+		.size     = m->bar_size,
+		.op       = caplength,
+		.runtime  = rtsoff,
+		.doorbell = dboff,
+		.slots    = (uint8_t)slots,
+		.addr64   = (hcc1 & 1u) != 0u,
+		.dma      = {.source_cap           = CAP_ID_INVALID,
+		             .memory_allocator_cap = CAP_ID_INVALID,
+		             .device_space_cap     = CAP_ID_INVALID,
+		             .binding_cap          = CAP_ID_INVALID,
+		             .process_space_cap    = CAP_ID_INVALID},
+		.dcbaa    = {.memory_cap         = CAP_ID_INVALID,
+		             .cpu_mapping_cap    = CAP_ID_INVALID,
+		             .device_mapping_cap = CAP_ID_INVALID},
+		.erst = {.memory_cap = CAP_ID_INVALID, .cpu_mapping_cap = CAP_ID_INVALID, .device_mapping_cap = CAP_ID_INVALID},
+		.commands = {.dma = {.memory_cap         = CAP_ID_INVALID,
+		                     .cpu_mapping_cap    = CAP_ID_INVALID,
+		                     .device_mapping_cap = CAP_ID_INVALID}},
+		.events   = {.dma = {.memory_cap         = CAP_ID_INVALID,
+		                     .cpu_mapping_cap    = CAP_ID_INVALID,
+		                     .device_mapping_cap = CAP_ID_INVALID}},
+	};
 	return true;
 }
 
@@ -191,14 +220,21 @@ enum device_driver_result xhci_driver_run(cap_id_t device_cap) {
 		fprintf(stderr, "xhci: unable to map BAR0\n");
 		return DEVICE_DRIVER_ERROR;
 	}
-	bool ok = probe_controller(&mapping);
+	struct xhci_controller controller;
+	bool                   ok = probe_controller(&mapping, &controller);
 	if (!ok) {
 		release_mapping(&mapping);
 		return DEVICE_DRIVER_ERROR;
 	}
 
+	if (!xhci_controller_start(&controller, device_cap)) {
+		xhci_controller_stop(&controller);
+		release_mapping(&mapping);
+		return DEVICE_DRIVER_ERROR;
+	}
 	for (;;) {
-		if (sleep_ms(1000u) != SYSCALL_STATUS_OK) {
+		if (!xhci_controller_poll(&controller) || sleep_ms(10u) != SYSCALL_STATUS_OK) {
+			xhci_controller_stop(&controller);
 			release_mapping(&mapping);
 			return DEVICE_DRIVER_ERROR;
 		}
