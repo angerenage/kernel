@@ -7,6 +7,7 @@
 #include <system/memory.h>
 #include <system/time.h>
 
+#include "device.h"
 #include "registers.h"
 
 #define XHCI_TIMEOUT_MS 2000u
@@ -180,6 +181,7 @@ bool xhci_controller_poll(struct xhci_controller* c) {
 }
 
 void xhci_controller_stop(struct xhci_controller* c) {
+	if (c->owned) xhci_device_release_all(c);
 	if (c->owned && c->mmio != NULL && in_bar(c, (size_t)c->op + XHCI_OP_USBCMD, 4u)) {
 		wr(c, (size_t)c->op + XHCI_OP_USBCMD, reg(c, (size_t)c->op + XHCI_OP_USBCMD) & ~XHCI_CMD_RS);
 		(void)wait_bits(c, (size_t)c->op + XHCI_OP_USBSTS, XHCI_STS_HCH, XHCI_STS_HCH, XHCI_TIMEOUT_MS);

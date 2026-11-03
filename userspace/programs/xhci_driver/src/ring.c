@@ -38,14 +38,25 @@ void xhci_ring_release(struct xhci_ring* ring) {
 	xhci_dma_buffer_release(&ring->dma);
 }
 
-bool xhci_ring_noop(struct xhci_ring* ring, uint64_t* trb_address) {
-	if (ring->enqueue >= XHCI_RING_TRBS - 1u) return false; /* one command in flight */
+bool xhci_ring_submit(struct xhci_ring* ring, struct xhci_trb trb, uint64_t* trb_address) {
+	if (ring == NULL || ring->dma.cpu_address == NULL || trb_address == NULL || ring->enqueue >= XHCI_RING_TRBS - 1u)
+		return false;
 	struct xhci_trb* trbs  = ring->dma.cpu_address;
 	uint16_t         index = ring->enqueue;
 	*trb_address           = (uint64_t)ring->dma.device_address + (uint64_t)index * sizeof(*trbs);
-	trbs[index] = (struct xhci_trb){.control = (XHCI_TRB_NOOP_CMD << XHCI_TRB_TYPE_SHIFT) | ring->producer_cycle};
-	ring->enqueue++;
+	trb.control            = (trb.control & ~XHCI_TRB_CYCLE) | ring->producer_cycle;
+	trbs[index]            = trb;
+	if (++ring->enqueue == XHCI_RING_TRBS - 1u) {
+		/* Link TRB toggles the consumer cycle on the next traversal. */
+		trbs[XHCI_RING_TRBS - 1u].control = (XHCI_TRB_LINK << XHCI_TRB_TYPE_SHIFT) | (1u << 1u) | ring->producer_cycle;
+		ring->enqueue                     = 0u;
+		ring->producer_cycle ^= 1u;
+	}
 	return mapping_sync(ring->dma.device_mapping_cap, 0u, ring->dma.size, DMA_SYNC_FOR_DEVICE) == SYSCALL_STATUS_OK;
+}
+
+bool xhci_ring_noop(struct xhci_ring* ring, uint64_t* trb_address) {
+	return xhci_ring_submit(ring, (struct xhci_trb){.control = XHCI_TRB_NOOP_CMD << XHCI_TRB_TYPE_SHIFT}, trb_address);
 }
 
 bool xhci_ring_event(struct xhci_ring* ring, struct xhci_trb* event) {

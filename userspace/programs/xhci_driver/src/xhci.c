@@ -14,6 +14,7 @@
 #include <system/time.h>
 
 #include "controller.h"
+#include "device.h"
 
 /* xHCI specification, capability / operational register layout. */
 #define XHCI_CLASS 0x0cu
@@ -165,21 +166,23 @@ static bool probe_controller(const struct xhci_mapping* m, struct xhci_controlle
 	    interrupters == 0u)
 		return false;
 	*controller = (struct xhci_controller){
-		.mmio     = m->registers,
-		.size     = m->bar_size,
-		.op       = caplength,
-		.runtime  = rtsoff,
-		.doorbell = dboff,
-		.slots    = (uint8_t)slots,
-		.addr64   = (hcc1 & 1u) != 0u,
-		.dma      = {.source_cap           = CAP_ID_INVALID,
-		             .memory_allocator_cap = CAP_ID_INVALID,
-		             .device_space_cap     = CAP_ID_INVALID,
-		             .binding_cap          = CAP_ID_INVALID,
-		             .process_space_cap    = CAP_ID_INVALID},
-		.dcbaa    = {.memory_cap         = CAP_ID_INVALID,
-		             .cpu_mapping_cap    = CAP_ID_INVALID,
-		             .device_mapping_cap = CAP_ID_INVALID},
+		.mmio         = m->registers,
+		.size         = m->bar_size,
+		.op           = caplength,
+		.runtime      = rtsoff,
+		.doorbell     = dboff,
+		.slots        = (uint8_t)slots,
+		.ports        = (uint8_t)ports,
+		.context_size = (hcc1 & (1u << 2u)) != 0u ? 64u : 32u,
+		.addr64       = (hcc1 & 1u) != 0u,
+		.dma          = {.source_cap           = CAP_ID_INVALID,
+		                 .memory_allocator_cap = CAP_ID_INVALID,
+		                 .device_space_cap     = CAP_ID_INVALID,
+		                 .binding_cap          = CAP_ID_INVALID,
+		                 .process_space_cap    = CAP_ID_INVALID},
+		.dcbaa        = {.memory_cap         = CAP_ID_INVALID,
+		                 .cpu_mapping_cap    = CAP_ID_INVALID,
+		                 .device_mapping_cap = CAP_ID_INVALID},
 		.erst = {.memory_cap = CAP_ID_INVALID, .cpu_mapping_cap = CAP_ID_INVALID, .device_mapping_cap = CAP_ID_INVALID},
 		.commands = {.dma = {.memory_cap         = CAP_ID_INVALID,
 		                     .cpu_mapping_cap    = CAP_ID_INVALID,
@@ -232,8 +235,14 @@ enum device_driver_result xhci_driver_run(cap_id_t device_cap) {
 		release_mapping(&mapping);
 		return DEVICE_DRIVER_ERROR;
 	}
+	if (!xhci_device_poll(&controller)) {
+		xhci_controller_stop(&controller);
+		release_mapping(&mapping);
+		return DEVICE_DRIVER_ERROR;
+	}
 	for (;;) {
-		if (!xhci_controller_poll(&controller) || sleep_ms(10u) != SYSCALL_STATUS_OK) {
+		if (!xhci_controller_poll(&controller) || !xhci_device_poll(&controller) ||
+		    sleep_ms(10u) != SYSCALL_STATUS_OK) {
 			xhci_controller_stop(&controller);
 			release_mapping(&mapping);
 			return DEVICE_DRIVER_ERROR;

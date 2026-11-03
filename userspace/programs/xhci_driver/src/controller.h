@@ -6,6 +6,8 @@
 #include "dma.h"
 #include "ring.h"
 
+struct xhci_device;
+
 struct xhci_controller {
 	volatile uint8_t*       mmio;
 	size_t                  size;
@@ -13,6 +15,8 @@ struct xhci_controller {
 	uint32_t                runtime;
 	uint32_t                doorbell;
 	uint8_t                 slots;
+	uint8_t                 ports;
+	uint8_t                 context_size;
 	bool                    addr64;
 	bool                    owned;
 	struct xhci_dma_context dma;
@@ -20,6 +24,9 @@ struct xhci_controller {
 	struct xhci_dma_buffer  erst;
 	struct xhci_ring        commands;
 	struct xhci_ring        events;
+	struct xhci_device*     devices[255];
+	bool                    port_seen[255];
+	uint16_t                port_retry_ticks[255];
 };
 
 /* Probe the controller and fill in the controller structure. */

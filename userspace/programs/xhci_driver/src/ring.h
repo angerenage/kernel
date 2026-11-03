@@ -32,5 +32,8 @@ void xhci_ring_release(struct xhci_ring* ring);
 /* Enqueue a no-op TRB and return its device address. */
 bool xhci_ring_noop(struct xhci_ring* ring, uint64_t* trb_address);
 
+/* Submit a TRB to a producer ring, including link TRB cycle transitions. */
+bool xhci_ring_submit(struct xhci_ring* ring, struct xhci_trb trb, uint64_t* trb_address);
+
 /* Dequeue an event TRB from the ring, if available. */
 bool xhci_ring_event(struct xhci_ring* ring, struct xhci_trb* event);

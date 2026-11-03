@@ -2,6 +2,7 @@ xhci_driver_sources = files(
 	'src/main.c',
 	'src/xhci.c',
 	'src/controller.c',
+	'src/device.c',
 	'src/dma.c',
 	'src/ring.c',
 )
