@@ -23,6 +23,9 @@
 #define XHCI_TRB_ENABLE_SLOT 9u
 #define XHCI_TRB_DISABLE_SLOT 10u
 #define XHCI_TRB_ADDRESS_DEVICE 11u
+#define XHCI_TRB_CONFIGURE_ENDPOINT 12u
+#define XHCI_TRB_NORMAL 1u
+#define XHCI_TRB_SHORT_PACKET 13u
 #define XHCI_TRB_SETUP_STAGE 2u
 #define XHCI_TRB_DATA_STAGE 3u
 #define XHCI_TRB_STATUS_STAGE 4u
@@ -32,6 +35,7 @@
 #define XHCI_TRB_IDT (1u << 6u)
 #define XHCI_TRB_DIR_IN (1u << 16u)
 #define XHCI_TRB_TRT_IN (3u << 16u)
+#define XHCI_ENDPOINT_BUFFER_SIZE 4096u
 #define XHCI_USB_DESCRIPTOR_DEVICE 1u
 #define XHCI_DESCRIPTOR_LENGTH 18u
 #define XHCI_USB_DESCRIPTOR_CONFIGURATION 2u
@@ -41,6 +45,16 @@
 #define XHCI_CONFIGURATION_MAX_LENGTH 4096u
 #define XHCI_MAX_ENDPOINT_DESCRIPTORS 30u
 
+struct xhci_endpoint {
+	struct xhci_ring       ring;
+	struct xhci_dma_buffer buffer;
+	uint8_t                address;
+	uint8_t                attributes;
+	uint8_t                interval;
+	uint16_t               max_packet_size;
+	bool                   configured;
+};
+
 struct xhci_device {
 	struct xhci_dma_buffer input;
 	struct xhci_dma_buffer output;
@@ -49,12 +63,7 @@ struct xhci_device {
 	uint8_t                slot;
 	uint8_t                configuration;
 	uint8_t                endpoint_count;
-	struct {
-		uint8_t  address;
-		uint8_t  attributes;
-		uint16_t max_packet_size;
-		uint8_t  interval;
-	} endpoints[XHCI_MAX_ENDPOINT_DESCRIPTORS];
+	struct xhci_endpoint   endpoints[XHCI_MAX_ENDPOINT_DESCRIPTORS];
 };
 
 static uint32_t read_reg(const struct xhci_controller* c, size_t offset) {
@@ -86,7 +95,7 @@ static bool allocate_dma(struct xhci_controller* c, struct xhci_dma_buffer* buff
 
 /* One event consumer, shared by command and transfer completion waits. */
 static bool wait_event(struct xhci_controller* c, uint32_t expected_type, uint64_t expected_pointer,
-                       struct xhci_trb* completion) {
+                       struct xhci_trb* completion, bool allow_short) {
 	for (unsigned elapsed = 0u; elapsed < XHCI_DEVICE_TIMEOUT_MS; elapsed++) {
 		struct xhci_trb event;
 		if (xhci_ring_event(&c->events, &event)) {
@@ -99,8 +108,9 @@ static bool wait_event(struct xhci_controller* c, uint32_t expected_type, uint64
 				((uint64_t)c->events.dma.device_address + (uint64_t)c->events.dequeue * sizeof(struct xhci_trb)) | 8u);
 			if (type == expected_type && ptr == expected_pointer) {
 				*completion = event;
-				if (code != XHCI_TRB_SUCCESS) fprintf(stderr, "xhci: completion error type=%u code=%u\n", type, code);
-				return code == XHCI_TRB_SUCCESS;
+				if (code != XHCI_TRB_SUCCESS && !(allow_short && code == XHCI_TRB_SHORT_PACKET))
+					fprintf(stderr, "xhci: completion error type=%u code=%u\n", type, code);
+				return code == XHCI_TRB_SUCCESS || (allow_short && code == XHCI_TRB_SHORT_PACKET);
 			}
 			if (type != XHCI_TRB_PORT_STATUS)
 				printf("xhci: ignored event type=%u code=%u ptr=%llx\n", type, code, (unsigned long long)ptr);
@@ -116,7 +126,7 @@ static bool command(struct xhci_controller* c, struct xhci_trb trb, struct xhci_
 	uint64_t address;
 	if (!xhci_ring_submit(&c->commands, trb, &address)) return false;
 	write_reg(c, c->doorbell, 0u);
-	return wait_event(c, XHCI_TRB_COMMAND_COMPLETION, address, completion);
+	return wait_event(c, XHCI_TRB_COMMAND_COMPLETION, address, completion, false);
 }
 
 static bool reset_port(struct xhci_controller* c, unsigned port, uint32_t* out_speed) {
@@ -155,6 +165,10 @@ static void release_device(struct xhci_controller* c, struct xhci_device* device
 		((uint64_t*)c->dcbaa.cpu_address)[device->slot] = 0u;
 		(void)sync_dma(&c->dcbaa, DMA_SYNC_FOR_DEVICE);
 	}
+	for (unsigned i = 0u; i < device->endpoint_count; i++) {
+		xhci_ring_release(&device->endpoints[i].ring);
+		xhci_dma_buffer_release(&device->endpoints[i].buffer);
+	}
 	xhci_ring_release(&device->endpoint_zero);
 	xhci_dma_buffer_release(&device->descriptor);
 	xhci_dma_buffer_release(&device->output);
@@ -186,7 +200,7 @@ static bool read_descriptor(struct xhci_controller* c, struct xhci_device* devic
 	};
 	if (!xhci_ring_submit(&device->endpoint_zero, status, &address)) return false;
 	write_reg(c, (size_t)c->doorbell + (size_t)device->slot * 4u, 1u);
-	if (!wait_event(c, XHCI_TRB_TRANSFER_EVENT, address, &completion) ||
+	if (!wait_event(c, XHCI_TRB_TRANSFER_EVENT, address, &completion, false) ||
 	    !sync_dma(&device->descriptor, DMA_SYNC_FOR_CPU))
 		return false;
 	memcpy(result, device->descriptor.cpu_address, length);
@@ -225,20 +239,136 @@ static bool discover_endpoints(struct xhci_controller* c, struct xhci_device* de
 		}
 		offset += size;
 	}
-	printf("xhci: configuration %u, bulk/interrupt endpoints=%u (discovery only)\n",
-	       device->configuration,
-	       device->endpoint_count);
-	for (unsigned index = 0u; index < device->endpoint_count; index++) {
-		printf("xhci: endpoint %02x %s max-packet=%u interval=%u\n",
-		       device->endpoints[index].address,
-		       device->endpoints[index].attributes == 2u ? "bulk" : "interrupt",
-		       device->endpoints[index].max_packet_size,
-		       device->endpoints[index].interval);
-	}
 	success = true;
 done:
 	free(descriptors);
 	return success;
+}
+
+/* Endpoint IDs are xHCI Device Context Indices (DCI), not USB addresses. */
+static unsigned endpoint_dci(uint8_t address) {
+	return 2u * (address & 15u) + ((address & 0x80u) != 0u);
+}
+
+/* Synchronous endpoint transfer. The caller must serialize requests on this ring. */
+bool xhci_device_transfer(struct xhci_controller* c, unsigned port, uint8_t address, void* data, size_t length,
+                          size_t* transferred) {
+	if (c == NULL || port == 0u || port > c->ports) return false;
+	struct xhci_device* device = c->devices[port - 1u];
+	if (device == NULL) return false;
+	struct xhci_endpoint* ep = NULL;
+	for (unsigned i = 0u; i < device->endpoint_count; i++) {
+		if (device->endpoints[i].address == address) {
+			ep = &device->endpoints[i];
+			break;
+		}
+	}
+	if (ep == NULL) return false;
+	if (!ep->configured || length > ep->buffer.size || (length != 0u && data == NULL)) return false;
+	bool in = (ep->address & 0x80u) != 0u;
+	if (!in) {
+		if (length != 0u) memcpy(ep->buffer.cpu_address, data, length);
+		if (!sync_dma(&ep->buffer, DMA_SYNC_FOR_DEVICE)) return false;
+	}
+	uint64_t        trb_address;
+	struct xhci_trb trb = {
+		.parameter_low  = (uint32_t)ep->buffer.device_address,
+		.parameter_high = (uint32_t)((uint64_t)ep->buffer.device_address >> 32u),
+		.status         = (uint32_t)length,
+		.control        = (XHCI_TRB_NORMAL << XHCI_TRB_TYPE_SHIFT) | XHCI_TRB_IOC | (in ? (1u << 2u) : 0u),
+	};
+	if (!xhci_ring_submit(&ep->ring, trb, &trb_address)) return false;
+	write_reg(c, (size_t)c->doorbell + (size_t)device->slot * 4u, endpoint_dci(ep->address));
+	struct xhci_trb completion;
+	if (!wait_event(c, XHCI_TRB_TRANSFER_EVENT, trb_address, &completion, true)) {
+		ep->configured = false; /* Do not reuse a ring with an unresolved transfer. */
+		return false;
+	}
+	size_t residual = completion.status & 0xffffffu;
+	if (residual > length) return false;
+	if (transferred != NULL) *transferred = length - residual;
+	if (in && !sync_dma(&ep->buffer, DMA_SYNC_FOR_CPU)) return false;
+	if (in && length > residual) memcpy(data, ep->buffer.cpu_address, length - residual);
+	return true;
+}
+
+static bool set_configuration(struct xhci_controller* c, struct xhci_device* device) {
+	uint64_t        address;
+	struct xhci_trb completion;
+	struct xhci_trb setup = {
+		.parameter_low = 0x00000900u | ((uint32_t)device->configuration << 16u),
+		.status        = 8u,
+		.control       = (XHCI_TRB_SETUP_STAGE << XHCI_TRB_TYPE_SHIFT) | XHCI_TRB_IDT,
+	};
+	if (!xhci_ring_submit(&device->endpoint_zero, setup, &address)) return false;
+	struct xhci_trb status = {
+		.control = (XHCI_TRB_STATUS_STAGE << XHCI_TRB_TYPE_SHIFT) | XHCI_TRB_DIR_IN | XHCI_TRB_IOC,
+	};
+	if (!xhci_ring_submit(&device->endpoint_zero, status, &address)) return false;
+	write_reg(c, (size_t)c->doorbell + (size_t)device->slot * 4u, 1u);
+	return wait_event(c, XHCI_TRB_TRANSFER_EVENT, address, &completion, false);
+}
+
+static bool configure_endpoints(struct xhci_controller* c, struct xhci_device* device, uint32_t speed) {
+	if (device->endpoint_count == 0u) return set_configuration(c, device);
+	if (!sync_dma(&device->output, DMA_SYNC_FOR_CPU)) return false;
+	memset(device->input.cpu_address, 0, device->input.size);
+	uint8_t* input  = device->input.cpu_address;
+	uint8_t* output = device->output.cpu_address;
+	memcpy(input + c->context_size, output, c->context_size * 2u);
+	uint32_t* control = (uint32_t*)input;
+	uint32_t* slot    = (uint32_t*)(input + c->context_size);
+	control[1]        = 1u;
+	unsigned highest  = 1u;
+	for (unsigned i = 0u; i < device->endpoint_count; i++) {
+		struct xhci_endpoint* ep     = &device->endpoints[i];
+		unsigned              dci    = endpoint_dci(ep->address);
+		unsigned              number = ep->address & 15u;
+		unsigned              packet = ep->max_packet_size & 0x7ffu;
+		if (number == 0u || dci > 31u || packet == 0u || (ep->address & 0x70u) != 0u) return false;
+		if (!xhci_ring_allocate(&c->dma, &ep->ring, true) ||
+		    !allocate_dma(c, &ep->buffer, XHCI_ENDPOINT_BUFFER_SIZE, 64u))
+			return false;
+		unsigned type = ep->attributes == 2u ? 2u : 3u;
+		if ((ep->address & 0x80u) != 0u) type += 4u;
+		unsigned interval = 0u;
+		if (ep->attributes == 3u) {
+			if (ep->interval == 0u) return false;
+			if (speed >= 3u) interval = ep->interval - 1u;
+			else {
+				/* Full/low-speed bInterval is in frames; convert to microframes. */
+				unsigned frames = ep->interval - 1u;
+				while (frames != 0u) {
+					interval++;
+					frames >>= 1u;
+				}
+				interval += 3u;
+			}
+			if (interval > 15u) return false;
+		}
+		uint32_t* context = (uint32_t*)(input + (dci + 1u) * c->context_size);
+		uint64_t  dequeue = (uint64_t)ep->ring.dma.device_address | 1u;
+		context[0]        = interval << 16u;
+		context[1]        = (packet << 16u) | (type << 3u) | (3u << 1u);
+		context[2]        = (uint32_t)dequeue;
+		context[3]        = (uint32_t)(dequeue >> 32u);
+		context[4]        = ep->attributes == 2u ? 3072u : packet;
+		control[1] |= 1u << dci;
+		if (dci > highest) highest = dci;
+	}
+	slot[0] = (slot[0] & ~(31u << 27u)) | (highest << 27u);
+	if (!sync_dma(&device->input, DMA_SYNC_FOR_DEVICE)) return false;
+	uint64_t        pointer = (uint64_t)device->input.device_address;
+	struct xhci_trb completion;
+	struct xhci_trb trb = {
+		.parameter_low  = (uint32_t)pointer,
+		.parameter_high = (uint32_t)(pointer >> 32u),
+		.control        = (XHCI_TRB_CONFIGURE_ENDPOINT << XHCI_TRB_TYPE_SHIFT) | ((uint32_t)device->slot << 24u),
+	};
+	if (!command(c, trb, &completion) || !set_configuration(c, device)) return false;
+	for (unsigned i = 0u; i < device->endpoint_count; i++) device->endpoints[i].configured = true;
+	printf("xhci: slot %u configured %u bulk/interrupt endpoints\n", device->slot, device->endpoint_count);
+	return true;
 }
 
 static struct xhci_device* enumerate_port(struct xhci_controller* c, unsigned port, uint32_t speed) {
@@ -293,7 +423,7 @@ static struct xhci_device* enumerate_port(struct xhci_controller* c, unsigned po
 	if (!command(c, address, &completion)) goto done;
 	uint8_t descriptor[XHCI_DESCRIPTOR_LENGTH];
 	if (!read_descriptor(c, device, XHCI_USB_DESCRIPTOR_DEVICE, 0u, descriptor, sizeof(descriptor)) ||
-	    !discover_endpoints(c, device))
+	    !discover_endpoints(c, device) || !configure_endpoints(c, device, speed))
 		goto done;
 	printf("xhci: port %u slot %u speed-id=%u VID=%04x PID=%04x usb=%x.%02x\n",
 	       port,
@@ -303,16 +433,6 @@ static struct xhci_device* enumerate_port(struct xhci_controller* c, unsigned po
 	       (unsigned)((uint16_t)descriptor[10] | ((uint16_t)descriptor[11] << 8u)),
 	       descriptor[3],
 	       descriptor[2]);
-	printf("xhci: configuration %u, bulk/interrupt endpoints=%u (discovery only)\n",
-	       device->configuration,
-	       device->endpoint_count);
-	for (unsigned index = 0u; index < device->endpoint_count; index++) {
-		printf("xhci: endpoint %02x %s max-packet=%u interval=%u\n",
-		       device->endpoints[index].address,
-		       device->endpoints[index].attributes == 2u ? "bulk" : "interrupt",
-		       device->endpoints[index].max_packet_size,
-		       device->endpoints[index].interval);
-	}
 	success = true;
 done:
 	if (!success) {
