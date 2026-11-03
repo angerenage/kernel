@@ -63,6 +63,8 @@ struct xhci_device {
 	uint8_t                slot;
 	uint8_t                configuration;
 	uint8_t                endpoint_count;
+	uint16_t               vendor_id;
+	uint16_t               product_id;
 	struct xhci_endpoint   endpoints[XHCI_MAX_ENDPOINT_DESCRIPTORS];
 };
 
@@ -423,6 +425,8 @@ static struct xhci_device* enumerate_port(struct xhci_controller* c, unsigned po
 	if (!read_descriptor(c, device, XHCI_USB_DESCRIPTOR_DEVICE, 0u, descriptor, sizeof(descriptor)) ||
 	    !discover_endpoints(c, device) || !configure_endpoints(c, device, speed))
 		goto done;
+	device->vendor_id  = (uint16_t)descriptor[8] | ((uint16_t)descriptor[9] << 8u);
+	device->product_id = (uint16_t)descriptor[10] | ((uint16_t)descriptor[11] << 8u);
 	printf("xhci: port %u slot %u speed-id=%u VID=%04x PID=%04x usb=%x.%02x\n",
 	       port,
 	       device->slot,
@@ -473,7 +477,10 @@ bool xhci_device_poll(struct xhci_controller* c) {
 			fprintf(stderr, "xhci: unable to enumerate port %u\n", port);
 			c->port_retry_ticks[index] = 100u;
 		}
-		else c->port_seen[index] = true;
+		else {
+			c->port_seen[index] = true;
+			c->port_generation[index]++;
+		}
 	}
 	return true;
 }
@@ -487,4 +494,22 @@ void xhci_device_release_all(struct xhci_controller* c) {
 		c->port_seen[index]        = false;
 		c->port_retry_ticks[index] = 0u;
 	}
+}
+
+bool xhci_device_info(struct xhci_controller* c, unsigned port, struct usb_transport_info* info) {
+	if (c == NULL || info == NULL || port == 0u || port > c->ports || c->devices[port - 1u] == NULL) return false;
+	const struct xhci_device* device = c->devices[port - 1u];
+	*info                            = (struct usb_transport_info){.vendor_id      = device->vendor_id,
+	                                                               .product_id     = device->product_id,
+	                                                               .configuration  = device->configuration,
+	                                                               .endpoint_count = device->endpoint_count};
+	for (unsigned i = 0u; i < device->endpoint_count; i++) {
+		info->endpoints[i] = (struct usb_transport_endpoint){
+			.address         = device->endpoints[i].address,
+			.attributes      = device->endpoints[i].attributes,
+			.interval        = device->endpoints[i].interval,
+			.max_packet_size = device->endpoints[i].max_packet_size,
+		};
+	}
+	return true;
 }

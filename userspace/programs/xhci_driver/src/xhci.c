@@ -15,6 +15,7 @@
 
 #include "controller.h"
 #include "device.h"
+#include "transport.h"
 
 /* xHCI specification, capability / operational register layout. */
 #define XHCI_CLASS 0x0cu
@@ -240,9 +241,17 @@ enum device_driver_result xhci_driver_run(cap_id_t device_cap) {
 		release_mapping(&mapping);
 		return DEVICE_DRIVER_ERROR;
 	}
+	struct xhci_transport transport;
+	if (!xhci_transport_init(&transport, &controller, device_cap)) {
+		xhci_transport_release(&transport);
+		xhci_controller_stop(&controller);
+		release_mapping(&mapping);
+		return DEVICE_DRIVER_ERROR;
+	}
 	for (;;) {
-		if (!xhci_controller_poll(&controller) || !xhci_device_poll(&controller) ||
+		if (!xhci_controller_poll(&controller) || !xhci_device_poll(&controller) || !xhci_transport_poll(&transport) ||
 		    sleep_ms(10u) != SYSCALL_STATUS_OK) {
+			xhci_transport_release(&transport);
 			xhci_controller_stop(&controller);
 			release_mapping(&mapping);
 			return DEVICE_DRIVER_ERROR;

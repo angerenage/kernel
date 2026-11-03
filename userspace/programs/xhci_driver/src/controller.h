@@ -31,6 +31,7 @@ struct xhci_controller {
 	struct xhci_device*     devices[255];
 	bool                    port_seen[255];
 	uint16_t                port_retry_ticks[255];
+	uint64_t                port_generation[255];
 };
 
 /* Probe the controller and fill in the controller structure. */

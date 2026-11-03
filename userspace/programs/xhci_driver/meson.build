@@ -1,3 +1,5 @@
+xhci_include = include_directories('include')
+
 xhci_driver_sources = files(
 	'src/main.c',
 	'src/xhci.c',
@@ -5,12 +7,13 @@ xhci_driver_sources = files(
 	'src/device.c',
 	'src/dma.c',
 	'src/ring.c',
+    'src/transport.c',
 )
 
 xhci_driver_elf = executable('xhci_driver.elf',
 	sources : xhci_driver_sources,
 	c_args : userspace_c_args,
-	include_directories : userspace_inc,
+	include_directories : [userspace_inc, xhci_include],
 	dependencies : device_manager_dep,
 	link_whole : userspace_crt,
 	link_with : userspace_link_libs,
