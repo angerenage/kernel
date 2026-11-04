@@ -145,7 +145,7 @@ static syscall_result_t framebuffer_info_handler(const struct cap_request*      
 
 static syscall_result_t framebuffer_map_handler(const struct cap_request*      req,
                                                 const struct boot_framebuffer* framebuffer, size_t size) {
-	struct external_mapping_result  mapping;
+	struct external_mapping_result  mapping = {.mapping_cap = CAP_ID_INVALID};
 	struct framebuffer_map_response response;
 	syscall_result_t                result;
 

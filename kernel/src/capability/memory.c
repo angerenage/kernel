@@ -159,7 +159,7 @@ static syscall_result_t memory_slice_handler(const struct cap_request* req, stru
 }
 
 static syscall_result_t memory_handler(const struct cap_request* req) {
-	struct memory_request_header header;
+	struct memory_request_header header = {0};
 	syscall_result_t             result;
 	if (req == NULL || req->object_id == 0u || copy_request(req, &header, sizeof(header)).status != SYSCALL_STATUS_OK)
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -412,7 +412,7 @@ static syscall_result_t mapping_unmap_handler(const struct cap_request* req, con
 }
 
 static syscall_result_t mapping_handler(const struct cap_request* req) {
-	struct mapping_request_header header;
+	struct mapping_request_header header = {0};
 	syscall_result_t              result;
 	if (req == NULL || req->object_id == 0u || copy_request(req, &header, sizeof(header)).status != SYSCALL_STATUS_OK)
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
