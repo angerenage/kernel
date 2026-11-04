@@ -53,19 +53,22 @@ struct xhci_endpoint {
 	uint8_t                interval;
 	uint16_t               max_packet_size;
 	bool                   configured;
+	uint8_t                interface_number;
 };
 
 struct xhci_device {
-	struct xhci_dma_buffer input;
-	struct xhci_dma_buffer output;
-	struct xhci_dma_buffer descriptor;
-	struct xhci_ring       endpoint_zero;
-	uint8_t                slot;
-	uint8_t                configuration;
-	uint8_t                endpoint_count;
-	uint16_t               vendor_id;
-	uint16_t               product_id;
-	struct xhci_endpoint   endpoints[XHCI_MAX_ENDPOINT_DESCRIPTORS];
+	struct xhci_dma_buffer         input;
+	struct xhci_dma_buffer         output;
+	struct xhci_dma_buffer         descriptor;
+	struct xhci_ring               endpoint_zero;
+	uint8_t                        slot;
+	uint8_t                        configuration;
+	uint8_t                        endpoint_count;
+	uint16_t                       vendor_id;
+	uint16_t                       product_id;
+	uint8_t                        interface_count;
+	struct usb_transport_interface interfaces[USB_TRANSPORT_MAX_INTERFACES];
+	struct xhci_endpoint           endpoints[XHCI_MAX_ENDPOINT_DESCRIPTORS];
 };
 
 static uint32_t read_reg(const struct xhci_controller* c, size_t offset) {
@@ -219,19 +222,35 @@ static bool discover_endpoints(struct xhci_controller* c, struct xhci_device* de
 	if (descriptors == NULL) return false;
 	bool success = false;
 	if (!read_descriptor(c, device, XHCI_USB_DESCRIPTOR_CONFIGURATION, 0u, descriptors, length)) goto done;
-	device->configuration = descriptors[5];
-	bool active_interface = false;
+	device->configuration    = descriptors[5];
+	bool    active_interface = false;
+	uint8_t interface_number = 0u;
 	for (size_t offset = 0u; offset < length;) {
 		uint8_t size = descriptors[offset];
 		if (size < 2u || size > length - offset) goto done;
 		uint8_t type = descriptors[offset + 1u];
-		if (type == XHCI_USB_DESCRIPTOR_INTERFACE && size >= 9u) active_interface = descriptors[offset + 3u] == 0u;
+		if (type == XHCI_USB_DESCRIPTOR_INTERFACE && size >= 9u) {
+			active_interface = descriptors[offset + 3u] == 0u;
+			interface_number = descriptors[offset + 2u];
+			if (active_interface) {
+				if (device->interface_count == USB_TRANSPORT_MAX_INTERFACES) goto done;
+				for (unsigned i = 0u; i < device->interface_count; i++)
+					if (device->interfaces[i].number == interface_number) goto done;
+				device->interfaces[device->interface_count++] =
+					(struct usb_transport_interface){.number                = interface_number,
+					                                 .class_code            = descriptors[offset + 5u],
+					                                 .subclass              = descriptors[offset + 6u],
+					                                 .programming_interface = descriptors[offset + 7u]};
+			}
+		}
 		if (type == XHCI_USB_DESCRIPTOR_ENDPOINT && active_interface && size >= 7u) {
 			uint8_t attributes = descriptors[offset + 3u] & 3u;
-			if ((attributes == 2u || attributes == 3u) && device->endpoint_count < XHCI_MAX_ENDPOINT_DESCRIPTORS) {
-				unsigned index                      = device->endpoint_count++;
-				device->endpoints[index].address    = descriptors[offset + 2u];
-				device->endpoints[index].attributes = attributes;
+			if (attributes == 2u || attributes == 3u) {
+				if (device->endpoint_count == XHCI_MAX_ENDPOINT_DESCRIPTORS) goto done;
+				unsigned index                            = device->endpoint_count++;
+				device->endpoints[index].address          = descriptors[offset + 2u];
+				device->endpoints[index].interface_number = interface_number;
+				device->endpoints[index].attributes       = attributes;
 				device->endpoints[index].max_packet_size =
 					(uint16_t)descriptors[offset + 4u] | ((uint16_t)descriptors[offset + 5u] << 8u);
 				device->endpoints[index].interval = descriptors[offset + 6u];
@@ -239,7 +258,7 @@ static bool discover_endpoints(struct xhci_controller* c, struct xhci_device* de
 		}
 		offset += size;
 	}
-	success = true;
+	success = device->interface_count != 0u;
 done:
 	free(descriptors);
 	return success;
@@ -289,6 +308,64 @@ bool xhci_device_transfer(struct xhci_controller* c, unsigned port, uint8_t addr
 	if (transferred != NULL) *transferred = length - residual;
 	if (in && !sync_dma(&ep->buffer, DMA_SYNC_FOR_CPU)) return false;
 	if (in && length > residual) memcpy(data, ep->buffer.cpu_address, length - residual);
+	return true;
+}
+
+bool xhci_device_control(struct xhci_controller* c, unsigned port, uint8_t interface_number,
+                         const struct usb_transport_control_request* request, void* data, size_t* transferred) {
+	if (c == NULL || request == NULL || port == 0u || port > c->ports) return false;
+	struct xhci_device* device = c->devices[port - 1u];
+	if (device == NULL || request->length > device->descriptor.size || (request->request_type & 0x1fu) != 1u ||
+	    request->index != interface_number || (request->length != 0u && data == NULL))
+		return false;
+	bool found = false;
+	for (unsigned i = 0u; i < device->interface_count; i++)
+		if (device->interfaces[i].number == interface_number) found = true;
+	if (!found) return false;
+	bool in = (request->request_type & 0x80u) != 0u;
+	if (!in && request->length != 0u) {
+		memcpy(device->descriptor.cpu_address, data, request->length);
+		if (!sync_dma(&device->descriptor, DMA_SYNC_FOR_DEVICE)) return false;
+	}
+	uint64_t        address;
+	struct xhci_trb completion;
+	struct xhci_trb setup = {
+		.parameter_low =
+			(uint32_t)request->request_type | ((uint32_t)request->request << 8u) | ((uint32_t)request->value << 16u),
+		.parameter_high = (uint32_t)request->index | ((uint32_t)request->length << 16u),
+		.status         = 8u,
+		.control        = (XHCI_TRB_SETUP_STAGE << XHCI_TRB_TYPE_SHIFT) | XHCI_TRB_IDT |
+		                  (request->length == 0u ? 0u
+		                   : in                  ? XHCI_TRB_TRT_IN
+		                                         : (2u << 16u)),
+	};
+	if (!xhci_ring_submit(&device->endpoint_zero, setup, &address)) return false;
+	uint64_t data_address = 0u;
+	if (request->length != 0u) {
+		struct xhci_trb stage = {
+			.parameter_low  = (uint32_t)device->descriptor.device_address,
+			.parameter_high = (uint32_t)((uint64_t)device->descriptor.device_address >> 32u),
+			.status         = request->length,
+			.control        = (XHCI_TRB_DATA_STAGE << XHCI_TRB_TYPE_SHIFT) | XHCI_TRB_IOC | (in ? XHCI_TRB_DIR_IN : 0u),
+		};
+		if (!xhci_ring_submit(&device->endpoint_zero, stage, &data_address)) return false;
+	}
+	struct xhci_trb status = {
+		.control = (XHCI_TRB_STATUS_STAGE << XHCI_TRB_TYPE_SHIFT) | (in ? 0u : XHCI_TRB_DIR_IN) | XHCI_TRB_IOC,
+	};
+	if (!xhci_ring_submit(&device->endpoint_zero, status, &address)) return false;
+	write_reg(c, (size_t)c->doorbell + (size_t)device->slot * 4u, 1u);
+	size_t actual = request->length;
+	if (request->length != 0u) {
+		if (!wait_event(c, XHCI_TRB_TRANSFER_EVENT, data_address, &completion, true)) return false;
+		size_t residual = completion.status & 0xffffffu;
+		if (residual > request->length) return false;
+		actual -= residual;
+	}
+	if (!wait_event(c, XHCI_TRB_TRANSFER_EVENT, address, &completion, false)) return false;
+	if (in && actual != 0u && !sync_dma(&device->descriptor, DMA_SYNC_FOR_CPU)) return false;
+	if (in && actual != 0u) memcpy(data, device->descriptor.cpu_address, actual);
+	if (transferred != NULL) *transferred = actual;
 	return true;
 }
 
@@ -496,20 +573,35 @@ void xhci_device_release_all(struct xhci_controller* c) {
 	}
 }
 
-bool xhci_device_info(struct xhci_controller* c, unsigned port, struct usb_transport_info* info) {
+bool xhci_device_info(struct xhci_controller* c, unsigned port, unsigned interface_index,
+                      struct usb_transport_info* info) {
 	if (c == NULL || info == NULL || port == 0u || port > c->ports || c->devices[port - 1u] == NULL) return false;
 	const struct xhci_device* device = c->devices[port - 1u];
-	*info                            = (struct usb_transport_info){.vendor_id      = device->vendor_id,
-	                                                               .product_id     = device->product_id,
-	                                                               .configuration  = device->configuration,
-	                                                               .endpoint_count = device->endpoint_count};
+	if (interface_index >= device->interface_count) return false;
+	struct usb_transport_interface interface = device->interfaces[interface_index];
+	*info = (struct usb_transport_info){.vendor_id             = device->vendor_id,
+	                                    .product_id            = device->product_id,
+	                                    .configuration         = device->configuration,
+	                                    .interface_number      = interface.number,
+	                                    .class_code            = interface.class_code,
+	                                    .subclass              = interface.subclass,
+	                                    .programming_interface = interface.programming_interface};
 	for (unsigned i = 0u; i < device->endpoint_count; i++) {
-		info->endpoints[i] = (struct usb_transport_endpoint){
-			.address         = device->endpoints[i].address,
-			.attributes      = device->endpoints[i].attributes,
-			.interval        = device->endpoints[i].interval,
-			.max_packet_size = device->endpoints[i].max_packet_size,
+		if (device->endpoints[i].interface_number != interface.number) continue;
+		info->endpoints[info->endpoint_count++] = (struct usb_transport_endpoint){
+			.address          = device->endpoints[i].address,
+			.attributes       = device->endpoints[i].attributes,
+			.interval         = device->endpoints[i].interval,
+			.interface_number = interface.number,
+			.max_packet_size  = device->endpoints[i].max_packet_size,
 		};
 	}
 	return true;
+}
+
+unsigned xhci_device_interfaces(struct xhci_controller* c, unsigned port, struct usb_transport_interface* interfaces) {
+	if (c == NULL || port == 0u || port > c->ports || c->devices[port - 1u] == NULL) return 0u;
+	struct xhci_device* device = c->devices[port - 1u];
+	if (interfaces != NULL) memcpy(interfaces, device->interfaces, device->interface_count * sizeof(*interfaces));
+	return device->interface_count;
 }

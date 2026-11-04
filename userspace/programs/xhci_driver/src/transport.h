@@ -7,20 +7,27 @@
 
 #include "controller.h"
 
-struct xhci_transport {
-	struct xhci_controller* controller;
-	cap_id_t                parent;
-	channel_id_t            channel;
-	cap_id_t                activity;
-	process_id_t            pid;
-	cap_id_t                providers[255];
-	bool                    published[255];
-	uint64_t                generation[255];
-	uint64_t                object_ids[255];
-	uint64_t                next_object_id;
+struct xhci_transport_child {
+	cap_id_t provider;
+	uint64_t object_id;
+	uint64_t generation;
+	uint8_t  port;
+	uint8_t  interface_index;
+	uint8_t  interface_number;
+	bool     published;
 };
 
-/* Publish one transport resource for each enumerated USB child. */
+struct xhci_transport {
+	struct xhci_controller*      controller;
+	cap_id_t                     parent;
+	channel_id_t                 channel;
+	cap_id_t                     activity;
+	process_id_t                 pid;
+	struct xhci_transport_child* children;
+	uint64_t                     next_object_id;
+};
+
+/* Publish one transport resource per active USB interface. */
 bool xhci_transport_init(struct xhci_transport* transport, struct xhci_controller* controller, cap_id_t parent);
 
 /* Process child requests and remove disconnected devices. */

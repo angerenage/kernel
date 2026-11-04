@@ -18,4 +18,13 @@ bool xhci_device_transfer(struct xhci_controller* controller, unsigned port, uin
                           size_t length, size_t* transferred);
 
 /* Return the descriptors of a connected USB device. */
-bool xhci_device_info(struct xhci_controller* controller, unsigned port, struct usb_transport_info* info);
+bool xhci_device_info(struct xhci_controller* controller, unsigned port, unsigned interface_index,
+                      struct usb_transport_info* info);
+
+/* Return active alternate-setting-zero interfaces on a physical device. */
+unsigned xhci_device_interfaces(struct xhci_controller* controller, unsigned port,
+                                struct usb_transport_interface* interfaces);
+
+/* Execute one interface-recipient control transfer on endpoint zero. */
+bool xhci_device_control(struct xhci_controller* controller, unsigned port, uint8_t interface_number,
+                         const struct usb_transport_control_request* request, void* data, size_t* transferred);
