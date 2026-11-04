@@ -169,6 +169,7 @@ subdir('programs/pci_driver')
 subdir('programs/ahci_driver')
 subdir('programs/xhci_driver')
 subdir('programs/hid_driver')
+subdir('programs/usb_storage_driver')
 subdir('programs/sata_driver')
 subdir('programs/partition_driver')
 subdir('programs/fat32_driver')
@@ -220,6 +221,7 @@ userspace_boot_programs = [
 	pci_driver_elf,
 	ahci_driver_elf,
 	xhci_driver_elf,
+	usb_storage_driver_elf,
 	sata_driver_elf,
 	partition_driver_elf,
 	fat32_driver_elf,

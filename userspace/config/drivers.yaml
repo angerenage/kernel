@@ -62,3 +62,8 @@ drivers:
     compatible_ids:
       - "usb:class:03:01:01"
       - "usb:class:03:01:02"
+
+  usb_storage:
+    executable: "/bin/usb_storage_driver.elf"
+    compatible_ids:
+      - "usb:class:08:06:50"

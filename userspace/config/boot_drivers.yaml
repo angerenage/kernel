@@ -26,6 +26,11 @@ drivers:
     compatible_ids:
       - "pci:class:0c:03:30"
 
+  usb_storage:
+    executable: "/boot/usb_storage_driver.elf"
+    compatible_ids:
+      - "usb:class:08:06:50"
+
   sata:
     executable: "/boot/sata_driver.elf"
     compatible_ids:
