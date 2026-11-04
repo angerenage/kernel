@@ -41,6 +41,7 @@
 #define XHCI_USB_DESCRIPTOR_CONFIGURATION 2u
 #define XHCI_USB_DESCRIPTOR_INTERFACE 4u
 #define XHCI_USB_DESCRIPTOR_ENDPOINT 5u
+#define XHCI_USB_DESCRIPTOR_SS_ENDPOINT_COMPANION 0x30u
 #define XHCI_CONFIGURATION_HEADER_LENGTH 9u
 #define XHCI_CONFIGURATION_MAX_LENGTH 4096u
 #define XHCI_MAX_ENDPOINT_DESCRIPTORS 30u
@@ -54,6 +55,8 @@ struct xhci_endpoint {
 	uint8_t                address;
 	uint8_t                attributes;
 	uint8_t                interval;
+	uint8_t                max_burst;
+	bool                   has_ss_companion;
 	uint16_t               max_packet_size;
 	bool                   configured;
 	bool                   transfer_pending;
@@ -259,6 +262,12 @@ static bool discover_endpoints(struct xhci_controller* c, struct xhci_device* de
 				device->endpoints[index].max_packet_size =
 					(uint16_t)descriptors[offset + 4u] | ((uint16_t)descriptors[offset + 5u] << 8u);
 				device->endpoints[index].interval = descriptors[offset + 6u];
+				size_t companion                  = offset + size;
+				if (companion < length && length - companion >= 6u && descriptors[companion] >= 6u &&
+				    descriptors[companion + 1u] == XHCI_USB_DESCRIPTOR_SS_ENDPOINT_COMPANION) {
+					device->endpoints[index].max_burst        = descriptors[companion + 2u];
+					device->endpoints[index].has_ss_companion = true;
+				}
 			}
 		}
 		offset += size;
@@ -437,6 +446,7 @@ static bool configure_endpoints(struct xhci_controller* c, struct xhci_device* d
 		unsigned              number = ep->address & 15u;
 		unsigned              packet = ep->max_packet_size & 0x7ffu;
 		if (number == 0u || dci > 31u || packet == 0u || (ep->address & 0x70u) != 0u) return false;
+		if (speed >= 4u && (!ep->has_ss_companion || ep->max_burst > 15u)) return false;
 		if (!xhci_ring_allocate(&c->dma, &ep->ring, true) ||
 		    !allocate_dma(c, &ep->buffer, XHCI_ENDPOINT_BUFFER_SIZE, 64u))
 			return false;
@@ -460,7 +470,7 @@ static bool configure_endpoints(struct xhci_controller* c, struct xhci_device* d
 		uint32_t* context = (uint32_t*)(input + (dci + 1u) * c->context_size);
 		uint64_t  dequeue = (uint64_t)ep->ring.dma.device_address | 1u;
 		context[0]        = interval << 16u;
-		context[1]        = (packet << 16u) | (type << 3u) | (3u << 1u);
+		context[1]        = (packet << 16u) | ((uint32_t)ep->max_burst << 8u) | (type << 3u) | (3u << 1u);
 		context[2]        = (uint32_t)dequeue;
 		context[3]        = (uint32_t)(dequeue >> 32u);
 		context[4]        = ep->attributes == 2u ? 3072u : packet;

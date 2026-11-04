@@ -148,7 +148,7 @@ bool partition_service_run(cap_id_t device_cap, struct block_device* parent, con
 		else {
 			(void)snprintf(precise, sizeof(precise), "mbr:%02x", partition->mbr.type);
 		}
-		RUNTIME_DEBUG_LOG("partition: published partition-%u as SATA block slice (%s, first_lba=%llu, blocks=%llu)\n",
+		RUNTIME_DEBUG_LOG("partition: published partition-%u as block slice (%s, first_lba=%llu, blocks=%llu)\n",
 		                  partition->table_index,
 		                  precise,
 		                  (unsigned long long)partition->first_lba,
