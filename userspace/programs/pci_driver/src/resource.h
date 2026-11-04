@@ -26,6 +26,7 @@ struct pci_bar_resource {
 	uint64_t          size;
 	uint64_t          mapping_offset; /* Byte offset of the BAR within its page-aligned Memory capability. */
 	bool              prefetchable;
+	bool              claimed;
 	cap_id_t          capability;
 };
 

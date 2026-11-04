@@ -5,6 +5,8 @@
 
 #include "enumerate.h"
 
+struct pci_control;
+
 /* Publish every retained function and its restricted DMA resources below the PCI host device. */
 syscall_status_t pci_devices_publish(cap_id_t host_cap, cap_id_t memory_allocator_cap, cap_id_t dma_cap,
-                                     struct pci_inventory* inventory);
+                                     struct pci_control* control, struct pci_inventory* inventory);

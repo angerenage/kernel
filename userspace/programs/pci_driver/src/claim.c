@@ -277,6 +277,7 @@ size_t pci_resources_claim(const struct pci_claim_context* context, const struct
 				                           bar->size,
 				                           &bar->capability,
 				                           &bar->mapping_offset);
+			bar->claimed = bar->capability != CAP_ID_INVALID;
 		}
 	}
 	if (resources->rom.present && resources->rom.address != 0u) {

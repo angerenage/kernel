@@ -1,9 +1,9 @@
 #include "pci.h"
 
 #include <stdio.h>
-#include <system/time.h>
 #include <system/trace.h>
 
+#include "control.h"
 #include "device.h"
 #include "enumerate.h"
 #include "host.h"
@@ -16,6 +16,7 @@ enum device_driver_result pci_driver_run(cap_id_t device_cap, cap_id_t memory_al
                                          cap_id_t interrupts_cap, cap_id_t io_ports_cap) {
 	struct pci_host      host;
 	struct pci_inventory inventory = {0};
+	struct pci_control   control   = {.endpoint = CHANNEL_ID_INVALID, .activity_cap = CAP_ID_INVALID};
 	bool                 success;
 	bool                 missing_configuration = false;
 
@@ -39,13 +40,21 @@ enum device_driver_result pci_driver_run(cap_id_t device_cap, cap_id_t memory_al
 		pci_host_deinitialize(&host);
 		return DEVICE_DRIVER_ERROR;
 	}
+	if (!pci_control_initialize(&control, &host.config, &inventory)) {
+		fprintf(stderr, "pci: could not initialize function-control service\n");
+		pci_control_deinitialize(&control);
+		pci_inventory_deinitialize(&inventory);
+		pci_host_deinitialize(&host);
+		return DEVICE_DRIVER_ERROR;
+	}
 	syscall_status_t publish_status;
 	{
 		TRACE_SCOPE(trace, &trace_publish);
-		publish_status = pci_devices_publish(device_cap, memory_allocator_cap, dma_cap, &inventory);
+		publish_status = pci_devices_publish(device_cap, memory_allocator_cap, dma_cap, &control, &inventory);
 	}
 	if (publish_status != SYSCALL_STATUS_OK) {
 		fprintf(stderr, "pci: could not publish the discovered functions: %u\n", (unsigned)publish_status);
+		pci_control_deinitialize(&control);
 		pci_inventory_deinitialize(&inventory);
 		pci_host_deinitialize(&host);
 		return DEVICE_DRIVER_ERROR;
@@ -53,10 +62,9 @@ enum device_driver_result pci_driver_run(cap_id_t device_cap, cap_id_t memory_al
 	printf("pci: published %zu function(s) with %zu claimed resource(s)\n",
 	       inventory.function_count,
 	       inventory.resource_count);
-	for (;;)
-		if (sleep_ms(1000u) != SYSCALL_STATUS_OK) {
-			pci_inventory_deinitialize(&inventory);
-			pci_host_deinitialize(&host);
-			return DEVICE_DRIVER_ERROR;
-		}
+	(void)pci_control_serve(&control);
+	pci_control_deinitialize(&control);
+	pci_inventory_deinitialize(&inventory);
+	pci_host_deinitialize(&host);
+	return DEVICE_DRIVER_ERROR;
 }

@@ -9,9 +9,11 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <system/capability.h>
 #include <system/trace.h>
 
 #include "claim.h"
+#include "control.h"
 #include "resource.h"
 
 #define PCI_HEADER_LAYOUT_MASK 0x7fu
@@ -151,7 +153,7 @@ static syscall_status_t add_bar(const struct device_builder* builder, const stru
 			name,
 			(resources->command & (bar->kind == PCI_BAR_IO ? PCI_COMMAND_IO_ENABLE : PCI_COMMAND_MEMORY_ENABLE)) != 0u);
 	if (!format(name, sizeof(name), &size, "bar_%u_claimed", bar->index)) return SYSCALL_STATUS_FAILED;
-	if (status == SYSCALL_STATUS_OK) status = add_bool(builder, name, bar->capability != CAP_ID_INVALID);
+	if (status == SYSCALL_STATUS_OK) status = add_bool(builder, name, bar->claimed);
 	if (!format(name, sizeof(name), &size, "bar_%u_mapping_offset", bar->index)) return SYSCALL_STATUS_FAILED;
 	if (status == SYSCALL_STATUS_OK) status = add_u64(builder, name, bar->mapping_offset);
 	if (memory) {
@@ -255,14 +257,34 @@ static syscall_status_t add_bridge(const struct device_builder* builder, const s
 	return status;
 }
 
+static void add_control(const struct device_builder* builder, struct pci_control* control,
+                        const struct pci_function* function) {
+	cap_id_t         capability = CAP_ID_INVALID;
+	syscall_status_t status     = pci_control_publish(control, function, &capability);
+	if (status == SYSCALL_STATUS_OK)
+		status = device_builder_add_resource(
+			builder, PCI_CONTROL_RESOURCE, sizeof(PCI_CONTROL_RESOURCE) - 1u, capability, PCI_CONTROL_DRIVER_RIGHTS);
+	if (status != SYSCALL_STATUS_OK && capability != CAP_ID_INVALID)
+		(void)cap_unpublish(control->endpoint, (uint64_t)function->resources.requester_id + 1u);
+	if (capability != CAP_ID_INVALID) (void)cap_drop(capability);
+	if (status != SYSCALL_STATUS_OK)
+		fprintf(stderr,
+		        "pci: %04x:%02x:%02x.%u could not publish control capability: %u\n",
+		        function->address.segment,
+		        function->address.bus,
+		        function->address.device,
+		        function->address.function,
+		        (unsigned)status);
+}
+
 static syscall_status_t pci_device_publish(cap_id_t host_cap, cap_id_t memory_allocator_cap, cap_id_t dma_cap,
-                                           struct pci_function* function) {
+                                           struct pci_control* control, struct pci_function* function) {
 	struct device_builder builder = {.capability = CAP_ID_INVALID, .manager_pid = PROCESS_PID_INVALID};
 	char                  name[32];
 	size_t                name_size;
 	syscall_status_t      status;
 
-	if (host_cap == CAP_ID_INVALID || function == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
+	if (host_cap == CAP_ID_INVALID || control == NULL || function == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	TRACE_SCOPE(device_trace, &trace_publish_device);
 	{
 		TRACE_SCOPE(trace, &trace_publish_begin);
@@ -280,7 +302,7 @@ static syscall_status_t pci_device_publish(cap_id_t host_cap, cap_id_t memory_al
 		status = SYSCALL_STATUS_FAILED;
 		goto failed;
 	}
-	{
+	if (status == SYSCALL_STATUS_OK) {
 		TRACE_SCOPE(trace, &trace_publish_properties);
 		{
 			TRACE_SCOPE(step_trace, &trace_publish_set_name);
@@ -317,15 +339,17 @@ static syscall_status_t pci_device_publish(cap_id_t host_cap, cap_id_t memory_al
 			TRACE_SCOPE(step_trace, &trace_publish_bridge);
 			status = add_bridge(&builder, &function->resources.bridge);
 		}
+		if (status == SYSCALL_STATUS_OK) add_control(&builder, control, function);
 	}
 	if (status == SYSCALL_STATUS_OK && dma_cap != CAP_ID_INVALID) {
 		TRACE_SCOPE(trace, &trace_publish_dma);
 		syscall_status_t dma_status = pci_claim_dma_resource(
 			&builder, dma_cap, "dma", sizeof("dma") - 1u, function->address.segment, function->resources.requester_id);
-		if (dma_status == SYSCALL_STATUS_OK)
-			status =
+		if (dma_status == SYSCALL_STATUS_OK) {
+			dma_status =
 				pci_claim_dma_allocator(&builder, memory_allocator_cap, "dma_allocator", sizeof("dma_allocator") - 1u);
-		else if (dma_status != SYSCALL_STATUS_UNAVAILABLE) status = dma_status;
+		}
+		if (dma_status != SYSCALL_STATUS_OK && dma_status != SYSCALL_STATUS_UNAVAILABLE) status = dma_status;
 	}
 	if (status == SYSCALL_STATUS_OK) {
 		TRACE_SCOPE(trace, &trace_publish_commit);
@@ -342,11 +366,11 @@ failed:
 }
 
 syscall_status_t pci_devices_publish(cap_id_t host_cap, cap_id_t memory_allocator_cap, cap_id_t dma_cap,
-                                     struct pci_inventory* inventory) {
-	if (host_cap == CAP_ID_INVALID || memory_allocator_cap == CAP_ID_INVALID || inventory == NULL)
+                                     struct pci_control* control, struct pci_inventory* inventory) {
+	if (host_cap == CAP_ID_INVALID || memory_allocator_cap == CAP_ID_INVALID || control == NULL || inventory == NULL)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	for (struct pci_function* function = inventory->functions; function != NULL; function = function->next) {
-		syscall_status_t status = pci_device_publish(host_cap, memory_allocator_cap, dma_cap, function);
+		syscall_status_t status = pci_device_publish(host_cap, memory_allocator_cap, dma_cap, control, function);
 		if (status != SYSCALL_STATUS_OK) return status;
 	}
 	return SYSCALL_STATUS_OK;

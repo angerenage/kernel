@@ -126,7 +126,7 @@ static inline uint64_t iommu_pt_table_entry(const struct iommu_pt_format* format
 	case IOMMU_PT_INTEL_VTD:
 		return encoded | 0x3u;
 	case IOMMU_PT_AMD_V1:
-		return encoded | 1u | (1ull << 60u) | (1ull << 61u) | (1ull << 62u) | ((uint64_t)remaining_levels << 9u);
+		return encoded | 1u | (1ull << 61u) | (1ull << 62u) | ((uint64_t)remaining_levels << 9u);
 	case IOMMU_PT_ARM_STAGE2:
 		return encoded | 0x3u;
 	case IOMMU_PT_RISCV:

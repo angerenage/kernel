@@ -94,6 +94,7 @@ userspace_system_sources = files(
 	'system/dma.c',
 	'system/interrupt.c',
 	'system/process.c',
+	'system/pci.c',
 	'system/signal.c',
 	'system/thread.c',
 	'system/time.c',
