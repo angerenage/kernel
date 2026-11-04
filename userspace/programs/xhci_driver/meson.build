@@ -1,5 +1,9 @@
 xhci_include = include_directories('include')
 
+xhci_dep = declare_dependency(
+	include_directories : xhci_include,
+)
+
 xhci_driver_sources = files(
 	'src/main.c',
 	'src/xhci.c',

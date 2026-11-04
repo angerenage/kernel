@@ -123,6 +123,7 @@ static bool probe_controller(const struct xhci_mapping* m, struct xhci_controlle
 	uint32_t ports        = (hcs1 >> 24u) & 0xffu;
 	uint32_t slots        = hcs1 & 0xffu;
 	uint32_t interrupters = (hcs1 >> 8u) & 0x7ffu;
+	uint32_t scratchpads  = ((hcs2 >> 27u) & 0x1fu) | (((hcs2 >> 21u) & 0x1fu) << 5u);
 	if (ports == 0u || ports > XHCI_MAX_PORTS || slots == 0u || !contains(m->bar_size, dboff, sizeof(uint32_t)) ||
 	    !contains(m->bar_size, rtsoff, 0x24u) ||
 	    !contains(m->bar_size,
@@ -141,13 +142,14 @@ static bool probe_controller(const struct xhci_mapping* m, struct xhci_controlle
 	       slots,
 	       interrupters,
 	       (unsigned)(hcc1 & 1u));
-	printf("xhci: caplen=%x dboff=%x rtsoff=%x cmd=%08x sts=%08x hcs2=%08x\n",
+	printf("xhci: caplen=%x dboff=%x rtsoff=%x cmd=%08x sts=%08x hcs2=%08x scratchpads=%u\n",
 	       (unsigned)caplength,
 	       dboff,
 	       rtsoff,
 	       command,
 	       status,
-	       hcs2);
+	       hcs2,
+	       scratchpads);
 	unsigned connected = 0u;
 	unsigned shown     = 0u;
 	for (uint32_t index = 0u; index < ports; index++) {
@@ -167,23 +169,28 @@ static bool probe_controller(const struct xhci_mapping* m, struct xhci_controlle
 	    interrupters == 0u)
 		return false;
 	*controller = (struct xhci_controller){
-		.mmio         = m->registers,
-		.size         = m->bar_size,
-		.op           = caplength,
-		.runtime      = rtsoff,
-		.doorbell     = dboff,
-		.slots        = (uint8_t)slots,
-		.ports        = (uint8_t)ports,
-		.context_size = (hcc1 & (1u << 2u)) != 0u ? 64u : 32u,
-		.addr64       = (hcc1 & 1u) != 0u,
-		.dma          = {.source_cap           = CAP_ID_INVALID,
-		                 .memory_allocator_cap = CAP_ID_INVALID,
-		                 .device_space_cap     = CAP_ID_INVALID,
-		                 .binding_cap          = CAP_ID_INVALID,
-		                 .process_space_cap    = CAP_ID_INVALID},
-		.dcbaa        = {.memory_cap         = CAP_ID_INVALID,
-		                 .cpu_mapping_cap    = CAP_ID_INVALID,
-		                 .device_mapping_cap = CAP_ID_INVALID},
+		.mmio             = m->registers,
+		.size             = m->bar_size,
+		.op               = caplength,
+		.runtime          = rtsoff,
+		.doorbell         = dboff,
+		.slots            = (uint8_t)slots,
+		.ports            = (uint8_t)ports,
+		.context_size     = (hcc1 & (1u << 2u)) != 0u ? 64u : 32u,
+		.scratchpad_count = (uint16_t)scratchpads,
+		.addr64           = (hcc1 & 1u) != 0u,
+		.pci_control_cap  = CAP_ID_INVALID,
+		.dma              = {.source_cap           = CAP_ID_INVALID,
+		                     .memory_allocator_cap = CAP_ID_INVALID,
+		                     .device_space_cap     = CAP_ID_INVALID,
+		                     .binding_cap          = CAP_ID_INVALID,
+		                     .process_space_cap    = CAP_ID_INVALID},
+		.dcbaa            = {.memory_cap         = CAP_ID_INVALID,
+		                     .cpu_mapping_cap    = CAP_ID_INVALID,
+		                     .device_mapping_cap = CAP_ID_INVALID},
+		.scratchpad_array = {.memory_cap         = CAP_ID_INVALID,
+		                     .cpu_mapping_cap    = CAP_ID_INVALID,
+		                     .device_mapping_cap = CAP_ID_INVALID},
 		.erst = {.memory_cap = CAP_ID_INVALID, .cpu_mapping_cap = CAP_ID_INVALID, .device_mapping_cap = CAP_ID_INVALID},
 		.commands = {.dma = {.memory_cap         = CAP_ID_INVALID,
 		                     .cpu_mapping_cap    = CAP_ID_INVALID,

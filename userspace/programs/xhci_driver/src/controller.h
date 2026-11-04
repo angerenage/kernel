@@ -19,10 +19,14 @@ struct xhci_controller {
 	uint8_t                 slots;
 	uint8_t                 ports;
 	uint8_t                 context_size;
+	uint16_t                scratchpad_count;
 	bool                    addr64;
 	bool                    owned;
+	cap_id_t                pci_control_cap;
 	struct xhci_dma_context dma;
 	struct xhci_dma_buffer  dcbaa;
+	struct xhci_dma_buffer  scratchpad_array;
+	struct xhci_dma_buffer* scratchpads;
 	struct xhci_dma_buffer  erst;
 	struct xhci_ring        commands;
 	struct xhci_ring        events;

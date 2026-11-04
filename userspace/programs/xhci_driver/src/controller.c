@@ -2,9 +2,15 @@
 
 #include <base/dma.h>
 #include <base/memory.h>
+#include <protocol/device.h>
+#include <protocol/pci.h>
+#include <runtime/device.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <system/capability.h>
 #include <system/memory.h>
+#include <system/pci.h>
 #include <system/time.h>
 
 #include "device.h"
@@ -84,6 +90,36 @@ static bool sync_device(struct xhci_dma_buffer* b) {
 	return mapping_sync(b->device_mapping_cap, 0u, b->size, DMA_SYNC_FOR_DEVICE) == SYSCALL_STATUS_OK;
 }
 
+static bool enable_bus_master(struct xhci_controller* c, cap_id_t device_cap) {
+	cap_id_t control_cap = CAP_ID_INVALID;
+	bool     enabled     = device_resource_acquire(device_cap,
+	                                               PCI_CONTROL_RESOURCE,
+	                                               sizeof(PCI_CONTROL_RESOURCE) - 1u,
+	                                               PCI_CONTROL_COMMAND_RIGHTS,
+	                                               &control_cap) == SYSCALL_STATUS_OK &&
+	                       pci_control_set_dma_enabled(control_cap, true, NULL) == SYSCALL_STATUS_OK;
+	if (enabled) c->pci_control_cap = control_cap;
+	else if (control_cap != CAP_ID_INVALID) (void)cap_drop(control_cap);
+	if (!enabled) fprintf(stderr, "xhci: unable to enable PCI DMA\n");
+	return enabled;
+}
+
+static bool allocate_scratchpads(struct xhci_controller* c) {
+	if (c->scratchpad_count == 0u) return true;
+	c->scratchpads = calloc(c->scratchpad_count, sizeof(*c->scratchpads));
+	if (c->scratchpads == NULL ||
+	    !allocate(c, &c->scratchpad_array, (size_t)c->scratchpad_count * sizeof(uint64_t), 64u))
+		return false;
+	uint64_t* addresses = c->scratchpad_array.cpu_address;
+	for (uint16_t i = 0u; i < c->scratchpad_count; i++) {
+		if (!allocate(c, &c->scratchpads[i], 4096u, 4096u)) return false;
+		addresses[i] = (uint64_t)c->scratchpads[i].device_address;
+	}
+	if (!sync_device(&c->scratchpad_array)) return false;
+	((uint64_t*)c->dcbaa.cpu_address)[0] = (uint64_t)c->scratchpad_array.device_address;
+	return true;
+}
+
 bool xhci_controller_start(struct xhci_controller* c, cap_id_t device_cap) {
 	size_t op = c->op;
 	if (!legacy_handoff(c)) return false;
@@ -103,7 +139,8 @@ bool xhci_controller_start(struct xhci_controller* c, cap_id_t device_cap) {
 		fprintf(stderr, "xhci: 4 KiB controller pages unsupported\n");
 		return false;
 	}
-	if (!xhci_dma_initialize(device_cap, &c->dma) || !allocate(c, &c->dcbaa, 256u * sizeof(uint64_t), 64u) ||
+	if (!xhci_dma_initialize(device_cap, &c->dma) || !enable_bus_master(c, device_cap) ||
+	    !allocate(c, &c->dcbaa, 256u * sizeof(uint64_t), 64u) || !allocate_scratchpads(c) ||
 	    !allocate(c, &c->erst, 16u, 64u) || !xhci_ring_allocate(&c->dma, &c->commands, true) ||
 	    !xhci_ring_allocate(&c->dma, &c->events, false)) {
 		fprintf(stderr, "xhci: DMA/ring allocation failed\n");
@@ -135,6 +172,15 @@ bool xhci_controller_start(struct xhci_controller* c, cap_id_t device_cap) {
 	if (!xhci_ring_noop(&c->commands, &command_address)) return false;
 	wr(c, c->doorbell, 0u);
 	for (unsigned i = 0u; i < XHCI_TIMEOUT_MS; i++) {
+		uint32_t status = reg(c, op + XHCI_OP_USBSTS);
+		if ((status & XHCI_STS_HSE) != 0u || (status & XHCI_STS_HCH) != 0u) {
+			fprintf(stderr,
+			        "xhci: controller error during No Op (sts=%08x%s%s)\n",
+			        status,
+			        (status & XHCI_STS_HSE) != 0u ? ", host system error" : "",
+			        (status & XHCI_STS_HCH) != 0u ? ", halted" : "");
+			return false;
+		}
 		struct xhci_trb event;
 		if (xhci_ring_event(&c->events, &event)) {
 			uint64_t pointer = (uint64_t)event.parameter_low | ((uint64_t)event.parameter_high << 32u);
@@ -201,9 +247,20 @@ void xhci_controller_stop(struct xhci_controller* c) {
 		wr(c, (size_t)c->op + XHCI_OP_USBCMD, reg(c, (size_t)c->op + XHCI_OP_USBCMD) & ~XHCI_CMD_RS);
 		(void)wait_bits(c, (size_t)c->op + XHCI_OP_USBSTS, XHCI_STS_HCH, XHCI_STS_HCH, XHCI_TIMEOUT_MS);
 	}
+	if (c->pci_control_cap != CAP_ID_INVALID) {
+		(void)pci_control_set_dma_enabled(c->pci_control_cap, false, NULL);
+		(void)cap_drop(c->pci_control_cap);
+		c->pci_control_cap = CAP_ID_INVALID;
+	}
 	xhci_ring_release(&c->events);
 	xhci_ring_release(&c->commands);
 	xhci_dma_buffer_release(&c->erst);
+	if (c->scratchpads != NULL) {
+		for (uint16_t i = 0u; i < c->scratchpad_count; i++) xhci_dma_buffer_release(&c->scratchpads[i]);
+		free(c->scratchpads);
+		c->scratchpads = NULL;
+	}
+	xhci_dma_buffer_release(&c->scratchpad_array);
 	xhci_dma_buffer_release(&c->dcbaa);
 	xhci_dma_deinitialize(&c->dma);
 }

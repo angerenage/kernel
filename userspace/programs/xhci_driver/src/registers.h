@@ -9,6 +9,7 @@
 #define XHCI_CMD_RS (1u << 0u)
 #define XHCI_CMD_HCRST (1u << 1u)
 #define XHCI_STS_HCH (1u << 0u)
+#define XHCI_STS_HSE (1u << 2u)
 #define XHCI_STS_CNR (1u << 11u)
 #define XHCI_RT_IR0 0x20u
 #define XHCI_IR_IMAN 0x00u
