@@ -56,3 +56,9 @@ drivers:
       - "ps2:keyboard"
       - "ps2:mouse"
       - "ps2:device"
+
+  hid:
+    executable: "/bin/hid_driver.elf"
+    compatible_ids:
+      - "usb:class:03:01:01"
+      - "usb:class:03:01:02"
