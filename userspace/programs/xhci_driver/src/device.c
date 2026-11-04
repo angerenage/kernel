@@ -2,6 +2,7 @@
 
 #include <base/dma.h>
 #include <base/memory.h>
+#include <runtime/log.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -122,9 +123,9 @@ static bool wait_event(struct xhci_controller* c, uint32_t expected_type, uint64
 			if (type == XHCI_TRB_COMMAND_COMPLETION || type == XHCI_TRB_TRANSFER_EVENT) {
 				if (!xhci_controller_queue_event(c, event)) return false;
 			}
-			else if (type != XHCI_TRB_PORT_STATUS) {
-				printf("xhci: event type=%u completion=%u\n", type, event.status >> XHCI_TRB_COMPLETION_SHIFT);
-			}
+			else if (type != XHCI_TRB_PORT_STATUS)
+				RUNTIME_DEBUG_LOG(
+					"xhci: event type=%u completion=%u\n", type, event.status >> XHCI_TRB_COMPLETION_SHIFT);
 			continue;
 		}
 		if (sleep_ms(1u) != SYSCALL_STATUS_OK) return false;
@@ -162,7 +163,7 @@ static bool reset_port(struct xhci_controller* c, unsigned port, uint32_t* out_s
 		}
 		if (sleep_ms(1u) != SYSCALL_STATUS_OK) return false;
 	}
-	fprintf(stderr, "xhci: port %u reset timeout (PORTSC=%08x)\n", port, status);
+	RUNTIME_DEBUG_ERROR("xhci: port %u reset timeout (PORTSC=%08x)\n", port, status);
 	return false;
 }
 
@@ -488,7 +489,7 @@ static bool configure_endpoints(struct xhci_controller* c, struct xhci_device* d
 	};
 	if (!command(c, trb, &completion) || !set_configuration(c, device)) return false;
 	for (unsigned i = 0u; i < device->endpoint_count; i++) device->endpoints[i].configured = true;
-	printf("xhci: slot %u configured %u bulk/interrupt endpoints\n", device->slot, device->endpoint_count);
+	RUNTIME_DEBUG_LOG("xhci: slot %u configured %u bulk/interrupt endpoints\n", device->slot, device->endpoint_count);
 	return true;
 }
 
@@ -548,14 +549,14 @@ static struct xhci_device* enumerate_port(struct xhci_controller* c, unsigned po
 		goto done;
 	device->vendor_id  = (uint16_t)descriptor[8] | ((uint16_t)descriptor[9] << 8u);
 	device->product_id = (uint16_t)descriptor[10] | ((uint16_t)descriptor[11] << 8u);
-	printf("xhci: port %u slot %u speed-id=%u VID=%04x PID=%04x usb=%x.%02x\n",
-	       port,
-	       device->slot,
-	       speed,
-	       (unsigned)((uint16_t)descriptor[8] | ((uint16_t)descriptor[9] << 8u)),
-	       (unsigned)((uint16_t)descriptor[10] | ((uint16_t)descriptor[11] << 8u)),
-	       descriptor[3],
-	       descriptor[2]);
+	RUNTIME_DEBUG_LOG("xhci: port %u slot %u speed-id=%u VID=%04x PID=%04x usb=%x.%02x\n",
+	                  port,
+	                  device->slot,
+	                  speed,
+	                  (unsigned)((uint16_t)descriptor[8] | ((uint16_t)descriptor[9] << 8u)),
+	                  (unsigned)((uint16_t)descriptor[10] | ((uint16_t)descriptor[11] << 8u)),
+	                  descriptor[3],
+	                  descriptor[2]);
 	success = true;
 done:
 	if (!success) {
@@ -601,7 +602,7 @@ bool xhci_device_poll(struct xhci_controller* c) {
 		if (c->devices[index] != NULL && !poll_interrupt_transfers(c, c->devices[index])) return false;
 		if (!connected) {
 			if (c->devices[index] != NULL) {
-				printf("xhci: port %u disconnected (slot %u)\n", port, c->devices[index]->slot);
+				RUNTIME_DEBUG_LOG("xhci: port %u disconnected (slot %u)\n", port, c->devices[index]->slot);
 				release_device(c, c->devices[index]);
 				free(c->devices[index]);
 				c->devices[index] = NULL;
@@ -617,13 +618,13 @@ bool xhci_device_poll(struct xhci_controller* c) {
 		}
 		uint32_t speed;
 		if (!reset_port(c, port, &speed)) {
-			fprintf(stderr, "xhci: unable to reset port %u\n", port);
+			RUNTIME_DEBUG_ERROR("xhci: unable to reset port %u\n", port);
 			c->port_retry_ticks[index] = 100u;
 			continue;
 		}
 		c->devices[index] = enumerate_port(c, port, speed);
 		if (c->devices[index] == NULL) {
-			fprintf(stderr, "xhci: unable to enumerate port %u\n", port);
+			RUNTIME_DEBUG_ERROR("xhci: unable to enumerate port %u\n", port);
 			c->port_retry_ticks[index] = 100u;
 		}
 		else {

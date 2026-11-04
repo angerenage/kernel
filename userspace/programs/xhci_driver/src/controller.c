@@ -5,6 +5,7 @@
 #include <protocol/device.h>
 #include <protocol/pci.h>
 #include <runtime/device.h>
+#include <runtime/log.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -62,7 +63,7 @@ static bool legacy_handoff(struct xhci_controller* c) {
 				fprintf(stderr, "xhci: firmware did not release controller ownership\n");
 				return false;
 			}
-			printf("xhci: firmware ownership transferred\n");
+			RUNTIME_DEBUG_LOG("xhci: firmware ownership transferred\n");
 		}
 		uint32_t next = (header >> XHCI_EXT_NEXT_SHIFT) & 0xffu;
 		if (next == 0u) return true;
@@ -190,7 +191,7 @@ bool xhci_controller_start(struct xhci_controller* c, cap_id_t device_cap) {
 			     ir + XHCI_IR_ERDP,
 			     (uint64_t)c->events.dma.device_address + (uint64_t)c->events.dequeue * sizeof(struct xhci_trb) | 8u);
 			if (type == XHCI_TRB_COMMAND_COMPLETION && pointer == command_address && code == XHCI_TRB_SUCCESS) {
-				printf("xhci: No Op command completed successfully\n");
+				RUNTIME_DEBUG_LOG("xhci: No Op command completed successfully\n");
 				return true;
 			}
 			if (type == XHCI_TRB_COMMAND_COMPLETION) {
@@ -230,9 +231,8 @@ bool xhci_controller_poll(struct xhci_controller* c) {
 		if (type == XHCI_TRB_COMMAND_COMPLETION || type == 32u) {
 			if (!xhci_controller_queue_event(c, event)) return false;
 		}
-		else if (type != 34u) {
-			printf("xhci: event type=%u completion=%u\n", type, event.status >> XHCI_TRB_COMPLETION_SHIFT);
-		}
+		else if (type != 34u)
+			RUNTIME_DEBUG_LOG("xhci: event type=%u completion=%u\n", type, event.status >> XHCI_TRB_COMPLETION_SHIFT);
 	}
 	if ((reg(c, c->op + XHCI_OP_USBSTS) & (1u << 2u)) != 0u) {
 		fprintf(stderr, "xhci: host system error\n");

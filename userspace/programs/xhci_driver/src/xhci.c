@@ -4,6 +4,7 @@
 #include <base/memory.h>
 #include <base/process.h>
 #include <runtime/device.h>
+#include <runtime/log.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -134,22 +135,22 @@ static bool probe_controller(const struct xhci_mapping* m, struct xhci_controlle
 	}
 	uint32_t command = read32(m, (size_t)caplength + XHCI_USBCMD);
 	uint32_t status  = read32(m, (size_t)caplength + XHCI_USBSTS);
-	printf("xhci: caphdr=%08x v%x.%02x ports=%u slots=%u intr=%u 64bit=%u\n",
-	       cap_header,
-	       (unsigned)(version >> 8u),
-	       (unsigned)(version & 0xffu),
-	       ports,
-	       slots,
-	       interrupters,
-	       (unsigned)(hcc1 & 1u));
-	printf("xhci: caplen=%x dboff=%x rtsoff=%x cmd=%08x sts=%08x hcs2=%08x scratchpads=%u\n",
-	       (unsigned)caplength,
-	       dboff,
-	       rtsoff,
-	       command,
-	       status,
-	       hcs2,
-	       scratchpads);
+	RUNTIME_DEBUG_LOG("xhci: caphdr=%08x v%x.%02x ports=%u slots=%u intr=%u 64bit=%u\n",
+	                  cap_header,
+	                  (unsigned)(version >> 8u),
+	                  (unsigned)(version & 0xffu),
+	                  ports,
+	                  slots,
+	                  interrupters,
+	                  (unsigned)(hcc1 & 1u));
+	RUNTIME_DEBUG_LOG("xhci: caplen=%x dboff=%x rtsoff=%x cmd=%08x sts=%08x hcs2=%08x scratchpads=%u\n",
+	                  (unsigned)caplength,
+	                  dboff,
+	                  rtsoff,
+	                  command,
+	                  status,
+	                  hcs2,
+	                  scratchpads);
 	unsigned connected = 0u;
 	unsigned shown     = 0u;
 	for (uint32_t index = 0u; index < ports; index++) {
@@ -158,13 +159,13 @@ static bool probe_controller(const struct xhci_mapping* m, struct xhci_controlle
 		if ((portsc & XHCI_PORTSC_CCS) == 0u) continue;
 		connected++;
 		if (shown++ < XHCI_LOG_PORT_LIMIT)
-			printf("xhci: port %u connected enabled=%u powered=%u speed-id=%u\n",
-			       (unsigned)(index + 1u),
-			       (unsigned)((portsc & XHCI_PORTSC_PED) != 0u),
-			       (unsigned)((portsc & XHCI_PORTSC_PP) != 0u),
-			       (unsigned)((portsc >> XHCI_PORTSC_SPEED_SHIFT) & XHCI_PORTSC_SPEED_MASK));
+			RUNTIME_DEBUG_LOG("xhci: port %u connected enabled=%u powered=%u speed-id=%u\n",
+			                  (unsigned)(index + 1u),
+			                  (unsigned)((portsc & XHCI_PORTSC_PED) != 0u),
+			                  (unsigned)((portsc & XHCI_PORTSC_PP) != 0u),
+			                  (unsigned)((portsc >> XHCI_PORTSC_SPEED_SHIFT) & XHCI_PORTSC_SPEED_MASK));
 	}
-	printf("xhci: connected ports=%u/%u (initial probe)\n", connected, ports);
+	RUNTIME_DEBUG_LOG("xhci: connected ports=%u/%u (initial probe)\n", connected, ports);
 	if (!contains(m->bar_size, (size_t)rtsoff + 0x20u, 0x20u) || !contains(m->bar_size, dboff, 4u) ||
 	    interrupters == 0u)
 		return false;
