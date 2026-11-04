@@ -1,5 +1,6 @@
 #pragma once
 
+#include <base/syscall.h>
 #include <protocol/usb.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -13,9 +14,9 @@ bool xhci_device_poll(struct xhci_controller* controller);
 /* Release every slot before stopping the controller or destroying DMA mappings. */
 void xhci_device_release_all(struct xhci_controller* controller);
 
-/* Synchronous transfer on a configured bulk/interrupt endpoint (one outstanding request per endpoint). */
-bool xhci_device_transfer(struct xhci_controller* controller, unsigned port, uint8_t endpoint_address, void* data,
-                          size_t length, size_t* transferred);
+/* Transfer on a configured endpoint, idle interrupt-IN endpoints return UNAVAILABLE while armed. */
+syscall_status_t xhci_device_transfer(struct xhci_controller* controller, unsigned port, uint8_t endpoint_address,
+                                      void* data, size_t length, size_t* transferred);
 
 /* Return the descriptors of a connected USB device. */
 bool xhci_device_info(struct xhci_controller* controller, unsigned port, unsigned interface_index,

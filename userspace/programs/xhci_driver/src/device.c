@@ -48,11 +48,16 @@
 struct xhci_endpoint {
 	struct xhci_ring       ring;
 	struct xhci_dma_buffer buffer;
+	uint64_t               pending_trb;
+	size_t                 pending_length;
+	size_t                 completed_length;
 	uint8_t                address;
 	uint8_t                attributes;
 	uint8_t                interval;
 	uint16_t               max_packet_size;
 	bool                   configured;
+	bool                   transfer_pending;
+	bool                   report_ready;
 	uint8_t                interface_number;
 };
 
@@ -269,12 +274,29 @@ static unsigned endpoint_dci(uint8_t address) {
 	return 2u * (address & 15u) + ((address & 0x80u) != 0u);
 }
 
-/* Synchronous endpoint transfer. The caller must serialize requests on this ring. */
-bool xhci_device_transfer(struct xhci_controller* c, unsigned port, uint8_t address, void* data, size_t length,
-                          size_t* transferred) {
-	if (c == NULL || port == 0u || port > c->ports) return false;
+static syscall_status_t submit_interrupt_in(struct xhci_controller* c, const struct xhci_device* device,
+                                            struct xhci_endpoint* ep, size_t length) {
+	memset(ep->buffer.cpu_address, 0, length);
+	if (!sync_dma(&ep->buffer, DMA_SYNC_FOR_DEVICE)) return SYSCALL_STATUS_FAILED;
+	struct xhci_trb trb = {
+		.parameter_low  = (uint32_t)ep->buffer.device_address,
+		.parameter_high = (uint32_t)((uint64_t)ep->buffer.device_address >> 32u),
+		.status         = (uint32_t)length,
+		.control        = (XHCI_TRB_NORMAL << XHCI_TRB_TYPE_SHIFT) | XHCI_TRB_IOC | (1u << 2u),
+	};
+	if (!xhci_ring_submit(&ep->ring, trb, &ep->pending_trb)) return SYSCALL_STATUS_FAILED;
+	ep->pending_length   = length;
+	ep->transfer_pending = true;
+	write_reg(c, (size_t)c->doorbell + (size_t)device->slot * 4u, endpoint_dci(ep->address));
+	return SYSCALL_STATUS_UNAVAILABLE;
+}
+
+syscall_status_t xhci_device_transfer(struct xhci_controller* c, unsigned port, uint8_t address, void* data,
+                                      size_t length, size_t* transferred) {
+	if (transferred != NULL) *transferred = 0u;
+	if (c == NULL || port == 0u || port > c->ports) return SYSCALL_STATUS_BAD_ARGUMENT;
 	struct xhci_device* device = c->devices[port - 1u];
-	if (device == NULL) return false;
+	if (device == NULL) return SYSCALL_STATUS_UNAVAILABLE;
 	struct xhci_endpoint* ep = NULL;
 	for (unsigned i = 0u; i < device->endpoint_count; i++) {
 		if (device->endpoints[i].address == address) {
@@ -282,12 +304,24 @@ bool xhci_device_transfer(struct xhci_controller* c, unsigned port, uint8_t addr
 			break;
 		}
 	}
-	if (ep == NULL) return false;
-	if (!ep->configured || length > ep->buffer.size || (length != 0u && data == NULL)) return false;
+	if (ep == NULL) return SYSCALL_STATUS_DENIED;
+	if (!ep->configured || length > ep->buffer.size || (length != 0u && data == NULL))
+		return SYSCALL_STATUS_BAD_ARGUMENT;
 	bool in = (ep->address & 0x80u) != 0u;
+	if (in && ep->attributes == 3u) {
+		if (ep->report_ready) {
+			size_t actual = ep->completed_length < length ? ep->completed_length : length;
+			if (actual != 0u) memcpy(data, ep->buffer.cpu_address, actual);
+			ep->report_ready = false;
+			if (transferred != NULL) *transferred = actual;
+			return SYSCALL_STATUS_OK;
+		}
+		if (ep->transfer_pending) return SYSCALL_STATUS_UNAVAILABLE;
+		return submit_interrupt_in(c, device, ep, length);
+	}
 	if (!in) {
 		if (length != 0u) memcpy(ep->buffer.cpu_address, data, length);
-		if (!sync_dma(&ep->buffer, DMA_SYNC_FOR_DEVICE)) return false;
+		if (!sync_dma(&ep->buffer, DMA_SYNC_FOR_DEVICE)) return SYSCALL_STATUS_FAILED;
 	}
 	uint64_t        trb_address;
 	struct xhci_trb trb = {
@@ -296,19 +330,19 @@ bool xhci_device_transfer(struct xhci_controller* c, unsigned port, uint8_t addr
 		.status         = (uint32_t)length,
 		.control        = (XHCI_TRB_NORMAL << XHCI_TRB_TYPE_SHIFT) | XHCI_TRB_IOC | (in ? (1u << 2u) : 0u),
 	};
-	if (!xhci_ring_submit(&ep->ring, trb, &trb_address)) return false;
+	if (!xhci_ring_submit(&ep->ring, trb, &trb_address)) return SYSCALL_STATUS_FAILED;
 	write_reg(c, (size_t)c->doorbell + (size_t)device->slot * 4u, endpoint_dci(ep->address));
 	struct xhci_trb completion;
 	if (!wait_event(c, XHCI_TRB_TRANSFER_EVENT, trb_address, &completion, true)) {
 		ep->configured = false; /* Do not reuse a ring with an unresolved transfer. */
-		return false;
+		return SYSCALL_STATUS_FAILED;
 	}
 	size_t residual = completion.status & 0xffffffu;
-	if (residual > length) return false;
+	if (residual > length) return SYSCALL_STATUS_FAILED;
 	if (transferred != NULL) *transferred = length - residual;
-	if (in && !sync_dma(&ep->buffer, DMA_SYNC_FOR_CPU)) return false;
+	if (in && !sync_dma(&ep->buffer, DMA_SYNC_FOR_CPU)) return SYSCALL_STATUS_FAILED;
 	if (in && length > residual) memcpy(data, ep->buffer.cpu_address, length - residual);
-	return true;
+	return SYSCALL_STATUS_OK;
 }
 
 bool xhci_device_control(struct xhci_controller* c, unsigned port, uint8_t interface_number,
@@ -522,11 +556,39 @@ done:
 	return device;
 }
 
+static bool poll_interrupt_transfers(struct xhci_controller* c, struct xhci_device* device) {
+	for (unsigned endpoint = 0u; endpoint < device->endpoint_count; endpoint++) {
+		struct xhci_endpoint* ep = &device->endpoints[endpoint];
+		if (!ep->transfer_pending) continue;
+		for (unsigned index = 0u; index < c->pending_count; index++) {
+			struct xhci_trb event   = c->pending[index];
+			uint32_t        type    = (event.control >> XHCI_TRB_TYPE_SHIFT) & 0x3fu;
+			uint64_t        pointer = (uint64_t)event.parameter_low | ((uint64_t)event.parameter_high << 32u);
+			if (type != XHCI_TRB_TRANSFER_EVENT || pointer != ep->pending_trb) continue;
+			c->pending[index]    = c->pending[--c->pending_count];
+			ep->transfer_pending = false;
+			uint32_t code        = event.status >> XHCI_TRB_COMPLETION_SHIFT;
+			if (code != XHCI_TRB_SUCCESS && code != XHCI_TRB_SHORT_PACKET) {
+				fprintf(stderr, "xhci: interrupt transfer failed: code=%u\n", code);
+				ep->configured = false;
+				return false;
+			}
+			size_t residual = event.status & 0xffffffu;
+			if (residual > ep->pending_length || !sync_dma(&ep->buffer, DMA_SYNC_FOR_CPU)) return false;
+			ep->completed_length = ep->pending_length - residual;
+			ep->report_ready     = true;
+			break;
+		}
+	}
+	return true;
+}
+
 bool xhci_device_poll(struct xhci_controller* c) {
 	for (unsigned port = 1u; port <= c->ports; port++) {
 		unsigned index     = port - 1u;
 		size_t   offset    = (size_t)c->op + 0x400u + (size_t)index * 0x10u;
 		bool     connected = (read_reg(c, offset) & XHCI_PORTSC_CCS) != 0u;
+		if (c->devices[index] != NULL && !poll_interrupt_transfers(c, c->devices[index])) return false;
 		if (!connected) {
 			if (c->devices[index] != NULL) {
 				printf("xhci: port %u disconnected (slot %u)\n", port, c->devices[index]->slot);

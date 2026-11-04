@@ -207,14 +207,16 @@ bool xhci_transport_poll(struct xhci_transport* t) {
 				if (!reply(&call, NULL, 0u, SYSCALL_STATUS_DENIED)) return false;
 				continue;
 			}
-			size_t transferred = 0u;
-			if (!xhci_device_transfer(t->controller,
-			                          port,
-			                          request.endpoint,
-			                          data + sizeof(struct usb_transport_transfer_response),
-			                          request.length,
-			                          &transferred)) {
-				if (!reply(&call, NULL, 0u, SYSCALL_STATUS_FAILED)) return false;
+			size_t           transferred = 0u;
+			syscall_status_t transfer_status =
+				xhci_device_transfer(t->controller,
+				                     port,
+				                     request.endpoint,
+				                     data + sizeof(struct usb_transport_transfer_response),
+				                     request.length,
+				                     &transferred);
+			if (transfer_status != SYSCALL_STATUS_OK) {
+				if (!reply(&call, NULL, 0u, transfer_status)) return false;
 				continue;
 			}
 			struct usb_transport_transfer_response response = {.transferred = (uint32_t)transferred};
