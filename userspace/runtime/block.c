@@ -5,6 +5,7 @@
 #include <runtime/block.h>
 #include <runtime/device.h>
 #include <stddef.h>
+#include <string.h>
 #include <system/capability.h>
 #include <system/memory.h>
 #include <system/process.h>
@@ -150,8 +151,9 @@ void block_buffer_release(const struct block_device* device, struct block_buffer
 		.memory_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .mapping_cap = CAP_ID_INVALID};
 }
 
-static syscall_status_t transfer(const struct block_device* device, struct block_buffer* buffer, uint32_t buffer_offset,
-                                 uint64_t block_index, uint32_t block_count, enum block_op operation) {
+static syscall_status_t transfer_blocks(const struct block_device* device, struct block_buffer* buffer,
+                                        uint32_t buffer_offset, uint64_t block_index, uint32_t block_count,
+                                        enum block_op operation) {
 	const struct block_transfer_request request = {.header        = {.op = operation},
 	                                               .block_count   = block_count,
 	                                               .block_index   = block_index,
@@ -174,15 +176,90 @@ static syscall_status_t transfer(const struct block_device* device, struct block
 			   : SYSCALL_STATUS_FAILED;
 }
 
-syscall_status_t block_read(const struct block_device* device, struct block_buffer* buffer, uint32_t buffer_offset,
-                            uint64_t block_index, uint32_t block_count) {
-	return transfer(device, buffer, buffer_offset, block_index, block_count, BLOCK_OP_READ);
+static bool byte_range_valid(const struct block_device* device, const struct block_buffer* buffer,
+                             uint32_t buffer_offset, const struct block_buffer* scratch, uint64_t byte_offset,
+                             uint32_t byte_count) {
+	if (device == NULL || buffer == NULL || scratch == NULL || byte_count == 0u || device->block_size == 0u ||
+	    device->max_transfer_blocks == 0u || device->block_count > UINT64_MAX / device->block_size ||
+	    buffer_offset > buffer->size || byte_count > buffer->size - buffer_offset || scratch->size < device->block_size)
+		return false;
+	uint64_t capacity = device->block_count * device->block_size;
+	return byte_offset < capacity && byte_count <= capacity - byte_offset;
 }
 
-syscall_status_t block_write(const struct block_device* device, struct block_buffer* buffer, uint32_t buffer_offset,
-                             uint64_t block_index, uint32_t block_count) {
-	if (device == NULL || (device->flags & BLOCK_DEVICE_WRITABLE) == 0u) return SYSCALL_STATUS_DENIED;
-	return transfer(device, buffer, buffer_offset, block_index, block_count, BLOCK_OP_WRITE);
+syscall_status_t block_read(const struct block_device* device, struct block_buffer* destination,
+                            uint32_t destination_offset, struct block_buffer* scratch, uint64_t byte_offset,
+                            uint32_t byte_count) {
+	if (!byte_range_valid(device, destination, destination_offset, scratch, byte_offset, byte_count))
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	uint32_t block_size = device->block_size;
+	uint32_t leading    = (uint32_t)(byte_offset % block_size);
+	uint8_t* output     = destination->address + destination_offset;
+	if (leading != 0u) {
+		uint32_t         chunk  = byte_count < block_size - leading ? byte_count : block_size - leading;
+		syscall_status_t status = transfer_blocks(device, scratch, 0u, byte_offset / block_size, 1u, BLOCK_OP_READ);
+		if (status != SYSCALL_STATUS_OK) return status;
+		memcpy(output, scratch->address + leading, chunk);
+		byte_offset += chunk;
+		output += chunk;
+		byte_count -= chunk;
+	}
+	while (byte_count >= block_size) {
+		uint32_t blocks = byte_count / block_size;
+		if (blocks > device->max_transfer_blocks) blocks = device->max_transfer_blocks;
+		syscall_status_t status = transfer_blocks(device,
+		                                          destination,
+		                                          (uint32_t)(output - destination->address),
+		                                          byte_offset / block_size,
+		                                          blocks,
+		                                          BLOCK_OP_READ);
+		if (status != SYSCALL_STATUS_OK) return status;
+		uint32_t chunk = blocks * block_size;
+		byte_offset += chunk;
+		output += chunk;
+		byte_count -= chunk;
+	}
+	if (byte_count == 0u) return SYSCALL_STATUS_OK;
+	syscall_status_t status = transfer_blocks(device, scratch, 0u, byte_offset / block_size, 1u, BLOCK_OP_READ);
+	if (status == SYSCALL_STATUS_OK) memcpy(output, scratch->address, byte_count);
+	return status;
+}
+
+syscall_status_t block_write(const struct block_device* device, struct block_buffer* source, uint32_t source_offset,
+                             struct block_buffer* scratch, uint64_t byte_offset, uint32_t byte_count) {
+	if (!byte_range_valid(device, source, source_offset, scratch, byte_offset, byte_count))
+		return SYSCALL_STATUS_BAD_ARGUMENT;
+	if ((device->flags & BLOCK_DEVICE_WRITABLE) == 0u) return SYSCALL_STATUS_DENIED;
+	uint32_t block_size = device->block_size;
+	uint32_t leading    = (uint32_t)(byte_offset % block_size);
+	uint8_t* input      = source->address + source_offset;
+	if (leading != 0u) {
+		uint32_t         chunk  = byte_count < block_size - leading ? byte_count : block_size - leading;
+		syscall_status_t status = transfer_blocks(device, scratch, 0u, byte_offset / block_size, 1u, BLOCK_OP_READ);
+		if (status != SYSCALL_STATUS_OK) return status;
+		memcpy(scratch->address + leading, input, chunk);
+		status = transfer_blocks(device, scratch, 0u, byte_offset / block_size, 1u, BLOCK_OP_WRITE);
+		if (status != SYSCALL_STATUS_OK) return status;
+		byte_offset += chunk;
+		input += chunk;
+		byte_count -= chunk;
+	}
+	while (byte_count >= block_size) {
+		uint32_t blocks = byte_count / block_size;
+		if (blocks > device->max_transfer_blocks) blocks = device->max_transfer_blocks;
+		syscall_status_t status = transfer_blocks(
+			device, source, (uint32_t)(input - source->address), byte_offset / block_size, blocks, BLOCK_OP_WRITE);
+		if (status != SYSCALL_STATUS_OK) return status;
+		uint32_t chunk = blocks * block_size;
+		byte_offset += chunk;
+		input += chunk;
+		byte_count -= chunk;
+	}
+	if (byte_count == 0u) return SYSCALL_STATUS_OK;
+	syscall_status_t status = transfer_blocks(device, scratch, 0u, byte_offset / block_size, 1u, BLOCK_OP_READ);
+	if (status != SYSCALL_STATUS_OK) return status;
+	memcpy(scratch->address, input, byte_count);
+	return transfer_blocks(device, scratch, 0u, byte_offset / block_size, 1u, BLOCK_OP_WRITE);
 }
 
 syscall_status_t block_flush(const struct block_device* device) {

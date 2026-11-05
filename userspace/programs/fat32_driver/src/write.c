@@ -165,9 +165,9 @@ static enum fat32_result find_directory_entry(struct fat32_volume* volume, uint3
 		out->tail_cluster     = cluster;
 		uint64_t first_sector = fat32_volume_cluster_sector(volume, cluster);
 		for (uint32_t sector = 0u; sector < volume->sectors_per_cluster; sector++) {
-			enum fat32_result result = fat32_volume_read_sector(volume, first_sector + sector);
+			enum fat32_result result = fat32_volume_read(volume, &volume->buffer, first_sector + sector, 1u);
 			if (result != FAT32_RESULT_OK) return result;
-			for (uint32_t offset = 0u; offset < volume->device.block_size; offset += FAT32_DIRECTORY_ENTRY_SIZE) {
+			for (uint32_t offset = 0u; offset < volume->sector_size; offset += FAT32_DIRECTORY_ENTRY_SIZE) {
 				const uint8_t* entry = volume->buffer.address + offset;
 				if (++slots_seen > FAT32_DIRECTORY_MAX_SLOTS) return FAT32_RESULT_UNSUPPORTED;
 				if (entry[0u] == 0u) {
@@ -213,7 +213,7 @@ static enum fat32_result find_directory_entry(struct fat32_volume* volume, uint3
 
 static enum fat32_result collect_chain(struct fat32_volume* volume, uint32_t first, uint32_t size,
                                        uint32_t** out_clusters, size_t* out_count) {
-	uint64_t cluster_size = (uint64_t)volume->device.block_size * volume->sectors_per_cluster;
+	uint64_t cluster_size = (uint64_t)volume->sector_size * volume->sectors_per_cluster;
 	size_t   count        = size == 0u ? 0u : (size_t)((size + cluster_size - 1u) / cluster_size);
 	*out_clusters         = NULL;
 	*out_count            = 0u;
@@ -277,7 +277,7 @@ static enum fat32_result release_clusters(struct fat32_volume* volume, const uin
 
 static enum fat32_result allocate_chain(struct fat32_volume* volume, size_t size, uint32_t** out_clusters,
                                         size_t* out_count) {
-	uint64_t cluster_size = (uint64_t)volume->device.block_size * volume->sectors_per_cluster;
+	uint64_t cluster_size = (uint64_t)volume->sector_size * volume->sectors_per_cluster;
 	size_t   count        = size == 0u ? 0u : (size_t)((size + cluster_size - 1u) / cluster_size);
 	*out_clusters         = NULL;
 	*out_count            = 0u;
@@ -312,11 +312,11 @@ static enum fat32_result write_chain(struct fat32_volume* volume, const uint32_t
 	for (size_t index = 0u; index < count; index++) {
 		uint64_t first_sector = fat32_volume_cluster_sector(volume, clusters[index]);
 		for (uint32_t sector = 0u; sector < volume->sectors_per_cluster; sector++) {
-			memset(volume->buffer.address, 0, volume->device.block_size);
+			memset(volume->buffer.address, 0, volume->sector_size);
 			size_t chunk = size - position;
-			if (chunk > volume->device.block_size) chunk = volume->device.block_size;
+			if (chunk > volume->sector_size) chunk = volume->sector_size;
 			if (chunk != 0u) memcpy(volume->buffer.address, data + position, chunk);
-			enum fat32_result result = fat32_volume_write_sector(volume, first_sector + sector);
+			enum fat32_result result = fat32_volume_write(volume, &volume->buffer, first_sector + sector, 1u);
 			if (result != FAT32_RESULT_OK) return result;
 			position += chunk;
 		}
@@ -438,9 +438,9 @@ static enum fat32_result find_free_slots(struct fat32_volume* volume, uint32_t d
 	for (;;) {
 		uint64_t first_sector = fat32_volume_cluster_sector(volume, cluster);
 		for (uint32_t sector = 0u; sector < volume->sectors_per_cluster; sector++) {
-			enum fat32_result result = fat32_volume_read_sector(volume, first_sector + sector);
+			enum fat32_result result = fat32_volume_read(volume, &volume->buffer, first_sector + sector, 1u);
 			if (result != FAT32_RESULT_OK) return result;
-			for (uint32_t offset = 0u; offset < volume->device.block_size; offset += FAT32_DIRECTORY_ENTRY_SIZE) {
+			for (uint32_t offset = 0u; offset < volume->sector_size; offset += FAT32_DIRECTORY_ENTRY_SIZE) {
 				const uint8_t* entry = volume->buffer.address + offset;
 				if (entry[0u] == 0u) ended = true;
 				if (ended || entry[0u] == 0xe5u) {
@@ -513,26 +513,26 @@ static void format_directory_entry(uint8_t entry[FAT32_DIRECTORY_ENTRY_SIZE], co
 static enum fat32_result write_directory_entry(struct fat32_volume* volume, const struct root_entry* location,
                                                const uint8_t name[11], uint8_t attributes, uint32_t cluster,
                                                uint32_t size) {
-	enum fat32_result result = fat32_volume_read_sector(volume, location->sector);
+	enum fat32_result result = fat32_volume_read(volume, &volume->buffer, location->sector, 1u);
 	if (result != FAT32_RESULT_OK) return result;
 	uint8_t* entry = volume->buffer.address + location->offset;
 	format_directory_entry(entry, name, attributes, cluster, size);
-	return fat32_volume_write_sector(volume, location->sector);
+	return fat32_volume_write(volume, &volume->buffer, location->sector, 1u);
 }
 
 static enum fat32_result write_slot(struct fat32_volume* volume, struct directory_slot slot,
                                     const uint8_t entry[FAT32_DIRECTORY_ENTRY_SIZE]) {
-	enum fat32_result result = fat32_volume_read_sector(volume, slot.sector);
+	enum fat32_result result = fat32_volume_read(volume, &volume->buffer, slot.sector, 1u);
 	if (result != FAT32_RESULT_OK) return result;
 	memcpy(volume->buffer.address + slot.offset, entry, FAT32_DIRECTORY_ENTRY_SIZE);
-	return fat32_volume_write_sector(volume, slot.sector);
+	return fat32_volume_write(volume, &volume->buffer, slot.sector, 1u);
 }
 
 static void delete_slots_best_effort(struct fat32_volume* volume, const struct directory_slot* slots, size_t count) {
 	for (size_t index = 0u; index < count; index++) {
-		if (fat32_volume_read_sector(volume, slots[index].sector) != FAT32_RESULT_OK) continue;
+		if (fat32_volume_read(volume, &volume->buffer, slots[index].sector, 1u) != FAT32_RESULT_OK) continue;
 		volume->buffer.address[slots[index].offset] = 0xe5u;
-		(void)fat32_volume_write_sector(volume, slots[index].sector);
+		(void)fat32_volume_write(volume, &volume->buffer, slots[index].sector, 1u);
 	}
 }
 
@@ -590,9 +590,9 @@ static enum fat32_result locate_entry_slots(struct fat32_volume* volume, uint32_
 	for (;;) {
 		uint64_t first_sector = fat32_volume_cluster_sector(volume, cluster);
 		for (uint32_t sector = 0u; sector < volume->sectors_per_cluster; sector++) {
-			enum fat32_result result = fat32_volume_read_sector(volume, first_sector + sector);
+			enum fat32_result result = fat32_volume_read(volume, &volume->buffer, first_sector + sector, 1u);
 			if (result != FAT32_RESULT_OK) return result;
-			for (uint32_t offset = 0u; offset < volume->device.block_size; offset += FAT32_DIRECTORY_ENTRY_SIZE) {
+			for (uint32_t offset = 0u; offset < volume->sector_size; offset += FAT32_DIRECTORY_ENTRY_SIZE) {
 				const uint8_t* raw = volume->buffer.address + offset;
 				if (raw[0u] == 0u) return FAT32_RESULT_NOT_FOUND;
 				if (raw[0u] == 0xe5u) {
@@ -632,13 +632,13 @@ static enum fat32_result delete_entry_slots(struct fat32_volume* volume, uint32_
 	if (result != FAT32_RESULT_OK) return result;
 	for (size_t index = 0u; index < count;) {
 		uint64_t sector = slots[index].sector;
-		result          = fat32_volume_read_sector(volume, sector);
+		result          = fat32_volume_read(volume, &volume->buffer, sector, 1u);
 		if (result != FAT32_RESULT_OK) return result;
 		do {
 			volume->buffer.address[slots[index].offset] = 0xe5u;
 			index++;
 		} while (index < count && slots[index].sector == sector);
-		result = fat32_volume_write_sector(volume, sector);
+		result = fat32_volume_write(volume, &volume->buffer, sector, 1u);
 		if (result != FAT32_RESULT_OK) return result;
 	}
 	return FAT32_RESULT_OK;
@@ -657,10 +657,10 @@ static enum fat32_result verify_file(struct fat32_volume* volume, uint32_t direc
 	for (size_t index = 0u; index < count && result == FAT32_RESULT_OK; index++) {
 		uint64_t first_sector = fat32_volume_cluster_sector(volume, clusters[index]);
 		for (uint32_t sector = 0u; sector < volume->sectors_per_cluster && position < size; sector++) {
-			result = fat32_volume_read_sector(volume, first_sector + sector);
+			result = fat32_volume_read(volume, &volume->buffer, first_sector + sector, 1u);
 			if (result != FAT32_RESULT_OK) break;
 			size_t chunk = size - position;
-			if (chunk > volume->device.block_size) chunk = volume->device.block_size;
+			if (chunk > volume->sector_size) chunk = volume->sector_size;
 			if (memcmp(volume->buffer.address, data + position, chunk) != 0) result = FAT32_RESULT_UNSUPPORTED;
 			position += chunk;
 		}
@@ -765,16 +765,16 @@ static enum fat32_result initialize_directory(struct fat32_volume* volume, uint3
 	uint64_t             first_sector    = fat32_volume_cluster_sector(volume, cluster);
 	enum fat32_result    result;
 
-	result = fat32_volume_read_sector(volume, first_sector);
+	result = fat32_volume_read(volume, &volume->buffer, first_sector, 1u);
 	if (result != FAT32_RESULT_OK) return result;
-	memset(volume->buffer.address, 0, volume->device.block_size);
+	memset(volume->buffer.address, 0, volume->sector_size);
 	format_directory_entry(volume->buffer.address, dot_name, FAT32_ATTRIBUTE_DIRECTORY, cluster, 0u);
 	format_directory_entry(volume->buffer.address + FAT32_DIRECTORY_ENTRY_SIZE,
 	                       dotdot_name,
 	                       FAT32_ATTRIBUTE_DIRECTORY,
 	                       parent_cluster,
 	                       0u);
-	return fat32_volume_write_sector(volume, first_sector);
+	return fat32_volume_write(volume, &volume->buffer, first_sector, 1u);
 }
 
 enum fat32_result fat32_create_directory(struct fat32_volume* volume, uint32_t parent_cluster, const void* name,
@@ -889,7 +889,7 @@ enum fat32_result fat32_remove_node(struct fat32_volume* volume, uint32_t parent
 static enum fat32_result update_parent_entry(struct fat32_volume* volume, uint32_t directory_cluster,
                                              uint32_t parent_cluster) {
 	uint64_t          sector = fat32_volume_cluster_sector(volume, directory_cluster);
-	enum fat32_result result = fat32_volume_read_sector(volume, sector);
+	enum fat32_result result = fat32_volume_read(volume, &volume->buffer, sector, 1u);
 	if (result != FAT32_RESULT_OK) return result;
 	uint8_t* entry = volume->buffer.address + FAT32_DIRECTORY_ENTRY_SIZE;
 	if (entry[0u] != '.' || entry[1u] != '.' || (entry[11u] & FAT32_ATTRIBUTE_DIRECTORY) == 0u)
@@ -897,7 +897,7 @@ static enum fat32_result update_parent_entry(struct fat32_volume* volume, uint32
 	uint32_t encoded = parent_cluster == volume->root_cluster ? 0u : parent_cluster;
 	write_u16_le(entry + 20u, (uint16_t)(encoded >> 16u));
 	write_u16_le(entry + 26u, (uint16_t)encoded);
-	return fat32_volume_write_sector(volume, sector);
+	return fat32_volume_write(volume, &volume->buffer, sector, 1u);
 }
 
 enum fat32_result fat32_rename_node(struct fat32_volume* volume, uint32_t old_parent_cluster, const void* old_name,

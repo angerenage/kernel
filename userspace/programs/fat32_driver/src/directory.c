@@ -242,18 +242,17 @@ static enum fat32_result scan_directory(struct fat32_volume* volume, uint32_t di
 
 	for (;;) {
 		uint64_t first_sector     = fat32_volume_cluster_sector(volume, cluster);
-		bool     cluster_buffered = volume->sectors_per_cluster <= volume->device.max_transfer_blocks &&
-		                            volume->sectors_per_cluster <= volume->buffer.size / volume->device.block_size;
+		bool     cluster_buffered = volume->sectors_per_cluster <= volume->buffer.size / volume->sector_size;
 		if (cluster_buffered &&
-		    block_read(&volume->device, &volume->buffer, 0u, first_sector, volume->sectors_per_cluster) !=
-		        SYSCALL_STATUS_OK)
+		    fat32_volume_read(volume, &volume->buffer, first_sector, volume->sectors_per_cluster) != FAT32_RESULT_OK)
 			return FAT32_RESULT_ERROR;
 		for (uint32_t sector = 0u; sector < volume->sectors_per_cluster; sector++) {
-			if (!cluster_buffered && fat32_volume_read_sector(volume, first_sector + sector) != FAT32_RESULT_OK)
+			if (!cluster_buffered &&
+			    fat32_volume_read(volume, &volume->buffer, first_sector + sector, 1u) != FAT32_RESULT_OK)
 				return FAT32_RESULT_ERROR;
-			for (uint32_t offset = 0u; offset < volume->device.block_size; offset += FAT32_DIRECTORY_ENTRY_SIZE) {
-				const uint8_t* raw = volume->buffer.address +
-				                     (cluster_buffered ? (size_t)sector * volume->device.block_size : 0u) + offset;
+			for (uint32_t offset = 0u; offset < volume->sector_size; offset += FAT32_DIRECTORY_ENTRY_SIZE) {
+				const uint8_t* raw =
+					volume->buffer.address + (cluster_buffered ? (size_t)sector * volume->sector_size : 0u) + offset;
 				if (raw[0u] == 0u) goto complete;
 				if (++slots_seen > FAT32_DIRECTORY_MAX_SLOTS) return FAT32_RESULT_UNSUPPORTED;
 				if (raw[11u] == FAT32_ATTRIBUTE_LONG_NAME) {
@@ -291,7 +290,7 @@ static enum fat32_result scan_directory(struct fat32_volume* volume, uint32_t di
 		enum fat32_result result = fat32_volume_next_cluster(volume, cluster, &next, &end);
 		if (result != FAT32_RESULT_OK) return result;
 		if (end) break;
-		if (slots_seen / (volume->device.block_size / FAT32_DIRECTORY_ENTRY_SIZE) > volume->cluster_count)
+		if (slots_seen / (volume->sector_size / FAT32_DIRECTORY_ENTRY_SIZE) > volume->cluster_count)
 			return FAT32_RESULT_UNSUPPORTED;
 		cluster = next;
 	}
@@ -327,7 +326,7 @@ enum fat32_result fat32_file_read(struct fat32_volume* volume, const struct fat3
 	if (offset >= entry->size || size == 0u) return FAT32_RESULT_OK;
 	uint64_t available = entry->size - offset;
 	if (size > available) size = (size_t)available;
-	uint64_t cluster_size = (uint64_t)volume->device.block_size * volume->sectors_per_cluster;
+	uint64_t cluster_size = (uint64_t)volume->sector_size * volume->sectors_per_cluster;
 	uint64_t skip         = offset / cluster_size;
 	uint32_t cluster      = entry->cluster;
 	for (uint64_t index = 0u; index < skip; index++) {
@@ -340,11 +339,11 @@ enum fat32_result fat32_file_read(struct fat32_volume* volume, const struct fat3
 	size_t   copied         = 0u;
 	uint64_t cluster_offset = offset % cluster_size;
 	while (copied < size) {
-		uint32_t sector_index  = (uint32_t)(cluster_offset / volume->device.block_size);
-		uint32_t sector_offset = (uint32_t)(cluster_offset % volume->device.block_size);
-		if (sector_offset == 0u && size - copied >= volume->device.block_size) {
-			uint32_t block_capacity = volume->buffer.size / volume->device.block_size;
-			uint32_t requested      = (uint32_t)((size - copied) / volume->device.block_size);
+		uint32_t sector_index  = (uint32_t)(cluster_offset / volume->sector_size);
+		uint32_t sector_offset = (uint32_t)(cluster_offset % volume->sector_size);
+		if (sector_offset == 0u && size - copied >= volume->sector_size) {
+			uint32_t block_capacity = volume->buffer.size / volume->sector_size;
+			uint32_t requested      = (uint32_t)((size - copied) / volume->sector_size);
 			if (requested > block_capacity) requested = block_capacity;
 			uint64_t first_sector = fat32_volume_cluster_sector(volume, cluster) + sector_index;
 			uint32_t walk_cluster = cluster;
@@ -365,10 +364,9 @@ enum fat32_result fat32_file_read(struct fat32_volume* volume, const struct fat3
 					walk_sector  = 0u;
 				}
 			}
-			if (planned == 0u ||
-			    block_read(&volume->device, &volume->buffer, 0u, first_sector, planned) != SYSCALL_STATUS_OK)
+			if (planned == 0u || fat32_volume_read(volume, &volume->buffer, first_sector, planned) != FAT32_RESULT_OK)
 				return FAT32_RESULT_ERROR;
-			size_t chunk = (size_t)planned * volume->device.block_size;
+			size_t chunk = (size_t)planned * volume->sector_size;
 			memcpy((uint8_t*)buffer + copied, volume->buffer.address, chunk);
 			copied += chunk;
 			if (walk_sector == volume->sectors_per_cluster) {
@@ -383,13 +381,13 @@ enum fat32_result fat32_file_read(struct fat32_volume* volume, const struct fat3
 				walk_sector  = 0u;
 			}
 			cluster        = walk_cluster;
-			cluster_offset = (uint64_t)walk_sector * volume->device.block_size;
+			cluster_offset = (uint64_t)walk_sector * volume->sector_size;
 			continue;
 		}
 		enum fat32_result result =
-			fat32_volume_read_sector(volume, fat32_volume_cluster_sector(volume, cluster) + sector_index);
+			fat32_volume_read(volume, &volume->buffer, fat32_volume_cluster_sector(volume, cluster) + sector_index, 1u);
 		if (result != FAT32_RESULT_OK) return result;
-		size_t chunk = volume->device.block_size - sector_offset;
+		size_t chunk = volume->sector_size - sector_offset;
 		if (chunk > size - copied) chunk = size - copied;
 		memcpy((uint8_t*)buffer + copied, volume->buffer.address + sector_offset, chunk);
 		copied += chunk;

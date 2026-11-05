@@ -37,6 +37,7 @@ struct partition_table {
 	struct partition_entry* entries;
 	size_t                  count;
 	size_t                  capacity;
+	uint32_t                block_size;
 };
 
 /* Append one partition record without changing existing entries on failure. */

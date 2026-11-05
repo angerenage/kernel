@@ -131,28 +131,39 @@ static bool wait_for_shutdown(void) {
 bool partition_service_run(cap_id_t device_cap, struct block_device* parent, const struct partition_table* partitions) {
 	if (parent == NULL || partitions == NULL || partitions->count == 0u) return false;
 	for (size_t index = 0u; index < partitions->count; index++) {
-		const struct partition_entry* partition = &partitions->entries[index];
-		cap_id_t                      slice_cap = CAP_ID_INVALID;
-		if (block_device_slice(parent, partition->first_lba, partition->block_count, &slice_cap) != SYSCALL_STATUS_OK)
+		struct partition_entry partition = partitions->entries[index];
+		if (partitions->block_size == 0u || partition.first_lba > UINT64_MAX / partitions->block_size ||
+		    partition.block_count > UINT64_MAX / partitions->block_size)
 			return false;
-		bool created = create_child(device_cap, slice_cap, parent, partition);
+		uint64_t byte_offset = partition.first_lba * partitions->block_size;
+		uint64_t byte_count  = partition.block_count * partitions->block_size;
+		if (byte_offset % parent->block_size != 0u || byte_count % parent->block_size != 0u) {
+			fprintf(stderr, "partition: partition-%u is not aligned to the device block size\n", partition.table_index);
+			return false;
+		}
+		partition.first_lba   = byte_offset / parent->block_size;
+		partition.block_count = byte_count / parent->block_size;
+		cap_id_t slice_cap    = CAP_ID_INVALID;
+		if (block_device_slice(parent, partition.first_lba, partition.block_count, &slice_cap) != SYSCALL_STATUS_OK)
+			return false;
+		bool created = create_child(device_cap, slice_cap, parent, &partition);
 		(void)cap_drop(slice_cap);
 		if (!created) return false;
 
 		char precise[5u + PARTITION_GUID_STRING_SIZE];
-		if (partition->scheme == PARTITION_SCHEME_GPT) {
+		if (partition.scheme == PARTITION_SCHEME_GPT) {
 			char guid[PARTITION_GUID_STRING_SIZE];
-			partition_format_guid(partition->gpt.type_guid, guid);
+			partition_format_guid(partition.gpt.type_guid, guid);
 			(void)snprintf(precise, sizeof(precise), "gpt:%s", guid);
 		}
 		else {
-			(void)snprintf(precise, sizeof(precise), "mbr:%02x", partition->mbr.type);
+			(void)snprintf(precise, sizeof(precise), "mbr:%02x", partition.mbr.type);
 		}
 		RUNTIME_DEBUG_LOG("partition: published partition-%u as block slice (%s, first_lba=%llu, blocks=%llu)\n",
-		                  partition->table_index,
+		                  partition.table_index,
 		                  precise,
-		                  (unsigned long long)partition->first_lba,
-		                  (unsigned long long)partition->block_count);
+		                  (unsigned long long)partition.first_lba,
+		                  (unsigned long long)partition.block_count);
 	}
 	printf("partition: published %zu partition device%s\n", partitions->count, partitions->count == 1u ? "" : "s");
 	block_device_close(parent);

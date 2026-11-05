@@ -141,13 +141,14 @@ syscall_status_t block_buffer_allocate(const struct block_device* device, uint32
 /* Unmap and release a provider-owned buffer. */
 void block_buffer_release(const struct block_device* device, struct block_buffer* buffer);
 
-/* Read complete logical blocks into a provider-owned buffer. */
-syscall_status_t block_read(const struct block_device* device, struct block_buffer* buffer, uint32_t buffer_offset,
-                            uint64_t block_index, uint32_t block_count);
+/* Read an arbitrary byte range, using scratch for partial device blocks. */
+syscall_status_t block_read(const struct block_device* device, struct block_buffer* destination,
+                            uint32_t destination_offset, struct block_buffer* scratch, uint64_t byte_offset,
+                            uint32_t byte_count);
 
-/* Write complete logical blocks from a provider-owned buffer. */
-syscall_status_t block_write(const struct block_device* device, struct block_buffer* buffer, uint32_t buffer_offset,
-                             uint64_t block_index, uint32_t block_count);
+/* Write an arbitrary byte range, preserving bytes outside it in partial device blocks. */
+syscall_status_t block_write(const struct block_device* device, struct block_buffer* source, uint32_t source_offset,
+                             struct block_buffer* scratch, uint64_t byte_offset, uint32_t byte_count);
 
 /* Commit writes completed before this call. */
 syscall_status_t block_flush(const struct block_device* device);

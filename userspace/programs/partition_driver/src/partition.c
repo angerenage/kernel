@@ -36,6 +36,8 @@ static enum partition_probe_result probe_partition_table(struct block_device*   
                                                          struct partition_table* partitions) {
 	struct block_buffer buffer = {
 		.memory_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .mapping_cap = CAP_ID_INVALID};
+	struct block_buffer scratch = {
+		.memory_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .mapping_cap = CAP_ID_INVALID};
 	struct mbr_table table;
 	enum gpt_result  gpt = gpt_probe(device, partitions);
 
@@ -46,23 +48,31 @@ static enum partition_probe_result probe_partition_table(struct block_device*   
 		return PARTITION_PROBE_EMPTY;
 	}
 
-	if (block_buffer_allocate(device, device->block_size, &buffer) != SYSCALL_STATUS_OK) goto done;
-	if (block_read(device, &buffer, 0u, 0u, 1u) != SYSCALL_STATUS_OK) goto done;
-	if (mbr_parse(buffer.address, device->block_size, device->block_count, &table) != MBR_RESULT_VALID) {
+	uint64_t disk_bytes = device->block_count * device->block_size;
+	if (block_buffer_allocate(device, 512u, &buffer) != SYSCALL_STATUS_OK ||
+	    block_buffer_allocate(device, device->block_size, &scratch) != SYSCALL_STATUS_OK)
+		goto done;
+	if (block_read(device, &buffer, 0u, &scratch, 0u, 512u) != SYSCALL_STATUS_OK) goto done;
+	if (mbr_parse(buffer.address, 512u, disk_bytes / 512u, &table) != MBR_RESULT_VALID) {
+		block_buffer_release(device, &scratch);
 		block_buffer_release(device, &buffer);
 		return PARTITION_PROBE_EMPTY;
 	}
 	if (!mbr_is_legacy_usable(&table)) {
 		printf("partition: refusing protective or hybrid MBR without a valid GPT\n");
+		block_buffer_release(device, &scratch);
 		block_buffer_release(device, &buffer);
 		return PARTITION_PROBE_EMPTY;
 	}
 	if (!append_mbr_partitions(&table, partitions)) goto done;
+	partitions->block_size = 512u;
 	mbr_print(&table);
+	block_buffer_release(device, &scratch);
 	block_buffer_release(device, &buffer);
 	return partitions->count == 0u ? PARTITION_PROBE_EMPTY : PARTITION_PROBE_FOUND;
 
 done:
+	block_buffer_release(device, &scratch);
 	block_buffer_release(device, &buffer);
 	return PARTITION_PROBE_ERROR;
 }

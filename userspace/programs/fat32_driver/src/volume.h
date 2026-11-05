@@ -20,6 +20,8 @@ struct fat32_volume {
 	struct block_device device;
 	struct block_buffer buffer;
 	struct block_buffer fat_buffer;
+	struct block_buffer io_buffer;
+	uint32_t            sector_size;
 	uint64_t            total_sectors;
 	uint64_t            fat_base;
 	uint64_t            fat_start;
@@ -46,11 +48,13 @@ enum fat32_result fat32_volume_open(cap_id_t device_cap, struct fat32_volume* ou
 /* Release the reusable buffers and block session. */
 void fat32_volume_close(struct fat32_volume* volume);
 
-/* Read one volume-relative logical sector into the reusable buffer. */
-enum fat32_result fat32_volume_read_sector(struct fat32_volume* volume, uint64_t sector);
+/* Read consecutive volume-relative sectors into a provider-owned buffer. */
+enum fat32_result fat32_volume_read(struct fat32_volume* volume, struct block_buffer* buffer, uint64_t sector,
+                                    uint32_t count);
 
-/* Write the reusable buffer to one volume-relative logical sector. */
-enum fat32_result fat32_volume_write_sector(struct fat32_volume* volume, uint64_t sector);
+/* Write consecutive volume-relative sectors from a provider-owned buffer. */
+enum fat32_result fat32_volume_write(struct fat32_volume* volume, struct block_buffer* buffer, uint64_t sector,
+                                     uint32_t count);
 
 /* Read one masked FAT32 entry from the selected FAT. */
 enum fat32_result fat32_volume_read_fat(struct fat32_volume* volume, uint32_t cluster, uint32_t* out_value);

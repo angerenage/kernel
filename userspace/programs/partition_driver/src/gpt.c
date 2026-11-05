@@ -29,6 +29,11 @@ struct gpt_header {
 	uint32_t entries_crc;
 };
 
+struct gpt_buffers {
+	struct block_buffer data;
+	struct block_buffer scratch;
+};
+
 static uint32_t read_u32_le(const uint8_t* value) {
 	return (uint32_t)value[0] | (uint32_t)value[1] << 8u | (uint32_t)value[2] << 16u | (uint32_t)value[3] << 24u;
 }
@@ -66,49 +71,68 @@ static bool range_contains(uint64_t first, uint64_t count, uint64_t value) {
 	return value >= first && value - first < count;
 }
 
-static enum gpt_result read_header(const struct block_device* device, uint64_t lba, struct gpt_header* out_header) {
-	struct block_buffer buffer = {
-		.memory_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .mapping_cap = CAP_ID_INVALID};
-	enum gpt_result result = GPT_RESULT_IO_ERROR;
+static void buffers_release(const struct block_device* device, struct gpt_buffers* buffers) {
+	block_buffer_release(device, &buffers->scratch);
+	block_buffer_release(device, &buffers->data);
+}
 
-	if (block_buffer_allocate(device, device->block_size, &buffer) != SYSCALL_STATUS_OK) return result;
-	if (block_read(device, &buffer, 0u, lba, 1u) != SYSCALL_STATUS_OK) goto done;
-	if (memcmp(buffer.address, "EFI PART", 8u) != 0) {
+static enum gpt_result buffers_allocate(const struct block_device* device, uint32_t data_size,
+                                        struct gpt_buffers* buffers) {
+	*buffers = (struct gpt_buffers){
+		.data    = {.memory_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .mapping_cap = CAP_ID_INVALID},
+		.scratch = {.memory_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .mapping_cap = CAP_ID_INVALID},
+	};
+	if (block_buffer_allocate(device, data_size, &buffers->data) != SYSCALL_STATUS_OK ||
+	    block_buffer_allocate(device, device->block_size, &buffers->scratch) != SYSCALL_STATUS_OK) {
+		buffers_release(device, buffers);
+		return GPT_RESULT_IO_ERROR;
+	}
+	return GPT_RESULT_VALID;
+}
+
+static enum gpt_result read_header(const struct block_device* device, uint32_t sector_size, uint64_t disk_sectors,
+                                   uint64_t lba, struct gpt_header* out_header) {
+	struct gpt_buffers buffers;
+	enum gpt_result    result = buffers_allocate(device, sector_size, &buffers);
+	if (result != GPT_RESULT_VALID) return result;
+	if (block_read(device, &buffers.data, 0u, &buffers.scratch, lba * sector_size, sector_size) != SYSCALL_STATUS_OK)
+		goto done;
+	if (memcmp(buffers.data.address, "EFI PART", 8u) != 0) {
 		result = GPT_RESULT_NOT_PRESENT;
 		goto done;
 	}
-	uint32_t revision     = read_u32_le(buffer.address + 8u);
-	uint32_t header_size  = read_u32_le(buffer.address + 12u);
-	uint32_t expected_crc = read_u32_le(buffer.address + GPT_HEADER_CRC_OFFSET);
-	uint32_t entry_count  = read_u32_le(buffer.address + 80u);
-	uint32_t entry_size   = read_u32_le(buffer.address + 84u);
-	uint64_t entries_bytes;
-
-	if ((revision >> 16u) != 1u || header_size < GPT_HEADER_MIN_SIZE || header_size > device->block_size ||
-	    read_u32_le(buffer.address + 20u) != 0u || header_crc32(buffer.address, header_size) != expected_crc ||
-	    all_zero(buffer.address + 56u, 16u) || entry_count == 0u || entry_size < GPT_ENTRY_MIN_SIZE ||
-	    entry_size % GPT_ENTRY_ALIGNMENT != 0u || entry_count > UINT64_MAX / entry_size) {
+	uint32_t revision     = read_u32_le(buffers.data.address + 8u);
+	uint32_t header_size  = read_u32_le(buffers.data.address + 12u);
+	uint32_t expected_crc = read_u32_le(buffers.data.address + GPT_HEADER_CRC_OFFSET);
+	uint32_t entry_count  = read_u32_le(buffers.data.address + 80u);
+	uint32_t entry_size   = read_u32_le(buffers.data.address + 84u);
+	if ((revision >> 16u) != 1u || header_size < GPT_HEADER_MIN_SIZE || header_size > sector_size ||
+	    read_u32_le(buffers.data.address + 20u) != 0u ||
+	    header_crc32(buffers.data.address, header_size) != expected_crc || all_zero(buffers.data.address + 56u, 16u) ||
+	    entry_count == 0u || entry_size < GPT_ENTRY_MIN_SIZE || entry_size % GPT_ENTRY_ALIGNMENT != 0u ||
+	    entry_count > UINT64_MAX / entry_size) {
 		result = GPT_RESULT_INVALID;
 		goto done;
 	}
-	entries_bytes         = (uint64_t)entry_count * entry_size;
-	*out_header           = (struct gpt_header){.current_lba      = read_u64_le(buffer.address + 24u),
-	                                            .backup_lba       = read_u64_le(buffer.address + 32u),
-	                                            .first_usable_lba = read_u64_le(buffer.address + 40u),
-	                                            .last_usable_lba  = read_u64_le(buffer.address + 48u),
-	                                            .entries_lba      = read_u64_le(buffer.address + 72u),
-	                                            .entries_bytes    = entries_bytes,
-	                                            .entry_count      = entry_count,
-	                                            .entry_size       = entry_size,
-	                                            .entries_crc      = read_u32_le(buffer.address + 88u)};
-	uint64_t entry_blocks = entries_bytes / device->block_size + (entries_bytes % device->block_size != 0u);
-	if (out_header->current_lba != lba || out_header->backup_lba >= device->block_count ||
+	*out_header = (struct gpt_header){
+		.current_lba      = read_u64_le(buffers.data.address + 24u),
+		.backup_lba       = read_u64_le(buffers.data.address + 32u),
+		.first_usable_lba = read_u64_le(buffers.data.address + 40u),
+		.last_usable_lba  = read_u64_le(buffers.data.address + 48u),
+		.entries_lba      = read_u64_le(buffers.data.address + 72u),
+		.entries_bytes    = (uint64_t)entry_count * entry_size,
+		.entry_count      = entry_count,
+		.entry_size       = entry_size,
+		.entries_crc      = read_u32_le(buffers.data.address + 88u),
+	};
+	uint64_t entry_sectors = out_header->entries_bytes / sector_size + (out_header->entries_bytes % sector_size != 0u);
+	if (out_header->current_lba != lba || out_header->backup_lba >= disk_sectors ||
 	    out_header->backup_lba == out_header->current_lba || out_header->first_usable_lba == 0u ||
-	    out_header->first_usable_lba > out_header->last_usable_lba ||
-	    out_header->last_usable_lba >= device->block_count || out_header->entries_lba >= device->block_count ||
-	    entry_blocks == 0u || entry_blocks > device->block_count - out_header->entries_lba ||
-	    range_contains(out_header->entries_lba, entry_blocks, out_header->current_lba) ||
-	    !(out_header->entries_lba + entry_blocks <= out_header->first_usable_lba ||
+	    out_header->first_usable_lba > out_header->last_usable_lba || out_header->last_usable_lba >= disk_sectors ||
+	    out_header->entries_lba >= disk_sectors || entry_sectors == 0u ||
+	    entry_sectors > disk_sectors - out_header->entries_lba ||
+	    range_contains(out_header->entries_lba, entry_sectors, out_header->current_lba) ||
+	    !(out_header->entries_lba + entry_sectors <= out_header->first_usable_lba ||
 	      out_header->entries_lba > out_header->last_usable_lba) ||
 	    range_contains(out_header->first_usable_lba,
 	                   out_header->last_usable_lba - out_header->first_usable_lba + 1u,
@@ -120,54 +144,35 @@ static enum gpt_result read_header(const struct block_device* device, uint64_t l
 		goto done;
 	}
 	result = GPT_RESULT_VALID;
-
 done:
-	block_buffer_release(device, &buffer);
+	buffers_release(device, &buffers);
 	return result;
 }
 
-static enum gpt_result allocate_entry_buffer(const struct block_device* device, const struct gpt_header* header,
-                                             struct block_buffer* out_buffer) {
-	uint64_t table_blocks =
-		header->entries_bytes / device->block_size + (header->entries_bytes % device->block_size != 0u);
-	uint64_t blocks = table_blocks;
-	uint64_t size;
-
-	if (blocks > device->max_transfer_blocks) blocks = device->max_transfer_blocks;
-	if (blocks > UINT32_MAX / device->block_size) blocks = UINT32_MAX / device->block_size;
-	if (blocks == 0u) return GPT_RESULT_INVALID;
-	size = blocks * device->block_size;
-	if (size < header->entry_size ||
-	    (blocks < table_blocks && size < (uint64_t)header->entry_size + device->block_size - 1u))
-		return GPT_RESULT_INVALID;
-	return block_buffer_allocate(device, (uint32_t)size, out_buffer) == SYSCALL_STATUS_OK ? GPT_RESULT_VALID
-	                                                                                      : GPT_RESULT_IO_ERROR;
+static enum gpt_result allocate_entry_buffers(const struct block_device* device, const struct gpt_header* header,
+                                              struct gpt_buffers* buffers) {
+	uint64_t transfer_bytes = (uint64_t)device->max_transfer_blocks * device->block_size;
+	uint64_t size           = header->entries_bytes < transfer_bytes ? header->entries_bytes : transfer_bytes;
+	if (size > UINT32_MAX) size = UINT32_MAX;
+	uint32_t count = (uint32_t)(size / header->entry_size);
+	if (count == 0u) return GPT_RESULT_INVALID;
+	return buffers_allocate(device, count * header->entry_size, buffers);
 }
 
-static bool read_entry_batch(const struct block_device* device, struct block_buffer* buffer,
-                             const struct gpt_header* header, uint32_t first_index, const uint8_t** out_entries,
+static bool read_entry_batch(const struct block_device* device, struct gpt_buffers* buffers,
+                             const struct gpt_header* header, uint32_t sector_size, uint32_t first_index,
                              uint32_t* out_count) {
-	uint64_t byte_offset = (uint64_t)first_index * header->entry_size;
-	uint64_t block_delta = byte_offset / device->block_size;
-	uint32_t offset      = (uint32_t)(byte_offset % device->block_size);
-	uint32_t count       = (buffer->size - offset) / header->entry_size;
-	uint32_t remaining   = header->entry_count - first_index;
-
+	uint32_t count     = buffers->data.size / header->entry_size;
+	uint32_t remaining = header->entry_count - first_index;
 	if (count > remaining) count = remaining;
-	if (count == 0u) return false;
-	uint64_t span   = offset + (uint64_t)count * header->entry_size;
-	uint64_t blocks = span / device->block_size + (span % device->block_size != 0u);
-	uint64_t lba;
-
-	if (blocks == 0u || blocks > device->max_transfer_blocks || blocks > UINT32_MAX ||
-	    block_delta > UINT64_MAX - header->entries_lba)
+	uint64_t table_offset = header->entries_lba * sector_size;
+	uint64_t entry_offset = (uint64_t)first_index * header->entry_size;
+	if (count == 0u || table_offset > UINT64_MAX - entry_offset) return false;
+	uint32_t size = count * header->entry_size;
+	if (block_read(device, &buffers->data, 0u, &buffers->scratch, table_offset + entry_offset, size) !=
+	    SYSCALL_STATUS_OK)
 		return false;
-	lba = header->entries_lba + block_delta;
-	if (lba >= device->block_count || blocks > device->block_count - lba ||
-	    block_read(device, buffer, 0u, lba, (uint32_t)blocks) != SYSCALL_STATUS_OK)
-		return false;
-	*out_entries = buffer->address + offset;
-	*out_count   = count;
+	*out_count = count;
 	return true;
 }
 
@@ -179,21 +184,16 @@ static bool valid_entry(const uint8_t* entry, const struct gpt_header* header) {
 	       last_lba <= header->last_usable_lba && first_lba <= last_lba;
 }
 
-static enum gpt_result validate_entries(const struct block_device* device, struct block_buffer* buffer,
-                                        const struct gpt_header* header, bool* out_fully_loaded) {
+static enum gpt_result validate_entries(const struct block_device* device, struct gpt_buffers* buffers,
+                                        const struct gpt_header* header, uint32_t sector_size) {
 	uint32_t crc = UINT32_MAX;
-
-	*out_fully_loaded = false;
 	for (uint32_t index = 0u; index < header->entry_count;) {
-		const uint8_t* entries;
-		uint32_t       count;
-		if (!read_entry_batch(device, buffer, header, index, &entries, &count)) return GPT_RESULT_IO_ERROR;
-		if (index == 0u && count == header->entry_count) *out_fully_loaded = true;
-		crc = crc32_update(crc, entries, (size_t)count * header->entry_size);
-		for (uint32_t offset = 0u; offset < count; offset++) {
-			const uint8_t* entry = entries + (size_t)offset * header->entry_size;
-			if (!valid_entry(entry, header)) return GPT_RESULT_INVALID;
-		}
+		uint32_t count;
+		if (!read_entry_batch(device, buffers, header, sector_size, index, &count)) return GPT_RESULT_IO_ERROR;
+		crc = crc32_update(crc, buffers->data.address, (size_t)count * header->entry_size);
+		for (uint32_t offset = 0u; offset < count; offset++)
+			if (!valid_entry(buffers->data.address + (size_t)offset * header->entry_size, header))
+				return GPT_RESULT_INVALID;
 		index += count;
 	}
 	return ~crc == header->entries_crc ? GPT_RESULT_VALID : GPT_RESULT_INVALID;
@@ -209,32 +209,25 @@ static void format_name(const uint8_t* entry, char output[GPT_NAME_CODE_UNITS + 
 	output[size] = '\0';
 }
 
-static enum gpt_result collect_entries(const struct block_device* device, struct block_buffer* buffer,
-                                       const struct gpt_header* header, bool backup, bool fully_loaded,
+static enum gpt_result collect_entries(const struct block_device* device, struct gpt_buffers* buffers,
+                                       const struct gpt_header* header, uint32_t sector_size, bool backup,
                                        struct partition_table* table) {
 	uint32_t populated = 0u;
-
 	for (uint32_t index = 0u; index < header->entry_count;) {
-		const uint8_t* entries;
-		uint32_t       count;
-		if (fully_loaded) {
-			entries = buffer->address;
-			count   = header->entry_count;
-		}
-		else if (!read_entry_batch(device, buffer, header, index, &entries, &count)) {
-			return GPT_RESULT_IO_ERROR;
-		}
+		uint32_t count;
+		if (!read_entry_batch(device, buffers, header, sector_size, index, &count)) return GPT_RESULT_IO_ERROR;
 		for (uint32_t offset = 0u; offset < count; offset++) {
-			const uint8_t* entry = entries + (size_t)offset * header->entry_size;
+			const uint8_t* entry = buffers->data.address + (size_t)offset * header->entry_size;
 			if (all_zero(entry, 16u)) continue;
-			if (!valid_entry(entry, header)) return GPT_RESULT_INVALID;
 			uint64_t               first_lba = read_u64_le(entry + 32u);
 			uint64_t               last_lba  = read_u64_le(entry + 40u);
-			struct partition_entry partition = {.scheme      = PARTITION_SCHEME_GPT,
-			                                    .table_index = index + offset + 1u,
-			                                    .first_lba   = first_lba,
-			                                    .block_count = last_lba - first_lba + 1u};
-			char                   type[PARTITION_GUID_STRING_SIZE];
+			struct partition_entry partition = {
+				.scheme      = PARTITION_SCHEME_GPT,
+				.table_index = index + offset + 1u,
+				.first_lba   = first_lba,
+				.block_count = last_lba - first_lba + 1u,
+			};
+			char type[PARTITION_GUID_STRING_SIZE];
 			memcpy(partition.gpt.type_guid, entry, sizeof(partition.gpt.type_guid));
 			memcpy(partition.gpt.unique_guid, entry + 16u, sizeof(partition.gpt.unique_guid));
 			partition.gpt.attributes = read_u64_le(entry + 48u);
@@ -252,40 +245,61 @@ static enum gpt_result collect_entries(const struct block_device* device, struct
 		}
 		index += count;
 	}
-	printf("partition: %sGPT table contains %u partition%s\n",
+	printf("partition: %sGPT table contains %u partition%s (sector size %u)\n",
 	       backup ? "backup " : "",
 	       populated,
-	       populated == 1u ? "" : "s");
+	       populated == 1u ? "" : "s",
+	       sector_size);
 	return GPT_RESULT_VALID;
 }
 
-static enum gpt_result probe_copy(const struct block_device* device, uint64_t lba, bool backup,
-                                  struct partition_table* table) {
-	struct gpt_header   header;
-	struct block_buffer buffer = {
-		.memory_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .mapping_cap = CAP_ID_INVALID};
-	bool            fully_loaded;
-	enum gpt_result result = read_header(device, lba, &header);
+static enum gpt_result probe_copy(const struct block_device* device, uint32_t sector_size, uint64_t disk_sectors,
+                                  uint64_t lba, bool backup, struct partition_table* table) {
+	struct gpt_header header;
+	enum gpt_result   result = read_header(device, sector_size, disk_sectors, lba, &header);
 	if (result != GPT_RESULT_VALID) return result;
-	result = allocate_entry_buffer(device, &header, &buffer);
+	struct gpt_buffers buffers;
+	result = allocate_entry_buffers(device, &header, &buffers);
 	if (result != GPT_RESULT_VALID) return result;
-	result = validate_entries(device, &buffer, &header, &fully_loaded);
-	if (result == GPT_RESULT_VALID) result = collect_entries(device, &buffer, &header, backup, fully_loaded, table);
-	block_buffer_release(device, &buffer);
+	result = validate_entries(device, &buffers, &header, sector_size);
+	if (result == GPT_RESULT_VALID) result = collect_entries(device, &buffers, &header, sector_size, backup, table);
+	buffers_release(device, &buffers);
 	return result;
 }
 
-enum gpt_result gpt_probe(const struct block_device* device, struct partition_table* table) {
-	if (device == NULL || table == NULL || table->count != 0u || device->block_size < GPT_HEADER_MIN_SIZE ||
-	    device->block_count < 2u)
-		return GPT_RESULT_INVALID;
-	enum gpt_result primary = probe_copy(device, 1u, false, table);
+static enum gpt_result probe_geometry(const struct block_device* device, uint32_t sector_size,
+                                      struct partition_table* table) {
+	uint64_t disk_bytes = device->block_count * device->block_size;
+	if (sector_size < GPT_HEADER_MIN_SIZE || disk_bytes % sector_size != 0u) return GPT_RESULT_NOT_PRESENT;
+	uint64_t disk_sectors = disk_bytes / sector_size;
+	if (disk_sectors < 2u) return GPT_RESULT_NOT_PRESENT;
+	enum gpt_result primary = probe_copy(device, sector_size, disk_sectors, 1u, false, table);
 	if (primary == GPT_RESULT_VALID || primary == GPT_RESULT_IO_ERROR || primary == GPT_RESULT_NO_MEMORY)
 		return primary;
 	table->count           = 0u;
-	enum gpt_result backup = probe_copy(device, device->block_count - 1u, true, table);
+	enum gpt_result backup = probe_copy(device, sector_size, disk_sectors, disk_sectors - 1u, true, table);
 	if (backup == GPT_RESULT_VALID || backup == GPT_RESULT_IO_ERROR || backup == GPT_RESULT_NO_MEMORY) return backup;
 	table->count = 0u;
 	return primary == GPT_RESULT_NOT_PRESENT && backup == GPT_RESULT_NOT_PRESENT ? GPT_RESULT_NOT_PRESENT
 	                                                                             : GPT_RESULT_INVALID;
+}
+
+enum gpt_result gpt_probe(const struct block_device* device, struct partition_table* table) {
+	if (device == NULL || table == NULL || table->count != 0u || device->block_size == 0u ||
+	    device->block_count > UINT64_MAX / device->block_size)
+		return GPT_RESULT_INVALID;
+	uint32_t        sector_sizes[2] = {device->block_size, 512u};
+	enum gpt_result result          = GPT_RESULT_NOT_PRESENT;
+	bool            invalid         = false;
+	for (size_t index = 0u; index < 2u; index++) {
+		if (index != 0u && sector_sizes[index] == sector_sizes[0]) continue;
+		result = probe_geometry(device, sector_sizes[index], table);
+		if (result == GPT_RESULT_VALID) {
+			table->block_size = sector_sizes[index];
+			return result;
+		}
+		if (result == GPT_RESULT_IO_ERROR || result == GPT_RESULT_NO_MEMORY) return result;
+		if (result == GPT_RESULT_INVALID) invalid = true;
+	}
+	return invalid ? GPT_RESULT_INVALID : result;
 }
