@@ -57,9 +57,13 @@ struct pixel_format {
 
 struct drawing_surface {
 	volatile uint8_t*   framebuffer;
+	uint8_t*            shadow;
 	size_t              width;
 	size_t              height;
 	size_t              pitch;
+	size_t              shadow_width;
+	size_t              shadow_height;
+	size_t              shadow_pitch;
 	struct pixel_format format;
 };
 
@@ -404,17 +408,56 @@ static void show_pointer_cursor(struct terminal* terminal) {
 	terminal->pointer_drawn = true;
 }
 
-static void fill_rectangle(volatile uint8_t* framebuffer, size_t pitch, const struct pixel_format* format, size_t x,
-                           size_t y, size_t width, size_t height, struct color color) {
-	uint64_t pixel = encode_color(format, color);
+static void fill_rectangle(struct drawing_surface* surface, size_t x, size_t y, size_t width, size_t height,
+                           struct color color) {
+	uint64_t pixel = encode_color(&surface->format, color);
 	for (size_t row = 0u; row < height; row++) {
-		volatile uint8_t* destination = framebuffer + (y + row) * pitch + x * format->bytes_per_pixel;
-		fill_pixel_run(destination, width, format->bytes_per_pixel, pixel);
+		volatile uint8_t* destination =
+			surface->framebuffer + (y + row) * surface->pitch + x * surface->format.bytes_per_pixel;
+		fill_pixel_run(destination, width, surface->format.bytes_per_pixel, pixel);
+	}
+	if (surface->shadow == NULL || x >= surface->shadow_width || y >= surface->shadow_height) return;
+	if (width > surface->shadow_width - x) width = surface->shadow_width - x;
+	if (height > surface->shadow_height - y) height = surface->shadow_height - y;
+	for (size_t row = 0u; row < height; row++) {
+		uint8_t* destination =
+			surface->shadow + (y + row) * surface->shadow_pitch + x * surface->format.bytes_per_pixel;
+		fill_pixel_run(destination, width, surface->format.bytes_per_pixel, pixel);
 	}
 }
 
-static void copy_framebuffer_row(volatile uint8_t* destination, const volatile uint8_t* source, size_t size) {
+static void copy_to_framebuffer(volatile uint8_t* destination, const uint8_t* source, size_t size) {
 	memcpy((void*)destination, (const void*)source, size);
+}
+
+static void move_surface_rows(struct drawing_surface* surface, size_t destination_y, size_t source_y, size_t rows,
+                              size_t width) {
+	if (rows == 0u || destination_y == source_y) return;
+	if (surface->shadow != NULL) {
+		memmove(surface->shadow + destination_y * surface->shadow_pitch,
+		        surface->shadow + source_y * surface->shadow_pitch,
+		        rows * surface->shadow_pitch);
+		for (size_t row = 0u; row < rows; row++) {
+			copy_to_framebuffer(surface->framebuffer + (destination_y + row) * surface->pitch,
+			                    surface->shadow + (destination_y + row) * surface->shadow_pitch,
+			                    width);
+		}
+		return;
+	}
+	if (destination_y < source_y) {
+		for (size_t row = 0u; row < rows; row++) {
+			volatile uint8_t* destination = surface->framebuffer + (destination_y + row) * surface->pitch;
+			const uint8_t*    source      = (const uint8_t*)surface->framebuffer + (source_y + row) * surface->pitch;
+			copy_to_framebuffer(destination, source, width);
+		}
+	}
+	else {
+		for (size_t row = rows; row != 0u; row--) {
+			volatile uint8_t* destination = surface->framebuffer + (destination_y + row - 1u) * surface->pitch;
+			const uint8_t*    source = (const uint8_t*)surface->framebuffer + (source_y + row - 1u) * surface->pitch;
+			copy_to_framebuffer(destination, source, width);
+		}
+	}
 }
 
 static struct color blend_color(struct color foreground, struct color background, uint8_t alpha) {
@@ -452,9 +495,15 @@ static bool draw_glyph(const struct drawing_surface* surface, const struct termi
 				continue;
 			volatile uint8_t* destination = surface->framebuffer + (size_t)destination_y * surface->pitch +
 			                                (size_t)destination_x * surface->format.bytes_per_pixel;
-			write_pixel(destination,
-			            surface->format.bytes_per_pixel,
-			            encode_color(&surface->format, blend_color(foreground, background, alpha)));
+			uint64_t          pixel       = encode_color(&surface->format, blend_color(foreground, background, alpha));
+			write_pixel(destination, surface->format.bytes_per_pixel, pixel);
+			if (surface->shadow != NULL && (uint64_t)destination_x < surface->shadow_width &&
+			    (uint64_t)destination_y < surface->shadow_height) {
+				write_pixel(surface->shadow + (size_t)destination_y * surface->shadow_pitch +
+				                (size_t)destination_x * surface->format.bytes_per_pixel,
+				            surface->format.bytes_per_pixel,
+				            pixel);
+			}
 		}
 	}
 	return true;
@@ -568,14 +617,7 @@ static bool draw_cell_value(struct terminal* terminal, const struct terminal_cel
 
 	foreground = cursor ? theme.cursor_text : selected ? theme.selection_foreground : cell->foreground;
 	background = cursor ? theme.cursor : selected ? theme.selection_background : cell->background;
-	fill_rectangle(terminal->surface.framebuffer,
-	               terminal->surface.pitch,
-	               &terminal->surface.format,
-	               cell_x,
-	               cell_y,
-	               terminal->cell_width,
-	               terminal->cell_height,
-	               background);
+	fill_rectangle(&terminal->surface, cell_x, cell_y, terminal->cell_width, terminal->cell_height, background);
 	if (cell->codepoint != ' ') {
 		const struct terminal_glyph* glyph;
 		int64_t                      glyph_x;
@@ -599,14 +641,7 @@ static bool draw_cell_value(struct terminal* terminal, const struct terminal_cel
 	if (cell->underline && !cursor) {
 		size_t underline_y = cell_y + terminal->ascender + 1u;
 		if (underline_y >= cell_y + terminal->cell_height) underline_y = cell_y + terminal->cell_height - 1u;
-		fill_rectangle(terminal->surface.framebuffer,
-		               terminal->surface.pitch,
-		               &terminal->surface.format,
-		               cell_x,
-		               underline_y,
-		               terminal->cell_width,
-		               1u,
-		               foreground);
+		fill_rectangle(&terminal->surface, cell_x, underline_y, terminal->cell_width, 1u, foreground);
 	}
 	return true;
 }
@@ -663,22 +698,12 @@ static bool move_viewport(struct terminal* terminal, bool older, size_t lines) {
 	    pixel_lines >= height)
 		return redraw_viewport(terminal);
 	if (older) {
-		for (size_t row = height - pixel_lines; row != 0u; row--) {
-			size_t            source_row = row - 1u;
-			volatile uint8_t* destination =
-				terminal->surface.framebuffer + (source_row + pixel_lines) * terminal->surface.pitch;
-			volatile uint8_t* source = terminal->surface.framebuffer + source_row * terminal->surface.pitch;
-			copy_framebuffer_row(destination, source, width);
-		}
+		move_surface_rows(&terminal->surface, pixel_lines, 0u, height - pixel_lines, width);
 		for (size_t row = 0u; row < lines; row++)
 			if (!redraw_viewport_row(terminal, row)) return false;
 	}
 	else {
-		for (size_t row = 0u; row < height - pixel_lines; row++) {
-			volatile uint8_t* destination = terminal->surface.framebuffer + row * terminal->surface.pitch;
-			volatile uint8_t* source = terminal->surface.framebuffer + (row + pixel_lines) * terminal->surface.pitch;
-			copy_framebuffer_row(destination, source, width);
-		}
+		move_surface_rows(&terminal->surface, 0u, pixel_lines, height - pixel_lines, width);
 		for (size_t row = terminal->rows - lines; row < terminal->rows; row++)
 			if (!redraw_viewport_row(terminal, row)) return false;
 	}
@@ -863,14 +888,7 @@ static void clear_display(struct terminal* terminal) {
 	struct terminal_cell blank = blank_cell(terminal);
 
 	if (terminal->viewport_offset == 0u)
-		fill_rectangle(terminal->surface.framebuffer,
-		               terminal->surface.pitch,
-		               &terminal->surface.format,
-		               0u,
-		               0u,
-		               terminal->surface.width,
-		               terminal->surface.height,
-		               blank.background);
+		fill_rectangle(&terminal->surface, 0u, 0u, terminal->surface.width, terminal->surface.height, blank.background);
 	else if (terminal->viewport_offset < terminal->rows) terminal->viewport_dirty = true;
 	for (size_t index = 0u; index < terminal->cell_count; index++) terminal->cells[index] = blank;
 	terminal->column       = 0u;
@@ -920,23 +938,15 @@ static void scroll_screen(struct terminal* terminal) {
 	append_history_line(terminal, terminal->cells);
 	terminal->screen_origin++;
 	expire_evicted_selection(terminal);
-	if (terminal->viewport_offset == 0u) {
-		for (size_t row = 0u; row < copied_rows; row++) {
-			volatile uint8_t* destination = terminal->surface.framebuffer + row * terminal->surface.pitch;
-			volatile uint8_t* source =
-				terminal->surface.framebuffer + (row + terminal->cell_height) * terminal->surface.pitch;
-			copy_framebuffer_row(destination, source, width);
-		}
-	}
+	if (terminal->viewport_offset == 0u)
+		move_surface_rows(&terminal->surface, 0u, terminal->cell_height, copied_rows, width);
 	memmove(terminal->cells,
 	        terminal->cells + terminal->columns,
 	        (terminal->cell_count - terminal->columns) * sizeof(*terminal->cells));
 	for (size_t index = terminal->cell_count - terminal->columns; index < terminal->cell_count; index++)
 		terminal->cells[index] = blank;
 	if (terminal->viewport_offset == 0u)
-		fill_rectangle(terminal->surface.framebuffer,
-		               terminal->surface.pitch,
-		               &terminal->surface.format,
+		fill_rectangle(&terminal->surface,
 		               0u,
 		               copied_rows,
 		               terminal->columns * terminal->cell_width,
@@ -1285,6 +1295,7 @@ struct terminal* terminal_create(volatile uint8_t* framebuffer, const struct fra
 	size_t           visible_row_size;
 	size_t           visible_size;
 	size_t           history_cell_count;
+	size_t           shadow_size;
 	FT_Pos           advance;
 
 	if (framebuffer == NULL || info == NULL) return NULL;
@@ -1329,11 +1340,18 @@ struct terminal* terminal_create(volatile uint8_t* framebuffer, const struct fra
 	    mul_overflow_size(terminal->columns, terminal->rows, &terminal->cell_count) ||
 	    terminal->cell_count > SIZE_MAX / sizeof(*terminal->cells) ||
 	    mul_overflow_size(terminal->columns, TERMINAL_SCROLLBACK_LINE_CAPACITY, &history_cell_count) ||
-	    history_cell_count > SIZE_MAX / sizeof(*terminal->history))
+	    history_cell_count > SIZE_MAX / sizeof(*terminal->history) ||
+	    mul_overflow_size(terminal->columns, terminal->cell_width, &terminal->surface.shadow_width) ||
+	    mul_overflow_size(terminal->rows, terminal->cell_height, &terminal->surface.shadow_height) ||
+	    mul_overflow_size(terminal->surface.shadow_width,
+	                      terminal->surface.format.bytes_per_pixel,
+	                      &terminal->surface.shadow_pitch) ||
+	    mul_overflow_size(terminal->surface.shadow_height, terminal->surface.shadow_pitch, &shadow_size))
 		goto fail;
-	terminal->cells       = calloc(terminal->cell_count, sizeof(*terminal->cells));
-	terminal->history     = malloc(history_cell_count * sizeof(*terminal->history));
-	terminal->glyph_cache = terminal_glyph_cache_create(terminal->face);
+	terminal->cells          = calloc(terminal->cell_count, sizeof(*terminal->cells));
+	terminal->history        = malloc(history_cell_count * sizeof(*terminal->history));
+	terminal->surface.shadow = malloc(shadow_size);
+	terminal->glyph_cache    = terminal_glyph_cache_create(terminal->face);
 	if (terminal->cells == NULL || terminal->history == NULL || terminal->glyph_cache == NULL) goto fail;
 	terminal->screen_origin = 1u;
 	reset_attributes(terminal);
@@ -1355,6 +1373,7 @@ void terminal_destroy(struct terminal* terminal) {
 	if (terminal->face != NULL) (void)FT_Done_Face(terminal->face);
 	if (terminal->library != NULL) (void)FT_Done_FreeType(terminal->library);
 	free(terminal->font_data);
+	free(terminal->surface.shadow);
 	free(terminal->cells);
 	free(terminal->history);
 	free(terminal->preedit_codepoints);
