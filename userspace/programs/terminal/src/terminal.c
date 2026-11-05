@@ -18,9 +18,6 @@
 #define TERMINAL_TAB_WIDTH 4u
 #define TERMINAL_CSI_PARAMETER_CAPACITY 16u
 #define TERMINAL_SCROLLBACK_LINE_CAPACITY 4096u
-#define TERMINAL_POINTER_MAX_WIDTH 11u
-#define TERMINAL_POINTER_MAX_HEIGHT 20u
-#define TERMINAL_POINTER_MAX_PIXEL_SIZE 8u
 #define TERMINAL_TRACE_SAMPLE_INTERVAL 8u
 
 TRACE_LABEL(trace_terminal_write_setup, "terminal/write/setup");
@@ -61,8 +58,6 @@ struct drawing_surface {
 	size_t              width;
 	size_t              height;
 	size_t              pitch;
-	size_t              shadow_width;
-	size_t              shadow_height;
 	size_t              shadow_pitch;
 	struct pixel_format format;
 };
@@ -101,48 +96,47 @@ enum escape_state {
 };
 
 struct terminal {
-	struct drawing_surface          surface;
-	FT_Library                      library;
-	FT_Face                         face;
-	struct terminal_glyph_cache*    glyph_cache;
-	uint8_t*                        font_data;
-	size_t                          cell_width;
-	size_t                          cell_height;
-	size_t                          ascender;
-	size_t                          columns;
-	size_t                          rows;
-	size_t                          column;
-	size_t                          row;
-	struct terminal_cell*           cells;
-	size_t                          cell_count;
-	struct terminal_cell*           history;
-	size_t                          history_count;
-	size_t                          history_head;
-	uint64_t                        screen_origin;
-	size_t                          viewport_offset;
-	bool                            viewport_dirty;
-	struct terminal_selection_state selection;
-	uint8_t*                        clipboard;
-	size_t                          clipboard_size;
-	size_t                          saved_column;
-	size_t                          saved_row;
-	bool                            saved_cursor;
-	bool                            cursor_visible;
-	bool                            cursor_drawn;
-	size_t                          cursor_drawn_row;
-	size_t                          cursor_drawn_column;
-	size_t                          pointer_x;
-	size_t                          pointer_y;
-	bool                            pointer_moved;
-	bool                            pointer_drawn;
-	size_t                          pointer_saved_x;
-	size_t                          pointer_saved_y;
-	size_t                          pointer_saved_width;
-	size_t                          pointer_saved_height;
-	uint8_t  pointer_saved[TERMINAL_POINTER_MAX_WIDTH * TERMINAL_POINTER_MAX_HEIGHT * TERMINAL_POINTER_MAX_PIXEL_SIZE];
-	bool     pointer_primary_pressed;
-	bool     pointer_selecting;
-	uint64_t pointer_selection_source;
+	struct drawing_surface             surface;
+	FT_Library                         library;
+	FT_Face                            face;
+	struct terminal_glyph_cache*       glyph_cache;
+	uint8_t*                           font_data;
+	size_t                             cell_width;
+	size_t                             cell_height;
+	size_t                             ascender;
+	size_t                             columns;
+	size_t                             rows;
+	size_t                             column;
+	size_t                             row;
+	struct terminal_cell*              cells;
+	size_t                             cell_count;
+	struct terminal_cell*              history;
+	size_t                             history_count;
+	size_t                             history_head;
+	uint64_t                           screen_origin;
+	size_t                             viewport_offset;
+	bool                               viewport_dirty;
+	struct terminal_selection_state    selection;
+	uint8_t*                           clipboard;
+	size_t                             clipboard_size;
+	size_t                             saved_column;
+	size_t                             saved_row;
+	bool                               saved_cursor;
+	bool                               cursor_visible;
+	bool                               cursor_drawn;
+	size_t                             cursor_drawn_row;
+	size_t                             cursor_drawn_column;
+	size_t                             pointer_x;
+	size_t                             pointer_y;
+	bool                               pointer_moved;
+	bool                               pointer_drawn;
+	size_t                             pointer_drawn_x;
+	size_t                             pointer_drawn_y;
+	size_t                             pointer_drawn_width;
+	size_t                             pointer_drawn_height;
+	bool                               pointer_primary_pressed;
+	bool                               pointer_selecting;
+	uint64_t                           pointer_selection_source;
 	struct terminal_selection_position pointer_selection_anchor;
 	bool                               wrap_pending;
 	bool                               locked;
@@ -209,11 +203,6 @@ static const struct terminal_pointer_shape ibeam_pointer_shape = {
 	.hotspot_x = 5u,
 	.hotspot_y = 10u,
 };
-
-_Static_assert(sizeof(ibeam_pointer_pixels[0]) - 1u <= TERMINAL_POINTER_MAX_WIDTH,
-               "I-beam pointer is wider than its save-under storage");
-_Static_assert(sizeof(ibeam_pointer_pixels) / sizeof(ibeam_pointer_pixels[0]) <= TERMINAL_POINTER_MAX_HEIGHT,
-               "I-beam pointer is taller than its save-under storage");
 
 static bool channel_valid(uint8_t size, uint8_t shift, uint16_t bpp) {
 	return size != 0u && size <= 16u && shift < bpp && size <= bpp - shift;
@@ -357,12 +346,14 @@ static void hide_pointer_cursor(struct terminal* terminal) {
 	const size_t pixel_size = terminal->surface.format.bytes_per_pixel;
 
 	if (!terminal->pointer_drawn) return;
-	for (size_t row = 0u; row < terminal->pointer_saved_height; row++) {
+	for (size_t row = 0u; row < terminal->pointer_drawn_height; row++) {
 		volatile uint8_t* destination = terminal->surface.framebuffer +
-		                                (terminal->pointer_saved_y + row) * terminal->surface.pitch +
-		                                terminal->pointer_saved_x * pixel_size;
-		const uint8_t*    source      = terminal->pointer_saved + row * terminal->pointer_saved_width * pixel_size;
-		memcpy((void*)destination, source, terminal->pointer_saved_width * pixel_size);
+		                                (terminal->pointer_drawn_y + row) * terminal->surface.pitch +
+		                                terminal->pointer_drawn_x * pixel_size;
+		const uint8_t*    source      = terminal->surface.shadow +
+		                                (terminal->pointer_drawn_y + row) * terminal->surface.shadow_pitch +
+		                                terminal->pointer_drawn_x * pixel_size;
+		memcpy((void*)destination, source, terminal->pointer_drawn_width * pixel_size);
 	}
 	terminal->pointer_drawn = false;
 }
@@ -389,17 +380,14 @@ static void show_pointer_cursor(struct terminal* terminal) {
 	if (width > terminal->surface.width - destination_x) width = terminal->surface.width - destination_x;
 	if (height > terminal->surface.height - destination_y) height = terminal->surface.height - destination_y;
 
-	terminal->pointer_saved_x      = destination_x;
-	terminal->pointer_saved_y      = destination_y;
-	terminal->pointer_saved_width  = width;
-	terminal->pointer_saved_height = height;
+	terminal->pointer_drawn_x      = destination_x;
+	terminal->pointer_drawn_y      = destination_y;
+	terminal->pointer_drawn_width  = width;
+	terminal->pointer_drawn_height = height;
 	for (size_t row = 0u; row < height; row++) {
 		volatile uint8_t* destination = terminal->surface.framebuffer +
 		                                (destination_y + row) * terminal->surface.pitch + destination_x * pixel_size;
-		uint8_t*          saved       = terminal->pointer_saved + row * width * pixel_size;
 		for (size_t column = 0u; column < width; column++) {
-			for (size_t byte = 0u; byte < pixel_size; byte++)
-				saved[column * pixel_size + byte] = destination[column * pixel_size + byte];
 			char pixel = shape->pixels[(source_y + row) * shape->stride + source_x + column];
 			if (pixel == 'B') write_pixel(destination + column * pixel_size, pixel_size, outline);
 			else if (pixel == 'W') write_pixel(destination + column * pixel_size, pixel_size, fill);
@@ -416,9 +404,6 @@ static void fill_rectangle(struct drawing_surface* surface, size_t x, size_t y, 
 			surface->framebuffer + (y + row) * surface->pitch + x * surface->format.bytes_per_pixel;
 		fill_pixel_run(destination, width, surface->format.bytes_per_pixel, pixel);
 	}
-	if (surface->shadow == NULL || x >= surface->shadow_width || y >= surface->shadow_height) return;
-	if (width > surface->shadow_width - x) width = surface->shadow_width - x;
-	if (height > surface->shadow_height - y) height = surface->shadow_height - y;
 	for (size_t row = 0u; row < height; row++) {
 		uint8_t* destination =
 			surface->shadow + (y + row) * surface->shadow_pitch + x * surface->format.bytes_per_pixel;
@@ -433,30 +418,13 @@ static void copy_to_framebuffer(volatile uint8_t* destination, const uint8_t* so
 static void move_surface_rows(struct drawing_surface* surface, size_t destination_y, size_t source_y, size_t rows,
                               size_t width) {
 	if (rows == 0u || destination_y == source_y) return;
-	if (surface->shadow != NULL) {
-		memmove(surface->shadow + destination_y * surface->shadow_pitch,
-		        surface->shadow + source_y * surface->shadow_pitch,
-		        rows * surface->shadow_pitch);
-		for (size_t row = 0u; row < rows; row++) {
-			copy_to_framebuffer(surface->framebuffer + (destination_y + row) * surface->pitch,
-			                    surface->shadow + (destination_y + row) * surface->shadow_pitch,
-			                    width);
-		}
-		return;
-	}
-	if (destination_y < source_y) {
-		for (size_t row = 0u; row < rows; row++) {
-			volatile uint8_t* destination = surface->framebuffer + (destination_y + row) * surface->pitch;
-			const uint8_t*    source      = (const uint8_t*)surface->framebuffer + (source_y + row) * surface->pitch;
-			copy_to_framebuffer(destination, source, width);
-		}
-	}
-	else {
-		for (size_t row = rows; row != 0u; row--) {
-			volatile uint8_t* destination = surface->framebuffer + (destination_y + row - 1u) * surface->pitch;
-			const uint8_t*    source = (const uint8_t*)surface->framebuffer + (source_y + row - 1u) * surface->pitch;
-			copy_to_framebuffer(destination, source, width);
-		}
+	memmove(surface->shadow + destination_y * surface->shadow_pitch,
+	        surface->shadow + source_y * surface->shadow_pitch,
+	        rows * surface->shadow_pitch);
+	for (size_t row = 0u; row < rows; row++) {
+		copy_to_framebuffer(surface->framebuffer + (destination_y + row) * surface->pitch,
+		                    surface->shadow + (destination_y + row) * surface->shadow_pitch,
+		                    width);
 	}
 }
 
@@ -497,13 +465,10 @@ static bool draw_glyph(const struct drawing_surface* surface, const struct termi
 			                                (size_t)destination_x * surface->format.bytes_per_pixel;
 			uint64_t          pixel       = encode_color(&surface->format, blend_color(foreground, background, alpha));
 			write_pixel(destination, surface->format.bytes_per_pixel, pixel);
-			if (surface->shadow != NULL && (uint64_t)destination_x < surface->shadow_width &&
-			    (uint64_t)destination_y < surface->shadow_height) {
-				write_pixel(surface->shadow + (size_t)destination_y * surface->shadow_pitch +
-				                (size_t)destination_x * surface->format.bytes_per_pixel,
-				            surface->format.bytes_per_pixel,
-				            pixel);
-			}
+			write_pixel(surface->shadow + (size_t)destination_y * surface->shadow_pitch +
+			                (size_t)destination_x * surface->format.bytes_per_pixel,
+			            surface->format.bytes_per_pixel,
+			            pixel);
 		}
 	}
 	return true;
@@ -1315,8 +1280,10 @@ struct terminal* terminal_create(volatile uint8_t* framebuffer, const struct fra
 	    mul_overflow_size(terminal->surface.width, terminal->surface.format.bytes_per_pixel, &visible_row_size) ||
 	    visible_row_size > terminal->surface.pitch ||
 	    mul_overflow_size(terminal->surface.height, terminal->surface.pitch, &visible_size) ||
-	    visible_size > (size_t)info->size || FT_Init_FreeType(&terminal->library) != FT_Err_Ok ||
-	    !load_font(&terminal->font_data, &font_size) || font_size > LONG_MAX ||
+	    visible_size > (size_t)info->size ||
+	    mul_overflow_size(terminal->surface.height, visible_row_size, &shadow_size) ||
+	    FT_Init_FreeType(&terminal->library) != FT_Err_Ok || !load_font(&terminal->font_data, &font_size) ||
+	    font_size > LONG_MAX ||
 	    FT_New_Memory_Face(terminal->library, terminal->font_data, (FT_Long)font_size, 0, &terminal->face) !=
 	        FT_Err_Ok ||
 	    FT_Set_Pixel_Sizes(terminal->face, 0u, TERMINAL_FONT_PIXEL_HEIGHT) != FT_Err_Ok ||
@@ -1334,25 +1301,22 @@ struct terminal* terminal_create(volatile uint8_t* framebuffer, const struct fra
 	terminal->cell_height = metrics_height > glyph_height ? metrics_height : glyph_height;
 	if (terminal->cell_width == 0u || terminal->cell_height == 0u || terminal->ascender > terminal->cell_height)
 		goto fail;
-	terminal->columns = terminal->surface.width / terminal->cell_width;
-	terminal->rows    = terminal->surface.height / terminal->cell_height;
+	terminal->columns              = terminal->surface.width / terminal->cell_width;
+	terminal->rows                 = terminal->surface.height / terminal->cell_height;
+	terminal->surface.shadow_pitch = visible_row_size;
 	if (terminal->columns == 0u || terminal->rows == 0u || terminal->rows > UINT64_MAX - 1u ||
 	    mul_overflow_size(terminal->columns, terminal->rows, &terminal->cell_count) ||
 	    terminal->cell_count > SIZE_MAX / sizeof(*terminal->cells) ||
 	    mul_overflow_size(terminal->columns, TERMINAL_SCROLLBACK_LINE_CAPACITY, &history_cell_count) ||
-	    history_cell_count > SIZE_MAX / sizeof(*terminal->history) ||
-	    mul_overflow_size(terminal->columns, terminal->cell_width, &terminal->surface.shadow_width) ||
-	    mul_overflow_size(terminal->rows, terminal->cell_height, &terminal->surface.shadow_height) ||
-	    mul_overflow_size(terminal->surface.shadow_width,
-	                      terminal->surface.format.bytes_per_pixel,
-	                      &terminal->surface.shadow_pitch) ||
-	    mul_overflow_size(terminal->surface.shadow_height, terminal->surface.shadow_pitch, &shadow_size))
+	    history_cell_count > SIZE_MAX / sizeof(*terminal->history))
 		goto fail;
 	terminal->cells          = calloc(terminal->cell_count, sizeof(*terminal->cells));
 	terminal->history        = malloc(history_cell_count * sizeof(*terminal->history));
 	terminal->surface.shadow = malloc(shadow_size);
 	terminal->glyph_cache    = terminal_glyph_cache_create(terminal->face);
-	if (terminal->cells == NULL || terminal->history == NULL || terminal->glyph_cache == NULL) goto fail;
+	if (terminal->cells == NULL || terminal->history == NULL || terminal->surface.shadow == NULL ||
+	    terminal->glyph_cache == NULL)
+		goto fail;
 	terminal->screen_origin = 1u;
 	reset_attributes(terminal);
 	terminal->cursor_visible = true;
