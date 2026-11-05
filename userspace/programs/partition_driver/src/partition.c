@@ -81,7 +81,8 @@ enum device_driver_result partition_driver_run(cap_id_t device_cap) {
 	struct block_device       device     = {.root_cap = CAP_ID_INVALID, .session_cap = CAP_ID_INVALID};
 	struct partition_table    partitions = {0};
 	enum device_driver_result result     = DEVICE_DRIVER_ERROR;
-	bool                      success    = block_device_open(device_cap, &device) == SYSCALL_STATUS_OK;
+	bool                      success    = block_device_open(device_cap, &device) == SYSCALL_STATUS_OK ||
+	                                       block_device_open_read_only(device_cap, &device) == SYSCALL_STATUS_OK;
 
 	if (success)
 		RUNTIME_DEBUG_LOG("partition: probing disk with %llu blocks of %u bytes "
