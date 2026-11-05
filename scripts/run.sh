@@ -13,7 +13,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 usage() {
 	cat <<'EOF'
-Usage: run.sh [--test|-t | --kernel-selftest] [--test-name <name>] [--arch <arch> | --all] [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--iommu <kind>] [--headless] [--debug] [--debug-port <port>] [--timeout <seconds>] [--profile] [--profile-output <path>] [--profile-timeout <seconds>] [-- <extra qemu args>]
+Usage: run.sh [--test|-t | --kernel-selftest] [--test-name <name>] [--arch <arch> | --all] [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--iommu <kind>] [--boot-device <kind>] [--input-device <kind>] [--headless] [--debug] [--debug-port <port>] [--timeout <seconds>] [--profile] [--profile-output <path>] [--profile-timeout <seconds>] [-- <extra qemu args>]
 
 Modes:
   Default mode         Launch QEMU. Requires --arch <arch> or --all.
@@ -36,6 +36,11 @@ QEMU options:
                        --build-root. Defaults to build, producing build-<arch>.
   --headless           Disable the graphical display, including during profiling.
   --iommu <kind>       Select auto, none, vtd, amd, smmuv3, or riscv.
+  --boot-device <kind> Select auto, sata, cdrom, or usb. auto uses QEMU's
+                       firmware-visible CD-ROM and is the default.
+  --input-device <kind>
+                       Select ps2, hid, or none. PS/2 is available only on x86_64;
+                       the default is selected per architecture.
   --debug              Pass --debug through to the QEMU launcher.
   --debug-port <port>  Pass --debug-port through to the QEMU launcher.
   --timeout <seconds>  Selftest mode timeout. Defaults to 30 seconds.
@@ -58,6 +63,8 @@ Test arch resolution:
 
 Examples:
   bash scripts/run.sh --arch x86_64
+  bash scripts/run.sh --arch x86_64 --boot-device cdrom --input-device hid
+  bash scripts/run.sh --arch riscv64 --input-device none
   bash scripts/run.sh --arch riscv64 --debug
   bash scripts/run.sh --all
   bash scripts/run.sh --arch x86_64 --builddir build-debug-x86_64
@@ -178,6 +185,8 @@ run_qemu_for_arch() {
 		--arch "$arch"
 		--builddir "$build_dir"
 		--iommu "$IOMMU_MODE"
+		--boot-device "$BOOT_DEVICE"
+		--input-device "$INPUT_DEVICE"
 	)
 
 	if (( HEADLESS )); then
@@ -243,6 +252,8 @@ run_kernel_selftests() {
 		--builddir "$build_dir"
 		--headless
 		--iommu "$IOMMU_MODE"
+		--boot-device "$BOOT_DEVICE"
+		--input-device "$INPUT_DEVICE"
 	)
 
 	if (( DEBUG_MODE )); then
@@ -317,6 +328,10 @@ DEBUG_PORT=1234
 DEBUG_PORT_SET=0
 HEADLESS=0
 IOMMU_MODE="auto"
+BOOT_DEVICE="auto"
+BOOT_DEVICE_SET=0
+INPUT_DEVICE="auto"
+INPUT_DEVICE_SET=0
 SELFTEST_TIMEOUT=30
 TEST_NAMES=()
 EXTRA_QEMU_ARGS=()
@@ -385,6 +400,28 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--iommu=*)
 			IOMMU_MODE="${1#*=}"
+			shift
+			;;
+		--boot-device)
+			[[ $# -ge 2 ]] || error "missing value for --boot-device"
+			BOOT_DEVICE="$2"
+			BOOT_DEVICE_SET=1
+			shift 2
+			;;
+		--boot-device=*)
+			BOOT_DEVICE="${1#*=}"
+			BOOT_DEVICE_SET=1
+			shift
+			;;
+		--input-device)
+			[[ $# -ge 2 ]] || error "missing value for --input-device"
+			INPUT_DEVICE="$2"
+			INPUT_DEVICE_SET=1
+			shift 2
+			;;
+		--input-device=*)
+			INPUT_DEVICE="${1#*=}"
+			INPUT_DEVICE_SET=1
 			shift
 			;;
 		--test-name)
@@ -457,6 +494,16 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
+case "$BOOT_DEVICE" in
+	auto|sata|cdrom|usb) ;;
+	*) error "unsupported boot device: $BOOT_DEVICE (expected auto, sata, cdrom, or usb)" ;;
+esac
+
+case "$INPUT_DEVICE" in
+	auto|ps2|hid|none) ;;
+	*) error "unsupported input device: $INPUT_DEVICE (expected ps2, hid, or none)" ;;
+esac
+
 if (( ALL_ARCHES )) && [[ -n "$TARGET_ARCH" ]]; then
 	error "use either --arch <arch> or --all, not both"
 fi
@@ -503,6 +550,8 @@ if (( DO_TEST )); then
 	(( ! HEADLESS )) || error "--headless is not used in test mode"
 	(( ! DEBUG_MODE )) || error "--debug is not used in test mode"
 	(( ! DEBUG_PORT_SET )) || error "--debug-port is not used in test mode"
+	(( ! BOOT_DEVICE_SET )) || error "--boot-device is not used in test mode"
+	(( ! INPUT_DEVICE_SET )) || error "--input-device is not used in test mode"
 	[[ "$SELFTEST_TIMEOUT" == "30" ]] || error "--timeout is not used in test mode"
 	(( ${#EXTRA_QEMU_ARGS[@]} == 0 )) || error "extra QEMU arguments are not used in test mode"
 
@@ -523,6 +572,9 @@ elif (( DO_KERNEL_SELFTEST )); then
 	run_kernel_selftests "$TARGET_ARCH" "$BUILD_DIR" "$SELFTEST_TIMEOUT"
 else
 	(( ${#TEST_NAMES[@]} == 0 )) || error "--test-name requires --test or -t"
+	if (( ALL_ARCHES )) && [[ "$INPUT_DEVICE" == "ps2" ]]; then
+		error "--input-device ps2 cannot be combined with --all because PS/2 is available only on x86_64"
+	fi
 	if (( DEBUG_MODE )) && [[ -z "$TARGET_ARCH" ]] && (( ! ALL_ARCHES )); then
 		error "--debug requires --arch <arch> or --all"
 	fi

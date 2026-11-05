@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
 	cat <<'EOF'
-Usage: run_qemu.sh --arch <arch> [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--iommu <kind>] [--headless] [--debug] [--debug-port <port>] [--qmp-socket <path>] [-- <extra qemu args>]
+Usage: run_qemu.sh --arch <arch> [--builddir <path>] [--build-root <path>] [--build-prefix <name>] [--iommu <kind>] [--boot-device <kind>] [--input-device <kind>] [--headless] [--debug] [--debug-port <port>] [--qmp-socket <path>] [-- <extra qemu args>]
 
 Required arguments:
   --arch        Target architecture (x86_64, aarch64, riscv64, loongarch64).
@@ -19,6 +19,11 @@ Optional arguments:
   --headless    Disable graphical display and keep serial on stdio.
   --iommu       IOMMU model: auto, none, vtd, amd, smmuv3, or riscv.
                 auto enables the native emulated model when one exists.
+  --boot-device Select auto, sata, cdrom, or usb. auto uses QEMU's firmware-
+                visible CD-ROM and is the default on every architecture.
+  --input-device
+                Select ps2, hid, or none. PS/2 is available only on x86_64;
+                the default is ps2 on x86_64 and hid elsewhere.
   --debug       Start QEMU paused with a GDB stub on localhost and enable
                 QEMU debug logging in the build directory.
   --debug-port  TCP port to use for the GDB stub in --debug mode.
@@ -203,6 +208,8 @@ HEADLESS=0
 IOMMU_MODE="auto"
 EXTRA_ARGS=()
 QMP_SOCKET=""
+BOOT_DEVICE="auto"
+INPUT_DEVICE="auto"
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -242,6 +249,24 @@ while [[ $# -gt 0 ]]; do
 			HEADLESS=1
 			shift 1
 			;;
+		--boot-device)
+			[[ $# -ge 2 ]] || error "missing value for --boot-device"
+			BOOT_DEVICE="$2"
+			shift 2
+			;;
+		--boot-device=*)
+			BOOT_DEVICE="${1#*=}"
+			shift
+			;;
+		--input-device)
+			[[ $# -ge 2 ]] || error "missing value for --input-device"
+			INPUT_DEVICE="$2"
+			shift 2
+			;;
+		--input-device=*)
+			INPUT_DEVICE="${1#*=}"
+			shift
+			;;
 		--iommu)
 			IOMMU_MODE="$2"
 			shift 2
@@ -276,6 +301,16 @@ done
 
 [[ -n "$TARGET_ARCH" ]] || error "missing required argument --arch"
 
+case "$BOOT_DEVICE" in
+	auto|sata|cdrom|usb) ;;
+	*) error "unsupported boot device: $BOOT_DEVICE (expected auto, sata, cdrom, or usb)" ;;
+esac
+
+case "$INPUT_DEVICE" in
+	auto|ps2|hid|none) ;;
+	*) error "unsupported input device: $INPUT_DEVICE (expected ps2, hid, or none)" ;;
+esac
+
 if [[ -n "$BUILD_DIR" ]] && [[ "$BUILD_ROOT" != "$REPO_ROOT" ]]; then
 	error "use either --builddir or --build-root, not both"
 fi
@@ -308,9 +343,6 @@ case "$TARGET_ARCH" in
 		qemu_args=(
 			-M q35
 			-smp 4
-			-device ich9-ahci,id=ahci
-			-drive file="$ISO_PATH",if=none,id=disk,format=raw
-			-device ide-hd,drive=disk,bus=ahci.0
 			-serial stdio
 			-no-reboot
 			-no-shutdown
@@ -330,11 +362,7 @@ case "$TARGET_ARCH" in
 			-smp 4
 			-cpu cortex-a72
 			-m 2G
-			-cdrom "$ISO_PATH"
-			-device virtio-gpu-pci
-			-device qemu-xhci
-			-device usb-kbd
-			-device usb-mouse
+			-device ramfb
 			-serial stdio
 			-no-reboot
 			-no-shutdown
@@ -354,15 +382,7 @@ case "$TARGET_ARCH" in
 			-smp 4
 			-cpu rv64,v=true,vlen=128,elen=64
 			-m 2G
-			# Boot drive
-			-cdrom "$ISO_PATH"
-			-device ich9-ahci,id=ahci
-			-drive "file=${ISO_PATH},format=raw,if=none,id=sata_os,snapshot=on"
-			-device ide-hd,drive=sata_os,bus=ahci.0
-			-device virtio-gpu-pci
-			-device qemu-xhci
-			-device usb-kbd
-			-device usb-mouse
+			-device ramfb
 			-serial stdio
 			-no-reboot
 			-no-shutdown
@@ -381,13 +401,7 @@ case "$TARGET_ARCH" in
 			-smp 4
 			-cpu la464
 			-m 2G
-			-device ich9-ahci,id=ahci
-			-drive file="$ISO_PATH",if=none,id=disk,format=raw
-			-device ide-hd,drive=disk,bus=ahci.0
-			-device virtio-gpu-pci
-			-device qemu-xhci
-			-device usb-kbd
-			-device usb-mouse
+			-device ramfb
 			-serial stdio
 			-no-reboot
 			-no-shutdown
@@ -401,6 +415,54 @@ case "$TARGET_ARCH" in
 		error "unsupported architecture: $TARGET_ARCH"
 		;;
 esac
+
+if [[ "$INPUT_DEVICE" == "auto" ]]; then
+	case "$TARGET_ARCH" in
+		x86_64) INPUT_DEVICE="ps2" ;;
+		*) INPUT_DEVICE="hid" ;;
+	esac
+fi
+
+if [[ "$INPUT_DEVICE" == "ps2" && "$TARGET_ARCH" != "x86_64" ]]; then
+	error "PS/2 input is supported only on x86_64"
+fi
+
+if [[ "$BOOT_DEVICE" == "usb" || "$INPUT_DEVICE" == "hid" ]]; then
+	qemu_args+=( -device qemu-xhci,id=xhci )
+fi
+
+case "$BOOT_DEVICE" in
+	auto)
+		qemu_args+=( -cdrom "$ISO_PATH" )
+		;;
+	sata)
+		qemu_args+=(
+			-device ich9-ahci,id=ahci
+			-drive file="$ISO_PATH",if=none,id=boot_disk,format=raw,snapshot=on
+			-device ide-hd,drive=boot_disk,bus=ahci.0
+		)
+		;;
+	cdrom)
+		qemu_args+=(
+			-device ich9-ahci,id=ahci
+			-drive file="$ISO_PATH",if=none,id=boot_disk,format=raw,media=cdrom,readonly=on
+			-device ide-cd,drive=boot_disk,bus=ahci.0
+		)
+		;;
+	usb)
+		qemu_args+=(
+			-drive file="$ISO_PATH",if=none,id=boot_disk,format=raw,snapshot=on
+			-device usb-storage,drive=boot_disk,bus=xhci.0
+		)
+		;;
+esac
+
+if [[ "$INPUT_DEVICE" == "hid" ]]; then
+	qemu_args+=(
+		-device usb-kbd,bus=xhci.0
+		-device usb-mouse,bus=xhci.0
+	)
+fi
 
 qemu_bin="$(resolve_cmd "$qemu_name")" || error "required tool '$qemu_name' not found in PATH"
 
