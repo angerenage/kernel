@@ -36,6 +36,11 @@ drivers:
     compatible_ids:
       - "ahci:sata"
 
+  satapi:
+    executable: "/boot/satapi_driver.elf"
+    compatible_ids:
+      - "ahci:satapi"
+
   partition:
     executable: "/boot/partition_driver.elf"
     compatible_ids:

@@ -83,6 +83,8 @@ bool ahci_port_initialize(struct ahci_port* port, volatile struct ahci_port_regi
 	registers->interrupt_enable       = 0u;
 	registers->interrupt_status       = UINT32_MAX;
 	registers->sata_error             = UINT32_MAX;
+	if (kind == AHCI_DEVICE_SATAPI) registers->command |= AHCI_PORT_CMD_ATAPI;
+	else registers->command &= ~AHCI_PORT_CMD_ATAPI;
 	registers->command |= AHCI_PORT_CMD_FRE;
 	registers->command |= AHCI_PORT_CMD_ST;
 	port->running = true;

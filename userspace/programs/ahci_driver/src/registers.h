@@ -31,6 +31,7 @@
 #define AHCI_PORT_CMD_FRE (1u << 4u)
 #define AHCI_PORT_CMD_FR (1u << 14u)
 #define AHCI_PORT_CMD_CR (1u << 15u)
+#define AHCI_PORT_CMD_ATAPI (1u << 24u)
 
 #define AHCI_PORT_TFD_ERR (1u << 0u)
 #define AHCI_PORT_TFD_DRQ (1u << 3u)

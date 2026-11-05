@@ -172,6 +172,7 @@ subdir('programs/hid_driver')
 subdir('programs/usb_storage_driver')
 subdir('lib/ata')
 subdir('programs/sata_driver')
+subdir('programs/satapi_driver')
 subdir('programs/partition_driver')
 subdir('programs/fat32_driver')
 subdir('programs/ps2_driver')
@@ -224,6 +225,7 @@ userspace_boot_programs = [
 	xhci_driver_elf,
 	usb_storage_driver_elf,
 	sata_driver_elf,
+	satapi_driver_elf,
 	partition_driver_elf,
 	fat32_driver_elf,
 ]
