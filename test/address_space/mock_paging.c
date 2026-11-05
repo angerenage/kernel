@@ -34,22 +34,30 @@ static size_t                  largest_map_size;
 static bool                    initialized;
 static bool                    fail_init_once;
 static bool                    fail_next_unmap;
+static bool                    kernel_translation_available;
+static enum memory_type        kernel_translation_memory_type;
 static uintptr_t               next_space_id = 2u;
 
 void mock_paging_reset(void) {
 	memset(mappings, 0, sizeof(mappings));
 	memset(spaces, 0, sizeof(spaces));
-	fail_after_maps            = (size_t)-1;
-	fail_map_budget            = (size_t)-1;
-	successful_maps            = 0u;
-	map_calls                  = 0u;
-	largest_map_size           = 0u;
-	paging_info.leaf_size_mask = 1ull << 12;
-	initialized                = false;
-	fail_init_once             = false;
-	fail_next_unmap            = false;
-	kernel_space               = (struct hal_paging_space){1u, true};
-	next_space_id              = 2u;
+	fail_after_maps              = (size_t)-1;
+	fail_map_budget              = (size_t)-1;
+	successful_maps              = 0u;
+	map_calls                    = 0u;
+	largest_map_size             = 0u;
+	paging_info.leaf_size_mask   = 1ull << 12;
+	initialized                  = false;
+	fail_init_once               = false;
+	fail_next_unmap              = false;
+	kernel_translation_available = false;
+	kernel_space                 = (struct hal_paging_space){1u, true};
+	next_space_id                = 2u;
+}
+
+void hal_paging_mock_set_kernel_memory_type(enum memory_type memory_type) {
+	kernel_translation_memory_type = memory_type;
+	kernel_translation_available   = memory_type < MEMORY_TYPE_COUNT;
 }
 
 void mock_paging_fail_init_once(void) {
@@ -103,12 +111,20 @@ bool hal_paging_init(void) {
 	return true;
 }
 
+bool hal_paging_init_local(void) {
+	return true;
+}
+
 const struct hal_paging_info* hal_paging_info(void) {
 	return &paging_info;
 }
 
+bool hal_paging_memory_type_supported(enum memory_type memory_type) {
+	return memory_type < MEMORY_TYPE_COUNT;
+}
+
 bool hal_paging_mapping_supported(uint64_t flags, enum memory_type memory_type) {
-	return (flags & ~HAL_PAGE_VALID_MASK) == 0u && memory_type < MEMORY_TYPE_COUNT;
+	return (flags & ~HAL_PAGE_VALID_MASK) == 0u && hal_paging_memory_type_supported(memory_type);
 }
 
 struct hal_paging_space* hal_paging_kernel_space(void) {
@@ -222,6 +238,13 @@ bool hal_paging_query(const struct hal_paging_space* space, uintptr_t virt,
 	if (out_translation != NULL) *out_translation = (struct hal_paging_translation){0};
 	if (space == NULL || !space->allocated || !initialized) return false;
 	struct mock_mapping* mapping = find_mapping(space, virt);
+	if (mapping == NULL && space == &kernel_space && kernel_translation_available) {
+		if (out_translation != NULL) {
+			*out_translation = (struct hal_paging_translation){
+				virt, TEST_MAPPING_GRANULE, HAL_PAGE_READ | HAL_PAGE_WRITE, kernel_translation_memory_type};
+		}
+		return true;
+	}
 	if (mapping == NULL) return false;
 	if (out_translation != NULL)
 		*out_translation = (struct hal_paging_translation){mapping->phys + (virt & (TEST_MAPPING_GRANULE - 1u)),

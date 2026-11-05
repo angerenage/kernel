@@ -54,6 +54,9 @@ struct hal_paging_translation {
 /* Initialize paging and capture the hardware address space currently used by the kernel. */
 bool hal_paging_init(void);
 
+/* Initialize paging state that is local to the current CPU. */
+bool hal_paging_init_local(void);
+
 /* Return the translation capabilities of the active architecture backend. */
 const struct hal_paging_info* hal_paging_info(void);
 
@@ -62,6 +65,9 @@ struct hal_paging_space* hal_paging_kernel_space(void);
 
 /* Return whether the requested protection and memory type can be enforced exactly. */
 bool hal_paging_mapping_supported(uint64_t flags, enum memory_type memory_type);
+
+/* Return whether the active architecture can enforce this memory type exactly. */
+bool hal_paging_memory_type_supported(enum memory_type memory_type);
 
 /* Create a process paging space with the required kernel mappings. */
 bool hal_paging_space_create(struct hal_paging_space** out_space);

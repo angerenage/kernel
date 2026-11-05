@@ -43,6 +43,8 @@
 #define AARCH64_TCR_DS (1ull << 59)
 #define AARCH64_DEVICE_ATTR (2ull << 2)
 #define AARCH64_MAIR_DEVICE_NGNRNE 0x00u
+#define AARCH64_MAIR_DEVICE_GRE 0x0cu
+#define AARCH64_MAIR_NORMAL_NC 0x44u
 
 struct hal_paging_space {
 	uintptr_t lower_root_phys;
@@ -55,6 +57,8 @@ static struct hal_paging_info paging_info;
 
 static bool                    initialized;
 static bool                    device_memory_supported;
+static bool                    write_combining_supported;
+static uint64_t                write_combining_attrs;
 static unsigned                minimum_leaf_shift;
 static uint64_t                pte_address_mask;
 static uint64_t                normal_attrs_template;
@@ -308,11 +312,17 @@ static uint64_t aarch64_leaf_flags(uint64_t flags, enum memory_type memory_type)
 		entry &= ~(AARCH64_ATTR_MASK | AARCH64_SH_MASK);
 		entry |= AARCH64_DEVICE_ATTR;
 	}
+	else if (memory_type == MEMORY_TYPE_WRITE_COMBINING) {
+		entry &= ~(AARCH64_ATTR_MASK | AARCH64_SH_MASK);
+		entry |= write_combining_attrs;
+	}
 
 	return entry | AARCH64_DESC_VALID;
 }
 
 static enum memory_type aarch64_leaf_memory_type(uint64_t entry) {
+	if (write_combining_supported && (entry & AARCH64_ATTR_MASK) == write_combining_attrs)
+		return MEMORY_TYPE_WRITE_COMBINING;
 	return (entry & AARCH64_ATTR_MASK) == AARCH64_DEVICE_ATTR ? MEMORY_TYPE_DEVICE : MEMORY_TYPE_NORMAL;
 }
 
@@ -362,6 +372,7 @@ static bool aarch64_physical_bits(uint64_t tcr, unsigned* out_bits) {
 
 bool hal_paging_init(void) {
 	uint64_t               entry;
+	uint64_t               mair;
 	uint64_t               tcr;
 	unsigned               shift;
 	unsigned               physical_bits;
@@ -369,6 +380,8 @@ bool hal_paging_init(void) {
 	const struct pmm_info* physical_memory = pmm_info();
 
 	initialized                   = false;
+	write_combining_supported     = false;
+	write_combining_attrs         = 0u;
 	normal_attrs_template         = 0;
 	minimum_leaf_shift            = 12u;
 	paging_info.minimum_leaf_size = (size_t)1u << minimum_leaf_shift;
@@ -388,7 +401,16 @@ bool hal_paging_init(void) {
 		AARCH64_PHYS_FIELD_MASK & ((1ull << physical_bits) - 1u) & ~((uint64_t)paging_info.minimum_leaf_size - 1u);
 	paging_info.leaf_size_mask =
 		(1ull << minimum_leaf_shift) | (1ull << (minimum_leaf_shift + 9u)) | (1ull << (minimum_leaf_shift + 18u));
-	device_memory_supported = ((aarch64_read_mair_el1() >> 16u) & 0xffu) == AARCH64_MAIR_DEVICE_NGNRNE;
+	mair                    = aarch64_read_mair_el1();
+	device_memory_supported = ((mair >> 16u) & 0xffu) == AARCH64_MAIR_DEVICE_NGNRNE;
+	for (uint64_t index = 0u; index < 8u; index++) {
+		uint8_t type = (uint8_t)((mair >> (index * 8u)) & 0xffu);
+
+		if (type != AARCH64_MAIR_NORMAL_NC && type != AARCH64_MAIR_DEVICE_GRE) continue;
+		write_combining_attrs     = index << 2u;
+		write_combining_supported = true;
+		break;
+	}
 
 	if (!aarch64_query_entry((uintptr_t)&hal_paging_init, &entry, &shift)) {
 		spinlock_unlock_irqrestore(&paging_lock, state);
@@ -407,6 +429,10 @@ bool hal_paging_init(void) {
 	return true;
 }
 
+bool hal_paging_init_local(void) {
+	return true;
+}
+
 const struct hal_paging_info* hal_paging_info(void) {
 	return &paging_info;
 }
@@ -415,9 +441,13 @@ static bool aarch64_protection_supported(uint64_t flags) {
 	return (flags & ~HAL_PAGE_VALID_MASK) == 0u && (flags & HAL_PAGE_READ) != 0u;
 }
 
+bool hal_paging_memory_type_supported(enum memory_type memory_type) {
+	return memory_type == MEMORY_TYPE_NORMAL || (memory_type == MEMORY_TYPE_DEVICE && device_memory_supported) ||
+	       (memory_type == MEMORY_TYPE_WRITE_COMBINING && write_combining_supported);
+}
+
 bool hal_paging_mapping_supported(uint64_t flags, enum memory_type memory_type) {
-	return aarch64_protection_supported(flags) &&
-	       (memory_type == MEMORY_TYPE_NORMAL || (memory_type == MEMORY_TYPE_DEVICE && device_memory_supported));
+	return aarch64_protection_supported(flags) && hal_paging_memory_type_supported(memory_type);
 }
 
 struct hal_paging_space* hal_paging_kernel_space(void) {

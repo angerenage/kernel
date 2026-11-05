@@ -205,7 +205,7 @@ static syscall_result_t allocator_claim(const struct cap_request*             re
 			&memory))
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	cap_rights_t memory_rights = allocator->memory_rights & ALLOCATOR_MEMORY_RIGHTS;
-	if (request.memory_type == MEMORY_TYPE_DEVICE || !memory_cpu_accessible(memory)) memory_rights &= ~CAP_EXEC;
+	if (request.memory_type != MEMORY_TYPE_NORMAL || !memory_cpu_accessible(memory)) memory_rights &= ~CAP_EXEC;
 	response.memory_cap = kernel_memory_grant(memory, req->caller, CAP_CALL | memory_rights);
 	memory_release(memory);
 	if (response.memory_cap == CAP_ID_INVALID) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);

@@ -28,6 +28,9 @@
 #define LOONGARCH_CRMD_DATF_SHIFT 5u
 #define LOONGARCH_CRMD_DATM_SHIFT 7u
 #define LOONGARCH_CRMD_CC 1u
+#define LOONGARCH_MAT_SUC 0u
+#define LOONGARCH_MAT_CC 1u
+#define LOONGARCH_MAT_WUC 2u
 
 #define LOONGARCH_PTE_V (1ull << 0)
 #define LOONGARCH_PTE_D (1ull << 1)
@@ -225,7 +228,10 @@ static inline uint64_t loongarch_space_root_phys(const struct hal_paging_space* 
 
 static inline uint64_t loongarch_leaf_flags(uint64_t flags, enum memory_type memory_type, bool huge) {
 	uint64_t entry = LOONGARCH_PTE_P | LOONGARCH_PTE_V;
-	uint64_t mat   = memory_type == MEMORY_TYPE_DEVICE ? 0ull : (uint64_t)LOONGARCH_CRMD_CC;
+	uint64_t mat   = LOONGARCH_MAT_CC;
+
+	if (memory_type == MEMORY_TYPE_DEVICE) mat = LOONGARCH_MAT_SUC;
+	if (memory_type == MEMORY_TYPE_WRITE_COMBINING) mat = LOONGARCH_MAT_WUC;
 
 	entry |= ((flags & HAL_PAGE_USER) != 0) ? LOONGARCH_PTE_PLV3 : LOONGARCH_PTE_PLV0;
 	entry |= mat << LOONGARCH_PTE_MAT_SHIFT;
@@ -239,7 +245,11 @@ static inline uint64_t loongarch_leaf_flags(uint64_t flags, enum memory_type mem
 }
 
 static inline enum memory_type loongarch_leaf_memory_type(uint64_t entry) {
-	return ((entry >> LOONGARCH_PTE_MAT_SHIFT) & 0x3u) == LOONGARCH_CRMD_CC ? MEMORY_TYPE_NORMAL : MEMORY_TYPE_DEVICE;
+	uint64_t mat = (entry >> LOONGARCH_PTE_MAT_SHIFT) & 0x3u;
+
+	if (mat == LOONGARCH_MAT_CC) return MEMORY_TYPE_NORMAL;
+	if (mat == LOONGARCH_MAT_WUC) return MEMORY_TYPE_WRITE_COMBINING;
+	return MEMORY_TYPE_DEVICE;
 }
 
 static inline uint64_t loongarch_leaf_apply_protection(uint64_t entry, uint64_t flags, bool huge) {
@@ -359,6 +369,10 @@ bool hal_paging_init(void) {
 	return true;
 }
 
+bool hal_paging_init_local(void) {
+	return true;
+}
+
 const struct hal_paging_info* hal_paging_info(void) {
 	return &paging_info;
 }
@@ -367,8 +381,12 @@ static bool loongarch_protection_supported(uint64_t flags) {
 	return (flags & ~HAL_PAGE_VALID_MASK) == 0u;
 }
 
+bool hal_paging_memory_type_supported(enum memory_type memory_type) {
+	return memory_type < MEMORY_TYPE_COUNT;
+}
+
 bool hal_paging_mapping_supported(uint64_t flags, enum memory_type memory_type) {
-	return loongarch_protection_supported(flags) && memory_type < MEMORY_TYPE_COUNT;
+	return loongarch_protection_supported(flags) && hal_paging_memory_type_supported(memory_type);
 }
 
 static bool loongarch_query_entry(const struct hal_paging_space* space, uintptr_t virt, uint64_t* out_entry,

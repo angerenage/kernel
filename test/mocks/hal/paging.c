@@ -26,12 +26,20 @@ bool hal_paging_init(void) {
 	return true;
 }
 
+bool hal_paging_init_local(void) {
+	return true;
+}
+
 const struct hal_paging_info* hal_paging_info(void) {
 	return &paging_info;
 }
 
+bool hal_paging_memory_type_supported(enum memory_type memory_type) {
+	return memory_type < MEMORY_TYPE_COUNT;
+}
+
 bool hal_paging_mapping_supported(uint64_t flags, enum memory_type memory_type) {
-	return (flags & ~HAL_PAGE_VALID_MASK) == 0u && memory_type < MEMORY_TYPE_COUNT;
+	return (flags & ~HAL_PAGE_VALID_MASK) == 0u && hal_paging_memory_type_supported(memory_type);
 }
 
 struct hal_paging_space* hal_paging_kernel_space(void) {

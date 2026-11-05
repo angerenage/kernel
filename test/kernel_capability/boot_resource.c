@@ -1,9 +1,12 @@
 #include "../../kernel/src/capability/boot_resource.h"
 
 #include <base/framebuffer.h>
+#include <base/memory.h>
 #include <test_memory.h>
 
 #include "test_support.h"
+
+void hal_paging_mock_set_kernel_memory_type(enum memory_type memory_type);
 
 Test(kernel_capability_boot_resource, framebuffer_reports_format_and_maps_writable) {
 	struct kernel_capability_test_context ctx;
@@ -11,6 +14,8 @@ Test(kernel_capability_boot_resource, framebuffer_reports_format_and_maps_writab
 	const struct framebuffer_map_request  map_request  = {.header = {.op = FRAMEBUFFER_OP_MAP}};
 	struct framebuffer_info_response      info;
 	struct framebuffer_map_response       mapping;
+	struct mapping_info                   mapping_info;
+	const struct mapping_info_request     mapping_info_request = {.header = {.op = MAPPING_OP_INFO}};
 	struct boot_framebuffer               framebuffer;
 	struct capability*                    root;
 	struct pmm_extent                     allocation;
@@ -40,6 +45,7 @@ Test(kernel_capability_boot_resource, framebuffer_reports_format_and_maps_writab
 		.blue_mask_size   = 8u,
 	};
 	boot_mock_set_framebuffer(&framebuffer);
+	hal_paging_mock_set_kernel_memory_type(MEMORY_TYPE_WRITE_COMBINING);
 	kernel_capability_boot_resources_init();
 	cap = kernel_capability_framebuffer_grant(process_pid(ctx.process));
 	cr_assert_neq(cap, CAP_ID_INVALID);
@@ -56,6 +62,10 @@ Test(kernel_capability_boot_resource, framebuffer_reports_format_and_maps_writab
 	cr_assert_eq(mapping.mapping_size, TEST_MAPPING_GRANULE);
 	cr_assert_eq(mapping.data_offset, 31u);
 	cr_assert_neq(mapping.mapping_cap, CAP_ID_INVALID);
+	result = kernel_capability_test_call(
+		mapping.mapping_cap, &mapping_info_request, sizeof(mapping_info_request), &mapping_info, sizeof(mapping_info));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_eq(mapping_info.memory_type, MEMORY_TYPE_WRITE_COMBINING);
 	result = kernel_capability_test_call(cap, &map_request, sizeof(map_request), &mapping, sizeof(mapping));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK, "a second mapping must share the resource backing");
 	cr_assert_neq(mapping.mapping_cap, CAP_ID_INVALID);

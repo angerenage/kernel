@@ -4,6 +4,7 @@
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/spinlock.h>
+#include <firmware/dt/device.h>
 #include <hal/hcf.h>
 #include <hal/paging.h>
 #include <stdbool.h>
@@ -22,6 +23,7 @@
 #define RISCV_PTE_A (1ull << 6)
 #define RISCV_PTE_D (1ull << 7)
 #define RISCV_PTE_PBMT_MASK (3ull << 61)
+#define RISCV_PTE_PBMT_NC (1ull << 61)
 #define RISCV_PTE_PBMT_IO (2ull << 61)
 #define RISCV_PTE_PPN_MASK 0x003ffffffffffc00ull
 
@@ -54,6 +56,49 @@ static uint64_t                satp_prefix;
 static struct hal_paging_space kernel_space;
 static struct spinlock         paging_lock =
 	SPINLOCK_INIT_CLASS("paging_lock", SPINLOCK_ORDER_PAGING, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
+
+static bool riscv_query_entry(const struct hal_paging_space* space, uintptr_t virt, uint64_t* out_entry,
+                              unsigned* out_shift);
+
+static bool riscv_isa_string_has_extension(const uint8_t* data, size_t size, const char* name) {
+	size_t name_size;
+
+	if (data == NULL || size == 0u || data[size - 1u] != '\0' || name == NULL) return false;
+	name_size       = strlen(name);
+	const char* isa = (const char*)data;
+	const char* end = isa + size - 1u;
+	for (const char* token = isa; token < end;) {
+		const char* token_end = token;
+		while (token_end < end && *token_end != '_') token_end++;
+		size_t token_size = (size_t)(token_end - token);
+		if (token_size >= name_size && memcmp(token, name, name_size) == 0 &&
+		    (token_size == name_size || (token[name_size] >= '0' && token[name_size] <= '9')))
+			return true;
+		token = token_end < end ? token_end + 1u : end;
+	}
+	return false;
+}
+
+static bool riscv_svpbmt_available(void) {
+	size_t cpus = 0u;
+
+	for (size_t index = 0u;; index++) {
+		struct dt_node     node = dt_node_with_string_at("device_type", "cpu", index);
+		struct dt_property extensions;
+		struct dt_property isa;
+		bool               available;
+
+		if (!dt_node_valid(node)) break;
+		if (!dt_node_enabled(node)) continue;
+		available = dt_node_property(node, "riscv,isa-extensions", &extensions) &&
+		            dt_property_string_list_contains(&extensions, "svpbmt");
+		if (!available && dt_node_property(node, "riscv,isa", &isa))
+			available = riscv_isa_string_has_extension(isa.data, isa.size, "svpbmt");
+		if (!available) return false;
+		cpus++;
+	}
+	return cpus != 0u;
+}
 
 static inline uint64_t riscv_read_satp(void) {
 	uint64_t value;
@@ -156,6 +201,7 @@ static inline uint64_t riscv_leaf_flags(uint64_t flags, enum memory_type memory_
 	if ((flags & HAL_PAGE_GLOBAL) != 0) entry |= RISCV_PTE_G;
 	if ((flags & HAL_PAGE_USER) != 0) entry |= RISCV_PTE_U;
 	if (memory_type == MEMORY_TYPE_DEVICE && svpbmt_available) entry |= RISCV_PTE_PBMT_IO;
+	if (memory_type == MEMORY_TYPE_WRITE_COMBINING && svpbmt_available) entry |= RISCV_PTE_PBMT_NC;
 
 	return entry;
 }
@@ -264,10 +310,8 @@ bool hal_paging_init(void) {
 	paging_info.leaf_size_mask = 0u;
 	for (int level = 0; level < paging_levels; level++)
 		paging_info.leaf_size_mask |= 1ull << (minimum_leaf_shift + 9u * (unsigned)level);
-	/* S-mode cannot read menvcfg.PBMTE, and SBI exposes no architectural query for it.
-	 * A DT ISA declaration
-	 * alone therefore cannot prove that PBMT is enabled for satp. */
-	svpbmt_available = false;
+	/* Limine enables Svpbmt page attributes when the extension is advertised. */
+	svpbmt_available = riscv_svpbmt_available();
 
 	satp_prefix  = satp & ~((1ull << 44) - 1u);
 	kernel_space = (struct hal_paging_space){
@@ -278,6 +322,10 @@ bool hal_paging_init(void) {
 	initialized = riscv_root_table() != NULL;
 	spinlock_unlock_irqrestore(&paging_lock, state);
 	return initialized;
+}
+
+bool hal_paging_init_local(void) {
+	return true;
 }
 
 const struct hal_paging_info* hal_paging_info(void) {
@@ -307,9 +355,13 @@ static bool riscv_protection_supported(uint64_t flags) {
 	       ((flags & HAL_PAGE_WRITE) == 0u || (flags & HAL_PAGE_READ) != 0u);
 }
 
+bool hal_paging_memory_type_supported(enum memory_type memory_type) {
+	return memory_type == MEMORY_TYPE_NORMAL || memory_type == MEMORY_TYPE_DEVICE ||
+	       (memory_type == MEMORY_TYPE_WRITE_COMBINING && svpbmt_available);
+}
+
 bool hal_paging_mapping_supported(uint64_t flags, enum memory_type memory_type) {
-	return riscv_protection_supported(flags) &&
-	       (memory_type == MEMORY_TYPE_NORMAL || memory_type == MEMORY_TYPE_DEVICE) && memory_type < MEMORY_TYPE_COUNT;
+	return riscv_protection_supported(flags) && hal_paging_memory_type_supported(memory_type);
 }
 
 struct hal_paging_space* hal_paging_kernel_space(void) {
@@ -589,7 +641,9 @@ bool hal_paging_query(const struct hal_paging_space* space, uintptr_t virt,
 			.physical_address = physical_address,
 			.leaf_size        = (size_t)1u << shift,
 			.flags            = flags,
-			.memory_type = (entry & RISCV_PTE_PBMT_MASK) == RISCV_PTE_PBMT_IO ? MEMORY_TYPE_DEVICE : MEMORY_TYPE_NORMAL,
+			.memory_type      = (entry & RISCV_PTE_PBMT_MASK) == RISCV_PTE_PBMT_NC   ? MEMORY_TYPE_WRITE_COMBINING
+			                    : (entry & RISCV_PTE_PBMT_MASK) == RISCV_PTE_PBMT_IO ? MEMORY_TYPE_DEVICE
+			                                                                         : MEMORY_TYPE_NORMAL,
 		};
 
 	spinlock_unlock_irqrestore(&paging_lock, state);

@@ -13,6 +13,7 @@
 #include <core/pmm.h>
 #include <core/process.h>
 #include <core/spinlock.h>
+#include <hal/paging.h>
 #include <kernel/capability.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -58,7 +59,8 @@ static bool external_mapping_layout(const void* address, size_t size, struct ext
 }
 
 static syscall_result_t external_mapping_create(const struct cap_request* req, const void* address, size_t size,
-                                                memory_access_t access, struct external_mapping_result* out) {
+                                                memory_access_t access, enum memory_type memory_type,
+                                                struct external_mapping_result* out) {
 	struct external_mapping_layout layout;
 	struct process*                caller;
 	struct address_space*          space;
@@ -79,7 +81,7 @@ static syscall_result_t external_mapping_create(const struct cap_request* req, c
 				&(const struct memory_physical_request){
 					.physical_address        = layout.physical_base,
 					.size                    = layout.mapping_size,
-					.memory_type             = MEMORY_TYPE_NORMAL,
+					.memory_type             = memory_type,
 					.external_cpu_accessible = true,
 				},
 				&framebuffer_memory);
@@ -147,14 +149,21 @@ static syscall_result_t framebuffer_map_handler(const struct cap_request*      r
                                                 const struct boot_framebuffer* framebuffer, size_t size) {
 	struct external_mapping_result  mapping = {.mapping_cap = CAP_ID_INVALID};
 	struct framebuffer_map_response response;
+	struct hal_paging_translation   translation;
 	syscall_result_t                result;
+	enum memory_type                memory_type = MEMORY_TYPE_NORMAL;
 
 	if (req->request_size < sizeof(struct framebuffer_map_request) ||
 	    !cap_kernel_response_fits(req, sizeof(response))) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
-	result =
-		external_mapping_create(req, framebuffer->address, size, MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE, &mapping);
+	if (hal_paging_query(hal_paging_kernel_space(), (uintptr_t)framebuffer->address, &translation)) {
+		if (!hal_paging_memory_type_supported(translation.memory_type))
+			return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+		memory_type = translation.memory_type;
+	}
+	result = external_mapping_create(
+		req, framebuffer->address, size, MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE, memory_type, &mapping);
 	if (result.status != SYSCALL_STATUS_OK) return result;
 	response = (struct framebuffer_map_response){
 		.mapping_cap  = mapping.mapping_cap,

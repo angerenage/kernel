@@ -29,6 +29,8 @@
 #define X86_PTE_PAT_LARGE (1ull << 12)
 #define X86_PTE_NX (1ull << 63)
 #define X86_CR0_WP (1ull << 16)
+#define X86_CR0_NW (1ull << 29)
+#define X86_CR0_CD (1ull << 30)
 #define X86_CR4_PGE (1ull << 7)
 #define X86_CR4_LA57 (1ull << 12)
 #define X86_TLB_MAX_CPUS 64u
@@ -41,6 +43,9 @@
 #define X86_CPUID_EXT_FEATURE_NX (1u << 20)
 #define X86_CPUID_EXT_FEATURE_1G_PAGE (1u << 26)
 #define X86_PAT_UC 0u
+#define X86_PAT_WC 1u
+#define X86_PAT_ENTRY_COUNT 8u
+#define X86_PAT_WC_FALLBACK_INDEX 1u
 
 struct hal_paging_space {
 	uintptr_t lower_root_phys;
@@ -53,6 +58,8 @@ struct hal_paging_space {
 static struct hal_paging_info paging_info;
 static unsigned               minimum_leaf_shift;
 static bool                   device_memory_supported;
+static bool                   write_combining_supported;
+static uint8_t                write_combining_pat_index;
 static bool                   global_pages_supported;
 static uint64_t               pte_address_mask;
 
@@ -105,6 +112,46 @@ static inline uint64_t x86_read_msr(uint32_t msr) {
 	uint32_t low, high;
 	__asm__ volatile("rdmsr" : "=a"(low), "=d"(high) : "c"(msr));
 	return ((uint64_t)high << 32u) | low;
+}
+
+static inline void x86_write_msr(uint32_t msr, uint64_t value) {
+	__asm__ volatile("wrmsr" : : "c"(msr), "a"((uint32_t)value), "d"((uint32_t)(value >> 32u)) : "memory");
+}
+
+static inline void x86_wbinvd(void) {
+	__asm__ volatile("wbinvd" : : : "memory");
+}
+
+static bool x86_pat_install_write_combining(uint8_t index) {
+	uint64_t cr0;
+	uint64_t pat;
+	uint64_t shift;
+
+	if (index >= X86_PAT_ENTRY_COUNT) return false;
+	shift = (uint64_t)index * 8u;
+
+	pat = x86_read_msr(X86_MSR_PAT);
+	pat = (pat & ~(0xffull << shift)) | ((uint64_t)X86_PAT_WC << shift);
+	cr0 = x86_read_cr0();
+	x86_write_cr0((cr0 | X86_CR0_CD) & ~X86_CR0_NW);
+	x86_wbinvd();
+	x86_write_msr(X86_MSR_PAT, pat);
+	x86_wbinvd();
+	x86_write_cr0(cr0);
+	return ((x86_read_msr(X86_MSR_PAT) >> shift) & 0xffu) == X86_PAT_WC;
+}
+
+static bool x86_pat_find_write_combining(uint8_t* out_index) {
+	uint64_t pat;
+
+	if (out_index == NULL) return false;
+	pat = x86_read_msr(X86_MSR_PAT);
+	for (uint8_t index = 0u; index < X86_PAT_ENTRY_COUNT; index++) {
+		if (((pat >> ((uint64_t)index * 8u)) & 0xffu) != X86_PAT_WC) continue;
+		*out_index = index;
+		return true;
+	}
+	return false;
 }
 
 static inline void x86_cpuid(uint32_t leaf, uint32_t subleaf, uint32_t* eax, uint32_t* ebx, uint32_t* ecx,
@@ -269,7 +316,7 @@ static inline uintptr_t hhdm_phys_to_virt(uintptr_t phys) {
 	return phys + boot_info.direct_map_offset;
 }
 
-static inline uint64_t x86_leaf_flags(uint64_t flags, enum memory_type memory_type) {
+static inline uint64_t x86_leaf_flags(uint64_t flags, enum memory_type memory_type, int level) {
 	uint64_t entry = X86_PTE_PRESENT;
 
 	if ((flags & HAL_PAGE_WRITE) != 0) entry |= X86_PTE_WRITE;
@@ -277,12 +324,23 @@ static inline uint64_t x86_leaf_flags(uint64_t flags, enum memory_type memory_ty
 	if ((flags & HAL_PAGE_GLOBAL) != 0) entry |= X86_PTE_GLOBAL;
 	if ((flags & HAL_PAGE_USER) != 0) entry |= X86_PTE_USER;
 	if (memory_type == MEMORY_TYPE_DEVICE) entry |= X86_PTE_PWT | X86_PTE_PCD;
+	if (memory_type == MEMORY_TYPE_WRITE_COMBINING) {
+		if ((write_combining_pat_index & 1u) != 0u) entry |= X86_PTE_PWT;
+		if ((write_combining_pat_index & 2u) != 0u) entry |= X86_PTE_PCD;
+		if ((write_combining_pat_index & 4u) != 0u) entry |= level == 0 ? X86_PTE_PAT_4K : X86_PTE_PAT_LARGE;
+	}
 
 	return entry;
 }
 
-static inline enum memory_type x86_leaf_memory_type(uint64_t entry) {
-	return (entry & (X86_PTE_PWT | X86_PTE_PCD)) != 0u ? MEMORY_TYPE_DEVICE : MEMORY_TYPE_NORMAL;
+static inline enum memory_type x86_leaf_memory_type(uint64_t entry, unsigned shift) {
+	uint8_t index = 0u;
+
+	if ((entry & X86_PTE_PWT) != 0u) index |= 1u;
+	if ((entry & X86_PTE_PCD) != 0u) index |= 2u;
+	if ((entry & (shift == minimum_leaf_shift ? X86_PTE_PAT_4K : X86_PTE_PAT_LARGE)) != 0u) index |= 4u;
+	if (write_combining_supported && index == write_combining_pat_index) return MEMORY_TYPE_WRITE_COMBINING;
+	return index != 0u ? MEMORY_TYPE_DEVICE : MEMORY_TYPE_NORMAL;
 }
 
 static inline uint64_t x86_leaf_apply_protection(uint64_t entry, uint64_t flags) {
@@ -367,6 +425,8 @@ bool hal_paging_init(void) {
 
 	initialized                   = false;
 	device_memory_supported       = false;
+	write_combining_supported     = false;
+	write_combining_pat_index     = 0u;
 	global_pages_supported        = false;
 	minimum_leaf_shift            = 12u;
 	paging_info.minimum_leaf_size = (size_t)1u << minimum_leaf_shift;
@@ -414,6 +474,13 @@ bool hal_paging_init(void) {
 	}
 	device_memory_supported =
 		(basic_features & X86_CPUID_FEATURE_PAT) != 0u && ((x86_read_msr(X86_MSR_PAT) >> 24u) & 0xffu) == X86_PAT_UC;
+	if ((basic_features & X86_CPUID_FEATURE_PAT) != 0u) {
+		write_combining_supported = x86_pat_find_write_combining(&write_combining_pat_index);
+		if (!write_combining_supported) {
+			write_combining_pat_index = X86_PAT_WC_FALLBACK_INDEX;
+			write_combining_supported = x86_pat_install_write_combining(write_combining_pat_index);
+		}
+	}
 
 	kernel_space = (struct hal_paging_space){
 		.lower_root_phys = (uintptr_t)(x86_read_cr3() & pte_address_mask),
@@ -428,6 +495,11 @@ bool hal_paging_init(void) {
 	}
 	spinlock_unlock_irqrestore(&paging_lock, state);
 	return initialized;
+}
+
+bool hal_paging_init_local(void) {
+	if (!initialized) return true;
+	return !write_combining_supported || x86_pat_install_write_combining(write_combining_pat_index);
 }
 
 const struct hal_paging_info* hal_paging_info(void) {
@@ -456,9 +528,13 @@ static bool x86_protection_supported(uint64_t flags) {
 	       ((flags & HAL_PAGE_GLOBAL) == 0u || global_pages_supported);
 }
 
+bool hal_paging_memory_type_supported(enum memory_type memory_type) {
+	return memory_type == MEMORY_TYPE_NORMAL || (memory_type == MEMORY_TYPE_DEVICE && device_memory_supported) ||
+	       (memory_type == MEMORY_TYPE_WRITE_COMBINING && write_combining_supported);
+}
+
 bool hal_paging_mapping_supported(uint64_t flags, enum memory_type memory_type) {
-	return x86_protection_supported(flags) &&
-	       (memory_type == MEMORY_TYPE_NORMAL || (memory_type == MEMORY_TYPE_DEVICE && device_memory_supported));
+	return x86_protection_supported(flags) && hal_paging_memory_type_supported(memory_type);
 }
 
 struct hal_paging_space* hal_paging_kernel_space(void) {
@@ -851,7 +927,7 @@ bool hal_paging_query(const struct hal_paging_space* space, uintptr_t virt,
 			.physical_address = physical_address,
 			.leaf_size        = (size_t)1u << shift,
 			.flags            = flags | HAL_PAGE_READ,
-			.memory_type      = x86_leaf_memory_type(entry),
+			.memory_type      = x86_leaf_memory_type(entry, shift),
 		};
 
 	spinlock_unlock_irqrestore(&paging_lock, state);
@@ -970,7 +1046,7 @@ bool hal_paging_map(struct hal_paging_space* space, const struct hal_paging_map_
 			break;
 		}
 		*slot = (phys & pte_address_mask & ~((uint64_t)x86_leaf_size(level) - 1u)) |
-		        x86_leaf_flags(request->flags, request->memory_type);
+		        x86_leaf_flags(request->flags, request->memory_type, level);
 		if (level > 0) *slot |= X86_PTE_LARGE;
 		mapped += x86_leaf_size(level);
 	}
