@@ -12,6 +12,7 @@
 #include "registers.h"
 
 #define XHCI_DEVICE_TIMEOUT_MS 2000u
+#define XHCI_DEVICE_TIMEOUT_NS ((uint64_t)XHCI_DEVICE_TIMEOUT_MS * 1000000u)
 #define XHCI_PORTSC_CCS (1u << 0u)
 #define XHCI_PORTSC_PED (1u << 1u)
 #define XHCI_PORTSC_PR (1u << 4u)
@@ -102,9 +103,59 @@ static bool allocate_dma(struct xhci_controller* c, struct xhci_dma_buffer* buff
 	return true;
 }
 
+static bool ring_contains(const struct xhci_ring* ring, uint64_t pointer) {
+	uint64_t base = (uint64_t)ring->dma.device_address;
+	uint64_t size = (XHCI_RING_TRBS - 1u) * sizeof(struct xhci_trb);
+	return pointer >= base && pointer - base < size && ((pointer - base) % sizeof(struct xhci_trb)) == 0u;
+}
+
+static void report_event_timeout(const struct xhci_controller* c, uint32_t type, uint64_t pointer) {
+	uint32_t status = read_reg(c, (size_t)c->op + XHCI_OP_USBSTS);
+	if (type == XHCI_TRB_TRANSFER_EVENT) {
+		for (unsigned port = 0u; port < c->ports; port++) {
+			const struct xhci_device* device = c->devices[port];
+			if (device == NULL) continue;
+			if (ring_contains(&device->endpoint_zero, pointer)) {
+				RUNTIME_DEBUG_ERROR(
+					"xhci: timeout detail port=%u slot=%u ep=00 VID=%04x PID=%04x trb=%llx sts=%08x q=%u\n",
+					port + 1u,
+					device->slot,
+					device->vendor_id,
+					device->product_id,
+					(unsigned long long)pointer,
+					status,
+					c->pending_count);
+				return;
+			}
+			for (unsigned endpoint = 0u; endpoint < device->endpoint_count; endpoint++) {
+				if (!ring_contains(&device->endpoints[endpoint].ring, pointer)) continue;
+				RUNTIME_DEBUG_ERROR(
+					"xhci: timeout detail port=%u slot=%u ep=%02x VID=%04x PID=%04x trb=%llx sts=%08x q=%u\n",
+					port + 1u,
+					device->slot,
+					device->endpoints[endpoint].address,
+					device->vendor_id,
+					device->product_id,
+					(unsigned long long)pointer,
+					status,
+					c->pending_count);
+				return;
+			}
+		}
+	}
+	RUNTIME_DEBUG_ERROR("xhci: timeout detail type=%u trb=%llx sts=%08x q=%u\n",
+	                    type,
+	                    (unsigned long long)pointer,
+	                    status,
+	                    c->pending_count);
+}
+
 static bool wait_event(struct xhci_controller* c, uint32_t expected_type, uint64_t expected_pointer,
                        struct xhci_trb* completion, bool allow_short) {
-	for (unsigned elapsed = 0u; elapsed < XHCI_DEVICE_TIMEOUT_MS; elapsed++) {
+	uint64_t deadline;
+	if (monotonic_time_ns(&deadline) != SYSCALL_STATUS_OK) return false;
+	deadline = deadline > UINT64_MAX - XHCI_DEVICE_TIMEOUT_NS ? UINT64_MAX : deadline + XHCI_DEVICE_TIMEOUT_NS;
+	for (;;) {
 		for (unsigned index = 0u; index < c->pending_count; index++) {
 			struct xhci_trb event   = c->pending[index];
 			uint32_t        type    = (event.control >> XHCI_TRB_TYPE_SHIFT) & 63u;
@@ -117,6 +168,9 @@ static bool wait_event(struct xhci_controller* c, uint32_t expected_type, uint64
 				fprintf(stderr, "xhci: completion error type=%u code=%u\n", type, code);
 			return code == XHCI_TRB_SUCCESS || (allow_short && code == XHCI_TRB_SHORT_PACKET);
 		}
+		uint64_t now;
+		if (monotonic_time_ns(&now) != SYSCALL_STATUS_OK) return false;
+		if (now >= deadline) break;
 		struct xhci_trb event;
 		if (xhci_controller_next_event(c, &event)) {
 			uint32_t type = (event.control >> XHCI_TRB_TYPE_SHIFT) & 63u;
@@ -126,11 +180,11 @@ static bool wait_event(struct xhci_controller* c, uint32_t expected_type, uint64
 			else if (type != XHCI_TRB_PORT_STATUS)
 				RUNTIME_DEBUG_LOG(
 					"xhci: event type=%u completion=%u\n", type, event.status >> XHCI_TRB_COMPLETION_SHIFT);
-			continue;
 		}
-		if (sleep_ms(1u) != SYSCALL_STATUS_OK) return false;
+		else if (sleep_ms(1u) != SYSCALL_STATUS_OK) return false;
 	}
 	fprintf(stderr, "xhci: event timeout type=%u pointer=%llx\n", expected_type, (unsigned long long)expected_pointer);
+	report_event_timeout(c, expected_type, expected_pointer);
 	return false;
 }
 
