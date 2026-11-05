@@ -258,7 +258,95 @@ static uint64_t encode_color(const struct pixel_format* format, struct color col
 }
 
 static void write_pixel(volatile uint8_t* destination, size_t size, uint64_t pixel) {
-	for (size_t byte = 0u; byte < size; byte++) destination[byte] = (uint8_t)(pixel >> (byte * 8u));
+	size_t offset = 0u;
+
+	switch (size) {
+	case 1u:
+		*destination = (uint8_t)pixel;
+		return;
+	case 2u:
+		if (((uintptr_t)destination % _Alignof(uint16_t)) == 0u) {
+			*(volatile uint16_t*)destination = (uint16_t)pixel;
+			return;
+		}
+		break;
+	case 4u:
+		if (((uintptr_t)destination % _Alignof(uint32_t)) == 0u) {
+			*(volatile uint32_t*)destination = (uint32_t)pixel;
+			return;
+		}
+		break;
+	case 8u:
+		if (((uintptr_t)destination % _Alignof(uint64_t)) == 0u) {
+			*(volatile uint64_t*)destination = pixel;
+			return;
+		}
+		break;
+	default:
+		break;
+	}
+
+	while (size - offset >= sizeof(uint64_t) && ((uintptr_t)(destination + offset) % _Alignof(uint64_t)) == 0u) {
+		*(volatile uint64_t*)(destination + offset) = pixel >> (offset * 8u);
+		offset += sizeof(uint64_t);
+	}
+	while (size - offset >= sizeof(uint32_t) && ((uintptr_t)(destination + offset) % _Alignof(uint32_t)) == 0u) {
+		*(volatile uint32_t*)(destination + offset) = (uint32_t)(pixel >> (offset * 8u));
+		offset += sizeof(uint32_t);
+	}
+	while (size - offset >= sizeof(uint16_t) && ((uintptr_t)(destination + offset) % _Alignof(uint16_t)) == 0u) {
+		*(volatile uint16_t*)(destination + offset) = (uint16_t)(pixel >> (offset * 8u));
+		offset += sizeof(uint16_t);
+	}
+	while (offset < size) {
+		destination[offset] = (uint8_t)(pixel >> (offset * 8u));
+		offset++;
+	}
+}
+
+static void fill_pixel_run(volatile uint8_t* destination, size_t count, size_t pixel_size, uint64_t pixel) {
+	uint64_t repeated;
+	size_t   pixels_per_store;
+
+	switch (pixel_size) {
+	case 1u:
+		repeated = (pixel & 0xffu) * 0x0101010101010101ull;
+		break;
+	case 2u:
+		repeated = pixel & 0xffffu;
+		repeated |= repeated << 16u;
+		repeated |= repeated << 32u;
+		break;
+	case 4u:
+		repeated = pixel & 0xffffffffu;
+		repeated |= repeated << 32u;
+		break;
+	case 8u:
+		repeated = pixel;
+		break;
+	default:
+		while (count-- != 0u) {
+			write_pixel(destination, pixel_size, pixel);
+			destination += pixel_size;
+		}
+		return;
+	}
+
+	while (count != 0u && ((uintptr_t)destination % _Alignof(uint64_t)) != 0u) {
+		write_pixel(destination, pixel_size, pixel);
+		destination += pixel_size;
+		count--;
+	}
+	pixels_per_store = sizeof(uint64_t) / pixel_size;
+	while (count >= pixels_per_store) {
+		*(volatile uint64_t*)destination = repeated;
+		destination += sizeof(uint64_t);
+		count -= pixels_per_store;
+	}
+	while (count-- != 0u) {
+		write_pixel(destination, pixel_size, pixel);
+		destination += pixel_size;
+	}
 }
 
 static void hide_pointer_cursor(struct terminal* terminal) {
@@ -270,8 +358,7 @@ static void hide_pointer_cursor(struct terminal* terminal) {
 		                                (terminal->pointer_saved_y + row) * terminal->surface.pitch +
 		                                terminal->pointer_saved_x * pixel_size;
 		const uint8_t*    source      = terminal->pointer_saved + row * terminal->pointer_saved_width * pixel_size;
-		for (size_t byte = 0u; byte < terminal->pointer_saved_width * pixel_size; byte++)
-			destination[byte] = source[byte];
+		memcpy((void*)destination, source, terminal->pointer_saved_width * pixel_size);
 	}
 	terminal->pointer_drawn = false;
 }
@@ -322,10 +409,7 @@ static void fill_rectangle(volatile uint8_t* framebuffer, size_t pitch, const st
 	uint64_t pixel = encode_color(format, color);
 	for (size_t row = 0u; row < height; row++) {
 		volatile uint8_t* destination = framebuffer + (y + row) * pitch + x * format->bytes_per_pixel;
-		for (size_t column = 0u; column < width; column++) {
-			write_pixel(destination, format->bytes_per_pixel, pixel);
-			destination += format->bytes_per_pixel;
-		}
+		fill_pixel_run(destination, width, format->bytes_per_pixel, pixel);
 	}
 }
 
