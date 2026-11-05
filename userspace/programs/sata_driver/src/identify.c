@@ -1,11 +1,10 @@
 #include "identify.h"
 
+#include <ata/transport.h>
 #include <protocol/ahci.h>
 #include <runtime/log.h>
 #include <stdint.h>
 #include <stdio.h>
-
-#include "transport.h"
 
 #define ATA_COMMAND_IDENTIFY_DEVICE 0xecu
 #define ATA_IDENTIFY_SIZE 512u
@@ -107,15 +106,15 @@ static void print_identify(uint32_t port, const uint8_t* identify, const struct 
 		rotation == 1u ? "solid-state" : "rotating/unspecified");
 }
 
-enum sata_identify_result sata_identify_device(const struct sata_transport* transport,
-                                               struct sata_device_info*     out_info) {
-	struct sata_buffer buffer = {
+enum sata_identify_result sata_identify_device(const struct ata_transport* transport,
+                                               struct sata_device_info*    out_info) {
+	struct ata_buffer buffer = {
 		.memory_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .mapping_cap = CAP_ID_INVALID};
 	struct ahci_transport_execute_response response;
 	enum sata_identify_result              result = SATA_IDENTIFY_ERROR;
 
-	if (transport == NULL || out_info == NULL || transport->max_transfer_size < ATA_IDENTIFY_SIZE ||
-	    !sata_buffer_allocate(transport, ATA_IDENTIFY_SIZE, &buffer))
+	if (transport == NULL || out_info == NULL || transport->kind != AHCI_DEVICE_SATA ||
+	    transport->max_transfer_size < ATA_IDENTIFY_SIZE || !ata_buffer_allocate(transport, ATA_IDENTIFY_SIZE, &buffer))
 		goto done;
 	const struct ahci_transport_execute_request request = {
 		.header        = {.op = AHCI_TRANSPORT_OP_EXECUTE},
@@ -124,7 +123,7 @@ enum sata_identify_result sata_identify_device(const struct sata_transport* tran
 		.direction     = AHCI_DATA_FROM_DEVICE,
 		.command       = ATA_COMMAND_IDENTIFY_DEVICE,
 	};
-	if (!sata_transport_execute(transport, &request, &response) || response.transferred_size != ATA_IDENTIFY_SIZE) {
+	if (!ata_transport_execute(transport, &request, &response) || response.transferred_size != ATA_IDENTIFY_SIZE) {
 		fprintf(stderr, "sata: port %u IDENTIFY DEVICE failed\n", transport->port);
 		goto done;
 	}
@@ -138,6 +137,6 @@ enum sata_identify_result sata_identify_device(const struct sata_transport* tran
 	result = SATA_IDENTIFY_OK;
 
 done:
-	sata_buffer_release(transport, &buffer);
+	ata_buffer_release(transport, &buffer);
 	return result;
 }

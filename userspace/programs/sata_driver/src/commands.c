@@ -1,10 +1,9 @@
 #include "commands.h"
 
+#include <ata/transport.h>
 #include <limits.h>
 #include <protocol/ahci.h>
 #include <stddef.h>
-
-#include "transport.h"
 
 #define ATA_COMMAND_READ_DMA_EXT 0x25u
 #define ATA_COMMAND_WRITE_DMA_EXT 0x35u
@@ -16,7 +15,7 @@
 #define ATA_LBA28_LIMIT ((uint64_t)1u << 28u)
 #define ATA_LBA48_LIMIT ((uint64_t)1u << 48u)
 
-static bool execute_dma(const struct sata_transport* transport, struct sata_buffer* buffer, uint32_t buffer_offset,
+static bool execute_dma(const struct ata_transport* transport, struct ata_buffer* buffer, uint32_t buffer_offset,
                         uint64_t lba, uint16_t sector_count, uint32_t sector_size, bool extended, bool write) {
 	struct ahci_transport_execute_request request = {
 		.header        = {.op = AHCI_TRANSPORT_OP_EXECUTE},
@@ -46,42 +45,42 @@ static bool execute_dma(const struct sata_transport* transport, struct sata_buff
 		request.device |= (uint8_t)(lba >> 24u) & 0x0fu;
 		request.count = sector_count == 256u ? 0u : (uint8_t)sector_count;
 	}
-	return sata_transport_execute(transport, &request, &response) && response.transferred_size == transfer_size;
+	return ata_transport_execute(transport, &request, &response) && response.transferred_size == transfer_size;
 }
 
-static bool execute_flush(const struct sata_transport* transport, uint8_t command) {
+static bool execute_flush(const struct ata_transport* transport, uint8_t command) {
 	const struct ahci_transport_execute_request request = {
 		.header = {.op = AHCI_TRANSPORT_OP_EXECUTE}, .direction = AHCI_DATA_NONE, .command = command};
 	struct ahci_transport_execute_response response;
 
-	return transport != NULL && sata_transport_execute(transport, &request, &response) &&
+	return transport != NULL && ata_transport_execute(transport, &request, &response) &&
 	       response.transferred_size == 0u;
 }
 
-bool sata_read_dma_ext(const struct sata_transport* transport, struct sata_buffer* buffer, uint32_t buffer_offset,
+bool sata_read_dma_ext(const struct ata_transport* transport, struct ata_buffer* buffer, uint32_t buffer_offset,
                        uint64_t lba, uint16_t sector_count, uint32_t sector_size) {
 	return execute_dma(transport, buffer, buffer_offset, lba, sector_count, sector_size, true, false);
 }
 
-bool sata_write_dma_ext(const struct sata_transport* transport, struct sata_buffer* buffer, uint32_t buffer_offset,
+bool sata_write_dma_ext(const struct ata_transport* transport, struct ata_buffer* buffer, uint32_t buffer_offset,
                         uint64_t lba, uint16_t sector_count, uint32_t sector_size) {
 	return execute_dma(transport, buffer, buffer_offset, lba, sector_count, sector_size, true, true);
 }
 
-bool sata_flush_cache_ext(const struct sata_transport* transport) {
+bool sata_flush_cache_ext(const struct ata_transport* transport) {
 	return execute_flush(transport, ATA_COMMAND_FLUSH_CACHE_EXT);
 }
 
-bool sata_read_dma(const struct sata_transport* transport, struct sata_buffer* buffer, uint32_t buffer_offset,
+bool sata_read_dma(const struct ata_transport* transport, struct ata_buffer* buffer, uint32_t buffer_offset,
                    uint32_t lba, uint16_t sector_count, uint32_t sector_size) {
 	return execute_dma(transport, buffer, buffer_offset, lba, sector_count, sector_size, false, false);
 }
 
-bool sata_write_dma(const struct sata_transport* transport, struct sata_buffer* buffer, uint32_t buffer_offset,
+bool sata_write_dma(const struct ata_transport* transport, struct ata_buffer* buffer, uint32_t buffer_offset,
                     uint32_t lba, uint16_t sector_count, uint32_t sector_size) {
 	return execute_dma(transport, buffer, buffer_offset, lba, sector_count, sector_size, false, true);
 }
 
-bool sata_flush_cache(const struct sata_transport* transport) {
+bool sata_flush_cache(const struct ata_transport* transport) {
 	return execute_flush(transport, ATA_COMMAND_FLUSH_CACHE);
 }

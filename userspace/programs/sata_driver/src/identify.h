@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-struct sata_transport;
+struct ata_transport;
 
 /* Addressing and command capabilities reported by IDENTIFY DEVICE. */
 struct sata_device_info {
@@ -22,5 +22,5 @@ enum sata_identify_result {
 };
 
 /* Issue IDENTIFY DEVICE and report the disk identity and basic capabilities. */
-enum sata_identify_result sata_identify_device(const struct sata_transport* transport,
-                                               struct sata_device_info*     out_info);
+enum sata_identify_result sata_identify_device(const struct ata_transport* transport,
+                                               struct sata_device_info*    out_info);
