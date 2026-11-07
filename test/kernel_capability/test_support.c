@@ -115,6 +115,6 @@ void kernel_capability_test_poison_next_pmm_page(uint8_t value) {
 	cr_assert(
 		pmm_alloc(&(const struct pmm_alloc_request){.size = TEST_MAPPING_GRANULE, .alignment = TEST_MAPPING_GRANULE},
 		          &allocation));
-	memset((void*)(allocation.address + boot_info.direct_map_offset), value, allocation.size);
+	memset((void*)(allocation.address + mm_info.direct_map_offset), value, allocation.size);
 	cr_assert(pmm_free(allocation), "failed to return poisoned PMM extent");
 }

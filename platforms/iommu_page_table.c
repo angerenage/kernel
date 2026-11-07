@@ -17,7 +17,7 @@ static inline void iommu_pt_publish(void) {
 }
 
 void* iommu_pt_phys_to_virt(uintptr_t address) {
-	return (void*)(address + boot_info.direct_map_offset);
+	return (void*)(address + mm_info.direct_map_offset);
 }
 
 bool iommu_pt_map_mmio(uintptr_t address, size_t size) {
@@ -29,8 +29,8 @@ bool iommu_pt_map_mmio(uintptr_t address, size_t size) {
 	if (address > UINTPTR_MAX - (size - 1u)) return false;
 	last = (address + size - 1u) & ~((uintptr_t)granule - 1u);
 	for (uintptr_t physical = start;; physical += granule) {
-		if (physical > UINTPTR_MAX - boot_info.direct_map_offset) return false;
-		uintptr_t                     virtual_address = physical + boot_info.direct_map_offset;
+		if (physical > UINTPTR_MAX - mm_info.direct_map_offset) return false;
+		uintptr_t                     virtual_address = physical + mm_info.direct_map_offset;
 		struct hal_paging_translation translation;
 		if (hal_paging_query(hal_paging_kernel_space(), virtual_address, &translation)) {
 			if (translation.physical_address != physical ||

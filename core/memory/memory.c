@@ -39,7 +39,7 @@ static struct spinlock     memory_allocator_lock =
 _Static_assert(sizeof(struct memory) >= sizeof(struct memory_free_slot), "Memory slot must hold a free-list link");
 
 static void* physical_to_virtual(uintptr_t physical_address) {
-	return (void*)(physical_address + boot_info.direct_map_offset);
+	return (void*)(physical_address + mm_info.direct_map_offset);
 }
 
 static size_t memory_granule(void) {
@@ -72,7 +72,7 @@ static struct memory_slab* slab_create(size_t granule) {
 }
 
 static struct memory_slab* memory_slab(const struct memory* memory, size_t granule) {
-	uintptr_t physical = (uintptr_t)memory - boot_info.direct_map_offset;
+	uintptr_t physical = (uintptr_t)memory - mm_info.direct_map_offset;
 	physical &= ~(uintptr_t)(granule - 1u);
 	return physical_to_virtual(physical);
 }

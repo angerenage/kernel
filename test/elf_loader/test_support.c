@@ -66,8 +66,8 @@ bool heap_grow_region(size_t minimum_size, void** out_base, size_t* out_size) {
 }
 
 void elf_test_init_environment(void) {
-	const struct mem_range memory_map[] = {
-		{.base = (uintptr_t)elf_test_arena, .length = ELF_TEST_ARENA_SIZE, .type = MEM_RANGE_USABLE},
+	const struct pmm_memory_range memory_map[] = {
+		{.address = (uintptr_t)elf_test_arena, .size = ELF_TEST_ARENA_SIZE, .usable = true},
 	};
 
 	elf_test_heap_offset = 0u;
@@ -152,6 +152,6 @@ void elf_test_poison_recycled_memory(size_t size, uint8_t value) {
 	cr_assert(size != 0u);
 	cr_assert(
 		pmm_alloc(&(const struct pmm_alloc_request){.size = size, .alignment = TEST_MAPPING_GRANULE}, &allocation));
-	memset((void*)(allocation.address + boot_info.direct_map_offset), value, allocation.size);
+	memset((void*)(allocation.address + mm_info.direct_map_offset), value, allocation.size);
 	cr_assert(pmm_free(allocation), "failed to return poisoned memory to PMM");
 }

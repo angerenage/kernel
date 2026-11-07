@@ -47,8 +47,8 @@ static bool external_mapping_layout(const void* address, size_t size, struct ext
 
 	if (address == NULL || size == 0u || out == NULL || granule == 0u) return false;
 	virtual_address = (uintptr_t)address;
-	if (virtual_address < boot_info.direct_map_offset) return false;
-	physical_address   = virtual_address - boot_info.direct_map_offset;
+	if (virtual_address < mm_info.direct_map_offset) return false;
+	physical_address   = virtual_address - mm_info.direct_map_offset;
 	out->physical_base = physical_address & ~(uintptr_t)(granule - 1u);
 	out->data_offset   = (size_t)(physical_address - out->physical_base);
 	if (add_overflow_size(out->data_offset, size, &mapped_size) || !align_up_size(mapped_size, granule, &mapped_size)) {

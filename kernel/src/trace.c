@@ -162,7 +162,7 @@ bool kernel_trace_init(void) {
 	               &allocation))
 		return false;
 
-	trace_header           = (void*)(allocation.address + boot_info.direct_map_offset);
+	trace_header           = (void*)(allocation.address + mm_info.direct_map_offset);
 	trace_physical_address = allocation.address;
 	trace_allocation_size  = allocation.size;
 	memset(trace_header, 0, trace_allocation_size);

@@ -20,6 +20,13 @@ struct pmm_extent {
 	size_t    size;
 };
 
+/* One physical-memory range supplied by the kernel. */
+struct pmm_memory_range {
+	uintptr_t address;
+	size_t    size;
+	bool      usable;
+};
+
 struct pmm_alloc_request {
 	size_t    size;            /* Nonzero multiple of allocation_granule. */
 	size_t    alignment;       /* Zero selects allocation_granule, otherwise a power of two >= allocation_granule. */
@@ -27,8 +34,8 @@ struct pmm_alloc_request {
 	uintptr_t maximum_address; /* Exclusive; zero means unbounded. */
 };
 
-/* Initialize physical memory management from the boot memory map. */
-bool pmm_init(const struct mem_range* memory_map, size_t range_count, uintptr_t direct_map_offset);
+/* Initialize physical memory management from the kernel-supplied memory map. */
+bool pmm_init(const struct pmm_memory_range* memory_map, size_t range_count, uintptr_t direct_map_offset);
 
 /* Return physical allocation properties. */
 const struct pmm_info* pmm_info(void);

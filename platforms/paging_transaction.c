@@ -8,7 +8,7 @@ bool paging_transaction_empty(const struct paging_transaction* transaction) {
 }
 
 static inline struct paging_transaction_page* paging_transaction_page_virt(uintptr_t phys) {
-	return (struct paging_transaction_page*)(phys + boot_info.direct_map_offset);
+	return (struct paging_transaction_page*)(phys + mm_info.direct_map_offset);
 }
 
 size_t paging_transaction_page_capacity(void) {

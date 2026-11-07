@@ -56,7 +56,7 @@ static struct spinlock               external_claim_lock =
 #define METADATA_SLAB_OFFSET ((sizeof(struct backing_metadata_slab) + METADATA_ALIGN - 1u) & ~(METADATA_ALIGN - 1u))
 
 static void* physical_to_virtual(uintptr_t physical_address) {
-	return (void*)(physical_address + boot_info.direct_map_offset);
+	return (void*)(physical_address + mm_info.direct_map_offset);
 }
 
 static size_t backing_granule(void) {
@@ -116,7 +116,7 @@ static void* metadata_alloc(void) {
 }
 
 static struct backing_metadata_slab* metadata_owner(const void* payload, size_t granule) {
-	uintptr_t physical = (uintptr_t)payload - boot_info.direct_map_offset;
+	uintptr_t physical = (uintptr_t)payload - mm_info.direct_map_offset;
 	physical &= ~(uintptr_t)(granule - 1u);
 	return physical_to_virtual(physical);
 }

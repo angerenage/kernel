@@ -38,29 +38,7 @@ static size_t                pmm_free_bytes;
 static bool                  pmm_initialized;
 static struct spinlock pmm_lock = SPINLOCK_INIT_CLASS("pmm_lock", SPINLOCK_ORDER_PMM, SPINLOCK_FLAG_ALLOW_EXCEPTION);
 
-struct mm_boot_info boot_info;
-
-const char* mem_range_type_str(enum mem_range_type type) {
-	switch (type) {
-	case MEM_RANGE_USABLE:
-		return "usable";
-	case MEM_RANGE_RESERVED:
-		return "reserved";
-	case MEM_RANGE_ACPI:
-		return "acpi";
-	case MEM_RANGE_BAD_MEMORY:
-		return "bad_memory";
-	case MEM_RANGE_BOOTLOADER_RECLAIMABLE:
-		return "bootloader_reclaimable";
-	case MEM_RANGE_KERNEL_AND_MODULES:
-		return "kernel_and_modules";
-	case MEM_RANGE_FRAMEBUFFER:
-		return "framebuffer";
-	case MEM_RANGE_OTHER:
-		return "other";
-	}
-	return "unknown";
-}
+struct mm_info mm_info;
 
 static inline void* pmm_phys_to_virt(uintptr_t address, uintptr_t direct_map_offset) {
 	return (void*)(address + direct_map_offset);
@@ -82,33 +60,33 @@ static inline void pmm_bitmap_clear(uint64_t* bitmap, size_t bit) {
 	bitmap[bit / PMM_BITS_PER_WORD] &= ~(1ull << (bit % PMM_BITS_PER_WORD));
 }
 
-static bool pmm_memory_map_valid(const struct mem_range* memory_map, size_t range_count) {
+static bool pmm_memory_map_valid(const struct pmm_memory_range* memory_map, size_t range_count) {
 	if (memory_map == NULL || range_count == 0u) return false;
 	for (size_t i = 0u; i < range_count; i++) {
 		uint64_t left_end;
 
-		if (memory_map[i].length == 0u) continue;
-		if (add_overflow_u64((uint64_t)memory_map[i].base, (uint64_t)memory_map[i].length, &left_end)) return false;
+		if (memory_map[i].size == 0u) continue;
+		if (add_overflow_u64((uint64_t)memory_map[i].address, (uint64_t)memory_map[i].size, &left_end)) return false;
 		for (size_t j = i + 1u; j < range_count; j++) {
 			uint64_t right_end;
 
-			if (memory_map[j].length == 0u) continue;
-			if (add_overflow_u64((uint64_t)memory_map[j].base, (uint64_t)memory_map[j].length, &right_end))
+			if (memory_map[j].size == 0u) continue;
+			if (add_overflow_u64((uint64_t)memory_map[j].address, (uint64_t)memory_map[j].size, &right_end))
 				return false;
-			if ((uint64_t)memory_map[i].base < right_end && (uint64_t)memory_map[j].base < left_end) return false;
+			if ((uint64_t)memory_map[i].address < right_end && (uint64_t)memory_map[j].address < left_end) return false;
 		}
 	}
 	return true;
 }
 
-static bool pmm_usable_extent(const struct mem_range* source, struct pmm_normalized_range* out) {
+static bool pmm_usable_extent(const struct pmm_memory_range* source, struct pmm_normalized_range* out) {
 	uint64_t raw_end;
 	uint64_t address;
 	uint64_t end;
 
-	if (source == NULL || out == NULL || source->type != MEM_RANGE_USABLE || source->length == 0u ||
-	    add_overflow_u64((uint64_t)source->base, (uint64_t)source->length, &raw_end) ||
-	    !align_up_u64((uint64_t)source->base, PMM_ALLOCATION_GRANULE, &address))
+	if (source == NULL || out == NULL || !source->usable || source->size == 0u ||
+	    add_overflow_u64((uint64_t)source->address, (uint64_t)source->size, &raw_end) ||
+	    !align_up_u64((uint64_t)source->address, PMM_ALLOCATION_GRANULE, &address))
 		return false;
 	end = align_down_u64(raw_end, PMM_ALLOCATION_GRANULE);
 	if (end <= address || end - address > SIZE_MAX) return false;
@@ -118,7 +96,7 @@ static bool pmm_usable_extent(const struct mem_range* source, struct pmm_normali
 
 /* Return the lowest normalized usable extent beginning at or after minimum,
  * merging all physically adjacent usable map entries. */
-static bool pmm_next_range(const struct mem_range* memory_map, size_t range_count, uintptr_t minimum,
+static bool pmm_next_range(const struct pmm_memory_range* memory_map, size_t range_count, uintptr_t minimum,
                            struct pmm_normalized_range* out) {
 	struct pmm_normalized_range result = {0};
 	bool                        found  = false;
@@ -153,7 +131,7 @@ static bool pmm_next_range(const struct mem_range* memory_map, size_t range_coun
 	return true;
 }
 
-static bool pmm_measure_ranges(const struct mem_range* memory_map, size_t range_count, size_t* out_count,
+static bool pmm_measure_ranges(const struct pmm_memory_range* memory_map, size_t range_count, size_t* out_count,
                                size_t* out_total_size, size_t* out_bitmap_bytes) {
 	uintptr_t minimum = 0u;
 	size_t    count = 0u, total_size = 0u, bitmap_bytes = 0u;
@@ -196,8 +174,8 @@ static bool pmm_metadata_layout(size_t range_count, size_t bitmap_bytes, size_t*
 	return true;
 }
 
-static bool pmm_find_metadata_extent(const struct mem_range* memory_map, size_t range_count, size_t metadata_size,
-                                     uintptr_t* out_address) {
+static bool pmm_find_metadata_extent(const struct pmm_memory_range* memory_map, size_t range_count,
+                                     size_t metadata_size, uintptr_t* out_address) {
 	uintptr_t minimum = 0u;
 
 	for (;;) {
@@ -266,7 +244,7 @@ static bool pmm_find_free_extent(const struct pmm_range* range, const struct pmm
 	return false;
 }
 
-bool pmm_init(const struct mem_range* memory_map, size_t range_count, uintptr_t direct_map_offset) {
+bool pmm_init(const struct pmm_memory_range* memory_map, size_t range_count, uintptr_t direct_map_offset) {
 	size_t            normalized_count;
 	size_t            total_size;
 	size_t            bitmap_bytes;
@@ -349,10 +327,10 @@ bool pmm_init(const struct mem_range* memory_map, size_t range_count, uintptr_t 
 		metadata_range->first_free_granule = first + count;
 	}
 
-	boot_info.direct_map_offset = direct_map_offset;
-	pmm_total_bytes             = total_size;
-	pmm_free_bytes              = total_size - metadata_size;
-	pmm_initialized             = true;
+	mm_info.direct_map_offset = direct_map_offset;
+	pmm_total_bytes           = total_size;
+	pmm_free_bytes            = total_size - metadata_size;
+	pmm_initialized           = true;
 	spinlock_unlock_irqrestore(&pmm_lock, state);
 	return true;
 }

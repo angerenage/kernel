@@ -109,7 +109,7 @@ static inline void aarch64_write_ttbr1_el1(uint64_t value) {
 }
 
 static inline uintptr_t hhdm_phys_to_virt(uintptr_t phys) {
-	return phys + boot_info.direct_map_offset;
+	return phys + mm_info.direct_map_offset;
 }
 
 static inline void aarch64_tlb_flush_all(void) {

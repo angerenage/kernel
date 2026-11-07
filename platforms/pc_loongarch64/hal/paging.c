@@ -136,7 +136,7 @@ static inline uint32_t loongarch_cpucfg_word(unsigned word) {
 }
 
 static inline uintptr_t hhdm_phys_to_virt(uintptr_t phys) {
-	return phys + boot_info.direct_map_offset;
+	return phys + mm_info.direct_map_offset;
 }
 
 static inline uintptr_t loongarch_entry_to_phys(uint64_t entry) {

@@ -47,8 +47,8 @@ void syscall_test_reset_state(void) {
 }
 
 void syscall_test_init_process_environment(void) {
-	const struct mem_range memory_map[] = {
-		{.base = (uintptr_t)syscall_test_arena, .length = SYSCALL_TEST_ARENA_SIZE, .type = MEM_RANGE_USABLE},
+	const struct pmm_memory_range memory_map[] = {
+		{.address = (uintptr_t)syscall_test_arena, .size = SYSCALL_TEST_ARENA_SIZE, .usable = true},
 	};
 
 	syscall_test_heap_offset = 0u;

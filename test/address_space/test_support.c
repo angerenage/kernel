@@ -5,21 +5,21 @@
 #include <core/pmm.h>
 
 void init_test_address_space(uint8_t* arena, size_t arena_size) {
-	const struct mem_range memory_map[] = {
+	const struct pmm_memory_range memory_map[] = {
 		{
-		 .base   = (uintptr_t)arena,
-		 .length = KiB(24),
-		 .type   = MEM_RANGE_USABLE,
+		 .address = (uintptr_t)arena,
+		 .size    = KiB(24),
+		 .usable  = true,
 		 },
 		{
-		 .base   = (uintptr_t)(arena + KiB(32)),
-		 .length = KiB(8),
-		 .type   = MEM_RANGE_RESERVED,
+		 .address = (uintptr_t)(arena + KiB(32)),
+		 .size    = KiB(8),
+		 .usable  = false,
 		 },
 		{
-		 .base   = (uintptr_t)(arena + KiB(64)),
-		 .length = KiB(128),
-		 .type   = MEM_RANGE_USABLE,
+		 .address = (uintptr_t)(arena + KiB(64)),
+		 .size    = KiB(128),
+		 .usable  = true,
 		 },
 	};
 

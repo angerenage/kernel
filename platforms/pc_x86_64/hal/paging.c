@@ -313,7 +313,7 @@ static void x86_tlb_shootdown_range(const struct hal_paging_space* space, uintpt
 }
 
 static inline uintptr_t hhdm_phys_to_virt(uintptr_t phys) {
-	return phys + boot_info.direct_map_offset;
+	return phys + mm_info.direct_map_offset;
 }
 
 static inline uint64_t x86_leaf_flags(uint64_t flags, enum memory_type memory_type, int level) {

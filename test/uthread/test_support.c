@@ -39,8 +39,8 @@ static void init_bound_bootstrap_cpu(void) {
 }
 
 void init_uthread_test_environment(void) {
-	const struct mem_range memory_map[] = {
-		{.base = (uintptr_t)uthread_test_arena, .length = UTHREAD_TEST_ARENA_SIZE, .type = MEM_RANGE_USABLE},
+	const struct pmm_memory_range memory_map[] = {
+		{.address = (uintptr_t)uthread_test_arena, .size = UTHREAD_TEST_ARENA_SIZE, .usable = true},
 	};
 
 	uthread_test_heap_offset = 0u;

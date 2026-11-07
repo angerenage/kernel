@@ -43,8 +43,8 @@ static bool boot_module_mapping_layout(const struct boot_module*          module
 
 	if (module == NULL || out_layout == NULL || granule == 0u) return false;
 	module_address = (uintptr_t)module->address;
-	if (module_address < boot_info.direct_map_offset) return false;
-	physical_address          = module_address - boot_info.direct_map_offset;
+	if (module_address < mm_info.direct_map_offset) return false;
+	physical_address          = module_address - mm_info.direct_map_offset;
 	out_layout->physical_base = physical_address & ~(uintptr_t)(granule - 1u);
 	out_layout->data_offset   = (size_t)(physical_address - out_layout->physical_base);
 	if (add_overflow_size(out_layout->data_offset, module->size, &mapped_size) ||

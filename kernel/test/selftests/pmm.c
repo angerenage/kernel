@@ -7,7 +7,7 @@
 #include "../selftest.h"
 
 static inline volatile uint64_t* kernel_selftest_pmm_phys_to_virt(uintptr_t phys) {
-	return (volatile uint64_t*)(uintptr_t)(phys + boot_info.direct_map_offset);
+	return (volatile uint64_t*)(uintptr_t)(phys + mm_info.direct_map_offset);
 }
 
 static void kernel_selftest_pmm_allocates_contiguous_extents_and_restores_state(struct kernel_selftest_context* ctx) {

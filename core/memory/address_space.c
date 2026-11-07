@@ -41,7 +41,7 @@ static bool initialized;
 _Static_assert(sizeof(struct mapping) >= sizeof(struct mapping_free_slot), "Mapping slot must hold a free-list link");
 
 static void* physical_to_virtual(uintptr_t physical_address) {
-	return (void*)(physical_address + boot_info.direct_map_offset);
+	return (void*)(physical_address + mm_info.direct_map_offset);
 }
 
 static size_t mapping_granule(void) {
@@ -74,7 +74,7 @@ static struct mapping_slab* slab_create(size_t granule) {
 }
 
 static struct mapping_slab* mapping_slab(const struct mapping* mapping, size_t granule) {
-	uintptr_t physical = (uintptr_t)mapping - boot_info.direct_map_offset;
+	uintptr_t physical = (uintptr_t)mapping - mm_info.direct_map_offset;
 	physical &= ~(uintptr_t)(granule - 1u);
 	return physical_to_virtual(physical);
 }
@@ -452,8 +452,7 @@ void address_space_device_release(struct address_space* space) {
 	address_space_device_destroy(space);
 	granule = pmm_info() == NULL ? 0u : pmm_info()->allocation_granule;
 	if (granule == 0u) hcf();
-	if (!pmm_free((struct pmm_extent){.address = (uintptr_t)space - boot_info.direct_map_offset, .size = granule}))
-		hcf();
+	if (!pmm_free((struct pmm_extent){.address = (uintptr_t)space - mm_info.direct_map_offset, .size = granule})) hcf();
 }
 
 void address_space_destroy_process(struct address_space* space) {
@@ -1005,7 +1004,7 @@ bool address_space_protect(struct address_space* space, struct mapping* mapping,
 		for (size_t offset = 0u; offset < mapping->size; offset += span.size) {
 			if (!memory_query(mapping->memory, offset, mapping->size - offset, &span)) goto fail;
 			if (span.kind == MEMORY_SPAN_PRESENT)
-				hal_cache_sync_executable_range_all_cpus((void*)(span.physical_address + boot_info.direct_map_offset),
+				hal_cache_sync_executable_range_all_cpus((void*)(span.physical_address + mm_info.direct_map_offset),
 				                                         span.size);
 		}
 	}
@@ -1064,7 +1063,7 @@ static bool map_present_run_locked(struct address_space* space, struct mapping* 
 		.memory_type      = mapping->memory_type,
 	};
 	if ((mapping->access & MEMORY_ACCESS_EXEC) != 0u)
-		hal_cache_sync_executable_range_all_cpus((void*)(physical_address + boot_info.direct_map_offset), run_size);
+		hal_cache_sync_executable_range_all_cpus((void*)(physical_address + mm_info.direct_map_offset), run_size);
 	if (hal_paging_map(space->backend.process.hal, &request)) return true;
 	if (run_size == granule || required_size > granule) return false;
 	return hal_paging_map(space->backend.process.hal,
@@ -1098,8 +1097,7 @@ static bool map_fault_leaf_locked(struct address_space* space, struct mapping* m
 		    present_size != leaf_size || (physical_address & (leaf_size - 1u)) != 0u)
 			continue;
 		if ((mapping->access & MEMORY_ACCESS_EXEC) != 0u)
-			hal_cache_sync_executable_range_all_cpus((void*)(physical_address + boot_info.direct_map_offset),
-			                                         leaf_size);
+			hal_cache_sync_executable_range_all_cpus((void*)(physical_address + mm_info.direct_map_offset), leaf_size);
 		if (hal_paging_map(space->backend.process.hal,
 		                   &(const struct hal_paging_map_request){
 							   .virtual_address  = virtual_address,

@@ -105,10 +105,10 @@ static void kernel_selftest_address_space_large_leaf_split(struct kernel_selftes
 	*(volatile uint64_t*)(virtual + paging->minimum_leaf_size)     = 0x1122334455667788ull;
 	*(volatile uint64_t*)(virtual + large_size - sizeof(uint64_t)) = 0x0fedcba987654321ull;
 	KERNEL_SELFTEST_ASSERT_GOTO(
-		ctx, *(volatile uint64_t*)(physical + boot_info.direct_map_offset) == 0x123456789abcdef0ull, cleanup);
+		ctx, *(volatile uint64_t*)(physical + mm_info.direct_map_offset) == 0x123456789abcdef0ull, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx,
 	                            *(volatile uint64_t*)(physical + large_size - sizeof(uint64_t) +
-	                                                  boot_info.direct_map_offset) == 0x0fedcba987654321ull,
+	                                                  mm_info.direct_map_offset) == 0x0fedcba987654321ull,
 	                            cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, hal_paging_activate(hal_paging_kernel_space()), cleanup);
 	active = false;
@@ -137,11 +137,11 @@ static void kernel_selftest_address_space_large_leaf_split(struct kernel_selftes
 	active = false;
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx,
 	                            *(volatile uint64_t*)(new_physical + paging->minimum_leaf_size +
-	                                                  boot_info.direct_map_offset) == 0x8877665544332211ull,
+	                                                  mm_info.direct_map_offset) == 0x8877665544332211ull,
 	                            cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx,
 	                            *(volatile uint64_t*)(physical + paging->minimum_leaf_size +
-	                                                  boot_info.direct_map_offset) == 0x1122334455667788ull,
+	                                                  mm_info.direct_map_offset) == 0x1122334455667788ull,
 	                            cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(
 		ctx,

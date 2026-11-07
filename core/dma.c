@@ -48,7 +48,7 @@ static struct dma_controller  dma_direct_controller;
 static bool                   dma_initialized;
 
 static void* physical_to_virtual(uintptr_t address) {
-	return (void*)(address + boot_info.direct_map_offset);
+	return (void*)(address + mm_info.direct_map_offset);
 }
 
 static struct dma_controller* dma_controller_at_index(uint32_t index) {
@@ -349,7 +349,7 @@ bool dma_mapping_sync(struct address_space* device_space, struct mapping* mappin
 	while (cursor < end) {
 		struct memory_span span;
 		if (!memory_query(memory, cursor, end - cursor, &span) || span.kind != MEMORY_SPAN_PRESENT || span.size == 0u ||
-		    span.size > end - cursor || span.physical_address > UINTPTR_MAX - boot_info.direct_map_offset)
+		    span.size > end - cursor || span.physical_address > UINTPTR_MAX - mm_info.direct_map_offset)
 			goto done;
 		cursor += span.size;
 	}

@@ -21,11 +21,11 @@ bool heap_grow_region(size_t minimum_size, void** out_base, size_t* out_size) {
 }
 
 bool dma_test_init_pmm(void) {
-	static bool            initialized;
-	const struct mem_range memory_map = {
-		.base   = (uintptr_t)dma_test_pmm,
-		.length = DMA_TEST_PMM_SIZE,
-		.type   = MEM_RANGE_USABLE,
+	static bool                   initialized;
+	const struct pmm_memory_range memory_map = {
+		.address = (uintptr_t)dma_test_pmm,
+		.size    = DMA_TEST_PMM_SIZE,
+		.usable  = true,
 	};
 
 	if (initialized) return true;

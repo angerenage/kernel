@@ -257,7 +257,17 @@ static void boot_start_timer_counter(void) {
 }
 
 static void kernel_init_memory(const struct mem_range* memory_map, size_t range_count, uintptr_t direct_map_offset) {
-	if (!pmm_init(memory_map, range_count, direct_map_offset)) {
+	struct pmm_memory_range pmm_memory_map[range_count];
+
+	for (size_t i = 0u; i < range_count; i++) {
+		pmm_memory_map[i] = (struct pmm_memory_range){
+			.address = memory_map[i].base,
+			.size    = memory_map[i].length,
+			.usable  = memory_map[i].type == MEM_RANGE_USABLE,
+		};
+	}
+
+	if (!pmm_init(pmm_memory_map, range_count, direct_map_offset)) {
 		boot_fail("kernel: pmm_init failed");
 	}
 
