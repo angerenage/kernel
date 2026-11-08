@@ -34,7 +34,8 @@ struct xhci_controller {
 	uint16_t                pending_count;
 	struct xhci_device*     devices[255];
 	bool                    port_seen[255];
-	uint16_t                port_retry_ticks[255];
+	uint8_t                 port_failures[255];
+	uint64_t                port_retry_after_ns[255];
 	uint64_t                port_generation[255];
 };
 

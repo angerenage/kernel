@@ -13,6 +13,11 @@
 
 #define XHCI_DEVICE_TIMEOUT_MS 2000u
 #define XHCI_DEVICE_TIMEOUT_NS ((uint64_t)XHCI_DEVICE_TIMEOUT_MS * 1000000u)
+#define XHCI_PORT_DEBOUNCE_NS (100u * 1000000ull)
+#define XHCI_PORT_RETRY_DELAY_NS (5u * 1000000000ull)
+#define XHCI_PORT_MAX_FAILURES 2u
+#define XHCI_RESET_RECOVERY_MS 10u
+#define XHCI_SET_ADDRESS_RECOVERY_MS 2u
 #define XHCI_PORTSC_CCS (1u << 0u)
 #define XHCI_PORTSC_PED (1u << 1u)
 #define XHCI_PORTSC_PR (1u << 4u)
@@ -26,6 +31,7 @@
 #define XHCI_TRB_DISABLE_SLOT 10u
 #define XHCI_TRB_ADDRESS_DEVICE 11u
 #define XHCI_TRB_CONFIGURE_ENDPOINT 12u
+#define XHCI_TRB_EVALUATE_CONTEXT 13u
 #define XHCI_TRB_NORMAL 1u
 #define XHCI_TRB_SHORT_PACKET 13u
 #define XHCI_TRB_SETUP_STAGE 2u
@@ -213,6 +219,7 @@ static bool reset_port(struct xhci_controller* c, unsigned port, uint32_t* out_s
 		if ((status & XHCI_PORTSC_PED) != 0u && (status & XHCI_PORTSC_PR) == 0u) {
 			*out_speed = (status >> XHCI_PORTSC_SPEED_SHIFT) & XHCI_PORTSC_SPEED_MASK;
 			write_reg(c, offset, XHCI_PORTSC_PP | (status & XHCI_PORTSC_CHANGE_MASK));
+			if (*out_speed <= 3u && sleep_ms(XHCI_RESET_RECOVERY_MS) != SYSCALL_STATUS_OK) return false;
 			return true;
 		}
 		if (sleep_ms(1u) != SYSCALL_STATUS_OK) return false;
@@ -547,6 +554,39 @@ static bool configure_endpoints(struct xhci_controller* c, struct xhci_device* d
 	return true;
 }
 
+static bool endpoint_zero_packet_size(uint32_t speed, uint8_t encoded, uint32_t* packet_size) {
+	if (packet_size == NULL) return false;
+	if (speed >= 4u) {
+		if (encoded >= 16u) return false;
+		*packet_size = 1u << encoded;
+		return *packet_size >= 8u && *packet_size <= 1024u;
+	}
+	*packet_size = encoded;
+	if (speed == 3u) return encoded == 64u;
+	if (speed == 2u) return encoded == 8u;
+	return speed == 1u && (encoded == 8u || encoded == 16u || encoded == 32u || encoded == 64u);
+}
+
+static bool update_endpoint_zero(struct xhci_controller* c, struct xhci_device* device, uint32_t packet_size) {
+	if (!sync_dma(&device->output, DMA_SYNC_FOR_CPU)) return false;
+	memset(device->input.cpu_address, 0, device->input.size);
+	uint8_t* input  = device->input.cpu_address;
+	uint8_t* output = device->output.cpu_address;
+	memcpy(input + 2u * c->context_size, output + c->context_size, c->context_size);
+	((uint32_t*)input)[1] = 2u; /* Add Default Control Endpoint Context. */
+	uint32_t* ep0         = (uint32_t*)(input + 2u * c->context_size);
+	ep0[1]                = (ep0[1] & 0x0000ffffu) | (packet_size << 16u);
+	if (!sync_dma(&device->input, DMA_SYNC_FOR_DEVICE)) return false;
+	uint64_t        pointer = (uint64_t)device->input.device_address;
+	struct xhci_trb completion;
+	return command(c,
+	               (struct xhci_trb){.parameter_low  = (uint32_t)pointer,
+	                                 .parameter_high = (uint32_t)(pointer >> 32u),
+	                                 .control        = (XHCI_TRB_EVALUATE_CONTEXT << XHCI_TRB_TYPE_SHIFT) |
+	                                                   ((uint32_t)device->slot << 24u)},
+	               &completion);
+}
+
 static struct xhci_device* enumerate_port(struct xhci_controller* c, unsigned port, uint32_t speed) {
 	struct xhci_device* device = calloc(1u, sizeof(*device));
 	if (device == NULL) return NULL;
@@ -569,7 +609,7 @@ static struct xhci_device* enumerate_port(struct xhci_controller* c, unsigned po
 	if (!command(c, (struct xhci_trb){.control = XHCI_TRB_ENABLE_SLOT << XHCI_TRB_TYPE_SHIFT}, &completion)) goto done;
 	device->slot = (uint8_t)(completion.control >> 24u);
 	if (device->slot == 0u || device->slot > c->slots) goto done;
-	uint32_t packet_size = speed == 4u ? 512u : speed == 3u ? 64u : 8u;
+	uint32_t packet_size = speed >= 4u ? 512u : speed == 3u ? 64u : 8u;
 	if (!allocate_dma(c, &device->input, 33u * c->context_size, 64u) ||
 	    !allocate_dma(c, &device->output, 32u * c->context_size, 64u) ||
 	    !allocate_dma(c, &device->descriptor, XHCI_CONFIGURATION_MAX_LENGTH, 64u) ||
@@ -597,10 +637,17 @@ static struct xhci_device* enumerate_port(struct xhci_controller* c, unsigned po
 		.control        = (XHCI_TRB_ADDRESS_DEVICE << XHCI_TRB_TYPE_SHIFT) | (uint32_t)device->slot << 24u,
 	};
 	if (!command(c, address, &completion)) goto done;
+	if (sleep_ms(XHCI_SET_ADDRESS_RECOVERY_MS) != SYSCALL_STATUS_OK) goto done;
 	uint8_t descriptor[XHCI_DESCRIPTOR_LENGTH];
-	if (!read_descriptor(c, device, XHCI_USB_DESCRIPTOR_DEVICE, 0u, descriptor, sizeof(descriptor)) ||
-	    !discover_endpoints(c, device) || !configure_endpoints(c, device, speed))
-		goto done;
+	if (!read_descriptor(c, device, XHCI_USB_DESCRIPTOR_DEVICE, 0u, descriptor, 8u)) goto done;
+	uint32_t actual_packet_size;
+	if (!endpoint_zero_packet_size(speed, descriptor[7], &actual_packet_size)) goto done;
+	if (actual_packet_size != packet_size) {
+		if (!update_endpoint_zero(c, device, actual_packet_size)) goto done;
+	}
+	if (!read_descriptor(c, device, XHCI_USB_DESCRIPTOR_DEVICE, 0u, descriptor, sizeof(descriptor))) goto done;
+	if (!discover_endpoints(c, device)) goto done;
+	if (!configure_endpoints(c, device, speed)) goto done;
 	device->vendor_id  = (uint16_t)descriptor[8] | ((uint16_t)descriptor[9] << 8u);
 	device->product_id = (uint16_t)descriptor[10] | ((uint16_t)descriptor[11] << 8u);
 	RUNTIME_DEBUG_LOG("xhci: port %u slot %u speed-id=%u VID=%04x PID=%04x usb=%x.%02x\n",
@@ -636,7 +683,7 @@ static bool poll_interrupt_transfers(struct xhci_controller* c, struct xhci_devi
 			if (code != XHCI_TRB_SUCCESS && code != XHCI_TRB_SHORT_PACKET) {
 				fprintf(stderr, "xhci: interrupt transfer failed: code=%u\n", code);
 				ep->configured = false;
-				return false;
+				continue;
 			}
 			size_t residual = event.status & 0xffffffu;
 			if (residual > ep->pending_length || !sync_dma(&ep->buffer, DMA_SYNC_FOR_CPU)) return false;
@@ -649,6 +696,8 @@ static bool poll_interrupt_transfers(struct xhci_controller* c, struct xhci_devi
 }
 
 bool xhci_device_poll(struct xhci_controller* c) {
+	uint64_t now;
+	if (monotonic_time_ns(&now) != SYSCALL_STATUS_OK) return false;
 	for (unsigned port = 1u; port <= c->ports; port++) {
 		unsigned index     = port - 1u;
 		size_t   offset    = (size_t)c->op + 0x400u + (size_t)index * 0x10u;
@@ -661,29 +710,33 @@ bool xhci_device_poll(struct xhci_controller* c) {
 				free(c->devices[index]);
 				c->devices[index] = NULL;
 			}
-			c->port_seen[index]        = false;
-			c->port_retry_ticks[index] = 0u;
+			c->port_seen[index]           = false;
+			c->port_failures[index]       = 0u;
+			c->port_retry_after_ns[index] = 0u;
 			continue;
 		}
 		if (c->port_seen[index]) continue;
-		if (c->port_retry_ticks[index] != 0u) {
-			c->port_retry_ticks[index]--;
+		if (c->port_failures[index] == 0u && c->port_retry_after_ns[index] == 0u) {
+			c->port_retry_after_ns[index] =
+				now > UINT64_MAX - XHCI_PORT_DEBOUNCE_NS ? UINT64_MAX : now + XHCI_PORT_DEBOUNCE_NS;
 			continue;
 		}
+		if (c->port_failures[index] >= XHCI_PORT_MAX_FAILURES || now < c->port_retry_after_ns[index]) continue;
 		uint32_t speed;
-		if (!reset_port(c, port, &speed)) {
-			RUNTIME_DEBUG_ERROR("xhci: unable to reset port %u\n", port);
-			c->port_retry_ticks[index] = 100u;
+		bool     reset = reset_port(c, port, &speed);
+		if (reset) c->devices[index] = enumerate_port(c, port, speed);
+		if (reset && c->devices[index] != NULL) {
+			c->port_seen[index]           = true;
+			c->port_failures[index]       = 0u;
+			c->port_retry_after_ns[index] = 0u;
+			c->port_generation[index]++;
 			continue;
 		}
-		c->devices[index] = enumerate_port(c, port, speed);
-		if (c->devices[index] == NULL) {
-			RUNTIME_DEBUG_ERROR("xhci: unable to enumerate port %u\n", port);
-			c->port_retry_ticks[index] = 100u;
-		}
-		else {
-			c->port_seen[index] = true;
-			c->port_generation[index]++;
+		fprintf(stderr, "xhci: unable to %s port %u\n", reset ? "enumerate" : "reset", port);
+		c->port_failures[index]++;
+		if (c->port_failures[index] < XHCI_PORT_MAX_FAILURES) {
+			c->port_retry_after_ns[index] =
+				now > UINT64_MAX - XHCI_PORT_RETRY_DELAY_NS ? UINT64_MAX : now + XHCI_PORT_RETRY_DELAY_NS;
 		}
 	}
 	return true;
@@ -694,9 +747,10 @@ void xhci_device_release_all(struct xhci_controller* c) {
 		if (c->devices[index] == NULL) continue;
 		release_device(c, c->devices[index]);
 		free(c->devices[index]);
-		c->devices[index]          = NULL;
-		c->port_seen[index]        = false;
-		c->port_retry_ticks[index] = 0u;
+		c->devices[index]             = NULL;
+		c->port_seen[index]           = false;
+		c->port_failures[index]       = 0u;
+		c->port_retry_after_ns[index] = 0u;
 	}
 }
 
