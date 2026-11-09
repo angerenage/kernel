@@ -3,11 +3,12 @@
 #include <libc/stdlib.h>
 
 void* malloc(size_t size) {
-	struct heap_block* block;
-	struct heap_block* remainder;
-	size_t             payload_bytes;
-	size_t             block_bytes;
-	size_t             remainder_bytes;
+	struct heap_block*     block;
+	struct heap_block*     remainder;
+	struct heap_lock_state lock_state;
+	size_t                 payload_bytes;
+	size_t                 block_bytes;
+	size_t                 remainder_bytes;
 
 	if (!heap_is_initialized() || size == 0) return NULL;
 	if (!align_up_size(size, HEAP_ALIGN, &payload_bytes)) {
@@ -22,10 +23,10 @@ void* malloc(size_t size) {
 	if (block_bytes < heap_min_block_size) block_bytes = heap_min_block_size;
 
 	for (;;) {
-		heap_lock();
-		block = find_fit_locked(block_bytes);
+		lock_state = heap_lock();
+		block      = find_fit_locked(block_bytes);
 		if (block != NULL) break;
-		heap_unlock();
+		heap_unlock(lock_state);
 		if (!grow_heap(block_bytes)) return NULL;
 	}
 
@@ -45,6 +46,6 @@ void* malloc(size_t size) {
 
 	free_bytes -= block_bytes;
 	void* ptr = (uint8_t*)block + heap_header_size;
-	heap_unlock();
+	heap_unlock(lock_state);
 	return ptr;
 }

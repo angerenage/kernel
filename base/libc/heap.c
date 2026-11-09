@@ -120,11 +120,12 @@ static bool add_arena_locked(void* base, size_t size_bytes) {
 }
 
 bool grow_heap(size_t min_block_size) {
-	void*  region = NULL;
-	size_t granule;
-	size_t sentinel_bytes;
-	size_t request_bytes;
-	size_t grow_bytes;
+	void*                  region = NULL;
+	struct heap_lock_state lock_state;
+	size_t                 granule;
+	size_t                 sentinel_bytes;
+	size_t                 request_bytes;
+	size_t                 grow_bytes;
 
 	granule = heap_growth_granule();
 	if (granule == 0u) return false;
@@ -135,12 +136,12 @@ bool grow_heap(size_t min_block_size) {
 	if (!align_up_size(request_bytes, granule, &grow_bytes)) return false;
 
 	if (!heap_grow_region(grow_bytes, &region, &grow_bytes)) return false;
-	heap_lock();
+	lock_state = heap_lock();
 	if (!add_arena_locked(region, grow_bytes)) {
-		heap_unlock();
+		heap_unlock(lock_state);
 		return false;
 	}
-	heap_unlock();
+	heap_unlock(lock_state);
 	return true;
 }
 
@@ -156,44 +157,47 @@ struct heap_block* find_fit_locked(size_t block_bytes) {
 }
 
 bool heap_init(void) {
-	heap_lock();
-	free_list   = NULL;
-	total_bytes = 0;
-	free_bytes  = 0;
-	initialized = false;
-	heap_unlock();
+	struct heap_lock_state lock_state = heap_lock();
+	free_list                         = NULL;
+	total_bytes                       = 0;
+	free_bytes                        = 0;
+	initialized                       = false;
+	heap_unlock(lock_state);
 
 	if (!grow_heap(heap_min_block_size)) return false;
 
-	heap_lock();
+	lock_state  = heap_lock();
 	initialized = true;
-	heap_unlock();
+	heap_unlock(lock_state);
 	return true;
 }
 
 bool heap_is_initialized(void) {
-	bool is_initialized;
+	bool                   is_initialized;
+	struct heap_lock_state lock_state;
 
-	heap_lock();
+	lock_state     = heap_lock();
 	is_initialized = initialized;
-	heap_unlock();
+	heap_unlock(lock_state);
 	return is_initialized;
 }
 
 size_t heap_total_bytes(void) {
-	size_t total;
+	size_t                 total;
+	struct heap_lock_state lock_state;
 
-	heap_lock();
-	total = total_bytes;
-	heap_unlock();
+	lock_state = heap_lock();
+	total      = total_bytes;
+	heap_unlock(lock_state);
 	return total;
 }
 
 size_t heap_free_bytes(void) {
-	size_t free_now;
+	size_t                 free_now;
+	struct heap_lock_state lock_state;
 
-	heap_lock();
-	free_now = free_bytes;
-	heap_unlock();
+	lock_state = heap_lock();
+	free_now   = free_bytes;
+	heap_unlock(lock_state);
 	return free_now;
 }

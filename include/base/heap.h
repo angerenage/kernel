@@ -72,8 +72,13 @@ bool heap_grow_region(size_t minimum_size, void** out_base, size_t* out_size);
 /* Return the allocation granularity used for arena growth. */
 size_t heap_growth_granule(void);
 
-/* Acquire the global heap lock. */
-void heap_lock(void);
+/* Opaque platform state preserved while the global heap lock is held. */
+struct heap_lock_state {
+	bool interrupts_enabled;
+};
 
-/* Release the global heap lock. */
-void heap_unlock(void);
+/* Acquire the global heap lock and return the platform state to restore. */
+struct heap_lock_state heap_lock(void);
+
+/* Release the global heap lock and restore the state saved by heap_lock(). */
+void heap_unlock(struct heap_lock_state state);

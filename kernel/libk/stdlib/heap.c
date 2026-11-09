@@ -8,7 +8,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-static struct spinlock kernel_heap_lock = SPINLOCK_INIT_CLASS("heap_lock", SPINLOCK_ORDER_HEAP, SPINLOCK_FLAG_NONE);
+static struct spinlock kernel_heap_lock =
+	(struct spinlock)SPINLOCK_INIT_CLASS("heap_lock", SPINLOCK_ORDER_HEAP, SPINLOCK_FLAG_IRQSAVE);
 
 bool heap_grow_region(size_t minimum_size, void** out_base, size_t* out_size) {
 	struct memory*  memory;
@@ -45,10 +46,11 @@ size_t heap_growth_granule(void) {
 	return address_space_minimum_mapping_size(address_space_kernel());
 }
 
-void heap_lock(void) {
-	spinlock_lock(&kernel_heap_lock);
+struct heap_lock_state heap_lock(void) {
+	struct irq_state irq_state = spinlock_lock_irqsave(&kernel_heap_lock);
+	return (struct heap_lock_state){.interrupts_enabled = irq_state.enabled};
 }
 
-void heap_unlock(void) {
-	spinlock_unlock(&kernel_heap_lock);
+void heap_unlock(struct heap_lock_state state) {
+	spinlock_unlock_irqrestore(&kernel_heap_lock, (struct irq_state){.enabled = state.interrupts_enabled});
 }

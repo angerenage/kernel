@@ -62,10 +62,12 @@ size_t heap_growth_granule(void) {
 	return runtime_heap_granule;
 }
 
-void heap_lock(void) {
+struct heap_lock_state heap_lock(void) {
 	while (__atomic_test_and_set(&userspace_heap_locked, __ATOMIC_ACQUIRE)) __asm__ volatile("" ::: "memory");
+	return (struct heap_lock_state){0};
 }
 
-void heap_unlock(void) {
+void heap_unlock(struct heap_lock_state state) {
+	(void)state;
 	__atomic_clear(&userspace_heap_locked, __ATOMIC_RELEASE);
 }
