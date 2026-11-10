@@ -1,11 +1,11 @@
 #include <base/startup.h>
-#include <libc/stdlib.h>
-#include <libc/string.h>
 #include <protocol/loader.h>
 #include <runtime/program.h>
 #include <runtime/registry.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 #include <system/capability.h>
 
 #define LOADER_PROTOCOL_VERSION_MAJOR 1u

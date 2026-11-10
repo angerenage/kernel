@@ -5,7 +5,6 @@
 #include <firmware/dt.h>
 #include <hal/clock.h>
 #include <stdbool.h>
-#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 

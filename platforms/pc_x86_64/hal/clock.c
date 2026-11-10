@@ -2,16 +2,13 @@
 
 #include <boot/info.h>
 #include <core/cpu.h>
-#include <core/lock.h>
 #include <core/spinlock.h>
 #include <hal/clock.h>
 #include <hal/interrupts.h>
 #include <stdbool.h>
-#include <stddef.h>
 #include <stdint.h>
 
 #include "interrupts/pic.h"
-#include "interrupts/vectors.h"
 
 static hal_clock_handler_t               clock_handler;
 static void*                             clock_context;

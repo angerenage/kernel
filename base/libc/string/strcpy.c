@@ -1,4 +1,4 @@
-#include <string.h>
+#include <libc/string.h>
 
 char* strcpy(char* restrict destination, const char* restrict source) {
 	char* cursor = destination;

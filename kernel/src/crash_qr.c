@@ -1,5 +1,4 @@
 #include <kernel/crash_qr.h>
-#include <limits.h>
 #include <qrcodegen.h>
 #include <string.h>
 

@@ -1,4 +1,4 @@
-#include <string.h>
+#include <libc/string.h>
 
 char* strcat(char* restrict destination, const char* restrict source) {
 	char* end = destination + strlen(destination);

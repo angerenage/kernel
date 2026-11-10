@@ -1,5 +1,5 @@
+#include <libc/stdlib.h>
 #include <stdint.h>
-#include <stdlib.h>
 
 static void swap(unsigned char* left, unsigned char* right, size_t size) {
 	for (size_t index = 0u; index < size; index++) {

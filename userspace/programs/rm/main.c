@@ -1,6 +1,4 @@
 #include <base/cap.h>
-#include <libc/stdlib.h>
-#include <libc/string.h>
 #include <protocol/filesystem.h>
 #include <protocol/vfs.h>
 #include <runtime/filesystem.h>
@@ -10,6 +8,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <system/capability.h>
 
 #define RM_VFS_MAJOR 1u

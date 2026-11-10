@@ -1,6 +1,5 @@
 #include <runtime/stream.h>
 #include <stddef.h>
-#include <stdint.h>
 
 static cap_id_t stdin_stream_cap  = CAP_ID_INVALID;
 static cap_id_t stdout_stream_cap = CAP_ID_INVALID;

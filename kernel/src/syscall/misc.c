@@ -1,7 +1,5 @@
 #include "misc.h"
 
-#include <base/display.h>
-#include <core/syscall.h>
 #include <stddef.h>
 #include <stdio.h>
 

@@ -1,6 +1,5 @@
 #include "resource.h"
 
-#include <stddef.h>
 #include <system/trace.h>
 
 #define PCI_COMMAND_OFFSET 0x04u

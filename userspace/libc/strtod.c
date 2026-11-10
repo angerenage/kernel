@@ -1,6 +1,5 @@
 #include <libc/ctype.h>
 #include <libc/errno.h>
-#include <libc/stdlib.h>
 #include <stdbool.h>
 #include <stddef.h>
 

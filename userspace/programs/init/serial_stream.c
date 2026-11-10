@@ -11,8 +11,6 @@
 #include <system/signal.h>
 #include <system/thread.h>
 
-#include "init.h"
-
 #define SERIAL_STREAM_OBJECT_ID 1u
 
 static channel_id_t serial_stream_endpoint = CHANNEL_ID_INVALID;

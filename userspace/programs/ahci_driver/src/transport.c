@@ -6,7 +6,6 @@
 #include <base/process.h>
 #include <base/signal.h>
 #include <protocol/ahci.h>
-#include <protocol/device.h>
 #include <runtime/device.h>
 #include <runtime/log.h>
 #include <stdio.h>

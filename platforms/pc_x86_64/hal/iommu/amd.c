@@ -1,6 +1,5 @@
 #include "amd.h"
 
-#include <core/mm.h>
 #include <core/pmm.h>
 #include <hal/hcf.h>
 #include <hal/iommu.h>

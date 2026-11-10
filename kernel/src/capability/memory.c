@@ -7,7 +7,6 @@
 #include <core/process.h>
 #include <core/sched.h>
 #include <core/spinlock.h>
-#include <core/syscall.h>
 #include <kernel/capability.h>
 #include <kernel/trace.h>
 #include <stdlib.h>

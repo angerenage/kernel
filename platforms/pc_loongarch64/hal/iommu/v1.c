@@ -1,6 +1,5 @@
 #include "v1.h"
 
-#include <core/mm.h>
 #include <hal/hcf.h>
 #include <stdbool.h>
 #include <stddef.h>

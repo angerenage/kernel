@@ -1,8 +1,7 @@
 #include <base/cap.h>
-#include <libc/stdlib.h>
-#include <libc/string.h>
 #include <runtime/registry.h>
-#include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
 #include <system/capability.h>
 
 cap_id_t registry_cap_id = CAP_ID_INVALID;

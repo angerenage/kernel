@@ -1,9 +1,7 @@
 #include <base/cap.h>
-#include <base/syscall.h>
 #include <core/capability.h>
 #include <core/capability_call.h>
 #include <core/lock.h>
-#include <core/pmm.h>
 #include <core/process.h>
 #include <hal/hcf.h>
 #include <libc/stdlib.h>

@@ -1,6 +1,7 @@
 #include "parser.h"
 
 #include <base/device_tree.h>
+#include <base/process.h>
 #include <protocol/device.h>
 #include <runtime/device.h>
 #include <stdbool.h>
@@ -8,7 +9,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <system/capability.h>
 #include <system/device_tree.h>
 
 #include "property.h"

@@ -1,7 +1,6 @@
 #include <libc/limits.h>
 #include <libc/locale.h>
 #include <libc/string.h>
-#include <stddef.h>
 
 static char empty[]    = "";
 static char decimal[]  = ".";

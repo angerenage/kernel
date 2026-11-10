@@ -1,9 +1,7 @@
 #include "claim.h"
 
-#include <base/dma.h>
 #include <base/interrupt.h>
 #include <base/memory.h>
-#include <limits.h>
 #include <runtime/device.h>
 #include <runtime/log.h>
 #include <stdio.h>

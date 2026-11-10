@@ -5,8 +5,8 @@ usage() {
 	cat <<'EOF'
 Usage: format.sh [options]
 
-Run clang-format on selected source files, then enforce a newline after
-__attribute__(...) in normal C code.
+Remove unused includes, run clang-format on selected source files, then enforce
+a newline after __attribute__(...) in normal C code.
 
 Options:
   --root <dir>             Root directory to scan (default: .)
@@ -16,12 +16,18 @@ Options:
   --exclude <glob>         Path pattern to exclude (repeatable). Matches
                            root-relative paths, absolute paths, or basenames.
   --clang-format <path>    Path to clang-format binary (default: clang-format)
+  --clang-tidy <path>      Path to clang-tidy binary (default: clang-tidy)
+  --run-clang-tidy <path>  Path to run-clang-tidy (default: run-clang-tidy)
+  --build-dir <dir>        Compilation database directory used for include
+                           cleanup (repeatable; default: discover all)
+  --skip-include-cleanup   Skip unused-include removal
   --dry-run                Print what would be done without modifying anything
   -h, --help               Show this help and exit
 
 Notes:
 - Perl is required for the attribute rewrite.
-- In --staged mode, only the Git index is modified.
+- Include cleanup requires a configured Meson build and is skipped in
+  --staged mode, where only the Git index is modified.
 - build-* directories and include/limine.h are skipped by default.
 EOF
 }
@@ -50,11 +56,15 @@ abspath() {
 
 ROOT="."
 CLANG_FORMAT_BIN="clang-format"
+CLANG_TIDY_BIN="clang-tidy"
+RUN_CLANG_TIDY_BIN="run-clang-tidy"
+BUILD_DIRS=()
+SKIP_INCLUDE_CLEANUP=0
 DRY_RUN=0
 STAGED_ONLY=0
 
 EXTS=("*.c" "*.h")
-EXCLUDES=("include/limine.h")
+EXCLUDES=("include/limine.h" "third_party")
 PRUNE_DIRS=("build-*")
 FILES=()
 
@@ -68,7 +78,7 @@ ATTRIBUTE_PERL_EXPR='
 		^[\x20\t]*\#(?:[^\n]*\\\r?\n)*[^\n]*(?:\r?\n|\z)(*SKIP)(*F)
 		|
 		__attribute__(?&P)\K[\x20\t]+
-		(?(DEFINE)(?<P>\((?:[^()]+|(?&P))*\)))
+		(?(DEFINE)(?<P>\((?:[^()]++|(?&P))*\)))
 	}{\n}gmx
 '
 
@@ -112,6 +122,37 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--clang-format=*)
 			CLANG_FORMAT_BIN="${1#*=}"
+			shift
+			;;
+		--clang-tidy)
+			[[ $# -ge 2 ]] || error "--clang-tidy requires an argument"
+			CLANG_TIDY_BIN="$2"
+			shift 2
+			;;
+		--clang-tidy=*)
+			CLANG_TIDY_BIN="${1#*=}"
+			shift
+			;;
+		--run-clang-tidy)
+			[[ $# -ge 2 ]] || error "--run-clang-tidy requires an argument"
+			RUN_CLANG_TIDY_BIN="$2"
+			shift 2
+			;;
+		--run-clang-tidy=*)
+			RUN_CLANG_TIDY_BIN="${1#*=}"
+			shift
+			;;
+		--build-dir)
+			[[ $# -ge 2 ]] || error "--build-dir requires an argument"
+			BUILD_DIRS+=("$2")
+			shift 2
+			;;
+		--build-dir=*)
+			BUILD_DIRS+=("${1#*=}")
+			shift
+			;;
+		--skip-include-cleanup)
+			SKIP_INCLUDE_CLEANUP=1
 			shift
 			;;
 		--dry-run)
@@ -308,6 +349,28 @@ apply_attribute_breaks() {
 	apply_attribute_breaks_to "${FILES[@]}"
 }
 
+remove_unused_includes() {
+	local script_dir
+	local build_dir
+	local args
+
+	(( SKIP_INCLUDE_CLEANUP )) && return
+
+	script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+	args=(
+		--root "$ROOT"
+		--clang-tidy "$CLANG_TIDY_BIN"
+		--run-clang-tidy "$RUN_CLANG_TIDY_BIN"
+	)
+
+	for build_dir in "${BUILD_DIRS[@]}"; do
+		args+=(--build-dir "$build_dir")
+	done
+	(( DRY_RUN )) && args+=(--dry-run)
+
+	bash "${script_dir}/remove-unused-includes.sh" "${args[@]}"
+}
+
 format_staged_file() {
 	local file="$1"
 	local rel
@@ -433,6 +496,7 @@ fi
 if (( STAGED_ONLY )); then
 	format_staged_files
 else
+	remove_unused_includes
 	run_clang_format
 	apply_attribute_breaks
 fi

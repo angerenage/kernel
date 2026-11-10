@@ -2,7 +2,6 @@
 
 #include <base/channel.h>
 #include <base/process.h>
-#include <limits.h>
 #include <runtime/registry.h>
 #include <stdbool.h>
 #include <stdlib.h>

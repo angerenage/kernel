@@ -5,7 +5,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <system/capability.h>
 #include <system/trace.h>
 
 #include "claim.h"

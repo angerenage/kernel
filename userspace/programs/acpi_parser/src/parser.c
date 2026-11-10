@@ -1,7 +1,6 @@
 #include "parser.h"
 
 #include <stdio.h>
-#include <system/capability.h>
 
 #include "aml.h"
 #include "tables/fadt.h"

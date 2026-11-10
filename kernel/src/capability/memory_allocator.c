@@ -5,7 +5,6 @@
 #include <core/capability.h>
 #include <core/memory.h>
 #include <core/pmm.h>
-#include <core/syscall.h>
 #include <hal/hcf.h>
 #include <kernel/capability.h>
 #include <stdlib.h>

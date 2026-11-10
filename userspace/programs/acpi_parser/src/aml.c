@@ -2,7 +2,6 @@
 
 #include <base/acpi.h>
 #include <base/cap.h>
-#include <base/process.h>
 #include <protocol/device.h>
 #include <runtime/device.h>
 #include <stdbool.h>

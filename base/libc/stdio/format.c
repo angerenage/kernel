@@ -1,9 +1,7 @@
 #include "format.h"
 
 #include <base/display.h>
-#include <libc/limits.h>
 #include <stdbool.h>
-#include <stddef.h>
 #include <stdint.h>
 
 #define DISPLAY_BUFFER_SIZE 256u

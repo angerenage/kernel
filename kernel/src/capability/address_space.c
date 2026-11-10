@@ -4,7 +4,6 @@
 #include <core/address_space.h>
 #include <core/capability.h>
 #include <core/process.h>
-#include <core/syscall.h>
 #include <kernel/capability.h>
 #include <string.h>
 

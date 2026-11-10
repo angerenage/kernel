@@ -10,7 +10,6 @@
 #include <core/capability.h>
 #include <core/memory.h>
 #include <core/mm.h>
-#include <core/pmm.h>
 #include <core/process.h>
 #include <core/spinlock.h>
 #include <hal/paging.h>

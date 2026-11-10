@@ -2,7 +2,6 @@
 #include <base/kernel_resource.h>
 #include <base/startup.h>
 #include <runtime/heap.h>
-#include <stddef.h>
 #include <string.h>
 #include <system/kernel_resource.h>
 #include <system/process.h>

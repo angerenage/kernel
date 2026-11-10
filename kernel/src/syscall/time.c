@@ -2,7 +2,6 @@
 
 #include <base/time.h>
 #include <core/sched.h>
-#include <core/syscall.h>
 #include <core/time.h>
 #include <hal/clock.h>
 #include <stdint.h>

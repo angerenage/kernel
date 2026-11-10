@@ -1,5 +1,5 @@
+#include <core/address_space.h>
 #include <core/address_transfer.h>
-#include <core/process.h>
 #include <core/sched.h>
 #include <core/syscall.h>
 #include <libc/stdlib.h>

@@ -3,7 +3,6 @@
 #include <libc/limits.h>
 #include <libc/stdlib.h>
 #include <stdbool.h>
-#include <stddef.h>
 
 static int digit_value(unsigned char character) {
 	if (character >= '0' && character <= '9') return character - '0';

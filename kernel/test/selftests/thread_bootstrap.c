@@ -2,7 +2,6 @@
 #include <core/kthread.h>
 #include <core/thread.h>
 #include <stdbool.h>
-#include <stddef.h>
 #include <stdint.h>
 
 #include "../selftest.h"

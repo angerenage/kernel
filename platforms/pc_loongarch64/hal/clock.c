@@ -4,7 +4,6 @@
 #include <core/spinlock.h>
 #include <hal/clock.h>
 #include <stdbool.h>
-#include <stddef.h>
 #include <stdint.h>
 
 #define LOONGARCH64_CSR_CRMD 0x0u

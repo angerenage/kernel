@@ -7,7 +7,6 @@
 #include <core/signal.h>
 #include <core/user_upcall.h>
 #include <core/uthread.h>
-#include <kernel/capability.h>
 #include <string.h>
 
 struct kernel_signal_reference {

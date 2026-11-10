@@ -1,7 +1,6 @@
 #include "cache.h"
 
 #include <core/cpu.h>
-#include <core/lock.h>
 #include <core/spinlock.h>
 #include <hal/cache.h>
 #include <hal/hcf.h>

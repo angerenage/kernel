@@ -1,5 +1,4 @@
 #include <core/cpu.h>
-#include <core/lock.h>
 #include <core/spinlock.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>

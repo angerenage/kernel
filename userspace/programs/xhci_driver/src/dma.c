@@ -2,7 +2,6 @@
 
 #include <base/address_space.h>
 #include <base/process.h>
-#include <protocol/device.h>
 #include <runtime/device.h>
 #include <stdint.h>
 #include <stdio.h>

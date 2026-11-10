@@ -2,7 +2,6 @@
 
 #include <ata/block_service.h>
 #include <ata/transport.h>
-#include <runtime/block.h>
 #include <stdio.h>
 
 #include "commands.h"

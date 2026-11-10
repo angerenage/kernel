@@ -30,6 +30,7 @@ Test(heap, failed_realloc_preserves_original_allocation_and_contents) {
 	void*                         failed;
 	size_t                        before_total;
 	size_t                        before_free;
+	volatile size_t               impossible_size = SIZE_MAX - 64u;
 
 	init_test_heap(arena, sizeof(arena));
 	ptr = malloc(128u);
@@ -38,7 +39,7 @@ Test(heap, failed_realloc_preserves_original_allocation_and_contents) {
 
 	before_total = heap_total_bytes();
 	before_free  = heap_free_bytes();
-	failed       = realloc(ptr, SIZE_MAX - 64u);
+	failed       = realloc(ptr, impossible_size);
 
 	cr_assert_null(failed, "oversized realloc must fail");
 	for (size_t i = 0u; i < 128u; i++) {
@@ -57,12 +58,13 @@ Test(heap, calloc_overflow_is_side_effect_free) {
 	_Alignas(4096) static uint8_t arena[KiB(64)];
 	size_t                        before_total;
 	size_t                        before_free;
+	volatile size_t               overflowing_count = SIZE_MAX;
 
 	init_test_heap(arena, sizeof(arena));
 	before_total = heap_total_bytes();
 	before_free  = heap_free_bytes();
 
-	cr_assert_null(calloc(SIZE_MAX, 2u), "calloc multiplication overflow must fail");
+	cr_assert_null(calloc(overflowing_count, 2u), "calloc multiplication overflow must fail");
 	cr_assert_eq(heap_total_bytes(), before_total, "calloc overflow must not grow the heap");
 	cr_assert_eq(heap_free_bytes(), before_free, "calloc overflow must not consume heap capacity");
 }

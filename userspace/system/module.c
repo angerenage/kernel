@@ -1,14 +1,12 @@
 #include <base/math.h>
-#include <libc/stdlib.h>
 #include <runtime/diagnostic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <system/capability.h>
 #include <system/module.h>
-
-#include "syscall.h"
 
 static bool module_provider_entry_valid(const struct module_provider_entry* entry) {
 	return entry->id != MODULE_ID_INVALID && entry->reserved == 0u &&

@@ -1,6 +1,6 @@
-#include <libc/stdlib.h>
-#include <libc/string.h>
 #include <runtime/stream.h>
+#include <stdlib.h>
+#include <string.h>
 #include <system/capability.h>
 
 syscall_status_t stream_read(cap_id_t stream_cap, void* buffer, size_t size, size_t* out_read) {

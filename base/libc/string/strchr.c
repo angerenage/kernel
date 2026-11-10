@@ -1,5 +1,4 @@
 #include <libc/string.h>
-#include <stddef.h>
 
 char* strchr(const char* string, int character) {
 	char target = (char)character;

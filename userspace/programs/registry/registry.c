@@ -1,8 +1,7 @@
 #include "registry.h"
 
-#include <libc/stdlib.h>
-#include <libc/string.h>
-#include <limits.h>
+#include <stdlib.h>
+#include <string.h>
 #include <system/capability.h>
 #include <system/signal.h>
 

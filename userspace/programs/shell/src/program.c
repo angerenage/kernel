@@ -1,6 +1,5 @@
 #include <base/process.h>
 #include <base/startup.h>
-#include <libc/string.h>
 #include <protocol/filesystem.h>
 #include <runtime/program.h>
 #include <runtime/tty_session.h>
@@ -8,6 +7,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 #include <system/capability.h>
 #include <system/display.h>
 #include <system/process.h>

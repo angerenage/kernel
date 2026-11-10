@@ -3,12 +3,10 @@
 #include <base/cap.h>
 #include <base/interrupt.h>
 #include <protocol/device.h>
-#include <runtime/device.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <system/capability.h>
 #include <uacpi/resources.h>
 
 #if defined(__x86_64__)

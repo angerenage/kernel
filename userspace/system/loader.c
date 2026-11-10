@@ -1,7 +1,5 @@
 #include <base/loader.h>
 #include <runtime/diagnostic.h>
-#include <stddef.h>
-#include <stdint.h>
 #include <system/capability.h>
 #include <system/loader.h>
 

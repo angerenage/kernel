@@ -1,7 +1,7 @@
-#include <libc/errno.h>
-#include <libc/stdio.h>
-#include <libc/unistd.h>
+#include <errno.h>
+#include <stdio.h>
 #include <system/display.h>
+#include <unistd.h>
 
 ssize_t read(int descriptor, void* buffer, size_t count) {
 	if (descriptor != 0) {

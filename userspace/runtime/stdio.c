@@ -1,9 +1,6 @@
 #include <base/cap.h>
 #include <base/syscall.h>
-#include <libc/limits.h>
-#include <libc/stdio.h>
-#include <libc/stdlib.h>
-#include <libc/string.h>
+#include <limits.h>
 #include <protocol/filesystem.h>
 #include <protocol/vfs.h>
 #include <runtime/filesystem.h>
@@ -11,6 +8,9 @@
 #include <runtime/vfs.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <system/capability.h>
 #include <system/display.h>
 

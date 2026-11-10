@@ -1,7 +1,7 @@
-#include <libc/stdlib.h>
-#include <libc/string.h>
 #include <runtime/filesystem.h>
 #include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
 #include <system/capability.h>
 
 static cap_id_t working_directory_cap = CAP_ID_INVALID;

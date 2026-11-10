@@ -1,12 +1,12 @@
 #include "pipe.h"
 
 #include <base/cap.h>
-#include <libc/string.h>
 #include <runtime/stream.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 #include <system/capability.h>
 #include <system/channel.h>
 #include <system/process.h>

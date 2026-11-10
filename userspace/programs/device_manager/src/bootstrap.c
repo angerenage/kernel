@@ -7,7 +7,6 @@
 #include <runtime/program.h>
 #include <runtime/registry.h>
 #include <runtime/vfs.h>
-#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #include <system/capability.h>

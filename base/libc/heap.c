@@ -1,8 +1,6 @@
 #include <base/heap.h>
 #include <base/math.h>
 #include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
 #include <string.h>
 
 struct heap_block* free_list;

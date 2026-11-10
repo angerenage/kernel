@@ -8,7 +8,6 @@
 #include <core/dma.h>
 #include <core/interrupt.h>
 #include <core/kthread.h>
-#include <core/mm.h>
 #include <core/pmm.h>
 #include <core/process.h>
 #include <core/sched.h>

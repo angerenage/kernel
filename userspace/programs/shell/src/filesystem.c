@@ -1,8 +1,8 @@
-#include <libc/string.h>
 #include <protocol/filesystem.h>
 #include <runtime/vfs.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <string.h>
 #include <system/capability.h>
 
 #include "shell.h"

@@ -1,10 +1,10 @@
 #include <base/cap.h>
 #include <base/kernel_resource.h>
 #include <base/math.h>
-#include <libc/stdlib.h>
 #include <runtime/diagnostic.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <system/capability.h>
 #include <system/kernel_resource.h>

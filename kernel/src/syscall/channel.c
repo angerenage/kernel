@@ -5,10 +5,8 @@
 #include <core/address_transfer.h>
 #include <core/channel.h>
 #include <core/process.h>
-#include <core/sched.h>
 #include <core/syscall.h>
 #include <core/thread.h>
-#include <stdbool.h>
 
 #include "../capability/signal.h"
 

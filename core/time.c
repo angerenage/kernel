@@ -1,7 +1,6 @@
 #include <core/sched.h>
 #include <core/time.h>
 #include <hal/clock.h>
-#include <stddef.h>
 #include <stdint.h>
 
 #define NANOSECONDS_PER_SECOND 1000000000ull

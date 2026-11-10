@@ -1,5 +1,5 @@
+#include <libc/string.h>
 #include <stdint.h>
-#include <string.h>
 
 typedef size_t memset_word_t __attribute__((__may_alias__));
 

@@ -1,5 +1,4 @@
 #include <base/cap.h>
-#include <libc/string.h>
 #include <protocol/filesystem.h>
 #include <protocol/vfs.h>
 #include <runtime/filesystem.h>
@@ -7,8 +6,8 @@
 #include <runtime/vfs.h>
 #include <stdbool.h>
 #include <stddef.h>
-#include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <system/capability.h>
 
 #define MKDIR_VFS_MAJOR 1u

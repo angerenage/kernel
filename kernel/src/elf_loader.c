@@ -4,8 +4,6 @@
 #include <core/address_space.h>
 #include <core/address_transfer.h>
 #include <core/memory.h>
-#include <core/mm.h>
-#include <core/pmm.h>
 #include <core/process.h>
 #include <kernel/elf_loader.h>
 #include <libc/stdlib.h>

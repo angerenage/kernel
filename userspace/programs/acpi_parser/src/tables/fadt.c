@@ -2,15 +2,9 @@
 
 #include <base/acpi.h>
 #include <base/interrupt.h>
-#include <runtime/device.h>
-#include <stddef.h>
-#include <stdint.h>
 #include <system/acpi.h>
-#include <system/capability.h>
 
 #if defined(__x86_64__)
-#include <base/io_port.h>
-#include <system/io_port.h>
 
 #include "../device.h"
 

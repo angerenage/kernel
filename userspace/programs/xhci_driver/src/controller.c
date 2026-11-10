@@ -2,7 +2,6 @@
 
 #include <base/dma.h>
 #include <base/memory.h>
-#include <protocol/device.h>
 #include <protocol/pci.h>
 #include <runtime/device.h>
 #include <runtime/log.h>

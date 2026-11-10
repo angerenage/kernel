@@ -2,9 +2,7 @@
 #include <base/time.h>
 #include <core/address_space.h>
 #include <core/kthread.h>
-#include <core/lock.h>
 #include <core/memory.h>
-#include <core/pmm.h>
 #include <core/sched.h>
 #include <core/spinlock.h>
 #include <hal/clock.h>

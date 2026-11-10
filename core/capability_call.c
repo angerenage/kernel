@@ -1,6 +1,5 @@
 #include <core/capability_call.h>
 #include <core/id_table.h>
-#include <core/lock.h>
 #include <core/sched.h>
 #include <core/semaphore.h>
 #include <kernel/trace.h>

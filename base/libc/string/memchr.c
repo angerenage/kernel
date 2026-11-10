@@ -1,4 +1,4 @@
-#include <string.h>
+#include <libc/string.h>
 
 void* memchr(const void* ptr, int value, size_t count) {
 	const unsigned char* bytes  = ptr;

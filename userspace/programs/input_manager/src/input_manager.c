@@ -1,6 +1,5 @@
 #include "input_manager.h"
 
-#include <limits.h>
 #include <runtime/input.h>
 #include <runtime/log.h>
 #include <stdio.h>

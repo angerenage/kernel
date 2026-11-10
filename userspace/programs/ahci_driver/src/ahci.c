@@ -13,7 +13,6 @@
 #include <system/capability.h>
 #include <system/memory.h>
 #include <system/process.h>
-#include <system/time.h>
 
 #include "dma.h"
 #include "registers.h"

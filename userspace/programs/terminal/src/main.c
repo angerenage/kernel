@@ -1,6 +1,5 @@
 #include <base/cap.h>
 #include <base/framebuffer.h>
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>

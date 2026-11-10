@@ -1,6 +1,5 @@
 #include "upcall.h"
 
-#include <core/syscall.h>
 #include <core/uthread.h>
 
 syscall_result_t syscall_upcall_dropped_count(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,

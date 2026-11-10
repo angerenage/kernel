@@ -1,9 +1,9 @@
-#include <libc/stdlib.h>
-#include <libc/string.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <system/display.h>
 
 #include "parse.h"

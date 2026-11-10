@@ -2,7 +2,6 @@
 
 #include <base/math.h>
 #include <core/cpu.h>
-#include <core/lock.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/sched.h>

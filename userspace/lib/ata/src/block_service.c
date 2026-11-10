@@ -1,7 +1,6 @@
 #include <ata/block_service.h>
 #include <ata/transport.h>
 #include <base/channel.h>
-#include <base/memory.h>
 #include <base/process.h>
 #include <base/signal.h>
 #include <protocol/device.h>

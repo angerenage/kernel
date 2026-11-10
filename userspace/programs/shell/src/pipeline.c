@@ -1,13 +1,13 @@
 #include "pipeline.h"
 
 #include <base/process.h>
-#include <libc/stdlib.h>
-#include <libc/string.h>
 #include <runtime/tty_session.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <system/capability.h>
 #include <system/display.h>
 #include <system/process.h>

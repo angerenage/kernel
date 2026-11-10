@@ -4,7 +4,6 @@
 #include <core/sched.h>
 #include <core/spinlock.h>
 #include <core/thread.h>
-#include <core/uthread.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>
 #include <kernel/trace.h>

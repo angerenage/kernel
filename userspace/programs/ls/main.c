@@ -1,6 +1,4 @@
 #include <base/cap.h>
-#include <libc/stdlib.h>
-#include <libc/string.h>
 #include <protocol/vfs.h>
 #include <runtime/registry.h>
 #include <runtime/tty_session.h>
@@ -9,6 +7,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <system/capability.h>
 #include <system/display.h>
 #include <system/trace.h>

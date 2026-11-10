@@ -1,8 +1,8 @@
-#include <libc/stdlib.h>
 #include <limits.h>
 #include <runtime/startup.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 static char* bounded_nul(char* begin, char* end) {
 	for (char* cursor = begin; cursor < end; cursor++) {

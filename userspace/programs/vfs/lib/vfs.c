@@ -1,8 +1,8 @@
-#include <libc/stdlib.h>
-#include <libc/string.h>
 #include <protocol/vfs.h>
 #include <runtime/vfs.h>
 #include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
 #include <system/capability.h>
 
 static struct filesystem_call_result result(enum filesystem_status status, syscall_status_t transport_status) {

@@ -1,7 +1,6 @@
 #include <core/cpu.h>
 #include <core/exception.h>
 #include <core/interrupt.h>
-#include <core/lock.h>
 #include <core/sched.h>
 #include <core/spinlock.h>
 #include <hal/hcf.h>

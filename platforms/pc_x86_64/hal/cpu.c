@@ -3,7 +3,6 @@
 #include <hal/io_port.h>
 #include <kernel/trace.h>
 #include <stdbool.h>
-#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 

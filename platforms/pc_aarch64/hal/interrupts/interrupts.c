@@ -1,14 +1,11 @@
-#include <base/process.h>
 #include <core/address_space.h>
 #include <core/cpu.h>
 #include <core/exception.h>
 #include <core/sched.h>
-#include <hal/hcf.h>
 #include <hal/interrupts.h>
 #include <kernel/crash.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h>
 
 #include "../cache.h"
 #include "../syscall.h"

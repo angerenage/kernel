@@ -8,8 +8,6 @@
 #include <system/acpi.h>
 #include <system/capability.h>
 
-#include "syscall.h"
-
 syscall_status_t acpi_table_count(cap_id_t provider_cap, const char signature[4], uint64_t* out_count) {
 	struct acpi_provider_count_request  request = {.header = {.op = ACPI_PROVIDER_OP_COUNT}};
 	struct acpi_provider_count_response response;

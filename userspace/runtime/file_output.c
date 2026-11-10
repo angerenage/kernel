@@ -1,7 +1,8 @@
-#include <libc/limits.h>
-#include <libc/stdio.h>
-#include <libc/stdlib.h>
-#include <libc/string.h>
+#include <limits.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 int vfprintf(FILE* restrict stream, const char* restrict format, va_list arguments) {
 	if (stream == NULL || format == NULL) return EOF;

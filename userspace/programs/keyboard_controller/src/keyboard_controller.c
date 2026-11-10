@@ -1,6 +1,5 @@
 #include "keyboard_controller.h"
 
-#include <limits.h>
 #include <protocol/input_manager.h>
 #include <runtime/input_manager.h>
 #include <runtime/log.h>

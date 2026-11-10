@@ -1,4 +1,4 @@
-#include <string.h>
+#include <libc/string.h>
 
 int strcmp(const char* lhs, const char* rhs) {
 	while (*lhs != '\0' && *lhs == *rhs) {

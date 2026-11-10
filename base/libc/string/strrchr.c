@@ -1,4 +1,4 @@
-#include <string.h>
+#include <libc/string.h>
 
 char* strrchr(const char* string, int character) {
 	const char* match  = NULL;

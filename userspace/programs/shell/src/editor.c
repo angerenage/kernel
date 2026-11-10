@@ -1,13 +1,12 @@
 #include "editor.h"
 
-#include <libc/stdlib.h>
-#include <libc/string.h>
 #include <runtime/tty_session.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <system/display.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "shell.h"
 

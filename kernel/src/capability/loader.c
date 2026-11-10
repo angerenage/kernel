@@ -5,7 +5,6 @@
 #include <core/process.h>
 #include <kernel/capability.h>
 #include <kernel/elf_loader.h>
-#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 

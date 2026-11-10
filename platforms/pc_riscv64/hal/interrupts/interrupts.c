@@ -1,6 +1,5 @@
 #include "interrupts.h"
 
-#include <base/process.h>
 #include <core/address_space.h>
 #include <core/cpu.h>
 #include <core/exception.h>

@@ -2,13 +2,12 @@
 #include <core/process.h>
 #if KERNEL_TRACE_ENABLED
 #include <core/sched.h>
+#include <kernel/trace.h>
 #endif
 #include <core/user_upcall.h>
 #include <core/uthread.h>
 #include <hal/userspace.h>
 #include <kernel/syscall.h>
-#include <kernel/trace.h>
-#include <stddef.h>
 #include <stdint.h>
 
 static syscall_result_t syscall_upcall_result(enum user_upcall_result result) {

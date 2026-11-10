@@ -1,4 +1,3 @@
-#include <base/heap.h>
 #include <base/math.h>
 #include <libc/stdlib.h>
 #include <string.h>

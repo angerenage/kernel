@@ -5,7 +5,6 @@
 #include <runtime/filesystem.h>
 #include <runtime/vfs.h>
 #include <stdbool.h>
-#include <stddef.h>
 #include <stdio.h>
 #include <system/capability.h>
 

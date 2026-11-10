@@ -1,5 +1,4 @@
 #include <libc/string.h>
-#include <stddef.h>
 
 char* strstr(const char* haystack, const char* needle) {
 	if (*needle == '\0') return (char*)haystack;

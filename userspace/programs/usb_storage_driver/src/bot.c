@@ -1,6 +1,5 @@
 #include "bot.h"
 
-#include <protocol/device.h>
 #include <protocol/usb.h>
 #include <runtime/device.h>
 #include <stdlib.h>

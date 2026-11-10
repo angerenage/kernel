@@ -1,7 +1,6 @@
 #include <base/address_space.h>
 #include <base/memory.h>
 #include <base/process.h>
-#include <protocol/device.h>
 #include <runtime/block.h>
 #include <runtime/device.h>
 #include <stddef.h>

@@ -10,7 +10,6 @@
 #include <core/uthread.h>
 #include <hal/hcf.h>
 #include <hal/userspace.h>
-#include <stddef.h>
 
 static void core_handle_upcall_delivery_result(struct uthread* current, enum user_upcall_result result) {
 	switch (result) {

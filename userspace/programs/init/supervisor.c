@@ -28,7 +28,6 @@
 #include "device_manager.h"
 #include "launcher.h"
 #include "root_pivot.h"
-#include "serial_stream.h"
 
 #define BOOTFS_SERVICE_NAME "boot"
 #define VFS_PROTOCOL_VERSION_MAJOR 1u

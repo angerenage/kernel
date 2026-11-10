@@ -1,7 +1,5 @@
 #include "fat32.h"
 
-#include <stddef.h>
-
 #include "server.h"
 #include "volume.h"
 

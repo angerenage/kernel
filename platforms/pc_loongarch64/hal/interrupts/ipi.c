@@ -2,7 +2,6 @@
 
 #include <core/cpu.h>
 #include <hal/interrupts.h>
-#include <stddef.h>
 #include <stdint.h>
 
 #include "../cache.h"
