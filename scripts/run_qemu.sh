@@ -382,14 +382,16 @@ case "$TARGET_ARCH" in
 			-smp 4
 			-cpu rv64,v=true,vlen=128,elen=64
 			-m 2G
-			-device ramfb
 			-serial stdio
 			-no-reboot
 			-no-shutdown
 		)
 		case "$IOMMU_MODE" in
-			auto|riscv) ;;
-			none) qemu_args[1]="virt,acpi=off,pflash0=pflash0,pflash1=pflash1" ;;
+			auto|riscv) qemu_args+=( -device virtio-gpu-pci ) ;;
+			none)
+				qemu_args[1]="virt,acpi=off,pflash0=pflash0,pflash1=pflash1"
+				qemu_args+=("-device ramfb")
+				;;
 			*) error "IOMMU model '$IOMMU_MODE' is not supported on riscv64" ;;
 		esac
 		;;
