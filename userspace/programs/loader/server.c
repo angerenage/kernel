@@ -1,21 +1,23 @@
 #include "server.h"
 
-#include <base/cap.h>
-#include <base/process.h>
-#include <base/startup.h>
-#include <protocol/loader.h>
-#include <runtime/program.h>
-#include <runtime/registry.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+
+#include <base/cap.h>
+#include <base/process.h>
+#include <base/startup.h>
+
+#include <protocol/loader.h>
 #include <system/capability.h>
 #include <system/channel.h>
 #include <system/process.h>
 #include <system/signal.h>
 #include <system/trace.h>
+#include <runtime/program.h>
+#include <runtime/registry.h>
 
 #include "lifecycle.h"
 #include "load.h"
@@ -29,10 +31,10 @@ TRACE_LABEL(trace_handle_load, "loader/server/load");
 TRACE_LABEL(trace_handle_run, "loader/server/run");
 TRACE_LABEL(trace_handle_cancel, "loader/server/cancel");
 
-static channel_id_t                  loader_endpoint = CHANNEL_ID_INVALID;
-static cap_id_t                      loader_activity = CAP_ID_INVALID;
+static channel_id_t loader_endpoint = CHANNEL_ID_INVALID;
+static cap_id_t loader_activity = CAP_ID_INVALID;
 static struct loader_loaded_program* loaded_programs;
-static uint8_t                       request_buffer[CAP_MAX_REQUEST_SIZE];
+static uint8_t request_buffer[CAP_MAX_REQUEST_SIZE];
 
 static bool reply_request(cap_call_id_t call_id, const void* response, size_t response_size, syscall_status_t status) {
 	return channel_reply(call_id, response, response_size, status) == SYSCALL_STATUS_OK;
@@ -54,7 +56,7 @@ static void unlink_loaded(struct loader_loaded_program* target) {
 
 	while (*cursor != NULL) {
 		if (*cursor == target) {
-			*cursor      = target->next;
+			*cursor = target->next;
 			target->next = NULL;
 			return;
 		}
@@ -68,21 +70,21 @@ static bool copy_request(const struct cap_request* call, const void* data, void*
 }
 
 static bool handle_load(const struct cap_request* call, const void* data) {
-	struct loader_v1_load_request  request;
-	struct loader_loaded_program*  program = NULL;
+	struct loader_v1_load_request request;
+	struct loader_loaded_program* program = NULL;
 	struct loader_v1_load_response response;
-	cap_id_t                       load_cap = CAP_ID_INVALID;
-	uint64_t                       expected_size;
-	uint64_t                       object_id;
-	syscall_status_t               status;
+	cap_id_t load_cap = CAP_ID_INVALID;
+	uint64_t expected_size;
+	uint64_t object_id;
+	syscall_status_t status;
 	TRACE_SCOPE(trace, &trace_handle_load);
 
 	if (!copy_request(call, data, &request, sizeof(request)))
 		return reply_request(call->call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	if (request.reserved != 0u || request.name_size == 0u || request.file_cap == CAP_ID_INVALID ||
-	    request.name_size > CAP_MAX_REQUEST_SIZE - sizeof(request) ||
-	    (expected_size = sizeof(request) + (uint64_t)request.name_size) != call->request_size ||
-	    call->response_capacity < sizeof(response))
+			request.name_size > CAP_MAX_REQUEST_SIZE - sizeof(request) ||
+			(expected_size = sizeof(request) + (uint64_t)request.name_size) != call->request_size ||
+			call->response_capacity < sizeof(response))
 		return reply_request(call->call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 
 	status = loader_prepare_program(request.file_cap, (const char*)data + sizeof(request), request.name_size, &program);
@@ -100,10 +102,10 @@ static bool handle_load(const struct cap_request* call, const void* data) {
 	}
 	program->load_cap = load_cap;
 
-	program->next   = loaded_programs;
+	program->next = loaded_programs;
 	loaded_programs = program;
-	response        = (struct loader_v1_load_response){
-		.load_cap   = load_cap,
+	response = (struct loader_v1_load_response){
+		.load_cap = load_cap,
 		.process_id = program->process_id,
 	};
 	if (reply_request(call->call_id, &response, sizeof(response), SYSCALL_STATUS_OK)) return true;
@@ -114,37 +116,36 @@ static bool handle_load(const struct cap_request* call, const void* data) {
 }
 
 static bool handle_run(const struct cap_request* call, struct loader_loaded_program* program, const void* data) {
-	struct loader_v1_run_request  request;
+	struct loader_v1_run_request request;
 	struct loader_v1_run_response response = {
 		.process_cap = CAP_ID_INVALID,
-		.thread_cap  = CAP_ID_INVALID,
+		.thread_cap = CAP_ID_INVALID,
 	};
-	cap_id_t         loader_thread_cap = CAP_ID_INVALID;
-	size_t           capability_size;
-	uint64_t         expected_size;
+	cap_id_t loader_thread_cap = CAP_ID_INVALID;
+	size_t capability_size;
+	uint64_t expected_size;
 	syscall_status_t status;
 	TRACE_SCOPE(trace, &trace_handle_run);
 
 	if (program == NULL || program->started || !copy_request(call, data, &request, sizeof(request)))
 		return reply_request(call->call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	if (request.reserved[0] != 0u || request.reserved[1] != 0u || request.capc < PROCESS_STARTUP_CAP_COUNT ||
-	    request.capc > (CAP_MAX_REQUEST_SIZE - sizeof(request)) / sizeof(cap_id_t))
+			request.capc > (CAP_MAX_REQUEST_SIZE - sizeof(request)) / sizeof(cap_id_t))
 		return reply_request(call->call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	capability_size = (size_t)request.capc * sizeof(cap_id_t);
 	if (request.argv_size > CAP_MAX_REQUEST_SIZE - sizeof(request) - capability_size ||
-	    (expected_size = sizeof(request) + (uint64_t)capability_size + (uint64_t)request.argv_size) !=
-	        call->request_size ||
-	    (request.argc == 0u) != (request.argv_size == 0u) || call->response_capacity < sizeof(response))
+			(expected_size = sizeof(request) + (uint64_t)capability_size + (uint64_t)request.argv_size) !=
+					call->request_size ||
+			(request.argc == 0u) != (request.argv_size == 0u) || call->response_capacity < sizeof(response))
 		return reply_request(call->call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 
-	status =
-		loader_start_program(program,
-		                     request.argc,
-		                     request.argv_size == 0u ? NULL : (const uint8_t*)data + sizeof(request) + capability_size,
-		                     request.argv_size,
-		                     request.capc,
-		                     request.capc == 0u ? NULL : (const cap_id_t*)((const uint8_t*)data + sizeof(request)),
-		                     &loader_thread_cap);
+	status = loader_start_program(program,
+			request.argc,
+			request.argv_size == 0u ? NULL : (const uint8_t*)data + sizeof(request) + capability_size,
+			request.argv_size,
+			request.capc,
+			request.capc == 0u ? NULL : (const cap_id_t*)((const uint8_t*)data + sizeof(request)),
+			&loader_thread_cap);
 	if (status != SYSCALL_STATUS_OK) {
 		if (program->started) {
 			(void)loader_unpublish_terminal(loader_endpoint, program);
@@ -189,11 +190,11 @@ static bool handle_run(const struct cap_request* call, struct loader_loaded_prog
 
 static bool handle_cancel(const struct cap_request* call, struct loader_loaded_program* program, const void* data) {
 	struct loader_v1_cancel_request request;
-	syscall_status_t                status;
+	syscall_status_t status;
 	TRACE_SCOPE(trace, &trace_handle_cancel);
 
 	if (program == NULL || program->started || !copy_request(call, data, &request, sizeof(request)) ||
-	    call->request_size != sizeof(request))
+			call->request_size != sizeof(request))
 		return reply_request(call->call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 
 	status = loader_unpublish_terminal(loader_endpoint, program);
@@ -206,7 +207,7 @@ static bool handle_cancel(const struct cap_request* call, struct loader_loaded_p
 
 static bool dispatch_request(const struct cap_request* call, const void* data) {
 	struct loader_v1_request_header header;
-	struct loader_loaded_program*   program;
+	struct loader_loaded_program* program;
 
 	if (!copy_request(call, data, &header, sizeof(header)) || (call->rights & CAP_CALL) == 0u)
 		return reply_request(call->call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
@@ -224,21 +225,24 @@ static bool dispatch_request(const struct cap_request* call, const void* data) {
 static bool advertise_loader(void) {
 	const struct registry_service_selector selector = {
 		.namespace_path = PROGRAM_LOADER_NAMESPACE,
-		.protocol       = LOADER_PROTOCOL_NAME,
-		.major          = LOADER_PROTOCOL_VERSION_MAJOR,
-		.service        = LOADER_SERVICE_NAME,
+		.protocol = LOADER_PROTOCOL_NAME,
+		.major = LOADER_PROTOCOL_VERSION_MAJOR,
+		.service = LOADER_SERVICE_NAME,
 	};
-	struct self_info            self;
+	struct self_info self;
 	struct registry_call_result result;
-	cap_id_t                    service_cap = CAP_ID_INVALID;
-	syscall_status_t            status;
+	cap_id_t service_cap = CAP_ID_INVALID;
+	syscall_status_t status;
 
 	status = process_self_info(&self);
 	if (status != SYSCALL_STATUS_OK || self.pid == PROCESS_PID_INVALID) return false;
 	status = channel_create(&loader_endpoint, &loader_activity);
 	if (status != SYSCALL_STATUS_OK) return false;
-	status = cap_publish(
-		loader_endpoint, LOADER_SERVICE_OBJECT_ID, self.pid, CAP_CALL | CAP_DELEGATE | CAP_DELEGATE_PEER, &service_cap);
+	status = cap_publish(loader_endpoint,
+			LOADER_SERVICE_OBJECT_ID,
+			self.pid,
+			CAP_CALL | CAP_DELEGATE | CAP_DELEGATE_PEER,
+			&service_cap);
 	if (status != SYSCALL_STATUS_OK) return false;
 	result = registry_advertise(&selector, LOADER_PROTOCOL_VERSION_MINOR, service_cap, LOADER_V1_SERVICE_CAP_RIGHTS);
 	if (result.status == REGISTRY_STATUS_OK && result.transport_status == SYSCALL_STATUS_OK) return true;
@@ -248,24 +252,24 @@ static bool advertise_loader(void) {
 
 int loader_server_run(void) {
 	struct cap_request call;
-	bool               received;
-	syscall_status_t   status;
+	bool received;
+	syscall_status_t status;
 
 	if (!advertise_loader()) {
 		printf("loader: advertisement failed\n");
 		return 1;
 	}
 	printf("loader: advertised %s/%s@%u.%u/%s\n",
-	       PROGRAM_LOADER_NAMESPACE,
-	       LOADER_PROTOCOL_NAME,
-	       LOADER_PROTOCOL_VERSION_MAJOR,
-	       LOADER_PROTOCOL_VERSION_MINOR,
-	       LOADER_SERVICE_NAME);
+			PROGRAM_LOADER_NAMESPACE,
+			LOADER_PROTOCOL_NAME,
+			LOADER_PROTOCOL_VERSION_MAJOR,
+			LOADER_PROTOCOL_VERSION_MINOR,
+			LOADER_SERVICE_NAME);
 
 	for (;;) {
 		do {
 			received = false;
-			status   = channel_recv(loader_endpoint, &call, request_buffer, sizeof(request_buffer), &received);
+			status = channel_recv(loader_endpoint, &call, request_buffer, sizeof(request_buffer), &received);
 			if (status != SYSCALL_STATUS_OK) {
 				printf("loader: channel receive failed: %u\n", (unsigned)status);
 				return 1;
@@ -275,10 +279,10 @@ int loader_server_run(void) {
 		do {
 			struct channel_event event;
 			received = false;
-			status   = channel_event_recv(loader_endpoint, &event, &received);
+			status = channel_event_recv(loader_endpoint, &event, &received);
 			if (status != SYSCALL_STATUS_OK) return 1;
 			if (received && event.type == CHANNEL_EVENT_CAP_ZERO_GRANTS &&
-			    event.object_id != LOADER_SERVICE_OBJECT_ID) {
+					event.object_id != LOADER_SERVICE_OBJECT_ID) {
 				struct loader_loaded_program* program = find_loaded(event.object_id);
 				if (program != NULL && !program->started && loader_unpublish_abandoned(loader_endpoint, program)) {
 					unlink_loaded(program);

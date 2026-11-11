@@ -1,13 +1,14 @@
 #pragma once
 
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
 #include <base/cap.h>
 #include <base/channel.h>
 #include <base/process.h>
 #include <core/ring_buffer.h>
 #include <core/spinlock.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
 
 struct cap_object;
 struct signal;
@@ -18,15 +19,15 @@ struct signal;
  * knows the channel ID may send capability calls to it.
  */
 struct channel {
-	struct spinlock    lock;
-	channel_id_t       id;
+	struct spinlock lock;
+	channel_id_t id;
 	struct ring_buffer cap_queue;
 	struct cap_object* event_head;
 	struct cap_object* event_tail;
-	struct signal*     activity_signal;
-	process_id_t       owner_pid;
-	uint64_t           reference_count;
-	bool               closing;
+	struct signal* activity_signal;
+	process_id_t owner_pid;
+	uint64_t reference_count;
+	bool closing;
 };
 
 #define CHANNEL_MAX_PER_PROCESS 64u
@@ -34,7 +35,7 @@ struct channel {
 /* Channels owned by one process for teardown. */
 struct process_channel_state {
 	struct spinlock lock;
-	size_t          count;
+	size_t count;
 	struct channel* channels[CHANNEL_MAX_PER_PROCESS];
 };
 

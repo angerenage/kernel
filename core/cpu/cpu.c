@@ -1,15 +1,16 @@
-#include <core/cpu.h>
-#include <core/spinlock.h>
+#include <stddef.h>
+
 #include <hal/cpu.h>
 #include <hal/interrupts.h>
-#include <stddef.h>
+#include <core/cpu.h>
+#include <core/spinlock.h>
 
 #define CPU_MAX_COUNT 64u
 
-static struct cpu          cpu_storage[CPU_MAX_COUNT];
+static struct cpu cpu_storage[CPU_MAX_COUNT];
 static struct cpu_topology topology;
-static struct spinlock     cpu_topology_lock =
-	SPINLOCK_INIT_CLASS("cpu_topology_lock", SPINLOCK_ORDER_CPU_TOPOLOGY, SPINLOCK_FLAG_IRQSAVE);
+static struct spinlock cpu_topology_lock =
+		SPINLOCK_INIT_CLASS("cpu_topology_lock", SPINLOCK_ORDER_CPU_TOPOLOGY, SPINLOCK_FLAG_IRQSAVE);
 
 static bool cpu_is_installed_locked(const struct cpu* cpu) {
 	if (cpu == NULL || topology.cpus == NULL) return false;
@@ -34,29 +35,29 @@ bool cpu_topology_init(const struct cpu_init_info* init_info, size_t cpu_count, 
 
 		if (role == CPU_ROLE_BSP && i != bsp_index) role = CPU_ROLE_AP;
 		cpu_storage[i] = (struct cpu){
-			.index                      = init_info[i].index,
-			.processor_id               = init_info[i].processor_id,
-			.arch_id                    = init_info[i].arch_id,
-			.role                       = role,
-			.state                      = CPU_STATE_PRESENT,
-			.kernel_entry_stack_top     = init_info[i].boot_stack_top,
-			.syscall_user_stack         = 0u,
-			.reschedule_requested       = false,
-			.interrupts_ready           = false,
-			.irq_disable_depth          = 0u,
-			.exception_depth            = 0u,
-			.boot_stack_base            = init_info[i].boot_stack_base,
-			.boot_stack_top             = init_info[i].boot_stack_top,
-			.deferred_reap_thread       = NULL,
+			.index = init_info[i].index,
+			.processor_id = init_info[i].processor_id,
+			.arch_id = init_info[i].arch_id,
+			.role = role,
+			.state = CPU_STATE_PRESENT,
+			.kernel_entry_stack_top = init_info[i].boot_stack_top,
+			.syscall_user_stack = 0u,
+			.reschedule_requested = false,
+			.interrupts_ready = false,
+			.irq_disable_depth = 0u,
+			.exception_depth = 0u,
+			.boot_stack_base = init_info[i].boot_stack_base,
+			.boot_stack_top = init_info[i].boot_stack_top,
+			.deferred_reap_thread = NULL,
 			.context_switch_in_progress = false,
 		};
 	}
 
 	topology = (struct cpu_topology){
-		.cpus         = cpu_storage,
-		.cpu_count    = cpu_count,
+		.cpus = cpu_storage,
+		.cpu_count = cpu_count,
 		.online_count = 0u,
-		.bsp_index    = bsp_index,
+		.bsp_index = bsp_index,
 	};
 	spinlock_unlock_irqrestore(&cpu_topology_lock, state);
 	return true;
@@ -64,12 +65,12 @@ bool cpu_topology_init(const struct cpu_init_info* init_info, size_t cpu_count, 
 
 bool cpu_topology_init_bootstrap(uintptr_t boot_stack_base, uintptr_t boot_stack_top) {
 	const struct cpu_init_info init_info = {
-		.index           = 0u,
-		.processor_id    = 0u,
-		.arch_id         = hal_cpu_boot_arch_id(),
-		.role            = CPU_ROLE_BSP,
+		.index = 0u,
+		.processor_id = 0u,
+		.arch_id = hal_cpu_boot_arch_id(),
+		.role = CPU_ROLE_BSP,
 		.boot_stack_base = boot_stack_base,
-		.boot_stack_top  = boot_stack_top,
+		.boot_stack_top = boot_stack_top,
 	};
 
 	return cpu_topology_init(&init_info, 1u, 0u);
@@ -95,7 +96,7 @@ void cpu_current_thread_store(struct cpu* cpu, struct thread* thread) {
 
 struct cpu* cpu_bsp(void) {
 	struct irq_state state;
-	struct cpu*      cpu;
+	struct cpu* cpu;
 
 	state = spinlock_lock_irqsave(&cpu_topology_lock);
 	if (topology.cpus == NULL || topology.bsp_index >= topology.cpu_count) {
@@ -109,7 +110,7 @@ struct cpu* cpu_bsp(void) {
 
 struct cpu* cpu_by_index(size_t index) {
 	struct irq_state state;
-	struct cpu*      cpu;
+	struct cpu* cpu;
 
 	state = spinlock_lock_irqsave(&cpu_topology_lock);
 	if (topology.cpus == NULL || index >= topology.cpu_count) {
@@ -146,7 +147,7 @@ void cpu_interrupts_set_ready(struct cpu* cpu, bool ready) {
 	struct irq_state irq_state;
 
 	if (!cpu) return;
-	irq_state             = spinlock_lock_irqsave(&cpu_topology_lock);
+	irq_state = spinlock_lock_irqsave(&cpu_topology_lock);
 	cpu->interrupts_ready = ready;
 	spinlock_unlock_irqrestore(&cpu_topology_lock, irq_state);
 }
@@ -167,7 +168,7 @@ bool cpu_is_bsp(void) {
 }
 
 size_t cpu_count(void) {
-	size_t           count;
+	size_t count;
 	struct irq_state state = spinlock_lock_irqsave(&cpu_topology_lock);
 
 	count = topology.cpu_count;
@@ -176,7 +177,7 @@ size_t cpu_count(void) {
 }
 
 size_t cpu_online_count(void) {
-	size_t           count;
+	size_t count;
 	struct irq_state state = spinlock_lock_irqsave(&cpu_topology_lock);
 
 	count = topology.online_count;

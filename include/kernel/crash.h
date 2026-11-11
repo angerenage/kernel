@@ -27,8 +27,8 @@ enum kernel_panic_reason {
 
 enum kernel_crash_trace_flags {
 	KERNEL_CRASH_TRACE_UNAVAILABLE = 1u << 0,
-	KERNEL_CRASH_TRACE_INVALID     = 1u << 1,
-	KERNEL_CRASH_TRACE_TRUNCATED   = 1u << 2,
+	KERNEL_CRASH_TRACE_INVALID = 1u << 1,
+	KERNEL_CRASH_TRACE_TRUNCATED = 1u << 2,
 };
 
 enum kernel_crash_frame_layout {
@@ -37,69 +37,70 @@ enum kernel_crash_frame_layout {
 };
 
 enum {
-	KERNEL_CRASH_SCHEMA_VERSION   = 1u,
-	KERNEL_CRASH_BUILD_ID_SIZE    = 20u,
-	KERNEL_CRASH_GIT_ID_SIZE      = 41u,
-	KERNEL_CRASH_MAX_REGISTERS    = 32u,
-	KERNEL_CRASH_MAX_TRACE        = 8u,
-	KERNEL_CRASH_MAX_CPUS         = 64u,
-	KERNEL_CRASH_RENDER_SIZE      = 4096u,
+	KERNEL_CRASH_SCHEMA_VERSION = 1u,
+	KERNEL_CRASH_BUILD_ID_SIZE = 20u,
+	KERNEL_CRASH_GIT_ID_SIZE = 41u,
+	KERNEL_CRASH_MAX_REGISTERS = 32u,
+	KERNEL_CRASH_MAX_TRACE = 8u,
+	KERNEL_CRASH_MAX_CPUS = 64u,
+	KERNEL_CRASH_RENDER_SIZE = 4096u,
 	KERNEL_CRASH_WIRE_HEADER_SIZE = 50u,
 	KERNEL_CRASH_WIRE_FIXED_WORDS = 16u,
-	KERNEL_CRASH_WIRE_MAX_SIZE    = KERNEL_CRASH_WIRE_HEADER_SIZE +
-		(KERNEL_CRASH_WIRE_FIXED_WORDS + KERNEL_CRASH_MAX_REGISTERS + KERNEL_CRASH_MAX_TRACE) * (sizeof(uint64_t) + 1u),
+	KERNEL_CRASH_WIRE_MAX_SIZE = KERNEL_CRASH_WIRE_HEADER_SIZE +
+			(KERNEL_CRASH_WIRE_FIXED_WORDS + KERNEL_CRASH_MAX_REGISTERS + KERNEL_CRASH_MAX_TRACE) *
+					(sizeof(uint64_t) + 1u),
 	KERNEL_CRASH_URL_SIZE = 1024u,
 };
 
 enum kernel_crash_wire_flags {
-	KERNEL_CRASH_WIRE_GIT_VALID      = 1u << 0,
+	KERNEL_CRASH_WIRE_GIT_VALID = 1u << 0,
 	KERNEL_CRASH_WIRE_BUILD_ID_VALID = 1u << 1,
 };
 
 struct kernel_crash_record {
-	uint32_t                 schema_version;
-	enum kernel_crash_arch   arch;
-	enum kernel_crash_cause  cause;
-	char                     git_commit[KERNEL_CRASH_GIT_ID_SIZE];
-	uint8_t                  build_id[KERNEL_CRASH_BUILD_ID_SIZE];
-	bool                     build_id_valid;
-	uint64_t                 cpu_index;
-	uint64_t                 processor_id;
-	uint64_t                 arch_id;
-	uint64_t                 cpu_count;
-	uint64_t                 total_memory;
-	uint64_t                 exception_code;
-	uint64_t                 exception_subcode;
-	uint64_t                 error_code;
-	uint64_t                 fault_address;
-	uint64_t                 instruction_pointer;
-	uint64_t                 stack_pointer;
-	uint64_t                 frame_pointer;
-	uint64_t                 status;
-	uint64_t                 registers[KERNEL_CRASH_MAX_REGISTERS];
-	uint32_t                 register_count;
-	uint64_t                 trace[KERNEL_CRASH_MAX_TRACE];
-	uint32_t                 trace_count;
-	uint32_t                 trace_flags;
+	uint32_t schema_version;
+	enum kernel_crash_arch arch;
+	enum kernel_crash_cause cause;
+	char git_commit[KERNEL_CRASH_GIT_ID_SIZE];
+	uint8_t build_id[KERNEL_CRASH_BUILD_ID_SIZE];
+	bool build_id_valid;
+	uint64_t cpu_index;
+	uint64_t processor_id;
+	uint64_t arch_id;
+	uint64_t cpu_count;
+	uint64_t total_memory;
+	uint64_t exception_code;
+	uint64_t exception_subcode;
+	uint64_t error_code;
+	uint64_t fault_address;
+	uint64_t instruction_pointer;
+	uint64_t stack_pointer;
+	uint64_t frame_pointer;
+	uint64_t status;
+	uint64_t registers[KERNEL_CRASH_MAX_REGISTERS];
+	uint32_t register_count;
+	uint64_t trace[KERNEL_CRASH_MAX_TRACE];
+	uint32_t trace_count;
+	uint32_t trace_flags;
 	enum kernel_panic_reason panic_reason;
-	uint64_t                 panic_detail;
+	uint64_t panic_detail;
 };
 
 struct kernel_crash_panic {
 	enum kernel_panic_reason reason;
-	uintptr_t                detail;
+	uintptr_t detail;
 };
 
 /* Reset a crash record and attach its immutable build identity. */
-void kernel_crash_record_reset(struct kernel_crash_record* record, enum kernel_crash_arch arch,
-                               enum kernel_crash_cause cause);
+void kernel_crash_record_reset(
+		struct kernel_crash_record* record, enum kernel_crash_arch arch, enum kernel_crash_cause cause);
 
 /* Extract a SHA-1 GNU build ID from a bounded ELF note region. */
 bool kernel_crash_parse_build_id(const void* note, size_t note_size, uint8_t out_build_id[KERNEL_CRASH_BUILD_ID_SIZE]);
 
 /* Collect a bounded frame-pointer trace from a validated stack range. */
 void kernel_crash_walk_stack(struct kernel_crash_record* record, uintptr_t stack_base, uintptr_t stack_top,
-                             enum kernel_crash_frame_layout layout);
+		enum kernel_crash_frame_layout layout);
 
 /* Return the stable schema name for a saved architecture register. */
 const char* kernel_crash_register_name(enum kernel_crash_arch arch, uint32_t index);
@@ -111,8 +112,8 @@ bool kernel_crash_render(const struct kernel_crash_record* record, char* output,
 size_t kernel_crash_encode_wire(const struct kernel_crash_record* record, uint8_t* output, size_t output_size);
 
 /* Format a crash wire payload as a browser-local base64url fragment. */
-bool kernel_crash_format_url(const uint8_t* wire, size_t wire_size, const char* server_url, char* output,
-                             size_t output_size);
+bool kernel_crash_format_url(
+		const uint8_t* wire, size_t wire_size, const char* server_url, char* output, size_t output_size);
 
 /* Atomically claim an unowned crash-report slot for one-based CPU identity. */
 bool kernel_crash_try_claim(uint32_t* owner, uint32_t candidate);

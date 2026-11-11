@@ -1,17 +1,18 @@
-#include <core/cpu.h>
-#include <core/exception.h>
-#include <core/interrupt.h>
-#include <core/sched.h>
-#include <core/spinlock.h>
-#include <hal/hcf.h>
-#include <hal/interrupts.h>
-#include <hal/io_port.h>
-#include <kernel/crash.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+
+#include <hal/hcf.h>
+#include <hal/interrupts.h>
+#include <hal/io_port.h>
+#include <core/cpu.h>
+#include <core/exception.h>
+#include <core/interrupt.h>
+#include <core/sched.h>
+#include <core/spinlock.h>
+#include <kernel/crash.h>
 
 #include "../cache.h"
 #include "../clock.h"
@@ -111,8 +112,8 @@ static bool x86_handle_user_exception(unsigned long long vector, const struct in
 struct idt_entry {
 	uint16_t offset_low;
 	uint16_t selector;
-	uint8_t  ist;
-	uint8_t  type_attributes;
+	uint8_t ist;
+	uint8_t type_attributes;
 	uint16_t offset_mid;
 	uint32_t offset_high;
 	uint32_t reserved;
@@ -129,50 +130,50 @@ struct gdtr {
 } __attribute__((packed));
 
 struct tss64 {
-	uint32_t                  reserved0;
-	uint64_t                  rsp0;
-	uint64_t                  rsp1;
-	uint64_t                  rsp2;
-	uint64_t                  reserved1;
-	uint64_t                  ist1;
-	uint64_t                  ist2;
-	uint64_t                  ist3;
-	uint64_t                  ist4;
-	uint64_t                  ist5;
-	uint64_t                  ist6;
-	uint64_t                  ist7;
-	uint64_t                  reserved2;
-	uint16_t                  reserved3;
-	uint16_t                  iomap_base;
+	uint32_t reserved0;
+	uint64_t rsp0;
+	uint64_t rsp1;
+	uint64_t rsp2;
+	uint64_t reserved1;
+	uint64_t ist1;
+	uint64_t ist2;
+	uint64_t ist3;
+	uint64_t ist4;
+	uint64_t ist5;
+	uint64_t ist6;
+	uint64_t ist7;
+	uint64_t reserved2;
+	uint16_t reserved3;
+	uint16_t iomap_base;
 	struct hal_io_port_bitmap io_bitmap;
 } __attribute__((packed));
 
 _Static_assert(offsetof(struct tss64, io_bitmap) <= UINT16_MAX, "x86_64 TSS I/O bitmap offset must fit");
 _Static_assert(sizeof(struct tss64) <= UINT16_MAX, "x86_64 TSS size must fit the I/O bitmap offset field");
 _Static_assert(sizeof(((struct tss64*)0)->io_bitmap) == HAL_IO_PORT_BITMAP_STORAGE_SIZE,
-               "x86_64 TSS I/O bitmap size mismatch");
+		"x86_64 TSS I/O bitmap size mismatch");
 
 extern void (*x86_64_interrupt_stub_table[])(void);
 
 static struct idt_entry idt[256];
-static uint64_t         gdt[64][8];
-static struct tss64     x86_tss[64];
+static uint64_t gdt[64][8];
+static struct tss64 x86_tss[64];
 static _Alignas(16) uint8_t x86_exception_stack[64][X86_EXCEPTION_STACK_SIZE];
-static bool                             local_ready[64];
-static uint16_t                         kernel_code_selector;
-static bool                             global_ready;
-static const struct cpu*                legacy_target;
+static bool local_ready[64];
+static uint16_t kernel_code_selector;
+static bool global_ready;
+static const struct cpu* legacy_target;
 static const struct hal_io_port_bitmap* io_port_selected_bitmap[64];
-static uint64_t                         io_port_selected_generation[64];
-static bool                             io_port_selection_valid[64];
+static uint64_t io_port_selected_generation[64];
+static bool io_port_selection_valid[64];
 static struct {
-	size_t   source_index;
+	size_t source_index;
 	uint64_t generation;
 } io_port_invalidation_request;
 
-static uint64_t        io_port_invalidation_ack[64];
+static uint64_t io_port_invalidation_ack[64];
 static struct spinlock io_port_invalidation_lock =
-	SPINLOCK_INIT_CLASS("io_port_invalidation", SPINLOCK_ORDER_NONE, SPINLOCK_FLAG_IRQSAVE);
+		SPINLOCK_INIT_CLASS("io_port_invalidation", SPINLOCK_ORDER_NONE, SPINLOCK_FLAG_IRQSAVE);
 
 static bool is_external_irq(unsigned long long vector) {
 	return vector >= X86_IRQ_BASE && vector < X86_LAPIC_SPURIOUS_VECTOR && vector != X86_SYSCALL_VECTOR;
@@ -221,29 +222,31 @@ static void interrupt_send_eoi(unsigned vector) {
 static void x86_load_segments_and_tss(size_t cpu_index) {
 	struct gdtr gdtr = {
 		.limit = (uint16_t)(sizeof(gdt[cpu_index]) - 1u),
-		.base  = (uint64_t)(uintptr_t)gdt[cpu_index],
+		.base = (uint64_t)(uintptr_t)gdt[cpu_index],
 	};
 	uint16_t tss_selector = X86_GDT_TSS_SELECTOR;
 
-	__asm__ volatile(
-		"lgdt %0\n\t"
-		"movw %1, %%ax\n\t"
-		"movw %%ax, %%ds\n\t"
-		"movw %%ax, %%es\n\t"
-		"movw %%ax, %%ss\n\t"
-		"pushq %2\n\t"
-		"leaq 1f(%%rip), %%rax\n\t"
-		"pushq %%rax\n\t"
-		"lretq\n\t"
-		"1:\n\t"
-		"ltr %3"
-		:
-		: "m"(gdtr), "i"(X86_GDT_KERNEL_DATA_SELECTOR), "i"((uint64_t)X86_GDT_KERNEL_CODE_SELECTOR), "r"(tss_selector)
-		: "rax", "memory");
+	__asm__ volatile("lgdt %0\n\t"
+					 "movw %1, %%ax\n\t"
+					 "movw %%ax, %%ds\n\t"
+					 "movw %%ax, %%es\n\t"
+					 "movw %%ax, %%ss\n\t"
+					 "pushq %2\n\t"
+					 "leaq 1f(%%rip), %%rax\n\t"
+					 "pushq %%rax\n\t"
+					 "lretq\n\t"
+					 "1:\n\t"
+					 "ltr %3"
+			:
+			: "m"(gdtr),
+			"i"(X86_GDT_KERNEL_DATA_SELECTOR),
+			"i"((uint64_t)X86_GDT_KERNEL_CODE_SELECTOR),
+			"r"(tss_selector)
+			: "rax", "memory");
 }
 
 static bool x86_setup_exception_stack(struct cpu* cpu) {
-	size_t   cpu_index;
+	size_t cpu_index;
 	uint64_t base;
 	uint64_t limit;
 
@@ -258,12 +261,12 @@ static bool x86_setup_exception_stack(struct cpu* cpu) {
 	gdt[cpu_index][5] = 0x00affa000000ffffull;
 
 	memset(&x86_tss[cpu_index], 0, sizeof(x86_tss[cpu_index]));
-	x86_tss[cpu_index].rsp0       = (uint64_t)cpu->kernel_entry_stack_top;
-	x86_tss[cpu_index].ist1       = (uint64_t)(uintptr_t)(x86_exception_stack[cpu_index] + X86_EXCEPTION_STACK_SIZE);
+	x86_tss[cpu_index].rsp0 = (uint64_t)cpu->kernel_entry_stack_top;
+	x86_tss[cpu_index].ist1 = (uint64_t)(uintptr_t)(x86_exception_stack[cpu_index] + X86_EXCEPTION_STACK_SIZE);
 	x86_tss[cpu_index].iomap_base = (uint16_t)sizeof(struct tss64);
 
-	base              = (uint64_t)(uintptr_t)&x86_tss[cpu_index];
-	limit             = (uint64_t)(sizeof(x86_tss[cpu_index]) - 1u);
+	base = (uint64_t)(uintptr_t)&x86_tss[cpu_index];
+	limit = (uint64_t)(sizeof(x86_tss[cpu_index]) - 1u);
 	gdt[cpu_index][6] = (limit & 0xffffu) | ((base & 0xffffull) << 16) | (((base >> 16) & 0xffull) << 32) |
 	                    ((uint64_t)0x89u << 40) | (((limit >> 16) & 0x0full) << 48) | (((base >> 24) & 0xffull) << 56);
 	gdt[cpu_index][7] = base >> 32;
@@ -295,12 +298,12 @@ bool hal_io_port_bitmap_select(const struct hal_io_port_bitmap* bitmap, uint64_t
 
 	if (cpu == NULL || cpu->index >= 64u || !local_ready[cpu->index]) return false;
 	if (io_port_selection_valid[cpu->index] && io_port_selected_bitmap[cpu->index] == bitmap &&
-	    io_port_selected_generation[cpu->index] == generation)
+			io_port_selected_generation[cpu->index] == generation)
 		return true;
 	if (!hal_io_port_bitmap_load(bitmap)) return false;
-	io_port_selected_bitmap[cpu->index]     = bitmap;
+	io_port_selected_bitmap[cpu->index] = bitmap;
 	io_port_selected_generation[cpu->index] = generation;
-	io_port_selection_valid[cpu->index]     = true;
+	io_port_selection_valid[cpu->index] = true;
 	return true;
 }
 
@@ -310,16 +313,16 @@ void hal_io_port_bitmap_context_switch(void) {
 
 void hal_io_port_bitmap_invalidate_all(void) {
 	const struct cpu_topology* topology;
-	struct cpu*                current;
-	struct irq_state           irq;
-	uint64_t                   generation;
-	uint64_t                   targets = 0u;
+	struct cpu* current;
+	struct irq_state irq;
+	uint64_t generation;
+	uint64_t targets = 0u;
 
-	irq      = spinlock_lock_irqsave(&io_port_invalidation_lock);
-	current  = cpu_current();
+	irq = spinlock_lock_irqsave(&io_port_invalidation_lock);
+	current = cpu_current();
 	topology = cpu_topology_get();
 	if (current == NULL || topology == NULL || topology->cpus == NULL || topology->cpu_count == 0u ||
-	    topology->cpu_count > 64u || current->index >= 64u)
+			topology->cpu_count > 64u || current->index >= 64u)
 		hcf();
 	if (!hal_io_port_bitmap_load(NULL)) hcf();
 	generation = __atomic_load_n(&io_port_invalidation_request.generation, __ATOMIC_RELAXED) + 1u;
@@ -331,7 +334,7 @@ void hal_io_port_bitmap_invalidate_all(void) {
 		struct cpu* target = &topology->cpus[index];
 		if (target == current || cpu_state_get(target) != CPU_STATE_ONLINE || !target->interrupts_ready) continue;
 		if (target->index >= 64u || target->arch_id > UINT32_MAX ||
-		    !apic_send_ipi((uint32_t)target->arch_id, X86_IO_PORT_INVALIDATE_VECTOR))
+				!apic_send_ipi((uint32_t)target->arch_id, X86_IO_PORT_INVALIDATE_VECTOR))
 			hcf();
 		targets |= 1ull << target->index;
 	}
@@ -346,13 +349,13 @@ static void idt_set_entry(unsigned vector, void (*handler)(void), uint8_t ist, u
 	uint64_t address = (uint64_t)(uintptr_t)handler;
 
 	idt[vector] = (struct idt_entry){
-		.offset_low      = (uint16_t)(address & 0xffffu),
-		.selector        = kernel_code_selector,
-		.ist             = ist,
+		.offset_low = (uint16_t)(address & 0xffffu),
+		.selector = kernel_code_selector,
+		.ist = ist,
 		.type_attributes = type_attributes,
-		.offset_mid      = (uint16_t)((address >> 16) & 0xffffu),
-		.offset_high     = (uint32_t)(address >> 32),
-		.reserved        = 0u,
+		.offset_mid = (uint16_t)((address >> 16) & 0xffffu),
+		.offset_high = (uint32_t)(address >> 32),
+		.reserved = 0u,
 	};
 }
 
@@ -365,13 +368,13 @@ bool hal_interrupts_init_global(void) {
 		idt_set_entry(vector, x86_64_interrupt_stub_table[vector], x86_ist_for_vector(vector), X86_IDT_INTERRUPT_GATE);
 	}
 	idt_set_entry(X86_SYSCALL_VECTOR,
-	              x86_64_interrupt_stub_table[X86_SYSCALL_VECTOR],
-	              X86_IDT_NO_IST,
-	              X86_IDT_USER_INTERRUPT_GATE);
+			x86_64_interrupt_stub_table[X86_SYSCALL_VECTOR],
+			X86_IDT_NO_IST,
+			X86_IDT_USER_INTERRUPT_GATE);
 
 	struct idtr idtr = {
 		.limit = (uint16_t)(sizeof(idt) - 1u),
-		.base  = (uint64_t)(uintptr_t)idt,
+		.base = (uint64_t)(uintptr_t)idt,
 	};
 
 	__asm__ volatile("lidt %0" : : "m"(idtr));
@@ -386,7 +389,7 @@ bool hal_interrupts_init_global(void) {
 bool hal_interrupts_init_local(struct cpu* cpu) {
 	struct idtr idtr = {
 		.limit = (uint16_t)(sizeof(idt) - 1u),
-		.base  = (uint64_t)(uintptr_t)idt,
+		.base = (uint64_t)(uintptr_t)idt,
 	};
 
 	if (!global_ready || cpu == NULL || cpu->index >= 64u) return false;
@@ -416,7 +419,7 @@ static bool x86_fixed_interrupt_valid(uint32_t id) {
 
 enum {
 	X86_DELIVERY_DOMAIN_VECTOR = 0u,
-	X86_MESSAGE_DOMAIN_MSI     = 0u,
+	X86_MESSAGE_DOMAIN_MSI = 0u,
 };
 
 static bool x86_event_in_range(struct hal_interrupt_event event, struct hal_interrupt_delivery_range range) {
@@ -430,12 +433,12 @@ size_t hal_interrupt_source_domain_count(void) {
 bool hal_interrupt_source_domain_at(size_t index, struct hal_interrupt_source_domain_info* out_domain) {
 	if (index != 0u || out_domain == NULL || !global_ready) return false;
 	*out_domain =
-		(struct hal_interrupt_source_domain_info){.domain = 0u, .first_source = 0u, .source_count = X86_IRQ_COUNT};
+			(struct hal_interrupt_source_domain_info){.domain = 0u, .first_source = 0u, .source_count = X86_IRQ_COUNT};
 	return true;
 }
 
-bool hal_interrupt_source_resolve(uint64_t controller_register_address, uint32_t local_source_id,
-                                  struct hal_interrupt_source* out_source) {
+bool hal_interrupt_source_resolve(
+		uint64_t controller_register_address, uint32_t local_source_id, struct hal_interrupt_source* out_source) {
 	if (!global_ready || out_source == NULL) return false;
 	if (controller_register_address == INTERRUPT_SOURCE_CONTROLLER_PLATFORM) {
 		if (!x86_fixed_interrupt_valid(local_source_id)) return false;
@@ -452,11 +455,10 @@ bool hal_interrupt_source_claimable(const struct hal_interrupt_source* source) {
 }
 
 bool hal_interrupt_source_configuration_supported(const struct hal_interrupt_source* source,
-                                                  enum hal_interrupt_trigger         trigger,
-                                                  enum hal_interrupt_polarity        polarity) {
+		enum hal_interrupt_trigger trigger, enum hal_interrupt_polarity polarity) {
 	struct hal_interrupt_source_info info;
 	if (source == NULL || trigger > HAL_INTERRUPT_TRIGGER_LEVEL || polarity > HAL_INTERRUPT_POLARITY_LOW ||
-	    !hal_interrupt_source_info(source, &info))
+			!hal_interrupt_source_info(source, &info))
 		return false;
 
 	/* Non-ISA I/O APIC sources have no firmware trigger/polarity metadata here. */
@@ -474,84 +476,88 @@ bool hal_interrupt_source_info(const struct hal_interrupt_source* source, struct
 	if (source->domain != 0u) {
 		if (!apic_ioapic_source_available(source)) return false;
 		*out_info = (struct hal_interrupt_source_info){
-			.delivery     = {.domain = X86_DELIVERY_DOMAIN_VECTOR, .base = 48u, .limit = X86_SYSCALL_VECTOR},
-			.target_kind  = HAL_INTERRUPT_TARGET_ROUTABLE,
+			.delivery = {.domain = X86_DELIVERY_DOMAIN_VECTOR, .base = 48u, .limit = X86_SYSCALL_VECTOR},
+			.target_kind = HAL_INTERRUPT_TARGET_ROUTABLE,
 			.fixed_target = NULL
-        };
+		};
 		return true;
 	}
 	if (!x86_fixed_interrupt_valid(source->number)) return false;
-	bool                                routable = apic_isa_irq_available(source->number);
+	bool routable = apic_isa_irq_available(source->number);
 	struct hal_interrupt_delivery_range delivery =
-		source->number == 0u ? (struct hal_interrupt_delivery_range){.domain = X86_DELIVERY_DOMAIN_VECTOR,
-		                                                             .base   = X86_IRQ_BASE,
-		                                                             .limit  = X86_IRQ_BASE + 1u}
-		: routable           ? (struct hal_interrupt_delivery_range){.domain = X86_DELIVERY_DOMAIN_VECTOR,
-		                                                             .base   = 48u,
-		                                                             .limit  = X86_SYSCALL_VECTOR}
-		                     : (struct hal_interrupt_delivery_range){.domain = X86_DELIVERY_DOMAIN_VECTOR,
-		                                                             .base   = X86_IRQ_BASE + source->number,
-		                                                             .limit  = X86_IRQ_BASE + source->number + 1u};
+			source->number == 0u
+	                ? (struct hal_interrupt_delivery_range){.domain = X86_DELIVERY_DOMAIN_VECTOR, .base = X86_IRQ_BASE, .limit = X86_IRQ_BASE + 1u}
+	        : routable
+	                ? (struct hal_interrupt_delivery_range){.domain = X86_DELIVERY_DOMAIN_VECTOR, .base = 48u, .limit = X86_SYSCALL_VECTOR}
+	                : (struct hal_interrupt_delivery_range){
+						  .domain = X86_DELIVERY_DOMAIN_VECTOR,
+						  .base = X86_IRQ_BASE + source->number,
+						  .limit = X86_IRQ_BASE + source->number + 1u
+					  };
 	const struct cpu* fixed_target = routable ? NULL : legacy_target;
 	if (!routable && fixed_target == NULL) return false;
-	*out_info = (struct hal_interrupt_source_info){.delivery     = delivery,
-	                                               .target_kind  = routable ? HAL_INTERRUPT_TARGET_ROUTABLE
-	                                                                        : HAL_INTERRUPT_TARGET_FIXED,
-	                                               .fixed_target = fixed_target};
+	*out_info = (struct hal_interrupt_source_info){
+		.delivery = delivery,
+		.target_kind = routable ? HAL_INTERRUPT_TARGET_ROUTABLE : HAL_INTERRUPT_TARGET_FIXED,
+		.fixed_target = fixed_target
+	};
 	return true;
 }
 
 bool hal_interrupt_source_target_supported(const struct hal_interrupt_source* source, const struct cpu* target) {
 	struct hal_interrupt_source_info info;
 	if (target == NULL || target->index >= 64u || !local_ready[target->index] ||
-	    !hal_interrupt_source_info(source, &info))
+			!hal_interrupt_source_info(source, &info))
 		return false;
 	if (info.target_kind == HAL_INTERRUPT_TARGET_FIXED) return target == info.fixed_target;
 	return target->arch_id <= 255u;
 }
 
 bool hal_interrupt_source_init(struct hal_interrupt_source_state* state, const struct hal_interrupt_source* source,
-                               const struct hal_interrupt_delivery* delivery) {
+		const struct hal_interrupt_delivery* delivery) {
 	struct hal_interrupt_source_info info;
-	uint32_t                         route;
-	uintptr_t                        registers;
-	bool                             edge_triggered = false;
+	uint32_t route;
+	uintptr_t registers;
+	bool edge_triggered = false;
 	if (state == NULL || state->initialized || delivery == NULL || !hal_interrupt_source_info(source, &info) ||
-	    !x86_event_in_range(delivery->event, info.delivery) ||
-	    !hal_interrupt_source_target_supported(source, delivery->target) ||
-	    delivery->trigger > HAL_INTERRUPT_TRIGGER_LEVEL || delivery->polarity > HAL_INTERRUPT_POLARITY_LOW)
+			!x86_event_in_range(delivery->event, info.delivery) ||
+			!hal_interrupt_source_target_supported(source, delivery->target) ||
+			delivery->trigger > HAL_INTERRUPT_TRIGGER_LEVEL || delivery->polarity > HAL_INTERRUPT_POLARITY_LOW)
 		return false;
 	bool routed = source->domain == 0u ? apic_route_isa_irq(source->number,
-	                                                        delivery->event.id,
-	                                                        (uint32_t)delivery->target->arch_id,
-	                                                        delivery->trigger,
-	                                                        delivery->polarity,
-	                                                        &route,
-	                                                        &registers,
-	                                                        &edge_triggered)
+												 delivery->event.id,
+												 (uint32_t)delivery->target->arch_id,
+												 delivery->trigger,
+												 delivery->polarity,
+												 &route,
+												 &registers,
+												 &edge_triggered)
 	                                   : apic_route_ioapic_source(source,
-	                                                              delivery->event.id,
-	                                                              (uint32_t)delivery->target->arch_id,
-	                                                              delivery->trigger,
-	                                                              delivery->polarity,
-	                                                              &route,
-	                                                              &registers,
-	                                                              &edge_triggered);
+												 delivery->event.id,
+												 (uint32_t)delivery->target->arch_id,
+												 delivery->trigger,
+												 delivery->polarity,
+												 &route,
+												 &registers,
+												 &edge_triggered);
 	if (info.target_kind == HAL_INTERRUPT_TARGET_ROUTABLE && routed) {
-		*state = (struct hal_interrupt_source_state){.source           = *source,
-		                                             .ioapic_route     = route,
-		                                             .ioapic_registers = registers,
-		                                             .initialized      = true,
-		                                             .masked           = true,
-		                                             .edge_triggered   = edge_triggered};
+		*state = (struct hal_interrupt_source_state){
+			.source = *source,
+			.ioapic_route = route,
+			.ioapic_registers = registers,
+			.initialized = true,
+			.masked = true,
+			.edge_triggered = edge_triggered
+		};
 		return true;
 	}
 	if (info.target_kind != HAL_INTERRUPT_TARGET_FIXED || delivery->target->role != CPU_ROLE_BSP ||
-	    delivery->trigger == HAL_INTERRUPT_TRIGGER_LEVEL || delivery->polarity == HAL_INTERRUPT_POLARITY_LOW)
+			delivery->trigger == HAL_INTERRUPT_TRIGGER_LEVEL || delivery->polarity == HAL_INTERRUPT_POLARITY_LOW)
 		return false;
 	pic_mask_irq(source->number);
 	*state = (struct hal_interrupt_source_state){
-		.source = *source, .uses_pic = true, .initialized = true, .masked = true, .edge_triggered = true};
+		.source = *source, .uses_pic = true, .initialized = true, .masked = true, .edge_triggered = true
+	};
 	return true;
 }
 
@@ -585,31 +591,31 @@ size_t hal_interrupt_message_range_count(void) {
 
 bool hal_interrupt_message_range_at(size_t index, struct hal_interrupt_message_range* out_range) {
 	if (index >= 2u || out_range == NULL || !global_ready) return false;
-	*out_range = index == 0u
-	                    ? (struct hal_interrupt_message_range){
-		                      .domain   = X86_MESSAGE_DOMAIN_MSI,
-		                      .delivery = {.domain = X86_DELIVERY_DOMAIN_VECTOR,
-		                                   .base   = 48u,
-		                                   .limit  = X86_SYSCALL_VECTOR}}
-		                    : (struct hal_interrupt_message_range){
-		                      .domain   = X86_MESSAGE_DOMAIN_MSI,
-		                      .delivery = {.domain = X86_DELIVERY_DOMAIN_VECTOR,
-		                                   .base   = X86_SYSCALL_VECTOR + 1u,
-		                                   .limit  = X86_IO_PORT_INVALIDATE_VECTOR}};
+	*out_range =
+			index == 0u
+	                ? (struct hal_interrupt_message_range){.domain = X86_MESSAGE_DOMAIN_MSI, .delivery = {.domain = X86_DELIVERY_DOMAIN_VECTOR, .base = 48u, .limit = X86_SYSCALL_VECTOR}}
+	                : (struct hal_interrupt_message_range){
+						  .domain = X86_MESSAGE_DOMAIN_MSI,
+						  .delivery = {
+							  .domain = X86_DELIVERY_DOMAIN_VECTOR,
+							  .base = X86_SYSCALL_VECTOR + 1u,
+							  .limit = X86_IO_PORT_INVALIDATE_VECTOR
+						  }
+					  };
 	return true;
 }
 
-bool hal_interrupt_message_resolve(uint64_t controller_register_address, uint32_t producer_id,
-                                   struct hal_interrupt_message_context* out_context) {
+bool hal_interrupt_message_resolve(
+		uint64_t controller_register_address, uint32_t producer_id, struct hal_interrupt_message_context* out_context) {
 	if (!global_ready || controller_register_address != UINT64_MAX || producer_id != UINT32_MAX ||
-	    out_context == NULL || hal_interrupt_message_range_count() == 0u)
+			out_context == NULL || hal_interrupt_message_range_count() == 0u)
 		return false;
 	*out_context = (struct hal_interrupt_message_context){.domain = X86_MESSAGE_DOMAIN_MSI};
 	return true;
 }
 
-bool hal_interrupt_message_target_supported(uint32_t domain, const struct hal_interrupt_message_source* source,
-                                            const struct cpu* target) {
+bool hal_interrupt_message_target_supported(
+		uint32_t domain, const struct hal_interrupt_message_source* source, const struct cpu* target) {
 	return global_ready && domain == X86_MESSAGE_DOMAIN_MSI && source == NULL && target != NULL &&
 	       target->index < 64u && target->arch_id <= 255u && local_ready[target->index];
 }
@@ -620,18 +626,18 @@ static bool x86_message_request_valid(const struct hal_interrupt_message_request
 	for (size_t index = 0u; index < hal_interrupt_message_range_count(); ++index) {
 		struct hal_interrupt_message_range range;
 		if (hal_interrupt_message_range_at(index, &range) && range.domain == request->domain &&
-		    x86_event_in_range(request->event, range.delivery))
+				x86_event_in_range(request->event, range.delivery))
 			return true;
 	}
 	return false;
 }
 
-bool hal_interrupt_message_init(struct hal_interrupt_message_state*         state,
-                                const struct hal_interrupt_message_request* request,
-                                struct hal_interrupt_message*               out_message) {
+bool hal_interrupt_message_init(struct hal_interrupt_message_state* state,
+		const struct hal_interrupt_message_request* request, struct hal_interrupt_message* out_message) {
 	if (state == NULL || state->initialized || out_message == NULL || !x86_message_request_valid(request)) return false;
-	*out_message       = (struct hal_interrupt_message){.address = 0xfee00000ull | (request->target->arch_id << 12),
-	                                                    .data    = request->event.id};
+	*out_message = (struct hal_interrupt_message){
+		.address = 0xfee00000ull | (request->target->arch_id << 12), .data = request->event.id
+	};
 	state->initialized = true;
 	return true;
 }
@@ -660,17 +666,17 @@ void x86_64_maybe_preempt_on_interrupt_exit(void) {
 
 void x86_64_handle_interrupt(struct interrupt_frame* frame) {
 	unsigned long long vector = frame->vector;
-	uint64_t           fault_addr;
-	bool               trap_context = !is_external_irq(vector);
+	uint64_t fault_addr;
+	bool trap_context = !is_external_irq(vector);
 
 	if (x86_64_handle_syscall(frame)) return;
 	/* LAPIC spurious interrupts require neither an EOI nor fatal exception handling. */
 	if (vector == X86_LAPIC_SPURIOUS_VECTOR) return;
 	if (trap_context) cpu_enter_exception();
 	if (vector == 2u) {
-		struct cpu* cpu      = cpu_current();
-		bool        internal = cpu != NULL && apic_sync_nmi_armed(cpu->index);
-		bool        handled  = x86_64_cache_handle_sync_nmi();
+		struct cpu* cpu = cpu_current();
+		bool internal = cpu != NULL && apic_sync_nmi_armed(cpu->index);
+		bool handled = x86_64_cache_handle_sync_nmi();
 		handled |= x86_64_paging_handle_tlb_nmi();
 		if (internal) {
 			apic_sync_nmi_disarm(cpu->index);
@@ -687,10 +693,10 @@ void x86_64_handle_interrupt(struct interrupt_frame* frame) {
 		return;
 	}
 	if (vector == X86_IO_PORT_INVALIDATE_VECTOR) {
-		struct cpu* cpu        = cpu_current();
-		uint64_t    generation = __atomic_load_n(&io_port_invalidation_request.generation, __ATOMIC_ACQUIRE);
+		struct cpu* cpu = cpu_current();
+		uint64_t generation = __atomic_load_n(&io_port_invalidation_request.generation, __ATOMIC_ACQUIRE);
 		if (cpu == NULL || cpu->index >= 64u || generation == 0u ||
-		    cpu->index == io_port_invalidation_request.source_index)
+				cpu->index == io_port_invalidation_request.source_index)
 			hcf();
 		if (!hal_io_port_bitmap_load(NULL)) hcf();
 		__atomic_store_n(&io_port_invalidation_ack[cpu->index], generation, __ATOMIC_RELEASE);
@@ -698,13 +704,13 @@ void x86_64_handle_interrupt(struct interrupt_frame* frame) {
 		return;
 	}
 	if (is_external_irq(vector)) {
-		bool pic_spurious =
-			vector >= X86_IRQ_BASE && vector < X86_IRQ_BASE + X86_IRQ_COUNT && pic_is_spurious_irq((unsigned)vector);
+		bool pic_spurious = vector >= X86_IRQ_BASE && vector < X86_IRQ_BASE + X86_IRQ_COUNT &&
+		                    pic_is_spurious_irq((unsigned)vector);
 		bool handled = false;
 		if (!pic_spurious) {
 			handled = clock_handle_irq((unsigned)vector);
 			handled |= interrupt_handle_event(
-				(struct hal_interrupt_event){.domain = X86_DELIVERY_DOMAIN_VECTOR, .id = (uint32_t)vector});
+					(struct hal_interrupt_event){.domain = X86_DELIVERY_DOMAIN_VECTOR, .id = (uint32_t)vector});
 		}
 		if (!handled && !pic_spurious && vector < X86_IRQ_BASE + X86_IRQ_COUNT) {
 			uint32_t id = (uint32_t)(vector - X86_IRQ_BASE);
@@ -718,9 +724,9 @@ void x86_64_handle_interrupt(struct interrupt_frame* frame) {
 	if (vector == 14u) {
 		if (trap_context) cpu_leave_exception();
 		if (core_handle_exception(x86_page_fault_kind(frame->error_code),
-		                          x86_page_fault_access(frame->error_code),
-		                          (uintptr_t)fault_addr,
-		                          x86_page_fault_from_user(frame->error_code))) {
+					x86_page_fault_access(frame->error_code),
+					(uintptr_t)fault_addr,
+					x86_page_fault_from_user(frame->error_code))) {
 			return;
 		}
 		if (trap_context) cpu_enter_exception();
@@ -732,40 +738,39 @@ void x86_64_handle_interrupt(struct interrupt_frame* frame) {
 		if (trap_context) cpu_enter_exception();
 	}
 
-	struct kernel_crash_record* record =
-		kernel_crash_begin(KERNEL_CRASH_ARCH_X86_64,
-		                   vector < 32u ? KERNEL_CRASH_CAUSE_EXCEPTION : KERNEL_CRASH_CAUSE_UNEXPECTED_INTERRUPT);
+	struct kernel_crash_record* record = kernel_crash_begin(KERNEL_CRASH_ARCH_X86_64,
+			vector < 32u ? KERNEL_CRASH_CAUSE_EXCEPTION : KERNEL_CRASH_CAUSE_UNEXPECTED_INTERRUPT);
 	struct kernel_crash_panic panic;
 
 	if (kernel_crash_take_panic(&panic)) {
-		record->cause        = KERNEL_CRASH_CAUSE_PANIC;
+		record->cause = KERNEL_CRASH_CAUSE_PANIC;
 		record->panic_reason = panic.reason;
 		record->panic_detail = panic.detail;
 	}
-	record->exception_code      = vector;
-	record->error_code          = frame->error_code;
-	record->fault_address       = fault_addr;
+	record->exception_code = vector;
+	record->error_code = frame->error_code;
+	record->fault_address = fault_addr;
 	record->instruction_pointer = frame->rip;
-	record->frame_pointer       = frame->rbp;
-	record->status              = frame->rflags;
-	record->stack_pointer       = (frame->cs & 3u) != 0u || x86_ist_for_vector((unsigned)vector) != X86_IDT_NO_IST
-	                                  ? ((const struct user_interrupt_frame*)frame)->rsp
-	                                  : (uintptr_t)frame + sizeof(*frame);
-	record->register_count      = 15u;
-	record->registers[0]        = frame->rax;
-	record->registers[1]        = frame->rbx;
-	record->registers[2]        = frame->rcx;
-	record->registers[3]        = frame->rdx;
-	record->registers[4]        = frame->rbp;
-	record->registers[5]        = frame->rdi;
-	record->registers[6]        = frame->rsi;
-	record->registers[7]        = frame->r8;
-	record->registers[8]        = frame->r9;
-	record->registers[9]        = frame->r10;
-	record->registers[10]       = frame->r11;
-	record->registers[11]       = frame->r12;
-	record->registers[12]       = frame->r13;
-	record->registers[13]       = frame->r14;
-	record->registers[14]       = frame->r15;
+	record->frame_pointer = frame->rbp;
+	record->status = frame->rflags;
+	record->stack_pointer = (frame->cs & 3u) != 0u || x86_ist_for_vector((unsigned)vector) != X86_IDT_NO_IST
+	                                ? ((const struct user_interrupt_frame*)frame)->rsp
+	                                : (uintptr_t)frame + sizeof(*frame);
+	record->register_count = 15u;
+	record->registers[0] = frame->rax;
+	record->registers[1] = frame->rbx;
+	record->registers[2] = frame->rcx;
+	record->registers[3] = frame->rdx;
+	record->registers[4] = frame->rbp;
+	record->registers[5] = frame->rdi;
+	record->registers[6] = frame->rsi;
+	record->registers[7] = frame->r8;
+	record->registers[8] = frame->r9;
+	record->registers[9] = frame->r10;
+	record->registers[10] = frame->r11;
+	record->registers[11] = frame->r12;
+	record->registers[12] = frame->r13;
+	record->registers[13] = frame->r14;
+	record->registers[14] = frame->r15;
 	kernel_crash_finish(record);
 }

@@ -1,16 +1,17 @@
-#include <core/cpu.h>
-#include <core/mutex.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <core/cpu.h>
+#include <core/mutex.h>
 
 #include "../selftest.h"
 #include "sync_helpers.h"
 
 struct kernel_selftest_sched_dispatch_state {
-	struct cpu*    cpu_at_entry;
+	struct cpu* cpu_at_entry;
 	struct thread* current_thread;
-	bool           ran;
+	bool ran;
 };
 
 static void kernel_selftest_sched_dispatch_worker(void* arg) {
@@ -18,27 +19,26 @@ static void kernel_selftest_sched_dispatch_worker(void* arg) {
 
 	if (state == NULL) return;
 
-	state->cpu_at_entry   = cpu_current();
+	state->cpu_at_entry = cpu_current();
 	state->current_thread = kthread_current();
-	state->ran            = true;
+	state->ran = true;
 }
 
 static void kernel_selftest_sched_yield_dispatches_runnable_thread(struct kernel_selftest_context* ctx) {
-	struct kthread*                             worker = NULL;
-	struct kernel_selftest_sched_dispatch_state state  = {0};
-	struct sched_stats                          stats_before;
-	struct sched_stats                          stats_after;
-	struct cpu*                                 cpu = cpu_current();
+	struct kthread* worker = NULL;
+	struct kernel_selftest_sched_dispatch_state state = {0};
+	struct sched_stats stats_before;
+	struct sched_stats stats_after;
+	struct cpu* cpu = cpu_current();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, cpu != NULL, "cpu_current returned NULL", cleanup);
 
 	sched_get_stats(&stats_before);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx,
-		kernel_selftest_thread_create(
-			&worker, "selftest/sched-dispatch", kernel_selftest_sched_dispatch_worker, &state),
-		"failed to create scheduler dispatch worker",
-		cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+			kernel_selftest_thread_create(
+					&worker, "selftest/sched-dispatch", kernel_selftest_sched_dispatch_worker, &state),
+			"failed to create scheduler dispatch worker",
+			cleanup);
 
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, sched_run_queue_depth(cpu) == 1u, cleanup);
 
@@ -53,7 +53,7 @@ static void kernel_selftest_sched_yield_dispatches_runnable_thread(struct kernel
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, sched_run_queue_depth(cpu) == 0u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, stats_after.yield_count >= stats_before.yield_count + 1u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(
-		ctx, stats_after.context_switch_count >= stats_before.context_switch_count + 2u, cleanup);
+			ctx, stats_after.context_switch_count >= stats_before.context_switch_count + 2u, cleanup);
 
 cleanup:
 	if (kernel_selftest_thread_is_live(worker)) kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
@@ -66,8 +66,8 @@ cleanup:
 struct kernel_selftest_sched_sleep_state {
 	uint64_t deadline_tick;
 	uint64_t wake_tick;
-	bool     entered;
-	bool     slept;
+	bool entered;
+	bool slept;
 };
 
 static void kernel_selftest_sched_sleep_worker(void* arg) {
@@ -76,22 +76,21 @@ static void kernel_selftest_sched_sleep_worker(void* arg) {
 	if (state == NULL) return;
 
 	state->deadline_tick = sched_tick_count() + KERNEL_SELFTEST_SLEEP_TICKS;
-	state->entered       = true;
-	state->slept         = sched_sleep_until_tick(state->deadline_tick);
-	state->wake_tick     = sched_tick_count();
+	state->entered = true;
+	state->slept = sched_sleep_until_tick(state->deadline_tick);
+	state->wake_tick = sched_tick_count();
 }
 
 static void kernel_selftest_sched_sleep_wakes_after_deadline(struct kernel_selftest_context* ctx) {
-	struct kthread*                          worker = NULL;
-	struct kernel_selftest_sched_sleep_state state  = {0};
-	struct cpu*                              cpu    = cpu_current();
+	struct kthread* worker = NULL;
+	struct kernel_selftest_sched_sleep_state state = {0};
+	struct cpu* cpu = cpu_current();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, cpu != NULL, "cpu_current returned NULL", cleanup);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx,
-		kernel_selftest_thread_create(&worker, "selftest/sched-sleep", kernel_selftest_sched_sleep_worker, &state),
-		"failed to create scheduler sleep worker",
-		cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+			kernel_selftest_thread_create(&worker, "selftest/sched-sleep", kernel_selftest_sched_sleep_worker, &state),
+			"failed to create scheduler sleep worker",
+			cleanup);
 
 	sched_yield();
 
@@ -128,8 +127,8 @@ cleanup:
 struct kernel_selftest_kthread_sleep_ms_state {
 	uint64_t start_tick;
 	uint64_t wake_tick;
-	bool     started;
-	bool     slept;
+	bool started;
+	bool slept;
 };
 
 static void kernel_selftest_kthread_sleep_ms_worker(void* arg) {
@@ -138,31 +137,30 @@ static void kernel_selftest_kthread_sleep_ms_worker(void* arg) {
 	if (state == NULL) return;
 
 	state->start_tick = sched_tick_count();
-	state->started    = true;
-	state->slept      = kthread_sleep_ms(KERNEL_SELFTEST_KTHREAD_SLEEP_MS);
-	state->wake_tick  = sched_tick_count();
+	state->started = true;
+	state->slept = kthread_sleep_ms(KERNEL_SELFTEST_KTHREAD_SLEEP_MS);
+	state->wake_tick = sched_tick_count();
 }
 
 static void kernel_selftest_sleep_ms_wakes_after_deadline(struct kernel_selftest_context* ctx) {
-	struct kthread*                               worker = NULL;
-	struct kernel_selftest_kthread_sleep_ms_state state  = {0};
-	struct kernel_selftest_clock_scope            clock  = {0};
-	struct cpu*                                   cpu    = cpu_current();
-	uint64_t                                      sleep_ticks;
-	uint64_t                                      deadline_tick = 0u;
+	struct kthread* worker = NULL;
+	struct kernel_selftest_kthread_sleep_ms_state state = {0};
+	struct kernel_selftest_clock_scope clock = {0};
+	struct cpu* cpu = cpu_current();
+	uint64_t sleep_ticks;
+	uint64_t deadline_tick = 0u;
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, cpu != NULL, "cpu_current returned NULL", cleanup);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, kernel_selftest_clock_scope_begin(&clock), "failed to start a temporary clock source", cleanup);
+			ctx, kernel_selftest_clock_scope_begin(&clock), "failed to start a temporary clock source", cleanup);
 
 	sleep_ticks = kernel_selftest_ms_to_ticks(KERNEL_SELFTEST_KTHREAD_SLEEP_MS, clock.hz);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, sleep_ticks != 0u, "ms to ticks conversion returned zero", cleanup);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx,
-		kernel_selftest_thread_create(
-			&worker, "selftest/kthread-sleep-ms", kernel_selftest_kthread_sleep_ms_worker, &state),
-		"failed to create kthread_sleep_ms worker",
-		cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+			kernel_selftest_thread_create(
+					&worker, "selftest/kthread-sleep-ms", kernel_selftest_kthread_sleep_ms_worker, &state),
+			"failed to create kthread_sleep_ms worker",
+			cleanup);
 
 	sched_yield();
 
@@ -200,18 +198,18 @@ cleanup:
 }
 
 struct kernel_selftest_mutex_state {
-	struct mutex   mutex;
+	struct mutex mutex;
 	struct thread* holder_thread;
 	struct thread* waiter_thread;
-	uint64_t       holder_deadline_tick;
-	uint64_t       holder_wake_tick;
-	bool           holder_acquired;
-	bool           holder_sleep_result;
-	bool           holder_unlocked;
-	bool           waiter_started;
-	bool           waiter_acquired;
-	bool           waiter_owned_mutex;
-	bool           waiter_unlocked;
+	uint64_t holder_deadline_tick;
+	uint64_t holder_wake_tick;
+	bool holder_acquired;
+	bool holder_sleep_result;
+	bool holder_unlocked;
+	bool waiter_started;
+	bool waiter_acquired;
+	bool waiter_owned_mutex;
+	bool waiter_unlocked;
 };
 
 static void kernel_selftest_mutex_holder_worker(void* arg) {
@@ -220,12 +218,12 @@ static void kernel_selftest_mutex_holder_worker(void* arg) {
 	if (state == NULL) return;
 
 	mutex_lock(&state->mutex);
-	state->holder_thread        = kthread_current();
-	state->holder_acquired      = mutex_is_owned_by_current(&state->mutex);
+	state->holder_thread = kthread_current();
+	state->holder_acquired = mutex_is_owned_by_current(&state->mutex);
 	state->holder_deadline_tick = sched_tick_count() + KERNEL_SELFTEST_MUTEX_HOLD_TICKS;
-	state->holder_sleep_result  = sched_sleep_until_tick(state->holder_deadline_tick);
-	state->holder_wake_tick     = sched_tick_count();
-	state->holder_unlocked      = mutex_unlock(&state->mutex);
+	state->holder_sleep_result = sched_sleep_until_tick(state->holder_deadline_tick);
+	state->holder_wake_tick = sched_tick_count();
+	state->holder_unlocked = mutex_unlock(&state->mutex);
 }
 
 static void kernel_selftest_mutex_waiter_worker(void* arg) {
@@ -233,30 +231,30 @@ static void kernel_selftest_mutex_waiter_worker(void* arg) {
 
 	if (state == NULL) return;
 
-	state->waiter_thread  = kthread_current();
+	state->waiter_thread = kthread_current();
 	state->waiter_started = true;
 	mutex_lock(&state->mutex);
-	state->waiter_acquired    = true;
+	state->waiter_acquired = true;
 	state->waiter_owned_mutex = mutex_is_owned_by_current(&state->mutex);
-	state->waiter_unlocked    = mutex_unlock(&state->mutex);
+	state->waiter_unlocked = mutex_unlock(&state->mutex);
 }
 
 struct kernel_selftest_mutex_timeout_state {
-	struct mutex   mutex;
+	struct mutex mutex;
 	struct thread* owner_thread;
 	struct thread* waiter_thread;
-	uint64_t       owner_hold_ticks;
-	uint64_t       owner_deadline_tick;
-	uint64_t       owner_wake_tick;
-	uint64_t       waiter_start_tick;
-	uint64_t       waiter_finish_tick;
-	bool           owner_locked;
-	bool           owner_sleep_result;
-	bool           owner_unlocked;
-	bool           waiter_started;
-	bool           waiter_result;
-	bool           waiter_finished;
-	bool           waiter_owned_mutex;
+	uint64_t owner_hold_ticks;
+	uint64_t owner_deadline_tick;
+	uint64_t owner_wake_tick;
+	uint64_t waiter_start_tick;
+	uint64_t waiter_finish_tick;
+	bool owner_locked;
+	bool owner_sleep_result;
+	bool owner_unlocked;
+	bool waiter_started;
+	bool waiter_result;
+	bool waiter_finished;
+	bool waiter_owned_mutex;
 };
 
 static void kernel_selftest_mutex_timeout_owner_worker(void* arg) {
@@ -265,12 +263,12 @@ static void kernel_selftest_mutex_timeout_owner_worker(void* arg) {
 	if (state == NULL) return;
 
 	mutex_lock(&state->mutex);
-	state->owner_thread        = kthread_current();
-	state->owner_locked        = mutex_is_owned_by_current(&state->mutex);
+	state->owner_thread = kthread_current();
+	state->owner_locked = mutex_is_owned_by_current(&state->mutex);
 	state->owner_deadline_tick = sched_tick_count() + state->owner_hold_ticks;
-	state->owner_sleep_result  = sched_sleep_until_tick(state->owner_deadline_tick);
-	state->owner_wake_tick     = sched_tick_count();
-	state->owner_unlocked      = mutex_unlock(&state->mutex);
+	state->owner_sleep_result = sched_sleep_until_tick(state->owner_deadline_tick);
+	state->owner_wake_tick = sched_tick_count();
+	state->owner_unlocked = mutex_unlock(&state->mutex);
 }
 
 static void kernel_selftest_mutex_timeout_waiter_worker(void* arg) {
@@ -278,43 +276,41 @@ static void kernel_selftest_mutex_timeout_waiter_worker(void* arg) {
 
 	if (state == NULL) return;
 
-	state->waiter_thread      = kthread_current();
-	state->waiter_started     = true;
-	state->waiter_start_tick  = sched_tick_count();
-	state->waiter_result      = mutex_timed_lock(&state->mutex, KERNEL_SELFTEST_MUTEX_TIMEOUT_MS);
+	state->waiter_thread = kthread_current();
+	state->waiter_started = true;
+	state->waiter_start_tick = sched_tick_count();
+	state->waiter_result = mutex_timed_lock(&state->mutex, KERNEL_SELFTEST_MUTEX_TIMEOUT_MS);
 	state->waiter_finish_tick = sched_tick_count();
 	state->waiter_owned_mutex = mutex_is_owned_by_current(&state->mutex);
-	state->waiter_finished    = true;
+	state->waiter_finished = true;
 	if (state->waiter_result) (void)mutex_unlock(&state->mutex);
 }
 
 static void kernel_selftest_mutex_timed_lock_times_out_when_owner_never_unlocks(struct kernel_selftest_context* ctx) {
-	struct kthread*                            owner  = NULL;
-	struct kthread*                            waiter = NULL;
-	struct kernel_selftest_mutex_timeout_state state  = {0};
-	struct kernel_selftest_clock_scope         clock  = {0};
-	uint64_t                                   timeout_ticks;
-	uint64_t                                   timeout_deadline = 0u;
+	struct kthread* owner = NULL;
+	struct kthread* waiter = NULL;
+	struct kernel_selftest_mutex_timeout_state state = {0};
+	struct kernel_selftest_clock_scope clock = {0};
+	uint64_t timeout_ticks;
+	uint64_t timeout_deadline = 0u;
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, kernel_selftest_clock_scope_begin(&clock), "failed to start a temporary clock source", cleanup);
+			ctx, kernel_selftest_clock_scope_begin(&clock), "failed to start a temporary clock source", cleanup);
 	timeout_ticks = kernel_selftest_ms_to_ticks(KERNEL_SELFTEST_MUTEX_TIMEOUT_MS, clock.hz);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, timeout_ticks != 0u, "timeout conversion returned zero ticks", cleanup);
 	state.owner_hold_ticks = timeout_ticks + KERNEL_SELFTEST_MUTEX_HOLD_TICKS;
 
 	mutex_init(&state.mutex);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx,
-		kernel_selftest_thread_create(
-			&owner, "selftest/mutex-timeout-owner", kernel_selftest_mutex_timeout_owner_worker, &state),
-		"failed to create mutex timeout owner thread",
-		cleanup);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx,
-		kernel_selftest_thread_create(
-			&waiter, "selftest/mutex-timeout-waiter", kernel_selftest_mutex_timeout_waiter_worker, &state),
-		"failed to create mutex timeout waiter thread",
-		cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+			kernel_selftest_thread_create(
+					&owner, "selftest/mutex-timeout-owner", kernel_selftest_mutex_timeout_owner_worker, &state),
+			"failed to create mutex timeout owner thread",
+			cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+			kernel_selftest_thread_create(
+					&waiter, "selftest/mutex-timeout-waiter", kernel_selftest_mutex_timeout_waiter_worker, &state),
+			"failed to create mutex timeout waiter thread",
+			cleanup);
 
 	sched_yield();
 
@@ -362,23 +358,23 @@ struct kernel_selftest_mutex_single_wake_state;
 
 struct kernel_selftest_mutex_single_wake_waiter_arg {
 	struct kernel_selftest_mutex_single_wake_state* state;
-	size_t                                          index;
+	size_t index;
 };
 
 struct kernel_selftest_mutex_single_wake_state {
-	struct mutex                                        mutex;
-	struct thread*                                      holder_thread;
-	struct thread*                                      waiter_threads[2];
-	uint64_t                                            holder_deadline_tick;
-	uint64_t                                            waiter_deadline_ticks[2];
-	bool                                                holder_locked;
-	bool                                                holder_sleep_result;
-	bool                                                holder_unlocked;
-	bool                                                waiter_started[2];
-	bool                                                waiter_acquired[2];
-	bool                                                waiter_owned_mutex[2];
-	bool                                                waiter_sleep_result[2];
-	bool                                                waiter_unlocked[2];
+	struct mutex mutex;
+	struct thread* holder_thread;
+	struct thread* waiter_threads[2];
+	uint64_t holder_deadline_tick;
+	uint64_t waiter_deadline_ticks[2];
+	bool holder_locked;
+	bool holder_sleep_result;
+	bool holder_unlocked;
+	bool waiter_started[2];
+	bool waiter_acquired[2];
+	bool waiter_owned_mutex[2];
+	bool waiter_sleep_result[2];
+	bool waiter_unlocked[2];
 	struct kernel_selftest_mutex_single_wake_waiter_arg waiter_args[2];
 };
 
@@ -388,17 +384,17 @@ static void kernel_selftest_mutex_single_wake_holder_worker(void* arg) {
 	if (state == NULL) return;
 
 	mutex_lock(&state->mutex);
-	state->holder_thread        = kthread_current();
-	state->holder_locked        = mutex_is_owned_by_current(&state->mutex);
+	state->holder_thread = kthread_current();
+	state->holder_locked = mutex_is_owned_by_current(&state->mutex);
 	state->holder_deadline_tick = sched_tick_count() + KERNEL_SELFTEST_MUTEX_HOLD_TICKS;
-	state->holder_sleep_result  = sched_sleep_until_tick(state->holder_deadline_tick);
-	state->holder_unlocked      = mutex_unlock(&state->mutex);
+	state->holder_sleep_result = sched_sleep_until_tick(state->holder_deadline_tick);
+	state->holder_unlocked = mutex_unlock(&state->mutex);
 }
 
 static void kernel_selftest_mutex_single_wake_waiter_worker(void* arg) {
 	struct kernel_selftest_mutex_single_wake_waiter_arg* waiter_arg = arg;
-	struct kernel_selftest_mutex_single_wake_state*      state;
-	size_t                                               index;
+	struct kernel_selftest_mutex_single_wake_state* state;
+	size_t index;
 
 	if (waiter_arg == NULL || waiter_arg->state == NULL || waiter_arg->index >= 2u) return;
 
@@ -408,19 +404,19 @@ static void kernel_selftest_mutex_single_wake_waiter_worker(void* arg) {
 	state->waiter_threads[index] = kthread_current();
 	state->waiter_started[index] = true;
 	mutex_lock(&state->mutex);
-	state->waiter_acquired[index]       = true;
-	state->waiter_owned_mutex[index]    = mutex_is_owned_by_current(&state->mutex);
+	state->waiter_acquired[index] = true;
+	state->waiter_owned_mutex[index] = mutex_is_owned_by_current(&state->mutex);
 	state->waiter_deadline_ticks[index] = sched_tick_count() + KERNEL_SELFTEST_MUTEX_HOLD_TICKS;
-	state->waiter_sleep_result[index]   = sched_sleep_until_tick(state->waiter_deadline_ticks[index]);
-	state->waiter_unlocked[index]       = mutex_unlock(&state->mutex);
+	state->waiter_sleep_result[index] = sched_sleep_until_tick(state->waiter_deadline_ticks[index]);
+	state->waiter_unlocked[index] = mutex_unlock(&state->mutex);
 }
 
 static void kernel_selftest_mutex_unlock_wakes_single_waiter(struct kernel_selftest_context* ctx) {
-	struct kthread*                                holder        = NULL;
-	struct kthread*                                waiters[2]    = {0};
-	struct kernel_selftest_mutex_single_wake_state state         = {0};
-	size_t                                         woken_index   = 0u;
-	size_t                                         blocked_index = 0u;
+	struct kthread* holder = NULL;
+	struct kthread* waiters[2] = {0};
+	struct kernel_selftest_mutex_single_wake_state state = {0};
+	size_t woken_index = 0u;
+	size_t blocked_index = 0u;
 
 	mutex_init(&state.mutex);
 	for (size_t i = 0; i < 2u; i++) {
@@ -430,21 +426,19 @@ static void kernel_selftest_mutex_unlock_wakes_single_waiter(struct kernel_selft
 		};
 	}
 
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx,
-		kernel_selftest_thread_create(
-			&holder, "selftest/mutex-single-holder", kernel_selftest_mutex_single_wake_holder_worker, &state),
-		"failed to create mutex single-wake holder thread",
-		cleanup);
-	for (size_t i = 0; i < 2u; i++) {
-		KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-			ctx,
-			kernel_selftest_thread_create(&waiters[i],
-			                              i == 0u ? "selftest/mutex-single-waiter-b" : "selftest/mutex-single-waiter-c",
-			                              kernel_selftest_mutex_single_wake_waiter_worker,
-			                              &state.waiter_args[i]),
-			"failed to create mutex single-wake waiter thread",
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+			kernel_selftest_thread_create(
+					&holder, "selftest/mutex-single-holder", kernel_selftest_mutex_single_wake_holder_worker, &state),
+			"failed to create mutex single-wake holder thread",
 			cleanup);
+	for (size_t i = 0; i < 2u; i++) {
+		KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+				kernel_selftest_thread_create(&waiters[i],
+						i == 0u ? "selftest/mutex-single-waiter-b" : "selftest/mutex-single-waiter-c",
+						kernel_selftest_mutex_single_wake_waiter_worker,
+						&state.waiter_args[i]),
+				"failed to create mutex single-wake waiter thread",
+				cleanup);
 	}
 
 	sched_yield();
@@ -474,7 +468,7 @@ static void kernel_selftest_mutex_unlock_wakes_single_waiter(struct kernel_selft
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_count_true(state.waiter_owned_mutex, 2u) == 1u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, mutex_waiter_count(&state.mutex) == 1u, cleanup);
 
-	woken_index   = state.waiter_acquired[0] ? 0u : 1u;
+	woken_index = state.waiter_acquired[0] ? 0u : 1u;
 	blocked_index = woken_index == 0u ? 1u : 0u;
 
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_acquired[woken_index], cleanup);
@@ -507,9 +501,9 @@ static void kernel_selftest_mutex_unlock_wakes_single_waiter(struct kernel_selft
 
 cleanup:
 	for (size_t attempt = 0; attempt < KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS &&
-	                         (kernel_selftest_thread_is_live(holder) || kernel_selftest_thread_is_live(waiters[0]) ||
-	                          kernel_selftest_thread_is_live(waiters[1]));
-	     attempt++) {
+							 (kernel_selftest_thread_is_live(holder) || kernel_selftest_thread_is_live(waiters[0]) ||
+									 kernel_selftest_thread_is_live(waiters[1]));
+			attempt++) {
 		kernel_selftest_advance_ticks_until(state.holder_deadline_tick);
 		for (size_t i = 0; i < 2u; i++) {
 			kernel_selftest_advance_ticks_until(state.waiter_deadline_ticks[i]);
@@ -529,24 +523,24 @@ cleanup:
 }
 
 static void kernel_selftest_mutex_contention_blocks_and_wakes_waiter(struct kernel_selftest_context* ctx) {
-	struct kthread*                    holder = NULL;
-	struct kthread*                    waiter = NULL;
-	struct kernel_selftest_mutex_state state  = {0};
-	struct cpu*                        cpu    = cpu_current();
+	struct kthread* holder = NULL;
+	struct kthread* waiter = NULL;
+	struct kernel_selftest_mutex_state state = {0};
+	struct cpu* cpu = cpu_current();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, cpu != NULL, "cpu_current returned NULL", cleanup);
 
 	mutex_init(&state.mutex);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx,
-		kernel_selftest_thread_create(&holder, "selftest/mutex-holder", kernel_selftest_mutex_holder_worker, &state),
-		"failed to create mutex holder thread",
-		cleanup);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx,
-		kernel_selftest_thread_create(&waiter, "selftest/mutex-waiter", kernel_selftest_mutex_waiter_worker, &state),
-		"failed to create mutex waiter thread",
-		cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+			kernel_selftest_thread_create(
+					&holder, "selftest/mutex-holder", kernel_selftest_mutex_holder_worker, &state),
+			"failed to create mutex holder thread",
+			cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+			kernel_selftest_thread_create(
+					&waiter, "selftest/mutex-waiter", kernel_selftest_mutex_waiter_worker, &state),
+			"failed to create mutex waiter thread",
+			cleanup);
 
 	sched_yield();
 
@@ -595,33 +589,33 @@ cleanup:
 
 static const struct kernel_selftest_case kernel_sched_mutex_selftests[] = {
 	{
-	 .name = "yield_dispatches_runnable_thread",
-	 .run  = kernel_selftest_sched_yield_dispatches_runnable_thread,
-	 },
+		.name = "yield_dispatches_runnable_thread",
+		.run = kernel_selftest_sched_yield_dispatches_runnable_thread,
+	},
 	{
-	 .name = "sleep_wakes_after_deadline",
-	 .run  = kernel_selftest_sched_sleep_wakes_after_deadline,
-	 },
+		.name = "sleep_wakes_after_deadline",
+		.run = kernel_selftest_sched_sleep_wakes_after_deadline,
+	},
 	{
-	 .name = "mutex_contention_blocks_and_wakes_waiter",
-	 .run  = kernel_selftest_mutex_contention_blocks_and_wakes_waiter,
-	 },
+		.name = "mutex_contention_blocks_and_wakes_waiter",
+		.run = kernel_selftest_mutex_contention_blocks_and_wakes_waiter,
+	},
 	{
-	 .name = "mutex_timed_lock_times_out_when_owner_never_unlocks",
-	 .run  = kernel_selftest_mutex_timed_lock_times_out_when_owner_never_unlocks,
-	 },
+		.name = "mutex_timed_lock_times_out_when_owner_never_unlocks",
+		.run = kernel_selftest_mutex_timed_lock_times_out_when_owner_never_unlocks,
+	},
 	{
-	 .name = "mutex_unlock_wakes_single_waiter",
-	 .run  = kernel_selftest_mutex_unlock_wakes_single_waiter,
-	 },
+		.name = "mutex_unlock_wakes_single_waiter",
+		.run = kernel_selftest_mutex_unlock_wakes_single_waiter,
+	},
 	{
-	 .name = "sleep_ms_wakes_after_deadline",
-	 .run  = kernel_selftest_sleep_ms_wakes_after_deadline,
-	 },
+		.name = "sleep_ms_wakes_after_deadline",
+		.run = kernel_selftest_sleep_ms_wakes_after_deadline,
+	},
 };
 
 const struct kernel_selftest_suite kernel_sched_mutex_selftest_suite = {
-	.name       = "sched_mutex",
-	.cases      = kernel_sched_mutex_selftests,
+	.name = "sched_mutex",
+	.cases = kernel_sched_mutex_selftests,
 	.case_count = sizeof(kernel_sched_mutex_selftests) / sizeof(kernel_sched_mutex_selftests[0]),
 };

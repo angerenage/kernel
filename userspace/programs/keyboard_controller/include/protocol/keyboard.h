@@ -11,9 +11,11 @@
  * Current specification version: 1.0-beta
  */
 
-#include <base/cap.h>
-#include <protocol/input.h>
 #include <stdint.h>
+
+#include <base/cap.h>
+
+#include <protocol/input.h>
 
 /* Registry identity of the single system-wide keyboard service. */
 #define KEYBOARD_NAMESPACE "input"
@@ -26,22 +28,22 @@
 
 /* Physical modifier keys held on one keyboard. */
 enum keyboard_modifier {
-	KEYBOARD_MODIFIER_NONE          = 0u,
-	KEYBOARD_MODIFIER_LEFT_SHIFT    = 1u << 0u,
-	KEYBOARD_MODIFIER_RIGHT_SHIFT   = 1u << 1u,
-	KEYBOARD_MODIFIER_LEFT_CONTROL  = 1u << 2u,
+	KEYBOARD_MODIFIER_NONE = 0u,
+	KEYBOARD_MODIFIER_LEFT_SHIFT = 1u << 0u,
+	KEYBOARD_MODIFIER_RIGHT_SHIFT = 1u << 1u,
+	KEYBOARD_MODIFIER_LEFT_CONTROL = 1u << 2u,
 	KEYBOARD_MODIFIER_RIGHT_CONTROL = 1u << 3u,
-	KEYBOARD_MODIFIER_LEFT_ALT      = 1u << 4u,
-	KEYBOARD_MODIFIER_RIGHT_ALT     = 1u << 5u,
-	KEYBOARD_MODIFIER_LEFT_META     = 1u << 6u,
-	KEYBOARD_MODIFIER_RIGHT_META    = 1u << 7u,
+	KEYBOARD_MODIFIER_LEFT_ALT = 1u << 4u,
+	KEYBOARD_MODIFIER_RIGHT_ALT = 1u << 5u,
+	KEYBOARD_MODIFIER_LEFT_META = 1u << 6u,
+	KEYBOARD_MODIFIER_RIGHT_META = 1u << 7u,
 };
 
 /* Logical lock state maintained independently for one keyboard. */
 enum keyboard_lock {
-	KEYBOARD_LOCK_NONE        = 0u,
-	KEYBOARD_LOCK_CAPS_LOCK   = 1u << 0u,
-	KEYBOARD_LOCK_NUM_LOCK    = 1u << 1u,
+	KEYBOARD_LOCK_NONE = 0u,
+	KEYBOARD_LOCK_CAPS_LOCK = 1u << 0u,
+	KEYBOARD_LOCK_NUM_LOCK = 1u << 1u,
 	KEYBOARD_LOCK_SCROLL_LOCK = 1u << 2u,
 };
 
@@ -69,23 +71,23 @@ enum keyboard_key_action {
 
 /* Flags attached to one retained keyboard record. */
 enum keyboard_event_flags {
-	KEYBOARD_EVENT_FLAG_NONE      = 0u,
+	KEYBOARD_EVENT_FLAG_NONE = 0u,
 	KEYBOARD_EVENT_FLAG_FRAME_END = 1u << 0u,
 };
 
 /* One keyboard lifecycle record or physical key transition. */
 struct keyboard_event {
-	uint64_t                 sequence;
-	uint64_t                 frame;
-	uint64_t                 timestamp_ns;
-	uint64_t                 keyboard_id;
+	uint64_t sequence;
+	uint64_t frame;
+	uint64_t timestamp_ns;
+	uint64_t keyboard_id;
 	enum keyboard_event_type type;
 	enum keyboard_key_action action;
-	enum input_key_code      key;
-	uint32_t                 modifiers;
-	uint32_t                 locks;
-	uint32_t                 flags;
-	uint32_t                 reserved;
+	enum input_key_code key;
+	uint32_t modifiers;
+	uint32_t locks;
+	uint32_t flags;
+	uint32_t reserved;
 };
 
 /* Operations accepted by the system keyboard capability. */
@@ -122,59 +124,59 @@ struct keyboard_get_info_response {
 /* Request one keyboard page from an exact topology generation. */
 struct keyboard_enumerate_request {
 	struct keyboard_request_header header;
-	uint32_t                       reserved;
-	uint64_t                       topology_generation;
-	uint64_t                       offset;
-	uint64_t                       count;
+	uint32_t reserved;
+	uint64_t topology_generation;
+	uint64_t offset;
+	uint64_t count;
 };
 
 /* Keyboard entries follow this successful response header. */
 struct keyboard_enumerate_response {
-	uint64_t             topology_generation;
-	uint64_t             total;
-	uint64_t             returned;
+	uint64_t topology_generation;
+	uint64_t total;
+	uint64_t returned;
 	struct keyboard_info keyboards[];
 };
 
 /* Request one atomic keyboard-state snapshot. */
 struct keyboard_read_state_request {
 	struct keyboard_request_header header;
-	uint32_t                       reserved;
-	uint64_t                       keyboard_id;
+	uint32_t reserved;
+	uint64_t keyboard_id;
 };
 
 /* Sorted physical key codes follow this successful response header. */
 struct keyboard_read_state_response {
-	uint64_t            sequence;
-	uint64_t            keyboard_id;
-	uint32_t            modifiers;
-	uint32_t            locks;
-	uint32_t            pressed_count;
-	uint32_t            reserved;
+	uint64_t sequence;
+	uint64_t keyboard_id;
+	uint32_t modifiers;
+	uint32_t locks;
+	uint32_t pressed_count;
+	uint32_t reserved;
 	enum input_key_code pressed_keys[];
 };
 
 /* Request retained keyboard records newer than after_sequence. */
 struct keyboard_read_events_request {
 	struct keyboard_request_header header;
-	uint32_t                       reserved;
-	uint64_t                       after_sequence;
-	uint64_t                       count;
+	uint32_t reserved;
+	uint64_t after_sequence;
+	uint64_t count;
 };
 
 /* Conditions reported with a successful keyboard-event read. */
 enum keyboard_read_event_flags {
 	KEYBOARD_READ_EVENT_FLAG_NONE = 0u,
-	KEYBOARD_READ_EVENT_FLAG_GAP  = 1u << 0u,
+	KEYBOARD_READ_EVENT_FLAG_GAP = 1u << 0u,
 };
 
 /* Retained records follow this successful response header. */
 struct keyboard_read_events_response {
-	uint64_t              oldest_sequence;
-	uint64_t              newest_sequence;
-	uint64_t              returned;
-	uint32_t              flags;
-	uint32_t              reserved;
+	uint64_t oldest_sequence;
+	uint64_t newest_sequence;
+	uint64_t returned;
+	uint32_t flags;
+	uint32_t reserved;
 	struct keyboard_event events[];
 };
 

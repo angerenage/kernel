@@ -1,15 +1,17 @@
-#include <base/cap.h>
-#include <base/device_tree.h>
-#include <base/syscall.h>
-#include <runtime/diagnostic.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <base/cap.h>
+#include <base/device_tree.h>
+#include <base/syscall.h>
+
 #include <system/capability.h>
 #include <system/device_tree.h>
+#include <runtime/diagnostic.h>
 
 static syscall_status_t device_tree_fixed_call(cap_id_t cap, const void* request, size_t request_size, void* response,
-                                               size_t response_size, uint64_t operation) {
+		size_t response_size, uint64_t operation) {
 	(void)operation;
 	if (cap == CAP_ID_INVALID || request == NULL || (response_size != 0u && response == NULL))
 		return SYSCALL_STATUS_BAD_ARGUMENT;
@@ -20,13 +22,13 @@ static syscall_status_t device_tree_fixed_call(cap_id_t cap, const void* request
 }
 
 syscall_status_t device_tree_root(cap_id_t provider_cap, device_tree_node_id_t* out_root) {
-	const struct device_tree_root_request request  = {.header = {.op = DEVICE_TREE_OP_ROOT}};
-	struct device_tree_root_response      response = {.root = DEVICE_TREE_NODE_INVALID};
+	const struct device_tree_root_request request = {.header = {.op = DEVICE_TREE_OP_ROOT}};
+	struct device_tree_root_response response = {.root = DEVICE_TREE_NODE_INVALID};
 
 	if (out_root == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
-	*out_root               = DEVICE_TREE_NODE_INVALID;
+	*out_root = DEVICE_TREE_NODE_INVALID;
 	syscall_status_t status = device_tree_fixed_call(
-		provider_cap, &request, sizeof(request), &response, sizeof(response), DEVICE_TREE_OP_ROOT);
+			provider_cap, &request, sizeof(request), &response, sizeof(response), DEVICE_TREE_OP_ROOT);
 	if (status == SYSCALL_STATUS_OK) {
 		if (response.root == DEVICE_TREE_NODE_INVALID || response.root == 0u) return SYSCALL_STATUS_FAILED;
 		*out_root = response.root;
@@ -34,44 +36,44 @@ syscall_status_t device_tree_root(cap_id_t provider_cap, device_tree_node_id_t* 
 	return status;
 }
 
-syscall_status_t device_tree_node_info(cap_id_t provider_cap, device_tree_node_id_t node,
-                                       struct device_tree_node_info_response* out_info) {
+syscall_status_t device_tree_node_info(
+		cap_id_t provider_cap, device_tree_node_id_t node, struct device_tree_node_info_response* out_info) {
 	const struct device_tree_node_info_request request = {
-		.header = {.op = DEVICE_TREE_OP_NODE_INFO}, .reserved = 0u, .node = node};
+		.header = {.op = DEVICE_TREE_OP_NODE_INFO}, .reserved = 0u, .node = node
+	};
 
 	if (out_info == NULL || node == DEVICE_TREE_NODE_INVALID || node == 0u) return SYSCALL_STATUS_BAD_ARGUMENT;
 	return device_tree_fixed_call(
-		provider_cap, &request, sizeof(request), out_info, sizeof(*out_info), DEVICE_TREE_OP_NODE_INFO);
+			provider_cap, &request, sizeof(request), out_info, sizeof(*out_info), DEVICE_TREE_OP_NODE_INFO);
 }
 
 syscall_status_t device_tree_property_info(cap_id_t provider_cap, device_tree_node_id_t node, uint64_t property_index,
-                                           struct device_tree_property_info_response* out_info) {
+		struct device_tree_property_info_response* out_info) {
 	const struct device_tree_property_info_request request = {
-		.header         = {.op = DEVICE_TREE_OP_PROPERTY_INFO},
-		.reserved       = 0u,
-		.node           = node,
+		.header = {.op = DEVICE_TREE_OP_PROPERTY_INFO},
+		.reserved = 0u,
+		.node = node,
 		.property_index = property_index,
 	};
 
 	if (out_info == NULL || node == DEVICE_TREE_NODE_INVALID || node == 0u) return SYSCALL_STATUS_BAD_ARGUMENT;
 	return device_tree_fixed_call(
-		provider_cap, &request, sizeof(request), out_info, sizeof(*out_info), DEVICE_TREE_OP_PROPERTY_INFO);
+			provider_cap, &request, sizeof(request), out_info, sizeof(*out_info), DEVICE_TREE_OP_PROPERTY_INFO);
 }
 
 static syscall_status_t device_tree_read(cap_id_t provider_cap, enum device_tree_read_kind kind,
-                                         device_tree_node_id_t node, uint64_t property_index, uint64_t offset,
-                                         void* buffer, size_t size) {
+		device_tree_node_id_t node, uint64_t property_index, uint64_t offset, void* buffer, size_t size) {
 	const struct device_tree_read_request request = {
-		.header         = {.op = DEVICE_TREE_OP_READ},
-		.kind           = kind,
-		.node           = node,
+		.header = {.op = DEVICE_TREE_OP_READ},
+		.kind = kind,
+		.node = node,
 		.property_index = property_index,
-		.offset         = offset,
-		.size           = size,
+		.offset = offset,
+		.size = size,
 	};
 
 	if (provider_cap == CAP_ID_INVALID || node == DEVICE_TREE_NODE_INVALID || node == 0u ||
-	    (size != 0u && buffer == NULL) || size > CAP_MAX_RESPONSE_SIZE)
+			(size != 0u && buffer == NULL) || size > CAP_MAX_RESPONSE_SIZE)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	syscall_result_t result = cap_call_syscall(provider_cap, &request, sizeof(request), buffer, size);
 	RUNTIME_DIAGNOSTIC_OPERATION_RESULT(DEVICE_TREE_OP_READ, result);
@@ -79,69 +81,74 @@ static syscall_status_t device_tree_read(cap_id_t provider_cap, enum device_tree
 	return result.value == size ? SYSCALL_STATUS_OK : SYSCALL_STATUS_FAILED;
 }
 
-syscall_status_t device_tree_node_name_read(cap_id_t provider_cap, device_tree_node_id_t node, uint64_t offset,
-                                            void* buffer, size_t size) {
+syscall_status_t device_tree_node_name_read(
+		cap_id_t provider_cap, device_tree_node_id_t node, uint64_t offset, void* buffer, size_t size) {
 	return device_tree_read(provider_cap, DEVICE_TREE_READ_NODE_NAME, node, 0u, offset, buffer, size);
 }
 
 syscall_status_t device_tree_property_name_read(cap_id_t provider_cap, device_tree_node_id_t node,
-                                                uint64_t property_index, uint64_t offset, void* buffer, size_t size) {
+		uint64_t property_index, uint64_t offset, void* buffer, size_t size) {
 	return device_tree_read(provider_cap, DEVICE_TREE_READ_PROPERTY_NAME, node, property_index, offset, buffer, size);
 }
 
 syscall_status_t device_tree_property_read(cap_id_t provider_cap, device_tree_node_id_t node, uint64_t property_index,
-                                           uint64_t offset, void* buffer, size_t size) {
+		uint64_t offset, void* buffer, size_t size) {
 	return device_tree_read(provider_cap, DEVICE_TREE_READ_PROPERTY_VALUE, node, property_index, offset, buffer, size);
 }
 
 static syscall_status_t device_tree_resolve(cap_id_t provider_cap, uint32_t phandle, const uint32_t* cells,
-                                            size_t                                       cell_count,
-                                            struct device_tree_resolve_phandle_response* out_reference) {
+		size_t cell_count, struct device_tree_resolve_phandle_response* out_reference) {
 	struct device_tree_resolve_phandle_request request = {0};
 
 	if (out_reference == NULL || phandle == 0u || cell_count > DEVICE_TREE_REFERENCE_MAX_SPECIFIER_CELLS ||
-	    (cell_count != 0u && cells == NULL))
+			(cell_count != 0u && cells == NULL))
 		return SYSCALL_STATUS_BAD_ARGUMENT;
-	request.header.op            = DEVICE_TREE_OP_RESOLVE_PHANDLE;
-	request.phandle              = phandle;
+	request.header.op = DEVICE_TREE_OP_RESOLVE_PHANDLE;
+	request.phandle = phandle;
 	request.specifier_cell_count = (uint32_t)cell_count;
 	if (cell_count != 0u) memcpy(request.specifier_cells, cells, cell_count * sizeof(*cells));
-	syscall_status_t status = device_tree_fixed_call(
-		provider_cap, &request, sizeof(request), out_reference, sizeof(*out_reference), DEVICE_TREE_OP_RESOLVE_PHANDLE);
+	syscall_status_t status = device_tree_fixed_call(provider_cap,
+			&request,
+			sizeof(request),
+			out_reference,
+			sizeof(*out_reference),
+			DEVICE_TREE_OP_RESOLVE_PHANDLE);
 	if (status == SYSCALL_STATUS_OK &&
-	    ((unsigned int)out_reference->kind > DEVICE_TREE_REFERENCE_UNSUPPORTED ||
-	     (out_reference->interrupt_claim_valid != 0u && out_reference->interrupt_claim_valid != 1u) ||
-	     (out_reference->dma_claim_valid != 0u && out_reference->dma_claim_valid != 1u) ||
-	     (out_reference->interrupt_claim_valid != 0u && out_reference->dma_claim_valid != 0u) ||
-	     out_reference->specifier_cell_count > DEVICE_TREE_REFERENCE_MAX_SPECIFIER_CELLS ||
-	     ((out_reference->kind == DEVICE_TREE_REFERENCE_NODE ||
-	       out_reference->kind == DEVICE_TREE_REFERENCE_UNSUPPORTED) &&
-	      (out_reference->specifier_cell_count != 0u || out_reference->interrupt_claim_valid != 0u ||
-	       out_reference->dma_claim_valid != 0u)) ||
-	     (cell_count == 0u && (out_reference->interrupt_claim_valid != 0u || out_reference->dma_claim_valid != 0u)) ||
-	     (cell_count != 0u && out_reference->specifier_cell_count != cell_count) ||
-	     (out_reference->interrupt_claim_valid != 0u &&
-	      (out_reference->kind != DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER || cell_count == 0u ||
-	       out_reference->trigger > INTERRUPT_TRIGGER_LEVEL || out_reference->polarity > INTERRUPT_POLARITY_LOW))))
+			((unsigned int)out_reference->kind > DEVICE_TREE_REFERENCE_UNSUPPORTED ||
+					(out_reference->interrupt_claim_valid != 0u && out_reference->interrupt_claim_valid != 1u) ||
+					(out_reference->dma_claim_valid != 0u && out_reference->dma_claim_valid != 1u) ||
+					(out_reference->interrupt_claim_valid != 0u && out_reference->dma_claim_valid != 0u) ||
+					out_reference->specifier_cell_count > DEVICE_TREE_REFERENCE_MAX_SPECIFIER_CELLS ||
+					((out_reference->kind == DEVICE_TREE_REFERENCE_NODE ||
+							 out_reference->kind == DEVICE_TREE_REFERENCE_UNSUPPORTED) &&
+							(out_reference->specifier_cell_count != 0u || out_reference->interrupt_claim_valid != 0u ||
+									out_reference->dma_claim_valid != 0u)) ||
+					(cell_count == 0u &&
+							(out_reference->interrupt_claim_valid != 0u || out_reference->dma_claim_valid != 0u)) ||
+					(cell_count != 0u && out_reference->specifier_cell_count != cell_count) ||
+					(out_reference->interrupt_claim_valid != 0u &&
+							(out_reference->kind != DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER || cell_count == 0u ||
+									out_reference->trigger > INTERRUPT_TRIGGER_LEVEL ||
+									out_reference->polarity > INTERRUPT_POLARITY_LOW))))
 		return SYSCALL_STATUS_FAILED;
 	if (status == SYSCALL_STATUS_OK && cell_count != 0u &&
-	    ((out_reference->kind == DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER &&
-	      out_reference->interrupt_claim_valid == 0u) ||
-	     (out_reference->kind == DEVICE_TREE_REFERENCE_DMA_CONTROLLER && out_reference->dma_claim_valid == 0u) ||
-	     (out_reference->kind != DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER &&
-	      out_reference->kind != DEVICE_TREE_REFERENCE_DMA_CONTROLLER)))
+			((out_reference->kind == DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER &&
+					 out_reference->interrupt_claim_valid == 0u) ||
+					(out_reference->kind == DEVICE_TREE_REFERENCE_DMA_CONTROLLER &&
+							out_reference->dma_claim_valid == 0u) ||
+					(out_reference->kind != DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER &&
+							out_reference->kind != DEVICE_TREE_REFERENCE_DMA_CONTROLLER)))
 		return SYSCALL_STATUS_FAILED;
 	return status;
 }
 
-syscall_status_t device_tree_resolve_phandle(cap_id_t provider_cap, uint32_t phandle,
-                                             struct device_tree_resolve_phandle_response* out_reference) {
+syscall_status_t device_tree_resolve_phandle(
+		cap_id_t provider_cap, uint32_t phandle, struct device_tree_resolve_phandle_response* out_reference) {
 	return device_tree_resolve(provider_cap, phandle, NULL, 0u, out_reference);
 }
 
 syscall_status_t device_tree_resolve_phandle_specifier(cap_id_t provider_cap, uint32_t phandle, const uint32_t* cells,
-                                                       size_t                                       cell_count,
-                                                       struct device_tree_resolve_phandle_response* out_reference) {
+		size_t cell_count, struct device_tree_resolve_phandle_response* out_reference) {
 	if (cell_count == 0u) return SYSCALL_STATUS_BAD_ARGUMENT;
 	return device_tree_resolve(provider_cap, phandle, cells, cell_count, out_reference);
 }

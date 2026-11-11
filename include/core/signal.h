@@ -1,13 +1,14 @@
 #pragma once
 
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
 #include <base/signal.h>
 #include <base/upcall.h>
 #include <core/capability.h>
 #include <core/spinlock.h>
 #include <core/thread.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
 
 struct signal_handler_binding;
 struct signal_wait_binding;
@@ -16,27 +17,27 @@ struct uthread;
 
 /* Multi-producer broadcast object carrying one authenticated four-word message. */
 struct signal {
-	struct spinlock                lock;
-	signal_id_t                    id;
-	struct signal_message          latest;
-	uint64_t                       generation;
+	struct spinlock lock;
+	signal_id_t id;
+	struct signal_message latest;
+	uint64_t generation;
 	struct signal_handler_binding* handler_head;
 	struct signal_handler_binding* handler_tail;
 	struct signal_handler_binding* handler_wake_head;
 	struct signal_handler_binding* handler_wake_tail;
 	struct signal_handler_binding* retired_handler_head;
 	struct signal_handler_binding* retired_handler_tail;
-	size_t                         handler_count;
-	struct signal_wait_binding*    wait_head;
-	struct signal_wait_binding*    wait_tail;
-	size_t                         wait_receiver_count;
-	struct thread_wait_queue       waiters;
+	size_t handler_count;
+	struct signal_wait_binding* wait_head;
+	struct signal_wait_binding* wait_tail;
+	size_t wait_receiver_count;
+	struct thread_wait_queue waiters;
 	/* Lazily-created cap_object id for this Signal. */
 	cap_object_id_t cap_object_id;
 	/* Interrupt binding protected by lock; the stored pointer owns one interrupt reference. */
 	struct interrupt* interrupt;
 	/* Interrupt-origin upcalls queued or executing for the current publication. */
-	size_t   interrupt_upcalls_outstanding;
+	size_t interrupt_upcalls_outstanding;
 	uint64_t reference_count;
 	/* Readiness requested while interrupt-origin upcalls are still outstanding. */
 	bool interrupt_rearm_requested;
@@ -78,15 +79,14 @@ enum signal_result signal_destroy(struct signal* signal);
  * wait calls for which a private wake value was installed.
  */
 enum signal_result signal_send(struct signal* signal, process_id_t sender, const struct signal_payload* payload,
-                               uint64_t* out_receiver_count, uint64_t* out_delivery_count);
+		uint64_t* out_receiver_count, uint64_t* out_delivery_count);
 
 /*
  * Publish like signal_send(), but replace only older coalescible publications
  * pending for the same handler. Ordinary queued publications are never removed.
  */
 enum signal_result signal_send_coalesced(struct signal* signal, process_id_t sender,
-                                         const struct signal_payload* payload, uint64_t* out_receiver_count,
-                                         uint64_t* out_delivery_count);
+		const struct signal_payload* payload, uint64_t* out_receiver_count, uint64_t* out_delivery_count);
 
 /*
  * Publish atomically to all live handlers, reserving queue admission first. A
@@ -98,12 +98,11 @@ enum signal_result signal_send_coalesced(struct signal* signal, process_id_t sen
  * be used by a hard-IRQ producer that owns a stable reference to signal.
  */
 enum signal_result signal_send_force(struct signal* signal, process_id_t sender, const struct signal_payload* payload,
-                                     uint64_t* out_receiver_count, uint64_t* out_delivery_count);
+		uint64_t* out_receiver_count, uint64_t* out_delivery_count);
 
 /* Publish a forced kernel notification whose upcall deliveries participate in Interrupt readiness. */
 enum signal_result signal_send_interrupt(struct signal* signal, process_id_t sender,
-                                         const struct signal_payload* payload, uint64_t* out_receiver_count,
-                                         uint64_t* out_delivery_count);
+		const struct signal_payload* payload, uint64_t* out_receiver_count, uint64_t* out_delivery_count);
 
 /* Request Interrupt readiness, deferring it until all interrupt-origin upcalls have completed. */
 void signal_interrupt_request_ready(signal_id_t signal_id);
@@ -127,8 +126,8 @@ enum signal_result signal_unregister_wait_receiver(struct signal* signal);
  * Register one userspace upcall handler for target with immutable lifecycle flags.
  * A one-shot binding is removed after its first successfully admitted upcall.
  */
-enum signal_result signal_register_handler(struct signal* signal, struct uthread* target, user_upcall_entry_t* handler,
-                                           uint32_t flags);
+enum signal_result signal_register_handler(
+		struct signal* signal, struct uthread* target, user_upcall_entry_t* handler, uint32_t flags);
 
 /* Remove target's persistent userspace handler registration and purge its queued requests. */
 enum signal_result signal_unregister_handler(struct signal* signal, struct uthread* target);

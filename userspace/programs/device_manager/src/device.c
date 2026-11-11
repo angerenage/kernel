@@ -2,6 +2,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+
 #include <system/capability.h>
 
 static bool add_size(size_t left, size_t right, size_t* out) {
@@ -43,22 +44,22 @@ bool dm_utf8_valid(const void* value, size_t size) {
 	const uint8_t* bytes = value;
 	if (bytes == NULL && size != 0u) return false;
 	for (size_t index = 0u; index < size;) {
-		uint8_t  first = bytes[index++];
+		uint8_t first = bytes[index++];
 		uint32_t codepoint;
-		size_t   trailing;
+		size_t trailing;
 		if (first == 0u) return false;
 		if (first < 0x80u) continue;
 		if (first >= 0xc2u && first <= 0xdfu) {
 			codepoint = first & 0x1fu;
-			trailing  = 1u;
+			trailing = 1u;
 		}
 		else if (first >= 0xe0u && first <= 0xefu) {
 			codepoint = first & 0x0fu;
-			trailing  = 2u;
+			trailing = 2u;
 		}
 		else if (first >= 0xf0u && first <= 0xf4u) {
 			codepoint = first & 0x07u;
-			trailing  = 3u;
+			trailing = 3u;
 		}
 		else return false;
 		if (trailing > size - index) return false;
@@ -68,8 +69,8 @@ bool dm_utf8_valid(const void* value, size_t size) {
 			codepoint = (codepoint << 6u) | (byte & 0x3fu);
 		}
 		if ((trailing == 1u && codepoint < 0x80u) || (trailing == 2u && codepoint < 0x800u) ||
-		    (trailing == 3u && codepoint < 0x10000u) || codepoint > 0x10ffffu ||
-		    (codepoint >= 0xd800u && codepoint <= 0xdfffu))
+				(trailing == 3u && codepoint < 0x10000u) || codepoint > 0x10ffffu ||
+				(codepoint >= 0xd800u && codepoint <= 0xdfffu))
 			return false;
 	}
 	return true;
@@ -149,29 +150,28 @@ struct dm_builder* dm_state_find_builder(const struct dm_state* state, uint64_t 
 }
 
 syscall_status_t dm_builder_begin(struct dm_state* state, struct dm_device* parent,
-                                  struct dm_driver_binding* owner_binding, uint64_t owner_generation,
-                                  struct dm_builder** out_builder) {
+		struct dm_driver_binding* owner_binding, uint64_t owner_generation, struct dm_builder** out_builder) {
 	struct dm_builder* builder;
-	uint64_t           id;
+	uint64_t id;
 	if (state == NULL || out_builder == NULL || state->next_builder_id >= DEVICE_OBJECT_ID_LIMIT)
 		return SYSCALL_STATUS_FAILED;
 	builder = calloc(1u, sizeof(*builder));
 	if (builder == NULL) return SYSCALL_STATUS_FAILED;
-	id                        = state->next_builder_id++;
-	builder->object_id        = DEVICE_BUILDER_OBJECT_BASE | id;
-	builder->parent           = parent;
-	builder->owner_binding    = owner_binding;
+	id = state->next_builder_id++;
+	builder->object_id = DEVICE_BUILDER_OBJECT_BASE | id;
+	builder->parent = parent;
+	builder->owner_binding = owner_binding;
 	builder->owner_generation = owner_generation;
-	builder->accounted_size   = sizeof(*builder);
-	builder->next             = state->builders;
-	state->builders           = builder;
-	*out_builder              = builder;
+	builder->accounted_size = sizeof(*builder);
+	builder->next = state->builders;
+	state->builders = builder;
+	*out_builder = builder;
 	return SYSCALL_STATUS_OK;
 }
 
 syscall_status_t dm_builder_set_name(struct dm_builder* builder, const void* name, size_t name_size) {
 	if (builder == NULL || builder->name.data != NULL || name_size == 0u || name_size > DEVICE_NAME_MAX ||
-	    !dm_utf8_valid(name, name_size))
+			!dm_utf8_valid(name, name_size))
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	if (!reserve(builder, name_size)) return SYSCALL_STATUS_UNAVAILABLE;
 	if (!string_copy(&builder->name, name, name_size)) {
@@ -194,7 +194,7 @@ syscall_status_t dm_builder_add_compatible(struct dm_builder* builder, const voi
 		builder->accounted_size -= sizeof(*ids) + id_size;
 		return SYSCALL_STATUS_FAILED;
 	}
-	builder->compatible_ids        = ids;
+	builder->compatible_ids = ids;
 	ids[builder->compatible_count] = (struct dm_string){0};
 	if (!string_copy(&ids[builder->compatible_count], id, id_size)) {
 		builder->accounted_size -= sizeof(*ids) + id_size;
@@ -240,11 +240,10 @@ static bool property_shape_valid(enum device_property_type type, uint64_t count,
 }
 
 syscall_status_t dm_builder_begin_property(struct dm_builder* builder, const void* name, size_t name_size,
-                                           enum device_property_type type, uint64_t element_count,
-                                           uint64_t value_size) {
+		enum device_property_type type, uint64_t element_count, uint64_t value_size) {
 	struct dm_property* property;
 	if (builder == NULL || builder->active_property != NULL || !dm_identifier_valid(name, name_size) ||
-	    value_size > SIZE_MAX || !property_shape_valid(type, element_count, value_size))
+			value_size > SIZE_MAX || !property_shape_valid(type, element_count, value_size))
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	if (builder->property_count >= DEVICE_MAX_PROPERTIES) return SYSCALL_STATUS_UNAVAILABLE;
 	if (builder_find_property(builder, name, name_size) != NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
@@ -266,22 +265,23 @@ syscall_status_t dm_builder_begin_property(struct dm_builder* builder, const voi
 		free(property);
 		return SYSCALL_STATUS_FAILED;
 	}
-	property->type          = type;
+	property->type = type;
 	property->element_count = element_count;
-	property->value_size    = (size_t)value_size;
+	property->value_size = (size_t)value_size;
 	if (builder->properties_tail == NULL) builder->properties = property;
 	else builder->properties_tail->next = property;
 	builder->properties_tail = property;
 	builder->property_count++;
-	builder->active_property         = property;
+	builder->active_property = property;
 	builder->active_property_written = 0u;
 	return SYSCALL_STATUS_OK;
 }
 
-syscall_status_t dm_builder_append_property(struct dm_builder* builder, uint64_t offset, const void* bytes,
-                                            size_t size) {
+syscall_status_t dm_builder_append_property(
+		struct dm_builder* builder, uint64_t offset, const void* bytes, size_t size) {
 	if (builder == NULL || builder->active_property == NULL || offset != builder->active_property_written ||
-	    size > builder->active_property->value_size - builder->active_property_written || (size != 0u && bytes == NULL))
+			size > builder->active_property->value_size - builder->active_property_written ||
+			(size != 0u && bytes == NULL))
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	if (size != 0u) memcpy(builder->active_property->value + builder->active_property_written, bytes, size);
 	builder->active_property_written += size;
@@ -314,10 +314,10 @@ static bool property_value_valid(const struct dm_property* property) {
 
 syscall_status_t dm_builder_finish_property(struct dm_builder* builder) {
 	if (builder == NULL || builder->active_property == NULL ||
-	    builder->active_property_written != builder->active_property->value_size)
+			builder->active_property_written != builder->active_property->value_size)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	if (!property_value_valid(builder->active_property)) return SYSCALL_STATUS_BAD_ARGUMENT;
-	builder->active_property         = NULL;
+	builder->active_property = NULL;
 	builder->active_property_written = 0u;
 	return SYSCALL_STATUS_OK;
 }
@@ -334,8 +334,8 @@ static struct dm_resource* builder_find_resource(const struct dm_builder* builde
 	return NULL;
 }
 
-syscall_status_t dm_builder_add_resource(struct dm_builder* builder, const void* name, size_t name_size,
-                                         cap_id_t capability, cap_rights_t rights) {
+syscall_status_t dm_builder_add_resource(
+		struct dm_builder* builder, const void* name, size_t name_size, cap_id_t capability, cap_rights_t rights) {
 	struct dm_resource* resource;
 	if (builder == NULL || !dm_identifier_valid(name, name_size) || capability == CAP_ID_INVALID || rights == 0u)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
@@ -353,7 +353,7 @@ syscall_status_t dm_builder_add_resource(struct dm_builder* builder, const void*
 		return SYSCALL_STATUS_FAILED;
 	}
 	resource->capability = capability;
-	resource->rights     = rights;
+	resource->rights = rights;
 	if (builder->resources_tail == NULL) builder->resources = resource;
 	else builder->resources_tail->next = resource;
 	builder->resources_tail = resource;
@@ -365,7 +365,7 @@ static void unlink_builder(struct dm_state* state, struct dm_builder* builder) {
 	struct dm_builder** cursor = &state->builders;
 	while (*cursor != NULL) {
 		if (*cursor == builder) {
-			*cursor       = builder->next;
+			*cursor = builder->next;
 			builder->next = NULL;
 			return;
 		}
@@ -387,18 +387,18 @@ syscall_status_t dm_builder_commit(struct dm_state* state, struct dm_builder* bu
 	if (state->next_device_id >= DEVICE_OBJECT_ID_LIMIT) return SYSCALL_STATUS_FAILED;
 	device = calloc(1u, sizeof(*device));
 	if (device == NULL) return SYSCALL_STATUS_FAILED;
-	device->id                  = state->next_device_id++;
-	device->parent              = builder->parent;
-	device->name                = builder->name;
-	device->compatible_ids      = builder->compatible_ids;
-	device->compatible_count    = builder->compatible_count;
-	device->properties          = builder->properties;
-	device->properties_tail     = builder->properties_tail;
-	device->property_count      = builder->property_count;
-	device->resources           = builder->resources;
-	device->resources_tail      = builder->resources_tail;
-	device->resource_count      = builder->resource_count;
-	device->provider_binding    = builder->owner_binding;
+	device->id = state->next_device_id++;
+	device->parent = builder->parent;
+	device->name = builder->name;
+	device->compatible_ids = builder->compatible_ids;
+	device->compatible_count = builder->compatible_count;
+	device->properties = builder->properties;
+	device->properties_tail = builder->properties_tail;
+	device->property_count = builder->property_count;
+	device->resources = builder->resources;
+	device->resources_tail = builder->resources_tail;
+	device->resource_count = builder->resource_count;
+	device->provider_binding = builder->owner_binding;
 	device->provider_generation = builder->owner_generation;
 	if (device->parent != NULL) {
 		if (device->parent->last_child == NULL) device->parent->first_child = device;
@@ -409,11 +409,11 @@ syscall_status_t dm_builder_commit(struct dm_state* state, struct dm_builder* bu
 	else state->devices_tail->next = device;
 	state->devices_tail = device;
 	unlink_builder(state, builder);
-	builder->name             = (struct dm_string){0};
-	builder->compatible_ids   = NULL;
+	builder->name = (struct dm_string){0};
+	builder->compatible_ids = NULL;
 	builder->compatible_count = 0u;
-	builder->properties       = NULL;
-	builder->resources        = NULL;
+	builder->properties = NULL;
+	builder->resources = NULL;
 	release_builder(builder);
 	*out_device = device;
 	return SYSCALL_STATUS_OK;

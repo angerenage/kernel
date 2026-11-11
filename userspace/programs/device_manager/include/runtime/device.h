@@ -1,17 +1,19 @@
 #pragma once
 
-#include <base/cap.h>
-#include <base/dma.h>
-#include <base/interrupt.h>
-#include <base/syscall.h>
-#include <protocol/device.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
+#include <base/cap.h>
+#include <base/dma.h>
+#include <base/interrupt.h>
+#include <base/syscall.h>
+
+#include <protocol/device.h>
+
 /* Client-side handle for one temporary device-construction transaction. */
 struct device_builder {
-	cap_id_t     capability;
+	cap_id_t capability;
 	process_id_t manager_pid;
 };
 
@@ -32,41 +34,35 @@ syscall_status_t device_builder_add_compatible(const struct device_builder* buil
 
 /* Begin one named property with its complete encoded shape and byte size. */
 syscall_status_t device_builder_begin_property(const struct device_builder* builder, const char* name, size_t name_size,
-                                               enum device_property_type type, uint64_t element_count,
-                                               uint64_t value_size);
+		enum device_property_type type, uint64_t element_count, uint64_t value_size);
 
 /* Append the next contiguous encoded-value chunk to the active property. */
-syscall_status_t device_builder_append_property(const struct device_builder* builder, uint64_t offset,
-                                                const void* bytes, size_t size);
+syscall_status_t device_builder_append_property(
+		const struct device_builder* builder, uint64_t offset, const void* bytes, size_t size);
 
 /* Validate and finish the active property after exactly value_size bytes. */
 syscall_status_t device_builder_finish_property(const struct device_builder* builder);
 
 /* Add one complete property in a single call. Prefer this when its value fits in one request. */
 syscall_status_t device_builder_add_property(const struct device_builder* builder, const char* name, size_t name_size,
-                                             enum device_property_type type, uint64_t element_count, const void* value,
-                                             size_t value_size);
+		enum device_property_type type, uint64_t element_count, const void* value, size_t value_size);
 
 /* Delegate a named resource to the manager and record its maximum driver rights. */
 syscall_status_t device_builder_add_resource(const struct device_builder* builder, const char* name, size_t name_size,
-                                             cap_id_t resource_cap, cap_rights_t rights);
+		cap_id_t resource_cap, cap_rights_t rights);
 
 /* Claim one physical MMIO range and attach its device-memory capability as a named resource. */
 syscall_status_t device_builder_add_mmio_resource(const struct device_builder* builder, cap_id_t memory_allocator_cap,
-                                                  const char* name, size_t name_size, uintptr_t physical_address,
-                                                  size_t size);
+		const char* name, size_t name_size, uintptr_t physical_address, size_t size);
 
 /* Claim one IOMMU input source and attach its DMA-source capability as a named resource. */
 syscall_status_t device_builder_add_dma_resource(const struct device_builder* builder, cap_id_t dma_cap,
-                                                 const char* name, size_t name_size,
-                                                 uint64_t controller_register_address, uint32_t local_source_id);
+		const char* name, size_t name_size, uint64_t controller_register_address, uint32_t local_source_id);
 
 /* Claim one fixed interrupt source and attach its Interrupt capability as a named resource. */
 syscall_status_t device_builder_add_interrupt_resource(const struct device_builder* builder, cap_id_t interrupts_cap,
-                                                       const char* name, size_t name_size,
-                                                       uint64_t controller_register_address, uint32_t local_source_id,
-                                                       enum interrupt_trigger  trigger,
-                                                       enum interrupt_polarity polarity);
+		const char* name, size_t name_size, uint64_t controller_register_address, uint32_t local_source_id,
+		enum interrupt_trigger trigger, enum interrupt_polarity polarity);
 
 /* Atomically install the immutable device and invalidate the builder on success. */
 syscall_status_t device_builder_commit(struct device_builder* builder);
@@ -84,16 +80,16 @@ syscall_status_t device_name_read(cap_id_t device_cap, uint64_t offset, void* bu
 syscall_status_t device_compatible_info(cap_id_t device_cap, uint64_t index, uint64_t* out_size);
 
 /* Read an exact byte range from one provider-ordered compatible ID. */
-syscall_status_t device_compatible_read(cap_id_t device_cap, uint64_t index, uint64_t offset, void* buffer,
-                                        size_t size);
+syscall_status_t device_compatible_read(
+		cap_id_t device_cap, uint64_t index, uint64_t offset, void* buffer, size_t size);
 
 /* Read the encoded type and shape of one named property. */
-syscall_status_t device_property_get_info(cap_id_t device_cap, const char* name, size_t name_size,
-                                          struct device_property_info* out_info);
+syscall_status_t device_property_get_info(
+		cap_id_t device_cap, const char* name, size_t name_size, struct device_property_info* out_info);
 
 /* Read an exact encoded byte range from one named property. */
-syscall_status_t device_property_read(cap_id_t device_cap, const char* name, size_t name_size, uint64_t offset,
-                                      void* buffer, size_t size);
+syscall_status_t device_property_read(
+		cap_id_t device_cap, const char* name, size_t name_size, uint64_t offset, void* buffer, size_t size);
 
 /* Read one scalar boolean property. */
 syscall_status_t device_property_read_bool(cap_id_t device_cap, const char* name, bool* out_value);
@@ -105,36 +101,36 @@ syscall_status_t device_property_read_u64(cap_id_t device_cap, const char* name,
 syscall_status_t device_property_read_i64(cap_id_t device_cap, const char* name, int64_t* out_value);
 
 /* Decode count unsigned integer-array elements starting at first. */
-syscall_status_t device_property_read_u64_array(cap_id_t device_cap, const char* name, uint64_t first, uint64_t* values,
-                                                size_t count);
+syscall_status_t device_property_read_u64_array(
+		cap_id_t device_cap, const char* name, uint64_t first, uint64_t* values, size_t count);
 
 /* Decode count signed integer-array elements starting at first. */
-syscall_status_t device_property_read_i64_array(cap_id_t device_cap, const char* name, uint64_t first, int64_t* values,
-                                                size_t count);
+syscall_status_t device_property_read_i64_array(
+		cap_id_t device_cap, const char* name, uint64_t first, int64_t* values, size_t count);
 
 /* Decode count boolean-array elements starting at first. */
-syscall_status_t device_property_read_bool_array(cap_id_t device_cap, const char* name, uint64_t first, bool* values,
-                                                 size_t count);
+syscall_status_t device_property_read_bool_array(
+		cap_id_t device_cap, const char* name, uint64_t first, bool* values, size_t count);
 
 /* Read and NUL-terminate a UTF-8 string property, or query its size with a null buffer. */
-syscall_status_t device_property_read_string(cap_id_t device_cap, const char* name, char* buffer, size_t capacity,
-                                             size_t* out_size);
+syscall_status_t device_property_read_string(
+		cap_id_t device_cap, const char* name, char* buffer, size_t capacity, size_t* out_size);
 
 /* Read and NUL-terminate one UTF-8 string-array element, or query its size with a null buffer. */
-syscall_status_t device_property_read_string_at(cap_id_t device_cap, const char* name, uint64_t index, char* buffer,
-                                                size_t capacity, size_t* out_size);
+syscall_status_t device_property_read_string_at(
+		cap_id_t device_cap, const char* name, uint64_t index, char* buffer, size_t capacity, size_t* out_size);
 
 /* Read an exact range from an opaque byte property. */
-syscall_status_t device_property_read_bytes(cap_id_t device_cap, const char* name, uint64_t offset, void* buffer,
-                                            size_t size);
+syscall_status_t device_property_read_bytes(
+		cap_id_t device_cap, const char* name, uint64_t offset, void* buffer, size_t size);
 
 /* Read one resource's name size and maximum acquirable rights by provider-order index. */
 syscall_status_t device_resource_info(cap_id_t device_cap, uint64_t index, struct device_resource_info* out_info);
 
 /* Read an exact byte range from one indexed resource name. */
-syscall_status_t device_resource_name_read(cap_id_t device_cap, uint64_t index, uint64_t offset, void* buffer,
-                                           size_t size);
+syscall_status_t device_resource_name_read(
+		cap_id_t device_cap, uint64_t index, uint64_t offset, void* buffer, size_t size);
 
 /* Acquire a named resource capability with a subset of its recorded maximum rights. */
-syscall_status_t device_resource_acquire(cap_id_t device_cap, const char* name, size_t name_size, cap_rights_t rights,
-                                         cap_id_t* out_cap);
+syscall_status_t device_resource_acquire(
+		cap_id_t device_cap, const char* name, size_t name_size, cap_rights_t rights, cap_id_t* out_cap);

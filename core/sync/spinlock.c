@@ -1,7 +1,8 @@
+#include <stdio.h>
+
+#include <hal/hcf.h>
 #include <core/cpu.h>
 #include <core/spinlock.h>
-#include <hal/hcf.h>
-#include <stdio.h>
 
 #if defined(PLATFORM_PC_AARCH64)
 void aarch64_cache_poll_sync(void);
@@ -14,9 +15,9 @@ void spinlock_init(struct spinlock* lock) {
 
 	lock->state = 0u;
 #if CORE_LOCK_DEBUG
-	lock->name      = NULL;
-	lock->order     = SPINLOCK_ORDER_NONE;
-	lock->flags     = SPINLOCK_FLAG_NONE;
+	lock->name = NULL;
+	lock->order = SPINLOCK_ORDER_NONE;
+	lock->flags = SPINLOCK_FLAG_NONE;
 	lock->owner_cpu = 0u;
 #endif
 }
@@ -26,7 +27,7 @@ void spinlock_init_class(struct spinlock* lock, const char* name, uint32_t order
 
 	spinlock_init(lock);
 #if CORE_LOCK_DEBUG
-	lock->name  = name;
+	lock->name = name;
 	lock->order = order;
 	lock->flags = flags;
 #else
@@ -93,18 +94,18 @@ static void spinlock_debug_fail(const struct spinlock* lock, enum spinlock_debug
 	const struct cpu* cpu = cpu_current();
 
 	printf("kernel: spinlock debug failure: check=%s(%u) lock=%s order=%u flags=0x%x owner_cpu=%u\n",
-	       spinlock_debug_check_name(check),
-	       (unsigned)check,
-	       lock != NULL && lock->name != NULL ? lock->name : "<unnamed>",
-	       lock != NULL ? (unsigned)lock->order : 0u,
-	       lock != NULL ? (unsigned)lock->flags : 0u,
-	       lock != NULL ? (unsigned)lock->owner_cpu : 0u);
+			spinlock_debug_check_name(check),
+			(unsigned)check,
+			lock != NULL && lock->name != NULL ? lock->name : "<unnamed>",
+			lock != NULL ? (unsigned)lock->order : 0u,
+			lock != NULL ? (unsigned)lock->flags : 0u,
+			lock != NULL ? (unsigned)lock->owner_cpu : 0u);
 	if (cpu != NULL) {
 		printf("kernel: spinlock debug cpu=%zu irq_disable_depth=%u exception_depth=%u lock_depth=%u\n",
-		       cpu->index,
-		       (unsigned)cpu->irq_disable_depth,
-		       (unsigned)cpu->exception_depth,
-		       (unsigned)cpu->lock_depth);
+				cpu->index,
+				(unsigned)cpu->irq_disable_depth,
+				(unsigned)cpu->exception_depth,
+				(unsigned)cpu->lock_depth);
 		if (cpu->lock_depth != 0u) {
 			printf("kernel: spinlock debug held orders:");
 			for (uint32_t i = 0; i < cpu->lock_depth; i++) {
@@ -133,7 +134,7 @@ static void spinlock_debug_fail(const struct spinlock* lock, enum spinlock_debug
 enum spinlock_debug_check spinlock_debug_check_acquire(const struct spinlock* lock) {
 #if CORE_LOCK_DEBUG
 	const struct cpu* cpu;
-	uint32_t          last_order;
+	uint32_t last_order;
 
 	if (!lock) return SPINLOCK_DEBUG_CHECK_OK;
 

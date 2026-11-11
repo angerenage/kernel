@@ -1,11 +1,12 @@
 #pragma once
 
-#include <core/process.h>
-#include <core/thread.h>
-#include <core/user_upcall.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <core/process.h>
+#include <core/thread.h>
+#include <core/user_upcall.h>
 
 typedef uint64_t uthread_id_t;
 
@@ -26,27 +27,27 @@ enum uthread_start_result {
 };
 
 struct uthread_start_params {
-	const char*     name;
+	const char* name;
 	struct process* process;
-	uintptr_t       user_entry;
-	const void*     arg_data;
-	size_t          arg_size;
-	size_t          user_stack_size;
-	struct cpu*     preferred_cpu;
-	bool            detached;
+	uintptr_t user_entry;
+	const void* arg_data;
+	size_t arg_size;
+	size_t user_stack_size;
+	struct cpu* preferred_cpu;
+	bool detached;
 	/* Internal process lifecycle claim for the unique initial thread. */
 	bool main_thread;
 };
 
 struct uthread {
-	struct thread            thread;
-	uthread_id_t             id;
-	struct process*          process;
+	struct thread thread;
+	uthread_id_t id;
+	struct process* process;
 	struct user_upcall_state upcall;
-	struct mapping*          user_stack_mapping;
-	struct mapping*          kernel_stack_mapping;
-	uintptr_t                user_stack_top;
-	struct uthread*          process_next;
+	struct mapping* user_stack_mapping;
+	struct mapping* kernel_stack_mapping;
+	uintptr_t user_stack_top;
+	struct uthread* process_next;
 	/* Lazily-created cap_object id for this thread. */
 	cap_object_id_t cap_object_id;
 	/* References keep the descriptor and its owned resources alive. */
@@ -75,8 +76,8 @@ enum uthread_start_result uthread_start(struct uthread* thread, const struct uth
  * The process remains caller-owned; the thread descriptor and stacks are
  * reclaimed by the scheduler's deferred reap callback after exit.
  */
-enum uthread_start_result uthread_spawn_detached(struct uthread**                   out_thread,
-                                                 const struct uthread_start_params* params);
+enum uthread_start_result uthread_spawn_detached(
+		struct uthread** out_thread, const struct uthread_start_params* params);
 
 /* Return a userspace thread ID, or UTHREAD_ID_INVALID for NULL. */
 uthread_id_t uthread_id(const struct uthread* thread);

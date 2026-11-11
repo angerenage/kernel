@@ -86,5 +86,5 @@ enum core_exception_access {
 bool core_handle_user_exception(enum core_exception_kind kind);
 
 /* Handle an architecture-classified fault using access info and the faulting address. */
-bool core_handle_exception(enum core_exception_kind kind, enum core_exception_access access, uintptr_t addr,
-                           bool user_mode);
+bool core_handle_exception(
+		enum core_exception_kind kind, enum core_exception_access access, uintptr_t addr, bool user_mode);

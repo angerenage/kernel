@@ -1,9 +1,10 @@
 #pragma once
 
-#include <hal/device_tree.h>
-#include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+#include <hal/device_tree.h>
+#include <hal/interrupts.h>
 
 struct cpu;
 
@@ -26,13 +27,12 @@ bool riscv64_imsic_target(const struct cpu* cpu, uint32_t id, uint32_t* out_hart
 bool riscv64_imsic_message_range_at(struct hal_interrupt_message_range* out);
 
 /* Return whether the IMSIC message mechanism can deliver to a CPU without changing hardware state. */
-bool riscv64_imsic_message_target_supported(uint32_t domain, const struct hal_interrupt_message_source* source,
-                                            const struct cpu* target);
+bool riscv64_imsic_message_target_supported(
+		uint32_t domain, const struct hal_interrupt_message_source* source, const struct cpu* target);
 
 /* Initialize one core-reserved IMSIC message identity. */
-bool riscv64_imsic_message_init(struct hal_interrupt_message_state*         state,
-                                const struct hal_interrupt_message_request* request,
-                                struct hal_interrupt_message*               out_message);
+bool riscv64_imsic_message_init(struct hal_interrupt_message_state* state,
+		const struct hal_interrupt_message_request* request, struct hal_interrupt_message* out_message);
 
 /* Disable architecture programming for one IMSIC message identity. */
 bool riscv64_imsic_message_deinit(struct hal_interrupt_message_state* state);

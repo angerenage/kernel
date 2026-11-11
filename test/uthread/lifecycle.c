@@ -2,22 +2,22 @@
 
 Test(uthread, deinit_detaches_joinable_thread_from_process) {
 	struct process* process = NULL;
-	struct uthread  worker  = {
-		.user_stack_mapping   = NULL,
+	struct uthread worker = {
+		.user_stack_mapping = NULL,
 		.kernel_stack_mapping = NULL,
 	};
-	uthread_id_t                worker_tid;
+	uthread_id_t worker_tid;
 	struct uthread_start_params params = {
-		.name            = "user/joinable",
-		.process         = NULL,
-		.user_entry      = 0x400000u,
+		.name = "user/joinable",
+		.process = NULL,
+		.user_entry = 0x400000u,
 		.user_stack_size = 2u * TEST_MAPPING_GRANULE,
-		.preferred_cpu   = NULL,
-		.detached        = false,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 
 	init_uthread_test_environment();
-	process        = spawn_owner_process("test/process");
+	process = spawn_owner_process("test/process");
 	params.process = process;
 
 	cr_assert_eq(uthread_start(&worker, &params), UTHREAD_START_OK, "uthread_start failed");
@@ -34,28 +34,28 @@ Test(uthread, deinit_detaches_joinable_thread_from_process) {
 
 Test(uthread, retained_descriptor_defers_final_cleanup) {
 	struct process* process = NULL;
-	struct uthread  worker  = {
-		.user_stack_mapping   = NULL,
+	struct uthread worker = {
+		.user_stack_mapping = NULL,
 		.kernel_stack_mapping = NULL,
 	};
 	struct uthread* held;
-	uthread_id_t    worker_tid;
+	uthread_id_t worker_tid;
 
 	init_uthread_test_environment();
 	process = spawn_owner_process("test/retained-descriptor");
 
 	cr_assert_eq(uthread_start(&worker,
-	                           &(const struct uthread_start_params){
-								   .name            = "user/retained",
-								   .process         = process,
-								   .user_entry      = 0x400000u,
-								   .user_stack_size = 2u * TEST_MAPPING_GRANULE,
-								   .detached        = false,
-							   }),
-	             UTHREAD_START_OK);
+						 &(const struct uthread_start_params){
+							 .name = "user/retained",
+							 .process = process,
+							 .user_entry = 0x400000u,
+							 .user_stack_size = 2u * TEST_MAPPING_GRANULE,
+							 .detached = false,
+						 }),
+			UTHREAD_START_OK);
 
 	worker_tid = uthread_id(&worker);
-	held       = uthread_acquire(worker_tid);
+	held = uthread_acquire(worker_tid);
 	cr_assert_eq(held, &worker, "uthread_acquire should retain the registered descriptor");
 
 	thread_mark_zombie(&worker.thread);
@@ -63,8 +63,8 @@ Test(uthread, retained_descriptor_defers_final_cleanup) {
 	cr_assert_null(uthread_lookup(worker_tid), "destroying a uthread must remove its ID immediately");
 	cr_assert_null(uthread_acquire(worker_tid), "removed IDs must reject new retained lookups");
 	cr_assert_eq(process_thread_count(process),
-	             2u,
-	             "an outstanding reference should defer process detachment and stack cleanup");
+			2u,
+			"an outstanding reference should defer process detachment and stack cleanup");
 
 	uthread_release(held);
 	cr_assert_eq(process_thread_count(process), 1u, "the last reference should perform final cleanup");

@@ -1,6 +1,7 @@
-#include <base/cap.h>
 #include <stddef.h>
 #include <stdio.h>
+
+#include <base/cap.h>
 
 #include "text_input.h"
 

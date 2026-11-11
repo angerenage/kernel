@@ -17,10 +17,10 @@ struct xhci_trb {
 /* Ring buffer of TRBs in DMA memory, with enqueue/dequeue indices and cycle bits. */
 struct xhci_ring {
 	struct xhci_dma_buffer dma;
-	uint16_t               enqueue;
-	uint16_t               dequeue;
-	uint8_t                producer_cycle;
-	uint8_t                consumer_cycle;
+	uint16_t enqueue;
+	uint16_t dequeue;
+	uint8_t producer_cycle;
+	uint8_t consumer_cycle;
 };
 
 /* Allocate a ring buffer of TRBs in DMA memory. */

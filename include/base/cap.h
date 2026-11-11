@@ -16,20 +16,20 @@ typedef uint64_t cap_call_id_t;
 #define CAP_REQUEST_QUEUE_DEPTH 16u
 
 enum cap_right {
-	CAP_READ     = 1ull << 0,
-	CAP_WRITE    = 1ull << 1,
-	CAP_EXEC     = 1ull << 2,
-	CAP_MAP      = 1ull << 3,
-	CAP_CALL     = 1ull << 4,
-	CAP_WAIT     = 1ull << 5,
-	CAP_SIGNAL   = 1ull << 6,
+	CAP_READ = 1ull << 0,
+	CAP_WRITE = 1ull << 1,
+	CAP_EXEC = 1ull << 2,
+	CAP_MAP = 1ull << 3,
+	CAP_CALL = 1ull << 4,
+	CAP_WAIT = 1ull << 5,
+	CAP_SIGNAL = 1ull << 6,
 	CAP_ALLOCATE = 1ull << 7,
-	CAP_DESTROY  = 1ull << 8,
+	CAP_DESTROY = 1ull << 8,
 
-	CAP_DELEGATE      = 1ull << 16,
-	CAP_DERIVE        = 1ull << 17,
-	CAP_REVOKE        = 1ull << 18,
-	CAP_MANAGE        = 1ull << 19,
+	CAP_DELEGATE = 1ull << 16,
+	CAP_DERIVE = 1ull << 17,
+	CAP_REVOKE = 1ull << 18,
+	CAP_MANAGE = 1ull << 19,
 	CAP_DELEGATE_PEER = 1ull << 20,
 };
 
@@ -42,12 +42,12 @@ enum cap_delegate_flag {
  * and complete call_id with cap_reply; kernel handlers receive a writable response buffer directly. */
 struct cap_request {
 	cap_call_id_t call_id;
-	process_id_t  caller;
-	cap_id_t      cap_id;
-	uint64_t      object_id;
-	cap_rights_t  rights;
-	const void*   request;
-	size_t        request_size;
-	void*         response;
-	size_t        response_capacity;
+	process_id_t caller;
+	cap_id_t cap_id;
+	uint64_t object_id;
+	cap_rights_t rights;
+	const void* request;
+	size_t request_size;
+	void* response;
+	size_t response_capacity;
 };

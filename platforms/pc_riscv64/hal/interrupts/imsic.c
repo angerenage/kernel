@@ -1,14 +1,15 @@
 #include "imsic.h"
 
-#include <core/cpu.h>
-#include <core/interrupt.h>
-#include <firmware/dt/device.h>
-#include <hal/cpu.h>
-#include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <firmware/dt/device.h>
+#include <hal/cpu.h>
+#include <hal/interrupts.h>
+#include <core/cpu.h>
+#include <core/interrupt.h>
 
 #include "aplic.h"
 #include "interrupts.h"
@@ -22,40 +23,41 @@
 #define IMSIC_EIE0 0xc0u
 
 struct imsic_hart {
-	uint64_t  hart_id;
+	uint64_t hart_id;
 	uintptr_t message_address;
 };
 
 static struct {
 	struct imsic_hart harts[IMSIC_MAX_CPUS];
-	size_t            hart_count;
-	size_t            controller;
-	uint32_t          ids;
-	uint32_t          phandle;
-	uint32_t          guest_bits;
-	uint64_t          enabled[IMSIC_MAX_CPUS][32u];
-	uint64_t          clear_pending[IMSIC_MAX_CPUS][32u];
-	uint64_t          requested[IMSIC_MAX_CPUS];
-	uint64_t          applied[IMSIC_MAX_CPUS];
-	bool              local_ready[IMSIC_MAX_CPUS];
-	bool              probed;
-	bool              ready;
+	size_t hart_count;
+	size_t controller;
+	uint32_t ids;
+	uint32_t phandle;
+	uint32_t guest_bits;
+	uint64_t enabled[IMSIC_MAX_CPUS][32u];
+	uint64_t clear_pending[IMSIC_MAX_CPUS][32u];
+	uint64_t requested[IMSIC_MAX_CPUS];
+	uint64_t applied[IMSIC_MAX_CPUS];
+	bool local_ready[IMSIC_MAX_CPUS];
+	bool probed;
+	bool ready;
 } imsic;
 static uint32_t imsic_init_lock;
 
 size_t riscv64_imsic_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity) {
-	size_t count        = 0u;
+	size_t count = 0u;
 	size_t device_count = dt_device_count("riscv,imsics");
 
 	for (size_t index = 0u; index < device_count; index++) {
 		struct dt_node node = dt_device_at("riscv,imsics", index);
-		struct dt_reg  reg;
+		struct dt_reg reg;
 
 		if (!dt_node_reg(node, 0u, &reg) || reg.address == 0u || reg.address > UINTPTR_MAX || reg.size > UINTPTR_MAX)
 			continue;
 		if (nodes != NULL && count < capacity) {
 			nodes[count] = (struct hal_device_tree_consumed_node){
-				.node = node, .kind = HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED, .value = 0u};
+				.node = node, .kind = HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED, .value = 0u
+			};
 		}
 		count++;
 	}
@@ -67,10 +69,10 @@ static bool imsic_find(void) {
 	if (count == 0u || count > 2u) return false;
 	bool selected = false;
 	for (size_t controller = 0u; controller < count; controller++) {
-		struct dt_node     node = dt_device_at("riscv,imsics", controller);
+		struct dt_node node = dt_device_at("riscv,imsics", controller);
 		struct dt_property interrupts;
 		if (!dt_node_property(node, "interrupts-extended", &interrupts) || interrupts.size == 0u ||
-		    interrupts.size % 8u != 0u || interrupts.size > IMSIC_MAX_CPUS * 8u)
+				interrupts.size % 8u != 0u || interrupts.size > IMSIC_MAX_CPUS * 8u)
 			return false;
 		uint64_t cause;
 		if (!dt_property_read_cells(&interrupts, 1u, 1u, &cause)) return false;
@@ -85,14 +87,14 @@ static bool imsic_find(void) {
 		selected = true;
 		struct dt_reg reg;
 		if (!dt_node_reg(node, 0u, &reg) || reg.address == 0u || reg.address > UINTPTR_MAX || reg.size > UINTPTR_MAX ||
-		    reg.address % IMSIC_PAGE_SIZE != 0u)
+				reg.address % IMSIC_PAGE_SIZE != 0u)
 			return false;
-		uintptr_t          base = (uintptr_t)reg.address;
-		uintptr_t          size = (uintptr_t)reg.size;
+		uintptr_t base = (uintptr_t)reg.address;
+		uintptr_t size = (uintptr_t)reg.size;
 		struct dt_property property;
-		uint64_t           value;
+		uint64_t value;
 		if (!dt_node_property(node, "riscv,num-ids", &property) || property.size != 4u ||
-		    !dt_property_read_cells(&property, 0u, 1u, &value))
+				!dt_property_read_cells(&property, 0u, 1u, &value))
 			return false;
 		uint32_t ids = (uint32_t)value;
 		if (ids < 63u || ids > IMSIC_MAX_IDS) return false;
@@ -113,15 +115,15 @@ static bool imsic_find(void) {
 		}
 		/* Multi-group layouts need per-group reg/interrupt mappings; do not guess them. */
 		(void)group_bits;
-		size_t    hart_count = interrupts.size / 8u;
-		uintptr_t stride     = (uintptr_t)IMSIC_PAGE_SIZE << guest_bits;
+		size_t hart_count = interrupts.size / 8u;
+		uintptr_t stride = (uintptr_t)IMSIC_PAGE_SIZE << guest_bits;
 		if (hart_count > size / stride || base > UINTPTR_MAX - size) return false;
 		for (size_t index = 0u; index < hart_count; index++) {
 			uint64_t hart;
 			uint64_t phandle_value;
 
 			if (!dt_property_read_cells(&interrupts, index * 2u, 1u, &phandle_value) ||
-			    !riscv64_interrupt_hart_for_phandle((uint32_t)phandle_value, &hart))
+					!riscv64_interrupt_hart_for_phandle((uint32_t)phandle_value, &hart))
 				return false;
 			for (size_t previous = 0u; previous < index; previous++)
 				if (imsic.harts[previous].hart_id == hart) return false;
@@ -129,8 +131,8 @@ static bool imsic_find(void) {
 		}
 		imsic.hart_count = hart_count;
 		imsic.controller = controller;
-		imsic.ids        = ids;
-		imsic.phandle    = phandle;
+		imsic.ids = ids;
+		imsic.phandle = phandle;
 		imsic.guest_bits = guest_bits;
 	}
 	return selected;
@@ -186,14 +188,14 @@ bool riscv64_imsic_target(const struct cpu* cpu, uint32_t id, uint32_t* out_hart
 bool riscv64_imsic_message_range_at(struct hal_interrupt_message_range* out) {
 	if (out == NULL || !imsic_probe()) return false;
 	*out = (struct hal_interrupt_message_range){
-		.domain   = RISCV64_MESSAGE_DOMAIN_IMSIC,
+		.domain = RISCV64_MESSAGE_DOMAIN_IMSIC,
 		.delivery = {.domain = RISCV64_DELIVERY_DOMAIN_IMSIC, .base = 1u, .limit = imsic.ids + 1u}
-    };
+	};
 	return true;
 }
 
-bool riscv64_imsic_message_target_supported(uint32_t domain, const struct hal_interrupt_message_source* source,
-                                            const struct cpu* target) {
+bool riscv64_imsic_message_target_supported(
+		uint32_t domain, const struct hal_interrupt_message_source* source, const struct cpu* target) {
 	return domain == RISCV64_MESSAGE_DOMAIN_IMSIC && source == NULL && target != NULL &&
 	       target->index < IMSIC_MAX_CPUS && target->interrupts_ready && cpu_state_get(target) == CPU_STATE_ONLINE &&
 	       __atomic_load_n(&imsic.ready, __ATOMIC_ACQUIRE) && imsic_hart_for_cpu(target, NULL);
@@ -207,11 +209,11 @@ static void imsic_write_indirect(uint32_t selector, uint64_t value) {
 void riscv64_imsic_sync_local(void) {
 	struct cpu* cpu = cpu_current();
 	if (cpu == NULL || cpu->index >= IMSIC_MAX_CPUS || !imsic_probe() || !imsic_hart_for_cpu(cpu, NULL)) return;
-	struct irq_state irq        = irq_save_disable();
-	uint64_t         generation = __atomic_load_n(&imsic.requested[cpu->index], __ATOMIC_ACQUIRE);
+	struct irq_state irq = irq_save_disable();
+	uint64_t generation = __atomic_load_n(&imsic.requested[cpu->index], __ATOMIC_ACQUIRE);
 	for (uint32_t word = 0u; word <= imsic.ids / 64u; word++)
-		imsic_write_indirect(IMSIC_EIE0 + word * 2u,
-		                     __atomic_load_n(&imsic.enabled[cpu->index][word], __ATOMIC_ACQUIRE));
+		imsic_write_indirect(
+				IMSIC_EIE0 + word * 2u, __atomic_load_n(&imsic.enabled[cpu->index][word], __ATOMIC_ACQUIRE));
 	for (uint32_t word = 0u; word <= imsic.ids / 64u; word++) {
 		uint64_t clear = __atomic_exchange_n(&imsic.clear_pending[cpu->index][word], 0u, __ATOMIC_ACQ_REL);
 		if (clear == 0u) continue;
@@ -227,10 +229,10 @@ void riscv64_imsic_sync_local(void) {
 
 bool riscv64_imsic_set_enabled(const struct cpu* cpu, uint32_t id, bool enabled) {
 	if (cpu == NULL || cpu->index >= IMSIC_MAX_CPUS || !cpu->interrupts_ready ||
-	    cpu_state_get(cpu) != CPU_STATE_ONLINE || !riscv64_imsic_target(cpu, id, NULL))
+			cpu_state_get(cpu) != CPU_STATE_ONLINE || !riscv64_imsic_target(cpu, id, NULL))
 		return false;
 	uint64_t* word = &imsic.enabled[cpu->index][id / 64u];
-	uint64_t  bit  = 1ull << (id % 64u);
+	uint64_t bit = 1ull << (id % 64u);
 	if (enabled) __atomic_fetch_or(word, bit, __ATOMIC_ACQ_REL);
 	else {
 		__atomic_fetch_and(word, ~bit, __ATOMIC_ACQ_REL);
@@ -246,21 +248,21 @@ bool riscv64_imsic_set_enabled(const struct cpu* cpu, uint32_t id, bool enabled)
 	return true;
 }
 
-bool riscv64_imsic_message_init(struct hal_interrupt_message_state*         state,
-                                const struct hal_interrupt_message_request* request,
-                                struct hal_interrupt_message*               out_message) {
+bool riscv64_imsic_message_init(struct hal_interrupt_message_state* state,
+		const struct hal_interrupt_message_request* request, struct hal_interrupt_message* out_message) {
 	struct hal_interrupt_message_range range;
-	uintptr_t                          address;
+	uintptr_t address;
 	if (state == NULL || state->initialized || request == NULL || out_message == NULL ||
-	    !riscv64_imsic_message_target_supported(request->domain, request->source, request->target) ||
-	    !riscv64_imsic_message_range_at(&range) || request->event.domain != range.delivery.domain ||
-	    request->event.id < range.delivery.base || request->event.id >= range.delivery.limit ||
-	    !imsic_hart_for_cpu(request->target, &address))
+			!riscv64_imsic_message_target_supported(request->domain, request->source, request->target) ||
+			!riscv64_imsic_message_range_at(&range) || request->event.domain != range.delivery.domain ||
+			request->event.id < range.delivery.base || request->event.id >= range.delivery.limit ||
+			!imsic_hart_for_cpu(request->target, &address))
 		return false;
 	if (!riscv64_imsic_set_enabled(request->target, request->event.id, true)) return false;
 	*out_message = (struct hal_interrupt_message){.address = address, .data = request->event.id};
-	*state =
-		(struct hal_interrupt_message_state){.target = request->target, .event = request->event, .initialized = true};
+	*state = (struct hal_interrupt_message_state){
+		.target = request->target, .event = request->event, .initialized = true
+	};
 	return true;
 }
 
@@ -268,7 +270,7 @@ bool riscv64_imsic_message_deinit(struct hal_interrupt_message_state* state) {
 	if (state == NULL) return false;
 	if (!state->initialized) return true;
 	if (state->event.domain != RISCV64_DELIVERY_DOMAIN_IMSIC ||
-	    !riscv64_imsic_set_enabled(state->target, state->event.id, false))
+			!riscv64_imsic_set_enabled(state->target, state->event.id, false))
 		return false;
 	state->initialized = false;
 	return true;

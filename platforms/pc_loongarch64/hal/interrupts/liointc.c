@@ -1,10 +1,11 @@
 #include "liointc.h"
 
-#include <core/cpu.h>
-#include <core/interrupt.h>
-#include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+#include <hal/interrupts.h>
+#include <core/cpu.h>
+#include <core/interrupt.h>
 
 #include "controller.h"
 #include "htvec.h"
@@ -51,13 +52,13 @@ bool loongarch64_liointc_set_masked(struct fixed_controller* controller, uint32_
 	return true;
 }
 
-bool loongarch64_liointc_configure(struct fixed_controller* controller, uint32_t source,
-                                   const struct hal_interrupt_delivery* delivery) {
+bool loongarch64_liointc_configure(
+		struct fixed_controller* controller, uint32_t source, const struct hal_interrupt_delivery* delivery) {
 	if (controller == NULL || delivery == NULL || source >= controller->source_count ||
-	    !loongarch64_liointc_probe(controller))
+			!loongarch64_liointc_probe(controller))
 		return false;
 	struct irq_state irq = loongarch64_controllers_lock();
-	uint32_t         bit = 1u << source;
+	uint32_t bit = 1u << source;
 	if (delivery->trigger != HAL_INTERRUPT_TRIGGER_FIRMWARE) {
 		uint32_t edge = loongarch64_mmio_read32(controller->virtual_base, LIOINTC_EDGE);
 		if (delivery->trigger == HAL_INTERRUPT_TRIGGER_EDGE) edge |= bit;
@@ -80,10 +81,10 @@ bool loongarch64_liointc_handle(uint64_t pending_cpu) {
 	bool cascade_pending = false;
 	for (uint32_t parent = 0u; parent < 2u; parent++)
 		if (lio_cascades[parent] >= LOONGARCH64_CPU_HWI_BASE && lio_cascades[parent] < LOONGARCH64_CPU_HWI_LIMIT &&
-		    (pending_cpu & (1ull << lio_cascades[parent])) != 0u)
+				(pending_cpu & (1ull << lio_cascades[parent])) != 0u)
 			cascade_pending = true;
 	if (!cascade_pending) return false;
-	uint32_t core    = cpu_current() == NULL ? 0u : (uint32_t)(cpu_current()->arch_id & 3u);
+	uint32_t core = cpu_current() == NULL ? 0u : (uint32_t)(cpu_current()->arch_id & 3u);
 	uint32_t pending = loongarch64_mmio_read32(lio->virtual_base, LIOINTC_STATUS(core));
 	if (pending == 0u) return false;
 	bool handled = false;
@@ -103,7 +104,7 @@ bool loongarch64_liointc_handle(uint64_t pending_cpu) {
 		while (pending != 0u) {
 			uint32_t source = (uint32_t)__builtin_ctz(pending);
 			if (interrupt_handle_event(
-					(struct hal_interrupt_event){.domain = LOONGARCH64_DELIVERY_DOMAIN_LIOINTC, .id = source}))
+						(struct hal_interrupt_event){.domain = LOONGARCH64_DELIVERY_DOMAIN_LIOINTC, .id = source}))
 				unhandled &= ~(1u << source);
 			pending &= ~(1u << source);
 		}

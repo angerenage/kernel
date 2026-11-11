@@ -1,11 +1,12 @@
 #pragma once
 
-#include <hal/acpi.h>
-#include <hal/device_tree.h>
-#include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <hal/acpi.h>
+#include <hal/device_tree.h>
+#include <hal/interrupts.h>
 
 struct cpu;
 
@@ -17,8 +18,7 @@ size_t loongarch64_device_tree_consumed_nodes(struct hal_device_tree_consumed_no
 
 /* Translate one Loongson PCH PIC Device Tree interrupt specifier. */
 bool loongarch64_device_tree_interrupt(const uint32_t* cells, size_t cell_count, uint32_t* out_local_source_id,
-                                       enum hal_interrupt_trigger*  out_trigger,
-                                       enum hal_interrupt_polarity* out_polarity);
+		enum hal_interrupt_trigger* out_trigger, enum hal_interrupt_polarity* out_polarity);
 
 /* Discover the platform interrupt-controller topology from firmware. */
 bool loongarch64_interrupt_controllers_discover(void);
@@ -39,28 +39,26 @@ size_t loongarch64_interrupt_source_domain_count(void);
 bool loongarch64_interrupt_source_domain_at(size_t index, struct hal_interrupt_source_domain_info* out_domain);
 
 /* Resolve a firmware-visible controller address and local ID without claiming the source. */
-bool loongarch64_interrupt_source_resolve(uint64_t controller_address, uint32_t local_source_id,
-                                          struct hal_interrupt_source* out_source);
+bool loongarch64_interrupt_source_resolve(
+		uint64_t controller_address, uint32_t local_source_id, struct hal_interrupt_source* out_source);
 
 /* Return whether ownership of a fixed source is available to userspace. */
 bool loongarch64_interrupt_source_claimable(const struct hal_interrupt_source* source);
 
 /* Return whether a fixed-source configuration is supported by the platform. */
 bool loongarch64_interrupt_source_configuration_supported(const struct hal_interrupt_source* source,
-                                                          enum hal_interrupt_trigger         trigger,
-                                                          enum hal_interrupt_polarity        polarity);
+		enum hal_interrupt_trigger trigger, enum hal_interrupt_polarity polarity);
 
 /* Return the delivery identity and target-routing capability of one fixed source. */
-bool loongarch64_interrupt_source_info(const struct hal_interrupt_source* source,
-                                       struct hal_interrupt_source_info*  out_info);
+bool loongarch64_interrupt_source_info(
+		const struct hal_interrupt_source* source, struct hal_interrupt_source_info* out_info);
 
 /* Return whether a fixed source can deliver to a CPU without changing hardware state. */
 bool loongarch64_interrupt_source_target_supported(const struct hal_interrupt_source* source, const struct cpu* target);
 
 /* Configure a fixed interrupt source and leave it masked. */
-bool loongarch64_interrupt_source_init(struct hal_interrupt_source_state*   state,
-                                       const struct hal_interrupt_source*   source,
-                                       const struct hal_interrupt_delivery* delivery);
+bool loongarch64_interrupt_source_init(struct hal_interrupt_source_state* state,
+		const struct hal_interrupt_source* source, const struct hal_interrupt_delivery* delivery);
 
 /* Mask an initialized fixed interrupt source. */
 bool loongarch64_interrupt_source_mask(struct hal_interrupt_source_state* state);
@@ -78,13 +76,12 @@ size_t loongarch64_interrupt_message_range_count(void);
 bool loongarch64_interrupt_message_range_at(size_t index, struct hal_interrupt_message_range* out_range);
 
 /* Return whether a message mechanism can deliver to a CPU without changing hardware state. */
-bool loongarch64_interrupt_message_target_supported(uint32_t domain, const struct hal_interrupt_message_source* source,
-                                                    const struct cpu* target);
+bool loongarch64_interrupt_message_target_supported(
+		uint32_t domain, const struct hal_interrupt_message_source* source, const struct cpu* target);
 
 /* Initialize one core-reserved message interrupt. */
-bool loongarch64_interrupt_message_init(struct hal_interrupt_message_state*         state,
-                                        const struct hal_interrupt_message_request* request,
-                                        struct hal_interrupt_message*               out_message);
+bool loongarch64_interrupt_message_init(struct hal_interrupt_message_state* state,
+		const struct hal_interrupt_message_request* request, struct hal_interrupt_message* out_message);
 
 /* Disable architecture programming for one message interrupt. */
 bool loongarch64_interrupt_message_deinit(struct hal_interrupt_message_state* state);

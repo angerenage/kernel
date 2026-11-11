@@ -1,9 +1,10 @@
 #include "selftest.h"
 
-#include <kernel/cmdline.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
+
+#include <kernel/cmdline.h>
 
 extern const struct kernel_selftest_suite kernel_pmm_selftest_suite;
 extern const struct kernel_selftest_suite kernel_iommu_selftest_suite;
@@ -31,14 +32,14 @@ static const struct kernel_selftest_suite* const kernel_selftest_suites[] = {
 	&kernel_rwlock_selftest_suite,
 };
 
-void kernel_selftest_fail(struct kernel_selftest_context* ctx, const char* file, size_t line, const char* expr,
-                          const char* message) {
+void kernel_selftest_fail(
+		struct kernel_selftest_context* ctx, const char* file, size_t line, const char* expr, const char* message) {
 	if (!ctx || ctx->failure_expr != NULL) return;
 
-	ctx->failure_expr    = expr;
+	ctx->failure_expr = expr;
 	ctx->failure_message = message;
-	ctx->failure_file    = file;
-	ctx->failure_line    = line;
+	ctx->failure_file = file;
+	ctx->failure_line = line;
 }
 
 bool kernel_selftests_requested(void) {
@@ -56,7 +57,7 @@ static bool selftest_cmdline_requested_suite(const char** suite_name, size_t* su
 }
 
 static bool kernel_selftests_run_case(const struct kernel_selftest_suite* suite,
-                                      const struct kernel_selftest_case* test_case, size_t* assertion_total) {
+		const struct kernel_selftest_case* test_case, size_t* assertion_total) {
 	struct kernel_selftest_context ctx = {0};
 
 	test_case->run(&ctx);
@@ -64,11 +65,11 @@ static bool kernel_selftests_run_case(const struct kernel_selftest_suite* suite,
 
 	if (ctx.failure_expr != NULL) {
 		printf("selftest: %s.%s FAIL at %s:%zu (%s)\n",
-		       suite->name,
-		       test_case->name,
-		       ctx.failure_file,
-		       ctx.failure_line,
-		       ctx.failure_expr);
+				suite->name,
+				test_case->name,
+				ctx.failure_file,
+				ctx.failure_line,
+				ctx.failure_expr);
 		if (ctx.failure_message != NULL) printf("selftest: detail: %s\n", ctx.failure_message);
 		return false;
 	}
@@ -78,14 +79,14 @@ static bool kernel_selftests_run_case(const struct kernel_selftest_suite* suite,
 }
 
 bool kernel_selftests_run(void) {
-	size_t      suite_count     = sizeof(kernel_selftest_suites) / sizeof(kernel_selftest_suites[0]);
-	size_t      case_total      = 0;
-	size_t      case_failed     = 0;
-	size_t      assertion_total = 0;
+	size_t suite_count = sizeof(kernel_selftest_suites) / sizeof(kernel_selftest_suites[0]);
+	size_t case_total = 0;
+	size_t case_failed = 0;
+	size_t assertion_total = 0;
 	const char* suite_filter;
-	size_t      suite_filter_len;
-	bool        has_suite_filter;
-	bool        ran_any_suite = false;
+	size_t suite_filter_len;
+	bool has_suite_filter;
+	bool ran_any_suite = false;
 
 	has_suite_filter = selftest_cmdline_requested_suite(&suite_filter, &suite_filter_len);
 
@@ -115,9 +116,9 @@ bool kernel_selftests_run(void) {
 	}
 
 	printf("selftest: summary: %zu passed, %zu failed, %zu assertions\n",
-	       case_total - case_failed,
-	       case_failed,
-	       assertion_total);
+			case_total - case_failed,
+			case_failed,
+			assertion_total);
 	printf("selftest: result: %s\n", case_failed == 0 ? "PASS" : "FAIL");
 	return case_failed == 0;
 }

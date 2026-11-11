@@ -1,9 +1,9 @@
 #include <base/time.h>
+#include <hal/clock.h>
+#include <hal/hcf.h>
 #include <core/kthread.h>
 #include <core/rwlock.h>
 #include <core/sched.h>
-#include <hal/clock.h>
-#include <hal/hcf.h>
 
 static bool rwlock_can_grant_read_locked(const struct rwlock* rwlock) {
 	return rwlock->writer == NULL && rwlock->waiting_writers == 0u;
@@ -21,22 +21,22 @@ void rwlock_init(struct rwlock* rwlock) {
 	if (rwlock == NULL) return;
 
 	spinlock_init_class(&rwlock->lock, "rwlock_lock", SPINLOCK_ORDER_MUTEX, SPINLOCK_FLAG_IRQSAVE);
-	rwlock->reader_count    = 0u;
+	rwlock->reader_count = 0u;
 	rwlock->waiting_writers = 0u;
-	rwlock->writer          = NULL;
+	rwlock->writer = NULL;
 	thread_wait_queue_init(&rwlock->readers);
 	thread_wait_queue_init(&rwlock->writers);
 }
 
 bool rwlock_try_read_lock(struct rwlock* rwlock) {
 	struct irq_state state;
-	struct thread*   current;
-	bool             acquired = false;
+	struct thread* current;
+	bool acquired = false;
 
 	if (rwlock == NULL) return false;
 
 	current = sched_current_thread();
-	state   = spinlock_lock_irqsave(&rwlock->lock);
+	state = spinlock_lock_irqsave(&rwlock->lock);
 	if (rwlock->writer != current && rwlock_can_grant_read_locked(rwlock)) {
 		rwlock->reader_count++;
 		acquired = true;
@@ -82,7 +82,7 @@ void rwlock_read_lock(struct rwlock* rwlock) {
 
 bool rwlock_timed_read_lock(struct rwlock* rwlock, uint64_t timeout_ms) {
 	struct thread* current;
-	uint64_t       deadline_tick;
+	uint64_t deadline_tick;
 
 	if (rwlock == NULL) return false;
 
@@ -124,8 +124,8 @@ bool rwlock_timed_read_lock(struct rwlock* rwlock, uint64_t timeout_ms) {
 
 bool rwlock_try_write_lock(struct rwlock* rwlock) {
 	struct irq_state state;
-	struct thread*   current;
-	bool             acquired = false;
+	struct thread* current;
+	bool acquired = false;
 
 	if (rwlock == NULL) return false;
 
@@ -135,7 +135,7 @@ bool rwlock_try_write_lock(struct rwlock* rwlock) {
 	state = spinlock_lock_irqsave(&rwlock->lock);
 	if (rwlock_can_grant_write_locked(rwlock)) {
 		rwlock->writer = current;
-		acquired       = true;
+		acquired = true;
 	}
 	spinlock_unlock_irqrestore(&rwlock->lock, state);
 	return acquired;
@@ -143,7 +143,7 @@ bool rwlock_try_write_lock(struct rwlock* rwlock) {
 
 void rwlock_write_lock(struct rwlock* rwlock) {
 	struct thread* current;
-	bool           counted_waiter = false;
+	bool counted_waiter = false;
 
 	if (rwlock == NULL) return;
 
@@ -154,7 +154,7 @@ void rwlock_write_lock(struct rwlock* rwlock) {
 	for (;;) {
 		struct irq_state rwlock_state;
 		struct irq_state wait_state;
-		bool             wake_readers = false;
+		bool wake_readers = false;
 
 		rwlock_state = spinlock_lock_irqsave(&rwlock->lock);
 		if (counted_waiter && thread_should_cancel(current)) {
@@ -197,8 +197,8 @@ void rwlock_write_lock(struct rwlock* rwlock) {
 
 bool rwlock_timed_write_lock(struct rwlock* rwlock, uint64_t timeout_ms) {
 	struct thread* current;
-	uint64_t       deadline_tick;
-	bool           counted_waiter = false;
+	uint64_t deadline_tick;
+	bool counted_waiter = false;
 
 	if (rwlock == NULL) return false;
 
@@ -214,7 +214,7 @@ bool rwlock_timed_write_lock(struct rwlock* rwlock, uint64_t timeout_ms) {
 	for (;;) {
 		struct irq_state rwlock_state;
 		struct irq_state wait_state;
-		bool             wake_readers = false;
+		bool wake_readers = false;
 
 		rwlock_state = spinlock_lock_irqsave(&rwlock->lock);
 		if (counted_waiter && thread_should_cancel(current)) {
@@ -258,7 +258,7 @@ bool rwlock_timed_write_lock(struct rwlock* rwlock, uint64_t timeout_ms) {
 
 bool rwlock_read_unlock(struct rwlock* rwlock) {
 	struct irq_state state;
-	bool             wake_writer = false;
+	bool wake_writer = false;
 
 	if (rwlock == NULL) return false;
 
@@ -278,9 +278,9 @@ bool rwlock_read_unlock(struct rwlock* rwlock) {
 
 bool rwlock_write_unlock(struct rwlock* rwlock) {
 	struct irq_state state;
-	struct thread*   current;
-	bool             wake_writer  = false;
-	bool             wake_readers = false;
+	struct thread* current;
+	bool wake_writer = false;
+	bool wake_readers = false;
 
 	if (rwlock == NULL) return false;
 
@@ -311,8 +311,8 @@ bool rwlock_write_unlock(struct rwlock* rwlock) {
 
 bool rwlock_downgrade(struct rwlock* rwlock) {
 	struct irq_state state;
-	struct thread*   current;
-	bool             wake_readers = false;
+	struct thread* current;
+	bool wake_readers = false;
 
 	if (rwlock == NULL) return false;
 
@@ -327,7 +327,7 @@ bool rwlock_downgrade(struct rwlock* rwlock) {
 
 	rwlock->reader_count++;
 	rwlock->writer = NULL;
-	wake_readers   = rwlock_should_wake_readers_locked(rwlock);
+	wake_readers = rwlock_should_wake_readers_locked(rwlock);
 	spinlock_unlock_irqrestore(&rwlock->lock, state);
 
 	if (wake_readers) (void)sched_wake_all(&rwlock->readers);
@@ -337,12 +337,12 @@ bool rwlock_downgrade(struct rwlock* rwlock) {
 size_t rwlock_reader_count(const struct rwlock* rwlock) {
 	struct irq_state state;
 	struct spinlock* lock;
-	size_t           reader_count;
+	size_t reader_count;
 
 	if (rwlock == NULL) return 0u;
 
-	lock         = (struct spinlock*)&rwlock->lock;
-	state        = spinlock_lock_irqsave(lock);
+	lock = (struct spinlock*)&rwlock->lock;
+	state = spinlock_lock_irqsave(lock);
 	reader_count = rwlock->reader_count;
 	spinlock_unlock_irqrestore(lock, state);
 	return reader_count;

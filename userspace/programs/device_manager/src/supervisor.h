@@ -1,10 +1,11 @@
 #pragma once
 
-#include <base/cap.h>
-#include <base/process.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/cap.h>
+#include <base/process.h>
 
 #include "device.h"
 #include "driver.h"
@@ -29,33 +30,33 @@ enum dm_driver_binding_state {
 /* Bounded tail of bytes written by one driver to one standard stream. */
 struct dm_driver_log {
 	uint8_t* data;
-	size_t   size;
+	size_t size;
 };
 
 /* Runtime state for the active driver and any drivers that declined one device. */
 struct dm_driver_binding {
-	struct dm_device*            device;
-	struct dm_driver*            driver;
+	struct dm_device* device;
+	struct dm_driver* driver;
 	enum dm_driver_binding_state state;
-	uint64_t                     generation;
-	unsigned int                 restart_count;
-	process_id_t                 process_id;
-	cap_id_t                     process_cap;
-	syscall_status_t             last_wait_status;
-	uintptr_t                    last_exit_code;
-	struct dm_driver**           rejected_drivers;
-	size_t                       rejected_count;
-	struct dm_driver_log         stdout_log;
-	struct dm_driver_log         stderr_log;
-	struct dm_driver_binding*    next;
+	uint64_t generation;
+	unsigned int restart_count;
+	process_id_t process_id;
+	cap_id_t process_cap;
+	syscall_status_t last_wait_status;
+	uintptr_t last_exit_code;
+	struct dm_driver** rejected_drivers;
+	size_t rejected_count;
+	struct dm_driver_log stdout_log;
+	struct dm_driver_log stderr_log;
+	struct dm_driver_binding* next;
 };
 
 /* Private objects and all live binding state owned by the device manager. */
 struct dm_driver_supervisor {
-	cap_id_t                  self_cap;
-	cap_id_t                  control_cap;
-	cap_id_t                  stdout_cap;
-	cap_id_t                  stderr_cap;
+	cap_id_t self_cap;
+	cap_id_t control_cap;
+	cap_id_t stdout_cap;
+	cap_id_t stderr_cap;
 	struct dm_driver_binding* bindings;
 };
 
@@ -76,7 +77,7 @@ void dm_supervisor_device_committed(struct device_server* server, struct dm_devi
 
 /* Validate that a child transaction belongs to the parent's active driver generation. */
 bool dm_supervisor_authorize_child(struct device_server* server, const struct dm_device* parent, process_id_t caller,
-                                   struct dm_driver_binding** out_binding, uint64_t* out_generation);
+		struct dm_driver_binding** out_binding, uint64_t* out_generation);
 
 /* Schedule removal of a child subtree after its drivers stop. */
 syscall_status_t dm_supervisor_remove_child(struct device_server* server, struct dm_device* child);

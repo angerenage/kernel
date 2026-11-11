@@ -1,8 +1,9 @@
 #pragma once
 
-#include <base/cap.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+#include <base/cap.h>
 
 struct usb_msc_device {
 	cap_id_t transport_cap;
@@ -10,10 +11,10 @@ struct usb_msc_device {
 	uint64_t block_count;
 	uint32_t block_size;
 	uint32_t max_transfer_blocks;
-	uint8_t  bulk_in;
-	uint8_t  bulk_out;
-	uint8_t  interface_number;
-	bool     removable;
+	uint8_t bulk_in;
+	uint8_t bulk_out;
+	uint8_t interface_number;
+	bool removable;
 };
 
 bool usb_msc_initialize(cap_id_t device_cap, struct usb_msc_device* device);

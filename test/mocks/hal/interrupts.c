@@ -1,22 +1,22 @@
 #include <base/interrupt.h>
-#include <core/cpu.h>
 #include <hal/interrupts.h>
+#include <core/cpu.h>
 
-static _Thread_local bool                 hosted_irq_enabled = true;
-static const struct cpu*                  last_source_target;
-static bool                               last_source_unmasked_from_masked;
-static size_t                             source_unmask_count;
-static size_t                             source_mask_count;
-static bool                               source_mask_fails;
-static bool                               source_unmask_fails;
-static enum hal_interrupt_trigger         last_source_trigger;
-static enum hal_interrupt_polarity        last_source_polarity;
+static _Thread_local bool hosted_irq_enabled = true;
+static const struct cpu* last_source_target;
+static bool last_source_unmasked_from_masked;
+static size_t source_unmask_count;
+static size_t source_mask_count;
+static bool source_mask_fails;
+static bool source_unmask_fails;
+static enum hal_interrupt_trigger last_source_trigger;
+static enum hal_interrupt_polarity last_source_polarity;
 static struct hal_interrupt_message_range message_ranges[4] = {
 	{.domain = 0u, .delivery = {.domain = 0u, .base = 0u, .limit = 256u}}
 };
-static size_t                              message_range_count = 1u;
-static bool                                message_source_supported;
-static bool                                last_message_had_source;
+static size_t message_range_count = 1u;
+static bool message_source_supported;
+static bool last_message_had_source;
 static struct hal_interrupt_message_source last_message_source;
 
 const struct cpu* hal_interrupt_mock_last_target(void) {
@@ -91,8 +91,8 @@ bool hal_interrupt_source_domain_at(size_t index, struct hal_interrupt_source_do
 	return true;
 }
 
-bool hal_interrupt_source_resolve(uint64_t controller_register_address, uint32_t local_source_id,
-                                  struct hal_interrupt_source* out_source) {
+bool hal_interrupt_source_resolve(
+		uint64_t controller_register_address, uint32_t local_source_id, struct hal_interrupt_source* out_source) {
 	if (out_source == NULL) return false;
 	if (controller_register_address == INTERRUPT_SOURCE_CONTROLLER_PLATFORM) {
 		if (local_source_id >= 16u) return false;
@@ -109,18 +109,17 @@ bool hal_interrupt_source_claimable(const struct hal_interrupt_source* source) {
 }
 
 bool hal_interrupt_source_configuration_supported(const struct hal_interrupt_source* source,
-                                                  enum hal_interrupt_trigger         trigger,
-                                                  enum hal_interrupt_polarity        polarity) {
+		enum hal_interrupt_trigger trigger, enum hal_interrupt_polarity polarity) {
 	return source != NULL && trigger <= HAL_INTERRUPT_TRIGGER_LEVEL && polarity <= HAL_INTERRUPT_POLARITY_LOW;
 }
 
 bool hal_interrupt_source_info(const struct hal_interrupt_source* source, struct hal_interrupt_source_info* out_info) {
 	if (source == NULL || out_info == NULL || source->domain != 0u || source->number >= 256u) return false;
 	*out_info = (struct hal_interrupt_source_info){
-		.delivery     = {.domain = 0u, .base = source->number, .limit = source->number + 1u},
-		.target_kind  = HAL_INTERRUPT_TARGET_ROUTABLE,
+		.delivery = {.domain = 0u, .base = source->number, .limit = source->number + 1u},
+		.target_kind = HAL_INTERRUPT_TARGET_ROUTABLE,
 		.fixed_target = NULL
-    };
+	};
 	return true;
 }
 
@@ -130,20 +129,23 @@ bool hal_interrupt_source_target_supported(const struct hal_interrupt_source* so
 }
 
 bool hal_interrupt_source_init(struct hal_interrupt_source_state* state, const struct hal_interrupt_source* source,
-                               const struct hal_interrupt_delivery* delivery) {
+		const struct hal_interrupt_delivery* delivery) {
 	struct hal_interrupt_source_info info;
 	if (state == NULL || state->initialized || delivery == NULL || !hal_interrupt_source_info(source, &info) ||
-	    delivery->event.domain != info.delivery.domain || delivery->event.id < info.delivery.base ||
-	    delivery->event.id >= info.delivery.limit || !hal_interrupt_source_target_supported(source, delivery->target) ||
-	    delivery->trigger > HAL_INTERRUPT_TRIGGER_LEVEL || delivery->polarity > HAL_INTERRUPT_POLARITY_LOW)
+			delivery->event.domain != info.delivery.domain || delivery->event.id < info.delivery.base ||
+			delivery->event.id >= info.delivery.limit ||
+			!hal_interrupt_source_target_supported(source, delivery->target) ||
+			delivery->trigger > HAL_INTERRUPT_TRIGGER_LEVEL || delivery->polarity > HAL_INTERRUPT_POLARITY_LOW)
 		return false;
-	*state = (struct hal_interrupt_source_state){.source         = *source,
-	                                             .target         = delivery->target,
-	                                             .initialized    = true,
-	                                             .masked         = true,
-	                                             .edge_triggered = delivery->trigger == HAL_INTERRUPT_TRIGGER_EDGE};
-	last_source_target   = delivery->target;
-	last_source_trigger  = delivery->trigger;
+	*state = (struct hal_interrupt_source_state){
+		.source = *source,
+		.target = delivery->target,
+		.initialized = true,
+		.masked = true,
+		.edge_triggered = delivery->trigger == HAL_INTERRUPT_TRIGGER_EDGE
+	};
+	last_source_target = delivery->target;
+	last_source_trigger = delivery->trigger;
 	last_source_polarity = delivery->polarity;
 	return true;
 }
@@ -158,7 +160,7 @@ bool hal_interrupt_source_mask(struct hal_interrupt_source_state* state) {
 bool hal_interrupt_source_unmask(struct hal_interrupt_source_state* state) {
 	if (state == NULL || !state->initialized || source_unmask_fails) return false;
 	last_source_unmasked_from_masked = state->masked;
-	state->masked                    = false;
+	state->masked = false;
 	source_unmask_count++;
 	return true;
 }
@@ -181,32 +183,31 @@ bool hal_interrupt_message_range_at(size_t index, struct hal_interrupt_message_r
 	return true;
 }
 
-bool hal_interrupt_message_resolve(uint64_t controller_register_address, uint32_t producer_id,
-                                   struct hal_interrupt_message_context* out_context) {
+bool hal_interrupt_message_resolve(
+		uint64_t controller_register_address, uint32_t producer_id, struct hal_interrupt_message_context* out_context) {
 	if (controller_register_address != UINT64_MAX || producer_id != UINT32_MAX || out_context == NULL ||
-	    message_range_count == 0u)
+			message_range_count == 0u)
 		return false;
 	*out_context = (struct hal_interrupt_message_context){.domain = message_ranges[0].domain};
 	return true;
 }
 
-bool hal_interrupt_message_target_supported(uint32_t domain, const struct hal_interrupt_message_source* source,
-                                            const struct cpu* target) {
+bool hal_interrupt_message_target_supported(
+		uint32_t domain, const struct hal_interrupt_message_source* source, const struct cpu* target) {
 	return domain == 0u && target != NULL && (source == NULL || (message_source_supported && source->domain == domain));
 }
 
-bool hal_interrupt_message_init(struct hal_interrupt_message_state*         state,
-                                const struct hal_interrupt_message_request* request,
-                                struct hal_interrupt_message*               out_message) {
+bool hal_interrupt_message_init(struct hal_interrupt_message_state* state,
+		const struct hal_interrupt_message_request* request, struct hal_interrupt_message* out_message) {
 	if (state == NULL || state->initialized || request == NULL || out_message == NULL ||
-	    !hal_interrupt_message_target_supported(request->domain, request->source, request->target) ||
-	    request->event.domain != 0u)
+			!hal_interrupt_message_target_supported(request->domain, request->source, request->target) ||
+			request->event.domain != 0u)
 		return false;
 	bool in_range = false;
 	for (size_t index = 0u; index < message_range_count; index++) {
 		struct hal_interrupt_delivery_range range = message_ranges[index].delivery;
 		if (message_ranges[index].domain == request->domain && request->event.domain == range.domain &&
-		    request->event.id >= range.base && request->event.id < range.limit) {
+				request->event.id >= range.base && request->event.id < range.limit) {
 			in_range = true;
 			break;
 		}
@@ -214,7 +215,7 @@ bool hal_interrupt_message_init(struct hal_interrupt_message_state*         stat
 	if (!in_range) return false;
 	last_message_had_source = request->source != NULL;
 	if (request->source != NULL) last_message_source = *request->source;
-	*out_message       = (struct hal_interrupt_message){.address = 0xfee00000u, .data = request->event.id};
+	*out_message = (struct hal_interrupt_message){.address = 0xfee00000u, .data = request->event.id};
 	state->initialized = true;
 	return true;
 }

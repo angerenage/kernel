@@ -1,12 +1,13 @@
+#include <string.h>
+
 #include <base/interrupt.h>
-#include <core/cpu.h>
-#include <core/sched.h>
-#include <core/spinlock.h>
 #include <firmware/dt/device.h>
 #include <hal/cache.h>
 #include <hal/interrupts.h>
+#include <core/cpu.h>
+#include <core/sched.h>
+#include <core/spinlock.h>
 #include <kernel/cpu_boot.h>
-#include <string.h>
 
 #include "../selftest.h"
 #include "sync_helpers.h"
@@ -16,8 +17,8 @@
 #endif
 
 #if defined(PLATFORM_PC_LOONGARCH64) || defined(PLATFORM_PC_AARCH64)
-#include <core/pmm.h>
 #include <hal/paging.h>
+#include <core/pmm.h>
 #endif
 
 #if defined(PLATFORM_PC_LOONGARCH64)
@@ -60,13 +61,13 @@ static void kernel_selftest_cpu_x86_io_bitmap_invalidation_reaches_online_cpus(s
 static void kernel_selftest_cpu_x86_interrupt_ranges_are_stable(struct kernel_selftest_context* ctx) {
 	struct hal_interrupt_message_range low;
 	struct hal_interrupt_message_range high;
-	struct hal_interrupt_source        source = {.domain = 0u, .number = 0u};
-	struct hal_interrupt_source        irq0;
-	struct hal_interrupt_source        irq1;
-	struct hal_interrupt_source        irq2;
-	struct hal_interrupt_source        invalid;
-	struct hal_interrupt_source_info   source_before;
-	struct hal_interrupt_source_info   source_after;
+	struct hal_interrupt_source source = {.domain = 0u, .number = 0u};
+	struct hal_interrupt_source irq0;
+	struct hal_interrupt_source irq1;
+	struct hal_interrupt_source irq2;
+	struct hal_interrupt_source invalid;
+	struct hal_interrupt_source_info source_before;
+	struct hal_interrupt_source_info source_after;
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_resolve(INTERRUPT_SOURCE_CONTROLLER_PLATFORM, 0u, &irq0));
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_resolve(INTERRUPT_SOURCE_CONTROLLER_PLATFORM, 1u, &irq1));
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_resolve(INTERRUPT_SOURCE_CONTROLLER_PLATFORM, 2u, &irq2));
@@ -87,11 +88,11 @@ static void kernel_selftest_cpu_x86_interrupt_ranges_are_stable(struct kernel_se
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_info(&source, &source_before));
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_target_supported(&source, cpu_current()));
 	struct hal_interrupt_delivery source_delivery = {
-		.target   = cpu_current(),
-		.event    = {.domain = source_before.delivery.domain, .id = source_before.delivery.base},
-		.trigger  = HAL_INTERRUPT_TRIGGER_FIRMWARE,
+		.target = cpu_current(),
+		.event = {.domain = source_before.delivery.domain, .id = source_before.delivery.base},
+		.trigger = HAL_INTERRUPT_TRIGGER_FIRMWARE,
 		.polarity = HAL_INTERRUPT_POLARITY_FIRMWARE
-    };
+	};
 	struct hal_interrupt_source_state source_state = {0};
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_init(&source_state, &source, &source_delivery));
 	KERNEL_SELFTEST_ASSERT(ctx, source_state.initialized && source_state.masked);
@@ -100,19 +101,19 @@ static void kernel_selftest_cpu_x86_interrupt_ranges_are_stable(struct kernel_se
 	KERNEL_SELFTEST_ASSERT(ctx, !source_state.initialized);
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_info(&source, &source_after));
 	KERNEL_SELFTEST_ASSERT(ctx,
-	                       source_before.delivery.domain == source_after.delivery.domain &&
-	                           source_before.delivery.base == source_after.delivery.base &&
-	                           source_before.delivery.limit == source_after.delivery.limit &&
-	                           source_before.target_kind == source_after.target_kind &&
-	                           source_before.fixed_target == source_after.fixed_target);
+			source_before.delivery.domain == source_after.delivery.domain &&
+					source_before.delivery.base == source_after.delivery.base &&
+					source_before.delivery.limit == source_after.delivery.limit &&
+					source_before.target_kind == source_after.target_kind &&
+					source_before.fixed_target == source_after.fixed_target);
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_range_count() == 2u);
-	struct hal_interrupt_message         message;
-	struct hal_interrupt_message_state   state   = {0};
+	struct hal_interrupt_message message;
+	struct hal_interrupt_message_state state = {0};
 	struct hal_interrupt_message_request request = {
 		.domain = low.domain,
 		.target = cpu_current(),
-		.event  = {.domain = low.delivery.domain, .id = low.delivery.limit - 1u}
-    };
+		.event = {.domain = low.delivery.domain, .id = low.delivery.limit - 1u}
+	};
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_target_supported(request.domain, request.source, request.target));
 	struct cpu unsupported = {.arch_id = 256u};
 	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_message_target_supported(request.domain, request.source, &unsupported));
@@ -129,8 +130,8 @@ static void kernel_selftest_cpu_x86_interrupt_ranges_are_stable(struct kernel_se
 #if defined(PLATFORM_PC_AARCH64)
 static void kernel_selftest_cpu_gic_external_source_contract(struct kernel_selftest_context* ctx) {
 	struct hal_interrupt_source_domain_info domain;
-	struct hal_interrupt_source_info        info;
-	struct hal_interrupt_source             timer = {.domain = 0u, .number = 27u};
+	struct hal_interrupt_source_info info;
+	struct hal_interrupt_source timer = {.domain = 0u, .number = 27u};
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_domain_count() == 1u);
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_domain_at(0u, &domain));
 	KERNEL_SELFTEST_ASSERT(ctx, domain.domain == 0u && domain.first_source == 32u && domain.source_count > 0u);
@@ -141,11 +142,12 @@ static void kernel_selftest_cpu_gic_external_source_contract(struct kernel_selft
 	struct cpu unsupported = {.index = SIZE_MAX};
 	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_source_target_supported(&spi, &unsupported));
 	KERNEL_SELFTEST_ASSERT(ctx,
-	                       info.target_kind == HAL_INTERRUPT_TARGET_ROUTABLE && info.fixed_target == NULL &&
-	                           info.delivery.domain == 0u && info.delivery.base == spi.number &&
-	                           info.delivery.limit == spi.number + 1u);
-	struct hal_interrupt_source invalid = {.domain = domain.domain,
-	                                       .number = domain.first_source + domain.source_count};
+			info.target_kind == HAL_INTERRUPT_TARGET_ROUTABLE && info.fixed_target == NULL &&
+					info.delivery.domain == 0u && info.delivery.base == spi.number &&
+					info.delivery.limit == spi.number + 1u);
+	struct hal_interrupt_source invalid = {
+		.domain = domain.domain, .number = domain.first_source + domain.source_count
+	};
 	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_source_info(&invalid, &info));
 }
 #endif
@@ -154,10 +156,10 @@ static void kernel_selftest_cpu_gic_external_source_contract(struct kernel_selft
 #define KERNEL_SELFTEST_CPU_REMOTE_DISPATCH_TIMEOUT_MS 250u
 
 static void kernel_selftest_cpu_interrupt_source_lifecycle(struct kernel_selftest_context* ctx) {
-	struct hal_interrupt_source             source = {0};
-	struct hal_interrupt_source_info        info;
+	struct hal_interrupt_source source = {0};
+	struct hal_interrupt_source_info info;
 	struct hal_interrupt_source_domain_info domain;
-	bool                                    found = false;
+	bool found = false;
 	for (size_t domain_index = 0u; domain_index < hal_interrupt_source_domain_count() && !found; domain_index++) {
 		KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_domain_at(domain_index, &domain));
 		for (uint32_t offset = 0u; offset < domain.source_count; offset++) {
@@ -172,21 +174,21 @@ static void kernel_selftest_cpu_interrupt_source_lifecycle(struct kernel_selftes
 	const struct cpu* target = info.target_kind == HAL_INTERRUPT_TARGET_FIXED ? info.fixed_target : cpu_current();
 	KERNEL_SELFTEST_ASSERT(ctx, target != NULL && hal_interrupt_source_target_supported(&source, target));
 	struct hal_interrupt_delivery delivery = {
-		.target   = target,
-		.event    = {.domain = info.delivery.domain, .id = info.delivery.limit},
-		.trigger  = HAL_INTERRUPT_TRIGGER_FIRMWARE,
+		.target = target,
+		.event = {.domain = info.delivery.domain, .id = info.delivery.limit},
+		.trigger = HAL_INTERRUPT_TRIGGER_FIRMWARE,
 		.polarity = HAL_INTERRUPT_POLARITY_FIRMWARE
-    };
+	};
 	struct hal_interrupt_source_state state = {0};
 	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_source_init(&state, &source, &delivery));
 	KERNEL_SELFTEST_ASSERT(ctx, !state.initialized);
 	delivery.event.id = info.delivery.base;
-	bool initialized  = hal_interrupt_source_init(&state, &source, &delivery);
+	bool initialized = hal_interrupt_source_init(&state, &source, &delivery);
 	if (!initialized) {
 		KERNEL_SELFTEST_ASSERT(ctx, !state.initialized);
-		delivery.trigger  = HAL_INTERRUPT_TRIGGER_EDGE;
+		delivery.trigger = HAL_INTERRUPT_TRIGGER_EDGE;
 		delivery.polarity = HAL_INTERRUPT_POLARITY_HIGH;
-		initialized       = hal_interrupt_source_init(&state, &source, &delivery);
+		initialized = hal_interrupt_source_init(&state, &source, &delivery);
 	}
 	KERNEL_SELFTEST_ASSERT(ctx, initialized && state.initialized && state.masked);
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_mask(&state) && state.masked);
@@ -201,10 +203,10 @@ static void kernel_selftest_cpu_interrupt_message_lifecycle(struct kernel_selfte
 	struct hal_interrupt_message_request request = {
 		.domain = range.domain,
 		.target = cpu_current(),
-		.event  = {.domain = range.delivery.domain, .id = range.delivery.limit}
-    };
+		.event = {.domain = range.delivery.domain, .id = range.delivery.limit}
+	};
 	if (!hal_interrupt_message_target_supported(request.domain, request.source, request.target)) return;
-	struct hal_interrupt_message       message;
+	struct hal_interrupt_message message;
 	struct hal_interrupt_message_state state = {0};
 	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_message_init(&state, &request, &message));
 	KERNEL_SELFTEST_ASSERT(ctx, !state.initialized);
@@ -223,16 +225,16 @@ static void kernel_selftest_cpu_global_executable_sync(struct kernel_selftest_co
 
 #if defined(PLATFORM_PC_RISCV64)
 static void kernel_selftest_cpu_plic_firmware_source_contract(struct kernel_selftest_context* ctx) {
-	uintptr_t                        controller   = 0u;
-	struct hal_interrupt_source      source       = {.domain = 1u, .number = 1u};
-	struct hal_interrupt_source      aplic_source = {.domain = 2u, .number = 1u};
+	uintptr_t controller = 0u;
+	struct hal_interrupt_source source = {.domain = 1u, .number = 1u};
+	struct hal_interrupt_source aplic_source = {.domain = 2u, .number = 1u};
 	struct hal_interrupt_source_info info;
-	struct dt_node                   node = dt_device_at("sifive,plic-1.0.0", 0u);
+	struct dt_node node = dt_device_at("sifive,plic-1.0.0", 0u);
 	if (!dt_node_valid(node)) node = dt_device_at("riscv,plic0", 0u);
 	struct dt_reg reg;
-	size_t        described = dt_node_reg(node, 0u, &reg) && reg.address <= UINTPTR_MAX ? 1u : 0u;
+	size_t described = dt_node_reg(node, 0u, &reg) && reg.address <= UINTPTR_MAX ? 1u : 0u;
 	if (described != 0u) controller = (uintptr_t)reg.address;
-	bool available       = hal_interrupt_source_info(&source, &info);
+	bool available = hal_interrupt_source_info(&source, &info);
 	bool aplic_available = hal_interrupt_source_info(&aplic_source, &info);
 	if (described == 0u) {
 		KERNEL_SELFTEST_ASSERT(ctx, !available);
@@ -256,8 +258,8 @@ static void kernel_selftest_cpu_plic_firmware_source_contract(struct kernel_self
 	struct cpu unsupported = {.arch_id = UINT64_MAX};
 	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_source_target_supported(&source, &unsupported));
 	KERNEL_SELFTEST_ASSERT(ctx,
-	                       info.target_kind == HAL_INTERRUPT_TARGET_ROUTABLE && info.fixed_target == NULL &&
-	                           info.delivery.base == source.number && info.delivery.limit == source.number + 1u);
+			info.target_kind == HAL_INTERRUPT_TARGET_ROUTABLE && info.fixed_target == NULL &&
+					info.delivery.base == source.number && info.delivery.limit == source.number + 1u);
 	struct hal_interrupt_source_domain_info domain;
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_domain_count() == (aplic_available ? 2u : 1u));
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_domain_at(0u, &domain));
@@ -270,7 +272,7 @@ static void kernel_selftest_cpu_plic_firmware_source_contract(struct kernel_self
 
 static void kernel_selftest_cpu_imsic_message_contract(struct kernel_selftest_context* ctx) {
 	struct hal_interrupt_message_range range;
-	bool                               described = dt_device_count("riscv,imsics") != 0u;
+	bool described = dt_device_count("riscv,imsics") != 0u;
 	if (!described) {
 		KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_range_count() == 0u);
 		KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_message_range_at(0u, &range));
@@ -279,32 +281,32 @@ static void kernel_selftest_cpu_imsic_message_contract(struct kernel_selftest_co
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_range_count() == 1u);
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_range_at(0u, &range));
 	KERNEL_SELFTEST_ASSERT(ctx, range.delivery.base == 1u && range.delivery.limit > range.delivery.base);
-	size_t             selected_controller;
+	size_t selected_controller;
 	struct dt_property ids_property;
-	uint64_t           ids;
-	KERNEL_SELFTEST_ASSERT(
-		ctx,
-		riscv64_imsic_selected_controller(&selected_controller) &&
-			dt_node_property(dt_device_at("riscv,imsics", selected_controller), "riscv,num-ids", &ids_property) &&
-			ids_property.size == 4u && dt_property_read_cells(&ids_property, 0u, 1u, &ids) &&
-			range.delivery.limit == ids + 1u);
+	uint64_t ids;
+	KERNEL_SELFTEST_ASSERT(ctx,
+			riscv64_imsic_selected_controller(&selected_controller) &&
+					dt_node_property(
+							dt_device_at("riscv,imsics", selected_controller), "riscv,num-ids", &ids_property) &&
+					ids_property.size == 4u && dt_property_read_cells(&ids_property, 0u, 1u, &ids) &&
+					range.delivery.limit == ids + 1u);
 	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_message_range_at(1u, &range));
 	struct hal_interrupt_message_request request = {
 		.domain = range.domain,
 		.target = cpu_current(),
-		.event  = {.domain = range.delivery.domain, .id = range.delivery.limit - 1u}
-    };
+		.event = {.domain = range.delivery.domain, .id = range.delivery.limit - 1u}
+	};
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_target_supported(request.domain, request.source, request.target));
-	struct hal_interrupt_message       message;
+	struct hal_interrupt_message message;
 	struct hal_interrupt_message_state state = {0};
-	KERNEL_SELFTEST_ASSERT(
-		ctx,
-		!hal_interrupt_message_init(
-			&state,
-			&(struct hal_interrupt_message_request){
-				.domain = range.domain, .target = cpu_current(), .event = {.domain = range.delivery.domain, .id = 0u}
-    },
-			&message));
+	KERNEL_SELFTEST_ASSERT(ctx,
+			!hal_interrupt_message_init(&state,
+					&(struct hal_interrupt_message_request){
+						.domain = range.domain,
+						.target = cpu_current(),
+						.event = {.domain = range.delivery.domain, .id = 0u}
+					},
+					&message));
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_init(&state, &request, &message));
 	KERNEL_SELFTEST_ASSERT(ctx, message.address != 0u && message.address % 4096u == 0u);
 	KERNEL_SELFTEST_ASSERT(ctx, message.data == request.event.id);
@@ -313,10 +315,10 @@ static void kernel_selftest_cpu_imsic_message_contract(struct kernel_selftest_co
 		const struct cpu* remote = cpu_by_index((cpu_current()->index + 1u) % cpu_count());
 		if (remote != NULL && cpu_state_get(remote) == CPU_STATE_ONLINE) {
 			uint64_t local_address = message.address;
-			request.target         = remote;
-			request.event.id       = range.delivery.limit - 2u;
+			request.target = remote;
+			request.event.id = range.delivery.limit - 2u;
 			KERNEL_SELFTEST_ASSERT(
-				ctx, hal_interrupt_message_target_supported(request.domain, request.source, request.target));
+					ctx, hal_interrupt_message_target_supported(request.domain, request.source, request.target));
 			KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_init(&state, &request, &message));
 			KERNEL_SELFTEST_ASSERT(ctx, message.address != local_address);
 			KERNEL_SELFTEST_ASSERT(ctx, message.data == request.event.id);
@@ -329,19 +331,19 @@ static void kernel_selftest_cpu_aplic_source_starts_masked(struct kernel_selftes
 	if (dt_device_count("qemu,aplic") == 0u) return;
 	struct hal_interrupt_source_domain_info domain;
 	if (!hal_interrupt_source_domain_at(0u, &domain) || domain.domain != 2u) return;
-	struct hal_interrupt_source      source = {.domain = domain.domain, .number = domain.source_count};
+	struct hal_interrupt_source source = {.domain = domain.domain, .number = domain.source_count};
 	struct hal_interrupt_source_info info;
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_info(&source, &info));
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_target_supported(&source, cpu_current()));
 	struct hal_interrupt_delivery delivery = {
-		.target   = cpu_current(),
-		.event    = {.domain = info.delivery.domain, .id = info.delivery.base},
-		.trigger  = HAL_INTERRUPT_TRIGGER_EDGE,
+		.target = cpu_current(),
+		.event = {.domain = info.delivery.domain, .id = info.delivery.base},
+		.trigger = HAL_INTERRUPT_TRIGGER_EDGE,
 		.polarity = HAL_INTERRUPT_POLARITY_HIGH
-    };
-	struct hal_interrupt_source_state state   = {0};
-	struct hal_interrupt_delivery     invalid = delivery;
-	invalid.event.id                          = info.delivery.limit;
+	};
+	struct hal_interrupt_source_state state = {0};
+	struct hal_interrupt_delivery invalid = delivery;
+	invalid.event.id = info.delivery.limit;
 	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_source_init(&state, &source, &invalid));
 	KERNEL_SELFTEST_ASSERT(ctx, !state.initialized);
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_init(&state, &source, &delivery));
@@ -355,31 +357,32 @@ static void kernel_selftest_cpu_aplic_source_starts_masked(struct kernel_selftes
 #if defined(PLATFORM_PC_LOONGARCH64)
 static void kernel_selftest_cpu_loongarch_interrupt_contract(struct kernel_selftest_context* ctx) {
 	struct hal_interrupt_source_info info;
-	struct hal_interrupt_source      aggregate = {.domain = 0u, .number = 3u};
+	struct hal_interrupt_source aggregate = {.domain = 0u, .number = 3u};
 	KERNEL_SELFTEST_ASSERT(ctx, !hal_interrupt_source_info(&aggregate, &info));
 
-	bool                                    pch_described = dt_device_count("loongson,pch-pic-1.0") != 0u;
-	struct hal_interrupt_source_domain_info pch_domain    = {0};
-	bool                                    found_pch     = false;
+	bool pch_described = dt_device_count("loongson,pch-pic-1.0") != 0u;
+	struct hal_interrupt_source_domain_info pch_domain = {0};
+	bool found_pch = false;
 	for (size_t index = 0u; index < hal_interrupt_source_domain_count(); index++) {
 		struct hal_interrupt_source_domain_info domain;
 		KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_domain_at(index, &domain));
 		if (domain.domain >= 16u && domain.domain < 20u) {
 			pch_domain = domain;
-			found_pch  = true;
+			found_pch = true;
 		}
 	}
 	if (pch_described) KERNEL_SELFTEST_ASSERT(ctx, found_pch);
 	if (found_pch) {
-		struct hal_interrupt_source source = {.domain = pch_domain.domain,
-		                                      .number = pch_domain.first_source + pch_domain.source_count - 1u};
+		struct hal_interrupt_source source = {
+			.domain = pch_domain.domain, .number = pch_domain.first_source + pch_domain.source_count - 1u
+		};
 		KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_info(&source, &info));
 		struct hal_interrupt_delivery delivery = {
-			.target   = cpu_current(),
-			.event    = {.domain = info.delivery.domain, .id = info.delivery.base},
-			.trigger  = HAL_INTERRUPT_TRIGGER_FIRMWARE,
+			.target = cpu_current(),
+			.event = {.domain = info.delivery.domain, .id = info.delivery.base},
+			.trigger = HAL_INTERRUPT_TRIGGER_FIRMWARE,
 			.polarity = HAL_INTERRUPT_POLARITY_FIRMWARE
-        };
+		};
 		struct hal_interrupt_source_state state = {0};
 		KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_source_init(&state, &source, &delivery));
 		KERNEL_SELFTEST_ASSERT(ctx, state.initialized && state.masked);
@@ -389,7 +392,7 @@ static void kernel_selftest_cpu_loongarch_interrupt_contract(struct kernel_selft
 	}
 
 	struct hal_interrupt_message_range message_range;
-	bool                               msi_described = dt_device_count("loongson,pch-msi-1.0") != 0u;
+	bool msi_described = dt_device_count("loongson,pch-msi-1.0") != 0u;
 	if (!hal_interrupt_message_range_at(0u, &message_range)) {
 		KERNEL_SELFTEST_ASSERT(ctx, !msi_described && hal_interrupt_message_range_count() == 0u);
 		return;
@@ -398,15 +401,15 @@ static void kernel_selftest_cpu_loongarch_interrupt_contract(struct kernel_selft
 	struct hal_interrupt_message_request request = {
 		.domain = message_range.domain,
 		.target = cpu_current(),
-		.event  = {.domain = message_range.delivery.domain, .id = message_range.delivery.limit - 1u}
-    };
+		.event = {.domain = message_range.delivery.domain, .id = message_range.delivery.limit - 1u}
+	};
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_target_supported(request.domain, request.source, request.target));
-	struct hal_interrupt_message       message;
+	struct hal_interrupt_message message;
 	struct hal_interrupt_message_state state = {0};
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_init(&state, &request, &message));
 	KERNEL_SELFTEST_ASSERT(ctx,
-	                       message.address != 0u && state.initialized && state.event.domain == request.event.domain &&
-	                           state.event.id == request.event.id);
+			message.address != 0u && state.initialized && state.event.domain == request.event.domain &&
+					state.event.id == request.event.id);
 	if (request.domain == LOONGARCH64_MESSAGE_DOMAIN_AVEC) {
 		uint64_t expected = (pch_msi.address - LOONGARCH64_AVEC_MESSAGE_OFFSET) | ((uint64_t)request.event.id << 4u) |
 		                    (request.target->arch_id << 12u);
@@ -415,12 +418,12 @@ static void kernel_selftest_cpu_loongarch_interrupt_contract(struct kernel_selft
 	else if (request.domain == LOONGARCH64_MESSAGE_DOMAIN_REDIRECT) {
 		uint64_t expected = (pch_msi.address - LOONGARCH64_AVEC_MESSAGE_OFFSET) | (1u << 2u);
 		KERNEL_SELFTEST_ASSERT(
-			ctx, message.address == expected && message.data == state.redirect_index && message.data < 65536u);
+				ctx, message.address == expected && message.data == state.redirect_index && message.data < 65536u);
 	}
 	else {
 		KERNEL_SELFTEST_ASSERT(ctx,
-		                       request.domain == LOONGARCH64_MESSAGE_DOMAIN_PCH_MSI &&
-		                           message.address == pch_msi.address && message.data == request.event.id);
+				request.domain == LOONGARCH64_MESSAGE_DOMAIN_PCH_MSI && message.address == pch_msi.address &&
+						message.data == request.event.id);
 	}
 	KERNEL_SELFTEST_ASSERT(ctx, hal_interrupt_message_deinit(&state));
 }
@@ -428,7 +431,7 @@ static void kernel_selftest_cpu_loongarch_interrupt_contract(struct kernel_selft
 
 static void kernel_selftest_cpu_topology_is_consistent(struct kernel_selftest_context* ctx) {
 	struct cpu_topology* topology = cpu_topology_get();
-	struct cpu*          bsp      = cpu_bsp();
+	struct cpu* bsp = cpu_bsp();
 
 	KERNEL_SELFTEST_ASSERT_MSG(ctx, topology != NULL, "cpu topology is unavailable");
 	KERNEL_SELFTEST_ASSERT_MSG(ctx, topology->cpus != NULL, "cpu topology has no storage");
@@ -463,7 +466,7 @@ static void kernel_selftest_cpu_ids_are_unique_and_bindings_succeeded(struct ker
 
 		for (size_t j = i + 1; j < topology->cpu_count; j++) {
 			KERNEL_SELFTEST_ASSERT_MSG(
-				ctx, cpu->arch_id != topology->cpus[j].arch_id, "duplicate cpu arch_id discovered during boot");
+					ctx, cpu->arch_id != topology->cpus[j].arch_id, "duplicate cpu arch_id discovered during boot");
 		}
 	}
 }
@@ -482,12 +485,12 @@ static void kernel_selftest_cpu_current_accessors_match_bound_cpu(struct kernel_
 }
 
 static void kernel_selftest_cpu_irq_save_disable_tracks_nesting(struct kernel_selftest_context* ctx) {
-	struct cpu*      current = cpu_current();
+	struct cpu* current = cpu_current();
 	struct irq_state outer;
 	struct irq_state inner;
-	bool             irq_was_enabled;
-	bool             outer_saved = false;
-	bool             inner_saved = false;
+	bool irq_was_enabled;
+	bool outer_saved = false;
+	bool inner_saved = false;
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, current != NULL, "cpu_current returned NULL", cleanup);
 	irq_was_enabled = irq_enabled();
@@ -495,13 +498,13 @@ static void kernel_selftest_cpu_irq_save_disable_tracks_nesting(struct kernel_se
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, irq_enabled(), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, current->irq_disable_depth == 0u, cleanup);
 
-	outer       = irq_save_disable();
+	outer = irq_save_disable();
 	outer_saved = true;
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, outer.enabled, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !irq_enabled(), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, current->irq_disable_depth == 1u, cleanup);
 
-	inner       = irq_save_disable();
+	inner = irq_save_disable();
 	inner_saved = true;
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, inner.enabled == false, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !irq_enabled(), cleanup);
@@ -533,28 +536,28 @@ cleanup:
 static void kernel_selftest_cpu_spinlock_debug_checks_enforce_irqsave_and_order(struct kernel_selftest_context* ctx) {
 	struct spinlock paging = SPINLOCK_INIT_CLASS("paging_lock", SPINLOCK_ORDER_PAGING, SPINLOCK_FLAG_IRQSAVE);
 	struct spinlock address_space =
-		SPINLOCK_INIT_CLASS("address_space_lock", SPINLOCK_ORDER_VADDR, SPINLOCK_FLAG_IRQSAVE);
-	struct spinlock  irqsave    = SPINLOCK_INIT_CLASS("clock_lock", SPINLOCK_ORDER_CLOCK, SPINLOCK_FLAG_IRQSAVE);
-	struct cpu*      current    = cpu_current();
-	struct irq_state state      = {0};
-	bool             locked     = false;
-	bool             ready_prev = false;
-	bool             irq_was_enabled;
+			SPINLOCK_INIT_CLASS("address_space_lock", SPINLOCK_ORDER_VADDR, SPINLOCK_FLAG_IRQSAVE);
+	struct spinlock irqsave = SPINLOCK_INIT_CLASS("clock_lock", SPINLOCK_ORDER_CLOCK, SPINLOCK_FLAG_IRQSAVE);
+	struct cpu* current = cpu_current();
+	struct irq_state state = {0};
+	bool locked = false;
+	bool ready_prev = false;
+	bool irq_was_enabled;
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, current != NULL, "cpu_current returned NULL", cleanup);
-	ready_prev      = current->interrupts_ready;
+	ready_prev = current->interrupts_ready;
 	irq_was_enabled = irq_enabled();
 	cpu_interrupts_set_ready(current, true);
 	if (!irq_was_enabled) irq_enable_local();
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, irq_enabled(), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(
-		ctx, spinlock_debug_check_acquire(&irqsave) == SPINLOCK_DEBUG_CHECK_IRQSAVE_REQUIRED, cleanup);
+			ctx, spinlock_debug_check_acquire(&irqsave) == SPINLOCK_DEBUG_CHECK_IRQSAVE_REQUIRED, cleanup);
 
-	state  = spinlock_lock_irqsave(&paging);
+	state = spinlock_lock_irqsave(&paging);
 	locked = true;
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, current->irq_disable_depth == 1u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(
-		ctx, spinlock_debug_check_acquire(&address_space) == SPINLOCK_DEBUG_CHECK_ORDER, cleanup);
+			ctx, spinlock_debug_check_acquire(&address_space) == SPINLOCK_DEBUG_CHECK_ORDER, cleanup);
 
 cleanup:
 	if (locked) spinlock_unlock_irqrestore(&paging, state);
@@ -571,10 +574,10 @@ cleanup:
 
 struct kernel_selftest_cpu_remote_dispatch_state {
 	struct cpu* expected_cpu;
-	uintptr_t   actual_cpu;
-	uintptr_t   current_thread;
-	uint32_t    exception_depth;
-	uint32_t    ran;
+	uintptr_t actual_cpu;
+	uintptr_t current_thread;
+	uint32_t exception_depth;
+	uint32_t ran;
 #if defined(PLATFORM_PC_AARCH64)
 	uint64_t stack_selection;
 #endif
@@ -582,8 +585,8 @@ struct kernel_selftest_cpu_remote_dispatch_state {
 
 static struct kthread* kernel_selftest_cpu_remote_workers[KERNEL_SELFTEST_CPU_MAX_CPUS];
 static struct kernel_selftest_cpu_remote_dispatch_state kernel_selftest_cpu_remote_states[KERNEL_SELFTEST_CPU_MAX_CPUS];
-static struct sched_cpu_stats                           kernel_selftest_cpu_stats_before[KERNEL_SELFTEST_CPU_MAX_CPUS];
-static struct sched_cpu_stats                           kernel_selftest_cpu_stats_after[KERNEL_SELFTEST_CPU_MAX_CPUS];
+static struct sched_cpu_stats kernel_selftest_cpu_stats_before[KERNEL_SELFTEST_CPU_MAX_CPUS];
+static struct sched_cpu_stats kernel_selftest_cpu_stats_after[KERNEL_SELFTEST_CPU_MAX_CPUS];
 static bool kernel_selftest_cpu_remote_created[KERNEL_SELFTEST_CPU_MAX_CPUS];
 
 static void kernel_selftest_cpu_remote_dispatch_worker(void* arg) {
@@ -603,9 +606,9 @@ static void kernel_selftest_cpu_remote_dispatch_worker(void* arg) {
 }
 
 static void kernel_selftest_cpu_remote_dispatch_reaches_application_processors(struct kernel_selftest_context* ctx) {
-	struct kernel_selftest_clock_scope clock        = {0};
-	size_t                             total_cpus   = cpu_count();
-	size_t                             worker_count = 0u;
+	struct kernel_selftest_clock_scope clock = {0};
+	size_t total_cpus = cpu_count();
+	size_t worker_count = 0u;
 
 	memset(kernel_selftest_cpu_remote_workers, 0, sizeof(kernel_selftest_cpu_remote_workers));
 	memset(kernel_selftest_cpu_remote_states, 0, sizeof(kernel_selftest_cpu_remote_states));
@@ -618,7 +621,7 @@ static void kernel_selftest_cpu_remote_dispatch_reaches_application_processors(s
 
 	if (total_cpus == 1u) return;
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, kernel_selftest_clock_scope_begin(&clock), "failed to start a temporary clock source", cleanup);
+			ctx, kernel_selftest_clock_scope_begin(&clock), "failed to start a temporary clock source", cleanup);
 
 	for (size_t i = 0u; i < total_cpus; i++) {
 		struct cpu* cpu = cpu_by_index(i);
@@ -628,15 +631,14 @@ static void kernel_selftest_cpu_remote_dispatch_reaches_application_processors(s
 		KERNEL_SELFTEST_ASSERT_GOTO(ctx, sched_get_cpu_stats(cpu, &kernel_selftest_cpu_stats_before[i]), cleanup);
 
 		kernel_selftest_cpu_remote_states[i].expected_cpu = cpu;
-		KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-			ctx,
-			kernel_selftest_thread_create_with_preferred_cpu(&kernel_selftest_cpu_remote_workers[i],
-			                                                 "selftest/cpu-remote-dispatch",
-			                                                 kernel_selftest_cpu_remote_dispatch_worker,
-			                                                 &kernel_selftest_cpu_remote_states[i],
-			                                                 cpu),
-			"failed to create AP-targeted worker thread",
-			cleanup);
+		KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+				kernel_selftest_thread_create_with_preferred_cpu(&kernel_selftest_cpu_remote_workers[i],
+						"selftest/cpu-remote-dispatch",
+						kernel_selftest_cpu_remote_dispatch_worker,
+						&kernel_selftest_cpu_remote_states[i],
+						cpu),
+				"failed to create AP-targeted worker thread",
+				cleanup);
 		kernel_selftest_cpu_remote_created[i] = true;
 		worker_count++;
 	}
@@ -645,11 +647,10 @@ static void kernel_selftest_cpu_remote_dispatch_reaches_application_processors(s
 	for (size_t i = 0u; i < total_cpus; i++) {
 		if (!kernel_selftest_cpu_remote_created[i]) continue;
 		KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
-		                                kthread_timed_join(kernel_selftest_cpu_remote_workers[i],
-		                                                   KERNEL_SELFTEST_CPU_REMOTE_DISPATCH_TIMEOUT_MS,
-		                                                   NULL),
-		                                "AP-targeted worker did not finish before the dispatch timeout",
-		                                cleanup);
+				kthread_timed_join(
+						kernel_selftest_cpu_remote_workers[i], KERNEL_SELFTEST_CPU_REMOTE_DISPATCH_TIMEOUT_MS, NULL),
+				"AP-targeted worker did not finish before the dispatch timeout",
+				cleanup);
 	}
 
 	for (size_t i = 0u; i < total_cpus; i++) {
@@ -658,32 +659,28 @@ static void kernel_selftest_cpu_remote_dispatch_reaches_application_processors(s
 		if (!kernel_selftest_cpu_remote_created[i]) continue;
 
 		KERNEL_SELFTEST_ASSERT_GOTO(
-			ctx, __atomic_load_n(&kernel_selftest_cpu_remote_states[i].ran, __ATOMIC_ACQUIRE) != 0u, cleanup);
-		KERNEL_SELFTEST_ASSERT_GOTO(
-			ctx,
-			(struct cpu*)__atomic_load_n(&kernel_selftest_cpu_remote_states[i].actual_cpu, __ATOMIC_ACQUIRE) == cpu,
-			cleanup);
-		KERNEL_SELFTEST_ASSERT_GOTO(
-			ctx,
-			(struct thread*)__atomic_load_n(&kernel_selftest_cpu_remote_states[i].current_thread, __ATOMIC_ACQUIRE) ==
-				&kernel_selftest_cpu_remote_workers[i]->thread,
-			cleanup);
-		KERNEL_SELFTEST_ASSERT_GOTO(
-			ctx,
-			__atomic_load_n(&kernel_selftest_cpu_remote_states[i].exception_depth, __ATOMIC_ACQUIRE) == 0u,
-			cleanup);
+				ctx, __atomic_load_n(&kernel_selftest_cpu_remote_states[i].ran, __ATOMIC_ACQUIRE) != 0u, cleanup);
+		KERNEL_SELFTEST_ASSERT_GOTO(ctx,
+				(struct cpu*)__atomic_load_n(&kernel_selftest_cpu_remote_states[i].actual_cpu, __ATOMIC_ACQUIRE) == cpu,
+				cleanup);
+		KERNEL_SELFTEST_ASSERT_GOTO(ctx,
+				(struct thread*)__atomic_load_n(&kernel_selftest_cpu_remote_states[i].current_thread,
+						__ATOMIC_ACQUIRE) == &kernel_selftest_cpu_remote_workers[i]->thread,
+				cleanup);
+		KERNEL_SELFTEST_ASSERT_GOTO(ctx,
+				__atomic_load_n(&kernel_selftest_cpu_remote_states[i].exception_depth, __ATOMIC_ACQUIRE) == 0u,
+				cleanup);
 #if defined(PLATFORM_PC_AARCH64)
-		KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-			ctx,
-			__atomic_load_n(&kernel_selftest_cpu_remote_states[i].stack_selection, __ATOMIC_ACQUIRE) == 1u,
-			"AP kernel thread is not using SP_EL1",
-			cleanup);
+		KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+				__atomic_load_n(&kernel_selftest_cpu_remote_states[i].stack_selection, __ATOMIC_ACQUIRE) == 1u,
+				"AP kernel thread is not using SP_EL1",
+				cleanup);
 #endif
 		KERNEL_SELFTEST_ASSERT_GOTO(ctx, sched_get_cpu_stats(cpu, &kernel_selftest_cpu_stats_after[i]), cleanup);
 		KERNEL_SELFTEST_ASSERT_GOTO(ctx,
-		                            kernel_selftest_cpu_stats_after[i].context_switch_count >
-		                                kernel_selftest_cpu_stats_before[i].context_switch_count,
-		                            cleanup);
+				kernel_selftest_cpu_stats_after[i].context_switch_count >
+						kernel_selftest_cpu_stats_before[i].context_switch_count,
+				cleanup);
 	}
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, worker_count == cpu_online_count() - 1u, cleanup);
 
@@ -701,9 +698,9 @@ cleanup:
 #if defined(PLATFORM_PC_LOONGARCH64) || defined(PLATFORM_PC_AARCH64)
 static struct {
 	struct spinlock lock;
-	uint32_t        start;
-	uint32_t        waiting;
-	bool            irq_state_preserved;
+	uint32_t start;
+	uint32_t waiting;
+	bool irq_state_preserved;
 } kernel_selftest_cpu_sync_wait;
 
 static void kernel_selftest_cpu_sync_wait_worker(void* arg) {
@@ -718,14 +715,14 @@ static void kernel_selftest_cpu_sync_wait_worker(void* arg) {
 }
 
 static void kernel_selftest_cpu_sync_during_irq_disabled_lock_wait(struct kernel_selftest_context* ctx) {
-	struct kernel_selftest_clock_scope clock      = {0};
-	struct hal_paging_space*           space      = NULL;
-	struct pmm_extent                  allocation = {0};
-	struct kthread*                    worker     = NULL;
-	struct cpu*                        target     = NULL;
-	struct irq_state                   state      = {0};
-	bool                               locked     = false;
-	const struct hal_paging_info*      paging     = hal_paging_info();
+	struct kernel_selftest_clock_scope clock = {0};
+	struct hal_paging_space* space = NULL;
+	struct pmm_extent allocation = {0};
+	struct kthread* worker = NULL;
+	struct cpu* target = NULL;
+	struct irq_state state = {0};
+	bool locked = false;
+	const struct hal_paging_info* paging = hal_paging_info();
 
 	for (size_t i = 0u; i < cpu_count(); i++) {
 		struct cpu* cpu = cpu_by_index(i);
@@ -737,29 +734,32 @@ static void kernel_selftest_cpu_sync_during_irq_disabled_lock_wait(struct kernel
 	if (target == NULL) return;
 	memset(&kernel_selftest_cpu_sync_wait, 0, sizeof(kernel_selftest_cpu_sync_wait));
 	spinlock_init_class(
-		&kernel_selftest_cpu_sync_wait.lock, "selftest/sync-wait", SPINLOCK_ORDER_NONE, SPINLOCK_FLAG_IRQSAVE);
+			&kernel_selftest_cpu_sync_wait.lock, "selftest/sync-wait", SPINLOCK_ORDER_NONE, SPINLOCK_FLAG_IRQSAVE);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_clock_scope_begin(&clock), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, paging != NULL, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx,
-	                            pmm_alloc(&(const struct pmm_alloc_request){.size      = paging->minimum_leaf_size,
-	                                                                        .alignment = paging->minimum_leaf_size},
-	                                      &allocation),
-	                            cleanup);
+			pmm_alloc(
+					&(const struct pmm_alloc_request){
+						.size = paging->minimum_leaf_size, .alignment = paging->minimum_leaf_size
+					},
+					&allocation),
+			cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, hal_paging_space_create(&space), cleanup);
-	KERNEL_SELFTEST_ASSERT_GOTO(
-		ctx,
-		hal_paging_map(space,
-		               &(const struct hal_paging_map_request){.virtual_address  = 0x10000u,
-		                                                      .physical_address = allocation.address,
-		                                                      .size             = paging->minimum_leaf_size,
-		                                                      .flags            = HAL_PAGE_READ | HAL_PAGE_WRITE,
-		                                                      .memory_type      = MEMORY_TYPE_NORMAL}),
-		cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx,
-	                            kernel_selftest_thread_create_with_preferred_cpu(
-									&worker, "selftest/sync-wait", kernel_selftest_cpu_sync_wait_worker, NULL, target),
-	                            cleanup);
-	state  = spinlock_lock_irqsave(&kernel_selftest_cpu_sync_wait.lock);
+			hal_paging_map(space,
+					&(const struct hal_paging_map_request){
+						.virtual_address = 0x10000u,
+						.physical_address = allocation.address,
+						.size = paging->minimum_leaf_size,
+						.flags = HAL_PAGE_READ | HAL_PAGE_WRITE,
+						.memory_type = MEMORY_TYPE_NORMAL
+					}),
+			cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx,
+			kernel_selftest_thread_create_with_preferred_cpu(
+					&worker, "selftest/sync-wait", kernel_selftest_cpu_sync_wait_worker, NULL, target),
+			cleanup);
+	state = spinlock_lock_irqsave(&kernel_selftest_cpu_sync_wait.lock);
 	locked = true;
 	__atomic_store_n(&kernel_selftest_cpu_sync_wait.start, 1u, __ATOMIC_RELEASE);
 	for (size_t spins = 0u; spins < 10000000u; spins++) {
@@ -767,20 +767,19 @@ static void kernel_selftest_cpu_sync_during_irq_disabled_lock_wait(struct kernel
 		spinlock_relax();
 	}
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
-	                                __atomic_load_n(&kernel_selftest_cpu_sync_wait.waiting, __ATOMIC_ACQUIRE) != 0u,
-	                                "AP did not enter the IRQ-disabled lock wait",
-	                                cleanup);
+			__atomic_load_n(&kernel_selftest_cpu_sync_wait.waiting, __ATOMIC_ACQUIRE) != 0u,
+			"AP did not enter the IRQ-disabled lock wait",
+			cleanup);
 	/* The AP cannot take a maskable IPI or acquire our lock until both
 	 * synchronization operations finish. Repeat to check generation reuse. */
 	for (size_t round = 0u; round < 4u; round++) {
 		hal_cache_sync_executable_range_all_cpus((void*)(uintptr_t)&kernel_selftest_cpu_sync_wait_worker, 1u);
-		KERNEL_SELFTEST_ASSERT_GOTO(
-			ctx,
-			hal_paging_protect(space,
-			                   0x10000u,
-			                   paging->minimum_leaf_size,
-			                   (round & 1u) == 0u ? HAL_PAGE_READ : HAL_PAGE_READ | HAL_PAGE_WRITE),
-			cleanup);
+		KERNEL_SELFTEST_ASSERT_GOTO(ctx,
+				hal_paging_protect(space,
+						0x10000u,
+						paging->minimum_leaf_size,
+						(round & 1u) == 0u ? HAL_PAGE_READ : HAL_PAGE_READ | HAL_PAGE_WRITE),
+				cleanup);
 	}
 
 cleanup:
@@ -805,7 +804,7 @@ destroy:
 static struct {
 	uint32_t running;
 	uint32_t stop;
-	bool     interrupts_enabled;
+	bool interrupts_enabled;
 } kernel_selftest_cpu_busy;
 
 static void kernel_selftest_cpu_busy_worker(void* arg) {
@@ -819,9 +818,9 @@ static void kernel_selftest_cpu_busy_worker(void* arg) {
 }
 
 static void kernel_selftest_cpu_aarch64_sync_interrupts_busy_cpu(struct kernel_selftest_context* ctx) {
-	struct kernel_selftest_clock_scope clock  = {0};
-	struct kthread*                    worker = NULL;
-	struct cpu*                        target = NULL;
+	struct kernel_selftest_clock_scope clock = {0};
+	struct kthread* worker = NULL;
+	struct cpu* target = NULL;
 
 	for (size_t i = 0u; i < cpu_count(); i++) {
 		struct cpu* cpu = cpu_by_index(i);
@@ -834,15 +833,15 @@ static void kernel_selftest_cpu_aarch64_sync_interrupts_busy_cpu(struct kernel_s
 	memset(&kernel_selftest_cpu_busy, 0, sizeof(kernel_selftest_cpu_busy));
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_clock_scope_begin(&clock), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx,
-	                            kernel_selftest_thread_create_with_preferred_cpu(
-									&worker, "selftest/cpu-busy", kernel_selftest_cpu_busy_worker, NULL, target),
-	                            cleanup);
+			kernel_selftest_thread_create_with_preferred_cpu(
+					&worker, "selftest/cpu-busy", kernel_selftest_cpu_busy_worker, NULL, target),
+			cleanup);
 	for (size_t spins = 0u; spins < 10000000u; spins++) {
 		if (__atomic_load_n(&kernel_selftest_cpu_busy.running, __ATOMIC_ACQUIRE) != 0u) break;
 		spinlock_relax();
 	}
 	KERNEL_SELFTEST_ASSERT_GOTO(
-		ctx, __atomic_load_n(&kernel_selftest_cpu_busy.running, __ATOMIC_ACQUIRE) != 0u, cleanup);
+			ctx, __atomic_load_n(&kernel_selftest_cpu_busy.running, __ATOMIC_ACQUIRE) != 0u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_cpu_busy.interrupts_enabled, cleanup);
 	/* Stress reuse of the SGI: the sender must not advance a generation
 	 * before the receiver has consumed its pending interrupt at the GIC. */
@@ -865,13 +864,13 @@ static const struct kernel_selftest_case kernel_cpu_selftests[] = {
 #if defined(PLATFORM_PC_X86_64)
 	{.name = "x86_io_bitmap_ranges", .run = kernel_selftest_cpu_x86_io_bitmap_ranges},
 	{.name = "x86_io_bitmap_invalidation_reaches_online_cpus",
-	                               .run  = kernel_selftest_cpu_x86_io_bitmap_invalidation_reaches_online_cpus},
+		.run = kernel_selftest_cpu_x86_io_bitmap_invalidation_reaches_online_cpus},
 	{.name = "x86_interrupt_ranges_are_stable", .run = kernel_selftest_cpu_x86_interrupt_ranges_are_stable},
 #endif
 #if defined(PLATFORM_PC_AARCH64)
 	{.name = "gic_external_source_contract", .run = kernel_selftest_cpu_gic_external_source_contract},
 	{.name = "aarch64_sync_during_irq_disabled_lock_wait",
-	                               .run  = kernel_selftest_cpu_sync_during_irq_disabled_lock_wait},
+		.run = kernel_selftest_cpu_sync_during_irq_disabled_lock_wait},
 	{.name = "aarch64_sync_interrupts_busy_cpu", .run = kernel_selftest_cpu_aarch64_sync_interrupts_busy_cpu},
 #endif
 #if defined(PLATFORM_PC_RISCV64)
@@ -882,42 +881,42 @@ static const struct kernel_selftest_case kernel_cpu_selftests[] = {
 #if defined(PLATFORM_PC_LOONGARCH64)
 	{.name = "loongarch_interrupt_contract", .run = kernel_selftest_cpu_loongarch_interrupt_contract},
 	{.name = "loongarch_sync_during_irq_disabled_lock_wait",
-	                               .run  = kernel_selftest_cpu_sync_during_irq_disabled_lock_wait},
+		.run = kernel_selftest_cpu_sync_during_irq_disabled_lock_wait},
 #endif
 	{.name = "interrupt_source_lifecycle", .run = kernel_selftest_cpu_interrupt_source_lifecycle},
 	{.name = "interrupt_message_lifecycle", .run = kernel_selftest_cpu_interrupt_message_lifecycle},
 	{
-								   .name = "topology_is_consistent",
-								   .run  = kernel_selftest_cpu_topology_is_consistent,
-								   },
+		.name = "topology_is_consistent",
+		.run = kernel_selftest_cpu_topology_is_consistent,
+	},
 	{
-								   .name = "ids_are_unique_and_bindings_succeeded",
-								   .run  = kernel_selftest_cpu_ids_are_unique_and_bindings_succeeded,
-								   },
+		.name = "ids_are_unique_and_bindings_succeeded",
+		.run = kernel_selftest_cpu_ids_are_unique_and_bindings_succeeded,
+	},
 	{
-								   .name = "current_accessors_match_bound_cpu",
-								   .run  = kernel_selftest_cpu_current_accessors_match_bound_cpu,
-								   },
+		.name = "current_accessors_match_bound_cpu",
+		.run = kernel_selftest_cpu_current_accessors_match_bound_cpu,
+	},
 	{
-								   .name = "irq_save_disable_tracks_nesting",
-								   .run  = kernel_selftest_cpu_irq_save_disable_tracks_nesting,
-								   },
+		.name = "irq_save_disable_tracks_nesting",
+		.run = kernel_selftest_cpu_irq_save_disable_tracks_nesting,
+	},
 	{
-								   .name = "spinlock_debug_checks_enforce_irqsave_and_order",
-								   .run  = kernel_selftest_cpu_spinlock_debug_checks_enforce_irqsave_and_order,
-								   },
+		.name = "spinlock_debug_checks_enforce_irqsave_and_order",
+		.run = kernel_selftest_cpu_spinlock_debug_checks_enforce_irqsave_and_order,
+	},
 	{
-								   .name = "remote_dispatch_reaches_application_processors",
-								   .run  = kernel_selftest_cpu_remote_dispatch_reaches_application_processors,
-								   },
+		.name = "remote_dispatch_reaches_application_processors",
+		.run = kernel_selftest_cpu_remote_dispatch_reaches_application_processors,
+	},
 	{
-								   .name = "global_executable_sync_reaches_online_cpus",
-								   .run  = kernel_selftest_cpu_global_executable_sync,
-								   },
+		.name = "global_executable_sync_reaches_online_cpus",
+		.run = kernel_selftest_cpu_global_executable_sync,
+	},
 };
 
 const struct kernel_selftest_suite kernel_cpu_selftest_suite = {
-	.name       = "cpu",
-	.cases      = kernel_cpu_selftests,
+	.name = "cpu",
+	.cases = kernel_cpu_selftests,
 	.case_count = sizeof(kernel_cpu_selftests) / sizeof(kernel_cpu_selftests[0]),
 };

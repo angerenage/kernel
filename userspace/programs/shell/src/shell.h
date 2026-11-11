@@ -2,37 +2,38 @@
 
 struct shell_command;
 
-#include <base/cap.h>
-#include <base/process.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
+#include <base/cap.h>
+#include <base/process.h>
+
 enum {
-	SHELL_LINE_CAPACITY    = 4096u,
-	SHELL_PATH_CAPACITY    = 4096u,
+	SHELL_LINE_CAPACITY = 4096u,
+	SHELL_PATH_CAPACITY = 4096u,
 	SHELL_HISTORY_CAPACITY = 64u,
 };
 
 struct shell_history_entry {
-	char*  line;
+	char* line;
 	size_t size;
 };
 
 /* Mutable state owned by one shell process. */
 struct shell {
-	cap_id_t                   tty_cap;
-	process_id_t               tty_owner;
-	cap_id_t                   vfs_cap;
-	cap_id_t                   current_directory_cap;
-	cap_rights_t               current_directory_rights;
-	char                       current_directory[SHELL_PATH_CAPACITY];
-	size_t                     current_directory_size;
-	size_t                     terminal_columns;
-	size_t                     terminal_rows;
-	bool                       exit_requested;
+	cap_id_t tty_cap;
+	process_id_t tty_owner;
+	cap_id_t vfs_cap;
+	cap_id_t current_directory_cap;
+	cap_rights_t current_directory_rights;
+	char current_directory[SHELL_PATH_CAPACITY];
+	size_t current_directory_size;
+	size_t terminal_columns;
+	size_t terminal_rows;
+	bool exit_requested;
 	struct shell_history_entry history[SHELL_HISTORY_CAPACITY];
-	size_t                     history_count;
+	size_t history_count;
 };
 
 enum shell_input_result {
@@ -71,12 +72,12 @@ bool shell_resolve_path(const struct shell* shell, const char* path, size_t path
 
 /* Load, run, and wait for one foreground program. */
 enum shell_program_result shell_run_program(struct shell* shell, const char* command, size_t command_size, size_t argc,
-                                            const char* const argv[], uintptr_t* out_exit_code);
+		const char* const argv[], uintptr_t* out_exit_code);
 
 /* Launch one child without waiting, for concurrent pipeline execution. */
 enum shell_program_result shell_pipeline_start_program(struct shell* shell, const char* name, size_t argc,
-                                                       const char* const argv[], cap_id_t input, cap_id_t output,
-                                                       cap_id_t error, bool foreground, cap_id_t* out_process);
+		const char* const argv[], cap_id_t input, cap_id_t output, cap_id_t error, bool foreground,
+		cap_id_t* out_process);
 
 /* Builtins may be used in a pipeline without creating a separate process. */
 bool shell_is_builtin(const char* name);

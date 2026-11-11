@@ -1,12 +1,14 @@
-#include <boot/info.h>
-#include <core/mm.h>
-#include <criterion/criterion.h>
-#include <firmware/dt.h>
-#include <firmware/dt/device.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <boot/info.h>
+#include <firmware/dt.h>
+#include <firmware/dt/device.h>
+#include <core/mm.h>
+
+#include <criterion/criterion.h>
 
 #include "heap/test_support.h"
 
@@ -18,13 +20,13 @@
 #define TEST_STRINGS_OFFSET 0x1000u
 #define TEST_TOTAL_SIZE 0x1800u
 
-static uint8_t          test_arena[TEST_ARENA_SIZE] __attribute__((aligned(8)));
-static uint8_t          test_heap[64u * 1024u] __attribute__((aligned(4096)));
+static uint8_t test_arena[TEST_ARENA_SIZE] __attribute__((aligned(8)));
+static uint8_t test_heap[64u * 1024u] __attribute__((aligned(4096)));
 static struct mem_range test_ranges[3];
-static size_t           test_range_count;
+static size_t test_range_count;
 static struct boot_info test_boot_info;
-static size_t           test_structure_cursor;
-static size_t           test_strings_cursor;
+static size_t test_structure_cursor;
+static size_t test_strings_cursor;
 
 static bool test_dt_init(const void* dtb) {
 	test_boot_info.dtb_address = (uintptr_t)dtb;
@@ -43,23 +45,23 @@ static void test_reset(void) {
 	memset(test_arena, 0, sizeof(test_arena));
 	memset(test_ranges, 0, sizeof(test_ranges));
 	test_range_count = 1u;
-	test_ranges[0]   = (struct mem_range){
-		.base   = TEST_PHYSICAL_BASE,
+	test_ranges[0] = (struct mem_range){
+		.base = TEST_PHYSICAL_BASE,
 		.length = TEST_DTB_RANGE_SIZE,
-		.type   = MEM_RANGE_BOOTLOADER_RECLAIMABLE,
+		.type = MEM_RANGE_BOOTLOADER_RECLAIMABLE,
 	};
 	test_boot_info = (struct boot_info){
-		.memory_map        = test_ranges,
-		.memory_map_count  = test_range_count,
+		.memory_map = test_ranges,
+		.memory_map_count = test_range_count,
 		.direct_map_offset = (uintptr_t)test_arena - TEST_PHYSICAL_BASE,
 	};
 	test_structure_cursor = 0u;
-	test_strings_cursor   = 0u;
+	test_strings_cursor = 0u;
 }
 
 static size_t test_string(const char* value) {
 	size_t offset = test_strings_cursor;
-	size_t size   = strlen(value) + 1u;
+	size_t size = strlen(value) + 1u;
 
 	memcpy(test_arena + TEST_STRINGS_OFFSET + offset, value, size);
 	test_strings_cursor += size;
@@ -108,21 +110,21 @@ static void test_header(uint32_t version) {
 
 static void test_tree(uint32_t version) {
 	static const uint8_t compatible[] = "vendor,soc\0vendor,fallback\0";
-	static const uint8_t disabled[]   = "disabled\0";
-	static const uint8_t cells[]      = {0x12u, 0x34u, 0x56u, 0x78u, 0x9au, 0xbcu, 0xdeu, 0xf0u};
-	static const uint8_t phandle[]    = {0u, 0u, 0u, 7u};
-	size_t               compatible_name;
-	size_t               status_name;
-	size_t               cells_name;
-	size_t               phandle_name;
-	size_t               empty_name;
+	static const uint8_t disabled[] = "disabled\0";
+	static const uint8_t cells[] = {0x12u, 0x34u, 0x56u, 0x78u, 0x9au, 0xbcu, 0xdeu, 0xf0u};
+	static const uint8_t phandle[] = {0u, 0u, 0u, 7u};
+	size_t compatible_name;
+	size_t status_name;
+	size_t cells_name;
+	size_t phandle_name;
+	size_t empty_name;
 
 	test_reset();
 	compatible_name = test_string("compatible");
-	status_name     = test_string("status");
-	cells_name      = test_string("cells");
-	phandle_name    = test_string("phandle");
-	empty_name      = test_string("empty");
+	status_name = test_string("status");
+	cells_name = test_string("cells");
+	phandle_name = test_string("phandle");
+	empty_name = test_string("empty");
 	test_begin_node("");
 	test_begin_node("soc");
 	test_property(version, compatible_name, compatible, sizeof(compatible));
@@ -143,9 +145,9 @@ static void test_tree(uint32_t version) {
 
 static void test_version(uint32_t version) {
 	struct dt_property cells;
-	struct dt_node     root;
-	struct dt_node     soc;
-	uint64_t           value;
+	struct dt_node root;
+	struct dt_node soc;
+	uint64_t value;
 
 	test_tree(version);
 	cr_assert(test_dt_init(test_arena));
@@ -181,9 +183,9 @@ Test(dt, accepts_version_17) {
 }
 
 Test(dt, unavailable_provider_rejects_navigation_without_outputs) {
-	struct dt_property output  = {.data = test_arena, .size = 17u};
-	struct dt_node     invalid = DT_NODE_INVALID;
-	const char*        name    = "unchanged";
+	struct dt_property output = {.data = test_arena, .size = 17u};
+	struct dt_node invalid = DT_NODE_INVALID;
+	const char* name = "unchanged";
 
 	cr_assert_not(dt_node_valid(dt_root()));
 	cr_assert_not(dt_node_valid(dt_node_child(invalid)));
@@ -204,20 +206,20 @@ Test(dt, unavailable_provider_rejects_navigation_without_outputs) {
 Test(dt, traversal_properties_and_standard_predicates) {
 	struct dt_property property;
 	struct dt_property unchanged = {.data = test_arena, .size = 99u};
-	const char*        property_name;
-	const char*        unchanged_name = "unchanged";
-	struct dt_node     root;
-	struct dt_node     soc;
-	struct dt_node     child;
-	struct dt_node     off;
-	uint64_t           value;
+	const char* property_name;
+	const char* unchanged_name = "unchanged";
+	struct dt_node root;
+	struct dt_node soc;
+	struct dt_node child;
+	struct dt_node off;
+	uint64_t value;
 
 	test_tree(17u);
 	cr_assert(test_dt_init(test_arena));
-	root  = dt_root();
-	soc   = dt_node_child(root);
+	root = dt_root();
+	soc = dt_node_child(root);
 	child = dt_node_child(soc);
-	off   = dt_node_next(soc);
+	off = dt_node_next(soc);
 	cr_assert_str_eq(dt_node_name(root), "");
 	cr_assert_str_eq(dt_node_name(soc), "soc");
 	cr_assert_str_eq(dt_node_name(child), "child");
@@ -282,7 +284,7 @@ Test(dt, navigation_accepts_nop_before_root) {
 	test_token(9u);
 	test_header(17u);
 	cr_assert(test_dt_init(test_arena));
-	root  = dt_root();
+	root = dt_root();
 	child = dt_node_child(root);
 	cr_assert_eq(root.id, 4u);
 	cr_assert_str_eq(dt_node_name(child), "child");
@@ -291,26 +293,26 @@ Test(dt, navigation_accepts_nop_before_root) {
 
 Test(dt, decodes_and_translates_device_registers) {
 	static const uint8_t root_address_cells[] = {0u, 0u, 0u, 2u};
-	static const uint8_t root_size_cells[]    = {0u, 0u, 0u, 2u};
-	static const uint8_t bus_address_cells[]  = {0u, 0u, 0u, 1u};
-	static const uint8_t bus_size_cells[]     = {0u, 0u, 0u, 1u};
-	static const uint8_t ranges[]             = {0u, 0u, 0x10u, 0u, 0u, 0u, 0u, 1u, 0u, 0u, 0u, 0u, 0u, 1u, 0u, 0u};
-	static const uint8_t compatible[]         = "vendor,device\0";
-	static const uint8_t reg[]                = {0u, 0u, 0x12u, 0u, 0u, 0u, 1u, 0u};
-	size_t               address_cells_name;
-	size_t               size_cells_name;
-	size_t               ranges_name;
-	size_t               compatible_name;
-	size_t               reg_name;
-	struct dt_node       device;
-	struct dt_reg        decoded;
+	static const uint8_t root_size_cells[] = {0u, 0u, 0u, 2u};
+	static const uint8_t bus_address_cells[] = {0u, 0u, 0u, 1u};
+	static const uint8_t bus_size_cells[] = {0u, 0u, 0u, 1u};
+	static const uint8_t ranges[] = {0u, 0u, 0x10u, 0u, 0u, 0u, 0u, 1u, 0u, 0u, 0u, 0u, 0u, 1u, 0u, 0u};
+	static const uint8_t compatible[] = "vendor,device\0";
+	static const uint8_t reg[] = {0u, 0u, 0x12u, 0u, 0u, 0u, 1u, 0u};
+	size_t address_cells_name;
+	size_t size_cells_name;
+	size_t ranges_name;
+	size_t compatible_name;
+	size_t reg_name;
+	struct dt_node device;
+	struct dt_reg decoded;
 
 	test_reset();
 	address_cells_name = test_string("#address-cells");
-	size_cells_name    = test_string("#size-cells");
-	ranges_name        = test_string("ranges");
-	compatible_name    = test_string("compatible");
-	reg_name           = test_string("reg");
+	size_cells_name = test_string("#size-cells");
+	ranges_name = test_string("ranges");
+	compatible_name = test_string("compatible");
+	reg_name = test_string("reg");
 	test_begin_node("");
 	test_property(17u, address_cells_name, root_address_cells, sizeof(root_address_cells));
 	test_property(17u, size_cells_name, root_size_cells, sizeof(root_size_cells));
@@ -340,9 +342,9 @@ Test(dt, decodes_and_translates_device_registers) {
 
 Test(dt, rejects_offsets_inside_tokens) {
 	static const uint8_t fake_node[] = {0u, 0u, 0u, 1u};
-	struct dt_property   property;
-	size_t               property_name;
-	size_t               fake_id;
+	struct dt_property property;
+	size_t property_name;
+	size_t fake_id;
 
 	test_reset();
 	property_name = test_string("value");
@@ -360,9 +362,9 @@ Test(dt, rejects_offsets_inside_tokens) {
 
 Test(dt, accepts_property_padding_contents_but_rejects_name_padding) {
 	static const uint8_t value[] = {1u};
-	struct dt_property   property;
-	struct dt_node       child;
-	size_t               property_name;
+	struct dt_property property;
+	struct dt_node child;
+	size_t property_name;
 
 	test_reset();
 	property_name = test_string("value");
@@ -398,14 +400,14 @@ Test(dt, validates_hhdm_alignment_and_complete_memory_coverage) {
 	cr_assert_not(test_dt_init(test_arena + 1u));
 	test_ranges[0].type = MEM_RANGE_RESERVED;
 	cr_assert_not(test_dt_init(test_arena));
-	test_ranges[0].type   = MEM_RANGE_BOOTLOADER_RECLAIMABLE;
+	test_ranges[0].type = MEM_RANGE_BOOTLOADER_RECLAIMABLE;
 	test_ranges[0].length = 0x800u;
-	test_ranges[1]        = (struct mem_range){
-		.base   = TEST_PHYSICAL_BASE + 0x801u,
+	test_ranges[1] = (struct mem_range){
+		.base = TEST_PHYSICAL_BASE + 0x801u,
 		.length = TEST_DTB_RANGE_SIZE - 0x801u,
-		.type   = MEM_RANGE_BOOTLOADER_RECLAIMABLE,
+		.type = MEM_RANGE_BOOTLOADER_RECLAIMABLE,
 	};
-	test_range_count                = 2u;
+	test_range_count = 2u;
 	test_boot_info.memory_map_count = test_range_count;
 	cr_assert_not(test_dt_init(test_arena));
 	test_ranges[1].base--;
@@ -439,8 +441,8 @@ Test(dt, rejects_bad_versions_sizes_blocks_and_structure) {
 
 Test(dt, resolves_legacy_phandles) {
 	static const uint8_t phandle[] = {0u, 0u, 0u, 9u};
-	struct dt_node       node;
-	size_t               phandle_name;
+	struct dt_node node;
+	size_t phandle_name;
 
 	test_reset();
 	phandle_name = test_string("linux,phandle");
@@ -459,31 +461,31 @@ Test(dt, resolves_legacy_phandles) {
 
 Test(dt, resolves_pci_iommu_maps) {
 	static const uint8_t pci_type[] = "pci";
-	uint8_t              one_cell[4];
-	uint8_t              registers[16];
-	uint8_t              iommu_map[16];
-	uint64_t             controller_address;
-	uint32_t             source_id;
-	size_t               address_cells_name;
-	size_t               size_cells_name;
-	size_t               phandle_name;
-	size_t               iommu_cells_name;
-	size_t               reg_name;
-	size_t               device_type_name;
-	size_t               domain_name;
-	size_t               map_name;
-	size_t               mask_name;
+	uint8_t one_cell[4];
+	uint8_t registers[16];
+	uint8_t iommu_map[16];
+	uint64_t controller_address;
+	uint32_t source_id;
+	size_t address_cells_name;
+	size_t size_cells_name;
+	size_t phandle_name;
+	size_t iommu_cells_name;
+	size_t reg_name;
+	size_t device_type_name;
+	size_t domain_name;
+	size_t map_name;
+	size_t mask_name;
 
 	test_reset();
 	address_cells_name = test_string("#address-cells");
-	size_cells_name    = test_string("#size-cells");
-	phandle_name       = test_string("phandle");
-	iommu_cells_name   = test_string("#iommu-cells");
-	reg_name           = test_string("reg");
-	device_type_name   = test_string("device_type");
-	domain_name        = test_string("linux,pci-domain");
-	map_name           = test_string("iommu-map");
-	mask_name          = test_string("iommu-map-mask");
+	size_cells_name = test_string("#size-cells");
+	phandle_name = test_string("phandle");
+	iommu_cells_name = test_string("#iommu-cells");
+	reg_name = test_string("reg");
+	device_type_name = test_string("device_type");
+	domain_name = test_string("linux,pci-domain");
+	map_name = test_string("iommu-map");
+	mask_name = test_string("iommu-map-mask");
 	test_write_u32(one_cell, 2u);
 	test_write_u32(registers, 0u);
 	test_write_u32(registers + 4u, 0x100000u);
@@ -542,14 +544,14 @@ Test(dt, traverses_without_a_fixed_depth_limit) {
 
 Test(dt, rejects_ambiguous_phandles_and_malformed_string_lists) {
 	static const uint8_t compatible[] = {'o', 'k'};
-	static const uint8_t phandle[]    = {0u, 0u, 0u, 5u};
-	struct dt_property   property;
-	size_t               compatible_name;
-	size_t               phandle_name;
+	static const uint8_t phandle[] = {0u, 0u, 0u, 5u};
+	struct dt_property property;
+	size_t compatible_name;
+	size_t phandle_name;
 
 	test_reset();
 	compatible_name = test_string("compatible");
-	phandle_name    = test_string("phandle");
+	phandle_name = test_string("phandle");
 	test_begin_node("");
 	for (size_t index = 0u; index < 2u; index++) {
 		test_begin_node("node");

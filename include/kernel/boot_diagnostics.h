@@ -1,9 +1,10 @@
 #pragma once
 
-#include <boot/info.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <boot/info.h>
 
 /* Return true when boot-time diagnostic logging is enabled for the current image. */
 bool kernel_boot_diagnostics_enabled(void);

@@ -1,12 +1,14 @@
+#include <string.h>
+
 #include <base/cap.h>
 #include <base/startup.h>
+
+#include <system/display.h>
+#include <system/process.h>
 #include <runtime/filesystem.h>
 #include <runtime/heap.h>
 #include <runtime/registry.h>
 #include <runtime/startup.h>
-#include <string.h>
-#include <system/display.h>
-#include <system/process.h>
 
 int main(int argc, char** argv, size_t capc, const cap_id_t* capv);
 
@@ -21,12 +23,12 @@ void exit(uintptr_t code) {
 __attribute__((noreturn))
 void _start(const struct process_startup_info* startup) {
 	struct runtime_startup_arguments arguments;
-	enum runtime_startup_result      startup_result;
-	int                              main_result;
+	enum runtime_startup_result startup_result;
+	int main_result;
 
 	memset(__bss_start, 0, __bss_end - __bss_start);
 	if (startup == NULL || startup->size < sizeof(*startup) || startup->heap_base == 0u || startup->heap_size == 0u ||
-	    startup->memory_allocator_cap == CAP_ID_INVALID) {
+			startup->memory_allocator_cap == CAP_ID_INVALID) {
 		exit(PROCESS_EXIT_SYSTEM_INVALID_STARTUP);
 	}
 	registry_cap_id = startup->registry_cap;

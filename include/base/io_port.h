@@ -4,8 +4,9 @@
 #error "I/O-port access is only available on x86_64"
 #endif
 
-#include <base/cap.h>
 #include <stdint.h>
+
+#include <base/cap.h>
 
 #define IO_PORT_COUNT 65536u
 
@@ -19,7 +20,7 @@ enum io_port_op {
 };
 
 enum io_port_width {
-	IO_PORT_WIDTH_8  = 1u,
+	IO_PORT_WIDTH_8 = 1u,
 	IO_PORT_WIDTH_16 = 2u,
 	IO_PORT_WIDTH_32 = 4u,
 };
@@ -43,9 +44,9 @@ struct io_port_info {
 /* Request a contained child range with no additional rights. */
 struct io_port_derive_request {
 	struct io_port_request_header header;
-	uint32_t                      offset;
-	uint32_t                      count;
-	cap_rights_t                  rights;
+	uint32_t offset;
+	uint32_t count;
+	cap_rights_t rights;
 };
 
 /* Capability returned for a derived I/O-port range. */
@@ -56,8 +57,8 @@ struct io_port_derive_response {
 /* Request one syscall-backed port read at an offset within the range. */
 struct io_port_read_request {
 	struct io_port_request_header header;
-	uint32_t                      offset;
-	enum io_port_width            width;
+	uint32_t offset;
+	enum io_port_width width;
 };
 
 /* Zero-extended value returned by a syscall-backed port read. */
@@ -68,9 +69,9 @@ struct io_port_read_response {
 /* Request one syscall-backed port write at an offset within the range. */
 struct io_port_write_request {
 	struct io_port_request_header header;
-	uint32_t                      offset;
-	enum io_port_width            width;
-	uint32_t                      value;
+	uint32_t offset;
+	enum io_port_width width;
+	uint32_t value;
 };
 
 /* Read one byte from an I/O port. */

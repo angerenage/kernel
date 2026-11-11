@@ -1,13 +1,14 @@
 #include "apic.h"
 
-#include <boot/info.h>
-#include <firmware/acpi.h>
-#include <hal/interrupts.h>
-#include <hal/paging.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <boot/info.h>
+#include <firmware/acpi.h>
+#include <hal/interrupts.h>
+#include <hal/paging.h>
 
 #include "../utils.h"
 #include "vectors.h"
@@ -50,8 +51,8 @@
 
 struct x86_acpi_madt {
 	struct acpi_sdt_header header;
-	uint32_t               lapic_address;
-	uint32_t               flags;
+	uint32_t lapic_address;
+	uint32_t flags;
 } __attribute__((packed));
 
 struct x86_acpi_madt_entry_header {
@@ -61,54 +62,54 @@ struct x86_acpi_madt_entry_header {
 
 struct x86_acpi_madt_io_apic {
 	struct x86_acpi_madt_entry_header header;
-	uint8_t                           io_apic_id;
-	uint8_t                           reserved;
-	uint32_t                          io_apic_address;
-	uint32_t                          global_system_interrupt_base;
+	uint8_t io_apic_id;
+	uint8_t reserved;
+	uint32_t io_apic_address;
+	uint32_t global_system_interrupt_base;
 } __attribute__((packed));
 
 struct x86_acpi_madt_iso {
 	struct x86_acpi_madt_entry_header header;
-	uint8_t                           bus;
-	uint8_t                           source;
-	uint32_t                          global_system_interrupt;
-	uint16_t                          flags;
+	uint8_t bus;
+	uint8_t source;
+	uint32_t global_system_interrupt;
+	uint16_t flags;
 } __attribute__((packed));
 
 struct x86_acpi_madt_lapic_addr_override {
 	struct x86_acpi_madt_entry_header header;
-	uint16_t                          reserved;
-	uint64_t                          lapic_address;
+	uint16_t reserved;
+	uint64_t lapic_address;
 } __attribute__((packed));
 
-static bool              apic_active;
-static bool              lapic_ready;
+static bool apic_active;
+static bool lapic_ready;
 static volatile uint8_t* lapic_mmio;
-static uint32_t          ioapic_register_lock;
-static bool              ioapic_probed;
-static bool              sync_nmi_armed[X86_APIC_MAX_CPUS];
+static uint32_t ioapic_register_lock;
+static bool ioapic_probed;
+static bool sync_nmi_armed[X86_APIC_MAX_CPUS];
 
 static bool lapic_init(uintptr_t lapic_phys);
 
 struct x86_isa_route {
-	uintptr_t         lapic_phys;
+	uintptr_t lapic_phys;
 	volatile uint8_t* registers;
-	uint32_t          index;
-	uint16_t          flags;
-	bool              available;
+	uint32_t index;
+	uint16_t flags;
+	bool available;
 };
 
 static struct x86_isa_route isa_routes[X86_IRQ_COUNT];
 
 struct x86_ioapic {
-	uintptr_t         physical_address;
-	uintptr_t         lapic_phys;
+	uintptr_t physical_address;
+	uintptr_t lapic_phys;
 	volatile uint8_t* registers;
-	uint32_t          redirection_count;
+	uint32_t redirection_count;
 };
 
 static struct x86_ioapic ioapics[X86_IOAPIC_MAX_CONTROLLERS];
-static size_t            ioapic_count;
+static size_t ioapic_count;
 
 static bool boot_address_space(struct boot_address_space* out) {
 	return boot_address_space_get(out);
@@ -133,13 +134,13 @@ static bool map_mmio_page(uintptr_t phys) {
 	if (hal_paging_query(hal_paging_kernel_space(), virt, NULL)) return true;
 
 	return hal_paging_map(hal_paging_kernel_space(),
-	                      &(const struct hal_paging_map_request){
-							  virt,
-							  phys & ~(uintptr_t)(X86_PAGE_SIZE - 1u),
-							  X86_PAGE_SIZE,
-							  HAL_PAGE_READ | HAL_PAGE_WRITE | HAL_PAGE_GLOBAL,
-							  MEMORY_TYPE_DEVICE,
-						  });
+			&(const struct hal_paging_map_request){
+				virt,
+				phys & ~(uintptr_t)(X86_PAGE_SIZE - 1u),
+				X86_PAGE_SIZE,
+				HAL_PAGE_READ | HAL_PAGE_WRITE | HAL_PAGE_GLOBAL,
+				MEMORY_TYPE_DEVICE,
+			});
 }
 
 static uint32_t lapic_read(uint32_t reg) {
@@ -236,24 +237,24 @@ bool apic_probe_isa_irqs(void) {
 	if (ioapic_probed) return true;
 	for (uint32_t irq = 0u; irq < X86_IRQ_COUNT; irq++) isa_routes[irq] = (struct x86_isa_route){0};
 	memset(ioapics, 0, sizeof(ioapics));
-	ioapic_count                              = 0u;
+	ioapic_count = 0u;
 	const struct acpi_sdt_header* madt_header = acpi_table_next("APIC", NULL);
 	if (!madt_header || madt_header->length < sizeof(struct x86_acpi_madt)) {
 		ioapic_probed = true;
 		return true;
 	}
 
-	const struct x86_acpi_madt* madt       = (const struct x86_acpi_madt*)madt_header;
-	uintptr_t                   lapic_phys = (uintptr_t)madt->lapic_address;
-	uint32_t                    routed_gsi[X86_IRQ_COUNT];
-	uint16_t                    routed_flags[X86_IRQ_COUNT];
-	bool                        duplicate[X86_IRQ_COUNT] = {0};
+	const struct x86_acpi_madt* madt = (const struct x86_acpi_madt*)madt_header;
+	uintptr_t lapic_phys = (uintptr_t)madt->lapic_address;
+	uint32_t routed_gsi[X86_IRQ_COUNT];
+	uint16_t routed_flags[X86_IRQ_COUNT];
+	bool duplicate[X86_IRQ_COUNT] = {0};
 	for (uint32_t irq = 0u; irq < X86_IRQ_COUNT; irq++) {
-		routed_gsi[irq]   = irq;
+		routed_gsi[irq] = irq;
 		routed_flags[irq] = 0u;
 	}
 	const uint8_t* entry = (const uint8_t*)madt + sizeof(*madt);
-	const uint8_t* end   = (const uint8_t*)madt + madt->header.length;
+	const uint8_t* end = (const uint8_t*)madt + madt->header.length;
 
 	while (entry < end) {
 		size_t remaining = (size_t)(end - entry);
@@ -271,7 +272,7 @@ bool apic_probe_isa_irqs(void) {
 			if (header->length < sizeof(struct x86_acpi_madt_iso)) return false;
 			const struct x86_acpi_madt_iso* iso = (const struct x86_acpi_madt_iso*)entry;
 			if (iso->bus == 0u && iso->source < X86_IRQ_COUNT) {
-				routed_gsi[iso->source]   = iso->global_system_interrupt;
+				routed_gsi[iso->source] = iso->global_system_interrupt;
 				routed_flags[iso->source] = iso->flags;
 			}
 			break;
@@ -279,7 +280,7 @@ bool apic_probe_isa_irqs(void) {
 		case X86_ACPI_MADT_TYPE_LAPIC_ADDR_OVERRIDE: {
 			if (header->length < sizeof(struct x86_acpi_madt_lapic_addr_override)) return false;
 			const struct x86_acpi_madt_lapic_addr_override* override =
-				(const struct x86_acpi_madt_lapic_addr_override*)entry;
+					(const struct x86_acpi_madt_lapic_addr_override*)entry;
 			lapic_phys = (uintptr_t) override->lapic_address;
 			break;
 		}
@@ -291,22 +292,22 @@ bool apic_probe_isa_irqs(void) {
 	}
 
 	for (entry = (const uint8_t*)madt + sizeof(*madt); entry < end;
-	     entry += ((const struct x86_acpi_madt_entry_header*)entry)->length) {
+			entry += ((const struct x86_acpi_madt_entry_header*)entry)->length) {
 		const struct x86_acpi_madt_entry_header* header = (const struct x86_acpi_madt_entry_header*)entry;
 		if (header->type != X86_ACPI_MADT_TYPE_IO_APIC) continue;
 		const struct x86_acpi_madt_io_apic* io_apic = (const struct x86_acpi_madt_io_apic*)entry;
-		uintptr_t                           address = (uintptr_t)io_apic->io_apic_address;
+		uintptr_t address = (uintptr_t)io_apic->io_apic_address;
 		if (address == 0u || !map_mmio_page(address)) return false;
-		volatile uint8_t* registers   = (volatile uint8_t*)hhdm_phys_to_virt(address);
-		struct irq_state  irq         = ioapic_lock_acquire();
-		uint32_t          redir_count = ((ioapic_read(registers, X86_IOAPIC_VERSION_REG) >> 16) & 0xffu) + 1u;
+		volatile uint8_t* registers = (volatile uint8_t*)hhdm_phys_to_virt(address);
+		struct irq_state irq = ioapic_lock_acquire();
+		uint32_t redir_count = ((ioapic_read(registers, X86_IOAPIC_VERSION_REG) >> 16) & 0xffu) + 1u;
 		if (redir_count > 120u) {
 			ioapic_lock_release(irq);
 			return false;
 		}
 		for (uint32_t route = 0u; route < redir_count; route++) {
-			uint8_t  low_reg = (uint8_t)(X86_IOAPIC_REDIR_BASE + route * 2u);
-			uint32_t low     = ioapic_read(registers, low_reg);
+			uint8_t low_reg = (uint8_t)(X86_IOAPIC_REDIR_BASE + route * 2u);
+			uint32_t low = ioapic_read(registers, low_reg);
 			ioapic_write(registers, low_reg, low | X86_IOAPIC_REDIR_MASK);
 		}
 		ioapic_lock_release(irq);
@@ -314,21 +315,25 @@ bool apic_probe_isa_irqs(void) {
 		if (ioapic_count == X86_IOAPIC_MAX_CONTROLLERS) return false;
 		for (size_t previous = 0u; previous < ioapic_count; previous++)
 			if (ioapics[previous].physical_address == address) return false;
-		ioapics[ioapic_count++] = (struct x86_ioapic){.physical_address  = address,
-		                                              .lapic_phys        = lapic_phys,
-		                                              .registers         = registers,
-		                                              .redirection_count = redir_count};
+		ioapics[ioapic_count++] = (struct x86_ioapic){
+			.physical_address = address,
+			.lapic_phys = lapic_phys,
+			.registers = registers,
+			.redirection_count = redir_count
+		};
 		for (uint32_t irq = 0u; irq < X86_IRQ_COUNT; irq++) {
 			if (routed_gsi[irq] < base || routed_gsi[irq] - base >= redir_count) continue;
 			if (isa_routes[irq].available) {
 				duplicate[irq] = true;
 				continue;
 			}
-			isa_routes[irq] = (struct x86_isa_route){.lapic_phys = lapic_phys,
-			                                         .registers  = registers,
-			                                         .index      = routed_gsi[irq] - base,
-			                                         .flags      = routed_flags[irq],
-			                                         .available  = true};
+			isa_routes[irq] = (struct x86_isa_route){
+				.lapic_phys = lapic_phys,
+				.registers = registers,
+				.index = routed_gsi[irq] - base,
+				.flags = routed_flags[irq],
+				.available = true
+			};
 		}
 	}
 	for (uint32_t irq = 0u; irq < X86_IRQ_COUNT; irq++)
@@ -341,17 +346,17 @@ bool apic_isa_irq_available(unsigned irq) {
 	return irq < X86_IRQ_COUNT && ioapic_probed && isa_routes[irq].available;
 }
 
-bool apic_resolve_ioapic_source(uint64_t controller_address, uint32_t local_source_id,
-                                struct hal_interrupt_source* out_source) {
+bool apic_resolve_ioapic_source(
+		uint64_t controller_address, uint32_t local_source_id, struct hal_interrupt_source* out_source) {
 	if (out_source == NULL || controller_address > UINTPTR_MAX || (!ioapic_probed && !apic_probe_isa_irqs()))
 		return false;
 	for (size_t index = 0u; index < ioapic_count; index++) {
 		if (ioapics[index].physical_address != (uintptr_t)controller_address ||
-		    local_source_id >= ioapics[index].redirection_count)
+				local_source_id >= ioapics[index].redirection_count)
 			continue;
 		for (uint32_t irq = 0u; irq < X86_IRQ_COUNT; irq++) {
 			if (!isa_routes[irq].available || isa_routes[irq].registers != ioapics[index].registers ||
-			    isa_routes[irq].index != local_source_id)
+					isa_routes[irq].index != local_source_id)
 				continue;
 			*out_source = (struct hal_interrupt_source){.domain = 0u, .number = irq};
 			return true;
@@ -373,94 +378,94 @@ bool apic_ioapic_source_claimable(const struct hal_interrupt_source* source) {
 	size_t index = (size_t)source->domain - 1u;
 	for (uint32_t irq = 0u; irq < X86_IRQ_COUNT; irq++) {
 		if (isa_routes[irq].available && isa_routes[irq].registers == ioapics[index].registers &&
-		    isa_routes[irq].index == source->number)
+				isa_routes[irq].index == source->number)
 			return false;
 	}
 	return true;
 }
 
 static bool apic_route_ioapic(const struct x86_ioapic* selected, uint32_t route, uint16_t flags, unsigned vector,
-                              uint32_t target_lapic_id, enum hal_interrupt_trigger trigger,
-                              enum hal_interrupt_polarity polarity, uint32_t* out_route, uintptr_t* out_registers,
-                              bool* out_edge_triggered) {
+		uint32_t target_lapic_id, enum hal_interrupt_trigger trigger, enum hal_interrupt_polarity polarity,
+		uint32_t* out_route, uintptr_t* out_registers, bool* out_edge_triggered) {
 	if (selected == NULL || route >= selected->redirection_count || vector < 32u || vector >= 255u ||
-	    target_lapic_id > 255u || trigger > HAL_INTERRUPT_TRIGGER_LEVEL || polarity > HAL_INTERRUPT_POLARITY_LOW ||
-	    out_route == NULL || out_registers == NULL || out_edge_triggered == NULL || !lapic_init(selected->lapic_phys))
+			target_lapic_id > 255u || trigger > HAL_INTERRUPT_TRIGGER_LEVEL || polarity > HAL_INTERRUPT_POLARITY_LOW ||
+			out_route == NULL || out_registers == NULL || out_edge_triggered == NULL ||
+			!lapic_init(selected->lapic_phys))
 		return false;
-	uint64_t redir             = (uint64_t)vector | X86_IOAPIC_REDIR_MASK;
+	uint64_t redir = (uint64_t)vector | X86_IOAPIC_REDIR_MASK;
 	uint16_t firmware_polarity = flags & X86_ACPI_MADT_POLARITY_MASK;
-	uint16_t firmware_trigger  = flags & X86_ACPI_MADT_TRIGGER_MASK;
+	uint16_t firmware_trigger = flags & X86_ACPI_MADT_TRIGGER_MASK;
 	if (firmware_polarity == 2u || firmware_trigger == 8u) return false;
 	bool active_low =
-		polarity == HAL_INTERRUPT_POLARITY_LOW ||
-		(polarity == HAL_INTERRUPT_POLARITY_FIRMWARE && firmware_polarity == X86_ACPI_MADT_POLARITY_ACTIVE_LOW);
+			polarity == HAL_INTERRUPT_POLARITY_LOW ||
+			(polarity == HAL_INTERRUPT_POLARITY_FIRMWARE && firmware_polarity == X86_ACPI_MADT_POLARITY_ACTIVE_LOW);
 	bool level = trigger == HAL_INTERRUPT_TRIGGER_LEVEL ||
 	             (trigger == HAL_INTERRUPT_TRIGGER_FIRMWARE && firmware_trigger == X86_ACPI_MADT_TRIGGER_LEVEL);
 	if (active_low) redir |= X86_IOAPIC_REDIR_POLARITY_LOW;
 	if (level) redir |= X86_IOAPIC_REDIR_TRIGGER_LEVEL;
 	struct irq_state route_irq_state = ioapic_lock_acquire();
-	uint8_t          low_reg         = (uint8_t)(X86_IOAPIC_REDIR_BASE + route * 2u);
-	uint32_t         current_low     = ioapic_read(selected->registers, low_reg);
+	uint8_t low_reg = (uint8_t)(X86_IOAPIC_REDIR_BASE + route * 2u);
+	uint32_t current_low = ioapic_read(selected->registers, low_reg);
 	ioapic_write(selected->registers, low_reg, current_low | X86_IOAPIC_REDIR_MASK);
 	ioapic_write(selected->registers, (uint8_t)(low_reg + 1u), target_lapic_id << 24);
 	ioapic_write(selected->registers, low_reg, (uint32_t)redir);
 	ioapic_lock_release(route_irq_state);
-	*out_route          = route;
-	*out_registers      = (uintptr_t)selected->registers;
+	*out_route = route;
+	*out_registers = (uintptr_t)selected->registers;
 	*out_edge_triggered = !level;
-	apic_active         = true;
+	apic_active = true;
 	return true;
 }
 
 bool apic_route_isa_irq(unsigned irq, unsigned vector, uint32_t target_lapic_id, enum hal_interrupt_trigger trigger,
-                        enum hal_interrupt_polarity polarity, uint32_t* out_route, uintptr_t* out_registers,
-                        bool* out_edge_triggered) {
+		enum hal_interrupt_polarity polarity, uint32_t* out_route, uintptr_t* out_registers, bool* out_edge_triggered) {
 	if (irq >= X86_IRQ_COUNT || vector < 32u || vector >= 255u || out_route == NULL || out_registers == NULL ||
-	    out_edge_triggered == NULL || target_lapic_id > 255u || trigger > HAL_INTERRUPT_TRIGGER_LEVEL ||
-	    polarity > HAL_INTERRUPT_POLARITY_LOW || (!ioapic_probed && !apic_probe_isa_irqs()) ||
-	    !isa_routes[irq].available)
+			out_edge_triggered == NULL || target_lapic_id > 255u || trigger > HAL_INTERRUPT_TRIGGER_LEVEL ||
+			polarity > HAL_INTERRUPT_POLARITY_LOW || (!ioapic_probed && !apic_probe_isa_irqs()) ||
+			!isa_routes[irq].available)
 		return false;
 	const struct x86_isa_route* selected = &isa_routes[irq];
-	struct x86_ioapic           ioapic   = {
-		.lapic_phys = selected->lapic_phys, .registers = selected->registers, .redirection_count = 120u};
+	struct x86_ioapic ioapic = {
+		.lapic_phys = selected->lapic_phys, .registers = selected->registers, .redirection_count = 120u
+	};
 	return apic_route_ioapic(&ioapic,
-	                         selected->index,
-	                         selected->flags,
-	                         vector,
-	                         target_lapic_id,
-	                         trigger,
-	                         polarity,
-	                         out_route,
-	                         out_registers,
-	                         out_edge_triggered);
+			selected->index,
+			selected->flags,
+			vector,
+			target_lapic_id,
+			trigger,
+			polarity,
+			out_route,
+			out_registers,
+			out_edge_triggered);
 }
 
 bool apic_route_ioapic_source(const struct hal_interrupt_source* source, unsigned vector, uint32_t target_lapic_id,
-                              enum hal_interrupt_trigger trigger, enum hal_interrupt_polarity polarity,
-                              uint32_t* out_route, uintptr_t* out_registers, bool* out_edge_triggered) {
+		enum hal_interrupt_trigger trigger, enum hal_interrupt_polarity polarity, uint32_t* out_route,
+		uintptr_t* out_registers, bool* out_edge_triggered) {
 	if (!apic_ioapic_source_available(source)) return false;
 	return apic_route_ioapic(&ioapics[source->domain - 1u],
-	                         source->number,
-	                         0u,
-	                         vector,
-	                         target_lapic_id,
-	                         trigger,
-	                         polarity,
-	                         out_route,
-	                         out_registers,
-	                         out_edge_triggered);
+			source->number,
+			0u,
+			vector,
+			target_lapic_id,
+			trigger,
+			polarity,
+			out_route,
+			out_registers,
+			out_edge_triggered);
 }
 
 bool apic_set_isa_irq_mask(uintptr_t registers_address, uint32_t route, bool masked) {
-	uint8_t           low_reg;
-	uint32_t          low_value;
+	uint8_t low_reg;
+	uint32_t low_value;
 	volatile uint8_t* registers = (volatile uint8_t*)registers_address;
 
 	if (!apic_active || registers == NULL || route >= 120u) return false;
 
 	struct irq_state irq = ioapic_lock_acquire();
-	low_reg              = (uint8_t)(X86_IOAPIC_REDIR_BASE + route * 2u);
-	low_value            = ioapic_read(registers, low_reg);
+	low_reg = (uint8_t)(X86_IOAPIC_REDIR_BASE + route * 2u);
+	low_value = ioapic_read(registers, low_reg);
 	if (masked) {
 		low_value |= (uint32_t)X86_IOAPIC_REDIR_MASK;
 	}

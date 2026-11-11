@@ -1,9 +1,11 @@
 #pragma once
 
-#include <base/cap.h>
-#include <runtime/block.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+#include <base/cap.h>
+
+#include <runtime/block.h>
 
 enum fat32_result {
 	FAT32_RESULT_OK = 0u,
@@ -21,25 +23,25 @@ struct fat32_volume {
 	struct block_buffer buffer;
 	struct block_buffer fat_buffer;
 	struct block_buffer io_buffer;
-	uint32_t            sector_size;
-	uint64_t            total_sectors;
-	uint64_t            fat_base;
-	uint64_t            fat_start;
-	uint64_t            data_start;
-	uint32_t            fat_size;
-	uint32_t            fat_count;
-	uint32_t            sectors_per_cluster;
-	uint32_t            cluster_count;
-	uint32_t            root_cluster;
-	uint32_t            volume_id;
-	char                label[12];
-	uint32_t            allocation_hint;
-	uint64_t            cached_fat_sector;
-	uint16_t            fsinfo_sector;
-	uint16_t            backup_sector;
-	bool                fat_mirrored;
-	bool                fat_cache_valid;
-	bool                fsinfo_dirty;
+	uint32_t sector_size;
+	uint64_t total_sectors;
+	uint64_t fat_base;
+	uint64_t fat_start;
+	uint64_t data_start;
+	uint32_t fat_size;
+	uint32_t fat_count;
+	uint32_t sectors_per_cluster;
+	uint32_t cluster_count;
+	uint32_t root_cluster;
+	uint32_t volume_id;
+	char label[12];
+	uint32_t allocation_hint;
+	uint64_t cached_fat_sector;
+	uint16_t fsinfo_sector;
+	uint16_t backup_sector;
+	bool fat_mirrored;
+	bool fat_cache_valid;
+	bool fsinfo_dirty;
 };
 
 /* Open a block partition and validate its FAT32 boot metadata. */
@@ -49,12 +51,12 @@ enum fat32_result fat32_volume_open(cap_id_t device_cap, struct fat32_volume* ou
 void fat32_volume_close(struct fat32_volume* volume);
 
 /* Read consecutive volume-relative sectors into a provider-owned buffer. */
-enum fat32_result fat32_volume_read(struct fat32_volume* volume, struct block_buffer* buffer, uint64_t sector,
-                                    uint32_t count);
+enum fat32_result fat32_volume_read(
+		struct fat32_volume* volume, struct block_buffer* buffer, uint64_t sector, uint32_t count);
 
 /* Write consecutive volume-relative sectors from a provider-owned buffer. */
-enum fat32_result fat32_volume_write(struct fat32_volume* volume, struct block_buffer* buffer, uint64_t sector,
-                                     uint32_t count);
+enum fat32_result fat32_volume_write(
+		struct fat32_volume* volume, struct block_buffer* buffer, uint64_t sector, uint32_t count);
 
 /* Read one masked FAT32 entry from the selected FAT. */
 enum fat32_result fat32_volume_read_fat(struct fat32_volume* volume, uint32_t cluster, uint32_t* out_value);
@@ -66,8 +68,8 @@ enum fat32_result fat32_volume_write_fat(struct fat32_volume* volume, uint32_t c
 enum fat32_result fat32_volume_clear_clusters(struct fat32_volume* volume, const uint32_t* clusters, size_t count);
 
 /* Resolve one FAT entry and report whether it terminates the chain. */
-enum fat32_result fat32_volume_next_cluster(struct fat32_volume* volume, uint32_t cluster, uint32_t* out_next,
-                                            bool* out_end);
+enum fat32_result fat32_volume_next_cluster(
+		struct fat32_volume* volume, uint32_t cluster, uint32_t* out_next, bool* out_end);
 
 /* Fill every sector in one data cluster with zeroes. */
 enum fat32_result fat32_volume_zero_cluster(struct fat32_volume* volume, uint32_t cluster);

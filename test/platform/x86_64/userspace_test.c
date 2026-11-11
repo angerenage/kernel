@@ -1,7 +1,9 @@
-#include <criterion/criterion.h>
-#include <hal/userspace.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <hal/userspace.h>
+
+#include <criterion/criterion.h>
 
 #include "../../../platforms/pc_x86_64/hal/interrupts/frame.h"
 #include "../../../platforms/pc_x86_64/hal/interrupts/segments.h"
@@ -32,8 +34,8 @@ void hal_cpu_fp_context_restore(const struct hal_cpu_fp_context* context) {
 
 Test(x86_64_userspace, exposes_aligned_fp_context_storage) {
 	struct hal_cpu_fp_context context;
-	uintptr_t                 base = (uintptr_t)&context;
-	uintptr_t                 data = (uintptr_t)hal_cpu_fp_context_data(&context);
+	uintptr_t base = (uintptr_t)&context;
+	uintptr_t data = (uintptr_t)hal_cpu_fp_context_data(&context);
 
 	cr_assert_eq(data & (HAL_CPU_FP_CONTEXT_ALIGNMENT - 1u), 0u);
 	cr_assert(data >= base);
@@ -46,29 +48,29 @@ void x86_64_userspace_enter(void) {
 static struct user_interrupt_frame user_frame(void) {
 	return (struct user_interrupt_frame){
 		.frame =
-			{
-					.rax    = 0x01u,
-					.rbx    = 0x02u,
-					.rcx    = 0x03u,
-					.rdx    = 0x04u,
-					.rbp    = 0x05u,
-					.rdi    = 0x06u,
-					.rsi    = 0x07u,
-					.r8     = 0x08u,
-					.r9     = 0x09u,
-					.r10    = 0x0au,
-					.r11    = 0x0bu,
-					.r12    = 0x0cu,
-					.r13    = 0x0du,
-					.r14    = 0x0eu,
-					.r15    = 0x0fu,
+				{
+					.rax = 0x01u,
+					.rbx = 0x02u,
+					.rcx = 0x03u,
+					.rdx = 0x04u,
+					.rbp = 0x05u,
+					.rdi = 0x06u,
+					.rsi = 0x07u,
+					.r8 = 0x08u,
+					.r9 = 0x09u,
+					.r10 = 0x0au,
+					.r11 = 0x0bu,
+					.r12 = 0x0cu,
+					.r13 = 0x0du,
+					.r14 = 0x0eu,
+					.r15 = 0x0fu,
 					.vector = 0x80u,
-					.rip    = 0x1000u,
-					.cs     = X86_GDT_USER_CODE_SELECTOR | 0x3u,
+					.rip = 0x1000u,
+					.cs = X86_GDT_USER_CODE_SELECTOR | 0x3u,
 					.rflags = 0x202u,
-					},
+				},
 		.rsp = 0x8000u,
-		.ss  = X86_GDT_USER_DATA_SELECTOR | 0x3u,
+		.ss = X86_GDT_USER_DATA_SELECTOR | 0x3u,
 	};
 }
 
@@ -86,17 +88,17 @@ Test(x86_64_userspace, recognizes_only_complete_user_frames) {
 	cr_assert(hal_userspace_frame_is_user(opaque_const_frame(&frame)));
 	frame.frame.cs = 0x08u;
 	cr_assert_not(hal_userspace_frame_is_user(opaque_const_frame(&frame)));
-	frame    = user_frame();
+	frame = user_frame();
 	frame.ss = 0x10u;
 	cr_assert_not(hal_userspace_frame_is_user(opaque_const_frame(&frame)));
 	cr_assert_not(hal_userspace_frame_is_user(NULL));
 }
 
 Test(x86_64_userspace, saves_and_restores_the_complete_user_context) {
-	struct user_interrupt_frame  original = user_frame();
-	struct user_interrupt_frame  frame    = original;
+	struct user_interrupt_frame original = user_frame();
+	struct user_interrupt_frame frame = original;
 	struct hal_userspace_context context;
-	struct hal_cpu_fp_context    original_fp;
+	struct hal_cpu_fp_context original_fp;
 
 	memset(&live_fp_context, 0x5a, sizeof(live_fp_context));
 	original_fp = live_fp_context;
@@ -104,14 +106,14 @@ Test(x86_64_userspace, saves_and_restores_the_complete_user_context) {
 	memset(&frame, 0xa5, sizeof(frame));
 	memset(&live_fp_context, 0xa5, sizeof(live_fp_context));
 	frame.frame.cs = X86_GDT_USER_CODE_SELECTOR | 0x3u;
-	frame.ss       = X86_GDT_USER_DATA_SELECTOR | 0x3u;
+	frame.ss = X86_GDT_USER_DATA_SELECTOR | 0x3u;
 	cr_assert(hal_userspace_context_restore(opaque_frame(&frame), &context));
 	cr_assert_eq(memcmp(&frame, &original, sizeof(frame)), 0);
 	cr_assert_eq(memcmp(&live_fp_context, &original_fp, sizeof(original_fp)), 0);
 }
 
 Test(x86_64_userspace, rejects_non_user_saved_contexts) {
-	struct user_interrupt_frame  frame = user_frame();
+	struct user_interrupt_frame frame = user_frame();
 	struct hal_userspace_context context;
 
 	memset(&context, 0, sizeof(context));
@@ -138,13 +140,13 @@ Test(x86_64_userspace, redirects_with_sysv_stack_shape_and_safe_direction_flag) 
 	cr_assert_eq(frame.frame.r8, 0x55u);
 	cr_assert_eq(frame.frame.rflags & X86_RFLAGS_DIRECTION, 0u);
 
-	frame.frame.rip    = before.frame.rip;
-	frame.rsp          = before.rsp;
-	frame.frame.rdi    = before.frame.rdi;
-	frame.frame.rsi    = before.frame.rsi;
-	frame.frame.rdx    = before.frame.rdx;
-	frame.frame.rcx    = before.frame.rcx;
-	frame.frame.r8     = before.frame.r8;
+	frame.frame.rip = before.frame.rip;
+	frame.rsp = before.rsp;
+	frame.frame.rdi = before.frame.rdi;
+	frame.frame.rsi = before.frame.rsi;
+	frame.frame.rdx = before.frame.rdx;
+	frame.frame.rcx = before.frame.rcx;
+	frame.frame.r8 = before.frame.r8;
 	frame.frame.rflags = before.frame.rflags;
 	cr_assert_eq(memcmp(&frame, &before, sizeof(frame)), 0);
 }

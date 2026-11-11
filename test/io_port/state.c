@@ -4,7 +4,7 @@
 #include "../process/test_support.h"
 
 Test(io_port, mappings_are_lazy_independent_and_generation_cached) {
-	struct process*                  process = NULL;
+	struct process* process = NULL;
 	const struct hal_io_port_bitmap* bitmap;
 
 	init_process_test_environment();

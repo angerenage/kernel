@@ -1,11 +1,12 @@
 #pragma once
 
-#include <base/thread.h>
-#include <core/spinlock.h>
-#include <hal/cpu.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/thread.h>
+#include <hal/cpu.h>
+#include <core/spinlock.h>
 
 struct cpu;
 struct address_space;
@@ -18,9 +19,9 @@ enum {
 };
 
 enum {
-	THREAD_PRIORITY_MIN     = -20,
+	THREAD_PRIORITY_MIN = -20,
 	THREAD_PRIORITY_DEFAULT = 0,
-	THREAD_PRIORITY_MAX     = 20,
+	THREAD_PRIORITY_MAX = 20,
 };
 
 /* Thread entry function used for first-run bootstrap. */
@@ -42,14 +43,14 @@ enum thread_state {
 
 /* Persistent thread attributes and transient scheduler bookkeeping flags. */
 enum thread_flags {
-	THREAD_FLAG_NONE               = 0u,
-	THREAD_FLAG_IDLE               = 1u << 0,
-	THREAD_FLAG_QUEUED             = 1u << 1,
-	THREAD_FLAG_DETACHED           = 1u << 2,
-	THREAD_FLAG_CANCEL_PENDING     = 1u << 3,
-	THREAD_FLAG_CANCEL_DISABLED    = 1u << 4,
-	THREAD_FLAG_PARK_PERMIT        = 1u << 5,
-	THREAD_FLAG_INTERRUPT_PENDING  = 1u << 6,
+	THREAD_FLAG_NONE = 0u,
+	THREAD_FLAG_IDLE = 1u << 0,
+	THREAD_FLAG_QUEUED = 1u << 1,
+	THREAD_FLAG_DETACHED = 1u << 2,
+	THREAD_FLAG_CANCEL_PENDING = 1u << 3,
+	THREAD_FLAG_CANCEL_DISABLED = 1u << 4,
+	THREAD_FLAG_PARK_PERMIT = 1u << 5,
+	THREAD_FLAG_INTERRUPT_PENDING = 1u << 6,
 	THREAD_FLAG_WAIT_INTERRUPTIBLE = 1u << 7,
 };
 
@@ -85,29 +86,29 @@ enum thread_wait_status {
 
 /* Parameters used to initialize a non-idle thread descriptor. */
 struct thread_create_params {
-	const char*           name;
-	thread_entry_t        entry;
-	void*                 arg;
-	uintptr_t             kernel_stack_base;
-	uintptr_t             kernel_stack_top;
+	const char* name;
+	thread_entry_t entry;
+	void* arg;
+	uintptr_t kernel_stack_base;
+	uintptr_t kernel_stack_top;
 	struct address_space* address_space;
-	struct cpu*           preferred_cpu;
-	int32_t               base_priority;
-	bool                  detached;
+	struct cpu* preferred_cpu;
+	int32_t base_priority;
+	bool detached;
 };
 
 /* Parameters used when the caller already built an initial CPU context. */
 struct thread_context_params {
-	const char*                  name;
-	uintptr_t                    kernel_stack_base;
-	uintptr_t                    kernel_stack_top;
-	struct address_space*        address_space;
-	struct cpu*                  preferred_cpu;
-	int32_t                      base_priority;
-	bool                         detached;
+	const char* name;
+	uintptr_t kernel_stack_base;
+	uintptr_t kernel_stack_top;
+	struct address_space* address_space;
+	struct cpu* preferred_cpu;
+	int32_t base_priority;
+	bool detached;
 	const struct thread_context* context;
-	thread_entry_t               entry;
-	void*                        arg;
+	thread_entry_t entry;
+	void* arg;
 };
 
 /* Owner callback invoked from a safe stack after the scheduler publishes ZOMBIE. */
@@ -116,53 +117,53 @@ typedef void (*thread_reap_callback_t)(struct thread* thread, void* ctx);
 /* FIFO wait queue used by joins and other blocking synchronization points. */
 struct thread_wait_queue {
 	struct spinlock lock;
-	struct thread*  head;
-	struct thread*  tail;
-	size_t          depth;
+	struct thread* head;
+	struct thread* tail;
+	size_t depth;
 };
 
 /* Core thread descriptor shared by scheduler, wait queues, and higher-level thread wrappers. */
 struct thread {
 	const char* name;
 	/* Monotonic identity used instead of an address in traces. */
-	uint64_t                  trace_id;
-	struct cpu*               cpu;
-	struct cpu*               preferred_cpu;
-	enum thread_state         state;
-	enum thread_block_reason  block_reason;
-	uint32_t                  flags;
-	uintptr_t                 kernel_stack_base;
-	uintptr_t                 kernel_stack_top;
-	struct address_space*     address_space;
-	enum thread_owner_kind    owner_kind;
-	void*                     owner;
-	struct thread_context     context;
-	thread_entry_t            entry;
-	void*                     arg;
-	thread_exit_code_t        exit_code;
-	struct thread_wait_queue  join_wait_queue;
-	struct thread_wait_queue  park_wait_queue;
+	uint64_t trace_id;
+	struct cpu* cpu;
+	struct cpu* preferred_cpu;
+	enum thread_state state;
+	enum thread_block_reason block_reason;
+	uint32_t flags;
+	uintptr_t kernel_stack_base;
+	uintptr_t kernel_stack_top;
+	struct address_space* address_space;
+	enum thread_owner_kind owner_kind;
+	void* owner;
+	struct thread_context context;
+	thread_entry_t entry;
+	void* arg;
+	thread_exit_code_t exit_code;
+	struct thread_wait_queue join_wait_queue;
+	struct thread_wait_queue park_wait_queue;
 	struct thread_wait_queue* blocked_queue;
-	struct mutex*             owned_mutexes;
-	struct thread*            run_queue_next;
-	struct thread*            wait_queue_next;
-	struct thread*            sleep_queue_next;
-	uint64_t                  wake_deadline_tick;
-	uint32_t                  wait_status;
-	int32_t                   base_priority;
-	int32_t                   effective_priority;
-	uint32_t                  timeslice_ticks;
-	uint32_t                  timeslice_remaining;
-	thread_reap_callback_t    reap_callback;
-	void*                     reap_context;
+	struct mutex* owned_mutexes;
+	struct thread* run_queue_next;
+	struct thread* wait_queue_next;
+	struct thread* sleep_queue_next;
+	uint64_t wake_deadline_tick;
+	uint32_t wait_status;
+	int32_t base_priority;
+	int32_t effective_priority;
+	uint32_t timeslice_ticks;
+	uint32_t timeslice_remaining;
+	thread_reap_callback_t reap_callback;
+	void* reap_context;
 };
 
 /* Priority-ordered run queue with FIFO ordering among equal-priority threads. */
 struct run_queue {
 	struct spinlock lock;
-	struct thread*  head;
-	struct thread*  tail;
-	size_t          depth;
+	struct thread* head;
+	struct thread* tail;
+	size_t depth;
 };
 
 enum thread_init_result {

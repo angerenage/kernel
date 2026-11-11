@@ -1,12 +1,13 @@
 #include "editor.h"
 
-#include <runtime/tty_session.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <runtime/tty_session.h>
 
 #include "shell.h"
 
@@ -64,37 +65,37 @@ static size_t line_position(const struct shell_line_editor* editor, size_t offse
 	return shell_prompt_width(editor->shell) + count_codepoints(editor->line, offset);
 }
 
-static bool update_screen_origin(struct shell_line_editor*                     editor,
-                                 const struct tty_session_get_cursor_response* cursor) {
+static bool update_screen_origin(
+		struct shell_line_editor* editor, const struct tty_session_get_cursor_response* cursor) {
 	size_t prompt_position = shell_prompt_width(editor->shell);
-	size_t prompt_rows     = prompt_position / editor->shell->terminal_columns;
+	size_t prompt_rows = prompt_position / editor->shell->terminal_columns;
 
 	if (cursor->column != prompt_position % editor->shell->terminal_columns || cursor->row < prompt_rows ||
-	    cursor->row > INT64_MAX || cursor->line == 0u || prompt_rows >= cursor->line)
+			cursor->row > INT64_MAX || cursor->line == 0u || prompt_rows >= cursor->line)
 		return false;
-	editor->screen_origin_row  = (int64_t)cursor->row - (int64_t)prompt_rows;
+	editor->screen_origin_row = (int64_t)cursor->row - (int64_t)prompt_rows;
 	editor->screen_origin_line = cursor->line - prompt_rows;
 	return true;
 }
 
-static bool selection_position(const struct shell_line_editor* editor, size_t offset,
-                               struct tty_session_selection_position* out_position) {
+static bool selection_position(
+		const struct shell_line_editor* editor, size_t offset, struct tty_session_selection_position* out_position) {
 	size_t position;
 	size_t row;
 
 	if (offset > editor->size || out_position == NULL) return false;
 	position = line_position(editor, offset);
-	row      = position / editor->shell->terminal_columns;
+	row = position / editor->shell->terminal_columns;
 	if (row > UINT64_MAX - editor->screen_origin_line) return false;
 	*out_position = (struct tty_session_selection_position){
-		.line   = editor->screen_origin_line + row,
+		.line = editor->screen_origin_line + row,
 		.column = position % editor->shell->terminal_columns,
 	};
 	return true;
 }
 
-static int selection_position_compare(struct tty_session_selection_position left,
-                                      struct tty_session_selection_position right) {
+static int selection_position_compare(
+		struct tty_session_selection_position left, struct tty_session_selection_position right) {
 	if (left.line < right.line) return -1;
 	if (left.line > right.line) return 1;
 	if (left.column < right.column) return -1;
@@ -102,8 +103,8 @@ static int selection_position_compare(struct tty_session_selection_position left
 	return 0;
 }
 
-static bool selection_offset(const struct shell_line_editor* editor, struct tty_session_selection_position position,
-                             size_t* out_offset) {
+static bool selection_offset(
+		const struct shell_line_editor* editor, struct tty_session_selection_position position, size_t* out_offset) {
 	size_t prompt_position;
 	size_t end_position;
 	size_t row;
@@ -111,7 +112,7 @@ static bool selection_offset(const struct shell_line_editor* editor, struct tty_
 	size_t codepoints;
 
 	if (out_offset == NULL || position.line < editor->screen_origin_line ||
-	    position.column > editor->shell->terminal_columns)
+			position.column > editor->shell->terminal_columns)
 		return false;
 	if (position.line - editor->screen_origin_line > SIZE_MAX) return false;
 	row = (size_t)(position.line - editor->screen_origin_line);
@@ -120,19 +121,19 @@ static bool selection_offset(const struct shell_line_editor* editor, struct tty_
 	if (position.column > SIZE_MAX - logical_position) return false;
 	logical_position += (size_t)position.column;
 	prompt_position = shell_prompt_width(editor->shell);
-	end_position    = line_position(editor, editor->size);
+	end_position = line_position(editor, editor->size);
 	if (logical_position < prompt_position || logical_position > end_position) return false;
-	codepoints  = logical_position - prompt_position;
+	codepoints = logical_position - prompt_position;
 	*out_offset = byte_offset_for_codepoints(editor, codepoints);
 	return count_codepoints(editor->line, *out_offset) == codepoints;
 }
 
-static enum selection_range_result read_selection_range(struct shell_line_editor* editor,
-                                                        struct selection_range*   out_range) {
+static enum selection_range_result read_selection_range(
+		struct shell_line_editor* editor, struct selection_range* out_range) {
 	struct tty_session_get_selection_response selection;
-	struct tty_session_selection_position     first;
-	struct tty_session_selection_position     last;
-	syscall_status_t                          status;
+	struct tty_session_selection_position first;
+	struct tty_session_selection_position last;
+	syscall_status_t status;
 
 	status = tty_session_get_selection(editor->shell->tty_cap, &selection);
 	if (status == SYSCALL_STATUS_UNAVAILABLE) {
@@ -142,14 +143,14 @@ static enum selection_range_result read_selection_range(struct shell_line_editor
 	if (status != SYSCALL_STATUS_OK) return SELECTION_RANGE_FAILED;
 	if (selection_position_compare(selection.anchor, selection.focus) < 0) {
 		first = selection.anchor;
-		last  = selection.focus;
+		last = selection.focus;
 	}
 	else {
 		first = selection.focus;
-		last  = selection.anchor;
+		last = selection.anchor;
 	}
 	if (!selection_offset(editor, first, &out_range->first) || !selection_offset(editor, last, &out_range->last) ||
-	    out_range->first >= out_range->last) {
+			out_range->first >= out_range->last) {
 		editor->selection_active = false;
 		return SELECTION_RANGE_OUTSIDE;
 	}
@@ -166,7 +167,7 @@ static bool clear_selection(struct shell_line_editor* editor) {
 static bool reserve_render(struct shell_line_editor* editor, size_t additional) {
 	size_t required;
 	size_t capacity;
-	char*  resized;
+	char* resized;
 
 	if (additional > SIZE_MAX - editor->render_size) return false;
 	required = editor->render_size + additional;
@@ -181,7 +182,7 @@ static bool reserve_render(struct shell_line_editor* editor, size_t additional) 
 	}
 	resized = realloc(editor->render_data, capacity);
 	if (resized == NULL) return false;
-	editor->render_data     = resized;
+	editor->render_data = resized;
 	editor->render_capacity = capacity;
 	return true;
 }
@@ -199,9 +200,9 @@ static bool append_string(struct shell_line_editor* editor, const char* string) 
 }
 
 static bool append_csi(struct shell_line_editor* editor, size_t value, char final) {
-	char   sequence[3u + sizeof(size_t) * 3u];
+	char sequence[3u + sizeof(size_t) * 3u];
 	size_t end = sizeof(sequence);
-	size_t i   = end;
+	size_t i = end;
 
 	if (value == 0u) return true;
 	sequence[--i] = final;
@@ -222,17 +223,17 @@ static bool append_screen_cursor_move(struct shell_line_editor* editor, size_t f
 	size_t to_column;
 
 	if (columns == 0u) return false;
-	from_row    = from / columns;
-	to_row      = to / columns;
+	from_row = from / columns;
+	to_row = to / columns;
 	from_column = from % columns;
-	to_column   = to % columns;
+	to_column = to % columns;
 	if (to_row < from_row && !append_csi(editor, from_row - to_row, 'A')) return false;
 	if (to_row > from_row && !append_csi(editor, to_row - from_row, 'B')) return false;
 	return from_column == to_column || append_csi(editor, to_column + 1u, 'G');
 }
 
-static bool position_screen_row(const struct shell_line_editor* editor, size_t position, int64_t origin,
-                                int64_t* out_row) {
+static bool position_screen_row(
+		const struct shell_line_editor* editor, size_t position, int64_t origin, int64_t* out_row) {
 	size_t row = position / editor->shell->terminal_columns;
 
 	if (row > INT64_MAX || out_row == NULL) return false;
@@ -297,12 +298,12 @@ static struct quote_state quote_state_before(const struct shell_line_editor* edi
 }
 
 static bool append_colored_line(struct shell_line_editor* editor, size_t start, size_t end) {
-	struct quote_state state  = quote_state_before(editor, start);
-	bool               yellow = false;
+	struct quote_state state = quote_state_before(editor, start);
+	bool yellow = false;
 
 	for (size_t offset = start; offset < end; offset++) {
-		bool next_yellow =
-			state.quote != '\0' || (!state.escaped && (editor->line[offset] == '\'' || editor->line[offset] == '"'));
+		bool next_yellow = state.quote != '\0' ||
+		                   (!state.escaped && (editor->line[offset] == '\'' || editor->line[offset] == '"'));
 		if (next_yellow != yellow && !append_string(editor, next_yellow ? SHELL_QUOTE_COLOR : SHELL_DEFAULT_COLOR))
 			return false;
 		yellow = next_yellow;
@@ -313,8 +314,8 @@ static bool append_colored_line(struct shell_line_editor* editor, size_t start, 
 }
 
 static bool write_render(struct shell_line_editor* editor) {
-	bool success        = editor->render_size == 0u ||
-	                      fwrite(editor->render_data, 1u, editor->render_size, stdout) == editor->render_size;
+	bool success = editor->render_size == 0u ||
+	               fwrite(editor->render_data, 1u, editor->render_size, stdout) == editor->render_size;
 	editor->render_size = 0u;
 	return success;
 }
@@ -332,16 +333,16 @@ static bool append_spaces(struct shell_line_editor* editor, size_t count) {
 
 static bool redraw_window(struct shell_line_editor* editor, size_t target_position) {
 	struct tty_session_get_cursor_response cursor;
-	size_t                                 columns         = editor->shell->terminal_columns;
-	size_t                                 rows            = editor->shell->terminal_rows;
-	size_t                                 prompt_position = shell_prompt_width(editor->shell);
-	size_t                                 end_position    = line_position(editor, editor->size);
-	size_t                                 target_row      = target_position / columns;
-	size_t                                 last_row        = target_row;
-	size_t                                 render_end_position;
-	size_t                                 end_codepoint;
-	size_t                                 end_offset;
-	size_t                                 current_position;
+	size_t columns = editor->shell->terminal_columns;
+	size_t rows = editor->shell->terminal_rows;
+	size_t prompt_position = shell_prompt_width(editor->shell);
+	size_t end_position = line_position(editor, editor->size);
+	size_t target_row = target_position / columns;
+	size_t last_row = target_row;
+	size_t render_end_position;
+	size_t end_codepoint;
+	size_t end_offset;
+	size_t current_position;
 
 	if (rows == 0u || target_position > end_position || target_row > SIZE_MAX - rows / 2u) return false;
 	last_row += rows / 2u;
@@ -350,18 +351,18 @@ static bool redraw_window(struct shell_line_editor* editor, size_t target_positi
 	render_end_position = (last_row + 1u) * columns - 1u;
 	if (render_end_position > end_position) render_end_position = end_position;
 	end_codepoint = render_end_position > prompt_position ? render_end_position - prompt_position : 0u;
-	end_offset    = byte_offset_for_codepoints(editor, end_codepoint);
+	end_offset = byte_offset_for_codepoints(editor, end_codepoint);
 
 	editor->render_size = 0u;
 	if (!append_string(editor, "\x1b[2J\x1b[H") || !write_render(editor)) return false;
 	if (!shell_write_prompt(editor->shell)) return false;
 	if (tty_session_get_cursor(editor->shell->tty_cap, &cursor) != SYSCALL_STATUS_OK ||
-	    !update_screen_origin(editor, &cursor))
+			!update_screen_origin(editor, &cursor))
 		return false;
-	current_position    = prompt_position + count_codepoints(editor->line, end_offset);
+	current_position = prompt_position + count_codepoints(editor->line, end_offset);
 	editor->render_size = 0u;
 	if (!append_colored_line(editor, 0u, end_offset) ||
-	    !append_normalized_wrap(editor, prompt_position, current_position))
+			!append_normalized_wrap(editor, prompt_position, current_position))
 		return false;
 	editor->screen_origin_row = origin_after_render(editor, current_position);
 	if (!append_cursor_move(editor, current_position, target_position)) return false;
@@ -369,58 +370,58 @@ static bool redraw_window(struct shell_line_editor* editor, size_t target_positi
 }
 
 static bool refresh_visible_suffix(struct shell_line_editor* editor, size_t start, size_t start_position,
-                                   size_t old_cursor_position, size_t cursor_position) {
+		size_t old_cursor_position, size_t cursor_position) {
 	int64_t logical_rows = (int64_t)editor->shell->terminal_rows - editor->screen_origin_row;
-	size_t  limit_position;
-	size_t  limit_codepoint;
-	size_t  limit_offset;
-	size_t  last_screen_position;
-	size_t  target_screen_position;
+	size_t limit_position;
+	size_t limit_codepoint;
+	size_t limit_offset;
+	size_t last_screen_position;
+	size_t target_screen_position;
 
 	if (logical_rows <= 0 || (uint64_t)logical_rows > SIZE_MAX / editor->shell->terminal_columns) return false;
 	limit_position = (size_t)logical_rows * editor->shell->terminal_columns;
 	if (limit_position <= shell_prompt_width(editor->shell)) return false;
 	limit_codepoint = limit_position - shell_prompt_width(editor->shell);
-	limit_offset    = byte_offset_for_codepoints(editor, limit_codepoint);
+	limit_offset = byte_offset_for_codepoints(editor, limit_codepoint);
 	if (limit_offset <= start) return false;
-	last_screen_position   = editor->shell->terminal_rows * editor->shell->terminal_columns - 1u;
+	last_screen_position = editor->shell->terminal_rows * editor->shell->terminal_columns - 1u;
 	target_screen_position = screen_position(editor, cursor_position);
 
 	editor->render_size = 0u;
 	if (!append_cursor_move(editor, old_cursor_position, start_position) ||
-	    !append_colored_line(editor, start, limit_offset) ||
-	    !append_screen_cursor_move(editor, last_screen_position, target_screen_position))
+			!append_colored_line(editor, start, limit_offset) ||
+			!append_screen_cursor_move(editor, last_screen_position, target_screen_position))
 		return false;
 	if (last_screen_position == target_screen_position &&
-	    !append_csi(editor, target_screen_position % editor->shell->terminal_columns + 1u, 'G'))
+			!append_csi(editor, target_screen_position % editor->shell->terminal_columns + 1u, 'G'))
 		return false;
 	return write_render(editor);
 }
 
-static bool refresh_suffix(struct shell_line_editor* editor, size_t start, size_t old_cursor_position,
-                           size_t old_end_position) {
-	size_t  start_position    = line_position(editor, start);
-	size_t  end_position      = line_position(editor, editor->size);
-	size_t  cursor_position   = line_position(editor, editor->cursor);
-	size_t  rendered_position = old_end_position > end_position ? old_end_position : end_position;
-	int64_t next_origin       = origin_after_render(editor, rendered_position);
+static bool refresh_suffix(
+		struct shell_line_editor* editor, size_t start, size_t old_cursor_position, size_t old_end_position) {
+	size_t start_position = line_position(editor, start);
+	size_t end_position = line_position(editor, editor->size);
+	size_t cursor_position = line_position(editor, editor->cursor);
+	size_t rendered_position = old_end_position > end_position ? old_end_position : end_position;
+	int64_t next_origin = origin_after_render(editor, rendered_position);
 
 	if (position_visible(editor, old_cursor_position) && position_visible(editor, start_position) &&
-	    position_visible(editor, cursor_position) && !position_visible(editor, old_end_position) &&
-	    !position_visible(editor, end_position))
+			position_visible(editor, cursor_position) && !position_visible(editor, old_end_position) &&
+			!position_visible(editor, end_position))
 		return refresh_visible_suffix(editor, start, start_position, old_cursor_position, cursor_position);
 	if (!position_visible(editor, old_cursor_position) || !position_visible(editor, start_position) ||
-	    !position_visible(editor, old_end_position) || !position_visible_at(editor, end_position, next_origin) ||
-	    !position_visible_at(editor, cursor_position, next_origin))
+			!position_visible(editor, old_end_position) || !position_visible_at(editor, end_position, next_origin) ||
+			!position_visible_at(editor, cursor_position, next_origin))
 		return redraw_window(editor, cursor_position);
 	editor->render_size = 0u;
 	if (!append_cursor_move(editor, old_cursor_position, start_position) ||
-	    !append_colored_line(editor, start, editor->size) ||
-	    !append_normalized_wrap(editor, start_position, end_position))
+			!append_colored_line(editor, start, editor->size) ||
+			!append_normalized_wrap(editor, start_position, end_position))
 		return false;
 	if (old_end_position > end_position) {
 		if (!append_spaces(editor, old_end_position - end_position) ||
-		    !append_normalized_wrap(editor, end_position, old_end_position))
+				!append_normalized_wrap(editor, end_position, old_end_position))
 			return false;
 	}
 	editor->screen_origin_row = next_origin;
@@ -430,7 +431,7 @@ static bool refresh_suffix(struct shell_line_editor* editor, size_t start, size_
 
 static bool move_cursor(struct shell_line_editor* editor, size_t next) {
 	size_t from = line_position(editor, editor->cursor);
-	size_t to   = line_position(editor, next);
+	size_t to = line_position(editor, next);
 
 	if (!position_visible(editor, to)) {
 		if (!redraw_window(editor, to)) return false;
@@ -449,7 +450,7 @@ static bool erase_range(struct shell_line_editor* editor, struct selection_range
 
 	if (range.first >= range.last || range.last > editor->size) return false;
 	old_cursor_position = line_position(editor, editor->cursor);
-	old_end_position    = line_position(editor, editor->size);
+	old_end_position = line_position(editor, editor->size);
 	if (tty_session_clear_selection(editor->shell->tty_cap) != SYSCALL_STATUS_OK) return false;
 	editor->selection_active = false;
 	memmove(editor->line + range.first, editor->line + range.last, editor->size - range.last);
@@ -459,7 +460,7 @@ static bool erase_range(struct shell_line_editor* editor, struct selection_range
 }
 
 static bool erase_selection(struct shell_line_editor* editor, bool* out_handled) {
-	struct selection_range      range;
+	struct selection_range range;
 	enum selection_range_result result;
 
 	if (out_handled == NULL) return false;
@@ -469,20 +470,20 @@ static bool erase_selection(struct shell_line_editor* editor, bool* out_handled)
 	return result != SELECTION_RANGE_AVAILABLE || erase_range(editor, range);
 }
 
-bool shell_line_editor_initialize(struct shell_line_editor* editor, const struct shell* shell, char* line,
-                                  size_t capacity) {
+bool shell_line_editor_initialize(
+		struct shell_line_editor* editor, const struct shell* shell, char* line, size_t capacity) {
 	struct tty_session_get_cursor_response cursor;
 
 	if (editor == NULL || shell == NULL || shell->terminal_columns == 0u || shell->terminal_rows == 0u ||
-	    line == NULL || capacity == 0u)
+			line == NULL || capacity == 0u)
 		return false;
 	if (tty_session_get_cursor(shell->tty_cap, &cursor) != SYSCALL_STATUS_OK ||
-	    cursor.column >= shell->terminal_columns || cursor.row >= shell->terminal_rows ||
-	    cursor.column != shell_prompt_width(shell) % shell->terminal_columns)
+			cursor.column >= shell->terminal_columns || cursor.row >= shell->terminal_rows ||
+			cursor.column != shell_prompt_width(shell) % shell->terminal_columns)
 		return false;
 	*editor = (struct shell_line_editor){
-		.shell    = shell,
-		.line     = line,
+		.shell = shell,
+		.line = line,
 		.capacity = capacity,
 	};
 	return update_screen_origin(editor, &cursor);
@@ -492,8 +493,8 @@ void shell_line_editor_destroy(struct shell_line_editor* editor) {
 	if (editor == NULL) return;
 	(void)clear_selection(editor);
 	free(editor->render_data);
-	editor->render_data     = NULL;
-	editor->render_size     = 0u;
+	editor->render_data = NULL;
+	editor->render_size = 0u;
 	editor->render_capacity = 0u;
 }
 
@@ -505,8 +506,8 @@ bool shell_line_editor_insert(struct shell_line_editor* editor, const char* char
 	if (editor == NULL || character == NULL || size == 0u || size > editor->capacity - editor->size) return false;
 	if (!clear_selection(editor)) return false;
 	old_cursor_position = line_position(editor, editor->cursor);
-	old_end_position    = line_position(editor, editor->size);
-	insertion           = editor->cursor;
+	old_end_position = line_position(editor, editor->size);
+	insertion = editor->cursor;
 	memmove(editor->line + insertion + size, editor->line + insertion, editor->size - insertion);
 	memcpy(editor->line + insertion, character, size);
 	editor->cursor += size;
@@ -518,15 +519,15 @@ bool shell_line_editor_backspace(struct shell_line_editor* editor) {
 	size_t old_cursor_position;
 	size_t old_end_position;
 	size_t previous;
-	bool   selection_handled;
+	bool selection_handled;
 
 	if (editor == NULL) return false;
 	if (!erase_selection(editor, &selection_handled)) return false;
 	if (selection_handled) return true;
 	if (editor->cursor == 0u) return true;
 	old_cursor_position = line_position(editor, editor->cursor);
-	old_end_position    = line_position(editor, editor->size);
-	previous            = previous_codepoint(editor->line, editor->cursor);
+	old_end_position = line_position(editor, editor->size);
+	previous = previous_codepoint(editor->line, editor->cursor);
 	memmove(editor->line + previous, editor->line + editor->cursor, editor->size - editor->cursor);
 	editor->size -= editor->cursor - previous;
 	editor->cursor = previous;
@@ -537,22 +538,22 @@ bool shell_line_editor_delete(struct shell_line_editor* editor) {
 	size_t old_cursor_position;
 	size_t old_end_position;
 	size_t next;
-	bool   selection_handled;
+	bool selection_handled;
 
 	if (editor == NULL) return false;
 	if (!erase_selection(editor, &selection_handled)) return false;
 	if (selection_handled) return true;
 	if (editor->cursor == editor->size) return true;
 	old_cursor_position = line_position(editor, editor->cursor);
-	old_end_position    = line_position(editor, editor->size);
-	next                = next_codepoint(editor->line, editor->size, editor->cursor);
+	old_end_position = line_position(editor, editor->size);
+	next = next_codepoint(editor->line, editor->size, editor->cursor);
 	memmove(editor->line + editor->cursor, editor->line + next, editor->size - next);
 	editor->size -= next - editor->cursor;
 	return refresh_suffix(editor, editor->cursor, old_cursor_position, old_end_position);
 }
 
 bool shell_line_editor_cut(struct shell_line_editor* editor) {
-	struct selection_range      range;
+	struct selection_range range;
 	enum selection_range_result result;
 
 	if (editor == NULL) return false;
@@ -560,7 +561,7 @@ bool shell_line_editor_cut(struct shell_line_editor* editor) {
 	if (result == SELECTION_RANGE_FAILED) return false;
 	if (result != SELECTION_RANGE_AVAILABLE) return true;
 	if (tty_session_set_clipboard(editor->shell->tty_cap, editor->line + range.first, range.last - range.first) !=
-	    SYSCALL_STATUS_OK)
+			SYSCALL_STATUS_OK)
 		return false;
 	return erase_range(editor, range);
 }
@@ -593,7 +594,7 @@ bool shell_line_editor_move_right(struct shell_line_editor* editor) {
 static bool select_to(struct shell_line_editor* editor, size_t next) {
 	struct tty_session_selection_position anchor_position;
 	struct tty_session_selection_position focus_position;
-	size_t                                anchor;
+	size_t anchor;
 
 	if (next == editor->cursor) return true;
 	anchor = editor->selection_active ? editor->selection_anchor : editor->cursor;
@@ -604,7 +605,7 @@ static bool select_to(struct shell_line_editor* editor, size_t next) {
 		return true;
 	}
 	if (!selection_position(editor, anchor, &anchor_position) || !selection_position(editor, next, &focus_position) ||
-	    tty_session_set_selection(editor->shell->tty_cap, anchor_position, focus_position) != SYSCALL_STATUS_OK)
+			tty_session_set_selection(editor->shell->tty_cap, anchor_position, focus_position) != SYSCALL_STATUS_OK)
 		return false;
 	editor->selection_anchor = anchor;
 	editor->selection_active = true;
@@ -634,7 +635,7 @@ bool shell_line_editor_select_all(struct shell_line_editor* editor) {
 	}
 	if (editor->cursor != editor->size && !move_cursor(editor, editor->size)) return false;
 	if (!selection_position(editor, 0u, &anchor) || !selection_position(editor, editor->size, &focus) ||
-	    tty_session_set_selection(editor->shell->tty_cap, anchor, focus) != SYSCALL_STATUS_OK)
+			tty_session_set_selection(editor->shell->tty_cap, anchor, focus) != SYSCALL_STATUS_OK)
 		return false;
 	editor->selection_anchor = 0u;
 	editor->selection_active = true;
@@ -648,9 +649,9 @@ bool shell_line_editor_replace(struct shell_line_editor* editor, const char* lin
 	if (editor == NULL || (size != 0u && line == NULL) || size > editor->capacity || cursor > size) return false;
 	if (!clear_selection(editor)) return false;
 	old_cursor_position = line_position(editor, editor->cursor);
-	old_end_position    = line_position(editor, editor->size);
+	old_end_position = line_position(editor, editor->size);
 	memmove(editor->line, line, size);
-	editor->size   = size;
+	editor->size = size;
 	editor->cursor = cursor;
 	return refresh_suffix(editor, 0u, old_cursor_position, old_end_position);
 }
@@ -664,7 +665,7 @@ bool shell_line_editor_finish(struct shell_line_editor* editor) {
 	if (!position_visible(editor, end_position) && !redraw_window(editor, end_position)) return false;
 	editor->render_size = 0u;
 	if (!append_cursor_move(editor, line_position(editor, editor->cursor), end_position) ||
-	    (end_position % editor->shell->terminal_columns != 0u && !append_string(editor, "\n")))
+			(end_position % editor->shell->terminal_columns != 0u && !append_string(editor, "\n")))
 		return false;
 	if (!write_render(editor)) return false;
 	editor->cursor = editor->size;

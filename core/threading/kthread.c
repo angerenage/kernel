@@ -1,46 +1,46 @@
+#include <libc/stdlib.h>
+#include <stddef.h>
+
 #include <base/math.h>
 #include <base/time.h>
+#include <hal/clock.h>
+#include <hal/hcf.h>
 #include <core/address_space.h>
 #include <core/kthread.h>
 #include <core/memory.h>
 #include <core/sched.h>
 #include <core/spinlock.h>
-#include <hal/clock.h>
-#include <hal/hcf.h>
-#include <libc/stdlib.h>
-#include <stddef.h>
 
 static bool kthread_map_stack(struct mapping** out_mapping, void** out_base) {
-	struct memory*  memory;
+	struct memory* memory;
 	struct mapping* mapping;
-	size_t          granule = address_space_minimum_mapping_size(address_space_kernel());
-	size_t          stack_size, guard_size;
+	size_t granule = address_space_minimum_mapping_size(address_space_kernel());
+	size_t stack_size, guard_size;
 	if (granule == 0u || !align_up_size(KTHREAD_DEFAULT_STACK_SIZE, granule, &stack_size) ||
-	    !memory_create_anonymous(stack_size, &memory))
+			!memory_create_anonymous(stack_size, &memory))
 		return false;
-	guard_size  = granule;
+	guard_size = granule;
 	bool mapped = address_space_map(address_space_kernel(),
-	                                &(const struct address_space_mapping_request){
-										.memory       = memory,
-										.guard_before = guard_size,
-										.access       = MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
-									},
-	                                &mapping);
+			&(const struct address_space_mapping_request){
+				.memory = memory,
+				.guard_before = guard_size,
+				.access = MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+			},
+			&mapping);
 	memory_release(memory);
 	if (!mapped) return false;
-	*out_base    = (void*)mapping_address(mapping);
+	*out_base = (void*)mapping_address(mapping);
 	*out_mapping = mapping;
 	if (address_space_prefault(address_space_kernel(), mapping, 0u, mapping_size(mapping))) return true;
 	(void)address_space_unmap(address_space_kernel(), mapping);
 	mapping_release(mapping);
 	*out_mapping = NULL;
-	*out_base    = NULL;
+	*out_base = NULL;
 	return false;
 }
 
 static enum kthread_spawn_result kthread_spawn_internal(struct kthread** out_thread, const char* name,
-                                                        thread_entry_t entry, void* arg, struct cpu* preferred_cpu,
-                                                        bool detached);
+		thread_entry_t entry, void* arg, struct cpu* preferred_cpu, bool detached);
 
 static bool kthread_join_target(struct kthread* target, struct thread** out_thread) {
 	struct thread* current = kthread_current();
@@ -98,13 +98,12 @@ static void kthread_reap_callback(struct thread* thread, void* ctx) {
 }
 
 static enum kthread_spawn_result kthread_spawn_internal(struct kthread** out_thread, const char* name,
-                                                        thread_entry_t entry, void* arg, struct cpu* preferred_cpu,
-                                                        bool detached) {
-	struct kthread*             thread;
+		thread_entry_t entry, void* arg, struct cpu* preferred_cpu, bool detached) {
+	struct kthread* thread;
 	struct thread_create_params create_params;
-	enum thread_init_result     init_result;
-	void*                       stack_base = NULL;
-	uintptr_t                   stack_base_addr;
+	enum thread_init_result init_result;
+	void* stack_base = NULL;
+	uintptr_t stack_base_addr;
 
 	if (entry == NULL) return KTHREAD_SPAWN_INVALID_ARGUMENTS;
 	if (!detached && out_thread == NULL) return KTHREAD_SPAWN_INVALID_ARGUMENTS;
@@ -114,7 +113,7 @@ static enum kthread_spawn_result kthread_spawn_internal(struct kthread** out_thr
 
 	*thread = (struct kthread){
 		.stack_mapping = NULL,
-		.stack_size    = 0u,
+		.stack_size = 0u,
 	};
 
 	if (!kthread_map_stack(&thread->stack_mapping, &stack_base)) {
@@ -122,17 +121,17 @@ static enum kthread_spawn_result kthread_spawn_internal(struct kthread** out_thr
 		return KTHREAD_SPAWN_STACK_ALLOC_FAILED;
 	}
 
-	stack_base_addr                 = (uintptr_t)stack_base;
-	thread->stack_size              = mapping_size(thread->stack_mapping);
-	create_params                   = (struct thread_create_params){0};
-	create_params.name              = name;
-	create_params.entry             = entry;
-	create_params.arg               = arg;
+	stack_base_addr = (uintptr_t)stack_base;
+	thread->stack_size = mapping_size(thread->stack_mapping);
+	create_params = (struct thread_create_params){0};
+	create_params.name = name;
+	create_params.entry = entry;
+	create_params.arg = arg;
 	create_params.kernel_stack_base = stack_base_addr;
-	create_params.kernel_stack_top  = stack_base_addr + thread->stack_size;
-	create_params.preferred_cpu     = preferred_cpu;
-	create_params.detached          = detached;
-	init_result                     = thread_init_ex(&thread->thread, &create_params);
+	create_params.kernel_stack_top = stack_base_addr + thread->stack_size;
+	create_params.preferred_cpu = preferred_cpu;
+	create_params.detached = detached;
+	init_result = thread_init_ex(&thread->thread, &create_params);
 	if (init_result != THREAD_INIT_OK) {
 		enum kthread_spawn_result result = kthread_result_from_thread_result(init_result);
 
@@ -140,7 +139,7 @@ static enum kthread_spawn_result kthread_spawn_internal(struct kthread** out_thr
 		return result;
 	}
 	thread->thread.owner_kind = THREAD_OWNER_KTHREAD;
-	thread->thread.owner      = thread;
+	thread->thread.owner = thread;
 
 	thread_set_reap_callback(&thread->thread, kthread_reap_callback, thread);
 
@@ -153,13 +152,13 @@ static enum kthread_spawn_result kthread_spawn_internal(struct kthread** out_thr
 	return KTHREAD_SPAWN_OK;
 }
 
-enum kthread_spawn_result kthread_spawn(struct kthread** out_thread, const char* name, thread_entry_t entry,
-                                        void* arg) {
+enum kthread_spawn_result kthread_spawn(
+		struct kthread** out_thread, const char* name, thread_entry_t entry, void* arg) {
 	return kthread_spawn_on_cpu(out_thread, name, entry, arg, NULL);
 }
 
-enum kthread_spawn_result kthread_spawn_on_cpu(struct kthread** out_thread, const char* name, thread_entry_t entry,
-                                               void* arg, struct cpu* preferred_cpu) {
+enum kthread_spawn_result kthread_spawn_on_cpu(
+		struct kthread** out_thread, const char* name, thread_entry_t entry, void* arg, struct cpu* preferred_cpu) {
 	return kthread_spawn_internal(out_thread, name, entry, arg, preferred_cpu, false);
 }
 
@@ -167,8 +166,8 @@ enum kthread_spawn_result kthread_spawn_detached(const char* name, thread_entry_
 	return kthread_spawn_detached_on_cpu(name, entry, arg, NULL);
 }
 
-enum kthread_spawn_result kthread_spawn_detached_on_cpu(const char* name, thread_entry_t entry, void* arg,
-                                                        struct cpu* preferred_cpu) {
+enum kthread_spawn_result kthread_spawn_detached_on_cpu(
+		const char* name, thread_entry_t entry, void* arg, struct cpu* preferred_cpu) {
 	return kthread_spawn_internal(NULL, name, entry, arg, preferred_cpu, true);
 }
 
@@ -187,7 +186,7 @@ void kthread_yield(void) {
 }
 
 bool kthread_park(void) {
-	struct thread*   current = kthread_current();
+	struct thread* current = kthread_current();
 	struct irq_state wait_state;
 
 	kthread_testcancel();
@@ -215,9 +214,9 @@ bool kthread_park(void) {
 }
 
 bool kthread_unpark(struct kthread* target) {
-	struct thread*   thread;
+	struct thread* thread;
 	struct irq_state wait_state;
-	bool             wake_target;
+	bool wake_target;
 
 	if (target == NULL) return false;
 
@@ -278,7 +277,7 @@ bool kthread_join(struct kthread* target, thread_exit_code_t* out_exit_code) {
 
 bool kthread_timed_join(struct kthread* target, uint64_t timeout_ms, thread_exit_code_t* out_exit_code) {
 	struct thread* thread;
-	uint64_t       deadline_tick;
+	uint64_t deadline_tick;
 
 	kthread_testcancel();
 	if (!kthread_join_target(target, &thread)) return false;
@@ -293,7 +292,7 @@ bool kthread_timed_join(struct kthread* target, uint64_t timeout_ms, thread_exit
 
 		if (!thread_is_reap_safe(thread)) {
 			if (!sched_block_current_until_locked(
-					&thread->join_wait_queue, THREAD_BLOCK_JOIN, deadline_tick, wait_state)) {
+						&thread->join_wait_queue, THREAD_BLOCK_JOIN, deadline_tick, wait_state)) {
 				kthread_testcancel();
 				return false;
 			}

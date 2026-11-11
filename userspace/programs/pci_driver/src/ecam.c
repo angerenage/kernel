@@ -1,7 +1,9 @@
 #include "ecam.h"
 
-#include <base/memory.h>
 #include <stddef.h>
+
+#include <base/memory.h>
+
 #include <system/capability.h>
 #include <system/memory.h>
 #include <system/trace.h>
@@ -20,9 +22,9 @@ TRACE_LABEL(trace_ecam_drop_slice, "pci/ecam/drop_slice");
 
 static bool map_bus(struct pci_ecam* ecam, uint8_t bus) {
 	struct address_space_map_response mapping = {.mapping_cap = CAP_ID_INVALID};
-	cap_id_t                          bus_cap = CAP_ID_INVALID;
-	size_t                            bus_offset;
-	syscall_status_t                  status;
+	cap_id_t bus_cap = CAP_ID_INVALID;
+	size_t bus_offset;
+	syscall_status_t status;
 
 	if (ecam->bus_mapped && ecam->mapped_bus == bus) return true;
 	TRACE_SCOPE(trace, &trace_ecam_map_bus);
@@ -33,8 +35,8 @@ static bool map_bus(struct pci_ecam* ecam, uint8_t bus) {
 		}
 		if (status != SYSCALL_STATUS_OK) return false;
 		ecam->mapping_cap = CAP_ID_INVALID;
-		ecam->base        = NULL;
-		ecam->bus_mapped  = false;
+		ecam->base = NULL;
+		ecam->bus_mapped = false;
 	}
 	bus_offset = ((size_t)bus - ecam->first_bus) * PCI_ECAM_BUS_SIZE;
 	{
@@ -45,13 +47,13 @@ static bool map_bus(struct pci_ecam* ecam, uint8_t bus) {
 	{
 		TRACE_SCOPE(step_trace, &trace_ecam_map_memory);
 		status = address_space_map(ecam->address_space_cap,
-		                           bus_cap,
-		                           MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
-		                           0u,
-		                           PCI_ECAM_FUNCTION_SIZE,
-		                           0u,
-		                           0u,
-		                           &mapping);
+				bus_cap,
+				MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+				0u,
+				PCI_ECAM_FUNCTION_SIZE,
+				0u,
+				0u,
+				&mapping);
 	}
 	if (status != SYSCALL_STATUS_OK) {
 		(void)cap_drop(bus_cap);
@@ -66,23 +68,24 @@ static bool map_bus(struct pci_ecam* ecam, uint8_t bus) {
 		return false;
 	}
 	ecam->mapping_cap = mapping.mapping_cap;
-	ecam->base        = (volatile uint8_t*)mapping.address;
-	ecam->mapped_bus  = bus;
-	ecam->bus_mapped  = true;
+	ecam->base = (volatile uint8_t*)mapping.address;
+	ecam->mapped_bus = bus;
+	ecam->bus_mapped = true;
 	return true;
 }
 
-static volatile uint8_t* register_address(struct pci_ecam* ecam, struct pci_address address, uint16_t offset,
-                                          size_t width) {
+static volatile uint8_t* register_address(
+		struct pci_ecam* ecam, struct pci_address address, uint16_t offset, size_t width) {
 	size_t function_offset;
 
 	if (ecam == NULL || address.segment != ecam->segment || address.bus < ecam->first_bus ||
-	    address.bus > ecam->last_bus || address.device >= PCI_DEVICE_COUNT || address.function >= PCI_FUNCTION_COUNT)
+			address.bus > ecam->last_bus || address.device >= PCI_DEVICE_COUNT ||
+			address.function >= PCI_FUNCTION_COUNT)
 		return NULL;
 	function_offset =
-		(size_t)address.device * PCI_ECAM_DEVICE_SIZE + (size_t)address.function * PCI_ECAM_FUNCTION_SIZE + offset;
+			(size_t)address.device * PCI_ECAM_DEVICE_SIZE + (size_t)address.function * PCI_ECAM_FUNCTION_SIZE + offset;
 	if (function_offset > PCI_ECAM_BUS_SIZE || width > PCI_ECAM_BUS_SIZE - function_offset ||
-	    !map_bus(ecam, address.bus))
+			!map_bus(ecam, address.bus))
 		return NULL;
 	return ecam->base + function_offset;
 }
@@ -130,22 +133,22 @@ bool pci_ecam_write32(struct pci_ecam* ecam, struct pci_address address, uint16_
 }
 
 bool pci_ecam_initialize(struct pci_ecam* ecam, cap_id_t memory_cap, cap_id_t address_space_cap, size_t size,
-                         uint16_t segment, uint8_t first_bus, uint8_t last_bus, struct pci_config* out_config) {
+		uint16_t segment, uint8_t first_bus, uint8_t last_bus, struct pci_config* out_config) {
 	size_t bus_count;
 
 	if (ecam == NULL || memory_cap == CAP_ID_INVALID || address_space_cap == CAP_ID_INVALID || out_config == NULL ||
-	    first_bus > last_bus)
+			first_bus > last_bus)
 		return false;
 	bus_count = (size_t)last_bus - first_bus + 1u;
 	if (bus_count > SIZE_MAX / PCI_ECAM_BUS_SIZE || size != bus_count * PCI_ECAM_BUS_SIZE) return false;
 	*ecam = (struct pci_ecam){
-		.memory_cap        = memory_cap,
+		.memory_cap = memory_cap,
 		.address_space_cap = address_space_cap,
-		.mapping_cap       = CAP_ID_INVALID,
-		.size              = size,
-		.segment           = segment,
-		.first_bus         = first_bus,
-		.last_bus          = last_bus,
+		.mapping_cap = CAP_ID_INVALID,
+		.size = size,
+		.segment = segment,
+		.first_bus = first_bus,
+		.last_bus = last_bus,
 	};
 #if defined(__x86_64__)
 	*out_config = (struct pci_config){.kind = PCI_CONFIG_KIND_ECAM, .backend.ecam = ecam};
@@ -159,5 +162,6 @@ void pci_ecam_deinitialize(struct pci_ecam* ecam) {
 	if (ecam == NULL) return;
 	if (ecam->mapping_cap != CAP_ID_INVALID) (void)mapping_unmap(ecam->mapping_cap);
 	*ecam = (struct pci_ecam){
-		.memory_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .mapping_cap = CAP_ID_INVALID};
+		.memory_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .mapping_cap = CAP_ID_INVALID
+	};
 }

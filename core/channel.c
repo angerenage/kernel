@@ -1,3 +1,7 @@
+#include <libc/stdlib.h>
+#include <stdbool.h>
+#include <string.h>
+
 #include <base/cap.h>
 #include <core/capability.h>
 #include <core/capability_call.h>
@@ -6,15 +10,12 @@
 #include <core/ring_buffer.h>
 #include <core/signal.h>
 #include <core/spinlock.h>
-#include <libc/stdlib.h>
-#include <stdbool.h>
-#include <string.h>
 
 static struct id_table channel_table = ID_TABLE_INITIALIZER("channel_table", 1u, UINT64_MAX);
 
 struct channel* channel_create(process_id_t owner_pid, bool with_activity_signal) {
-	struct channel*      ch;
-	channel_id_t         id;
+	struct channel* ch;
+	channel_id_t id;
 	enum id_table_result id_result;
 
 	if (owner_pid == PROCESS_PID_INVALID) return NULL;
@@ -23,7 +24,7 @@ struct channel* channel_create(process_id_t owner_pid, bool with_activity_signal
 	if (ch == NULL) return NULL;
 	memset(ch, 0, sizeof(*ch));
 	spinlock_init_class(&ch->lock, "channel_lock", SPINLOCK_ORDER_MUTEX, SPINLOCK_FLAG_IRQSAVE);
-	ch->owner_pid       = owner_pid;
+	ch->owner_pid = owner_pid;
 	ch->reference_count = 1u;
 	if (with_activity_signal) {
 		ch->activity_signal = signal_create();
@@ -33,10 +34,10 @@ struct channel* channel_create(process_id_t owner_pid, bool with_activity_signal
 		}
 	}
 	if (!ring_buffer_init(&ch->cap_queue,
-	                      "channel_cap_queue",
-	                      SPINLOCK_ORDER_ID_TABLE,
-	                      CAP_REQUEST_QUEUE_DEPTH,
-	                      sizeof(struct cap_request))) {
+				"channel_cap_queue",
+				SPINLOCK_ORDER_ID_TABLE,
+				CAP_REQUEST_QUEUE_DEPTH,
+				sizeof(struct cap_request))) {
 		if (ch->activity_signal != NULL) (void)signal_destroy(ch->activity_signal);
 		free(ch);
 		return NULL;
@@ -126,8 +127,8 @@ void channel_release(struct channel* channel) {
 
 bool channel_enqueue_cap_request(struct channel* channel, const struct cap_request* request) {
 	struct irq_state state;
-	bool             enqueued;
-	struct signal*   activity = NULL;
+	bool enqueued;
+	struct signal* activity = NULL;
 
 	if (channel == NULL || request == NULL) return false;
 	state = spinlock_lock_irqsave(&channel->lock);
@@ -148,7 +149,7 @@ bool channel_enqueue_cap_request(struct channel* channel, const struct cap_reque
 
 bool channel_enqueue_cap_event(struct channel* channel, struct cap_object* object) {
 	struct irq_state state;
-	struct signal*   activity = NULL;
+	struct signal* activity = NULL;
 	if (channel == NULL || object == NULL) return false;
 	state = spinlock_lock_irqsave(&channel->lock);
 	if (channel->closing) {
@@ -171,9 +172,9 @@ bool channel_enqueue_cap_event(struct channel* channel, struct cap_object* objec
 
 struct cap_object* channel_dequeue_cap_event(struct channel* channel) {
 	struct cap_object* object;
-	struct irq_state   state;
+	struct irq_state state;
 	if (channel == NULL) return NULL;
-	state  = spinlock_lock_irqsave(&channel->lock);
+	state = spinlock_lock_irqsave(&channel->lock);
 	object = channel->event_head;
 	if (object != NULL) {
 		channel->event_head = object->event_next;
@@ -197,10 +198,10 @@ void process_channel_state_init(struct process_channel_state* state) {
 void process_channel_state_deinit(struct process_channel_state* state) {
 	if (state == NULL) return;
 	for (size_t i = 0u; i < CHANNEL_MAX_PER_PROCESS; i++) {
-		struct channel*  channel;
+		struct channel* channel;
 		struct irq_state irq_state = spinlock_lock_irqsave(&state->lock);
 
-		channel            = state->channels[i];
+		channel = state->channels[i];
 		state->channels[i] = NULL;
 		if (channel != NULL && state->count > 0u) state->count--;
 		spinlock_unlock_irqrestore(&state->lock, irq_state);
@@ -211,7 +212,7 @@ void process_channel_state_deinit(struct process_channel_state* state) {
 
 bool process_channel_state_add(struct process_channel_state* state, struct channel* channel) {
 	struct irq_state irq_state;
-	bool             added = false;
+	bool added = false;
 
 	if (state == NULL || channel == NULL) return false;
 	irq_state = spinlock_lock_irqsave(&state->lock);

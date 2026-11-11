@@ -1,9 +1,9 @@
 #include <base/time.h>
+#include <hal/clock.h>
+#include <hal/hcf.h>
 #include <core/kthread.h>
 #include <core/sched.h>
 #include <core/semaphore.h>
-#include <hal/clock.h>
-#include <hal/hcf.h>
 #include <kernel/trace.h>
 
 #define TRACE_SEMAPHORE_PHASE(phase, type)                                                                             \
@@ -19,7 +19,7 @@ void semaphore_init(struct semaphore* semaphore, size_t initial_count) {
 
 bool semaphore_try_acquire(struct semaphore* semaphore) {
 	struct irq_state state;
-	bool             acquired = false;
+	bool acquired = false;
 
 	if (semaphore == NULL) return false;
 
@@ -52,7 +52,7 @@ bool semaphore_acquire_cancelable(struct semaphore* semaphore) {
 	for (;;) {
 		struct irq_state semaphore_state;
 		struct irq_state wait_state;
-		bool             blocked;
+		bool blocked;
 
 		TRACE_SEMAPHORE_PHASE(KERNEL_TRACE_SEMAPHORE_CHECK, KERNEL_TRACE_RECORD_BEGIN);
 		semaphore_state = spinlock_lock_irqsave(&semaphore->lock);
@@ -143,11 +143,11 @@ bool semaphore_release(struct semaphore* semaphore) {
 size_t semaphore_count(const struct semaphore* semaphore) {
 	struct irq_state state;
 	struct spinlock* lock;
-	size_t           count;
+	size_t count;
 
 	if (semaphore == NULL) return 0u;
 
-	lock  = (struct spinlock*)&semaphore->lock;
+	lock = (struct spinlock*)&semaphore->lock;
 	state = spinlock_lock_irqsave(lock);
 	count = semaphore->count;
 	spinlock_unlock_irqrestore(lock, state);

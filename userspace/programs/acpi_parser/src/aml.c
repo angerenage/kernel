@@ -1,15 +1,18 @@
 #include "aml.h"
 
-#include <base/acpi.h>
-#include <base/cap.h>
-#include <protocol/device.h>
-#include <runtime/device.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <base/acpi.h>
+#include <base/cap.h>
+
+#include <protocol/device.h>
 #include <system/acpi.h>
+#include <runtime/device.h>
+
 #include <uacpi/acpi.h>
 #include <uacpi/namespace.h>
 #include <uacpi/uacpi.h>
@@ -25,18 +28,18 @@
 
 struct aml_parse_context {
 	struct acpi_device_set* devices;
-	syscall_status_t        status;
+	syscall_status_t status;
 };
 
 struct acpi_aml {
 	struct uacpi_host_aml_definition* definitions;
-	struct acpi_device_set*           devices;
-	size_t                            definition_count;
-	cap_id_t                          memory_allocator_cap;
-	cap_id_t                          interrupts_cap;
-	cap_id_t                          io_ports_cap;
-	bool                              platform_initialized;
-	bool                              interpreter_initialized;
+	struct acpi_device_set* devices;
+	size_t definition_count;
+	cap_id_t memory_allocator_cap;
+	cap_id_t interrupts_cap;
+	cap_id_t io_ports_cap;
+	bool platform_initialized;
+	bool interpreter_initialized;
 };
 
 static bool id_string_valid(const uacpi_id_string* id) {
@@ -46,7 +49,7 @@ static bool id_string_valid(const uacpi_id_string* id) {
 }
 
 static syscall_status_t add_id_compatible(struct acpi_device* device, const uacpi_id_string* id) {
-	char   compatible[DEVICE_COMPATIBLE_ID_MAX + 1u];
+	char compatible[DEVICE_COMPATIBLE_ID_MAX + 1u];
 	size_t prefix_size = sizeof(ACPI_COMPATIBLE_PREFIX) - 1u;
 	size_t id_size;
 
@@ -59,23 +62,23 @@ static syscall_status_t add_id_compatible(struct acpi_device* device, const uacp
 	return acpi_device_add_compatible(device, compatible);
 }
 
-static syscall_status_t add_optional_string(const struct device_builder* builder, const char* property,
-                                            const uacpi_id_string* id) {
+static syscall_status_t add_optional_string(
+		const struct device_builder* builder, const char* property, const uacpi_id_string* id) {
 	if (!id_string_valid(id)) return SYSCALL_STATUS_OK;
 	return acpi_device_add_string(builder, property, id->value);
 }
 
 static syscall_status_t submit_device(struct aml_parse_context* context, uacpi_namespace_node* node, uacpi_u32 sta) {
-	struct acpi_device*    device = NULL;
+	struct acpi_device* device = NULL;
 	struct device_builder* builder;
-	uacpi_id_string*       hid  = NULL;
-	uacpi_id_string*       uid  = NULL;
-	uacpi_pnp_id_list*     cids = NULL;
-	const uacpi_char*      path = NULL;
-	uacpi_u64              address;
-	uacpi_status           ustatus;
-	syscall_status_t       status;
-	size_t                 compatible_count = 0u;
+	uacpi_id_string* hid = NULL;
+	uacpi_id_string* uid = NULL;
+	uacpi_pnp_id_list* cids = NULL;
+	const uacpi_char* path = NULL;
+	uacpi_u64 address;
+	uacpi_status ustatus;
+	syscall_status_t status;
+	size_t compatible_count = 0u;
 
 	status = acpi_device_begin(context->devices, &device);
 	if (status != SYSCALL_STATUS_OK) goto cleanup;
@@ -135,8 +138,8 @@ cleanup:
 
 static uacpi_iteration_decision discover_device(void* opaque, uacpi_namespace_node* node, uacpi_u32 depth) {
 	struct aml_parse_context* context = opaque;
-	uacpi_u32                 sta;
-	uacpi_status              status;
+	uacpi_u32 sta;
+	uacpi_status status;
 
 	(void)depth;
 	if (uacpi_namespace_node_is_alias(node)) return UACPI_ITERATION_DECISION_NEXT_PEER;
@@ -154,15 +157,15 @@ static uacpi_iteration_decision discover_device(void* opaque, uacpi_namespace_no
 	return UACPI_ITERATION_DECISION_CONTINUE;
 }
 
-static syscall_status_t read_definitions(cap_id_t provider_cap, struct uacpi_host_aml_definition** out_definitions,
-                                         size_t* out_count) {
+static syscall_status_t read_definitions(
+		cap_id_t provider_cap, struct uacpi_host_aml_definition** out_definitions, size_t* out_count) {
 	struct uacpi_host_aml_definition* definitions = NULL;
-	uint64_t                          count64;
-	syscall_status_t                  status;
+	uint64_t count64;
+	syscall_status_t status;
 
 	*out_definitions = NULL;
-	*out_count       = 0u;
-	status           = acpi_aml_count(provider_cap, &count64);
+	*out_count = 0u;
+	status = acpi_aml_count(provider_cap, &count64);
 	if (status != SYSCALL_STATUS_OK || count64 == 0u) return status;
 	if (count64 > SIZE_MAX / sizeof(*definitions)) return SYSCALL_STATUS_FAILED;
 	definitions = calloc((size_t)count64, sizeof(*definitions));
@@ -170,7 +173,7 @@ static syscall_status_t read_definitions(cap_id_t provider_cap, struct uacpi_hos
 
 	for (size_t index = 0u; index < (size_t)count64; index++) {
 		struct acpi_provider_aml_info_response info;
-		uacpi_u8*                              aml;
+		uacpi_u8* aml;
 
 		status = acpi_aml_info(provider_cap, index, &info);
 		if (status != SYSCALL_STATUS_OK) goto fail;
@@ -188,10 +191,10 @@ static syscall_status_t read_definitions(cap_id_t provider_cap, struct uacpi_hos
 			goto fail;
 		}
 		definitions[index] = (struct uacpi_host_aml_definition){
-			.aml          = {.bytes = aml, .length = (size_t)info.aml_size},
+			.aml = {.bytes = aml, .length = (size_t)info.aml_size},
 			.oem_revision = info.oem_revision,
-			.kind =
-				info.kind == ACPI_AML_DEFINITION_DSDT ? UACPI_HOST_AML_DEFINITION_DSDT : UACPI_HOST_AML_DEFINITION_SSDT,
+			.kind = info.kind == ACPI_AML_DEFINITION_DSDT ? UACPI_HOST_AML_DEFINITION_DSDT
+			                                              : UACPI_HOST_AML_DEFINITION_SSDT,
 			.revision = info.revision,
 		};
 		memcpy(definitions[index].oem_id, info.oem_id, sizeof(info.oem_id));
@@ -199,13 +202,13 @@ static syscall_status_t read_definitions(cap_id_t provider_cap, struct uacpi_hos
 		for (uint64_t offset = 0u; offset < info.aml_size;) {
 			size_t chunk = info.aml_size - offset > CAP_MAX_RESPONSE_SIZE ? CAP_MAX_RESPONSE_SIZE
 			                                                              : (size_t)(info.aml_size - offset);
-			status       = acpi_aml_read(provider_cap, index, offset, aml + offset, chunk);
+			status = acpi_aml_read(provider_cap, index, offset, aml + offset, chunk);
 			if (status != SYSCALL_STATUS_OK) goto fail;
 			offset += chunk;
 		}
 	}
 	*out_definitions = definitions;
-	*out_count       = (size_t)count64;
+	*out_count = (size_t)count64;
 	return SYSCALL_STATUS_OK;
 
 fail:
@@ -217,7 +220,7 @@ fail:
 void acpi_aml_deinitialize(struct acpi_aml* aml) {
 	if (aml == NULL) return;
 	for (struct acpi_device* device = acpi_device_first(aml->devices); device != NULL;
-	     device                     = acpi_device_next(device))
+			device = acpi_device_next(device))
 		acpi_device_set_source(device, NULL);
 	if (aml->interpreter_initialized) uacpi_host_reset();
 	if (aml->platform_initialized) uacpi_host_platform_deinitialize();
@@ -227,37 +230,36 @@ void acpi_aml_deinitialize(struct acpi_aml* aml) {
 }
 
 syscall_status_t acpi_aml_initialize(cap_id_t provider_cap, struct acpi_device_set* devices,
-                                     cap_id_t memory_allocator_cap, cap_id_t interrupts_cap, cap_id_t io_ports_cap,
-                                     struct acpi_aml** out_aml) {
-	struct acpi_aml*         aml;
+		cap_id_t memory_allocator_cap, cap_id_t interrupts_cap, cap_id_t io_ports_cap, struct acpi_aml** out_aml) {
+	struct acpi_aml* aml;
 	struct aml_parse_context context;
-	uacpi_status             ustatus;
-	syscall_status_t         status;
+	uacpi_status ustatus;
+	syscall_status_t status;
 
 	if (provider_cap == CAP_ID_INVALID || devices == NULL || memory_allocator_cap == CAP_ID_INVALID || out_aml == NULL)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	*out_aml = NULL;
-	aml      = calloc(1u, sizeof(*aml));
+	aml = calloc(1u, sizeof(*aml));
 	if (aml == NULL) return SYSCALL_STATUS_FAILED;
-	aml->devices              = devices;
+	aml->devices = devices;
 	aml->memory_allocator_cap = memory_allocator_cap;
-	aml->interrupts_cap       = interrupts_cap;
-	aml->io_ports_cap         = io_ports_cap;
-	status                    = read_definitions(provider_cap, &aml->definitions, &aml->definition_count);
+	aml->interrupts_cap = interrupts_cap;
+	aml->io_ports_cap = io_ports_cap;
+	status = read_definitions(provider_cap, &aml->definitions, &aml->definition_count);
 	if (status != SYSCALL_STATUS_OK || aml->definition_count == 0u) goto fail;
 	if (!uacpi_host_platform_initialize(memory_allocator_cap, io_ports_cap)) {
 		status = SYSCALL_STATUS_FAILED;
 		goto fail;
 	}
 	aml->platform_initialized = true;
-	ustatus                   = uacpi_host_initialize(UACPI_FLAG_NO_ACPI_MODE, aml->definitions, aml->definition_count);
+	ustatus = uacpi_host_initialize(UACPI_FLAG_NO_ACPI_MODE, aml->definitions, aml->definition_count);
 	if (ustatus != UACPI_STATUS_OK) {
 		printf("acpi-parser: uACPI initialization failed: %s\n", uacpi_status_to_string(ustatus));
 		status = SYSCALL_STATUS_FAILED;
 		goto fail;
 	}
 	aml->interpreter_initialized = true;
-	ustatus                      = uacpi_host_namespace_load();
+	ustatus = uacpi_host_namespace_load();
 	if (ustatus != UACPI_STATUS_OK) {
 		printf("acpi-parser: AML namespace load failed: %s\n", uacpi_status_to_string(ustatus));
 		status = SYSCALL_STATUS_FAILED;
@@ -271,10 +273,10 @@ syscall_status_t acpi_aml_initialize(cap_id_t provider_cap, struct acpi_device_s
 	}
 	context = (struct aml_parse_context){
 		.devices = devices,
-		.status  = SYSCALL_STATUS_OK,
+		.status = SYSCALL_STATUS_OK,
 	};
 	ustatus = uacpi_namespace_for_each_child(
-		uacpi_namespace_root(), discover_device, NULL, UACPI_OBJECT_DEVICE_BIT, UACPI_MAX_DEPTH_ANY, &context);
+			uacpi_namespace_root(), discover_device, NULL, UACPI_OBJECT_DEVICE_BIT, UACPI_MAX_DEPTH_ANY, &context);
 	if (ustatus != UACPI_STATUS_OK) {
 		printf("acpi-parser: AML namespace walk failed: %s\n", uacpi_status_to_string(ustatus));
 		status = SYSCALL_STATUS_FAILED;
@@ -292,12 +294,12 @@ fail:
 syscall_status_t acpi_aml_add_resources(struct acpi_aml* aml) {
 	if (aml == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	for (struct acpi_device* device = acpi_device_first(aml->devices); device != NULL;
-	     device                     = acpi_device_next(device)) {
+			device = acpi_device_next(device)) {
 		uacpi_namespace_node* node = acpi_device_source(device);
 
 		if (node == NULL) continue;
-		syscall_status_t status =
-			acpi_resources_add_current(device, node, aml->memory_allocator_cap, aml->interrupts_cap, aml->io_ports_cap);
+		syscall_status_t status = acpi_resources_add_current(
+				device, node, aml->memory_allocator_cap, aml->interrupts_cap, aml->io_ports_cap);
 		if (status != SYSCALL_STATUS_OK) return status;
 	}
 	return SYSCALL_STATUS_OK;
@@ -305,8 +307,8 @@ syscall_status_t acpi_aml_add_resources(struct acpi_aml* aml) {
 
 syscall_status_t acpi_aml_evaluate_u64(const struct acpi_device* device, const char* path, uint64_t* out_value) {
 	uacpi_namespace_node* node;
-	uacpi_u64             value;
-	uacpi_status          status;
+	uacpi_u64 value;
+	uacpi_status status;
 
 	if (device == NULL || path == NULL || path[0] == '\0' || out_value == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	node = acpi_device_source(device);

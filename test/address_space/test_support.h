@@ -1,5 +1,13 @@
 #pragma once
 
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+#include <test_memory.h>
+
+#include <hal/cpu.h>
+#include <hal/paging.h>
 #include <core/address_space.h>
 #include <core/address_transfer.h>
 #include <core/cpu.h>
@@ -7,29 +15,23 @@
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/thread.h>
+
 #include <criterion/criterion.h>
-#include <hal/cpu.h>
-#include <hal/paging.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <string.h>
-#include <test_memory.h>
 
 #define KiB(x) ((size_t)(x) * 1024u)
 
-void   init_test_address_space(uint8_t* arena, size_t arena_size);
+void init_test_address_space(uint8_t* arena, size_t arena_size);
 size_t address_space_test_bytes_consumed_since(size_t free_before);
 bool test_address_space_map(struct address_space* space, size_t size, memory_access_t access, uintptr_t requested_base,
-                            size_t alignment, size_t guard_before, struct mapping** out_mapping, void** out_base);
+		size_t alignment, size_t guard_before, struct mapping** out_mapping, void** out_base);
 void mock_paging_reset(void);
 void mock_paging_fail_init_once(void);
 void mock_paging_fail_after(size_t successful_maps);
 void mock_paging_fail_once_after(size_t successful_maps);
 void mock_paging_fail_next_unmap(void);
 size_t mock_paging_mapping_count(void);
-void   mock_paging_set_leaf_size_mask(uint64_t mask);
+void mock_paging_set_leaf_size_mask(uint64_t mask);
 size_t mock_paging_map_call_count(void);
 size_t mock_paging_largest_map_size(void);
-void   mock_cache_reset(void);
+void mock_cache_reset(void);
 size_t mock_cache_executable_sync_count(void);

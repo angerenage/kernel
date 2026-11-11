@@ -2,15 +2,15 @@
 
 Test(kthread, join_detach_and_cancel_validate_inputs) {
 	const struct thread_create_params params = {
-		.name              = "worker",
-		.entry             = kthread_test_entry,
-		.arg               = NULL,
+		.name = "worker",
+		.entry = kthread_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x320000u,
-		.kernel_stack_top  = 0x324000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x324000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
-	struct kthread worker      = {.stack_mapping = NULL};
+	struct kthread worker = {.stack_mapping = NULL};
 	struct kthread idle_target = {.stack_mapping = NULL};
 
 	init_bound_bootstrap_cpu();

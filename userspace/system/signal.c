@@ -1,7 +1,8 @@
-#include <runtime/diagnostic.h>
 #include <stddef.h>
+
 #include <system/capability.h>
 #include <system/signal.h>
+#include <runtime/diagnostic.h>
 
 #include "syscall.h"
 
@@ -24,7 +25,7 @@ syscall_status_t signal_create(cap_id_t* out_cap) {
 }
 
 syscall_status_t signal_send(cap_id_t cap, uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint32_t flags,
-                             struct signal_send_response* out_response) {
+		struct signal_send_response* out_response) {
 	syscall_result_t result;
 
 	if (cap == CAP_ID_INVALID) {
@@ -37,22 +38,22 @@ syscall_status_t signal_send(cap_id_t cap, uint64_t arg0, uint64_t arg1, uint64_
 	}
 	if ((flags & (uint32_t)SIGNAL_SEND_FLAG_COALESCE) != 0u) {
 		result = syscall(SYSCALL_SIGNAL_SEND_COALESCED,
-		                 (uintptr_t)cap,
-		                 (uintptr_t)arg0,
-		                 (uintptr_t)arg1,
-		                 (uintptr_t)arg2,
-		                 (uintptr_t)arg3,
-		                 (uintptr_t)out_response);
+				(uintptr_t)cap,
+				(uintptr_t)arg0,
+				(uintptr_t)arg1,
+				(uintptr_t)arg2,
+				(uintptr_t)arg3,
+				(uintptr_t)out_response);
 		RUNTIME_DIAGNOSTIC_SYSCALL_RESULT(SYSCALL_SIGNAL_SEND_COALESCED, result);
 	}
 	else {
 		result = syscall(SYSCALL_SIGNAL_SEND,
-		                 (uintptr_t)cap,
-		                 (uintptr_t)arg0,
-		                 (uintptr_t)arg1,
-		                 (uintptr_t)arg2,
-		                 (uintptr_t)arg3,
-		                 (uintptr_t)out_response);
+				(uintptr_t)cap,
+				(uintptr_t)arg0,
+				(uintptr_t)arg1,
+				(uintptr_t)arg2,
+				(uintptr_t)arg3,
+				(uintptr_t)out_response);
 		RUNTIME_DIAGNOSTIC_SYSCALL_RESULT(SYSCALL_SIGNAL_SEND, result);
 	}
 	return result.status;
@@ -143,9 +144,9 @@ syscall_status_t signal_try_wait(cap_id_t cap, struct signal_message* out_messag
 
 syscall_status_t signal_set_handler(cap_id_t cap, user_upcall_entry_t* handler, uint32_t flags) {
 	const struct signal_set_handler_request request = {
-		.header  = {.op = SIGNAL_OP_SET_HANDLER},
+		.header = {.op = SIGNAL_OP_SET_HANDLER},
 		.handler = handler,
-		.flags   = flags,
+		.flags = flags,
 	};
 	syscall_result_t result;
 
@@ -183,7 +184,7 @@ syscall_status_t signal_clear_handler(cap_id_t cap) {
 
 syscall_status_t signal_unsubscribe(cap_id_t cap) {
 	const struct signal_unsubscribe_request request = {.header = {.op = SIGNAL_OP_UNSUBSCRIBE}};
-	syscall_result_t                        result;
+	syscall_result_t result;
 
 	if (cap == CAP_ID_INVALID) {
 		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(cap);
@@ -196,7 +197,7 @@ syscall_status_t signal_unsubscribe(cap_id_t cap) {
 
 syscall_status_t signal_destroy(cap_id_t cap) {
 	const struct signal_destroy_request request = {.header = {.op = SIGNAL_OP_DESTROY}};
-	syscall_result_t                    result;
+	syscall_result_t result;
 
 	if (cap == CAP_ID_INVALID) {
 		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(cap);

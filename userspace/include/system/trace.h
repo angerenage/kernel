@@ -1,27 +1,28 @@
 #pragma once
 
-#include <base/syscall.h>
-#include <base/trace.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
+#include <base/syscall.h>
+#include <base/trace.h>
+
 struct trace_label {
-	const char*      name;
-	size_t           length;
+	const char* name;
+	size_t length;
 	trace_label_id_t id;
 };
 
 struct trace_scope {
 	struct trace_label* label;
-	bool                active;
+	bool active;
 };
 
 #define TRACE_LABEL_INITIALIZER(label_name)                                                                            \
 	{                                                                                                                  \
-		.name   = (label_name),                                                                                        \
+		.name = (label_name),                                                                                          \
 		.length = sizeof(label_name) - 1u,                                                                             \
-		.id     = TRACE_LABEL_ID_INVALID,                                                                              \
+		.id = TRACE_LABEL_ID_INVALID,                                                                                  \
 	}
 
 #define TRACE_LABEL(variable, label_name) static struct trace_label variable = TRACE_LABEL_INITIALIZER(label_name)

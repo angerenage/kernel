@@ -1,6 +1,11 @@
 #ifndef TEST_IPC_TEST_SUPPORT_H
 #define TEST_IPC_TEST_SUPPORT_H
 
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+
 #include <base/cap.h>
 #include <base/channel.h>
 #include <base/heap.h>
@@ -10,11 +15,8 @@
 #include <core/channel.h>
 #include <core/pmm.h>
 #include <core/ring_buffer.h>
+
 #include <criterion/criterion.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <string.h>
 
 #define KiB(x) ((size_t)(x) * 1024u)
 

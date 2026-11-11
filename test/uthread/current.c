@@ -5,7 +5,7 @@ Test(uthread, current_returns_running_user_thread) {
 	struct uthread* main_thread;
 
 	init_uthread_test_environment();
-	process     = spawn_owner_process("test/current");
+	process = spawn_owner_process("test/current");
 	main_thread = process_main_thread(process);
 
 	cr_assert_null(uthread_current(), "idle scheduler thread should not resolve to a uthread");

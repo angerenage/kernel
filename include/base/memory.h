@@ -1,9 +1,10 @@
 #pragma once
 
-#include <base/cap.h>
-#include <base/dma.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/cap.h>
+#include <base/dma.h>
 
 enum memory_type {
 	MEMORY_TYPE_NORMAL = 0,
@@ -17,9 +18,9 @@ _Static_assert(MEMORY_TYPE_COUNT < 64, "memory type mask must fit in uint64_t");
 typedef uint32_t memory_access_t;
 
 enum memory_access {
-	MEMORY_ACCESS_READ  = 1u << 0,
+	MEMORY_ACCESS_READ = 1u << 0,
 	MEMORY_ACCESS_WRITE = 1u << 1,
-	MEMORY_ACCESS_EXEC  = 1u << 2,
+	MEMORY_ACCESS_EXEC = 1u << 2,
 };
 
 #define MEMORY_ACCESS_VALID_MASK ((memory_access_t)(MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE | MEMORY_ACCESS_EXEC))
@@ -44,7 +45,7 @@ enum memory_allocator_derive_flag {
 /* One physical range authorized by a MemoryAllocator policy. */
 struct memory_allocator_physical_range {
 	uintptr_t address;
-	size_t    size;
+	size_t size;
 };
 
 /* Common header for MemoryAllocator requests. */
@@ -59,21 +60,21 @@ struct memory_allocator_info_request {
 
 /* Immutable public MemoryAllocator policy information. */
 struct memory_allocator_info {
-	cap_rights_t                       memory_rights;
-	uint64_t                           memory_type_mask;
+	cap_rights_t memory_rights;
+	uint64_t memory_type_mask;
 	enum memory_allocator_claim_policy claim_policy;
-	size_t                             claim_range_count;
-	size_t                             physical_claim_granule;
+	size_t claim_range_count;
+	size_t physical_claim_granule;
 };
 
 /* Request a policy-restricted child MemoryAllocator. */
 struct memory_allocator_derive_request {
 	struct memory_allocator_request_header header;
-	cap_rights_t                           allocator_rights;
-	cap_rights_t                           memory_rights;
-	uint64_t                               memory_type_mask;
-	uint32_t                               flags;
-	uint32_t                               claim_range_count;
+	cap_rights_t allocator_rights;
+	cap_rights_t memory_rights;
+	uint64_t memory_type_mask;
+	uint32_t flags;
+	uint32_t claim_range_count;
 	struct memory_allocator_physical_range claim_ranges[];
 };
 
@@ -85,7 +86,7 @@ struct memory_allocator_derive_response {
 /* Request sparse Memory with an exact logical byte size. */
 struct memory_allocator_alloc_request {
 	struct memory_allocator_request_header header;
-	size_t                                 size;
+	size_t size;
 };
 
 /* Capability returned for newly allocated Memory. */
@@ -96,9 +97,9 @@ struct memory_allocator_alloc_response {
 /* Request exclusive ownership of an existing physical byte range. */
 struct memory_allocator_claim_physical_request {
 	struct memory_allocator_request_header header;
-	uintptr_t                              physical_address;
-	size_t                                 size;
-	enum memory_type                       memory_type;
+	uintptr_t physical_address;
+	size_t size;
+	enum memory_type memory_type;
 };
 
 /* Capability returned for claimed physical Memory. */
@@ -123,15 +124,15 @@ struct memory_info_request {
 
 /* Immutable public Memory information. */
 struct memory_info {
-	size_t           size;
+	size_t size;
 	enum memory_type memory_type;
 };
 
 /* Request a distinct child view over a Memory byte range. */
 struct memory_slice_request {
 	struct memory_request_header header;
-	size_t                       offset;
-	size_t                       size;
+	size_t offset;
+	size_t size;
 };
 
 /* Capability returned for a new Memory slice. */
@@ -158,18 +159,18 @@ struct mapping_info_request {
 
 /* Public information describing one whole-Memory projection. */
 struct mapping_info {
-	uintptr_t        address;
-	size_t           size;
-	memory_access_t  access;
-	size_t           guard_before;
-	size_t           guard_after;
+	uintptr_t address;
+	size_t size;
+	memory_access_t access;
+	size_t guard_before;
+	size_t guard_after;
 	enum memory_type memory_type;
 };
 
 /* Request a new protection for one Mapping. */
 struct mapping_protect_request {
 	struct mapping_request_header header;
-	memory_access_t               access;
+	memory_access_t access;
 };
 
 /* Request explicit destruction of one Mapping. */
@@ -180,8 +181,8 @@ struct mapping_unmap_request {
 /* Synchronize one DEVICE Mapping byte range for a DMA ownership transition. */
 struct mapping_sync_request {
 	struct mapping_request_header header;
-	enum dma_sync_target          target;
-	uint32_t                      reserved;
-	size_t                        offset;
-	size_t                        size;
+	enum dma_sync_target target;
+	uint32_t reserved;
+	size_t offset;
+	size_t size;
 };

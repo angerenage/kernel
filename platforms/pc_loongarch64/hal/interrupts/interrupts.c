@@ -1,15 +1,16 @@
-#include <boot/info.h>
-#include <core/address_space.h>
-#include <core/cpu.h>
-#include <core/exception.h>
-#include <core/sched.h>
-#include <hal/hcf.h>
-#include <hal/interrupts.h>
-#include <kernel/crash.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+
+#include <boot/info.h>
+#include <hal/hcf.h>
+#include <hal/interrupts.h>
+#include <core/address_space.h>
+#include <core/cpu.h>
+#include <core/exception.h>
+#include <core/sched.h>
+#include <kernel/crash.h>
 
 #include "../cache.h"
 #include "../clock.h"
@@ -133,8 +134,8 @@ bool hal_interrupt_source_domain_at(size_t index, struct hal_interrupt_source_do
 	return global_ready && loongarch64_interrupt_source_domain_at(index, out_domain);
 }
 
-bool hal_interrupt_source_resolve(uint64_t controller_register_address, uint32_t local_source_id,
-                                  struct hal_interrupt_source* out_source) {
+bool hal_interrupt_source_resolve(
+		uint64_t controller_register_address, uint32_t local_source_id, struct hal_interrupt_source* out_source) {
 	return global_ready &&
 	       loongarch64_interrupt_source_resolve(controller_register_address, local_source_id, out_source);
 }
@@ -144,8 +145,7 @@ bool hal_interrupt_source_claimable(const struct hal_interrupt_source* source) {
 }
 
 bool hal_interrupt_source_configuration_supported(const struct hal_interrupt_source* source,
-                                                  enum hal_interrupt_trigger         trigger,
-                                                  enum hal_interrupt_polarity        polarity) {
+		enum hal_interrupt_trigger trigger, enum hal_interrupt_polarity polarity) {
 	return global_ready && loongarch64_interrupt_source_configuration_supported(source, trigger, polarity);
 }
 
@@ -158,7 +158,7 @@ bool hal_interrupt_source_target_supported(const struct hal_interrupt_source* so
 }
 
 bool hal_interrupt_source_init(struct hal_interrupt_source_state* state, const struct hal_interrupt_source* source,
-                               const struct hal_interrupt_delivery* delivery) {
+		const struct hal_interrupt_delivery* delivery) {
 	return global_ready && loongarch64_interrupt_source_init(state, source, delivery);
 }
 
@@ -180,22 +180,21 @@ size_t hal_interrupt_message_range_count(void) {
 bool hal_interrupt_message_range_at(size_t index, struct hal_interrupt_message_range* out_range) {
 	return global_ready && loongarch64_interrupt_message_range_at(index, out_range);
 }
-bool hal_interrupt_message_resolve(uint64_t controller_register_address, uint32_t producer_id,
-                                   struct hal_interrupt_message_context* out_context) {
+bool hal_interrupt_message_resolve(
+		uint64_t controller_register_address, uint32_t producer_id, struct hal_interrupt_message_context* out_context) {
 	struct hal_interrupt_message_range range;
 	if (controller_register_address != UINT64_MAX || producer_id != UINT32_MAX || out_context == NULL ||
-	    !hal_interrupt_message_range_at(0u, &range))
+			!hal_interrupt_message_range_at(0u, &range))
 		return false;
 	*out_context = (struct hal_interrupt_message_context){.domain = range.domain};
 	return true;
 }
-bool hal_interrupt_message_target_supported(uint32_t domain, const struct hal_interrupt_message_source* source,
-                                            const struct cpu* target) {
+bool hal_interrupt_message_target_supported(
+		uint32_t domain, const struct hal_interrupt_message_source* source, const struct cpu* target) {
 	return global_ready && loongarch64_interrupt_message_target_supported(domain, source, target);
 }
-bool hal_interrupt_message_init(struct hal_interrupt_message_state*         state,
-                                const struct hal_interrupt_message_request* request,
-                                struct hal_interrupt_message*               out_message) {
+bool hal_interrupt_message_init(struct hal_interrupt_message_state* state,
+		const struct hal_interrupt_message_request* request, struct hal_interrupt_message* out_message) {
 	return global_ready && loongarch64_interrupt_message_init(state, request, out_message);
 }
 bool hal_interrupt_message_deinit(struct hal_interrupt_message_state* state) {
@@ -288,7 +287,7 @@ static bool loongarch64_exception_kind(uint64_t ecode, uint64_t esubcode, enum c
 		return true;
 	case 0x8:
 		*out_kind =
-			esubcode == 0 ? CORE_EXCEPTION_ACCESS_ADDRESS_ERROR_FETCH : CORE_EXCEPTION_ACCESS_ADDRESS_ERROR_MEMORY;
+				esubcode == 0 ? CORE_EXCEPTION_ACCESS_ADDRESS_ERROR_FETCH : CORE_EXCEPTION_ACCESS_ADDRESS_ERROR_MEMORY;
 		return true;
 	case 0x9:
 		*out_kind = CORE_EXCEPTION_ALIGNMENT;
@@ -362,12 +361,12 @@ void handle_exception(struct exception_frame* frame) {
 	}
 
 	is_pending = frame->estat & 0x7fffu;
-	esubcode   = (frame->estat >> 22) & 0x1ffu;
+	esubcode = (frame->estat >> 22) & 0x1ffu;
 
 	if (is_page_invalid_exception(ecode)) {
 		cpu_leave_exception();
 		if (address_space_handle_current_fault(
-				frame->badv, ADDRESS_SPACE_FAULT_NOT_PRESENT, loongarch64_fault_access(ecode), was_user_mode())) {
+					frame->badv, ADDRESS_SPACE_FAULT_NOT_PRESENT, loongarch64_fault_access(ecode), was_user_mode())) {
 			return;
 		}
 		cpu_enter_exception();
@@ -379,25 +378,24 @@ void handle_exception(struct exception_frame* frame) {
 		cpu_enter_exception();
 	}
 
-	struct kernel_crash_record* record =
-		kernel_crash_begin(KERNEL_CRASH_ARCH_LOONGARCH64,
-		                   ecode == 0u ? KERNEL_CRASH_CAUSE_UNEXPECTED_INTERRUPT : KERNEL_CRASH_CAUSE_EXCEPTION);
+	struct kernel_crash_record* record = kernel_crash_begin(KERNEL_CRASH_ARCH_LOONGARCH64,
+			ecode == 0u ? KERNEL_CRASH_CAUSE_UNEXPECTED_INTERRUPT : KERNEL_CRASH_CAUSE_EXCEPTION);
 	struct kernel_crash_panic panic;
 
 	if (kernel_crash_take_panic(&panic)) {
-		record->cause        = KERNEL_CRASH_CAUSE_PANIC;
+		record->cause = KERNEL_CRASH_CAUSE_PANIC;
 		record->panic_reason = panic.reason;
 		record->panic_detail = panic.detail;
 	}
-	record->exception_code      = ecode;
-	record->exception_subcode   = esubcode;
-	record->error_code          = frame->estat;
-	record->fault_address       = frame->badv;
+	record->exception_code = ecode;
+	record->exception_subcode = esubcode;
+	record->error_code = frame->estat;
+	record->fault_address = frame->badv;
 	record->instruction_pointer = frame->era;
-	record->stack_pointer       = frame->gpr[3];
-	record->frame_pointer       = frame->gpr[22];
-	record->status              = frame->prmd;
-	record->register_count      = 32u;
+	record->stack_pointer = frame->gpr[3];
+	record->frame_pointer = frame->gpr[22];
+	record->status = frame->prmd;
+	record->register_count = 32u;
 	for (uint32_t i = 0u; i < record->register_count; i++) record->registers[i] = frame->gpr[i];
 	kernel_crash_finish(record);
 }

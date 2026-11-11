@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include <system/display.h>
 
 #include "parse.h"
@@ -25,10 +26,10 @@ static bool write_unknown_command(const char* command) {
 
 static bool write_program_exit(const char* command, uintptr_t exit_code) {
 	return command != NULL && fprintf(stderr,
-	                                  SHELL_ERROR_PREFIX "%s: exited with code %llu (0x%llx)\n",
-	                                  command,
-	                                  (unsigned long long)exit_code,
-	                                  (unsigned long long)exit_code) >= 0;
+									  SHELL_ERROR_PREFIX "%s: exited with code %llu (0x%llx)\n",
+									  command,
+									  (unsigned long long)exit_code,
+									  (unsigned long long)exit_code) >= 0;
 }
 
 static bool report_change_directory(enum shell_change_directory_result result) {
@@ -66,7 +67,7 @@ static bool execute_print_directory(const struct shell* shell, size_t argc, char
 
 enum echo_option {
 	ECHO_OPTION_NO_NEWLINE = 1u << 0,
-	ECHO_OPTION_ESCAPES    = 1u << 1,
+	ECHO_OPTION_ESCAPES = 1u << 1,
 };
 
 static bool parse_echo_option(const char* argument, uint32_t* options) {
@@ -126,18 +127,18 @@ static void append_utf8(char* output, size_t* size, uint32_t code) {
 /* Escapes never expand, so the output needs no more room than the argument. Returns true on \c. */
 static bool append_escaped(char* output, size_t* size, const char* argument) {
 	static const char letters[] = "abeEfnrtv\\";
-	static const char values[]  = "\a\b\x1b\x1b\f\n\r\t\v\\";
+	static const char values[] = "\a\b\x1b\x1b\f\n\r\t\v\\";
 
 	while (*argument != '\0') {
 		const char* letter;
-		char        value = *argument++;
-		uint32_t    code  = 0u;
+		char value = *argument++;
+		uint32_t code = 0u;
 
 		if (value != '\\' || *argument == '\0') {
 			output[(*size)++] = value;
 			continue;
 		}
-		value  = *argument++;
+		value = *argument++;
 		letter = memchr(letters, value, sizeof(letters) - 1u);
 		if (letter != NULL) {
 			output[(*size)++] = values[letter - letters];
@@ -165,11 +166,11 @@ static bool append_escaped(char* output, size_t* size, const char* argument) {
 }
 
 static bool execute_echo(size_t argc, char* const argv[]) {
-	uint32_t options  = 0u;
-	size_t   capacity = 1u;
-	size_t   size     = 0u;
-	bool     success;
-	char*    output;
+	uint32_t options = 0u;
+	size_t capacity = 1u;
+	size_t size = 0u;
+	bool success;
+	char* output;
 
 	for (; argc != 0u && parse_echo_option(*argv, &options); argc--) argv++;
 	for (size_t i = 0u; i < argc; i++) capacity += strlen(argv[i]) + 1u;
@@ -194,7 +195,7 @@ static bool execute_echo(size_t argc, char* const argv[]) {
 }
 
 static bool execute_program(struct shell* shell, size_t argc, char* const argv[]) {
-	size_t    command_size = strlen(argv[0]);
+	size_t command_size = strlen(argv[0]);
 	uintptr_t exit_code;
 	switch (shell_run_program(shell, argv[0], command_size, argc - 1u, (const char* const*)(argv + 1u), &exit_code)) {
 	case SHELL_PROGRAM_OK:
@@ -233,17 +234,17 @@ bool shell_execute_builtin(struct shell* shell, const struct shell_command* comm
 }
 
 bool shell_execute_line(struct shell* shell, const char* line, size_t size) {
-	struct shell_pipeline         pipeline = {0};
-	struct shell_command*         command;
-	struct shell_redirect_streams redirects       = {0};
-	cap_id_t                      original_input  = CAP_ID_INVALID;
-	cap_id_t                      original_output = CAP_ID_INVALID;
-	cap_id_t                      original_error  = CAP_ID_INVALID;
-	char**                        argv;
-	size_t                        argc;
-	bool                          success    = true;
-	bool                          redirected = false;
-	enum shell_parse_result       parse_result;
+	struct shell_pipeline pipeline = {0};
+	struct shell_command* command;
+	struct shell_redirect_streams redirects = {0};
+	cap_id_t original_input = CAP_ID_INVALID;
+	cap_id_t original_output = CAP_ID_INVALID;
+	cap_id_t original_error = CAP_ID_INVALID;
+	char** argv;
+	size_t argc;
+	bool success = true;
+	bool redirected = false;
+	enum shell_parse_result parse_result;
 
 	if (shell == NULL || (line == NULL && size != 0u)) return false;
 	parse_result = shell_parse_line(line, size, &pipeline);
@@ -286,8 +287,8 @@ bool shell_execute_line(struct shell* shell, const char* line, size_t size) {
 		return pipeline_ok;
 	}
 	command = &pipeline.commands[0];
-	argc    = command->argc;
-	argv    = command->argv;
+	argc = command->argc;
+	argv = command->argv;
 
 	if (command->redirection_count != 0u) {
 		const char* error_path;
@@ -300,14 +301,14 @@ bool shell_execute_line(struct shell* shell, const char* line, size_t size) {
 		}
 		display_get_standard_streams(&original_input, &original_output, &original_error);
 		display_set_standard_streams(redirects.input_changed ? redirects.input : original_input,
-		                             redirects.output_changed ? redirects.output : original_output,
-		                             original_error);
+				redirects.output_changed ? redirects.output : original_output,
+				original_error);
 		redirected = true;
 	}
 
 	if (argc == 0u) goto cleanup;
 	bool handled = false;
-	success      = shell_execute_builtin(shell, command, &handled);
+	success = shell_execute_builtin(shell, command, &handled);
 	if (!handled) success = execute_program(shell, argc, argv);
 
 cleanup:

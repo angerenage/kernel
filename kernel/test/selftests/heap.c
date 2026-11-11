@@ -1,8 +1,9 @@
-#include <base/heap.h>
 #include <libc/stdlib.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <base/heap.h>
 
 #include "../selftest.h"
 
@@ -10,10 +11,10 @@ static void kernel_selftest_heap_allocates_and_restores(struct kernel_selftest_c
 	size_t free_before;
 	size_t total_bytes;
 	size_t free_during;
-	void*  first        = NULL;
-	void*  second       = NULL;
-	void*  reused       = NULL;
-	void*  first_before = NULL;
+	void* first = NULL;
+	void* second = NULL;
+	void* reused = NULL;
+	void* first_before = NULL;
 
 	free_before = heap_free_bytes();
 	total_bytes = heap_total_bytes();
@@ -21,9 +22,9 @@ static void kernel_selftest_heap_allocates_and_restores(struct kernel_selftest_c
 	KERNEL_SELFTEST_ASSERT_MSG(ctx, total_bytes > 0u, "heap reported no capacity");
 	KERNEL_SELFTEST_ASSERT(ctx, free_before <= total_bytes);
 
-	first        = malloc(24);
+	first = malloc(24);
 	first_before = first;
-	second       = malloc(80);
+	second = malloc(80);
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, first != NULL, "malloc(24) returned NULL", cleanup);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, second != NULL, "malloc(80) returned NULL", cleanup);
@@ -50,8 +51,8 @@ cleanup:
 }
 
 static void kernel_selftest_heap_calloc_zeroes_and_realloc_preserves_contents(struct kernel_selftest_context* ctx) {
-	size_t   free_before;
-	uint8_t* data  = NULL;
+	size_t free_before;
+	uint8_t* data = NULL;
 	uint8_t* grown = NULL;
 
 	free_before = heap_free_bytes();
@@ -80,23 +81,23 @@ cleanup:
 }
 
 static void kernel_selftest_heap_grows_when_initial_arena_is_exhausted(struct kernel_selftest_context* ctx) {
-	void*  blocks[128]   = {0};
-	size_t free_before   = heap_free_bytes();
-	size_t total_before  = heap_total_bytes();
-	size_t count         = 0;
+	void* blocks[128] = {0};
+	size_t free_before = heap_free_bytes();
+	size_t total_before = heap_total_bytes();
+	size_t count = 0;
 	size_t total_current = total_before;
 
 	while (count < (sizeof(blocks) / sizeof(blocks[0])) && total_current == total_before) {
 		blocks[count] = malloc(256);
 		KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-			ctx, blocks[count] != NULL, "malloc(256) returned NULL before heap growth", cleanup);
+				ctx, blocks[count] != NULL, "malloc(256) returned NULL before heap growth", cleanup);
 		memset(blocks[count], (int)(0x80u + (count & 0x1fu)), 256);
 		count++;
 		total_current = heap_total_bytes();
 	}
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, total_current > total_before, "heap did not request additional pages", cleanup);
+			ctx, total_current > total_before, "heap did not request additional pages", cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, count > 0u, cleanup);
 
 cleanup:
@@ -112,9 +113,9 @@ cleanup:
 }
 
 static void kernel_selftest_heap_realloc_special_cases_restore_state(struct kernel_selftest_context* ctx) {
-	size_t   free_before = heap_free_bytes();
-	uint8_t* grown       = NULL;
-	uint8_t* direct      = NULL;
+	size_t free_before = heap_free_bytes();
+	uint8_t* grown = NULL;
+	uint8_t* direct = NULL;
 
 	direct = (uint8_t*)realloc(NULL, 64u);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, direct != NULL, "realloc(NULL, 64) returned NULL", cleanup);
@@ -143,25 +144,25 @@ cleanup:
 
 static const struct kernel_selftest_case kernel_heap_selftests[] = {
 	{
-	 .name = "allocates_and_restores_heap",
-	 .run  = kernel_selftest_heap_allocates_and_restores,
-	 },
+		.name = "allocates_and_restores_heap",
+		.run = kernel_selftest_heap_allocates_and_restores,
+	},
 	{
-	 .name = "calloc_zeroes_and_realloc_preserves_contents",
-	 .run  = kernel_selftest_heap_calloc_zeroes_and_realloc_preserves_contents,
-	 },
+		.name = "calloc_zeroes_and_realloc_preserves_contents",
+		.run = kernel_selftest_heap_calloc_zeroes_and_realloc_preserves_contents,
+	},
 	{
-	 .name = "grows_when_initial_arena_is_exhausted",
-	 .run  = kernel_selftest_heap_grows_when_initial_arena_is_exhausted,
-	 },
+		.name = "grows_when_initial_arena_is_exhausted",
+		.run = kernel_selftest_heap_grows_when_initial_arena_is_exhausted,
+	},
 	{
-	 .name = "realloc_special_cases_restore_state",
-	 .run  = kernel_selftest_heap_realloc_special_cases_restore_state,
-	 },
+		.name = "realloc_special_cases_restore_state",
+		.run = kernel_selftest_heap_realloc_special_cases_restore_state,
+	},
 };
 
 const struct kernel_selftest_suite kernel_heap_selftest_suite = {
-	.name       = "heap",
-	.cases      = kernel_heap_selftests,
+	.name = "heap",
+	.cases = kernel_heap_selftests,
 	.case_count = sizeof(kernel_heap_selftests) / sizeof(kernel_heap_selftests[0]),
 };

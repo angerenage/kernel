@@ -4,14 +4,14 @@
 
 Test(heap, impossible_allocation_does_not_consume_growth_arenas) {
 	_Alignas(4096) static uint8_t arena[KiB(64)];
-	size_t                        before_total;
-	size_t                        before_free;
-	void*                         ptr;
-	volatile size_t               impossible_size = SIZE_MAX - 64u;
+	size_t before_total;
+	size_t before_free;
+	void* ptr;
+	volatile size_t impossible_size = SIZE_MAX - 64u;
 
 	init_test_heap(arena, sizeof(arena));
 	before_total = heap_total_bytes();
-	before_free  = heap_free_bytes();
+	before_free = heap_free_bytes();
 
 	/*
 	 * This size can survive malloc's header/alignment arithmetic on 64-bit,

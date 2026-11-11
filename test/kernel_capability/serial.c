@@ -4,11 +4,11 @@
 
 Test(kernel_capability_serial, call_right_does_not_implicitly_grant_serial_write) {
 	struct kernel_capability_test_context ctx;
-	struct capability*                    root;
-	cap_id_t                              root_id;
-	cap_id_t                              call_only_id;
-	syscall_result_t                      result;
-	const char                            payload[] = "must-not-write";
+	struct capability* root;
+	cap_id_t root_id;
+	cap_id_t call_only_id;
+	syscall_result_t result;
+	const char payload[] = "must-not-write";
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/serial-rights");
 	kernel_capability_serial_init();
@@ -23,8 +23,9 @@ Test(kernel_capability_serial, call_right_does_not_implicitly_grant_serial_write
 
 	kernel_capability_test_serial_reset();
 	result = kernel_capability_test_call(call_only_id, payload, sizeof(payload), NULL, 0u);
-	cr_assert_eq(
-		result.status, SYSCALL_STATUS_DENIED, "CAP_CALL-only serial capability bypassed the service's CAP_WRITE right");
+	cr_assert_eq(result.status,
+			SYSCALL_STATUS_DENIED,
+			"CAP_CALL-only serial capability bypassed the service's CAP_WRITE right");
 	cr_assert_eq(kernel_capability_test_serial_bytes(), 0u, "denied serial call emitted bytes");
 
 	kernel_capability_test_end(&ctx);

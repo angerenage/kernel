@@ -1,18 +1,19 @@
 #include "ps2.h"
 
-#include <protocol/device.h>
-#include <protocol/ps2.h>
-#include <runtime/device.h>
-#include <runtime/log.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+
+#include <protocol/device.h>
+#include <protocol/ps2.h>
 #include <system/capability.h>
 #include <system/process.h>
 #include <system/signal.h>
 #include <system/thread.h>
 #include <system/time.h>
+#include <runtime/device.h>
+#include <runtime/log.h>
 
 #include "events.h"
 #include "keyboard.h"
@@ -54,14 +55,14 @@ enum ps2_receive_result {
 
 /* Runtime state owned by one independently supervised PS/2 driver. */
 struct ps2_device {
-	cap_id_t             transport_cap;
-	cap_id_t             receive_signal_cap;
-	cap_id_t             activity_cap;
-	cap_id_t             transport_waiter_cap;
+	cap_id_t transport_cap;
+	cap_id_t receive_signal_cap;
+	cap_id_t activity_cap;
+	cap_id_t transport_waiter_cap;
 	enum ps2_device_kind kind;
-	uint8_t              mouse_id;
-	uint8_t              keyboard_leds;
-	bool                 transport_failed;
+	uint8_t mouse_id;
+	uint8_t keyboard_leds;
+	bool transport_failed;
 };
 
 /* Copied onto the transport waiter's initial stack. */
@@ -72,37 +73,37 @@ struct ps2_transport_waiter_argument {
 struct ps2_read_buffer {
 	uint32_t size;
 	uint32_t flags;
-	uint8_t  bytes[PS2_TRANSPORT_MAX_READ];
+	uint8_t bytes[PS2_TRANSPORT_MAX_READ];
 };
 
-static syscall_status_t transport_read(cap_id_t transport_cap, void* buffer, size_t capacity, size_t* out_size,
-                                       bool* out_overrun) {
+static syscall_status_t transport_read(
+		cap_id_t transport_cap, void* buffer, size_t capacity, size_t* out_size, bool* out_overrun) {
 	const struct ps2_transport_read_request request = {
-		.header   = {.op = PS2_TRANSPORT_OP_READ},
+		.header = {.op = PS2_TRANSPORT_OP_READ},
 		.max_size = (uint32_t)capacity,
 	};
 	struct ps2_read_buffer response = {0};
-	size_t                 response_size;
-	syscall_status_t       status;
+	size_t response_size;
+	syscall_status_t status;
 
 	if (transport_cap == CAP_ID_INVALID || buffer == NULL || capacity == 0u || capacity > PS2_TRANSPORT_MAX_READ ||
-	    out_size == NULL || out_overrun == NULL)
+			out_size == NULL || out_overrun == NULL)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
-	*out_size    = 0u;
+	*out_size = 0u;
 	*out_overrun = false;
-	status       = cap_call(transport_cap,
-	                        &request,
-	                        sizeof(request),
-	                        &response,
-	                        sizeof(struct ps2_transport_read_response) + capacity,
-	                        &response_size);
+	status = cap_call(transport_cap,
+			&request,
+			sizeof(request),
+			&response,
+			sizeof(struct ps2_transport_read_response) + capacity,
+			&response_size);
 	if (status != SYSCALL_STATUS_OK) return status;
 	if (response_size < sizeof(struct ps2_transport_read_response) || response.size > capacity ||
-	    response_size != sizeof(struct ps2_transport_read_response) + response.size ||
-	    (response.flags & ~(uint32_t)PS2_TRANSPORT_READ_FLAG_OVERRUN) != 0u)
+			response_size != sizeof(struct ps2_transport_read_response) + response.size ||
+			(response.flags & ~(uint32_t)PS2_TRANSPORT_READ_FLAG_OVERRUN) != 0u)
 		return SYSCALL_STATUS_FAILED;
 	if (response.size != 0u) memcpy(buffer, response.bytes, response.size);
-	*out_size    = response.size;
+	*out_size = response.size;
 	*out_overrun = (response.flags & PS2_TRANSPORT_READ_FLAG_OVERRUN) != 0u;
 	return SYSCALL_STATUS_OK;
 }
@@ -110,7 +111,7 @@ static syscall_status_t transport_read(cap_id_t transport_cap, void* buffer, siz
 static syscall_status_t transport_write(cap_id_t transport_cap, uint8_t value) {
 	const struct ps2_transport_write_request request = {
 		.header = {.op = PS2_TRANSPORT_OP_WRITE},
-		.value  = value,
+		.value = value,
 	};
 	size_t response_size = 0u;
 	if (transport_cap == CAP_ID_INVALID) return SYSCALL_STATUS_BAD_ARGUMENT;
@@ -124,12 +125,12 @@ static syscall_status_t transport_acquire_receive_signal(cap_id_t transport_cap,
 		.header = {.op = PS2_TRANSPORT_OP_ACQUIRE_RECEIVE_SIGNAL},
 	};
 	struct ps2_transport_acquire_signal_response response = {.capability = CAP_ID_INVALID};
-	size_t                                       response_size;
-	syscall_status_t                             status;
+	size_t response_size;
+	syscall_status_t status;
 
 	if (transport_cap == CAP_ID_INVALID || out_signal_cap == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	*out_signal_cap = CAP_ID_INVALID;
-	status          = cap_call(transport_cap, &request, sizeof(request), &response, sizeof(response), &response_size);
+	status = cap_call(transport_cap, &request, sizeof(request), &response, sizeof(response), &response_size);
 	if (status != SYSCALL_STATUS_OK) return status;
 	if (response_size != sizeof(response) || response.capability == CAP_ID_INVALID) return SYSCALL_STATUS_FAILED;
 	*out_signal_cap = response.capability;
@@ -138,15 +139,15 @@ static syscall_status_t transport_acquire_receive_signal(cap_id_t transport_cap,
 
 static void transport_waiter(void* opaque) {
 	const struct ps2_transport_waiter_argument* argument = opaque;
-	struct ps2_device*                          device   = argument->device;
+	struct ps2_device* device = argument->device;
 	for (;;) {
 		struct signal_message message;
-		syscall_status_t      status = signal_wait(device->receive_signal_cap, &message);
+		syscall_status_t status = signal_wait(device->receive_signal_cap, &message);
 		if (status == SYSCALL_STATUS_INTERRUPTED) continue;
 		if (status != SYSCALL_STATUS_OK) __atomic_store_n(&device->transport_failed, true, __ATOMIC_RELEASE);
 		struct signal_send_response response;
 		if (signal_send(device->activity_cap, 1u, 0u, 0u, 0u, SIGNAL_SEND_FLAG_COALESCE, &response) !=
-		    SYSCALL_STATUS_OK)
+				SYSCALL_STATUS_OK)
 			thread_exit(1u);
 		if (status != SYSCALL_STATUS_OK) thread_exit(1u);
 	}
@@ -154,18 +155,19 @@ static void transport_waiter(void* opaque) {
 
 static bool start_transport_waiter(struct ps2_device* device) {
 	struct self_info self = {
-		.self_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .main_thread_cap = CAP_ID_INVALID};
+		.self_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .main_thread_cap = CAP_ID_INVALID
+	};
 	if (signal_create(&device->activity_cap) != SYSCALL_STATUS_OK) return false;
 	syscall_status_t status = process_self_info(&self);
 	if (status == SYSCALL_STATUS_OK) {
 		const struct ps2_transport_waiter_argument argument = {.device = device};
-		status                                              = process_spawn_thread(self.self_cap,
-		                                                                           (uintptr_t)transport_waiter,
-		                                                                           &argument,
-		                                                                           sizeof(argument),
-		                                                                           "PS/2 transport waiter",
-		                                                                           sizeof("PS/2 transport waiter"),
-		                                                                           &device->transport_waiter_cap);
+		status = process_spawn_thread(self.self_cap,
+				(uintptr_t)transport_waiter,
+				&argument,
+				sizeof(argument),
+				"PS/2 transport waiter",
+				sizeof("PS/2 transport waiter"),
+				&device->transport_waiter_cap);
 	}
 	if (self.self_cap != CAP_ID_INVALID) (void)cap_drop(self.self_cap);
 	if (self.address_space_cap != CAP_ID_INVALID) (void)cap_drop(self.address_space_cap);
@@ -198,13 +200,13 @@ static enum ps2_receive_result receive_byte(struct ps2_device* device, uint64_t 
 	uint64_t deadline;
 
 	if (timeout_ms == 0u || timeout_ms > UINT64_MAX / NANOSECONDS_PER_MILLISECOND ||
-	    monotonic_time_ns(&now) != SYSCALL_STATUS_OK)
+			monotonic_time_ns(&now) != SYSCALL_STATUS_OK)
 		return PS2_RECEIVE_FAILED;
 	duration = timeout_ms * NANOSECONDS_PER_MILLISECOND;
 	deadline = now > UINT64_MAX - duration ? UINT64_MAX : now + duration;
 	for (;;) {
-		size_t           size;
-		bool             overrun;
+		size_t size;
+		bool overrun;
 		syscall_status_t status = transport_read(device->transport_cap, out_value, 1u, &size, &overrun);
 		if (status == SYSCALL_STATUS_OK) {
 			if (overrun) return PS2_RECEIVE_OVERRUN;
@@ -221,8 +223,8 @@ static enum ps2_receive_result receive_byte(struct ps2_device* device, uint64_t 
 static bool drain_transport(struct ps2_device* device) {
 	uint8_t bytes[PS2_SERVICE_READ_SIZE];
 	for (;;) {
-		size_t           size;
-		bool             overrun;
+		size_t size;
+		bool overrun;
 		syscall_status_t status = transport_read(device->transport_cap, bytes, sizeof(bytes), &size, &overrun);
 		if (status == SYSCALL_STATUS_UNAVAILABLE) return true;
 		if (status != SYSCALL_STATUS_OK) return false;
@@ -235,7 +237,7 @@ static bool command_acknowledged(struct ps2_device* device, uint8_t command) {
 	for (size_t attempt = 0u; attempt < PS2_COMMAND_ATTEMPTS; attempt++) {
 		if (transport_write(device->transport_cap, command) != SYSCALL_STATUS_OK) return false;
 		for (size_t skipped = 0u; skipped < PS2_UNEXPECTED_RESPONSE_LIMIT; skipped++) {
-			uint8_t                 response;
+			uint8_t response;
 			enum ps2_receive_result result = receive_byte(device, PS2_RESPONSE_TIMEOUT_MS, &response);
 			if (result != PS2_RECEIVE_OK) return false;
 			if (response == PS2_ACK) return true;
@@ -274,9 +276,9 @@ enum ps2_configure_result {
 static enum ps2_configure_result reset_and_identify(struct ps2_device* device) {
 	uint8_t first;
 	uint8_t second;
-	size_t  id_size;
+	size_t id_size;
 
-	device->kind     = PS2_DEVICE_UNKNOWN;
+	device->kind = PS2_DEVICE_UNKNOWN;
 	device->mouse_id = PS2_MOUSE_ID_STANDARD;
 	if (!drain_transport(device) || !command_acknowledged(device, PS2_COMMAND_RESET)) return PS2_CONFIGURE_ERROR;
 	if (receive_byte(device, PS2_RESET_TIMEOUT_MS, &first) != PS2_RECEIVE_OK || first != PS2_SELF_TEST_SUCCESS)
@@ -285,7 +287,7 @@ static enum ps2_configure_result reset_and_identify(struct ps2_device* device) {
 		return PS2_CONFIGURE_ERROR;
 
 	if (id_size >= 1u && is_mouse_id(first)) {
-		device->kind     = PS2_DEVICE_MOUSE;
+		device->kind = PS2_DEVICE_MOUSE;
 		device->mouse_id = first;
 	}
 	else if (id_size >= 1u && first == 0xabu) {
@@ -297,7 +299,7 @@ static enum ps2_configure_result reset_and_identify(struct ps2_device* device) {
 
 static bool read_mouse_id(struct ps2_device* device, uint8_t* out_id) {
 	uint8_t ignored;
-	size_t  size;
+	size_t size;
 	if (!identify(device, out_id, &ignored, &size)) return false;
 	return size == 1u && is_mouse_id(*out_id);
 }
@@ -310,13 +312,13 @@ static bool configure_mouse(struct ps2_device* device) {
 	uint8_t id;
 	if (device->mouse_id == PS2_MOUSE_ID_STANDARD) {
 		if (!set_sample_rate(device, 200u) || !set_sample_rate(device, 100u) || !set_sample_rate(device, 80u) ||
-		    !read_mouse_id(device, &id))
+				!read_mouse_id(device, &id))
 			return false;
 		device->mouse_id = id;
 	}
 	if (device->mouse_id == PS2_MOUSE_ID_WHEEL) {
 		if (!set_sample_rate(device, 200u) || !set_sample_rate(device, 200u) || !set_sample_rate(device, 80u) ||
-		    !read_mouse_id(device, &id))
+				!read_mouse_id(device, &id))
 			return false;
 		device->mouse_id = id;
 	}
@@ -325,7 +327,7 @@ static bool configure_mouse(struct ps2_device* device) {
 
 static enum ps2_configure_result configure_device(struct ps2_device* device) {
 	enum ps2_configure_result result = reset_and_identify(device);
-	bool                      configured;
+	bool configured;
 
 	if (result != PS2_CONFIGURE_OK) return result;
 	if (device->kind == PS2_DEVICE_KEYBOARD)
@@ -345,12 +347,12 @@ static bool wait_for_activity(struct ps2_device* device) {
 	}
 }
 
-static bool keyboard_command_acknowledged(struct ps2_device* device, struct ps2_keyboard_decoder* decoder,
-                                          uint8_t command) {
+static bool keyboard_command_acknowledged(
+		struct ps2_device* device, struct ps2_keyboard_decoder* decoder, uint8_t command) {
 	for (size_t attempt = 0u; attempt < PS2_COMMAND_ATTEMPTS; attempt++) {
 		if (transport_write(device->transport_cap, command) != SYSCALL_STATUS_OK) return false;
 		for (size_t skipped = 0u; skipped < PS2_UNEXPECTED_RESPONSE_LIMIT; skipped++) {
-			uint8_t                 response;
+			uint8_t response;
 			enum ps2_receive_result result = receive_byte(device, PS2_RESPONSE_TIMEOUT_MS, &response);
 			if (result != PS2_RECEIVE_OK) return false;
 			if (response == PS2_ACK) return true;
@@ -366,8 +368,8 @@ static bool keyboard_set_leds(struct ps2_device* device, struct ps2_keyboard_dec
 	       keyboard_command_acknowledged(device, decoder, mask);
 }
 
-static bool keyboard_output_mask(struct ps2_device* device, const struct input_output_value* values, size_t count,
-                                 uint8_t* out_mask) {
+static bool keyboard_output_mask(
+		struct ps2_device* device, const struct input_output_value* values, size_t count, uint8_t* out_mask) {
 	uint8_t mask = device->keyboard_leds;
 	for (size_t i = 0u; i < count; i++) {
 		uint8_t bit;
@@ -393,15 +395,15 @@ static bool keyboard_output_mask(struct ps2_device* device, const struct input_o
 
 static bool serve_keyboard(struct ps2_device* device, bool* out_reinitialize) {
 	struct ps2_keyboard_decoder decoder;
-	uint8_t                     bytes[PS2_SERVICE_READ_SIZE];
+	uint8_t bytes[PS2_SERVICE_READ_SIZE];
 	ps2_keyboard_decoder_init(&decoder);
 	for (;;) {
 		struct input_output_value outputs[3];
-		size_t                    output_count;
+		size_t output_count;
 		if (ps2_outputs_take(outputs, sizeof(outputs) / sizeof(outputs[0]), &output_count)) {
 			uint8_t mask;
-			bool    applied =
-				keyboard_output_mask(device, outputs, output_count, &mask) && keyboard_set_leds(device, &decoder, mask);
+			bool applied = keyboard_output_mask(device, outputs, output_count, &mask) &&
+			               keyboard_set_leds(device, &decoder, mask);
 			if (applied) device->keyboard_leds = mask;
 			if (!ps2_outputs_complete(applied ? SYSCALL_STATUS_OK : SYSCALL_STATUS_FAILED)) return false;
 			if (!applied) {
@@ -412,8 +414,8 @@ static bool serve_keyboard(struct ps2_device* device, bool* out_reinitialize) {
 			continue;
 		}
 
-		size_t           size;
-		bool             overrun;
+		size_t size;
+		bool overrun;
 		syscall_status_t status = transport_read(device->transport_cap, bytes, sizeof(bytes), &size, &overrun);
 		if (status == SYSCALL_STATUS_UNAVAILABLE) {
 			if (!wait_for_activity(device)) return false;
@@ -437,11 +439,11 @@ static bool serve_keyboard(struct ps2_device* device, bool* out_reinitialize) {
 
 static bool serve_mouse(struct ps2_device* device, bool* out_reinitialize) {
 	struct ps2_mouse_decoder decoder;
-	uint8_t                  bytes[PS2_SERVICE_READ_SIZE];
+	uint8_t bytes[PS2_SERVICE_READ_SIZE];
 	ps2_mouse_decoder_init(&decoder, device->mouse_id);
 	for (;;) {
-		size_t           size;
-		bool             overrun;
+		size_t size;
+		bool overrun;
 		syscall_status_t status = transport_read(device->transport_cap, bytes, sizeof(bytes), &size, &overrun);
 		if (status == SYSCALL_STATUS_UNAVAILABLE) {
 			if (!wait_for_activity(device)) return false;
@@ -470,19 +472,19 @@ static bool serve_device(struct ps2_device* device, bool* out_reinitialize) {
 
 enum device_driver_result ps2_driver_run(cap_id_t device_cap) {
 	struct ps2_device device = {
-		.transport_cap        = CAP_ID_INVALID,
-		.receive_signal_cap   = CAP_ID_INVALID,
-		.activity_cap         = CAP_ID_INVALID,
+		.transport_cap = CAP_ID_INVALID,
+		.receive_signal_cap = CAP_ID_INVALID,
+		.activity_cap = CAP_ID_INVALID,
 		.transport_waiter_cap = CAP_ID_INVALID,
 	};
-	bool                      input_initialized = false;
-	enum device_driver_result result            = DEVICE_DRIVER_ERROR;
+	bool input_initialized = false;
+	enum device_driver_result result = DEVICE_DRIVER_ERROR;
 
 	if (device_resource_acquire(device_cap,
-	                            PS2_TRANSPORT_RESOURCE,
-	                            sizeof(PS2_TRANSPORT_RESOURCE) - 1u,
-	                            PS2_TRANSPORT_DRIVER_RIGHTS,
-	                            &device.transport_cap) != SYSCALL_STATUS_OK) {
+				PS2_TRANSPORT_RESOURCE,
+				sizeof(PS2_TRANSPORT_RESOURCE) - 1u,
+				PS2_TRANSPORT_DRIVER_RIGHTS,
+				&device.transport_cap) != SYSCALL_STATUS_OK) {
 		printf("ps2: could not acquire the byte transport\n");
 		goto done;
 	}
@@ -506,7 +508,7 @@ enum device_driver_result ps2_driver_run(cap_id_t device_cap) {
 			goto done;
 		}
 		if ((!input_initialized && !ps2_events_initialize(device.kind, device.mouse_id, device.activity_cap)) ||
-		    (input_initialized && !ps2_events_match(device.kind, device.mouse_id))) {
+				(input_initialized && !ps2_events_match(device.kind, device.mouse_id))) {
 			printf("ps2: could not publish a stable input service\n");
 			goto done;
 		}

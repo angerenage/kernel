@@ -1,8 +1,9 @@
-#include <base/heap.h>
 #include <libc/stdlib.h>
 
+#include <base/heap.h>
+
 void free(void* ptr) {
-	struct heap_block*     block;
+	struct heap_block* block;
 	struct heap_lock_state lock_state;
 
 	if (!heap_is_initialized() || ptr == NULL) return;

@@ -1,16 +1,18 @@
-#include <base/process.h>
-#include <protocol/device.h>
-#include <protocol/input.h>
-#include <protocol/usb.h>
-#include <runtime/device.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <base/process.h>
+
+#include <protocol/device.h>
+#include <protocol/input.h>
+#include <protocol/usb.h>
 #include <system/capability.h>
 #include <system/process.h>
 #include <system/time.h>
+#include <runtime/device.h>
 
 #include "input.h"
 
@@ -132,19 +134,19 @@ static const enum input_key_code modifier_keys[8] = {
 
 static syscall_status_t control(cap_id_t transport, uint8_t request, uint16_t value, uint8_t interface_number) {
 	struct usb_transport_control_request command = {
-		.header       = {.op = USB_TRANSPORT_OP_CONTROL},
+		.header = {.op = USB_TRANSPORT_OP_CONTROL},
 		.request_type = 0x21u,
-		.request      = request,
-		.value        = value,
-		.index        = interface_number,
-		.length       = 0u,
+		.request = request,
+		.value = value,
+		.index = interface_number,
+		.length = 0u,
 	};
 	struct usb_transport_transfer_response response;
-	size_t                                 size = 0u;
+	size_t size = 0u;
 	syscall_status_t status = cap_call(transport, &command, sizeof(command), &response, sizeof(response), &size);
 	return status == SYSCALL_STATUS_OK && size == sizeof(response) && response.transferred == 0u
-			   ? SYSCALL_STATUS_OK
-			   : SYSCALL_STATUS_FAILED;
+				   ? SYSCALL_STATUS_OK
+				   : SYSCALL_STATUS_FAILED;
 }
 
 enum report_read_result {
@@ -154,13 +156,13 @@ enum report_read_result {
 };
 
 static enum report_read_result read_report(cap_id_t transport, uint8_t endpoint, uint8_t* report, size_t length,
-                                           uint8_t* response, size_t response_capacity, size_t* received) {
+		uint8_t* response, size_t response_capacity, size_t* received) {
 	struct usb_transport_transfer_request command = {
-		.header   = {.op = USB_TRANSPORT_OP_TRANSFER},
+		.header = {.op = USB_TRANSPORT_OP_TRANSFER},
 		.endpoint = endpoint,
-		.length   = (uint32_t)length,
+		.length = (uint32_t)length,
 	};
-	size_t           size   = 0u;
+	size_t size = 0u;
 	syscall_status_t status = cap_call(transport, &command, sizeof(command), response, response_capacity, &size);
 	if (status == SYSCALL_STATUS_UNAVAILABLE) return REPORT_READ_PENDING;
 	if (status != SYSCALL_STATUS_OK || size < sizeof(struct usb_transport_transfer_response)) return REPORT_READ_ERROR;
@@ -182,7 +184,7 @@ static bool keyboard_report(struct hid_input_server* server, bool* state, const 
 			next[usage_keys[usage]] = true;
 	}
 	struct hid_input_value values[INPUT_KEY_KEYPAD_DECIMAL];
-	size_t                 count = 0u;
+	size_t count = 0u;
 	for (unsigned key = INPUT_KEY_ESCAPE; key <= INPUT_KEY_KEYPAD_DECIMAL; key++) {
 		if (state[key] != next[key]) values[count++] = (struct hid_input_value){.control_id = key, .value = next[key]};
 	}
@@ -193,8 +195,8 @@ static bool keyboard_report(struct hid_input_server* server, bool* state, const 
 
 static bool mouse_report(struct hid_input_server* server, uint8_t* old_buttons, const uint8_t* report) {
 	struct hid_input_value values[5];
-	size_t                 count = 0u;
-	int8_t                 dx = (int8_t)report[1], dy = (int8_t)report[2];
+	size_t count = 0u;
+	int8_t dx = (int8_t)report[1], dy = (int8_t)report[2];
 	if (dx) values[count++] = (struct hid_input_value){.control_id = 1u, .value = dx};
 	if (dy) values[count++] = (struct hid_input_value){.control_id = 2u, .value = dy};
 	for (unsigned i = 0u; i < 3u; i++) {
@@ -209,33 +211,33 @@ static bool mouse_report(struct hid_input_server* server, uint8_t* old_buttons, 
 static enum device_driver_result run(cap_id_t device_cap) {
 	cap_id_t transport = CAP_ID_INVALID;
 	if (device_resource_acquire(device_cap,
-	                            USB_TRANSPORT_RESOURCE,
-	                            sizeof(USB_TRANSPORT_RESOURCE) - 1u,
-	                            USB_TRANSPORT_RIGHTS,
-	                            &transport) != SYSCALL_STATUS_OK)
+				USB_TRANSPORT_RESOURCE,
+				sizeof(USB_TRANSPORT_RESOURCE) - 1u,
+				USB_TRANSPORT_RIGHTS,
+				&transport) != SYSCALL_STATUS_OK)
 		return DEVICE_DRIVER_ERROR;
-	enum device_driver_result   result   = DEVICE_DRIVER_ERROR;
-	uint8_t*                    report   = NULL;
-	uint8_t*                    response = NULL;
-	struct usb_transport_info   info;
+	enum device_driver_result result = DEVICE_DRIVER_ERROR;
+	uint8_t* report = NULL;
+	uint8_t* response = NULL;
+	struct usb_transport_info info;
 	struct usb_transport_header query = {.op = USB_TRANSPORT_OP_INFO};
-	size_t                      size  = 0u;
+	size_t size = 0u;
 	if (cap_call(transport, &query, sizeof(query), &info, sizeof(info), &size) != SYSCALL_STATUS_OK ||
-	    size != sizeof(info))
+			size != sizeof(info))
 		goto done;
 	if (info.class_code != HID_CLASS || info.subclass != HID_BOOT_SUBCLASS ||
-	    (info.programming_interface != HID_KEYBOARD_PROTOCOL && info.programming_interface != HID_MOUSE_PROTOCOL)) {
+			(info.programming_interface != HID_KEYBOARD_PROTOCOL && info.programming_interface != HID_MOUSE_PROTOCOL)) {
 		result = DEVICE_DRIVER_UNSUPPORTED;
 		goto done;
 	}
-	uint8_t endpoint        = 0u;
-	size_t  report_length   = info.programming_interface == HID_KEYBOARD_PROTOCOL ? 8u : 3u;
-	size_t  transfer_length = 0u;
+	uint8_t endpoint = 0u;
+	size_t report_length = info.programming_interface == HID_KEYBOARD_PROTOCOL ? 8u : 3u;
+	size_t transfer_length = 0u;
 	for (unsigned i = 0u; i < info.endpoint_count; i++) {
 		size_t packet_size = info.endpoints[i].max_packet_size & 0x7ffu;
 		if ((info.endpoints[i].address & 0x80u) != 0u && (info.endpoints[i].attributes & 3u) == 3u &&
-		    packet_size >= report_length && packet_size <= USB_TRANSPORT_MAX_TRANSFER) {
-			endpoint        = info.endpoints[i].address;
+				packet_size >= report_length && packet_size <= USB_TRANSPORT_MAX_TRANSFER) {
+			endpoint = info.endpoints[i].address;
 			transfer_length = packet_size;
 			break;
 		}
@@ -244,60 +246,62 @@ static enum device_driver_result run(cap_id_t device_cap) {
 		result = DEVICE_DRIVER_UNSUPPORTED;
 		goto done;
 	}
-	report   = malloc(transfer_length);
+	report = malloc(transfer_length);
 	response = malloc(sizeof(struct usb_transport_transfer_response) + transfer_length);
 	if (report == NULL || response == NULL) goto done;
 	if (control(transport, 0x0bu, 0u, info.interface_number) != SYSCALL_STATUS_OK) goto done;
 	if (info.programming_interface == HID_KEYBOARD_PROTOCOL) (void)control(transport, 0x0au, 0u, info.interface_number);
 	struct input_control_descriptor descriptors[INPUT_KEY_KEYPAD_DECIMAL];
-	size_t                          count = 0u;
+	size_t count = 0u;
 	if (info.programming_interface == HID_KEYBOARD_PROTOCOL) {
 		for (unsigned key = INPUT_KEY_ESCAPE; key <= INPUT_KEY_KEYPAD_DECIMAL; key++)
 			descriptors[count++] = (struct input_control_descriptor){
-				.id = key, .kind = INPUT_CONTROL_KIND_KEY, .code = key, .logical_maximum = 1};
+				.id = key, .kind = INPUT_CONTROL_KIND_KEY, .code = key, .logical_maximum = 1
+			};
 	}
 	else {
-		descriptors[count++] =
-			(struct input_control_descriptor){.id = 1u, .kind = INPUT_CONTROL_KIND_RELATIVE_AXIS, .code = INPUT_AXIS_X};
-		descriptors[count++] =
-			(struct input_control_descriptor){.id = 2u, .kind = INPUT_CONTROL_KIND_RELATIVE_AXIS, .code = INPUT_AXIS_Y};
+		descriptors[count++] = (struct input_control_descriptor){
+			.id = 1u, .kind = INPUT_CONTROL_KIND_RELATIVE_AXIS, .code = INPUT_AXIS_X
+		};
+		descriptors[count++] = (struct input_control_descriptor){
+			.id = 2u, .kind = INPUT_CONTROL_KIND_RELATIVE_AXIS, .code = INPUT_AXIS_Y
+		};
 		for (unsigned i = 0u; i < 3u; i++)
-			descriptors[count++] = (struct input_control_descriptor){.id              = 3u + i,
-			                                                         .kind            = INPUT_CONTROL_KIND_BUTTON,
-			                                                         .code            = INPUT_BUTTON_PRIMARY + i,
-			                                                         .logical_maximum = 1};
+			descriptors[count++] = (struct input_control_descriptor){
+				.id = 3u + i, .kind = INPUT_CONTROL_KIND_BUTTON, .code = INPUT_BUTTON_PRIMARY + i, .logical_maximum = 1
+			};
 	}
 	struct self_info self = {0};
 	if (process_self_info(&self) != SYSCALL_STATUS_OK) goto done;
 	char service[32];
-	int  n = snprintf(service, sizeof(service), "hid_%llu", (unsigned long long)self.pid);
+	int n = snprintf(service, sizeof(service), "hid_%llu", (unsigned long long)self.pid);
 	if (self.self_cap != CAP_ID_INVALID) (void)cap_drop(self.self_cap);
 	if (self.address_space_cap != CAP_ID_INVALID) (void)cap_drop(self.address_space_cap);
 	if (self.main_thread_cap != CAP_ID_INVALID) (void)cap_drop(self.main_thread_cap);
 	if (n <= 0 || (size_t)n >= sizeof(service)) goto done;
 	struct hid_input_server* server = NULL;
 	if (hid_input_server_create(service,
-	                            info.programming_interface == HID_KEYBOARD_PROTOCOL ? INPUT_DEVICE_CLASS_KEYBOARD
-	                                                                                : INPUT_DEVICE_CLASS_POINTER,
-	                            descriptors,
-	                            count,
-	                            NULL,
-	                            0u,
-	                            CAP_ID_INVALID,
-	                            &server) != SYSCALL_STATUS_OK)
+				info.programming_interface == HID_KEYBOARD_PROTOCOL ? INPUT_DEVICE_CLASS_KEYBOARD
+				                                                    : INPUT_DEVICE_CLASS_POINTER,
+				descriptors,
+				count,
+				NULL,
+				0u,
+				CAP_ID_INVALID,
+				&server) != SYSCALL_STATUS_OK)
 		goto done;
 	printf("hid: USB boot %s online\n", info.programming_interface == HID_KEYBOARD_PROTOCOL ? "keyboard" : "mouse");
-	bool    keys[INPUT_KEY_KEYPAD_DECIMAL + 1u] = {0};
-	uint8_t buttons                             = 0u;
+	bool keys[INPUT_KEY_KEYPAD_DECIMAL + 1u] = {0};
+	uint8_t buttons = 0u;
 	for (;;) {
-		size_t                  received = 0u;
-		enum report_read_result read     = read_report(transport,
-		                                               endpoint,
-		                                               report,
-		                                               transfer_length,
-		                                               response,
-		                                               sizeof(struct usb_transport_transfer_response) + transfer_length,
-		                                               &received);
+		size_t received = 0u;
+		enum report_read_result read = read_report(transport,
+				endpoint,
+				report,
+				transfer_length,
+				response,
+				sizeof(struct usb_transport_transfer_response) + transfer_length,
+				&received);
 		if (read == REPORT_READ_ERROR) break;
 		if (read == REPORT_READ_READY && received >= report_length) {
 			if (info.programming_interface == HID_KEYBOARD_PROTOCOL) {
@@ -318,7 +322,7 @@ int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 	(void)argc;
 	(void)argv;
 	if (capc != DEVICE_DRIVER_CAPABILITY_COUNT || capv == NULL ||
-	    capv[DEVICE_DRIVER_CAPABILITY_DEVICE] == CAP_ID_INVALID)
+			capv[DEVICE_DRIVER_CAPABILITY_DEVICE] == CAP_ID_INVALID)
 		return 1;
 	enum device_driver_result result = run(capv[DEVICE_DRIVER_CAPABILITY_DEVICE]);
 	(void)cap_drop(capv[DEVICE_DRIVER_CAPABILITY_DEVICE]);

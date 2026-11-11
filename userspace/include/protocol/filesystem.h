@@ -10,8 +10,9 @@
  * Current specification version: 1.0-beta
  */
 
-#include <base/cap.h>
 #include <stdint.h>
+
+#include <base/cap.h>
 
 #define FILESYSTEM_NAMESPACE "fs"
 #define FILESYSTEM_PROTOCOL_NAME "filesystem"
@@ -42,13 +43,13 @@ enum filesystem_status {
 };
 
 enum filesystem_node_type {
-	FILESYSTEM_NODE_INVALID   = 0u,
-	FILESYSTEM_NODE_FILE      = 1u,
+	FILESYSTEM_NODE_INVALID = 0u,
+	FILESYSTEM_NODE_FILE = 1u,
 	FILESYSTEM_NODE_DIRECTORY = 2u,
 };
 
 enum filesystem_node_flag {
-	FILESYSTEM_NODE_READ_ONLY   = 1u << 0,
+	FILESYSTEM_NODE_READ_ONLY = 1u << 0,
 	FILESYSTEM_NODE_MOUNT_POINT = 1u << 1,
 };
 
@@ -76,116 +77,116 @@ struct filesystem_node_info {
 
 struct filesystem_info_request {
 	struct filesystem_request_header header;
-	uint32_t                         reserved;
+	uint32_t reserved;
 };
 
 struct filesystem_info_response {
 	struct filesystem_response_header header;
-	struct filesystem_node_info       info;
+	struct filesystem_node_info info;
 };
 
 struct filesystem_open_response {
 	struct filesystem_response_header header;
-	struct filesystem_node_info       info;
-	cap_id_t                          capability;
+	struct filesystem_node_info info;
+	cap_id_t capability;
 };
 
 enum filesystem_file_op {
-	FILESYSTEM_FILE_OP_INFO   = 0u,
-	FILESYSTEM_FILE_OP_READ   = 1u,
-	FILESYSTEM_FILE_OP_WRITE  = 2u,
+	FILESYSTEM_FILE_OP_INFO = 0u,
+	FILESYSTEM_FILE_OP_READ = 1u,
+	FILESYSTEM_FILE_OP_WRITE = 2u,
 	FILESYSTEM_FILE_OP_RESIZE = 3u,
 };
 
 struct filesystem_file_read_request {
 	struct filesystem_request_header header;
-	uint32_t                         reserved;
-	uint64_t                         offset;
-	uint64_t                         size;
+	uint32_t reserved;
+	uint64_t offset;
+	uint64_t size;
 };
 
 /* A successful response is followed by at most size bytes. */
 struct filesystem_file_read_response {
 	struct filesystem_response_header header;
-	uint8_t                           data[];
+	uint8_t data[];
 };
 
 /* The request is followed by exactly size bytes. */
 struct filesystem_file_write_request {
 	struct filesystem_request_header header;
-	uint32_t                         reserved;
-	uint64_t                         offset;
-	uint64_t                         size;
-	uint8_t                          data[];
+	uint32_t reserved;
+	uint64_t offset;
+	uint64_t size;
+	uint8_t data[];
 };
 
 struct filesystem_file_write_response {
 	struct filesystem_response_header header;
-	uint64_t                          size;
+	uint64_t size;
 };
 
 struct filesystem_file_resize_request {
 	struct filesystem_request_header header;
-	uint32_t                         reserved;
-	uint64_t                         size;
+	uint32_t reserved;
+	uint64_t size;
 };
 
 enum filesystem_directory_op {
-	FILESYSTEM_DIRECTORY_OP_INFO             = 0u,
-	FILESYSTEM_DIRECTORY_OP_OPEN             = 1u,
-	FILESYSTEM_DIRECTORY_OP_ENUMERATE        = 2u,
-	FILESYSTEM_DIRECTORY_OP_CREATE_FILE      = 3u,
+	FILESYSTEM_DIRECTORY_OP_INFO = 0u,
+	FILESYSTEM_DIRECTORY_OP_OPEN = 1u,
+	FILESYSTEM_DIRECTORY_OP_ENUMERATE = 2u,
+	FILESYSTEM_DIRECTORY_OP_CREATE_FILE = 3u,
 	FILESYSTEM_DIRECTORY_OP_CREATE_DIRECTORY = 4u,
-	FILESYSTEM_DIRECTORY_OP_REMOVE           = 5u,
-	FILESYSTEM_DIRECTORY_OP_RENAME           = 6u,
-	FILESYSTEM_DIRECTORY_OP_REMOVE_DEFERRED  = 7u,
-	FILESYSTEM_DIRECTORY_OP_SYNC             = 8u,
+	FILESYSTEM_DIRECTORY_OP_REMOVE = 5u,
+	FILESYSTEM_DIRECTORY_OP_RENAME = 6u,
+	FILESYSTEM_DIRECTORY_OP_REMOVE_DEFERRED = 7u,
+	FILESYSTEM_DIRECTORY_OP_SYNC = 8u,
 };
 
 /* Followed by path_size bytes containing one normalized relative path. */
 struct filesystem_directory_open_request {
 	struct filesystem_request_header header;
-	uint32_t                         path_size;
-	cap_rights_t                     rights;
-	uint8_t                          path[];
+	uint32_t path_size;
+	cap_rights_t rights;
+	uint8_t path[];
 };
 
 struct filesystem_directory_enumerate_request {
 	struct filesystem_request_header header;
-	uint32_t                         reserved;
-	uint64_t                         offset;
-	uint64_t                         count;
+	uint32_t reserved;
+	uint64_t offset;
+	uint64_t count;
 };
 
 /* Names are length-delimited; bytes after name_size have no meaning. */
 struct filesystem_directory_entry {
-	uint32_t                    name_size;
-	uint32_t                    reserved;
+	uint32_t name_size;
+	uint32_t reserved;
 	struct filesystem_node_info info;
-	uint8_t                     name[FILESYSTEM_NAME_MAX + 1u];
+	uint8_t name[FILESYSTEM_NAME_MAX + 1u];
 };
 
 struct filesystem_directory_enumerate_response {
 	struct filesystem_response_header header;
-	uint64_t                          total;
-	uint64_t                          returned;
+	uint64_t total;
+	uint64_t returned;
 	struct filesystem_directory_entry entries[];
 };
 
 /* Followed by path_size bytes containing one normalized relative path. */
 struct filesystem_directory_path_request {
 	struct filesystem_request_header header;
-	uint32_t                         path_size;
-	uint8_t                          path[];
+	uint32_t path_size;
+	uint8_t path[];
 };
 
 /* Followed by old_path_size bytes and then new_path_size bytes. */
 struct filesystem_directory_rename_request {
 	struct filesystem_request_header header;
-	uint32_t                         old_path_size;
-	uint32_t                         new_path_size;
-	uint32_t                         reserved;
-	uint8_t                          paths[];
+	uint32_t old_path_size;
+	uint32_t new_path_size;
+	uint32_t reserved;
+	uint8_t paths[];
 };
 
 /*

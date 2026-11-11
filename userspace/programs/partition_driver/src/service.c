@@ -1,18 +1,20 @@
 #include "service.h"
 
-#include <base/channel.h>
-#include <base/signal.h>
-#include <protocol/device.h>
-#include <runtime/block.h>
-#include <runtime/device.h>
-#include <runtime/log.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+
+#include <base/channel.h>
+#include <base/signal.h>
+
+#include <protocol/device.h>
 #include <system/capability.h>
 #include <system/channel.h>
 #include <system/signal.h>
+#include <runtime/block.h>
+#include <runtime/device.h>
+#include <runtime/log.h>
 
 #include "table.h"
 
@@ -27,38 +29,38 @@ static syscall_status_t add_u64(const struct device_builder* builder, const char
 
 	for (size_t index = 0u; index < sizeof(encoded); index++) encoded[index] = (uint8_t)(value >> (index * 8u));
 	syscall_status_t status =
-		device_builder_begin_property(builder, name, strlen(name), DEVICE_PROPERTY_UNSIGNED, 1u, sizeof(encoded));
+			device_builder_begin_property(builder, name, strlen(name), DEVICE_PROPERTY_UNSIGNED, 1u, sizeof(encoded));
 	if (status == SYSCALL_STATUS_OK) status = device_builder_append_property(builder, 0u, encoded, sizeof(encoded));
 	if (status == SYSCALL_STATUS_OK) status = device_builder_finish_property(builder);
 	return status;
 }
 
 static syscall_status_t add_bool(const struct device_builder* builder, const char* name, bool value) {
-	uint8_t          encoded = value ? 1u : 0u;
+	uint8_t encoded = value ? 1u : 0u;
 	syscall_status_t status =
-		device_builder_begin_property(builder, name, strlen(name), DEVICE_PROPERTY_BOOLEAN, 1u, sizeof(encoded));
+			device_builder_begin_property(builder, name, strlen(name), DEVICE_PROPERTY_BOOLEAN, 1u, sizeof(encoded));
 	if (status == SYSCALL_STATUS_OK) status = device_builder_append_property(builder, 0u, &encoded, sizeof(encoded));
 	if (status == SYSCALL_STATUS_OK) status = device_builder_finish_property(builder);
 	return status;
 }
 
 static syscall_status_t add_string(const struct device_builder* builder, const char* name, const char* value) {
-	size_t           size = strlen(value);
+	size_t size = strlen(value);
 	syscall_status_t status =
-		device_builder_begin_property(builder, name, strlen(name), DEVICE_PROPERTY_UTF8_STRING, 1u, size);
+			device_builder_begin_property(builder, name, strlen(name), DEVICE_PROPERTY_UTF8_STRING, 1u, size);
 	if (status == SYSCALL_STATUS_OK && size != 0u) status = device_builder_append_property(builder, 0u, value, size);
 	if (status == SYSCALL_STATUS_OK) status = device_builder_finish_property(builder);
 	return status;
 }
 
 static bool create_child(cap_id_t parent, cap_id_t block_cap, const struct block_device* device,
-                         const struct partition_entry* partition) {
+		const struct partition_entry* partition) {
 	struct device_builder builder = {.capability = CAP_ID_INVALID, .manager_pid = PROCESS_PID_INVALID};
-	char                  name[32];
-	char                  compatible[5u + PARTITION_GUID_STRING_SIZE];
-	char                  type_guid[PARTITION_GUID_STRING_SIZE];
-	char                  unique_guid[PARTITION_GUID_STRING_SIZE];
-	int                   length;
+	char name[32];
+	char compatible[5u + PARTITION_GUID_STRING_SIZE];
+	char type_guid[PARTITION_GUID_STRING_SIZE];
+	char unique_guid[PARTITION_GUID_STRING_SIZE];
+	int length;
 
 	length = snprintf(name, sizeof(name), "partition-%u", partition->table_index);
 	if (length <= 0 || (size_t)length >= sizeof(name)) return false;
@@ -77,7 +79,7 @@ static bool create_child(cap_id_t parent, cap_id_t block_cap, const struct block
 	if (status == SYSCALL_STATUS_OK) status = device_builder_add_compatible(&builder, compatible, strlen(compatible));
 	if (status == SYSCALL_STATUS_OK)
 		status = device_builder_add_compatible(
-			&builder, BLOCK_COMPATIBLE_PARTITION, sizeof(BLOCK_COMPATIBLE_PARTITION) - 1u);
+				&builder, BLOCK_COMPATIBLE_PARTITION, sizeof(BLOCK_COMPATIBLE_PARTITION) - 1u);
 	if (status == SYSCALL_STATUS_OK)
 		status = device_builder_add_compatible(&builder, BLOCK_COMPATIBLE_DEVICE, sizeof(BLOCK_COMPATIBLE_DEVICE) - 1u);
 	if (status == SYSCALL_STATUS_OK) status = add_u64(&builder, "partition_index", partition->table_index);
@@ -107,20 +109,20 @@ static bool create_child(cap_id_t parent, cap_id_t block_cap, const struct block
 		status = add_bool(&builder, "bootable", partition->mbr.bootable);
 	if (status == SYSCALL_STATUS_OK)
 		status = device_builder_add_resource(
-			&builder, BLOCK_RESOURCE, sizeof(BLOCK_RESOURCE) - 1u, block_cap, block_rights(device));
+				&builder, BLOCK_RESOURCE, sizeof(BLOCK_RESOURCE) - 1u, block_cap, block_rights(device));
 	if (status == SYSCALL_STATUS_OK) status = device_builder_commit(&builder);
 	if (status != SYSCALL_STATUS_OK) (void)device_builder_abort(&builder);
 	return status == SYSCALL_STATUS_OK;
 }
 
 static bool wait_for_shutdown(void) {
-	channel_id_t endpoint     = CHANNEL_ID_INVALID;
-	cap_id_t     activity_cap = CAP_ID_INVALID;
+	channel_id_t endpoint = CHANNEL_ID_INVALID;
+	cap_id_t activity_cap = CAP_ID_INVALID;
 
 	if (channel_create(&endpoint, &activity_cap) != SYSCALL_STATUS_OK) return false;
 	for (;;) {
 		struct signal_message activity;
-		syscall_status_t      status = signal_wait(activity_cap, &activity);
+		syscall_status_t status = signal_wait(activity_cap, &activity);
 		if (status != SYSCALL_STATUS_OK && status != SYSCALL_STATUS_INTERRUPTED) break;
 	}
 	(void)cap_drop(activity_cap);
@@ -133,17 +135,17 @@ bool partition_service_run(cap_id_t device_cap, struct block_device* parent, con
 	for (size_t index = 0u; index < partitions->count; index++) {
 		struct partition_entry partition = partitions->entries[index];
 		if (partitions->block_size == 0u || partition.first_lba > UINT64_MAX / partitions->block_size ||
-		    partition.block_count > UINT64_MAX / partitions->block_size)
+				partition.block_count > UINT64_MAX / partitions->block_size)
 			return false;
 		uint64_t byte_offset = partition.first_lba * partitions->block_size;
-		uint64_t byte_count  = partition.block_count * partitions->block_size;
+		uint64_t byte_count = partition.block_count * partitions->block_size;
 		if (byte_offset % parent->block_size != 0u || byte_count % parent->block_size != 0u) {
 			fprintf(stderr, "partition: partition-%u is not aligned to the device block size\n", partition.table_index);
 			return false;
 		}
-		partition.first_lba   = byte_offset / parent->block_size;
+		partition.first_lba = byte_offset / parent->block_size;
 		partition.block_count = byte_count / parent->block_size;
-		cap_id_t slice_cap    = CAP_ID_INVALID;
+		cap_id_t slice_cap = CAP_ID_INVALID;
 		if (block_device_slice(parent, partition.first_lba, partition.block_count, &slice_cap) != SYSCALL_STATUS_OK)
 			return false;
 		bool created = create_child(device_cap, slice_cap, parent, &partition);
@@ -160,10 +162,10 @@ bool partition_service_run(cap_id_t device_cap, struct block_device* parent, con
 			(void)snprintf(precise, sizeof(precise), "mbr:%02x", partition.mbr.type);
 		}
 		RUNTIME_DEBUG_LOG("partition: published partition-%u as block slice (%s, first_lba=%llu, blocks=%llu)\n",
-		                  partition.table_index,
-		                  precise,
-		                  (unsigned long long)partition.first_lba,
-		                  (unsigned long long)partition.block_count);
+				partition.table_index,
+				precise,
+				(unsigned long long)partition.first_lba,
+				(unsigned long long)partition.block_count);
 	}
 	printf("partition: published %zu partition device%s\n", partitions->count, partitions->count == 1u ? "" : "s");
 	block_device_close(parent);

@@ -24,9 +24,9 @@ struct hal_cpu_fp_context {
 };
 
 _Static_assert((HAL_CPU_FP_CONTEXT_ALIGNMENT & (HAL_CPU_FP_CONTEXT_ALIGNMENT - 1u)) == 0u,
-               "FP context alignment must be a power of two");
-_Static_assert(sizeof(struct hal_cpu_fp_context) == HAL_CPU_FP_CONTEXT_STORAGE_SIZE,
-               "FP context storage size mismatch");
+		"FP context alignment must be a power of two");
+_Static_assert(
+		sizeof(struct hal_cpu_fp_context) == HAL_CPU_FP_CONTEXT_STORAGE_SIZE, "FP context storage size mismatch");
 
 static inline void* hal_cpu_fp_context_data(struct hal_cpu_fp_context* context) {
 	uintptr_t address = (uintptr_t)context->opaque;
@@ -38,7 +38,7 @@ static inline const void* hal_cpu_fp_context_const_data(const struct hal_cpu_fp_
 	uintptr_t address = (uintptr_t)context->opaque;
 
 	return (const void*)((address + HAL_CPU_FP_CONTEXT_ALIGNMENT - 1u) &
-	                     ~(uintptr_t)(HAL_CPU_FP_CONTEXT_ALIGNMENT - 1u));
+						 ~(uintptr_t)(HAL_CPU_FP_CONTEXT_ALIGNMENT - 1u));
 }
 
 /*
@@ -49,9 +49,9 @@ static inline const void* hal_cpu_fp_context_const_data(const struct hal_cpu_fp_
  * context initialization and context switching.
  */
 struct thread_context {
-	uintptr_t                 instruction_pointer;
-	uintptr_t                 stack_pointer;
-	uintptr_t                 spill[HAL_CPU_THREAD_CONTEXT_SPILL_WORDS];
+	uintptr_t instruction_pointer;
+	uintptr_t stack_pointer;
+	uintptr_t spill[HAL_CPU_THREAD_CONTEXT_SPILL_WORDS];
 	struct hal_cpu_fp_context fp_context;
 };
 
@@ -77,7 +77,7 @@ void hal_cpu_fp_context_restore(const struct hal_cpu_fp_context* context);
  * enters entry_pc(entry_arg) on the supplied stack.
  */
 bool hal_cpu_thread_context_init(struct thread_context* context, uintptr_t stack_base, uintptr_t stack_top,
-                                 uintptr_t entry_pc, uintptr_t entry_arg);
+		uintptr_t entry_pc, uintptr_t entry_arg);
 
 /* Eagerly switch integer/control and floating-point/SIMD thread state. */
 void hal_cpu_context_switch(struct thread_context* current, const struct thread_context* next);

@@ -15,9 +15,10 @@
  * Current specification version: 1.0-beta
  */
 
+#include <stdint.h>
+
 #include <base/cap.h>
 #include <base/process.h>
-#include <stdint.h>
 
 /* Registry identity of the single system TTY session. */
 #define TTY_SESSION_NAMESPACE "io"
@@ -59,8 +60,8 @@ struct tty_session_get_info_request {
 
 /* Terminal dimensions measured in fixed-width character cells. */
 struct tty_session_get_info_response {
-	uint64_t     columns;
-	uint64_t     rows;
+	uint64_t columns;
+	uint64_t rows;
 	process_id_t session_pid;
 };
 
@@ -95,7 +96,7 @@ struct tty_session_get_selection_response {
 
 /* Replace the terminal selection with one nonempty half-open cell range. */
 struct tty_session_set_selection_request {
-	struct tty_session_request_header     header;
+	struct tty_session_request_header header;
 	struct tty_session_selection_position anchor;
 	struct tty_session_selection_position focus;
 };
@@ -114,15 +115,15 @@ struct tty_session_get_clipboard_request {
 struct tty_session_get_clipboard_response {
 	uint32_t size;
 	uint32_t reserved;
-	uint8_t  text[];
+	uint8_t text[];
 };
 
 /* Replace the clipboard with the size bytes of UTF-8 text that follow. */
 struct tty_session_set_clipboard_request {
 	struct tty_session_request_header header;
-	uint32_t                          size;
-	uint32_t                          reserved;
-	uint8_t                           text[];
+	uint32_t size;
+	uint32_t reserved;
+	uint8_t text[];
 };
 
 /* Largest clipboard value that can be replaced atomically. */
@@ -131,7 +132,7 @@ struct tty_session_set_clipboard_request {
 /* Select a prepared child process as the foreground input recipient. */
 struct tty_session_begin_foreground_request {
 	struct tty_session_request_header header;
-	process_id_t                      process_id;
+	process_id_t process_id;
 };
 
 /*
@@ -140,8 +141,8 @@ struct tty_session_begin_foreground_request {
  */
 struct tty_session_attach_foreground_request {
 	struct tty_session_request_header header;
-	cap_id_t                          process_cap;
-	process_id_t                      process_id;
+	cap_id_t process_cap;
+	process_id_t process_id;
 };
 
 /* Restore the controlling shell as the foreground input recipient. */

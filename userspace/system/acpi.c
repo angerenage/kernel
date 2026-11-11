@@ -1,22 +1,24 @@
-#include <base/acpi.h>
-#include <base/cap.h>
-#include <base/syscall.h>
-#include <runtime/diagnostic.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <base/acpi.h>
+#include <base/cap.h>
+#include <base/syscall.h>
+
 #include <system/acpi.h>
 #include <system/capability.h>
+#include <runtime/diagnostic.h>
 
 syscall_status_t acpi_table_count(cap_id_t provider_cap, const char signature[4], uint64_t* out_count) {
-	struct acpi_provider_count_request  request = {.header = {.op = ACPI_PROVIDER_OP_COUNT}};
+	struct acpi_provider_count_request request = {.header = {.op = ACPI_PROVIDER_OP_COUNT}};
 	struct acpi_provider_count_response response;
-	syscall_result_t                    result;
+	syscall_result_t result;
 
 	if (provider_cap == CAP_ID_INVALID || signature == NULL || out_count == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	memcpy(request.signature, signature, sizeof(request.signature));
 	*out_count = 0u;
-	result     = cap_call_syscall(provider_cap, &request, sizeof(request), &response, sizeof(response));
+	result = cap_call_syscall(provider_cap, &request, sizeof(request), &response, sizeof(response));
 	RUNTIME_DIAGNOSTIC_OPERATION_RESULT(ACPI_PROVIDER_OP_COUNT, result);
 	if (result.status != SYSCALL_STATUS_OK) return result.status;
 	if (result.value != sizeof(response)) return SYSCALL_STATUS_FAILED;
@@ -24,17 +26,17 @@ syscall_status_t acpi_table_count(cap_id_t provider_cap, const char signature[4]
 	return SYSCALL_STATUS_OK;
 }
 
-syscall_status_t acpi_table_claim(cap_id_t provider_cap, const char signature[4], uint64_t index,
-                                  cap_id_t* out_table_cap) {
-	struct acpi_provider_claim_request  request  = {.header = {.op = ACPI_PROVIDER_OP_CLAIM}, .index = index};
+syscall_status_t acpi_table_claim(
+		cap_id_t provider_cap, const char signature[4], uint64_t index, cap_id_t* out_table_cap) {
+	struct acpi_provider_claim_request request = {.header = {.op = ACPI_PROVIDER_OP_CLAIM}, .index = index};
 	struct acpi_provider_claim_response response = {.table_cap = CAP_ID_INVALID};
-	syscall_result_t                    result;
+	syscall_result_t result;
 
 	if (provider_cap == CAP_ID_INVALID || signature == NULL || out_table_cap == NULL)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	memcpy(request.signature, signature, sizeof(request.signature));
 	*out_table_cap = CAP_ID_INVALID;
-	result         = cap_call_syscall(provider_cap, &request, sizeof(request), &response, sizeof(response));
+	result = cap_call_syscall(provider_cap, &request, sizeof(request), &response, sizeof(response));
 	RUNTIME_DIAGNOSTIC_OPERATION_RESULT(ACPI_PROVIDER_OP_CLAIM, result);
 	if (result.status != SYSCALL_STATUS_OK) return result.status;
 	if (result.value != sizeof(response) || response.table_cap == CAP_ID_INVALID) return SYSCALL_STATUS_FAILED;
@@ -44,7 +46,7 @@ syscall_status_t acpi_table_claim(cap_id_t provider_cap, const char signature[4]
 
 syscall_status_t acpi_fadt_read(cap_id_t provider_cap, struct acpi_provider_fadt_read_response* out_info) {
 	const struct acpi_provider_fadt_read_request request = {.header = {.op = ACPI_PROVIDER_OP_FADT_READ}};
-	syscall_result_t                             result;
+	syscall_result_t result;
 
 	if (provider_cap == CAP_ID_INVALID || out_info == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	memset(out_info, 0, sizeof(*out_info));
@@ -56,12 +58,12 @@ syscall_status_t acpi_fadt_read(cap_id_t provider_cap, struct acpi_provider_fadt
 
 syscall_status_t acpi_aml_count(cap_id_t provider_cap, uint64_t* out_count) {
 	const struct acpi_provider_aml_count_request request = {.header = {.op = ACPI_PROVIDER_OP_AML_COUNT}};
-	struct acpi_provider_aml_count_response      response;
-	syscall_result_t                             result;
+	struct acpi_provider_aml_count_response response;
+	syscall_result_t result;
 
 	if (provider_cap == CAP_ID_INVALID || out_count == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	*out_count = 0u;
-	result     = cap_call_syscall(provider_cap, &request, sizeof(request), &response, sizeof(response));
+	result = cap_call_syscall(provider_cap, &request, sizeof(request), &response, sizeof(response));
 	RUNTIME_DIAGNOSTIC_OPERATION_RESULT(ACPI_PROVIDER_OP_AML_COUNT, result);
 	if (result.status != SYSCALL_STATUS_OK) return result.status;
 	if (result.value != sizeof(response)) return SYSCALL_STATUS_FAILED;
@@ -69,10 +71,11 @@ syscall_status_t acpi_aml_count(cap_id_t provider_cap, uint64_t* out_count) {
 	return SYSCALL_STATUS_OK;
 }
 
-syscall_status_t acpi_aml_info(cap_id_t provider_cap, uint64_t index,
-                               struct acpi_provider_aml_info_response* out_info) {
+syscall_status_t acpi_aml_info(
+		cap_id_t provider_cap, uint64_t index, struct acpi_provider_aml_info_response* out_info) {
 	const struct acpi_provider_aml_info_request request = {
-		.header = {.op = ACPI_PROVIDER_OP_AML_INFO}, .reserved = 0u, .index = index};
+		.header = {.op = ACPI_PROVIDER_OP_AML_INFO}, .reserved = 0u, .index = index
+	};
 	syscall_result_t result;
 
 	if (provider_cap == CAP_ID_INVALID || out_info == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
@@ -87,9 +90,9 @@ syscall_status_t acpi_aml_info(cap_id_t provider_cap, uint64_t index,
 syscall_status_t acpi_aml_read(cap_id_t provider_cap, uint64_t index, uint64_t offset, void* buffer, size_t size) {
 	const struct acpi_provider_aml_read_request request = {
 		.header = {.op = ACPI_PROVIDER_OP_AML_READ},
-		.index  = index,
+		.index = index,
 		.offset = offset,
-		.size   = size,
+		.size = size,
 	};
 	syscall_result_t result;
 
@@ -103,7 +106,7 @@ syscall_status_t acpi_aml_read(cap_id_t provider_cap, uint64_t index, uint64_t o
 
 syscall_status_t acpi_table_info(cap_id_t table_cap, struct acpi_table_info_response* out_info) {
 	const struct acpi_table_info_request request = {.header = {.op = ACPI_TABLE_OP_INFO}};
-	syscall_result_t                     result;
+	syscall_result_t result;
 
 	if (table_cap == CAP_ID_INVALID || out_info == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	result = cap_call_syscall(table_cap, &request, sizeof(request), out_info, sizeof(*out_info));
@@ -114,7 +117,8 @@ syscall_status_t acpi_table_info(cap_id_t table_cap, struct acpi_table_info_resp
 
 syscall_status_t acpi_table_read(cap_id_t table_cap, uint64_t offset, void* buffer, size_t size) {
 	const struct acpi_table_read_request request = {
-		.header = {.op = ACPI_TABLE_OP_READ}, .reserved = 0u, .offset = offset, .size = size};
+		.header = {.op = ACPI_TABLE_OP_READ}, .reserved = 0u, .offset = offset, .size = size
+	};
 	syscall_result_t result;
 
 	if (table_cap == CAP_ID_INVALID || (size != 0u && buffer == NULL) || size > CAP_MAX_RESPONSE_SIZE)

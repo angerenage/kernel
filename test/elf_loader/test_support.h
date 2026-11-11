@@ -1,23 +1,25 @@
 #ifndef TEST_ELF_LOADER_TEST_SUPPORT_H
 #define TEST_ELF_LOADER_TEST_SUPPORT_H
 
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+#include <test_memory.h>
+
 #include <base/heap.h>
 #include <boot/info.h>
+#include <hal/cpu.h>
+#include <hal/interrupts.h>
 #include <core/address_space.h>
 #include <core/address_transfer.h>
 #include <core/cpu.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/process.h>
-#include <criterion/criterion.h>
-#include <hal/cpu.h>
-#include <hal/interrupts.h>
 #include <kernel/elf_loader.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <string.h>
-#include <test_memory.h>
+
+#include <criterion/criterion.h>
 
 #include "../address_space/test_support.h"
 
@@ -30,7 +32,7 @@
 #define ELF_TEST_PF_R 4u
 
 struct elf_test_ehdr {
-	uint8_t  ident[16];
+	uint8_t ident[16];
 	uint16_t type;
 	uint16_t machine;
 	uint32_t version;
@@ -62,13 +64,13 @@ struct elf_test_image {
 	size_t size;
 };
 
-void                  elf_test_init_environment(void);
-void                  elf_test_image_init(struct elf_test_image* image, size_t phnum);
+void elf_test_init_environment(void);
+void elf_test_image_init(struct elf_test_image* image, size_t phnum);
 struct elf_test_ehdr* elf_test_header(struct elf_test_image* image);
 struct elf_test_phdr* elf_test_phdr(struct elf_test_image* image, size_t index);
-struct boot_module    elf_test_module(struct elf_test_image* image);
+struct boot_module elf_test_module(struct elf_test_image* image);
 void elf_test_set_load(struct elf_test_image* image, size_t index, uint64_t offset, uint64_t vaddr, uint64_t filesz,
-                       uint64_t memsz, uint32_t flags);
+		uint64_t memsz, uint32_t flags);
 void elf_test_destroy_loaded(struct kernel_elf_process* loaded);
 void elf_test_poison_recycled_memory(size_t size, uint8_t value);
 

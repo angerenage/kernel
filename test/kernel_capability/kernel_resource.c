@@ -35,15 +35,17 @@ static cap_id_t init_resources(struct kernel_capability_test_context* ctx) {
 
 Test(kernel_capability_resource, framebuffer_is_listed_only_when_available) {
 	struct kernel_capability_test_context ctx;
-	static uint8_t                        framebuffer_bytes[64];
-	const struct boot_framebuffer         framebuffer = {
-		.address = framebuffer_bytes, .width = 4u, .height = 4u, .pitch = 16u, .bpp = 32u};
+	static uint8_t framebuffer_bytes[64];
+	const struct boot_framebuffer framebuffer = {
+		.address = framebuffer_bytes, .width = 4u, .height = 4u, .pitch = 16u, .bpp = 32u
+	};
 	struct kernel_resources_list_request request = {
-		.header = {.op = KERNEL_RESOURCES_OP_LIST}, .offset = 0u, .capacity = 5u};
+		.header = {.op = KERNEL_RESOURCES_OP_LIST}, .offset = 0u, .capacity = 5u
+	};
 	uint8_t response_storage[sizeof(struct kernel_resources_list_response) + 5u * sizeof(enum kernel_resource_type)];
 	struct kernel_resources_list_response* response = (void*)response_storage;
-	cap_id_t                               root_cap;
-	syscall_result_t                       result;
+	cap_id_t root_cap;
+	syscall_result_t result;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/resources-framebuffer");
 	boot_mock_set_framebuffer(&framebuffer);
@@ -62,14 +64,13 @@ Test(kernel_capability_resource, framebuffer_is_listed_only_when_available) {
 
 Test(kernel_capability_resource, empty_and_zero_capacity_lists_report_totals) {
 	struct kernel_capability_test_context ctx;
-	const struct boot_module              modules[] = {
-		{.name = "one.bin", .size = 1u}
-    };
+	const struct boot_module modules[] = {{.name = "one.bin", .size = 1u}};
 	struct kernel_resources_list_request request = {
-		.header = {.op = KERNEL_RESOURCES_OP_LIST}, .offset = 0u, .capacity = 0u};
+		.header = {.op = KERNEL_RESOURCES_OP_LIST}, .offset = 0u, .capacity = 0u
+	};
 	struct kernel_resources_list_response response;
-	cap_id_t                              root_cap;
-	syscall_result_t                      result;
+	cap_id_t root_cap;
+	syscall_result_t result;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/resources-list");
 	root_cap = init_resources(&ctx);
@@ -88,18 +89,18 @@ Test(kernel_capability_resource, empty_and_zero_capacity_lists_report_totals) {
 }
 
 Test(kernel_capability_resource, serial_and_loader_are_acquired_from_the_registry) {
-	struct kernel_capability_test_context   ctx;
-	struct kernel_resource_acquire_request  request = {.header = {.op = KERNEL_RESOURCES_OP_ACQUIRE}};
+	struct kernel_capability_test_context ctx;
+	struct kernel_resource_acquire_request request = {.header = {.op = KERNEL_RESOURCES_OP_ACQUIRE}};
 	struct kernel_resource_acquire_response response;
-	struct capability*                      acquired;
-	cap_id_t                                root_cap;
-	syscall_result_t                        result;
+	struct capability* acquired;
+	cap_id_t root_cap;
+	syscall_result_t result;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/resources-core-providers");
 	root_cap = init_resources(&ctx);
 	cr_assert_neq(root_cap, CAP_ID_INVALID);
 	request.id = KERNEL_RESOURCE_TYPE_SERIAL;
-	result     = kernel_capability_test_call(root_cap, &request, sizeof(request), &response, sizeof(response));
+	result = kernel_capability_test_call(root_cap, &request, sizeof(request), &response, sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	acquired = cap_acquire(response.cap);
 	cr_assert_not_null(acquired);
@@ -107,7 +108,7 @@ Test(kernel_capability_resource, serial_and_loader_are_acquired_from_the_registr
 	cap_release(acquired);
 
 	request.id = KERNEL_RESOURCE_TYPE_LOADER;
-	result     = kernel_capability_test_call(root_cap, &request, sizeof(request), &response, sizeof(response));
+	result = kernel_capability_test_call(root_cap, &request, sizeof(request), &response, sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	acquired = cap_acquire(response.cap);
 	cr_assert_not_null(acquired);
@@ -118,29 +119,31 @@ Test(kernel_capability_resource, serial_and_loader_are_acquired_from_the_registr
 
 Test(kernel_capability_resource, acpi_is_listed_and_acquired_only_when_firmware_is_available) {
 	struct kernel_capability_test_context ctx;
-	struct kernel_resources_list_request  list_request = {
-		.header = {.op = KERNEL_RESOURCES_OP_LIST}, .offset = 0u, .capacity = 5u};
+	struct kernel_resources_list_request list_request = {
+		.header = {.op = KERNEL_RESOURCES_OP_LIST}, .offset = 0u, .capacity = 5u
+	};
 	uint8_t list_storage[sizeof(struct kernel_resources_list_response) + 5u * sizeof(enum kernel_resource_type)];
-	struct kernel_resources_list_response*       list_response   = (void*)list_storage;
-	const struct kernel_resource_acquire_request acquire_request = {.header = {.op = KERNEL_RESOURCES_OP_ACQUIRE},
-	                                                                .id     = KERNEL_RESOURCE_TYPE_ACPI};
-	struct kernel_resource_acquire_response      acquire_response;
-	struct capability*                           acquired;
+	struct kernel_resources_list_response* list_response = (void*)list_storage;
+	const struct kernel_resource_acquire_request acquire_request = {
+		.header = {.op = KERNEL_RESOURCES_OP_ACQUIRE}, .id = KERNEL_RESOURCE_TYPE_ACPI
+	};
+	struct kernel_resource_acquire_response acquire_response;
+	struct capability* acquired;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/resources-acpi");
 	acpi_mock_set_available(true);
 	cr_assert(kernel_capability_acpi_init());
 	cap_id_t root_cap = init_resources(&ctx);
 	cr_assert_neq(root_cap, CAP_ID_INVALID);
-	syscall_result_t result =
-		kernel_capability_test_call(root_cap, &list_request, sizeof(list_request), list_response, sizeof(list_storage));
+	syscall_result_t result = kernel_capability_test_call(
+			root_cap, &list_request, sizeof(list_request), list_response, sizeof(list_storage));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(list_response->total, 3u + IO_PORT_RESOURCE_EXTRA);
 	cr_assert_eq(list_response->returned, 3u + IO_PORT_RESOURCE_EXTRA);
 	cr_assert_eq(list_response->ids[2], KERNEL_RESOURCE_TYPE_ACPI);
 
 	result = kernel_capability_test_call(
-		root_cap, &acquire_request, sizeof(acquire_request), &acquire_response, sizeof(acquire_response));
+			root_cap, &acquire_request, sizeof(acquire_request), &acquire_response, sizeof(acquire_response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	acquired = cap_acquire(acquire_response.cap);
 	cr_assert_not_null(acquired);
@@ -151,37 +154,39 @@ Test(kernel_capability_resource, acpi_is_listed_and_acquired_only_when_firmware_
 
 Test(kernel_capability_resource, device_tree_is_listed_and_acquired_only_when_firmware_is_available) {
 	struct kernel_capability_test_context ctx;
-	struct kernel_resources_list_request  list_request = {
-		.header = {.op = KERNEL_RESOURCES_OP_LIST}, .offset = 0u, .capacity = 5u};
+	struct kernel_resources_list_request list_request = {
+		.header = {.op = KERNEL_RESOURCES_OP_LIST}, .offset = 0u, .capacity = 5u
+	};
 	uint8_t list_storage[sizeof(struct kernel_resources_list_response) + 5u * sizeof(enum kernel_resource_type)];
-	struct kernel_resources_list_response*       list_response   = (void*)list_storage;
-	const struct kernel_resource_acquire_request acquire_request = {.header = {.op = KERNEL_RESOURCES_OP_ACQUIRE},
-	                                                                .id     = KERNEL_RESOURCE_TYPE_DEVICE_TREE};
-	struct kernel_resource_acquire_response      acquire_response;
-	struct capability*                           acquired;
+	struct kernel_resources_list_response* list_response = (void*)list_storage;
+	const struct kernel_resource_acquire_request acquire_request = {
+		.header = {.op = KERNEL_RESOURCES_OP_ACQUIRE}, .id = KERNEL_RESOURCE_TYPE_DEVICE_TREE
+	};
+	struct kernel_resource_acquire_response acquire_response;
+	struct capability* acquired;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/resources-device-tree");
 	cap_id_t root_cap = init_resources(&ctx);
 	cr_assert_neq(root_cap, CAP_ID_INVALID);
-	syscall_result_t result =
-		kernel_capability_test_call(root_cap, &list_request, sizeof(list_request), list_response, sizeof(list_storage));
+	syscall_result_t result = kernel_capability_test_call(
+			root_cap, &list_request, sizeof(list_request), list_response, sizeof(list_storage));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(list_response->total, 2u + IO_PORT_RESOURCE_EXTRA);
 	result = kernel_capability_test_call(
-		root_cap, &acquire_request, sizeof(acquire_request), &acquire_response, sizeof(acquire_response));
+			root_cap, &acquire_request, sizeof(acquire_request), &acquire_response, sizeof(acquire_response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
 
 	dt_mock_set_available(true);
 	cr_assert(kernel_capability_device_tree_init());
-	result =
-		kernel_capability_test_call(root_cap, &list_request, sizeof(list_request), list_response, sizeof(list_storage));
+	result = kernel_capability_test_call(
+			root_cap, &list_request, sizeof(list_request), list_response, sizeof(list_storage));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(list_response->total, 3u + IO_PORT_RESOURCE_EXTRA);
 	cr_assert_eq(list_response->returned, 3u + IO_PORT_RESOURCE_EXTRA);
 	cr_assert_eq(list_response->ids[2], KERNEL_RESOURCE_TYPE_DEVICE_TREE);
 
 	result = kernel_capability_test_call(
-		root_cap, &acquire_request, sizeof(acquire_request), &acquire_response, sizeof(acquire_response));
+			root_cap, &acquire_request, sizeof(acquire_request), &acquire_response, sizeof(acquire_response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	acquired = cap_acquire(acquire_response.cap);
 	cr_assert_not_null(acquired);
@@ -192,17 +197,18 @@ Test(kernel_capability_resource, device_tree_is_listed_and_acquired_only_when_fi
 
 #if defined(IO_PORT_TEST)
 Test(kernel_capability_resource, io_ports_are_acquired_only_on_x86_64) {
-	struct kernel_capability_test_context        ctx;
-	const struct kernel_resource_acquire_request request = {.header = {.op = KERNEL_RESOURCES_OP_ACQUIRE},
-	                                                        .id     = KERNEL_RESOURCE_TYPE_IO_PORTS};
-	struct kernel_resource_acquire_response      response;
-	struct capability*                           acquired;
+	struct kernel_capability_test_context ctx;
+	const struct kernel_resource_acquire_request request = {
+		.header = {.op = KERNEL_RESOURCES_OP_ACQUIRE}, .id = KERNEL_RESOURCE_TYPE_IO_PORTS
+	};
+	struct kernel_resource_acquire_response response;
+	struct capability* acquired;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/resources-io-ports");
 	cap_id_t root_cap = init_resources(&ctx);
 	cr_assert_neq(root_cap, CAP_ID_INVALID);
 	syscall_result_t result =
-		kernel_capability_test_call(root_cap, &request, sizeof(request), &response, sizeof(response));
+			kernel_capability_test_call(root_cap, &request, sizeof(request), &response, sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	acquired = cap_acquire(response.cap);
 	cr_assert_not_null(acquired);
@@ -214,39 +220,39 @@ Test(kernel_capability_resource, io_ports_are_acquired_only_on_x86_64) {
 
 Test(kernel_capability_resource, listing_is_paginated_and_acquisition_targets_the_caller) {
 	struct kernel_capability_test_context ctx;
-	const struct boot_module              modules[] = {
-		{.name = "one.bin", .size = 1u}
-    };
+	const struct boot_module modules[] = {{.name = "one.bin", .size = 1u}};
 	struct kernel_resources_list_request list_request = {
-		.header = {.op = KERNEL_RESOURCES_OP_LIST}, .offset = 0u, .capacity = 1u};
+		.header = {.op = KERNEL_RESOURCES_OP_LIST}, .offset = 0u, .capacity = 1u
+	};
 	uint8_t list_storage[sizeof(struct kernel_resources_list_response) + sizeof(enum kernel_resource_type)];
-	struct kernel_resources_list_response*       list_response   = (void*)list_storage;
-	const struct kernel_resource_acquire_request acquire_request = {.header = {.op = KERNEL_RESOURCES_OP_ACQUIRE},
-	                                                                .id     = KERNEL_RESOURCE_TYPE_MODULES};
-	struct kernel_resource_acquire_response      acquire_response;
-	struct capability*                           acquired;
-	cap_id_t                                     root_cap;
-	syscall_result_t                             result;
+	struct kernel_resources_list_response* list_response = (void*)list_storage;
+	const struct kernel_resource_acquire_request acquire_request = {
+		.header = {.op = KERNEL_RESOURCES_OP_ACQUIRE}, .id = KERNEL_RESOURCE_TYPE_MODULES
+	};
+	struct kernel_resource_acquire_response acquire_response;
+	struct capability* acquired;
+	cap_id_t root_cap;
+	syscall_result_t result;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/resources-acquire");
 	boot_mock_set_modules(modules, 1u);
 	root_cap = init_resources(&ctx);
 	cr_assert_neq(root_cap, CAP_ID_INVALID);
-	result =
-		kernel_capability_test_call(root_cap, &list_request, sizeof(list_request), list_response, sizeof(list_storage));
+	result = kernel_capability_test_call(
+			root_cap, &list_request, sizeof(list_request), list_response, sizeof(list_storage));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(list_response->total, 3u + IO_PORT_RESOURCE_EXTRA);
 	cr_assert_eq(list_response->returned, 1u);
 	cr_assert_eq(list_response->ids[0], KERNEL_RESOURCE_TYPE_MODULES);
 	list_request.offset = 3u + IO_PORT_RESOURCE_EXTRA;
-	result =
-		kernel_capability_test_call(root_cap, &list_request, sizeof(list_request), list_response, sizeof(list_storage));
+	result = kernel_capability_test_call(
+			root_cap, &list_request, sizeof(list_request), list_response, sizeof(list_storage));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(list_response->total, 3u + IO_PORT_RESOURCE_EXTRA);
 	cr_assert_eq(list_response->returned, 0u);
 
 	result = kernel_capability_test_call(
-		root_cap, &acquire_request, sizeof(acquire_request), &acquire_response, sizeof(acquire_response));
+			root_cap, &acquire_request, sizeof(acquire_request), &acquire_response, sizeof(acquire_response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	acquired = cap_acquire(acquire_response.cap);
 	cr_assert_not_null(acquired);
@@ -258,34 +264,33 @@ Test(kernel_capability_resource, listing_is_paginated_and_acquisition_targets_th
 
 Test(kernel_capability_resource, unavailable_unknown_and_insufficient_rights_are_rejected_without_grants) {
 	struct kernel_capability_test_context ctx;
-	const struct boot_module              modules[] = {
-		{.name = "one.bin", .size = 1u}
-    };
-	struct kernel_resource_acquire_request  request = {.header = {.op = KERNEL_RESOURCES_OP_ACQUIRE},
-	                                                   .id     = KERNEL_RESOURCE_TYPE_MODULES};
+	const struct boot_module modules[] = {{.name = "one.bin", .size = 1u}};
+	struct kernel_resource_acquire_request request = {
+		.header = {.op = KERNEL_RESOURCES_OP_ACQUIRE}, .id = KERNEL_RESOURCE_TYPE_MODULES
+	};
 	struct kernel_resource_acquire_response response;
-	struct capability*                      root;
-	cap_id_t                                root_cap;
-	cap_id_t                                call_only_cap;
-	size_t                                  grants_before;
-	syscall_result_t                        result;
+	struct capability* root;
+	cap_id_t root_cap;
+	cap_id_t call_only_cap;
+	size_t grants_before;
+	syscall_result_t result;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/resources-errors");
 	root_cap = init_resources(&ctx);
 	cr_assert_neq(root_cap, CAP_ID_INVALID);
 	grants_before = capability_count();
-	result        = kernel_capability_test_call(root_cap, &request, sizeof(request), &response, sizeof(response));
+	result = kernel_capability_test_call(root_cap, &request, sizeof(request), &response, sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
 	cr_assert_eq(capability_count(), grants_before);
 
 	request.id = 99u;
-	result     = kernel_capability_test_call(root_cap, &request, sizeof(request), &response, sizeof(response));
+	result = kernel_capability_test_call(root_cap, &request, sizeof(request), &response, sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 	cr_assert_eq(capability_count(), grants_before);
 
 	boot_mock_set_modules(modules, 1u);
 	request.id = KERNEL_RESOURCE_TYPE_MODULES;
-	result     = kernel_capability_test_call(root_cap, &request, sizeof(request), &response, sizeof(response) - 1u);
+	result = kernel_capability_test_call(root_cap, &request, sizeof(request), &response, sizeof(response) - 1u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 	cr_assert_eq(capability_count(), grants_before);
 
@@ -295,7 +300,7 @@ Test(kernel_capability_resource, unavailable_unknown_and_insufficient_rights_are
 	cap_release(root);
 	cr_assert_neq(call_only_cap, CAP_ID_INVALID);
 	request.id = KERNEL_RESOURCE_TYPE_MODULES;
-	result     = kernel_capability_test_call(call_only_cap, &request, sizeof(request), &response, sizeof(response));
+	result = kernel_capability_test_call(call_only_cap, &request, sizeof(request), &response, sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_DENIED);
 	kernel_capability_test_end(&ctx);
 }

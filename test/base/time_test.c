@@ -1,6 +1,8 @@
-#include <base/time.h>
-#include <criterion/criterion.h>
 #include <stdint.h>
+
+#include <base/time.h>
+
+#include <criterion/criterion.h>
 
 Test(base_time, ms_to_ticks_rounds_up_partial_ticks) {
 	uint64_t ticks = UINT64_MAX;

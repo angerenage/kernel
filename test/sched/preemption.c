@@ -17,24 +17,24 @@ Test(sched, runnable_thread_preempts_idle_at_interrupt_exit) {
 
 Test(sched, high_priority_thread_preempts_lower_priority_current_at_interrupt_exit) {
 	const struct thread_create_params low_params = {
-		.name              = "low_current",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "low_current",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x30a000u,
-		.kernel_stack_top  = 0x30e000u,
-		.preferred_cpu     = NULL,
-		.base_priority     = THREAD_PRIORITY_DEFAULT - 2,
-		.detached          = false,
+		.kernel_stack_top = 0x30e000u,
+		.preferred_cpu = NULL,
+		.base_priority = THREAD_PRIORITY_DEFAULT - 2,
+		.detached = false,
 	};
 	const struct thread_create_params high_params = {
-		.name              = "high_ready",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "high_ready",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x30e000u,
-		.kernel_stack_top  = 0x312000u,
-		.preferred_cpu     = NULL,
-		.base_priority     = THREAD_PRIORITY_DEFAULT + 2,
-		.detached          = false,
+		.kernel_stack_top = 0x312000u,
+		.preferred_cpu = NULL,
+		.base_priority = THREAD_PRIORITY_DEFAULT + 2,
+		.detached = false,
 	};
 	struct thread low;
 	struct thread high;
@@ -60,34 +60,34 @@ Test(sched, high_priority_thread_preempts_lower_priority_current_at_interrupt_ex
 
 Test(sched, timeslice_expiry_rotates_equal_priority_threads_only) {
 	const struct thread_create_params high_params = {
-		.name              = "high_current",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "high_current",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x312000u,
-		.kernel_stack_top  = 0x316000u,
-		.preferred_cpu     = NULL,
-		.base_priority     = THREAD_PRIORITY_DEFAULT + 3,
-		.detached          = false,
+		.kernel_stack_top = 0x316000u,
+		.preferred_cpu = NULL,
+		.base_priority = THREAD_PRIORITY_DEFAULT + 3,
+		.detached = false,
 	};
 	const struct thread_create_params low_params = {
-		.name              = "low_queued",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "low_queued",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x316000u,
-		.kernel_stack_top  = 0x31a000u,
-		.preferred_cpu     = NULL,
-		.base_priority     = THREAD_PRIORITY_DEFAULT - 3,
-		.detached          = false,
+		.kernel_stack_top = 0x31a000u,
+		.preferred_cpu = NULL,
+		.base_priority = THREAD_PRIORITY_DEFAULT - 3,
+		.detached = false,
 	};
 	const struct thread_create_params peer_params = {
-		.name              = "high_peer",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "high_peer",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x31a000u,
-		.kernel_stack_top  = 0x31e000u,
-		.preferred_cpu     = NULL,
-		.base_priority     = THREAD_PRIORITY_DEFAULT + 3,
-		.detached          = false,
+		.kernel_stack_top = 0x31e000u,
+		.preferred_cpu = NULL,
+		.base_priority = THREAD_PRIORITY_DEFAULT + 3,
+		.detached = false,
 	};
 	struct thread high;
 	struct thread low;
@@ -108,14 +108,14 @@ Test(sched, timeslice_expiry_rotates_equal_priority_threads_only) {
 	cr_assert(sched_make_runnable(&low), "failed to make low-priority thread runnable");
 	sched_tick();
 	cr_assert(!sched_reschedule_pending(cpu_current()),
-	          "lower-priority queued work should not consume the current priority band's timeslice");
+			"lower-priority queued work should not consume the current priority band's timeslice");
 	cr_assert(!sched_handle_interrupt_exit(), "no preemption should be pending for lower-priority queued work");
 	cr_assert_eq(sched_current_thread(), &high, "high-priority current thread should keep running");
 
 	cr_assert(sched_make_runnable(&peer), "failed to make equal-priority peer runnable");
 	sched_tick();
-	cr_assert(sched_reschedule_pending(cpu_current()),
-	          "equal-priority runnable work should rotate on timeslice expiry");
+	cr_assert(
+			sched_reschedule_pending(cpu_current()), "equal-priority runnable work should rotate on timeslice expiry");
 	cr_assert(sched_handle_interrupt_exit(), "interrupt exit should consume equal-priority timeslice rotation");
 	cr_assert_eq(sched_current_thread(), &peer, "equal-priority peer should run after current timeslice expires");
 	cr_assert(thread_is_queued(&high), "preempted equal-priority thread should be queued for round-robin");
@@ -126,25 +126,25 @@ Test(sched, timeslice_expiry_rotates_equal_priority_threads_only) {
 
 Test(sched, timer_tick_requests_and_consumes_timeslice_preemption) {
 	const struct thread_create_params first_params = {
-		.name              = "first",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "first",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x315000u,
-		.kernel_stack_top  = 0x319000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x319000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params second_params = {
-		.name              = "second",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "second",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x319000u,
-		.kernel_stack_top  = 0x31d000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x31d000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
-	struct thread      first;
-	struct thread      second;
+	struct thread first;
+	struct thread second;
 	struct sched_stats stats_before;
 	struct sched_stats stats_after;
 
@@ -171,18 +171,18 @@ Test(sched, timer_tick_requests_and_consumes_timeslice_preemption) {
 
 	sched_get_stats(&stats_after);
 	cr_assert_eq(stats_after.timeslice_preempt_count,
-	             stats_before.timeslice_preempt_count + 1u,
-	             "timeslice preemption counter should increment");
+			stats_before.timeslice_preempt_count + 1u,
+			"timeslice preemption counter should increment");
 	cr_assert_eq(stats_after.context_switch_count,
-	             stats_before.context_switch_count + 1u,
-	             "context switch counter should increment");
+			stats_before.context_switch_count + 1u,
+			"context switch counter should increment");
 
 	reset_test_state();
 }
 
 Test(sched, remote_tick_is_consumed_only_by_target_cpu) {
-	struct cpu*   bsp;
-	struct cpu*   ap;
+	struct cpu* bsp;
+	struct cpu* ap;
 	struct thread current;
 	struct thread peer;
 
@@ -218,27 +218,27 @@ Test(sched, remote_tick_is_consumed_only_by_target_cpu) {
 
 Test(sched, timer_preemption_rotates_non_yielding_workers) {
 	const struct thread_create_params first_params = {
-		.name              = "first",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "first",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x380000u,
-		.kernel_stack_top  = 0x384000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x384000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params second_params = {
-		.name              = "second",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "second",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x390000u,
-		.kernel_stack_top  = 0x394000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x394000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	struct thread first;
 	struct thread second;
-	size_t        first_progress  = 0u;
-	size_t        second_progress = 0u;
+	size_t first_progress = 0u;
+	size_t second_progress = 0u;
 
 	init_bound_bootstrap_cpu();
 	cr_assert(sched_init(), "sched_init failed");

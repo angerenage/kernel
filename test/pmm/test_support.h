@@ -1,11 +1,13 @@
 #pragma once
 
-#include <core/mm.h>
-#include <core/pmm.h>
-#include <criterion/criterion.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <core/mm.h>
+#include <core/pmm.h>
+
+#include <criterion/criterion.h>
 
 #define KiB(x) ((size_t)(x) * 1024u)
 

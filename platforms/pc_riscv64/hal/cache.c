@@ -1,14 +1,15 @@
 #include "cache.h"
 
-#include <core/cpu.h>
-#include <core/spinlock.h>
-#include <firmware/dt/device.h>
-#include <hal/cache.h>
-#include <hal/hcf.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <firmware/dt/device.h>
+#include <hal/cache.h>
+#include <hal/hcf.h>
+#include <core/cpu.h>
+#include <core/spinlock.h>
 
 #define RISCV_SBI_EID_RFENCE 0x52464e43ul
 #define RISCV_SBI_FID_REMOTE_FENCE_I 0ul
@@ -26,7 +27,7 @@ struct riscv_cache_sbi_ret {
 };
 
 static uint32_t riscv_zicbom_state;
-static size_t   riscv_zicbom_block_size;
+static size_t riscv_zicbom_block_size;
 
 size_t riscv64_cache_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity) {
 	size_t count = 0u;
@@ -38,15 +39,16 @@ size_t riscv64_cache_device_tree_consumed_nodes(struct hal_device_tree_consumed_
 		if (!dt_node_enabled(node)) continue;
 		if (nodes != NULL && count < capacity) {
 			nodes[count] = (struct hal_device_tree_consumed_node){
-				.node = node, .kind = HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED, .value = 0u};
+				.node = node, .kind = HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED, .value = 0u
+			};
 		}
 		count++;
 	}
 	return count;
 }
 
-static struct riscv_cache_sbi_ret riscv_cache_sbi_call2(unsigned long arg0, unsigned long arg1, unsigned long fid,
-                                                        unsigned long eid) {
+static struct riscv_cache_sbi_ret riscv_cache_sbi_call2(
+		unsigned long arg0, unsigned long arg1, unsigned long fid, unsigned long eid) {
 	register unsigned long a0 asm("a0") = arg0;
 	register unsigned long a1 asm("a1") = arg1;
 	register unsigned long a6 asm("a6") = fid;
@@ -66,7 +68,8 @@ static bool riscv_isa_string_has_zicbom(const uint8_t* data, size_t size) {
 		while (token_end < end && *token_end != '_') token_end++;
 		size_t token_size = (size_t)(token_end - token);
 		if (token_size >= sizeof(name) - 1u && memcmp(token, name, sizeof(name) - 1u) == 0 &&
-		    (token_size == sizeof(name) - 1u || (token[sizeof(name) - 1u] >= '0' && token[sizeof(name) - 1u] <= '9')))
+				(token_size == sizeof(name) - 1u ||
+						(token[sizeof(name) - 1u] >= '0' && token[sizeof(name) - 1u] <= '9')))
 			return true;
 		token = token_end < end ? token_end + 1u : end;
 	}
@@ -74,17 +77,17 @@ static bool riscv_isa_string_has_zicbom(const uint8_t* data, size_t size) {
 }
 
 static bool riscv_zicbom_discover(size_t* out_block_size) {
-	size_t cpus  = 0u;
+	size_t cpus = 0u;
 	size_t block = 0u;
 
 	if (out_block_size == NULL) return false;
 	for (size_t index = 0u;; index++) {
-		struct dt_node     node = dt_node_with_string_at("device_type", "cpu", index);
+		struct dt_node node = dt_node_with_string_at("device_type", "cpu", index);
 		struct dt_property extensions;
 		struct dt_property isa;
 		struct dt_property block_size;
-		uint64_t           value;
-		bool               has_zicbom;
+		uint64_t value;
+		bool has_zicbom;
 
 		if (!dt_node_valid(node)) break;
 		if (!dt_node_enabled(node)) continue;
@@ -93,8 +96,8 @@ static bool riscv_zicbom_discover(size_t* out_block_size) {
 		if (!has_zicbom && dt_node_property(node, "riscv,isa", &isa))
 			has_zicbom = riscv_isa_string_has_zicbom(isa.data, isa.size);
 		if (!has_zicbom || !dt_node_property(node, "riscv,cbom-block-size", &block_size) || block_size.size != 4u ||
-		    !dt_property_read_cells(&block_size, 0u, 1u, &value) || value == 0u || (value & (value - 1u)) != 0u ||
-		    value > SIZE_MAX || (block != 0u && block != value))
+				!dt_property_read_cells(&block_size, 0u, 1u, &value) || value == 0u || (value & (value - 1u)) != 0u ||
+				value > SIZE_MAX || (block != 0u && block != value))
 			return false;
 		block = (size_t)value;
 		cpus++;
@@ -120,7 +123,7 @@ static bool riscv_zicbom_available(size_t* out_block_size) {
 		}
 		uint32_t expected = RISCV_ZICBOM_UNKNOWN;
 		if (__atomic_compare_exchange_n(
-				&riscv_zicbom_state, &expected, RISCV_ZICBOM_PROBING, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+					&riscv_zicbom_state, &expected, RISCV_ZICBOM_PROBING, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
 			break;
 	}
 	size_t block_size;
@@ -147,11 +150,11 @@ static bool riscv_cache_sync_dma_range(void* address, size_t size, bool for_devi
 	uintptr_t first;
 	uintptr_t end;
 	uintptr_t limit;
-	size_t    block;
+	size_t block;
 	if (size == 0u) return true;
 	if (address == NULL || size > UINTPTR_MAX - start || !riscv_zicbom_available(&block)) return false;
 	first = start & ~((uintptr_t)block - 1u);
-	end   = start + size;
+	end = start + size;
 	if (end > UINTPTR_MAX - (block - 1u)) return false;
 	limit = (end + block - 1u) & ~((uintptr_t)block - 1u);
 
@@ -180,7 +183,7 @@ void hal_cache_sync_executable_range(void* address, size_t size) {
 
 void hal_cache_sync_executable_range_all_cpus(void* address, size_t size) {
 	const struct cpu_topology* topology = cpu_topology_get();
-	struct cpu*                current  = cpu_current();
+	struct cpu* current = cpu_current();
 
 	(void)address;
 	(void)size;
@@ -192,8 +195,8 @@ void hal_cache_sync_executable_range_all_cpus(void* address, size_t size) {
 		struct cpu* target = &topology->cpus[i];
 		if (target == current || cpu_state_get(target) != CPU_STATE_ONLINE) continue;
 		if (riscv_cache_sbi_call2(
-				1ul, (unsigned long)target->arch_id, RISCV_SBI_FID_REMOTE_FENCE_I, RISCV_SBI_EID_RFENCE)
-		        .error != 0)
+					1ul, (unsigned long)target->arch_id, RISCV_SBI_FID_REMOTE_FENCE_I, RISCV_SBI_EID_RFENCE)
+						.error != 0)
 			hcf();
 	}
 }

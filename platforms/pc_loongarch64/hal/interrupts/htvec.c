@@ -1,8 +1,9 @@
 #include "htvec.h"
 
-#include <core/interrupt.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+#include <core/interrupt.h>
 
 #include "controller.h"
 #include "liointc.h"
@@ -37,7 +38,7 @@ bool loongarch64_htvec_probe(void) {
 void loongarch64_htvec_set_enabled(uint32_t vector, bool enabled) {
 	if (!htvec.ready || vector >= HTVEC_GROUP_COUNT * 32u) return;
 	uint32_t offset = HTVEC_ENABLE + (vector / 32u) * 4u;
-	uint32_t value  = loongarch64_mmio_read32(htvec.virtual_base, offset);
+	uint32_t value = loongarch64_mmio_read32(htvec.virtual_base, offset);
 	if (enabled) value |= 1u << (vector % 32u);
 	else value &= ~(1u << (vector % 32u));
 	loongarch64_mmio_write32(htvec.virtual_base, offset, value);
@@ -49,10 +50,10 @@ bool loongarch64_htvec_handle(void) {
 	for (uint32_t group = 0u; group < HTVEC_GROUP_COUNT; group++) {
 		uint32_t pending = loongarch64_mmio_read32(htvec.virtual_base, group * 4u);
 		while (pending != 0u) {
-			uint32_t bit    = (uint32_t)__builtin_ctz(pending);
+			uint32_t bit = (uint32_t)__builtin_ctz(pending);
 			uint32_t vector = group * 32u + bit;
 			if (!interrupt_handle_event(
-					(struct hal_interrupt_event){.domain = LOONGARCH64_DELIVERY_DOMAIN_VECTOR, .id = vector}))
+						(struct hal_interrupt_event){.domain = LOONGARCH64_DELIVERY_DOMAIN_VECTOR, .id = vector}))
 				(void)loongarch64_pch_pic_mask_vector_leaf(vector);
 			loongarch64_mmio_write32(htvec.virtual_base, group * 4u, 1u << bit);
 			pending &= ~(1u << bit);

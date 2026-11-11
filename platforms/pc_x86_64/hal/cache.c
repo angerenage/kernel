@@ -1,25 +1,26 @@
 #include "cache.h"
 
-#include <core/cpu.h>
-#include <core/spinlock.h>
-#include <hal/cache.h>
-#include <hal/hcf.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+#include <hal/cache.h>
+#include <hal/hcf.h>
+#include <core/cpu.h>
+#include <core/spinlock.h>
 
 #include "interrupts/apic.h"
 
 #define X86_CACHE_MAX_CPUS 64u
 
 struct x86_cache_sync_request {
-	size_t   source_index;
+	size_t source_index;
 	uint64_t generation;
 };
 
 static struct x86_cache_sync_request x86_cache_request;
-static uint64_t                      x86_cache_ack[X86_CACHE_MAX_CPUS];
-static struct spinlock               x86_cache_sync_lock =
-	SPINLOCK_INIT_CLASS("cache_sync_lock", SPINLOCK_ORDER_NONE, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
+static uint64_t x86_cache_ack[X86_CACHE_MAX_CPUS];
+static struct spinlock x86_cache_sync_lock = SPINLOCK_INIT_CLASS(
+		"cache_sync_lock", SPINLOCK_ORDER_NONE, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
 
 static void x86_cache_serialize_local(void) {
 	uint32_t eax = 0u;
@@ -54,12 +55,12 @@ void hal_cache_sync_executable_range(void* address, size_t size) {
 
 bool x86_64_cache_handle_sync_nmi(void) {
 	struct cpu* cpu = cpu_current();
-	uint64_t    generation;
+	uint64_t generation;
 
 	if (cpu == NULL || cpu->index >= X86_CACHE_MAX_CPUS) hcf();
 	generation = __atomic_load_n(&x86_cache_request.generation, __ATOMIC_ACQUIRE);
 	if (generation == 0u || cpu->index == x86_cache_request.source_index ||
-	    __atomic_load_n(&x86_cache_ack[cpu->index], __ATOMIC_ACQUIRE) == generation)
+			__atomic_load_n(&x86_cache_ack[cpu->index], __ATOMIC_ACQUIRE) == generation)
 		return false;
 	x86_cache_serialize_local();
 	__atomic_store_n(&x86_cache_ack[cpu->index], generation, __ATOMIC_RELEASE);
@@ -68,18 +69,18 @@ bool x86_64_cache_handle_sync_nmi(void) {
 
 void hal_cache_sync_executable_range_all_cpus(void* address, size_t size) {
 	const struct cpu_topology* topology;
-	struct cpu*                current;
-	struct irq_state           state;
-	uint64_t                   targets = 0u;
-	uint64_t                   generation;
+	struct cpu* current;
+	struct irq_state state;
+	uint64_t targets = 0u;
+	uint64_t generation;
 
 	(void)address;
 	(void)size;
-	state    = spinlock_lock_irqsave(&x86_cache_sync_lock);
-	current  = cpu_current();
+	state = spinlock_lock_irqsave(&x86_cache_sync_lock);
+	current = cpu_current();
 	topology = cpu_topology_get();
 	if (current == NULL || topology == NULL || topology->cpus == NULL || topology->cpu_count == 0u ||
-	    topology->cpu_count > X86_CACHE_MAX_CPUS || current->index >= X86_CACHE_MAX_CPUS)
+			topology->cpu_count > X86_CACHE_MAX_CPUS || current->index >= X86_CACHE_MAX_CPUS)
 		hcf();
 
 	x86_cache_serialize_local();

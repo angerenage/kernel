@@ -58,7 +58,7 @@ void pic_init(void) {
 
 void pic_mask_irq(unsigned irq) {
 	uint16_t port;
-	uint8_t  mask;
+	uint8_t mask;
 	unsigned line;
 
 	if (irq >= X86_IRQ_COUNT) return;
@@ -78,7 +78,7 @@ void pic_mask_irq(unsigned irq) {
 
 void pic_unmask_irq(unsigned irq) {
 	uint16_t port;
-	uint8_t  mask;
+	uint8_t mask;
 	unsigned line;
 
 	if (irq >= X86_IRQ_COUNT) return;

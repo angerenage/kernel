@@ -1,17 +1,18 @@
 #pragma once
 
-#include <boot/info.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <boot/info.h>
 
 enum {
 	KERNEL_CRASH_QR_BUFFER_SIZE = 3918u,
 };
 
 struct kernel_crash_qr {
-	uint8_t  temporary[KERNEL_CRASH_QR_BUFFER_SIZE];
-	uint8_t  modules[KERNEL_CRASH_QR_BUFFER_SIZE];
+	uint8_t temporary[KERNEL_CRASH_QR_BUFFER_SIZE];
+	uint8_t modules[KERNEL_CRASH_QR_BUFFER_SIZE];
 	uint16_t size;
 };
 

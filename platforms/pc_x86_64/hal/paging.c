@@ -1,18 +1,19 @@
 #include "paging.h"
 
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+
 #include <base/math.h>
+#include <hal/hcf.h>
+#include <hal/paging.h>
 #include <core/cpu.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/sched.h>
 #include <core/spinlock.h>
-#include <hal/hcf.h>
-#include <hal/paging.h>
 #include <kernel/trace.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <string.h>
 
 #include "../../paging_transaction.h"
 #include "interrupts/apic.h"
@@ -49,37 +50,37 @@
 struct hal_paging_space {
 	uintptr_t lower_root_phys;
 	uintptr_t upper_root_phys;
-	uint64_t  flags;
+	uint64_t flags;
 	uintptr_t storage_phys;
-	uint64_t  active_cpus;
+	uint64_t active_cpus;
 };
 
 static struct hal_paging_info paging_info;
-static unsigned               minimum_leaf_shift;
-static bool                   device_memory_supported;
-static bool                   write_combining_supported;
-static uint8_t                write_combining_pat_index;
-static bool                   global_pages_supported;
-static uint64_t               pte_address_mask;
+static unsigned minimum_leaf_shift;
+static bool device_memory_supported;
+static bool write_combining_supported;
+static uint8_t write_combining_pat_index;
+static bool global_pages_supported;
+static uint64_t pte_address_mask;
 
 struct x86_tlb_request {
 	uintptr_t start;
-	size_t    size;
-	size_t    source_index;
-	bool      full_flush;
-	uint64_t  targets;
-	uint64_t  generation;
+	size_t size;
+	size_t source_index;
+	bool full_flush;
+	uint64_t targets;
+	uint64_t generation;
 };
 
-static bool                    initialized;
+static bool initialized;
 static struct hal_paging_space kernel_space;
-static struct spinlock         paging_lock =
-	SPINLOCK_INIT_CLASS("paging_lock", SPINLOCK_ORDER_PAGING, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
-static struct x86_tlb_request   x86_tlb_request;
-static uint64_t                 x86_tlb_ack[X86_TLB_MAX_CPUS];
+static struct spinlock paging_lock = SPINLOCK_INIT_CLASS(
+		"paging_lock", SPINLOCK_ORDER_PAGING, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
+static struct x86_tlb_request x86_tlb_request;
+static uint64_t x86_tlb_ack[X86_TLB_MAX_CPUS];
 static struct hal_paging_space* x86_active_space[X86_TLB_MAX_CPUS];
-static struct spinlock          x86_tlb_shootdown_lock = SPINLOCK_INIT_CLASS(
-	"tlb_shootdown_lock", SPINLOCK_ORDER_PAGING, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
+static struct spinlock x86_tlb_shootdown_lock = SPINLOCK_INIT_CLASS(
+		"tlb_shootdown_lock", SPINLOCK_ORDER_PAGING, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
 
 static inline uint64_t x86_read_cr0(void) {
 	uint64_t value;
@@ -153,8 +154,8 @@ static bool x86_pat_find_write_combining(uint8_t* out_index) {
 	return false;
 }
 
-static inline void x86_cpuid(uint32_t leaf, uint32_t subleaf, uint32_t* eax, uint32_t* ebx, uint32_t* ecx,
-                             uint32_t* edx) {
+static inline void x86_cpuid(
+		uint32_t leaf, uint32_t subleaf, uint32_t* eax, uint32_t* ebx, uint32_t* ecx, uint32_t* edx) {
 	__asm__ volatile("cpuid" : "=a"(*eax), "=b"(*ebx), "=c"(*ecx), "=d"(*edx) : "a"(leaf), "c"(subleaf));
 }
 
@@ -165,9 +166,9 @@ static inline size_t x86_leaf_size(int level) {
 }
 
 static inline bool x86_virtual_address_valid(uintptr_t virt) {
-	unsigned bits     = minimum_leaf_shift + 9u * (unsigned)x86_paging_levels();
-	uint64_t sign     = ((uint64_t)virt >> (bits - 1u)) & 1u;
-	uint64_t upper    = (uint64_t)virt >> bits;
+	unsigned bits = minimum_leaf_shift + 9u * (unsigned)x86_paging_levels();
+	uint64_t sign = ((uint64_t)virt >> (bits - 1u)) & 1u;
+	uint64_t upper = (uint64_t)virt >> bits;
 	uint64_t expected = sign != 0u ? ((1ull << (64u - bits)) - 1u) : 0u;
 	return upper == expected;
 }
@@ -192,8 +193,8 @@ static void x86_tlb_flush_range_local(uintptr_t start, size_t size, bool full_fl
 
 static bool x86_tlb_process_request_for_current_cpu(void) {
 	struct cpu* cpu = cpu_current();
-	uint64_t    generation;
-	uint64_t    acknowledged;
+	uint64_t generation;
+	uint64_t acknowledged;
 
 	if (cpu == NULL || cpu->index >= X86_TLB_MAX_CPUS) hcf();
 	generation = __atomic_load_n(&x86_tlb_request.generation, __ATOMIC_ACQUIRE);
@@ -212,45 +213,45 @@ bool x86_64_paging_handle_tlb_nmi(void) {
 }
 
 static void x86_tlb_shootdown_range(const struct hal_paging_space* space, uintptr_t start, size_t size) {
-	uint64_t                   active_cpus;
-	uint64_t                   targets;
-	struct cpu*                current = cpu_current();
+	uint64_t active_cpus;
+	uint64_t targets;
+	struct cpu* current = cpu_current();
 	const struct cpu_topology* topology;
-	size_t                     cpu_total;
-	uint64_t                   generation;
-	uint64_t                   trace_tid;
-	bool                       full_flush;
-	struct irq_state           shootdown_state;
+	size_t cpu_total;
+	uint64_t generation;
+	uint64_t trace_tid;
+	bool full_flush;
+	struct irq_state shootdown_state;
 
 	if (size == 0u) return;
 	trace_tid = kernel_trace_thread_id(sched_current_thread());
 	if (current == NULL || current->index >= X86_TLB_MAX_CPUS) hcf();
 	active_cpus = space == &kernel_space ? UINT64_MAX : space->active_cpus;
-	full_flush  = space != &kernel_space && size / paging_info.minimum_leaf_size >= X86_TLB_FULL_FLUSH_PAGE_THRESHOLD;
+	full_flush = space != &kernel_space && size / paging_info.minimum_leaf_size >= X86_TLB_FULL_FLUSH_PAGE_THRESHOLD;
 	if ((active_cpus & (1ull << current->index)) != 0u) {
 		kernel_trace_emit(KERNEL_TRACE_EVENT_VM_TLB_RANGE,
-		                  KERNEL_TRACE_RECORD_INSTANT,
-		                  trace_tid,
-		                  size / paging_info.minimum_leaf_size);
+				KERNEL_TRACE_RECORD_INSTANT,
+				trace_tid,
+				size / paging_info.minimum_leaf_size);
 		kernel_trace_emit(
-			KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_LOCAL);
+				KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_LOCAL);
 		x86_tlb_flush_range_local(start, size, full_flush);
 		kernel_trace_emit(
-			KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_LOCAL);
+				KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_LOCAL);
 	}
 	targets = active_cpus & ~(1ull << current->index);
 	if (targets == 0u) return;
 
 	kernel_trace_emit(
-		KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_LOCK);
+			KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_LOCK);
 	shootdown_state = spinlock_lock_irqsave(&x86_tlb_shootdown_lock);
 	kernel_trace_emit(
-		KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_LOCK);
+			KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_LOCK);
 	kernel_trace_emit(
-		KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_TARGETS);
+			KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_TARGETS);
 	topology = cpu_topology_get();
 	if (topology == NULL || topology->cpus == NULL || topology->cpu_count == 0u ||
-	    topology->cpu_count > X86_TLB_MAX_CPUS) {
+			topology->cpu_count > X86_TLB_MAX_CPUS) {
 		hcf();
 	}
 	cpu_total = topology->cpu_count;
@@ -259,13 +260,13 @@ static void x86_tlb_shootdown_range(const struct hal_paging_space* space, uintpt
 	for (size_t i = 0u; i < cpu_total; i++) {
 		struct cpu* target = &topology->cpus[i];
 		if (target == current || target->index >= X86_TLB_MAX_CPUS || cpu_state_get(target) != CPU_STATE_ONLINE ||
-		    (targets & (1ull << target->index)) == 0u)
+				(targets & (1ull << target->index)) == 0u)
 			continue;
 		online_targets |= 1ull << target->index;
 	}
 	targets = online_targets;
 	kernel_trace_emit(
-		KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_TARGETS);
+			KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_TARGETS);
 	if (targets == 0u) {
 		spinlock_unlock_irqrestore(&x86_tlb_shootdown_lock, shootdown_state);
 		return;
@@ -275,17 +276,17 @@ static void x86_tlb_shootdown_range(const struct hal_paging_space* space, uintpt
 	generation = __atomic_load_n(&x86_tlb_request.generation, __ATOMIC_RELAXED) + 1u;
 	if (generation == 0u) generation = 1u;
 
-	x86_tlb_request.start        = start;
-	x86_tlb_request.size         = size;
+	x86_tlb_request.start = start;
+	x86_tlb_request.size = size;
 	x86_tlb_request.source_index = current->index;
-	x86_tlb_request.full_flush   = full_flush;
+	x86_tlb_request.full_flush = full_flush;
 	__atomic_store_n(&x86_tlb_request.targets, targets, __ATOMIC_RELAXED);
 	__atomic_store_n(&x86_tlb_request.generation, generation, __ATOMIC_RELEASE);
 	/* Publish the request before the LAPIC MMIO write that delivers the NMI. */
 	__atomic_thread_fence(__ATOMIC_SEQ_CST);
 
 	kernel_trace_emit(
-		KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_SEND);
+			KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_SEND);
 	for (size_t i = 0u; i < cpu_total; i++) {
 		struct cpu* target = &topology->cpus[i];
 
@@ -296,10 +297,10 @@ static void x86_tlb_shootdown_range(const struct hal_paging_space* space, uintpt
 		if (!apic_send_sync_nmi(target->index, (uint32_t)target->arch_id)) hcf();
 	}
 	kernel_trace_emit(
-		KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_SEND);
+			KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_SEND);
 
 	kernel_trace_emit(
-		KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_WAIT);
+			KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_WAIT);
 	for (size_t target_index = 0u; target_index < X86_TLB_MAX_CPUS; target_index++) {
 		if ((targets & (1ull << target_index)) == 0u) continue;
 		while (__atomic_load_n(&x86_tlb_ack[target_index], __ATOMIC_ACQUIRE) != generation) {
@@ -307,7 +308,7 @@ static void x86_tlb_shootdown_range(const struct hal_paging_space* space, uintpt
 		}
 	}
 	kernel_trace_emit(
-		KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_WAIT);
+			KERNEL_TRACE_EVENT_VM_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_VM_TLB_SHOOTDOWN_WAIT);
 	spinlock_unlock_irqrestore(&x86_tlb_shootdown_lock, shootdown_state);
 }
 
@@ -366,26 +367,28 @@ static inline int x86_paging_levels(void) {
 }
 
 static bool x86_walk_to_level(const struct hal_paging_space* space, uintptr_t virt, int target_level, bool user,
-                              struct paging_transaction* transaction, uint64_t** out_slot) {
-	uint64_t* table  = x86_space_root_table(space);
-	int       levels = x86_paging_levels();
+		struct paging_transaction* transaction, uint64_t** out_slot) {
+	uint64_t* table = x86_space_root_table(space);
+	int levels = x86_paging_levels();
 
 	if (!table || !out_slot || target_level < 0 || target_level >= levels) return false;
 
 	for (int level = levels - 1; level > target_level; level--) {
-		size_t   index = (size_t)((virt >> (minimum_leaf_shift + 9u * (unsigned)level)) & 0x1ffu);
+		size_t index = (size_t)((virt >> (minimum_leaf_shift + 9u * (unsigned)level)) & 0x1ffu);
 		uint64_t entry = table[index];
 
 		if ((entry & X86_PTE_PRESENT) == 0) {
 			struct pmm_extent allocation;
-			uintptr_t         next_phys;
-			uint64_t*         next_table;
+			uintptr_t next_phys;
+			uint64_t* next_table;
 
-			if (!pmm_alloc(&(const struct pmm_alloc_request){.size      = paging_info.minimum_leaf_size,
-			                                                 .alignment = paging_info.minimum_leaf_size},
-			               &allocation))
+			if (!pmm_alloc(
+						&(const struct pmm_alloc_request){
+							.size = paging_info.minimum_leaf_size, .alignment = paging_info.minimum_leaf_size
+						},
+						&allocation))
 				return false;
-			next_phys  = allocation.address;
+			next_phys = allocation.address;
 			next_table = (uint64_t*)hhdm_phys_to_virt(next_phys);
 			memset(next_table, 0, paging_info.minimum_leaf_size);
 			if (!paging_transaction_record(transaction, &table[index], allocation)) {
@@ -402,7 +405,7 @@ static bool x86_walk_to_level(const struct hal_paging_space* space, uintptr_t vi
 		else if (user && (entry & X86_PTE_USER) == 0) {
 			if (!paging_transaction_record(transaction, &table[index], (struct pmm_extent){0})) return false;
 			table[index] = entry | X86_PTE_USER;
-			entry        = table[index];
+			entry = table[index];
 		}
 
 		table = (uint64_t*)hhdm_phys_to_virt((uintptr_t)(entry & pte_address_mask));
@@ -413,26 +416,26 @@ static bool x86_walk_to_level(const struct hal_paging_space* space, uintptr_t vi
 }
 
 bool hal_paging_init(void) {
-	struct irq_state       state = spinlock_lock_irqsave(&paging_lock);
-	uint32_t               eax, ebx, ecx, edx;
-	uint32_t               maximum_extended_leaf;
-	uint32_t               extended_features;
-	uint32_t               basic_features;
-	unsigned               physical_bits;
-	uint64_t               control;
+	struct irq_state state = spinlock_lock_irqsave(&paging_lock);
+	uint32_t eax, ebx, ecx, edx;
+	uint32_t maximum_extended_leaf;
+	uint32_t extended_features;
+	uint32_t basic_features;
+	unsigned physical_bits;
+	uint64_t control;
 	const struct pmm_info* physical_memory = pmm_info();
 
-	initialized                   = false;
-	device_memory_supported       = false;
-	write_combining_supported     = false;
-	write_combining_pat_index     = 0u;
-	global_pages_supported        = false;
-	minimum_leaf_shift            = 12u;
+	initialized = false;
+	device_memory_supported = false;
+	write_combining_supported = false;
+	write_combining_pat_index = 0u;
+	global_pages_supported = false;
+	minimum_leaf_shift = 12u;
 	paging_info.minimum_leaf_size = (size_t)1u << minimum_leaf_shift;
 	if (physical_memory->allocation_granule == 0u ||
-	    paging_info.minimum_leaf_size % physical_memory->allocation_granule != 0u ||
-	    sizeof(struct hal_paging_space) > physical_memory->allocation_granule ||
-	    paging_transaction_page_capacity() == 0u) {
+			paging_info.minimum_leaf_size % physical_memory->allocation_granule != 0u ||
+			sizeof(struct hal_paging_space) > physical_memory->allocation_granule ||
+			paging_transaction_page_capacity() == 0u) {
 		spinlock_unlock_irqrestore(&paging_lock, state);
 		return false;
 	}
@@ -447,7 +450,7 @@ bool hal_paging_init(void) {
 		spinlock_unlock_irqrestore(&paging_lock, state);
 		return false;
 	}
-	pte_address_mask           = ((1ull << physical_bits) - 1u) & ~((uint64_t)paging_info.minimum_leaf_size - 1u);
+	pte_address_mask = ((1ull << physical_bits) - 1u) & ~((uint64_t)paging_info.minimum_leaf_size - 1u);
 	paging_info.leaf_size_mask = 1ull << minimum_leaf_shift;
 	if (x86_paging_levels() >= 3) paging_info.leaf_size_mask |= 1ull << (minimum_leaf_shift + 9u);
 	x86_cpuid(0x80000001u, 0u, &eax, &ebx, &ecx, &extended_features);
@@ -460,7 +463,7 @@ bool hal_paging_init(void) {
 
 	x86_cpuid(1u, 0u, &eax, &ebx, &ecx, &edx);
 	basic_features = edx;
-	control        = x86_read_cr0() | X86_CR0_WP;
+	control = x86_read_cr0() | X86_CR0_WP;
 	x86_write_cr0(control);
 	if ((x86_read_cr0() & X86_CR0_WP) == 0u) {
 		spinlock_unlock_irqrestore(&paging_lock, state);
@@ -471,8 +474,8 @@ bool hal_paging_init(void) {
 		x86_write_cr4(control);
 		global_pages_supported = (x86_read_cr4() & X86_CR4_PGE) != 0u;
 	}
-	device_memory_supported =
-		(basic_features & X86_CPUID_FEATURE_PAT) != 0u && ((x86_read_msr(X86_MSR_PAT) >> 24u) & 0xffu) == X86_PAT_UC;
+	device_memory_supported = (basic_features & X86_CPUID_FEATURE_PAT) != 0u &&
+	                          ((x86_read_msr(X86_MSR_PAT) >> 24u) & 0xffu) == X86_PAT_UC;
 	if ((basic_features & X86_CPUID_FEATURE_PAT) != 0u) {
 		write_combining_supported = x86_pat_find_write_combining(&write_combining_pat_index);
 		if (!write_combining_supported) {
@@ -484,12 +487,12 @@ bool hal_paging_init(void) {
 	kernel_space = (struct hal_paging_space){
 		.lower_root_phys = (uintptr_t)(x86_read_cr3() & pte_address_mask),
 		.upper_root_phys = 0u,
-		.flags           = (uint64_t)x86_paging_levels(),
+		.flags = (uint64_t)x86_paging_levels(),
 	};
-	initialized         = x86_space_root_table(&kernel_space) != NULL;
+	initialized = x86_space_root_table(&kernel_space) != NULL;
 	struct cpu* current = cpu_current();
 	if (initialized && current != NULL && current->index < X86_TLB_MAX_CPUS) {
-		kernel_space.active_cpus         = 1ull << current->index;
+		kernel_space.active_cpus = 1ull << current->index;
 		x86_active_space[current->index] = &kernel_space;
 	}
 	spinlock_unlock_irqrestore(&paging_lock, state);
@@ -505,8 +508,8 @@ const struct hal_paging_info* hal_paging_info(void) {
 	return &paging_info;
 }
 
-static bool x86_query_entry(const struct hal_paging_space* space, uintptr_t virt, uint64_t* out_entry,
-                            unsigned* out_shift) {
+static bool x86_query_entry(
+		const struct hal_paging_space* space, uintptr_t virt, uint64_t* out_entry, unsigned* out_shift) {
 	uint64_t* table = x86_space_root_table(space);
 	if (table == NULL || out_entry == NULL || out_shift == NULL || !x86_virtual_address_valid(virt)) return false;
 	for (int level = x86_paging_levels() - 1; level >= 0; level--) {
@@ -541,15 +544,15 @@ struct hal_paging_space* hal_paging_kernel_space(void) {
 }
 
 bool hal_paging_space_create(struct hal_paging_space** out_space) {
-	struct pmm_extent        root_allocation;
-	struct pmm_extent        storage_allocation;
-	uintptr_t                root_phys;
-	uintptr_t                storage_phys;
+	struct pmm_extent root_allocation;
+	struct pmm_extent storage_allocation;
+	uintptr_t root_phys;
+	uintptr_t storage_phys;
 	struct hal_paging_space* space;
-	uint64_t*                root;
-	uint64_t*                kernel_root;
-	int                      levels;
-	struct irq_state         state;
+	uint64_t* root;
+	uint64_t* kernel_root;
+	int levels;
+	struct irq_state state;
 
 	if (out_space == NULL || !initialized) return false;
 	*out_space = NULL;
@@ -560,17 +563,19 @@ bool hal_paging_space_create(struct hal_paging_space** out_space) {
 		return false;
 	}
 	storage_phys = storage_allocation.address;
-	if (!pmm_alloc(&(const struct pmm_alloc_request){.size      = paging_info.minimum_leaf_size,
-	                                                 .alignment = paging_info.minimum_leaf_size},
-	               &root_allocation)) {
+	if (!pmm_alloc(
+				&(const struct pmm_alloc_request){
+					.size = paging_info.minimum_leaf_size, .alignment = paging_info.minimum_leaf_size
+				},
+				&root_allocation)) {
 		(void)pmm_free(storage_allocation);
 		spinlock_unlock_irqrestore(&paging_lock, state);
 		return false;
 	}
 	root_phys = root_allocation.address;
-	space     = (struct hal_paging_space*)hhdm_phys_to_virt(storage_phys);
+	space = (struct hal_paging_space*)hhdm_phys_to_virt(storage_phys);
 
-	root        = (uint64_t*)hhdm_phys_to_virt(root_phys);
+	root = (uint64_t*)hhdm_phys_to_virt(root_phys);
 	kernel_root = x86_space_root_table(&kernel_space);
 	if (kernel_root == NULL) {
 		(void)pmm_free(root_allocation);
@@ -587,8 +592,8 @@ bool hal_paging_space_create(struct hal_paging_space** out_space) {
 	*space = (struct hal_paging_space){
 		.lower_root_phys = root_phys,
 		.upper_root_phys = 0u,
-		.flags           = (uint64_t)levels,
-		.storage_phys    = storage_phys,
+		.flags = (uint64_t)levels,
+		.storage_phys = storage_phys,
 	};
 	*out_space = space;
 	spinlock_unlock_irqrestore(&paging_lock, state);
@@ -602,7 +607,7 @@ static void x86_free_page_table_children(uint64_t* table, int level, size_t entr
 		if ((entry & X86_PTE_PRESENT) == 0u || (entry & X86_PTE_LARGE) != 0u) continue;
 
 		uintptr_t child_phys = (uintptr_t)(entry & pte_address_mask);
-		uint64_t* child      = (uint64_t*)hhdm_phys_to_virt(child_phys);
+		uint64_t* child = (uint64_t*)hhdm_phys_to_virt(child_phys);
 		x86_free_page_table_children(child, level - 1, 512u);
 		(void)pmm_free((struct pmm_extent){.address = child_phys, .size = paging_info.minimum_leaf_size});
 	}
@@ -610,20 +615,20 @@ static void x86_free_page_table_children(uint64_t* table, int level, size_t entr
 
 void hal_paging_space_destroy(struct hal_paging_space* space) {
 	struct irq_state state;
-	uintptr_t        root_phys;
-	uint64_t*        root;
-	int              levels;
+	uintptr_t root_phys;
+	uint64_t* root;
+	int levels;
 
 	if (space == NULL || space->lower_root_phys == 0u) return;
 	root_phys = space->lower_root_phys & pte_address_mask;
 	if (root_phys == kernel_space.lower_root_phys) return;
-	state  = spinlock_lock_irqsave(&paging_lock);
-	root   = (uint64_t*)hhdm_phys_to_virt(root_phys);
+	state = spinlock_lock_irqsave(&paging_lock);
+	root = (uint64_t*)hhdm_phys_to_virt(root_phys);
 	levels = space->flags != 0u ? (int)space->flags : x86_paging_levels();
 	x86_free_page_table_children(root, levels - 1, 256u);
 	(void)pmm_free((struct pmm_extent){.address = root_phys, .size = paging_info.minimum_leaf_size});
 	uintptr_t storage_phys = space->storage_phys;
-	*space                 = (struct hal_paging_space){0};
+	*space = (struct hal_paging_space){0};
 	if (storage_phys != 0u)
 		(void)pmm_free((struct pmm_extent){.address = storage_phys, .size = pmm_info()->allocation_granule});
 	spinlock_unlock_irqrestore(&paging_lock, state);
@@ -631,18 +636,22 @@ void hal_paging_space_destroy(struct hal_paging_space* space) {
 
 bool hal_paging_activate(const struct hal_paging_space* space) {
 	struct irq_state state;
-	struct cpu*      current;
-	uint64_t         trace_tid;
+	struct cpu* current;
+	uint64_t trace_tid;
 
 	if (space == NULL || space->lower_root_phys == 0u || !initialized) return false;
 	trace_tid = kernel_trace_thread_id(sched_current_thread());
-	kernel_trace_emit(
-		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_SCHED_ADDRESS_SPACE_LOCK);
+	kernel_trace_emit(KERNEL_TRACE_EVENT_SCHED_PHASE,
+			KERNEL_TRACE_RECORD_BEGIN,
+			trace_tid,
+			KERNEL_TRACE_SCHED_ADDRESS_SPACE_LOCK);
 	state = spinlock_lock_irqsave(&paging_lock);
 	kernel_trace_emit(
-		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_SCHED_ADDRESS_SPACE_LOCK);
-	kernel_trace_emit(
-		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_SCHED_ADDRESS_SPACE_TRACK);
+			KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_SCHED_ADDRESS_SPACE_LOCK);
+	kernel_trace_emit(KERNEL_TRACE_EVENT_SCHED_PHASE,
+			KERNEL_TRACE_RECORD_BEGIN,
+			trace_tid,
+			KERNEL_TRACE_SCHED_ADDRESS_SPACE_TRACK);
 	current = cpu_current();
 	if (current != NULL && current->index < X86_TLB_MAX_CPUS) {
 		struct hal_paging_space* previous = x86_active_space[current->index];
@@ -651,34 +660,36 @@ bool hal_paging_activate(const struct hal_paging_space* space) {
 		x86_active_space[current->index] = (struct hal_paging_space*)space;
 	}
 	kernel_trace_emit(
-		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_SCHED_ADDRESS_SPACE_TRACK);
+			KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_SCHED_ADDRESS_SPACE_TRACK);
 	kernel_trace_emit(
-		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_SCHED_ADDRESS_SPACE_CR3);
+			KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_SCHED_ADDRESS_SPACE_CR3);
 	x86_write_cr3(space->lower_root_phys & pte_address_mask);
 	kernel_trace_emit(
-		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_SCHED_ADDRESS_SPACE_CR3);
+			KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_SCHED_ADDRESS_SPACE_CR3);
 	spinlock_unlock_irqrestore(&paging_lock, state);
 	return true;
 }
 
 static bool x86_split_leaf(uint64_t* slot, int level, struct paging_transaction* transaction) {
-	uint64_t          entry = *slot;
+	uint64_t entry = *slot;
 	struct pmm_extent allocation;
-	uintptr_t         child_phys;
-	uint64_t*         child;
-	size_t            parent_size = x86_leaf_size(level);
-	size_t            child_size  = x86_leaf_size(level - 1);
-	uint64_t          base        = entry & pte_address_mask & ~((uint64_t)parent_size - 1u);
-	uint64_t          flags       = entry & ~pte_address_mask & ~X86_PTE_LARGE;
-	bool              pat         = (entry & X86_PTE_PAT_LARGE) != 0u;
+	uintptr_t child_phys;
+	uint64_t* child;
+	size_t parent_size = x86_leaf_size(level);
+	size_t child_size = x86_leaf_size(level - 1);
+	uint64_t base = entry & pte_address_mask & ~((uint64_t)parent_size - 1u);
+	uint64_t flags = entry & ~pte_address_mask & ~X86_PTE_LARGE;
+	bool pat = (entry & X86_PTE_PAT_LARGE) != 0u;
 
 	if (level <= 0 || (entry & (X86_PTE_PRESENT | X86_PTE_LARGE)) != (X86_PTE_PRESENT | X86_PTE_LARGE) ||
-	    !pmm_alloc(&(const struct pmm_alloc_request){.size      = paging_info.minimum_leaf_size,
-	                                                 .alignment = paging_info.minimum_leaf_size},
-	               &allocation))
+			!pmm_alloc(
+					&(const struct pmm_alloc_request){
+						.size = paging_info.minimum_leaf_size, .alignment = paging_info.minimum_leaf_size
+					},
+					&allocation))
 		return false;
 	child_phys = allocation.address;
-	child      = (uint64_t*)hhdm_phys_to_virt(child_phys);
+	child = (uint64_t*)hhdm_phys_to_virt(child_phys);
 	memset(child, 0, paging_info.minimum_leaf_size);
 	for (size_t index = 0u; index < 512u; index++) {
 		child[index] = (base + index * child_size) | flags;
@@ -703,14 +714,14 @@ static bool x86_table_empty(const uint64_t* table) {
 	return true;
 }
 
-static bool x86_prepare_range(uint64_t* table, int level, uintptr_t start, uintptr_t end,
-                              struct paging_transaction* transaction) {
+static bool x86_prepare_range(
+		uint64_t* table, int level, uintptr_t start, uintptr_t end, struct paging_transaction* transaction) {
 	size_t span = x86_leaf_size(level);
 	while (start < end) {
-		size_t    index = (start >> (minimum_leaf_shift + 9u * (unsigned)level)) & 0x1ffu;
-		uintptr_t next  = span - (start & (span - 1u)) > end - start ? end : start + span - (start & (span - 1u));
-		uint64_t* slot  = &table[index];
-		uint64_t  entry = *slot;
+		size_t index = (start >> (minimum_leaf_shift + 9u * (unsigned)level)) & 0x1ffu;
+		uintptr_t next = span - (start & (span - 1u)) > end - start ? end : start + span - (start & (span - 1u));
+		uint64_t* slot = &table[index];
+		uint64_t entry = *slot;
 		if ((entry & X86_PTE_PRESENT) != 0u && level > 0) {
 			if ((entry & X86_PTE_LARGE) != 0u) {
 				uintptr_t leaf_start = start & ~((uintptr_t)span - 1u);
@@ -720,8 +731,11 @@ static bool x86_prepare_range(uint64_t* table, int level, uintptr_t start, uintp
 				}
 			}
 			if ((entry & X86_PTE_LARGE) == 0u &&
-			    !x86_prepare_range(
-					(uint64_t*)hhdm_phys_to_virt(entry & pte_address_mask), level - 1, start, next, transaction))
+					!x86_prepare_range((uint64_t*)hhdm_phys_to_virt(entry & pte_address_mask),
+							level - 1,
+							start,
+							next,
+							transaction))
 				return false;
 		}
 		start = next;
@@ -730,72 +744,71 @@ static bool x86_prepare_range(uint64_t* table, int level, uintptr_t start, uintp
 }
 
 static bool x86_change_range(uint64_t* table, int level, uintptr_t start, uintptr_t end, bool protect, uint64_t flags,
-                             struct paging_transaction* transaction) {
+		struct paging_transaction* transaction) {
 	size_t span = x86_leaf_size(level);
 	while (start < end) {
-		size_t    index = (size_t)((start >> (minimum_leaf_shift + 9u * (unsigned)level)) & 0x1ffu);
-		uintptr_t step  = span - (start & (span - 1u));
-		uintptr_t next  = step > end - start ? end : start + step;
-		uint64_t  entry = table[index];
+		size_t index = (size_t)((start >> (minimum_leaf_shift + 9u * (unsigned)level)) & 0x1ffu);
+		uintptr_t step = span - (start & (span - 1u));
+		uintptr_t next = step > end - start ? end : start + step;
+		uint64_t entry = table[index];
 		if ((entry & X86_PTE_PRESENT) != 0u) {
 			if (level == 0 || (entry & X86_PTE_LARGE) != 0u) {
 				uint64_t trace_tid = kernel_trace_thread_id(sched_current_thread());
 				kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
-				                  KERNEL_TRACE_RECORD_BEGIN,
-				                  trace_tid,
-				                  KERNEL_TRACE_VM_PAGING_CHANGE_RECORD);
+						KERNEL_TRACE_RECORD_BEGIN,
+						trace_tid,
+						KERNEL_TRACE_VM_PAGING_CHANGE_RECORD);
 				bool recorded = paging_transaction_record(transaction, &table[index], (struct pmm_extent){0});
 				kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
-				                  KERNEL_TRACE_RECORD_END,
-				                  trace_tid,
-				                  KERNEL_TRACE_VM_PAGING_CHANGE_RECORD);
+						KERNEL_TRACE_RECORD_END,
+						trace_tid,
+						KERNEL_TRACE_VM_PAGING_CHANGE_RECORD);
 				if (!recorded) return false;
 				if (protect) table[index] = x86_leaf_apply_protection(entry, flags);
 				else table[index] = 0u;
 			}
 			else {
 				uintptr_t child_phys = (uintptr_t)(entry & pte_address_mask);
-				uint64_t* child      = (uint64_t*)hhdm_phys_to_virt(child_phys);
+				uint64_t* child = (uint64_t*)hhdm_phys_to_virt(child_phys);
 				if (protect && (flags & HAL_PAGE_USER) != 0u && (entry & X86_PTE_USER) == 0u) {
 					if (!paging_transaction_record(transaction, &table[index], (struct pmm_extent){0})) return false;
 					table[index] |= X86_PTE_USER;
 				}
 				uint64_t trace_tid = kernel_trace_thread_id(sched_current_thread());
 				kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
-				                  KERNEL_TRACE_RECORD_BEGIN,
-				                  trace_tid,
-				                  KERNEL_TRACE_VM_PAGING_CHANGE_DESCEND);
+						KERNEL_TRACE_RECORD_BEGIN,
+						trace_tid,
+						KERNEL_TRACE_VM_PAGING_CHANGE_DESCEND);
 				bool changed = x86_change_range(child, level - 1, start, next, protect, flags, transaction);
 				kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
-				                  KERNEL_TRACE_RECORD_END,
-				                  trace_tid,
-				                  KERNEL_TRACE_VM_PAGING_CHANGE_DESCEND);
+						KERNEL_TRACE_RECORD_END,
+						trace_tid,
+						KERNEL_TRACE_VM_PAGING_CHANGE_DESCEND);
 				if (!changed) return false;
 				bool empty = false;
 				if (!protect) {
 					kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
-					                  KERNEL_TRACE_RECORD_BEGIN,
-					                  trace_tid,
-					                  KERNEL_TRACE_VM_PAGING_CHANGE_EMPTY_SCAN);
+							KERNEL_TRACE_RECORD_BEGIN,
+							trace_tid,
+							KERNEL_TRACE_VM_PAGING_CHANGE_EMPTY_SCAN);
 					empty = x86_table_empty(child);
 					kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
-					                  KERNEL_TRACE_RECORD_END,
-					                  trace_tid,
-					                  KERNEL_TRACE_VM_PAGING_CHANGE_EMPTY_SCAN);
+							KERNEL_TRACE_RECORD_END,
+							trace_tid,
+							KERNEL_TRACE_VM_PAGING_CHANGE_EMPTY_SCAN);
 				}
 				if (empty) {
 					kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
-					                  KERNEL_TRACE_RECORD_BEGIN,
-					                  trace_tid,
-					                  KERNEL_TRACE_VM_PAGING_CHANGE_RETIRE);
-					bool retired = paging_transaction_retire(
-						transaction,
-						&table[index],
-						(struct pmm_extent){.address = child_phys, .size = paging_info.minimum_leaf_size});
+							KERNEL_TRACE_RECORD_BEGIN,
+							trace_tid,
+							KERNEL_TRACE_VM_PAGING_CHANGE_RETIRE);
+					bool retired = paging_transaction_retire(transaction,
+							&table[index],
+							(struct pmm_extent){.address = child_phys, .size = paging_info.minimum_leaf_size});
 					kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
-					                  KERNEL_TRACE_RECORD_END,
-					                  trace_tid,
-					                  KERNEL_TRACE_VM_PAGING_CHANGE_RETIRE);
+							KERNEL_TRACE_RECORD_END,
+							trace_tid,
+							KERNEL_TRACE_VM_PAGING_CHANGE_RETIRE);
 					if (!retired) return false;
 					table[index] = 0u;
 				}
@@ -809,8 +822,8 @@ static bool x86_change_range(uint64_t* table, int level, uintptr_t start, uintpt
 static bool x86_range_args(struct hal_paging_space* space, uintptr_t virt, size_t size, uintptr_t* out_end) {
 	uint64_t end;
 	if (space == NULL || !initialized || size == 0u || !x86_virtual_address_valid(virt) ||
-	    (virt & (paging_info.minimum_leaf_size - 1u)) != 0u || (size & (paging_info.minimum_leaf_size - 1u)) != 0u ||
-	    add_overflow_u64(virt, size, &end))
+			(virt & (paging_info.minimum_leaf_size - 1u)) != 0u ||
+			(size & (paging_info.minimum_leaf_size - 1u)) != 0u || add_overflow_u64(virt, size, &end))
 		return false;
 	if (!x86_virtual_address_valid((uintptr_t)end - 1u)) return false;
 	*out_end = (uintptr_t)end;
@@ -820,42 +833,42 @@ static bool x86_range_args(struct hal_paging_space* space, uintptr_t virt, size_
 bool hal_paging_unmap(struct hal_paging_space* space, uintptr_t virt, size_t size) {
 	uintptr_t end;
 	if (!x86_range_args(space, virt, size, &end)) return false;
-	struct irq_state          state       = spinlock_lock_irqsave(&paging_lock);
-	uint64_t*                 root        = x86_space_root_table(space);
+	struct irq_state state = spinlock_lock_irqsave(&paging_lock);
+	uint64_t* root = x86_space_root_table(space);
 	struct paging_transaction transaction = {0};
 	kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
-	                  KERNEL_TRACE_RECORD_BEGIN,
-	                  kernel_trace_thread_id(sched_current_thread()),
-	                  KERNEL_TRACE_VM_PAGING_PREPARE);
+			KERNEL_TRACE_RECORD_BEGIN,
+			kernel_trace_thread_id(sched_current_thread()),
+			KERNEL_TRACE_VM_PAGING_PREPARE);
 	bool ok = root != NULL && x86_prepare_range(root, x86_paging_levels() - 1, virt, end, &transaction);
 	kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
-	                  KERNEL_TRACE_RECORD_END,
-	                  kernel_trace_thread_id(sched_current_thread()),
-	                  KERNEL_TRACE_VM_PAGING_PREPARE);
+			KERNEL_TRACE_RECORD_END,
+			kernel_trace_thread_id(sched_current_thread()),
+			KERNEL_TRACE_VM_PAGING_PREPARE);
 	if (ok) {
 		kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
-		                  KERNEL_TRACE_RECORD_BEGIN,
-		                  kernel_trace_thread_id(sched_current_thread()),
-		                  KERNEL_TRACE_VM_PAGING_CHANGE);
+				KERNEL_TRACE_RECORD_BEGIN,
+				kernel_trace_thread_id(sched_current_thread()),
+				KERNEL_TRACE_VM_PAGING_CHANGE);
 		ok = x86_change_range(root, x86_paging_levels() - 1, virt, end, false, 0u, &transaction);
 		kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
-		                  KERNEL_TRACE_RECORD_END,
-		                  kernel_trace_thread_id(sched_current_thread()),
-		                  KERNEL_TRACE_VM_PAGING_CHANGE);
+				KERNEL_TRACE_RECORD_END,
+				kernel_trace_thread_id(sched_current_thread()),
+				KERNEL_TRACE_VM_PAGING_CHANGE);
 	}
 	kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
-	                  KERNEL_TRACE_RECORD_BEGIN,
-	                  kernel_trace_thread_id(sched_current_thread()),
-	                  KERNEL_TRACE_VM_PAGING_SHOOTDOWN);
+			KERNEL_TRACE_RECORD_BEGIN,
+			kernel_trace_thread_id(sched_current_thread()),
+			KERNEL_TRACE_VM_PAGING_SHOOTDOWN);
 	x86_tlb_shootdown_range(space, virt, size);
 	kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
-	                  KERNEL_TRACE_RECORD_END,
-	                  kernel_trace_thread_id(sched_current_thread()),
-	                  KERNEL_TRACE_VM_PAGING_SHOOTDOWN);
+			KERNEL_TRACE_RECORD_END,
+			kernel_trace_thread_id(sched_current_thread()),
+			KERNEL_TRACE_VM_PAGING_SHOOTDOWN);
 	kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
-	                  KERNEL_TRACE_RECORD_BEGIN,
-	                  kernel_trace_thread_id(sched_current_thread()),
-	                  KERNEL_TRACE_VM_PAGING_COMMIT);
+			KERNEL_TRACE_RECORD_BEGIN,
+			kernel_trace_thread_id(sched_current_thread()),
+			KERNEL_TRACE_VM_PAGING_COMMIT);
 	if (ok) paging_transaction_commit(&transaction);
 	else {
 		paging_transaction_rollback(&transaction, x86_transaction_restore, NULL);
@@ -863,9 +876,9 @@ bool hal_paging_unmap(struct hal_paging_space* space, uintptr_t virt, size_t siz
 		paging_transaction_abort(&transaction);
 	}
 	kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE,
-	                  KERNEL_TRACE_RECORD_END,
-	                  kernel_trace_thread_id(sched_current_thread()),
-	                  KERNEL_TRACE_VM_PAGING_COMMIT);
+			KERNEL_TRACE_RECORD_END,
+			kernel_trace_thread_id(sched_current_thread()),
+			KERNEL_TRACE_VM_PAGING_COMMIT);
 	spinlock_unlock_irqrestore(&paging_lock, state);
 	return ok;
 }
@@ -873,8 +886,8 @@ bool hal_paging_unmap(struct hal_paging_space* space, uintptr_t virt, size_t siz
 bool hal_paging_protect(struct hal_paging_space* space, uintptr_t virt, size_t size, uint64_t flags) {
 	uintptr_t end;
 	if (!x86_protection_supported(flags) || !x86_range_args(space, virt, size, &end)) return false;
-	struct irq_state          state       = spinlock_lock_irqsave(&paging_lock);
-	uint64_t*                 root        = x86_space_root_table(space);
+	struct irq_state state = spinlock_lock_irqsave(&paging_lock);
+	uint64_t* root = x86_space_root_table(space);
 	struct paging_transaction transaction = {0};
 	bool ok = root != NULL && x86_prepare_range(root, x86_paging_levels() - 1, virt, end, &transaction) &&
 	          x86_change_range(root, x86_paging_levels() - 1, virt, end, true, flags, &transaction);
@@ -889,11 +902,11 @@ bool hal_paging_protect(struct hal_paging_space* space, uintptr_t virt, size_t s
 	return ok;
 }
 
-bool hal_paging_query(const struct hal_paging_space* space, uintptr_t virt,
-                      struct hal_paging_translation* out_translation) {
-	uint64_t         entry;
-	uint64_t         flags = 0;
-	unsigned         shift;
+bool hal_paging_query(
+		const struct hal_paging_space* space, uintptr_t virt, struct hal_paging_translation* out_translation) {
+	uint64_t entry;
+	uint64_t flags = 0;
+	unsigned shift;
 	struct irq_state state;
 
 	if (out_translation) *out_translation = (struct hal_paging_translation){0};
@@ -924,9 +937,9 @@ bool hal_paging_query(const struct hal_paging_space* space, uintptr_t virt,
 	if (out_translation)
 		*out_translation = (struct hal_paging_translation){
 			.physical_address = physical_address,
-			.leaf_size        = (size_t)1u << shift,
-			.flags            = flags | HAL_PAGE_READ,
-			.memory_type      = x86_leaf_memory_type(entry, shift),
+			.leaf_size = (size_t)1u << shift,
+			.flags = flags | HAL_PAGE_READ,
+			.memory_type = x86_leaf_memory_type(entry, shift),
 		};
 
 	spinlock_unlock_irqrestore(&paging_lock, state);
@@ -934,28 +947,28 @@ bool hal_paging_query(const struct hal_paging_space* space, uintptr_t virt,
 }
 
 static bool x86_remap_range(uint64_t* table, int level, uintptr_t start, uintptr_t end, uintptr_t request_start,
-                            uintptr_t physical_start, struct paging_transaction* transaction) {
+		uintptr_t physical_start, struct paging_transaction* transaction) {
 	size_t span = x86_leaf_size(level);
 	while (start < end) {
-		size_t    index = (size_t)((start >> (minimum_leaf_shift + 9u * (unsigned)level)) & 0x1ffu);
-		uintptr_t step  = span - (start & (span - 1u));
-		uintptr_t next  = step > end - start ? end : start + step;
-		uint64_t* slot  = &table[index];
-		uint64_t  entry = *slot;
-		uintptr_t phys  = physical_start + (start - request_start);
+		size_t index = (size_t)((start >> (minimum_leaf_shift + 9u * (unsigned)level)) & 0x1ffu);
+		uintptr_t step = span - (start & (span - 1u));
+		uintptr_t next = step > end - start ? end : start + step;
+		uint64_t* slot = &table[index];
+		uint64_t entry = *slot;
+		uintptr_t phys = physical_start + (start - request_start);
 
 		if ((entry & X86_PTE_PRESENT) == 0u) return false;
 		if (level == 0 || (entry & X86_PTE_LARGE) != 0u) {
 			uintptr_t leaf_start = start & ~((uintptr_t)span - 1u);
 			if (level > 0 && (start != leaf_start || next != leaf_start + span || (phys & (span - 1u)) != 0u)) {
 				if (!x86_split_leaf(slot, level, transaction) ||
-				    !x86_remap_range((uint64_t*)hhdm_phys_to_virt(*slot & pte_address_mask),
-				                     level - 1,
-				                     start,
-				                     next,
-				                     request_start,
-				                     physical_start,
-				                     transaction))
+						!x86_remap_range((uint64_t*)hhdm_phys_to_virt(*slot & pte_address_mask),
+								level - 1,
+								start,
+								next,
+								request_start,
+								physical_start,
+								transaction))
 					return false;
 			}
 			else {
@@ -965,12 +978,12 @@ static bool x86_remap_range(uint64_t* table, int level, uintptr_t start, uintptr
 			}
 		}
 		else if (!x86_remap_range((uint64_t*)hhdm_phys_to_virt(entry & pte_address_mask),
-		                          level - 1,
-		                          start,
-		                          next,
-		                          request_start,
-		                          physical_start,
-		                          transaction)) {
+						 level - 1,
+						 start,
+						 next,
+						 request_start,
+						 physical_start,
+						 transaction)) {
 			return false;
 		}
 		start = next;
@@ -981,22 +994,22 @@ static bool x86_remap_range(uint64_t* table, int level, uintptr_t start, uintptr
 bool hal_paging_remap(struct hal_paging_space* space, const struct hal_paging_remap_request* request) {
 	uintptr_t end;
 	if (request == NULL || !x86_range_args(space, request->virtual_address, request->size, &end) ||
-	    (request->physical_address & (paging_info.minimum_leaf_size - 1u)) != 0u ||
-	    request->size > UINTPTR_MAX - request->physical_address ||
-	    ((request->physical_address + request->size - 1u) &
-	     ~(pte_address_mask | ((uint64_t)paging_info.minimum_leaf_size - 1u))) != 0u)
+			(request->physical_address & (paging_info.minimum_leaf_size - 1u)) != 0u ||
+			request->size > UINTPTR_MAX - request->physical_address ||
+			((request->physical_address + request->size - 1u) &
+					~(pte_address_mask | ((uint64_t)paging_info.minimum_leaf_size - 1u))) != 0u)
 		return false;
 
-	struct irq_state          state       = spinlock_lock_irqsave(&paging_lock);
-	uint64_t*                 root        = x86_space_root_table(space);
+	struct irq_state state = spinlock_lock_irqsave(&paging_lock);
+	uint64_t* root = x86_space_root_table(space);
 	struct paging_transaction transaction = {0};
-	bool                      ok          = root != NULL && x86_remap_range(root,
-	                                                                        x86_paging_levels() - 1,
-	                                                                        request->virtual_address,
-	                                                                        end,
-	                                                                        request->virtual_address,
-	                                                                        request->physical_address,
-	                                                                        &transaction);
+	bool ok = root != NULL && x86_remap_range(root,
+									  x86_paging_levels() - 1,
+									  request->virtual_address,
+									  end,
+									  request->virtual_address,
+									  request->physical_address,
+									  &transaction);
 	x86_tlb_shootdown_range(space, request->virtual_address, request->size);
 	if (ok) paging_transaction_commit(&transaction);
 	else {
@@ -1010,37 +1023,38 @@ bool hal_paging_remap(struct hal_paging_space* space, const struct hal_paging_re
 
 bool hal_paging_map(struct hal_paging_space* space, const struct hal_paging_map_request* request) {
 	if (space == NULL || request == NULL || !initialized ||
-	    !hal_paging_mapping_supported(request->flags, request->memory_type) || request->size == 0u ||
-	    (request->virtual_address & (paging_info.minimum_leaf_size - 1u)) != 0u ||
-	    (request->physical_address & (paging_info.minimum_leaf_size - 1u)) != 0u ||
-	    (request->size & (paging_info.minimum_leaf_size - 1u)) != 0u ||
-	    !x86_virtual_address_valid(request->virtual_address) ||
-	    request->size > UINTPTR_MAX - request->virtual_address ||
-	    request->size > UINTPTR_MAX - request->physical_address ||
-	    ((request->physical_address + request->size - 1u) &
-	     ~(pte_address_mask | ((uint64_t)paging_info.minimum_leaf_size - 1u))) != 0u)
+			!hal_paging_mapping_supported(request->flags, request->memory_type) || request->size == 0u ||
+			(request->virtual_address & (paging_info.minimum_leaf_size - 1u)) != 0u ||
+			(request->physical_address & (paging_info.minimum_leaf_size - 1u)) != 0u ||
+			(request->size & (paging_info.minimum_leaf_size - 1u)) != 0u ||
+			!x86_virtual_address_valid(request->virtual_address) ||
+			request->size > UINTPTR_MAX - request->virtual_address ||
+			request->size > UINTPTR_MAX - request->physical_address ||
+			((request->physical_address + request->size - 1u) &
+					~(pte_address_mask | ((uint64_t)paging_info.minimum_leaf_size - 1u))) != 0u)
 		return false;
 	if (!x86_virtual_address_valid(request->virtual_address + request->size - 1u)) return false;
-	struct irq_state          state       = spinlock_lock_irqsave(&paging_lock);
+	struct irq_state state = spinlock_lock_irqsave(&paging_lock);
 	struct paging_transaction transaction = {0};
-	size_t                    mapped      = 0u;
-	bool                      ok          = true;
+	size_t mapped = 0u;
+	bool ok = true;
 	while (mapped < request->size) {
-		uintptr_t virt      = request->virtual_address + mapped;
-		uintptr_t phys      = request->physical_address + mapped;
-		size_t    remaining = request->size - mapped;
-		int       level     = x86_paging_levels() - 2;
+		uintptr_t virt = request->virtual_address + mapped;
+		uintptr_t phys = request->physical_address + mapped;
+		size_t remaining = request->size - mapped;
+		int level = x86_paging_levels() - 2;
 		if (level > 2) level = 2;
 		while (level > 0) {
 			size_t leaf_size = x86_leaf_size(level);
 			if ((paging_info.leaf_size_mask & (1ull << (minimum_leaf_shift + 9u * (unsigned)level))) != 0u &&
-			    (virt & (leaf_size - 1u)) == 0u && (phys & (leaf_size - 1u)) == 0u && remaining >= leaf_size)
+					(virt & (leaf_size - 1u)) == 0u && (phys & (leaf_size - 1u)) == 0u && remaining >= leaf_size)
 				break;
 			level--;
 		}
 		uint64_t* slot;
 		if (!x86_walk_to_level(space, virt, level, (request->flags & HAL_PAGE_USER) != 0u, &transaction, &slot) ||
-		    (*slot & X86_PTE_PRESENT) != 0u || !paging_transaction_record(&transaction, slot, (struct pmm_extent){0})) {
+				(*slot & X86_PTE_PRESENT) != 0u ||
+				!paging_transaction_record(&transaction, slot, (struct pmm_extent){0})) {
 			ok = false;
 			break;
 		}

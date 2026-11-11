@@ -1,11 +1,12 @@
-#include <criterion/criterion.h>
 #include <ft2build.h>
+
+#include <criterion/criterion.h>
 #include FT_FREETYPE_H
 
 Test(freetype, initializes_the_pinned_release) {
-	FT_Int     major;
-	FT_Int     minor;
-	FT_Int     patch;
+	FT_Int major;
+	FT_Int minor;
+	FT_Int patch;
 	FT_Library library = NULL;
 
 	cr_assert_eq(FT_Init_FreeType(&library), FT_Err_Ok);
@@ -19,8 +20,8 @@ Test(freetype, initializes_the_pinned_release) {
 
 Test(freetype, rejects_invalid_memory_faces) {
 	static const FT_Byte invalid_font[] = "not a font";
-	FT_Library           library        = NULL;
-	FT_Face              face           = NULL;
+	FT_Library library = NULL;
+	FT_Face face = NULL;
 
 	cr_assert_eq(FT_Init_FreeType(&library), FT_Err_Ok);
 	cr_assert_neq(FT_New_Memory_Face(library, invalid_font, sizeof(invalid_font), 0, &face), FT_Err_Ok);

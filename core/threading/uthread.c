@@ -1,5 +1,12 @@
+#include <libc/stdlib.h>
+#include <libc/string.h>
+#include <stddef.h>
+#include <stdint.h>
+
 #include <base/math.h>
 #include <base/thread.h>
+#include <hal/hcf.h>
+#include <hal/userspace.h>
 #include <core/address_space.h>
 #include <core/address_transfer.h>
 #include <core/id_table.h>
@@ -9,17 +16,11 @@
 #include <core/signal.h>
 #include <core/spinlock.h>
 #include <core/uthread.h>
-#include <hal/hcf.h>
-#include <hal/userspace.h>
 #include <kernel/trace.h>
-#include <libc/stdlib.h>
-#include <libc/string.h>
-#include <stddef.h>
-#include <stdint.h>
 
 enum {
-	UTHREAD_KERNEL_STACK_SIZE    = 16u * 1024u,
-	UTHREAD_UPCALL_STACK_SIZE    = 16u * 1024u,
+	UTHREAD_KERNEL_STACK_SIZE = 16u * 1024u,
+	UTHREAD_UPCALL_STACK_SIZE = 16u * 1024u,
 	UTHREAD_USER_STACK_ALIGNMENT = HAL_USERSPACE_STACK_ALIGNMENT,
 };
 
@@ -27,11 +28,11 @@ enum {
 	kernel_trace_emit(KERNEL_TRACE_EVENT_UTHREAD_PHASE, type, kernel_trace_thread_id(sched_current_thread()), phase)
 
 static bool uthread_map_stack(struct address_space* space, size_t requested_size, bool prefault,
-                              struct mapping** out_mapping, void** out_base) {
-	struct memory*  memory;
+		struct mapping** out_mapping, void** out_base) {
+	struct memory* memory;
 	struct mapping* mapping;
-	size_t          granule = address_space_minimum_mapping_size(space);
-	size_t          size, guard;
+	size_t granule = address_space_minimum_mapping_size(space);
+	size_t size, guard;
 	if (granule == 0u || !align_up_size(requested_size, granule, &size)) return false;
 	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_STACK_MEMORY_CREATE, KERNEL_TRACE_RECORD_BEGIN);
 	bool memory_created = memory_create_anonymous(size, &memory);
@@ -40,17 +41,17 @@ static bool uthread_map_stack(struct address_space* space, size_t requested_size
 	guard = granule;
 	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_STACK_ADDRESS_MAP, KERNEL_TRACE_RECORD_BEGIN);
 	bool mapped = address_space_map(space,
-	                                &(const struct address_space_mapping_request){
-										.memory       = memory,
-										.guard_before = guard,
-										.access       = MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
-									},
-	                                &mapping);
+			&(const struct address_space_mapping_request){
+				.memory = memory,
+				.guard_before = guard,
+				.access = MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+			},
+			&mapping);
 	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_STACK_ADDRESS_MAP, KERNEL_TRACE_RECORD_END);
 	memory_release(memory);
 	if (!mapped) return false;
 	*out_mapping = mapping;
-	*out_base    = (void*)mapping_address(mapping);
+	*out_base = (void*)mapping_address(mapping);
 	if (!prefault) return true;
 	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_STACK_PREFAULT, KERNEL_TRACE_RECORD_BEGIN);
 	bool prefaulted = address_space_prefault(space, mapping, 0u, mapping_size(mapping));
@@ -59,7 +60,7 @@ static bool uthread_map_stack(struct address_space* space, size_t requested_size
 	(void)address_space_unmap(space, mapping);
 	mapping_release(mapping);
 	*out_mapping = NULL;
-	*out_base    = NULL;
+	*out_base = NULL;
 	return false;
 }
 
@@ -102,12 +103,12 @@ static void uthread_abort_destroy(struct uthread* thread) {
 
 static bool uthread_attach_process(struct uthread* thread, struct process* process, bool main_thread) {
 	struct irq_state state;
-	struct uthread*  cursor;
-	bool             attached = false;
+	struct uthread* cursor;
+	bool attached = false;
 
 	if (thread == NULL || process == NULL) return false;
 
-	state  = spinlock_lock_irqsave(&process->lock);
+	state = spinlock_lock_irqsave(&process->lock);
 	cursor = process->thread_head;
 	while (cursor != NULL) {
 		if (cursor == thread) {
@@ -117,7 +118,7 @@ static bool uthread_attach_process(struct uthread* thread, struct process* proce
 		cursor = cursor->process_next;
 	}
 	if (main_thread && (!process->main_thread_starting || process->state != PROCESS_STATE_NEW ||
-	                    process->main_thread != NULL || process->thread_count != 0u)) {
+							   process->main_thread != NULL || process->thread_count != 0u)) {
 		spinlock_unlock_irqrestore(&process->lock, state);
 		return false;
 	}
@@ -126,7 +127,7 @@ static bool uthread_attach_process(struct uthread* thread, struct process* proce
 		return false;
 	}
 	if ((process->state == PROCESS_STATE_NEW || process->state == PROCESS_STATE_RUNNING) &&
-	    process->thread_count != SIZE_MAX && thread->process_next == NULL) {
+			process->thread_count != SIZE_MAX && thread->process_next == NULL) {
 		if (process->thread_tail == NULL) {
 			process->thread_head = thread;
 		}
@@ -138,27 +139,27 @@ static bool uthread_attach_process(struct uthread* thread, struct process* proce
 		thread->process = process;
 		process->thread_count++;
 		process->state = PROCESS_STATE_RUNNING;
-		attached       = true;
+		attached = true;
 	}
 	spinlock_unlock_irqrestore(&process->lock, state);
 	return attached;
 }
 
 static bool uthread_remove_process_attachment(struct uthread* thread, bool preserve_process, bool restore_new) {
-	struct process*  process;
-	struct uthread*  previous = NULL;
-	struct uthread*  current;
+	struct process* process;
+	struct uthread* previous = NULL;
+	struct uthread* current;
 	struct irq_state state;
-	bool             removed = false;
+	bool removed = false;
 
 	if (thread == NULL || thread->process == NULL) return false;
 
 	process = thread->process;
-	state   = spinlock_lock_irqsave(&process->lock);
+	state = spinlock_lock_irqsave(&process->lock);
 	current = process->thread_head;
 	while (current != NULL && current != thread) {
 		previous = current;
-		current  = current->process_next;
+		current = current->process_next;
 	}
 	if (current != NULL) {
 		if (previous == NULL) {
@@ -170,10 +171,10 @@ static bool uthread_remove_process_attachment(struct uthread* thread, bool prese
 		if (process->thread_tail == current) process->thread_tail = previous;
 		if (process->main_thread == current) process->main_thread = process->thread_head;
 		current->process_next = NULL;
-		current->process      = preserve_process ? process : NULL;
+		current->process = preserve_process ? process : NULL;
 		if (process->thread_count != 0u) process->thread_count--;
 		if (restore_new && process->state == PROCESS_STATE_RUNNING && process->thread_count == 0u &&
-		    process->main_thread == NULL) {
+				process->main_thread == NULL) {
 			process->state = PROCESS_STATE_NEW;
 		}
 		removed = true;
@@ -188,7 +189,7 @@ static void uthread_detach_process(struct uthread* thread) {
 
 static bool uthread_release_stacks(struct uthread* thread) {
 	struct address_space* address_space;
-	bool                  released = true;
+	bool released = true;
 
 	if (thread == NULL) return true;
 
@@ -244,10 +245,10 @@ static bool uthread_free(struct uthread* thread) {
 	}
 
 	memset(thread, 0, sizeof(*thread));
-	thread->user_stack_mapping   = NULL;
+	thread->user_stack_mapping = NULL;
 	thread->kernel_stack_mapping = NULL;
 	thread->upcall.stack_mapping = NULL;
-	thread->cap_object_id        = CAP_OBJECT_ID_INVALID;
+	thread->cap_object_id = CAP_OBJECT_ID_INVALID;
 	return true;
 }
 
@@ -269,34 +270,34 @@ static void uthread_reap_callback(struct thread* thread, void* ctx) {
 	}
 }
 
-static enum uthread_start_result
-uthread_prepare_internal(struct uthread* thread, const struct uthread_start_params* params, bool heap_allocated);
-static enum uthread_start_result uthread_start_prepared(struct uthread*                    thread,
-                                                        const struct uthread_start_params* params, bool heap_allocated);
+static enum uthread_start_result uthread_prepare_internal(
+		struct uthread* thread, const struct uthread_start_params* params, bool heap_allocated);
+static enum uthread_start_result uthread_start_prepared(
+		struct uthread* thread, const struct uthread_start_params* params, bool heap_allocated);
 
-static enum uthread_start_result
-uthread_start_internal(struct uthread* thread, const struct uthread_start_params* params, bool heap_allocated) {
+static enum uthread_start_result uthread_start_internal(
+		struct uthread* thread, const struct uthread_start_params* params, bool heap_allocated) {
 	if (thread == NULL || params == NULL) return UTHREAD_START_INVALID_ARGUMENTS;
 
 	return uthread_start_prepared(thread, params, heap_allocated);
 }
 
-static enum uthread_start_result
-uthread_prepare_internal(struct uthread* thread, const struct uthread_start_params* params, bool heap_allocated) {
-	struct thread_context        context;
+static enum uthread_start_result uthread_prepare_internal(
+		struct uthread* thread, const struct uthread_start_params* params, bool heap_allocated) {
+	struct thread_context context;
 	struct thread_context_params thread_params;
-	struct address_space*        address_space;
-	enum thread_init_result      init_result;
-	void*                        user_stack_base   = NULL;
-	void*                        upcall_stack_base = NULL;
-	void*                        kernel_stack_base = NULL;
-	size_t                       user_stack_size;
-	uintptr_t                    kernel_stack_top;
-	uintptr_t                    initial_user_stack_top;
-	uintptr_t                    user_arg = 0u;
-	uthread_id_t                 id;
-	enum id_table_result         id_result;
-	char*                        name = NULL;
+	struct address_space* address_space;
+	enum thread_init_result init_result;
+	void* user_stack_base = NULL;
+	void* upcall_stack_base = NULL;
+	void* kernel_stack_base = NULL;
+	size_t user_stack_size;
+	uintptr_t kernel_stack_top;
+	uintptr_t initial_user_stack_top;
+	uintptr_t user_arg = 0u;
+	uthread_id_t id;
+	enum id_table_result id_result;
+	char* name = NULL;
 
 	if (thread == NULL || params == NULL || params->process == NULL || params->user_entry == 0u) {
 		return UTHREAD_START_INVALID_ARGUMENTS;
@@ -313,15 +314,15 @@ uthread_prepare_internal(struct uthread* thread, const struct uthread_start_para
 	}
 
 	*thread = (struct uthread){
-		.process              = params->process,
-		.thread               = {.name = name},
-		.user_stack_mapping   = NULL,
+		.process = params->process,
+		.thread = {.name = name},
+		.user_stack_mapping = NULL,
 		.kernel_stack_mapping = NULL,
-		.cap_object_id        = CAP_OBJECT_ID_INVALID,
-		.reference_count      = 1u,
-		.dying                = 0u,
-		.process_main_thread  = params->main_thread,
-		.heap_allocated       = heap_allocated,
+		.cap_object_id = CAP_OBJECT_ID_INVALID,
+		.reference_count = 1u,
+		.dying = 0u,
+		.process_main_thread = params->main_thread,
+		.heap_allocated = heap_allocated,
 	};
 	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_UPCALL_INIT, KERNEL_TRACE_RECORD_BEGIN);
 	bool upcall_initialized = uthread_upcall_state_init(thread);
@@ -344,7 +345,7 @@ uthread_prepare_internal(struct uthread* thread, const struct uthread_start_para
 	user_stack_size = params->user_stack_size != 0u ? params->user_stack_size : UTHREAD_DEFAULT_USER_STACK_SIZE;
 	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_USER_STACK_MAP, KERNEL_TRACE_RECORD_BEGIN);
 	bool user_stack_mapped =
-		uthread_map_stack(address_space, user_stack_size, false, &thread->user_stack_mapping, &user_stack_base);
+			uthread_map_stack(address_space, user_stack_size, false, &thread->user_stack_mapping, &user_stack_base);
 	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_USER_STACK_MAP, KERNEL_TRACE_RECORD_END);
 	if (!user_stack_mapped) {
 		uthread_release_name(thread);
@@ -355,7 +356,7 @@ uthread_prepare_internal(struct uthread* thread, const struct uthread_start_para
 	}
 	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_UPCALL_STACK_MAP, KERNEL_TRACE_RECORD_BEGIN);
 	bool upcall_stack_mapped = uthread_map_stack(
-		address_space, UTHREAD_UPCALL_STACK_SIZE, false, &thread->upcall.stack_mapping, &upcall_stack_base);
+			address_space, UTHREAD_UPCALL_STACK_SIZE, false, &thread->upcall.stack_mapping, &upcall_stack_base);
 	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_UPCALL_STACK_MAP, KERNEL_TRACE_RECORD_END);
 	if (!upcall_stack_mapped) {
 		uthread_release_name(thread);
@@ -367,7 +368,7 @@ uthread_prepare_internal(struct uthread* thread, const struct uthread_start_para
 	thread->upcall.stack_top = (uintptr_t)upcall_stack_base + mapping_size(thread->upcall.stack_mapping);
 	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_KERNEL_STACK_MAP, KERNEL_TRACE_RECORD_BEGIN);
 	bool kernel_stack_mapped = uthread_map_stack(
-		address_space_kernel(), UTHREAD_KERNEL_STACK_SIZE, true, &thread->kernel_stack_mapping, &kernel_stack_base);
+			address_space_kernel(), UTHREAD_KERNEL_STACK_SIZE, true, &thread->kernel_stack_mapping, &kernel_stack_base);
 	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_KERNEL_STACK_MAP, KERNEL_TRACE_RECORD_END);
 	if (!kernel_stack_mapped) {
 		uthread_release_name(thread);
@@ -378,7 +379,7 @@ uthread_prepare_internal(struct uthread* thread, const struct uthread_start_para
 	}
 
 	thread->user_stack_top = (uintptr_t)user_stack_base + mapping_size(thread->user_stack_mapping);
-	kernel_stack_top       = (uintptr_t)kernel_stack_base + mapping_size(thread->kernel_stack_mapping);
+	kernel_stack_top = (uintptr_t)kernel_stack_base + mapping_size(thread->kernel_stack_mapping);
 	initial_user_stack_top = thread->user_stack_top;
 	if (params->arg_size != 0u) {
 		if (params->arg_size > initial_user_stack_top - (uintptr_t)user_stack_base) {
@@ -391,9 +392,9 @@ uthread_prepare_internal(struct uthread* thread, const struct uthread_start_para
 		user_arg = (initial_user_stack_top - params->arg_size) & ~((uintptr_t)UTHREAD_USER_STACK_ALIGNMENT - 1u);
 		TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_ARGUMENT_COPY, KERNEL_TRACE_RECORD_BEGIN);
 		enum address_transfer_result argument_copy =
-			user_arg <= (uintptr_t)user_stack_base
-		        ? ADDRESS_TRANSFER_INVALID_ARGUMENTS
-		        : address_space_copy_to(address_space, user_arg, params->arg_data, params->arg_size);
+				user_arg <= (uintptr_t)user_stack_base
+		                ? ADDRESS_TRANSFER_INVALID_ARGUMENTS
+		                : address_space_copy_to(address_space, user_arg, params->arg_data, params->arg_size);
 		TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_ARGUMENT_COPY, KERNEL_TRACE_RECORD_END);
 		if (argument_copy != ADDRESS_TRANSFER_OK) {
 			uthread_release_name(thread);
@@ -407,7 +408,7 @@ uthread_prepare_internal(struct uthread* thread, const struct uthread_start_para
 
 	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_CONTEXT_INIT, KERNEL_TRACE_RECORD_BEGIN);
 	bool context_initialized = hal_userspace_thread_context_init(
-		&context, kernel_stack_top, params->user_entry, initial_user_stack_top, user_arg);
+			&context, kernel_stack_top, params->user_entry, initial_user_stack_top, user_arg);
 	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_CONTEXT_INIT, KERNEL_TRACE_RECORD_END);
 	if (!context_initialized) {
 		uthread_release_name(thread);
@@ -418,16 +419,16 @@ uthread_prepare_internal(struct uthread* thread, const struct uthread_start_para
 	}
 
 	thread_params = (struct thread_context_params){
-		.name              = thread->thread.name,
+		.name = thread->thread.name,
 		.kernel_stack_base = (uintptr_t)kernel_stack_base,
-		.kernel_stack_top  = kernel_stack_top,
-		.address_space     = address_space,
-		.preferred_cpu     = params->preferred_cpu,
-		.base_priority     = THREAD_PRIORITY_DEFAULT,
-		.detached          = params->detached,
-		.context           = &context,
-		.entry             = NULL,
-		.arg               = NULL,
+		.kernel_stack_top = kernel_stack_top,
+		.address_space = address_space,
+		.preferred_cpu = params->preferred_cpu,
+		.base_priority = THREAD_PRIORITY_DEFAULT,
+		.detached = params->detached,
+		.context = &context,
+		.entry = NULL,
+		.arg = NULL,
 	};
 	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_THREAD_INIT, KERNEL_TRACE_RECORD_BEGIN);
 	init_result = thread_init_context(&thread->thread, &thread_params);
@@ -440,7 +441,7 @@ uthread_prepare_internal(struct uthread* thread, const struct uthread_start_para
 		return UTHREAD_START_INVALID_ARGUMENTS;
 	}
 	thread->thread.owner_kind = THREAD_OWNER_UTHREAD;
-	thread->thread.owner      = thread;
+	thread->thread.owner = thread;
 	thread_set_reap_callback(&thread->thread, uthread_reap_callback, thread);
 	return UTHREAD_START_OK;
 }
@@ -451,16 +452,16 @@ enum uthread_start_result uthread_prepare(struct uthread* thread, const struct u
 
 enum uthread_start_result uthread_commit_prepared(struct uthread* thread, bool main_thread) {
 	struct process* process;
-	bool            restore_new;
+	bool restore_new;
 
 	if (thread == NULL || thread->process == NULL || thread->id == UTHREAD_ID_INVALID ||
-	    thread->thread.state != THREAD_STATE_NEW || thread_is_queued(&thread->thread) ||
-	    thread->thread.owner_kind != THREAD_OWNER_UTHREAD || thread->thread.owner != thread ||
-	    thread->process_main_thread != main_thread) {
+			thread->thread.state != THREAD_STATE_NEW || thread_is_queued(&thread->thread) ||
+			thread->thread.owner_kind != THREAD_OWNER_UTHREAD || thread->thread.owner != thread ||
+			thread->process_main_thread != main_thread) {
 		return UTHREAD_START_INVALID_ARGUMENTS;
 	}
 
-	process     = thread->process;
+	process = thread->process;
 	restore_new = process_get_state(process) == PROCESS_STATE_NEW;
 	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_PROCESS_ATTACH, KERNEL_TRACE_RECORD_BEGIN);
 	bool attached = uthread_attach_process(thread, process, main_thread);
@@ -471,7 +472,7 @@ enum uthread_start_result uthread_commit_prepared(struct uthread* thread, bool m
 	TRACE_UTHREAD_PHASE(KERNEL_TRACE_UTHREAD_SCHED_RUNNABLE, KERNEL_TRACE_RECORD_END);
 	if (!runnable) {
 		if (!uthread_remove_process_attachment(thread, true, restore_new)) hcf();
-		thread->thread.cpu   = NULL;
+		thread->thread.cpu = NULL;
 		thread->thread.state = THREAD_STATE_NEW;
 		return UTHREAD_START_SCHEDULER_REJECTED;
 	}
@@ -481,7 +482,7 @@ enum uthread_start_result uthread_commit_prepared(struct uthread* thread, bool m
 
 bool uthread_abort_prepared(struct uthread* thread) {
 	if (thread == NULL || thread->id == UTHREAD_ID_INVALID || thread->thread.state != THREAD_STATE_NEW ||
-	    thread_is_queued(&thread->thread)) {
+			thread_is_queued(&thread->thread)) {
 		return false;
 	}
 	if (__atomic_load_n(&thread->reference_count, __ATOMIC_ACQUIRE) != 1u) return false;
@@ -496,8 +497,8 @@ bool uthread_abort_prepared(struct uthread* thread) {
 	return true;
 }
 
-static enum uthread_start_result
-uthread_start_prepared(struct uthread* thread, const struct uthread_start_params* params, bool heap_allocated) {
+static enum uthread_start_result uthread_start_prepared(
+		struct uthread* thread, const struct uthread_start_params* params, bool heap_allocated) {
 	enum uthread_start_result result;
 
 	result = uthread_prepare_internal(thread, params, heap_allocated);
@@ -518,11 +519,11 @@ enum uthread_start_result uthread_start(struct uthread* thread, const struct uth
 	return uthread_start_internal(thread, params, false);
 }
 
-enum uthread_start_result uthread_spawn_detached(struct uthread**                   out_thread,
-                                                 const struct uthread_start_params* params) {
+enum uthread_start_result uthread_spawn_detached(
+		struct uthread** out_thread, const struct uthread_start_params* params) {
 	struct uthread_start_params effective_params;
-	struct uthread*             thread;
-	enum uthread_start_result   result;
+	struct uthread* thread;
+	enum uthread_start_result result;
 
 	if (out_thread == NULL || params == NULL) return UTHREAD_START_INVALID_ARGUMENTS;
 	*out_thread = NULL;
@@ -530,15 +531,15 @@ enum uthread_start_result uthread_spawn_detached(struct uthread**               
 	thread = malloc(sizeof(*thread));
 	if (thread == NULL) return UTHREAD_START_NO_MEMORY;
 	*thread = (struct uthread){
-		.user_stack_mapping   = NULL,
+		.user_stack_mapping = NULL,
 		.kernel_stack_mapping = NULL,
-		.upcall               = {.stack_mapping = NULL},
-		.heap_allocated       = true,
+		.upcall = {.stack_mapping = NULL},
+		.heap_allocated = true,
 	};
 
-	effective_params          = *params;
+	effective_params = *params;
 	effective_params.detached = true;
-	result                    = uthread_start_internal(thread, &effective_params, true);
+	result = uthread_start_internal(thread, &effective_params, true);
 	if (result != UTHREAD_START_OK) {
 		if (!uthread_free(thread)) hcf();
 		return result;
@@ -576,11 +577,11 @@ bool uthread_retain(struct uthread* thread) {
 		old_refcount = __atomic_load_n(&thread->reference_count, __ATOMIC_ACQUIRE);
 		if (old_refcount == 0u || old_refcount == UINT64_MAX) return false;
 		if (__atomic_compare_exchange_n(&thread->reference_count,
-		                                &old_refcount,
-		                                old_refcount + 1u,
-		                                false,
-		                                __ATOMIC_ACQ_REL,
-		                                __ATOMIC_ACQUIRE)) {
+					&old_refcount,
+					old_refcount + 1u,
+					false,
+					__ATOMIC_ACQ_REL,
+					__ATOMIC_ACQUIRE)) {
 			return true;
 		}
 	}
@@ -606,11 +607,11 @@ void uthread_release(struct uthread* thread) {
 		old_refcount = __atomic_load_n(&thread->reference_count, __ATOMIC_ACQUIRE);
 		if (old_refcount == 0u) hcf();
 		if (__atomic_compare_exchange_n(&thread->reference_count,
-		                                &old_refcount,
-		                                old_refcount - 1u,
-		                                false,
-		                                __ATOMIC_ACQ_REL,
-		                                __ATOMIC_ACQUIRE)) {
+					&old_refcount,
+					old_refcount - 1u,
+					false,
+					__ATOMIC_ACQ_REL,
+					__ATOMIC_ACQUIRE)) {
 			break;
 		}
 	}
@@ -656,7 +657,7 @@ bool uthread_destroy_cap_object(struct uthread* thread) {
 	cap_object_id_t id;
 
 	if (thread == NULL) return false;
-	id                    = thread->cap_object_id;
+	id = thread->cap_object_id;
 	thread->cap_object_id = CAP_OBJECT_ID_INVALID;
 	return id != CAP_OBJECT_ID_INVALID && cap_object_destroy_with_id(id);
 }

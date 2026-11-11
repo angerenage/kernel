@@ -8,7 +8,7 @@
 
 static bool access_valid(const struct pci_config* config, uint16_t offset, uint16_t width, uint16_t alignment) {
 	if (config == NULL || offset >= PCI_CONFIG_SPACE_SIZE || width > PCI_CONFIG_SPACE_SIZE - offset ||
-	    (offset & (alignment - 1u)) != 0u)
+			(offset & (alignment - 1u)) != 0u)
 		return false;
 #if defined(__x86_64__)
 	return config->kind != PCI_CONFIG_KIND_INVALID;
@@ -17,8 +17,8 @@ static bool access_valid(const struct pci_config* config, uint16_t offset, uint1
 #endif
 }
 
-bool pci_config_read8(const struct pci_config* config, struct pci_address address, uint16_t offset,
-                      uint8_t* out_value) {
+bool pci_config_read8(
+		const struct pci_config* config, struct pci_address address, uint16_t offset, uint8_t* out_value) {
 	if (out_value == NULL || !access_valid(config, offset, sizeof(*out_value), sizeof(*out_value))) return false;
 #if defined(__x86_64__)
 	switch (config->kind) {
@@ -32,8 +32,8 @@ bool pci_config_read8(const struct pci_config* config, struct pci_address addres
 #endif
 }
 
-bool pci_config_read16(const struct pci_config* config, struct pci_address address, uint16_t offset,
-                       uint16_t* out_value) {
+bool pci_config_read16(
+		const struct pci_config* config, struct pci_address address, uint16_t offset, uint16_t* out_value) {
 	if (out_value == NULL || !access_valid(config, offset, sizeof(*out_value), sizeof(*out_value))) return false;
 #if defined(__x86_64__)
 	switch (config->kind) {
@@ -47,8 +47,8 @@ bool pci_config_read16(const struct pci_config* config, struct pci_address addre
 #endif
 }
 
-bool pci_config_read32(const struct pci_config* config, struct pci_address address, uint16_t offset,
-                       uint32_t* out_value) {
+bool pci_config_read32(
+		const struct pci_config* config, struct pci_address address, uint16_t offset, uint32_t* out_value) {
 	if (out_value == NULL || !access_valid(config, offset, sizeof(*out_value), sizeof(*out_value))) return false;
 #if defined(__x86_64__)
 	switch (config->kind) {

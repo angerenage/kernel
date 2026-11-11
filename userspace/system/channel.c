@@ -1,12 +1,13 @@
-#include <runtime/diagnostic.h>
 #include <stddef.h>
+
 #include <system/channel.h>
+#include <runtime/diagnostic.h>
 
 #include "syscall.h"
 
 syscall_status_t channel_create(channel_id_t* out_id, cap_id_t* out_activity_signal) {
 	syscall_result_t result =
-		syscall(SYSCALL_CHANNEL_CREATE, (uintptr_t)out_id, (uintptr_t)out_activity_signal, 0u, 0u, 0u, 0u);
+			syscall(SYSCALL_CHANNEL_CREATE, (uintptr_t)out_id, (uintptr_t)out_activity_signal, 0u, 0u, 0u, 0u);
 
 #ifdef RUNTIME_DIAGNOSTICS
 	if (result.status == SYSCALL_STATUS_BAD_ARGUMENT) {
@@ -58,7 +59,7 @@ syscall_status_t channel_destroy(channel_id_t channel_id) {
 }
 
 syscall_status_t channel_recv(channel_id_t endpoint_id, struct cap_request* out_request, void* request_buffer,
-                              size_t request_buffer_size, bool* out_received) {
+		size_t request_buffer_size, bool* out_received) {
 	syscall_result_t result;
 
 	if (out_request == NULL) {
@@ -72,12 +73,12 @@ syscall_status_t channel_recv(channel_id_t endpoint_id, struct cap_request* out_
 	if (out_received != NULL) *out_received = false;
 
 	result = syscall(SYSCALL_CAP_RECV,
-	                 (uintptr_t)endpoint_id,
-	                 (uintptr_t)out_request,
-	                 (uintptr_t)request_buffer,
-	                 (uintptr_t)request_buffer_size,
-	                 0u,
-	                 0u);
+			(uintptr_t)endpoint_id,
+			(uintptr_t)out_request,
+			(uintptr_t)request_buffer,
+			(uintptr_t)request_buffer_size,
+			0u,
+			0u);
 
 #ifdef RUNTIME_DIAGNOSTICS
 	if (result.status == SYSCALL_STATUS_BAD_ARGUMENT) {
@@ -108,15 +109,15 @@ syscall_status_t channel_recv(channel_id_t endpoint_id, struct cap_request* out_
 	return result.status;
 }
 
-syscall_status_t channel_reply(cap_call_id_t call_id, const void* response, size_t response_size,
-                               syscall_status_t status) {
+syscall_status_t channel_reply(
+		cap_call_id_t call_id, const void* response, size_t response_size, syscall_status_t status) {
 	syscall_result_t result = syscall(SYSCALL_CAP_REPLY,
-	                                  (uintptr_t)call_id,
-	                                  (uintptr_t)response,
-	                                  (uintptr_t)response_size,
-	                                  (uintptr_t)status,
-	                                  0u,
-	                                  0u);
+			(uintptr_t)call_id,
+			(uintptr_t)response,
+			(uintptr_t)response_size,
+			(uintptr_t)status,
+			0u,
+			0u);
 
 #ifdef RUNTIME_DIAGNOSTICS
 	if (result.status == SYSCALL_STATUS_BAD_ARGUMENT) {

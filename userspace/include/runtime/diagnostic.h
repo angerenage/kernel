@@ -15,14 +15,14 @@
 /* Register a diagnostic with its userspace API call site, or clear it when message is null. */
 void runtime_diagnostic_set_at(const char* function_name, const char* message);
 
-void runtime_diagnostic_set_signed_at(const char* function_name, const char* message, const char* value_name,
-                                      int64_t value);
-void runtime_diagnostic_set_unsigned_at(const char* function_name, const char* message, const char* value_name,
-                                        uint64_t value);
-void runtime_diagnostic_set_boolean_at(const char* function_name, const char* message, const char* value_name,
-                                       bool value);
-void runtime_diagnostic_set_pointer_at(const char* function_name, const char* message, const char* value_name,
-                                       const void* value);
+void runtime_diagnostic_set_signed_at(
+		const char* function_name, const char* message, const char* value_name, int64_t value);
+void runtime_diagnostic_set_unsigned_at(
+		const char* function_name, const char* message, const char* value_name, uint64_t value);
+void runtime_diagnostic_set_boolean_at(
+		const char* function_name, const char* message, const char* value_name, bool value);
+void runtime_diagnostic_set_pointer_at(
+		const char* function_name, const char* message, const char* value_name, const void* value);
 
 /*
  * Allocate and format the current diagnostic. The caller owns the returned string and must free it.
@@ -37,19 +37,19 @@ void runtime_diagnostic_clear(void);
 #define RUNTIME_DIAGNOSTIC_SET(message) runtime_diagnostic_set(message)
 #define RUNTIME_DIAGNOSTIC_NAMED_VALUE(message, value_name, value)                                                     \
 	_Generic((value),                                                                                                  \
-	    bool: runtime_diagnostic_set_boolean_at,                                                                       \
-	    char: runtime_diagnostic_set_signed_at,                                                                        \
-	    signed char: runtime_diagnostic_set_signed_at,                                                                 \
-	    unsigned char: runtime_diagnostic_set_unsigned_at,                                                             \
-	    short: runtime_diagnostic_set_signed_at,                                                                       \
-	    unsigned short: runtime_diagnostic_set_unsigned_at,                                                            \
-	    int: runtime_diagnostic_set_signed_at,                                                                         \
-	    unsigned int: runtime_diagnostic_set_unsigned_at,                                                              \
-	    long: runtime_diagnostic_set_signed_at,                                                                        \
-	    unsigned long: runtime_diagnostic_set_unsigned_at,                                                             \
-	    long long: runtime_diagnostic_set_signed_at,                                                                   \
-	    unsigned long long: runtime_diagnostic_set_unsigned_at,                                                        \
-	    default: runtime_diagnostic_set_pointer_at)(__func__, (message), (value_name), (value))
+			bool: runtime_diagnostic_set_boolean_at,                                                                   \
+			char: runtime_diagnostic_set_signed_at,                                                                    \
+			signed char: runtime_diagnostic_set_signed_at,                                                             \
+			unsigned char: runtime_diagnostic_set_unsigned_at,                                                         \
+			short: runtime_diagnostic_set_signed_at,                                                                   \
+			unsigned short: runtime_diagnostic_set_unsigned_at,                                                        \
+			int: runtime_diagnostic_set_signed_at,                                                                     \
+			unsigned int: runtime_diagnostic_set_unsigned_at,                                                          \
+			long: runtime_diagnostic_set_signed_at,                                                                    \
+			unsigned long: runtime_diagnostic_set_unsigned_at,                                                         \
+			long long: runtime_diagnostic_set_signed_at,                                                               \
+			unsigned long long: runtime_diagnostic_set_unsigned_at,                                                    \
+			default: runtime_diagnostic_set_pointer_at)(__func__, (message), (value_name), (value))
 
 #define RUNTIME_DIAGNOSTIC_VALUE(message, value) RUNTIME_DIAGNOSTIC_NAMED_VALUE(message, #value, value)
 
@@ -65,7 +65,7 @@ void runtime_diagnostic_clear(void);
 #define RUNTIME_DIAGNOSTIC_PRIVATE_SELECT_FAILED(_1, _2, selected, ...) selected
 #define RUNTIME_DIAGNOSTIC_FAILED(...)                                                                                 \
 	RUNTIME_DIAGNOSTIC_PRIVATE_SELECT_FAILED(                                                                          \
-		__VA_ARGS__, RUNTIME_DIAGNOSTIC_PRIVATE_FAILED_VALUE, RUNTIME_DIAGNOSTIC_PRIVATE_FAILED)(__VA_ARGS__)
+			__VA_ARGS__, RUNTIME_DIAGNOSTIC_PRIVATE_FAILED_VALUE, RUNTIME_DIAGNOSTIC_PRIVATE_FAILED)(__VA_ARGS__)
 
 #define RUNTIME_DIAGNOSTIC_SYSCALL_RESULT(operation, result)                                                           \
 	do {                                                                                                               \
@@ -74,11 +74,11 @@ void runtime_diagnostic_clear(void);
 			break;                                                                                                     \
 		case SYSCALL_STATUS_UNKNOWN_SYSCALL:                                                                           \
 			RUNTIME_DIAGNOSTIC_NAMED_VALUE(                                                                            \
-				#operation " reported an unknown syscall", "syscall_number", (result).value);                          \
+					#operation " reported an unknown syscall", "syscall_number", (result).value);                      \
 			break;                                                                                                     \
 		case SYSCALL_STATUS_BAD_ARGUMENT:                                                                              \
 			RUNTIME_DIAGNOSTIC_NAMED_VALUE(                                                                            \
-				"invalid parameter index reported by " #operation, "argument_index", (result).value);                  \
+					"invalid parameter index reported by " #operation, "argument_index", (result).value);              \
 			break;                                                                                                     \
 		case SYSCALL_STATUS_DENIED:                                                                                    \
 			RUNTIME_DIAGNOSTIC_DENIED(operation);                                                                      \

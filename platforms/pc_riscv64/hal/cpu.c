@@ -1,8 +1,9 @@
-#include <core/cpu.h>
-#include <hal/cpu.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <hal/cpu.h>
+#include <core/cpu.h>
 
 #define RISCV64_SBI_EID_BASE 0x10ul
 #define RISCV64_SBI_FID_PROBE_EXTENSION 3ul
@@ -17,7 +18,7 @@ struct riscv64_sbi_ret {
 
 enum {
 	RISCV64_THREAD_STACK_ALIGNMENT = 16u,
-	RISCV64_THREAD_CTX_S0          = 0,
+	RISCV64_THREAD_CTX_S0 = 0,
 	RISCV64_THREAD_CTX_S1,
 	RISCV64_THREAD_CTX_S2,
 	RISCV64_THREAD_CTX_S3,
@@ -40,8 +41,8 @@ extern void riscv64_thread_entry(void);
 _Static_assert(HAL_CPU_THREAD_CONTEXT_SPILL_WORDS > RISCV64_THREAD_CTX_S11, "riscv64 thread spill area is too small");
 _Static_assert(HAL_CPU_FP_CONTEXT_SIZE >= 832u, "riscv64 FP/vector area is too small");
 
-static struct riscv64_sbi_ret riscv64_sbi_call2(unsigned long arg0, unsigned long arg1, unsigned long fid,
-                                                unsigned long eid) {
+static struct riscv64_sbi_ret riscv64_sbi_call2(
+		unsigned long arg0, unsigned long arg1, unsigned long fid, unsigned long eid) {
 	register unsigned long a0 asm("a0") = arg0;
 	register unsigned long a1 asm("a1") = arg1;
 	register unsigned long a6 asm("a6") = fid;
@@ -70,7 +71,7 @@ void hal_cpu_local_bind(void* ptr) {
 }
 
 bool hal_cpu_thread_context_init(struct thread_context* context, uintptr_t stack_base, uintptr_t stack_top,
-                                 uintptr_t entry_pc, uintptr_t entry_arg) {
+		uintptr_t entry_pc, uintptr_t entry_arg) {
 	uintptr_t aligned_top;
 
 	if (context == NULL || entry_pc == 0u || stack_top <= stack_base) return false;
@@ -85,7 +86,7 @@ bool hal_cpu_thread_context_init(struct thread_context* context, uintptr_t stack
 
 	*context = (struct thread_context){
 		.instruction_pointer = (uintptr_t)riscv64_thread_entry,
-		.stack_pointer       = aligned_top,
+		.stack_pointer = aligned_top,
 	};
 	context->spill[RISCV64_THREAD_CTX_S0] = entry_pc;
 	context->spill[RISCV64_THREAD_CTX_S1] = entry_arg;
@@ -121,9 +122,9 @@ void hal_cpu_context_switch(struct thread_context* current, const struct thread_
 
 bool hal_cpu_prepare_smp(void) {
 	struct riscv64_sbi_ret ipi =
-		riscv64_sbi_call2(RISCV64_SBI_EID_IPI, 0u, RISCV64_SBI_FID_PROBE_EXTENSION, RISCV64_SBI_EID_BASE);
+			riscv64_sbi_call2(RISCV64_SBI_EID_IPI, 0u, RISCV64_SBI_FID_PROBE_EXTENSION, RISCV64_SBI_EID_BASE);
 	struct riscv64_sbi_ret rfence =
-		riscv64_sbi_call2(RISCV64_SBI_EID_RFENCE, 0u, RISCV64_SBI_FID_PROBE_EXTENSION, RISCV64_SBI_EID_BASE);
+			riscv64_sbi_call2(RISCV64_SBI_EID_RFENCE, 0u, RISCV64_SBI_FID_PROBE_EXTENSION, RISCV64_SBI_EID_BASE);
 
 	return ipi.error == 0 && ipi.value != 0 && rfence.error == 0 && rfence.value != 0;
 }

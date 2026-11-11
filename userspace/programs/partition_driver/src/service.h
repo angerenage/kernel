@@ -1,7 +1,8 @@
 #pragma once
 
-#include <base/cap.h>
 #include <stdbool.h>
+
+#include <base/cap.h>
 
 struct block_device;
 struct partition_table;

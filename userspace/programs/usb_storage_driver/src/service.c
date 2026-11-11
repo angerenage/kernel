@@ -1,23 +1,25 @@
 #include "service.h"
 
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
 #include <base/address_space.h>
 #include <base/channel.h>
 #include <base/memory.h>
 #include <base/process.h>
 #include <base/signal.h>
+
 #include <protocol/device.h>
-#include <runtime/block.h>
-#include <runtime/device.h>
-#include <runtime/heap.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <string.h>
 #include <system/capability.h>
 #include <system/channel.h>
 #include <system/memory.h>
 #include <system/process.h>
 #include <system/signal.h>
+#include <runtime/block.h>
+#include <runtime/device.h>
+#include <runtime/heap.h>
 
 #include "bot.h"
 
@@ -30,7 +32,7 @@
 #define MSC_BLOCK_PROVIDER_RIGHTS (BLOCK_DRIVER_RIGHTS | CAP_DELEGATE)
 
 struct msc_block_buffer {
-	bool     used;
+	bool used;
 	uint64_t id;
 	uint32_t size;
 	cap_id_t memory_cap;
@@ -40,31 +42,31 @@ struct msc_block_buffer {
 };
 
 struct msc_block_session {
-	bool                    active;
-	uint64_t                object_id;
-	uint64_t                block_offset;
-	uint64_t                block_count;
-	uint64_t                next_buffer_id;
+	bool active;
+	uint64_t object_id;
+	uint64_t block_offset;
+	uint64_t block_count;
+	uint64_t next_buffer_id;
 	struct msc_block_buffer buffers[MSC_BLOCK_MAX_BUFFERS];
 };
 
 struct msc_block_slice {
-	bool     active;
+	bool active;
 	uint64_t object_id;
 	uint64_t block_offset;
 	uint64_t block_count;
 };
 
 struct msc_block_service {
-	channel_id_t             endpoint;
-	cap_id_t                 activity_cap;
-	cap_id_t                 root_cap;
-	cap_id_t                 address_space_cap;
-	process_id_t             pid;
-	struct usb_msc_device*   device;
-	uint64_t                 next_slice_id;
-	uint64_t                 next_session_id;
-	struct msc_block_slice   slices[MSC_BLOCK_MAX_SLICES];
+	channel_id_t endpoint;
+	cap_id_t activity_cap;
+	cap_id_t root_cap;
+	cap_id_t address_space_cap;
+	process_id_t pid;
+	struct usb_msc_device* device;
+	uint64_t next_slice_id;
+	uint64_t next_session_id;
+	struct msc_block_slice slices[MSC_BLOCK_MAX_SLICES];
 	struct msc_block_session sessions[MSC_BLOCK_MAX_SESSIONS];
 };
 
@@ -87,7 +89,7 @@ static syscall_status_t add_bool(const struct device_builder* builder, const cha
 
 static bool create_child(cap_id_t parent, cap_id_t block_cap, const struct usb_msc_device* device) {
 	struct device_builder builder = {.capability = CAP_ID_INVALID, .manager_pid = PROCESS_PID_INVALID};
-	syscall_status_t      status  = device_builder_begin_child(parent, &builder);
+	syscall_status_t status = device_builder_begin_child(parent, &builder);
 	if (status == SYSCALL_STATUS_OK) status = device_builder_set_name(&builder, "disk", sizeof("disk") - 1u);
 	if (status == SYSCALL_STATUS_OK)
 		status = device_builder_add_compatible(&builder, BLOCK_COMPATIBLE_DISK, sizeof(BLOCK_COMPATIBLE_DISK) - 1u);
@@ -101,7 +103,7 @@ static bool create_child(cap_id_t parent, cap_id_t block_cap, const struct usb_m
 	if (status == SYSCALL_STATUS_OK) status = add_bool(&builder, "flush_supported", true);
 	if (status == SYSCALL_STATUS_OK)
 		status = device_builder_add_resource(
-			&builder, BLOCK_RESOURCE, sizeof(BLOCK_RESOURCE) - 1u, block_cap, BLOCK_DRIVER_RIGHTS);
+				&builder, BLOCK_RESOURCE, sizeof(BLOCK_RESOURCE) - 1u, block_cap, BLOCK_DRIVER_RIGHTS);
 	if (status == SYSCALL_STATUS_OK) status = device_builder_commit(&builder);
 	if (status != SYSCALL_STATUS_OK) (void)device_builder_abort(&builder);
 	return status == SYSCALL_STATUS_OK;
@@ -122,13 +124,13 @@ static struct msc_block_slice* find_slice(struct msc_block_service* service, uin
 static bool find_region(struct msc_block_service* service, uint64_t object_id, uint64_t* offset, uint64_t* count) {
 	if (object_id == MSC_BLOCK_ROOT_OBJECT) {
 		*offset = 0u;
-		*count  = service->device->block_count;
+		*count = service->device->block_count;
 		return true;
 	}
 	struct msc_block_slice* slice = find_slice(service, object_id);
 	if (slice == NULL) return false;
 	*offset = slice->block_offset;
-	*count  = slice->block_count;
+	*count = slice->block_count;
 	return true;
 }
 
@@ -144,7 +146,8 @@ static void release_buffer(struct msc_block_buffer* buffer) {
 	if (buffer->mapping_cap != CAP_ID_INVALID) (void)mapping_unmap(buffer->mapping_cap);
 	if (buffer->memory_cap != CAP_ID_INVALID) (void)cap_drop(buffer->memory_cap);
 	*buffer = (struct msc_block_buffer){
-		.memory_cap = CAP_ID_INVALID, .client_cap = CAP_ID_INVALID, .mapping_cap = CAP_ID_INVALID};
+		.memory_cap = CAP_ID_INVALID, .client_cap = CAP_ID_INVALID, .mapping_cap = CAP_ID_INVALID
+	};
 }
 
 static void release_session(struct msc_block_session* session) {
@@ -153,11 +156,11 @@ static void release_session(struct msc_block_session* session) {
 	*session = (struct msc_block_session){0};
 }
 
-static bool dispatch_open(struct msc_block_service* service, uint64_t offset, uint64_t count,
-                          const struct cap_request* call) {
+static bool dispatch_open(
+		struct msc_block_service* service, uint64_t offset, uint64_t count, const struct cap_request* call) {
 	if ((call->rights & CAP_READ) == 0u) return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
 	if (call->request_size != sizeof(struct block_open_request) ||
-	    call->response_capacity < sizeof(struct block_open_response))
+			call->response_capacity < sizeof(struct block_open_response))
 		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	struct msc_block_session* session = NULL;
 	for (unsigned i = 0u; i < MSC_BLOCK_MAX_SESSIONS; i++)
@@ -166,21 +169,25 @@ static bool dispatch_open(struct msc_block_service* service, uint64_t offset, ui
 			break;
 		}
 	if (session == NULL) return reply(call, NULL, 0u, SYSCALL_STATUS_UNAVAILABLE);
-	*session = (struct msc_block_session){.active         = true,
-	                                      .object_id      = MSC_BLOCK_SESSION_OBJECT_BASE + service->next_session_id++,
-	                                      .block_offset   = offset,
-	                                      .block_count    = count,
-	                                      .next_buffer_id = 1u};
-	struct block_open_response response = {.block_count         = count,
-	                                       .block_size          = service->device->block_size,
-	                                       .max_transfer_blocks = service->device->max_transfer_blocks,
-	                                       .flags = BLOCK_DEVICE_WRITABLE | BLOCK_DEVICE_FLUSH_SUPPORTED |
-	                                                (service->device->removable ? BLOCK_DEVICE_REMOVABLE : 0u)};
+	*session = (struct msc_block_session){
+		.active = true,
+		.object_id = MSC_BLOCK_SESSION_OBJECT_BASE + service->next_session_id++,
+		.block_offset = offset,
+		.block_count = count,
+		.next_buffer_id = 1u
+	};
+	struct block_open_response response = {
+		.block_count = count,
+		.block_size = service->device->block_size,
+		.max_transfer_blocks = service->device->max_transfer_blocks,
+		.flags = BLOCK_DEVICE_WRITABLE | BLOCK_DEVICE_FLUSH_SUPPORTED |
+		         (service->device->removable ? BLOCK_DEVICE_REMOVABLE : 0u)
+	};
 	if (cap_publish(service->endpoint,
-	                session->object_id,
-	                call->caller,
-	                call->rights & BLOCK_DRIVER_RIGHTS,
-	                &response.session_cap) != SYSCALL_STATUS_OK) {
+				session->object_id,
+				call->caller,
+				call->rights & BLOCK_DRIVER_RIGHTS,
+				&response.session_cap) != SYSCALL_STATUS_OK) {
 		release_session(session);
 		return reply(call, NULL, 0u, SYSCALL_STATUS_FAILED);
 	}
@@ -191,14 +198,14 @@ static bool dispatch_open(struct msc_block_service* service, uint64_t offset, ui
 }
 
 static bool dispatch_slice(struct msc_block_service* service, uint64_t offset, uint64_t count,
-                           const struct cap_request* call, const void* data) {
+		const struct cap_request* call, const void* data) {
 	struct block_slice_request request;
 	if ((call->rights & CAP_READ) == 0u) return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
 	if (call->request_size != sizeof(request) || call->response_capacity < sizeof(struct block_slice_response))
 		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	memcpy(&request, data, sizeof(request));
 	if (request.reserved != 0u || request.block_count == 0u || request.block_index >= count ||
-	    request.block_count > count - request.block_index)
+			request.block_count > count - request.block_index)
 		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	struct msc_block_slice* slice = NULL;
 	for (unsigned i = 0u; i < MSC_BLOCK_MAX_SLICES; i++)
@@ -207,16 +214,18 @@ static bool dispatch_slice(struct msc_block_service* service, uint64_t offset, u
 			break;
 		}
 	if (slice == NULL) return reply(call, NULL, 0u, SYSCALL_STATUS_UNAVAILABLE);
-	*slice = (struct msc_block_slice){.active       = true,
-	                                  .object_id    = MSC_BLOCK_SLICE_OBJECT_BASE + service->next_slice_id++,
-	                                  .block_offset = offset + request.block_index,
-	                                  .block_count  = request.block_count};
+	*slice = (struct msc_block_slice){
+		.active = true,
+		.object_id = MSC_BLOCK_SLICE_OBJECT_BASE + service->next_slice_id++,
+		.block_offset = offset + request.block_index,
+		.block_count = request.block_count
+	};
 	struct block_slice_response response = {.root_cap = CAP_ID_INVALID};
 	if (cap_publish(service->endpoint,
-	                slice->object_id,
-	                call->caller,
-	                (call->rights & BLOCK_DRIVER_RIGHTS) | CAP_DELEGATE,
-	                &response.root_cap) != SYSCALL_STATUS_OK) {
+				slice->object_id,
+				call->caller,
+				(call->rights & BLOCK_DRIVER_RIGHTS) | CAP_DELEGATE,
+				&response.root_cap) != SYSCALL_STATUS_OK) {
 		*slice = (struct msc_block_slice){0};
 		return reply(call, NULL, 0u, SYSCALL_STATUS_FAILED);
 	}
@@ -227,11 +236,11 @@ static bool dispatch_slice(struct msc_block_service* service, uint64_t offset, u
 }
 
 static bool dispatch_allocate(struct msc_block_service* service, struct msc_block_session* session,
-                              const struct cap_request* call, const void* data) {
+		const struct cap_request* call, const void* data) {
 	struct block_allocate_buffer_request request;
 	if ((call->rights & CAP_READ) == 0u) return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
 	if (call->request_size != sizeof(request) ||
-	    call->response_capacity < sizeof(struct block_allocate_buffer_response))
+			call->response_capacity < sizeof(struct block_allocate_buffer_response))
 		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	memcpy(&request, data, sizeof(request));
 	uint64_t maximum = (uint64_t)service->device->max_transfer_blocks * service->device->block_size;
@@ -243,51 +252,54 @@ static bool dispatch_allocate(struct msc_block_service* service, struct msc_bloc
 			break;
 		}
 	if (buffer == NULL) return reply(call, NULL, 0u, SYSCALL_STATUS_UNAVAILABLE);
-	*buffer                                   = (struct msc_block_buffer){.used        = true,
-	                                                                      .id          = session->next_buffer_id++,
-	                                                                      .size        = request.size,
-	                                                                      .memory_cap  = CAP_ID_INVALID,
-	                                                                      .client_cap  = CAP_ID_INVALID,
-	                                                                      .mapping_cap = CAP_ID_INVALID};
+	*buffer = (struct msc_block_buffer){
+		.used = true,
+		.id = session->next_buffer_id++,
+		.size = request.size,
+		.memory_cap = CAP_ID_INVALID,
+		.client_cap = CAP_ID_INVALID,
+		.mapping_cap = CAP_ID_INVALID
+	};
 	struct address_space_map_response mapping = {.mapping_cap = CAP_ID_INVALID};
-	size_t           allocation_size = (request.size + runtime_heap_granule - 1u) & ~(runtime_heap_granule - 1u);
+	size_t allocation_size = (request.size + runtime_heap_granule - 1u) & ~(runtime_heap_granule - 1u);
 	syscall_status_t status =
-		memory_allocator_alloc(runtime_heap_memory_allocator_cap, allocation_size, &buffer->memory_cap);
+			memory_allocator_alloc(runtime_heap_memory_allocator_cap, allocation_size, &buffer->memory_cap);
 	if (status != SYSCALL_STATUS_OK) {
 		fprintf(stderr, "usb-storage: block buffer allocation failed: %u\n", status);
 		release_buffer(buffer);
 		return reply(call, NULL, 0u, SYSCALL_STATUS_FAILED);
 	}
 	status = address_space_map(service->address_space_cap,
-	                           buffer->memory_cap,
-	                           MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
-	                           0u,
-	                           0u,
-	                           0u,
-	                           0u,
-	                           &mapping);
+			buffer->memory_cap,
+			MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+			0u,
+			0u,
+			0u,
+			0u,
+			&mapping);
 	if (status != SYSCALL_STATUS_OK || mapping.mapping_cap == CAP_ID_INVALID || mapping.address == 0u) {
 		fprintf(stderr, "usb-storage: block buffer mapping failed: %u\n", status);
 		release_buffer(buffer);
 		return reply(call, NULL, 0u, SYSCALL_STATUS_FAILED);
 	}
 	buffer->mapping_cap = mapping.mapping_cap;
-	buffer->address     = (uint8_t*)mapping.address;
-	status              = cap_delegate(buffer->memory_cap, call->caller, BLOCK_BUFFER_RIGHTS, &buffer->client_cap);
+	buffer->address = (uint8_t*)mapping.address;
+	status = cap_delegate(buffer->memory_cap, call->caller, BLOCK_BUFFER_RIGHTS, &buffer->client_cap);
 	if (status != SYSCALL_STATUS_OK) {
 		fprintf(stderr, "usb-storage: block buffer delegation failed: %u\n", status);
 		release_buffer(buffer);
 		return reply(call, NULL, 0u, SYSCALL_STATUS_FAILED);
 	}
 	struct block_allocate_buffer_response response = {
-		.buffer_id = buffer->id, .memory_cap = buffer->client_cap, .size = buffer->size};
+		.buffer_id = buffer->id, .memory_cap = buffer->client_cap, .size = buffer->size
+	};
 	if (reply(call, &response, sizeof(response), SYSCALL_STATUS_OK)) return true;
 	release_buffer(buffer);
 	return false;
 }
 
 static bool dispatch_transfer(struct msc_block_service* service, struct msc_block_session* session,
-                              const struct cap_request* call, const void* data, bool write) {
+		const struct cap_request* call, const void* data, bool write) {
 	struct block_transfer_request request;
 	if ((call->rights & (write ? CAP_WRITE : CAP_READ)) == 0u) return reply(call, NULL, 0u, SYSCALL_STATUS_DENIED);
 	if (call->request_size != sizeof(request) || call->response_capacity < sizeof(struct block_transfer_response))
@@ -295,24 +307,24 @@ static bool dispatch_transfer(struct msc_block_service* service, struct msc_bloc
 	memcpy(&request, data, sizeof(request));
 	struct msc_block_buffer* buffer = find_buffer(session, request.buffer_id);
 	if (buffer == NULL || request.reserved != 0u || request.block_count == 0u ||
-	    request.block_count > service->device->max_transfer_blocks || request.block_index >= session->block_count ||
-	    request.block_count > session->block_count - request.block_index ||
-	    request.block_count > UINT32_MAX / service->device->block_size)
+			request.block_count > service->device->max_transfer_blocks || request.block_index >= session->block_count ||
+			request.block_count > session->block_count - request.block_index ||
+			request.block_count > UINT32_MAX / service->device->block_size)
 		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	uint32_t size = request.block_count * service->device->block_size;
 	if (request.buffer_offset > buffer->size || size > buffer->size - request.buffer_offset)
 		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	uint64_t block = session->block_offset + request.block_index;
-	bool     success =
-		write ? usb_msc_write(service->device, block, request.block_count, buffer->address + request.buffer_offset)
-		      : usb_msc_read(service->device, block, request.block_count, buffer->address + request.buffer_offset);
+	bool success =
+			write ? usb_msc_write(service->device, block, request.block_count, buffer->address + request.buffer_offset)
+			      : usb_msc_read(service->device, block, request.block_count, buffer->address + request.buffer_offset);
 	if (!success) return reply(call, NULL, 0u, SYSCALL_STATUS_FAILED);
 	struct block_transfer_response response = {.transferred_blocks = request.block_count};
 	return reply(call, &response, sizeof(response), SYSCALL_STATUS_OK);
 }
 
 static bool dispatch_session(struct msc_block_service* service, struct msc_block_session* session,
-                             const struct cap_request* call, const void* data, enum block_op op) {
+		const struct cap_request* call, const void* data, enum block_op op) {
 	switch (op) {
 	case BLOCK_OP_ALLOCATE_BUFFER:
 		return dispatch_allocate(service, session, call, data);
@@ -358,18 +370,18 @@ static bool dispatch(struct msc_block_service* service, const struct cap_request
 
 static bool serve(struct msc_block_service* service) {
 	for (;;) {
-		bool             received;
+		bool received;
 		syscall_status_t status;
 		do {
 			struct cap_request call;
 			received = false;
-			status   = channel_recv(service->endpoint, &call, request_buffer, sizeof(request_buffer), &received);
+			status = channel_recv(service->endpoint, &call, request_buffer, sizeof(request_buffer), &received);
 			if (status != SYSCALL_STATUS_OK || (received && !dispatch(service, &call, request_buffer))) return false;
 		} while (received);
 		do {
 			struct channel_event event;
 			received = false;
-			status   = channel_event_recv(service->endpoint, &event, &received);
+			status = channel_event_recv(service->endpoint, &event, &received);
 			if (status != SYSCALL_STATUS_OK) return false;
 			if (received && event.type == CHANNEL_EVENT_CAP_ZERO_GRANTS) {
 				struct msc_block_session* session = find_session(service, event.object_id);
@@ -380,7 +392,7 @@ static bool serve(struct msc_block_service* service) {
 				else {
 					struct msc_block_slice* slice = find_slice(service, event.object_id);
 					if (slice != NULL &&
-					    cap_unpublish_if_unused(service->endpoint, slice->object_id) == SYSCALL_STATUS_OK)
+							cap_unpublish_if_unused(service->endpoint, slice->object_id) == SYSCALL_STATUS_OK)
 						*slice = (struct msc_block_slice){0};
 				}
 			}
@@ -406,31 +418,34 @@ static void cleanup(struct msc_block_service* service) {
 }
 
 bool usb_msc_block_service_run(cap_id_t device_cap, struct usb_msc_device* device) {
-	struct msc_block_service service = {.endpoint          = CHANNEL_ID_INVALID,
-	                                    .activity_cap      = CAP_ID_INVALID,
-	                                    .root_cap          = CAP_ID_INVALID,
-	                                    .address_space_cap = CAP_ID_INVALID,
-	                                    .device            = device,
-	                                    .next_slice_id     = 1u,
-	                                    .next_session_id   = 1u};
-	struct self_info         self;
+	struct msc_block_service service = {
+		.endpoint = CHANNEL_ID_INVALID,
+		.activity_cap = CAP_ID_INVALID,
+		.root_cap = CAP_ID_INVALID,
+		.address_space_cap = CAP_ID_INVALID,
+		.device = device,
+		.next_slice_id = 1u,
+		.next_session_id = 1u
+	};
+	struct self_info self;
 	if (device == NULL || device->block_count == 0u || device->block_size == 0u ||
-	    process_self_info(&self) != SYSCALL_STATUS_OK)
+			process_self_info(&self) != SYSCALL_STATUS_OK)
 		return false;
-	service.pid               = self.pid;
+	service.pid = self.pid;
 	service.address_space_cap = self.address_space_cap;
 	if (self.self_cap != CAP_ID_INVALID) (void)cap_drop(self.self_cap);
 	if (self.main_thread_cap != CAP_ID_INVALID) (void)cap_drop(self.main_thread_cap);
-	bool success =
-		channel_create(&service.endpoint, &service.activity_cap) == SYSCALL_STATUS_OK &&
-		cap_publish(
-			service.endpoint, MSC_BLOCK_ROOT_OBJECT, service.pid, MSC_BLOCK_PROVIDER_RIGHTS, &service.root_cap) ==
-			SYSCALL_STATUS_OK &&
-		create_child(device_cap, service.root_cap, device);
+	bool success = channel_create(&service.endpoint, &service.activity_cap) == SYSCALL_STATUS_OK &&
+	               cap_publish(service.endpoint,
+						   MSC_BLOCK_ROOT_OBJECT,
+						   service.pid,
+						   MSC_BLOCK_PROVIDER_RIGHTS,
+						   &service.root_cap) == SYSCALL_STATUS_OK &&
+	               create_child(device_cap, service.root_cap, device);
 	if (success) {
 		printf("usb-storage: published block:disk (%llu blocks of %u bytes)\n",
-		       (unsigned long long)device->block_count,
-		       device->block_size);
+				(unsigned long long)device->block_count,
+				device->block_size);
 		success = serve(&service);
 	}
 	cleanup(&service);

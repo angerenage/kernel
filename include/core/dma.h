@@ -1,8 +1,9 @@
 #pragma once
 
-#include <base/dma.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+#include <base/dma.h>
 
 struct address_space;
 struct mapping;
@@ -34,7 +35,7 @@ bool dma_address_space_create(dma_source_t compatibility_source, struct address_
 
 /* Synchronize one aligned subrange of an active DEVICE Mapping. */
 bool dma_mapping_sync(struct address_space* device_space, struct mapping* mapping, size_t offset, size_t size,
-                      enum dma_sync_target target);
+		enum dma_sync_target target);
 
 /* Attach a DMA source to a device AddressSpace. */
 bool dma_bind(dma_source_t source, struct address_space* device_space, struct dma_binding** out_binding);

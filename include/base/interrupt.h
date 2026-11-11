@@ -1,8 +1,9 @@
 #pragma once
 
-#include <base/cap.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+#include <base/cap.h>
 
 /* Opaque, non-authoritative token naming one platform-discovered fixed source. */
 typedef uint64_t interrupt_source_t;
@@ -40,7 +41,7 @@ enum interrupt_kind {
 /* Public state that deliberately excludes all hardware delivery identities. */
 struct interrupt_info {
 	enum interrupt_kind kind;
-	bool                bound;
+	bool bound;
 };
 
 /* Device-programmable message values returned for a message interrupt. */
@@ -65,7 +66,7 @@ struct interrupt_request_header {
 /* Request to bind an Interrupt to a Signal capability. */
 struct interrupt_bind_request {
 	struct interrupt_request_header header;
-	cap_id_t                        signal_cap;
+	cap_id_t signal_cap;
 };
 
 /* Empty request used for info, unbind, and destroy operations. */
@@ -93,8 +94,8 @@ struct interrupts_request_header {
 
 struct interrupts_resolve_source_request {
 	struct interrupts_request_header header;
-	uint64_t                         controller_register_address;
-	uint32_t                         local_source_id;
+	uint64_t controller_register_address;
+	uint32_t local_source_id;
 };
 
 struct interrupts_resolve_source_response {
@@ -103,9 +104,9 @@ struct interrupts_resolve_source_response {
 
 struct interrupts_resolve_message_context_request {
 	struct interrupts_request_header header;
-	uint64_t                         controller_register_address;
-	uint32_t                         producer_id;
-	uint32_t                         reserved;
+	uint64_t controller_register_address;
+	uint32_t producer_id;
+	uint32_t reserved;
 };
 
 struct interrupts_resolve_message_context_response {
@@ -115,15 +116,15 @@ struct interrupts_resolve_message_context_response {
 /* Request to claim and configure one fixed hardware source. */
 struct interrupts_claim_source_request {
 	struct interrupts_request_header header;
-	interrupt_source_t               source;
-	enum interrupt_trigger           trigger;
-	enum interrupt_polarity          polarity;
+	interrupt_source_t source;
+	enum interrupt_trigger trigger;
+	enum interrupt_polarity polarity;
 };
 
 /* Request to allocate one message-signaled interrupt. */
 struct interrupts_allocate_message_request {
 	struct interrupts_request_header header;
-	interrupt_message_context_t      context;
+	interrupt_message_context_t context;
 };
 
 /* Response returned after claiming a fixed source; kernel producers must zero-initialize it. */

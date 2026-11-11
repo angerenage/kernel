@@ -1,8 +1,9 @@
 #pragma once
 
-#include <base/cap.h>
 #include <stdbool.h>
 #include <stddef.h>
+
+#include <base/cap.h>
 
 /* Maximum foreground pipeline: 16 processes and 15 pipe connections. */
 #define SHELL_PIPE_MAX 15u

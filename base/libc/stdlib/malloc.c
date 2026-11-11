@@ -1,14 +1,15 @@
-#include <base/heap.h>
-#include <base/math.h>
 #include <libc/stdlib.h>
 
+#include <base/heap.h>
+#include <base/math.h>
+
 void* malloc(size_t size) {
-	struct heap_block*     block;
-	struct heap_block*     remainder;
+	struct heap_block* block;
+	struct heap_block* remainder;
 	struct heap_lock_state lock_state;
-	size_t                 payload_bytes;
-	size_t                 block_bytes;
-	size_t                 remainder_bytes;
+	size_t payload_bytes;
+	size_t block_bytes;
+	size_t remainder_bytes;
 
 	if (!heap_is_initialized() || size == 0) return NULL;
 	if (!align_up_size(size, HEAP_ALIGN, &payload_bytes)) {
@@ -24,7 +25,7 @@ void* malloc(size_t size) {
 
 	for (;;) {
 		lock_state = heap_lock();
-		block      = find_fit_locked(block_bytes);
+		block = find_fit_locked(block_bytes);
 		if (block != NULL) break;
 		heap_unlock(lock_state);
 		if (!grow_heap(block_bytes)) return NULL;

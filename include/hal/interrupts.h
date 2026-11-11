@@ -59,8 +59,8 @@ enum hal_interrupt_target_kind {
 /* Allocatable events plus a required fixed target, or a core-selectable routable target. */
 struct hal_interrupt_source_info {
 	struct hal_interrupt_delivery_range delivery;
-	enum hal_interrupt_target_kind      target_kind;
-	const struct cpu*                   fixed_target;
+	enum hal_interrupt_target_kind target_kind;
+	const struct cpu* fixed_target;
 };
 
 /* A firmware-described namespace containing assignable external interrupt sources. */
@@ -72,9 +72,9 @@ struct hal_interrupt_source_domain_info {
 
 /* Requested delivery configuration for one fixed interrupt source. */
 struct hal_interrupt_delivery {
-	const struct cpu*           target;
-	struct hal_interrupt_event  event;
-	enum hal_interrupt_trigger  trigger;
+	const struct cpu* target;
+	struct hal_interrupt_event event;
+	enum hal_interrupt_trigger trigger;
 	enum hal_interrupt_polarity polarity;
 };
 
@@ -82,50 +82,50 @@ struct hal_interrupt_delivery {
 /* x86 fixed-source state selected at compile time. */
 struct hal_interrupt_source_state {
 	struct hal_interrupt_source source;
-	uintptr_t                   ioapic_registers;
-	uint32_t                    ioapic_route;
-	bool                        uses_pic;
-	bool                        initialized;
-	bool                        masked;
-	bool                        edge_triggered;
+	uintptr_t ioapic_registers;
+	uint32_t ioapic_route;
+	bool uses_pic;
+	bool initialized;
+	bool masked;
+	bool edge_triggered;
 };
 #elif defined(PLATFORM_PC_AARCH64)
 /* AArch64 fixed-source state selected at compile time. */
 struct hal_interrupt_source_state {
 	struct hal_interrupt_source source;
-	uintptr_t                   register_base;
-	uint32_t                    target_index;
-	bool                        initialized;
-	bool                        masked;
-	bool                        edge_triggered;
+	uintptr_t register_base;
+	uint32_t target_index;
+	bool initialized;
+	bool masked;
+	bool edge_triggered;
 };
 #elif defined(PLATFORM_PC_RISCV64)
 /* RISC-V fixed-source state selected at compile time. */
 struct hal_interrupt_source_state {
 	struct hal_interrupt_source source;
-	const struct cpu*           target;
-	uint32_t                    route;
-	bool                        initialized;
-	bool                        masked;
-	bool                        edge_triggered;
+	const struct cpu* target;
+	uint32_t route;
+	bool initialized;
+	bool masked;
+	bool edge_triggered;
 };
 #elif defined(PLATFORM_PC_LOONGARCH64)
 /* LoongArch fixed-source state selected at compile time. */
 struct hal_interrupt_source_state {
 	struct hal_interrupt_source source;
-	uint32_t                    route;
-	bool                        initialized;
-	bool                        masked;
-	bool                        edge_triggered;
+	uint32_t route;
+	bool initialized;
+	bool masked;
+	bool edge_triggered;
 };
 #else
 /* Hosted-test fixed-source state selected when no kernel platform is active. */
 struct hal_interrupt_source_state {
 	struct hal_interrupt_source source;
-	const struct cpu*           target;
-	bool                        initialized;
-	bool                        masked;
-	bool                        edge_triggered;
+	const struct cpu* target;
+	bool initialized;
+	bool masked;
+	bool edge_triggered;
 };
 #endif
 
@@ -138,16 +138,15 @@ size_t hal_interrupt_source_domain_count(void);
 bool hal_interrupt_source_domain_at(size_t index, struct hal_interrupt_source_domain_info* out_domain);
 
 /* Resolve a firmware-visible controller address and local ID without claiming the source. */
-bool hal_interrupt_source_resolve(uint64_t controller_register_address, uint32_t local_source_id,
-                                  struct hal_interrupt_source* out_source);
+bool hal_interrupt_source_resolve(
+		uint64_t controller_register_address, uint32_t local_source_id, struct hal_interrupt_source* out_source);
 
 /* Return whether platform/kernel policy allows this source identity to be claimed. */
 bool hal_interrupt_source_claimable(const struct hal_interrupt_source* source);
 
 /* Return whether a resolved source can be initialized with this electrical configuration. */
 bool hal_interrupt_source_configuration_supported(const struct hal_interrupt_source* source,
-                                                  enum hal_interrupt_trigger         trigger,
-                                                  enum hal_interrupt_polarity        polarity);
+		enum hal_interrupt_trigger trigger, enum hal_interrupt_polarity polarity);
 
 /* Return the allocatable delivery events and target constraint of one assignable external source. */
 bool hal_interrupt_source_info(const struct hal_interrupt_source* source, struct hal_interrupt_source_info* out_info);
@@ -157,7 +156,7 @@ bool hal_interrupt_source_target_supported(const struct hal_interrupt_source* so
 
 /* A successful initialization leaves the source initialized and masked; failure leaves no live delivery. */
 bool hal_interrupt_source_init(struct hal_interrupt_source_state* state, const struct hal_interrupt_source* source,
-                               const struct hal_interrupt_delivery* delivery);
+		const struct hal_interrupt_delivery* delivery);
 
 /* Mask an initialized source and update its state; failure leaves the lifecycle state unchanged. */
 bool hal_interrupt_source_mask(struct hal_interrupt_source_state* state);
@@ -170,7 +169,7 @@ bool hal_interrupt_source_deinit(struct hal_interrupt_source_state* state);
 
 /* One contiguous event range allocatable through a message-producing mechanism. */
 struct hal_interrupt_message_range {
-	uint32_t                            domain;
+	uint32_t domain;
 	struct hal_interrupt_delivery_range delivery;
 };
 
@@ -181,42 +180,42 @@ struct hal_interrupt_message_source {
 };
 
 struct hal_interrupt_message_context {
-	uint32_t                            domain;
-	bool                                has_source;
+	uint32_t domain;
+	bool has_source;
 	struct hal_interrupt_message_source source;
 };
 
 /* Requested message mechanism, optional producer, target, and core-reserved delivery event. */
 struct hal_interrupt_message_request {
-	uint32_t                                   domain;
+	uint32_t domain;
 	const struct hal_interrupt_message_source* source;
-	const struct cpu*                          target;
-	struct hal_interrupt_event                 event;
+	const struct cpu* target;
+	struct hal_interrupt_event event;
 };
 
 #if defined(PLATFORM_PC_AARCH64)
 /* AArch64 message-delivery state selected at compile time. */
 struct hal_interrupt_message_state {
 	struct hal_interrupt_event event;
-	bool                       uses_gicv3;
-	bool                       initialized;
+	bool uses_gicv3;
+	bool initialized;
 };
 #elif defined(PLATFORM_PC_RISCV64)
 /* RISC-V message-delivery state selected at compile time. */
 struct hal_interrupt_message_state {
-	const struct cpu*          target;
+	const struct cpu* target;
 	struct hal_interrupt_event event;
-	bool                       initialized;
+	bool initialized;
 };
 #elif defined(PLATFORM_PC_LOONGARCH64)
 /* LoongArch message-delivery state selected at compile time. */
 struct hal_interrupt_message_state {
-	uint32_t                   domain;
+	uint32_t domain;
 	struct hal_interrupt_event event;
-	uintptr_t                  redirect_gpid_address;
-	size_t                     redirect_gpid_size;
-	uint32_t                   redirect_index;
-	bool                       initialized;
+	uintptr_t redirect_gpid_address;
+	size_t redirect_gpid_size;
+	uint32_t redirect_index;
+	bool initialized;
 };
 #elif defined(PLATFORM_PC_X86_64)
 /* x86 message-delivery state selected at compile time. */
@@ -243,17 +242,16 @@ size_t hal_interrupt_message_range_count(void);
 bool hal_interrupt_message_range_at(size_t index, struct hal_interrupt_message_range* out_range);
 
 /* Resolve a firmware-visible message controller and producer without allocating delivery. */
-bool hal_interrupt_message_resolve(uint64_t controller_register_address, uint32_t producer_id,
-                                   struct hal_interrupt_message_context* out_context);
+bool hal_interrupt_message_resolve(
+		uint64_t controller_register_address, uint32_t producer_id, struct hal_interrupt_message_context* out_context);
 
 /* Return whether a message mechanism and optional producer can deliver to a CPU without changing hardware state. */
-bool hal_interrupt_message_target_supported(uint32_t domain, const struct hal_interrupt_message_source* source,
-                                            const struct cpu* target);
+bool hal_interrupt_message_target_supported(
+		uint32_t domain, const struct hal_interrupt_message_source* source, const struct cpu* target);
 
 /* Activate one core-reserved event and produce its message; failure leaves the state inactive and no delivery live. */
-bool hal_interrupt_message_init(struct hal_interrupt_message_state*         state,
-                                const struct hal_interrupt_message_request* request,
-                                struct hal_interrupt_message*               out_message);
+bool hal_interrupt_message_init(struct hal_interrupt_message_state* state,
+		const struct hal_interrupt_message_request* request, struct hal_interrupt_message* out_message);
 
 /* Disable and release a delivery; success makes it inactive, while failure preserves initialized state for retry. */
 bool hal_interrupt_message_deinit(struct hal_interrupt_message_state* state);

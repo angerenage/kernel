@@ -25,13 +25,14 @@
  * Zero-length requests are successful no-ops.
  */
 
-#include <base/cap.h>
-#include <base/syscall.h>
 #include <stddef.h>
 #include <stdint.h>
 
+#include <base/cap.h>
+#include <base/syscall.h>
+
 enum stream_op {
-	STREAM_OP_READ  = 0u,
+	STREAM_OP_READ = 0u,
 	STREAM_OP_WRITE = 1u,
 };
 
@@ -42,16 +43,16 @@ struct stream_request_header {
 /* Read at most size bytes from the current read cursor. */
 struct stream_read_request {
 	struct stream_request_header header;
-	uint32_t                     reserved;
-	uint64_t                     size;
+	uint32_t reserved;
+	uint64_t size;
 };
 
 /* Write request followed by exactly size bytes. */
 struct stream_write_request {
 	struct stream_request_header header;
-	uint32_t                     reserved;
-	uint64_t                     size;
-	uint8_t                      data[];
+	uint32_t reserved;
+	uint64_t size;
+	uint8_t data[];
 };
 
 struct stream_write_response {

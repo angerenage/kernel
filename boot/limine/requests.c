@@ -2,68 +2,68 @@
 
 #define LIMINE_TARGET_BASE_REVISION 6
 
-__attribute__((used,
-               section(".limine_requests_start_marker")))
+__attribute__((
+		used, section(".limine_requests_start_marker")))
 static volatile uint64_t limine_requests_start_marker[4] =
-	LIMINE_REQUESTS_START_MARKER;
+		LIMINE_REQUESTS_START_MARKER;
 
 __attribute__((used, section(".limine_requests")))
 static volatile uint64_t limine_base_revision[3] =
-	LIMINE_BASE_REVISION(LIMINE_TARGET_BASE_REVISION);
+		LIMINE_BASE_REVISION(LIMINE_TARGET_BASE_REVISION);
 
 /* Framebuffer request */
 __attribute__((used, section(".limine_requests")))
 volatile struct limine_framebuffer_request fb_req = {
-	.id       = LIMINE_FRAMEBUFFER_REQUEST_ID,
+	.id = LIMINE_FRAMEBUFFER_REQUEST_ID,
 	.revision = 0,
 };
 
 /* Multiprocessor request */
 __attribute__((used, section(".limine_requests")))
 volatile struct limine_mp_request mp_req = {
-	.id       = LIMINE_MP_REQUEST_ID,
+	.id = LIMINE_MP_REQUEST_ID,
 	.revision = 0,
 };
 
 /* Memory map request */
 __attribute__((used, section(".limine_requests")))
 volatile struct limine_memmap_request memmap_req = {
-	.id       = LIMINE_MEMMAP_REQUEST_ID,
+	.id = LIMINE_MEMMAP_REQUEST_ID,
 	.revision = 0,
 };
 
 /* HHDM request */
 __attribute__((used, section(".limine_requests")))
 volatile struct limine_hhdm_request hhdm_req = {
-	.id       = LIMINE_HHDM_REQUEST_ID,
+	.id = LIMINE_HHDM_REQUEST_ID,
 	.revision = 0,
 };
 
 /* Executable command line */
 __attribute__((used, section(".limine_requests")))
 volatile struct limine_executable_cmdline_request cmdline_req = {
-	.id       = LIMINE_EXECUTABLE_CMDLINE_REQUEST_ID,
+	.id = LIMINE_EXECUTABLE_CMDLINE_REQUEST_ID,
 	.revision = 0,
 };
 
 /* Boot modules */
 __attribute__((used, section(".limine_requests")))
 volatile struct limine_module_request module_req = {
-	.id       = LIMINE_MODULE_REQUEST_ID,
+	.id = LIMINE_MODULE_REQUEST_ID,
 	.revision = 0,
 };
 
 /* RSDP request */
 __attribute__((used, section(".limine_requests")))
 volatile struct limine_rsdp_request rsdp_req = {
-	.id       = LIMINE_RSDP_REQUEST_ID,
+	.id = LIMINE_RSDP_REQUEST_ID,
 	.revision = 0,
 };
 
 /* Device tree blob request */
 __attribute__((used, section(".limine_requests")))
 volatile struct limine_dtb_request dtb_req = {
-	.id       = LIMINE_DTB_REQUEST_ID,
+	.id = LIMINE_DTB_REQUEST_ID,
 	.revision = 0,
 };
 
@@ -71,7 +71,7 @@ volatile struct limine_dtb_request dtb_req = {
 /* Invariant TSC frequency, used by the x86-64 monotonic clock backend. */
 __attribute__((used, section(".limine_requests")))
 volatile struct limine_tsc_frequency_request tsc_frequency_req = {
-	.id       = LIMINE_TSC_FREQUENCY_REQUEST_ID,
+	.id = LIMINE_TSC_FREQUENCY_REQUEST_ID,
 	.revision = 0,
 };
 #endif
@@ -79,13 +79,13 @@ volatile struct limine_tsc_frequency_request tsc_frequency_req = {
 /* Executable address */
 __attribute__((used, section(".limine_requests")))
 volatile struct limine_executable_address_request exec_addr_req = {
-	.id       = LIMINE_EXECUTABLE_ADDRESS_REQUEST_ID,
+	.id = LIMINE_EXECUTABLE_ADDRESS_REQUEST_ID,
 	.revision = 0,
 };
 
 __attribute__((used, section(".limine_requests_end_marker")))
 static volatile uint64_t limine_requests_end_marker[2] =
-	LIMINE_REQUESTS_END_MARKER;
+		LIMINE_REQUESTS_END_MARKER;
 
 bool limine_protocol_supported(void) {
 	return LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision);

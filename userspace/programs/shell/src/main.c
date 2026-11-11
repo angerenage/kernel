@@ -1,18 +1,19 @@
-#include <base/cap.h>
 #include <stddef.h>
+
+#include <base/cap.h>
 
 #include "shell.h"
 
 int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 	struct shell shell;
-	char         line[SHELL_LINE_CAPACITY];
-	int          result = 1;
+	char line[SHELL_LINE_CAPACITY];
+	int result = 1;
 
 	(void)argv;
 	if (argc != 0 || capc != 0u || capv != NULL) return 1;
 	if (!shell_initialize(&shell)) return 1;
 	for (;;) {
-		size_t                  line_size;
+		size_t line_size;
 		enum shell_input_result input_result;
 
 		if (!shell_write_prompt(&shell)) goto cleanup;

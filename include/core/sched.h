@@ -1,9 +1,10 @@
 #pragma once
 
-#include <core/thread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <core/thread.h>
 
 struct cpu;
 
@@ -97,16 +98,15 @@ void sched_block_current(struct thread_wait_queue* queue, enum thread_block_reas
  * via spinlock_lock_irqsave(). The caller must pass the saved irq state for
  * queue->lock so the scheduler can enqueue atomically before releasing it.
  */
-bool sched_block_current_locked(struct thread_wait_queue* queue, enum thread_block_reason reason,
-                                struct irq_state queue_irq_state);
+bool sched_block_current_locked(
+		struct thread_wait_queue* queue, enum thread_block_reason reason, struct irq_state queue_irq_state);
 
 /*
  * Block on queue while allowing a queued userspace upcall to abort the wait.
  * The pending interrupt remains set until the upcall is delivered or purged.
  */
-enum sched_block_result sched_block_current_interruptible_locked(struct thread_wait_queue* queue,
-                                                                 enum thread_block_reason  reason,
-                                                                 struct irq_state          queue_irq_state);
+enum sched_block_result sched_block_current_interruptible_locked(
+		struct thread_wait_queue* queue, enum thread_block_reason reason, struct irq_state queue_irq_state);
 
 /*
  * Block the current thread on queue until another CPU wakes it or the scheduler
@@ -115,7 +115,7 @@ enum sched_block_result sched_block_current_interruptible_locked(struct thread_w
  * queue, or false when the timeout expired (or setup failed).
  */
 bool sched_block_current_until_locked(struct thread_wait_queue* queue, enum thread_block_reason reason,
-                                      uint64_t deadline_tick, struct irq_state queue_irq_state);
+		uint64_t deadline_tick, struct irq_state queue_irq_state);
 
 /* Wake one blocked waiter from queue and make it runnable again. */
 bool sched_wake_one(struct thread_wait_queue* queue);

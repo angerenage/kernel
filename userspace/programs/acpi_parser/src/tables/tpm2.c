@@ -1,11 +1,12 @@
 #include "tpm2.h"
 
-#include <runtime/device.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
 #include <system/acpi.h>
 #include <system/capability.h>
+#include <runtime/device.h>
 
 #include "../device.h"
 
@@ -46,15 +47,15 @@ static uint64_t read_u64_le(const uint8_t value[8]) {
 }
 
 static bool tpm2_device_decode(const struct acpi_table_info_response* info, const uint8_t body[ACPI_TPM2_BODY_SIZE],
-                               struct acpi_tpm2_device* out_device) {
+		struct acpi_tpm2_device* out_device) {
 	uint64_t control_address;
 	uint32_t start_method;
 
 	if (info == NULL || body == NULL || out_device == NULL || info->revision < ACPI_TPM2_MIN_REVISION ||
-	    info->body_size < ACPI_TPM2_BODY_SIZE || read_u16_le(body) > 1u || read_u16_le(body + 2u) != 0u)
+			info->body_size < ACPI_TPM2_BODY_SIZE || read_u16_le(body) > 1u || read_u16_le(body + 2u) != 0u)
 		return false;
 	control_address = read_u64_le(body + 4u);
-	start_method    = read_u32_le(body + 12u);
+	start_method = read_u32_le(body + 12u);
 	switch (start_method) {
 	case TPM2_START_METHOD_FIFO_MMIO:
 		if (control_address == 0u) control_address = TPM_FIFO_DEFAULT_ADDRESS;
@@ -68,26 +69,26 @@ static bool tpm2_device_decode(const struct acpi_table_info_response* info, cons
 	}
 	*out_device = (struct acpi_tpm2_device){
 		.control_address = control_address,
-		.start_method    = start_method,
-		.platform_class  = read_u16_le(body),
+		.start_method = start_method,
+		.platform_class = read_u16_le(body),
 	};
 	return true;
 }
 
 static syscall_status_t submit_tpm2_device(struct acpi_device_set* devices, const struct acpi_tpm2_device* device) {
-	struct acpi_device*    staged;
+	struct acpi_device* staged;
 	struct device_builder* builder;
-	syscall_status_t       status;
-	bool                   from_aml;
+	syscall_status_t status;
+	bool from_aml;
 
-	staged   = acpi_device_find_compatible(devices, TPM_COMPATIBLE_AML);
+	staged = acpi_device_find_compatible(devices, TPM_COMPATIBLE_AML);
 	from_aml = staged != NULL;
 	if (staged == NULL) {
 		status = acpi_device_begin(devices, &staged);
 		if (status != SYSCALL_STATUS_OK) return status;
 	}
 	builder = acpi_device_builder(staged);
-	status  = SYSCALL_STATUS_OK;
+	status = SYSCALL_STATUS_OK;
 	if (!from_aml) status = acpi_device_add_compatible(staged, TPM_COMPATIBLE_TABLE);
 	if (status == SYSCALL_STATUS_OK)
 		status = acpi_device_add_u64(builder, TPM_PROPERTY_PLATFORM_CLASS, device->platform_class);
@@ -97,15 +98,15 @@ static syscall_status_t submit_tpm2_device(struct acpi_device_set* devices, cons
 		status = acpi_device_add_u64(builder, TPM_PROPERTY_CONTROL_AREA_ADDRESS, device->control_address);
 	if (status == SYSCALL_STATUS_OK && !from_aml && device->start_method == TPM2_START_METHOD_FIFO_MMIO)
 		status = acpi_device_stage_mmio(
-			staged, TPM_RESOURCE_CONTROL_AREA, (uintptr_t)device->control_address, TPM_FIFO_REGISTER_SIZE);
+				staged, TPM_RESOURCE_CONTROL_AREA, (uintptr_t)device->control_address, TPM_FIFO_REGISTER_SIZE);
 	return status;
 }
 
 static syscall_status_t parse_tpm2_table(cap_id_t table_cap, struct acpi_device_set* devices) {
 	struct acpi_table_info_response info;
-	struct acpi_tpm2_device         device;
-	uint8_t                         body[ACPI_TPM2_BODY_SIZE];
-	syscall_status_t                status;
+	struct acpi_tpm2_device device;
+	uint8_t body[ACPI_TPM2_BODY_SIZE];
+	syscall_status_t status;
 
 	status = acpi_table_info(table_cap, &info);
 	if (status != SYSCALL_STATUS_OK) return status;
@@ -117,7 +118,7 @@ static syscall_status_t parse_tpm2_table(cap_id_t table_cap, struct acpi_device_
 }
 
 syscall_status_t acpi_tpm2_parse(cap_id_t provider_cap, struct acpi_device_set* devices) {
-	uint64_t         table_count;
+	uint64_t table_count;
 	syscall_status_t status;
 
 	if (provider_cap == CAP_ID_INVALID || devices == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;

@@ -1,25 +1,26 @@
 #include "cache.h"
 
+#include <stdint.h>
+
+#include <hal/cache.h>
+#include <hal/hcf.h>
 #include <core/cpu.h>
 #include <core/lock.h>
 #include <core/spinlock.h>
-#include <hal/cache.h>
-#include <hal/hcf.h>
-#include <stdint.h>
 
 #include "interrupts/ipi.h"
 
 #define LOONGARCH_CACHE_MAX_CPUS 64u
 
 struct loongarch_cache_sync_request {
-	size_t   source_index;
+	size_t source_index;
 	uint64_t generation;
 };
 
 static struct loongarch_cache_sync_request cache_request;
-static uint64_t                            cache_ack[LOONGARCH_CACHE_MAX_CPUS];
-static struct spinlock                     cache_sync_lock =
-	SPINLOCK_INIT_CLASS("cache_sync_lock", SPINLOCK_ORDER_NONE, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
+static uint64_t cache_ack[LOONGARCH_CACHE_MAX_CPUS];
+static struct spinlock cache_sync_lock = SPINLOCK_INIT_CLASS(
+		"cache_sync_lock", SPINLOCK_ORDER_NONE, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
 
 bool hal_cache_sync_for_device(void* address, size_t size) {
 	if (size == 0u) return true;
@@ -47,12 +48,12 @@ void hal_cache_sync_executable_range(void* address, size_t size) {
 
 bool loongarch64_cache_handle_sync_ipi(void) {
 	struct cpu* cpu = cpu_current();
-	uint64_t    generation;
+	uint64_t generation;
 
 	if (cpu == NULL || cpu->index >= LOONGARCH_CACHE_MAX_CPUS) hcf();
 	generation = __atomic_load_n(&cache_request.generation, __ATOMIC_ACQUIRE);
 	if (generation == 0u || cpu->index == cache_request.source_index ||
-	    __atomic_load_n(&cache_ack[cpu->index], __ATOMIC_ACQUIRE) == generation)
+			__atomic_load_n(&cache_ack[cpu->index], __ATOMIC_ACQUIRE) == generation)
 		return false;
 	hal_cache_sync_executable_range(NULL, 0u);
 	__atomic_store_n(&cache_ack[cpu->index], generation, __ATOMIC_RELEASE);
@@ -61,16 +62,16 @@ bool loongarch64_cache_handle_sync_ipi(void) {
 
 void hal_cache_sync_executable_range_all_cpus(void* address, size_t size) {
 	const struct cpu_topology* topology;
-	struct cpu*                current;
-	struct irq_state           state;
-	uint64_t                   generation;
-	uint64_t                   targets = 0u;
+	struct cpu* current;
+	struct irq_state state;
+	uint64_t generation;
+	uint64_t targets = 0u;
 
-	state    = spinlock_lock_irqsave(&cache_sync_lock);
+	state = spinlock_lock_irqsave(&cache_sync_lock);
 	topology = cpu_topology_get();
-	current  = cpu_current();
+	current = cpu_current();
 	if (topology == NULL || topology->cpus == NULL || current == NULL || topology->cpu_count == 0u ||
-	    topology->cpu_count > LOONGARCH_CACHE_MAX_CPUS || current->index >= LOONGARCH_CACHE_MAX_CPUS)
+			topology->cpu_count > LOONGARCH_CACHE_MAX_CPUS || current->index >= LOONGARCH_CACHE_MAX_CPUS)
 		hcf();
 
 	hal_cache_sync_executable_range(address, size);

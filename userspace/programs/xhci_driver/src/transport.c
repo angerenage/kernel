@@ -1,14 +1,16 @@
 #include "transport.h"
 
-#include <base/process.h>
-#include <protocol/usb.h>
-#include <runtime/device.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <base/process.h>
+
+#include <protocol/usb.h>
 #include <system/capability.h>
 #include <system/channel.h>
 #include <system/process.h>
+#include <runtime/device.h>
 
 #include "device.h"
 
@@ -26,11 +28,11 @@ static struct xhci_transport_child* child_at(struct xhci_transport* t, unsigned 
 
 static bool child_name(char* name, size_t capacity, const struct xhci_transport_child* child, size_t* length) {
 	int n = snprintf(name,
-	                 capacity,
-	                 "usb_port_%u_interface_%u_%llu",
-	                 child->port,
-	                 child->interface_number,
-	                 (unsigned long long)child->generation);
+			capacity,
+			"usb_port_%u_interface_%u_%llu",
+			child->port,
+			child->interface_number,
+			(unsigned long long)child->generation);
 	if (n < 0 || (size_t)n >= capacity) return false;
 	*length = (size_t)n;
 	return true;
@@ -42,10 +44,10 @@ static syscall_status_t add_u64(const struct device_builder* builder, const char
 	return device_builder_add_property(builder, name, strlen(name), DEVICE_PROPERTY_UNSIGNED, 1u, bytes, sizeof(bytes));
 }
 
-static bool add_compatible(const struct device_builder* builder, const char* format, unsigned a, unsigned b,
-                           unsigned c) {
+static bool add_compatible(
+		const struct device_builder* builder, const char* format, unsigned a, unsigned b, unsigned c) {
 	char name[48];
-	int  n = snprintf(name, sizeof(name), format, a, b, c);
+	int n = snprintf(name, sizeof(name), format, a, b, c);
 	return n > 0 && (size_t)n < sizeof(name) &&
 	       device_builder_add_compatible(builder, name, (size_t)n) == SYSCALL_STATUS_OK;
 }
@@ -54,19 +56,19 @@ static bool publish_child(struct xhci_transport* t, struct xhci_transport_child*
 	struct usb_transport_info info;
 	if (!xhci_device_info(t->controller, child->port, child->interface_index, &info)) return false;
 	struct device_builder builder = {.capability = CAP_ID_INVALID, .manager_pid = PROCESS_PID_INVALID};
-	char                  name[64];
-	size_t                length;
+	char name[64];
+	size_t length;
 	if (!child_name(name, sizeof(name), child, &length)) return false;
 	syscall_status_t status = device_builder_begin_child(t->parent, &builder);
 	if (status == SYSCALL_STATUS_OK) status = device_builder_set_name(&builder, name, length);
 	if (status == SYSCALL_STATUS_OK && !add_compatible(&builder, "usb:%04x:%04x", info.vendor_id, info.product_id, 0u))
 		status = SYSCALL_STATUS_FAILED;
 	if (status == SYSCALL_STATUS_OK &&
-	    !add_compatible(
-			&builder, "usb:class:%02x:%02x:%02x", info.class_code, info.subclass, info.programming_interface))
+			!add_compatible(
+					&builder, "usb:class:%02x:%02x:%02x", info.class_code, info.subclass, info.programming_interface))
 		status = SYSCALL_STATUS_FAILED;
 	if (status == SYSCALL_STATUS_OK &&
-	    !add_compatible(&builder, "usb:class:%02x:%02x", info.class_code, info.subclass, 0u))
+			!add_compatible(&builder, "usb:class:%02x:%02x", info.class_code, info.subclass, 0u))
 		status = SYSCALL_STATUS_FAILED;
 	if (status == SYSCALL_STATUS_OK && !add_compatible(&builder, "usb:class:%02x", info.class_code, 0u, 0u))
 		status = SYSCALL_STATUS_FAILED;
@@ -81,10 +83,10 @@ static bool publish_child(struct xhci_transport* t, struct xhci_transport_child*
 	if (status == SYSCALL_STATUS_OK) status = add_u64(&builder, "configuration", info.configuration);
 	if (status == SYSCALL_STATUS_OK)
 		status = device_builder_add_resource(&builder,
-		                                     USB_TRANSPORT_RESOURCE,
-		                                     sizeof(USB_TRANSPORT_RESOURCE) - 1u,
-		                                     child->provider,
-		                                     USB_TRANSPORT_RIGHTS);
+				USB_TRANSPORT_RESOURCE,
+				sizeof(USB_TRANSPORT_RESOURCE) - 1u,
+				child->provider,
+				USB_TRANSPORT_RIGHTS);
 	if (status == SYSCALL_STATUS_OK) status = device_builder_commit(&builder);
 	if (status != SYSCALL_STATUS_OK) (void)device_builder_abort(&builder);
 	return status == SYSCALL_STATUS_OK;
@@ -93,30 +95,32 @@ static bool publish_child(struct xhci_transport* t, struct xhci_transport_child*
 static bool reconcile(struct xhci_transport* t) {
 	for (unsigned port = 1u; port <= t->controller->ports; port++) {
 		struct usb_transport_interface interfaces[USB_TRANSPORT_MAX_INTERFACES];
-		unsigned                       count      = xhci_device_interfaces(t->controller, port, interfaces);
-		uint64_t                       generation = t->controller->port_generation[port - 1u];
+		unsigned count = xhci_device_interfaces(t->controller, port, interfaces);
+		uint64_t generation = t->controller->port_generation[port - 1u];
 		for (unsigned index = 0u; index < USB_TRANSPORT_MAX_INTERFACES; index++) {
 			struct xhci_transport_child* child = child_at(t, port, index);
 			if (child->published && (child->generation != generation || index >= count ||
-			                         child->interface_number != interfaces[index].number)) {
-				char   name[64];
+											child->interface_number != interfaces[index].number)) {
+				char name[64];
 				size_t length;
 				if (!child_name(name, sizeof(name), child, &length) ||
-				    device_remove_child(t->parent, name, length) != SYSCALL_STATUS_OK ||
-				    cap_unpublish(t->channel, child->object_id) != SYSCALL_STATUS_OK)
+						device_remove_child(t->parent, name, length) != SYSCALL_STATUS_OK ||
+						cap_unpublish(t->channel, child->object_id) != SYSCALL_STATUS_OK)
 					return false;
 				child->published = false;
-				child->provider  = CAP_ID_INVALID;
+				child->provider = CAP_ID_INVALID;
 			}
 			if (!child->published && index < count) {
-				child->port             = (uint8_t)port;
-				child->interface_index  = (uint8_t)index;
+				child->port = (uint8_t)port;
+				child->interface_index = (uint8_t)index;
 				child->interface_number = interfaces[index].number;
-				child->generation       = generation;
-				child->object_id        = ++t->next_object_id;
-				if (cap_publish(
-						t->channel, child->object_id, t->pid, USB_TRANSPORT_RIGHTS | CAP_DELEGATE, &child->provider) !=
-				    SYSCALL_STATUS_OK)
+				child->generation = generation;
+				child->object_id = ++t->next_object_id;
+				if (cap_publish(t->channel,
+							child->object_id,
+							t->pid,
+							USB_TRANSPORT_RIGHTS | CAP_DELEGATE,
+							&child->provider) != SYSCALL_STATUS_OK)
 					return false;
 				if (!publish_child(t, child)) {
 					(void)cap_unpublish(t->channel, child->object_id);
@@ -133,7 +137,8 @@ static bool reconcile(struct xhci_transport* t) {
 bool xhci_transport_init(struct xhci_transport* t, struct xhci_controller* c, cap_id_t parent) {
 	struct self_info self;
 	*t = (struct xhci_transport){
-		.controller = c, .parent = parent, .channel = CHANNEL_ID_INVALID, .activity = CAP_ID_INVALID};
+		.controller = c, .parent = parent, .channel = CHANNEL_ID_INVALID, .activity = CAP_ID_INVALID
+	};
 	t->children = calloc(XHCI_TRANSPORT_CHILDREN, sizeof(*t->children));
 	if (t->children == NULL || process_self_info(&self) != SYSCALL_STATUS_OK) return false;
 	t->pid = self.pid;
@@ -148,7 +153,7 @@ bool xhci_transport_poll(struct xhci_transport* t) {
 	if (!reconcile(t)) return false;
 	for (;;) {
 		struct cap_request call;
-		bool               received = false;
+		bool received = false;
 		if (channel_recv(t->channel, &call, request_buffer, sizeof(request_buffer), &received) != SYSCALL_STATUS_OK)
 			return false;
 		if (!received) break;
@@ -159,17 +164,17 @@ bool xhci_transport_poll(struct xhci_transport* t) {
 				break;
 			}
 		if (child == NULL || (call.rights & CAP_CALL) == 0u ||
-		    call.request_size < sizeof(struct usb_transport_header)) {
+				call.request_size < sizeof(struct usb_transport_header)) {
 			if (!reply(&call, NULL, 0u, SYSCALL_STATUS_DENIED)) return false;
 			continue;
 		}
-		unsigned                    port = child->port;
+		unsigned port = child->port;
 		struct usb_transport_header header;
 		memcpy(&header, request_buffer, sizeof(header));
 		if (header.op == USB_TRANSPORT_OP_INFO) {
 			struct usb_transport_info info;
 			if (call.request_size != sizeof(header) || (call.rights & CAP_READ) == 0u ||
-			    call.response_capacity < sizeof(info)) {
+					call.response_capacity < sizeof(info)) {
 				if (!reply(&call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT)) return false;
 			}
 			else if (!xhci_device_info(t->controller, port, child->interface_index, &info)) {
@@ -187,17 +192,18 @@ bool xhci_transport_poll(struct xhci_transport* t) {
 			memcpy(&request, request_buffer, sizeof(request));
 			bool in = (request.endpoint & 0x80u) != 0u;
 			if (request.reserved[0] || request.reserved[1] || request.reserved[2] ||
-			    request.length > USB_TRANSPORT_MAX_TRANSFER ||
-			    call.request_size != sizeof(request) + (in ? 0u : request.length) ||
-			    call.response_capacity < sizeof(struct usb_transport_transfer_response) + (in ? request.length : 0u)) {
+					request.length > USB_TRANSPORT_MAX_TRANSFER ||
+					call.request_size != sizeof(request) + (in ? 0u : request.length) ||
+					call.response_capacity <
+							sizeof(struct usb_transport_transfer_response) + (in ? request.length : 0u)) {
 				if (!reply(&call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT)) return false;
 				continue;
 			}
 			uint8_t data[sizeof(struct usb_transport_transfer_response) + USB_TRANSPORT_MAX_TRANSFER];
 			if (!in && request.length != 0u)
 				memcpy(data + sizeof(struct usb_transport_transfer_response),
-				       request_buffer + sizeof(request),
-				       request.length);
+						request_buffer + sizeof(request),
+						request.length);
 			struct usb_transport_info info;
 			if (!xhci_device_info(t->controller, port, child->interface_index, &info)) return false;
 			bool owned = false;
@@ -207,14 +213,13 @@ bool xhci_transport_poll(struct xhci_transport* t) {
 				if (!reply(&call, NULL, 0u, SYSCALL_STATUS_DENIED)) return false;
 				continue;
 			}
-			size_t           transferred = 0u;
-			syscall_status_t transfer_status =
-				xhci_device_transfer(t->controller,
-				                     port,
-				                     request.endpoint,
-				                     data + sizeof(struct usb_transport_transfer_response),
-				                     request.length,
-				                     &transferred);
+			size_t transferred = 0u;
+			syscall_status_t transfer_status = xhci_device_transfer(t->controller,
+					port,
+					request.endpoint,
+					data + sizeof(struct usb_transport_transfer_response),
+					request.length,
+					&transferred);
 			if (transfer_status != SYSCALL_STATUS_OK) {
 				if (!reply(&call, NULL, 0u, transfer_status)) return false;
 				continue;
@@ -233,26 +238,27 @@ bool xhci_transport_poll(struct xhci_transport* t) {
 			memcpy(&request, request_buffer, sizeof(request));
 			bool in = (request.request_type & 0x80u) != 0u;
 			if (request.length > USB_TRANSPORT_MAX_TRANSFER ||
-			    request.length > CAP_MAX_REQUEST_SIZE - sizeof(request) ||
-			    request.length > CAP_MAX_RESPONSE_SIZE - sizeof(struct usb_transport_transfer_response) ||
-			    request.index != child->interface_number || (request.request_type & 0x1fu) != 1u ||
-			    call.request_size != sizeof(request) + (in ? 0u : request.length) ||
-			    call.response_capacity < sizeof(struct usb_transport_transfer_response) + (in ? request.length : 0u)) {
+					request.length > CAP_MAX_REQUEST_SIZE - sizeof(request) ||
+					request.length > CAP_MAX_RESPONSE_SIZE - sizeof(struct usb_transport_transfer_response) ||
+					request.index != child->interface_number || (request.request_type & 0x1fu) != 1u ||
+					call.request_size != sizeof(request) + (in ? 0u : request.length) ||
+					call.response_capacity <
+							sizeof(struct usb_transport_transfer_response) + (in ? request.length : 0u)) {
 				if (!reply(&call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT)) return false;
 				continue;
 			}
 			uint8_t data[sizeof(struct usb_transport_transfer_response) + USB_TRANSPORT_MAX_TRANSFER];
 			if (!in && request.length != 0u)
 				memcpy(data + sizeof(struct usb_transport_transfer_response),
-				       request_buffer + sizeof(request),
-				       request.length);
+						request_buffer + sizeof(request),
+						request.length);
 			size_t transferred = 0u;
 			if (!xhci_device_control(t->controller,
-			                         port,
-			                         child->interface_number,
-			                         &request,
-			                         data + sizeof(struct usb_transport_transfer_response),
-			                         &transferred)) {
+						port,
+						child->interface_number,
+						&request,
+						data + sizeof(struct usb_transport_transfer_response),
+						&transferred)) {
 				if (!reply(&call, NULL, 0u, SYSCALL_STATUS_FAILED)) return false;
 				continue;
 			}

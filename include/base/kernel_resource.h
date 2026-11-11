@@ -1,8 +1,9 @@
 #pragma once
 
-#include <base/cap.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/cap.h>
 
 /* Stable identifiers for kernel resources discoverable by userspace. */
 enum kernel_resource_type {
@@ -31,21 +32,21 @@ struct kernel_resources_request_header {
 /* Enumerate at most capacity resource identifiers starting at offset. */
 struct kernel_resources_list_request {
 	struct kernel_resources_request_header header;
-	uint64_t                               offset;
-	uint64_t                               capacity;
+	uint64_t offset;
+	uint64_t capacity;
 };
 
 /* Variable-length list response followed by returned kernel_resource_type values. */
 struct kernel_resources_list_response {
-	uint64_t                  total;
-	uint64_t                  returned;
+	uint64_t total;
+	uint64_t returned;
 	enum kernel_resource_type ids[];
 };
 
 /* Request to acquire a kernel resource. */
 struct kernel_resource_acquire_request {
 	struct kernel_resources_request_header header;
-	enum kernel_resource_type              id;
+	enum kernel_resource_type id;
 };
 
 /* Response to a kernel resource acquire request. */

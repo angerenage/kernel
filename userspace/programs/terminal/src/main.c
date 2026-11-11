@@ -1,8 +1,10 @@
-#include <base/cap.h>
-#include <base/framebuffer.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+
+#include <base/cap.h>
+#include <base/framebuffer.h>
+
 #include <system/capability.h>
 #include <system/framebuffer.h>
 #include <system/memory.h>
@@ -12,11 +14,11 @@
 
 int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 	struct framebuffer_info_response info;
-	struct framebuffer_map_response  mapping  = {.mapping_cap = CAP_ID_INVALID};
-	struct terminal*                 terminal = NULL;
-	cap_id_t                         framebuffer_cap;
-	syscall_status_t                 status;
-	int                              result = 1;
+	struct framebuffer_map_response mapping = {.mapping_cap = CAP_ID_INVALID};
+	struct terminal* terminal = NULL;
+	cap_id_t framebuffer_cap;
+	syscall_status_t status;
+	int result = 1;
 
 	(void)argv;
 	if (argc != 0 || capc != 1u || capv == NULL || capv[0] == CAP_ID_INVALID) {
@@ -24,7 +26,7 @@ int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 		return 1;
 	}
 	framebuffer_cap = capv[0];
-	status          = framebuffer_get_info(framebuffer_cap, &info);
+	status = framebuffer_get_info(framebuffer_cap, &info);
 	if (status != SYSCALL_STATUS_OK) {
 		printf("terminal: framebuffer query failed: %u\n", (unsigned)status);
 		goto cleanup;
@@ -49,7 +51,7 @@ int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 		goto cleanup;
 	}
 	framebuffer_cap = CAP_ID_INVALID;
-	result          = terminal_server_run(terminal);
+	result = terminal_server_run(terminal);
 
 cleanup:
 	terminal_destroy(terminal);

@@ -1,30 +1,31 @@
+#include <stdbool.h>
+#include <stddef.h>
+
 #include <base/heap.h>
 #include <base/math.h>
 #include <core/address_space.h>
 #include <core/memory.h>
 #include <core/spinlock.h>
-#include <stdbool.h>
-#include <stddef.h>
 
 static struct spinlock kernel_heap_lock =
-	(struct spinlock)SPINLOCK_INIT_CLASS("heap_lock", SPINLOCK_ORDER_HEAP, SPINLOCK_FLAG_IRQSAVE);
+		(struct spinlock)SPINLOCK_INIT_CLASS("heap_lock", SPINLOCK_ORDER_HEAP, SPINLOCK_FLAG_IRQSAVE);
 
 bool heap_grow_region(size_t minimum_size, void** out_base, size_t* out_size) {
-	struct memory*  memory;
+	struct memory* memory;
 	struct mapping* mapping;
 	if (out_base != NULL) *out_base = NULL;
 	if (out_size != NULL) *out_size = 0u;
 	size_t granule = address_space_minimum_mapping_size(address_space_kernel());
 	size_t size;
 	if (out_base == NULL || out_size == NULL || granule == 0u || !align_up_size(minimum_size, granule, &size) ||
-	    !memory_create_anonymous(size, &memory))
+			!memory_create_anonymous(size, &memory))
 		return false;
 	bool mapped = address_space_map(address_space_kernel(),
-	                                &(const struct address_space_mapping_request){
-										.memory = memory,
-										.access = MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
-									},
-	                                &mapping);
+			&(const struct address_space_mapping_request){
+				.memory = memory,
+				.access = MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+			},
+			&mapping);
 	memory_release(memory);
 	if (!mapped) return false;
 	*out_base = (void*)mapping_address(mapping);

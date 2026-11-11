@@ -1,17 +1,19 @@
 #include "controller.h"
 
-#include <base/dma.h>
-#include <base/memory.h>
-#include <protocol/pci.h>
-#include <runtime/device.h>
-#include <runtime/log.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <base/dma.h>
+#include <base/memory.h>
+
+#include <protocol/pci.h>
 #include <system/capability.h>
 #include <system/memory.h>
 #include <system/pci.h>
 #include <system/time.h>
+#include <runtime/device.h>
+#include <runtime/log.h>
 
 #include "device.h"
 #include "registers.h"
@@ -41,8 +43,8 @@ static void wr64(const struct xhci_controller* c, size_t offset, uint64_t value)
 	wr(c, offset + 4u, (uint32_t)(value >> 32u));
 }
 
-static bool wait_bits(const struct xhci_controller* c, size_t offset, uint32_t mask, uint32_t expected,
-                      unsigned timeout_ms) {
+static bool wait_bits(
+		const struct xhci_controller* c, size_t offset, uint32_t mask, uint32_t expected, unsigned timeout_ms) {
 	for (unsigned i = 0; i < timeout_ms; i++) {
 		if ((reg(c, offset) & mask) == expected) return true;
 		if (sleep_ms(1u) != SYSCALL_STATUS_OK) return false;
@@ -51,8 +53,8 @@ static bool wait_bits(const struct xhci_controller* c, size_t offset, uint32_t m
 }
 
 static bool legacy_handoff(struct xhci_controller* c) {
-	uint32_t hcc    = reg(c, 0x10u);
-	size_t   offset = (size_t)(hcc >> XHCI_HCC_XECP_SHIFT) * 4u;
+	uint32_t hcc = reg(c, 0x10u);
+	size_t offset = (size_t)(hcc >> XHCI_HCC_XECP_SHIFT) * 4u;
 	for (unsigned i = 0u; offset != 0u && i < 256u; i++) {
 		if (!in_bar(c, offset, 8u)) return false;
 		uint32_t header = reg(c, offset);
@@ -92,12 +94,12 @@ static bool sync_device(struct xhci_dma_buffer* b) {
 
 static bool enable_bus_master(struct xhci_controller* c, cap_id_t device_cap) {
 	cap_id_t control_cap = CAP_ID_INVALID;
-	bool     enabled     = device_resource_acquire(device_cap,
-	                                               PCI_CONTROL_RESOURCE,
-	                                               sizeof(PCI_CONTROL_RESOURCE) - 1u,
-	                                               PCI_CONTROL_COMMAND_RIGHTS,
-	                                               &control_cap) == SYSCALL_STATUS_OK &&
-	                       pci_control_set_dma_enabled(control_cap, true, NULL) == SYSCALL_STATUS_OK;
+	bool enabled = device_resource_acquire(device_cap,
+						   PCI_CONTROL_RESOURCE,
+						   sizeof(PCI_CONTROL_RESOURCE) - 1u,
+						   PCI_CONTROL_COMMAND_RIGHTS,
+						   &control_cap) == SYSCALL_STATUS_OK &&
+	               pci_control_set_dma_enabled(control_cap, true, NULL) == SYSCALL_STATUS_OK;
 	if (enabled) c->pci_control_cap = control_cap;
 	else if (control_cap != CAP_ID_INVALID) (void)cap_drop(control_cap);
 	if (!enabled) fprintf(stderr, "xhci: unable to enable PCI DMA\n");
@@ -108,7 +110,7 @@ static bool allocate_scratchpads(struct xhci_controller* c) {
 	if (c->scratchpad_count == 0u) return true;
 	c->scratchpads = calloc(c->scratchpad_count, sizeof(*c->scratchpads));
 	if (c->scratchpads == NULL ||
-	    !allocate(c, &c->scratchpad_array, (size_t)c->scratchpad_count * sizeof(uint64_t), 64u))
+			!allocate(c, &c->scratchpad_array, (size_t)c->scratchpad_count * sizeof(uint64_t), 64u))
 		return false;
 	uint64_t* addresses = c->scratchpad_array.cpu_address;
 	for (uint16_t i = 0u; i < c->scratchpad_count; i++) {
@@ -131,7 +133,7 @@ bool xhci_controller_start(struct xhci_controller* c, cap_id_t device_cap) {
 	}
 	wr(c, op + XHCI_OP_USBCMD, XHCI_CMD_HCRST);
 	if (!wait_bits(c, op + XHCI_OP_USBCMD, XHCI_CMD_HCRST, 0u, XHCI_TIMEOUT_MS) ||
-	    !wait_bits(c, op + XHCI_OP_USBSTS, XHCI_STS_CNR, 0u, XHCI_TIMEOUT_MS)) {
+			!wait_bits(c, op + XHCI_OP_USBSTS, XHCI_STS_CNR, 0u, XHCI_TIMEOUT_MS)) {
 		fprintf(stderr, "xhci: reset timeout\n");
 		return false;
 	}
@@ -140,18 +142,18 @@ bool xhci_controller_start(struct xhci_controller* c, cap_id_t device_cap) {
 		return false;
 	}
 	if (!xhci_dma_initialize(device_cap, &c->dma) || !enable_bus_master(c, device_cap) ||
-	    !allocate(c, &c->dcbaa, 256u * sizeof(uint64_t), 64u) || !allocate_scratchpads(c) ||
-	    !allocate(c, &c->erst, 16u, 64u) || !xhci_ring_allocate(&c->dma, &c->commands, true) ||
-	    !xhci_ring_allocate(&c->dma, &c->events, false)) {
+			!allocate(c, &c->dcbaa, 256u * sizeof(uint64_t), 64u) || !allocate_scratchpads(c) ||
+			!allocate(c, &c->erst, 16u, 64u) || !xhci_ring_allocate(&c->dma, &c->commands, true) ||
+			!xhci_ring_allocate(&c->dma, &c->events, false)) {
 		fprintf(stderr, "xhci: DMA/ring allocation failed\n");
 		return false;
 	}
 	if (!fits_address(c, c->commands.dma.device_address, c->commands.dma.size) ||
-	    !fits_address(c, c->events.dma.device_address, c->events.dma.size))
+			!fits_address(c, c->events.dma.device_address, c->events.dma.size))
 		return false;
 	uint64_t* erst = c->erst.cpu_address;
 	/* ERST entry: segment address (64), size in TRBs (16), reserved. */
-	erst[0]              = (uint64_t)c->events.dma.device_address;
+	erst[0] = (uint64_t)c->events.dma.device_address;
 	((uint32_t*)erst)[2] = XHCI_RING_TRBS;
 	if (!sync_device(&c->erst) || !sync_device(&c->dcbaa)) return false;
 	size_t ir = (size_t)c->runtime + XHCI_RT_IR0;
@@ -175,27 +177,30 @@ bool xhci_controller_start(struct xhci_controller* c, cap_id_t device_cap) {
 		uint32_t status = reg(c, op + XHCI_OP_USBSTS);
 		if ((status & XHCI_STS_HSE) != 0u || (status & XHCI_STS_HCH) != 0u) {
 			fprintf(stderr,
-			        "xhci: controller error during No Op (sts=%08x%s%s)\n",
-			        status,
-			        (status & XHCI_STS_HSE) != 0u ? ", host system error" : "",
-			        (status & XHCI_STS_HCH) != 0u ? ", halted" : "");
+					"xhci: controller error during No Op (sts=%08x%s%s)\n",
+					status,
+					(status & XHCI_STS_HSE) != 0u ? ", host system error" : "",
+					(status & XHCI_STS_HCH) != 0u ? ", halted" : "");
 			return false;
 		}
 		struct xhci_trb event;
 		if (xhci_ring_event(&c->events, &event)) {
 			uint64_t pointer = (uint64_t)event.parameter_low | ((uint64_t)event.parameter_high << 32u);
-			uint32_t type    = (event.control >> XHCI_TRB_TYPE_SHIFT) & 0x3fu;
-			uint32_t code    = event.status >> XHCI_TRB_COMPLETION_SHIFT;
+			uint32_t type = (event.control >> XHCI_TRB_TYPE_SHIFT) & 0x3fu;
+			uint32_t code = event.status >> XHCI_TRB_COMPLETION_SHIFT;
 			wr64(c,
-			     ir + XHCI_IR_ERDP,
-			     (uint64_t)c->events.dma.device_address + (uint64_t)c->events.dequeue * sizeof(struct xhci_trb) | 8u);
+					ir + XHCI_IR_ERDP,
+					(uint64_t)c->events.dma.device_address + (uint64_t)c->events.dequeue * sizeof(struct xhci_trb) |
+							8u);
 			if (type == XHCI_TRB_COMMAND_COMPLETION && pointer == command_address && code == XHCI_TRB_SUCCESS) {
 				RUNTIME_DEBUG_LOG("xhci: No Op command completed successfully\n");
 				return true;
 			}
 			if (type == XHCI_TRB_COMMAND_COMPLETION) {
-				fprintf(
-					stderr, "xhci: No Op command failed: code=%u pointer=%llx\n", code, (unsigned long long)pointer);
+				fprintf(stderr,
+						"xhci: No Op command failed: code=%u pointer=%llx\n",
+						code,
+						(unsigned long long)pointer);
 				return false;
 			}
 			continue; /* Port-status changes may arrive before the command completion. */
@@ -209,8 +214,8 @@ bool xhci_controller_start(struct xhci_controller* c, cap_id_t device_cap) {
 bool xhci_controller_next_event(struct xhci_controller* c, struct xhci_trb* event) {
 	if (!xhci_ring_event(&c->events, event)) return false;
 	wr64(c,
-	     (size_t)c->runtime + XHCI_RT_IR0 + XHCI_IR_ERDP,
-	     ((uint64_t)c->events.dma.device_address + (uint64_t)c->events.dequeue * sizeof(*event)) | 8u);
+			(size_t)c->runtime + XHCI_RT_IR0 + XHCI_IR_ERDP,
+			((uint64_t)c->events.dma.device_address + (uint64_t)c->events.dequeue * sizeof(*event)) | 8u);
 	return true;
 }
 

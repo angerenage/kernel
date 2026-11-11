@@ -3,41 +3,41 @@
 Test(cpu, topology_initializes_from_generic_descriptors) {
 	const struct cpu_init_info init_info[] = {
 		{
-		 .index           = 0u,
-		 .processor_id    = 10u,
-		 .arch_id         = 0x20u,
-		 .role            = CPU_ROLE_AP,
-		 .boot_stack_base = 0x210000u,
-		 .boot_stack_top  = 0x214000u,
-		 },
+			.index = 0u,
+			.processor_id = 10u,
+			.arch_id = 0x20u,
+			.role = CPU_ROLE_AP,
+			.boot_stack_base = 0x210000u,
+			.boot_stack_top = 0x214000u,
+		},
 		{
-		 .index           = 1u,
-		 .processor_id    = 11u,
-		 .arch_id         = 0x21u,
-		 .role            = CPU_ROLE_BSP,
-		 .boot_stack_base = 0x200000u,
-		 .boot_stack_top  = 0x204000u,
-		 },
+			.index = 1u,
+			.processor_id = 11u,
+			.arch_id = 0x21u,
+			.role = CPU_ROLE_BSP,
+			.boot_stack_base = 0x200000u,
+			.boot_stack_top = 0x204000u,
+		},
 		{
-		 .index           = 2u,
-		 .processor_id    = 12u,
-		 .arch_id         = 0x22u,
-		 .role            = CPU_ROLE_AP,
-		 .boot_stack_base = 0x220000u,
-		 .boot_stack_top  = 0x224000u,
-		 },
+			.index = 2u,
+			.processor_id = 12u,
+			.arch_id = 0x22u,
+			.role = CPU_ROLE_AP,
+			.boot_stack_base = 0x220000u,
+			.boot_stack_top = 0x224000u,
+		},
 	};
 	struct cpu_topology* topology;
-	struct cpu*          bsp;
-	struct cpu*          ap0;
-	struct cpu*          ap2;
+	struct cpu* bsp;
+	struct cpu* ap0;
+	struct cpu* ap2;
 
 	cr_assert(cpu_topology_init(init_info, 3u, 1u), "cpu_topology_init failed");
 
 	topology = cpu_topology_get();
-	bsp      = cpu_bsp();
-	ap0      = cpu_by_index(0u);
-	ap2      = cpu_by_index(2u);
+	bsp = cpu_bsp();
+	ap0 = cpu_by_index(0u);
+	ap2 = cpu_by_index(2u);
 
 	cr_assert_not_null(topology, "cpu_topology_get returned NULL");
 	cr_assert_eq(cpu_count(), 3u, "cpu_count did not match the generic topology input");
@@ -62,13 +62,13 @@ Test(cpu, topology_initializes_from_generic_descriptors) {
 Test(cpu_irq, topology_rejects_invalid_inputs_and_bootstrap_accessors_work) {
 	const struct cpu_init_info init_info[] = {
 		{
-		 .index           = 0u,
-		 .processor_id    = 1u,
-		 .arch_id         = 2u,
-		 .role            = CPU_ROLE_AP,
-		 .boot_stack_base = 0x200000u,
-		 .boot_stack_top  = 0x204000u,
-		 },
+			.index = 0u,
+			.processor_id = 1u,
+			.arch_id = 2u,
+			.role = CPU_ROLE_AP,
+			.boot_stack_base = 0x200000u,
+			.boot_stack_top = 0x204000u,
+		},
 	};
 
 	cr_assert(!cpu_topology_init(NULL, 1u, 0u), "cpu_topology_init accepted NULL init_info");
@@ -100,15 +100,15 @@ Test(cpu, topology_rejects_descriptor_indices_that_do_not_match_stable_slots) {
 	descriptors[0].index = 1u;
 	descriptors[1].index = 0u;
 	cr_assert_not(cpu_topology_init(descriptors, 2u, 0u),
-	              "topology must reject descriptors whose stable index does not match their slot");
+			"topology must reject descriptors whose stable index does not match their slot");
 
-	descriptors[0]       = cpu_test_valid_topology[0];
-	descriptors[1]       = cpu_test_valid_topology[1];
+	descriptors[0] = cpu_test_valid_topology[0];
+	descriptors[1] = cpu_test_valid_topology[1];
 	descriptors[1].index = 0u;
 	cr_assert_not(cpu_topology_init(descriptors, 2u, 0u), "topology must reject duplicate stable CPU indices");
 
-	descriptors[0]       = cpu_test_valid_topology[0];
-	descriptors[1]       = cpu_test_valid_topology[1];
+	descriptors[0] = cpu_test_valid_topology[0];
+	descriptors[1] = cpu_test_valid_topology[1];
 	descriptors[1].index = 64u;
 	cr_assert_not(cpu_topology_init(descriptors, 2u, 0u), "topology must reject a stable index outside CPU storage");
 
@@ -127,9 +127,9 @@ Test(cpu, topology_reinitialization_resets_publication_state) {
 	cr_assert(cpu_topology_init(cpu_test_valid_topology, 2u, 0u), "topology reinitialization failed");
 	cr_assert_eq(cpu_online_count(), 0u, "reinitialization must reset the published online count");
 	cr_assert_eq(
-		cpu_state_get(cpu_by_index(0u)), CPU_STATE_PRESENT, "reinitialization must reset CPU state to PRESENT");
+			cpu_state_get(cpu_by_index(0u)), CPU_STATE_PRESENT, "reinitialization must reset CPU state to PRESENT");
 	cr_assert_eq(
-		cpu_state_get(cpu_by_index(1u)), CPU_STATE_PRESENT, "reinitialization must reset every CPU descriptor");
+			cpu_state_get(cpu_by_index(1u)), CPU_STATE_PRESENT, "reinitialization must reset every CPU descriptor");
 
 	cpu_test_reset();
 }

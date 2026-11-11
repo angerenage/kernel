@@ -1,8 +1,8 @@
 #include <libc/string.h>
 
 void* memmove(void* dest, const void* src, size_t count) {
-	unsigned char*       dest_bytes = dest;
-	const unsigned char* src_bytes  = src;
+	unsigned char* dest_bytes = dest;
+	const unsigned char* src_bytes = src;
 
 	if (dest_bytes == src_bytes || count == 0) return dest;
 

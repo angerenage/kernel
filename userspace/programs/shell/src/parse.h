@@ -11,20 +11,20 @@ enum shell_redirection_kind {
 
 struct shell_redirection {
 	enum shell_redirection_kind kind;
-	const char*                 path;
+	const char* path;
 };
 
 struct shell_command {
-	char**                    argv; /* NULL-terminated; strings owned by shell_pipeline.storage. */
-	size_t                    argc;
+	char** argv; /* NULL-terminated; strings owned by shell_pipeline.storage. */
+	size_t argc;
 	struct shell_redirection* redirections;
-	size_t                    redirection_count;
+	size_t redirection_count;
 };
 
 struct shell_pipeline {
 	struct shell_command* commands;
-	size_t                command_count;
-	char*                 storage;
+	size_t command_count;
+	char* storage;
 };
 
 enum shell_parse_result {

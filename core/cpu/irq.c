@@ -1,5 +1,5 @@
-#include <core/cpu.h>
 #include <hal/interrupts.h>
+#include <core/cpu.h>
 
 struct irq_state irq_save_disable(void) {
 	struct irq_state state = {

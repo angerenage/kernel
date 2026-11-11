@@ -12,9 +12,10 @@
  * Current specification version: 1.0-beta
  */
 
+#include <stdint.h>
+
 #include <base/cap.h>
 #include <base/process.h>
-#include <stdint.h>
 
 #define LOADER_PROTOCOL_NAME "loader"
 
@@ -28,8 +29,8 @@
 	((cap_rights_t)(CAP_CALL | CAP_WAIT | CAP_MANAGE | CAP_READ | CAP_DESTROY | CAP_DELEGATE))
 
 enum loader_v1_op {
-	LOADER_V1_OP_LOAD   = 0u,
-	LOADER_V1_OP_RUN    = 1u,
+	LOADER_V1_OP_LOAD = 0u,
+	LOADER_V1_OP_RUN = 1u,
 	LOADER_V1_OP_CANCEL = 2u,
 };
 
@@ -51,9 +52,9 @@ struct loader_v1_request_header {
  */
 struct loader_v1_load_request {
 	struct loader_v1_request_header header;
-	cap_id_t                        file_cap;
-	uint32_t                        name_size;
-	uint32_t                        reserved;
+	cap_id_t file_cap;
+	uint32_t name_size;
+	uint32_t reserved;
 };
 
 /*
@@ -65,7 +66,7 @@ struct loader_v1_load_request {
  * caller may delegate capabilities to the prepared process before RUN.
  */
 struct loader_v1_load_response {
-	cap_id_t     load_cap; /* Rights: exactly LOADER_V1_LOAD_CAP_RIGHTS. */
+	cap_id_t load_cap; /* Rights: exactly LOADER_V1_LOAD_CAP_RIGHTS. */
 	process_id_t process_id;
 };
 
@@ -88,10 +89,10 @@ struct loader_v1_load_response {
  */
 struct loader_v1_run_request {
 	struct loader_v1_request_header header;
-	uint32_t                        argc;
-	uint32_t                        argv_size;
-	uint32_t                        capc;
-	uint32_t                        reserved[2];
+	uint32_t argc;
+	uint32_t argv_size;
+	uint32_t capc;
+	uint32_t reserved[2];
 };
 
 struct loader_v1_run_response {

@@ -1,14 +1,15 @@
 #include "syscall.h"
 
-#include <core/cpu.h>
-#include <core/exception.h>
-#include <core/mm.h>
-#include <hal/hcf.h>
-#include <hal/paging.h>
-#include <kernel/syscall.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <hal/hcf.h>
+#include <hal/paging.h>
+#include <core/cpu.h>
+#include <core/exception.h>
+#include <core/mm.h>
+#include <kernel/syscall.h>
 
 #include "interrupts/segments.h"
 #include "interrupts/vectors.h"
@@ -36,8 +37,8 @@
 
 #define X86_USER_RFLAGS_ALLOWED                                                                                        \
 	(X86_RFLAGS_CARRY | X86_RFLAGS_RESERVED_ONE | X86_RFLAGS_PARITY | X86_RFLAGS_AUXILIARY_CARRY | X86_RFLAGS_ZERO |   \
-	 X86_RFLAGS_SIGN | X86_RFLAGS_TRAP | X86_RFLAGS_INTERRUPT_ENABLE | X86_RFLAGS_DIRECTION | X86_RFLAGS_OVERFLOW |    \
-	 X86_RFLAGS_RESUME | X86_RFLAGS_ALIGNMENT_CHECK | X86_RFLAGS_ID)
+			X86_RFLAGS_SIGN | X86_RFLAGS_TRAP | X86_RFLAGS_INTERRUPT_ENABLE | X86_RFLAGS_DIRECTION |                   \
+			X86_RFLAGS_OVERFLOW | X86_RFLAGS_RESUME | X86_RFLAGS_ALIGNMENT_CHECK | X86_RFLAGS_ID)
 
 #define X86_SYSCALL_RFLAGS_MASK                                                                                        \
 	(X86_RFLAGS_TRAP | X86_RFLAGS_INTERRUPT_ENABLE | X86_RFLAGS_DIRECTION | X86_RFLAGS_ALIGNMENT_CHECK)
@@ -73,17 +74,17 @@ _Static_assert(offsetof(struct user_interrupt_frame, ss) == 168u, "x86_64 user f
 _Static_assert(sizeof(struct user_interrupt_frame) == 176u, "x86_64 user interrupt frame size mismatch");
 
 _Static_assert(offsetof(struct cpu, kernel_entry_stack_top) == X86_CPU_KERNEL_ENTRY_STACK_TOP_OFFSET,
-               "x86_64 syscall asm kernel entry stack offset mismatch");
+		"x86_64 syscall asm kernel entry stack offset mismatch");
 _Static_assert(offsetof(struct cpu, syscall_user_stack) == X86_CPU_SYSCALL_USER_STACK_OFFSET,
-               "x86_64 syscall asm user stack offset mismatch");
+		"x86_64 syscall asm user stack offset mismatch");
 _Static_assert((X86_SYSCALL_RFLAGS_MASK & X86_RFLAGS_TRAP) != 0u,
-               "IA32_FMASK must suppress userspace single-step state on kernel entry");
+		"IA32_FMASK must suppress userspace single-step state on kernel entry");
 
 static bool x86_64_user_instruction_pointer(uint64_t address) {
 	const struct hal_paging_info* paging = hal_paging_info();
 	if (paging == NULL) return false;
 	const uint64_t user_base = paging->minimum_leaf_size;
-	const uint64_t user_end  = user_base + MM_USER_ADDRESS_SPACE_SIZE;
+	const uint64_t user_end = user_base + MM_USER_ADDRESS_SPACE_SIZE;
 
 	return address >= user_base && address < user_end;
 }
@@ -92,7 +93,7 @@ static bool x86_64_user_stack_pointer(uint64_t address) {
 	const struct hal_paging_info* paging = hal_paging_info();
 	if (paging == NULL) return false;
 	const uint64_t user_base = paging->minimum_leaf_size;
-	const uint64_t user_end  = user_base + MM_USER_ADDRESS_SPACE_SIZE;
+	const uint64_t user_end = user_base + MM_USER_ADDRESS_SPACE_SIZE;
 
 	/* A stack pointer may legally point one byte beyond the last mapped stack byte. */
 	return address >= user_base && address <= user_end;
@@ -104,7 +105,7 @@ static bool x86_64_user_rflags_valid(uint64_t rflags) {
 
 void x86_64_syscall_init(void) {
 	uint64_t star =
-		((uint64_t)X86_GDT_KERNEL_CODE_SELECTOR << 32) | (((uint64_t)X86_GDT_USER_COMPAT_SELECTOR | 0x3ull) << 48);
+			((uint64_t)X86_GDT_KERNEL_CODE_SELECTOR << 32) | (((uint64_t)X86_GDT_USER_COMPAT_SELECTOR | 0x3ull) << 48);
 
 	write_msr(X86_IA32_STAR_MSR, star);
 	write_msr(X86_IA32_LSTAR_MSR, (uint64_t)(uintptr_t)x86_64_syscall_entry);
@@ -115,19 +116,19 @@ void x86_64_syscall_init(void) {
 
 bool x86_64_handle_syscall(struct interrupt_frame* frame) {
 	enum syscall_frame_action action;
-	syscall_result_t          result;
+	syscall_result_t result;
 
 	if (frame->vector != X86_SYSCALL_VECTOR) return false;
 
 	action = syscall_dispatch_user_frame((struct hal_userspace_return_frame*)frame,
-	                                     frame->rax,
-	                                     frame->rdi,
-	                                     frame->rsi,
-	                                     frame->rdx,
-	                                     frame->r10,
-	                                     frame->r8,
-	                                     frame->r9,
-	                                     &result);
+			frame->rax,
+			frame->rdi,
+			frame->rsi,
+			frame->rdx,
+			frame->r10,
+			frame->r8,
+			frame->r9,
+			&result);
 	if (action == SYSCALL_FRAME_RESTORED) return true;
 	frame->rax = result.value;
 	frame->rdx = (uint64_t)result.status;

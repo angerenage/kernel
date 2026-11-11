@@ -1,24 +1,25 @@
 #include "cache.h"
 
-#include <core/cpu.h>
-#include <core/lock.h>
-#include <core/spinlock.h>
+#include <stdint.h>
+
 #include <hal/cache.h>
 #include <hal/cpu.h>
 #include <hal/hcf.h>
-#include <stdint.h>
+#include <core/cpu.h>
+#include <core/lock.h>
+#include <core/spinlock.h>
 
 #define AARCH64_CACHE_MAX_CPUS 64u
 
 struct aarch64_cache_sync_request {
-	size_t   source_index;
+	size_t source_index;
 	uint64_t generation;
 };
 
 static struct aarch64_cache_sync_request aarch64_cache_request;
-static uint64_t                          aarch64_cache_ack[AARCH64_CACHE_MAX_CPUS];
-static struct spinlock                   aarch64_cache_sync_lock =
-	SPINLOCK_INIT_CLASS("cache_sync_lock", SPINLOCK_ORDER_NONE, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
+static uint64_t aarch64_cache_ack[AARCH64_CACHE_MAX_CPUS];
+static struct spinlock aarch64_cache_sync_lock = SPINLOCK_INIT_CLASS(
+		"cache_sync_lock", SPINLOCK_ORDER_NONE, SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
 
 static size_t aarch64_data_cache_line_size(void) {
 	uint64_t ctr;
@@ -31,12 +32,12 @@ static bool aarch64_cache_sync_dma_range(void* address, size_t size, bool for_de
 	uintptr_t first;
 	uintptr_t end;
 	uintptr_t limit;
-	size_t    line;
+	size_t line;
 	if (size == 0u) return true;
 	if (address == NULL || size > UINTPTR_MAX - start) return false;
 	line = aarch64_data_cache_line_size();
 	if (line == 0u || (line & (line - 1u)) != 0u) return false;
-	end   = start + size;
+	end = start + size;
 	first = start & ~((uintptr_t)line - 1u);
 	if (end > UINTPTR_MAX - (line - 1u)) return false;
 	limit = (end + line - 1u) & ~((uintptr_t)line - 1u);
@@ -59,11 +60,11 @@ bool hal_cache_sync_for_cpu(void* address, size_t size) {
 }
 
 void hal_cache_sync_executable_range(void* address, size_t size) {
-	uint64_t  ctr;
+	uint64_t ctr;
 	uintptr_t start = (uintptr_t)address;
-	uintptr_t end   = start + size;
-	size_t    dcache_line;
-	size_t    icache_line;
+	uintptr_t end = start + size;
+	size_t dcache_line;
+	size_t icache_line;
 
 	__asm__ volatile("mrs %0, ctr_el0" : "=r"(ctr));
 	dcache_line = (size_t)4u << ((ctr >> 16u) & 0xfu);
@@ -80,17 +81,17 @@ void hal_cache_sync_executable_range(void* address, size_t size) {
 }
 
 void aarch64_cache_poll_sync(void) {
-	struct cpu*      cpu = cpu_current();
-	uint64_t         generation;
+	struct cpu* cpu = cpu_current();
+	uint64_t generation;
 	struct irq_state state;
 
 	if (cpu == NULL || cpu->index >= AARCH64_CACHE_MAX_CPUS) return;
 	/* A scheduler SGI must not acknowledge a newer generation while this
 	 * poll is suspended, then have its acknowledgement overwritten here. */
-	state      = irq_save_disable();
+	state = irq_save_disable();
 	generation = __atomic_load_n(&aarch64_cache_request.generation, __ATOMIC_ACQUIRE);
 	if (generation == 0u || cpu->index == aarch64_cache_request.source_index ||
-	    __atomic_load_n(&aarch64_cache_ack[cpu->index], __ATOMIC_ACQUIRE) == generation) {
+			__atomic_load_n(&aarch64_cache_ack[cpu->index], __ATOMIC_ACQUIRE) == generation) {
 		irq_restore(state);
 		return;
 	}
@@ -101,16 +102,16 @@ void aarch64_cache_poll_sync(void) {
 
 void hal_cache_sync_executable_range_all_cpus(void* address, size_t size) {
 	const struct cpu_topology* topology;
-	struct cpu*                current;
-	struct irq_state           state;
-	uint64_t                   targets = 0u;
-	uint64_t                   generation;
+	struct cpu* current;
+	struct irq_state state;
+	uint64_t targets = 0u;
+	uint64_t generation;
 
-	state    = spinlock_lock_irqsave(&aarch64_cache_sync_lock);
-	current  = cpu_current();
+	state = spinlock_lock_irqsave(&aarch64_cache_sync_lock);
+	current = cpu_current();
 	topology = cpu_topology_get();
 	if (current == NULL || topology == NULL || topology->cpus == NULL || topology->cpu_count == 0u ||
-	    topology->cpu_count > AARCH64_CACHE_MAX_CPUS || current->index >= AARCH64_CACHE_MAX_CPUS)
+			topology->cpu_count > AARCH64_CACHE_MAX_CPUS || current->index >= AARCH64_CACHE_MAX_CPUS)
 		hcf();
 
 	/* DC CVAU and IC IVAU make the cache effects visible to the Inner

@@ -1,10 +1,11 @@
 #pragma once
 
-#include <base/cap.h>
-#include <base/process.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/cap.h>
+#include <base/process.h>
 
 /* Creates the loader object. */
 void kernel_capability_loader_init(void);

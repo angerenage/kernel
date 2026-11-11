@@ -1,5 +1,7 @@
 #include "signal.h"
 
+#include <string.h>
+
 #include <base/cap.h>
 #include <base/signal.h>
 #include <base/syscall.h>
@@ -7,11 +9,10 @@
 #include <core/signal.h>
 #include <core/user_upcall.h>
 #include <core/uthread.h>
-#include <string.h>
 
 struct kernel_signal_reference {
 	struct cap_object* object;
-	struct signal*     signal;
+	struct signal* signal;
 };
 
 static enum signal_op signal_op_from_request(const void* request, size_t request_size) {
@@ -46,7 +47,7 @@ static syscall_result_t signal_result_to_syscall(enum signal_result result) {
 
 static syscall_result_t signal_set_handler(const struct cap_request* req, struct signal* signal) {
 	const struct signal_set_handler_request* request;
-	struct uthread*                          current;
+	struct uthread* current;
 
 	if (req->request_size != sizeof(*request)) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -74,32 +75,32 @@ static syscall_result_t signal_clear_handler(const struct cap_request* req, stru
 
 static syscall_result_t signal_read_info(const struct cap_request* req, struct signal* signal) {
 	struct signal_read_response response;
-	struct uthread*             current;
+	struct uthread* current;
 
 	if (req->request_size != sizeof(struct signal_read_request) || req->response == NULL ||
-	    req->response_capacity < sizeof(response)) {
+			req->response_capacity < sizeof(response)) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
-	current  = uthread_current();
+	current = uthread_current();
 	response = (struct signal_read_response){
-		.generation                  = signal_generation(signal),
-		.handler_count               = (uint64_t)signal_handler_count(signal),
-		.wait_subscription_count     = (uint64_t)signal_wait_subscription_count(signal),
-		.blocked_waiter_count        = (uint64_t)signal_blocked_waiter_count(signal),
+		.generation = signal_generation(signal),
+		.handler_count = (uint64_t)signal_handler_count(signal),
+		.wait_subscription_count = (uint64_t)signal_wait_subscription_count(signal),
+		.blocked_waiter_count = (uint64_t)signal_blocked_waiter_count(signal),
 		.caller_upcall_pending_count = (uint64_t)uthread_upcall_pending_count(current),
 		.caller_upcall_dropped_count = uthread_upcall_dropped_count(current),
-		.caller_upcall_capacity      = USER_UPCALL_QUEUE_CAPACITY,
-		.flags                       = signal_has_value(signal) ? SIGNAL_READ_FLAG_HAS_VALUE : SIGNAL_READ_FLAG_NONE,
+		.caller_upcall_capacity = USER_UPCALL_QUEUE_CAPACITY,
+		.flags = signal_has_value(signal) ? SIGNAL_READ_FLAG_HAS_VALUE : SIGNAL_READ_FLAG_NONE,
 	};
 	memcpy(req->response, &response, sizeof(response));
 	return syscall_result_ok(sizeof(response));
 }
 
 static syscall_result_t signal_handler(const struct cap_request* req) {
-	struct signal*   signal;
-	enum signal_op   op;
-	cap_rights_t     required_rights;
+	struct signal* signal;
+	enum signal_op op;
+	cap_rights_t required_rights;
 	syscall_result_t result;
 
 	if (req == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -160,10 +161,10 @@ static syscall_result_t signal_handler(const struct cap_request* req) {
 }
 
 static syscall_result_t kernel_signal_acquire(cap_id_t cap_id, process_id_t caller, cap_rights_t required_rights,
-                                              struct kernel_signal_reference* out_reference) {
+		struct kernel_signal_reference* out_reference) {
 	struct cap_object* object;
-	struct signal*     signal;
-	enum cap_result    cap_result;
+	struct signal* signal;
+	enum cap_result cap_result;
 
 	if (out_reference == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	*out_reference = (struct kernel_signal_reference){0};
@@ -204,27 +205,27 @@ static void kernel_signal_release(struct kernel_signal_reference* reference) {
 	*reference = (struct kernel_signal_reference){0};
 }
 
-syscall_result_t kernel_signal_retain_cap(cap_id_t cap, process_id_t caller, cap_rights_t required_rights,
-                                          struct signal** out_signal) {
+syscall_result_t kernel_signal_retain_cap(
+		cap_id_t cap, process_id_t caller, cap_rights_t required_rights, struct signal** out_signal) {
 	struct kernel_signal_reference reference;
-	syscall_result_t               result;
+	syscall_result_t result;
 
 	if (out_signal == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	*out_signal = NULL;
-	result      = kernel_signal_acquire(cap, caller, required_rights, &reference);
+	result = kernel_signal_acquire(cap, caller, required_rights, &reference);
 	if (result.status != SYSCALL_STATUS_OK) return result;
-	*out_signal      = reference.signal;
+	*out_signal = reference.signal;
 	reference.signal = NULL;
 	kernel_signal_release(&reference);
 	return syscall_result_ok(0u);
 }
 
 syscall_result_t kernel_signal_send(cap_id_t cap, process_id_t caller, const struct signal_payload* payload,
-                                    uint32_t flags, struct signal_send_response* out_response) {
+		uint32_t flags, struct signal_send_response* out_response) {
 	struct kernel_signal_reference reference;
-	struct signal_send_response    response = {0};
-	syscall_result_t               result;
-	enum signal_result             signal_result;
+	struct signal_send_response response = {0};
+	syscall_result_t result;
+	enum signal_result signal_result;
 
 	if (payload == NULL || (flags & ~((uint32_t)SIGNAL_SEND_FLAG_COALESCE)) != 0u) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -233,11 +234,11 @@ syscall_result_t kernel_signal_send(cap_id_t cap, process_id_t caller, const str
 	if (result.status != SYSCALL_STATUS_OK) return result;
 	if ((flags & (uint32_t)SIGNAL_SEND_FLAG_COALESCE) != 0u) {
 		signal_result = signal_send_coalesced(
-			reference.signal, caller, payload, &response.receiver_count, &response.delivery_count);
+				reference.signal, caller, payload, &response.receiver_count, &response.delivery_count);
 	}
 	else {
 		signal_result =
-			signal_send(reference.signal, caller, payload, &response.receiver_count, &response.delivery_count);
+				signal_send(reference.signal, caller, payload, &response.receiver_count, &response.delivery_count);
 	}
 	kernel_signal_release(&reference);
 	if (signal_result != SIGNAL_OK) return signal_result_to_syscall(signal_result);
@@ -247,8 +248,8 @@ syscall_result_t kernel_signal_send(cap_id_t cap, process_id_t caller, const str
 
 syscall_result_t kernel_signal_read(cap_id_t cap, process_id_t caller, struct signal_message* out_message) {
 	struct kernel_signal_reference reference;
-	syscall_result_t               result;
-	enum signal_result             signal_result;
+	syscall_result_t result;
+	enum signal_result signal_result;
 
 	if (out_message == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	result = kernel_signal_acquire(cap, caller, CAP_READ, &reference);
@@ -262,8 +263,8 @@ syscall_result_t kernel_signal_read(cap_id_t cap, process_id_t caller, struct si
 
 syscall_result_t kernel_signal_wait(cap_id_t cap, process_id_t caller, struct signal_message* out_message) {
 	struct kernel_signal_reference reference;
-	syscall_result_t               result;
-	enum signal_result             signal_result;
+	syscall_result_t result;
+	enum signal_result signal_result;
 
 	if (out_message == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	result = kernel_signal_acquire(cap, caller, CAP_WAIT, &reference);
@@ -275,8 +276,8 @@ syscall_result_t kernel_signal_wait(cap_id_t cap, process_id_t caller, struct si
 
 syscall_result_t kernel_signal_try_wait(cap_id_t cap, process_id_t caller, struct signal_message* out_message) {
 	struct kernel_signal_reference reference;
-	syscall_result_t               result;
-	enum signal_result             signal_result;
+	syscall_result_t result;
+	enum signal_result signal_result;
 
 	if (out_message == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	result = kernel_signal_acquire(cap, caller, CAP_WAIT, &reference);
@@ -290,14 +291,14 @@ syscall_result_t kernel_signal_try_wait(cap_id_t cap, process_id_t caller, struc
 
 cap_id_t kernel_signal_grant(struct signal* target, process_id_t recipient, cap_rights_t rights) {
 	struct cap_object* object = NULL;
-	cap_object_id_t    object_id;
-	signal_id_t        id;
-	struct signal*     held;
-	cap_id_t           result_cap     = CAP_ID_INVALID;
-	bool               object_created = false;
+	cap_object_id_t object_id;
+	signal_id_t id;
+	struct signal* held;
+	cap_id_t result_cap = CAP_ID_INVALID;
+	bool object_created = false;
 
 	if (target == NULL || recipient == PROCESS_PID_INVALID) return CAP_ID_INVALID;
-	id   = signal_id(target);
+	id = signal_id(target);
 	held = signal_acquire(id);
 	if (held != target) {
 		if (held != NULL) signal_release(held);
@@ -329,5 +330,5 @@ out:
 
 cap_id_t kernel_signal_grant_full(struct signal* target, process_id_t recipient) {
 	return kernel_signal_grant(
-		target, recipient, CAP_CALL | CAP_SIGNAL | CAP_READ | CAP_WAIT | CAP_MAP | CAP_DESTROY | CAP_DELEGATE);
+			target, recipient, CAP_CALL | CAP_SIGNAL | CAP_READ | CAP_WAIT | CAP_MAP | CAP_DESTROY | CAP_DELEGATE);
 }

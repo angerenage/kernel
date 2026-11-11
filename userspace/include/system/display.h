@@ -1,9 +1,10 @@
 #pragma once
 
+#include <stddef.h>
+
 #include <base/cap.h>
 #include <base/display.h>
 #include <base/syscall.h>
-#include <stddef.h>
 
 /* Install the standard Stream capabilities extracted from process_startup_info. */
 void display_set_standard_streams(cap_id_t stdin_cap, cap_id_t stdout_cap, cap_id_t stderr_cap);

@@ -1,9 +1,10 @@
-#include <base/math.h>
 #include <libc/stdlib.h>
 #include <string.h>
 
+#include <base/math.h>
+
 void* calloc(size_t nmemb, size_t size) {
-	void*  ptr;
+	void* ptr;
 	size_t total;
 
 	if (mul_overflow_size(nmemb, size, &total)) return NULL;

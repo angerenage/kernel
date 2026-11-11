@@ -1,10 +1,12 @@
-#include <base/trace.h>
-#include <core/syscall.h>
-#include <criterion/criterion.h>
 #include <stdint.h>
 
+#include <base/trace.h>
+#include <core/syscall.h>
+
+#include <criterion/criterion.h>
+
 Test(syscall, trace_register_validates_arguments_when_tracing_is_disabled) {
-	const char       name[] = "test";
+	const char name[] = "test";
 	syscall_result_t result;
 
 	result = syscall_dispatch(SYSCALL_TRACE_REGISTER, 0u, sizeof(name) - 1u, 0u, 0u, 0u, 0u);

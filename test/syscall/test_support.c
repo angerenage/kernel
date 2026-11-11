@@ -7,7 +7,7 @@
 
 static uint8_t syscall_test_arena[SYSCALL_TEST_ARENA_SIZE] __attribute__((aligned(TEST_MAPPING_GRANULE)));
 static uint8_t syscall_test_heap[SYSCALL_TEST_HEAP_SIZE] __attribute__((aligned(TEST_MAPPING_GRANULE)));
-static size_t  syscall_test_heap_offset;
+static size_t syscall_test_heap_offset;
 
 bool heap_grow_region(size_t minimum_size, void** out_base, size_t* out_size) {
 	size_t bytes;
@@ -16,12 +16,12 @@ bool heap_grow_region(size_t minimum_size, void** out_base, size_t* out_size) {
 	if (out_base == NULL || out_size == NULL) return false;
 	*out_base = NULL;
 	*out_size = 0u;
-	bytes     = minimum_size;
+	bytes = minimum_size;
 	for (;;) {
 		offset = __atomic_load_n(&syscall_test_heap_offset, __ATOMIC_ACQUIRE);
 		if (bytes > SYSCALL_TEST_HEAP_SIZE - offset) return false;
 		if (__atomic_compare_exchange_n(
-				&syscall_test_heap_offset, &offset, offset + bytes, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+					&syscall_test_heap_offset, &offset, offset + bytes, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
 			*out_base = syscall_test_heap + offset;
 			*out_size = bytes;
 			return true;
@@ -69,11 +69,11 @@ struct process* syscall_test_spawn_process(const char* name) {
 
 	cr_assert_eq(process_create(&process, name), PROCESS_OK);
 	cr_assert_not_null(process);
-	cr_assert_eq(process_spawn_thread(
-					 process,
-					 &main_thread,
-					 &(const struct process_thread_params){.name = name, .user_entry = 0x300000u, .detached = false}),
-	             PROCESS_THREAD_SPAWN_OK);
+	cr_assert_eq(
+			process_spawn_thread(process,
+					&main_thread,
+					&(const struct process_thread_params){.name = name, .user_entry = 0x300000u, .detached = false}),
+			PROCESS_THREAD_SPAWN_OK);
 	return process;
 }
 
@@ -82,7 +82,7 @@ void syscall_test_thread_entry(void* arg) {
 }
 
 syscall_result_t syscall_test_cap_handler(const struct cap_request* request) {
-	struct syscall_test_cap_request  input;
+	struct syscall_test_cap_request input;
 	struct syscall_test_cap_response output;
 
 	if (request == NULL || request->request == NULL || request->request_size < sizeof(input))

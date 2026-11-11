@@ -22,13 +22,15 @@ void thread_regression_reset(void) {
 }
 
 void thread_regression_init(struct thread* thread, const char* name, uintptr_t stack_base, int32_t priority) {
-	const struct thread_create_params params = {.name              = name,
-	                                            .entry             = thread_test_entry,
-	                                            .arg               = NULL,
-	                                            .kernel_stack_base = stack_base,
-	                                            .kernel_stack_top  = stack_base + 0x4000u,
-	                                            .preferred_cpu     = NULL,
-	                                            .base_priority     = priority,
-	                                            .detached          = false};
+	const struct thread_create_params params = {
+		.name = name,
+		.entry = thread_test_entry,
+		.arg = NULL,
+		.kernel_stack_base = stack_base,
+		.kernel_stack_top = stack_base + 0x4000u,
+		.preferred_cpu = NULL,
+		.base_priority = priority,
+		.detached = false
+	};
 	cr_assert(thread_init(thread, &params), "thread_init failed for %s", name);
 }

@@ -9,10 +9,10 @@ struct ata_transport;
 struct sata_device_info {
 	uint64_t sector_count;
 	uint32_t logical_sector_size;
-	bool     dma;
-	bool     lba48;
-	bool     flush_cache;
-	bool     flush_cache_ext;
+	bool dma;
+	bool lba48;
+	bool flush_cache;
+	bool flush_cache_ext;
 };
 
 enum sata_identify_result {
@@ -22,5 +22,5 @@ enum sata_identify_result {
 };
 
 /* Issue IDENTIFY DEVICE and report the disk identity and basic capabilities. */
-enum sata_identify_result sata_identify_device(const struct ata_transport* transport,
-                                               struct sata_device_info*    out_info);
+enum sata_identify_result sata_identify_device(
+		const struct ata_transport* transport, struct sata_device_info* out_info);

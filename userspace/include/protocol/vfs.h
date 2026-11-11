@@ -17,49 +17,49 @@
 #define VFS_SERVICE_NAME "root"
 
 enum vfs_op {
-	VFS_OP_OPEN             = 0u,
-	VFS_OP_CREATE_FILE      = 1u,
+	VFS_OP_OPEN = 0u,
+	VFS_OP_CREATE_FILE = 1u,
 	VFS_OP_CREATE_DIRECTORY = 2u,
-	VFS_OP_REMOVE           = 3u,
-	VFS_OP_RENAME           = 4u,
-	VFS_OP_MOUNT            = 5u,
-	VFS_OP_UNMOUNT          = 6u,
+	VFS_OP_REMOVE = 3u,
+	VFS_OP_RENAME = 4u,
+	VFS_OP_MOUNT = 5u,
+	VFS_OP_UNMOUNT = 6u,
 };
 
 /* Followed by path_size bytes containing one normalized absolute path. */
 struct vfs_open_request {
 	struct filesystem_request_header header;
-	uint32_t                         path_size;
-	cap_rights_t                     rights;
-	uint8_t                          path[];
+	uint32_t path_size;
+	cap_rights_t rights;
+	uint8_t path[];
 };
 
 /* Followed by path_size bytes containing one normalized absolute path. */
 struct vfs_path_request {
 	struct filesystem_request_header header;
-	uint32_t                         path_size;
-	uint8_t                          path[];
+	uint32_t path_size;
+	uint8_t path[];
 };
 
 /* Followed by old_path_size bytes and then new_path_size bytes. */
 struct vfs_rename_request {
 	struct filesystem_request_header header;
-	uint32_t                         old_path_size;
-	uint32_t                         new_path_size;
-	uint32_t                         reserved;
-	uint8_t                          paths[];
+	uint32_t old_path_size;
+	uint32_t new_path_size;
+	uint32_t reserved;
+	uint8_t paths[];
 };
 
 enum vfs_directory_op {
-	VFS_DIRECTORY_OP_INFO             = 0u,
-	VFS_DIRECTORY_OP_ENUMERATE        = 1u,
-	VFS_DIRECTORY_OP_OPEN             = 4u,
-	VFS_DIRECTORY_OP_CREATE_FILE      = 5u,
+	VFS_DIRECTORY_OP_INFO = 0u,
+	VFS_DIRECTORY_OP_ENUMERATE = 1u,
+	VFS_DIRECTORY_OP_OPEN = 4u,
+	VFS_DIRECTORY_OP_CREATE_FILE = 5u,
 	VFS_DIRECTORY_OP_CREATE_DIRECTORY = 6u,
-	VFS_DIRECTORY_OP_REMOVE           = 7u,
-	VFS_DIRECTORY_OP_RENAME           = 8u,
-	VFS_DIRECTORY_OP_REMOVE_DEFERRED  = 9u,
-	VFS_DIRECTORY_OP_SYNC             = 10u,
+	VFS_DIRECTORY_OP_REMOVE = 7u,
+	VFS_DIRECTORY_OP_RENAME = 8u,
+	VFS_DIRECTORY_OP_REMOVE_DEFERRED = 9u,
+	VFS_DIRECTORY_OP_SYNC = 10u,
 };
 
 enum vfs_mount_flag {
@@ -69,10 +69,10 @@ enum vfs_mount_flag {
 /* Followed by path_size bytes containing one normalized absolute path. */
 struct vfs_mount_request {
 	struct filesystem_request_header header;
-	uint32_t                         path_size;
-	uint32_t                         flags;
-	cap_id_t                         root_capability;
-	uint8_t                          path[];
+	uint32_t path_size;
+	uint32_t flags;
+	cap_id_t root_capability;
+	uint8_t path[];
 };
 
 /*

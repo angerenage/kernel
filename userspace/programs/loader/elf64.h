@@ -1,8 +1,9 @@
 #pragma once
 
-#include <base/cap.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/cap.h>
 
 enum elf64_parse_result {
 	ELF64_PARSE_OK = 0,
@@ -14,9 +15,9 @@ enum elf64_parse_result {
 };
 
 enum elf64_segment_flag {
-	ELF64_SEGMENT_EXEC  = 1u << 0,
+	ELF64_SEGMENT_EXEC = 1u << 0,
 	ELF64_SEGMENT_WRITE = 1u << 1,
-	ELF64_SEGMENT_READ  = 1u << 2,
+	ELF64_SEGMENT_READ = 1u << 2,
 };
 
 struct elf64_segment {
@@ -29,9 +30,9 @@ struct elf64_segment {
 };
 
 struct elf64_image {
-	uint64_t              entry;
+	uint64_t entry;
 	struct elf64_segment* segments;
-	size_t                segment_count;
+	size_t segment_count;
 };
 
 /* Parse and validate a static ELF64 executable exposed by a file capability. */

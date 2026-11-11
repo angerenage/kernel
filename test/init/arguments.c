@@ -1,11 +1,12 @@
 #include "../../userspace/programs/init/arguments.h"
 
-#include <criterion/criterion.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include <criterion/criterion.h>
+
 Test(init_arguments, validates_exact_argument_payload) {
-	static const char valid[]        = "first\0second=value\0third\0";
+	static const char valid[] = "first\0second=value\0third\0";
 	static const char unterminated[] = {'f', 'i', 'r', 's', 't'};
 
 	cr_assert(init_arguments_valid(3u, valid, sizeof(valid) - 1u));
@@ -19,8 +20,8 @@ Test(init_arguments, validates_exact_argument_payload) {
 
 Test(init_arguments, creates_a_vector_without_copying_strings) {
 	static const char payload[] = "first\0second=value\0third\0";
-	struct init_state init      = {.argc = 3u, .argv_data = payload, .argv_size = sizeof(payload) - 1u};
-	const char**      argv      = NULL;
+	struct init_state init = {.argc = 3u, .argv_data = payload, .argv_size = sizeof(payload) - 1u};
+	const char** argv = NULL;
 
 	cr_assert(init_arguments_vector(&init, &argv));
 	cr_assert_not_null(argv);
@@ -34,9 +35,9 @@ Test(init_arguments, creates_a_vector_without_copying_strings) {
 }
 
 Test(init_arguments, handles_empty_and_invalid_state) {
-	struct init_state empty   = {0};
+	struct init_state empty = {0};
 	struct init_state invalid = {.argc = 1u, .argv_data = "missing terminator", .argv_size = 4u};
-	const char**      argv    = (const char**)1;
+	const char** argv = (const char**)1;
 
 	cr_assert(init_arguments_vector(&empty, &argv));
 	cr_assert_null(argv);

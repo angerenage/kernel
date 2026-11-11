@@ -38,22 +38,22 @@ struct thread;
  * - boot_stack_*: stack bounds used during CPU bring-up before normal scheduling exists
  */
 struct cpu {
-	size_t         index;
-	uint64_t       processor_id;
-	uint64_t       arch_id;
-	enum cpu_role  role;
+	size_t index;
+	uint64_t processor_id;
+	uint64_t arch_id;
+	enum cpu_role role;
 	enum cpu_state state;
 	struct thread* current_thread;
-	uintptr_t      kernel_entry_stack_top;
-	uintptr_t      syscall_user_stack;
-	bool           reschedule_requested;
-	bool           interrupts_ready;
-	uint32_t       irq_disable_depth;
-	uint32_t       exception_depth;
-	uintptr_t      boot_stack_base;
-	uintptr_t      boot_stack_top;
+	uintptr_t kernel_entry_stack_top;
+	uintptr_t syscall_user_stack;
+	bool reschedule_requested;
+	bool interrupts_ready;
+	uint32_t irq_disable_depth;
+	uint32_t exception_depth;
+	uintptr_t boot_stack_base;
+	uintptr_t boot_stack_top;
 	struct thread* deferred_reap_thread;
-	bool           context_switch_in_progress;
+	bool context_switch_in_progress;
 #if CORE_LOCK_DEBUG
 	uint32_t lock_depth;
 	uint32_t lock_order_stack[CPU_DEBUG_LOCK_DEPTH];
@@ -63,19 +63,19 @@ struct cpu {
 /* Global CPU inventory discovered during boot. */
 struct cpu_topology {
 	struct cpu* cpus;
-	size_t      cpu_count;
-	size_t      online_count;
-	size_t      bsp_index;
+	size_t cpu_count;
+	size_t online_count;
+	size_t bsp_index;
 };
 
 /* Boot-time description used to seed the cpu_topology. */
 struct cpu_init_info {
-	size_t        index;
-	uint64_t      processor_id;
-	uint64_t      arch_id;
+	size_t index;
+	uint64_t processor_id;
+	uint64_t arch_id;
 	enum cpu_role role;
-	uintptr_t     boot_stack_base;
-	uintptr_t     boot_stack_top;
+	uintptr_t boot_stack_base;
+	uintptr_t boot_stack_top;
 };
 
 /* Install a full CPU topology discovered from the boot environment. Resets online_count to zero. */

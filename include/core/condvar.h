@@ -1,10 +1,11 @@
 #pragma once
 
-#include <core/mutex.h>
-#include <core/thread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <core/mutex.h>
+#include <core/thread.h>
 
 /* Sleepable condition variable backed by a scheduler wait queue. */
 struct condvar {

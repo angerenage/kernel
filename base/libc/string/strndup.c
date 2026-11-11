@@ -3,7 +3,7 @@
 
 char* strndup(const char* str, size_t size) {
 	size_t length = 0u;
-	char*  copy;
+	char* copy;
 
 	while (length < size && str[length] != '\0') {
 		length++;

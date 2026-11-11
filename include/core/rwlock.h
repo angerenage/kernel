@@ -1,17 +1,18 @@
 #pragma once
 
-#include <core/spinlock.h>
-#include <core/thread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
+#include <core/spinlock.h>
+#include <core/thread.h>
+
 /* Sleepable reader-writer lock with writer preference once a writer queues. */
 struct rwlock {
-	struct spinlock          lock;
-	size_t                   reader_count;
-	size_t                   waiting_writers;
-	struct thread*           writer;
+	struct spinlock lock;
+	size_t reader_count;
+	size_t waiting_writers;
+	struct thread* writer;
 	struct thread_wait_queue readers;
 	struct thread_wait_queue writers;
 };

@@ -1,8 +1,9 @@
 #pragma once
 
+#include <stdbool.h>
+
 #include <base/cap.h>
 #include <base/process.h>
-#include <stdbool.h>
 
 /* Create the x86_64 root I/O-port range capability object. */
 bool kernel_capability_io_ports_init(void);

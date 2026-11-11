@@ -1,13 +1,14 @@
 #pragma once
 
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
 #include <base/process.h>
 #include <core/address_space.h>
 #include <core/capability.h>
 #include <core/channel.h>
 #include <core/thread.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
 
 struct cpu;
 struct io_port_state;
@@ -87,33 +88,33 @@ enum process_thread_spawn_result {
 
 struct process_spawn_params {
 	const char* name;
-	uintptr_t   user_entry;
+	uintptr_t user_entry;
 	const void* arg_data;
-	size_t      arg_size;
-	size_t      user_stack_size;
+	size_t arg_size;
+	size_t user_stack_size;
 	struct cpu* preferred_cpu;
 };
 
 struct process_thread_params {
 	const char* name;
-	uintptr_t   user_entry;
+	uintptr_t user_entry;
 	const void* arg_data;
-	size_t      arg_size;
-	size_t      user_stack_size;
+	size_t arg_size;
+	size_t user_stack_size;
 	struct cpu* preferred_cpu;
-	bool        detached;
+	bool detached;
 };
 
 /* Aggregate state of one process: its address space, threads, and lifecycle bookkeeping. */
 struct process {
 	process_id_t pid;
 	/* Monotonic identity used to keep reused PIDs separate in traces. */
-	uint64_t           trace_id;
-	const char*        name;
+	uint64_t trace_id;
+	const char* name;
 	enum process_state state;
 	/* Exit code produced when the process terminates. */
 	uintptr_t exit_code;
-	size_t    thread_count;
+	size_t thread_count;
 	/* Parent process that created this one, or NULL for the initial process. */
 	struct process* parent;
 	struct uthread* main_thread;
@@ -146,8 +147,8 @@ struct process {
 };
 
 /* Prepare a process thread without attaching it to the process or making it runnable. */
-enum process_thread_spawn_result process_prepare_thread(struct process* process, struct uthread** out_thread,
-                                                        const struct process_thread_params* params);
+enum process_thread_spawn_result process_prepare_thread(
+		struct process* process, struct uthread** out_thread, const struct process_thread_params* params);
 
 /* Attach and schedule a thread returned by process_prepare_thread(). */
 enum process_thread_spawn_result process_commit_thread(struct process* process, struct uthread* thread);
@@ -156,12 +157,12 @@ enum process_thread_spawn_result process_commit_thread(struct process* process, 
 bool process_abort_thread(struct process* process, struct uthread* thread);
 
 /* Allocate and queue a userspace thread. out_thread remains NULL for detached threads. */
-enum process_thread_spawn_result process_spawn_thread(struct process* process, struct uthread** out_thread,
-                                                      const struct process_thread_params* params);
+enum process_thread_spawn_result process_spawn_thread(
+		struct process* process, struct uthread** out_thread, const struct process_thread_params* params);
 
 /* Reserve and prepare the unique initial thread without attaching or scheduling it. */
-enum process_thread_spawn_result process_prepare_main_thread(struct process* process, struct uthread** out_thread,
-                                                             const struct process_thread_params* params);
+enum process_thread_spawn_result process_prepare_main_thread(
+		struct process* process, struct uthread** out_thread, const struct process_thread_params* params);
 
 /* Attach and schedule a main thread returned by process_prepare_main_thread(). */
 enum process_thread_spawn_result process_commit_main_thread(struct process* process, struct uthread* thread);
@@ -170,12 +171,12 @@ enum process_thread_spawn_result process_commit_main_thread(struct process* proc
 bool process_abort_main_thread(struct process* process, struct uthread* thread);
 
 /* Queue the initial userspace thread for a newly-created process. */
-enum process_thread_spawn_result process_start_main_thread(struct process* process, struct uthread** out_thread,
-                                                           const struct process_thread_params* params);
+enum process_thread_spawn_result process_start_main_thread(
+		struct process* process, struct uthread** out_thread, const struct process_thread_params* params);
 
 /* Block until thread exits, publish its exit code, and reclaim its process-owned resources. */
-enum process_thread_join_result process_join_thread(struct process* process, struct uthread* thread,
-                                                    uintptr_t* out_exit_code);
+enum process_thread_join_result process_join_thread(
+		struct process* process, struct uthread* thread, uintptr_t* out_exit_code);
 
 /* Mark a process thread detached so it is reclaimed by the user-thread reaper after exit. */
 enum process_thread_detach_result process_detach_thread(struct process* process, struct uthread* thread);

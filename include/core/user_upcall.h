@@ -1,11 +1,12 @@
 #pragma once
 
-#include <base/upcall.h>
-#include <core/spinlock.h>
-#include <hal/userspace.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/upcall.h>
+#include <hal/userspace.h>
+#include <core/spinlock.h>
 
 struct hal_userspace_return_frame;
 struct mapping;
@@ -27,9 +28,9 @@ enum user_upcall_origin {
 
 /* Queue-management properties attached to one pending request. */
 enum user_upcall_flags {
-	USER_UPCALL_FLAG_NONE          = 0u,
+	USER_UPCALL_FLAG_NONE = 0u,
 	USER_UPCALL_FLAG_NON_EVICTABLE = 1u << 0,
-	USER_UPCALL_FLAG_COALESCIBLE   = 1u << 1,
+	USER_UPCALL_FLAG_COALESCIBLE = 1u << 1,
 	/* Completion of this interrupt-origin request asks the Signal to rearm. */
 	USER_UPCALL_FLAG_INTERRUPT_REARM = 1u << 2,
 };
@@ -37,11 +38,11 @@ enum user_upcall_flags {
 /* One userspace entry, opaque arguments, and non-user-visible provenance. */
 struct user_upcall_request {
 	enum user_upcall_origin origin;
-	uint32_t                flags;
-	uintptr_t               origin_token;
-	uint64_t                origin_id;
-	uintptr_t               entry;
-	uintptr_t               args[USER_UPCALL_ARGUMENT_COUNT];
+	uint32_t flags;
+	uintptr_t origin_token;
+	uint64_t origin_id;
+	uintptr_t entry;
+	uintptr_t args[USER_UPCALL_ARGUMENT_COUNT];
 };
 
 enum user_upcall_result {
@@ -67,22 +68,22 @@ enum user_upcall_phase {
 
 /* State owned by one userspace thread. */
 struct user_upcall_state {
-	struct spinlock              lock;
-	struct mapping*              stack_mapping;
-	uintptr_t                    stack_top;
+	struct spinlock lock;
+	struct mapping* stack_mapping;
+	uintptr_t stack_top;
 	struct hal_userspace_context interrupted_context;
-	struct user_upcall_request*  pending;
-	size_t                       head;
-	size_t                       count;
-	uint64_t                     dropped_count;
-	size_t                       force_free_reservations;
-	size_t                       force_eviction_reservations;
-	enum user_upcall_origin      active_origin;
-	uint64_t                     active_origin_id;
+	struct user_upcall_request* pending;
+	size_t head;
+	size_t count;
+	uint64_t dropped_count;
+	size_t force_free_reservations;
+	size_t force_eviction_reservations;
+	enum user_upcall_origin active_origin;
+	uint64_t active_origin_id;
 	/* Flags retained from the active request for completion processing. */
-	uint32_t               active_flags;
+	uint32_t active_flags;
 	enum user_upcall_phase phase;
-	bool                   initialized;
+	bool initialized;
 };
 
 /* Initialize the state and allocate its fixed-capacity pending queue. */
@@ -100,8 +101,8 @@ enum user_upcall_result uthread_upcall_enqueue(struct uthread* thread, const str
  * never removed. Unrelated requests keep FIFO order and the replacement is
  * appended as the newest request.
  */
-enum user_upcall_result uthread_upcall_enqueue_latest(struct uthread*                   thread,
-                                                      const struct user_upcall_request* request);
+enum user_upcall_result uthread_upcall_enqueue_latest(
+		struct uthread* thread, const struct user_upcall_request* request);
 
 /* Reserve admission for one forced request without changing the visible FIFO. */
 enum user_upcall_result uthread_upcall_force_reserve(struct uthread* thread);

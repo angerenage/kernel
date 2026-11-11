@@ -1,8 +1,9 @@
 #pragma once
 
+#include <stdint.h>
+
 #include <base/syscall.h>
 #include <base/upcall.h>
-#include <stdint.h>
 
 /* Return the current thread's saturating count of upcalls dropped by a full queue. */
 syscall_status_t upcall_dropped_count(uint64_t* out_count);

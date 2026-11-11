@@ -57,25 +57,25 @@ enum {
 };
 
 typedef enum syscall_status {
-	SYSCALL_STATUS_OK              = 0u,
+	SYSCALL_STATUS_OK = 0u,
 	SYSCALL_STATUS_UNKNOWN_SYSCALL = 100u,
-	SYSCALL_STATUS_BAD_ARGUMENT    = 101u,
-	SYSCALL_STATUS_DENIED          = 102u,
-	SYSCALL_STATUS_FAILED          = 200u,
-	SYSCALL_STATUS_UNAVAILABLE     = 201u,
-	SYSCALL_STATUS_INTERRUPTED     = 202u,
+	SYSCALL_STATUS_BAD_ARGUMENT = 101u,
+	SYSCALL_STATUS_DENIED = 102u,
+	SYSCALL_STATUS_FAILED = 200u,
+	SYSCALL_STATUS_UNAVAILABLE = 201u,
+	SYSCALL_STATUS_INTERRUPTED = 202u,
 } syscall_status_t;
 
 /* Result envelope returned by every syscall implementation. */
 typedef struct syscall_result {
-	uintptr_t        value;
+	uintptr_t value;
 	syscall_status_t status;
 } syscall_result_t;
 
 /* Convert an arbitrary value into a successful syscall_result_t. */
 static inline syscall_result_t syscall_result_ok(uintptr_t value) {
 	return (syscall_result_t){
-		.value  = value,
+		.value = value,
 		.status = SYSCALL_STATUS_OK,
 	};
 }
@@ -83,7 +83,7 @@ static inline syscall_result_t syscall_result_ok(uintptr_t value) {
 /* Convert an arbitrary value and error status into a failing syscall_result_t. */
 static inline syscall_result_t syscall_result_error(syscall_status_t status, uintptr_t value) {
 	return (syscall_result_t){
-		.value  = value,
+		.value = value,
 		.status = status,
 	};
 }
@@ -105,4 +105,4 @@ static inline bool syscall_status_is_kernel_error(syscall_status_t status) {
 
 /* Dispatch a syscall number to the registered handler. Implemented by the environment linking base. */
 syscall_result_t syscall_dispatch(uintptr_t number, uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
-                                  uintptr_t arg4, uintptr_t arg5);
+		uintptr_t arg4, uintptr_t arg5);

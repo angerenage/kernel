@@ -1,7 +1,8 @@
 #pragma once
 
-#include <base/cap.h>
 #include <stdint.h>
+
+#include <base/cap.h>
 
 #define USB_TRANSPORT_RESOURCE "transport"
 #define USB_COMPATIBLE_DEVICE "usb:device"
@@ -21,10 +22,10 @@ struct usb_transport_header {
 };
 
 struct usb_transport_endpoint {
-	uint8_t  address;
-	uint8_t  attributes;
-	uint8_t  interval;
-	uint8_t  interface_number;
+	uint8_t address;
+	uint8_t attributes;
+	uint8_t interval;
+	uint8_t interface_number;
 	uint16_t max_packet_size;
 	uint16_t reserved2;
 };
@@ -37,39 +38,39 @@ struct usb_transport_interface {
 };
 
 struct usb_transport_info {
-	uint16_t                      vendor_id;
-	uint16_t                      product_id;
-	uint8_t                       configuration;
-	uint8_t                       endpoint_count;
-	uint8_t                       interface_number;
-	uint8_t                       class_code;
-	uint8_t                       subclass;
-	uint8_t                       programming_interface;
+	uint16_t vendor_id;
+	uint16_t product_id;
+	uint8_t configuration;
+	uint8_t endpoint_count;
+	uint8_t interface_number;
+	uint8_t class_code;
+	uint8_t subclass;
+	uint8_t programming_interface;
 	struct usb_transport_endpoint endpoints[USB_TRANSPORT_MAX_ENDPOINTS];
 };
 
 /* Submit an interface-recipient control request on endpoint zero. */
 struct usb_transport_control_request {
 	struct usb_transport_header header;
-	uint8_t                     request_type;
-	uint8_t                     request;
-	uint16_t                    value;
-	uint16_t                    index;
-	uint16_t                    length;
-	uint8_t                     data[];
+	uint8_t request_type;
+	uint8_t request;
+	uint16_t value;
+	uint16_t index;
+	uint16_t length;
+	uint8_t data[];
 };
 
 /* Request a transfer on an endpoint belonging to the child device. */
 struct usb_transport_transfer_request {
 	struct usb_transport_header header;
-	uint8_t                     endpoint;
-	uint8_t                     reserved[3];
-	uint32_t                    length;
-	uint8_t                     data[]; /* OUT payload; absent for IN. */
+	uint8_t endpoint;
+	uint8_t reserved[3];
+	uint32_t length;
+	uint8_t data[]; /* OUT payload; absent for IN. */
 };
 
 /* Return the transferred length and the IN payload, if any. */
 struct usb_transport_transfer_response {
 	uint32_t transferred;
-	uint8_t  data[];
+	uint8_t data[];
 };

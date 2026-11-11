@@ -1,16 +1,17 @@
-#include <core/memory.h>
 #include <string.h>
+
+#include <core/memory.h>
 
 #include "../memory_backing/test_support.h"
 
 Test(memory, anonymous_size_is_exact_and_sparse_contents_are_zero) {
-	struct memory*     memory;
+	struct memory* memory;
 	struct memory_span span;
-	uint8_t            bytes[17];
-	const uint8_t      value[] = {0x12u, 0x34u, 0x56u};
+	uint8_t bytes[17];
+	const uint8_t value[] = {0x12u, 0x34u, 0x56u};
 	backing_test_pmm_init();
 	size_t granule = backing_test_granule();
-	size_t before  = pmm_free_size();
+	size_t before = pmm_free_size();
 	cr_assert(memory_create_anonymous(granule + 19u, &memory));
 	cr_assert_eq(memory_size(memory), granule + 19u);
 	cr_assert_eq(memory_type(memory), MEMORY_TYPE_NORMAL);
@@ -32,11 +33,11 @@ Test(memory, anonymous_size_is_exact_and_sparse_contents_are_zero) {
 
 Test(memory, slices_share_contents_and_retain_their_immediate_parents) {
 	struct memory *root, *slice, *nested, *sibling;
-	uint8_t        value[]                 = {1u, 3u, 5u, 7u};
-	uint8_t        readback[sizeof(value)] = {0};
+	uint8_t value[] = {1u, 3u, 5u, 7u};
+	uint8_t readback[sizeof(value)] = {0};
 	backing_test_pmm_init();
 	size_t granule = backing_test_granule();
-	size_t before  = pmm_free_size();
+	size_t before = pmm_free_size();
 	cr_assert(memory_create_anonymous(2u * granule + 31u, &root));
 	cr_assert(memory_slice(root, 11u, granule + 20u, &slice));
 	cr_assert(memory_slice(slice, 13u, granule, &nested));
@@ -60,18 +61,18 @@ Test(memory, slices_share_contents_and_retain_their_immediate_parents) {
 }
 
 Test(memory, slice_materialization_translates_absolute_offsets) {
-	struct memory *    root, *slice;
+	struct memory *root, *slice;
 	struct memory_span root_span, slice_span;
 	backing_test_pmm_init();
 	size_t granule = backing_test_granule();
 	cr_assert(memory_create_anonymous(4u * granule, &root));
 	cr_assert(memory_slice(root, granule, 2u * granule, &slice));
 	cr_assert(memory_materialize(slice,
-	                             &(const struct memory_materialize_request){
-									 .size               = granule,
-									 .alignment          = granule,
-									 .require_contiguous = true,
-								 }));
+			&(const struct memory_materialize_request){
+				.size = granule,
+				.alignment = granule,
+				.require_contiguous = true,
+			}));
 	cr_assert(memory_query(slice, 0u, granule, &slice_span));
 	cr_assert_eq(slice_span.kind, MEMORY_SPAN_PRESENT);
 	cr_assert(memory_query(root, granule, granule, &root_span));
@@ -102,32 +103,32 @@ Test(memory, range_alignment_uses_the_absolute_backing_offset) {
 
 Test(memory, physical_memory_preserves_contents_and_device_rejects_transfers) {
 	struct memory *normal, *device;
-	uint8_t        readback[16];
+	uint8_t readback[16];
 	backing_test_pmm_init();
-	size_t                         granule = backing_test_granule();
+	size_t granule = backing_test_granule();
 	static _Alignas(65536) uint8_t physical[65536];
 	cr_assert_leq(granule, sizeof(physical));
 	memset(physical, 0xa6, granule);
 	cr_assert(memory_create_physical(
-		&(const struct memory_physical_request){
-			.physical_address        = (uintptr_t)physical,
-			.size                    = granule,
-			.memory_type             = MEMORY_TYPE_NORMAL,
-			.external_cpu_accessible = true,
-		},
-		&normal));
+			&(const struct memory_physical_request){
+				.physical_address = (uintptr_t)physical,
+				.size = granule,
+				.memory_type = MEMORY_TYPE_NORMAL,
+				.external_cpu_accessible = true,
+			},
+			&normal));
 	cr_assert(memory_read(normal, 0u, readback, sizeof(readback)));
 	for (size_t i = 0u; i < sizeof(readback); i++) cr_assert_eq(readback[i], 0xa6u);
 	memory_release(normal);
 	cr_assert_eq(physical[0], 0xa6u, "physical creation modified pre-existing contents");
 	cr_assert(memory_create_physical(
-		&(const struct memory_physical_request){
-			.physical_address        = (uintptr_t)physical,
-			.size                    = granule,
-			.memory_type             = MEMORY_TYPE_DEVICE,
-			.external_cpu_accessible = true,
-		},
-		&device));
+			&(const struct memory_physical_request){
+				.physical_address = (uintptr_t)physical,
+				.size = granule,
+				.memory_type = MEMORY_TYPE_DEVICE,
+				.external_cpu_accessible = true,
+			},
+			&device));
 	cr_assert_not(memory_can_transfer(device));
 	cr_assert_not(memory_read(device, 0u, readback, sizeof(readback)));
 	cr_assert_not(memory_write(device, 0u, readback, sizeof(readback)));

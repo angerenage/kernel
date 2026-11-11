@@ -1,20 +1,21 @@
+#include <hal/clock.h>
+#include <hal/cpu.h>
+#include <hal/interrupts.h>
 #include <core/cpu.h>
 #include <core/kthread.h>
 #include <core/sched.h>
 #include <core/semaphore.h>
 #include <core/thread.h>
+
 #include <criterion/criterion.h>
-#include <hal/clock.h>
-#include <hal/cpu.h>
-#include <hal/interrupts.h>
 
 #include "../mocks/hal/cpu_mock.h"
 
-static bool              semaphore_test_hook_active;
-static size_t            semaphore_test_hook_runs;
+static bool semaphore_test_hook_active;
+static size_t semaphore_test_hook_runs;
 static struct semaphore* semaphore_test_semaphore;
-static struct thread*    semaphore_test_signaler;
-static struct thread*    semaphore_test_waiter;
+static struct thread* semaphore_test_signaler;
+static struct thread* semaphore_test_waiter;
 
 static void init_bound_bootstrap_cpu(void) {
 	irq_enable_local();
@@ -28,10 +29,10 @@ static void reset_test_state(void) {
 	irq_enable_local();
 	hal_cpu_mock_set_context_switch_hook(NULL);
 	semaphore_test_hook_active = false;
-	semaphore_test_hook_runs   = 0u;
-	semaphore_test_semaphore   = NULL;
-	semaphore_test_signaler    = NULL;
-	semaphore_test_waiter      = NULL;
+	semaphore_test_hook_runs = 0u;
+	semaphore_test_semaphore = NULL;
+	semaphore_test_signaler = NULL;
+	semaphore_test_waiter = NULL;
 	hal_cpu_local_bind(NULL);
 }
 
@@ -42,12 +43,12 @@ static void semaphore_test_entry(void* arg) {
 static void semaphore_test_set_one_tick_timeslice(struct thread* thread) {
 	if (thread == NULL) return;
 
-	thread->timeslice_ticks     = 1u;
+	thread->timeslice_ticks = 1u;
 	thread->timeslice_remaining = 1u;
 }
 
-static void semaphore_test_signal_context_switch_hook(struct thread_context*       current,
-                                                      const struct thread_context* next) {
+static void semaphore_test_signal_context_switch_hook(
+		struct thread_context* current, const struct thread_context* next) {
 	(void)current;
 	(void)next;
 
@@ -61,8 +62,8 @@ static void semaphore_test_signal_context_switch_hook(struct thread_context*    
 	semaphore_test_hook_active = false;
 }
 
-static void semaphore_test_timeout_context_switch_hook(struct thread_context*       current,
-                                                       const struct thread_context* next) {
+static void semaphore_test_timeout_context_switch_hook(
+		struct thread_context* current, const struct thread_context* next) {
 	(void)current;
 	(void)next;
 
@@ -77,8 +78,8 @@ static void semaphore_test_timeout_context_switch_hook(struct thread_context*   
 	semaphore_test_hook_active = false;
 }
 
-static void semaphore_test_cancel_context_switch_hook(struct thread_context*       current,
-                                                      const struct thread_context* next) {
+static void semaphore_test_cancel_context_switch_hook(
+		struct thread_context* current, const struct thread_context* next) {
 	(void)current;
 	(void)next;
 
@@ -129,26 +130,26 @@ Test(semaphore, release_rejects_overflow) {
 
 Test(semaphore, acquire_blocks_and_release_wakes_waiter) {
 	const struct thread_create_params waiter_params = {
-		.name              = "semaphore_waiter",
-		.entry             = semaphore_test_entry,
-		.arg               = NULL,
+		.name = "semaphore_waiter",
+		.entry = semaphore_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x420000u,
-		.kernel_stack_top  = 0x424000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x424000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params signaler_params = {
-		.name              = "semaphore_signaler",
-		.entry             = semaphore_test_entry,
-		.arg               = NULL,
+		.name = "semaphore_signaler",
+		.entry = semaphore_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x430000u,
-		.kernel_stack_top  = 0x434000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x434000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	struct semaphore semaphore;
-	struct thread    waiter;
-	struct thread    signaler;
+	struct thread waiter;
+	struct thread signaler;
 
 	init_bound_bootstrap_cpu();
 	cr_assert(sched_init(), "sched_init failed");
@@ -160,7 +161,7 @@ Test(semaphore, acquire_blocks_and_release_wakes_waiter) {
 	cr_assert(sched_make_runnable(&signaler), "signaler should become runnable");
 
 	semaphore_test_semaphore = &semaphore;
-	semaphore_test_signaler  = &signaler;
+	semaphore_test_signaler = &signaler;
 	hal_cpu_mock_set_context_switch_hook(semaphore_test_signal_context_switch_hook);
 
 	sched_set_current(cpu_current(), &waiter);
@@ -177,26 +178,26 @@ Test(semaphore, acquire_blocks_and_release_wakes_waiter) {
 
 Test(semaphore, cancelable_acquire_returns_after_cancellation_without_exiting) {
 	const struct thread_create_params waiter_params = {
-		.name              = "semaphore_waiter",
-		.entry             = semaphore_test_entry,
-		.arg               = NULL,
+		.name = "semaphore_waiter",
+		.entry = semaphore_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x470000u,
-		.kernel_stack_top  = 0x474000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x474000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params canceler_params = {
-		.name              = "semaphore_canceler",
-		.entry             = semaphore_test_entry,
-		.arg               = NULL,
+		.name = "semaphore_canceler",
+		.entry = semaphore_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x480000u,
-		.kernel_stack_top  = 0x484000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x484000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	struct semaphore semaphore;
-	struct thread    waiter;
-	struct thread    canceler;
+	struct thread waiter;
+	struct thread canceler;
 
 	init_bound_bootstrap_cpu();
 	cr_assert(sched_init(), "sched_init failed");
@@ -208,12 +209,12 @@ Test(semaphore, cancelable_acquire_returns_after_cancellation_without_exiting) {
 	cr_assert(sched_make_runnable(&canceler), "canceler should become runnable");
 
 	semaphore_test_signaler = &canceler;
-	semaphore_test_waiter   = &waiter;
+	semaphore_test_waiter = &waiter;
 	hal_cpu_mock_set_context_switch_hook(semaphore_test_cancel_context_switch_hook);
 
 	sched_set_current(cpu_current(), &waiter);
 	cr_assert_not(semaphore_acquire_cancelable(&semaphore),
-	              "cancelable acquire must return control to its caller for cleanup");
+			"cancelable acquire must return control to its caller for cleanup");
 	cr_assert_eq(semaphore_test_hook_runs, 1u, "cancel hook should run exactly once");
 	cr_assert_eq(sched_current_thread(), &waiter, "canceled waiter should resume at its caller");
 	cr_assert(thread_should_cancel(&waiter), "deferred cancellation must remain pending");
@@ -242,36 +243,36 @@ Test(semaphore, timed_acquire_zero_timeout_is_non_blocking) {
 
 Test(semaphore, timed_acquire_times_out_while_preemption_keeps_other_workers_running) {
 	const struct thread_create_params waiter_params = {
-		.name              = "semaphore_waiter",
-		.entry             = semaphore_test_entry,
-		.arg               = NULL,
+		.name = "semaphore_waiter",
+		.entry = semaphore_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x440000u,
-		.kernel_stack_top  = 0x444000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x444000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params runner1_params = {
-		.name              = "semaphore_runner1",
-		.entry             = semaphore_test_entry,
-		.arg               = NULL,
+		.name = "semaphore_runner1",
+		.entry = semaphore_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x450000u,
-		.kernel_stack_top  = 0x454000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x454000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params runner2_params = {
-		.name              = "semaphore_runner2",
-		.entry             = semaphore_test_entry,
-		.arg               = NULL,
+		.name = "semaphore_runner2",
+		.entry = semaphore_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x460000u,
-		.kernel_stack_top  = 0x464000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x464000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
-	struct semaphore   semaphore;
-	struct thread      waiter;
-	struct thread      runner1;
-	struct thread      runner2;
+	struct semaphore semaphore;
+	struct thread waiter;
+	struct thread runner1;
+	struct thread runner2;
 	struct sched_stats stats;
 
 	init_bound_bootstrap_cpu();
@@ -290,8 +291,8 @@ Test(semaphore, timed_acquire_times_out_while_preemption_keeps_other_workers_run
 
 	hal_cpu_mock_set_context_switch_hook(semaphore_test_timeout_context_switch_hook);
 	sched_set_current(cpu_current(), &waiter);
-	cr_assert(!semaphore_timed_acquire(&semaphore, 2u),
-	          "timed acquire should time out while other workers keep running");
+	cr_assert(
+			!semaphore_timed_acquire(&semaphore, 2u), "timed acquire should time out while other workers keep running");
 	cr_assert_eq(semaphore_test_hook_runs, 1u, "timeout simulation should run once");
 	cr_assert_eq(semaphore_count(&semaphore), 0u, "timeout must not publish a permit");
 	cr_assert_eq(semaphore_waiter_count(&semaphore), 0u, "timed out waiter should be removed from the queue");

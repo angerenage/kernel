@@ -1,9 +1,10 @@
 #pragma once
 
+#include <stdbool.h>
+
 #include <base/interrupt.h>
 #include <base/signal.h>
 #include <hal/interrupts.h>
-#include <stdbool.h>
 
 struct interrupt;
 struct signal;
@@ -25,12 +26,12 @@ enum interrupt_result {
 bool interrupt_init(void);
 
 /* Resolve one firmware-visible fixed-source identity into an opaque, non-authoritative token. */
-enum interrupt_result interrupt_resolve_source(uint64_t controller_register_address, uint32_t local_source_id,
-                                               interrupt_source_t* out_source);
+enum interrupt_result interrupt_resolve_source(
+		uint64_t controller_register_address, uint32_t local_source_id, interrupt_source_t* out_source);
 
 /* Claim and configure a fixed source without enabling it.  The returned reference must be released. */
 enum interrupt_result interrupt_claim_source(interrupt_source_t source, enum interrupt_trigger trigger,
-                                             enum interrupt_polarity polarity, struct interrupt** out_interrupt);
+		enum interrupt_polarity polarity, struct interrupt** out_interrupt);
 
 /*
  * Encode a message domain and optional domain-local producer in an opaque context token.
@@ -39,15 +40,15 @@ enum interrupt_result interrupt_claim_source(interrupt_source_t source, enum int
  * that value with domain UINT32_MAX is invalid because it aliases the invalid
  * context token.  The encoding grants no authority and may later be replaced.
  */
-bool interrupt_message_context_create(uint32_t domain, const struct hal_interrupt_message_source* producer,
-                                      interrupt_message_context_t* out_context);
+bool interrupt_message_context_create(
+		uint32_t domain, const struct hal_interrupt_message_source* producer, interrupt_message_context_t* out_context);
 
-enum interrupt_result interrupt_resolve_message_context(uint64_t controller_register_address, uint32_t producer_id,
-                                                        interrupt_message_context_t* out_context);
+enum interrupt_result interrupt_resolve_message_context(
+		uint64_t controller_register_address, uint32_t producer_id, interrupt_message_context_t* out_context);
 
 /* Allocate a message interrupt and return only its device-programmable message values. */
-enum interrupt_result interrupt_allocate_message(interrupt_message_context_t context, struct interrupt** out_interrupt,
-                                                 struct interrupt_message* out_message);
+enum interrupt_result interrupt_allocate_message(
+		interrupt_message_context_t context, struct interrupt** out_interrupt, struct interrupt_message* out_message);
 
 /* Acquire one reference to an interrupt that has not begun destruction. */
 bool interrupt_retain(struct interrupt* interrupt);

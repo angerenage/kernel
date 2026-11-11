@@ -1,10 +1,12 @@
 #pragma once
 
-#include <base/framebuffer.h>
-#include <protocol/terminal.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/framebuffer.h>
+
+#include <protocol/terminal.h>
 
 struct terminal;
 
@@ -43,8 +45,8 @@ bool terminal_scroll_to_bottom(struct terminal* terminal);
 bool terminal_selection_get(struct terminal* terminal, struct terminal_get_selection_response* out_selection);
 
 /* Replace the active selection with one retained half-open cell range. */
-bool terminal_selection_set(struct terminal* terminal, struct terminal_selection_position anchor,
-                            struct terminal_selection_position focus);
+bool terminal_selection_set(
+		struct terminal* terminal, struct terminal_selection_position anchor, struct terminal_selection_position focus);
 
 /* Clear the active selection and restore its cells. */
 bool terminal_selection_clear(struct terminal* terminal);
@@ -66,7 +68,7 @@ bool terminal_clipboard_set(struct terminal* terminal, const void* text, size_t 
 
 /* Apply one relative pointer frame and its optional primary-button transition. */
 bool terminal_pointer_update(struct terminal* terminal, uint64_t source_id, int64_t delta_x, int64_t delta_y,
-                             bool primary_changed, bool primary_pressed);
+		bool primary_changed, bool primary_pressed);
 
 /* End an unfinished pointer selection after the pointer source is lost. */
 void terminal_pointer_cancel(struct terminal* terminal, uint64_t source_id);

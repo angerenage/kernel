@@ -7,9 +7,9 @@
 /* Decoder state for one standard, wheel, or five-button PS/2 mouse. */
 struct ps2_mouse_decoder {
 	uint8_t packet[4];
-	size_t  packet_size;
-	size_t  packet_index;
-	size_t  invalid_starts;
+	size_t packet_size;
+	size_t packet_index;
+	size_t invalid_starts;
 };
 
 /* Reset packet synchronization for the identified mouse protocol. */

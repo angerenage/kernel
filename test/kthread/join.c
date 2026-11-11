@@ -2,15 +2,15 @@
 
 Test(kthread, join_terminated_thread_returns_exit_code_and_detaches) {
 	const struct thread_create_params params = {
-		.name              = "target",
-		.entry             = kthread_test_entry,
-		.arg               = NULL,
+		.name = "target",
+		.entry = kthread_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x310000u,
-		.kernel_stack_top  = 0x314000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x314000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
-	struct kthread     target    = {.stack_mapping = NULL};
+	struct kthread target = {.stack_mapping = NULL};
 	thread_exit_code_t exit_code = 0u;
 
 	init_bound_bootstrap_cpu();
@@ -20,7 +20,7 @@ Test(kthread, join_terminated_thread_returns_exit_code_and_detaches) {
 
 	thread_mark_exiting(&target.thread, 123u);
 	cr_assert(!kthread_timed_join(&target, 0u, &exit_code),
-	          "EXITING thread must not be joinable before its stack is reap-safe");
+			"EXITING thread must not be joinable before its stack is reap-safe");
 	cr_assert_eq(exit_code, 0u, "failed join must not publish an exit code");
 	thread_mark_zombie(&target.thread);
 	cr_assert(kthread_join(&target, &exit_code), "kthread_join should succeed for terminated joinable thread");
@@ -28,7 +28,7 @@ Test(kthread, join_terminated_thread_returns_exit_code_and_detaches) {
 
 	exit_code = 0u;
 	cr_assert(kthread_timed_join(&target, 0u, &exit_code),
-	          "kthread_timed_join should succeed immediately for terminated joinable thread");
+			"kthread_timed_join should succeed immediately for terminated joinable thread");
 	cr_assert_eq(exit_code, 123u, "kthread_timed_join should publish target exit code");
 
 	reset_test_state();
@@ -36,35 +36,35 @@ Test(kthread, join_terminated_thread_returns_exit_code_and_detaches) {
 
 Test(kthread, timed_join_times_out_without_consuming_joinability) {
 	const struct thread_create_params target_params = {
-		.name              = "target",
-		.entry             = kthread_test_entry,
-		.arg               = NULL,
+		.name = "target",
+		.entry = kthread_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x318000u,
-		.kernel_stack_top  = 0x31c000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x31c000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params joiner_params = {
-		.name              = "joiner",
-		.entry             = kthread_test_entry,
-		.arg               = NULL,
+		.name = "joiner",
+		.entry = kthread_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x31c000u,
-		.kernel_stack_top  = 0x320000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x320000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params runner_params = {
-		.name              = "runner",
-		.entry             = kthread_test_entry,
-		.arg               = NULL,
+		.name = "runner",
+		.entry = kthread_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x324000u,
-		.kernel_stack_top  = 0x328000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x328000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
-	struct kthread     target = {.stack_mapping = NULL};
-	struct kthread     joiner = {.stack_mapping = NULL};
-	struct thread      runner;
+	struct kthread target = {.stack_mapping = NULL};
+	struct kthread joiner = {.stack_mapping = NULL};
+	struct thread runner;
 	thread_exit_code_t exit_code = 0xdeadbeefu;
 
 	init_bound_bootstrap_cpu();

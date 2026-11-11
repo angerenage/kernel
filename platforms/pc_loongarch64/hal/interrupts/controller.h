@@ -1,9 +1,10 @@
 #pragma once
 
-#include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <hal/interrupts.h>
 
 /* Static storage limits for firmware-described controllers. */
 #define LOONGARCH64_MAX_FIXED_CONTROLLERS 6u
@@ -44,34 +45,34 @@ enum fixed_kind {
 
 /* Firmware description and mapped state for one fixed-source controller. */
 struct fixed_controller {
-	enum fixed_kind   kind;
-	uint32_t          domain;
-	uint32_t          source_count;
-	uint32_t          vector_base;
-	uint32_t          cascade;
-	uintptr_t         physical_base;
-	uintptr_t         size;
+	enum fixed_kind kind;
+	uint32_t domain;
+	uint32_t source_count;
+	uint32_t vector_base;
+	uint32_t cascade;
+	uintptr_t physical_base;
+	uintptr_t size;
 	volatile uint8_t* virtual_base;
-	bool              ready;
+	bool ready;
 };
 
 /* Firmware description of the extended I/O interrupt controller. */
 struct eiointc_state {
 	uint32_t cascade;
 	uint32_t vector_count;
-	uint8_t  node;
+	uint8_t node;
 	uint64_t node_map;
-	bool     described;
+	bool described;
 };
 
 /* Firmware description and mapped state for the legacy HT vector controller. */
 struct htvec_state {
-	uintptr_t         physical_base;
-	uintptr_t         size;
-	uint8_t           cascades[HTVEC_GROUP_COUNT];
+	uintptr_t physical_base;
+	uintptr_t size;
+	uint8_t cascades[HTVEC_GROUP_COUNT];
 	volatile uint8_t* virtual_base;
-	bool              described;
-	bool              ready;
+	bool described;
+	bool ready;
 };
 
 /* Firmware description of the PCH MSI controller. */
@@ -79,7 +80,7 @@ struct pch_msi_state {
 	uint64_t address;
 	uint32_t first;
 	uint32_t count;
-	bool     described;
+	bool described;
 };
 
 /* Discovered fixed-source controllers. */

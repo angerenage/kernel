@@ -15,19 +15,19 @@ enum partition_scheme {
 /* Metadata required to publish one bounded block-device view. */
 struct partition_entry {
 	enum partition_scheme scheme;
-	uint32_t              table_index;
-	uint64_t              first_lba;
-	uint64_t              block_count;
+	uint32_t table_index;
+	uint64_t first_lba;
+	uint64_t block_count;
 	union {
 		struct {
-			uint8_t  type_guid[16];
-			uint8_t  unique_guid[16];
+			uint8_t type_guid[16];
+			uint8_t unique_guid[16];
 			uint64_t attributes;
-			char     name[PARTITION_GPT_NAME_SIZE];
+			char name[PARTITION_GPT_NAME_SIZE];
 		} gpt;
 		struct {
 			uint8_t type;
-			bool    bootable;
+			bool bootable;
 		} mbr;
 	};
 };
@@ -35,9 +35,9 @@ struct partition_entry {
 /* Dynamically sized collection of populated partition records. */
 struct partition_table {
 	struct partition_entry* entries;
-	size_t                  count;
-	size_t                  capacity;
-	uint32_t                block_size;
+	size_t count;
+	size_t capacity;
+	uint32_t block_size;
 };
 
 /* Append one partition record without changing existing entries on failure. */

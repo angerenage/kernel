@@ -2,7 +2,7 @@
 
 int puts(const char* str) {
 	const char* cursor = str;
-	int         count  = 0;
+	int count = 0;
 
 	if (!cursor) return EOF;
 

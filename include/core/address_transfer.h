@@ -19,11 +19,11 @@ enum address_transfer_result {
 
 /* Access flags accepted by the address-transfer validation helpers. */
 enum address_transfer_access {
-	ADDRESS_TRANSFER_READ     = 1u << 0,
-	ADDRESS_TRANSFER_WRITE    = 1u << 1,
-	ADDRESS_TRANSFER_EXEC     = 1u << 2,
-	ADDRESS_TRANSFER_USER     = 1u << 3,
-	ADDRESS_TRANSFER_PRESENT  = 1u << 4,
+	ADDRESS_TRANSFER_READ = 1u << 0,
+	ADDRESS_TRANSFER_WRITE = 1u << 1,
+	ADDRESS_TRANSFER_EXEC = 1u << 2,
+	ADDRESS_TRANSFER_USER = 1u << 3,
+	ADDRESS_TRANSFER_PRESENT = 1u << 4,
 	ADDRESS_TRANSFER_FAULT_IN = 1u << 5,
 };
 
@@ -31,21 +31,20 @@ enum address_transfer_access {
 bool address_transfer_result_is_success(enum address_transfer_result result);
 
 /* Validate [addr, addr + size) in space against the requested access bits. */
-enum address_transfer_result address_space_validate_range(struct address_space* space, uintptr_t addr, size_t size,
-                                                          uint32_t access);
+enum address_transfer_result address_space_validate_range(
+		struct address_space* space, uintptr_t addr, size_t size, uint32_t access);
 
 /* Copy size bytes from src_addr in src_space into the kernel buffer dst. */
-enum address_transfer_result address_space_copy_from(struct address_space* src_space, uintptr_t src_addr, void* dst,
-                                                     size_t size);
+enum address_transfer_result address_space_copy_from(
+		struct address_space* src_space, uintptr_t src_addr, void* dst, size_t size);
 
 /* Copy size bytes from the kernel buffer src into dst_addr in dst_space. */
-enum address_transfer_result address_space_copy_to(struct address_space* dst_space, uintptr_t dst_addr, const void* src,
-                                                   size_t size);
+enum address_transfer_result address_space_copy_to(
+		struct address_space* dst_space, uintptr_t dst_addr, const void* src, size_t size);
 
 /* Copy size bytes directly between two user address spaces. */
 enum address_transfer_result address_space_copy_between(struct address_space* dst_space, uintptr_t dst_addr,
-                                                        struct address_space* src_space, uintptr_t src_addr,
-                                                        size_t size);
+		struct address_space* src_space, uintptr_t src_addr, size_t size);
 
 /* Read a typed value from space at addr, with lazy fault-in when allowed. */
 enum address_transfer_result address_space_read_u8(struct address_space* space, uintptr_t addr, uint8_t* out);

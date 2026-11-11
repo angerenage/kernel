@@ -4,28 +4,28 @@
 #include <stddef.h>
 
 struct kernel_selftest_context {
-	size_t      assertions;
+	size_t assertions;
 	const char* failure_expr;
 	const char* failure_message;
 	const char* failure_file;
-	size_t      failure_line;
+	size_t failure_line;
 };
 
 typedef void (*kernel_selftest_fn)(struct kernel_selftest_context* ctx);
 
 struct kernel_selftest_case {
-	const char*        name;
+	const char* name;
 	kernel_selftest_fn run;
 };
 
 struct kernel_selftest_suite {
-	const char*                        name;
+	const char* name;
 	const struct kernel_selftest_case* cases;
-	size_t                             case_count;
+	size_t case_count;
 };
 
-void kernel_selftest_fail(struct kernel_selftest_context* ctx, const char* file, size_t line, const char* expr,
-                          const char* message);
+void kernel_selftest_fail(
+		struct kernel_selftest_context* ctx, const char* file, size_t line, const char* expr, const char* message);
 
 bool kernel_selftests_requested(void);
 bool kernel_selftests_run(void);

@@ -1,6 +1,7 @@
 #include "pci.h"
 
 #include <stdio.h>
+
 #include <system/trace.h>
 
 #include "control.h"
@@ -13,12 +14,12 @@ TRACE_LABEL(trace_enumerate, "pci/enumerate");
 TRACE_LABEL(trace_publish, "pci/publish");
 
 enum device_driver_result pci_driver_run(cap_id_t device_cap, cap_id_t memory_allocator_cap, cap_id_t dma_cap,
-                                         cap_id_t interrupts_cap, cap_id_t io_ports_cap) {
-	struct pci_host      host;
+		cap_id_t interrupts_cap, cap_id_t io_ports_cap) {
+	struct pci_host host;
 	struct pci_inventory inventory = {0};
-	struct pci_control   control   = {.endpoint = CHANNEL_ID_INVALID, .activity_cap = CAP_ID_INVALID};
-	bool                 success;
-	bool                 missing_configuration = false;
+	struct pci_control control = {.endpoint = CHANNEL_ID_INVALID, .activity_cap = CAP_ID_INVALID};
+	bool success;
+	bool missing_configuration = false;
 
 	{
 		TRACE_SCOPE(trace, &trace_host_initialize);
@@ -60,8 +61,8 @@ enum device_driver_result pci_driver_run(cap_id_t device_cap, cap_id_t memory_al
 		return DEVICE_DRIVER_ERROR;
 	}
 	printf("pci: published %zu function(s) with %zu claimed resource(s)\n",
-	       inventory.function_count,
-	       inventory.resource_count);
+			inventory.function_count,
+			inventory.resource_count);
 	(void)pci_control_serve(&control);
 	pci_control_deinitialize(&control);
 	pci_inventory_deinitialize(&inventory);

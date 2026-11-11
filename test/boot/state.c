@@ -11,13 +11,13 @@ Test(boot_state, failed_initialization_does_not_publish_partial_boot_state) {
 
 	cr_assert_not(boot_init());
 	cr_assert_null(boot_info_get());
-	cr_assert_not(boot_address_space_get(&address_space),
-	              "failed initialization exposed a partial address-space snapshot");
+	cr_assert_not(
+			boot_address_space_get(&address_space), "failed initialization exposed a partial address-space snapshot");
 }
 
 Test(boot_state, successful_initialization_publishes_a_coherent_snapshot) {
-	struct boot_address_space                   address_space = {0};
-	const struct boot_info*                     info;
+	struct boot_address_space address_space = {0};
+	const struct boot_info* info;
 	static struct limine_tsc_frequency_response tsc_response = {.frequency = 2400000000u};
 
 	boot_test_configure_valid_base();
@@ -47,9 +47,9 @@ Test(boot_state, successful_initialization_is_idempotent) {
 	cr_assert(boot_init());
 	before = boot_info_get();
 
-	hhdm_req.response      = NULL;
+	hhdm_req.response = NULL;
 	exec_addr_req.response = NULL;
-	memmap_req.response    = NULL;
+	memmap_req.response = NULL;
 
 	cr_assert(boot_init());
 	after = boot_info_get();
@@ -79,39 +79,39 @@ Test(boot_state, acpi_memory_types_share_one_classification) {
 }
 
 Test(boot_state, optional_boot_resources_are_validated_and_published) {
-	static uint8_t                            rsdp[36];
-	static uint8_t                            dtb[40] = {0xd0u, 0x0du, 0xfeu, 0xedu, 0u, 0u, 0u, 40u};
-	static uint8_t                            framebuffer_memory[4096];
-	static struct limine_rsdp_response        rsdp_response;
-	static struct limine_dtb_response         dtb_response;
-	static struct limine_framebuffer          framebuffer;
-	static struct limine_framebuffer*         framebuffers[1];
+	static uint8_t rsdp[36];
+	static uint8_t dtb[40] = {0xd0u, 0x0du, 0xfeu, 0xedu, 0u, 0u, 0u, 40u};
+	static uint8_t framebuffer_memory[4096];
+	static struct limine_rsdp_response rsdp_response;
+	static struct limine_dtb_response dtb_response;
+	static struct limine_framebuffer framebuffer;
+	static struct limine_framebuffer* framebuffers[1];
 	static struct limine_framebuffer_response framebuffer_response;
-	struct boot_framebuffer                   captured;
-	const struct boot_info*                   info;
+	struct boot_framebuffer captured;
+	const struct boot_info* info;
 
 	boot_test_configure_valid_base();
 	rsdp_response.address = rsdp;
-	dtb_response.dtb_ptr  = dtb;
-	framebuffer           = (struct limine_framebuffer){
-		.address          = framebuffer_memory,
-		.width            = 32u,
-		.height           = 16u,
-		.pitch            = 128u,
-		.bpp              = 32u,
-		.memory_model     = LIMINE_FRAMEBUFFER_RGB,
-		.red_mask_size    = 8u,
-		.red_mask_shift   = 16u,
-		.green_mask_size  = 8u,
+	dtb_response.dtb_ptr = dtb;
+	framebuffer = (struct limine_framebuffer){
+		.address = framebuffer_memory,
+		.width = 32u,
+		.height = 16u,
+		.pitch = 128u,
+		.bpp = 32u,
+		.memory_model = LIMINE_FRAMEBUFFER_RGB,
+		.red_mask_size = 8u,
+		.red_mask_shift = 16u,
+		.green_mask_size = 8u,
 		.green_mask_shift = 8u,
-		.blue_mask_size   = 8u,
-		.blue_mask_shift  = 0u,
+		.blue_mask_size = 8u,
+		.blue_mask_shift = 0u,
 	};
-	framebuffers[0]      = &framebuffer;
+	framebuffers[0] = &framebuffer;
 	framebuffer_response = (struct limine_framebuffer_response){.framebuffer_count = 1u, .framebuffers = framebuffers};
-	rsdp_req.response    = &rsdp_response;
-	dtb_req.response     = &dtb_response;
-	fb_req.response      = &framebuffer_response;
+	rsdp_req.response = &rsdp_response;
+	dtb_req.response = &dtb_response;
+	fb_req.response = &framebuffer_response;
 
 	cr_assert(boot_init());
 	info = boot_info_get();

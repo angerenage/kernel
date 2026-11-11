@@ -1,6 +1,7 @@
 #pragma once
 
 #include <base/cap.h>
+
 #include <protocol/device.h>
 
 /* Probe one partition and serve it through the filesystem protocol. */

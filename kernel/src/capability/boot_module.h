@@ -1,11 +1,12 @@
 #pragma once
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include <base/cap.h>
 #include <base/process.h>
 #include <base/syscall.h>
 #include <boot/info.h>
-#include <stddef.h>
-#include <stdint.h>
 
 /* Create the singleton modules-provider capability object. */
 void kernel_capability_boot_module_provider_init(void);
@@ -17,5 +18,5 @@ cap_id_t kernel_capability_boot_module_provider_grant(process_id_t recipient);
 cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t recipient);
 
 /* Resolve an authorized boot-module capability to its immutable kernel descriptor. */
-syscall_result_t kernel_capability_boot_module_get(cap_id_t module_cap, process_id_t caller,
-                                                   cap_rights_t required_rights, const struct boot_module** out_module);
+syscall_result_t kernel_capability_boot_module_get(
+		cap_id_t module_cap, process_id_t caller, cap_rights_t required_rights, const struct boot_module** out_module);

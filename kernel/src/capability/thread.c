@@ -1,5 +1,7 @@
 #include "thread.h"
 
+#include <string.h>
+
 #include <base/cap.h>
 #include <base/syscall.h>
 #include <base/thread.h>
@@ -8,7 +10,6 @@
 #include <core/thread.h>
 #include <core/uthread.h>
 #include <kernel/capability.h>
-#include <string.h>
 
 static enum thread_op thread_op_from_request(const void* request, size_t request_size) {
 	if (request == NULL || request_size < sizeof(struct thread_request_header)) return (enum thread_op) - 1;
@@ -16,9 +17,9 @@ static enum thread_op thread_op_from_request(const void* request, size_t request
 }
 
 static syscall_result_t thread_join_handler(const struct cap_request* req, struct uthread* target) {
-	struct thread_join_response     response;
+	struct thread_join_response response;
 	enum process_thread_join_result result;
-	struct process*                 process;
+	struct process* process;
 
 	if (!cap_kernel_response_fits(req, sizeof(response))) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -101,9 +102,9 @@ static syscall_result_t thread_test_cancel_handler(const struct cap_request* req
 }
 
 static syscall_result_t thread_handler(const struct cap_request* req) {
-	struct uthread*  target;
-	enum thread_op   op;
-	cap_rights_t     required_rights;
+	struct uthread* target;
+	enum thread_op op;
+	cap_rights_t required_rights;
 	syscall_result_t result;
 
 	target = uthread_acquire((uthread_id_t)req->object_id);
@@ -164,15 +165,15 @@ static syscall_result_t thread_handler(const struct cap_request* req) {
 
 cap_id_t kernel_thread_grant(struct uthread* target, process_id_t recipient, cap_rights_t rights) {
 	struct cap_object* object = NULL;
-	cap_object_id_t    object_id;
-	uthread_id_t       thread_id;
-	struct uthread*    held;
-	cap_id_t           result_cap     = CAP_ID_INVALID;
-	bool               object_created = false;
+	cap_object_id_t object_id;
+	uthread_id_t thread_id;
+	struct uthread* held;
+	cap_id_t result_cap = CAP_ID_INVALID;
+	bool object_created = false;
 
 	if (target == NULL || recipient == PROCESS_PID_INVALID) return CAP_ID_INVALID;
 	thread_id = uthread_id(target);
-	held      = uthread_acquire(thread_id);
+	held = uthread_acquire(thread_id);
 	if (held != target) {
 		if (held != NULL) uthread_release(held);
 		return CAP_ID_INVALID;
@@ -201,5 +202,5 @@ out:
 
 cap_id_t kernel_thread_grant_full(struct uthread* target, process_id_t recipient) {
 	return kernel_thread_grant(
-		target, recipient, CAP_CALL | CAP_WAIT | CAP_MANAGE | CAP_READ | CAP_DESTROY | CAP_DELEGATE);
+			target, recipient, CAP_CALL | CAP_WAIT | CAP_MANAGE | CAP_READ | CAP_DESTROY | CAP_DELEGATE);
 }

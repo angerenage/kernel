@@ -1,24 +1,25 @@
 #pragma once
 
-#include <base/address_space.h>
-#include <core/mapping.h>
-#include <core/spinlock.h>
-#include <hal/iommu.h>
-#include <hal/paging.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/address_space.h>
+#include <hal/iommu.h>
+#include <hal/paging.h>
+#include <core/mapping.h>
+#include <core/spinlock.h>
 
 struct memory;
 struct mapping;
 
 /* Parameters for projecting one complete Memory into an AddressSpace. */
 struct address_space_mapping_request {
-	struct memory*  memory;
-	uintptr_t       address;
-	size_t          alignment;
-	size_t          guard_before;
-	size_t          guard_after;
+	struct memory* memory;
+	uintptr_t address;
+	size_t alignment;
+	size_t guard_before;
+	size_t guard_after;
 	memory_access_t access;
 };
 
@@ -33,25 +34,25 @@ enum address_space_fault_kind {
 /* One PROCESS or DEVICE AddressSpace and its common Mapping registry. */
 struct address_space {
 	enum address_space_kind kind;
-	uintptr_t               base;
-	uintptr_t               end;
+	uintptr_t base;
+	uintptr_t end;
 	union {
 		struct {
 			struct hal_paging_space* hal;
 		} process;
 		struct {
-			uint32_t                     controller_index;
-			uint32_t                     context_id;
+			uint32_t controller_index;
+			uint32_t context_id;
 			struct hal_iommu_space_state hal;
-			uint64_t                     reference_count;
+			uint64_t reference_count;
 		} device;
 	} backend;
 	struct spinlock lock;
 	struct mapping* mapping_root;
 	struct mapping* mapping_first;
 	struct mapping* mapping_last;
-	size_t          mapping_count;
-	bool            destroying;
+	size_t mapping_count;
+	bool destroying;
 };
 
 /* Initialize AddressSpace support and the kernel AddressSpace. */
@@ -88,8 +89,8 @@ bool address_space_activate(struct address_space* space);
 struct hal_paging_space* address_space_paging_space(struct address_space* space);
 
 /* Project one complete Memory and return a retained Mapping. PROCESS projection remains lazy. */
-bool address_space_map(struct address_space* space, const struct address_space_mapping_request* request,
-                       struct mapping** out_mapping);
+bool address_space_map(
+		struct address_space* space, const struct address_space_mapping_request* request, struct mapping** out_mapping);
 
 /* Remove an active Mapping from its owning AddressSpace. */
 bool address_space_unmap(struct address_space* space, struct mapping* mapping);
@@ -110,5 +111,5 @@ size_t address_space_mapping_count(struct address_space* space);
 bool address_space_contains_mapping(struct address_space* space, const struct mapping* mapping);
 
 /* Resolve or dispatch a fault from the current execution context. */
-bool address_space_handle_current_fault(uintptr_t address, enum address_space_fault_kind kind, memory_access_t access,
-                                        bool user_mode);
+bool address_space_handle_current_fault(
+		uintptr_t address, enum address_space_fault_kind kind, memory_access_t access, bool user_mode);

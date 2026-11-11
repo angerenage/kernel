@@ -1,7 +1,8 @@
-#include <runtime/diagnostic.h>
 #include <stddef.h>
 #include <stdint.h>
+
 #include <system/time.h>
+#include <runtime/diagnostic.h>
 
 #include "syscall.h"
 

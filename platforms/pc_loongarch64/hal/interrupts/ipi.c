@@ -1,8 +1,9 @@
 #include "ipi.h"
 
-#include <core/cpu.h>
-#include <hal/interrupts.h>
 #include <stdint.h>
+
+#include <hal/interrupts.h>
+#include <core/cpu.h>
 
 #include "../cache.h"
 #include "../paging.h"
@@ -65,7 +66,7 @@ bool loongarch64_ipi_send(const struct cpu* cpu, enum loongarch64_ipi_vector vec
 	uint32_t request;
 
 	if (!loongarch64_ipi_supported() || cpu == NULL || cpu->arch_id > LOONGARCH64_CSR_CPUID_MASK ||
-	    vector >= LOONGARCH64_IPI_VECTOR_COUNT)
+			vector >= LOONGARCH64_IPI_VECTOR_COUNT)
 		return false;
 
 	request = LOONGARCH64_IOCSR_IPI_SEND_BLOCKING | ((uint32_t)cpu->arch_id << LOONGARCH64_IOCSR_IPI_SEND_CPU_SHIFT) |

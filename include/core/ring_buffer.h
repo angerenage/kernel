@@ -1,10 +1,11 @@
 #pragma once
 
-#include <core/lock.h>
-#include <core/spinlock.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <core/lock.h>
+#include <core/spinlock.h>
 
 /*
  * A general-purpose fixed-capacity ring buffer that stores elements of a
@@ -13,24 +14,24 @@
  */
 struct ring_buffer {
 	struct spinlock lock;
-	size_t          head;
-	size_t          tail;
-	size_t          count;
-	size_t          capacity;
-	size_t          element_size;
-	uint8_t*        data;
+	size_t head;
+	size_t tail;
+	size_t count;
+	size_t capacity;
+	size_t element_size;
+	uint8_t* data;
 };
 
 /* Locked view of the oldest element. Call ring_buffer_front_release() exactly once after a successful acquire. */
 struct ring_buffer_front {
 	struct ring_buffer* buffer;
-	const void*         element;
-	struct irq_state    irq_state;
+	const void* element;
+	struct irq_state irq_state;
 };
 
 /* Initialize a ring buffer with the given capacity and element size. Rejects an overflowing storage size. */
-bool ring_buffer_init(struct ring_buffer* rb, const char* lock_name, uint32_t lock_order, size_t capacity,
-                      size_t element_size);
+bool ring_buffer_init(
+		struct ring_buffer* rb, const char* lock_name, uint32_t lock_order, size_t capacity, size_t element_size);
 
 /* Release the ring buffer's storage. */
 void ring_buffer_deinit(struct ring_buffer* rb);

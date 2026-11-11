@@ -2,13 +2,13 @@
 
 Test(kthread, current_start_and_yield_delegate_to_scheduler) {
 	const struct thread_create_params params = {
-		.name              = "worker",
-		.entry             = kthread_test_entry,
-		.arg               = NULL,
+		.name = "worker",
+		.entry = kthread_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x300000u,
-		.kernel_stack_top  = 0x304000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x304000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	struct kthread worker = {.stack_mapping = NULL};
 	struct thread* idle;

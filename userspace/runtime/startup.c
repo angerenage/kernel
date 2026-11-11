@@ -1,8 +1,9 @@
 #include <limits.h>
-#include <runtime/startup.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
+
+#include <runtime/startup.h>
 
 static char* bounded_nul(char* begin, char* end) {
 	for (char* cursor = begin; cursor < end; cursor++) {
@@ -11,43 +12,43 @@ static char* bounded_nul(char* begin, char* end) {
 	return NULL;
 }
 
-enum runtime_startup_result runtime_startup_unpack(const struct process_startup_info* startup,
-                                                   struct runtime_startup_arguments*  out_arguments) {
-	char**          argv;
-	char*           cursor;
-	char*           end;
+enum runtime_startup_result runtime_startup_unpack(
+		const struct process_startup_info* startup, struct runtime_startup_arguments* out_arguments) {
+	char** argv;
+	char* cursor;
+	char* end;
 	const cap_id_t* capabilities;
-	size_t          capability_size;
-	size_t          payload_offset;
+	size_t capability_size;
+	size_t payload_offset;
 
 	if (out_arguments == NULL) return RUNTIME_STARTUP_INVALID;
 	*out_arguments = (struct runtime_startup_arguments){0};
 
 	if (startup == NULL || startup->size < sizeof(*startup) || startup->argc > INT_MAX ||
-	    startup->capc < PROCESS_STARTUP_CAP_COUNT) {
+			startup->capc < PROCESS_STARTUP_CAP_COUNT) {
 		return RUNTIME_STARTUP_INVALID;
 	}
 	capability_size = (size_t)startup->capc * sizeof(cap_id_t);
-	payload_offset  = sizeof(*startup) + capability_size;
+	payload_offset = sizeof(*startup) + capability_size;
 	if (startup->capv_offset != sizeof(*startup) || payload_offset > startup->size) {
 		return RUNTIME_STARTUP_INVALID;
 	}
-	capabilities                         = (const cap_id_t*)((const uint8_t*)startup + startup->capv_offset);
-	out_arguments->stdin_cap             = capabilities[PROCESS_STARTUP_CAP_STDIN];
-	out_arguments->stdout_cap            = capabilities[PROCESS_STARTUP_CAP_STDOUT];
-	out_arguments->stderr_cap            = capabilities[PROCESS_STARTUP_CAP_STDERR];
+	capabilities = (const cap_id_t*)((const uint8_t*)startup + startup->capv_offset);
+	out_arguments->stdin_cap = capabilities[PROCESS_STARTUP_CAP_STDIN];
+	out_arguments->stdout_cap = capabilities[PROCESS_STARTUP_CAP_STDOUT];
+	out_arguments->stderr_cap = capabilities[PROCESS_STARTUP_CAP_STDERR];
 	out_arguments->working_directory_cap = capabilities[PROCESS_STARTUP_CAP_WORKING_DIRECTORY];
-	out_arguments->capc                  = startup->capc - PROCESS_STARTUP_CAP_COUNT;
-	out_arguments->capv                  = out_arguments->capc == 0u ? NULL : capabilities + PROCESS_STARTUP_CAP_COUNT;
+	out_arguments->capc = startup->capc - PROCESS_STARTUP_CAP_COUNT;
+	out_arguments->capv = out_arguments->capc == 0u ? NULL : capabilities + PROCESS_STARTUP_CAP_COUNT;
 	if (startup->argc == 0u) {
 		if (startup->argv_offset != 0u || startup->argv_size != 0u || payload_offset != startup->size)
 			return RUNTIME_STARTUP_INVALID;
 		return RUNTIME_STARTUP_OK;
 	}
 	if (startup->argv_offset != payload_offset || startup->argv_size == 0u ||
-	    startup->argv_size > startup->size - startup->argv_offset ||
-	    startup->size != startup->argv_offset + startup->argv_size || startup->argc > startup->argv_size ||
-	    (size_t)startup->argc + 1u > SIZE_MAX / sizeof(*argv)) {
+			startup->argv_size > startup->size - startup->argv_offset ||
+			startup->size != startup->argv_offset + startup->argv_size || startup->argc > startup->argv_size ||
+			(size_t)startup->argc + 1u > SIZE_MAX / sizeof(*argv)) {
 		return RUNTIME_STARTUP_INVALID;
 	}
 
@@ -55,7 +56,7 @@ enum runtime_startup_result runtime_startup_unpack(const struct process_startup_
 	if (argv == NULL) return RUNTIME_STARTUP_NO_MEMORY;
 
 	cursor = (char*)startup + startup->argv_offset;
-	end    = cursor + startup->argv_size;
+	end = cursor + startup->argv_size;
 	for (uint32_t i = 0u; i < startup->argc; i++) {
 		char* terminator;
 		if (cursor >= end || (terminator = bounded_nul(cursor, end)) == NULL) {
@@ -63,7 +64,7 @@ enum runtime_startup_result runtime_startup_unpack(const struct process_startup_
 			return RUNTIME_STARTUP_INVALID;
 		}
 		argv[i] = cursor;
-		cursor  = terminator + 1;
+		cursor = terminator + 1;
 	}
 	if (cursor != end) {
 		free(argv);

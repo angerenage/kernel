@@ -4,13 +4,13 @@
 static void swap(unsigned char* left, unsigned char* right, size_t size) {
 	for (size_t index = 0u; index < size; index++) {
 		unsigned char byte = left[index];
-		left[index]        = right[index];
-		right[index]       = byte;
+		left[index] = right[index];
+		right[index] = byte;
 	}
 }
 
-static void sift_down(unsigned char* bytes, size_t root, size_t count, size_t size,
-                      int (*compare)(const void*, const void*)) {
+static void sift_down(
+		unsigned char* bytes, size_t root, size_t count, size_t size, int (*compare)(const void*, const void*)) {
 	if (count < 2u) return;
 	while (root <= (count - 2u) / 2u) {
 		size_t child = root * 2u + 1u;

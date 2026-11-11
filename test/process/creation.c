@@ -1,10 +1,10 @@
 #include "test_support.h"
 
 Test(process, create_initializes_pid_new_state_and_address_space) {
-	struct process*       process = NULL;
+	struct process* process = NULL;
 	struct address_space* space;
-	enum process_result   result;
-	process_id_t          pid;
+	enum process_result result;
+	process_id_t pid;
 
 	init_process_test_environment();
 
@@ -32,19 +32,19 @@ Test(process, create_initializes_pid_new_state_and_address_space) {
 }
 
 Test(process, spawn_thread_sets_running_state_and_main_thread) {
-	struct process*       process = NULL;
+	struct process* process = NULL;
 	struct address_space* space;
-	enum process_result   result;
-	process_id_t          pid;
-	uthread_id_t          main_tid;
+	enum process_result result;
+	process_id_t pid;
+	uthread_id_t main_tid;
 
 	init_process_test_environment();
 
 	result = create_process_with_main_thread(&process,
-	                                         &(const struct process_spawn_params){
-												 .name       = "init",
-												 .user_entry = 0x400000u,
-											 });
+			&(const struct process_spawn_params){
+				.name = "init",
+				.user_entry = 0x400000u,
+			});
 	cr_assert_eq(result, PROCESS_OK, "process_create/process_spawn_thread failed: %d", result);
 	cr_assert_not_null(process, "process_create did not return a process");
 	pid = process_pid(process);
@@ -57,9 +57,9 @@ Test(process, spawn_thread_sets_running_state_and_main_thread) {
 	main_tid = uthread_id(process->main_thread);
 	cr_assert_neq(main_tid, UTHREAD_ID_INVALID, "main thread TID should be valid");
 	cr_assert_eq(
-		uthread_lookup(main_tid), process->main_thread, "main thread TID lookup should return the main thread");
+			uthread_lookup(main_tid), process->main_thread, "main thread TID lookup should return the main thread");
 	cr_assert_eq(
-		process_main_thread(process), process->main_thread, "main thread accessor should return the main thread");
+			process_main_thread(process), process->main_thread, "main thread accessor should return the main thread");
 
 	space = process_address_space(process);
 	cr_assert_not_null(space, "process address space should be exposed");
@@ -75,27 +75,27 @@ Test(process, spawn_thread_sets_running_state_and_main_thread) {
 }
 
 Test(process, spawn_assigns_monotonic_pids) {
-	struct process* first  = NULL;
+	struct process* first = NULL;
 	struct process* second = NULL;
-	process_id_t    first_pid;
-	process_id_t    second_pid;
+	process_id_t first_pid;
+	process_id_t second_pid;
 
 	init_process_test_environment();
 
 	cr_assert_eq(create_process_with_main_thread(&first,
-	                                             &(const struct process_spawn_params){
-													 .name       = "first",
-													 .user_entry = 0x400000u,
-												 }),
-	             PROCESS_OK);
+						 &(const struct process_spawn_params){
+							 .name = "first",
+							 .user_entry = 0x400000u,
+						 }),
+			PROCESS_OK);
 	cr_assert_eq(create_process_with_main_thread(&second,
-	                                             &(const struct process_spawn_params){
-													 .name       = "second",
-													 .user_entry = 0x410000u,
-												 }),
-	             PROCESS_OK);
+						 &(const struct process_spawn_params){
+							 .name = "second",
+							 .user_entry = 0x410000u,
+						 }),
+			PROCESS_OK);
 
-	first_pid  = process_pid(first);
+	first_pid = process_pid(first);
 	second_pid = process_pid(second);
 	cr_assert_neq(first_pid, PROCESS_PID_INVALID);
 	cr_assert_neq(second_pid, PROCESS_PID_INVALID);
@@ -111,33 +111,33 @@ Test(process, spawn_rejects_missing_output_pointer) {
 	init_process_test_environment();
 
 	cr_assert_eq(create_process_with_main_thread(NULL,
-	                                             &(const struct process_spawn_params){
-													 .name       = "invalid",
-													 .user_entry = 0x400000u,
-												 }),
-	             PROCESS_INVALID_ARGUMENTS);
+						 &(const struct process_spawn_params){
+							 .name = "invalid",
+							 .user_entry = 0x400000u,
+						 }),
+			PROCESS_INVALID_ARGUMENTS);
 }
 
 Test(process, spawn_user_creates_main_thread_in_process_address_space) {
-	struct process*     process = NULL;
+	struct process* process = NULL;
 	enum process_result result;
 
 	init_process_test_environment();
 
 	result = create_process_with_main_thread(&process,
-	                                         &(const struct process_spawn_params){
-												 .name            = "spawned",
-												 .user_entry      = 0x400000u,
-												 .user_stack_size = 2u * TEST_MAPPING_GRANULE,
-												 .preferred_cpu   = NULL,
-											 });
+			&(const struct process_spawn_params){
+				.name = "spawned",
+				.user_entry = 0x400000u,
+				.user_stack_size = 2u * TEST_MAPPING_GRANULE,
+				.preferred_cpu = NULL,
+			});
 	cr_assert_eq(result, PROCESS_OK, "process_create/process_spawn_thread failed: %d", result);
 	cr_assert_not_null(process, "process_create did not return a process");
 	cr_assert_not_null(process->main_thread, "process should record the main user thread");
 	cr_assert_eq(process->main_thread->process, process, "main uthread should point back to the process");
 	cr_assert_eq(process->main_thread->thread.address_space,
-	             process_address_space(process),
-	             "main scheduler thread should run in the process address space");
+			process_address_space(process),
+			"main scheduler thread should run in the process address space");
 	cr_assert_eq(process_thread_count(process), 1u, "spawned process should have one thread");
 	cr_assert_eq(sched_run_queue_depth(cpu_current()), 1u, "main thread should be runnable");
 

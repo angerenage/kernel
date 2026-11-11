@@ -2,13 +2,13 @@
 
 Test(kthread, canceled_running_thread_exits_with_cancel_code_at_cancellation_point) {
 	const struct thread_create_params params = {
-		.name              = "worker",
-		.entry             = kthread_test_entry,
-		.arg               = NULL,
+		.name = "worker",
+		.entry = kthread_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x330000u,
-		.kernel_stack_top  = 0x334000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x334000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	struct kthread worker = {.stack_mapping = NULL};
 
@@ -29,24 +29,24 @@ Test(kthread, canceled_running_thread_exits_with_cancel_code_at_cancellation_poi
 	sched_complete_context_switch();
 	cr_assert_eq(worker.thread.state, THREAD_STATE_ZOMBIE, "context-switch completion should publish ZOMBIE");
 	cr_assert_eq(worker.thread.exit_code,
-	             THREAD_EXIT_CODE_CANCELLED,
-	             "canceled worker should publish the dedicated cancellation exit code");
+			THREAD_EXIT_CODE_CANCELLED,
+			"canceled worker should publish the dedicated cancellation exit code");
 	cr_assert_eq(sched_current_thread(),
-	             sched_idle_thread(cpu_current()),
-	             "scheduler should switch away from the canceled worker");
+			sched_idle_thread(cpu_current()),
+			"scheduler should switch away from the canceled worker");
 
 	reset_test_state();
 }
 
 Test(kthread, cancel_wakes_sleeping_thread_so_it_can_reach_a_cancellation_point) {
 	const struct thread_create_params params = {
-		.name              = "sleeper",
-		.entry             = kthread_test_entry,
-		.arg               = NULL,
+		.name = "sleeper",
+		.entry = kthread_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x340000u,
-		.kernel_stack_top  = 0x344000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x344000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	struct kthread sleeper = {.stack_mapping = NULL};
 
@@ -56,7 +56,7 @@ Test(kthread, cancel_wakes_sleeping_thread_so_it_can_reach_a_cancellation_point)
 	cr_assert(thread_init(&sleeper.thread, &params), "thread_init failed");
 
 	sched_set_current(cpu_current(), &sleeper.thread);
-	kthread_test_sleep_cancel_target     = &sleeper;
+	kthread_test_sleep_cancel_target = &sleeper;
 	kthread_test_sleep_cancel_hook_armed = true;
 	hal_cpu_mock_set_context_switch_hook(kthread_test_sleep_cancel_context_switch_hook);
 	cr_assert(sched_sleep_until_tick(sched_tick_count() + 8u), "sched_sleep_until_tick failed");

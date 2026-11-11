@@ -1,13 +1,14 @@
 #pragma once
 
-#include <base/time.h>
-#include <core/cpu.h>
-#include <core/kthread.h>
-#include <core/sched.h>
-#include <hal/clock.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/time.h>
+#include <hal/clock.h>
+#include <core/cpu.h>
+#include <core/kthread.h>
+#include <core/sched.h>
 
 #define KERNEL_SELFTEST_SLEEP_TICKS 3u
 #define KERNEL_SELFTEST_MUTEX_HOLD_TICKS 2u
@@ -17,10 +18,8 @@
 #define KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS 8u
 
 static __attribute__((unused))
-bool kernel_selftest_thread_create_with_preferred_cpu(struct kthread** out_thread,
-                                                                                     const char*      name,
-                                                                                     thread_entry_t entry, void* arg,
-                                                                                     struct cpu* preferred_cpu) {
+bool kernel_selftest_thread_create_with_preferred_cpu(
+		struct kthread** out_thread, const char* name, thread_entry_t entry, void* arg, struct cpu* preferred_cpu) {
 	if (out_thread == NULL || name == NULL || entry == NULL) return false;
 
 	*out_thread = NULL;
@@ -28,8 +27,8 @@ bool kernel_selftest_thread_create_with_preferred_cpu(struct kthread** out_threa
 }
 
 static __attribute__((unused))
-bool kernel_selftest_thread_create(struct kthread** out_thread, const char* name,
-                                                                  thread_entry_t entry, void* arg) {
+bool kernel_selftest_thread_create(
+		struct kthread** out_thread, const char* name, thread_entry_t entry, void* arg) {
 	struct cpu* cpu = cpu_current();
 
 	if (cpu == NULL) return false;
@@ -91,7 +90,7 @@ uint64_t kernel_selftest_ms_to_ticks(uint64_t ms, uint32_t hz) {
 
 struct kernel_selftest_clock_scope {
 	uint32_t hz;
-	bool     started;
+	bool started;
 };
 
 static __attribute__((unused))
@@ -110,7 +109,7 @@ bool kernel_selftest_clock_scope_begin(struct kernel_selftest_clock_scope* scope
 	if (!hal_clock_start(KERNEL_SELFTEST_CLOCK_HZ, kernel_selftest_clock_noop_handler, NULL)) return false;
 
 	scope->started = true;
-	scope->hz      = hal_clock_frequency();
+	scope->hz = hal_clock_frequency();
 	return scope->hz != 0u;
 }
 
@@ -120,5 +119,5 @@ void kernel_selftest_clock_scope_end(struct kernel_selftest_clock_scope* scope) 
 
 	hal_clock_stop();
 	scope->started = false;
-	scope->hz      = 0u;
+	scope->hz = 0u;
 }

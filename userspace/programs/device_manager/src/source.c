@@ -1,10 +1,12 @@
 #include "source.h"
 
-#include <base/device_tree.h>
-#include <protocol/device_manager.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
+
+#include <base/device_tree.h>
+
+#include <protocol/device_manager.h>
 #include <system/device_tree.h>
 
 enum source_preference {
@@ -13,11 +15,11 @@ enum source_preference {
 	SOURCE_PREFERENCE_ACPI,
 };
 
-static enum device_manager_source_result parse_preference(int argc, char** argv,
-                                                          enum source_preference* out_preference) {
+static enum device_manager_source_result parse_preference(
+		int argc, char** argv, enum source_preference* out_preference) {
 	static const char option[] = DEVICE_MANAGER_SOURCE_OPTION;
 	static const char prefix[] = DEVICE_MANAGER_SOURCE_OPTION "=";
-	const char*       value    = NULL;
+	const char* value = NULL;
 
 	if (out_preference == NULL || argc < 0 || (argc != 0 && argv == NULL))
 		return DEVICE_MANAGER_SOURCE_INVALID_ARGUMENT;
@@ -53,15 +55,14 @@ static bool device_tree_valid(cap_id_t capability) {
 }
 
 enum device_manager_source_result device_manager_source_select(int argc, char** argv, cap_id_t acpi_cap,
-                                                               cap_id_t                                device_tree_cap,
-                                                               struct device_manager_source_selection* out_selection) {
-	enum source_preference            preference;
+		cap_id_t device_tree_cap, struct device_manager_source_selection* out_selection) {
+	enum source_preference preference;
 	enum device_manager_source_result result;
-	bool                              dt_valid;
+	bool dt_valid;
 
 	if (out_selection == NULL) return DEVICE_MANAGER_SOURCE_INVALID_ARGUMENT;
 	*out_selection = (struct device_manager_source_selection){
-		.source     = DEVICE_MANAGER_FIRMWARE_SOURCE_INVALID,
+		.source = DEVICE_MANAGER_FIRMWARE_SOURCE_INVALID,
 		.capability = CAP_ID_INVALID,
 	};
 	result = parse_preference(argc, argv, &preference);
@@ -69,7 +70,7 @@ enum device_manager_source_result device_manager_source_select(int argc, char** 
 	if (preference == SOURCE_PREFERENCE_ACPI) {
 		if (acpi_cap == CAP_ID_INVALID) return DEVICE_MANAGER_SOURCE_UNAVAILABLE;
 		*out_selection = (struct device_manager_source_selection){
-			.source     = DEVICE_MANAGER_FIRMWARE_SOURCE_ACPI,
+			.source = DEVICE_MANAGER_FIRMWARE_SOURCE_ACPI,
 			.capability = acpi_cap,
 		};
 		return DEVICE_MANAGER_SOURCE_OK;
@@ -78,21 +79,21 @@ enum device_manager_source_result device_manager_source_select(int argc, char** 
 	if (preference == SOURCE_PREFERENCE_DEVICE_TREE) {
 		if (!dt_valid) return DEVICE_MANAGER_SOURCE_UNAVAILABLE;
 		*out_selection = (struct device_manager_source_selection){
-			.source     = DEVICE_MANAGER_FIRMWARE_SOURCE_DEVICE_TREE,
+			.source = DEVICE_MANAGER_FIRMWARE_SOURCE_DEVICE_TREE,
 			.capability = device_tree_cap,
 		};
 		return DEVICE_MANAGER_SOURCE_OK;
 	}
 	if (dt_valid) {
 		*out_selection = (struct device_manager_source_selection){
-			.source     = DEVICE_MANAGER_FIRMWARE_SOURCE_DEVICE_TREE,
+			.source = DEVICE_MANAGER_FIRMWARE_SOURCE_DEVICE_TREE,
 			.capability = device_tree_cap,
 		};
 		return DEVICE_MANAGER_SOURCE_OK;
 	}
 	if (acpi_cap != CAP_ID_INVALID) {
 		*out_selection = (struct device_manager_source_selection){
-			.source     = DEVICE_MANAGER_FIRMWARE_SOURCE_ACPI,
+			.source = DEVICE_MANAGER_FIRMWARE_SOURCE_ACPI,
 			.capability = acpi_cap,
 		};
 		return DEVICE_MANAGER_SOURCE_OK;

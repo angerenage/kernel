@@ -4,7 +4,7 @@
 
 Test(heap, strdup_allocates_kernel_copy) {
 	_Alignas(4096) static uint8_t arena[KiB(64)];
-	char*                         copy;
+	char* copy;
 
 	init_test_heap(arena, sizeof(arena));
 
@@ -21,8 +21,8 @@ Test(heap, strdup_allocates_kernel_copy) {
 
 Test(heap, strndup_limits_source_scan_and_terminates_copy) {
 	_Alignas(4096) static uint8_t arena[KiB(64)];
-	const char                    source[] = {'a', 'b', 'c', 'd'};
-	char*                         copy;
+	const char source[] = {'a', 'b', 'c', 'd'};
+	char* copy;
 
 	init_test_heap(arena, sizeof(arena));
 

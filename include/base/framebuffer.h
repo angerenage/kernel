@@ -1,8 +1,9 @@
 #pragma once
 
-#include <base/cap.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/cap.h>
 
 /* Operations supported by a kernel framebuffer capability. */
 enum framebuffer_op {
@@ -22,18 +23,18 @@ struct framebuffer_info_request {
 
 /* Framebuffer byte size, geometry, scanline pitch, and boot-protocol pixel format. */
 struct framebuffer_info_response {
-	size_t   size;
+	size_t size;
 	uint64_t width;
 	uint64_t height;
 	uint64_t pitch;
 	uint16_t bpp;
-	uint8_t  memory_model;
-	uint8_t  red_mask_size;
-	uint8_t  red_mask_shift;
-	uint8_t  green_mask_size;
-	uint8_t  green_mask_shift;
-	uint8_t  blue_mask_size;
-	uint8_t  blue_mask_shift;
+	uint8_t memory_model;
+	uint8_t red_mask_size;
+	uint8_t red_mask_shift;
+	uint8_t green_mask_size;
+	uint8_t green_mask_shift;
+	uint8_t blue_mask_size;
+	uint8_t blue_mask_shift;
 };
 
 /* Request a read-write mapping of the framebuffer. */
@@ -43,8 +44,8 @@ struct framebuffer_map_request {
 
 /* Writable caller mapping, its management capability, and the framebuffer's offset from mapping.base. */
 struct framebuffer_map_response {
-	cap_id_t  mapping_cap;
+	cap_id_t mapping_cap;
 	uintptr_t address;
-	size_t    mapping_size;
-	size_t    data_offset;
+	size_t mapping_size;
+	size_t data_offset;
 };

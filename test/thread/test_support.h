@@ -1,11 +1,12 @@
 #ifndef TEST_THREAD_TEST_SUPPORT_H
 #define TEST_THREAD_TEST_SUPPORT_H
 
-#include <core/cpu.h>
-#include <core/thread.h>
-#include <criterion/criterion.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>
+#include <core/cpu.h>
+#include <core/thread.h>
+
+#include <criterion/criterion.h>
 
 #include "../mocks/hal/cpu_mock.h"
 

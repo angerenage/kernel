@@ -1,6 +1,7 @@
 #pragma once
 
 #include <base/cap.h>
+
 #include <protocol/device.h>
 
 /* Run a SATAPI device driver on a given device and publish a block-device view of the media. */

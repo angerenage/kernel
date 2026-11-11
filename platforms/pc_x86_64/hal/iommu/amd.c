@@ -1,11 +1,12 @@
 #include "amd.h"
 
-#include <core/pmm.h>
-#include <hal/hcf.h>
-#include <hal/iommu.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <hal/hcf.h>
+#include <hal/iommu.h>
+#include <core/pmm.h>
 
 #include "../../../iommu_page_table.h"
 
@@ -87,12 +88,14 @@ static unsigned amd_physical_address_bits(void) {
 }
 
 static struct iommu_pt_format amd_format(const struct hal_iommu_controller_state* controller) {
-	return (struct iommu_pt_format){.kind                  = IOMMU_PT_AMD_V1,
-	                                .address_mask          = controller->address_mask,
-	                                .leaf_size_mask        = controller->leaf_size_mask,
-	                                .levels                = 4u,
-	                                .io_address_bits       = controller->io_address_bits,
-	                                .physical_address_bits = controller->physical_address_bits};
+	return (struct iommu_pt_format){
+		.kind = IOMMU_PT_AMD_V1,
+		.address_mask = controller->address_mask,
+		.leaf_size_mask = controller->leaf_size_mask,
+		.levels = 4u,
+		.io_address_bits = controller->io_address_bits,
+		.physical_address_bits = controller->physical_address_bits
+	};
 }
 
 static bool amd_source_valid(const struct hal_iommu_controller_state* controller, uint32_t source_id) {
@@ -107,9 +110,9 @@ static uint64_t* amd_device_entry(const struct hal_iommu_controller_state* contr
 static bool amd_queue(struct hal_iommu_controller_state* controller, struct amd_iommu_command command) {
 	for (size_t attempt = 0u; attempt < AMD_IOMMU_WAIT_LIMIT; attempt++) {
 		uint32_t next =
-			(controller->command_queue_tail + AMD_IOMMU_COMMAND_ENTRY_SIZE) & (AMD_IOMMU_COMMAND_BUFFER_SIZE - 1u);
+				(controller->command_queue_tail + AMD_IOMMU_COMMAND_ENTRY_SIZE) & (AMD_IOMMU_COMMAND_BUFFER_SIZE - 1u);
 		if (next !=
-		    (uint32_t)(amd_read32(controller, AMD_IOMMU_REG_COMMAND_HEAD) & (AMD_IOMMU_COMMAND_BUFFER_SIZE - 1u))) {
+				(uint32_t)(amd_read32(controller, AMD_IOMMU_REG_COMMAND_HEAD) & (AMD_IOMMU_COMMAND_BUFFER_SIZE - 1u))) {
 			struct amd_iommu_command* entries = iommu_pt_phys_to_virt(controller->command_queue_address);
 			entries[controller->command_queue_tail / AMD_IOMMU_COMMAND_ENTRY_SIZE] = command;
 			__atomic_thread_fence(__ATOMIC_RELEASE);
@@ -124,9 +127,7 @@ static bool amd_queue(struct hal_iommu_controller_state* controller, struct amd_
 
 static bool amd_complete(struct hal_iommu_controller_state* controller) {
 	amd_write32(controller, AMD_IOMMU_REG_STATUS, AMD_IOMMU_STATUS_COMPLETION_WAIT);
-	struct amd_iommu_command command = {
-		.data = {2u, AMD_IOMMU_COMMAND_COMPLETION_WAIT << 28u, 0u, 0u}
-    };
+	struct amd_iommu_command command = {.data = {2u, AMD_IOMMU_COMMAND_COMPLETION_WAIT << 28u, 0u, 0u}};
 	if (!amd_queue(controller, command)) return false;
 	for (size_t attempt = 0u; attempt < AMD_IOMMU_WAIT_LIMIT; attempt++) {
 		if ((amd_read32(controller, AMD_IOMMU_REG_STATUS) & AMD_IOMMU_STATUS_COMPLETION_WAIT) != 0u) return true;
@@ -136,21 +137,21 @@ static bool amd_complete(struct hal_iommu_controller_state* controller) {
 }
 
 static bool amd_invalidate_device(struct hal_iommu_controller_state* controller, uint32_t source_id) {
-	struct amd_iommu_command command = {
-		.data = {source_id, AMD_IOMMU_COMMAND_INVALIDATE_DEVICE << 28u, 0u, 0u}
-    };
+	struct amd_iommu_command command = {.data = {source_id, AMD_IOMMU_COMMAND_INVALIDATE_DEVICE << 28u, 0u, 0u}};
 	return amd_queue(controller, command) && amd_complete(controller);
 }
 
-static bool amd_invalidate_domain(struct hal_iommu_controller_state* controller, uint32_t context_id,
-                                  bool hierarchy_changed) {
-	const uint64_t           address = 0x7ffffffffffff000ull;
+static bool amd_invalidate_domain(
+		struct hal_iommu_controller_state* controller, uint32_t context_id, bool hierarchy_changed) {
+	const uint64_t address = 0x7ffffffffffff000ull;
 	struct amd_iommu_command command = {
-		.data = {0u,
-		         context_id | (AMD_IOMMU_COMMAND_INVALIDATE_PAGES << 28u),
-		         (uint32_t)address | 1u | (hierarchy_changed ? 2u : 0u),
-		         (uint32_t)(address >> 32u)}
-    };
+		.data = {
+			0u,
+			context_id | (AMD_IOMMU_COMMAND_INVALIDATE_PAGES << 28u),
+			(uint32_t)address | 1u | (hierarchy_changed ? 2u : 0u),
+			(uint32_t)(address >> 32u)
+		}
+	};
 	return amd_queue(controller, command) && amd_complete(controller);
 }
 
@@ -160,15 +161,14 @@ static bool amd_sync(void* context, uint32_t context_id, uint64_t io_address, si
 	return amd_invalidate_domain(context, context_id, hierarchy_changed);
 }
 
-bool x86_amd_iommu_controller_init(struct hal_iommu_controller_state*            controller,
-                                   const struct hal_iommu_controller_descriptor* descriptor,
-                                   struct hal_iommu_info*                        out_info) {
+bool x86_amd_iommu_controller_init(struct hal_iommu_controller_state* controller,
+		const struct hal_iommu_controller_descriptor* descriptor, struct hal_iommu_info* out_info) {
 	const struct pmm_info* pmm = pmm_info();
-	struct pmm_extent      devices;
-	struct pmm_extent      commands;
-	unsigned               physical_bits;
+	struct pmm_extent devices;
+	struct pmm_extent commands;
+	unsigned physical_bits;
 	if (controller == NULL || descriptor == NULL || out_info == NULL || descriptor->kind != HAL_IOMMU_KIND_AMD ||
-	    descriptor->register_address == 0u || pmm == NULL)
+			descriptor->register_address == 0u || pmm == NULL)
 		return false;
 	if (!iommu_pt_map_mmio(descriptor->register_address, AMD_IOMMU_REGISTER_SPACE_SIZE)) return false;
 	physical_bits = amd_physical_address_bits();
@@ -177,7 +177,7 @@ bool x86_amd_iommu_controller_init(struct hal_iommu_controller_state*           
 	unsigned io_bits = descriptor->firmware_io_address_bits;
 	if (io_bits == 0u) io_bits = 64u;
 	if (physical_bits < 32u || physical_bits > 52u || io_bits < 32u || io_bits > 64u ||
-	    pmm->allocation_granule > AMD_IOMMU_COMMAND_BUFFER_SIZE)
+			pmm->allocation_granule > AMD_IOMMU_COMMAND_BUFFER_SIZE)
 		return false;
 	if (io_bits > AMD_IOMMU_V1_IO_ADDRESS_BITS) io_bits = AMD_IOMMU_V1_IO_ADDRESS_BITS;
 	if (!iommu_pt_allocate_table(AMD_IOMMU_DEVICE_TABLE_SIZE, &devices)) return false;
@@ -192,24 +192,25 @@ bool x86_amd_iommu_controller_init(struct hal_iommu_controller_state*           
 		return false;
 	}
 	*controller = (struct hal_iommu_controller_state){
-		.kind                  = HAL_IOMMU_KIND_AMD,
-		.registers             = iommu_pt_phys_to_virt(descriptor->register_address),
-		.source_table_address  = devices.address,
+		.kind = HAL_IOMMU_KIND_AMD,
+		.registers = iommu_pt_phys_to_virt(descriptor->register_address),
+		.source_table_address = devices.address,
 		.command_queue_address = commands.address,
 		.table_allocation_size =
-			pmm->allocation_granule > IOMMU_PT_PAGE_SIZE ? pmm->allocation_granule : IOMMU_PT_PAGE_SIZE,
-		.source_table_size     = devices.size,
-		.command_queue_size    = commands.size,
+				pmm->allocation_granule > IOMMU_PT_PAGE_SIZE ? pmm->allocation_granule : IOMMU_PT_PAGE_SIZE,
+		.source_table_size = devices.size,
+		.command_queue_size = commands.size,
 		.physical_address_bits = (uint8_t)physical_bits,
-		.io_address_bits       = (uint8_t)io_bits,
-		.context_id_bits       = 16u,
-		.source_id_bits        = 16u,
-		.context_limit         = UINT16_MAX,
-		.address_mask          = address_mask,
-		.leaf_size_mask        = (1ull << IOMMU_PT_PAGE_SHIFT) | (1ull << 21u) | (1ull << 30u),
-		.extended_capabilities = 0u};
+		.io_address_bits = (uint8_t)io_bits,
+		.context_id_bits = 16u,
+		.source_id_bits = 16u,
+		.context_limit = UINT16_MAX,
+		.address_mask = address_mask,
+		.leaf_size_mask = (1ull << IOMMU_PT_PAGE_SHIFT) | (1ull << 21u) | (1ull << 30u),
+		.extended_capabilities = 0u
+	};
 	controller->extended_capabilities = amd_read64(controller, AMD_IOMMU_REG_EXTENDED_FEATURES);
-	controller->control               = amd_read64(controller, AMD_IOMMU_REG_CONTROL);
+	controller->control = amd_read64(controller, AMD_IOMMU_REG_CONTROL);
 	controller->control &= ~(AMD_IOMMU_CONTROL_ENABLE | AMD_IOMMU_CONTROL_COMMAND_BUFFER | AMD_IOMMU_CONTROL_COHERENT);
 	if ((descriptor->firmware_flags & (1u << 5u)) != 0u) controller->control |= AMD_IOMMU_CONTROL_COHERENT;
 	if (!amd_set_control(controller, controller->control)) {
@@ -218,22 +219,24 @@ bool x86_amd_iommu_controller_init(struct hal_iommu_controller_state*           
 		return false;
 	}
 	amd_write64(controller,
-	            AMD_IOMMU_REG_DEVICE_TABLE,
-	            devices.address | (uint64_t)((devices.size >> IOMMU_PT_PAGE_SHIFT) - 1u));
+			AMD_IOMMU_REG_DEVICE_TABLE,
+			devices.address | (uint64_t)((devices.size >> IOMMU_PT_PAGE_SHIFT) - 1u));
 	amd_write64(controller, AMD_IOMMU_REG_COMMAND_BUFFER, commands.address | AMD_IOMMU_COMMAND_BUFFER_512);
 	amd_write32(controller, AMD_IOMMU_REG_COMMAND_HEAD, 0u);
 	amd_write32(controller, AMD_IOMMU_REG_COMMAND_TAIL, 0u);
 	controller->control |=
-		AMD_IOMMU_CONTROL_ENABLE | AMD_IOMMU_CONTROL_COMMAND_BUFFER | AMD_IOMMU_CONTROL_COMPLETION_WAIT;
+			AMD_IOMMU_CONTROL_ENABLE | AMD_IOMMU_CONTROL_COMMAND_BUFFER | AMD_IOMMU_CONTROL_COMPLETION_WAIT;
 	if (!amd_set_control(controller, controller->control)) hcf();
 	controller->initialized = true;
-	*out_info               = (struct hal_iommu_info){.kind                  = HAL_IOMMU_KIND_AMD,
-	                                                  .minimum_leaf_size     = IOMMU_PT_PAGE_SIZE,
-	                                                  .leaf_size_mask        = controller->leaf_size_mask,
-	                                                  .io_address_bits       = controller->io_address_bits,
-	                                                  .physical_address_bits = controller->physical_address_bits,
-	                                                  .context_id_bits       = controller->context_id_bits,
-	                                                  .source_id_bits        = controller->source_id_bits};
+	*out_info = (struct hal_iommu_info){
+		.kind = HAL_IOMMU_KIND_AMD,
+		.minimum_leaf_size = IOMMU_PT_PAGE_SIZE,
+		.leaf_size_mask = controller->leaf_size_mask,
+		.io_address_bits = controller->io_address_bits,
+		.physical_address_bits = controller->physical_address_bits,
+		.context_id_bits = controller->context_id_bits,
+		.source_id_bits = controller->source_id_bits
+	};
 	return true;
 }
 
@@ -260,12 +263,12 @@ bool x86_amd_iommu_mapping_supported(const struct hal_iommu_controller_state* co
 	return iommu_pt_access_supported(&format, access);
 }
 
-bool x86_amd_iommu_space_init(struct hal_iommu_controller_state* controller, uint32_t context_id,
-                              struct hal_iommu_space_state* space) {
+bool x86_amd_iommu_space_init(
+		struct hal_iommu_controller_state* controller, uint32_t context_id, struct hal_iommu_space_state* space) {
 	if (controller == NULL || !controller->initialized || space == NULL || context_id > UINT16_MAX) return false;
 	amd_lock(controller);
 	struct iommu_pt_format format = amd_format(controller);
-	bool                   ok     = iommu_pt_space_init(&format, (uintptr_t)controller, context_id, space);
+	bool ok = iommu_pt_space_init(&format, (uintptr_t)controller, context_id, space);
 	amd_unlock(controller);
 	return ok;
 }
@@ -279,21 +282,21 @@ void x86_amd_iommu_space_deinit(struct hal_iommu_controller_state* controller, s
 }
 
 bool x86_amd_iommu_map(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                       const struct hal_iommu_map_request* request) {
+		const struct hal_iommu_map_request* request) {
 	if (controller == NULL || !controller->initialized || space == NULL ||
-	    space->table.controller_identity != (uintptr_t)controller)
+			space->table.controller_identity != (uintptr_t)controller)
 		return false;
 	amd_lock(controller);
 	struct iommu_pt_format format = amd_format(controller);
-	bool                   ok = iommu_pt_map(&format, space, request, amd_sync, controller) && controller->initialized;
+	bool ok = iommu_pt_map(&format, space, request, amd_sync, controller) && controller->initialized;
 	amd_unlock(controller);
 	return ok;
 }
 
 bool x86_amd_iommu_unmap(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                         uint64_t io_address, size_t size) {
+		uint64_t io_address, size_t size) {
 	if (controller == NULL || !controller->initialized || space == NULL ||
-	    space->table.controller_identity != (uintptr_t)controller)
+			space->table.controller_identity != (uintptr_t)controller)
 		return false;
 	amd_lock(controller);
 	struct iommu_pt_format format = amd_format(controller);
@@ -303,27 +306,27 @@ bool x86_amd_iommu_unmap(struct hal_iommu_controller_state* controller, struct h
 }
 
 bool x86_amd_iommu_protect(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                           uint64_t io_address, size_t size, uint64_t access) {
+		uint64_t io_address, size_t size, uint64_t access) {
 	if (controller == NULL || !controller->initialized || space == NULL ||
-	    space->table.controller_identity != (uintptr_t)controller)
+			space->table.controller_identity != (uintptr_t)controller)
 		return false;
 	amd_lock(controller);
 	struct iommu_pt_format format = amd_format(controller);
-	bool                   ok =
-		iommu_pt_protect(&format, space, io_address, size, access, amd_sync, controller) && controller->initialized;
+	bool ok =
+			iommu_pt_protect(&format, space, io_address, size, access, amd_sync, controller) && controller->initialized;
 	amd_unlock(controller);
 	return ok;
 }
 
 bool x86_amd_iommu_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                          uint32_t source_id, struct hal_iommu_attachment_state* attachment) {
+		uint32_t source_id, struct hal_iommu_attachment_state* attachment) {
 	if (!amd_source_valid(controller, source_id) || space == NULL || !space->table.initialized ||
-	    space->table.controller_identity != (uintptr_t)controller || attachment == NULL || attachment->initialized)
+			space->table.controller_identity != (uintptr_t)controller || attachment == NULL || attachment->initialized)
 		return false;
 	amd_lock(controller);
-	uint64_t* entry    = amd_device_entry(controller, source_id);
-	uint64_t  expected = space->table.root_address | AMD_IOMMU_DTE_VALID | AMD_IOMMU_DTE_TRANSLATION_VALID |
-	                     (4ull << 9u) | AMD_IOMMU_DTE_READ | AMD_IOMMU_DTE_WRITE;
+	uint64_t* entry = amd_device_entry(controller, source_id);
+	uint64_t expected = space->table.root_address | AMD_IOMMU_DTE_VALID | AMD_IOMMU_DTE_TRANSLATION_VALID |
+	                    (4ull << 9u) | AMD_IOMMU_DTE_READ | AMD_IOMMU_DTE_WRITE;
 	if ((entry[0] & AMD_IOMMU_DTE_VALID) != 0u) {
 		amd_unlock(controller);
 		return false;
@@ -335,15 +338,16 @@ bool x86_amd_iommu_attach(struct hal_iommu_controller_state* controller, struct 
 	entry[0] = expected;
 	if (!amd_invalidate_device(controller, source_id)) hcf();
 	*attachment = (struct hal_iommu_attachment_state){
-		.initialized = true, .controller_identity = (uintptr_t)controller, .source_id = source_id};
+		.initialized = true, .controller_identity = (uintptr_t)controller, .source_id = source_id
+	};
 	amd_unlock(controller);
 	return true;
 }
 
 bool x86_amd_iommu_detach(struct hal_iommu_controller_state* controller, uint32_t source_id,
-                          struct hal_iommu_attachment_state* attachment) {
+		struct hal_iommu_attachment_state* attachment) {
 	if (!amd_source_valid(controller, source_id) || attachment == NULL || !attachment->initialized ||
-	    attachment->controller_identity != (uintptr_t)controller || attachment->source_id != source_id)
+			attachment->controller_identity != (uintptr_t)controller || attachment->source_id != source_id)
 		return false;
 	amd_lock(controller);
 	uint64_t* entry = amd_device_entry(controller, source_id);

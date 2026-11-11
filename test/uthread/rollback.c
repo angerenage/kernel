@@ -2,49 +2,50 @@
 
 Test(uthread, context_initialization_failure_rolls_back_all_allocated_resources) {
 	struct process* process = NULL;
-	struct uthread  worker  = {
-		.user_stack_mapping   = NULL,
+	struct uthread worker = {
+		.user_stack_mapping = NULL,
 		.kernel_stack_mapping = NULL,
 	};
-	size_t                    user_regions_before;
-	size_t                    kernel_regions_before;
-	size_t                    process_threads_before;
-	size_t                    uthreads_before;
-	size_t                    run_queue_before;
+	size_t user_regions_before;
+	size_t kernel_regions_before;
+	size_t process_threads_before;
+	size_t uthreads_before;
+	size_t run_queue_before;
 	enum uthread_start_result result;
 
 	init_uthread_test_environment();
 	process = spawn_owner_process("test/context-rollback");
 
-	user_regions_before    = address_space_mapping_count(process_address_space(process));
-	kernel_regions_before  = address_space_mapping_count(address_space_kernel());
+	user_regions_before = address_space_mapping_count(process_address_space(process));
+	kernel_regions_before = address_space_mapping_count(address_space_kernel());
 	process_threads_before = process_thread_count(process);
-	uthreads_before        = uthread_count();
-	run_queue_before       = sched_run_queue_depth(cpu_current());
+	uthreads_before = uthread_count();
+	run_queue_before = sched_run_queue_depth(cpu_current());
 
 	hal_userspace_mock_set_context_init_result(false);
 	result = uthread_start(&worker,
-	                       &(const struct uthread_start_params){
-							   .name            = "user/context-failure",
-							   .process         = process,
-							   .user_entry      = 0x420000u,
-							   .user_stack_size = 2u * TEST_MAPPING_GRANULE,
-							   .detached        = false,
-						   });
+			&(const struct uthread_start_params){
+				.name = "user/context-failure",
+				.process = process,
+				.user_entry = 0x420000u,
+				.user_stack_size = 2u * TEST_MAPPING_GRANULE,
+				.detached = false,
+			});
 	hal_userspace_mock_set_context_init_result(true);
 
 	cr_assert_eq(result, UTHREAD_START_CONTEXT_UNSUPPORTED, "injected userspace context failure was not surfaced");
 	cr_assert_eq(uthread_count(), uthreads_before, "failed start leaked a TID registration");
 	cr_assert_eq(
-		process_thread_count(process), process_threads_before, "failed start attached a thread to the process");
+			process_thread_count(process), process_threads_before, "failed start attached a thread to the process");
 	cr_assert_eq(address_space_mapping_count(process_address_space(process)),
-	             user_regions_before,
-	             "failed start leaked user/upcall stack regions");
+			user_regions_before,
+			"failed start leaked user/upcall stack regions");
 	cr_assert_eq(address_space_mapping_count(address_space_kernel()),
-	             kernel_regions_before,
-	             "failed start leaked its kernel stack region");
-	cr_assert_eq(
-		sched_run_queue_depth(cpu_current()), run_queue_before, "failed start changed scheduler run-queue membership");
+			kernel_regions_before,
+			"failed start leaked its kernel stack region");
+	cr_assert_eq(sched_run_queue_depth(cpu_current()),
+			run_queue_before,
+			"failed start changed scheduler run-queue membership");
 	cr_assert_null(worker.user_stack_mapping, "failed start retained a user-stack Mapping");
 	cr_assert_null(worker.upcall.stack_mapping, "failed start retained an upcall-stack Mapping");
 	cr_assert_null(worker.kernel_stack_mapping, "failed start retained a kernel-stack Mapping");

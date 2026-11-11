@@ -1,15 +1,16 @@
 #pragma once
 
+#include <stdbool.h>
+
 #include <core/spinlock.h>
 #include <core/thread.h>
-#include <stdbool.h>
 
 /* Non-recursive sleepable mutex layered on top of the core scheduler wait queues. */
 struct mutex {
-	struct spinlock          lock;
-	struct thread*           owner;
+	struct spinlock lock;
+	struct thread* owner;
 	struct thread_wait_queue waiters;
-	struct mutex*            owner_next;
+	struct mutex* owner_next;
 };
 
 /* Reset the mutex to the unlocked state with no current owner or waiters. */

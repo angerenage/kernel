@@ -1,20 +1,22 @@
-#include <base/cap.h>
-#include <base/module.h>
-#include <base/process.h>
-#include <protocol/filesystem.h>
-#include <runtime/filesystem.h>
-#include <runtime/registry.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <base/cap.h>
+#include <base/module.h>
+#include <base/process.h>
+
+#include <protocol/filesystem.h>
 #include <system/capability.h>
 #include <system/channel.h>
 #include <system/module.h>
 #include <system/process.h>
 #include <system/signal.h>
+#include <runtime/filesystem.h>
+#include <runtime/registry.h>
 
 #define BOOTFS_SERVICE_NAME "boot"
 #define FILESYSTEM_PROTOCOL_VERSION_MAJOR 1u
@@ -25,20 +27,20 @@
 #define BOOTFS_SOURCE_RIGHTS ((cap_rights_t)(BOOTFS_CLIENT_RIGHTS | CAP_MANAGE))
 
 struct bootfs_file {
-	cap_id_t                            module_cap;
+	cap_id_t module_cap;
 	const struct module_provider_entry* module;
-	struct bootfs_file*                 next;
+	struct bootfs_file* next;
 };
 
-static channel_id_t                  bootfs_endpoint  = CHANNEL_ID_INVALID;
-static cap_id_t                      bootfs_activity  = CAP_ID_INVALID;
-static cap_id_t                      bootfs_root_cap  = CAP_ID_INVALID;
-static cap_id_t                      modules_provider = CAP_ID_INVALID;
+static channel_id_t bootfs_endpoint = CHANNEL_ID_INVALID;
+static cap_id_t bootfs_activity = CAP_ID_INVALID;
+static cap_id_t bootfs_root_cap = CAP_ID_INVALID;
+static cap_id_t modules_provider = CAP_ID_INVALID;
 static struct module_provider_entry* modules;
-static size_t                        module_count;
-static struct bootfs_file*           files;
-static uint8_t                       request_buffer[CAP_MAX_REQUEST_SIZE];
-static uint8_t                       response_buffer[CAP_MAX_RESPONSE_SIZE];
+static size_t module_count;
+static struct bootfs_file* files;
+static uint8_t request_buffer[CAP_MAX_REQUEST_SIZE];
+static uint8_t response_buffer[CAP_MAX_RESPONSE_SIZE];
 
 static bool reply_request(cap_call_id_t call_id, const void* response, size_t response_size, syscall_status_t status) {
 	return channel_reply(call_id, response, response_size, status) == SYSCALL_STATUS_OK;
@@ -50,7 +52,7 @@ static bool reply_transport(const struct cap_request* call, syscall_status_t sta
 
 static bool reply_domain(const struct cap_request* call, enum filesystem_status status) {
 	const struct filesystem_response_header response = {
-		.status   = status,
+		.status = status,
 		.reserved = 0u,
 	};
 	return reply_request(call->call_id, &response, sizeof(response), SYSCALL_STATUS_OK);
@@ -85,7 +87,7 @@ static void unlink_file(struct bootfs_file* target) {
 	struct bootfs_file** cursor = &files;
 	while (*cursor != NULL) {
 		if (*cursor == target) {
-			*cursor      = target->next;
+			*cursor = target->next;
 			target->next = NULL;
 			return;
 		}
@@ -101,7 +103,7 @@ static void release_file(struct bootfs_file* file) {
 
 static bool module_name_valid(const struct module_provider_entry* module) {
 	const char* terminator;
-	size_t      name_size;
+	size_t name_size;
 
 	if (module == NULL) return false;
 	terminator = memchr(module->name, '\0', sizeof(module->name));
@@ -119,8 +121,8 @@ static bool module_name_unique(size_t index) {
 }
 
 static bool load_module_descriptors(void) {
-	uint64_t         total = 0u;
-	size_t           returned;
+	uint64_t total = 0u;
+	size_t returned;
 	syscall_status_t status;
 
 	status = module_enumerate(modules_provider, 0u, NULL, 0u, &returned, &total);
@@ -130,12 +132,12 @@ static bool load_module_descriptors(void) {
 	if (modules == NULL) return false;
 	while (module_count < (size_t)total) {
 		uint64_t current_total = 0u;
-		status                 = module_enumerate(modules_provider,
-		                                          module_count,
-		                                          modules + module_count,
-		                                          (size_t)total - module_count,
-		                                          &returned,
-		                                          &current_total);
+		status = module_enumerate(modules_provider,
+				module_count,
+				modules + module_count,
+				(size_t)total - module_count,
+				&returned,
+				&current_total);
 		if (status != SYSCALL_STATUS_OK || returned == 0u || current_total != total) return false;
 		for (size_t i = 0u; i < returned; i++) {
 			size_t index = module_count + i;
@@ -156,42 +158,42 @@ static const struct module_provider_entry* find_module(const void* name, size_t 
 
 static struct filesystem_node_info directory_info(void) {
 	return (struct filesystem_node_info){
-		.type  = FILESYSTEM_NODE_DIRECTORY,
+		.type = FILESYSTEM_NODE_DIRECTORY,
 		.flags = FILESYSTEM_NODE_READ_ONLY,
-		.size  = 0u,
+		.size = 0u,
 	};
 }
 
 static struct filesystem_node_info file_info(const struct module_provider_entry* module) {
 	return (struct filesystem_node_info){
-		.type  = FILESYSTEM_NODE_FILE,
+		.type = FILESYSTEM_NODE_FILE,
 		.flags = FILESYSTEM_NODE_READ_ONLY,
-		.size  = module->size,
+		.size = module->size,
 	};
 }
 
 static bool reply_open_directory(const struct cap_request* call, cap_rights_t rights) {
 	struct filesystem_open_response response = {
 		.header = {.status = FILESYSTEM_STATUS_OK, .reserved = 0u},
-		.info   = directory_info(),
+		.info = directory_info(),
 	};
 	syscall_status_t status =
-		cap_derive(bootfs_root_cap, call->caller, BOOTFS_BOOT_OBJECT_ID, CAP_CALL | rights, &response.capability);
+			cap_derive(bootfs_root_cap, call->caller, BOOTFS_BOOT_OBJECT_ID, CAP_CALL | rights, &response.capability);
 	if (status != SYSCALL_STATUS_OK) return reply_transport(call, status);
 	if (reply_request(call->call_id, &response, sizeof(response), SYSCALL_STATUS_OK)) return true;
 	(void)cap_revoke(response.capability, 0u);
 	return false;
 }
 
-static bool reply_open_file(const struct cap_request* call, const struct module_provider_entry* module,
-                            cap_rights_t rights) {
+static bool reply_open_file(
+		const struct cap_request* call, const struct module_provider_entry* module, cap_rights_t rights) {
 	struct module_provider_resolve_response resolved = {.cap = CAP_ID_INVALID};
-	struct filesystem_open_response         response = {
+	struct filesystem_open_response response = {
 		.header = {.status = FILESYSTEM_STATUS_OK, .reserved = 0u},
-		.info   = file_info(module),
+		.info = file_info(module),
 	};
 	struct bootfs_file* file;
-	syscall_status_t    status;
+	syscall_status_t status;
 
 	status = module_resolve(modules_provider, module->name, strlen(module->name) + 1u, &resolved);
 	if (status != SYSCALL_STATUS_OK) return reply_transport(call, status);
@@ -205,9 +207,9 @@ static bool reply_open_file(const struct cap_request* call, const struct module_
 		return reply_transport(call, SYSCALL_STATUS_FAILED);
 	}
 	file->module_cap = resolved.cap;
-	file->module     = module;
+	file->module = module;
 	if (file_object_id(file) == 0u || file_object_id(file) == BOOTFS_ROOT_OBJECT_ID ||
-	    file_object_id(file) == BOOTFS_BOOT_OBJECT_ID) {
+			file_object_id(file) == BOOTFS_BOOT_OBJECT_ID) {
 		release_file(file);
 		return reply_transport(call, SYSCALL_STATUS_FAILED);
 	}
@@ -217,7 +219,7 @@ static bool reply_open_file(const struct cap_request* call, const struct module_
 		return reply_transport(call, status);
 	}
 	file->next = files;
-	files      = file;
+	files = file;
 	if (reply_request(call->call_id, &response, sizeof(response), SYSCALL_STATUS_OK)) return true;
 	(void)cap_unpublish(bootfs_endpoint, file_object_id(file));
 	unlink_file(file);
@@ -226,30 +228,30 @@ static bool reply_open_file(const struct cap_request* call, const struct module_
 }
 
 static bool handle_directory_info(const struct cap_request* call, const void* data) {
-	struct filesystem_info_request  request;
+	struct filesystem_info_request request;
 	struct filesystem_info_response response = {
 		.header = {.status = FILESYSTEM_STATUS_OK, .reserved = 0u},
-		.info   = directory_info(),
+		.info = directory_info(),
 	};
 
 	if (!request_has_rights(call, CAP_CALL | CAP_READ)) return reply_transport(call, SYSCALL_STATUS_DENIED);
 	if (!copy_request(call, data, &request, sizeof(request)) || call->request_size != sizeof(request) ||
-	    request.reserved != 0u || call->response_capacity < sizeof(response))
+			request.reserved != 0u || call->response_capacity < sizeof(response))
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	return reply_request(call->call_id, &response, sizeof(response), SYSCALL_STATUS_OK);
 }
 
 static bool handle_directory_open(const struct cap_request* call, const void* data, bool root) {
 	struct filesystem_directory_open_request request;
-	const struct module_provider_entry*      module = NULL;
-	const uint8_t*                           path;
-	size_t                                   expected_size;
+	const struct module_provider_entry* module = NULL;
+	const uint8_t* path;
+	size_t expected_size;
 
 	if (!request_has_rights(call, CAP_CALL | CAP_READ)) return reply_transport(call, SYSCALL_STATUS_DENIED);
 	if (!copy_request(call, data, &request, sizeof(request)) || request.path_size == 0u ||
-	    request.path_size > CAP_MAX_REQUEST_SIZE - sizeof(request) ||
-	    (expected_size = sizeof(request) + request.path_size) != call->request_size ||
-	    call->response_capacity < sizeof(struct filesystem_open_response) || !node_rights_valid(request.rights))
+			request.path_size > CAP_MAX_REQUEST_SIZE - sizeof(request) ||
+			(expected_size = sizeof(request) + request.path_size) != call->request_size ||
+			call->response_capacity < sizeof(struct filesystem_open_response) || !node_rights_valid(request.rights))
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	path = (const uint8_t*)data + sizeof(request);
 	if (!filesystem_relative_path_valid(path, request.path_size))
@@ -269,36 +271,36 @@ static bool handle_directory_open(const struct cap_request* call, const void* da
 	return reply_open_file(call, module, request.rights);
 }
 
-static void fill_directory_entry(struct filesystem_directory_entry* entry, const char* name,
-                                 struct filesystem_node_info info) {
+static void fill_directory_entry(
+		struct filesystem_directory_entry* entry, const char* name, struct filesystem_node_info info) {
 	size_t name_size = strlen(name);
-	*entry           = (struct filesystem_directory_entry){
+	*entry = (struct filesystem_directory_entry){
 		.name_size = (uint32_t)name_size,
-		.reserved  = 0u,
-		.info      = info,
+		.reserved = 0u,
+		.info = info,
 	};
 	memcpy(entry->name, name, name_size);
 }
 
 static bool handle_directory_enumerate(const struct cap_request* call, const void* data, bool root) {
-	struct filesystem_directory_enumerate_request   request;
+	struct filesystem_directory_enumerate_request request;
 	struct filesystem_directory_enumerate_response* response = (void*)response_buffer;
-	const size_t                                    maximum_count =
-		(CAP_MAX_RESPONSE_SIZE - sizeof(*response)) / sizeof(struct filesystem_directory_entry);
-	uint64_t total    = root ? 1u : module_count;
-	size_t   returned = 0u;
+	const size_t maximum_count =
+			(CAP_MAX_RESPONSE_SIZE - sizeof(*response)) / sizeof(struct filesystem_directory_entry);
+	uint64_t total = root ? 1u : module_count;
+	size_t returned = 0u;
 
 	if (!request_has_rights(call, CAP_CALL | CAP_READ)) return reply_transport(call, SYSCALL_STATUS_DENIED);
 	if (!copy_request(call, data, &request, sizeof(request)) || call->request_size != sizeof(request) ||
-	    request.reserved != 0u || call->response_capacity < sizeof(*response) || request.count > maximum_count ||
-	    request.count > (call->response_capacity - sizeof(*response)) / sizeof(struct filesystem_directory_entry))
+			request.reserved != 0u || call->response_capacity < sizeof(*response) || request.count > maximum_count ||
+			request.count > (call->response_capacity - sizeof(*response)) / sizeof(struct filesystem_directory_entry))
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	if (request.offset < total) {
 		uint64_t available = total - request.offset;
-		returned           = available > request.count ? (size_t)request.count : (size_t)available;
+		returned = available > request.count ? (size_t)request.count : (size_t)available;
 	}
-	response->header   = (struct filesystem_response_header){.status = FILESYSTEM_STATUS_OK, .reserved = 0u};
-	response->total    = total;
+	response->header = (struct filesystem_response_header){.status = FILESYSTEM_STATUS_OK, .reserved = 0u};
+	response->total = total;
 	response->returned = returned;
 	for (size_t i = 0u; i < returned; i++) {
 		if (root) {
@@ -310,13 +312,13 @@ static bool handle_directory_enumerate(const struct cap_request* call, const voi
 		}
 	}
 	return reply_request(call->call_id,
-	                     response,
-	                     sizeof(*response) + returned * sizeof(struct filesystem_directory_entry),
-	                     SYSCALL_STATUS_OK);
+			response,
+			sizeof(*response) + returned * sizeof(struct filesystem_directory_entry),
+			SYSCALL_STATUS_OK);
 }
 
-static bool dispatch_directory(const struct cap_request* call, const void* data,
-                               const struct filesystem_request_header* header, bool root) {
+static bool dispatch_directory(
+		const struct cap_request* call, const void* data, const struct filesystem_request_header* header, bool root) {
 	switch (header->op) {
 	case FILESYSTEM_DIRECTORY_OP_INFO:
 		return handle_directory_info(call, data);
@@ -336,33 +338,33 @@ static bool dispatch_directory(const struct cap_request* call, const void* data,
 }
 
 static bool handle_file_info(const struct cap_request* call, const void* data, const struct bootfs_file* file) {
-	struct filesystem_info_request  request;
+	struct filesystem_info_request request;
 	struct filesystem_info_response response = {
 		.header = {.status = FILESYSTEM_STATUS_OK, .reserved = 0u},
-		.info   = file_info(file->module),
+		.info = file_info(file->module),
 	};
 
 	if (!request_has_rights(call, CAP_CALL | CAP_READ)) return reply_transport(call, SYSCALL_STATUS_DENIED);
 	if (!copy_request(call, data, &request, sizeof(request)) || call->request_size != sizeof(request) ||
-	    request.reserved != 0u || call->response_capacity < sizeof(response))
+			request.reserved != 0u || call->response_capacity < sizeof(response))
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	return reply_request(call->call_id, &response, sizeof(response), SYSCALL_STATUS_OK);
 }
 
 static bool handle_file_read(const struct cap_request* call, const void* data, const struct bootfs_file* file) {
-	struct filesystem_file_read_request   request;
-	struct filesystem_file_read_response* response  = (void*)response_buffer;
-	size_t                                read_size = 0u;
-	syscall_status_t                      status;
+	struct filesystem_file_read_request request;
+	struct filesystem_file_read_response* response = (void*)response_buffer;
+	size_t read_size = 0u;
+	syscall_status_t status;
 
 	if (!request_has_rights(call, CAP_CALL | CAP_READ)) return reply_transport(call, SYSCALL_STATUS_DENIED);
 	if (!copy_request(call, data, &request, sizeof(request)) || call->request_size != sizeof(request) ||
-	    request.reserved != 0u || request.size > CAP_MAX_RESPONSE_SIZE - sizeof(*response) ||
-	    call->response_capacity < sizeof(*response) || request.size > call->response_capacity - sizeof(*response))
+			request.reserved != 0u || request.size > CAP_MAX_RESPONSE_SIZE - sizeof(*response) ||
+			call->response_capacity < sizeof(*response) || request.size > call->response_capacity - sizeof(*response))
 		return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
 	if (request.offset < file->module->size) {
 		uint64_t available = file->module->size - request.offset;
-		read_size          = available > request.size ? (size_t)request.size : (size_t)available;
+		read_size = available > request.size ? (size_t)request.size : (size_t)available;
 	}
 	response->header = (struct filesystem_response_header){.status = FILESYSTEM_STATUS_OK, .reserved = 0u};
 	if (read_size != 0u) {
@@ -373,7 +375,7 @@ static bool handle_file_read(const struct cap_request* call, const void* data, c
 }
 
 static bool dispatch_file(const struct cap_request* call, const void* data,
-                          const struct filesystem_request_header* header, const struct bootfs_file* file) {
+		const struct filesystem_request_header* header, const struct bootfs_file* file) {
 	switch (header->op) {
 	case FILESYSTEM_FILE_OP_INFO:
 		return handle_file_info(call, data, file);
@@ -390,7 +392,7 @@ static bool dispatch_file(const struct cap_request* call, const void* data,
 
 static bool dispatch_request(const struct cap_request* call, const void* data) {
 	struct filesystem_request_header header;
-	struct bootfs_file*              file;
+	struct bootfs_file* file;
 
 	if (!request_has_rights(call, CAP_CALL)) return reply_transport(call, SYSCALL_STATUS_DENIED);
 	if (!copy_request(call, data, &header, sizeof(header))) return reply_transport(call, SYSCALL_STATUS_BAD_ARGUMENT);
@@ -404,13 +406,13 @@ static bool dispatch_request(const struct cap_request* call, const void* data) {
 static bool advertise_bootfs(void) {
 	const struct registry_service_selector selector = {
 		.namespace_path = FILESYSTEM_NAMESPACE,
-		.protocol       = FILESYSTEM_PROTOCOL_NAME,
-		.major          = FILESYSTEM_PROTOCOL_VERSION_MAJOR,
-		.service        = BOOTFS_SERVICE_NAME,
+		.protocol = FILESYSTEM_PROTOCOL_NAME,
+		.major = FILESYSTEM_PROTOCOL_VERSION_MAJOR,
+		.service = BOOTFS_SERVICE_NAME,
 	};
 	struct registry_call_result result;
-	struct self_info            self;
-	syscall_status_t            status;
+	struct self_info self;
+	syscall_status_t status;
 
 	status = process_self_info(&self);
 	if (status != SYSCALL_STATUS_OK || self.pid == PROCESS_PID_INVALID) return false;
@@ -426,7 +428,7 @@ static void handle_channel_event(const struct channel_event* event) {
 	struct bootfs_file* file;
 
 	if (event->type != CHANNEL_EVENT_CAP_ZERO_GRANTS || event->object_id == BOOTFS_ROOT_OBJECT_ID ||
-	    event->object_id == BOOTFS_BOOT_OBJECT_ID)
+			event->object_id == BOOTFS_BOOT_OBJECT_ID)
 		return;
 	file = find_file(event->object_id);
 	if (file == NULL || cap_unpublish_if_unused(bootfs_endpoint, event->object_id) != SYSCALL_STATUS_OK) return;
@@ -436,8 +438,8 @@ static void handle_channel_event(const struct channel_event* event) {
 
 static int bootfs_run(void) {
 	struct cap_request call;
-	bool               received;
-	syscall_status_t   status;
+	bool received;
+	syscall_status_t status;
 
 	if (!load_module_descriptors()) {
 		printf("bootfs: module enumeration failed\n");
@@ -448,15 +450,15 @@ static int bootfs_run(void) {
 		return 1;
 	}
 	printf("bootfs: advertised %s/%s@%u.%u/%s\n",
-	       FILESYSTEM_NAMESPACE,
-	       FILESYSTEM_PROTOCOL_NAME,
-	       FILESYSTEM_PROTOCOL_VERSION_MAJOR,
-	       FILESYSTEM_PROTOCOL_VERSION_MINOR,
-	       BOOTFS_SERVICE_NAME);
+			FILESYSTEM_NAMESPACE,
+			FILESYSTEM_PROTOCOL_NAME,
+			FILESYSTEM_PROTOCOL_VERSION_MAJOR,
+			FILESYSTEM_PROTOCOL_VERSION_MINOR,
+			BOOTFS_SERVICE_NAME);
 	for (;;) {
 		do {
 			received = false;
-			status   = channel_recv(bootfs_endpoint, &call, request_buffer, sizeof(request_buffer), &received);
+			status = channel_recv(bootfs_endpoint, &call, request_buffer, sizeof(request_buffer), &received);
 			if (status != SYSCALL_STATUS_OK) {
 				printf("bootfs: channel receive failed: %u\n", (unsigned)status);
 				return 1;
@@ -466,7 +468,7 @@ static int bootfs_run(void) {
 		do {
 			struct channel_event event;
 			received = false;
-			status   = channel_event_recv(bootfs_endpoint, &event, &received);
+			status = channel_event_recv(bootfs_endpoint, &event, &received);
 			if (status != SYSCALL_STATUS_OK) return 1;
 			if (received) handle_channel_event(&event);
 		} while (received);

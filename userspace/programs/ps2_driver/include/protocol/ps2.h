@@ -2,8 +2,9 @@
 
 /* Controller-independent PS/2 byte transport protocol. */
 
-#include <base/cap.h>
 #include <stdint.h>
+
+#include <base/cap.h>
 
 /* Maximum number of ordered bytes returned by one transport read. */
 #define PS2_TRANSPORT_MAX_READ 256u
@@ -34,12 +35,12 @@ struct ps2_transport_request_header {
 /* Request up to max_size immediately available bytes without blocking. */
 struct ps2_transport_read_request {
 	struct ps2_transport_request_header header;
-	uint32_t                            max_size;
+	uint32_t max_size;
 };
 
 /* Status bits returned with a successful PS/2 transport read. */
 enum ps2_transport_read_flags {
-	PS2_TRANSPORT_READ_FLAG_NONE    = 0u,
+	PS2_TRANSPORT_READ_FLAG_NONE = 0u,
 	PS2_TRANSPORT_READ_FLAG_OVERRUN = 1u << 0u,
 };
 
@@ -47,14 +48,14 @@ enum ps2_transport_read_flags {
 struct ps2_transport_read_response {
 	uint32_t size;
 	uint32_t flags;
-	uint8_t  bytes[];
+	uint8_t bytes[];
 };
 
 /* Write one byte after the controller accepts it into its input register. */
 struct ps2_transport_write_request {
 	struct ps2_transport_request_header header;
-	uint8_t                             value;
-	uint8_t                             reserved[3];
+	uint8_t value;
+	uint8_t reserved[3];
 };
 
 /* Request the coalesced signal used to announce newly readable state. */

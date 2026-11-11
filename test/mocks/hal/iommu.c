@@ -1,67 +1,70 @@
-#include <hal/iommu.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include <hal/iommu.h>
+
 struct mock_iommu_leaf {
-	uint64_t  io_address;
+	uint64_t io_address;
 	uintptr_t physical_address;
-	size_t    size;
-	uint64_t  access;
+	size_t size;
+	uint64_t access;
 };
 
 struct mock_iommu_source {
-	uint32_t                      source_id;
+	uint32_t source_id;
 	struct hal_iommu_space_state* space;
 };
 
 #define MOCK_DISCOVERED_CONTROLLER_CAPACITY 8u
 
 static struct hal_iommu_controller_descriptor mock_discovered_controllers[MOCK_DISCOVERED_CONTROLLER_CAPACITY];
-static size_t                                 mock_discovered_controller_count;
-static bool                                   mock_discovery_initialized;
-static size_t                                 mock_map_successes;
-static size_t                                 mock_map_fail_after = SIZE_MAX;
+static size_t mock_discovered_controller_count;
+static bool mock_discovery_initialized;
+static size_t mock_map_successes;
+static size_t mock_map_fail_after = SIZE_MAX;
 
-static struct hal_iommu_controller_descriptor mock_default_descriptor(uintptr_t           register_address,
-                                                                      enum hal_iommu_kind kind) {
+static struct hal_iommu_controller_descriptor mock_default_descriptor(
+		uintptr_t register_address, enum hal_iommu_kind kind) {
 	return (struct hal_iommu_controller_descriptor){
-		.kind             = kind,
+		.kind = kind,
 		.register_address = register_address,
-		.mock_info        = {.minimum_leaf_size     = 4096u,
-		                     .leaf_size_mask        = (1ull << 12u) | (1ull << 21u),
-		                     .io_address_bits       = 39u,
-		                     .physical_address_bits = 48u,
-		                     .context_id_bits       = 8u,
-		                     .source_id_bits        = 8u}
-    };
+		.mock_info = {
+			.minimum_leaf_size = 4096u,
+			.leaf_size_mask = (1ull << 12u) | (1ull << 21u),
+			.io_address_bits = 39u,
+			.physical_address_bits = 48u,
+			.context_id_bits = 8u,
+			.source_id_bits = 8u
+		}
+	};
 }
 
 static void mock_discovery_reset_defaults(void) {
-	mock_discovered_controllers[0]   = mock_default_descriptor(0x1000u, HAL_IOMMU_KIND_INTEL_VTD);
-	mock_discovered_controllers[1]   = mock_default_descriptor(0x2000u, HAL_IOMMU_KIND_AMD);
+	mock_discovered_controllers[0] = mock_default_descriptor(0x1000u, HAL_IOMMU_KIND_INTEL_VTD);
+	mock_discovered_controllers[1] = mock_default_descriptor(0x2000u, HAL_IOMMU_KIND_AMD);
 	mock_discovered_controller_count = 2u;
-	mock_discovery_initialized       = true;
+	mock_discovery_initialized = true;
 }
 
-void hal_iommu_mock_set_discovered_controllers(const struct hal_iommu_controller_descriptor* descriptors,
-                                               size_t                                        count) {
+void hal_iommu_mock_set_discovered_controllers(
+		const struct hal_iommu_controller_descriptor* descriptors, size_t count) {
 	if (count > MOCK_DISCOVERED_CONTROLLER_CAPACITY) count = MOCK_DISCOVERED_CONTROLLER_CAPACITY;
 	for (size_t index = 0u; index < count; index++) mock_discovered_controllers[index] = descriptors[index];
 	mock_discovered_controller_count = count;
-	mock_discovery_initialized       = true;
+	mock_discovery_initialized = true;
 }
 
 void hal_iommu_mock_reset_discovered_controllers(void) {
 	mock_discovery_reset_defaults();
-	mock_map_successes  = 0u;
+	mock_map_successes = 0u;
 	mock_map_fail_after = SIZE_MAX;
 }
 
 void hal_iommu_mock_fail_map_after(size_t successful_maps) {
-	mock_map_successes  = 0u;
+	mock_map_successes = 0u;
 	mock_map_fail_after = successful_maps;
 }
 
@@ -78,10 +81,10 @@ bool hal_iommu_controller_at(size_t index, struct hal_iommu_controller_descripto
 }
 
 bool hal_iommu_pci_source(const struct hal_iommu_controller_descriptor* descriptor, uint16_t segment,
-                          uint16_t requester_id, uint32_t* out_source_id) {
+		uint16_t requester_id, uint32_t* out_source_id) {
 	if (descriptor == NULL || out_source_id == NULL || segment != 0u) return false;
 	if ((descriptor->register_address == 0x1000u && requester_id >= 128u) ||
-	    (descriptor->register_address == 0x2000u && requester_id < 128u))
+			(descriptor->register_address == 0x2000u && requester_id < 128u))
 		return false;
 	*out_source_id = requester_id;
 	return true;
@@ -99,9 +102,9 @@ static unsigned mock_shift(size_t value) {
 
 static bool mock_info_valid(const struct hal_iommu_info* info) {
 	if (info == NULL || !mock_power_of_two(info->minimum_leaf_size) || info->source_id_bits == 0u ||
-	    info->source_id_bits > 32u || info->context_id_bits == 0u || info->context_id_bits > 32u ||
-	    info->io_address_bits == 0u || info->io_address_bits > 64u || info->physical_address_bits == 0u ||
-	    info->physical_address_bits > 64u)
+			info->source_id_bits > 32u || info->context_id_bits == 0u || info->context_id_bits > 32u ||
+			info->io_address_bits == 0u || info->io_address_bits > 64u || info->physical_address_bits == 0u ||
+			info->physical_address_bits > 64u)
 		return false;
 	unsigned shift = mock_shift(info->minimum_leaf_size);
 	return shift < info->io_address_bits && shift < info->physical_address_bits &&
@@ -126,22 +129,21 @@ static bool mock_source_valid(const struct hal_iommu_controller_state* controlle
 	       (controller->info.source_id_bits == 32u || source_id < (1u << controller->info.source_id_bits));
 }
 
-static struct mock_iommu_source* mock_source_find(const struct hal_iommu_controller_state* controller,
-                                                  uint32_t                                 source_id) {
+static struct mock_iommu_source* mock_source_find(
+		const struct hal_iommu_controller_state* controller, uint32_t source_id) {
 	struct mock_iommu_source* sources = controller->source_entries;
 	for (size_t index = 0u; index < controller->source_count; index++)
 		if (sources[index].source_id == source_id) return &sources[index];
 	return NULL;
 }
 
-bool hal_iommu_controller_init(struct hal_iommu_controller_state*            controller,
-                               const struct hal_iommu_controller_descriptor* descriptor,
-                               struct hal_iommu_info*                        out_info) {
+bool hal_iommu_controller_init(struct hal_iommu_controller_state* controller,
+		const struct hal_iommu_controller_descriptor* descriptor, struct hal_iommu_info* out_info) {
 	if (controller == NULL || descriptor == NULL || out_info == NULL || !mock_info_valid(&descriptor->mock_info))
 		return false;
-	*controller           = (struct hal_iommu_controller_state){.initialized = true, .info = descriptor->mock_info};
+	*controller = (struct hal_iommu_controller_state){.initialized = true, .info = descriptor->mock_info};
 	controller->info.kind = descriptor->kind;
-	*out_info             = controller->info;
+	*out_info = controller->info;
 	return true;
 }
 
@@ -157,21 +159,21 @@ bool hal_iommu_mapping_supported(const struct hal_iommu_controller_state* contro
 	       (access & ~HAL_IOMMU_ACCESS_VALID_MASK) == 0u;
 }
 
-bool hal_iommu_space_init(struct hal_iommu_controller_state* controller, uint32_t context_id,
-                          struct hal_iommu_space_state* space) {
+bool hal_iommu_space_init(
+		struct hal_iommu_controller_state* controller, uint32_t context_id, struct hal_iommu_space_state* space) {
 	if (controller == NULL || !controller->initialized || space == NULL ||
-	    (controller->info.context_id_bits < 32u && context_id >= (1u << controller->info.context_id_bits)))
+			(controller->info.context_id_bits < 32u && context_id >= (1u << controller->info.context_id_bits)))
 		return false;
 	*space = (struct hal_iommu_space_state){
 		.table = {.initialized = true, .controller_identity = (uintptr_t)controller, .context_id = context_id}
-    };
+	};
 	controller->live_spaces++;
 	return true;
 }
 
 void hal_iommu_space_deinit(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space) {
 	if (controller == NULL || space == NULL || !space->table.initialized || space->leaf_count != 0u ||
-	    space->table.controller_identity != (uintptr_t)controller)
+			space->table.controller_identity != (uintptr_t)controller)
 		return;
 	for (size_t i = 0u; i < controller->source_count; i++)
 		if (((struct mock_iommu_source*)controller->source_entries)[i].space == space) return;
@@ -181,7 +183,7 @@ void hal_iommu_space_deinit(struct hal_iommu_controller_state* controller, struc
 }
 
 static size_t mock_largest_leaf(const struct hal_iommu_controller_state* controller, uint64_t io_address,
-                                uintptr_t physical_address, size_t remaining) {
+		uintptr_t physical_address, size_t remaining) {
 	for (unsigned shift = 63u; shift != 0u; shift--) {
 		if ((controller->info.leaf_size_mask & (1ull << shift)) == 0u || shift >= sizeof(size_t) * 8u) continue;
 		size_t size = (size_t)1u << shift;
@@ -192,17 +194,17 @@ static size_t mock_largest_leaf(const struct hal_iommu_controller_state* control
 }
 
 bool hal_iommu_map(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                   const struct hal_iommu_map_request* request) {
+		const struct hal_iommu_map_request* request) {
 	uint64_t end;
 	uint64_t physical_end;
 	if (!hal_iommu_mapping_supported(controller, request == NULL ? 0u : request->access) || space == NULL ||
-	    request == NULL || !space->table.initialized || space->table.controller_identity != (uintptr_t)controller ||
-	    (request->io_address & (controller->info.minimum_leaf_size - 1u)) != 0u ||
-	    (request->physical_address & (controller->info.minimum_leaf_size - 1u)) != 0u ||
-	    (request->size & (controller->info.minimum_leaf_size - 1u)) != 0u ||
-	    !mock_range_end(request->io_address, request->size, controller->info.io_address_bits, &end) ||
-	    !mock_range_end(
-			request->physical_address, request->size, controller->info.physical_address_bits, &physical_end))
+			request == NULL || !space->table.initialized || space->table.controller_identity != (uintptr_t)controller ||
+			(request->io_address & (controller->info.minimum_leaf_size - 1u)) != 0u ||
+			(request->physical_address & (controller->info.minimum_leaf_size - 1u)) != 0u ||
+			(request->size & (controller->info.minimum_leaf_size - 1u)) != 0u ||
+			!mock_range_end(request->io_address, request->size, controller->info.io_address_bits, &end) ||
+			!mock_range_end(
+					request->physical_address, request->size, controller->info.physical_address_bits, &physical_end))
 		return false;
 	(void)physical_end;
 	struct mock_iommu_leaf* old = space->leaves;
@@ -214,7 +216,7 @@ bool hal_iommu_map(struct hal_iommu_controller_state* controller, struct hal_iom
 	size_t additions = 0u;
 	for (uint64_t io = request->io_address; io < end;) {
 		size_t leaf_size = mock_largest_leaf(
-			controller, io, request->physical_address + (uintptr_t)(io - request->io_address), (size_t)(end - io));
+				controller, io, request->physical_address + (uintptr_t)(io - request->io_address), (size_t)(end - io));
 		additions++;
 		io += leaf_size;
 	}
@@ -225,14 +227,14 @@ bool hal_iommu_map(struct hal_iommu_controller_state* controller, struct hal_iom
 	if (space->leaf_count != 0u) memcpy(replacement, old, space->leaf_count * sizeof(*replacement));
 	size_t count = space->leaf_count;
 	for (uint64_t io = request->io_address; io < end;) {
-		uintptr_t physical   = request->physical_address + (uintptr_t)(io - request->io_address);
-		size_t    leaf_size  = mock_largest_leaf(controller, io, physical, (size_t)(end - io));
+		uintptr_t physical = request->physical_address + (uintptr_t)(io - request->io_address);
+		size_t leaf_size = mock_largest_leaf(controller, io, physical, (size_t)(end - io));
 		replacement[count++] = (struct mock_iommu_leaf){io, physical, leaf_size, request->access};
 		io += leaf_size;
 	}
 	qsort(replacement, count, sizeof(*replacement), mock_leaf_compare);
 	free(old);
-	space->leaves     = replacement;
+	space->leaves = replacement;
 	space->leaf_count = count;
 	space->table.mapped_size += request->size;
 	controller->invalidations++;
@@ -241,16 +243,16 @@ bool hal_iommu_map(struct hal_iommu_controller_state* controller, struct hal_iom
 }
 
 bool hal_iommu_unmap(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                     uint64_t io_address, size_t size) {
+		uint64_t io_address, size_t size) {
 	uint64_t end;
 	if (controller == NULL || !controller->initialized || space == NULL || !space->table.initialized ||
-	    space->table.controller_identity != (uintptr_t)controller ||
-	    (io_address & (controller->info.minimum_leaf_size - 1u)) != 0u ||
-	    (size & (controller->info.minimum_leaf_size - 1u)) != 0u ||
-	    !mock_range_end(io_address, size, controller->info.io_address_bits, &end))
+			space->table.controller_identity != (uintptr_t)controller ||
+			(io_address & (controller->info.minimum_leaf_size - 1u)) != 0u ||
+			(size & (controller->info.minimum_leaf_size - 1u)) != 0u ||
+			!mock_range_end(io_address, size, controller->info.io_address_bits, &end))
 		return false;
-	struct mock_iommu_leaf* old    = space->leaves;
-	uint64_t                cursor = io_address;
+	struct mock_iommu_leaf* old = space->leaves;
+	uint64_t cursor = io_address;
 	for (size_t i = 0u; i < space->leaf_count && cursor < end; i++) {
 		uint64_t leaf_end = old[i].io_address + old[i].size;
 		if (leaf_end <= cursor) continue;
@@ -266,20 +268,22 @@ bool hal_iommu_unmap(struct hal_iommu_controller_state* controller, struct hal_i
 	size_t count = 0u;
 	for (size_t i = 0u; i < space->leaf_count; i++) {
 		uint64_t leaf_start = old[i].io_address;
-		uint64_t leaf_end   = leaf_start + old[i].size;
+		uint64_t leaf_end = leaf_start + old[i].size;
 		if (leaf_end <= io_address || leaf_start >= end) {
 			replacement[count++] = old[i];
 			continue;
 		}
 		for (uint64_t part = leaf_start; part < io_address && part < leaf_end; part += granule)
 			replacement[count++] = (struct mock_iommu_leaf){
-				part, old[i].physical_address + (uintptr_t)(part - leaf_start), granule, old[i].access};
+				part, old[i].physical_address + (uintptr_t)(part - leaf_start), granule, old[i].access
+			};
 		for (uint64_t part = end > leaf_start ? end : leaf_start; part < leaf_end; part += granule)
 			replacement[count++] = (struct mock_iommu_leaf){
-				part, old[i].physical_address + (uintptr_t)(part - leaf_start), granule, old[i].access};
+				part, old[i].physical_address + (uintptr_t)(part - leaf_start), granule, old[i].access
+			};
 	}
 	free(old);
-	space->leaves     = replacement;
+	space->leaves = replacement;
 	space->leaf_count = count;
 	space->table.mapped_size -= size;
 	controller->invalidations++;
@@ -287,16 +291,16 @@ bool hal_iommu_unmap(struct hal_iommu_controller_state* controller, struct hal_i
 }
 
 bool hal_iommu_protect(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                       uint64_t io_address, size_t size, uint64_t access) {
+		uint64_t io_address, size_t size, uint64_t access) {
 	uint64_t end;
 	if (!hal_iommu_mapping_supported(controller, access) || space == NULL || !space->table.initialized ||
-	    space->table.controller_identity != (uintptr_t)controller ||
-	    (io_address & (controller->info.minimum_leaf_size - 1u)) != 0u ||
-	    (size & (controller->info.minimum_leaf_size - 1u)) != 0u ||
-	    !mock_range_end(io_address, size, controller->info.io_address_bits, &end))
+			space->table.controller_identity != (uintptr_t)controller ||
+			(io_address & (controller->info.minimum_leaf_size - 1u)) != 0u ||
+			(size & (controller->info.minimum_leaf_size - 1u)) != 0u ||
+			!mock_range_end(io_address, size, controller->info.io_address_bits, &end))
 		return false;
-	struct mock_iommu_leaf* old    = space->leaves;
-	uint64_t                cursor = io_address;
+	struct mock_iommu_leaf* old = space->leaves;
+	uint64_t cursor = io_address;
 	for (size_t i = 0u; i < space->leaf_count && cursor < end; i++) {
 		uint64_t leaf_end = old[i].io_address + old[i].size;
 		if (leaf_end <= cursor) continue;
@@ -307,7 +311,7 @@ bool hal_iommu_protect(struct hal_iommu_controller_state* controller, struct hal
 	size_t additions = 0u;
 	for (size_t i = 0u; i < space->leaf_count; i++) {
 		uint64_t leaf_start = old[i].io_address;
-		uint64_t leaf_end   = leaf_start + old[i].size;
+		uint64_t leaf_end = leaf_start + old[i].size;
 		if (leaf_end <= io_address || leaf_start >= end) continue;
 		additions += (old[i].size / controller->info.minimum_leaf_size) - 1u;
 	}
@@ -318,7 +322,7 @@ bool hal_iommu_protect(struct hal_iommu_controller_state* controller, struct hal
 	size_t count = 0u;
 	for (size_t i = 0u; i < space->leaf_count; i++) {
 		uint64_t leaf_start = old[i].io_address;
-		uint64_t leaf_end   = leaf_start + old[i].size;
+		uint64_t leaf_end = leaf_start + old[i].size;
 		if (leaf_end <= io_address || leaf_start >= end) {
 			replacement[count++] = old[i];
 			continue;
@@ -334,16 +338,16 @@ bool hal_iommu_protect(struct hal_iommu_controller_state* controller, struct hal
 	}
 	qsort(replacement, count, sizeof(*replacement), mock_leaf_compare);
 	free(old);
-	space->leaves     = replacement;
+	space->leaves = replacement;
 	space->leaf_count = count;
 	controller->invalidations++;
 	return true;
 }
 
 bool hal_iommu_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                      uint32_t source_id, struct hal_iommu_attachment_state* attachment) {
+		uint32_t source_id, struct hal_iommu_attachment_state* attachment) {
 	if (!mock_source_valid(controller, source_id) || space == NULL || !space->table.initialized ||
-	    space->table.controller_identity != (uintptr_t)controller || attachment == NULL || attachment->initialized)
+			space->table.controller_identity != (uintptr_t)controller || attachment == NULL || attachment->initialized)
 		return false;
 	struct mock_iommu_source* source = mock_source_find(controller, source_id);
 	if (source != NULL) return false;
@@ -352,21 +356,22 @@ bool hal_iommu_attach(struct hal_iommu_controller_state* controller, struct hal_
 		if (capacity < controller->source_capacity || capacity > SIZE_MAX / sizeof(*source)) return false;
 		struct mock_iommu_source* sources = realloc(controller->source_entries, capacity * sizeof(*sources));
 		if (sources == NULL) return false;
-		controller->source_entries  = sources;
+		controller->source_entries = sources;
 		controller->source_capacity = capacity;
 	}
 	((struct mock_iommu_source*)controller->source_entries)[controller->source_count++] =
-		(struct mock_iommu_source){.source_id = source_id, .space = space};
+			(struct mock_iommu_source){.source_id = source_id, .space = space};
 	controller->invalidations++;
 	*attachment = (struct hal_iommu_attachment_state){
-		.initialized = true, .controller_identity = (uintptr_t)controller, .source_id = source_id};
+		.initialized = true, .controller_identity = (uintptr_t)controller, .source_id = source_id
+	};
 	return true;
 }
 
 bool hal_iommu_detach(struct hal_iommu_controller_state* controller, uint32_t source_id,
-                      struct hal_iommu_attachment_state* attachment) {
+		struct hal_iommu_attachment_state* attachment) {
 	if (!mock_source_valid(controller, source_id) || attachment == NULL || !attachment->initialized ||
-	    attachment->controller_identity != (uintptr_t)controller || attachment->source_id != source_id)
+			attachment->controller_identity != (uintptr_t)controller || attachment->source_id != source_id)
 		return false;
 	struct mock_iommu_source* source = mock_source_find(controller, source_id);
 	if (source == NULL) return false;

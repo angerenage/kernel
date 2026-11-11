@@ -2,8 +2,8 @@
 
 #include <base/cap.h>
 #include <base/syscall.h>
-#include <core/capability.h>
 #include <hal/serial.h>
+#include <core/capability.h>
 
 static cap_object_id_t serial_object_id = CAP_OBJECT_ID_INVALID;
 

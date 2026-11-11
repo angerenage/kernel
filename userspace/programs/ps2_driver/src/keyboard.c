@@ -22,10 +22,10 @@ bool ps2_keyboard_decoder_feed(struct ps2_keyboard_decoder* decoder, uint8_t val
 		return true;
 	}
 	if (value == 0xe1u) {
-		decoder->pause       = true;
+		decoder->pause = true;
 		decoder->pause_index = 0u;
-		decoder->extended    = false;
-		decoder->released    = false;
+		decoder->extended = false;
+		decoder->released = false;
 		return true;
 	}
 	if (value == 0xe0u) {

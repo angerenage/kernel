@@ -2,6 +2,7 @@
 
 #include <base/cap.h>
 #include <base/syscall.h>
+
 #include <protocol/terminal.h>
 
 /* Read the framebuffer terminal's immutable character-cell dimensions. */
@@ -14,8 +15,8 @@ syscall_status_t terminal_get_cursor(cap_id_t terminal_cap, struct terminal_get_
 syscall_status_t terminal_get_selection(cap_id_t terminal_cap, struct terminal_get_selection_response* out_selection);
 
 /* Replace the active selection with one retained half-open cell range. */
-syscall_status_t terminal_set_selection(cap_id_t terminal_cap, struct terminal_selection_position anchor,
-                                        struct terminal_selection_position focus);
+syscall_status_t terminal_set_selection(
+		cap_id_t terminal_cap, struct terminal_selection_position anchor, struct terminal_selection_position focus);
 
 /* Clear the active selection. */
 syscall_status_t terminal_clear_selection(cap_id_t terminal_cap);

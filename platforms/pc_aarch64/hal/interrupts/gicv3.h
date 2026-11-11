@@ -1,9 +1,10 @@
 #pragma once
 
-#include <hal/device_tree.h>
-#include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stddef.h>
+
+#include <hal/device_tree.h>
+#include <hal/interrupts.h>
 
 #include "frame.h"
 
@@ -34,8 +35,8 @@ size_t aarch64_gicv3_source_domain_count(void);
 bool aarch64_gicv3_source_domain_at(size_t index, struct hal_interrupt_source_domain_info* out);
 
 /* Resolve a distributor physical address and SPI ID. */
-bool aarch64_gicv3_source_resolve(uint64_t controller_address, uint32_t local_source_id,
-                                  struct hal_interrupt_source* out_source);
+bool aarch64_gicv3_source_resolve(
+		uint64_t controller_address, uint32_t local_source_id, struct hal_interrupt_source* out_source);
 
 /* Return the delivery identity and target-routing capability of one GICv3 source. */
 bool aarch64_gicv3_source_info(const struct hal_interrupt_source* source, struct hal_interrupt_source_info* out);
@@ -45,7 +46,7 @@ bool aarch64_gicv3_source_target_supported(const struct hal_interrupt_source* so
 
 /* Configure a GICv3 fixed source and leave it masked. */
 bool aarch64_gicv3_source_init(struct hal_interrupt_source_state* state, const struct hal_interrupt_source* source,
-                               const struct hal_interrupt_delivery* delivery);
+		const struct hal_interrupt_delivery* delivery);
 
 /* Configure one kernel-private local GICv3 source and leave it masked. */
 bool aarch64_gicv3_local_source_init(struct hal_interrupt_source_state* state, uint32_t id, const struct cpu* target);
@@ -66,12 +67,12 @@ size_t aarch64_gicv3_message_range_count(void);
 bool aarch64_gicv3_message_range_at(size_t index, struct hal_interrupt_message_range* out);
 
 /* Return whether a GICv3 message mechanism can deliver to a CPU without changing hardware state. */
-bool aarch64_gicv3_message_target_supported(uint32_t domain, const struct hal_interrupt_message_source* source,
-                                            const struct cpu* target);
+bool aarch64_gicv3_message_target_supported(
+		uint32_t domain, const struct hal_interrupt_message_source* source, const struct cpu* target);
 
 /* Initialize one core-reserved GICv3 message interrupt. */
-bool aarch64_gicv3_message_init(struct hal_interrupt_message_state*         state,
-                                const struct hal_interrupt_message_request* request, struct hal_interrupt_message* out);
+bool aarch64_gicv3_message_init(struct hal_interrupt_message_state* state,
+		const struct hal_interrupt_message_request* request, struct hal_interrupt_message* out);
 
 /* Disable the architecture programming for a GICv3 message interrupt. */
 bool aarch64_gicv3_message_deinit(struct hal_interrupt_message_state* state);

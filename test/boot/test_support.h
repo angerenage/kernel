@@ -1,9 +1,10 @@
 #ifndef TEST_BOOT_TEST_SUPPORT_H
 #define TEST_BOOT_TEST_SUPPORT_H
 
-#include <boot/protocol.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+#include <boot/protocol.h>
 
 #include "../../boot/limine/limine.h"
 

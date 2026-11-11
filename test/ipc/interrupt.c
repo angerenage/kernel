@@ -1,31 +1,33 @@
+#include <libc/string.h>
+
+#include <hal/interrupts.h>
 #include <core/address_space.h>
 #include <core/cpu.h>
 #include <core/interrupt.h>
 #include <core/signal.h>
 #include <core/user_upcall.h>
 #include <core/uthread.h>
+
 #include <criterion/criterion.h>
-#include <hal/interrupts.h>
-#include <libc/string.h>
 
 #include "test_support.h"
 
 static struct cpu interrupt_test_cpu = {.index = 0u, .role = CPU_ROLE_BSP};
 
-extern const struct cpu*           hal_interrupt_mock_last_target(void);
-extern bool                        hal_interrupt_mock_unmasked_from_masked(void);
-extern size_t                      hal_interrupt_mock_unmask_count(void);
-extern size_t                      hal_interrupt_mock_mask_count(void);
-extern void                        hal_interrupt_mock_set_mask_failure(bool fail);
-extern void                        hal_interrupt_mock_set_unmask_failure(bool fail);
-extern enum hal_interrupt_trigger  hal_interrupt_mock_last_trigger(void);
+extern const struct cpu* hal_interrupt_mock_last_target(void);
+extern bool hal_interrupt_mock_unmasked_from_masked(void);
+extern size_t hal_interrupt_mock_unmask_count(void);
+extern size_t hal_interrupt_mock_mask_count(void);
+extern void hal_interrupt_mock_set_mask_failure(bool fail);
+extern void hal_interrupt_mock_set_unmask_failure(bool fail);
+extern enum hal_interrupt_trigger hal_interrupt_mock_last_trigger(void);
 extern enum hal_interrupt_polarity hal_interrupt_mock_last_polarity(void);
 extern void hal_interrupt_mock_set_message_ranges(const struct hal_interrupt_message_range* ranges, size_t count);
 extern void hal_interrupt_mock_set_message_source_supported(bool supported);
 extern bool hal_interrupt_mock_last_message_source(struct hal_interrupt_message_source* out_source);
 
 struct hal_userspace_return_frame {
-	bool      user;
+	bool user;
 	uintptr_t entry;
 	uintptr_t stack;
 	uintptr_t args[USER_UPCALL_ARGUMENT_COUNT];
@@ -42,11 +44,11 @@ static void interrupt_test_handler(uintptr_t arg0, uintptr_t arg1, uintptr_t arg
 static void interrupt_test_init_uthread(struct uthread* target, uintptr_t stack_top) {
 	ipc_test_init_heap();
 	memset(target, 0, sizeof(*target));
-	target->process         = (struct process*)(uintptr_t)1u;
+	target->process = (struct process*)(uintptr_t)1u;
 	target->reference_count = 1u;
 	cr_assert(uthread_upcall_state_init(target));
 	target->upcall.stack_mapping = (struct mapping*)1u;
-	target->upcall.stack_top     = stack_top;
+	target->upcall.stack_top = stack_top;
 }
 
 static struct hal_userspace_return_frame interrupt_test_frame(void) {
@@ -55,32 +57,32 @@ static struct hal_userspace_return_frame interrupt_test_frame(void) {
 
 static struct interrupt* interrupt_test_bind_source(struct signal* signal, uint32_t source_number) {
 	interrupt_source_t token;
-	struct interrupt*  interrupt;
+	struct interrupt* interrupt;
 
 	cr_assert_eq(interrupt_resolve_source(0x10000000u, source_number, &token), INTERRUPT_OK);
-	cr_assert_eq(interrupt_claim_source(token, INTERRUPT_TRIGGER_LEVEL, INTERRUPT_POLARITY_HIGH, &interrupt),
-	             INTERRUPT_OK);
+	cr_assert_eq(
+			interrupt_claim_source(token, INTERRUPT_TRIGGER_LEVEL, INTERRUPT_POLARITY_HIGH, &interrupt), INTERRUPT_OK);
 	cr_assert(interrupt_bind(interrupt, signal) == INTERRUPT_OK);
 	return interrupt;
 }
 
 static struct interrupt* interrupt_test_bind_edge_source(struct signal* signal, uint32_t source_number) {
 	interrupt_source_t token;
-	struct interrupt*  interrupt;
+	struct interrupt* interrupt;
 
 	cr_assert_eq(interrupt_resolve_source(0x10000000u, source_number, &token), INTERRUPT_OK);
-	cr_assert_eq(interrupt_claim_source(token, INTERRUPT_TRIGGER_EDGE, INTERRUPT_POLARITY_HIGH, &interrupt),
-	             INTERRUPT_OK);
+	cr_assert_eq(
+			interrupt_claim_source(token, INTERRUPT_TRIGGER_EDGE, INTERRUPT_POLARITY_HIGH, &interrupt), INTERRUPT_OK);
 	cr_assert_eq(interrupt_bind(interrupt, signal), INTERRUPT_OK);
 	return interrupt;
 }
 
 Test(interrupt_hal, fixed_sources_start_masked_and_messages_compose) {
-	struct hal_interrupt_source             source;
-	struct hal_interrupt_source_state       fixed = {0};
-	struct hal_interrupt_delivery           delivery;
-	struct hal_interrupt_message_range      range;
-	struct hal_interrupt_message            message;
+	struct hal_interrupt_source source;
+	struct hal_interrupt_source_state fixed = {0};
+	struct hal_interrupt_delivery delivery;
+	struct hal_interrupt_message_range range;
+	struct hal_interrupt_message message;
 	struct hal_interrupt_source_domain_info fixed_domain;
 
 	cpu_bind_current(&interrupt_test_cpu);
@@ -98,11 +100,11 @@ Test(interrupt_hal, fixed_sources_start_masked_and_messages_compose) {
 	cr_assert(hal_interrupt_source_target_supported(&source, &interrupt_test_cpu));
 	cr_assert_not(hal_interrupt_source_target_supported(&source, NULL));
 	delivery = (struct hal_interrupt_delivery){
-		.target   = &interrupt_test_cpu,
-		.event    = {.domain = source_info.delivery.domain, .id = source_info.delivery.base},
-		.trigger  = HAL_INTERRUPT_TRIGGER_FIRMWARE,
+		.target = &interrupt_test_cpu,
+		.event = {.domain = source_info.delivery.domain, .id = source_info.delivery.base},
+		.trigger = HAL_INTERRUPT_TRIGGER_FIRMWARE,
 		.polarity = HAL_INTERRUPT_POLARITY_FIRMWARE
-    };
+	};
 	cr_assert_not(hal_interrupt_source_mask(&fixed));
 	cr_assert_not(hal_interrupt_source_unmask(&fixed));
 	cr_assert(hal_interrupt_source_init(&fixed, &source, &delivery));
@@ -137,7 +139,7 @@ Test(interrupt_hal, fixed_sources_start_masked_and_messages_compose) {
 	cr_assert(range.delivery.base <= 64u && range.delivery.limit > 64u);
 	struct hal_interrupt_message_request request = {
 		.domain = range.domain, .target = &interrupt_test_cpu, .event = {.domain = range.delivery.domain, .id = 64u}
-    };
+	};
 	cr_assert(hal_interrupt_message_target_supported(request.domain, request.source, request.target));
 	cr_assert_not(hal_interrupt_message_target_supported(request.domain, request.source, NULL));
 	struct hal_interrupt_message_state message_state = {0};
@@ -147,7 +149,7 @@ Test(interrupt_hal, fixed_sources_start_masked_and_messages_compose) {
 	cr_assert_not(hal_interrupt_message_init(&message_state, &request, &message));
 	cr_assert(hal_interrupt_message_deinit(&message_state));
 	struct hal_interrupt_message_source producer = {.domain = 0u, .id = 1u};
-	request.source                               = &producer;
+	request.source = &producer;
 	cr_assert_not(hal_interrupt_message_target_supported(request.domain, request.source, request.target));
 	cr_assert_not(hal_interrupt_message_init(&message_state, &request, &message));
 	request.source = NULL;
@@ -159,11 +161,11 @@ Test(interrupt_hal, fixed_sources_start_masked_and_messages_compose) {
 Test(interrupt_core, message_allocation_tries_every_matching_range) {
 	const struct hal_interrupt_message_range ranges[] = {
 		{.domain = 0u, .delivery = {.domain = 0u, .base = 10u, .limit = 12u}},
-		{.domain = 1u,   .delivery = {.domain = 1u, .base = 0u, .limit = 1u}},
+		{.domain = 1u, .delivery = {.domain = 1u, .base = 0u, .limit = 1u}},
 		{.domain = 0u, .delivery = {.domain = 0u, .base = 20u, .limit = 22u}},
 	};
-	struct interrupt*           interrupts[3] = {0};
-	struct interrupt_message    messages[3];
+	struct interrupt* interrupts[3] = {0};
+	struct interrupt_message messages[3];
 	interrupt_message_context_t context;
 
 	cpu_bind_current(&interrupt_test_cpu);
@@ -184,16 +186,16 @@ Test(interrupt_core, message_allocation_tries_every_matching_range) {
 	}
 
 	hal_interrupt_mock_set_message_ranges(NULL, 0u);
-	struct interrupt*        unused_interrupt = NULL;
+	struct interrupt* unused_interrupt = NULL;
 	struct interrupt_message unused_message;
 	cr_assert_eq(interrupt_allocate_message(context, &unused_interrupt, &unused_message), INTERRUPT_NOT_FOUND);
 	const struct hal_interrupt_message_range default_range = {
 		.domain = 0u, .delivery = {.domain = 0u, .base = 0u, .limit = 256u}
-    };
+	};
 	hal_interrupt_mock_set_message_ranges(&default_range, 1u);
 
 	const struct hal_interrupt_message_source producer = {.domain = 0u, .id = 37u};
-	struct hal_interrupt_message_source       decoded;
+	struct hal_interrupt_message_source decoded;
 	hal_interrupt_mock_set_message_source_supported(true);
 	cr_assert(interrupt_message_context_create(0u, &producer, &context));
 	cr_assert_eq(interrupt_allocate_message(context, &unused_interrupt, &unused_message), INTERRUPT_OK);
@@ -208,18 +210,18 @@ Test(interrupt_core, message_allocation_tries_every_matching_range) {
 }
 
 Test(interrupt_core, source_identity_configuration_and_signal_lifecycle) {
-	interrupt_source_t    token;
-	struct interrupt*     interrupt;
+	interrupt_source_t token;
+	struct interrupt* interrupt;
 	struct interrupt_info info;
-	struct signal*        signal;
+	struct signal* signal;
 
 	cpu_bind_current(&interrupt_test_cpu);
 	ipc_test_init_heap();
 	cr_assert(interrupt_init());
 	cr_assert_eq(interrupt_resolve_source(0x10000000u, 7u, &token), INTERRUPT_OK);
 	cr_assert_neq(token, INTERRUPT_SOURCE_INVALID);
-	cr_assert_eq(interrupt_claim_source(token, INTERRUPT_TRIGGER_LEVEL, INTERRUPT_POLARITY_LOW, &interrupt),
-	             INTERRUPT_OK);
+	cr_assert_eq(
+			interrupt_claim_source(token, INTERRUPT_TRIGGER_LEVEL, INTERRUPT_POLARITY_LOW, &interrupt), INTERRUPT_OK);
 	cr_assert_eq(hal_interrupt_mock_last_trigger(), HAL_INTERRUPT_TRIGGER_LEVEL);
 	cr_assert_eq(hal_interrupt_mock_last_polarity(), HAL_INTERRUPT_POLARITY_LOW);
 
@@ -250,12 +252,12 @@ Test(interrupt_core, source_identity_configuration_and_signal_lifecycle) {
 /* Edge IRQs stay unmasked while userspace handles the previous event. A second
  * edge is remembered and delivered once the first interrupt upcall completes. */
 Test(interrupt_core, edge_sources_remain_unmasked_and_retrigger) {
-	struct signal*                    signal;
-	struct interrupt*                 interrupt;
-	struct uthread                    target;
+	struct signal* signal;
+	struct interrupt* interrupt;
+	struct uthread target;
 	struct hal_userspace_return_frame frame = interrupt_test_frame();
-	size_t                            unmask_count;
-	size_t                            mask_count;
+	size_t unmask_count;
+	size_t mask_count;
 
 	cpu_bind_current(&interrupt_test_cpu);
 	ipc_test_init_heap();
@@ -264,9 +266,9 @@ Test(interrupt_core, edge_sources_remain_unmasked_and_retrigger) {
 	cr_assert_not_null(signal);
 	interrupt_test_init_uthread(&target, 0x9000u);
 	cr_assert_eq(signal_register_handler(signal, &target, interrupt_test_handler, SIGNAL_HANDLER_FLAG_NONE), SIGNAL_OK);
-	interrupt    = interrupt_test_bind_edge_source(signal, 16u);
+	interrupt = interrupt_test_bind_edge_source(signal, 16u);
 	unmask_count = hal_interrupt_mock_unmask_count();
-	mask_count   = hal_interrupt_mock_mask_count();
+	mask_count = hal_interrupt_mock_mask_count();
 
 	cr_assert(interrupt_handle_event((struct hal_interrupt_event){.domain = 0u, .id = 16u}));
 	cr_assert_not_null(target.upcall.pending);
@@ -295,13 +297,13 @@ Test(interrupt_core, edge_sources_remain_unmasked_and_retrigger) {
 }
 
 Test(interrupt_core, interrupt_upcalls_form_a_completion_barrier) {
-	struct signal*                    signal;
-	struct interrupt*                 interrupt;
-	struct uthread                    persistent;
-	struct uthread                    oneshot;
+	struct signal* signal;
+	struct interrupt* interrupt;
+	struct uthread persistent;
+	struct uthread oneshot;
 	struct hal_userspace_return_frame persistent_frame = interrupt_test_frame();
-	struct hal_userspace_return_frame oneshot_frame    = interrupt_test_frame();
-	size_t                            unmask_count;
+	struct hal_userspace_return_frame oneshot_frame = interrupt_test_frame();
+	size_t unmask_count;
 
 	cpu_bind_current(&interrupt_test_cpu);
 	ipc_test_init_heap();
@@ -310,11 +312,11 @@ Test(interrupt_core, interrupt_upcalls_form_a_completion_barrier) {
 	cr_assert_not_null(signal);
 	interrupt_test_init_uthread(&persistent, 0x9000u);
 	interrupt_test_init_uthread(&oneshot, 0xa000u);
-	cr_assert_eq(signal_register_handler(signal, &persistent, interrupt_test_handler, SIGNAL_HANDLER_FLAG_NONE),
-	             SIGNAL_OK);
-	cr_assert_eq(signal_register_handler(signal, &oneshot, interrupt_test_handler, SIGNAL_HANDLER_FLAG_ONESHOT),
-	             SIGNAL_OK);
-	interrupt    = interrupt_test_bind_source(signal, 11u);
+	cr_assert_eq(
+			signal_register_handler(signal, &persistent, interrupt_test_handler, SIGNAL_HANDLER_FLAG_NONE), SIGNAL_OK);
+	cr_assert_eq(
+			signal_register_handler(signal, &oneshot, interrupt_test_handler, SIGNAL_HANDLER_FLAG_ONESHOT), SIGNAL_OK);
+	interrupt = interrupt_test_bind_source(signal, 11u);
 	unmask_count = hal_interrupt_mock_unmask_count();
 
 	cr_assert(interrupt_handle_event((struct hal_interrupt_event){.domain = 0u, .id = 11u}));
@@ -340,14 +342,14 @@ Test(interrupt_core, interrupt_upcalls_form_a_completion_barrier) {
 }
 
 Test(interrupt_core, oneshot_and_ordinary_upcalls_do_not_request_rearm) {
-	struct signal*                    signal;
-	struct interrupt*                 interrupt;
-	struct uthread                    ordinary;
-	struct uthread                    oneshot;
+	struct signal* signal;
+	struct interrupt* interrupt;
+	struct uthread ordinary;
+	struct uthread oneshot;
 	struct hal_userspace_return_frame ordinary_frame = interrupt_test_frame();
-	struct hal_userspace_return_frame oneshot_frame  = interrupt_test_frame();
-	struct signal_payload             payload        = {0};
-	size_t                            unmask_count;
+	struct hal_userspace_return_frame oneshot_frame = interrupt_test_frame();
+	struct signal_payload payload = {0};
+	size_t unmask_count;
 
 	cpu_bind_current(&interrupt_test_cpu);
 	ipc_test_init_heap();
@@ -356,9 +358,9 @@ Test(interrupt_core, oneshot_and_ordinary_upcalls_do_not_request_rearm) {
 	cr_assert_not_null(signal);
 	interrupt_test_init_uthread(&ordinary, 0x9000u);
 	interrupt_test_init_uthread(&oneshot, 0xa000u);
-	cr_assert_eq(signal_register_handler(signal, &ordinary, interrupt_test_handler, SIGNAL_HANDLER_FLAG_NONE),
-	             SIGNAL_OK);
-	interrupt    = interrupt_test_bind_source(signal, 12u);
+	cr_assert_eq(
+			signal_register_handler(signal, &ordinary, interrupt_test_handler, SIGNAL_HANDLER_FLAG_NONE), SIGNAL_OK);
+	interrupt = interrupt_test_bind_source(signal, 12u);
 	unmask_count = hal_interrupt_mock_unmask_count();
 
 	cr_assert_eq(signal_send(signal, 42u, &payload, NULL, NULL), SIGNAL_OK);
@@ -368,8 +370,8 @@ Test(interrupt_core, oneshot_and_ordinary_upcalls_do_not_request_rearm) {
 	cr_assert_eq(hal_interrupt_mock_unmask_count(), unmask_count);
 	cr_assert_eq(signal_unregister_handler(signal, &ordinary), SIGNAL_OK);
 
-	cr_assert_eq(signal_register_handler(signal, &oneshot, interrupt_test_handler, SIGNAL_HANDLER_FLAG_ONESHOT),
-	             SIGNAL_OK);
+	cr_assert_eq(
+			signal_register_handler(signal, &oneshot, interrupt_test_handler, SIGNAL_HANDLER_FLAG_ONESHOT), SIGNAL_OK);
 	cr_assert(interrupt_handle_event((struct hal_interrupt_event){.domain = 0u, .id = 12u}));
 	cr_assert_eq(uthread_upcall_deliver(&oneshot, &oneshot_frame), USER_UPCALL_OK);
 	cr_assert_eq(uthread_upcall_restore(&oneshot, &oneshot_frame), USER_UPCALL_OK);
@@ -385,11 +387,11 @@ Test(interrupt_core, oneshot_and_ordinary_upcalls_do_not_request_rearm) {
 }
 
 Test(interrupt_core, registering_handler_rearms_after_oneshot_completion) {
-	struct signal*                    signal;
-	struct interrupt*                 interrupt;
-	struct uthread                    oneshot;
+	struct signal* signal;
+	struct interrupt* interrupt;
+	struct uthread oneshot;
 	struct hal_userspace_return_frame frame = interrupt_test_frame();
-	size_t                            unmask_count;
+	size_t unmask_count;
 
 	cpu_bind_current(&interrupt_test_cpu);
 	ipc_test_init_heap();
@@ -397,9 +399,9 @@ Test(interrupt_core, registering_handler_rearms_after_oneshot_completion) {
 	signal = signal_create();
 	cr_assert_not_null(signal);
 	interrupt_test_init_uthread(&oneshot, 0x9000u);
-	cr_assert_eq(signal_register_handler(signal, &oneshot, interrupt_test_handler, SIGNAL_HANDLER_FLAG_ONESHOT),
-	             SIGNAL_OK);
-	interrupt    = interrupt_test_bind_source(signal, 13u);
+	cr_assert_eq(
+			signal_register_handler(signal, &oneshot, interrupt_test_handler, SIGNAL_HANDLER_FLAG_ONESHOT), SIGNAL_OK);
+	interrupt = interrupt_test_bind_source(signal, 13u);
 	unmask_count = hal_interrupt_mock_unmask_count();
 
 	cr_assert(interrupt_handle_event((struct hal_interrupt_event){.domain = 0u, .id = 13u}));
@@ -407,8 +409,8 @@ Test(interrupt_core, registering_handler_rearms_after_oneshot_completion) {
 	cr_assert_eq(uthread_upcall_restore(&oneshot, &frame), USER_UPCALL_OK);
 	cr_assert_eq(hal_interrupt_mock_unmask_count(), unmask_count);
 
-	cr_assert_eq(signal_register_handler(signal, &oneshot, interrupt_test_handler, SIGNAL_HANDLER_FLAG_ONESHOT),
-	             SIGNAL_OK);
+	cr_assert_eq(
+			signal_register_handler(signal, &oneshot, interrupt_test_handler, SIGNAL_HANDLER_FLAG_ONESHOT), SIGNAL_OK);
 	cr_assert_eq(hal_interrupt_mock_unmask_count(), unmask_count + 1u);
 	cr_assert(interrupt_handle_event((struct hal_interrupt_event){.domain = 0u, .id = 13u}));
 	cr_assert_eq(oneshot.upcall.count, 1u);
@@ -425,9 +427,9 @@ Test(interrupt_core, registering_handler_rearms_after_oneshot_completion) {
 }
 
 Test(interrupt_core, signal_refusal_is_not_reported_as_already_bound) {
-	struct signal*    signal;
+	struct signal* signal;
 	struct interrupt* interrupt;
-	struct uthread    target;
+	struct uthread target;
 
 	cpu_bind_current(&interrupt_test_cpu);
 	ipc_test_init_heap();
@@ -453,18 +455,18 @@ Test(interrupt_core, signal_refusal_is_not_reported_as_already_bound) {
 
 Test(interrupt_core, routing_table_retains_published_interrupts) {
 	interrupt_message_context_t context;
-	struct interrupt_message    message;
-	interrupt_source_t          token;
-	struct interrupt*           source_interrupt;
-	struct interrupt*           message_interrupt;
-	struct interrupt_info       info;
+	struct interrupt_message message;
+	interrupt_source_t token;
+	struct interrupt* source_interrupt;
+	struct interrupt* message_interrupt;
+	struct interrupt_info info;
 
 	cpu_bind_current(&interrupt_test_cpu);
 	ipc_test_init_heap();
 	cr_assert(interrupt_init());
 	cr_assert_eq(interrupt_resolve_source(0x10000000u, 15u, &token), INTERRUPT_OK);
 	cr_assert_eq(interrupt_claim_source(token, INTERRUPT_TRIGGER_EDGE, INTERRUPT_POLARITY_HIGH, &source_interrupt),
-	             INTERRUPT_OK);
+			INTERRUPT_OK);
 	interrupt_release(source_interrupt);
 	cr_assert(interrupt_retain(source_interrupt));
 	cr_assert_eq(interrupt_get_info(source_interrupt, &info), INTERRUPT_OK);

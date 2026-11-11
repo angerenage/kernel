@@ -29,8 +29,8 @@ struct interrupt_frame {
 /* Interrupt frame extension saved when an exception crosses privilege levels. */
 struct user_interrupt_frame {
 	struct interrupt_frame frame;
-	uint64_t               rsp;
-	uint64_t               ss;
+	uint64_t rsp;
+	uint64_t ss;
 };
 
 /* Safe return mechanisms selected for a validated userspace frame. */

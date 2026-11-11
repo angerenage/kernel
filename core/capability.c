@@ -1,13 +1,14 @@
-#include <base/cap.h>
-#include <core/capability.h>
-#include <core/capability_call.h>
-#include <core/lock.h>
-#include <core/process.h>
-#include <hal/hcf.h>
 #include <libc/stdlib.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
+
+#include <base/cap.h>
+#include <hal/hcf.h>
+#include <core/capability.h>
+#include <core/capability_call.h>
+#include <core/lock.h>
+#include <core/process.h>
 
 #define CAP_ID_TABLE_MIN 1u
 #define CAP_ID_TABLE_MAX UINT64_MAX
@@ -23,7 +24,7 @@ static struct id_table cap_object_table = ID_TABLE_INITIALIZER("cap_object_table
 static struct id_table capability_table = ID_TABLE_INITIALIZER("capability_table", CAP_ID_TABLE_MIN, CAP_ID_TABLE_MAX);
 
 static struct spinlock capability_topology_lock =
-	SPINLOCK_INIT_CLASS("capability_topology", SPINLOCK_ORDER_CAPABILITY, SPINLOCK_FLAG_IRQSAVE);
+		SPINLOCK_INIT_CLASS("capability_topology", SPINLOCK_ORDER_CAPABILITY, SPINLOCK_FLAG_IRQSAVE);
 
 static struct cap_object* capability_object_locked(cap_object_id_t id, struct cap_object* unpublished_object);
 
@@ -38,10 +39,10 @@ static bool cap_object_zero_grants_eligible_locked(const struct cap_object* obje
 
 static void cap_object_schedule_event_locked(struct cap_object* object, struct cap_event_batch* batch) {
 	if (batch == NULL || object == NULL || (object->endpoint == NULL && object->event_handler == NULL) ||
-	    !cap_object_zero_grants_eligible_locked(object) || object->event_pending)
+			!cap_object_zero_grants_eligible_locked(object) || object->event_pending)
 		return;
 	object->event_pending = true;
-	object->event_next    = NULL;
+	object->event_next = NULL;
 	(void)__atomic_add_fetch(&object->reference_count, 1u, __ATOMIC_RELAXED);
 	if (batch->tail == NULL) batch->head = object;
 	else batch->tail->event_next = object;
@@ -52,17 +53,17 @@ static void cap_object_dispatch_events(struct cap_event_batch* batch) {
 	struct cap_object* object;
 	if (batch == NULL) return;
 	while ((object = batch->head) != NULL) {
-		cap_object_event_handler_t handler  = NULL;
-		struct channel*            endpoint = NULL;
-		struct cap_object*         next     = object->event_next;
-		batch->head                         = next;
+		cap_object_event_handler_t handler = NULL;
+		struct channel* endpoint = NULL;
+		struct cap_object* next = object->event_next;
+		batch->head = next;
 		if (batch->head == NULL) batch->tail = NULL;
 		object->event_next = NULL;
 
 		struct irq_state state = spinlock_lock_irqsave(&capability_topology_lock);
 		if (object->event_pending && cap_object_zero_grants_eligible_locked(object)) {
 			endpoint = object->endpoint;
-			handler  = object->event_handler;
+			handler = object->event_handler;
 			if (endpoint == NULL) object->event_pending = false;
 		}
 		else {
@@ -72,7 +73,7 @@ static void cap_object_dispatch_events(struct cap_event_batch* batch) {
 
 		if (endpoint != NULL) {
 			if (channel_enqueue_cap_event(endpoint, object)) continue;
-			state                 = spinlock_lock_irqsave(&capability_topology_lock);
+			state = spinlock_lock_irqsave(&capability_topology_lock);
 			object->event_pending = false;
 			spinlock_unlock_irqrestore(&capability_topology_lock, state);
 		}
@@ -85,8 +86,11 @@ static void cap_object_dispatch_events(struct cap_event_batch* batch) {
 
 static void capability_notify_grant_change_locked(struct capability* capability, struct cap_object* object) {
 	if (capability == NULL || object == NULL || object->grant_change == NULL) return;
-	object->grant_change(
-		object->object_id, capability->cap_id, capability->target, cap_rights(capability), cap_is_removed(capability));
+	object->grant_change(object->object_id,
+			capability->cap_id,
+			capability->target,
+			cap_rights(capability),
+			cap_is_removed(capability));
 }
 
 static struct capability* capability_subtree_next_locked(struct capability* root, struct capability* current) {
@@ -132,8 +136,8 @@ static struct capability* capability_subtree_first_leaf_locked(struct capability
 	return current;
 }
 
-static struct capability* capability_subtree_postorder_next_locked(struct capability* root,
-                                                                   struct capability* current) {
+static struct capability* capability_subtree_postorder_next_locked(
+		struct capability* root, struct capability* current) {
 	struct capability* next;
 
 	if (root == NULL || current == NULL || current == root) return NULL;
@@ -148,14 +152,14 @@ static void capability_attach_locked(struct capability* capability) {
 	struct capability* parent;
 
 	if (capability == NULL || capability->parent == NULL) return;
-	parent                   = capability->parent;
+	parent = capability->parent;
 	capability->next_sibling = parent->first_child;
-	parent->first_child      = capability;
+	parent->first_child = capability;
 }
 
 static bool capability_detach_locked(struct capability* capability) {
 	struct capability** link;
-	struct capability*  parent;
+	struct capability* parent;
 
 	if (capability == NULL) return false;
 	parent = capability->parent;
@@ -168,8 +172,8 @@ static bool capability_detach_locked(struct capability* capability) {
 	while (*link != NULL && *link != capability) link = &(*link)->next_sibling;
 	if (*link != capability) return false;
 
-	*link                    = capability->next_sibling;
-	capability->parent       = NULL;
+	*link = capability->next_sibling;
+	capability->parent = NULL;
 	capability->next_sibling = NULL;
 	return true;
 }
@@ -185,8 +189,8 @@ static struct cap_object* capability_object_locked(cap_object_id_t id, struct ca
 	return id_table_lookup(&cap_object_table, id);
 }
 
-static void capability_grant_removed_locked(struct capability* capability, struct cap_object* unpublished_object,
-                                            struct cap_event_batch* batch) {
+static void capability_grant_removed_locked(
+		struct capability* capability, struct cap_object* unpublished_object, struct cap_event_batch* batch) {
 	struct cap_object* object;
 	if (capability == NULL) return;
 	object = capability_object_locked(capability->cap_object_id, unpublished_object);
@@ -212,21 +216,21 @@ static bool capability_drop_locked(struct capability* capability, struct cap_eve
 	}
 
 	if (id_table_remove(&capability_table, (id_table_id_t)capability->cap_id, (void**)&removed) != ID_TABLE_OK ||
-	    removed != capability) {
+			removed != capability) {
 		capability->parent = parent;
 		capability_attach_locked(capability);
 		__atomic_store_n(&capability->removed, false, __ATOMIC_RELEASE);
 		return false;
 	}
 
-	children                = capability->first_child;
-	capability->parent      = NULL;
+	children = capability->first_child;
+	capability->parent = NULL;
 	capability->first_child = NULL;
 	if (parent == NULL) {
 		while (children != NULL) {
-			child               = children;
-			children            = children->next_sibling;
-			child->parent       = NULL;
+			child = children;
+			children = children->next_sibling;
+			child->parent = NULL;
 			child->next_sibling = NULL;
 		}
 	}
@@ -246,10 +250,10 @@ static bool capability_drop_locked(struct capability* capability, struct cap_eve
 	return true;
 }
 
-static bool capability_remove_subtree_locked(struct capability* root, struct cap_object* unpublished_object,
-                                             struct cap_event_batch* batch) {
+static bool capability_remove_subtree_locked(
+		struct capability* root, struct cap_object* unpublished_object, struct cap_event_batch* batch) {
 	struct capability* current;
-	bool               success = true;
+	bool success = true;
 
 	if (!capability_is_published_locked(root)) return false;
 
@@ -261,17 +265,17 @@ static bool capability_remove_subtree_locked(struct capability* root, struct cap
 
 	current = capability_subtree_first_leaf_locked(root);
 	while (current != NULL) {
-		struct capability* next    = capability_subtree_postorder_next_locked(root, current);
+		struct capability* next = capability_subtree_postorder_next_locked(root, current);
 		struct capability* removed = NULL;
 
 		if (id_table_remove(&capability_table, (id_table_id_t)current->cap_id, (void**)&removed) != ID_TABLE_OK ||
-		    removed != current) {
+				removed != current) {
 			success = false;
 		}
 		else {
 			capability_grant_removed_locked(current, unpublished_object, batch);
-			current->parent       = NULL;
-			current->first_child  = NULL;
+			current->parent = NULL;
+			current->first_child = NULL;
 			current->next_sibling = NULL;
 			cap_release(removed);
 		}
@@ -281,13 +285,13 @@ static bool capability_remove_subtree_locked(struct capability* root, struct cap
 	return success;
 }
 
-static void capability_remove_object_subtrees_locked(cap_object_id_t object_id, struct cap_object* unpublished_object,
-                                                     struct cap_event_batch* batch) {
+static void capability_remove_object_subtrees_locked(
+		cap_object_id_t object_id, struct cap_object* unpublished_object, struct cap_event_batch* batch) {
 	size_t cursor = 0u;
 
 	for (;;) {
-		struct capability* candidate   = NULL;
-		struct irq_state   table_state = spinlock_lock_irqsave(&capability_table.lock);
+		struct capability* candidate = NULL;
+		struct irq_state table_state = spinlock_lock_irqsave(&capability_table.lock);
 
 		for (; cursor < id_table_extent_locked(&capability_table); cursor++) {
 			struct capability* capability = id_table_lookup_index_locked(&capability_table, cursor);
@@ -302,10 +306,9 @@ static void capability_remove_object_subtrees_locked(cap_object_id_t object_id, 
 	}
 }
 
-static struct cap_object*
-cap_object_create_locked(uint64_t object_id, struct channel* endpoint, cap_kernel_handler_t handler,
-                         cap_kernel_process_cleanup_t process_cleanup, cap_kernel_destroy_t destroy,
-                         cap_object_event_handler_t event_handler, cap_kernel_grant_change_t grant_change) {
+static struct cap_object* cap_object_create_locked(uint64_t object_id, struct channel* endpoint,
+		cap_kernel_handler_t handler, cap_kernel_process_cleanup_t process_cleanup, cap_kernel_destroy_t destroy,
+		cap_object_event_handler_t event_handler, cap_kernel_grant_change_t grant_change) {
 	struct cap_object* object = malloc(sizeof(*object));
 	if (object == NULL) return NULL;
 	if (!channel_retain(endpoint)) {
@@ -313,25 +316,25 @@ cap_object_create_locked(uint64_t object_id, struct channel* endpoint, cap_kerne
 		return NULL;
 	}
 
-	object->cap_object_id   = CAP_OBJECT_ID_INVALID;
-	object->object_id       = object_id;
-	object->endpoint        = endpoint;
-	object->handler         = handler;
+	object->cap_object_id = CAP_OBJECT_ID_INVALID;
+	object->object_id = object_id;
+	object->endpoint = endpoint;
+	object->handler = handler;
 	object->process_cleanup = process_cleanup;
-	object->destroy         = destroy;
-	object->grant_change    = grant_change;
-	object->event_handler   = event_handler;
-	object->event_next      = NULL;
+	object->destroy = destroy;
+	object->grant_change = grant_change;
+	object->event_handler = event_handler;
+	object->event_next = NULL;
 	object->reference_count = 1u;
-	object->grant_count     = 0u;
-	object->active_calls    = 0u;
-	object->event_pending   = false;
+	object->grant_count = 0u;
+	object->active_calls = 0u;
+	object->event_pending = false;
 
 	return object;
 }
 
-static struct cap_object* cap_object_find_locked(struct channel* endpoint, uint64_t object_id,
-                                                 cap_kernel_handler_t handler) {
+static struct cap_object* cap_object_find_locked(
+		struct channel* endpoint, uint64_t object_id, cap_kernel_handler_t handler) {
 	for (size_t i = 0; i < id_table_extent_locked(&cap_object_table); i++) {
 		struct cap_object* obj = id_table_lookup_index_locked(&cap_object_table, i);
 		if (obj == NULL || obj->object_id != object_id) continue;
@@ -343,11 +346,11 @@ static struct cap_object* cap_object_find_locked(struct channel* endpoint, uint6
 }
 
 cap_object_id_t cap_object_create(uint64_t object_id, struct channel* endpoint, bool* out_created) {
-	struct irq_state   state;
+	struct irq_state state;
 	struct cap_object* object;
 
 	if (out_created != NULL) *out_created = false;
-	state  = spinlock_lock_irqsave(&cap_object_table.lock);
+	state = spinlock_lock_irqsave(&cap_object_table.lock);
 	object = cap_object_find_locked(endpoint, object_id, NULL);
 	if (object != NULL) {
 		cap_object_id_t id = object->cap_object_id;
@@ -368,10 +371,10 @@ cap_object_id_t cap_object_create(uint64_t object_id, struct channel* endpoint, 
 		return CAP_OBJECT_ID_INVALID;
 	}
 
-	state                        = spinlock_lock_irqsave(&cap_object_table.lock);
-	object->cap_object_id        = id;
-	struct cap_object* existing  = cap_object_find_locked(endpoint, object_id, NULL);
-	cap_object_id_t    result_id = existing == NULL ? CAP_OBJECT_ID_INVALID : existing->cap_object_id;
+	state = spinlock_lock_irqsave(&cap_object_table.lock);
+	object->cap_object_id = id;
+	struct cap_object* existing = cap_object_find_locked(endpoint, object_id, NULL);
+	cap_object_id_t result_id = existing == NULL ? CAP_OBJECT_ID_INVALID : existing->cap_object_id;
 	spinlock_unlock_irqrestore(&cap_object_table.lock, state);
 	if (existing != object) {
 		struct cap_object* removed = NULL;
@@ -390,31 +393,27 @@ cap_object_id_t cap_object_create_kernel(uint64_t object_id, cap_kernel_handler_
 }
 
 cap_object_id_t cap_object_create_kernel_managed(uint64_t object_id, cap_kernel_handler_t handler,
-                                                 cap_kernel_process_cleanup_t process_cleanup,
-                                                 cap_kernel_destroy_t destroy, bool* out_created) {
+		cap_kernel_process_cleanup_t process_cleanup, cap_kernel_destroy_t destroy, bool* out_created) {
 	return cap_object_create_kernel_lifecycle(object_id, handler, process_cleanup, destroy, NULL, out_created);
 }
 
 cap_object_id_t cap_object_create_kernel_lifecycle(uint64_t object_id, cap_kernel_handler_t handler,
-                                                   cap_kernel_process_cleanup_t process_cleanup,
-                                                   cap_kernel_destroy_t         destroy,
-                                                   cap_object_event_handler_t event_handler, bool* out_created) {
+		cap_kernel_process_cleanup_t process_cleanup, cap_kernel_destroy_t destroy,
+		cap_object_event_handler_t event_handler, bool* out_created) {
 	return cap_object_create_kernel_observed(
-		object_id, handler, process_cleanup, destroy, event_handler, NULL, out_created);
+			object_id, handler, process_cleanup, destroy, event_handler, NULL, out_created);
 }
 
 cap_object_id_t cap_object_create_kernel_observed(uint64_t object_id, cap_kernel_handler_t handler,
-                                                  cap_kernel_process_cleanup_t process_cleanup,
-                                                  cap_kernel_destroy_t         destroy,
-                                                  cap_object_event_handler_t   event_handler,
-                                                  cap_kernel_grant_change_t grant_change, bool* out_created) {
-	struct irq_state   state;
+		cap_kernel_process_cleanup_t process_cleanup, cap_kernel_destroy_t destroy,
+		cap_object_event_handler_t event_handler, cap_kernel_grant_change_t grant_change, bool* out_created) {
+	struct irq_state state;
 	struct cap_object* object;
 
 	if (out_created != NULL) *out_created = false;
 	if (handler == NULL) return CAP_OBJECT_ID_INVALID;
 
-	state  = spinlock_lock_irqsave(&cap_object_table.lock);
+	state = spinlock_lock_irqsave(&cap_object_table.lock);
 	object = cap_object_find_locked(NULL, object_id, handler);
 	if (object != NULL) {
 		cap_object_id_t id = object->cap_object_id;
@@ -434,10 +433,10 @@ cap_object_id_t cap_object_create_kernel_observed(uint64_t object_id, cap_kernel
 		return CAP_OBJECT_ID_INVALID;
 	}
 
-	state                        = spinlock_lock_irqsave(&cap_object_table.lock);
-	object->cap_object_id        = id;
-	struct cap_object* existing  = cap_object_find_locked(NULL, object_id, handler);
-	cap_object_id_t    result_id = existing == NULL ? CAP_OBJECT_ID_INVALID : existing->cap_object_id;
+	state = spinlock_lock_irqsave(&cap_object_table.lock);
+	object->cap_object_id = id;
+	struct cap_object* existing = cap_object_find_locked(NULL, object_id, handler);
+	cap_object_id_t result_id = existing == NULL ? CAP_OBJECT_ID_INVALID : existing->cap_object_id;
 	spinlock_unlock_irqrestore(&cap_object_table.lock, state);
 	if (existing != object) {
 		struct cap_object* removed = NULL;
@@ -452,7 +451,7 @@ cap_object_id_t cap_object_create_kernel_observed(uint64_t object_id, cap_kernel
 }
 
 struct cap_object* cap_object_lookup(struct channel* endpoint, uint64_t object_id) {
-	struct irq_state   state;
+	struct irq_state state;
 	struct cap_object* object = NULL;
 
 	state = spinlock_lock_irqsave(&cap_object_table.lock);
@@ -493,8 +492,8 @@ void cap_object_release(struct cap_object* object) {
 }
 
 bool cap_object_destroy_with_id(cap_object_id_t id) {
-	struct irq_state       topology_state;
-	struct cap_object*     object = NULL;
+	struct irq_state topology_state;
+	struct cap_object* object = NULL;
 	struct cap_event_batch events = {0};
 
 	if (id == CAP_OBJECT_ID_INVALID) return false;
@@ -517,8 +516,8 @@ bool cap_object_destroy(struct cap_object* object) {
 	return cap_object_destroy_with_id(object->cap_object_id);
 }
 
-static bool cap_object_remove_if_unused_locked(struct cap_object* object, struct cap_object** out_removed,
-                                               struct cap_event_batch* events) {
+static bool cap_object_remove_if_unused_locked(
+		struct cap_object* object, struct cap_object** out_removed, struct cap_event_batch* events) {
 	struct cap_object* removed = NULL;
 
 	if (object == NULL || !cap_object_zero_grants_eligible_locked(object)) return false;
@@ -530,12 +529,12 @@ static bool cap_object_remove_if_unused_locked(struct cap_object* object, struct
 }
 
 bool cap_object_destroy_if_unused(struct cap_object* object) {
-	struct cap_object*     removed = NULL;
-	struct cap_event_batch events  = {0};
-	struct irq_state       state;
+	struct cap_object* removed = NULL;
+	struct cap_event_batch events = {0};
+	struct irq_state state;
 
 	if (object == NULL) return false;
-	state        = spinlock_lock_irqsave(&capability_topology_lock);
+	state = spinlock_lock_irqsave(&capability_topology_lock);
 	bool success = cap_object_remove_if_unused_locked(object, &removed, &events);
 	spinlock_unlock_irqrestore(&capability_topology_lock, state);
 	cap_object_dispatch_events(&events);
@@ -544,15 +543,15 @@ bool cap_object_destroy_if_unused(struct cap_object* object) {
 }
 
 bool cap_object_unpublish(struct channel* endpoint, uint64_t object_id) {
-	struct cap_object*     object = NULL;
+	struct cap_object* object = NULL;
 	struct cap_event_batch events = {0};
-	struct irq_state       state;
-	bool                   unpublished;
+	struct irq_state state;
+	bool unpublished;
 	if (endpoint == NULL) return false;
-	state                          = spinlock_lock_irqsave(&capability_topology_lock);
-	struct irq_state   table_state = spinlock_lock_irqsave(&cap_object_table.lock);
-	struct cap_object* candidate   = cap_object_find_locked(endpoint, object_id, NULL);
-	cap_object_id_t    id          = candidate == NULL ? CAP_OBJECT_ID_INVALID : candidate->cap_object_id;
+	state = spinlock_lock_irqsave(&capability_topology_lock);
+	struct irq_state table_state = spinlock_lock_irqsave(&cap_object_table.lock);
+	struct cap_object* candidate = cap_object_find_locked(endpoint, object_id, NULL);
+	cap_object_id_t id = candidate == NULL ? CAP_OBJECT_ID_INVALID : candidate->cap_object_id;
 	spinlock_unlock_irqrestore(&cap_object_table.lock, table_state);
 	if (id != CAP_OBJECT_ID_INVALID && id_table_remove(&cap_object_table, id, (void**)&object) != ID_TABLE_OK)
 		object = NULL;
@@ -565,15 +564,15 @@ bool cap_object_unpublish(struct channel* endpoint, uint64_t object_id) {
 }
 
 bool cap_object_unpublish_if_unused(struct channel* endpoint, uint64_t object_id) {
-	struct cap_object*     removed = NULL;
-	struct cap_event_batch events  = {0};
-	struct irq_state       state;
-	bool                   unpublished;
+	struct cap_object* removed = NULL;
+	struct cap_event_batch events = {0};
+	struct irq_state state;
+	bool unpublished;
 
 	if (endpoint == NULL) return false;
-	state                          = spinlock_lock_irqsave(&capability_topology_lock);
-	struct irq_state   table_state = spinlock_lock_irqsave(&cap_object_table.lock);
-	struct cap_object* object      = cap_object_find_locked(endpoint, object_id, NULL);
+	state = spinlock_lock_irqsave(&capability_topology_lock);
+	struct irq_state table_state = spinlock_lock_irqsave(&cap_object_table.lock);
+	struct cap_object* object = cap_object_find_locked(endpoint, object_id, NULL);
 	spinlock_unlock_irqrestore(&cap_object_table.lock, table_state);
 	unpublished = cap_object_remove_if_unused_locked(object, &removed, &events);
 	spinlock_unlock_irqrestore(&capability_topology_lock, state);
@@ -584,12 +583,12 @@ bool cap_object_unpublish_if_unused(struct channel* endpoint, uint64_t object_id
 
 void cap_object_unregister_endpoint(struct channel* endpoint) {
 	cap_object_id_t ids[CAP_OBJECT_UNREGISTER_BATCH];
-	size_t          count;
+	size_t count;
 
 	if (endpoint == NULL) return;
 	do {
 		struct irq_state state = spinlock_lock_irqsave(&cap_object_table.lock);
-		count                  = 0u;
+		count = 0u;
 		for (size_t i = 0u; i < id_table_extent_locked(&cap_object_table) && count < CAP_OBJECT_UNREGISTER_BATCH; i++) {
 			struct cap_object* object = id_table_lookup_index_locked(&cap_object_table, i);
 			if (object == NULL || object->endpoint != endpoint) continue;
@@ -604,12 +603,12 @@ void cap_object_unregister_endpoint(struct channel* endpoint) {
 void cap_object_cleanup_for_process(process_id_t process) {
 	if (process == PROCESS_PID_INVALID) return;
 	for (;;) {
-		size_t cursor        = 0u;
-		bool   destroyed_any = false;
+		size_t cursor = 0u;
+		bool destroyed_any = false;
 
 		for (;;) {
 			struct cap_object* object = NULL;
-			struct irq_state   state  = spinlock_lock_irqsave(&cap_object_table.lock);
+			struct irq_state state = spinlock_lock_irqsave(&cap_object_table.lock);
 			for (; cursor < id_table_extent_locked(&cap_object_table); cursor++) {
 				struct cap_object* candidate = id_table_lookup_index_locked(&cap_object_table, cursor);
 				if (candidate == NULL || candidate->process_cleanup == NULL) continue;
@@ -621,8 +620,8 @@ void cap_object_cleanup_for_process(process_id_t process) {
 			spinlock_unlock_irqrestore(&cap_object_table.lock, state);
 			if (object == NULL) break;
 
-			cap_object_id_t id      = object->cap_object_id;
-			bool            destroy = object->process_cleanup(object->object_id, process);
+			cap_object_id_t id = object->cap_object_id;
+			bool destroy = object->process_cleanup(object->object_id, process);
 			cap_object_release(object);
 			if (destroy && cap_object_destroy_with_id(id)) destroyed_any = true;
 		}
@@ -630,19 +629,19 @@ void cap_object_cleanup_for_process(process_id_t process) {
 	}
 }
 
-static struct capability* capability_create_locked(cap_object_id_t cap_object_id, process_id_t target,
-                                                   cap_rights_t rights, struct capability* parent) {
+static struct capability* capability_create_locked(
+		cap_object_id_t cap_object_id, process_id_t target, cap_rights_t rights, struct capability* parent) {
 	struct capability* capability = malloc(sizeof(*capability));
 	if (capability == NULL) return NULL;
 
-	capability->cap_id          = CAP_ID_INVALID;
-	capability->cap_object_id   = cap_object_id;
-	capability->target          = target;
-	capability->rights          = rights;
-	capability->parent          = parent;
-	capability->first_child     = NULL;
-	capability->next_sibling    = NULL;
-	capability->removed         = true;
+	capability->cap_id = CAP_ID_INVALID;
+	capability->cap_object_id = cap_object_id;
+	capability->target = target;
+	capability->rights = rights;
+	capability->parent = parent;
+	capability->first_child = NULL;
+	capability->next_sibling = NULL;
+	capability->removed = true;
 	capability->reference_count = 1u;
 
 	return capability;
@@ -656,7 +655,7 @@ void cap_release(struct capability* capability) {
 
 static bool capability_retain_callback(void* value, void* context) {
 	struct capability* capability = value;
-	uint64_t           current;
+	uint64_t current;
 
 	(void)context;
 	if (__atomic_load_n(&capability->removed, __ATOMIC_ACQUIRE)) return false;
@@ -664,7 +663,7 @@ static bool capability_retain_callback(void* value, void* context) {
 	for (;;) {
 		if (current == 0u || current == UINT64_MAX) return false;
 		if (__atomic_compare_exchange_n(
-				&capability->reference_count, &current, current + 1u, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+					&capability->reference_count, &current, current + 1u, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
 			return true;
 		}
 	}
@@ -685,10 +684,10 @@ bool cap_is_removed(const struct capability* capability) {
 
 bool cap_remove_rights(struct capability* capability, cap_rights_t rights) {
 	struct irq_state state;
-	cap_rights_t     current;
+	cap_rights_t current;
 
 	if (capability == NULL || rights == 0u) return false;
-	state   = spinlock_lock_irqsave(&capability_topology_lock);
+	state = spinlock_lock_irqsave(&capability_topology_lock);
 	current = cap_rights(capability);
 	if (cap_is_removed(capability) || (rights & ~current) != 0u) {
 		spinlock_unlock_irqrestore(&capability_topology_lock, state);
@@ -699,30 +698,30 @@ bool cap_remove_rights(struct capability* capability, cap_rights_t rights) {
 	return true;
 }
 
-static cap_id_t capability_publish_locked(struct capability* capability, struct capability* parent,
-                                          struct process** out_target) {
-	id_table_id_t      id;
+static cap_id_t capability_publish_locked(
+		struct capability* capability, struct capability* parent, struct process** out_target) {
+	id_table_id_t id;
 	struct cap_object* object;
-	struct process*    target;
-	struct irq_state   target_state;
-	cap_id_t           result = CAP_ID_INVALID;
+	struct process* target;
+	struct irq_state target_state;
+	cap_id_t result = CAP_ID_INVALID;
 
 	if (out_target == NULL) return CAP_ID_INVALID;
 	*out_target = NULL;
 	if (capability == NULL || capability->cap_object_id == CAP_OBJECT_ID_INVALID ||
-	    capability->target == PROCESS_PID_INVALID)
+			capability->target == PROCESS_PID_INVALID)
 		return CAP_ID_INVALID;
 
 	target = process_acquire(capability->target);
 	if (target == NULL) return CAP_ID_INVALID;
-	*out_target  = target;
+	*out_target = target;
 	target_state = spinlock_lock_irqsave(&target->lock);
 	if (target->state != PROCESS_STATE_NEW && target->state != PROCESS_STATE_RUNNING) goto out;
 
 	capability->parent = parent;
-	object             = id_table_lookup(&cap_object_table, (id_table_id_t)capability->cap_object_id);
+	object = id_table_lookup(&cap_object_table, (id_table_id_t)capability->cap_object_id);
 	if (object == NULL || (parent != NULL && (!capability_is_published_locked(parent) ||
-	                                          (capability->rights & ~cap_rights(parent)) != 0u))) {
+													 (capability->rights & ~cap_rights(parent)) != 0u))) {
 		goto out;
 	}
 
@@ -740,13 +739,13 @@ out:
 	return result;
 }
 
-cap_id_t cap_create(cap_object_id_t cap_object_id, process_id_t target, cap_rights_t rights,
-                    struct capability* parent) {
-	struct irq_state   topology_state;
+cap_id_t cap_create(
+		cap_object_id_t cap_object_id, process_id_t target, cap_rights_t rights, struct capability* parent) {
+	struct irq_state topology_state;
 	struct capability* capability;
 	struct cap_object* object;
-	struct process*    target_process = NULL;
-	cap_id_t           result_id;
+	struct process* target_process = NULL;
+	cap_id_t result_id;
 
 	if (cap_object_id == CAP_OBJECT_ID_INVALID || target == PROCESS_PID_INVALID) return CAP_ID_INVALID;
 	object = cap_object_acquire(cap_object_id);
@@ -759,7 +758,7 @@ cap_id_t cap_create(cap_object_id_t cap_object_id, process_id_t target, cap_righ
 	}
 
 	topology_state = spinlock_lock_irqsave(&capability_topology_lock);
-	result_id      = capability_publish_locked(capability, parent, &target_process);
+	result_id = capability_publish_locked(capability, parent, &target_process);
 	spinlock_unlock_irqrestore(&capability_topology_lock, topology_state);
 	process_release(target_process);
 
@@ -769,13 +768,13 @@ cap_id_t cap_create(cap_object_id_t cap_object_id, process_id_t target, cap_righ
 }
 
 cap_id_t cap_delegate_create(struct capability* source, process_id_t target, cap_rights_t rights, bool peer) {
-	struct irq_state   topology_state;
+	struct irq_state topology_state;
 	struct capability* capability;
 	struct capability* parent;
 	struct cap_object* object;
-	cap_rights_t       source_rights;
-	struct process*    target_process = NULL;
-	cap_id_t           result_id      = CAP_ID_INVALID;
+	cap_rights_t source_rights;
+	struct process* target_process = NULL;
+	cap_id_t result_id = CAP_ID_INVALID;
 
 	if (source == NULL || target == PROCESS_PID_INVALID) return CAP_ID_INVALID;
 
@@ -792,11 +791,11 @@ cap_id_t cap_delegate_create(struct capability* source, process_id_t target, cap
 
 	source_rights = cap_rights(source);
 	if ((rights & ~source_rights) != 0u || (source_rights & CAP_DELEGATE) == 0u ||
-	    (peer && (source_rights & CAP_DELEGATE_PEER) == 0u)) {
+			(peer && (source_rights & CAP_DELEGATE_PEER) == 0u)) {
 		goto out;
 	}
 
-	parent    = peer ? source->parent : source;
+	parent = peer ? source->parent : source;
 	result_id = capability_publish_locked(capability, parent, &target_process);
 
 out:
@@ -813,24 +812,24 @@ struct capability* cap_lookup(cap_id_t id) {
 }
 
 bool cap_destroy(struct capability* capability) {
-	struct irq_state       topology_state;
-	bool                   removed;
+	struct irq_state topology_state;
+	bool removed;
 	struct cap_event_batch events = {0};
 
 	if (capability == NULL) return false;
 
 	topology_state = spinlock_lock_irqsave(&capability_topology_lock);
-	removed        = capability_remove_subtree_locked(capability, NULL, &events);
+	removed = capability_remove_subtree_locked(capability, NULL, &events);
 	spinlock_unlock_irqrestore(&capability_topology_lock, topology_state);
 	cap_object_dispatch_events(&events);
 	return removed;
 }
 
 bool cap_revoke_direct_child(process_id_t delegator, struct capability* capability) {
-	struct capability*     parent;
-	struct irq_state       topology_state;
-	struct cap_event_batch events  = {0};
-	bool                   removed = false;
+	struct capability* parent;
+	struct irq_state topology_state;
+	struct cap_event_batch events = {0};
+	bool removed = false;
 
 	if (delegator == PROCESS_PID_INVALID || capability == NULL) return false;
 
@@ -838,7 +837,7 @@ bool cap_revoke_direct_child(process_id_t delegator, struct capability* capabili
 	if (!capability_is_published_locked(capability)) goto out;
 	parent = capability->parent;
 	if (parent == NULL || !capability_is_published_locked(parent) || parent->target != delegator ||
-	    (cap_rights(parent) & CAP_DELEGATE) == 0u)
+			(cap_rights(parent) & CAP_DELEGATE) == 0u)
 		goto out;
 	removed = capability_remove_subtree_locked(capability, NULL, &events);
 
@@ -850,7 +849,7 @@ out:
 
 bool cap_destroy_by_id(cap_id_t id) {
 	struct capability* capability;
-	bool               destroyed;
+	bool destroyed;
 
 	if (id == CAP_ID_INVALID) return false;
 	capability = cap_acquire(id);
@@ -861,29 +860,29 @@ bool cap_destroy_by_id(cap_id_t id) {
 }
 
 bool cap_drop(struct capability* capability) {
-	struct irq_state       topology_state;
-	bool                   dropped;
+	struct irq_state topology_state;
+	bool dropped;
 	struct cap_event_batch events = {0};
 
 	if (capability == NULL) return false;
 
 	topology_state = spinlock_lock_irqsave(&capability_topology_lock);
-	dropped        = capability_drop_locked(capability, &events);
+	dropped = capability_drop_locked(capability, &events);
 	spinlock_unlock_irqrestore(&capability_topology_lock, topology_state);
 	cap_object_dispatch_events(&events);
 	return dropped;
 }
 
 void cap_drop_for_process(process_id_t target) {
-	struct irq_state       topology_state;
+	struct irq_state topology_state;
 	struct cap_event_batch events = {0};
 
 	if (target == PROCESS_PID_INVALID) return;
 
 	topology_state = spinlock_lock_irqsave(&capability_topology_lock);
 	for (;;) {
-		struct capability* candidate   = NULL;
-		struct irq_state   table_state = spinlock_lock_irqsave(&capability_table.lock);
+		struct capability* candidate = NULL;
+		struct irq_state table_state = spinlock_lock_irqsave(&capability_table.lock);
 
 		for (size_t i = 0u; i < id_table_extent_locked(&capability_table); i++) {
 			struct capability* cap = id_table_lookup_index_locked(&capability_table, i);
@@ -909,10 +908,10 @@ bool cap_object_alive(struct capability* cap) {
 }
 
 enum cap_result cap_is_authorized(process_id_t caller, struct capability* cap) {
-	struct irq_state   topology_state;
+	struct irq_state topology_state;
 	struct cap_object* object;
 	struct capability* parent;
-	enum cap_result    result = CAP_NOT_AUTHORIZED;
+	enum cap_result result = CAP_NOT_AUTHORIZED;
 
 	if (cap == NULL || caller == PROCESS_PID_INVALID) return CAP_INVALID_ARGUMENTS;
 
@@ -967,18 +966,18 @@ static enum cap_result cap_is_authorized_locked(process_id_t caller, struct capa
 }
 
 enum cap_result cap_object_acquire_for_use(process_id_t caller, cap_id_t capability_id, cap_rights_t required_rights,
-                                           struct cap_object** out_object, cap_rights_t* out_rights) {
+		struct cap_object** out_object, cap_rights_t* out_rights) {
 	struct capability* capability;
 	struct cap_object* object;
-	cap_rights_t       rights;
-	enum cap_result    result;
-	struct irq_state   state;
+	cap_rights_t rights;
+	enum cap_result result;
+	struct irq_state state;
 
 	if (capability_id == CAP_ID_INVALID || caller == PROCESS_PID_INVALID || out_object == NULL)
 		return CAP_INVALID_ARGUMENTS;
 	*out_object = NULL;
 	if (out_rights != NULL) *out_rights = 0u;
-	state      = spinlock_lock_irqsave(&capability_topology_lock);
+	state = spinlock_lock_irqsave(&capability_topology_lock);
 	capability = id_table_lookup(&capability_table, (id_table_id_t)capability_id);
 	if (capability == NULL) {
 		result = CAP_NOT_FOUND;
@@ -1004,16 +1003,16 @@ out:
 	return result;
 }
 
-enum cap_result cap_object_begin_call(process_id_t caller, struct capability* capability,
-                                      struct cap_object** out_object, cap_rights_t* out_rights) {
+enum cap_result cap_object_begin_call(
+		process_id_t caller, struct capability* capability, struct cap_object** out_object, cap_rights_t* out_rights) {
 	struct cap_object* object;
-	enum cap_result    result;
-	struct irq_state   state;
+	enum cap_result result;
+	struct irq_state state;
 
 	if (out_object == NULL) return CAP_INVALID_ARGUMENTS;
 	*out_object = NULL;
 	if (out_rights != NULL) *out_rights = 0u;
-	state  = spinlock_lock_irqsave(&capability_topology_lock);
+	state = spinlock_lock_irqsave(&capability_topology_lock);
 	result = cap_is_authorized_locked(caller, capability);
 	if (result != CAP_OK) goto out;
 	if ((cap_rights(capability) & CAP_CALL) == 0u) {
@@ -1036,7 +1035,7 @@ out:
 
 void cap_object_end_call(struct cap_object* object) {
 	struct cap_event_batch events = {0};
-	struct irq_state       state;
+	struct irq_state state;
 
 	if (object == NULL) return;
 	state = spinlock_lock_irqsave(&capability_topology_lock);
@@ -1049,7 +1048,7 @@ void cap_object_end_call(struct cap_object* object) {
 }
 
 bool cap_object_prepare_zero_grants_event(struct cap_object* object, uint64_t* out_object_id) {
-	bool             prepared = false;
+	bool prepared = false;
 	struct irq_state state;
 
 	if (object == NULL) return false;
@@ -1067,12 +1066,12 @@ bool cap_object_prepare_zero_grants_event(struct cap_object* object, uint64_t* o
 }
 
 bool cap_object_commit_zero_grants_event(struct cap_object* object) {
-	bool             committed;
+	bool committed;
 	struct irq_state state;
 	if (object == NULL) return false;
 	state = spinlock_lock_irqsave(&capability_topology_lock);
 	if (!object->event_pending) hcf();
-	committed             = cap_object_zero_grants_eligible_locked(object);
+	committed = cap_object_zero_grants_eligible_locked(object);
 	object->event_pending = false;
 	spinlock_unlock_irqrestore(&capability_topology_lock, state);
 	cap_object_release(object);
@@ -1080,7 +1079,7 @@ bool cap_object_commit_zero_grants_event(struct cap_object* object) {
 }
 
 void cap_object_rollback_zero_grants_event(struct cap_object* object) {
-	struct channel*  endpoint = NULL;
+	struct channel* endpoint = NULL;
 	struct irq_state state;
 	if (object == NULL) return;
 	state = spinlock_lock_irqsave(&capability_topology_lock);
@@ -1089,7 +1088,7 @@ void cap_object_rollback_zero_grants_event(struct cap_object* object) {
 	else object->event_pending = false;
 	spinlock_unlock_irqrestore(&capability_topology_lock, state);
 	if (endpoint != NULL && channel_enqueue_cap_event(endpoint, object)) return;
-	state                 = spinlock_lock_irqsave(&capability_topology_lock);
+	state = spinlock_lock_irqsave(&capability_topology_lock);
 	object->event_pending = false;
 	spinlock_unlock_irqrestore(&capability_topology_lock, state);
 	cap_object_release(object);
@@ -1098,14 +1097,14 @@ void cap_object_rollback_zero_grants_event(struct cap_object* object) {
 void cap_object_discard_event(struct cap_object* object) {
 	struct irq_state state;
 	if (object == NULL) return;
-	state                 = spinlock_lock_irqsave(&capability_topology_lock);
+	state = spinlock_lock_irqsave(&capability_topology_lock);
 	object->event_pending = false;
 	spinlock_unlock_irqrestore(&capability_topology_lock, state);
 	cap_object_release(object);
 }
 
 size_t cap_object_grant_count(struct cap_object* object) {
-	size_t           count = 0u;
+	size_t count = 0u;
 	struct irq_state state;
 	if (object == NULL) return 0u;
 	state = spinlock_lock_irqsave(&capability_topology_lock);
@@ -1115,7 +1114,7 @@ size_t cap_object_grant_count(struct cap_object* object) {
 }
 
 size_t cap_object_active_call_count(struct cap_object* object) {
-	size_t           count = 0u;
+	size_t count = 0u;
 	struct irq_state state;
 	if (object == NULL) return 0u;
 	state = spinlock_lock_irqsave(&capability_topology_lock);
@@ -1126,19 +1125,19 @@ size_t cap_object_active_call_count(struct cap_object* object) {
 
 enum cap_result cap_is_valid(struct capability* cap) {
 	struct irq_state topology_state;
-	enum cap_result  result;
+	enum cap_result result;
 
 	if (cap == NULL) return CAP_INVALID_ARGUMENTS;
 
 	topology_state = spinlock_lock_irqsave(&capability_topology_lock);
-	result         = cap_is_removed(cap) ? CAP_NOT_FOUND : CAP_OK;
+	result = cap_is_removed(cap) ? CAP_NOT_FOUND : CAP_OK;
 	spinlock_unlock_irqrestore(&capability_topology_lock, topology_state);
 	return result;
 }
 
 void capability_init(void) {
 	spinlock_init_class(
-		&capability_topology_lock, "capability_topology", SPINLOCK_ORDER_CAPABILITY, SPINLOCK_FLAG_IRQSAVE);
+			&capability_topology_lock, "capability_topology", SPINLOCK_ORDER_CAPABILITY, SPINLOCK_FLAG_IRQSAVE);
 	id_table_init(&cap_object_table, "cap_object_table", CAP_ID_TABLE_MIN, CAP_ID_TABLE_MAX);
 	id_table_init(&capability_table, "capability_table", CAP_ID_TABLE_MIN, CAP_ID_TABLE_MAX);
 	cap_pending_call_init();

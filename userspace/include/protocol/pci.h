@@ -1,8 +1,9 @@
 #pragma once
 
-#include <base/cap.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+#include <base/cap.h>
 
 #define PCI_CONTROL_RESOURCE "pci_control"
 #define PCI_CONTROL_COMMAND_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_WRITE))
@@ -18,8 +19,8 @@ struct pci_control_request_header {
 
 struct pci_control_set_dma_enabled_request {
 	struct pci_control_request_header header;
-	uint8_t                           enabled;
-	uint8_t                           reserved[7];
+	uint8_t enabled;
+	uint8_t reserved[7];
 };
 
 struct pci_control_set_dma_enabled_response {

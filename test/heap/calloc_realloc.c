@@ -5,8 +5,8 @@
 
 Test(heap, calloc_zeroes_and_realloc_preserves_contents) {
 	_Alignas(4096) static uint8_t arena[KiB(64)];
-	uint8_t*                      data;
-	uint8_t*                      grown;
+	uint8_t* data;
+	uint8_t* grown;
 
 	init_test_heap(arena, sizeof(arena));
 
@@ -26,11 +26,11 @@ Test(heap, calloc_zeroes_and_realloc_preserves_contents) {
 
 Test(heap, failed_realloc_preserves_original_allocation_and_contents) {
 	_Alignas(4096) static uint8_t arena[KiB(64)];
-	uint8_t*                      ptr;
-	void*                         failed;
-	size_t                        before_total;
-	size_t                        before_free;
-	volatile size_t               impossible_size = SIZE_MAX - 64u;
+	uint8_t* ptr;
+	void* failed;
+	size_t before_total;
+	size_t before_free;
+	volatile size_t impossible_size = SIZE_MAX - 64u;
 
 	init_test_heap(arena, sizeof(arena));
 	ptr = malloc(128u);
@@ -38,8 +38,8 @@ Test(heap, failed_realloc_preserves_original_allocation_and_contents) {
 	for (size_t i = 0u; i < 128u; i++) ptr[i] = (uint8_t)(i ^ 0x5au);
 
 	before_total = heap_total_bytes();
-	before_free  = heap_free_bytes();
-	failed       = realloc(ptr, impossible_size);
+	before_free = heap_free_bytes();
+	failed = realloc(ptr, impossible_size);
 
 	cr_assert_null(failed, "oversized realloc must fail");
 	for (size_t i = 0u; i < 128u; i++) {
@@ -50,19 +50,19 @@ Test(heap, failed_realloc_preserves_original_allocation_and_contents) {
 
 	free(ptr);
 	cr_assert_eq(heap_free_bytes(),
-	             heap_total_bytes(),
-	             "original allocation must remain normally releasable after realloc failure");
+			heap_total_bytes(),
+			"original allocation must remain normally releasable after realloc failure");
 }
 
 Test(heap, calloc_overflow_is_side_effect_free) {
 	_Alignas(4096) static uint8_t arena[KiB(64)];
-	size_t                        before_total;
-	size_t                        before_free;
-	volatile size_t               overflowing_count = SIZE_MAX;
+	size_t before_total;
+	size_t before_free;
+	volatile size_t overflowing_count = SIZE_MAX;
 
 	init_test_heap(arena, sizeof(arena));
 	before_total = heap_total_bytes();
-	before_free  = heap_free_bytes();
+	before_free = heap_free_bytes();
 
 	cr_assert_null(calloc(overflowing_count, 2u), "calloc multiplication overflow must fail");
 	cr_assert_eq(heap_total_bytes(), before_total, "calloc overflow must not grow the heap");

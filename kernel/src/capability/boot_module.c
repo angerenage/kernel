@@ -1,5 +1,11 @@
 #include "boot_module.h"
 
+#include <libc/stdlib.h>
+#include <libc/string.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
 #include <base/cap.h>
 #include <base/math.h>
 #include <base/module.h>
@@ -12,42 +18,37 @@
 #include <core/process.h>
 #include <core/spinlock.h>
 #include <kernel/capability.h>
-#include <libc/stdlib.h>
-#include <libc/string.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
 
 #include "memory.h"
 
 static cap_object_id_t* boot_module_object_ids;
-static struct memory**  boot_module_memories;
-static size_t           boot_module_object_count;
-static cap_object_id_t  boot_module_provider_object_id = CAP_OBJECT_ID_INVALID;
-static struct spinlock  boot_module_memory_lock =
-	SPINLOCK_INIT_CLASS("boot_module_memory", SPINLOCK_ORDER_VADDR, SPINLOCK_FLAG_IRQSAVE);
+static struct memory** boot_module_memories;
+static size_t boot_module_object_count;
+static cap_object_id_t boot_module_provider_object_id = CAP_OBJECT_ID_INVALID;
+static struct spinlock boot_module_memory_lock =
+		SPINLOCK_INIT_CLASS("boot_module_memory", SPINLOCK_ORDER_VADDR, SPINLOCK_FLAG_IRQSAVE);
 
 struct boot_module_mapping_layout {
 	uintptr_t physical_base;
-	size_t    data_offset;
-	size_t    mapping_size;
+	size_t data_offset;
+	size_t mapping_size;
 };
 
-static bool boot_module_mapping_layout(const struct boot_module*          module,
-                                       struct boot_module_mapping_layout* out_layout) {
+static bool boot_module_mapping_layout(
+		const struct boot_module* module, struct boot_module_mapping_layout* out_layout) {
 	uintptr_t module_address;
 	uintptr_t physical_address;
-	size_t    mapped_size;
-	size_t    granule = address_space_minimum_mapping_size(address_space_kernel());
+	size_t mapped_size;
+	size_t granule = address_space_minimum_mapping_size(address_space_kernel());
 
 	if (module == NULL || out_layout == NULL || granule == 0u) return false;
 	module_address = (uintptr_t)module->address;
 	if (module_address < mm_info.direct_map_offset) return false;
-	physical_address          = module_address - mm_info.direct_map_offset;
+	physical_address = module_address - mm_info.direct_map_offset;
 	out_layout->physical_base = physical_address & ~(uintptr_t)(granule - 1u);
-	out_layout->data_offset   = (size_t)(physical_address - out_layout->physical_base);
+	out_layout->data_offset = (size_t)(physical_address - out_layout->physical_base);
 	if (add_overflow_size(out_layout->data_offset, module->size, &mapped_size) ||
-	    !align_up_size(mapped_size, granule, &mapped_size)) {
+			!align_up_size(mapped_size, granule, &mapped_size)) {
 		return false;
 	}
 	out_layout->mapping_size = mapped_size;
@@ -59,15 +60,15 @@ static cap_object_id_t* boot_module_id_slot(size_t module_index) {
 		size_t count = boot_module_count();
 		if (count == 0u || module_index >= count) return NULL;
 
-		cap_object_id_t* ids      = calloc(count, sizeof(*boot_module_object_ids));
-		struct memory**  memories = calloc(count, sizeof(*boot_module_memories));
+		cap_object_id_t* ids = calloc(count, sizeof(*boot_module_object_ids));
+		struct memory** memories = calloc(count, sizeof(*boot_module_memories));
 		if (ids == NULL || memories == NULL) {
 			free(ids);
 			free(memories);
 			return NULL;
 		}
-		boot_module_object_ids   = ids;
-		boot_module_memories     = memories;
+		boot_module_object_ids = ids;
+		boot_module_memories = memories;
 		boot_module_object_count = count;
 	}
 
@@ -75,11 +76,11 @@ static cap_object_id_t* boot_module_id_slot(size_t module_index) {
 	return &boot_module_object_ids[module_index];
 }
 
-static syscall_result_t boot_module_info_handler(const struct cap_request* req, module_id_t id,
-                                                 const struct boot_module* module) {
+static syscall_result_t boot_module_info_handler(
+		const struct cap_request* req, module_id_t id, const struct boot_module* module) {
 	struct module_info_response response = {
-		.id         = id,
-		.size       = module->size,
+		.id = id,
+		.size = module->size,
 		.media_type = module->media_type,
 	};
 
@@ -92,15 +93,15 @@ static syscall_result_t boot_module_info_handler(const struct cap_request* req, 
 	return cap_kernel_write_response(req, &response, sizeof(response));
 }
 
-static syscall_result_t boot_module_map_handler(const struct cap_request* req, size_t module_index,
-                                                const struct boot_module* module) {
+static syscall_result_t boot_module_map_handler(
+		const struct cap_request* req, size_t module_index, const struct boot_module* module) {
 	struct boot_module_mapping_layout layout;
-	struct module_map_response        response = {0};
-	struct process*                   caller;
-	struct address_space*             space;
-	struct mapping*                   mapping = NULL;
-	struct memory*                    memory  = NULL;
-	syscall_result_t                  result;
+	struct module_map_response response = {0};
+	struct process* caller;
+	struct address_space* space;
+	struct mapping* mapping = NULL;
+	struct memory* memory = NULL;
+	syscall_result_t result;
 
 	if (req->request_size < sizeof(struct module_map_request) || !cap_kernel_response_fits(req, sizeof(response))) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -116,34 +117,37 @@ static syscall_result_t boot_module_map_handler(const struct cap_request* req, s
 		struct irq_state state = spinlock_lock_irqsave(&boot_module_memory_lock);
 		if (boot_module_memories != NULL && boot_module_memories[module_index] == NULL)
 			(void)memory_create_physical(
-				&(const struct memory_physical_request){
-					.physical_address        = layout.physical_base,
-					.size                    = layout.mapping_size,
-					.memory_type             = MEMORY_TYPE_NORMAL,
-					.external_cpu_accessible = true,
-				},
-				&boot_module_memories[module_index]);
+					&(const struct memory_physical_request){
+						.physical_address = layout.physical_base,
+						.size = layout.mapping_size,
+						.memory_type = MEMORY_TYPE_NORMAL,
+						.external_cpu_accessible = true,
+					},
+					&boot_module_memories[module_index]);
 		if (boot_module_memories != NULL && boot_module_memories[module_index] != NULL &&
-		    memory_retain(boot_module_memories[module_index]))
+				memory_retain(boot_module_memories[module_index]))
 			memory = boot_module_memories[module_index];
 		spinlock_unlock_irqrestore(&boot_module_memory_lock, state);
 	}
 	if (memory == NULL || !address_space_map(space,
-	                                         &(const struct address_space_mapping_request){
-												 .memory = memory,
-												 .access = MEMORY_ACCESS_READ,
-											 },
-	                                         &mapping)) {
+								  &(const struct address_space_mapping_request){
+									  .memory = memory,
+									  .access = MEMORY_ACCESS_READ,
+								  },
+								  &mapping)) {
 		memory_release(memory);
 		process_release(caller);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 	memory_release(memory);
-	response.mapping_cap = kernel_mapping_publish(
-		caller, req->caller, mapping, CAP_CALL | CAP_READ | CAP_MAP | CAP_DESTROY | CAP_DELEGATE, MEMORY_ACCESS_READ);
-	response.address      = mapping_address(mapping);
+	response.mapping_cap = kernel_mapping_publish(caller,
+			req->caller,
+			mapping,
+			CAP_CALL | CAP_READ | CAP_MAP | CAP_DESTROY | CAP_DELEGATE,
+			MEMORY_ACCESS_READ);
+	response.address = mapping_address(mapping);
 	response.mapping_size = mapping_size(mapping);
-	response.data_offset  = layout.data_offset;
+	response.data_offset = layout.data_offset;
 	if (response.mapping_cap == CAP_ID_INVALID) {
 		(void)address_space_unmap(space, mapping);
 		mapping_release(mapping);
@@ -166,7 +170,7 @@ static syscall_result_t boot_module_read_handler(const struct cap_request* req, 
 	memcpy(&request, req->request, sizeof(request));
 	if (request.size == 0u && request.offset <= module->size) return syscall_result_ok(0u);
 	if (request.size > CAP_MAX_RESPONSE_SIZE || request.offset > module->size ||
-	    request.size > module->size - request.offset || !cap_kernel_response_fits(req, request.size)) {
+			request.size > module->size - request.offset || !cap_kernel_response_fits(req, request.size)) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 	return cap_kernel_write_response(req, (const uint8_t*)module->address + (size_t)request.offset, request.size);
@@ -174,18 +178,19 @@ static syscall_result_t boot_module_read_handler(const struct cap_request* req, 
 
 static syscall_result_t boot_module_resolve_handler(const struct cap_request* req) {
 	struct module_provider_resolve_request request;
-	const char*                            name;
-	size_t                                 expected_size;
-	size_t                                 count;
+	const char* name;
+	size_t expected_size;
+	size_t count;
 
 	if ((req->rights & CAP_READ) != CAP_READ || req->request == NULL || req->request_size < sizeof(request) ||
-	    !cap_kernel_response_fits(req, sizeof(struct module_provider_resolve_response))) {
+			!cap_kernel_response_fits(req, sizeof(struct module_provider_resolve_response))) {
 		return syscall_result_error(
-			(req->rights & CAP_READ) != CAP_READ ? SYSCALL_STATUS_DENIED : SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+				(req->rights & CAP_READ) != CAP_READ ? SYSCALL_STATUS_DENIED : SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 	memcpy(&request, req->request, sizeof(request));
 	if (request.header.op != MODULE_PROVIDER_OP_RESOLVE || request.name_size == 0u ||
-	    add_overflow_size(sizeof(request), request.name_size, &expected_size) || expected_size != req->request_size) {
+			add_overflow_size(sizeof(request), request.name_size, &expected_size) ||
+			expected_size != req->request_size) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 	name = (const char*)req->request + sizeof(request);
@@ -193,18 +198,18 @@ static syscall_result_t boot_module_resolve_handler(const struct cap_request* re
 
 	count = boot_module_count();
 	for (size_t i = 0u; i < count; i++) {
-		const struct boot_module*               module = boot_module_get(i);
+		const struct boot_module* module = boot_module_get(i);
 		struct module_provider_resolve_response response;
-		syscall_result_t                        result;
+		syscall_result_t result;
 
 		if (module == NULL || !((module->name != NULL && strcmp(module->name, name) == 0) ||
-		                        (module->path != NULL && strcmp(module->path, name) == 0))) {
+									  (module->path != NULL && strcmp(module->path, name) == 0))) {
 			continue;
 		}
 		response = (struct module_provider_resolve_response){
-			.id         = (module_id_t)i + 1u,
-			.cap        = kernel_capability_boot_module_grant(i, req->caller),
-			.size       = module->size,
+			.id = (module_id_t)i + 1u,
+			.cap = kernel_capability_boot_module_grant(i, req->caller),
+			.size = module->size,
 			.media_type = module->media_type,
 		};
 		if (response.cap == CAP_ID_INVALID) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
@@ -218,14 +223,14 @@ static syscall_result_t boot_module_resolve_handler(const struct cap_request* re
 }
 
 static syscall_result_t boot_module_enumerate_handler(const struct cap_request* req) {
-	struct module_provider_enumerate_request   request;
+	struct module_provider_enumerate_request request;
 	struct module_provider_enumerate_response* response;
-	size_t                                     maximum_count;
-	size_t                                     offset;
-	size_t                                     returned;
-	size_t                                     response_size;
-	size_t                                     total;
-	syscall_result_t                           result;
+	size_t maximum_count;
+	size_t offset;
+	size_t returned;
+	size_t response_size;
+	size_t total;
+	syscall_result_t result;
 
 	if ((req->rights & CAP_READ) != CAP_READ) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (req->request == NULL || req->request_size != sizeof(request) || req->response_capacity < sizeof(*response))
@@ -233,17 +238,17 @@ static syscall_result_t boot_module_enumerate_handler(const struct cap_request* 
 	memcpy(&request, req->request, sizeof(request));
 	maximum_count = (CAP_MAX_RESPONSE_SIZE - sizeof(*response)) / sizeof(struct module_provider_entry);
 	if (request.header.op != MODULE_PROVIDER_OP_ENUMERATE || request.reserved != 0u || request.count > maximum_count ||
-	    request.count > (req->response_capacity - sizeof(*response)) / sizeof(struct module_provider_entry))
+			request.count > (req->response_capacity - sizeof(*response)) / sizeof(struct module_provider_entry))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 
-	total    = boot_module_count();
-	offset   = request.offset > total ? total : (size_t)request.offset;
+	total = boot_module_count();
+	offset = request.offset > total ? total : (size_t)request.offset;
 	returned = total - offset;
 	if (returned > (size_t)request.count) returned = (size_t)request.count;
 	response_size = sizeof(*response) + returned * sizeof(struct module_provider_entry);
-	response      = calloc(1u, response_size);
+	response = calloc(1u, response_size);
 	if (response == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
-	response->total    = total;
+	response->total = total;
 	response->returned = returned;
 	for (size_t i = 0u; i < returned; i++) {
 		const struct boot_module* module = boot_module_get(offset + i);
@@ -251,8 +256,8 @@ static syscall_result_t boot_module_enumerate_handler(const struct cap_request* 
 			free(response);
 			return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 		}
-		response->entries[i].id         = (module_id_t)(offset + i) + 1u;
-		response->entries[i].size       = module->size;
+		response->entries[i].id = (module_id_t)(offset + i) + 1u;
+		response->entries[i].size = module->size;
 		response->entries[i].media_type = module->media_type;
 		strlcpy(response->entries[i].name, module->name != NULL ? module->name : "", sizeof(response->entries[i].name));
 		strlcpy(response->entries[i].path, module->path != NULL ? module->path : "", sizeof(response->entries[i].path));
@@ -280,7 +285,7 @@ static syscall_result_t boot_module_provider_handler(const struct cap_request* r
 }
 
 static syscall_result_t boot_module_handler(const struct cap_request* req) {
-	uint32_t    operation;
+	uint32_t operation;
 	module_id_t id = (module_id_t)req->object_id;
 
 	if (id == MODULE_ID_INVALID || req->request_size < sizeof(operation)) {
@@ -305,23 +310,22 @@ static syscall_result_t boot_module_handler(const struct cap_request* req) {
 	}
 }
 
-syscall_result_t kernel_capability_boot_module_get(cap_id_t module_cap, process_id_t caller,
-                                                   cap_rights_t               required_rights,
-                                                   const struct boot_module** out_module) {
+syscall_result_t kernel_capability_boot_module_get(
+		cap_id_t module_cap, process_id_t caller, cap_rights_t required_rights, const struct boot_module** out_module) {
 	struct cap_object* object;
-	enum cap_result    result;
-	module_id_t        id;
+	enum cap_result result;
+	module_id_t id;
 
 	if (module_cap == CAP_ID_INVALID || caller == PROCESS_PID_INVALID || out_module == NULL) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 	*out_module = NULL;
-	result      = cap_object_acquire_for_use(caller, module_cap, required_rights, &object, NULL);
+	result = cap_object_acquire_for_use(caller, module_cap, required_rights, &object, NULL);
 	if (result != CAP_OK)
 		return syscall_result_error(result == CAP_NOT_AUTHORIZED || result == CAP_RIGHTS_EXCEEDED
-										? SYSCALL_STATUS_DENIED
-										: SYSCALL_STATUS_BAD_ARGUMENT,
-		                            0u);
+											? SYSCALL_STATUS_DENIED
+											: SYSCALL_STATUS_BAD_ARGUMENT,
+				0u);
 	if (object == NULL || object->handler != boot_module_handler) {
 		cap_object_release(object);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -346,9 +350,9 @@ cap_id_t kernel_capability_boot_module_provider_grant(process_id_t recipient) {
 
 cap_id_t kernel_capability_boot_module_grant(size_t module_index, process_id_t recipient) {
 	cap_object_id_t* slot;
-	cap_object_id_t  object_id;
-	cap_id_t         cap_id;
-	bool             object_created = false;
+	cap_object_id_t object_id;
+	cap_id_t cap_id;
+	bool object_created = false;
 
 	slot = boot_module_id_slot(module_index);
 	if (slot == NULL) return CAP_ID_INVALID;

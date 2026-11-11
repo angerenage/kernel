@@ -1,18 +1,19 @@
 #pragma once
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #include <base/cap.h>
 #include <base/signal.h>
 #include <base/syscall.h>
 #include <base/upcall.h>
-#include <stdbool.h>
-#include <stdint.h>
 
 /* Create a Signal capability with full synchronous rights. */
 syscall_status_t signal_create(cap_id_t* out_cap);
 
 /* Publish a payload with the requested userspace delivery behavior. */
 syscall_status_t signal_send(cap_id_t cap, uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint32_t flags,
-                             struct signal_send_response* out_response);
+		struct signal_send_response* out_response);
 
 /* Read the remembered message without creating or advancing a synchronous receiver. */
 syscall_status_t signal_read(cap_id_t cap, struct signal_message* out_message, bool* out_has_value);

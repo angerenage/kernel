@@ -1,8 +1,10 @@
 #include "port.h"
 
-#include <base/memory.h>
 #include <stdint.h>
 #include <stdio.h>
+
+#include <base/memory.h>
+
 #include <system/time.h>
 
 #include "registers.h"
@@ -36,20 +38,20 @@ bool ahci_port_stop(struct ahci_port* port) {
 }
 
 bool ahci_port_initialize(struct ahci_port* port, volatile struct ahci_port_registers* registers, uint32_t index,
-                          enum ahci_device_kind kind, bool address_64bit, const struct ahci_dma_context* dma) {
+		enum ahci_device_kind kind, bool address_64bit, const struct ahci_dma_context* dma) {
 	uintptr_t command_list_address;
 	uintptr_t received_fis_address;
 
 	if (port == NULL || registers == NULL || dma == NULL) return false;
 	*port = (struct ahci_port){
-		.registers     = registers,
+		.registers = registers,
 		.transport_cap = CAP_ID_INVALID,
-		.object_id     = (uint64_t)index + 1u,
-		.index         = index,
-		.kind          = kind,
-		.command_dma   = {.memory_cap         = CAP_ID_INVALID,
-		                  .cpu_mapping_cap    = CAP_ID_INVALID,
-		                  .device_mapping_cap = CAP_ID_INVALID},
+		.object_id = (uint64_t)index + 1u,
+		.index = index,
+		.kind = kind,
+		.command_dma = {
+			.memory_cap = CAP_ID_INVALID, .cpu_mapping_cap = CAP_ID_INVALID, .device_mapping_cap = CAP_ID_INVALID
+		},
 	};
 	if (!ahci_port_stop(port)) {
 		fprintf(stderr, "ahci: port %u command engine did not stop during initialization\n", index);
@@ -57,32 +59,32 @@ bool ahci_port_initialize(struct ahci_port* port, volatile struct ahci_port_regi
 	}
 	if (registers->command_issue != 0u || registers->sata_active != 0u) {
 		fprintf(stderr,
-		        "ahci: port %u retained active commands (ci=%08x sact=%08x)\n",
-		        index,
-		        registers->command_issue,
-		        registers->sata_active);
+				"ahci: port %u retained active commands (ci=%08x sact=%08x)\n",
+				index,
+				registers->command_issue,
+				registers->sata_active);
 		return false;
 	}
 	if (!ahci_dma_buffer_allocate(
-			dma, AHCI_COMMAND_DMA_SIZE, MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE, &port->command_dma)) {
+				dma, AHCI_COMMAND_DMA_SIZE, MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE, &port->command_dma)) {
 		fprintf(stderr, "ahci: port %u could not allocate command DMA memory\n", index);
 		return false;
 	}
 	if (!address_64bit && (port->command_dma.device_address > UINT32_MAX ||
-	                       port->command_dma.size - 1u > UINT32_MAX - port->command_dma.device_address)) {
+								  port->command_dma.size - 1u > UINT32_MAX - port->command_dma.device_address)) {
 		fprintf(stderr, "ahci: port %u command memory exceeds the controller address width\n", index);
 		ahci_dma_buffer_release(&port->command_dma);
 		return false;
 	}
-	command_list_address              = port->command_dma.device_address + AHCI_COMMAND_LIST_OFFSET;
-	received_fis_address              = port->command_dma.device_address + AHCI_RECEIVED_FIS_OFFSET;
-	registers->command_list_base_low  = address_low(command_list_address);
+	command_list_address = port->command_dma.device_address + AHCI_COMMAND_LIST_OFFSET;
+	received_fis_address = port->command_dma.device_address + AHCI_RECEIVED_FIS_OFFSET;
+	registers->command_list_base_low = address_low(command_list_address);
 	registers->command_list_base_high = address_high(command_list_address);
-	registers->fis_base_low           = address_low(received_fis_address);
-	registers->fis_base_high          = address_high(received_fis_address);
-	registers->interrupt_enable       = 0u;
-	registers->interrupt_status       = UINT32_MAX;
-	registers->sata_error             = UINT32_MAX;
+	registers->fis_base_low = address_low(received_fis_address);
+	registers->fis_base_high = address_high(received_fis_address);
+	registers->interrupt_enable = 0u;
+	registers->interrupt_status = UINT32_MAX;
+	registers->sata_error = UINT32_MAX;
 	if (kind == AHCI_DEVICE_SATAPI) registers->command |= AHCI_PORT_CMD_ATAPI;
 	else registers->command &= ~AHCI_PORT_CMD_ATAPI;
 	registers->command |= AHCI_PORT_CMD_FRE;
@@ -96,8 +98,8 @@ void ahci_port_deinitialize(struct ahci_port* port) {
 	if (port->running && !ahci_port_stop(port))
 		fprintf(stderr, "ahci: port %u command engine did not stop\n", port->index);
 	if (port->registers != NULL) {
-		port->registers->interrupt_enable      = 0u;
-		port->registers->interrupt_status      = UINT32_MAX;
+		port->registers->interrupt_enable = 0u;
+		port->registers->interrupt_status = UINT32_MAX;
 		port->registers->command_list_base_low = port->registers->command_list_base_high = 0u;
 		port->registers->fis_base_low = port->registers->fis_base_high = 0u;
 	}

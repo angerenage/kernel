@@ -1,7 +1,7 @@
 #include "test_support.h"
 
 struct reap_probe {
-	size_t         calls;
+	size_t calls;
 	struct thread* thread;
 };
 
@@ -13,7 +13,7 @@ static void record_reap(struct thread* thread, void* ctx) {
 }
 
 Test(thread, reap_callback_registration_and_notification_preserve_identity) {
-	struct thread     thread;
+	struct thread thread;
 	struct reap_probe probe = {0};
 
 	irq_enable_local();

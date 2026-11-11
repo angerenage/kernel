@@ -1,8 +1,9 @@
 #pragma once
 
+#include <stdbool.h>
+
 #include <hal/device_tree.h>
 #include <hal/interrupts.h>
-#include <stdbool.h>
 
 struct cpu;
 
@@ -11,14 +12,13 @@ size_t riscv64_plic_device_tree_consumed_nodes(struct hal_device_tree_consumed_n
 
 /* Translate one PLIC Device Tree interrupt specifier. */
 bool riscv64_plic_device_tree_interrupt(const uint32_t* cells, size_t cell_count, uint32_t* out_local_source_id,
-                                        enum hal_interrupt_trigger*  out_trigger,
-                                        enum hal_interrupt_polarity* out_polarity);
+		enum hal_interrupt_trigger* out_trigger, enum hal_interrupt_polarity* out_polarity);
 
 /* Return the fixed-source domain exposed by the PLIC. */
 bool riscv64_plic_source_domain_at(struct hal_interrupt_source_domain_info* out_domain);
 
-bool riscv64_plic_source_resolve(uint64_t controller_address, uint32_t local_source_id,
-                                 struct hal_interrupt_source* out_source);
+bool riscv64_plic_source_resolve(
+		uint64_t controller_address, uint32_t local_source_id, struct hal_interrupt_source* out_source);
 
 /* Return the delivery identity and target-routing capability of one PLIC source. */
 bool riscv64_plic_source_info(const struct hal_interrupt_source* source, struct hal_interrupt_source_info* out_info);
@@ -28,7 +28,7 @@ bool riscv64_plic_source_target_supported(const struct hal_interrupt_source* sou
 
 /* Configure a PLIC interrupt source and leave it masked. */
 bool riscv64_plic_source_init(struct hal_interrupt_source_state* state, const struct hal_interrupt_source* source,
-                              const struct hal_interrupt_delivery* delivery);
+		const struct hal_interrupt_delivery* delivery);
 
 /* Mask an initialized PLIC interrupt source. */
 bool riscv64_plic_source_mask(struct hal_interrupt_source_state* state);

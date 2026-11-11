@@ -1,10 +1,12 @@
-#include <boot/info.h>
-#include <core/mm.h>
-#include <criterion/criterion.h>
-#include <firmware/acpi.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <boot/info.h>
+#include <firmware/acpi.h>
+#include <core/mm.h>
+
+#include <criterion/criterion.h>
 
 #include "heap/test_support.h"
 
@@ -16,21 +18,21 @@
 #define TEST_FADT_X_DSDT_OFFSET 140u
 
 struct test_rsdp {
-	char     signature[8];
-	uint8_t  checksum;
-	char     oem_id[6];
-	uint8_t  revision;
+	char signature[8];
+	uint8_t checksum;
+	char oem_id[6];
+	uint8_t revision;
 	uint32_t rsdt_address;
 	uint32_t length;
 	uint64_t xsdt_address;
-	uint8_t  extended_checksum;
-	uint8_t  reserved[3];
+	uint8_t extended_checksum;
+	uint8_t reserved[3];
 } __attribute__((packed));
 
-static uint8_t          test_arena[TEST_ARENA_SIZE];
-static uint8_t          test_heap[64u * 1024u] __attribute__((aligned(4096)));
+static uint8_t test_arena[TEST_ARENA_SIZE];
+static uint8_t test_heap[64u * 1024u] __attribute__((aligned(4096)));
 static struct mem_range test_ranges[3];
-static size_t           test_range_count;
+static size_t test_range_count;
 static struct boot_info test_boot_info;
 
 static bool test_acpi_init(const void* rsdp) {
@@ -44,7 +46,7 @@ static uintptr_t test_physical(size_t offset) {
 
 static void test_checksum(void* data, size_t size, size_t checksum_offset) {
 	uint8_t* bytes = data;
-	uint8_t  sum   = 0u;
+	uint8_t sum = 0u;
 
 	bytes[checksum_offset] = 0u;
 	for (size_t index = 0u; index < size; index++) sum = (uint8_t)(sum + bytes[index]);
@@ -56,14 +58,14 @@ static void test_reset(void) {
 	memset(test_arena, 0, sizeof(test_arena));
 	memset(test_ranges, 0, sizeof(test_ranges));
 	test_range_count = 1u;
-	test_ranges[0]   = (struct mem_range){
-		.base   = TEST_PHYSICAL_BASE,
+	test_ranges[0] = (struct mem_range){
+		.base = TEST_PHYSICAL_BASE,
 		.length = TEST_ARENA_SIZE,
-		.type   = MEM_RANGE_ACPI,
+		.type = MEM_RANGE_ACPI,
 	};
 	test_boot_info = (struct boot_info){
-		.memory_map        = test_ranges,
-		.memory_map_count  = test_range_count,
+		.memory_map = test_ranges,
+		.memory_map_count = test_range_count,
 		.direct_map_offset = (uintptr_t)test_arena - TEST_PHYSICAL_BASE,
 	};
 }
@@ -73,17 +75,17 @@ static struct acpi_sdt_header* test_table(size_t offset, const char signature[4]
 
 	memset(table, 0, size);
 	memcpy(table->signature, signature, 4u);
-	table->length   = (uint32_t)size;
+	table->length = (uint32_t)size;
 	table->revision = 1u;
 	test_checksum(table, size, offsetof(struct acpi_sdt_header, checksum));
 	return table;
 }
 
 static struct acpi_sdt_header* test_root(bool xsdt, const uintptr_t* entries, size_t entry_count) {
-	size_t                  entry_size = xsdt ? sizeof(uint64_t) : sizeof(uint32_t);
-	size_t                  size       = sizeof(struct acpi_sdt_header) + entry_count * entry_size;
-	struct acpi_sdt_header* root       = test_table(TEST_ROOT_OFFSET, xsdt ? "XSDT" : "RSDT", size);
-	uint8_t*                output     = (uint8_t*)root + sizeof(*root);
+	size_t entry_size = xsdt ? sizeof(uint64_t) : sizeof(uint32_t);
+	size_t size = sizeof(struct acpi_sdt_header) + entry_count * entry_size;
+	struct acpi_sdt_header* root = test_table(TEST_ROOT_OFFSET, xsdt ? "XSDT" : "RSDT", size);
+	uint8_t* output = (uint8_t*)root + sizeof(*root);
 
 	for (size_t index = 0u; index < entry_count; index++) {
 		if (xsdt) {
@@ -105,10 +107,10 @@ static struct test_rsdp* test_rsdp(bool xsdt) {
 	memset(rsdp, 0, sizeof(*rsdp));
 	memcpy(rsdp->signature, "RSD PTR ", 8u);
 	memcpy(rsdp->oem_id, "CODEX ", 6u);
-	rsdp->revision     = xsdt ? 2u : 0u;
+	rsdp->revision = xsdt ? 2u : 0u;
 	rsdp->rsdt_address = (uint32_t)test_physical(TEST_ROOT_OFFSET);
 	if (xsdt) {
-		rsdp->length       = sizeof(*rsdp);
+		rsdp->length = sizeof(*rsdp);
 		rsdp->xsdt_address = test_physical(TEST_ROOT_OFFSET);
 	}
 	test_checksum(rsdp, 20u, offsetof(struct test_rsdp, checksum));
@@ -117,8 +119,8 @@ static struct test_rsdp* test_rsdp(bool xsdt) {
 }
 
 static struct acpi_sdt_header* test_fadt(size_t offset, size_t size, uint32_t dsdt, uint64_t x_dsdt) {
-	struct acpi_sdt_header* fadt  = test_table(offset, "FACP", size);
-	uint8_t*                bytes = (uint8_t*)fadt;
+	struct acpi_sdt_header* fadt = test_table(offset, "FACP", size);
+	uint8_t* bytes = (uint8_t*)fadt;
 
 	if (size >= TEST_FADT_DSDT_OFFSET + sizeof(dsdt)) memcpy(bytes + TEST_FADT_DSDT_OFFSET, &dsdt, sizeof(dsdt));
 	if (size >= TEST_FADT_X_DSDT_OFFSET + sizeof(x_dsdt))
@@ -134,17 +136,17 @@ Test(acpi, cursor_iteration_skips_invalid_tables_and_preserves_duplicates) {
 		test_physical(0x400u),
 		test_physical(0x600u),
 	};
-	struct acpi_sdt_header*       apic;
-	struct acpi_sdt_header*       invalid;
-	struct acpi_sdt_header*       facp;
+	struct acpi_sdt_header* apic;
+	struct acpi_sdt_header* invalid;
+	struct acpi_sdt_header* facp;
 	const struct acpi_sdt_header* found;
-	struct test_rsdp*             rsdp;
-	acpi_cursor_t                 cursor = ACPI_CURSOR_INIT;
+	struct test_rsdp* rsdp;
+	acpi_cursor_t cursor = ACPI_CURSOR_INIT;
 
 	test_reset();
-	apic    = test_table(0x400u, "APIC", sizeof(*apic));
+	apic = test_table(0x400u, "APIC", sizeof(*apic));
 	invalid = test_table(0x500u, "APIC", sizeof(*invalid));
-	facp    = test_table(0x600u, "FACP", sizeof(*facp));
+	facp = test_table(0x600u, "FACP", sizeof(*facp));
 	invalid->checksum++;
 	test_root(true, entries, sizeof(entries) / sizeof(entries[0]));
 	rsdp = test_rsdp(true);
@@ -176,10 +178,10 @@ Test(acpi, cursor_iteration_skips_invalid_tables_and_preserves_duplicates) {
 }
 
 Test(acpi, filters_signatures_before_validating_table_contents) {
-	const uintptr_t         entries[] = {test_physical(0x400u), test_physical(0x500u)};
+	const uintptr_t entries[] = {test_physical(0x400u), test_physical(0x500u)};
 	struct acpi_sdt_header* unrelated;
 	struct acpi_sdt_header* apic;
-	struct test_rsdp*       rsdp;
+	struct test_rsdp* rsdp;
 
 	test_reset();
 	unrelated = test_table(0x400u, "FACP", sizeof(*unrelated));
@@ -193,10 +195,10 @@ Test(acpi, filters_signatures_before_validating_table_contents) {
 }
 
 Test(acpi, resolves_legacy_dsdt_and_keeps_fadt_accessible) {
-	const uintptr_t         entries[] = {test_physical(0x400u)};
+	const uintptr_t entries[] = {test_physical(0x400u)};
 	struct acpi_sdt_header* fadt;
 	struct acpi_sdt_header* dsdt;
-	struct test_rsdp*       rsdp;
+	struct test_rsdp* rsdp;
 
 	test_reset();
 	dsdt = test_table(0x800u, "DSDT", 64u);
@@ -212,16 +214,16 @@ Test(acpi, resolves_legacy_dsdt_and_keeps_fadt_accessible) {
 }
 
 Test(acpi, prefers_extended_dsdt_address) {
-	const uintptr_t         entries[] = {test_physical(0x400u)};
+	const uintptr_t entries[] = {test_physical(0x400u)};
 	struct acpi_sdt_header* legacy;
 	struct acpi_sdt_header* extended;
-	struct test_rsdp*       rsdp;
+	struct test_rsdp* rsdp;
 
 	test_reset();
-	legacy   = test_table(0x800u, "DSDT", 64u);
+	legacy = test_table(0x800u, "DSDT", 64u);
 	extended = test_table(0xa00u, "DSDT", 64u);
 	test_fadt(
-		0x400u, TEST_FADT_X_DSDT_OFFSET + sizeof(uint64_t), (uint32_t)test_physical(0x800u), test_physical(0xa00u));
+			0x400u, TEST_FADT_X_DSDT_OFFSET + sizeof(uint64_t), (uint32_t)test_physical(0x800u), test_physical(0xa00u));
 	test_root(true, entries, sizeof(entries) / sizeof(entries[0]));
 	rsdp = test_rsdp(true);
 	cr_assert(test_acpi_init(rsdp));
@@ -231,17 +233,17 @@ Test(acpi, prefers_extended_dsdt_address) {
 }
 
 Test(acpi, rejects_invalid_extended_dsdt_without_hiding_fadt) {
-	const uintptr_t         entries[] = {test_physical(0x400u)};
+	const uintptr_t entries[] = {test_physical(0x400u)};
 	struct acpi_sdt_header* fadt;
 	struct acpi_sdt_header* extended;
-	struct test_rsdp*       rsdp;
+	struct test_rsdp* rsdp;
 
 	test_reset();
 	test_table(0x800u, "DSDT", 64u);
 	extended = test_table(0xa00u, "DSDT", 64u);
 	extended->checksum++;
 	fadt = test_fadt(
-		0x400u, TEST_FADT_X_DSDT_OFFSET + sizeof(uint64_t), (uint32_t)test_physical(0x800u), test_physical(0xa00u));
+			0x400u, TEST_FADT_X_DSDT_OFFSET + sizeof(uint64_t), (uint32_t)test_physical(0x800u), test_physical(0xa00u));
 	test_root(true, entries, sizeof(entries) / sizeof(entries[0]));
 	rsdp = test_rsdp(true);
 	cr_assert(test_acpi_init(rsdp));
@@ -275,23 +277,23 @@ Test(acpi, rejects_invalid_rsdp_fields_and_hhdm_addresses) {
 
 	test_reset();
 	test_root(true, NULL, 0u);
-	rsdp               = test_rsdp(true);
+	rsdp = test_rsdp(true);
 	rsdp->signature[0] = 'X';
 	cr_assert_not(test_acpi_init(rsdp));
 
-	rsdp         = test_rsdp(true);
+	rsdp = test_rsdp(true);
 	rsdp->length = sizeof(*rsdp) - 1u;
 	cr_assert_not(test_acpi_init(rsdp));
 
-	rsdp                    = test_rsdp(true);
+	rsdp = test_rsdp(true);
 	rsdp->extended_checksum = (uint8_t)(rsdp->extended_checksum + 1u);
 	cr_assert_not(test_acpi_init(rsdp));
 
-	rsdp         = test_rsdp(true);
+	rsdp = test_rsdp(true);
 	rsdp->length = 4097u;
 	cr_assert_not(test_acpi_init(rsdp));
 
-	rsdp               = test_rsdp(true);
+	rsdp = test_rsdp(true);
 	rsdp->xsdt_address = UINT64_MAX;
 	test_checksum(rsdp, sizeof(*rsdp), offsetof(struct test_rsdp, extended_checksum));
 	cr_assert_not(test_acpi_init(rsdp));
@@ -301,7 +303,7 @@ Test(acpi, rejects_invalid_rsdp_fields_and_hhdm_addresses) {
 
 Test(acpi, rejects_invalid_root_signature_and_entry_alignment) {
 	struct acpi_sdt_header* root;
-	struct test_rsdp*       rsdp;
+	struct test_rsdp* rsdp;
 
 	test_reset();
 	root = test_root(true, NULL, 0u);
@@ -318,7 +320,7 @@ Test(acpi, rejects_invalid_root_signature_and_entry_alignment) {
 
 Test(acpi, advertised_invalid_xsdt_does_not_fall_back_to_rsdt) {
 	struct acpi_sdt_header* root;
-	struct test_rsdp*       rsdp;
+	struct test_rsdp* rsdp;
 
 	test_reset();
 	root = test_root(true, NULL, 0u);
@@ -328,50 +330,52 @@ Test(acpi, advertised_invalid_xsdt_does_not_fall_back_to_rsdt) {
 }
 
 Test(acpi, table_may_cross_adjacent_acpi_ranges) {
-	const uintptr_t         entries[] = {test_physical(0x800u)};
+	const uintptr_t entries[] = {test_physical(0x800u)};
 	struct acpi_sdt_header* table;
-	struct test_rsdp*       rsdp;
+	struct test_rsdp* rsdp;
 
 	test_reset();
 	table = test_table(0x800u, "APIC", 64u);
 	test_root(true, entries, 1u);
-	rsdp                            = test_rsdp(true);
-	test_range_count                = 2u;
+	rsdp = test_rsdp(true);
+	test_range_count = 2u;
 	test_boot_info.memory_map_count = test_range_count;
 	test_ranges[0] = (struct mem_range){.base = TEST_PHYSICAL_BASE, .length = 0x820u, .type = MEM_RANGE_ACPI};
-	test_ranges[1] =
-		(struct mem_range){.base = test_physical(0x820u), .length = TEST_ARENA_SIZE - 0x820u, .type = MEM_RANGE_ACPI};
+	test_ranges[1] = (struct mem_range){
+		.base = test_physical(0x820u), .length = TEST_ARENA_SIZE - 0x820u, .type = MEM_RANGE_ACPI
+	};
 	cr_assert(test_acpi_init(rsdp));
 	cr_assert_eq(acpi_table_next("APIC", NULL), table);
 }
 
 Test(acpi, table_may_not_cross_a_gap_between_acpi_ranges) {
-	const uintptr_t   entries[] = {test_physical(0x800u)};
+	const uintptr_t entries[] = {test_physical(0x800u)};
 	struct test_rsdp* rsdp;
-	acpi_cursor_t     cursor = ACPI_CURSOR_INIT;
+	acpi_cursor_t cursor = ACPI_CURSOR_INIT;
 
 	test_reset();
 	test_table(0x800u, "APIC", 64u);
 	test_root(true, entries, 1u);
-	rsdp                            = test_rsdp(true);
-	test_range_count                = 2u;
+	rsdp = test_rsdp(true);
+	test_range_count = 2u;
 	test_boot_info.memory_map_count = test_range_count;
 	test_ranges[0] = (struct mem_range){.base = TEST_PHYSICAL_BASE, .length = 0x820u, .type = MEM_RANGE_ACPI};
-	test_ranges[1] =
-		(struct mem_range){.base = test_physical(0x821u), .length = TEST_ARENA_SIZE - 0x821u, .type = MEM_RANGE_ACPI};
+	test_ranges[1] = (struct mem_range){
+		.base = test_physical(0x821u), .length = TEST_ARENA_SIZE - 0x821u, .type = MEM_RANGE_ACPI
+	};
 	cr_assert(test_acpi_init(rsdp));
 	cr_assert_null(acpi_table_next("APIC", &cursor));
 	cr_assert_eq(cursor, 1u);
 }
 
 Test(acpi, rejects_oversized_children) {
-	const uintptr_t         entries[] = {test_physical(0x800u)};
+	const uintptr_t entries[] = {test_physical(0x800u)};
 	struct acpi_sdt_header* table;
-	struct test_rsdp*       rsdp;
-	acpi_cursor_t           cursor = ACPI_CURSOR_INIT;
+	struct test_rsdp* rsdp;
+	acpi_cursor_t cursor = ACPI_CURSOR_INIT;
 
 	test_reset();
-	table         = test_table(0x800u, "APIC", sizeof(*table));
+	table = test_table(0x800u, "APIC", sizeof(*table));
 	table->length = 16u * 1024u * 1024u + 1u;
 	test_root(true, entries, 1u);
 	rsdp = test_rsdp(true);
@@ -385,7 +389,7 @@ Test(acpi, rejects_non_acpi_or_reserved_ranges) {
 
 	test_reset();
 	test_root(true, NULL, 0u);
-	rsdp                = test_rsdp(true);
+	rsdp = test_rsdp(true);
 	test_ranges[0].type = MEM_RANGE_OTHER;
 	cr_assert_not(test_acpi_init(rsdp));
 }

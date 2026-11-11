@@ -2,30 +2,31 @@
 
 #include <stdlib.h>
 #include <string.h>
+
 #include <system/capability.h>
 #include <system/signal.h>
 
 struct registry_advertisement {
 	struct registry_service_selector selector;
-	uint32_t                         minor;
-	process_id_t                     owner;
-	cap_id_t                         capability;
-	cap_rights_t                     client_rights;
-	struct registry_advertisement*   next;
+	uint32_t minor;
+	process_id_t owner;
+	cap_id_t capability;
+	cap_rights_t client_rights;
+	struct registry_advertisement* next;
 };
 
 struct registry_state_watch {
-	uint64_t                       id;
-	process_id_t                   owner;
+	uint64_t id;
+	process_id_t owner;
 	struct registry_protocol_query query;
-	cap_id_t                       signal_capability;
-	uint64_t                       counter;
-	struct registry_state_watch*   next;
+	cap_id_t signal_capability;
+	uint64_t counter;
+	struct registry_state_watch* next;
 };
 
 static struct registry_advertisement* advertisements;
-static struct registry_state_watch*   watches;
-static uint64_t                       next_watch_id = 1u;
+static struct registry_state_watch* watches;
+static uint64_t next_watch_id = 1u;
 
 static bool bounded_terminated(const char* value, size_t capacity, size_t* out_length) {
 	if (value == NULL) return false;
@@ -74,8 +75,8 @@ bool registry_state_namespace_valid(const char* namespace_path, bool allow_root)
 		size_t component_length = i - component_start;
 		if (component_length == 0u || component_length > REGISTRY_NAME_MAX) return false;
 		if ((component_length == 1u && namespace_path[component_start] == '.') ||
-		    (component_length == 2u && namespace_path[component_start] == '.' &&
-		     namespace_path[component_start + 1u] == '.'))
+				(component_length == 2u && namespace_path[component_start] == '.' &&
+						namespace_path[component_start + 1u] == '.'))
 			return false;
 		component_start = i + 1u;
 	}
@@ -92,8 +93,8 @@ bool registry_state_selector_valid(const struct registry_service_selector* selec
 	       registry_state_name_valid(selector->protocol) && registry_state_name_valid(selector->service);
 }
 
-static int selector_compare(const struct registry_service_selector* left,
-                            const struct registry_service_selector* right) {
+static int selector_compare(
+		const struct registry_service_selector* left, const struct registry_service_selector* right) {
 	int comparison = strcmp(left->namespace_path, right->namespace_path);
 	if (comparison != 0) return comparison;
 	comparison = strcmp(left->protocol, right->protocol);
@@ -109,8 +110,8 @@ static bool query_matches(const struct registry_protocol_query* query, const str
 	       ad->minor >= query->minor;
 }
 
-static bool advertisement_same(const struct registry_advertisement* ad, uint32_t minor, cap_id_t capability,
-                               cap_rights_t rights) {
+static bool advertisement_same(
+		const struct registry_advertisement* ad, uint32_t minor, cap_id_t capability, cap_rights_t rights) {
 	return ad->minor == minor && ad->capability == capability && ad->client_rights == rights;
 }
 
@@ -118,10 +119,10 @@ static void notify_watches(const struct registry_advertisement* old_ad, const st
 	struct registry_state_watch** cursor = &watches;
 
 	while (*cursor != NULL) {
-		struct registry_state_watch* watch   = *cursor;
-		bool                         valid   = false;
-		bool                         matches = (old_ad != NULL && query_matches(&watch->query, old_ad)) ||
-		                                       (new_ad != NULL && query_matches(&watch->query, new_ad));
+		struct registry_state_watch* watch = *cursor;
+		bool valid = false;
+		bool matches = (old_ad != NULL && query_matches(&watch->query, old_ad)) ||
+		               (new_ad != NULL && query_matches(&watch->query, new_ad));
 
 		if (cap_valid(watch->signal_capability, &valid) != SYSCALL_STATUS_OK || !valid) {
 			*cursor = watch->next;
@@ -133,7 +134,7 @@ static void notify_watches(const struct registry_advertisement* old_ad, const st
 			watch->counter++;
 			if (watch->counter == 0u) watch->counter = 1u;
 			(void)signal_send(
-				watch->signal_capability, watch->counter, 0u, 0u, 0u, SIGNAL_SEND_FLAG_COALESCE, &response);
+					watch->signal_capability, watch->counter, 0u, 0u, 0u, SIGNAL_SEND_FLAG_COALESCE, &response);
 		}
 		cursor = &watch->next;
 	}
@@ -143,8 +144,8 @@ static void prune_dead_advertisements(void) {
 	struct registry_advertisement** cursor = &advertisements;
 
 	while (*cursor != NULL) {
-		struct registry_advertisement* ad    = *cursor;
-		bool                           valid = false;
+		struct registry_advertisement* ad = *cursor;
+		bool valid = false;
 		if (cap_valid(ad->capability, &valid) == SYSCALL_STATUS_OK && valid) {
 			cursor = &ad->next;
 			continue;
@@ -156,13 +157,13 @@ static void prune_dead_advertisements(void) {
 }
 
 enum registry_status registry_state_advertise(process_id_t owner, const struct registry_service_selector* selector,
-                                              uint32_t minor, cap_id_t capability, cap_rights_t client_rights) {
+		uint32_t minor, cap_id_t capability, cap_rights_t client_rights) {
 	struct registry_advertisement** cursor;
-	struct registry_advertisement*  replacement;
-	bool                            valid = false;
+	struct registry_advertisement* replacement;
+	bool valid = false;
 
 	if (owner == PROCESS_PID_INVALID || !registry_state_selector_valid(selector) || capability == CAP_ID_INVALID ||
-	    client_rights == 0u)
+			client_rights == 0u)
 		return REGISTRY_STATUS_INVALID_ARGUMENT;
 	if (cap_valid(capability, &valid) != SYSCALL_STATUS_OK || !valid) return REGISTRY_STATUS_INVALID_ARGUMENT;
 	prune_dead_advertisements();
@@ -175,12 +176,12 @@ enum registry_status registry_state_advertise(process_id_t owner, const struct r
 		replacement = malloc(sizeof(*replacement));
 		if (replacement == NULL) return REGISTRY_STATUS_NO_MEMORY;
 		*replacement = (struct registry_advertisement){
-			.selector      = *selector,
-			.minor         = minor,
-			.owner         = owner,
-			.capability    = capability,
+			.selector = *selector,
+			.minor = minor,
+			.owner = owner,
+			.capability = capability,
 			.client_rights = client_rights,
-			.next          = current->next,
+			.next = current->next,
 		};
 		if (current->capability != capability && cap_drop(current->capability) != SYSCALL_STATUS_OK) {
 			free(replacement);
@@ -194,12 +195,12 @@ enum registry_status registry_state_advertise(process_id_t owner, const struct r
 	replacement = malloc(sizeof(*replacement));
 	if (replacement == NULL) return REGISTRY_STATUS_NO_MEMORY;
 	*replacement = (struct registry_advertisement){
-		.selector      = *selector,
-		.minor         = minor,
-		.owner         = owner,
-		.capability    = capability,
+		.selector = *selector,
+		.minor = minor,
+		.owner = owner,
+		.capability = capability,
 		.client_rights = client_rights,
-		.next          = *cursor,
+		.next = *cursor,
 	};
 	*cursor = replacement;
 	notify_watches(NULL, replacement);
@@ -226,13 +227,13 @@ enum registry_status registry_state_withdraw(process_id_t owner, const struct re
 static void fill_service_info(const struct registry_advertisement* ad, struct registry_service_info* info) {
 	*info = (struct registry_service_info){
 		.selector = ad->selector,
-		.minor    = ad->minor,
-		.rights   = ad->client_rights,
+		.minor = ad->minor,
+		.rights = ad->client_rights,
 	};
 }
 
-static struct registry_advertisement* find_advertisement(const struct registry_protocol_query* query,
-                                                         const char*                           service) {
+static struct registry_advertisement* find_advertisement(
+		const struct registry_protocol_query* query, const char* service) {
 	for (struct registry_advertisement* ad = advertisements; ad != NULL; ad = ad->next) {
 		if (query_matches(query, ad) && strcmp(service, ad->selector.service) == 0) return ad;
 	}
@@ -240,23 +241,23 @@ static struct registry_advertisement* find_advertisement(const struct registry_p
 }
 
 static enum registry_status grant_advertisement(const struct registry_advertisement* ad, process_id_t target,
-                                                cap_rights_t rights, struct registry_service_handle* out_handle) {
+		cap_rights_t rights, struct registry_service_handle* out_handle) {
 	cap_id_t delegated;
 
 	if (cap_delegate(ad->capability, target, rights, &delegated) != SYSCALL_STATUS_OK)
 		return REGISTRY_STATUS_RESOURCE_FAILURE;
 	fill_service_info(ad, &out_handle->info);
-	out_handle->owner      = ad->owner;
+	out_handle->owner = ad->owner;
 	out_handle->capability = delegated;
 	return REGISTRY_STATUS_OK;
 }
 
 enum registry_status registry_state_acquire(process_id_t caller, const struct registry_protocol_query* query,
-                                            const char* service, struct registry_service_handle* out_handle) {
+		const char* service, struct registry_service_handle* out_handle) {
 	struct registry_advertisement* ad;
 
 	if (caller == PROCESS_PID_INVALID || !registry_state_query_valid(query) || !registry_state_name_valid(service) ||
-	    out_handle == NULL)
+			out_handle == NULL)
 		return REGISTRY_STATUS_INVALID_ARGUMENT;
 	prune_dead_advertisements();
 	ad = find_advertisement(query, service);
@@ -264,18 +265,18 @@ enum registry_status registry_state_acquire(process_id_t caller, const struct re
 }
 
 enum registry_status registry_state_grant(process_id_t target, const struct registry_protocol_query* query,
-                                          const char* service, cap_rights_t rights, cap_id_t* out_capability) {
+		const char* service, cap_rights_t rights, cap_id_t* out_capability) {
 	struct registry_advertisement* ad;
 
 	if (target == PROCESS_PID_INVALID || !registry_state_query_valid(query) || !registry_state_name_valid(service) ||
-	    rights == 0u || out_capability == NULL)
+			rights == 0u || out_capability == NULL)
 		return REGISTRY_STATUS_INVALID_ARGUMENT;
 	prune_dead_advertisements();
 	ad = find_advertisement(query, service);
 	if (ad == NULL) return REGISTRY_STATUS_NOT_FOUND;
 	return cap_delegate(ad->capability, target, rights, out_capability) == SYSCALL_STATUS_OK
-			   ? REGISTRY_STATUS_OK
-			   : REGISTRY_STATUS_RESOURCE_FAILURE;
+				   ? REGISTRY_STATUS_OK
+				   : REGISTRY_STATUS_RESOURCE_FAILURE;
 }
 
 bool registry_state_contains(const struct registry_service_selector* selector) {
@@ -288,13 +289,12 @@ bool registry_state_contains(const struct registry_service_selector* selector) {
 }
 
 enum registry_status registry_state_enumerate(const struct registry_protocol_query* query, uint64_t offset,
-                                              uint64_t size, struct registry_service_info* entries,
-                                              uint64_t* out_returned, uint64_t* out_total) {
-	uint64_t index    = 0u;
-	uint64_t total    = 0u;
+		uint64_t size, struct registry_service_info* entries, uint64_t* out_returned, uint64_t* out_total) {
+	uint64_t index = 0u;
+	uint64_t total = 0u;
 	uint64_t returned = 0u;
 	if (!registry_state_query_valid(query) || (size != 0u && entries == NULL) || out_returned == NULL ||
-	    out_total == NULL)
+			out_total == NULL)
 		return REGISTRY_STATUS_INVALID_ARGUMENT;
 	prune_dead_advertisements();
 	for (struct registry_advertisement* ad = advertisements; ad != NULL; ad = ad->next) {
@@ -307,7 +307,7 @@ enum registry_status registry_state_enumerate(const struct registry_protocol_que
 		fill_service_info(ad, &entries[returned++]);
 	}
 	*out_returned = returned;
-	*out_total    = total;
+	*out_total = total;
 	return REGISTRY_STATUS_OK;
 }
 
@@ -324,7 +324,7 @@ static int browse_compare(const struct registry_browse_entry* left, const struct
 }
 
 static enum registry_status browse_add(struct registry_browse_entry** values, size_t* count, size_t* capacity,
-                                       const struct registry_browse_entry* candidate) {
+		const struct registry_browse_entry* candidate) {
 	for (size_t i = 0u; i < *count; i++) {
 		if (browse_compare(&(*values)[i], candidate) == 0) return REGISTRY_STATUS_OK;
 	}
@@ -333,7 +333,7 @@ static enum registry_status browse_add(struct registry_browse_entry** values, si
 		if (new_capacity < *capacity || new_capacity > SIZE_MAX / sizeof(**values)) return REGISTRY_STATUS_NO_MEMORY;
 		void* grown = realloc(*values, new_capacity * sizeof(**values));
 		if (grown == NULL) return REGISTRY_STATUS_NO_MEMORY;
-		*values   = grown;
+		*values = grown;
 		*capacity = new_capacity;
 	}
 	size_t position = *count;
@@ -347,22 +347,21 @@ static enum registry_status browse_add(struct registry_browse_entry** values, si
 }
 
 enum registry_status registry_state_browse(const char* namespace_path, uint64_t offset, uint64_t size,
-                                           struct registry_browse_entry* entries, uint64_t* out_returned,
-                                           uint64_t* out_total) {
-	struct registry_browse_entry* values   = NULL;
-	size_t                        count    = 0u;
-	size_t                        capacity = 0u;
-	size_t                        namespace_length;
-	enum registry_status          status = REGISTRY_STATUS_OK;
+		struct registry_browse_entry* entries, uint64_t* out_returned, uint64_t* out_total) {
+	struct registry_browse_entry* values = NULL;
+	size_t count = 0u;
+	size_t capacity = 0u;
+	size_t namespace_length;
+	enum registry_status status = REGISTRY_STATUS_OK;
 
 	if (!registry_state_namespace_valid(namespace_path, true) || (size != 0u && entries == NULL) ||
-	    out_returned == NULL || out_total == NULL)
+			out_returned == NULL || out_total == NULL)
 		return REGISTRY_STATUS_INVALID_ARGUMENT;
 	namespace_length = strlen(namespace_path);
 	prune_dead_advertisements();
 	for (struct registry_advertisement* ad = advertisements; ad != NULL; ad = ad->next) {
-		const char*                  remainder;
-		const char*                  slash;
+		const char* remainder;
+		const char* slash;
 		struct registry_browse_entry candidate = {0};
 		if (namespace_length == 0u) {
 			remainder = ad->selector.namespace_path;
@@ -370,7 +369,7 @@ enum registry_status registry_state_browse(const char* namespace_path, uint64_t 
 		else {
 			if (!string_has_prefix(ad->selector.namespace_path, namespace_path, namespace_length)) continue;
 			if (ad->selector.namespace_path[namespace_length] == '\0') {
-				candidate.kind  = REGISTRY_BROWSE_PROTOCOL;
+				candidate.kind = REGISTRY_BROWSE_PROTOCOL;
 				candidate.major = ad->selector.major;
 				candidate.minor = ad->minor;
 				(void)strlcpy(candidate.name, ad->selector.protocol, sizeof(candidate.name));
@@ -383,32 +382,31 @@ enum registry_status registry_state_browse(const char* namespace_path, uint64_t 
 		}
 		slash = remainder;
 		while (*slash != '\0' && *slash != '/') slash++;
-		candidate.kind          = REGISTRY_BROWSE_NAMESPACE;
+		candidate.kind = REGISTRY_BROWSE_NAMESPACE;
 		size_t component_length = (size_t)(slash - remainder);
 		memcpy(candidate.name, remainder, component_length);
 		candidate.name[component_length] = '\0';
-		status                           = browse_add(&values, &count, &capacity, &candidate);
+		status = browse_add(&values, &count, &capacity, &candidate);
 		if (status != REGISTRY_STATUS_OK) break;
 	}
 	if (status == REGISTRY_STATUS_OK) {
 		uint64_t available = offset >= count ? 0u : (uint64_t)count - offset;
-		uint64_t returned  = available < size ? available : size;
+		uint64_t returned = available < size ? available : size;
 		if (returned != 0u) memcpy(entries, values + (size_t)offset, (size_t)returned * sizeof(*entries));
 		*out_returned = returned;
-		*out_total    = count;
+		*out_total = count;
 	}
 	free(values);
 	return status;
 }
 
 enum registry_status registry_state_watch(process_id_t owner, const struct registry_protocol_query* query,
-                                          cap_id_t signal_capability, uint64_t* out_subscription_id,
-                                          uint64_t* out_counter) {
+		cap_id_t signal_capability, uint64_t* out_subscription_id, uint64_t* out_counter) {
 	struct registry_state_watch* watch;
-	struct signal_send_response  response;
-	bool                         valid = false;
+	struct signal_send_response response;
+	bool valid = false;
 	if (owner == PROCESS_PID_INVALID || !registry_state_query_valid(query) || signal_capability == CAP_ID_INVALID ||
-	    out_subscription_id == NULL || out_counter == NULL)
+			out_subscription_id == NULL || out_counter == NULL)
 		return REGISTRY_STATUS_INVALID_ARGUMENT;
 	if (cap_valid(signal_capability, &valid) != SYSCALL_STATUS_OK || !valid) return REGISTRY_STATUS_INVALID_ARGUMENT;
 	watch = malloc(sizeof(*watch));
@@ -418,12 +416,12 @@ enum registry_status registry_state_watch(process_id_t owner, const struct regis
 		return REGISTRY_STATUS_RESOURCE_FAILURE;
 	}
 	*watch = (struct registry_state_watch){
-		.id                = next_watch_id++,
-		.owner             = owner,
-		.query             = *query,
+		.id = next_watch_id++,
+		.owner = owner,
+		.query = *query,
 		.signal_capability = signal_capability,
-		.counter           = 1u,
-		.next              = watches,
+		.counter = 1u,
+		.next = watches,
 	};
 	watches = watch;
 	if (signal_send(signal_capability, 1u, 0u, 0u, 0u, SIGNAL_SEND_FLAG_COALESCE, &response) != SYSCALL_STATUS_OK) {
@@ -433,7 +431,7 @@ enum registry_status registry_state_watch(process_id_t owner, const struct regis
 		return REGISTRY_STATUS_DELIVERY_FAILED;
 	}
 	*out_subscription_id = watch->id;
-	*out_counter         = watch->counter;
+	*out_counter = watch->counter;
 	return REGISTRY_STATUS_OK;
 }
 

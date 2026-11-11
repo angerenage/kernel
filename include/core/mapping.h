@@ -1,9 +1,10 @@
 #pragma once
 
-#include <base/memory.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/memory.h>
 
 struct mapping;
 

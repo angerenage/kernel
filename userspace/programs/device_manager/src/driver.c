@@ -1,16 +1,18 @@
 #include "driver.h"
 
-#include <base/cap.h>
-#include <protocol/device.h>
-#include <protocol/vfs.h>
-#include <runtime/vfs.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <system/capability.h>
 #include <yaml.h>
+
+#include <base/cap.h>
+
+#include <protocol/device.h>
+#include <protocol/vfs.h>
+#include <system/capability.h>
+#include <runtime/vfs.h>
 
 static bool string_equal(const struct dm_string* string, const void* bytes, size_t size) {
 	return string->size == size && (size == 0u || memcmp(string->data, bytes, size) == 0);
@@ -63,8 +65,8 @@ void dm_driver_catalog_deinit(struct dm_driver_catalog* catalog) {
 	*catalog = (struct dm_driver_catalog){0};
 }
 
-const struct dm_driver* dm_driver_catalog_find_compatible(const struct dm_driver_catalog* catalog,
-                                                          const void* compatible_id, size_t compatible_id_size) {
+const struct dm_driver* dm_driver_catalog_find_compatible(
+		const struct dm_driver_catalog* catalog, const void* compatible_id, size_t compatible_id_size) {
 	if (catalog == NULL || compatible_id == NULL || compatible_id_size == 0u) return NULL;
 	for (const struct dm_driver* driver = catalog->drivers; driver != NULL; driver = driver->next) {
 		for (size_t index = 0u; index < driver->compatible_count; index++) {
@@ -76,8 +78,8 @@ const struct dm_driver* dm_driver_catalog_find_compatible(const struct dm_driver
 
 static enum dm_driver_catalog_status append_compatible(struct dm_driver* driver, const yaml_node_t* node) {
 	struct dm_string* resized;
-	struct dm_string  compatible = {0};
-	size_t            size;
+	struct dm_string compatible = {0};
+	size_t size;
 
 	if (node == NULL || node->type != YAML_SCALAR_NODE) return DM_DRIVER_CATALOG_INVALID;
 	size = node->data.scalar.length;
@@ -88,7 +90,7 @@ static enum dm_driver_catalog_status append_compatible(struct dm_driver* driver,
 			return DM_DRIVER_CATALOG_INVALID;
 	}
 	if (driver->compatible_count == SIZE_MAX ||
-	    driver->compatible_count + 1u > SIZE_MAX / sizeof(*driver->compatible_ids))
+			driver->compatible_count + 1u > SIZE_MAX / sizeof(*driver->compatible_ids))
 		return DM_DRIVER_CATALOG_NO_MEMORY;
 	if (!string_copy(&compatible, node->data.scalar.value, size)) return DM_DRIVER_CATALOG_NO_MEMORY;
 	resized = realloc(driver->compatible_ids, (driver->compatible_count + 1u) * sizeof(*resized));
@@ -96,17 +98,17 @@ static enum dm_driver_catalog_status append_compatible(struct dm_driver* driver,
 		free(compatible.data);
 		return DM_DRIVER_CATALOG_NO_MEMORY;
 	}
-	driver->compatible_ids                             = resized;
+	driver->compatible_ids = resized;
 	driver->compatible_ids[driver->compatible_count++] = compatible;
 	return DM_DRIVER_CATALOG_OK;
 }
 
-static enum dm_driver_catalog_status parse_compatible_ids(struct dm_driver* driver, yaml_document_t* document,
-                                                          const yaml_node_t* node) {
+static enum dm_driver_catalog_status parse_compatible_ids(
+		struct dm_driver* driver, yaml_document_t* document, const yaml_node_t* node) {
 	enum dm_driver_catalog_status status;
 
 	if (node == NULL || node->type != YAML_SEQUENCE_NODE ||
-	    node->data.sequence.items.start == node->data.sequence.items.top)
+			node->data.sequence.items.start == node->data.sequence.items.top)
 		return DM_DRIVER_CATALOG_INVALID;
 	for (yaml_node_item_t* item = node->data.sequence.items.start; item != node->data.sequence.items.top; item++) {
 		status = append_compatible(driver, yaml_document_get_node(document, *item));
@@ -121,18 +123,18 @@ static enum dm_driver_catalog_status parse_executable(struct dm_driver* driver, 
 	if (node == NULL || node->type != YAML_SCALAR_NODE) return DM_DRIVER_CATALOG_INVALID;
 	size = node->data.scalar.length;
 	if (size == 0u || size > CAP_MAX_REQUEST_SIZE - sizeof(struct vfs_open_request) ||
-	    !dm_utf8_valid(node->data.scalar.value, size) || !vfs_absolute_path_valid(node->data.scalar.value, size))
+			!dm_utf8_valid(node->data.scalar.value, size) || !vfs_absolute_path_valid(node->data.scalar.value, size))
 		return DM_DRIVER_CATALOG_INVALID;
 	if (!string_copy(&driver->executable, node->data.scalar.value, size)) return DM_DRIVER_CATALOG_NO_MEMORY;
 	return DM_DRIVER_CATALOG_OK;
 }
 
-static enum dm_driver_catalog_status parse_capabilities(struct dm_driver* driver, yaml_document_t* document,
-                                                        const yaml_node_t* node) {
+static enum dm_driver_catalog_status parse_capabilities(
+		struct dm_driver* driver, yaml_document_t* document, const yaml_node_t* node) {
 	if (node == NULL || node->type != YAML_SEQUENCE_NODE) return DM_DRIVER_CATALOG_INVALID;
 	for (yaml_node_item_t* item = node->data.sequence.items.start; item != node->data.sequence.items.top; item++) {
 		const yaml_node_t* capability = yaml_document_get_node(document, *item);
-		uint32_t           flag;
+		uint32_t flag;
 
 		if (scalar_equal(capability, "memory_allocator")) flag = DM_DRIVER_CAPABILITY_MEMORY_ALLOCATOR;
 		else if (scalar_equal(capability, "dma")) flag = DM_DRIVER_CAPABILITY_DMA;
@@ -146,16 +148,16 @@ static enum dm_driver_catalog_status parse_capabilities(struct dm_driver* driver
 }
 
 static enum dm_driver_catalog_status parse_driver(struct dm_driver_catalog* catalog, yaml_document_t* document,
-                                                  const yaml_node_t* name_node, const yaml_node_t* declaration) {
-	struct dm_driver*             driver;
-	enum dm_driver_catalog_status status              = DM_DRIVER_CATALOG_INVALID;
-	bool                          have_executable     = false;
-	bool                          have_compatible_ids = false;
-	bool                          have_capabilities   = false;
+		const yaml_node_t* name_node, const yaml_node_t* declaration) {
+	struct dm_driver* driver;
+	enum dm_driver_catalog_status status = DM_DRIVER_CATALOG_INVALID;
+	bool have_executable = false;
+	bool have_compatible_ids = false;
+	bool have_capabilities = false;
 
 	if (name_node == NULL || name_node->type != YAML_SCALAR_NODE ||
-	    !dm_identifier_valid(name_node->data.scalar.value, name_node->data.scalar.length) || declaration == NULL ||
-	    declaration->type != YAML_MAPPING_NODE)
+			!dm_identifier_valid(name_node->data.scalar.value, name_node->data.scalar.length) || declaration == NULL ||
+			declaration->type != YAML_MAPPING_NODE)
 		return DM_DRIVER_CATALOG_INVALID;
 	for (const struct dm_driver* existing = catalog->drivers; existing != NULL; existing = existing->next) {
 		if (string_equal(&existing->name, name_node->data.scalar.value, name_node->data.scalar.length))
@@ -169,24 +171,24 @@ static enum dm_driver_catalog_status parse_driver(struct dm_driver_catalog* cata
 		goto fail;
 	}
 	for (yaml_node_pair_t* pair = declaration->data.mapping.pairs.start; pair != declaration->data.mapping.pairs.top;
-	     pair++) {
-		yaml_node_t* key   = yaml_document_get_node(document, pair->key);
+			pair++) {
+		yaml_node_t* key = yaml_document_get_node(document, pair->key);
 		yaml_node_t* value = yaml_document_get_node(document, pair->value);
-		status             = DM_DRIVER_CATALOG_INVALID;
+		status = DM_DRIVER_CATALOG_INVALID;
 		if (scalar_equal(key, "executable")) {
 			if (have_executable) goto fail;
 			have_executable = true;
-			status          = parse_executable(driver, value);
+			status = parse_executable(driver, value);
 		}
 		else if (scalar_equal(key, "compatible_ids")) {
 			if (have_compatible_ids) goto fail;
 			have_compatible_ids = true;
-			status              = parse_compatible_ids(driver, document, value);
+			status = parse_compatible_ids(driver, document, value);
 		}
 		else if (scalar_equal(key, "root_capabilities")) {
 			if (have_capabilities) goto fail;
 			have_capabilities = true;
-			status            = parse_capabilities(driver, document, value);
+			status = parse_capabilities(driver, document, value);
 		}
 		else goto fail;
 		if (status != DM_DRIVER_CATALOG_OK) goto fail;
@@ -210,41 +212,41 @@ fail:
 	return status;
 }
 
-static enum dm_driver_catalog_status parse_drivers(struct dm_driver_catalog* catalog, yaml_document_t* document,
-                                                   const yaml_node_t* node) {
+static enum dm_driver_catalog_status parse_drivers(
+		struct dm_driver_catalog* catalog, yaml_document_t* document, const yaml_node_t* node) {
 	enum dm_driver_catalog_status status;
 
 	if (node == NULL || node->type != YAML_MAPPING_NODE) return DM_DRIVER_CATALOG_INVALID;
 	for (yaml_node_pair_t* pair = node->data.mapping.pairs.start; pair != node->data.mapping.pairs.top; pair++) {
 		status = parse_driver(catalog,
-		                      document,
-		                      yaml_document_get_node(document, pair->key),
-		                      yaml_document_get_node(document, pair->value));
+				document,
+				yaml_document_get_node(document, pair->key),
+				yaml_document_get_node(document, pair->value));
 		if (status != DM_DRIVER_CATALOG_OK) return status;
 	}
 	return DM_DRIVER_CATALOG_OK;
 }
 
 static enum dm_driver_catalog_status parse_document(struct dm_driver_catalog* catalog, yaml_document_t* document) {
-	yaml_node_t*                  root         = yaml_document_get_root_node(document);
-	enum dm_driver_catalog_status status       = DM_DRIVER_CATALOG_INVALID;
-	bool                          have_version = false;
-	bool                          have_drivers = false;
+	yaml_node_t* root = yaml_document_get_root_node(document);
+	enum dm_driver_catalog_status status = DM_DRIVER_CATALOG_INVALID;
+	bool have_version = false;
+	bool have_drivers = false;
 
 	if (root == NULL || root->type != YAML_MAPPING_NODE) return DM_DRIVER_CATALOG_INVALID;
 	for (yaml_node_pair_t* pair = root->data.mapping.pairs.start; pair != root->data.mapping.pairs.top; pair++) {
-		yaml_node_t* key   = yaml_document_get_node(document, pair->key);
+		yaml_node_t* key = yaml_document_get_node(document, pair->key);
 		yaml_node_t* value = yaml_document_get_node(document, pair->value);
 		if (scalar_equal(key, "format_version")) {
 			if (have_version || value == NULL || value->type != YAML_SCALAR_NODE ||
-			    value->data.scalar.style != YAML_PLAIN_SCALAR_STYLE || !scalar_equal(value, "1"))
+					value->data.scalar.style != YAML_PLAIN_SCALAR_STYLE || !scalar_equal(value, "1"))
 				return DM_DRIVER_CATALOG_INVALID;
 			have_version = true;
 		}
 		else if (scalar_equal(key, "drivers")) {
 			if (have_drivers) return DM_DRIVER_CATALOG_INVALID;
 			have_drivers = true;
-			status       = parse_drivers(catalog, document, value);
+			status = parse_drivers(catalog, document, value);
 			if (status != DM_DRIVER_CATALOG_OK) return status;
 		}
 		else return DM_DRIVER_CATALOG_INVALID;
@@ -259,13 +261,13 @@ static enum dm_driver_catalog_status parser_failure(const yaml_parser_t* parser,
 }
 
 enum dm_driver_catalog_status dm_driver_catalog_load(struct dm_driver_catalog* catalog, const char* path) {
-	struct dm_driver_catalog      loaded;
-	yaml_parser_t                 parser;
-	yaml_document_t               document;
-	enum dm_driver_catalog_status status               = DM_DRIVER_CATALOG_IO_ERROR;
-	FILE*                         stream               = NULL;
-	bool                          parser_initialized   = false;
-	bool                          document_initialized = false;
+	struct dm_driver_catalog loaded;
+	yaml_parser_t parser;
+	yaml_document_t document;
+	enum dm_driver_catalog_status status = DM_DRIVER_CATALOG_IO_ERROR;
+	FILE* stream = NULL;
+	bool parser_initialized = false;
+	bool document_initialized = false;
 
 	if (catalog == NULL || path == NULL) return DM_DRIVER_CATALOG_INVALID;
 	dm_driver_catalog_init(&loaded);
@@ -282,7 +284,7 @@ enum dm_driver_catalog_status dm_driver_catalog_load(struct dm_driver_catalog* c
 		goto cleanup;
 	}
 	document_initialized = true;
-	status               = parse_document(&loaded, &document);
+	status = parse_document(&loaded, &document);
 	yaml_document_delete(&document);
 	document_initialized = false;
 	if (status != DM_DRIVER_CATALOG_OK) goto cleanup;

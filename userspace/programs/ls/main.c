@@ -1,31 +1,33 @@
-#include <base/cap.h>
-#include <protocol/vfs.h>
-#include <runtime/registry.h>
-#include <runtime/tty_session.h>
-#include <runtime/vfs.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <base/cap.h>
+
+#include <protocol/vfs.h>
 #include <system/capability.h>
 #include <system/display.h>
 #include <system/trace.h>
+#include <runtime/registry.h>
+#include <runtime/tty_session.h>
+#include <runtime/vfs.h>
 
 #define VFS_PROTOCOL_VERSION_MAJOR 1u
 #define VFS_PROTOCOL_VERSION_MINOR 0u
 
 enum {
-	LIST_PATH_CAPACITY          = 4096u,
+	LIST_PATH_CAPACITY = 4096u,
 	LIST_INITIAL_ENTRY_CAPACITY = (CAP_MAX_RESPONSE_SIZE - sizeof(struct filesystem_directory_enumerate_response)) /
-		sizeof(struct filesystem_directory_entry),
+			sizeof(struct filesystem_directory_entry),
 };
 
 enum list_option {
-	LIST_OPTION_ALL          = 1u << 0,
-	LIST_OPTION_ALMOST_ALL   = 1u << 1,
-	LIST_OPTION_LONG         = 1u << 2,
+	LIST_OPTION_ALL = 1u << 0,
+	LIST_OPTION_ALMOST_ALL = 1u << 1,
+	LIST_OPTION_LONG = 1u << 2,
 	LIST_OPTION_ONE_PER_LINE = 1u << 3,
 };
 
@@ -33,36 +35,36 @@ struct list_context {
 	cap_id_t vfs_cap;
 	cap_id_t working_directory_cap;
 	/* Zero when standard input is not a terminal: output is then one plain name per line. */
-	size_t   terminal_columns;
+	size_t terminal_columns;
 	uint32_t options;
 };
 
 /* A lexically normalized path, relative to the working directory unless absolute. */
 struct list_path {
-	char   bytes[LIST_PATH_CAPACITY];
+	char bytes[LIST_PATH_CAPACITY];
 	size_t size;
-	bool   absolute;
+	bool absolute;
 };
 
 struct list_item {
-	const uint8_t*              name;
-	size_t                      name_size;
+	const uint8_t* name;
+	size_t name_size;
 	struct filesystem_node_info info;
 };
 
 struct list_directory {
-	const char*                 operand;
-	struct list_path            path;
-	cap_id_t                    capability;
+	const char* operand;
+	struct list_path path;
+	cap_id_t capability;
 	struct filesystem_node_info info;
 };
 
 /* A listing is built in memory and written at once, since every write to stdout is a terminal call. */
 struct list_output {
-	char*  bytes;
+	char* bytes;
 	size_t size;
 	size_t capacity;
-	bool   failed;
+	bool failed;
 };
 
 TRACE_LABEL(trace_ls_main, "ls/main");
@@ -107,7 +109,7 @@ static bool remove_component(struct list_path* path) {
 	size_t component = path->size;
 	while (component > root && path->bytes[component - 1u] != '/') component--;
 	if (!path->absolute && path->size - component == 2u && path->bytes[component] == '.' &&
-	    path->bytes[component + 1u] == '.') {
+			path->bytes[component + 1u] == '.') {
 		if (sizeof(path->bytes) - path->size < 3u) return false;
 		memcpy(path->bytes + path->size, "/..", 3u);
 		path->size += 3u;
@@ -124,7 +126,7 @@ static const char* normalize_path(const char* operand, struct list_path* out) {
 	size_t offset = 0u;
 
 	out->absolute = length != 0u && operand[0] == '/';
-	out->size     = 0u;
+	out->size = 0u;
 	if (out->absolute) out->bytes[out->size++] = '/';
 	while (offset < length) {
 		size_t start;
@@ -152,12 +154,12 @@ static const char* normalize_path(const char* operand, struct list_path* out) {
 static bool acquire_vfs(struct list_context* context) {
 	static const struct registry_protocol_query query = {
 		.namespace_path = VFS_NAMESPACE,
-		.protocol       = VFS_PROTOCOL_NAME,
-		.major          = VFS_PROTOCOL_VERSION_MAJOR,
-		.minor          = VFS_PROTOCOL_VERSION_MINOR,
+		.protocol = VFS_PROTOCOL_NAME,
+		.major = VFS_PROTOCOL_VERSION_MAJOR,
+		.minor = VFS_PROTOCOL_VERSION_MINOR,
 	};
 	struct registry_service_handle service = {.capability = CAP_ID_INVALID};
-	struct registry_call_result    acquired;
+	struct registry_call_result acquired;
 
 	if (context->vfs_cap != CAP_ID_INVALID) return true;
 	acquired = registry_acquire(&query, VFS_SERVICE_NAME, &service);
@@ -170,10 +172,11 @@ static bool acquire_vfs(struct list_context* context) {
 }
 
 /* The working directory itself is borrowed rather than opened, so release it with release_node. */
-static struct filesystem_call_result open_path(struct list_context* context, const struct list_path* path,
-                                               struct filesystem_node_handle* out_node) {
-	const struct filesystem_call_result failed = {.status           = FILESYSTEM_STATUS_NONE,
-	                                              .transport_status = SYSCALL_STATUS_FAILED};
+static struct filesystem_call_result open_path(
+		struct list_context* context, const struct list_path* path, struct filesystem_node_handle* out_node) {
+	const struct filesystem_call_result failed = {
+		.status = FILESYSTEM_STATUS_NONE, .transport_status = SYSCALL_STATUS_FAILED
+	};
 
 	*out_node = (struct filesystem_node_handle){.capability = CAP_ID_INVALID};
 	if (path->absolute) {
@@ -195,7 +198,7 @@ static void output_append(struct list_output* output, const void* bytes, size_t 
 	if (output->failed || size == 0u) return;
 	if (size > output->capacity - output->size) {
 		size_t capacity = output->capacity == 0u ? 256u : output->capacity;
-		char*  grown;
+		char* grown;
 
 		while (size > capacity - output->size) {
 			if (capacity > SIZE_MAX / 2u) {
@@ -209,7 +212,7 @@ static void output_append(struct list_output* output, const void* bytes, size_t 
 			output->failed = true;
 			return;
 		}
-		output->bytes    = grown;
+		output->bytes = grown;
 		output->capacity = capacity;
 	}
 	memcpy(output->bytes + output->size, bytes, size);
@@ -254,10 +257,10 @@ static size_t control_size(const uint8_t* name, size_t size, size_t index) {
 	return 0u;
 }
 
-static void output_append_name(struct list_output* output, const struct list_context* context,
-                               const struct list_item* item) {
-	bool   colored = context->terminal_columns != 0u && item->info.type == FILESYSTEM_NODE_DIRECTORY;
-	size_t start   = 0u;
+static void output_append_name(
+		struct list_output* output, const struct list_context* context, const struct list_item* item) {
+	bool colored = context->terminal_columns != 0u && item->info.type == FILESYSTEM_NODE_DIRECTORY;
+	size_t start = 0u;
 
 	if (colored) output_append(output, "\x1b[1;34m", 7u);
 	/* Control characters in a name would otherwise be interpreted by the terminal. */
@@ -278,13 +281,15 @@ static void output_append_name(struct list_output* output, const struct list_con
 }
 
 static void output_append_long(struct list_output* output, const struct list_context* context,
-                               const struct list_item* item, size_t size_width) {
+		const struct list_item* item, size_t size_width) {
 	char size[24];
-	int  size_length = snprintf(size, sizeof(size), "%llu", (unsigned long long)item->info.size);
-	char mode[]      = {item->info.type == FILESYSTEM_NODE_DIRECTORY ? 'd' : '-',
-	                    'r',
-	                    (item->info.flags & FILESYSTEM_NODE_READ_ONLY) != 0u ? '-' : 'w',
-	                    ' '};
+	int size_length = snprintf(size, sizeof(size), "%llu", (unsigned long long)item->info.size);
+	char mode[] = {
+		item->info.type == FILESYSTEM_NODE_DIRECTORY ? 'd' : '-',
+		'r',
+		(item->info.flags & FILESYSTEM_NODE_READ_ONLY) != 0u ? '-' : 'w',
+		' '
+	};
 
 	output_append(output, mode, sizeof(mode));
 	output_append_padding(output, size_width - (size_t)size_length);
@@ -294,8 +299,8 @@ static void output_append_long(struct list_output* output, const struct list_con
 	output_append(output, "\n", 1u);
 }
 
-static void output_append_items(struct list_output* output, const struct list_context* context,
-                                const struct list_item* items, size_t count) {
+static void output_append_items(
+		struct list_output* output, const struct list_context* context, const struct list_item* items, size_t count) {
 	size_t width = 0u;
 	size_t columns;
 	size_t rows;
@@ -318,9 +323,9 @@ static void output_append_items(struct list_output* output, const struct list_co
 	}
 	width += 2u;
 	columns = (context->options & LIST_OPTION_ONE_PER_LINE) != 0u || width > context->terminal_columns
-	              ? 1u
-	              : context->terminal_columns / width;
-	rows    = (count + columns - 1u) / columns;
+	                  ? 1u
+	                  : context->terminal_columns / width;
+	rows = (count + columns - 1u) / columns;
 	/* Entries fill each column top to bottom before moving to the next one. */
 	for (size_t row = 0u; row < rows; row++) {
 		for (size_t index = row; index < count; index += rows) {
@@ -332,10 +337,10 @@ static void output_append_items(struct list_output* output, const struct list_co
 }
 
 static int compare_items(const void* left, const void* right) {
-	const struct list_item* left_item  = left;
+	const struct list_item* left_item = left;
 	const struct list_item* right_item = right;
-	size_t size  = left_item->name_size < right_item->name_size ? left_item->name_size : right_item->name_size;
-	int    order = memcmp(left_item->name, right_item->name, size);
+	size_t size = left_item->name_size < right_item->name_size ? left_item->name_size : right_item->name_size;
+	int order = memcmp(left_item->name, right_item->name, size);
 
 	if (order != 0) return order;
 	return (left_item->name_size > right_item->name_size) - (left_item->name_size < right_item->name_size);
@@ -346,21 +351,21 @@ static int compare_directories(const void* left, const void* right) {
 }
 
 /* Returns NULL on success, or the message describing the failure. */
-static const char* read_directory(cap_id_t directory_cap, struct filesystem_directory_entry** out_entries,
-                                  size_t* out_count) {
-	struct filesystem_directory_entry* entries  = NULL;
-	size_t                             count    = 0u;
-	size_t                             capacity = 0u;
-	uint64_t                           total    = 0u;
+static const char* read_directory(
+		cap_id_t directory_cap, struct filesystem_directory_entry** out_entries, size_t* out_count) {
+	struct filesystem_directory_entry* entries = NULL;
+	size_t count = 0u;
+	size_t capacity = 0u;
+	uint64_t total = 0u;
 	TRACE_SCOPE(trace, &trace_ls_enumerate);
 
 	for (;;) {
 		struct filesystem_call_result result;
-		size_t                        returned;
+		size_t returned;
 
 		if (count == capacity) {
 			struct filesystem_directory_entry* grown;
-			size_t                             next = capacity == 0u ? LIST_INITIAL_ENTRY_CAPACITY : capacity * 2u;
+			size_t next = capacity == 0u ? LIST_INITIAL_ENTRY_CAPACITY : capacity * 2u;
 
 			if (total > next && total <= SIZE_MAX / sizeof(*entries)) next = (size_t)total;
 			grown = next > SIZE_MAX / sizeof(*entries) ? NULL : realloc(entries, next * sizeof(*entries));
@@ -368,7 +373,7 @@ static const char* read_directory(cap_id_t directory_cap, struct filesystem_dire
 				free(entries);
 				return "out of memory";
 			}
-			entries  = grown;
+			entries = grown;
 			capacity = next;
 		}
 		result = vfs_directory_enumerate(directory_cap, count, entries + count, capacity - count, &returned, &total);
@@ -380,15 +385,15 @@ static const char* read_directory(cap_id_t directory_cap, struct filesystem_dire
 		if (returned == 0u || count >= total) break;
 	}
 	*out_entries = entries;
-	*out_count   = count;
+	*out_count = count;
 	return NULL;
 }
 
-static struct filesystem_node_info read_parent_info(struct list_context*         context,
-                                                    const struct list_directory* directory) {
+static struct filesystem_node_info read_parent_info(
+		struct list_context* context, const struct list_directory* directory) {
 	struct filesystem_node_handle parent = {.capability = CAP_ID_INVALID};
-	struct list_path*             path   = malloc(sizeof(*path));
-	struct filesystem_node_info   info   = directory->info;
+	struct list_path* path = malloc(sizeof(*path));
+	struct filesystem_node_info info = directory->info;
 
 	if (path == NULL) return info;
 	*path = directory->path;
@@ -400,7 +405,7 @@ static struct filesystem_node_info read_parent_info(struct list_context*        
 
 /* Fill items with the entries ls shows for an opened directory. */
 static size_t collect_items(struct list_context* context, const struct list_directory* directory,
-                            const struct filesystem_directory_entry* entries, size_t count, struct list_item* items) {
+		const struct filesystem_directory_entry* entries, size_t count, struct list_item* items) {
 	size_t item_count = 0u;
 
 	if ((context->options & LIST_OPTION_ALL) != 0u) {
@@ -413,22 +418,22 @@ static size_t collect_items(struct list_context* context, const struct list_dire
 	}
 	for (size_t i = 0u; i < count; i++) {
 		if (entries[i].name_size == 0u ||
-		    (entries[i].name[0] == '.' && (context->options & (LIST_OPTION_ALL | LIST_OPTION_ALMOST_ALL)) == 0u))
+				(entries[i].name[0] == '.' && (context->options & (LIST_OPTION_ALL | LIST_OPTION_ALMOST_ALL)) == 0u))
 			continue;
 		items[item_count++] =
-			(struct list_item){.name = entries[i].name, .name_size = entries[i].name_size, .info = entries[i].info};
+				(struct list_item){.name = entries[i].name, .name_size = entries[i].name_size, .info = entries[i].info};
 	}
 	qsort(items, item_count, sizeof(*items), compare_items);
 	return item_count;
 }
 
-static bool list_directory(struct list_context* context, const struct list_directory* directory, bool header,
-                           bool* printed) {
+static bool list_directory(
+		struct list_context* context, const struct list_directory* directory, bool header, bool* printed) {
 	struct filesystem_directory_entry* entries;
-	struct list_item*                  items;
-	struct list_output                 output = {0};
-	size_t                             count;
-	const char*                        error;
+	struct list_item* items;
+	struct list_output output = {0};
+	size_t count;
+	const char* error;
 
 	error = read_directory(directory->capability, &entries, &count);
 	if (error != NULL) {
@@ -461,12 +466,12 @@ static bool is_operand(const char* argument, bool after_separator) {
 
 static size_t terminal_columns(void) {
 	struct tty_session_get_info_response info;
-	cap_id_t                             stdin_cap;
+	cap_id_t stdin_cap;
 
 	/* Standard output is write-only, so the terminal size is read through standard input. */
 	display_get_standard_streams(&stdin_cap, NULL, NULL);
 	if (stdin_cap == CAP_ID_INVALID || tty_session_get_info(stdin_cap, &info) != SYSCALL_STATUS_OK ||
-	    info.columns > SIZE_MAX)
+			info.columns > SIZE_MAX)
 		return 0u;
 	return (size_t)info.columns;
 }
@@ -476,19 +481,20 @@ static size_t terminal_columns(void) {
  * listed together, then each directory, all in name order.
  */
 int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
-	static char            current_name[] = ".";
-	static char*           current_argv[] = {current_name};
-	struct list_context    context        = {.vfs_cap               = CAP_ID_INVALID,
-	                                         .working_directory_cap = filesystem_get_working_directory()};
-	struct list_item*      files;
+	static char current_name[] = ".";
+	static char* current_argv[] = {current_name};
+	struct list_context context = {
+		.vfs_cap = CAP_ID_INVALID, .working_directory_cap = filesystem_get_working_directory()
+	};
+	struct list_item* files;
 	struct list_directory* directories;
-	struct list_output     output          = {0};
-	size_t                 operand_count   = 0u;
-	size_t                 file_count      = 0u;
-	size_t                 directory_count = 0u;
-	bool                   after_separator = false;
-	bool                   printed         = false;
-	bool                   success         = true;
+	struct list_output output = {0};
+	size_t operand_count = 0u;
+	size_t file_count = 0u;
+	size_t directory_count = 0u;
+	bool after_separator = false;
+	bool printed = false;
+	bool success = true;
 	TRACE_SCOPE(trace, &trace_ls_main);
 
 	if (argc < 0 || (argc != 0 && argv == NULL) || capc != 0u || capv != NULL) return 1;
@@ -519,13 +525,13 @@ int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 		}
 	}
 	if (operand_count == 0u) {
-		argc          = 1;
-		argv          = current_argv;
+		argc = 1;
+		argv = current_argv;
 		operand_count = 1u;
 	}
 	context.terminal_columns = terminal_columns();
-	files                    = malloc(operand_count * sizeof(*files));
-	directories              = malloc(operand_count * sizeof(*directories));
+	files = malloc(operand_count * sizeof(*files));
+	directories = malloc(operand_count * sizeof(*directories));
 	if (files == NULL || directories == NULL) {
 		free(directories);
 		free(files);
@@ -534,10 +540,10 @@ int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 	}
 	after_separator = false;
 	for (int i = 0; i < argc; i++) {
-		struct list_directory*        directory = &directories[directory_count];
+		struct list_directory* directory = &directories[directory_count];
 		struct filesystem_node_handle node;
 		struct filesystem_call_result result;
-		const char*                   error;
+		const char* error;
 
 		if (!is_operand(argv[i], after_separator)) {
 			after_separator = after_separator || strcmp(argv[i], "--") == 0;
@@ -557,15 +563,15 @@ int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 			continue;
 		}
 		if (node.info.type == FILESYSTEM_NODE_DIRECTORY) {
-			directory->operand    = argv[i];
+			directory->operand = argv[i];
 			directory->capability = node.capability;
-			directory->info       = node.info;
+			directory->info = node.info;
 			directory_count++;
 			continue;
 		}
 		release_node(&context, node.capability);
 		files[file_count++] =
-			(struct list_item){.name = (const uint8_t*)argv[i], .name_size = strlen(argv[i]), .info = node.info};
+				(struct list_item){.name = (const uint8_t*)argv[i], .name_size = strlen(argv[i]), .info = node.info};
 	}
 	qsort(files, file_count, sizeof(*files), compare_items);
 	qsort(directories, directory_count, sizeof(*directories), compare_directories);

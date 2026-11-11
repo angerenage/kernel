@@ -1,7 +1,8 @@
-#include <boot/info.h>
-#include <boot/protocol.h>
 #include <stdbool.h>
 #include <string.h>
+
+#include <boot/info.h>
+#include <boot/protocol.h>
 
 #include "limine/backend.h"
 
@@ -48,9 +49,9 @@ const struct boot_info* boot_info_get(void) {
 bool boot_address_space_get(struct boot_address_space* out) {
 	if (out == NULL || published_info == NULL) return false;
 	*out = (struct boot_address_space){
-		.direct_map_offset    = published_info->direct_map_offset,
+		.direct_map_offset = published_info->direct_map_offset,
 		.kernel_physical_base = published_info->kernel_physical_base,
-		.kernel_virtual_base  = published_info->kernel_virtual_base,
+		.kernel_virtual_base = published_info->kernel_virtual_base,
 	};
 	return true;
 }
@@ -89,10 +90,10 @@ const struct boot_module* boot_module_at(const struct boot_info* info, size_t in
 const struct boot_module* boot_module_find(const struct boot_info* info, const char* name) {
 	if (info == NULL || name == NULL) return NULL;
 	for (size_t index = 0u; index < info->module_count; index++) {
-		const struct boot_module* module   = &info->modules[index];
-		const char*               basename = path_basename(module->path);
+		const struct boot_module* module = &info->modules[index];
+		const char* basename = path_basename(module->path);
 		if ((module->name != NULL && strcmp(module->name, name) == 0) ||
-		    (basename != NULL && strcmp(basename, name) == 0))
+				(basename != NULL && strcmp(basename, name) == 0))
 			return module;
 	}
 	return NULL;

@@ -1,5 +1,6 @@
-#include <base/display.h>
 #include <libc/stdio.h>
+
+#include <base/display.h>
 
 int putchar(int ch) {
 	char out = (char)ch;

@@ -1,22 +1,24 @@
 #include "device_manager.h"
 
-#include <base/kernel_resource.h>
-#include <base/startup.h>
-#include <protocol/device_manager.h>
-#include <protocol/loader.h>
-#include <protocol/terminal.h>
-#include <protocol/vfs.h>
-#include <runtime/program.h>
-#include <runtime/registry.h>
-#include <runtime/vfs.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <base/kernel_resource.h>
+#include <base/startup.h>
+
+#include <protocol/device_manager.h>
+#include <protocol/loader.h>
+#include <protocol/terminal.h>
+#include <protocol/vfs.h>
 #include <system/capability.h>
 #include <system/kernel_resource.h>
 #include <system/process.h>
+#include <runtime/program.h>
+#include <runtime/registry.h>
+#include <runtime/vfs.h>
 
 #include "arguments.h"
 #define DEVICE_MANAGER_FILE_PATH "/boot/device_manager.elf"
@@ -42,24 +44,24 @@ static bool device_manager_drop_capability(cap_id_t* capability, const char* des
 	return true;
 }
 
-static syscall_status_t device_manager_output_stream(const struct init_state* init, cap_id_t* out_capability,
-                                                     bool* out_owned) {
+static syscall_status_t device_manager_output_stream(
+		const struct init_state* init, cap_id_t* out_capability, bool* out_owned) {
 	const struct registry_protocol_query query = {
 		.namespace_path = TERMINAL_NAMESPACE,
-		.protocol       = TERMINAL_PROTOCOL_NAME,
-		.major          = TERMINAL_PROTOCOL_VERSION_MAJOR,
-		.minor          = TERMINAL_PROTOCOL_VERSION_MINOR,
+		.protocol = TERMINAL_PROTOCOL_NAME,
+		.major = TERMINAL_PROTOCOL_VERSION_MAJOR,
+		.minor = TERMINAL_PROTOCOL_VERSION_MINOR,
 	};
 	struct registry_service_handle terminal = {.capability = CAP_ID_INVALID};
-	enum registry_status           registry_status;
+	enum registry_status registry_status;
 
 	if (init == NULL || out_capability == NULL || out_owned == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	*out_capability = CAP_ID_INVALID;
-	*out_owned      = false;
+	*out_owned = false;
 	registry_status = registry_acquire(&query, TERMINAL_SERVICE_NAME, &terminal).status;
 	if (registry_status == REGISTRY_STATUS_OK) {
 		*out_capability = terminal.capability;
-		*out_owned      = true;
+		*out_owned = true;
 		return SYSCALL_STATUS_OK;
 	}
 	if (registry_status != REGISTRY_STATUS_NOT_FOUND) return SYSCALL_STATUS_FAILED;
@@ -67,97 +69,96 @@ static syscall_status_t device_manager_output_stream(const struct init_state* in
 	return SYSCALL_STATUS_OK;
 }
 
-static syscall_status_t device_manager_load(const struct registry_service_handle* loader, cap_id_t file_cap,
-                                            struct program_load_result* out_load) {
+static syscall_status_t device_manager_load(
+		const struct registry_service_handle* loader, cap_id_t file_cap, struct program_load_result* out_load) {
 	struct {
 		struct loader_v1_load_request request;
-		char                          name[sizeof(DEVICE_MANAGER_PROCESS_NAME) - 1u];
+		char name[sizeof(DEVICE_MANAGER_PROCESS_NAME) - 1u];
 	} payload = {
-		.request =
-			{
-					  .header    = {.op = LOADER_V1_OP_LOAD},
-					  .name_size = sizeof(DEVICE_MANAGER_PROCESS_NAME) - 1u,
-					  },
+		.request = {
+			.header = {.op = LOADER_V1_OP_LOAD},
+			.name_size = sizeof(DEVICE_MANAGER_PROCESS_NAME) - 1u,
+		},
 	};
-	struct loader_v1_load_response response       = {.load_cap = CAP_ID_INVALID, .process_id = PROCESS_PID_INVALID};
-	cap_id_t                       delegated_file = CAP_ID_INVALID;
-	size_t                         response_size  = 0u;
-	syscall_status_t               cleanup_status;
-	syscall_status_t               status;
+	struct loader_v1_load_response response = {.load_cap = CAP_ID_INVALID, .process_id = PROCESS_PID_INVALID};
+	cap_id_t delegated_file = CAP_ID_INVALID;
+	size_t response_size = 0u;
+	syscall_status_t cleanup_status;
+	syscall_status_t status;
 
 	if (loader == NULL || loader->capability == CAP_ID_INVALID || loader->owner == PROCESS_PID_INVALID ||
-	    file_cap == CAP_ID_INVALID || out_load == NULL)
+			file_cap == CAP_ID_INVALID || out_load == NULL)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	*out_load = (struct program_load_result){
-		.load_cap   = CAP_ID_INVALID,
+		.load_cap = CAP_ID_INVALID,
 		.process_id = PROCESS_PID_INVALID,
 	};
 	status = cap_delegate(file_cap, loader->owner, LOADER_V1_FILE_CAP_RIGHTS, &delegated_file);
 	if (status != SYSCALL_STATUS_OK) return status;
 	payload.request.file_cap = delegated_file;
 	memcpy(payload.name, DEVICE_MANAGER_PROCESS_NAME, sizeof(payload.name));
-	status         = cap_call(loader->capability,
-	                          &payload,
-	                          sizeof(payload.request) + sizeof(payload.name),
-	                          &response,
-	                          sizeof(response),
-	                          &response_size);
+	status = cap_call(loader->capability,
+			&payload,
+			sizeof(payload.request) + sizeof(payload.name),
+			&response,
+			sizeof(response),
+			&response_size);
 	cleanup_status = cap_revoke(delegated_file, 0u);
 	if (status == SYSCALL_STATUS_OK && cleanup_status != SYSCALL_STATUS_OK) status = cleanup_status;
 	if (status != SYSCALL_STATUS_OK || response_size != sizeof(response) || response.load_cap == CAP_ID_INVALID ||
-	    response.process_id == PROCESS_PID_INVALID) {
+			response.process_id == PROCESS_PID_INVALID) {
 		if (response.load_cap != CAP_ID_INVALID) (void)program_cancel(response.load_cap);
 		return status == SYSCALL_STATUS_OK ? SYSCALL_STATUS_FAILED : status;
 	}
 	*out_load = (struct program_load_result){
-		.load_cap   = response.load_cap,
+		.load_cap = response.load_cap,
 		.process_id = response.process_id,
 	};
 	return SYSCALL_STATUS_OK;
 }
 
-static syscall_status_t device_manager_optional_resource(const struct init_state* init, enum kernel_resource_type type,
-                                                         cap_id_t* out_cap) {
+static syscall_status_t device_manager_optional_resource(
+		const struct init_state* init, enum kernel_resource_type type, cap_id_t* out_cap) {
 	syscall_status_t status;
 
 	*out_cap = CAP_ID_INVALID;
-	status   = kernel_resource_acquire(init->kernel_resources_cap, type, out_cap);
+	status = kernel_resource_acquire(init->kernel_resources_cap, type, out_cap);
 	return status == SYSCALL_STATUS_UNAVAILABLE ? SYSCALL_STATUS_OK : status;
 }
 
 enum device_manager_launch_result device_manager_launch(const struct init_state* init, cap_id_t* out_process_cap) {
 	static const struct registry_protocol_query loader_query = {
 		.namespace_path = PROGRAM_LOADER_NAMESPACE,
-		.protocol       = LOADER_PROTOCOL_NAME,
-		.major          = LOADER_PROTOCOL_VERSION_MAJOR,
-		.minor          = LOADER_PROTOCOL_VERSION_MINOR,
+		.protocol = LOADER_PROTOCOL_NAME,
+		.major = LOADER_PROTOCOL_VERSION_MAJOR,
+		.minor = LOADER_PROTOCOL_VERSION_MINOR,
 	};
 	static const struct registry_protocol_query vfs_query = {
 		.namespace_path = VFS_NAMESPACE,
-		.protocol       = VFS_PROTOCOL_NAME,
-		.major          = VFS_PROTOCOL_VERSION_MAJOR,
-		.minor          = VFS_PROTOCOL_VERSION_MINOR,
+		.protocol = VFS_PROTOCOL_NAME,
+		.major = VFS_PROTOCOL_VERSION_MAJOR,
+		.minor = VFS_PROTOCOL_VERSION_MINOR,
 	};
-	struct registry_service_handle loader     = {.capability = CAP_ID_INVALID};
-	struct registry_service_handle vfs        = {.capability = CAP_ID_INVALID};
-	struct filesystem_node_handle  executable = {.capability = CAP_ID_INVALID};
-	struct filesystem_call_result  open_result;
-	struct program_load_result     loaded = {
-		.load_cap   = CAP_ID_INVALID,
+	struct registry_service_handle loader = {.capability = CAP_ID_INVALID};
+	struct registry_service_handle vfs = {.capability = CAP_ID_INVALID};
+	struct filesystem_node_handle executable = {.capability = CAP_ID_INVALID};
+	struct filesystem_call_result open_result;
+	struct program_load_result loaded = {
+		.load_cap = CAP_ID_INVALID,
 		.process_id = PROCESS_PID_INVALID,
 	};
 	struct program_run_result running;
-	cap_id_t                  acpi_cap       = CAP_ID_INVALID;
-	cap_id_t                  dt_cap         = CAP_ID_INVALID;
-	cap_id_t                  dma_cap        = CAP_ID_INVALID;
-	cap_id_t                  interrupts_cap = CAP_ID_INVALID;
-	cap_id_t                  io_ports_cap   = CAP_ID_INVALID;
-	cap_id_t                  output_cap     = CAP_ID_INVALID;
-	const char**              argv           = NULL;
-	enum registry_status      registry_status;
-	syscall_status_t          status;
-	bool                      temporary_caps_released = true;
-	bool                      output_cap_owned        = false;
+	cap_id_t acpi_cap = CAP_ID_INVALID;
+	cap_id_t dt_cap = CAP_ID_INVALID;
+	cap_id_t dma_cap = CAP_ID_INVALID;
+	cap_id_t interrupts_cap = CAP_ID_INVALID;
+	cap_id_t io_ports_cap = CAP_ID_INVALID;
+	cap_id_t output_cap = CAP_ID_INVALID;
+	const char** argv = NULL;
+	enum registry_status registry_status;
+	syscall_status_t status;
+	bool temporary_caps_released = true;
+	bool output_cap_owned = false;
 
 	if (init == NULL || out_process_cap == NULL || *out_process_cap != CAP_ID_INVALID)
 		return DEVICE_MANAGER_LAUNCH_FAILED;
@@ -178,17 +179,17 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 		return DEVICE_MANAGER_LAUNCH_FAILED;
 	}
 	open_result = vfs_open(vfs.capability,
-	                       DEVICE_MANAGER_FILE_PATH,
-	                       sizeof(DEVICE_MANAGER_FILE_PATH) - 1u,
-	                       CAP_READ | CAP_DELEGATE,
-	                       &executable);
+			DEVICE_MANAGER_FILE_PATH,
+			sizeof(DEVICE_MANAGER_FILE_PATH) - 1u,
+			CAP_READ | CAP_DELEGATE,
+			&executable);
 	if (open_result.transport_status != SYSCALL_STATUS_OK || open_result.status != FILESYSTEM_STATUS_OK ||
-	    executable.info.type != FILESYSTEM_NODE_FILE) {
+			executable.info.type != FILESYSTEM_NODE_FILE) {
 		printf("init: device manager file open failed: transport=%u status=%u\n",
-		       (unsigned)open_result.transport_status,
-		       (unsigned)open_result.status);
-		status =
-			open_result.transport_status == SYSCALL_STATUS_OK ? SYSCALL_STATUS_FAILED : open_result.transport_status;
+				(unsigned)open_result.transport_status,
+				(unsigned)open_result.status);
+		status = open_result.transport_status == SYSCALL_STATUS_OK ? SYSCALL_STATUS_FAILED
+		                                                           : open_result.transport_status;
 	}
 	else {
 		status = device_manager_load(&loader, executable.capability, &loaded);
@@ -217,52 +218,51 @@ enum device_manager_launch_result device_manager_launch(const struct init_state*
 	if (status == SYSCALL_STATUS_OK) {
 		const struct program_capability_argument capv[PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_COUNT] = {
 			[PROCESS_STARTUP_CAP_STDIN] =
-				{
-											 .capability = CAP_ID_INVALID,
-											 },
+					{
+						.capability = CAP_ID_INVALID,
+					},
 			[PROCESS_STARTUP_CAP_STDOUT] =
-				{
-											 .capability = output_cap,
-											 .rights     = CAP_CALL | CAP_WRITE,
-											 },
+					{
+						.capability = output_cap,
+						.rights = CAP_CALL | CAP_WRITE,
+					},
 			[PROCESS_STARTUP_CAP_STDERR] =
-				{
-											 .capability = output_cap,
-											 .rights     = CAP_CALL | CAP_WRITE,
-											 },
+					{
+						.capability = output_cap,
+						.rights = CAP_CALL | CAP_WRITE,
+					},
 			[PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_ACPI] =
-				{
-											 .capability = acpi_cap,
-											 .rights     = CAP_CALL | CAP_READ | CAP_MANAGE | CAP_DELEGATE,
-											 },
+					{
+						.capability = acpi_cap,
+						.rights = CAP_CALL | CAP_READ | CAP_MANAGE | CAP_DELEGATE,
+					},
 			[PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_DEVICE_TREE] =
-				{
-											 .capability = dt_cap,
-											 .rights     = CAP_CALL | CAP_READ | CAP_DELEGATE,
-											 },
+					{
+						.capability = dt_cap,
+						.rights = CAP_CALL | CAP_READ | CAP_DELEGATE,
+					},
 			[PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_MEMORY_ALLOCATOR] =
-				{
-											 .capability = init->memory_allocator_cap,
-											 .rights     = DEVICE_MANAGER_MEMORY_ALLOCATOR_CAP_RIGHTS,
-											 },
+					{
+						.capability = init->memory_allocator_cap,
+						.rights = DEVICE_MANAGER_MEMORY_ALLOCATOR_CAP_RIGHTS,
+					},
 			[PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_DMA] =
-				{
-											 .capability = dma_cap,
-											 .rights     = dma_cap == CAP_ID_INVALID ? 0u : DEVICE_MANAGER_DMA_CAP_RIGHTS,
-											 },
+					{
+						.capability = dma_cap,
+						.rights = dma_cap == CAP_ID_INVALID ? 0u : DEVICE_MANAGER_DMA_CAP_RIGHTS,
+					},
 			[PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_INTERRUPTS] =
-				{
-											 .capability = interrupts_cap,
-											 .rights     = DEVICE_MANAGER_INTERRUPTS_CAP_RIGHTS,
-											 },
-			[PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_IO_PORTS] =
-				{
-											 .capability = io_ports_cap,
-											 .rights     = io_ports_cap == CAP_ID_INVALID ? 0u : DEVICE_PARSER_IO_PORTS_CAP_RIGHTS,
-											 },
+					{
+						.capability = interrupts_cap,
+						.rights = DEVICE_MANAGER_INTERRUPTS_CAP_RIGHTS,
+					},
+			[PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_IO_PORTS] = {
+				.capability = io_ports_cap,
+				.rights = io_ports_cap == CAP_ID_INVALID ? 0u : DEVICE_PARSER_IO_PORTS_CAP_RIGHTS,
+			},
 		};
 		status = program_run(
-			&loaded, init->argc, argv, PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_COUNT, capv, &running);
+				&loaded, init->argc, argv, PROCESS_STARTUP_CAP_COUNT + DEVICE_MANAGER_CAPABILITY_COUNT, capv, &running);
 	}
 	free(argv);
 	if (output_cap_owned && !device_manager_drop_capability(&output_cap, "terminal output"))

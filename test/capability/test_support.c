@@ -1,16 +1,17 @@
 #include "test_support.h"
 
+#include <test_memory.h>
+
 #include <core/address_space.h>
 #include <core/process.h>
-#include <test_memory.h>
 
 #define CAP_TEST_HEAP_SIZE ((size_t)8u * 1024u * 1024u)
 #define CAP_TEST_TARGET_COUNT 128u
 
 static uint8_t cap_test_heap[CAP_TEST_HEAP_SIZE] __attribute__((aligned(TEST_MAPPING_GRANULE)));
-static size_t  cap_test_heap_offset;
-static bool    cap_test_heap_initialized;
-static bool    cap_test_targets_initialized;
+static size_t cap_test_heap_offset;
+static bool cap_test_heap_initialized;
+static bool cap_test_targets_initialized;
 
 bool heap_grow_region(size_t minimum_size, void** out_base, size_t* out_size) {
 	size_t bytes;
@@ -19,12 +20,12 @@ bool heap_grow_region(size_t minimum_size, void** out_base, size_t* out_size) {
 	if (out_base == NULL || out_size == NULL) return false;
 	*out_base = NULL;
 	*out_size = 0u;
-	bytes     = minimum_size;
+	bytes = minimum_size;
 	for (;;) {
 		offset = __atomic_load_n(&cap_test_heap_offset, __ATOMIC_ACQUIRE);
 		if (bytes > CAP_TEST_HEAP_SIZE - offset) return false;
 		if (__atomic_compare_exchange_n(
-				&cap_test_heap_offset, &offset, offset + bytes, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+					&cap_test_heap_offset, &offset, offset + bytes, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
 			*out_base = cap_test_heap + offset;
 			*out_size = bytes;
 			return true;
@@ -39,9 +40,9 @@ static void cap_test_init_targets(void) {
 	for (process_id_t expected = 1u; expected <= CAP_TEST_TARGET_COUNT; expected++) {
 		struct process* process = NULL;
 		cr_assert_eq(process_create(&process, NULL),
-		             PROCESS_OK,
-		             "failed to create capability target %llu",
-		             (unsigned long long)expected);
+				PROCESS_OK,
+				"failed to create capability target %llu",
+				(unsigned long long)expected);
 		cr_assert_not_null(process);
 		cr_assert_eq(process_pid(process), expected, "capability target pid sequence changed");
 	}

@@ -1,18 +1,19 @@
-#include <core/id_table.h>
-#include <core/lock.h>
 #include <libc/stdlib.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
+#include <core/id_table.h>
+#include <core/lock.h>
+
 enum {
 	ID_TABLE_INITIAL_CAPACITY = 16u,
-	ID_TABLE_BITMAP_BITS      = sizeof(uint64_t) * 8u,
+	ID_TABLE_BITMAP_BITS = sizeof(uint64_t) * 8u,
 };
 
 union id_table_slot {
-	void*  object;
+	void* object;
 	size_t next_free;
 };
 
@@ -22,7 +23,7 @@ static size_t id_table_bitmap_words(size_t capacity) {
 
 static size_t id_table_slots_offset(size_t capacity) {
 	size_t bitmap_bytes = id_table_bitmap_words(capacity) * sizeof(uint64_t);
-	size_t alignment    = _Alignof(union id_table_slot);
+	size_t alignment = _Alignof(union id_table_slot);
 	return (bitmap_bytes + alignment - 1u) & ~(alignment - 1u);
 }
 
@@ -62,22 +63,22 @@ static bool id_table_id_for_index(const struct id_table* table, size_t index, id
 	id_table_id_t offset = (id_table_id_t)index;
 
 	if (table->min_id == ID_TABLE_ID_INVALID || table->min_id > table->max_id || index == SIZE_MAX ||
-	    offset > table->max_id - table->min_id)
+			offset > table->max_id - table->min_id)
 		return false;
 	*out_id = table->min_id + offset;
 	return true;
 }
 
 static enum id_table_result id_table_grow_locked(struct id_table* table, size_t minimum_capacity) {
-	void*                storage;
-	size_t               old_capacity;
-	size_t               old_slots_offset;
-	size_t               old_bitmap_bytes;
-	size_t               new_capacity;
-	size_t               new_slots_offset;
-	size_t               new_bitmap_bytes;
-	size_t               slot_bytes;
-	size_t               storage_bytes;
+	void* storage;
+	size_t old_capacity;
+	size_t old_slots_offset;
+	size_t old_bitmap_bytes;
+	size_t new_capacity;
+	size_t new_slots_offset;
+	size_t new_bitmap_bytes;
+	size_t slot_bytes;
+	size_t storage_bytes;
 	union id_table_slot* old_slots;
 	union id_table_slot* new_slots;
 
@@ -100,13 +101,13 @@ static enum id_table_result id_table_grow_locked(struct id_table* table, size_t 
 
 	new_slots_offset = id_table_slots_offset(new_capacity);
 	new_bitmap_bytes = id_table_bitmap_words(new_capacity) * sizeof(uint64_t);
-	slot_bytes       = new_capacity * sizeof(union id_table_slot);
+	slot_bytes = new_capacity * sizeof(union id_table_slot);
 	if (new_slots_offset > SIZE_MAX - slot_bytes) return ID_TABLE_NO_MEMORY;
 	storage_bytes = new_slots_offset + slot_bytes;
 
 	old_slots_offset = id_table_slots_offset(old_capacity);
 	old_bitmap_bytes = id_table_bitmap_words(old_capacity) * sizeof(uint64_t);
-	storage          = realloc(table->storage, storage_bytes);
+	storage = realloc(table->storage, storage_bytes);
 	if (storage == NULL) return ID_TABLE_NO_MEMORY;
 
 	old_slots = (union id_table_slot*)((uint8_t*)storage + old_slots_offset);
@@ -117,19 +118,19 @@ static enum id_table_result id_table_grow_locked(struct id_table* table, size_t 
 	}
 	memset(new_slots + old_capacity, 0, (new_capacity - old_capacity) * sizeof(*new_slots));
 
-	table->storage  = storage;
-	table->slots    = new_slots;
+	table->storage = storage;
+	table->slots = new_slots;
 	table->capacity = new_capacity;
 	return ID_TABLE_OK;
 }
 
-enum id_table_result id_table_init(struct id_table* table, const char* lock_name, id_table_id_t min_id,
-                                   id_table_id_t max_id) {
+enum id_table_result id_table_init(
+		struct id_table* table, const char* lock_name, id_table_id_t min_id, id_table_id_t max_id) {
 	if (table == NULL || min_id == ID_TABLE_ID_INVALID || min_id > max_id) return ID_TABLE_INVALID_ARGUMENTS;
 
 	*table = (struct id_table){
-		.min_id    = min_id,
-		.max_id    = max_id,
+		.min_id = min_id,
+		.max_id = max_id,
 		.free_head = SIZE_MAX,
 	};
 	spinlock_init_class(&table->lock, lock_name, SPINLOCK_ORDER_ID_TABLE, SPINLOCK_FLAG_IRQSAVE);
@@ -138,30 +139,30 @@ enum id_table_result id_table_init(struct id_table* table, const char* lock_name
 
 void id_table_deinit(struct id_table* table) {
 	struct irq_state state;
-	void*            storage;
+	void* storage;
 
 	if (table == NULL) return;
 
-	state                 = spinlock_lock_irqsave(&table->lock);
-	storage               = table->storage;
-	table->min_id         = ID_TABLE_ID_INVALID;
-	table->max_id         = ID_TABLE_ID_INVALID;
-	table->count          = 0u;
-	table->capacity       = 0u;
+	state = spinlock_lock_irqsave(&table->lock);
+	storage = table->storage;
+	table->min_id = ID_TABLE_ID_INVALID;
+	table->max_id = ID_TABLE_ID_INVALID;
+	table->count = 0u;
+	table->capacity = 0u;
 	table->high_watermark = 0u;
-	table->free_head      = SIZE_MAX;
-	table->storage        = NULL;
-	table->slots          = NULL;
+	table->free_head = SIZE_MAX;
+	table->storage = NULL;
+	table->slots = NULL;
 	spinlock_unlock_irqrestore(&table->lock, state);
 
 	free(storage);
 }
 
-static enum id_table_result id_table_alloc_internal(struct id_table* table, void* object, id_table_id_t* out_id,
-                                                    bool reuse) {
-	struct irq_state     state;
-	id_table_id_t        id;
-	size_t               index;
+static enum id_table_result id_table_alloc_internal(
+		struct id_table* table, void* object, id_table_id_t* out_id, bool reuse) {
+	struct irq_state state;
+	id_table_id_t id;
+	size_t index;
 	enum id_table_result result;
 
 	if (out_id != NULL) *out_id = ID_TABLE_ID_INVALID;
@@ -169,7 +170,7 @@ static enum id_table_result id_table_alloc_internal(struct id_table* table, void
 
 	state = spinlock_lock_irqsave(&table->lock);
 	if (reuse && table->free_head != SIZE_MAX) {
-		index            = table->free_head;
+		index = table->free_head;
 		table->free_head = table->slots[index].next_free;
 	}
 	else {
@@ -209,8 +210,8 @@ enum id_table_result id_table_alloc_fresh(struct id_table* table, void* object, 
 
 void* id_table_lookup(struct id_table* table, id_table_id_t id) {
 	struct irq_state state;
-	size_t           index;
-	void*            object = NULL;
+	size_t index;
+	void* object = NULL;
 
 	if (id_table_index(table, id, &index) != ID_TABLE_OK) return NULL;
 
@@ -224,8 +225,8 @@ void* id_table_lookup(struct id_table* table, id_table_id_t id) {
 
 void* id_table_lookup_retain(struct id_table* table, id_table_id_t id, id_table_retain_fn retain, void* context) {
 	struct irq_state state;
-	size_t           index;
-	void*            object = NULL;
+	size_t index;
+	void* object = NULL;
 
 	if (retain == NULL || id_table_index(table, id, &index) != ID_TABLE_OK) return NULL;
 
@@ -248,9 +249,9 @@ void* id_table_lookup_index_locked(const struct id_table* table, size_t index) {
 }
 
 enum id_table_result id_table_remove(struct id_table* table, id_table_id_t id, void** out_object) {
-	struct irq_state     state;
-	size_t               index;
-	void*                object;
+	struct irq_state state;
+	size_t index;
+	void* object;
 	enum id_table_result result;
 
 	if (out_object != NULL) *out_object = NULL;
@@ -266,7 +267,7 @@ enum id_table_result id_table_remove(struct id_table* table, id_table_id_t id, v
 	object = table->slots[index].object;
 	id_table_slot_set_free(table, index);
 	table->slots[index].next_free = table->free_head;
-	table->free_head              = index;
+	table->free_head = index;
 	table->count--;
 	spinlock_unlock_irqrestore(&table->lock, state);
 
@@ -276,7 +277,7 @@ enum id_table_result id_table_remove(struct id_table* table, id_table_id_t id, v
 
 size_t id_table_count(struct id_table* table) {
 	struct irq_state state;
-	size_t           count;
+	size_t count;
 
 	if (table == NULL) return 0u;
 

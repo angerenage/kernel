@@ -14,10 +14,10 @@ static void init_small_user_space(struct address_space* space) {
 
 Test(exception_fault, user_not_present_fault_materializes_only_the_current_user_space) {
 	_Alignas(4096) uint8_t arena[KiB(512)];
-	struct address_space   user_space = {0};
-	struct thread          current    = {0};
-	struct mapping*        mapping    = NULL;
-	void*                  base       = NULL;
+	struct address_space user_space = {0};
+	struct thread current = {0};
+	struct mapping* mapping = NULL;
+	void* base = NULL;
 
 	init_test_address_space(arena, sizeof(arena));
 	bind_exception_test_cpu();
@@ -27,21 +27,21 @@ Test(exception_fault, user_not_present_fault_materializes_only_the_current_user_
 	cpu_current_thread_store(cpu_current(), &current);
 
 	cr_assert(test_address_space_map(&user_space,
-	                                 TEST_MAPPING_GRANULE,
-	                                 MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
-	                                 0u,
-	                                 TEST_MAPPING_GRANULE,
-	                                 0u,
-	                                 &mapping,
-	                                 &base));
+			TEST_MAPPING_GRANULE,
+			MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+			0u,
+			TEST_MAPPING_GRANULE,
+			0u,
+			&mapping,
+			&base));
 	cr_assert_eq(mock_paging_mapping_count(), 0u);
 
-	cr_assert(
-		address_space_handle_current_fault((uintptr_t)base, ADDRESS_SPACE_FAULT_NOT_PRESENT, MEMORY_ACCESS_READ, true),
-		"valid userspace lazy fault was not resolved");
+	cr_assert(address_space_handle_current_fault(
+					  (uintptr_t)base, ADDRESS_SPACE_FAULT_NOT_PRESENT, MEMORY_ACCESS_READ, true),
+			"valid userspace lazy fault was not resolved");
 	cr_assert_eq(mock_paging_mapping_count(), 1u, "valid userspace fault did not materialize exactly one page");
 	cr_assert(hal_paging_query(address_space_paging_space(&user_space), (uintptr_t)base, NULL),
-	          "faulted page was not mapped in the current user address space");
+			"faulted page was not mapped in the current user address space");
 
 	cpu_current_thread_store(cpu_current(), NULL);
 	cr_assert(address_space_unmap(&user_space, mapping));
@@ -52,12 +52,12 @@ Test(exception_fault, user_not_present_fault_materializes_only_the_current_user_
 
 Test(exception_fault, user_fault_cannot_materialize_a_lazy_kernel_mapping) {
 	_Alignas(4096) uint8_t arena[KiB(512)];
-	struct address_space   user_space     = {0};
-	struct thread          current        = {0};
-	struct mapping*        kernel_mapping = NULL;
-	void*                  kernel_base    = NULL;
-	size_t                 mappings_before;
-	size_t                 free_before;
+	struct address_space user_space = {0};
+	struct thread current = {0};
+	struct mapping* kernel_mapping = NULL;
+	void* kernel_base = NULL;
+	size_t mappings_before;
+	size_t free_before;
 
 	init_test_address_space(arena, sizeof(arena));
 	bind_exception_test_cpu();
@@ -67,20 +67,20 @@ Test(exception_fault, user_fault_cannot_materialize_a_lazy_kernel_mapping) {
 	cpu_current_thread_store(cpu_current(), &current);
 
 	cr_assert(test_address_space_map(address_space_kernel(),
-	                                 TEST_MAPPING_GRANULE,
-	                                 MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE | 0u,
-	                                 0u,
-	                                 TEST_MAPPING_GRANULE,
-	                                 0u,
-	                                 &kernel_mapping,
-	                                 &kernel_base),
-	          "lazy kernel allocation failed");
+					  TEST_MAPPING_GRANULE,
+					  MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE | 0u,
+					  0u,
+					  TEST_MAPPING_GRANULE,
+					  0u,
+					  &kernel_mapping,
+					  &kernel_base),
+			"lazy kernel allocation failed");
 	mappings_before = mock_paging_mapping_count();
-	free_before     = pmm_free_size();
+	free_before = pmm_free_size();
 
 	cr_assert_not(address_space_handle_current_fault(
-					  (uintptr_t)kernel_base, ADDRESS_SPACE_FAULT_NOT_PRESENT, MEMORY_ACCESS_READ, true),
-	              "userspace fault must not be satisfied from the kernel lazy address space");
+						  (uintptr_t)kernel_base, ADDRESS_SPACE_FAULT_NOT_PRESENT, MEMORY_ACCESS_READ, true),
+			"userspace fault must not be satisfied from the kernel lazy address space");
 	cr_assert_eq(mock_paging_mapping_count(), mappings_before, "userspace fault materialized a kernel-only mapping");
 	cr_assert_eq(pmm_free_size(), free_before, "userspace fault allocated physical backing for a kernel-only region");
 
@@ -93,11 +93,11 @@ Test(exception_fault, user_fault_cannot_materialize_a_lazy_kernel_mapping) {
 
 Test(exception_fault, forbidden_user_access_does_not_materialize_lazy_backing) {
 	_Alignas(4096) uint8_t arena[KiB(512)];
-	struct address_space   user_space = {0};
-	struct thread          current    = {0};
-	struct mapping*        mapping    = NULL;
-	void*                  base       = NULL;
-	size_t                 free_before;
+	struct address_space user_space = {0};
+	struct thread current = {0};
+	struct mapping* mapping = NULL;
+	void* base = NULL;
+	size_t free_before;
 
 	init_test_address_space(arena, sizeof(arena));
 	bind_exception_test_cpu();
@@ -106,17 +106,17 @@ Test(exception_fault, forbidden_user_access_does_not_materialize_lazy_backing) {
 	cpu_current_thread_store(cpu_current(), &current);
 
 	cr_assert(test_address_space_map(
-		&user_space, TEST_MAPPING_GRANULE, MEMORY_ACCESS_READ, 0u, TEST_MAPPING_GRANULE, 0u, &mapping, &base));
+			&user_space, TEST_MAPPING_GRANULE, MEMORY_ACCESS_READ, 0u, TEST_MAPPING_GRANULE, 0u, &mapping, &base));
 	free_before = pmm_free_size();
 	cr_assert_not(address_space_handle_current_fault(
-		(uintptr_t)base, ADDRESS_SPACE_FAULT_NOT_PRESENT, MEMORY_ACCESS_WRITE, true));
+			(uintptr_t)base, ADDRESS_SPACE_FAULT_NOT_PRESENT, MEMORY_ACCESS_WRITE, true));
 	cr_assert_not(hal_paging_query(address_space_paging_space(&user_space), (uintptr_t)base, NULL));
 	cr_assert_eq(pmm_free_size(), free_before, "a rejected write fault must not allocate physical backing");
 
-	cr_assert(
-		address_space_handle_current_fault((uintptr_t)base, ADDRESS_SPACE_FAULT_NOT_PRESENT, MEMORY_ACCESS_READ, true));
+	cr_assert(address_space_handle_current_fault(
+			(uintptr_t)base, ADDRESS_SPACE_FAULT_NOT_PRESENT, MEMORY_ACCESS_READ, true));
 	cr_assert(hal_paging_query(address_space_paging_space(&user_space), (uintptr_t)base, NULL),
-	          "an allowed read fault must still materialize userspace lazy backing");
+			"an allowed read fault must still materialize userspace lazy backing");
 
 	cpu_current_thread_store(cpu_current(), NULL);
 	cr_assert(address_space_unmap(&user_space, mapping));

@@ -1,12 +1,13 @@
 #include "test_support.h"
 
-#include <hal/cache.h>
 #include <test_memory.h>
+
+#include <hal/cache.h>
 
 #include "../../kernel/src/capability/memory_allocator.h"
 #include "../../kernel/src/syscall/capability.h"
 
-static size_t          serial_bytes;
+static size_t serial_bytes;
 static cap_object_id_t loader_object_id = CAP_OBJECT_ID_INVALID;
 
 static syscall_result_t loader_test_handler(const struct cap_request* request) {
@@ -81,14 +82,14 @@ void kernel_capability_test_end(struct kernel_capability_test_context* ctx) {
 	*ctx = (struct kernel_capability_test_context){0};
 }
 
-syscall_result_t kernel_capability_test_call(cap_id_t cap, const void* request, size_t request_size, void* response,
-                                             size_t response_capacity) {
+syscall_result_t kernel_capability_test_call(
+		cap_id_t cap, const void* request, size_t request_size, void* response, size_t response_capacity) {
 	return syscall_cap_call((uintptr_t)cap,
-	                        (uintptr_t)request,
-	                        (uintptr_t)request_size,
-	                        (uintptr_t)response,
-	                        (uintptr_t)response_capacity,
-	                        0u);
+			(uintptr_t)request,
+			(uintptr_t)request_size,
+			(uintptr_t)response,
+			(uintptr_t)response_capacity,
+			0u);
 }
 
 uintptr_t kernel_capability_test_alloc_user_buffer(struct process* process, size_t size, struct mapping** out_mapping) {
@@ -98,13 +99,13 @@ uintptr_t kernel_capability_test_alloc_user_buffer(struct process* process, size
 	cr_assert_not_null(out_mapping);
 	*out_mapping = NULL;
 	cr_assert(test_address_space_map(process_address_space(process),
-	                                 size,
-	                                 MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
-	                                 0u,
-	                                 TEST_MAPPING_GRANULE,
-	                                 0u,
-	                                 out_mapping,
-	                                 &base));
+			size,
+			MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+			0u,
+			TEST_MAPPING_GRANULE,
+			0u,
+			out_mapping,
+			&base));
 	cr_assert_not_null(base);
 	return (uintptr_t)base;
 }
@@ -112,9 +113,9 @@ uintptr_t kernel_capability_test_alloc_user_buffer(struct process* process, size
 void kernel_capability_test_poison_next_pmm_page(uint8_t value) {
 	struct pmm_extent allocation;
 
-	cr_assert(
-		pmm_alloc(&(const struct pmm_alloc_request){.size = TEST_MAPPING_GRANULE, .alignment = TEST_MAPPING_GRANULE},
-		          &allocation));
+	cr_assert(pmm_alloc(
+			&(const struct pmm_alloc_request){.size = TEST_MAPPING_GRANULE, .alignment = TEST_MAPPING_GRANULE},
+			&allocation));
 	memset((void*)(allocation.address + mm_info.direct_map_offset), value, allocation.size);
 	cr_assert(pmm_free(allocation), "failed to return poisoned PMM extent");
 }

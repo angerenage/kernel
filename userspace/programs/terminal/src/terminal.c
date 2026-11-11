@@ -1,6 +1,5 @@
 #include "terminal.h"
 
-#include <base/math.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -8,6 +7,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <base/math.h>
+
 #include <system/trace.h>
 
 #include "glyph_cache.h"
@@ -43,7 +45,7 @@ struct terminal_theme {
 };
 
 struct pixel_format {
-	size_t  bytes_per_pixel;
+	size_t bytes_per_pixel;
 	uint8_t red_size;
 	uint8_t red_shift;
 	uint8_t green_size;
@@ -53,40 +55,40 @@ struct pixel_format {
 };
 
 struct drawing_surface {
-	volatile uint8_t*   framebuffer;
-	uint8_t*            shadow;
-	size_t              width;
-	size_t              height;
-	size_t              pitch;
-	size_t              shadow_pitch;
+	volatile uint8_t* framebuffer;
+	uint8_t* shadow;
+	size_t width;
+	size_t height;
+	size_t pitch;
+	size_t shadow_pitch;
 	struct pixel_format format;
 };
 
 struct terminal_cell {
-	uint32_t     codepoint;
+	uint32_t codepoint;
 	struct color foreground;
 	struct color background;
-	bool         underline;
+	bool underline;
 };
 
 struct terminal_overlay_cell {
-	size_t               index;
+	size_t index;
 	struct terminal_cell cell;
 };
 
 struct terminal_selection_state {
 	struct terminal_selection_position anchor;
 	struct terminal_selection_position focus;
-	bool                               active;
+	bool active;
 };
 
 struct terminal_pointer_shape {
 	const char* pixels;
-	size_t      stride;
-	size_t      width;
-	size_t      height;
-	size_t      hotspot_x;
-	size_t      hotspot_y;
+	size_t stride;
+	size_t width;
+	size_t height;
+	size_t hotspot_x;
+	size_t hotspot_y;
 };
 
 enum escape_state {
@@ -96,110 +98,127 @@ enum escape_state {
 };
 
 struct terminal {
-	struct drawing_surface             surface;
-	FT_Library                         library;
-	FT_Face                            face;
-	struct terminal_glyph_cache*       glyph_cache;
-	uint8_t*                           font_data;
-	size_t                             cell_width;
-	size_t                             cell_height;
-	size_t                             ascender;
-	size_t                             columns;
-	size_t                             rows;
-	size_t                             column;
-	size_t                             row;
-	struct terminal_cell*              cells;
-	size_t                             cell_count;
-	struct terminal_cell*              history;
-	size_t                             history_count;
-	size_t                             history_head;
-	uint64_t                           screen_origin;
-	size_t                             viewport_offset;
-	bool                               viewport_dirty;
-	struct terminal_selection_state    selection;
-	uint8_t*                           clipboard;
-	size_t                             clipboard_size;
-	size_t                             saved_column;
-	size_t                             saved_row;
-	bool                               saved_cursor;
-	bool                               cursor_visible;
-	bool                               cursor_drawn;
-	size_t                             cursor_drawn_row;
-	size_t                             cursor_drawn_column;
-	size_t                             pointer_x;
-	size_t                             pointer_y;
-	bool                               pointer_moved;
-	bool                               pointer_drawn;
-	size_t                             pointer_drawn_x;
-	size_t                             pointer_drawn_y;
-	size_t                             pointer_drawn_width;
-	size_t                             pointer_drawn_height;
-	bool                               pointer_primary_pressed;
-	bool                               pointer_selecting;
-	uint64_t                           pointer_selection_source;
+	struct drawing_surface surface;
+	FT_Library library;
+	FT_Face face;
+	struct terminal_glyph_cache* glyph_cache;
+	uint8_t* font_data;
+	size_t cell_width;
+	size_t cell_height;
+	size_t ascender;
+	size_t columns;
+	size_t rows;
+	size_t column;
+	size_t row;
+	struct terminal_cell* cells;
+	size_t cell_count;
+	struct terminal_cell* history;
+	size_t history_count;
+	size_t history_head;
+	uint64_t screen_origin;
+	size_t viewport_offset;
+	bool viewport_dirty;
+	struct terminal_selection_state selection;
+	uint8_t* clipboard;
+	size_t clipboard_size;
+	size_t saved_column;
+	size_t saved_row;
+	bool saved_cursor;
+	bool cursor_visible;
+	bool cursor_drawn;
+	size_t cursor_drawn_row;
+	size_t cursor_drawn_column;
+	size_t pointer_x;
+	size_t pointer_y;
+	bool pointer_moved;
+	bool pointer_drawn;
+	size_t pointer_drawn_x;
+	size_t pointer_drawn_y;
+	size_t pointer_drawn_width;
+	size_t pointer_drawn_height;
+	bool pointer_primary_pressed;
+	bool pointer_selecting;
+	uint64_t pointer_selection_source;
 	struct terminal_selection_position pointer_selection_anchor;
-	bool                               wrap_pending;
-	bool                               locked;
-	uint32_t*                          preedit_codepoints;
-	size_t                             preedit_count;
-	size_t                             preedit_caret;
-	struct terminal_overlay_cell*      overlay;
-	size_t                             overlay_count;
-	bool                               foreground_default;
-	bool                               background_default;
-	bool                               bold;
-	bool                               reverse;
-	bool                               underline;
-	uint8_t                            foreground;
-	uint8_t                            background;
-	uint32_t                           utf8_value;
-	uint32_t                           utf8_minimum;
-	uint8_t                            utf8_remaining;
-	enum escape_state                  escape_state;
-	uint16_t                           csi_parameters[TERMINAL_CSI_PARAMETER_CAPACITY];
-	size_t                             csi_parameter_count;
-	uint16_t                           csi_value;
-	bool                               csi_has_value;
-	bool                               csi_invalid;
-	bool                               csi_private;
+	bool wrap_pending;
+	bool locked;
+	uint32_t* preedit_codepoints;
+	size_t preedit_count;
+	size_t preedit_caret;
+	struct terminal_overlay_cell* overlay;
+	size_t overlay_count;
+	bool foreground_default;
+	bool background_default;
+	bool bold;
+	bool reverse;
+	bool underline;
+	uint8_t foreground;
+	uint8_t background;
+	uint32_t utf8_value;
+	uint32_t utf8_minimum;
+	uint8_t utf8_remaining;
+	enum escape_state escape_state;
+	uint16_t csi_parameters[TERMINAL_CSI_PARAMETER_CAPACITY];
+	size_t csi_parameter_count;
+	uint16_t csi_value;
+	bool csi_has_value;
+	bool csi_invalid;
+	bool csi_private;
 };
 
 static const struct terminal_theme theme = {
-	.background           = {0x1e, 0x1e, 0x1e},
-	.foreground           = {0xcc, 0xcc, 0xcc},
+	.background = {0x1e, 0x1e, 0x1e},
+	.foreground = {0xcc, 0xcc, 0xcc},
 	.selection_background = {0x3a, 0x3d, 0x41},
 	.selection_foreground = {0xe0, 0xe0, 0xe0},
-	.cursor               = {0xff, 0xff, 0xff},
-	.cursor_text          = {0x00, 0x00, 0x00},
-	.palette[0]           = {0x00, 0x00, 0x00}, // Black
-	.palette[1]           = {0xd8, 0x2a, 0x2a}, // Red
-	.palette[2]           = {0x22, 0xac, 0x3c}, // Green
-	.palette[3]           = {0xe6, 0xe6, 0x03}, // Dark yellow
-	.palette[4]           = {0x31, 0x45, 0x9c}, // Dark blue
-	.palette[5]           = {0xd8, 0x22, 0x7f}, // Magenta
-	.palette[6]           = {0x18, 0x99, 0xb9}, // Dark cyan
-	.palette[7]           = {0x96, 0x96, 0x96}, // Light gray
-	.palette[8]           = {0x50, 0x50, 0x50}, // Dark gray
-	.palette[9]           = {0xf7, 0x49, 0x49}, // Light red
-	.palette[10]          = {0xac, 0xe9, 0x71}, // Light green
-	.palette[11]          = {0xf7, 0xf7, 0x61}, // Yellow
-	.palette[12]          = {0x52, 0xa0, 0xf5}, // Blue
-	.palette[13]          = {0xd6, 0x70, 0xd6}, // Light magenta
-	.palette[14]          = {0x3d, 0xf8, 0xf7}, // Cyan
-	.palette[15]          = {0xe5, 0xe5, 0xe5}, // White
+	.cursor = {0xff, 0xff, 0xff},
+	.cursor_text = {0x00, 0x00, 0x00},
+	.palette[0] = {0x00, 0x00, 0x00},  // Black
+	.palette[1] = {0xd8, 0x2a, 0x2a},  // Red
+	.palette[2] = {0x22, 0xac, 0x3c},  // Green
+	.palette[3] = {0xe6, 0xe6, 0x03},  // Dark yellow
+	.palette[4] = {0x31, 0x45, 0x9c},  // Dark blue
+	.palette[5] = {0xd8, 0x22, 0x7f},  // Magenta
+	.palette[6] = {0x18, 0x99, 0xb9},  // Dark cyan
+	.palette[7] = {0x96, 0x96, 0x96},  // Light gray
+	.palette[8] = {0x50, 0x50, 0x50},  // Dark gray
+	.palette[9] = {0xf7, 0x49, 0x49},  // Light red
+	.palette[10] = {0xac, 0xe9, 0x71}, // Light green
+	.palette[11] = {0xf7, 0xf7, 0x61}, // Yellow
+	.palette[12] = {0x52, 0xa0, 0xf5}, // Blue
+	.palette[13] = {0xd6, 0x70, 0xd6}, // Light magenta
+	.palette[14] = {0x3d, 0xf8, 0xf7}, // Cyan
+	.palette[15] = {0xe5, 0xe5, 0xe5}, // White
 };
 
 static const char ibeam_pointer_pixels[][12] = {
-	"BBBBBBBBBBB", "WWWWWWWWWWW", "....BWB....", "....BWB....", "....BWB....", "....BWB....", "....BWB....",
-	"....BWB....", "...BBWBB...", "...BBWBB...", "...BBWBB...", "...BBWBB...", "....BWB....", "....BWB....",
-	"....BWB....", "....BWB....", "....BWB....", "....BWB....", "WWWWWWWWWWW", "BBBBBBBBBBB",
+	"BBBBBBBBBBB",
+	"WWWWWWWWWWW",
+	"....BWB....",
+	"....BWB....",
+	"....BWB....",
+	"....BWB....",
+	"....BWB....",
+	"....BWB....",
+	"...BBWBB...",
+	"...BBWBB...",
+	"...BBWBB...",
+	"...BBWBB...",
+	"....BWB....",
+	"....BWB....",
+	"....BWB....",
+	"....BWB....",
+	"....BWB....",
+	"....BWB....",
+	"WWWWWWWWWWW",
+	"BBBBBBBBBBB",
 };
 
 static const struct terminal_pointer_shape ibeam_pointer_shape = {
-	.pixels    = &ibeam_pointer_pixels[0][0],
-	.stride    = sizeof(ibeam_pointer_pixels[0]),
-	.width     = sizeof(ibeam_pointer_pixels[0]) - 1u,
-	.height    = sizeof(ibeam_pointer_pixels) / sizeof(ibeam_pointer_pixels[0]),
+	.pixels = &ibeam_pointer_pixels[0][0],
+	.stride = sizeof(ibeam_pointer_pixels[0]),
+	.width = sizeof(ibeam_pointer_pixels[0]) - 1u,
+	.height = sizeof(ibeam_pointer_pixels) / sizeof(ibeam_pointer_pixels[0]),
 	.hotspot_x = 5u,
 	.hotspot_y = 10u,
 };
@@ -218,23 +237,23 @@ static bool pixel_format_initialize(const struct framebuffer_info_response* info
 	uint64_t blue_mask;
 
 	if (info == NULL || format == NULL || info->memory_model != FRAMEBUFFER_MEMORY_MODEL_RGB || info->bpp == 0u ||
-	    info->bpp > 64u || info->bpp % 8u != 0u ||
-	    !channel_valid(info->red_mask_size, info->red_mask_shift, info->bpp) ||
-	    !channel_valid(info->green_mask_size, info->green_mask_shift, info->bpp) ||
-	    !channel_valid(info->blue_mask_size, info->blue_mask_shift, info->bpp))
+			info->bpp > 64u || info->bpp % 8u != 0u ||
+			!channel_valid(info->red_mask_size, info->red_mask_shift, info->bpp) ||
+			!channel_valid(info->green_mask_size, info->green_mask_shift, info->bpp) ||
+			!channel_valid(info->blue_mask_size, info->blue_mask_shift, info->bpp))
 		return false;
-	red_mask   = channel_mask(info->red_mask_size, info->red_mask_shift);
+	red_mask = channel_mask(info->red_mask_size, info->red_mask_shift);
 	green_mask = channel_mask(info->green_mask_size, info->green_mask_shift);
-	blue_mask  = channel_mask(info->blue_mask_size, info->blue_mask_shift);
+	blue_mask = channel_mask(info->blue_mask_size, info->blue_mask_shift);
 	if ((red_mask & green_mask) != 0u || (red_mask & blue_mask) != 0u || (green_mask & blue_mask) != 0u) return false;
 	*format = (struct pixel_format){
 		.bytes_per_pixel = info->bpp / 8u,
-		.red_size        = info->red_mask_size,
-		.red_shift       = info->red_mask_shift,
-		.green_size      = info->green_mask_size,
-		.green_shift     = info->green_mask_shift,
-		.blue_size       = info->blue_mask_size,
-		.blue_shift      = info->blue_mask_shift,
+		.red_size = info->red_mask_size,
+		.red_shift = info->red_mask_shift,
+		.green_size = info->green_mask_size,
+		.green_shift = info->green_mask_shift,
+		.blue_size = info->blue_mask_size,
+		.blue_shift = info->blue_mask_shift,
 	};
 	return true;
 }
@@ -299,7 +318,7 @@ static void write_pixel(volatile uint8_t* destination, size_t size, uint64_t pix
 
 static void fill_pixel_run(volatile uint8_t* destination, size_t count, size_t pixel_size, uint64_t pixel) {
 	uint64_t repeated;
-	size_t   pixels_per_store;
+	size_t pixels_per_store;
 
 	switch (pixel_size) {
 	case 1u:
@@ -350,39 +369,39 @@ static void hide_pointer_cursor(struct terminal* terminal) {
 		volatile uint8_t* destination = terminal->surface.framebuffer +
 		                                (terminal->pointer_drawn_y + row) * terminal->surface.pitch +
 		                                terminal->pointer_drawn_x * pixel_size;
-		const uint8_t*    source      = terminal->surface.shadow +
-		                                (terminal->pointer_drawn_y + row) * terminal->surface.shadow_pitch +
-		                                terminal->pointer_drawn_x * pixel_size;
+		const uint8_t* source = terminal->surface.shadow +
+		                        (terminal->pointer_drawn_y + row) * terminal->surface.shadow_pitch +
+		                        terminal->pointer_drawn_x * pixel_size;
 		memcpy((void*)destination, source, terminal->pointer_drawn_width * pixel_size);
 	}
 	terminal->pointer_drawn = false;
 }
 
 static void show_pointer_cursor(struct terminal* terminal) {
-	const struct terminal_pointer_shape* shape      = &ibeam_pointer_shape;
-	const size_t                         pixel_size = terminal->surface.format.bytes_per_pixel;
-	size_t                               source_x   = 0u;
-	size_t                               source_y   = 0u;
-	size_t                               destination_x;
-	size_t                               destination_y;
-	size_t                               width;
-	size_t                               height;
-	uint64_t                             outline = encode_color(&terminal->surface.format, theme.cursor_text);
-	uint64_t                             fill    = encode_color(&terminal->surface.format, theme.cursor);
+	const struct terminal_pointer_shape* shape = &ibeam_pointer_shape;
+	const size_t pixel_size = terminal->surface.format.bytes_per_pixel;
+	size_t source_x = 0u;
+	size_t source_y = 0u;
+	size_t destination_x;
+	size_t destination_y;
+	size_t width;
+	size_t height;
+	uint64_t outline = encode_color(&terminal->surface.format, theme.cursor_text);
+	uint64_t fill = encode_color(&terminal->surface.format, theme.cursor);
 
 	if (!terminal->pointer_moved || terminal->pointer_drawn) return;
 	if (terminal->pointer_x < shape->hotspot_x) source_x = shape->hotspot_x - terminal->pointer_x;
 	if (terminal->pointer_y < shape->hotspot_y) source_y = shape->hotspot_y - terminal->pointer_y;
 	destination_x = terminal->pointer_x < shape->hotspot_x ? 0u : terminal->pointer_x - shape->hotspot_x;
 	destination_y = terminal->pointer_y < shape->hotspot_y ? 0u : terminal->pointer_y - shape->hotspot_y;
-	width         = shape->width - source_x;
-	height        = shape->height - source_y;
+	width = shape->width - source_x;
+	height = shape->height - source_y;
 	if (width > terminal->surface.width - destination_x) width = terminal->surface.width - destination_x;
 	if (height > terminal->surface.height - destination_y) height = terminal->surface.height - destination_y;
 
-	terminal->pointer_drawn_x      = destination_x;
-	terminal->pointer_drawn_y      = destination_y;
-	terminal->pointer_drawn_width  = width;
+	terminal->pointer_drawn_x = destination_x;
+	terminal->pointer_drawn_y = destination_y;
+	terminal->pointer_drawn_width = width;
 	terminal->pointer_drawn_height = height;
 	for (size_t row = 0u; row < height; row++) {
 		volatile uint8_t* destination = terminal->surface.framebuffer +
@@ -396,17 +415,17 @@ static void show_pointer_cursor(struct terminal* terminal) {
 	terminal->pointer_drawn = true;
 }
 
-static void fill_rectangle(struct drawing_surface* surface, size_t x, size_t y, size_t width, size_t height,
-                           struct color color) {
+static void fill_rectangle(
+		struct drawing_surface* surface, size_t x, size_t y, size_t width, size_t height, struct color color) {
 	uint64_t pixel = encode_color(&surface->format, color);
 	for (size_t row = 0u; row < height; row++) {
 		volatile uint8_t* destination =
-			surface->framebuffer + (y + row) * surface->pitch + x * surface->format.bytes_per_pixel;
+				surface->framebuffer + (y + row) * surface->pitch + x * surface->format.bytes_per_pixel;
 		fill_pixel_run(destination, width, surface->format.bytes_per_pixel, pixel);
 	}
 	for (size_t row = 0u; row < height; row++) {
 		uint8_t* destination =
-			surface->shadow + (y + row) * surface->shadow_pitch + x * surface->format.bytes_per_pixel;
+				surface->shadow + (y + row) * surface->shadow_pitch + x * surface->format.bytes_per_pixel;
 		fill_pixel_run(destination, width, surface->format.bytes_per_pixel, pixel);
 	}
 }
@@ -415,38 +434,38 @@ static void copy_to_framebuffer(volatile uint8_t* destination, const uint8_t* so
 	memcpy((void*)destination, (const void*)source, size);
 }
 
-static void move_surface_rows(struct drawing_surface* surface, size_t destination_y, size_t source_y, size_t rows,
-                              size_t width) {
+static void move_surface_rows(
+		struct drawing_surface* surface, size_t destination_y, size_t source_y, size_t rows, size_t width) {
 	if (rows == 0u || destination_y == source_y) return;
 	memmove(surface->shadow + destination_y * surface->shadow_pitch,
-	        surface->shadow + source_y * surface->shadow_pitch,
-	        rows * surface->shadow_pitch);
+			surface->shadow + source_y * surface->shadow_pitch,
+			rows * surface->shadow_pitch);
 	for (size_t row = 0u; row < rows; row++) {
 		copy_to_framebuffer(surface->framebuffer + (destination_y + row) * surface->pitch,
-		                    surface->shadow + (destination_y + row) * surface->shadow_pitch,
-		                    width);
+				surface->shadow + (destination_y + row) * surface->shadow_pitch,
+				width);
 	}
 }
 
 static struct color blend_color(struct color foreground, struct color background, uint8_t alpha) {
 	uint16_t inverse = (uint16_t)(255u - alpha);
 	return (struct color){
-		.red   = (uint8_t)(((uint16_t)foreground.red * alpha + (uint16_t)background.red * inverse + 127u) / 255u),
+		.red = (uint8_t)(((uint16_t)foreground.red * alpha + (uint16_t)background.red * inverse + 127u) / 255u),
 		.green = (uint8_t)(((uint16_t)foreground.green * alpha + (uint16_t)background.green * inverse + 127u) / 255u),
-		.blue  = (uint8_t)(((uint16_t)foreground.blue * alpha + (uint16_t)background.blue * inverse + 127u) / 255u),
+		.blue = (uint8_t)(((uint16_t)foreground.blue * alpha + (uint16_t)background.blue * inverse + 127u) / 255u),
 	};
 }
 
 static bool draw_glyph(const struct drawing_surface* surface, const struct terminal_glyph* glyph, int64_t x, int64_t y,
-                       size_t clip_x, size_t clip_y, size_t clip_width, size_t clip_height, struct color foreground,
-                       struct color background) {
+		size_t clip_x, size_t clip_y, size_t clip_width, size_t clip_height, struct color foreground,
+		struct color background) {
 	size_t clip_right;
 	size_t clip_bottom;
 
 	if (surface == NULL || glyph == NULL || clip_x > surface->width || clip_y > surface->height ||
-	    clip_width > surface->width - clip_x || clip_height > surface->height - clip_y)
+			clip_width > surface->width - clip_x || clip_height > surface->height - clip_y)
 		return false;
-	clip_right  = clip_x + clip_width;
+	clip_right = clip_x + clip_width;
 	clip_bottom = clip_y + clip_height;
 	if (glyph->width == 0u || glyph->height == 0u) return true;
 	if (glyph->alpha == NULL) return false;
@@ -455,43 +474,43 @@ static bool draw_glyph(const struct drawing_surface* surface, const struct termi
 		for (size_t column = 0u; column < glyph->width; column++) {
 			int64_t destination_x = x + (int64_t)column;
 			int64_t destination_y = y + (int64_t)row;
-			uint8_t alpha         = glyph->alpha[row * glyph->width + column];
+			uint8_t alpha = glyph->alpha[row * glyph->width + column];
 
 			if (alpha == 0u || destination_x < 0 || destination_y < 0 || (uint64_t)destination_x < clip_x ||
-			    (uint64_t)destination_x >= clip_right || (uint64_t)destination_y < clip_y ||
-			    (uint64_t)destination_y >= clip_bottom)
+					(uint64_t)destination_x >= clip_right || (uint64_t)destination_y < clip_y ||
+					(uint64_t)destination_y >= clip_bottom)
 				continue;
 			volatile uint8_t* destination = surface->framebuffer + (size_t)destination_y * surface->pitch +
 			                                (size_t)destination_x * surface->format.bytes_per_pixel;
-			uint64_t          pixel       = encode_color(&surface->format, blend_color(foreground, background, alpha));
+			uint64_t pixel = encode_color(&surface->format, blend_color(foreground, background, alpha));
 			write_pixel(destination, surface->format.bytes_per_pixel, pixel);
 			write_pixel(surface->shadow + (size_t)destination_y * surface->shadow_pitch +
-			                (size_t)destination_x * surface->format.bytes_per_pixel,
-			            surface->format.bytes_per_pixel,
-			            pixel);
+								(size_t)destination_x * surface->format.bytes_per_pixel,
+					surface->format.bytes_per_pixel,
+					pixel);
 		}
 	}
 	return true;
 }
 
 static bool load_font(uint8_t** data, size_t* size) {
-	FILE*    file = NULL;
-	long     file_size;
-	uint8_t* buffer  = NULL;
-	bool     success = false;
+	FILE* file = NULL;
+	long file_size;
+	uint8_t* buffer = NULL;
+	bool success = false;
 
 	if (data == NULL || size == NULL) return false;
 	*data = NULL;
 	*size = 0u;
-	file  = fopen(TERMINAL_FONT_PATH, "rb");
+	file = fopen(TERMINAL_FONT_PATH, "rb");
 	if (file == NULL || fseek(file, 0l, SEEK_END) != 0) goto cleanup;
 	file_size = ftell(file);
 	if (file_size <= 0l || fseek(file, 0l, SEEK_SET) != 0) goto cleanup;
 	buffer = malloc((size_t)file_size);
 	if (buffer == NULL || fread(buffer, 1u, (size_t)file_size, file) != (size_t)file_size) goto cleanup;
-	*data   = buffer;
-	*size   = (size_t)file_size;
-	buffer  = NULL;
+	*data = buffer;
+	*size = (size_t)file_size;
+	buffer = NULL;
 	success = true;
 
 cleanup:
@@ -508,36 +527,36 @@ cleanup:
 static void reset_attributes(struct terminal* terminal) {
 	terminal->foreground_default = true;
 	terminal->background_default = true;
-	terminal->foreground         = 7u;
-	terminal->background         = 0u;
-	terminal->bold               = false;
-	terminal->reverse            = false;
-	terminal->underline          = false;
+	terminal->foreground = 7u;
+	terminal->background = 0u;
+	terminal->bold = false;
+	terminal->reverse = false;
+	terminal->underline = false;
 }
 
 static struct color selected_foreground(const struct terminal* terminal) {
 	struct color foreground =
-		terminal->foreground_default
-	        ? theme.foreground
-	        : theme.palette[terminal->foreground < 8u && terminal->bold ? terminal->foreground + 8u
-	                                                                    : terminal->foreground];
+			terminal->foreground_default
+	                ? theme.foreground
+	                : theme.palette[terminal->foreground < 8u && terminal->bold ? terminal->foreground + 8u
+	                                                                            : terminal->foreground];
 	struct color background = terminal->background_default ? theme.background : theme.palette[terminal->background];
 	return terminal->reverse ? background : foreground;
 }
 
 static struct color selected_background(const struct terminal* terminal) {
 	struct color foreground =
-		terminal->foreground_default
-	        ? theme.foreground
-	        : theme.palette[terminal->foreground < 8u && terminal->bold ? terminal->foreground + 8u
-	                                                                    : terminal->foreground];
+			terminal->foreground_default
+	                ? theme.foreground
+	                : theme.palette[terminal->foreground < 8u && terminal->bold ? terminal->foreground + 8u
+	                                                                            : terminal->foreground];
 	struct color background = terminal->background_default ? theme.background : theme.palette[terminal->background];
 	return terminal->reverse ? foreground : background;
 }
 
 static struct terminal_cell blank_cell(const struct terminal* terminal) {
 	return (struct terminal_cell){
-		.codepoint  = ' ',
+		.codepoint = ' ',
 		.foreground = selected_foreground(terminal),
 		.background = selected_background(terminal),
 	};
@@ -552,14 +571,14 @@ static int position_compare(struct terminal_selection_position left, struct term
 }
 
 static void selection_bounds(const struct terminal_selection_state* selection,
-                             struct terminal_selection_position* first, struct terminal_selection_position* last) {
+		struct terminal_selection_position* first, struct terminal_selection_position* last) {
 	if (position_compare(selection->anchor, selection->focus) < 0) {
 		*first = selection->anchor;
-		*last  = selection->focus;
+		*last = selection->focus;
 	}
 	else {
 		*first = selection->focus;
-		*last  = selection->anchor;
+		*last = selection->anchor;
 	}
 }
 
@@ -574,33 +593,33 @@ static bool selection_contains(const struct terminal_selection_state* selection,
 }
 
 static bool draw_cell_value(struct terminal* terminal, const struct terminal_cell* cell, size_t row, size_t column,
-                            bool cursor, bool selected) {
+		bool cursor, bool selected) {
 	struct color foreground;
 	struct color background;
-	size_t       cell_x = column * terminal->cell_width;
-	size_t       cell_y = row * terminal->cell_height;
+	size_t cell_x = column * terminal->cell_width;
+	size_t cell_y = row * terminal->cell_height;
 
 	foreground = cursor ? theme.cursor_text : selected ? theme.selection_foreground : cell->foreground;
 	background = cursor ? theme.cursor : selected ? theme.selection_background : cell->background;
 	fill_rectangle(&terminal->surface, cell_x, cell_y, terminal->cell_width, terminal->cell_height, background);
 	if (cell->codepoint != ' ') {
 		const struct terminal_glyph* glyph;
-		int64_t                      glyph_x;
-		int64_t                      glyph_y;
+		int64_t glyph_x;
+		int64_t glyph_y;
 
 		if (!terminal_glyph_cache_get(terminal->glyph_cache, cell->codepoint, &glyph)) return false;
 		glyph_x = (int64_t)cell_x + glyph->left;
 		glyph_y = (int64_t)cell_y + (int64_t)terminal->ascender - glyph->top;
 		if (!draw_glyph(&terminal->surface,
-		                glyph,
-		                glyph_x,
-		                glyph_y,
-		                cell_x,
-		                cell_y,
-		                terminal->cell_width,
-		                terminal->cell_height,
-		                foreground,
-		                background))
+					glyph,
+					glyph_x,
+					glyph_y,
+					cell_x,
+					cell_y,
+					terminal->cell_width,
+					terminal->cell_height,
+					foreground,
+					background))
 			return false;
 	}
 	if (cell->underline && !cursor) {
@@ -621,11 +640,11 @@ static bool draw_cell(struct terminal* terminal, size_t row, size_t column, bool
 		return true;
 	}
 	return draw_cell_value(terminal,
-	                       &terminal->cells[row * terminal->columns + column],
-	                       row,
-	                       column,
-	                       cursor,
-	                       selection_contains(&terminal->selection, terminal->screen_origin + row, column));
+			&terminal->cells[row * terminal->columns + column],
+			row,
+			column,
+			cursor,
+			selection_contains(&terminal->selection, terminal->screen_origin + row, column));
 }
 
 static const struct terminal_cell* history_line(const struct terminal* terminal, size_t line) {
@@ -634,15 +653,19 @@ static const struct terminal_cell* history_line(const struct terminal* terminal,
 }
 
 static bool redraw_viewport_row(struct terminal* terminal, size_t row) {
-	size_t                      stored_line = terminal->history_count - terminal->viewport_offset + row;
-	uint64_t                    line        = terminal->screen_origin - terminal->viewport_offset + row;
+	size_t stored_line = terminal->history_count - terminal->viewport_offset + row;
+	uint64_t line = terminal->screen_origin - terminal->viewport_offset + row;
 	const struct terminal_cell* cells;
 
 	if (stored_line < terminal->history_count) cells = history_line(terminal, stored_line);
 	else cells = terminal->cells + (stored_line - terminal->history_count) * terminal->columns;
 	for (size_t column = 0u; column < terminal->columns; column++)
-		if (!draw_cell_value(
-				terminal, &cells[column], row, column, false, selection_contains(&terminal->selection, line, column)))
+		if (!draw_cell_value(terminal,
+					&cells[column],
+					row,
+					column,
+					false,
+					selection_contains(&terminal->selection, line, column)))
 			return false;
 	return true;
 }
@@ -655,12 +678,12 @@ static bool redraw_viewport(struct terminal* terminal) {
 }
 
 static bool move_viewport(struct terminal* terminal, bool older, size_t lines) {
-	size_t width  = terminal->columns * terminal->cell_width * terminal->surface.format.bytes_per_pixel;
+	size_t width = terminal->columns * terminal->cell_width * terminal->surface.format.bytes_per_pixel;
 	size_t height = terminal->rows * terminal->cell_height;
 	size_t pixel_lines;
 
 	if (lines >= terminal->rows || mul_overflow_size(lines, terminal->cell_height, &pixel_lines) ||
-	    pixel_lines >= height)
+			pixel_lines >= height)
 		return redraw_viewport(terminal);
 	if (older) {
 		move_surface_rows(&terminal->surface, pixel_lines, 0u, height - pixel_lines, width);
@@ -683,14 +706,14 @@ static const struct terminal_cell* overlay_cell_at(const struct terminal* termin
 }
 
 static bool redraw_viewport_cell(struct terminal* terminal, size_t row, size_t column) {
-	size_t                      stored_line = terminal->history_count - terminal->viewport_offset + row;
-	uint64_t                    line        = terminal->screen_origin - terminal->viewport_offset + row;
+	size_t stored_line = terminal->history_count - terminal->viewport_offset + row;
+	uint64_t line = terminal->screen_origin - terminal->viewport_offset + row;
 	const struct terminal_cell* cell;
 
 	if (stored_line < terminal->history_count) cell = &history_line(terminal, stored_line)[column];
 	else {
 		size_t live_row = stored_line - terminal->history_count;
-		cell            = &terminal->cells[live_row * terminal->columns + column];
+		cell = &terminal->cells[live_row * terminal->columns + column];
 		if (terminal->viewport_offset == 0u) {
 			const struct terminal_cell* overlay = overlay_cell_at(terminal, live_row * terminal->columns + column);
 			if (overlay != NULL) cell = overlay;
@@ -699,21 +722,21 @@ static bool redraw_viewport_cell(struct terminal* terminal, size_t row, size_t c
 	return draw_cell_value(terminal, cell, row, column, false, selection_contains(&terminal->selection, line, column));
 }
 
-static bool redraw_selection_range(struct terminal* terminal, struct terminal_selection_position first,
-                                   struct terminal_selection_position last) {
+static bool redraw_selection_range(
+		struct terminal* terminal, struct terminal_selection_position first, struct terminal_selection_position last) {
 	uint64_t visible_first = terminal->screen_origin - terminal->viewport_offset;
 	uint64_t visible_last =
-		terminal->rows - 1u > UINT64_MAX - visible_first ? UINT64_MAX : visible_first + terminal->rows - 1u;
+			terminal->rows - 1u > UINT64_MAX - visible_first ? UINT64_MAX : visible_first + terminal->rows - 1u;
 	uint64_t first_line;
 	uint64_t last_line;
 
 	if (position_compare(first, last) >= 0 || last.line < visible_first || first.line > visible_last) return true;
 	first_line = first.line < visible_first ? visible_first : first.line;
-	last_line  = last.line > visible_last ? visible_last : last.line;
+	last_line = last.line > visible_last ? visible_last : last.line;
 	for (uint64_t line = first_line;; line++) {
-		size_t row          = (size_t)(line - visible_first);
+		size_t row = (size_t)(line - visible_first);
 		size_t first_column = line == first.line ? first.column : 0u;
-		size_t last_column  = line == last.line ? last.column : terminal->columns;
+		size_t last_column = line == last.line ? last.column : terminal->columns;
 
 		if (first_column > terminal->columns) first_column = terminal->columns;
 		if (last_column > terminal->columns) last_column = terminal->columns;
@@ -748,7 +771,7 @@ static bool redraw_selection_difference(struct terminal* terminal, const struct 
 		if (!redraw_selection_range(terminal, previous_first, next_first)) return false;
 	}
 	else if (position_compare(next_first, previous_first) < 0 &&
-	         !redraw_selection_range(terminal, next_first, previous_first))
+			 !redraw_selection_range(terminal, next_first, previous_first))
 		return false;
 	if (position_compare(previous_last, next_last) < 0)
 		return redraw_selection_range(terminal, previous_last, next_last);
@@ -758,16 +781,15 @@ static bool redraw_selection_difference(struct terminal* terminal, const struct 
 }
 
 static bool redraw_screen_cell(struct terminal* terminal, size_t row, size_t column, bool cursor) {
-	size_t                      index = row * terminal->columns + column;
-	const struct terminal_cell* cell  = overlay_cell_at(terminal, index);
-	return cell == NULL
-			   ? draw_cell(terminal, row, column, cursor)
-			   : draw_cell_value(terminal,
-			                     cell,
-			                     row,
-			                     column,
-			                     cursor,
-			                     selection_contains(&terminal->selection, terminal->screen_origin + row, column));
+	size_t index = row * terminal->columns + column;
+	const struct terminal_cell* cell = overlay_cell_at(terminal, index);
+	return cell == NULL ? draw_cell(terminal, row, column, cursor)
+	                    : draw_cell_value(terminal,
+								  cell,
+								  row,
+								  column,
+								  cursor,
+								  selection_contains(&terminal->selection, terminal->screen_origin + row, column));
 }
 
 static bool hide_cursor(struct terminal* terminal) {
@@ -777,20 +799,20 @@ static bool hide_cursor(struct terminal* terminal) {
 }
 
 static bool show_cursor(struct terminal* terminal) {
-	size_t row    = terminal->row;
+	size_t row = terminal->row;
 	size_t column = terminal->column;
 	if (!terminal->cursor_visible || terminal->cursor_drawn || terminal->viewport_offset != 0u) return true;
 	if (terminal->overlay_count != 0u) {
 		size_t caret =
-			terminal->preedit_caret < terminal->overlay_count ? terminal->preedit_caret : terminal->overlay_count;
+				terminal->preedit_caret < terminal->overlay_count ? terminal->preedit_caret : terminal->overlay_count;
 		size_t index = terminal->overlay[0].index + caret;
 		if (index >= terminal->cell_count) index = terminal->cell_count - 1u;
-		row    = index / terminal->columns;
+		row = index / terminal->columns;
 		column = index % terminal->columns;
 	}
 	if (!redraw_screen_cell(terminal, row, column, true)) return false;
-	terminal->cursor_drawn        = true;
-	terminal->cursor_drawn_row    = row;
+	terminal->cursor_drawn = true;
+	terminal->cursor_drawn_row = row;
 	terminal->cursor_drawn_column = column;
 	return true;
 }
@@ -800,7 +822,7 @@ static bool erase_overlay(struct terminal* terminal) {
 	for (size_t i = 0u; i < terminal->overlay_count; i++) {
 		size_t index = terminal->overlay[i].index;
 		if (terminal->viewport_offset == 0u &&
-		    !draw_cell(terminal, index / terminal->columns, index % terminal->columns, false))
+				!draw_cell(terminal, index / terminal->columns, index % terminal->columns, false))
 			success = false;
 	}
 	terminal->overlay_count = 0u;
@@ -819,23 +841,22 @@ static bool draw_overlay(struct terminal* terminal) {
 	for (size_t i = 0u; i < terminal->overlay_count; i++) {
 		terminal->overlay[i] = (struct terminal_overlay_cell){
 			.index = first + i,
-			.cell =
-				{
-					   .codepoint  = terminal->preedit_codepoints[i],
-					   .foreground = selected_foreground(terminal),
-					   .background = selected_background(terminal),
-					   .underline  = true,
-					   },
+			.cell = {
+				.codepoint = terminal->preedit_codepoints[i],
+				.foreground = selected_foreground(terminal),
+				.background = selected_background(terminal),
+				.underline = true,
+			},
 		};
-		size_t row    = terminal->overlay[i].index / terminal->columns;
+		size_t row = terminal->overlay[i].index / terminal->columns;
 		size_t column = terminal->overlay[i].index % terminal->columns;
 		if (terminal->viewport_offset == 0u &&
-		    !draw_cell_value(terminal,
-		                     &terminal->overlay[i].cell,
-		                     row,
-		                     column,
-		                     false,
-		                     selection_contains(&terminal->selection, terminal->screen_origin + row, column)))
+				!draw_cell_value(terminal,
+						&terminal->overlay[i].cell,
+						row,
+						column,
+						false,
+						selection_contains(&terminal->selection, terminal->screen_origin + row, column)))
 			return false;
 	}
 	return true;
@@ -856,17 +877,17 @@ static void clear_display(struct terminal* terminal) {
 		fill_rectangle(&terminal->surface, 0u, 0u, terminal->surface.width, terminal->surface.height, blank.background);
 	else if (terminal->viewport_offset < terminal->rows) terminal->viewport_dirty = true;
 	for (size_t index = 0u; index < terminal->cell_count; index++) terminal->cells[index] = blank;
-	terminal->column       = 0u;
-	terminal->row          = 0u;
+	terminal->column = 0u;
+	terminal->row = 0u;
 	terminal->wrap_pending = false;
 }
 
 static void append_history_line(struct terminal* terminal, const struct terminal_cell* cells) {
-	bool   full = terminal->history_count == TERMINAL_SCROLLBACK_LINE_CAPACITY;
+	bool full = terminal->history_count == TERMINAL_SCROLLBACK_LINE_CAPACITY;
 	size_t slot;
 
 	if (full) {
-		slot                   = terminal->history_head;
+		slot = terminal->history_head;
 		terminal->history_head = (terminal->history_head + 1u) % TERMINAL_SCROLLBACK_LINE_CAPACITY;
 	}
 	else {
@@ -883,22 +904,22 @@ static void expire_evicted_selection(struct terminal* terminal) {
 	uint64_t first = terminal->screen_origin - terminal->history_count;
 
 	if (terminal->pointer_selecting && terminal->pointer_selection_anchor.line < first) {
-		terminal->pointer_primary_pressed  = false;
-		terminal->pointer_selecting        = false;
+		terminal->pointer_primary_pressed = false;
+		terminal->pointer_selecting = false;
 		terminal->pointer_selection_source = 0u;
 	}
 	if (!terminal->selection.active ||
-	    (terminal->selection.anchor.line >= first && terminal->selection.focus.line >= first))
+			(terminal->selection.anchor.line >= first && terminal->selection.focus.line >= first))
 		return;
 	terminal->selection.active = false;
-	terminal->viewport_dirty   = true;
+	terminal->viewport_dirty = true;
 }
 
 static void scroll_screen(struct terminal* terminal) {
-	size_t               width  = terminal->columns * terminal->cell_width * terminal->surface.format.bytes_per_pixel;
-	size_t               height = terminal->rows * terminal->cell_height;
-	size_t               copied_rows = height - terminal->cell_height;
-	struct terminal_cell blank       = blank_cell(terminal);
+	size_t width = terminal->columns * terminal->cell_width * terminal->surface.format.bytes_per_pixel;
+	size_t height = terminal->rows * terminal->cell_height;
+	size_t copied_rows = height - terminal->cell_height;
+	struct terminal_cell blank = blank_cell(terminal);
 
 	append_history_line(terminal, terminal->cells);
 	terminal->screen_origin++;
@@ -906,21 +927,21 @@ static void scroll_screen(struct terminal* terminal) {
 	if (terminal->viewport_offset == 0u)
 		move_surface_rows(&terminal->surface, 0u, terminal->cell_height, copied_rows, width);
 	memmove(terminal->cells,
-	        terminal->cells + terminal->columns,
-	        (terminal->cell_count - terminal->columns) * sizeof(*terminal->cells));
+			terminal->cells + terminal->columns,
+			(terminal->cell_count - terminal->columns) * sizeof(*terminal->cells));
 	for (size_t index = terminal->cell_count - terminal->columns; index < terminal->cell_count; index++)
 		terminal->cells[index] = blank;
 	if (terminal->viewport_offset == 0u)
 		fill_rectangle(&terminal->surface,
-		               0u,
-		               copied_rows,
-		               terminal->columns * terminal->cell_width,
-		               terminal->cell_height,
-		               blank.background);
+				0u,
+				copied_rows,
+				terminal->columns * terminal->cell_width,
+				terminal->cell_height,
+				blank.background);
 }
 
 static void next_line(struct terminal* terminal) {
-	terminal->column       = 0u;
+	terminal->column = 0u;
 	terminal->wrap_pending = false;
 	if (terminal->row + 1u < terminal->rows) terminal->row++;
 	else scroll_screen(terminal);
@@ -930,12 +951,12 @@ static bool draw_codepoint(struct terminal* terminal, uint32_t codepoint) {
 	struct terminal_cell* cell;
 
 	if (terminal->wrap_pending) next_line(terminal);
-	cell  = &terminal->cells[terminal->row * terminal->columns + terminal->column];
+	cell = &terminal->cells[terminal->row * terminal->columns + terminal->column];
 	*cell = (struct terminal_cell){
-		.codepoint  = codepoint,
+		.codepoint = codepoint,
 		.foreground = selected_foreground(terminal),
 		.background = selected_background(terminal),
-		.underline  = terminal->underline,
+		.underline = terminal->underline,
 	};
 	if (!draw_cell(terminal, terminal->row, terminal->column, false)) return false;
 	if (terminal->column + 1u == terminal->columns) terminal->wrap_pending = true;
@@ -944,18 +965,18 @@ static bool draw_codepoint(struct terminal* terminal, uint32_t codepoint) {
 }
 
 static bool emit_replacement(struct terminal* terminal) {
-	terminal->utf8_value     = 0u;
-	terminal->utf8_minimum   = 0u;
+	terminal->utf8_value = 0u;
+	terminal->utf8_minimum = 0u;
 	terminal->utf8_remaining = 0u;
 	return draw_codepoint(terminal, 0xfffdu);
 }
 
 static void csi_reset(struct terminal* terminal) {
 	terminal->csi_parameter_count = 0u;
-	terminal->csi_value           = 0u;
-	terminal->csi_has_value       = false;
-	terminal->csi_invalid         = false;
-	terminal->csi_private         = false;
+	terminal->csi_value = 0u;
+	terminal->csi_has_value = false;
+	terminal->csi_invalid = false;
+	terminal->csi_private = false;
 }
 
 static void csi_push(struct terminal* terminal) {
@@ -964,8 +985,8 @@ static void csi_push(struct terminal* terminal) {
 		return;
 	}
 	terminal->csi_parameters[terminal->csi_parameter_count++] = terminal->csi_has_value ? terminal->csi_value : 0u;
-	terminal->csi_value                                       = 0u;
-	terminal->csi_has_value                                   = false;
+	terminal->csi_value = 0u;
+	terminal->csi_has_value = false;
 }
 
 static void apply_sgr(struct terminal* terminal) {
@@ -982,31 +1003,31 @@ static void apply_sgr(struct terminal* terminal) {
 		else if (parameter == 27u) terminal->reverse = false;
 		else if (parameter >= 30u && parameter <= 37u) {
 			terminal->foreground_default = false;
-			terminal->foreground         = (uint8_t)(parameter - 30u);
+			terminal->foreground = (uint8_t)(parameter - 30u);
 		}
 		else if (parameter == 39u) terminal->foreground_default = true;
 		else if (parameter >= 40u && parameter <= 47u) {
 			terminal->background_default = false;
-			terminal->background         = (uint8_t)(parameter - 40u);
+			terminal->background = (uint8_t)(parameter - 40u);
 		}
 		else if (parameter == 49u) terminal->background_default = true;
 		else if (parameter >= 90u && parameter <= 97u) {
 			terminal->foreground_default = false;
-			terminal->foreground         = (uint8_t)(parameter - 90u + 8u);
+			terminal->foreground = (uint8_t)(parameter - 90u + 8u);
 		}
 		else if (parameter >= 100u && parameter <= 107u) {
 			terminal->background_default = false;
-			terminal->background         = (uint8_t)(parameter - 100u + 8u);
+			terminal->background = (uint8_t)(parameter - 100u + 8u);
 		}
 		else if ((parameter == 38u || parameter == 48u) && index + 2u < terminal->csi_parameter_count &&
-		         terminal->csi_parameters[index + 1u] == 5u && terminal->csi_parameters[index + 2u] < 16u) {
+				 terminal->csi_parameters[index + 1u] == 5u && terminal->csi_parameters[index + 2u] < 16u) {
 			if (parameter == 38u) {
 				terminal->foreground_default = false;
-				terminal->foreground         = (uint8_t)terminal->csi_parameters[index + 2u];
+				terminal->foreground = (uint8_t)terminal->csi_parameters[index + 2u];
 			}
 			else {
 				terminal->background_default = false;
-				terminal->background         = (uint8_t)terminal->csi_parameters[index + 2u];
+				terminal->background = (uint8_t)terminal->csi_parameters[index + 2u];
 			}
 			index += 2u;
 		}
@@ -1030,15 +1051,15 @@ static bool erase_cells(struct terminal* terminal, size_t first, size_t last) {
 }
 
 static bool erase_scrollback(struct terminal* terminal) {
-	terminal->history_head             = 0u;
-	terminal->history_count            = 0u;
-	terminal->viewport_offset          = 0u;
-	terminal->selection                = (struct terminal_selection_state){0};
-	terminal->pointer_primary_pressed  = false;
-	terminal->pointer_selecting        = false;
+	terminal->history_head = 0u;
+	terminal->history_count = 0u;
+	terminal->viewport_offset = 0u;
+	terminal->selection = (struct terminal_selection_state){0};
+	terminal->pointer_primary_pressed = false;
+	terminal->pointer_selecting = false;
 	terminal->pointer_selection_source = 0u;
 	terminal->pointer_selection_anchor = (struct terminal_selection_position){0};
-	terminal->viewport_dirty           = false;
+	terminal->viewport_dirty = false;
 	return redraw_viewport(terminal);
 }
 
@@ -1054,7 +1075,7 @@ static bool erase_display(struct terminal* terminal, size_t mode) {
 
 static bool erase_line(struct terminal* terminal, size_t mode) {
 	size_t first = terminal->row * terminal->columns;
-	size_t last  = first + terminal->columns - 1u;
+	size_t last = first + terminal->columns - 1u;
 
 	if (mode == 0u) first += terminal->column;
 	else if (mode == 1u) last = first + terminal->column;
@@ -1063,8 +1084,8 @@ static bool erase_line(struct terminal* terminal, size_t mode) {
 }
 
 static void move_cursor(struct terminal* terminal, size_t row, size_t column) {
-	terminal->row          = row < terminal->rows ? row : terminal->rows - 1u;
-	terminal->column       = column < terminal->columns ? column : terminal->columns - 1u;
+	terminal->row = row < terminal->rows ? row : terminal->rows - 1u;
+	terminal->column = column < terminal->columns ? column : terminal->columns - 1u;
 	terminal->wrap_pending = false;
 }
 
@@ -1083,7 +1104,7 @@ static bool apply_csi(struct terminal* terminal, uint8_t final) {
 	}
 	amount = csi_parameter(terminal, 0u, 1u);
 	if (final == 'A') {
-		terminal->row          = amount > terminal->row ? 0u : terminal->row - amount;
+		terminal->row = amount > terminal->row ? 0u : terminal->row - amount;
 		terminal->wrap_pending = false;
 	}
 	else if (final == 'B') {
@@ -1092,16 +1113,16 @@ static bool apply_csi(struct terminal* terminal, uint8_t final) {
 	}
 	else if (final == 'C') {
 		terminal->column =
-			amount >= terminal->columns - terminal->column ? terminal->columns - 1u : terminal->column + amount;
+				amount >= terminal->columns - terminal->column ? terminal->columns - 1u : terminal->column + amount;
 		terminal->wrap_pending = false;
 	}
 	else if (final == 'D') {
-		terminal->column       = amount > terminal->column ? 0u : terminal->column - amount;
+		terminal->column = amount > terminal->column ? 0u : terminal->column - amount;
 		terminal->wrap_pending = false;
 	}
 	else if (final == 'E')
 		move_cursor(
-			terminal, amount >= terminal->rows - terminal->row ? terminal->rows - 1u : terminal->row + amount, 0u);
+				terminal, amount >= terminal->rows - terminal->row ? terminal->rows - 1u : terminal->row + amount, 0u);
 	else if (final == 'F') move_cursor(terminal, amount > terminal->row ? 0u : terminal->row - amount, 0u);
 	else if (final == 'G') move_cursor(terminal, terminal->row, amount - 1u);
 	else if (final == 'd') move_cursor(terminal, amount - 1u, terminal->column);
@@ -1110,7 +1131,7 @@ static bool apply_csi(struct terminal* terminal, uint8_t final) {
 	else if (final == 'J') return erase_display(terminal, csi_parameter(terminal, 0u, 0u));
 	else if (final == 'K') return erase_line(terminal, csi_parameter(terminal, 0u, 0u));
 	else if (final == 's') {
-		terminal->saved_row    = terminal->row;
+		terminal->saved_row = terminal->row;
 		terminal->saved_column = terminal->column;
 		terminal->saved_cursor = true;
 	}
@@ -1125,7 +1146,7 @@ static bool process_escape_byte(struct terminal* terminal, uint8_t byte) {
 		terminal->escape_state = byte == '[' ? ESCAPE_STATE_CSI : ESCAPE_STATE_TEXT;
 		if (byte == '[') csi_reset(terminal);
 		else if (byte == '7') {
-			terminal->saved_row    = terminal->row;
+			terminal->saved_row = terminal->row;
 			terminal->saved_column = terminal->column;
 			terminal->saved_cursor = true;
 		}
@@ -1150,7 +1171,7 @@ static bool process_escape_byte(struct terminal* terminal, uint8_t byte) {
 	}
 	if (byte >= 0x40u && byte <= 0x7eu) {
 		if (terminal->csi_has_value || terminal->csi_parameter_count != 0u) csi_push(terminal);
-		bool success           = apply_csi(terminal, byte);
+		bool success = apply_csi(terminal, byte);
 		terminal->escape_state = ESCAPE_STATE_TEXT;
 		return success;
 	}
@@ -1167,9 +1188,9 @@ static bool process_utf8_byte(struct terminal* terminal, uint8_t byte) {
 		terminal->utf8_value = (terminal->utf8_value << 6u) | (byte & 0x3fu);
 		terminal->utf8_remaining--;
 		if (terminal->utf8_remaining != 0u) return true;
-		uint32_t codepoint     = terminal->utf8_value;
-		uint32_t minimum       = terminal->utf8_minimum;
-		terminal->utf8_value   = 0u;
+		uint32_t codepoint = terminal->utf8_value;
+		uint32_t minimum = terminal->utf8_minimum;
+		terminal->utf8_value = 0u;
 		terminal->utf8_minimum = 0u;
 		if (codepoint < minimum || codepoint > 0x10ffffu || (codepoint >= 0xd800u && codepoint <= 0xdfffu))
 			return draw_codepoint(terminal, 0xfffdu);
@@ -1177,20 +1198,20 @@ static bool process_utf8_byte(struct terminal* terminal, uint8_t byte) {
 	}
 	if (byte < 0x80u) return draw_codepoint(terminal, byte);
 	if (byte >= 0xc2u && byte <= 0xdfu) {
-		terminal->utf8_value     = byte & 0x1fu;
-		terminal->utf8_minimum   = 0x80u;
+		terminal->utf8_value = byte & 0x1fu;
+		terminal->utf8_minimum = 0x80u;
 		terminal->utf8_remaining = 1u;
 		return true;
 	}
 	if (byte >= 0xe0u && byte <= 0xefu) {
-		terminal->utf8_value     = byte & 0x0fu;
-		terminal->utf8_minimum   = 0x800u;
+		terminal->utf8_value = byte & 0x0fu;
+		terminal->utf8_minimum = 0x800u;
 		terminal->utf8_remaining = 2u;
 		return true;
 	}
 	if (byte >= 0xf0u && byte <= 0xf4u) {
-		terminal->utf8_value     = byte & 0x07u;
-		terminal->utf8_minimum   = 0x10000u;
+		terminal->utf8_value = byte & 0x07u;
+		terminal->utf8_minimum = 0x10000u;
 		terminal->utf8_remaining = 3u;
 		return true;
 	}
@@ -1208,7 +1229,7 @@ static bool process_text_byte(struct terminal* terminal, uint8_t byte) {
 		if (terminal->utf8_remaining != 0u && !emit_replacement(terminal)) return false;
 		if (byte == '\n') next_line(terminal);
 		else if (byte == '\r') {
-			terminal->column       = 0u;
+			terminal->column = 0u;
 			terminal->wrap_pending = false;
 		}
 		else if (byte == '\b') {
@@ -1232,7 +1253,7 @@ static bool positive_metric_pixels(FT_Pos value, size_t* out_pixels) {
 	uintmax_t pixels;
 
 	if (value <= 0 || out_pixels == NULL) return false;
-	raw    = (uintmax_t)value;
+	raw = (uintmax_t)value;
 	pixels = raw / 64u + (raw % 64u != 0u ? 1u : 0u);
 	if (pixels > SIZE_MAX) return false;
 	*out_pixels = (size_t)pixels;
@@ -1244,7 +1265,7 @@ static bool descender_metric_pixels(FT_Pos value, size_t* out_pixels) {
 	uintmax_t pixels;
 
 	if (value > 0 || out_pixels == NULL) return false;
-	raw    = value == LONG_MIN ? (uintmax_t)LONG_MAX + 1u : (uintmax_t)-value;
+	raw = value == LONG_MIN ? (uintmax_t)LONG_MAX + 1u : (uintmax_t)-value;
 	pixels = raw / 64u + (raw % 64u != 0u ? 1u : 0u);
 	if (pixels > SIZE_MAX) return false;
 	*out_pixels = (size_t)pixels;
@@ -1253,75 +1274,76 @@ static bool descender_metric_pixels(FT_Pos value, size_t* out_pixels) {
 
 struct terminal* terminal_create(volatile uint8_t* framebuffer, const struct framebuffer_info_response* info) {
 	struct terminal* terminal = NULL;
-	size_t           font_size;
-	size_t           metrics_height;
-	size_t           descender;
-	size_t           glyph_height;
-	size_t           visible_row_size;
-	size_t           visible_size;
-	size_t           history_cell_count;
-	size_t           shadow_size;
-	FT_Pos           advance;
+	size_t font_size;
+	size_t metrics_height;
+	size_t descender;
+	size_t glyph_height;
+	size_t visible_row_size;
+	size_t visible_size;
+	size_t history_cell_count;
+	size_t shadow_size;
+	FT_Pos advance;
 
 	if (framebuffer == NULL || info == NULL) return NULL;
 	terminal = calloc(1u, sizeof(*terminal));
 	if (terminal == NULL || !pixel_format_initialize(info, &terminal->surface.format) ||
-	    (uint64_t)(size_t)info->width != info->width || (uint64_t)(size_t)info->height != info->height ||
-	    (uint64_t)(size_t)info->pitch != info->pitch || (uint64_t)(size_t)info->size != info->size)
+			(uint64_t)(size_t)info->width != info->width || (uint64_t)(size_t)info->height != info->height ||
+			(uint64_t)(size_t)info->pitch != info->pitch || (uint64_t)(size_t)info->size != info->size)
 		goto fail;
 	terminal->surface = (struct drawing_surface){
 		.framebuffer = framebuffer,
-		.width       = (size_t)info->width,
-		.height      = (size_t)info->height,
-		.pitch       = (size_t)info->pitch,
-		.format      = terminal->surface.format,
+		.width = (size_t)info->width,
+		.height = (size_t)info->height,
+		.pitch = (size_t)info->pitch,
+		.format = terminal->surface.format,
 	};
 	if (terminal->surface.width == 0u || terminal->surface.height == 0u ||
-	    mul_overflow_size(terminal->surface.width, terminal->surface.format.bytes_per_pixel, &visible_row_size) ||
-	    visible_row_size > terminal->surface.pitch ||
-	    mul_overflow_size(terminal->surface.height, terminal->surface.pitch, &visible_size) ||
-	    visible_size > (size_t)info->size ||
-	    mul_overflow_size(terminal->surface.height, visible_row_size, &shadow_size) ||
-	    FT_Init_FreeType(&terminal->library) != FT_Err_Ok || !load_font(&terminal->font_data, &font_size) ||
-	    font_size > LONG_MAX ||
-	    FT_New_Memory_Face(terminal->library, terminal->font_data, (FT_Long)font_size, 0, &terminal->face) !=
-	        FT_Err_Ok ||
-	    FT_Set_Pixel_Sizes(terminal->face, 0u, TERMINAL_FONT_PIXEL_HEIGHT) != FT_Err_Ok ||
-	    terminal->face->size->metrics.height <= 0 || terminal->face->size->metrics.ascender <= 0 ||
-	    terminal->face->size->metrics.descender > 0 || FT_Load_Char(terminal->face, 'M', FT_LOAD_DEFAULT) != FT_Err_Ok)
+			mul_overflow_size(terminal->surface.width, terminal->surface.format.bytes_per_pixel, &visible_row_size) ||
+			visible_row_size > terminal->surface.pitch ||
+			mul_overflow_size(terminal->surface.height, terminal->surface.pitch, &visible_size) ||
+			visible_size > (size_t)info->size ||
+			mul_overflow_size(terminal->surface.height, visible_row_size, &shadow_size) ||
+			FT_Init_FreeType(&terminal->library) != FT_Err_Ok || !load_font(&terminal->font_data, &font_size) ||
+			font_size > LONG_MAX ||
+			FT_New_Memory_Face(terminal->library, terminal->font_data, (FT_Long)font_size, 0, &terminal->face) !=
+					FT_Err_Ok ||
+			FT_Set_Pixel_Sizes(terminal->face, 0u, TERMINAL_FONT_PIXEL_HEIGHT) != FT_Err_Ok ||
+			terminal->face->size->metrics.height <= 0 || terminal->face->size->metrics.ascender <= 0 ||
+			terminal->face->size->metrics.descender > 0 ||
+			FT_Load_Char(terminal->face, 'M', FT_LOAD_DEFAULT) != FT_Err_Ok)
 		goto fail;
 	advance = terminal->face->glyph->advance.x;
 	if (advance <= 0) goto fail;
 	if (!positive_metric_pixels(advance, &terminal->cell_width) ||
-	    !positive_metric_pixels(terminal->face->size->metrics.height, &metrics_height) ||
-	    !positive_metric_pixels(terminal->face->size->metrics.ascender, &terminal->ascender) ||
-	    !descender_metric_pixels(terminal->face->size->metrics.descender, &descender) ||
-	    add_overflow_size(terminal->ascender, descender, &glyph_height))
+			!positive_metric_pixels(terminal->face->size->metrics.height, &metrics_height) ||
+			!positive_metric_pixels(terminal->face->size->metrics.ascender, &terminal->ascender) ||
+			!descender_metric_pixels(terminal->face->size->metrics.descender, &descender) ||
+			add_overflow_size(terminal->ascender, descender, &glyph_height))
 		goto fail;
 	terminal->cell_height = metrics_height > glyph_height ? metrics_height : glyph_height;
 	if (terminal->cell_width == 0u || terminal->cell_height == 0u || terminal->ascender > terminal->cell_height)
 		goto fail;
-	terminal->columns              = terminal->surface.width / terminal->cell_width;
-	terminal->rows                 = terminal->surface.height / terminal->cell_height;
+	terminal->columns = terminal->surface.width / terminal->cell_width;
+	terminal->rows = terminal->surface.height / terminal->cell_height;
 	terminal->surface.shadow_pitch = visible_row_size;
 	if (terminal->columns == 0u || terminal->rows == 0u || terminal->rows > UINT64_MAX - 1u ||
-	    mul_overflow_size(terminal->columns, terminal->rows, &terminal->cell_count) ||
-	    terminal->cell_count > SIZE_MAX / sizeof(*terminal->cells) ||
-	    mul_overflow_size(terminal->columns, TERMINAL_SCROLLBACK_LINE_CAPACITY, &history_cell_count) ||
-	    history_cell_count > SIZE_MAX / sizeof(*terminal->history))
+			mul_overflow_size(terminal->columns, terminal->rows, &terminal->cell_count) ||
+			terminal->cell_count > SIZE_MAX / sizeof(*terminal->cells) ||
+			mul_overflow_size(terminal->columns, TERMINAL_SCROLLBACK_LINE_CAPACITY, &history_cell_count) ||
+			history_cell_count > SIZE_MAX / sizeof(*terminal->history))
 		goto fail;
-	terminal->cells          = calloc(terminal->cell_count, sizeof(*terminal->cells));
-	terminal->history        = malloc(history_cell_count * sizeof(*terminal->history));
+	terminal->cells = calloc(terminal->cell_count, sizeof(*terminal->cells));
+	terminal->history = malloc(history_cell_count * sizeof(*terminal->history));
 	terminal->surface.shadow = malloc(shadow_size);
-	terminal->glyph_cache    = terminal_glyph_cache_create(terminal->face);
+	terminal->glyph_cache = terminal_glyph_cache_create(terminal->face);
 	if (terminal->cells == NULL || terminal->history == NULL || terminal->surface.shadow == NULL ||
-	    terminal->glyph_cache == NULL)
+			terminal->glyph_cache == NULL)
 		goto fail;
 	terminal->screen_origin = 1u;
 	reset_attributes(terminal);
 	terminal->cursor_visible = true;
-	terminal->pointer_x      = terminal->surface.width / 2u;
-	terminal->pointer_y      = terminal->surface.height / 2u;
+	terminal->pointer_x = terminal->surface.width / 2u;
+	terminal->pointer_y = terminal->surface.height / 2u;
 	clear_display(terminal);
 	if (!show_cursor(terminal)) goto fail;
 	return terminal;
@@ -1350,7 +1372,7 @@ bool terminal_get_dimensions(const struct terminal* terminal, size_t* out_column
 	if (terminal == NULL || out_columns == NULL || out_rows == NULL || terminal->columns == 0u || terminal->rows == 0u)
 		return false;
 	*out_columns = terminal->columns;
-	*out_rows    = terminal->rows;
+	*out_rows = terminal->rows;
 	return true;
 }
 
@@ -1358,16 +1380,16 @@ bool terminal_get_cursor_position(struct terminal* terminal, size_t* out_column,
 	if (terminal == NULL || out_column == NULL || out_row == NULL || out_line == NULL) return false;
 	terminal_lock(terminal);
 	*out_column = terminal->column;
-	*out_row    = terminal->row;
-	*out_line   = terminal->screen_origin + terminal->row;
+	*out_row = terminal->row;
+	*out_line = terminal->screen_origin + terminal->row;
 	terminal_unlock(terminal);
 	return true;
 }
 
 bool terminal_write(struct terminal* terminal, const uint8_t* data, size_t size, size_t* out_written) {
 	size_t written = 0u;
-	bool   success;
-	bool   trace_sample;
+	bool success;
+	bool trace_sample;
 
 	if (out_written == NULL) return false;
 	*out_written = 0u;
@@ -1393,8 +1415,8 @@ bool terminal_write(struct terminal* terminal, const uint8_t* data, size_t size,
 		(void)trace_begin(&trace_terminal_write_finalize);
 	}
 	*out_written = written;
-	success      = (!terminal->viewport_dirty || redraw_viewport(terminal)) && draw_overlay(terminal) &&
-	               show_cursor(terminal) && written == size;
+	success = (!terminal->viewport_dirty || redraw_viewport(terminal)) && draw_overlay(terminal) &&
+	          show_cursor(terminal) && written == size;
 	show_pointer_cursor(terminal);
 	if (trace_sample) (void)trace_end(&trace_terminal_write_finalize);
 	terminal_unlock(terminal);
@@ -1402,33 +1424,33 @@ bool terminal_write(struct terminal* terminal, const uint8_t* data, size_t size,
 }
 
 static bool decode_utf8(const uint8_t* text, size_t size, uint32_t* codepoints, size_t* out_count, size_t selection_end,
-                        size_t* out_caret) {
+		size_t* out_caret) {
 	size_t offset = 0u;
-	size_t count  = 0u;
-	size_t caret  = SIZE_MAX;
+	size_t count = 0u;
+	size_t caret = SIZE_MAX;
 
 	if (out_count == NULL || out_caret == NULL || selection_end > size ||
-	    (size != 0u && (text == NULL || codepoints == NULL)))
+			(size != 0u && (text == NULL || codepoints == NULL)))
 		return false;
 	while (offset < size) {
-		uint8_t  first = text[offset];
+		uint8_t first = text[offset];
 		uint32_t value;
-		size_t   length;
+		size_t length;
 		if (offset == selection_end) caret = count;
 		if (first < 0x80u) {
-			value  = first;
+			value = first;
 			length = 1u;
 		}
 		else if (first >= 0xc2u && first <= 0xdfu) {
-			value  = first & 0x1fu;
+			value = first & 0x1fu;
 			length = 2u;
 		}
 		else if (first >= 0xe0u && first <= 0xefu) {
-			value  = first & 0x0fu;
+			value = first & 0x0fu;
 			length = 3u;
 		}
 		else if (first >= 0xf0u && first <= 0xf4u) {
-			value  = first & 0x07u;
+			value = first & 0x07u;
 			length = 4u;
 		}
 		else return false;
@@ -1450,20 +1472,20 @@ static bool decode_utf8(const uint8_t* text, size_t size, uint32_t* codepoints, 
 }
 
 bool terminal_set_preedit(struct terminal* terminal, const uint8_t* text, size_t size, size_t selection_end) {
-	uint32_t*                     codepoints = NULL;
-	struct terminal_overlay_cell* overlay    = NULL;
-	size_t                        count;
-	size_t                        caret;
-	bool                          success;
+	uint32_t* codepoints = NULL;
+	struct terminal_overlay_cell* overlay = NULL;
+	size_t count;
+	size_t caret;
+	bool success;
 
 	if (terminal == NULL || selection_end > size || (size != 0u && text == NULL) ||
-	    size > SIZE_MAX / sizeof(*codepoints) || size > SIZE_MAX / sizeof(*overlay))
+			size > SIZE_MAX / sizeof(*codepoints) || size > SIZE_MAX / sizeof(*overlay))
 		return false;
 	if (size != 0u) {
 		codepoints = malloc(size * sizeof(*codepoints));
-		overlay    = malloc(size * sizeof(*overlay));
+		overlay = malloc(size * sizeof(*overlay));
 		if (codepoints == NULL || overlay == NULL ||
-		    !decode_utf8(text, size, codepoints, &count, selection_end, &caret)) {
+				!decode_utf8(text, size, codepoints, &count, selection_end, &caret)) {
 			free(codepoints);
 			free(overlay);
 			return false;
@@ -1481,12 +1503,12 @@ bool terminal_set_preedit(struct terminal* terminal, const uint8_t* text, size_t
 		free(terminal->preedit_codepoints);
 		free(terminal->overlay);
 		terminal->preedit_codepoints = codepoints;
-		terminal->preedit_count      = count;
-		terminal->preedit_caret      = caret;
-		terminal->overlay            = overlay;
-		codepoints                   = NULL;
-		overlay                      = NULL;
-		success                      = draw_overlay(terminal) && show_cursor(terminal);
+		terminal->preedit_count = count;
+		terminal->preedit_caret = caret;
+		terminal->overlay = overlay;
+		codepoints = NULL;
+		overlay = NULL;
+		success = draw_overlay(terminal) && show_cursor(terminal);
 	}
 	show_pointer_cursor(terminal);
 	terminal_unlock(terminal);
@@ -1499,13 +1521,13 @@ bool terminal_scroll_view(struct terminal* terminal, int64_t lines) {
 	size_t amount;
 	size_t offset;
 	size_t moved;
-	bool   success;
+	bool success;
 
 	if (terminal == NULL) return false;
 	if (lines > 0) amount = (uint64_t)lines > SIZE_MAX ? SIZE_MAX : (size_t)lines;
 	else {
 		uint64_t magnitude = lines == INT64_MIN ? (uint64_t)INT64_MAX + 1u : (uint64_t)-lines;
-		amount             = magnitude > SIZE_MAX ? SIZE_MAX : (size_t)magnitude;
+		amount = magnitude > SIZE_MAX ? SIZE_MAX : (size_t)magnitude;
 	}
 	terminal_lock(terminal);
 	hide_pointer_cursor(terminal);
@@ -1517,10 +1539,10 @@ bool terminal_scroll_view(struct terminal* terminal, int64_t lines) {
 	offset = terminal->viewport_offset;
 	if (lines > 0)
 		terminal->viewport_offset =
-			amount > terminal->history_count - offset ? terminal->history_count : offset + amount;
+				amount > terminal->history_count - offset ? terminal->history_count : offset + amount;
 	else if (lines < 0) terminal->viewport_offset = amount > offset ? 0u : offset - amount;
-	moved =
-		terminal->viewport_offset > offset ? terminal->viewport_offset - offset : offset - terminal->viewport_offset;
+	moved = terminal->viewport_offset > offset ? terminal->viewport_offset - offset
+	                                           : offset - terminal->viewport_offset;
 	if (terminal->viewport_dirty) success = redraw_viewport(terminal);
 	else success = moved == 0u || move_viewport(terminal, terminal->viewport_offset > offset, moved);
 	success = success && draw_overlay(terminal) && show_cursor(terminal);
@@ -1531,7 +1553,7 @@ bool terminal_scroll_view(struct terminal* terminal, int64_t lines) {
 
 bool terminal_scroll_to_bottom(struct terminal* terminal) {
 	size_t offset;
-	bool   success;
+	bool success;
 
 	if (terminal == NULL) return false;
 	terminal_lock(terminal);
@@ -1545,7 +1567,7 @@ bool terminal_scroll_to_bottom(struct terminal* terminal) {
 		terminal_unlock(terminal);
 		return false;
 	}
-	offset                    = terminal->viewport_offset;
+	offset = terminal->viewport_offset;
 	terminal->viewport_offset = 0u;
 	if (terminal->viewport_dirty) success = redraw_viewport(terminal);
 	else success = move_viewport(terminal, false, offset);
@@ -1564,7 +1586,7 @@ bool terminal_selection_get(struct terminal* terminal, struct terminal_get_selec
 	}
 	*out_selection = (struct terminal_get_selection_response){
 		.anchor = terminal->selection.anchor,
-		.focus  = terminal->selection.focus,
+		.focus = terminal->selection.focus,
 	};
 	terminal_unlock(terminal);
 	return true;
@@ -1579,10 +1601,11 @@ static bool selection_position_valid(const struct terminal* terminal, struct ter
 	return position.line >= first && position.line <= last && position.column <= terminal->columns;
 }
 
-static bool selection_state_equal(const struct terminal_selection_state* left,
-                                  const struct terminal_selection_state* right) {
-	return left->active == right->active && (!left->active || (position_compare(left->anchor, right->anchor) == 0 &&
-	                                                           position_compare(left->focus, right->focus) == 0));
+static bool selection_state_equal(
+		const struct terminal_selection_state* left, const struct terminal_selection_state* right) {
+	return left->active == right->active &&
+	       (!left->active || (position_compare(left->anchor, right->anchor) == 0 &&
+									 position_compare(left->focus, right->focus) == 0));
 }
 
 static bool set_selection_locked(struct terminal* terminal, struct terminal_selection_state next) {
@@ -1594,9 +1617,9 @@ static bool set_selection_locked(struct terminal* terminal, struct terminal_sele
 }
 
 bool terminal_selection_set(struct terminal* terminal, struct terminal_selection_position anchor,
-                            struct terminal_selection_position focus) {
+		struct terminal_selection_position focus) {
 	struct terminal_selection_state next = {.anchor = anchor, .focus = focus, .active = true};
-	bool                            success;
+	bool success;
 
 	if (terminal == NULL || position_compare(anchor, focus) == 0) return false;
 	terminal_lock(terminal);
@@ -1613,7 +1636,7 @@ bool terminal_selection_set(struct terminal* terminal, struct terminal_selection
 
 bool terminal_selection_clear(struct terminal* terminal) {
 	struct terminal_selection_state next = {0};
-	bool                            success;
+	bool success;
 
 	if (terminal == NULL) return false;
 	terminal_lock(terminal);
@@ -1635,29 +1658,29 @@ static bool clipboard_codepoint_allowed(uint32_t codepoint) {
 }
 
 bool terminal_clipboard_text_valid(const void* contents, size_t size) {
-	const uint8_t* text   = contents;
-	size_t         offset = 0u;
+	const uint8_t* text = contents;
+	size_t offset = 0u;
 
 	if (size != 0u && text == NULL) return false;
 	while (offset < size) {
-		uint8_t  first = text[offset];
+		uint8_t first = text[offset];
 		uint32_t value;
-		size_t   length;
+		size_t length;
 
 		if (first < 0x80u) {
-			value  = first;
+			value = first;
 			length = 1u;
 		}
 		else if (first >= 0xc2u && first <= 0xdfu) {
-			value  = first & 0x1fu;
+			value = first & 0x1fu;
 			length = 2u;
 		}
 		else if (first >= 0xe0u && first <= 0xefu) {
-			value  = first & 0x0fu;
+			value = first & 0x0fu;
 			length = 3u;
 		}
 		else if (first >= 0xf0u && first <= 0xf4u) {
-			value  = first & 0x07u;
+			value = first & 0x07u;
 			length = 4u;
 		}
 		else return false;
@@ -1719,9 +1742,9 @@ static size_t selected_line_end(const struct terminal_cell* cells, size_t first,
 enum terminal_clipboard_copy_result terminal_clipboard_copy_selection(struct terminal* terminal) {
 	struct terminal_selection_position first;
 	struct terminal_selection_position last;
-	uint8_t*                           clipboard      = NULL;
-	size_t                             clipboard_size = 0u;
-	size_t                             offset         = 0u;
+	uint8_t* clipboard = NULL;
+	size_t clipboard_size = 0u;
+	size_t offset = 0u;
 
 	if (terminal == NULL) return TERMINAL_CLIPBOARD_COPY_FAILED;
 	terminal_lock(terminal);
@@ -1732,8 +1755,8 @@ enum terminal_clipboard_copy_result terminal_clipboard_copy_selection(struct ter
 	selection_bounds(&terminal->selection, &first, &last);
 	for (uint64_t line = first.line;; line++) {
 		const struct terminal_cell* cells = retained_line_cells(terminal, line);
-		size_t                      begin = line == first.line ? (size_t)first.column : 0u;
-		size_t                      end   = line == last.line ? (size_t)last.column : terminal->columns;
+		size_t begin = line == first.line ? (size_t)first.column : 0u;
+		size_t end = line == last.line ? (size_t)last.column : terminal->columns;
 
 		if (cells == NULL || begin > terminal->columns || end > terminal->columns || begin > end) goto failed;
 		end = selected_line_end(cells, begin, end);
@@ -1752,8 +1775,8 @@ enum terminal_clipboard_copy_result terminal_clipboard_copy_selection(struct ter
 	}
 	for (uint64_t line = first.line;; line++) {
 		const struct terminal_cell* cells = retained_line_cells(terminal, line);
-		size_t                      begin = line == first.line ? (size_t)first.column : 0u;
-		size_t                      end   = line == last.line ? (size_t)last.column : terminal->columns;
+		size_t begin = line == first.line ? (size_t)first.column : 0u;
+		size_t end = line == last.line ? (size_t)last.column : terminal->columns;
 
 		end = selected_line_end(cells, begin, end);
 		for (size_t column = begin; column < end; column++) {
@@ -1764,7 +1787,7 @@ enum terminal_clipboard_copy_result terminal_clipboard_copy_selection(struct ter
 		clipboard[offset++] = '\n';
 	}
 	free(terminal->clipboard);
-	terminal->clipboard      = clipboard;
+	terminal->clipboard = clipboard;
 	terminal->clipboard_size = clipboard_size;
 	terminal_unlock(terminal);
 	return TERMINAL_CLIPBOARD_COPY_OK;
@@ -1821,7 +1844,7 @@ bool terminal_clipboard_set(struct terminal* terminal, const void* text, size_t 
 	}
 	terminal_lock(terminal);
 	free(terminal->clipboard);
-	terminal->clipboard      = copy;
+	terminal->clipboard = copy;
 	terminal->clipboard_size = size;
 	terminal_unlock(terminal);
 	return true;
@@ -1838,22 +1861,22 @@ static size_t move_pointer_axis(size_t current, size_t maximum, int64_t delta) {
 
 static struct terminal_selection_position pointer_selection_position(const struct terminal* terminal) {
 	size_t column = terminal->pointer_x / terminal->cell_width;
-	size_t row    = terminal->pointer_y / terminal->cell_height;
+	size_t row = terminal->pointer_y / terminal->cell_height;
 
 	if (column >= terminal->columns) column = terminal->columns;
 	else if (terminal->pointer_x % terminal->cell_width >= (terminal->cell_width + 1u) / 2u) column++;
 	if (row >= terminal->rows) row = terminal->rows - 1u;
 	return (struct terminal_selection_position){
-		.line   = terminal->screen_origin - terminal->viewport_offset + row,
+		.line = terminal->screen_origin - terminal->viewport_offset + row,
 		.column = column,
 	};
 }
 
 bool terminal_pointer_update(struct terminal* terminal, uint64_t source_id, int64_t delta_x, int64_t delta_y,
-                             bool primary_changed, bool primary_pressed) {
-	struct terminal_selection_state    next;
+		bool primary_changed, bool primary_pressed) {
+	struct terminal_selection_state next;
 	struct terminal_selection_position position;
-	bool                               success = true;
+	bool success = true;
 
 	if (terminal == NULL || source_id == 0u) return false;
 	terminal_lock(terminal);
@@ -1861,25 +1884,25 @@ bool terminal_pointer_update(struct terminal* terminal, uint64_t source_id, int6
 	if (delta_x != 0 || delta_y != 0) terminal->pointer_moved = true;
 	terminal->pointer_x = move_pointer_axis(terminal->pointer_x, terminal->surface.width - 1u, delta_x);
 	terminal->pointer_y = move_pointer_axis(terminal->pointer_y, terminal->surface.height - 1u, delta_y);
-	position            = pointer_selection_position(terminal);
+	position = pointer_selection_position(terminal);
 	if (primary_changed && primary_pressed && !terminal->pointer_primary_pressed) {
-		terminal->pointer_primary_pressed  = true;
+		terminal->pointer_primary_pressed = true;
 		terminal->pointer_selection_source = source_id;
-		terminal->pointer_selecting        = true;
+		terminal->pointer_selecting = true;
 		terminal->pointer_selection_anchor = position;
-		next                               = (struct terminal_selection_state){0};
-		success                            = set_selection_locked(terminal, next);
+		next = (struct terminal_selection_state){0};
+		success = set_selection_locked(terminal, next);
 	}
 	else if (primary_changed && !primary_pressed && terminal->pointer_primary_pressed &&
-	         terminal->pointer_selection_source == source_id) {
+			 terminal->pointer_selection_source == source_id) {
 		terminal->pointer_primary_pressed = false;
 		if (terminal->pointer_selecting) {
 			next = (struct terminal_selection_state){
 				.anchor = terminal->pointer_selection_anchor,
-				.focus  = position,
+				.focus = position,
 				.active = position_compare(terminal->pointer_selection_anchor, position) != 0,
 			};
-			success                     = set_selection_locked(terminal, next);
+			success = set_selection_locked(terminal, next);
 			terminal->pointer_selecting = false;
 		}
 		terminal->pointer_selection_source = 0u;
@@ -1887,7 +1910,7 @@ bool terminal_pointer_update(struct terminal* terminal, uint64_t source_id, int6
 	else if (terminal->pointer_selecting && terminal->pointer_selection_source == source_id) {
 		next = (struct terminal_selection_state){
 			.anchor = terminal->pointer_selection_anchor,
-			.focus  = position,
+			.focus = position,
 			.active = position_compare(terminal->pointer_selection_anchor, position) != 0,
 		};
 		success = set_selection_locked(terminal, next);
@@ -1901,8 +1924,8 @@ void terminal_pointer_cancel(struct terminal* terminal, uint64_t source_id) {
 	if (terminal == NULL) return;
 	terminal_lock(terminal);
 	if (source_id == 0u || source_id == terminal->pointer_selection_source) {
-		terminal->pointer_primary_pressed  = false;
-		terminal->pointer_selecting        = false;
+		terminal->pointer_primary_pressed = false;
+		terminal->pointer_selecting = false;
 		terminal->pointer_selection_source = 0u;
 	}
 	terminal_unlock(terminal);

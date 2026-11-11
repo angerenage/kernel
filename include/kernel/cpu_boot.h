@@ -1,8 +1,9 @@
 #pragma once
 
-#include <core/cpu.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+#include <core/cpu.h>
 
 /*
  * Higher-level CPU bring-up helpers layered on top of boot_cpu_* and the

@@ -1,12 +1,13 @@
 #include "load_plan.h"
 
-#include <base/math.h>
 #include <stdlib.h>
+
+#include <base/math.h>
 
 static void sort_boundaries(uint64_t* values, size_t count) {
 	for (size_t i = 1u; i < count; i++) {
 		uint64_t value = values[i];
-		size_t   j     = i;
+		size_t j = i;
 		while (j != 0u && values[j - 1u] > value) {
 			values[j] = values[j - 1u];
 			j--;
@@ -15,13 +16,13 @@ static void sort_boundaries(uint64_t* values, size_t count) {
 	}
 }
 
-static bool logical_ranges_overlap(const struct loader_elf_segment_layout* left,
-                                   const struct loader_elf_segment_layout* right) {
+static bool logical_ranges_overlap(
+		const struct loader_elf_segment_layout* left, const struct loader_elf_segment_layout* right) {
 	uint64_t left_end;
 	uint64_t right_end;
 	if (left->memsz == 0u || right->memsz == 0u) return false;
 	if (add_overflow_u64(left->vaddr, left->memsz, &left_end) ||
-	    add_overflow_u64(right->vaddr, right->memsz, &right_end))
+			add_overflow_u64(right->vaddr, right->memsz, &right_end))
 		return true;
 	return left->vaddr < right_end && right->vaddr < left_end;
 }
@@ -33,13 +34,13 @@ void loader_elf_plan_deinit(struct loader_elf_load_plan* plan) {
 	*plan = (struct loader_elf_load_plan){0};
 }
 
-bool loader_elf_entry_is_executable(const struct loader_elf_segment_layout* segments, size_t segment_count,
-                                    uint64_t entry) {
+bool loader_elf_entry_is_executable(
+		const struct loader_elf_segment_layout* segments, size_t segment_count, uint64_t entry) {
 	if (segments == NULL) return false;
 	for (size_t i = 0u; i < segment_count; i++) {
 		uint64_t end;
 		if (segments[i].memsz == 0u || (segments[i].access & MEMORY_ACCESS_EXEC) == 0u ||
-		    add_overflow_u64(segments[i].vaddr, segments[i].memsz, &end))
+				add_overflow_u64(segments[i].vaddr, segments[i].memsz, &end))
 			continue;
 		if (entry >= segments[i].vaddr && entry < end) return true;
 	}
@@ -47,13 +48,12 @@ bool loader_elf_entry_is_executable(const struct loader_elf_segment_layout* segm
 }
 
 enum loader_elf_plan_result loader_elf_plan_create(const struct loader_elf_segment_layout* segments,
-                                                   size_t segment_count, size_t mapping_granule,
-                                                   struct loader_elf_load_plan* out_plan) {
+		size_t segment_count, size_t mapping_granule, struct loader_elf_load_plan* out_plan) {
 	uint64_t* boundaries;
-	size_t    boundary_count = 0u;
-	size_t    boundary_capacity;
+	size_t boundary_count = 0u;
+	size_t boundary_capacity;
 	if (out_plan == NULL || (segments == NULL && segment_count != 0u) || mapping_granule == 0u ||
-	    (mapping_granule & (mapping_granule - 1u)) != 0u)
+			(mapping_granule & (mapping_granule - 1u)) != 0u)
 		return LOADER_ELF_PLAN_INVALID_ARGUMENT;
 	*out_plan = (struct loader_elf_load_plan){0};
 	if (segment_count > SIZE_MAX / 2u) return LOADER_ELF_PLAN_BAD_LAYOUT;
@@ -67,7 +67,7 @@ enum loader_elf_plan_result loader_elf_plan_create(const struct loader_elf_segme
 		uint64_t page_end;
 		if (segments[i].memsz == 0u) continue;
 		if (add_overflow_u64(segments[i].vaddr, segments[i].memsz, &logical_end) ||
-		    !align_up_u64(logical_end, mapping_granule, &page_end))
+				!align_up_u64(logical_end, mapping_granule, &page_end))
 			goto bad_layout;
 		for (size_t j = 0u; j < i; j++)
 			if (logical_ranges_overlap(&segments[i], &segments[j])) goto bad_layout;
@@ -83,7 +83,7 @@ enum loader_elf_plan_result loader_elf_plan_create(const struct loader_elf_segme
 	for (size_t i = 1u; i < boundary_count; i++)
 		if (boundaries[i] != boundaries[unique_count - 1u]) boundaries[unique_count++] = boundaries[i];
 	out_plan->regions = calloc(segment_count, sizeof(*out_plan->regions));
-	out_plan->runs    = calloc(unique_count - 1u, sizeof(*out_plan->runs));
+	out_plan->runs = calloc(unique_count - 1u, sizeof(*out_plan->runs));
 	if (out_plan->regions == NULL || out_plan->runs == NULL) {
 		free(boundaries);
 		loader_elf_plan_deinit(out_plan);
@@ -92,15 +92,15 @@ enum loader_elf_plan_result loader_elf_plan_create(const struct loader_elf_segme
 
 	bool covered_before = false;
 	for (size_t i = 0u; i + 1u < unique_count; i++) {
-		uint64_t        start   = boundaries[i];
-		uint64_t        end     = boundaries[i + 1u];
-		memory_access_t access  = 0u;
-		bool            covered = false;
+		uint64_t start = boundaries[i];
+		uint64_t end = boundaries[i + 1u];
+		memory_access_t access = 0u;
+		bool covered = false;
 		for (size_t j = 0u; j < segment_count; j++) {
 			uint64_t logical_end;
 			uint64_t page_end;
 			if (segments[j].memsz == 0u || add_overflow_u64(segments[j].vaddr, segments[j].memsz, &logical_end) ||
-			    !align_up_u64(logical_end, mapping_granule, &page_end))
+					!align_up_u64(logical_end, mapping_granule, &page_end))
 				continue;
 			uint64_t page_start = align_down_u64(segments[j].vaddr, mapping_granule);
 			if (page_start <= start && page_end >= end) {
@@ -114,15 +114,15 @@ enum loader_elf_plan_result loader_elf_plan_create(const struct loader_elf_segme
 		}
 		if (!covered_before) {
 			struct loader_elf_load_region* region = &out_plan->regions[out_plan->region_count++];
-			region->virtual_base                  = start;
-			region->first_run                     = out_plan->run_count;
+			region->virtual_base = start;
+			region->first_run = out_plan->run_count;
 		}
 		struct loader_elf_load_region* region = &out_plan->regions[out_plan->region_count - 1u];
 		if (end - region->virtual_base > SIZE_MAX) goto bad_plan;
 		region->size = (size_t)(end - region->virtual_base);
 		if (region->run_count != 0u) {
 			struct loader_elf_load_run* previous = &out_plan->runs[out_plan->run_count - 1u];
-			size_t                      offset   = (size_t)(start - region->virtual_base);
+			size_t offset = (size_t)(start - region->virtual_base);
 			if (previous->access == access && previous->object_offset + previous->size == offset) {
 				previous->size += (size_t)(end - start);
 				covered_before = true;
@@ -130,9 +130,9 @@ enum loader_elf_plan_result loader_elf_plan_create(const struct loader_elf_segme
 			}
 		}
 		struct loader_elf_load_run* run = &out_plan->runs[out_plan->run_count++];
-		run->object_offset              = (size_t)(start - region->virtual_base);
-		run->size                       = (size_t)(end - start);
-		run->access                     = access;
+		run->object_offset = (size_t)(start - region->virtual_base);
+		run->size = (size_t)(end - start);
+		run->access = access;
 		region->run_count++;
 		covered_before = true;
 	}

@@ -1,21 +1,23 @@
-#include <core/exception.h>
-#include <core/mm.h>
-#include <criterion/criterion.h>
-#include <hal/hcf.h>
-#include <hal/paging.h>
-#include <kernel/syscall.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <test_memory.h>
+
+#include <hal/hcf.h>
+#include <hal/paging.h>
+#include <core/exception.h>
+#include <core/mm.h>
+#include <kernel/syscall.h>
+
+#include <criterion/criterion.h>
 
 #include "../../../platforms/pc_x86_64/hal/interrupts/frame.h"
 #include "../../../platforms/pc_x86_64/hal/interrupts/segments.h"
 #include "../../../platforms/pc_x86_64/hal/interrupts/vectors.h"
 #include "../../../platforms/pc_x86_64/hal/syscall.h"
 
-static uintptr_t                 dispatched_number;
-static uintptr_t                 dispatched_args[6];
+static uintptr_t dispatched_number;
+static uintptr_t dispatched_args[6];
 static enum syscall_frame_action dispatched_action;
 
 const struct hal_paging_info* hal_paging_info(void) {
@@ -37,11 +39,11 @@ void hcf(void) {
 }
 
 enum syscall_frame_action syscall_dispatch_user_frame(struct hal_userspace_return_frame* opaque_frame, uintptr_t number,
-                                                      uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
-                                                      uintptr_t arg4, uintptr_t arg5, syscall_result_t* out_result) {
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5,
+		syscall_result_t* out_result) {
 	struct interrupt_frame* frame = (struct interrupt_frame*)opaque_frame;
 
-	dispatched_number  = number;
+	dispatched_number = number;
 	dispatched_args[0] = arg0;
 	dispatched_args[1] = arg1;
 	dispatched_args[2] = arg2;
@@ -58,34 +60,34 @@ enum syscall_frame_action syscall_dispatch_user_frame(struct hal_userspace_retur
 }
 
 static struct user_interrupt_frame valid_user_frame(void) {
-	const uint64_t rip    = TEST_MAPPING_GRANULE + 0x2000u;
-	const uint64_t rsp    = TEST_MAPPING_GRANULE + 0x8000u;
+	const uint64_t rip = TEST_MAPPING_GRANULE + 0x2000u;
+	const uint64_t rsp = TEST_MAPPING_GRANULE + 0x8000u;
 	const uint64_t rflags = 0x202u;
 
 	return (struct user_interrupt_frame){
 		.frame =
-			{
-					.rcx    = rip,
-					.r11    = rflags,
-					.rip    = rip,
-					.cs     = X86_GDT_USER_CODE_SELECTOR | 0x3u,
+				{
+					.rcx = rip,
+					.r11 = rflags,
+					.rip = rip,
+					.cs = X86_GDT_USER_CODE_SELECTOR | 0x3u,
 					.rflags = rflags,
-					},
+				},
 		.rsp = rsp,
-		.ss  = X86_GDT_USER_DATA_SELECTOR | 0x3u,
+		.ss = X86_GDT_USER_DATA_SELECTOR | 0x3u,
 	};
 }
 
 Test(x86_64_syscall, dispatches_six_arguments_from_the_normalized_frame) {
-	dispatched_action            = SYSCALL_FRAME_WRITE_RESULT;
+	dispatched_action = SYSCALL_FRAME_WRITE_RESULT;
 	struct interrupt_frame frame = {
-		.rax    = 0x10u,
-		.rdi    = 0x20u,
-		.rsi    = 0x30u,
-		.rdx    = 0x40u,
-		.r10    = 0x50u,
-		.r8     = 0x60u,
-		.r9     = 0x70u,
+		.rax = 0x10u,
+		.rdi = 0x20u,
+		.rsi = 0x30u,
+		.rdx = 0x40u,
+		.r10 = 0x50u,
+		.r8 = 0x60u,
+		.r9 = 0x70u,
 		.vector = X86_SYSCALL_VECTOR,
 	};
 
@@ -103,8 +105,8 @@ Test(x86_64_syscall, dispatches_six_arguments_from_the_normalized_frame) {
 
 Test(x86_64_syscall, preserves_a_frame_restored_by_the_common_dispatcher) {
 	struct interrupt_frame frame = {
-		.rax    = SYSCALL_UPCALL_RETURN,
-		.rdx    = 0x44u,
+		.rax = SYSCALL_UPCALL_RETURN,
+		.rdx = 0x44u,
 		.vector = X86_SYSCALL_VECTOR,
 	};
 

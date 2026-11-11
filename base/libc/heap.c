@@ -1,12 +1,13 @@
-#include <base/heap.h>
-#include <base/math.h>
 #include <stdbool.h>
 #include <string.h>
 
+#include <base/heap.h>
+#include <base/math.h>
+
 struct heap_block* free_list;
-size_t             total_bytes;
-size_t             free_bytes;
-bool               initialized;
+size_t total_bytes;
+size_t free_bytes;
+bool initialized;
 
 size_t block_size(const struct heap_block* block) {
 	return block->size_and_flags & HEAP_SIZE_MASK;
@@ -18,7 +19,7 @@ bool block_used(const struct heap_block* block) {
 
 static void write_footer(struct heap_block* block) {
 	size_t* footer = (size_t*)((uint8_t*)block + block_size(block) - heap_footer_size);
-	*footer        = block->size_and_flags;
+	*footer = block->size_and_flags;
 }
 
 void mark_block(struct heap_block* block, size_t size, bool used) {
@@ -35,8 +36,8 @@ static inline struct heap_block* next_block(const struct heap_block* block) {
 }
 
 static inline struct heap_block* prev_block(const struct heap_block* block) {
-	const size_t* footer    = (const size_t*)((const uint8_t*)block - heap_footer_size);
-	size_t        prev_size = *footer & HEAP_SIZE_MASK;
+	const size_t* footer = (const size_t*)((const uint8_t*)block - heap_footer_size);
+	size_t prev_size = *footer & HEAP_SIZE_MASK;
 	return (struct heap_block*)((uint8_t*)block - prev_size);
 }
 
@@ -52,13 +53,13 @@ void remove_free_block(struct heap_block* block) {
 
 void insert_free_block(struct heap_block* block) {
 	struct heap_block* current = free_list;
-	struct heap_block* prev    = NULL;
+	struct heap_block* prev = NULL;
 
 	block->prev_free = NULL;
 	block->next_free = NULL;
 
 	while (current != NULL && (uintptr_t)current < (uintptr_t)block) {
-		prev    = current;
+		prev = current;
 		current = current->next_free;
 	}
 
@@ -94,16 +95,16 @@ static bool add_arena_locked(void* base, size_t size_bytes) {
 	struct heap_block* prologue;
 	struct heap_block* free_block;
 	struct heap_block* epilogue;
-	size_t             free_block_size;
+	size_t free_block_size;
 
 	if (!base) return false;
 	if (size_bytes < (2u * heap_sentinel_size + heap_min_block_size)) return false;
 	if ((size_bytes & (HEAP_ALIGN - 1u)) != 0) return false;
 
-	prologue        = (struct heap_block*)base;
-	free_block      = (struct heap_block*)((uint8_t*)base + heap_sentinel_size);
+	prologue = (struct heap_block*)base;
+	free_block = (struct heap_block*)((uint8_t*)base + heap_sentinel_size);
 	free_block_size = size_bytes - 2u * heap_sentinel_size;
-	epilogue        = (struct heap_block*)((uint8_t*)free_block + free_block_size);
+	epilogue = (struct heap_block*)((uint8_t*)free_block + free_block_size);
 
 	mark_block(prologue, heap_sentinel_size, true);
 	mark_block(free_block, free_block_size, false);
@@ -118,12 +119,12 @@ static bool add_arena_locked(void* base, size_t size_bytes) {
 }
 
 bool grow_heap(size_t min_block_size) {
-	void*                  region = NULL;
+	void* region = NULL;
 	struct heap_lock_state lock_state;
-	size_t                 granule;
-	size_t                 sentinel_bytes;
-	size_t                 request_bytes;
-	size_t                 grow_bytes;
+	size_t granule;
+	size_t sentinel_bytes;
+	size_t request_bytes;
+	size_t grow_bytes;
 
 	granule = heap_growth_granule();
 	if (granule == 0u) return false;
@@ -156,46 +157,46 @@ struct heap_block* find_fit_locked(size_t block_bytes) {
 
 bool heap_init(void) {
 	struct heap_lock_state lock_state = heap_lock();
-	free_list                         = NULL;
-	total_bytes                       = 0;
-	free_bytes                        = 0;
-	initialized                       = false;
+	free_list = NULL;
+	total_bytes = 0;
+	free_bytes = 0;
+	initialized = false;
 	heap_unlock(lock_state);
 
 	if (!grow_heap(heap_min_block_size)) return false;
 
-	lock_state  = heap_lock();
+	lock_state = heap_lock();
 	initialized = true;
 	heap_unlock(lock_state);
 	return true;
 }
 
 bool heap_is_initialized(void) {
-	bool                   is_initialized;
+	bool is_initialized;
 	struct heap_lock_state lock_state;
 
-	lock_state     = heap_lock();
+	lock_state = heap_lock();
 	is_initialized = initialized;
 	heap_unlock(lock_state);
 	return is_initialized;
 }
 
 size_t heap_total_bytes(void) {
-	size_t                 total;
+	size_t total;
 	struct heap_lock_state lock_state;
 
 	lock_state = heap_lock();
-	total      = total_bytes;
+	total = total_bytes;
 	heap_unlock(lock_state);
 	return total;
 }
 
 size_t heap_free_bytes(void) {
-	size_t                 free_now;
+	size_t free_now;
 	struct heap_lock_state lock_state;
 
 	lock_state = heap_lock();
-	free_now   = free_bytes;
+	free_now = free_bytes;
 	heap_unlock(lock_state);
 	return free_now;
 }

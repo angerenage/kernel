@@ -12,8 +12,8 @@
 #include "../../kernel/src/capability/memory.h"
 #include "test_support.h"
 
-extern void   hal_iommu_mock_reset_discovered_controllers(void);
-extern void   mock_cache_reset(void);
+extern void hal_iommu_mock_reset_discovered_controllers(void);
+extern void mock_cache_reset(void);
 extern size_t mock_cache_dma_device_sync_count(void);
 extern size_t mock_cache_dma_device_sync_bytes(void);
 
@@ -28,14 +28,14 @@ static cap_id_t dma_test_grant(struct kernel_capability_test_context* ctx) {
 
 static dma_source_t resolve_source(cap_id_t dma_cap, struct kernel_capability_test_context* ctx, uint32_t local_id) {
 	const struct dma_resolve_source_request request = {
-		.header                      = {.op = DMA_OP_RESOLVE_SOURCE},
+		.header = {.op = DMA_OP_RESOLVE_SOURCE},
 		.controller_register_address = 0x1000u,
-		.local_source_id             = local_id,
-		.reserved                    = 0u,
+		.local_source_id = local_id,
+		.reserved = 0u,
 	};
 	struct dma_resolve_source_response response;
-	syscall_result_t                   result =
-		kernel_capability_test_call(dma_cap, &request, sizeof(request), &response, sizeof(response));
+	syscall_result_t result =
+			kernel_capability_test_call(dma_cap, &request, sizeof(request), &response, sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_neq(response.source, DMA_SOURCE_INVALID);
 	(void)ctx;
@@ -48,8 +48,8 @@ static cap_id_t claim_source(cap_id_t dma_cap, dma_source_t source) {
 		.source = source,
 	};
 	struct dma_claim_source_response response;
-	syscall_result_t                 result =
-		kernel_capability_test_call(dma_cap, &request, sizeof(request), &response, sizeof(response));
+	syscall_result_t result =
+			kernel_capability_test_call(dma_cap, &request, sizeof(request), &response, sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_neq(response.source_cap, CAP_ID_INVALID);
 	return response.source_cap;
@@ -67,21 +67,23 @@ Test(kernel_capability_dma, kernel_resource_lists_and_grants_dma_control) {
 	cr_assert_neq(resources_cap, CAP_ID_INVALID);
 
 	struct kernel_resources_list_request list_request = {
-		.header = {.op = KERNEL_RESOURCES_OP_LIST}, .offset = 0u, .capacity = 4u};
+		.header = {.op = KERNEL_RESOURCES_OP_LIST}, .offset = 0u, .capacity = 4u
+	};
 	uint8_t storage[sizeof(struct kernel_resources_list_response) + 4u * sizeof(enum kernel_resource_type)];
 	struct kernel_resources_list_response* list = (void*)storage;
-	syscall_result_t                       result =
-		kernel_capability_test_call(resources_cap, &list_request, sizeof(list_request), list, sizeof(storage));
+	syscall_result_t result =
+			kernel_capability_test_call(resources_cap, &list_request, sizeof(list_request), list, sizeof(storage));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(list->total, 1u);
 	cr_assert_eq(list->returned, 1u);
 	cr_assert_eq(list->ids[0], KERNEL_RESOURCE_TYPE_DMA);
 
-	const struct kernel_resource_acquire_request acquire_request = {.header = {.op = KERNEL_RESOURCES_OP_ACQUIRE},
-	                                                                .id     = KERNEL_RESOURCE_TYPE_DMA};
-	struct kernel_resource_acquire_response      acquire_response;
+	const struct kernel_resource_acquire_request acquire_request = {
+		.header = {.op = KERNEL_RESOURCES_OP_ACQUIRE}, .id = KERNEL_RESOURCE_TYPE_DMA
+	};
+	struct kernel_resource_acquire_response acquire_response;
 	result = kernel_capability_test_call(
-		resources_cap, &acquire_request, sizeof(acquire_request), &acquire_response, sizeof(acquire_response));
+			resources_cap, &acquire_request, sizeof(acquire_request), &acquire_response, sizeof(acquire_response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	struct capability* acquired = cap_acquire(acquire_response.cap);
 	cr_assert_not_null(acquired);
@@ -94,55 +96,56 @@ Test(kernel_capability_dma, kernel_resource_lists_and_grants_dma_control) {
 Test(kernel_capability_dma, device_resources_map_sync_bind_recover_and_unbind) {
 	struct kernel_capability_test_context ctx;
 	kernel_capability_test_begin(&ctx, "kernel-cap/dma-lifecycle");
-	cap_id_t     dma_cap    = dma_test_grant(&ctx);
-	dma_source_t source     = resolve_source(dma_cap, &ctx, 3u);
-	cap_id_t     source_cap = claim_source(dma_cap, source);
+	cap_id_t dma_cap = dma_test_grant(&ctx);
+	dma_source_t source = resolve_source(dma_cap, &ctx, 3u);
+	cap_id_t source_cap = claim_source(dma_cap, source);
 
 	const struct dma_source_create_address_space_request create_request = {
-		.header = {.op = DMA_SOURCE_OP_CREATE_ADDRESS_SPACE}};
+		.header = {.op = DMA_SOURCE_OP_CREATE_ADDRESS_SPACE}
+	};
 	struct dma_source_create_address_space_response create_response;
-	syscall_result_t                                result = kernel_capability_test_call(
-		source_cap, &create_request, sizeof(create_request), &create_response, sizeof(create_response));
+	syscall_result_t result = kernel_capability_test_call(
+			source_cap, &create_request, sizeof(create_request), &create_response, sizeof(create_response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_neq(create_response.address_space_cap, CAP_ID_INVALID);
 
 	const struct address_space_info_request info_request = {.header = {.op = ADDRESS_SPACE_OP_INFO}};
-	struct address_space_info               info;
+	struct address_space_info info;
 	result = kernel_capability_test_call(
-		create_response.address_space_cap, &info_request, sizeof(info_request), &info, sizeof(info));
+			create_response.address_space_cap, &info_request, sizeof(info_request), &info, sizeof(info));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(info.kind, ADDRESS_SPACE_KIND_DEVICE);
 	cr_assert_neq(info.minimum_mapping_size, 0u);
 
 	struct memory* memory;
 	cr_assert(memory_create_anonymous(2u * info.minimum_mapping_size, &memory));
-	cap_id_t memory_cap =
-		kernel_memory_grant(memory, process_pid(ctx.process), CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP | CAP_DELEGATE);
+	cap_id_t memory_cap = kernel_memory_grant(
+			memory, process_pid(ctx.process), CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP | CAP_DELEGATE);
 	memory_release(memory);
 	cr_assert_neq(memory_cap, CAP_ID_INVALID);
 
 	const struct address_space_map_request map_request = {
-		.header       = {.op = ADDRESS_SPACE_OP_MAP},
-		.memory_cap   = memory_cap,
-		.access       = MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
-		.address      = 0u,
-		.alignment    = 0u,
+		.header = {.op = ADDRESS_SPACE_OP_MAP},
+		.memory_cap = memory_cap,
+		.access = MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+		.address = 0u,
+		.alignment = 0u,
 		.guard_before = 0u,
-		.guard_after  = 0u,
+		.guard_after = 0u,
 	};
 	struct address_space_map_response map_response;
 	result = kernel_capability_test_call(
-		create_response.address_space_cap, &map_request, sizeof(map_request), &map_response, sizeof(map_response));
+			create_response.address_space_cap, &map_request, sizeof(map_request), &map_response, sizeof(map_response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_neq(map_response.mapping_cap, CAP_ID_INVALID);
 
 	mock_cache_reset();
 	const struct mapping_sync_request sync_request = {
-		.header   = {.op = MAPPING_OP_SYNC},
-		.target   = DMA_SYNC_FOR_DEVICE,
+		.header = {.op = MAPPING_OP_SYNC},
+		.target = DMA_SYNC_FOR_DEVICE,
 		.reserved = 0u,
-		.offset   = info.minimum_mapping_size,
-		.size     = info.minimum_mapping_size,
+		.offset = info.minimum_mapping_size,
+		.size = info.minimum_mapping_size,
 	};
 	result = kernel_capability_test_call(map_response.mapping_cap, &sync_request, sizeof(sync_request), NULL, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
@@ -150,12 +153,12 @@ Test(kernel_capability_dma, device_resources_map_sync_bind_recover_and_unbind) {
 	cr_assert_eq(mock_cache_dma_device_sync_bytes(), info.minimum_mapping_size);
 
 	const struct dma_source_bind_request bind_request = {
-		.header            = {.op = DMA_SOURCE_OP_BIND},
+		.header = {.op = DMA_SOURCE_OP_BIND},
 		.address_space_cap = create_response.address_space_cap,
 	};
 	struct dma_source_bind_response bind_response;
 	result = kernel_capability_test_call(
-		source_cap, &bind_request, sizeof(bind_request), &bind_response, sizeof(bind_response));
+			source_cap, &bind_request, sizeof(bind_request), &bind_response, sizeof(bind_response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_neq(bind_response.binding_cap, CAP_ID_INVALID);
 
@@ -164,19 +167,19 @@ Test(kernel_capability_dma, device_resources_map_sync_bind_recover_and_unbind) {
 	cr_assert(cap_destroy_by_id(bind_response.binding_cap));
 
 	const struct dma_source_recover_request recover_request = {.header = {.op = DMA_SOURCE_OP_RECOVER}};
-	struct dma_source_recover_response      recover_response;
+	struct dma_source_recover_response recover_response;
 	result = kernel_capability_test_call(
-		source_cap, &recover_request, sizeof(recover_request), &recover_response, sizeof(recover_response));
+			source_cap, &recover_request, sizeof(recover_request), &recover_response, sizeof(recover_response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_neq(recover_response.binding_cap, CAP_ID_INVALID);
 
 	const struct dma_binding_unbind_request unbind_request = {.header = {.op = DMA_BINDING_OP_UNBIND}};
-	result =
-		kernel_capability_test_call(recover_response.binding_cap, &unbind_request, sizeof(unbind_request), NULL, 0u);
+	result = kernel_capability_test_call(
+			recover_response.binding_cap, &unbind_request, sizeof(unbind_request), NULL, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 
 	result = kernel_capability_test_call(
-		source_cap, &recover_request, sizeof(recover_request), &recover_response, sizeof(recover_response));
+			source_cap, &recover_request, sizeof(recover_request), &recover_response, sizeof(recover_response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
 
 	const struct mapping_unmap_request unmap_request = {.header = {.op = MAPPING_OP_UNMAP}};
@@ -204,28 +207,29 @@ Test(kernel_capability_dma, source_tokens_do_not_bypass_dma_capability_rights) {
 		.source = source,
 	};
 	struct dma_claim_source_response claim_response;
-	syscall_result_t                 result = kernel_capability_test_call(
-		read_only, &claim_request, sizeof(claim_request), &claim_response, sizeof(claim_response));
+	syscall_result_t result = kernel_capability_test_call(
+			read_only, &claim_request, sizeof(claim_request), &claim_response, sizeof(claim_response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_DENIED);
 
-	cap_id_t           source_cap = claim_source(dma_cap, source);
-	struct capability* claimed    = cap_acquire(source_cap);
+	cap_id_t source_cap = claim_source(dma_cap, source);
+	struct capability* claimed = cap_acquire(source_cap);
 	cr_assert_not_null(claimed);
 	cap_id_t call_only = cap_delegate_create(claimed, process_pid(ctx.process), CAP_CALL, false);
 	cap_release(claimed);
 	cr_assert_neq(call_only, CAP_ID_INVALID);
 
 	const struct dma_source_create_address_space_request create_request = {
-		.header = {.op = DMA_SOURCE_OP_CREATE_ADDRESS_SPACE}};
+		.header = {.op = DMA_SOURCE_OP_CREATE_ADDRESS_SPACE}
+	};
 	struct dma_source_create_address_space_response create_response;
 	result = kernel_capability_test_call(
-		call_only, &create_request, sizeof(create_request), &create_response, sizeof(create_response));
+			call_only, &create_request, sizeof(create_request), &create_response, sizeof(create_response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_DENIED);
 
 	const struct dma_source_recover_request recover_request = {.header = {.op = DMA_SOURCE_OP_RECOVER}};
-	struct dma_source_recover_response      recover_response;
+	struct dma_source_recover_response recover_response;
 	result = kernel_capability_test_call(
-		call_only, &recover_request, sizeof(recover_request), &recover_response, sizeof(recover_response));
+			call_only, &recover_request, sizeof(recover_request), &recover_response, sizeof(recover_response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_DENIED);
 
 	kernel_capability_test_end(&ctx);
@@ -237,13 +241,13 @@ Test(kernel_capability_dma, pci_source_claim_resolves_routes_and_remains_exclusi
 	cap_id_t dma_cap = dma_test_grant(&ctx);
 
 	const struct dma_claim_pci_source_request request = {
-		.header       = {.op = DMA_OP_CLAIM_PCI_SOURCE},
-		.segment      = 0u,
+		.header = {.op = DMA_OP_CLAIM_PCI_SOURCE},
+		.segment = 0u,
 		.requester_id = 7u,
 	};
 	struct dma_claim_source_response response;
-	syscall_result_t                 result =
-		kernel_capability_test_call(dma_cap, &request, sizeof(request), &response, sizeof(response));
+	syscall_result_t result =
+			kernel_capability_test_call(dma_cap, &request, sizeof(request), &response, sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_neq(response.source_cap, CAP_ID_INVALID);
 
@@ -253,7 +257,7 @@ Test(kernel_capability_dma, pci_source_claim_resolves_routes_and_remains_exclusi
 	cr_assert(cap_destroy_by_id(response.source_cap));
 
 	struct dma_claim_pci_source_request unrouted = request;
-	unrouted.segment                             = 1u;
+	unrouted.segment = 1u;
 	result = kernel_capability_test_call(dma_cap, &unrouted, sizeof(unrouted), &response, sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_neq(response.source_cap, CAP_ID_INVALID);
@@ -264,17 +268,17 @@ Test(kernel_capability_dma, pci_source_claim_resolves_routes_and_remains_exclusi
 Test(kernel_capability_dma, source_claims_are_exclusive_releasable_and_transactional) {
 	struct kernel_capability_test_context ctx;
 	kernel_capability_test_begin(&ctx, "kernel-cap/dma-claims");
-	cap_id_t     dma_cap    = dma_test_grant(&ctx);
-	dma_source_t source     = resolve_source(dma_cap, &ctx, 11u);
-	cap_id_t     source_cap = claim_source(dma_cap, source);
+	cap_id_t dma_cap = dma_test_grant(&ctx);
+	dma_source_t source = resolve_source(dma_cap, &ctx, 11u);
+	cap_id_t source_cap = claim_source(dma_cap, source);
 
 	const struct dma_claim_source_request request = {
 		.header = {.op = DMA_OP_CLAIM_SOURCE},
 		.source = source,
 	};
 	struct dma_claim_source_response response;
-	syscall_result_t                 result =
-		kernel_capability_test_call(dma_cap, &request, sizeof(request), &response, sizeof(response));
+	syscall_result_t result =
+			kernel_capability_test_call(dma_cap, &request, sizeof(request), &response, sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
 
 	cr_assert(cap_destroy_by_id(source_cap));
@@ -294,24 +298,25 @@ Test(kernel_capability_dma, source_claims_are_exclusive_releasable_and_transacti
 Test(kernel_capability_dma, dropping_source_authority_detaches_an_active_binding) {
 	struct kernel_capability_test_context ctx;
 	kernel_capability_test_begin(&ctx, "kernel-cap/dma-source-drop");
-	cap_id_t     dma_cap    = dma_test_grant(&ctx);
-	dma_source_t source     = resolve_source(dma_cap, &ctx, 12u);
-	cap_id_t     source_cap = claim_source(dma_cap, source);
+	cap_id_t dma_cap = dma_test_grant(&ctx);
+	dma_source_t source = resolve_source(dma_cap, &ctx, 12u);
+	cap_id_t source_cap = claim_source(dma_cap, source);
 
 	const struct dma_source_create_address_space_request create_request = {
-		.header = {.op = DMA_SOURCE_OP_CREATE_ADDRESS_SPACE}};
+		.header = {.op = DMA_SOURCE_OP_CREATE_ADDRESS_SPACE}
+	};
 	struct dma_source_create_address_space_response create_response;
-	syscall_result_t                                result = kernel_capability_test_call(
-		source_cap, &create_request, sizeof(create_request), &create_response, sizeof(create_response));
+	syscall_result_t result = kernel_capability_test_call(
+			source_cap, &create_request, sizeof(create_request), &create_response, sizeof(create_response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 
 	const struct dma_source_bind_request bind_request = {
-		.header            = {.op = DMA_SOURCE_OP_BIND},
+		.header = {.op = DMA_SOURCE_OP_BIND},
 		.address_space_cap = create_response.address_space_cap,
 	};
 	struct dma_source_bind_response bind_response;
 	result = kernel_capability_test_call(
-		source_cap, &bind_request, sizeof(bind_request), &bind_response, sizeof(bind_response));
+			source_cap, &bind_request, sizeof(bind_request), &bind_response, sizeof(bind_response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 
 	cr_assert(cap_destroy_by_id(source_cap));
@@ -321,8 +326,8 @@ Test(kernel_capability_dma, dropping_source_authority_detaches_an_active_binding
 	cr_assert(cap_destroy_by_id(bind_response.binding_cap));
 
 	source_cap = claim_source(dma_cap, source);
-	result     = kernel_capability_test_call(
-		source_cap, &bind_request, sizeof(bind_request), &bind_response, sizeof(bind_response));
+	result = kernel_capability_test_call(
+			source_cap, &bind_request, sizeof(bind_request), &bind_response, sizeof(bind_response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	result = kernel_capability_test_call(bind_response.binding_cap, &unbind_request, sizeof(unbind_request), NULL, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);

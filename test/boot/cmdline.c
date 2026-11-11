@@ -1,8 +1,10 @@
-#include <boot/info.h>
-#include <criterion/criterion.h>
-#include <kernel/cmdline.h>
 #include <stddef.h>
 #include <string.h>
+
+#include <boot/info.h>
+#include <kernel/cmdline.h>
+
+#include <criterion/criterion.h>
 
 static const char* current_command_line;
 
@@ -10,9 +12,9 @@ const char* boot_cmdline_current(void) {
 	return current_command_line;
 }
 
-static void expect_userspace_arguments(const char* command_line, size_t expected_argc, const char* expected,
-                                       size_t expected_size) {
-	char   buffer[256];
+static void expect_userspace_arguments(
+		const char* command_line, size_t expected_argc, const char* expected, size_t expected_size) {
+	char buffer[256];
 	size_t argc;
 	size_t size;
 
@@ -32,13 +34,13 @@ Test(kernel_cmdline, retains_only_options_unrecognized_by_the_kernel) {
 	static const char expected[] = "device_manager.source=dt\0debugger=1\0console.color=true\0kernel.unknown=1\0";
 
 	expect_userspace_arguments("debug kernel.debug=1 loglevel=debug "
-	                           "device_manager.source=dt selftest kernel.selftest=1 "
-	                           "selftests=no kernel.selftests=no selftest.suite=ipc "
-	                           "kernel.selftest.suite=core kernel.selftest.iommu=none "
-	                           "debugger=1 console.color=true kernel.unknown=1",
-	                           4u,
-	                           expected,
-	                           sizeof(expected) - 1u);
+							   "device_manager.source=dt selftest kernel.selftest=1 "
+							   "selftests=no kernel.selftests=no selftest.suite=ipc "
+							   "kernel.selftest.suite=core kernel.selftest.iommu=none "
+							   "debugger=1 console.color=true kernel.unknown=1",
+			4u,
+			expected,
+			sizeof(expected) - 1u);
 }
 
 Test(kernel_cmdline, preserves_token_order_and_normalizes_whitespace) {
@@ -60,7 +62,7 @@ Test(kernel_cmdline, accepts_empty_or_kernel_only_command_lines) {
 }
 
 Test(kernel_cmdline, rejects_invalid_output_and_short_buffers) {
-	char   buffer[4];
+	char buffer[4];
 	size_t argc = 99u;
 	size_t size = 99u;
 

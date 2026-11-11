@@ -19,7 +19,7 @@ struct memory_backing;
 /* Parameters for claiming one fixed physical byte range. */
 struct memory_backing_physical_request {
 	uintptr_t physical_address;
-	size_t    size;
+	size_t size;
 	/* Applies only when the range is outside PMM-managed memory. */
 	bool external_cpu_accessible;
 };
@@ -27,9 +27,9 @@ struct memory_backing_physical_request {
 /* One present physical run or implicit sparse hole. */
 struct memory_backing_span {
 	enum memory_backing_span_kind kind;
-	size_t                        offset;
-	size_t                        size;
-	uintptr_t                     physical_address;
+	size_t offset;
+	size_t size;
+	uintptr_t physical_address;
 };
 
 /* Physical placement policy for anonymous materialization. */
@@ -41,15 +41,15 @@ struct memory_backing_materialize_request {
 	/* Inclusive lower bound and exclusive upper bound; zero means unbounded. */
 	uintptr_t minimum_address;
 	uintptr_t maximum_address;
-	bool      require_contiguous;
+	bool require_contiguous;
 };
 
 /* Create sparse, zero-filled storage with byte capacity size. */
 bool memory_backing_create_anonymous(size_t size, struct memory_backing** out_backing);
 
 /* Atomically claim one fixed physical byte range. */
-bool memory_backing_create_physical(const struct memory_backing_physical_request* request,
-                                    struct memory_backing**                       out_backing);
+bool memory_backing_create_physical(
+		const struct memory_backing_physical_request* request, struct memory_backing** out_backing);
 
 /* Acquire one backing-lifetime reference unless destruction has begun. */
 bool memory_backing_retain(struct memory_backing* backing);
@@ -67,12 +67,12 @@ enum memory_backing_kind memory_backing_kind(const struct memory_backing* backin
 bool memory_backing_cpu_accessible(const struct memory_backing* backing);
 
 /* Describe the present run or implicit hole beginning at offset. */
-bool memory_backing_query(struct memory_backing* backing, size_t offset, size_t maximum_size,
-                          struct memory_backing_span* out_span);
+bool memory_backing_query(
+		struct memory_backing* backing, size_t offset, size_t maximum_size, struct memory_backing_span* out_span);
 
 /* Materialize anonymous storage according to the requested physical placement policy. */
-bool memory_backing_materialize(struct memory_backing*                           backing,
-                                const struct memory_backing_materialize_request* request);
+bool memory_backing_materialize(
+		struct memory_backing* backing, const struct memory_backing_materialize_request* request);
 
 /* Copy bytes from present storage and synthesize zeroes for sparse holes. */
 bool memory_backing_read(struct memory_backing* backing, size_t offset, void* destination, size_t size);

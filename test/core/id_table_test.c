@@ -1,7 +1,9 @@
-#include <core/id_table.h>
-#include <criterion/criterion.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <core/id_table.h>
+
+#include <criterion/criterion.h>
 
 #include "../heap/test_support.h"
 #include "../thread_test.h"
@@ -18,10 +20,10 @@ static void init_id_table_test_heap(void) {
 
 Test(id_table, allocates_sequential_ids_and_supports_lookup) {
 	struct id_table table;
-	int             first_object  = 11;
-	int             second_object = 22;
-	id_table_id_t   first_id      = ID_TABLE_ID_INVALID;
-	id_table_id_t   second_id     = ID_TABLE_ID_INVALID;
+	int first_object = 11;
+	int second_object = 22;
+	id_table_id_t first_id = ID_TABLE_ID_INVALID;
+	id_table_id_t second_id = ID_TABLE_ID_INVALID;
 
 	init_id_table_test_heap();
 
@@ -40,9 +42,9 @@ Test(id_table, allocates_sequential_ids_and_supports_lookup) {
 
 Test(id_table, remove_clears_slot_and_returns_object) {
 	struct id_table table;
-	int             object = 33;
-	void*           removed;
-	id_table_id_t   id = ID_TABLE_ID_INVALID;
+	int object = 33;
+	void* removed;
+	id_table_id_t id = ID_TABLE_ID_INVALID;
 
 	init_id_table_test_heap();
 
@@ -61,36 +63,38 @@ Test(id_table, remove_clears_slot_and_returns_object) {
 
 Test(id_table, rejects_invalid_arguments_and_exhaustion) {
 	struct id_table table;
-	int             first_object  = 44;
-	int             second_object = 55;
-	id_table_id_t   id            = ID_TABLE_ID_INVALID;
+	int first_object = 44;
+	int second_object = 55;
+	id_table_id_t id = ID_TABLE_ID_INVALID;
 
 	init_id_table_test_heap();
 
 	cr_assert_eq(
-		id_table_init(NULL, "id_table_test", 1u, 16u), ID_TABLE_INVALID_ARGUMENTS, "NULL table should be rejected");
+			id_table_init(NULL, "id_table_test", 1u, 16u), ID_TABLE_INVALID_ARGUMENTS, "NULL table should be rejected");
 	cr_assert_eq(id_table_init(&table, "id_table_test", ID_TABLE_ID_INVALID, 16u),
-	             ID_TABLE_INVALID_ARGUMENTS,
-	             "zero min ID should be rejected");
+			ID_TABLE_INVALID_ARGUMENTS,
+			"zero min ID should be rejected");
 	cr_assert_eq(id_table_init(&table, "id_table_test", 4u, 3u),
-	             ID_TABLE_INVALID_ARGUMENTS,
-	             "inverted range should be rejected");
+			ID_TABLE_INVALID_ARGUMENTS,
+			"inverted range should be rejected");
 
 	cr_assert_eq(id_table_init(&table, "id_table_test", 7u, 7u), ID_TABLE_OK, "single-ID table should initialize");
 	cr_assert_eq(id_table_alloc(&table, NULL, &id), ID_TABLE_INVALID_ARGUMENTS, "NULL object should be rejected");
+	cr_assert_eq(id_table_alloc(&table, &first_object, NULL),
+			ID_TABLE_INVALID_ARGUMENTS,
+			"NULL output ID should be rejected");
 	cr_assert_eq(
-		id_table_alloc(&table, &first_object, NULL), ID_TABLE_INVALID_ARGUMENTS, "NULL output ID should be rejected");
-	cr_assert_eq(
-		id_table_alloc(&table, &first_object, &id), ID_TABLE_OK, "first allocation should consume the only ID");
+			id_table_alloc(&table, &first_object, &id), ID_TABLE_OK, "first allocation should consume the only ID");
 	cr_assert_eq(id, 7u, "single-ID table returned wrong ID");
-	cr_assert_eq(
-		id_table_alloc(&table, &second_object, &id), ID_TABLE_EXHAUSTED, "exhausted table should reject allocation");
+	cr_assert_eq(id_table_alloc(&table, &second_object, &id),
+			ID_TABLE_EXHAUSTED,
+			"exhausted table should reject allocation");
 	cr_assert_eq(id, ID_TABLE_ID_INVALID, "failed allocation should clear output ID");
 	cr_assert_null(id_table_lookup(&table, ID_TABLE_ID_INVALID), "invalid ID should not resolve");
 	cr_assert_eq(id_table_remove(&table, 8u, NULL), ID_TABLE_OUT_OF_RANGE, "out-of-range remove should fail");
 	cr_assert_eq(id_table_remove(&table, 7u, NULL), ID_TABLE_OK, "removing the only ID should succeed");
 	cr_assert_eq(
-		id_table_alloc(&table, &second_object, &id), ID_TABLE_OK, "the removed ID should become available again");
+			id_table_alloc(&table, &second_object, &id), ID_TABLE_OK, "the removed ID should become available again");
 	cr_assert_eq(id, 7u, "single-ID table should recycle its ID");
 	cr_assert_eq(id_table_lookup(&table, id), &second_object, "recycled ID should resolve to the new object");
 
@@ -99,16 +103,16 @@ Test(id_table, rejects_invalid_arguments_and_exhaustion) {
 
 Test(id_table, grows_slot_storage_and_reuses_removed_ids) {
 	struct id_table table;
-	int             objects[40];
-	id_table_id_t   ids[40];
-	void*           removed;
+	int objects[40];
+	id_table_id_t ids[40];
+	void* removed;
 
 	init_id_table_test_heap();
 
 	cr_assert_eq(id_table_init(&table, "id_table_test", 1u, 128u), ID_TABLE_OK, "id_table_init failed");
 	for (size_t i = 0; i < 40u; i++) {
 		objects[i] = (int)i;
-		ids[i]     = ID_TABLE_ID_INVALID;
+		ids[i] = ID_TABLE_ID_INVALID;
 		cr_assert_eq(id_table_alloc(&table, &objects[i], &ids[i]), ID_TABLE_OK, "allocation %zu failed", i);
 		cr_assert_eq(ids[i], i + 1u, "allocation %zu returned unexpected ID", i);
 	}
@@ -127,9 +131,9 @@ Test(id_table, grows_slot_storage_and_reuses_removed_ids) {
 
 Test(id_table, reuses_multiple_removed_ids_without_growing) {
 	struct id_table table;
-	int             objects[6];
-	id_table_id_t   ids[6];
-	size_t          capacity;
+	int objects[6];
+	id_table_id_t ids[6];
+	size_t capacity;
 
 	init_id_table_test_heap();
 
@@ -154,11 +158,11 @@ Test(id_table, reuses_multiple_removed_ids_without_growing) {
 
 Test(id_table, fresh_allocation_bypasses_recycled_ids) {
 	struct id_table table;
-	int             objects[4];
-	id_table_id_t   first;
-	id_table_id_t   second;
-	id_table_id_t   fresh;
-	id_table_id_t   recycled;
+	int objects[4];
+	id_table_id_t first;
+	id_table_id_t second;
+	id_table_id_t fresh;
+	id_table_id_t recycled;
 
 	init_id_table_test_heap();
 
@@ -176,11 +180,11 @@ Test(id_table, fresh_allocation_bypasses_recycled_ids) {
 }
 
 struct id_table_concurrent_ctx {
-	struct id_table*     table;
+	struct id_table* table;
 	struct test_barrier* barrier;
-	id_table_id_t*       ids;
-	int                  object;
-	bool                 ok;
+	id_table_id_t* ids;
+	int object;
+	bool ok;
 };
 
 static void* id_table_concurrent_alloc_worker(void* arg) {
@@ -198,30 +202,31 @@ static void* id_table_concurrent_alloc_worker(void* arg) {
 }
 
 Test(id_table, concurrent_allocations_get_unique_ids) {
-	struct id_table                table;
-	struct test_barrier            barrier;
-	pthread_t                      threads[ID_TABLE_CONCURRENT_THREADS];
+	struct id_table table;
+	struct test_barrier barrier;
+	pthread_t threads[ID_TABLE_CONCURRENT_THREADS];
 	struct id_table_concurrent_ctx ctx[ID_TABLE_CONCURRENT_THREADS];
-	id_table_id_t                  ids[ID_TABLE_CONCURRENT_THREADS][ID_TABLE_CONCURRENT_ALLOCS]        = {{0}};
-	bool                           seen[ID_TABLE_CONCURRENT_THREADS * ID_TABLE_CONCURRENT_ALLOCS + 1u] = {false};
+	id_table_id_t ids[ID_TABLE_CONCURRENT_THREADS][ID_TABLE_CONCURRENT_ALLOCS] = {{0}};
+	bool seen[ID_TABLE_CONCURRENT_THREADS * ID_TABLE_CONCURRENT_ALLOCS + 1u] = {false};
 
 	init_id_table_test_heap();
 
 	cr_assert_eq(id_table_init(&table, "id_table_test", 1u, ID_TABLE_CONCURRENT_THREADS * ID_TABLE_CONCURRENT_ALLOCS),
-	             ID_TABLE_OK,
-	             "id_table_init failed");
+			ID_TABLE_OK,
+			"id_table_init failed");
 	test_barrier_init(&barrier, ID_TABLE_CONCURRENT_THREADS);
 
 	for (size_t i = 0; i < ID_TABLE_CONCURRENT_THREADS; i++) {
 		ctx[i] = (struct id_table_concurrent_ctx){
-			.table   = &table,
+			.table = &table,
 			.barrier = &barrier,
-			.ids     = ids[i],
-			.object  = (int)i,
-			.ok      = true,
+			.ids = ids[i],
+			.object = (int)i,
+			.ok = true,
 		};
-		cr_assert_eq(
-			pthread_create(&threads[i], NULL, id_table_concurrent_alloc_worker, &ctx[i]), 0, "pthread_create failed");
+		cr_assert_eq(pthread_create(&threads[i], NULL, id_table_concurrent_alloc_worker, &ctx[i]),
+				0,
+				"pthread_create failed");
 	}
 
 	for (size_t i = 0; i < ID_TABLE_CONCURRENT_THREADS; i++) {
@@ -235,10 +240,10 @@ Test(id_table, concurrent_allocations_get_unique_ids) {
 
 			cr_assert_geq(id, 1u, "worker %zu allocation %zu returned invalid low ID", i, j);
 			cr_assert_leq(id,
-			              ID_TABLE_CONCURRENT_THREADS * ID_TABLE_CONCURRENT_ALLOCS,
-			              "worker %zu allocation %zu returned out-of-range ID",
-			              i,
-			              j);
+					ID_TABLE_CONCURRENT_THREADS * ID_TABLE_CONCURRENT_ALLOCS,
+					"worker %zu allocation %zu returned out-of-range ID",
+					i,
+					j);
 			cr_assert(!seen[(size_t)id], "duplicate ID %llu", (unsigned long long)id);
 			seen[(size_t)id] = true;
 		}

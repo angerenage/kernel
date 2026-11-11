@@ -1,4 +1,5 @@
 #include <stdint.h>
+
 #include <system/trace.h>
 
 #include "syscall.h"
@@ -10,7 +11,7 @@ static syscall_status_t trace_label_resolve(struct trace_label* label, trace_lab
 	syscall_result_t result;
 
 	if (label == NULL || out_id == NULL || label->name == NULL || label->length == 0u ||
-	    label->length > TRACE_LABEL_NAME_MAX) {
+			label->length > TRACE_LABEL_NAME_MAX) {
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	}
 	id = __atomic_load_n(&label->id, __ATOMIC_ACQUIRE);
@@ -21,11 +22,11 @@ static syscall_status_t trace_label_resolve(struct trace_label* label, trace_lab
 			trace_label_id_t expected = TRACE_LABEL_ID_INVALID;
 			if (result.status == SYSCALL_STATUS_UNAVAILABLE || result.status == SYSCALL_STATUS_BAD_ARGUMENT) {
 				(void)__atomic_compare_exchange_n(
-					&label->id, &expected, TRACE_LABEL_UNAVAILABLE, false, __ATOMIC_RELEASE, __ATOMIC_RELAXED);
+						&label->id, &expected, TRACE_LABEL_UNAVAILABLE, false, __ATOMIC_RELEASE, __ATOMIC_RELAXED);
 			}
 			return result.status;
 		}
-		id                        = (trace_label_id_t)result.value;
+		id = (trace_label_id_t)result.value;
 		trace_label_id_t expected = TRACE_LABEL_ID_INVALID;
 		if (!__atomic_compare_exchange_n(&label->id, &expected, id, false, __ATOMIC_RELEASE, __ATOMIC_ACQUIRE)) {
 			id = expected;
@@ -62,7 +63,7 @@ syscall_status_t trace_instant(struct trace_label* label) {
 
 struct trace_scope trace_scope_open(struct trace_label* label) {
 	return (struct trace_scope){
-		.label  = label,
+		.label = label,
 		.active = trace_begin(label) == SYSCALL_STATUS_OK,
 	};
 }

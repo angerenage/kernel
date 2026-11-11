@@ -1,7 +1,8 @@
 #pragma once
 
-#include <base/cap.h>
 #include <stdint.h>
+
+#include <base/cap.h>
 
 /* Direction in which a DMA mapping must be synchronized. */
 enum dma_sync_target {
@@ -29,9 +30,9 @@ struct dma_request_header {
 /* Request to resolve firmware routing data into an opaque source token. */
 struct dma_resolve_source_request {
 	struct dma_request_header header;
-	uint64_t                  controller_register_address;
-	uint32_t                  local_source_id;
-	uint32_t                  reserved;
+	uint64_t controller_register_address;
+	uint32_t local_source_id;
+	uint32_t reserved;
 };
 
 /* Response returned after resolving one DMA source. */
@@ -42,7 +43,7 @@ struct dma_resolve_source_response {
 /* Request to claim exclusive authority over one resolved DMA source. */
 struct dma_claim_source_request {
 	struct dma_request_header header;
-	dma_source_t              source;
+	dma_source_t source;
 };
 
 /* Response returned after claiming one DMA source. */
@@ -53,9 +54,9 @@ struct dma_claim_source_response {
 /* Request exclusive DMA authority for one PCI requester. */
 struct dma_claim_pci_source_request {
 	struct dma_request_header header;
-	uint16_t                  segment;
-	uint16_t                  requester_id;
-	uint32_t                  reserved;
+	uint16_t segment;
+	uint16_t requester_id;
+	uint32_t reserved;
 };
 
 /* Operations accepted by a claimed DMA-source capability. */
@@ -83,7 +84,7 @@ struct dma_source_create_address_space_response {
 /* Request to attach the claimed source to a DEVICE AddressSpace. */
 struct dma_source_bind_request {
 	struct dma_source_request_header header;
-	cap_id_t                         address_space_cap;
+	cap_id_t address_space_cap;
 };
 
 /* Response returned after attaching a claimed source. */

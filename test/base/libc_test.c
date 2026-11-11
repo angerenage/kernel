@@ -1,10 +1,11 @@
-#include <criterion/criterion.h>
 #include <ctype.h>
 #include <limits.h>
 #include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <criterion/criterion.h>
 
 Test(base_libc, classifies_ascii_characters) {
 	cr_assert((isalnum)('A'));
@@ -32,7 +33,7 @@ Test(base_libc, searches_strings) {
 
 Test(base_libc, copies_and_concatenates_strings) {
 	char buffer[16];
-	char padded[8]                                                      = {'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x'};
+	char padded[8] = {'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x'};
 	char* (*copy_bounded)(char* restrict, const char* restrict, size_t) = strncpy;
 
 	cr_assert_eq(strcpy(buffer, "frame"), buffer);
@@ -51,7 +52,7 @@ static int compare_ints(const void* left, const void* right) {
 }
 
 Test(base_libc, sorts_arrays) {
-	int values[]   = {4, -2, 4, 0, 9, 1};
+	int values[] = {4, -2, 4, 0, 9, 1};
 	int expected[] = {-2, 0, 1, 4, 4, 9};
 
 	qsort(values, sizeof(values) / sizeof(values[0]), sizeof(values[0]), compare_ints);

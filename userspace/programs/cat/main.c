@@ -1,44 +1,46 @@
-#include <base/cap.h>
-#include <protocol/filesystem.h>
-#include <protocol/vfs.h>
-#include <runtime/filesystem.h>
-#include <runtime/registry.h>
-#include <runtime/vfs.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+
+#include <base/cap.h>
+
+#include <protocol/filesystem.h>
+#include <protocol/vfs.h>
 #include <system/capability.h>
 #include <system/display.h>
+#include <runtime/filesystem.h>
+#include <runtime/registry.h>
+#include <runtime/vfs.h>
 
 #define CAT_VFS_MAJOR 1u
 #define CAT_VFS_MINOR 0u
 
 enum {
 	CAT_PATH_CAPACITY = 4096u,
-	CAT_BUFFER_SIZE   = 4096u,
+	CAT_BUFFER_SIZE = 4096u,
 };
 
 struct cat_path {
-	char   bytes[CAT_PATH_CAPACITY];
+	char bytes[CAT_PATH_CAPACITY];
 	size_t size;
-	bool   absolute;
+	bool absolute;
 };
 
 struct cat_output {
-	uint8_t  bytes[CAT_BUFFER_SIZE];
-	size_t   used;
+	uint8_t bytes[CAT_BUFFER_SIZE];
+	size_t used;
 	uint64_t next_line;
-	bool     at_line_start;
-	bool     number_lines;
-	bool     number_nonblank;
-	bool     failed;
+	bool at_line_start;
+	bool number_lines;
+	bool number_nonblank;
+	bool failed;
 };
 
 struct cat_context {
-	cap_id_t          vfs_cap;
-	cap_id_t          cwd_cap;
+	cap_id_t vfs_cap;
+	cap_id_t cwd_cap;
 	struct cat_output output;
 };
 
@@ -86,7 +88,7 @@ static bool path_pop(struct cat_path* path) {
 	size_t component = path->size;
 	while (component > root && path->bytes[component - 1u] != '/') component--;
 	if (!path->absolute && path->size - component == 2u && path->bytes[component] == '.' &&
-	    path->bytes[component + 1u] == '.') {
+			path->bytes[component + 1u] == '.') {
 		if (sizeof(path->bytes) - path->size < 3u) return false;
 		memcpy(path->bytes + path->size, "/..", 3u);
 		path->size += 3u;
@@ -99,10 +101,10 @@ static bool path_pop(struct cat_path* path) {
 
 static const char* normalize_path(const char* operand, struct cat_path* path) {
 	const size_t length = strlen(operand);
-	size_t       offset = 0u;
+	size_t offset = 0u;
 
 	path->absolute = length != 0u && operand[0] == '/';
-	path->size     = 0u;
+	path->size = 0u;
 	if (path->absolute) path->bytes[path->size++] = '/';
 	while (offset < length) {
 		size_t start;
@@ -131,17 +133,17 @@ static const char* normalize_path(const char* operand, struct cat_path* path) {
 static bool acquire_vfs(struct cat_context* context) {
 	static const struct registry_protocol_query query = {
 		.namespace_path = VFS_NAMESPACE,
-		.protocol       = VFS_PROTOCOL_NAME,
-		.major          = CAT_VFS_MAJOR,
-		.minor          = CAT_VFS_MINOR,
+		.protocol = VFS_PROTOCOL_NAME,
+		.major = CAT_VFS_MAJOR,
+		.minor = CAT_VFS_MINOR,
 	};
 	struct registry_service_handle service = {.capability = CAP_ID_INVALID};
-	struct registry_call_result    result;
+	struct registry_call_result result;
 
 	if (context->vfs_cap != CAP_ID_INVALID) return true;
 	result = registry_acquire(&query, VFS_SERVICE_NAME, &service);
 	if (result.transport_status != SYSCALL_STATUS_OK || result.status != REGISTRY_STATUS_OK ||
-	    service.capability == CAP_ID_INVALID) {
+			service.capability == CAP_ID_INVALID) {
 		if (service.capability != CAP_ID_INVALID) (void)cap_drop(service.capability);
 		return false;
 	}
@@ -169,7 +171,7 @@ static bool output_append(struct cat_output* output, const void* bytes, size_t s
 
 		if (output->used == sizeof(output->bytes) && !output_flush(output)) return false;
 		available = sizeof(output->bytes) - output->used;
-		amount    = size < available ? size : available;
+		amount = size < available ? size : available;
 		memcpy(output->bytes + output->used, input, amount);
 		output->used += amount;
 		input += amount;
@@ -184,7 +186,7 @@ static bool output_numbered(struct cat_output* output, const uint8_t* input, siz
 
 		if (output->at_line_start && (!output->number_nonblank || ch != '\n')) {
 			char prefix[32];
-			int  length = snprintf(prefix, sizeof(prefix), "%6llu\t", (unsigned long long)output->next_line);
+			int length = snprintf(prefix, sizeof(prefix), "%6llu\t", (unsigned long long)output->next_line);
 
 			if (length < 0 || (size_t)length >= sizeof(prefix) || !output_append(output, prefix, (size_t)length))
 				return false;
@@ -219,11 +221,11 @@ static bool cat_standard_input(struct cat_context* context) {
 static bool cat_file(struct cat_context* context, const char* operand) {
 	struct filesystem_node_handle node = {.capability = CAP_ID_INVALID};
 	struct filesystem_call_result result;
-	struct cat_path               path;
-	uint8_t                       buffer[CAT_BUFFER_SIZE];
-	uint64_t                      offset = 0u;
-	const char*                   error;
-	bool                          success = false;
+	struct cat_path path;
+	uint8_t buffer[CAT_BUFFER_SIZE];
+	uint64_t offset = 0u;
+	const char* error;
+	bool success = false;
 
 	error = normalize_path(operand, &path);
 	if (error != NULL) {
@@ -291,11 +293,11 @@ int main(int argc, char** argv, size_t capc, const cap_id_t* capv) {
 	struct cat_context context = {
 		.vfs_cap = CAP_ID_INVALID,
 		.cwd_cap = filesystem_get_working_directory(),
-		.output  = {.next_line = 1u, .at_line_start = true},
+		.output = {.next_line = 1u, .at_line_start = true},
 	};
-	bool   after_separator = false;
-	bool   success         = true;
-	size_t operands        = 0u;
+	bool after_separator = false;
+	bool success = true;
+	size_t operands = 0u;
 
 	if (argc < 0 || (argc != 0 && argv == NULL) || capc != 0u || capv != NULL) return 1;
 	for (int i = 0; i < argc; i++) {

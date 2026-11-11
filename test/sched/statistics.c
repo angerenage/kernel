@@ -2,15 +2,15 @@
 
 Test(sched, per_cpu_stats_track_sampled_kernel_idle_and_thread_time) {
 	const struct thread_create_params worker_params = {
-		.name              = "worker",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "worker",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x31d000u,
-		.kernel_stack_top  = 0x321000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x321000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
-	struct thread          worker;
+	struct thread worker;
 	struct sched_cpu_stats stats;
 
 	init_bound_bootstrap_cpu();
@@ -35,25 +35,25 @@ Test(sched, per_cpu_stats_track_sampled_kernel_idle_and_thread_time) {
 
 Test(sched, per_cpu_stats_track_local_switch_preempt_and_yield_counts) {
 	const struct thread_create_params first_params = {
-		.name              = "first",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "first",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x321000u,
-		.kernel_stack_top  = 0x325000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x325000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params second_params = {
-		.name              = "second",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "second",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x325000u,
-		.kernel_stack_top  = 0x329000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x329000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
-	struct thread          first;
-	struct thread          second;
+	struct thread first;
+	struct thread second;
 	struct sched_cpu_stats stats;
 
 	init_bound_bootstrap_cpu();

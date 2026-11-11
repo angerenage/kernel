@@ -1,16 +1,18 @@
-#include <base/process.h>
-#include <base/startup.h>
-#include <protocol/filesystem.h>
-#include <runtime/program.h>
-#include <runtime/tty_session.h>
-#include <runtime/vfs.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <base/process.h>
+#include <base/startup.h>
+
+#include <protocol/filesystem.h>
 #include <system/capability.h>
 #include <system/display.h>
 #include <system/process.h>
+#include <runtime/program.h>
+#include <runtime/tty_session.h>
+#include <runtime/vfs.h>
 
 #include "shell.h"
 
@@ -23,14 +25,14 @@ static bool command_has_suffix(const char* command, size_t size) {
 	return size >= suffix_size && memcmp(command + size - suffix_size, SHELL_PROGRAM_SUFFIX, suffix_size) == 0;
 }
 
-static bool executable_path(const struct shell* shell, const char* command, size_t command_size, char* output,
-                            size_t* out_size) {
+static bool executable_path(
+		const struct shell* shell, const char* command, size_t command_size, char* output, size_t* out_size) {
 	if (memchr(command, '/', command_size) != NULL)
 		return shell_resolve_path(shell, command, command_size, output, out_size);
 	const size_t directory_size = sizeof(SHELL_PROGRAM_DIRECTORY) - 1u;
-	const size_t suffix_size    = command_has_suffix(command, command_size) ? 0u : sizeof(SHELL_PROGRAM_SUFFIX) - 1u;
+	const size_t suffix_size = command_has_suffix(command, command_size) ? 0u : sizeof(SHELL_PROGRAM_SUFFIX) - 1u;
 	if (command_size == 0u || command_size > FILESYSTEM_NAME_MAX - suffix_size ||
-	    directory_size + command_size + suffix_size > SHELL_PATH_CAPACITY)
+			directory_size + command_size + suffix_size > SHELL_PATH_CAPACITY)
 		return false;
 	memcpy(output, SHELL_PROGRAM_DIRECTORY, directory_size);
 	memcpy(output + directory_size, command, command_size);
@@ -59,30 +61,30 @@ static void stop_process(struct program_run_result* running) {
 }
 
 enum shell_program_result shell_run_program(struct shell* shell, const char* command, size_t command_size, size_t argc,
-                                            const char* const argv[], uintptr_t* out_exit_code) {
+		const char* const argv[], uintptr_t* out_exit_code) {
 	struct filesystem_node_handle executable = {.capability = CAP_ID_INVALID};
-	struct program_load_result    loaded     = {
-		.load_cap   = CAP_ID_INVALID,
+	struct program_load_result loaded = {
+		.load_cap = CAP_ID_INVALID,
 		.process_id = PROCESS_PID_INVALID,
 	};
 	struct program_run_result running = {
 		.process_cap = CAP_ID_INVALID,
-		.thread_cap  = CAP_ID_INVALID,
+		.thread_cap = CAP_ID_INVALID,
 	};
 	struct program_capability_argument capabilities[PROCESS_STARTUP_CAP_COUNT] = {0};
-	struct filesystem_call_result      opened;
-	char                               path[SHELL_PATH_CAPACITY];
-	const char*                        name;
-	size_t                             name_size;
-	size_t                             path_size;
-	uintptr_t                          exit_code = PROCESS_EXIT_SYSTEM_UNKNOWN;
-	syscall_status_t                   status;
-	enum shell_program_result          result              = SHELL_PROGRAM_FAILED;
-	bool                               foreground_selected = false;
+	struct filesystem_call_result opened;
+	char path[SHELL_PATH_CAPACITY];
+	const char* name;
+	size_t name_size;
+	size_t path_size;
+	uintptr_t exit_code = PROCESS_EXIT_SYSTEM_UNKNOWN;
+	syscall_status_t status;
+	enum shell_program_result result = SHELL_PROGRAM_FAILED;
+	bool foreground_selected = false;
 
 	if (out_exit_code != NULL) *out_exit_code = PROCESS_EXIT_SYSTEM_UNKNOWN;
 	if (shell == NULL || shell->vfs_cap == CAP_ID_INVALID || command == NULL || command_size == 0u ||
-	    (argc != 0u && argv == NULL) || !executable_path(shell, command, command_size, path, &path_size))
+			(argc != 0u && argv == NULL) || !executable_path(shell, command, command_size, path, &path_size))
 		return SHELL_PROGRAM_FAILED;
 	opened = vfs_open(shell->vfs_cap, path, path_size, CAP_READ | CAP_DELEGATE, &executable);
 	if (opened.transport_status == SYSCALL_STATUS_OK && opened.status == FILESYSTEM_STATUS_NOT_FOUND) {
@@ -90,7 +92,7 @@ enum shell_program_result shell_run_program(struct shell* shell, const char* com
 		return SHELL_PROGRAM_NOT_FOUND;
 	}
 	if (opened.transport_status != SYSCALL_STATUS_OK || opened.status != FILESYSTEM_STATUS_OK ||
-	    executable.info.type != FILESYSTEM_NODE_FILE || executable.capability == CAP_ID_INVALID)
+			executable.info.type != FILESYSTEM_NODE_FILE || executable.capability == CAP_ID_INVALID)
 		goto cleanup;
 	process_name(command, command_size, &name, &name_size);
 	if (name_size == 0u) goto cleanup;
@@ -102,21 +104,21 @@ enum shell_program_result shell_run_program(struct shell* shell, const char* com
 	executable.capability = CAP_ID_INVALID;
 	if (status != SYSCALL_STATUS_OK) goto cleanup;
 	display_get_standard_streams(&capabilities[PROCESS_STARTUP_CAP_STDIN].capability,
-	                             &capabilities[PROCESS_STARTUP_CAP_STDOUT].capability,
-	                             &capabilities[PROCESS_STARTUP_CAP_STDERR].capability);
-	capabilities[PROCESS_STARTUP_CAP_STDIN].rights      = TTY_SESSION_INPUT_RIGHTS;
-	capabilities[PROCESS_STARTUP_CAP_STDOUT].rights     = CAP_CALL | CAP_WRITE;
-	capabilities[PROCESS_STARTUP_CAP_STDERR].rights     = CAP_CALL | CAP_WRITE;
+			&capabilities[PROCESS_STARTUP_CAP_STDOUT].capability,
+			&capabilities[PROCESS_STARTUP_CAP_STDERR].capability);
+	capabilities[PROCESS_STARTUP_CAP_STDIN].rights = TTY_SESSION_INPUT_RIGHTS;
+	capabilities[PROCESS_STARTUP_CAP_STDOUT].rights = CAP_CALL | CAP_WRITE;
+	capabilities[PROCESS_STARTUP_CAP_STDERR].rights = CAP_CALL | CAP_WRITE;
 	capabilities[PROCESS_STARTUP_CAP_WORKING_DIRECTORY] = (struct program_capability_argument){
 		.capability = shell->current_directory_cap,
-		.rights     = shell->current_directory_rights,
+		.rights = shell->current_directory_rights,
 	};
 	for (size_t i = 0u; i < PROCESS_STARTUP_CAP_COUNT; i++)
 		if (capabilities[i].capability == CAP_ID_INVALID) capabilities[i].rights = 0u;
 	status = tty_session_begin_foreground(shell->tty_cap, loaded.process_id);
 	if (status != SYSCALL_STATUS_OK) goto cleanup;
 	foreground_selected = true;
-	status              = program_run(&loaded, argc, argv, PROCESS_STARTUP_CAP_COUNT, capabilities, &running);
+	status = program_run(&loaded, argc, argv, PROCESS_STARTUP_CAP_COUNT, capabilities, &running);
 	if (status != SYSCALL_STATUS_OK) goto cleanup;
 	loaded.load_cap = CAP_ID_INVALID;
 	status = tty_session_attach_foreground(shell->tty_cap, shell->tty_owner, running.process_cap, loaded.process_id);
@@ -124,7 +126,7 @@ enum shell_program_result shell_run_program(struct shell* shell, const char* com
 	status = cap_drop(running.thread_cap);
 	if (status != SYSCALL_STATUS_OK) goto cleanup;
 	running.thread_cap = CAP_ID_INVALID;
-	status             = process_wait(running.process_cap, &exit_code);
+	status = process_wait(running.process_cap, &exit_code);
 	if (status != SYSCALL_STATUS_OK) goto cleanup;
 	running.process_cap = CAP_ID_INVALID;
 	if (out_exit_code != NULL) *out_exit_code = exit_code;
@@ -140,17 +142,17 @@ cleanup:
 }
 
 enum shell_program_result shell_pipeline_start_program(struct shell* shell, const char* name, size_t argc,
-                                                       const char* const argv[], cap_id_t input, cap_id_t output,
-                                                       cap_id_t error, bool foreground, cap_id_t* out_process) {
-	struct filesystem_node_handle      executable = {.capability = CAP_ID_INVALID};
-	struct program_load_result         loaded     = {.load_cap = CAP_ID_INVALID, .process_id = PROCESS_PID_INVALID};
-	struct program_run_result          running    = {.process_cap = CAP_ID_INVALID, .thread_cap = CAP_ID_INVALID};
+		const char* const argv[], cap_id_t input, cap_id_t output, cap_id_t error, bool foreground,
+		cap_id_t* out_process) {
+	struct filesystem_node_handle executable = {.capability = CAP_ID_INVALID};
+	struct program_load_result loaded = {.load_cap = CAP_ID_INVALID, .process_id = PROCESS_PID_INVALID};
+	struct program_run_result running = {.process_cap = CAP_ID_INVALID, .thread_cap = CAP_ID_INVALID};
 	struct program_capability_argument caps[PROCESS_STARTUP_CAP_COUNT] = {0};
-	struct filesystem_call_result      opened;
-	char                               path[SHELL_PATH_CAPACITY];
-	size_t                             path_size;
-	bool                               selected = false;
-	enum shell_program_result          result   = SHELL_PROGRAM_FAILED;
+	struct filesystem_call_result opened;
+	char path[SHELL_PATH_CAPACITY];
+	size_t path_size;
+	bool selected = false;
+	enum shell_program_result result = SHELL_PROGRAM_FAILED;
 	if (out_process == NULL) return result;
 	*out_process = CAP_ID_INVALID;
 	if (shell == NULL || name == NULL || !executable_path(shell, name, strlen(name), path, &path_size)) return result;
@@ -160,25 +162,26 @@ enum shell_program_result shell_pipeline_start_program(struct shell* shell, cons
 		goto cleanup;
 	}
 	if (opened.transport_status != SYSCALL_STATUS_OK || opened.status != FILESYSTEM_STATUS_OK ||
-	    executable.info.type != FILESYSTEM_NODE_FILE || executable.capability == CAP_ID_INVALID)
+			executable.info.type != FILESYSTEM_NODE_FILE || executable.capability == CAP_ID_INVALID)
 		goto cleanup;
 	const char* exec_name;
-	size_t      exec_name_size;
+	size_t exec_name_size;
 	process_name(name, strlen(name), &exec_name, &exec_name_size);
 	if (exec_name_size == 0u) goto cleanup;
 	if (program_load(SHELL_LOADER_SERVICE, executable.capability, exec_name, exec_name_size, &loaded) !=
-	    SYSCALL_STATUS_OK)
+			SYSCALL_STATUS_OK)
 		goto cleanup;
 	(void)cap_drop(executable.capability);
 	executable.capability = CAP_ID_INVALID;
 	caps[PROCESS_STARTUP_CAP_STDIN] =
-		(struct program_capability_argument){.capability = input, .rights = CAP_CALL | CAP_READ};
+			(struct program_capability_argument){.capability = input, .rights = CAP_CALL | CAP_READ};
 	caps[PROCESS_STARTUP_CAP_STDOUT] =
-		(struct program_capability_argument){.capability = output, .rights = CAP_CALL | CAP_WRITE};
+			(struct program_capability_argument){.capability = output, .rights = CAP_CALL | CAP_WRITE};
 	caps[PROCESS_STARTUP_CAP_STDERR] =
-		(struct program_capability_argument){.capability = error, .rights = CAP_CALL | CAP_WRITE};
+			(struct program_capability_argument){.capability = error, .rights = CAP_CALL | CAP_WRITE};
 	caps[PROCESS_STARTUP_CAP_WORKING_DIRECTORY] = (struct program_capability_argument){
-		.capability = shell->current_directory_cap, .rights = shell->current_directory_rights};
+		.capability = shell->current_directory_cap, .rights = shell->current_directory_rights
+	};
 	for (size_t i = 0u; i < PROCESS_STARTUP_CAP_COUNT; i++)
 		if (caps[i].capability == CAP_ID_INVALID) caps[i].rights = 0u;
 	if (foreground) {
@@ -188,15 +191,15 @@ enum shell_program_result shell_pipeline_start_program(struct shell* shell, cons
 	if (program_run(&loaded, argc, argv, PROCESS_STARTUP_CAP_COUNT, caps, &running) != SYSCALL_STATUS_OK) goto cleanup;
 	loaded.load_cap = CAP_ID_INVALID;
 	if (foreground &&
-	    tty_session_attach_foreground(shell->tty_cap, shell->tty_owner, running.process_cap, loaded.process_id) !=
-	        SYSCALL_STATUS_OK)
+			tty_session_attach_foreground(shell->tty_cap, shell->tty_owner, running.process_cap, loaded.process_id) !=
+					SYSCALL_STATUS_OK)
 		goto cleanup;
 	if (cap_drop(running.thread_cap) != SYSCALL_STATUS_OK) goto cleanup;
-	running.thread_cap  = CAP_ID_INVALID;
-	*out_process        = running.process_cap;
+	running.thread_cap = CAP_ID_INVALID;
+	*out_process = running.process_cap;
 	running.process_cap = CAP_ID_INVALID;
-	selected            = false; /* Foreground remains selected until caller restores it. */
-	result              = SHELL_PROGRAM_OK;
+	selected = false; /* Foreground remains selected until caller restores it. */
+	result = SHELL_PROGRAM_OK;
 cleanup:
 	if (selected) (void)tty_session_restore_foreground(shell->tty_cap);
 	if (executable.capability != CAP_ID_INVALID) (void)cap_drop(executable.capability);

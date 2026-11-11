@@ -1,9 +1,10 @@
 #pragma once
 
-#include <base/cap.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/cap.h>
 
 #define PCI_HOST_RANGE_COUNT 8u
 
@@ -16,17 +17,17 @@ enum pci_host_range_kind {
 /* One PCI bus-address window and its corresponding CPU physical window. */
 struct pci_host_range {
 	enum pci_host_range_kind kind;
-	uint64_t                 bus_address;
-	uint64_t                 cpu_address;
-	uint64_t                 size;
-	bool                     prefetchable;
+	uint64_t bus_address;
+	uint64_t cpu_address;
+	uint64_t size;
+	bool prefetchable;
 };
 
 /* Address translations supplied by the firmware description of a PCI host. */
 struct pci_host_ranges {
 	struct pci_host_range values[PCI_HOST_RANGE_COUNT];
-	size_t                count;
-	bool                  identity;
+	size_t count;
+	bool identity;
 };
 
 /* Configure identity translation for a host described by PC ACPI tables. */
@@ -37,4 +38,4 @@ bool pci_host_ranges_read_dt(cap_id_t device_cap, struct pci_host_ranges* out_ra
 
 /* Locate the unique host window containing a complete PCI bus-address range. */
 bool pci_host_ranges_locate(const struct pci_host_ranges* ranges, enum pci_host_range_kind kind, uint64_t bus_address,
-                            uint64_t size, size_t* out_index, uint64_t* out_offset, uint64_t* out_cpu_address);
+		uint64_t size, size_t* out_index, uint64_t* out_offset, uint64_t* out_cpu_address);

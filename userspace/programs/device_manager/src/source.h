@@ -19,10 +19,9 @@ enum device_manager_source_result {
 /* Selected source kind and manager-owned firmware capability. */
 struct device_manager_source_selection {
 	enum device_manager_firmware_source source;
-	cap_id_t                            capability;
+	cap_id_t capability;
 };
 
 /* Select a valid firmware source, honoring at most one command-line override. */
 enum device_manager_source_result device_manager_source_select(int argc, char** argv, cap_id_t acpi_cap,
-                                                               cap_id_t                                device_tree_cap,
-                                                               struct device_manager_source_selection* out_selection);
+		cap_id_t device_tree_cap, struct device_manager_source_selection* out_selection);

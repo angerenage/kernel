@@ -1,23 +1,24 @@
 #include "iommu.h"
 
+#include <string.h>
+
 #include <firmware/acpi.h>
 #include <firmware/dt/device.h>
 #include <hal/device_tree.h>
 #include <hal/iommu.h>
-#include <string.h>
 
 #include "iort.h"
 #include "smmuv3.h"
 
 static size_t smmuv3_dt_controllers(size_t target, uintptr_t* out_address) {
-	size_t count        = 0u;
+	size_t count = 0u;
 	size_t device_count = dt_device_count("arm,smmu-v3");
 
 	for (size_t index = 0u; index < device_count; index++) {
 		struct dt_reg reg;
 
 		if (!dt_node_reg(dt_device_at("arm,smmu-v3", index), 0u, &reg) || reg.address == 0u ||
-		    reg.address > UINTPTR_MAX)
+				reg.address > UINTPTR_MAX)
 			continue;
 		if (count == target && out_address != NULL) *out_address = (uintptr_t)reg.address;
 		count++;
@@ -31,19 +32,19 @@ size_t aarch64_iommu_acpi_consumed_tables(struct hal_acpi_consumed_table* tables
 }
 
 size_t aarch64_iommu_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity) {
-	size_t count        = 0u;
+	size_t count = 0u;
 	size_t device_count = dt_device_count("arm,smmu-v3");
 
 	for (size_t index = 0u; index < device_count; index++) {
 		struct dt_node node = dt_device_at("arm,smmu-v3", index);
-		struct dt_reg  reg;
+		struct dt_reg reg;
 
 		if (!dt_node_reg(node, 0u, &reg) || reg.address == 0u || reg.address > UINTPTR_MAX) continue;
 		if (nodes != NULL && count < capacity) {
 			nodes[count] = (struct hal_device_tree_consumed_node){
-				.node            = node,
-				.kind            = HAL_DEVICE_TREE_REFERENCE_DMA_CONTROLLER,
-				.value           = reg.address,
+				.node = node,
+				.kind = HAL_DEVICE_TREE_REFERENCE_DMA_CONTROLLER,
+				.value = reg.address,
 				.specifier_cells = 1u,
 			};
 		}
@@ -61,8 +62,8 @@ static size_t smmuv3_acpi_controllers(size_t target, uintptr_t* out_address) {
 	memcpy(&node_offset, (const uint8_t*)table + 40u, sizeof(node_offset));
 	if (node_offset < 48u || node_offset > table->length) return 0u;
 	const uint8_t* cursor = (const uint8_t*)table + node_offset;
-	const uint8_t* end    = (const uint8_t*)table + table->length;
-	size_t         count  = 0u;
+	const uint8_t* end = (const uint8_t*)table + table->length;
+	size_t count = 0u;
 	for (uint32_t node = 0u; node < node_count; node++) {
 		if ((size_t)(end - cursor) < 4u) return count;
 		uint16_t length;
@@ -91,24 +92,24 @@ bool hal_iommu_controller_at(size_t index, struct hal_iommu_controller_descripto
 	size_t count = smmuv3_dt_controllers(index, &address);
 	if (index >= count && index - count >= smmuv3_acpi_controllers(index - count, &address)) return false;
 	*out_descriptor =
-		(struct hal_iommu_controller_descriptor){.kind = HAL_IOMMU_KIND_ARM_SMMUV3, .register_address = address};
+			(struct hal_iommu_controller_descriptor){.kind = HAL_IOMMU_KIND_ARM_SMMUV3, .register_address = address};
 	return true;
 }
 
 bool hal_iommu_pci_source(const struct hal_iommu_controller_descriptor* descriptor, uint16_t segment,
-                          uint16_t requester_id, uint32_t* out_source_id) {
+		uint16_t requester_id, uint32_t* out_source_id) {
 	uint64_t dt_controller_address;
 	uint64_t acpi_controller_address;
 	uint32_t dt_source_id;
 	uint32_t acpi_source_id;
-	bool     dt_routed;
-	bool     acpi_routed;
+	bool dt_routed;
+	bool acpi_routed;
 
 	if (descriptor == NULL || out_source_id == NULL) return false;
-	dt_routed   = dt_pci_iommu_route(segment, requester_id, &dt_controller_address, &dt_source_id);
+	dt_routed = dt_pci_iommu_route(segment, requester_id, &dt_controller_address, &dt_source_id);
 	acpi_routed = aarch64_iort_pci_route(segment, requester_id, &acpi_controller_address, &acpi_source_id);
 	if (dt_routed && acpi_routed &&
-	    (dt_controller_address != acpi_controller_address || dt_source_id != acpi_source_id))
+			(dt_controller_address != acpi_controller_address || dt_source_id != acpi_source_id))
 		return false;
 	if (dt_routed) {
 		if (dt_controller_address != descriptor->register_address) return false;
@@ -122,9 +123,8 @@ bool hal_iommu_pci_source(const struct hal_iommu_controller_descriptor* descript
 	return true;
 }
 
-bool hal_iommu_controller_init(struct hal_iommu_controller_state*            controller,
-                               const struct hal_iommu_controller_descriptor* descriptor,
-                               struct hal_iommu_info*                        out_info) {
+bool hal_iommu_controller_init(struct hal_iommu_controller_state* controller,
+		const struct hal_iommu_controller_descriptor* descriptor, struct hal_iommu_info* out_info) {
 	return descriptor != NULL && descriptor->kind == HAL_IOMMU_KIND_ARM_SMMUV3 &&
 	       aarch64_smmuv3_controller_init(controller, descriptor, out_info);
 }
@@ -137,8 +137,8 @@ bool hal_iommu_mapping_supported(const struct hal_iommu_controller_state* contro
 	return aarch64_smmuv3_mapping_supported(controller, access);
 }
 
-bool hal_iommu_space_init(struct hal_iommu_controller_state* controller, uint32_t context_id,
-                          struct hal_iommu_space_state* space) {
+bool hal_iommu_space_init(
+		struct hal_iommu_controller_state* controller, uint32_t context_id, struct hal_iommu_space_state* space) {
 	return aarch64_smmuv3_space_init(controller, context_id, space);
 }
 
@@ -147,26 +147,26 @@ void hal_iommu_space_deinit(struct hal_iommu_controller_state* controller, struc
 }
 
 bool hal_iommu_map(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                   const struct hal_iommu_map_request* request) {
+		const struct hal_iommu_map_request* request) {
 	return aarch64_smmuv3_map(controller, space, request);
 }
 
 bool hal_iommu_unmap(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                     uint64_t io_address, size_t size) {
+		uint64_t io_address, size_t size) {
 	return aarch64_smmuv3_unmap(controller, space, io_address, size);
 }
 
 bool hal_iommu_protect(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                       uint64_t io_address, size_t size, uint64_t access) {
+		uint64_t io_address, size_t size, uint64_t access) {
 	return aarch64_smmuv3_protect(controller, space, io_address, size, access);
 }
 
 bool hal_iommu_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                      uint32_t source_id, struct hal_iommu_attachment_state* attachment) {
+		uint32_t source_id, struct hal_iommu_attachment_state* attachment) {
 	return aarch64_smmuv3_attach(controller, space, source_id, attachment);
 }
 
 bool hal_iommu_detach(struct hal_iommu_controller_state* controller, uint32_t source_id,
-                      struct hal_iommu_attachment_state* attachment) {
+		struct hal_iommu_attachment_state* attachment) {
 	return aarch64_smmuv3_detach(controller, source_id, attachment);
 }

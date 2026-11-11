@@ -1,28 +1,29 @@
 #pragma once
 
-#include <core/lock.h>
-#include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+#include <hal/interrupts.h>
+#include <core/lock.h>
 
 /* Small busy-wait lock with optional debug metadata for ordering and irq-save validation. */
 struct spinlock {
 	uint32_t state;
 #if CORE_LOCK_DEBUG
 	const char* name;
-	uint32_t    order;
-	uint32_t    flags;
-	uint32_t    owner_cpu;
+	uint32_t order;
+	uint32_t flags;
+	uint32_t owner_cpu;
 #endif
 };
 
 #if CORE_LOCK_DEBUG
 #define SPINLOCK_INIT_CLASS(lock_name, lock_order, lock_flags)                                                         \
 	{                                                                                                                  \
-		.state     = 0u,                                                                                               \
-		.name      = lock_name,                                                                                        \
-		.order     = (lock_order),                                                                                     \
-		.flags     = (lock_flags),                                                                                     \
+		.state = 0u,                                                                                                   \
+		.name = lock_name,                                                                                             \
+		.order = (lock_order),                                                                                         \
+		.flags = (lock_flags),                                                                                         \
 		.owner_cpu = 0u,                                                                                               \
 	}
 #else

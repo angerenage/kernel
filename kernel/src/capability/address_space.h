@@ -16,5 +16,5 @@ cap_id_t kernel_device_address_space_grant(struct address_space* space, process_
 
 /* Resolve a DEVICE AddressSpace capability and retain its routing object for the caller. */
 syscall_result_t kernel_device_address_space_acquire(cap_id_t address_space_cap, process_id_t caller,
-                                                     cap_rights_t required_rights, struct cap_object** out_object,
-                                                     struct address_space** out_space, cap_rights_t* out_rights);
+		cap_rights_t required_rights, struct cap_object** out_object, struct address_space** out_space,
+		cap_rights_t* out_rights);

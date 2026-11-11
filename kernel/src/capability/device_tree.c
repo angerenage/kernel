@@ -1,34 +1,35 @@
 #include "device_tree.h"
 
-#include <base/cap.h>
-#include <base/device_tree.h>
-#include <base/math.h>
-#include <base/syscall.h>
-#include <core/capability.h>
-#include <firmware/dt.h>
-#include <hal/device_tree.h>
-#include <kernel/capability.h>
 #include <libc/stdlib.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
+#include <base/cap.h>
+#include <base/device_tree.h>
+#include <base/math.h>
+#include <base/syscall.h>
+#include <firmware/dt.h>
+#include <hal/device_tree.h>
+#include <core/capability.h>
+#include <kernel/capability.h>
+
 #define DEVICE_TREE_PROVIDER_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_DELEGATE))
 
 struct device_tree_public_node {
-	struct dt_node        internal;
+	struct dt_node internal;
 	device_tree_node_id_t parent;
 	device_tree_node_id_t first_child;
 	device_tree_node_id_t next_sibling;
-	uint64_t              name_size;
-	uint64_t              property_count;
+	uint64_t name_size;
+	uint64_t property_count;
 };
 
-static cap_object_id_t                       device_tree_provider_object_id = CAP_OBJECT_ID_INVALID;
+static cap_object_id_t device_tree_provider_object_id = CAP_OBJECT_ID_INVALID;
 static struct hal_device_tree_consumed_node* device_tree_consumed;
-static size_t                                device_tree_consumed_count;
-static struct device_tree_public_node*       device_tree_nodes;
-static size_t                                device_tree_node_count;
+static size_t device_tree_consumed_count;
+static struct device_tree_public_node* device_tree_nodes;
+static size_t device_tree_node_count;
 
 static struct dt_node device_tree_walk_after(struct dt_node node) {
 	while (dt_node_valid(node)) {
@@ -61,15 +62,15 @@ static bool device_tree_consumed_merge(struct hal_device_tree_consumed_node reco
 	struct hal_device_tree_consumed_node* existing;
 
 	if (!dt_node_valid(record.node) || record.node.id == dt_root().id ||
-	    (unsigned int)record.kind > HAL_DEVICE_TREE_REFERENCE_DMA_CONTROLLER ||
-	    (record.kind == HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED && record.value != 0u) ||
-	    (record.kind != HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED && record.value == 0u) ||
-	    ((record.kind == HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER ||
-	      record.kind == HAL_DEVICE_TREE_REFERENCE_DMA_CONTROLLER) &&
-	     record.specifier_cells > DEVICE_TREE_REFERENCE_MAX_SPECIFIER_CELLS) ||
-	    ((record.kind != HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER &&
-	      record.kind != HAL_DEVICE_TREE_REFERENCE_DMA_CONTROLLER) &&
-	     record.specifier_cells != 0u))
+			(unsigned int)record.kind > HAL_DEVICE_TREE_REFERENCE_DMA_CONTROLLER ||
+			(record.kind == HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED && record.value != 0u) ||
+			(record.kind != HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED && record.value == 0u) ||
+			((record.kind == HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER ||
+					 record.kind == HAL_DEVICE_TREE_REFERENCE_DMA_CONTROLLER) &&
+					record.specifier_cells > DEVICE_TREE_REFERENCE_MAX_SPECIFIER_CELLS) ||
+			((record.kind != HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER &&
+					 record.kind != HAL_DEVICE_TREE_REFERENCE_DMA_CONTROLLER) &&
+					record.specifier_cells != 0u))
 		return false;
 	existing = device_tree_consumed_find(record.node);
 	if (existing == NULL) {
@@ -86,10 +87,10 @@ static bool device_tree_consumed_merge(struct hal_device_tree_consumed_node reco
 }
 
 static bool device_tree_collect_consumed(void) {
-	size_t                                upper_bound = hal_device_tree_consumed_nodes(NULL, 0u);
-	size_t                                allocation_size;
+	size_t upper_bound = hal_device_tree_consumed_nodes(NULL, 0u);
+	size_t allocation_size;
 	struct hal_device_tree_consumed_node* temporary;
-	size_t                                written;
+	size_t written;
 
 	if (upper_bound == 0u) return true;
 	if (mul_overflow_size(upper_bound, sizeof(*temporary), &allocation_size)) return false;
@@ -110,7 +111,7 @@ static bool device_tree_collect_consumed(void) {
 fail:
 	free(temporary);
 	free(device_tree_consumed);
-	device_tree_consumed       = NULL;
+	device_tree_consumed = NULL;
 	device_tree_consumed_count = 0u;
 	return false;
 }
@@ -141,9 +142,9 @@ static struct dt_node device_tree_next_visible_sibling(struct dt_node node) {
 }
 
 static bool device_tree_build_nodes(void) {
-	struct dt_node node  = dt_root();
-	size_t         count = 0u;
-	size_t         allocation_size;
+	struct dt_node node = dt_root();
+	size_t count = 0u;
+	size_t allocation_size;
 
 	while (dt_node_valid(node)) {
 		bool consumed = device_tree_consumed_find(node) != NULL;
@@ -158,8 +159,8 @@ static bool device_tree_build_nodes(void) {
 	device_tree_nodes = calloc(1u, allocation_size);
 	if (device_tree_nodes == NULL) return false;
 	device_tree_node_count = count;
-	node                   = dt_root();
-	count                  = 0u;
+	node = dt_root();
+	count = 0u;
 	while (dt_node_valid(node)) {
 		bool consumed = device_tree_consumed_find(node) != NULL;
 
@@ -168,22 +169,22 @@ static bool device_tree_build_nodes(void) {
 	}
 	for (size_t index = 0u; index < device_tree_node_count; index++) {
 		struct device_tree_public_node* entry = &device_tree_nodes[index];
-		struct dt_node                  parent;
-		struct dt_node                  child;
-		struct dt_node                  sibling;
-		const char*                     name = dt_node_name(entry->internal);
-		const char*                     property_name;
-		struct dt_property              property;
-		size_t                          properties = 0u;
+		struct dt_node parent;
+		struct dt_node child;
+		struct dt_node sibling;
+		const char* name = dt_node_name(entry->internal);
+		const char* property_name;
+		struct dt_property property;
+		size_t properties = 0u;
 
 		if (name == NULL) return false;
-		parent              = dt_node_parent(entry->internal);
-		child               = device_tree_first_visible_child(entry->internal);
-		sibling             = device_tree_next_visible_sibling(entry->internal);
-		entry->parent       = dt_node_valid(parent) ? device_tree_public_id(parent) : DEVICE_TREE_NODE_INVALID;
-		entry->first_child  = dt_node_valid(child) ? device_tree_public_id(child) : DEVICE_TREE_NODE_INVALID;
+		parent = dt_node_parent(entry->internal);
+		child = device_tree_first_visible_child(entry->internal);
+		sibling = device_tree_next_visible_sibling(entry->internal);
+		entry->parent = dt_node_valid(parent) ? device_tree_public_id(parent) : DEVICE_TREE_NODE_INVALID;
+		entry->first_child = dt_node_valid(child) ? device_tree_public_id(child) : DEVICE_TREE_NODE_INVALID;
 		entry->next_sibling = dt_node_valid(sibling) ? device_tree_public_id(sibling) : DEVICE_TREE_NODE_INVALID;
-		entry->name_size    = strlen(name);
+		entry->name_size = strlen(name);
 		while (dt_node_property_at(entry->internal, properties, &property_name, &property)) {
 			if (properties == SIZE_MAX) return false;
 			properties++;
@@ -195,11 +196,11 @@ static bool device_tree_build_nodes(void) {
 
 static syscall_result_t device_tree_root_handler(const struct cap_request* req) {
 	const struct device_tree_root_request request_expected = {.header = {.op = DEVICE_TREE_OP_ROOT}};
-	struct device_tree_root_request       request;
-	struct device_tree_root_response      response = {.root = 1u};
+	struct device_tree_root_request request;
+	struct device_tree_root_response response = {.root = 1u};
 
 	if (req->request == NULL || req->request_size != sizeof(request) ||
-	    !cap_kernel_response_fits(req, sizeof(response)))
+			!cap_kernel_response_fits(req, sizeof(response)))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	memcpy(&request, req->request, sizeof(request));
 	if (memcmp(&request, &request_expected, sizeof(request)) != 0)
@@ -208,44 +209,44 @@ static syscall_result_t device_tree_root_handler(const struct cap_request* req) 
 }
 
 static syscall_result_t device_tree_node_info_handler(const struct cap_request* req) {
-	struct device_tree_node_info_request  request;
+	struct device_tree_node_info_request request;
 	struct device_tree_node_info_response response = {0};
-	struct device_tree_public_node*       node;
+	struct device_tree_public_node* node;
 
 	if (req->request == NULL || req->request_size != sizeof(request) ||
-	    !cap_kernel_response_fits(req, sizeof(response)))
+			!cap_kernel_response_fits(req, sizeof(response)))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	memcpy(&request, req->request, sizeof(request));
 	node = device_tree_public_node(request.node);
 	if (request.header.op != DEVICE_TREE_OP_NODE_INFO || request.reserved != 0u || node == NULL)
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	response = (struct device_tree_node_info_response){
-		.parent         = node->parent,
-		.first_child    = node->first_child,
-		.next_sibling   = node->next_sibling,
-		.name_size      = node->name_size,
+		.parent = node->parent,
+		.first_child = node->first_child,
+		.next_sibling = node->next_sibling,
+		.name_size = node->name_size,
 		.property_count = node->property_count,
 	};
 	return cap_kernel_write_response(req, &response, sizeof(response));
 }
 
 static syscall_result_t device_tree_property_info_handler(const struct cap_request* req) {
-	struct device_tree_property_info_request  request;
+	struct device_tree_property_info_request request;
 	struct device_tree_property_info_response response = {0};
-	struct device_tree_public_node*           node;
-	const char*                               name;
-	struct dt_property                        property;
+	struct device_tree_public_node* node;
+	const char* name;
+	struct dt_property property;
 
 	if (req->request == NULL || req->request_size != sizeof(request) ||
-	    !cap_kernel_response_fits(req, sizeof(response)))
+			!cap_kernel_response_fits(req, sizeof(response)))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	memcpy(&request, req->request, sizeof(request));
 	node = device_tree_public_node(request.node);
 	if (request.header.op != DEVICE_TREE_OP_PROPERTY_INFO || request.reserved != 0u || node == NULL ||
-	    request.property_index > SIZE_MAX || request.property_index >= node->property_count ||
-	    !dt_node_property_at(node->internal, (size_t)request.property_index, &name, &property))
+			request.property_index > SIZE_MAX || request.property_index >= node->property_count ||
+			!dt_node_property_at(node->internal, (size_t)request.property_index, &name, &property))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	response.name_size  = strlen(name);
+	response.name_size = strlen(name);
 	response.value_size = property.size;
 	return cap_kernel_write_response(req, &response, sizeof(response));
 }
@@ -253,40 +254,41 @@ static syscall_result_t device_tree_property_info_handler(const struct cap_reque
 static syscall_result_t device_tree_read_handler(const struct cap_request* req) {
 	struct device_tree_read_request request;
 	struct device_tree_public_node* node;
-	const void*                     data;
-	size_t                          data_size;
-	const char*                     property_name;
-	struct dt_property              property;
-	size_t                          offset;
-	size_t                          size;
+	const void* data;
+	size_t data_size;
+	const char* property_name;
+	struct dt_property property;
+	size_t offset;
+	size_t size;
 
 	if (req->request == NULL || req->request_size != sizeof(request))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	memcpy(&request, req->request, sizeof(request));
 	node = device_tree_public_node(request.node);
 	if (request.header.op != DEVICE_TREE_OP_READ || (unsigned int)request.kind > DEVICE_TREE_READ_PROPERTY_VALUE ||
-	    node == NULL || request.offset > SIZE_MAX || request.size > SIZE_MAX || request.size > CAP_MAX_RESPONSE_SIZE)
+			node == NULL || request.offset > SIZE_MAX || request.size > SIZE_MAX ||
+			request.size > CAP_MAX_RESPONSE_SIZE)
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	if (request.kind == DEVICE_TREE_READ_NODE_NAME) {
 		if (request.property_index != 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-		data      = dt_node_name(node->internal);
+		data = dt_node_name(node->internal);
 		data_size = (size_t)node->name_size;
 	}
 	else {
 		if (request.property_index > SIZE_MAX || request.property_index >= node->property_count ||
-		    !dt_node_property_at(node->internal, (size_t)request.property_index, &property_name, &property))
+				!dt_node_property_at(node->internal, (size_t)request.property_index, &property_name, &property))
 			return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 		if (request.kind == DEVICE_TREE_READ_PROPERTY_NAME) {
-			data      = property_name;
+			data = property_name;
 			data_size = strlen(property_name);
 		}
 		else {
-			data      = property.data;
+			data = property.data;
 			data_size = property.size;
 		}
 	}
 	offset = (size_t)request.offset;
-	size   = (size_t)request.size;
+	size = (size_t)request.size;
 	if (offset > data_size || size > data_size - offset) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	if (size == 0u) return syscall_result_ok(0u);
 	if (!cap_kernel_response_fits(req, size)) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -294,18 +296,18 @@ static syscall_result_t device_tree_read_handler(const struct cap_request* req) 
 }
 
 static syscall_result_t device_tree_resolve_phandle_handler(const struct cap_request* req) {
-	struct device_tree_resolve_phandle_request  request;
+	struct device_tree_resolve_phandle_request request;
 	struct device_tree_resolve_phandle_response response = {0};
-	struct hal_device_tree_consumed_node*       consumed;
-	struct dt_node                              node;
-	device_tree_node_id_t                       public_id;
+	struct hal_device_tree_consumed_node* consumed;
+	struct dt_node node;
+	device_tree_node_id_t public_id;
 
 	if (req->request == NULL || req->request_size != sizeof(request) ||
-	    !cap_kernel_response_fits(req, sizeof(response)))
+			!cap_kernel_response_fits(req, sizeof(response)))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	memcpy(&request, req->request, sizeof(request));
 	if (request.header.op != DEVICE_TREE_OP_RESOLVE_PHANDLE || request.phandle == 0u || request.reserved != 0u ||
-	    request.specifier_cell_count > DEVICE_TREE_REFERENCE_MAX_SPECIFIER_CELLS)
+			request.specifier_cell_count > DEVICE_TREE_REFERENCE_MAX_SPECIFIER_CELLS)
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	for (size_t index = request.specifier_cell_count; index < DEVICE_TREE_REFERENCE_MAX_SPECIFIER_CELLS; index++)
 		if (request.specifier_cells[index] != 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -314,7 +316,7 @@ static syscall_result_t device_tree_resolve_phandle_handler(const struct cap_req
 	public_id = device_tree_public_id(node);
 	if (public_id != DEVICE_TREE_NODE_INVALID) {
 		if (request.specifier_cell_count != 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-		response.kind  = DEVICE_TREE_REFERENCE_NODE;
+		response.kind = DEVICE_TREE_REFERENCE_NODE;
 		response.value = public_id;
 		return cap_kernel_write_response(req, &response, sizeof(response));
 	}
@@ -324,21 +326,21 @@ static syscall_result_t device_tree_resolve_phandle_handler(const struct cap_req
 		response.kind = DEVICE_TREE_REFERENCE_UNSUPPORTED;
 	}
 	else if (consumed->kind == HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER) {
-		response.kind                 = DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER;
+		response.kind = DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER;
 		response.specifier_cell_count = consumed->specifier_cells;
-		response.value                = consumed->value;
+		response.value = consumed->value;
 		if (request.specifier_cell_count != 0u) {
-			enum hal_interrupt_trigger  trigger  = HAL_INTERRUPT_TRIGGER_FIRMWARE;
+			enum hal_interrupt_trigger trigger = HAL_INTERRUPT_TRIGGER_FIRMWARE;
 			enum hal_interrupt_polarity polarity = HAL_INTERRUPT_POLARITY_FIRMWARE;
 
 			if (request.specifier_cell_count != consumed->specifier_cells || consumed->specifier_cells == 0u ||
-			    !hal_device_tree_interrupt_translate(consumed,
-			                                         request.specifier_cells,
-			                                         request.specifier_cell_count,
-			                                         &response.local_source_id,
-			                                         &trigger,
-			                                         &polarity) ||
-			    trigger > HAL_INTERRUPT_TRIGGER_LEVEL || polarity > HAL_INTERRUPT_POLARITY_LOW)
+					!hal_device_tree_interrupt_translate(consumed,
+							request.specifier_cells,
+							request.specifier_cell_count,
+							&response.local_source_id,
+							&trigger,
+							&polarity) ||
+					trigger > HAL_INTERRUPT_TRIGGER_LEVEL || polarity > HAL_INTERRUPT_POLARITY_LOW)
 				return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 			response.interrupt_claim_valid = 1u;
 			switch (trigger) {
@@ -366,13 +368,13 @@ static syscall_result_t device_tree_resolve_phandle_handler(const struct cap_req
 		}
 	}
 	else {
-		response.kind                 = DEVICE_TREE_REFERENCE_DMA_CONTROLLER;
+		response.kind = DEVICE_TREE_REFERENCE_DMA_CONTROLLER;
 		response.specifier_cell_count = consumed->specifier_cells;
-		response.value                = consumed->value;
+		response.value = consumed->value;
 		if (request.specifier_cell_count != 0u) {
 			if (request.specifier_cell_count != consumed->specifier_cells || consumed->specifier_cells == 0u ||
-			    !hal_device_tree_dma_translate(
-					consumed, request.specifier_cells, request.specifier_cell_count, &response.local_source_id))
+					!hal_device_tree_dma_translate(
+							consumed, request.specifier_cells, request.specifier_cell_count, &response.local_source_id))
 				return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 			response.dma_claim_valid = 1u;
 		}
@@ -385,7 +387,8 @@ static syscall_result_t device_tree_provider_handler(const struct cap_request* r
 
 	if (req == NULL || (req->rights & CAP_READ) == 0u || req->request == NULL || req->request_size < sizeof(header))
 		return syscall_result_error(
-			req != NULL && (req->rights & CAP_READ) == 0u ? SYSCALL_STATUS_DENIED : SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+				req != NULL && (req->rights & CAP_READ) == 0u ? SYSCALL_STATUS_DENIED : SYSCALL_STATUS_BAD_ARGUMENT,
+				0u);
 	memcpy(&header, req->request, sizeof(header));
 	switch (header.op) {
 	case DEVICE_TREE_OP_ROOT:
@@ -413,9 +416,9 @@ bool kernel_capability_device_tree_init(void) {
 fail:
 	free(device_tree_nodes);
 	free(device_tree_consumed);
-	device_tree_nodes          = NULL;
-	device_tree_node_count     = 0u;
-	device_tree_consumed       = NULL;
+	device_tree_nodes = NULL;
+	device_tree_node_count = 0u;
+	device_tree_consumed = NULL;
 	device_tree_consumed_count = 0u;
 	return false;
 }

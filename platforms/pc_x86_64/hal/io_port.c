@@ -1,6 +1,7 @@
-#include <hal/io_port.h>
 #include <stddef.h>
 #include <string.h>
+
+#include <hal/io_port.h>
 
 void hal_io_port_bitmap_deny_all(struct hal_io_port_bitmap* bitmap) {
 	if (bitmap == NULL) return;

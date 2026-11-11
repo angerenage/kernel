@@ -1,11 +1,12 @@
+#include <stdbool.h>
+#include <stdint.h>
+
+#include <hal/interrupts.h>
 #include <core/address_space.h>
 #include <core/cpu.h>
 #include <core/exception.h>
 #include <core/sched.h>
-#include <hal/interrupts.h>
 #include <kernel/crash.h>
-#include <stdbool.h>
-#include <stdint.h>
 
 #include "../cache.h"
 #include "../syscall.h"
@@ -58,10 +59,10 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 	irq_disable_local();
 	aarch64_select_kernel_stack();
 	__asm__ volatile("msr vbar_el1, %0\n\t"
-	                 "isb"
-	                 :
-	                 : "r"(vectors)
-	                 : "memory");
+					 "isb"
+			:
+			: "r"(vectors)
+			: "memory");
 
 	if (!aarch64_gic_init_local(cpu)) return false;
 	local_ready[cpu->index] = true;
@@ -163,8 +164,8 @@ void aarch64_prepare_user_return(void) {
 }
 
 void handle_exception(struct exception_frame* frame) {
-	bool     is_irq = (frame->vector & 0x3u) == 1u;
-	uint64_t ec     = (frame->esr >> 26) & 0x3fu;
+	bool is_irq = (frame->vector & 0x3u) == 1u;
+	uint64_t ec = (frame->esr >> 26) & 0x3fu;
 
 	/* IRQ cache acknowledgements belong after the GIC has consumed the
 	 * interrupt, so a subsequent generation cannot lose its SGI by coalescing
@@ -180,14 +181,14 @@ void handle_exception(struct exception_frame* frame) {
 	uint64_t iss = frame->esr & 0x01ffffffu;
 
 	uint64_t dfsc = iss & 0x3fu;
-	bool     fnv  = ((iss >> 10) & 1u) != 0;
+	bool fnv = ((iss >> 10) & 1u) != 0;
 
 	if ((is_instruction_abort(ec) || is_data_abort(ec)) && is_page_fault_abort(dfsc)) {
 		if (!is_irq) cpu_leave_exception();
 		if (address_space_handle_current_fault(fnv ? 0u : frame->far,
-		                                       fnv ? ADDRESS_SPACE_FAULT_INVALID : abort_fault_kind(dfsc),
-		                                       abort_fault_access(ec, iss),
-		                                       is_abort_from_lower_el(ec))) {
+					fnv ? ADDRESS_SPACE_FAULT_INVALID : abort_fault_kind(dfsc),
+					abort_fault_access(ec, iss),
+					is_abort_from_lower_el(ec))) {
 			return;
 		}
 		if (!is_irq) cpu_enter_exception();
@@ -200,23 +201,23 @@ void handle_exception(struct exception_frame* frame) {
 	}
 
 	struct kernel_crash_record* record = kernel_crash_begin(
-		KERNEL_CRASH_ARCH_AARCH64, is_irq ? KERNEL_CRASH_CAUSE_UNEXPECTED_INTERRUPT : KERNEL_CRASH_CAUSE_EXCEPTION);
+			KERNEL_CRASH_ARCH_AARCH64, is_irq ? KERNEL_CRASH_CAUSE_UNEXPECTED_INTERRUPT : KERNEL_CRASH_CAUSE_EXCEPTION);
 	struct kernel_crash_panic panic;
 
 	if (kernel_crash_take_panic(&panic)) {
-		record->cause        = KERNEL_CRASH_CAUSE_PANIC;
+		record->cause = KERNEL_CRASH_CAUSE_PANIC;
 		record->panic_reason = panic.reason;
 		record->panic_detail = panic.detail;
 	}
-	record->exception_code      = ec;
-	record->exception_subcode   = iss;
-	record->error_code          = frame->esr;
-	record->fault_address       = frame->far;
+	record->exception_code = ec;
+	record->exception_subcode = iss;
+	record->error_code = frame->esr;
+	record->fault_address = frame->far;
 	record->instruction_pointer = frame->elr;
 	record->stack_pointer =
-		aarch64_exception_from_lower_el(frame) ? frame->sp_el0 : (uintptr_t)frame + sizeof(*frame) + 16u;
-	record->frame_pointer  = frame->x[29];
-	record->status         = frame->spsr;
+			aarch64_exception_from_lower_el(frame) ? frame->sp_el0 : (uintptr_t)frame + sizeof(*frame) + 16u;
+	record->frame_pointer = frame->x[29];
+	record->status = frame->spsr;
 	record->register_count = 31u;
 	for (uint32_t i = 0u; i < record->register_count; i++) record->registers[i] = frame->x[i];
 	kernel_crash_finish(record);

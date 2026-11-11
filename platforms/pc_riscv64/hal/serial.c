@@ -1,8 +1,9 @@
-#include <boot/info.h>
-#include <hal/serial.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <boot/info.h>
+#include <hal/serial.h>
 
 #define NS16550_BASE_PHYS 0x10000000ull
 #define NS16550_PAGE_SIZE 0x1000ull
@@ -32,12 +33,12 @@
 #define RISCV_SATP_MODE_SV57 10ull
 
 static volatile uint8_t* serial_base;
-static bool              serial_ready;
-static bool              serial_emergency_active;
-static bool              serial_mapped;
+static bool serial_ready;
+static bool serial_emergency_active;
+static bool serial_mapped;
 
 static uint64_t serial_page_tables[4][512] __attribute__((aligned(4096)));
-static size_t   serial_page_table_count;
+static size_t serial_page_table_count;
 
 static inline uint64_t kernel_virt_to_phys(const void* ptr) {
 	struct boot_address_space address_space;
@@ -80,7 +81,7 @@ static bool serial_map_uart_hhdm(void) {
 	__asm__ volatile("csrr %0, satp" : "=r"(satp));
 
 	uint64_t mode = satp >> 60;
-	int      levels;
+	int levels;
 	switch (mode) {
 	case RISCV_SATP_MODE_SV39:
 		levels = 3;
@@ -100,14 +101,14 @@ static bool serial_map_uart_hhdm(void) {
 		return false;
 	}
 
-	uint64_t  uart_virt = address_space.direct_map_offset + NS16550_BASE_PHYS;
-	uint64_t* table     = (uint64_t*)(uintptr_t)hhdm_phys_to_virt(root_phys);
+	uint64_t uart_virt = address_space.direct_map_offset + NS16550_BASE_PHYS;
+	uint64_t* table = (uint64_t*)(uintptr_t)hhdm_phys_to_virt(root_phys);
 	if (table == NULL) {
 		return false;
 	}
 
 	for (int level = levels - 1; level > 0; level--) {
-		size_t   index = (size_t)((uart_virt >> (12 + 9 * level)) & 0x1ffu);
+		size_t index = (size_t)((uart_virt >> (12 + 9 * level)) & 0x1ffu);
 		uint64_t entry = table[index];
 
 		if ((entry & RISCV_PTE_V) == 0) {
@@ -116,13 +117,13 @@ static bool serial_map_uart_hhdm(void) {
 			}
 
 			uint64_t* next_table = serial_page_tables[serial_page_table_count++];
-			uint64_t  next_phys  = kernel_virt_to_phys(next_table);
+			uint64_t next_phys = kernel_virt_to_phys(next_table);
 			if (next_phys == 0) {
 				return false;
 			}
 
 			table[index] = riscv_pte_from_phys(next_phys) | RISCV_PTE_V;
-			entry        = table[index];
+			entry = table[index];
 		}
 		else if ((entry & (RISCV_PTE_R | RISCV_PTE_W | RISCV_PTE_X)) != 0) {
 			return false;
@@ -140,7 +141,7 @@ static bool serial_map_uart_hhdm(void) {
 
 	riscv_tlb_flush_all();
 
-	serial_base   = (volatile uint8_t*)(uintptr_t)uart_virt;
+	serial_base = (volatile uint8_t*)(uintptr_t)uart_virt;
 	serial_mapped = true;
 	return true;
 }
@@ -164,7 +165,7 @@ static inline uint8_t ns16550_read(uint32_t reg) {
 
 static inline void ns16550_write(uint32_t reg, uint8_t value) {
 	volatile uint8_t* regs = ns16550_regs();
-	regs[reg]              = value;
+	regs[reg] = value;
 }
 
 static inline void serial_relax(void) {

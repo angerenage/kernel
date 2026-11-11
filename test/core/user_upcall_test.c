@@ -1,21 +1,23 @@
-#include <base/heap.h>
-#include <core/pmm.h>
-#include <core/user_upcall.h>
-#include <core/uthread.h>
-#include <criterion/criterion.h>
-#include <hal/userspace.h>
 #include <libc/string.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <test_memory.h>
 
+#include <base/heap.h>
+#include <hal/userspace.h>
+#include <core/pmm.h>
+#include <core/user_upcall.h>
+#include <core/uthread.h>
+
+#include <criterion/criterion.h>
+
 #define KiB(x) ((size_t)(x) * 1024u)
 #define USER_UPCALL_TEST_HEAP_SIZE KiB(64)
 
 static uint8_t user_upcall_test_heap[USER_UPCALL_TEST_HEAP_SIZE] __attribute__((aligned(TEST_MAPPING_GRANULE)));
-static size_t  user_upcall_test_heap_offset;
-static bool    user_upcall_test_heap_initialized;
+static size_t user_upcall_test_heap_offset;
+static bool user_upcall_test_heap_initialized;
 
 bool heap_grow_region(size_t minimum_size, void** out_base, size_t* out_size) {
 	size_t bytes;
@@ -29,8 +31,12 @@ bool heap_grow_region(size_t minimum_size, void** out_base, size_t* out_size) {
 	for (;;) {
 		offset = __atomic_load_n(&user_upcall_test_heap_offset, __ATOMIC_ACQUIRE);
 		if (bytes > USER_UPCALL_TEST_HEAP_SIZE - offset) return false;
-		if (__atomic_compare_exchange_n(
-				&user_upcall_test_heap_offset, &offset, offset + bytes, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+		if (__atomic_compare_exchange_n(&user_upcall_test_heap_offset,
+					&offset,
+					offset + bytes,
+					false,
+					__ATOMIC_ACQ_REL,
+					__ATOMIC_ACQUIRE)) {
 			*out_base = user_upcall_test_heap + offset;
 			*out_size = bytes;
 			return true;
@@ -46,7 +52,7 @@ static void user_upcall_test_init_heap(void) {
 }
 
 struct hal_userspace_return_frame {
-	bool      user;
+	bool user;
 	uintptr_t entry;
 	uintptr_t stack;
 	uintptr_t args[USER_UPCALL_ARGUMENT_COUNT];
@@ -56,23 +62,23 @@ static void user_upcall_test_reset(struct uthread* thread, struct hal_userspace_
 	user_upcall_test_init_heap();
 	memset(thread, 0, sizeof(*thread));
 	cr_assert(uthread_upcall_state_init(thread), "uthread upcall state initialization failed");
-	thread->process              = (struct process*)(uintptr_t)1u;
+	thread->process = (struct process*)(uintptr_t)1u;
 	thread->upcall.stack_mapping = (struct mapping*)1u;
-	thread->upcall.stack_top     = 0x9000u;
-	*frame                       = (struct hal_userspace_return_frame){
-		.user  = true,
+	thread->upcall.stack_top = 0x9000u;
+	*frame = (struct hal_userspace_return_frame){
+		.user = true,
 		.entry = 0x1000u,
 		.stack = 0x8000u,
-		.args  = {0x11u, 0x22u, 0x33u, 0x44u, 0x55u},
+		.args = {0x11u, 0x22u, 0x33u, 0x44u, 0x55u},
 	};
 }
 
 Test(user_upcall, validates_requests) {
-	struct uthread                    thread;
+	struct uthread thread;
 	struct hal_userspace_return_frame frame;
-	struct user_upcall_request        request = {
+	struct user_upcall_request request = {
 		.entry = 0x4000u,
-		.args  = {1u, 2u, 3u, 4u, 5u},
+		.args = {1u, 2u, 3u, 4u, 5u},
 	};
 
 	user_upcall_test_reset(&thread, &frame);
@@ -87,11 +93,11 @@ Test(user_upcall, validates_requests) {
 }
 
 Test(user_upcall, rejects_dying_thread) {
-	struct uthread                    thread;
+	struct uthread thread;
 	struct hal_userspace_return_frame frame;
-	struct user_upcall_request        request = {
+	struct user_upcall_request request = {
 		.entry = 0x4000u,
-		.args  = {1u, 2u, 3u, 4u},
+		.args = {1u, 2u, 3u, 4u},
 	};
 
 	user_upcall_test_reset(&thread, &frame);
@@ -101,17 +107,17 @@ Test(user_upcall, rejects_dying_thread) {
 }
 
 Test(user_upcall, delivers_fifo_and_restores_interrupted_context) {
-	struct uthread                    thread;
+	struct uthread thread;
 	struct hal_userspace_return_frame frame;
 	struct hal_userspace_return_frame original;
-	struct user_upcall_request        request;
+	struct user_upcall_request request;
 
 	user_upcall_test_reset(&thread, &frame);
 	original = frame;
 	for (size_t i = 0u; i < USER_UPCALL_QUEUE_CAPACITY; i++) {
 		request = (struct user_upcall_request){
 			.entry = 0x4000u + i * 0x1000u,
-			.args  = {i + 1u, i + 101u, i + 201u, i + 301u, i + 401u},
+			.args = {i + 1u, i + 101u, i + 201u, i + 301u, i + 401u},
 		};
 		cr_assert_eq(uthread_upcall_enqueue(&thread, &request), USER_UPCALL_OK);
 	}
@@ -157,11 +163,11 @@ Test(user_upcall, delivers_fifo_and_restores_interrupted_context) {
 }
 
 Test(user_upcall, preserves_active_state_after_invalid_restore_frame) {
-	struct uthread                    thread;
+	struct uthread thread;
 	struct hal_userspace_return_frame frame;
-	struct user_upcall_request        request = {
+	struct user_upcall_request request = {
 		.entry = 0x4000u,
-		.args  = {7u, 8u, 9u, 10u},
+		.args = {7u, 8u, 9u, 10u},
 	};
 
 	user_upcall_test_reset(&thread, &frame);
@@ -178,15 +184,15 @@ Test(user_upcall, preserves_active_state_after_invalid_restore_frame) {
 }
 
 Test(user_upcall, queues_requests_while_active) {
-	struct uthread                    thread;
+	struct uthread thread;
 	struct hal_userspace_return_frame frame;
-	struct user_upcall_request        first = {
+	struct user_upcall_request first = {
 		.entry = 0x4000u,
-		.args  = {1u, 2u, 3u, 4u},
+		.args = {1u, 2u, 3u, 4u},
 	};
 	struct user_upcall_request second = {
 		.entry = 0x5000u,
-		.args  = {5u, 6u, 7u, 8u},
+		.args = {5u, 6u, 7u, 8u},
 	};
 
 	user_upcall_test_reset(&thread, &frame);
@@ -204,12 +210,12 @@ Test(user_upcall, queues_requests_while_active) {
 }
 
 Test(user_upcall, defers_a_full_queue_after_restoring_userspace) {
-	struct uthread                    thread;
+	struct uthread thread;
 	struct hal_userspace_return_frame frame;
 	struct hal_userspace_return_frame original;
-	struct user_upcall_request        request = {
+	struct user_upcall_request request = {
 		.entry = 0x4000u,
-		.args  = {1u, 2u, 3u, 4u},
+		.args = {1u, 2u, 3u, 4u},
 	};
 
 	user_upcall_test_reset(&thread, &frame);
@@ -218,7 +224,7 @@ Test(user_upcall, defers_a_full_queue_after_restoring_userspace) {
 	cr_assert_eq(uthread_upcall_deliver(&thread, &frame), USER_UPCALL_OK);
 
 	for (size_t i = 0u; i < USER_UPCALL_QUEUE_CAPACITY; i++) {
-		request.entry   = 0x5000u + i * 0x1000u;
+		request.entry = 0x5000u + i * 0x1000u;
 		request.args[0] = i;
 		cr_assert_eq(uthread_upcall_enqueue(&thread, &request), USER_UPCALL_OK);
 	}
@@ -239,11 +245,11 @@ Test(user_upcall, defers_a_full_queue_after_restoring_userspace) {
 }
 
 Test(user_upcall, purge_removes_only_matching_queued_requests_and_preserves_fifo) {
-	struct uthread                    thread;
+	struct uthread thread;
 	struct hal_userspace_return_frame frame;
-	const uintptr_t                   first_token  = 0x1111u;
-	const uintptr_t                   second_token = 0x2222u;
-	struct user_upcall_request        requests[]   = {
+	const uintptr_t first_token = 0x1111u;
+	const uintptr_t second_token = 0x2222u;
+	struct user_upcall_request requests[] = {
 		{.origin = USER_UPCALL_ORIGIN_SIGNAL, .origin_token = first_token, .entry = 0x4000u, .args = {1u}},
 		{.origin = USER_UPCALL_ORIGIN_SIGNAL, .origin_token = second_token, .entry = 0x5000u, .args = {2u}},
 		{.origin = USER_UPCALL_ORIGIN_NONE, .entry = 0x6000u, .args = {3u}},
@@ -270,24 +276,24 @@ Test(user_upcall, purge_removes_only_matching_queued_requests_and_preserves_fifo
 }
 
 Test(user_upcall, coalescing_preserves_latest_and_counts_only_real_drops) {
-	struct uthread                    thread;
+	struct uthread thread;
 	struct hal_userspace_return_frame frame;
-	const uintptr_t                   token   = 0x1111u;
-	struct user_upcall_request        tracked = {
-		.origin       = USER_UPCALL_ORIGIN_SIGNAL,
-		.flags        = USER_UPCALL_FLAG_COALESCIBLE,
+	const uintptr_t token = 0x1111u;
+	struct user_upcall_request tracked = {
+		.origin = USER_UPCALL_ORIGIN_SIGNAL,
+		.flags = USER_UPCALL_FLAG_COALESCIBLE,
 		.origin_token = token,
-		.entry        = 0x4000u,
-		.args         = {1u, 2u, 3u, 4u, 5u},
+		.entry = 0x4000u,
+		.args = {1u, 2u, 3u, 4u, 5u},
 	};
 	struct user_upcall_request filler = {
 		.entry = 0x5000u,
 	};
 	struct user_upcall_request unrelated = {
-		.origin       = USER_UPCALL_ORIGIN_SIGNAL,
-		.flags        = USER_UPCALL_FLAG_COALESCIBLE,
+		.origin = USER_UPCALL_ORIGIN_SIGNAL,
+		.flags = USER_UPCALL_FLAG_COALESCIBLE,
 		.origin_token = 0x2222u,
-		.entry        = 0x6000u,
+		.entry = 0x6000u,
 	};
 	size_t tail;
 
@@ -303,7 +309,7 @@ Test(user_upcall, coalescing_preserves_latest_and_counts_only_real_drops) {
 	cr_assert_eq(uthread_upcall_enqueue(&thread, &filler), USER_UPCALL_QUEUE_FULL);
 	cr_assert_eq(uthread_upcall_dropped_count(&thread), 1u);
 
-	tracked.entry   = 0x7000u;
+	tracked.entry = 0x7000u;
 	tracked.args[0] = 10u;
 	tracked.args[4] = 50u;
 	cr_assert_eq(uthread_upcall_enqueue_latest(&thread, &tracked), USER_UPCALL_OK);
@@ -328,27 +334,27 @@ Test(user_upcall, coalescing_preserves_latest_and_counts_only_real_drops) {
 }
 
 Test(user_upcall, coalescing_never_removes_a_normal_matching_request) {
-	struct uthread                    thread;
+	struct uthread thread;
 	struct hal_userspace_return_frame frame;
-	const uintptr_t                   token  = 0x1111u;
-	struct user_upcall_request        queued = {
-		.origin       = USER_UPCALL_ORIGIN_SIGNAL,
+	const uintptr_t token = 0x1111u;
+	struct user_upcall_request queued = {
+		.origin = USER_UPCALL_ORIGIN_SIGNAL,
 		.origin_token = token,
-		.entry        = 0x4000u,
-		.args         = {1u},
+		.entry = 0x4000u,
+		.args = {1u},
 	};
 	struct user_upcall_request coalesced = {
-		.origin       = USER_UPCALL_ORIGIN_SIGNAL,
-		.flags        = USER_UPCALL_FLAG_COALESCIBLE,
+		.origin = USER_UPCALL_ORIGIN_SIGNAL,
+		.flags = USER_UPCALL_FLAG_COALESCIBLE,
 		.origin_token = token,
-		.entry        = 0x5000u,
-		.args         = {2u},
+		.entry = 0x5000u,
+		.args = {2u},
 	};
 
 	user_upcall_test_reset(&thread, &frame);
 	cr_assert_eq(uthread_upcall_enqueue(&thread, &queued), USER_UPCALL_OK);
 	cr_assert_eq(uthread_upcall_enqueue_latest(&thread, &coalesced), USER_UPCALL_OK);
-	coalesced.entry   = 0x6000u;
+	coalesced.entry = 0x6000u;
 	coalesced.args[0] = 3u;
 	cr_assert_eq(uthread_upcall_enqueue_latest(&thread, &coalesced), USER_UPCALL_OK);
 
@@ -367,9 +373,9 @@ Test(user_upcall, coalescing_never_removes_a_normal_matching_request) {
 }
 
 Test(user_upcall, forced_enqueue_evicts_oldest_evictable_and_preserves_protected_requests) {
-	struct uthread                    thread;
+	struct uthread thread;
 	struct hal_userspace_return_frame frame;
-	struct user_upcall_request        protected = {
+	struct user_upcall_request protected = {
 		.flags = USER_UPCALL_FLAG_NON_EVICTABLE,
 		.entry = 0x4000u,
 	};
@@ -379,7 +385,7 @@ Test(user_upcall, forced_enqueue_evicts_oldest_evictable_and_preserves_protected
 	struct user_upcall_request forced = {
 		.flags = USER_UPCALL_FLAG_NON_EVICTABLE,
 		.entry = 0x6000u,
-		.args  = {0xfeedu},
+		.args = {0xfeedu},
 	};
 	size_t tail;
 
@@ -413,9 +419,9 @@ Test(user_upcall, forced_enqueue_evicts_oldest_evictable_and_preserves_protected
 }
 
 Test(user_upcall, forced_reservation_prevents_regular_enqueue_from_stealing_capacity) {
-	struct uthread                    thread;
+	struct uthread thread;
 	struct hal_userspace_return_frame frame;
-	struct user_upcall_request        regular = {
+	struct user_upcall_request regular = {
 		.entry = 0x4000u,
 	};
 	struct user_upcall_request forced = {
@@ -439,9 +445,9 @@ Test(user_upcall, forced_reservation_prevents_regular_enqueue_from_stealing_capa
 }
 
 Test(user_upcall, force_reserve_full_protected_queue_fails_without_recording_a_drop) {
-	struct uthread                    thread;
+	struct uthread thread;
 	struct hal_userspace_return_frame frame;
-	struct user_upcall_request        protected = {
+	struct user_upcall_request protected = {
 		.flags = USER_UPCALL_FLAG_NON_EVICTABLE,
 		.entry = 0x4000u,
 	};
@@ -461,9 +467,9 @@ Test(user_upcall, force_reserve_full_protected_queue_fails_without_recording_a_d
 }
 
 Test(user_upcall, canceling_eviction_reservation_restores_original_fifo) {
-	struct uthread                    thread;
+	struct uthread thread;
 	struct hal_userspace_return_frame frame;
-	struct user_upcall_request        request = {
+	struct user_upcall_request request = {
 		.entry = 0x4000u,
 	};
 
@@ -477,8 +483,8 @@ Test(user_upcall, canceling_eviction_reservation_restores_original_fifo) {
 	cr_assert_eq(thread.upcall.force_free_reservations, 0u);
 	cr_assert_eq(thread.upcall.force_eviction_reservations, 1u);
 	cr_assert_eq(uthread_upcall_deliver(&thread, &frame),
-	             USER_UPCALL_DEFERRED,
-	             "the reserved victim must not be delivered while the reservation is live");
+			USER_UPCALL_DEFERRED,
+			"the reserved victim must not be delivered while the reservation is live");
 
 	uthread_upcall_force_cancel(&thread);
 	cr_assert_eq(thread.upcall.force_free_reservations, 0u);
@@ -492,13 +498,13 @@ Test(user_upcall, canceling_eviction_reservation_restores_original_fifo) {
 }
 
 Test(user_upcall, purging_reserved_victim_rebalances_reservation_to_free_capacity) {
-	struct uthread                    thread;
+	struct uthread thread;
 	struct hal_userspace_return_frame frame;
-	const uintptr_t                   token  = 0x1111u;
-	struct user_upcall_request        victim = {
-		.origin       = USER_UPCALL_ORIGIN_SIGNAL,
+	const uintptr_t token = 0x1111u;
+	struct user_upcall_request victim = {
+		.origin = USER_UPCALL_ORIGIN_SIGNAL,
 		.origin_token = token,
-		.entry        = 0x4000u,
+		.entry = 0x4000u,
 	};
 	struct user_upcall_request protected = {
 		.flags = USER_UPCALL_FLAG_NON_EVICTABLE,
@@ -507,7 +513,7 @@ Test(user_upcall, purging_reserved_victim_rebalances_reservation_to_free_capacit
 	struct user_upcall_request forced = {
 		.flags = USER_UPCALL_FLAG_NON_EVICTABLE,
 		.entry = 0x6000u,
-		.args  = {0xfeedu},
+		.args = {0xfeedu},
 	};
 	size_t tail;
 
@@ -535,20 +541,20 @@ Test(user_upcall, purging_reserved_victim_rebalances_reservation_to_free_capacit
 }
 
 Test(user_upcall, delivery_rebalances_eviction_reservation_to_free_capacity) {
-	struct uthread                    thread;
+	struct uthread thread;
 	struct hal_userspace_return_frame frame;
-	struct user_upcall_request        protected = {
+	struct user_upcall_request protected = {
 		.flags = USER_UPCALL_FLAG_NON_EVICTABLE,
 		.entry = 0x4000u,
 	};
 	struct user_upcall_request evictable = {
 		.entry = 0x5000u,
-		.args  = {0xdeadu},
+		.args = {0xdeadu},
 	};
 	struct user_upcall_request forced = {
 		.flags = USER_UPCALL_FLAG_NON_EVICTABLE,
 		.entry = 0x6000u,
-		.args  = {0xfeedu},
+		.args = {0xfeedu},
 	};
 	size_t tail;
 

@@ -1,20 +1,21 @@
+#include <hal/clock.h>
+#include <hal/cpu.h>
+#include <hal/interrupts.h>
 #include <core/condvar.h>
 #include <core/cpu.h>
 #include <core/mutex.h>
 #include <core/sched.h>
 #include <core/thread.h>
+
 #include <criterion/criterion.h>
-#include <hal/clock.h>
-#include <hal/cpu.h>
-#include <hal/interrupts.h>
 
 #include "../mocks/hal/cpu_mock.h"
 
-static bool            condvar_test_hook_active;
-static size_t          condvar_test_hook_runs;
+static bool condvar_test_hook_active;
+static size_t condvar_test_hook_runs;
 static struct condvar* condvar_test_condvar;
-static struct mutex*   condvar_test_mutex;
-static struct thread*  condvar_test_signaler;
+static struct mutex* condvar_test_mutex;
+static struct thread* condvar_test_signaler;
 
 static void init_bound_bootstrap_cpu(void) {
 	irq_enable_local();
@@ -28,10 +29,10 @@ static void reset_test_state(void) {
 	irq_enable_local();
 	hal_cpu_mock_set_context_switch_hook(NULL);
 	condvar_test_hook_active = false;
-	condvar_test_hook_runs   = 0u;
-	condvar_test_condvar     = NULL;
-	condvar_test_mutex       = NULL;
-	condvar_test_signaler    = NULL;
+	condvar_test_hook_runs = 0u;
+	condvar_test_condvar = NULL;
+	condvar_test_mutex = NULL;
+	condvar_test_signaler = NULL;
 	hal_cpu_local_bind(NULL);
 }
 
@@ -55,8 +56,8 @@ static void condvar_test_signal_context_switch_hook(struct thread_context* curre
 	condvar_test_hook_active = false;
 }
 
-static void condvar_test_timeout_context_switch_hook(struct thread_context*       current,
-                                                     const struct thread_context* next) {
+static void condvar_test_timeout_context_switch_hook(
+		struct thread_context* current, const struct thread_context* next) {
 	(void)current;
 	(void)next;
 
@@ -89,27 +90,27 @@ Test(condvar, init_signal_and_broadcast_handle_empty_wait_queue) {
 
 Test(condvar, wait_releases_mutex_and_reacquires_it_after_signal) {
 	const struct thread_create_params waiter_params = {
-		.name              = "condvar_waiter",
-		.entry             = condvar_test_entry,
-		.arg               = NULL,
+		.name = "condvar_waiter",
+		.entry = condvar_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x3e0000u,
-		.kernel_stack_top  = 0x3e4000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x3e4000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params signaler_params = {
-		.name              = "condvar_signaler",
-		.entry             = condvar_test_entry,
-		.arg               = NULL,
+		.name = "condvar_signaler",
+		.entry = condvar_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x3f0000u,
-		.kernel_stack_top  = 0x3f4000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x3f4000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	struct condvar condvar;
-	struct mutex   mutex;
-	struct thread  waiter;
-	struct thread  signaler;
+	struct mutex mutex;
+	struct thread waiter;
+	struct thread signaler;
 
 	init_bound_bootstrap_cpu();
 	cr_assert(sched_init(), "sched_init failed");
@@ -124,8 +125,8 @@ Test(condvar, wait_releases_mutex_and_reacquires_it_after_signal) {
 	sched_set_current(cpu_current(), &waiter);
 	cr_assert(mutex_try_lock(&mutex), "waiter should acquire the mutex before waiting");
 
-	condvar_test_condvar  = &condvar;
-	condvar_test_mutex    = &mutex;
+	condvar_test_condvar = &condvar;
+	condvar_test_mutex = &mutex;
 	condvar_test_signaler = &signaler;
 	hal_cpu_mock_set_context_switch_hook(condvar_test_signal_context_switch_hook);
 
@@ -142,27 +143,27 @@ Test(condvar, wait_releases_mutex_and_reacquires_it_after_signal) {
 
 Test(condvar, timed_wait_times_out_and_reacquires_mutex) {
 	const struct thread_create_params waiter_params = {
-		.name              = "timed_waiter",
-		.entry             = condvar_test_entry,
-		.arg               = NULL,
+		.name = "timed_waiter",
+		.entry = condvar_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x400000u,
-		.kernel_stack_top  = 0x404000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x404000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params runner_params = {
-		.name              = "timeout_runner",
-		.entry             = condvar_test_entry,
-		.arg               = NULL,
+		.name = "timeout_runner",
+		.entry = condvar_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x410000u,
-		.kernel_stack_top  = 0x414000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x414000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	struct condvar condvar;
-	struct mutex   mutex;
-	struct thread  waiter;
-	struct thread  runner;
+	struct mutex mutex;
+	struct thread waiter;
+	struct thread runner;
 
 	init_bound_bootstrap_cpu();
 	cr_assert(sched_init(), "sched_init failed");

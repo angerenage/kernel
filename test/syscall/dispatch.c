@@ -1,8 +1,10 @@
-#include <base/syscall.h>
-#include <core/syscall.h>
-#include <criterion/criterion.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/syscall.h>
+#include <core/syscall.h>
+
+#include <criterion/criterion.h>
 
 #define SIX_ARGS uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5
 
@@ -84,11 +86,11 @@ static const uintptr_t ordinary_syscalls[] = {
 };
 
 _Static_assert(sizeof(ordinary_syscalls) / sizeof(ordinary_syscalls[0]) + 1u == SYSCALL_COUNT,
-               "production dispatch coverage must list every ordinary syscall plus UPCALL_RETURN");
+		"production dispatch coverage must list every ordinary syscall plus UPCALL_RETURN");
 
 Test(syscall_dispatch, production_table_routes_every_ordinary_syscall) {
 	for (size_t i = 0u; i < sizeof(ordinary_syscalls) / sizeof(ordinary_syscalls[0]); i++) {
-		const uintptr_t        number = ordinary_syscalls[i];
+		const uintptr_t number = ordinary_syscalls[i];
 		const syscall_result_t result = syscall_dispatch(number, 1u, 2u, 3u, 4u, 5u, 6u);
 
 		cr_assert_eq(result.status, SYSCALL_STATUS_OK, "production table rejected syscall %zu", (size_t)number);

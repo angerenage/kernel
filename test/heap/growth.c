@@ -2,9 +2,9 @@
 
 Test(heap, grows_when_initial_arena_is_exhausted) {
 	_Alignas(4096) static uint8_t arena[KiB(128)];
-	void*                         blocks[128] = {0};
-	size_t                        count       = 0;
-	size_t                        before_total;
+	void* blocks[128] = {0};
+	size_t count = 0;
+	size_t before_total;
 
 	init_test_heap(arena, sizeof(arena));
 

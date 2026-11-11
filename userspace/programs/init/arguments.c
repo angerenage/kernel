@@ -19,7 +19,7 @@ bool init_arguments_valid(uint32_t argc, const char* argv_data, size_t argv_size
 
 bool init_arguments_vector(const struct init_state* init, const char*** out_argv) {
 	const char** argv;
-	const char*  cursor;
+	const char* cursor;
 
 	if (out_argv == NULL) return false;
 	*out_argv = NULL;

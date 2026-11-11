@@ -3,17 +3,17 @@
 #include "test_support.h"
 
 Test(syscall, channel_create_and_destroy_manage_process_owned_state) {
-	struct process*       process;
-	struct uthread*       main_thread;
+	struct process* process;
+	struct uthread* main_thread;
 	struct address_space* space;
-	struct channel*       channel;
-	void*                 output_base;
-	channel_id_t          channel_id = CHANNEL_ID_INVALID;
-	syscall_result_t      result;
+	struct channel* channel;
+	void* output_base;
+	channel_id_t channel_id = CHANNEL_ID_INVALID;
+	syscall_result_t result;
 
 	syscall_test_init_process_environment();
 	capability_init();
-	process     = syscall_test_spawn_process("syscall/channel");
+	process = syscall_test_spawn_process("syscall/channel");
 	main_thread = process_main_thread(process);
 	cr_assert_not_null(main_thread);
 	sched_set_current(cpu_current(), &main_thread->thread);
@@ -30,18 +30,18 @@ Test(syscall, channel_create_and_destroy_manage_process_owned_state) {
 	cr_assert_eq(process->channel_state.count, 0u, "failed copyout must roll back channel ownership");
 
 	cr_assert(test_address_space_map(space,
-	                                 TEST_MAPPING_GRANULE,
-	                                 MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
-	                                 0u,
-	                                 TEST_MAPPING_GRANULE,
-	                                 0u,
-	                                 NULL,
-	                                 &output_base),
-	          "failed to allocate channel ID output");
+					  TEST_MAPPING_GRANULE,
+					  MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+					  0u,
+					  TEST_MAPPING_GRANULE,
+					  0u,
+					  NULL,
+					  &output_base),
+			"failed to allocate channel ID output");
 	result = syscall_dispatch(SYSCALL_CHANNEL_CREATE, (uintptr_t)output_base, 0u, 0u, 0u, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(address_space_copy_from(space, (uintptr_t)output_base, &channel_id, sizeof(channel_id)),
-	             ADDRESS_TRANSFER_OK);
+			ADDRESS_TRANSFER_OK);
 	cr_assert_neq(channel_id, CHANNEL_ID_INVALID);
 	cr_assert_eq(process->channel_state.count, 1u);
 	channel = channel_acquire(channel_id);
@@ -68,57 +68,62 @@ Test(syscall, channel_create_and_destroy_manage_process_owned_state) {
 }
 
 Test(syscall, channel_create_optionally_returns_an_activity_signal_capability) {
-	struct process*       process;
-	struct uthread*       main_thread;
+	struct process* process;
+	struct uthread* main_thread;
 	struct address_space* space;
-	struct capability*    activity_grant;
-	struct channel*       channel;
-	void*                 output_base;
-	channel_id_t          channel_id   = CHANNEL_ID_INVALID;
-	cap_id_t              activity_cap = CAP_ID_INVALID;
-	size_t                caps_before;
-	size_t                signals_before;
-	syscall_result_t      result;
+	struct capability* activity_grant;
+	struct channel* channel;
+	void* output_base;
+	channel_id_t channel_id = CHANNEL_ID_INVALID;
+	cap_id_t activity_cap = CAP_ID_INVALID;
+	size_t caps_before;
+	size_t signals_before;
+	syscall_result_t result;
 
 	syscall_test_init_process_environment();
 	capability_init();
-	process     = syscall_test_spawn_process("syscall/channel-activity");
+	process = syscall_test_spawn_process("syscall/channel-activity");
 	main_thread = process_main_thread(process);
 	cr_assert_not_null(main_thread);
 	sched_set_current(cpu_current(), &main_thread->thread);
-	space          = process_address_space(process);
-	caps_before    = capability_count();
+	space = process_address_space(process);
+	caps_before = capability_count();
 	signals_before = signal_count();
 
 	cr_assert(test_address_space_map(space,
-	                                 TEST_MAPPING_GRANULE,
-	                                 MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
-	                                 0u,
-	                                 TEST_MAPPING_GRANULE,
-	                                 0u,
-	                                 NULL,
-	                                 &output_base));
+			TEST_MAPPING_GRANULE,
+			MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+			0u,
+			TEST_MAPPING_GRANULE,
+			0u,
+			NULL,
+			&output_base));
 	result = syscall_dispatch(SYSCALL_CHANNEL_CREATE,
-	                          (uintptr_t)output_base,
-	                          TEST_MAPPING_GRANULE + MM_USER_ADDRESS_SPACE_SIZE,
-	                          0u,
-	                          0u,
-	                          0u,
-	                          0u);
+			(uintptr_t)output_base,
+			TEST_MAPPING_GRANULE + MM_USER_ADDRESS_SPACE_SIZE,
+			0u,
+			0u,
+			0u,
+			0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 	cr_assert_eq(result.value, 1u);
 	cr_assert_eq(process->channel_state.count, 0u);
 	cr_assert_eq(capability_count(), caps_before);
 	cr_assert_eq(signal_count(), signals_before);
 
-	result = syscall_dispatch(
-		SYSCALL_CHANNEL_CREATE, (uintptr_t)output_base, (uintptr_t)output_base + sizeof(channel_id), 0u, 0u, 0u, 0u);
+	result = syscall_dispatch(SYSCALL_CHANNEL_CREATE,
+			(uintptr_t)output_base,
+			(uintptr_t)output_base + sizeof(channel_id),
+			0u,
+			0u,
+			0u,
+			0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(address_space_copy_from(space, (uintptr_t)output_base, &channel_id, sizeof(channel_id)),
-	             ADDRESS_TRANSFER_OK);
+			ADDRESS_TRANSFER_OK);
 	cr_assert_eq(address_space_copy_from(
-					 space, (uintptr_t)output_base + sizeof(channel_id), &activity_cap, sizeof(activity_cap)),
-	             ADDRESS_TRANSFER_OK);
+						 space, (uintptr_t)output_base + sizeof(channel_id), &activity_cap, sizeof(activity_cap)),
+			ADDRESS_TRANSFER_OK);
 	cr_assert_neq(channel_id, CHANNEL_ID_INVALID);
 	cr_assert_neq(activity_cap, CAP_ID_INVALID);
 	cr_assert_eq(process->channel_state.count, 1u);
@@ -145,21 +150,21 @@ Test(syscall, channel_create_optionally_returns_an_activity_signal_capability) {
 }
 
 Test(syscall, cap_unpublish_requires_endpoint_owner_authority) {
-	struct process*  owner;
-	struct process*  other;
-	struct uthread*  owner_thread;
-	struct uthread*  other_thread;
-	struct channel*  endpoint;
-	cap_object_id_t  object_id;
+	struct process* owner;
+	struct process* other;
+	struct uthread* owner_thread;
+	struct uthread* other_thread;
+	struct channel* endpoint;
+	cap_object_id_t object_id;
 	syscall_result_t result;
 
 	syscall_test_init_process_environment();
 	capability_init();
-	owner        = syscall_test_spawn_process("syscall/unpublish-owner");
-	other        = syscall_test_spawn_process("syscall/unpublish-other");
+	owner = syscall_test_spawn_process("syscall/unpublish-owner");
+	other = syscall_test_spawn_process("syscall/unpublish-other");
 	owner_thread = process_main_thread(owner);
 	other_thread = process_main_thread(other);
-	endpoint     = channel_create(process_pid(owner), false);
+	endpoint = channel_create(process_pid(owner), false);
 	cr_assert_not_null(endpoint);
 	object_id = cap_object_create(0x500u, endpoint, NULL);
 	cr_assert_neq(object_id, CAP_OBJECT_ID_INVALID);
@@ -187,22 +192,22 @@ Test(syscall, cap_unpublish_requires_endpoint_owner_authority) {
 }
 
 Test(syscall, cap_unpublish_if_unused_preserves_new_grants) {
-	struct process*    owner;
-	struct process*    other;
-	struct uthread*    owner_thread;
-	struct uthread*    other_thread;
-	struct channel*    endpoint;
+	struct process* owner;
+	struct process* other;
+	struct uthread* owner_thread;
+	struct uthread* other_thread;
+	struct channel* endpoint;
 	struct capability* grant;
-	cap_object_id_t    object_id;
-	syscall_result_t   result;
+	cap_object_id_t object_id;
+	syscall_result_t result;
 
 	syscall_test_init_process_environment();
 	capability_init();
-	owner        = syscall_test_spawn_process("syscall/unused-owner");
-	other        = syscall_test_spawn_process("syscall/unused-other");
+	owner = syscall_test_spawn_process("syscall/unused-owner");
+	other = syscall_test_spawn_process("syscall/unused-other");
 	owner_thread = process_main_thread(owner);
 	other_thread = process_main_thread(other);
-	endpoint     = channel_create(process_pid(owner), false);
+	endpoint = channel_create(process_pid(owner), false);
 	cr_assert_not_null(endpoint);
 	object_id = cap_object_create(0x501u, endpoint, NULL);
 	cr_assert_neq(object_id, CAP_OBJECT_ID_INVALID);

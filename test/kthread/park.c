@@ -2,25 +2,25 @@
 
 Test(kthread, park_blocks_until_another_thread_unparks_the_current_thread) {
 	const struct thread_create_params parker_params = {
-		.name              = "parker",
-		.entry             = kthread_test_entry,
-		.arg               = NULL,
+		.name = "parker",
+		.entry = kthread_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x304000u,
-		.kernel_stack_top  = 0x308000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x308000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params runner_params = {
-		.name              = "runner",
-		.entry             = kthread_test_entry,
-		.arg               = NULL,
+		.name = "runner",
+		.entry = kthread_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x308000u,
-		.kernel_stack_top  = 0x30c000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x30c000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	struct kthread parker = {.stack_mapping = NULL};
-	struct thread  runner;
+	struct thread runner;
 
 	init_bound_bootstrap_cpu();
 	cr_assert(sched_init(), "sched_init failed");
@@ -30,7 +30,7 @@ Test(kthread, park_blocks_until_another_thread_unparks_the_current_thread) {
 	cr_assert(sched_make_runnable(&runner), "runner should be runnable while the parker is blocked");
 
 	sched_set_current(cpu_current(), &parker.thread);
-	kthread_test_park_target     = &parker;
+	kthread_test_park_target = &parker;
 	kthread_test_park_hook_armed = true;
 	hal_cpu_mock_set_context_switch_hook(kthread_test_park_context_switch_hook);
 	cr_assert(kthread_park(), "kthread_park should return after another thread unparks the target");
@@ -41,21 +41,21 @@ Test(kthread, park_blocks_until_another_thread_unparks_the_current_thread) {
 	cr_assert_eq(parker.thread.block_reason, THREAD_BLOCK_NONE, "park should clear the parked block reason");
 	cr_assert_eq(thread_wait_queue_depth(&parker.thread.park_wait_queue), 0u, "park wait queue should be empty");
 	cr_assert_eq(parker.thread.flags & THREAD_FLAG_PARK_PERMIT,
-	             0u,
-	             "waking a parked thread should consume the delivered park permit");
+			0u,
+			"waking a parked thread should consume the delivered park permit");
 
 	reset_test_state();
 }
 
 Test(kthread, unpark_before_park_leaves_a_single_permit) {
 	const struct thread_create_params worker_params = {
-		.name              = "worker",
-		.entry             = kthread_test_entry,
-		.arg               = NULL,
+		.name = "worker",
+		.entry = kthread_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x30c000u,
-		.kernel_stack_top  = 0x310000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x310000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	struct kthread worker = {.stack_mapping = NULL};
 
@@ -89,8 +89,9 @@ Test(kthread, repeated_unpark_coalesces_to_one_binary_permit) {
 
 	cr_assert(kthread_park(), "park must consume the available permit without blocking");
 	cr_assert_eq(target.thread.flags & THREAD_FLAG_PARK_PERMIT, 0u, "one park must consume the coalesced permit");
-	cr_assert_eq(
-		thread_wait_queue_depth(&target.thread.park_wait_queue), 0u, "permit consumption must not enqueue the thread");
+	cr_assert_eq(thread_wait_queue_depth(&target.thread.park_wait_queue),
+			0u,
+			"permit consumption must not enqueue the thread");
 
 	reset_test_state();
 }
@@ -98,7 +99,7 @@ Test(kthread, repeated_unpark_coalesces_to_one_binary_permit) {
 Test(kthread, unpark_only_changes_the_park_permit_flag) {
 	struct kthread target;
 	const uint32_t persistent =
-		THREAD_FLAG_CANCEL_PENDING | THREAD_FLAG_CANCEL_DISABLED | THREAD_FLAG_INTERRUPT_PENDING;
+			THREAD_FLAG_CANCEL_PENDING | THREAD_FLAG_CANCEL_DISABLED | THREAD_FLAG_INTERRUPT_PENDING;
 
 	kthread_test_init_scheduler();
 	kthread_test_init_target(&target, "parker", 0x920000u, true);
@@ -106,7 +107,7 @@ Test(kthread, unpark_only_changes_the_park_permit_flag) {
 
 	cr_assert(kthread_unpark(&target));
 	cr_assert_eq(
-		target.thread.flags & persistent, persistent, "unpark must preserve unrelated persistent thread flags");
+			target.thread.flags & persistent, persistent, "unpark must preserve unrelated persistent thread flags");
 	cr_assert((target.thread.flags & THREAD_FLAG_PARK_PERMIT) != 0u, "unpark must grant the park permit");
 
 	cr_assert(kthread_park(), "park must consume an available permit");

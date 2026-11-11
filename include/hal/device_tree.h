@@ -1,10 +1,11 @@
 #pragma once
 
-#include <firmware/dt.h>
-#include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <firmware/dt.h>
+#include <hal/interrupts.h>
 
 /* Resolution supplied for a node consumed by the HAL. */
 enum hal_device_tree_reference_kind {
@@ -15,9 +16,9 @@ enum hal_device_tree_reference_kind {
 
 /* One firmware node consumed by a platform HAL provider. */
 struct hal_device_tree_consumed_node {
-	struct dt_node                      node;
+	struct dt_node node;
 	enum hal_device_tree_reference_kind kind;
-	uint64_t                            value;
+	uint64_t value;
 	/* Zero when the reference cannot translate controller-specific specifiers. */
 	uint32_t specifier_cells;
 };
@@ -27,10 +28,9 @@ size_t hal_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* node
 
 /* Translate one interrupt-controller phandle specifier into the kernel's fixed-source model. */
 bool hal_device_tree_interrupt_translate(const struct hal_device_tree_consumed_node* controller, const uint32_t* cells,
-                                         size_t cell_count, uint32_t* out_local_source_id,
-                                         enum hal_interrupt_trigger*  out_trigger,
-                                         enum hal_interrupt_polarity* out_polarity);
+		size_t cell_count, uint32_t* out_local_source_id, enum hal_interrupt_trigger* out_trigger,
+		enum hal_interrupt_polarity* out_polarity);
 
 /* Translate one DMA-controller phandle specifier into the kernel's source model. */
 bool hal_device_tree_dma_translate(const struct hal_device_tree_consumed_node* controller, const uint32_t* cells,
-                                   size_t cell_count, uint32_t* out_local_source_id);
+		size_t cell_count, uint32_t* out_local_source_id);

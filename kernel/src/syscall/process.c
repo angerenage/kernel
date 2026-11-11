@@ -1,5 +1,7 @@
 #include "process.h"
 
+#include <libc/stdlib.h>
+
 #include <base/cap.h>
 #include <base/process.h>
 #include <base/syscall.h>
@@ -8,7 +10,6 @@
 #include <core/process.h>
 #include <core/syscall.h>
 #include <core/uthread.h>
-#include <libc/stdlib.h>
 
 #include "../capability/address_space.h"
 #include "../capability/process.h"
@@ -28,20 +29,20 @@ static syscall_result_t syscall_result_from_process_create(enum process_result r
 	}
 }
 
-syscall_result_t syscall_self(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                              uintptr_t arg5) {
-	struct process*              process;
-	struct uthread*              thread;
-	struct self_info             info;
-	cap_id_t                     self_cap_id          = CAP_ID_INVALID;
-	cap_id_t                     address_space_cap_id = CAP_ID_INVALID;
-	cap_id_t                     main_thread_cap_id   = CAP_ID_INVALID;
-	struct uthread*              main_thread;
+syscall_result_t syscall_self(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
+	struct process* process;
+	struct uthread* thread;
+	struct self_info info;
+	cap_id_t self_cap_id = CAP_ID_INVALID;
+	cap_id_t address_space_cap_id = CAP_ID_INVALID;
+	cap_id_t main_thread_cap_id = CAP_ID_INVALID;
+	struct uthread* main_thread;
 	enum address_transfer_result validation_result;
-	cap_object_id_t              self_object_before;
-	cap_object_id_t              address_space_object_before;
-	cap_object_id_t              main_thread_object_before;
-	syscall_result_t             result = syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
+	cap_object_id_t self_object_before;
+	cap_object_id_t address_space_object_before;
+	cap_object_id_t main_thread_object_before;
+	syscall_result_t result = syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 
 	(void)arg1;
 	(void)arg2;
@@ -51,35 +52,34 @@ syscall_result_t syscall_self(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, ui
 
 	process = process_current();
 	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
-	validation_result =
-		address_space_validate_range(process_address_space(process),
-		                             arg0,
-		                             sizeof(info),
-		                             ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
+	validation_result = address_space_validate_range(process_address_space(process),
+			arg0,
+			sizeof(info),
+			ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
 	if (validation_result != ADDRESS_TRANSFER_OK) return syscall_result_from_address_transfer(validation_result, 0u);
 
-	thread      = uthread_current();
+	thread = uthread_current();
 	main_thread = process_main_thread(process);
 	if (main_thread == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
-	self_object_before          = process_cap_object_id(process);
+	self_object_before = process_cap_object_id(process);
 	address_space_object_before = process_address_space_cap_object_id(process);
-	main_thread_object_before   = uthread_cap_object_id(main_thread);
+	main_thread_object_before = uthread_cap_object_id(main_thread);
 
 	self_cap_id = kernel_self_grant(process);
 	if (self_cap_id == CAP_ID_INVALID) goto grant_failed;
 
 	address_space_cap_id = kernel_address_space_grant(
-		process, process_pid(process), CAP_CALL | CAP_MAP | CAP_READ | CAP_WRITE | CAP_EXEC | CAP_DELEGATE);
+			process, process_pid(process), CAP_CALL | CAP_MAP | CAP_READ | CAP_WRITE | CAP_EXEC | CAP_DELEGATE);
 	if (address_space_cap_id == CAP_ID_INVALID) goto grant_failed;
 	main_thread_cap_id = kernel_thread_grant_full(main_thread, process_pid(process));
 	if (main_thread_cap_id == CAP_ID_INVALID) goto grant_failed;
 
-	info.pid               = process_pid(process);
-	info.thread_id         = thread != NULL ? (uint64_t)uthread_id(thread) : 0u;
-	info.thread_count      = process_thread_count(process);
-	info.self_cap          = self_cap_id;
+	info.pid = process_pid(process);
+	info.thread_id = thread != NULL ? (uint64_t)uthread_id(thread) : 0u;
+	info.thread_count = process_thread_count(process);
+	info.self_cap = self_cap_id;
 	info.address_space_cap = address_space_cap_id;
-	info.main_thread_cap   = main_thread_cap_id;
+	info.main_thread_cap = main_thread_cap_id;
 
 	result = syscall_copy_to_user(process_address_space(process), arg0, &info, sizeof(info), 0u);
 	if (result.status == SYSCALL_STATUS_OK) return result;
@@ -94,15 +94,15 @@ grant_failed:
 	return result.status == SYSCALL_STATUS_OK ? syscall_result_error(SYSCALL_STATUS_FAILED, 0u) : result;
 }
 
-syscall_result_t syscall_create_process(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                        uintptr_t arg5) {
-	struct process*                process = NULL;
-	struct process*                caller;
-	enum process_result            result;
-	char*                          name = NULL;
-	syscall_result_t               copy_result;
+syscall_result_t syscall_create_process(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
+	struct process* process = NULL;
+	struct process* caller;
+	enum process_result result;
+	char* name = NULL;
+	syscall_result_t copy_result;
 	struct process_create_response response;
-	process_id_t                   caller_pid;
+	process_id_t caller_pid;
 
 	(void)arg3;
 	(void)arg4;
@@ -121,13 +121,13 @@ syscall_result_t syscall_create_process(uintptr_t arg0, uintptr_t arg1, uintptr_
 	if (result != PROCESS_OK) return syscall_result_from_process_create(result);
 
 	response.process_cap = kernel_process_grant(
-		process, caller_pid, CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_EXEC | CAP_DELEGATE);
+			process, caller_pid, CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_EXEC | CAP_DELEGATE);
 	if (response.process_cap == CAP_ID_INVALID) {
 		(void)process_destroy(process);
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 	response.address_space_cap = kernel_address_space_grant(
-		process, caller_pid, CAP_CALL | CAP_MAP | CAP_READ | CAP_WRITE | CAP_EXEC | CAP_DELEGATE);
+			process, caller_pid, CAP_CALL | CAP_MAP | CAP_READ | CAP_WRITE | CAP_EXEC | CAP_DELEGATE);
 	if (response.address_space_cap == CAP_ID_INVALID) {
 		(void)cap_destroy_by_id(response.process_cap);
 		(void)process_destroy(process);
@@ -145,8 +145,8 @@ syscall_result_t syscall_create_process(uintptr_t arg0, uintptr_t arg1, uintptr_
 	return syscall_result_ok((uintptr_t)response.process_cap);
 }
 
-syscall_result_t syscall_exit_process(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                      uintptr_t arg5) {
+syscall_result_t syscall_exit_process(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
 	struct process* process;
 
 	(void)arg1;

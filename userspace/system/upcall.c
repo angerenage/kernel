@@ -1,9 +1,11 @@
-#include <base/syscall.h>
-#include <runtime/diagnostic.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+
+#include <base/syscall.h>
+
 #include <system/upcall.h>
+#include <runtime/diagnostic.h>
 
 #include "syscall.h"
 

@@ -2,16 +2,16 @@
 
 Test(sched, make_runnable_prefers_preferred_cpu_over_lower_depth_target) {
 	const struct thread_create_params pinned_params = {
-		.name              = "pinned_existing",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "pinned_existing",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x304000u,
-		.kernel_stack_top  = 0x308000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x308000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
-	struct cpu*   bsp;
-	struct cpu*   ap;
+	struct cpu* bsp;
+	struct cpu* ap;
 	struct thread pinned;
 	struct thread preferred;
 
@@ -19,13 +19,13 @@ Test(sched, make_runnable_prefers_preferred_cpu_over_lower_depth_target) {
 
 	{
 		const struct thread_create_params preferred_params = {
-			.name              = "preferred",
-			.entry             = sched_test_thread_entry,
-			.arg               = NULL,
+			.name = "preferred",
+			.entry = sched_test_thread_entry,
+			.arg = NULL,
 			.kernel_stack_base = 0x308000u,
-			.kernel_stack_top  = 0x30c000u,
-			.preferred_cpu     = ap,
-			.detached          = false,
+			.kernel_stack_top = 0x30c000u,
+			.preferred_cpu = ap,
+			.detached = false,
 		};
 
 		cr_assert(thread_init(&pinned, &pinned_params), "thread_init failed for pinned thread");
@@ -48,25 +48,25 @@ Test(sched, make_runnable_prefers_preferred_cpu_over_lower_depth_target) {
 
 Test(sched, make_runnable_chooses_cpu_with_smallest_run_queue_depth) {
 	const struct thread_create_params busy_params = {
-		.name              = "busy",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "busy",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x30c000u,
-		.kernel_stack_top  = 0x310000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x310000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params balanced_params = {
-		.name              = "balanced",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "balanced",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x310000u,
-		.kernel_stack_top  = 0x314000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x314000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
-	struct cpu*   bsp;
-	struct cpu*   ap;
+	struct cpu* bsp;
+	struct cpu* ap;
 	struct thread busy;
 	struct thread balanced;
 
@@ -91,25 +91,25 @@ Test(sched, make_runnable_chooses_cpu_with_smallest_run_queue_depth) {
 
 Test(sched, make_runnable_prefers_idle_cpu_over_busy_current_cpu) {
 	const struct thread_create_params busy_params = {
-		.name              = "busy_running",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "busy_running",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x312000u,
-		.kernel_stack_top  = 0x316000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x316000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params balanced_params = {
-		.name              = "balanced_idle_target",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "balanced_idle_target",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x316000u,
-		.kernel_stack_top  = 0x31a000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x31a000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
-	struct cpu*   bsp;
-	struct cpu*   ap;
+	struct cpu* bsp;
+	struct cpu* ap;
 	struct thread busy;
 	struct thread balanced;
 
@@ -131,16 +131,16 @@ Test(sched, make_runnable_prefers_idle_cpu_over_busy_current_cpu) {
 
 Test(sched, remote_enqueue_requests_reschedule_and_kicks_target_cpu) {
 	const struct thread_create_params remote_params = {
-		.name              = "remote",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "remote",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x314000u,
-		.kernel_stack_top  = 0x318000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x318000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
-	struct cpu*   bsp;
-	struct cpu*   ap;
+	struct cpu* bsp;
+	struct cpu* ap;
 	struct thread remote;
 
 	init_started_dual_cpu_topology(&bsp, &ap);
@@ -159,8 +159,8 @@ Test(sched, remote_enqueue_requests_reschedule_and_kicks_target_cpu) {
 }
 
 Test(sched, remote_duplicate_enqueue_does_not_duplicate_kicks_or_queue_entries) {
-	struct cpu*   bsp;
-	struct cpu*   ap;
+	struct cpu* bsp;
+	struct cpu* ap;
 	struct thread remote;
 
 	sched_regression_init_dual_cpu(&bsp, &ap);

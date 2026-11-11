@@ -1,15 +1,16 @@
-#include <criterion/criterion.h>
 #include <stdbool.h>
 #include <string.h>
 #include <yaml.h>
 
+#include <criterion/criterion.h>
+
 static bool parse_stream(const unsigned char* input, size_t size, size_t* out_aliases, size_t* out_scalars) {
 	yaml_parser_t parser;
-	yaml_event_t  event;
-	bool          done    = false;
-	bool          success = true;
-	size_t        aliases = 0u;
-	size_t        scalars = 0u;
+	yaml_event_t event;
+	bool done = false;
+	bool success = true;
+	size_t aliases = 0u;
+	size_t scalars = 0u;
 
 	cr_assert(yaml_parser_initialize(&parser));
 	yaml_parser_set_input_string(&parser, input, size);
@@ -33,8 +34,8 @@ Test(libyaml, parses_utf8_documents_and_aliases) {
 	static const unsigned char document[] = "name: périphérique\n"
 											"values: &shared [one, two]\n"
 											"copy: *shared\n";
-	size_t                     aliases    = 0u;
-	size_t                     scalars    = 0u;
+	size_t aliases = 0u;
+	size_t scalars = 0u;
 
 	cr_assert(parse_stream(document, sizeof(document) - 1u, &aliases, &scalars));
 	cr_assert_eq(aliases, 1u);
@@ -42,7 +43,7 @@ Test(libyaml, parses_utf8_documents_and_aliases) {
 }
 
 Test(libyaml, rejects_malformed_yaml_and_invalid_utf8) {
-	static const unsigned char malformed[]    = "mapping: [unterminated\n";
+	static const unsigned char malformed[] = "mapping: [unterminated\n";
 	static const unsigned char invalid_utf8[] = {'n', 'a', 'm', 'e', ':', ' ', 0xc0u, 0xafu, '\n'};
 
 	cr_assert_not(parse_stream(malformed, sizeof(malformed) - 1u, NULL, NULL));
@@ -54,11 +55,11 @@ Test(libyaml, loads_documents_and_resolves_aliases) {
 											"  - one\n"
 											"  - two\n"
 											"second: *shared\n";
-	yaml_parser_t              parser;
-	yaml_document_t            loaded;
-	yaml_node_t*               root;
-	yaml_node_pair_t*          first;
-	yaml_node_pair_t*          second;
+	yaml_parser_t parser;
+	yaml_document_t loaded;
+	yaml_node_t* root;
+	yaml_node_pair_t* first;
+	yaml_node_pair_t* second;
 
 	cr_assert(yaml_parser_initialize(&parser));
 	yaml_parser_set_input_string(&parser, document, sizeof(document) - 1u);
@@ -67,7 +68,7 @@ Test(libyaml, loads_documents_and_resolves_aliases) {
 	cr_assert_not_null(root);
 	cr_assert_eq(root->type, YAML_MAPPING_NODE);
 	cr_assert_eq(root->data.mapping.pairs.top - root->data.mapping.pairs.start, 2);
-	first  = root->data.mapping.pairs.start;
+	first = root->data.mapping.pairs.start;
 	second = first + 1;
 	cr_assert_eq(first->value, second->value);
 	cr_assert_eq(yaml_document_get_node(&loaded, first->value)->type, YAML_SEQUENCE_NODE);
@@ -76,18 +77,18 @@ Test(libyaml, loads_documents_and_resolves_aliases) {
 }
 
 Test(libyaml, emits_to_a_string_buffer_that_can_be_parsed_again) {
-	unsigned char   output[256] = {0};
-	size_t          written     = 0u;
+	unsigned char output[256] = {0};
+	size_t written = 0u;
 	yaml_document_t document;
-	yaml_emitter_t  emitter;
-	int             mapping;
-	int             key;
-	int             value;
+	yaml_emitter_t emitter;
+	int mapping;
+	int key;
+	int value;
 
 	cr_assert(yaml_document_initialize(&document, NULL, NULL, NULL, 1, 1));
 	mapping = yaml_document_add_mapping(&document, NULL, YAML_BLOCK_MAPPING_STYLE);
-	key     = yaml_document_add_scalar(&document, NULL, (const yaml_char_t*)"driver", -1, YAML_PLAIN_SCALAR_STYLE);
-	value   = yaml_document_add_scalar(&document, NULL, (const yaml_char_t*)"acpi:tpm2", -1, YAML_PLAIN_SCALAR_STYLE);
+	key = yaml_document_add_scalar(&document, NULL, (const yaml_char_t*)"driver", -1, YAML_PLAIN_SCALAR_STYLE);
+	value = yaml_document_add_scalar(&document, NULL, (const yaml_char_t*)"acpi:tpm2", -1, YAML_PLAIN_SCALAR_STYLE);
 	cr_assert_neq(mapping, 0);
 	cr_assert_neq(key, 0);
 	cr_assert_neq(value, 0);

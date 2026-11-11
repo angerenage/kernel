@@ -12,4 +12,4 @@ bool satapi_read_capacity(const struct ata_transport* transport, uint64_t* out_b
 /* Read one or more contiguous blocks from a SATAPI device. The buffer must be large enough to hold the requested data.
  */
 bool satapi_read_blocks(const struct ata_transport* transport, struct ata_buffer* buffer, uint32_t buffer_offset,
-                        uint32_t lba, uint32_t block_count, uint32_t block_size);
+		uint32_t lba, uint32_t block_count, uint32_t block_size);

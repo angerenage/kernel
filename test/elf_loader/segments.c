@@ -3,13 +3,13 @@
 #include "test_support.h"
 
 Test(elf_loader_segments, loads_file_bytes_zeros_bss_and_applies_final_permissions) {
-	struct elf_test_image     image;
-	struct boot_module        module;
+	struct elf_test_image image;
+	struct boot_module module;
 	struct kernel_elf_process loaded = {0};
-	struct address_space*     space;
-	uint8_t                   bytes[64];
-	const uint64_t            file_offset = TEST_MAPPING_GRANULE;
-	const uint64_t            vaddr       = TEST_MAPPING_GRANULE + 4u * (uint64_t)TEST_MAPPING_GRANULE;
+	struct address_space* space;
+	uint8_t bytes[64];
+	const uint64_t file_offset = TEST_MAPPING_GRANULE;
+	const uint64_t vaddr = TEST_MAPPING_GRANULE + 4u * (uint64_t)TEST_MAPPING_GRANULE;
 	elf_test_init_environment();
 	elf_test_image_init(&image, 1u);
 	elf_test_header(&image)->entry = vaddr;
@@ -26,28 +26,28 @@ Test(elf_loader_segments, loads_file_bytes_zeros_bss_and_applies_final_permissio
 	for (size_t i = 0u; i < 32u; i++) cr_assert_eq(bytes[i], (uint8_t)(0x40u + i));
 	for (size_t i = 32u; i < sizeof(bytes); i++) cr_assert_eq(bytes[i], 0u, "BSS byte %zu was not zero", i);
 	cr_assert_eq(address_space_validate_range(space, vaddr, 1u, ADDRESS_TRANSFER_EXEC | ADDRESS_TRANSFER_USER),
-	             ADDRESS_TRANSFER_OK);
+			ADDRESS_TRANSFER_OK);
 	cr_assert_eq(address_space_validate_range(space, vaddr, 1u, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER),
-	             ADDRESS_TRANSFER_ACCESS_DENIED);
+			ADDRESS_TRANSFER_ACCESS_DENIED);
 	cr_assert_eq(
-		address_space_validate_range(space, loaded.heap_base, 1u, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER),
-		ADDRESS_TRANSFER_OK);
+			address_space_validate_range(space, loaded.heap_base, 1u, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER),
+			ADDRESS_TRANSFER_OK);
 	cr_assert_eq(
-		address_space_validate_range(space, loaded.heap_base, 1u, ADDRESS_TRANSFER_EXEC | ADDRESS_TRANSFER_USER),
-		ADDRESS_TRANSFER_ACCESS_DENIED);
+			address_space_validate_range(space, loaded.heap_base, 1u, ADDRESS_TRANSFER_EXEC | ADDRESS_TRANSFER_USER),
+			ADDRESS_TRANSFER_ACCESS_DENIED);
 	elf_test_destroy_loaded(&loaded);
 }
 
 Test(elf_loader_segments, keeps_text_and_data_permissions_independent) {
-	struct elf_test_image     image;
-	struct boot_module        module;
+	struct elf_test_image image;
+	struct boot_module module;
 	struct kernel_elf_process loaded = {0};
-	struct address_space*     space;
-	const uint64_t            text_offset = TEST_MAPPING_GRANULE;
-	const uint64_t            data_offset = 2u * (uint64_t)TEST_MAPPING_GRANULE;
-	const uint64_t            text_vaddr  = TEST_MAPPING_GRANULE + 4u * (uint64_t)TEST_MAPPING_GRANULE;
-	const uint64_t            data_vaddr  = TEST_MAPPING_GRANULE + 8u * (uint64_t)TEST_MAPPING_GRANULE;
-	uint8_t                   text[16], data[16];
+	struct address_space* space;
+	const uint64_t text_offset = TEST_MAPPING_GRANULE;
+	const uint64_t data_offset = 2u * (uint64_t)TEST_MAPPING_GRANULE;
+	const uint64_t text_vaddr = TEST_MAPPING_GRANULE + 4u * (uint64_t)TEST_MAPPING_GRANULE;
+	const uint64_t data_vaddr = TEST_MAPPING_GRANULE + 8u * (uint64_t)TEST_MAPPING_GRANULE;
+	uint8_t text[16], data[16];
 	elf_test_init_environment();
 	elf_test_image_init(&image, 2u);
 	elf_test_header(&image)->entry = text_vaddr;
@@ -59,13 +59,13 @@ Test(elf_loader_segments, keeps_text_and_data_permissions_independent) {
 	cr_assert_eq(kernel_elf_load_process(&module, "two-segments", &loaded), KERNEL_ELF_LOAD_OK);
 	space = process_address_space(loaded.process);
 	cr_assert_eq(address_space_validate_range(space, text_vaddr, 1u, ADDRESS_TRANSFER_EXEC | ADDRESS_TRANSFER_USER),
-	             ADDRESS_TRANSFER_OK);
+			ADDRESS_TRANSFER_OK);
 	cr_assert_eq(address_space_validate_range(space, text_vaddr, 1u, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER),
-	             ADDRESS_TRANSFER_ACCESS_DENIED);
+			ADDRESS_TRANSFER_ACCESS_DENIED);
 	cr_assert_eq(address_space_validate_range(space, data_vaddr, 1u, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER),
-	             ADDRESS_TRANSFER_OK);
+			ADDRESS_TRANSFER_OK);
 	cr_assert_eq(address_space_validate_range(space, data_vaddr, 1u, ADDRESS_TRANSFER_EXEC | ADDRESS_TRANSFER_USER),
-	             ADDRESS_TRANSFER_ACCESS_DENIED);
+			ADDRESS_TRANSFER_ACCESS_DENIED);
 	cr_assert_eq(address_space_copy_from(space, text_vaddr, text, sizeof(text)), ADDRESS_TRANSFER_OK);
 	cr_assert_eq(address_space_copy_from(space, data_vaddr, data, sizeof(data)), ADDRESS_TRANSFER_OK);
 	for (size_t i = 0u; i < sizeof(text); i++) cr_assert_eq(text[i], 0x71u);
@@ -74,16 +74,16 @@ Test(elf_loader_segments, keeps_text_and_data_permissions_independent) {
 }
 
 Test(elf_loader_segments, segment_page_padding_does_not_expose_recycled_physical_contents) {
-	struct elf_test_image     image;
-	struct boot_module        module;
+	struct elf_test_image image;
+	struct boot_module module;
 	struct kernel_elf_process loaded = {0};
-	struct address_space*     space;
-	uint8_t                   first_byte = 0u, last_byte = 0u;
-	const uint8_t             poison      = 0xd7u;
-	const uint64_t            page_offset = 0x120u;
-	const uint64_t            file_offset = TEST_MAPPING_GRANULE + page_offset;
-	const uint64_t            page_base   = TEST_MAPPING_GRANULE + 8u * (uint64_t)TEST_MAPPING_GRANULE;
-	const uint64_t            vaddr       = page_base + page_offset;
+	struct address_space* space;
+	uint8_t first_byte = 0u, last_byte = 0u;
+	const uint8_t poison = 0xd7u;
+	const uint64_t page_offset = 0x120u;
+	const uint64_t file_offset = TEST_MAPPING_GRANULE + page_offset;
+	const uint64_t page_base = TEST_MAPPING_GRANULE + 8u * (uint64_t)TEST_MAPPING_GRANULE;
+	const uint64_t vaddr = page_base + page_offset;
 	elf_test_init_environment();
 	elf_test_poison_recycled_memory(32u * TEST_MAPPING_GRANULE, poison);
 	elf_test_image_init(&image, 1u);
@@ -94,23 +94,23 @@ Test(elf_loader_segments, segment_page_padding_does_not_expose_recycled_physical
 	cr_assert_eq(kernel_elf_load_process(&module, "padding", &loaded), KERNEL_ELF_LOAD_OK);
 	space = process_address_space(loaded.process);
 	cr_assert_eq(address_space_copy_from(space, page_base, &first_byte, 1u), ADDRESS_TRANSFER_OK);
-	cr_assert_eq(address_space_copy_from(space, page_base + TEST_MAPPING_GRANULE - 1u, &last_byte, 1u),
-	             ADDRESS_TRANSFER_OK);
+	cr_assert_eq(
+			address_space_copy_from(space, page_base + TEST_MAPPING_GRANULE - 1u, &last_byte, 1u), ADDRESS_TRANSFER_OK);
 	cr_assert_neq(first_byte, poison, "leading PT_LOAD page padding exposed recycled physical data");
 	cr_assert_neq(last_byte, poison, "trailing PT_LOAD page padding exposed recycled physical data");
 	elf_test_destroy_loaded(&loaded);
 }
 
 Test(elf_loader_segments, initial_heap_does_not_expose_recycled_physical_contents) {
-	struct elf_test_image     image;
-	struct boot_module        module;
+	struct elf_test_image image;
+	struct boot_module module;
 	struct kernel_elf_process loaded = {0};
-	struct address_space*     space;
-	uint8_t                   first_byte = 0u, last_byte = 0u;
-	const uint8_t             poison      = 0xa6u;
-	const uint64_t            file_offset = TEST_MAPPING_GRANULE;
-	const uint64_t            vaddr       = TEST_MAPPING_GRANULE + 4u * (uint64_t)TEST_MAPPING_GRANULE;
-	uintptr_t                 heap_last;
+	struct address_space* space;
+	uint8_t first_byte = 0u, last_byte = 0u;
+	const uint8_t poison = 0xa6u;
+	const uint64_t file_offset = TEST_MAPPING_GRANULE;
+	const uint64_t vaddr = TEST_MAPPING_GRANULE + 4u * (uint64_t)TEST_MAPPING_GRANULE;
+	uintptr_t heap_last;
 	elf_test_init_environment();
 	elf_test_poison_recycled_memory(32u * TEST_MAPPING_GRANULE, poison);
 	elf_test_image_init(&image, 1u);
@@ -119,7 +119,7 @@ Test(elf_loader_segments, initial_heap_does_not_expose_recycled_physical_content
 	memset(image.bytes + file_offset, 0x19, 16u);
 	module = elf_test_module(&image);
 	cr_assert_eq(kernel_elf_load_process(&module, "heap-sanitize", &loaded), KERNEL_ELF_LOAD_OK);
-	space     = process_address_space(loaded.process);
+	space = process_address_space(loaded.process);
 	heap_last = loaded.heap_base + loaded.heap_size - 1u;
 	cr_assert_eq(address_space_copy_from(space, loaded.heap_base, &first_byte, 1u), ADDRESS_TRANSFER_OK);
 	cr_assert_eq(address_space_copy_from(space, heap_last, &last_byte, 1u), ADDRESS_TRANSFER_OK);

@@ -1,11 +1,12 @@
-#include <base/heap.h>
 #include <libc/stdlib.h>
 #include <string.h>
 
+#include <base/heap.h>
+
 void* realloc(void* ptr, size_t size) {
 	struct heap_block* block;
-	size_t             current_payload;
-	void*              new_ptr;
+	size_t current_payload;
+	void* new_ptr;
 
 	if (ptr == NULL) return malloc(size);
 	if (size == 0) {

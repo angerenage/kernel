@@ -1,6 +1,6 @@
 #include "test_support.h"
 
-static size_t          kernel_call_lifecycle_events;
+static size_t kernel_call_lifecycle_events;
 static cap_object_id_t kernel_call_object_id;
 
 static void kernel_call_lifecycle_callback(struct cap_object* object, enum cap_object_event event) {
@@ -11,7 +11,7 @@ static void kernel_call_lifecycle_callback(struct cap_object* object, enum cap_o
 
 static syscall_result_t kernel_call_lifecycle_handler(const struct cap_request* request) {
 	struct cap_object* object = cap_object_acquire(kernel_call_object_id);
-	struct capability* grant  = cap_acquire(request->cap_id);
+	struct capability* grant = cap_acquire(request->cap_id);
 	cr_assert_not_null(object);
 	cr_assert_not_null(grant);
 	cr_assert_eq(cap_object_active_call_count(object), 1u);
@@ -25,25 +25,25 @@ static syscall_result_t kernel_call_lifecycle_handler(const struct cap_request* 
 Test(syscall, kernel_handler_call_defers_zero_grants_until_handler_returns) {
 	struct process* process;
 	struct uthread* main_thread;
-	cap_id_t        capability_id;
-	bool            created = false;
-	uint8_t         request = 0u;
+	cap_id_t capability_id;
+	bool created = false;
+	uint8_t request = 0u;
 
 	syscall_test_init_process_environment();
 	capability_init();
-	process     = syscall_test_spawn_process("syscall/kernel-call-lifecycle");
+	process = syscall_test_spawn_process("syscall/kernel-call-lifecycle");
 	main_thread = process_main_thread(process);
 	cr_assert_not_null(main_thread);
 	main_thread->thread.address_space = NULL;
 	sched_set_current(cpu_current(), &main_thread->thread);
 	kernel_call_lifecycle_events = 0u;
-	kernel_call_object_id        = cap_object_create_kernel_lifecycle(
-		0x600u, kernel_call_lifecycle_handler, NULL, NULL, kernel_call_lifecycle_callback, &created);
+	kernel_call_object_id = cap_object_create_kernel_lifecycle(
+			0x600u, kernel_call_lifecycle_handler, NULL, NULL, kernel_call_lifecycle_callback, &created);
 	cr_assert(created);
 	capability_id = cap_create(kernel_call_object_id, process_pid(process), CAP_CALL, NULL);
 	cr_assert_neq(capability_id, CAP_ID_INVALID);
 	syscall_result_t result =
-		syscall_dispatch(SYSCALL_CAP_CALL, capability_id, (uintptr_t)&request, sizeof(request), 0u, 0u, 0u);
+			syscall_dispatch(SYSCALL_CAP_CALL, capability_id, (uintptr_t)&request, sizeof(request), 0u, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(kernel_call_lifecycle_events, 1u);
 	cr_assert(cap_object_destroy_with_id(kernel_call_object_id));
@@ -51,17 +51,17 @@ Test(syscall, kernel_handler_call_defers_zero_grants_until_handler_returns) {
 }
 
 Test(syscall, capability_call_uses_distinct_request_and_response_buffers) {
-	struct process*                  process;
-	struct uthread*                  main_thread;
-	cap_object_id_t                  object_id;
-	cap_id_t                         capability_id;
-	struct syscall_test_cap_request  request  = {.value = 41u};
+	struct process* process;
+	struct uthread* main_thread;
+	cap_object_id_t object_id;
+	cap_id_t capability_id;
+	struct syscall_test_cap_request request = {.value = 41u};
 	struct syscall_test_cap_response response = {0};
-	syscall_result_t                 result;
+	syscall_result_t result;
 
 	syscall_test_init_process_environment();
 	capability_init();
-	process     = syscall_test_spawn_process("syscall/cap-call");
+	process = syscall_test_spawn_process("syscall/cap-call");
 	main_thread = process_main_thread(process);
 	cr_assert_not_null(main_thread);
 	sched_set_current(cpu_current(), &main_thread->thread);
@@ -73,12 +73,12 @@ Test(syscall, capability_call_uses_distinct_request_and_response_buffers) {
 	cr_assert_neq(capability_id, CAP_ID_INVALID);
 
 	result = syscall_dispatch(SYSCALL_CAP_CALL,
-	                          capability_id,
-	                          (uintptr_t)&request,
-	                          sizeof(request),
-	                          (uintptr_t)&response,
-	                          sizeof(response),
-	                          0u);
+			capability_id,
+			(uintptr_t)&request,
+			sizeof(request),
+			(uintptr_t)&response,
+			sizeof(response),
+			0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(result.value, sizeof(response));
 	cr_assert_eq(response.value, 42u);
@@ -88,7 +88,7 @@ Test(syscall, capability_call_uses_distinct_request_and_response_buffers) {
 	cr_assert_eq(result.value, 2u);
 
 	result = syscall_dispatch(
-		SYSCALL_CAP_CALL, capability_id, (uintptr_t)&request, sizeof(request), 0u, sizeof(response), 0u);
+			SYSCALL_CAP_CALL, capability_id, (uintptr_t)&request, sizeof(request), 0u, sizeof(response), 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 	cr_assert_eq(result.value, 3u);
 
@@ -98,19 +98,19 @@ Test(syscall, capability_call_uses_distinct_request_and_response_buffers) {
 }
 
 Test(syscall, capability_valid_reports_current_validity_without_disclosing_foreign_caps) {
-	struct process*    owner;
-	struct process*    other;
-	struct uthread*    owner_thread;
-	struct uthread*    other_thread;
-	cap_object_id_t    object_id;
-	cap_id_t           capability_id;
-	syscall_result_t   result;
+	struct process* owner;
+	struct process* other;
+	struct uthread* owner_thread;
+	struct uthread* other_thread;
+	cap_object_id_t object_id;
+	cap_id_t capability_id;
+	syscall_result_t result;
 	struct capability* capability;
 
 	syscall_test_init_process_environment();
 	capability_init();
-	owner        = syscall_test_spawn_process("syscall/cap-valid-owner");
-	other        = syscall_test_spawn_process("syscall/cap-valid-other");
+	owner = syscall_test_spawn_process("syscall/cap-valid-owner");
+	other = syscall_test_spawn_process("syscall/cap-valid-other");
 	owner_thread = process_main_thread(owner);
 	other_thread = process_main_thread(other);
 	cr_assert_not_null(owner_thread);
@@ -151,61 +151,62 @@ Test(syscall, capability_valid_reports_current_validity_without_disclosing_forei
 }
 
 Test(syscall, capability_reply_delivers_to_caller_before_success) {
-	struct process*          provider;
-	struct process*          caller;
-	struct uthread*          provider_thread;
+	struct process* provider;
+	struct process* caller;
+	struct uthread* provider_thread;
 	struct cap_pending_call* pending;
-	struct mapping*          provider_mapping  = NULL;
-	struct mapping*          response_mapping  = NULL;
-	void*                    provider_response = NULL;
-	void*                    response_address  = NULL;
-	const uint32_t           reply_value       = 0x55aa55aau;
-	uint32_t                 delivered         = 0u;
-	syscall_result_t         result;
-	syscall_result_t         call_result;
+	struct mapping* provider_mapping = NULL;
+	struct mapping* response_mapping = NULL;
+	void* provider_response = NULL;
+	void* response_address = NULL;
+	const uint32_t reply_value = 0x55aa55aau;
+	uint32_t delivered = 0u;
+	syscall_result_t result;
+	syscall_result_t call_result;
 
 	syscall_test_init_process_environment();
 	capability_init();
-	provider        = syscall_test_spawn_process("syscall/cap-reply-provider");
-	caller          = syscall_test_spawn_process("syscall/cap-reply-caller");
+	provider = syscall_test_spawn_process("syscall/cap-reply-provider");
+	caller = syscall_test_spawn_process("syscall/cap-reply-caller");
 	provider_thread = process_main_thread(provider);
 	cr_assert_not_null(provider_thread);
 	sched_set_current(cpu_current(), &provider_thread->thread);
 
 	cr_assert(test_address_space_map(process_address_space(provider),
-	                                 TEST_MAPPING_GRANULE,
-	                                 MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
-	                                 0u,
-	                                 TEST_MAPPING_GRANULE,
-	                                 0u,
-	                                 &provider_mapping,
-	                                 &provider_response));
-	cr_assert_eq(address_space_copy_to(
-					 process_address_space(provider), (uintptr_t)provider_response, &reply_value, sizeof(reply_value)),
-	             ADDRESS_TRANSFER_OK);
+			TEST_MAPPING_GRANULE,
+			MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+			0u,
+			TEST_MAPPING_GRANULE,
+			0u,
+			&provider_mapping,
+			&provider_response));
+	cr_assert_eq(
+			address_space_copy_to(
+					process_address_space(provider), (uintptr_t)provider_response, &reply_value, sizeof(reply_value)),
+			ADDRESS_TRANSFER_OK);
 	cr_assert(test_address_space_map(process_address_space(caller),
-	                                 TEST_MAPPING_GRANULE,
-	                                 MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
-	                                 0u,
-	                                 TEST_MAPPING_GRANULE,
-	                                 0u,
-	                                 &response_mapping,
-	                                 &response_address));
+			TEST_MAPPING_GRANULE,
+			MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+			0u,
+			TEST_MAPPING_GRANULE,
+			0u,
+			&response_mapping,
+			&response_address));
 	pending = cap_pending_call_create(NULL, 9u, process_pid(provider), process_pid(caller), sizeof(reply_value));
 	cr_assert_not_null(pending);
 	pending->response_address = (uintptr_t)response_address;
 
 	result = syscall_dispatch(SYSCALL_CAP_REPLY,
-	                          cap_pending_call_id(pending),
-	                          (uintptr_t)provider_response,
-	                          sizeof(reply_value),
-	                          SYSCALL_STATUS_OK,
-	                          0u,
-	                          0u);
+			cap_pending_call_id(pending),
+			(uintptr_t)provider_response,
+			sizeof(reply_value),
+			SYSCALL_STATUS_OK,
+			0u,
+			0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(address_space_copy_from(
-					 process_address_space(caller), (uintptr_t)response_address, &delivered, sizeof(delivered)),
-	             ADDRESS_TRANSFER_OK);
+						 process_address_space(caller), (uintptr_t)response_address, &delivered, sizeof(delivered)),
+			ADDRESS_TRANSFER_OK);
 	cr_assert_eq(delivered, reply_value, "CAP_REPLY returned success before delivering the caller response");
 
 	cap_pending_call_wait(pending, &call_result);
@@ -220,33 +221,33 @@ Test(syscall, capability_reply_delivers_to_caller_before_success) {
 }
 
 Test(syscall, capability_reply_reports_failed_caller_delivery) {
-	struct process*          provider;
-	struct process*          caller;
-	struct uthread*          provider_thread;
+	struct process* provider;
+	struct process* caller;
+	struct uthread* provider_thread;
 	struct cap_pending_call* pending;
-	struct mapping*          response_mapping = NULL;
-	void*                    response_address = NULL;
-	const uint32_t           reply_value      = 0xaa55aa55u;
-	syscall_result_t         result;
-	syscall_result_t         call_result;
+	struct mapping* response_mapping = NULL;
+	void* response_address = NULL;
+	const uint32_t reply_value = 0xaa55aa55u;
+	syscall_result_t result;
+	syscall_result_t call_result;
 
 	syscall_test_init_process_environment();
 	capability_init();
-	provider        = syscall_test_spawn_process("syscall/cap-reply-fail-provider");
-	caller          = syscall_test_spawn_process("syscall/cap-reply-fail-caller");
+	provider = syscall_test_spawn_process("syscall/cap-reply-fail-provider");
+	caller = syscall_test_spawn_process("syscall/cap-reply-fail-caller");
 	provider_thread = process_main_thread(provider);
 	cr_assert_not_null(provider_thread);
 	provider_thread->thread.address_space = NULL;
 	sched_set_current(cpu_current(), &provider_thread->thread);
 
 	cr_assert(test_address_space_map(process_address_space(caller),
-	                                 TEST_MAPPING_GRANULE,
-	                                 MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
-	                                 0u,
-	                                 TEST_MAPPING_GRANULE,
-	                                 0u,
-	                                 &response_mapping,
-	                                 &response_address));
+			TEST_MAPPING_GRANULE,
+			MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+			0u,
+			TEST_MAPPING_GRANULE,
+			0u,
+			&response_mapping,
+			&response_address));
 	pending = cap_pending_call_create(NULL, 10u, process_pid(provider), process_pid(caller), sizeof(reply_value));
 	cr_assert_not_null(pending);
 	pending->response_address = (uintptr_t)response_address;
@@ -254,12 +255,12 @@ Test(syscall, capability_reply_reports_failed_caller_delivery) {
 	mapping_release(response_mapping);
 
 	result = syscall_dispatch(SYSCALL_CAP_REPLY,
-	                          cap_pending_call_id(pending),
-	                          (uintptr_t)&reply_value,
-	                          sizeof(reply_value),
-	                          SYSCALL_STATUS_OK,
-	                          0u,
-	                          0u);
+			cap_pending_call_id(pending),
+			(uintptr_t)&reply_value,
+			sizeof(reply_value),
+			SYSCALL_STATUS_OK,
+			0u,
+			0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
 	cap_pending_call_wait(pending, &call_result);
 	cr_assert_eq(call_result.status, SYSCALL_STATUS_UNAVAILABLE);
@@ -269,16 +270,16 @@ Test(syscall, capability_reply_reports_failed_caller_delivery) {
 }
 
 Test(syscall, pending_capability_call_wait_returns_for_cancellation_cleanup) {
-	struct process*          caller;
-	struct uthread*          caller_thread;
+	struct process* caller;
+	struct uthread* caller_thread;
 	struct cap_pending_call* pending;
-	cap_call_id_t            call_id;
+	cap_call_id_t call_id;
 	struct cap_pending_reply reply;
-	syscall_result_t         call_result;
+	syscall_result_t call_result;
 
 	syscall_test_init_process_environment();
 	capability_init();
-	caller        = syscall_test_spawn_process("syscall/canceled-cap-call");
+	caller = syscall_test_spawn_process("syscall/canceled-cap-call");
 	caller_thread = process_main_thread(caller);
 	cr_assert_not_null(caller_thread);
 	sched_set_current(cpu_current(), &caller_thread->thread);
@@ -288,32 +289,32 @@ Test(syscall, pending_capability_call_wait_returns_for_cancellation_cleanup) {
 	call_id = cap_pending_call_id(pending);
 	cr_assert(thread_request_cancel(&caller_thread->thread));
 	cr_assert_not(cap_pending_call_wait(pending, &call_result),
-	              "a canceled caller must regain control before its pending call is destroyed");
+			"a canceled caller must regain control before its pending call is destroyed");
 	cap_pending_call_destroy(pending);
 	cr_assert_eq(cap_pending_call_prepare_reply(call_id, 2u, 0u, &reply),
-	             CAP_PENDING_REPLY_NOT_FOUND,
-	             "cancellation cleanup must remove the pending call");
+			CAP_PENDING_REPLY_NOT_FOUND,
+			"cancellation cleanup must remove the pending call");
 
 	syscall_test_reset_state();
 }
 
 Test(syscall, capability_direct_delegator_can_revoke_child_without_revoke_right) {
-	struct process*  service;
-	struct process*  delegator;
-	struct process*  client;
-	struct uthread*  delegator_thread;
-	struct channel*  channel;
-	cap_object_id_t  object_id;
-	cap_id_t         source_id;
-	cap_id_t         child_id = CAP_ID_INVALID;
-	cap_id_t         peer_id  = CAP_ID_INVALID;
+	struct process* service;
+	struct process* delegator;
+	struct process* client;
+	struct uthread* delegator_thread;
+	struct channel* channel;
+	cap_object_id_t object_id;
+	cap_id_t source_id;
+	cap_id_t child_id = CAP_ID_INVALID;
+	cap_id_t peer_id = CAP_ID_INVALID;
 	syscall_result_t result;
 
 	syscall_test_init_process_environment();
 	capability_init();
-	service          = syscall_test_spawn_process("syscall/revoke-service");
-	delegator        = syscall_test_spawn_process("syscall/revoke-delegator");
-	client           = syscall_test_spawn_process("syscall/revoke-client");
+	service = syscall_test_spawn_process("syscall/revoke-service");
+	delegator = syscall_test_spawn_process("syscall/revoke-delegator");
+	client = syscall_test_spawn_process("syscall/revoke-client");
 	delegator_thread = process_main_thread(delegator);
 	cr_assert_not_null(delegator_thread);
 	delegator_thread->thread.address_space = NULL;
@@ -327,12 +328,12 @@ Test(syscall, capability_direct_delegator_can_revoke_child_without_revoke_right)
 	cr_assert_neq(source_id, CAP_ID_INVALID);
 
 	result = syscall_dispatch(SYSCALL_CAP_DELEGATE,
-	                          source_id,
-	                          process_pid(client),
-	                          CAP_CALL,
-	                          (uintptr_t)&child_id,
-	                          (uintptr_t)CAP_DELEGATE_FLAG_NONE,
-	                          0u);
+			source_id,
+			process_pid(client),
+			CAP_CALL,
+			(uintptr_t)&child_id,
+			(uintptr_t)CAP_DELEGATE_FLAG_NONE,
+			0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_neq(child_id, CAP_ID_INVALID);
 	result = syscall_dispatch(SYSCALL_CAP_REVOKE, child_id, 0u, 0u, 0u, 0u, 0u);
@@ -340,12 +341,12 @@ Test(syscall, capability_direct_delegator_can_revoke_child_without_revoke_right)
 	cr_assert_null(cap_lookup(child_id));
 
 	result = syscall_dispatch(SYSCALL_CAP_DELEGATE,
-	                          source_id,
-	                          process_pid(client),
-	                          CAP_CALL,
-	                          (uintptr_t)&peer_id,
-	                          (uintptr_t)CAP_DELEGATE_FLAG_PEER,
-	                          0u);
+			source_id,
+			process_pid(client),
+			CAP_CALL,
+			(uintptr_t)&peer_id,
+			(uintptr_t)CAP_DELEGATE_FLAG_PEER,
+			0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_neq(peer_id, CAP_ID_INVALID);
 	result = syscall_dispatch(SYSCALL_CAP_REVOKE, peer_id, 0u, 0u, 0u, 0u, 0u);
@@ -360,18 +361,18 @@ Test(syscall, capability_direct_delegator_can_revoke_child_without_revoke_right)
 }
 
 Test(syscall, capability_drop_only_allows_direct_target) {
-	struct process*  owner;
-	struct process*  other;
-	struct uthread*  owner_thread;
-	struct uthread*  other_thread;
-	cap_object_id_t  object_id;
-	cap_id_t         capability_id;
+	struct process* owner;
+	struct process* other;
+	struct uthread* owner_thread;
+	struct uthread* other_thread;
+	cap_object_id_t object_id;
+	cap_id_t capability_id;
 	syscall_result_t result;
 
 	syscall_test_init_process_environment();
 	capability_init();
-	owner        = syscall_test_spawn_process("syscall/cap-drop-owner");
-	other        = syscall_test_spawn_process("syscall/cap-drop-other");
+	owner = syscall_test_spawn_process("syscall/cap-drop-owner");
+	other = syscall_test_spawn_process("syscall/cap-drop-other");
 	owner_thread = process_main_thread(owner);
 	other_thread = process_main_thread(other);
 	cr_assert_not_null(owner_thread);
@@ -399,23 +400,23 @@ Test(syscall, capability_drop_only_allows_direct_target) {
 }
 
 Test(syscall, capability_delegate_peer_uses_source_parent) {
-	struct process*    process;
-	struct uthread*    main_thread;
+	struct process* process;
+	struct uthread* main_thread;
 	struct capability* root;
 	struct capability* source;
 	struct capability* normal;
 	struct capability* peer;
-	cap_object_id_t    object_id;
-	cap_id_t           root_id;
-	cap_id_t           source_id;
-	cap_id_t           normal_id = CAP_ID_INVALID;
-	cap_id_t           peer_id   = CAP_ID_INVALID;
-	syscall_result_t   result;
-	process_id_t       pid;
+	cap_object_id_t object_id;
+	cap_id_t root_id;
+	cap_id_t source_id;
+	cap_id_t normal_id = CAP_ID_INVALID;
+	cap_id_t peer_id = CAP_ID_INVALID;
+	syscall_result_t result;
+	process_id_t pid;
 
 	syscall_test_init_process_environment();
 	capability_init();
-	process     = syscall_test_spawn_process("syscall/cap-delegate-peer");
+	process = syscall_test_spawn_process("syscall/cap-delegate-peer");
 	main_thread = process_main_thread(process);
 	cr_assert_not_null(main_thread);
 	main_thread->thread.address_space = NULL;
@@ -424,34 +425,39 @@ Test(syscall, capability_delegate_peer_uses_source_parent) {
 
 	object_id = cap_object_create_kernel(4u, syscall_test_cap_handler, NULL);
 	cr_assert_neq(object_id, CAP_OBJECT_ID_INVALID);
-	root_id   = cap_create(object_id, pid, CAP_READ | CAP_DELEGATE | CAP_DELEGATE_PEER, NULL);
-	root      = cap_lookup(root_id);
+	root_id = cap_create(object_id, pid, CAP_READ | CAP_DELEGATE | CAP_DELEGATE_PEER, NULL);
+	root = cap_lookup(root_id);
 	source_id = cap_create(object_id, pid, CAP_READ | CAP_DELEGATE | CAP_DELEGATE_PEER, root);
-	source    = cap_lookup(source_id);
+	source = cap_lookup(source_id);
 	cr_assert_not_null(root);
 	cr_assert_not_null(source);
 
-	result = syscall_dispatch(
-		SYSCALL_CAP_DELEGATE, source_id, pid, CAP_READ, (uintptr_t)&normal_id, (uintptr_t)CAP_DELEGATE_FLAG_NONE, 0u);
+	result = syscall_dispatch(SYSCALL_CAP_DELEGATE,
+			source_id,
+			pid,
+			CAP_READ,
+			(uintptr_t)&normal_id,
+			(uintptr_t)CAP_DELEGATE_FLAG_NONE,
+			0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	normal = cap_lookup(normal_id);
 	cr_assert_not_null(normal);
 	cr_assert_eq(normal->parent, source);
 
 	result = syscall_dispatch(
-		SYSCALL_CAP_DELEGATE, source_id, pid, CAP_READ, (uintptr_t)&peer_id, (uintptr_t)CAP_DELEGATE_FLAG_PEER, 0u);
+			SYSCALL_CAP_DELEGATE, source_id, pid, CAP_READ, (uintptr_t)&peer_id, (uintptr_t)CAP_DELEGATE_FLAG_PEER, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	peer = cap_lookup(peer_id);
 	cr_assert_not_null(peer);
 	cr_assert_eq(peer->parent, root);
 
 	result = syscall_dispatch(SYSCALL_CAP_DELEGATE,
-	                          source_id,
-	                          pid,
-	                          CAP_READ,
-	                          (uintptr_t)&peer_id,
-	                          (uintptr_t)(CAP_DELEGATE_FLAG_PEER | (1u << 1)),
-	                          0u);
+			source_id,
+			pid,
+			CAP_READ,
+			(uintptr_t)&peer_id,
+			(uintptr_t)(CAP_DELEGATE_FLAG_PEER | (1u << 1)),
+			0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 	cr_assert_eq(result.value, 4u);
 

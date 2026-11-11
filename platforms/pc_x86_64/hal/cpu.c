@@ -1,10 +1,11 @@
-#include <core/cpu.h>
-#include <hal/cpu.h>
-#include <hal/io_port.h>
-#include <kernel/trace.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <hal/cpu.h>
+#include <hal/io_port.h>
+#include <core/cpu.h>
+#include <kernel/trace.h>
 
 #include "interrupts/apic.h"
 #include "interrupts/vectors.h"
@@ -12,9 +13,9 @@
 #define X86_64_MSR_GS_BASE 0xc0000101u
 
 enum {
-	X86_THREAD_STACK_ALIGNMENT  = 16u,
+	X86_THREAD_STACK_ALIGNMENT = 16u,
 	X86_THREAD_ENTRY_FRAME_SIZE = sizeof(uintptr_t),
-	X86_THREAD_CTX_RBX          = 0,
+	X86_THREAD_CTX_RBX = 0,
 	X86_THREAD_CTX_RBP,
 	X86_THREAD_CTX_R12,
 	X86_THREAD_CTX_R13,
@@ -54,16 +55,16 @@ void* hal_cpu_local_current(void) {
 
 void hal_cpu_local_bind(void* ptr) {
 	uint64_t value = (uint64_t)(uintptr_t)ptr;
-	uint32_t lo    = (uint32_t)value;
-	uint32_t hi    = (uint32_t)(value >> 32);
+	uint32_t lo = (uint32_t)value;
+	uint32_t hi = (uint32_t)(value >> 32);
 
 	__asm__ volatile("wrmsr" : : "c"(X86_64_MSR_GS_BASE), "a"(lo), "d"(hi) : "memory");
 }
 
 bool hal_cpu_thread_context_init(struct thread_context* context, uintptr_t stack_base, uintptr_t stack_top,
-                                 uintptr_t entry_pc, uintptr_t entry_arg) {
-	uintptr_t  aligned_top;
-	uintptr_t  initial_sp;
+		uintptr_t entry_pc, uintptr_t entry_arg) {
+	uintptr_t aligned_top;
+	uintptr_t initial_sp;
 	uintptr_t* return_slot;
 
 	if (context == NULL || entry_pc == 0u || stack_top <= stack_base) return false;
@@ -78,13 +79,13 @@ bool hal_cpu_thread_context_init(struct thread_context* context, uintptr_t stack
 	 * Seed a synthetic return slot so the first C frame sees the SysV
 	 * ABI stack shape (%rsp % 16 == 8 at function entry).
 	 */
-	initial_sp   = aligned_top - X86_THREAD_ENTRY_FRAME_SIZE;
-	return_slot  = (uintptr_t*)initial_sp;
+	initial_sp = aligned_top - X86_THREAD_ENTRY_FRAME_SIZE;
+	return_slot = (uintptr_t*)initial_sp;
 	*return_slot = 0u;
 
 	*context = (struct thread_context){
 		.instruction_pointer = (uintptr_t)x86_64_thread_entry,
-		.stack_pointer       = initial_sp,
+		.stack_pointer = initial_sp,
 	};
 	context->spill[X86_THREAD_CTX_R12] = entry_pc;
 	context->spill[X86_THREAD_CTX_R13] = entry_arg;
@@ -98,7 +99,7 @@ bool hal_cpu_fp_init(void) {
 
 void hal_cpu_fp_context_init(struct hal_cpu_fp_context* context) {
 	const uint16_t control_word = 0x037fu;
-	const uint32_t mxcsr        = 0x1f80u;
+	const uint32_t mxcsr = 0x1f80u;
 	unsigned char* data;
 
 	if (context == NULL) return;
@@ -124,20 +125,20 @@ void hal_cpu_context_switch(struct thread_context* current, const struct thread_
 	if (current == NULL || next == NULL) return;
 	trace_tid = (uint64_t)(uintptr_t)current;
 	kernel_trace_emit(
-		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_SCHED_SWITCH_FP_SAVE);
+			KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_SCHED_SWITCH_FP_SAVE);
 	hal_cpu_fp_context_save(&current->fp_context);
 	kernel_trace_emit(
-		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_SCHED_SWITCH_FP_SAVE);
+			KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_SCHED_SWITCH_FP_SAVE);
 	kernel_trace_emit(
-		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_SCHED_SWITCH_FP_RESTORE);
+			KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_SCHED_SWITCH_FP_RESTORE);
 	hal_cpu_fp_context_restore(&next->fp_context);
 	kernel_trace_emit(
-		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_SCHED_SWITCH_FP_RESTORE);
+			KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_SCHED_SWITCH_FP_RESTORE);
 	kernel_trace_emit(
-		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_SCHED_SWITCH_IO_BITMAP);
+			KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_BEGIN, trace_tid, KERNEL_TRACE_SCHED_SWITCH_IO_BITMAP);
 	hal_io_port_bitmap_context_switch();
 	kernel_trace_emit(
-		KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_SCHED_SWITCH_IO_BITMAP);
+			KERNEL_TRACE_EVENT_SCHED_PHASE, KERNEL_TRACE_RECORD_END, trace_tid, KERNEL_TRACE_SCHED_SWITCH_IO_BITMAP);
 	x86_64_thread_context_switch(current, next);
 }
 

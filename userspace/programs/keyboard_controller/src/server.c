@@ -1,7 +1,9 @@
-#include <base/cap.h>
-#include <protocol/keyboard.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <base/cap.h>
+
+#include <protocol/keyboard.h>
 #include <system/capability.h>
 #include <system/channel.h>
 #include <system/process.h>
@@ -31,27 +33,27 @@ static bool dispatch_get_info(struct keyboard_controller* controller, const stru
 	keyboard_controller_lock(controller);
 	response = (struct keyboard_get_info_response){
 		.topology_generation = controller->topology_generation,
-		.keyboard_count      = controller->keyboard_count,
-		.oldest_sequence     = controller->event_count == 0u ? 0u : controller->events[controller->event_tail].sequence,
-		.newest_sequence     = controller->next_sequence - 1u,
-		.queue_capacity      = KEYBOARD_CONTROLLER_EVENT_QUEUE_CAPACITY,
+		.keyboard_count = controller->keyboard_count,
+		.oldest_sequence = controller->event_count == 0u ? 0u : controller->events[controller->event_tail].sequence,
+		.newest_sequence = controller->next_sequence - 1u,
+		.queue_capacity = KEYBOARD_CONTROLLER_EVENT_QUEUE_CAPACITY,
 		.maximum_frame_events = KEYBOARD_CONTROLLER_MAXIMUM_FRAME_EVENTS,
-		.repeat_delay_ms      = KEYBOARD_CONTROLLER_REPEAT_DELAY_MS,
-		.repeat_interval_ms   = KEYBOARD_CONTROLLER_REPEAT_INTERVAL_MS,
+		.repeat_delay_ms = KEYBOARD_CONTROLLER_REPEAT_DELAY_MS,
+		.repeat_interval_ms = KEYBOARD_CONTROLLER_REPEAT_INTERVAL_MS,
 	};
 	keyboard_controller_unlock(controller);
 	return reply(call, &response, sizeof(response), SYSCALL_STATUS_OK);
 }
 
 static bool dispatch_enumerate(struct keyboard_controller* controller, const struct cap_request* call,
-                               const void* request_data, void* response_buffer) {
-	struct keyboard_enumerate_request   request;
+		const void* request_data, void* response_buffer) {
+	struct keyboard_enumerate_request request;
 	struct keyboard_enumerate_response* response = response_buffer;
 	if (call->request_size != sizeof(request)) return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	memcpy(&request, request_data, sizeof(request));
 	if (call->response_capacity < sizeof(*response) || request.reserved != 0u || request.topology_generation == 0u ||
-	    request.count == 0u ||
-	    request.count > (call->response_capacity - sizeof(*response)) / sizeof(*response->keyboards))
+			request.count == 0u ||
+			request.count > (call->response_capacity - sizeof(*response)) / sizeof(*response->keyboards))
 		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	keyboard_controller_lock(controller);
 	if (request.topology_generation != controller->topology_generation) {
@@ -62,24 +64,24 @@ static bool dispatch_enumerate(struct keyboard_controller* controller, const str
 		keyboard_controller_unlock(controller);
 		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	}
-	size_t skipped  = 0u;
+	size_t skipped = 0u;
 	size_t returned = 0u;
 	for (struct managed_keyboard* keyboard = controller->keyboards;
-	     keyboard != NULL && returned < (size_t)request.count;
-	     keyboard = keyboard->next) {
+			keyboard != NULL && returned < (size_t)request.count;
+			keyboard = keyboard->next) {
 		if (skipped++ < (size_t)request.offset) continue;
 		response->keyboards[returned++].id = keyboard->id;
 	}
 	response->topology_generation = controller->topology_generation;
-	response->total               = controller->keyboard_count;
-	response->returned            = returned;
+	response->total = controller->keyboard_count;
+	response->returned = returned;
 	keyboard_controller_unlock(controller);
 	return reply(call, response, sizeof(*response) + returned * sizeof(*response->keyboards), SYSCALL_STATUS_OK);
 }
 
 static bool dispatch_read_state(struct keyboard_controller* controller, const struct cap_request* call,
-                                const void* request_data, void* response_buffer) {
-	struct keyboard_read_state_request   request;
+		const void* request_data, void* response_buffer) {
+	struct keyboard_read_state_request request;
 	struct keyboard_read_state_response* response = response_buffer;
 	if (call->request_size != sizeof(request)) return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	memcpy(&request, request_data, sizeof(request));
@@ -92,20 +94,20 @@ static bool dispatch_read_state(struct keyboard_controller* controller, const st
 		return reply(call, NULL, 0u, SYSCALL_STATUS_UNAVAILABLE);
 	}
 	size_t capacity = (call->response_capacity - sizeof(*response)) / sizeof(*response->pressed_keys);
-	size_t count    = 0u;
+	size_t count = 0u;
 	for (enum input_key_code key = INPUT_KEY_ESCAPE; key <= INPUT_KEY_KEYPAD_DECIMAL; key++)
 		if (keyboard->pressed[key]) count++;
 	if (count > capacity) {
 		keyboard_controller_unlock(controller);
 		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	}
-	response->sequence      = controller->next_sequence - 1u;
-	response->keyboard_id   = keyboard->id;
-	response->modifiers     = keyboard->modifiers;
-	response->locks         = keyboard->locks;
+	response->sequence = controller->next_sequence - 1u;
+	response->keyboard_id = keyboard->id;
+	response->modifiers = keyboard->modifiers;
+	response->locks = keyboard->locks;
 	response->pressed_count = (uint32_t)count;
-	response->reserved      = 0u;
-	size_t index            = 0u;
+	response->reserved = 0u;
+	size_t index = 0u;
 	for (enum input_key_code key = INPUT_KEY_ESCAPE; key <= INPUT_KEY_KEYPAD_DECIMAL; key++)
 		if (keyboard->pressed[key]) response->pressed_keys[index++] = key;
 	keyboard_controller_unlock(controller);
@@ -117,13 +119,13 @@ static size_t event_index(const struct keyboard_controller* controller, size_t o
 }
 
 static bool dispatch_read_events(struct keyboard_controller* controller, const struct cap_request* call,
-                                 const void* request_data, void* response_buffer) {
-	struct keyboard_read_events_request   request;
+		const void* request_data, void* response_buffer) {
+	struct keyboard_read_events_request request;
 	struct keyboard_read_events_response* response = response_buffer;
 	if (call->request_size != sizeof(request)) return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	memcpy(&request, request_data, sizeof(request));
 	if (call->response_capacity < sizeof(*response) || request.reserved != 0u || request.count == 0u ||
-	    request.count > (call->response_capacity - sizeof(*response)) / sizeof(*response->events))
+			request.count > (call->response_capacity - sizeof(*response)) / sizeof(*response->events))
 		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	keyboard_controller_lock(controller);
 	uint64_t newest = controller->next_sequence - 1u;
@@ -137,7 +139,7 @@ static bool dispatch_read_events(struct keyboard_controller* controller, const s
 	}
 	uint64_t oldest = controller->events[controller->event_tail].sequence;
 	uint64_t wanted = request.after_sequence + 1u;
-	bool     gap    = wanted < oldest;
+	bool gap = wanted < oldest;
 	if (gap) wanted = oldest;
 	size_t skip = (size_t)(wanted - oldest);
 	if (skip >= controller->event_count) {
@@ -149,9 +151,9 @@ static bool dispatch_read_events(struct keyboard_controller* controller, const s
 	for (size_t i = 0u; i < returned; i++) response->events[i] = controller->events[event_index(controller, skip + i)];
 	response->oldest_sequence = oldest;
 	response->newest_sequence = newest;
-	response->returned        = returned;
-	response->flags           = gap ? KEYBOARD_READ_EVENT_FLAG_GAP : KEYBOARD_READ_EVENT_FLAG_NONE;
-	response->reserved        = 0u;
+	response->returned = returned;
+	response->flags = gap ? KEYBOARD_READ_EVENT_FLAG_GAP : KEYBOARD_READ_EVENT_FLAG_NONE;
+	response->reserved = 0u;
 	keyboard_controller_unlock(controller);
 	return reply(call, response, sizeof(*response) + returned * sizeof(*response->events), SYSCALL_STATUS_OK);
 }
@@ -159,10 +161,10 @@ static bool dispatch_read_events(struct keyboard_controller* controller, const s
 static bool dispatch_acquire_signal(struct keyboard_controller* controller, const struct cap_request* call) {
 	struct keyboard_acquire_event_signal_response response = {.capability = CAP_ID_INVALID};
 	if (call->request_size != sizeof(struct keyboard_acquire_event_signal_request) ||
-	    call->response_capacity < sizeof(response))
+			call->response_capacity < sizeof(response))
 		return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
-	syscall_status_t status =
-		cap_delegate(controller->event_signal_cap, call->caller, KEYBOARD_EVENT_SIGNAL_RIGHTS, &response.capability);
+	syscall_status_t status = cap_delegate(
+			controller->event_signal_cap, call->caller, KEYBOARD_EVENT_SIGNAL_RIGHTS, &response.capability);
 	if (status != SYSCALL_STATUS_OK) return reply(call, NULL, 0u, status);
 	if (reply(call, &response, sizeof(response), SYSCALL_STATUS_OK)) return true;
 	(void)cap_revoke(response.capability, 0u);
@@ -170,7 +172,7 @@ static bool dispatch_acquire_signal(struct keyboard_controller* controller, cons
 }
 
 static bool dispatch(struct keyboard_controller* controller, const struct cap_request* call, const void* request_data,
-                     void* response_buffer) {
+		void* response_buffer) {
 	struct keyboard_request_header header;
 	if (call->object_id != KEYBOARD_CONTROLLER_OBJECT_ID) return reply(call, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT);
 	if ((call->rights & CAP_CALL) == 0u || (call->rights & CAP_READ) == 0u)
@@ -195,27 +197,27 @@ static bool dispatch(struct keyboard_controller* controller, const struct cap_re
 }
 
 static void server_thread(void* opaque) {
-	const struct server_argument* argument        = opaque;
-	struct keyboard_controller*   controller      = argument->controller;
-	void*                         request_buffer  = malloc(CAP_MAX_REQUEST_SIZE);
-	void*                         response_buffer = malloc(CAP_MAX_RESPONSE_SIZE);
+	const struct server_argument* argument = opaque;
+	struct keyboard_controller* controller = argument->controller;
+	void* request_buffer = malloc(CAP_MAX_REQUEST_SIZE);
+	void* response_buffer = malloc(CAP_MAX_RESPONSE_SIZE);
 	if (controller == NULL || request_buffer == NULL || response_buffer == NULL)
 		process_exit(PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
 	for (;;) {
-		bool             received;
+		bool received;
 		syscall_status_t status;
 		do {
 			struct cap_request call;
 			received = false;
-			status   = channel_recv(controller->endpoint, &call, request_buffer, CAP_MAX_REQUEST_SIZE, &received);
+			status = channel_recv(controller->endpoint, &call, request_buffer, CAP_MAX_REQUEST_SIZE, &received);
 			if (status != SYSCALL_STATUS_OK ||
-			    (received && !dispatch(controller, &call, request_buffer, response_buffer)))
+					(received && !dispatch(controller, &call, request_buffer, response_buffer)))
 				process_exit(PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
 		} while (received);
 		do {
 			struct channel_event event;
 			received = false;
-			status   = channel_event_recv(controller->endpoint, &event, &received);
+			status = channel_event_recv(controller->endpoint, &event, &received);
 			if (status != SYSCALL_STATUS_OK) process_exit(PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
 		} while (received);
 		struct signal_message activity;
@@ -226,10 +228,10 @@ static void server_thread(void* opaque) {
 }
 
 bool keyboard_controller_server_start(struct keyboard_controller* controller) {
-	const struct server_argument argument   = {.controller = controller};
-	cap_id_t                     thread_cap = CAP_ID_INVALID;
-	syscall_status_t             status     = process_spawn_thread(
-		controller->self_cap, (uintptr_t)server_thread, &argument, sizeof(argument), NULL, 0u, &thread_cap);
+	const struct server_argument argument = {.controller = controller};
+	cap_id_t thread_cap = CAP_ID_INVALID;
+	syscall_status_t status = process_spawn_thread(
+			controller->self_cap, (uintptr_t)server_thread, &argument, sizeof(argument), NULL, 0u, &thread_cap);
 	if (status == SYSCALL_STATUS_OK) status = thread_detach(thread_cap);
 	if (thread_cap != CAP_ID_INVALID) {
 		syscall_status_t drop_status = cap_drop(thread_cap);

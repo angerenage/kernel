@@ -1,16 +1,18 @@
 #pragma once
 
-#include <base/interrupt.h>
-#include <base/syscall.h>
-#include <runtime/device.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
+#include <base/interrupt.h>
+#include <base/syscall.h>
+
+#include <runtime/device.h>
+
 struct acpi_device;
 
 struct acpi_device_set {
-	cap_id_t            root_cap;
+	cap_id_t root_cap;
 	struct acpi_device* head;
 	struct acpi_device* tail;
 };
@@ -65,8 +67,8 @@ syscall_status_t acpi_device_stage_io(struct acpi_device* device, const char* na
 
 /* Stage an interrupt for the specified ACPI device. */
 syscall_status_t acpi_device_stage_interrupt(struct acpi_device* device, const char* name, uint32_t source,
-                                             enum interrupt_trigger trigger, enum interrupt_polarity polarity);
+		enum interrupt_trigger trigger, enum interrupt_polarity polarity);
 
 /* Publish staged resources for all devices in the set after parsing allocations are freed. */
-syscall_status_t acpi_device_set_publish_resources(struct acpi_device_set* set, cap_id_t memory_allocator_cap,
-                                                   cap_id_t interrupts_cap, cap_id_t io_ports_cap);
+syscall_status_t acpi_device_set_publish_resources(
+		struct acpi_device_set* set, cap_id_t memory_allocator_cap, cap_id_t interrupts_cap, cap_id_t io_ports_cap);

@@ -2,9 +2,10 @@
 
 /* Controller-independent random-access block-device interface. */
 
+#include <stdint.h>
+
 #include <base/cap.h>
 #include <base/syscall.h>
-#include <stdint.h>
 
 #define BLOCK_RESOURCE "block"
 #define BLOCK_COMPATIBLE_DEVICE "block:device"
@@ -26,9 +27,9 @@ enum block_op {
 };
 
 enum block_device_flag {
-	BLOCK_DEVICE_WRITABLE        = 1u << 0u,
+	BLOCK_DEVICE_WRITABLE = 1u << 0u,
 	BLOCK_DEVICE_FLUSH_SUPPORTED = 1u << 1u,
-	BLOCK_DEVICE_REMOVABLE       = 1u << 2u,
+	BLOCK_DEVICE_REMOVABLE = 1u << 2u,
 };
 
 struct block_request_header {
@@ -52,9 +53,9 @@ struct block_open_response {
 /* Derive a transferable block root restricted to a subrange of this root. */
 struct block_slice_request {
 	struct block_request_header header;
-	uint32_t                    reserved;
-	uint64_t                    block_index;
-	uint64_t                    block_count;
+	uint32_t reserved;
+	uint64_t block_index;
+	uint64_t block_count;
 };
 
 struct block_slice_response {
@@ -64,7 +65,7 @@ struct block_slice_response {
 /* Allocate storage that is directly usable by the provider's DMA engine. */
 struct block_allocate_buffer_request {
 	struct block_request_header header;
-	uint32_t                    size;
+	uint32_t size;
 };
 
 struct block_allocate_buffer_response {
@@ -77,11 +78,11 @@ struct block_allocate_buffer_response {
 /* Transfer complete logical blocks between a device and a session buffer. */
 struct block_transfer_request {
 	struct block_request_header header;
-	uint32_t                    block_count;
-	uint64_t                    block_index;
-	uint64_t                    buffer_id;
-	uint32_t                    buffer_offset;
-	uint32_t                    reserved;
+	uint32_t block_count;
+	uint64_t block_index;
+	uint64_t buffer_id;
+	uint32_t buffer_offset;
+	uint32_t reserved;
 };
 
 struct block_transfer_response {
@@ -97,8 +98,8 @@ struct block_flush_request {
 /* Release one session buffer. */
 struct block_release_buffer_request {
 	struct block_request_header header;
-	uint32_t                    reserved;
-	uint64_t                    buffer_id;
+	uint32_t reserved;
+	uint64_t buffer_id;
 };
 
 /* One opened block-device session. */
@@ -131,24 +132,23 @@ syscall_status_t block_device_open_read_only(cap_id_t device_cap, struct block_d
 void block_device_close(struct block_device* device);
 
 /* Create a block root whose block zero is block_index in this device. */
-syscall_status_t block_device_slice(const struct block_device* device, uint64_t block_index, uint64_t block_count,
-                                    cap_id_t* out_root_cap);
+syscall_status_t block_device_slice(
+		const struct block_device* device, uint64_t block_index, uint64_t block_count, cap_id_t* out_root_cap);
 
 /* Allocate and map a buffer suitable for this block provider. */
-syscall_status_t block_buffer_allocate(const struct block_device* device, uint32_t size,
-                                       struct block_buffer* out_buffer);
+syscall_status_t block_buffer_allocate(
+		const struct block_device* device, uint32_t size, struct block_buffer* out_buffer);
 
 /* Unmap and release a provider-owned buffer. */
 void block_buffer_release(const struct block_device* device, struct block_buffer* buffer);
 
 /* Read an arbitrary byte range, using scratch for partial device blocks. */
 syscall_status_t block_read(const struct block_device* device, struct block_buffer* destination,
-                            uint32_t destination_offset, struct block_buffer* scratch, uint64_t byte_offset,
-                            uint32_t byte_count);
+		uint32_t destination_offset, struct block_buffer* scratch, uint64_t byte_offset, uint32_t byte_count);
 
 /* Write an arbitrary byte range, preserving bytes outside it in partial device blocks. */
 syscall_status_t block_write(const struct block_device* device, struct block_buffer* source, uint32_t source_offset,
-                             struct block_buffer* scratch, uint64_t byte_offset, uint32_t byte_count);
+		struct block_buffer* scratch, uint64_t byte_offset, uint32_t byte_count);
 
 /* Commit writes completed before this call. */
 syscall_status_t block_flush(const struct block_device* device);

@@ -1,8 +1,9 @@
 #pragma once
 
+#include <stdbool.h>
+
 #include <base/cap.h>
 #include <base/process.h>
-#include <stdbool.h>
 
 /* Create the singleton boot-time framebuffer capability object. */
 void kernel_capability_boot_resources_init(void);

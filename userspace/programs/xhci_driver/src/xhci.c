@@ -1,18 +1,20 @@
 #include "xhci.h"
 
-#include <base/address_space.h>
-#include <base/memory.h>
-#include <base/process.h>
-#include <runtime/device.h>
-#include <runtime/log.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+
+#include <base/address_space.h>
+#include <base/memory.h>
+#include <base/process.h>
+
 #include <system/capability.h>
 #include <system/memory.h>
 #include <system/process.h>
 #include <system/time.h>
+#include <runtime/device.h>
+#include <runtime/log.h>
 
 #include "controller.h"
 #include "device.h"
@@ -46,11 +48,11 @@
 #define XHCI_LOG_PORT_LIMIT 8u
 
 struct xhci_mapping {
-	cap_id_t          memory_cap;
-	cap_id_t          address_space_cap;
-	cap_id_t          mapping_cap;
+	cap_id_t memory_cap;
+	cap_id_t address_space_cap;
+	cap_id_t mapping_cap;
 	volatile uint8_t* registers;
-	size_t            bar_size;
+	size_t bar_size;
 };
 
 static bool contains(size_t size, size_t offset, size_t width) {
@@ -66,41 +68,46 @@ static void release_mapping(struct xhci_mapping* m) {
 	if (m->address_space_cap != CAP_ID_INVALID) (void)cap_drop(m->address_space_cap);
 	if (m->memory_cap != CAP_ID_INVALID) (void)cap_drop(m->memory_cap);
 	*m = (struct xhci_mapping){
-		.memory_cap        = CAP_ID_INVALID,
+		.memory_cap = CAP_ID_INVALID,
 		.address_space_cap = CAP_ID_INVALID,
-		.mapping_cap       = CAP_ID_INVALID,
+		.mapping_cap = CAP_ID_INVALID,
 	};
 }
 
 static bool map_bar(cap_id_t device_cap, uint64_t bar_size, uint64_t mapping_offset, struct xhci_mapping* m) {
-	struct memory_info                memory;
-	struct self_info                  self;
+	struct memory_info memory;
+	struct self_info self;
 	struct address_space_map_response mapped = {.mapping_cap = CAP_ID_INVALID};
-	*m                                       = (struct xhci_mapping){
-		.memory_cap        = CAP_ID_INVALID,
+	*m = (struct xhci_mapping){
+		.memory_cap = CAP_ID_INVALID,
 		.address_space_cap = CAP_ID_INVALID,
-		.mapping_cap       = CAP_ID_INVALID,
+		.mapping_cap = CAP_ID_INVALID,
 	};
 	if (bar_size > SIZE_MAX || mapping_offset > SIZE_MAX || mapping_offset > UINT64_MAX - bar_size) return false;
 	if (device_resource_acquire(
-			device_cap, XHCI_BAR_RESOURCE, sizeof(XHCI_BAR_RESOURCE) - 1u, XHCI_BAR_RIGHTS, &m->memory_cap) !=
-	        SYSCALL_STATUS_OK ||
-	    memory_info(m->memory_cap, &memory) != SYSCALL_STATUS_OK || memory.memory_type != MEMORY_TYPE_DEVICE ||
-	    mapping_offset + bar_size > memory.size || process_self_info(&self) != SYSCALL_STATUS_OK)
+				device_cap, XHCI_BAR_RESOURCE, sizeof(XHCI_BAR_RESOURCE) - 1u, XHCI_BAR_RIGHTS, &m->memory_cap) !=
+					SYSCALL_STATUS_OK ||
+			memory_info(m->memory_cap, &memory) != SYSCALL_STATUS_OK || memory.memory_type != MEMORY_TYPE_DEVICE ||
+			mapping_offset + bar_size > memory.size || process_self_info(&self) != SYSCALL_STATUS_OK)
 		goto fail;
 	if (self.self_cap != CAP_ID_INVALID) (void)cap_drop(self.self_cap);
 	if (self.main_thread_cap != CAP_ID_INVALID) (void)cap_drop(self.main_thread_cap);
 	if (self.address_space_cap == CAP_ID_INVALID) goto fail;
 	m->address_space_cap = self.address_space_cap;
-	if (address_space_map(
-			m->address_space_cap, m->memory_cap, MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE, 0u, 0u, 0u, 0u, &mapped) !=
-	        SYSCALL_STATUS_OK ||
-	    mapped.mapping_cap == CAP_ID_INVALID)
+	if (address_space_map(m->address_space_cap,
+				m->memory_cap,
+				MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+				0u,
+				0u,
+				0u,
+				0u,
+				&mapped) != SYSCALL_STATUS_OK ||
+			mapped.mapping_cap == CAP_ID_INVALID)
 		goto fail;
 	m->mapping_cap = mapped.mapping_cap;
 	if (mapped.address == 0u) goto fail;
 	m->registers = (volatile uint8_t*)(mapped.address + (uintptr_t)mapping_offset);
-	m->bar_size  = (size_t)bar_size;
+	m->bar_size = (size_t)bar_size;
 	return true;
 fail:
 	release_mapping(m);
@@ -110,105 +117,108 @@ fail:
 static bool probe_controller(const struct xhci_mapping* m, struct xhci_controller* controller) {
 	if (!contains(m->bar_size, XHCI_RTSOFF, sizeof(uint32_t))) return false;
 	uint32_t cap_header = read32(m, XHCI_CAPLENGTH);
-	uint8_t  caplength  = (uint8_t)(cap_header & 0xffu);
+	uint8_t caplength = (uint8_t)(cap_header & 0xffu);
 	if (caplength < 0x20u || !contains(m->bar_size, caplength + XHCI_USBSTS, sizeof(uint32_t))) {
 		fprintf(stderr, "xhci: invalid capability length %u\n", (unsigned)caplength);
 		return false;
 	}
-	uint16_t version      = (uint16_t)(cap_header >> 16u);
-	uint32_t hcs1         = read32(m, XHCI_HCSPARAMS1);
-	uint32_t hcs2         = read32(m, XHCI_HCSPARAMS2);
-	uint32_t hcc1         = read32(m, XHCI_HCCPARAMS1);
-	uint32_t dboff        = read32(m, XHCI_DBOFF) & ~3u;
-	uint32_t rtsoff       = read32(m, XHCI_RTSOFF) & ~0x1fu;
-	uint32_t ports        = (hcs1 >> 24u) & 0xffu;
-	uint32_t slots        = hcs1 & 0xffu;
+	uint16_t version = (uint16_t)(cap_header >> 16u);
+	uint32_t hcs1 = read32(m, XHCI_HCSPARAMS1);
+	uint32_t hcs2 = read32(m, XHCI_HCSPARAMS2);
+	uint32_t hcc1 = read32(m, XHCI_HCCPARAMS1);
+	uint32_t dboff = read32(m, XHCI_DBOFF) & ~3u;
+	uint32_t rtsoff = read32(m, XHCI_RTSOFF) & ~0x1fu;
+	uint32_t ports = (hcs1 >> 24u) & 0xffu;
+	uint32_t slots = hcs1 & 0xffu;
 	uint32_t interrupters = (hcs1 >> 8u) & 0x7ffu;
-	uint32_t scratchpads  = ((hcs2 >> 27u) & 0x1fu) | (((hcs2 >> 21u) & 0x1fu) << 5u);
+	uint32_t scratchpads = ((hcs2 >> 27u) & 0x1fu) | (((hcs2 >> 21u) & 0x1fu) << 5u);
 	if (ports == 0u || ports > XHCI_MAX_PORTS || slots == 0u || !contains(m->bar_size, dboff, sizeof(uint32_t)) ||
-	    !contains(m->bar_size, rtsoff, 0x24u) ||
-	    !contains(m->bar_size,
-	              (size_t)caplength + XHCI_PORTREGS + (size_t)(ports - 1u) * XHCI_PORTSTRIDE + XHCI_PORTSC,
-	              sizeof(uint32_t))) {
+			!contains(m->bar_size, rtsoff, 0x24u) ||
+			!contains(m->bar_size,
+					(size_t)caplength + XHCI_PORTREGS + (size_t)(ports - 1u) * XHCI_PORTSTRIDE + XHCI_PORTSC,
+					sizeof(uint32_t))) {
 		fprintf(stderr, "xhci: inconsistent register layout (ports=%u slots=%u)\n", ports, slots);
 		return false;
 	}
 	uint32_t command = read32(m, (size_t)caplength + XHCI_USBCMD);
-	uint32_t status  = read32(m, (size_t)caplength + XHCI_USBSTS);
+	uint32_t status = read32(m, (size_t)caplength + XHCI_USBSTS);
 	RUNTIME_DEBUG_LOG("xhci: caphdr=%08x v%x.%02x ports=%u slots=%u intr=%u 64bit=%u\n",
-	                  cap_header,
-	                  (unsigned)(version >> 8u),
-	                  (unsigned)(version & 0xffu),
-	                  ports,
-	                  slots,
-	                  interrupters,
-	                  (unsigned)(hcc1 & 1u));
+			cap_header,
+			(unsigned)(version >> 8u),
+			(unsigned)(version & 0xffu),
+			ports,
+			slots,
+			interrupters,
+			(unsigned)(hcc1 & 1u));
 	RUNTIME_DEBUG_LOG("xhci: caplen=%x dboff=%x rtsoff=%x cmd=%08x sts=%08x hcs2=%08x scratchpads=%u\n",
-	                  (unsigned)caplength,
-	                  dboff,
-	                  rtsoff,
-	                  command,
-	                  status,
-	                  hcs2,
-	                  scratchpads);
+			(unsigned)caplength,
+			dboff,
+			rtsoff,
+			command,
+			status,
+			hcs2,
+			scratchpads);
 	unsigned connected = 0u;
-	unsigned shown     = 0u;
+	unsigned shown = 0u;
 	for (uint32_t index = 0u; index < ports; index++) {
-		size_t   offset = (size_t)caplength + XHCI_PORTREGS + (size_t)index * XHCI_PORTSTRIDE;
+		size_t offset = (size_t)caplength + XHCI_PORTREGS + (size_t)index * XHCI_PORTSTRIDE;
 		uint32_t portsc = read32(m, offset);
 		if ((portsc & XHCI_PORTSC_CCS) == 0u) continue;
 		connected++;
 		if (shown++ < XHCI_LOG_PORT_LIMIT)
 			RUNTIME_DEBUG_LOG("xhci: port %u connected enabled=%u powered=%u speed-id=%u\n",
-			                  (unsigned)(index + 1u),
-			                  (unsigned)((portsc & XHCI_PORTSC_PED) != 0u),
-			                  (unsigned)((portsc & XHCI_PORTSC_PP) != 0u),
-			                  (unsigned)((portsc >> XHCI_PORTSC_SPEED_SHIFT) & XHCI_PORTSC_SPEED_MASK));
+					(unsigned)(index + 1u),
+					(unsigned)((portsc & XHCI_PORTSC_PED) != 0u),
+					(unsigned)((portsc & XHCI_PORTSC_PP) != 0u),
+					(unsigned)((portsc >> XHCI_PORTSC_SPEED_SHIFT) & XHCI_PORTSC_SPEED_MASK));
 	}
 	RUNTIME_DEBUG_LOG("xhci: connected ports=%u/%u (initial probe)\n", connected, ports);
 	if (!contains(m->bar_size, (size_t)rtsoff + 0x20u, 0x20u) || !contains(m->bar_size, dboff, 4u) ||
-	    interrupters == 0u)
+			interrupters == 0u)
 		return false;
 	*controller = (struct xhci_controller){
-		.mmio             = m->registers,
-		.size             = m->bar_size,
-		.op               = caplength,
-		.runtime          = rtsoff,
-		.doorbell         = dboff,
-		.slots            = (uint8_t)slots,
-		.ports            = (uint8_t)ports,
-		.context_size     = (hcc1 & (1u << 2u)) != 0u ? 64u : 32u,
+		.mmio = m->registers,
+		.size = m->bar_size,
+		.op = caplength,
+		.runtime = rtsoff,
+		.doorbell = dboff,
+		.slots = (uint8_t)slots,
+		.ports = (uint8_t)ports,
+		.context_size = (hcc1 & (1u << 2u)) != 0u ? 64u : 32u,
 		.scratchpad_count = (uint16_t)scratchpads,
-		.addr64           = (hcc1 & 1u) != 0u,
-		.pci_control_cap  = CAP_ID_INVALID,
-		.dma              = {.source_cap           = CAP_ID_INVALID,
-		                     .memory_allocator_cap = CAP_ID_INVALID,
-		                     .device_space_cap     = CAP_ID_INVALID,
-		                     .binding_cap          = CAP_ID_INVALID,
-		                     .process_space_cap    = CAP_ID_INVALID},
-		.dcbaa            = {.memory_cap         = CAP_ID_INVALID,
-		                     .cpu_mapping_cap    = CAP_ID_INVALID,
-		                     .device_mapping_cap = CAP_ID_INVALID},
-		.scratchpad_array = {.memory_cap         = CAP_ID_INVALID,
-		                     .cpu_mapping_cap    = CAP_ID_INVALID,
-		                     .device_mapping_cap = CAP_ID_INVALID},
+		.addr64 = (hcc1 & 1u) != 0u,
+		.pci_control_cap = CAP_ID_INVALID,
+		.dma =
+				{.source_cap = CAP_ID_INVALID,
+					.memory_allocator_cap = CAP_ID_INVALID,
+					.device_space_cap = CAP_ID_INVALID,
+					.binding_cap = CAP_ID_INVALID,
+					.process_space_cap = CAP_ID_INVALID},
+		.dcbaa =
+				{.memory_cap = CAP_ID_INVALID, .cpu_mapping_cap = CAP_ID_INVALID, .device_mapping_cap = CAP_ID_INVALID},
+		.scratchpad_array =
+				{.memory_cap = CAP_ID_INVALID, .cpu_mapping_cap = CAP_ID_INVALID, .device_mapping_cap = CAP_ID_INVALID},
 		.erst = {.memory_cap = CAP_ID_INVALID, .cpu_mapping_cap = CAP_ID_INVALID, .device_mapping_cap = CAP_ID_INVALID},
-		.commands = {.dma = {.memory_cap         = CAP_ID_INVALID,
-		                     .cpu_mapping_cap    = CAP_ID_INVALID,
-		                     .device_mapping_cap = CAP_ID_INVALID}},
-		.events   = {.dma = {.memory_cap         = CAP_ID_INVALID,
-		                     .cpu_mapping_cap    = CAP_ID_INVALID,
-		                     .device_mapping_cap = CAP_ID_INVALID}},
+		.commands =
+				{.dma =
+							{.memory_cap = CAP_ID_INVALID,
+								.cpu_mapping_cap = CAP_ID_INVALID,
+								.device_mapping_cap = CAP_ID_INVALID}},
+		.events = {
+			.dma = {
+				.memory_cap = CAP_ID_INVALID, .cpu_mapping_cap = CAP_ID_INVALID, .device_mapping_cap = CAP_ID_INVALID
+			}
+		},
 	};
 	return true;
 }
 
 enum device_driver_result xhci_driver_run(cap_id_t device_cap) {
 	uint64_t cls, subclass, interface, kind, size, offset;
-	bool     enabled, claimed;
+	bool enabled, claimed;
 	if (device_property_read_u64(device_cap, "class_code", &cls) != SYSCALL_STATUS_OK ||
-	    device_property_read_u64(device_cap, "subclass", &subclass) != SYSCALL_STATUS_OK ||
-	    device_property_read_u64(device_cap, "programming_interface", &interface) != SYSCALL_STATUS_OK)
+			device_property_read_u64(device_cap, "subclass", &subclass) != SYSCALL_STATUS_OK ||
+			device_property_read_u64(device_cap, "programming_interface", &interface) != SYSCALL_STATUS_OK)
 		return DEVICE_DRIVER_ERROR;
 	if (cls != XHCI_CLASS || subclass != XHCI_SUBCLASS || interface != XHCI_PROGIF) return DEVICE_DRIVER_UNSUPPORTED;
 	syscall_status_t statuses[] = {
@@ -233,7 +243,7 @@ enum device_driver_result xhci_driver_run(cap_id_t device_cap) {
 		return DEVICE_DRIVER_ERROR;
 	}
 	struct xhci_controller controller;
-	bool                   ok = probe_controller(&mapping, &controller);
+	bool ok = probe_controller(&mapping, &controller);
 	if (!ok) {
 		release_mapping(&mapping);
 		return DEVICE_DRIVER_ERROR;
@@ -258,7 +268,7 @@ enum device_driver_result xhci_driver_run(cap_id_t device_cap) {
 	}
 	for (;;) {
 		if (!xhci_controller_poll(&controller) || !xhci_device_poll(&controller) || !xhci_transport_poll(&transport) ||
-		    sleep_ms(10u) != SYSCALL_STATUS_OK) {
+				sleep_ms(10u) != SYSCALL_STATUS_OK) {
 			xhci_transport_release(&transport);
 			xhci_controller_stop(&controller);
 			release_mapping(&mapping);

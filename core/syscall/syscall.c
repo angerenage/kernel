@@ -1,9 +1,10 @@
+#include <libc/stdlib.h>
+#include <libc/string.h>
+
 #include <core/address_space.h>
 #include <core/address_transfer.h>
 #include <core/sched.h>
 #include <core/syscall.h>
-#include <libc/stdlib.h>
-#include <libc/string.h>
 
 syscall_result_t syscall_result_from_address_transfer(enum address_transfer_result result, uintptr_t arg_index) {
 	switch (result) {
@@ -32,11 +33,11 @@ struct address_space* syscall_current_user_space(void) {
 }
 
 syscall_result_t syscall_copy_string_arg(uintptr_t ptr_arg_index, uintptr_t string_ptr, uintptr_t len_arg_index,
-                                         uintptr_t string_len_arg, char** out_string) {
-	struct address_space*        space;
+		uintptr_t string_len_arg, char** out_string) {
+	struct address_space* space;
 	enum address_transfer_result transfer_result;
-	size_t                       string_len = (size_t)string_len_arg;
-	char*                        string;
+	size_t string_len = (size_t)string_len_arg;
+	char* string;
 
 	if (out_string == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, ptr_arg_index);
 	*out_string = NULL;
@@ -48,8 +49,10 @@ syscall_result_t syscall_copy_string_arg(uintptr_t ptr_arg_index, uintptr_t stri
 
 	space = syscall_current_user_space();
 	if (space != NULL) {
-		transfer_result = address_space_validate_range(
-			space, string_ptr, string_len, ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
+		transfer_result = address_space_validate_range(space,
+				string_ptr,
+				string_len,
+				ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
 		if (transfer_result != ADDRESS_TRANSFER_OK) {
 			return syscall_result_from_address_transfer(transfer_result, ptr_arg_index);
 		}
@@ -81,8 +84,8 @@ syscall_result_t syscall_copy_string_arg(uintptr_t ptr_arg_index, uintptr_t stri
 	return syscall_result_ok(0u);
 }
 
-syscall_result_t syscall_write_uintptr_arg(struct address_space* space, uintptr_t dst, uintptr_t arg_index,
-                                           uintptr_t value) {
+syscall_result_t syscall_write_uintptr_arg(
+		struct address_space* space, uintptr_t dst, uintptr_t arg_index, uintptr_t value) {
 	enum address_transfer_result transfer_result;
 
 	if (dst == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, arg_index);
@@ -96,8 +99,8 @@ syscall_result_t syscall_write_uintptr_arg(struct address_space* space, uintptr_
 	return syscall_result_from_address_transfer(transfer_result, arg_index);
 }
 
-syscall_result_t syscall_copy_to_user(struct address_space* space, uintptr_t dst, const void* src, size_t size,
-                                      uintptr_t arg_index) {
+syscall_result_t syscall_copy_to_user(
+		struct address_space* space, uintptr_t dst, const void* src, size_t size, uintptr_t arg_index) {
 	enum address_transfer_result transfer_result;
 
 	if (size == 0u) return syscall_result_ok(0u);
@@ -112,8 +115,8 @@ syscall_result_t syscall_copy_to_user(struct address_space* space, uintptr_t dst
 	return syscall_result_from_address_transfer(transfer_result, arg_index);
 }
 
-syscall_result_t syscall_copy_from_user(struct address_space* space, uintptr_t src, void* dst, size_t size,
-                                        uintptr_t arg_index) {
+syscall_result_t syscall_copy_from_user(
+		struct address_space* space, uintptr_t src, void* dst, size_t size, uintptr_t arg_index) {
 	enum address_transfer_result transfer_result;
 
 	if (size == 0u) return syscall_result_ok(0u);

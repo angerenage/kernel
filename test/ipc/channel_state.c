@@ -6,10 +6,10 @@
 #define CHANNEL_STATE_THREAD_COUNT 8u
 
 struct channel_state_thread_ctx {
-	struct test_barrier*          barrier;
+	struct test_barrier* barrier;
 	struct process_channel_state* state;
-	struct channel*               channel;
-	bool                          added;
+	struct channel* channel;
+	bool added;
 };
 
 static void* channel_state_worker(void* arg) {
@@ -25,11 +25,11 @@ static void* channel_state_worker(void* arg) {
 }
 
 Test(channel, process_channel_state_is_safe_for_concurrent_threads) {
-	struct process_channel_state    state;
-	struct test_barrier             barrier;
-	struct channel*                 channels[CHANNEL_STATE_THREAD_COUNT];
+	struct process_channel_state state;
+	struct test_barrier barrier;
+	struct channel* channels[CHANNEL_STATE_THREAD_COUNT];
 	struct channel_state_thread_ctx contexts[CHANNEL_STATE_THREAD_COUNT];
-	pthread_t                       threads[CHANNEL_STATE_THREAD_COUNT];
+	pthread_t threads[CHANNEL_STATE_THREAD_COUNT];
 
 	ipc_test_init_heap();
 	process_channel_state_init(&state);
@@ -40,9 +40,9 @@ Test(channel, process_channel_state_is_safe_for_concurrent_threads) {
 		cr_assert_not_null(channels[i]);
 		contexts[i] = (struct channel_state_thread_ctx){
 			.barrier = &barrier,
-			.state   = &state,
+			.state = &state,
 			.channel = channels[i],
-			.added   = false,
+			.added = false,
 		};
 		cr_assert_eq(pthread_create(&threads[i], NULL, channel_state_worker, &contexts[i]), 0, "pthread_create failed");
 	}

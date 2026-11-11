@@ -29,9 +29,9 @@ void hal_cache_sync_executable_range(void* address, size_t size) {
 void mock_cache_reset(void) {
 	executable_sync_count = 0u;
 	dma_device_sync_count = 0u;
-	dma_cpu_sync_count    = 0u;
+	dma_cpu_sync_count = 0u;
 	dma_device_sync_bytes = 0u;
-	dma_cpu_sync_bytes    = 0u;
+	dma_cpu_sync_bytes = 0u;
 }
 
 size_t mock_cache_executable_sync_count(void) {

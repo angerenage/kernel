@@ -1,3 +1,6 @@
+#include <stdint.h>
+#include <string.h>
+
 #include <base/cap.h>
 #include <base/loader.h>
 #include <base/syscall.h>
@@ -5,8 +8,6 @@
 #include <core/process.h>
 #include <kernel/capability.h>
 #include <kernel/elf_loader.h>
-#include <stdint.h>
-#include <string.h>
 
 #include "address_space.h"
 #include "boot_module.h"
@@ -28,15 +29,15 @@ static const char* module_process_name(const struct boot_module* module) {
 }
 
 static syscall_result_t loader_handler(const struct cap_request* req) {
-	struct loader_load_request  request;
+	struct loader_load_request request;
 	struct loader_load_response response;
-	const struct boot_module*   module;
-	struct kernel_elf_process   loaded = {0};
+	const struct boot_module* module;
+	struct kernel_elf_process loaded = {0};
 	enum kernel_elf_load_result load_result;
-	syscall_result_t            result;
+	syscall_result_t result;
 
 	if (req->request == NULL || req->request_size < sizeof(request) ||
-	    !cap_kernel_response_fits(req, sizeof(response))) {
+			!cap_kernel_response_fits(req, sizeof(response))) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 	memcpy(&request, req->request, sizeof(request));
@@ -50,14 +51,13 @@ static syscall_result_t loader_handler(const struct cap_request* req) {
 	}
 
 	response = (struct loader_load_response){
-		.process_cap =
-			kernel_process_grant(loaded.process,
-			                     req->caller,
-			                     CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_EXEC | CAP_DELEGATE),
+		.process_cap = kernel_process_grant(loaded.process,
+				req->caller,
+				CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_EXEC | CAP_DELEGATE),
 		.address_space_cap = CAP_ID_INVALID,
-		.entry             = loaded.entry,
-		.heap_base         = loaded.heap_base,
-		.heap_size         = loaded.heap_size,
+		.entry = loaded.entry,
+		.heap_base = loaded.heap_base,
+		.heap_size = loaded.heap_size,
 	};
 	if (response.process_cap == CAP_ID_INVALID) {
 		(void)process_destroy(loaded.process);
@@ -65,7 +65,7 @@ static syscall_result_t loader_handler(const struct cap_request* req) {
 	}
 
 	response.address_space_cap = kernel_address_space_grant(
-		loaded.process, req->caller, CAP_CALL | CAP_MAP | CAP_READ | CAP_WRITE | CAP_EXEC | CAP_DELEGATE);
+			loaded.process, req->caller, CAP_CALL | CAP_MAP | CAP_READ | CAP_WRITE | CAP_EXEC | CAP_DELEGATE);
 	if (response.address_space_cap == CAP_ID_INVALID) {
 		(void)cap_destroy_by_id(response.process_cap);
 		(void)process_destroy(loaded.process);

@@ -1,15 +1,16 @@
-#include <hal/cpu.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <hal/cpu.h>
 
 #include "cache.h"
 #include "interrupts/gic.h"
 
 enum {
 	AARCH64_THREAD_STACK_ALIGNMENT = 16u,
-	AARCH64_THREAD_CTX_X19         = 0,
+	AARCH64_THREAD_CTX_X19 = 0,
 	AARCH64_THREAD_CTX_X20,
 	AARCH64_THREAD_CTX_X21,
 	AARCH64_THREAD_CTX_X22,
@@ -50,7 +51,7 @@ void hal_cpu_local_bind(void* ptr) {
 }
 
 bool hal_cpu_thread_context_init(struct thread_context* context, uintptr_t stack_base, uintptr_t stack_top,
-                                 uintptr_t entry_pc, uintptr_t entry_arg) {
+		uintptr_t entry_pc, uintptr_t entry_arg) {
 	uintptr_t aligned_top;
 
 	if (context == NULL || entry_pc == 0u || stack_top <= stack_base) return false;
@@ -65,7 +66,7 @@ bool hal_cpu_thread_context_init(struct thread_context* context, uintptr_t stack
 
 	*context = (struct thread_context){
 		.instruction_pointer = (uintptr_t)aarch64_thread_entry,
-		.stack_pointer       = aligned_top,
+		.stack_pointer = aligned_top,
 	};
 	context->spill[AARCH64_THREAD_CTX_X19] = entry_pc;
 	context->spill[AARCH64_THREAD_CTX_X20] = entry_arg;
@@ -115,8 +116,8 @@ void hal_cpu_kick(const struct cpu* cpu) {
 	(void)aarch64_gic_kick(cpu);
 
 	__asm__ volatile("dsb ishst\n\t"
-	                 "sev"
-	                 :
-	                 :
-	                 : "memory");
+					 "sev"
+			:
+			:
+			: "memory");
 }

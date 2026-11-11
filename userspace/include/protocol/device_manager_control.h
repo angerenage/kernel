@@ -1,7 +1,8 @@
 #pragma once
 
-#include <base/cap.h>
 #include <stdint.h>
+
+#include <base/cap.h>
 
 /* Registry identity and version of the device-manager control service. */
 #define DEVICE_MANAGER_NAMESPACE "system"
@@ -48,14 +49,14 @@ enum device_manager_catalog_update_status {
 /* Replace the catalog from the absolute VFS path following this header. */
 struct device_manager_update_catalog_request {
 	struct device_manager_request_header header;
-	uint32_t                             path_size;
-	uint32_t                             reserved;
-	uint8_t                              path[];
+	uint32_t path_size;
+	uint32_t reserved;
+	uint8_t path[];
 };
 
 /* Catalog result and metadata; metadata changes only after successful activation. */
 struct device_manager_update_catalog_response {
 	enum device_manager_catalog_update_status status;
-	uint32_t                                  reserved;
-	struct device_manager_catalog_info        catalog;
+	uint32_t reserved;
+	struct device_manager_catalog_info catalog;
 };

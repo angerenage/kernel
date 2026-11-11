@@ -1,15 +1,16 @@
 #include "dma.h"
 
+#include <libc/stdlib.h>
+#include <string.h>
+
 #include <base/dma.h>
 #include <base/syscall.h>
+#include <hal/hcf.h>
 #include <core/address_space.h>
 #include <core/capability.h>
 #include <core/dma.h>
 #include <core/spinlock.h>
-#include <hal/hcf.h>
 #include <kernel/capability.h>
-#include <libc/stdlib.h>
-#include <string.h>
 
 #include "address_space.h"
 
@@ -19,22 +20,22 @@
 #define DMA_BINDING_CAP_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_DESTROY | CAP_DELEGATE))
 
 struct kernel_dma_source {
-	dma_source_t              source;
+	dma_source_t source;
 	struct kernel_dma_source* next;
 };
 
-static cap_object_id_t           dma_object_id = CAP_OBJECT_ID_INVALID;
+static cap_object_id_t dma_object_id = CAP_OBJECT_ID_INVALID;
 static struct kernel_dma_source* claimed_sources;
-static struct spinlock           claimed_sources_lock =
-	SPINLOCK_INIT_CLASS("dma_source_claims", SPINLOCK_ORDER_CAPABILITY, SPINLOCK_FLAG_IRQSAVE);
+static struct spinlock claimed_sources_lock =
+		SPINLOCK_INIT_CLASS("dma_source_claims", SPINLOCK_ORDER_CAPABILITY, SPINLOCK_FLAG_IRQSAVE);
 
 #if defined(KERNEL_CAPABILITY_DMA_TEST)
-static bool     fail_next_claim_response;
+static bool fail_next_claim_response;
 static cap_id_t last_rollback_cap = CAP_ID_INVALID;
 
 void kernel_capability_dma_test_fail_next_claim_response(void) {
 	fail_next_claim_response = true;
-	last_rollback_cap        = CAP_ID_INVALID;
+	last_rollback_cap = CAP_ID_INVALID;
 }
 
 cap_id_t kernel_capability_dma_test_last_rollback_cap(void) {
@@ -52,12 +53,12 @@ static bool copy_request(const struct cap_request* req, void* out, size_t size) 
 	return true;
 }
 
-static syscall_result_t write_claim_response(const struct cap_request*               req,
-                                             const struct dma_claim_source_response* response) {
+static syscall_result_t write_claim_response(
+		const struct cap_request* req, const struct dma_claim_source_response* response) {
 #if defined(KERNEL_CAPABILITY_DMA_TEST)
 	if (fail_next_claim_response) {
 		fail_next_claim_response = false;
-		last_rollback_cap        = response->source_cap;
+		last_rollback_cap = response->source_cap;
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 #endif
@@ -74,12 +75,12 @@ static void dma_binding_event(struct cap_object* object, enum cap_object_event e
 
 static cap_id_t dma_binding_publish(struct dma_binding* binding, process_id_t recipient) {
 	cap_object_id_t object_id;
-	cap_id_t        cap;
-	bool            created = false;
+	cap_id_t cap;
+	bool created = false;
 
 	if (binding == NULL || recipient == PROCESS_PID_INVALID || !dma_binding_retain(binding)) return CAP_ID_INVALID;
 	object_id = cap_object_create_kernel_lifecycle(
-		(uint64_t)(uintptr_t)binding, dma_binding_handler, NULL, dma_binding_destroy, dma_binding_event, &created);
+			(uint64_t)(uintptr_t)binding, dma_binding_handler, NULL, dma_binding_destroy, dma_binding_event, &created);
 	if (object_id == CAP_OBJECT_ID_INVALID) {
 		dma_binding_release(binding);
 		return CAP_ID_INVALID;
@@ -92,7 +93,7 @@ static cap_id_t dma_binding_publish(struct dma_binding* binding, process_id_t re
 }
 
 static void dma_source_remove(struct kernel_dma_source* managed) {
-	struct irq_state           state;
+	struct irq_state state;
 	struct kernel_dma_source** link;
 
 	if (managed == NULL) return;
@@ -105,7 +106,7 @@ static void dma_source_remove(struct kernel_dma_source* managed) {
 
 static void dma_source_destroy(uint64_t object_id) {
 	struct kernel_dma_source* managed = (struct kernel_dma_source*)(uintptr_t)object_id;
-	struct dma_binding*       binding;
+	struct dma_binding* binding;
 
 	if (managed == NULL) return;
 	if (dma_binding_recover(managed->source, &binding)) {
@@ -122,10 +123,10 @@ static void dma_source_event(struct cap_object* object, enum cap_object_event ev
 
 static cap_id_t dma_source_claim(dma_source_t source, process_id_t recipient, bool* out_unavailable) {
 	struct kernel_dma_source* managed;
-	struct irq_state          state;
-	cap_object_id_t           object_id;
-	cap_id_t                  cap;
-	bool                      created = false;
+	struct irq_state state;
+	cap_object_id_t object_id;
+	cap_id_t cap;
+	bool created = false;
 
 	if (out_unavailable != NULL) *out_unavailable = false;
 	if (recipient == PROCESS_PID_INVALID || out_unavailable == NULL || !dma_source_valid(source)) return CAP_ID_INVALID;
@@ -142,12 +143,12 @@ static cap_id_t dma_source_claim(dma_source_t source, process_id_t recipient, bo
 			return CAP_ID_INVALID;
 		}
 	}
-	managed->next   = claimed_sources;
+	managed->next = claimed_sources;
 	claimed_sources = managed;
 	spinlock_unlock_irqrestore(&claimed_sources_lock, state);
 
 	object_id = cap_object_create_kernel_lifecycle(
-		(uint64_t)(uintptr_t)managed, dma_source_handler, NULL, dma_source_destroy, dma_source_event, &created);
+			(uint64_t)(uintptr_t)managed, dma_source_handler, NULL, dma_source_destroy, dma_source_event, &created);
 	if (object_id == CAP_OBJECT_ID_INVALID || !created) {
 		dma_source_remove(managed);
 		free(managed);
@@ -159,12 +160,12 @@ static cap_id_t dma_source_claim(dma_source_t source, process_id_t recipient, bo
 }
 
 static syscall_result_t dma_resolve_source_handler(const struct cap_request* req) {
-	struct dma_resolve_source_request  request;
+	struct dma_resolve_source_request request;
 	struct dma_resolve_source_response response = {.source = DMA_SOURCE_INVALID};
 
 	if ((req->rights & CAP_READ) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (!copy_request(req, &request, sizeof(request)) || request.reserved != 0u ||
-	    !cap_kernel_response_fits(req, sizeof(response)))
+			!cap_kernel_response_fits(req, sizeof(response)))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	if (!dma_source_resolve(request.controller_register_address, request.local_source_id, &response.source))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -172,13 +173,13 @@ static syscall_result_t dma_resolve_source_handler(const struct cap_request* req
 }
 
 static syscall_result_t dma_claim_source_handler(const struct cap_request* req) {
-	struct dma_claim_source_request  request;
+	struct dma_claim_source_request request;
 	struct dma_claim_source_response response = {.source_cap = CAP_ID_INVALID};
-	bool                             unavailable;
+	bool unavailable;
 
 	if ((req->rights & CAP_MANAGE) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (!copy_request(req, &request, sizeof(request)) || request.source == DMA_SOURCE_INVALID ||
-	    !cap_kernel_response_fits(req, sizeof(response)))
+			!cap_kernel_response_fits(req, sizeof(response)))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	if (!dma_source_valid(request.source)) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	response.source_cap = dma_source_claim(request.source, req->caller, &unavailable);
@@ -191,13 +192,13 @@ static syscall_result_t dma_claim_source_handler(const struct cap_request* req) 
 
 static syscall_result_t dma_claim_pci_source_handler(const struct cap_request* req) {
 	struct dma_claim_pci_source_request request;
-	struct dma_claim_source_response    response = {.source_cap = CAP_ID_INVALID};
-	dma_source_t                        source;
-	bool                                unavailable;
+	struct dma_claim_source_response response = {.source_cap = CAP_ID_INVALID};
+	dma_source_t source;
+	bool unavailable;
 
 	if ((req->rights & CAP_MANAGE) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (!copy_request(req, &request, sizeof(request)) || request.reserved != 0u ||
-	    !cap_kernel_response_fits(req, sizeof(response)))
+			!cap_kernel_response_fits(req, sizeof(response)))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	if (!dma_pci_source_resolve(request.segment, request.requester_id, &source) || !dma_source_valid(source))
 		return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
@@ -210,9 +211,9 @@ static syscall_result_t dma_claim_pci_source_handler(const struct cap_request* r
 }
 
 static syscall_result_t dma_source_create_address_space_handler(const struct cap_request* req, dma_source_t source) {
-	struct dma_source_create_address_space_request  request;
+	struct dma_source_create_address_space_request request;
 	struct dma_source_create_address_space_response response = {.address_space_cap = CAP_ID_INVALID};
-	struct address_space*                           space;
+	struct address_space* space;
 
 	if ((req->rights & CAP_ALLOCATE) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (!copy_request(req, &request, sizeof(request)) || !cap_kernel_response_fits(req, sizeof(response)))
@@ -229,18 +230,18 @@ static syscall_result_t dma_source_create_address_space_handler(const struct cap
 }
 
 static syscall_result_t dma_source_bind_handler(const struct cap_request* req, dma_source_t source) {
-	struct dma_source_bind_request  request;
+	struct dma_source_bind_request request;
 	struct dma_source_bind_response response = {.binding_cap = CAP_ID_INVALID};
-	struct cap_object*              space_object;
-	struct address_space*           space;
-	struct dma_binding*             binding;
+	struct cap_object* space_object;
+	struct address_space* space;
+	struct dma_binding* binding;
 
 	if ((req->rights & CAP_MANAGE) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (!copy_request(req, &request, sizeof(request)) || !cap_kernel_response_fits(req, sizeof(response)))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 
 	syscall_result_t result = kernel_device_address_space_acquire(
-		request.address_space_cap, req->caller, CAP_MAP, &space_object, &space, NULL);
+			request.address_space_cap, req->caller, CAP_MAP, &space_object, &space, NULL);
 	if (result.status != SYSCALL_STATUS_OK) return result;
 	if (!dma_bind(source, space, &binding)) {
 		cap_object_release(space_object);
@@ -265,9 +266,9 @@ static syscall_result_t dma_source_bind_handler(const struct cap_request* req, d
 }
 
 static syscall_result_t dma_source_recover_handler(const struct cap_request* req, dma_source_t source) {
-	struct dma_source_recover_request  request;
+	struct dma_source_recover_request request;
 	struct dma_source_recover_response response = {.binding_cap = CAP_ID_INVALID};
-	struct dma_binding*                binding;
+	struct dma_binding* binding;
 
 	if ((req->rights & CAP_MANAGE) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (!copy_request(req, &request, sizeof(request)) || !cap_kernel_response_fits(req, sizeof(response)))
@@ -303,7 +304,7 @@ static syscall_result_t dma_handler(const struct cap_request* req) {
 
 static syscall_result_t dma_source_handler(const struct cap_request* req) {
 	struct dma_source_request_header header;
-	struct kernel_dma_source*        managed;
+	struct kernel_dma_source* managed;
 
 	if (req == NULL || req->object_id == 0u || req->request == NULL || req->request_size < sizeof(header))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -324,7 +325,7 @@ static syscall_result_t dma_source_handler(const struct cap_request* req) {
 
 static syscall_result_t dma_binding_unbind_handler(const struct cap_request* req, struct dma_binding* binding) {
 	struct dma_binding_unbind_request request;
-	struct capability*                cap;
+	struct capability* cap;
 
 	if ((req->rights & CAP_DESTROY) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (!copy_request(req, &request, sizeof(request))) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);

@@ -1,7 +1,8 @@
 #pragma once
 
-#include <base/cap.h>
 #include <stdint.h>
+
+#include <base/cap.h>
 
 /* Protocol limits for diagnostic names, compatible IDs, and lower-snake-case identifiers. */
 #define DEVICE_NAME_MAX 255u
@@ -78,14 +79,14 @@ struct device_info {
 /* Type, logical element count, and encoded byte size for one property. */
 struct device_property_info {
 	enum device_property_type type;
-	uint32_t                  reserved;
-	uint64_t                  element_count;
-	uint64_t                  value_size;
+	uint32_t reserved;
+	uint64_t element_count;
+	uint64_t value_size;
 };
 
 /* Name length and maximum acquirable rights for one named resource. */
 struct device_resource_info {
-	uint64_t     name_size;
+	uint64_t name_size;
 	cap_rights_t rights;
 };
 
@@ -117,48 +118,48 @@ struct device_object_simple_request {
 /* Request to remove a direct child by its unique name. */
 struct device_object_remove_child_request {
 	struct device_object_request_header header;
-	uint32_t                            name_size;
-	uint32_t                            reserved;
+	uint32_t name_size;
+	uint32_t reserved;
 };
 
 /* Request selecting one compatible ID or resource by provider-order index. */
 struct device_object_index_request {
 	struct device_object_request_header header;
-	uint32_t                            reserved;
-	uint64_t                            index;
+	uint32_t reserved;
+	uint64_t index;
 };
 
 /* Request reading a byte range from one indexed compatible ID or resource name. */
 struct device_object_read_index_request {
 	struct device_object_request_header header;
-	uint32_t                            reserved;
-	uint64_t                            index;
-	uint64_t                            offset;
-	uint64_t                            size;
+	uint32_t reserved;
+	uint64_t index;
+	uint64_t offset;
+	uint64_t size;
 };
 
 /* A lower-snake-case property name follows this header. */
 struct device_object_property_info_request {
 	struct device_object_request_header header;
-	uint32_t                            name_size;
-	uint8_t                             name[];
+	uint32_t name_size;
+	uint8_t name[];
 };
 
 /* A lower-snake-case property name follows this header. */
 struct device_object_property_read_request {
 	struct device_object_request_header header;
-	uint32_t                            name_size;
-	uint64_t                            offset;
-	uint64_t                            size;
-	uint8_t                             name[];
+	uint32_t name_size;
+	uint64_t offset;
+	uint64_t size;
+	uint8_t name[];
 };
 
 /* A lower-snake-case resource name follows this header. */
 struct device_object_resource_acquire_request {
 	struct device_object_request_header header;
-	uint32_t                            name_size;
-	cap_rights_t                        rights;
-	uint8_t                             name[];
+	uint32_t name_size;
+	cap_rights_t rights;
+	uint8_t name[];
 };
 
 /* Capability delegated to the caller after successful named-resource acquisition. */
@@ -178,7 +179,7 @@ struct device_root_begin_request {
 
 /* Non-delegable builder and manager PID returned when construction begins. */
 struct device_builder_begin_response {
-	cap_id_t     builder_cap;
+	cap_id_t builder_cap;
 	process_id_t manager_pid;
 };
 
@@ -203,54 +204,54 @@ struct device_builder_request_header {
 /* The UTF-8 name follows this header. */
 struct device_builder_set_name_request {
 	struct device_builder_request_header header;
-	uint32_t                             name_size;
-	uint8_t                              name[];
+	uint32_t name_size;
+	uint8_t name[];
 };
 
 /* The UTF-8 compatible ID follows this header. */
 struct device_builder_add_compatible_request {
 	struct device_builder_request_header header;
-	uint32_t                             id_size;
-	uint8_t                              id[];
+	uint32_t id_size;
+	uint8_t id[];
 };
 
 /* The lower-snake-case property name follows this header. */
 struct device_builder_begin_property_request {
 	struct device_builder_request_header header;
-	enum device_property_type            type;
-	uint32_t                             name_size;
-	uint32_t                             reserved;
-	uint64_t                             element_count;
-	uint64_t                             value_size;
-	uint8_t                              name[];
+	enum device_property_type type;
+	uint32_t name_size;
+	uint32_t reserved;
+	uint64_t element_count;
+	uint64_t value_size;
+	uint8_t name[];
 };
 
 /* One contiguous property-value chunk follows this header. */
 struct device_builder_append_property_request {
 	struct device_builder_request_header header;
-	uint32_t                             reserved;
-	uint64_t                             offset;
-	uint8_t                              bytes[];
+	uint32_t reserved;
+	uint64_t offset;
+	uint8_t bytes[];
 };
 
 /* A complete property name followed immediately by its complete encoded value. */
 struct device_builder_add_property_request {
 	struct device_builder_request_header header;
-	enum device_property_type            type;
-	uint32_t                             name_size;
-	uint32_t                             reserved;
-	uint64_t                             element_count;
-	uint64_t                             value_size;
-	uint8_t                              data[];
+	enum device_property_type type;
+	uint32_t name_size;
+	uint32_t reserved;
+	uint64_t element_count;
+	uint64_t value_size;
+	uint8_t data[];
 };
 
 /* The lower-snake-case resource name follows this header. */
 struct device_builder_add_resource_request {
 	struct device_builder_request_header header;
-	uint32_t                             name_size;
-	cap_id_t                             capability;
-	cap_rights_t                         rights;
-	uint8_t                              name[];
+	uint32_t name_size;
+	cap_id_t capability;
+	cap_rights_t rights;
+	uint8_t name[];
 };
 
 /* Builder request containing no operation-specific payload. */

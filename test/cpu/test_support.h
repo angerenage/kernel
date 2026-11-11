@@ -1,12 +1,14 @@
 #ifndef TEST_CPU_TEST_SUPPORT_H
 #define TEST_CPU_TEST_SUPPORT_H
 
-#include <core/cpu.h>
-#include <core/spinlock.h>
-#include <criterion/criterion.h>
+#include <stdint.h>
+
 #include <hal/cpu.h>
 #include <hal/interrupts.h>
-#include <stdint.h>
+#include <core/cpu.h>
+#include <core/spinlock.h>
+
+#include <criterion/criterion.h>
 
 extern const struct cpu_init_info cpu_test_valid_topology[2];
 

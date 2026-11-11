@@ -1,11 +1,12 @@
 #include "iommu.h"
 
-#include <firmware/acpi.h>
-#include <hal/iommu.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <firmware/acpi.h>
+#include <hal/iommu.h>
 
 #include "v1.h"
 
@@ -18,8 +19,8 @@ static size_t loongarch_iommu_controllers(size_t target, struct hal_iommu_contro
 	memcpy(&structure_offset, (const uint8_t*)table + 38u, sizeof(structure_offset));
 	if (structure_offset < 48u || structure_offset > table->length) return 0u;
 	const uint8_t* cursor = (const uint8_t*)table + structure_offset;
-	const uint8_t* end    = (const uint8_t*)table + table->length;
-	size_t         count  = 0u;
+	const uint8_t* end = (const uint8_t*)table + table->length;
+	size_t count = 0u;
 	for (uint16_t index = 0u; index < structure_count; index++) {
 		if ((size_t)(end - cursor) < 64u) return count;
 		uint16_t type, length;
@@ -66,17 +67,16 @@ bool hal_iommu_controller_at(size_t index, struct hal_iommu_controller_descripto
 }
 
 bool hal_iommu_pci_source(const struct hal_iommu_controller_descriptor* descriptor, uint16_t segment,
-                          uint16_t requester_id, uint32_t* out_source_id) {
+		uint16_t requester_id, uint32_t* out_source_id) {
 	if (descriptor == NULL || out_source_id == NULL || descriptor->segment != segment ||
-	    requester_id >= descriptor->maximum_device_count)
+			requester_id >= descriptor->maximum_device_count)
 		return false;
 	*out_source_id = requester_id;
 	return true;
 }
 
-bool hal_iommu_controller_init(struct hal_iommu_controller_state*            controller,
-                               const struct hal_iommu_controller_descriptor* descriptor,
-                               struct hal_iommu_info*                        out_info) {
+bool hal_iommu_controller_init(struct hal_iommu_controller_state* controller,
+		const struct hal_iommu_controller_descriptor* descriptor, struct hal_iommu_info* out_info) {
 	return loongarch_iommu_v1_controller_init(controller, descriptor, out_info);
 }
 
@@ -88,8 +88,8 @@ bool hal_iommu_mapping_supported(const struct hal_iommu_controller_state* contro
 	return loongarch_iommu_v1_mapping_supported(controller, access);
 }
 
-bool hal_iommu_space_init(struct hal_iommu_controller_state* controller, uint32_t context_id,
-                          struct hal_iommu_space_state* space) {
+bool hal_iommu_space_init(
+		struct hal_iommu_controller_state* controller, uint32_t context_id, struct hal_iommu_space_state* space) {
 	return loongarch_iommu_v1_space_init(controller, context_id, space);
 }
 
@@ -98,26 +98,26 @@ void hal_iommu_space_deinit(struct hal_iommu_controller_state* controller, struc
 }
 
 bool hal_iommu_map(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                   const struct hal_iommu_map_request* request) {
+		const struct hal_iommu_map_request* request) {
 	return loongarch_iommu_v1_map(controller, space, request);
 }
 
 bool hal_iommu_unmap(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                     uint64_t io_address, size_t size) {
+		uint64_t io_address, size_t size) {
 	return loongarch_iommu_v1_unmap(controller, space, io_address, size);
 }
 
 bool hal_iommu_protect(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                       uint64_t io_address, size_t size, uint64_t access) {
+		uint64_t io_address, size_t size, uint64_t access) {
 	return loongarch_iommu_v1_protect(controller, space, io_address, size, access);
 }
 
 bool hal_iommu_attach(struct hal_iommu_controller_state* controller, struct hal_iommu_space_state* space,
-                      uint32_t source_id, struct hal_iommu_attachment_state* attachment) {
+		uint32_t source_id, struct hal_iommu_attachment_state* attachment) {
 	return loongarch_iommu_v1_attach(controller, space, source_id, attachment);
 }
 
 bool hal_iommu_detach(struct hal_iommu_controller_state* controller, uint32_t source_id,
-                      struct hal_iommu_attachment_state* attachment) {
+		struct hal_iommu_attachment_state* attachment) {
 	return loongarch_iommu_v1_detach(controller, source_id, attachment);
 }

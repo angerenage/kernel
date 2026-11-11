@@ -1,7 +1,8 @@
+#include <stdint.h>
+
+#include <hal/clock.h>
 #include <core/sched.h>
 #include <core/time.h>
-#include <hal/clock.h>
-#include <stdint.h>
 
 #define NANOSECONDS_PER_SECOND 1000000000ull
 
@@ -27,7 +28,7 @@ static uint64_t monotonic_resolution(uint64_t frequency) {
 
 static uint64_t monotonic_fractional_ns(uint64_t remainder, uint64_t frequency) {
 	uint64_t quotient = 0u;
-	uint64_t residue  = 0u;
+	uint64_t residue = 0u;
 
 	/* Long division computes remainder * 1e9 / frequency without overflowing either product. */
 	for (unsigned bit = 30u; bit-- > 0u;) {
@@ -60,7 +61,7 @@ static uint64_t monotonic_ticks_to_ns(uint64_t ticks, uint64_t frequency) {
 	seconds = ticks / frequency;
 	if (seconds > UINT64_MAX / NANOSECONDS_PER_SECOND) return UINT64_MAX;
 	nanoseconds = seconds * NANOSECONDS_PER_SECOND;
-	fractional  = monotonic_fractional_ns(ticks % frequency, frequency);
+	fractional = monotonic_fractional_ns(ticks % frequency, frequency);
 	if (fractional > UINT64_MAX - nanoseconds) return UINT64_MAX;
 	return nanoseconds + fractional;
 }
@@ -74,7 +75,7 @@ bool time_monotonic_init(void) {
 
 	frequency = hal_clock_monotonic_frequency();
 	if (frequency != 0u && hal_clock_monotonic_counter(&origin)) {
-		monotonic_origin    = origin;
+		monotonic_origin = origin;
 		monotonic_frequency = frequency;
 		__atomic_store_n(&monotonic_source, MONOTONIC_SOURCE_HARDWARE, __ATOMIC_RELEASE);
 		return true;
@@ -82,7 +83,7 @@ bool time_monotonic_init(void) {
 
 	frequency = hal_clock_frequency();
 	if (frequency == 0u) return false;
-	monotonic_origin    = sched_tick_count();
+	monotonic_origin = sched_tick_count();
 	monotonic_frequency = frequency;
 	__atomic_store_n(&monotonic_source, MONOTONIC_SOURCE_SCHEDULER, __ATOMIC_RELEASE);
 	return true;
@@ -107,12 +108,12 @@ bool time_monotonic_now(uint64_t* out_nanoseconds) {
 		return false;
 	}
 
-	elapsed   = counter < monotonic_origin ? 0u : counter - monotonic_origin;
+	elapsed = counter < monotonic_origin ? 0u : counter - monotonic_origin;
 	candidate = monotonic_ticks_to_ns(elapsed, monotonic_frequency);
-	previous  = __atomic_load_n(&monotonic_last_ns, __ATOMIC_ACQUIRE);
+	previous = __atomic_load_n(&monotonic_last_ns, __ATOMIC_ACQUIRE);
 	while (candidate > previous &&
-	       !__atomic_compare_exchange_n(
-			   &monotonic_last_ns, &previous, candidate, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+			!__atomic_compare_exchange_n(
+					&monotonic_last_ns, &previous, candidate, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
 	}
 	*out_nanoseconds = candidate > previous ? candidate : previous;
 	return true;

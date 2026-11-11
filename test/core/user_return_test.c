@@ -1,34 +1,36 @@
-#include <base/process.h>
-#include <core/process.h>
-#include <core/user_return.h>
-#include <core/user_upcall.h>
-#include <core/uthread.h>
-#include <criterion/criterion.h>
-#include <hal/hcf.h>
-#include <hal/userspace.h>
 #include <setjmp.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 
+#include <base/process.h>
+#include <hal/hcf.h>
+#include <hal/userspace.h>
+#include <core/process.h>
+#include <core/user_return.h>
+#include <core/user_upcall.h>
+#include <core/uthread.h>
+
+#include <criterion/criterion.h>
+
 struct hal_userspace_return_frame {
-	bool      user;
+	bool user;
 	uintptr_t marker;
 };
 
-static size_t                  frame_checks;
-static size_t                  current_checks;
-static size_t                  delivery_checks;
+static size_t frame_checks;
+static size_t current_checks;
+static size_t delivery_checks;
 static enum user_upcall_result delivery_result;
-static struct uthread          fake_current;
-static struct uthread*         current_thread;
-static size_t                  terminate_checks;
-static struct process*         terminated_process;
-static uintptr_t               terminated_exit_code;
-static bool                    cancel_pending;
-static jmp_buf                 cancel_return;
-static uintptr_t               cancel_exit_code;
+static struct uthread fake_current;
+static struct uthread* current_thread;
+static size_t terminate_checks;
+static struct process* terminated_process;
+static uintptr_t terminated_exit_code;
+static bool cancel_pending;
+static jmp_buf cancel_return;
+static uintptr_t cancel_exit_code;
 
 bool hal_userspace_frame_is_user(const struct hal_userspace_return_frame* frame) {
 	frame_checks++;
@@ -49,7 +51,7 @@ enum user_upcall_result uthread_upcall_deliver(struct uthread* thread, struct ha
 
 bool process_terminate(struct process* process, uintptr_t exit_code) {
 	terminate_checks++;
-	terminated_process   = process;
+	terminated_process = process;
 	terminated_exit_code = exit_code;
 	return true;
 }
@@ -71,23 +73,23 @@ void hcf(void) {
 }
 
 static void user_return_test_reset(void) {
-	frame_checks         = 0u;
-	current_checks       = 0u;
-	delivery_checks      = 0u;
-	delivery_result      = USER_UPCALL_IDLE;
-	terminate_checks     = 0u;
-	terminated_process   = NULL;
+	frame_checks = 0u;
+	current_checks = 0u;
+	delivery_checks = 0u;
+	delivery_result = USER_UPCALL_IDLE;
+	terminate_checks = 0u;
+	terminated_process = NULL;
 	terminated_exit_code = 0u;
-	cancel_pending       = false;
-	cancel_exit_code     = 0u;
-	fake_current         = (struct uthread){0};
+	cancel_pending = false;
+	cancel_exit_code = 0u;
+	fake_current = (struct uthread){0};
 	fake_current.process = (struct process*)(uintptr_t)1u;
-	current_thread       = &fake_current;
+	current_thread = &fake_current;
 }
 
 Test(user_return, exits_a_cancelled_userspace_thread_before_delivering_upcalls) {
 	struct hal_userspace_return_frame frame = {
-		.user   = true,
+		.user = true,
 		.marker = 0x123456789abcdef0ull,
 	};
 
@@ -116,7 +118,7 @@ Test(user_return, ignores_null_frame) {
 
 Test(user_return, ignores_kernel_return) {
 	struct hal_userspace_return_frame frame = {
-		.user   = false,
+		.user = false,
 		.marker = 0x1122334455667788ull,
 	};
 
@@ -131,7 +133,7 @@ Test(user_return, ignores_kernel_return) {
 
 Test(user_return, validates_userspace_owner_without_mutating_frame) {
 	struct hal_userspace_return_frame frame = {
-		.user   = true,
+		.user = true,
 		.marker = 0x8877665544332211ull,
 	};
 
@@ -146,7 +148,7 @@ Test(user_return, validates_userspace_owner_without_mutating_frame) {
 
 Test(user_return, accepts_delivered_upcall) {
 	struct hal_userspace_return_frame frame = {
-		.user   = true,
+		.user = true,
 		.marker = 0x123456789abcdef0ull,
 	};
 
@@ -161,7 +163,7 @@ Test(user_return, accepts_delivered_upcall) {
 
 Test(user_return, accepts_a_deferred_upcall_delivery) {
 	struct hal_userspace_return_frame frame = {
-		.user   = true,
+		.user = true,
 		.marker = 0x0fedcba987654321ull,
 	};
 
@@ -177,7 +179,7 @@ Test(user_return, accepts_a_deferred_upcall_delivery) {
 
 Test(user_return, ignores_a_dying_thread) {
 	struct hal_userspace_return_frame frame = {
-		.user   = true,
+		.user = true,
 		.marker = 0x1020304050607080ull,
 	};
 
@@ -192,7 +194,7 @@ Test(user_return, ignores_a_dying_thread) {
 
 Test(user_return, terminates_the_process_for_an_invalid_upcall_context) {
 	struct hal_userspace_return_frame frame = {
-		.user   = true,
+		.user = true,
 		.marker = 0xaabbccddeeff0011ull,
 	};
 

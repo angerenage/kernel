@@ -1,5 +1,8 @@
 #include "process.h"
 
+#include <libc/stdlib.h>
+#include <string.h>
+
 #include <base/cap.h>
 #include <base/process.h>
 #include <base/thread.h>
@@ -10,14 +13,12 @@
 #include <core/uthread.h>
 #include <kernel/capability.h>
 #include <kernel/trace.h>
-#include <libc/stdlib.h>
-#include <string.h>
 
 #include "thread.h"
 
 #define TRACE_CAP_OPERATION(operation, type)                                                                           \
 	kernel_trace_emit(                                                                                                 \
-		KERNEL_TRACE_EVENT_CAP_CALL_OPERATION, type, kernel_trace_thread_id(sched_current_thread()), operation)
+			KERNEL_TRACE_EVENT_CAP_CALL_OPERATION, type, kernel_trace_thread_id(sched_current_thread()), operation)
 
 /* Extract the operation code from a request buffer. Returns -1 if the buffer is too small. */
 static enum process_op process_op_from_request(const void* request, size_t request_size) {
@@ -30,17 +31,17 @@ static enum process_op process_op_from_request(const void* request, size_t reque
 static syscall_result_t process_info_handler(const struct cap_request* req, struct process* target) {
 	struct process_info_response response;
 
-	response.pid          = process_pid(target);
-	response.thread_id    = 0u;
+	response.pid = process_pid(target);
+	response.thread_id = 0u;
 	response.thread_count = process_thread_count(target);
 
 	return cap_kernel_write_response(req, &response, sizeof(response));
 }
 
-static syscall_result_t process_copy_thread_arg(const struct cap_request* req, const void* arg_data, size_t arg_size,
-                                                void** out_arg) {
-	struct process*  caller;
-	void*            copy;
+static syscall_result_t process_copy_thread_arg(
+		const struct cap_request* req, const void* arg_data, size_t arg_size, void** out_arg) {
+	struct process* caller;
+	void* copy;
 	syscall_result_t result;
 
 	if (out_arg == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -68,11 +69,11 @@ static syscall_result_t process_copy_thread_arg(const struct cap_request* req, c
 }
 
 static syscall_result_t process_run_handler(const struct cap_request* req, struct process* target) {
-	struct process_run_request       request;
-	struct uthread*                  main_thread = NULL;
+	struct process_run_request request;
+	struct uthread* main_thread = NULL;
 	enum process_thread_spawn_result result;
-	void*                            arg_copy = NULL;
-	syscall_result_t                 copy_result;
+	void* arg_copy = NULL;
+	syscall_result_t copy_result;
 
 	if (req->request == NULL || req->request_size < sizeof(request)) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -86,23 +87,23 @@ static syscall_result_t process_run_handler(const struct cap_request* req, struc
 	if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
 
 	result = process_prepare_main_thread(target,
-	                                     &main_thread,
-	                                     &(const struct process_thread_params){
-											 .name            = target->name,
-											 .user_entry      = request.entry,
-											 .arg_data        = arg_copy,
-											 .arg_size        = request.arg_size,
-											 .user_stack_size = UTHREAD_DEFAULT_USER_STACK_SIZE,
-											 .preferred_cpu   = NULL,
-											 .detached        = false,
-										 });
+			&main_thread,
+			&(const struct process_thread_params){
+				.name = target->name,
+				.user_entry = request.entry,
+				.arg_data = arg_copy,
+				.arg_size = request.arg_size,
+				.user_stack_size = UTHREAD_DEFAULT_USER_STACK_SIZE,
+				.preferred_cpu = NULL,
+				.detached = false,
+			});
 	free(arg_copy);
 	if (result != PROCESS_THREAD_SPAWN_OK) {
 		return syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
 	}
 
 	struct process_run_response response = {
-		.thread_id  = uthread_id(main_thread),
+		.thread_id = uthread_id(main_thread),
 		.thread_cap = kernel_thread_grant_full(main_thread, req->caller),
 	};
 	if (response.thread_cap == CAP_ID_INVALID) {
@@ -120,15 +121,15 @@ static syscall_result_t process_run_handler(const struct cap_request* req, struc
 }
 
 static syscall_result_t process_spawn_thread_handler(const struct cap_request* req, struct process* target) {
-	struct process_spawn_thread_request  request;
+	struct process_spawn_thread_request request;
 	struct process_spawn_thread_response response;
-	struct process_thread_params         params;
-	struct uthread*                      thread = NULL;
-	enum process_thread_spawn_result     result;
-	char*                                name     = NULL;
-	void*                                arg_copy = NULL;
-	syscall_result_t                     copy_result;
-	bool                                 detached;
+	struct process_thread_params params;
+	struct uthread* thread = NULL;
+	enum process_thread_spawn_result result;
+	char* name = NULL;
+	void* arg_copy = NULL;
+	syscall_result_t copy_result;
+	bool detached;
 
 	if (req->request == NULL || req->request_size < sizeof(request)) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -136,8 +137,8 @@ static syscall_result_t process_spawn_thread_handler(const struct cap_request* r
 	memcpy(&request, req->request, sizeof(request));
 	detached = (request.flags & PROCESS_SPAWN_THREAD_DETACHED) != 0u;
 	if ((request.flags & ~PROCESS_SPAWN_THREAD_DETACHED) != 0u || request.reserved != 0u || request.entry == 0u ||
-	    (detached ? req->response != NULL || req->response_capacity != 0u
-	              : !cap_kernel_response_fits(req, sizeof(response))))
+			(detached ? req->response != NULL || req->response_capacity != 0u
+			          : !cap_kernel_response_fits(req, sizeof(response))))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	copy_result = process_copy_thread_arg(req, request.arg_data, request.arg_size, &arg_copy);
 	if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
@@ -149,21 +150,21 @@ static syscall_result_t process_spawn_thread_handler(const struct cap_request* r
 	}
 
 	params = (struct process_thread_params){
-		.name            = name,
-		.user_entry      = request.entry,
-		.arg_data        = arg_copy,
-		.arg_size        = request.arg_size,
+		.name = name,
+		.user_entry = request.entry,
+		.arg_data = arg_copy,
+		.arg_size = request.arg_size,
 		.user_stack_size = UTHREAD_DEFAULT_USER_STACK_SIZE,
-		.preferred_cpu   = NULL,
-		.detached        = detached,
+		.preferred_cpu = NULL,
+		.detached = detached,
 	};
 	result = process_prepare_thread(target, &thread, &params);
 	free(name);
 	free(arg_copy);
 	if (result != PROCESS_THREAD_SPAWN_OK) {
 		return result == PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS
-				   ? syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, (uintptr_t)result)
-				   : syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
+					   ? syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, (uintptr_t)result)
+					   : syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)result);
 	}
 	if (detached) {
 		result = process_commit_thread(target, thread);
@@ -191,8 +192,8 @@ static syscall_result_t process_spawn_thread_handler(const struct cap_request* r
 
 static syscall_result_t process_wait_handler(const struct cap_request* req, struct process* target) {
 	struct process_wait_response response;
-	enum process_join_result     join_result;
-	uintptr_t                    exit_code = 0u;
+	enum process_join_result join_result;
+	uintptr_t exit_code = 0u;
 
 	if (!cap_kernel_response_fits(req, sizeof(response))) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -236,7 +237,7 @@ static syscall_result_t process_detach_handler(const struct cap_request* req, st
 
 static syscall_result_t process_kill_handler(const struct cap_request* req, struct process* target) {
 	struct process_kill_request request;
-	bool                        success;
+	bool success;
 
 	if (req->request == NULL || req->request_size < sizeof(request)) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -251,9 +252,9 @@ static syscall_result_t process_kill_handler(const struct cap_request* req, stru
 }
 
 static syscall_result_t process_handler(const struct cap_request* req) {
-	struct process*  process;
-	enum process_op  op;
-	cap_rights_t     required_rights;
+	struct process* process;
+	enum process_op op;
+	cap_rights_t required_rights;
 	syscall_result_t result;
 
 	process = process_acquire((process_id_t)req->object_id);
@@ -329,8 +330,8 @@ static syscall_result_t process_handler(const struct cap_request* req) {
 
 cap_id_t kernel_process_grant(struct process* target, process_id_t recipient, cap_rights_t rights) {
 	struct cap_object* object;
-	cap_object_id_t    object_id;
-	bool               object_created = false;
+	cap_object_id_t object_id;
+	bool object_created = false;
 
 	if (target == NULL || recipient == PROCESS_PID_INVALID) return CAP_ID_INVALID;
 
@@ -366,6 +367,6 @@ cap_id_t kernel_process_grant(struct process* target, process_id_t recipient, ca
 
 cap_id_t kernel_self_grant(struct process* process) {
 	return kernel_process_grant(process,
-	                            process_pid(process),
-	                            CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_EXEC | CAP_DELEGATE);
+			process_pid(process),
+			CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_EXEC | CAP_DELEGATE);
 }

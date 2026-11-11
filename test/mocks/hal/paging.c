@@ -4,10 +4,10 @@ struct hal_paging_space {
 	uintptr_t root_phys;
 };
 
-static uintptr_t                    hal_paging_mock_active_root;
-static struct hal_paging_space      kernel_space = {1u};
-static struct hal_paging_space      user_space   = {2u};
-static const struct hal_paging_info paging_info  = {4096u, 1ull << 12};
+static uintptr_t hal_paging_mock_active_root;
+static struct hal_paging_space kernel_space = {1u};
+static struct hal_paging_space user_space = {2u};
+static const struct hal_paging_info paging_info = {4096u, 1ull << 12};
 
 struct hal_paging_space* hal_paging_mock_space(uintptr_t root_phys) {
 	user_space.root_phys = root_phys;
@@ -87,8 +87,8 @@ bool hal_paging_protect(struct hal_paging_space* space, uintptr_t virt, size_t s
 	return size != 0u;
 }
 
-bool hal_paging_query(const struct hal_paging_space* space, uintptr_t virt,
-                      struct hal_paging_translation* out_translation) {
+bool hal_paging_query(
+		const struct hal_paging_space* space, uintptr_t virt, struct hal_paging_translation* out_translation) {
 	(void)space;
 	(void)virt;
 	if (out_translation != NULL) *out_translation = (struct hal_paging_translation){0};

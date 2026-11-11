@@ -1,9 +1,10 @@
-#include <boot/info.h>
-#include <hal/paging.h>
-#include <hal/serial.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <boot/info.h>
+#include <hal/paging.h>
+#include <hal/serial.h>
 
 #define PL011_BASE_PHYS 0x09000000ull
 #define PL011_PAGE_SIZE 0x00001000ull
@@ -40,10 +41,10 @@
 #define AARCH64_TT_ATTR_DEVICE_nGnRnE 2ull
 
 static volatile uint32_t* serial_base;
-static bool               serial_ready;
-static bool               serial_emergency_active;
-static bool               serial_identity_mapped;
-static bool               serial_direct_mapped;
+static bool serial_ready;
+static bool serial_emergency_active;
+static bool serial_identity_mapped;
+static bool serial_direct_mapped;
 
 static uint64_t ttbr0_l0[512] __attribute__((aligned(4096)));
 static uint64_t ttbr0_l1[512] __attribute__((aligned(4096)));
@@ -58,10 +59,10 @@ static inline uint64_t kernel_virt_to_phys(const void* ptr) {
 
 static inline void serial_tlb_flush_all(void) {
 	__asm__ volatile("dsb ishst\n\t"
-	                 "tlbi vmalle1\n\t"
-	                 "dsb ish\n\t"
-	                 "isb" ::
-	                     : "memory");
+					 "tlbi vmalle1\n\t"
+					 "dsb ish\n\t"
+					 "isb" ::
+							 : "memory");
 }
 
 static bool serial_map_uart_identity(void) {
@@ -86,22 +87,22 @@ static bool serial_map_uart_identity(void) {
 	                                             AARCH64_TT_DESC_PXN | AARCH64_TT_DESC_UXN;
 
 	__asm__ volatile("msr ttbr0_el1, %0\n\t"
-	                 "isb"
-	                 :
-	                 : "r"(l0_phys)
-	                 : "memory");
+					 "isb"
+			:
+			: "r"(l0_phys)
+			: "memory");
 	serial_tlb_flush_all();
 
-	serial_base            = (volatile uint32_t*)(uintptr_t)PL011_BASE_PHYS;
+	serial_base = (volatile uint32_t*)(uintptr_t)PL011_BASE_PHYS;
 	serial_identity_mapped = true;
 	return true;
 }
 
 static bool serial_map_uart_direct(void) {
 	struct boot_address_space address_space;
-	struct hal_paging_space*  kernel_space;
-	uintptr_t                 page_phys;
-	uintptr_t                 page_virt;
+	struct hal_paging_space* kernel_space;
+	uintptr_t page_phys;
+	uintptr_t page_virt;
 
 	if (serial_direct_mapped) return true;
 	if (!boot_address_space_get(&address_space)) return false;
@@ -112,16 +113,18 @@ static bool serial_map_uart_direct(void) {
 	page_phys = (uintptr_t)PL011_BASE_PHYS & ~(uintptr_t)(PL011_PAGE_SIZE - 1u);
 	page_virt = (uintptr_t)(address_space.direct_map_offset + page_phys);
 	if (!hal_paging_query(kernel_space, page_virt, NULL) &&
-	    !hal_paging_map(kernel_space,
-	                    &(const struct hal_paging_map_request){page_virt,
-	                                                           page_phys,
-	                                                           PL011_PAGE_SIZE,
-	                                                           HAL_PAGE_READ | HAL_PAGE_WRITE | HAL_PAGE_GLOBAL,
-	                                                           MEMORY_TYPE_DEVICE})) {
+			!hal_paging_map(kernel_space,
+					&(const struct hal_paging_map_request){
+						page_virt,
+						page_phys,
+						PL011_PAGE_SIZE,
+						HAL_PAGE_READ | HAL_PAGE_WRITE | HAL_PAGE_GLOBAL,
+						MEMORY_TYPE_DEVICE
+					})) {
 		return false;
 	}
 
-	serial_base          = (volatile uint32_t*)(uintptr_t)(address_space.direct_map_offset + PL011_BASE_PHYS);
+	serial_base = (volatile uint32_t*)(uintptr_t)(address_space.direct_map_offset + PL011_BASE_PHYS);
 	serial_direct_mapped = true;
 	return true;
 }
@@ -144,7 +147,7 @@ static inline uint32_t pl011_read(uint32_t offset) {
 }
 
 static inline void pl011_write(uint32_t offset, uint32_t value) {
-	volatile uint32_t* regs         = pl011_regs();
+	volatile uint32_t* regs = pl011_regs();
 	regs[offset / sizeof(uint32_t)] = value;
 }
 

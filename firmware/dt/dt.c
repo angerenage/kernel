@@ -1,8 +1,9 @@
-#include <firmware/dt.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <firmware/dt.h>
 
 #define DT_MAGIC 0xd00dfeedu
 #define DT_BEGIN_NODE 1u
@@ -20,24 +21,24 @@
 
 struct dt_state {
 	const uint8_t* blob;
-	size_t         blob_size;
+	size_t blob_size;
 	const uint8_t* structure;
-	size_t         structure_size;
+	size_t structure_size;
 	const uint8_t* strings;
-	size_t         strings_size;
-	uint32_t       version;
+	size_t strings_size;
+	uint32_t version;
 };
 
 struct dt_token {
 	uint32_t type;
-	size_t   next;
-	size_t   data;
-	size_t   size;
+	size_t next;
+	size_t data;
+	size_t size;
 	uint32_t name_offset;
 };
 
-static struct dt_state         dt;
-static bool                    dt_initialized;
+static struct dt_state dt;
+static bool dt_initialized;
 static const struct boot_info* dt_boot_info;
 
 static uint32_t dt_read_u32(const uint8_t* value) {
@@ -56,14 +57,14 @@ static bool dt_align(size_t value, size_t alignment, size_t* out) {
 
 static bool dt_physical_span(uintptr_t physical, size_t size, const void** out) {
 	const struct mem_range* ranges;
-	size_t                  range_count;
-	uintptr_t               end;
-	uintptr_t               cursor;
-	uintptr_t               virtual;
+	size_t range_count;
+	uintptr_t end;
+	uintptr_t cursor;
+	uintptr_t virtual;
 
 	if (size == 0u || size > UINTPTR_MAX - physical || dt_boot_info == NULL) return false;
-	end         = physical + size;
-	ranges      = dt_boot_info->memory_map;
+	end = physical + size;
+	ranges = dt_boot_info->memory_map;
 	range_count = dt_boot_info->memory_map_count;
 	if (ranges == NULL || range_count == 0u) return false;
 
@@ -75,7 +76,7 @@ static bool dt_physical_span(uintptr_t physical, size_t size, const void** out) 
 			uintptr_t range_end;
 
 			if (ranges[index].type != MEM_RANGE_BOOTLOADER_RECLAIMABLE || ranges[index].length == 0u ||
-			    ranges[index].length > UINTPTR_MAX - ranges[index].base)
+					ranges[index].length > UINTPTR_MAX - ranges[index].base)
 				continue;
 			range_end = ranges[index].base + ranges[index].length;
 			if (ranges[index].base <= cursor && range_end > covered_end) covered_end = range_end;
@@ -113,11 +114,11 @@ static size_t dt_header_size(uint32_t version) {
 
 static bool dt_token_read(const struct dt_state* state, size_t offset, size_t limit, struct dt_token* out) {
 	struct dt_token token;
-	size_t          cursor;
+	size_t cursor;
 
 	if (state == NULL || out == NULL || offset > limit || limit > state->structure_size || limit - offset < 4u)
 		return false;
-	token  = (struct dt_token){.type = dt_read_u32(state->structure + offset)};
+	token = (struct dt_token){.type = dt_read_u32(state->structure + offset)};
 	cursor = offset + 4u;
 	switch (token.type) {
 	case DT_BEGIN_NODE: {
@@ -134,9 +135,9 @@ static bool dt_token_read(const struct dt_state* state, size_t offset, size_t li
 		size_t end;
 
 		if (limit - cursor < 8u) return false;
-		token.size        = dt_read_u32(state->structure + cursor);
+		token.size = dt_read_u32(state->structure + cursor);
 		token.name_offset = dt_read_u32(state->structure + cursor + 4u);
-		data              = cursor + 8u;
+		data = cursor + 8u;
 		if (state->version < 16u && token.size >= 8u && (data & 7u) != 0u) {
 			if (!dt_range(data, 4u, limit) || !dt_zeroes(state->structure + data, 4u)) return false;
 			data += 4u;
@@ -159,10 +160,10 @@ static bool dt_token_read(const struct dt_state* state, size_t offset, size_t li
 }
 
 static bool dt_structure_validate(struct dt_state* state, size_t limit, size_t* out_size) {
-	size_t cursor      = 0u;
-	size_t depth       = 0u;
-	bool   root_seen   = false;
-	bool   root_closed = false;
+	size_t cursor = 0u;
+	size_t depth = 0u;
+	bool root_seen = false;
+	bool root_closed = false;
 
 	while (cursor < limit) {
 		struct dt_token token;
@@ -184,7 +185,7 @@ static bool dt_structure_validate(struct dt_state* state, size_t limit, size_t* 
 			break;
 		case DT_PROPERTY:
 			if (depth == 0u || token.name_offset >= state->strings_size ||
-			    memchr(state->strings + token.name_offset, '\0', state->strings_size - token.name_offset) == NULL)
+					memchr(state->strings + token.name_offset, '\0', state->strings_size - token.name_offset) == NULL)
 				return false;
 			break;
 		case DT_NOP:
@@ -207,7 +208,7 @@ static bool dt_reservations_validate(const uint8_t* blob, size_t total, size_t o
 
 	while (dt_range(cursor, 16u, total)) {
 		uint64_t address = dt_read_u64(blob + cursor);
-		uint64_t size    = dt_read_u64(blob + cursor + 8u);
+		uint64_t size = dt_read_u64(blob + cursor + 8u);
 
 		cursor += 16u;
 		if (address == 0u && size == 0u) {
@@ -219,30 +220,30 @@ static bool dt_reservations_validate(const uint8_t* blob, size_t total, size_t o
 }
 
 bool dt_init(const struct boot_info* info) {
-	const uint8_t*  bytes;
-	const void*     span;
-	uintptr_t       virtual;
-	uintptr_t       physical;
-	uint32_t        total32;
-	uint32_t        version;
-	uint32_t        last_compatible;
-	size_t          total;
-	size_t          header_size;
-	size_t          structure_offset;
-	size_t          structure_limit;
-	size_t          structure_declared;
-	size_t          structure_size;
-	size_t          strings_offset;
-	size_t          strings_size;
-	size_t          reservations_offset;
-	size_t          reservations_size;
+	const uint8_t* bytes;
+	const void* span;
+	uintptr_t virtual;
+	uintptr_t physical;
+	uint32_t total32;
+	uint32_t version;
+	uint32_t last_compatible;
+	size_t total;
+	size_t header_size;
+	size_t structure_offset;
+	size_t structure_limit;
+	size_t structure_declared;
+	size_t structure_size;
+	size_t strings_offset;
+	size_t strings_size;
+	size_t reservations_offset;
+	size_t reservations_size;
 	struct dt_state state;
 
 	const void* dtb;
 	if (__atomic_load_n(&dt_initialized, __ATOMIC_ACQUIRE)) return true;
 	if (info == NULL || info->dtb_address == 0u) return false;
 	dt_boot_info = info;
-	dtb          = (const void*)info->dtb_address;
+	dtb = (const void*)info->dtb_address;
 	if (((uintptr_t)dtb & 7u) != 0u) return false;
 	virtual = (uintptr_t)dtb;
 	if (virtual < info->direct_map_offset) return false;
@@ -250,25 +251,25 @@ bool dt_init(const struct boot_info* info) {
 	if (!dt_physical_span(physical, DT_V1_HEADER_SIZE, &span) || span != dtb) return false;
 	bytes = span;
 	if (dt_read_u32(bytes) != DT_MAGIC) return false;
-	version         = dt_read_u32(bytes + 20u);
+	version = dt_read_u32(bytes + 20u);
 	last_compatible = dt_read_u32(bytes + 24u);
 	if (version < DT_MIN_VERSION || version > DT_MAX_VERSION || last_compatible == 0u || last_compatible > version ||
-	    last_compatible > DT_MAX_VERSION)
+			last_compatible > DT_MAX_VERSION)
 		return false;
 	header_size = dt_header_size(version);
 	if (!dt_physical_span(physical, header_size, &span) || span != dtb) return false;
-	bytes   = span;
+	bytes = span;
 	total32 = dt_read_u32(bytes + 4u);
-	total   = total32;
+	total = total32;
 	if (total < header_size || total > DT_MAX_SIZE || !dt_physical_span(physical, total, &span) || span != dtb)
 		return false;
 	bytes = span;
 
-	structure_offset    = dt_read_u32(bytes + 8u);
-	strings_offset      = dt_read_u32(bytes + 12u);
+	structure_offset = dt_read_u32(bytes + 8u);
+	strings_offset = dt_read_u32(bytes + 12u);
 	reservations_offset = dt_read_u32(bytes + 16u);
 	if (structure_offset < header_size || (structure_offset & 3u) != 0u || strings_offset < header_size ||
-	    reservations_offset < header_size || (reservations_offset & 7u) != 0u)
+			reservations_offset < header_size || (reservations_offset & 7u) != 0u)
 		return false;
 	if (version >= 3u) {
 		strings_size = dt_read_u32(bytes + 32u);
@@ -295,16 +296,16 @@ bool dt_init(const struct boot_info* info) {
 	}
 
 	state = (struct dt_state){
-		.blob           = bytes,
-		.blob_size      = total,
-		.structure      = bytes + structure_offset,
+		.blob = bytes,
+		.blob_size = total,
+		.structure = bytes + structure_offset,
 		.structure_size = structure_limit,
-		.strings        = bytes + strings_offset,
-		.strings_size   = strings_size,
-		.version        = version,
+		.strings = bytes + strings_offset,
+		.strings_size = strings_size,
+		.version = version,
 	};
 	if (!dt_structure_validate(&state, structure_limit, &structure_size) ||
-	    !dt_reservations_validate(bytes, total, reservations_offset, &reservations_size))
+			!dt_reservations_validate(bytes, total, reservations_offset, &reservations_size))
 		return false;
 	if (version >= 17u) {
 		for (size_t index = structure_size; index < structure_declared; index++)
@@ -312,15 +313,15 @@ bool dt_init(const struct boot_info* info) {
 	}
 	else structure_declared = structure_size;
 	if (dt_overlap(0u, header_size, structure_offset, structure_declared) ||
-	    dt_overlap(0u, header_size, strings_offset, strings_size) ||
-	    dt_overlap(0u, header_size, reservations_offset, reservations_size) ||
-	    dt_overlap(structure_offset, structure_declared, strings_offset, strings_size) ||
-	    dt_overlap(structure_offset, structure_declared, reservations_offset, reservations_size) ||
-	    dt_overlap(strings_offset, strings_size, reservations_offset, reservations_size))
+			dt_overlap(0u, header_size, strings_offset, strings_size) ||
+			dt_overlap(0u, header_size, reservations_offset, reservations_size) ||
+			dt_overlap(structure_offset, structure_declared, strings_offset, strings_size) ||
+			dt_overlap(structure_offset, structure_declared, reservations_offset, reservations_size) ||
+			dt_overlap(strings_offset, strings_size, reservations_offset, reservations_size))
 		return false;
 
 	state.structure_size = structure_size;
-	dt                   = state;
+	dt = state;
 	__atomic_store_n(&dt_initialized, true, __ATOMIC_RELEASE);
 	return true;
 }
@@ -343,7 +344,7 @@ bool dt_node_valid(struct dt_node node) {
 
 struct dt_node dt_root(void) {
 	struct dt_token token;
-	size_t          cursor = 0u;
+	size_t cursor = 0u;
 
 	if (!__atomic_load_n(&dt_initialized, __ATOMIC_ACQUIRE)) return DT_NODE_INVALID;
 	while (cursor < dt.structure_size) {
@@ -357,7 +358,7 @@ struct dt_node dt_root(void) {
 
 struct dt_node dt_node_child(struct dt_node node) {
 	struct dt_token token;
-	size_t          cursor;
+	size_t cursor;
 
 	if (!dt_node_valid(node) || !dt_token_read(&dt, node.id, dt.structure_size, &token)) return DT_NODE_INVALID;
 	cursor = token.next;
@@ -372,8 +373,8 @@ struct dt_node dt_node_child(struct dt_node node) {
 
 struct dt_node dt_node_next(struct dt_node node) {
 	struct dt_token token;
-	size_t          cursor;
-	size_t          depth = 1u;
+	size_t cursor;
+	size_t depth = 1u;
 
 	if (!dt_node_valid(node) || !dt_token_read(&dt, node.id, dt.structure_size, &token)) return DT_NODE_INVALID;
 	cursor = token.next;
@@ -394,12 +395,12 @@ struct dt_node dt_node_next(struct dt_node node) {
 }
 
 struct dt_node dt_node_parent(struct dt_node node) {
-	struct dt_node  parent = DT_NODE_INVALID;
-	struct dt_node  root;
+	struct dt_node parent = DT_NODE_INVALID;
+	struct dt_node root;
 	struct dt_token token;
-	size_t          target_depth = 0u;
-	size_t          cursor       = 0u;
-	size_t          depth        = 0u;
+	size_t target_depth = 0u;
+	size_t cursor = 0u;
+	size_t depth = 0u;
 
 	if (!dt_node_valid(node)) return DT_NODE_INVALID;
 	root = dt_root();
@@ -415,8 +416,8 @@ struct dt_node dt_node_parent(struct dt_node node) {
 	}
 	if (cursor != node.id || depth == 0u) return DT_NODE_INVALID;
 	target_depth = depth;
-	cursor       = 0u;
-	depth        = 0u;
+	cursor = 0u;
+	depth = 0u;
 	while (cursor < node.id) {
 		if (!dt_token_read(&dt, cursor, dt.structure_size, &token)) return DT_NODE_INVALID;
 		if (token.type == DT_BEGIN_NODE) {
@@ -440,12 +441,12 @@ const char* dt_node_name(struct dt_node node) {
 	return (const char*)dt.structure + token.data;
 }
 
-static bool dt_node_property_find(struct dt_node node, size_t index, const char* name, const char** out_name,
-                                  struct dt_property* out) {
+static bool dt_node_property_find(
+		struct dt_node node, size_t index, const char* name, const char** out_name, struct dt_property* out) {
 	struct dt_token token;
-	size_t          cursor;
-	size_t          depth          = 0u;
-	size_t          property_index = 0u;
+	size_t cursor;
+	size_t depth = 0u;
+	size_t property_index = 0u;
 
 	if (!dt_node_valid(node) || !dt_token_read(&dt, node.id, dt.structure_size, &token)) return false;
 	cursor = token.next;
@@ -486,11 +487,11 @@ bool dt_node_property(struct dt_node node, const char* name, struct dt_property*
 
 bool dt_property_read_cells(const struct dt_property* property, size_t first_cell, size_t cell_count, uint64_t* out) {
 	const uint8_t* bytes;
-	uint64_t       value = 0u;
-	size_t         offset;
+	uint64_t value = 0u;
+	size_t offset;
 
 	if (property == NULL || property->data == NULL || out == NULL || cell_count == 0u || cell_count > 2u ||
-	    first_cell > SIZE_MAX / 4u)
+			first_cell > SIZE_MAX / 4u)
 		return false;
 	offset = first_cell * 4u;
 	if (offset > property->size || cell_count > (property->size - offset) / 4u) return false;
@@ -502,15 +503,15 @@ bool dt_property_read_cells(const struct dt_property* property, size_t first_cel
 
 bool dt_property_string_list_contains(const struct dt_property* property, const char* value) {
 	const uint8_t* bytes;
-	size_t         remaining;
-	bool           found = false;
+	size_t remaining;
+	bool found = false;
 
 	if (property == NULL || property->data == NULL || value == NULL) return false;
-	bytes     = property->data;
+	bytes = property->data;
 	remaining = property->size;
 	while (remaining != 0u) {
 		const uint8_t* end = memchr(bytes, '\0', remaining);
-		size_t         size;
+		size_t size;
 
 		if (end == NULL) return false;
 		size = (size_t)(end - bytes) + 1u;
@@ -538,32 +539,32 @@ bool dt_node_compatible(struct dt_node node, const char* compatible) {
 }
 
 struct dt_node dt_node_by_phandle(uint32_t phandle) {
-	struct dt_node found  = DT_NODE_INVALID;
-	size_t         cursor = 0u;
+	struct dt_node found = DT_NODE_INVALID;
+	size_t cursor = 0u;
 
 	if (phandle == 0u || !__atomic_load_n(&dt_initialized, __ATOMIC_ACQUIRE)) return DT_NODE_INVALID;
 	while (cursor < dt.structure_size) {
-		struct dt_token    token;
-		struct dt_node     node;
+		struct dt_token token;
+		struct dt_node node;
 		struct dt_property standard;
 		struct dt_property legacy;
-		uint64_t           standard_value = 0u;
-		uint64_t           legacy_value   = 0u;
-		bool               has_standard;
-		bool               has_legacy;
+		uint64_t standard_value = 0u;
+		uint64_t legacy_value = 0u;
+		bool has_standard;
+		bool has_legacy;
 
 		if (!dt_token_read(&dt, cursor, dt.structure_size, &token)) return DT_NODE_INVALID;
 		if (token.type != DT_BEGIN_NODE) {
 			cursor = token.next;
 			continue;
 		}
-		node         = (struct dt_node){.id = cursor};
+		node = (struct dt_node){.id = cursor};
 		has_standard = dt_node_property(node, "phandle", &standard);
-		has_legacy   = dt_node_property(node, "linux,phandle", &legacy);
+		has_legacy = dt_node_property(node, "linux,phandle", &legacy);
 		if ((has_standard && !dt_property_read_cells(&standard, 0u, 1u, &standard_value)) ||
-		    (has_legacy && !dt_property_read_cells(&legacy, 0u, 1u, &legacy_value)) ||
-		    (has_standard && standard.size != 4u) || (has_legacy && legacy.size != 4u) ||
-		    (has_standard && has_legacy && standard_value != legacy_value))
+				(has_legacy && !dt_property_read_cells(&legacy, 0u, 1u, &legacy_value)) ||
+				(has_standard && standard.size != 4u) || (has_legacy && legacy.size != 4u) ||
+				(has_standard && has_legacy && standard_value != legacy_value))
 			return DT_NODE_INVALID;
 		if ((has_standard && standard_value == phandle) || (has_legacy && legacy_value == phandle)) {
 			if (dt_node_valid(found)) return DT_NODE_INVALID;

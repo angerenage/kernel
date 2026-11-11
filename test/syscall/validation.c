@@ -1,3 +1,7 @@
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
 #include <base/cap.h>
 #include <base/process.h>
 #include <boot/info.h>
@@ -9,10 +13,8 @@
 #include <core/syscall.h>
 #include <core/thread.h>
 #include <core/uthread.h>
+
 #include <criterion/criterion.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
 
 #include "../../kernel/src/capability/address_space.h"
 #include "../../kernel/src/capability/process.h"
@@ -28,7 +30,7 @@ enum grant_slot {
 	GRANT_SLOT_COUNT,
 };
 
-static cap_id_t        grant_caps[GRANT_SLOT_COUNT];
+static cap_id_t grant_caps[GRANT_SLOT_COUNT];
 static cap_object_id_t grant_objects[GRANT_SLOT_COUNT];
 static enum grant_slot grant_fail_slot = GRANT_SLOT_COUNT;
 
@@ -39,8 +41,8 @@ static syscall_result_t grant_test_handler(const struct cap_request* request) {
 	return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 }
 
-static cap_id_t ensure_test_grant(enum grant_slot slot, uint64_t object_id, process_id_t recipient,
-                                  cap_rights_t rights) {
+static cap_id_t ensure_test_grant(
+		enum grant_slot slot, uint64_t object_id, process_id_t recipient, cap_rights_t rights) {
 	cap_id_t cap;
 
 	if (slot >= GRANT_SLOT_COUNT || recipient == PROCESS_PID_INVALID) return CAP_ID_INVALID;
@@ -57,7 +59,7 @@ static cap_id_t ensure_test_grant(enum grant_slot slot, uint64_t object_id, proc
 
 static void grant_test_reset(void) {
 	for (size_t i = 0u; i < GRANT_SLOT_COUNT; i++) {
-		grant_caps[i]    = CAP_ID_INVALID;
+		grant_caps[i] = CAP_ID_INVALID;
 		grant_objects[i] = CAP_OBJECT_ID_INVALID;
 	}
 	grant_fail_slot = GRANT_SLOT_COUNT;
@@ -87,11 +89,10 @@ cap_id_t kernel_process_grant(struct process* target, process_id_t recipient, ca
 
 cap_id_t kernel_self_grant(struct process* process) {
 	if (process == NULL) return CAP_ID_INVALID;
-	cap_id_t cap =
-		ensure_test_grant(GRANT_SELF,
-		                  0xf101u,
-		                  process_pid(process),
-		                  CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_EXEC | CAP_DELEGATE);
+	cap_id_t cap = ensure_test_grant(GRANT_SELF,
+			0xf101u,
+			process_pid(process),
+			CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_EXEC | CAP_DELEGATE);
 	if (cap != CAP_ID_INVALID) process_set_cap_object_id(process, grant_objects[GRANT_SELF]);
 	return cap;
 }
@@ -106,9 +107,9 @@ cap_id_t kernel_address_space_grant(struct process* process, process_id_t recipi
 cap_id_t kernel_thread_grant_full(struct uthread* target, process_id_t recipient) {
 	if (target == NULL) return CAP_ID_INVALID;
 	cap_id_t cap = ensure_test_grant(GRANT_MAIN_THREAD,
-	                                 0xf103u,
-	                                 recipient,
-	                                 CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_DELEGATE);
+			0xf103u,
+			recipient,
+			CAP_CALL | CAP_READ | CAP_WAIT | CAP_MANAGE | CAP_DESTROY | CAP_DELEGATE);
 	if (cap != CAP_ID_INVALID) uthread_set_cap_object_id(target, grant_objects[GRANT_MAIN_THREAD]);
 	return cap;
 }
@@ -143,58 +144,59 @@ static void destroy_current_process(struct process* process) {
 }
 
 Test(syscall_validation, failed_self_copyout_does_not_publish_hidden_grants) {
-	struct process*  process;
+	struct process* process;
 	syscall_result_t result;
-	size_t           caps_before;
-	size_t           objects_before;
+	size_t caps_before;
+	size_t objects_before;
 
-	process        = make_current_process("syscall/self-rollback");
-	caps_before    = capability_count();
+	process = make_current_process("syscall/self-rollback");
+	caps_before = capability_count();
 	objects_before = capability_object_count();
 
 	result = syscall_self(TEST_MAPPING_GRANULE, 0u, 0u, 0u, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT, "unmapped self-info output must reject the syscall");
 	cr_assert_eq(capability_count(),
-	             caps_before,
-	             "failed self copyout must not leave capabilities that userspace never received");
+			caps_before,
+			"failed self copyout must not leave capabilities that userspace never received");
 	cr_assert_eq(capability_object_count(),
-	             objects_before,
-	             "failed self copyout must not publish routing objects solely for the failed query");
+			objects_before,
+			"failed self copyout must not publish routing objects solely for the failed query");
 
 	destroy_current_process(process);
 }
 
 Test(syscall_validation, failed_self_copyout_preserves_preexisting_grants) {
-	struct process*  process;
-	struct uthread*  main_thread;
-	cap_id_t         self_cap;
-	cap_id_t         address_cap;
-	cap_id_t         thread_cap;
+	struct process* process;
+	struct uthread* main_thread;
+	cap_id_t self_cap;
+	cap_id_t address_cap;
+	cap_id_t thread_cap;
 	syscall_result_t result;
-	size_t           caps_before;
-	size_t           objects_before;
+	size_t caps_before;
+	size_t objects_before;
 
-	process     = make_current_process("syscall/self-existing");
+	process = make_current_process("syscall/self-existing");
 	main_thread = process_main_thread(process);
 	cr_assert_not_null(main_thread);
 
 	self_cap = kernel_self_grant(process);
 	address_cap =
-		kernel_address_space_grant(process, process_pid(process), CAP_CALL | CAP_MAP | CAP_READ | CAP_DELEGATE);
+			kernel_address_space_grant(process, process_pid(process), CAP_CALL | CAP_MAP | CAP_READ | CAP_DELEGATE);
 	thread_cap = kernel_thread_grant_full(main_thread, process_pid(process));
 	cr_assert_neq(self_cap, CAP_ID_INVALID);
 	cr_assert_neq(address_cap, CAP_ID_INVALID);
 	cr_assert_neq(thread_cap, CAP_ID_INVALID);
 
-	caps_before    = capability_count();
+	caps_before = capability_count();
 	objects_before = capability_object_count();
 
 	result = syscall_self(TEST_MAPPING_GRANULE, 0u, 0u, 0u, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_eq(capability_count(),
+			caps_before,
+			"copyout rollback must not destroy grants that existed before the syscall");
 	cr_assert_eq(
-		capability_count(), caps_before, "copyout rollback must not destroy grants that existed before the syscall");
-	cr_assert_eq(
-		capability_object_count(), objects_before, "copyout rollback must preserve preexisting routing objects");
+			capability_object_count(), objects_before, "copyout rollback must preserve preexisting routing objects");
 
 	{
 		struct capability* cap = cap_acquire(self_cap);
@@ -219,39 +221,39 @@ static uintptr_t allocate_self_info_output(struct process* process, struct mappi
 	void* base = NULL;
 
 	cr_assert(test_address_space_map(process_address_space(process),
-	                                 TEST_MAPPING_GRANULE,
-	                                 MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
-	                                 0u,
-	                                 TEST_MAPPING_GRANULE,
-	                                 0u,
-	                                 out_mapping,
-	                                 &base));
+			TEST_MAPPING_GRANULE,
+			MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+			0u,
+			TEST_MAPPING_GRANULE,
+			0u,
+			out_mapping,
+			&base));
 	cr_assert_not_null(base);
 	return (uintptr_t)base;
 }
 
 Test(syscall_validation, failed_address_space_grant_rolls_back_new_self_grant) {
-	struct process*  process;
-	struct mapping*  output_mapping = NULL;
-	uintptr_t        output;
-	size_t           caps_before;
-	size_t           objects_before;
+	struct process* process;
+	struct mapping* output_mapping = NULL;
+	uintptr_t output;
+	size_t caps_before;
+	size_t objects_before;
 	syscall_result_t result;
 
-	process         = make_current_process("syscall/self-address-grant-failure");
-	output          = allocate_self_info_output(process, &output_mapping);
-	caps_before     = capability_count();
-	objects_before  = capability_object_count();
+	process = make_current_process("syscall/self-address-grant-failure");
+	output = allocate_self_info_output(process, &output_mapping);
+	caps_before = capability_count();
+	objects_before = capability_object_count();
 	grant_fail_slot = GRANT_ADDRESS_SPACE;
 
 	result = syscall_self(output, 0u, 0u, 0u, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_FAILED);
 	cr_assert_eq(capability_count(),
-	             caps_before,
-	             "failed address-space grant left the earlier self capability hidden from userspace");
+			caps_before,
+			"failed address-space grant left the earlier self capability hidden from userspace");
 	cr_assert_eq(capability_object_count(),
-	             objects_before,
-	             "failed address-space grant left the earlier self routing object hidden from userspace");
+			objects_before,
+			"failed address-space grant left the earlier self routing object hidden from userspace");
 
 	grant_fail_slot = GRANT_SLOT_COUNT;
 	cr_assert(address_space_unmap(process_address_space(process), output_mapping));
@@ -260,27 +262,27 @@ Test(syscall_validation, failed_address_space_grant_rolls_back_new_self_grant) {
 }
 
 Test(syscall_validation, failed_thread_grant_rolls_back_all_new_preceding_grants) {
-	struct process*  process;
-	struct mapping*  output_mapping = NULL;
-	uintptr_t        output;
-	size_t           caps_before;
-	size_t           objects_before;
+	struct process* process;
+	struct mapping* output_mapping = NULL;
+	uintptr_t output;
+	size_t caps_before;
+	size_t objects_before;
 	syscall_result_t result;
 
-	process         = make_current_process("syscall/self-thread-grant-failure");
-	output          = allocate_self_info_output(process, &output_mapping);
-	caps_before     = capability_count();
-	objects_before  = capability_object_count();
+	process = make_current_process("syscall/self-thread-grant-failure");
+	output = allocate_self_info_output(process, &output_mapping);
+	caps_before = capability_count();
+	objects_before = capability_object_count();
 	grant_fail_slot = GRANT_MAIN_THREAD;
 
 	result = syscall_self(output, 0u, 0u, 0u, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_FAILED);
 	cr_assert_eq(capability_count(),
-	             caps_before,
-	             "failed thread grant left earlier self/address-space capabilities hidden from userspace");
+			caps_before,
+			"failed thread grant left earlier self/address-space capabilities hidden from userspace");
 	cr_assert_eq(capability_object_count(),
-	             objects_before,
-	             "failed thread grant left earlier routing objects hidden from userspace");
+			objects_before,
+			"failed thread grant left earlier routing objects hidden from userspace");
 
 	grant_fail_slot = GRANT_SLOT_COUNT;
 	cr_assert(address_space_unmap(process_address_space(process), output_mapping));
@@ -289,21 +291,21 @@ Test(syscall_validation, failed_thread_grant_rolls_back_all_new_preceding_grants
 }
 
 Test(syscall_validation, grant_failure_rollback_preserves_preexisting_self_grant) {
-	struct process*    process;
-	struct mapping*    output_mapping = NULL;
-	uintptr_t          output;
-	cap_id_t           existing_self;
+	struct process* process;
+	struct mapping* output_mapping = NULL;
+	uintptr_t output;
+	cap_id_t existing_self;
 	struct capability* retained;
-	size_t             caps_before;
-	size_t             objects_before;
-	syscall_result_t   result;
+	size_t caps_before;
+	size_t objects_before;
+	syscall_result_t result;
 
-	process       = make_current_process("syscall/self-existing-grant-failure");
-	output        = allocate_self_info_output(process, &output_mapping);
+	process = make_current_process("syscall/self-existing-grant-failure");
+	output = allocate_self_info_output(process, &output_mapping);
 	existing_self = kernel_self_grant(process);
 	cr_assert_neq(existing_self, CAP_ID_INVALID);
-	caps_before     = capability_count();
-	objects_before  = capability_object_count();
+	caps_before = capability_count();
+	objects_before = capability_object_count();
 	grant_fail_slot = GRANT_ADDRESS_SPACE;
 
 	result = syscall_self(output, 0u, 0u, 0u, 0u, 0u);

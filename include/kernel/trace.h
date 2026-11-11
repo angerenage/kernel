@@ -1,9 +1,10 @@
 #pragma once
 
-#include <base/trace.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/trace.h>
 
 #ifndef KERNEL_TRACE_ENABLED
 #define KERNEL_TRACE_ENABLED 0
@@ -154,8 +155,8 @@ struct kernel_trace_record {
 	uint64_t arg1;
 	uint32_t event_id;
 	uint16_t cpu;
-	uint8_t  type;
-	uint8_t  flags;
+	uint8_t type;
+	uint8_t flags;
 };
 
 struct kernel_trace_cpu_descriptor {
@@ -166,17 +167,17 @@ struct kernel_trace_cpu_descriptor {
 };
 
 struct kernel_trace_file_header {
-	uint64_t                           magic;
-	uint32_t                           version;
-	uint32_t                           header_size;
-	uint64_t                           total_size;
-	uint64_t                           clock_frequency;
-	uint32_t                           record_size;
-	uint32_t                           cpu_count;
-	uint64_t                           session_id;
-	uint32_t                           flags;
-	uint32_t                           reserved;
-	uint64_t                           checksum;
+	uint64_t magic;
+	uint32_t version;
+	uint32_t header_size;
+	uint64_t total_size;
+	uint64_t clock_frequency;
+	uint32_t record_size;
+	uint32_t cpu_count;
+	uint64_t session_id;
+	uint32_t flags;
+	uint32_t reserved;
+	uint64_t checksum;
 	struct kernel_trace_cpu_descriptor cpus[KERNEL_TRACE_MAX_CPUS];
 };
 
@@ -184,16 +185,16 @@ _Static_assert(sizeof(struct kernel_trace_record) == 32u, "trace record format m
 _Static_assert(offsetof(struct kernel_trace_file_header, checksum) == 56u, "trace checksum offset changed");
 
 #if KERNEL_TRACE_ENABLED
-bool             kernel_trace_init(void);
-bool             kernel_trace_start_autostop(void);
-bool             kernel_trace_is_active(void);
-void             kernel_trace_finalize(void);
-uint64_t         kernel_trace_thread_id(const struct thread* thread);
-void             kernel_trace_emit(uint32_t event_id, enum kernel_trace_record_type type, uint64_t arg0, uint64_t arg1);
+bool kernel_trace_init(void);
+bool kernel_trace_start_autostop(void);
+bool kernel_trace_is_active(void);
+void kernel_trace_finalize(void);
+uint64_t kernel_trace_thread_id(const struct thread* thread);
+void kernel_trace_emit(uint32_t event_id, enum kernel_trace_record_type type, uint64_t arg0, uint64_t arg1);
 trace_label_id_t kernel_trace_register_string(const char* string, size_t length);
-void             kernel_trace_register_process(uint64_t trace_process_id, uint64_t process_id, const char* name);
-void kernel_trace_register_user_thread(const struct thread* thread, uint64_t trace_process_id, uint64_t thread_id,
-                                       const char* name);
+void kernel_trace_register_process(uint64_t trace_process_id, uint64_t process_id, const char* name);
+void kernel_trace_register_user_thread(
+		const struct thread* thread, uint64_t trace_process_id, uint64_t thread_id, const char* name);
 #else
 static inline bool kernel_trace_init(void) {
 	return false;
@@ -224,8 +225,8 @@ static inline void kernel_trace_register_process(uint64_t trace_process_id, uint
 	(void)process_id;
 	(void)name;
 }
-static inline void kernel_trace_register_user_thread(const struct thread* thread, uint64_t trace_process_id,
-                                                     uint64_t thread_id, const char* name) {
+static inline void kernel_trace_register_user_thread(
+		const struct thread* thread, uint64_t trace_process_id, uint64_t thread_id, const char* name) {
 	(void)thread;
 	(void)trace_process_id;
 	(void)thread_id;

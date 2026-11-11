@@ -1,11 +1,12 @@
 #include <base/loader.h>
-#include <runtime/diagnostic.h>
+
 #include <system/capability.h>
 #include <system/loader.h>
+#include <runtime/diagnostic.h>
 
 syscall_status_t loader_load(cap_id_t loader_cap, cap_id_t module_cap, struct loader_load_response* out_response) {
 	const struct loader_load_request request = {.module_cap = module_cap};
-	syscall_result_t                 result;
+	syscall_result_t result;
 
 	if (loader_cap == CAP_ID_INVALID) {
 		RUNTIME_DIAGNOSTIC_INVALID_PARAMETER(loader_cap);
@@ -28,7 +29,7 @@ syscall_status_t loader_load(cap_id_t loader_cap, cap_id_t module_cap, struct lo
 		return SYSCALL_STATUS_FAILED;
 	}
 	if (out_response->process_cap == CAP_ID_INVALID || out_response->address_space_cap == CAP_ID_INVALID ||
-	    out_response->entry == 0u || out_response->heap_base == 0u || out_response->heap_size == 0u) {
+			out_response->entry == 0u || out_response->heap_base == 0u || out_response->heap_size == 0u) {
 		RUNTIME_DIAGNOSTIC_FAILED(loader_load);
 		return SYSCALL_STATUS_FAILED;
 	}

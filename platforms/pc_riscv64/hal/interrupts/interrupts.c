@@ -1,16 +1,17 @@
 #include "interrupts.h"
 
-#include <core/address_space.h>
-#include <core/cpu.h>
-#include <core/exception.h>
-#include <core/sched.h>
-#include <hal/hcf.h>
-#include <hal/interrupts.h>
-#include <kernel/crash.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+
+#include <hal/hcf.h>
+#include <hal/interrupts.h>
+#include <core/address_space.h>
+#include <core/cpu.h>
+#include <core/exception.h>
+#include <core/sched.h>
+#include <kernel/crash.h>
 
 #include "../clock.h"
 #include "../syscall.h"
@@ -40,9 +41,9 @@ struct riscv64_exception_entry_state {
 } riscv64_exception_entry_state[64];
 
 _Static_assert(offsetof(struct riscv64_exception_entry_state, kernel_stack_top) == 32u,
-               "riscv64 exception entry assembly kernel_stack_top offset mismatch");
+		"riscv64 exception entry assembly kernel_stack_top offset mismatch");
 _Static_assert(offsetof(struct riscv64_exception_entry_state, cpu_local) == 40u,
-               "riscv64 exception entry assembly cpu_local offset mismatch");
+		"riscv64 exception entry assembly cpu_local offset mismatch");
 
 static inline uint64_t read_sie(void) {
 	uint64_t value;
@@ -82,7 +83,7 @@ void riscv64_sync_external_interrupt_local(void) {
 
 	sie = read_sie();
 	if (riscv64_plic_cpu_has_enabled_sources(cpu_current()) || riscv64_aplic_cpu_has_interface(cpu_current()) ||
-	    riscv64_imsic_cpu_has_interface(cpu_current()))
+			riscv64_imsic_cpu_has_interface(cpu_current()))
 		sie |= RISCV64_SIE_SEIE;
 	else sie &= ~RISCV64_SIE_SEIE;
 	write_sie(sie);
@@ -107,10 +108,11 @@ bool hal_interrupt_source_domain_at(size_t index, struct hal_interrupt_source_do
 	return index == 0u && riscv64_aplic_source_domain_at(out_domain);
 }
 
-bool hal_interrupt_source_resolve(uint64_t controller_register_address, uint32_t local_source_id,
-                                  struct hal_interrupt_source* out_source) {
-	return global_ready && (riscv64_plic_source_resolve(controller_register_address, local_source_id, out_source) ||
-	                        riscv64_aplic_source_resolve(controller_register_address, local_source_id, out_source));
+bool hal_interrupt_source_resolve(
+		uint64_t controller_register_address, uint32_t local_source_id, struct hal_interrupt_source* out_source) {
+	return global_ready &&
+	       (riscv64_plic_source_resolve(controller_register_address, local_source_id, out_source) ||
+				   riscv64_aplic_source_resolve(controller_register_address, local_source_id, out_source));
 }
 
 bool hal_interrupt_source_claimable(const struct hal_interrupt_source* source) {
@@ -123,8 +125,7 @@ bool hal_interrupt_source_claimable(const struct hal_interrupt_source* source) {
 }
 
 bool hal_interrupt_source_configuration_supported(const struct hal_interrupt_source* source,
-                                                  enum hal_interrupt_trigger         trigger,
-                                                  enum hal_interrupt_polarity        polarity) {
+		enum hal_interrupt_trigger trigger, enum hal_interrupt_polarity polarity) {
 	struct hal_interrupt_source_info info;
 	if (source == NULL || trigger > HAL_INTERRUPT_TRIGGER_LEVEL || polarity > HAL_INTERRUPT_POLARITY_LOW) return false;
 
@@ -150,7 +151,7 @@ bool hal_interrupt_source_target_supported(const struct hal_interrupt_source* so
 }
 
 bool hal_interrupt_source_init(struct hal_interrupt_source_state* state, const struct hal_interrupt_source* source,
-                               const struct hal_interrupt_delivery* delivery) {
+		const struct hal_interrupt_delivery* delivery) {
 	if (source == NULL) return false;
 	if (source->domain == 1u) return riscv64_plic_source_init(state, source, delivery);
 	return riscv64_aplic_source_init(state, source, delivery);
@@ -181,22 +182,21 @@ size_t hal_interrupt_message_range_count(void) {
 bool hal_interrupt_message_range_at(size_t index, struct hal_interrupt_message_range* out_range) {
 	return global_ready && index == 0u && riscv64_imsic_message_range_at(out_range);
 }
-bool hal_interrupt_message_resolve(uint64_t controller_register_address, uint32_t producer_id,
-                                   struct hal_interrupt_message_context* out_context) {
+bool hal_interrupt_message_resolve(
+		uint64_t controller_register_address, uint32_t producer_id, struct hal_interrupt_message_context* out_context) {
 	struct hal_interrupt_message_range range;
 	if (controller_register_address != UINT64_MAX || producer_id != UINT32_MAX || out_context == NULL ||
-	    !hal_interrupt_message_range_at(0u, &range))
+			!hal_interrupt_message_range_at(0u, &range))
 		return false;
 	*out_context = (struct hal_interrupt_message_context){.domain = range.domain};
 	return true;
 }
-bool hal_interrupt_message_target_supported(uint32_t domain, const struct hal_interrupt_message_source* source,
-                                            const struct cpu* target) {
+bool hal_interrupt_message_target_supported(
+		uint32_t domain, const struct hal_interrupt_message_source* source, const struct cpu* target) {
 	return global_ready && riscv64_imsic_message_target_supported(domain, source, target);
 }
-bool hal_interrupt_message_init(struct hal_interrupt_message_state*         state,
-                                const struct hal_interrupt_message_request* request,
-                                struct hal_interrupt_message*               out_message) {
+bool hal_interrupt_message_init(struct hal_interrupt_message_state* state,
+		const struct hal_interrupt_message_request* request, struct hal_interrupt_message* out_message) {
 	return global_ready && riscv64_imsic_message_init(state, request, out_message);
 }
 bool hal_interrupt_message_deinit(struct hal_interrupt_message_state* state) {
@@ -209,20 +209,20 @@ bool hal_interrupts_init_global(void) {
 }
 
 bool hal_interrupts_init_local(struct cpu* cpu) {
-	uintptr_t                             entry;
+	uintptr_t entry;
 	struct riscv64_exception_entry_state* entry_state;
-	uint64_t                              sie;
+	uint64_t sie;
 
 	if (!global_ready || cpu == NULL || cpu->index >= 64u) return false;
 	if (local_ready[cpu->index]) return true;
 
-	entry       = (uintptr_t)exception_entry;
+	entry = (uintptr_t)exception_entry;
 	entry_state = &riscv64_exception_entry_state[cpu->index];
-	sie         = read_sie();
+	sie = read_sie();
 	sie &= ~(RISCV64_SIE_STIE | RISCV64_SIE_SEIE);
 	sie |= RISCV64_SIE_SSIE;
 	entry_state->kernel_stack_top = cpu->kernel_entry_stack_top;
-	entry_state->cpu_local        = (uintptr_t)cpu;
+	entry_state->cpu_local = (uintptr_t)cpu;
 
 	__asm__ volatile("csrw stvec, %0" : : "r"(entry) : "memory");
 	write_sscratch((uint64_t)(uintptr_t)entry_state);
@@ -238,13 +238,13 @@ bool hal_interrupts_init_local(struct cpu* cpu) {
 }
 
 void riscv64_prepare_user_return(void) {
-	struct cpu*                           cpu = cpu_current();
+	struct cpu* cpu = cpu_current();
 	struct riscv64_exception_entry_state* entry_state;
 
 	sched_finish_context_switch();
 	if (cpu == NULL || cpu->index >= 64u || cpu->kernel_entry_stack_top == 0u) hcf();
 
-	entry_state                   = &riscv64_exception_entry_state[cpu->index];
+	entry_state = &riscv64_exception_entry_state[cpu->index];
 	entry_state->kernel_stack_top = cpu->kernel_entry_stack_top;
 	__asm__ volatile("" : : : "memory");
 }
@@ -308,8 +308,8 @@ void riscv64_maybe_preempt_on_interrupt_exit(void) {
 }
 
 void handle_exception(struct exception_frame* frame) {
-	bool     is_interrupt = (frame->scause >> 63) != 0;
-	uint64_t code         = frame->scause & ~(1ull << 63);
+	bool is_interrupt = (frame->scause >> 63) != 0;
+	uint64_t code = frame->scause & ~(1ull << 63);
 
 	if (riscv64_handle_syscall(frame, is_interrupt, code)) return;
 	if (!is_interrupt) cpu_enter_exception();
@@ -334,9 +334,9 @@ void handle_exception(struct exception_frame* frame) {
 	if (!is_interrupt && is_page_fault_exception(code)) {
 		cpu_leave_exception();
 		if (address_space_handle_current_fault(frame->stval,
-		                                       ADDRESS_SPACE_FAULT_UNCLASSIFIED,
-		                                       page_fault_access(code),
-		                                       was_user_mode(frame->sstatus))) {
+					ADDRESS_SPACE_FAULT_UNCLASSIFIED,
+					page_fault_access(code),
+					was_user_mode(frame->sstatus))) {
 			return;
 		}
 		cpu_enter_exception();
@@ -348,24 +348,23 @@ void handle_exception(struct exception_frame* frame) {
 		cpu_enter_exception();
 	}
 
-	struct kernel_crash_record* record =
-		kernel_crash_begin(KERNEL_CRASH_ARCH_RISCV64,
-		                   is_interrupt ? KERNEL_CRASH_CAUSE_UNEXPECTED_INTERRUPT : KERNEL_CRASH_CAUSE_EXCEPTION);
+	struct kernel_crash_record* record = kernel_crash_begin(KERNEL_CRASH_ARCH_RISCV64,
+			is_interrupt ? KERNEL_CRASH_CAUSE_UNEXPECTED_INTERRUPT : KERNEL_CRASH_CAUSE_EXCEPTION);
 	struct kernel_crash_panic panic;
 
 	if (kernel_crash_take_panic(&panic)) {
-		record->cause        = KERNEL_CRASH_CAUSE_PANIC;
+		record->cause = KERNEL_CRASH_CAUSE_PANIC;
 		record->panic_reason = panic.reason;
 		record->panic_detail = panic.detail;
 	}
-	record->exception_code      = code;
-	record->error_code          = frame->scause;
-	record->fault_address       = frame->stval;
+	record->exception_code = code;
+	record->error_code = frame->scause;
+	record->fault_address = frame->stval;
 	record->instruction_pointer = frame->sepc;
-	record->stack_pointer       = frame->sp;
-	record->frame_pointer       = frame->s0;
-	record->status              = frame->sstatus;
-	record->register_count      = 31u;
+	record->stack_pointer = frame->sp;
+	record->frame_pointer = frame->s0;
+	record->status = frame->sstatus;
+	record->register_count = 31u;
 	memcpy(record->registers, &frame->ra, record->register_count * sizeof(record->registers[0]));
 	kernel_crash_finish(record);
 }

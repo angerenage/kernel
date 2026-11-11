@@ -1,12 +1,14 @@
-#include <base/math.h>
-#include <criterion/criterion.h>
 #include <stdint.h>
 
+#include <base/math.h>
+
+#include <criterion/criterion.h>
+
 Test(base_math, overflow_helpers_detect_success_and_overflow) {
-	uint64_t sum64        = 0u;
-	uint64_t product64    = 0u;
-	size_t   sum_size     = 0u;
-	size_t   product_size = 0u;
+	uint64_t sum64 = 0u;
+	uint64_t product64 = 0u;
+	size_t sum_size = 0u;
+	size_t product_size = 0u;
 
 	cr_assert_not(add_overflow_u64(4u, 5u, &sum64));
 	cr_assert_eq(sum64, 9u);
@@ -26,8 +28,8 @@ Test(base_math, overflow_helpers_detect_success_and_overflow) {
 }
 
 Test(base_math, alignment_helpers_round_and_normalize) {
-	uint64_t aligned_u64  = 0u;
-	size_t   aligned_size = 0u;
+	uint64_t aligned_u64 = 0u;
+	size_t aligned_size = 0u;
 
 	cr_assert(align_up_u64(17u, 16u, &aligned_u64));
 	cr_assert_eq(aligned_u64, 32u);

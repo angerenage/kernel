@@ -1,8 +1,9 @@
 #pragma once
 
-#include <hal/iommu.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+#include <hal/iommu.h>
 
 /* Return the initialized IOMMU information for a controller. */
 const struct hal_iommu_info* dma_controller_info(uint32_t controller_index);

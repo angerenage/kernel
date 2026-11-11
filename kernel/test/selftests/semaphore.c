@@ -1,8 +1,9 @@
-#include <core/semaphore.h>
-#include <core/thread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <core/semaphore.h>
+#include <core/thread.h>
 
 #include "../selftest.h"
 #include "sync_helpers.h"
@@ -31,9 +32,9 @@ overflow_check:
 
 struct kernel_selftest_semaphore_wait_state {
 	struct semaphore semaphore;
-	struct thread*   waiter_thread;
-	bool             waiter_started;
-	bool             waiter_acquired;
+	struct thread* waiter_thread;
+	bool waiter_started;
+	bool waiter_acquired;
 };
 
 static void kernel_selftest_semaphore_waiter_worker(void* arg) {
@@ -41,28 +42,27 @@ static void kernel_selftest_semaphore_waiter_worker(void* arg) {
 
 	if (state == NULL) return;
 
-	state->waiter_thread  = kthread_current();
+	state->waiter_thread = kthread_current();
 	state->waiter_started = true;
 	semaphore_acquire(&state->semaphore);
 	state->waiter_acquired = true;
 }
 
 static void kernel_selftest_semaphore_release_wakes_blocked_waiter(struct kernel_selftest_context* ctx) {
-	struct kthread*                             waiter = NULL;
-	struct kernel_selftest_semaphore_wait_state state  = {0};
+	struct kthread* waiter = NULL;
+	struct kernel_selftest_semaphore_wait_state state = {0};
 
 	semaphore_init(&state.semaphore, 0u);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx,
-		kernel_selftest_thread_create(
-			&waiter, "selftest/semaphore-waiter", kernel_selftest_semaphore_waiter_worker, &state),
-		"failed to create semaphore waiter thread",
-		cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+			kernel_selftest_thread_create(
+					&waiter, "selftest/semaphore-waiter", kernel_selftest_semaphore_waiter_worker, &state),
+			"failed to create semaphore waiter thread",
+			cleanup);
 
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, state.waiter_started, "waiter thread did not attempt semaphore_acquire", cleanup);
+			ctx, state.waiter_started, "waiter thread did not attempt semaphore_acquire", cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.waiter_acquired, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_thread_is_live(waiter), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_thread == &waiter->thread, cleanup);
@@ -72,7 +72,7 @@ static void kernel_selftest_semaphore_release_wakes_blocked_waiter(struct kernel
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, semaphore_waiter_count(&state.semaphore) == 1u, cleanup);
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, semaphore_release(&state.semaphore), "semaphore_release failed to publish a permit", cleanup);
+			ctx, semaphore_release(&state.semaphore), "semaphore_release failed to publish a permit", cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, semaphore_count(&state.semaphore) == 1u, cleanup);
 
 	sched_yield();
@@ -95,12 +95,12 @@ cleanup:
 
 struct kernel_selftest_semaphore_timed_state {
 	struct semaphore semaphore;
-	struct thread*   waiter_thread;
-	uint64_t         waiter_start_tick;
-	uint64_t         waiter_finish_tick;
-	bool             waiter_started;
-	bool             waiter_result;
-	bool             waiter_finished;
+	struct thread* waiter_thread;
+	uint64_t waiter_start_tick;
+	uint64_t waiter_finish_tick;
+	bool waiter_started;
+	bool waiter_result;
+	bool waiter_finished;
 };
 
 static void kernel_selftest_semaphore_timed_waiter_worker(void* arg) {
@@ -108,38 +108,37 @@ static void kernel_selftest_semaphore_timed_waiter_worker(void* arg) {
 
 	if (state == NULL) return;
 
-	state->waiter_thread      = kthread_current();
-	state->waiter_started     = true;
-	state->waiter_start_tick  = sched_tick_count();
-	state->waiter_result      = semaphore_timed_acquire(&state->semaphore, KERNEL_SELFTEST_SEMAPHORE_TIMEOUT_MS);
+	state->waiter_thread = kthread_current();
+	state->waiter_started = true;
+	state->waiter_start_tick = sched_tick_count();
+	state->waiter_result = semaphore_timed_acquire(&state->semaphore, KERNEL_SELFTEST_SEMAPHORE_TIMEOUT_MS);
 	state->waiter_finish_tick = sched_tick_count();
-	state->waiter_finished    = true;
+	state->waiter_finished = true;
 }
 
 static void kernel_selftest_semaphore_timed_acquire_times_out_without_permit(struct kernel_selftest_context* ctx) {
-	struct kthread*                              waiter           = NULL;
-	struct kernel_selftest_semaphore_timed_state state            = {0};
-	struct kernel_selftest_clock_scope           clock            = {0};
-	uint64_t                                     timeout_ticks    = 0u;
-	uint64_t                                     timeout_deadline = 0u;
+	struct kthread* waiter = NULL;
+	struct kernel_selftest_semaphore_timed_state state = {0};
+	struct kernel_selftest_clock_scope clock = {0};
+	uint64_t timeout_ticks = 0u;
+	uint64_t timeout_deadline = 0u;
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, kernel_selftest_clock_scope_begin(&clock), "failed to start a temporary clock source", cleanup);
+			ctx, kernel_selftest_clock_scope_begin(&clock), "failed to start a temporary clock source", cleanup);
 	timeout_ticks = kernel_selftest_ms_to_ticks(KERNEL_SELFTEST_SEMAPHORE_TIMEOUT_MS, clock.hz);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, timeout_ticks != 0u, "timeout conversion returned zero ticks", cleanup);
 
 	semaphore_init(&state.semaphore, 0u);
-	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx,
-		kernel_selftest_thread_create(
-			&waiter, "selftest/semaphore-timeout", kernel_selftest_semaphore_timed_waiter_worker, &state),
-		"failed to create timed semaphore waiter thread",
-		cleanup);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+			kernel_selftest_thread_create(
+					&waiter, "selftest/semaphore-timeout", kernel_selftest_semaphore_timed_waiter_worker, &state),
+			"failed to create timed semaphore waiter thread",
+			cleanup);
 
 	sched_yield();
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
-		ctx, state.waiter_started, "waiter thread did not attempt semaphore_timed_acquire", cleanup);
+			ctx, state.waiter_started, "waiter thread did not attempt semaphore_timed_acquire", cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.waiter_finished, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, kernel_selftest_thread_is_live(waiter), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_thread == &waiter->thread, cleanup);
@@ -189,25 +188,25 @@ cleanup:
 
 static const struct kernel_selftest_case kernel_semaphore_selftests[] = {
 	{
-	 .name = "counts_and_overflow_behave",
-	 .run  = kernel_selftest_semaphore_counts_and_overflow_behave,
-	 },
+		.name = "counts_and_overflow_behave",
+		.run = kernel_selftest_semaphore_counts_and_overflow_behave,
+	},
 	{
-	 .name = "release_wakes_blocked_waiter",
-	 .run  = kernel_selftest_semaphore_release_wakes_blocked_waiter,
-	 },
+		.name = "release_wakes_blocked_waiter",
+		.run = kernel_selftest_semaphore_release_wakes_blocked_waiter,
+	},
 	{
-	 .name = "timed_acquire_times_out_without_permit",
-	 .run  = kernel_selftest_semaphore_timed_acquire_times_out_without_permit,
-	 },
+		.name = "timed_acquire_times_out_without_permit",
+		.run = kernel_selftest_semaphore_timed_acquire_times_out_without_permit,
+	},
 	{
-	 .name = "timed_acquire_zero_timeout_is_non_blocking",
-	 .run  = kernel_selftest_semaphore_timed_acquire_zero_timeout_is_non_blocking,
-	 },
+		.name = "timed_acquire_zero_timeout_is_non_blocking",
+		.run = kernel_selftest_semaphore_timed_acquire_zero_timeout_is_non_blocking,
+	},
 };
 
 const struct kernel_selftest_suite kernel_semaphore_selftest_suite = {
-	.name       = "semaphore",
-	.cases      = kernel_semaphore_selftests,
+	.name = "semaphore",
+	.cases = kernel_semaphore_selftests,
 	.case_count = sizeof(kernel_semaphore_selftests) / sizeof(kernel_semaphore_selftests[0]),
 };

@@ -2,14 +2,16 @@
 #include <pthread.h>
 #undef sched_yield
 
+#include <stddef.h>
+#include <stdint.h>
+
+#include <hal/clock.h>
+#include <hal/interrupts.h>
 #include <core/cpu.h>
 #include <core/sched.h>
 #include <core/time.h>
+
 #include <criterion/criterion.h>
-#include <hal/clock.h>
-#include <hal/interrupts.h>
-#include <stddef.h>
-#include <stdint.h>
 
 #include "../mocks/hal/clock.h"
 
@@ -70,8 +72,8 @@ Test(core_time, regressing_hardware_samples_are_clamped) {
 
 Test(core_time, concurrent_observations_preserve_the_high_water_mark) {
 	pthread_t threads[TIME_TEST_THREAD_COUNT];
-	bool      failed = false;
-	uint64_t  now;
+	bool failed = false;
+	uint64_t now;
 
 	hal_clock_init();
 	hal_clock_mock_set_monotonic(1000000000u, 0u, true);

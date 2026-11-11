@@ -1,13 +1,14 @@
 #include "time.h"
 
-#include <base/time.h>
-#include <core/sched.h>
-#include <core/time.h>
-#include <hal/clock.h>
 #include <stdint.h>
 
-syscall_result_t syscall_yield(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                               uintptr_t arg5) {
+#include <base/time.h>
+#include <hal/clock.h>
+#include <core/sched.h>
+#include <core/time.h>
+
+syscall_result_t syscall_yield(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
 	(void)arg0;
 	(void)arg1;
 	(void)arg2;
@@ -19,8 +20,8 @@ syscall_result_t syscall_yield(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, u
 	return syscall_result_ok(0u);
 }
 
-syscall_result_t syscall_sleep_ms(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                  uintptr_t arg5) {
+syscall_result_t syscall_sleep_ms(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
 	uint64_t deadline_tick;
 	uint32_t frequency;
 
@@ -45,8 +46,8 @@ syscall_result_t syscall_sleep_ms(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 	return syscall_result_ok(0u);
 }
 
-syscall_result_t syscall_tick_count(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                    uintptr_t arg5) {
+syscall_result_t syscall_tick_count(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
 	(void)arg0;
 	(void)arg1;
 	(void)arg2;
@@ -57,8 +58,8 @@ syscall_result_t syscall_tick_count(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 	return syscall_result_ok((uintptr_t)sched_tick_count());
 }
 
-syscall_result_t syscall_monotonic_time_ns(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
-                                           uintptr_t arg4, uintptr_t arg5) {
+syscall_result_t syscall_monotonic_time_ns(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
 	uint64_t nanoseconds;
 
 	(void)arg0;

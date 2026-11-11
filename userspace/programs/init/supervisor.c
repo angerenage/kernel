@@ -1,6 +1,11 @@
 #include "supervisor.h"
 
 #include <limits.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include <protocol/device_manager_control.h>
 #include <protocol/filesystem.h>
 #include <protocol/loader.h>
@@ -8,13 +13,6 @@
 #include <protocol/text_input.h>
 #include <protocol/tty_session.h>
 #include <protocol/vfs.h>
-#include <runtime/device_manager.h>
-#include <runtime/program.h>
-#include <runtime/vfs.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <system/capability.h>
 #include <system/channel.h>
 #include <system/display.h>
@@ -23,6 +21,9 @@
 #include <system/signal.h>
 #include <system/thread.h>
 #include <system/time.h>
+#include <runtime/device_manager.h>
+#include <runtime/program.h>
+#include <runtime/vfs.h>
 
 #include "configuration.h"
 #include "device_manager.h"
@@ -70,11 +71,11 @@ enum supervised_process_state {
 };
 
 struct supervised_process {
-	const char*                   description;
+	const char* description;
 	enum supervised_process_state state;
-	uint64_t                      generation;
-	unsigned int                  restart_count;
-	cap_id_t                      process_cap;
+	uint64_t generation;
+	unsigned int restart_count;
+	cap_id_t process_cap;
 };
 
 enum supervisor_event_op {
@@ -84,25 +85,25 @@ enum supervisor_event_op {
 };
 
 struct supervisor_event {
-	enum supervisor_event_op   op;
+	enum supervisor_event_op op;
 	enum supervised_process_id process;
-	uint64_t                   generation;
-	syscall_status_t           wait_status;
-	uintptr_t                  exit_code;
+	uint64_t generation;
+	syscall_status_t wait_status;
+	uintptr_t exit_code;
 };
 
 struct process_monitor_argument {
-	cap_id_t                   process_cap;
-	cap_id_t                   control_cap;
+	cap_id_t process_cap;
+	cap_id_t control_cap;
 	enum supervised_process_id process;
-	uint64_t                   generation;
+	uint64_t generation;
 };
 
 struct process_retry_argument {
-	cap_id_t                   control_cap;
+	cap_id_t control_cap;
 	enum supervised_process_id process;
-	uint64_t                   generation;
-	size_t                     delay_ms;
+	uint64_t generation;
+	size_t delay_ms;
 };
 
 struct registry_monitor_argument {
@@ -112,11 +113,11 @@ struct registry_monitor_argument {
 
 static void monitor_process(void* opaque) {
 	const struct process_monitor_argument* argument = opaque;
-	struct supervisor_event                event    = {
-		.op         = SUPERVISOR_EVENT_PROCESS_EXIT,
-		.process    = argument->process,
+	struct supervisor_event event = {
+		.op = SUPERVISOR_EVENT_PROCESS_EXIT,
+		.process = argument->process,
 		.generation = argument->generation,
-		.exit_code  = PROCESS_EXIT_SYSTEM_UNKNOWN,
+		.exit_code = PROCESS_EXIT_SYSTEM_UNKNOWN,
 	};
 
 	event.wait_status = process_wait(argument->process_cap, &event.exit_code);
@@ -125,9 +126,9 @@ static void monitor_process(void* opaque) {
 
 static void retry_process(void* opaque) {
 	const struct process_retry_argument* argument = opaque;
-	const struct supervisor_event        event    = {
-		.op         = SUPERVISOR_EVENT_RETRY,
-		.process    = argument->process,
+	const struct supervisor_event event = {
+		.op = SUPERVISOR_EVENT_RETRY,
+		.process = argument->process,
 		.generation = argument->generation,
 	};
 
@@ -137,8 +138,8 @@ static void retry_process(void* opaque) {
 
 static void monitor_registry(void* opaque) {
 	const struct registry_monitor_argument* argument = opaque;
-	const struct supervisor_event           event    = {.op = SUPERVISOR_EVENT_REGISTRY_CHANGE};
-	struct signal_message                   message;
+	const struct supervisor_event event = {.op = SUPERVISOR_EVENT_REGISTRY_CHANGE};
+	struct signal_message message;
 
 	for (;;) {
 		if (signal_wait(argument->registry_activity, &message) != SYSCALL_STATUS_OK) thread_exit(1u);
@@ -154,21 +155,21 @@ static bool spawn_worker(cap_id_t self_cap, uintptr_t entry, const void* argumen
 static void process_begin_launch(struct supervised_process* process) {
 	process->generation++;
 	if (process->generation == 0u) process->generation = 1u;
-	process->state       = SUPERVISED_PROCESS_STARTING;
+	process->state = SUPERVISED_PROCESS_STARTING;
 	process->process_cap = CAP_ID_INVALID;
 }
 
 static bool process_started(struct supervised_process* process, enum supervised_process_id id, cap_id_t self_cap,
-                            cap_id_t control_cap, cap_id_t process_cap) {
+		cap_id_t control_cap, cap_id_t process_cap) {
 	const struct process_monitor_argument argument = {
 		.process_cap = process_cap,
 		.control_cap = control_cap,
-		.process     = id,
-		.generation  = process->generation,
+		.process = id,
+		.generation = process->generation,
 	};
 
 	if (process_cap == CAP_ID_INVALID ||
-	    !spawn_worker(self_cap, (uintptr_t)monitor_process, &argument, sizeof(argument))) {
+			!spawn_worker(self_cap, (uintptr_t)monitor_process, &argument, sizeof(argument))) {
 		if (process_cap != CAP_ID_INVALID) {
 			(void)process_kill(process_cap, PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
 			(void)process_wait(process_cap, NULL);
@@ -176,31 +177,31 @@ static bool process_started(struct supervised_process* process, enum supervised_
 		return false;
 	}
 	process->process_cap = process_cap;
-	process->state       = SUPERVISED_PROCESS_RUNNING;
+	process->state = SUPERVISED_PROCESS_RUNNING;
 	return true;
 }
 
-static bool process_schedule_restart(struct supervised_process* process, enum supervised_process_id id,
-                                     cap_id_t self_cap, cap_id_t control_cap) {
+static bool process_schedule_restart(
+		struct supervised_process* process, enum supervised_process_id id, cap_id_t self_cap, cap_id_t control_cap) {
 	size_t delay = SUPERVISOR_RESTART_BASE_MS;
 
 	for (unsigned int retry = 0u; retry < process->restart_count && delay < SUPERVISOR_RESTART_MAX_MS; retry++)
 		delay *= 2u;
 	if (delay > SUPERVISOR_RESTART_MAX_MS) delay = SUPERVISOR_RESTART_MAX_MS;
 	if (process->restart_count != UINT_MAX) process->restart_count++;
-	process->state                               = SUPERVISED_PROCESS_BACKOFF;
+	process->state = SUPERVISED_PROCESS_BACKOFF;
 	const struct process_retry_argument argument = {
 		.control_cap = control_cap,
-		.process     = id,
-		.generation  = process->generation,
-		.delay_ms    = delay,
+		.process = id,
+		.generation = process->generation,
+		.delay_ms = delay,
 	};
 	printf("init: restarting %s in %llu ms\n", process->description, (unsigned long long)delay);
 	return spawn_worker(self_cap, (uintptr_t)retry_process, &argument, sizeof(argument));
 }
 
 static bool process_finish_launch(struct supervised_process* process, enum supervised_process_id id, cap_id_t self_cap,
-                                  cap_id_t control_cap, bool launched, cap_id_t process_cap) {
+		cap_id_t control_cap, bool launched, cap_id_t process_cap) {
 	if (launched && process_started(process, id, self_cap, control_cap, process_cap)) return true;
 	if (!launched && process_cap != CAP_ID_INVALID) {
 		(void)process_kill(process_cap, PROCESS_EXIT_SYSTEM_RUNTIME_INIT_FAILED);
@@ -229,15 +230,15 @@ enum bootfs_mount_readiness {
 static enum vfs_readiness check_vfs_readiness(const struct registry_service_selector* selector) {
 	const struct registry_protocol_query query = {
 		.namespace_path = VFS_NAMESPACE,
-		.protocol       = VFS_PROTOCOL_NAME,
-		.major          = VFS_PROTOCOL_VERSION_MAJOR,
-		.minor          = VFS_PROTOCOL_VERSION_MINOR,
+		.protocol = VFS_PROTOCOL_NAME,
+		.major = VFS_PROTOCOL_VERSION_MAJOR,
+		.minor = VFS_PROTOCOL_VERSION_MINOR,
 	};
 	struct registry_service_handle service = {.capability = CAP_ID_INVALID};
-	struct filesystem_node_handle  root    = {.capability = CAP_ID_INVALID};
-	struct filesystem_call_result  result;
-	enum registry_status           registry_status;
-	syscall_status_t               cleanup_status = SYSCALL_STATUS_OK;
+	struct filesystem_node_handle root = {.capability = CAP_ID_INVALID};
+	struct filesystem_call_result result;
+	enum registry_status registry_status;
+	syscall_status_t cleanup_status = SYSCALL_STATUS_OK;
 
 	(void)selector;
 	registry_status = registry_acquire(&query, VFS_SERVICE_NAME, &service).status;
@@ -251,10 +252,10 @@ static enum vfs_readiness check_vfs_readiness(const struct registry_service_sele
 		cleanup_status = SYSCALL_STATUS_FAILED;
 	if (cap_drop(service.capability) != SYSCALL_STATUS_OK) cleanup_status = SYSCALL_STATUS_FAILED;
 	if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK ||
-	    root.info.type != FILESYSTEM_NODE_DIRECTORY || cleanup_status != SYSCALL_STATUS_OK) {
+			root.info.type != FILESYSTEM_NODE_DIRECTORY || cleanup_status != SYSCALL_STATUS_OK) {
 		printf("init: VFS readiness check failed: transport=%u status=%u\n",
-		       (unsigned)result.transport_status,
-		       (unsigned)result.status);
+				(unsigned)result.transport_status,
+				(unsigned)result.status);
 		return VFS_READINESS_FAILED;
 	}
 	return VFS_READINESS_READY;
@@ -262,9 +263,9 @@ static enum vfs_readiness check_vfs_readiness(const struct registry_service_sele
 
 static bool launch_bootfs(const struct init_state* init, cap_id_t* out_process_cap) {
 	struct program_capability_argument argument;
-	cap_id_t                           modules_cap = CAP_ID_INVALID;
-	syscall_status_t                   status;
-	bool                               launched;
+	cap_id_t modules_cap = CAP_ID_INVALID;
+	syscall_status_t status;
+	bool launched;
 
 	status = kernel_resource_acquire(init->kernel_resources_cap, KERNEL_RESOURCE_TYPE_MODULES, &modules_cap);
 	if (status != SYSCALL_STATUS_OK) {
@@ -273,10 +274,10 @@ static bool launch_bootfs(const struct init_state* init, cap_id_t* out_process_c
 	}
 	argument = (struct program_capability_argument){
 		.capability = modules_cap,
-		.rights     = CAP_CALL | CAP_READ,
+		.rights = CAP_CALL | CAP_READ,
 	};
 	launched = bootstrap_launch(init, "bootfs.elf", "bootfs", 0u, NULL, 1u, &argument, out_process_cap);
-	status   = cap_drop(modules_cap);
+	status = cap_drop(modules_cap);
 	if (status != SYSCALL_STATUS_OK) {
 		printf("init: bootfs modules provider capability drop failed: %u\n", (unsigned)status);
 		return false;
@@ -286,9 +287,9 @@ static bool launch_bootfs(const struct init_state* init, cap_id_t* out_process_c
 
 static bool launch_terminal(const struct init_state* init, bool* out_launched, cap_id_t* out_process_cap) {
 	struct program_capability_argument argument;
-	cap_id_t                           framebuffer_cap = CAP_ID_INVALID;
-	syscall_status_t                   status;
-	bool                               launched;
+	cap_id_t framebuffer_cap = CAP_ID_INVALID;
+	syscall_status_t status;
+	bool launched;
 
 	if (out_launched == NULL || out_process_cap == NULL || *out_process_cap != CAP_ID_INVALID) return false;
 	*out_launched = false;
@@ -300,7 +301,7 @@ static bool launch_terminal(const struct init_state* init, bool* out_launched, c
 	}
 	argument = (struct program_capability_argument){
 		.capability = framebuffer_cap,
-		.rights     = CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP,
+		.rights = CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP,
 	};
 	launched = bootstrap_launch(init, "terminal.elf", "terminal", 0u, NULL, 1u, &argument, out_process_cap);
 	if (launched) *out_launched = true;
@@ -315,13 +316,13 @@ static bool launch_terminal(const struct init_state* init, bool* out_launched, c
 static bool use_terminal_output(void) {
 	const struct registry_protocol_query query = {
 		.namespace_path = TERMINAL_NAMESPACE,
-		.protocol       = TERMINAL_PROTOCOL_NAME,
-		.major          = TERMINAL_PROTOCOL_VERSION_MAJOR,
-		.minor          = TERMINAL_PROTOCOL_VERSION_MINOR,
+		.protocol = TERMINAL_PROTOCOL_NAME,
+		.major = TERMINAL_PROTOCOL_VERSION_MAJOR,
+		.minor = TERMINAL_PROTOCOL_VERSION_MINOR,
 	};
-	struct registry_service_handle terminal   = {.capability = CAP_ID_INVALID};
-	cap_id_t                       output_cap = CAP_ID_INVALID;
-	enum registry_status           status;
+	struct registry_service_handle terminal = {.capability = CAP_ID_INVALID};
+	cap_id_t output_cap = CAP_ID_INVALID;
+	enum registry_status status;
 
 	status = registry_acquire(&query, TERMINAL_SERVICE_NAME, &terminal).status;
 	if (status != REGISTRY_STATUS_OK) {
@@ -329,7 +330,7 @@ static bool use_terminal_output(void) {
 		return false;
 	}
 	if (cap_delegate(terminal.capability, supervisor_pid, TERMINAL_OUTPUT_RIGHTS, &output_cap) != SYSCALL_STATUS_OK ||
-	    cap_drop(terminal.capability) != SYSCALL_STATUS_OK) {
+			cap_drop(terminal.capability) != SYSCALL_STATUS_OK) {
 		if (output_cap != CAP_ID_INVALID) (void)cap_drop(output_cap);
 		printf("init: terminal output rights reduction failed\n");
 		return false;
@@ -341,25 +342,25 @@ static bool use_terminal_output(void) {
 static enum bootfs_mount_readiness mount_bootfs(const struct registry_service_selector* selector, bool at_root) {
 	const struct registry_protocol_query vfs_query = {
 		.namespace_path = VFS_NAMESPACE,
-		.protocol       = VFS_PROTOCOL_NAME,
-		.major          = VFS_PROTOCOL_VERSION_MAJOR,
-		.minor          = VFS_PROTOCOL_VERSION_MINOR,
+		.protocol = VFS_PROTOCOL_NAME,
+		.major = VFS_PROTOCOL_VERSION_MAJOR,
+		.minor = VFS_PROTOCOL_VERSION_MINOR,
 	};
 	const struct registry_protocol_query bootfs_query = {
 		.namespace_path = FILESYSTEM_NAMESPACE,
-		.protocol       = FILESYSTEM_PROTOCOL_NAME,
-		.major          = FILESYSTEM_PROTOCOL_VERSION_MAJOR,
-		.minor          = FILESYSTEM_PROTOCOL_VERSION_MINOR,
+		.protocol = FILESYSTEM_PROTOCOL_NAME,
+		.major = FILESYSTEM_PROTOCOL_VERSION_MAJOR,
+		.minor = FILESYSTEM_PROTOCOL_VERSION_MINOR,
 	};
-	struct registry_service_handle vfs_service    = {.capability = CAP_ID_INVALID};
+	struct registry_service_handle vfs_service = {.capability = CAP_ID_INVALID};
 	struct registry_service_handle bootfs_service = {.capability = CAP_ID_INVALID};
-	struct filesystem_node_handle  module_root    = {.capability = CAP_ID_INVALID};
-	struct filesystem_call_result  result;
-	enum registry_status           registry_status;
-	cap_id_t                       delegated_root = CAP_ID_INVALID;
-	syscall_status_t               status;
-	bool                           cleanup_ok = true;
-	bool                           mounted    = false;
+	struct filesystem_node_handle module_root = {.capability = CAP_ID_INVALID};
+	struct filesystem_call_result result;
+	enum registry_status registry_status;
+	cap_id_t delegated_root = CAP_ID_INVALID;
+	syscall_status_t status;
+	bool cleanup_ok = true;
+	bool mounted = false;
 
 	(void)selector;
 	registry_status = registry_acquire(&vfs_query, VFS_SERVICE_NAME, &vfs_service).status;
@@ -378,38 +379,38 @@ static enum bootfs_mount_readiness mount_bootfs(const struct registry_service_se
 	}
 	if (!at_root) {
 		result = filesystem_directory_open(
-			bootfs_service.capability, "boot", sizeof("boot") - 1u, CAP_READ | CAP_DELEGATE, &module_root);
+				bootfs_service.capability, "boot", sizeof("boot") - 1u, CAP_READ | CAP_DELEGATE, &module_root);
 		if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK ||
-		    module_root.info.type != FILESYSTEM_NODE_DIRECTORY) {
+				module_root.info.type != FILESYSTEM_NODE_DIRECTORY) {
 			printf("init: bootfs module-directory acquisition failed: transport=%u status=%u\n",
-			       (unsigned)result.transport_status,
-			       (unsigned)result.status);
+					(unsigned)result.transport_status,
+					(unsigned)result.status);
 			goto cleanup;
 		}
 	}
 	status = cap_delegate(at_root ? bootfs_service.capability : module_root.capability,
-	                      vfs_service.owner,
-	                      CAP_CALL | CAP_READ | CAP_DELEGATE,
-	                      &delegated_root);
+			vfs_service.owner,
+			CAP_CALL | CAP_READ | CAP_DELEGATE,
+			&delegated_root);
 	if (status != SYSCALL_STATUS_OK) {
 		printf("init: bootfs root delegation failed: %u\n", (unsigned)status);
 		goto cleanup;
 	}
 	const char* mount_path = at_root ? "/" : "/boot";
-	result                 = vfs_directory_unmount(vfs_service.capability, mount_path, strlen(mount_path));
+	result = vfs_directory_unmount(vfs_service.capability, mount_path, strlen(mount_path));
 	if (result.transport_status != SYSCALL_STATUS_OK ||
-	    (result.status != FILESYSTEM_STATUS_OK && result.status != FILESYSTEM_STATUS_NOT_FOUND)) {
+			(result.status != FILESYSTEM_STATUS_OK && result.status != FILESYSTEM_STATUS_NOT_FOUND)) {
 		printf("init: old bootfs mount removal failed: transport=%u status=%u\n",
-		       (unsigned)result.transport_status,
-		       (unsigned)result.status);
+				(unsigned)result.transport_status,
+				(unsigned)result.status);
 		goto cleanup;
 	}
 	result = vfs_directory_mount(
-		vfs_service.capability, mount_path, strlen(mount_path), delegated_root, VFS_MOUNT_READ_ONLY);
+			vfs_service.capability, mount_path, strlen(mount_path), delegated_root, VFS_MOUNT_READ_ONLY);
 	if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK) {
 		printf("init: bootfs mount failed: transport=%u status=%u\n",
-		       (unsigned)result.transport_status,
-		       (unsigned)result.status);
+				(unsigned)result.transport_status,
+				(unsigned)result.status);
 		goto cleanup;
 	}
 	mounted = true;
@@ -430,12 +431,12 @@ cleanup:
 
 static bool text_input_layout_override(const struct init_state* init, const char** out_path) {
 	static const char prefix[] = TEXT_INPUT_LAYOUT_OPTION "=";
-	const char*       selected = NULL;
-	const char*       argument;
+	const char* selected = NULL;
+	const char* argument;
 
 	if (init == NULL || out_path == NULL) return false;
 	*out_path = NULL;
-	argument  = init->argv_data;
+	argument = init->argv_data;
 	for (uint32_t index = 0u; index < init->argc; index++) {
 		if (strcmp(argument, TEXT_INPUT_LAYOUT_OPTION) == 0) return false;
 		if (strncmp(argument, prefix, sizeof(prefix) - 1u) == 0) {
@@ -459,15 +460,15 @@ static bool text_input_layout_override(const struct init_state* init, const char
 static bool load_system_configuration(struct init_configuration* configuration) {
 	const struct registry_protocol_query query = {
 		.namespace_path = VFS_NAMESPACE,
-		.protocol       = VFS_PROTOCOL_NAME,
-		.major          = VFS_PROTOCOL_VERSION_MAJOR,
-		.minor          = VFS_PROTOCOL_VERSION_MINOR,
+		.protocol = VFS_PROTOCOL_NAME,
+		.major = VFS_PROTOCOL_VERSION_MAJOR,
+		.minor = VFS_PROTOCOL_VERSION_MINOR,
 	};
 	struct registry_service_handle service = {.capability = CAP_ID_INVALID};
-	enum registry_status           registry_status;
+	enum registry_status registry_status;
 	enum init_configuration_status configuration_status;
-	syscall_status_t               status;
-	bool                           success = true;
+	syscall_status_t status;
+	bool success = true;
 
 	registry_status = registry_acquire(&query, VFS_SERVICE_NAME, &service).status;
 	if (registry_status != REGISTRY_STATUS_OK) {
@@ -475,7 +476,7 @@ static bool load_system_configuration(struct init_configuration* configuration) 
 		return false;
 	}
 	configuration_status = init_configuration_load(service.capability, SYSTEM_CONFIGURATION_PATH, configuration);
-	status               = cap_drop(service.capability);
+	status = cap_drop(service.capability);
 	if (status != SYSCALL_STATUS_OK) {
 		printf("init: VFS capability drop after system configuration failed: %u\n", (unsigned)status);
 		success = false;
@@ -502,23 +503,23 @@ enum driver_catalog_readiness {
 static enum driver_catalog_readiness update_driver_catalog(void) {
 	const struct registry_protocol_query query = {
 		.namespace_path = DEVICE_MANAGER_NAMESPACE,
-		.protocol       = DEVICE_MANAGER_PROTOCOL_NAME,
-		.major          = DEVICE_MANAGER_PROTOCOL_VERSION_MAJOR,
-		.minor          = DEVICE_MANAGER_PROTOCOL_VERSION_MINOR,
+		.protocol = DEVICE_MANAGER_PROTOCOL_NAME,
+		.major = DEVICE_MANAGER_PROTOCOL_VERSION_MAJOR,
+		.minor = DEVICE_MANAGER_PROTOCOL_VERSION_MINOR,
 	};
 	struct device_manager_update_catalog_response response;
-	cap_id_t                                      control = CAP_ID_INVALID;
-	struct registry_call_result                   result =
-		registry_grant(supervisor_pid, &query, DEVICE_MANAGER_SERVICE_NAME, DEVICE_MANAGER_CONTROL_RIGHTS, &control);
+	cap_id_t control = CAP_ID_INVALID;
+	struct registry_call_result result = registry_grant(
+			supervisor_pid, &query, DEVICE_MANAGER_SERVICE_NAME, DEVICE_MANAGER_CONTROL_RIGHTS, &control);
 	if (result.status == REGISTRY_STATUS_NOT_FOUND) return DRIVER_CATALOG_WAIT;
 	if (result.transport_status != SYSCALL_STATUS_OK || result.status != REGISTRY_STATUS_OK) {
 		printf("init: device-manager control acquisition failed: transport=%u status=%u\n",
-		       (unsigned)result.transport_status,
-		       (unsigned)result.status);
+				(unsigned)result.transport_status,
+				(unsigned)result.status);
 		return DRIVER_CATALOG_FAILED;
 	}
 	syscall_status_t status =
-		device_manager_update_catalog(control, DRIVER_CATALOG_PATH, sizeof(DRIVER_CATALOG_PATH) - 1u, &response);
+			device_manager_update_catalog(control, DRIVER_CATALOG_PATH, sizeof(DRIVER_CATALOG_PATH) - 1u, &response);
 	if (cap_drop(control) != SYSCALL_STATUS_OK) return DRIVER_CATALOG_FAILED;
 	if (status != SYSCALL_STATUS_OK) {
 		printf("init: device-manager catalog update call failed: %u\n", (unsigned)status);
@@ -529,27 +530,27 @@ static enum driver_catalog_readiness update_driver_catalog(void) {
 		return DRIVER_CATALOG_FAILED;
 	}
 	printf("init: activated driver catalog generation %llu with %llu declaration(s)\n",
-	       (unsigned long long)response.catalog.generation,
-	       (unsigned long long)response.catalog.driver_count);
+			(unsigned long long)response.catalog.generation,
+			(unsigned long long)response.catalog.driver_count);
 	return DRIVER_CATALOG_READY;
 }
 
-static enum configured_mount_readiness mount_configured_filesystems(const struct init_configuration* configuration,
-                                                                    bool* mounted, bool* bootfs_at_root) {
+static enum configured_mount_readiness mount_configured_filesystems(
+		const struct init_configuration* configuration, bool* mounted, bool* bootfs_at_root) {
 	const struct registry_protocol_query vfs_query = {
 		.namespace_path = VFS_NAMESPACE,
-		.protocol       = VFS_PROTOCOL_NAME,
-		.major          = VFS_PROTOCOL_VERSION_MAJOR,
-		.minor          = VFS_PROTOCOL_VERSION_MINOR,
+		.protocol = VFS_PROTOCOL_NAME,
+		.major = VFS_PROTOCOL_VERSION_MAJOR,
+		.minor = VFS_PROTOCOL_VERSION_MINOR,
 	};
 	const struct registry_protocol_query filesystem_query = {
 		.namespace_path = FILESYSTEM_NAMESPACE,
-		.protocol       = FILESYSTEM_PROTOCOL_NAME,
-		.major          = FILESYSTEM_PROTOCOL_VERSION_MAJOR,
-		.minor          = FILESYSTEM_PROTOCOL_VERSION_MINOR,
+		.protocol = FILESYSTEM_PROTOCOL_NAME,
+		.major = FILESYSTEM_PROTOCOL_VERSION_MAJOR,
+		.minor = FILESYSTEM_PROTOCOL_VERSION_MINOR,
 	};
-	struct registry_service_handle vfs     = {.capability = CAP_ID_INVALID};
-	bool                           waiting = false;
+	struct registry_service_handle vfs = {.capability = CAP_ID_INVALID};
+	bool waiting = false;
 	if (bootfs_at_root == NULL || registry_acquire(&vfs_query, VFS_SERVICE_NAME, &vfs).status != REGISTRY_STATUS_OK)
 		return CONFIGURED_MOUNTS_FAILED;
 	for (size_t order = 0u; order < 2u; order++) {
@@ -557,8 +558,8 @@ static enum configured_mount_readiness mount_configured_filesystems(const struct
 			bool root_mount = strcmp(configuration->mounts[index].mount_point, "/") == 0;
 			if ((order == 0u) != root_mount) continue;
 			if (mounted[index]) continue;
-			const struct init_mount_configuration* mount      = &configuration->mounts[index];
-			struct registry_service_handle         filesystem = {.capability = CAP_ID_INVALID};
+			const struct init_mount_configuration* mount = &configuration->mounts[index];
+			struct registry_service_handle filesystem = {.capability = CAP_ID_INVALID};
 			struct registry_call_result acquire = registry_acquire(&filesystem_query, mount->service, &filesystem);
 			if (acquire.status == REGISTRY_STATUS_NOT_FOUND) {
 				waiting = true;
@@ -569,37 +570,37 @@ static enum configured_mount_readiness mount_configured_filesystems(const struct
 				(void)cap_drop(vfs.capability);
 				return CONFIGURED_MOUNTS_FAILED;
 			}
-			bool         read_only = mount->read_only || (filesystem.info.rights & CAP_WRITE) == 0u;
-			cap_rights_t rights    = CAP_CALL | CAP_READ | CAP_DELEGATE;
+			bool read_only = mount->read_only || (filesystem.info.rights & CAP_WRITE) == 0u;
+			cap_rights_t rights = CAP_CALL | CAP_READ | CAP_DELEGATE;
 			if (!read_only) rights |= CAP_WRITE;
-			cap_id_t                      delegated = CAP_ID_INVALID;
-			syscall_status_t              status = cap_delegate(filesystem.capability, vfs.owner, rights, &delegated);
+			cap_id_t delegated = CAP_ID_INVALID;
+			syscall_status_t status = cap_delegate(filesystem.capability, vfs.owner, rights, &delegated);
 			struct filesystem_call_result result = {.status = FILESYSTEM_STATUS_NONE, .transport_status = status};
-			bool                          delegated_consumed = false;
+			bool delegated_consumed = false;
 			if (status == SYSCALL_STATUS_OK && root_mount) {
 				delegated_consumed = true;
 				if (init_root_pivot(&vfs, delegated, read_only ? VFS_MOUNT_READ_ONLY : 0u))
 					result = (struct filesystem_call_result){
-						.status           = FILESYSTEM_STATUS_OK,
+						.status = FILESYSTEM_STATUS_OK,
 						.transport_status = SYSCALL_STATUS_OK,
 					};
 				else result.transport_status = SYSCALL_STATUS_FAILED;
 			}
 			else if (status == SYSCALL_STATUS_OK)
 				result = vfs_directory_mount(vfs.capability,
-				                             mount->mount_point,
-				                             strlen(mount->mount_point),
-				                             delegated,
-				                             read_only ? VFS_MOUNT_READ_ONLY : 0u);
+						mount->mount_point,
+						strlen(mount->mount_point),
+						delegated,
+						read_only ? VFS_MOUNT_READ_ONLY : 0u);
 			if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK) {
 				if (!delegated_consumed && delegated != CAP_ID_INVALID) (void)cap_revoke(delegated, 0u);
 				(void)cap_drop(filesystem.capability);
 				(void)cap_drop(vfs.capability);
 				printf("init: mounting filesystem %s at %s failed: transport=%u status=%u\n",
-				       mount->service,
-				       mount->mount_point,
-				       (unsigned)result.transport_status,
-				       (unsigned)result.status);
+						mount->service,
+						mount->mount_point,
+						(unsigned)result.transport_status,
+						(unsigned)result.status);
 				return CONFIGURED_MOUNTS_FAILED;
 			}
 			if (cap_drop(filesystem.capability) != SYSCALL_STATUS_OK) {
@@ -609,9 +610,9 @@ static enum configured_mount_readiness mount_configured_filesystems(const struct
 			mounted[index] = true;
 			if (root_mount) *bootfs_at_root = false;
 			printf("init: mounted filesystem %s at %s%s\n",
-			       mount->service,
-			       mount->mount_point,
-			       read_only ? " read-only" : "");
+					mount->service,
+					mount->mount_point,
+					read_only ? " read-only" : "");
 		}
 		if (order == 0u) {
 			for (size_t index = 0u; index < configuration->mount_count; index++) {
@@ -631,7 +632,7 @@ static bool service_available(const struct registry_service_selector* selector) 
 		.major = selector->major,
 	};
 	struct registry_service_handle service = {.capability = CAP_ID_INVALID};
-	struct registry_call_result    result;
+	struct registry_call_result result;
 
 	(void)strlcpy(query.namespace_path, selector->namespace_path, sizeof(query.namespace_path));
 	(void)strlcpy(query.protocol, selector->protocol, sizeof(query.protocol));
@@ -645,8 +646,8 @@ static bool watch_service(cap_id_t activity, const struct registry_service_selec
 		.major = selector->major,
 	};
 	struct registry_call_result result;
-	uint64_t                    subscription_id;
-	uint64_t                    counter;
+	uint64_t subscription_id;
+	uint64_t counter;
 
 	(void)strlcpy(query.namespace_path, selector->namespace_path, sizeof(query.namespace_path));
 	(void)strlcpy(query.protocol, selector->protocol, sizeof(query.protocol));
@@ -657,86 +658,86 @@ static bool watch_service(cap_id_t activity, const struct registry_service_selec
 int supervisor_run(const struct init_state* init) {
 	struct init_configuration configuration;
 	struct supervised_process processes[SUPERVISED_PROCESS_COUNT] = {
-		[SUPERVISED_VFS]                 = {.description = "VFS"},
-		[SUPERVISED_BOOTFS]              = {.description = "bootfs"},
-		[SUPERVISED_TERMINAL]            = {.description = "terminal"},
-		[SUPERVISED_TTY_SESSION]         = {.description = "TTY session"},
-		[SUPERVISED_LOADER]              = {.description = "loader"},
-		[SUPERVISED_INPUT_MANAGER]       = {.description = "input manager"},
+		[SUPERVISED_VFS] = {.description = "VFS"},
+		[SUPERVISED_BOOTFS] = {.description = "bootfs"},
+		[SUPERVISED_TERMINAL] = {.description = "terminal"},
+		[SUPERVISED_TTY_SESSION] = {.description = "TTY session"},
+		[SUPERVISED_LOADER] = {.description = "loader"},
+		[SUPERVISED_INPUT_MANAGER] = {.description = "input manager"},
 		[SUPERVISED_KEYBOARD_CONTROLLER] = {.description = "keyboard controller"},
-		[SUPERVISED_TEXT_INPUT]          = {.description = "text input"},
-		[SUPERVISED_DEVICE_MANAGER]      = {.description = "device manager"},
-		[SUPERVISED_SHELL]               = {.description = "shell"},
+		[SUPERVISED_TEXT_INPUT] = {.description = "text input"},
+		[SUPERVISED_DEVICE_MANAGER] = {.description = "device manager"},
+		[SUPERVISED_SHELL] = {.description = "shell"},
 	};
 	static const struct registry_service_selector vfs_selector = {
 		.namespace_path = VFS_NAMESPACE,
-		.protocol       = VFS_PROTOCOL_NAME,
-		.major          = VFS_PROTOCOL_VERSION_MAJOR,
-		.service        = VFS_SERVICE_NAME,
+		.protocol = VFS_PROTOCOL_NAME,
+		.major = VFS_PROTOCOL_VERSION_MAJOR,
+		.service = VFS_SERVICE_NAME,
 	};
 	static const struct registry_service_selector bootfs_selector = {
 		.namespace_path = FILESYSTEM_NAMESPACE,
-		.protocol       = FILESYSTEM_PROTOCOL_NAME,
-		.major          = FILESYSTEM_PROTOCOL_VERSION_MAJOR,
-		.service        = BOOTFS_SERVICE_NAME,
+		.protocol = FILESYSTEM_PROTOCOL_NAME,
+		.major = FILESYSTEM_PROTOCOL_VERSION_MAJOR,
+		.service = BOOTFS_SERVICE_NAME,
 	};
 	static const struct registry_service_selector terminal_selector = {
 		.namespace_path = TERMINAL_NAMESPACE,
-		.protocol       = TERMINAL_PROTOCOL_NAME,
-		.major          = TERMINAL_PROTOCOL_VERSION_MAJOR,
-		.service        = TERMINAL_SERVICE_NAME,
+		.protocol = TERMINAL_PROTOCOL_NAME,
+		.major = TERMINAL_PROTOCOL_VERSION_MAJOR,
+		.service = TERMINAL_SERVICE_NAME,
 	};
 	static const struct registry_service_selector text_input_selector = {
 		.namespace_path = TEXT_INPUT_NAMESPACE,
-		.protocol       = TEXT_INPUT_PROTOCOL_NAME,
-		.major          = TEXT_INPUT_PROTOCOL_VERSION_MAJOR,
-		.service        = TEXT_INPUT_SERVICE_NAME,
+		.protocol = TEXT_INPUT_PROTOCOL_NAME,
+		.major = TEXT_INPUT_PROTOCOL_VERSION_MAJOR,
+		.service = TEXT_INPUT_SERVICE_NAME,
 	};
 	static const struct registry_service_selector tty_session_selector = {
 		.namespace_path = TTY_SESSION_NAMESPACE,
-		.protocol       = TTY_SESSION_PROTOCOL_NAME,
-		.major          = TTY_SESSION_PROTOCOL_VERSION_MAJOR,
-		.service        = TTY_SESSION_SERVICE_NAME,
+		.protocol = TTY_SESSION_PROTOCOL_NAME,
+		.major = TTY_SESSION_PROTOCOL_VERSION_MAJOR,
+		.service = TTY_SESSION_SERVICE_NAME,
 	};
 	static const struct registry_service_selector loader_selector = {
 		.namespace_path = PROGRAM_LOADER_NAMESPACE,
-		.protocol       = LOADER_PROTOCOL_NAME,
-		.major          = 1u,
-		.service        = "elf64",
+		.protocol = LOADER_PROTOCOL_NAME,
+		.major = 1u,
+		.service = "elf64",
 	};
 	static const struct registry_service_selector device_manager_selector = {
 		.namespace_path = DEVICE_MANAGER_NAMESPACE,
-		.protocol       = DEVICE_MANAGER_PROTOCOL_NAME,
-		.major          = DEVICE_MANAGER_PROTOCOL_VERSION_MAJOR,
-		.service        = DEVICE_MANAGER_SERVICE_NAME,
+		.protocol = DEVICE_MANAGER_PROTOCOL_NAME,
+		.major = DEVICE_MANAGER_PROTOCOL_VERSION_MAJOR,
+		.service = DEVICE_MANAGER_SERVICE_NAME,
 	};
-	bool             bootfs_mounted                                   = false;
-	bool             bootfs_at_root                                   = true;
-	bool             bootfs_started                                   = false;
-	bool             configuration_loaded                             = false;
-	bool             configured_mounts_ready                          = false;
-	bool             configured_mounts[INIT_CONFIGURATION_MAX_MOUNTS] = {false};
-	bool             device_manager_started                           = false;
-	bool             driver_catalog_updated                           = false;
-	bool             terminal_started                                 = false;
-	bool             terminal_ready                                   = false;
-	bool             terminal_available                               = false;
-	bool             input_manager_started                            = false;
-	bool             keyboard_controller_started                      = false;
-	bool             text_input_started                               = false;
-	bool             tty_session_started                              = false;
-	bool             tty_session_ready                                = false;
-	bool             shell_started                                    = false;
-	bool             loader_started                                   = false;
-	bool             vfs_ready                                        = false;
-	bool             vfs_started                                      = false;
-	const char*      text_input_layout_override_path;
-	const char*      text_input_layout = NULL;
+	bool bootfs_mounted = false;
+	bool bootfs_at_root = true;
+	bool bootfs_started = false;
+	bool configuration_loaded = false;
+	bool configured_mounts_ready = false;
+	bool configured_mounts[INIT_CONFIGURATION_MAX_MOUNTS] = {false};
+	bool device_manager_started = false;
+	bool driver_catalog_updated = false;
+	bool terminal_started = false;
+	bool terminal_ready = false;
+	bool terminal_available = false;
+	bool input_manager_started = false;
+	bool keyboard_controller_started = false;
+	bool text_input_started = false;
+	bool tty_session_started = false;
+	bool tty_session_ready = false;
+	bool shell_started = false;
+	bool loader_started = false;
+	bool vfs_ready = false;
+	bool vfs_started = false;
+	const char* text_input_layout_override_path;
+	const char* text_input_layout = NULL;
 	struct self_info self;
-	channel_id_t     supervisor_endpoint = CHANNEL_ID_INVALID;
-	cap_id_t         supervisor_activity = CAP_ID_INVALID;
-	cap_id_t         supervisor_control  = CAP_ID_INVALID;
-	cap_id_t         registry_activity   = CAP_ID_INVALID;
+	channel_id_t supervisor_endpoint = CHANNEL_ID_INVALID;
+	cap_id_t supervisor_activity = CAP_ID_INVALID;
+	cap_id_t supervisor_control = CAP_ID_INVALID;
+	cap_id_t registry_activity = CAP_ID_INVALID;
 	syscall_status_t status;
 
 	if (init == NULL || init->registry_cap == CAP_ID_INVALID) return 1;
@@ -751,26 +752,27 @@ int supervisor_run(const struct init_state* init) {
 	if (self.main_thread_cap != CAP_ID_INVALID) (void)cap_drop(self.main_thread_cap);
 	status = signal_create(&registry_activity);
 	if (status != SYSCALL_STATUS_OK || !watch_service(registry_activity, &vfs_selector) ||
-	    !watch_service(registry_activity, &bootfs_selector) || !watch_service(registry_activity, &terminal_selector) ||
-	    !watch_service(registry_activity, &tty_session_selector) ||
-	    !watch_service(registry_activity, &text_input_selector) ||
-	    !watch_service(registry_activity, &loader_selector) ||
-	    !watch_service(registry_activity, &device_manager_selector))
+			!watch_service(registry_activity, &bootfs_selector) ||
+			!watch_service(registry_activity, &terminal_selector) ||
+			!watch_service(registry_activity, &tty_session_selector) ||
+			!watch_service(registry_activity, &text_input_selector) ||
+			!watch_service(registry_activity, &loader_selector) ||
+			!watch_service(registry_activity, &device_manager_selector))
 		return 1;
 	status = channel_create(&supervisor_endpoint, &supervisor_activity);
 	if (status == SYSCALL_STATUS_OK)
 		status = cap_publish(
-			supervisor_endpoint, SUPERVISOR_CONTROL_OBJECT_ID, supervisor_pid, CAP_CALL, &supervisor_control);
+				supervisor_endpoint, SUPERVISOR_CONTROL_OBJECT_ID, supervisor_pid, CAP_CALL, &supervisor_control);
 	if (status != SYSCALL_STATUS_OK) return 1;
 	{
 		struct signal_message pending;
-		bool                  received;
+		bool received;
 		if (signal_try_wait(supervisor_activity, &pending, &received) != SYSCALL_STATUS_OK) return 1;
 	}
 	{
 		const struct registry_monitor_argument argument = {
 			.registry_activity = registry_activity,
-			.control_cap       = supervisor_control,
+			.control_cap = supervisor_control,
 		};
 		if (!spawn_worker(self.self_cap, (uintptr_t)monitor_registry, &argument, sizeof(argument))) return 1;
 	}
@@ -780,11 +782,11 @@ int supervisor_run(const struct init_state* init) {
 			process_begin_launch(&processes[SUPERVISED_VFS]);
 			bool launched = bootstrap_launch(init, "vfs.elf", "VFS", 0u, NULL, 0u, NULL, &process_cap);
 			if (!process_finish_launch(&processes[SUPERVISED_VFS],
-			                           SUPERVISED_VFS,
-			                           self.self_cap,
-			                           supervisor_control,
-			                           launched,
-			                           process_cap))
+						SUPERVISED_VFS,
+						self.self_cap,
+						supervisor_control,
+						launched,
+						process_cap))
 				return 1;
 			vfs_started = processes[SUPERVISED_VFS].state == SUPERVISED_PROCESS_RUNNING;
 			continue;
@@ -802,11 +804,11 @@ int supervisor_run(const struct init_state* init) {
 			process_begin_launch(&processes[SUPERVISED_BOOTFS]);
 			bool launched = launch_bootfs(init, &process_cap);
 			if (!process_finish_launch(&processes[SUPERVISED_BOOTFS],
-			                           SUPERVISED_BOOTFS,
-			                           self.self_cap,
-			                           supervisor_control,
-			                           launched,
-			                           process_cap))
+						SUPERVISED_BOOTFS,
+						self.self_cap,
+						supervisor_control,
+						launched,
+						process_cap))
 				return 1;
 			bootfs_started = processes[SUPERVISED_BOOTFS].state == SUPERVISED_PROCESS_RUNNING;
 			continue;
@@ -820,31 +822,31 @@ int supervisor_run(const struct init_state* init) {
 			}
 		}
 		if (bootfs_mounted && !terminal_started && processes[SUPERVISED_TERMINAL].state == SUPERVISED_PROCESS_STOPPED) {
-			bool     terminal_launched;
+			bool terminal_launched;
 			cap_id_t process_cap = CAP_ID_INVALID;
 			process_begin_launch(&processes[SUPERVISED_TERMINAL]);
 			bool launched = launch_terminal(init, &terminal_launched, &process_cap);
 			if (!launched) {
 				if (!process_finish_launch(&processes[SUPERVISED_TERMINAL],
-				                           SUPERVISED_TERMINAL,
-				                           self.self_cap,
-				                           supervisor_control,
-				                           false,
-				                           process_cap))
+							SUPERVISED_TERMINAL,
+							self.self_cap,
+							supervisor_control,
+							false,
+							process_cap))
 					return 1;
 				continue;
 			}
 			if (terminal_launched && !process_finish_launch(&processes[SUPERVISED_TERMINAL],
-			                                                SUPERVISED_TERMINAL,
-			                                                self.self_cap,
-			                                                supervisor_control,
-			                                                true,
-			                                                process_cap))
+											 SUPERVISED_TERMINAL,
+											 self.self_cap,
+											 supervisor_control,
+											 true,
+											 process_cap))
 				return 1;
 			if (terminal_launched && processes[SUPERVISED_TERMINAL].state != SUPERVISED_PROCESS_RUNNING) continue;
 			if (!terminal_launched) processes[SUPERVISED_TERMINAL].state = SUPERVISED_PROCESS_DISABLED;
-			terminal_started   = true;
-			terminal_ready     = !terminal_launched;
+			terminal_started = true;
+			terminal_ready = !terminal_launched;
 			terminal_available = terminal_launched;
 			continue;
 		}
@@ -856,21 +858,21 @@ int supervisor_run(const struct init_state* init) {
 		if (driver_catalog_updated && terminal_ready && !tty_session_started) {
 			if (!terminal_available) {
 				processes[SUPERVISED_TTY_SESSION].state = SUPERVISED_PROCESS_DISABLED;
-				tty_session_started                     = true;
-				tty_session_ready                       = true;
+				tty_session_started = true;
+				tty_session_ready = true;
 				continue;
 			}
 			if (processes[SUPERVISED_TTY_SESSION].state == SUPERVISED_PROCESS_STOPPED) {
 				cap_id_t process_cap = CAP_ID_INVALID;
 				process_begin_launch(&processes[SUPERVISED_TTY_SESSION]);
 				bool launched = installed_launch_terminal_session(
-					init, "tty_session.elf", "TTY session", 0u, NULL, 0u, NULL, &process_cap);
+						init, "tty_session.elf", "TTY session", 0u, NULL, 0u, NULL, &process_cap);
 				if (!process_finish_launch(&processes[SUPERVISED_TTY_SESSION],
-				                           SUPERVISED_TTY_SESSION,
-				                           self.self_cap,
-				                           supervisor_control,
-				                           launched,
-				                           process_cap))
+							SUPERVISED_TTY_SESSION,
+							self.self_cap,
+							supervisor_control,
+							launched,
+							process_cap))
 					return 1;
 				tty_session_started = processes[SUPERVISED_TTY_SESSION].state == SUPERVISED_PROCESS_RUNNING;
 				continue;
@@ -882,96 +884,96 @@ int supervisor_run(const struct init_state* init) {
 		}
 		if (terminal_ready && !configuration_loaded) {
 			if (!load_system_configuration(&configuration)) return 1;
-			text_input_layout    = text_input_layout_override_path == NULL ? configuration.text_input_layout
-			                                                               : text_input_layout_override_path;
+			text_input_layout = text_input_layout_override_path == NULL ? configuration.text_input_layout
+			                                                            : text_input_layout_override_path;
 			configuration_loaded = true;
 			continue;
 		}
 		if (configuration_loaded && !loader_started &&
-		    processes[SUPERVISED_LOADER].state == SUPERVISED_PROCESS_STOPPED) {
+				processes[SUPERVISED_LOADER].state == SUPERVISED_PROCESS_STOPPED) {
 			cap_id_t process_cap = CAP_ID_INVALID;
 			process_begin_launch(&processes[SUPERVISED_LOADER]);
 			bool launched = bootstrap_launch(init, "loader.elf", "loader", 0u, NULL, 0u, NULL, &process_cap);
 			if (!process_finish_launch(&processes[SUPERVISED_LOADER],
-			                           SUPERVISED_LOADER,
-			                           self.self_cap,
-			                           supervisor_control,
-			                           launched,
-			                           process_cap))
+						SUPERVISED_LOADER,
+						self.self_cap,
+						supervisor_control,
+						launched,
+						process_cap))
 				return 1;
 			loader_started = processes[SUPERVISED_LOADER].state == SUPERVISED_PROCESS_RUNNING;
 			continue;
 		}
 		if (driver_catalog_updated && !input_manager_started &&
-		    processes[SUPERVISED_INPUT_MANAGER].state == SUPERVISED_PROCESS_STOPPED) {
+				processes[SUPERVISED_INPUT_MANAGER].state == SUPERVISED_PROCESS_STOPPED) {
 			cap_id_t process_cap = CAP_ID_INVALID;
 			process_begin_launch(&processes[SUPERVISED_INPUT_MANAGER]);
 			bool launched =
-				installed_launch(init, "input_manager.elf", "input manager", 0u, NULL, 0u, NULL, &process_cap);
+					installed_launch(init, "input_manager.elf", "input manager", 0u, NULL, 0u, NULL, &process_cap);
 			if (!process_finish_launch(&processes[SUPERVISED_INPUT_MANAGER],
-			                           SUPERVISED_INPUT_MANAGER,
-			                           self.self_cap,
-			                           supervisor_control,
-			                           launched,
-			                           process_cap))
+						SUPERVISED_INPUT_MANAGER,
+						self.self_cap,
+						supervisor_control,
+						launched,
+						process_cap))
 				return 1;
 			input_manager_started = processes[SUPERVISED_INPUT_MANAGER].state == SUPERVISED_PROCESS_RUNNING;
 			continue;
 		}
 		if (input_manager_started && !keyboard_controller_started &&
-		    processes[SUPERVISED_KEYBOARD_CONTROLLER].state == SUPERVISED_PROCESS_STOPPED) {
+				processes[SUPERVISED_KEYBOARD_CONTROLLER].state == SUPERVISED_PROCESS_STOPPED) {
 			cap_id_t process_cap = CAP_ID_INVALID;
 			process_begin_launch(&processes[SUPERVISED_KEYBOARD_CONTROLLER]);
 			bool launched = installed_launch(
-				init, "keyboard_controller.elf", "keyboard controller", 0u, NULL, 0u, NULL, &process_cap);
+					init, "keyboard_controller.elf", "keyboard controller", 0u, NULL, 0u, NULL, &process_cap);
 			if (!process_finish_launch(&processes[SUPERVISED_KEYBOARD_CONTROLLER],
-			                           SUPERVISED_KEYBOARD_CONTROLLER,
-			                           self.self_cap,
-			                           supervisor_control,
-			                           launched,
-			                           process_cap))
+						SUPERVISED_KEYBOARD_CONTROLLER,
+						self.self_cap,
+						supervisor_control,
+						launched,
+						process_cap))
 				return 1;
 			keyboard_controller_started = processes[SUPERVISED_KEYBOARD_CONTROLLER].state == SUPERVISED_PROCESS_RUNNING;
 			continue;
 		}
 		if (keyboard_controller_started && !text_input_started &&
-		    processes[SUPERVISED_TEXT_INPUT].state == SUPERVISED_PROCESS_STOPPED) {
+				processes[SUPERVISED_TEXT_INPUT].state == SUPERVISED_PROCESS_STOPPED) {
 			const char* arguments[] = {text_input_layout};
-			cap_id_t    process_cap = CAP_ID_INVALID;
+			cap_id_t process_cap = CAP_ID_INVALID;
 			process_begin_launch(&processes[SUPERVISED_TEXT_INPUT]);
 			bool launched =
-				installed_launch(init, "text_input.elf", "text input", 1u, arguments, 0u, NULL, &process_cap);
+					installed_launch(init, "text_input.elf", "text input", 1u, arguments, 0u, NULL, &process_cap);
 			if (!process_finish_launch(&processes[SUPERVISED_TEXT_INPUT],
-			                           SUPERVISED_TEXT_INPUT,
-			                           self.self_cap,
-			                           supervisor_control,
-			                           launched,
-			                           process_cap))
+						SUPERVISED_TEXT_INPUT,
+						self.self_cap,
+						supervisor_control,
+						launched,
+						process_cap))
 				return 1;
 			text_input_started = processes[SUPERVISED_TEXT_INPUT].state == SUPERVISED_PROCESS_RUNNING;
 			continue;
 		}
 		if (loader_started && !device_manager_started &&
-		    processes[SUPERVISED_DEVICE_MANAGER].state == SUPERVISED_PROCESS_STOPPED) {
+				processes[SUPERVISED_DEVICE_MANAGER].state == SUPERVISED_PROCESS_STOPPED) {
 			cap_id_t process_cap = CAP_ID_INVALID;
 			process_begin_launch(&processes[SUPERVISED_DEVICE_MANAGER]);
 			enum device_manager_launch_result result = device_manager_launch(init, &process_cap);
 
 			if (result == DEVICE_MANAGER_LAUNCH_FAILED) {
 				if (!process_schedule_restart(&processes[SUPERVISED_DEVICE_MANAGER],
-				                              SUPERVISED_DEVICE_MANAGER,
-				                              self.self_cap,
-				                              supervisor_control))
+							SUPERVISED_DEVICE_MANAGER,
+							self.self_cap,
+							supervisor_control))
 					return 1;
 				continue;
 			}
 			if (result == DEVICE_MANAGER_LAUNCH_SUCCESS) {
 				if (!process_finish_launch(&processes[SUPERVISED_DEVICE_MANAGER],
-				                           SUPERVISED_DEVICE_MANAGER,
-				                           self.self_cap,
-				                           supervisor_control,
-				                           true,
-				                           process_cap))
+							SUPERVISED_DEVICE_MANAGER,
+							self.self_cap,
+							supervisor_control,
+							true,
+							process_cap))
 					return 1;
 				device_manager_started = processes[SUPERVISED_DEVICE_MANAGER].state == SUPERVISED_PROCESS_RUNNING;
 				continue;
@@ -980,7 +982,7 @@ int supervisor_run(const struct init_state* init) {
 		}
 		if (device_manager_started && !configured_mounts_ready) {
 			enum configured_mount_readiness readiness =
-				mount_configured_filesystems(&configuration, configured_mounts, &bootfs_at_root);
+					mount_configured_filesystems(&configuration, configured_mounts, &bootfs_at_root);
 			if (readiness == CONFIGURED_MOUNTS_FAILED) return 1;
 			if (readiness == CONFIGURED_MOUNTS_READY) {
 				configured_mounts_ready = true;
@@ -998,21 +1000,21 @@ int supervisor_run(const struct init_state* init) {
 		if (driver_catalog_updated && !shell_started) {
 			if (!terminal_available) {
 				processes[SUPERVISED_SHELL].state = SUPERVISED_PROCESS_DISABLED;
-				shell_started                     = true;
+				shell_started = true;
 				continue;
 			}
 			if (processes[SUPERVISED_SHELL].state == SUPERVISED_PROCESS_STOPPED &&
-			    service_available(&text_input_selector) && service_available(&tty_session_selector)) {
+					service_available(&text_input_selector) && service_available(&tty_session_selector)) {
 				cap_id_t process_cap = CAP_ID_INVALID;
 				process_begin_launch(&processes[SUPERVISED_SHELL]);
 				bool launched =
-					installed_launch_interactive(init, "shell.elf", "shell", 0u, NULL, 0u, NULL, &process_cap);
+						installed_launch_interactive(init, "shell.elf", "shell", 0u, NULL, 0u, NULL, &process_cap);
 				if (!process_finish_launch(&processes[SUPERVISED_SHELL],
-				                           SUPERVISED_SHELL,
-				                           self.self_cap,
-				                           supervisor_control,
-				                           launched,
-				                           process_cap))
+							SUPERVISED_SHELL,
+							self.self_cap,
+							supervisor_control,
+							launched,
+							process_cap))
 					return 1;
 				shell_started = processes[SUPERVISED_SHELL].state == SUPERVISED_PROCESS_RUNNING;
 				continue;
@@ -1020,16 +1022,16 @@ int supervisor_run(const struct init_state* init) {
 		}
 		bool handled_event = false;
 		for (;;) {
-			struct cap_request      call;
+			struct cap_request call;
 			struct supervisor_event event;
-			bool                    received = false;
+			bool received = false;
 
 			status = channel_recv(supervisor_endpoint, &call, &event, sizeof(event), &received);
 			if (status != SYSCALL_STATUS_OK) return 1;
 			if (!received) break;
 			handled_event = true;
 			if (call.object_id != SUPERVISOR_CONTROL_OBJECT_ID || call.caller != supervisor_pid ||
-			    (call.rights & CAP_CALL) == 0u || call.request_size != sizeof(event)) {
+					(call.rights & CAP_CALL) == 0u || call.request_size != sizeof(event)) {
 				if (channel_reply(call.call_id, NULL, 0u, SYSCALL_STATUS_DENIED) != SYSCALL_STATUS_OK) return 1;
 				continue;
 			}
@@ -1056,18 +1058,18 @@ int supervisor_run(const struct init_state* init) {
 				continue;
 			}
 			printf("init: %s exited: wait=%u code=%llu\n",
-			       process->description,
-			       (unsigned)event.wait_status,
-			       (unsigned long long)event.exit_code);
+					process->description,
+					(unsigned)event.wait_status,
+					(unsigned long long)event.exit_code);
 			process->process_cap = CAP_ID_INVALID;
 			switch (event.process) {
 			case SUPERVISED_VFS:
-				vfs_started             = false;
-				vfs_ready               = false;
-				bootfs_mounted          = false;
-				bootfs_at_root          = true;
+				vfs_started = false;
+				vfs_ready = false;
+				bootfs_mounted = false;
+				bootfs_at_root = true;
 				configured_mounts_ready = false;
-				driver_catalog_updated  = false;
+				driver_catalog_updated = false;
 				memset(configured_mounts, 0, sizeof(configured_mounts));
 				break;
 			case SUPERVISED_BOOTFS:
@@ -1075,14 +1077,14 @@ int supervisor_run(const struct init_state* init) {
 				bootfs_mounted = false;
 				break;
 			case SUPERVISED_TERMINAL:
-				terminal_started   = false;
-				terminal_ready     = false;
+				terminal_started = false;
+				terminal_ready = false;
 				terminal_available = false;
 				display_set_standard_streams(CAP_ID_INVALID, init->serial_stream_cap, init->serial_stream_cap);
 				break;
 			case SUPERVISED_TTY_SESSION:
 				tty_session_started = false;
-				tty_session_ready   = false;
+				tty_session_ready = false;
 				break;
 			case SUPERVISED_LOADER:
 				loader_started = false;
@@ -1111,8 +1113,8 @@ int supervisor_run(const struct init_state* init) {
 		}
 		for (;;) {
 			struct channel_event event;
-			bool                 received = false;
-			status                        = channel_event_recv(supervisor_endpoint, &event, &received);
+			bool received = false;
+			status = channel_event_recv(supervisor_endpoint, &event, &received);
 			if (status != SYSCALL_STATUS_OK) return 1;
 			if (!received) break;
 		}

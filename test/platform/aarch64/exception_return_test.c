@@ -1,15 +1,17 @@
-#include <core/address_space.h>
-#include <core/cpu.h>
-#include <core/exception.h>
-#include <core/sched.h>
-#include <criterion/criterion.h>
-#include <hal/cpu.h>
-#include <hal/hcf.h>
-#include <hal/userspace.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <hal/cpu.h>
+#include <hal/hcf.h>
+#include <hal/userspace.h>
+#include <core/address_space.h>
+#include <core/cpu.h>
+#include <core/exception.h>
+#include <core/sched.h>
+
+#include <criterion/criterion.h>
 
 #include "../../../platforms/pc_aarch64/hal/interrupts/frame.h"
 
@@ -18,14 +20,14 @@
 
 char exception_vectors[2048];
 
-static size_t                        observed_address_space_faults;
-static uintptr_t                     observed_address_space_addr;
+static size_t observed_address_space_faults;
+static uintptr_t observed_address_space_addr;
 static enum address_space_fault_kind observed_fault_kind;
-static memory_access_t               observed_address_space_access;
-static bool                          observed_address_space_user_mode;
-static bool                          address_space_fault_result;
+static memory_access_t observed_address_space_access;
+static bool observed_address_space_user_mode;
+static bool address_space_fault_result;
 
-static size_t                   observed_core_faults;
+static size_t observed_core_faults;
 static enum core_exception_kind observed_core_kind;
 
 bool clock_handle_irq(const struct exception_frame* frame) {
@@ -57,12 +59,12 @@ void cpu_enter_exception(void) {
 void cpu_leave_exception(void) {
 }
 
-bool address_space_handle_current_fault(uintptr_t addr, enum address_space_fault_kind kind, memory_access_t access,
-                                        bool user_mode) {
+bool address_space_handle_current_fault(
+		uintptr_t addr, enum address_space_fault_kind kind, memory_access_t access, bool user_mode) {
 	observed_address_space_faults++;
-	observed_address_space_addr      = addr;
-	observed_fault_kind              = kind;
-	observed_address_space_access    = access;
+	observed_address_space_addr = addr;
+	observed_fault_kind = kind;
+	observed_address_space_access = access;
 	observed_address_space_user_mode = user_mode;
 	return address_space_fault_result;
 }
@@ -73,8 +75,8 @@ bool core_handle_user_exception(enum core_exception_kind kind) {
 	return true;
 }
 
-bool core_handle_exception(enum core_exception_kind kind, enum core_exception_access access, uintptr_t addr,
-                           bool user_mode) {
+bool core_handle_exception(
+		enum core_exception_kind kind, enum core_exception_access access, uintptr_t addr, bool user_mode) {
 	(void)access;
 	(void)addr;
 	(void)user_mode;
@@ -114,20 +116,20 @@ void hal_cpu_fp_context_restore(const struct hal_cpu_fp_context* context) {
 #include "../../../platforms/pc_aarch64/hal/userspace.c"
 
 static void aarch64_exception_test_reset(void) {
-	observed_address_space_faults    = 0u;
-	observed_address_space_addr      = 0u;
-	observed_fault_kind              = ADDRESS_SPACE_FAULT_INVALID;
-	observed_address_space_access    = 0u;
+	observed_address_space_faults = 0u;
+	observed_address_space_addr = 0u;
+	observed_fault_kind = ADDRESS_SPACE_FAULT_INVALID;
+	observed_address_space_access = 0u;
 	observed_address_space_user_mode = false;
-	address_space_fault_result       = true;
-	observed_core_faults             = 0u;
-	observed_core_kind               = CORE_EXCEPTION_UNKNOWN;
+	address_space_fault_result = true;
+	observed_core_faults = 0u;
+	observed_core_kind = CORE_EXCEPTION_UNKNOWN;
 	memset(&live_fp_context, 0, sizeof(live_fp_context));
 }
 
 Test(aarch64_exception_return, initial_el0_context_leaves_irq_and_fiq_unmasked) {
 	struct thread_context context;
-	uint64_t              spsr;
+	uint64_t spsr;
 
 	aarch64_exception_test_reset();
 	memset(&context, 0, sizeof(context));
@@ -137,16 +139,16 @@ Test(aarch64_exception_return, initial_el0_context_leaves_irq_and_fiq_unmasked) 
 
 	cr_assert_eq(spsr & AARCH64_SPSR_MODE_MASK, AARCH64_SPSR_MODE_EL0T);
 	cr_assert_eq(
-		spsr & AARCH64_TEST_PSTATE_I, 0u, "new userspace threads must not enter EL0 with IRQ exceptions masked");
+			spsr & AARCH64_TEST_PSTATE_I, 0u, "new userspace threads must not enter EL0 with IRQ exceptions masked");
 	cr_assert_eq(
-		spsr & AARCH64_TEST_PSTATE_F, 0u, "new userspace threads must not enter EL0 with FIQ exceptions masked");
+			spsr & AARCH64_TEST_PSTATE_F, 0u, "new userspace threads must not enter EL0 with FIQ exceptions masked");
 }
 
 Test(aarch64_exception_return, translation_faults_still_reach_lazy_page_fault_policy) {
 	struct exception_frame frame = {
 		.vector = 8u,
-		.esr    = (0x24ull << 26) | 0x04u,
-		.far    = 0x12345000u,
+		.esr = (0x24ull << 26) | 0x04u,
+		.far = 0x12345000u,
 	};
 
 	aarch64_exception_test_reset();
@@ -163,8 +165,8 @@ Test(aarch64_exception_return, translation_faults_still_reach_lazy_page_fault_po
 Test(aarch64_exception_return, permission_faults_reach_address_space_as_write_protection_faults) {
 	struct exception_frame frame = {
 		.vector = 8u,
-		.esr    = (0x24ull << 26) | (1ull << 6) | 0x0du,
-		.far    = 0x12346000u,
+		.esr = (0x24ull << 26) | (1ull << 6) | 0x0du,
+		.far = 0x12346000u,
 	};
 
 	aarch64_exception_test_reset();
@@ -180,17 +182,18 @@ Test(aarch64_exception_return, permission_faults_reach_address_space_as_write_pr
 Test(aarch64_exception_return, data_abort_alignment_is_not_misreported_as_page_protection) {
 	struct exception_frame frame = {
 		.vector = 8u,
-		.esr    = (0x24ull << 26) | 0x21u,
-		.far    = 0x12347003u,
+		.esr = (0x24ull << 26) | 0x21u,
+		.far = 0x12347003u,
 	};
 
 	aarch64_exception_test_reset();
 	handle_exception(&frame);
 
-	cr_assert_eq(
-		observed_address_space_faults, 0u, "DFSC alignment faults must not enter lazy/protection page-fault handling");
+	cr_assert_eq(observed_address_space_faults,
+			0u,
+			"DFSC alignment faults must not enter lazy/protection page-fault handling");
 	cr_assert_eq(observed_core_faults, 1u);
 	cr_assert_eq(observed_core_kind,
-	             CORE_EXCEPTION_ALIGNMENT,
-	             "userspace data-abort alignment must retain alignment fault semantics");
+			CORE_EXCEPTION_ALIGNMENT,
+			"userspace data-abort alignment must retain alignment fault semantics");
 }

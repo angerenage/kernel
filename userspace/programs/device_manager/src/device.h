@@ -1,11 +1,13 @@
 #pragma once
 
-#include <base/cap.h>
-#include <base/syscall.h>
-#include <protocol/device.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/cap.h>
+#include <base/syscall.h>
+
+#include <protocol/device.h>
 
 #define DEVICE_ROOT_OBJECT_ID UINT64_MAX
 #define DEVICE_OBJECT_ID_LIMIT (1ull << 62)
@@ -16,82 +18,82 @@ struct dm_driver_binding;
 
 /* Owned length-delimited byte string used by internal immutable state. */
 struct dm_string {
-	char*  data;
+	char* data;
 	size_t size;
 };
 
 /* One immutable named property in provider insertion order. */
 struct dm_property {
-	struct dm_string          name;
+	struct dm_string name;
 	enum device_property_type type;
-	uint64_t                  element_count;
-	size_t                    value_size;
-	uint8_t*                  value;
-	struct dm_property*       next;
+	uint64_t element_count;
+	size_t value_size;
+	uint8_t* value;
+	struct dm_property* next;
 };
 
 /* One manager-owned named resource and its maximum driver rights. */
 struct dm_resource {
-	struct dm_string    name;
-	cap_id_t            capability;
-	cap_rights_t        rights;
+	struct dm_string name;
+	cap_id_t capability;
+	cap_rights_t rights;
 	struct dm_resource* next;
 };
 
 /* One committed immutable device and its fixed parent/child links. */
 struct dm_device {
-	uint64_t            id;          /* Private, monotonically assigned manager ID. */
-	cap_id_t            manager_cap; /* Manager-owned source for future driver grants. */
-	struct dm_device*   parent;
-	struct dm_device*   first_child;
-	struct dm_device*   last_child;
-	struct dm_device*   next_sibling;
-	struct dm_device*   next;
-	struct dm_string    name;
-	struct dm_string*   compatible_ids;
-	size_t              compatible_count;
+	uint64_t id;          /* Private, monotonically assigned manager ID. */
+	cap_id_t manager_cap; /* Manager-owned source for future driver grants. */
+	struct dm_device* parent;
+	struct dm_device* first_child;
+	struct dm_device* last_child;
+	struct dm_device* next_sibling;
+	struct dm_device* next;
+	struct dm_string name;
+	struct dm_string* compatible_ids;
+	size_t compatible_count;
 	struct dm_property* properties;
 	struct dm_property* properties_tail;
-	size_t              property_count;
+	size_t property_count;
 	struct dm_resource* resources;
 	struct dm_resource* resources_tail;
-	size_t              resource_count;
+	size_t resource_count;
 	/* Driver generation that constructed this device, or NULL for a firmware root. */
 	struct dm_driver_binding* provider_binding;
-	uint64_t                  provider_generation;
+	uint64_t provider_generation;
 	/* Supervisor binding selected for this device, if its compatible IDs match. */
 	struct dm_driver_binding* binding;
-	bool                      removing;
+	bool removing;
 };
 
 /* Mutable state retained only for the lifetime of one construction transaction. */
 struct dm_builder {
-	uint64_t            object_id;
-	struct dm_device*   parent;
-	struct dm_string    name;
-	struct dm_string*   compatible_ids;
-	size_t              compatible_count;
+	uint64_t object_id;
+	struct dm_device* parent;
+	struct dm_string name;
+	struct dm_string* compatible_ids;
+	size_t compatible_count;
 	struct dm_property* properties;
 	struct dm_property* properties_tail;
-	size_t              property_count;
+	size_t property_count;
 	struct dm_property* active_property;
-	size_t              active_property_written;
+	size_t active_property_written;
 	struct dm_resource* resources;
 	struct dm_resource* resources_tail;
-	size_t              resource_count;
-	size_t              accounted_size;
+	size_t resource_count;
+	size_t accounted_size;
 	/* Active driver generation authorized to commit this child transaction. */
 	struct dm_driver_binding* owner_binding;
-	uint64_t                  owner_generation;
-	struct dm_builder*        next;
+	uint64_t owner_generation;
+	struct dm_builder* next;
 };
 
 /* Complete independently testable device tree and in-progress builder state. */
 struct dm_state {
-	uint64_t           next_device_id;
-	uint64_t           next_builder_id;
-	struct dm_device*  devices;
-	struct dm_device*  devices_tail;
+	uint64_t next_device_id;
+	uint64_t next_builder_id;
+	struct dm_device* devices;
+	struct dm_device* devices_tail;
 	struct dm_builder* builders;
 };
 
@@ -109,8 +111,7 @@ struct dm_builder* dm_state_find_builder(const struct dm_state* state, uint64_t 
 
 /* Allocate and link a root or direct-child builder. */
 syscall_status_t dm_builder_begin(struct dm_state* state, struct dm_device* parent,
-                                  struct dm_driver_binding* owner_binding, uint64_t owner_generation,
-                                  struct dm_builder** out_builder);
+		struct dm_driver_binding* owner_binding, uint64_t owner_generation, struct dm_builder** out_builder);
 
 /* Set a builder's optional UTF-8 diagnostic name. */
 syscall_status_t dm_builder_set_name(struct dm_builder* builder, const void* name, size_t name_size);
@@ -120,18 +121,18 @@ syscall_status_t dm_builder_add_compatible(struct dm_builder* builder, const voi
 
 /* Allocate one property and make it the builder's active property. */
 syscall_status_t dm_builder_begin_property(struct dm_builder* builder, const void* name, size_t name_size,
-                                           enum device_property_type type, uint64_t element_count, uint64_t value_size);
+		enum device_property_type type, uint64_t element_count, uint64_t value_size);
 
 /* Append the next contiguous chunk to the active property. */
-syscall_status_t dm_builder_append_property(struct dm_builder* builder, uint64_t offset, const void* bytes,
-                                            size_t size);
+syscall_status_t dm_builder_append_property(
+		struct dm_builder* builder, uint64_t offset, const void* bytes, size_t size);
 
 /* Validate the completed encoding and close the active property. */
 syscall_status_t dm_builder_finish_property(struct dm_builder* builder);
 
 /* Transfer one delegated named resource into builder ownership. */
-syscall_status_t dm_builder_add_resource(struct dm_builder* builder, const void* name, size_t name_size,
-                                         cap_id_t capability, cap_rights_t rights);
+syscall_status_t dm_builder_add_resource(
+		struct dm_builder* builder, const void* name, size_t name_size, cap_id_t capability, cap_rights_t rights);
 
 /* Check whether a builder has the minimum complete state required by commit. */
 syscall_status_t dm_builder_validate_commit(const struct dm_builder* builder);

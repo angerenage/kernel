@@ -1,40 +1,41 @@
 #pragma once
 
-#include <base/cap.h>
-#include <base/process.h>
-#include <base/syscall.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
+#include <base/cap.h>
+#include <base/process.h>
+#include <base/syscall.h>
+
 struct loader_mapping_authority {
-	cap_id_t                         cap;
+	cap_id_t cap;
 	struct loader_mapping_authority* next;
 };
 
 struct loader_loaded_program {
-	cap_id_t                         load_cap;
-	cap_id_t                         process_cap;
-	cap_id_t                         address_space_cap;
-	process_id_t                     process_id;
-	uintptr_t                        entry;
-	uintptr_t                        heap_base;
-	size_t                           heap_size;
-	size_t                           mapping_granule;
-	cap_id_t                         memory_allocator_cap;
-	cap_id_t                         registry_cap;
+	cap_id_t load_cap;
+	cap_id_t process_cap;
+	cap_id_t address_space_cap;
+	process_id_t process_id;
+	uintptr_t entry;
+	uintptr_t heap_base;
+	size_t heap_size;
+	size_t mapping_granule;
+	cap_id_t memory_allocator_cap;
+	cap_id_t registry_cap;
 	struct loader_mapping_authority* mappings;
-	bool                             started;
-	struct loader_loaded_program*    next;
+	bool started;
+	struct loader_loaded_program* next;
 };
 
 /* Build a complete, non-running process from a static ELF64 file. */
-syscall_status_t loader_prepare_program(cap_id_t file_cap, const char* name, size_t name_size,
-                                        struct loader_loaded_program** out_program);
+syscall_status_t loader_prepare_program(
+		cap_id_t file_cap, const char* name, size_t name_size, struct loader_loaded_program** out_program);
 
 /* Start a prepared process with the positional arguments from LOADER_V1_OP_RUN. */
 syscall_status_t loader_start_program(struct loader_loaded_program* program, uint32_t argc, const void* argv_data,
-                                      size_t argv_size, uint32_t capc, const cap_id_t* capv, cap_id_t* out_thread_cap);
+		size_t argv_size, uint32_t capc, const cap_id_t* capv, cap_id_t* out_thread_cap);
 
 /* Destroy a prepared process and release the loader's local state. */
 void loader_discard_program(struct loader_loaded_program* program);

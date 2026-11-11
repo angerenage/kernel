@@ -1,3 +1,9 @@
+#include <libc/stdlib.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+
 #include <base/heap.h>
 #include <base/math.h>
 #include <boot/info.h>
@@ -6,11 +12,6 @@
 #include <core/memory.h>
 #include <core/process.h>
 #include <kernel/elf_loader.h>
-#include <libc/stdlib.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <string.h>
 
 #include "capability/memory.h"
 
@@ -40,7 +41,7 @@
 #endif
 
 struct elf64_ehdr {
-	uint8_t  ident[16];
+	uint8_t ident[16];
 	uint16_t type;
 	uint16_t machine;
 	uint32_t version;
@@ -75,8 +76,8 @@ static bool kernel_elf_range_in_module(size_t module_size, uint64_t offset, uint
 	return end <= (uint64_t)module_size;
 }
 
-static bool kernel_elf_mapping_range(uint64_t vaddr, uint64_t size, size_t granule, uintptr_t* out_base,
-                                     size_t* out_size) {
+static bool kernel_elf_mapping_range(
+		uint64_t vaddr, uint64_t size, size_t granule, uintptr_t* out_base, size_t* out_size) {
 	uint64_t page_base;
 	uint64_t page_end;
 	uint64_t end;
@@ -98,7 +99,7 @@ static bool kernel_elf_header_valid(const struct elf64_ehdr* ehdr, size_t module
 
 	if (ehdr == NULL) return false;
 	if (ehdr->ident[0] != ELF_MAGIC0 || ehdr->ident[1] != ELF_MAGIC1 || ehdr->ident[2] != ELF_MAGIC2 ||
-	    ehdr->ident[3] != ELF_MAGIC3) {
+			ehdr->ident[3] != ELF_MAGIC3) {
 		return false;
 	}
 	if (ehdr->ident[4] != ELF_CLASS_64 || ehdr->ident[5] != ELF_DATA_LSB || ehdr->ident[6] != ELF_VERSION_CURRENT) {
@@ -131,46 +132,46 @@ static cap_rights_t mapping_rights(memory_access_t access) {
 	return rights;
 }
 
-static enum kernel_elf_load_result kernel_elf_load_segment(struct process* process, const struct boot_module* module,
-                                                           const struct elf64_phdr* phdr) {
+static enum kernel_elf_load_result kernel_elf_load_segment(
+		struct process* process, const struct boot_module* module, const struct elf64_phdr* phdr) {
 	struct address_space* space;
-	uintptr_t             map_base;
-	size_t                mapping_size;
-	size_t                granule;
-	struct mapping*       mapping      = NULL;
-	struct memory*        memory       = NULL;
-	memory_access_t       final_access = kernel_elf_segment_access(phdr->flags);
-	memory_access_t       load_access  = final_access | MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE;
+	uintptr_t map_base;
+	size_t mapping_size;
+	size_t granule;
+	struct mapping* mapping = NULL;
+	struct memory* memory = NULL;
+	memory_access_t final_access = kernel_elf_segment_access(phdr->flags);
+	memory_access_t load_access = final_access | MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE;
 
 	if (phdr->filesz > phdr->memsz) return KERNEL_ELF_LOAD_BAD_FORMAT;
 	if (phdr->memsz == 0u) return KERNEL_ELF_LOAD_OK;
 	if (!kernel_elf_range_in_module(module->size, phdr->offset, phdr->filesz)) return KERNEL_ELF_LOAD_BAD_FORMAT;
-	space   = process_address_space(process);
+	space = process_address_space(process);
 	granule = address_space_minimum_mapping_size(space);
 	if (!kernel_elf_mapping_range(phdr->vaddr, phdr->memsz, granule, &map_base, &mapping_size)) {
 		return KERNEL_ELF_LOAD_BAD_FORMAT;
 	}
 	if ((phdr->align != 0u && phdr->align != 1u && phdr->align != granule) ||
-	    ((phdr->vaddr - phdr->offset) & (uint64_t)(granule - 1u)) != 0u) {
+			((phdr->vaddr - phdr->offset) & (uint64_t)(granule - 1u)) != 0u) {
 		return KERNEL_ELF_LOAD_UNSUPPORTED;
 	}
 
 	if (!memory_create_anonymous(mapping_size, &memory)) return KERNEL_ELF_LOAD_MAP_FAILED;
 	if (!address_space_map(space,
-	                       &(const struct address_space_mapping_request){
-							   .memory  = memory,
-							   .address = map_base,
-							   .access  = load_access,
-						   },
-	                       &mapping)) {
+				&(const struct address_space_mapping_request){
+					.memory = memory,
+					.address = map_base,
+					.access = load_access,
+				},
+				&mapping)) {
 		memory_release(memory);
 		return KERNEL_ELF_LOAD_MAP_FAILED;
 	}
 
 	if (phdr->filesz != 0u && address_space_copy_to(space,
-	                                                (uintptr_t)phdr->vaddr,
-	                                                (const uint8_t*)module->address + (size_t)phdr->offset,
-	                                                (size_t)phdr->filesz) != ADDRESS_TRANSFER_OK) {
+									  (uintptr_t)phdr->vaddr,
+									  (const uint8_t*)module->address + (size_t)phdr->offset,
+									  (size_t)phdr->filesz) != ADDRESS_TRANSFER_OK) {
 		memory_release(memory);
 		mapping_release(mapping);
 		return KERNEL_ELF_LOAD_COPY_FAILED;
@@ -181,7 +182,7 @@ static enum kernel_elf_load_result kernel_elf_load_segment(struct process* proce
 		return KERNEL_ELF_LOAD_MAP_FAILED;
 	}
 	if (kernel_mapping_publish(process, process_pid(process), mapping, mapping_rights(final_access), final_access) ==
-	    CAP_ID_INVALID) {
+			CAP_ID_INVALID) {
 		(void)address_space_unmap(space, mapping);
 		mapping_release(mapping);
 		return KERNEL_ELF_LOAD_MAP_FAILED;
@@ -190,23 +191,23 @@ static enum kernel_elf_load_result kernel_elf_load_segment(struct process* proce
 	return KERNEL_ELF_LOAD_OK;
 }
 
-static enum kernel_elf_load_result kernel_elf_allocate_initial_heap(struct process* process, uintptr_t* out_base,
-                                                                    size_t* out_size) {
+static enum kernel_elf_load_result kernel_elf_allocate_initial_heap(
+		struct process* process, uintptr_t* out_base, size_t* out_size) {
 	struct mapping* mapping;
-	struct memory*  memory;
+	struct memory* memory;
 
 	if (process == NULL || out_base == NULL || out_size == NULL) return KERNEL_ELF_LOAD_INVALID_ARGUMENTS;
 	size_t granule = address_space_minimum_mapping_size(process_address_space(process));
 	size_t size;
 	if (granule == 0u || !align_up_size(HEAP_DEFAULT_GROW_SIZE, granule, &size) ||
-	    !memory_create_anonymous(size, &memory))
+			!memory_create_anonymous(size, &memory))
 		return KERNEL_ELF_LOAD_MAP_FAILED;
 	bool mapped = address_space_map(process_address_space(process),
-	                                &(const struct address_space_mapping_request){
-										.memory = memory,
-										.access = MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
-									},
-	                                &mapping);
+			&(const struct address_space_mapping_request){
+				.memory = memory,
+				.access = MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+			},
+			&mapping);
 	memory_release(memory);
 	if (!mapped) {
 		return KERNEL_ELF_LOAD_MAP_FAILED;
@@ -214,10 +215,10 @@ static enum kernel_elf_load_result kernel_elf_allocate_initial_heap(struct proce
 	*out_base = mapping_address(mapping);
 	*out_size = size;
 	if (kernel_mapping_publish(process,
-	                           process_pid(process),
-	                           mapping,
-	                           mapping_rights(MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE),
-	                           MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE) == CAP_ID_INVALID) {
+				process_pid(process),
+				mapping,
+				mapping_rights(MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE),
+				MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE) == CAP_ID_INVALID) {
 		(void)address_space_unmap(process_address_space(process), mapping);
 		mapping_release(mapping);
 		return KERNEL_ELF_LOAD_MAP_FAILED;
@@ -226,13 +227,13 @@ static enum kernel_elf_load_result kernel_elf_allocate_initial_heap(struct proce
 	return KERNEL_ELF_LOAD_OK;
 }
 
-enum kernel_elf_load_result kernel_elf_load_process(const struct boot_module* module, const char* name,
-                                                    struct kernel_elf_process* out_process) {
-	struct elf64_ehdr   ehdr;
-	struct process*     process = NULL;
+enum kernel_elf_load_result kernel_elf_load_process(
+		const struct boot_module* module, const char* name, struct kernel_elf_process* out_process) {
+	struct elf64_ehdr ehdr;
+	struct process* process = NULL;
 	enum process_result create_result;
-	uintptr_t           heap_base = 0u;
-	bool                saw_load  = false;
+	uintptr_t heap_base = 0u;
+	bool saw_load = false;
 
 	if (out_process != NULL) *out_process = (struct kernel_elf_process){0};
 	if (module == NULL || module->address == NULL || out_process == NULL) return KERNEL_ELF_LOAD_INVALID_ARGUMENTS;
@@ -247,12 +248,12 @@ enum kernel_elf_load_result kernel_elf_load_process(const struct boot_module* mo
 
 	for (size_t i = 0; i < ehdr.phnum; i++) {
 		enum kernel_elf_load_result segment_result;
-		struct elf64_phdr           phdr;
-		size_t                      phdr_offset = (size_t)ehdr.phoff + i * sizeof(phdr);
+		struct elf64_phdr phdr;
+		size_t phdr_offset = (size_t)ehdr.phoff + i * sizeof(phdr);
 
 		memcpy(&phdr, (const uint8_t*)module->address + phdr_offset, sizeof(phdr));
 		if (phdr.type != ELF_PT_LOAD) continue;
-		saw_load       = true;
+		saw_load = true;
 		segment_result = kernel_elf_load_segment(process, module, &phdr);
 		if (segment_result != KERNEL_ELF_LOAD_OK) {
 			(void)process_destroy(process);
@@ -263,13 +264,14 @@ enum kernel_elf_load_result kernel_elf_load_process(const struct boot_module* mo
 		(void)process_destroy(process);
 		return KERNEL_ELF_LOAD_BAD_FORMAT;
 	}
-	if (address_space_validate_range(
-			process_address_space(process), (uintptr_t)ehdr.entry, 1u, ADDRESS_TRANSFER_EXEC | ADDRESS_TRANSFER_USER) !=
-	    ADDRESS_TRANSFER_OK) {
+	if (address_space_validate_range(process_address_space(process),
+				(uintptr_t)ehdr.entry,
+				1u,
+				ADDRESS_TRANSFER_EXEC | ADDRESS_TRANSFER_USER) != ADDRESS_TRANSFER_OK) {
 		(void)process_destroy(process);
 		return KERNEL_ELF_LOAD_BAD_FORMAT;
 	}
-	size_t                      heap_size;
+	size_t heap_size;
 	enum kernel_elf_load_result heap_result = kernel_elf_allocate_initial_heap(process, &heap_base, &heap_size);
 	if (heap_result != KERNEL_ELF_LOAD_OK) {
 		(void)process_destroy(process);
@@ -277,8 +279,8 @@ enum kernel_elf_load_result kernel_elf_load_process(const struct boot_module* mo
 	}
 
 	*out_process = (struct kernel_elf_process){
-		.process   = process,
-		.entry     = (uintptr_t)ehdr.entry,
+		.process = process,
+		.entry = (uintptr_t)ehdr.entry,
 		.heap_base = heap_base,
 		.heap_size = heap_size,
 	};

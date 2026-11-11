@@ -1,15 +1,16 @@
-#include <core/cpu.h>
-#include <hal/cpu.h>
 #include <stddef.h>
 #include <string.h>
 
+#include <hal/cpu.h>
+#include <core/cpu.h>
+
 #include "cpu_mock.h"
 
-static _Thread_local void*                     hosted_cpu_local_ptr;
+static _Thread_local void* hosted_cpu_local_ptr;
 static _Thread_local struct hal_cpu_fp_context hosted_fp_context;
-static hal_cpu_mock_context_switch_hook_t      hosted_context_switch_hook;
-static bool                                    hosted_thread_context_init_result = true;
-static size_t                                  hosted_kick_count[64];
+static hal_cpu_mock_context_switch_hook_t hosted_context_switch_hook;
+static bool hosted_thread_context_init_result = true;
+static size_t hosted_kick_count[64];
 
 uint64_t hal_cpu_boot_arch_id(void) {
 	return 0u;
@@ -24,13 +25,13 @@ void hal_cpu_local_bind(void* ptr) {
 }
 
 bool hal_cpu_thread_context_init(struct thread_context* context, uintptr_t stack_base, uintptr_t stack_top,
-                                 uintptr_t entry_pc, uintptr_t entry_arg) {
+		uintptr_t entry_pc, uintptr_t entry_arg) {
 	if (!hosted_thread_context_init_result) return false;
 	if (context == NULL || entry_pc == 0u || stack_top <= stack_base) return false;
 
 	*context = (struct thread_context){
 		.instruction_pointer = entry_pc,
-		.stack_pointer       = stack_top,
+		.stack_pointer = stack_top,
 	};
 	context->spill[0] = entry_arg;
 	hal_cpu_fp_context_init(&context->fp_context);

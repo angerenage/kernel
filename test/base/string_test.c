@@ -1,6 +1,7 @@
-#include <criterion/criterion.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <criterion/criterion.h>
 
 Test(base_string, strlen_counts_until_nul) {
 	cr_assert_eq(strlen(""), 0);
@@ -10,7 +11,7 @@ Test(base_string, strlen_counts_until_nul) {
 
 Test(base_string, strncmp_compares_bounded_strings) {
 	const char high_byte[] = {(char)0xff, '\0'};
-	const char low_byte[]  = {(char)0x7f, '\0'};
+	const char low_byte[] = {(char)0x7f, '\0'};
 
 	cr_assert_eq(strncmp("kernel", "kernel", 6u), 0);
 	cr_assert_eq(strncmp("kernel", "different", 0u), 0);
@@ -65,7 +66,7 @@ Test(base_string, memset_fills_requested_range) {
 }
 
 Test(base_string, memcpy_copies_forward_without_touching_neighbors) {
-	uint8_t src[6]  = {10, 20, 30, 40, 50, 60};
+	uint8_t src[6] = {10, 20, 30, 40, 50, 60};
 	uint8_t dest[8] = {1, 2, 3, 4, 5, 6, 7, 8};
 
 	void* result = memcpy(dest + 1, src + 1, 4);
@@ -105,9 +106,9 @@ Test(base_string, memmove_handles_overlap_when_source_is_higher) {
 }
 
 Test(base_string, memcmp_reports_equality_and_order) {
-	const uint8_t lhs[]  = {1, 2, 3, 4};
-	const uint8_t rhs[]  = {1, 2, 3, 4};
-	const uint8_t low[]  = {1, 2, 3, 3};
+	const uint8_t lhs[] = {1, 2, 3, 4};
+	const uint8_t rhs[] = {1, 2, 3, 4};
+	const uint8_t low[] = {1, 2, 3, 3};
 	const uint8_t high[] = {1, 2, 3, 5};
 
 	cr_assert_eq(memcmp(lhs, rhs, sizeof(lhs)), 0);
@@ -116,10 +117,10 @@ Test(base_string, memcmp_reports_equality_and_order) {
 }
 
 Test(base_string, zero_length_operations_leave_buffers_unchanged) {
-	uint8_t src[]  = {1, 2, 3, 4};
+	uint8_t src[] = {1, 2, 3, 4};
 	uint8_t dest[] = {9, 8, 7, 6};
 	uint8_t copy[] = {5, 4, 3, 2};
-	size_t  zero   = 0;
+	size_t zero = 0;
 
 	cr_assert_eq(memcpy(dest, src, zero), dest);
 	cr_assert_eq(memmove(copy, copy + 1, zero), copy);

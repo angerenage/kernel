@@ -22,11 +22,11 @@ enum character_read_result {
 };
 
 struct history_navigation {
-	char   draft[SHELL_LINE_CAPACITY];
+	char draft[SHELL_LINE_CAPACITY];
 	size_t draft_size;
 	size_t draft_cursor;
 	size_t index;
-	bool   draft_saved;
+	bool draft_saved;
 };
 
 static bool read_input_byte(struct shell* shell, uint8_t* out_byte) {
@@ -34,8 +34,8 @@ static bool read_input_byte(struct shell* shell, uint8_t* out_byte) {
 	return read(0, out_byte, 1u) == 1;
 }
 
-static enum character_read_result read_character(struct shell* shell, uint8_t first, char character[4],
-                                                 size_t* out_size) {
+static enum character_read_result read_character(
+		struct shell* shell, uint8_t first, char character[4], size_t* out_size) {
 	size_t size;
 
 	character[0] = (char)first;
@@ -51,7 +51,7 @@ static enum character_read_result read_character(struct shell* shell, uint8_t fi
 		character[i] = (char)byte;
 	}
 	if ((first == 0xe0u && (uint8_t)character[1] < 0xa0u) || (first == 0xedu && (uint8_t)character[1] >= 0xa0u) ||
-	    (first == 0xf0u && (uint8_t)character[1] < 0x90u) || (first == 0xf4u && (uint8_t)character[1] >= 0x90u))
+			(first == 0xf0u && (uint8_t)character[1] < 0x90u) || (first == 0xf4u && (uint8_t)character[1] >= 0x90u))
 		return CHARACTER_READ_INVALID;
 	*out_size = size;
 	return CHARACTER_READ_OK;
@@ -73,12 +73,12 @@ static void append_history(struct shell* shell, const char* line, size_t size) {
 }
 
 static bool select_history(const struct shell* shell, struct shell_line_editor* editor,
-                           struct history_navigation* navigation, bool older) {
+		struct history_navigation* navigation, bool older) {
 	if (!navigation->draft_saved) {
 		memcpy(navigation->draft, editor->line, editor->size);
-		navigation->draft_size   = editor->size;
+		navigation->draft_size = editor->size;
 		navigation->draft_cursor = editor->cursor;
-		navigation->draft_saved  = true;
+		navigation->draft_saved = true;
 	}
 	if (older) {
 		if (navigation->index == 0u) return true;
@@ -96,7 +96,7 @@ static bool select_history(const struct shell* shell, struct shell_line_editor* 
 }
 
 static bool handle_escape_key(struct shell* shell, struct shell_line_editor* editor,
-                              struct history_navigation* navigation, uint8_t key, bool shifted, bool delete_key) {
+		struct history_navigation* navigation, uint8_t key, bool shifted, bool delete_key) {
 	switch (key) {
 	case 'A':
 		return shifted || select_history(shell, editor, navigation, true);
@@ -114,19 +114,19 @@ static bool handle_escape_key(struct shell* shell, struct shell_line_editor* edi
 }
 
 enum shell_input_result shell_read_line(struct shell* shell, char* line, size_t capacity, size_t* out_size) {
-	struct shell_line_editor  editor;
+	struct shell_line_editor editor;
 	struct history_navigation navigation;
-	char                      csi_parameters[8];
-	size_t                    csi_parameter_size = 0u;
-	enum input_state          state              = INPUT_STATE_TEXT;
-	bool                      csi_valid          = true;
-	enum shell_input_result   input_result;
+	char csi_parameters[8];
+	size_t csi_parameter_size = 0u;
+	enum input_state state = INPUT_STATE_TEXT;
+	bool csi_valid = true;
+	enum shell_input_result input_result;
 
 	if (shell == NULL || line == NULL || capacity == 0u || capacity > SHELL_LINE_CAPACITY || out_size == NULL)
 		return SHELL_INPUT_FAILED;
 	if (!shell_line_editor_initialize(&editor, shell, line, capacity)) return SHELL_INPUT_FAILED;
 	navigation = (struct history_navigation){.index = shell->history_count};
-	*out_size  = 0u;
+	*out_size = 0u;
 	for (;;) {
 		uint8_t byte;
 		if (!read_input_byte(shell, &byte)) {
@@ -136,9 +136,9 @@ enum shell_input_result shell_read_line(struct shell* shell, char* line, size_t 
 
 		if (state == INPUT_STATE_ESCAPE) {
 			if (byte == '[') {
-				state              = INPUT_STATE_CSI;
+				state = INPUT_STATE_CSI;
 				csi_parameter_size = 0u;
-				csi_valid          = true;
+				csi_valid = true;
 			}
 			else if (byte == 'O') state = INPUT_STATE_SS3;
 			else state = INPUT_STATE_TEXT;
@@ -148,10 +148,10 @@ enum shell_input_result shell_read_line(struct shell* shell, char* line, size_t 
 			if (byte >= 0x40u && byte <= 0x7eu) {
 				bool plain = csi_valid && csi_parameter_size == 0u;
 				bool shifted =
-					csi_valid && csi_parameter_size == 3u && memcmp(csi_parameters, "1;2", csi_parameter_size) == 0;
+						csi_valid && csi_parameter_size == 3u && memcmp(csi_parameters, "1;2", csi_parameter_size) == 0;
 				bool delete_key = csi_valid && byte == '~' && csi_parameter_size == 1u && csi_parameters[0] == '3';
 				if ((plain || shifted || delete_key) &&
-				    !handle_escape_key(shell, &editor, &navigation, byte, shifted, delete_key)) {
+						!handle_escape_key(shell, &editor, &navigation, byte, shifted, delete_key)) {
 					input_result = SHELL_INPUT_FAILED;
 					break;
 				}
@@ -181,7 +181,7 @@ enum shell_input_result shell_read_line(struct shell* shell, char* line, size_t 
 				break;
 			}
 			append_history(shell, editor.line, editor.size);
-			*out_size    = editor.size;
+			*out_size = editor.size;
 			input_result = SHELL_INPUT_SUBMITTED;
 			break;
 		}
@@ -211,8 +211,8 @@ enum shell_input_result shell_read_line(struct shell* shell, char* line, size_t 
 			continue;
 		}
 		if (byte < 0x20u) continue;
-		char                       character[4];
-		size_t                     character_size;
+		char character[4];
+		size_t character_size;
 		enum character_read_result result = read_character(shell, byte, character, &character_size);
 		if (result == CHARACTER_READ_FAILED) {
 			input_result = SHELL_INPUT_FAILED;

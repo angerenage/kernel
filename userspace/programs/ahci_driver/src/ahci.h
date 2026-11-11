@@ -1,6 +1,7 @@
 #pragma once
 
 #include <base/cap.h>
+
 #include <protocol/device.h>
 
 /* Validate and retain one PCI AHCI controller while preparing its DMA context. */

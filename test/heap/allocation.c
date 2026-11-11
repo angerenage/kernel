@@ -2,9 +2,9 @@
 
 Test(heap, allocates_frees_and_reuses_blocks) {
 	_Alignas(4096) static uint8_t arena[KiB(64)];
-	void*                         a;
-	void*                         b;
-	void*                         reused;
+	void* a;
+	void* b;
+	void* reused;
 
 	init_test_heap(arena, sizeof(arena));
 

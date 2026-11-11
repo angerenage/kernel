@@ -11,8 +11,9 @@
  * Current specification version: 1.0-beta
  */
 
-#include <base/cap.h>
 #include <stdint.h>
+
+#include <base/cap.h>
 
 /* Registry identity shared by every logical input-device service. */
 #define INPUT_NAMESPACE "devices"
@@ -175,12 +176,12 @@ enum input_button_code {
 
 /* Immutable description of one producer-local control ID. */
 struct input_control_descriptor {
-	uint32_t                id;
+	uint32_t id;
 	enum input_control_kind kind;
-	uint32_t                code;
-	uint32_t                group_id;
-	int64_t                 logical_minimum;
-	int64_t                 logical_maximum;
+	uint32_t code;
+	uint32_t group_id;
+	int64_t logical_minimum;
+	int64_t logical_maximum;
 };
 
 /* Value representation used by one synchronous device output. */
@@ -200,19 +201,19 @@ enum input_output_code {
 
 /* Immutable description of one producer-local output ID. */
 struct input_output_descriptor {
-	uint32_t               id;
+	uint32_t id;
 	enum input_output_kind kind;
-	uint32_t               code;
-	uint32_t               group_id;
-	int64_t                logical_minimum;
-	int64_t                logical_maximum;
+	uint32_t code;
+	uint32_t group_id;
+	int64_t logical_minimum;
+	int64_t logical_maximum;
 };
 
 /* One requested value in an atomic output batch. */
 struct input_output_value {
 	uint32_t output_id;
 	uint32_t reserved;
-	int64_t  value;
+	int64_t value;
 };
 
 /* Record kinds retained in the ordered event history. */
@@ -224,7 +225,7 @@ enum input_event_type {
 
 /* Flags attached to one retained event record. */
 enum input_event_flags {
-	INPUT_EVENT_FLAG_NONE      = 0u,
+	INPUT_EVENT_FLAG_NONE = 0u,
 	INPUT_EVENT_FLAG_FRAME_END = 1u << 0u,
 };
 
@@ -235,14 +236,14 @@ enum input_event_flags {
  * frame carries the same timestamp.
  */
 struct input_event {
-	uint64_t              sequence;
-	uint64_t              frame;
-	uint64_t              timestamp_ns;
+	uint64_t sequence;
+	uint64_t frame;
+	uint64_t timestamp_ns;
 	enum input_event_type type;
-	uint32_t              control_id;
-	int64_t               value;
-	uint32_t              flags;
-	uint32_t              reserved;
+	uint32_t control_id;
+	int64_t value;
+	uint32_t flags;
+	uint32_t reserved;
 };
 
 /* Operations accepted by every input-device service capability. */
@@ -268,49 +269,49 @@ struct input_get_info_request {
 /* Immutable metadata returned by INPUT_OP_GET_INFO. */
 struct input_get_info_response {
 	enum input_device_class device_class;
-	uint32_t                descriptor_count;
-	uint32_t                output_descriptor_count;
-	uint32_t                queue_capacity;
-	uint32_t                maximum_frame_events;
-	uint32_t                maximum_output_values;
+	uint32_t descriptor_count;
+	uint32_t output_descriptor_count;
+	uint32_t queue_capacity;
+	uint32_t maximum_frame_events;
+	uint32_t maximum_output_values;
 };
 
 /* Request a provider-ordered page of immutable control descriptors. */
 struct input_read_descriptors_request {
 	struct input_request_header header;
-	uint32_t                    reserved;
-	uint64_t                    offset;
-	uint64_t                    count;
+	uint32_t reserved;
+	uint64_t offset;
+	uint64_t count;
 };
 
 /* Descriptor entries follow this successful response header. */
 struct input_read_descriptors_response {
-	uint64_t                        total;
-	uint64_t                        returned;
+	uint64_t total;
+	uint64_t returned;
 	struct input_control_descriptor descriptors[];
 };
 
 /* Request retained records strictly newer than after_sequence. */
 struct input_read_events_request {
 	struct input_request_header header;
-	uint32_t                    reserved;
-	uint64_t                    after_sequence;
-	uint64_t                    count;
+	uint32_t reserved;
+	uint64_t after_sequence;
+	uint64_t count;
 };
 
 /* Conditions reported with a successful retained-event read. */
 enum input_read_event_flags {
 	INPUT_READ_EVENT_FLAG_NONE = 0u,
-	INPUT_READ_EVENT_FLAG_GAP  = 1u << 0u,
+	INPUT_READ_EVENT_FLAG_GAP = 1u << 0u,
 };
 
 /* Event records follow this successful response header. */
 struct input_read_events_response {
-	uint64_t           oldest_sequence;
-	uint64_t           newest_sequence;
-	uint64_t           returned;
-	uint32_t           flags;
-	uint32_t           reserved;
+	uint64_t oldest_sequence;
+	uint64_t newest_sequence;
+	uint64_t returned;
+	uint32_t flags;
+	uint32_t reserved;
 	struct input_event events[];
 };
 
@@ -327,22 +328,22 @@ struct input_acquire_event_signal_response {
 /* Request a provider-ordered page of immutable output descriptors. */
 struct input_read_output_descriptors_request {
 	struct input_request_header header;
-	uint32_t                    reserved;
-	uint64_t                    offset;
-	uint64_t                    count;
+	uint32_t reserved;
+	uint64_t offset;
+	uint64_t count;
 };
 
 /* Output descriptor entries follow this successful response header. */
 struct input_read_output_descriptors_response {
-	uint64_t                       total;
-	uint64_t                       returned;
+	uint64_t total;
+	uint64_t returned;
 	struct input_output_descriptor descriptors[];
 };
 
 /* Apply one nonempty atomic batch of producer-local output values. */
 struct input_set_outputs_request {
 	struct input_request_header header;
-	uint32_t                    reserved;
-	uint64_t                    count;
-	struct input_output_value   values[];
+	uint32_t reserved;
+	uint64_t count;
+	struct input_output_value values[];
 };

@@ -1,17 +1,18 @@
 #include "format.h"
 
-#include <base/display.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+#include <base/display.h>
 
 #define DISPLAY_BUFFER_SIZE 256u
 
 struct format_ctx {
-	char*  buffer;
+	char* buffer;
 	size_t capacity;
 	size_t index;
-	int    count;
-	bool   bounded;
+	int count;
+	bool bounded;
 };
 
 static void emit_char(struct format_ctx* ctx, char ch) {
@@ -48,9 +49,9 @@ static void emit_padding(struct format_ctx* ctx, int count, char pad) {
 	}
 }
 
-static void emit_unsigned_number(struct format_ctx* ctx, unsigned long long value, unsigned base, bool uppercase,
-                                 int width, char pad) {
-	char   buffer[32];
+static void emit_unsigned_number(
+		struct format_ctx* ctx, unsigned long long value, unsigned base, bool uppercase, int width, char pad) {
+	char buffer[32];
 	size_t idx = 0;
 
 	if (value == 0) {
@@ -80,11 +81,11 @@ static void emit_unsigned_number(struct format_ctx* ctx, unsigned long long valu
 }
 
 static void emit_signed_number(struct format_ctx* ctx, long long value, int width, bool zero_pad) {
-	char               pad       = zero_pad ? '0' : ' ';
-	bool               negative  = value < 0;
+	char pad = zero_pad ? '0' : ' ';
+	bool negative = value < 0;
 	unsigned long long magnitude = negative ? 0ull - (unsigned long long)value : (unsigned long long)value;
-	char               buffer[32];
-	size_t             idx = 0;
+	char buffer[32];
+	size_t idx = 0;
 
 	if (magnitude == 0) {
 		buffer[idx++] = '0';
@@ -98,7 +99,7 @@ static void emit_signed_number(struct format_ctx* ctx, long long value, int widt
 	}
 
 	int total_digits = (int)idx + (negative ? 1 : 0);
-	int padding      = width - total_digits;
+	int padding = width - total_digits;
 
 	if (negative && pad == '0') {
 		emit_char(ctx, '-');
@@ -120,10 +121,10 @@ static void emit_signed_number(struct format_ctx* ctx, long long value, int widt
 
 #ifdef BASE_FORMAT_FLOAT
 static void emit_general_float(struct format_ctx* ctx, double value, int width, int precision, bool zero_pad) {
-	char   output[384];
-	char   digits[17];
-	size_t size     = 0u;
-	bool   negative = __builtin_signbit(value);
+	char output[384];
+	char digits[17];
+	size_t size = 0u;
+	bool negative = __builtin_signbit(value);
 
 	if (negative) value = -value;
 	if (__builtin_isnan(value)) {
@@ -142,7 +143,7 @@ static void emit_general_float(struct format_ctx* ctx, double value, int width, 
 		output[size++] = '0';
 	}
 	else {
-		int    exponent   = 0;
+		int exponent = 0;
 		double normalized = value;
 		if (precision < 0) precision = 6;
 		if (precision == 0) precision = 1;
@@ -164,9 +165,9 @@ static void emit_general_float(struct format_ctx* ctx, double value, int width, 
 			exponent++;
 		}
 		for (int index = 0; index < precision; index++) {
-			int digit     = (int)normalized;
+			int digit = (int)normalized;
 			digits[index] = (char)('0' + digit);
-			normalized    = (normalized - (double)digit) * 10.0;
+			normalized = (normalized - (double)digit) * 10.0;
 		}
 		int significant = precision;
 		while (significant > 1 && digits[significant - 1] == '0') significant--;
@@ -177,11 +178,11 @@ static void emit_general_float(struct format_ctx* ctx, double value, int width, 
 				output[size++] = '.';
 				for (int index = 1; index < significant; index++) output[size++] = digits[index];
 			}
-			output[size++]          = 'e';
-			output[size++]          = exponent < 0 ? '-' : '+';
+			output[size++] = 'e';
+			output[size++] = exponent < 0 ? '-' : '+';
 			unsigned exponent_value = exponent < 0 ? (unsigned)-exponent : (unsigned)exponent;
-			char     exponent_digits[3];
-			size_t   exponent_size = 0u;
+			char exponent_digits[3];
+			size_t exponent_size = 0u;
 			do {
 				exponent_digits[exponent_size++] = (char)('0' + exponent_value % 10u);
 				exponent_value /= 10u;
@@ -252,9 +253,9 @@ static void format_internal(struct format_ctx* ctx, const char* format, va_list*
 			continue;
 		}
 
-		bool zero_pad  = false;
-		int  width     = 0;
-		int  precision = -1;
+		bool zero_pad = false;
+		int width = 0;
+		int precision = -1;
 
 		if (*format == '0') {
 			zero_pad = true;
@@ -282,7 +283,7 @@ static void format_internal(struct format_ctx* ctx, const char* format, va_list*
 			}
 		}
 
-		int  length      = 0;
+		int length = 0;
 		bool length_size = false;
 		if (*format == 'l') {
 			format++;
@@ -314,7 +315,7 @@ static void format_internal(struct format_ctx* ctx, const char* format, va_list*
 			long long value;
 			if (length_size) {
 				ptrdiff_t diff_value = va_arg(*args, ptrdiff_t);
-				value                = (long long)diff_value;
+				value = (long long)diff_value;
 			}
 			else {
 				value = read_signed(args, length);
@@ -326,7 +327,7 @@ static void format_internal(struct format_ctx* ctx, const char* format, va_list*
 			unsigned long long value;
 			if (length_size) {
 				size_t size_value = va_arg(*args, size_t);
-				value             = (unsigned long long)size_value;
+				value = (unsigned long long)size_value;
 			}
 			else {
 				value = read_unsigned(args, length);
@@ -339,7 +340,7 @@ static void format_internal(struct format_ctx* ctx, const char* format, va_list*
 			unsigned long long value;
 			if (length_size) {
 				size_t size_value = va_arg(*args, size_t);
-				value             = (unsigned long long)size_value;
+				value = (unsigned long long)size_value;
 			}
 			else {
 				value = read_unsigned(args, length);
@@ -371,12 +372,12 @@ static void format_internal(struct format_ctx* ctx, const char* format, va_list*
 }
 
 int format_to_display(const char* format, va_list* args) {
-	char              buffer[DISPLAY_BUFFER_SIZE];
+	char buffer[DISPLAY_BUFFER_SIZE];
 	struct format_ctx ctx = {
-		.buffer   = buffer,
+		.buffer = buffer,
 		.capacity = sizeof(buffer),
-		.index    = 0u,
-		.count    = 0,
+		.index = 0u,
+		.count = 0,
 	};
 
 	format_internal(&ctx, format, args);
@@ -392,11 +393,11 @@ int format_to_buffer_size(char* buffer, size_t size, const char* format, va_list
 	if (format == NULL || (buffer == NULL && size != 0u)) return -1;
 
 	struct format_ctx ctx = {
-		.buffer   = buffer,
+		.buffer = buffer,
 		.capacity = size,
-		.index    = 0u,
-		.count    = 0,
-		.bounded  = true,
+		.index = 0u,
+		.count = 0,
+		.bounded = true,
 	};
 
 	format_internal(&ctx, format, args);

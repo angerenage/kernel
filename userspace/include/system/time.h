@@ -1,8 +1,9 @@
 #pragma once
 
-#include <base/syscall.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/syscall.h>
 
 /* Yield the current thread's remaining scheduler time. */
 syscall_status_t sched_yield(void);

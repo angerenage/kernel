@@ -13,10 +13,10 @@
 
 /* One free or allocated chunk in the free-list heap. */
 struct heap_block {
-	size_t             size_and_flags;
+	size_t size_and_flags;
 	struct heap_block* prev_free;
 	struct heap_block* next_free;
-	uint64_t           reserved;
+	uint64_t reserved;
 };
 
 static const size_t heap_header_size = sizeof(struct heap_block);
@@ -27,8 +27,8 @@ static const size_t heap_sentinel_size = 48u;
 static const size_t heap_min_block_size = 64u;
 
 extern struct heap_block* free_list;
-extern size_t             total_bytes;
-extern size_t             free_bytes;
+extern size_t total_bytes;
+extern size_t free_bytes;
 
 /* Initialize the heap and seed it with a first arena. Safe to call only once. */
 bool heap_init(void);

@@ -2,8 +2,8 @@
 
 Test(uthread, start_copies_argument_onto_new_user_stack) {
 	struct process* process = NULL;
-	struct uthread  worker  = {
-		.user_stack_mapping   = NULL,
+	struct uthread worker = {
+		.user_stack_mapping = NULL,
 		.kernel_stack_mapping = NULL,
 	};
 	const struct {
@@ -20,22 +20,22 @@ Test(uthread, start_copies_argument_onto_new_user_stack) {
 	process = spawn_owner_process("test/argument-copy");
 
 	cr_assert_eq(uthread_start(&worker,
-	                           &(const struct uthread_start_params){
-								   .name            = "user/argument-copy",
-								   .process         = process,
-								   .user_entry      = 0x400000u,
-								   .arg_data        = &source,
-								   .arg_size        = sizeof(source),
-								   .user_stack_size = 2u * TEST_MAPPING_GRANULE,
-								   .detached        = false,
-							   }),
-	             UTHREAD_START_OK);
+						 &(const struct uthread_start_params){
+							 .name = "user/argument-copy",
+							 .process = process,
+							 .user_entry = 0x400000u,
+							 .arg_data = &source,
+							 .arg_size = sizeof(source),
+							 .user_stack_size = 2u * TEST_MAPPING_GRANULE,
+							 .detached = false,
+						 }),
+			UTHREAD_START_OK);
 
 	arg_address = worker.thread.context.spill[1];
 	cr_assert_neq(arg_address, 0u, "new thread should receive an argument pointer");
 	cr_assert_neq(arg_address, (uintptr_t)&source, "new thread must not receive the creator's pointer");
 	cr_assert_eq(address_space_copy_from(process_address_space(process), arg_address, &copied, sizeof(copied)),
-	             ADDRESS_TRANSFER_OK);
+			ADDRESS_TRANSFER_OK);
 	cr_assert_eq(copied.first, source.first);
 	cr_assert_eq(copied.second, source.second);
 

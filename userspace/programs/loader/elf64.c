@@ -1,10 +1,11 @@
 #include "elf64.h"
 
-#include <runtime/filesystem.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+
 #include <system/trace.h>
+#include <runtime/filesystem.h>
 
 #define ELF_MAGIC0 0x7fu
 #define ELF_MAGIC1 'E'
@@ -42,7 +43,7 @@ TRACE_LABEL(trace_elf_read, "loader/elf/read");
 #endif
 
 struct elf64_ehdr {
-	uint8_t  ident[16];
+	uint8_t ident[16];
 	uint16_t type;
 	uint16_t machine;
 	uint32_t version;
@@ -92,7 +93,7 @@ static bool read_exact(cap_id_t file_cap, uint64_t offset, void* buffer, size_t 
 
 	while (size != 0u) {
 		struct filesystem_call_result result;
-		size_t                        read = 0u;
+		size_t read = 0u;
 
 		result = filesystem_file_read(file_cap, offset, cursor, size, &read);
 		if (result.transport_status != SYSCALL_STATUS_OK || result.status != FILESYSTEM_STATUS_OK || read == 0u)
@@ -112,7 +113,7 @@ static enum elf64_parse_result validate_header(uint64_t file_size, const struct 
 	uint64_t table_size;
 
 	if (header->ident[0] != ELF_MAGIC0 || header->ident[1] != ELF_MAGIC1 || header->ident[2] != ELF_MAGIC2 ||
-	    header->ident[3] != ELF_MAGIC3)
+			header->ident[3] != ELF_MAGIC3)
 		return ELF64_PARSE_BAD_FORMAT;
 	if (header->ident[4] != ELF_CLASS_64 || header->ident[5] != ELF_DATA_LSB || header->ident[6] != ELF_VERSION_CURRENT)
 		return ELF64_PARSE_BAD_FORMAT;
@@ -121,7 +122,7 @@ static enum elf64_parse_result validate_header(uint64_t file_size, const struct 
 	if (header->ehsize != sizeof(*header) || header->phentsize != sizeof(struct elf64_phdr) || header->phnum == 0u)
 		return ELF64_PARSE_BAD_FORMAT;
 	if (!mul_u64((uint64_t)header->phentsize, (uint64_t)header->phnum, &table_size) ||
-	    !range_valid(file_size, header->phoff, table_size))
+			!range_valid(file_size, header->phoff, table_size))
 		return ELF64_PARSE_BAD_FORMAT;
 	return ELF64_PARSE_OK;
 }
@@ -154,14 +155,14 @@ void elf64_image_deinit(struct elf64_image* image) {
 }
 
 enum elf64_parse_result elf64_image_parse(cap_id_t file_cap, struct elf64_image* out_image) {
-	struct filesystem_node_info   info;
+	struct filesystem_node_info info;
 	struct filesystem_call_result info_result;
-	struct elf64_ehdr             header;
-	struct elf64_phdr*            phdrs = NULL;
-	struct elf64_segment*         segments;
-	size_t                        segment_count = 0u;
-	bool                          entry_valid   = false;
-	enum elf64_parse_result       result;
+	struct elf64_ehdr header;
+	struct elf64_phdr* phdrs = NULL;
+	struct elf64_segment* segments;
+	size_t segment_count = 0u;
+	bool entry_valid = false;
+	enum elf64_parse_result result;
 	TRACE_SCOPE(trace, &trace_elf_parse);
 
 	if (out_image != NULL) *out_image = (struct elf64_image){0};
@@ -175,7 +176,7 @@ enum elf64_parse_result elf64_image_parse(cap_id_t file_cap, struct elf64_image*
 	if (result != ELF64_PARSE_OK) return result;
 
 	segments = calloc((size_t)header.phnum, sizeof(*segments));
-	phdrs    = malloc((size_t)header.phnum * sizeof(*phdrs));
+	phdrs = malloc((size_t)header.phnum * sizeof(*phdrs));
 	if (segments == NULL || phdrs == NULL) {
 		free(phdrs);
 		free(segments);
@@ -200,13 +201,13 @@ enum elf64_parse_result elf64_image_parse(cap_id_t file_cap, struct elf64_image*
 		if (entry_in_segment(header.entry, phdr)) entry_valid = true;
 		segments[segment_count++] = (struct elf64_segment){
 			.offset = phdr->offset,
-			.vaddr  = phdr->vaddr,
+			.vaddr = phdr->vaddr,
 			.filesz = phdr->filesz,
-			.memsz  = phdr->memsz,
-			.align  = phdr->align,
-			.flags  = ((phdr->flags & ELF_PF_X) != 0u ? ELF64_SEGMENT_EXEC : 0u) |
-			          ((phdr->flags & ELF_PF_W) != 0u ? ELF64_SEGMENT_WRITE : 0u) |
-			          ((phdr->flags & ELF_PF_R) != 0u ? ELF64_SEGMENT_READ : 0u),
+			.memsz = phdr->memsz,
+			.align = phdr->align,
+			.flags = ((phdr->flags & ELF_PF_X) != 0u ? ELF64_SEGMENT_EXEC : 0u) |
+			         ((phdr->flags & ELF_PF_W) != 0u ? ELF64_SEGMENT_WRITE : 0u) |
+			         ((phdr->flags & ELF_PF_R) != 0u ? ELF64_SEGMENT_READ : 0u),
 		};
 	}
 
@@ -216,8 +217,8 @@ enum elf64_parse_result elf64_image_parse(cap_id_t file_cap, struct elf64_image*
 	}
 
 	*out_image = (struct elf64_image){
-		.entry         = header.entry,
-		.segments      = segments,
+		.entry = header.entry,
+		.segments = segments,
 		.segment_count = segment_count,
 	};
 	free(phdrs);

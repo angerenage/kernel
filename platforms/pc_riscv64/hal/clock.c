@@ -1,12 +1,13 @@
 #include "clock.h"
 
-#include <core/lock.h>
-#include <core/spinlock.h>
-#include <firmware/dt.h>
-#include <hal/clock.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <firmware/dt.h>
+#include <hal/clock.h>
+#include <core/lock.h>
+#include <core/spinlock.h>
 
 #define RISCV64_SIE_STIE (1ull << 5)
 #define RISCV64_SCAUSE_INTERRUPT (1ull << 63)
@@ -22,14 +23,14 @@ struct sbi_ret {
 };
 
 static hal_clock_handler_t clock_handler;
-static void*               clock_context;
-static bool                clock_initialized;
-static bool                clock_running;
-static uint32_t            clock_frequency_hz;
-static uint64_t            clock_interval_ticks;
-static uint64_t            clock_next_deadline;
-static uint64_t            monotonic_frequency_hz;
-static struct spinlock     clock_lock = SPINLOCK_INIT_CLASS("clock_lock", SPINLOCK_ORDER_CLOCK, SPINLOCK_FLAG_IRQSAVE);
+static void* clock_context;
+static bool clock_initialized;
+static bool clock_running;
+static uint32_t clock_frequency_hz;
+static uint64_t clock_interval_ticks;
+static uint64_t clock_next_deadline;
+static uint64_t monotonic_frequency_hz;
+static struct spinlock clock_lock = SPINLOCK_INIT_CLASS("clock_lock", SPINLOCK_ORDER_CLOCK, SPINLOCK_FLAG_IRQSAVE);
 
 static inline uint64_t read_time(void) {
 	uint64_t value;
@@ -38,16 +39,16 @@ static inline uint64_t read_time(void) {
 }
 
 static uint64_t discover_timebase_frequency(void) {
-	struct dt_node     node;
+	struct dt_node node;
 	struct dt_property property;
-	uint64_t           frequency;
+	uint64_t frequency;
 
 	for (node = dt_node_child(dt_root()); dt_node_valid(node); node = dt_node_next(node)) {
 		const char* name = dt_node_name(node);
 
 		if (name == NULL || (strcmp(name, "cpus") != 0 && strncmp(name, "cpus@", 5u) != 0)) continue;
 		if (!dt_node_property(node, "timebase-frequency", &property) || property.size != 4u ||
-		    !dt_property_read_cells(&property, 0u, 1u, &frequency) || frequency == 0u)
+				!dt_property_read_cells(&property, 0u, 1u, &frequency) || frequency == 0u)
 			return 0u;
 		return frequency;
 	}
@@ -102,7 +103,7 @@ void hal_clock_init(void) {
 	}
 
 	monotonic_frequency_hz = discover_timebase_frequency();
-	clock_initialized      = true;
+	clock_initialized = true;
 	spinlock_unlock_irqrestore(&clock_lock, state);
 }
 
@@ -117,8 +118,8 @@ bool hal_clock_monotonic_counter(uint64_t* out_counter) {
 }
 
 bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* ctx) {
-	uint64_t         interval_ticks;
-	uint64_t         sie;
+	uint64_t interval_ticks;
+	uint64_t sie;
 	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
 
 	if (!clock_initialized || frequency_hz == 0u || handler == NULL) {
@@ -131,12 +132,12 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 		sie &= ~RISCV64_SIE_STIE;
 		write_sie(sie);
 		(void)set_timer(UINT64_MAX);
-		clock_running        = false;
-		clock_frequency_hz   = 0u;
+		clock_running = false;
+		clock_frequency_hz = 0u;
 		clock_interval_ticks = 0u;
-		clock_next_deadline  = 0u;
-		clock_handler        = NULL;
-		clock_context        = NULL;
+		clock_next_deadline = 0u;
+		clock_handler = NULL;
+		clock_context = NULL;
 	}
 
 	if (monotonic_frequency_hz == 0u) {
@@ -146,24 +147,24 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 	interval_ticks = monotonic_frequency_hz / frequency_hz;
 	if (interval_ticks == 0u) interval_ticks = 1u;
 
-	clock_handler        = handler;
-	clock_context        = ctx;
+	clock_handler = handler;
+	clock_context = ctx;
 	clock_interval_ticks = interval_ticks;
-	clock_next_deadline  = read_time() + clock_interval_ticks;
-	clock_frequency_hz   = (uint32_t)(monotonic_frequency_hz / clock_interval_ticks);
-	clock_running        = true;
+	clock_next_deadline = read_time() + clock_interval_ticks;
+	clock_frequency_hz = (uint32_t)(monotonic_frequency_hz / clock_interval_ticks);
+	clock_running = true;
 
 	if (!set_timer(clock_next_deadline)) {
 		sie = read_sie();
 		sie &= ~RISCV64_SIE_STIE;
 		write_sie(sie);
 		(void)set_timer(UINT64_MAX);
-		clock_running        = false;
-		clock_frequency_hz   = 0u;
+		clock_running = false;
+		clock_frequency_hz = 0u;
 		clock_interval_ticks = 0u;
-		clock_next_deadline  = 0u;
-		clock_handler        = NULL;
-		clock_context        = NULL;
+		clock_next_deadline = 0u;
+		clock_handler = NULL;
+		clock_context = NULL;
 		spinlock_unlock_irqrestore(&clock_lock, state);
 		return false;
 	}
@@ -177,7 +178,7 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 }
 
 uint32_t hal_clock_frequency(void) {
-	uint32_t         hz;
+	uint32_t hz;
 	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
 
 	hz = clock_frequency_hz;
@@ -186,7 +187,7 @@ uint32_t hal_clock_frequency(void) {
 }
 
 void hal_clock_stop(void) {
-	uint64_t         sie;
+	uint64_t sie;
 	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
 
 	if (!clock_initialized) {
@@ -199,23 +200,23 @@ void hal_clock_stop(void) {
 	write_sie(sie);
 	(void)set_timer(UINT64_MAX);
 
-	clock_running        = false;
-	clock_frequency_hz   = 0u;
+	clock_running = false;
+	clock_frequency_hz = 0u;
 	clock_interval_ticks = 0u;
-	clock_next_deadline  = 0u;
-	clock_handler        = NULL;
-	clock_context        = NULL;
+	clock_next_deadline = 0u;
+	clock_handler = NULL;
+	clock_context = NULL;
 	spinlock_unlock_irqrestore(&clock_lock, state);
 }
 
 bool clock_handle_irq(const struct exception_frame* frame) {
-	bool     is_interrupt;
+	bool is_interrupt;
 	uint64_t code;
 
 	if (!clock_running || clock_handler == NULL || frame == NULL) return false;
 
 	is_interrupt = (frame->scause & RISCV64_SCAUSE_INTERRUPT) != 0;
-	code         = frame->scause & RISCV64_SCAUSE_CODE_MASK;
+	code = frame->scause & RISCV64_SCAUSE_CODE_MASK;
 	if (!is_interrupt || code != RISCV64_SCAUSE_SUPERVISOR_TIMER) return false;
 
 	program_next_deadline();

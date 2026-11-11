@@ -1,11 +1,12 @@
-#include <protocol/device.h>
-#include <runtime/device.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <protocol/device.h>
 #include <system/capability.h>
 #include <system/dma.h>
 #include <system/interrupt.h>
 #include <system/memory.h>
+#include <runtime/device.h>
 
 static bool identifier_valid(const void* value, size_t size) {
 	const uint8_t* bytes = value;
@@ -21,22 +22,22 @@ static bool utf8_valid(const void* value, size_t size) {
 	const uint8_t* bytes = value;
 	if (bytes == NULL && size != 0u) return false;
 	for (size_t index = 0u; index < size;) {
-		uint8_t  first = bytes[index++];
+		uint8_t first = bytes[index++];
 		uint32_t codepoint;
-		size_t   trailing;
+		size_t trailing;
 		if (first == 0u) return false;
 		if (first < 0x80u) continue;
 		if (first >= 0xc2u && first <= 0xdfu) {
 			codepoint = first & 0x1fu;
-			trailing  = 1u;
+			trailing = 1u;
 		}
 		else if (first >= 0xe0u && first <= 0xefu) {
 			codepoint = first & 0x0fu;
-			trailing  = 2u;
+			trailing = 2u;
 		}
 		else if (first >= 0xf0u && first <= 0xf4u) {
 			codepoint = first & 0x07u;
-			trailing  = 3u;
+			trailing = 3u;
 		}
 		else return false;
 		if (trailing > size - index) return false;
@@ -46,8 +47,8 @@ static bool utf8_valid(const void* value, size_t size) {
 			codepoint = (codepoint << 6u) | (byte & 0x3fu);
 		}
 		if ((trailing == 1u && codepoint < 0x80u) || (trailing == 2u && codepoint < 0x800u) ||
-		    (trailing == 3u && codepoint < 0x10000u) || codepoint > 0x10ffffu ||
-		    (codepoint >= 0xd800u && codepoint <= 0xdfffu))
+				(trailing == 3u && codepoint < 0x10000u) || codepoint > 0x10ffffu ||
+				(codepoint >= 0xd800u && codepoint <= 0xdfffu))
 			return false;
 	}
 	return true;
@@ -76,9 +77,9 @@ static bool property_shape_valid(const struct device_property_info* info) {
 	}
 }
 
-static syscall_status_t call_exact(cap_id_t cap, const void* request, size_t request_size, void* response,
-                                   size_t response_size) {
-	size_t           actual = 0u;
+static syscall_status_t call_exact(
+		cap_id_t cap, const void* request, size_t request_size, void* response, size_t response_size) {
+	size_t actual = 0u;
 	syscall_status_t status;
 
 	if (cap == CAP_ID_INVALID || request == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
@@ -93,15 +94,15 @@ static syscall_status_t call_empty(cap_id_t cap, const void* request, size_t req
 
 static syscall_status_t begin_builder(cap_id_t cap, uint32_t operation, struct device_builder* out_builder) {
 	struct device_builder_begin_response response = {0};
-	syscall_status_t                     status;
+	syscall_status_t status;
 
 	if (out_builder == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	*out_builder = (struct device_builder){.capability = CAP_ID_INVALID, .manager_pid = PROCESS_PID_INVALID};
-	status       = call_exact(cap, &operation, sizeof(operation), &response, sizeof(response));
+	status = call_exact(cap, &operation, sizeof(operation), &response, sizeof(response));
 	if (status != SYSCALL_STATUS_OK) return status;
 	if (response.builder_cap == CAP_ID_INVALID || response.manager_pid == PROCESS_PID_INVALID)
 		return SYSCALL_STATUS_FAILED;
-	out_builder->capability  = response.builder_cap;
+	out_builder->capability = response.builder_cap;
 	out_builder->manager_pid = response.manager_pid;
 	return SYSCALL_STATUS_OK;
 }
@@ -116,12 +117,12 @@ syscall_status_t device_builder_begin_child(cap_id_t device_cap, struct device_b
 
 syscall_status_t device_remove_child(cap_id_t parent_cap, const char* name, size_t name_size) {
 	if (parent_cap == CAP_ID_INVALID || name_size == 0u || name_size > DEVICE_NAME_MAX ||
-	    !utf8_valid(name, name_size) ||
-	    name_size > CAP_MAX_REQUEST_SIZE - sizeof(struct device_object_remove_child_request))
+			!utf8_valid(name, name_size) ||
+			name_size > CAP_MAX_REQUEST_SIZE - sizeof(struct device_object_remove_child_request))
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	uint8_t request[sizeof(struct device_object_remove_child_request) + DEVICE_NAME_MAX];
 	struct device_object_remove_child_request header = {
-		.header    = {.op = DEVICE_OBJECT_OP_REMOVE_CHILD},
+		.header = {.op = DEVICE_OBJECT_OP_REMOVE_CHILD},
 		.name_size = (uint32_t)name_size,
 	};
 	memcpy(request, &header, sizeof(header));
@@ -130,12 +131,12 @@ syscall_status_t device_remove_child(cap_id_t parent_cap, const char* name, size
 }
 
 static syscall_status_t builder_string_call(const struct device_builder* builder, uint32_t operation, const char* value,
-                                            size_t value_size, size_t header_size) {
-	uint8_t*         request;
+		size_t value_size, size_t header_size) {
+	uint8_t* request;
 	syscall_status_t status;
 
 	if (builder == NULL || builder->capability == CAP_ID_INVALID || value == NULL || value_size > UINT32_MAX ||
-	    header_size > CAP_MAX_REQUEST_SIZE || value_size > CAP_MAX_REQUEST_SIZE - header_size)
+			header_size > CAP_MAX_REQUEST_SIZE || value_size > CAP_MAX_REQUEST_SIZE - header_size)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	request = calloc(1u, header_size + value_size);
 	if (request == NULL) return SYSCALL_STATUS_FAILED;
@@ -151,36 +152,39 @@ syscall_status_t device_builder_set_name(const struct device_builder* builder, c
 	if (name_size == 0u || name_size > DEVICE_NAME_MAX || !utf8_valid(name, name_size))
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	return builder_string_call(
-		builder, DEVICE_BUILDER_OP_SET_NAME, name, name_size, sizeof(struct device_builder_set_name_request));
+			builder, DEVICE_BUILDER_OP_SET_NAME, name, name_size, sizeof(struct device_builder_set_name_request));
 }
 
 syscall_status_t device_builder_add_compatible(const struct device_builder* builder, const char* id, size_t id_size) {
 	if (id_size == 0u || id_size > DEVICE_COMPATIBLE_ID_MAX || !utf8_valid(id, id_size))
 		return SYSCALL_STATUS_BAD_ARGUMENT;
-	return builder_string_call(
-		builder, DEVICE_BUILDER_OP_ADD_COMPATIBLE, id, id_size, sizeof(struct device_builder_add_compatible_request));
+	return builder_string_call(builder,
+			DEVICE_BUILDER_OP_ADD_COMPATIBLE,
+			id,
+			id_size,
+			sizeof(struct device_builder_add_compatible_request));
 }
 
 syscall_status_t device_builder_begin_property(const struct device_builder* builder, const char* name, size_t name_size,
-                                               enum device_property_type type, uint64_t element_count,
-                                               uint64_t value_size) {
+		enum device_property_type type, uint64_t element_count, uint64_t value_size) {
 	struct device_builder_begin_property_request* request;
-	size_t                                        request_size;
-	syscall_status_t                              status;
+	size_t request_size;
+	syscall_status_t status;
 
 	const struct device_property_info info = {.type = type, .element_count = element_count, .value_size = value_size};
 	if (builder == NULL || builder->capability == CAP_ID_INVALID || !identifier_valid(name, name_size) ||
-	    !property_shape_valid(&info) || name_size > UINT32_MAX || name_size > CAP_MAX_REQUEST_SIZE - sizeof(*request))
+			!property_shape_valid(&info) || name_size > UINT32_MAX ||
+			name_size > CAP_MAX_REQUEST_SIZE - sizeof(*request))
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	request_size = sizeof(*request) + name_size;
-	request      = calloc(1u, request_size);
+	request = calloc(1u, request_size);
 	if (request == NULL) return SYSCALL_STATUS_FAILED;
 	*request = (struct device_builder_begin_property_request){
-		.header        = {.op = DEVICE_BUILDER_OP_BEGIN_PROPERTY},
-		.type          = type,
-		.name_size     = (uint32_t)name_size,
+		.header = {.op = DEVICE_BUILDER_OP_BEGIN_PROPERTY},
+		.type = type,
+		.name_size = (uint32_t)name_size,
 		.element_count = element_count,
-		.value_size    = value_size,
+		.value_size = value_size,
 	};
 	memcpy(request->name, name, name_size);
 	status = call_empty(builder->capability, request, request_size);
@@ -188,17 +192,17 @@ syscall_status_t device_builder_begin_property(const struct device_builder* buil
 	return status;
 }
 
-syscall_status_t device_builder_append_property(const struct device_builder* builder, uint64_t offset,
-                                                const void* bytes, size_t size) {
+syscall_status_t device_builder_append_property(
+		const struct device_builder* builder, uint64_t offset, const void* bytes, size_t size) {
 	struct device_builder_append_property_request* request;
-	size_t                                         request_size;
-	syscall_status_t                               status;
+	size_t request_size;
+	syscall_status_t status;
 
 	if (builder == NULL || builder->capability == CAP_ID_INVALID || (size != 0u && bytes == NULL) ||
-	    size > CAP_MAX_REQUEST_SIZE - sizeof(*request))
+			size > CAP_MAX_REQUEST_SIZE - sizeof(*request))
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	request_size = sizeof(*request) + size;
-	request      = calloc(1u, request_size);
+	request = calloc(1u, request_size);
 	if (request == NULL) return SYSCALL_STATUS_FAILED;
 	*request = (struct device_builder_append_property_request){
 		.header = {.op = DEVICE_BUILDER_OP_APPEND_PROPERTY},
@@ -221,27 +225,26 @@ syscall_status_t device_builder_finish_property(const struct device_builder* bui
 }
 
 syscall_status_t device_builder_add_property(const struct device_builder* builder, const char* name, size_t name_size,
-                                             enum device_property_type type, uint64_t element_count, const void* value,
-                                             size_t value_size) {
+		enum device_property_type type, uint64_t element_count, const void* value, size_t value_size) {
 	struct device_builder_add_property_request* request;
 	struct device_property_info info = {.type = type, .element_count = element_count, .value_size = value_size};
-	size_t                      request_size;
-	syscall_status_t            status;
+	size_t request_size;
+	syscall_status_t status;
 
 	if (builder == NULL || builder->capability == CAP_ID_INVALID || !identifier_valid(name, name_size) ||
-	    !property_shape_valid(&info) || (value_size != 0u && value == NULL) || name_size > UINT32_MAX ||
-	    name_size > CAP_MAX_REQUEST_SIZE - sizeof(*request) ||
-	    value_size > CAP_MAX_REQUEST_SIZE - sizeof(*request) - name_size)
+			!property_shape_valid(&info) || (value_size != 0u && value == NULL) || name_size > UINT32_MAX ||
+			name_size > CAP_MAX_REQUEST_SIZE - sizeof(*request) ||
+			value_size > CAP_MAX_REQUEST_SIZE - sizeof(*request) - name_size)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	request_size = sizeof(*request) + name_size + value_size;
-	request      = calloc(1u, request_size);
+	request = calloc(1u, request_size);
 	if (request == NULL) return SYSCALL_STATUS_FAILED;
 	*request = (struct device_builder_add_property_request){
-		.header        = {.op = DEVICE_BUILDER_OP_ADD_PROPERTY},
-		.type          = type,
-		.name_size     = (uint32_t)name_size,
+		.header = {.op = DEVICE_BUILDER_OP_ADD_PROPERTY},
+		.type = type,
+		.name_size = (uint32_t)name_size,
 		.element_count = element_count,
-		.value_size    = value_size,
+		.value_size = value_size,
 	};
 	memcpy(request->data, name, name_size);
 	if (value_size != 0u) memcpy(request->data + name_size, value, value_size);
@@ -251,29 +254,29 @@ syscall_status_t device_builder_add_property(const struct device_builder* builde
 }
 
 syscall_status_t device_builder_add_resource(const struct device_builder* builder, const char* name, size_t name_size,
-                                             cap_id_t resource_cap, cap_rights_t rights) {
+		cap_id_t resource_cap, cap_rights_t rights) {
 	struct device_builder_add_resource_request* request;
-	cap_id_t                                    delegated = CAP_ID_INVALID;
-	size_t                                      request_size;
-	syscall_status_t                            status;
+	cap_id_t delegated = CAP_ID_INVALID;
+	size_t request_size;
+	syscall_status_t status;
 
 	if (builder == NULL || builder->capability == CAP_ID_INVALID || builder->manager_pid == PROCESS_PID_INVALID ||
-	    !identifier_valid(name, name_size) || resource_cap == CAP_ID_INVALID || rights == 0u ||
-	    name_size > UINT32_MAX || name_size > CAP_MAX_REQUEST_SIZE - sizeof(*request))
+			!identifier_valid(name, name_size) || resource_cap == CAP_ID_INVALID || rights == 0u ||
+			name_size > UINT32_MAX || name_size > CAP_MAX_REQUEST_SIZE - sizeof(*request))
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	status = cap_delegate(resource_cap, builder->manager_pid, rights | CAP_DELEGATE, &delegated);
 	if (status != SYSCALL_STATUS_OK) return status;
 	request_size = sizeof(*request) + name_size;
-	request      = calloc(1u, request_size);
+	request = calloc(1u, request_size);
 	if (request == NULL) {
 		(void)cap_revoke(delegated, 0u);
 		return SYSCALL_STATUS_FAILED;
 	}
 	*request = (struct device_builder_add_resource_request){
-		.header     = {.op = DEVICE_BUILDER_OP_ADD_RESOURCE},
-		.name_size  = (uint32_t)name_size,
+		.header = {.op = DEVICE_BUILDER_OP_ADD_RESOURCE},
+		.name_size = (uint32_t)name_size,
 		.capability = delegated,
-		.rights     = rights,
+		.rights = rights,
 	};
 	memcpy(request->name, name, name_size);
 	status = call_empty(builder->capability, request, request_size);
@@ -283,29 +286,28 @@ syscall_status_t device_builder_add_resource(const struct device_builder* builde
 }
 
 syscall_status_t device_builder_add_mmio_resource(const struct device_builder* builder, cap_id_t memory_allocator_cap,
-                                                  const char* name, size_t name_size, uintptr_t physical_address,
-                                                  size_t size) {
-	static const cap_rights_t    driver_rights = CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP | CAP_DERIVE;
+		const char* name, size_t name_size, uintptr_t physical_address, size_t size) {
+	static const cap_rights_t driver_rights = CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP | CAP_DERIVE;
 	struct memory_allocator_info allocator;
-	cap_id_t                     memory_cap = CAP_ID_INVALID;
-	size_t                       claimed_size;
-	syscall_status_t             status;
-	syscall_status_t             cleanup_status;
+	cap_id_t memory_cap = CAP_ID_INVALID;
+	size_t claimed_size;
+	syscall_status_t status;
+	syscall_status_t cleanup_status;
 
 	if (memory_allocator_cap == CAP_ID_INVALID || size == 0u || physical_address > UINTPTR_MAX - (size - 1u))
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	status = memory_allocator_info(memory_allocator_cap, &allocator);
 	if (status != SYSCALL_STATUS_OK) return status;
 	if (allocator.physical_claim_granule == 0u ||
-	    (allocator.physical_claim_granule & (allocator.physical_claim_granule - 1u)) != 0u)
+			(allocator.physical_claim_granule & (allocator.physical_claim_granule - 1u)) != 0u)
 		return SYSCALL_STATUS_FAILED;
 	if ((physical_address & (allocator.physical_claim_granule - 1u)) != 0u ||
-	    size > SIZE_MAX - (allocator.physical_claim_granule - 1u))
+			size > SIZE_MAX - (allocator.physical_claim_granule - 1u))
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	claimed_size = (size + allocator.physical_claim_granule - 1u) & ~(allocator.physical_claim_granule - 1u);
 	if (claimed_size > UINTPTR_MAX - physical_address) return SYSCALL_STATUS_BAD_ARGUMENT;
 	status = memory_allocator_claim_physical(
-		memory_allocator_cap, physical_address, claimed_size, MEMORY_TYPE_DEVICE, &memory_cap);
+			memory_allocator_cap, physical_address, claimed_size, MEMORY_TYPE_DEVICE, &memory_cap);
 	if (status == SYSCALL_STATUS_OK)
 		status = device_builder_add_resource(builder, name, name_size, memory_cap, driver_rights);
 	if (memory_cap != CAP_ID_INVALID) {
@@ -316,13 +318,12 @@ syscall_status_t device_builder_add_mmio_resource(const struct device_builder* b
 }
 
 syscall_status_t device_builder_add_dma_resource(const struct device_builder* builder, cap_id_t dma_cap,
-                                                 const char* name, size_t name_size,
-                                                 uint64_t controller_register_address, uint32_t local_source_id) {
+		const char* name, size_t name_size, uint64_t controller_register_address, uint32_t local_source_id) {
 	static const cap_rights_t driver_rights = CAP_CALL | CAP_ALLOCATE | CAP_MANAGE;
-	dma_source_t              source        = DMA_SOURCE_INVALID;
-	cap_id_t                  source_cap    = CAP_ID_INVALID;
-	syscall_status_t          status;
-	syscall_status_t          cleanup_status;
+	dma_source_t source = DMA_SOURCE_INVALID;
+	cap_id_t source_cap = CAP_ID_INVALID;
+	syscall_status_t status;
+	syscall_status_t cleanup_status;
 
 	if (dma_cap == CAP_ID_INVALID) return SYSCALL_STATUS_BAD_ARGUMENT;
 	status = dma_resolve_source(dma_cap, controller_register_address, local_source_id, &source);
@@ -337,15 +338,13 @@ syscall_status_t device_builder_add_dma_resource(const struct device_builder* bu
 }
 
 syscall_status_t device_builder_add_interrupt_resource(const struct device_builder* builder, cap_id_t interrupts_cap,
-                                                       const char* name, size_t name_size,
-                                                       uint64_t controller_register_address, uint32_t local_source_id,
-                                                       enum interrupt_trigger  trigger,
-                                                       enum interrupt_polarity polarity) {
+		const char* name, size_t name_size, uint64_t controller_register_address, uint32_t local_source_id,
+		enum interrupt_trigger trigger, enum interrupt_polarity polarity) {
 	static const cap_rights_t driver_rights = CAP_CALL | CAP_READ | CAP_MANAGE;
-	interrupt_source_t        source        = INTERRUPT_SOURCE_INVALID;
-	cap_id_t                  interrupt_cap = CAP_ID_INVALID;
-	syscall_status_t          status;
-	syscall_status_t          cleanup_status;
+	interrupt_source_t source = INTERRUPT_SOURCE_INVALID;
+	cap_id_t interrupt_cap = CAP_ID_INVALID;
+	syscall_status_t status;
+	syscall_status_t cleanup_status;
 
 	if (interrupts_cap == CAP_ID_INVALID) return SYSCALL_STATUS_BAD_ARGUMENT;
 	status = interrupts_resolve_source(interrupts_cap, controller_register_address, local_source_id, &source);
@@ -385,19 +384,19 @@ syscall_status_t device_get_info(cap_id_t device_cap, struct device_info* out_in
 	syscall_status_t status = call_exact(device_cap, &request, sizeof(request), out_info, sizeof(*out_info));
 	if (status != SYSCALL_STATUS_OK) return status;
 	if (out_info->name_size > DEVICE_NAME_MAX || out_info->compatible_count == 0u ||
-	    out_info->compatible_count > DEVICE_MAX_COMPATIBLE_IDS || out_info->property_count > DEVICE_MAX_PROPERTIES ||
-	    out_info->resource_count > DEVICE_MAX_RESOURCES)
+			out_info->compatible_count > DEVICE_MAX_COMPATIBLE_IDS ||
+			out_info->property_count > DEVICE_MAX_PROPERTIES || out_info->resource_count > DEVICE_MAX_RESOURCES)
 		return SYSCALL_STATUS_FAILED;
 	return SYSCALL_STATUS_OK;
 }
 
-static syscall_status_t read_index(cap_id_t cap, enum device_object_op op, uint64_t index, uint64_t offset,
-                                   void* buffer, size_t size) {
+static syscall_status_t read_index(
+		cap_id_t cap, enum device_object_op op, uint64_t index, uint64_t offset, void* buffer, size_t size) {
 	const struct device_object_read_index_request request = {
 		.header = {.op = op},
-		.index  = index,
+		.index = index,
 		.offset = offset,
-		.size   = size,
+		.size = size,
 	};
 	if ((size != 0u && buffer == NULL) || size > CAP_MAX_RESPONSE_SIZE) return SYSCALL_STATUS_BAD_ARGUMENT;
 	return call_exact(cap, &request, sizeof(request), buffer, size);
@@ -410,7 +409,7 @@ syscall_status_t device_name_read(cap_id_t device_cap, uint64_t offset, void* bu
 syscall_status_t device_compatible_info(cap_id_t device_cap, uint64_t index, uint64_t* out_size) {
 	const struct device_object_index_request request = {
 		.header = {.op = DEVICE_OBJECT_OP_COMPATIBLE_INFO},
-		.index  = index,
+		.index = index,
 	};
 	if (out_size == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	syscall_status_t status = call_exact(device_cap, &request, sizeof(request), out_size, sizeof(*out_size));
@@ -419,45 +418,45 @@ syscall_status_t device_compatible_info(cap_id_t device_cap, uint64_t index, uin
 	return status;
 }
 
-syscall_status_t device_compatible_read(cap_id_t device_cap, uint64_t index, uint64_t offset, void* buffer,
-                                        size_t size) {
+syscall_status_t device_compatible_read(
+		cap_id_t device_cap, uint64_t index, uint64_t offset, void* buffer, size_t size) {
 	return read_index(device_cap, DEVICE_OBJECT_OP_READ_COMPATIBLE, index, offset, buffer, size);
 }
 
 static syscall_status_t property_request(cap_id_t cap, enum device_object_op op, const char* name, size_t name_size,
-                                         uint64_t offset, void* response, size_t response_size) {
+		uint64_t offset, void* response, size_t response_size) {
 	struct device_object_property_read_request* request;
-	size_t                                      request_size;
-	syscall_status_t                            status;
+	size_t request_size;
+	syscall_status_t status;
 
 	if (cap == CAP_ID_INVALID || !identifier_valid(name, name_size) || name_size > UINT32_MAX ||
-	    name_size > CAP_MAX_REQUEST_SIZE - sizeof(*request) || response_size > CAP_MAX_RESPONSE_SIZE ||
-	    (response_size != 0u && response == NULL))
+			name_size > CAP_MAX_REQUEST_SIZE - sizeof(*request) || response_size > CAP_MAX_RESPONSE_SIZE ||
+			(response_size != 0u && response == NULL))
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	request_size = sizeof(*request) + name_size;
-	request      = calloc(1u, request_size);
+	request = calloc(1u, request_size);
 	if (request == NULL) return SYSCALL_STATUS_FAILED;
 	request->header.op = op;
 	request->name_size = (uint32_t)name_size;
-	request->offset    = offset;
-	request->size      = response_size;
+	request->offset = offset;
+	request->size = response_size;
 	memcpy(request->name, name, name_size);
 	status = call_exact(cap, request, request_size, response, response_size);
 	free(request);
 	return status;
 }
 
-syscall_status_t device_property_get_info(cap_id_t device_cap, const char* name, size_t name_size,
-                                          struct device_property_info* out_info) {
+syscall_status_t device_property_get_info(
+		cap_id_t device_cap, const char* name, size_t name_size, struct device_property_info* out_info) {
 	struct device_object_property_info_request* request;
-	size_t                                      request_size;
-	syscall_status_t                            status;
+	size_t request_size;
+	syscall_status_t status;
 
 	if (device_cap == CAP_ID_INVALID || !identifier_valid(name, name_size) || out_info == NULL ||
-	    name_size > UINT32_MAX || name_size > CAP_MAX_REQUEST_SIZE - sizeof(*request))
+			name_size > UINT32_MAX || name_size > CAP_MAX_REQUEST_SIZE - sizeof(*request))
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	request_size = sizeof(*request) + name_size;
-	request      = calloc(1u, request_size);
+	request = calloc(1u, request_size);
 	if (request == NULL) return SYSCALL_STATUS_FAILED;
 	request->header.op = DEVICE_OBJECT_OP_PROPERTY_INFO;
 	request->name_size = (uint32_t)name_size;
@@ -468,8 +467,8 @@ syscall_status_t device_property_get_info(cap_id_t device_cap, const char* name,
 	return status;
 }
 
-syscall_status_t device_property_read(cap_id_t device_cap, const char* name, size_t name_size, uint64_t offset,
-                                      void* buffer, size_t size) {
+syscall_status_t device_property_read(
+		cap_id_t device_cap, const char* name, size_t name_size, uint64_t offset, void* buffer, size_t size) {
 	return property_request(device_cap, DEVICE_OBJECT_OP_READ_PROPERTY, name, name_size, offset, buffer, size);
 }
 
@@ -479,8 +478,8 @@ static uint64_t read_u64_le(const uint8_t bytes[8]) {
 	return value;
 }
 
-static syscall_status_t scalar_info(cap_id_t cap, const char* name, enum device_property_type type,
-                                    struct device_property_info* info) {
+static syscall_status_t scalar_info(
+		cap_id_t cap, const char* name, enum device_property_type type, struct device_property_info* info) {
 	syscall_status_t status;
 	if (name == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	status = device_property_get_info(cap, name, strlen(name), info);
@@ -490,8 +489,8 @@ static syscall_status_t scalar_info(cap_id_t cap, const char* name, enum device_
 
 syscall_status_t device_property_read_bool(cap_id_t cap, const char* name, bool* out_value) {
 	struct device_property_info info;
-	uint8_t                     value;
-	syscall_status_t            status;
+	uint8_t value;
+	syscall_status_t status;
 	if (out_value == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	status = scalar_info(cap, name, DEVICE_PROPERTY_BOOLEAN, &info);
 	if (status != SYSCALL_STATUS_OK || info.value_size != 1u)
@@ -502,11 +501,11 @@ syscall_status_t device_property_read_bool(cap_id_t cap, const char* name, bool*
 	return status;
 }
 
-static syscall_status_t read_integer(cap_id_t cap, const char* name, enum device_property_type type,
-                                     uint64_t* out_value) {
+static syscall_status_t read_integer(
+		cap_id_t cap, const char* name, enum device_property_type type, uint64_t* out_value) {
 	struct device_property_info info;
-	uint8_t                     value[8];
-	syscall_status_t            status;
+	uint8_t value[8];
+	syscall_status_t status;
 	if (out_value == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	status = scalar_info(cap, name, type, &info);
 	if (status != SYSCALL_STATUS_OK || info.value_size != sizeof(value))
@@ -529,17 +528,17 @@ syscall_status_t device_property_read_i64(cap_id_t cap, const char* name, int64_
 }
 
 static syscall_status_t read_integer_array(cap_id_t cap, const char* name, enum device_property_type type,
-                                           uint64_t first, uint64_t* values, size_t count) {
+		uint64_t first, uint64_t* values, size_t count) {
 	struct device_property_info info;
-	uint8_t*                    bytes;
-	syscall_status_t            status;
+	uint8_t* bytes;
+	syscall_status_t status;
 	if (name == NULL || (count != 0u && values == NULL) || count > CAP_MAX_RESPONSE_SIZE / 8u ||
-	    first > UINT64_MAX - count)
+			first > UINT64_MAX - count)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	status = device_property_get_info(cap, name, strlen(name), &info);
 	if (status != SYSCALL_STATUS_OK) return status;
 	if (info.type != type || info.element_count > UINT64_MAX / 8u || first + count > info.element_count ||
-	    info.value_size != info.element_count * 8u)
+			info.value_size != info.element_count * 8u)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	bytes = malloc(count * 8u);
 	if (bytes == NULL && count != 0u) return SYSCALL_STATUS_FAILED;
@@ -550,13 +549,13 @@ static syscall_status_t read_integer_array(cap_id_t cap, const char* name, enum 
 	return status;
 }
 
-syscall_status_t device_property_read_u64_array(cap_id_t cap, const char* name, uint64_t first, uint64_t* values,
-                                                size_t count) {
+syscall_status_t device_property_read_u64_array(
+		cap_id_t cap, const char* name, uint64_t first, uint64_t* values, size_t count) {
 	return read_integer_array(cap, name, DEVICE_PROPERTY_UNSIGNED_ARRAY, first, values, count);
 }
 
-syscall_status_t device_property_read_i64_array(cap_id_t cap, const char* name, uint64_t first, int64_t* values,
-                                                size_t count) {
+syscall_status_t device_property_read_i64_array(
+		cap_id_t cap, const char* name, uint64_t first, int64_t* values, size_t count) {
 	uint64_t* temporary;
 	if (count != 0u && values == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	temporary = malloc(count * sizeof(*temporary));
@@ -569,17 +568,17 @@ syscall_status_t device_property_read_i64_array(cap_id_t cap, const char* name, 
 	return status;
 }
 
-syscall_status_t device_property_read_bool_array(cap_id_t cap, const char* name, uint64_t first, bool* values,
-                                                 size_t count) {
+syscall_status_t device_property_read_bool_array(
+		cap_id_t cap, const char* name, uint64_t first, bool* values, size_t count) {
 	struct device_property_info info;
-	uint8_t*                    bytes;
-	syscall_status_t            status;
+	uint8_t* bytes;
+	syscall_status_t status;
 	if (name == NULL || (count != 0u && values == NULL) || count > CAP_MAX_RESPONSE_SIZE || first > UINT64_MAX - count)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	status = device_property_get_info(cap, name, strlen(name), &info);
 	if (status != SYSCALL_STATUS_OK) return status;
 	if (info.type != DEVICE_PROPERTY_BOOLEAN_ARRAY || first + count > info.element_count ||
-	    info.value_size != info.element_count)
+			info.value_size != info.element_count)
 		return SYSCALL_STATUS_BAD_ARGUMENT;
 	bytes = malloc(count);
 	if (bytes == NULL && count != 0u) return SYSCALL_STATUS_FAILED;
@@ -609,10 +608,10 @@ static syscall_status_t read_property_all(cap_id_t cap, const char* name, void* 
 	return SYSCALL_STATUS_OK;
 }
 
-syscall_status_t device_property_read_string(cap_id_t cap, const char* name, char* buffer, size_t capacity,
-                                             size_t* out_size) {
+syscall_status_t device_property_read_string(
+		cap_id_t cap, const char* name, char* buffer, size_t capacity, size_t* out_size) {
 	struct device_property_info info;
-	syscall_status_t            status;
+	syscall_status_t status;
 	if (name == NULL || out_size == NULL || (capacity != 0u && buffer == NULL)) return SYSCALL_STATUS_BAD_ARGUMENT;
 	status = device_property_get_info(cap, name, strlen(name), &info);
 	if (status != SYSCALL_STATUS_OK) return status;
@@ -626,12 +625,12 @@ syscall_status_t device_property_read_string(cap_id_t cap, const char* name, cha
 	return status;
 }
 
-syscall_status_t device_property_read_string_at(cap_id_t cap, const char* name, uint64_t index, char* buffer,
-                                                size_t capacity, size_t* out_size) {
+syscall_status_t device_property_read_string_at(
+		cap_id_t cap, const char* name, uint64_t index, char* buffer, size_t capacity, size_t* out_size) {
 	struct device_property_info info;
-	uint64_t                    offset = 0u;
-	uint8_t                     length_bytes[4];
-	syscall_status_t            status;
+	uint64_t offset = 0u;
+	uint8_t length_bytes[4];
+	syscall_status_t status;
 	if (name == NULL || out_size == NULL || (capacity != 0u && buffer == NULL)) return SYSCALL_STATUS_BAD_ARGUMENT;
 	status = device_property_get_info(cap, name, strlen(name), &info);
 	if (status != SYSCALL_STATUS_OK) return status;
@@ -667,8 +666,8 @@ syscall_status_t device_property_read_string_at(cap_id_t cap, const char* name, 
 	return SYSCALL_STATUS_FAILED;
 }
 
-syscall_status_t device_property_read_bytes(cap_id_t cap, const char* name, uint64_t offset, void* buffer,
-                                            size_t size) {
+syscall_status_t device_property_read_bytes(
+		cap_id_t cap, const char* name, uint64_t offset, void* buffer, size_t size) {
 	struct device_property_info info;
 	if (name == NULL || (size != 0u && buffer == NULL)) return SYSCALL_STATUS_BAD_ARGUMENT;
 	syscall_status_t status = device_property_get_info(cap, name, strlen(name), &info);
@@ -681,12 +680,12 @@ syscall_status_t device_property_read_bytes(cap_id_t cap, const char* name, uint
 syscall_status_t device_resource_info(cap_id_t cap, uint64_t index, struct device_resource_info* out_info) {
 	const struct device_object_index_request request = {
 		.header = {.op = DEVICE_OBJECT_OP_RESOURCE_INFO},
-		.index  = index,
+		.index = index,
 	};
 	if (out_info == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;
 	syscall_status_t status = call_exact(cap, &request, sizeof(request), out_info, sizeof(*out_info));
 	if (status == SYSCALL_STATUS_OK &&
-	    (out_info->name_size == 0u || out_info->name_size > DEVICE_IDENTIFIER_MAX || out_info->rights == 0u))
+			(out_info->name_size == 0u || out_info->name_size > DEVICE_IDENTIFIER_MAX || out_info->rights == 0u))
 		return SYSCALL_STATUS_FAILED;
 	return status;
 }
@@ -695,22 +694,22 @@ syscall_status_t device_resource_name_read(cap_id_t cap, uint64_t index, uint64_
 	return read_index(cap, DEVICE_OBJECT_OP_READ_RESOURCE_NAME, index, offset, buffer, size);
 }
 
-syscall_status_t device_resource_acquire(cap_id_t cap, const char* name, size_t name_size, cap_rights_t rights,
-                                         cap_id_t* out_cap) {
+syscall_status_t device_resource_acquire(
+		cap_id_t cap, const char* name, size_t name_size, cap_rights_t rights, cap_id_t* out_cap) {
 	struct device_object_resource_acquire_request* request;
 	struct device_object_resource_acquire_response response = {.capability = CAP_ID_INVALID};
-	size_t                                         request_size;
-	syscall_status_t                               status;
+	size_t request_size;
+	syscall_status_t status;
 	if (!identifier_valid(name, name_size) || out_cap == NULL || rights == 0u || name_size > UINT32_MAX ||
-	    name_size > CAP_MAX_REQUEST_SIZE - sizeof(*request))
+			name_size > CAP_MAX_REQUEST_SIZE - sizeof(*request))
 		return SYSCALL_STATUS_BAD_ARGUMENT;
-	*out_cap     = CAP_ID_INVALID;
+	*out_cap = CAP_ID_INVALID;
 	request_size = sizeof(*request) + name_size;
-	request      = calloc(1u, request_size);
+	request = calloc(1u, request_size);
 	if (request == NULL) return SYSCALL_STATUS_FAILED;
 	request->header.op = DEVICE_OBJECT_OP_ACQUIRE_RESOURCE;
 	request->name_size = (uint32_t)name_size;
-	request->rights    = rights;
+	request->rights = rights;
 	memcpy(request->name, name, name_size);
 	status = call_exact(cap, request, request_size, &response, sizeof(response));
 	free(request);

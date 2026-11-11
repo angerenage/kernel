@@ -1,13 +1,14 @@
+#include <stdio.h>
+
 #include <boot/protocol.h>
-#include <core/cpu.h>
-#include <core/sched.h>
-#include <core/spinlock.h>
 #include <hal/cpu.h>
 #include <hal/hcf.h>
 #include <hal/interrupts.h>
 #include <hal/paging.h>
+#include <core/cpu.h>
+#include <core/sched.h>
+#include <core/spinlock.h>
 #include <kernel/cpu_boot.h>
-#include <stdio.h>
 
 #define CPU_BOOT_MAX_COUNT 64u
 #define CPU_BOOT_STACK_SIZE 0x4000u
@@ -53,7 +54,7 @@ bool kernel_cpu_boot_init(uintptr_t boot_stack_base, uintptr_t boot_stack_top) {
 	}
 
 	if (!boot_cpu_topology(
-			boot_cpu_init, CPU_BOOT_MAX_COUNT, boot_stack_base, boot_stack_top, &cpu_count, &bsp_index)) {
+				boot_cpu_init, CPU_BOOT_MAX_COUNT, boot_stack_base, boot_stack_top, &cpu_count, &bsp_index)) {
 		return false;
 	}
 
@@ -61,7 +62,7 @@ bool kernel_cpu_boot_init(uintptr_t boot_stack_base, uintptr_t boot_stack_top) {
 		if (boot_cpu_init[i].role != CPU_ROLE_AP) continue;
 
 		boot_cpu_init[i].boot_stack_base = (uintptr_t)ap_boot_stacks[i];
-		boot_cpu_init[i].boot_stack_top  = boot_cpu_init[i].boot_stack_base + CPU_BOOT_STACK_SIZE;
+		boot_cpu_init[i].boot_stack_top = boot_cpu_init[i].boot_stack_base + CPU_BOOT_STACK_SIZE;
 	}
 
 	return cpu_topology_init(boot_cpu_init, cpu_count, bsp_index);
@@ -92,9 +93,9 @@ bool kernel_cpu_boot_start_aps(void) {
 		for (size_t spin_count = 0; cpu_state_get(cpu) != CPU_STATE_ONLINE; spin_count++) {
 			if (spin_count >= CPU_AP_START_SPIN_LIMIT) {
 				printf("kernel: AP cpu%zu failed to reach ONLINE (state=%u, bound=%u)\n",
-				       cpu->index,
-				       (unsigned)cpu_state_get(cpu),
-				       kernel_cpu_boot_current_pointer_ok(cpu) ? 1u : 0u);
+						cpu->index,
+						(unsigned)cpu_state_get(cpu),
+						kernel_cpu_boot_current_pointer_ok(cpu) ? 1u : 0u);
 				return false;
 			}
 			spinlock_relax();

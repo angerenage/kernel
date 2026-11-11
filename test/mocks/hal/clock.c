@@ -1,16 +1,17 @@
-#include <hal/clock.h>
 #include <stddef.h>
+
+#include <hal/clock.h>
 
 static uint32_t mock_frequency_hz;
 static uint64_t mock_monotonic_frequency_hz;
 static uint64_t mock_monotonic_counter;
-static bool     mock_monotonic_readable;
+static bool mock_monotonic_readable;
 
 void hal_clock_init(void) {
-	mock_frequency_hz           = 0u;
+	mock_frequency_hz = 0u;
 	mock_monotonic_frequency_hz = 0u;
-	mock_monotonic_counter      = 0u;
-	mock_monotonic_readable     = false;
+	mock_monotonic_counter = 0u;
+	mock_monotonic_readable = false;
 }
 
 uint64_t hal_clock_monotonic_frequency(void) {
@@ -19,7 +20,7 @@ uint64_t hal_clock_monotonic_frequency(void) {
 
 bool hal_clock_monotonic_counter(uint64_t* out_counter) {
 	if (out_counter == NULL || !__atomic_load_n(&mock_monotonic_readable, __ATOMIC_ACQUIRE) ||
-	    hal_clock_monotonic_frequency() == 0u)
+			hal_clock_monotonic_frequency() == 0u)
 		return false;
 	*out_counter = __atomic_load_n(&mock_monotonic_counter, __ATOMIC_ACQUIRE);
 	return true;

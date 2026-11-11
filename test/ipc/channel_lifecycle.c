@@ -16,7 +16,7 @@ Test(channel, create_rejects_invalid_arguments) {
 }
 
 Test(channel, destroy_rejects_non_owner) {
-	struct channel*     ch;
+	struct channel* ch;
 	enum channel_result result;
 
 	ipc_test_init_heap();
@@ -46,17 +46,17 @@ Test(channel, destroy_unpublishes_endpoint_objects) {
 }
 
 Test(channel, destroy_unpublishes_id_before_last_retained_reference_is_released) {
-	struct channel*    channel;
-	struct channel*    held;
+	struct channel* channel;
+	struct channel* held;
 	struct cap_request request;
-	channel_id_t       id;
+	channel_id_t id;
 
 	ipc_test_init_heap();
 	capability_init();
 
 	channel = channel_create(42u, false);
 	cr_assert_not_null(channel);
-	id   = channel->id;
+	id = channel->id;
 	held = channel_acquire(id);
 	cr_assert_eq(held, channel);
 
@@ -66,15 +66,15 @@ Test(channel, destroy_unpublishes_id_before_last_retained_reference_is_released)
 	cr_assert_null(channel_acquire(id), "destroyed channel must reject new acquisitions immediately");
 	cr_assert(held->closing, "retained descriptor must observe channel closure");
 	cr_assert_not(channel_enqueue_cap_request(held, &request),
-	              "closure must reject new requests while an old reference keeps the descriptor alive");
+			"closure must reject new requests while an old reference keeps the descriptor alive");
 
 	channel_release(held);
 }
 
 Test(channel, destroy_completes_pending_calls_as_unavailable) {
-	struct channel*          channel;
+	struct channel* channel;
 	struct cap_pending_call* call;
-	syscall_result_t         result;
+	syscall_result_t result;
 
 	ipc_test_init_heap();
 	capability_init();
@@ -87,16 +87,16 @@ Test(channel, destroy_completes_pending_calls_as_unavailable) {
 	cr_assert_eq(channel_destroy(channel, 77u), CHANNEL_OK);
 	cap_pending_call_wait(call, &result);
 	cr_assert_eq(result.status,
-	             SYSCALL_STATUS_UNAVAILABLE,
-	             "closing the endpoint must wake callers waiting for a provider reply");
+			SYSCALL_STATUS_UNAVAILABLE,
+			"closing the endpoint must wake callers waiting for a provider reply");
 
 	cap_pending_call_destroy(call);
 }
 
 Test(channel, process_channel_state_deinit_unpublishes_every_owned_channel) {
 	struct process_channel_state state;
-	struct channel*              channels[8];
-	channel_id_t                 ids[8];
+	struct channel* channels[8];
+	channel_id_t ids[8];
 
 	ipc_test_init_heap();
 	capability_init();
@@ -115,6 +115,6 @@ Test(channel, process_channel_state_deinit_unpublishes_every_owned_channel) {
 
 	for (size_t i = 0u; i < 8u; i++) {
 		cr_assert_null(
-			channel_acquire(ids[i]), "channel %zu remained globally published after process channel teardown", i);
+				channel_acquire(ids[i]), "channel %zu remained globally published after process channel teardown", i);
 	}
 }

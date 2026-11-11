@@ -1,30 +1,32 @@
-#include <core/ring_buffer.h>
-#include <criterion/criterion.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
+#include <core/ring_buffer.h>
+
+#include <criterion/criterion.h>
+
 #include "test_support.h"
 
 Test(ring_buffer, init_rejects_capacity_element_size_overflow) {
-	struct ring_buffer rb           = {0};
-	const size_t       element_size = 16u;
-	const size_t       capacity     = SIZE_MAX / element_size + 2u;
+	struct ring_buffer rb = {0};
+	const size_t element_size = 16u;
+	const size_t capacity = SIZE_MAX / element_size + 2u;
 
 	ipc_test_init_heap();
 
 	cr_assert_not(ring_buffer_init(&rb, "ring_buffer_overflow", SPINLOCK_ORDER_PROCESS, capacity, element_size),
-	              "ring_buffer_init must reject capacity * element_size overflow");
+			"ring_buffer_init must reject capacity * element_size overflow");
 }
 
 Test(ring_buffer, wraparound_preserves_fifo_order_and_count) {
-	struct ring_buffer rb         = {0};
-	const uint32_t     initial[]  = {10u, 20u, 30u, 40u};
-	const uint32_t     wrapped[]  = {50u, 60u};
-	const uint32_t     expected[] = {30u, 40u, 50u, 60u};
-	uint32_t           value      = 0u;
+	struct ring_buffer rb = {0};
+	const uint32_t initial[] = {10u, 20u, 30u, 40u};
+	const uint32_t wrapped[] = {50u, 60u};
+	const uint32_t expected[] = {30u, 40u, 50u, 60u};
+	uint32_t value = 0u;
 
 	ipc_test_init_heap();
 	cr_assert(ring_buffer_init(&rb, "ring_buffer_wrap", SPINLOCK_ORDER_PROCESS, 4u, sizeof(uint32_t)));
@@ -56,11 +58,11 @@ Test(ring_buffer, wraparound_preserves_fifo_order_and_count) {
 }
 
 Test(ring_buffer, failed_full_enqueue_does_not_change_existing_contents) {
-	struct ring_buffer rb       = {0};
-	const uint64_t     first    = 0x1111111111111111ull;
-	const uint64_t     second   = 0x2222222222222222ull;
-	const uint64_t     rejected = 0x3333333333333333ull;
-	uint64_t           value    = 0u;
+	struct ring_buffer rb = {0};
+	const uint64_t first = 0x1111111111111111ull;
+	const uint64_t second = 0x2222222222222222ull;
+	const uint64_t rejected = 0x3333333333333333ull;
+	uint64_t value = 0u;
 
 	ipc_test_init_heap();
 	cr_assert(ring_buffer_init(&rb, "ring_buffer_full", SPINLOCK_ORDER_PROCESS, 2u, sizeof(uint64_t)));
@@ -80,15 +82,15 @@ Test(ring_buffer, failed_full_enqueue_does_not_change_existing_contents) {
 }
 
 enum {
-	RING_BUFFER_PRODUCER_COUNT      = 4u,
+	RING_BUFFER_PRODUCER_COUNT = 4u,
 	RING_BUFFER_VALUES_PER_PRODUCER = 64u,
 	RING_BUFFER_CONCURRENT_CAPACITY = RING_BUFFER_PRODUCER_COUNT * RING_BUFFER_VALUES_PER_PRODUCER,
 };
 
 struct producer_ctx {
 	struct ring_buffer* rb;
-	uint32_t            producer;
-	bool                success;
+	uint32_t producer;
+	bool success;
 };
 
 static void* producer_entry(void* arg) {
@@ -106,15 +108,15 @@ static void* producer_entry(void* arg) {
 }
 
 Test(ring_buffer, concurrent_producers_publish_each_element_exactly_once) {
-	struct ring_buffer  rb = {0};
+	struct ring_buffer rb = {0};
 	struct producer_ctx ctx[RING_BUFFER_PRODUCER_COUNT];
-	pthread_t           threads[RING_BUFFER_PRODUCER_COUNT];
-	bool                seen[RING_BUFFER_CONCURRENT_CAPACITY];
+	pthread_t threads[RING_BUFFER_PRODUCER_COUNT];
+	bool seen[RING_BUFFER_CONCURRENT_CAPACITY];
 
 	ipc_test_init_heap();
 	memset(seen, 0, sizeof(seen));
 	cr_assert(ring_buffer_init(
-		&rb, "ring_buffer_concurrent", SPINLOCK_ORDER_PROCESS, RING_BUFFER_CONCURRENT_CAPACITY, sizeof(uint32_t)));
+			&rb, "ring_buffer_concurrent", SPINLOCK_ORDER_PROCESS, RING_BUFFER_CONCURRENT_CAPACITY, sizeof(uint32_t)));
 
 	for (uint32_t i = 0u; i < RING_BUFFER_PRODUCER_COUNT; i++) {
 		ctx[i] = (struct producer_ctx){.rb = &rb, .producer = i, .success = false};

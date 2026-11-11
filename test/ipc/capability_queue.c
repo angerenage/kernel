@@ -3,7 +3,7 @@
 #include "test_support.h"
 
 Test(channel, cap_queue_init_is_empty) {
-	struct channel*    ch;
+	struct channel* ch;
 	struct cap_request req;
 
 	ipc_test_init_heap();
@@ -15,7 +15,7 @@ Test(channel, cap_queue_init_is_empty) {
 	channel_destroy(ch, 1u);
 }
 Test(channel, cap_queue_send_and_recv) {
-	struct channel*    ch;
+	struct channel* ch;
 	struct cap_request req;
 	struct cap_request out;
 
@@ -23,11 +23,11 @@ Test(channel, cap_queue_send_and_recv) {
 	ch = channel_create(1u, false);
 	cr_assert_not_null(ch);
 
-	req.caller       = 5u;
-	req.cap_id       = 42u;
-	req.object_id    = 100u;
-	req.rights       = CAP_READ;
-	req.request      = NULL;
+	req.caller = 5u;
+	req.cap_id = 42u;
+	req.object_id = 100u;
+	req.rights = CAP_READ;
+	req.request = NULL;
 	req.request_size = 0u;
 
 	cr_assert(ring_buffer_enqueue(&ch->cap_queue, &req), "enqueue should succeed");
@@ -45,7 +45,7 @@ Test(channel, cap_queue_send_and_recv) {
 }
 
 Test(channel, cap_queue_fifo_order) {
-	struct channel*    ch;
+	struct channel* ch;
 	struct cap_request req1;
 	struct cap_request req2;
 	struct cap_request out;
@@ -54,18 +54,18 @@ Test(channel, cap_queue_fifo_order) {
 	ch = channel_create(1u, false);
 	cr_assert_not_null(ch);
 
-	req1.caller       = 1u;
-	req1.cap_id       = 10u;
-	req1.object_id    = 100u;
-	req1.rights       = CAP_READ;
-	req1.request      = NULL;
+	req1.caller = 1u;
+	req1.cap_id = 10u;
+	req1.object_id = 100u;
+	req1.rights = CAP_READ;
+	req1.request = NULL;
 	req1.request_size = 0u;
 
-	req2.caller       = 2u;
-	req2.cap_id       = 20u;
-	req2.object_id    = 200u;
-	req2.rights       = CAP_WRITE;
-	req2.request      = NULL;
+	req2.caller = 2u;
+	req2.cap_id = 20u;
+	req2.object_id = 200u;
+	req2.rights = CAP_WRITE;
+	req2.request = NULL;
 	req2.request_size = 0u;
 
 	cr_assert(ring_buffer_enqueue(&ch->cap_queue, &req1));
@@ -85,7 +85,7 @@ Test(channel, cap_queue_fifo_order) {
 }
 
 Test(channel, cap_queue_full) {
-	struct channel*    ch;
+	struct channel* ch;
 	struct cap_request req;
 
 	ipc_test_init_heap();
@@ -103,7 +103,7 @@ Test(channel, cap_queue_full) {
 }
 
 Test(channel, cap_queue_rejects_null) {
-	struct channel*    ch;
+	struct channel* ch;
 	struct cap_request req;
 
 	ipc_test_init_heap();
@@ -119,8 +119,8 @@ Test(channel, cap_queue_rejects_null) {
 }
 
 Test(channel, activity_signal_is_optional_and_reports_enqueued_requests) {
-	struct channel*       ch;
-	struct cap_request    req = {0};
+	struct channel* ch;
+	struct cap_request req = {0};
 	struct signal_message message;
 
 	ipc_test_init_heap();

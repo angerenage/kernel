@@ -1,16 +1,20 @@
 #include "resource.h"
 
-#include <base/cap.h>
-#include <base/interrupt.h>
-#include <protocol/device.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+
+#include <base/cap.h>
+#include <base/interrupt.h>
+
+#include <protocol/device.h>
+
 #include <uacpi/resources.h>
 
 #if defined(__x86_64__)
 #include <base/io_port.h>
+
 #include <system/io_port.h>
 #endif
 
@@ -18,13 +22,13 @@
 
 struct acpi_resource_context {
 	struct acpi_device* device;
-	cap_id_t            memory_allocator_cap;
-	cap_id_t            interrupts_cap;
-	cap_id_t            io_ports_cap;
-	size_t              memory_count;
-	size_t              io_count;
-	size_t              interrupt_count;
-	syscall_status_t    status;
+	cap_id_t memory_allocator_cap;
+	cap_id_t interrupts_cap;
+	cap_id_t io_ports_cap;
+	size_t memory_count;
+	size_t io_count;
+	size_t interrupt_count;
+	syscall_status_t status;
 };
 
 static bool resource_name(char output[ACPI_RESOURCE_NAME_CAPACITY], const char* kind, size_t index, size_t* out_size) {
@@ -36,7 +40,7 @@ static bool resource_name(char output[ACPI_RESOURCE_NAME_CAPACITY], const char* 
 }
 
 static syscall_status_t add_memory(struct acpi_resource_context* context, uint64_t address, uint64_t size) {
-	char   name[ACPI_RESOURCE_NAME_CAPACITY];
+	char name[ACPI_RESOURCE_NAME_CAPACITY];
 	size_t name_size;
 	if (size == 0u || address > UINTPTR_MAX || size > SIZE_MAX || address > UINTPTR_MAX - (size - 1u))
 		return SYSCALL_STATUS_OK;
@@ -49,11 +53,11 @@ static syscall_status_t add_memory(struct acpi_resource_context* context, uint64
 static syscall_status_t add_io(struct acpi_resource_context* context, uint64_t address, uint64_t size) {
 #if defined(__x86_64__)
 	struct io_port_info range;
-	char                name[ACPI_RESOURCE_NAME_CAPACITY];
-	size_t              name_size;
-	syscall_status_t    status;
+	char name[ACPI_RESOURCE_NAME_CAPACITY];
+	size_t name_size;
+	syscall_status_t status;
 	if (context->io_ports_cap == CAP_ID_INVALID || size == 0u || address > UINT32_MAX || size > UINT32_MAX ||
-	    address > UINT32_MAX - (size - 1u))
+			address > UINT32_MAX - (size - 1u))
 		return SYSCALL_STATUS_OK;
 	status = io_port_info(context->io_ports_cap, &range);
 	if (status != SYSCALL_STATUS_OK) return status;
@@ -71,11 +75,11 @@ static syscall_status_t add_io(struct acpi_resource_context* context, uint64_t a
 #endif
 }
 
-static syscall_status_t add_interrupt(struct acpi_resource_context* context, uint32_t source, uint8_t triggering,
-                                      uint8_t polarity) {
-	char                    name[ACPI_RESOURCE_NAME_CAPACITY];
-	size_t                  name_size;
-	enum interrupt_trigger  trigger;
+static syscall_status_t add_interrupt(
+		struct acpi_resource_context* context, uint32_t source, uint8_t triggering, uint8_t polarity) {
+	char name[ACPI_RESOURCE_NAME_CAPACITY];
+	size_t name_size;
+	enum interrupt_trigger trigger;
 	enum interrupt_polarity active;
 
 	if (context->interrupts_cap == CAP_ID_INVALID) return SYSCALL_STATUS_OK;
@@ -90,7 +94,7 @@ static syscall_status_t add_interrupt(struct acpi_resource_context* context, uin
 }
 
 static syscall_status_t add_address(struct acpi_resource_context* context, const uacpi_resource_address_common* common,
-                                    uint64_t minimum, uint64_t translation, uint64_t length) {
+		uint64_t minimum, uint64_t translation, uint64_t length) {
 	if (common->direction != UACPI_CONSUMER || minimum > UINT64_MAX - translation) return SYSCALL_STATUS_OK;
 	if (common->type == UACPI_RANGE_MEMORY) return add_memory(context, minimum + translation, length);
 	if (common->type == UACPI_RANGE_IO) return add_io(context, minimum + translation, length);
@@ -105,17 +109,17 @@ static uacpi_iteration_decision add_resource(void* opaque, uacpi_resource* resou
 		if (resource->irq.sharing == UACPI_SHARED) break;
 		for (uacpi_u8 index = 0u; context->status == SYSCALL_STATUS_OK && index < resource->irq.num_irqs; index++)
 			context->status =
-				add_interrupt(context, resource->irq.irqs[index], resource->irq.triggering, resource->irq.polarity);
+					add_interrupt(context, resource->irq.irqs[index], resource->irq.triggering, resource->irq.polarity);
 		break;
 	case UACPI_RESOURCE_TYPE_EXTENDED_IRQ:
 		if (resource->extended_irq.direction == UACPI_CONSUMER && resource->extended_irq.sharing == UACPI_EXCLUSIVE &&
-		    resource->extended_irq.source.length == 0u)
+				resource->extended_irq.source.length == 0u)
 			for (uacpi_u8 index = 0u; context->status == SYSCALL_STATUS_OK && index < resource->extended_irq.num_irqs;
-			     index++)
+					index++)
 				context->status = add_interrupt(context,
-				                                resource->extended_irq.irqs[index],
-				                                resource->extended_irq.triggering,
-				                                resource->extended_irq.polarity);
+						resource->extended_irq.irqs[index],
+						resource->extended_irq.triggering,
+						resource->extended_irq.polarity);
 		break;
 	case UACPI_RESOURCE_TYPE_IO:
 		context->status = add_io(context, resource->io.minimum, resource->io.length);
@@ -134,31 +138,31 @@ static uacpi_iteration_decision add_resource(void* opaque, uacpi_resource* resou
 		break;
 	case UACPI_RESOURCE_TYPE_ADDRESS16:
 		context->status = add_address(context,
-		                              &resource->address16.common,
-		                              resource->address16.minimum,
-		                              resource->address16.translation_offset,
-		                              resource->address16.address_length);
+				&resource->address16.common,
+				resource->address16.minimum,
+				resource->address16.translation_offset,
+				resource->address16.address_length);
 		break;
 	case UACPI_RESOURCE_TYPE_ADDRESS32:
 		context->status = add_address(context,
-		                              &resource->address32.common,
-		                              resource->address32.minimum,
-		                              resource->address32.translation_offset,
-		                              resource->address32.address_length);
+				&resource->address32.common,
+				resource->address32.minimum,
+				resource->address32.translation_offset,
+				resource->address32.address_length);
 		break;
 	case UACPI_RESOURCE_TYPE_ADDRESS64:
 		context->status = add_address(context,
-		                              &resource->address64.common,
-		                              resource->address64.minimum,
-		                              resource->address64.translation_offset,
-		                              resource->address64.address_length);
+				&resource->address64.common,
+				resource->address64.minimum,
+				resource->address64.translation_offset,
+				resource->address64.address_length);
 		break;
 	case UACPI_RESOURCE_TYPE_ADDRESS64_EXTENDED:
 		context->status = add_address(context,
-		                              &resource->address64_extended.common,
-		                              resource->address64_extended.minimum,
-		                              resource->address64_extended.translation_offset,
-		                              resource->address64_extended.address_length);
+				&resource->address64_extended.common,
+				resource->address64_extended.minimum,
+				resource->address64_extended.translation_offset,
+				resource->address64_extended.address_length);
 		break;
 	default:
 		break;
@@ -167,18 +171,17 @@ static uacpi_iteration_decision add_resource(void* opaque, uacpi_resource* resou
 }
 
 syscall_status_t acpi_resources_add_current(struct acpi_device* device, uacpi_namespace_node* node,
-                                            cap_id_t memory_allocator_cap, cap_id_t interrupts_cap,
-                                            cap_id_t io_ports_cap) {
+		cap_id_t memory_allocator_cap, cap_id_t interrupts_cap, cap_id_t io_ports_cap) {
 	struct acpi_resource_context context;
-	uacpi_status                 status;
+	uacpi_status status;
 
 	if (device == NULL || node == NULL || memory_allocator_cap == CAP_ID_INVALID) return SYSCALL_STATUS_BAD_ARGUMENT;
 	context = (struct acpi_resource_context){
-		.device               = device,
+		.device = device,
 		.memory_allocator_cap = memory_allocator_cap,
-		.interrupts_cap       = interrupts_cap,
-		.io_ports_cap         = io_ports_cap,
-		.status               = SYSCALL_STATUS_OK,
+		.interrupts_cap = interrupts_cap,
+		.io_ports_cap = io_ports_cap,
+		.status = SYSCALL_STATUS_OK,
 	};
 	status = uacpi_for_each_device_resource(node, "_CRS", add_resource, &context);
 	if (status == UACPI_STATUS_NOT_FOUND) return SYSCALL_STATUS_OK;

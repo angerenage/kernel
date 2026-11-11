@@ -1,6 +1,7 @@
 #include "lifecycle.h"
 
 #include <stdlib.h>
+
 #include <system/capability.h>
 
 static uint64_t loader_object_id(const struct loader_loaded_program* program) {

@@ -2,14 +2,14 @@
 #if defined(PLATFORM_PC_X86_64)
 #include <core/io_port.h>
 #endif
+#include <hal/hcf.h>
+#include <hal/userspace.h>
 #include <core/process.h>
 #include <core/sched.h>
 #include <core/thread.h>
 #include <core/user_return.h>
 #include <core/user_upcall.h>
 #include <core/uthread.h>
-#include <hal/hcf.h>
-#include <hal/userspace.h>
 
 static void core_handle_upcall_delivery_result(struct uthread* current, enum user_upcall_result result) {
 	switch (result) {
@@ -30,7 +30,7 @@ static void core_handle_upcall_delivery_result(struct uthread* current, enum use
 }
 
 void core_finalize_user_return(struct hal_userspace_return_frame* frame) {
-	struct uthread*         current;
+	struct uthread* current;
 	enum user_upcall_result result;
 
 	if (frame == NULL || !hal_userspace_frame_is_user(frame)) return;

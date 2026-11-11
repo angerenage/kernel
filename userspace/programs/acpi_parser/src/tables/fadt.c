@@ -2,6 +2,7 @@
 
 #include <base/acpi.h>
 #include <base/interrupt.h>
+
 #include <system/acpi.h>
 
 #if defined(__x86_64__)
@@ -28,22 +29,22 @@
 
 static syscall_status_t stage_i8042(struct acpi_device_set* devices) {
 	struct acpi_device* device;
-	syscall_status_t    status;
+	syscall_status_t status;
 	status = acpi_device_begin(devices, &device);
 	if (status != SYSCALL_STATUS_OK) return status;
 	status = acpi_device_add_compatible(device, I8042_COMPATIBLE);
 	if (status == SYSCALL_STATUS_OK)
 		status = acpi_device_stage_interrupt(device,
-		                                     I8042_KEYBOARD_INTERRUPT_RESOURCE,
-		                                     I8042_KEYBOARD_INTERRUPT,
-		                                     INTERRUPT_TRIGGER_FIRMWARE,
-		                                     INTERRUPT_POLARITY_FIRMWARE);
+				I8042_KEYBOARD_INTERRUPT_RESOURCE,
+				I8042_KEYBOARD_INTERRUPT,
+				INTERRUPT_TRIGGER_FIRMWARE,
+				INTERRUPT_POLARITY_FIRMWARE);
 	if (status == SYSCALL_STATUS_OK)
 		status = acpi_device_stage_interrupt(device,
-		                                     I8042_MOUSE_INTERRUPT_RESOURCE,
-		                                     I8042_MOUSE_INTERRUPT,
-		                                     INTERRUPT_TRIGGER_FIRMWARE,
-		                                     INTERRUPT_POLARITY_FIRMWARE);
+				I8042_MOUSE_INTERRUPT_RESOURCE,
+				I8042_MOUSE_INTERRUPT,
+				INTERRUPT_TRIGGER_FIRMWARE,
+				INTERRUPT_POLARITY_FIRMWARE);
 	if (status == SYSCALL_STATUS_OK) status = acpi_device_stage_io(device, I8042_DATA_RESOURCE, I8042_DATA_PORT, 1u);
 	if (status == SYSCALL_STATUS_OK)
 		status = acpi_device_stage_io(device, I8042_COMMAND_RESOURCE, I8042_COMMAND_PORT, 1u);
@@ -54,8 +55,8 @@ static syscall_status_t stage_i8042(struct acpi_device_set* devices) {
 syscall_status_t acpi_fadt_parse(cap_id_t provider_cap, struct acpi_device_set* devices) {
 #if defined(__x86_64__)
 	struct acpi_provider_fadt_read_response fadt;
-	struct acpi_device*                     aml_keyboard;
-	syscall_status_t                        status;
+	struct acpi_device* aml_keyboard;
+	syscall_status_t status;
 #endif
 
 	if (provider_cap == CAP_ID_INVALID || devices == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;

@@ -1,24 +1,26 @@
-#include <base/process.h>
-#include <core/address_space.h>
-#include <core/exception.h>
-#include <core/process.h>
-#include <criterion/criterion.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-static struct process* fake_current_process = (struct process*)(uintptr_t)0x1000u;
-static bool            terminate_result;
-static size_t          terminate_calls;
-static struct process* terminated_process;
-static uintptr_t       terminated_exit_code;
+#include <base/process.h>
+#include <core/address_space.h>
+#include <core/exception.h>
+#include <core/process.h>
 
-static bool                          address_space_fault_result;
-static size_t                        address_space_fault_calls;
-static uintptr_t                     observed_fault_addr;
+#include <criterion/criterion.h>
+
+static struct process* fake_current_process = (struct process*)(uintptr_t)0x1000u;
+static bool terminate_result;
+static size_t terminate_calls;
+static struct process* terminated_process;
+static uintptr_t terminated_exit_code;
+
+static bool address_space_fault_result;
+static size_t address_space_fault_calls;
+static uintptr_t observed_fault_addr;
 static enum address_space_fault_kind observed_fault_kind;
-static memory_access_t               observed_fault_access;
-static bool                          observed_fault_user_mode;
+static memory_access_t observed_fault_access;
+static bool observed_fault_user_mode;
 
 struct process* process_current(void) {
 	return fake_current_process;
@@ -26,64 +28,64 @@ struct process* process_current(void) {
 
 bool process_terminate(struct process* process, uintptr_t exit_code) {
 	terminate_calls++;
-	terminated_process   = process;
+	terminated_process = process;
 	terminated_exit_code = exit_code;
 	return terminate_result;
 }
 
-bool address_space_handle_current_fault(uintptr_t addr, enum address_space_fault_kind kind, memory_access_t access,
-                                        bool user_mode) {
+bool address_space_handle_current_fault(
+		uintptr_t addr, enum address_space_fault_kind kind, memory_access_t access, bool user_mode) {
 	address_space_fault_calls++;
-	observed_fault_addr      = addr;
-	observed_fault_kind      = kind;
-	observed_fault_access    = access;
+	observed_fault_addr = addr;
+	observed_fault_kind = kind;
+	observed_fault_access = access;
 	observed_fault_user_mode = user_mode;
 	return address_space_fault_result;
 }
 
 static void exception_test_reset(void) {
-	fake_current_process       = (struct process*)(uintptr_t)0x1000u;
-	terminate_result           = true;
-	terminate_calls            = 0u;
-	terminated_process         = NULL;
-	terminated_exit_code       = UINTPTR_MAX;
+	fake_current_process = (struct process*)(uintptr_t)0x1000u;
+	terminate_result = true;
+	terminate_calls = 0u;
+	terminated_process = NULL;
+	terminated_exit_code = UINTPTR_MAX;
 	address_space_fault_result = true;
-	address_space_fault_calls  = 0u;
-	observed_fault_addr        = 0u;
-	observed_fault_kind        = ADDRESS_SPACE_FAULT_INVALID;
-	observed_fault_access      = 0u;
-	observed_fault_user_mode   = false;
+	address_space_fault_calls = 0u;
+	observed_fault_addr = 0u;
+	observed_fault_kind = ADDRESS_SPACE_FAULT_INVALID;
+	observed_fault_access = 0u;
+	observed_fault_user_mode = false;
 }
 
 Test(exception_core, page_faults_preserve_kind_access_address_and_origin) {
 	static const struct {
-		enum core_exception_kind      core_kind;
-		enum core_exception_access    core_access;
+		enum core_exception_kind core_kind;
+		enum core_exception_access core_access;
 		enum address_space_fault_kind fault_kind;
-		memory_access_t               access;
-		bool                          user_mode;
+		memory_access_t access;
+		bool user_mode;
 	} cases[] = {
 		{
-		 .core_kind   = CORE_EXCEPTION_PAGE_FAULT_NOT_PRESENT,
-		 .core_access = CORE_EXCEPTION_ACCESS_READ,
-		 .fault_kind  = ADDRESS_SPACE_FAULT_NOT_PRESENT,
-		 .access      = MEMORY_ACCESS_READ,
-		 .user_mode   = true,
-		 },
+			.core_kind = CORE_EXCEPTION_PAGE_FAULT_NOT_PRESENT,
+			.core_access = CORE_EXCEPTION_ACCESS_READ,
+			.fault_kind = ADDRESS_SPACE_FAULT_NOT_PRESENT,
+			.access = MEMORY_ACCESS_READ,
+			.user_mode = true,
+		},
 		{
-		 .core_kind   = CORE_EXCEPTION_PAGE_FAULT_PROTECTION,
-		 .core_access = CORE_EXCEPTION_ACCESS_WRITE,
-		 .fault_kind  = ADDRESS_SPACE_FAULT_PROTECTION,
-		 .access      = MEMORY_ACCESS_WRITE,
-		 .user_mode   = true,
-		 },
+			.core_kind = CORE_EXCEPTION_PAGE_FAULT_PROTECTION,
+			.core_access = CORE_EXCEPTION_ACCESS_WRITE,
+			.fault_kind = ADDRESS_SPACE_FAULT_PROTECTION,
+			.access = MEMORY_ACCESS_WRITE,
+			.user_mode = true,
+		},
 		{
-		 .core_kind   = CORE_EXCEPTION_PAGE_FAULT_INVALID,
-		 .core_access = CORE_EXCEPTION_ACCESS_EXEC,
-		 .fault_kind  = ADDRESS_SPACE_FAULT_INVALID,
-		 .access      = MEMORY_ACCESS_EXEC,
-		 .user_mode   = false,
-		 },
+			.core_kind = CORE_EXCEPTION_PAGE_FAULT_INVALID,
+			.core_access = CORE_EXCEPTION_ACCESS_EXEC,
+			.fault_kind = ADDRESS_SPACE_FAULT_INVALID,
+			.access = MEMORY_ACCESS_EXEC,
+			.user_mode = false,
+		},
 	};
 
 	for (size_t i = 0u; i < sizeof(cases) / sizeof(cases[0]); i++) {
@@ -93,7 +95,7 @@ Test(exception_core, page_faults_preserve_kind_access_address_and_origin) {
 		address_space_fault_result = (i & 1u) == 0u;
 
 		cr_assert_eq(core_handle_exception(cases[i].core_kind, cases[i].core_access, addr, cases[i].user_mode),
-		             address_space_fault_result);
+				address_space_fault_result);
 		cr_assert_eq(address_space_fault_calls, 1u);
 		cr_assert_eq(observed_fault_addr, addr);
 		cr_assert_eq(observed_fault_kind, cases[i].fault_kind);
@@ -106,29 +108,30 @@ Test(exception_core, page_faults_preserve_kind_access_address_and_origin) {
 Test(exception_core, public_user_faults_publish_their_stable_process_exit_codes) {
 	static const struct {
 		enum core_exception_kind kind;
-		uintptr_t                exit_code;
+		uintptr_t exit_code;
 	} cases[] = {
-		{   CORE_EXCEPTION_ARITHMETIC_DIVIDE_BY_ZERO,    PROCESS_EXIT_ARITHMETIC_DIVIDE_BY_ZERO},
-		{         CORE_EXCEPTION_ARITHMETIC_OVERFLOW,          PROCESS_EXIT_ARITHMETIC_OVERFLOW},
-		{      CORE_EXCEPTION_ARITHMETIC_BOUND_RANGE,       PROCESS_EXIT_ARITHMETIC_BOUND_RANGE},
-		{         CORE_EXCEPTION_INSTRUCTION_ILLEGAL,          PROCESS_EXIT_INSTRUCTION_ILLEGAL},
+		{CORE_EXCEPTION_ARITHMETIC_DIVIDE_BY_ZERO, PROCESS_EXIT_ARITHMETIC_DIVIDE_BY_ZERO},
+		{CORE_EXCEPTION_ARITHMETIC_OVERFLOW, PROCESS_EXIT_ARITHMETIC_OVERFLOW},
+		{CORE_EXCEPTION_ARITHMETIC_BOUND_RANGE, PROCESS_EXIT_ARITHMETIC_BOUND_RANGE},
+		{CORE_EXCEPTION_INSTRUCTION_ILLEGAL, PROCESS_EXIT_INSTRUCTION_ILLEGAL},
 		{CORE_EXCEPTION_PRIVILEGE_GENERAL_PROTECTION, PROCESS_EXIT_PRIVILEGE_GENERAL_PROTECTION},
-		{                   CORE_EXCEPTION_ALIGNMENT,              PROCESS_EXIT_ALIGNMENT_FAULT},
-		{    CORE_EXCEPTION_ACCESS_INSTRUCTION_ABORT,     PROCESS_EXIT_ACCESS_INSTRUCTION_ABORT},
-		{           CORE_EXCEPTION_ACCESS_DATA_ABORT,            PROCESS_EXIT_ACCESS_DATA_ABORT},
-		{  CORE_EXCEPTION_ACCESS_ADDRESS_ERROR_FETCH,   PROCESS_EXIT_ACCESS_ADDRESS_ERROR_FETCH},
-		{ CORE_EXCEPTION_ACCESS_ADDRESS_ERROR_MEMORY,  PROCESS_EXIT_ACCESS_ADDRESS_ERROR_MEMORY},
-		{                   CORE_EXCEPTION_BUS_ERROR,                    PROCESS_EXIT_BUS_ERROR},
-		{              CORE_EXCEPTION_FLOATING_POINT,         PROCESS_EXIT_FLOATING_POINT_ERROR},
-		{         CORE_EXCEPTION_FLOATING_POINT_SIMD,          PROCESS_EXIT_FLOATING_POINT_SIMD},
-		{           CORE_EXCEPTION_MEMORY_PROTECTION,            PROCESS_EXIT_MEMORY_PROTECTION},
+		{CORE_EXCEPTION_ALIGNMENT, PROCESS_EXIT_ALIGNMENT_FAULT},
+		{CORE_EXCEPTION_ACCESS_INSTRUCTION_ABORT, PROCESS_EXIT_ACCESS_INSTRUCTION_ABORT},
+		{CORE_EXCEPTION_ACCESS_DATA_ABORT, PROCESS_EXIT_ACCESS_DATA_ABORT},
+		{CORE_EXCEPTION_ACCESS_ADDRESS_ERROR_FETCH, PROCESS_EXIT_ACCESS_ADDRESS_ERROR_FETCH},
+		{CORE_EXCEPTION_ACCESS_ADDRESS_ERROR_MEMORY, PROCESS_EXIT_ACCESS_ADDRESS_ERROR_MEMORY},
+		{CORE_EXCEPTION_BUS_ERROR, PROCESS_EXIT_BUS_ERROR},
+		{CORE_EXCEPTION_FLOATING_POINT, PROCESS_EXIT_FLOATING_POINT_ERROR},
+		{CORE_EXCEPTION_FLOATING_POINT_SIMD, PROCESS_EXIT_FLOATING_POINT_SIMD},
+		{CORE_EXCEPTION_MEMORY_PROTECTION, PROCESS_EXIT_MEMORY_PROTECTION},
 	};
 
 	for (size_t i = 0u; i < sizeof(cases) / sizeof(cases[0]); i++) {
 		exception_test_reset();
 
-		cr_assert(
-			core_handle_user_exception(cases[i].kind), "user exception kind %d was not consumed", (int)cases[i].kind);
+		cr_assert(core_handle_user_exception(cases[i].kind),
+				"user exception kind %d was not consumed",
+				(int)cases[i].kind);
 		cr_assert_eq(terminate_calls, 1u);
 		cr_assert_eq(terminated_process, fake_current_process);
 		cr_assert_eq(terminated_exit_code, cases[i].exit_code);
@@ -138,10 +141,10 @@ Test(exception_core, public_user_faults_publish_their_stable_process_exit_codes)
 Test(exception_core, debugger_generated_user_traps_are_contained_by_the_core) {
 	static const struct {
 		enum core_exception_kind kind;
-		uintptr_t                exit_code;
+		uintptr_t exit_code;
 	} cases[] = {
 		{CORE_EXCEPTION_BREAKPOINT, PROCESS_EXIT_BREAKPOINT},
-		{     CORE_EXCEPTION_DEBUG,      PROCESS_EXIT_DEBUG},
+		{CORE_EXCEPTION_DEBUG, PROCESS_EXIT_DEBUG},
 		{CORE_EXCEPTION_WATCHPOINT, PROCESS_EXIT_WATCHPOINT},
 	};
 
@@ -149,8 +152,8 @@ Test(exception_core, debugger_generated_user_traps_are_contained_by_the_core) {
 		exception_test_reset();
 
 		cr_assert(core_handle_user_exception(cases[i].kind),
-		          "userspace trap kind %d escaped to architecture-fatal handling",
-		          (int)cases[i].kind);
+				"userspace trap kind %d escaped to architecture-fatal handling",
+				(int)cases[i].kind);
 		cr_assert_eq(terminate_calls, 1u);
 		cr_assert_eq(terminated_exit_code, cases[i].exit_code);
 	}

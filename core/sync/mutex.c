@@ -1,33 +1,33 @@
 #include <base/time.h>
+#include <hal/clock.h>
+#include <hal/hcf.h>
 #include <core/kthread.h>
 #include <core/mutex.h>
 #include <core/sched.h>
-#include <hal/clock.h>
-#include <hal/hcf.h>
 
 void mutex_init(struct mutex* mutex) {
 	if (mutex == NULL) return;
 
 	spinlock_init_class(&mutex->lock, "mutex_lock", SPINLOCK_ORDER_MUTEX, SPINLOCK_FLAG_IRQSAVE);
-	mutex->owner      = NULL;
+	mutex->owner = NULL;
 	mutex->owner_next = NULL;
 	thread_wait_queue_init(&mutex->waiters);
 }
 
 static void mutex_recompute_inherited_priority(struct thread* owner) {
-	int32_t       priority;
+	int32_t priority;
 	struct mutex* owned;
 
 	if (owner == NULL) return;
 
 	priority = owner->base_priority;
-	owned    = owner->owned_mutexes;
+	owned = owner->owned_mutexes;
 	while (owned != NULL) {
 		struct irq_state wait_state;
-		struct thread*   waiter;
+		struct thread* waiter;
 
 		wait_state = spinlock_lock_irqsave(&owned->waiters.lock);
-		waiter     = owned->waiters.head;
+		waiter = owned->waiters.head;
 		while (waiter != NULL) {
 			if (waiter->effective_priority > priority) priority = waiter->effective_priority;
 			waiter = waiter->wait_queue_next;
@@ -43,8 +43,8 @@ static void mutex_recompute_inherited_priority(struct thread* owner) {
 static void mutex_add_owned_locked(struct mutex* mutex, struct thread* owner) {
 	if (mutex == NULL || owner == NULL) return;
 
-	mutex->owner         = owner;
-	mutex->owner_next    = owner->owned_mutexes;
+	mutex->owner = owner;
+	mutex->owner_next = owner->owned_mutexes;
 	owner->owned_mutexes = mutex;
 	mutex_recompute_inherited_priority(owner);
 }
@@ -60,7 +60,7 @@ static void mutex_remove_owned_locked(struct mutex* mutex, struct thread* owner)
 	}
 	if (*cursor == mutex) *cursor = mutex->owner_next;
 
-	mutex->owner      = NULL;
+	mutex->owner = NULL;
 	mutex->owner_next = NULL;
 	mutex_recompute_inherited_priority(owner);
 }
@@ -79,7 +79,7 @@ static void mutex_inherit_waiter_priority_locked(struct mutex* mutex, const stru
 
 static void mutex_recompute_owner_priority(struct mutex* mutex) {
 	struct irq_state state;
-	struct thread*   owner;
+	struct thread* owner;
 
 	if (mutex == NULL) return;
 
@@ -98,8 +98,8 @@ bool mutex_release_locked(struct mutex* mutex, struct thread* owner) {
 
 bool mutex_try_lock(struct mutex* mutex) {
 	struct irq_state state;
-	struct thread*   current;
-	bool             acquired = false;
+	struct thread* current;
+	bool acquired = false;
 
 	if (mutex == NULL) return false;
 
@@ -154,7 +154,7 @@ void mutex_lock(struct mutex* mutex) {
 
 bool mutex_timed_lock(struct mutex* mutex, uint64_t timeout_ms) {
 	struct thread* current;
-	uint64_t       deadline_tick;
+	uint64_t deadline_tick;
 
 	if (mutex == NULL) return false;
 
@@ -214,7 +214,7 @@ bool mutex_timed_lock(struct mutex* mutex, uint64_t timeout_ms) {
 
 bool mutex_unlock(struct mutex* mutex) {
 	struct irq_state state;
-	struct thread*   current;
+	struct thread* current;
 
 	if (mutex == NULL) return false;
 
@@ -236,12 +236,12 @@ bool mutex_unlock(struct mutex* mutex) {
 bool mutex_is_locked(const struct mutex* mutex) {
 	struct irq_state state;
 	struct spinlock* lock;
-	bool             locked;
+	bool locked;
 
 	if (mutex == NULL) return false;
 
-	lock   = (struct spinlock*)&mutex->lock;
-	state  = spinlock_lock_irqsave(lock);
+	lock = (struct spinlock*)&mutex->lock;
+	state = spinlock_lock_irqsave(lock);
 	locked = mutex->owner != NULL;
 	spinlock_unlock_irqrestore(lock, state);
 	return locked;
@@ -249,16 +249,16 @@ bool mutex_is_locked(const struct mutex* mutex) {
 
 bool mutex_is_owned_by_current(const struct mutex* mutex) {
 	struct irq_state state;
-	struct thread*   current;
+	struct thread* current;
 	struct spinlock* lock;
-	bool             owned;
+	bool owned;
 
 	if (mutex == NULL) return false;
 
 	current = sched_current_thread();
-	lock    = (struct spinlock*)&mutex->lock;
-	state   = spinlock_lock_irqsave(lock);
-	owned   = current != NULL && mutex->owner == current;
+	lock = (struct spinlock*)&mutex->lock;
+	state = spinlock_lock_irqsave(lock);
+	owned = current != NULL && mutex->owner == current;
 	spinlock_unlock_irqrestore(lock, state);
 	return owned;
 }
@@ -266,11 +266,11 @@ bool mutex_is_owned_by_current(const struct mutex* mutex) {
 struct thread* mutex_owner(const struct mutex* mutex) {
 	struct irq_state state;
 	struct spinlock* lock;
-	struct thread*   owner;
+	struct thread* owner;
 
 	if (mutex == NULL) return NULL;
 
-	lock  = (struct spinlock*)&mutex->lock;
+	lock = (struct spinlock*)&mutex->lock;
 	state = spinlock_lock_irqsave(lock);
 	owner = mutex->owner;
 	spinlock_unlock_irqrestore(lock, state);

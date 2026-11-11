@@ -11,10 +11,11 @@
  * capability.
  */
 
-#include <base/cap.h>
-#include <base/syscall.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/cap.h>
+#include <base/syscall.h>
 
 enum blob_op {
 	BLOB_OP_INFO = 0u,
@@ -37,8 +38,8 @@ struct blob_info_response {
 /* Read an exact byte range from a Blob. */
 struct blob_read_request {
 	struct blob_request_header header;
-	uint64_t                   offset;
-	uint64_t                   size;
+	uint64_t offset;
+	uint64_t size;
 };
 
 /* Read Blob metadata through a Blob capability. */

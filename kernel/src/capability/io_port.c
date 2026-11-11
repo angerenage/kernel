@@ -1,26 +1,27 @@
 #include "io_port.h"
 
+#include <libc/stdlib.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+
 #include <base/io_port.h>
 #include <base/syscall.h>
 #include <core/capability.h>
 #include <core/io_port.h>
 #include <core/process.h>
 #include <kernel/capability.h>
-#include <libc/stdlib.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <string.h>
 
 #define IO_PORT_CAP_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_WRITE | CAP_MAP | CAP_DERIVE | CAP_DELEGATE))
 
 struct io_port_resource {
 	uint32_t base;
 	uint32_t count;
-	bool     root;
+	bool root;
 };
 
-static struct io_port_resource root_resource  = {.base = 0u, .count = IO_PORT_COUNT, .root = true};
-static cap_object_id_t         root_object_id = CAP_OBJECT_ID_INVALID;
+static struct io_port_resource root_resource = {.base = 0u, .count = IO_PORT_COUNT, .root = true};
+static cap_object_id_t root_object_id = CAP_OBJECT_ID_INVALID;
 
 static syscall_result_t io_port_handler(const struct cap_request* req);
 
@@ -28,13 +29,13 @@ static bool range_valid(uint32_t base, uint32_t count) {
 	return count != 0u && base < IO_PORT_COUNT && count <= IO_PORT_COUNT - base;
 }
 
-static bool access_valid(const struct io_port_resource* resource, uint32_t offset, enum io_port_width width,
-                         uint16_t* out_port) {
+static bool access_valid(
+		const struct io_port_resource* resource, uint32_t offset, enum io_port_width width, uint16_t* out_port) {
 	uint32_t size = (uint32_t)width;
 	if (resource == NULL || out_port == NULL ||
-	    (width != IO_PORT_WIDTH_8 && width != IO_PORT_WIDTH_16 && width != IO_PORT_WIDTH_32) ||
-	    offset >= resource->count || size > resource->count - offset || resource->base + offset >= IO_PORT_COUNT ||
-	    size > IO_PORT_COUNT - (resource->base + offset))
+			(width != IO_PORT_WIDTH_8 && width != IO_PORT_WIDTH_16 && width != IO_PORT_WIDTH_32) ||
+			offset >= resource->count || size > resource->count - offset || resource->base + offset >= IO_PORT_COUNT ||
+			size > IO_PORT_COUNT - (resource->base + offset))
 		return false;
 	*out_port = (uint16_t)(resource->base + offset);
 	return true;
@@ -49,7 +50,7 @@ static syscall_result_t copy_request(const struct cap_request* req, void* out, s
 
 static bool grant_targets_caller(const struct cap_request* req) {
 	struct capability* capability;
-	bool               matches;
+	bool matches;
 	if (req == NULL) return false;
 	capability = cap_acquire(req->cap_id);
 	if (capability == NULL) return false;
@@ -70,27 +71,27 @@ static void io_port_resource_event(struct cap_object* object, enum cap_object_ev
 	if (resource != NULL && !resource->root) (void)cap_object_destroy_if_unused(object);
 }
 
-static void io_port_grant_change(uint64_t object_id, cap_id_t capability, process_id_t process, cap_rights_t rights,
-                                 bool removed) {
+static void io_port_grant_change(
+		uint64_t object_id, cap_id_t capability, process_id_t process, cap_rights_t rights, bool removed) {
 	(void)object_id;
 	if (removed || (rights & CAP_MAP) == 0u) (void)io_port_unmap_capability(process, capability);
 }
 
-static cap_id_t io_port_resource_publish(struct io_port_resource* resource, process_id_t recipient, cap_rights_t rights,
-                                         struct capability* parent) {
+static cap_id_t io_port_resource_publish(
+		struct io_port_resource* resource, process_id_t recipient, cap_rights_t rights, struct capability* parent) {
 	cap_object_id_t object_id;
-	cap_id_t        cap;
-	bool            created = false;
+	cap_id_t cap;
+	bool created = false;
 	if (resource == NULL || recipient == PROCESS_PID_INVALID || (rights & CAP_CALL) == 0u ||
-	    (rights & ~IO_PORT_CAP_RIGHTS) != 0u)
+			(rights & ~IO_PORT_CAP_RIGHTS) != 0u)
 		return CAP_ID_INVALID;
 	object_id = cap_object_create_kernel_observed((uint64_t)(uintptr_t)resource,
-	                                              io_port_handler,
-	                                              NULL,
-	                                              io_port_resource_destroy,
-	                                              io_port_resource_event,
-	                                              io_port_grant_change,
-	                                              &created);
+			io_port_handler,
+			NULL,
+			io_port_resource_destroy,
+			io_port_resource_event,
+			io_port_grant_change,
+			&created);
 	if (object_id == CAP_OBJECT_ID_INVALID) {
 		if (!resource->root) free(resource);
 		return CAP_ID_INVALID;
@@ -107,24 +108,25 @@ static syscall_result_t io_port_info_handler(const struct cap_request* req, cons
 }
 
 static syscall_result_t io_port_derive_handler(const struct cap_request* req, const struct io_port_resource* resource) {
-	struct io_port_derive_request  request;
+	struct io_port_derive_request request;
 	struct io_port_derive_response response = {.io_port_cap = CAP_ID_INVALID};
-	struct io_port_resource*       child;
-	struct capability*             parent;
-	syscall_result_t               result;
+	struct io_port_resource* child;
+	struct capability* parent;
+	syscall_result_t result;
 
 	if ((req->rights & CAP_DERIVE) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (copy_request(req, &request, sizeof(request)).status != SYSCALL_STATUS_OK ||
-	    !cap_kernel_response_fits(req, sizeof(response)) || request.count == 0u || request.offset >= resource->count ||
-	    request.count > resource->count - request.offset || (request.rights & CAP_CALL) == 0u ||
-	    (request.rights & ~req->rights) != 0u || (request.rights & ~IO_PORT_CAP_RIGHTS) != 0u)
+			!cap_kernel_response_fits(req, sizeof(response)) || request.count == 0u ||
+			request.offset >= resource->count || request.count > resource->count - request.offset ||
+			(request.rights & CAP_CALL) == 0u || (request.rights & ~req->rights) != 0u ||
+			(request.rights & ~IO_PORT_CAP_RIGHTS) != 0u)
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	child = malloc(sizeof(*child));
 	if (child == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	*child = (struct io_port_resource){
-		.base  = resource->base + request.offset,
+		.base = resource->base + request.offset,
 		.count = request.count,
-		.root  = false,
+		.root = false,
 	};
 	parent = cap_acquire(req->cap_id);
 	if (parent == NULL) {
@@ -142,7 +144,7 @@ static syscall_result_t io_port_derive_handler(const struct cap_request* req, co
 }
 
 static syscall_result_t io_port_map_handler(const struct cap_request* req, const struct io_port_resource* resource) {
-	struct process*     process;
+	struct process* process;
 	enum io_port_result map_result;
 	if ((req->rights & CAP_MAP) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (!grant_targets_caller(req)) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
@@ -151,12 +153,12 @@ static syscall_result_t io_port_map_handler(const struct cap_request* req, const
 	map_result = io_port_map(process, req->cap_id, resource->base, resource->count);
 	process_release(process);
 	if (map_result == IO_PORT_OK) return syscall_result_ok(0u);
-	return syscall_result_error(map_result == IO_PORT_NO_MEMORY ? SYSCALL_STATUS_FAILED : SYSCALL_STATUS_BAD_ARGUMENT,
-	                            0u);
+	return syscall_result_error(
+			map_result == IO_PORT_NO_MEMORY ? SYSCALL_STATUS_FAILED : SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 }
 
 static syscall_result_t io_port_unmap_handler(const struct cap_request* req) {
-	struct process*     process;
+	struct process* process;
 	enum io_port_result unmap_result;
 	if ((req->rights & CAP_MAP) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (!grant_targets_caller(req)) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
@@ -168,13 +170,13 @@ static syscall_result_t io_port_unmap_handler(const struct cap_request* req) {
 }
 
 static syscall_result_t io_port_read_handler(const struct cap_request* req, const struct io_port_resource* resource) {
-	struct io_port_read_request  request;
+	struct io_port_read_request request;
 	struct io_port_read_response response = {0};
-	uint16_t                     port;
+	uint16_t port;
 	if ((req->rights & CAP_READ) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (copy_request(req, &request, sizeof(request)).status != SYSCALL_STATUS_OK ||
-	    !cap_kernel_response_fits(req, sizeof(response)) ||
-	    !access_valid(resource, request.offset, request.width, &port))
+			!cap_kernel_response_fits(req, sizeof(response)) ||
+			!access_valid(resource, request.offset, request.width, &port))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	switch (request.width) {
 	case IO_PORT_WIDTH_8:
@@ -194,10 +196,10 @@ static syscall_result_t io_port_read_handler(const struct cap_request* req, cons
 
 static syscall_result_t io_port_write_handler(const struct cap_request* req, const struct io_port_resource* resource) {
 	struct io_port_write_request request;
-	uint16_t                     port;
+	uint16_t port;
 	if ((req->rights & CAP_WRITE) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (copy_request(req, &request, sizeof(request)).status != SYSCALL_STATUS_OK ||
-	    !access_valid(resource, request.offset, request.width, &port))
+			!access_valid(resource, request.offset, request.width, &port))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	switch (request.width) {
 	case IO_PORT_WIDTH_8:
@@ -217,7 +219,7 @@ static syscall_result_t io_port_write_handler(const struct cap_request* req, con
 
 static syscall_result_t io_port_handler(const struct cap_request* req) {
 	struct io_port_request_header header;
-	struct io_port_resource*      resource;
+	struct io_port_resource* resource;
 	if (req == NULL || req->object_id == 0u || req->request == NULL || req->request_size < sizeof(header))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	memcpy(&header, req->request, sizeof(header));
@@ -248,14 +250,14 @@ static syscall_result_t io_port_handler(const struct cap_request* req) {
 }
 
 bool kernel_capability_io_ports_init(void) {
-	bool created   = false;
+	bool created = false;
 	root_object_id = cap_object_create_kernel_observed((uint64_t)(uintptr_t)&root_resource,
-	                                                   io_port_handler,
-	                                                   NULL,
-	                                                   io_port_resource_destroy,
-	                                                   io_port_resource_event,
-	                                                   io_port_grant_change,
-	                                                   &created);
+			io_port_handler,
+			NULL,
+			io_port_resource_destroy,
+			io_port_resource_event,
+			io_port_grant_change,
+			&created);
 	(void)created;
 	return root_object_id != CAP_OBJECT_ID_INVALID;
 }

@@ -1,8 +1,9 @@
 #pragma once
 
+#include <stdbool.h>
+
 #include <base/cap.h>
 #include <base/process.h>
-#include <stdbool.h>
 
 /* Publish the singleton DMA control resource when an IOMMU controller exists. */
 bool kernel_capability_dma_init(void);

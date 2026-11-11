@@ -1,7 +1,8 @@
-#include <kernel/crash.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+
+#include <kernel/crash.h>
 
 #include "kernel_config.h"
 
@@ -15,12 +16,12 @@ static size_t crash_write_compact_u64(uint8_t* output, size_t cursor, uint64_t v
 	size_t zero_length = sizeof(value);
 	size_t ones_length = sizeof(value);
 	size_t length;
-	bool   fill_ones;
+	bool fill_ones;
 
 	while (zero_length > 0u && (uint8_t)(value >> (8u * (zero_length - 1u))) == 0u) zero_length--;
 	while (ones_length > 0u && (uint8_t)(value >> (8u * (ones_length - 1u))) == 0xffu) ones_length--;
-	fill_ones        = ones_length < zero_length;
-	length           = fill_ones ? ones_length : zero_length;
+	fill_ones = ones_length < zero_length;
+	length = fill_ones ? ones_length : zero_length;
 	output[cursor++] = (uint8_t)length | (fill_ones ? 0x10u : 0u);
 	for (size_t i = 0u; i < length; i++) output[cursor++] = (uint8_t)(value >> (8u * i));
 	return cursor;
@@ -37,7 +38,7 @@ static bool crash_decode_git_id(const char* git_commit, uint8_t output[KERNEL_CR
 	if (git_commit == NULL || strlen(git_commit) != 2u * KERNEL_CRASH_BUILD_ID_SIZE) return false;
 	for (size_t i = 0u; i < KERNEL_CRASH_BUILD_ID_SIZE; i++) {
 		int high = crash_hex_nibble(git_commit[2u * i]);
-		int low  = crash_hex_nibble(git_commit[2u * i + 1u]);
+		int low = crash_hex_nibble(git_commit[2u * i + 1u]);
 
 		if (high < 0 || low < 0) return false;
 		output[i] = (uint8_t)((unsigned)high << 4u) | (uint8_t)low;
@@ -79,7 +80,7 @@ static const char* crash_cause_name(enum kernel_crash_cause cause) {
 
 static bool crash_append_format(char* output, size_t output_size, size_t* length, const char* format, ...) {
 	va_list arguments;
-	int     written;
+	int written;
 
 	va_start(arguments, format);
 	written = vsnprintf(output + *length, output_size - *length, format, arguments);
@@ -92,27 +93,27 @@ static bool crash_append_format(char* output, size_t output_size, size_t* length
 	return true;
 }
 
-void kernel_crash_record_reset(struct kernel_crash_record* record, enum kernel_crash_arch arch,
-                               enum kernel_crash_cause cause) {
+void kernel_crash_record_reset(
+		struct kernel_crash_record* record, enum kernel_crash_arch arch, enum kernel_crash_cause cause) {
 	if (record == NULL) return;
 	memset(record, 0, sizeof(*record));
 	record->schema_version = KERNEL_CRASH_SCHEMA_VERSION;
-	record->arch           = arch;
-	record->cause          = cause;
+	record->arch = arch;
+	record->cause = cause;
 	strlcpy(record->git_commit, KERNEL_GIT_COMMIT, sizeof(record->git_commit));
 }
 
 bool kernel_crash_parse_build_id(const void* note, size_t note_size, uint8_t out_build_id[KERNEL_CRASH_BUILD_ID_SIZE]) {
-	const uint8_t* bytes  = note;
-	size_t         cursor = 0u;
+	const uint8_t* bytes = note;
+	size_t cursor = 0u;
 
 	if (bytes == NULL || out_build_id == NULL) return false;
 	while (note_size - cursor >= 12u) {
 		uint32_t namesz = crash_read_u32(bytes + cursor);
 		uint32_t descsz = crash_read_u32(bytes + cursor + 4u);
-		uint32_t type   = crash_read_u32(bytes + cursor + 8u);
-		size_t   name_size;
-		size_t   desc_size;
+		uint32_t type = crash_read_u32(bytes + cursor + 8u);
+		size_t name_size;
+		size_t desc_size;
 
 		cursor += 12u;
 		name_size = crash_align4(namesz);
@@ -120,7 +121,7 @@ bool kernel_crash_parse_build_id(const void* note, size_t note_size, uint8_t out
 		if (name_size > note_size - cursor) return false;
 		if (desc_size > note_size - cursor - name_size) return false;
 		if (namesz == 4u && descsz == KERNEL_CRASH_BUILD_ID_SIZE && type == 3u &&
-		    memcmp(bytes + cursor, "GNU\0", 4u) == 0) {
+				memcmp(bytes + cursor, "GNU\0", 4u) == 0) {
 			memcpy(out_build_id, bytes + cursor + name_size, KERNEL_CRASH_BUILD_ID_SIZE);
 			return true;
 		}
@@ -130,9 +131,9 @@ bool kernel_crash_parse_build_id(const void* note, size_t note_size, uint8_t out
 }
 
 void kernel_crash_walk_stack(struct kernel_crash_record* record, uintptr_t stack_base, uintptr_t stack_top,
-                             enum kernel_crash_frame_layout layout) {
+		enum kernel_crash_frame_layout layout) {
 	uintptr_t fp;
-	uint32_t  visited = 0u;
+	uint32_t visited = 0u;
 
 	if (record == NULL) return;
 	record->trace_count = 0u;
@@ -164,7 +165,7 @@ void kernel_crash_walk_stack(struct kernel_crash_record* record, uintptr_t stack
 			record_address = fp;
 		}
 		if (record_address < stack_base || record_address > stack_top ||
-		    stack_top - record_address < 2u * sizeof(uintptr_t)) {
+				stack_top - record_address < 2u * sizeof(uintptr_t)) {
 			record->trace_flags |= KERNEL_CRASH_TRACE_INVALID;
 			return;
 		}
@@ -183,16 +184,108 @@ void kernel_crash_walk_stack(struct kernel_crash_record* record, uintptr_t stack
 
 const char* kernel_crash_register_name(enum kernel_crash_arch arch, uint32_t index) {
 	static const char* const x86[] = {
-		"rax", "rbx", "rcx", "rdx", "rbp", "rdi", "rsi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"};
-	static const char* const aarch[] = {"x0",  "x1",  "x2",  "x3",  "x4",  "x5",  "x6",  "x7",  "x8",  "x9",  "x10",
-	                                    "x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18", "x19", "x20", "x21",
-	                                    "x22", "x23", "x24", "x25", "x26", "x27", "x28", "x29", "x30"};
-	static const char* const riscv[] = {"ra", "sp", "gp", "tp",  "t0",  "t1", "t2", "s0", "s1", "a0", "a1",
-	                                    "a2", "a3", "a4", "a5",  "a6",  "a7", "s2", "s3", "s4", "s5", "s6",
-	                                    "s7", "s8", "s9", "s10", "s11", "t3", "t4", "t5", "t6"};
-	static const char* const loong[] = {"r0", "ra", "tp", "sp", "a0", "a1", "a2", "a3", "a4", "a5", "a6",
-	                                    "a7", "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8", "r21",
-	                                    "fp", "s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8"};
+		"rax", "rbx", "rcx", "rdx", "rbp", "rdi", "rsi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"
+	};
+	static const char* const aarch[] = {
+		"x0",
+		"x1",
+		"x2",
+		"x3",
+		"x4",
+		"x5",
+		"x6",
+		"x7",
+		"x8",
+		"x9",
+		"x10",
+		"x11",
+		"x12",
+		"x13",
+		"x14",
+		"x15",
+		"x16",
+		"x17",
+		"x18",
+		"x19",
+		"x20",
+		"x21",
+		"x22",
+		"x23",
+		"x24",
+		"x25",
+		"x26",
+		"x27",
+		"x28",
+		"x29",
+		"x30"
+	};
+	static const char* const riscv[] = {
+		"ra",
+		"sp",
+		"gp",
+		"tp",
+		"t0",
+		"t1",
+		"t2",
+		"s0",
+		"s1",
+		"a0",
+		"a1",
+		"a2",
+		"a3",
+		"a4",
+		"a5",
+		"a6",
+		"a7",
+		"s2",
+		"s3",
+		"s4",
+		"s5",
+		"s6",
+		"s7",
+		"s8",
+		"s9",
+		"s10",
+		"s11",
+		"t3",
+		"t4",
+		"t5",
+		"t6"
+	};
+	static const char* const loong[] = {
+		"r0",
+		"ra",
+		"tp",
+		"sp",
+		"a0",
+		"a1",
+		"a2",
+		"a3",
+		"a4",
+		"a5",
+		"a6",
+		"a7",
+		"t0",
+		"t1",
+		"t2",
+		"t3",
+		"t4",
+		"t5",
+		"t6",
+		"t7",
+		"t8",
+		"r21",
+		"fp",
+		"s0",
+		"s1",
+		"s2",
+		"s3",
+		"s4",
+		"s5",
+		"s6",
+		"s7",
+		"s8"
+	};
 
 	if (arch == KERNEL_CRASH_ARCH_X86_64 && index < sizeof(x86) / sizeof(x86[0])) return x86[index];
 	if (arch == KERNEL_CRASH_ARCH_AARCH64 && index < sizeof(aarch) / sizeof(aarch[0])) return aarch[index];
@@ -203,10 +296,10 @@ const char* kernel_crash_register_name(enum kernel_crash_arch arch, uint32_t ind
 
 bool kernel_crash_render(const struct kernel_crash_record* record, char* output, size_t output_size) {
 	static const char hex[] = "0123456789abcdef";
-	char              build_id[2u * KERNEL_CRASH_BUILD_ID_SIZE + 1u];
-	size_t            length = 0u;
-	uint32_t          register_count;
-	uint32_t          trace_count;
+	char build_id[2u * KERNEL_CRASH_BUILD_ID_SIZE + 1u];
+	size_t length = 0u;
+	uint32_t register_count;
+	uint32_t trace_count;
 
 	if (record == NULL || output == NULL || output_size == 0u) return false;
 	output[0] = '\0';
@@ -215,7 +308,7 @@ bool kernel_crash_render(const struct kernel_crash_record* record, char* output,
 	if (!crash_append_format(output, output_size, &length, "build.git=%s\n", record->git_commit)) return false;
 	if (record->build_id_valid) {
 		for (size_t i = 0u; i < KERNEL_CRASH_BUILD_ID_SIZE; i++) {
-			build_id[2u * i]      = hex[record->build_id[i] >> 4u];
+			build_id[2u * i] = hex[record->build_id[i] >> 4u];
 			build_id[2u * i + 1u] = hex[record->build_id[i] & 0x0fu];
 		}
 		build_id[2u * KERNEL_CRASH_BUILD_ID_SIZE] = '\0';
@@ -224,59 +317,77 @@ bool kernel_crash_render(const struct kernel_crash_record* record, char* output,
 		strlcpy(build_id, "unknown", sizeof(build_id));
 	}
 	if (!crash_append_format(output, output_size, &length, "build.id=%s\n", build_id) ||
-	    !crash_append_format(output, output_size, &length, "system.arch=%s\n", crash_arch_name(record->arch)) ||
-	    !crash_append_format(
-			output, output_size, &length, "system.cpu_index=%llu\n", (unsigned long long)record->cpu_index) ||
-	    !crash_append_format(output,
-	                         output_size,
-	                         &length,
-	                         "system.processor_id=0x%016llx\n",
-	                         (unsigned long long)record->processor_id) ||
-	    !crash_append_format(
-			output, output_size, &length, "system.arch_id=0x%016llx\n", (unsigned long long)record->arch_id) ||
-	    !crash_append_format(
-			output, output_size, &length, "system.cpu_count=%llu\n", (unsigned long long)record->cpu_count) ||
-	    !crash_append_format(
-			output, output_size, &length, "system.memory_bytes=%llu\n", (unsigned long long)record->total_memory) ||
-	    !crash_append_format(output, output_size, &length, "crash.cause=%s\n", crash_cause_name(record->cause)) ||
-	    !crash_append_format(
-			output, output_size, &length, "crash.code=0x%016llx\n", (unsigned long long)record->exception_code) ||
-	    !crash_append_format(
-			output, output_size, &length, "crash.subcode=0x%016llx\n", (unsigned long long)record->exception_subcode) ||
-	    !crash_append_format(
-			output, output_size, &length, "crash.error=0x%016llx\n", (unsigned long long)record->error_code) ||
-	    !crash_append_format(
-			output, output_size, &length, "crash.address=0x%016llx\n", (unsigned long long)record->fault_address) ||
-	    !crash_append_format(
-			output, output_size, &length, "crash.pc=0x%016llx\n", (unsigned long long)record->instruction_pointer) ||
-	    !crash_append_format(
-			output, output_size, &length, "crash.sp=0x%016llx\n", (unsigned long long)record->stack_pointer) ||
-	    !crash_append_format(
-			output, output_size, &length, "crash.fp=0x%016llx\n", (unsigned long long)record->frame_pointer) ||
-	    !crash_append_format(
-			output, output_size, &length, "crash.status=0x%016llx\n", (unsigned long long)record->status))
+			!crash_append_format(output, output_size, &length, "system.arch=%s\n", crash_arch_name(record->arch)) ||
+			!crash_append_format(
+					output, output_size, &length, "system.cpu_index=%llu\n", (unsigned long long)record->cpu_index) ||
+			!crash_append_format(output,
+					output_size,
+					&length,
+					"system.processor_id=0x%016llx\n",
+					(unsigned long long)record->processor_id) ||
+			!crash_append_format(
+					output, output_size, &length, "system.arch_id=0x%016llx\n", (unsigned long long)record->arch_id) ||
+			!crash_append_format(
+					output, output_size, &length, "system.cpu_count=%llu\n", (unsigned long long)record->cpu_count) ||
+			!crash_append_format(output,
+					output_size,
+					&length,
+					"system.memory_bytes=%llu\n",
+					(unsigned long long)record->total_memory) ||
+			!crash_append_format(output, output_size, &length, "crash.cause=%s\n", crash_cause_name(record->cause)) ||
+			!crash_append_format(output,
+					output_size,
+					&length,
+					"crash.code=0x%016llx\n",
+					(unsigned long long)record->exception_code) ||
+			!crash_append_format(output,
+					output_size,
+					&length,
+					"crash.subcode=0x%016llx\n",
+					(unsigned long long)record->exception_subcode) ||
+			!crash_append_format(
+					output, output_size, &length, "crash.error=0x%016llx\n", (unsigned long long)record->error_code) ||
+			!crash_append_format(output,
+					output_size,
+					&length,
+					"crash.address=0x%016llx\n",
+					(unsigned long long)record->fault_address) ||
+			!crash_append_format(output,
+					output_size,
+					&length,
+					"crash.pc=0x%016llx\n",
+					(unsigned long long)record->instruction_pointer) ||
+			!crash_append_format(
+					output, output_size, &length, "crash.sp=0x%016llx\n", (unsigned long long)record->stack_pointer) ||
+			!crash_append_format(
+					output, output_size, &length, "crash.fp=0x%016llx\n", (unsigned long long)record->frame_pointer) ||
+			!crash_append_format(
+					output, output_size, &length, "crash.status=0x%016llx\n", (unsigned long long)record->status))
 		return false;
 	if (record->cause == KERNEL_CRASH_CAUSE_PANIC) {
 		if (!crash_append_format(output, output_size, &length, "panic.reason=%u\n", (unsigned)record->panic_reason) ||
-		    !crash_append_format(
-				output, output_size, &length, "panic.detail=0x%016llx\n", (unsigned long long)record->panic_detail))
+				!crash_append_format(output,
+						output_size,
+						&length,
+						"panic.detail=0x%016llx\n",
+						(unsigned long long)record->panic_detail))
 			return false;
 	}
 	register_count =
-		record->register_count < KERNEL_CRASH_MAX_REGISTERS ? record->register_count : KERNEL_CRASH_MAX_REGISTERS;
+			record->register_count < KERNEL_CRASH_MAX_REGISTERS ? record->register_count : KERNEL_CRASH_MAX_REGISTERS;
 	for (uint32_t i = 0u; i < register_count; i++)
 		if (!crash_append_format(output,
-		                         output_size,
-		                         &length,
-		                         "register.%s=0x%016llx\n",
-		                         kernel_crash_register_name(record->arch, i),
-		                         (unsigned long long)record->registers[i]))
+					output_size,
+					&length,
+					"register.%s=0x%016llx\n",
+					kernel_crash_register_name(record->arch, i),
+					(unsigned long long)record->registers[i]))
 			return false;
 	if (!crash_append_format(output, output_size, &length, "trace.flags=0x%08x\n", record->trace_flags)) return false;
 	trace_count = record->trace_count < KERNEL_CRASH_MAX_TRACE ? record->trace_count : KERNEL_CRASH_MAX_TRACE;
 	for (uint32_t i = 0u; i < trace_count; i++)
 		if (!crash_append_format(
-				output, output_size, &length, "trace.%u=0x%016llx\n", i, (unsigned long long)record->trace[i]))
+					output, output_size, &length, "trace.%u=0x%016llx\n", i, (unsigned long long)record->trace[i]))
 			return false;
 	return crash_append_format(output, output_size, &length, "--- END KERNEL CRASH FRAME ---\n");
 }
@@ -284,11 +395,11 @@ bool kernel_crash_render(const struct kernel_crash_record* record, char* output,
 size_t kernel_crash_encode_wire(const struct kernel_crash_record* record, uint8_t* output, size_t output_size) {
 	uint32_t register_count;
 	uint32_t trace_count;
-	size_t   cursor;
+	size_t cursor;
 
 	if (record == NULL || output == NULL) return 0u;
 	register_count =
-		record->register_count < KERNEL_CRASH_MAX_REGISTERS ? record->register_count : KERNEL_CRASH_MAX_REGISTERS;
+			record->register_count < KERNEL_CRASH_MAX_REGISTERS ? record->register_count : KERNEL_CRASH_MAX_REGISTERS;
 	trace_count = record->trace_count < KERNEL_CRASH_MAX_TRACE ? record->trace_count : KERNEL_CRASH_MAX_TRACE;
 	if (output_size < KERNEL_CRASH_WIRE_MAX_SIZE) return 0u;
 	memset(output, 0, KERNEL_CRASH_WIRE_HEADER_SIZE);
@@ -303,43 +414,43 @@ size_t kernel_crash_encode_wire(const struct kernel_crash_record* record, uint8_
 	}
 	output[8] = (uint8_t)register_count;
 	output[9] = (uint8_t)trace_count;
-	cursor    = KERNEL_CRASH_WIRE_HEADER_SIZE;
-	cursor    = crash_write_compact_u64(output, cursor, record->trace_flags);
-	cursor    = crash_write_compact_u64(output, cursor, record->cpu_index);
-	cursor    = crash_write_compact_u64(output, cursor, record->processor_id);
-	cursor    = crash_write_compact_u64(output, cursor, record->arch_id);
-	cursor    = crash_write_compact_u64(output, cursor, record->cpu_count);
-	cursor    = crash_write_compact_u64(output, cursor, record->total_memory);
-	cursor    = crash_write_compact_u64(output, cursor, record->exception_code);
-	cursor    = crash_write_compact_u64(output, cursor, record->exception_subcode);
-	cursor    = crash_write_compact_u64(output, cursor, record->error_code);
-	cursor    = crash_write_compact_u64(output, cursor, record->fault_address);
-	cursor    = crash_write_compact_u64(output, cursor, record->instruction_pointer);
-	cursor    = crash_write_compact_u64(output, cursor, record->stack_pointer);
-	cursor    = crash_write_compact_u64(output, cursor, record->frame_pointer);
-	cursor    = crash_write_compact_u64(output, cursor, record->status);
-	cursor    = crash_write_compact_u64(output, cursor, (uint32_t)record->panic_reason);
-	cursor    = crash_write_compact_u64(output, cursor, record->panic_detail);
+	cursor = KERNEL_CRASH_WIRE_HEADER_SIZE;
+	cursor = crash_write_compact_u64(output, cursor, record->trace_flags);
+	cursor = crash_write_compact_u64(output, cursor, record->cpu_index);
+	cursor = crash_write_compact_u64(output, cursor, record->processor_id);
+	cursor = crash_write_compact_u64(output, cursor, record->arch_id);
+	cursor = crash_write_compact_u64(output, cursor, record->cpu_count);
+	cursor = crash_write_compact_u64(output, cursor, record->total_memory);
+	cursor = crash_write_compact_u64(output, cursor, record->exception_code);
+	cursor = crash_write_compact_u64(output, cursor, record->exception_subcode);
+	cursor = crash_write_compact_u64(output, cursor, record->error_code);
+	cursor = crash_write_compact_u64(output, cursor, record->fault_address);
+	cursor = crash_write_compact_u64(output, cursor, record->instruction_pointer);
+	cursor = crash_write_compact_u64(output, cursor, record->stack_pointer);
+	cursor = crash_write_compact_u64(output, cursor, record->frame_pointer);
+	cursor = crash_write_compact_u64(output, cursor, record->status);
+	cursor = crash_write_compact_u64(output, cursor, (uint32_t)record->panic_reason);
+	cursor = crash_write_compact_u64(output, cursor, record->panic_detail);
 	for (uint32_t i = 0u; i < register_count; i++)
 		cursor = crash_write_compact_u64(output, cursor, record->registers[i]);
 	for (uint32_t i = 0u; i < trace_count; i++) cursor = crash_write_compact_u64(output, cursor, record->trace[i]);
 	return cursor;
 }
 
-bool kernel_crash_format_url(const uint8_t* wire, size_t wire_size, const char* server_url, char* output,
-                             size_t output_size) {
+bool kernel_crash_format_url(
+		const uint8_t* wire, size_t wire_size, const char* server_url, char* output, size_t output_size) {
 	static const char base64url[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-	static const char suffix[]    = "crash#v1.";
-	size_t            server_size;
-	size_t            encoded_size;
-	size_t            cursor;
-	size_t            output_cursor;
-	size_t            required_size;
-	bool              add_slash;
+	static const char suffix[] = "crash#v1.";
+	size_t server_size;
+	size_t encoded_size;
+	size_t cursor;
+	size_t output_cursor;
+	size_t required_size;
+	bool add_slash;
 
 	if (wire == NULL || wire_size == 0u || server_url == NULL || server_url[0] == '\0' || output == NULL) return false;
 	server_size = strlen(server_url);
-	add_slash   = server_url[server_size - 1u] != '/';
+	add_slash = server_url[server_size - 1u] != '/';
 	if (wire_size / 3u > (SIZE_MAX - 3u) / 4u) return false;
 	encoded_size = (wire_size / 3u) * 4u + (wire_size % 3u == 0u ? 0u : wire_size % 3u + 1u);
 	if (server_size > SIZE_MAX - (add_slash ? 1u : 0u)) return false;

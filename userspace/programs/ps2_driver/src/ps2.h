@@ -1,9 +1,11 @@
 #pragma once
 
-#include <base/cap.h>
-#include <protocol/device.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+#include <base/cap.h>
+
+#include <protocol/device.h>
 
 /* Device protocol selected from reset and Identify responses. */
 enum ps2_device_kind {

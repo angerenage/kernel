@@ -34,16 +34,16 @@ static syscall_result_t signal_validate_write_buffer(uintptr_t address, size_t s
 	space = syscall_current_user_space();
 	if (space == NULL) return syscall_result_ok(0u);
 	return signal_transfer_result(
-		address_space_validate_range(
-			space, address, size, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN),
-		arg_index);
+			address_space_validate_range(
+					space, address, size, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN),
+			arg_index);
 }
 
-syscall_result_t syscall_signal_create(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                       uintptr_t arg5) {
+syscall_result_t syscall_signal_create(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
 	struct process* process;
-	struct signal*  signal;
-	cap_id_t        cap;
+	struct signal* signal;
+	cap_id_t cap;
 
 	(void)arg0;
 	(void)arg1;
@@ -67,13 +67,13 @@ syscall_result_t syscall_signal_create(uintptr_t arg0, uintptr_t arg1, uintptr_t
 }
 
 static syscall_result_t syscall_signal_send_internal(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
-                                                     uintptr_t arg4, uintptr_t arg5, uint32_t flags) {
-	struct process*             process;
+		uintptr_t arg4, uintptr_t arg5, uint32_t flags) {
+	struct process* process;
 	const struct signal_payload payload = {
 		.args = {(uint64_t)arg1, (uint64_t)arg2, (uint64_t)arg3, (uint64_t)arg4},
 	};
 	struct signal_send_response response;
-	syscall_result_t            result;
+	syscall_result_t result;
 
 	process = process_current();
 	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
@@ -87,21 +87,21 @@ static syscall_result_t syscall_signal_send_internal(uintptr_t arg0, uintptr_t a
 	return syscall_copy_to_user(syscall_current_user_space(), arg5, &response, sizeof(response), 5u);
 }
 
-syscall_result_t syscall_signal_send(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                     uintptr_t arg5) {
+syscall_result_t syscall_signal_send(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
 	return syscall_signal_send_internal(arg0, arg1, arg2, arg3, arg4, arg5, SIGNAL_SEND_FLAG_NONE);
 }
 
-syscall_result_t syscall_signal_send_coalesced(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
-                                               uintptr_t arg4, uintptr_t arg5) {
+syscall_result_t syscall_signal_send_coalesced(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
 	return syscall_signal_send_internal(arg0, arg1, arg2, arg3, arg4, arg5, SIGNAL_SEND_FLAG_COALESCE);
 }
 
-syscall_result_t syscall_signal_read(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                     uintptr_t arg5) {
-	struct process*       process;
+syscall_result_t syscall_signal_read(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
+	struct process* process;
 	struct signal_message message;
-	syscall_result_t      result;
+	syscall_result_t result;
 
 	(void)arg2;
 	(void)arg3;
@@ -119,11 +119,11 @@ syscall_result_t syscall_signal_read(uintptr_t arg0, uintptr_t arg1, uintptr_t a
 	return result;
 }
 
-syscall_result_t syscall_signal_wait(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                     uintptr_t arg5) {
-	struct process*       process;
+syscall_result_t syscall_signal_wait(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
+	struct process* process;
 	struct signal_message message;
-	syscall_result_t      result;
+	syscall_result_t result;
 
 	(void)arg2;
 	(void)arg3;
@@ -139,11 +139,11 @@ syscall_result_t syscall_signal_wait(uintptr_t arg0, uintptr_t arg1, uintptr_t a
 	return syscall_copy_to_user(syscall_current_user_space(), arg1, &message, sizeof(message), 1u);
 }
 
-syscall_result_t syscall_signal_try_wait(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                         uintptr_t arg5) {
-	struct process*       process;
+syscall_result_t syscall_signal_try_wait(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
+	struct process* process;
 	struct signal_message message;
-	syscall_result_t      result;
+	syscall_result_t result;
 
 	(void)arg2;
 	(void)arg3;

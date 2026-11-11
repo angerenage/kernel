@@ -1,9 +1,10 @@
 #pragma once
 
-#include <hal/device_tree.h>
-#include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+#include <hal/device_tree.h>
+#include <hal/interrupts.h>
 
 struct cpu;
 
@@ -12,15 +13,14 @@ size_t riscv64_aplic_device_tree_consumed_nodes(struct hal_device_tree_consumed_
 
 /* Translate one APLIC Device Tree interrupt specifier. */
 bool riscv64_aplic_device_tree_interrupt(const uint32_t* cells, size_t cell_count, uint32_t* out_local_source_id,
-                                         enum hal_interrupt_trigger*  out_trigger,
-                                         enum hal_interrupt_polarity* out_polarity);
+		enum hal_interrupt_trigger* out_trigger, enum hal_interrupt_polarity* out_polarity);
 
 /* Return the fixed-source domain exposed by the APLIC. */
 bool riscv64_aplic_source_domain_at(struct hal_interrupt_source_domain_info* out);
 
 /* Resolve a firmware-visible controller address and local ID without claiming the source. */
-bool riscv64_aplic_source_resolve(uint64_t controller_address, uint32_t local_source_id,
-                                  struct hal_interrupt_source* out_source);
+bool riscv64_aplic_source_resolve(
+		uint64_t controller_address, uint32_t local_source_id, struct hal_interrupt_source* out_source);
 
 /* Return whether ownership of an APLIC source is available to this kernel domain. */
 bool riscv64_aplic_source_claimable(const struct hal_interrupt_source* source);
@@ -33,7 +33,7 @@ bool riscv64_aplic_source_target_supported(const struct hal_interrupt_source* so
 
 /* Configure an APLIC interrupt source and leave it masked. */
 bool riscv64_aplic_source_init(struct hal_interrupt_source_state* state, const struct hal_interrupt_source* source,
-                               const struct hal_interrupt_delivery* delivery);
+		const struct hal_interrupt_delivery* delivery);
 
 /* Mask an initialized APLIC interrupt source. */
 bool riscv64_aplic_source_mask(struct hal_interrupt_source_state* state);

@@ -1,13 +1,14 @@
 #include "interrupt.h"
 
+#include <libc/stdlib.h>
+#include <string.h>
+
 #include <base/interrupt.h>
 #include <base/syscall.h>
 #include <core/capability.h>
 #include <core/interrupt.h>
 #include <core/signal.h>
 #include <kernel/capability.h>
-#include <libc/stdlib.h>
-#include <string.h>
 
 #include "signal.h"
 
@@ -16,20 +17,20 @@
 
 struct kernel_interrupt {
 	struct interrupt* interrupt;
-	cap_object_id_t   cap_object_id;
-	process_id_t      bound_process;
-	bool              destroyed;
+	cap_object_id_t cap_object_id;
+	process_id_t bound_process;
+	bool destroyed;
 };
 
 static cap_object_id_t interrupts_resource_object_id = CAP_OBJECT_ID_INVALID;
 
 #if defined(KERNEL_CAPABILITY_INTERRUPT_TEST)
-static bool     fail_next_interrupt_response;
+static bool fail_next_interrupt_response;
 static cap_id_t last_rollback_cap = CAP_ID_INVALID;
 
 void kernel_capability_interrupt_test_fail_next_response(void) {
 	fail_next_interrupt_response = true;
-	last_rollback_cap            = CAP_ID_INVALID;
+	last_rollback_cap = CAP_ID_INVALID;
 }
 
 cap_id_t kernel_capability_interrupt_test_last_rollback_cap(void) {
@@ -65,12 +66,12 @@ static bool copy_request(const struct cap_request* req, void* out, size_t size) 
 	return true;
 }
 
-static syscall_result_t write_published_response(const struct cap_request* req, const void* response,
-                                                 size_t response_size, cap_id_t published_cap) {
+static syscall_result_t write_published_response(
+		const struct cap_request* req, const void* response, size_t response_size, cap_id_t published_cap) {
 #if defined(KERNEL_CAPABILITY_INTERRUPT_TEST)
 	if (fail_next_interrupt_response) {
 		fail_next_interrupt_response = false;
-		last_rollback_cap            = published_cap;
+		last_rollback_cap = published_cap;
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 #else
@@ -90,15 +91,15 @@ static enum interrupt_result kernel_interrupt_destroy(struct kernel_interrupt* m
 
 static bool kernel_interrupt_process_cleanup(uint64_t object_id, process_id_t process) {
 	struct kernel_interrupt* managed = (struct kernel_interrupt*)(uintptr_t)object_id;
-	process_id_t             expected;
+	process_id_t expected;
 	if (managed == NULL || process == PROCESS_PID_INVALID ||
-	    __atomic_load_n(&managed->bound_process, __ATOMIC_ACQUIRE) != process)
+			__atomic_load_n(&managed->bound_process, __ATOMIC_ACQUIRE) != process)
 		return false;
 	enum interrupt_result result = interrupt_unbind(managed->interrupt);
 	if (result == INTERRUPT_OK || result == INTERRUPT_NOT_BOUND) {
 		expected = process;
 		(void)__atomic_compare_exchange_n(
-			&managed->bound_process, &expected, PROCESS_PID_INVALID, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+				&managed->bound_process, &expected, PROCESS_PID_INVALID, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
 	}
 	return false;
 }
@@ -125,9 +126,9 @@ static void kernel_interrupt_object_event(struct cap_object* object, enum cap_ob
 
 static cap_id_t kernel_interrupt_publish(struct interrupt* interrupt, process_id_t recipient) {
 	struct kernel_interrupt* managed;
-	cap_object_id_t          object_id;
-	cap_id_t                 cap;
-	bool                     created = false;
+	cap_object_id_t object_id;
+	cap_id_t cap;
+	bool created = false;
 
 	if (interrupt == NULL || recipient == PROCESS_PID_INVALID) return CAP_ID_INVALID;
 	managed = calloc(1u, sizeof(*managed));
@@ -137,12 +138,12 @@ static cap_id_t kernel_interrupt_publish(struct interrupt* interrupt, process_id
 		return CAP_ID_INVALID;
 	}
 	managed->interrupt = interrupt;
-	object_id          = cap_object_create_kernel_lifecycle((uint64_t)(uintptr_t)managed,
-	                                                        kernel_interrupt_handler,
-	                                                        kernel_interrupt_process_cleanup,
-	                                                        kernel_interrupt_object_destroy,
-	                                                        kernel_interrupt_object_event,
-	                                                        &created);
+	object_id = cap_object_create_kernel_lifecycle((uint64_t)(uintptr_t)managed,
+			kernel_interrupt_handler,
+			kernel_interrupt_process_cleanup,
+			kernel_interrupt_object_destroy,
+			kernel_interrupt_object_event,
+			&created);
 	if (object_id == CAP_OBJECT_ID_INVALID) {
 		interrupt_release(interrupt);
 		free(managed);
@@ -156,7 +157,7 @@ static cap_id_t kernel_interrupt_publish(struct interrupt* interrupt, process_id
 		return CAP_ID_INVALID;
 	}
 	managed->cap_object_id = object_id;
-	cap                    = cap_create(object_id, recipient, INTERRUPT_CAP_RIGHTS, NULL);
+	cap = cap_create(object_id, recipient, INTERRUPT_CAP_RIGHTS, NULL);
 	if (cap == CAP_ID_INVALID) {
 		kernel_interrupt_unpublish(managed);
 		return CAP_ID_INVALID;
@@ -166,7 +167,7 @@ static cap_id_t kernel_interrupt_publish(struct interrupt* interrupt, process_id
 
 static syscall_result_t kernel_interrupt_info_handler(const struct cap_request* req, struct kernel_interrupt* managed) {
 	struct interrupt_simple_request request;
-	struct interrupt_info_response  response = {0};
+	struct interrupt_info_response response = {0};
 	if ((req->rights & CAP_READ) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (!copy_request(req, &request, sizeof(request)) || !cap_kernel_response_fits(req, sizeof(response)))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -177,7 +178,7 @@ static syscall_result_t kernel_interrupt_info_handler(const struct cap_request* 
 
 static syscall_result_t kernel_interrupt_bind_handler(const struct cap_request* req, struct kernel_interrupt* managed) {
 	struct interrupt_bind_request request;
-	struct signal*                signal;
+	struct signal* signal;
 	if ((req->rights & CAP_MANAGE) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (!copy_request(req, &request, sizeof(request)) || request.signal_cap == CAP_ID_INVALID)
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -189,8 +190,8 @@ static syscall_result_t kernel_interrupt_bind_handler(const struct cap_request* 
 	return interrupt_result_to_syscall(interrupt_result);
 }
 
-static syscall_result_t kernel_interrupt_unbind_handler(const struct cap_request* req,
-                                                        struct kernel_interrupt*  managed) {
+static syscall_result_t kernel_interrupt_unbind_handler(
+		const struct cap_request* req, struct kernel_interrupt* managed) {
 	struct interrupt_simple_request request;
 	if ((req->rights & CAP_MANAGE) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (!copy_request(req, &request, sizeof(request))) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -199,8 +200,8 @@ static syscall_result_t kernel_interrupt_unbind_handler(const struct cap_request
 	return interrupt_result_to_syscall(result);
 }
 
-static syscall_result_t kernel_interrupt_destroy_handler(const struct cap_request* req,
-                                                         struct kernel_interrupt*  managed) {
+static syscall_result_t kernel_interrupt_destroy_handler(
+		const struct cap_request* req, struct kernel_interrupt* managed) {
 	struct interrupt_simple_request request;
 	if ((req->rights & CAP_DESTROY) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (!copy_request(req, &request, sizeof(request))) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -212,7 +213,7 @@ static syscall_result_t kernel_interrupt_destroy_handler(const struct cap_reques
 
 static syscall_result_t kernel_interrupt_handler(const struct cap_request* req) {
 	struct interrupt_request_header header;
-	struct kernel_interrupt*        managed;
+	struct kernel_interrupt* managed;
 	if (req == NULL || req->object_id == 0u || req->request == NULL || req->request_size < sizeof(header))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	memcpy(&header, req->request, sizeof(header));
@@ -232,14 +233,14 @@ static syscall_result_t kernel_interrupt_handler(const struct cap_request* req) 
 }
 
 static syscall_result_t interrupts_claim_source_handler(const struct cap_request* req) {
-	struct interrupts_claim_source_request  request;
+	struct interrupts_claim_source_request request;
 	struct interrupts_claim_source_response response = {0};
-	struct interrupt*                       interrupt;
+	struct interrupt* interrupt;
 	if ((req->rights & CAP_MANAGE) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (!copy_request(req, &request, sizeof(request)) || !cap_kernel_response_fits(req, sizeof(response)))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	enum interrupt_result interrupt_result =
-		interrupt_claim_source(request.source, request.trigger, request.polarity, &interrupt);
+			interrupt_claim_source(request.source, request.trigger, request.polarity, &interrupt);
 	if (interrupt_result != INTERRUPT_OK) return interrupt_result_to_syscall(interrupt_result);
 	response.interrupt_cap = kernel_interrupt_publish(interrupt, req->caller);
 	if (response.interrupt_cap == CAP_ID_INVALID) {
@@ -253,35 +254,35 @@ static syscall_result_t interrupts_claim_source_handler(const struct cap_request
 }
 
 static syscall_result_t interrupts_resolve_source_handler(const struct cap_request* req) {
-	struct interrupts_resolve_source_request  request;
+	struct interrupts_resolve_source_request request;
 	struct interrupts_resolve_source_response response = {0};
 	if ((req->rights & CAP_READ) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (!copy_request(req, &request, sizeof(request)) || !cap_kernel_response_fits(req, sizeof(response)))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	enum interrupt_result result =
-		interrupt_resolve_source(request.controller_register_address, request.local_source_id, &response.source);
+			interrupt_resolve_source(request.controller_register_address, request.local_source_id, &response.source);
 	if (result != INTERRUPT_OK) return interrupt_result_to_syscall(result);
 	return cap_kernel_write_response(req, &response, sizeof(response));
 }
 
 static syscall_result_t interrupts_resolve_message_context_handler(const struct cap_request* req) {
-	struct interrupts_resolve_message_context_request  request;
+	struct interrupts_resolve_message_context_request request;
 	struct interrupts_resolve_message_context_response response = {0};
 	if ((req->rights & CAP_READ) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (!copy_request(req, &request, sizeof(request)) || request.reserved != 0u ||
-	    !cap_kernel_response_fits(req, sizeof(response)))
+			!cap_kernel_response_fits(req, sizeof(response)))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
-	enum interrupt_result result =
-		interrupt_resolve_message_context(request.controller_register_address, request.producer_id, &response.context);
+	enum interrupt_result result = interrupt_resolve_message_context(
+			request.controller_register_address, request.producer_id, &response.context);
 	if (result != INTERRUPT_OK) return interrupt_result_to_syscall(result);
 	return cap_kernel_write_response(req, &response, sizeof(response));
 }
 
 static syscall_result_t interrupts_allocate_message_handler(const struct cap_request* req) {
-	struct interrupts_allocate_message_request  request;
+	struct interrupts_allocate_message_request request;
 	struct interrupts_allocate_message_response response = {0};
-	struct interrupt_message                    message  = {0};
-	struct interrupt*                           interrupt;
+	struct interrupt_message message = {0};
+	struct interrupt* interrupt;
 	if ((req->rights & CAP_ALLOCATE) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (!copy_request(req, &request, sizeof(request)) || !cap_kernel_response_fits(req, sizeof(response)))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -293,8 +294,8 @@ static syscall_result_t interrupts_allocate_message_handler(const struct cap_req
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 	response.message_address = message.message_address;
-	response.message_data    = message.message_data;
-	syscall_result_t result  = write_published_response(req, &response, sizeof(response), response.interrupt_cap);
+	response.message_data = message.message_data;
+	syscall_result_t result = write_published_response(req, &response, sizeof(response), response.interrupt_cap);
 	if (result.status != SYSCALL_STATUS_OK) (void)cap_destroy_by_id(response.interrupt_cap);
 	interrupt_release(interrupt);
 	return result;

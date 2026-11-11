@@ -12,12 +12,12 @@ static int digit_value(unsigned char character) {
 }
 
 long strtol(const char* restrict string, char** restrict end, int base) {
-	const char*   cursor = string;
-	bool          negative;
-	bool          any   = false;
+	const char* cursor = string;
+	bool negative;
+	bool any = false;
 	unsigned long value = 0u;
 	unsigned long limit;
-	bool          overflow = false;
+	bool overflow = false;
 
 	if (end != NULL) *end = (char*)string;
 	if (string == NULL || base < 0 || base == 1 || base > 36) {
@@ -28,7 +28,7 @@ long strtol(const char* restrict string, char** restrict end, int base) {
 	negative = *cursor == '-';
 	if (*cursor == '-' || *cursor == '+') cursor++;
 	if ((base == 0 || base == 16) && cursor[0] == '0' && (cursor[1] == 'x' || cursor[1] == 'X') &&
-	    digit_value((unsigned char)cursor[2]) >= 0 && digit_value((unsigned char)cursor[2]) < 16) {
+			digit_value((unsigned char)cursor[2]) >= 0 && digit_value((unsigned char)cursor[2]) < 16) {
 		base = 16;
 		cursor += 2;
 	}
@@ -55,11 +55,11 @@ long strtol(const char* restrict string, char** restrict end, int base) {
 }
 
 unsigned long long strtoull(const char* restrict string, char** restrict end, int base) {
-	const char*        cursor = string;
-	bool               negative;
-	bool               any      = false;
-	unsigned long long value    = 0u;
-	bool               overflow = false;
+	const char* cursor = string;
+	bool negative;
+	bool any = false;
+	unsigned long long value = 0u;
+	bool overflow = false;
 
 	if (end != NULL) *end = (char*)string;
 	if (string == NULL || base < 0 || base == 1 || base > 36) {
@@ -70,7 +70,7 @@ unsigned long long strtoull(const char* restrict string, char** restrict end, in
 	negative = *cursor == '-';
 	if (*cursor == '-' || *cursor == '+') cursor++;
 	if ((base == 0 || base == 16) && cursor[0] == '0' && (cursor[1] == 'x' || cursor[1] == 'X') &&
-	    digit_value((unsigned char)cursor[2]) >= 0 && digit_value((unsigned char)cursor[2]) < 16) {
+			digit_value((unsigned char)cursor[2]) >= 0 && digit_value((unsigned char)cursor[2]) < 16) {
 		base = 16;
 		cursor += 2;
 	}

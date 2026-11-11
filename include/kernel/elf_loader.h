@@ -1,10 +1,11 @@
 #pragma once
 
-#include <boot/info.h>
-#include <core/process.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <boot/info.h>
+#include <core/process.h>
 
 /* Result codes for ELF-driven process creation. */
 enum kernel_elf_load_result {
@@ -21,11 +22,11 @@ enum kernel_elf_load_result {
 /* Output of a successful kernel_elf_load_process() call. */
 struct kernel_elf_process {
 	struct process* process;
-	uintptr_t       entry;
-	uintptr_t       heap_base;
-	size_t          heap_size;
+	uintptr_t entry;
+	uintptr_t heap_base;
+	size_t heap_size;
 };
 
 /* Load an ELF boot module and zero-initialized heap into a fresh, not-yet-started process. */
-enum kernel_elf_load_result kernel_elf_load_process(const struct boot_module* module, const char* name,
-                                                    struct kernel_elf_process* out_process);
+enum kernel_elf_load_result kernel_elf_load_process(
+		const struct boot_module* module, const char* name, struct kernel_elf_process* out_process);

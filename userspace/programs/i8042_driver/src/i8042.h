@@ -1,6 +1,7 @@
 #pragma once
 
 #include <base/cap.h>
+
 #include <protocol/device.h>
 
 /* Acquire, initialize, and serve one ACPI-described i8042 controller. */

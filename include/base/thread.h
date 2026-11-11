@@ -43,7 +43,7 @@ struct thread_cancel_request {
 /* Enable or disable deferred cancellation on the target thread. */
 struct thread_set_cancel_enabled_request {
 	struct thread_request_header header;
-	bool                         enabled;
+	bool enabled;
 };
 
 /* Test deferred cancellation on the target thread. */

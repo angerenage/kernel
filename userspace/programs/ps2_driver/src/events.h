@@ -1,10 +1,12 @@
 #pragma once
 
-#include <base/syscall.h>
-#include <protocol/input.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/syscall.h>
+
+#include <protocol/input.h>
 
 #include "ps2.h"
 

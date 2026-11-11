@@ -33,16 +33,16 @@ static syscall_result_t syscall_channel_result_to_syscall(enum channel_result re
 	}
 }
 
-syscall_result_t syscall_channel_create(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                        uintptr_t arg5) {
-	struct process*              process;
-	struct channel*              ch;
-	process_id_t                 owner_pid;
-	channel_id_t                 id;
-	cap_id_t                     activity_cap = CAP_ID_INVALID;
-	struct address_space*        space;
+syscall_result_t syscall_channel_create(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
+	struct process* process;
+	struct channel* ch;
+	process_id_t owner_pid;
+	channel_id_t id;
+	cap_id_t activity_cap = CAP_ID_INVALID;
+	struct address_space* space;
 	enum address_transfer_result transfer_result;
-	syscall_result_t             copy_result;
+	syscall_result_t copy_result;
 
 	(void)arg2;
 	(void)arg3;
@@ -54,25 +54,23 @@ syscall_result_t syscall_channel_create(uintptr_t arg0, uintptr_t arg1, uintptr_
 	if (arg0 == 0u) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	space = syscall_current_user_space();
 	if (space != NULL) {
-		transfer_result =
-			address_space_validate_range(space,
-			                             arg0,
-			                             sizeof(channel_id_t),
-			                             ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
+		transfer_result = address_space_validate_range(space,
+				arg0,
+				sizeof(channel_id_t),
+				ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
 		if (transfer_result != ADDRESS_TRANSFER_OK) return syscall_result_from_address_transfer(transfer_result, 0u);
 		if (arg1 != 0u) {
 			transfer_result = address_space_validate_range(space,
-			                                               arg1,
-			                                               sizeof(cap_id_t),
-			                                               ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER |
-			                                                   ADDRESS_TRANSFER_FAULT_IN);
+					arg1,
+					sizeof(cap_id_t),
+					ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
 			if (transfer_result != ADDRESS_TRANSFER_OK)
 				return syscall_result_from_address_transfer(transfer_result, 1u);
 		}
 	}
 
 	owner_pid = process_pid(process);
-	ch        = channel_create(owner_pid, arg1 != 0u);
+	ch = channel_create(owner_pid, arg1 != 0u);
 	if (ch == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, CHANNEL_NO_MEMORY);
 
 	if (!process_channel_state_add(&process->channel_state, ch)) {
@@ -88,7 +86,7 @@ syscall_result_t syscall_channel_create(uintptr_t arg0, uintptr_t arg1, uintptr_
 		}
 	}
 
-	id          = ch->id;
+	id = ch->id;
 	copy_result = syscall_write_uintptr_arg(space, arg0, 0u, (uintptr_t)id);
 	if (copy_result.status != SYSCALL_STATUS_OK) {
 		process_channel_state_remove(&process->channel_state, ch);
@@ -107,12 +105,12 @@ syscall_result_t syscall_channel_create(uintptr_t arg0, uintptr_t arg1, uintptr_
 	return syscall_result_ok(0u);
 }
 
-syscall_result_t syscall_channel_event_recv(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
-                                            uintptr_t arg4, uintptr_t arg5) {
-	struct process*              process;
-	struct channel*              channel;
-	struct address_space*        space;
-	struct channel_event         event = {0};
+syscall_result_t syscall_channel_event_recv(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
+	struct process* process;
+	struct channel* channel;
+	struct address_space* space;
+	struct channel_event event = {0};
 	enum address_transfer_result transfer_result;
 	(void)arg2;
 	(void)arg3;
@@ -126,7 +124,7 @@ syscall_result_t syscall_channel_event_recv(uintptr_t arg0, uintptr_t arg1, uint
 	space = syscall_current_user_space();
 	if (space != NULL) {
 		transfer_result = address_space_validate_range(
-			space, arg1, sizeof(event), ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
+				space, arg1, sizeof(event), ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
 		if (transfer_result != ADDRESS_TRANSFER_OK) return syscall_result_from_address_transfer(transfer_result, 1u);
 	}
 
@@ -154,11 +152,11 @@ syscall_result_t syscall_channel_event_recv(uintptr_t arg0, uintptr_t arg1, uint
 	}
 }
 
-syscall_result_t syscall_channel_destroy(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                         uintptr_t arg5) {
-	struct process*     process;
-	struct channel*     ch;
-	process_id_t        caller_pid;
+syscall_result_t syscall_channel_destroy(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
+	struct process* process;
+	struct channel* ch;
+	process_id_t caller_pid;
 	enum channel_result result;
 
 	(void)arg1;
@@ -175,7 +173,7 @@ syscall_result_t syscall_channel_destroy(uintptr_t arg0, uintptr_t arg1, uintptr
 	if (ch == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 
 	caller_pid = process_pid(process);
-	result     = channel_destroy(ch, caller_pid);
+	result = channel_destroy(ch, caller_pid);
 	if (result == CHANNEL_OK) {
 		process_channel_state_remove(&process->channel_state, ch);
 	}

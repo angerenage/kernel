@@ -1,18 +1,20 @@
-#include <base/cap.h>
-#include <base/syscall.h>
 #include <limits.h>
-#include <protocol/filesystem.h>
-#include <protocol/vfs.h>
-#include <runtime/filesystem.h>
-#include <runtime/registry.h>
-#include <runtime/vfs.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <base/cap.h>
+#include <base/syscall.h>
+
+#include <protocol/filesystem.h>
+#include <protocol/vfs.h>
 #include <system/capability.h>
 #include <system/display.h>
+#include <runtime/filesystem.h>
+#include <runtime/registry.h>
+#include <runtime/vfs.h>
 
 #define VFS_PROTOCOL_VERSION_MAJOR 1u
 #define VFS_PROTOCOL_VERSION_MINOR 0u
@@ -26,13 +28,13 @@ enum file_kind {
 
 struct libc_file {
 	enum file_kind kind;
-	cap_id_t       capability;
-	uint64_t       offset;
-	bool           readable;
-	bool           writable;
-	bool           end_of_file;
-	bool           error;
-	bool           locked;
+	cap_id_t capability;
+	uint64_t offset;
+	bool readable;
+	bool writable;
+	bool end_of_file;
+	bool error;
+	bool locked;
 };
 
 struct file_mode {
@@ -44,22 +46,22 @@ struct file_mode {
 };
 
 static FILE standard_input = {
-	.kind       = FILE_KIND_STANDARD_INPUT,
+	.kind = FILE_KIND_STANDARD_INPUT,
 	.capability = CAP_ID_INVALID,
-	.readable   = true,
+	.readable = true,
 };
 static FILE standard_output = {
-	.kind       = FILE_KIND_STANDARD_OUTPUT,
+	.kind = FILE_KIND_STANDARD_OUTPUT,
 	.capability = CAP_ID_INVALID,
-	.writable   = true,
+	.writable = true,
 };
 static FILE standard_error = {
-	.kind       = FILE_KIND_STANDARD_ERROR,
+	.kind = FILE_KIND_STANDARD_ERROR,
 	.capability = CAP_ID_INVALID,
-	.writable   = true,
+	.writable = true,
 };
 
-FILE* stdin  = &standard_input;
+FILE* stdin = &standard_input;
 FILE* stdout = &standard_output;
 FILE* stderr = &standard_error;
 
@@ -91,9 +93,9 @@ static bool file_mode_parse(const char* mode, struct file_mode* out_mode) {
 	*out_mode = (struct file_mode){
 		.readable = initial == 'r' || update,
 		.writable = initial != 'r' || update,
-		.create   = initial != 'r',
+		.create = initial != 'r',
 		.truncate = initial == 'w',
-		.append   = initial == 'a',
+		.append = initial == 'a',
 	};
 	return true;
 }
@@ -107,25 +109,25 @@ static void file_capability_drop(cap_id_t* capability) {
 FILE* fopen(const char* restrict path, const char* restrict mode) {
 	static const struct registry_protocol_query vfs_query = {
 		.namespace_path = VFS_NAMESPACE,
-		.protocol       = VFS_PROTOCOL_NAME,
-		.major          = VFS_PROTOCOL_VERSION_MAJOR,
-		.minor          = VFS_PROTOCOL_VERSION_MINOR,
+		.protocol = VFS_PROTOCOL_NAME,
+		.major = VFS_PROTOCOL_VERSION_MAJOR,
+		.minor = VFS_PROTOCOL_VERSION_MINOR,
 	};
-	struct registry_service_handle vfs  = {.capability = CAP_ID_INVALID};
-	struct filesystem_node_handle  node = {.capability = CAP_ID_INVALID};
-	struct filesystem_call_result  open_result;
-	struct registry_call_result    acquire_result;
-	struct file_mode               parsed_mode;
-	cap_rights_t                   rights = 0u;
-	FILE*                          stream = NULL;
-	size_t                         path_size;
-	cap_id_t                       working_directory;
-	bool                           absolute;
-	bool                           success = false;
+	struct registry_service_handle vfs = {.capability = CAP_ID_INVALID};
+	struct filesystem_node_handle node = {.capability = CAP_ID_INVALID};
+	struct filesystem_call_result open_result;
+	struct registry_call_result acquire_result;
+	struct file_mode parsed_mode;
+	cap_rights_t rights = 0u;
+	FILE* stream = NULL;
+	size_t path_size;
+	cap_id_t working_directory;
+	bool absolute;
+	bool success = false;
 
 	if (path == NULL || !file_mode_parse(mode, &parsed_mode)) return NULL;
-	path_size         = strlen(path);
-	absolute          = path_size != 0u && path[0] == '/';
+	path_size = strlen(path);
+	absolute = path_size != 0u && path[0] == '/';
 	working_directory = filesystem_get_working_directory();
 	if (absolute ? !vfs_absolute_path_valid(path, path_size)
 	             : working_directory == CAP_ID_INVALID || !filesystem_relative_path_valid(path, path_size))
@@ -141,7 +143,7 @@ FILE* fopen(const char* restrict path, const char* restrict mode) {
 	}
 	else open_result = vfs_directory_open(working_directory, path, path_size, rights, &node);
 	if (!call_succeeded(open_result) && parsed_mode.create && open_result.transport_status == SYSCALL_STATUS_OK &&
-	    open_result.status == FILESYSTEM_STATUS_NOT_FOUND) {
+			open_result.status == FILESYSTEM_STATUS_NOT_FOUND) {
 		if (absolute) open_result = vfs_create_file(vfs.capability, path, path_size, rights, &node);
 		else open_result = vfs_directory_create_file(working_directory, path, path_size, rights, &node);
 	}
@@ -151,14 +153,14 @@ FILE* fopen(const char* restrict path, const char* restrict mode) {
 	stream = calloc(1u, sizeof(*stream));
 	if (stream == NULL) goto cleanup;
 	*stream = (FILE){
-		.kind       = FILE_KIND_VFS,
+		.kind = FILE_KIND_VFS,
 		.capability = node.capability,
-		.offset     = parsed_mode.append ? node.info.size : 0u,
-		.readable   = parsed_mode.readable,
-		.writable   = parsed_mode.writable,
+		.offset = parsed_mode.append ? node.info.size : 0u,
+		.readable = parsed_mode.readable,
+		.writable = parsed_mode.writable,
 	};
 	node.capability = CAP_ID_INVALID;
-	success         = true;
+	success = true;
 
 cleanup:
 	file_capability_drop(&node.capability);
@@ -177,7 +179,7 @@ cleanup:
 }
 
 int fclose(FILE* stream) {
-	cap_id_t         capability;
+	cap_id_t capability;
 	syscall_status_t status;
 
 	if (stream == NULL) return EOF;
@@ -187,7 +189,7 @@ int fclose(FILE* stream) {
 		file_unlock(stream);
 		return EOF;
 	}
-	capability         = stream->capability;
+	capability = stream->capability;
 	stream->capability = CAP_ID_INVALID;
 	file_unlock(stream);
 	status = cap_drop(capability);
@@ -204,7 +206,7 @@ static size_t file_read(FILE* stream, void* buffer, size_t size) {
 		break;
 	case FILE_KIND_VFS: {
 		struct filesystem_call_result result =
-			filesystem_file_read(stream->capability, stream->offset, buffer, size, &transferred);
+				filesystem_file_read(stream->capability, stream->offset, buffer, size, &transferred);
 		if (!call_succeeded(result)) stream->error = true;
 		break;
 	}
@@ -265,7 +267,7 @@ static size_t file_write(FILE* stream, const void* buffer, size_t size) {
 		break;
 	case FILE_KIND_VFS: {
 		struct filesystem_call_result result =
-			filesystem_file_write(stream->capability, stream->offset, buffer, size, &transferred);
+				filesystem_file_write(stream->capability, stream->offset, buffer, size, &transferred);
 		if (!call_succeeded(result)) stream->error = true;
 		break;
 	}
@@ -332,7 +334,7 @@ void clearerr(FILE* stream) {
 	if (stream == NULL) return;
 	file_lock(stream);
 	stream->end_of_file = false;
-	stream->error       = false;
+	stream->error = false;
 	file_unlock(stream);
 }
 
@@ -350,8 +352,8 @@ static bool seek_offset(uint64_t base, long offset, uint64_t* result) {
 
 int fseek(FILE* stream, long offset, int origin) {
 	struct filesystem_node_info info;
-	uint64_t                    base;
-	uint64_t                    position;
+	uint64_t base;
+	uint64_t position;
 
 	if (stream == NULL) return EOF;
 	file_lock(stream);
@@ -371,7 +373,7 @@ int fseek(FILE* stream, long offset, int origin) {
 		goto error;
 	}
 	if (!seek_offset(base, offset, &position)) goto error;
-	stream->offset      = position;
+	stream->offset = position;
 	stream->end_of_file = false;
 	file_unlock(stream);
 	return 0;
@@ -389,7 +391,7 @@ long ftell(FILE* stream) {
 	file_lock(stream);
 	if (stream->kind != FILE_KIND_VFS || stream->capability == CAP_ID_INVALID || stream->offset > LONG_MAX) {
 		stream->error = true;
-		result        = -1l;
+		result = -1l;
 	}
 	else {
 		result = (long)stream->offset;

@@ -1,11 +1,12 @@
 #include "layout.h"
 
 #include <mxml.h>
-#include <protocol/keyboard.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <utf8proc.h>
+
+#include <protocol/keyboard.h>
 
 #define TEXT_LAYOUT_MAXIMUM_KEYS 512u
 #define TEXT_LAYOUT_MAXIMUM_LAYERS 32u
@@ -22,21 +23,21 @@
 
 struct text_layout_key {
 	struct text_layout_key* next;
-	char*                   id;
-	char*                   output;
+	char* id;
+	char* output;
 };
 
 struct text_layout_transform {
 	struct text_layout_transform* next;
-	char*                         from;
-	size_t                        from_size;
-	char*                         to;
-	size_t                        to_size;
+	char* from;
+	size_t from_size;
+	char* to;
+	size_t to_size;
 };
 
 struct form_description {
 	const enum input_key_code* rows[4];
-	size_t                     row_sizes[4];
+	size_t row_sizes[4];
 };
 
 static const enum input_key_code number_row[] = {
@@ -156,7 +157,7 @@ static char* read_layout_file(const char* path) {
 	if (file_size <= 0l || (unsigned long)file_size > TEXT_LAYOUT_MAXIMUM_FILE_SIZE) goto cleanup;
 	if (fseek(file, 0l, SEEK_SET) != 0) goto cleanup;
 	size_t size = (size_t)file_size;
-	data        = malloc(size + 1u);
+	data = malloc(size + 1u);
 	if (data == NULL) goto cleanup;
 	if (fread(data, 1u, size, file) != size || ferror(file) || memchr(data, '\0', size) != NULL) {
 		free(data);
@@ -192,12 +193,12 @@ static mxml_node_t* next_element_sibling(mxml_node_t* node) {
 
 static bool utf8_valid(const char* string) {
 	if (string == NULL) return false;
-	size_t size   = strlen(string);
+	size_t size = strlen(string);
 	size_t offset = 0u;
 	while (offset < size) {
 		utf8proc_int32_t codepoint;
-		utf8proc_ssize_t consumed =
-			utf8proc_iterate((const utf8proc_uint8_t*)string + offset, (utf8proc_ssize_t)(size - offset), &codepoint);
+		utf8proc_ssize_t consumed = utf8proc_iterate(
+				(const utf8proc_uint8_t*)string + offset, (utf8proc_ssize_t)(size - offset), &codepoint);
 		if (consumed <= 0 || codepoint == 0) return false;
 		offset += (size_t)consumed;
 	}
@@ -212,8 +213,8 @@ static bool append_bytes(char* output, size_t* size, const void* bytes, size_t c
 }
 
 static bool parse_hex_scalar(const char** cursor, uint32_t* scalar) {
-	uint32_t value  = 0u;
-	size_t   digits = 0u;
+	uint32_t value = 0u;
+	size_t digits = 0u;
 	while (**cursor != '\0' && **cursor != '}') {
 		unsigned digit;
 		if (**cursor >= '0' && **cursor <= '9') digit = (unsigned)(**cursor - '0');
@@ -232,7 +233,7 @@ static bool parse_hex_scalar(const char** cursor, uint32_t* scalar) {
 }
 
 static char* decode_value(const char* value, bool pattern) {
-	char   decoded[TEXT_LAYOUT_MAXIMUM_VALUE_SIZE];
+	char decoded[TEXT_LAYOUT_MAXIMUM_VALUE_SIZE];
 	size_t size = 0u;
 	if (value == NULL || !utf8_valid(value)) return NULL;
 	for (const char* cursor = value; *cursor != '\0';) {
@@ -257,10 +258,12 @@ static char* decode_value(const char* value, bool pattern) {
 		if (!append_bytes(decoded, &size, cursor, 1u)) return NULL;
 		cursor++;
 	}
-	decoded[size]                     = '\0';
-	utf8proc_uint8_t* normalized      = NULL;
-	utf8proc_ssize_t  normalized_size = utf8proc_map(
-		(const utf8proc_uint8_t*)decoded, (utf8proc_ssize_t)size, &normalized, UTF8PROC_STABLE | UTF8PROC_DECOMPOSE);
+	decoded[size] = '\0';
+	utf8proc_uint8_t* normalized = NULL;
+	utf8proc_ssize_t normalized_size = utf8proc_map((const utf8proc_uint8_t*)decoded,
+			(utf8proc_ssize_t)size,
+			&normalized,
+			UTF8PROC_STABLE | UTF8PROC_DECOMPOSE);
 	if (normalized_size < 0 || normalized == NULL || normalized_size > TEXT_LAYOUT_MAXIMUM_VALUE_SIZE - 1u) {
 		if (normalized != NULL) utf8proc_free(normalized);
 		return NULL;
@@ -278,26 +281,26 @@ static bool parse_keys(struct text_layout* layout, mxml_node_t* keys) {
 	size_t count = 0u;
 	for (mxml_node_t* node = first_element_child(keys); node != NULL; node = next_element_sibling(node)) {
 		if (!is_element(node, "key") || ++count > TEXT_LAYOUT_MAXIMUM_KEYS) return false;
-		const char* id     = mxmlElementGetAttr(node, "id");
+		const char* id = mxmlElementGetAttr(node, "id");
 		const char* output = mxmlElementGetAttr(node, "output");
-		const char* gap    = mxmlElementGetAttr(node, "gap");
-		bool        is_gap = gap != NULL && strcmp(gap, "true") == 0;
+		const char* gap = mxmlElementGetAttr(node, "gap");
+		bool is_gap = gap != NULL && strcmp(gap, "true") == 0;
 		if (id == NULL || id[0] == '\0' || strlen(id) > 64u || find_key(layout, id) != NULL ||
-		    (gap != NULL && !is_gap) || (output == NULL && !is_gap) ||
-		    (output != NULL && (output[0] == '\0' || is_gap)))
+				(gap != NULL && !is_gap) || (output == NULL && !is_gap) ||
+				(output != NULL && (output[0] == '\0' || is_gap)))
 			return false;
 		struct text_layout_key* key = calloc(1u, sizeof(*key));
 		if (key == NULL) return false;
 		key->id = strdup(id);
 		if (output != NULL) key->output = decode_value(output, false);
 		if (key->id == NULL ||
-		    (output != NULL && (key->output == NULL || strlen(key->output) > TEXT_LAYOUT_CONTEXT_CAPACITY))) {
+				(output != NULL && (key->output == NULL || strlen(key->output) > TEXT_LAYOUT_CONTEXT_CAPACITY))) {
 			free(key->id);
 			free(key->output);
 			free(key);
 			return false;
 		}
-		key->next    = layout->keys;
+		key->next = layout->keys;
 		layout->keys = key;
 	}
 	return count != 0u;
@@ -305,18 +308,18 @@ static bool parse_keys(struct text_layout* layout, mxml_node_t* keys) {
 
 static bool form_description(const char* id, struct form_description* form) {
 	if (id == NULL || form == NULL || (strcmp(id, "us") != 0 && strcmp(id, "iso") != 0)) return false;
-	bool iso           = strcmp(id, "iso") == 0;
-	form->rows[0]      = number_row;
-	form->rows[1]      = iso ? upper_row_iso : upper_row_us;
-	form->rows[2]      = iso ? home_row_iso : home_row_us;
-	form->rows[3]      = iso ? lower_row_iso : lower_row_us;
+	bool iso = strcmp(id, "iso") == 0;
+	form->rows[0] = number_row;
+	form->rows[1] = iso ? upper_row_iso : upper_row_us;
+	form->rows[2] = iso ? home_row_iso : home_row_us;
+	form->rows[3] = iso ? lower_row_iso : lower_row_us;
 	form->row_sizes[0] = sizeof(number_row) / sizeof(number_row[0]);
 	form->row_sizes[1] =
-		iso ? sizeof(upper_row_iso) / sizeof(upper_row_iso[0]) : sizeof(upper_row_us) / sizeof(upper_row_us[0]);
+			iso ? sizeof(upper_row_iso) / sizeof(upper_row_iso[0]) : sizeof(upper_row_us) / sizeof(upper_row_us[0]);
 	form->row_sizes[2] =
-		iso ? sizeof(home_row_iso) / sizeof(home_row_iso[0]) : sizeof(home_row_us) / sizeof(home_row_us[0]);
+			iso ? sizeof(home_row_iso) / sizeof(home_row_iso[0]) : sizeof(home_row_us) / sizeof(home_row_us[0]);
 	form->row_sizes[3] =
-		iso ? sizeof(lower_row_iso) / sizeof(lower_row_iso[0]) : sizeof(lower_row_us) / sizeof(lower_row_us[0]);
+			iso ? sizeof(lower_row_iso) / sizeof(lower_row_iso[0]) : sizeof(lower_row_us) / sizeof(lower_row_us[0]);
 	return true;
 }
 
@@ -345,8 +348,8 @@ static char* next_token(char** cursor, char separator) {
 
 static bool modifier_set_matches(char* set, uint8_t state, bool* valid) {
 	uint8_t mentioned = 0u;
-	bool    any       = false;
-	*valid            = true;
+	bool any = false;
+	*valid = true;
 	while (*set == ' ') set++;
 	if (strcmp(set, "none") == 0) return state == 0u;
 	if (strcmp(set, "other") == 0) {
@@ -387,8 +390,8 @@ static bool layer_states(const char* modifiers, bool states[64]) {
 		if (comma != NULL) *comma = '\0';
 		for (uint8_t state = 0u; state < 64u; state++) {
 			char* state_set = strdup(set);
-			bool  valid;
-			bool  matches = state_set != NULL && modifier_set_matches(state_set, state, &valid);
+			bool valid;
+			bool matches = state_set != NULL && modifier_set_matches(state_set, state, &valid);
 			free(state_set);
 			if (state_set == NULL || !valid) {
 				free(copy);
@@ -405,11 +408,11 @@ static bool layer_states(const char* modifiers, bool states[64]) {
 }
 
 static bool map_row(struct text_layout* layout, const bool states[64], const struct form_description* form,
-                    size_t row_index, const char* key_ids) {
+		size_t row_index, const char* key_ids) {
 	char* copy = key_ids == NULL ? NULL : strdup(key_ids);
 	if (copy == NULL) return false;
 	size_t column = 0u;
-	char*  cursor = copy;
+	char* cursor = copy;
 	for (char* id = next_token(&cursor, ','); id != NULL; id = next_token(&cursor, ',')) {
 		if (column >= form->row_sizes[row_index]) {
 			free(copy);
@@ -438,8 +441,8 @@ static bool map_row(struct text_layout* layout, const bool states[64], const str
 static bool parse_layers(struct text_layout* layout, mxml_node_t* layers) {
 	struct form_description form;
 	if (!form_description(mxmlElementGetAttr(layers, "formId"), &form)) return false;
-	size_t layer_count  = 0u;
-	bool   assigned[64] = {false};
+	size_t layer_count = 0u;
+	bool assigned[64] = {false};
 	for (mxml_node_t* layer = first_element_child(layers); layer != NULL; layer = next_element_sibling(layer)) {
 		if (!is_element(layer, "layer") || ++layer_count > TEXT_LAYOUT_MAXIMUM_LAYERS) return false;
 		bool states[64];
@@ -447,14 +450,14 @@ static bool parse_layers(struct text_layout* layout, mxml_node_t* layers) {
 		for (size_t state = 0u; state < 64u; state++) {
 			if (states[state] && assigned[state]) return false;
 			if (states[state]) {
-				assigned[state]              = true;
+				assigned[state] = true;
 				layout->active_states[state] = true;
 			}
 		}
 		size_t row_index = 0u;
 		for (mxml_node_t* row = first_element_child(layer); row != NULL; row = next_element_sibling(row)) {
 			if (!is_element(row, "row") || row_index >= 4u ||
-			    !map_row(layout, states, &form, row_index, mxmlElementGetAttr(row, "keys")))
+					!map_row(layout, states, &form, row_index, mxmlElementGetAttr(row, "keys")))
 				return false;
 			row_index++;
 		}
@@ -471,23 +474,23 @@ static bool parse_transforms(struct text_layout* layout, mxml_node_t* transforms
 		if (!is_element(group, "transformGroup")) return false;
 		for (mxml_node_t* node = first_element_child(group); node != NULL; node = next_element_sibling(node)) {
 			if (!is_element(node, "transform") || ++count > TEXT_LAYOUT_MAXIMUM_TRANSFORMS) return false;
-			const char*                   from      = mxmlElementGetAttr(node, "from");
-			const char*                   to        = mxmlElementGetAttr(node, "to");
+			const char* from = mxmlElementGetAttr(node, "from");
+			const char* to = mxmlElementGetAttr(node, "to");
 			struct text_layout_transform* transform = calloc(1u, sizeof(*transform));
 			if (transform == NULL) return false;
 			transform->from = decode_value(from, true);
-			transform->to   = decode_value(to == NULL ? "" : to, false);
+			transform->to = decode_value(to == NULL ? "" : to, false);
 			if (transform->from == NULL || transform->from[0] == '\0' || transform->to == NULL ||
-			    transform->to[0] == '\0' || strlen(transform->from) > TEXT_LAYOUT_CONTEXT_CAPACITY ||
-			    strlen(transform->to) > TEXT_LAYOUT_CONTEXT_CAPACITY) {
+					transform->to[0] == '\0' || strlen(transform->from) > TEXT_LAYOUT_CONTEXT_CAPACITY ||
+					strlen(transform->to) > TEXT_LAYOUT_CONTEXT_CAPACITY) {
 				free(transform->from);
 				free(transform->to);
 				free(transform);
 				return false;
 			}
-			transform->from_size                = strlen(transform->from);
-			transform->to_size                  = strlen(transform->to);
-			transform->next                     = NULL;
+			transform->from_size = strlen(transform->from);
+			transform->to_size = strlen(transform->to);
+			transform->next = NULL;
 			struct text_layout_transform** tail = &layout->transforms;
 			while (*tail != NULL) tail = &(*tail)->next;
 			*tail = transform;
@@ -501,16 +504,16 @@ static bool parse_document(struct text_layout* layout, mxml_node_t* tree) {
 	if (root == NULL || mxmlElementGetAttr(root, "locale") == NULL || mxmlElementGetAttr(root, "conformsTo") == NULL)
 		return false;
 	const char* version = mxmlElementGetAttr(root, "conformsTo");
-	char*       version_end;
-	long        version_number = strtol(version, &version_end, 10);
+	char* version_end;
+	long version_number = strtol(version, &version_end, 10);
 	if (*version == '\0' || *version_end != '\0' || version_number < 45 || version_number > 48 ||
-	    !utf8_valid(mxmlElementGetAttr(root, "locale")) || mxmlElementGetAttr(root, "locale")[0] == '\0')
+			!utf8_valid(mxmlElementGetAttr(root, "locale")) || mxmlElementGetAttr(root, "locale")[0] == '\0')
 		return false;
 	layout->locale = strdup(mxmlElementGetAttr(root, "locale"));
 	if (layout->locale == NULL) return false;
-	mxml_node_t* keys                   = NULL;
-	mxml_node_t* layers                 = NULL;
-	bool         simple_transforms_seen = false;
+	mxml_node_t* keys = NULL;
+	mxml_node_t* layers = NULL;
+	bool simple_transforms_seen = false;
 	for (mxml_node_t* node = first_element_child(root); node != NULL; node = next_element_sibling(node)) {
 		if (is_element(node, "keys")) {
 			if (keys != NULL) return false;
@@ -557,14 +560,14 @@ void text_layout_destroy(struct text_layout* layout) {
 	if (layout == NULL) return;
 	while (layout->keys != NULL) {
 		struct text_layout_key* key = layout->keys;
-		layout->keys                = key->next;
+		layout->keys = key->next;
 		free(key->id);
 		free(key->output);
 		free(key);
 	}
 	while (layout->transforms != NULL) {
 		struct text_layout_transform* transform = layout->transforms;
-		layout->transforms                      = transform->next;
+		layout->transforms = transform->next;
 		free(transform->from);
 		free(transform->to);
 		free(transform);
@@ -585,10 +588,10 @@ static uint8_t modifier_state(uint32_t modifiers, uint32_t locks) {
 	return state;
 }
 
-const char* text_layout_map(const struct text_layout* layout, enum input_key_code key, uint32_t modifiers,
-                            uint32_t locks) {
+const char* text_layout_map(
+		const struct text_layout* layout, enum input_key_code key, uint32_t modifiers, uint32_t locks) {
 	if (layout == NULL || key <= INPUT_KEY_INVALID || key > INPUT_KEY_KEYPAD_DECIMAL ||
-	    (modifiers & (KEYBOARD_MODIFIER_LEFT_META | KEYBOARD_MODIFIER_RIGHT_META)) != 0u)
+			(modifiers & (KEYBOARD_MODIFIER_LEFT_META | KEYBOARD_MODIFIER_RIGHT_META)) != 0u)
 		return NULL;
 	uint8_t state = modifier_state(modifiers, locks);
 	if (!layout->active_states[state]) return NULL;
@@ -634,8 +637,8 @@ const char* text_layout_map(const struct text_layout* layout, enum input_key_cod
 	return layout->mappings[state][key];
 }
 
-const char* text_layout_shortcut_map(const struct text_layout* layout, enum input_key_code key, uint32_t modifiers,
-                                     uint32_t locks) {
+const char* text_layout_shortcut_map(
+		const struct text_layout* layout, enum input_key_code key, uint32_t modifiers, uint32_t locks) {
 	const uint32_t shortcut_modifiers = KEYBOARD_MODIFIER_LEFT_CONTROL | KEYBOARD_MODIFIER_RIGHT_CONTROL |
 	                                    KEYBOARD_MODIFIER_LEFT_ALT | KEYBOARD_MODIFIER_LEFT_META |
 	                                    KEYBOARD_MODIFIER_RIGHT_META;
@@ -643,32 +646,32 @@ const char* text_layout_shortcut_map(const struct text_layout* layout, enum inpu
 }
 
 enum text_layout_result text_layout_apply(const struct text_layout* layout, const uint8_t* context, size_t context_size,
-                                          const char* output, uint8_t* next_context, size_t* next_context_size,
-                                          uint8_t** committed, size_t* committed_size) {
+		const char* output, uint8_t* next_context, size_t* next_context_size, uint8_t** committed,
+		size_t* committed_size) {
 	if (next_context_size != NULL) *next_context_size = 0u;
 	if (committed != NULL) *committed = NULL;
 	if (committed_size != NULL) *committed_size = 0u;
 	if (layout == NULL || (context_size != 0u && context == NULL) || output == NULL || next_context == NULL ||
-	    next_context_size == NULL || committed == NULL || committed_size == NULL)
+			next_context_size == NULL || committed == NULL || committed_size == NULL)
 		return TEXT_LAYOUT_RESULT_NONE;
 	size_t output_size = strlen(output);
 	if (output_size > TEXT_LAYOUT_CONTEXT_CAPACITY - context_size) return TEXT_LAYOUT_RESULT_NONE;
 	memcpy(next_context, context, context_size);
 	memcpy(next_context + context_size, output, output_size);
 	*next_context_size = context_size + output_size;
-	bool prefix        = false;
+	bool prefix = false;
 	for (const struct text_layout_transform* transform = layout->transforms; transform != NULL;
-	     transform                                     = transform->next) {
+			transform = transform->next) {
 		if (transform->from_size == *next_context_size &&
-		    memcmp(transform->from, next_context, *next_context_size) == 0) {
+				memcmp(transform->from, next_context, *next_context_size) == 0) {
 			utf8proc_uint8_t* normalized = NULL;
-			utf8proc_ssize_t  size       = utf8proc_map((const utf8proc_uint8_t*)transform->to,
-			                                            (utf8proc_ssize_t)transform->to_size,
-			                                            &normalized,
-			                                            UTF8PROC_STABLE | UTF8PROC_COMPOSE);
+			utf8proc_ssize_t size = utf8proc_map((const utf8proc_uint8_t*)transform->to,
+					(utf8proc_ssize_t)transform->to_size,
+					&normalized,
+					UTF8PROC_STABLE | UTF8PROC_COMPOSE);
 			if (size < 0 || normalized == NULL) return TEXT_LAYOUT_RESULT_NONE;
-			*committed         = normalized;
-			*committed_size    = (size_t)size;
+			*committed = normalized;
+			*committed_size = (size_t)size;
 			*next_context_size = 0u;
 			return TEXT_LAYOUT_RESULT_COMMIT;
 		}
@@ -677,11 +680,11 @@ enum text_layout_result text_layout_apply(const struct text_layout* layout, cons
 	}
 	if (prefix) return TEXT_LAYOUT_RESULT_PENDING;
 	utf8proc_uint8_t* normalized = NULL;
-	utf8proc_ssize_t  size       = utf8proc_map(
-		next_context, (utf8proc_ssize_t)*next_context_size, &normalized, UTF8PROC_STABLE | UTF8PROC_COMPOSE);
+	utf8proc_ssize_t size = utf8proc_map(
+			next_context, (utf8proc_ssize_t)*next_context_size, &normalized, UTF8PROC_STABLE | UTF8PROC_COMPOSE);
 	if (size < 0 || normalized == NULL) return TEXT_LAYOUT_RESULT_NONE;
-	*committed         = normalized;
-	*committed_size    = (size_t)size;
+	*committed = normalized;
+	*committed_size = (size_t)size;
 	*next_context_size = 0u;
 	return TEXT_LAYOUT_RESULT_COMMIT;
 }

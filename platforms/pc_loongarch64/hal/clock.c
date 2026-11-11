@@ -1,10 +1,11 @@
 #include "clock.h"
 
-#include <core/lock.h>
-#include <core/spinlock.h>
-#include <hal/clock.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+#include <hal/clock.h>
+#include <core/lock.h>
+#include <core/spinlock.h>
 
 #define LOONGARCH64_CSR_CRMD 0x0u
 #define LOONGARCH64_CSR_ECFG 0x4u
@@ -20,12 +21,12 @@
 #define LOONGARCH64_TIMER_MIN_INTERVAL 4ull
 
 static hal_clock_handler_t clock_handler;
-static void*               clock_context;
-static bool                clock_initialized;
-static bool                clock_running;
-static uint32_t            clock_frequency_hz;
-static uint64_t            monotonic_frequency_hz;
-static struct spinlock     clock_lock = SPINLOCK_INIT_CLASS("clock_lock", SPINLOCK_ORDER_CLOCK, SPINLOCK_FLAG_IRQSAVE);
+static void* clock_context;
+static bool clock_initialized;
+static bool clock_running;
+static uint32_t clock_frequency_hz;
+static uint64_t monotonic_frequency_hz;
+static struct spinlock clock_lock = SPINLOCK_INIT_CLASS("clock_lock", SPINLOCK_ORDER_CLOCK, SPINLOCK_FLAG_IRQSAVE);
 
 static inline uint32_t cpucfg_word(unsigned word) {
 	uint64_t value;
@@ -74,9 +75,9 @@ static inline void csrwr(uint64_t value, unsigned csr) {
 
 static uint64_t timer_frequency_hz(void) {
 	uint64_t base_frequency = cpucfg_word(4u);
-	uint64_t scale          = cpucfg_word(5u);
-	uint64_t multiplier     = scale & 0xffffu;
-	uint64_t divisor        = scale >> 16;
+	uint64_t scale = cpucfg_word(5u);
+	uint64_t multiplier = scale & 0xffffu;
+	uint64_t divisor = scale >> 16;
 
 	if (base_frequency == 0u) return 0u;
 	if (multiplier == 0u) multiplier = 1u;
@@ -102,7 +103,7 @@ void hal_clock_init(void) {
 	csrwr(LOONGARCH64_TICLR_CLEAR, LOONGARCH64_CSR_TICLR);
 
 	monotonic_frequency_hz = timer_frequency_hz();
-	clock_initialized      = true;
+	clock_initialized = true;
 	spinlock_unlock_irqrestore(&clock_lock, state);
 }
 
@@ -117,9 +118,9 @@ bool hal_clock_monotonic_counter(uint64_t* out_counter) {
 }
 
 bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* ctx) {
-	uint64_t         timer_hz;
-	uint64_t         interval_ticks;
-	uint64_t         ecfg;
+	uint64_t timer_hz;
+	uint64_t interval_ticks;
+	uint64_t ecfg;
 	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
 
 	if (!clock_initialized || frequency_hz == 0u || handler == NULL) {
@@ -133,10 +134,10 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 		ecfg = csrrd(LOONGARCH64_CSR_ECFG);
 		ecfg &= ~LOONGARCH64_TIMER_INT_MASK;
 		csrwr(ecfg, LOONGARCH64_CSR_ECFG);
-		clock_running      = false;
+		clock_running = false;
 		clock_frequency_hz = 0u;
-		clock_handler      = NULL;
-		clock_context      = NULL;
+		clock_handler = NULL;
+		clock_context = NULL;
 	}
 
 	timer_hz = monotonic_frequency_hz;
@@ -149,10 +150,10 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 	if (interval_ticks < LOONGARCH64_TIMER_MIN_INTERVAL) interval_ticks = LOONGARCH64_TIMER_MIN_INTERVAL;
 	interval_ticks = (interval_ticks + (LOONGARCH64_TIMER_MIN_INTERVAL - 1u)) & ~(LOONGARCH64_TIMER_MIN_INTERVAL - 1u);
 
-	clock_handler      = handler;
-	clock_context      = ctx;
+	clock_handler = handler;
+	clock_context = ctx;
 	clock_frequency_hz = (uint32_t)(timer_hz / interval_ticks);
-	clock_running      = true;
+	clock_running = true;
 
 	csrwr(LOONGARCH64_TICLR_CLEAR, LOONGARCH64_CSR_TICLR);
 	csrwr(interval_ticks | LOONGARCH64_TCFG_PERIODIC | LOONGARCH64_TCFG_ENABLE, LOONGARCH64_CSR_TCFG);
@@ -166,7 +167,7 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 }
 
 uint32_t hal_clock_frequency(void) {
-	uint32_t         hz;
+	uint32_t hz;
 	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
 
 	hz = clock_frequency_hz;
@@ -175,7 +176,7 @@ uint32_t hal_clock_frequency(void) {
 }
 
 void hal_clock_stop(void) {
-	uint64_t         ecfg;
+	uint64_t ecfg;
 	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
 
 	if (!clock_initialized) {
@@ -190,10 +191,10 @@ void hal_clock_stop(void) {
 	ecfg &= ~LOONGARCH64_TIMER_INT_MASK;
 	csrwr(ecfg, LOONGARCH64_CSR_ECFG);
 
-	clock_running      = false;
+	clock_running = false;
 	clock_frequency_hz = 0u;
-	clock_handler      = NULL;
-	clock_context      = NULL;
+	clock_handler = NULL;
+	clock_context = NULL;
 	spinlock_unlock_irqrestore(&clock_lock, state);
 }
 

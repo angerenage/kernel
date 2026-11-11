@@ -1,9 +1,10 @@
-#include <base/cap.h>
-#include <core/capability.h>
-#include <kernel/capability.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <base/cap.h>
+#include <core/capability.h>
+#include <kernel/capability.h>
 
 #include "../capability/acpi.h"
 #include "../capability/boot_module.h"
@@ -21,8 +22,8 @@
 
 cap_id_t cap_kernel_create(uint64_t object_id, cap_kernel_handler_t handler, process_id_t target, cap_rights_t rights) {
 	cap_object_id_t cap_object_id;
-	cap_id_t        cap_id;
-	bool            object_created = false;
+	cap_id_t cap_id;
+	bool object_created = false;
 
 	cap_object_id = cap_object_create_kernel(object_id, handler, &object_created);
 	if (cap_object_id == CAP_OBJECT_ID_INVALID) return CAP_ID_INVALID;
@@ -41,8 +42,8 @@ bool cap_kernel_response_fits(const struct cap_request* request, size_t response
 	       response_size <= request->response_capacity;
 }
 
-syscall_result_t cap_kernel_write_response(const struct cap_request* request, const void* response,
-                                           size_t response_size) {
+syscall_result_t cap_kernel_write_response(
+		const struct cap_request* request, const void* response, size_t response_size) {
 	if (response == NULL || !cap_kernel_response_fits(request, response_size)) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
@@ -52,7 +53,7 @@ syscall_result_t cap_kernel_write_response(const struct cap_request* request, co
 
 bool kernel_capability_init(void) {
 	if (!kernel_memory_allocator_init() || !kernel_capability_dma_init() || !kernel_capability_interrupts_init() ||
-	    !kernel_capability_acpi_init() || !kernel_capability_device_tree_init())
+			!kernel_capability_acpi_init() || !kernel_capability_device_tree_init())
 		return false;
 #if defined(PLATFORM_PC_X86_64) || defined(IO_PORT_TEST)
 	if (!kernel_capability_io_ports_init()) return false;

@@ -1,9 +1,10 @@
-#include <core/cpu.h>
-#include <hal/cpu.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <hal/cpu.h>
+#include <core/cpu.h>
 
 #include "interrupts/ipi.h"
 
@@ -11,7 +12,7 @@
 
 enum {
 	LOONGARCH64_THREAD_STACK_ALIGNMENT = 16u,
-	LOONGARCH64_THREAD_CTX_FP          = 0,
+	LOONGARCH64_THREAD_CTX_FP = 0,
 	LOONGARCH64_THREAD_CTX_S0,
 	LOONGARCH64_THREAD_CTX_S1,
 	LOONGARCH64_THREAD_CTX_S2,
@@ -28,8 +29,8 @@ extern void loongarch64_fp_context_restore(const void* context);
 extern void loongarch64_thread_context_switch(struct thread_context* current, const struct thread_context* next);
 extern void loongarch64_thread_entry(void);
 
-_Static_assert(HAL_CPU_THREAD_CONTEXT_SPILL_WORDS > LOONGARCH64_THREAD_CTX_S7,
-               "loongarch64 thread spill area is too small");
+_Static_assert(
+		HAL_CPU_THREAD_CONTEXT_SPILL_WORDS > LOONGARCH64_THREAD_CTX_S7, "loongarch64 thread spill area is too small");
 _Static_assert(HAL_CPU_FP_CONTEXT_SIZE >= 1036u, "loongarch64 FP/LASX area is too small");
 
 uint64_t hal_cpu_boot_arch_id(void) {
@@ -51,7 +52,7 @@ void hal_cpu_local_bind(void* ptr) {
 }
 
 bool hal_cpu_thread_context_init(struct thread_context* context, uintptr_t stack_base, uintptr_t stack_top,
-                                 uintptr_t entry_pc, uintptr_t entry_arg) {
+		uintptr_t entry_pc, uintptr_t entry_arg) {
 	uintptr_t aligned_top;
 
 	if (context == NULL || entry_pc == 0u || stack_top <= stack_base) return false;
@@ -66,7 +67,7 @@ bool hal_cpu_thread_context_init(struct thread_context* context, uintptr_t stack
 
 	*context = (struct thread_context){
 		.instruction_pointer = (uintptr_t)loongarch64_thread_entry,
-		.stack_pointer       = aligned_top,
+		.stack_pointer = aligned_top,
 	};
 	context->spill[LOONGARCH64_THREAD_CTX_S0] = entry_pc;
 	context->spill[LOONGARCH64_THREAD_CTX_S1] = entry_arg;

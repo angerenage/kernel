@@ -2,15 +2,15 @@
 #include "test_support.h"
 
 Test(kernel_capability_module, repeated_maps_share_one_physical_backing) {
-	struct kernel_capability_test_context         ctx;
+	struct kernel_capability_test_context ctx;
 	_Alignas(TEST_MAPPING_GRANULE) static uint8_t module_bytes[TEST_MAPPING_GRANULE];
-	const struct boot_module                      modules[] = {
+	const struct boot_module modules[] = {
 		{.name = "mapped.bin", .address = module_bytes + 17u, .size = 31u},
 	};
 	const struct module_map_request request = {.header = {.op = MODULE_OP_MAP}};
-	struct module_map_response      response;
-	cap_id_t                        cap;
-	syscall_result_t                result;
+	struct module_map_response response;
+	cap_id_t cap;
+	syscall_result_t result;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/module-shared-backing");
 	boot_mock_set_modules(modules, 1u);
@@ -27,28 +27,28 @@ Test(kernel_capability_module, repeated_maps_share_one_physical_backing) {
 
 Test(kernel_capability_module, failed_repeat_resolve_preserves_the_preexisting_module_capability) {
 	struct kernel_capability_test_context ctx;
-	static const uint8_t                  module_bytes[] = {1u, 2u, 3u, 4u};
-	const struct boot_module              modules[]      = {
+	static const uint8_t module_bytes[] = {1u, 2u, 3u, 4u};
+	const struct boot_module modules[] = {
 		{
-		 .name       = "sample.elf",
-		 .path       = "/boot/sample.elf",
-		 .address    = (void*)module_bytes,
-		 .size       = sizeof(module_bytes),
-		 .media_type = 0u,
-		 },
+			.name = "sample.elf",
+			.path = "/boot/sample.elf",
+			.address = (void*)module_bytes,
+			.size = sizeof(module_bytes),
+			.media_type = 0u,
+		},
 	};
 	const struct {
 		struct module_provider_resolve_request request;
-		char                                   name[sizeof("sample.elf")];
+		char name[sizeof("sample.elf")];
 	} request = {
 		.request = {.header = {.op = MODULE_PROVIDER_OP_RESOLVE}, .name_size = sizeof("sample.elf")},
-		.name    = "sample.elf",
+		.name = "sample.elf",
 	};
 	struct module_provider_resolve_response response;
-	cap_id_t                                provider_cap;
-	cap_id_t                                original_cap;
-	struct capability*                      retained;
-	syscall_result_t                        result;
+	cap_id_t provider_cap;
+	cap_id_t original_cap;
+	struct capability* retained;
+	syscall_result_t result;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/module-rollback");
 	boot_mock_set_modules(modules, 1u);
@@ -57,7 +57,7 @@ Test(kernel_capability_module, failed_repeat_resolve_preserves_the_preexisting_m
 	cr_assert_neq(provider_cap, CAP_ID_INVALID);
 
 	result = kernel_capability_test_call(
-		provider_cap, &request, sizeof(request.request) + sizeof(request.name), &response, sizeof(response));
+			provider_cap, &request, sizeof(request.request) + sizeof(request.name), &response, sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	original_cap = response.cap;
 	cr_assert_neq(original_cap, CAP_ID_INVALID);
@@ -66,11 +66,11 @@ Test(kernel_capability_module, failed_repeat_resolve_preserves_the_preexisting_m
 	cap_release(retained);
 
 	result = kernel_capability_test_call(
-		provider_cap, &request, sizeof(request.request) + sizeof(request.name), &response, sizeof(response) - 1u);
+			provider_cap, &request, sizeof(request.request) + sizeof(request.name), &response, sizeof(response) - 1u);
 	cr_assert_neq(result.status, SYSCALL_STATUS_OK);
 	retained = cap_acquire(original_cap);
-	cr_assert_not_null(retained,
-	                   "failed repeat module resolve destroyed a capability that existed before the failed call");
+	cr_assert_not_null(
+			retained, "failed repeat module resolve destroyed a capability that existed before the failed call");
 	cap_release(retained);
 
 	kernel_capability_test_end(&ctx);
@@ -78,27 +78,27 @@ Test(kernel_capability_module, failed_repeat_resolve_preserves_the_preexisting_m
 
 Test(kernel_capability_module, provider_resolves_paths_and_rejects_unterminated_names) {
 	struct kernel_capability_test_context ctx;
-	static const uint8_t                  module_bytes[] = {0x41u};
-	const struct boot_module              modules[]      = {
+	static const uint8_t module_bytes[] = {0x41u};
+	const struct boot_module modules[] = {
 		{.name = "path.bin", .path = "/boot/path.bin", .address = (void*)module_bytes, .size = sizeof(module_bytes)},
 	};
 	const struct {
 		struct module_provider_resolve_request request;
-		char                                   name[sizeof("/boot/path.bin")];
+		char name[sizeof("/boot/path.bin")];
 	} path_request = {
 		.request = {.header = {.op = MODULE_PROVIDER_OP_RESOLVE}, .name_size = sizeof("/boot/path.bin")},
-		.name    = "/boot/path.bin",
+		.name = "/boot/path.bin",
 	};
 	const struct {
 		struct module_provider_resolve_request request;
-		char                                   name[3];
+		char name[3];
 	} bad_request = {
 		.request = {.header = {.op = MODULE_PROVIDER_OP_RESOLVE}, .name_size = 3u},
-		.name    = {'b', 'a', 'd'},
+		.name = {'b', 'a', 'd'},
 	};
 	struct module_provider_resolve_response response;
-	cap_id_t                                provider_cap;
-	syscall_result_t                        result;
+	cap_id_t provider_cap;
+	syscall_result_t result;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/module-provider-validation");
 	boot_mock_set_modules(modules, 1u);
@@ -106,55 +106,55 @@ Test(kernel_capability_module, provider_resolves_paths_and_rejects_unterminated_
 	provider_cap = kernel_capability_boot_module_provider_grant(process_pid(ctx.process));
 	cr_assert_neq(provider_cap, CAP_ID_INVALID);
 	result = kernel_capability_test_call(provider_cap,
-	                                     &path_request,
-	                                     sizeof(path_request.request) + sizeof(path_request.name),
-	                                     &response,
-	                                     sizeof(response));
+			&path_request,
+			sizeof(path_request.request) + sizeof(path_request.name),
+			&response,
+			sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(response.id, 1u);
 	cr_assert_str_eq(response.path, "/boot/path.bin");
 	result = kernel_capability_test_call(provider_cap,
-	                                     &bad_request,
-	                                     sizeof(bad_request.request) + sizeof(bad_request.name),
-	                                     &response,
-	                                     sizeof(response));
+			&bad_request,
+			sizeof(bad_request.request) + sizeof(bad_request.name),
+			&response,
+			sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 	kernel_capability_test_end(&ctx);
 }
 
 Test(kernel_capability_module, provider_enumerates_stable_pages_and_zero_length_requests) {
 	struct kernel_capability_test_context ctx;
-	static const uint8_t                  module_bytes[] = {0x41u};
-	const struct boot_module              modules[]      = {
+	static const uint8_t module_bytes[] = {0x41u};
+	const struct boot_module modules[] = {
 		{
-		 .name    = "first.elf",
-		 .path    = "/boot/first.elf",
-		 .address = (void*)module_bytes,
-		 .size    = 1u,
-		 },
+			.name = "first.elf",
+			.path = "/boot/first.elf",
+			.address = (void*)module_bytes,
+			.size = 1u,
+		},
 		{
-		 .name    = "second.elf",
-		 .path    = "/boot/second.elf",
-		 .address = (void*)module_bytes,
-		 .size    = 2u,
-		 },
+			.name = "second.elf",
+			.path = "/boot/second.elf",
+			.address = (void*)module_bytes,
+			.size = 2u,
+		},
 		{
-		 .name    = "third.elf",
-		 .path    = "/boot/third.elf",
-		 .address = (void*)module_bytes,
-		 .size    = 3u,
-		 },
+			.name = "third.elf",
+			.path = "/boot/third.elf",
+			.address = (void*)module_bytes,
+			.size = 3u,
+		},
 	};
 	struct module_provider_enumerate_request request = {
 		.header = {.op = MODULE_PROVIDER_OP_ENUMERATE},
 		.offset = 1u,
-		.count  = 2u,
+		.count = 2u,
 	};
 	struct {
 		struct module_provider_enumerate_response response;
-		struct module_provider_entry              entries[2];
+		struct module_provider_entry entries[2];
 	} page;
-	cap_id_t         provider_cap;
+	cap_id_t provider_cap;
 	syscall_result_t result;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/module-enumerate");
@@ -174,9 +174,9 @@ Test(kernel_capability_module, provider_enumerates_stable_pages_and_zero_length_
 	cr_assert_str_eq(page.response.entries[1].path, "/boot/third.elf");
 
 	request.offset = UINT64_MAX;
-	request.count  = 0u;
+	request.count = 0u;
 	result =
-		kernel_capability_test_call(provider_cap, &request, sizeof(request), &page.response, sizeof(page.response));
+			kernel_capability_test_call(provider_cap, &request, sizeof(request), &page.response, sizeof(page.response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(result.value, sizeof(page.response));
 	cr_assert_eq(page.response.total, 3u);
@@ -187,22 +187,22 @@ Test(kernel_capability_module, provider_enumerates_stable_pages_and_zero_length_
 
 Test(kernel_capability_module, provider_enumeration_validates_rights_framing_and_capacity) {
 	struct kernel_capability_test_context ctx;
-	static const uint8_t                  module_bytes[] = {0x51u};
-	const struct boot_module              modules[]      = {
+	static const uint8_t module_bytes[] = {0x51u};
+	const struct boot_module modules[] = {
 		{.name = "only.elf", .address = (void*)module_bytes, .size = sizeof(module_bytes)},
 	};
 	struct module_provider_enumerate_request request = {
 		.header = {.op = MODULE_PROVIDER_OP_ENUMERATE},
-		.count  = 1u,
+		.count = 1u,
 	};
 	struct {
 		struct module_provider_enumerate_response response;
-		struct module_provider_entry              entry;
+		struct module_provider_entry entry;
 	} response;
 	struct capability* provider;
-	cap_id_t           call_only_cap;
-	cap_id_t           provider_cap;
-	syscall_result_t   result;
+	cap_id_t call_only_cap;
+	cap_id_t provider_cap;
+	syscall_result_t result;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/module-enumerate-validation");
 	boot_mock_set_modules(modules, 1u);
@@ -221,15 +221,15 @@ Test(kernel_capability_module, provider_enumeration_validates_rights_framing_and
 	result = kernel_capability_test_call(provider_cap, &request, sizeof(request) - 1u, &response, sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 	result = kernel_capability_test_call(
-		provider_cap, &request, sizeof(request), &response.response, sizeof(response.response));
+			provider_cap, &request, sizeof(request), &response.response, sizeof(response.response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 	request.reserved = 1u;
 	result = kernel_capability_test_call(provider_cap, &request, sizeof(request), &response, sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 	request.reserved = 0u;
-	request.count    = (CAP_MAX_RESPONSE_SIZE - sizeof(struct module_provider_enumerate_response)) /
-	                       sizeof(struct module_provider_entry) +
-	                   1u;
+	request.count = (CAP_MAX_RESPONSE_SIZE - sizeof(struct module_provider_enumerate_response)) /
+	                        sizeof(struct module_provider_entry) +
+	                1u;
 	result = kernel_capability_test_call(provider_cap, &request, sizeof(request), &response, sizeof(response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 
@@ -238,21 +238,21 @@ Test(kernel_capability_module, provider_enumeration_validates_rights_framing_and
 
 Test(kernel_capability_module, zero_length_read_is_a_successful_noop) {
 	struct kernel_capability_test_context ctx;
-	static const uint8_t                  module_bytes[] = {0x11u, 0x22u};
-	const struct boot_module              modules[]      = {
+	static const uint8_t module_bytes[] = {0x11u, 0x22u};
+	const struct boot_module modules[] = {
 		{
-		 .name    = "bytes.bin",
-		 .path    = "/boot/bytes.bin",
-		 .address = (void*)module_bytes,
-		 .size    = sizeof(module_bytes),
-		 },
+			.name = "bytes.bin",
+			.path = "/boot/bytes.bin",
+			.address = (void*)module_bytes,
+			.size = sizeof(module_bytes),
+		},
 	};
 	const struct module_read_request request = {
 		.header = {.op = MODULE_OP_READ},
 		.offset = sizeof(module_bytes),
-		.size   = 0u,
+		.size = 0u,
 	};
-	cap_id_t         cap;
+	cap_id_t cap;
 	syscall_result_t result;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/module-zero-read");
@@ -269,28 +269,28 @@ Test(kernel_capability_module, zero_length_read_is_a_successful_noop) {
 
 Test(kernel_capability_module, provider_and_module_capabilities_use_distinct_protocols) {
 	struct kernel_capability_test_context ctx;
-	static const uint8_t                  module_bytes[] = {0x21u};
-	const struct boot_module              modules[]      = {
+	static const uint8_t module_bytes[] = {0x21u};
+	const struct boot_module modules[] = {
 		{.name = "distinct.bin", .address = (void*)module_bytes, .size = sizeof(module_bytes)},
 	};
 	const struct module_info_request info_request = {.header = {.op = MODULE_OP_INFO}};
-	struct module_info_response      info_response;
-	const struct boot_module*        resolved = NULL;
-	struct capability*               provider;
-	struct capability*               module;
-	cap_id_t                         provider_cap;
-	cap_id_t                         module_cap;
-	syscall_result_t                 result;
+	struct module_info_response info_response;
+	const struct boot_module* resolved = NULL;
+	struct capability* provider;
+	struct capability* module;
+	cap_id_t provider_cap;
+	cap_id_t module_cap;
+	syscall_result_t result;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/module-provider-distinct");
 	boot_mock_set_modules(modules, 1u);
 	kernel_capability_boot_module_provider_init();
 	provider_cap = kernel_capability_boot_module_provider_grant(process_pid(ctx.process));
-	module_cap   = kernel_capability_boot_module_grant(0u, process_pid(ctx.process));
+	module_cap = kernel_capability_boot_module_grant(0u, process_pid(ctx.process));
 	cr_assert_neq(provider_cap, CAP_ID_INVALID);
 	cr_assert_neq(module_cap, CAP_ID_INVALID);
 	provider = cap_acquire(provider_cap);
-	module   = cap_acquire(module_cap);
+	module = cap_acquire(module_cap);
 	cr_assert_not_null(provider);
 	cr_assert_not_null(module);
 	cr_assert_neq(provider->cap_object_id, module->cap_object_id);
@@ -298,7 +298,7 @@ Test(kernel_capability_module, provider_and_module_capabilities_use_distinct_pro
 	cap_release(module);
 
 	result = kernel_capability_test_call(
-		provider_cap, &info_request, sizeof(info_request), &info_response, sizeof(info_response));
+			provider_cap, &info_request, sizeof(info_request), &info_response, sizeof(info_response));
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
 	result = kernel_capability_boot_module_get(provider_cap, process_pid(ctx.process), CAP_READ, &resolved);
 	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
@@ -308,30 +308,30 @@ Test(kernel_capability_module, provider_and_module_capabilities_use_distinct_pro
 
 Test(kernel_capability_module, direct_resolution_uses_read_right_without_cap_call) {
 	struct kernel_capability_test_context ctx;
-	static const uint8_t                  module_bytes[] = {0x33u};
-	const struct boot_module              modules[]      = {
+	static const uint8_t module_bytes[] = {0x33u};
+	const struct boot_module modules[] = {
 		{
-		 .name    = "direct.bin",
-		 .path    = "/boot/direct.bin",
-		 .address = (void*)module_bytes,
-		 .size    = sizeof(module_bytes),
-		 },
+			.name = "direct.bin",
+			.path = "/boot/direct.bin",
+			.address = (void*)module_bytes,
+			.size = sizeof(module_bytes),
+		},
 	};
 	const struct boot_module* resolved = NULL;
-	struct capability*        original;
-	cap_id_t                  original_id;
-	cap_id_t                  read_only_id;
+	struct capability* original;
+	cap_id_t original_id;
+	cap_id_t read_only_id;
 
 	kernel_capability_test_begin(&ctx, "kernel-cap/module-direct-resolution");
 	boot_mock_set_modules(modules, 1u);
 	original_id = kernel_capability_boot_module_grant(0u, process_pid(ctx.process));
-	original    = cap_acquire(original_id);
+	original = cap_acquire(original_id);
 	cr_assert_not_null(original);
 	read_only_id = cap_create(original->cap_object_id, process_pid(ctx.process), CAP_READ, NULL);
 	cap_release(original);
 	cr_assert_neq(read_only_id, CAP_ID_INVALID);
 	cr_assert_eq(kernel_capability_boot_module_get(read_only_id, process_pid(ctx.process), CAP_READ, &resolved).status,
-	             SYSCALL_STATUS_OK);
+			SYSCALL_STATUS_OK);
 	cr_assert_not_null(resolved);
 	cr_assert_eq(resolved->address, modules[0].address);
 	cr_assert_eq(resolved->size, modules[0].size);

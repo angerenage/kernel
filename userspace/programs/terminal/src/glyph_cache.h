@@ -10,11 +10,11 @@ struct terminal_glyph_cache;
 
 /* One immutable, normalized glyph bitmap retained by the terminal cache. */
 struct terminal_glyph {
-	uint32_t       codepoint;
-	int64_t        left;
-	int64_t        top;
-	size_t         width;
-	size_t         height;
+	uint32_t codepoint;
+	int64_t left;
+	int64_t top;
+	size_t width;
+	size_t height;
 	const uint8_t* alpha;
 };
 
@@ -25,5 +25,5 @@ struct terminal_glyph_cache* terminal_glyph_cache_create(FT_Face face);
 void terminal_glyph_cache_destroy(struct terminal_glyph_cache* cache);
 
 /* Find or rasterize one Unicode codepoint and return its normalized bitmap. */
-bool terminal_glyph_cache_get(struct terminal_glyph_cache* cache, uint32_t codepoint,
-                              const struct terminal_glyph** out_glyph);
+bool terminal_glyph_cache_get(
+		struct terminal_glyph_cache* cache, uint32_t codepoint, const struct terminal_glyph** out_glyph);

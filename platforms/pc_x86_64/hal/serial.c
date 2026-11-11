@@ -1,7 +1,8 @@
-#include <hal/serial.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <hal/serial.h>
 
 #include "utils.h"
 

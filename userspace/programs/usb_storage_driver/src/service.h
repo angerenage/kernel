@@ -1,7 +1,8 @@
 #pragma once
 
-#include <base/cap.h>
 #include <stdbool.h>
+
+#include <base/cap.h>
 
 struct usb_msc_device;
 

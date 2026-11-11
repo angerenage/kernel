@@ -1,9 +1,10 @@
 #pragma once
 
-#include <core/spinlock.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <core/spinlock.h>
 
 typedef uint64_t id_table_id_t;
 
@@ -12,22 +13,22 @@ typedef uint64_t id_table_id_t;
 union id_table_slot;
 
 struct id_table {
-	struct spinlock      lock;
-	id_table_id_t        min_id;
-	id_table_id_t        max_id;
-	size_t               count;
-	size_t               capacity;
-	size_t               high_watermark;
-	size_t               free_head;
-	void*                storage;
+	struct spinlock lock;
+	id_table_id_t min_id;
+	id_table_id_t max_id;
+	size_t count;
+	size_t capacity;
+	size_t high_watermark;
+	size_t free_head;
+	void* storage;
 	union id_table_slot* slots;
 };
 
 #define ID_TABLE_INITIALIZER(table_name, minimum_id, maximum_id)                                                       \
 	{                                                                                                                  \
-		.lock      = SPINLOCK_INIT_CLASS((table_name), SPINLOCK_ORDER_ID_TABLE, SPINLOCK_FLAG_IRQSAVE),                \
-		.min_id    = (minimum_id),                                                                                     \
-		.max_id    = (maximum_id),                                                                                     \
+		.lock = SPINLOCK_INIT_CLASS((table_name), SPINLOCK_ORDER_ID_TABLE, SPINLOCK_FLAG_IRQSAVE),                     \
+		.min_id = (minimum_id),                                                                                        \
+		.max_id = (maximum_id),                                                                                        \
 		.free_head = SIZE_MAX,                                                                                         \
 	}
 
@@ -55,8 +56,8 @@ static inline bool id_table_result_is_success(enum id_table_result result) {
  * only proves that the object was registered at that instant; callers that need
  * stronger lifetime guarantees must add object-specific reference counting.
  */
-enum id_table_result id_table_init(struct id_table* table, const char* lock_name, id_table_id_t min_id,
-                                   id_table_id_t max_id);
+enum id_table_result id_table_init(
+		struct id_table* table, const char* lock_name, id_table_id_t min_id, id_table_id_t max_id);
 
 /* Release table storage. Registered objects are left untouched. */
 void id_table_deinit(struct id_table* table);

@@ -4,11 +4,12 @@
 #error "I/O port state is only available on x86_64"
 #endif
 
-#include <base/cap.h>
-#include <hal/io_port.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/cap.h>
+#include <hal/io_port.h>
 
 struct io_port_state;
 struct process;

@@ -1,9 +1,10 @@
 #pragma once
 
-#include <base/cap.h>
-#include <base/thread.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/cap.h>
+#include <base/thread.h>
 
 typedef uint64_t process_id_t;
 
@@ -63,8 +64,8 @@ enum process_exit_code {
 /* Identity information returned by the self syscall. */
 struct self_info {
 	process_id_t pid;
-	uint64_t     thread_id;
-	uint64_t     thread_count;
+	uint64_t thread_id;
+	uint64_t thread_count;
 	/* Capability for the calling process. */
 	cap_id_t self_cap;
 	/* Capability for the calling process' address space. */
@@ -82,8 +83,8 @@ struct process_create_response {
 /* Response with process identity information. */
 struct process_info_response {
 	process_id_t pid;
-	uint64_t     thread_id;
-	uint64_t     thread_count;
+	uint64_t thread_id;
+	uint64_t thread_count;
 };
 
 /* Response with process exit code. */
@@ -108,11 +109,11 @@ enum process_spawn_thread_flags {
 
 /* Operation codes for process capability requests. */
 enum process_op {
-	PROCESS_OP_INFO         = 0,
-	PROCESS_OP_RUN          = 1,
-	PROCESS_OP_WAIT         = 2,
-	PROCESS_OP_DETACH       = 3,
-	PROCESS_OP_KILL         = 4,
+	PROCESS_OP_INFO = 0,
+	PROCESS_OP_RUN = 1,
+	PROCESS_OP_WAIT = 2,
+	PROCESS_OP_DETACH = 3,
+	PROCESS_OP_KILL = 4,
 	PROCESS_OP_SPAWN_THREAD = 5,
 };
 
@@ -139,25 +140,25 @@ struct process_detach_request {
 /* Request to kill a process. */
 struct process_kill_request {
 	struct process_request_header header;
-	uintptr_t                     exit_code;
+	uintptr_t exit_code;
 };
 
 /* Request to run a process. arg_data is copied from the caller onto the new thread's stack. */
 struct process_run_request {
 	struct process_request_header header;
-	uintptr_t                     entry;
-	const void*                   arg_data;
-	size_t                        arg_size;
+	uintptr_t entry;
+	const void* arg_data;
+	size_t arg_size;
 };
 
 /* Request to create a joinable thread. arg_data is copied from the caller onto the new thread's stack. */
 struct process_spawn_thread_request {
 	struct process_request_header header;
-	uint32_t                      flags;
-	uint32_t                      reserved;
-	uintptr_t                     entry;
-	const void*                   arg_data;
-	size_t                        arg_size;
-	const char*                   name;
-	size_t                        name_length;
+	uint32_t flags;
+	uint32_t reserved;
+	uintptr_t entry;
+	const void* arg_data;
+	size_t arg_size;
+	const char* name;
+	size_t name_length;
 };

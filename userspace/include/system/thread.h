@@ -1,10 +1,11 @@
 #pragma once
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #include <base/cap.h>
 #include <base/syscall.h>
 #include <base/thread.h>
-#include <stdbool.h>
-#include <stdint.h>
 
 /* Terminate only the calling thread with the supplied exit code. */
 __attribute__((noreturn))

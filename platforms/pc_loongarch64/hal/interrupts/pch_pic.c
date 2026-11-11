@@ -1,9 +1,10 @@
 #include "pch_pic.h"
 
-#include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <hal/interrupts.h>
 
 #include "controller.h"
 #include "eiointc.h"
@@ -39,7 +40,7 @@ bool loongarch64_pch_pic_probe(struct fixed_controller* controller) {
 	}
 	for (uint32_t source = 0u; source < controller->source_count; source++) {
 		loongarch64_mmio_write8(
-			controller->virtual_base, PCH_PIC_VECTOR(source), (uint8_t)(controller->vector_base + source));
+				controller->virtual_base, PCH_PIC_VECTOR(source), (uint8_t)(controller->vector_base + source));
 		loongarch64_mmio_write8(controller->virtual_base, PCH_PIC_ROUTE(source), 1u);
 	}
 	controller->ready = true;
@@ -55,14 +56,14 @@ bool loongarch64_pch_pic_source_reserved(const struct fixed_controller* controll
 	return false;
 }
 
-bool loongarch64_pch_pic_set_masked_route(struct fixed_controller* controller, uint32_t source, uint32_t route,
-                                          bool masked) {
+bool loongarch64_pch_pic_set_masked_route(
+		struct fixed_controller* controller, uint32_t source, uint32_t route, bool masked) {
 	if (controller == NULL || source >= controller->source_count || route >= EIOINTC_VECTOR_COUNT ||
-	    !loongarch64_pch_pic_probe(controller))
+			!loongarch64_pch_pic_probe(controller))
 		return false;
-	struct irq_state irq    = loongarch64_controllers_lock();
-	uint32_t         offset = PCH_PIC_MASK + (source / 32u) * 4u;
-	uint32_t         value  = loongarch64_mmio_read32(controller->virtual_base, offset);
+	struct irq_state irq = loongarch64_controllers_lock();
+	uint32_t offset = PCH_PIC_MASK + (source / 32u) * 4u;
+	uint32_t value = loongarch64_mmio_read32(controller->virtual_base, offset);
 	if (masked) value |= 1u << (source % 32u);
 	else {
 		loongarch64_mmio_write32(controller->virtual_base, PCH_PIC_CLEAR + (source / 32u) * 4u, 1u << (source % 32u));
@@ -81,14 +82,14 @@ bool loongarch64_pch_pic_set_masked(struct fixed_controller* controller, uint32_
 }
 
 bool loongarch64_pch_pic_configure(struct fixed_controller* controller, uint32_t source, uint32_t route,
-                                   const struct hal_interrupt_delivery* delivery) {
+		const struct hal_interrupt_delivery* delivery) {
 	if (controller == NULL || delivery == NULL || source >= controller->source_count ||
-	    !loongarch64_pch_pic_probe(controller))
+			!loongarch64_pch_pic_probe(controller))
 		return false;
 	struct irq_state irq = loongarch64_controllers_lock();
 	loongarch64_mmio_write8(controller->virtual_base, PCH_PIC_VECTOR(source), (uint8_t)route);
 	uint32_t word = (source / 32u) * 4u;
-	uint32_t bit  = 1u << (source % 32u);
+	uint32_t bit = 1u << (source % 32u);
 	if (delivery->trigger != HAL_INTERRUPT_TRIGGER_FIRMWARE) {
 		uint32_t edge = loongarch64_mmio_read32(controller->virtual_base, PCH_PIC_EDGE + word);
 		if (delivery->trigger == HAL_INTERRUPT_TRIGGER_EDGE) edge |= bit;
@@ -115,7 +116,7 @@ bool loongarch64_pch_pic_mask_vector_leaf(uint32_t vector) {
 			if (loongarch64_pch_lpc_handle_cascade(source)) return true;
 			if (!loongarch64_pch_pic_set_masked_route(controller, source, vector, true)) return false;
 			loongarch64_mmio_write32(
-				controller->virtual_base, PCH_PIC_CLEAR + (source / 32u) * 4u, 1u << (source % 32u));
+					controller->virtual_base, PCH_PIC_CLEAR + (source / 32u) * 4u, 1u << (source % 32u));
 			return true;
 		}
 	}

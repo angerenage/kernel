@@ -1,6 +1,8 @@
-#include <criterion/criterion.h>
-#include <kernel/crash_qr.h>
 #include <string.h>
+
+#include <kernel/crash_qr.h>
+
+#include <criterion/criterion.h>
 
 static bool qr_module(const struct kernel_crash_qr* qr, size_t x, size_t y) {
 	size_t index = y * qr->size + x;
@@ -9,18 +11,18 @@ static bool qr_module(const struct kernel_crash_qr* qr, size_t x, size_t y) {
 
 static struct boot_framebuffer rgb32_framebuffer(void* pixels, size_t width, size_t height) {
 	return (struct boot_framebuffer){
-		.address          = pixels,
-		.width            = width,
-		.height           = height,
-		.pitch            = width * 4u,
-		.bpp              = 32u,
-		.memory_model     = 1u,
-		.red_mask_size    = 8u,
-		.red_mask_shift   = 16u,
-		.green_mask_size  = 8u,
+		.address = pixels,
+		.width = width,
+		.height = height,
+		.pitch = width * 4u,
+		.bpp = 32u,
+		.memory_model = 1u,
+		.red_mask_size = 8u,
+		.red_mask_shift = 16u,
+		.green_mask_size = 8u,
 		.green_mask_shift = 8u,
-		.blue_mask_size   = 8u,
-		.blue_mask_shift  = 0u,
+		.blue_mask_size = 8u,
+		.blue_mask_shift = 0u,
 	};
 }
 
@@ -36,11 +38,11 @@ Test(crash_qr, encodes_a_bounded_byte_payload) {
 }
 
 Test(crash_qr, draws_a_centered_high_contrast_symbol_on_blue) {
-	static uint8_t          pixels[96u * 96u * 4u];
-	struct kernel_crash_qr  qr;
-	struct boot_framebuffer framebuffer  = rgb32_framebuffer(pixels, 96u, 96u);
-	const size_t            panel_left   = 19u;
-	const size_t            first_module = panel_left + 8u;
+	static uint8_t pixels[96u * 96u * 4u];
+	struct kernel_crash_qr qr;
+	struct boot_framebuffer framebuffer = rgb32_framebuffer(pixels, 96u, 96u);
+	const size_t panel_left = 19u;
+	const size_t first_module = panel_left + 8u;
 
 	memset(pixels, 0xa5, sizeof(pixels));
 	cr_assert(kernel_crash_qr_encode(&qr, "x", 1u));
@@ -53,8 +55,8 @@ Test(crash_qr, draws_a_centered_high_contrast_symbol_on_blue) {
 }
 
 Test(crash_qr, rejects_an_unsafe_framebuffer_without_writing) {
-	uint8_t                 pixels[64u];
-	struct kernel_crash_qr  qr;
+	uint8_t pixels[64u];
+	struct kernel_crash_qr qr;
 	struct boot_framebuffer framebuffer = rgb32_framebuffer(pixels, 4u, 4u);
 
 	memset(pixels, 0xa5, sizeof(pixels));

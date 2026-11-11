@@ -2,13 +2,12 @@ BasedOnStyle: LLVM
 UseTab: AlignWithSpaces
 IndentWidth: 4
 TabWidth: 4
-ContinuationIndentWidth: 4
+ContinuationIndentWidth: 8
 ColumnLimit: 120
 IncludeBlocks: Regroup
 NamespaceIndentation: Inner
 AccessModifierOffset: -4
-AlignConsecutiveAssignments: Consecutive
-AlignConsecutiveDeclarations: Consecutive
+AlignAfterOpenBracket: false
 DerivePointerAlignment: false
 PointerAlignment: Left
 AllowShortIfStatementsOnASingleLine: AllIfsAndElse
@@ -18,19 +17,53 @@ BreakBeforeTernaryOperators: true
 BreakBeforeBraces: Custom
 BraceWrapping:
   BeforeElse: true
-AlignArrayOfStructures: Right
+AlignArrayOfStructures: None
 Cpp11BracedListStyle: true
 BinPackArguments: false
+BreakFunctionDefinitionParameters: false
+BreakFunctionDeclarationParameters: false
+BreakAfterOpenBracketBracedList: true
+BreakBeforeCloseBracketBracedList: true
+BracedInitializerIndentWidth: 4
 
 IncludeCategories:
-  - Regex: '^<.*>'
+  - Regex: '^<libc/.*>'
     Priority: 1
+    SortPriority: 1
+  - Regex: '^<[^/]+>$'
+    Priority: 1
+    SortPriority: 2
+  - Regex: '^<base/.*>'
+    Priority: 2
+    SortPriority: 10
+  - Regex: '^<boot/.*>'
+    Priority: 2
+    SortPriority: 11
+  - Regex: '^<firmware/.*>'
+    Priority: 2
+    SortPriority: 12
+  - Regex: '^<hal/.*>'
+    Priority: 2
+    SortPriority: 13
   - Regex: '^<core/.*>'
     Priority: 2
+    SortPriority: 14
   - Regex: '^<kernel/.*>'
+    Priority: 2
+    SortPriority: 15
+  - Regex: '^<protocol/.*>'
     Priority: 3
-  - Regex: '^<hal/.*>'
-    Priority: 4
-  - Regex: '^".*"'
+    SortPriority: 20
+  - Regex: '^<system/.*>'
+    Priority: 3
+    SortPriority: 21
+  - Regex: '^<runtime/.*>'
+    Priority: 3
+    SortPriority: 22
+  - Regex: '^<.*>'
     Priority: 5
+    SortPriority: 30
+  - Regex: '^".*"'
+    Priority: 6
+    SortPriority: 40
 SortIncludes: true

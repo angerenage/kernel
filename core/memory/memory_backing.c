@@ -1,12 +1,13 @@
+#include <stddef.h>
+#include <string.h>
+
+#include <hal/hcf.h>
 #include <core/memory_backing.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/sched.h>
 #include <core/spinlock.h>
-#include <hal/hcf.h>
 #include <kernel/trace.h>
-#include <stddef.h>
-#include <string.h>
 
 #include "memory_backing_tree.h"
 
@@ -14,25 +15,25 @@
 	kernel_trace_emit(KERNEL_TRACE_EVENT_VM_PHASE, type, kernel_trace_thread_id(sched_current_thread()), phase)
 
 struct memory_backing {
-	struct spinlock               lock;
+	struct spinlock lock;
 	struct memory_backing_rb_tree extents;
 	struct memory_backing_rb_node claim_node;
-	size_t                        size;
-	uintptr_t                     claim_address;
-	uint64_t                      reference_count;
-	uint64_t                      topology_generation;
-	enum memory_backing_kind      kind;
-	bool                          cpu_accessible;
-	bool                          external_claim;
+	size_t size;
+	uintptr_t claim_address;
+	uint64_t reference_count;
+	uint64_t topology_generation;
+	enum memory_backing_kind kind;
+	bool cpu_accessible;
+	bool external_claim;
 };
 
 union backing_metadata_payload {
-	struct memory_backing        backing;
+	struct memory_backing backing;
 	struct memory_backing_extent extent;
 };
 
 struct backing_metadata_slot {
-	struct backing_metadata_slot*  next;
+	struct backing_metadata_slot* next;
 	union backing_metadata_payload payload;
 };
 
@@ -40,16 +41,16 @@ struct backing_metadata_slab {
 	struct backing_metadata_slab* next;
 	struct backing_metadata_slab* previous;
 	struct backing_metadata_slot* free_slots;
-	uintptr_t                     physical_address;
-	size_t                        used;
+	uintptr_t physical_address;
+	size_t used;
 };
 
 static struct backing_metadata_slab* metadata_slabs;
-static struct spinlock               metadata_lock =
-	SPINLOCK_INIT_CLASS("memory_backing_metadata", SPINLOCK_ORDER_BACKING_METADATA, SPINLOCK_FLAG_IRQSAVE);
+static struct spinlock metadata_lock =
+		SPINLOCK_INIT_CLASS("memory_backing_metadata", SPINLOCK_ORDER_BACKING_METADATA, SPINLOCK_FLAG_IRQSAVE);
 static struct memory_backing_rb_tree external_claims;
-static struct spinlock               external_claim_lock =
-	SPINLOCK_INIT_CLASS("memory_backing_claim", SPINLOCK_ORDER_MEMORY_BACKING, SPINLOCK_FLAG_IRQSAVE);
+static struct spinlock external_claim_lock =
+		SPINLOCK_INIT_CLASS("memory_backing_claim", SPINLOCK_ORDER_MEMORY_BACKING, SPINLOCK_FLAG_IRQSAVE);
 
 #define METADATA_ALIGN _Alignof(struct backing_metadata_slot)
 #define METADATA_SLAB_OFFSET ((sizeof(struct backing_metadata_slab) + METADATA_ALIGN - 1u) & ~(METADATA_ALIGN - 1u))
@@ -64,10 +65,10 @@ static size_t backing_granule(void) {
 }
 
 static struct backing_metadata_slab* metadata_slab_create(size_t granule) {
-	struct pmm_extent             allocation;
+	struct pmm_extent allocation;
 	struct backing_metadata_slab* slab;
-	uint8_t*                      slots;
-	size_t                        count;
+	uint8_t* slots;
+	size_t count;
 	if (granule == 0u || !pmm_alloc(&(const struct pmm_alloc_request){.size = granule}, &allocation)) return NULL;
 	slab = physical_to_virtual(allocation.address);
 	memset(slab, 0, granule);
@@ -81,20 +82,20 @@ static struct backing_metadata_slab* metadata_slab_create(size_t granule) {
 		return NULL;
 	}
 	slab->physical_address = allocation.address;
-	slots                  = (uint8_t*)slab + METADATA_SLAB_OFFSET;
+	slots = (uint8_t*)slab + METADATA_SLAB_OFFSET;
 	for (size_t i = 0u; i < count; i++) {
 		struct backing_metadata_slot* slot = (void*)(slots + i * sizeof(*slot));
-		slot->next                         = slab->free_slots;
-		slab->free_slots                   = slot;
+		slot->next = slab->free_slots;
+		slab->free_slots = slot;
 	}
 	return slab;
 }
 
 static void* metadata_alloc(void) {
-	struct irq_state              state = spinlock_lock_irqsave(&metadata_lock);
+	struct irq_state state = spinlock_lock_irqsave(&metadata_lock);
 	struct backing_metadata_slab* slab;
 	struct backing_metadata_slot* slot;
-	size_t                        granule = backing_granule();
+	size_t granule = backing_granule();
 	slab = metadata_slabs != NULL && metadata_slabs->free_slots != NULL ? metadata_slabs : NULL;
 	if (slab == NULL) {
 		slab = metadata_slab_create(granule);
@@ -106,7 +107,7 @@ static void* metadata_alloc(void) {
 		if (metadata_slabs != NULL) metadata_slabs->previous = slab;
 		metadata_slabs = slab;
 	}
-	slot             = slab->free_slots;
+	slot = slab->free_slots;
 	slab->free_slots = slot->next;
 	slab->used++;
 	memset(&slot->payload, 0, sizeof(slot->payload));
@@ -123,17 +124,17 @@ static struct backing_metadata_slab* metadata_owner(const void* payload, size_t 
 static void metadata_free(void* payload) {
 	struct backing_metadata_slot* slot;
 	struct backing_metadata_slab* slab;
-	struct irq_state              state;
-	uintptr_t                     physical_address = 0u;
-	size_t                        granule          = backing_granule();
-	bool                          release          = false;
+	struct irq_state state;
+	uintptr_t physical_address = 0u;
+	size_t granule = backing_granule();
+	bool release = false;
 	if (payload == NULL || granule == 0u) hcf();
-	slot  = (struct backing_metadata_slot*)((uint8_t*)payload - offsetof(struct backing_metadata_slot, payload));
-	slab  = metadata_owner(payload, granule);
+	slot = (struct backing_metadata_slot*)((uint8_t*)payload - offsetof(struct backing_metadata_slot, payload));
+	slab = metadata_owner(payload, granule);
 	state = spinlock_lock_irqsave(&metadata_lock);
 	if (slab->used == 0u) hcf();
 	memset(&slot->payload, 0, sizeof(slot->payload));
-	slot->next       = slab->free_slots;
+	slot->next = slab->free_slots;
 	slab->free_slots = slot;
 	slab->used--;
 	if (slab->previous != NULL) slab->previous->next = slab->next;
@@ -142,11 +143,11 @@ static void metadata_free(void* payload) {
 	if (slab->next != NULL) slab->next->previous = slab->previous;
 	if (slab->used == 0u) {
 		physical_address = slab->physical_address;
-		release          = true;
+		release = true;
 	}
 	else {
 		slab->previous = NULL;
-		slab->next     = metadata_slabs;
+		slab->next = metadata_slabs;
 		if (metadata_slabs != NULL) metadata_slabs->previous = slab;
 		metadata_slabs = slab;
 	}
@@ -159,15 +160,15 @@ static struct memory_backing* claim_from_node(struct memory_backing_rb_node* nod
 }
 
 static bool external_claim_insert(struct memory_backing* backing) {
-	struct memory_backing_rb_node*  parent = NULL;
-	struct memory_backing_rb_node** link   = &external_claims.root;
-	struct irq_state                state;
-	uintptr_t                       end = backing->claim_address + backing->size;
-	state                               = spinlock_lock_irqsave(&external_claim_lock);
+	struct memory_backing_rb_node* parent = NULL;
+	struct memory_backing_rb_node** link = &external_claims.root;
+	struct irq_state state;
+	uintptr_t end = backing->claim_address + backing->size;
+	state = spinlock_lock_irqsave(&external_claim_lock);
 	while (*link != NULL) {
-		struct memory_backing* current     = claim_from_node(*link);
-		uintptr_t              current_end = current->claim_address + current->size;
-		parent                             = *link;
+		struct memory_backing* current = claim_from_node(*link);
+		uintptr_t current_end = current->claim_address + current->size;
+		parent = *link;
 		if (end <= current->claim_address) link = &(*link)->left;
 		else if (backing->claim_address >= current_end) link = &(*link)->right;
 		else {
@@ -197,13 +198,13 @@ static bool valid_capacity(size_t size) {
 static struct memory_backing* backing_alloc(size_t size, enum memory_backing_kind kind) {
 	struct memory_backing* backing = metadata_alloc();
 	if (backing == NULL) return NULL;
-	backing->size            = size;
-	backing->kind            = kind;
+	backing->size = size;
+	backing->kind = kind;
 	backing->reference_count = 1u;
 	spinlock_init_class(&backing->lock,
-	                    "memory_backing",
-	                    SPINLOCK_ORDER_MEMORY_BACKING,
-	                    SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
+			"memory_backing",
+			SPINLOCK_ORDER_MEMORY_BACKING,
+			SPINLOCK_FLAG_IRQSAVE | SPINLOCK_FLAG_ALLOW_EXCEPTION);
 	return backing;
 }
 
@@ -214,49 +215,50 @@ bool memory_backing_create_anonymous(size_t size, struct memory_backing** out_ba
 	backing = backing_alloc(size, MEMORY_BACKING_ANONYMOUS);
 	if (backing == NULL) return false;
 	backing->cpu_accessible = true;
-	*out_backing            = backing;
+	*out_backing = backing;
 	return true;
 }
 
-bool memory_backing_create_physical(const struct memory_backing_physical_request* request,
-                                    struct memory_backing**                       out_backing) {
-	struct memory_backing*        backing;
+bool memory_backing_create_physical(
+		const struct memory_backing_physical_request* request, struct memory_backing** out_backing) {
+	struct memory_backing* backing;
 	struct memory_backing_extent* extent;
-	enum pmm_claim_result         claim;
-	size_t                        granule = backing_granule();
+	enum pmm_claim_result claim;
+	size_t granule = backing_granule();
 	if (out_backing != NULL) *out_backing = NULL;
 	if (out_backing == NULL || request == NULL || !valid_capacity(request->size) ||
-	    (request->physical_address & (granule - 1u)) != 0u || request->size > UINTPTR_MAX - request->physical_address)
+			(request->physical_address & (granule - 1u)) != 0u ||
+			request->size > UINTPTR_MAX - request->physical_address)
 		return false;
 	claim = pmm_claim((struct pmm_extent){.address = request->physical_address, .size = request->size});
 	if (claim == PMM_CLAIM_UNAVAILABLE) return false;
 	backing = backing_alloc(request->size, MEMORY_BACKING_PHYSICAL);
 	if (backing == NULL) {
 		if (claim == PMM_CLAIM_OK &&
-		    !pmm_free((struct pmm_extent){.address = request->physical_address, .size = request->size}))
+				!pmm_free((struct pmm_extent){.address = request->physical_address, .size = request->size}))
 			hcf();
 		return false;
 	}
 	extent = metadata_alloc();
 	if (extent == NULL) {
 		if (claim == PMM_CLAIM_OK &&
-		    !pmm_free((struct pmm_extent){.address = request->physical_address, .size = request->size}))
+				!pmm_free((struct pmm_extent){.address = request->physical_address, .size = request->size}))
 			hcf();
 		metadata_free(backing);
 		return false;
 	}
 	*extent = (struct memory_backing_extent){
-		.logical_start  = 0u,
-		.size           = request->size,
+		.logical_start = 0u,
+		.size = request->size,
 		.physical_start = request->physical_address,
 	};
 	backing->claim_address = request->physical_address;
 	if (claim == PMM_CLAIM_OK) {
-		extent->source          = MEMORY_BACKING_EXTENT_PMM;
+		extent->source = MEMORY_BACKING_EXTENT_PMM;
 		backing->cpu_accessible = true;
 	}
 	else if (claim == PMM_CLAIM_NOT_MANAGED) {
-		extent->source          = MEMORY_BACKING_EXTENT_EXTERNAL;
+		extent->source = MEMORY_BACKING_EXTENT_EXTERNAL;
 		backing->cpu_accessible = request->external_cpu_accessible;
 		if (!external_claim_insert(backing)) {
 			metadata_free(extent);
@@ -277,7 +279,7 @@ bool memory_backing_retain(struct memory_backing* backing) {
 	for (;;) {
 		if (current == 0u || current == UINT64_MAX) return false;
 		if (__atomic_compare_exchange_n(
-				&backing->reference_count, &current, current + 1u, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+					&backing->reference_count, &current, current + 1u, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
 			return true;
 	}
 }
@@ -289,7 +291,7 @@ static void release_extent_tree(struct memory_backing_rb_node* node) {
 	release_extent_tree(node->right);
 	extent = (struct memory_backing_extent*)((uint8_t*)node - offsetof(struct memory_backing_extent, tree_node));
 	if (extent->source == MEMORY_BACKING_EXTENT_PMM &&
-	    !pmm_free((struct pmm_extent){.address = extent->physical_start, .size = extent->size}))
+			!pmm_free((struct pmm_extent){.address = extent->physical_start, .size = extent->size}))
 		hcf();
 	metadata_free(extent);
 }
@@ -321,27 +323,27 @@ static bool valid_range(const struct memory_backing* backing, size_t offset, siz
 	return backing != NULL && offset <= backing->size && size <= backing->size - offset;
 }
 
-static void query_locked(struct memory_backing* backing, size_t offset, size_t maximum_size,
-                         struct memory_backing_span* span) {
+static void query_locked(
+		struct memory_backing* backing, size_t offset, size_t maximum_size, struct memory_backing_span* span) {
 	struct memory_backing_extent* extent = memory_backing_tree_find(&backing->extents, offset);
-	span->offset                         = offset;
-	span->physical_address               = 0u;
+	span->offset = offset;
+	span->physical_address = 0u;
 	if (extent != NULL) {
-		size_t within          = offset - extent->logical_start;
-		span->kind             = MEMORY_BACKING_SPAN_PRESENT;
-		span->size             = extent->size - within;
+		size_t within = offset - extent->logical_start;
+		span->kind = MEMORY_BACKING_SPAN_PRESENT;
+		span->size = extent->size - within;
 		span->physical_address = extent->physical_start + within;
 	}
 	else {
 		struct memory_backing_extent* next = memory_backing_tree_lower_bound(&backing->extents, offset);
-		span->kind                         = MEMORY_BACKING_SPAN_HOLE;
-		span->size                         = next == NULL ? backing->size - offset : next->logical_start - offset;
+		span->kind = MEMORY_BACKING_SPAN_HOLE;
+		span->size = next == NULL ? backing->size - offset : next->logical_start - offset;
 	}
 	if (span->size > maximum_size) span->size = maximum_size;
 }
 
-bool memory_backing_query(struct memory_backing* backing, size_t offset, size_t maximum_size,
-                          struct memory_backing_span* out_span) {
+bool memory_backing_query(
+		struct memory_backing* backing, size_t offset, size_t maximum_size, struct memory_backing_span* out_span) {
 	struct irq_state state;
 	if (out_span != NULL) *out_span = (struct memory_backing_span){0};
 	if (out_span == NULL || maximum_size == 0u || !valid_range(backing, offset, maximum_size)) return false;
@@ -385,20 +387,20 @@ static void rollback_pending(struct memory_backing_extent* pending) {
 }
 
 struct materialize_plan {
-	size_t                   logical_start;
-	size_t                   size;
+	size_t logical_start;
+	size_t size;
 	struct pmm_alloc_request allocation;
-	bool                     allow_smaller;
+	bool allow_smaller;
 };
 
 static bool allocate_plan(struct memory_backing_extent** pending, const struct materialize_plan* plan) {
 	size_t logical_start = plan->logical_start;
-	size_t size          = plan->size;
+	size_t size = plan->size;
 	while (size != 0u) {
 		struct memory_backing_extent* extent;
-		struct pmm_alloc_request      request = plan->allocation;
-		struct pmm_extent             allocation;
-		size_t                        attempt = size;
+		struct pmm_alloc_request request = plan->allocation;
+		struct pmm_extent allocation;
+		size_t attempt = size;
 		for (;;) {
 			request.size = attempt;
 			TRACE_BACKING_PHASE(KERNEL_TRACE_VM_BACKING_PMM_ALLOC, KERNEL_TRACE_RECORD_BEGIN);
@@ -420,11 +422,11 @@ static bool allocate_plan(struct memory_backing_extent** pending, const struct m
 		memset(physical_to_virtual(allocation.address), 0, allocation.size);
 		TRACE_BACKING_PHASE(KERNEL_TRACE_VM_BACKING_ZERO, KERNEL_TRACE_RECORD_END);
 		*extent = (struct memory_backing_extent){
-			.logical_start  = logical_start,
-			.size           = allocation.size,
+			.logical_start = logical_start,
+			.size = allocation.size,
 			.physical_start = allocation.address,
-			.source         = MEMORY_BACKING_EXTENT_PMM,
-			.pending_next   = *pending,
+			.source = MEMORY_BACKING_EXTENT_PMM,
+			.pending_next = *pending,
 		};
 		*pending = extent;
 		logical_start += allocation.size;
@@ -444,11 +446,10 @@ static bool request_valid(struct memory_backing* backing, const struct memory_ba
 	       (request->maximum_address == 0u || request->maximum_address > request->minimum_address);
 }
 
-static bool contiguous_base_locked(struct memory_backing*                           backing,
-                                   const struct memory_backing_materialize_request* request, uintptr_t* out_base,
-                                   bool* out_whole_hole) {
+static bool contiguous_base_locked(struct memory_backing* backing,
+		const struct memory_backing_materialize_request* request, uintptr_t* out_base, bool* out_whole_hole) {
 	struct memory_backing_extent* anchor =
-		memory_backing_tree_first_intersecting(&backing->extents, request->offset, request->size);
+			memory_backing_tree_first_intersecting(&backing->extents, request->offset, request->size);
 	if (anchor == NULL) {
 		*out_whole_hole = true;
 		return true;
@@ -467,72 +468,70 @@ static bool contiguous_base_locked(struct memory_backing*                       
 	return request->size <= UINTPTR_MAX - *out_base;
 }
 
-static bool next_noncontiguous_plan_locked(struct memory_backing*                           backing,
-                                           const struct memory_backing_materialize_request* request, size_t* cursor,
-                                           struct materialize_plan* plan) {
-	size_t                        end = request->offset + request->size;
+static bool next_noncontiguous_plan_locked(struct memory_backing* backing,
+		const struct memory_backing_materialize_request* request, size_t* cursor, struct materialize_plan* plan) {
+	size_t end = request->offset + request->size;
 	struct memory_backing_extent* extent =
-		memory_backing_tree_first_intersecting(&backing->extents, *cursor, end - *cursor);
+			memory_backing_tree_first_intersecting(&backing->extents, *cursor, end - *cursor);
 	while (*cursor < end && extent != NULL && *cursor >= extent->logical_start) {
 		size_t extent_end = extent->logical_start + extent->size;
-		*cursor           = extent_end < end ? extent_end : end;
-		extent            = memory_backing_tree_next(extent);
+		*cursor = extent_end < end ? extent_end : end;
+		extent = memory_backing_tree_next(extent);
 	}
 	if (*cursor == end) {
 		*plan = (struct materialize_plan){0};
 		return true;
 	}
 	size_t hole_end = extent != NULL && extent->logical_start < end ? extent->logical_start : end;
-	*plan           = (struct materialize_plan){
+	*plan = (struct materialize_plan){
 		.logical_start = *cursor,
-		.size          = hole_end - *cursor,
+		.size = hole_end - *cursor,
 		.allocation =
-			{
-						 .alignment       = request->alignment,
-						 .minimum_address = request->minimum_address,
-						 .maximum_address = request->maximum_address,
-						 },
+				{
+					.alignment = request->alignment,
+					.minimum_address = request->minimum_address,
+					.maximum_address = request->maximum_address,
+				},
 		.allow_smaller = true,
 	};
 	*cursor = hole_end;
 	return true;
 }
 
-static bool next_contiguous_plan_locked(struct memory_backing*                           backing,
-                                        const struct memory_backing_materialize_request* request,
-                                        uintptr_t expected_base, size_t* cursor, struct materialize_plan* plan) {
-	size_t                        end       = request->offset + request->size;
-	size_t                        alignment = request->alignment == 0u ? backing_granule() : request->alignment;
+static bool next_contiguous_plan_locked(struct memory_backing* backing,
+		const struct memory_backing_materialize_request* request, uintptr_t expected_base, size_t* cursor,
+		struct materialize_plan* plan) {
+	size_t end = request->offset + request->size;
+	size_t alignment = request->alignment == 0u ? backing_granule() : request->alignment;
 	struct memory_backing_extent* extent =
-		memory_backing_tree_first_intersecting(&backing->extents, *cursor, end - *cursor);
+			memory_backing_tree_first_intersecting(&backing->extents, *cursor, end - *cursor);
 	while (*cursor < end && extent != NULL && *cursor >= extent->logical_start) {
-		size_t    within     = *cursor - extent->logical_start;
-		size_t    extent_end = extent->logical_start + extent->size;
-		uintptr_t expected   = expected_base + (*cursor - request->offset);
+		size_t within = *cursor - extent->logical_start;
+		size_t extent_end = extent->logical_start + extent->size;
+		uintptr_t expected = expected_base + (*cursor - request->offset);
 		if (extent->physical_start + within != expected) return false;
 		*cursor = extent_end < end ? extent_end : end;
-		extent  = memory_backing_tree_next(extent);
+		extent = memory_backing_tree_next(extent);
 	}
 	if (*cursor == end) {
 		*plan = (struct materialize_plan){0};
 		return true;
 	}
-	size_t    hole_end  = extent != NULL && extent->logical_start < end ? extent->logical_start : end;
-	size_t    hole_size = hole_end - *cursor;
-	uintptr_t expected  = expected_base + (*cursor - request->offset);
+	size_t hole_end = extent != NULL && extent->logical_start < end ? extent->logical_start : end;
+	size_t hole_size = hole_end - *cursor;
+	uintptr_t expected = expected_base + (*cursor - request->offset);
 	uintptr_t exact_end = expected + hole_size;
 	if ((expected_base & (alignment - 1u)) != 0u || expected < request->minimum_address ||
-	    (request->maximum_address != 0u && exact_end > request->maximum_address))
+			(request->maximum_address != 0u && exact_end > request->maximum_address))
 		return false;
 	*plan = (struct materialize_plan){
 		.logical_start = *cursor,
-		.size          = hole_size,
-		.allocation =
-			{
-						 .alignment       = backing_granule(),
-						 .minimum_address = expected,
-						 .maximum_address = exact_end,
-						 },
+		.size = hole_size,
+		.allocation = {
+			.alignment = backing_granule(),
+			.minimum_address = expected,
+			.maximum_address = exact_end,
+		},
 	};
 	*cursor = hole_end;
 	return true;
@@ -542,7 +541,7 @@ static void commit_pending_locked(struct memory_backing* backing, struct memory_
 	if (pending == NULL) return;
 	while (pending != NULL) {
 		struct memory_backing_extent* next = pending->pending_next;
-		pending->pending_next              = NULL;
+		pending->pending_next = NULL;
 		insert_and_merge(backing, pending);
 		pending = next;
 	}
@@ -553,10 +552,10 @@ static void commit_pending_locked(struct memory_backing* backing, struct memory_
 #endif
 }
 
-bool memory_backing_materialize(struct memory_backing*                           backing,
-                                const struct memory_backing_materialize_request* request) {
+bool memory_backing_materialize(
+		struct memory_backing* backing, const struct memory_backing_materialize_request* request) {
 	struct memory_backing_span span;
-	struct irq_state           state;
+	struct irq_state state;
 	if (!request_valid(backing, request)) return false;
 	state = spinlock_lock_irqsave(&backing->lock);
 	query_locked(backing, request->offset, request->size, &span);
@@ -564,15 +563,15 @@ bool memory_backing_materialize(struct memory_backing*                          
 	if (span.kind == MEMORY_BACKING_SPAN_PRESENT && span.size == request->size) return true;
 	for (;;) {
 		struct memory_backing_extent* pending = NULL;
-		struct materialize_plan       plan;
-		struct irq_state              state;
-		uint64_t                      generation;
-		uintptr_t                     contiguous_base = 0u;
-		size_t                        cursor          = request->offset;
-		bool                          whole_hole      = false;
-		bool                          retry           = false;
-		state                                         = spinlock_lock_irqsave(&backing->lock);
-		generation                                    = backing->topology_generation;
+		struct materialize_plan plan;
+		struct irq_state state;
+		uint64_t generation;
+		uintptr_t contiguous_base = 0u;
+		size_t cursor = request->offset;
+		bool whole_hole = false;
+		bool retry = false;
+		state = spinlock_lock_irqsave(&backing->lock);
+		generation = backing->topology_generation;
 		if (request->require_contiguous && !contiguous_base_locked(backing, request, &contiguous_base, &whole_hole)) {
 			spinlock_unlock_irqrestore(&backing->lock, state);
 			return false;
@@ -581,13 +580,12 @@ bool memory_backing_materialize(struct memory_backing*                          
 		if (whole_hole) {
 			plan = (struct materialize_plan){
 				.logical_start = request->offset,
-				.size          = request->size,
-				.allocation =
-					{
-								 .alignment       = request->alignment,
-								 .minimum_address = request->minimum_address,
-								 .maximum_address = request->maximum_address,
-								 },
+				.size = request->size,
+				.allocation = {
+					.alignment = request->alignment,
+					.minimum_address = request->minimum_address,
+					.maximum_address = request->maximum_address,
+				},
 			};
 			cursor = request->offset + request->size;
 			if (!allocate_plan(&pending, &plan)) {
@@ -601,7 +599,7 @@ bool memory_backing_materialize(struct memory_backing*                          
 		}
 		while (cursor < request->offset + request->size) {
 			bool plan_valid = true;
-			state           = spinlock_lock_irqsave(&backing->lock);
+			state = spinlock_lock_irqsave(&backing->lock);
 			if (generation != backing->topology_generation) retry = true;
 			else if (request->require_contiguous)
 				plan_valid = next_contiguous_plan_locked(backing, request, contiguous_base, &cursor, &plan);
@@ -641,7 +639,7 @@ bool memory_backing_materialize(struct memory_backing*                          
 
 bool memory_backing_read(struct memory_backing* backing, size_t offset, void* destination, size_t size) {
 	struct memory_backing_span span;
-	size_t                     end;
+	size_t end;
 	if (size == 0u) return valid_range(backing, offset, 0u);
 	if (destination == NULL || !valid_range(backing, offset, size) || !memory_backing_cpu_accessible(backing))
 		return false;
@@ -657,27 +655,27 @@ bool memory_backing_read(struct memory_backing* backing, size_t offset, void* de
 
 bool memory_backing_write(struct memory_backing* backing, size_t offset, const void* source, size_t size) {
 	struct memory_backing_span span;
-	size_t                     granule = backing_granule();
-	size_t                     materialize_start;
-	size_t                     materialize_end;
-	size_t                     end;
+	size_t granule = backing_granule();
+	size_t materialize_start;
+	size_t materialize_end;
+	size_t end;
 	kernel_trace_emit(KERNEL_TRACE_EVENT_VM_BACKING_WRITE,
-	                  KERNEL_TRACE_RECORD_INSTANT,
-	                  kernel_trace_thread_id(sched_current_thread()),
-	                  size);
+			KERNEL_TRACE_RECORD_INSTANT,
+			kernel_trace_thread_id(sched_current_thread()),
+			size);
 	if (size == 0u) return valid_range(backing, offset, 0u);
 	if (source == NULL || granule == 0u || !valid_range(backing, offset, size) ||
-	    !memory_backing_cpu_accessible(backing))
+			!memory_backing_cpu_accessible(backing))
 		return false;
 	if (backing->kind == MEMORY_BACKING_ANONYMOUS) {
 		materialize_start = offset & ~(granule - 1u);
-		materialize_end   = (offset + size + granule - 1u) & ~(granule - 1u);
+		materialize_end = (offset + size + granule - 1u) & ~(granule - 1u);
 		TRACE_BACKING_PHASE(KERNEL_TRACE_VM_BACKING_MATERIALIZE, KERNEL_TRACE_RECORD_BEGIN);
 		bool materialized = memory_backing_materialize(backing,
-		                                               &(const struct memory_backing_materialize_request){
-														   .offset = materialize_start,
-														   .size   = materialize_end - materialize_start,
-													   });
+				&(const struct memory_backing_materialize_request){
+					.offset = materialize_start,
+					.size = materialize_end - materialize_start,
+				});
 		TRACE_BACKING_PHASE(KERNEL_TRACE_VM_BACKING_MATERIALIZE, KERNEL_TRACE_RECORD_END);
 		if (!materialized) return false;
 	}

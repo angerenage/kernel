@@ -1,6 +1,7 @@
 #pragma once
 
 #include <base/cap.h>
+
 #include <protocol/device.h>
 
 /* Inspect and retain one PCI xHCI controller. */

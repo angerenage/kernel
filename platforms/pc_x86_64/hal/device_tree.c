@@ -1,5 +1,6 @@
-#include <hal/device_tree.h>
 #include <stddef.h>
+
+#include <hal/device_tree.h>
 
 size_t hal_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity) {
 	(void)nodes;
@@ -8,9 +9,8 @@ size_t hal_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* node
 }
 
 bool hal_device_tree_interrupt_translate(const struct hal_device_tree_consumed_node* controller, const uint32_t* cells,
-                                         size_t cell_count, uint32_t* out_local_source_id,
-                                         enum hal_interrupt_trigger*  out_trigger,
-                                         enum hal_interrupt_polarity* out_polarity) {
+		size_t cell_count, uint32_t* out_local_source_id, enum hal_interrupt_trigger* out_trigger,
+		enum hal_interrupt_polarity* out_polarity) {
 	(void)controller;
 	(void)cells;
 	(void)cell_count;
@@ -21,7 +21,7 @@ bool hal_device_tree_interrupt_translate(const struct hal_device_tree_consumed_n
 }
 
 bool hal_device_tree_dma_translate(const struct hal_device_tree_consumed_node* controller, const uint32_t* cells,
-                                   size_t cell_count, uint32_t* out_local_source_id) {
+		size_t cell_count, uint32_t* out_local_source_id) {
 	(void)controller;
 	(void)cells;
 	(void)cell_count;

@@ -1,42 +1,44 @@
-#include <base/process.h>
-#include <core/process.h>
-#include <core/syscall.h>
-#include <core/user_upcall.h>
-#include <core/uthread.h>
-#include <criterion/criterion.h>
-#include <hal/userspace.h>
-#include <kernel/syscall.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 
+#include <base/process.h>
+#include <hal/userspace.h>
+#include <core/process.h>
+#include <core/syscall.h>
+#include <core/user_upcall.h>
+#include <core/uthread.h>
+#include <kernel/syscall.h>
+
+#include <criterion/criterion.h>
+
 #include "../../kernel/src/syscall/upcall.h"
 
 struct hal_userspace_return_frame {
-	bool      user;
+	bool user;
 	uintptr_t marker;
 };
 
-static struct uthread          fake_thread;
-static struct uthread*         current_thread;
+static struct uthread fake_thread;
+static struct uthread* current_thread;
 static enum user_upcall_result restore_result;
-static size_t                  dispatch_count;
-static size_t                  terminate_count;
-static struct process*         terminated_process;
-static uintptr_t               terminated_exit_code;
-static uint64_t                dropped_count;
+static size_t dispatch_count;
+static size_t terminate_count;
+static struct process* terminated_process;
+static uintptr_t terminated_exit_code;
+static uint64_t dropped_count;
 
 /* Reset the syscall test state. */
 static void upcall_syscall_test_reset(void) {
 	memset(&fake_thread, 0, sizeof(fake_thread));
-	fake_thread.process  = (struct process*)(uintptr_t)1u;
-	current_thread       = &fake_thread;
-	restore_result       = USER_UPCALL_OK;
-	dispatch_count       = 0u;
-	terminate_count      = 0u;
-	terminated_process   = NULL;
+	fake_thread.process = (struct process*)(uintptr_t)1u;
+	current_thread = &fake_thread;
+	restore_result = USER_UPCALL_OK;
+	dispatch_count = 0u;
+	terminate_count = 0u;
+	terminated_process = NULL;
 	terminated_exit_code = 0u;
-	dropped_count        = 0u;
+	dropped_count = 0u;
 }
 
 /* Return the fake current thread. */
@@ -59,7 +61,7 @@ uint64_t uthread_upcall_dropped_count(struct uthread* thread) {
 /* Record process termination caused by an invalid saved context. */
 bool process_terminate(struct process* process, uintptr_t exit_code) {
 	terminate_count++;
-	terminated_process   = process;
+	terminated_process = process;
 	terminated_exit_code = exit_code;
 	return true;
 }
@@ -71,7 +73,7 @@ bool hal_userspace_frame_is_user(const struct hal_userspace_return_frame* frame)
 
 /* Record a normal syscall dispatch. */
 syscall_result_t syscall_dispatch(uintptr_t number, uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
-                                  uintptr_t arg4, uintptr_t arg5) {
+		uintptr_t arg4, uintptr_t arg5) {
 	(void)number;
 	(void)arg0;
 	(void)arg1;
@@ -84,8 +86,8 @@ syscall_result_t syscall_dispatch(uintptr_t number, uintptr_t arg0, uintptr_t ar
 }
 
 Test(upcall_syscall, normal_syscalls_use_the_generic_dispatcher) {
-	struct hal_userspace_return_frame frame  = {.user = true};
-	syscall_result_t                  result = {0};
+	struct hal_userspace_return_frame frame = {.user = true};
+	syscall_result_t result = {0};
 
 	upcall_syscall_test_reset();
 	cr_assert_eq(syscall_dispatch_user_frame(&frame, 7u, 1u, 2u, 3u, 4u, 5u, 6u, &result), SYSCALL_FRAME_WRITE_RESULT);
@@ -99,47 +101,47 @@ Test(upcall_syscall, dropped_count_returns_the_current_thread_counter) {
 
 	upcall_syscall_test_reset();
 	dropped_count = 42u;
-	result        = syscall_upcall_dropped_count(0u, 0u, 0u, 0u, 0u, 0u);
+	result = syscall_upcall_dropped_count(0u, 0u, 0u, 0u, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(result.value, 42u);
 
 	current_thread = NULL;
-	result         = syscall_upcall_dropped_count(0u, 0u, 0u, 0u, 0u, 0u);
+	result = syscall_upcall_dropped_count(0u, 0u, 0u, 0u, 0u, 0u);
 	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
 }
 
 Test(upcall_syscall, successful_return_restores_the_native_frame) {
-	struct hal_userspace_return_frame frame  = {.user = true, .marker = 0x55u};
-	syscall_result_t                  result = syscall_result_error(SYSCALL_STATUS_FAILED, 0x99u);
+	struct hal_userspace_return_frame frame = {.user = true, .marker = 0x55u};
+	syscall_result_t result = syscall_result_error(SYSCALL_STATUS_FAILED, 0x99u);
 
 	upcall_syscall_test_reset();
 	cr_assert_eq(syscall_dispatch_user_frame(&frame, SYSCALL_UPCALL_RETURN, 0u, 0u, 0u, 0u, 0u, 0u, &result),
-	             SYSCALL_FRAME_RESTORED);
+			SYSCALL_FRAME_RESTORED);
 	cr_assert_eq(frame.marker, 0xdecafbadull);
 	cr_assert_eq(dispatch_count, 0u);
 	cr_assert_eq(result.value, 0x99u);
 }
 
 Test(upcall_syscall, return_outside_an_upcall_is_denied) {
-	struct hal_userspace_return_frame frame  = {.user = true};
-	syscall_result_t                  result = {0};
+	struct hal_userspace_return_frame frame = {.user = true};
+	syscall_result_t result = {0};
 
 	upcall_syscall_test_reset();
 	restore_result = USER_UPCALL_NOT_ACTIVE;
 	cr_assert_eq(syscall_dispatch_user_frame(&frame, SYSCALL_UPCALL_RETURN, 0u, 0u, 0u, 0u, 0u, 0u, &result),
-	             SYSCALL_FRAME_WRITE_RESULT);
+			SYSCALL_FRAME_WRITE_RESULT);
 	cr_assert_eq(result.status, SYSCALL_STATUS_DENIED);
 	cr_assert_eq(terminate_count, 0u);
 }
 
 Test(upcall_syscall, invalid_saved_context_terminates_the_process) {
-	struct hal_userspace_return_frame frame  = {.user = true, .marker = 0x55u};
-	syscall_result_t                  result = {0};
+	struct hal_userspace_return_frame frame = {.user = true, .marker = 0x55u};
+	syscall_result_t result = {0};
 
 	upcall_syscall_test_reset();
 	restore_result = USER_UPCALL_CONTEXT_INVALID;
 	cr_assert_eq(syscall_dispatch_user_frame(&frame, SYSCALL_UPCALL_RETURN, 0u, 0u, 0u, 0u, 0u, 0u, &result),
-	             SYSCALL_FRAME_WRITE_RESULT);
+			SYSCALL_FRAME_WRITE_RESULT);
 	cr_assert_eq(terminate_count, 1u);
 	cr_assert_eq(terminated_process, fake_thread.process);
 	cr_assert_eq(terminated_exit_code, PROCESS_EXIT_SYSTEM_UPCALL_CONTEXT_INVALID);

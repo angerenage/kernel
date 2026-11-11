@@ -1,5 +1,6 @@
-#include <base/cap.h>
 #include <stddef.h>
+
+#include <base/cap.h>
 
 #include "server.h"
 

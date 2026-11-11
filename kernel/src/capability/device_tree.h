@@ -1,7 +1,8 @@
 #pragma once
 
-#include <base/cap.h>
 #include <stdbool.h>
+
+#include <base/cap.h>
 
 /* Create the Device Tree provider when a validated tree is available. */
 bool kernel_capability_device_tree_init(void);

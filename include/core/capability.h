@@ -1,13 +1,14 @@
 #pragma once
 
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
 #include <base/cap.h>
 #include <base/process.h>
 #include <base/syscall.h>
 #include <core/channel.h>
 #include <core/id_table.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
 
 /* Handler invoked by sys_cap_call for kernel-owned capabilities. */
 typedef syscall_result_t (*cap_kernel_handler_t)(const struct cap_request* req);
@@ -16,8 +17,8 @@ typedef bool (*cap_kernel_process_cleanup_t)(uint64_t object_id, process_id_t pr
 /* Handler invoked when managed kernel routing metadata is finalized. */
 typedef void (*cap_kernel_destroy_t)(uint64_t object_id);
 /* Synchronous notification after one grant is removed or has rights reduced. */
-typedef void (*cap_kernel_grant_change_t)(uint64_t object_id, cap_id_t capability_id, process_id_t target,
-                                          cap_rights_t rights, bool removed);
+typedef void (*cap_kernel_grant_change_t)(
+		uint64_t object_id, cap_id_t capability_id, process_id_t target, cap_rights_t rights, bool removed);
 
 /* Lifecycle events observed by a kernel capability provider. */
 enum cap_object_event {
@@ -36,32 +37,32 @@ typedef id_table_id_t cap_object_id_t;
 
 /* A kernel or userspace object that can be referenced by capabilities. */
 struct cap_object {
-	cap_object_id_t              cap_object_id;
-	uint64_t                     object_id;
-	struct channel*              endpoint;
-	cap_kernel_handler_t         handler;
+	cap_object_id_t cap_object_id;
+	uint64_t object_id;
+	struct channel* endpoint;
+	cap_kernel_handler_t handler;
 	cap_kernel_process_cleanup_t process_cleanup;
-	cap_kernel_destroy_t         destroy;
-	cap_kernel_grant_change_t    grant_change;
-	cap_object_event_handler_t   event_handler;
-	struct cap_object*           event_next;
-	uint64_t                     reference_count;
-	size_t                       grant_count;
-	size_t                       active_calls;
-	bool                         event_pending;
+	cap_kernel_destroy_t destroy;
+	cap_kernel_grant_change_t grant_change;
+	cap_object_event_handler_t event_handler;
+	struct cap_object* event_next;
+	uint64_t reference_count;
+	size_t grant_count;
+	size_t active_calls;
+	bool event_pending;
 };
 
 /* A capability grants a target process rights on a cap_object. Capabilities form a delegation tree through parent. */
 struct capability {
-	cap_id_t           cap_id;
-	cap_object_id_t    cap_object_id;
-	process_id_t       target;
-	cap_rights_t       rights;
+	cap_id_t cap_id;
+	cap_object_id_t cap_object_id;
+	process_id_t target;
+	cap_rights_t rights;
 	struct capability* parent;
 	struct capability* first_child;
 	struct capability* next_sibling;
-	bool               removed;
-	uint64_t           reference_count;
+	bool removed;
+	uint64_t reference_count;
 };
 
 /* Results from capability topology and authorization operations. */
@@ -88,21 +89,17 @@ cap_object_id_t cap_object_create_kernel(uint64_t object_id, cap_kernel_handler_
 
 /* Publish a managed kernel object and return its stable ID. */
 cap_object_id_t cap_object_create_kernel_managed(uint64_t object_id, cap_kernel_handler_t handler,
-                                                 cap_kernel_process_cleanup_t process_cleanup,
-                                                 cap_kernel_destroy_t destroy, bool* out_created);
+		cap_kernel_process_cleanup_t process_cleanup, cap_kernel_destroy_t destroy, bool* out_created);
 
 /* Publish a managed kernel object with a zero-grants lifecycle handler. */
 cap_object_id_t cap_object_create_kernel_lifecycle(uint64_t object_id, cap_kernel_handler_t handler,
-                                                   cap_kernel_process_cleanup_t process_cleanup,
-                                                   cap_kernel_destroy_t         destroy,
-                                                   cap_object_event_handler_t event_handler, bool* out_created);
+		cap_kernel_process_cleanup_t process_cleanup, cap_kernel_destroy_t destroy,
+		cap_object_event_handler_t event_handler, bool* out_created);
 
 /* Publish a managed kernel object that observes removal and rights reduction of each individual grant. */
 cap_object_id_t cap_object_create_kernel_observed(uint64_t object_id, cap_kernel_handler_t handler,
-                                                  cap_kernel_process_cleanup_t process_cleanup,
-                                                  cap_kernel_destroy_t         destroy,
-                                                  cap_object_event_handler_t   event_handler,
-                                                  cap_kernel_grant_change_t grant_change, bool* out_created);
+		cap_kernel_process_cleanup_t process_cleanup, cap_kernel_destroy_t destroy,
+		cap_object_event_handler_t event_handler, cap_kernel_grant_change_t grant_change, bool* out_created);
 
 /* Look up an existing object. The returned pointer is borrowed and requires external lifetime synchronisation. */
 struct cap_object* cap_object_lookup(struct channel* endpoint, uint64_t object_id);
@@ -136,12 +133,12 @@ void cap_object_unregister_endpoint(struct channel* endpoint);
 void cap_object_cleanup_for_process(process_id_t process);
 
 /* Begin a capability call and snapshot its retained routing object and rights. */
-enum cap_result cap_object_begin_call(process_id_t caller, struct capability* capability,
-                                      struct cap_object** out_object, cap_rights_t* out_rights);
+enum cap_result cap_object_begin_call(
+		process_id_t caller, struct capability* capability, struct cap_object** out_object, cap_rights_t* out_rights);
 
 /* Resolve an authorized capability and retain its object for direct use. */
 enum cap_result cap_object_acquire_for_use(process_id_t caller, cap_id_t capability_id, cap_rights_t required_rights,
-                                           struct cap_object** out_object, cap_rights_t* out_rights);
+		struct cap_object** out_object, cap_rights_t* out_rights);
 
 /* End a previously begun capability call and release its routing-object reference. */
 void cap_object_end_call(struct cap_object* object);

@@ -2,10 +2,10 @@
 
 Test(thread, run_queue_orders_priorities_and_preserves_fifo_ties) {
 	struct run_queue queue;
-	struct thread    low;
-	struct thread    first_high;
-	struct thread    normal;
-	struct thread    second_high;
+	struct thread low;
+	struct thread first_high;
+	struct thread normal;
+	struct thread second_high;
 
 	irq_enable_local();
 	run_queue_init(&queue);
@@ -33,7 +33,7 @@ Test(thread, run_queue_orders_priorities_and_preserves_fifo_ties) {
 
 Test(thread, run_queue_duplicate_enqueue_is_side_effect_free_and_reusable_after_dequeue) {
 	struct run_queue queue;
-	struct thread    thread;
+	struct thread thread;
 
 	irq_enable_local();
 	run_queue_init(&queue);
@@ -60,9 +60,9 @@ Test(thread, run_queue_duplicate_enqueue_is_side_effect_free_and_reusable_after_
 
 Test(thread, run_queue_requeue_tracks_priority_changes_without_duplication) {
 	struct run_queue queue;
-	struct thread    first;
-	struct thread    second;
-	struct thread    third;
+	struct thread first;
+	struct thread second;
+	struct thread third;
 
 	irq_enable_local();
 	run_queue_init(&queue);
@@ -91,9 +91,9 @@ Test(thread, run_queue_requeue_tracks_priority_changes_without_duplication) {
 
 Test(thread, terminated_and_idle_threads_cannot_enter_run_queue) {
 	struct run_queue queue;
-	struct thread    exiting;
-	struct thread    zombie;
-	struct thread    idle;
+	struct thread exiting;
+	struct thread zombie;
+	struct thread idle;
 
 	irq_enable_local();
 	run_queue_init(&queue);

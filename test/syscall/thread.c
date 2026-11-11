@@ -11,22 +11,22 @@ Test(syscall, exit_thread_requires_current_userspace_thread) {
 
 Test(syscall, yield_dispatches_next_runnable_thread) {
 	const struct thread_create_params first_params = {
-		.name              = "syscall-yield-first",
-		.entry             = syscall_test_thread_entry,
-		.arg               = NULL,
+		.name = "syscall-yield-first",
+		.entry = syscall_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x300000u,
-		.kernel_stack_top  = 0x304000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x304000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params second_params = {
-		.name              = "syscall-yield-second",
-		.entry             = syscall_test_thread_entry,
-		.arg               = NULL,
+		.name = "syscall-yield-second",
+		.entry = syscall_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x310000u,
-		.kernel_stack_top  = 0x314000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x314000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	struct thread first;
 	struct thread second;

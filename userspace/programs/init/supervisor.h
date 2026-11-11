@@ -1,8 +1,10 @@
 #pragma once
 
-#include <base/process.h>
-#include <runtime/registry.h>
 #include <stdbool.h>
+
+#include <base/process.h>
+
+#include <runtime/registry.h>
 
 #include "init.h"
 

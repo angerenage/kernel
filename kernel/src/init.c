@@ -1,7 +1,19 @@
+#include <libc/stdlib.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+
 #include <base/heap.h>
 #include <base/startup.h>
 #include <boot/info.h>
 #include <boot/protocol.h>
+#include <firmware/init.h>
+#include <hal/clock.h>
+#include <hal/cpu.h>
+#include <hal/hcf.h>
+#include <hal/interrupts.h>
+#include <hal/serial.h>
 #include <core/address_space.h>
 #include <core/capability.h>
 #include <core/cpu.h>
@@ -13,12 +25,6 @@
 #include <core/sched.h>
 #include <core/time.h>
 #include <core/uthread.h>
-#include <firmware/init.h>
-#include <hal/clock.h>
-#include <hal/cpu.h>
-#include <hal/hcf.h>
-#include <hal/interrupts.h>
-#include <hal/serial.h>
 #include <kernel/boot_diagnostics.h>
 #include <kernel/capability.h>
 #include <kernel/cmdline.h>
@@ -26,11 +32,6 @@
 #include <kernel/crash.h>
 #include <kernel/elf_loader.h>
 #include <kernel/trace.h>
-#include <libc/stdlib.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <stdio.h>
 
 #include "capability/kernel_resource.h"
 #include "capability/memory_allocator.h"
@@ -52,7 +53,7 @@ static void boot_fail(const char* message) {
 #define KERNEL_DIAGNOSTICS_INTERVAL_MS 1000u
 
 static uint32_t boot_timer_frequency_hz;
-static bool     boot_diagnostics_enabled;
+static bool boot_diagnostics_enabled;
 
 static const char* kernel_elf_load_result_string(enum kernel_elf_load_result result) {
 	switch (result) {
@@ -77,18 +78,18 @@ static const char* kernel_elf_load_result_string(enum kernel_elf_load_result res
 }
 
 static bool kernel_launch_init_process(void) {
-	const struct boot_module*        module;
-	struct kernel_elf_process        loaded  = {0};
-	struct init_startup_info*        startup = NULL;
-	struct uthread*                  main_thread;
-	struct process_thread_params     thread_params;
-	enum kernel_elf_load_result      load_result;
+	const struct boot_module* module;
+	struct kernel_elf_process loaded = {0};
+	struct init_startup_info* startup = NULL;
+	struct uthread* main_thread;
+	struct process_thread_params thread_params;
+	enum kernel_elf_load_result load_result;
 	enum process_thread_spawn_result start_result;
-	cap_id_t                         kernel_resources_cap;
-	cap_id_t                         memory_allocator_cap;
-	size_t                           init_argc;
-	size_t                           init_argv_size;
-	size_t                           startup_size;
+	cap_id_t kernel_resources_cap;
+	cap_id_t memory_allocator_cap;
+	size_t init_argc;
+	size_t init_argv_size;
+	size_t startup_size;
 
 	module = boot_module_lookup("init.elf");
 	if (module == NULL) {
@@ -115,45 +116,45 @@ static bool kernel_launch_init_process(void) {
 	}
 
 	if (!kernel_cmdline_userspace_arguments(NULL, 0u, &init_argc, &init_argv_size) || init_argc > UINT32_MAX ||
-	    init_argv_size > THREAD_START_ARG_MAX_SIZE - sizeof(*startup)) {
+			init_argv_size > THREAD_START_ARG_MAX_SIZE - sizeof(*startup)) {
 		(void)process_destroy(loaded.process);
 		printf("kernel: invalid userspace command-line arguments\n");
 		return false;
 	}
 	startup_size = sizeof(*startup) + init_argv_size;
-	startup      = calloc(1u, startup_size);
+	startup = calloc(1u, startup_size);
 	if (startup == NULL) {
 		(void)process_destroy(loaded.process);
 		printf("kernel: init startup allocation failed\n");
 		return false;
 	}
 	*startup = (struct init_startup_info){
-		.size                 = (uint32_t)startup_size,
-		.heap_base            = loaded.heap_base,
-		.heap_size            = loaded.heap_size,
+		.size = (uint32_t)startup_size,
+		.heap_base = loaded.heap_base,
+		.heap_size = loaded.heap_size,
 		.memory_allocator_cap = memory_allocator_cap,
 		.kernel_resources_cap = kernel_resources_cap,
-		.argc                 = (uint32_t)init_argc,
-		.argv_offset          = init_argc == 0u ? 0u : (uint32_t)sizeof(*startup),
-		.argv_size            = (uint32_t)init_argv_size,
+		.argc = (uint32_t)init_argc,
+		.argv_offset = init_argc == 0u ? 0u : (uint32_t)sizeof(*startup),
+		.argv_size = (uint32_t)init_argv_size,
 	};
 	if (init_argc != 0u &&
-	    !kernel_cmdline_userspace_arguments((char*)(startup + 1), init_argv_size, &init_argc, &init_argv_size)) {
+			!kernel_cmdline_userspace_arguments((char*)(startup + 1), init_argv_size, &init_argc, &init_argv_size)) {
 		free(startup);
 		(void)process_destroy(loaded.process);
 		printf("kernel: userspace command-line serialization failed\n");
 		return false;
 	}
 	thread_params = (struct process_thread_params){
-		.name            = "init/main",
-		.user_entry      = loaded.entry,
-		.arg_data        = startup,
-		.arg_size        = startup_size,
+		.name = "init/main",
+		.user_entry = loaded.entry,
+		.arg_data = startup,
+		.arg_size = startup_size,
 		.user_stack_size = UTHREAD_DEFAULT_USER_STACK_SIZE,
-		.preferred_cpu   = NULL,
-		.detached        = false,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
-	main_thread  = NULL;
+	main_thread = NULL;
 	start_result = process_start_main_thread(loaded.process, &main_thread, &thread_params);
 	free(startup);
 	if (start_result != PROCESS_THREAD_SPAWN_OK) {
@@ -164,9 +165,9 @@ static bool kernel_launch_init_process(void) {
 
 	if (boot_diagnostics_enabled) {
 		printf("kernel: launched init pid=%llu entry=%p thread=%llu\n",
-		       (unsigned long long)process_pid(loaded.process),
-		       (void*)loaded.entry,
-		       (unsigned long long)uthread_id(main_thread));
+				(unsigned long long)process_pid(loaded.process),
+				(void*)loaded.entry,
+				(unsigned long long)uthread_id(main_thread));
 	}
 	return true;
 }
@@ -181,8 +182,8 @@ static void kernel_selftest_runner_entry(void* arg) {
 }
 
 static void kernel_run_selftests(void) {
-	struct kthread*           worker = NULL;
-	struct cpu*               cpu    = cpu_current();
+	struct kthread* worker = NULL;
+	struct cpu* cpu = cpu_current();
 	enum kthread_spawn_result result;
 
 	result = kthread_spawn_on_cpu(&worker, "selftest/runner", kernel_selftest_runner_entry, NULL, cpu);
@@ -261,8 +262,8 @@ static void kernel_init_memory(const struct mem_range* memory_map, size_t range_
 	for (size_t i = 0u; i < range_count; i++) {
 		pmm_memory_map[i] = (struct pmm_memory_range){
 			.address = memory_map[i].base,
-			.size    = memory_map[i].length,
-			.usable  = memory_map[i].type == MEM_RANGE_USABLE,
+			.size = memory_map[i].length,
+			.usable = memory_map[i].type == MEM_RANGE_USABLE,
 		};
 	}
 

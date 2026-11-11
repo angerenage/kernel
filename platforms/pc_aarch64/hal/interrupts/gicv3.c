@@ -1,18 +1,19 @@
 #include "gicv3.h"
 
-#include <boot/info.h>
-#include <core/cpu.h>
-#include <core/interrupt.h>
-#include <core/lock.h>
-#include <core/spinlock.h>
-#include <firmware/acpi.h>
-#include <firmware/dt/device.h>
-#include <hal/interrupts.h>
-#include <hal/paging.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <boot/info.h>
+#include <firmware/acpi.h>
+#include <firmware/dt/device.h>
+#include <hal/interrupts.h>
+#include <hal/paging.h>
+#include <core/cpu.h>
+#include <core/interrupt.h>
+#include <core/lock.h>
+#include <core/spinlock.h>
 
 #include "../cache.h"
 #include "../clock.h"
@@ -52,15 +53,15 @@
 #define GICR_WAKER_PROCESSOR_SLEEP (1u << 1)
 #define GICR_WAKER_CHILDREN_ASLEEP (1u << 2)
 
-static uintptr_t       distributor_phys;
-static uintptr_t       redistributors_phys;
-static uintptr_t       redistributors_size;
-static uintptr_t       redistributor_stride;
-static uintptr_t       redistributor_phys[GICV3_MAX_CPUS];
-static bool            local_ready[GICV3_MAX_CPUS];
-static bool            ready;
+static uintptr_t distributor_phys;
+static uintptr_t redistributors_phys;
+static uintptr_t redistributors_size;
+static uintptr_t redistributor_stride;
+static uintptr_t redistributor_phys[GICV3_MAX_CPUS];
+static bool local_ready[GICV3_MAX_CPUS];
+static bool ready;
 static struct spinlock gicv3_distributor_lock =
-	SPINLOCK_INIT_CLASS("gicv3_distributor", SPINLOCK_ORDER_INTERRUPT, SPINLOCK_FLAG_IRQSAVE);
+		SPINLOCK_INIT_CLASS("gicv3_distributor", SPINLOCK_ORDER_INTERRUPT, SPINLOCK_FLAG_IRQSAVE);
 
 bool aarch64_gicv3_ready(void) {
 	return __atomic_load_n(&ready, __ATOMIC_ACQUIRE);
@@ -68,16 +69,16 @@ bool aarch64_gicv3_ready(void) {
 
 size_t aarch64_gicv3_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity) {
 	struct dt_node node = dt_device_at("arm,gic-v3", 0u);
-	struct dt_reg  distributor;
+	struct dt_reg distributor;
 
 	if (!aarch64_gicv3_ready() || dt_device_count("arm,gic-v3") != 1u || !dt_node_reg(node, 0u, &distributor) ||
-	    distributor.address != distributor_phys)
+			distributor.address != distributor_phys)
 		return 0u;
 	if (nodes != NULL && capacity != 0u) {
 		nodes[0] = (struct hal_device_tree_consumed_node){
-			.node            = node,
-			.kind            = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER,
-			.value           = distributor.address,
+			.node = node,
+			.kind = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER,
+			.value = distributor.address,
 			.specifier_cells = 3u,
 		};
 	}
@@ -95,10 +96,10 @@ static bool gicv3_map(uintptr_t phys) {
 	uintptr_t virt = gicv3_virt(page);
 	if (virt == 0u) return false;
 	if (hal_paging_query(hal_paging_kernel_space(), virt, NULL)) return true;
-	return hal_paging_map(
-		hal_paging_kernel_space(),
-		&(const struct hal_paging_map_request){
-			virt, page, GICV3_PAGE_SIZE, HAL_PAGE_READ | HAL_PAGE_WRITE | HAL_PAGE_GLOBAL, MEMORY_TYPE_DEVICE});
+	return hal_paging_map(hal_paging_kernel_space(),
+			&(const struct hal_paging_map_request){
+				virt, page, GICV3_PAGE_SIZE, HAL_PAGE_READ | HAL_PAGE_WRITE | HAL_PAGE_GLOBAL, MEMORY_TYPE_DEVICE
+			});
 }
 
 static uint32_t gicv3_read32(uintptr_t phys) {
@@ -127,15 +128,15 @@ static bool gicv3_wait_rwp(void) {
 /* Wait until an interrupt disable has reached its distributor or redistributor. */
 static bool gicv3_wait_disabled(uintptr_t base, uint32_t id) {
 	uintptr_t ctlr;
-	uint32_t  rwp;
+	uint32_t rwp;
 	if (id < 32u) {
 		if (base < GICR_SGI_BASE) return false;
 		ctlr = base - GICR_SGI_BASE + GICR_CTLR;
-		rwp  = GICR_CTLR_RWP;
+		rwp = GICR_CTLR_RWP;
 	}
 	else {
 		ctlr = distributor_phys + GICD_CTLR;
-		rwp  = GICD_CTLR_RWP;
+		rwp = GICD_CTLR_RWP;
 	}
 	if (!gicv3_map(ctlr)) return false;
 	for (uint32_t attempt = 0u; attempt < 100000u; attempt++)
@@ -143,16 +144,16 @@ static bool gicv3_wait_disabled(uintptr_t base, uint32_t id) {
 	return false;
 }
 
-static bool gicv3_find_acpi(uintptr_t* out_distributor, uintptr_t* out_redistributors, uintptr_t* out_size,
-                            bool* out_described) {
-	const struct acpi_sdt_header* madt           = acpi_table_next("APIC", NULL);
-	uintptr_t                     distributor    = 0u;
-	uintptr_t                     redistributors = 0u;
-	uintptr_t                     size           = 0u;
-	bool                          described      = false;
+static bool gicv3_find_acpi(
+		uintptr_t* out_distributor, uintptr_t* out_redistributors, uintptr_t* out_size, bool* out_described) {
+	const struct acpi_sdt_header* madt = acpi_table_next("APIC", NULL);
+	uintptr_t distributor = 0u;
+	uintptr_t redistributors = 0u;
+	uintptr_t size = 0u;
+	bool described = false;
 	if (madt == NULL || madt->length < sizeof(*madt) + 8u) return false;
 	const uint8_t* entry = (const uint8_t*)madt + sizeof(*madt) + 8u;
-	const uint8_t* end   = (const uint8_t*)madt + madt->length;
+	const uint8_t* end = (const uint8_t*)madt + madt->length;
 	while ((size_t)(end - entry) >= 2u) {
 		uint8_t length = entry[1];
 		if (length < 2u || length > (size_t)(end - entry)) return false;
@@ -170,17 +171,17 @@ static bool gicv3_find_acpi(uintptr_t* out_distributor, uintptr_t* out_redistrib
 			memcpy(&region_size, entry + 12u, sizeof(region_size));
 			if (redistributors != 0u || address == 0u || address > UINTPTR_MAX) return false;
 			redistributors = (uintptr_t)address;
-			size           = region_size;
+			size = region_size;
 		}
 		entry += length;
 	}
 	if (out_described != NULL) *out_described = described;
 	if (entry != end || !described || distributor == 0u || redistributors == 0u || size < GICV3_REDIST_STRIDE ||
-	    redistributors > UINTPTR_MAX - size)
+			redistributors > UINTPTR_MAX - size)
 		return false;
-	*out_distributor    = distributor;
+	*out_distributor = distributor;
 	*out_redistributors = redistributors;
-	*out_size           = size;
+	*out_size = size;
 	return true;
 }
 
@@ -188,50 +189,50 @@ bool aarch64_gicv3_described(void) {
 	uintptr_t distributor;
 	uintptr_t redistributors;
 	uintptr_t size;
-	bool      described = false;
+	bool described = false;
 	if (dt_device_count("arm,gic-v3") != 0u) return true;
 	(void)gicv3_find_acpi(&distributor, &redistributors, &size, &described);
 	return described;
 }
 
 bool aarch64_gicv3_init_global(void) {
-	uintptr_t distributor    = 0u;
+	uintptr_t distributor = 0u;
 	uintptr_t redistributors = 0u;
-	uintptr_t size           = 0u;
-	uintptr_t stride         = 0u;
+	uintptr_t size = 0u;
+	uintptr_t stride = 0u;
 	if (__atomic_load_n(&ready, __ATOMIC_ACQUIRE)) return true;
 	if (dt_device_count("arm,gic-v3") != 0u) {
 		struct dt_node node = dt_device_at("arm,gic-v3", 0u);
-		struct dt_reg  distributor_reg;
-		struct dt_reg  redistributors_reg;
+		struct dt_reg distributor_reg;
+		struct dt_reg redistributors_reg;
 
 		if (dt_device_count("arm,gic-v3") != 1u || !dt_node_reg(node, 0u, &distributor_reg) ||
-		    !dt_node_reg(node, 1u, &redistributors_reg) || distributor_reg.address > UINTPTR_MAX ||
-		    redistributors_reg.address > UINTPTR_MAX || redistributors_reg.size > UINTPTR_MAX)
+				!dt_node_reg(node, 1u, &redistributors_reg) || distributor_reg.address > UINTPTR_MAX ||
+				redistributors_reg.address > UINTPTR_MAX || redistributors_reg.size > UINTPTR_MAX)
 			return false;
-		distributor    = (uintptr_t)distributor_reg.address;
+		distributor = (uintptr_t)distributor_reg.address;
 		redistributors = (uintptr_t)redistributors_reg.address;
-		size           = (uintptr_t)redistributors_reg.size;
+		size = (uintptr_t)redistributors_reg.size;
 		struct dt_property property;
-		uint64_t           value;
+		uint64_t value;
 		if (dt_node_property(node, "#redistributor-regions", &property) &&
-		    (property.size != 4u || !dt_property_read_cells(&property, 0u, 1u, &value) || value != 1u))
+				(property.size != 4u || !dt_property_read_cells(&property, 0u, 1u, &value) || value != 1u))
 			return false;
 		if (dt_node_property(node, "redistributor-stride", &property)) {
 			uint64_t value;
 			if (property.size != 8u || !dt_property_read_cells(&property, 0u, 2u, &value) || value > UINTPTR_MAX ||
-			    value < GICV3_REDIST_STRIDE || (value & 0xffffu) != 0u)
+					value < GICV3_REDIST_STRIDE || (value & 0xffffu) != 0u)
 				return false;
 			stride = (uintptr_t)value;
 		}
 	}
 	else if (!gicv3_find_acpi(&distributor, &redistributors, &size, NULL)) return false;
 	if (distributor == 0u || distributor > UINTPTR_MAX - 0x8000u || redistributors == 0u ||
-	    size < GICV3_REDIST_STRIDE || redistributors > UINTPTR_MAX - size || !gicv3_map(distributor))
+			size < GICV3_REDIST_STRIDE || redistributors > UINTPTR_MAX - size || !gicv3_map(distributor))
 		return false;
-	distributor_phys     = distributor;
-	redistributors_phys  = redistributors;
-	redistributors_size  = size;
+	distributor_phys = distributor;
+	redistributors_phys = redistributors;
+	redistributors_size = size;
 	redistributor_stride = stride;
 
 	/* Disable firmware groups without changing an already-enabled ARE_NS. */
@@ -266,12 +267,12 @@ static bool gicv3_redist_for_cpu(const struct cpu* cpu, uintptr_t* out) {
 		uint64_t typer = gicv3_read64(frame + GICR_TYPER);
 		if ((uint32_t)(typer >> 32u) == affinity) {
 			redistributor_phys[cpu->index] = frame;
-			*out                           = frame;
+			*out = frame;
 			return true;
 		}
 		uintptr_t next = redistributor_stride != 0u
-		                     ? redistributor_stride
-		                     : ((typer & GICR_TYPER_VLPIS) != 0u ? 2u * GICV3_REDIST_STRIDE : GICV3_REDIST_STRIDE);
+		                         ? redistributor_stride
+		                         : ((typer & GICR_TYPER_VLPIS) != 0u ? 2u * GICV3_REDIST_STRIDE : GICV3_REDIST_STRIDE);
 		if ((typer & GICR_TYPER_LAST) != 0u || next > redistributors_size || offset > redistributors_size - next) break;
 		offset += next;
 	}
@@ -305,8 +306,8 @@ bool aarch64_gicv3_init_local(struct cpu* cpu) {
 	gicv3_write32(sgi + GICD_ICENABLER, UINT32_MAX);
 	__asm__ volatile("dsb sy" : : : "memory");
 	if (!gicv3_wait_disabled(sgi, 0u)) return false;
-	struct irq_state irq   = spinlock_lock_irqsave(&gicv3_distributor_lock);
-	uint32_t         group = gicv3_read32(sgi + GICD_IGROUPR);
+	struct irq_state irq = spinlock_lock_irqsave(&gicv3_distributor_lock);
+	uint32_t group = gicv3_read32(sgi + GICD_IGROUPR);
 	gicv3_write32(sgi + GICD_IGROUPR, group | (1u << GICV3_SCHEDULER_SGI));
 	spinlock_unlock_irqrestore(&gicv3_distributor_lock, irq);
 	gicv3_write8(sgi + GICD_IPRIORITYR + GICV3_SCHEDULER_SGI, 0x40u);
@@ -315,10 +316,10 @@ bool aarch64_gicv3_init_local(struct cpu* cpu) {
 	__asm__ volatile("mrs %0, ICC_CTLR_EL1" : "=r"(ctlr));
 	ctlr &= ~(1ull << 1u);
 	__asm__ volatile(
-		"msr ICC_CTLR_EL1, %0\n\tmsr ICC_PMR_EL1, %1\n\tmsr ICC_BPR1_EL1, xzr\n\tmsr ICC_IGRPEN1_EL1, %2\n\tisb"
-		:
-		: "r"(ctlr), "r"(0xffull), "r"(1ull)
-		: "memory");
+			"msr ICC_CTLR_EL1, %0\n\tmsr ICC_PMR_EL1, %1\n\tmsr ICC_BPR1_EL1, xzr\n\tmsr ICC_IGRPEN1_EL1, %2\n\tisb"
+			:
+			: "r"(ctlr), "r"(0xffull), "r"(1ull)
+			: "memory");
 	__atomic_store_n(&local_ready[cpu->index], true, __ATOMIC_RELEASE);
 	return true;
 }
@@ -328,12 +329,12 @@ bool aarch64_gicv3_kick(const struct cpu* cpu) {
 	uint64_t request;
 	uint64_t affinity0;
 	if (!aarch64_gicv3_ready() || cpu == NULL || cpu->index >= GICV3_MAX_CPUS ||
-	    !__atomic_load_n(&local_ready[cpu->index], __ATOMIC_ACQUIRE))
+			!__atomic_load_n(&local_ready[cpu->index], __ATOMIC_ACQUIRE))
 		return false;
 	affinity0 = cpu->arch_id & 0xffu;
 	__asm__ volatile("mrs %0, ICC_CTLR_EL1" : "=r"(ctlr));
 	if (affinity0 >= 16u &&
-	    ((ctlr & GICV3_CTLR_RSS) == 0u || (gicv3_read32(distributor_phys + GICD_TYPER) & GICV3_TYPER_RSS) == 0u)) {
+			((ctlr & GICV3_CTLR_RSS) == 0u || (gicv3_read32(distributor_phys + GICD_TYPER) & GICV3_TYPER_RSS) == 0u)) {
 		/* Controllers without Range Selector support can still wake a remote
 		 * target by broadcasting. Extra scheduler interrupts are harmless. */
 		if (cpu == cpu_current()) return false;
@@ -368,10 +369,10 @@ bool aarch64_gicv3_source_domain_at(size_t index, struct hal_interrupt_source_do
 	return true;
 }
 
-bool aarch64_gicv3_source_resolve(uint64_t controller_address, uint32_t local_source_id,
-                                  struct hal_interrupt_source* out_source) {
+bool aarch64_gicv3_source_resolve(
+		uint64_t controller_address, uint32_t local_source_id, struct hal_interrupt_source* out_source) {
 	if (out_source == NULL || !ready || controller_address != distributor_phys || local_source_id < 32u ||
-	    !gicv3_source_valid(local_source_id))
+			!gicv3_source_valid(local_source_id))
 		return false;
 	*out_source = (struct hal_interrupt_source){.domain = 0u, .number = local_source_id};
 	return true;
@@ -379,13 +380,13 @@ bool aarch64_gicv3_source_resolve(uint64_t controller_address, uint32_t local_so
 
 bool aarch64_gicv3_source_info(const struct hal_interrupt_source* source, struct hal_interrupt_source_info* out) {
 	if (source == NULL || out == NULL || source->domain != 0u || source->number < 32u ||
-	    !gicv3_source_valid(source->number))
+			!gicv3_source_valid(source->number))
 		return false;
 	*out = (struct hal_interrupt_source_info){
-		.delivery     = {.domain = 0u, .base = source->number, .limit = source->number + 1u},
-		.target_kind  = HAL_INTERRUPT_TARGET_ROUTABLE,
+		.delivery = {.domain = 0u, .base = source->number, .limit = source->number + 1u},
+		.target_kind = HAL_INTERRUPT_TARGET_ROUTABLE,
 		.fixed_target = NULL
-    };
+	};
 	return true;
 }
 
@@ -404,23 +405,23 @@ static bool gicv3_set_enabled(uintptr_t base, uint32_t id, bool enabled) {
 }
 
 static bool gicv3_source_init(struct hal_interrupt_source_state* state, const struct hal_interrupt_source* source,
-                              const struct hal_interrupt_delivery* delivery, bool local) {
+		const struct hal_interrupt_delivery* delivery, bool local) {
 	struct hal_interrupt_source_info info;
-	uintptr_t                        base;
+	uintptr_t base;
 	if (state == NULL || state->initialized || delivery == NULL || delivery->target == NULL ||
-	    !aarch64_gicv3_init_global() || delivery->polarity > HAL_INTERRUPT_POLARITY_HIGH ||
-	    delivery->trigger > HAL_INTERRUPT_TRIGGER_LEVEL)
+			!aarch64_gicv3_init_global() || delivery->polarity > HAL_INTERRUPT_POLARITY_HIGH ||
+			delivery->trigger > HAL_INTERRUPT_TRIGGER_LEVEL)
 		return false;
 	if (local) {
 		if (source == NULL || source->domain != 0u || source->number < 16u || source->number >= 32u ||
-		    !gicv3_source_valid(source->number) || delivery->event.domain != 0u ||
-		    delivery->event.id != source->number || delivery->target != cpu_current() ||
-		    delivery->trigger != HAL_INTERRUPT_TRIGGER_FIRMWARE)
+				!gicv3_source_valid(source->number) || delivery->event.domain != 0u ||
+				delivery->event.id != source->number || delivery->target != cpu_current() ||
+				delivery->trigger != HAL_INTERRUPT_TRIGGER_FIRMWARE)
 			return false;
 	}
 	else if (!aarch64_gicv3_source_info(source, &info) || delivery->event.domain != info.delivery.domain ||
-	         delivery->event.id != info.delivery.base ||
-	         !aarch64_gicv3_source_target_supported(source, delivery->target))
+			 delivery->event.id != info.delivery.base ||
+			 !aarch64_gicv3_source_target_supported(source, delivery->target))
 		return false;
 	if (source->number < 32u) {
 		uintptr_t redist;
@@ -429,8 +430,8 @@ static bool gicv3_source_init(struct hal_interrupt_source_state* state, const st
 	}
 	else base = distributor_phys;
 	if (!gicv3_set_enabled(base, source->number, false) ||
-	    !gicv3_map(base + GICD_IGROUPR + (source->number / 32u) * 4u) ||
-	    !gicv3_map(base + GICD_IPRIORITYR + source->number))
+			!gicv3_map(base + GICD_IGROUPR + (source->number / 32u) * 4u) ||
+			!gicv3_map(base + GICD_IPRIORITYR + source->number))
 		return false;
 	uint32_t group_offset = GICD_IGROUPR + (source->number / 32u) * 4u;
 	if (source->number >= 32u && delivery->trigger != HAL_INTERRUPT_TRIGGER_FIRMWARE) {
@@ -442,8 +443,8 @@ static bool gicv3_source_init(struct hal_interrupt_source_state* state, const st
 	if (source->number >= 32u) {
 		if (delivery->trigger != HAL_INTERRUPT_TRIGGER_FIRMWARE) {
 			uint32_t config_offset = GICD_ICFGR + (source->number / 16u) * 4u;
-			uint32_t config        = gicv3_read32(distributor_phys + config_offset);
-			uint32_t edge          = 1u << ((source->number % 16u) * 2u + 1u);
+			uint32_t config = gicv3_read32(distributor_phys + config_offset);
+			uint32_t edge = 1u << ((source->number % 16u) * 2u + 1u);
 			if (delivery->trigger == HAL_INTERRUPT_TRIGGER_EDGE) config |= edge;
 			else config &= ~edge;
 			gicv3_write32(distributor_phys + config_offset, config);
@@ -458,27 +459,29 @@ static bool gicv3_source_init(struct hal_interrupt_source_state* state, const st
 		gicv3_write64(distributor_phys + route_offset, route);
 	}
 	__asm__ volatile("dsb sy\n\tisb" : : : "memory");
-	*state = (struct hal_interrupt_source_state){.source         = *source,
-	                                             .register_base  = base,
-	                                             .initialized    = true,
-	                                             .masked         = true,
-	                                             .edge_triggered = delivery->trigger == HAL_INTERRUPT_TRIGGER_EDGE};
+	*state = (struct hal_interrupt_source_state){
+		.source = *source,
+		.register_base = base,
+		.initialized = true,
+		.masked = true,
+		.edge_triggered = delivery->trigger == HAL_INTERRUPT_TRIGGER_EDGE
+	};
 	return true;
 }
 
 bool aarch64_gicv3_source_init(struct hal_interrupt_source_state* state, const struct hal_interrupt_source* source,
-                               const struct hal_interrupt_delivery* delivery) {
+		const struct hal_interrupt_delivery* delivery) {
 	return gicv3_source_init(state, source, delivery, false);
 }
 
 bool aarch64_gicv3_local_source_init(struct hal_interrupt_source_state* state, uint32_t id, const struct cpu* target) {
-	struct hal_interrupt_source   source   = {.domain = 0u, .number = id};
+	struct hal_interrupt_source source = {.domain = 0u, .number = id};
 	struct hal_interrupt_delivery delivery = {
-		.target   = target,
-		.event    = {.domain = 0u, .id = id},
-		.trigger  = HAL_INTERRUPT_TRIGGER_FIRMWARE,
+		.target = target,
+		.event = {.domain = 0u, .id = id},
+		.trigger = HAL_INTERRUPT_TRIGGER_FIRMWARE,
 		.polarity = HAL_INTERRUPT_POLARITY_FIRMWARE
-    };
+	};
 	return gicv3_source_init(state, &source, &delivery, true);
 }
 
@@ -505,75 +508,74 @@ bool aarch64_gicv3_source_deinit(struct hal_interrupt_source_state* state) {
 }
 
 static bool gicv3_mbi_ranges(struct dt_property* out_ranges, size_t* out_count) {
-	struct dt_node     node = dt_device_at("arm,gic-v3", 0u);
+	struct dt_node node = dt_device_at("arm,gic-v3", 0u);
 	struct dt_property controller;
 	struct dt_property ranges;
 	if (!ready || (gicv3_read32(distributor_phys + GICD_TYPER) & GICD_TYPER_MBIS) == 0u ||
-	    !dt_node_property(node, "msi-controller", &controller) || !dt_node_property(node, "mbi-ranges", &ranges) ||
-	    ranges.size == 0u || ranges.size % 8u != 0u || ranges.size > (GICV3_SPURIOUS_INTID - 32u) * 8u)
+			!dt_node_property(node, "msi-controller", &controller) || !dt_node_property(node, "mbi-ranges", &ranges) ||
+			ranges.size == 0u || ranges.size % 8u != 0u || ranges.size > (GICV3_SPURIOUS_INTID - 32u) * 8u)
 		return false;
 	for (size_t index = 0u; index < ranges.size / 8u; index++) {
 		uint64_t first;
 		uint64_t count;
 
 		if (!dt_property_read_cells(&ranges, index * 2u, 1u, &first) ||
-		    !dt_property_read_cells(&ranges, index * 2u + 1u, 1u, &count))
+				!dt_property_read_cells(&ranges, index * 2u + 1u, 1u, &count))
 			return false;
 		if (first < 32u || first >= GICV3_SPURIOUS_INTID || count == 0u || count > GICV3_SPURIOUS_INTID - first ||
-		    !gicv3_source_valid((uint32_t)(first + count - 1u)))
+				!gicv3_source_valid((uint32_t)(first + count - 1u)))
 			return false;
 		for (size_t previous = 0u; previous < index; previous++) {
 			uint64_t other_first;
 			uint64_t other_count;
 
 			if (!dt_property_read_cells(&ranges, previous * 2u, 1u, &other_first) ||
-			    !dt_property_read_cells(&ranges, previous * 2u + 1u, 1u, &other_count))
+					!dt_property_read_cells(&ranges, previous * 2u + 1u, 1u, &other_count))
 				return false;
 			if (first < other_first + other_count && other_first < first + count) return false;
 		}
 	}
 	*out_ranges = ranges;
-	*out_count  = ranges.size / 8u;
+	*out_count = ranges.size / 8u;
 	return true;
 }
 
 size_t aarch64_gicv3_message_range_count(void) {
 	struct dt_property ranges;
-	size_t             count;
+	size_t count;
 	return gicv3_mbi_ranges(&ranges, &count) ? count : 0u;
 }
 
 bool aarch64_gicv3_message_range_at(size_t index, struct hal_interrupt_message_range* out) {
 	struct dt_property ranges;
-	size_t             count;
-	uint64_t           first;
-	uint64_t           span;
+	size_t count;
+	uint64_t first;
+	uint64_t span;
 	if (out == NULL || !gicv3_mbi_ranges(&ranges, &count) || index >= count) return false;
 	if (!dt_property_read_cells(&ranges, index * 2u, 1u, &first) ||
-	    !dt_property_read_cells(&ranges, index * 2u + 1u, 1u, &span))
+			!dt_property_read_cells(&ranges, index * 2u + 1u, 1u, &span))
 		return false;
 	*out = (struct hal_interrupt_message_range){
 		.domain = 0u, .delivery = {.domain = 0u, .base = (uint32_t)first, .limit = (uint32_t)(first + span)}
-    };
+	};
 	return true;
 }
 
-bool aarch64_gicv3_message_target_supported(uint32_t domain, const struct hal_interrupt_message_source* source,
-                                            const struct cpu* target) {
+bool aarch64_gicv3_message_target_supported(
+		uint32_t domain, const struct hal_interrupt_message_source* source, const struct cpu* target) {
 	struct dt_property ranges;
-	size_t             count;
+	size_t count;
 	return domain == 0u && source == NULL && target != NULL && target->index < GICV3_MAX_CPUS &&
 	       __atomic_load_n(&local_ready[target->index], __ATOMIC_ACQUIRE) && gicv3_mbi_ranges(&ranges, &count);
 }
 
-bool aarch64_gicv3_message_init(struct hal_interrupt_message_state*         state,
-                                const struct hal_interrupt_message_request* request,
-                                struct hal_interrupt_message*               out) {
+bool aarch64_gicv3_message_init(struct hal_interrupt_message_state* state,
+		const struct hal_interrupt_message_request* request, struct hal_interrupt_message* out) {
 	struct dt_property ranges;
-	size_t             count;
+	size_t count;
 	if (state == NULL || state->initialized || request == NULL || out == NULL ||
-	    !aarch64_gicv3_message_target_supported(request->domain, request->source, request->target) ||
-	    !gicv3_mbi_ranges(&ranges, &count))
+			!aarch64_gicv3_message_target_supported(request->domain, request->source, request->target) ||
+			!gicv3_mbi_ranges(&ranges, &count))
 		return false;
 	uint32_t id = request->event.id;
 	if (request->event.domain != 0u) return false;
@@ -583,7 +585,7 @@ bool aarch64_gicv3_message_init(struct hal_interrupt_message_state*         stat
 		uint64_t span;
 
 		if (!dt_property_read_cells(&ranges, index * 2u, 1u, &first) ||
-		    !dt_property_read_cells(&ranges, index * 2u + 1u, 1u, &span))
+				!dt_property_read_cells(&ranges, index * 2u + 1u, 1u, &span))
 			return false;
 		if (id >= first && id - first < span) {
 			in_range = true;
@@ -591,20 +593,21 @@ bool aarch64_gicv3_message_init(struct hal_interrupt_message_state*         stat
 		}
 	}
 	if (!in_range) return false;
-	uint64_t           message_base = (uint64_t)distributor_phys;
+	uint64_t message_base = (uint64_t)distributor_phys;
 	struct dt_property alias;
-	struct dt_node     node = dt_device_at("arm,gic-v3", 0u);
+	struct dt_node node = dt_device_at("arm,gic-v3", 0u);
 	if (dt_node_property(node, "mbi-alias", &alias) &&
-	    ((alias.size != 4u && alias.size != 8u) ||
-	     !dt_property_read_cells(&alias, 0u, alias.size / 4u, &message_base) || message_base == 0u))
+			((alias.size != 4u && alias.size != 8u) ||
+					!dt_property_read_cells(&alias, 0u, alias.size / 4u, &message_base) || message_base == 0u))
 		return false;
 	if (message_base > UINT64_MAX - GICD_SETSPI_NSR) return false;
-	uintptr_t base          = distributor_phys;
-	uint32_t  group_offset  = GICD_IGROUPR + (id / 32u) * 4u;
-	uint32_t  config_offset = GICD_ICFGR + (id / 16u) * 4u;
-	uint32_t  route_offset  = GICD_IROUTER + id * 8u;
+	uintptr_t base = distributor_phys;
+	uint32_t group_offset = GICD_IGROUPR + (id / 32u) * 4u;
+	uint32_t config_offset = GICD_ICFGR + (id / 16u) * 4u;
+	uint32_t route_offset = GICD_IROUTER + id * 8u;
 	if (!gicv3_set_enabled(base, id, false) || !gicv3_map(base + group_offset) ||
-	    !gicv3_map(base + GICD_IPRIORITYR + id) || !gicv3_map(base + config_offset) || !gicv3_map(base + route_offset))
+			!gicv3_map(base + GICD_IPRIORITYR + id) || !gicv3_map(base + config_offset) ||
+			!gicv3_map(base + route_offset))
 		return false;
 	struct irq_state irq = spinlock_lock_irqsave(&gicv3_distributor_lock);
 	gicv3_write32(base + group_offset, gicv3_read32(base + group_offset) | (1u << (id % 32u)));
@@ -615,7 +618,7 @@ bool aarch64_gicv3_message_init(struct hal_interrupt_message_state*         stat
 	gicv3_write8(base + GICD_IPRIORITYR + id, 0x80u);
 	gicv3_write64(base + route_offset, request->target->arch_id & 0x000000ff00ffffffull);
 	if (!gicv3_set_enabled(base, id, true)) return false;
-	*out   = (struct hal_interrupt_message){.address = message_base + GICD_SETSPI_NSR, .data = id};
+	*out = (struct hal_interrupt_message){.address = message_base + GICD_SETSPI_NSR, .data = id};
 	*state = (struct hal_interrupt_message_state){.event = request->event, .uses_gicv3 = true, .initialized = true};
 	return true;
 }

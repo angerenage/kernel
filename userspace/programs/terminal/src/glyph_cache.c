@@ -1,25 +1,26 @@
 #include "glyph_cache.h"
 
-#include <base/math.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 
+#include <base/math.h>
+
 #define TERMINAL_GLYPH_CACHE_SET_COUNT 128u
 #define TERMINAL_GLYPH_CACHE_WAY_COUNT 4u
 
 struct glyph_cache_entry {
 	struct terminal_glyph glyph;
-	uint8_t*              alpha;
-	uint64_t              last_used;
-	bool                  valid;
+	uint8_t* alpha;
+	uint64_t last_used;
+	bool valid;
 };
 
 struct terminal_glyph_cache {
-	FT_Face                  face;
-	uint64_t                 clock;
+	FT_Face face;
+	uint64_t clock;
 	struct glyph_cache_entry entries[TERMINAL_GLYPH_CACHE_SET_COUNT][TERMINAL_GLYPH_CACHE_WAY_COUNT];
 };
 
@@ -58,25 +59,25 @@ static uint64_t next_stamp(struct terminal_glyph_cache* cache) {
 }
 
 /* Rasterize one codepoint and normalize its bitmap before replacing a cache entry. */
-static bool load_entry(struct terminal_glyph_cache* cache, struct glyph_cache_entry* entry, uint32_t codepoint,
-                       uint64_t stamp) {
+static bool load_entry(
+		struct terminal_glyph_cache* cache, struct glyph_cache_entry* entry, uint32_t codepoint, uint64_t stamp) {
 	struct glyph_cache_entry loaded = {0};
-	FT_GlyphSlot             slot;
-	const FT_Bitmap*         bitmap;
-	size_t                   stride;
-	size_t                   minimum_stride;
-	size_t                   alpha_size;
+	FT_GlyphSlot slot;
+	const FT_Bitmap* bitmap;
+	size_t stride;
+	size_t minimum_stride;
+	size_t alpha_size;
 
 	if (FT_Load_Char(cache->face, codepoint, FT_LOAD_RENDER) != FT_Err_Ok) return false;
-	slot   = cache->face->glyph;
+	slot = cache->face->glyph;
 	bitmap = &slot->bitmap;
 	if (bitmap->pitch == INT_MIN) return false;
 	loaded.glyph = (struct terminal_glyph){
 		.codepoint = codepoint,
-		.left      = slot->bitmap_left,
-		.top       = slot->bitmap_top,
-		.width     = bitmap->width,
-		.height    = bitmap->rows,
+		.left = slot->bitmap_left,
+		.top = slot->bitmap_top,
+		.width = bitmap->width,
+		.height = bitmap->rows,
 	};
 	if (bitmap->width != 0u && bitmap->rows != 0u) {
 		if (bitmap->buffer == NULL || mul_overflow_size(bitmap->width, bitmap->rows, &alpha_size)) return false;
@@ -93,8 +94,10 @@ static bool load_entry(struct terminal_glyph_cache* cache, struct glyph_cache_en
 				return false;
 			}
 			for (size_t column = 0u; column < bitmap->width; column++) {
-				if (!bitmap_alpha(
-						bitmap, bitmap->buffer + source_offset, column, &loaded.alpha[row * bitmap->width + column])) {
+				if (!bitmap_alpha(bitmap,
+							bitmap->buffer + source_offset,
+							column,
+							&loaded.alpha[row * bitmap->width + column])) {
 					free(loaded.alpha);
 					return false;
 				}
@@ -103,7 +106,7 @@ static bool load_entry(struct terminal_glyph_cache* cache, struct glyph_cache_en
 		loaded.glyph.alpha = loaded.alpha;
 	}
 	loaded.last_used = stamp;
-	loaded.valid     = true;
+	loaded.valid = true;
 	free(entry->alpha);
 	*entry = loaded;
 	return true;
@@ -126,22 +129,22 @@ void terminal_glyph_cache_destroy(struct terminal_glyph_cache* cache) {
 	free(cache);
 }
 
-bool terminal_glyph_cache_get(struct terminal_glyph_cache* cache, uint32_t codepoint,
-                              const struct terminal_glyph** out_glyph) {
+bool terminal_glyph_cache_get(
+		struct terminal_glyph_cache* cache, uint32_t codepoint, const struct terminal_glyph** out_glyph) {
 	struct glyph_cache_entry* entries;
 	struct glyph_cache_entry* replacement;
-	uint64_t                  stamp;
+	uint64_t stamp;
 
 	if (cache == NULL || out_glyph == NULL || codepoint > 0x10ffffu || (codepoint >= 0xd800u && codepoint <= 0xdfffu))
 		return false;
-	*out_glyph  = NULL;
-	stamp       = next_stamp(cache);
-	entries     = cache->entries[glyph_set_index(codepoint)];
+	*out_glyph = NULL;
+	stamp = next_stamp(cache);
+	entries = cache->entries[glyph_set_index(codepoint)];
 	replacement = &entries[0];
 	for (size_t way = 0u; way < TERMINAL_GLYPH_CACHE_WAY_COUNT; way++) {
 		if (entries[way].valid && entries[way].glyph.codepoint == codepoint) {
 			entries[way].last_used = stamp;
-			*out_glyph             = &entries[way].glyph;
+			*out_glyph = &entries[way].glyph;
 			return true;
 		}
 		if (!entries[way].valid) replacement = &entries[way];

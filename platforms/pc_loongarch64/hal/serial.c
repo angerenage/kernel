@@ -1,7 +1,8 @@
-#include <hal/serial.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <hal/serial.h>
 
 #define NS16550_BASE_PHYS 0x1fe001e0ull
 #define LOONGARCH_DMW0_CSR 0x180u
@@ -47,7 +48,7 @@ static inline uint8_t ns16550_read(uint32_t reg) {
 
 static inline void ns16550_write(uint32_t reg, uint8_t value) {
 	volatile uint8_t* regs = ns16550_regs();
-	regs[reg]              = value;
+	regs[reg] = value;
 }
 
 static inline void serial_relax(void) {

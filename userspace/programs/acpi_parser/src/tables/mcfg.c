@@ -1,11 +1,12 @@
 #include "mcfg.h"
 
-#include <runtime/device.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
 #include <system/acpi.h>
 #include <system/capability.h>
+#include <runtime/device.h>
 
 #include "../aml.h"
 #include "../device.h"
@@ -28,8 +29,8 @@ struct acpi_mcfg_allocation {
 	uint64_t register_address;
 	uint64_t register_size;
 	uint16_t segment_group;
-	uint8_t  start_bus;
-	uint8_t  end_bus;
+	uint8_t start_bus;
+	uint8_t end_bus;
 };
 
 static uint16_t read_u16_le(const uint8_t value[2]) {
@@ -47,47 +48,47 @@ static uint64_t read_u64_le(const uint8_t value[8]) {
 	return result;
 }
 
-static bool mcfg_allocation_decode(const uint8_t                bytes[ACPI_MCFG_ALLOCATION_SIZE],
-                                   struct acpi_mcfg_allocation* out_allocation) {
+static bool mcfg_allocation_decode(
+		const uint8_t bytes[ACPI_MCFG_ALLOCATION_SIZE], struct acpi_mcfg_allocation* out_allocation) {
 	uint64_t address;
 	uint64_t bus_offset;
 	uint64_t bus_count;
 	uint64_t range_size;
 	uint16_t segment_group;
-	uint8_t  start_bus;
-	uint8_t  end_bus;
+	uint8_t start_bus;
+	uint8_t end_bus;
 
 	if (bytes == NULL || out_allocation == NULL) return false;
-	address       = read_u64_le(bytes);
+	address = read_u64_le(bytes);
 	segment_group = read_u16_le(bytes + 8u);
-	start_bus     = bytes[10];
-	end_bus       = bytes[11];
+	start_bus = bytes[10];
+	end_bus = bytes[11];
 	if (address == 0u || (address & (PCI_ECAM_BUS_SIZE - 1u)) != 0u || start_bus > end_bus ||
-	    read_u32_le(bytes + 12u) != 0u)
+			read_u32_le(bytes + 12u) != 0u)
 		return false;
 	bus_offset = (uint64_t)start_bus * PCI_ECAM_BUS_SIZE;
-	bus_count  = (uint64_t)end_bus - start_bus + 1u;
+	bus_count = (uint64_t)end_bus - start_bus + 1u;
 	range_size = bus_count * PCI_ECAM_BUS_SIZE;
 	if (address > UINT64_MAX - bus_offset || address + bus_offset > UINT64_MAX - range_size) return false;
 	*out_allocation = (struct acpi_mcfg_allocation){
 		.register_address = address + bus_offset,
-		.register_size    = range_size,
-		.segment_group    = segment_group,
-		.start_bus        = start_bus,
-		.end_bus          = end_bus,
+		.register_size = range_size,
+		.segment_group = segment_group,
+		.start_bus = start_bus,
+		.end_bus = end_bus,
 	};
 	return true;
 }
 
-static struct acpi_device* find_pci_host(struct acpi_device_set*            devices,
-                                         const struct acpi_mcfg_allocation* allocation) {
+static struct acpi_device* find_pci_host(
+		struct acpi_device_set* devices, const struct acpi_mcfg_allocation* allocation) {
 	for (struct acpi_device* device = acpi_device_first(devices); device != NULL; device = acpi_device_next(device)) {
-		uint64_t         segment  = 0u;
-		uint64_t         base_bus = 0u;
+		uint64_t segment = 0u;
+		uint64_t base_bus = 0u;
 		syscall_status_t status;
 
 		if (!acpi_device_has_compatible(device, PCI_COMPATIBLE_ROOT) &&
-		    !acpi_device_has_compatible(device, PCI_COMPATIBLE_EXPRESS_ROOT))
+				!acpi_device_has_compatible(device, PCI_COMPATIBLE_EXPRESS_ROOT))
 			continue;
 		status = acpi_aml_evaluate_u64(device, "_SEG", &segment);
 		if (status != SYSCALL_STATUS_OK && status != SYSCALL_STATUS_UNAVAILABLE) continue;
@@ -99,11 +100,11 @@ static struct acpi_device* find_pci_host(struct acpi_device_set*            devi
 	return NULL;
 }
 
-static syscall_status_t submit_mcfg_allocation(struct acpi_device_set*            devices,
-                                               const struct acpi_mcfg_allocation* allocation) {
-	struct acpi_device*    device = find_pci_host(devices, allocation);
+static syscall_status_t submit_mcfg_allocation(
+		struct acpi_device_set* devices, const struct acpi_mcfg_allocation* allocation) {
+	struct acpi_device* device = find_pci_host(devices, allocation);
 	struct device_builder* builder;
-	syscall_status_t       status;
+	syscall_status_t status;
 
 	if (device == NULL) {
 		status = acpi_device_begin(devices, &device);
@@ -112,10 +113,10 @@ static syscall_status_t submit_mcfg_allocation(struct acpi_device_set*          
 		if (status != SYSCALL_STATUS_OK) return status;
 	}
 	builder = acpi_device_builder(device);
-	status  = acpi_device_stage_mmio(device,
-	                                 MCFG_RESOURCE_CONFIGURATION_SPACE,
-	                                 (uintptr_t)allocation->register_address,
-	                                 (size_t)allocation->register_size);
+	status = acpi_device_stage_mmio(device,
+			MCFG_RESOURCE_CONFIGURATION_SPACE,
+			(uintptr_t)allocation->register_address,
+			(size_t)allocation->register_size);
 	if (status == SYSCALL_STATUS_OK)
 		status = acpi_device_add_u64(builder, MCFG_PROPERTY_SEGMENT_GROUP, allocation->segment_group);
 	if (status == SYSCALL_STATUS_OK)
@@ -126,14 +127,14 @@ static syscall_status_t submit_mcfg_allocation(struct acpi_device_set*          
 
 static syscall_status_t parse_mcfg_table(cap_id_t table_cap, struct acpi_device_set* devices) {
 	struct acpi_table_info_response info;
-	uint8_t                         reserved[ACPI_MCFG_RESERVED_SIZE];
-	uint64_t                        allocation_count;
-	syscall_status_t                status;
+	uint8_t reserved[ACPI_MCFG_RESERVED_SIZE];
+	uint64_t allocation_count;
+	syscall_status_t status;
 
 	status = acpi_table_info(table_cap, &info);
 	if (status != SYSCALL_STATUS_OK) return status;
 	if (info.body_size < ACPI_MCFG_RESERVED_SIZE ||
-	    (info.body_size - ACPI_MCFG_RESERVED_SIZE) % ACPI_MCFG_ALLOCATION_SIZE != 0u)
+			(info.body_size - ACPI_MCFG_RESERVED_SIZE) % ACPI_MCFG_ALLOCATION_SIZE != 0u)
 		return SYSCALL_STATUS_OK;
 	status = acpi_table_read(table_cap, 0u, reserved, sizeof(reserved));
 	if (status != SYSCALL_STATUS_OK) return status;
@@ -142,9 +143,9 @@ static syscall_status_t parse_mcfg_table(cap_id_t table_cap, struct acpi_device_
 	allocation_count = (info.body_size - ACPI_MCFG_RESERVED_SIZE) / ACPI_MCFG_ALLOCATION_SIZE;
 
 	for (uint64_t index = 0u; index < allocation_count; index++) {
-		uint8_t                     bytes[ACPI_MCFG_ALLOCATION_SIZE];
+		uint8_t bytes[ACPI_MCFG_ALLOCATION_SIZE];
 		struct acpi_mcfg_allocation allocation;
-		uint64_t                    offset = ACPI_MCFG_RESERVED_SIZE + index * ACPI_MCFG_ALLOCATION_SIZE;
+		uint64_t offset = ACPI_MCFG_RESERVED_SIZE + index * ACPI_MCFG_ALLOCATION_SIZE;
 
 		status = acpi_table_read(table_cap, offset, bytes, sizeof(bytes));
 		if (status != SYSCALL_STATUS_OK) return status;
@@ -156,7 +157,7 @@ static syscall_status_t parse_mcfg_table(cap_id_t table_cap, struct acpi_device_
 }
 
 syscall_status_t acpi_mcfg_parse(cap_id_t provider_cap, struct acpi_device_set* devices) {
-	uint64_t         table_count;
+	uint64_t table_count;
 	syscall_status_t status;
 
 	if (provider_cap == CAP_ID_INVALID || devices == NULL) return SYSCALL_STATUS_BAD_ARGUMENT;

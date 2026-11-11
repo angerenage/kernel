@@ -2,26 +2,26 @@
 
 Test(sched, sleep_until_tick_blocks_and_wakes_on_deadline) {
 	const struct thread_create_params sleeper_params = {
-		.name              = "sleeper",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "sleeper",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x340000u,
-		.kernel_stack_top  = 0x344000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x344000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params worker_params = {
-		.name              = "worker",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "worker",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x350000u,
-		.kernel_stack_top  = 0x354000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x354000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	struct thread sleeper;
 	struct thread worker;
-	uint64_t      deadline_tick;
+	uint64_t deadline_tick;
 
 	init_bound_bootstrap_cpu();
 	cr_assert(sched_init(), "sched_init failed");
@@ -58,17 +58,17 @@ Test(sched, sleep_until_tick_blocks_and_wakes_on_deadline) {
 
 Test(sched, pending_interrupt_aborts_interruptible_wait_handoff) {
 	const struct thread_create_params params = {
-		.name              = "interrupted_waiter",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "interrupted_waiter",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x400000u,
-		.kernel_stack_top  = 0x404000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x404000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
-	struct thread            current;
+	struct thread current;
 	struct thread_wait_queue wait_queue;
-	struct irq_state         wait_state;
+	struct irq_state wait_state;
 
 	init_bound_bootstrap_cpu();
 	cr_assert(sched_init(), "sched_init failed");
@@ -82,8 +82,8 @@ Test(sched, pending_interrupt_aborts_interruptible_wait_handoff) {
 	cr_assert(thread_interrupt_pending(&current), "interrupt request should remain pending");
 	wait_state = spinlock_lock_irqsave(&wait_queue.lock);
 	cr_assert_eq(sched_block_current_interruptible_locked(&wait_queue, THREAD_BLOCK_SIGNAL, wait_state),
-	             SCHED_BLOCK_INTERRUPTED,
-	             "a pending upcall must abort the wait handoff");
+			SCHED_BLOCK_INTERRUPTED,
+			"a pending upcall must abort the wait handoff");
 	cr_assert_eq(current.state, THREAD_STATE_RUNNING, "interrupted waiter must remain running");
 	cr_assert_null(current.blocked_queue, "interrupted waiter must not retain a blocked queue");
 	cr_assert_eq(thread_wait_queue_depth(&wait_queue), 0u, "interrupted waiter must not enter the wait queue");
@@ -94,15 +94,15 @@ Test(sched, pending_interrupt_aborts_interruptible_wait_handoff) {
 
 Test(sched, interrupt_during_block_handoff_requeues_current_thread) {
 	const struct thread_create_params params = {
-		.name              = "handoff_interrupted",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "handoff_interrupted",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x410000u,
-		.kernel_stack_top  = 0x414000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x414000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
-	struct thread            current;
+	struct thread current;
 	struct thread_wait_queue wait_queue;
 
 	init_bound_bootstrap_cpu();
@@ -114,10 +114,10 @@ Test(sched, interrupt_during_block_handoff_requeues_current_thread) {
 
 	thread_mark_blocked(&current, THREAD_BLOCK_SIGNAL);
 	current.blocked_queue = &wait_queue;
-	current.wait_status   = THREAD_WAIT_STATUS_PENDING;
+	current.wait_status = THREAD_WAIT_STATUS_PENDING;
 	(void)__atomic_fetch_or(&current.flags, (uint32_t)THREAD_FLAG_WAIT_INTERRUPTIBLE, __ATOMIC_ACQ_REL);
-	wait_queue.head  = &current;
-	wait_queue.tail  = &current;
+	wait_queue.head = &current;
+	wait_queue.tail = &current;
 	wait_queue.depth = 1u;
 
 	thread_request_interrupt(&current);

@@ -1,10 +1,11 @@
 #pragma once
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #include <hal/acpi.h>
 #include <hal/device_tree.h>
 #include <hal/interrupts.h>
-#include <stdbool.h>
-#include <stdint.h>
 
 #include "frame.h"
 
@@ -18,8 +19,7 @@ size_t aarch64_gic_device_tree_consumed_nodes(struct hal_device_tree_consumed_no
 
 /* Translate one standard GIC Device Tree interrupt specifier. */
 bool aarch64_gic_device_tree_interrupt(const uint32_t* cells, size_t cell_count, uint32_t* out_local_source_id,
-                                       enum hal_interrupt_trigger*  out_trigger,
-                                       enum hal_interrupt_polarity* out_polarity);
+		enum hal_interrupt_trigger* out_trigger, enum hal_interrupt_polarity* out_polarity);
 
 /* Discover, map, and enable the architecture's global interrupt controller. */
 bool aarch64_gic_init_global(void);

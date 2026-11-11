@@ -9,22 +9,22 @@ struct shell;
 /* Screen and buffer state for one shell command line. */
 struct shell_line_editor {
 	const struct shell* shell;
-	char*               line;
-	size_t              capacity;
-	size_t              size;
-	size_t              cursor;
-	char*               render_data;
-	size_t              render_size;
-	size_t              render_capacity;
-	int64_t             screen_origin_row;
-	uint64_t            screen_origin_line;
-	size_t              selection_anchor;
-	bool                selection_active;
+	char* line;
+	size_t capacity;
+	size_t size;
+	size_t cursor;
+	char* render_data;
+	size_t render_size;
+	size_t render_capacity;
+	int64_t screen_origin_row;
+	uint64_t screen_origin_line;
+	size_t selection_anchor;
+	bool selection_active;
 };
 
 /* Initialize an editor after its prompt has been rendered. */
-bool shell_line_editor_initialize(struct shell_line_editor* editor, const struct shell* shell, char* line,
-                                  size_t capacity);
+bool shell_line_editor_initialize(
+		struct shell_line_editor* editor, const struct shell* shell, char* line, size_t capacity);
 
 /* Release temporary rendering storage retained by an editor. */
 void shell_line_editor_destroy(struct shell_line_editor* editor);

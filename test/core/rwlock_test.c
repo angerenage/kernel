@@ -1,17 +1,18 @@
+#include <hal/clock.h>
+#include <hal/cpu.h>
+#include <hal/interrupts.h>
 #include <core/cpu.h>
 #include <core/kthread.h>
 #include <core/rwlock.h>
 #include <core/sched.h>
 #include <core/thread.h>
+
 #include <criterion/criterion.h>
-#include <hal/clock.h>
-#include <hal/cpu.h>
-#include <hal/interrupts.h>
 
 #include "../mocks/hal/cpu_mock.h"
 
-static bool           rwlock_test_hook_active;
-static size_t         rwlock_test_hook_runs;
+static bool rwlock_test_hook_active;
+static size_t rwlock_test_hook_runs;
 static struct rwlock* rwlock_test_lock;
 static struct thread* rwlock_test_reader;
 
@@ -27,9 +28,9 @@ static void reset_test_state(void) {
 	irq_enable_local();
 	hal_cpu_mock_set_context_switch_hook(NULL);
 	rwlock_test_hook_active = false;
-	rwlock_test_hook_runs   = 0u;
-	rwlock_test_lock        = NULL;
-	rwlock_test_reader      = NULL;
+	rwlock_test_hook_runs = 0u;
+	rwlock_test_lock = NULL;
+	rwlock_test_reader = NULL;
 	hal_cpu_local_bind(NULL);
 }
 
@@ -40,12 +41,12 @@ static void rwlock_test_entry(void* arg) {
 static void rwlock_test_set_one_tick_timeslice(struct thread* thread) {
 	if (thread == NULL) return;
 
-	thread->timeslice_ticks     = 1u;
+	thread->timeslice_ticks = 1u;
 	thread->timeslice_remaining = 1u;
 }
 
-static void rwlock_test_writer_wake_context_switch_hook(struct thread_context*       current,
-                                                        const struct thread_context* next) {
+static void rwlock_test_writer_wake_context_switch_hook(
+		struct thread_context* current, const struct thread_context* next) {
 	(void)current;
 	(void)next;
 
@@ -110,13 +111,13 @@ Test(rwlock, init_try_paths_and_unlocks_track_state) {
 
 Test(rwlock, write_unlock_rejects_non_owner) {
 	const struct thread_create_params owner_params = {
-		.name              = "rwlock_owner",
-		.entry             = rwlock_test_entry,
-		.arg               = NULL,
+		.name = "rwlock_owner",
+		.entry = rwlock_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x470000u,
-		.kernel_stack_top  = 0x474000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x474000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	struct rwlock rwlock;
 	struct thread owner;
@@ -142,22 +143,22 @@ Test(rwlock, write_unlock_rejects_non_owner) {
 
 Test(rwlock, write_lock_blocks_until_last_reader_unlocks) {
 	const struct thread_create_params reader_params = {
-		.name              = "rwlock_reader",
-		.entry             = rwlock_test_entry,
-		.arg               = NULL,
+		.name = "rwlock_reader",
+		.entry = rwlock_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x480000u,
-		.kernel_stack_top  = 0x484000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x484000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params writer_params = {
-		.name              = "rwlock_writer",
-		.entry             = rwlock_test_entry,
-		.arg               = NULL,
+		.name = "rwlock_writer",
+		.entry = rwlock_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x490000u,
-		.kernel_stack_top  = 0x494000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x494000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	struct rwlock rwlock;
 	struct thread reader;
@@ -177,7 +178,7 @@ Test(rwlock, write_lock_blocks_until_last_reader_unlocks) {
 	sched_set_current(cpu_current(), sched_idle_thread(cpu_current()));
 	cr_assert(sched_make_runnable(&reader), "reader should be runnable again to release the lock");
 
-	rwlock_test_lock   = &rwlock;
+	rwlock_test_lock = &rwlock;
 	rwlock_test_reader = &reader;
 	hal_cpu_mock_set_context_switch_hook(rwlock_test_writer_wake_context_switch_hook);
 
@@ -195,46 +196,46 @@ Test(rwlock, write_lock_blocks_until_last_reader_unlocks) {
 
 Test(rwlock, timed_read_lock_times_out_while_preemption_keeps_other_workers_running) {
 	const struct thread_create_params writer_params = {
-		.name              = "rwlock_writer",
-		.entry             = rwlock_test_entry,
-		.arg               = NULL,
+		.name = "rwlock_writer",
+		.entry = rwlock_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x4a0000u,
-		.kernel_stack_top  = 0x4a4000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x4a4000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params reader_params = {
-		.name              = "rwlock_reader",
-		.entry             = rwlock_test_entry,
-		.arg               = NULL,
+		.name = "rwlock_reader",
+		.entry = rwlock_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x4b0000u,
-		.kernel_stack_top  = 0x4b4000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x4b4000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params runner1_params = {
-		.name              = "rwlock_runner1",
-		.entry             = rwlock_test_entry,
-		.arg               = NULL,
+		.name = "rwlock_runner1",
+		.entry = rwlock_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x4c0000u,
-		.kernel_stack_top  = 0x4c4000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x4c4000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params runner2_params = {
-		.name              = "rwlock_runner2",
-		.entry             = rwlock_test_entry,
-		.arg               = NULL,
+		.name = "rwlock_runner2",
+		.entry = rwlock_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x4d0000u,
-		.kernel_stack_top  = 0x4d4000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x4d4000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
-	struct rwlock      rwlock;
-	struct thread      writer;
-	struct thread      reader;
-	struct thread      runner1;
-	struct thread      runner2;
+	struct rwlock rwlock;
+	struct thread writer;
+	struct thread reader;
+	struct thread runner1;
+	struct thread runner2;
 	struct sched_stats stats;
 
 	init_bound_bootstrap_cpu();
@@ -273,46 +274,46 @@ Test(rwlock, timed_read_lock_times_out_while_preemption_keeps_other_workers_runn
 
 Test(rwlock, timed_write_lock_times_out_while_readers_hold_the_rwlock) {
 	const struct thread_create_params reader_params = {
-		.name              = "rwlock_reader",
-		.entry             = rwlock_test_entry,
-		.arg               = NULL,
+		.name = "rwlock_reader",
+		.entry = rwlock_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x4e0000u,
-		.kernel_stack_top  = 0x4e4000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x4e4000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params writer_params = {
-		.name              = "rwlock_writer",
-		.entry             = rwlock_test_entry,
-		.arg               = NULL,
+		.name = "rwlock_writer",
+		.entry = rwlock_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x4f0000u,
-		.kernel_stack_top  = 0x4f4000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x4f4000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params runner1_params = {
-		.name              = "rwlock_runner1",
-		.entry             = rwlock_test_entry,
-		.arg               = NULL,
+		.name = "rwlock_runner1",
+		.entry = rwlock_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x500000u,
-		.kernel_stack_top  = 0x504000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x504000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params runner2_params = {
-		.name              = "rwlock_runner2",
-		.entry             = rwlock_test_entry,
-		.arg               = NULL,
+		.name = "rwlock_runner2",
+		.entry = rwlock_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x510000u,
-		.kernel_stack_top  = 0x514000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x514000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
-	struct rwlock      rwlock;
-	struct thread      reader;
-	struct thread      writer;
-	struct thread      runner1;
-	struct thread      runner2;
+	struct rwlock rwlock;
+	struct thread reader;
+	struct thread writer;
+	struct thread runner1;
+	struct thread runner2;
 	struct sched_stats stats;
 
 	init_bound_bootstrap_cpu();
@@ -336,7 +337,7 @@ Test(rwlock, timed_write_lock_times_out_while_readers_hold_the_rwlock) {
 	hal_cpu_mock_set_context_switch_hook(rwlock_test_timeout_context_switch_hook);
 	sched_set_current(cpu_current(), &writer);
 	cr_assert(!rwlock_timed_write_lock(&rwlock, 2u),
-	          "timed write lock should time out while a reader still holds the rwlock");
+			"timed write lock should time out while a reader still holds the rwlock");
 	cr_assert_eq(rwlock_test_hook_runs, 1u, "timeout hook should run exactly once");
 	cr_assert_eq(rwlock_reader_count(&rwlock), 1u, "timed out writer must not disturb active readers");
 	cr_assert_eq(rwlock_waiter_count(&rwlock), 0u, "timed out writer should be removed from the wait queue");

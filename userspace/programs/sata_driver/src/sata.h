@@ -1,6 +1,7 @@
 #pragma once
 
 #include <base/cap.h>
+
 #include <protocol/device.h>
 
 /* Identify and serve one ATA disk or ATAPI optical drive exposed by AHCI. */

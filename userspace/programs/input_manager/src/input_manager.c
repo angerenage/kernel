@@ -1,16 +1,17 @@
 #include "input_manager.h"
 
-#include <runtime/input.h>
-#include <runtime/log.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include <system/capability.h>
 #include <system/channel.h>
 #include <system/process.h>
 #include <system/signal.h>
 #include <system/thread.h>
 #include <system/time.h>
+#include <runtime/input.h>
+#include <runtime/log.h>
 
 #define INPUT_PROTOCOL_VERSION_MAJOR 1u
 #define INPUT_PROTOCOL_VERSION_MINOR 0u
@@ -27,22 +28,22 @@ enum attach_result {
 };
 
 struct source_waiter_argument {
-	struct input_manager*        manager;
+	struct input_manager* manager;
 	struct managed_input_source* source;
 };
 
 static const struct registry_protocol_query input_query = {
 	.namespace_path = INPUT_NAMESPACE,
-	.protocol       = INPUT_PROTOCOL_NAME,
-	.major          = INPUT_PROTOCOL_VERSION_MAJOR,
-	.minor          = INPUT_PROTOCOL_VERSION_MINOR,
+	.protocol = INPUT_PROTOCOL_NAME,
+	.major = INPUT_PROTOCOL_VERSION_MAJOR,
+	.minor = INPUT_PROTOCOL_VERSION_MINOR,
 };
 
 static const struct registry_service_selector manager_selector = {
 	.namespace_path = INPUT_MANAGER_NAMESPACE,
-	.protocol       = INPUT_MANAGER_PROTOCOL_NAME,
-	.major          = INPUT_MANAGER_PROTOCOL_VERSION_MAJOR,
-	.service        = INPUT_MANAGER_SERVICE_NAME,
+	.protocol = INPUT_MANAGER_PROTOCOL_NAME,
+	.major = INPUT_MANAGER_PROTOCOL_VERSION_MAJOR,
+	.service = INPUT_MANAGER_SERVICE_NAME,
 };
 
 void input_manager_lock(struct input_manager* manager) {
@@ -62,12 +63,12 @@ static bool wake_manager(struct input_manager* manager) {
 static bool notify_consumers(struct input_manager* manager) {
 	struct signal_send_response response;
 	return signal_send(manager->event_signal_cap,
-	                   manager->next_sequence - 1u,
-	                   0u,
-	                   0u,
-	                   0u,
-	                   SIGNAL_SEND_FLAG_COALESCE,
-	                   &response) == SYSCALL_STATUS_OK;
+				   manager->next_sequence - 1u,
+				   0u,
+				   0u,
+				   0u,
+				   SIGNAL_SEND_FLAG_COALESCE,
+				   &response) == SYSCALL_STATUS_OK;
 }
 
 static size_t event_index(const struct input_manager* manager, size_t offset) {
@@ -76,7 +77,7 @@ static size_t event_index(const struct input_manager* manager, size_t offset) {
 
 static void evict_oldest_frame(struct input_manager* manager) {
 	while (manager->event_count != 0u) {
-		bool frame_end      = (manager->events[manager->event_tail].flags & INPUT_MANAGER_EVENT_FLAG_FRAME_END) != 0u;
+		bool frame_end = (manager->events[manager->event_tail].flags & INPUT_MANAGER_EVENT_FLAG_FRAME_END) != 0u;
 		manager->event_tail = (manager->event_tail + 1u) % INPUT_MANAGER_EVENT_QUEUE_CAPACITY;
 		manager->event_count--;
 		if (frame_end) return;
@@ -85,13 +86,14 @@ static void evict_oldest_frame(struct input_manager* manager) {
 
 static bool append_frame_locked(struct input_manager* manager, struct input_manager_event* events, size_t count) {
 	if (count == 0u || count > INPUT_MANAGER_MAXIMUM_FRAME_EVENTS || manager->next_sequence == 0u ||
-	    manager->next_sequence > UINT64_MAX - count || manager->next_frame == 0u || manager->next_frame == UINT64_MAX)
+			manager->next_sequence > UINT64_MAX - count || manager->next_frame == 0u ||
+			manager->next_frame == UINT64_MAX)
 		return false;
 	while (INPUT_MANAGER_EVENT_QUEUE_CAPACITY - manager->event_count < count) evict_oldest_frame(manager);
 	for (size_t i = 0u; i < count; i++) {
 		events[i].sequence = manager->next_sequence++;
-		events[i].frame    = manager->next_frame;
-		events[i].flags    = i + 1u == count ? INPUT_MANAGER_EVENT_FLAG_FRAME_END : INPUT_MANAGER_EVENT_FLAG_NONE;
+		events[i].frame = manager->next_frame;
+		events[i].flags = i + 1u == count ? INPUT_MANAGER_EVENT_FLAG_FRAME_END : INPUT_MANAGER_EVENT_FLAG_NONE;
 		manager->events[event_index(manager, manager->event_count++)] = events[i];
 	}
 	manager->next_frame++;
@@ -104,12 +106,12 @@ static uint64_t timestamp_now(void) {
 	return timestamp_ns;
 }
 
-static struct input_manager_event lifecycle_event(const struct managed_input_source* source,
-                                                  enum input_manager_event_type type, uint64_t timestamp_ns) {
+static struct input_manager_event lifecycle_event(
+		const struct managed_input_source* source, enum input_manager_event_type type, uint64_t timestamp_ns) {
 	return (struct input_manager_event){
 		.timestamp_ns = timestamp_ns,
-		.source_id    = source->id,
-		.type         = type,
+		.source_id = source->id,
+		.type = type,
 		.device_class = source->device_class,
 	};
 }
@@ -136,7 +138,7 @@ static bool descriptor_valid(const struct input_control_descriptor* descriptor) 
 
 static bool output_descriptor_valid(const struct input_output_descriptor* descriptor) {
 	if (descriptor->id == 0u || descriptor->code <= INPUT_OUTPUT_CODE_INVALID ||
-	    descriptor->code > INPUT_OUTPUT_CODE_SCROLL_LOCK_INDICATOR)
+			descriptor->code > INPUT_OUTPUT_CODE_SCROLL_LOCK_INDICATOR)
 		return false;
 	switch (descriptor->kind) {
 	case INPUT_OUTPUT_KIND_BOOLEAN:
@@ -168,8 +170,8 @@ static bool value_valid(const struct input_control_descriptor* descriptor, int64
 	}
 }
 
-static bool selector_equal(const struct registry_service_selector* left,
-                           const struct registry_service_selector* right) {
+static bool selector_equal(
+		const struct registry_service_selector* left, const struct registry_service_selector* right) {
 	return left->major == right->major && strcmp(left->namespace_path, right->namespace_path) == 0 &&
 	       strcmp(left->protocol, right->protocol) == 0 && strcmp(left->service, right->service) == 0;
 }
@@ -179,8 +181,8 @@ static bool service_equal(const struct registry_service_info* left, const struct
 	       left->rights == right->rights;
 }
 
-static struct managed_input_source* find_source(struct input_manager*                   manager,
-                                                const struct registry_service_selector* selector) {
+static struct managed_input_source* find_source(
+		struct input_manager* manager, const struct registry_service_selector* selector) {
 	for (struct managed_input_source* source = manager->sources; source != NULL; source = source->next)
 		if (selector_equal(&source->service.selector, selector)) return source;
 	return NULL;
@@ -190,7 +192,7 @@ static void registry_waiter(void* opaque) {
 	struct input_manager* manager = *(struct input_manager**)opaque;
 	for (;;) {
 		struct signal_message message;
-		syscall_status_t      status = signal_wait(manager->registry_signal_cap, &message);
+		syscall_status_t status = signal_wait(manager->registry_signal_cap, &message);
 		if (status == SYSCALL_STATUS_INTERRUPTED) continue;
 		if (status != SYSCALL_STATUS_OK) {
 			__atomic_store_n(&manager->registry_failed, true, __ATOMIC_RELEASE);
@@ -209,11 +211,11 @@ static void registry_waiter(void* opaque) {
 
 static void source_waiter(void* opaque) {
 	const struct source_waiter_argument* argument = opaque;
-	struct input_manager*                manager  = argument->manager;
-	struct managed_input_source*         source   = argument->source;
+	struct input_manager* manager = argument->manager;
+	struct managed_input_source* source = argument->source;
 	for (;;) {
 		struct signal_message message;
-		syscall_status_t      status = signal_wait(source->signal_cap, &message);
+		syscall_status_t status = signal_wait(source->signal_cap, &message);
 		if (__atomic_load_n(&source->stopping, __ATOMIC_ACQUIRE)) thread_exit(0u);
 		if (status == SYSCALL_STATUS_INTERRUPTED) continue;
 		if (status != SYSCALL_STATUS_OK) {
@@ -244,23 +246,23 @@ static bool stop_source(struct managed_input_source* source) {
 	}
 	free(source->descriptors);
 	free(source->output_descriptors);
-	source->descriptors             = NULL;
-	source->descriptor_count        = 0u;
-	source->output_descriptors      = NULL;
+	source->descriptors = NULL;
+	source->descriptor_count = 0u;
+	source->output_descriptors = NULL;
 	source->output_descriptor_count = 0u;
-	source->maximum_output_values   = 0u;
-	source->pending_count           = 0u;
-	source->pending_frame           = 0u;
+	source->maximum_output_values = 0u;
+	source->pending_count = 0u;
+	source->pending_frame = 0u;
 	return success;
 }
 
 static bool link_quarantine(struct input_manager* manager, struct managed_input_source* source) {
-	source->active            = false;
-	source->quarantined       = true;
-	source->seen              = true;
+	source->active = false;
+	source->quarantined = true;
+	source->seen = true;
 	source->identity_revision = __atomic_load_n(&manager->registry_revision, __ATOMIC_ACQUIRE);
 	input_manager_lock(manager);
-	source->next     = manager->sources;
+	source->next = manager->sources;
 	manager->sources = source;
 	input_manager_unlock(manager);
 	printf("input manager: quarantined malformed source %s\n", source->service.selector.service);
@@ -269,41 +271,41 @@ static bool link_quarantine(struct input_manager* manager, struct managed_input_
 
 static bool install_source(struct input_manager* manager, struct managed_input_source* source) {
 	struct input_manager_event event;
-	bool                       success;
+	bool success;
 
 	input_manager_lock(manager);
 	if (manager->source_count >= INPUT_MANAGER_MAXIMUM_SOURCES || manager->next_source_id == 0u ||
-	    manager->next_source_id == UINT64_MAX || manager->topology_generation == UINT64_MAX) {
+			manager->next_source_id == UINT64_MAX || manager->topology_generation == UINT64_MAX) {
 		input_manager_unlock(manager);
 		return false;
 	}
-	source->id                = manager->next_source_id++;
-	source->active            = true;
-	source->quarantined       = false;
-	source->seen              = true;
+	source->id = manager->next_source_id++;
+	source->active = true;
+	source->quarantined = false;
+	source->seen = true;
 	source->identity_revision = __atomic_load_n(&manager->registry_revision, __ATOMIC_ACQUIRE);
-	source->next              = manager->sources;
-	manager->sources          = source;
+	source->next = manager->sources;
+	manager->sources = source;
 	manager->source_count++;
 	manager->topology_generation++;
-	event   = lifecycle_event(source, INPUT_MANAGER_EVENT_SOURCE_ADDED, timestamp_now());
+	event = lifecycle_event(source, INPUT_MANAGER_EVENT_SOURCE_ADDED, timestamp_now());
 	success = append_frame_locked(manager, &event, 1u);
 	if (!success) {
 		manager->sources = source->next;
 		manager->source_count--;
 		manager->topology_generation--;
 		manager->next_source_id--;
-		source->next   = NULL;
+		source->next = NULL;
 		source->active = false;
 	}
 	input_manager_unlock(manager);
 	if (!success || !notify_consumers(manager)) return false;
 	RUNTIME_DEBUG_LOG("input manager: attached source %llu (%s), class=%u controls=%zu outputs=%zu\n",
-	                  (unsigned long long)source->id,
-	                  source->service.selector.service,
-	                  (unsigned)source->device_class,
-	                  source->descriptor_count,
-	                  source->output_descriptor_count);
+			(unsigned long long)source->id,
+			source->service.selector.service,
+			(unsigned)source->device_class,
+			source->descriptor_count,
+			source->output_descriptor_count);
 	return true;
 }
 
@@ -324,8 +326,8 @@ static bool deactivate_source(struct input_manager* manager, struct managed_inpu
 		input_manager_unlock(manager);
 		if (success) success = notify_consumers(manager);
 		RUNTIME_DEBUG_LOG("input manager: removed source %llu (%s)\n",
-		                  (unsigned long long)source->id,
-		                  source->service.selector.service);
+				(unsigned long long)source->id,
+				source->service.selector.service);
 	}
 	if (!stop_source(source)) success = false;
 	source->quarantined = quarantine;
@@ -370,8 +372,8 @@ static bool output_descriptors_valid(const struct input_output_descriptor* descr
 	return true;
 }
 
-static enum attach_result quarantine_acquired_source(struct input_manager*        manager,
-                                                     struct managed_input_source* source) {
+static enum attach_result quarantine_acquired_source(
+		struct input_manager* manager, struct managed_input_source* source) {
 	if (!stop_source(source)) {
 		free(source);
 		return ATTACH_RESULT_FAILED;
@@ -381,14 +383,14 @@ static enum attach_result quarantine_acquired_source(struct input_manager*      
 }
 
 static enum attach_result attach_source(struct input_manager* manager, const struct registry_service_info* service) {
-	struct managed_input_source*   source = calloc(1u, sizeof(*source));
+	struct managed_input_source* source = calloc(1u, sizeof(*source));
 	struct registry_service_handle handle = {.capability = CAP_ID_INVALID};
 	struct input_get_info_response info;
-	struct registry_call_result    acquire;
+	struct registry_call_result acquire;
 	if (source == NULL) return ATTACH_RESULT_FAILED;
-	source->service    = *service;
-	source->owner      = PROCESS_PID_INVALID;
-	source->input_cap  = CAP_ID_INVALID;
+	source->service = *service;
+	source->owner = PROCESS_PID_INVALID;
+	source->input_cap = CAP_ID_INVALID;
 	source->signal_cap = CAP_ID_INVALID;
 	source->waiter_cap = CAP_ID_INVALID;
 
@@ -403,24 +405,24 @@ static enum attach_result attach_source(struct input_manager* manager, const str
 		return ATTACH_RESULT_RETRY;
 	}
 	if (acquire.status != REGISTRY_STATUS_OK) return quarantine_acquired_source(manager, source);
-	source->owner     = handle.owner;
+	source->owner = handle.owner;
 	source->input_cap = handle.capability;
 	if (handle.capability == CAP_ID_INVALID || handle.owner == PROCESS_PID_INVALID ||
-	    !service_equal(service, &handle.info) || handle.info.rights != INPUT_SERVICE_CLIENT_RIGHTS)
+			!service_equal(service, &handle.info) || handle.info.rights != INPUT_SERVICE_CLIENT_RIGHTS)
 		return quarantine_acquired_source(manager, source);
 
 	if (input_get_info(source->input_cap, &info) != SYSCALL_STATUS_OK || info.descriptor_count == 0u ||
-	    info.descriptor_count > INPUT_MANAGER_MAXIMUM_DESCRIPTORS || info.queue_capacity == 0u ||
-	    info.maximum_frame_events == 0u || info.maximum_frame_events > INPUT_MANAGER_MAXIMUM_FRAME_EVENTS ||
-	    info.maximum_frame_events > info.queue_capacity ||
-	    info.output_descriptor_count > INPUT_MANAGER_MAXIMUM_OUTPUT_DESCRIPTORS ||
-	    info.maximum_output_values > INPUT_MANAGER_MAXIMUM_OUTPUT_VALUES ||
-	    (info.output_descriptor_count == 0u) != (info.maximum_output_values == 0u) ||
-	    info.maximum_output_values > info.output_descriptor_count)
+			info.descriptor_count > INPUT_MANAGER_MAXIMUM_DESCRIPTORS || info.queue_capacity == 0u ||
+			info.maximum_frame_events == 0u || info.maximum_frame_events > INPUT_MANAGER_MAXIMUM_FRAME_EVENTS ||
+			info.maximum_frame_events > info.queue_capacity ||
+			info.output_descriptor_count > INPUT_MANAGER_MAXIMUM_OUTPUT_DESCRIPTORS ||
+			info.maximum_output_values > INPUT_MANAGER_MAXIMUM_OUTPUT_VALUES ||
+			(info.output_descriptor_count == 0u) != (info.maximum_output_values == 0u) ||
+			info.maximum_output_values > info.output_descriptor_count)
 		return quarantine_acquired_source(manager, source);
-	source->device_class     = info.device_class;
+	source->device_class = info.device_class;
 	source->descriptor_count = info.descriptor_count;
-	source->descriptors      = malloc(source->descriptor_count * sizeof(*source->descriptors));
+	source->descriptors = malloc(source->descriptor_count * sizeof(*source->descriptors));
 	if (source->descriptors == NULL) {
 		(void)stop_source(source);
 		free(source);
@@ -429,12 +431,12 @@ static enum attach_result attach_source(struct input_manager* manager, const str
 	for (size_t offset = 0u; offset < source->descriptor_count;) {
 		size_t capacity = source->descriptor_count - offset;
 		if (capacity > INPUT_MANAGER_DESCRIPTOR_PAGE_SIZE) capacity = INPUT_MANAGER_DESCRIPTOR_PAGE_SIZE;
-		size_t   returned = 0u;
-		uint64_t total    = 0u;
+		size_t returned = 0u;
+		uint64_t total = 0u;
 		if (input_read_descriptors(
-				source->input_cap, offset, source->descriptors + offset, capacity, &returned, &total) !=
-		        SYSCALL_STATUS_OK ||
-		    total != source->descriptor_count || returned == 0u || returned > capacity) {
+					source->input_cap, offset, source->descriptors + offset, capacity, &returned, &total) !=
+						SYSCALL_STATUS_OK ||
+				total != source->descriptor_count || returned == 0u || returned > capacity) {
 			return quarantine_acquired_source(manager, source);
 		}
 		offset += returned;
@@ -442,7 +444,7 @@ static enum attach_result attach_source(struct input_manager* manager, const str
 	if (!descriptors_valid(source->descriptors, source->descriptor_count))
 		return quarantine_acquired_source(manager, source);
 	source->output_descriptor_count = info.output_descriptor_count;
-	source->maximum_output_values   = info.maximum_output_values;
+	source->maximum_output_values = info.maximum_output_values;
 	if (source->output_descriptor_count != 0u) {
 		source->output_descriptors = malloc(source->output_descriptor_count * sizeof(*source->output_descriptors));
 		if (source->output_descriptors == NULL) {
@@ -453,12 +455,12 @@ static enum attach_result attach_source(struct input_manager* manager, const str
 		for (size_t offset = 0u; offset < source->output_descriptor_count;) {
 			size_t capacity = source->output_descriptor_count - offset;
 			if (capacity > INPUT_MANAGER_DESCRIPTOR_PAGE_SIZE) capacity = INPUT_MANAGER_DESCRIPTOR_PAGE_SIZE;
-			size_t   returned = 0u;
-			uint64_t total    = 0u;
+			size_t returned = 0u;
+			uint64_t total = 0u;
 			if (input_read_output_descriptors(
-					source->input_cap, offset, source->output_descriptors + offset, capacity, &returned, &total) !=
-			        SYSCALL_STATUS_OK ||
-			    total != source->output_descriptor_count || returned == 0u || returned > capacity)
+						source->input_cap, offset, source->output_descriptors + offset, capacity, &returned, &total) !=
+							SYSCALL_STATUS_OK ||
+					total != source->output_descriptor_count || returned == 0u || returned > capacity)
 				return quarantine_acquired_source(manager, source);
 			offset += returned;
 		}
@@ -466,17 +468,17 @@ static enum attach_result attach_source(struct input_manager* manager, const str
 			return quarantine_acquired_source(manager, source);
 	}
 	if (input_acquire_event_signal(source->input_cap, &source->signal_cap) != SYSCALL_STATUS_OK ||
-	    source->signal_cap == CAP_ID_INVALID)
+			source->signal_cap == CAP_ID_INVALID)
 		return quarantine_acquired_source(manager, source);
 
 	const struct source_waiter_argument argument = {.manager = manager, .source = source};
 	if (process_spawn_thread(manager->self_cap,
-	                         (uintptr_t)source_waiter,
-	                         &argument,
-	                         sizeof(argument),
-	                         "input source waiter",
-	                         sizeof("input source waiter"),
-	                         &source->waiter_cap) != SYSCALL_STATUS_OK) {
+				(uintptr_t)source_waiter,
+				&argument,
+				sizeof(argument),
+				"input source waiter",
+				sizeof("input source waiter"),
+				&source->waiter_cap) != SYSCALL_STATUS_OK) {
 		(void)stop_source(source);
 		free(source);
 		return ATTACH_RESULT_FAILED;
@@ -492,26 +494,26 @@ static enum attach_result attach_source(struct input_manager* manager, const str
 
 static bool enumerate_sources(struct registry_service_info** out_services, size_t* out_count, bool* out_retry) {
 	*out_services = NULL;
-	*out_count    = 0u;
-	*out_retry    = false;
+	*out_count = 0u;
+	*out_retry = false;
 	for (unsigned attempt = 0u; attempt < 3u; attempt++) {
-		uint64_t                    total = 0u;
-		uint64_t                    returned;
+		uint64_t total = 0u;
+		uint64_t returned;
 		struct registry_call_result result = registry_enumerate(&input_query, 0u, 0u, NULL, &returned, &total);
 		if (result.transport_status != SYSCALL_STATUS_OK || result.status != REGISTRY_STATUS_OK ||
-		    total > INPUT_MANAGER_MAXIMUM_SOURCES)
+				total > INPUT_MANAGER_MAXIMUM_SOURCES)
 			return false;
 		if (total == 0u) return true;
 		struct registry_service_info* services = malloc((size_t)total * sizeof(*services));
 		if (services == NULL) return false;
 		uint64_t offset = 0u;
-		bool     stable = true;
+		bool stable = true;
 		while (offset < total) {
 			uint64_t count = total - offset;
 			if (count > INPUT_MANAGER_REGISTRY_PAGE_SIZE) count = INPUT_MANAGER_REGISTRY_PAGE_SIZE;
 			uint64_t current_total = 0u;
-			result =
-				registry_enumerate(&input_query, offset, count, services + (size_t)offset, &returned, &current_total);
+			result = registry_enumerate(
+					&input_query, offset, count, services + (size_t)offset, &returned, &current_total);
 			if (result.transport_status != SYSCALL_STATUS_OK || result.status != REGISTRY_STATUS_OK) {
 				free(services);
 				return false;
@@ -524,7 +526,7 @@ static bool enumerate_sources(struct registry_service_info** out_services, size_
 		}
 		if (stable) {
 			*out_services = services;
-			*out_count    = (size_t)total;
+			*out_count = (size_t)total;
 			return true;
 		}
 		free(services);
@@ -533,11 +535,11 @@ static bool enumerate_sources(struct registry_service_info** out_services, size_
 	return true;
 }
 
-static bool source_identity_is_same(struct input_manager* manager, struct managed_input_source* source,
-                                    bool* out_same) {
+static bool source_identity_is_same(
+		struct input_manager* manager, struct managed_input_source* source, bool* out_same) {
 	struct registry_service_handle handle = {.capability = CAP_ID_INVALID};
-	struct registry_call_result    result = registry_acquire(&input_query, source->service.selector.service, &handle);
-	*out_same                             = true;
+	struct registry_call_result result = registry_acquire(&input_query, source->service.selector.service, &handle);
+	*out_same = true;
 	if (result.transport_status != SYSCALL_STATUS_OK) return false;
 	if (result.status == REGISTRY_STATUS_NOT_FOUND) {
 		*out_same = false;
@@ -552,9 +554,9 @@ static bool source_identity_is_same(struct input_manager* manager, struct manage
 
 static bool reconcile_sources(struct input_manager* manager) {
 	struct registry_service_info* services;
-	size_t                        service_count;
-	bool                          retry;
-	uint64_t                      revision = __atomic_load_n(&manager->registry_revision, __ATOMIC_ACQUIRE);
+	size_t service_count;
+	bool retry;
+	uint64_t revision = __atomic_load_n(&manager->registry_revision, __ATOMIC_ACQUIRE);
 	if (!enumerate_sources(&services, &service_count, &retry)) return false;
 	if (retry) {
 		__atomic_store_n(&manager->registry_dirty, true, __ATOMIC_RELEASE);
@@ -614,8 +616,8 @@ enum drain_result {
 	DRAIN_RESULT_MANAGER_FAILED,
 };
 
-static enum drain_result append_source_reset(struct input_manager* manager, const struct managed_input_source* source,
-                                             uint64_t timestamp_ns) {
+static enum drain_result append_source_reset(
+		struct input_manager* manager, const struct managed_input_source* source, uint64_t timestamp_ns) {
 	struct input_manager_event event = lifecycle_event(source, INPUT_MANAGER_EVENT_SOURCE_RESET, timestamp_ns);
 	input_manager_lock(manager);
 	bool success = append_frame_locked(manager, &event, 1u);
@@ -639,8 +641,8 @@ static enum drain_result drain_source(struct input_manager* manager, struct mana
 	struct input_event events[INPUT_MANAGER_MAXIMUM_FRAME_EVENTS];
 	for (;;) {
 		struct input_event_page page;
-		syscall_status_t        status =
-			input_read_events(source->input_cap, source->cursor, events, INPUT_MANAGER_MAXIMUM_FRAME_EVENTS, &page);
+		syscall_status_t status =
+				input_read_events(source->input_cap, source->cursor, events, INPUT_MANAGER_MAXIMUM_FRAME_EVENTS, &page);
 		if (status == SYSCALL_STATUS_UNAVAILABLE)
 			return source->pending_count == 0u ? DRAIN_RESULT_OK : DRAIN_RESULT_PROVIDER_FAILED;
 		if (status != SYSCALL_STATUS_OK) return DRAIN_RESULT_PROVIDER_FAILED;
@@ -648,9 +650,9 @@ static enum drain_result drain_source(struct input_manager* manager, struct mana
 		if (!gap && events[0].sequence != source->cursor + 1u) return DRAIN_RESULT_PROVIDER_FAILED;
 		if (gap && events[0].sequence <= source->cursor + 1u) return DRAIN_RESULT_PROVIDER_FAILED;
 		if (gap) {
-			source->pending_count    = 0u;
-			source->pending_frame    = 0u;
-			source->last_frame       = 0u;
+			source->pending_count = 0u;
+			source->pending_frame = 0u;
+			source->last_frame = 0u;
 			enum drain_result result = append_source_reset(manager, source, timestamp_now());
 			if (result != DRAIN_RESULT_OK) return result;
 		}
@@ -661,17 +663,17 @@ static enum drain_result drain_source(struct input_manager* manager, struct mana
 			source->cursor = event->sequence;
 			if (event->type == INPUT_EVENT_TYPE_STATE_RESET) {
 				if (source->pending_count != 0u || (event->flags & INPUT_EVENT_FLAG_FRAME_END) == 0u ||
-				    event->frame == source->last_frame)
+						event->frame == source->last_frame)
 					return DRAIN_RESULT_PROVIDER_FAILED;
-				source->last_frame        = event->frame;
+				source->last_frame = event->frame;
 				source->last_timestamp_ns = event->timestamp_ns;
-				enum drain_result result  = append_source_reset(manager, source, event->timestamp_ns);
+				enum drain_result result = append_source_reset(manager, source, event->timestamp_ns);
 				if (result != DRAIN_RESULT_OK) return result;
 				continue;
 			}
 			const struct input_control_descriptor* descriptor = find_descriptor(source, event->control_id);
 			if (descriptor == NULL || !value_valid(descriptor, event->value) ||
-			    source->pending_count >= INPUT_MANAGER_MAXIMUM_FRAME_EVENTS)
+					source->pending_count >= INPUT_MANAGER_MAXIMUM_FRAME_EVENTS)
 				return DRAIN_RESULT_PROVIDER_FAILED;
 			if (source->pending_count == 0u) {
 				if (event->frame == source->last_frame) return DRAIN_RESULT_PROVIDER_FAILED;
@@ -680,22 +682,22 @@ static enum drain_result drain_source(struct input_manager* manager, struct mana
 			else if (source->pending_frame != event->frame || source->pending[0].timestamp_ns != event->timestamp_ns)
 				return DRAIN_RESULT_PROVIDER_FAILED;
 			source->pending[source->pending_count++] = (struct input_manager_event){
-				.timestamp_ns    = event->timestamp_ns,
-				.source_id       = source->id,
-				.type            = INPUT_MANAGER_EVENT_CONTROL,
-				.device_class    = source->device_class,
-				.control_id      = descriptor->id,
-				.control_kind    = descriptor->kind,
-				.control_code    = descriptor->code,
-				.group_id        = descriptor->group_id,
-				.value           = event->value,
+				.timestamp_ns = event->timestamp_ns,
+				.source_id = source->id,
+				.type = INPUT_MANAGER_EVENT_CONTROL,
+				.device_class = source->device_class,
+				.control_id = descriptor->id,
+				.control_kind = descriptor->kind,
+				.control_code = descriptor->code,
+				.group_id = descriptor->group_id,
+				.value = event->value,
 				.logical_minimum = descriptor->logical_minimum,
 				.logical_maximum = descriptor->logical_maximum,
 			};
 			if ((event->flags & INPUT_EVENT_FLAG_FRAME_END) != 0u) {
-				source->last_frame        = event->frame;
+				source->last_frame = event->frame;
 				source->last_timestamp_ns = event->timestamp_ns;
-				enum drain_result result  = append_source_controls(manager, source);
+				enum drain_result result = append_source_controls(manager, source);
 				if (result != DRAIN_RESULT_OK) return result;
 			}
 		}
@@ -721,71 +723,74 @@ static bool process_dirty_sources(struct input_manager* manager) {
 }
 
 static void initialize_invalid_capabilities(struct input_manager* manager) {
-	manager->self_cap             = CAP_ID_INVALID;
+	manager->self_cap = CAP_ID_INVALID;
 	manager->channel_activity_cap = CAP_ID_INVALID;
-	manager->service_cap          = CAP_ID_INVALID;
-	manager->event_signal_cap     = CAP_ID_INVALID;
-	manager->activity_cap         = CAP_ID_INVALID;
-	manager->registry_signal_cap  = CAP_ID_INVALID;
-	manager->endpoint             = CHANNEL_ID_INVALID;
+	manager->service_cap = CAP_ID_INVALID;
+	manager->event_signal_cap = CAP_ID_INVALID;
+	manager->activity_cap = CAP_ID_INVALID;
+	manager->registry_signal_cap = CAP_ID_INVALID;
+	manager->endpoint = CHANNEL_ID_INVALID;
 }
 
 bool input_manager_initialize(struct input_manager* manager) {
 	struct self_info self = {
-		.self_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .main_thread_cap = CAP_ID_INVALID};
+		.self_cap = CAP_ID_INVALID, .address_space_cap = CAP_ID_INVALID, .main_thread_cap = CAP_ID_INVALID
+	};
 	cap_id_t registry_thread_cap = CAP_ID_INVALID;
 	if (manager == NULL) return false;
 	memset(manager, 0, sizeof(*manager));
 	initialize_invalid_capabilities(manager);
 	manager->topology_generation = 1u;
-	manager->next_source_id      = 1u;
-	manager->next_sequence       = 1u;
-	manager->next_frame          = 1u;
-	manager->registry_revision   = 1u;
-	manager->events              = calloc(INPUT_MANAGER_EVENT_QUEUE_CAPACITY, sizeof(*manager->events));
+	manager->next_source_id = 1u;
+	manager->next_sequence = 1u;
+	manager->next_frame = 1u;
+	manager->registry_revision = 1u;
+	manager->events = calloc(INPUT_MANAGER_EVENT_QUEUE_CAPACITY, sizeof(*manager->events));
 	if (manager->events == NULL) return false;
 
 	syscall_status_t status = process_self_info(&self);
 	if (status == SYSCALL_STATUS_OK && self.pid == PROCESS_PID_INVALID) status = SYSCALL_STATUS_FAILED;
 	if (status == SYSCALL_STATUS_OK) {
-		manager->pid      = self.pid;
+		manager->pid = self.pid;
 		manager->self_cap = self.self_cap;
-		self.self_cap     = CAP_ID_INVALID;
-		status            = signal_create(&manager->event_signal_cap);
+		self.self_cap = CAP_ID_INVALID;
+		status = signal_create(&manager->event_signal_cap);
 	}
 	if (status == SYSCALL_STATUS_OK) status = signal_create(&manager->activity_cap);
 	if (status == SYSCALL_STATUS_OK) status = signal_create(&manager->registry_signal_cap);
 	if (status == SYSCALL_STATUS_OK) status = channel_create(&manager->endpoint, &manager->channel_activity_cap);
 	if (status == SYSCALL_STATUS_OK)
 		status = cap_publish(manager->endpoint,
-		                     INPUT_MANAGER_OBJECT_ID,
-		                     manager->pid,
-		                     CAP_CALL | CAP_READ | CAP_WRITE | CAP_DELEGATE,
-		                     &manager->service_cap);
+				INPUT_MANAGER_OBJECT_ID,
+				manager->pid,
+				CAP_CALL | CAP_READ | CAP_WRITE | CAP_DELEGATE,
+				&manager->service_cap);
 	if (status == SYSCALL_STATUS_OK && !input_manager_server_start(manager)) status = SYSCALL_STATUS_FAILED;
 	if (status == SYSCALL_STATUS_OK) {
-		struct registry_call_result result = registry_advertise(
-			&manager_selector, INPUT_MANAGER_PROTOCOL_VERSION_MINOR, manager->service_cap, INPUT_MANAGER_CLIENT_RIGHTS);
+		struct registry_call_result result = registry_advertise(&manager_selector,
+				INPUT_MANAGER_PROTOCOL_VERSION_MINOR,
+				manager->service_cap,
+				INPUT_MANAGER_CLIENT_RIGHTS);
 		if (result.transport_status != SYSCALL_STATUS_OK || result.status != REGISTRY_STATUS_OK)
 			status = SYSCALL_STATUS_FAILED;
 	}
 	if (status == SYSCALL_STATUS_OK) {
-		uint64_t                    counter;
+		uint64_t counter;
 		struct registry_call_result result =
-			registry_watch(&input_query, manager->registry_signal_cap, &manager->registry_subscription, &counter);
+				registry_watch(&input_query, manager->registry_signal_cap, &manager->registry_subscription, &counter);
 		if (result.transport_status != SYSCALL_STATUS_OK || result.status != REGISTRY_STATUS_OK || counter == 0u)
 			status = SYSCALL_STATUS_FAILED;
 		else __atomic_store_n(&manager->registry_dirty, true, __ATOMIC_RELEASE);
 	}
 	if (status == SYSCALL_STATUS_OK) {
 		struct input_manager* argument = manager;
-		status                         = process_spawn_thread(manager->self_cap,
-		                                                      (uintptr_t)registry_waiter,
-		                                                      &argument,
-		                                                      sizeof(argument),
-		                                                      "input registry waiter",
-		                                                      sizeof("input registry waiter"),
-		                                                      &registry_thread_cap);
+		status = process_spawn_thread(manager->self_cap,
+				(uintptr_t)registry_waiter,
+				&argument,
+				sizeof(argument),
+				"input registry waiter",
+				sizeof("input registry waiter"),
+				&registry_thread_cap);
 	}
 	if (status == SYSCALL_STATUS_OK) status = thread_detach(registry_thread_cap);
 	if (registry_thread_cap != CAP_ID_INVALID) {
@@ -797,11 +802,11 @@ bool input_manager_initialize(struct input_manager* manager) {
 	if (self.self_cap != CAP_ID_INVALID) (void)cap_drop(self.self_cap);
 	if (status != SYSCALL_STATUS_OK) return false;
 	printf("input manager: advertised %s/%s@%u.%u/%s\n",
-	       INPUT_MANAGER_NAMESPACE,
-	       INPUT_MANAGER_PROTOCOL_NAME,
-	       INPUT_MANAGER_PROTOCOL_VERSION_MAJOR,
-	       INPUT_MANAGER_PROTOCOL_VERSION_MINOR,
-	       INPUT_MANAGER_SERVICE_NAME);
+			INPUT_MANAGER_NAMESPACE,
+			INPUT_MANAGER_PROTOCOL_NAME,
+			INPUT_MANAGER_PROTOCOL_VERSION_MAJOR,
+			INPUT_MANAGER_PROTOCOL_VERSION_MINOR,
+			INPUT_MANAGER_SERVICE_NAME);
 	return true;
 }
 
@@ -816,14 +821,14 @@ int input_manager_run(struct input_manager* manager) {
 		bool source_dirty = false;
 		for (struct managed_input_source* source = manager->sources; source != NULL; source = source->next) {
 			if (source->active && (__atomic_load_n(&source->dirty, __ATOMIC_ACQUIRE) ||
-			                       __atomic_load_n(&source->dead, __ATOMIC_ACQUIRE))) {
+										  __atomic_load_n(&source->dead, __ATOMIC_ACQUIRE))) {
 				source_dirty = true;
 				break;
 			}
 		}
 		if (source_dirty) continue;
 		struct signal_message activity;
-		syscall_status_t      status = signal_wait(manager->activity_cap, &activity);
+		syscall_status_t status = signal_wait(manager->activity_cap, &activity);
 		if (status != SYSCALL_STATUS_OK && status != SYSCALL_STATUS_INTERRUPTED) return 1;
 	}
 }

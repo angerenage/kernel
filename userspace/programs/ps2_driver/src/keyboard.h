@@ -6,9 +6,9 @@
 
 /* Decoder state for one keyboard speaking untranslated scan-code set 2. */
 struct ps2_keyboard_decoder {
-	bool   extended;
-	bool   released;
-	bool   pause;
+	bool extended;
+	bool released;
+	bool pause;
 	size_t pause_index;
 };
 

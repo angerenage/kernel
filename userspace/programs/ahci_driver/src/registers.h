@@ -78,11 +78,11 @@ struct ahci_port_registers {
 	uint32_t sata_notification;
 	uint32_t fis_based_switching;
 	uint32_t device_sleep;
-	uint8_t  reserved_1[0x70u - 0x48u];
-	uint8_t  vendor[0x80u - 0x70u];
+	uint8_t reserved_1[0x70u - 0x48u];
+	uint8_t vendor[0x80u - 0x70u];
 };
 
 _Static_assert(sizeof(struct ahci_host_registers) == AHCI_GENERIC_REGISTERS_SIZE,
-               "AHCI host register layout must match the specification");
+		"AHCI host register layout must match the specification");
 _Static_assert(sizeof(struct ahci_port_registers) == AHCI_PORT_REGISTERS_SIZE,
-               "AHCI port register layout must match the specification");
+		"AHCI port register layout must match the specification");

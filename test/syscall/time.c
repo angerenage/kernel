@@ -70,22 +70,22 @@ Test(syscall, monotonic_time_ns_reports_an_unavailable_clock) {
 
 Test(syscall, sleep_ms_zero_yields) {
 	const struct thread_create_params first_params = {
-		.name              = "syscall-sleep-zero-first",
-		.entry             = syscall_test_thread_entry,
-		.arg               = NULL,
+		.name = "syscall-sleep-zero-first",
+		.entry = syscall_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x320000u,
-		.kernel_stack_top  = 0x324000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x324000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params second_params = {
-		.name              = "syscall-sleep-zero-second",
-		.entry             = syscall_test_thread_entry,
-		.arg               = NULL,
+		.name = "syscall-sleep-zero-second",
+		.entry = syscall_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x330000u,
-		.kernel_stack_top  = 0x334000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x334000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	struct thread first;
 	struct thread second;
@@ -106,22 +106,22 @@ Test(syscall, sleep_ms_zero_yields) {
 
 Test(syscall, sleep_ms_blocks_until_deadline) {
 	const struct thread_create_params sleeper_params = {
-		.name              = "syscall-sleeper",
-		.entry             = syscall_test_thread_entry,
-		.arg               = NULL,
+		.name = "syscall-sleeper",
+		.entry = syscall_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x340000u,
-		.kernel_stack_top  = 0x344000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x344000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params worker_params = {
-		.name              = "syscall-worker",
-		.entry             = syscall_test_thread_entry,
-		.arg               = NULL,
+		.name = "syscall-worker",
+		.entry = syscall_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x350000u,
-		.kernel_stack_top  = 0x354000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x354000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	struct thread sleeper;
 	struct thread worker;
@@ -130,7 +130,7 @@ Test(syscall, sleep_ms_blocks_until_deadline) {
 	cr_assert(hal_clock_start(1000u, NULL, NULL), "hal_clock_start failed");
 	cr_assert(thread_init(&sleeper, &sleeper_params), "thread_init failed for sleeper thread");
 	cr_assert(thread_init(&worker, &worker_params), "thread_init failed for worker thread");
-	worker.timeslice_ticks     = 1u;
+	worker.timeslice_ticks = 1u;
 	worker.timeslice_remaining = 1u;
 	cr_assert(sched_make_runnable(&sleeper), "failed to make sleeper runnable");
 	cr_assert(sched_make_runnable(&worker), "failed to make worker runnable");

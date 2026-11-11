@@ -4,11 +4,12 @@
 #include <core/sched.h>
 #include <kernel/trace.h>
 #endif
+#include <stdint.h>
+
+#include <hal/userspace.h>
 #include <core/user_upcall.h>
 #include <core/uthread.h>
-#include <hal/userspace.h>
 #include <kernel/syscall.h>
-#include <stdint.h>
 
 static syscall_result_t syscall_upcall_result(enum user_upcall_result result) {
 	switch (result) {
@@ -28,16 +29,16 @@ static syscall_result_t syscall_upcall_result(enum user_upcall_result result) {
 }
 
 enum syscall_frame_action syscall_dispatch_user_frame(struct hal_userspace_return_frame* frame, uintptr_t number,
-                                                      uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
-                                                      uintptr_t arg4, uintptr_t arg5, syscall_result_t* out_result) {
-	struct uthread*         current;
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5,
+		syscall_result_t* out_result) {
+	struct uthread* current;
 	enum user_upcall_result restore_result;
 
 	if (out_result == NULL) return SYSCALL_FRAME_WRITE_RESULT;
 	if (number != SYSCALL_UPCALL_RETURN) {
 #if KERNEL_TRACE_ENABLED
-		bool     trace_syscall = number != SYSCALL_TRACE_REGISTER && number != SYSCALL_TRACE_EVENT;
-		uint64_t trace_thread  = kernel_trace_thread_id(sched_current_thread());
+		bool trace_syscall = number != SYSCALL_TRACE_REGISTER && number != SYSCALL_TRACE_EVENT;
+		uint64_t trace_thread = kernel_trace_thread_id(sched_current_thread());
 		if (trace_syscall) {
 			kernel_trace_emit(KERNEL_TRACE_EVENT_SYSCALL, KERNEL_TRACE_RECORD_BEGIN, trace_thread, number);
 		}

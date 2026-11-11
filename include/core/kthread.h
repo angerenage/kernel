@@ -1,10 +1,11 @@
 #pragma once
 
-#include <core/mapping.h>
-#include <core/thread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <core/mapping.h>
+#include <core/thread.h>
 
 enum {
 	KTHREAD_DEFAULT_STACK_SIZE = 16u * 1024u,
@@ -20,9 +21,9 @@ enum kthread_spawn_result {
 };
 
 struct kthread {
-	struct thread   thread;
+	struct thread thread;
 	struct mapping* stack_mapping;
-	size_t          stack_size;
+	size_t stack_size;
 };
 
 /* Return the thread descriptor currently associated with the running CPU. */
@@ -32,15 +33,15 @@ struct thread* kthread_current(void);
 enum kthread_spawn_result kthread_spawn(struct kthread** out_thread, const char* name, thread_entry_t entry, void* arg);
 
 /* Spawn a joinable kernel thread with a CPU preference; NULL lets the scheduler select one. */
-enum kthread_spawn_result kthread_spawn_on_cpu(struct kthread** out_thread, const char* name, thread_entry_t entry,
-                                               void* arg, struct cpu* preferred_cpu);
+enum kthread_spawn_result kthread_spawn_on_cpu(
+		struct kthread** out_thread, const char* name, thread_entry_t entry, void* arg, struct cpu* preferred_cpu);
 
 /* Spawn a detached kernel thread on a CPU selected by the scheduler. */
 enum kthread_spawn_result kthread_spawn_detached(const char* name, thread_entry_t entry, void* arg);
 
 /* Spawn a detached kernel thread with a CPU preference; NULL lets the scheduler select one. */
-enum kthread_spawn_result kthread_spawn_detached_on_cpu(const char* name, thread_entry_t entry, void* arg,
-                                                        struct cpu* preferred_cpu);
+enum kthread_spawn_result kthread_spawn_detached_on_cpu(
+		const char* name, thread_entry_t entry, void* arg, struct cpu* preferred_cpu);
 
 /* Block until target exits (or is already exited), then publish its exit code. */
 bool kthread_join(struct kthread* target, thread_exit_code_t* out_exit_code);

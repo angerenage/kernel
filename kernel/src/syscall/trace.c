@@ -1,15 +1,16 @@
 #include "trace.h"
 
+#include <stdint.h>
+#include <string.h>
+
 #include <base/trace.h>
 #include <core/sched.h>
 #include <core/syscall.h>
 #include <kernel/trace.h>
-#include <stdint.h>
-#include <string.h>
 
-syscall_result_t syscall_trace_register(uintptr_t name, uintptr_t name_length, uintptr_t arg2, uintptr_t arg3,
-                                        uintptr_t arg4, uintptr_t arg5) {
-	char             buffer[TRACE_LABEL_NAME_MAX + 1u] = {0};
+syscall_result_t syscall_trace_register(
+		uintptr_t name, uintptr_t name_length, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
+	char buffer[TRACE_LABEL_NAME_MAX + 1u] = {0};
 	trace_label_id_t label;
 	syscall_result_t result;
 
@@ -32,8 +33,8 @@ syscall_result_t syscall_trace_register(uintptr_t name, uintptr_t name_length, u
 	return syscall_result_ok((uintptr_t)label);
 }
 
-syscall_result_t syscall_trace_event(uintptr_t type, uintptr_t label, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                     uintptr_t arg5) {
+syscall_result_t syscall_trace_event(
+		uintptr_t type, uintptr_t label, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
 	(void)arg2;
 	(void)arg3;
 	(void)arg4;
@@ -44,8 +45,8 @@ syscall_result_t syscall_trace_event(uintptr_t type, uintptr_t label, uintptr_t 
 	}
 	if (!kernel_trace_is_active()) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 	kernel_trace_emit(KERNEL_TRACE_EVENT_USERSPACE,
-	                  (enum kernel_trace_record_type)type,
-	                  kernel_trace_thread_id(sched_current_thread()),
-	                  (uint64_t)label);
+			(enum kernel_trace_record_type)type,
+			kernel_trace_thread_id(sched_current_thread()),
+			(uint64_t)label);
 	return syscall_result_ok(0u);
 }

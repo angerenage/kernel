@@ -1,16 +1,17 @@
 #include "acpi.h"
 
-#include <base/acpi.h>
-#include <base/cap.h>
-#include <base/syscall.h>
-#include <core/capability.h>
-#include <firmware/acpi.h>
-#include <hal/acpi.h>
-#include <kernel/capability.h>
 #include <libc/stdlib.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <base/acpi.h>
+#include <base/cap.h>
+#include <base/syscall.h>
+#include <firmware/acpi.h>
+#include <hal/acpi.h>
+#include <core/capability.h>
+#include <kernel/capability.h>
 
 #define ACPI_PROVIDER_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_MANAGE | CAP_DELEGATE))
 #define ACPI_TABLE_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ | CAP_DELEGATE))
@@ -33,17 +34,17 @@ static const struct hal_acpi_consumed_table acpi_hidden_tables[] = {
 	{.signature = "UEFI"},
 };
 
-static cap_object_id_t                 acpi_provider_object_id = CAP_OBJECT_ID_INVALID;
+static cap_object_id_t acpi_provider_object_id = CAP_OBJECT_ID_INVALID;
 static struct hal_acpi_consumed_table* acpi_consumed_tables;
-static size_t                          acpi_consumed_table_count;
+static size_t acpi_consumed_table_count;
 
 #if defined(KERNEL_CAPABILITY_ACPI_TEST)
-static bool     fail_next_claim_response;
+static bool fail_next_claim_response;
 static cap_id_t last_rollback_cap = CAP_ID_INVALID;
 
 void kernel_capability_acpi_test_fail_next_claim_response(void) {
 	fail_next_claim_response = true;
-	last_rollback_cap        = CAP_ID_INVALID;
+	last_rollback_cap = CAP_ID_INVALID;
 }
 
 cap_id_t kernel_capability_acpi_test_last_rollback_cap(void) {
@@ -67,7 +68,7 @@ static bool acpi_collect_consumed_tables(void) {
 
 	if (upper_bound == 0u) return true;
 	if (upper_bound > SIZE_MAX / sizeof(*acpi_consumed_tables)) return false;
-	allocation_size      = upper_bound * sizeof(*acpi_consumed_tables);
+	allocation_size = upper_bound * sizeof(*acpi_consumed_tables);
 	acpi_consumed_tables = malloc(allocation_size);
 	if (acpi_consumed_tables == NULL) return false;
 	written = hal_acpi_consumed_tables(acpi_consumed_tables, upper_bound);
@@ -80,10 +81,10 @@ static bool acpi_collect_consumed_tables(void) {
 	return true;
 }
 
-static const struct acpi_sdt_header* acpi_visible_table_at(const char signature[4], uint64_t target,
-                                                           uint64_t* out_count) {
-	acpi_cursor_t                 cursor = ACPI_CURSOR_INIT;
-	uint64_t                      count  = 0u;
+static const struct acpi_sdt_header* acpi_visible_table_at(
+		const char signature[4], uint64_t target, uint64_t* out_count) {
+	acpi_cursor_t cursor = ACPI_CURSOR_INIT;
+	uint64_t count = 0u;
 	const struct acpi_sdt_header* table;
 
 	if (acpi_signature_excluded(signature)) {
@@ -110,8 +111,8 @@ static size_t acpi_table_body_size(const struct acpi_sdt_header* table) {
 static const struct acpi_sdt_header* acpi_aml_definition_at(uint64_t target, uint8_t* out_kind, uint64_t* out_count) {
 	const struct acpi_sdt_header* dsdt = acpi_dsdt();
 	const struct acpi_sdt_header* table;
-	acpi_cursor_t                 cursor = ACPI_CURSOR_INIT;
-	uint64_t                      count  = 0u;
+	acpi_cursor_t cursor = ACPI_CURSOR_INIT;
+	uint64_t count = 0u;
 
 	if (dsdt == NULL) {
 		if (out_count != NULL) *out_count = 0u;
@@ -135,36 +136,36 @@ static const struct acpi_sdt_header* acpi_aml_definition_at(uint64_t target, uin
 }
 
 static syscall_result_t acpi_table_info_handler(const struct cap_request* req, const struct acpi_sdt_header* table) {
-	struct acpi_table_info_request  request;
+	struct acpi_table_info_request request;
 	struct acpi_table_info_response response = {0};
 
 	if ((req->rights & CAP_READ) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (req->request == NULL || req->request_size != sizeof(request) ||
-	    !cap_kernel_response_fits(req, sizeof(response)))
+			!cap_kernel_response_fits(req, sizeof(response)))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	memcpy(&request, req->request, sizeof(request));
 	if (request.header.op != ACPI_TABLE_OP_INFO) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	response.body_size = acpi_table_body_size(table);
-	response.revision  = table->revision;
+	response.revision = table->revision;
 	return cap_kernel_write_response(req, &response, sizeof(response));
 }
 
 static syscall_result_t acpi_table_read_handler(const struct cap_request* req, const struct acpi_sdt_header* table) {
 	struct acpi_table_read_request request;
-	size_t                         body_size;
-	size_t                         offset;
-	size_t                         size;
+	size_t body_size;
+	size_t offset;
+	size_t size;
 
 	if ((req->rights & CAP_READ) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (req->request == NULL || req->request_size != sizeof(request))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	memcpy(&request, req->request, sizeof(request));
 	if (request.header.op != ACPI_TABLE_OP_READ || request.reserved != 0u || request.offset > SIZE_MAX ||
-	    request.size > SIZE_MAX || request.size > CAP_MAX_RESPONSE_SIZE)
+			request.size > SIZE_MAX || request.size > CAP_MAX_RESPONSE_SIZE)
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	body_size = acpi_table_body_size(table);
-	offset    = (size_t)request.offset;
-	size      = (size_t)request.size;
+	offset = (size_t)request.offset;
+	size = (size_t)request.size;
 	if (offset > body_size || size > body_size - offset) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	if (size == 0u) return syscall_result_ok(0u);
 	if (!cap_kernel_response_fits(req, size)) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -173,7 +174,7 @@ static syscall_result_t acpi_table_read_handler(const struct cap_request* req, c
 
 static syscall_result_t acpi_table_handler(const struct cap_request* req) {
 	struct acpi_table_request_header header;
-	const struct acpi_sdt_header*    table;
+	const struct acpi_sdt_header* table;
 
 	if (req == NULL || req->object_id == 0u || req->request == NULL || req->request_size < sizeof(header))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -194,12 +195,12 @@ static void acpi_table_object_event(struct cap_object* object, enum cap_object_e
 }
 
 static syscall_result_t acpi_provider_count_handler(const struct cap_request* req) {
-	struct acpi_provider_count_request  request;
+	struct acpi_provider_count_request request;
 	struct acpi_provider_count_response response = {0};
 
 	if ((req->rights & CAP_READ) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (req->request == NULL || req->request_size != sizeof(request) ||
-	    !cap_kernel_response_fits(req, sizeof(response)))
+			!cap_kernel_response_fits(req, sizeof(response)))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	memcpy(&request, req->request, sizeof(request));
 	if (request.header.op != ACPI_PROVIDER_OP_COUNT) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -207,12 +208,12 @@ static syscall_result_t acpi_provider_count_handler(const struct cap_request* re
 	return cap_kernel_write_response(req, &response, sizeof(response));
 }
 
-static syscall_result_t acpi_write_claim_response(const struct cap_request*                  req,
-                                                  const struct acpi_provider_claim_response* response) {
+static syscall_result_t acpi_write_claim_response(
+		const struct cap_request* req, const struct acpi_provider_claim_response* response) {
 #if defined(KERNEL_CAPABILITY_ACPI_TEST)
 	if (fail_next_claim_response) {
 		fail_next_claim_response = false;
-		last_rollback_cap        = response->table_cap;
+		last_rollback_cap = response->table_cap;
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 #endif
@@ -220,23 +221,23 @@ static syscall_result_t acpi_write_claim_response(const struct cap_request*     
 }
 
 static syscall_result_t acpi_provider_claim_handler(const struct cap_request* req) {
-	struct acpi_provider_claim_request  request;
+	struct acpi_provider_claim_request request;
 	struct acpi_provider_claim_response response = {.table_cap = CAP_ID_INVALID};
-	const struct acpi_sdt_header*       table;
-	cap_object_id_t                     object_id;
-	bool                                created = false;
-	syscall_result_t                    result;
+	const struct acpi_sdt_header* table;
+	cap_object_id_t object_id;
+	bool created = false;
+	syscall_result_t result;
 
 	if ((req->rights & CAP_MANAGE) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (req->request == NULL || req->request_size != sizeof(request) ||
-	    !cap_kernel_response_fits(req, sizeof(response)))
+			!cap_kernel_response_fits(req, sizeof(response)))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	memcpy(&request, req->request, sizeof(request));
 	if (request.header.op != ACPI_PROVIDER_OP_CLAIM) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	table = acpi_visible_table_at(request.signature, request.index, NULL);
 	if (table == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 	object_id = cap_object_create_kernel_lifecycle(
-		(uint64_t)(uintptr_t)table, acpi_table_handler, NULL, NULL, acpi_table_object_event, &created);
+			(uint64_t)(uintptr_t)table, acpi_table_handler, NULL, NULL, acpi_table_object_event, &created);
 	if (object_id == CAP_OBJECT_ID_INVALID) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	if (!created) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 	response.table_cap = cap_create(object_id, req->caller, ACPI_TABLE_RIGHTS, NULL);
@@ -250,15 +251,15 @@ static syscall_result_t acpi_provider_claim_handler(const struct cap_request* re
 }
 
 static syscall_result_t acpi_provider_fadt_info_handler(const struct cap_request* req) {
-	struct acpi_provider_fadt_read_request  request;
+	struct acpi_provider_fadt_read_request request;
 	struct acpi_provider_fadt_read_response response = {0};
-	const struct acpi_sdt_header*           table;
-	const uint8_t*                          bytes;
-	uint32_t                                length;
+	const struct acpi_sdt_header* table;
+	const uint8_t* bytes;
+	uint32_t length;
 
 	if ((req->rights & CAP_READ) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (req->request == NULL || req->request_size != sizeof(request) ||
-	    !cap_kernel_response_fits(req, sizeof(response)))
+			!cap_kernel_response_fits(req, sizeof(response)))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	memcpy(&request, req->request, sizeof(request));
 	if (request.header.op != ACPI_PROVIDER_OP_FADT_READ) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -269,8 +270,8 @@ static syscall_result_t acpi_provider_fadt_info_handler(const struct cap_request
 	bytes = (const uint8_t*)table;
 	if (length >= ACPI_FADT_PREFERRED_PM_PROFILE_OFFSET + sizeof(response.preferred_pm_profile))
 		memcpy(&response.preferred_pm_profile,
-		       bytes + ACPI_FADT_PREFERRED_PM_PROFILE_OFFSET,
-		       sizeof(response.preferred_pm_profile));
+				bytes + ACPI_FADT_PREFERRED_PM_PROFILE_OFFSET,
+				sizeof(response.preferred_pm_profile));
 	if (table->revision >= 2u) {
 		if (length >= ACPI_FADT_IAPC_BOOT_ARCH_OFFSET + sizeof(response.iapc_boot_arch))
 			memcpy(&response.iapc_boot_arch, bytes + ACPI_FADT_IAPC_BOOT_ARCH_OFFSET, sizeof(response.iapc_boot_arch));
@@ -283,12 +284,12 @@ static syscall_result_t acpi_provider_fadt_info_handler(const struct cap_request
 }
 
 static syscall_result_t acpi_provider_aml_count_handler(const struct cap_request* req) {
-	struct acpi_provider_aml_count_request  request;
+	struct acpi_provider_aml_count_request request;
 	struct acpi_provider_aml_count_response response = {0};
 
 	if ((req->rights & CAP_READ) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (req->request == NULL || req->request_size != sizeof(request) ||
-	    !cap_kernel_response_fits(req, sizeof(response)))
+			!cap_kernel_response_fits(req, sizeof(response)))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	memcpy(&request, req->request, sizeof(request));
 	if (request.header.op != ACPI_PROVIDER_OP_AML_COUNT) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -297,13 +298,13 @@ static syscall_result_t acpi_provider_aml_count_handler(const struct cap_request
 }
 
 static syscall_result_t acpi_provider_aml_info_handler(const struct cap_request* req) {
-	struct acpi_provider_aml_info_request  request;
+	struct acpi_provider_aml_info_request request;
 	struct acpi_provider_aml_info_response response = {0};
-	const struct acpi_sdt_header*          table;
+	const struct acpi_sdt_header* table;
 
 	if ((req->rights & CAP_READ) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (req->request == NULL || req->request_size != sizeof(request) ||
-	    !cap_kernel_response_fits(req, sizeof(response)))
+			!cap_kernel_response_fits(req, sizeof(response)))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	memcpy(&request, req->request, sizeof(request));
 	if (request.header.op != ACPI_PROVIDER_OP_AML_INFO || request.reserved != 0u)
@@ -320,23 +321,23 @@ static syscall_result_t acpi_provider_aml_info_handler(const struct cap_request*
 
 static syscall_result_t acpi_provider_aml_read_handler(const struct cap_request* req) {
 	struct acpi_provider_aml_read_request request;
-	const struct acpi_sdt_header*         table;
-	size_t                                aml_size;
-	size_t                                offset;
-	size_t                                size;
+	const struct acpi_sdt_header* table;
+	size_t aml_size;
+	size_t offset;
+	size_t size;
 
 	if ((req->rights & CAP_READ) == 0u) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (req->request == NULL || req->request_size != sizeof(request))
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	memcpy(&request, req->request, sizeof(request));
 	if (request.header.op != ACPI_PROVIDER_OP_AML_READ || request.offset > SIZE_MAX || request.size > SIZE_MAX ||
-	    request.size > CAP_MAX_RESPONSE_SIZE)
+			request.size > CAP_MAX_RESPONSE_SIZE)
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	table = acpi_aml_definition_at(request.index, NULL, NULL);
 	if (table == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 	aml_size = acpi_table_body_size(table);
-	offset   = (size_t)request.offset;
-	size     = (size_t)request.size;
+	offset = (size_t)request.offset;
+	size = (size_t)request.size;
 	if (offset > aml_size || size > aml_size - offset) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	if (size == 0u) return syscall_result_ok(0u);
 	if (!cap_kernel_response_fits(req, size)) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
@@ -373,7 +374,7 @@ bool kernel_capability_acpi_init(void) {
 	acpi_provider_object_id = cap_object_create_kernel(0u, acpi_provider_handler, NULL);
 	if (acpi_provider_object_id == CAP_OBJECT_ID_INVALID) {
 		free(acpi_consumed_tables);
-		acpi_consumed_tables      = NULL;
+		acpi_consumed_tables = NULL;
 		acpi_consumed_table_count = 0u;
 	}
 	return acpi_provider_object_id != CAP_OBJECT_ID_INVALID;

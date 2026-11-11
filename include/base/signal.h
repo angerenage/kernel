@@ -1,8 +1,9 @@
 #pragma once
 
+#include <stdint.h>
+
 #include <base/process.h>
 #include <base/upcall.h>
-#include <stdint.h>
 
 typedef uint64_t signal_id_t;
 
@@ -21,7 +22,7 @@ struct signal_payload {
 
 /* One authenticated signal publication as observed by synchronous receivers. */
 struct signal_message {
-	process_id_t          sender;
+	process_id_t sender;
 	struct signal_payload payload;
 };
 
@@ -33,19 +34,19 @@ struct signal_send_response {
 
 /* Userspace-selectable behavior attached to one Signal publication. */
 enum signal_send_flags {
-	SIGNAL_SEND_FLAG_NONE     = 0u,
+	SIGNAL_SEND_FLAG_NONE = 0u,
 	SIGNAL_SEND_FLAG_COALESCE = 1u << 0,
 };
 
 /* Lifecycle properties fixed when an asynchronous Signal handler is registered. */
 enum signal_handler_flags {
-	SIGNAL_HANDLER_FLAG_NONE    = 0u,
+	SIGNAL_HANDLER_FLAG_NONE = 0u,
 	SIGNAL_HANDLER_FLAG_ONESHOT = 1u << 0,
 };
 
 /* Flags returned by SIGNAL_OP_READ. */
 enum signal_read_flags {
-	SIGNAL_READ_FLAG_NONE      = 0u,
+	SIGNAL_READ_FLAG_NONE = 0u,
 	SIGNAL_READ_FLAG_HAS_VALUE = 1u << 0,
 };
 
@@ -76,8 +77,8 @@ struct signal_destroy_request {
 /* Request to register the calling thread's asynchronous upcall handler. */
 struct signal_set_handler_request {
 	struct signal_request_header header;
-	user_upcall_entry_t*         handler;
-	uint32_t                     flags;
+	user_upcall_entry_t* handler;
+	uint32_t flags;
 };
 
 /* Request to remove the calling thread's persistent upcall handler. */

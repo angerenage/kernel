@@ -1,32 +1,33 @@
 #pragma once
 
+#include <stdbool.h>
+#include <stddef.h>
+
 #include <base/cap.h>
 #include <base/channel.h>
 #include <base/process.h>
 #include <base/syscall.h>
 #include <core/capability.h>
 #include <core/semaphore.h>
-#include <stdbool.h>
-#include <stddef.h>
 
 /* One userspace-provider call retained until reply or cancellation. */
 struct cap_pending_call {
 	cap_call_id_t id;
-	channel_id_t  endpoint_id;
-	process_id_t  provider;
-	process_id_t  caller;
+	channel_id_t endpoint_id;
+	process_id_t provider;
+	process_id_t caller;
 	/* Caller response destination validated before the request is published. */
-	uintptr_t          response_address;
-	size_t             response_capacity;
-	void*              request;
-	size_t             request_size;
-	syscall_result_t   result;
-	struct semaphore   completion;
+	uintptr_t response_address;
+	size_t response_capacity;
+	void* request;
+	size_t request_size;
+	syscall_result_t result;
+	struct semaphore completion;
 	struct cap_object* object;
-	uint32_t           state;
-	uint32_t           channel_closed;
-	uint32_t           caller_closed;
-	uint64_t           reference_count;
+	uint32_t state;
+	uint32_t channel_closed;
+	uint32_t caller_closed;
+	uint64_t reference_count;
 };
 
 /* A claimed provider reply. */
@@ -37,8 +38,8 @@ struct cap_pending_reply {
 /* A pinned provider request and its immutable request buffer. */
 struct cap_pending_request {
 	struct cap_pending_call* call;
-	const void*              request;
-	size_t                   request_size;
+	const void* request;
+	size_t request_size;
 };
 
 /* Results from claiming a pending call for reply. */
@@ -55,7 +56,7 @@ void cap_pending_call_init(void);
 
 /* Create a pending provider call and take ownership of its active object reference. */
 struct cap_pending_call* cap_pending_call_create(struct cap_object* object, channel_id_t endpoint_id,
-                                                 process_id_t provider, process_id_t caller, size_t response_capacity);
+		process_id_t provider, process_id_t caller, size_t response_capacity);
 
 /* Return the stable identifier of a pending call. */
 cap_call_id_t cap_pending_call_id(const struct cap_pending_call* call);
@@ -79,8 +80,8 @@ bool cap_pending_call_prepare_receive(cap_call_id_t id, process_id_t provider, s
 void cap_pending_call_finish_receive(struct cap_pending_request* request);
 
 /* Claim a pending call for a provider reply. */
-enum cap_pending_reply_result cap_pending_call_prepare_reply(cap_call_id_t id, process_id_t provider,
-                                                             size_t response_size, struct cap_pending_reply* out_reply);
+enum cap_pending_reply_result cap_pending_call_prepare_reply(
+		cap_call_id_t id, process_id_t provider, size_t response_size, struct cap_pending_reply* out_reply);
 
 /* Publish the terminal result of a claimed provider reply. */
 void cap_pending_call_finish_reply(struct cap_pending_reply* reply, syscall_status_t status, size_t response_size);

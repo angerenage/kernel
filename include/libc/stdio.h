@@ -15,17 +15,17 @@ extern FILE* stdout;
 extern FILE* stderr;
 
 FILE* fopen(const char* restrict path, const char* restrict mode);
-int   fclose(FILE* stream);
+int fclose(FILE* stream);
 
 size_t fread(void* restrict buffer, size_t size, size_t count, FILE* restrict stream);
 size_t fwrite(const void* restrict buffer, size_t size, size_t count, FILE* restrict stream);
-int    fseek(FILE* stream, long offset, int origin);
-long   ftell(FILE* stream);
+int fseek(FILE* stream, long offset, int origin);
+long ftell(FILE* stream);
 
-int  feof(FILE* stream);
-int  ferror(FILE* stream);
+int feof(FILE* stream);
+int ferror(FILE* stream);
 void clearerr(FILE* stream);
-int  fflush(FILE* stream);
+int fflush(FILE* stream);
 
 int putchar(int);
 int puts(const char*);

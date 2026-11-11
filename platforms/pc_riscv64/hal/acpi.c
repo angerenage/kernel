@@ -1,5 +1,6 @@
-#include <hal/acpi.h>
 #include <stddef.h>
+
+#include <hal/acpi.h>
 
 #include "iommu/iommu.h"
 

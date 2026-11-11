@@ -6,11 +6,11 @@ Test(process, destroy_rejects_live_main_thread) {
 	init_process_test_environment();
 
 	cr_assert_eq(create_process_with_main_thread(&process,
-	                                             &(const struct process_spawn_params){
-													 .name       = "live",
-													 .user_entry = 0x400000u,
-												 }),
-	             PROCESS_OK);
+						 &(const struct process_spawn_params){
+							 .name = "live",
+							 .user_entry = 0x400000u,
+						 }),
+			PROCESS_OK);
 	cr_assert(!process_destroy(process), "process_destroy must reject live process threads");
 
 	thread_mark_zombie(&process->main_thread->thread);
@@ -23,17 +23,18 @@ Test(process, terminate_marks_process_exiting_and_requests_thread_cancellation) 
 	init_process_test_environment();
 
 	cr_assert_eq(create_process_with_main_thread(&process,
-	                                             &(const struct process_spawn_params){
-													 .name       = "terminating",
-													 .user_entry = 0x400000u,
-												 }),
-	             PROCESS_OK);
+						 &(const struct process_spawn_params){
+							 .name = "terminating",
+							 .user_entry = 0x400000u,
+						 }),
+			PROCESS_OK);
 
 	cr_assert(process_terminate(process, PROCESS_EXIT_MEMORY_PROTECTION),
-	          "process_terminate should accept a running process");
+			"process_terminate should accept a running process");
 	cr_assert_eq(process_get_state(process), PROCESS_STATE_EXITING, "process should enter EXITING state");
-	cr_assert_eq(
-		process->exit_code, PROCESS_EXIT_MEMORY_PROTECTION, "process_terminate should publish the process exit code");
+	cr_assert_eq(process->exit_code,
+			PROCESS_EXIT_MEMORY_PROTECTION,
+			"process_terminate should publish the process exit code");
 	cr_assert(thread_cancel_requested(&process->main_thread->thread), "process threads should receive cancellation");
 
 	thread_mark_zombie(&process->main_thread->thread);
@@ -43,17 +44,17 @@ Test(process, terminate_marks_process_exiting_and_requests_thread_cancellation) 
 }
 
 Test(process, join_returns_zombie_exit_code_once) {
-	struct process* process   = NULL;
-	uintptr_t       exit_code = 0u;
+	struct process* process = NULL;
+	uintptr_t exit_code = 0u;
 
 	init_process_test_environment();
 
 	cr_assert_eq(create_process_with_main_thread(&process,
-	                                             &(const struct process_spawn_params){
-													 .name       = "joinable",
-													 .user_entry = 0x400000u,
-												 }),
-	             PROCESS_OK);
+						 &(const struct process_spawn_params){
+							 .name = "joinable",
+							 .user_entry = 0x400000u,
+						 }),
+			PROCESS_OK);
 
 	cr_assert(process_terminate(process, 123u));
 	thread_mark_zombie(&process->main_thread->thread);
@@ -73,11 +74,11 @@ Test(process, detach_prevents_later_join) {
 	init_process_test_environment();
 
 	cr_assert_eq(create_process_with_main_thread(&process,
-	                                             &(const struct process_spawn_params){
-													 .name       = "detached",
-													 .user_entry = 0x400000u,
-												 }),
-	             PROCESS_OK);
+						 &(const struct process_spawn_params){
+							 .name = "detached",
+							 .user_entry = 0x400000u,
+						 }),
+			PROCESS_OK);
 
 	cr_assert_eq(process_detach(process), PROCESS_DETACH_OK, "process_detach should accept a joinable process");
 	cr_assert_eq(process_detach(process), PROCESS_DETACH_ALREADY_DETACHED, "process_detach should reject repeats");
@@ -90,8 +91,8 @@ Test(process, detach_prevents_later_join) {
 
 Test(process, detached_new_process_is_reaped_when_terminated) {
 	struct process* process = NULL;
-	process_id_t    pid;
-	size_t          processes_before;
+	process_id_t pid;
+	size_t processes_before;
 
 	init_process_test_environment();
 	processes_before = process_count();
@@ -108,8 +109,8 @@ Test(process, detached_new_process_is_reaped_when_terminated) {
 
 Test(process, zombie_process_is_reaped_when_detached) {
 	struct process* process = NULL;
-	process_id_t    pid;
-	size_t          processes_before;
+	process_id_t pid;
+	size_t processes_before;
 
 	init_process_test_environment();
 	processes_before = process_count();
@@ -127,15 +128,15 @@ Test(process, zombie_process_is_reaped_when_detached) {
 
 Test(process, normal_joinable_thread_reap_notifies_process_exit) {
 	struct process* process = NULL;
-	uintptr_t       exit_code;
+	uintptr_t exit_code;
 
 	init_process_test_environment();
 	cr_assert_eq(create_process_with_main_thread(&process,
-	                                             &(const struct process_spawn_params){
-													 .name       = "naturally-exiting",
-													 .user_entry = 0x400000u,
-												 }),
-	             PROCESS_OK);
+						 &(const struct process_spawn_params){
+							 .name = "naturally-exiting",
+							 .user_entry = 0x400000u,
+						 }),
+			PROCESS_OK);
 	process->main_thread->thread.exit_code = 77u;
 	thread_mark_zombie(&process->main_thread->thread);
 	thread_notify_reap(&process->main_thread->thread);
@@ -148,15 +149,15 @@ Test(process, normal_joinable_thread_reap_notifies_process_exit) {
 
 Test(process, detached_process_is_reaped_after_its_last_thread_exits) {
 	struct process* process = NULL;
-	process_id_t    pid;
+	process_id_t pid;
 
 	init_process_test_environment();
 	cr_assert_eq(create_process_with_main_thread(&process,
-	                                             &(const struct process_spawn_params){
-													 .name       = "auto-reap",
-													 .user_entry = 0x400000u,
-												 }),
-	             PROCESS_OK);
+						 &(const struct process_spawn_params){
+							 .name = "auto-reap",
+							 .user_entry = 0x400000u,
+						 }),
+			PROCESS_OK);
 	pid = process_pid(process);
 	cr_assert_eq(process_detach(process), PROCESS_DETACH_OK);
 	thread_mark_zombie(&process->main_thread->thread);
@@ -166,11 +167,11 @@ Test(process, detached_process_is_reaped_after_its_last_thread_exits) {
 }
 
 Test(process, acquired_reference_defers_final_teardown) {
-	struct process* warmup   = NULL;
-	struct process* process  = NULL;
+	struct process* warmup = NULL;
+	struct process* process = NULL;
 	struct process* retained = NULL;
-	process_id_t    pid;
-	size_t          baseline;
+	process_id_t pid;
+	size_t baseline;
 
 	init_process_test_environment();
 	cr_assert_eq(process_create(&warmup, NULL), PROCESS_OK);
@@ -178,7 +179,7 @@ Test(process, acquired_reference_defers_final_teardown) {
 	baseline = heap_free_bytes();
 
 	cr_assert_eq(process_create(&process, NULL), PROCESS_OK);
-	pid      = process_pid(process);
+	pid = process_pid(process);
 	retained = process_acquire(pid);
 	cr_assert_eq(retained, process);
 
@@ -186,7 +187,7 @@ Test(process, acquired_reference_defers_final_teardown) {
 	cr_assert_null(process_lookup(pid), "destroy must prevent new acquisitions before teardown");
 	cr_assert_eq(process_pid(retained), pid, "an acquired process must retain its identity");
 	cr_assert(address_space_is_initialized(process_address_space(retained)),
-	          "an acquired process must retain its address space");
+			"an acquired process must retain its address space");
 	cr_assert_lt(heap_free_bytes(), baseline, "retained process storage must remain allocated");
 
 	process_release(retained);

@@ -1,11 +1,12 @@
+#include <libc/stdlib.h>
+#include <stdint.h>
+#include <string.h>
+
 #include <core/capability_call.h>
 #include <core/id_table.h>
 #include <core/sched.h>
 #include <core/semaphore.h>
 #include <kernel/trace.h>
-#include <libc/stdlib.h>
-#include <stdint.h>
-#include <string.h>
 
 #define CAP_CALL_ID_MIN 1u
 #define CAP_CALL_ID_MAX UINT64_MAX
@@ -21,7 +22,7 @@ enum cap_pending_state {
 };
 
 static struct id_table pending_call_table =
-	ID_TABLE_INITIALIZER("pending_call_table", CAP_CALL_ID_MIN, CAP_CALL_ID_MAX);
+		ID_TABLE_INITIALIZER("pending_call_table", CAP_CALL_ID_MIN, CAP_CALL_ID_MAX);
 
 static bool cap_pending_call_retain_callback(void* value, void* context) {
 	struct cap_pending_call* call = value;
@@ -47,13 +48,13 @@ static void cap_pending_call_release(struct cap_pending_call* call) {
 static bool cap_pending_call_claim(struct cap_pending_call* call) {
 	uint32_t expected = CAP_PENDING_STATE_WAITING;
 	return __atomic_compare_exchange_n(
-		&call->state, &expected, CAP_PENDING_STATE_REPLYING, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+			&call->state, &expected, CAP_PENDING_STATE_REPLYING, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
 }
 
 static void cap_pending_call_complete(struct cap_pending_call* call, syscall_status_t status, size_t response_size) {
 	struct cap_object* object = call->object;
-	call->object              = NULL;
-	call->result              = syscall_result_error(status, response_size);
+	call->object = NULL;
+	call->result = syscall_result_error(status, response_size);
 	if (status == SYSCALL_STATUS_OK) call->result = syscall_result_ok(response_size);
 	__atomic_store_n(&call->state, CAP_PENDING_STATE_COMPLETED, __ATOMIC_RELEASE);
 	cap_object_end_call(object);
@@ -65,9 +66,9 @@ void cap_pending_call_init(void) {
 }
 
 struct cap_pending_call* cap_pending_call_create(struct cap_object* object, channel_id_t endpoint_id,
-                                                 process_id_t provider, process_id_t caller, size_t response_capacity) {
+		process_id_t provider, process_id_t caller, size_t response_capacity) {
 	struct cap_pending_call* call;
-	id_table_id_t            id;
+	id_table_id_t id;
 
 	if (endpoint_id == CHANNEL_ID_INVALID || provider == PROCESS_PID_INVALID || caller == PROCESS_PID_INVALID) {
 		return NULL;
@@ -75,13 +76,13 @@ struct cap_pending_call* cap_pending_call_create(struct cap_object* object, chan
 	call = calloc(1u, sizeof(*call));
 	if (call == NULL) return NULL;
 
-	call->endpoint_id       = endpoint_id;
-	call->provider          = provider;
-	call->caller            = caller;
+	call->endpoint_id = endpoint_id;
+	call->provider = provider;
+	call->caller = caller;
 	call->response_capacity = response_capacity;
-	call->object            = object;
-	call->reference_count   = 1u;
-	call->state             = CAP_PENDING_STATE_WAITING;
+	call->object = object;
+	call->reference_count = 1u;
+	call->state = CAP_PENDING_STATE_WAITING;
 	semaphore_init(&call->completion, 0u);
 
 	if (id_table_alloc(&pending_call_table, call, &id) != ID_TABLE_OK) {
@@ -129,28 +130,28 @@ void cap_pending_call_destroy(struct cap_pending_call* call) {
 
 bool cap_pending_call_attach_request(struct cap_pending_call* call, void* request, size_t request_size) {
 	if (call == NULL || request == NULL || request_size == 0u || call->request != NULL) return false;
-	call->request      = request;
+	call->request = request;
 	call->request_size = request_size;
 	return true;
 }
 
-bool cap_pending_call_prepare_receive(cap_call_id_t id, process_id_t provider,
-                                      struct cap_pending_request* out_request) {
+bool cap_pending_call_prepare_receive(
+		cap_call_id_t id, process_id_t provider, struct cap_pending_request* out_request) {
 	struct cap_pending_call* call;
 
 	if (out_request == NULL) return false;
-	out_request->call         = NULL;
-	out_request->request      = NULL;
+	out_request->call = NULL;
+	out_request->request = NULL;
 	out_request->request_size = 0u;
-	call                      = cap_pending_call_acquire(id);
+	call = cap_pending_call_acquire(id);
 	if (call == NULL) return false;
 	if (call->provider != provider || call->request == NULL ||
-	    __atomic_load_n(&call->state, __ATOMIC_ACQUIRE) != CAP_PENDING_STATE_WAITING) {
+			__atomic_load_n(&call->state, __ATOMIC_ACQUIRE) != CAP_PENDING_STATE_WAITING) {
 		cap_pending_call_release(call);
 		return false;
 	}
-	out_request->call         = call;
-	out_request->request      = call->request;
+	out_request->call = call;
+	out_request->request = call->request;
 	out_request->request_size = call->request_size;
 	return true;
 }
@@ -159,21 +160,20 @@ void cap_pending_call_finish_receive(struct cap_pending_request* request) {
 	struct cap_pending_call* call;
 
 	if (request == NULL || request->call == NULL) return;
-	call                  = request->call;
-	request->call         = NULL;
-	request->request      = NULL;
+	call = request->call;
+	request->call = NULL;
+	request->request = NULL;
 	request->request_size = 0u;
 	cap_pending_call_release(call);
 }
 
-enum cap_pending_reply_result cap_pending_call_prepare_reply(cap_call_id_t id, process_id_t provider,
-                                                             size_t                    response_size,
-                                                             struct cap_pending_reply* out_reply) {
+enum cap_pending_reply_result cap_pending_call_prepare_reply(
+		cap_call_id_t id, process_id_t provider, size_t response_size, struct cap_pending_reply* out_reply) {
 	struct cap_pending_call* call;
 
 	if (out_reply == NULL) return CAP_PENDING_REPLY_NOT_FOUND;
 	out_reply->call = NULL;
-	call            = cap_pending_call_acquire(id);
+	call = cap_pending_call_acquire(id);
 	if (call == NULL) return CAP_PENDING_REPLY_NOT_FOUND;
 	if (call->provider != provider) {
 		cap_pending_call_release(call);
@@ -221,14 +221,14 @@ void cap_pending_call_cancel_channel(channel_id_t endpoint_id) {
 	if (endpoint_id == CHANNEL_ID_INVALID) return;
 	for (;;) {
 		struct cap_pending_call* batch[CAP_CALL_CANCEL_BATCH];
-		size_t                   count = 0u;
-		bool                     finished;
-		struct irq_state         irq_state = spinlock_lock_irqsave(&pending_call_table.lock);
+		size_t count = 0u;
+		bool finished;
+		struct irq_state irq_state = spinlock_lock_irqsave(&pending_call_table.lock);
 
 		while (cursor < id_table_extent_locked(&pending_call_table) && count < CAP_CALL_CANCEL_BATCH) {
 			struct cap_pending_call* call = id_table_lookup_index_locked(&pending_call_table, cursor++);
 			if (call == NULL || call->endpoint_id != endpoint_id ||
-			    __atomic_load_n(&call->state, __ATOMIC_ACQUIRE) == CAP_PENDING_STATE_COMPLETED) {
+					__atomic_load_n(&call->state, __ATOMIC_ACQUIRE) == CAP_PENDING_STATE_COMPLETED) {
 				continue;
 			}
 			(void)__atomic_add_fetch(&call->reference_count, 1u, __ATOMIC_RELAXED);
@@ -254,14 +254,14 @@ void cap_pending_call_cancel_caller(process_id_t caller) {
 	if (caller == PROCESS_PID_INVALID) return;
 	for (;;) {
 		struct cap_pending_call* batch[CAP_CALL_CANCEL_BATCH];
-		size_t                   count = 0u;
-		bool                     finished;
-		struct irq_state         irq_state = spinlock_lock_irqsave(&pending_call_table.lock);
+		size_t count = 0u;
+		bool finished;
+		struct irq_state irq_state = spinlock_lock_irqsave(&pending_call_table.lock);
 
 		while (cursor < id_table_extent_locked(&pending_call_table) && count < CAP_CALL_CANCEL_BATCH) {
 			struct cap_pending_call* call = id_table_lookup_index_locked(&pending_call_table, cursor++);
 			if (call == NULL || call->caller != caller ||
-			    __atomic_load_n(&call->state, __ATOMIC_ACQUIRE) == CAP_PENDING_STATE_COMPLETED) {
+					__atomic_load_n(&call->state, __ATOMIC_ACQUIRE) == CAP_PENDING_STATE_COMPLETED) {
 				continue;
 			}
 			(void)__atomic_add_fetch(&call->reference_count, 1u, __ATOMIC_RELAXED);
@@ -287,14 +287,14 @@ void cap_pending_call_cancel_provider(process_id_t provider) {
 	if (provider == PROCESS_PID_INVALID) return;
 	for (;;) {
 		struct cap_pending_call* batch[CAP_CALL_CANCEL_BATCH];
-		size_t                   count = 0u;
-		bool                     finished;
-		struct irq_state         irq_state = spinlock_lock_irqsave(&pending_call_table.lock);
+		size_t count = 0u;
+		bool finished;
+		struct irq_state irq_state = spinlock_lock_irqsave(&pending_call_table.lock);
 
 		while (cursor < id_table_extent_locked(&pending_call_table) && count < CAP_CALL_CANCEL_BATCH) {
 			struct cap_pending_call* call = id_table_lookup_index_locked(&pending_call_table, cursor++);
 			if (call == NULL || call->provider != provider ||
-			    __atomic_load_n(&call->state, __ATOMIC_ACQUIRE) == CAP_PENDING_STATE_COMPLETED) {
+					__atomic_load_n(&call->state, __ATOMIC_ACQUIRE) == CAP_PENDING_STATE_COMPLETED) {
 				continue;
 			}
 			(void)__atomic_add_fetch(&call->reference_count, 1u, __ATOMIC_RELAXED);

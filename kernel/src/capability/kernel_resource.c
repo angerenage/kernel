@@ -1,5 +1,10 @@
 #include "kernel_resource.h"
 
+#include <libc/stdlib.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+
 #include <base/cap.h>
 #include <base/kernel_resource.h>
 #include <base/math.h>
@@ -7,10 +12,6 @@
 #include <boot/info.h>
 #include <core/capability.h>
 #include <kernel/capability.h>
-#include <libc/stdlib.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <string.h>
 
 #include "acpi.h"
 #include "boot_module.h"
@@ -71,15 +72,15 @@ static size_t kernel_resources_available(enum kernel_resource_type* ids, size_t 
 }
 
 static syscall_result_t kernel_resources_list_handler(const struct cap_request* req) {
-	struct kernel_resources_list_request   request;
+	struct kernel_resources_list_request request;
 	struct kernel_resources_list_response* response;
-	enum kernel_resource_type              available[KERNEL_RESOURCE_TYPE_COUNT];
-	size_t                                 available_count;
-	size_t                                 start;
-	size_t                                 returned;
-	size_t                                 ids_size;
-	size_t                                 response_size;
-	syscall_result_t                       result;
+	enum kernel_resource_type available[KERNEL_RESOURCE_TYPE_COUNT];
+	size_t available_count;
+	size_t start;
+	size_t returned;
+	size_t ids_size;
+	size_t response_size;
+	syscall_result_t result;
 
 	if ((req->rights & CAP_READ) != CAP_READ) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (req->request == NULL || req->request_size != sizeof(request)) {
@@ -90,17 +91,17 @@ static syscall_result_t kernel_resources_list_handler(const struct cap_request* 
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 	available_count = kernel_resources_available(available, sizeof(available) / sizeof(available[0]));
-	start           = (size_t)request.offset;
-	returned        = start < available_count ? available_count - start : 0u;
+	start = (size_t)request.offset;
+	returned = start < available_count ? available_count - start : 0u;
 	if (returned > (size_t)request.capacity) returned = (size_t)request.capacity;
 	if (mul_overflow_size(returned, sizeof(*available), &ids_size) ||
-	    add_overflow_size(sizeof(*response), ids_size, &response_size) ||
-	    !cap_kernel_response_fits(req, response_size)) {
+			add_overflow_size(sizeof(*response), ids_size, &response_size) ||
+			!cap_kernel_response_fits(req, response_size)) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 	response = malloc(response_size);
 	if (response == NULL) return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
-	response->total    = available_count;
+	response->total = available_count;
 	response->returned = returned;
 	if (returned != 0u) memcpy(response->ids, available + start, ids_size);
 	result = cap_kernel_write_response(req, response, response_size);
@@ -109,18 +110,18 @@ static syscall_result_t kernel_resources_list_handler(const struct cap_request* 
 }
 
 static syscall_result_t kernel_resource_acquire_handler(const struct cap_request* req) {
-	struct kernel_resource_acquire_request  request;
+	struct kernel_resource_acquire_request request;
 	struct kernel_resource_acquire_response response = {.cap = CAP_ID_INVALID};
-	syscall_result_t                        result;
+	syscall_result_t result;
 
 	if ((req->rights & CAP_READ) != CAP_READ) return syscall_result_error(SYSCALL_STATUS_DENIED, 0u);
 	if (req->request == NULL || req->request_size != sizeof(request) ||
-	    !cap_kernel_response_fits(req, sizeof(response))) {
+			!cap_kernel_response_fits(req, sizeof(response))) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 	memcpy(&request, req->request, sizeof(request));
 	if (request.header.op != KERNEL_RESOURCES_OP_ACQUIRE || request.id <= KERNEL_RESOURCE_TYPE_INVALID ||
-	    request.id >= KERNEL_RESOURCE_TYPE_COUNT) {
+			request.id >= KERNEL_RESOURCE_TYPE_COUNT) {
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 	switch (request.id) {

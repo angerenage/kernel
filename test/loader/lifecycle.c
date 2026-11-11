@@ -1,15 +1,17 @@
 #include "../../userspace/programs/loader/lifecycle.h"
 
-#include <criterion/criterion.h>
 #include <stdlib.h>
+
 #include <system/capability.h>
+
+#include <criterion/criterion.h>
 
 static syscall_status_t conditional_status;
 static syscall_status_t terminal_status;
-static size_t           conditional_calls;
-static size_t           terminal_calls;
-static size_t           drop_calls;
-static cap_id_t         dropped_cap;
+static size_t conditional_calls;
+static size_t terminal_calls;
+static size_t drop_calls;
+static cap_id_t dropped_cap;
 
 syscall_status_t cap_unpublish(channel_id_t endpoint, uint64_t object_id) {
 	(void)endpoint;
@@ -33,11 +35,11 @@ syscall_status_t cap_drop(cap_id_t cap) {
 
 static void reset_unpublish_mocks(void) {
 	conditional_status = SYSCALL_STATUS_FAILED;
-	terminal_status    = SYSCALL_STATUS_FAILED;
-	conditional_calls  = 0u;
-	terminal_calls     = 0u;
-	drop_calls         = 0u;
-	dropped_cap        = CAP_ID_INVALID;
+	terminal_status = SYSCALL_STATUS_FAILED;
+	conditional_calls = 0u;
+	terminal_calls = 0u;
+	drop_calls = 0u;
+	dropped_cap = CAP_ID_INVALID;
 }
 
 Test(loader_lifecycle, abandoned_load_is_discardable_only_after_conditional_unpublish) {

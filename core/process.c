@@ -1,24 +1,25 @@
-#include <core/address_space.h>
-#include <core/capability.h>
-#include <core/capability_call.h>
-#include <core/id_table.h>
-#if defined(PLATFORM_PC_X86_64) || defined(IO_PORT_TEST)
-#include <core/io_port.h>
-#endif
-#include <core/process.h>
-#include <core/sched.h>
-#include <core/spinlock.h>
-#include <core/thread.h>
-#include <core/uthread.h>
-#include <kernel/trace.h>
 #include <libc/stdlib.h>
 #include <libc/string.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
+#include <core/address_space.h>
+#include <core/capability.h>
+#include <core/capability_call.h>
+#include <core/id_table.h>
+#include <core/process.h>
+#include <core/sched.h>
+#include <core/spinlock.h>
+#include <core/thread.h>
+#include <core/uthread.h>
+#include <kernel/trace.h>
+#if defined(PLATFORM_PC_X86_64) || defined(IO_PORT_TEST)
+#include <core/io_port.h>
+#endif
+
 static struct id_table process_table = ID_TABLE_INITIALIZER("process_table", 1u, UINT64_MAX);
-static uint64_t        next_process_trace_id;
+static uint64_t next_process_trace_id;
 
 static uint64_t process_allocate_trace_id(void) {
 	uint64_t id = __atomic_add_fetch(&next_process_trace_id, 1u, __ATOMIC_RELAXED);
@@ -82,7 +83,7 @@ static bool process_has_thread_locked(const struct process* process, const struc
 
 static bool process_has_thread(struct process* process, struct uthread* thread) {
 	struct irq_state state;
-	bool             found;
+	bool found;
 
 	if (process == NULL || thread == NULL) return false;
 
@@ -92,11 +93,9 @@ static bool process_has_thread(struct process* process, struct uthread* thread) 
 	return found;
 }
 
-static enum process_thread_spawn_result process_prepare_thread_internal(struct process*                     process,
-                                                                        struct uthread**                    out_thread,
-                                                                        const struct process_thread_params* params,
-                                                                        bool main_thread) {
-	struct uthread*           thread;
+static enum process_thread_spawn_result process_prepare_thread_internal(struct process* process,
+		struct uthread** out_thread, const struct process_thread_params* params, bool main_thread) {
+	struct uthread* thread;
 	enum uthread_start_result start_result;
 
 	if (process == NULL || params == NULL) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
@@ -106,29 +105,29 @@ static enum process_thread_spawn_result process_prepare_thread_internal(struct p
 	thread = malloc(sizeof(*thread));
 	if (thread == NULL) return PROCESS_THREAD_SPAWN_NO_MEMORY;
 	start_result = uthread_prepare(thread,
-	                               &(const struct uthread_start_params){
-									   .name            = params->name,
-									   .process         = process,
-									   .user_entry      = params->user_entry,
-									   .arg_data        = params->arg_data,
-									   .arg_size        = params->arg_size,
-									   .user_stack_size = params->user_stack_size,
-									   .preferred_cpu   = params->preferred_cpu,
-									   .detached        = params->detached,
-									   .main_thread     = main_thread,
-								   });
+			&(const struct uthread_start_params){
+				.name = params->name,
+				.process = process,
+				.user_entry = params->user_entry,
+				.arg_data = params->arg_data,
+				.arg_size = params->arg_size,
+				.user_stack_size = params->user_stack_size,
+				.preferred_cpu = params->preferred_cpu,
+				.detached = params->detached,
+				.main_thread = main_thread,
+			});
 	if (start_result != UTHREAD_START_OK) {
 		free(thread);
 		return process_thread_spawn_result_from_uthread(start_result);
 	}
 
 	thread->heap_allocated = true;
-	*out_thread            = thread;
+	*out_thread = thread;
 	return PROCESS_THREAD_SPAWN_OK;
 }
 
-enum process_thread_spawn_result process_prepare_thread(struct process* process, struct uthread** out_thread,
-                                                        const struct process_thread_params* params) {
+enum process_thread_spawn_result process_prepare_thread(
+		struct process* process, struct uthread** out_thread, const struct process_thread_params* params) {
 	return process_prepare_thread_internal(process, out_thread, params, false);
 }
 
@@ -144,20 +143,20 @@ enum process_thread_spawn_result process_commit_thread(struct process* process, 
 
 bool process_abort_thread(struct process* process, struct uthread* thread) {
 	if (process == NULL || thread == NULL || thread->process != process || thread->process_main_thread ||
-	    process_has_thread(process, thread)) {
+			process_has_thread(process, thread)) {
 		return false;
 	}
 	return uthread_abort_prepared(thread);
 }
 
-enum process_thread_spawn_result process_spawn_thread(struct process* process, struct uthread** out_thread,
-                                                      const struct process_thread_params* params) {
-	struct uthread*                  prepared = NULL;
+enum process_thread_spawn_result process_spawn_thread(
+		struct process* process, struct uthread** out_thread, const struct process_thread_params* params) {
+	struct uthread* prepared = NULL;
 	enum process_thread_spawn_result result;
 
 	if (out_thread == NULL) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
 	*out_thread = NULL;
-	result      = process_prepare_thread(process, &prepared, params);
+	result = process_prepare_thread(process, &prepared, params);
 	if (result != PROCESS_THREAD_SPAWN_OK) return result;
 
 	result = process_commit_thread(process, prepared);
@@ -174,21 +173,21 @@ static void process_release_main_thread_claim(struct process* process) {
 	struct irq_state state;
 
 	if (process == NULL) return;
-	state                         = spinlock_lock_irqsave(&process->lock);
+	state = spinlock_lock_irqsave(&process->lock);
 	process->main_thread_starting = false;
 	spinlock_unlock_irqrestore(&process->lock, state);
 }
 
-enum process_thread_spawn_result process_prepare_main_thread(struct process* process, struct uthread** out_thread,
-                                                             const struct process_thread_params* params) {
-	struct irq_state                 state;
+enum process_thread_spawn_result process_prepare_main_thread(
+		struct process* process, struct uthread** out_thread, const struct process_thread_params* params) {
+	struct irq_state state;
 	enum process_thread_spawn_result result;
-	bool                             claimed;
+	bool claimed;
 
 	if (process == NULL || out_thread == NULL || params == NULL) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
 	*out_thread = NULL;
 
-	state   = spinlock_lock_irqsave(&process->lock);
+	state = spinlock_lock_irqsave(&process->lock);
 	claimed = process->state == PROCESS_STATE_NEW && process->main_thread == NULL && process->thread_count == 0u &&
 	          !process->main_thread_starting;
 	if (claimed) process->main_thread_starting = true;
@@ -201,12 +200,12 @@ enum process_thread_spawn_result process_prepare_main_thread(struct process* pro
 }
 
 enum process_thread_spawn_result process_commit_main_thread(struct process* process, struct uthread* thread) {
-	struct irq_state          state;
-	bool                      claimed;
+	struct irq_state state;
+	bool claimed;
 	enum uthread_start_result start_result;
 
 	if (process == NULL || thread == NULL) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
-	state   = spinlock_lock_irqsave(&process->lock);
+	state = spinlock_lock_irqsave(&process->lock);
 	claimed = process->main_thread_starting && process->main_thread == NULL && process->thread_count == 0u &&
 	          thread->process == process;
 	spinlock_unlock_irqrestore(&process->lock, state);
@@ -221,10 +220,10 @@ enum process_thread_spawn_result process_commit_main_thread(struct process* proc
 
 bool process_abort_main_thread(struct process* process, struct uthread* thread) {
 	struct irq_state state;
-	bool             claimed;
+	bool claimed;
 
 	if (process == NULL || thread == NULL || !thread->process_main_thread) return false;
-	state   = spinlock_lock_irqsave(&process->lock);
+	state = spinlock_lock_irqsave(&process->lock);
 	claimed = process->main_thread_starting && process->main_thread == NULL && process->thread_count == 0u &&
 	          thread->process == process;
 	spinlock_unlock_irqrestore(&process->lock, state);
@@ -234,14 +233,14 @@ bool process_abort_main_thread(struct process* process, struct uthread* thread) 
 	return true;
 }
 
-enum process_thread_spawn_result process_start_main_thread(struct process* process, struct uthread** out_thread,
-                                                           const struct process_thread_params* params) {
-	struct uthread*                  prepared = NULL;
+enum process_thread_spawn_result process_start_main_thread(
+		struct process* process, struct uthread** out_thread, const struct process_thread_params* params) {
+	struct uthread* prepared = NULL;
 	enum process_thread_spawn_result result;
 
 	if (out_thread == NULL) return PROCESS_THREAD_SPAWN_INVALID_ARGUMENTS;
 	*out_thread = NULL;
-	result      = process_prepare_main_thread(process, &prepared, params);
+	result = process_prepare_main_thread(process, &prepared, params);
 	if (result != PROCESS_THREAD_SPAWN_OK) return result;
 
 	result = process_commit_main_thread(process, prepared);
@@ -254,10 +253,10 @@ enum process_thread_spawn_result process_start_main_thread(struct process* proce
 	return PROCESS_THREAD_SPAWN_OK;
 }
 
-enum process_thread_join_result process_join_thread(struct process* process, struct uthread* thread,
-                                                    uintptr_t* out_exit_code) {
+enum process_thread_join_result process_join_thread(
+		struct process* process, struct uthread* thread, uintptr_t* out_exit_code) {
 	struct thread* current;
-	uintptr_t      exit_code;
+	uintptr_t exit_code;
 
 	if (process == NULL || thread == NULL) return PROCESS_THREAD_JOIN_INVALID_ARGUMENTS;
 
@@ -306,8 +305,8 @@ enum process_thread_cancel_result process_cancel_thread(struct process* process,
 }
 
 enum process_result process_create(struct process** out_process, const char* name) {
-	struct process*      process;
-	process_id_t         pid;
+	struct process* process;
+	process_id_t pid;
 	enum id_table_result id_result;
 
 	if (out_process == NULL) return PROCESS_INVALID_ARGUMENTS;
@@ -324,10 +323,10 @@ enum process_result process_create(struct process** out_process, const char* nam
 			return PROCESS_NO_MEMORY;
 		}
 	}
-	process->state                       = PROCESS_STATE_NEW;
-	process->cap_object_id               = CAP_OBJECT_ID_INVALID;
+	process->state = PROCESS_STATE_NEW;
+	process->cap_object_id = CAP_OBJECT_ID_INVALID;
 	process->address_space_cap_object_id = CAP_OBJECT_ID_INVALID;
-	process->reference_count             = 1u;
+	process->reference_count = 1u;
 	spinlock_init_class(&process->lock, "process", SPINLOCK_ORDER_PROCESS, SPINLOCK_FLAG_IRQSAVE);
 	thread_wait_queue_init(&process->join_wait_queue);
 	process_channel_state_init(&process->channel_state);
@@ -345,7 +344,7 @@ enum process_result process_create(struct process** out_process, const char* nam
 		free(process);
 		return id_result == ID_TABLE_NO_MEMORY ? PROCESS_NO_MEMORY : PROCESS_PID_EXHAUSTED;
 	}
-	process->pid      = pid;
+	process->pid = pid;
 	process->trace_id = process_allocate_trace_id();
 	kernel_trace_register_process(process->trace_id, process->pid, process->name);
 
@@ -357,12 +356,12 @@ bool process_terminate(struct process* process, uintptr_t exit_code) {
 	enum { CANCEL_BATCH_SIZE = 16u };
 	struct irq_state state;
 	struct irq_state wait_state;
-	struct uthread*  cursor;
-	struct uthread*  cancel_batch[CANCEL_BATCH_SIZE];
-	struct process*  held;
-	struct thread*   current;
-	bool             current_in_process = false;
-	bool             wake_joiners       = false;
+	struct uthread* cursor;
+	struct uthread* cancel_batch[CANCEL_BATCH_SIZE];
+	struct process* held;
+	struct thread* current;
+	bool current_in_process = false;
+	bool wake_joiners = false;
 
 	if (process == NULL) return false;
 
@@ -374,7 +373,7 @@ bool process_terminate(struct process* process, uintptr_t exit_code) {
 	process = held;
 
 	wait_state = spinlock_lock_irqsave(&process->join_wait_queue.lock);
-	state      = spinlock_lock_irqsave(&process->lock);
+	state = spinlock_lock_irqsave(&process->lock);
 	if (process->state == PROCESS_STATE_ZOMBIE) {
 		spinlock_unlock_irqrestore(&process->lock, state);
 		spinlock_unlock_irqrestore(&process->join_wait_queue.lock, wait_state);
@@ -384,11 +383,11 @@ bool process_terminate(struct process* process, uintptr_t exit_code) {
 
 	if (process->state != PROCESS_STATE_EXITING) {
 		process->exit_code = exit_code;
-		process->state     = PROCESS_STATE_EXITING;
+		process->state = PROCESS_STATE_EXITING;
 	}
 
 	current = sched_current_thread();
-	cursor  = process->thread_head;
+	cursor = process->thread_head;
 	while (cursor != NULL) {
 		if (&cursor->thread == current) current_in_process = true;
 		cursor = cursor->process_next;
@@ -403,11 +402,11 @@ bool process_terminate(struct process* process, uintptr_t exit_code) {
 	for (;;) {
 		size_t cancel_count = 0u;
 
-		state  = spinlock_lock_irqsave(&process->lock);
+		state = spinlock_lock_irqsave(&process->lock);
 		cursor = process->thread_head;
 		while (cursor != NULL && cancel_count < CANCEL_BATCH_SIZE) {
 			if (&cursor->thread != current && !thread_is_terminated(&cursor->thread) &&
-			    !thread_cancel_requested(&cursor->thread) && uthread_retain(cursor)) {
+					!thread_cancel_requested(&cursor->thread) && uthread_retain(cursor)) {
 				cancel_batch[cancel_count++] = cursor;
 			}
 			cursor = cursor->process_next;
@@ -444,10 +443,10 @@ enum process_join_result process_join(struct process* process, uintptr_t* out_ex
 	for (;;) {
 		struct irq_state wait_state;
 		struct irq_state state;
-		uintptr_t        exit_code;
+		uintptr_t exit_code;
 
 		wait_state = spinlock_lock_irqsave(&process->join_wait_queue.lock);
-		state      = spinlock_lock_irqsave(&process->lock);
+		state = spinlock_lock_irqsave(&process->lock);
 
 		(void)process_mark_zombie_if_complete_locked(process);
 		if (process->detached) {
@@ -462,7 +461,7 @@ enum process_join_result process_join(struct process* process, uintptr_t* out_ex
 		}
 		if (process->state == PROCESS_STATE_ZOMBIE) {
 			process->joined = true;
-			exit_code       = process->exit_code;
+			exit_code = process->exit_code;
 			spinlock_unlock_irqrestore(&process->lock, state);
 			spinlock_unlock_irqrestore(&process->join_wait_queue.lock, wait_state);
 			if (out_exit_code != NULL) *out_exit_code = exit_code;
@@ -478,7 +477,7 @@ enum process_join_result process_join(struct process* process, uintptr_t* out_ex
 
 enum process_detach_result process_detach(struct process* process) {
 	struct irq_state state;
-	struct process*  held;
+	struct process* held;
 
 	if (process == NULL) return PROCESS_DETACH_INVALID_ARGUMENTS;
 
@@ -525,7 +524,7 @@ void process_release(struct process* process) {
 
 bool process_reap_detached(struct process* process) {
 	struct irq_state state;
-	bool             ready;
+	bool ready;
 
 	if (process == NULL) return false;
 	state = spinlock_lock_irqsave(&process->lock);
@@ -537,8 +536,8 @@ bool process_reap_detached(struct process* process) {
 
 bool process_destroy(struct process* process) {
 	struct irq_state state;
-	struct uthread*  cursor;
-	struct process*  removed;
+	struct uthread* cursor;
+	struct process* removed;
 
 	if (process == NULL) return false;
 
@@ -550,7 +549,7 @@ bool process_destroy(struct process* process) {
 	cursor = process->thread_head;
 	while (cursor != NULL) {
 		if ((!thread_is_reap_safe(&cursor->thread) && cursor->thread.state != THREAD_STATE_NEW) ||
-		    !thread_is_joinable(&cursor->thread)) {
+				!thread_is_joinable(&cursor->thread)) {
 			spinlock_unlock_irqrestore(&process->lock, state);
 			return false;
 		}
@@ -563,7 +562,7 @@ bool process_destroy(struct process* process) {
 	for (;;) {
 		struct uthread* thread;
 
-		state  = spinlock_lock_irqsave(&process->lock);
+		state = spinlock_lock_irqsave(&process->lock);
 		thread = process->thread_head;
 		spinlock_unlock_irqrestore(&process->lock, state);
 		if (thread == NULL) break;
@@ -594,14 +593,14 @@ struct process* process_lookup(process_id_t pid) {
 
 static bool process_retain_callback(void* value, void* context) {
 	struct process* process = value;
-	uint64_t        current;
+	uint64_t current;
 
 	(void)context;
 	current = __atomic_load_n(&process->reference_count, __ATOMIC_ACQUIRE);
 	for (;;) {
 		if (current == 0u || current == UINT64_MAX) return false;
 		if (__atomic_compare_exchange_n(
-				&process->reference_count, &current, current + 1u, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+					&process->reference_count, &current, current + 1u, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
 			return true;
 		}
 	}
@@ -621,12 +620,12 @@ struct address_space* process_address_space(struct process* process) {
 }
 
 struct uthread* process_main_thread(struct process* process) {
-	struct uthread*  main_thread;
+	struct uthread* main_thread;
 	struct irq_state state;
 
 	if (process == NULL) return NULL;
 
-	state       = spinlock_lock_irqsave(&process->lock);
+	state = spinlock_lock_irqsave(&process->lock);
 	main_thread = process->main_thread;
 	spinlock_unlock_irqrestore(&process->lock, state);
 	return main_thread;
@@ -634,18 +633,18 @@ struct uthread* process_main_thread(struct process* process) {
 
 enum process_state process_get_state(struct process* process) {
 	enum process_state state;
-	struct irq_state   irq_state;
+	struct irq_state irq_state;
 
 	if (process == NULL) return PROCESS_STATE_ZOMBIE;
 
 	irq_state = spinlock_lock_irqsave(&process->lock);
-	state     = process->state;
+	state = process->state;
 	spinlock_unlock_irqrestore(&process->lock, irq_state);
 	return state;
 }
 
 size_t process_thread_count(struct process* process) {
-	size_t           count;
+	size_t count;
 	struct irq_state state;
 
 	if (process == NULL) return 0u;
@@ -664,16 +663,16 @@ struct process* process_current(void) {
 void process_notify_thread_exit(struct process* process, struct thread* thread, uintptr_t exit_code) {
 	struct irq_state state;
 	struct irq_state wait_state;
-	struct uthread*  uthread;
-	bool             wake_joiners;
+	struct uthread* uthread;
+	bool wake_joiners;
 
 	if (process == NULL || thread == NULL) return;
 
-	uthread    = uthread_from_thread(thread);
+	uthread = uthread_from_thread(thread);
 	wait_state = spinlock_lock_irqsave(&process->join_wait_queue.lock);
-	state      = spinlock_lock_irqsave(&process->lock);
+	state = spinlock_lock_irqsave(&process->lock);
 	if (uthread != NULL && uthread->process == process && process->state != PROCESS_STATE_EXITING &&
-	    process->state != PROCESS_STATE_ZOMBIE) {
+			process->state != PROCESS_STATE_ZOMBIE) {
 		process->exit_code = exit_code;
 	}
 	wake_joiners = process_mark_zombie_if_complete_locked(process);
@@ -696,20 +695,20 @@ void process_set_cap_object_id(struct process* process, cap_object_id_t id) {
 
 	if (process == NULL) return;
 
-	state                  = spinlock_lock_irqsave(&process->lock);
+	state = spinlock_lock_irqsave(&process->lock);
 	process->cap_object_id = id;
 	spinlock_unlock_irqrestore(&process->lock, state);
 }
 
 bool process_destroy_cap_object(struct process* process) {
 	struct irq_state state;
-	cap_object_id_t  id;
-	bool             destroyed;
+	cap_object_id_t id;
+	bool destroyed;
 
 	if (process == NULL) return false;
 
-	state                  = spinlock_lock_irqsave(&process->lock);
-	id                     = process->cap_object_id;
+	state = spinlock_lock_irqsave(&process->lock);
+	id = process->cap_object_id;
 	process->cap_object_id = CAP_OBJECT_ID_INVALID;
 	spinlock_unlock_irqrestore(&process->lock, state);
 
@@ -728,19 +727,19 @@ void process_set_address_space_cap_object_id(struct process* process, cap_object
 
 	if (process == NULL) return;
 
-	state                                = spinlock_lock_irqsave(&process->lock);
+	state = spinlock_lock_irqsave(&process->lock);
 	process->address_space_cap_object_id = id;
 	spinlock_unlock_irqrestore(&process->lock, state);
 }
 
 bool process_destroy_address_space_cap_object(struct process* process) {
 	struct irq_state state;
-	cap_object_id_t  id;
+	cap_object_id_t id;
 
 	if (process == NULL) return false;
 
-	state                                = spinlock_lock_irqsave(&process->lock);
-	id                                   = process->address_space_cap_object_id;
+	state = spinlock_lock_irqsave(&process->lock);
+	id = process->address_space_cap_object_id;
 	process->address_space_cap_object_id = CAP_OBJECT_ID_INVALID;
 	spinlock_unlock_irqrestore(&process->lock, state);
 

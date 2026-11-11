@@ -2,6 +2,9 @@
 #define TEST_UTHREAD_TEST_SUPPORT_H
 
 #include <base/heap.h>
+#include <hal/cpu.h>
+#include <hal/interrupts.h>
+#include <hal/userspace.h>
 #include <core/address_space.h>
 #include <core/address_transfer.h>
 #include <core/cpu.h>
@@ -11,17 +14,15 @@
 #include <core/sched.h>
 #include <core/thread.h>
 #include <core/uthread.h>
+
 #include <criterion/criterion.h>
-#include <hal/cpu.h>
-#include <hal/interrupts.h>
-#include <hal/userspace.h>
 
 #include "../address_space/test_support.h"
 #include "../mocks/hal/cpu_mock.h"
 #include "../mocks/hal/userspace_mock.h"
 
-void            init_uthread_test_environment(void);
+void init_uthread_test_environment(void);
 struct process* spawn_owner_process(const char* name);
-void            terminate_main_thread(struct process* process);
+void terminate_main_thread(struct process* process);
 
 #endif

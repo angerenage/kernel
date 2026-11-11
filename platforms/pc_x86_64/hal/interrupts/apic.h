@@ -1,9 +1,10 @@
 #pragma once
 
-#include <hal/acpi.h>
-#include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+#include <hal/acpi.h>
+#include <hal/interrupts.h>
 
 /* List ACPI tables consumed by APIC discovery. */
 size_t x86_64_apic_acpi_consumed_tables(struct hal_acpi_consumed_table* tables, size_t capacity);
@@ -24,8 +25,8 @@ bool apic_probe_isa_irqs(void);
 bool apic_isa_irq_available(unsigned irq);
 
 /* Resolve one firmware-visible I/O APIC and redirection index into a HAL source. */
-bool apic_resolve_ioapic_source(uint64_t controller_address, uint32_t local_source_id,
-                                struct hal_interrupt_source* out_source);
+bool apic_resolve_ioapic_source(
+		uint64_t controller_address, uint32_t local_source_id, struct hal_interrupt_source* out_source);
 
 /* Return whether a resolved non-ISA I/O APIC source is available. */
 bool apic_ioapic_source_available(const struct hal_interrupt_source* source);
@@ -35,13 +36,12 @@ bool apic_ioapic_source_claimable(const struct hal_interrupt_source* source);
 
 /* Program an I/O APIC route for one ISA interrupt source. */
 bool apic_route_isa_irq(unsigned irq, unsigned vector, uint32_t target_lapic_id, enum hal_interrupt_trigger trigger,
-                        enum hal_interrupt_polarity polarity, uint32_t* out_route, uintptr_t* out_registers,
-                        bool* out_edge_triggered);
+		enum hal_interrupt_polarity polarity, uint32_t* out_route, uintptr_t* out_registers, bool* out_edge_triggered);
 
 /* Program one resolved non-ISA I/O APIC source. */
 bool apic_route_ioapic_source(const struct hal_interrupt_source* source, unsigned vector, uint32_t target_lapic_id,
-                              enum hal_interrupt_trigger trigger, enum hal_interrupt_polarity polarity,
-                              uint32_t* out_route, uintptr_t* out_registers, bool* out_edge_triggered);
+		enum hal_interrupt_trigger trigger, enum hal_interrupt_polarity polarity, uint32_t* out_route,
+		uintptr_t* out_registers, bool* out_edge_triggered);
 
 /* Change the mask state of an I/O APIC ISA route. */
 bool apic_set_isa_irq_mask(uintptr_t registers, uint32_t route, bool masked);

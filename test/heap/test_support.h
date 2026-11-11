@@ -1,11 +1,13 @@
 #pragma once
 
-#include <base/heap.h>
-#include <criterion/criterion.h>
 #include <libc/stdlib.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/heap.h>
+
+#include <criterion/criterion.h>
 
 #define KiB(x) ((size_t)(x) * 1024u)
 

@@ -1,7 +1,8 @@
 #pragma once
 
-#include <base/cap.h>
 #include <stdint.h>
+
+#include <base/cap.h>
 
 /*
  * Optional kernel command-line override forwarded verbatim by init.

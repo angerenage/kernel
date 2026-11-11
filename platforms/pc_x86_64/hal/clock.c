@@ -1,23 +1,24 @@
 #include "clock.h"
 
-#include <boot/info.h>
-#include <core/cpu.h>
-#include <core/spinlock.h>
-#include <hal/clock.h>
-#include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <boot/info.h>
+#include <hal/clock.h>
+#include <hal/interrupts.h>
+#include <core/cpu.h>
+#include <core/spinlock.h>
+
 #include "interrupts/pic.h"
 
-static hal_clock_handler_t               clock_handler;
-static void*                             clock_context;
-static bool                              clock_running;
-static bool                              clock_initialized;
+static hal_clock_handler_t clock_handler;
+static void* clock_context;
+static bool clock_running;
+static bool clock_initialized;
 static struct hal_interrupt_source_state timer_source;
-static uint32_t                          clock_frequency_hz;
-static uint32_t                          clock_vector = UINT32_MAX;
-static uint64_t                          monotonic_frequency_hz;
+static uint32_t clock_frequency_hz;
+static uint32_t clock_vector = UINT32_MAX;
+static uint64_t monotonic_frequency_hz;
 static struct spinlock clock_lock = SPINLOCK_INIT_CLASS("clock_lock", SPINLOCK_ORDER_CLOCK, SPINLOCK_FLAG_IRQSAVE);
 
 static bool invariant_tsc_available(void) {
@@ -49,7 +50,7 @@ static void clock_reset_state(void) {
 }
 
 void hal_clock_init(void) {
-	struct irq_state        state = spinlock_lock_irqsave(&clock_lock);
+	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
 	const struct boot_info* info;
 
 	if (clock_initialized) {
@@ -58,9 +59,9 @@ void hal_clock_init(void) {
 	}
 
 	clock_reset_state();
-	info                   = boot_info_get();
+	info = boot_info_get();
 	monotonic_frequency_hz = info != NULL && invariant_tsc_available() ? info->monotonic_counter_frequency_hz : 0u;
-	clock_initialized      = true;
+	clock_initialized = true;
 	spinlock_unlock_irqrestore(&clock_lock, state);
 }
 
@@ -75,7 +76,7 @@ bool hal_clock_monotonic_counter(uint64_t* out_counter) {
 }
 
 bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* ctx) {
-	uint32_t         actual_frequency_hz;
+	uint32_t actual_frequency_hz;
 	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
 
 	if (!clock_initialized || frequency_hz == 0u || handler == NULL) {
@@ -96,7 +97,7 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 		spinlock_unlock_irqrestore(&clock_lock, state);
 		return false;
 	}
-	struct hal_interrupt_source      source = {.domain = 0u, .number = 0u};
+	struct hal_interrupt_source source = {.domain = 0u, .number = 0u};
 	struct hal_interrupt_source_info source_info;
 	if (!hal_interrupt_source_info(&source, &source_info)) {
 		clock_reset_state();
@@ -104,9 +105,9 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 		return false;
 	}
 	struct hal_interrupt_delivery delivery = {
-		.target   = cpu_current(),
-		.event    = {.domain = source_info.delivery.domain, .id = source_info.delivery.base},
-		.trigger  = HAL_INTERRUPT_TRIGGER_FIRMWARE,
+		.target = cpu_current(),
+		.event = {.domain = source_info.delivery.domain, .id = source_info.delivery.base},
+		.trigger = HAL_INTERRUPT_TRIGGER_FIRMWARE,
 		.polarity = HAL_INTERRUPT_POLARITY_FIRMWARE,
 	};
 	if (!hal_interrupt_source_init(&timer_source, &source, &delivery)) {
@@ -130,7 +131,7 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 }
 
 uint32_t hal_clock_frequency(void) {
-	uint32_t         hz;
+	uint32_t hz;
 	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
 
 	hz = __atomic_load_n(&clock_frequency_hz, __ATOMIC_ACQUIRE);
@@ -152,7 +153,7 @@ void hal_clock_stop(void) {
 
 bool clock_handle_irq(unsigned vector) {
 	hal_clock_handler_t handler;
-	void*               ctx;
+	void* ctx;
 
 	if (vector != __atomic_load_n(&clock_vector, __ATOMIC_ACQUIRE)) return false;
 	if (!__atomic_load_n(&clock_running, __ATOMIC_ACQUIRE)) return true;

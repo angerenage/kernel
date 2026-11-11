@@ -1,15 +1,16 @@
 #pragma once
 
-#include <core/spinlock.h>
-#include <core/thread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
+#include <core/spinlock.h>
+#include <core/thread.h>
+
 /* Sleepable counting semaphore layered on top of the core scheduler wait queues. */
 struct semaphore {
-	struct spinlock          lock;
-	size_t                   count;
+	struct spinlock lock;
+	size_t count;
 	struct thread_wait_queue waiters;
 };
 

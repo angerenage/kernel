@@ -1,15 +1,16 @@
 #include "shell.h"
 
-#include <protocol/vfs.h>
-#include <runtime/registry.h>
-#include <runtime/tty_session.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+#include <protocol/vfs.h>
 #include <system/capability.h>
 #include <system/display.h>
+#include <runtime/registry.h>
+#include <runtime/tty_session.h>
 
 #define VFS_PROTOCOL_VERSION_MAJOR 1u
 #define VFS_PROTOCOL_VERSION_MINOR 0u
@@ -17,32 +18,34 @@
 bool shell_initialize(struct shell* shell) {
 	static const struct registry_protocol_query query = {
 		.namespace_path = VFS_NAMESPACE,
-		.protocol       = VFS_PROTOCOL_NAME,
-		.major          = VFS_PROTOCOL_VERSION_MAJOR,
-		.minor          = VFS_PROTOCOL_VERSION_MINOR,
+		.protocol = VFS_PROTOCOL_NAME,
+		.major = VFS_PROTOCOL_VERSION_MAJOR,
+		.minor = VFS_PROTOCOL_VERSION_MINOR,
 	};
-	struct registry_service_handle       service = {.capability = CAP_ID_INVALID};
-	struct registry_call_result          acquired;
+	struct registry_service_handle service = {.capability = CAP_ID_INVALID};
+	struct registry_call_result acquired;
 	struct tty_session_get_info_response terminal_info;
 
 	if (shell == NULL) return false;
-	*shell = (struct shell){.tty_cap               = CAP_ID_INVALID,
-	                        .tty_owner             = PROCESS_PID_INVALID,
-	                        .vfs_cap               = CAP_ID_INVALID,
-	                        .current_directory_cap = CAP_ID_INVALID};
+	*shell = (struct shell){
+		.tty_cap = CAP_ID_INVALID,
+		.tty_owner = PROCESS_PID_INVALID,
+		.vfs_cap = CAP_ID_INVALID,
+		.current_directory_cap = CAP_ID_INVALID
+	};
 	display_get_standard_streams(&shell->tty_cap, NULL, NULL);
 	if (shell->tty_cap == CAP_ID_INVALID || tty_session_get_info(shell->tty_cap, &terminal_info) != SYSCALL_STATUS_OK ||
-	    terminal_info.session_pid == PROCESS_PID_INVALID || terminal_info.columns == 0u ||
-	    terminal_info.columns > SIZE_MAX || terminal_info.rows == 0u || terminal_info.rows > INT64_MAX ||
-	    terminal_info.rows > SIZE_MAX / terminal_info.columns)
+			terminal_info.session_pid == PROCESS_PID_INVALID || terminal_info.columns == 0u ||
+			terminal_info.columns > SIZE_MAX || terminal_info.rows == 0u || terminal_info.rows > INT64_MAX ||
+			terminal_info.rows > SIZE_MAX / terminal_info.columns)
 		goto fail;
-	shell->tty_owner        = terminal_info.session_pid;
+	shell->tty_owner = terminal_info.session_pid;
 	shell->terminal_columns = (size_t)terminal_info.columns;
-	shell->terminal_rows    = (size_t)terminal_info.rows;
+	shell->terminal_rows = (size_t)terminal_info.rows;
 
 	acquired = registry_acquire(&query, VFS_SERVICE_NAME, &service);
 	if (acquired.transport_status != SYSCALL_STATUS_OK || acquired.status != REGISTRY_STATUS_OK ||
-	    service.capability == CAP_ID_INVALID) {
+			service.capability == CAP_ID_INVALID) {
 		shell_destroy(shell);
 		return false;
 	}
@@ -63,7 +66,7 @@ void shell_destroy(struct shell* shell) {
 	for (size_t i = 0u; i < shell->history_count; i++) free(shell->history[i].line);
 	shell->history_count = 0u;
 	if (shell->current_directory_cap != CAP_ID_INVALID) (void)cap_drop(shell->current_directory_cap);
-	shell->current_directory_cap    = CAP_ID_INVALID;
+	shell->current_directory_cap = CAP_ID_INVALID;
 	shell->current_directory_rights = 0u;
 	if (shell->vfs_cap != CAP_ID_INVALID) (void)cap_drop(shell->vfs_cap);
 	shell->vfs_cap = CAP_ID_INVALID;
@@ -71,7 +74,7 @@ void shell_destroy(struct shell* shell) {
 		(void)tty_session_restore_foreground(shell->tty_cap);
 		(void)cap_drop(shell->tty_cap);
 	}
-	shell->tty_cap   = CAP_ID_INVALID;
+	shell->tty_cap = CAP_ID_INVALID;
 	shell->tty_owner = PROCESS_PID_INVALID;
 }
 
@@ -87,7 +90,7 @@ size_t shell_prompt_width(const struct shell* shell) {
 
 bool shell_write_prompt(const struct shell* shell) {
 	struct tty_session_get_cursor_response cursor;
-	bool                                   unfinished_line;
+	bool unfinished_line;
 
 	if (shell == NULL || shell->terminal_columns == 0u || shell->current_directory_size > INT32_MAX) return false;
 	/*
@@ -98,9 +101,9 @@ bool shell_write_prompt(const struct shell* shell) {
 	if (putchar('\x18') == EOF) return false;
 	unfinished_line = tty_session_get_cursor(shell->tty_cap, &cursor) == SYSCALL_STATUS_OK && cursor.column != 0u;
 	if (printf("%s\x1b[1;34mkernel\x1b[0m:\x1b[1;36m%.*s\x1b[0m\x1b[1;32m$\x1b[0m ",
-	           unfinished_line ? "\n" : "",
-	           (int)shell->current_directory_size,
-	           shell->current_directory) < 0)
+				unfinished_line ? "\n" : "",
+				(int)shell->current_directory_size,
+				shell->current_directory) < 0)
 		return false;
 	return shell_prompt_width(shell) % shell->terminal_columns != 0u || putchar('\n') != EOF;
 }

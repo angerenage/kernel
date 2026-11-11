@@ -1,9 +1,10 @@
 #pragma once
 
-#include <boot/info.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <boot/info.h>
 
 /* Opaque structure-block position identifying one Device Tree node. */
 struct dt_node {
@@ -13,7 +14,7 @@ struct dt_node {
 /* Stable zero-copy view of one Device Tree property value. */
 struct dt_property {
 	const void* data;
-	size_t      size;
+	size_t size;
 };
 
 /* Invalid node returned when traversal cannot produce another node. */

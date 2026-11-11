@@ -2,22 +2,22 @@
 
 Test(sched, runnable_threads_yield_in_fifo_order) {
 	const struct thread_create_params first_params = {
-		.name              = "first",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "first",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x300000u,
-		.kernel_stack_top  = 0x304000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x304000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params second_params = {
-		.name              = "second",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "second",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x310000u,
-		.kernel_stack_top  = 0x314000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x314000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	struct thread first;
 	struct thread second;
@@ -60,24 +60,24 @@ Test(sched, runnable_threads_yield_in_fifo_order) {
 
 Test(sched, runnable_threads_dispatch_highest_priority_first) {
 	const struct thread_create_params low_params = {
-		.name              = "low",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "low",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x302000u,
-		.kernel_stack_top  = 0x306000u,
-		.preferred_cpu     = NULL,
-		.base_priority     = THREAD_PRIORITY_DEFAULT - 4,
-		.detached          = false,
+		.kernel_stack_top = 0x306000u,
+		.preferred_cpu = NULL,
+		.base_priority = THREAD_PRIORITY_DEFAULT - 4,
+		.detached = false,
 	};
 	const struct thread_create_params high_params = {
-		.name              = "high",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "high",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x306000u,
-		.kernel_stack_top  = 0x30a000u,
-		.preferred_cpu     = NULL,
-		.base_priority     = THREAD_PRIORITY_DEFAULT + 4,
-		.detached          = false,
+		.kernel_stack_top = 0x30a000u,
+		.preferred_cpu = NULL,
+		.base_priority = THREAD_PRIORITY_DEFAULT + 4,
+		.detached = false,
 	};
 	struct thread low;
 	struct thread high;
@@ -103,18 +103,18 @@ Test(sched, runnable_threads_dispatch_highest_priority_first) {
 Test(sched, dispatch_activates_thread_address_space) {
 	struct address_space user_space = {
 		.base = 0x1000u,
-		.end  = 0x2000u,
+		.end = 0x2000u,
 	};
-	user_space.backend.process.hal                = hal_paging_mock_space(0x4242000u);
+	user_space.backend.process.hal = hal_paging_mock_space(0x4242000u);
 	const struct thread_create_params user_params = {
-		.name              = "user",
-		.entry             = sched_test_thread_entry,
-		.arg               = NULL,
+		.name = "user",
+		.entry = sched_test_thread_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x305000u,
-		.kernel_stack_top  = 0x309000u,
-		.address_space     = &user_space,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x309000u,
+		.address_space = &user_space,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	struct thread user_thread;
 
@@ -123,7 +123,7 @@ Test(sched, dispatch_activates_thread_address_space) {
 	cr_assert(sched_init(), "sched_init failed");
 	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
 	cr_assert_eq(
-		hal_paging_mock_active_root_phys(), 0u, "idle startup should not activate an uninitialized kernel space");
+			hal_paging_mock_active_root_phys(), 0u, "idle startup should not activate an uninitialized kernel space");
 
 	cr_assert(thread_init(&user_thread, &user_params), "thread_init failed for userspace thread");
 	cr_assert(sched_make_runnable(&user_thread), "failed to make userspace thread runnable");
@@ -181,34 +181,34 @@ Test(sched, reschedule_requested_during_context_switch_remains_pending) {
 	cr_assert(sched_handle_interrupt_exit(), "initial reschedule request must switch threads");
 	cr_assert_eq(sched_current_thread(), &second, "second thread must become current");
 	cr_assert(sched_reschedule_pending(cpu_current()),
-	          "a request raised during the switch must survive the request being consumed");
+			"a request raised during the switch must survive the request being consumed");
 
 	sched_regression_reset();
 }
 
 Test(sched, accepted_thread_is_never_orphaned_when_address_space_activation_fails) {
 	struct address_space unusable_space = {0};
-	struct thread        current;
-	struct thread        candidate;
-	bool                 accepted;
+	struct thread current;
+	struct thread candidate;
+	bool accepted;
 
 	sched_regression_init_single_cpu();
 	sched_regression_init_thread(&current, "current", 0x330000u, THREAD_PRIORITY_DEFAULT, cpu_current(), NULL);
 	sched_regression_init_thread(
-		&candidate, "candidate", 0x334000u, THREAD_PRIORITY_DEFAULT, cpu_current(), &unusable_space);
+			&candidate, "candidate", 0x334000u, THREAD_PRIORITY_DEFAULT, cpu_current(), &unusable_space);
 	sched_set_current(cpu_current(), &current);
 
 	accepted = sched_make_runnable(&candidate);
 	if (accepted) {
 		sched_yield();
 		cr_assert(sched_current_thread() == &candidate || thread_is_queued(&candidate),
-		          "an accepted runnable thread must not disappear after dispatch failure");
+				"an accepted runnable thread must not disappear after dispatch failure");
 		if (sched_current_thread() == &current) {
 			cr_assert_eq(current.state,
-			             THREAD_STATE_RUNNING,
-			             "current descriptor must remain RUNNING when dispatch cannot replace it");
-			cr_assert_not(thread_is_queued(&current),
-			              "current thread must not simultaneously remain current and queued");
+					THREAD_STATE_RUNNING,
+					"current descriptor must remain RUNNING when dispatch cannot replace it");
+			cr_assert_not(
+					thread_is_queued(&current), "current thread must not simultaneously remain current and queued");
 		}
 	}
 
@@ -217,7 +217,7 @@ Test(sched, accepted_thread_is_never_orphaned_when_address_space_activation_fail
 
 Test(sched, current_thread_kernel_entry_stack_tracks_dispatch_target) {
 	struct thread worker;
-	struct cpu*   cpu;
+	struct cpu* cpu;
 
 	sched_regression_init_single_cpu();
 	cpu = cpu_current();
@@ -228,7 +228,7 @@ Test(sched, current_thread_kernel_entry_stack_tracks_dispatch_target) {
 	sched_yield();
 	cr_assert_eq(sched_current_thread(), &worker, "worker must dispatch");
 	cr_assert_eq(
-		cpu->kernel_entry_stack_top, worker.kernel_stack_top, "kernel entry stack must follow the current thread");
+			cpu->kernel_entry_stack_top, worker.kernel_stack_top, "kernel entry stack must follow the current thread");
 
 	sched_regression_reset();
 }

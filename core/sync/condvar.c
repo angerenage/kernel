@@ -1,9 +1,9 @@
 #include <base/time.h>
+#include <hal/clock.h>
+#include <hal/hcf.h>
 #include <core/condvar.h>
 #include <core/kthread.h>
 #include <core/sched.h>
-#include <hal/clock.h>
-#include <hal/hcf.h>
 
 void condvar_init(struct condvar* condvar) {
 	if (condvar == NULL) return;
@@ -14,7 +14,7 @@ void condvar_init(struct condvar* condvar) {
 void condvar_wait(struct condvar* condvar, struct mutex* mutex) {
 	struct irq_state mutex_state;
 	struct irq_state wait_state;
-	struct thread*   current;
+	struct thread* current;
 
 	if (condvar == NULL || mutex == NULL) return;
 	current = sched_current_thread();
@@ -48,9 +48,9 @@ void condvar_wait(struct condvar* condvar, struct mutex* mutex) {
 bool condvar_timed_wait(struct condvar* condvar, struct mutex* mutex, uint64_t timeout_ms) {
 	struct irq_state mutex_state;
 	struct irq_state wait_state;
-	uint64_t         deadline_tick;
-	bool             signaled;
-	struct thread*   current;
+	uint64_t deadline_tick;
+	bool signaled;
+	struct thread* current;
 
 	if (condvar == NULL || mutex == NULL) return false;
 	current = sched_current_thread();

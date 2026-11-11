@@ -1,7 +1,8 @@
-#include <core/mm.h>
-#include <core/pmm.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <core/mm.h>
+#include <core/pmm.h>
 
 #include "../selftest.h"
 
@@ -10,9 +11,9 @@ static inline volatile uint64_t* kernel_selftest_pmm_phys_to_virt(uintptr_t phys
 }
 
 static void kernel_selftest_pmm_allocates_contiguous_extents_and_restores_state(struct kernel_selftest_context* ctx) {
-	const struct pmm_info* info        = pmm_info();
-	struct pmm_extent      run         = {0};
-	size_t                 free_before = 0u;
+	const struct pmm_info* info = pmm_info();
+	struct pmm_extent run = {0};
+	size_t free_before = 0u;
 
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, info != NULL, "pmm reported no allocation properties", cleanup);
 	free_before = pmm_free_size();
@@ -21,22 +22,23 @@ static void kernel_selftest_pmm_allocates_contiguous_extents_and_restores_state(
 	KERNEL_SELFTEST_ASSERT(ctx, free_before >= 3u * info->allocation_granule);
 	KERNEL_SELFTEST_ASSERT(ctx, free_before <= pmm_total_size());
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
-	                                pmm_alloc(&(const struct pmm_alloc_request){.size = 3u * info->allocation_granule,
-	                                                                            .alignment = info->allocation_granule},
-	                                          &run),
-	                                "three-granule PMM allocation failed",
-	                                cleanup);
+			pmm_alloc(
+					&(const struct pmm_alloc_request){
+						.size = 3u * info->allocation_granule, .alignment = info->allocation_granule
+					},
+					&run),
+			"three-granule PMM allocation failed",
+			cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, (run.address & (info->allocation_granule - 1u)) == 0u, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, run.size == 3u * info->allocation_granule, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, pmm_free_size() == free_before - run.size, cleanup);
 
-	*kernel_selftest_pmm_phys_to_virt(run.address)                                 = 0x1122334455667788ull;
+	*kernel_selftest_pmm_phys_to_virt(run.address) = 0x1122334455667788ull;
 	*kernel_selftest_pmm_phys_to_virt(run.address + 2u * info->allocation_granule) = 0x8877665544332211ull;
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, *kernel_selftest_pmm_phys_to_virt(run.address) == 0x1122334455667788ull, cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx,
-	                            *kernel_selftest_pmm_phys_to_virt(run.address + 2u * info->allocation_granule) ==
-	                                0x8877665544332211ull,
-	                            cleanup);
+			*kernel_selftest_pmm_phys_to_virt(run.address + 2u * info->allocation_granule) == 0x8877665544332211ull,
+			cleanup);
 
 	struct pmm_extent released = run;
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, pmm_free(run), "PMM extent release failed", cleanup);
@@ -50,25 +52,29 @@ cleanup:
 }
 
 static void kernel_selftest_pmm_reuses_freed_extents(struct kernel_selftest_context* ctx) {
-	const struct pmm_info* info  = pmm_info();
-	struct pmm_extent      first = {0}, reused = {0};
-	size_t                 free_before = 0u;
+	const struct pmm_info* info = pmm_info();
+	struct pmm_extent first = {0}, reused = {0};
+	size_t free_before = 0u;
 
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, info != NULL, cleanup);
 	free_before = pmm_free_size();
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
-	                                pmm_alloc(&(const struct pmm_alloc_request){.size      = info->allocation_granule,
-	                                                                            .alignment = info->allocation_granule},
-	                                          &first),
-	                                "single-granule PMM allocation failed",
-	                                cleanup);
+			pmm_alloc(
+					&(const struct pmm_alloc_request){
+						.size = info->allocation_granule, .alignment = info->allocation_granule
+					},
+					&first),
+			"single-granule PMM allocation failed",
+			cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, pmm_free(first), cleanup);
 	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
-	                                pmm_alloc(&(const struct pmm_alloc_request){.size      = info->allocation_granule,
-	                                                                            .alignment = info->allocation_granule},
-	                                          &reused),
-	                                "replacement PMM allocation failed",
-	                                cleanup);
+			pmm_alloc(
+					&(const struct pmm_alloc_request){
+						.size = info->allocation_granule, .alignment = info->allocation_granule
+					},
+					&reused),
+			"replacement PMM allocation failed",
+			cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, reused.address == first.address, cleanup);
 	first = (struct pmm_extent){0};
 
@@ -79,34 +85,38 @@ cleanup:
 }
 
 static void kernel_selftest_pmm_rejects_invalid_requests(struct kernel_selftest_context* ctx) {
-	const struct pmm_info* info        = pmm_info();
-	struct pmm_extent      extent      = {0};
-	size_t                 free_before = 0u;
+	const struct pmm_info* info = pmm_info();
+	struct pmm_extent extent = {0};
+	size_t free_before = 0u;
 
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, info != NULL, cleanup);
 	free_before = pmm_free_size();
 	KERNEL_SELFTEST_ASSERT(
-		ctx, !pmm_alloc(&(const struct pmm_alloc_request){.alignment = info->allocation_granule}, &extent));
+			ctx, !pmm_alloc(&(const struct pmm_alloc_request){.alignment = info->allocation_granule}, &extent));
 	KERNEL_SELFTEST_ASSERT(ctx,
-	                       !pmm_alloc(&(const struct pmm_alloc_request){.size      = info->allocation_granule,
-	                                                                    .alignment = info->allocation_granule},
-	                                  NULL));
+			!pmm_alloc(
+					&(const struct pmm_alloc_request){
+						.size = info->allocation_granule, .alignment = info->allocation_granule
+					},
+					NULL));
 	KERNEL_SELFTEST_ASSERT(ctx, !pmm_free((struct pmm_extent){.address = 1u, .size = info->allocation_granule}));
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx,
-	                            pmm_alloc(&(const struct pmm_alloc_request){.size      = info->allocation_granule,
-	                                                                        .alignment = info->allocation_granule},
-	                                      &extent),
-	                            cleanup);
+			pmm_alloc(
+					&(const struct pmm_alloc_request){
+						.size = info->allocation_granule, .alignment = info->allocation_granule
+					},
+					&extent),
+			cleanup);
 	{
 		struct pmm_extent overflowing = {
 			.address = extent.address,
-			.size    = (size_t)(UINTPTR_MAX - extent.address) + 1u,
+			.size = (size_t)(UINTPTR_MAX - extent.address) + 1u,
 		};
 		KERNEL_SELFTEST_ASSERT_GOTO(ctx, pmm_claim(overflowing) == PMM_CLAIM_UNAVAILABLE, cleanup);
 		KERNEL_SELFTEST_ASSERT_GOTO(ctx, !pmm_free(overflowing), cleanup);
 	}
 	KERNEL_SELFTEST_ASSERT_GOTO(
-		ctx, !pmm_free((struct pmm_extent){.address = extent.address + 1u, .size = extent.size}), cleanup);
+			ctx, !pmm_free((struct pmm_extent){.address = extent.address + 1u, .size = extent.size}), cleanup);
 	KERNEL_SELFTEST_ASSERT_GOTO(ctx, pmm_free(extent), cleanup);
 	extent = (struct pmm_extent){0};
 	KERNEL_SELFTEST_ASSERT(ctx, pmm_free_size() == free_before);
@@ -118,13 +128,13 @@ cleanup:
 
 static const struct kernel_selftest_case kernel_pmm_selftests[] = {
 	{.name = "allocates_contiguous_extents_and_restores_state",
-	 .run  = kernel_selftest_pmm_allocates_contiguous_extents_and_restores_state                                   },
-	{                           .name = "reuses_freed_extents",     .run = kernel_selftest_pmm_reuses_freed_extents},
-	{                       .name = "rejects_invalid_requests", .run = kernel_selftest_pmm_rejects_invalid_requests},
+		.run = kernel_selftest_pmm_allocates_contiguous_extents_and_restores_state},
+	{.name = "reuses_freed_extents", .run = kernel_selftest_pmm_reuses_freed_extents},
+	{.name = "rejects_invalid_requests", .run = kernel_selftest_pmm_rejects_invalid_requests},
 };
 
 const struct kernel_selftest_suite kernel_pmm_selftest_suite = {
-	.name       = "pmm",
-	.cases      = kernel_pmm_selftests,
+	.name = "pmm",
+	.cases = kernel_pmm_selftests,
 	.case_count = sizeof(kernel_pmm_selftests) / sizeof(kernel_pmm_selftests[0]),
 };

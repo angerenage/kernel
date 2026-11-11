@@ -1,8 +1,9 @@
-#include <hal/userspace.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <hal/userspace.h>
 
 #include "interrupts/frame.h"
 #include "interrupts/segments.h"
@@ -11,9 +12,9 @@
 #define X86_RFLAGS_DIRECTION (1ull << 10)
 
 enum {
-	X86_USER_ENTRY_FRAME_WORDS     = 5u,
+	X86_USER_ENTRY_FRAME_WORDS = 5u,
 	X86_USER_CALL_RETURN_SLOT_SIZE = sizeof(uintptr_t),
-	X86_THREAD_CTX_R12             = 2,
+	X86_THREAD_CTX_R12 = 2,
 };
 
 enum {
@@ -29,13 +30,13 @@ extern void x86_64_userspace_enter(void);
 #define HAL_USERSPACE_CONTEXT_MAGIC 0x757063616c6c7631ull
 
 struct arch_userspace_context {
-	uint64_t                    magic;
+	uint64_t magic;
 	struct user_interrupt_frame frame;
 };
 
 _Static_assert(HAL_CPU_THREAD_CONTEXT_SPILL_WORDS > X86_THREAD_CTX_R12, "x86_64 userspace spill area is too small");
 _Static_assert(sizeof(struct arch_userspace_context) <= HAL_USERSPACE_INTEGER_CONTEXT_SIZE,
-               "x86_64 integer userspace context storage is too small");
+		"x86_64 integer userspace context storage is too small");
 _Static_assert(offsetof(struct user_interrupt_frame, frame.rdx) == 24u, "x86_64 userspace rdx offset mismatch");
 _Static_assert(offsetof(struct user_interrupt_frame, frame.rdi) == 40u, "x86_64 userspace rdi offset mismatch");
 _Static_assert(offsetof(struct user_interrupt_frame, frame.rsi) == 48u, "x86_64 userspace rsi offset mismatch");
@@ -52,25 +53,25 @@ static bool x86_64_frame_is_user(const struct user_interrupt_frame* frame) {
 }
 
 bool hal_userspace_thread_context_init(struct thread_context* context, uintptr_t kernel_stack_top, uintptr_t user_entry,
-                                       uintptr_t user_stack, uintptr_t user_arg) {
+		uintptr_t user_stack, uintptr_t user_arg) {
 	uintptr_t* frame;
-	uintptr_t  frame_sp;
+	uintptr_t frame_sp;
 
 	if (context == NULL || kernel_stack_top == 0u || user_entry == 0u || user_stack == 0u) return false;
 	if (kernel_stack_top < X86_USER_ENTRY_FRAME_WORDS * sizeof(uintptr_t)) return false;
 
 	frame_sp = kernel_stack_top - X86_USER_ENTRY_FRAME_WORDS * sizeof(uintptr_t);
-	frame    = (uintptr_t*)frame_sp;
+	frame = (uintptr_t*)frame_sp;
 
-	frame[X86_IRET_RIP]    = user_entry;
-	frame[X86_IRET_CS]     = X86_GDT_USER_CODE_SELECTOR | 0x3u;
+	frame[X86_IRET_RIP] = user_entry;
+	frame[X86_IRET_CS] = X86_GDT_USER_CODE_SELECTOR | 0x3u;
 	frame[X86_IRET_RFLAGS] = X86_USER_RFLAGS;
-	frame[X86_IRET_RSP]    = user_stack;
-	frame[X86_IRET_SS]     = X86_GDT_USER_DATA_SELECTOR | 0x3u;
+	frame[X86_IRET_RSP] = user_stack;
+	frame[X86_IRET_SS] = X86_GDT_USER_DATA_SELECTOR | 0x3u;
 
 	memset(context, 0, sizeof(*context));
-	context->instruction_pointer       = (uintptr_t)x86_64_userspace_enter;
-	context->stack_pointer             = frame_sp;
+	context->instruction_pointer = (uintptr_t)x86_64_userspace_enter;
+	context->stack_pointer = frame_sp;
 	context->spill[X86_THREAD_CTX_R12] = user_arg;
 	hal_cpu_fp_context_init(&context->fp_context);
 	return true;
@@ -82,7 +83,7 @@ bool hal_userspace_frame_is_user(const struct hal_userspace_return_frame* frame)
 
 bool hal_userspace_context_save(struct hal_userspace_context* context, const struct hal_userspace_return_frame* frame) {
 	const struct user_interrupt_frame* native = (const struct user_interrupt_frame*)frame;
-	struct arch_userspace_context      saved;
+	struct arch_userspace_context saved;
 
 	if (context == NULL || !x86_64_frame_is_user(native)) return false;
 	saved = (struct arch_userspace_context){
@@ -95,9 +96,9 @@ bool hal_userspace_context_save(struct hal_userspace_context* context, const str
 	return true;
 }
 
-bool hal_userspace_context_restore(struct hal_userspace_return_frame*  frame,
-                                   const struct hal_userspace_context* context) {
-	struct user_interrupt_frame*  native = (struct user_interrupt_frame*)frame;
+bool hal_userspace_context_restore(
+		struct hal_userspace_return_frame* frame, const struct hal_userspace_context* context) {
+	struct user_interrupt_frame* native = (struct user_interrupt_frame*)frame;
 	struct arch_userspace_context saved;
 
 	if (context == NULL || !x86_64_frame_is_user(native)) return false;
@@ -109,7 +110,7 @@ bool hal_userspace_context_restore(struct hal_userspace_return_frame*  frame,
 }
 
 bool hal_userspace_frame_redirect(struct hal_userspace_return_frame* frame, uintptr_t entry, uintptr_t stack_top,
-                                  uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4) {
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4) {
 	struct user_interrupt_frame* native = (struct user_interrupt_frame*)frame;
 
 	if (!x86_64_frame_is_user(native) || entry == 0u || stack_top == 0u) return false;
@@ -117,12 +118,12 @@ bool hal_userspace_frame_redirect(struct hal_userspace_return_frame* frame, uint
 	if (stack_top < X86_USER_CALL_RETURN_SLOT_SIZE) return false;
 
 	native->frame.rip = entry;
-	native->rsp       = stack_top - X86_USER_CALL_RETURN_SLOT_SIZE;
+	native->rsp = stack_top - X86_USER_CALL_RETURN_SLOT_SIZE;
 	native->frame.rdi = arg0;
 	native->frame.rsi = arg1;
 	native->frame.rdx = arg2;
 	native->frame.rcx = arg3;
-	native->frame.r8  = arg4;
+	native->frame.r8 = arg4;
 	/* A direct IRET is not a CALL, so establish the SysV function-entry state explicitly. */
 	native->frame.rflags &= ~X86_RFLAGS_DIRECTION;
 	return true;

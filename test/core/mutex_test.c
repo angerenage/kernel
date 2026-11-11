@@ -1,18 +1,19 @@
+#include <hal/clock.h>
+#include <hal/cpu.h>
+#include <hal/interrupts.h>
 #include <core/cpu.h>
 #include <core/kthread.h>
 #include <core/mutex.h>
 #include <core/sched.h>
 #include <core/thread.h>
+
 #include <criterion/criterion.h>
-#include <hal/clock.h>
-#include <hal/cpu.h>
-#include <hal/interrupts.h>
 
 #include "../mocks/hal/cpu_mock.h"
 
-static bool           mutex_test_switch_hook_active;
-static size_t         mutex_test_switch_hook_runs;
-static struct mutex*  mutex_test_inheritance_mutex;
+static bool mutex_test_switch_hook_active;
+static size_t mutex_test_switch_hook_runs;
+static struct mutex* mutex_test_inheritance_mutex;
 static struct thread* mutex_test_inheritance_owner;
 static struct thread* mutex_test_inheritance_waiter;
 
@@ -28,9 +29,9 @@ static void reset_test_state(void) {
 	irq_enable_local();
 	hal_cpu_mock_set_context_switch_hook(NULL);
 	mutex_test_switch_hook_active = false;
-	mutex_test_switch_hook_runs   = 0u;
-	mutex_test_inheritance_mutex  = NULL;
-	mutex_test_inheritance_owner  = NULL;
+	mutex_test_switch_hook_runs = 0u;
+	mutex_test_inheritance_mutex = NULL;
+	mutex_test_inheritance_owner = NULL;
 	mutex_test_inheritance_waiter = NULL;
 	hal_cpu_local_bind(NULL);
 }
@@ -42,7 +43,7 @@ static void mutex_test_entry(void* arg) {
 static void mutex_test_set_one_tick_timeslice(struct thread* thread) {
 	if (thread == NULL) return;
 
-	thread->timeslice_ticks     = 1u;
+	thread->timeslice_ticks = 1u;
 	thread->timeslice_remaining = 1u;
 }
 
@@ -61,8 +62,8 @@ static void mutex_test_timeout_context_switch_hook(struct thread_context* curren
 	mutex_test_switch_hook_active = false;
 }
 
-static void mutex_test_inheritance_unlock_context_switch_hook(struct thread_context*       current,
-                                                              const struct thread_context* next) {
+static void mutex_test_inheritance_unlock_context_switch_hook(
+		struct thread_context* current, const struct thread_context* next) {
 	(void)current;
 	(void)next;
 
@@ -71,18 +72,18 @@ static void mutex_test_inheritance_unlock_context_switch_hook(struct thread_cont
 	mutex_test_switch_hook_active = true;
 	mutex_test_switch_hook_runs++;
 	cr_assert_eq(sched_current_thread(),
-	             mutex_test_inheritance_owner,
-	             "boosted owner should dispatch before medium-priority runnable work");
+			mutex_test_inheritance_owner,
+			"boosted owner should dispatch before medium-priority runnable work");
 	cr_assert_eq(mutex_test_inheritance_owner->effective_priority,
-	             mutex_test_inheritance_waiter->effective_priority,
-	             "owner should inherit the high-priority waiter's effective priority");
+			mutex_test_inheritance_waiter->effective_priority,
+			"owner should inherit the high-priority waiter's effective priority");
 	cr_assert(mutex_unlock(mutex_test_inheritance_mutex), "boosted owner should be able to unlock the mutex");
 	sched_yield();
 	mutex_test_switch_hook_active = false;
 }
 
-static void mutex_test_inheritance_timeout_context_switch_hook(struct thread_context*       current,
-                                                               const struct thread_context* next) {
+static void mutex_test_inheritance_timeout_context_switch_hook(
+		struct thread_context* current, const struct thread_context* next) {
 	(void)current;
 	(void)next;
 
@@ -91,8 +92,8 @@ static void mutex_test_inheritance_timeout_context_switch_hook(struct thread_con
 	mutex_test_switch_hook_active = true;
 	mutex_test_switch_hook_runs++;
 	cr_assert_eq(mutex_test_inheritance_owner->effective_priority,
-	             mutex_test_inheritance_waiter->effective_priority,
-	             "owner should inherit priority while the high-priority waiter is blocked");
+			mutex_test_inheritance_waiter->effective_priority,
+			"owner should inherit priority while the high-priority waiter is blocked");
 	sched_tick();
 	(void)sched_handle_interrupt_exit();
 	sched_tick();
@@ -125,15 +126,15 @@ Test(mutex, init_try_lock_and_unlock_track_owner_and_state) {
 
 Test(mutex, unlock_rejects_non_owner) {
 	const struct thread_create_params params = {
-		.name              = "mutex_owner",
-		.entry             = mutex_test_entry,
-		.arg               = NULL,
+		.name = "mutex_owner",
+		.entry = mutex_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x350000u,
-		.kernel_stack_top  = 0x354000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x354000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
-	struct mutex  mutex;
+	struct mutex mutex;
 	struct thread owner;
 
 	init_bound_bootstrap_cpu();
@@ -157,24 +158,24 @@ Test(mutex, unlock_rejects_non_owner) {
 
 Test(mutex, contended_lock_blocks_and_wakes_waiter) {
 	const struct thread_create_params owner_params = {
-		.name              = "mutex_owner",
-		.entry             = mutex_test_entry,
-		.arg               = NULL,
+		.name = "mutex_owner",
+		.entry = mutex_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x360000u,
-		.kernel_stack_top  = 0x364000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x364000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params waiter_params = {
-		.name              = "mutex_waiter",
-		.entry             = mutex_test_entry,
-		.arg               = NULL,
+		.name = "mutex_waiter",
+		.entry = mutex_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x370000u,
-		.kernel_stack_top  = 0x374000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x374000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
-	struct mutex  mutex;
+	struct mutex mutex;
 	struct thread owner;
 	struct thread waiter;
 
@@ -197,8 +198,8 @@ Test(mutex, contended_lock_blocks_and_wakes_waiter) {
 	cr_assert_eq(waiter.block_reason, THREAD_BLOCK_MUTEX, "waiter block reason should record mutex contention");
 	cr_assert_eq(mutex_waiter_count(&mutex), 1u, "mutex should report one blocked waiter");
 	cr_assert_eq(sched_current_thread(),
-	             sched_idle_thread(cpu_current()),
-	             "blocking the sole runnable waiter should leave the CPU on idle");
+			sched_idle_thread(cpu_current()),
+			"blocking the sole runnable waiter should leave the CPU on idle");
 
 	sched_set_current(cpu_current(), &owner);
 	cr_assert(mutex_unlock(&mutex), "owner unlock should wake one waiter");
@@ -219,36 +220,36 @@ Test(mutex, contended_lock_blocks_and_wakes_waiter) {
 
 Test(mutex, high_priority_waiter_boosts_owner_ahead_of_medium_priority_work) {
 	const struct thread_create_params owner_params = {
-		.name              = "pi_owner",
-		.entry             = mutex_test_entry,
-		.arg               = NULL,
+		.name = "pi_owner",
+		.entry = mutex_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x355000u,
-		.kernel_stack_top  = 0x359000u,
-		.preferred_cpu     = NULL,
-		.base_priority     = THREAD_PRIORITY_DEFAULT - 5,
-		.detached          = false,
+		.kernel_stack_top = 0x359000u,
+		.preferred_cpu = NULL,
+		.base_priority = THREAD_PRIORITY_DEFAULT - 5,
+		.detached = false,
 	};
 	const struct thread_create_params waiter_params = {
-		.name              = "pi_waiter",
-		.entry             = mutex_test_entry,
-		.arg               = NULL,
+		.name = "pi_waiter",
+		.entry = mutex_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x359000u,
-		.kernel_stack_top  = 0x35d000u,
-		.preferred_cpu     = NULL,
-		.base_priority     = THREAD_PRIORITY_DEFAULT + 5,
-		.detached          = false,
+		.kernel_stack_top = 0x35d000u,
+		.preferred_cpu = NULL,
+		.base_priority = THREAD_PRIORITY_DEFAULT + 5,
+		.detached = false,
 	};
 	const struct thread_create_params medium_params = {
-		.name              = "pi_medium",
-		.entry             = mutex_test_entry,
-		.arg               = NULL,
+		.name = "pi_medium",
+		.entry = mutex_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x35d000u,
-		.kernel_stack_top  = 0x361000u,
-		.preferred_cpu     = NULL,
-		.base_priority     = THREAD_PRIORITY_DEFAULT,
-		.detached          = false,
+		.kernel_stack_top = 0x361000u,
+		.preferred_cpu = NULL,
+		.base_priority = THREAD_PRIORITY_DEFAULT,
+		.detached = false,
 	};
-	struct mutex  mutex;
+	struct mutex mutex;
 	struct thread owner;
 	struct thread waiter;
 	struct thread medium;
@@ -269,8 +270,8 @@ Test(mutex, high_priority_waiter_boosts_owner_ahead_of_medium_priority_work) {
 	cr_assert(sched_make_runnable(&owner), "owner should be queued before waiter blocks");
 	cr_assert(sched_make_runnable(&medium), "medium-priority work should be queued");
 
-	mutex_test_inheritance_mutex  = &mutex;
-	mutex_test_inheritance_owner  = &owner;
+	mutex_test_inheritance_mutex = &mutex;
+	mutex_test_inheritance_owner = &owner;
 	mutex_test_inheritance_waiter = &waiter;
 	hal_cpu_mock_set_context_switch_hook(mutex_test_inheritance_unlock_context_switch_hook);
 
@@ -288,36 +289,36 @@ Test(mutex, high_priority_waiter_boosts_owner_ahead_of_medium_priority_work) {
 
 Test(mutex, timed_out_priority_waiter_restores_owner_effective_priority) {
 	const struct thread_create_params owner_params = {
-		.name              = "pi_timeout_owner",
-		.entry             = mutex_test_entry,
-		.arg               = NULL,
+		.name = "pi_timeout_owner",
+		.entry = mutex_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x361000u,
-		.kernel_stack_top  = 0x365000u,
-		.preferred_cpu     = NULL,
-		.base_priority     = THREAD_PRIORITY_DEFAULT - 5,
-		.detached          = false,
+		.kernel_stack_top = 0x365000u,
+		.preferred_cpu = NULL,
+		.base_priority = THREAD_PRIORITY_DEFAULT - 5,
+		.detached = false,
 	};
 	const struct thread_create_params waiter_params = {
-		.name              = "pi_timeout_waiter",
-		.entry             = mutex_test_entry,
-		.arg               = NULL,
+		.name = "pi_timeout_waiter",
+		.entry = mutex_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x365000u,
-		.kernel_stack_top  = 0x369000u,
-		.preferred_cpu     = NULL,
-		.base_priority     = THREAD_PRIORITY_DEFAULT + 5,
-		.detached          = false,
+		.kernel_stack_top = 0x369000u,
+		.preferred_cpu = NULL,
+		.base_priority = THREAD_PRIORITY_DEFAULT + 5,
+		.detached = false,
 	};
 	const struct thread_create_params runner_params = {
-		.name              = "pi_timeout_runner",
-		.entry             = mutex_test_entry,
-		.arg               = NULL,
+		.name = "pi_timeout_runner",
+		.entry = mutex_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x369000u,
-		.kernel_stack_top  = 0x36d000u,
-		.preferred_cpu     = NULL,
-		.base_priority     = THREAD_PRIORITY_DEFAULT,
-		.detached          = false,
+		.kernel_stack_top = 0x36d000u,
+		.preferred_cpu = NULL,
+		.base_priority = THREAD_PRIORITY_DEFAULT,
+		.detached = false,
 	};
-	struct mutex  mutex;
+	struct mutex mutex;
 	struct thread owner;
 	struct thread waiter;
 	struct thread runner;
@@ -336,7 +337,7 @@ Test(mutex, timed_out_priority_waiter_restores_owner_effective_priority) {
 	cr_assert(mutex_try_lock(&mutex), "owner should acquire the mutex");
 	cr_assert(sched_make_runnable(&runner), "runner should become runnable during timed wait");
 
-	mutex_test_inheritance_owner  = &owner;
+	mutex_test_inheritance_owner = &owner;
 	mutex_test_inheritance_waiter = &waiter;
 	hal_cpu_mock_set_context_switch_hook(mutex_test_inheritance_timeout_context_switch_hook);
 
@@ -345,8 +346,8 @@ Test(mutex, timed_out_priority_waiter_restores_owner_effective_priority) {
 	cr_assert_eq(mutex_test_switch_hook_runs, 1u, "timeout simulation hook should run once");
 	cr_assert_eq(mutex_waiter_count(&mutex), 0u, "timed-out waiter should leave the mutex wait queue");
 	cr_assert_eq(owner.effective_priority,
-	             owner.base_priority,
-	             "owner priority should restore after the high-priority waiter times out");
+			owner.base_priority,
+			"owner priority should restore after the high-priority waiter times out");
 
 	sched_set_current(cpu_current(), &owner);
 	cr_assert(mutex_unlock(&mutex), "owner should still be able to release the mutex");
@@ -372,24 +373,24 @@ Test(mutex, timed_lock_zero_timeout_acquires_without_sleeping) {
 
 Test(mutex, timed_lock_zero_timeout_times_out_when_contended) {
 	const struct thread_create_params owner_params = {
-		.name              = "mutex_owner",
-		.entry             = mutex_test_entry,
-		.arg               = NULL,
+		.name = "mutex_owner",
+		.entry = mutex_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x380000u,
-		.kernel_stack_top  = 0x384000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x384000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params waiter_params = {
-		.name              = "mutex_waiter",
-		.entry             = mutex_test_entry,
-		.arg               = NULL,
+		.name = "mutex_waiter",
+		.entry = mutex_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x390000u,
-		.kernel_stack_top  = 0x394000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x394000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
-	struct mutex  mutex;
+	struct mutex mutex;
 	struct thread owner;
 	struct thread waiter;
 
@@ -418,46 +419,46 @@ Test(mutex, timed_lock_zero_timeout_times_out_when_contended) {
 
 Test(mutex, timed_lock_times_out_while_preemption_keeps_other_workers_running) {
 	const struct thread_create_params owner_params = {
-		.name              = "mutex_owner",
-		.entry             = mutex_test_entry,
-		.arg               = NULL,
+		.name = "mutex_owner",
+		.entry = mutex_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x3a0000u,
-		.kernel_stack_top  = 0x3a4000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x3a4000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params waiter_params = {
-		.name              = "mutex_waiter",
-		.entry             = mutex_test_entry,
-		.arg               = NULL,
+		.name = "mutex_waiter",
+		.entry = mutex_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x3b0000u,
-		.kernel_stack_top  = 0x3b4000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x3b4000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params runner1_params = {
-		.name              = "runner1",
-		.entry             = mutex_test_entry,
-		.arg               = NULL,
+		.name = "runner1",
+		.entry = mutex_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x3c0000u,
-		.kernel_stack_top  = 0x3c4000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x3c4000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
 	const struct thread_create_params runner2_params = {
-		.name              = "runner2",
-		.entry             = mutex_test_entry,
-		.arg               = NULL,
+		.name = "runner2",
+		.entry = mutex_test_entry,
+		.arg = NULL,
 		.kernel_stack_base = 0x3d0000u,
-		.kernel_stack_top  = 0x3d4000u,
-		.preferred_cpu     = NULL,
-		.detached          = false,
+		.kernel_stack_top = 0x3d4000u,
+		.preferred_cpu = NULL,
+		.detached = false,
 	};
-	struct mutex       mutex;
-	struct thread      owner;
-	struct thread      waiter;
-	struct thread      runner1;
-	struct thread      runner2;
+	struct mutex mutex;
+	struct thread owner;
+	struct thread waiter;
+	struct thread runner1;
+	struct thread runner2;
 	struct sched_stats stats;
 
 	init_bound_bootstrap_cpu();

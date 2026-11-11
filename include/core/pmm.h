@@ -1,9 +1,10 @@
 #pragma once
 
-#include <core/mm.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <core/mm.h>
 
 enum pmm_claim_result {
 	PMM_CLAIM_OK = 0,
@@ -17,19 +18,19 @@ struct pmm_info {
 
 struct pmm_extent {
 	uintptr_t address;
-	size_t    size;
+	size_t size;
 };
 
 /* One physical-memory range supplied by the kernel. */
 struct pmm_memory_range {
 	uintptr_t address;
-	size_t    size;
-	bool      usable;
+	size_t size;
+	bool usable;
 };
 
 struct pmm_alloc_request {
-	size_t    size;            /* Nonzero multiple of allocation_granule. */
-	size_t    alignment;       /* Zero selects allocation_granule, otherwise a power of two >= allocation_granule. */
+	size_t size;               /* Nonzero multiple of allocation_granule. */
+	size_t alignment;          /* Zero selects allocation_granule, otherwise a power of two >= allocation_granule. */
 	uintptr_t minimum_address; /* Inclusive. */
 	uintptr_t maximum_address; /* Exclusive; zero means unbounded. */
 };

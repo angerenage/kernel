@@ -1,9 +1,10 @@
-#include <protocol/vfs.h>
-#include <runtime/vfs.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <protocol/vfs.h>
 #include <system/capability.h>
+#include <runtime/vfs.h>
 
 static struct filesystem_call_result result(enum filesystem_status status, syscall_status_t transport_status) {
 	return (struct filesystem_call_result){.transport_status = transport_status, .status = status};
@@ -37,11 +38,11 @@ bool vfs_absolute_path_valid(const void* path, size_t path_size) {
 	return filesystem_relative_path_valid(bytes + 1u, path_size - 1u);
 }
 
-static struct filesystem_call_result call_fixed(cap_id_t cap, const void* request, size_t request_size, void* response,
-                                                size_t success_size) {
-	struct filesystem_response_header* header        = response;
-	size_t                             response_size = 0u;
-	syscall_status_t                   status;
+static struct filesystem_call_result call_fixed(
+		cap_id_t cap, const void* request, size_t request_size, void* response, size_t success_size) {
+	struct filesystem_response_header* header = response;
+	size_t response_size = 0u;
+	syscall_status_t status;
 
 	status = cap_call(cap, request, request_size, response, success_size, &response_size);
 	if (status != SYSCALL_STATUS_OK) return result(FILESYSTEM_STATUS_NONE, status);
@@ -55,25 +56,24 @@ static struct filesystem_call_result call_fixed(cap_id_t cap, const void* reques
 }
 
 static struct filesystem_call_result open_node(cap_id_t cap, uint32_t op, const void* path, size_t path_size,
-                                               cap_rights_t rights, uint32_t expected_type, bool absolute,
-                                               struct filesystem_node_handle* out_node) {
-	struct vfs_open_request*        request;
+		cap_rights_t rights, uint32_t expected_type, bool absolute, struct filesystem_node_handle* out_node) {
+	struct vfs_open_request* request;
 	struct filesystem_open_response response;
-	struct filesystem_call_result   call_result;
-	size_t                          request_size;
+	struct filesystem_call_result call_result;
+	size_t request_size;
 
 	if (out_node == NULL) return local_error();
 	*out_node = (struct filesystem_node_handle){.capability = CAP_ID_INVALID};
 	if (cap == CAP_ID_INVALID || path_size > CAP_MAX_REQUEST_SIZE - sizeof(*request) || !rights_valid(rights) ||
-	    (absolute ? !vfs_absolute_path_valid(path, path_size) : !vfs_relative_path_valid(path, path_size)))
+			(absolute ? !vfs_absolute_path_valid(path, path_size) : !vfs_relative_path_valid(path, path_size)))
 		return local_error();
 	request_size = sizeof(*request) + path_size;
-	request      = malloc(request_size);
+	request = malloc(request_size);
 	if (request == NULL) return result(FILESYSTEM_STATUS_NONE, SYSCALL_STATUS_FAILED);
 	*request = (struct vfs_open_request){
-		.header    = {.op = op},
+		.header = {.op = op},
 		.path_size = (uint32_t)path_size,
-		.rights    = rights,
+		.rights = rights,
 	};
 	memcpy(request->path, path, path_size);
 	call_result = call_fixed(cap, request, request_size, &response, sizeof(response));
@@ -81,44 +81,44 @@ static struct filesystem_call_result open_node(cap_id_t cap, uint32_t op, const 
 	if (call_result.transport_status != SYSCALL_STATUS_OK || call_result.status != FILESYSTEM_STATUS_OK)
 		return call_result;
 	if (!node_info_valid(&response.info) ||
-	    (expected_type != FILESYSTEM_NODE_INVALID && response.info.type != expected_type) ||
-	    response.capability == CAP_ID_INVALID)
+			(expected_type != FILESYSTEM_NODE_INVALID && response.info.type != expected_type) ||
+			response.capability == CAP_ID_INVALID)
 		return failed_response();
 	*out_node = (struct filesystem_node_handle){.info = response.info, .capability = response.capability};
 	return call_result;
 }
 
 struct filesystem_call_result vfs_open(cap_id_t vfs_cap, const void* path, size_t path_size, cap_rights_t rights,
-                                       struct filesystem_node_handle* out_node) {
+		struct filesystem_node_handle* out_node) {
 	return open_node(vfs_cap, VFS_OP_OPEN, path, path_size, rights, FILESYSTEM_NODE_INVALID, true, out_node);
 }
 
 struct filesystem_call_result vfs_create_file(cap_id_t vfs_cap, const void* path, size_t path_size, cap_rights_t rights,
-                                              struct filesystem_node_handle* out_node) {
+		struct filesystem_node_handle* out_node) {
 	return open_node(vfs_cap, VFS_OP_CREATE_FILE, path, path_size, rights, FILESYSTEM_NODE_FILE, true, out_node);
 }
 
 struct filesystem_call_result vfs_create_directory(cap_id_t vfs_cap, const void* path, size_t path_size,
-                                                   cap_rights_t rights, struct filesystem_node_handle* out_node) {
+		cap_rights_t rights, struct filesystem_node_handle* out_node) {
 	return open_node(
-		vfs_cap, VFS_OP_CREATE_DIRECTORY, path, path_size, rights, FILESYSTEM_NODE_DIRECTORY, true, out_node);
+			vfs_cap, VFS_OP_CREATE_DIRECTORY, path, path_size, rights, FILESYSTEM_NODE_DIRECTORY, true, out_node);
 }
 
-static struct filesystem_call_result path_call(cap_id_t cap, uint32_t op, const void* path, size_t path_size,
-                                               bool absolute) {
-	struct vfs_path_request*          request;
+static struct filesystem_call_result path_call(
+		cap_id_t cap, uint32_t op, const void* path, size_t path_size, bool absolute) {
+	struct vfs_path_request* request;
 	struct filesystem_response_header response;
-	struct filesystem_call_result     call_result;
-	size_t                            request_size;
+	struct filesystem_call_result call_result;
+	size_t request_size;
 
 	if (cap == CAP_ID_INVALID || path_size > CAP_MAX_REQUEST_SIZE - sizeof(*request) ||
-	    (absolute ? !vfs_absolute_path_valid(path, path_size) : !vfs_relative_path_valid(path, path_size)))
+			(absolute ? !vfs_absolute_path_valid(path, path_size) : !vfs_relative_path_valid(path, path_size)))
 		return local_error();
 	request_size = sizeof(*request) + path_size;
-	request      = malloc(request_size);
+	request = malloc(request_size);
 	if (request == NULL) return result(FILESYSTEM_STATUS_NONE, SYSCALL_STATUS_FAILED);
 	*request = (struct vfs_path_request){
-		.header    = {.op = op},
+		.header = {.op = op},
 		.path_size = (uint32_t)path_size,
 	};
 	memcpy(request->path, path, path_size);
@@ -132,27 +132,27 @@ struct filesystem_call_result vfs_remove(cap_id_t vfs_cap, const void* path, siz
 }
 
 static struct filesystem_call_result rename_path(cap_id_t cap, uint32_t op, const void* old_path, size_t old_path_size,
-                                                 const void* new_path, size_t new_path_size, bool absolute) {
-	struct vfs_rename_request*        request;
+		const void* new_path, size_t new_path_size, bool absolute) {
+	struct vfs_rename_request* request;
 	struct filesystem_response_header response;
-	struct filesystem_call_result     call_result;
-	size_t                            request_size;
+	struct filesystem_call_result call_result;
+	size_t request_size;
 
 	if (cap == CAP_ID_INVALID || old_path_size > CAP_MAX_REQUEST_SIZE - sizeof(*request) ||
-	    new_path_size > CAP_MAX_REQUEST_SIZE - sizeof(*request) - old_path_size ||
-	    (absolute
-			 ? (!vfs_absolute_path_valid(old_path, old_path_size) || !vfs_absolute_path_valid(new_path, new_path_size))
-			 : (!vfs_relative_path_valid(old_path, old_path_size) ||
-			    !vfs_relative_path_valid(new_path, new_path_size))))
+			new_path_size > CAP_MAX_REQUEST_SIZE - sizeof(*request) - old_path_size ||
+			(absolute ? (!vfs_absolute_path_valid(old_path, old_path_size) ||
+								!vfs_absolute_path_valid(new_path, new_path_size))
+			          : (!vfs_relative_path_valid(old_path, old_path_size) ||
+								!vfs_relative_path_valid(new_path, new_path_size))))
 		return local_error();
 	request_size = sizeof(*request) + old_path_size + new_path_size;
-	request      = malloc(request_size);
+	request = malloc(request_size);
 	if (request == NULL) return result(FILESYSTEM_STATUS_NONE, SYSCALL_STATUS_FAILED);
 	*request = (struct vfs_rename_request){
-		.header        = {.op = op},
+		.header = {.op = op},
 		.old_path_size = (uint32_t)old_path_size,
 		.new_path_size = (uint32_t)new_path_size,
-		.reserved      = 0u,
+		.reserved = 0u,
 	};
 	memcpy(request->paths, old_path, old_path_size);
 	memcpy(request->paths + old_path_size, new_path, new_path_size);
@@ -161,28 +161,28 @@ static struct filesystem_call_result rename_path(cap_id_t cap, uint32_t op, cons
 	return call_result;
 }
 
-struct filesystem_call_result vfs_rename(cap_id_t vfs_cap, const void* old_path, size_t old_path_size,
-                                         const void* new_path, size_t new_path_size) {
+struct filesystem_call_result vfs_rename(
+		cap_id_t vfs_cap, const void* old_path, size_t old_path_size, const void* new_path, size_t new_path_size) {
 	return rename_path(vfs_cap, VFS_OP_RENAME, old_path, old_path_size, new_path, new_path_size, true);
 }
 
-struct filesystem_call_result vfs_directory_mount(cap_id_t vfs_cap, const void* path, size_t path_size,
-                                                  cap_id_t fs_root_cap, uint32_t flags) {
-	struct vfs_mount_request*         request;
+struct filesystem_call_result vfs_directory_mount(
+		cap_id_t vfs_cap, const void* path, size_t path_size, cap_id_t fs_root_cap, uint32_t flags) {
+	struct vfs_mount_request* request;
 	struct filesystem_response_header response;
-	struct filesystem_call_result     call_result;
-	size_t                            request_size;
+	struct filesystem_call_result call_result;
+	size_t request_size;
 
 	if (vfs_cap == CAP_ID_INVALID || fs_root_cap == CAP_ID_INVALID || !vfs_absolute_path_valid(path, path_size) ||
-	    path_size > CAP_MAX_REQUEST_SIZE - sizeof(*request) || (flags & ~VFS_MOUNT_READ_ONLY) != 0u)
+			path_size > CAP_MAX_REQUEST_SIZE - sizeof(*request) || (flags & ~VFS_MOUNT_READ_ONLY) != 0u)
 		return local_error();
 	request_size = sizeof(*request) + path_size;
-	request      = malloc(request_size);
+	request = malloc(request_size);
 	if (request == NULL) return result(FILESYSTEM_STATUS_NONE, SYSCALL_STATUS_FAILED);
 	*request = (struct vfs_mount_request){
-		.header          = {.op = VFS_OP_MOUNT},
-		.path_size       = (uint32_t)path_size,
-		.flags           = flags,
+		.header = {.op = VFS_OP_MOUNT},
+		.path_size = (uint32_t)path_size,
+		.flags = flags,
 		.root_capability = fs_root_cap,
 	};
 	memcpy(request->path, path, path_size);
@@ -200,28 +200,33 @@ struct filesystem_call_result vfs_directory_info(cap_id_t directory_cap, struct 
 }
 
 struct filesystem_call_result vfs_directory_open(cap_id_t directory_cap, const void* path, size_t path_size,
-                                                 cap_rights_t rights, struct filesystem_node_handle* out_node) {
+		cap_rights_t rights, struct filesystem_node_handle* out_node) {
 	return open_node(
-		directory_cap, VFS_DIRECTORY_OP_OPEN, path, path_size, rights, FILESYSTEM_NODE_INVALID, false, out_node);
+			directory_cap, VFS_DIRECTORY_OP_OPEN, path, path_size, rights, FILESYSTEM_NODE_INVALID, false, out_node);
 }
 
 struct filesystem_call_result vfs_directory_create_file(cap_id_t directory_cap, const void* path, size_t path_size,
-                                                        cap_rights_t rights, struct filesystem_node_handle* out_node) {
-	return open_node(
-		directory_cap, VFS_DIRECTORY_OP_CREATE_FILE, path, path_size, rights, FILESYSTEM_NODE_FILE, false, out_node);
+		cap_rights_t rights, struct filesystem_node_handle* out_node) {
+	return open_node(directory_cap,
+			VFS_DIRECTORY_OP_CREATE_FILE,
+			path,
+			path_size,
+			rights,
+			FILESYSTEM_NODE_FILE,
+			false,
+			out_node);
 }
 
 struct filesystem_call_result vfs_directory_create_directory(cap_id_t directory_cap, const void* path, size_t path_size,
-                                                             cap_rights_t                   rights,
-                                                             struct filesystem_node_handle* out_node) {
+		cap_rights_t rights, struct filesystem_node_handle* out_node) {
 	return open_node(directory_cap,
-	                 VFS_DIRECTORY_OP_CREATE_DIRECTORY,
-	                 path,
-	                 path_size,
-	                 rights,
-	                 FILESYSTEM_NODE_DIRECTORY,
-	                 false,
-	                 out_node);
+			VFS_DIRECTORY_OP_CREATE_DIRECTORY,
+			path,
+			path_size,
+			rights,
+			FILESYSTEM_NODE_DIRECTORY,
+			false,
+			out_node);
 }
 
 static bool directory_entry_valid(const struct filesystem_directory_entry* entry) {
@@ -231,30 +236,29 @@ static bool directory_entry_valid(const struct filesystem_directory_entry* entry
 }
 
 struct filesystem_call_result vfs_directory_enumerate(cap_id_t directory_cap, uint64_t offset,
-                                                      struct filesystem_directory_entry* entries, size_t count,
-                                                      size_t* out_returned, uint64_t* out_total) {
+		struct filesystem_directory_entry* entries, size_t count, size_t* out_returned, uint64_t* out_total) {
 	const size_t maximum_count =
-		(CAP_MAX_RESPONSE_SIZE - sizeof(struct filesystem_directory_enumerate_response)) / sizeof(*entries);
+			(CAP_MAX_RESPONSE_SIZE - sizeof(struct filesystem_directory_enumerate_response)) / sizeof(*entries);
 	struct filesystem_directory_enumerate_request request = {
-		.header   = {.op = VFS_DIRECTORY_OP_ENUMERATE},
+		.header = {.op = VFS_DIRECTORY_OP_ENUMERATE},
 		.reserved = 0u,
-		.offset   = offset,
+		.offset = offset,
 	};
 	struct filesystem_directory_enumerate_response* response;
-	struct filesystem_call_result                   call_result;
-	size_t                                          capacity;
-	size_t                                          response_size = 0u;
-	size_t                                          transfer_count;
-	syscall_status_t                                status;
+	struct filesystem_call_result call_result;
+	size_t capacity;
+	size_t response_size = 0u;
+	size_t transfer_count;
+	syscall_status_t status;
 
 	if (out_returned == NULL || out_total == NULL) return local_error();
 	*out_returned = 0u;
-	*out_total    = 0u;
+	*out_total = 0u;
 	if (directory_cap == CAP_ID_INVALID || (count != 0u && entries == NULL)) return local_error();
 	transfer_count = count > maximum_count ? maximum_count : count;
-	request.count  = transfer_count;
-	capacity       = sizeof(*response) + transfer_count * sizeof(*entries);
-	response       = malloc(capacity);
+	request.count = transfer_count;
+	capacity = sizeof(*response) + transfer_count * sizeof(*entries);
+	response = malloc(capacity);
 	if (response == NULL) return result(FILESYSTEM_STATUS_NONE, SYSCALL_STATUS_FAILED);
 	status = cap_call(directory_cap, &request, sizeof(request), response, capacity, &response_size);
 	if (status != SYSCALL_STATUS_OK) {
@@ -272,9 +276,9 @@ struct filesystem_call_result vfs_directory_enumerate(cap_id_t directory_cap, ui
 		return call_result;
 	}
 	if (response_size < sizeof(*response) || response->returned > transfer_count ||
-	    response->returned > response->total ||
-	    (response->returned != 0u && (offset > response->total || response->returned > response->total - offset)) ||
-	    response_size != sizeof(*response) + (size_t)response->returned * sizeof(*entries)) {
+			response->returned > response->total ||
+			(response->returned != 0u && (offset > response->total || response->returned > response->total - offset)) ||
+			response_size != sizeof(*response) + (size_t)response->returned * sizeof(*entries)) {
 		free(response);
 		return failed_response();
 	}
@@ -286,7 +290,7 @@ struct filesystem_call_result vfs_directory_enumerate(cap_id_t directory_cap, ui
 	}
 	if (response->returned != 0u) memcpy(entries, response->entries, (size_t)response->returned * sizeof(*entries));
 	*out_returned = (size_t)response->returned;
-	*out_total    = response->total;
+	*out_total = response->total;
 	free(response);
 	return call_result;
 }
@@ -295,14 +299,14 @@ struct filesystem_call_result vfs_directory_remove(cap_id_t directory_cap, const
 	return path_call(directory_cap, VFS_DIRECTORY_OP_REMOVE, path, path_size, false);
 }
 
-struct filesystem_call_result vfs_directory_remove_deferred(cap_id_t directory_cap, const void* path,
-                                                            size_t path_size) {
+struct filesystem_call_result vfs_directory_remove_deferred(
+		cap_id_t directory_cap, const void* path, size_t path_size) {
 	return path_call(directory_cap, VFS_DIRECTORY_OP_REMOVE_DEFERRED, path, path_size, false);
 }
 
 struct filesystem_call_result vfs_directory_sync(cap_id_t directory_cap) {
 	const struct filesystem_info_request request = {
-		.header   = {.op = VFS_DIRECTORY_OP_SYNC},
+		.header = {.op = VFS_DIRECTORY_OP_SYNC},
 		.reserved = 0u,
 	};
 	struct filesystem_response_header response;
@@ -311,6 +315,6 @@ struct filesystem_call_result vfs_directory_sync(cap_id_t directory_cap) {
 }
 
 struct filesystem_call_result vfs_directory_rename(cap_id_t directory_cap, const void* old_path, size_t old_path_size,
-                                                   const void* new_path, size_t new_path_size) {
+		const void* new_path, size_t new_path_size) {
 	return rename_path(directory_cap, VFS_DIRECTORY_OP_RENAME, old_path, old_path_size, new_path, new_path_size, false);
 }

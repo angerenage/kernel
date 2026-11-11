@@ -1,9 +1,10 @@
+#include <stdbool.h>
+#include <stdint.h>
+
 #include <base/process.h>
 #include <core/address_space.h>
 #include <core/exception.h>
 #include <core/process.h>
-#include <stdbool.h>
-#include <stdint.h>
 
 static bool core_exception_exit_code(enum core_exception_kind kind, uintptr_t* out_code) {
 	if (!out_code) return false;
@@ -66,7 +67,7 @@ static bool core_exception_exit_code(enum core_exception_kind kind, uintptr_t* o
 
 bool core_handle_user_exception(enum core_exception_kind kind) {
 	struct process* process;
-	uintptr_t       exit_code;
+	uintptr_t exit_code;
 
 	if (!core_exception_exit_code(kind, &exit_code)) return false;
 	process = process_current();
@@ -100,16 +101,16 @@ static memory_access_t core_exception_to_mapping_access(enum core_exception_acce
 	}
 }
 
-bool core_handle_exception(enum core_exception_kind kind, enum core_exception_access access, uintptr_t addr,
-                           bool user_mode) {
+bool core_handle_exception(
+		enum core_exception_kind kind, enum core_exception_access access, uintptr_t addr, bool user_mode) {
 	switch (kind) {
 	case CORE_EXCEPTION_PAGE_FAULT_NOT_PRESENT:
 	case CORE_EXCEPTION_PAGE_FAULT_PROTECTION:
 	case CORE_EXCEPTION_PAGE_FAULT_INVALID:
 		return address_space_handle_current_fault(addr,
-		                                          core_exception_to_address_space_fault_kind(kind),
-		                                          core_exception_to_mapping_access(access),
-		                                          user_mode);
+				core_exception_to_address_space_fault_kind(kind),
+				core_exception_to_mapping_access(access),
+				user_mode);
 	default:
 		if (!user_mode) return false;
 		return core_handle_user_exception(kind);

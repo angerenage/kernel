@@ -1,6 +1,6 @@
+#include <hal/interrupts.h>
 #include <core/sched.h>
 #include <core/thread.h>
-#include <hal/interrupts.h>
 
 static uint64_t next_thread_trace_id;
 
@@ -23,12 +23,13 @@ static uint32_t thread_flags_load(const struct thread* thread) {
 static void thread_reset_links(struct thread* thread) {
 	if (thread == NULL) return;
 
-	thread->run_queue_next     = NULL;
-	thread->wait_queue_next    = NULL;
-	thread->sleep_queue_next   = NULL;
+	thread->run_queue_next = NULL;
+	thread->wait_queue_next = NULL;
+	thread->sleep_queue_next = NULL;
 	thread->wake_deadline_tick = 0u;
-	(void)__atomic_fetch_and(
-		&thread->flags, ~((uint32_t)THREAD_FLAG_QUEUED | (uint32_t)THREAD_FLAG_WAIT_INTERRUPTIBLE), __ATOMIC_ACQ_REL);
+	(void)__atomic_fetch_and(&thread->flags,
+			~((uint32_t)THREAD_FLAG_QUEUED | (uint32_t)THREAD_FLAG_WAIT_INTERRUPTIBLE),
+			__ATOMIC_ACQ_REL);
 }
 
 static void thread_exit_if_cancelled(struct thread* thread) {
@@ -62,7 +63,7 @@ static enum thread_init_result thread_validate_context_params(const struct threa
 
 enum thread_init_result thread_init_context(struct thread* thread, const struct thread_context_params* params) {
 	enum thread_init_result result;
-	int32_t                 priority;
+	int32_t priority;
 
 	if (thread == NULL) return THREAD_INIT_INVALID_ARGUMENTS;
 
@@ -70,36 +71,36 @@ enum thread_init_result thread_init_context(struct thread* thread, const struct 
 	if (result != THREAD_INIT_OK) return result;
 
 	priority = thread_priority_clamp(params->base_priority);
-	*thread  = (struct thread){
-		.name                = params->name,
-		.trace_id            = thread_allocate_trace_id(),
-		.cpu                 = NULL,
-		.preferred_cpu       = params->preferred_cpu,
-		.state               = THREAD_STATE_NEW,
-		.block_reason        = THREAD_BLOCK_NONE,
-		.flags               = params->detached ? THREAD_FLAG_DETACHED : THREAD_FLAG_NONE,
-		.kernel_stack_base   = params->kernel_stack_base,
-		.kernel_stack_top    = params->kernel_stack_top,
-		.address_space       = params->address_space,
-		.owner_kind          = THREAD_OWNER_NONE,
-		.owner               = NULL,
-		.context             = *params->context,
-		.entry               = params->entry,
-		.arg                 = params->arg,
-		.exit_code           = 0u,
-		.blocked_queue       = NULL,
-		.owned_mutexes       = NULL,
-		.run_queue_next      = NULL,
-		.wait_queue_next     = NULL,
-		.sleep_queue_next    = NULL,
-		.wake_deadline_tick  = 0u,
-		.wait_status         = THREAD_WAIT_STATUS_NONE,
-		.base_priority       = priority,
-		.effective_priority  = priority,
-		.timeslice_ticks     = THREAD_DEFAULT_TIMESLICE_TICKS,
+	*thread = (struct thread){
+		.name = params->name,
+		.trace_id = thread_allocate_trace_id(),
+		.cpu = NULL,
+		.preferred_cpu = params->preferred_cpu,
+		.state = THREAD_STATE_NEW,
+		.block_reason = THREAD_BLOCK_NONE,
+		.flags = params->detached ? THREAD_FLAG_DETACHED : THREAD_FLAG_NONE,
+		.kernel_stack_base = params->kernel_stack_base,
+		.kernel_stack_top = params->kernel_stack_top,
+		.address_space = params->address_space,
+		.owner_kind = THREAD_OWNER_NONE,
+		.owner = NULL,
+		.context = *params->context,
+		.entry = params->entry,
+		.arg = params->arg,
+		.exit_code = 0u,
+		.blocked_queue = NULL,
+		.owned_mutexes = NULL,
+		.run_queue_next = NULL,
+		.wait_queue_next = NULL,
+		.sleep_queue_next = NULL,
+		.wake_deadline_tick = 0u,
+		.wait_status = THREAD_WAIT_STATUS_NONE,
+		.base_priority = priority,
+		.effective_priority = priority,
+		.timeslice_ticks = THREAD_DEFAULT_TIMESLICE_TICKS,
 		.timeslice_remaining = THREAD_DEFAULT_TIMESLICE_TICKS,
-		.reap_callback       = NULL,
-		.reap_context        = NULL,
+		.reap_callback = NULL,
+		.reap_context = NULL,
 	};
 	thread_wait_queue_init(&thread->join_wait_queue);
 	thread_wait_queue_init(&thread->park_wait_queue);
@@ -107,8 +108,8 @@ enum thread_init_result thread_init_context(struct thread* thread, const struct 
 }
 
 enum thread_init_result thread_init_ex(struct thread* thread, const struct thread_create_params* params) {
-	enum thread_init_result      result;
-	struct thread_context        context;
+	enum thread_init_result result;
+	struct thread_context context;
 	struct thread_context_params context_params;
 
 	if (thread == NULL) return THREAD_INIT_INVALID_ARGUMENTS;
@@ -117,24 +118,24 @@ enum thread_init_result thread_init_ex(struct thread* thread, const struct threa
 	if (result != THREAD_INIT_OK) return result;
 
 	if (!hal_cpu_thread_context_init(&context,
-	                                 params->kernel_stack_base,
-	                                 params->kernel_stack_top,
-	                                 (uintptr_t)thread_entry_bootstrap,
-	                                 (uintptr_t)thread)) {
+				params->kernel_stack_base,
+				params->kernel_stack_top,
+				(uintptr_t)thread_entry_bootstrap,
+				(uintptr_t)thread)) {
 		return THREAD_INIT_CONTEXT_UNSUPPORTED;
 	}
 
 	context_params = (struct thread_context_params){
-		.name              = params->name,
+		.name = params->name,
 		.kernel_stack_base = params->kernel_stack_base,
-		.kernel_stack_top  = params->kernel_stack_top,
-		.address_space     = params->address_space,
-		.preferred_cpu     = params->preferred_cpu,
-		.base_priority     = params->base_priority,
-		.detached          = params->detached,
-		.context           = &context,
-		.entry             = params->entry,
-		.arg               = params->arg,
+		.kernel_stack_top = params->kernel_stack_top,
+		.address_space = params->address_space,
+		.preferred_cpu = params->preferred_cpu,
+		.base_priority = params->base_priority,
+		.detached = params->detached,
+		.context = &context,
+		.entry = params->entry,
+		.arg = params->arg,
 	};
 	return thread_init_context(thread, &context_params);
 }
@@ -147,35 +148,35 @@ void thread_init_idle(struct thread* thread, struct cpu* cpu, const char* name) 
 	if (thread == NULL) return;
 
 	*thread = (struct thread){
-		.name                = name,
-		.trace_id            = thread_allocate_trace_id(),
-		.cpu                 = cpu,
-		.preferred_cpu       = cpu,
-		.state               = THREAD_STATE_IDLE,
-		.block_reason        = THREAD_BLOCK_NONE,
-		.flags               = THREAD_FLAG_IDLE,
-		.kernel_stack_base   = 0u,
-		.kernel_stack_top    = 0u,
-		.address_space       = NULL,
-		.owner_kind          = THREAD_OWNER_NONE,
-		.owner               = NULL,
-		.context             = {0},
-		.entry               = NULL,
-		.arg                 = NULL,
-		.exit_code           = 0u,
-		.blocked_queue       = NULL,
-		.owned_mutexes       = NULL,
-		.run_queue_next      = NULL,
-		.wait_queue_next     = NULL,
-		.sleep_queue_next    = NULL,
-		.wake_deadline_tick  = 0u,
-		.wait_status         = THREAD_WAIT_STATUS_NONE,
-		.base_priority       = THREAD_PRIORITY_MIN,
-		.effective_priority  = THREAD_PRIORITY_MIN,
-		.timeslice_ticks     = 0u,
+		.name = name,
+		.trace_id = thread_allocate_trace_id(),
+		.cpu = cpu,
+		.preferred_cpu = cpu,
+		.state = THREAD_STATE_IDLE,
+		.block_reason = THREAD_BLOCK_NONE,
+		.flags = THREAD_FLAG_IDLE,
+		.kernel_stack_base = 0u,
+		.kernel_stack_top = 0u,
+		.address_space = NULL,
+		.owner_kind = THREAD_OWNER_NONE,
+		.owner = NULL,
+		.context = {0},
+		.entry = NULL,
+		.arg = NULL,
+		.exit_code = 0u,
+		.blocked_queue = NULL,
+		.owned_mutexes = NULL,
+		.run_queue_next = NULL,
+		.wait_queue_next = NULL,
+		.sleep_queue_next = NULL,
+		.wake_deadline_tick = 0u,
+		.wait_status = THREAD_WAIT_STATUS_NONE,
+		.base_priority = THREAD_PRIORITY_MIN,
+		.effective_priority = THREAD_PRIORITY_MIN,
+		.timeslice_ticks = 0u,
 		.timeslice_remaining = 0u,
-		.reap_callback       = NULL,
-		.reap_context        = NULL,
+		.reap_callback = NULL,
+		.reap_context = NULL,
 	};
 	hal_cpu_fp_context_init(&thread->context.fp_context);
 	thread_wait_queue_init(&thread->join_wait_queue);
@@ -260,7 +261,7 @@ bool thread_detach_with_reap_callback(struct thread* thread, thread_reap_callbac
 		return false;
 	}
 	thread->reap_callback = callback;
-	thread->reap_context  = ctx;
+	thread->reap_context = ctx;
 	(void)__atomic_fetch_or(&thread->flags, (uint32_t)THREAD_FLAG_DETACHED, __ATOMIC_ACQ_REL);
 	spinlock_unlock_irqrestore(&thread->join_wait_queue.lock, state);
 	return true;
@@ -282,7 +283,7 @@ void thread_set_cancel_enabled(struct thread* thread, bool enabled) {
 	if (enabled) {
 		previous_flags = __atomic_fetch_and(&thread->flags, ~(uint32_t)THREAD_FLAG_CANCEL_DISABLED, __ATOMIC_ACQ_REL);
 		if ((previous_flags & (THREAD_FLAG_CANCEL_DISABLED | THREAD_FLAG_CANCEL_PENDING)) ==
-		    (THREAD_FLAG_CANCEL_DISABLED | THREAD_FLAG_CANCEL_PENDING)) {
+				(THREAD_FLAG_CANCEL_DISABLED | THREAD_FLAG_CANCEL_PENDING)) {
 			sched_cancel_thread(thread);
 		}
 	}
@@ -299,21 +300,21 @@ void thread_set_reap_callback(struct thread* thread, thread_reap_callback_t call
 	state = spinlock_lock_irqsave(&thread->join_wait_queue.lock);
 	if (!thread_is_terminated(thread)) {
 		thread->reap_callback = callback;
-		thread->reap_context  = ctx;
+		thread->reap_context = ctx;
 	}
 	spinlock_unlock_irqrestore(&thread->join_wait_queue.lock, state);
 }
 
 void thread_notify_reap(struct thread* thread) {
 	thread_reap_callback_t callback;
-	void*                  ctx;
-	struct irq_state       state;
+	void* ctx;
+	struct irq_state state;
 
 	if (thread == NULL) return;
 
-	state    = spinlock_lock_irqsave(&thread->join_wait_queue.lock);
+	state = spinlock_lock_irqsave(&thread->join_wait_queue.lock);
 	callback = thread->reap_callback;
-	ctx      = thread->reap_context;
+	ctx = thread->reap_context;
 	spinlock_unlock_irqrestore(&thread->join_wait_queue.lock, state);
 	if (callback != NULL) callback(thread, ctx);
 }
@@ -322,9 +323,9 @@ void thread_mark_ready(struct thread* thread, struct cpu* cpu) {
 	if (thread == NULL) return;
 
 	thread_reset_links(thread);
-	thread->cpu           = cpu;
+	thread->cpu = cpu;
 	thread->blocked_queue = NULL;
-	thread->block_reason  = THREAD_BLOCK_NONE;
+	thread->block_reason = THREAD_BLOCK_NONE;
 	if (!thread_is_idle(thread) && !thread_is_terminated(thread)) thread->state = THREAD_STATE_READY;
 }
 
@@ -332,9 +333,9 @@ void thread_mark_running(struct thread* thread, struct cpu* cpu) {
 	if (thread == NULL) return;
 
 	thread_reset_links(thread);
-	thread->cpu           = cpu;
+	thread->cpu = cpu;
 	thread->blocked_queue = NULL;
-	thread->block_reason  = THREAD_BLOCK_NONE;
+	thread->block_reason = THREAD_BLOCK_NONE;
 	if (!thread_is_idle(thread) && !thread_is_terminated(thread)) {
 		if (thread->timeslice_ticks == 0u) thread->timeslice_ticks = THREAD_DEFAULT_TIMESLICE_TICKS;
 		if (thread->timeslice_remaining == 0u) thread->timeslice_remaining = thread->timeslice_ticks;
@@ -347,8 +348,8 @@ void thread_mark_blocked(struct thread* thread, enum thread_block_reason reason)
 
 	thread_reset_links(thread);
 	thread->blocked_queue = NULL;
-	thread->wait_status   = THREAD_WAIT_STATUS_NONE;
-	thread->block_reason  = reason;
+	thread->wait_status = THREAD_WAIT_STATUS_NONE;
+	thread->block_reason = reason;
 	if (!thread_is_idle(thread) && !thread_is_terminated(thread)) thread->state = THREAD_STATE_BLOCKED;
 }
 
@@ -360,10 +361,10 @@ void thread_mark_exiting(struct thread* thread, thread_exit_code_t exit_code) {
 	state = spinlock_lock_irqsave(&thread->join_wait_queue.lock);
 	thread_reset_links(thread);
 	thread->blocked_queue = NULL;
-	thread->wait_status   = THREAD_WAIT_STATUS_NONE;
-	thread->block_reason  = THREAD_BLOCK_NONE;
-	thread->exit_code     = exit_code;
-	thread->state         = THREAD_STATE_EXITING;
+	thread->wait_status = THREAD_WAIT_STATUS_NONE;
+	thread->block_reason = THREAD_BLOCK_NONE;
+	thread->exit_code = exit_code;
+	thread->state = THREAD_STATE_EXITING;
 	spinlock_unlock_irqrestore(&thread->join_wait_queue.lock, state);
 }
 
@@ -372,24 +373,24 @@ void thread_mark_zombie(struct thread* thread) {
 
 	thread_reset_links(thread);
 	thread->blocked_queue = NULL;
-	thread->wait_status   = THREAD_WAIT_STATUS_NONE;
-	thread->block_reason  = THREAD_BLOCK_NONE;
-	thread->state         = THREAD_STATE_ZOMBIE;
+	thread->wait_status = THREAD_WAIT_STATUS_NONE;
+	thread->block_reason = THREAD_BLOCK_NONE;
+	thread->state = THREAD_STATE_ZOMBIE;
 }
 
 void thread_wait_queue_init(struct thread_wait_queue* queue) {
 	if (queue == NULL) return;
 
 	queue->lock =
-		(struct spinlock)SPINLOCK_INIT_CLASS("thread_wait_queue_lock", SPINLOCK_ORDER_SCHED, SPINLOCK_FLAG_IRQSAVE);
-	queue->head  = NULL;
-	queue->tail  = NULL;
+			(struct spinlock)SPINLOCK_INIT_CLASS("thread_wait_queue_lock", SPINLOCK_ORDER_SCHED, SPINLOCK_FLAG_IRQSAVE);
+	queue->head = NULL;
+	queue->tail = NULL;
 	queue->depth = 0u;
 }
 
 size_t thread_wait_queue_depth(struct thread_wait_queue* queue) {
 	struct irq_state state;
-	size_t           depth;
+	size_t depth;
 
 	if (queue == NULL) return 0u;
 
@@ -408,15 +409,15 @@ static void run_queue_insert_locked(struct run_queue* queue, struct thread* thre
 	current = queue->head;
 	while (current != NULL && current->effective_priority >= thread->effective_priority) {
 		previous = current;
-		current  = current->run_queue_next;
+		current = current->run_queue_next;
 	}
 
 	if (previous == NULL) {
 		thread->run_queue_next = queue->head;
-		queue->head            = thread;
+		queue->head = thread;
 	}
 	else {
-		thread->run_queue_next   = previous->run_queue_next;
+		thread->run_queue_next = previous->run_queue_next;
 		previous->run_queue_next = thread;
 	}
 
@@ -433,7 +434,7 @@ static bool run_queue_remove_locked(struct run_queue* queue, struct thread* thre
 	current = queue->head;
 	while (current != NULL && current != thread) {
 		previous = current;
-		current  = current->run_queue_next;
+		current = current->run_queue_next;
 	}
 
 	if (current == NULL) return false;
@@ -453,9 +454,9 @@ static bool run_queue_remove_locked(struct run_queue* queue, struct thread* thre
 void run_queue_init(struct run_queue* queue) {
 	if (queue == NULL) return;
 
-	queue->lock  = (struct spinlock)SPINLOCK_INIT_CLASS("run_queue_lock", SPINLOCK_ORDER_SCHED, SPINLOCK_FLAG_IRQSAVE);
-	queue->head  = NULL;
-	queue->tail  = NULL;
+	queue->lock = (struct spinlock)SPINLOCK_INIT_CLASS("run_queue_lock", SPINLOCK_ORDER_SCHED, SPINLOCK_FLAG_IRQSAVE);
+	queue->head = NULL;
+	queue->tail = NULL;
 	queue->depth = 0u;
 }
 
@@ -474,7 +475,7 @@ bool run_queue_enqueue(struct run_queue* queue, struct thread* thread) {
 	thread->wait_queue_next = NULL;
 	(void)__atomic_fetch_or(&thread->flags, (uint32_t)THREAD_FLAG_QUEUED, __ATOMIC_ACQ_REL);
 	thread->block_reason = THREAD_BLOCK_NONE;
-	thread->state        = THREAD_STATE_READY;
+	thread->state = THREAD_STATE_READY;
 	queue->depth++;
 	spinlock_unlock_irqrestore(&queue->lock, state);
 	return true;
@@ -521,11 +522,11 @@ bool run_queue_update_priority(struct run_queue* queue, struct thread* thread, i
 
 struct thread* run_queue_dequeue(struct run_queue* queue) {
 	struct irq_state state;
-	struct thread*   thread;
+	struct thread* thread;
 
 	if (queue == NULL) return NULL;
 
-	state  = spinlock_lock_irqsave(&queue->lock);
+	state = spinlock_lock_irqsave(&queue->lock);
 	thread = queue->head;
 	if (thread == NULL) {
 		spinlock_unlock_irqrestore(&queue->lock, state);
@@ -542,7 +543,7 @@ struct thread* run_queue_dequeue(struct run_queue* queue) {
 
 size_t run_queue_depth(struct run_queue* queue) {
 	struct irq_state state;
-	size_t           depth;
+	size_t depth;
 
 	if (queue == NULL) return 0u;
 

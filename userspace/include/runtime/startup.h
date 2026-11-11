@@ -10,19 +10,19 @@ enum runtime_startup_result {
 };
 
 struct runtime_startup_arguments {
-	int             argc;
-	char**          argv;
-	cap_id_t        stdin_cap;
-	cap_id_t        stdout_cap;
-	cap_id_t        stderr_cap;
-	cap_id_t        working_directory_cap;
-	size_t          capc;
+	int argc;
+	char** argv;
+	cap_id_t stdin_cap;
+	cap_id_t stdout_cap;
+	cap_id_t stderr_cap;
+	cap_id_t working_directory_cap;
+	size_t capc;
 	const cap_id_t* capv;
 };
 
 /* Rebuild argv, extract standard process resources, and expose the remaining capability arguments. */
-enum runtime_startup_result runtime_startup_unpack(const struct process_startup_info* startup,
-                                                   struct runtime_startup_arguments*  out_arguments);
+enum runtime_startup_result runtime_startup_unpack(
+		const struct process_startup_info* startup, struct runtime_startup_arguments* out_arguments);
 
 /* Release allocations owned by runtime_startup_arguments. */
 void runtime_startup_arguments_deinit(struct runtime_startup_arguments* arguments);

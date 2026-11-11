@@ -1,5 +1,6 @@
-#include <hal/device_tree.h>
 #include <stddef.h>
+
+#include <hal/device_tree.h>
 
 #include "cache.h"
 #include "interrupts/aplic.h"
@@ -8,9 +9,9 @@
 #include "iommu/iommu.h"
 
 static size_t device_tree_append(size_t (*provider)(struct hal_device_tree_consumed_node*, size_t),
-                                 struct hal_device_tree_consumed_node* nodes, size_t capacity, size_t count) {
+		struct hal_device_tree_consumed_node* nodes, size_t capacity, size_t count) {
 	size_t available = count < capacity ? capacity - count : 0u;
-	size_t added     = provider(nodes != NULL && available != 0u ? nodes + count : NULL, available);
+	size_t added = provider(nodes != NULL && available != 0u ? nodes + count : NULL, available);
 
 	return added > SIZE_MAX - count ? SIZE_MAX : count + added;
 }
@@ -27,14 +28,13 @@ size_t hal_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* node
 }
 
 bool hal_device_tree_interrupt_translate(const struct hal_device_tree_consumed_node* controller, const uint32_t* cells,
-                                         size_t cell_count, uint32_t* out_local_source_id,
-                                         enum hal_interrupt_trigger*  out_trigger,
-                                         enum hal_interrupt_polarity* out_polarity) {
+		size_t cell_count, uint32_t* out_local_source_id, enum hal_interrupt_trigger* out_trigger,
+		enum hal_interrupt_polarity* out_polarity) {
 	if (controller == NULL || controller->kind != HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER ||
-	    cell_count != controller->specifier_cells)
+			cell_count != controller->specifier_cells)
 		return false;
 	if (dt_node_compatible(controller->node, "sifive,plic-1.0.0") ||
-	    dt_node_compatible(controller->node, "riscv,plic0"))
+			dt_node_compatible(controller->node, "riscv,plic0"))
 		return riscv64_plic_device_tree_interrupt(cells, cell_count, out_local_source_id, out_trigger, out_polarity);
 	if (dt_node_compatible(controller->node, "riscv,aplic"))
 		return riscv64_aplic_device_tree_interrupt(cells, cell_count, out_local_source_id, out_trigger, out_polarity);
@@ -42,9 +42,9 @@ bool hal_device_tree_interrupt_translate(const struct hal_device_tree_consumed_n
 }
 
 bool hal_device_tree_dma_translate(const struct hal_device_tree_consumed_node* controller, const uint32_t* cells,
-                                   size_t cell_count, uint32_t* out_local_source_id) {
+		size_t cell_count, uint32_t* out_local_source_id) {
 	if (controller == NULL || controller->kind != HAL_DEVICE_TREE_REFERENCE_DMA_CONTROLLER || cells == NULL ||
-	    out_local_source_id == NULL || controller->specifier_cells != 1u || cell_count != 1u)
+			out_local_source_id == NULL || controller->specifier_cells != 1u || cell_count != 1u)
 		return false;
 	*out_local_source_id = cells[0];
 	return true;

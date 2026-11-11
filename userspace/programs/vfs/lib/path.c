@@ -1,9 +1,10 @@
-#include <runtime/filesystem.h>
-#include <runtime/vfs.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <runtime/filesystem.h>
+#include <runtime/vfs.h>
 
 static bool component_valid(const uint8_t* component, size_t size) {
 	if (size == 0u || size > FILESYSTEM_NAME_MAX) return false;
@@ -14,7 +15,7 @@ static bool component_valid(const uint8_t* component, size_t size) {
 
 bool vfs_relative_path_valid(const void* path, size_t path_size) {
 	const uint8_t* bytes = path;
-	size_t         start = 0u;
+	size_t start = 0u;
 
 	if (path == NULL || path_size == 0u || bytes[0u] == '/' || bytes[path_size - 1u] == '/') return false;
 	for (size_t index = 0u; index < path_size; index++) {
@@ -32,17 +33,17 @@ static void remove_component(uint8_t* path, size_t* size) {
 }
 
 bool vfs_resolve_directory_path(const void* directory, size_t directory_size, const void* relative,
-                                size_t relative_size, void* output, size_t output_capacity, size_t* out_size) {
-	const uint8_t* base  = directory;
+		size_t relative_size, void* output, size_t output_capacity, size_t* out_size) {
+	const uint8_t* base = directory;
 	const uint8_t* input = relative;
-	uint8_t*       path  = output;
-	size_t         size;
-	size_t         offset = 0u;
+	uint8_t* path = output;
+	size_t size;
+	size_t offset = 0u;
 
 	if (directory == NULL || directory_size == 0u || base[0u] != '/' ||
-	    (directory_size != 1u && !filesystem_relative_path_valid(base + 1u, directory_size - 1u)) ||
-	    !vfs_relative_path_valid(relative, relative_size) || output == NULL || output_capacity < directory_size ||
-	    out_size == NULL)
+			(directory_size != 1u && !filesystem_relative_path_valid(base + 1u, directory_size - 1u)) ||
+			!vfs_relative_path_valid(relative, relative_size) || output == NULL || output_capacity < directory_size ||
+			out_size == NULL)
 		return false;
 	memcpy(path, base, directory_size);
 	size = directory_size;

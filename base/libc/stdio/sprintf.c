@@ -4,7 +4,7 @@
 
 int sprintf(char* restrict buffer, const char* restrict format, ...) {
 	char* out = buffer;
-	int   result;
+	int result;
 
 	if (!out) return EOF;
 

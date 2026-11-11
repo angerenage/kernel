@@ -8,8 +8,8 @@
 
 /* A decoded primary MBR partition record. */
 struct mbr_partition {
-	bool     bootable;
-	uint8_t  type;
+	bool bootable;
+	uint8_t type;
 	uint32_t first_lba;
 	uint32_t block_count;
 };
@@ -17,7 +17,7 @@ struct mbr_partition {
 /* The four primary records and whether one makes the table unsafe for legacy-MBR use. */
 struct mbr_table {
 	struct mbr_partition partitions[MBR_PARTITION_COUNT];
-	bool                 protective;
+	bool protective;
 };
 
 enum mbr_result {

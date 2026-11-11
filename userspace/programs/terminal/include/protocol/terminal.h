@@ -32,8 +32,9 @@
  * Current specification version: 1.0-beta
  */
 
-#include <base/cap.h>
 #include <stdint.h>
+
+#include <base/cap.h>
 
 /* Registry identity of the single framebuffer terminal. */
 #define TERMINAL_NAMESPACE "io"
@@ -115,7 +116,7 @@ struct terminal_get_selection_response {
 
 /* Replace the selection with one nonempty retained cell range. */
 struct terminal_set_selection_request {
-	struct terminal_request_header     header;
+	struct terminal_request_header header;
 	struct terminal_selection_position anchor;
 	struct terminal_selection_position focus;
 };
@@ -134,15 +135,15 @@ struct terminal_get_clipboard_request {
 struct terminal_get_clipboard_response {
 	uint32_t size;
 	uint32_t reserved;
-	uint8_t  text[];
+	uint8_t text[];
 };
 
 /* Replace the clipboard with the size bytes of UTF-8 text that follow. */
 struct terminal_set_clipboard_request {
 	struct terminal_request_header header;
-	uint32_t                       size;
-	uint32_t                       reserved;
-	uint8_t                        text[];
+	uint32_t size;
+	uint32_t reserved;
+	uint8_t text[];
 };
 
 /* Largest clipboard value that can be replaced atomically. */

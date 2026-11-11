@@ -1,14 +1,15 @@
 #include "controllers.h"
 
-#include <boot/info.h>
-#include <core/cpu.h>
-#include <firmware/acpi.h>
-#include <firmware/dt/device.h>
-#include <hal/paging.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <boot/info.h>
+#include <firmware/acpi.h>
+#include <firmware/dt/device.h>
+#include <hal/paging.h>
+#include <core/cpu.h>
 
 #include "avec.h"
 #include "controller.h"
@@ -26,46 +27,46 @@ size_t loongarch64_interrupt_acpi_consumed_tables(struct hal_acpi_consumed_table
 }
 
 struct acpi_madt_lio_pic {
-	uint8_t  type;
-	uint8_t  length;
-	uint8_t  version;
+	uint8_t type;
+	uint8_t length;
+	uint8_t version;
 	uint64_t address;
 	uint16_t size;
-	uint8_t  cascade[2];
+	uint8_t cascade[2];
 	uint32_t cascade_map[2];
 } __attribute__((packed));
 
 struct acpi_madt_ht_pic {
-	uint8_t  type;
-	uint8_t  length;
-	uint8_t  version;
+	uint8_t type;
+	uint8_t length;
+	uint8_t version;
 	uint64_t address;
 	uint16_t size;
-	uint8_t  cascade[8];
+	uint8_t cascade[8];
 } __attribute__((packed));
 
 struct acpi_madt_eio_pic {
-	uint8_t  type;
-	uint8_t  length;
-	uint8_t  version;
-	uint8_t  cascade;
-	uint8_t  node;
+	uint8_t type;
+	uint8_t length;
+	uint8_t version;
+	uint8_t cascade;
+	uint8_t node;
 	uint64_t node_map;
 } __attribute__((packed));
 
 struct acpi_madt_msi_pic {
-	uint8_t  type;
-	uint8_t  length;
-	uint8_t  version;
+	uint8_t type;
+	uint8_t length;
+	uint8_t version;
 	uint64_t address;
 	uint32_t first;
 	uint32_t count;
 } __attribute__((packed));
 
 struct acpi_madt_bio_pic {
-	uint8_t  type;
-	uint8_t  length;
-	uint8_t  version;
+	uint8_t type;
+	uint8_t length;
+	uint8_t version;
 	uint64_t address;
 	uint16_t size;
 	uint16_t id;
@@ -73,25 +74,25 @@ struct acpi_madt_bio_pic {
 } __attribute__((packed));
 
 struct acpi_madt_lpc_pic {
-	uint8_t  type;
-	uint8_t  length;
-	uint8_t  version;
+	uint8_t type;
+	uint8_t length;
+	uint8_t version;
 	uint64_t address;
 	uint16_t size;
-	uint8_t  cascade;
+	uint8_t cascade;
 } __attribute__((packed));
 
 struct fixed_controller fixed_controllers[LOONGARCH64_MAX_FIXED_CONTROLLERS];
-size_t                  fixed_controller_count;
-struct eiointc_state    eiointc;
-struct htvec_state      htvec;
-struct pch_msi_state    pch_msi;
-uint8_t                 lio_cascades[2];
-uint32_t                lio_cascade_maps[2];
-bool                    controllers_discovered;
-const struct cpu*       loongarch64_fixed_target;
+size_t fixed_controller_count;
+struct eiointc_state eiointc;
+struct htvec_state htvec;
+struct pch_msi_state pch_msi;
+uint8_t lio_cascades[2];
+uint32_t lio_cascade_maps[2];
+bool controllers_discovered;
+const struct cpu* loongarch64_fixed_target;
 
-static uint8_t        controller_lock;
+static uint8_t controller_lock;
 static struct dt_node eio_dt_node = DT_NODE_INVALID;
 static struct dt_node pch_dt_node = DT_NODE_INVALID;
 static struct dt_node msi_dt_node = DT_NODE_INVALID;
@@ -128,17 +129,19 @@ bool loongarch64_map_mmio(uintptr_t physical, uintptr_t size, volatile uint8_t**
 	if (out == NULL || size == 0u || physical > UINTPTR_MAX - size || !boot_address_space_get(&address_space))
 		return false;
 	uintptr_t first = physical & ~(uintptr_t)(LOONGARCH64_PAGE_SIZE - 1u);
-	uintptr_t last  = (physical + size - 1u) & ~(uintptr_t)(LOONGARCH64_PAGE_SIZE - 1u);
+	uintptr_t last = (physical + size - 1u) & ~(uintptr_t)(LOONGARCH64_PAGE_SIZE - 1u);
 	for (uintptr_t page = first;; page += LOONGARCH64_PAGE_SIZE) {
 		if (page > UINTPTR_MAX - address_space.direct_map_offset) return false;
 		uintptr_t virtual_page = page + address_space.direct_map_offset;
 		if (!hal_paging_query(hal_paging_kernel_space(), virtual_page, NULL) &&
-		    !hal_paging_map(hal_paging_kernel_space(),
-		                    &(const struct hal_paging_map_request){virtual_page,
-		                                                           page,
-		                                                           LOONGARCH64_PAGE_SIZE,
-		                                                           HAL_PAGE_READ | HAL_PAGE_WRITE | HAL_PAGE_GLOBAL,
-		                                                           MEMORY_TYPE_DEVICE}))
+				!hal_paging_map(hal_paging_kernel_space(),
+						&(const struct hal_paging_map_request){
+							virtual_page,
+							page,
+							LOONGARCH64_PAGE_SIZE,
+							HAL_PAGE_READ | HAL_PAGE_WRITE | HAL_PAGE_GLOBAL,
+							MEMORY_TYPE_DEVICE
+						}))
 			return false;
 		if (page == last) break;
 	}
@@ -148,19 +151,21 @@ bool loongarch64_map_mmio(uintptr_t physical, uintptr_t size, volatile uint8_t**
 }
 
 static bool add_fixed(enum fixed_kind kind, uint32_t domain, uintptr_t address, uintptr_t size, uint32_t source_count,
-                      uint32_t vector_base, uint32_t cascade) {
+		uint32_t vector_base, uint32_t cascade) {
 	if (address == 0u || size == 0u || source_count == 0u ||
-	    fixed_controller_count == LOONGARCH64_MAX_FIXED_CONTROLLERS)
+			fixed_controller_count == LOONGARCH64_MAX_FIXED_CONTROLLERS)
 		return false;
 	for (size_t index = 0u; index < fixed_controller_count; index++)
 		if (fixed_controllers[index].domain == domain) return false;
-	fixed_controllers[fixed_controller_count++] = (struct fixed_controller){.kind          = kind,
-	                                                                        .domain        = domain,
-	                                                                        .source_count  = source_count,
-	                                                                        .vector_base   = vector_base,
-	                                                                        .cascade       = cascade,
-	                                                                        .physical_base = address,
-	                                                                        .size          = size};
+	fixed_controllers[fixed_controller_count++] = (struct fixed_controller){
+		.kind = kind,
+		.domain = domain,
+		.source_count = source_count,
+		.vector_base = vector_base,
+		.cascade = cascade,
+		.physical_base = address,
+		.size = size
+	};
 	return true;
 }
 
@@ -172,10 +177,10 @@ struct fixed_controller* loongarch64_fixed_by_domain(uint32_t domain) {
 
 static bool dt_u32_property(struct dt_node node, const char* name, uint32_t* out) {
 	struct dt_property property;
-	uint64_t           value;
+	uint64_t value;
 
 	if (out == NULL || !dt_node_property(node, name, &property) || property.size != 4u ||
-	    !dt_property_read_cells(&property, 0u, 1u, &value))
+			!dt_property_read_cells(&property, 0u, 1u, &value))
 		return false;
 	*out = (uint32_t)value;
 	return true;
@@ -183,7 +188,7 @@ static bool dt_u32_property(struct dt_node node, const char* name, uint32_t* out
 
 static bool discover_fdt(void) {
 	struct dt_node eio_node;
-	struct dt_reg  eio_reg;
+	struct dt_reg eio_reg;
 	eio_node = dt_device_at("loongson,ls2k2000-eiointc", 0u);
 	if (!dt_node_valid(eio_node)) {
 		eio_node = dt_device_at("loongson,ls2k0500-eiointc", 0u);
@@ -194,65 +199,64 @@ static bool discover_fdt(void) {
 	if (!dt_node_reg(eio_node, 0u, &eio_reg) || eio_reg.address == 0u || eio_reg.address > UINTPTR_MAX) return false;
 	uint32_t cascade;
 	if (!dt_u32_property(eio_node, "interrupts", &cascade) || cascade < LOONGARCH64_CPU_HWI_BASE ||
-	    cascade >= LOONGARCH64_CPU_HWI_LIMIT)
+			cascade >= LOONGARCH64_CPU_HWI_LIMIT)
 		return false;
-	eiointc.cascade   = cascade;
-	eiointc.node_map  = UINT64_MAX;
+	eiointc.cascade = cascade;
+	eiointc.node_map = UINT64_MAX;
 	eiointc.described = true;
-	eio_dt_node       = eio_node;
+	eio_dt_node = eio_node;
 
 	struct dt_node pch_node = dt_device_at("loongson,pch-pic-1.0", 0u);
-	struct dt_reg  pch_reg;
-	uint32_t       vector_base;
+	struct dt_reg pch_reg;
+	uint32_t vector_base;
 	if (dt_device_count("loongson,pch-pic-1.0") == 1u && dt_node_reg(pch_node, 0u, &pch_reg) &&
-	    pch_reg.address <= UINTPTR_MAX && pch_reg.size <= UINTPTR_MAX &&
-	    dt_u32_property(pch_node, "loongson,pic-base-vec", &vector_base))
+			pch_reg.address <= UINTPTR_MAX && pch_reg.size <= UINTPTR_MAX &&
+			dt_u32_property(pch_node, "loongson,pic-base-vec", &vector_base))
 		if (add_fixed(FIXED_PCH_PIC,
-		              LOONGARCH64_DOMAIN_PCH_PIC_BASE,
-		              (uintptr_t)pch_reg.address,
-		              (uintptr_t)pch_reg.size,
-		              PCH_PIC_SOURCE_COUNT,
-		              vector_base,
-		              UINT32_MAX))
+					LOONGARCH64_DOMAIN_PCH_PIC_BASE,
+					(uintptr_t)pch_reg.address,
+					(uintptr_t)pch_reg.size,
+					PCH_PIC_SOURCE_COUNT,
+					vector_base,
+					UINT32_MAX))
 			pch_dt_node = pch_node;
 
 	struct dt_node msi_node = dt_device_at("loongson,pch-msi-1.0", 0u);
-	struct dt_reg  msi_reg;
-	uint32_t       msi_first;
-	uint32_t       msi_count;
+	struct dt_reg msi_reg;
+	uint32_t msi_first;
+	uint32_t msi_count;
 	if (dt_device_count("loongson,pch-msi-1.0") == 1u && dt_node_reg(msi_node, 0u, &msi_reg) &&
-	    msi_reg.address <= UINTPTR_MAX && dt_u32_property(msi_node, "loongson,msi-base-vec", &msi_first) &&
-	    dt_u32_property(msi_node, "loongson,msi-num-vecs", &msi_count) && msi_count != 0u &&
-	    msi_first < eiointc.vector_count && msi_count <= eiointc.vector_count - msi_first) {
-		pch_msi.address   = (uintptr_t)msi_reg.address;
-		pch_msi.first     = msi_first;
-		pch_msi.count     = msi_count;
+			msi_reg.address <= UINTPTR_MAX && dt_u32_property(msi_node, "loongson,msi-base-vec", &msi_first) &&
+			dt_u32_property(msi_node, "loongson,msi-num-vecs", &msi_count) && msi_count != 0u &&
+			msi_first < eiointc.vector_count && msi_count <= eiointc.vector_count - msi_first) {
+		pch_msi.address = (uintptr_t)msi_reg.address;
+		pch_msi.first = msi_first;
+		pch_msi.count = msi_count;
 		pch_msi.described = true;
-		msi_dt_node       = msi_node;
+		msi_dt_node = msi_node;
 	}
 	return true;
 }
 
 bool loongarch64_device_tree_interrupt(const uint32_t* cells, size_t cell_count, uint32_t* out_local_source_id,
-                                       enum hal_interrupt_trigger*  out_trigger,
-                                       enum hal_interrupt_polarity* out_polarity) {
+		enum hal_interrupt_trigger* out_trigger, enum hal_interrupt_polarity* out_polarity) {
 	if (cells == NULL || cell_count != 2u || out_local_source_id == NULL || out_trigger == NULL || out_polarity == NULL)
 		return false;
 	switch (cells[1]) {
 	case 1u:
-		*out_trigger  = HAL_INTERRUPT_TRIGGER_EDGE;
+		*out_trigger = HAL_INTERRUPT_TRIGGER_EDGE;
 		*out_polarity = HAL_INTERRUPT_POLARITY_HIGH;
 		break;
 	case 2u:
-		*out_trigger  = HAL_INTERRUPT_TRIGGER_EDGE;
+		*out_trigger = HAL_INTERRUPT_TRIGGER_EDGE;
 		*out_polarity = HAL_INTERRUPT_POLARITY_LOW;
 		break;
 	case 4u:
-		*out_trigger  = HAL_INTERRUPT_TRIGGER_LEVEL;
+		*out_trigger = HAL_INTERRUPT_TRIGGER_LEVEL;
 		*out_polarity = HAL_INTERRUPT_POLARITY_HIGH;
 		break;
 	case 8u:
-		*out_trigger  = HAL_INTERRUPT_TRIGGER_LEVEL;
+		*out_trigger = HAL_INTERRUPT_TRIGGER_LEVEL;
 		*out_polarity = HAL_INTERRUPT_POLARITY_LOW;
 		break;
 	default:
@@ -269,7 +273,8 @@ size_t loongarch64_device_tree_consumed_nodes(struct hal_device_tree_consumed_no
 	if (dt_node_valid(eio_dt_node)) {
 		if (nodes != NULL && count < capacity) {
 			nodes[count] = (struct hal_device_tree_consumed_node){
-				.node = eio_dt_node, .kind = HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED, .value = 0u};
+				.node = eio_dt_node, .kind = HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED, .value = 0u
+			};
 		}
 		count++;
 	}
@@ -279,9 +284,9 @@ size_t loongarch64_device_tree_consumed_nodes(struct hal_device_tree_consumed_no
 		if (!dt_node_reg(pch_dt_node, 0u, &reg)) return count;
 		if (nodes != NULL && count < capacity) {
 			nodes[count] = (struct hal_device_tree_consumed_node){
-				.node            = pch_dt_node,
-				.kind            = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER,
-				.value           = reg.address,
+				.node = pch_dt_node,
+				.kind = HAL_DEVICE_TREE_REFERENCE_INTERRUPT_CONTROLLER,
+				.value = reg.address,
 				.specifier_cells = 2u,
 			};
 		}
@@ -290,7 +295,8 @@ size_t loongarch64_device_tree_consumed_nodes(struct hal_device_tree_consumed_no
 	if (dt_node_valid(msi_dt_node)) {
 		if (nodes != NULL && count < capacity) {
 			nodes[count] = (struct hal_device_tree_consumed_node){
-				.node = msi_dt_node, .kind = HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED, .value = 0u};
+				.node = msi_dt_node, .kind = HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED, .value = 0u
+			};
 		}
 		count++;
 	}
@@ -300,11 +306,11 @@ size_t loongarch64_device_tree_consumed_nodes(struct hal_device_tree_consumed_no
 static bool discover_acpi(void) {
 	const struct acpi_sdt_header* madt = acpi_table_next("APIC", NULL);
 	if (madt == NULL || madt->length < sizeof(*madt) + 8u) return false;
-	const uint8_t* entry     = (const uint8_t*)madt + sizeof(*madt) + 8u;
-	const uint8_t* end       = (const uint8_t*)madt + madt->length;
-	uint32_t       pch_index = 0u;
+	const uint8_t* entry = (const uint8_t*)madt + sizeof(*madt) + 8u;
+	const uint8_t* end = (const uint8_t*)madt + madt->length;
+	uint32_t pch_index = 0u;
 	while ((size_t)(end - entry) >= 2u) {
-		uint8_t type   = entry[0];
+		uint8_t type = entry[0];
 		uint8_t length = entry[1];
 		if (length < 2u || length > (size_t)(end - entry)) return false;
 		if (type == 18u && length >= sizeof(struct acpi_madt_lio_pic)) {
@@ -313,19 +319,19 @@ static bool discover_acpi(void) {
 				memcpy(lio_cascades, lio->cascade, sizeof(lio_cascades));
 				memcpy(lio_cascade_maps, lio->cascade_map, sizeof(lio_cascade_maps));
 				(void)add_fixed(FIXED_LIOINTC,
-				                LOONGARCH64_DOMAIN_LIOINTC,
-				                (uintptr_t)lio->address,
-				                lio->size,
-				                LIOINTC_SOURCE_COUNT,
-				                0u,
-				                lio->cascade[0]);
+						LOONGARCH64_DOMAIN_LIOINTC,
+						(uintptr_t)lio->address,
+						lio->size,
+						LIOINTC_SOURCE_COUNT,
+						0u,
+						lio->cascade[0]);
 			}
 		}
 		else if (type == 19u && length >= sizeof(struct acpi_madt_ht_pic)) {
 			const struct acpi_madt_ht_pic* ht = (const struct acpi_madt_ht_pic*)entry;
 			if (ht->version == 1u && ht->address <= UINTPTR_MAX && ht->size != 0u) {
 				htvec.physical_base = (uintptr_t)ht->address;
-				htvec.size          = ht->size;
+				htvec.size = ht->size;
 				memcpy(htvec.cascades, ht->cascade, sizeof(htvec.cascades));
 				htvec.described = true;
 			}
@@ -333,42 +339,45 @@ static bool discover_acpi(void) {
 		else if (type == 20u && length >= sizeof(struct acpi_madt_eio_pic)) {
 			const struct acpi_madt_eio_pic* eio = (const struct acpi_madt_eio_pic*)entry;
 			if (eio->version == 1u && eio->cascade >= LOONGARCH64_CPU_HWI_BASE &&
-			    eio->cascade < LOONGARCH64_CPU_HWI_LIMIT)
-				eiointc = (struct eiointc_state){.cascade      = eio->cascade,
-				                                 .vector_count = EIOINTC_VECTOR_COUNT,
-				                                 .node         = eio->node,
-				                                 .node_map     = eio->node_map,
-				                                 .described    = true};
+					eio->cascade < LOONGARCH64_CPU_HWI_LIMIT)
+				eiointc = (struct eiointc_state){
+					.cascade = eio->cascade,
+					.vector_count = EIOINTC_VECTOR_COUNT,
+					.node = eio->node,
+					.node_map = eio->node_map,
+					.described = true
+				};
 		}
 		else if (type == 21u && length >= sizeof(struct acpi_madt_msi_pic)) {
 			const struct acpi_madt_msi_pic* msi = (const struct acpi_madt_msi_pic*)entry;
 			if (msi->version == 1u && msi->address != 0u && msi->count != 0u && msi->first < EIOINTC_VECTOR_COUNT &&
-			    msi->count <= EIOINTC_VECTOR_COUNT - msi->first)
+					msi->count <= EIOINTC_VECTOR_COUNT - msi->first)
 				pch_msi = (struct pch_msi_state){
-					.address = msi->address, .first = msi->first, .count = msi->count, .described = true};
+					.address = msi->address, .first = msi->first, .count = msi->count, .described = true
+				};
 		}
 		else if (type == 22u && length >= sizeof(struct acpi_madt_bio_pic) && pch_index < LOONGARCH64_MAX_PCH_PICS) {
 			const struct acpi_madt_bio_pic* pch = (const struct acpi_madt_bio_pic*)entry;
 			if (pch->version == 1u && pch->address <= UINTPTR_MAX &&
-			    add_fixed(FIXED_PCH_PIC,
-			              LOONGARCH64_DOMAIN_PCH_PIC_BASE + pch_index,
-			              (uintptr_t)pch->address,
-			              pch->size,
-			              PCH_PIC_SOURCE_COUNT,
-			              0u,
-			              UINT32_MAX))
+					add_fixed(FIXED_PCH_PIC,
+							LOONGARCH64_DOMAIN_PCH_PIC_BASE + pch_index,
+							(uintptr_t)pch->address,
+							pch->size,
+							PCH_PIC_SOURCE_COUNT,
+							0u,
+							UINT32_MAX))
 				pch_index++;
 		}
 		else if (type == 23u && length >= sizeof(struct acpi_madt_lpc_pic)) {
 			const struct acpi_madt_lpc_pic* lpc = (const struct acpi_madt_lpc_pic*)entry;
 			if (lpc->version == 1u && lpc->address <= UINTPTR_MAX)
 				(void)add_fixed(FIXED_PCH_LPC,
-				                LOONGARCH64_DOMAIN_PCH_LPC,
-				                (uintptr_t)lpc->address,
-				                lpc->size,
-				                LPC_SOURCE_COUNT,
-				                0u,
-				                lpc->cascade);
+						LOONGARCH64_DOMAIN_PCH_LPC,
+						(uintptr_t)lpc->address,
+						lpc->size,
+						LPC_SOURCE_COUNT,
+						0u,
+						lpc->cascade);
 		}
 		entry += length;
 	}
@@ -406,8 +415,8 @@ bool loongarch64_interrupt_source_domain_at(size_t index, struct hal_interrupt_s
 	return controllers_discovered && loongarch64_fixed_source_domain_at(index, out_domain);
 }
 
-bool loongarch64_interrupt_source_resolve(uint64_t controller_address, uint32_t local_source_id,
-                                          struct hal_interrupt_source* out_source) {
+bool loongarch64_interrupt_source_resolve(
+		uint64_t controller_address, uint32_t local_source_id, struct hal_interrupt_source* out_source) {
 	return controllers_discovered && loongarch64_fixed_source_resolve(controller_address, local_source_id, out_source);
 }
 
@@ -416,24 +425,22 @@ bool loongarch64_interrupt_source_claimable(const struct hal_interrupt_source* s
 }
 
 bool loongarch64_interrupt_source_configuration_supported(const struct hal_interrupt_source* source,
-                                                          enum hal_interrupt_trigger         trigger,
-                                                          enum hal_interrupt_polarity        polarity) {
+		enum hal_interrupt_trigger trigger, enum hal_interrupt_polarity polarity) {
 	return controllers_discovered && loongarch64_fixed_source_configuration_supported(source, trigger, polarity);
 }
 
-bool loongarch64_interrupt_source_info(const struct hal_interrupt_source* source,
-                                       struct hal_interrupt_source_info*  out_info) {
+bool loongarch64_interrupt_source_info(
+		const struct hal_interrupt_source* source, struct hal_interrupt_source_info* out_info) {
 	return controllers_discovered && loongarch64_fixed_source_info(source, out_info);
 }
 
-bool loongarch64_interrupt_source_target_supported(const struct hal_interrupt_source* source,
-                                                   const struct cpu*                  target) {
+bool loongarch64_interrupt_source_target_supported(
+		const struct hal_interrupt_source* source, const struct cpu* target) {
 	return controllers_discovered && loongarch64_fixed_source_target_supported(source, target);
 }
 
-bool loongarch64_interrupt_source_init(struct hal_interrupt_source_state*   state,
-                                       const struct hal_interrupt_source*   source,
-                                       const struct hal_interrupt_delivery* delivery) {
+bool loongarch64_interrupt_source_init(struct hal_interrupt_source_state* state,
+		const struct hal_interrupt_source* source, const struct hal_interrupt_delivery* delivery) {
 	return controllers_discovered && loongarch64_fixed_source_init(state, source, delivery);
 }
 
@@ -460,8 +467,8 @@ bool loongarch64_interrupt_message_range_at(size_t index, struct hal_interrupt_m
 	                                    : loongarch64_pch_msi_range_at(index, out_range);
 }
 
-bool loongarch64_interrupt_message_target_supported(uint32_t domain, const struct hal_interrupt_message_source* source,
-                                                    const struct cpu* target) {
+bool loongarch64_interrupt_message_target_supported(
+		uint32_t domain, const struct hal_interrupt_message_source* source, const struct cpu* target) {
 	if (!controllers_discovered) return false;
 	if (domain == LOONGARCH64_MESSAGE_DOMAIN_AVEC) return loongarch64_avec_target_supported(domain, source, target);
 	if (domain == LOONGARCH64_MESSAGE_DOMAIN_REDIRECT)
@@ -470,9 +477,8 @@ bool loongarch64_interrupt_message_target_supported(uint32_t domain, const struc
 	return loongarch64_pch_msi_target_supported(domain, source, target);
 }
 
-bool loongarch64_interrupt_message_init(struct hal_interrupt_message_state*         state,
-                                        const struct hal_interrupt_message_request* request,
-                                        struct hal_interrupt_message*               out_message) {
+bool loongarch64_interrupt_message_init(struct hal_interrupt_message_state* state,
+		const struct hal_interrupt_message_request* request, struct hal_interrupt_message* out_message) {
 	if (!controllers_discovered || request == NULL) return false;
 	if (request->domain == LOONGARCH64_MESSAGE_DOMAIN_AVEC) return loongarch64_avec_init(state, request, out_message);
 	if (request->domain == LOONGARCH64_MESSAGE_DOMAIN_REDIRECT)

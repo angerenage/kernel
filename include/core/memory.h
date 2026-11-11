@@ -1,9 +1,10 @@
 #pragma once
 
-#include <base/memory.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/memory.h>
 
 struct memory;
 
@@ -15,27 +16,27 @@ enum memory_span_kind {
 /* One present physical run or sparse hole within a memory view. */
 struct memory_span {
 	enum memory_span_kind kind;
-	size_t                offset;
-	size_t                size;
-	uintptr_t             physical_address;
+	size_t offset;
+	size_t size;
+	uintptr_t physical_address;
 };
 
 /* Parameters for creating one fixed physical memory root. */
 struct memory_physical_request {
-	uintptr_t        physical_address;
-	size_t           size;
+	uintptr_t physical_address;
+	size_t size;
 	enum memory_type memory_type;
-	bool             external_cpu_accessible;
+	bool external_cpu_accessible;
 };
 
 /* Physical placement policy for materializing an anonymous memory range. */
 struct memory_materialize_request {
-	size_t    offset;
-	size_t    size;
-	size_t    alignment;
+	size_t offset;
+	size_t size;
+	size_t alignment;
 	uintptr_t minimum_address;
 	uintptr_t maximum_address;
-	bool      require_contiguous;
+	bool require_contiguous;
 };
 
 /* Create one sparse anonymous memory with an exact logical byte size. */

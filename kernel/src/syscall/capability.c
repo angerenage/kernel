@@ -1,5 +1,10 @@
 #include "capability.h"
 
+#include <libc/stdlib.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <string.h>
+
 #include <base/cap.h>
 #include <base/channel.h>
 #include <core/address_space.h>
@@ -14,19 +19,15 @@
 #include <core/syscall.h>
 #include <core/thread.h>
 #include <kernel/trace.h>
-#include <libc/stdlib.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <string.h>
 
 #define TRACE_CAP_CALL_PHASE(phase, type)                                                                              \
 	kernel_trace_emit(KERNEL_TRACE_EVENT_CAP_CALL_PHASE, type, kernel_trace_thread_id(sched_current_thread()), phase)
 
 #define TRACE_CAP_CALL_HANDLER(handler, type)                                                                          \
 	kernel_trace_emit(KERNEL_TRACE_EVENT_CAP_CALL_HANDLER,                                                             \
-	                  type,                                                                                            \
-	                  kernel_trace_thread_id(sched_current_thread()),                                                  \
-	                  (uint64_t)(uintptr_t)(handler))
+			type,                                                                                                      \
+			kernel_trace_thread_id(sched_current_thread()),                                                            \
+			(uint64_t)(uintptr_t)(handler))
 
 static syscall_result_t syscall_cap_result_to_syscall(enum cap_result result, uintptr_t arg_index) {
 	switch (result) {
@@ -46,18 +47,18 @@ static syscall_result_t syscall_cap_result_to_syscall(enum cap_result result, ui
 	}
 }
 
-syscall_result_t syscall_cap_create(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                    uintptr_t arg5) {
-	struct process*  process;
-	struct channel*  endpoint;
-	cap_object_id_t  cap_object_id;
-	process_id_t     caller_pid;
-	process_id_t     target;
-	uint64_t         object_id;
-	cap_rights_t     rights;
-	cap_id_t         cap_id;
+syscall_result_t syscall_cap_create(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
+	struct process* process;
+	struct channel* endpoint;
+	cap_object_id_t cap_object_id;
+	process_id_t caller_pid;
+	process_id_t target;
+	uint64_t object_id;
+	cap_rights_t rights;
+	cap_id_t cap_id;
 	syscall_result_t copy_result;
-	bool             object_created;
+	bool object_created;
 
 	(void)arg5;
 
@@ -65,11 +66,11 @@ syscall_result_t syscall_cap_create(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 
 	caller_pid = process_pid(process);
-	target     = (process_id_t)arg1;
+	target = (process_id_t)arg1;
 	if (target == PROCESS_PID_INVALID) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 1u);
 
 	object_id = (uint64_t)arg2;
-	rights    = (cap_rights_t)arg3;
+	rights = (cap_rights_t)arg3;
 
 	if (arg0 == CHANNEL_ID_INVALID) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	endpoint = channel_acquire((channel_id_t)arg0);
@@ -107,19 +108,19 @@ syscall_result_t syscall_cap_create(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 	return syscall_result_ok((uintptr_t)cap_id);
 }
 
-syscall_result_t syscall_cap_delegate(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                      uintptr_t arg5) {
-	struct process*    process;
+syscall_result_t syscall_cap_delegate(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
+	struct process* process;
 	struct capability* source;
-	process_id_t       caller_pid;
-	process_id_t       target;
-	cap_rights_t       rights;
-	cap_rights_t       source_rights;
-	cap_id_t           cap_id;
-	enum cap_result    auth_result;
-	enum cap_result    valid_result;
-	syscall_result_t   copy_result;
-	bool               peer;
+	process_id_t caller_pid;
+	process_id_t target;
+	cap_rights_t rights;
+	cap_rights_t source_rights;
+	cap_id_t cap_id;
+	enum cap_result auth_result;
+	enum cap_result valid_result;
+	syscall_result_t copy_result;
+	bool peer;
 
 	(void)arg5;
 
@@ -186,20 +187,20 @@ syscall_result_t syscall_cap_delegate(uintptr_t arg0, uintptr_t arg1, uintptr_t 
 	return syscall_result_ok((uintptr_t)cap_id);
 }
 
-syscall_result_t syscall_cap_derive(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                    uintptr_t arg5) {
-	struct process*    process;
+syscall_result_t syscall_cap_derive(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
+	struct process* process;
 	struct capability* base;
-	cap_object_id_t    derived_object_id;
-	process_id_t       caller_pid;
-	process_id_t       target;
-	uint64_t           object_id;
-	cap_rights_t       rights;
-	cap_id_t           cap_id;
-	enum cap_result    auth_result;
-	enum cap_result    valid_result;
-	syscall_result_t   copy_result;
-	bool               object_created;
+	cap_object_id_t derived_object_id;
+	process_id_t caller_pid;
+	process_id_t target;
+	uint64_t object_id;
+	cap_rights_t rights;
+	cap_id_t cap_id;
+	enum cap_result auth_result;
+	enum cap_result valid_result;
+	syscall_result_t copy_result;
+	bool object_created;
 
 	(void)arg5;
 
@@ -219,7 +220,7 @@ syscall_result_t syscall_cap_derive(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 	}
 
 	object_id = (uint64_t)arg2;
-	rights    = (cap_rights_t)arg3;
+	rights = (cap_rights_t)arg3;
 
 	auth_result = cap_is_authorized(caller_pid, base);
 	if (auth_result != CAP_OK) {
@@ -281,7 +282,7 @@ syscall_result_t syscall_cap_derive(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 }
 
 static syscall_result_t syscall_cap_validate_response_buffer(uintptr_t response, size_t response_capacity) {
-	struct address_space*        space;
+	struct address_space* space;
 	enum address_transfer_result transfer_result;
 
 	if (response_capacity == 0u) return syscall_result_ok(0u);
@@ -289,27 +290,29 @@ static syscall_result_t syscall_cap_validate_response_buffer(uintptr_t response,
 	space = syscall_current_user_space();
 	if (space == NULL) return syscall_result_ok(0u);
 
-	transfer_result = address_space_validate_range(
-		space, response, response_capacity, ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
+	transfer_result = address_space_validate_range(space,
+			response,
+			response_capacity,
+			ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN);
 	return syscall_result_from_address_transfer(transfer_result, 3u);
 }
 
-syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                  uintptr_t arg5) {
-	struct process*    process;
+syscall_result_t syscall_cap_call(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
+	struct process* process;
 	struct capability* cap;
-	process_id_t       caller_pid;
-	size_t             request_size;
-	size_t             response_capacity;
-	enum cap_result    begin_result;
+	process_id_t caller_pid;
+	size_t request_size;
+	size_t response_capacity;
+	enum cap_result begin_result;
 	struct cap_object* object;
-	struct channel*    endpoint;
+	struct channel* endpoint;
 	struct cap_request req;
-	void*              kernel_request;
-	void*              kernel_response;
-	syscall_result_t   call_result;
-	cap_rights_t       granted_rights;
-	bool               completed;
+	void* kernel_request;
+	void* kernel_response;
+	syscall_result_t call_result;
+	cap_rights_t granted_rights;
+	bool completed;
 
 	(void)arg5;
 
@@ -324,7 +327,7 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_CAP_ACQUIRE, KERNEL_TRACE_RECORD_END);
 	if (cap == NULL) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 
-	request_size      = (size_t)arg2;
+	request_size = (size_t)arg2;
 	response_capacity = (size_t)arg4;
 	if ((uintptr_t)request_size != arg2 || request_size == 0u || request_size > CAP_MAX_REQUEST_SIZE) {
 		cap_release(cap);
@@ -393,14 +396,14 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 			return syscall_result_error(SYSCALL_STATUS_FAILED, 4u);
 		}
 
-		req.call_id           = CAP_CALL_ID_INVALID;
-		req.caller            = caller_pid;
-		req.cap_id            = cap->cap_id;
-		req.object_id         = object->object_id;
-		req.rights            = granted_rights;
-		req.request           = kernel_request;
-		req.request_size      = request_size;
-		req.response          = kernel_response;
+		req.call_id = CAP_CALL_ID_INVALID;
+		req.caller = caller_pid;
+		req.cap_id = cap->cap_id;
+		req.object_id = object->object_id;
+		req.rights = granted_rights;
+		req.request = kernel_request;
+		req.request_size = request_size;
+		req.response = kernel_response;
 		req.response_capacity = response_capacity;
 
 		TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_KERNEL_HANDLER, KERNEL_TRACE_RECORD_BEGIN);
@@ -418,7 +421,7 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 		if (call_result.status == SYSCALL_STATUS_OK && call_result.value != 0u) {
 			TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_KERNEL_RESPONSE_COPY, KERNEL_TRACE_RECORD_BEGIN);
 			syscall_result_t copy_result = syscall_copy_to_user(
-				syscall_current_user_space(), arg3, kernel_response, (size_t)call_result.value, 3u);
+					syscall_current_user_space(), arg3, kernel_response, (size_t)call_result.value, 3u);
 			TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_KERNEL_RESPONSE_COPY, KERNEL_TRACE_RECORD_END);
 			if (copy_result.status != SYSCALL_STATUS_OK) call_result = copy_result;
 		}
@@ -437,18 +440,18 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 		return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 	}
 	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_ENDPOINT_RETAIN, KERNEL_TRACE_RECORD_END);
-	req.call_id           = CAP_CALL_ID_INVALID;
-	req.caller            = caller_pid;
-	req.cap_id            = cap->cap_id;
-	req.object_id         = object->object_id;
-	req.rights            = granted_rights;
-	req.request           = kernel_request;
-	req.request_size      = request_size;
-	req.response          = NULL;
+	req.call_id = CAP_CALL_ID_INVALID;
+	req.caller = caller_pid;
+	req.cap_id = cap->cap_id;
+	req.object_id = object->object_id;
+	req.rights = granted_rights;
+	req.request = kernel_request;
+	req.request_size = request_size;
+	req.response = NULL;
 	req.response_capacity = response_capacity;
 	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_PENDING_CREATE, KERNEL_TRACE_RECORD_BEGIN);
 	struct cap_pending_call* pending =
-		cap_pending_call_create(object, endpoint->id, endpoint->owner_pid, caller_pid, response_capacity);
+			cap_pending_call_create(object, endpoint->id, endpoint->owner_pid, caller_pid, response_capacity);
 	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_PENDING_CREATE, KERNEL_TRACE_RECORD_END);
 	if (pending == NULL) {
 		channel_release(endpoint);
@@ -458,7 +461,7 @@ syscall_result_t syscall_cap_call(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 		return syscall_result_error(SYSCALL_STATUS_FAILED, 0u);
 	}
 	pending->response_address = arg3;
-	req.call_id               = cap_pending_call_id(pending);
+	req.call_id = cap_pending_call_id(pending);
 	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_REQUEST_ATTACH, KERNEL_TRACE_RECORD_BEGIN);
 	if (!cap_pending_call_attach_request(pending, kernel_request, request_size)) {
 		TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_REQUEST_ATTACH, KERNEL_TRACE_RECORD_END);
@@ -515,9 +518,8 @@ static bool cap_reply_status_is_valid(syscall_status_t status) {
 }
 
 static syscall_status_t syscall_cap_reply_deliver(const struct cap_pending_reply* reply,
-                                                  struct address_space* provider_space, uintptr_t response,
-                                                  size_t response_size) {
-	struct process*              caller;
+		struct address_space* provider_space, uintptr_t response, size_t response_size) {
+	struct process* caller;
 	enum address_transfer_result transfer_result;
 
 	if (reply == NULL || reply->call == NULL) return SYSCALL_STATUS_FAILED;
@@ -530,26 +532,26 @@ static syscall_status_t syscall_cap_reply_deliver(const struct cap_pending_reply
 
 	if (provider_space == NULL) {
 		transfer_result = address_space_copy_to(
-			process_address_space(caller), reply->call->response_address, (const void*)response, response_size);
+				process_address_space(caller), reply->call->response_address, (const void*)response, response_size);
 	}
 	else {
 		transfer_result = address_space_copy_between(
-			process_address_space(caller), reply->call->response_address, provider_space, response, response_size);
+				process_address_space(caller), reply->call->response_address, provider_space, response, response_size);
 	}
 	process_release(caller);
 	return transfer_result == ADDRESS_TRANSFER_OK ? SYSCALL_STATUS_OK : SYSCALL_STATUS_UNAVAILABLE;
 }
 
-syscall_result_t syscall_cap_reply(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                   uintptr_t arg5) {
-	struct process*               process;
-	struct cap_pending_reply      reply;
-	size_t                        response_size;
-	syscall_status_t              status = (syscall_status_t)arg3;
-	syscall_status_t              delivery_status;
+syscall_result_t syscall_cap_reply(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
+	struct process* process;
+	struct cap_pending_reply reply;
+	size_t response_size;
+	syscall_status_t status = (syscall_status_t)arg3;
+	syscall_status_t delivery_status;
 	enum cap_pending_reply_result prepare_result;
-	syscall_result_t              copy_result;
-	struct address_space*         provider_space;
+	syscall_result_t copy_result;
+	struct address_space* provider_space;
 
 	(void)arg4;
 	(void)arg5;
@@ -568,7 +570,7 @@ syscall_result_t syscall_cap_reply(uintptr_t arg0, uintptr_t arg1, uintptr_t arg
 	provider_space = syscall_current_user_space();
 	if (response_size != 0u && provider_space != NULL) {
 		enum address_transfer_result transfer_result = address_space_validate_range(
-			provider_space, arg1, response_size, ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER);
+				provider_space, arg1, response_size, ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER);
 		copy_result = syscall_result_from_address_transfer(transfer_result, 1u);
 		if (copy_result.status != SYSCALL_STATUS_OK) return copy_result;
 	}
@@ -597,13 +599,13 @@ syscall_result_t syscall_cap_reply(uintptr_t arg0, uintptr_t arg1, uintptr_t arg
 	return syscall_result_ok(0u);
 }
 
-syscall_result_t syscall_cap_revoke(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                    uintptr_t arg5) {
-	struct process*    process;
+syscall_result_t syscall_cap_revoke(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
+	struct process* process;
 	struct capability* cap;
-	process_id_t       caller_pid;
-	cap_rights_t       rights;
-	enum cap_result    auth_result;
+	process_id_t caller_pid;
+	cap_rights_t rights;
+	enum cap_result auth_result;
 
 	(void)arg2;
 	(void)arg3;
@@ -614,7 +616,7 @@ syscall_result_t syscall_cap_revoke(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 	if (process == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
 
 	caller_pid = process_pid(process);
-	rights     = (cap_rights_t)arg1;
+	rights = (cap_rights_t)arg1;
 
 	if (arg0 == CAP_ID_INVALID) return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	cap = cap_acquire((cap_id_t)arg0);
@@ -634,7 +636,7 @@ syscall_result_t syscall_cap_revoke(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 	}
 
 	if ((cap_rights(cap) & CAP_REVOKE) == 0u && revoke_object->endpoint != NULL &&
-	    revoke_object->endpoint->owner_pid != caller_pid) {
+			revoke_object->endpoint->owner_pid != caller_pid) {
 		cap_object_release(revoke_object);
 		if (rights == 0u && cap_revoke_direct_child(caller_pid, cap)) {
 			cap_release(cap);
@@ -662,9 +664,9 @@ syscall_result_t syscall_cap_revoke(uintptr_t arg0, uintptr_t arg1, uintptr_t ar
 	return syscall_result_ok(0u);
 }
 
-syscall_result_t syscall_cap_drop(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                  uintptr_t arg5) {
-	struct process*    process;
+syscall_result_t syscall_cap_drop(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
+	struct process* process;
 	struct capability* cap;
 
 	(void)arg1;
@@ -688,11 +690,11 @@ syscall_result_t syscall_cap_drop(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 	return syscall_result_ok(0u);
 }
 
-syscall_result_t syscall_cap_unpublish(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                       uintptr_t arg5) {
+syscall_result_t syscall_cap_unpublish(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
 	struct process* process;
 	struct channel* endpoint;
-	bool            unpublished;
+	bool unpublished;
 	(void)arg3;
 	(void)arg4;
 	(void)arg5;
@@ -713,17 +715,17 @@ syscall_result_t syscall_cap_unpublish(uintptr_t arg0, uintptr_t arg1, uintptr_t
 	return syscall_result_error(arg2 == 0u ? SYSCALL_STATUS_BAD_ARGUMENT : SYSCALL_STATUS_UNAVAILABLE, 1u);
 }
 
-syscall_result_t syscall_cap_recv(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                  uintptr_t arg5) {
-	struct process*              process;
-	struct channel*              endpoint;
-	process_id_t                 caller_pid;
-	struct cap_request           req;
-	struct cap_pending_request   pending_request = {0};
-	struct address_space*        space;
+syscall_result_t syscall_cap_recv(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
+	struct process* process;
+	struct channel* endpoint;
+	process_id_t caller_pid;
+	struct cap_request req;
+	struct cap_pending_request pending_request = {0};
+	struct address_space* space;
 	enum address_transfer_result transfer_result;
-	syscall_result_t             copy_result;
-	size_t                       buffer_size;
+	syscall_result_t copy_result;
+	size_t buffer_size;
 
 	(void)arg4;
 	(void)arg5;
@@ -754,7 +756,7 @@ syscall_result_t syscall_cap_recv(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 		}
 		if (cap_pending_call_prepare_receive(req.call_id, caller_pid, &pending_request)) break;
 	}
-	req.request      = pending_request.request;
+	req.request = pending_request.request;
 	req.request_size = pending_request.request_size;
 
 	buffer_size = (size_t)arg3;
@@ -791,14 +793,14 @@ syscall_result_t syscall_cap_recv(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 
 	{
 		struct cap_request user_req;
-		user_req.call_id           = req.call_id;
-		user_req.caller            = req.caller;
-		user_req.cap_id            = req.cap_id;
-		user_req.object_id         = req.object_id;
-		user_req.rights            = req.rights;
-		user_req.request           = (const void*)arg2;
-		user_req.request_size      = req.request_size;
-		user_req.response          = NULL;
+		user_req.call_id = req.call_id;
+		user_req.caller = req.caller;
+		user_req.cap_id = req.cap_id;
+		user_req.object_id = req.object_id;
+		user_req.rights = req.rights;
+		user_req.request = (const void*)arg2;
+		user_req.request_size = req.request_size;
+		user_req.response = NULL;
 		user_req.response_capacity = req.response_capacity;
 
 		copy_result = syscall_copy_to_user(syscall_current_user_space(), arg1, &user_req, sizeof(user_req), 1u);
@@ -815,11 +817,11 @@ syscall_result_t syscall_cap_recv(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2
 	return syscall_result_ok(1u);
 }
 
-syscall_result_t syscall_cap_valid(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4,
-                                   uintptr_t arg5) {
-	struct process*    process;
+syscall_result_t syscall_cap_valid(
+		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
+	struct process* process;
 	struct capability* cap;
-	bool               valid;
+	bool valid;
 
 	(void)arg1;
 	(void)arg2;

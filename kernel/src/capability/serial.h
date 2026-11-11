@@ -1,10 +1,11 @@
 #pragma once
 
-#include <base/cap.h>
-#include <base/process.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/cap.h>
+#include <base/process.h>
 
 /* Creates the serial object. */
 void kernel_capability_serial_init(void);

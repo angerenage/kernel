@@ -1,18 +1,19 @@
 #pragma once
 
-#include <base/memory.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
+#include <base/memory.h>
+
 struct hal_paging_space;
 
 enum hal_page_flags {
-	HAL_PAGE_READ   = 1u << 0,
-	HAL_PAGE_WRITE  = 1u << 1,
-	HAL_PAGE_EXEC   = 1u << 2,
+	HAL_PAGE_READ = 1u << 0,
+	HAL_PAGE_WRITE = 1u << 1,
+	HAL_PAGE_EXEC = 1u << 2,
 	HAL_PAGE_GLOBAL = 1u << 3,
-	HAL_PAGE_USER   = 1u << 4,
+	HAL_PAGE_USER = 1u << 4,
 };
 
 #define HAL_PAGE_VALID_MASK                                                                                            \
@@ -23,16 +24,16 @@ enum hal_page_flags {
  * minimum_leaf_size is the minimum address and size granularity accepted by the HAL.
  */
 struct hal_paging_info {
-	size_t   minimum_leaf_size;
+	size_t minimum_leaf_size;
 	uint64_t leaf_size_mask;
 };
 
 /* Parameters for mapping one contiguous physical extent. */
 struct hal_paging_map_request {
-	uintptr_t        virtual_address;
-	uintptr_t        physical_address;
-	size_t           size;
-	uint64_t         flags;
+	uintptr_t virtual_address;
+	uintptr_t physical_address;
+	size_t size;
+	uint64_t flags;
 	enum memory_type memory_type;
 };
 
@@ -40,14 +41,14 @@ struct hal_paging_map_request {
 struct hal_paging_remap_request {
 	uintptr_t virtual_address;
 	uintptr_t physical_address;
-	size_t    size;
+	size_t size;
 };
 
 /* Information about the translation containing one virtual address. */
 struct hal_paging_translation {
-	uintptr_t        physical_address;
-	size_t           leaf_size;
-	uint64_t         flags;
+	uintptr_t physical_address;
+	size_t leaf_size;
+	uint64_t flags;
 	enum memory_type memory_type;
 };
 
@@ -92,4 +93,4 @@ bool hal_paging_protect(struct hal_paging_space* space, uintptr_t virtual_addres
 
 /* Query the translation containing one virtual address. */
 bool hal_paging_query(const struct hal_paging_space* space, uintptr_t virtual_address,
-                      struct hal_paging_translation* out_translation);
+		struct hal_paging_translation* out_translation);

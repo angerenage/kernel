@@ -11,8 +11,9 @@
  * Current specification version: 1.0-beta
  */
 
-#include <base/cap.h>
 #include <stdint.h>
+
+#include <base/cap.h>
 
 /* Registry identity of the single system-wide text-input service. */
 #define TEXT_INPUT_NAMESPACE "input"
@@ -93,21 +94,21 @@ enum text_input_key_action {
 
 /* Physical modifier keys held when a logical key transition is published. */
 enum text_input_key_modifier {
-	TEXT_INPUT_KEY_MODIFIER_NONE          = 0u,
-	TEXT_INPUT_KEY_MODIFIER_LEFT_SHIFT    = 1u << 0u,
-	TEXT_INPUT_KEY_MODIFIER_RIGHT_SHIFT   = 1u << 1u,
-	TEXT_INPUT_KEY_MODIFIER_LEFT_CONTROL  = 1u << 2u,
+	TEXT_INPUT_KEY_MODIFIER_NONE = 0u,
+	TEXT_INPUT_KEY_MODIFIER_LEFT_SHIFT = 1u << 0u,
+	TEXT_INPUT_KEY_MODIFIER_RIGHT_SHIFT = 1u << 1u,
+	TEXT_INPUT_KEY_MODIFIER_LEFT_CONTROL = 1u << 2u,
 	TEXT_INPUT_KEY_MODIFIER_RIGHT_CONTROL = 1u << 3u,
-	TEXT_INPUT_KEY_MODIFIER_LEFT_ALT      = 1u << 4u,
-	TEXT_INPUT_KEY_MODIFIER_RIGHT_ALT     = 1u << 5u,
-	TEXT_INPUT_KEY_MODIFIER_LEFT_META     = 1u << 6u,
-	TEXT_INPUT_KEY_MODIFIER_RIGHT_META    = 1u << 7u,
+	TEXT_INPUT_KEY_MODIFIER_LEFT_ALT = 1u << 4u,
+	TEXT_INPUT_KEY_MODIFIER_RIGHT_ALT = 1u << 5u,
+	TEXT_INPUT_KEY_MODIFIER_LEFT_META = 1u << 6u,
+	TEXT_INPUT_KEY_MODIFIER_RIGHT_META = 1u << 7u,
 };
 
 /* Boundaries attached to one retained text-input record. */
 enum text_input_event_flags {
-	TEXT_INPUT_EVENT_FLAG_NONE      = 0u,
-	TEXT_INPUT_EVENT_FLAG_TEXT_END  = 1u << 0u,
+	TEXT_INPUT_EVENT_FLAG_NONE = 0u,
+	TEXT_INPUT_EVENT_FLAG_TEXT_END = 1u << 0u,
 	TEXT_INPUT_EVENT_FLAG_FRAME_END = 1u << 1u,
 };
 
@@ -132,25 +133,25 @@ enum text_input_event_flags {
  * implied.
  */
 struct text_input_event {
-	uint64_t                   sequence;
-	uint64_t                   frame;
-	uint64_t                   timestamp_ns;
-	uint64_t                   source_id;
-	uint64_t                   composition_id;
+	uint64_t sequence;
+	uint64_t frame;
+	uint64_t timestamp_ns;
+	uint64_t source_id;
+	uint64_t composition_id;
 	enum text_input_event_type type;
-	uint32_t                   flags;
-	uint32_t                   text_offset;
-	uint32_t                   text_size;
-	uint32_t                   text_total_size;
-	uint32_t                   selection_start;
-	uint32_t                   selection_end;
-	uint32_t                   delete_before;
-	uint32_t                   delete_after;
-	enum text_input_key_code   key;
+	uint32_t flags;
+	uint32_t text_offset;
+	uint32_t text_size;
+	uint32_t text_total_size;
+	uint32_t selection_start;
+	uint32_t selection_end;
+	uint32_t delete_before;
+	uint32_t delete_after;
+	enum text_input_key_code key;
 	enum text_input_key_action key_action;
-	uint32_t                   key_modifiers;
-	uint32_t                   reserved;
-	uint8_t                    text[TEXT_INPUT_EVENT_TEXT_CAPACITY];
+	uint32_t key_modifiers;
+	uint32_t reserved;
+	uint8_t text[TEXT_INPUT_EVENT_TEXT_CAPACITY];
 };
 
 /* Operations accepted by the system text-input capability. */
@@ -183,24 +184,24 @@ struct text_input_get_info_response {
 /* Request complete frames newer than after_sequence. */
 struct text_input_read_events_request {
 	struct text_input_request_header header;
-	uint32_t                         reserved;
-	uint64_t                         after_sequence;
-	uint64_t                         count;
+	uint32_t reserved;
+	uint64_t after_sequence;
+	uint64_t count;
 };
 
 /* Conditions reported with a successful text-event read. */
 enum text_input_read_event_flags {
 	TEXT_INPUT_READ_EVENT_FLAG_NONE = 0u,
-	TEXT_INPUT_READ_EVENT_FLAG_GAP  = 1u << 0u,
+	TEXT_INPUT_READ_EVENT_FLAG_GAP = 1u << 0u,
 };
 
 /* Complete retained frames follow this successful response header. */
 struct text_input_read_events_response {
-	uint64_t                oldest_sequence;
-	uint64_t                newest_sequence;
-	uint64_t                returned;
-	uint32_t                flags;
-	uint32_t                reserved;
+	uint64_t oldest_sequence;
+	uint64_t newest_sequence;
+	uint64_t returned;
+	uint32_t flags;
+	uint32_t reserved;
 	struct text_input_event events[];
 };
 

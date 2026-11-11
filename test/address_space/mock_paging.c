@@ -1,7 +1,8 @@
-#include <core/pmm.h>
-#include <hal/paging.h>
 #include <string.h>
 #include <test_memory.h>
+
+#include <hal/paging.h>
+#include <core/pmm.h>
 
 #include "test_support.h"
 
@@ -10,54 +11,54 @@
 
 struct hal_paging_space {
 	uintptr_t id;
-	bool      allocated;
+	bool allocated;
 };
 
 struct mock_mapping {
 	const struct hal_paging_space* space;
-	uintptr_t                      virt;
-	uintptr_t                      phys;
-	uint64_t                       flags;
-	enum memory_type               memory_type;
-	bool                           present;
+	uintptr_t virt;
+	uintptr_t phys;
+	uint64_t flags;
+	enum memory_type memory_type;
+	bool present;
 };
 
-static struct mock_mapping     mappings[MOCK_PAGING_MAX_MAPPINGS];
+static struct mock_mapping mappings[MOCK_PAGING_MAX_MAPPINGS];
 static struct hal_paging_space spaces[MOCK_PAGING_MAX_SPACES];
-static struct hal_paging_space kernel_space    = {1u, true};
-static struct hal_paging_info  paging_info     = {TEST_MAPPING_GRANULE, 1ull << 12};
-static size_t                  fail_after_maps = (size_t)-1;
-static size_t                  fail_map_budget = (size_t)-1;
-static size_t                  successful_maps;
-static size_t                  map_calls;
-static size_t                  largest_map_size;
-static bool                    initialized;
-static bool                    fail_init_once;
-static bool                    fail_next_unmap;
-static bool                    kernel_translation_available;
-static enum memory_type        kernel_translation_memory_type;
-static uintptr_t               next_space_id = 2u;
+static struct hal_paging_space kernel_space = {1u, true};
+static struct hal_paging_info paging_info = {TEST_MAPPING_GRANULE, 1ull << 12};
+static size_t fail_after_maps = (size_t)-1;
+static size_t fail_map_budget = (size_t)-1;
+static size_t successful_maps;
+static size_t map_calls;
+static size_t largest_map_size;
+static bool initialized;
+static bool fail_init_once;
+static bool fail_next_unmap;
+static bool kernel_translation_available;
+static enum memory_type kernel_translation_memory_type;
+static uintptr_t next_space_id = 2u;
 
 void mock_paging_reset(void) {
 	memset(mappings, 0, sizeof(mappings));
 	memset(spaces, 0, sizeof(spaces));
-	fail_after_maps              = (size_t)-1;
-	fail_map_budget              = (size_t)-1;
-	successful_maps              = 0u;
-	map_calls                    = 0u;
-	largest_map_size             = 0u;
-	paging_info.leaf_size_mask   = 1ull << 12;
-	initialized                  = false;
-	fail_init_once               = false;
-	fail_next_unmap              = false;
+	fail_after_maps = (size_t)-1;
+	fail_map_budget = (size_t)-1;
+	successful_maps = 0u;
+	map_calls = 0u;
+	largest_map_size = 0u;
+	paging_info.leaf_size_mask = 1ull << 12;
+	initialized = false;
+	fail_init_once = false;
+	fail_next_unmap = false;
 	kernel_translation_available = false;
-	kernel_space                 = (struct hal_paging_space){1u, true};
-	next_space_id                = 2u;
+	kernel_space = (struct hal_paging_space){1u, true};
+	next_space_id = 2u;
 }
 
 void hal_paging_mock_set_kernel_memory_type(enum memory_type memory_type) {
 	kernel_translation_memory_type = memory_type;
-	kernel_translation_available   = memory_type < MEMORY_TYPE_COUNT;
+	kernel_translation_available = memory_type < MEMORY_TYPE_COUNT;
 }
 
 void mock_paging_fail_init_once(void) {
@@ -136,7 +137,7 @@ bool hal_paging_space_create(struct hal_paging_space** out_space) {
 	*out_space = NULL;
 	for (size_t i = 0u; i < MOCK_PAGING_MAX_SPACES; i++) {
 		if (spaces[i].allocated) continue;
-		spaces[i]  = (struct hal_paging_space){next_space_id++, true};
+		spaces[i] = (struct hal_paging_space){next_space_id++, true};
 		*out_space = &spaces[i];
 		return true;
 	}
@@ -165,10 +166,11 @@ static bool mock_map_should_fail(size_t pages) {
 
 bool hal_paging_map(struct hal_paging_space* space, const struct hal_paging_map_request* request) {
 	if (space == NULL || !space->allocated || !initialized || request == NULL ||
-	    !hal_paging_mapping_supported(request->flags, request->memory_type) || request->size == 0u ||
-	    ((request->virtual_address | request->physical_address | request->size) & (TEST_MAPPING_GRANULE - 1u)) != 0u ||
-	    request->size > UINTPTR_MAX - request->virtual_address ||
-	    request->size > UINTPTR_MAX - request->physical_address)
+			!hal_paging_mapping_supported(request->flags, request->memory_type) || request->size == 0u ||
+			((request->virtual_address | request->physical_address | request->size) & (TEST_MAPPING_GRANULE - 1u)) !=
+					0u ||
+			request->size > UINTPTR_MAX - request->virtual_address ||
+			request->size > UINTPTR_MAX - request->physical_address)
 		return false;
 	size_t pages = request->size / TEST_MAPPING_GRANULE;
 	map_calls++;
@@ -180,12 +182,14 @@ bool hal_paging_map(struct hal_paging_space* space, const struct hal_paging_map_
 	for (size_t offset = 0u; offset < request->size; offset += TEST_MAPPING_GRANULE) {
 		for (size_t i = 0u; i < MOCK_PAGING_MAX_MAPPINGS; i++) {
 			if (mappings[i].present) continue;
-			mappings[i] = (struct mock_mapping){space,
-			                                    request->virtual_address + offset,
-			                                    request->physical_address + offset,
-			                                    request->flags,
-			                                    request->memory_type,
-			                                    true};
+			mappings[i] = (struct mock_mapping){
+				space,
+				request->virtual_address + offset,
+				request->physical_address + offset,
+				request->flags,
+				request->memory_type,
+				true
+			};
 			break;
 		}
 	}
@@ -195,9 +199,10 @@ bool hal_paging_map(struct hal_paging_space* space, const struct hal_paging_map_
 
 bool hal_paging_remap(struct hal_paging_space* space, const struct hal_paging_remap_request* request) {
 	if (space == NULL || !space->allocated || !initialized || request == NULL || request->size == 0u ||
-	    ((request->virtual_address | request->physical_address | request->size) & (TEST_MAPPING_GRANULE - 1u)) != 0u ||
-	    request->size > UINTPTR_MAX - request->virtual_address ||
-	    request->size > UINTPTR_MAX - request->physical_address)
+			((request->virtual_address | request->physical_address | request->size) & (TEST_MAPPING_GRANULE - 1u)) !=
+					0u ||
+			request->size > UINTPTR_MAX - request->virtual_address ||
+			request->size > UINTPTR_MAX - request->physical_address)
 		return false;
 	for (size_t offset = 0u; offset < request->size; offset += TEST_MAPPING_GRANULE)
 		if (find_mapping(space, request->virtual_address + offset) == NULL) return false;
@@ -233,23 +238,26 @@ bool hal_paging_protect(struct hal_paging_space* space, uintptr_t virt, size_t s
 	return true;
 }
 
-bool hal_paging_query(const struct hal_paging_space* space, uintptr_t virt,
-                      struct hal_paging_translation* out_translation) {
+bool hal_paging_query(
+		const struct hal_paging_space* space, uintptr_t virt, struct hal_paging_translation* out_translation) {
 	if (out_translation != NULL) *out_translation = (struct hal_paging_translation){0};
 	if (space == NULL || !space->allocated || !initialized) return false;
 	struct mock_mapping* mapping = find_mapping(space, virt);
 	if (mapping == NULL && space == &kernel_space && kernel_translation_available) {
 		if (out_translation != NULL) {
 			*out_translation = (struct hal_paging_translation){
-				virt, TEST_MAPPING_GRANULE, HAL_PAGE_READ | HAL_PAGE_WRITE, kernel_translation_memory_type};
+				virt, TEST_MAPPING_GRANULE, HAL_PAGE_READ | HAL_PAGE_WRITE, kernel_translation_memory_type
+			};
 		}
 		return true;
 	}
 	if (mapping == NULL) return false;
 	if (out_translation != NULL)
-		*out_translation = (struct hal_paging_translation){mapping->phys + (virt & (TEST_MAPPING_GRANULE - 1u)),
-		                                                   TEST_MAPPING_GRANULE,
-		                                                   mapping->flags,
-		                                                   mapping->memory_type};
+		*out_translation = (struct hal_paging_translation){
+			mapping->phys + (virt & (TEST_MAPPING_GRANULE - 1u)),
+			TEST_MAPPING_GRANULE,
+			mapping->flags,
+			mapping->memory_type
+		};
 	return true;
 }

@@ -1,9 +1,10 @@
 #pragma once
 
-#include <hal/interrupts.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <hal/interrupts.h>
 
 struct cpu;
 
@@ -26,13 +27,12 @@ bool loongarch64_avec_cpu_supported(const struct cpu* target);
 bool loongarch64_avec_range(struct hal_interrupt_message_range* out_range);
 
 /* Return whether direct AVECINTC messages can target a processor. */
-bool loongarch64_avec_target_supported(uint32_t domain, const struct hal_interrupt_message_source* source,
-                                       const struct cpu* target);
+bool loongarch64_avec_target_supported(
+		uint32_t domain, const struct hal_interrupt_message_source* source, const struct cpu* target);
 
 /* Compose one direct AVECINTC message for a core-reserved vector. */
-bool loongarch64_avec_init(struct hal_interrupt_message_state*         state,
-                           const struct hal_interrupt_message_request* request,
-                           struct hal_interrupt_message*               out_message);
+bool loongarch64_avec_init(struct hal_interrupt_message_state* state,
+		const struct hal_interrupt_message_request* request, struct hal_interrupt_message* out_message);
 
 /* Release one direct AVECINTC message delivery. */
 bool loongarch64_avec_deinit(struct hal_interrupt_message_state* state);

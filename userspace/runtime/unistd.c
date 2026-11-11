@@ -1,7 +1,8 @@
 #include <errno.h>
 #include <stdio.h>
-#include <system/display.h>
 #include <unistd.h>
+
+#include <system/display.h>
 
 ssize_t read(int descriptor, void* buffer, size_t count) {
 	if (descriptor != 0) {
@@ -13,7 +14,7 @@ ssize_t read(int descriptor, void* buffer, size_t count) {
 		return -1;
 	}
 	if (count == 0u) return 0;
-	size_t           result = 0u;
+	size_t result = 0u;
 	syscall_status_t status = display_read(buffer, count, &result);
 	if (status != SYSCALL_STATUS_OK) {
 		errno = EIO;

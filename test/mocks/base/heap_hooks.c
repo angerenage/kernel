@@ -1,7 +1,8 @@
-#include <base/heap.h>
-#include <core/pmm.h>
 #include <pthread.h>
 #include <test_memory.h>
+
+#include <base/heap.h>
+#include <core/pmm.h>
 
 static pthread_mutex_t test_heap_mutex = PTHREAD_MUTEX_INITIALIZER;
 

@@ -1,10 +1,11 @@
 #include "iommu_page_table.h"
 
+#include <string.h>
+
 #include <base/math.h>
-#include <core/mm.h>
 #include <hal/hcf.h>
 #include <hal/paging.h>
-#include <string.h>
+#include <core/mm.h>
 
 #include "paging_transaction.h"
 
@@ -23,18 +24,18 @@ void* iommu_pt_phys_to_virt(uintptr_t address) {
 bool iommu_pt_map_mmio(uintptr_t address, size_t size) {
 	const struct hal_paging_info* paging = hal_paging_info();
 	if (paging == NULL || paging->minimum_leaf_size == 0u || size == 0u) return false;
-	size_t    granule = paging->minimum_leaf_size;
-	uintptr_t start   = address & ~((uintptr_t)granule - 1u);
+	size_t granule = paging->minimum_leaf_size;
+	uintptr_t start = address & ~((uintptr_t)granule - 1u);
 	uintptr_t last;
 	if (address > UINTPTR_MAX - (size - 1u)) return false;
 	last = (address + size - 1u) & ~((uintptr_t)granule - 1u);
 	for (uintptr_t physical = start;; physical += granule) {
 		if (physical > UINTPTR_MAX - mm_info.direct_map_offset) return false;
-		uintptr_t                     virtual_address = physical + mm_info.direct_map_offset;
+		uintptr_t virtual_address = physical + mm_info.direct_map_offset;
 		struct hal_paging_translation translation;
 		if (hal_paging_query(hal_paging_kernel_space(), virtual_address, &translation)) {
 			if (translation.physical_address != physical ||
-			    (translation.flags & (HAL_PAGE_READ | HAL_PAGE_WRITE)) != (HAL_PAGE_READ | HAL_PAGE_WRITE))
+					(translation.flags & (HAL_PAGE_READ | HAL_PAGE_WRITE)) != (HAL_PAGE_READ | HAL_PAGE_WRITE))
 				return false;
 #if defined(PLATFORM_PC_RISCV64)
 			/* Firmware-described MMIO PMAs remain authoritative without S-mode Svpbmt. */
@@ -43,11 +44,13 @@ bool iommu_pt_map_mmio(uintptr_t address, size_t size) {
 #endif
 		}
 		else {
-			struct hal_paging_map_request request = {.virtual_address  = virtual_address,
-			                                         .physical_address = physical,
-			                                         .size             = granule,
-			                                         .flags       = HAL_PAGE_READ | HAL_PAGE_WRITE | HAL_PAGE_GLOBAL,
-			                                         .memory_type = MEMORY_TYPE_DEVICE};
+			struct hal_paging_map_request request = {
+				.virtual_address = virtual_address,
+				.physical_address = physical,
+				.size = granule,
+				.flags = HAL_PAGE_READ | HAL_PAGE_WRITE | HAL_PAGE_GLOBAL,
+				.memory_type = MEMORY_TYPE_DEVICE
+			};
 #if defined(PLATFORM_PC_RISCV64)
 			/* Firmware-described MMIO has device PMAs even when S-mode cannot prove that Svpbmt is enabled. */
 			if (!hal_paging_mapping_supported(request.flags, request.memory_type))
@@ -119,8 +122,8 @@ static inline bool iommu_pt_entry_leaf(const struct iommu_pt_format* format, uin
 	return false;
 }
 
-static inline uint64_t iommu_pt_table_entry(const struct iommu_pt_format* format, uintptr_t address,
-                                            unsigned remaining_levels) {
+static inline uint64_t iommu_pt_table_entry(
+		const struct iommu_pt_format* format, uintptr_t address, unsigned remaining_levels) {
 	uint64_t encoded = iommu_pt_encode_address(format, address);
 	switch (format->kind) {
 	case IOMMU_PT_INTEL_VTD:
@@ -137,8 +140,8 @@ static inline uint64_t iommu_pt_table_entry(const struct iommu_pt_format* format
 	return 0u;
 }
 
-static inline uint64_t iommu_pt_leaf_entry(const struct iommu_pt_format* format, uintptr_t address, unsigned level,
-                                           uint64_t access) {
+static inline uint64_t iommu_pt_leaf_entry(
+		const struct iommu_pt_format* format, uintptr_t address, unsigned level, uint64_t access) {
 	uint64_t entry = iommu_pt_encode_address(format, address);
 	switch (format->kind) {
 	case IOMMU_PT_INTEL_VTD:
@@ -214,29 +217,31 @@ bool iommu_pt_allocate_table(size_t allocation_size, struct pmm_extent* out) {
 }
 
 bool iommu_pt_space_init(const struct iommu_pt_format* format, uintptr_t controller_identity, uint32_t context_id,
-                         struct hal_iommu_space_state* space) {
+		struct hal_iommu_space_state* space) {
 	const struct pmm_info* pmm = pmm_info();
-	struct pmm_extent      root;
-	size_t                 allocation_size;
+	struct pmm_extent root;
+	size_t allocation_size;
 
 	if (format == NULL || space == NULL || pmm == NULL || pmm->allocation_granule == 0u ||
-	    (pmm->allocation_granule & (pmm->allocation_granule - 1u)) != 0u)
+			(pmm->allocation_granule & (pmm->allocation_granule - 1u)) != 0u)
 		return false;
 	size_t table_size = (size_t)1u << iommu_pt_page_shift(format);
-	allocation_size   = pmm->allocation_granule > table_size ? pmm->allocation_granule : table_size;
+	allocation_size = pmm->allocation_granule > table_size ? pmm->allocation_granule : table_size;
 	if (!iommu_pt_allocate_table(allocation_size, &root)) return false;
 	if (((uint64_t)root.address & ~format->address_mask) != 0u) {
 		(void)pmm_free(root);
 		return false;
 	}
 	*space = (struct hal_iommu_space_state){
-		.table = {.initialized           = true,
-		          .root_address          = root.address,
-		          .table_allocation_size = allocation_size,
-		          .controller_identity   = controller_identity,
-		          .context_id            = context_id,
-		          .levels                = format->levels}
-    };
+		.table = {
+			.initialized = true,
+			.root_address = root.address,
+			.table_allocation_size = allocation_size,
+			.controller_identity = controller_identity,
+			.context_id = context_id,
+			.levels = format->levels
+		}
+	};
 	return true;
 }
 
@@ -246,13 +251,13 @@ static inline uint64_t* iommu_pt_root(const struct hal_iommu_space_state* space)
 }
 
 static inline bool iommu_pt_query(const struct iommu_pt_format* format, const struct hal_iommu_space_state* space,
-                                  uint64_t io_address, uint64_t* out_entry, unsigned* out_level) {
+		uint64_t io_address, uint64_t* out_entry, unsigned* out_level) {
 	uint64_t* table = iommu_pt_root(space);
 	if (table == NULL) return false;
 	for (unsigned level = format->levels; level != 0u;) {
 		level--;
 		uint64_t entry = table[(io_address >> (iommu_pt_page_shift(format) + iommu_pt_index_bits(format) * level)) &
-		                       (iommu_pt_entry_count(format) - 1u)];
+							   (iommu_pt_entry_count(format) - 1u)];
 		if (!iommu_pt_entry_present(format, entry)) return false;
 		if (iommu_pt_entry_leaf(format, entry, level)) {
 			if (out_entry != NULL) *out_entry = entry;
@@ -264,35 +269,34 @@ static inline bool iommu_pt_query(const struct iommu_pt_format* format, const st
 	return false;
 }
 
-static inline bool iommu_pt_range_mapped(const struct iommu_pt_format*       format,
-                                         const struct hal_iommu_space_state* space, uint64_t start, uint64_t end) {
+static inline bool iommu_pt_range_mapped(
+		const struct iommu_pt_format* format, const struct hal_iommu_space_state* space, uint64_t start, uint64_t end) {
 	while (start < end) {
 		unsigned level;
 		if (!iommu_pt_query(format, space, start, NULL, &level)) return false;
-		size_t   leaf_size = iommu_pt_leaf_size(format, level);
-		uint64_t leaf_end  = (start & ~((uint64_t)leaf_size - 1u)) + leaf_size;
-		start              = leaf_end < end ? leaf_end : end;
+		size_t leaf_size = iommu_pt_leaf_size(format, level);
+		uint64_t leaf_end = (start & ~((uint64_t)leaf_size - 1u)) + leaf_size;
+		start = leaf_end < end ? leaf_end : end;
 	}
 	return true;
 }
 
-static inline bool iommu_pt_table_range_unmapped(const struct iommu_pt_format* format, const uint64_t* table,
-                                                 unsigned level, uint64_t start, uint64_t end) {
+static inline bool iommu_pt_table_range_unmapped(
+		const struct iommu_pt_format* format, const uint64_t* table, unsigned level, uint64_t start, uint64_t end) {
 	size_t span = iommu_pt_leaf_size(format, level);
 	while (start < end) {
-		size_t   index     = (start >> (iommu_pt_page_shift(format) + iommu_pt_index_bits(format) * level)) &
-		                     (iommu_pt_entry_count(format) - 1u);
-		uint64_t entry     = table[index];
+		size_t index = (start >> (iommu_pt_page_shift(format) + iommu_pt_index_bits(format) * level)) &
+		               (iommu_pt_entry_count(format) - 1u);
+		uint64_t entry = table[index];
 		uint64_t entry_end = (start & ~((uint64_t)span - 1u)) + span;
-		uint64_t next      = entry_end < end ? entry_end : end;
+		uint64_t next = entry_end < end ? entry_end : end;
 		if (iommu_pt_entry_present(format, entry)) {
 			if (iommu_pt_entry_leaf(format, entry, level) || level == 0u) return false;
-			if (!iommu_pt_table_range_unmapped(
-					format,
-					(const uint64_t*)iommu_pt_phys_to_virt(iommu_pt_decode_address(format, entry)),
-					level - 1u,
-					start,
-					next))
+			if (!iommu_pt_table_range_unmapped(format,
+						(const uint64_t*)iommu_pt_phys_to_virt(iommu_pt_decode_address(format, entry)),
+						level - 1u,
+						start,
+						next))
 				return false;
 		}
 		start = next;
@@ -300,23 +304,23 @@ static inline bool iommu_pt_table_range_unmapped(const struct iommu_pt_format* f
 	return true;
 }
 
-static inline bool iommu_pt_range_unmapped(const struct iommu_pt_format*       format,
-                                           const struct hal_iommu_space_state* space, uint64_t start, uint64_t end) {
+static inline bool iommu_pt_range_unmapped(
+		const struct iommu_pt_format* format, const struct hal_iommu_space_state* space, uint64_t start, uint64_t end) {
 	const uint64_t* root = iommu_pt_root(space);
 	return root != NULL && iommu_pt_table_range_unmapped(format, root, format->levels - 1u, start, end);
 }
 
 struct iommu_pt_restore_context {
 	const struct iommu_pt_format* format;
-	iommu_pt_sync_fn              sync;
-	void*                         sync_context;
-	uint32_t                      context_id;
+	iommu_pt_sync_fn sync;
+	void* sync_context;
+	uint32_t context_id;
 };
 
 static inline void iommu_pt_restore(uint64_t* slot, uint64_t previous, void* raw_context) {
 	struct iommu_pt_restore_context* context = raw_context;
 	if (context->format->kind == IOMMU_PT_ARM_STAGE2 && iommu_pt_entry_present(context->format, previous) &&
-	    *slot != previous) {
+			*slot != previous) {
 		*slot = 0u;
 		iommu_pt_publish();
 		if (context->sync != NULL && !context->sync(context->sync_context, context->context_id, 0u, 0u, true)) hcf();
@@ -326,13 +330,12 @@ static inline void iommu_pt_restore(uint64_t* slot, uint64_t previous, void* raw
 }
 
 static inline bool iommu_pt_walk(const struct iommu_pt_format* format, struct hal_iommu_space_state* space,
-                                 uint64_t io_address, unsigned target_level, struct paging_transaction* transaction,
-                                 uint64_t** out_slot) {
+		uint64_t io_address, unsigned target_level, struct paging_transaction* transaction, uint64_t** out_slot) {
 	uint64_t* table = iommu_pt_root(space);
 	if (table == NULL || target_level >= format->levels) return false;
 	for (unsigned level = format->levels - 1u; level > target_level; level--) {
-		size_t   index = (io_address >> (iommu_pt_page_shift(format) + iommu_pt_index_bits(format) * level)) &
-		                 (iommu_pt_entry_count(format) - 1u);
+		size_t index = (io_address >> (iommu_pt_page_shift(format) + iommu_pt_index_bits(format) * level)) &
+		               (iommu_pt_entry_count(format) - 1u);
 		uint64_t entry = table[index];
 		if (!iommu_pt_entry_present(format, entry)) {
 			struct pmm_extent allocation;
@@ -346,7 +349,7 @@ static inline bool iommu_pt_walk(const struct iommu_pt_format* format, struct ha
 				return false;
 			}
 			table[index] = iommu_pt_table_entry(format, allocation.address, level);
-			entry        = table[index];
+			entry = table[index];
 		}
 		else if (iommu_pt_entry_leaf(format, entry, level)) {
 			return false;
@@ -354,65 +357,65 @@ static inline bool iommu_pt_walk(const struct iommu_pt_format* format, struct ha
 		table = (uint64_t*)iommu_pt_phys_to_virt(iommu_pt_decode_address(format, entry));
 	}
 	*out_slot = &table[(io_address >> (iommu_pt_page_shift(format) + iommu_pt_index_bits(format) * target_level)) &
-	                   (iommu_pt_entry_count(format) - 1u)];
+					   (iommu_pt_entry_count(format) - 1u)];
 	return true;
 }
 
-static inline unsigned iommu_pt_choose_level(const struct iommu_pt_format* format, uint64_t io_address,
-                                             uintptr_t physical_address, size_t remaining) {
+static inline unsigned iommu_pt_choose_level(
+		const struct iommu_pt_format* format, uint64_t io_address, uintptr_t physical_address, size_t remaining) {
 	for (unsigned level = format->levels; level != 0u;) {
 		level--;
 		size_t size = iommu_pt_leaf_size(format, level);
 		if ((format->leaf_size_mask & (1ull << (iommu_pt_page_shift(format) + iommu_pt_index_bits(format) * level))) !=
-		        0u &&
-		    (io_address & (size - 1u)) == 0u && (physical_address & (size - 1u)) == 0u && remaining >= size)
+						0u &&
+				(io_address & (size - 1u)) == 0u && (physical_address & (size - 1u)) == 0u && remaining >= size)
 			return level;
 	}
 	return 0u;
 }
 
 static inline bool iommu_pt_args(const struct iommu_pt_format* format, uint64_t io_address, uintptr_t physical_address,
-                                 size_t size, bool check_physical, uint64_t* out_end) {
+		size_t size, bool check_physical, uint64_t* out_end) {
 	uint64_t end;
 	uint64_t physical_end;
 	uint64_t io_limit;
 	uint64_t pa_limit;
 	if (format->io_address_bits == 0u || format->io_address_bits > 64u || format->physical_address_bits == 0u ||
-	    format->physical_address_bits > 64u)
+			format->physical_address_bits > 64u)
 		return false;
 	io_limit = format->io_address_bits == 64u ? UINT64_MAX : 1ull << format->io_address_bits;
 	pa_limit = format->physical_address_bits == 64u ? UINT64_MAX : 1ull << format->physical_address_bits;
 	if (size == 0u || (io_address & (((size_t)1u << iommu_pt_page_shift(format)) - 1u)) != 0u ||
-	    (size & (((size_t)1u << iommu_pt_page_shift(format)) - 1u)) != 0u || add_overflow_u64(io_address, size, &end) ||
-	    (format->io_address_bits != 64u && end > io_limit))
+			(size & (((size_t)1u << iommu_pt_page_shift(format)) - 1u)) != 0u ||
+			add_overflow_u64(io_address, size, &end) || (format->io_address_bits != 64u && end > io_limit))
 		return false;
 	if (check_physical && ((physical_address & (((size_t)1u << iommu_pt_page_shift(format)) - 1u)) != 0u ||
-	                       add_overflow_u64((uint64_t)physical_address, size, &physical_end) ||
-	                       (format->physical_address_bits != 64u && physical_end > pa_limit)))
+								  add_overflow_u64((uint64_t)physical_address, size, &physical_end) ||
+								  (format->physical_address_bits != 64u && physical_end > pa_limit)))
 		return false;
 	*out_end = end;
 	return true;
 }
 
 bool iommu_pt_map(const struct iommu_pt_format* format, struct hal_iommu_space_state* space,
-                  const struct hal_iommu_map_request* request, iommu_pt_sync_fn sync, void* context) {
-	struct paging_transaction       transaction = {0};
-	uint64_t                        end;
-	uint64_t                        io;
-	uintptr_t                       physical;
+		const struct hal_iommu_map_request* request, iommu_pt_sync_fn sync, void* context) {
+	struct paging_transaction transaction = {0};
+	uint64_t end;
+	uint64_t io;
+	uintptr_t physical;
 	struct iommu_pt_restore_context restore = {format, sync, context, space == NULL ? 0u : space->table.context_id};
 	if (format == NULL || space == NULL || request == NULL || !iommu_pt_access_supported(format, request->access) ||
-	    !iommu_pt_args(format, request->io_address, request->physical_address, request->size, true, &end) ||
-	    !iommu_pt_range_unmapped(format, space, request->io_address, end))
+			!iommu_pt_args(format, request->io_address, request->physical_address, request->size, true, &end) ||
+			!iommu_pt_range_unmapped(format, space, request->io_address, end))
 		return false;
-	io       = request->io_address;
+	io = request->io_address;
 	physical = request->physical_address;
 	while (io < end) {
-		unsigned  level     = iommu_pt_choose_level(format, io, physical, (size_t)(end - io));
-		size_t    leaf_size = iommu_pt_leaf_size(format, level);
+		unsigned level = iommu_pt_choose_level(format, io, physical, (size_t)(end - io));
+		size_t leaf_size = iommu_pt_leaf_size(format, level);
 		uint64_t* slot;
 		if (!iommu_pt_walk(format, space, io, level, &transaction, &slot) || *slot != 0u ||
-		    !paging_transaction_record(&transaction, slot, (struct pmm_extent){0}))
+				!paging_transaction_record(&transaction, slot, (struct pmm_extent){0}))
 			goto rollback;
 		*slot = iommu_pt_leaf_entry(format, physical, level, request->access);
 		io += leaf_size;
@@ -420,7 +423,7 @@ bool iommu_pt_map(const struct iommu_pt_format* format, struct hal_iommu_space_s
 	}
 	iommu_pt_publish();
 	if (sync != NULL &&
-	    !sync(context, space->table.context_id, request->io_address, request->size, transaction.hierarchy_changed))
+			!sync(context, space->table.context_id, request->io_address, request->size, transaction.hierarchy_changed))
 		hcf();
 	paging_transaction_commit(&transaction);
 	space->table.mapped_size += request->size;
@@ -436,25 +439,25 @@ rollback:
 }
 
 static inline bool iommu_pt_split_leaf(const struct iommu_pt_format* format, struct hal_iommu_space_state* space,
-                                       uint64_t* slot, unsigned level, uint64_t io_address,
-                                       struct paging_transaction* transaction, iommu_pt_sync_fn sync, void* context) {
-	uint64_t          entry = *slot;
+		uint64_t* slot, unsigned level, uint64_t io_address, struct paging_transaction* transaction,
+		iommu_pt_sync_fn sync, void* context) {
+	uint64_t entry = *slot;
 	struct pmm_extent allocation;
-	uint64_t*         child;
-	uintptr_t         base;
-	size_t            child_size;
-	uint64_t          access;
+	uint64_t* child;
+	uintptr_t base;
+	size_t child_size;
+	uint64_t access;
 	if (level == 0u || !iommu_pt_entry_leaf(format, entry, level) ||
-	    !iommu_pt_allocate_table(space->table.table_allocation_size, &allocation))
+			!iommu_pt_allocate_table(space->table.table_allocation_size, &allocation))
 		return false;
 	if (((uint64_t)allocation.address & ~format->address_mask) != 0u) {
 		(void)pmm_free(allocation);
 		return false;
 	}
-	child      = (uint64_t*)iommu_pt_phys_to_virt(allocation.address);
+	child = (uint64_t*)iommu_pt_phys_to_virt(allocation.address);
 	child_size = iommu_pt_leaf_size(format, level - 1u);
-	base       = iommu_pt_decode_address(format, entry) & ~((uintptr_t)iommu_pt_leaf_size(format, level) - 1u);
-	access     = iommu_pt_leaf_access(format, entry);
+	base = iommu_pt_decode_address(format, entry) & ~((uintptr_t)iommu_pt_leaf_size(format, level) - 1u);
+	access = iommu_pt_leaf_access(format, entry);
 	for (size_t index = 0u; index < iommu_pt_entry_count(format); index++)
 		child[index] = iommu_pt_leaf_entry(format, base + index * child_size, level - 1u, access);
 	if (!paging_transaction_record(transaction, slot, allocation)) {
@@ -465,10 +468,10 @@ static inline bool iommu_pt_split_leaf(const struct iommu_pt_format* format, str
 		*slot = 0u;
 		iommu_pt_publish();
 		if (sync != NULL && !sync(context,
-		                          space->table.context_id,
-		                          io_address & ~((uint64_t)iommu_pt_leaf_size(format, level) - 1u),
-		                          iommu_pt_leaf_size(format, level),
-		                          true))
+									space->table.context_id,
+									io_address & ~((uint64_t)iommu_pt_leaf_size(format, level) - 1u),
+									iommu_pt_leaf_size(format, level),
+									true))
 			hcf();
 	}
 	*slot = iommu_pt_table_entry(format, allocation.address, level);
@@ -476,22 +479,21 @@ static inline bool iommu_pt_split_leaf(const struct iommu_pt_format* format, str
 }
 
 static inline bool iommu_pt_protect_range(const struct iommu_pt_format* format, struct hal_iommu_space_state* space,
-                                          uint64_t* table, unsigned level, uint64_t start, uint64_t end,
-                                          uint64_t access, struct paging_transaction* transaction,
-                                          iommu_pt_sync_fn sync, void* context, bool* out_changed) {
+		uint64_t* table, unsigned level, uint64_t start, uint64_t end, uint64_t access,
+		struct paging_transaction* transaction, iommu_pt_sync_fn sync, void* context, bool* out_changed) {
 	size_t span = iommu_pt_leaf_size(format, level);
 	while (start < end) {
-		size_t    index      = (start >> (iommu_pt_page_shift(format) + iommu_pt_index_bits(format) * level)) &
-		                       (iommu_pt_entry_count(format) - 1u);
-		uint64_t  leaf_start = start & ~((uint64_t)span - 1u);
-		uint64_t  leaf_end   = leaf_start + span;
-		uint64_t  next       = leaf_end < end ? leaf_end : end;
-		uint64_t* slot       = &table[index];
-		uint64_t  entry      = *slot;
+		size_t index = (start >> (iommu_pt_page_shift(format) + iommu_pt_index_bits(format) * level)) &
+		               (iommu_pt_entry_count(format) - 1u);
+		uint64_t leaf_start = start & ~((uint64_t)span - 1u);
+		uint64_t leaf_end = leaf_start + span;
+		uint64_t next = leaf_end < end ? leaf_end : end;
+		uint64_t* slot = &table[index];
+		uint64_t entry = *slot;
 		if (!iommu_pt_entry_present(format, entry)) return false;
 		if (iommu_pt_entry_leaf(format, entry, level)) {
 			if (level != 0u && (start != leaf_start || next != leaf_end) &&
-			    !iommu_pt_split_leaf(format, space, slot, level, start, transaction, sync, context))
+					!iommu_pt_split_leaf(format, space, slot, level, start, transaction, sync, context))
 				return false;
 			entry = *slot;
 		}
@@ -516,16 +518,16 @@ static inline bool iommu_pt_protect_range(const struct iommu_pt_format* format, 
 		}
 		else {
 			if (!iommu_pt_protect_range(format,
-			                            space,
-			                            (uint64_t*)iommu_pt_phys_to_virt(iommu_pt_decode_address(format, entry)),
-			                            level - 1u,
-			                            start,
-			                            next,
-			                            access,
-			                            transaction,
-			                            sync,
-			                            context,
-			                            out_changed))
+						space,
+						(uint64_t*)iommu_pt_phys_to_virt(iommu_pt_decode_address(format, entry)),
+						level - 1u,
+						start,
+						next,
+						access,
+						transaction,
+						sync,
+						context,
+						out_changed))
 				return false;
 		}
 		start = next;
@@ -534,20 +536,28 @@ static inline bool iommu_pt_protect_range(const struct iommu_pt_format* format, 
 }
 
 bool iommu_pt_protect(const struct iommu_pt_format* format, struct hal_iommu_space_state* space, uint64_t io_address,
-                      size_t size, uint64_t access, iommu_pt_sync_fn sync, void* context) {
-	struct paging_transaction       transaction = {0};
-	uint64_t                        end;
-	uint64_t*                       root;
+		size_t size, uint64_t access, iommu_pt_sync_fn sync, void* context) {
+	struct paging_transaction transaction = {0};
+	uint64_t end;
+	uint64_t* root;
 	struct iommu_pt_restore_context restore = {format, sync, context, space == NULL ? 0u : space->table.context_id};
-	bool                            changed = false;
+	bool changed = false;
 	if (format == NULL || space == NULL || !iommu_pt_access_supported(format, access) ||
-	    !iommu_pt_args(format, io_address, 0u, size, false, &end) ||
-	    !iommu_pt_range_mapped(format, space, io_address, end))
+			!iommu_pt_args(format, io_address, 0u, size, false, &end) ||
+			!iommu_pt_range_mapped(format, space, io_address, end))
 		return false;
 	root = iommu_pt_root(space);
-	if (root == NULL ||
-	    !iommu_pt_protect_range(
-			format, space, root, format->levels - 1u, io_address, end, access, &transaction, sync, context, &changed))
+	if (root == NULL || !iommu_pt_protect_range(format,
+								space,
+								root,
+								format->levels - 1u,
+								io_address,
+								end,
+								access,
+								&transaction,
+								sync,
+								context,
+								&changed))
 		goto rollback;
 	if (changed) {
 		iommu_pt_publish();
@@ -567,35 +577,34 @@ rollback:
 }
 
 static inline bool iommu_pt_prepare_unmap(const struct iommu_pt_format* format, struct hal_iommu_space_state* space,
-                                          uint64_t* table, unsigned level, uint64_t start, uint64_t end,
-                                          struct paging_transaction* transaction, iommu_pt_sync_fn sync,
-                                          void* context) {
+		uint64_t* table, unsigned level, uint64_t start, uint64_t end, struct paging_transaction* transaction,
+		iommu_pt_sync_fn sync, void* context) {
 	size_t span = iommu_pt_leaf_size(format, level);
 	while (start < end) {
-		size_t    index      = (start >> (iommu_pt_page_shift(format) + iommu_pt_index_bits(format) * level)) &
-		                       (iommu_pt_entry_count(format) - 1u);
-		uint64_t  leaf_start = start & ~((uint64_t)span - 1u);
-		uint64_t  leaf_end   = leaf_start + span;
-		uint64_t  next       = leaf_end < end ? leaf_end : end;
-		uint64_t* slot       = &table[index];
-		uint64_t  entry      = *slot;
+		size_t index = (start >> (iommu_pt_page_shift(format) + iommu_pt_index_bits(format) * level)) &
+		               (iommu_pt_entry_count(format) - 1u);
+		uint64_t leaf_start = start & ~((uint64_t)span - 1u);
+		uint64_t leaf_end = leaf_start + span;
+		uint64_t next = leaf_end < end ? leaf_end : end;
+		uint64_t* slot = &table[index];
+		uint64_t entry = *slot;
 		if (!iommu_pt_entry_present(format, entry)) return false;
 		if (iommu_pt_entry_leaf(format, entry, level)) {
 			if (level != 0u && (start != leaf_start || next != leaf_end) &&
-			    !iommu_pt_split_leaf(format, space, slot, level, start, transaction, sync, context))
+					!iommu_pt_split_leaf(format, space, slot, level, start, transaction, sync, context))
 				return false;
 			entry = *slot;
 		}
 		if (!iommu_pt_entry_leaf(format, entry, level) &&
-		    !iommu_pt_prepare_unmap(format,
-		                            space,
-		                            (uint64_t*)iommu_pt_phys_to_virt(iommu_pt_decode_address(format, entry)),
-		                            level - 1u,
-		                            start,
-		                            next,
-		                            transaction,
-		                            sync,
-		                            context))
+				!iommu_pt_prepare_unmap(format,
+						space,
+						(uint64_t*)iommu_pt_phys_to_virt(iommu_pt_decode_address(format, entry)),
+						level - 1u,
+						start,
+						next,
+						transaction,
+						sync,
+						context))
 			return false;
 		start = next;
 	}
@@ -609,29 +618,27 @@ static inline bool iommu_pt_table_empty(const struct iommu_pt_format* format, co
 }
 
 static inline bool iommu_pt_remove_range(const struct iommu_pt_format* format, struct hal_iommu_space_state* space,
-                                         uint64_t* table, unsigned level, uint64_t start, uint64_t end,
-                                         struct paging_transaction* transaction) {
+		uint64_t* table, unsigned level, uint64_t start, uint64_t end, struct paging_transaction* transaction) {
 	size_t span = iommu_pt_leaf_size(format, level);
 	while (start < end) {
-		size_t   index      = (start >> (iommu_pt_page_shift(format) + iommu_pt_index_bits(format) * level)) &
-		                      (iommu_pt_entry_count(format) - 1u);
+		size_t index = (start >> (iommu_pt_page_shift(format) + iommu_pt_index_bits(format) * level)) &
+		               (iommu_pt_entry_count(format) - 1u);
 		uint64_t leaf_start = start & ~((uint64_t)span - 1u);
-		uint64_t leaf_end   = leaf_start + span;
-		uint64_t next       = leaf_end < end ? leaf_end : end;
-		uint64_t entry      = table[index];
+		uint64_t leaf_end = leaf_start + span;
+		uint64_t next = leaf_end < end ? leaf_end : end;
+		uint64_t entry = table[index];
 		if (iommu_pt_entry_leaf(format, entry, level)) {
 			if (!paging_transaction_record(transaction, &table[index], (struct pmm_extent){0})) return false;
 			table[index] = 0u;
 		}
 		else {
 			uintptr_t child_address = iommu_pt_decode_address(format, entry);
-			uint64_t* child         = (uint64_t*)iommu_pt_phys_to_virt(child_address);
+			uint64_t* child = (uint64_t*)iommu_pt_phys_to_virt(child_address);
 			if (!iommu_pt_remove_range(format, space, child, level - 1u, start, next, transaction)) return false;
 			if (iommu_pt_table_empty(format, child)) {
-				if (!paging_transaction_retire(
-						transaction,
-						&table[index],
-						(struct pmm_extent){.address = child_address, .size = space->table.table_allocation_size}))
+				if (!paging_transaction_retire(transaction,
+							&table[index],
+							(struct pmm_extent){.address = child_address, .size = space->table.table_allocation_size}))
 					return false;
 				table[index] = 0u;
 			}
@@ -642,19 +649,19 @@ static inline bool iommu_pt_remove_range(const struct iommu_pt_format* format, s
 }
 
 bool iommu_pt_unmap(const struct iommu_pt_format* format, struct hal_iommu_space_state* space, uint64_t io_address,
-                    size_t size, iommu_pt_sync_fn sync, void* context) {
-	struct paging_transaction       transaction = {0};
-	uint64_t                        end;
-	uint64_t*                       root;
+		size_t size, iommu_pt_sync_fn sync, void* context) {
+	struct paging_transaction transaction = {0};
+	uint64_t end;
+	uint64_t* root;
 	struct iommu_pt_restore_context restore = {format, sync, context, space == NULL ? 0u : space->table.context_id};
 	if (format == NULL || space == NULL || !iommu_pt_args(format, io_address, 0u, size, false, &end) ||
-	    !iommu_pt_range_mapped(format, space, io_address, end))
+			!iommu_pt_range_mapped(format, space, io_address, end))
 		return false;
 	root = iommu_pt_root(space);
 	if (root == NULL ||
-	    !iommu_pt_prepare_unmap(
-			format, space, root, format->levels - 1u, io_address, end, &transaction, sync, context) ||
-	    !iommu_pt_remove_range(format, space, root, format->levels - 1u, io_address, end, &transaction))
+			!iommu_pt_prepare_unmap(
+					format, space, root, format->levels - 1u, io_address, end, &transaction, sync, context) ||
+			!iommu_pt_remove_range(format, space, root, format->levels - 1u, io_address, end, &transaction))
 		goto rollback;
 	iommu_pt_publish();
 	if (sync != NULL && !sync(context, space->table.context_id, io_address, size, transaction.hierarchy_changed)) hcf();
@@ -671,14 +678,14 @@ rollback:
 	return false;
 }
 
-static inline void iommu_pt_free_children(const struct iommu_pt_format*       format,
-                                          const struct hal_iommu_space_state* space, uint64_t* table, unsigned level) {
+static inline void iommu_pt_free_children(const struct iommu_pt_format* format,
+		const struct hal_iommu_space_state* space, uint64_t* table, unsigned level) {
 	if (level == 0u) return;
 	for (size_t index = 0u; index < iommu_pt_entry_count(format); index++) {
 		uint64_t entry = table[index];
 		if (!iommu_pt_entry_present(format, entry) || iommu_pt_entry_leaf(format, entry, level)) continue;
 		uintptr_t child_address = iommu_pt_decode_address(format, entry);
-		uint64_t* child         = (uint64_t*)iommu_pt_phys_to_virt(child_address);
+		uint64_t* child = (uint64_t*)iommu_pt_phys_to_virt(child_address);
 		iommu_pt_free_children(format, space, child, level - 1u);
 		(void)pmm_free((struct pmm_extent){.address = child_address, .size = space->table.table_allocation_size});
 	}
@@ -689,6 +696,6 @@ void iommu_pt_space_deinit(const struct iommu_pt_format* format, struct hal_iomm
 	if (format == NULL || root == NULL || space->table.mapped_size != 0u) return;
 	iommu_pt_free_children(format, space, root, format->levels - 1u);
 	(void)pmm_free(
-		(struct pmm_extent){.address = space->table.root_address, .size = space->table.table_allocation_size});
+			(struct pmm_extent){.address = space->table.root_address, .size = space->table.table_allocation_size});
 	*space = (struct hal_iommu_space_state){0};
 }

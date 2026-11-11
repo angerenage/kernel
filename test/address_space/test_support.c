@@ -7,20 +7,20 @@
 void init_test_address_space(uint8_t* arena, size_t arena_size) {
 	const struct pmm_memory_range memory_map[] = {
 		{
-		 .address = (uintptr_t)arena,
-		 .size    = KiB(24),
-		 .usable  = true,
-		 },
+			.address = (uintptr_t)arena,
+			.size = KiB(24),
+			.usable = true,
+		},
 		{
-		 .address = (uintptr_t)(arena + KiB(32)),
-		 .size    = KiB(8),
-		 .usable  = false,
-		 },
+			.address = (uintptr_t)(arena + KiB(32)),
+			.size = KiB(8),
+			.usable = false,
+		},
 		{
-		 .address = (uintptr_t)(arena + KiB(64)),
-		 .size    = KiB(128),
-		 .usable  = true,
-		 },
+			.address = (uintptr_t)(arena + KiB(64)),
+			.size = KiB(128),
+			.usable = true,
+		},
 	};
 
 	cr_assert_geq(arena_size, KiB(192), "test arena is too small");
@@ -36,19 +36,19 @@ size_t address_space_test_bytes_consumed_since(size_t free_before) {
 }
 
 bool test_address_space_map(struct address_space* space, size_t size, memory_access_t access, uintptr_t requested_base,
-                            size_t alignment, size_t guard_before, struct mapping** out_mapping, void** out_base) {
-	struct memory*  memory;
+		size_t alignment, size_t guard_before, struct mapping** out_mapping, void** out_base) {
+	struct memory* memory;
 	struct mapping* mapping;
 	if ((access & ~MEMORY_ACCESS_VALID_MASK) != 0u || !memory_create_anonymous(size, &memory)) return false;
 	bool mapped = address_space_map(space,
-	                                &(const struct address_space_mapping_request){
-										.memory       = memory,
-										.address      = requested_base,
-										.alignment    = alignment,
-										.guard_before = guard_before,
-										.access       = access,
-									},
-	                                &mapping);
+			&(const struct address_space_mapping_request){
+				.memory = memory,
+				.address = requested_base,
+				.alignment = alignment,
+				.guard_before = guard_before,
+				.access = access,
+			},
+			&mapping);
 	memory_release(memory);
 	if (mapped) {
 		if (out_base != NULL) *out_base = (void*)mapping_address(mapping);

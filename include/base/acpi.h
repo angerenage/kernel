@@ -1,7 +1,8 @@
 #pragma once
 
-#include <base/cap.h>
 #include <stdint.h>
+
+#include <base/cap.h>
 
 /* Operations accepted by the kernel ACPI-table provider. */
 enum acpi_provider_op {
@@ -20,7 +21,7 @@ struct acpi_provider_request_header {
 /* Count all validated, userspace-visible tables carrying signature. */
 struct acpi_provider_count_request {
 	struct acpi_provider_request_header header;
-	char                                signature[4];
+	char signature[4];
 };
 
 struct acpi_provider_count_response {
@@ -30,8 +31,8 @@ struct acpi_provider_count_response {
 /* Exclusively claim the stable zero-based table index for signature. */
 struct acpi_provider_claim_request {
 	struct acpi_provider_request_header header;
-	char                                signature[4];
-	uint64_t                            index;
+	char signature[4];
+	uint64_t index;
 };
 
 struct acpi_provider_claim_response {
@@ -47,8 +48,8 @@ struct acpi_provider_fadt_read_response {
 	uint32_t flags;
 	uint16_t iapc_boot_arch;
 	uint16_t arm_boot_arch;
-	uint8_t  preferred_pm_profile;
-	uint8_t  reserved[3];
+	uint8_t preferred_pm_profile;
+	uint8_t reserved[3];
 };
 
 enum acpi_aml_definition_kind {
@@ -68,26 +69,26 @@ struct acpi_provider_aml_count_response {
 /* Read selected metadata for one headerless AML definition block. */
 struct acpi_provider_aml_info_request {
 	struct acpi_provider_request_header header;
-	uint32_t                            reserved;
-	uint64_t                            index;
+	uint32_t reserved;
+	uint64_t index;
 };
 
 struct acpi_provider_aml_info_response {
 	uint64_t aml_size;
 	uint32_t oem_revision;
-	char     oem_id[6];
-	char     oem_table_id[8];
-	uint8_t  kind;
-	uint8_t  revision;
-	uint8_t  reserved[4];
+	char oem_id[6];
+	char oem_table_id[8];
+	uint8_t kind;
+	uint8_t revision;
+	uint8_t reserved[4];
 };
 
 /* Read an exact range from one headerless AML definition block. */
 struct acpi_provider_aml_read_request {
 	struct acpi_provider_request_header header;
-	uint64_t                            index;
-	uint64_t                            offset;
-	uint64_t                            size;
+	uint64_t index;
+	uint64_t offset;
+	uint64_t size;
 };
 
 /* Operations accepted by one exclusively claimed ACPI-table capability. */
@@ -107,14 +108,14 @@ struct acpi_table_info_request {
 /* Metadata retained after the common ACPI SDT header is removed. */
 struct acpi_table_info_response {
 	uint64_t body_size;
-	uint8_t  revision;
-	uint8_t  reserved[7];
+	uint8_t revision;
+	uint8_t reserved[7];
 };
 
 /* Read an exact range from the headerless table body. */
 struct acpi_table_read_request {
 	struct acpi_table_request_header header;
-	uint32_t                         reserved;
-	uint64_t                         offset;
-	uint64_t                         size;
+	uint32_t reserved;
+	uint64_t offset;
+	uint64_t size;
 };

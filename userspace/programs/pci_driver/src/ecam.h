@@ -1,28 +1,29 @@
 #pragma once
 
-#include <base/cap.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/cap.h>
 
 #include "config.h"
 
 /* One Enhanced Configuration Access Mechanism allocation with a single mapped bus window. */
 struct pci_ecam {
-	cap_id_t          memory_cap;
-	cap_id_t          address_space_cap;
-	cap_id_t          mapping_cap;
+	cap_id_t memory_cap;
+	cap_id_t address_space_cap;
+	cap_id_t mapping_cap;
 	volatile uint8_t* base;
-	size_t            size;
-	uint16_t          segment;
-	uint8_t           first_bus;
-	uint8_t           last_bus;
-	uint8_t           mapped_bus;
-	bool              bus_mapped;
+	size_t size;
+	uint16_t segment;
+	uint8_t first_bus;
+	uint8_t last_bus;
+	uint8_t mapped_bus;
+	bool bus_mapped;
 };
 
 /* Bind a firmware-described ECAM memory object to the generic configuration interface. */
 bool pci_ecam_initialize(struct pci_ecam* ecam, cap_id_t memory_cap, cap_id_t address_space_cap, size_t size,
-                         uint16_t segment, uint8_t first_bus, uint8_t last_bus, struct pci_config* out_config);
+		uint16_t segment, uint8_t first_bus, uint8_t last_bus, struct pci_config* out_config);
 
 /* Release the currently mapped ECAM bus window. */
 void pci_ecam_deinitialize(struct pci_ecam* ecam);

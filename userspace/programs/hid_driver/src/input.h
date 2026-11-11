@@ -1,14 +1,16 @@
 #pragma once
 
-#include <base/syscall.h>
-#include <protocol/input.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <base/syscall.h>
+
+#include <protocol/input.h>
 
 /* One normalized control value supplied while constructing a producer frame. */
 struct hid_input_value {
 	uint32_t control_id;
-	int64_t  value;
+	int64_t value;
 };
 
 /* Opaque input-protocol server owned for the lifetime of the HID process. */
@@ -16,21 +18,20 @@ struct hid_input_server;
 
 /* Create and advertise the HID process's input service. */
 syscall_status_t hid_input_server_create(const char* service, enum input_device_class device_class,
-                                         const struct input_control_descriptor* descriptors, size_t descriptor_count,
-                                         const struct input_output_descriptor* output_descriptors,
-                                         size_t output_descriptor_count, cap_id_t driver_activity_cap,
-                                         struct hid_input_server** out_server);
+		const struct input_control_descriptor* descriptors, size_t descriptor_count,
+		const struct input_output_descriptor* output_descriptors, size_t output_descriptor_count,
+		cap_id_t driver_activity_cap, struct hid_input_server** out_server);
 
 /* Append one nonempty coherent control frame and notify waiting clients. */
-syscall_status_t hid_input_server_publish(struct hid_input_server* server, const struct hid_input_value* values,
-                                          size_t count);
+syscall_status_t hid_input_server_publish(
+		struct hid_input_server* server, const struct hid_input_value* values, size_t count);
 
 /* Append a state-reset frame after transport loss or device reinitialization. */
 syscall_status_t hid_input_server_reset(struct hid_input_server* server);
 
 /* Take the next validated output batch for execution by the transport owner. */
-bool hid_input_server_take_outputs(struct hid_input_server* server, struct input_output_value* values, size_t capacity,
-                                   size_t* out_count);
+bool hid_input_server_take_outputs(
+		struct hid_input_server* server, struct input_output_value* values, size_t capacity, size_t* out_count);
 
 /* Complete the output batch currently owned by the transport thread. */
 bool hid_input_server_complete_outputs(struct hid_input_server* server, syscall_status_t status);

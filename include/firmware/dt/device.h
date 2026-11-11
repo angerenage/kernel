@@ -1,9 +1,10 @@
 #pragma once
 
-#include <firmware/dt.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <firmware/dt.h>
 
 /* Decoded register range belonging to one Device Tree node. */
 struct dt_reg {
@@ -27,5 +28,5 @@ bool dt_node_reg_raw(struct dt_node node, size_t index, struct dt_reg* out);
 bool dt_node_reg(struct dt_node node, size_t index, struct dt_reg* out);
 
 /* Resolve a PCI requester through a host bridge's standard iommu-map property. */
-bool dt_pci_iommu_route(uint16_t segment, uint16_t requester_id, uint64_t* out_controller_address,
-                        uint32_t* out_source_id);
+bool dt_pci_iommu_route(
+		uint16_t segment, uint16_t requester_id, uint64_t* out_controller_address, uint32_t* out_source_id);

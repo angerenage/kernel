@@ -1,7 +1,8 @@
 #pragma once
 
-#include <base/cap.h>
 #include <stddef.h>
+
+#include <base/cap.h>
 
 #include "device.h"
 
@@ -19,19 +20,19 @@ enum dm_driver_catalog_status {
 /* Root authorities that a catalog entry may explicitly request. */
 enum dm_driver_capability {
 	DM_DRIVER_CAPABILITY_MEMORY_ALLOCATOR = 1u << 0u,
-	DM_DRIVER_CAPABILITY_DMA              = 1u << 1u,
-	DM_DRIVER_CAPABILITY_INTERRUPTS       = 1u << 2u,
-	DM_DRIVER_CAPABILITY_IO_PORTS         = 1u << 3u,
+	DM_DRIVER_CAPABILITY_DMA = 1u << 1u,
+	DM_DRIVER_CAPABILITY_INTERRUPTS = 1u << 2u,
+	DM_DRIVER_CAPABILITY_IO_PORTS = 1u << 3u,
 };
 
 /* One immutable driver declaration from the catalog. */
 struct dm_driver {
-	struct dm_string  name;
-	struct dm_string  executable;
+	struct dm_string name;
+	struct dm_string executable;
 	struct dm_string* compatible_ids;
-	size_t            compatible_count;
-	uint32_t          root_capabilities;
-	cap_id_t          executable_cap;
+	size_t compatible_count;
+	uint32_t root_capabilities;
+	cap_id_t executable_cap;
 	struct dm_driver* next;
 };
 
@@ -39,7 +40,7 @@ struct dm_driver {
 struct dm_driver_catalog {
 	struct dm_driver* drivers;
 	struct dm_driver* drivers_tail;
-	size_t            driver_count;
+	size_t driver_count;
 };
 
 /* Initialize an empty driver catalog. */
@@ -52,8 +53,8 @@ void dm_driver_catalog_deinit(struct dm_driver_catalog* catalog);
 enum dm_driver_catalog_status dm_driver_catalog_load(struct dm_driver_catalog* catalog, const char* path);
 
 /* Find the first catalog-ordered driver claiming an exact compatible ID. */
-const struct dm_driver* dm_driver_catalog_find_compatible(const struct dm_driver_catalog* catalog,
-                                                          const void* compatible_id, size_t compatible_id_size);
+const struct dm_driver* dm_driver_catalog_find_compatible(
+		const struct dm_driver_catalog* catalog, const void* compatible_id, size_t compatible_id_size);
 
 /* Return a stable diagnostic string for one catalog result. */
 const char* dm_driver_catalog_status_string(enum dm_driver_catalog_status status);

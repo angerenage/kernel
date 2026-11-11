@@ -1,7 +1,8 @@
-#include <criterion/criterion.h>
 #include <mxml.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <criterion/criterion.h>
 
 static void count_error(void* data, const char* message) {
 	(void)message;
@@ -9,8 +10,8 @@ static void count_error(void* data, const char* message) {
 }
 
 Test(mxml, parses_utf8_attributes_text_and_entities) {
-	static const char document[] =
-		"<?xml version=\"1.0\" encoding=\"utf-8\"?><keyboard locale=\"fr\"><key id=\"é\">A &amp; Z</key></keyboard>";
+	static const char document[] = "<?xml version=\"1.0\" encoding=\"utf-8\"?><keyboard locale=\"fr\"><key id=\"é\">A "
+								   "&amp; Z</key></keyboard>";
 	mxml_options_t* options = mxmlOptionsNew();
 	cr_assert_not_null(options);
 	mxmlOptionsSetTypeValue(options, MXML_TYPE_OPAQUE);
@@ -46,7 +47,7 @@ Test(mxml, saves_and_reloads_a_document) {
 }
 
 Test(mxml, rejects_malformed_xml) {
-	unsigned        errors  = 0u;
+	unsigned errors = 0u;
 	mxml_options_t* options = mxmlOptionsNew();
 	cr_assert_not_null(options);
 	mxmlOptionsSetErrorCallback(options, count_error, &errors);

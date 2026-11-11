@@ -2,21 +2,22 @@
 
 #if KERNEL_TRACE_ENABLED
 
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
 #include <boot/info.h>
+#include <hal/clock.h>
+#include <hal/interrupts.h>
+#include <hal/serial.h>
 #include <core/cpu.h>
 #include <core/kthread.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 #include <core/spinlock.h>
 #include <core/thread.h>
-#include <hal/clock.h>
-#include <hal/interrupts.h>
-#include <hal/serial.h>
 #include <kernel/cmdline.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <string.h>
 
 #ifndef KERNEL_TRACE_DURATION_MS
 #define KERNEL_TRACE_DURATION_MS 5000u
@@ -35,13 +36,13 @@ enum kernel_trace_transport {
 };
 
 static struct kernel_trace_file_header* trace_header;
-static uintptr_t                        trace_physical_address;
-static size_t                           trace_allocation_size;
-static uint64_t                         trace_duration_ms;
-static uint32_t                         trace_writers;
-static bool                             trace_active;
-static enum kernel_trace_transport      trace_transport;
-static bool                             trace_virtual_tsc;
+static uintptr_t trace_physical_address;
+static size_t trace_allocation_size;
+static uint64_t trace_duration_ms;
+static uint32_t trace_writers;
+static bool trace_active;
+static enum kernel_trace_transport trace_transport;
+static bool trace_virtual_tsc;
 
 #if defined(PLATFORM_PC_X86_64)
 static bool trace_x86_hypervisor_present(void) {
@@ -102,7 +103,7 @@ static uint32_t trace_crc32(const uint8_t* data, size_t size) {
 		crc ^= data[i];
 		for (unsigned bit = 0u; bit < 8u; bit++) {
 			uint32_t mask = (uint32_t)-(int32_t)(crc & 1u);
-			crc           = (crc >> 1u) ^ (0xedb88320u & mask);
+			crc = (crc >> 1u) ^ (0xedb88320u & mask);
 		}
 	}
 	return ~crc;
@@ -110,7 +111,7 @@ static uint32_t trace_crc32(const uint8_t* data, size_t size) {
 
 static enum kernel_trace_transport trace_selected_transport(void) {
 	const char* value;
-	size_t      length;
+	size_t length;
 
 	if (!kernel_cmdline_option_value("kernel.trace.transport", &value, &length) || value == NULL) {
 		return KERNEL_TRACE_TRANSPORT_QEMU;
@@ -121,65 +122,66 @@ static enum kernel_trace_transport trace_selected_transport(void) {
 
 bool kernel_trace_init(void) {
 	const struct pmm_info* properties;
-	struct pmm_extent      allocation;
-	const char*            duration_value;
-	size_t                 duration_length;
-	size_t                 count;
-	size_t                 per_cpu_size;
-	size_t                 total_size;
-	uint64_t               frequency;
-	uint64_t               now = 0u;
+	struct pmm_extent allocation;
+	const char* duration_value;
+	size_t duration_length;
+	size_t count;
+	size_t per_cpu_size;
+	size_t total_size;
+	uint64_t frequency;
+	uint64_t now = 0u;
 
 	if (!kernel_cmdline_option_enabled("kernel.trace") || trace_header != NULL) return false;
 	properties = pmm_info();
-	frequency  = hal_clock_monotonic_frequency();
-	count      = cpu_count();
+	frequency = hal_clock_monotonic_frequency();
+	count = cpu_count();
 #if defined(PLATFORM_PC_X86_64)
 	if (frequency == 0u) {
 		const struct boot_info* info = boot_info_get();
 		if (info != NULL && info->monotonic_counter_frequency_hz != 0u && trace_x86_hypervisor_present()) {
-			frequency         = info->monotonic_counter_frequency_hz;
+			frequency = info->monotonic_counter_frequency_hz;
 			trace_virtual_tsc = true;
 		}
 	}
 #endif
 	if (properties == NULL || properties->allocation_granule == 0u || frequency == 0u || count == 0u ||
-	    count > KERNEL_TRACE_MAX_CPUS) {
+			count > KERNEL_TRACE_MAX_CPUS) {
 		const struct boot_info* info = boot_info_get();
 		printf("ktrace: prerequisites unavailable counter_hz=%llu boot_counter_hz=%llu cpus=%zu\n",
-		       (unsigned long long)frequency,
-		       (unsigned long long)(info == NULL ? 0u : info->monotonic_counter_frequency_hz),
-		       count);
+				(unsigned long long)frequency,
+				(unsigned long long)(info == NULL ? 0u : info->monotonic_counter_frequency_hz),
+				count);
 		return false;
 	}
 
 	per_cpu_size = trace_align_up((size_t)KERNEL_TRACE_BUFFER_KB * 1024u, sizeof(struct kernel_trace_record));
 	if (per_cpu_size == 0u || count > (SIZE_MAX - sizeof(struct kernel_trace_file_header)) / per_cpu_size) return false;
-	total_size =
-		trace_align_up(sizeof(struct kernel_trace_file_header) + count * per_cpu_size, properties->allocation_granule);
+	total_size = trace_align_up(
+			sizeof(struct kernel_trace_file_header) + count * per_cpu_size, properties->allocation_granule);
 	if (total_size == 0u ||
-	    !pmm_alloc(&(const struct pmm_alloc_request){.size = total_size, .alignment = properties->allocation_granule},
-	               &allocation))
+			!pmm_alloc(
+					&(const struct pmm_alloc_request){.size = total_size, .alignment = properties->allocation_granule},
+					&allocation))
 		return false;
 
-	trace_header           = (void*)(allocation.address + mm_info.direct_map_offset);
+	trace_header = (void*)(allocation.address + mm_info.direct_map_offset);
 	trace_physical_address = allocation.address;
-	trace_allocation_size  = allocation.size;
+	trace_allocation_size = allocation.size;
 	memset(trace_header, 0, trace_allocation_size);
 	(void)trace_counter_read(&now);
 	*trace_header = (struct kernel_trace_file_header){
-		.magic           = KERNEL_TRACE_MAGIC,
-		.version         = KERNEL_TRACE_VERSION,
-		.header_size     = sizeof(struct kernel_trace_file_header),
-		.total_size      = trace_allocation_size,
+		.magic = KERNEL_TRACE_MAGIC,
+		.version = KERNEL_TRACE_VERSION,
+		.header_size = sizeof(struct kernel_trace_file_header),
+		.total_size = trace_allocation_size,
 		.clock_frequency = frequency,
-		.record_size     = sizeof(struct kernel_trace_record),
-		.cpu_count       = (uint32_t)count,
-		.session_id      = now ^ allocation.address ^ ((uint64_t)count << 48u),
-		.flags           = trace_virtual_tsc ? KERNEL_TRACE_FLAG_VIRTUAL_TSC : 0u,
+		.record_size = sizeof(struct kernel_trace_record),
+		.cpu_count = (uint32_t)count,
+		.session_id = now ^ allocation.address ^ ((uint64_t)count << 48u),
+		.flags = trace_virtual_tsc ? KERNEL_TRACE_FLAG_VIRTUAL_TSC : 0u,
 	};
 	for (size_t i = 0u; i < count; i++) {
-		trace_header->cpus[i].offset   = sizeof(struct kernel_trace_file_header) + i * per_cpu_size;
+		trace_header->cpus[i].offset = sizeof(struct kernel_trace_file_header) + i * per_cpu_size;
 		trace_header->cpus[i].capacity = per_cpu_size / sizeof(struct kernel_trace_record);
 	}
 
@@ -190,11 +192,11 @@ bool kernel_trace_init(void) {
 	trace_transport = trace_selected_transport();
 	__atomic_store_n(&trace_active, true, __ATOMIC_RELEASE);
 	printf("ktrace: recording session=%llx cpus=%zu buffer_kb=%u duration_ms=%llu transport=%s\n",
-	       (unsigned long long)trace_header->session_id,
-	       count,
-	       (unsigned)KERNEL_TRACE_BUFFER_KB,
-	       (unsigned long long)trace_duration_ms,
-	       trace_transport == KERNEL_TRACE_TRANSPORT_SERIAL ? "serial" : "qemu");
+			(unsigned long long)trace_header->session_id,
+			count,
+			(unsigned)KERNEL_TRACE_BUFFER_KB,
+			(unsigned long long)trace_duration_ms,
+			trace_transport == KERNEL_TRACE_TRANSPORT_SERIAL ? "serial" : "qemu");
 	return true;
 }
 
@@ -206,14 +208,14 @@ bool kernel_trace_is_active(void) {
 	return __atomic_load_n(&trace_active, __ATOMIC_ACQUIRE);
 }
 
-static void trace_emit_record(uint32_t event_id, enum kernel_trace_record_type type, uint8_t flags, uint64_t arg0,
-                              uint64_t arg1) {
+static void trace_emit_record(
+		uint32_t event_id, enum kernel_trace_record_type type, uint8_t flags, uint64_t arg0, uint64_t arg1) {
 	struct kernel_trace_cpu_descriptor* descriptor;
-	struct kernel_trace_record*         records;
-	struct irq_state                    irq_state;
-	uint64_t                            index;
-	uint64_t                            timestamp;
-	size_t                              cpu;
+	struct kernel_trace_record* records;
+	struct irq_state irq_state;
+	uint64_t index;
+	uint64_t timestamp;
+	size_t cpu;
 
 	if (!__atomic_load_n(&trace_active, __ATOMIC_ACQUIRE)) return;
 	irq_state = irq_save_disable();
@@ -231,20 +233,20 @@ static void trace_emit_record(uint32_t event_id, enum kernel_trace_record_type t
 		return;
 	}
 	descriptor = &trace_header->cpus[cpu];
-	index      = __atomic_load_n(&descriptor->committed, __ATOMIC_RELAXED);
+	index = __atomic_load_n(&descriptor->committed, __ATOMIC_RELAXED);
 	if (index >= descriptor->capacity) {
 		(void)__atomic_fetch_add(&descriptor->dropped, 1u, __ATOMIC_RELAXED);
 	}
 	else {
-		records        = (void*)((uint8_t*)trace_header + descriptor->offset);
+		records = (void*)((uint8_t*)trace_header + descriptor->offset);
 		records[index] = (struct kernel_trace_record){
 			.timestamp = timestamp,
-			.arg0      = arg0,
-			.arg1      = arg1,
-			.event_id  = event_id,
-			.cpu       = (uint16_t)cpu,
-			.type      = (uint8_t)type,
-			.flags     = flags,
+			.arg0 = arg0,
+			.arg1 = arg1,
+			.event_id = event_id,
+			.cpu = (uint16_t)cpu,
+			.type = (uint8_t)type,
+			.flags = flags,
 		};
 		__atomic_store_n(&descriptor->committed, index + 1u, __ATOMIC_RELEASE);
 	}
@@ -275,24 +277,24 @@ static size_t trace_string_length(const char* string) {
 
 trace_label_id_t kernel_trace_register_string(const char* string, size_t length) {
 	trace_label_id_t label;
-	size_t           chunks;
+	size_t chunks;
 
 	if (!kernel_trace_is_active() || string == NULL || length == 0u || length > TRACE_LABEL_NAME_MAX) {
 		return TRACE_LABEL_ID_INVALID;
 	}
-	label  = trace_string_hash(string, length);
+	label = trace_string_hash(string, length);
 	chunks = length / sizeof(uint64_t) + 1u;
 	for (size_t chunk_index = 0u; chunk_index < chunks; chunk_index++) {
-		uint64_t chunk      = 0u;
-		size_t   offset     = chunk_index * sizeof(chunk);
-		size_t   chunk_size = length > offset ? length - offset : 0u;
+		uint64_t chunk = 0u;
+		size_t offset = chunk_index * sizeof(chunk);
+		size_t chunk_size = length > offset ? length - offset : 0u;
 		if (chunk_size > sizeof(chunk)) chunk_size = sizeof(chunk);
 		if (chunk_size != 0u) memcpy(&chunk, string + offset, chunk_size);
 		trace_emit_record(KERNEL_TRACE_EVENT_STRING,
-		                  KERNEL_TRACE_RECORD_METADATA,
-		                  (uint8_t)(chunk_index | (chunk_index + 1u == chunks ? 0x80u : 0u)),
-		                  label,
-		                  chunk);
+				KERNEL_TRACE_RECORD_METADATA,
+				(uint8_t)(chunk_index | (chunk_index + 1u == chunks ? 0x80u : 0u)),
+				label,
+				chunk);
 	}
 	return label;
 }
@@ -308,10 +310,10 @@ void kernel_trace_register_process(uint64_t trace_process_id, uint64_t process_i
 	kernel_trace_emit(KERNEL_TRACE_EVENT_PROCESS_NAME, KERNEL_TRACE_RECORD_METADATA, trace_process_id, label);
 }
 
-void kernel_trace_register_user_thread(const struct thread* thread, uint64_t trace_process_id, uint64_t thread_id,
-                                       const char* name) {
+void kernel_trace_register_user_thread(
+		const struct thread* thread, uint64_t trace_process_id, uint64_t thread_id, const char* name) {
 	trace_label_id_t label;
-	uint64_t         trace_thread;
+	uint64_t trace_thread;
 
 	if (!kernel_trace_is_active() || thread == NULL || trace_process_id == 0u || thread_id == 0u) return;
 	trace_thread = kernel_trace_thread_id(thread);
@@ -325,7 +327,7 @@ void kernel_trace_register_user_thread(const struct thread* thread, uint64_t tra
 }
 
 void kernel_trace_finalize(void) {
-	bool     expected = true;
+	bool expected = true;
 	uint32_t checksum;
 
 	if (!__atomic_compare_exchange_n(&trace_active, &expected, false, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
@@ -333,24 +335,24 @@ void kernel_trace_finalize(void) {
 	while (__atomic_load_n(&trace_writers, __ATOMIC_ACQUIRE) != 0u) spinlock_relax();
 	trace_header->flags |= KERNEL_TRACE_FLAG_FINALIZED;
 	trace_header->checksum = 0u;
-	checksum               = trace_crc32((const uint8_t*)trace_header, trace_allocation_size);
+	checksum = trace_crc32((const uint8_t*)trace_header, trace_allocation_size);
 	trace_header->checksum = checksum;
 	if (trace_transport == KERNEL_TRACE_TRANSPORT_SERIAL) {
 		printf("KTRACE_STREAM_BEGIN version=%u session=%llx size=%zu crc32=%08x\n",
-		       KERNEL_TRACE_VERSION,
-		       (unsigned long long)trace_header->session_id,
-		       trace_allocation_size,
-		       checksum);
+				KERNEL_TRACE_VERSION,
+				(unsigned long long)trace_header->session_id,
+				trace_allocation_size,
+				checksum);
 		hal_serial_write((const char*)trace_header, trace_allocation_size);
 		printf("\nKTRACE_STREAM_END session=%llx\n", (unsigned long long)trace_header->session_id);
 	}
 	else {
 		printf("KTRACE_READY version=%u session=%llx phys=0x%llx size=%zu crc32=%08x\n",
-		       KERNEL_TRACE_VERSION,
-		       (unsigned long long)trace_header->session_id,
-		       (unsigned long long)trace_physical_address,
-		       trace_allocation_size,
-		       checksum);
+				KERNEL_TRACE_VERSION,
+				(unsigned long long)trace_header->session_id,
+				(unsigned long long)trace_physical_address,
+				trace_allocation_size,
+				checksum);
 	}
 }
 
