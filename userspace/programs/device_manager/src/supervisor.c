@@ -29,6 +29,7 @@
 #define DM_DRIVER_RESTART_LIMIT 5u
 #define DM_DRIVER_RESTART_BASE_MS 250u
 #define DM_DRIVER_RESTART_MAX_MS 4000u
+#define DM_ERROR_PREFIX "\x1b[31mdevice-manager:\x1b[0m "
 
 #define DM_SUPERVISOR_CONTROL_OBJECT_ID (DEVICE_INTERNAL_OBJECT_BASE + 0u)
 #define DM_SUPERVISOR_STDOUT_OBJECT_ID (DEVICE_INTERNAL_OBJECT_BASE + 1u)
@@ -209,7 +210,7 @@ static bool spawn_worker(
 			process_spawn_detached_thread(server->supervisor.self_cap, entry, argument, argument_size, NULL, 0u);
 	if (status != SYSCALL_STATUS_OK) {
 		char* diagnostic = runtime_diagnostic_get();
-		printf("device-manager: worker %s spawn failed: %u%s%s\n",
+		printf(DM_ERROR_PREFIX "worker %s spawn failed: %u%s%s\n",
 				name,
 				(unsigned)status,
 				diagnostic == NULL ? "" : ": ",
@@ -222,7 +223,7 @@ static bool spawn_worker(
 static void binding_schedule_retry(struct device_server* server, struct dm_driver_binding* binding) {
 	if (binding->restart_count >= DM_DRIVER_RESTART_LIMIT) {
 		binding->state = DM_DRIVER_WAITING_FOR_FALLBACK;
-		printf("device-manager: rejecting %.*s for device %llu after %u restarts\n",
+		printf(DM_ERROR_PREFIX "rejecting %.*s for device %llu after %u restarts\n",
 				(int)binding->driver->name.size,
 				binding->driver->name.data,
 				(unsigned long long)binding->device->id,
@@ -239,9 +240,14 @@ static void binding_schedule_retry(struct device_server* server, struct dm_drive
 		.generation = binding->generation,
 		.delay_ms = delay,
 	};
+	printf(DM_ERROR_PREFIX "restarting %.*s for device %llu in %llu ms\n",
+			(int)binding->driver->name.size,
+			binding->driver->name.data,
+			(unsigned long long)binding->device->id,
+			(unsigned long long)delay);
 	if (!spawn_worker(server, (uintptr_t)retry_process, &argument, sizeof(argument), "dm/driver-retry")) {
 		binding->state = DM_DRIVER_QUARANTINED;
-		printf("device-manager: unable to schedule restart for %.*s\n",
+		printf(DM_ERROR_PREFIX "unable to schedule restart for %.*s\n",
 				(int)binding->driver->name.size,
 				binding->driver->name.data);
 	}

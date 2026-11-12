@@ -45,6 +45,7 @@
 #define SUPERVISOR_RESTART_BASE_MS 250u
 #define SUPERVISOR_RESTART_MAX_MS 4000u
 #define SUPERVISOR_CONTROL_OBJECT_ID 1u
+#define INIT_ERROR_PREFIX "\x1b[31minit:\x1b[0m "
 
 static process_id_t supervisor_pid = PROCESS_PID_INVALID;
 
@@ -196,7 +197,7 @@ static bool process_schedule_restart(
 		.generation = process->generation,
 		.delay_ms = delay,
 	};
-	printf("init: restarting %s in %llu ms\n", process->description, (unsigned long long)delay);
+	printf(INIT_ERROR_PREFIX "restarting %s in %llu ms\n", process->description, (unsigned long long)delay);
 	return spawn_worker(self_cap, (uintptr_t)retry_process, &argument, sizeof(argument));
 }
 
@@ -1057,7 +1058,7 @@ int supervisor_run(const struct init_state* init) {
 				if (channel_reply(call.call_id, NULL, 0u, SYSCALL_STATUS_BAD_ARGUMENT) != SYSCALL_STATUS_OK) return 1;
 				continue;
 			}
-			printf("init: %s exited: wait=%u code=%llu\n",
+			printf(INIT_ERROR_PREFIX "%s exited: wait=%u code=%llu\n",
 					process->description,
 					(unsigned)event.wait_status,
 					(unsigned long long)event.exit_code);
