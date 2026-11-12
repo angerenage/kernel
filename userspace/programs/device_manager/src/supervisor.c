@@ -612,11 +612,13 @@ static bool dispatch_output(
 	log_append(error_stream ? &binding->stderr_log : &binding->stdout_log, bytes, (size_t)request.size);
 	if (request.size != 0u) {
 		FILE* stream = error_stream ? stderr : stdout;
-		printf("[%.*s:%llu:%s] ",
+		if (error_stream) (void)fputs("\x1b[31m", stream);
+		(void)fprintf(stream,
+				"[%.*s:%llu] ",
 				(int)binding->driver->name.size,
 				binding->driver->name.data,
-				(unsigned long long)binding->device->id,
-				error_stream ? "stderr" : "stdout");
+				(unsigned long long)binding->device->id);
+		if (error_stream) (void)fputs("\x1b[0m", stream);
 		(void)fwrite(bytes, 1u, (size_t)request.size, stream);
 		(void)fflush(stream);
 	}
