@@ -1,5 +1,15 @@
 #pragma once
 
+/*
+ * Device-manager control protocol.
+ *
+ * The device-manager control service provides a privileged interface for
+ * inspecting and replacing the active device catalog. Ordinary clients may
+ * inspect the catalog or may request to replace it with CAP_WRITE.
+ *
+ * Current specification version: 1.0-beta
+ */
+
 #include <stdint.h>
 
 #include <base/cap.h>
@@ -8,8 +18,6 @@
 #define DEVICE_MANAGER_NAMESPACE "system"
 #define DEVICE_MANAGER_PROTOCOL_NAME "device-manager-control"
 #define DEVICE_MANAGER_SERVICE_NAME "default"
-#define DEVICE_MANAGER_PROTOCOL_VERSION_MAJOR 1u
-#define DEVICE_MANAGER_PROTOCOL_VERSION_MINOR 0u
 
 /* Ordinary clients may inspect the catalog; init may request CAP_WRITE to replace it. */
 #define DEVICE_MANAGER_CLIENT_RIGHTS ((cap_rights_t)(CAP_CALL | CAP_READ))

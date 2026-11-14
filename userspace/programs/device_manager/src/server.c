@@ -18,6 +18,9 @@
 
 #define DEVICE_MANAGER_CONTROL_OBJECT_ID (DEVICE_INTERNAL_OBJECT_BASE + 3u)
 
+#define DEVICE_MANAGER_PROTOCOL_VERSION_MAJOR 1u
+#define DEVICE_MANAGER_PROTOCOL_VERSION_MINOR 0u
+
 static uint8_t request_buffer[CAP_MAX_REQUEST_SIZE];
 
 static bool reply(const struct cap_request* call, const void* response, size_t size, syscall_status_t status) {
