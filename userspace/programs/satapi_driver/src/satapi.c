@@ -4,11 +4,15 @@
 #include <stdio.h>
 
 #include <protocol/ahci.h>
+#include <system/time.h>
+#include <runtime/log.h>
 
 #include <ata/block_service.h>
 #include <ata/transport.h>
 
 #include "commands.h"
+
+#define SATAPI_MEDIA_POLL_INTERVAL_MS 1000u
 
 struct satapi_backend {
 	const struct ata_transport* transport;
@@ -33,6 +37,23 @@ enum device_driver_result satapi_driver_run(cap_id_t device_cap) {
 	uint32_t physical_block_size;
 
 	if (!ata_transport_initialize(device_cap, AHCI_DEVICE_SATAPI, &transport)) return DEVICE_DRIVER_ERROR;
+	bool waiting_for_media = false;
+	for (;;) {
+		enum satapi_media_status media_status = satapi_test_media(&transport);
+		if (media_status == SATAPI_MEDIA_READY) break;
+		if (media_status != SATAPI_MEDIA_NOT_PRESENT && media_status != SATAPI_MEDIA_NOT_READY) {
+			fprintf(stderr, "satapi: port %u media readiness check failed\n", transport.port);
+			goto error;
+		}
+		if (!waiting_for_media) {
+			if (media_status == SATAPI_MEDIA_NOT_PRESENT)
+				RUNTIME_DEBUG_LOG("satapi: port %u has no media; waiting for insertion\n", transport.port);
+			else RUNTIME_DEBUG_LOG("satapi: port %u media is not ready; waiting\n", transport.port);
+			waiting_for_media = true;
+		}
+		syscall_status_t status = sleep_ms(SATAPI_MEDIA_POLL_INTERVAL_MS);
+		if (status != SYSCALL_STATUS_OK && status != SYSCALL_STATUS_INTERRUPTED) goto error;
+	}
 	if (!satapi_read_capacity(&transport, &physical_block_count, &physical_block_size)) {
 		fprintf(stderr, "satapi: port %u READ CAPACITY failed\n", transport.port);
 		goto error;
