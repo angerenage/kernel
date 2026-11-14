@@ -4,7 +4,6 @@ userspace_runtime_inc = include_directories(
 	'../include/libc',
 	'../include',
 	'include',
-	'programs/device_manager/include',
 	'programs/vfs/include',
 )
 userspace_inc = include_directories('../include/libc', '../include', 'include')
@@ -67,7 +66,6 @@ endif
 
 userspace_runtime_sources = files(
 	'runtime/diagnostic.c',
-	'runtime/block.c',
 	'runtime/filesystem.c',
 	'runtime/file_output.c',
 	'runtime/heap.c',
@@ -94,7 +92,6 @@ userspace_system_sources = files(
 	'system/dma.c',
 	'system/interrupt.c',
 	'system/process.c',
-	'system/pci.c',
 	'system/signal.c',
 	'system/thread.c',
 	'system/time.c',
@@ -150,6 +147,7 @@ subdir('programs/vfs')
 userspace_link_libs += vfs_client
 subdir('programs/loader')
 subdir('programs/device_manager')
+subdir('lib/block')
 subdir('programs/input_manager')
 subdir('programs/keyboard_controller')
 subdir('programs/text_input')
