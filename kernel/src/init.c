@@ -293,13 +293,13 @@ void kernel_main(void) {
 		boot_fail("kernel: boot_init failed");
 	}
 
-	hal_serial_init();
-
 	info = boot_info_get();
 	if (info == NULL || info->memory_map == NULL || info->memory_map_count == 0u) {
 		boot_fail("kernel: boot information unavailable");
 	}
 	if (!firmware_init(info)) boot_fail("kernel: firmware initialization failed");
+
+	hal_serial_init();
 
 	if (!kernel_cpu_boot_init((uintptr_t)stack_bottom, (uintptr_t)stack_top)) {
 		boot_fail("kernel: kernel_cpu_boot_init failed");

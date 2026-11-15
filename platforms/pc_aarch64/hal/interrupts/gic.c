@@ -23,7 +23,6 @@
 #define AARCH64_GIC_MAX_CPUS 64u
 #define AARCH64_GIC_MAX_TARGETS 8u
 #define AARCH64_GIC_SCHEDULER_SGI 1u
-#define AARCH64_GIC_TIMER_PPI 27u
 
 #define AARCH64_GICD_CTLR 0x000u
 #define AARCH64_GICD_IGROUPR0 0x080u
@@ -655,7 +654,7 @@ static bool gic_handle_external_irq(const struct exception_frame* frame) {
 	if (intid == AARCH64_GIC_SCHEDULER_SGI) {
 		handled = true;
 	}
-	else if (intid == AARCH64_GIC_TIMER_PPI) {
+	else if (aarch64_clock_is_interrupt(intid)) {
 		(void)aarch64_clock_fire();
 		handled = true;
 	}

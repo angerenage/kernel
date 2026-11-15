@@ -1,8 +1,12 @@
 #include "clock.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
+#include <firmware/acpi.h>
+#include <firmware/dt/device.h>
 #include <hal/clock.h>
 #include <hal/interrupts.h>
 #include <core/cpu.h>
@@ -12,7 +16,12 @@
 #include "interrupts/gic.h"
 
 #define AARCH64_CNTV_CTL_ENABLE (1u << 0)
-#define AARCH64_TIMER_PPI 27u
+#define AARCH64_GIC_PPI_BASE 16u
+#define AARCH64_GIC_PPI_COUNT 16u
+#define AARCH64_DT_GIC_CELLS 3u
+#define AARCH64_DT_VIRTUAL_TIMER_INDEX 2u
+#define ACPI_GTDT_VIRTUAL_TIMER_GSIV_OFFSET 64u
+#define ACPI_GTDT_VIRTUAL_TIMER_MIN_SIZE (ACPI_GTDT_VIRTUAL_TIMER_GSIV_OFFSET + sizeof(uint32_t))
 
 static hal_clock_handler_t clock_handler;
 static void* clock_context;
@@ -22,8 +31,75 @@ static uint32_t clock_frequency_hz;
 static uint64_t clock_interval_ticks;
 static uint64_t clock_next_deadline;
 static uint64_t monotonic_frequency_hz;
+static uint32_t timer_interrupt_id;
+static struct dt_node timer_dt_node = DT_NODE_INVALID;
+static bool timer_from_acpi;
 static struct spinlock clock_lock = SPINLOCK_INIT_CLASS("clock_lock", SPINLOCK_ORDER_CLOCK, SPINLOCK_FLAG_IRQSAVE);
 static struct hal_interrupt_source_state timer_source;
+
+static bool clock_find_dt(uint32_t* out_id) {
+	struct dt_node node = dt_device_at("arm,armv8-timer", 0u);
+	struct dt_property interrupts;
+	uint64_t type;
+	uint64_t number;
+	size_t first_cell = AARCH64_DT_VIRTUAL_TIMER_INDEX * AARCH64_DT_GIC_CELLS;
+
+	if (!dt_node_valid(node)) node = dt_device_at("arm,armv7-timer", 0u);
+	if (!dt_node_valid(node) || !dt_node_property(node, "interrupts", &interrupts) ||
+			interrupts.size < (first_cell + AARCH64_DT_GIC_CELLS) * sizeof(uint32_t) ||
+			interrupts.size % (AARCH64_DT_GIC_CELLS * sizeof(uint32_t)) != 0u ||
+			!dt_property_read_cells(&interrupts, first_cell, 1u, &type) || type != 1u ||
+			!dt_property_read_cells(&interrupts, first_cell + 1u, 1u, &number) || number >= AARCH64_GIC_PPI_COUNT)
+		return false;
+	timer_dt_node = node;
+	*out_id = AARCH64_GIC_PPI_BASE + (uint32_t)number;
+	return true;
+}
+
+static bool clock_find_acpi(uint32_t* out_id) {
+	const struct acpi_sdt_header* gtdt = acpi_table_next("GTDT", NULL);
+	uint32_t id;
+
+	if (gtdt == NULL || gtdt->length < ACPI_GTDT_VIRTUAL_TIMER_MIN_SIZE) return false;
+	memcpy(&id, (const uint8_t*)gtdt + ACPI_GTDT_VIRTUAL_TIMER_GSIV_OFFSET, sizeof(id));
+	if (id < AARCH64_GIC_PPI_BASE || id >= AARCH64_GIC_PPI_BASE + AARCH64_GIC_PPI_COUNT) return false;
+	timer_from_acpi = true;
+	*out_id = id;
+	return true;
+}
+
+static bool clock_discover_interrupt(void) {
+	uint32_t id;
+
+	if (timer_interrupt_id != 0u) return true;
+	if (!clock_find_dt(&id) && !clock_find_acpi(&id)) return false;
+	timer_interrupt_id = id;
+	return true;
+}
+
+size_t aarch64_clock_acpi_consumed_tables(struct hal_acpi_consumed_table* tables, size_t capacity) {
+	(void)clock_discover_interrupt();
+	if (!timer_from_acpi) return 0u;
+	if (tables != NULL && capacity != 0u) tables[0] = (struct hal_acpi_consumed_table){.signature = "GTDT"};
+	return 1u;
+}
+
+size_t aarch64_clock_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity) {
+	(void)clock_discover_interrupt();
+	if (!dt_node_valid(timer_dt_node)) return 0u;
+	if (nodes != NULL && capacity != 0u) {
+		nodes[0] = (struct hal_device_tree_consumed_node){
+			.node = timer_dt_node,
+			.kind = HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED,
+			.value = 0u,
+		};
+	}
+	return 1u;
+}
+
+bool aarch64_clock_is_interrupt(uint32_t id) {
+	return timer_interrupt_id != 0u && id == timer_interrupt_id;
+}
 
 static inline uint64_t read_counter_frequency(void) {
 	uint64_t value;
@@ -59,6 +135,7 @@ void hal_clock_init(void) {
 	struct irq_state state = spinlock_lock_irqsave(&clock_lock);
 	if (!clock_initialized) {
 		write_timer_control(0u);
+		(void)clock_discover_interrupt();
 		monotonic_frequency_hz = read_counter_frequency();
 		clock_initialized = true;
 	}
@@ -96,7 +173,7 @@ bool hal_clock_start(uint32_t frequency_hz, hal_clock_handler_t handler, void* c
 	}
 	interval_ticks = counter_hz / frequency_hz;
 	if (interval_ticks == 0u) interval_ticks = 1u;
-	if (!aarch64_gic_local_source_init(&timer_source, AARCH64_TIMER_PPI, cpu_current())) {
+	if (timer_interrupt_id == 0u || !aarch64_gic_local_source_init(&timer_source, timer_interrupt_id, cpu_current())) {
 		spinlock_unlock_irqrestore(&clock_lock, state);
 		return false;
 	}

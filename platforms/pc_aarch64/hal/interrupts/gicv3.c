@@ -26,7 +26,6 @@
 #define GICV3_CTLR_RSS (1ull << 18u)
 #define GICV3_TYPER_RSS (1u << 26u)
 #define GICV3_SGI_IRM (1ull << 40u)
-#define GICV3_TIMER_PPI 27u
 
 #define GICD_CTLR 0x0000u
 #define GICD_TYPER 0x0004u
@@ -644,7 +643,7 @@ bool aarch64_gicv3_handle_irq(const struct exception_frame* frame) {
 	/* Acknowledge at the GIC before the sender can reuse the same SGI for
 	 * its next cache synchronization generation. */
 	aarch64_cache_poll_sync();
-	if (intid == GICV3_TIMER_PPI) (void)aarch64_clock_fire();
+	if (aarch64_clock_is_interrupt(intid)) (void)aarch64_clock_fire();
 	else if (intid != GICV3_SCHEDULER_SGI && gicv3_source_valid(intid)) {
 		if (!interrupt_handle_event((struct hal_interrupt_event){.domain = 0u, .id = intid})) {
 			uintptr_t base = distributor_phys;

@@ -1,35 +1,35 @@
+#include "serial.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include <boot/info.h>
+#include <firmware/acpi.h>
+#include <firmware/dt/device.h>
 #include <hal/paging.h>
 #include <hal/serial.h>
 
-#define PL011_BASE_PHYS 0x09000000ull
 #define PL011_PAGE_SIZE 0x00001000ull
 #define PL011_BLOCK_SIZE 0x00200000ull
+#define AARCH64_LOW_ADDRESS_LIMIT (1ull << 48u)
+
+#define ACPI_SPCR_INTERFACE_TYPE_OFFSET 36u
+#define ACPI_SPCR_GAS_OFFSET 40u
+#define ACPI_SPCR_GAS_ADDRESS_OFFSET (ACPI_SPCR_GAS_OFFSET + 4u)
+#define ACPI_SPCR_MIN_SIZE (ACPI_SPCR_GAS_ADDRESS_OFFSET + sizeof(uint64_t))
+#define ACPI_SPCR_INTERFACE_ARM_PL011 0x03u
+#define ACPI_GAS_SYSTEM_MEMORY 0x00u
 
 #define PL011_DR 0x000u
 #define PL011_FR 0x018u
-#define PL011_IBRD 0x024u
-#define PL011_FBRD 0x028u
-#define PL011_LCRH 0x02Cu
 #define PL011_CR 0x030u
-#define PL011_IMSC 0x038u
-#define PL011_ICR 0x044u
 
-#define PL011_FR_BUSY (1u << 3)
 #define PL011_FR_TXFF (1u << 5)
-
-#define PL011_LCRH_FEN (1u << 4)
-#define PL011_LCRH_WLEN_8BIT (3u << 5)
 
 #define PL011_CR_UARTEN (1u << 0)
 #define PL011_CR_TXE (1u << 8)
-#define PL011_CR_RXE (1u << 9)
-
-#define PL011_INT_ALL 0x7FFu
 #define SERIAL_EMERGENCY_POLL_LIMIT 1000000u
 
 #define AARCH64_TT_DESC_VALID (1ull << 0)
@@ -41,6 +41,9 @@
 #define AARCH64_TT_ATTR_DEVICE_nGnRnE 2ull
 
 static volatile uint32_t* serial_base;
+static uintptr_t serial_base_phys;
+static struct dt_node serial_dt_node = DT_NODE_INVALID;
+static bool serial_from_acpi;
 static bool serial_ready;
 static bool serial_emergency_active;
 static bool serial_identity_mapped;
@@ -65,9 +68,142 @@ static inline void serial_tlb_flush_all(void) {
 							 : "memory");
 }
 
+static struct dt_node serial_dt_child_named(struct dt_node parent, const char* name, size_t name_length) {
+	for (struct dt_node child = dt_node_child(parent); dt_node_valid(child); child = dt_node_next(child)) {
+		const char* child_name = dt_node_name(child);
+		if (child_name != NULL && strlen(child_name) == name_length && memcmp(child_name, name, name_length) == 0)
+			return child;
+	}
+	return DT_NODE_INVALID;
+}
+
+static struct dt_node serial_dt_path(const char* path, size_t length) {
+	struct dt_node node = dt_root();
+	size_t cursor = 0u;
+
+	if (!dt_node_valid(node) || path == NULL || length == 0u || path[0] != '/') return DT_NODE_INVALID;
+	while (cursor < length && path[cursor] == '/') cursor++;
+	while (cursor < length) {
+		size_t start = cursor;
+		while (cursor < length && path[cursor] != '/') cursor++;
+		if (cursor == start || !dt_node_valid(node = serial_dt_child_named(node, path + start, cursor - start)))
+			return DT_NODE_INVALID;
+		while (cursor < length && path[cursor] == '/') cursor++;
+	}
+	return node;
+}
+
+static bool serial_dt_property_string(
+		struct dt_node node, const char* name, const char** out_string, size_t* out_length) {
+	struct dt_property property;
+	const char* end;
+
+	if (out_string == NULL || out_length == NULL || !dt_node_property(node, name, &property) || property.size == 0u)
+		return false;
+	end = memchr(property.data, '\0', property.size);
+	if (end == NULL) return false;
+	*out_string = property.data;
+	*out_length = (size_t)(end - (const char*)property.data);
+	return true;
+}
+
+static struct dt_node serial_dt_console(void) {
+	struct dt_node root = dt_root();
+	struct dt_node chosen;
+	const char* path;
+	size_t length;
+
+	if (!dt_node_valid(root)) return DT_NODE_INVALID;
+	chosen = serial_dt_child_named(root, "chosen", sizeof("chosen") - 1u);
+	if (!dt_node_valid(chosen) || (!serial_dt_property_string(chosen, "stdout-path", &path, &length) &&
+										  !serial_dt_property_string(chosen, "linux,stdout-path", &path, &length)))
+		return DT_NODE_INVALID;
+	for (size_t index = 0u; index < length; index++) {
+		if (path[index] == ':') {
+			length = index;
+			break;
+		}
+	}
+	if (length == 0u) return DT_NODE_INVALID;
+	if (path[0] == '/') return serial_dt_path(path, length);
+
+	struct dt_node aliases = serial_dt_child_named(root, "aliases", sizeof("aliases") - 1u);
+	const char* alias_path;
+	size_t alias_length;
+	char alias[64];
+	if (!dt_node_valid(aliases) || length >= sizeof(alias)) return DT_NODE_INVALID;
+	memcpy(alias, path, length);
+	alias[length] = '\0';
+	if (!serial_dt_property_string(aliases, alias, &alias_path, &alias_length)) return DT_NODE_INVALID;
+	return serial_dt_path(alias_path, alias_length);
+}
+
+static bool serial_find_dt(uintptr_t* out_address) {
+	struct dt_node node = serial_dt_console();
+	struct dt_reg reg;
+
+	if (!dt_node_valid(node)) node = dt_device_at("arm,pl011", 0u);
+	if (!dt_node_valid(node) || !dt_node_enabled(node) || !dt_node_compatible(node, "arm,pl011") ||
+			!dt_node_reg(node, 0u, &reg) || reg.address == 0u || reg.address > UINTPTR_MAX ||
+			reg.size < PL011_PAGE_SIZE)
+		return false;
+	serial_dt_node = node;
+	*out_address = (uintptr_t)reg.address;
+	return true;
+}
+
+static bool serial_find_acpi(uintptr_t* out_address) {
+	const struct acpi_sdt_header* spcr = acpi_table_next("SPCR", NULL);
+	const uint8_t* bytes = (const uint8_t*)spcr;
+	uint64_t address;
+
+	if (spcr == NULL || spcr->length < ACPI_SPCR_MIN_SIZE ||
+			bytes[ACPI_SPCR_INTERFACE_TYPE_OFFSET] != ACPI_SPCR_INTERFACE_ARM_PL011 ||
+			bytes[ACPI_SPCR_GAS_OFFSET] != ACPI_GAS_SYSTEM_MEMORY)
+		return false;
+	memcpy(&address, bytes + ACPI_SPCR_GAS_ADDRESS_OFFSET, sizeof(address));
+	if (address == 0u || address > UINTPTR_MAX) return false;
+	serial_from_acpi = true;
+	*out_address = (uintptr_t)address;
+	return true;
+}
+
+static bool serial_discover(void) {
+	uintptr_t address;
+
+	if (serial_base_phys != 0u) return true;
+	if (!serial_find_dt(&address) && !serial_find_acpi(&address)) return false;
+	serial_base_phys = address;
+	return true;
+}
+
+size_t aarch64_serial_acpi_consumed_tables(struct hal_acpi_consumed_table* tables, size_t capacity) {
+	if (!serial_from_acpi) return 0u;
+	if (tables != NULL && capacity != 0u) tables[0] = (struct hal_acpi_consumed_table){.signature = "SPCR"};
+	return 1u;
+}
+
+size_t aarch64_serial_device_tree_consumed_nodes(struct hal_device_tree_consumed_node* nodes, size_t capacity) {
+	if (!dt_node_valid(serial_dt_node)) return 0u;
+	if (nodes != NULL && capacity != 0u) {
+		nodes[0] = (struct hal_device_tree_consumed_node){
+			.node = serial_dt_node,
+			.kind = HAL_DEVICE_TREE_REFERENCE_UNSUPPORTED,
+			.value = 0u,
+		};
+	}
+	return 1u;
+}
+
 static bool serial_map_uart_identity(void) {
+	uintptr_t block_phys;
+	size_t l0_index;
+	size_t l1_index;
+	size_t l2_index;
+
+	if (!serial_discover() || serial_base_phys >= AARCH64_LOW_ADDRESS_LIMIT) return false;
 	if (serial_identity_mapped) {
-		serial_base = (volatile uint32_t*)(uintptr_t)PL011_BASE_PHYS;
+		serial_base = (volatile uint32_t*)serial_base_phys;
 		return true;
 	}
 
@@ -79,12 +215,14 @@ static bool serial_map_uart_identity(void) {
 		return false;
 	}
 
-	ttbr0_l0[0] = l1_phys | AARCH64_TT_DESC_VALID | AARCH64_TT_DESC_TABLE;
-	ttbr0_l1[0] = l2_phys | AARCH64_TT_DESC_VALID | AARCH64_TT_DESC_TABLE;
-
-	ttbr0_l2[(PL011_BASE_PHYS >> 21) & 0x1FFu] = (PL011_BASE_PHYS & ~(PL011_BLOCK_SIZE - 1)) | AARCH64_TT_DESC_VALID |
-	                                             ((uint64_t)AARCH64_TT_ATTR_DEVICE_nGnRnE << 2) | AARCH64_TT_DESC_AF |
-	                                             AARCH64_TT_DESC_PXN | AARCH64_TT_DESC_UXN;
+	block_phys = serial_base_phys & ~(uintptr_t)(PL011_BLOCK_SIZE - 1u);
+	l0_index = (serial_base_phys >> 39u) & 0x1ffu;
+	l1_index = (serial_base_phys >> 30u) & 0x1ffu;
+	l2_index = (serial_base_phys >> 21u) & 0x1ffu;
+	ttbr0_l0[l0_index] = l1_phys | AARCH64_TT_DESC_VALID | AARCH64_TT_DESC_TABLE;
+	ttbr0_l1[l1_index] = l2_phys | AARCH64_TT_DESC_VALID | AARCH64_TT_DESC_TABLE;
+	ttbr0_l2[l2_index] = block_phys | AARCH64_TT_DESC_VALID | ((uint64_t)AARCH64_TT_ATTR_DEVICE_nGnRnE << 2) |
+	                     AARCH64_TT_DESC_AF | AARCH64_TT_DESC_PXN | AARCH64_TT_DESC_UXN;
 
 	__asm__ volatile("msr ttbr0_el1, %0\n\t"
 					 "isb"
@@ -93,7 +231,7 @@ static bool serial_map_uart_identity(void) {
 			: "memory");
 	serial_tlb_flush_all();
 
-	serial_base = (volatile uint32_t*)(uintptr_t)PL011_BASE_PHYS;
+	serial_base = (volatile uint32_t*)serial_base_phys;
 	serial_identity_mapped = true;
 	return true;
 }
@@ -105,12 +243,16 @@ static bool serial_map_uart_direct(void) {
 	uintptr_t page_virt;
 
 	if (serial_direct_mapped) return true;
+	if (!serial_discover()) return false;
 	if (!boot_address_space_get(&address_space)) return false;
 
 	kernel_space = hal_paging_kernel_space();
 	if (kernel_space == NULL) return false;
 
-	page_phys = (uintptr_t)PL011_BASE_PHYS & ~(uintptr_t)(PL011_PAGE_SIZE - 1u);
+	page_phys = serial_base_phys & ~(uintptr_t)(PL011_PAGE_SIZE - 1u);
+	if (page_phys > UINTPTR_MAX - address_space.direct_map_offset ||
+			serial_base_phys > UINTPTR_MAX - address_space.direct_map_offset)
+		return false;
 	page_virt = (uintptr_t)(address_space.direct_map_offset + page_phys);
 	if (!hal_paging_query(kernel_space, page_virt, NULL) &&
 			!hal_paging_map(kernel_space,
@@ -124,7 +266,7 @@ static bool serial_map_uart_direct(void) {
 		return false;
 	}
 
-	serial_base = (volatile uint32_t*)(uintptr_t)(address_space.direct_map_offset + PL011_BASE_PHYS);
+	serial_base = (volatile uint32_t*)(address_space.direct_map_offset + serial_base_phys);
 	serial_direct_mapped = true;
 	return true;
 }
@@ -155,12 +297,6 @@ static inline void serial_relax(void) {
 	__asm__ volatile("" ::: "memory");
 }
 
-static inline void pl011_wait_not_busy(void) {
-	while ((pl011_read(PL011_FR) & PL011_FR_BUSY) != 0) {
-		serial_relax();
-	}
-}
-
 static inline void pl011_wait_tx_ready(void) {
 	while ((pl011_read(PL011_FR) & PL011_FR_TXFF) != 0) {
 		serial_relax();
@@ -173,21 +309,7 @@ void hal_serial_init(void) {
 		return;
 	}
 
-	pl011_write(PL011_CR, 0u);
-	pl011_wait_not_busy();
-
-	pl011_write(PL011_IMSC, 0u);
-	pl011_write(PL011_ICR, PL011_INT_ALL);
-
-	/*
-	 * QEMU's aarch64 virt machine exposes a PL011 clocked at 24 MHz.
-	 * 24,000,000 / (16 * 115,200) = 13.0208..., so the closest divisor
-	 * pair is IBRD=13 and FBRD=1.
-	 */
-	pl011_write(PL011_IBRD, 13u);
-	pl011_write(PL011_FBRD, 1u);
-	pl011_write(PL011_LCRH, PL011_LCRH_FEN | PL011_LCRH_WLEN_8BIT);
-	pl011_write(PL011_CR, PL011_CR_UARTEN | PL011_CR_TXE | PL011_CR_RXE);
+	pl011_write(PL011_CR, pl011_read(PL011_CR) | PL011_CR_UARTEN | PL011_CR_TXE);
 
 	__atomic_store_n(&serial_ready, true, __ATOMIC_RELEASE);
 }
