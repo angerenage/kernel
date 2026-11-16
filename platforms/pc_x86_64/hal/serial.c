@@ -1,33 +1,72 @@
+#include "serial.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
+#include <firmware/acpi.h>
 #include <hal/serial.h>
 
 #include "utils.h"
 
-#define COM1_BASE 0x3F8
+#define LEGACY_COM1_BASE 0x3f8u
 #define SERIAL_EMERGENCY_POLL_LIMIT 1000000u
+
+#define ACPI_SPCR_INTERFACE_TYPE_OFFSET 36u
+#define ACPI_SPCR_GAS_OFFSET 40u
+#define ACPI_SPCR_GAS_ADDRESS_OFFSET 44u
+#define ACPI_SPCR_MIN_SIZE 52u
+#define ACPI_GAS_SYSTEM_IO 1u
 
 static bool serial_ready;
 static bool serial_emergency_active;
+static uint16_t serial_port;
+static bool serial_from_acpi;
+
+static bool serial_find_acpi(uint16_t* out_port) {
+	const struct acpi_sdt_header* spcr = acpi_table_next("SPCR", NULL);
+	const uint8_t* bytes = (const uint8_t*)spcr;
+	uint64_t address;
+
+	if (spcr == NULL || spcr->length < ACPI_SPCR_MIN_SIZE || bytes[ACPI_SPCR_INTERFACE_TYPE_OFFSET] > 2u ||
+			bytes[ACPI_SPCR_GAS_OFFSET] != ACPI_GAS_SYSTEM_IO || bytes[ACPI_SPCR_GAS_OFFSET + 2u] != 0u)
+		return false;
+	memcpy(&address, bytes + ACPI_SPCR_GAS_ADDRESS_OFFSET, sizeof(address));
+	if (address == 0u || address > UINT16_MAX - 7u) return false;
+	serial_from_acpi = true;
+	*out_port = (uint16_t)address;
+	return true;
+}
+
+static bool serial_discover(void) {
+	if (serial_port != 0u) return true;
+	if (!serial_find_acpi(&serial_port)) serial_port = LEGACY_COM1_BASE;
+	return true;
+}
+
+size_t x86_64_serial_acpi_consumed_tables(struct hal_acpi_consumed_table* tables, size_t capacity) {
+	if (!serial_from_acpi) return 0u;
+	if (tables != NULL && capacity != 0u) tables[0] = (struct hal_acpi_consumed_table){.signature = "SPCR"};
+	return 1u;
+}
 
 static inline bool serial_transmit_empty(void) {
-	return (inb(COM1_BASE + 5) & 0x20u) != 0;
+	return (inb((uint16_t)(serial_port + 5u)) & 0x20u) != 0;
 }
 
 void hal_serial_init(void) {
-	if (__atomic_load_n(&serial_ready, __ATOMIC_ACQUIRE)) {
-		return;
-	}
+	if (__atomic_load_n(&serial_ready, __ATOMIC_ACQUIRE) || !serial_discover()) return;
 
-	outb(COM1_BASE + 1, 0x00); // Disable interrupts.
-	outb(COM1_BASE + 3, 0x80); // Enable DLAB.
-	outb(COM1_BASE + 0, 0x03); // Set divisor to 3 (38400 baud).
-	outb(COM1_BASE + 1, 0x00); // High byte of divisor.
-	outb(COM1_BASE + 3, 0x03); // 8 bits, no parity, one stop bit.
-	outb(COM1_BASE + 2, 0xC7); // Enable FIFO, clear them, 14-byte threshold.
-	outb(COM1_BASE + 4, 0x0B); // IRQs enabled, RTS/DSR set.
+	if (!serial_from_acpi) {
+		outb((uint16_t)(serial_port + 1u), 0x00); // Disable interrupts.
+		outb((uint16_t)(serial_port + 3u), 0x80); // Enable DLAB.
+		outb(serial_port, 0x03);                  // Set divisor to 3 (38400 baud).
+		outb((uint16_t)(serial_port + 1u), 0x00); // High byte of divisor.
+		outb((uint16_t)(serial_port + 3u), 0x03); // 8 bits, no parity, one stop bit.
+		outb((uint16_t)(serial_port + 2u), 0xc7); // Enable and clear FIFOs.
+		outb((uint16_t)(serial_port + 4u), 0x0b); // RTS/DSR and OUT2.
+	}
 
 	__atomic_store_n(&serial_ready, true, __ATOMIC_RELEASE);
 }
@@ -47,7 +86,7 @@ void hal_serial_write_char(char ch) {
 	}
 	if (__atomic_load_n(&serial_emergency_active, __ATOMIC_ACQUIRE)) return;
 
-	outb(COM1_BASE, (uint8_t)ch);
+	outb(serial_port, (uint8_t)ch);
 }
 
 void hal_serial_write(const char* data, size_t length) {
@@ -59,7 +98,7 @@ void hal_serial_write(const char* data, size_t length) {
 static bool serial_emergency_write_char(char ch) {
 	for (size_t attempt = 0u; attempt < SERIAL_EMERGENCY_POLL_LIMIT; attempt++) {
 		if (serial_transmit_empty()) {
-			outb(COM1_BASE, (uint8_t)ch);
+			outb(serial_port, (uint8_t)ch);
 			return true;
 		}
 		__asm__ volatile("pause");

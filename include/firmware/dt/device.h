@@ -21,6 +21,9 @@ struct dt_node dt_device_at(const char* compatible, size_t index);
 /* Return a node whose named string list contains value, in stable tree order. */
 struct dt_node dt_node_with_string_at(const char* name, const char* value, size_t index);
 
+/* Resolve the console selected by /chosen stdout-path or linux,stdout-path. */
+struct dt_node dt_stdout_node(void);
+
 /* Decode one reg entry without translating it through parent buses. */
 bool dt_node_reg_raw(struct dt_node node, size_t index, struct dt_reg* out);
 

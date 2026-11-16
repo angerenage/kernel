@@ -68,78 +68,8 @@ static inline void serial_tlb_flush_all(void) {
 							 : "memory");
 }
 
-static struct dt_node serial_dt_child_named(struct dt_node parent, const char* name, size_t name_length) {
-	for (struct dt_node child = dt_node_child(parent); dt_node_valid(child); child = dt_node_next(child)) {
-		const char* child_name = dt_node_name(child);
-		if (child_name != NULL && strlen(child_name) == name_length && memcmp(child_name, name, name_length) == 0)
-			return child;
-	}
-	return DT_NODE_INVALID;
-}
-
-static struct dt_node serial_dt_path(const char* path, size_t length) {
-	struct dt_node node = dt_root();
-	size_t cursor = 0u;
-
-	if (!dt_node_valid(node) || path == NULL || length == 0u || path[0] != '/') return DT_NODE_INVALID;
-	while (cursor < length && path[cursor] == '/') cursor++;
-	while (cursor < length) {
-		size_t start = cursor;
-		while (cursor < length && path[cursor] != '/') cursor++;
-		if (cursor == start || !dt_node_valid(node = serial_dt_child_named(node, path + start, cursor - start)))
-			return DT_NODE_INVALID;
-		while (cursor < length && path[cursor] == '/') cursor++;
-	}
-	return node;
-}
-
-static bool serial_dt_property_string(
-		struct dt_node node, const char* name, const char** out_string, size_t* out_length) {
-	struct dt_property property;
-	const char* end;
-
-	if (out_string == NULL || out_length == NULL || !dt_node_property(node, name, &property) || property.size == 0u)
-		return false;
-	end = memchr(property.data, '\0', property.size);
-	if (end == NULL) return false;
-	*out_string = property.data;
-	*out_length = (size_t)(end - (const char*)property.data);
-	return true;
-}
-
-static struct dt_node serial_dt_console(void) {
-	struct dt_node root = dt_root();
-	struct dt_node chosen;
-	const char* path;
-	size_t length;
-
-	if (!dt_node_valid(root)) return DT_NODE_INVALID;
-	chosen = serial_dt_child_named(root, "chosen", sizeof("chosen") - 1u);
-	if (!dt_node_valid(chosen) || (!serial_dt_property_string(chosen, "stdout-path", &path, &length) &&
-										  !serial_dt_property_string(chosen, "linux,stdout-path", &path, &length)))
-		return DT_NODE_INVALID;
-	for (size_t index = 0u; index < length; index++) {
-		if (path[index] == ':') {
-			length = index;
-			break;
-		}
-	}
-	if (length == 0u) return DT_NODE_INVALID;
-	if (path[0] == '/') return serial_dt_path(path, length);
-
-	struct dt_node aliases = serial_dt_child_named(root, "aliases", sizeof("aliases") - 1u);
-	const char* alias_path;
-	size_t alias_length;
-	char alias[64];
-	if (!dt_node_valid(aliases) || length >= sizeof(alias)) return DT_NODE_INVALID;
-	memcpy(alias, path, length);
-	alias[length] = '\0';
-	if (!serial_dt_property_string(aliases, alias, &alias_path, &alias_length)) return DT_NODE_INVALID;
-	return serial_dt_path(alias_path, alias_length);
-}
-
 static bool serial_find_dt(uintptr_t* out_address) {
-	struct dt_node node = serial_dt_console();
+	struct dt_node node = dt_stdout_node();
 	struct dt_reg reg;
 
 	if (!dt_node_valid(node)) node = dt_device_at("arm,pl011", 0u);
@@ -159,7 +89,7 @@ static bool serial_find_acpi(uintptr_t* out_address) {
 
 	if (spcr == NULL || spcr->length < ACPI_SPCR_MIN_SIZE ||
 			bytes[ACPI_SPCR_INTERFACE_TYPE_OFFSET] != ACPI_SPCR_INTERFACE_ARM_PL011 ||
-			bytes[ACPI_SPCR_GAS_OFFSET] != ACPI_GAS_SYSTEM_MEMORY)
+			bytes[ACPI_SPCR_GAS_OFFSET] != ACPI_GAS_SYSTEM_MEMORY || bytes[ACPI_SPCR_GAS_OFFSET + 2u] != 0u)
 		return false;
 	memcpy(&address, bytes + ACPI_SPCR_GAS_ADDRESS_OFFSET, sizeof(address));
 	if (address == 0u || address > UINTPTR_MAX) return false;

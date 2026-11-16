@@ -1,5 +1,6 @@
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include <base/math.h>
 #include <firmware/dt/device.h>
@@ -60,6 +61,75 @@ struct dt_node dt_node_with_string_at(const char* name, const char* value, size_
 		node = dt_walk_next(node);
 	}
 	return DT_NODE_INVALID;
+}
+
+static struct dt_node dt_child_named(struct dt_node parent, const char* name, size_t name_length) {
+	for (struct dt_node child = dt_node_child(parent); dt_node_valid(child); child = dt_node_next(child)) {
+		const char* child_name = dt_node_name(child);
+		if (child_name != NULL && strlen(child_name) == name_length && memcmp(child_name, name, name_length) == 0)
+			return child;
+	}
+	return DT_NODE_INVALID;
+}
+
+static struct dt_node dt_path_node(const char* path, size_t length) {
+	struct dt_node node = dt_root();
+	size_t cursor = 0u;
+
+	if (!dt_node_valid(node) || path == NULL || length == 0u || path[0] != '/') return DT_NODE_INVALID;
+	while (cursor < length && path[cursor] == '/') cursor++;
+	while (cursor < length) {
+		size_t start = cursor;
+		while (cursor < length && path[cursor] != '/') cursor++;
+		if (cursor == start || !dt_node_valid(node = dt_child_named(node, path + start, cursor - start)))
+			return DT_NODE_INVALID;
+		while (cursor < length && path[cursor] == '/') cursor++;
+	}
+	return node;
+}
+
+static bool dt_property_string(struct dt_node node, const char* name, const char** out_string, size_t* out_length) {
+	struct dt_property property;
+	const char* end;
+
+	if (out_string == NULL || out_length == NULL || !dt_node_property(node, name, &property) || property.size == 0u)
+		return false;
+	end = memchr(property.data, '\0', property.size);
+	if (end == NULL) return false;
+	*out_string = property.data;
+	*out_length = (size_t)(end - (const char*)property.data);
+	return true;
+}
+
+struct dt_node dt_stdout_node(void) {
+	struct dt_node root = dt_root();
+	struct dt_node chosen;
+	const char* path;
+	size_t length;
+
+	if (!dt_node_valid(root)) return DT_NODE_INVALID;
+	chosen = dt_child_named(root, "chosen", sizeof("chosen") - 1u);
+	if (!dt_node_valid(chosen) || (!dt_property_string(chosen, "stdout-path", &path, &length) &&
+										  !dt_property_string(chosen, "linux,stdout-path", &path, &length)))
+		return DT_NODE_INVALID;
+	for (size_t index = 0u; index < length; index++) {
+		if (path[index] == ':') {
+			length = index;
+			break;
+		}
+	}
+	if (length == 0u) return DT_NODE_INVALID;
+	if (path[0] == '/') return dt_path_node(path, length);
+
+	struct dt_node aliases = dt_child_named(root, "aliases", sizeof("aliases") - 1u);
+	const char* alias_path;
+	size_t alias_length;
+	char alias[64];
+	if (!dt_node_valid(aliases) || length >= sizeof(alias)) return DT_NODE_INVALID;
+	memcpy(alias, path, length);
+	alias[length] = '\0';
+	if (!dt_property_string(aliases, alias, &alias_path, &alias_length)) return DT_NODE_INVALID;
+	return dt_path_node(alias_path, alias_length);
 }
 
 static bool dt_node_cells(struct dt_node node, const char* name, uint32_t fallback, bool zero_valid, uint32_t* out) {

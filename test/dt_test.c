@@ -291,6 +291,36 @@ Test(dt, navigation_accepts_nop_before_root) {
 	cr_assert_eq(dt_node_parent(child).id, root.id);
 }
 
+Test(dt, resolves_stdout_path_alias_and_ignores_serial_options) {
+	static const uint8_t alias_path[] = "/soc/uart@1000";
+	static const uint8_t stdout_path[] = "serial0:115200n8";
+	struct dt_node node;
+	size_t alias_name;
+	size_t stdout_name;
+
+	test_reset();
+	alias_name = test_string("serial0");
+	stdout_name = test_string("stdout-path");
+	test_begin_node("");
+	test_begin_node("aliases");
+	test_property(17u, alias_name, alias_path, sizeof(alias_path));
+	test_end_node();
+	test_begin_node("chosen");
+	test_property(17u, stdout_name, stdout_path, sizeof(stdout_path));
+	test_end_node();
+	test_begin_node("soc");
+	test_begin_node("uart@1000");
+	test_end_node();
+	test_end_node();
+	test_end_node();
+	test_token(9u);
+	test_header(17u);
+	cr_assert(test_dt_init(test_arena));
+	node = dt_stdout_node();
+	cr_assert(dt_node_valid(node));
+	cr_assert_str_eq(dt_node_name(node), "uart@1000");
+}
+
 Test(dt, decodes_and_translates_device_registers) {
 	static const uint8_t root_address_cells[] = {0u, 0u, 0u, 2u};
 	static const uint8_t root_size_cells[] = {0u, 0u, 0u, 2u};

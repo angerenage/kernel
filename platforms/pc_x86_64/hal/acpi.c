@@ -5,6 +5,7 @@
 
 #include "interrupts/apic.h"
 #include "iommu/iommu.h"
+#include "serial.h"
 
 static size_t acpi_append(size_t (*provider)(struct hal_acpi_consumed_table*, size_t),
 		struct hal_acpi_consumed_table* tables, size_t capacity, size_t count) {
@@ -19,5 +20,6 @@ size_t hal_acpi_consumed_tables(struct hal_acpi_consumed_table* tables, size_t c
 
 	count = acpi_append(x86_64_apic_acpi_consumed_tables, tables, capacity, count);
 	count = acpi_append(x86_64_iommu_acpi_consumed_tables, tables, capacity, count);
+	count = acpi_append(x86_64_serial_acpi_consumed_tables, tables, capacity, count);
 	return count;
 }

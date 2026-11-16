@@ -16,14 +16,15 @@
 .equ LOONGARCH64_CSR_PGD, 0x1b
 .equ LOONGARCH64_CSR_TLBRSAVE, 0x8c
 
-.equ NS16550_BASE_PHYS, 0x1fe001e0
 .equ NS16550_THR, 0
 .equ NS16550_LSR, 5
 .equ NS16550_LSR_THRE, 0x20
 
 .macro loongarch64_puts label
 	la.local $t0, \label
-	li.w $t1, NS16550_BASE_PHYS
+	la.global $t1, loongarch64_serial_base_physical
+	ld.d $t1, $t1, 0
+	beqz $t1, 3f
 1:
 	ld.bu $t2, $t0, 0
 	beqz $t2, 3f
