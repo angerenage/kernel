@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <firmware/acpi.h>
 #include <firmware/dt.h>
 #include <hal/clock.h>
 #include <core/lock.h>
@@ -16,6 +17,9 @@
 
 #define RISCV64_SBI_EID_TIME 0x54494d45ul
 #define RISCV64_SBI_FID_SET_TIMER 0ul
+
+#define ACPI_RHCT_TIMEBASE_FREQUENCY_OFFSET 40u
+#define ACPI_RHCT_MIN_SIZE 56u
 
 struct sbi_ret {
 	long error;
@@ -30,6 +34,7 @@ static uint32_t clock_frequency_hz;
 static uint64_t clock_interval_ticks;
 static uint64_t clock_next_deadline;
 static uint64_t monotonic_frequency_hz;
+static bool clock_from_acpi;
 static struct spinlock clock_lock = SPINLOCK_INIT_CLASS("clock_lock", SPINLOCK_ORDER_CLOCK, SPINLOCK_FLAG_IRQSAVE);
 
 static inline uint64_t read_time(void) {
@@ -38,7 +43,7 @@ static inline uint64_t read_time(void) {
 	return value;
 }
 
-static uint64_t discover_timebase_frequency(void) {
+static uint64_t discover_dt_timebase_frequency(void) {
 	struct dt_node node;
 	struct dt_property property;
 	uint64_t frequency;
@@ -53,6 +58,30 @@ static uint64_t discover_timebase_frequency(void) {
 		return frequency;
 	}
 	return 0u;
+}
+
+static uint64_t discover_acpi_timebase_frequency(void) {
+	const struct acpi_sdt_header* rhct = acpi_table_next("RHCT", NULL);
+	uint64_t frequency;
+
+	if (rhct == NULL || rhct->length < ACPI_RHCT_MIN_SIZE) return 0u;
+	memcpy(&frequency, (const uint8_t*)rhct + ACPI_RHCT_TIMEBASE_FREQUENCY_OFFSET, sizeof(frequency));
+	if (frequency == 0u) return 0u;
+	clock_from_acpi = true;
+	return frequency;
+}
+
+static uint64_t discover_timebase_frequency(void) {
+	uint64_t frequency = discover_dt_timebase_frequency();
+
+	return frequency != 0u ? frequency : discover_acpi_timebase_frequency();
+}
+
+size_t riscv64_clock_acpi_consumed_tables(struct hal_acpi_consumed_table* tables, size_t capacity) {
+	if (!clock_initialized) (void)discover_timebase_frequency();
+	if (!clock_from_acpi) return 0u;
+	if (tables != NULL && capacity != 0u) tables[0] = (struct hal_acpi_consumed_table){.signature = "RHCT"};
+	return 1u;
 }
 
 static inline uint64_t read_sie(void) {

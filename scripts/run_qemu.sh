@@ -390,7 +390,7 @@ case "$TARGET_ARCH" in
 			auto|riscv) qemu_args+=( -device virtio-gpu-pci ) ;;
 			none)
 				qemu_args[1]="virt,acpi=off,pflash0=pflash0,pflash1=pflash1"
-				qemu_args+=("-device ramfb")
+				qemu_args+=( -device ramfb )
 				;;
 			*) error "IOMMU model '$IOMMU_MODE' is not supported on riscv64" ;;
 		esac
