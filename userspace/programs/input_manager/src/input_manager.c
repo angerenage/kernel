@@ -299,7 +299,20 @@ static bool install_source(struct input_manager* manager, struct managed_input_s
 		source->active = false;
 	}
 	input_manager_unlock(manager);
-	if (!success || !notify_consumers(manager)) return false;
+	if (!success) return false;
+	if (!notify_consumers(manager)) {
+		input_manager_lock(manager);
+		struct managed_input_source** cursor = &manager->sources;
+		while (*cursor != NULL && *cursor != source) cursor = &(*cursor)->next;
+		if (*cursor == source) {
+			*cursor = source->next;
+			source->next = NULL;
+			source->active = false;
+			manager->source_count--;
+		}
+		input_manager_unlock(manager);
+		return false;
+	}
 	RUNTIME_DEBUG_LOG("input manager: attached source %llu (%s), class=%u controls=%zu outputs=%zu\n",
 			(unsigned long long)source->id,
 			source->service.selector.service,
