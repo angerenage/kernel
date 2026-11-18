@@ -8,8 +8,9 @@
 #include <core/semaphore.h>
 #include <kernel/trace.h>
 
-#define CAP_CALL_ID_MIN 1u
-#define CAP_CALL_ID_MAX UINT64_MAX
+#define CAP_CALL_SLOT_BITS 16u
+#define CAP_CALL_SLOT_MAX ((1ull << CAP_CALL_SLOT_BITS) - 1u)
+#define CAP_CALL_GENERATION_MAX (UINT64_MAX >> CAP_CALL_SLOT_BITS)
 #define CAP_CALL_CANCEL_BATCH 16u
 
 #define TRACE_CAP_WAIT_PHASE(phase, type)                                                                              \
@@ -21,20 +22,47 @@ enum cap_pending_state {
 	CAP_PENDING_STATE_COMPLETED,
 };
 
-static struct id_table pending_call_table =
-		ID_TABLE_INITIALIZER("pending_call_table", CAP_CALL_ID_MIN, CAP_CALL_ID_MAX);
+static struct id_table pending_call_table = ID_TABLE_INITIALIZER("pending_call_table", 1u, CAP_CALL_SLOT_MAX);
+static uint64_t pending_call_generation = 1u;
+
+struct cap_pending_call_lookup {
+	cap_call_id_t id;
+};
 
 static bool cap_pending_call_retain_callback(void* value, void* context) {
 	struct cap_pending_call* call = value;
-	(void)context;
+	const struct cap_pending_call_lookup* lookup = context;
 
+	if (lookup != NULL && call->id != lookup->id) return false;
 	(void)__atomic_add_fetch(&call->reference_count, 1u, __ATOMIC_RELAXED);
 	return true;
 }
 
 static struct cap_pending_call* cap_pending_call_acquire(cap_call_id_t id) {
+	struct cap_pending_call_lookup lookup = {.id = id};
+	id_table_id_t slot_id;
+
 	if (id == CAP_CALL_ID_INVALID) return NULL;
-	return id_table_lookup_retain(&pending_call_table, id, cap_pending_call_retain_callback, NULL);
+	slot_id = id & CAP_CALL_SLOT_MAX;
+	if (slot_id == ID_TABLE_ID_INVALID) return NULL;
+	return id_table_lookup_retain(&pending_call_table, slot_id, cap_pending_call_retain_callback, &lookup);
+}
+
+static bool cap_pending_call_allocate_id(id_table_id_t slot_id, cap_call_id_t* out_id) {
+	uint64_t generation;
+	uint64_t next;
+
+	if (out_id == NULL || slot_id == ID_TABLE_ID_INVALID || slot_id > CAP_CALL_SLOT_MAX) return false;
+	for (;;) {
+		generation = __atomic_load_n(&pending_call_generation, __ATOMIC_ACQUIRE);
+		if (generation == 0u || generation > CAP_CALL_GENERATION_MAX) return false;
+		next = generation == CAP_CALL_GENERATION_MAX ? 0u : generation + 1u;
+		if (__atomic_compare_exchange_n(
+					&pending_call_generation, &generation, next, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+			*out_id = (generation << CAP_CALL_SLOT_BITS) | slot_id;
+			return true;
+		}
+	}
 }
 
 static void cap_pending_call_release(struct cap_pending_call* call) {
@@ -62,7 +90,8 @@ static void cap_pending_call_complete(struct cap_pending_call* call, syscall_sta
 }
 
 void cap_pending_call_init(void) {
-	(void)id_table_init(&pending_call_table, "pending_call_table", CAP_CALL_ID_MIN, CAP_CALL_ID_MAX);
+	(void)id_table_init(&pending_call_table, "pending_call_table", 1u, CAP_CALL_SLOT_MAX);
+	__atomic_store_n(&pending_call_generation, 1u, __ATOMIC_RELEASE);
 }
 
 struct cap_pending_call* cap_pending_call_create(struct cap_object* object, channel_id_t endpoint_id,
@@ -90,7 +119,14 @@ struct cap_pending_call* cap_pending_call_create(struct cap_object* object, chan
 		cap_pending_call_release(call);
 		return NULL;
 	}
-	call->id = (cap_call_id_t)id;
+	call->slot_id = id;
+	if (!cap_pending_call_allocate_id(call->slot_id, &call->id)) {
+		struct cap_pending_call* removed = NULL;
+		(void)id_table_remove(&pending_call_table, call->slot_id, (void**)&removed);
+		call->object = NULL;
+		cap_pending_call_release(removed);
+		return NULL;
+	}
 	return call;
 }
 
@@ -124,7 +160,7 @@ void cap_pending_call_destroy(struct cap_pending_call* call) {
 
 	if (call == NULL) return;
 	if (cap_pending_call_claim(call)) cap_pending_call_complete(call, SYSCALL_STATUS_UNAVAILABLE, 0u);
-	if (id_table_remove(&pending_call_table, call->id, (void**)&removed) != ID_TABLE_OK) return;
+	if (id_table_remove(&pending_call_table, call->slot_id, (void**)&removed) != ID_TABLE_OK) return;
 	cap_pending_call_release(removed);
 }
 

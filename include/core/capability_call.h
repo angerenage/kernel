@@ -8,11 +8,13 @@
 #include <base/process.h>
 #include <base/syscall.h>
 #include <core/capability.h>
+#include <core/id_table.h>
 #include <core/semaphore.h>
 
 /* One userspace-provider call retained until reply or cancellation. */
 struct cap_pending_call {
 	cap_call_id_t id;
+	id_table_id_t slot_id;
 	channel_id_t endpoint_id;
 	process_id_t provider;
 	process_id_t caller;

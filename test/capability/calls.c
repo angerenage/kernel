@@ -1,3 +1,5 @@
+#include <libc/stdlib.h>
+
 #include "test_support.h"
 
 Test(capability, pending_call_completes_with_bounded_response) {
@@ -78,4 +80,57 @@ Test(capability, terminating_provider_cancels_requests_waiting_for_its_reply) {
 	cap_pending_call_wait(call, &result);
 	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
 	cap_pending_call_destroy(call);
+}
+
+Test(capability, stale_queued_call_id_does_not_resolve_a_later_call) {
+	struct cap_pending_call* first;
+	struct cap_pending_call* second;
+	struct cap_pending_request received;
+	struct cap_request queued;
+	struct channel* channel;
+	uint8_t* first_request;
+	uint8_t* second_request;
+	cap_call_id_t stale_id;
+
+	cap_test_setup();
+	channel = channel_create(47u, false);
+	cr_assert_not_null(channel);
+
+	first_request = malloc(1u);
+	cr_assert_not_null(first_request);
+	*first_request = 0x11u;
+	first = cap_pending_call_create(NULL, channel->id, 47u, 17u, 0u);
+	cr_assert_not_null(first);
+	cr_assert(cap_pending_call_attach_request(first, first_request, 1u));
+	stale_id = cap_pending_call_id(first);
+	queued = (struct cap_request){.call_id = stale_id};
+	cr_assert(channel_enqueue_cap_request(channel, &queued));
+	cap_pending_call_destroy(first);
+
+	second_request = malloc(1u);
+	cr_assert_not_null(second_request);
+	*second_request = 0x22u;
+	second = cap_pending_call_create(NULL, channel->id, 47u, 18u, 0u);
+	cr_assert_not_null(second);
+	cr_assert(cap_pending_call_attach_request(second, second_request, 1u));
+	cr_assert_eq((uint16_t)cap_pending_call_id(second),
+			(uint16_t)stale_id,
+			"the regression must reuse the removed pending-call table slot");
+	cr_assert_neq(cap_pending_call_id(second), stale_id, "a removed pending-call ID must never be reused");
+	queued = (struct cap_request){.call_id = cap_pending_call_id(second)};
+	cr_assert(channel_enqueue_cap_request(channel, &queued));
+
+	cr_assert(ring_buffer_dequeue(&channel->cap_queue, &queued));
+	cr_assert_eq(queued.call_id, stale_id);
+	cr_assert_not(cap_pending_call_prepare_receive(queued.call_id, 47u, &received),
+			"a stale queue entry must not resolve to a later pending call");
+	cr_assert(ring_buffer_dequeue(&channel->cap_queue, &queued));
+	cr_assert_eq(queued.call_id, cap_pending_call_id(second));
+	cr_assert(cap_pending_call_prepare_receive(queued.call_id, 47u, &received));
+	cr_assert_eq(received.request_size, 1u);
+	cr_assert_eq(*(const uint8_t*)received.request, 0x22u);
+	cap_pending_call_finish_receive(&received);
+
+	cap_pending_call_destroy(second);
+	cr_assert_eq(channel_destroy(channel, 47u), CHANNEL_OK);
 }
