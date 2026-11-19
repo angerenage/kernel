@@ -372,6 +372,54 @@ Test(syscall, capability_direct_delegator_can_revoke_child_without_revoke_right)
 	syscall_test_reset_state();
 }
 
+Test(syscall, kernel_provider_revocation_requires_explicit_revoke_right) {
+	struct process* caller;
+	struct uthread* caller_thread;
+	struct capability* capability;
+	cap_object_id_t object_id;
+	cap_id_t restricted_id;
+	cap_id_t privileged_id;
+	syscall_result_t result;
+
+	syscall_test_init_process_environment();
+	capability_init();
+	caller = syscall_test_spawn_process("syscall/kernel-provider-revoke");
+	caller_thread = process_main_thread(caller);
+	cr_assert_not_null(caller_thread);
+	caller_thread->thread.address_space = NULL;
+	sched_set_current(cpu_current(), &caller_thread->thread);
+
+	object_id = cap_object_create_kernel(0x702u, syscall_test_cap_handler, NULL);
+	cr_assert_neq(object_id, CAP_OBJECT_ID_INVALID);
+	restricted_id = cap_create(object_id, process_pid(caller), CAP_READ, NULL);
+	cr_assert_neq(restricted_id, CAP_ID_INVALID);
+
+	result = syscall_dispatch(SYSCALL_CAP_REVOKE, restricted_id, CAP_READ, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	capability = cap_lookup(restricted_id);
+	cr_assert_not_null(capability);
+	cr_assert_eq(cap_rights(capability), CAP_READ, "denied reduction must preserve kernel-provider rights");
+
+	result = syscall_dispatch(SYSCALL_CAP_REVOKE, restricted_id, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_BAD_ARGUMENT);
+	cr_assert_not_null(cap_lookup(restricted_id), "denied revocation must preserve the kernel-provider grant");
+
+	privileged_id = cap_create(object_id, process_pid(caller), CAP_READ | CAP_REVOKE, NULL);
+	cr_assert_neq(privileged_id, CAP_ID_INVALID);
+	result = syscall_dispatch(SYSCALL_CAP_REVOKE, privileged_id, CAP_READ, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	capability = cap_lookup(privileged_id);
+	cr_assert_not_null(capability);
+	cr_assert_eq(cap_rights(capability), CAP_REVOKE);
+	result = syscall_dispatch(SYSCALL_CAP_REVOKE, privileged_id, 0u, 0u, 0u, 0u, 0u);
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+	cr_assert_null(cap_lookup(privileged_id));
+
+	cr_assert(cap_destroy_by_id(restricted_id));
+	cr_assert(cap_object_destroy_with_id(object_id));
+	syscall_test_reset_state();
+}
+
 Test(syscall, capability_drop_only_allows_direct_target) {
 	struct process* owner;
 	struct process* other;

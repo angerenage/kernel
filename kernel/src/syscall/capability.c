@@ -603,9 +603,12 @@ syscall_result_t syscall_cap_revoke(
 		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4, uintptr_t arg5) {
 	struct process* process;
 	struct capability* cap;
+	struct cap_object* revoke_object;
 	process_id_t caller_pid;
 	cap_rights_t rights;
 	enum cap_result auth_result;
+	bool userspace_object;
+	bool endpoint_owner;
 
 	(void)arg2;
 	(void)arg3;
@@ -628,17 +631,18 @@ syscall_result_t syscall_cap_revoke(
 		return syscall_cap_result_to_syscall(auth_result, 0u);
 	}
 
-	struct cap_object* revoke_object = cap_object_acquire(cap->cap_object_id);
+	revoke_object = cap_object_acquire(cap->cap_object_id);
 	if (revoke_object == NULL) {
 		(void)cap_destroy_by_id(cap->cap_id);
 		cap_release(cap);
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
-	if ((cap_rights(cap) & CAP_REVOKE) == 0u && revoke_object->endpoint != NULL &&
-			revoke_object->endpoint->owner_pid != caller_pid) {
+	userspace_object = revoke_object->endpoint != NULL;
+	endpoint_owner = userspace_object && revoke_object->endpoint->owner_pid == caller_pid;
+	if ((cap_rights(cap) & CAP_REVOKE) == 0u && !endpoint_owner) {
 		cap_object_release(revoke_object);
-		if (rights == 0u && cap_revoke_direct_child(caller_pid, cap)) {
+		if (userspace_object && rights == 0u && cap_revoke_direct_child(caller_pid, cap)) {
 			cap_release(cap);
 			return syscall_result_ok(0u);
 		}
