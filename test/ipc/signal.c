@@ -37,6 +37,12 @@ struct signal_test_grant_context {
 	cap_id_t cap;
 };
 
+struct signal_test_send_context {
+	struct signal* signal;
+	struct signal_payload payload;
+	enum signal_result result;
+};
+
 static bool signal_test_hook_active;
 static size_t signal_test_hook_runs;
 static struct signal* signal_test_signal;
@@ -51,6 +57,21 @@ static uint64_t signal_test_first_receivers;
 static uint64_t signal_test_first_deliveries;
 static uint64_t signal_test_second_receivers;
 static uint64_t signal_test_second_deliveries;
+static struct test_barrier* signal_test_kick_entered;
+static struct test_barrier* signal_test_kick_release;
+
+static void signal_test_kick_hook(const struct cpu* cpu) {
+	(void)cpu;
+	test_barrier_wait(signal_test_kick_entered);
+	test_barrier_wait(signal_test_kick_release);
+}
+
+static void* signal_test_send_worker(void* arg) {
+	struct signal_test_send_context* context = arg;
+
+	context->result = signal_send(context->signal, SIGNAL_TEST_SENDER, &context->payload, NULL, NULL);
+	return NULL;
+}
 
 static void* signal_test_grant_worker(void* arg) {
 	struct signal_test_grant_context* context = arg;
@@ -94,6 +115,7 @@ static void signal_test_init_bound_bootstrap_cpu(void) {
 static void signal_test_reset_scheduler_state(void) {
 	irq_enable_local();
 	hal_cpu_mock_set_context_switch_hook(NULL);
+	hal_cpu_mock_set_kick_hook(NULL);
 	signal_test_hook_active = false;
 	signal_test_hook_runs = 0u;
 	signal_test_signal = NULL;
@@ -108,6 +130,8 @@ static void signal_test_reset_scheduler_state(void) {
 	signal_test_first_deliveries = 0u;
 	signal_test_second_receivers = 0u;
 	signal_test_second_deliveries = 0u;
+	signal_test_kick_entered = NULL;
+	signal_test_kick_release = NULL;
 	hal_cpu_local_bind(NULL);
 }
 
@@ -347,6 +371,52 @@ Test(signal, handlers_receive_broadcast_and_report_partial_delivery) {
 	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
 	signal_test_deinit_uthread(&first);
 	signal_test_deinit_uthread(&second);
+}
+
+Test(signal, handler_removal_defers_release_without_spinning_on_remote_wake) {
+	struct signal_test_send_context send_context = {
+		.payload = {.args = {5u, 6u, 7u, 8u}},
+		.result = SIGNAL_UNAVAILABLE,
+	};
+	struct cpu remote_cpu = {.index = 1u, .role = CPU_ROLE_AP};
+	struct test_barrier kick_entered;
+	struct test_barrier kick_release;
+	struct uthread receiver;
+	pthread_t sender;
+
+	ipc_test_init_heap();
+	signal_test_init_bound_bootstrap_cpu();
+	signal_test_init_sched_uthread(&receiver, "remote_signal_receiver", 0x470000u, 0x474000u, 0x9000u);
+	receiver.thread.state = THREAD_STATE_RUNNING;
+	receiver.thread.cpu = &remote_cpu;
+	send_context.signal = signal_create();
+	cr_assert_not_null(send_context.signal);
+	cr_assert_eq(signal_register_handler(send_context.signal, &receiver, signal_test_handler, SIGNAL_HANDLER_FLAG_NONE),
+			SIGNAL_OK);
+	cr_assert_eq(__atomic_load_n(&receiver.reference_count, __ATOMIC_ACQUIRE), 2u);
+
+	test_barrier_init(&kick_entered, 2u);
+	test_barrier_init(&kick_release, 2u);
+	signal_test_kick_entered = &kick_entered;
+	signal_test_kick_release = &kick_release;
+	hal_cpu_mock_set_kick_hook(signal_test_kick_hook);
+	cr_assert_eq(pthread_create(&sender, NULL, signal_test_send_worker, &send_context), 0, "pthread_create failed");
+	test_barrier_wait(&kick_entered);
+
+	cr_assert_eq(signal_unregister_handler(send_context.signal, &receiver), SIGNAL_OK);
+	cr_assert_eq(signal_handler_count(send_context.signal), 0u);
+	cr_assert_eq(__atomic_load_n(&receiver.reference_count, __ATOMIC_ACQUIRE), 2u);
+
+	test_barrier_wait(&kick_release);
+	cr_assert_eq(pthread_join(sender, NULL), 0, "pthread_join failed");
+	hal_cpu_mock_set_kick_hook(NULL);
+	cr_assert_eq(send_context.result, SIGNAL_OK);
+	cr_assert_eq(__atomic_load_n(&receiver.reference_count, __ATOMIC_ACQUIRE), 1u);
+	cr_assert_eq(uthread_upcall_pending_count(&receiver), 0u);
+
+	cr_assert_eq(signal_destroy(send_context.signal), SIGNAL_OK);
+	signal_test_deinit_uthread(&receiver);
+	signal_test_reset_scheduler_state();
 }
 
 Test(signal, coalesced_publications_replace_only_older_coalescible_publications) {

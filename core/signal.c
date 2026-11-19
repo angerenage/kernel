@@ -25,6 +25,7 @@ struct signal_handler_binding {
 	uint32_t flags;
 	size_t wake_in_progress;
 	bool wake_queued;
+	bool release_pending;
 	bool force_reserved;
 };
 
@@ -248,7 +249,6 @@ static struct signal_handler_binding* signal_detach_handlers_locked(struct signa
 	signal->handler_count = 0u;
 	for (struct signal_handler_binding* binding = bindings; binding != NULL; binding = binding->next) {
 		binding->wake_next = NULL;
-		binding->wake_in_progress = 0u;
 		binding->wake_queued = false;
 	}
 	return bindings;
@@ -263,15 +263,36 @@ static struct signal_wait_binding* signal_detach_waits_locked(struct signal* sig
 	return bindings;
 }
 
-static void signal_release_handlers(struct signal_handler_binding* binding) {
+static void signal_release_handler_now(struct signal_handler_binding* binding) {
+	if (binding == NULL) return;
+	(void)uthread_upcall_purge(binding->target, USER_UPCALL_ORIGIN_SIGNAL, (uintptr_t)binding);
+	if ((binding->flags & (uint32_t)SIGNAL_HANDLER_FLAG_ONESHOT) == 0u)
+		(void)uthread_upcall_purge(binding->target, USER_UPCALL_ORIGIN_INTERRUPT_SIGNAL, (uintptr_t)binding);
+	uthread_release(binding->target);
+	free(binding);
+}
+
+static void signal_release_handlers_now(struct signal_handler_binding* binding) {
 	while (binding != NULL) {
 		struct signal_handler_binding* next = binding->next;
 
-		(void)uthread_upcall_purge(binding->target, USER_UPCALL_ORIGIN_SIGNAL, (uintptr_t)binding);
-		if ((binding->flags & (uint32_t)SIGNAL_HANDLER_FLAG_ONESHOT) == 0u)
-			(void)uthread_upcall_purge(binding->target, USER_UPCALL_ORIGIN_INTERRUPT_SIGNAL, (uintptr_t)binding);
-		uthread_release(binding->target);
-		free(binding);
+		signal_release_handler_now(binding);
+		binding = next;
+	}
+}
+
+static void signal_release_handlers(struct signal* signal, struct signal_handler_binding* binding) {
+	while (binding != NULL) {
+		struct signal_handler_binding* next = binding->next;
+		struct irq_state state;
+		bool release_now;
+
+		binding->next = NULL;
+		state = spinlock_lock_irqsave(&signal->lock);
+		release_now = binding->wake_in_progress == 0u;
+		if (!release_now) binding->release_pending = true;
+		spinlock_unlock_irqrestore(&signal->lock, state);
+		if (release_now) signal_release_handler_now(binding);
 		binding = next;
 	}
 }
@@ -299,6 +320,8 @@ static void signal_wake_upcall_targets(struct signal* signal) {
 		}
 		if (binding->wake_in_progress == SIZE_MAX) hcf();
 		binding->wake_in_progress++;
+		if (__atomic_load_n(&signal->reference_count, __ATOMIC_ACQUIRE) == UINT64_MAX) hcf();
+		(void)__atomic_add_fetch(&signal->reference_count, 1u, __ATOMIC_ACQ_REL);
 		spinlock_unlock_irqrestore(&signal->lock, state);
 
 		(void)sched_interrupt_thread(&binding->target->thread);
@@ -306,41 +329,17 @@ static void signal_wake_upcall_targets(struct signal* signal) {
 		state = spinlock_lock_irqsave(&signal->lock);
 		if (binding->wake_in_progress == 0u) hcf();
 		binding->wake_in_progress--;
+		bool release_binding = binding->wake_in_progress == 0u && binding->release_pending;
+		if (release_binding) binding->release_pending = false;
 		spinlock_unlock_irqrestore(&signal->lock, state);
+		if (release_binding) signal_release_handler_now(binding);
+		signal_release(signal);
 	}
-}
-
-static bool signal_handler_wake_in_progress_locked(struct signal* signal) {
-	struct signal_handler_binding* binding;
-
-	for (binding = signal->handler_head; binding != NULL; binding = binding->next) {
-		if (binding->wake_in_progress != 0u) return true;
-	}
-	for (binding = signal->retired_handler_head; binding != NULL; binding = binding->next) {
-		if (binding->wake_in_progress != 0u) return true;
-	}
-	return false;
 }
 
 static void signal_cancel_active_handler_wakes_locked(struct signal* signal) {
 	for (struct signal_handler_binding* binding = signal->handler_head; binding != NULL; binding = binding->next) {
 		signal_remove_handler_wake_locked(signal, binding);
-	}
-}
-
-static void signal_drain_handler_wakes(struct signal* signal) {
-	if (signal == NULL) return;
-
-	for (;;) {
-		struct irq_state state;
-		bool pending;
-
-		signal_wake_upcall_targets(signal);
-		state = spinlock_lock_irqsave(&signal->lock);
-		pending = signal->handler_wake_head != NULL || signal_handler_wake_in_progress_locked(signal);
-		spinlock_unlock_irqrestore(&signal->lock, state);
-		if (!pending) return;
-		spinlock_relax();
 	}
 }
 
@@ -606,7 +605,7 @@ static enum signal_result signal_finish_destroy(struct signal* signal, signal_id
 	signal_cancel_active_handler_wakes_locked(signal);
 	spinlock_unlock_irqrestore(&signal->lock, state);
 	/* Retired one-shot requests are autonomous and must still wake their target. */
-	signal_drain_handler_wakes(signal);
+	signal_wake_upcall_targets(signal);
 
 	state = spinlock_lock_irqsave(&signal->lock);
 	signal->id = SIGNAL_ID_INVALID;
@@ -619,7 +618,7 @@ static enum signal_result signal_finish_destroy(struct signal* signal, signal_id
 
 	(void)signal_destroy_cap_object(signal);
 	(void)sched_wake_all(&signal->waiters);
-	signal_release_handlers(handlers);
+	signal_release_handlers(signal, handlers);
 	signal_release_waits(waits);
 	signal_release(signal);
 	return SIGNAL_OK;
@@ -1155,25 +1154,17 @@ enum signal_result signal_unregister_handler(struct signal* signal, struct uthre
 
 	if (signal == NULL || target == NULL) return SIGNAL_INVALID_ARGUMENTS;
 
-	for (;;) {
-		state = spinlock_lock_irqsave(&signal->lock);
-		if (signal->closing) {
-			spinlock_unlock_irqrestore(&signal->lock, state);
-			return SIGNAL_CLOSED;
-		}
-		binding = signal_find_handler_locked(signal, target, &previous);
-		if (binding != NULL && binding->wake_in_progress != 0u) {
-			spinlock_unlock_irqrestore(&signal->lock, state);
-			spinlock_relax();
-			continue;
-		}
-		if (binding != NULL) (void)signal_remove_handler_locked(signal, previous, binding);
+	state = spinlock_lock_irqsave(&signal->lock);
+	if (signal->closing) {
 		spinlock_unlock_irqrestore(&signal->lock, state);
-		break;
+		return SIGNAL_CLOSED;
 	}
+	binding = signal_find_handler_locked(signal, target, &previous);
+	if (binding != NULL) (void)signal_remove_handler_locked(signal, previous, binding);
+	spinlock_unlock_irqrestore(&signal->lock, state);
 
 	if (binding == NULL) return SIGNAL_HANDLER_NOT_REGISTERED;
-	signal_release_handlers(binding);
+	signal_release_handlers(signal, binding);
 	return SIGNAL_OK;
 }
 
@@ -1195,39 +1186,40 @@ void signal_unregister_thread_receivers(struct uthread* target) {
 		struct signal_wait_binding* wait;
 
 		if (signal == NULL) continue;
-		for (;;) {
-			spinlock_lock(&signal->lock);
-			handler = signal_find_handler_locked(signal, target, &handler_previous);
-			retired = signal_find_retired_handler_locked(signal, target, &retired_previous);
-			if ((handler != NULL && handler->wake_in_progress != 0u) ||
-					(retired != NULL && retired->wake_in_progress != 0u)) {
-				spinlock_unlock(&signal->lock);
-				spinlock_relax();
-				continue;
+		spinlock_lock(&signal->lock);
+		handler = signal_find_handler_locked(signal, target, &handler_previous);
+		retired = signal_find_retired_handler_locked(signal, target, &retired_previous);
+		if (handler != NULL) {
+			(void)signal_remove_handler_locked(signal, handler_previous, handler);
+			if (handler->wake_in_progress != 0u) {
+				handler->release_pending = true;
 			}
-			if (handler != NULL) {
-				(void)signal_remove_handler_locked(signal, handler_previous, handler);
+			else {
 				handler->next = released_handlers;
 				released_handlers = handler;
 			}
-			if (retired != NULL) {
-				(void)signal_remove_retired_handler_locked(signal, retired_previous, retired);
+		}
+		if (retired != NULL) {
+			(void)signal_remove_retired_handler_locked(signal, retired_previous, retired);
+			if (retired->wake_in_progress != 0u) {
+				retired->release_pending = true;
+			}
+			else {
 				retired->next = released_handlers;
 				released_handlers = retired;
 			}
-			wait = signal_find_wait_locked(signal, target, &wait_previous);
-			if (wait != NULL) {
-				(void)signal_remove_wait_locked(signal, wait_previous, wait);
-				wait->next = released_waits;
-				released_waits = wait;
-			}
-			spinlock_unlock(&signal->lock);
-			break;
 		}
+		wait = signal_find_wait_locked(signal, target, &wait_previous);
+		if (wait != NULL) {
+			(void)signal_remove_wait_locked(signal, wait_previous, wait);
+			wait->next = released_waits;
+			released_waits = wait;
+		}
+		spinlock_unlock(&signal->lock);
 	}
 	spinlock_unlock_irqrestore(&signal_table.lock, table_state);
 
-	signal_release_handlers(released_handlers);
+	signal_release_handlers_now(released_handlers);
 	signal_release_waits(released_waits);
 }
 

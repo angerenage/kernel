@@ -9,6 +9,7 @@
 static _Thread_local void* hosted_cpu_local_ptr;
 static _Thread_local struct hal_cpu_fp_context hosted_fp_context;
 static hal_cpu_mock_context_switch_hook_t hosted_context_switch_hook;
+static hal_cpu_mock_kick_hook_t hosted_kick_hook;
 static bool hosted_thread_context_init_result = true;
 static size_t hosted_kick_count[64];
 
@@ -76,10 +77,15 @@ void hal_cpu_kick(const struct cpu* cpu) {
 	if (cpu == NULL || cpu->index >= 64u) return;
 
 	hosted_kick_count[cpu->index]++;
+	if (hosted_kick_hook != NULL) hosted_kick_hook(cpu);
 }
 
 void hal_cpu_mock_set_context_switch_hook(hal_cpu_mock_context_switch_hook_t hook) {
 	hosted_context_switch_hook = hook;
+}
+
+void hal_cpu_mock_set_kick_hook(hal_cpu_mock_kick_hook_t hook) {
+	hosted_kick_hook = hook;
 }
 
 void hal_cpu_mock_set_thread_context_init_result(bool result) {
