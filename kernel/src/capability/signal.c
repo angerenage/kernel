@@ -290,7 +290,7 @@ syscall_result_t kernel_signal_try_wait(cap_id_t cap, process_id_t caller, struc
 }
 
 cap_id_t kernel_signal_grant(struct signal* target, process_id_t recipient, cap_rights_t rights) {
-	struct cap_object* object = NULL;
+	cap_object_id_t candidate_id;
 	cap_object_id_t object_id;
 	signal_id_t id;
 	struct signal* held;
@@ -305,24 +305,15 @@ cap_id_t kernel_signal_grant(struct signal* target, process_id_t recipient, cap_
 		return CAP_ID_INVALID;
 	}
 
-	object_id = signal_cap_object_id(held);
-	if (object_id != CAP_OBJECT_ID_INVALID) object = cap_object_acquire(object_id);
-	if (object == NULL) {
-		object_id = cap_object_create_kernel((uint64_t)id, signal_handler, &object_created);
-		if (object_id == CAP_OBJECT_ID_INVALID) goto out;
-		if (!signal_set_cap_object_id(held, object_id)) {
-			(void)cap_object_destroy_with_id(object_id);
-			goto out;
-		}
+	candidate_id = cap_object_create_kernel((uint64_t)id, signal_handler, &object_created);
+	if (candidate_id == CAP_OBJECT_ID_INVALID) goto out;
+	if (!signal_publish_cap_object_id(held, candidate_id, &object_id)) {
+		if (object_created) (void)cap_object_destroy_with_id(candidate_id);
+		goto out;
 	}
-	else {
-		cap_object_release(object);
-	}
+	if (candidate_id != object_id && object_created) (void)cap_object_destroy_with_id(candidate_id);
 
 	result_cap = cap_create(object_id, recipient, rights, NULL);
-	if (result_cap == CAP_ID_INVALID && object_created) {
-		(void)signal_destroy_cap_object(held);
-	}
 out:
 	signal_release(held);
 	return result_cap;

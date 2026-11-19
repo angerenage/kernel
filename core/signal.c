@@ -458,19 +458,28 @@ signal_id_t signal_id(const struct signal* signal) {
 	return signal == NULL ? SIGNAL_ID_INVALID : signal->id;
 }
 
-cap_object_id_t signal_cap_object_id(const struct signal* signal) {
-	return signal == NULL ? CAP_OBJECT_ID_INVALID : signal->cap_object_id;
+cap_object_id_t signal_cap_object_id(struct signal* signal) {
+	struct irq_state state;
+	cap_object_id_t id;
+
+	if (signal == NULL) return CAP_OBJECT_ID_INVALID;
+	state = spinlock_lock_irqsave(&signal->lock);
+	id = signal->cap_object_id;
+	spinlock_unlock_irqrestore(&signal->lock, state);
+	return id;
 }
 
-bool signal_set_cap_object_id(struct signal* signal, cap_object_id_t id) {
+bool signal_publish_cap_object_id(struct signal* signal, cap_object_id_t candidate, cap_object_id_t* out_canonical) {
 	struct irq_state state;
 	bool published = false;
 
-	if (signal == NULL || id == CAP_OBJECT_ID_INVALID) return false;
+	if (out_canonical != NULL) *out_canonical = CAP_OBJECT_ID_INVALID;
+	if (signal == NULL || candidate == CAP_OBJECT_ID_INVALID || out_canonical == NULL) return false;
 
 	state = spinlock_lock_irqsave(&signal->lock);
 	if (!signal->closing) {
-		signal->cap_object_id = id;
+		if (signal->cap_object_id == CAP_OBJECT_ID_INVALID) signal->cap_object_id = candidate;
+		*out_canonical = signal->cap_object_id;
 		published = true;
 	}
 	spinlock_unlock_irqrestore(&signal->lock, state);

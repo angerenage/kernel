@@ -1,5 +1,8 @@
 #include "../../kernel/src/capability/signal.h"
 
+#define sched_yield host_sched_yield
+#include <pthread.h>
+#undef sched_yield
 #include <libc/string.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -20,10 +23,19 @@
 #include <criterion/criterion.h>
 
 #include "../mocks/hal/cpu_mock.h"
+#include "../thread_test.h"
 #include "test_support.h"
 
 #define SIGNAL_TEST_SENDER ((process_id_t)42u)
 #define SIGNAL_TEST_SECOND_SENDER ((process_id_t)84u)
+#define SIGNAL_TEST_GRANT_THREADS 8u
+
+struct signal_test_grant_context {
+	struct test_barrier* barrier;
+	struct signal* signal;
+	process_id_t recipient;
+	cap_id_t cap;
+};
 
 static bool signal_test_hook_active;
 static size_t signal_test_hook_runs;
@@ -39,6 +51,14 @@ static uint64_t signal_test_first_receivers;
 static uint64_t signal_test_first_deliveries;
 static uint64_t signal_test_second_receivers;
 static uint64_t signal_test_second_deliveries;
+
+static void* signal_test_grant_worker(void* arg) {
+	struct signal_test_grant_context* context = arg;
+
+	test_barrier_wait(context->barrier);
+	context->cap = kernel_signal_grant(context->signal, context->recipient, CAP_SIGNAL);
+	return NULL;
+}
 
 static void signal_test_handler(uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4) {
 	(void)arg0;
@@ -1111,6 +1131,99 @@ Test(signal, rearmed_oneshot_binding_can_change_entry_and_become_persistent) {
 	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
 	cr_assert_eq(uthread_upcall_pending_count(&receiver), 1u);
 	signal_test_deinit_uthread(&receiver);
+}
+
+Test(signal, failed_first_grant_preserves_the_published_object_for_retry) {
+	struct process* recipient = NULL;
+	struct signal* signal;
+	cap_object_id_t object_id;
+	cap_id_t cap;
+
+	ipc_test_init_heap();
+	capability_init();
+	cr_assert(address_space_init(), "address_space_init failed");
+	signal = signal_create();
+	cr_assert_not_null(signal);
+
+	cap = kernel_signal_grant(signal, (process_id_t)0xdeadbeefu, CAP_SIGNAL);
+	cr_assert_eq(cap, CAP_ID_INVALID);
+	object_id = signal_cap_object_id(signal);
+	cr_assert_neq(object_id, CAP_OBJECT_ID_INVALID);
+	cr_assert_eq(capability_object_count(), 1u);
+	cr_assert_eq(capability_count(), 0u);
+
+	cr_assert_eq(process_create(&recipient, NULL), PROCESS_OK);
+	cap = kernel_signal_grant(signal, process_pid(recipient), CAP_SIGNAL);
+	cr_assert_neq(cap, CAP_ID_INVALID);
+	cr_assert_eq(signal_cap_object_id(signal), object_id);
+	cr_assert_eq(capability_object_count(), 1u);
+	cr_assert_eq(capability_count(), 1u);
+
+	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
+	cr_assert_eq(capability_count(), 0u);
+	cr_assert_eq(capability_object_count(), 0u);
+	cr_assert(process_destroy(recipient));
+}
+
+Test(signal, concurrent_grants_share_first_and_replacement_capability_objects) {
+	struct signal_test_grant_context contexts[SIGNAL_TEST_GRANT_THREADS];
+	pthread_t threads[SIGNAL_TEST_GRANT_THREADS];
+	struct test_barrier barrier;
+	struct process* recipient = NULL;
+	struct signal* signal;
+	cap_object_id_t first_object_id = CAP_OBJECT_ID_INVALID;
+	process_id_t recipient_pid;
+
+	ipc_test_init_heap();
+	capability_init();
+	cr_assert(address_space_init(), "address_space_init failed");
+	cr_assert_eq(process_create(&recipient, NULL), PROCESS_OK);
+	recipient_pid = process_pid(recipient);
+	signal = signal_create();
+	cr_assert_not_null(signal);
+
+	for (size_t round = 0u; round < 2u; round++) {
+		test_barrier_init(&barrier, SIGNAL_TEST_GRANT_THREADS);
+		for (size_t i = 0u; i < SIGNAL_TEST_GRANT_THREADS; i++) {
+			contexts[i] = (struct signal_test_grant_context){
+				.barrier = &barrier,
+				.signal = signal,
+				.recipient = recipient_pid,
+				.cap = CAP_ID_INVALID,
+			};
+			cr_assert_eq(pthread_create(&threads[i], NULL, signal_test_grant_worker, &contexts[i]),
+					0,
+					"pthread_create failed");
+		}
+
+		for (size_t i = 0u; i < SIGNAL_TEST_GRANT_THREADS; i++) {
+			struct capability* grant;
+
+			cr_assert_eq(pthread_join(threads[i], NULL), 0, "pthread_join failed");
+			cr_assert_neq(contexts[i].cap, CAP_ID_INVALID);
+			grant = cap_acquire(contexts[i].cap);
+			cr_assert_not_null(grant);
+			cr_assert_eq(grant->cap_object_id, signal_cap_object_id(signal));
+			cap_release(grant);
+		}
+		cr_assert_neq(signal_cap_object_id(signal), CAP_OBJECT_ID_INVALID);
+		cr_assert_eq(capability_count(), SIGNAL_TEST_GRANT_THREADS);
+		cr_assert_eq(capability_object_count(), 1u);
+
+		if (round == 0u) {
+			first_object_id = signal_cap_object_id(signal);
+			cr_assert(signal_destroy_cap_object(signal));
+			cr_assert_eq(signal_cap_object_id(signal), CAP_OBJECT_ID_INVALID);
+			cr_assert_eq(capability_count(), 0u);
+			cr_assert_eq(capability_object_count(), 0u);
+		}
+	}
+	cr_assert_neq(first_object_id, CAP_OBJECT_ID_INVALID);
+
+	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
+	cr_assert_eq(capability_count(), 0u);
+	cr_assert_eq(capability_object_count(), 0u);
+	cr_assert(process_destroy(recipient));
 }
 
 Test(signal, direct_operations_use_specific_rights_without_cap_call) {

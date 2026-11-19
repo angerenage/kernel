@@ -142,10 +142,10 @@ bool signal_has_value(struct signal* signal);
 signal_id_t signal_id(const struct signal* signal);
 
 /* Return the lazily-created cap_object id for signal. */
-cap_object_id_t signal_cap_object_id(const struct signal* signal);
+cap_object_id_t signal_cap_object_id(struct signal* signal);
 
-/* Publish a cap_object id on an open signal. */
-bool signal_set_cap_object_id(struct signal* signal, cap_object_id_t id);
+/* Publish a candidate cap_object id on an open Signal and return the canonical id. */
+bool signal_publish_cap_object_id(struct signal* signal, cap_object_id_t candidate, cap_object_id_t* out_canonical);
 
 /* Destroy the lazily-created cap_object for signal and clear the slot. */
 bool signal_destroy_cap_object(struct signal* signal);
