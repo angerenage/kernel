@@ -107,8 +107,8 @@ enum signal_result signal_send_interrupt(struct signal* signal, process_id_t sen
 /* Request Interrupt readiness, deferring it until all interrupt-origin upcalls have completed. */
 void signal_interrupt_request_ready(signal_id_t signal_id);
 
-/* Complete one interrupt-origin upcall and optionally request Interrupt readiness. */
-void signal_interrupt_upcall_complete(signal_id_t signal_id, bool request_rearm);
+/* Complete one interrupt-origin upcall, consume its retained Signal reference, and optionally request readiness. */
+void signal_interrupt_upcall_complete(struct signal* signal, bool request_rearm);
 
 /* Read the currently remembered message without creating a receiver or consuming a generation. */
 enum signal_result signal_read(struct signal* signal, struct signal_message* out_message);

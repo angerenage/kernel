@@ -10,6 +10,7 @@
 
 struct hal_userspace_return_frame;
 struct mapping;
+struct signal;
 struct uthread;
 
 enum {
@@ -41,6 +42,8 @@ struct user_upcall_request {
 	uint32_t flags;
 	uintptr_t origin_token;
 	uint64_t origin_id;
+	/* Retained completion target owned by an interrupt-origin request. */
+	struct signal* completion_signal;
 	uintptr_t entry;
 	uintptr_t args[USER_UPCALL_ARGUMENT_COUNT];
 };
@@ -79,7 +82,7 @@ struct user_upcall_state {
 	size_t force_free_reservations;
 	size_t force_eviction_reservations;
 	enum user_upcall_origin active_origin;
-	uint64_t active_origin_id;
+	struct signal* active_completion_signal;
 	/* Flags retained from the active request for completion processing. */
 	uint32_t active_flags;
 	enum user_upcall_phase phase;

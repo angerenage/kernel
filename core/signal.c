@@ -646,7 +646,7 @@ static bool signal_handler_is_oneshot(const struct signal_handler_binding* handl
 	return handler != NULL && (handler->flags & (uint32_t)SIGNAL_HANDLER_FLAG_ONESHOT) != 0u;
 }
 
-static struct user_upcall_request signal_handler_request(const struct signal* signal,
+static struct user_upcall_request signal_handler_request(struct signal* signal,
 		const struct signal_handler_binding* handler, const struct signal_message* message, uint32_t flags) {
 	uint32_t upcall_flags = USER_UPCALL_FLAG_NONE;
 	bool oneshot = signal_handler_is_oneshot(handler);
@@ -660,6 +660,7 @@ static struct user_upcall_request signal_handler_request(const struct signal* si
 		.flags = upcall_flags,
 		.origin_token = oneshot ? 0u : (uintptr_t)handler,
 		.origin_id = (uint64_t)signal->id,
+		.completion_signal = signal_send_internal_is_interrupt(flags) ? signal : NULL,
 		.entry = handler->entry,
 		.args = {
 			(uintptr_t)message->sender,
@@ -766,6 +767,8 @@ static enum signal_result signal_send_internal(struct signal* signal, process_id
 		request = signal_handler_request(signal, handler, &message, flags);
 		if (signal_send_internal_is_interrupt(flags)) {
 			if (signal->interrupt_upcalls_outstanding == SIZE_MAX) hcf();
+			if (__atomic_load_n(&signal->reference_count, __ATOMIC_ACQUIRE) == UINT64_MAX) hcf();
+			(void)__atomic_add_fetch(&signal->reference_count, 1u, __ATOMIC_ACQ_REL);
 			signal->interrupt_upcalls_outstanding++;
 		}
 		upcall_result = signal_enqueue_handler_locked(handler, &request, flags);
@@ -783,6 +786,7 @@ static enum signal_result signal_send_internal(struct signal* signal, process_id
 		else if (signal_send_internal_is_interrupt(flags)) {
 			if (signal->interrupt_upcalls_outstanding == 0u) hcf();
 			signal->interrupt_upcalls_outstanding--;
+			signal_release(signal);
 		}
 		handler_previous = handler;
 		handler = next;
@@ -856,13 +860,13 @@ void signal_interrupt_request_ready(signal_id_t signal_id) {
 	if (ready) interrupt_signal_ready(signal_id);
 }
 
-void signal_interrupt_upcall_complete(signal_id_t signal_id, bool request_rearm) {
-	struct signal* signal;
+void signal_interrupt_upcall_complete(struct signal* signal, bool request_rearm) {
 	struct irq_state state;
+	signal_id_t signal_id;
 	bool ready = false;
 
-	signal = signal_acquire(signal_id);
 	if (signal == NULL) return;
+	signal_id = signal->id;
 	state = spinlock_lock_irqsave(&signal->lock);
 	if (signal->interrupt_upcalls_outstanding != 0u) {
 		signal->interrupt_upcalls_outstanding--;

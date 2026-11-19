@@ -16,6 +16,7 @@ static bool uthread_upcall_thread_dying(const struct uthread* thread) {
 
 static bool uthread_upcall_request_valid(const struct user_upcall_request* request) {
 	if (request == NULL || request->entry == 0u) return false;
+	if ((request->origin == USER_UPCALL_ORIGIN_INTERRUPT_SIGNAL) != (request->completion_signal != NULL)) return false;
 	return (request->flags & ~((uint32_t)USER_UPCALL_FLAG_NON_EVICTABLE | (uint32_t)USER_UPCALL_FLAG_COALESCIBLE |
 									 (uint32_t)USER_UPCALL_FLAG_INTERRUPT_REARM)) == 0u;
 }
@@ -106,7 +107,7 @@ bool uthread_upcall_state_init(struct uthread* thread) {
 }
 
 void uthread_upcall_state_deinit(struct uthread* thread) {
-	signal_id_t completed[USER_UPCALL_QUEUE_CAPACITY + 1u];
+	struct signal* completed[USER_UPCALL_QUEUE_CAPACITY + 1u];
 	size_t completed_count = 0u;
 	struct user_upcall_request* pending;
 	struct user_upcall_state* state;
@@ -118,17 +119,18 @@ void uthread_upcall_state_deinit(struct uthread* thread) {
 
 	irq_state = spinlock_lock_irqsave(&state->lock);
 	if (state->active_origin == USER_UPCALL_ORIGIN_INTERRUPT_SIGNAL)
-		completed[completed_count++] = state->active_origin_id;
+		completed[completed_count++] = state->active_completion_signal;
 	for (size_t index = 0u; index < state->count; index++) {
 		struct user_upcall_request* request = &state->pending[(state->head + index) % USER_UPCALL_QUEUE_CAPACITY];
 
-		if (request->origin == USER_UPCALL_ORIGIN_INTERRUPT_SIGNAL) completed[completed_count++] = request->origin_id;
+		if (request->origin == USER_UPCALL_ORIGIN_INTERRUPT_SIGNAL)
+			completed[completed_count++] = request->completion_signal;
 	}
 	pending = state->pending;
 	state->stack_mapping = NULL;
 	state->stack_top = 0u;
 	state->active_origin = USER_UPCALL_ORIGIN_NONE;
-	state->active_origin_id = 0u;
+	state->active_completion_signal = NULL;
 	state->active_flags = USER_UPCALL_FLAG_NONE;
 	state->phase = USER_UPCALL_PHASE_IDLE;
 	memset(&state->interrupted_context, 0, sizeof(state->interrupted_context));
@@ -363,7 +365,7 @@ enum user_upcall_result uthread_upcall_enqueue_force(
 }
 
 size_t uthread_upcall_purge(struct uthread* thread, enum user_upcall_origin origin, uintptr_t origin_token) {
-	signal_id_t completed[USER_UPCALL_QUEUE_CAPACITY];
+	struct signal* completed[USER_UPCALL_QUEUE_CAPACITY];
 	size_t completed_count = 0u;
 	struct user_upcall_state* state;
 	struct irq_state irq_state;
@@ -392,7 +394,8 @@ size_t uthread_upcall_purge(struct uthread* thread, enum user_upcall_origin orig
 				state->force_eviction_reservations--;
 				state->force_free_reservations++;
 			}
-			if (request.origin == USER_UPCALL_ORIGIN_INTERRUPT_SIGNAL) completed[completed_count++] = request.origin_id;
+			if (request.origin == USER_UPCALL_ORIGIN_INTERRUPT_SIGNAL)
+				completed[completed_count++] = request.completion_signal;
 			purged++;
 			continue;
 		}
@@ -478,7 +481,7 @@ enum user_upcall_result uthread_upcall_deliver(struct uthread* thread, struct ha
 	}
 
 	state->active_origin = request.origin;
-	state->active_origin_id = request.origin_id;
+	state->active_completion_signal = request.completion_signal;
 	state->active_flags = request.flags;
 	memset(&state->pending[state->head], 0, sizeof(state->pending[state->head]));
 	state->head = (state->head + 1u) % USER_UPCALL_QUEUE_CAPACITY;
@@ -494,7 +497,7 @@ enum user_upcall_result uthread_upcall_restore(struct uthread* thread, struct ha
 	struct user_upcall_state* state;
 	struct irq_state irq_state;
 	enum user_upcall_origin active_origin;
-	uint64_t active_origin_id;
+	struct signal* active_completion_signal;
 	uint32_t active_flags;
 
 	if (thread == NULL || frame == NULL || !thread->upcall.initialized) return USER_UPCALL_INVALID_ARGUMENTS;
@@ -511,17 +514,17 @@ enum user_upcall_result uthread_upcall_restore(struct uthread* thread, struct ha
 	}
 
 	active_origin = state->active_origin;
-	active_origin_id = state->active_origin_id;
+	active_completion_signal = state->active_completion_signal;
 	active_flags = state->active_flags;
 	state->active_origin = USER_UPCALL_ORIGIN_NONE;
-	state->active_origin_id = 0u;
+	state->active_completion_signal = NULL;
 	state->active_flags = USER_UPCALL_FLAG_NONE;
 	memset(&state->interrupted_context, 0, sizeof(state->interrupted_context));
 	state->phase = USER_UPCALL_PHASE_RESUME;
 	spinlock_unlock_irqrestore(&state->lock, irq_state);
 	if (active_origin == USER_UPCALL_ORIGIN_INTERRUPT_SIGNAL) {
 		signal_interrupt_upcall_complete(
-				active_origin_id, (active_flags & (uint32_t)USER_UPCALL_FLAG_INTERRUPT_REARM) != 0u);
+				active_completion_signal, (active_flags & (uint32_t)USER_UPCALL_FLAG_INTERRUPT_REARM) != 0u);
 	}
 	return USER_UPCALL_OK;
 }

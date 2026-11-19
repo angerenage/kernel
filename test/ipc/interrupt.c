@@ -341,6 +341,65 @@ Test(interrupt_core, interrupt_upcalls_form_a_completion_barrier) {
 	uthread_upcall_state_deinit(&oneshot);
 }
 
+Test(interrupt_core, late_completion_uses_retained_signal_after_id_reuse) {
+	struct signal* old_signal;
+	struct signal* replacement;
+	struct interrupt* old_interrupt;
+	struct interrupt* replacement_interrupt;
+	struct uthread old_target;
+	struct uthread replacement_target;
+	struct hal_userspace_return_frame old_frame = interrupt_test_frame();
+	struct hal_userspace_return_frame replacement_frame = interrupt_test_frame();
+	signal_id_t reused_id;
+
+	cpu_bind_current(&interrupt_test_cpu);
+	ipc_test_init_heap();
+	cr_assert(interrupt_init());
+	old_signal = signal_create();
+	cr_assert_not_null(old_signal);
+	reused_id = signal_id(old_signal);
+	interrupt_test_init_uthread(&old_target, 0x9000u);
+	cr_assert_eq(signal_register_handler(old_signal, &old_target, interrupt_test_handler, SIGNAL_HANDLER_FLAG_ONESHOT),
+			SIGNAL_OK);
+	old_interrupt = interrupt_test_bind_source(old_signal, 17u);
+	cr_assert(interrupt_handle_event((struct hal_interrupt_event){.domain = 0u, .id = 17u}));
+	cr_assert_eq(old_target.upcall.count, 1u);
+	cr_assert_eq(old_signal->interrupt_upcalls_outstanding, 1u);
+
+	cr_assert_eq(signal_destroy(old_signal), SIGNAL_OK);
+	cr_assert_eq(interrupt_destroy(old_interrupt), INTERRUPT_OK);
+	interrupt_release(old_interrupt);
+
+	replacement = signal_create();
+	cr_assert_not_null(replacement);
+	cr_assert_eq(signal_id(replacement), reused_id, "the regression must reuse the removed Signal ID");
+	cr_assert_neq(old_target.upcall.pending[old_target.upcall.head].completion_signal,
+			replacement,
+			"the old request must retain its original Signal instance");
+	interrupt_test_init_uthread(&replacement_target, 0xa000u);
+	cr_assert_eq(
+			signal_register_handler(replacement, &replacement_target, interrupt_test_handler, SIGNAL_HANDLER_FLAG_NONE),
+			SIGNAL_OK);
+	replacement_interrupt = interrupt_test_bind_source(replacement, 18u);
+	cr_assert(interrupt_handle_event((struct hal_interrupt_event){.domain = 0u, .id = 18u}));
+	cr_assert_eq(replacement->interrupt_upcalls_outstanding, 1u);
+
+	cr_assert_eq(uthread_upcall_deliver(&old_target, &old_frame), USER_UPCALL_OK);
+	cr_assert_eq(uthread_upcall_restore(&old_target, &old_frame), USER_UPCALL_OK);
+	cr_assert_eq(replacement->interrupt_upcalls_outstanding,
+			1u,
+			"late completion from the old Signal must not change replacement accounting");
+
+	cr_assert_eq(uthread_upcall_deliver(&replacement_target, &replacement_frame), USER_UPCALL_OK);
+	cr_assert_eq(uthread_upcall_restore(&replacement_target, &replacement_frame), USER_UPCALL_OK);
+	cr_assert_eq(replacement->interrupt_upcalls_outstanding, 0u);
+	cr_assert_eq(signal_destroy(replacement), SIGNAL_OK);
+	cr_assert_eq(interrupt_destroy(replacement_interrupt), INTERRUPT_OK);
+	interrupt_release(replacement_interrupt);
+	uthread_upcall_state_deinit(&old_target);
+	uthread_upcall_state_deinit(&replacement_target);
+}
+
 Test(interrupt_core, oneshot_and_ordinary_upcalls_do_not_request_rearm) {
 	struct signal* signal;
 	struct interrupt* interrupt;
