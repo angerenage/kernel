@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include <core/capability_call.h>
+#include <core/channel.h>
 #include <core/id_table.h>
 #include <core/sched.h>
 #include <core/semaphore.h>
@@ -69,6 +70,7 @@ static void cap_pending_call_release(struct cap_pending_call* call) {
 	if (call == NULL) return;
 	if (__atomic_sub_fetch(&call->reference_count, 1u, __ATOMIC_ACQ_REL) != 0u) return;
 	if (call->object != NULL) cap_object_end_call(call->object);
+	channel_release(call->endpoint);
 	free(call->request);
 	free(call);
 }
@@ -94,18 +96,22 @@ void cap_pending_call_init(void) {
 	__atomic_store_n(&pending_call_generation, 1u, __ATOMIC_RELEASE);
 }
 
-struct cap_pending_call* cap_pending_call_create(struct cap_object* object, channel_id_t endpoint_id,
+struct cap_pending_call* cap_pending_call_create(struct cap_object* object, struct channel* endpoint,
 		process_id_t provider, process_id_t caller, size_t response_capacity) {
 	struct cap_pending_call* call;
 	id_table_id_t id;
 
-	if (endpoint_id == CHANNEL_ID_INVALID || provider == PROCESS_PID_INVALID || caller == PROCESS_PID_INVALID) {
+	if (endpoint == NULL || provider == PROCESS_PID_INVALID || caller == PROCESS_PID_INVALID) {
 		return NULL;
 	}
+	if (!channel_retain(endpoint)) return NULL;
 	call = calloc(1u, sizeof(*call));
-	if (call == NULL) return NULL;
+	if (call == NULL) {
+		channel_release(endpoint);
+		return NULL;
+	}
 
-	call->endpoint_id = endpoint_id;
+	call->endpoint = endpoint;
 	call->provider = provider;
 	call->caller = caller;
 	call->response_capacity = response_capacity;
@@ -251,10 +257,10 @@ bool cap_pending_call_fail(cap_call_id_t id, syscall_status_t status) {
 	return true;
 }
 
-void cap_pending_call_cancel_channel(channel_id_t endpoint_id) {
+void cap_pending_call_cancel_channel(struct channel* endpoint) {
 	size_t cursor = 0u;
 
-	if (endpoint_id == CHANNEL_ID_INVALID) return;
+	if (endpoint == NULL) return;
 	for (;;) {
 		struct cap_pending_call* batch[CAP_CALL_CANCEL_BATCH];
 		size_t count = 0u;
@@ -263,7 +269,7 @@ void cap_pending_call_cancel_channel(channel_id_t endpoint_id) {
 
 		while (cursor < id_table_extent_locked(&pending_call_table) && count < CAP_CALL_CANCEL_BATCH) {
 			struct cap_pending_call* call = id_table_lookup_index_locked(&pending_call_table, cursor++);
-			if (call == NULL || call->endpoint_id != endpoint_id ||
+			if (call == NULL || call->endpoint != endpoint ||
 					__atomic_load_n(&call->state, __ATOMIC_ACQUIRE) == CAP_PENDING_STATE_COMPLETED) {
 				continue;
 			}

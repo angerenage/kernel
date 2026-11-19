@@ -81,7 +81,7 @@ Test(channel, destroy_completes_pending_calls_as_unavailable) {
 
 	channel = channel_create(77u, false);
 	cr_assert_not_null(channel);
-	call = cap_pending_call_create(NULL, channel->id, 77u, 55u, 0u);
+	call = cap_pending_call_create(NULL, channel, 77u, 55u, 0u);
 	cr_assert_not_null(call);
 
 	cr_assert_eq(channel_destroy(channel, 77u), CHANNEL_OK);
@@ -91,6 +91,49 @@ Test(channel, destroy_completes_pending_calls_as_unavailable) {
 			"closing the endpoint must wake callers waiting for a provider reply");
 
 	cap_pending_call_destroy(call);
+}
+
+Test(channel, late_old_instance_cancellation_does_not_cancel_reused_id) {
+	struct cap_pending_call* old_call;
+	struct cap_pending_call* replacement_call;
+	struct cap_pending_reply reply;
+	struct channel* old_channel;
+	struct channel* replacement;
+	syscall_result_t result;
+	channel_id_t reused_id;
+
+	ipc_test_init_heap();
+	capability_init();
+
+	old_channel = channel_create(78u, false);
+	cr_assert_not_null(old_channel);
+	reused_id = old_channel->id;
+	cr_assert(channel_retain(old_channel));
+	old_call = cap_pending_call_create(NULL, old_channel, 78u, 56u, 0u);
+	cr_assert_not_null(old_call);
+
+	cr_assert_eq(channel_destroy(old_channel, 78u), CHANNEL_OK);
+	cr_assert(cap_pending_call_wait(old_call, &result));
+	cr_assert_eq(result.status, SYSCALL_STATUS_UNAVAILABLE);
+	cap_pending_call_destroy(old_call);
+
+	replacement = channel_create(78u, false);
+	cr_assert_not_null(replacement);
+	cr_assert_eq(replacement->id, reused_id, "the regression must reuse the removed channel ID");
+	replacement_call = cap_pending_call_create(NULL, replacement, 78u, 57u, 0u);
+	cr_assert_not_null(replacement_call);
+
+	cap_pending_call_cancel_channel(old_channel);
+	cr_assert_eq(cap_pending_call_prepare_reply(cap_pending_call_id(replacement_call), 78u, 0u, &reply),
+			CAP_PENDING_REPLY_OK,
+			"late teardown from the old channel must not claim the replacement call");
+	cap_pending_call_finish_reply(&reply, SYSCALL_STATUS_OK, 0u);
+	cr_assert(cap_pending_call_wait(replacement_call, &result));
+	cr_assert_eq(result.status, SYSCALL_STATUS_OK);
+
+	channel_release(old_channel);
+	cap_pending_call_destroy(replacement_call);
+	cr_assert_eq(channel_destroy(replacement, 78u), CHANNEL_OK);
 }
 
 Test(channel, process_channel_state_deinit_unpublishes_every_owned_channel) {

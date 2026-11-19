@@ -451,7 +451,7 @@ syscall_result_t syscall_cap_call(
 	req.response_capacity = response_capacity;
 	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_PENDING_CREATE, KERNEL_TRACE_RECORD_BEGIN);
 	struct cap_pending_call* pending =
-			cap_pending_call_create(object, endpoint->id, endpoint->owner_pid, caller_pid, response_capacity);
+			cap_pending_call_create(object, endpoint, endpoint->owner_pid, caller_pid, response_capacity);
 	TRACE_CAP_CALL_PHASE(KERNEL_TRACE_CAP_CALL_PENDING_CREATE, KERNEL_TRACE_RECORD_END);
 	if (pending == NULL) {
 		channel_release(endpoint);

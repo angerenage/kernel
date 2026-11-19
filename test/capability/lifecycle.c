@@ -606,7 +606,7 @@ Test(capability, pending_call_defers_zero_grants_until_terminal_completion) {
 	object = create_userspace_object(endpoint, 0x204u, &object_id);
 	grant = cap_acquire(cap_create(object_id, 51u, CAP_CALL, NULL));
 	cr_assert_eq(cap_object_begin_call(51u, grant, &active, NULL), CAP_OK);
-	pending = cap_pending_call_create(active, endpoint->id, 50u, 51u, 0u);
+	pending = cap_pending_call_create(active, endpoint, 50u, 51u, 0u);
 	cr_assert_not_null(pending);
 	cr_assert_eq(cap_object_active_call_count(object), 1u);
 	cr_assert(cap_destroy(grant));
@@ -634,10 +634,10 @@ Test(capability, caller_and_channel_cancellation_end_active_calls_once) {
 	for (size_t i = 0u; i < 2u; i++) {
 		struct cap_object* active = NULL;
 		cr_assert_eq(cap_object_begin_call(61u, grant, &active, NULL), CAP_OK);
-		struct cap_pending_call* pending = cap_pending_call_create(active, endpoint->id, 60u, 61u, 0u);
+		struct cap_pending_call* pending = cap_pending_call_create(active, endpoint, 60u, 61u, 0u);
 		cr_assert_not_null(pending);
 		if (i == 0u) cap_pending_call_cancel_caller(61u);
-		else cap_pending_call_cancel_channel(endpoint->id);
+		else cap_pending_call_cancel_channel(endpoint);
 		cr_assert_eq(cap_object_active_call_count(object), 0u);
 		cap_pending_call_destroy(pending);
 	}

@@ -15,7 +15,7 @@
 struct cap_pending_call {
 	cap_call_id_t id;
 	id_table_id_t slot_id;
-	channel_id_t endpoint_id;
+	struct channel* endpoint;
 	process_id_t provider;
 	process_id_t caller;
 	/* Caller response destination validated before the request is published. */
@@ -56,8 +56,8 @@ enum cap_pending_reply_result {
 /* Initialize the pending-call registry. */
 void cap_pending_call_init(void);
 
-/* Create a pending provider call and take ownership of its active object reference. */
-struct cap_pending_call* cap_pending_call_create(struct cap_object* object, channel_id_t endpoint_id,
+/* Create a pending provider call, retain its endpoint, and take ownership of its active object reference. */
+struct cap_pending_call* cap_pending_call_create(struct cap_object* object, struct channel* endpoint,
 		process_id_t provider, process_id_t caller, size_t response_capacity);
 
 /* Return the stable identifier of a pending call. */
@@ -92,7 +92,7 @@ void cap_pending_call_finish_reply(struct cap_pending_reply* reply, syscall_stat
 bool cap_pending_call_fail(cap_call_id_t id, syscall_status_t status);
 
 /* Cancel every pending call routed through an endpoint. */
-void cap_pending_call_cancel_channel(channel_id_t endpoint_id);
+void cap_pending_call_cancel_channel(struct channel* endpoint);
 
 /* Cancel every pending call made by a caller. */
 void cap_pending_call_cancel_caller(process_id_t caller);

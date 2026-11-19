@@ -155,6 +155,7 @@ Test(syscall, capability_reply_delivers_to_caller_before_success) {
 	struct process* caller;
 	struct uthread* provider_thread;
 	struct cap_pending_call* pending;
+	struct channel* endpoint;
 	struct mapping* provider_mapping = NULL;
 	struct mapping* response_mapping = NULL;
 	void* provider_response = NULL;
@@ -171,6 +172,8 @@ Test(syscall, capability_reply_delivers_to_caller_before_success) {
 	provider_thread = process_main_thread(provider);
 	cr_assert_not_null(provider_thread);
 	sched_set_current(cpu_current(), &provider_thread->thread);
+	endpoint = channel_create(process_pid(provider), false);
+	cr_assert_not_null(endpoint);
 
 	cr_assert(test_address_space_map(process_address_space(provider),
 			TEST_MAPPING_GRANULE,
@@ -192,7 +195,7 @@ Test(syscall, capability_reply_delivers_to_caller_before_success) {
 			0u,
 			&response_mapping,
 			&response_address));
-	pending = cap_pending_call_create(NULL, 9u, process_pid(provider), process_pid(caller), sizeof(reply_value));
+	pending = cap_pending_call_create(NULL, endpoint, process_pid(provider), process_pid(caller), sizeof(reply_value));
 	cr_assert_not_null(pending);
 	pending->response_address = (uintptr_t)response_address;
 
@@ -213,6 +216,7 @@ Test(syscall, capability_reply_delivers_to_caller_before_success) {
 	cr_assert_eq(call_result.status, SYSCALL_STATUS_OK);
 	cr_assert_eq(call_result.value, sizeof(reply_value));
 	cap_pending_call_destroy(pending);
+	cr_assert_eq(channel_destroy(endpoint, process_pid(provider)), CHANNEL_OK);
 	cr_assert(address_space_unmap(process_address_space(provider), provider_mapping));
 	mapping_release(provider_mapping);
 	cr_assert(address_space_unmap(process_address_space(caller), response_mapping));
@@ -225,6 +229,7 @@ Test(syscall, capability_reply_reports_failed_caller_delivery) {
 	struct process* caller;
 	struct uthread* provider_thread;
 	struct cap_pending_call* pending;
+	struct channel* endpoint;
 	struct mapping* response_mapping = NULL;
 	void* response_address = NULL;
 	const uint32_t reply_value = 0xaa55aa55u;
@@ -239,6 +244,8 @@ Test(syscall, capability_reply_reports_failed_caller_delivery) {
 	cr_assert_not_null(provider_thread);
 	provider_thread->thread.address_space = NULL;
 	sched_set_current(cpu_current(), &provider_thread->thread);
+	endpoint = channel_create(process_pid(provider), false);
+	cr_assert_not_null(endpoint);
 
 	cr_assert(test_address_space_map(process_address_space(caller),
 			TEST_MAPPING_GRANULE,
@@ -248,7 +255,7 @@ Test(syscall, capability_reply_reports_failed_caller_delivery) {
 			0u,
 			&response_mapping,
 			&response_address));
-	pending = cap_pending_call_create(NULL, 10u, process_pid(provider), process_pid(caller), sizeof(reply_value));
+	pending = cap_pending_call_create(NULL, endpoint, process_pid(provider), process_pid(caller), sizeof(reply_value));
 	cr_assert_not_null(pending);
 	pending->response_address = (uintptr_t)response_address;
 	cr_assert(address_space_unmap(process_address_space(caller), response_mapping));
@@ -266,6 +273,7 @@ Test(syscall, capability_reply_reports_failed_caller_delivery) {
 	cr_assert_eq(call_result.status, SYSCALL_STATUS_UNAVAILABLE);
 	cr_assert_eq(call_result.value, 0u);
 	cap_pending_call_destroy(pending);
+	cr_assert_eq(channel_destroy(endpoint, process_pid(provider)), CHANNEL_OK);
 	syscall_test_reset_state();
 }
 
@@ -273,6 +281,7 @@ Test(syscall, pending_capability_call_wait_returns_for_cancellation_cleanup) {
 	struct process* caller;
 	struct uthread* caller_thread;
 	struct cap_pending_call* pending;
+	struct channel* endpoint;
 	cap_call_id_t call_id;
 	struct cap_pending_reply reply;
 	syscall_result_t call_result;
@@ -283,8 +292,10 @@ Test(syscall, pending_capability_call_wait_returns_for_cancellation_cleanup) {
 	caller_thread = process_main_thread(caller);
 	cr_assert_not_null(caller_thread);
 	sched_set_current(cpu_current(), &caller_thread->thread);
+	endpoint = channel_create(2u, false);
+	cr_assert_not_null(endpoint);
 
-	pending = cap_pending_call_create(NULL, 11u, 2u, process_pid(caller), 0u);
+	pending = cap_pending_call_create(NULL, endpoint, 2u, process_pid(caller), 0u);
 	cr_assert_not_null(pending);
 	call_id = cap_pending_call_id(pending);
 	cr_assert(thread_request_cancel(&caller_thread->thread));
@@ -294,6 +305,7 @@ Test(syscall, pending_capability_call_wait_returns_for_cancellation_cleanup) {
 	cr_assert_eq(cap_pending_call_prepare_reply(call_id, 2u, 0u, &reply),
 			CAP_PENDING_REPLY_NOT_FOUND,
 			"cancellation cleanup must remove the pending call");
+	cr_assert_eq(channel_destroy(endpoint, 2u), CHANNEL_OK);
 
 	syscall_test_reset_state();
 }

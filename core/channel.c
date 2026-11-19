@@ -72,7 +72,7 @@ enum channel_result channel_destroy(struct channel* channel, process_id_t caller
 		return CHANNEL_NOT_FOUND;
 	}
 	cap_object_unregister_endpoint(channel);
-	cap_pending_call_cancel_channel(channel->id);
+	cap_pending_call_cancel_channel(channel);
 	for (;;) {
 		struct cap_object* object = channel_dequeue_cap_event(channel);
 		if (object == NULL) break;
