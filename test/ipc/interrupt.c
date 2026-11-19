@@ -249,6 +249,43 @@ Test(interrupt_core, source_identity_configuration_and_signal_lifecycle) {
 	interrupt_release(interrupt);
 }
 
+Test(interrupt_core, late_signal_destroy_rollback_restores_interrupt_binding) {
+	struct interrupt_info info;
+	struct interrupt* interrupt;
+	struct signal* signal;
+	signal_id_t id;
+	size_t unmask_count;
+
+	cpu_bind_current(&interrupt_test_cpu);
+	ipc_test_init_heap();
+	cr_assert(interrupt_init());
+	signal = signal_create();
+	cr_assert_not_null(signal);
+	id = signal_id(signal);
+	interrupt = interrupt_test_bind_source(signal, 8u);
+	unmask_count = hal_interrupt_mock_unmask_count();
+
+	signal->id = SIGNAL_ID_INVALID;
+	hal_interrupt_mock_set_unmask_failure(true);
+	cr_assert_eq(signal_destroy(signal), SIGNAL_NOT_FOUND);
+	cr_assert_eq(interrupt_get_info(interrupt, &info), INTERRUPT_OK);
+	cr_assert(info.bound);
+	cr_assert_not(signal->closing);
+
+	signal->id = id;
+	hal_interrupt_mock_set_unmask_failure(false);
+	interrupt_signal_ready(id);
+	cr_assert_eq(hal_interrupt_mock_unmask_count(), unmask_count + 1u);
+	cr_assert(interrupt_handle_event((struct hal_interrupt_event){.domain = 0u, .id = 8u}));
+	cr_assert(signal_has_value(signal));
+
+	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
+	cr_assert_eq(interrupt_get_info(interrupt, &info), INTERRUPT_OK);
+	cr_assert_not(info.bound);
+	cr_assert_eq(interrupt_destroy(interrupt), INTERRUPT_OK);
+	interrupt_release(interrupt);
+}
+
 /* Edge IRQs stay unmasked while userspace handles the previous event. A second
  * edge is remembered and delivered once the first interrupt upcall completes. */
 Test(interrupt_core, edge_sources_remain_unmasked_and_retrigger) {

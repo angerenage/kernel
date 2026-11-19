@@ -77,5 +77,11 @@ bool interrupt_handle_event(struct hal_interrupt_event event);
 /* Rearm the interrupt bound to a Signal after its consumer is ready again. */
 void interrupt_signal_ready(signal_id_t signal_id);
 
-/* Detach and mask an Interrupt whose bound Signal has begun destruction. */
-bool interrupt_signal_destroying(struct interrupt* interrupt, struct signal* signal);
+/* Prepare detachment of an Interrupt whose bound Signal has begun destruction. */
+bool interrupt_signal_destroying(struct interrupt* interrupt, struct signal* signal, bool* out_detachment_prepared);
+
+/* Commit a prepared Signal-side detachment and release both cross-references. */
+void interrupt_signal_destroyed(struct interrupt* interrupt, struct signal* signal);
+
+/* Restore both sides of a prepared detachment after Signal destruction rolls back. */
+bool interrupt_signal_destroy_rollback(struct interrupt* interrupt, struct signal* signal);

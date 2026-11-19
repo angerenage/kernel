@@ -542,15 +542,16 @@ enum interrupt_result interrupt_destroy(struct interrupt* interrupt) {
 	return INTERRUPT_OK;
 }
 
-bool interrupt_signal_destroying(struct interrupt* interrupt, struct signal* signal) {
+bool interrupt_signal_destroying(struct interrupt* interrupt, struct signal* signal, bool* out_detachment_prepared) {
 	struct irq_state state;
-	bool detached = false;
 
-	if (interrupt == NULL || signal == NULL) return false;
+	if (out_detachment_prepared != NULL) *out_detachment_prepared = false;
+	if (interrupt == NULL || signal == NULL || out_detachment_prepared == NULL) return false;
 	state = spinlock_lock_irqsave(&interrupt->lock);
 	if (interrupt->signal != signal) {
+		bool already_detached = interrupt->signal == NULL && !interrupt->bound;
 		spinlock_unlock_irqrestore(&interrupt->lock, state);
-		return true;
+		return already_detached;
 	}
 	if (interrupt->kind == INTERRUPT_KIND_SOURCE && !hal_interrupt_source_mask(&interrupt->source_state)) {
 		if (!signal_restore_interrupt(signal, interrupt)) {
@@ -561,14 +562,43 @@ bool interrupt_signal_destroying(struct interrupt* interrupt, struct signal* sig
 		return false;
 	}
 	interrupt->signal = NULL;
-	interrupt->signal_id = SIGNAL_ID_INVALID;
 	interrupt->bound = false;
-	interrupt->pending = false;
-	interrupt->retriggered = false;
-	detached = true;
+	*out_detachment_prepared = true;
 	spinlock_unlock_irqrestore(&interrupt->lock, state);
 	interrupt_synchronize_dispatch(interrupt);
-	if (detached) signal_release(signal);
+	return true;
+}
+
+void interrupt_signal_destroyed(struct interrupt* interrupt, struct signal* signal) {
+	struct irq_state state;
+
+	if (interrupt == NULL || signal == NULL) return;
+	state = spinlock_lock_irqsave(&interrupt->lock);
+	if (interrupt->signal != NULL || interrupt->bound) hcf();
+	interrupt->signal_id = SIGNAL_ID_INVALID;
+	interrupt->pending = false;
+	interrupt->retriggered = false;
+	spinlock_unlock_irqrestore(&interrupt->lock, state);
+	signal_release(signal);
+	interrupt_release(interrupt);
+}
+
+bool interrupt_signal_destroy_rollback(struct interrupt* interrupt, struct signal* signal) {
+	struct irq_state state;
+
+	if (interrupt == NULL || signal == NULL) return false;
+	state = spinlock_lock_irqsave(&interrupt->lock);
+	if (interrupt->destroying || interrupt->signal != NULL || interrupt->bound ||
+			!signal_restore_interrupt(signal, interrupt)) {
+		spinlock_unlock_irqrestore(&interrupt->lock, state);
+		return false;
+	}
+	interrupt->signal = signal;
+	interrupt->bound = true;
+	if (interrupt->kind == INTERRUPT_KIND_SOURCE && !hal_interrupt_source_unmask(&interrupt->source_state)) {
+		interrupt->pending = true;
+	}
+	spinlock_unlock_irqrestore(&interrupt->lock, state);
 	return true;
 }
 

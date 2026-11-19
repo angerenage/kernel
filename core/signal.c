@@ -578,23 +578,29 @@ static enum signal_result signal_finish_destroy(struct signal* signal, signal_id
 	struct irq_state state;
 	struct signal* removed = NULL;
 	enum id_table_result id_result;
+	bool interrupt_detachment_prepared = false;
 
-	if (interrupt != NULL && !interrupt_signal_destroying(interrupt, signal)) {
+	if (interrupt != NULL && !interrupt_signal_destroying(interrupt, signal, &interrupt_detachment_prepared)) {
 		state = spinlock_lock_irqsave(&signal->lock);
 		if (signal->closing) signal->closing = false;
 		spinlock_unlock_irqrestore(&signal->lock, state);
 		return SIGNAL_UNAVAILABLE;
 	}
-	if (interrupt != NULL) interrupt_release(interrupt);
+	if (interrupt != NULL && !interrupt_detachment_prepared) {
+		interrupt_release(interrupt);
+		interrupt = NULL;
+	}
 
 	id_result = id_table_remove(&signal_table, (id_table_id_t)id, (void**)&removed);
 	if (id_result != ID_TABLE_OK) {
+		if (interrupt != NULL && !interrupt_signal_destroy_rollback(interrupt, signal)) hcf();
 		state = spinlock_lock_irqsave(&signal->lock);
 		signal->closing = false;
 		spinlock_unlock_irqrestore(&signal->lock, state);
 		return SIGNAL_NOT_FOUND;
 	}
 	if (removed != signal) hcf();
+	if (interrupt != NULL) interrupt_signal_destroyed(interrupt, signal);
 
 	state = spinlock_lock_irqsave(&signal->lock);
 	signal_cancel_active_handler_wakes_locked(signal);
