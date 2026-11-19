@@ -339,6 +339,38 @@ Test(signal, synchronous_receivers_track_the_latest_generation_independently) {
 	signal_test_reset_scheduler_state();
 }
 
+Test(signal, generation_wrap_rebases_synchronous_cursors) {
+	struct signal_payload first_payload = {.args = {1u, 2u, 3u, 4u}};
+	struct signal_payload wrapped_payload = {.args = {9u, 8u, 7u, 6u}};
+	struct signal_message received;
+	struct uthread receiver;
+	struct signal* signal;
+
+	ipc_test_init_heap();
+	signal_test_init_bound_bootstrap_cpu();
+	signal_test_init_sched_uthread(&receiver, "signal_wrap", 0x440000u, 0x444000u, 0x9000u);
+	signal = signal_create();
+	cr_assert_not_null(signal);
+
+	cr_assert_eq(signal_send(signal, SIGNAL_TEST_SENDER, &first_payload, NULL, NULL), SIGNAL_OK);
+	sched_set_current(cpu_current(), &receiver.thread);
+	cr_assert_eq(signal_try_wait(signal, &received), SIGNAL_OK);
+	cr_assert_eq(received.payload.args[0], first_payload.args[0]);
+	cr_assert_eq(signal_try_wait(signal, &received), SIGNAL_WOULD_BLOCK);
+
+	signal->generation = UINT64_MAX;
+	cr_assert_eq(signal_send(signal, SIGNAL_TEST_SECOND_SENDER, &wrapped_payload, NULL, NULL), SIGNAL_OK);
+	cr_assert_eq(signal_generation(signal), 1u);
+	cr_assert_eq(signal_try_wait(signal, &received), SIGNAL_OK);
+	cr_assert_eq(received.sender, SIGNAL_TEST_SECOND_SENDER);
+	cr_assert_eq(memcmp(&received.payload, &wrapped_payload, sizeof(wrapped_payload)), 0);
+	cr_assert_eq(signal_try_wait(signal, &received), SIGNAL_WOULD_BLOCK);
+
+	cr_assert_eq(signal_destroy(signal), SIGNAL_OK);
+	signal_test_deinit_uthread(&receiver);
+	signal_test_reset_scheduler_state();
+}
+
 Test(signal, handlers_receive_broadcast_and_report_partial_delivery) {
 	struct signal* signal;
 	struct uthread first;

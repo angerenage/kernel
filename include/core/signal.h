@@ -153,7 +153,7 @@ bool signal_publish_cap_object_id(struct signal* signal, cap_object_id_t candida
 /* Destroy the lazily-created cap_object for signal and clear the slot. */
 bool signal_destroy_cap_object(struct signal* signal);
 
-/* Return the current generation number, which monotonically increases with each publication. */
+/* Return the current nonzero publication generation, which wraps after UINT64_MAX. */
 uint64_t signal_generation(struct signal* signal);
 
 /* Return the number of registered handlers for a signal. */

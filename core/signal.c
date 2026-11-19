@@ -46,8 +46,19 @@ static bool signal_retain_callback(void* value, void* context) {
 	return signal_retain((struct signal*)value);
 }
 
-static uint64_t signal_next_generation(uint64_t generation) {
-	return generation == UINT64_MAX ? 1u : generation + 1u;
+static void signal_advance_generation_locked(struct signal* signal) {
+	struct signal_wait_binding* wait;
+
+	if (signal->generation != UINT64_MAX) {
+		signal->generation++;
+		return;
+	}
+
+	for (wait = signal->wait_head; wait != NULL; wait = wait->next) {
+		wait->last_seen_generation = 0u;
+		if (wait->pending_delivery) wait->pending_generation = 0u;
+	}
+	signal->generation = 1u;
 }
 
 static struct signal_handler_binding* signal_find_handler_locked(
@@ -796,7 +807,7 @@ static enum signal_result signal_send_internal(struct signal* signal, process_id
 		}
 	}
 
-	signal->generation = signal_next_generation(signal->generation);
+	signal_advance_generation_locked(signal);
 	signal->latest = message;
 	signal->has_value = true;
 
