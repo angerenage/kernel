@@ -1226,6 +1226,67 @@ Test(signal, concurrent_grants_share_first_and_replacement_capability_objects) {
 	cr_assert(process_destroy(recipient));
 }
 
+Test(signal, final_capability_drop_destroys_an_abandoned_signal) {
+	struct process* recipient = NULL;
+	struct signal* signal;
+	signal_id_t signal_id_value;
+	cap_id_t cap;
+
+	ipc_test_init_heap();
+	capability_init();
+	cr_assert(address_space_init(), "address_space_init failed");
+	cr_assert_eq(process_create(&recipient, NULL), PROCESS_OK);
+	signal = signal_create();
+	cr_assert_not_null(signal);
+	signal_id_value = signal_id(signal);
+	cap = kernel_signal_grant(signal, process_pid(recipient), CAP_SIGNAL);
+	cr_assert_neq(cap, CAP_ID_INVALID);
+
+	cr_assert(cap_destroy_by_id(cap));
+	cr_assert_null(signal_acquire(signal_id_value));
+	cr_assert_eq(capability_count(), 0u);
+	cr_assert_eq(capability_object_count(), 0u);
+	cr_assert(process_destroy(recipient));
+}
+
+Test(signal, delegated_capability_keeps_signal_until_the_final_drop) {
+	struct process* recipient = NULL;
+	struct capability* original;
+	struct signal* signal;
+	struct signal* acquired;
+	signal_id_t signal_id_value;
+	cap_id_t original_id;
+	cap_id_t delegated_id;
+
+	ipc_test_init_heap();
+	capability_init();
+	cr_assert(address_space_init(), "address_space_init failed");
+	cr_assert_eq(process_create(&recipient, NULL), PROCESS_OK);
+	signal = signal_create();
+	cr_assert_not_null(signal);
+	signal_id_value = signal_id(signal);
+	original_id = kernel_signal_grant(signal, process_pid(recipient), CAP_SIGNAL | CAP_DELEGATE);
+	cr_assert_neq(original_id, CAP_ID_INVALID);
+	original = cap_acquire(original_id);
+	cr_assert_not_null(original);
+	delegated_id = cap_delegate_create(original, process_pid(recipient), CAP_SIGNAL, false);
+	cr_assert_neq(delegated_id, CAP_ID_INVALID);
+	cr_assert(cap_drop(original));
+	cap_release(original);
+
+	acquired = signal_acquire(signal_id_value);
+	cr_assert_not_null(acquired);
+	signal_release(acquired);
+	cr_assert_eq(capability_count(), 1u);
+	cr_assert_eq(capability_object_count(), 1u);
+
+	cr_assert(cap_destroy_by_id(delegated_id));
+	cr_assert_null(signal_acquire(signal_id_value));
+	cr_assert_eq(capability_count(), 0u);
+	cr_assert_eq(capability_object_count(), 0u);
+	cr_assert(process_destroy(recipient));
+}
+
 Test(signal, direct_operations_use_specific_rights_without_cap_call) {
 	struct signal* signal;
 	struct signal_payload payload = {.args = {12u, 34u, 56u, 78u}};

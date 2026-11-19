@@ -72,6 +72,9 @@ void signal_release(struct signal* signal);
  */
 enum signal_result signal_destroy(struct signal* signal);
 
+/* Destroy an unbound Signal only if object still has no grants or active calls. */
+bool signal_destroy_if_unused(struct signal* signal, struct cap_object* object);
+
 /*
  * Publish one value to every active receiver without allocating or sleeping.
  * out_receiver_count counts registered handlers plus wait calls blocked at the

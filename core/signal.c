@@ -572,27 +572,12 @@ void signal_release(struct signal* signal) {
 	free(signal);
 }
 
-enum signal_result signal_destroy(struct signal* signal) {
+static enum signal_result signal_finish_destroy(struct signal* signal, signal_id_t id, struct interrupt* interrupt) {
 	struct signal_handler_binding* handlers;
 	struct signal_wait_binding* waits;
-	struct interrupt* interrupt;
 	struct irq_state state;
 	struct signal* removed = NULL;
 	enum id_table_result id_result;
-	signal_id_t id;
-
-	if (signal == NULL) return SIGNAL_INVALID_ARGUMENTS;
-
-	state = spinlock_lock_irqsave(&signal->lock);
-	if (signal->closing) {
-		spinlock_unlock_irqrestore(&signal->lock, state);
-		return SIGNAL_CLOSED;
-	}
-	id = signal->id;
-	signal->closing = true;
-	interrupt = signal->interrupt;
-	signal->interrupt = NULL;
-	spinlock_unlock_irqrestore(&signal->lock, state);
 
 	if (interrupt != NULL && !interrupt_signal_destroying(interrupt, signal)) {
 		state = spinlock_lock_irqsave(&signal->lock);
@@ -632,6 +617,50 @@ enum signal_result signal_destroy(struct signal* signal) {
 	signal_release_waits(waits);
 	signal_release(signal);
 	return SIGNAL_OK;
+}
+
+enum signal_result signal_destroy(struct signal* signal) {
+	struct interrupt* interrupt;
+	struct irq_state state;
+	signal_id_t id;
+
+	if (signal == NULL) return SIGNAL_INVALID_ARGUMENTS;
+
+	state = spinlock_lock_irqsave(&signal->lock);
+	if (signal->closing) {
+		spinlock_unlock_irqrestore(&signal->lock, state);
+		return SIGNAL_CLOSED;
+	}
+	id = signal->id;
+	signal->closing = true;
+	interrupt = signal->interrupt;
+	signal->interrupt = NULL;
+	spinlock_unlock_irqrestore(&signal->lock, state);
+
+	return signal_finish_destroy(signal, id, interrupt);
+}
+
+bool signal_destroy_if_unused(struct signal* signal, struct cap_object* object) {
+	struct irq_state state;
+	signal_id_t id;
+
+	if (signal == NULL || object == NULL) return false;
+	state = spinlock_lock_irqsave(&signal->lock);
+	if (signal->closing || signal->interrupt != NULL || signal->cap_object_id != object->cap_object_id) {
+		spinlock_unlock_irqrestore(&signal->lock, state);
+		return false;
+	}
+	id = signal->id;
+	signal->closing = true;
+	spinlock_unlock_irqrestore(&signal->lock, state);
+
+	if (!cap_object_destroy_if_unused(object)) {
+		state = spinlock_lock_irqsave(&signal->lock);
+		if (signal->closing) signal->closing = false;
+		spinlock_unlock_irqrestore(&signal->lock, state);
+		return false;
+	}
+	return signal_finish_destroy(signal, id, NULL) == SIGNAL_OK;
 }
 
 enum signal_send_internal_flags {
