@@ -11,7 +11,7 @@
 #define USER_UPCALL_INTERNAL_FORCE_RESERVED ((uint32_t)1u << 31)
 
 static bool uthread_upcall_thread_dying(const struct uthread* thread) {
-	return thread != NULL && __atomic_load_n(&thread->dying, __ATOMIC_ACQUIRE) != 0u;
+	return !uthread_signal_receivers_available(thread);
 }
 
 static bool uthread_upcall_request_valid(const struct user_upcall_request* request) {

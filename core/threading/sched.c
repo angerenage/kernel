@@ -9,6 +9,7 @@
 #include <core/sched.h>
 #include <core/spinlock.h>
 #include <core/thread.h>
+#include <core/uthread.h>
 #include <kernel/trace.h>
 
 #define SCHED_MAX_CPU_COUNT 64u
@@ -1270,6 +1271,9 @@ void sched_exit_current(thread_exit_code_t exit_code) {
 	}
 
 	sched_set_cpu_activity(cpu, SCHED_CPU_ACTIVITY_KERNEL);
+	if (current->owner_kind == THREAD_OWNER_UTHREAD) {
+		uthread_close_signal_receivers((struct uthread*)current->owner);
+	}
 	thread_mark_exiting(current, exit_code);
 	sched_dispatch_next(cpu);
 

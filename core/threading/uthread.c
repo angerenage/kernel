@@ -87,6 +87,7 @@ static bool uthread_begin_destroy(struct uthread* thread) {
 	if (!__atomic_compare_exchange_n(&thread->dying, &expected, 1u, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
 		return false;
 	}
+	uthread_close_signal_receivers(thread);
 	return true;
 }
 
@@ -99,6 +100,9 @@ static void uthread_commit_destroy(struct uthread* thread) {
 static void uthread_abort_destroy(struct uthread* thread) {
 	if (thread == NULL) return;
 	__atomic_store_n(&thread->dying, 0u, __ATOMIC_RELEASE);
+	if (!thread_is_terminated(&thread->thread)) {
+		__atomic_store_n(&thread->signal_receivers_closed, 0u, __ATOMIC_RELEASE);
+	}
 }
 
 static bool uthread_attach_process(struct uthread* thread, struct process* process, bool main_thread) {
@@ -258,6 +262,8 @@ static void uthread_reap_callback(struct thread* thread, void* ctx) {
 
 	if (target == NULL || thread != &target->thread) return;
 
+	uthread_close_signal_receivers(target);
+	signal_unregister_thread_receivers(target);
 	process = process_acquire(process_pid(target->process));
 	process_notify_thread_exit(process, thread, thread->exit_code);
 	if (!thread_is_joinable(thread) && uthread_begin_destroy(target)) {
@@ -321,6 +327,7 @@ static enum uthread_start_result uthread_prepare_internal(
 		.cap_object_id = CAP_OBJECT_ID_INVALID,
 		.reference_count = 1u,
 		.dying = 0u,
+		.signal_receivers_closed = 0u,
 		.process_main_thread = params->main_thread,
 		.heap_allocated = heap_allocated,
 	};
@@ -643,6 +650,16 @@ bool uthread_deinit(struct uthread* thread) {
 	uthread_commit_destroy(thread);
 	uthread_release(thread);
 	return true;
+}
+
+void uthread_close_signal_receivers(struct uthread* thread) {
+	if (thread == NULL) return;
+	__atomic_store_n(&thread->signal_receivers_closed, 1u, __ATOMIC_RELEASE);
+}
+
+bool uthread_signal_receivers_available(const struct uthread* thread) {
+	return thread != NULL && __atomic_load_n(&thread->dying, __ATOMIC_ACQUIRE) == 0u &&
+	       __atomic_load_n(&thread->signal_receivers_closed, __ATOMIC_ACQUIRE) == 0u;
 }
 
 cap_object_id_t uthread_cap_object_id(const struct uthread* thread) {

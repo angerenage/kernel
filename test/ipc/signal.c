@@ -1287,6 +1287,51 @@ Test(signal, delegated_capability_keeps_signal_until_the_final_drop) {
 	cr_assert(process_destroy(recipient));
 }
 
+Test(signal, terminal_joinable_thread_rejects_signal_work_before_reaping) {
+	struct signal_payload payload = {.args = {1u, 2u, 3u, 4u}};
+	struct signal_message message;
+	struct uthread receiver;
+	struct signal* first;
+	struct signal* second;
+	uint64_t receiver_count;
+	uint64_t delivery_count;
+
+	ipc_test_init_heap();
+	signal_test_init_bound_bootstrap_cpu();
+	signal_test_init_sched_uthread(&receiver, "terminal_receiver", 0x460000u, 0x464000u, 0x9000u);
+	first = signal_create();
+	second = signal_create();
+	cr_assert_not_null(first);
+	cr_assert_not_null(second);
+
+	sched_set_current(cpu_current(), &receiver.thread);
+	cr_assert_eq(signal_try_wait(first, &message), SIGNAL_WOULD_BLOCK);
+	cr_assert_eq(signal_register_handler(first, &receiver, signal_test_handler, SIGNAL_HANDLER_FLAG_NONE), SIGNAL_OK);
+	cr_assert_eq(signal_wait_subscription_count(first), 1u);
+	cr_assert_eq(signal_handler_count(first), 1u);
+
+	uthread_close_signal_receivers(&receiver);
+	cr_assert_eq(signal_try_wait(first, &message), SIGNAL_UNAVAILABLE);
+	cr_assert_eq(signal_register_handler(second, &receiver, signal_test_handler, SIGNAL_HANDLER_FLAG_NONE),
+			SIGNAL_UNAVAILABLE);
+	cr_assert_eq(signal_send(first, SIGNAL_TEST_SENDER, &payload, &receiver_count, &delivery_count), SIGNAL_OK);
+	cr_assert_eq(receiver_count, 1u);
+	cr_assert_eq(delivery_count, 0u);
+	cr_assert_eq(uthread_upcall_pending_count(&receiver), 0u);
+
+	thread_mark_exiting(&receiver.thread, 0u);
+	cr_assert_eq(signal_try_wait(first, &message), SIGNAL_WAIT_FAILED);
+	thread_mark_zombie(&receiver.thread);
+	signal_unregister_thread_receivers(&receiver);
+	cr_assert_eq(signal_wait_subscription_count(first), 0u);
+	cr_assert_eq(signal_handler_count(first), 0u);
+
+	cr_assert_eq(signal_destroy(first), SIGNAL_OK);
+	cr_assert_eq(signal_destroy(second), SIGNAL_OK);
+	signal_test_deinit_uthread(&receiver);
+	signal_test_reset_scheduler_state();
+}
+
 Test(signal, direct_operations_use_specific_rights_without_cap_call) {
 	struct signal* signal;
 	struct signal_payload payload = {.args = {12u, 34u, 56u, 78u}};

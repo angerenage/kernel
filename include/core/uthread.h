@@ -54,6 +54,8 @@ struct uthread {
 	uint64_t reference_count;
 	/* Set before the ID is removed and the owner reference is released. */
 	uint32_t dying;
+	/* Set when terminal transition begins so no new Signal work can be admitted. */
+	uint32_t signal_receivers_closed;
 	/* Records whether the thread was prepared as the process' unique initial thread. */
 	bool process_main_thread;
 	bool heap_allocated;
@@ -111,6 +113,12 @@ bool uthread_detach(struct uthread* thread);
 
 /* Release stack resources owned by a userspace thread that is no longer running. */
 bool uthread_deinit(struct uthread* thread);
+
+/* Stop new Signal waits, registrations, and upcalls before terminal transition. */
+void uthread_close_signal_receivers(struct uthread* thread);
+
+/* Return whether the descriptor can still accept Signal work. */
+bool uthread_signal_receivers_available(const struct uthread* thread);
 
 /* Return the lazily-created cap_object id for thread. */
 cap_object_id_t uthread_cap_object_id(const struct uthread* thread);

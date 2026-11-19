@@ -374,7 +374,7 @@ static enum signal_result signal_prepare_wait_receiver(struct signal* signal, st
 	if (signal->closing) {
 		result = SIGNAL_CLOSED;
 	}
-	else if (__atomic_load_n(&target->dying, __ATOMIC_ACQUIRE) != 0u) {
+	else if (!uthread_signal_receivers_available(target)) {
 		result = SIGNAL_UNAVAILABLE;
 	}
 	else if (existing == NULL) {
@@ -725,7 +725,7 @@ static enum signal_result signal_reserve_force_handlers_locked(struct signal* si
 		enum user_upcall_result reserve_result;
 
 		handler->force_reserved = false;
-		if (__atomic_load_n(&handler->target->dying, __ATOMIC_ACQUIRE) != 0u) continue;
+		if (!uthread_signal_receivers_available(handler->target)) continue;
 		reserve_result = uthread_upcall_force_reserve(handler->target);
 		if (reserve_result == USER_UPCALL_THREAD_DYING) continue;
 		if (reserve_result == USER_UPCALL_OK) {
@@ -749,7 +749,7 @@ static enum user_upcall_result signal_enqueue_handler_locked(
 		if (result != USER_UPCALL_OK) hcf();
 		return result;
 	}
-	if (__atomic_load_n(&handler->target->dying, __ATOMIC_ACQUIRE) != 0u) return USER_UPCALL_THREAD_DYING;
+	if (!uthread_signal_receivers_available(handler->target)) return USER_UPCALL_THREAD_DYING;
 	if (signal_send_internal_is_coalesced(flags) && !signal_handler_is_oneshot(handler)) {
 		return uthread_upcall_enqueue_latest(handler->target, request);
 	}
@@ -833,7 +833,7 @@ static enum signal_result signal_send_internal(struct signal* signal, process_id
 	for (wait = signal->wait_head; wait != NULL; wait = wait->next) {
 		if (!wait->waiting) continue;
 		receiver_count++;
-		if (__atomic_load_n(&wait->target->dying, __ATOMIC_ACQUIRE) != 0u) continue;
+		if (!uthread_signal_receivers_available(wait->target)) continue;
 
 		wait->pending = message;
 		wait->pending_generation = signal->generation;
@@ -946,6 +946,7 @@ enum signal_result signal_try_wait(struct signal* signal, struct signal_message*
 	if (signal == NULL || out_message == NULL) return SIGNAL_INVALID_ARGUMENTS;
 	current = uthread_current();
 	if (current == NULL || thread_is_terminated(&current->thread)) return SIGNAL_WAIT_FAILED;
+	if (!uthread_signal_receivers_available(current)) return SIGNAL_UNAVAILABLE;
 	if (thread_should_cancel(&current->thread)) return SIGNAL_WAIT_CANCELED;
 
 	result = signal_prepare_wait_receiver(signal, current);
@@ -977,6 +978,7 @@ enum signal_result signal_wait(struct signal* signal, struct signal_message* out
 	if (signal == NULL || out_message == NULL) return SIGNAL_INVALID_ARGUMENTS;
 	current = uthread_current();
 	if (current == NULL || thread_is_terminated(&current->thread)) return SIGNAL_WAIT_FAILED;
+	if (!uthread_signal_receivers_available(current)) return SIGNAL_UNAVAILABLE;
 
 	result = signal_prepare_wait_receiver(signal, current);
 	if (result != SIGNAL_OK) return result;
@@ -1104,7 +1106,7 @@ enum signal_result signal_register_handler(
 		if (signal->closing) {
 			result = SIGNAL_CLOSED;
 		}
-		else if (__atomic_load_n(&target->dying, __ATOMIC_ACQUIRE) != 0u) {
+		else if (!uthread_signal_receivers_available(target)) {
 			result = SIGNAL_UNAVAILABLE;
 		}
 		else if (existing != NULL) {
