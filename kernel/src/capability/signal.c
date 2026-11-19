@@ -59,6 +59,9 @@ static syscall_result_t signal_set_handler(const struct cap_request* req, struct
 
 	current = uthread_current();
 	if (current == NULL) return syscall_result_error(SYSCALL_STATUS_UNAVAILABLE, 0u);
+	if (!uthread_user_entry_valid(current, (uintptr_t)request->handler)) {
+		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
+	}
 	return signal_result_to_syscall(signal_register_handler(signal, current, request->handler, request->flags));
 }
 

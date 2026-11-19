@@ -43,6 +43,10 @@ bool hal_userspace_frame_is_user(const struct hal_userspace_return_frame* frame)
 	return frame != NULL && frame->user;
 }
 
+bool hal_userspace_entry_valid(uintptr_t entry) {
+	return entry != 0u;
+}
+
 bool hal_userspace_context_save(struct hal_userspace_context* context, const struct hal_userspace_return_frame* frame) {
 	struct mock_userspace_context saved;
 
@@ -71,7 +75,7 @@ bool hal_userspace_context_restore(
 
 bool hal_userspace_frame_redirect(struct hal_userspace_return_frame* frame, uintptr_t entry, uintptr_t stack,
 		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4) {
-	if (!hal_userspace_frame_is_user(frame) || entry == 0u || stack == 0u) return false;
+	if (!hal_userspace_frame_is_user(frame) || !hal_userspace_entry_valid(entry) || stack == 0u) return false;
 	if ((stack & (HAL_USERSPACE_STACK_ALIGNMENT - 1u)) != 0u) return false;
 
 	frame->entry = entry;

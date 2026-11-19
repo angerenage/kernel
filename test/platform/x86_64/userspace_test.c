@@ -154,6 +154,8 @@ Test(x86_64_userspace, redirects_with_sysv_stack_shape_and_safe_direction_flag) 
 Test(x86_64_userspace, rejects_invalid_redirect_targets) {
 	struct user_interrupt_frame frame = user_frame();
 
+	cr_assert(hal_userspace_entry_valid(0x4000u));
+	cr_assert_not(hal_userspace_entry_valid(0u));
 	cr_assert_not(hal_userspace_frame_redirect(opaque_frame(&frame), 0u, 0x9000u, 0u, 0u, 0u, 0u, 0u));
 	cr_assert_not(hal_userspace_frame_redirect(opaque_frame(&frame), 0x4000u, 0u, 0u, 0u, 0u, 0u, 0u));
 	cr_assert_not(hal_userspace_frame_redirect(opaque_frame(&frame), 0x4000u, 0x9008u, 0u, 0u, 0u, 0u, 0u));

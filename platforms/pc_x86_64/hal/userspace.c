@@ -81,6 +81,10 @@ bool hal_userspace_frame_is_user(const struct hal_userspace_return_frame* frame)
 	return x86_64_frame_is_user((const struct user_interrupt_frame*)frame);
 }
 
+bool hal_userspace_entry_valid(uintptr_t entry) {
+	return entry != 0u;
+}
+
 bool hal_userspace_context_save(struct hal_userspace_context* context, const struct hal_userspace_return_frame* frame) {
 	const struct user_interrupt_frame* native = (const struct user_interrupt_frame*)frame;
 	struct arch_userspace_context saved;
@@ -113,7 +117,7 @@ bool hal_userspace_frame_redirect(struct hal_userspace_return_frame* frame, uint
 		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4) {
 	struct user_interrupt_frame* native = (struct user_interrupt_frame*)frame;
 
-	if (!x86_64_frame_is_user(native) || entry == 0u || stack_top == 0u) return false;
+	if (!x86_64_frame_is_user(native) || !hal_userspace_entry_valid(entry) || stack_top == 0u) return false;
 	if ((stack_top & (HAL_USERSPACE_STACK_ALIGNMENT - 1u)) != 0u) return false;
 	if (stack_top < X86_USER_CALL_RETURN_SLOT_SIZE) return false;
 

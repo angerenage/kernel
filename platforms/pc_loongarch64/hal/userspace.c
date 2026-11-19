@@ -80,6 +80,10 @@ bool hal_userspace_frame_is_user(const struct hal_userspace_return_frame* frame)
 	return loongarch64_frame_is_user((const struct exception_frame*)frame);
 }
 
+bool hal_userspace_entry_valid(uintptr_t entry) {
+	return entry != 0u && (entry & (LOONGARCH64_USER_INSTRUCTION_ALIGNMENT - 1u)) == 0u;
+}
+
 bool hal_userspace_context_save(struct hal_userspace_context* context, const struct hal_userspace_return_frame* frame) {
 	const struct exception_frame* native = (const struct exception_frame*)frame;
 	struct arch_userspace_context saved;
@@ -112,8 +116,7 @@ bool hal_userspace_frame_redirect(struct hal_userspace_return_frame* frame, uint
 		uintptr_t arg0, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3, uintptr_t arg4) {
 	struct exception_frame* native = (struct exception_frame*)frame;
 
-	if (!loongarch64_frame_is_user(native) || entry == 0u || stack_top == 0u) return false;
-	if ((entry & (LOONGARCH64_USER_INSTRUCTION_ALIGNMENT - 1u)) != 0u) return false;
+	if (!loongarch64_frame_is_user(native) || !hal_userspace_entry_valid(entry) || stack_top == 0u) return false;
 	if ((stack_top & (HAL_USERSPACE_STACK_ALIGNMENT - 1u)) != 0u) return false;
 
 	native->era = entry;

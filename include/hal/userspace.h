@@ -42,6 +42,9 @@ bool hal_userspace_thread_context_init(struct thread_context* context, uintptr_t
 /* Return true only when frame represents a final return to userspace. */
 bool hal_userspace_frame_is_user(const struct hal_userspace_return_frame* frame);
 
+/* Return whether entry satisfies the architecture instruction-address rules for userspace. */
+bool hal_userspace_entry_valid(uintptr_t entry);
+
 /* Save or restore the complete integer/control and floating-point/SIMD userspace state. */
 bool hal_userspace_context_save(struct hal_userspace_context* context, const struct hal_userspace_return_frame* frame);
 bool hal_userspace_context_restore(

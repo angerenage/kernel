@@ -657,9 +657,46 @@ endif
 if build_machine.cpu_family() == 'aarch64'
 	test_suites += [
 		{
+			'name': 'userspace_entry',
+			'sources': files(
+				'platform/userspace_entry_test.c',
+				'../platforms/pc_aarch64/hal/userspace.c',
+			),
+			'link_with': base_test_lib,
+			'suites': ['unit', 'platform'],
+		},
+		{
 			'name': 'aarch64_exception_return',
 			'sources': files(
 				'platform/aarch64/exception_return_test.c',
+			),
+			'link_with': base_test_lib,
+			'suites': ['unit', 'platform'],
+		},
+	]
+endif
+
+if build_machine.cpu_family() == 'riscv64'
+	test_suites += [
+		{
+			'name': 'userspace_entry',
+			'sources': files(
+				'platform/userspace_entry_test.c',
+				'../platforms/pc_riscv64/hal/userspace.c',
+			),
+			'link_with': base_test_lib,
+			'suites': ['unit', 'platform'],
+		},
+	]
+endif
+
+if build_machine.cpu_family() == 'loongarch64'
+	test_suites += [
+		{
+			'name': 'userspace_entry',
+			'sources': files(
+				'platform/userspace_entry_test.c',
+				'../platforms/pc_loongarch64/hal/userspace.c',
 			),
 			'link_with': base_test_lib,
 			'suites': ['unit', 'platform'],

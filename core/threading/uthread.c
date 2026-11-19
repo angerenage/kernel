@@ -662,6 +662,15 @@ bool uthread_signal_receivers_available(const struct uthread* thread) {
 	       __atomic_load_n(&thread->signal_receivers_closed, __ATOMIC_ACQUIRE) == 0u;
 }
 
+bool uthread_user_entry_valid(struct uthread* thread, uintptr_t entry) {
+	struct address_space* space;
+
+	if (thread == NULL || thread->process == NULL || !hal_userspace_entry_valid(entry)) return false;
+	space = process_address_space(thread->process);
+	return address_space_validate_range(space, entry, 1u, ADDRESS_TRANSFER_EXEC | ADDRESS_TRANSFER_USER) ==
+	       ADDRESS_TRANSFER_OK;
+}
+
 cap_object_id_t uthread_cap_object_id(const struct uthread* thread) {
 	return thread == NULL ? CAP_OBJECT_ID_INVALID : thread->cap_object_id;
 }

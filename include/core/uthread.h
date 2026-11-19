@@ -120,6 +120,9 @@ void uthread_close_signal_receivers(struct uthread* thread);
 /* Return whether the descriptor can still accept Signal work. */
 bool uthread_signal_receivers_available(const struct uthread* thread);
 
+/* Validate one userspace instruction entry against architecture and executable mapping rules. */
+bool uthread_user_entry_valid(struct uthread* thread, uintptr_t entry);
+
 /* Return the lazily-created cap_object id for thread. */
 cap_object_id_t uthread_cap_object_id(const struct uthread* thread);
 
