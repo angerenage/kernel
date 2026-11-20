@@ -258,7 +258,7 @@ static struct cpu* sched_target_cpu_for_thread(const struct thread* thread) {
 
 	if (thread == NULL) return NULL;
 
-	if (sched_state_for_cpu(thread->preferred_cpu) != NULL) return thread->preferred_cpu;
+	if (sched_cpu_can_accept_balanced_work(thread->preferred_cpu)) return thread->preferred_cpu;
 
 	cpu = sched_pick_least_loaded_cpu(thread);
 	if (cpu != NULL) return cpu;

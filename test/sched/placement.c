@@ -46,6 +46,33 @@ Test(sched, make_runnable_prefers_preferred_cpu_over_lower_depth_target) {
 	reset_test_state();
 }
 
+Test(sched, make_runnable_falls_back_when_preferred_cpu_has_not_started) {
+	struct cpu* bsp;
+	struct cpu* ap;
+	struct thread preferred;
+
+	init_started_dual_cpu_topology(&bsp, &ap);
+	cr_assert(cpu_set_state(ap, CPU_STATE_ONLINE));
+	cpu_current_thread_store(ap, NULL);
+	cr_assert_eq(cpu_state_get(ap), CPU_STATE_ONLINE, "test AP should remain discovered and online");
+	cr_assert_null(cpu_current_thread_load(ap), "test AP should have no scheduler current thread");
+	cr_assert(thread_init(&preferred,
+			&(const struct thread_create_params){
+				.name = "unstarted-preferred",
+				.entry = sched_test_thread_entry,
+				.kernel_stack_base = 0x30a000u,
+				.kernel_stack_top = 0x30e000u,
+				.preferred_cpu = ap,
+			}));
+
+	cr_assert(sched_make_runnable(&preferred));
+	cr_assert_eq(preferred.cpu, bsp, "work should fall back to the started BSP");
+	cr_assert_eq(sched_run_queue_depth(bsp), 1u);
+	cr_assert_eq(sched_run_queue_depth(ap), 0u, "unstarted AP must not receive queued work");
+
+	reset_test_state();
+}
+
 Test(sched, make_runnable_chooses_cpu_with_smallest_run_queue_depth) {
 	const struct thread_create_params busy_params = {
 		.name = "busy",
