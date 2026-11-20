@@ -486,6 +486,27 @@ enum process_join_result process_join(struct process* process, uintptr_t* out_ex
 	}
 }
 
+enum process_join_result process_join_destroy(struct process* process, uintptr_t* out_exit_code) {
+	struct irq_state wait_state;
+	struct irq_state state;
+	uintptr_t exit_code;
+	enum process_join_result result;
+
+	result = process_join(process, &exit_code);
+	if (result != PROCESS_JOIN_OK) return result;
+	if (process_destroy(process)) {
+		if (out_exit_code != NULL) *out_exit_code = exit_code;
+		return PROCESS_JOIN_OK;
+	}
+
+	wait_state = spinlock_lock_irqsave(&process->join_wait_queue.lock);
+	state = spinlock_lock_irqsave(&process->lock);
+	if (process->state == PROCESS_STATE_ZOMBIE && !process->detached) process->joined = false;
+	spinlock_unlock_irqrestore(&process->lock, state);
+	spinlock_unlock_irqrestore(&process->join_wait_queue.lock, wait_state);
+	return PROCESS_JOIN_DESTROY_FAILED;
+}
+
 enum process_detach_result process_detach(struct process* process) {
 	struct irq_state state;
 	struct process* held;

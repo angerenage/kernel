@@ -199,10 +199,9 @@ static syscall_result_t process_wait_handler(const struct cap_request* req, stru
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	}
 
-	join_result = process_join(target, &exit_code);
+	join_result = process_join_destroy(target, &exit_code);
 	switch (join_result) {
 	case PROCESS_JOIN_OK:
-		process_destroy(target);
 		response.exit_code = exit_code;
 		break;
 	case PROCESS_JOIN_INVALID_ARGUMENTS:
@@ -211,6 +210,7 @@ static syscall_result_t process_wait_handler(const struct cap_request* req, stru
 	case PROCESS_JOIN_ALREADY_JOINED:
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, 0u);
 	case PROCESS_JOIN_WAIT_FAILED:
+	case PROCESS_JOIN_DESTROY_FAILED:
 	default:
 		return syscall_result_error(SYSCALL_STATUS_FAILED, (uintptr_t)join_result);
 	}

@@ -68,6 +68,27 @@ Test(process, join_returns_zombie_exit_code_once) {
 	cr_assert(process_destroy(process), "process_destroy should reclaim a joined zombie process");
 }
 
+Test(process, join_destroy_failure_restores_retryable_join) {
+	struct process* process = NULL;
+	uintptr_t exit_code = 0xdeadbeefu;
+	process_id_t pid;
+
+	init_process_test_environment();
+	cr_assert_eq(process_create(&process, "join-destroy-retry"), PROCESS_OK);
+	pid = process_pid(process);
+	process->main_thread_starting = true;
+
+	cr_assert_eq(process_join_destroy(process, &exit_code), PROCESS_JOIN_DESTROY_FAILED);
+	cr_assert_eq(exit_code, 0xdeadbeefu, "failed destruction must not publish a successful wait result");
+
+	process->main_thread_starting = false;
+	cr_assert_eq(process_join_destroy(process, &exit_code),
+			PROCESS_JOIN_OK,
+			"failed destruction must restore join eligibility for a retry");
+	cr_assert_eq(exit_code, 0u);
+	cr_assert_null(process_lookup(pid));
+}
+
 Test(process, detach_prevents_later_join) {
 	struct process* process = NULL;
 

@@ -40,6 +40,7 @@ enum process_join_result {
 	PROCESS_JOIN_DETACHED,
 	PROCESS_JOIN_ALREADY_JOINED,
 	PROCESS_JOIN_WAIT_FAILED,
+	PROCESS_JOIN_DESTROY_FAILED,
 };
 
 enum process_detach_result {
@@ -190,6 +191,9 @@ enum process_result process_create(struct process** out_process, const char* nam
 
 /* Block until process exits, then publish its process exit code. */
 enum process_join_result process_join(struct process* process, uintptr_t* out_exit_code);
+
+/* Join and destroy a zombie process, restoring join eligibility when destruction cannot finish. */
+enum process_join_result process_join_destroy(struct process* process, uintptr_t* out_exit_code);
 
 /* Mark process as detached so it can no longer be joined. A detached zombie may be reaped before this returns. */
 enum process_detach_result process_detach(struct process* process);
