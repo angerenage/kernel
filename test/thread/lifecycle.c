@@ -89,6 +89,7 @@ Test(thread, detach_and_idle_helpers_follow_joinability_rules) {
 	};
 	struct thread detached_thread;
 	struct thread joinable_thread;
+	struct thread claimed_thread;
 	struct thread idle_thread;
 
 	init_bound_bootstrap_cpu();
@@ -101,6 +102,15 @@ Test(thread, detach_and_idle_helpers_follow_joinability_rules) {
 	cr_assert(thread_detach(&joinable_thread), "thread_detach should succeed once");
 	cr_assert(!thread_is_joinable(&joinable_thread), "detached thread should stop being joinable");
 	cr_assert(!thread_detach(&joinable_thread), "thread_detach should fail once already detached");
+
+	cr_assert(thread_init(&claimed_thread, &joinable_params), "claimed thread_init failed");
+	cr_assert(thread_try_claim_join(&claimed_thread), "first join claim should succeed");
+	cr_assert(thread_join_claimed(&claimed_thread), "join claim should be visible");
+	cr_assert_not(thread_try_claim_join(&claimed_thread), "second join claim should fail");
+	cr_assert_not(thread_detach(&claimed_thread), "detach must not race an active join claim");
+	thread_release_join_claim(&claimed_thread);
+	cr_assert_not(thread_join_claimed(&claimed_thread), "released join claim should clear");
+	cr_assert(thread_detach(&claimed_thread), "detach should succeed after a failed join releases its claim");
 
 	thread_init_idle(&idle_thread, cpu_current(), "idle/test");
 	cr_assert(thread_is_idle(&idle_thread), "idle thread should carry idle flag");

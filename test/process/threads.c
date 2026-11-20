@@ -115,6 +115,38 @@ Test(process, join_thread_returns_exit_code_and_reclaims_thread) {
 	cr_assert(process_destroy(process), "process_destroy should reclaim remaining main thread");
 }
 
+Test(process, join_thread_rejects_a_second_join_claim) {
+	struct process* process = NULL;
+	struct uthread* worker = NULL;
+	uintptr_t exit_code = 0u;
+
+	init_process_test_environment();
+	cr_assert_eq(create_process_with_main_thread(&process,
+						 &(const struct process_spawn_params){
+							 .name = "join-claim-owner",
+							 .user_entry = 0x400000u,
+						 }),
+			PROCESS_OK);
+	cr_assert_eq(process_spawn_thread(process,
+						 &worker,
+						 &(const struct process_thread_params){
+							 .name = "join-claim-worker",
+							 .user_entry = 0x410000u,
+						 }),
+			PROCESS_THREAD_SPAWN_OK);
+
+	cr_assert(thread_try_claim_join(&worker->thread));
+	cr_assert_eq(process_join_thread(process, worker, &exit_code), PROCESS_THREAD_JOIN_ALREADY_JOINED);
+	thread_release_join_claim(&worker->thread);
+	thread_mark_exiting(&worker->thread, 55u);
+	thread_mark_zombie(&worker->thread);
+	cr_assert_eq(process_join_thread(process, worker, &exit_code), PROCESS_THREAD_JOIN_OK);
+	cr_assert_eq(exit_code, 55u);
+
+	terminate_main_thread(process);
+	cr_assert(process_destroy(process));
+}
+
 Test(process, cancel_thread_requests_deferred_cancellation) {
 	struct process* process = NULL;
 	struct uthread* worker = NULL;

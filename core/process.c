@@ -264,12 +264,14 @@ enum process_thread_join_result process_join_thread(
 	if (current == &thread->thread) return PROCESS_THREAD_JOIN_SELF;
 	if (!process_has_thread(process, thread)) return PROCESS_THREAD_JOIN_FOREIGN_THREAD;
 	if (!thread_is_joinable(&thread->thread)) return PROCESS_THREAD_JOIN_DETACHED;
+	if (!thread_try_claim_join(&thread->thread)) return PROCESS_THREAD_JOIN_ALREADY_JOINED;
 
 	if (!thread_is_reap_safe(&thread->thread)) {
 		struct irq_state wait_state = spinlock_lock_irqsave(&thread->thread.join_wait_queue.lock);
 
 		if (!thread_is_reap_safe(&thread->thread)) {
 			if (!sched_block_current_locked(&thread->thread.join_wait_queue, THREAD_BLOCK_JOIN, wait_state)) {
+				thread_release_join_claim(&thread->thread);
 				return PROCESS_THREAD_JOIN_WAIT_FAILED;
 			}
 		}
@@ -278,11 +280,20 @@ enum process_thread_join_result process_join_thread(
 		}
 	}
 
-	if (!process_has_thread(process, thread)) return PROCESS_THREAD_JOIN_FOREIGN_THREAD;
-	if (!thread_is_reap_safe(&thread->thread)) return PROCESS_THREAD_JOIN_WAIT_FAILED;
+	if (!process_has_thread(process, thread)) {
+		thread_release_join_claim(&thread->thread);
+		return PROCESS_THREAD_JOIN_FOREIGN_THREAD;
+	}
+	if (!thread_is_reap_safe(&thread->thread)) {
+		thread_release_join_claim(&thread->thread);
+		return PROCESS_THREAD_JOIN_WAIT_FAILED;
+	}
 
 	exit_code = thread->thread.exit_code;
-	if (!uthread_deinit(thread)) return PROCESS_THREAD_JOIN_RECLAIM_FAILED;
+	if (!uthread_deinit(thread)) {
+		thread_release_join_claim(&thread->thread);
+		return PROCESS_THREAD_JOIN_RECLAIM_FAILED;
+	}
 	if (out_exit_code != NULL) *out_exit_code = exit_code;
 	return PROCESS_THREAD_JOIN_OK;
 }

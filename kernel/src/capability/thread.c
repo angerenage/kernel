@@ -35,6 +35,7 @@ static syscall_result_t thread_join_handler(const struct cap_request* req, struc
 	case PROCESS_THREAD_JOIN_FOREIGN_THREAD:
 	case PROCESS_THREAD_JOIN_SELF:
 	case PROCESS_THREAD_JOIN_DETACHED:
+	case PROCESS_THREAD_JOIN_ALREADY_JOINED:
 		return syscall_result_error(SYSCALL_STATUS_BAD_ARGUMENT, (uintptr_t)result);
 	case PROCESS_THREAD_JOIN_WAIT_FAILED:
 	case PROCESS_THREAD_JOIN_RECLAIM_FAILED:

@@ -52,6 +52,7 @@ enum thread_flags {
 	THREAD_FLAG_PARK_PERMIT = 1u << 5,
 	THREAD_FLAG_INTERRUPT_PENDING = 1u << 6,
 	THREAD_FLAG_WAIT_INTERRUPTIBLE = 1u << 7,
+	THREAD_FLAG_JOIN_CLAIMED = 1u << 8,
 };
 
 /* Why a thread is blocked when state == THREAD_STATE_BLOCKED. */
@@ -202,6 +203,15 @@ bool thread_is_reap_safe(const struct thread* thread);
 
 /* Return true while another thread may still legally join this thread. */
 bool thread_is_joinable(const struct thread* thread);
+
+/* Claim exclusive join ownership, or return false when detached or already claimed. */
+bool thread_try_claim_join(struct thread* thread);
+
+/* Release an unsuccessful join claim so another caller can retry. */
+void thread_release_join_claim(struct thread* thread);
+
+/* Return whether one caller owns the target's join and reclamation path. */
+bool thread_join_claimed(const struct thread* thread);
 
 /* Return true when deferred cancellation has been requested for the thread. */
 bool thread_cancel_requested(const struct thread* thread);

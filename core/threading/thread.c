@@ -205,6 +205,35 @@ bool thread_is_joinable(const struct thread* thread) {
 	return (thread_flags_load(thread) & THREAD_FLAG_DETACHED) == 0u;
 }
 
+bool thread_try_claim_join(struct thread* thread) {
+	struct irq_state state;
+	uint32_t flags;
+
+	if (thread == NULL || thread_is_idle(thread)) return false;
+	state = spinlock_lock_irqsave(&thread->join_wait_queue.lock);
+	flags = thread_flags_load(thread);
+	if ((flags & (THREAD_FLAG_DETACHED | THREAD_FLAG_JOIN_CLAIMED)) != 0u) {
+		spinlock_unlock_irqrestore(&thread->join_wait_queue.lock, state);
+		return false;
+	}
+	(void)__atomic_fetch_or(&thread->flags, (uint32_t)THREAD_FLAG_JOIN_CLAIMED, __ATOMIC_ACQ_REL);
+	spinlock_unlock_irqrestore(&thread->join_wait_queue.lock, state);
+	return true;
+}
+
+void thread_release_join_claim(struct thread* thread) {
+	struct irq_state state;
+
+	if (thread == NULL) return;
+	state = spinlock_lock_irqsave(&thread->join_wait_queue.lock);
+	(void)__atomic_fetch_and(&thread->flags, ~(uint32_t)THREAD_FLAG_JOIN_CLAIMED, __ATOMIC_ACQ_REL);
+	spinlock_unlock_irqrestore(&thread->join_wait_queue.lock, state);
+}
+
+bool thread_join_claimed(const struct thread* thread) {
+	return thread != NULL && (thread_flags_load(thread) & THREAD_FLAG_JOIN_CLAIMED) != 0u;
+}
+
 bool thread_cancel_requested(const struct thread* thread) {
 	return (thread_flags_load(thread) & THREAD_FLAG_CANCEL_PENDING) != 0u;
 }
@@ -241,7 +270,7 @@ bool thread_detach(struct thread* thread) {
 	if (thread == NULL || thread_is_idle(thread)) return false;
 
 	state = spinlock_lock_irqsave(&thread->join_wait_queue.lock);
-	if (thread_is_terminated(thread) || !thread_is_joinable(thread)) {
+	if (thread_is_terminated(thread) || !thread_is_joinable(thread) || thread_join_claimed(thread)) {
 		spinlock_unlock_irqrestore(&thread->join_wait_queue.lock, state);
 		return false;
 	}
@@ -256,7 +285,7 @@ bool thread_detach_with_reap_callback(struct thread* thread, thread_reap_callbac
 	if (thread == NULL || thread_is_idle(thread)) return false;
 
 	state = spinlock_lock_irqsave(&thread->join_wait_queue.lock);
-	if (thread_is_terminated(thread) || !thread_is_joinable(thread)) {
+	if (thread_is_terminated(thread) || !thread_is_joinable(thread) || thread_join_claimed(thread)) {
 		spinlock_unlock_irqrestore(&thread->join_wait_queue.lock, state);
 		return false;
 	}

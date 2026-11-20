@@ -1,5 +1,27 @@
 #include "test_support.h"
 
+static struct kthread* join_claim_target;
+static struct thread* join_claim_contender;
+static bool join_claim_hook_active;
+static bool join_claim_contender_result;
+static size_t join_claim_hook_runs;
+
+static void join_claim_context_switch_hook(struct thread_context* current, const struct thread_context* next) {
+	(void)current;
+	(void)next;
+	if (join_claim_hook_active || join_claim_hook_runs != 0u) return;
+
+	join_claim_hook_active = true;
+	join_claim_hook_runs++;
+	cr_assert_eq(sched_current_thread(), join_claim_contender);
+	join_claim_contender_result = kthread_timed_join(join_claim_target, 0u, NULL);
+	thread_mark_exiting(&join_claim_target->thread, 77u);
+	thread_mark_zombie(&join_claim_target->thread);
+	(void)sched_wake_all(&join_claim_target->thread.join_wait_queue);
+	sched_yield();
+	join_claim_hook_active = false;
+}
+
 Test(kthread, join_terminated_thread_returns_exit_code_and_detaches) {
 	const struct thread_create_params params = {
 		.name = "target",
@@ -27,9 +49,7 @@ Test(kthread, join_terminated_thread_returns_exit_code_and_detaches) {
 	cr_assert_eq(exit_code, 123u, "kthread_join should publish target exit code");
 
 	exit_code = 0u;
-	cr_assert(kthread_timed_join(&target, 0u, &exit_code),
-			"kthread_timed_join should succeed immediately for terminated joinable thread");
-	cr_assert_eq(exit_code, 123u, "kthread_timed_join should publish target exit code");
+	cr_assert_not(kthread_timed_join(&target, 0u, &exit_code), "a successful join must consume join ownership");
 
 	reset_test_state();
 }
@@ -87,5 +107,51 @@ Test(kthread, timed_join_times_out_without_consuming_joinability) {
 	cr_assert_eq(sched_current_thread(), &joiner.thread, "joiner should resume after timeout");
 
 	hal_clock_stop();
+	reset_test_state();
+}
+
+Test(kthread, concurrent_joiner_is_rejected_before_target_reclamation) {
+	const struct thread_create_params params = {
+		.name = "joiner",
+		.entry = kthread_test_entry,
+		.arg = NULL,
+		.kernel_stack_base = 0x330000u,
+		.kernel_stack_top = 0x334000u,
+		.preferred_cpu = NULL,
+		.detached = false,
+	};
+	struct kthread target;
+	struct thread joiner;
+	struct thread contender;
+	thread_exit_code_t exit_code = 0u;
+
+	kthread_test_init_scheduler();
+	kthread_test_init_target(&target, "target", 0x32c000u, false);
+	cr_assert(thread_init(&joiner, &params));
+	cr_assert(thread_init(&contender,
+			&(const struct thread_create_params){
+				.name = "contender",
+				.entry = kthread_test_entry,
+				.kernel_stack_base = 0x334000u,
+				.kernel_stack_top = 0x338000u,
+			}));
+	thread_mark_blocked(&target.thread, THREAD_BLOCK_PARKED);
+	cr_assert(sched_make_runnable(&contender));
+	sched_set_current(cpu_current(), &joiner);
+
+	join_claim_target = &target;
+	join_claim_contender = &contender;
+	join_claim_hook_active = false;
+	join_claim_contender_result = true;
+	join_claim_hook_runs = 0u;
+	hal_cpu_mock_set_context_switch_hook(join_claim_context_switch_hook);
+	cr_assert(kthread_join(&target, &exit_code));
+	cr_assert_eq(exit_code, 77u);
+	cr_assert_eq(join_claim_hook_runs, 1u);
+	cr_assert_not(join_claim_contender_result, "a second joiner must not wait on the claimed target");
+	cr_assert(thread_join_claimed(&target.thread));
+
+	join_claim_target = NULL;
+	join_claim_contender = NULL;
 	reset_test_state();
 }
