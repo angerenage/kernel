@@ -16,6 +16,9 @@ static size_t mutex_test_switch_hook_runs;
 static struct mutex* mutex_test_inheritance_mutex;
 static struct thread* mutex_test_inheritance_owner;
 static struct thread* mutex_test_inheritance_waiter;
+static struct thread* mutex_test_chain_owner;
+static struct thread* mutex_test_chain_middle;
+static struct thread* mutex_test_chain_waiter;
 
 static void init_bound_bootstrap_cpu(void) {
 	irq_enable_local();
@@ -33,6 +36,9 @@ static void reset_test_state(void) {
 	mutex_test_inheritance_mutex = NULL;
 	mutex_test_inheritance_owner = NULL;
 	mutex_test_inheritance_waiter = NULL;
+	mutex_test_chain_owner = NULL;
+	mutex_test_chain_middle = NULL;
+	mutex_test_chain_waiter = NULL;
 	hal_cpu_local_bind(NULL);
 }
 
@@ -94,6 +100,28 @@ static void mutex_test_inheritance_timeout_context_switch_hook(
 	cr_assert_eq(mutex_test_inheritance_owner->effective_priority,
 			mutex_test_inheritance_waiter->effective_priority,
 			"owner should inherit priority while the high-priority waiter is blocked");
+	sched_tick();
+	(void)sched_handle_interrupt_exit();
+	sched_tick();
+	(void)sched_handle_interrupt_exit();
+	mutex_test_switch_hook_active = false;
+}
+
+static void mutex_test_chain_timeout_context_switch_hook(
+		struct thread_context* current, const struct thread_context* next) {
+	(void)current;
+	(void)next;
+
+	if (mutex_test_switch_hook_active || mutex_test_switch_hook_runs != 0u) return;
+
+	mutex_test_switch_hook_active = true;
+	mutex_test_switch_hook_runs++;
+	cr_assert_eq(mutex_test_chain_middle->effective_priority,
+			mutex_test_chain_waiter->effective_priority,
+			"the intermediate owner should inherit the waiter's priority");
+	cr_assert_eq(mutex_test_chain_owner->effective_priority,
+			mutex_test_chain_waiter->effective_priority,
+			"the priority boost should reach the owner at the end of the wait chain");
 	sched_tick();
 	(void)sched_handle_interrupt_exit();
 	sched_tick();
@@ -375,6 +403,96 @@ Test(mutex, timed_out_priority_waiter_restores_owner_effective_priority) {
 
 	sched_set_current(cpu_current(), &owner);
 	cr_assert(mutex_unlock(&mutex), "owner should still be able to release the mutex");
+
+	hal_clock_stop();
+	reset_test_state();
+}
+
+Test(mutex, priority_inheritance_crosses_wait_chain_and_terminates_cycle) {
+	const struct thread_create_params owner_params = {
+		.name = "pi_chain_owner",
+		.entry = mutex_test_entry,
+		.arg = NULL,
+		.kernel_stack_base = 0x36d000u,
+		.kernel_stack_top = 0x371000u,
+		.preferred_cpu = NULL,
+		.base_priority = THREAD_PRIORITY_DEFAULT - 10,
+		.detached = false,
+	};
+	const struct thread_create_params middle_params = {
+		.name = "pi_chain_middle",
+		.entry = mutex_test_entry,
+		.arg = NULL,
+		.kernel_stack_base = 0x371000u,
+		.kernel_stack_top = 0x375000u,
+		.preferred_cpu = NULL,
+		.base_priority = THREAD_PRIORITY_DEFAULT - 5,
+		.detached = false,
+	};
+	const struct thread_create_params waiter_params = {
+		.name = "pi_chain_waiter",
+		.entry = mutex_test_entry,
+		.arg = NULL,
+		.kernel_stack_base = 0x375000u,
+		.kernel_stack_top = 0x379000u,
+		.preferred_cpu = NULL,
+		.base_priority = THREAD_PRIORITY_DEFAULT + 10,
+		.detached = false,
+	};
+	struct mutex outer;
+	struct mutex inner;
+	struct thread owner;
+	struct thread middle;
+	struct thread waiter;
+
+	init_bound_bootstrap_cpu();
+	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
+	cr_assert(hal_clock_start(1000u, NULL, NULL), "hal_clock_start failed");
+
+	mutex_init(&outer);
+	mutex_init(&inner);
+	cr_assert(thread_init(&owner, &owner_params), "owner thread_init failed");
+	cr_assert(thread_init(&middle, &middle_params), "middle thread_init failed");
+	cr_assert(thread_init(&waiter, &waiter_params), "waiter thread_init failed");
+
+	sched_set_current(cpu_current(), &owner);
+	cr_assert(mutex_try_lock(&outer), "owner should acquire the outer mutex");
+	sched_set_current(cpu_current(), sched_idle_thread(cpu_current()));
+	cr_assert(sched_make_runnable(&owner), "owner should be available while the chain blocks");
+
+	sched_set_current(cpu_current(), &middle);
+	cr_assert(mutex_try_lock(&inner), "middle thread should acquire the inner mutex");
+	__atomic_store_n(&middle.waiting_mutex, &outer, __ATOMIC_RELEASE);
+	sched_block_current(&outer.waiters, THREAD_BLOCK_MUTEX);
+	cr_assert_eq(sched_current_thread(), &owner, "outer owner should run after the middle thread blocks");
+
+	__atomic_store_n(&owner.waiting_mutex, &inner, __ATOMIC_RELEASE);
+	sched_set_current(cpu_current(), sched_idle_thread(cpu_current()));
+	cr_assert(sched_make_runnable(&owner), "owner should remain runnable for timeout progress");
+
+	mutex_test_chain_owner = &owner;
+	mutex_test_chain_middle = &middle;
+	mutex_test_chain_waiter = &waiter;
+	hal_cpu_mock_set_context_switch_hook(mutex_test_chain_timeout_context_switch_hook);
+
+	sched_set_current(cpu_current(), &waiter);
+	cr_assert(!mutex_timed_lock(&inner, 2u), "the chain waiter should time out without a released mutex");
+	cr_assert_eq(mutex_test_switch_hook_runs, 1u, "chain inheritance hook should run once");
+	cr_assert_eq(middle.effective_priority,
+			middle.base_priority,
+			"intermediate priority should restore when the waiter leaves");
+	cr_assert_eq(owner.effective_priority,
+			middle.base_priority,
+			"outer owner should retain only the remaining intermediate waiter priority");
+
+	hal_cpu_mock_set_context_switch_hook(NULL);
+	__atomic_store_n(&owner.waiting_mutex, NULL, __ATOMIC_RELEASE);
+	__atomic_store_n(&middle.waiting_mutex, NULL, __ATOMIC_RELEASE);
+	sched_set_current(cpu_current(), &owner);
+	cr_assert(mutex_unlock(&outer), "owner should release the outer mutex");
+	sched_set_current(cpu_current(), &middle);
+	cr_assert(mutex_unlock(&inner), "middle thread should release the inner mutex");
 
 	hal_clock_stop();
 	reset_test_state();

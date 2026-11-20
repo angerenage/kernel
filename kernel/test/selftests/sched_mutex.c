@@ -354,6 +354,151 @@ cleanup:
 	kernel_selftest_clock_scope_end(&clock);
 }
 
+struct kernel_selftest_mutex_chain_state {
+	struct mutex outer;
+	struct mutex inner;
+	uint64_t owner_deadline_tick;
+	uint64_t waiter_start_tick;
+	bool owner_locked;
+	bool owner_unlocked;
+	bool middle_locked_inner;
+	bool middle_acquired_outer;
+	bool middle_unlocked_outer;
+	bool middle_unlocked_inner;
+	bool waiter_started;
+	bool waiter_result;
+	bool waiter_finished;
+};
+
+static void kernel_selftest_mutex_chain_owner_worker(void* arg) {
+	struct kernel_selftest_mutex_chain_state* state = arg;
+
+	if (state == NULL) return;
+
+	mutex_lock(&state->outer);
+	state->owner_locked = true;
+	(void)sched_sleep_until_tick(state->owner_deadline_tick);
+	state->owner_unlocked = mutex_unlock(&state->outer);
+}
+
+static void kernel_selftest_mutex_chain_middle_worker(void* arg) {
+	struct kernel_selftest_mutex_chain_state* state = arg;
+
+	if (state == NULL) return;
+
+	mutex_lock(&state->inner);
+	state->middle_locked_inner = true;
+	mutex_lock(&state->outer);
+	state->middle_acquired_outer = true;
+	state->middle_unlocked_outer = mutex_unlock(&state->outer);
+	state->middle_unlocked_inner = mutex_unlock(&state->inner);
+}
+
+static void kernel_selftest_mutex_chain_waiter_worker(void* arg) {
+	struct kernel_selftest_mutex_chain_state* state = arg;
+
+	if (state == NULL) return;
+
+	state->waiter_started = true;
+	state->waiter_start_tick = sched_tick_count();
+	state->waiter_result = mutex_timed_lock(&state->inner, KERNEL_SELFTEST_MUTEX_TIMEOUT_MS);
+	state->waiter_finished = true;
+	if (state->waiter_result) (void)mutex_unlock(&state->inner);
+}
+
+static void kernel_selftest_mutex_priority_inheritance_crosses_wait_chain(struct kernel_selftest_context* ctx) {
+	struct kthread* owner = NULL;
+	struct kthread* middle = NULL;
+	struct kthread* waiter = NULL;
+	struct kernel_selftest_mutex_chain_state state = {0};
+	struct kernel_selftest_clock_scope clock = {0};
+	uint64_t timeout_ticks;
+	uint64_t waiter_deadline = 0u;
+
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+			ctx, kernel_selftest_clock_scope_begin(&clock), "failed to start a temporary clock source", cleanup);
+	timeout_ticks = kernel_selftest_ms_to_ticks(KERNEL_SELFTEST_MUTEX_TIMEOUT_MS, clock.hz);
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, timeout_ticks != 0u, "timeout conversion returned zero ticks", cleanup);
+	state.owner_deadline_tick = sched_tick_count() + timeout_ticks + KERNEL_SELFTEST_MUTEX_HOLD_TICKS;
+	mutex_init(&state.outer);
+	mutex_init(&state.inner);
+
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+			kernel_selftest_thread_create(
+					&owner, "selftest/mutex-chain-owner", kernel_selftest_mutex_chain_owner_worker, &state),
+			"failed to create mutex chain owner",
+			cleanup);
+	sched_yield();
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.owner_locked, "chain owner never acquired the outer mutex", cleanup);
+	owner->thread.base_priority = THREAD_PRIORITY_DEFAULT - 10;
+	sched_set_thread_effective_priority(&owner->thread, owner->thread.base_priority);
+
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+			kernel_selftest_thread_create(
+					&middle, "selftest/mutex-chain-middle", kernel_selftest_mutex_chain_middle_worker, &state),
+			"failed to create mutex chain middle thread",
+			cleanup);
+	sched_yield();
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(
+			ctx, state.middle_locked_inner, "middle thread never acquired inner mutex", cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, middle->thread.state == THREAD_STATE_BLOCKED, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(
+			ctx, __atomic_load_n(&middle->thread.waiting_mutex, __ATOMIC_ACQUIRE) == &state.outer, cleanup);
+	middle->thread.base_priority = THREAD_PRIORITY_DEFAULT - 5;
+	sched_set_thread_effective_priority(&middle->thread, middle->thread.base_priority);
+	sched_set_thread_effective_priority(&owner->thread, middle->thread.base_priority);
+
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+			kernel_selftest_thread_create(
+					&waiter, "selftest/mutex-chain-waiter", kernel_selftest_mutex_chain_waiter_worker, &state),
+			"failed to create mutex chain waiter",
+			cleanup);
+	waiter->thread.base_priority = THREAD_PRIORITY_DEFAULT + 10;
+	sched_set_thread_effective_priority(&waiter->thread, waiter->thread.base_priority);
+	sched_yield();
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx, state.waiter_started, "chain waiter never attempted inner mutex", cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.waiter_finished, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, waiter->thread.state == THREAD_STATE_BLOCKED, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, middle->thread.effective_priority == waiter->thread.effective_priority, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, owner->thread.effective_priority == waiter->thread.effective_priority, cleanup);
+
+	waiter_deadline = state.waiter_start_tick + timeout_ticks;
+	kernel_selftest_advance_ticks_until(waiter_deadline);
+	kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, state.waiter_finished, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, !state.waiter_result, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, middle->thread.effective_priority == middle->thread.base_priority, cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, owner->thread.effective_priority == middle->thread.base_priority, cleanup);
+
+cleanup:
+	if (owner != NULL) {
+		owner->thread.base_priority = THREAD_PRIORITY_DEFAULT;
+		sched_set_thread_effective_priority(&owner->thread, THREAD_PRIORITY_DEFAULT);
+	}
+	if (middle != NULL) {
+		middle->thread.base_priority = THREAD_PRIORITY_DEFAULT;
+		sched_set_thread_effective_priority(&middle->thread, THREAD_PRIORITY_DEFAULT);
+	}
+	kernel_selftest_advance_ticks_until(state.owner_deadline_tick);
+	if (kernel_selftest_thread_is_live(owner) || kernel_selftest_thread_is_live(middle) ||
+			kernel_selftest_thread_is_live(waiter)) {
+		kernel_selftest_dispatch_rounds(KERNEL_SELFTEST_MAX_DISPATCH_ROUNDS);
+	}
+	if (ctx->failure_expr == NULL) {
+		KERNEL_SELFTEST_ASSERT(ctx, state.owner_unlocked);
+		KERNEL_SELFTEST_ASSERT(ctx, state.middle_acquired_outer);
+		KERNEL_SELFTEST_ASSERT(ctx, state.middle_unlocked_outer);
+		KERNEL_SELFTEST_ASSERT(ctx, state.middle_unlocked_inner);
+		if (owner != NULL) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&owner->thread));
+		if (middle != NULL) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&middle->thread));
+		if (waiter != NULL) KERNEL_SELFTEST_ASSERT(ctx, thread_is_terminated(&waiter->thread));
+	}
+	kernel_selftest_thread_destroy(&waiter);
+	kernel_selftest_thread_destroy(&middle);
+	kernel_selftest_thread_destroy(&owner);
+	kernel_selftest_clock_scope_end(&clock);
+}
+
 struct kernel_selftest_mutex_single_wake_state;
 
 struct kernel_selftest_mutex_single_wake_waiter_arg {
@@ -603,6 +748,10 @@ static const struct kernel_selftest_case kernel_sched_mutex_selftests[] = {
 	{
 		.name = "mutex_timed_lock_times_out_when_owner_never_unlocks",
 		.run = kernel_selftest_mutex_timed_lock_times_out_when_owner_never_unlocks,
+	},
+	{
+		.name = "mutex_priority_inheritance_crosses_wait_chain",
+		.run = kernel_selftest_mutex_priority_inheritance_crosses_wait_chain,
 	},
 	{
 		.name = "mutex_unlock_wakes_single_waiter",

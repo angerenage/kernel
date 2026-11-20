@@ -152,6 +152,7 @@ struct thread {
 	struct thread_wait_queue join_wait_queue;
 	struct thread_wait_queue park_wait_queue;
 	struct thread_wait_queue* blocked_queue;
+	struct mutex* waiting_mutex;
 	struct mutex* owned_mutexes;
 	struct rwlock* owned_rwlock_writes;
 	struct thread_rwlock_read_hold owned_rwlock_reads[THREAD_RWLOCK_READ_HOLD_CAPACITY];
