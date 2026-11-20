@@ -96,6 +96,18 @@ bool mutex_release_locked(struct mutex* mutex, struct thread* owner) {
 	return true;
 }
 
+void mutex_abandon_owned(struct thread* owner) {
+	while (owner != NULL && owner->owned_mutexes != NULL) {
+		struct mutex* mutex = owner->owned_mutexes;
+		struct irq_state state = spinlock_lock_irqsave(&mutex->lock);
+		bool released = mutex_release_locked(mutex, owner);
+
+		spinlock_unlock_irqrestore(&mutex->lock, state);
+		if (!released) hcf();
+		(void)sched_wake_one(&mutex->waiters);
+	}
+}
+
 bool mutex_try_lock(struct mutex* mutex) {
 	struct irq_state state;
 	struct thread* current;

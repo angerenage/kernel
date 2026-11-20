@@ -31,6 +31,9 @@ bool mutex_unlock(struct mutex* mutex);
 /* Release a mutex already verified as owned by owner while mutex->lock is held. */
 bool mutex_release_locked(struct mutex* mutex, struct thread* owner);
 
+/* Release every mutex owned by a thread that is entering terminal state. */
+void mutex_abandon_owned(struct thread* owner);
+
 /* Return true while the mutex has a current owner. */
 bool mutex_is_locked(const struct mutex* mutex);
 

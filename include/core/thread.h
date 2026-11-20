@@ -11,11 +11,13 @@
 struct cpu;
 struct address_space;
 struct mutex;
+struct rwlock;
 struct thread;
 struct thread_wait_queue;
 
 enum {
 	THREAD_DEFAULT_TIMESLICE_TICKS = 4u,
+	THREAD_RWLOCK_READ_HOLD_CAPACITY = 16u,
 };
 
 enum {
@@ -123,6 +125,11 @@ struct thread_wait_queue {
 	size_t depth;
 };
 
+struct thread_rwlock_read_hold {
+	struct rwlock* rwlock;
+	size_t count;
+};
+
 /* Core thread descriptor shared by scheduler, wait queues, and higher-level thread wrappers. */
 struct thread {
 	const char* name;
@@ -146,6 +153,8 @@ struct thread {
 	struct thread_wait_queue park_wait_queue;
 	struct thread_wait_queue* blocked_queue;
 	struct mutex* owned_mutexes;
+	struct rwlock* owned_rwlock_writes;
+	struct thread_rwlock_read_hold owned_rwlock_reads[THREAD_RWLOCK_READ_HOLD_CAPACITY];
 	struct thread* run_queue_next;
 	struct thread* wait_queue_next;
 	struct thread* sleep_queue_next;

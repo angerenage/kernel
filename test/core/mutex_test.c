@@ -124,6 +124,30 @@ Test(mutex, init_try_lock_and_unlock_track_owner_and_state) {
 	reset_test_state();
 }
 
+Test(mutex, abandonment_releases_every_mutex_owned_by_terminal_thread) {
+	struct mutex first;
+	struct mutex second;
+	struct thread* owner;
+
+	init_bound_bootstrap_cpu();
+	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
+	owner = sched_current_thread();
+	mutex_init(&first);
+	mutex_init(&second);
+	cr_assert(mutex_try_lock(&first));
+	cr_assert(mutex_try_lock(&second));
+	cr_assert_not_null(owner->owned_mutexes);
+
+	mutex_abandon_owned(owner);
+	cr_assert_null(owner->owned_mutexes);
+	cr_assert_null(mutex_owner(&first));
+	cr_assert_null(mutex_owner(&second));
+	cr_assert_eq(owner->effective_priority, owner->base_priority);
+
+	reset_test_state();
+}
+
 Test(mutex, unlock_rejects_non_owner) {
 	const struct thread_create_params params = {
 		.name = "mutex_owner",

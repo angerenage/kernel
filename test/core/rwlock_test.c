@@ -109,6 +109,50 @@ Test(rwlock, init_try_paths_and_unlocks_track_state) {
 	reset_test_state();
 }
 
+Test(rwlock, ownership_validation_and_abandonment_release_terminal_thread_holds) {
+	const struct thread_create_params params = {
+		.name = "other",
+		.entry = rwlock_test_entry,
+		.kernel_stack_base = 0x468000u,
+		.kernel_stack_top = 0x46c000u,
+	};
+	struct rwlock read_lock;
+	struct rwlock write_lock;
+	struct thread other;
+	struct thread* owner;
+
+	init_bound_bootstrap_cpu();
+	cr_assert(sched_init(), "sched_init failed");
+	cr_assert(sched_start_cpu(cpu_current()), "sched_start_cpu failed");
+	owner = sched_current_thread();
+	cr_assert(thread_init(&other, &params));
+	rwlock_init(&read_lock);
+	rwlock_init(&write_lock);
+	cr_assert(rwlock_try_read_lock(&read_lock));
+	cr_assert(rwlock_try_read_lock(&read_lock));
+	cr_assert(rwlock_try_write_lock(&write_lock));
+
+	sched_set_current(cpu_current(), &other);
+	cr_assert_not(rwlock_read_unlock(&read_lock), "a different thread must not release another reader's hold");
+	cr_assert_eq(rwlock_reader_count(&read_lock), 2u);
+	sched_set_current(cpu_current(), owner);
+	rwlock_abandon_owned(owner);
+	cr_assert_eq(rwlock_reader_count(&read_lock), 0u);
+	cr_assert_null(owner->owned_rwlock_writes);
+	for (size_t i = 0u; i < THREAD_RWLOCK_READ_HOLD_CAPACITY; i++) {
+		cr_assert_null(owner->owned_rwlock_reads[i].rwlock);
+		cr_assert_eq(owner->owned_rwlock_reads[i].count, 0u);
+	}
+
+	sched_set_current(cpu_current(), &other);
+	cr_assert(rwlock_try_write_lock(&read_lock));
+	cr_assert(rwlock_write_unlock(&read_lock));
+	cr_assert(rwlock_try_write_lock(&write_lock));
+	cr_assert(rwlock_write_unlock(&write_lock));
+
+	reset_test_state();
+}
+
 Test(rwlock, write_unlock_rejects_non_owner) {
 	const struct thread_create_params owner_params = {
 		.name = "rwlock_owner",

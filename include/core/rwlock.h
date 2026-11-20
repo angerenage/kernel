@@ -13,6 +13,7 @@ struct rwlock {
 	size_t reader_count;
 	size_t waiting_writers;
 	struct thread* writer;
+	struct rwlock* owner_next;
 	struct thread_wait_queue readers;
 	struct thread_wait_queue writers;
 };
@@ -46,6 +47,9 @@ bool rwlock_write_unlock(struct rwlock* rwlock);
 
 /* Convert the current writer hold into one shared reader hold. */
 bool rwlock_downgrade(struct rwlock* rwlock);
+
+/* Release every read and write hold owned by a thread that is entering terminal state. */
+void rwlock_abandon_owned(struct thread* owner);
 
 /* Return the current number of active readers. */
 size_t rwlock_reader_count(const struct rwlock* rwlock);

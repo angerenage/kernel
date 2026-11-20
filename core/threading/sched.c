@@ -5,7 +5,9 @@
 #include <hal/interrupts.h>
 #include <core/address_space.h>
 #include <core/cpu.h>
+#include <core/mutex.h>
 #include <core/process.h>
+#include <core/rwlock.h>
 #include <core/sched.h>
 #include <core/spinlock.h>
 #include <core/thread.h>
@@ -1274,6 +1276,8 @@ void sched_exit_current(thread_exit_code_t exit_code) {
 	if (current->owner_kind == THREAD_OWNER_UTHREAD) {
 		uthread_close_signal_receivers((struct uthread*)current->owner);
 	}
+	mutex_abandon_owned(current);
+	rwlock_abandon_owned(current);
 	thread_mark_exiting(current, exit_code);
 	sched_dispatch_next(cpu);
 
