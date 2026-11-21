@@ -7,6 +7,7 @@
 #include <string.h>
 #include <test_memory.h>
 
+#include <base/cap.h>
 #include <base/heap.h>
 #include <boot/info.h>
 #include <hal/cpu.h>
@@ -73,5 +74,8 @@ void elf_test_set_load(struct elf_test_image* image, size_t index, uint64_t offs
 		uint64_t memsz, uint32_t flags);
 void elf_test_destroy_loaded(struct kernel_elf_process* loaded);
 void elf_test_poison_recycled_memory(size_t size, uint8_t value);
+size_t elf_test_published_mapping_count(void);
+cap_rights_t elf_test_published_mapping_rights(size_t index);
+memory_access_t elf_test_published_mapping_access(size_t index);
 
 #endif

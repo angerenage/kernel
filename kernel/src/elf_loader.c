@@ -125,7 +125,7 @@ static memory_access_t kernel_elf_segment_access(uint32_t flags) {
 }
 
 static cap_rights_t mapping_rights(memory_access_t access) {
-	cap_rights_t rights = CAP_CALL | CAP_READ | CAP_MAP | CAP_DESTROY | CAP_DELEGATE;
+	cap_rights_t rights = CAP_CALL | CAP_MAP | CAP_DESTROY | CAP_DELEGATE;
 	if ((access & MEMORY_ACCESS_READ) != 0u) rights |= CAP_READ;
 	if ((access & MEMORY_ACCESS_WRITE) != 0u) rights |= CAP_WRITE;
 	if ((access & MEMORY_ACCESS_EXEC) != 0u) rights |= CAP_EXEC;

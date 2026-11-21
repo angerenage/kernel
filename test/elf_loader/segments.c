@@ -73,6 +73,30 @@ Test(elf_loader_segments, keeps_text_and_data_permissions_independent) {
 	elf_test_destroy_loaded(&loaded);
 }
 
+Test(elf_loader_segments, nonreadable_segment_omits_read_mapping_authority) {
+	struct elf_test_image image;
+	struct boot_module module;
+	struct kernel_elf_process loaded = {0};
+	const uint64_t file_offset = TEST_MAPPING_GRANULE;
+	const uint64_t vaddr = TEST_MAPPING_GRANULE + 4u * (uint64_t)TEST_MAPPING_GRANULE;
+
+	elf_test_init_environment();
+	elf_test_image_init(&image, 1u);
+	elf_test_header(&image)->entry = vaddr;
+	elf_test_set_load(&image, 0u, file_offset, vaddr, 16u, 16u, ELF_TEST_PF_X);
+	memset(image.bytes + file_offset, 0x31, 16u);
+	module = elf_test_module(&image);
+	cr_assert_eq(kernel_elf_load_process(&module, "execute-only", &loaded), KERNEL_ELF_LOAD_OK);
+	cr_assert_eq(elf_test_published_mapping_count(), 2u);
+	cr_assert_eq(elf_test_published_mapping_rights(0u), CAP_CALL | CAP_MAP | CAP_DESTROY | CAP_DELEGATE | CAP_EXEC);
+	cr_assert_eq(elf_test_published_mapping_access(0u), MEMORY_ACCESS_EXEC);
+	cr_assert_eq(
+			address_space_validate_range(
+					process_address_space(loaded.process), vaddr, 1u, ADDRESS_TRANSFER_READ | ADDRESS_TRANSFER_USER),
+			ADDRESS_TRANSFER_ACCESS_DENIED);
+	elf_test_destroy_loaded(&loaded);
+}
+
 Test(elf_loader_segments, segment_page_padding_does_not_expose_recycled_physical_contents) {
 	struct elf_test_image image;
 	struct boot_module module;

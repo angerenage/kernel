@@ -35,14 +35,19 @@ static uint8_t elf_test_arena[ELF_TEST_ARENA_SIZE] __attribute__((aligned(TEST_M
 static uint8_t elf_test_heap[ELF_TEST_HEAP_SIZE] __attribute__((aligned(TEST_MAPPING_GRANULE)));
 static size_t elf_test_heap_offset;
 static cap_id_t elf_test_next_mapping_cap;
+static size_t elf_test_mapping_count;
+static cap_rights_t elf_test_mapping_rights[ELF_TEST_MAX_PHDRS + 1u];
+static memory_access_t elf_test_mapping_access[ELF_TEST_MAX_PHDRS + 1u];
 
 cap_id_t kernel_mapping_publish(struct process* target, process_id_t recipient, struct mapping* mapping,
 		cap_rights_t rights, memory_access_t maximum_access) {
 	(void)target;
 	(void)recipient;
 	(void)mapping;
-	(void)rights;
-	(void)maximum_access;
+	cr_assert_lt(elf_test_mapping_count, ELF_TEST_MAX_PHDRS + 1u);
+	elf_test_mapping_rights[elf_test_mapping_count] = rights;
+	elf_test_mapping_access[elf_test_mapping_count] = maximum_access;
+	elf_test_mapping_count++;
 	return ++elf_test_next_mapping_cap;
 }
 
@@ -72,6 +77,9 @@ void elf_test_init_environment(void) {
 	};
 
 	elf_test_heap_offset = 0u;
+	elf_test_mapping_count = 0u;
+	memset(elf_test_mapping_rights, 0, sizeof(elf_test_mapping_rights));
+	memset(elf_test_mapping_access, 0, sizeof(elf_test_mapping_access));
 	hal_cpu_local_bind(NULL);
 	irq_enable_local();
 	cr_assert(cpu_topology_init_bootstrap(0x100000u, 0x104000u));
@@ -159,4 +167,18 @@ void elf_test_poison_recycled_memory(size_t size, uint8_t value) {
 			pmm_alloc(&(const struct pmm_alloc_request){.size = size, .alignment = TEST_MAPPING_GRANULE}, &allocation));
 	memset((void*)(allocation.address + mm_info.direct_map_offset), value, allocation.size);
 	cr_assert(pmm_free(allocation), "failed to return poisoned memory to PMM");
+}
+
+size_t elf_test_published_mapping_count(void) {
+	return elf_test_mapping_count;
+}
+
+cap_rights_t elf_test_published_mapping_rights(size_t index) {
+	cr_assert_lt(index, elf_test_mapping_count);
+	return elf_test_mapping_rights[index];
+}
+
+memory_access_t elf_test_published_mapping_access(size_t index) {
+	cr_assert_lt(index, elf_test_mapping_count);
+	return elf_test_mapping_access[index];
 }
