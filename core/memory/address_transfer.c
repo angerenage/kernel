@@ -52,19 +52,28 @@ static enum address_transfer_result locate_locked(struct address_space* space, u
 	if (result != ADDRESS_TRANSFER_OK) return result;
 	if ((access & (ADDRESS_TRANSFER_PRESENT | ADDRESS_TRANSFER_FAULT_IN)) != 0u) {
 		const struct hal_paging_info* info = hal_paging_info();
+		struct hal_paging_translation translation;
 		size_t granule = info == NULL ? 0u : info->minimum_leaf_size;
 		if (granule == 0u) return ADDRESS_TRANSFER_FAULT_FAILED;
 		size_t offset = (size_t)(address - mapping->address) & ~(granule - 1u);
 		uintptr_t leaf = mapping->address + offset;
-		if (!hal_paging_query(space->backend.process.hal, leaf, NULL)) {
+		if (!hal_paging_query(space->backend.process.hal, leaf, &translation)) {
 			if ((access & ADDRESS_TRANSFER_PRESENT) != 0u) return ADDRESS_TRANSFER_NOT_MAPPED;
 			if (!address_space_resolve_process_locked(space, mapping, offset)) return ADDRESS_TRANSFER_FAULT_FAILED;
+			if (!hal_paging_query(space->backend.process.hal, leaf, &translation)) return ADDRESS_TRANSFER_FAULT_FAILED;
 		}
+		if (translation.leaf_size < granule || (translation.leaf_size & (translation.leaf_size - 1u)) != 0u)
+			return ADDRESS_TRANSFER_FAULT_FAILED;
+		size_t leaf_chunk = translation.leaf_size - (address & (translation.leaf_size - 1u));
+		mapping_end = mapping->address + mapping->size;
+		if (leaf_chunk > mapping_end - address) leaf_chunk = mapping_end - address;
+		if (out_chunk != NULL) *out_chunk = leaf_chunk;
 	}
 	mapping_end = mapping->address + mapping->size;
 	if (out_mapping != NULL) *out_mapping = mapping;
 	if (out_memory_offset != NULL) *out_memory_offset = (size_t)(address - mapping->address);
-	if (out_chunk != NULL) *out_chunk = (size_t)(mapping_end - address);
+	if (out_chunk != NULL && (access & (ADDRESS_TRANSFER_PRESENT | ADDRESS_TRANSFER_FAULT_IN)) == 0u)
+		*out_chunk = (size_t)(mapping_end - address);
 	return ADDRESS_TRANSFER_OK;
 }
 

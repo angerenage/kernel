@@ -102,3 +102,35 @@ Test(address_transfer, overlapping_copy_has_memmove_semantics) {
 	mapping_release(mapping);
 	address_space_destroy_process(&space);
 }
+
+Test(address_transfer, fault_in_validation_resolves_every_requested_leaf) {
+	struct address_space space = {0};
+	struct mapping* mapping;
+	void* base;
+	init_test_address_space(arena, sizeof(arena));
+	cr_assert(address_space_create_process(&space));
+	cr_assert(test_address_space_map(&space,
+			3u * TEST_MAPPING_GRANULE,
+			MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+			0u,
+			TEST_MAPPING_GRANULE,
+			0u,
+			&mapping,
+			&base));
+
+	cr_assert_eq(address_space_validate_range(&space,
+						 (uintptr_t)base,
+						 3u * TEST_MAPPING_GRANULE,
+						 ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_FAULT_IN),
+			ADDRESS_TRANSFER_OK);
+	cr_assert_eq(mock_paging_mapping_count(), 3u);
+	cr_assert_eq(address_space_validate_range(&space,
+						 (uintptr_t)base,
+						 3u * TEST_MAPPING_GRANULE,
+						 ADDRESS_TRANSFER_WRITE | ADDRESS_TRANSFER_USER | ADDRESS_TRANSFER_PRESENT),
+			ADDRESS_TRANSFER_OK);
+
+	cr_assert(address_space_unmap(&space, mapping));
+	mapping_release(mapping);
+	address_space_destroy_process(&space);
+}
