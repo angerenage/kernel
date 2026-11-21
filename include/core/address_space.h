@@ -31,6 +31,14 @@ enum address_space_fault_kind {
 	ADDRESS_SPACE_FAULT_UNCLASSIFIED,
 };
 
+/* Detailed outcome for prefault operations that can retain valid prefix work. */
+enum address_space_prefault_result {
+	ADDRESS_SPACE_PREFAULT_OK = 0,
+	ADDRESS_SPACE_PREFAULT_INVALID,
+	ADDRESS_SPACE_PREFAULT_FAILED,
+	ADDRESS_SPACE_PREFAULT_PARTIAL,
+};
+
 /* One PROCESS or DEVICE AddressSpace and its common Mapping registry. */
 struct address_space {
 	enum address_space_kind kind;
@@ -100,6 +108,10 @@ bool address_space_protect(struct address_space* space, struct mapping* mapping,
 
 /* Materialize and project an aligned Mapping-relative byte range in a PROCESS AddressSpace. */
 bool address_space_prefault(struct address_space* space, struct mapping* mapping, size_t offset, size_t size);
+
+/* Prefault a range and distinguish clean failure from retained backing or translations. */
+enum address_space_prefault_result address_space_prefault_ex(
+		struct address_space* space, struct mapping* mapping, size_t offset, size_t size);
 
 /* Resolve one eligible not-present access in a PROCESS AddressSpace. */
 bool address_space_resolve_fault(struct address_space* space, uintptr_t address, memory_access_t access);

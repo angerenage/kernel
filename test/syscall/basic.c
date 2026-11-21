@@ -15,3 +15,10 @@ Test(syscall, invalid_number_returns_unknown_syscall) {
 	cr_assert_eq(result.value, UINTPTR_MAX);
 	cr_assert(syscall_status_is_caller_error(result.status), "unknown syscall should be a caller error");
 }
+
+Test(syscall, partial_address_transfer_is_reported_as_runtime_failure) {
+	syscall_result_t result = syscall_result_from_address_transfer(ADDRESS_TRANSFER_PARTIAL, 3u);
+
+	cr_assert_eq(result.status, SYSCALL_STATUS_FAILED);
+	cr_assert_eq(result.value, 3u);
+}

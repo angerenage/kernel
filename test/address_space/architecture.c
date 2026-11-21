@@ -393,6 +393,27 @@ Test(address_space, failed_pte_install_keeps_materialized_memory) {
 	memory_release(memory);
 }
 
+Test(address_space, prefault_reports_partial_backing_and_translation_work) {
+	struct memory* memory;
+	struct mapping* mapping;
+	struct memory_span span;
+	init_test_address_space(arena, sizeof(arena));
+	cr_assert(memory_create_anonymous(3u * TEST_MAPPING_GRANULE, &memory));
+	cr_assert(map_memory(
+			address_space_kernel(), memory, 0u, 0u, 0u, 0u, MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE, &mapping));
+	mock_paging_fail_after(1u);
+
+	cr_assert_eq(address_space_prefault_ex(address_space_kernel(), mapping, 0u, 3u * TEST_MAPPING_GRANULE),
+			ADDRESS_SPACE_PREFAULT_PARTIAL);
+	cr_assert_eq(mock_paging_mapping_count(), 1u);
+	cr_assert(memory_query(memory, 0u, 3u * TEST_MAPPING_GRANULE, &span));
+	cr_assert_eq(span.kind, MEMORY_SPAN_PRESENT);
+	cr_assert_eq(span.size, 3u * TEST_MAPPING_GRANULE);
+
+	unmap_release(address_space_kernel(), mapping);
+	memory_release(memory);
+}
+
 Test(address_space, executable_projection_synchronizes_only_present_memory) {
 	struct memory* memory;
 	struct mapping* mapping;

@@ -59,7 +59,7 @@ static enum address_transfer_result locate_locked(struct address_space* space, u
 		uintptr_t leaf = mapping->address + offset;
 		if (!hal_paging_query(space->backend.process.hal, leaf, &translation)) {
 			if ((access & ADDRESS_TRANSFER_PRESENT) != 0u) return ADDRESS_TRANSFER_NOT_MAPPED;
-			if (!address_space_resolve_process_locked(space, mapping, offset)) return ADDRESS_TRANSFER_FAULT_FAILED;
+			if (!address_space_resolve_process_locked(space, mapping, offset)) return ADDRESS_TRANSFER_PARTIAL;
 			if (!hal_paging_query(space->backend.process.hal, leaf, &translation)) return ADDRESS_TRANSFER_FAULT_FAILED;
 		}
 		if (translation.leaf_size < granule || (translation.leaf_size & (translation.leaf_size - 1u)) != 0u)
@@ -89,7 +89,10 @@ static enum address_transfer_result validate_locked(struct address_space* space,
 		size_t chunk;
 		enum address_transfer_result result =
 				locate_locked(space, address + done, access, &mapping, &memory_offset, &chunk);
-		if (result != ADDRESS_TRANSFER_OK) return result;
+		if (result != ADDRESS_TRANSFER_OK) {
+			if (done != 0u && (access & ADDRESS_TRANSFER_FAULT_IN) != 0u) return ADDRESS_TRANSFER_PARTIAL;
+			return result;
+		}
 		if (chunk > size - done) chunk = size - done;
 		if (done == 0u) {
 			if (out_first_mapping != NULL) *out_first_mapping = mapping;
@@ -136,9 +139,12 @@ enum address_transfer_result address_space_copy_from(
 					&chunk);
 			if (chunk > size - done) chunk = size - done;
 		}
-		if (result == ADDRESS_TRANSFER_OK && !memory_read(mapping->memory, object_offset, (uint8_t*)dst + done, chunk))
-			result = ADDRESS_TRANSFER_FAULT_FAILED;
-		done += chunk;
+		if (result == ADDRESS_TRANSFER_OK &&
+				!memory_read(mapping->memory, object_offset, (uint8_t*)dst + done, chunk)) {
+			result = ADDRESS_TRANSFER_PARTIAL;
+			break;
+		}
+		if (result == ADDRESS_TRANSFER_OK) done += chunk;
 	}
 	spinlock_unlock_irqrestore(&space->lock, state);
 	return result;
@@ -168,9 +174,11 @@ enum address_transfer_result address_space_copy_to(
 			if (chunk > size - done) chunk = size - done;
 		}
 		if (result == ADDRESS_TRANSFER_OK &&
-				!memory_write(mapping->memory, object_offset, (const uint8_t*)src + done, chunk))
-			result = ADDRESS_TRANSFER_FAULT_FAILED;
-		done += chunk;
+				!memory_write(mapping->memory, object_offset, (const uint8_t*)src + done, chunk)) {
+			result = ADDRESS_TRANSFER_PARTIAL;
+			break;
+		}
+		if (result == ADDRESS_TRANSFER_OK) done += chunk;
 	}
 	spinlock_unlock_irqrestore(&space->lock, state);
 	return result;
@@ -256,9 +264,12 @@ enum address_transfer_result address_space_copy_between(struct address_space* ds
 			if (chunk > src_chunk) chunk = src_chunk;
 			if (chunk > dst_chunk) chunk = dst_chunk;
 		}
-		if (!memory_read(src_mapping->memory, src_offset, buffer, chunk) ||
-				!memory_write(dst_mapping->memory, dst_offset, buffer, chunk)) {
-			result = ADDRESS_TRANSFER_FAULT_FAILED;
+		if (!memory_read(src_mapping->memory, src_offset, buffer, chunk)) {
+			result = done == 0u ? ADDRESS_TRANSFER_FAULT_FAILED : ADDRESS_TRANSFER_PARTIAL;
+			break;
+		}
+		if (!memory_write(dst_mapping->memory, dst_offset, buffer, chunk)) {
+			result = ADDRESS_TRANSFER_PARTIAL;
 			break;
 		}
 		done += chunk;

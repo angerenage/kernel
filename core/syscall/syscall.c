@@ -11,6 +11,7 @@ syscall_result_t syscall_result_from_address_transfer(enum address_transfer_resu
 	case ADDRESS_TRANSFER_OK:
 		return syscall_result_ok(0u);
 	case ADDRESS_TRANSFER_FAULT_FAILED:
+	case ADDRESS_TRANSFER_PARTIAL:
 		return syscall_result_error(SYSCALL_STATUS_FAILED, arg_index);
 	case ADDRESS_TRANSFER_INVALID_ARGUMENTS:
 	case ADDRESS_TRANSFER_ADDRESS_OVERFLOW:

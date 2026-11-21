@@ -15,6 +15,7 @@ enum address_transfer_result {
 	ADDRESS_TRANSFER_NOT_USER,
 	ADDRESS_TRANSFER_ACCESS_DENIED,
 	ADDRESS_TRANSFER_FAULT_FAILED,
+	ADDRESS_TRANSFER_PARTIAL,
 };
 
 /* Access flags accepted by the address-transfer validation helpers. */

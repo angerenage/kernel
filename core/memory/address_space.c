@@ -1156,17 +1156,18 @@ bool address_space_resolve_fault(struct address_space* space, uintptr_t address,
 	return ok;
 }
 
-bool address_space_prefault(struct address_space* space, struct mapping* mapping, size_t offset, size_t size) {
+enum address_space_prefault_result address_space_prefault_ex(
+		struct address_space* space, struct mapping* mapping, size_t offset, size_t size) {
 	struct irq_state state;
 	size_t granule = translation_granule();
 	if (!initialized || !address_space_is_initialized(space) || mapping == NULL || granule == 0u || size == 0u ||
 			(offset & (granule - 1u)) != 0u || (size & (granule - 1u)) != 0u)
-		return false;
-	if (space->kind != ADDRESS_SPACE_KIND_PROCESS) return false;
+		return ADDRESS_SPACE_PREFAULT_INVALID;
+	if (space->kind != ADDRESS_SPACE_KIND_PROCESS) return ADDRESS_SPACE_PREFAULT_INVALID;
 	state = spinlock_lock_irqsave(&space->lock);
 	if (!mapping_belongs(space, mapping) || mapping->access == 0u || offset > mapping->size ||
 			size > mapping->size - offset)
-		goto fail;
+		goto invalid;
 	if (!memory_materialize(mapping->memory,
 				&(const struct memory_materialize_request){
 					.offset = offset,
@@ -1174,7 +1175,7 @@ bool address_space_prefault(struct address_space* space, struct mapping* mapping
 					.alignment = granule,
 					.require_contiguous = false,
 				}))
-		goto fail;
+		goto failed;
 	for (size_t done = 0u; done < size;) {
 		struct hal_paging_translation translation;
 		uintptr_t virtual_address = mapping->address + offset + done;
@@ -1187,13 +1188,23 @@ bool address_space_prefault(struct address_space* space, struct mapping* mapping
 			done += advance;
 			continue;
 		}
-		if (!map_present_run_locked(space, mapping, offset + done, size - done, granule)) goto fail;
+		if (!map_present_run_locked(space, mapping, offset + done, size - done, granule)) goto partial;
 	}
 	spinlock_unlock_irqrestore(&space->lock, state);
-	return true;
-fail:
+	return ADDRESS_SPACE_PREFAULT_OK;
+partial:
 	spinlock_unlock_irqrestore(&space->lock, state);
-	return false;
+	return ADDRESS_SPACE_PREFAULT_PARTIAL;
+failed:
+	spinlock_unlock_irqrestore(&space->lock, state);
+	return ADDRESS_SPACE_PREFAULT_FAILED;
+invalid:
+	spinlock_unlock_irqrestore(&space->lock, state);
+	return ADDRESS_SPACE_PREFAULT_INVALID;
+}
+
+bool address_space_prefault(struct address_space* space, struct mapping* mapping, size_t offset, size_t size) {
+	return address_space_prefault_ex(space, mapping, offset, size) == ADDRESS_SPACE_PREFAULT_OK;
 }
 
 size_t address_space_mapping_count(struct address_space* space) {
