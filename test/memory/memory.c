@@ -135,6 +135,60 @@ Test(memory, physical_memory_preserves_contents_and_device_rejects_transfers) {
 	memory_release(device);
 }
 
+Test(memory, physical_materialization_enforces_placement_constraints) {
+	struct memory* memory;
+	backing_test_pmm_init();
+	size_t granule = backing_test_granule();
+	static _Alignas(65536) uint8_t physical[65536];
+	uintptr_t address = (uintptr_t)physical + granule;
+	size_t size = 2u * granule;
+	cr_assert_leq(3u * granule, sizeof(physical));
+	cr_assert(memory_create_physical(
+			&(const struct memory_physical_request){
+				.physical_address = address,
+				.size = size,
+				.memory_type = MEMORY_TYPE_NORMAL,
+				.external_cpu_accessible = true,
+			},
+			&memory));
+
+	cr_assert(memory_materialize(memory,
+			&(const struct memory_materialize_request){
+				.size = size,
+				.alignment = granule,
+				.minimum_address = address,
+				.maximum_address = address + size,
+				.require_contiguous = true,
+			}));
+	cr_assert_not(memory_materialize(memory,
+			&(const struct memory_materialize_request){
+				.size = size,
+				.alignment = granule,
+				.minimum_address = address + granule,
+			}));
+	cr_assert_not(memory_materialize(memory,
+			&(const struct memory_materialize_request){
+				.size = size,
+				.alignment = granule,
+				.maximum_address = address + size - granule,
+			}));
+	cr_assert_not(memory_materialize(memory,
+			&(const struct memory_materialize_request){
+				.size = size,
+				.alignment = 2u * granule,
+			}));
+	cr_assert(memory_materialize(memory,
+			&(const struct memory_materialize_request){
+				.offset = granule,
+				.size = granule,
+				.alignment = granule,
+				.minimum_address = address + granule,
+				.maximum_address = address + size,
+			}));
+
+	memory_release(memory);
+}
+
 Test(memory, deeply_nested_slices_release_iteratively) {
 	struct memory* current;
 	struct memory* child;

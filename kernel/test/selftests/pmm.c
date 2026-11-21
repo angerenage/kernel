@@ -1,6 +1,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <core/memory.h>
 #include <core/mm.h>
 #include <core/pmm.h>
 
@@ -126,11 +127,88 @@ cleanup:
 	if (ctx->failure_expr == NULL) KERNEL_SELFTEST_ASSERT(ctx, pmm_free_size() == free_before);
 }
 
+static void kernel_selftest_pmm_fixed_memory_materialization_enforces_constraints(struct kernel_selftest_context* ctx) {
+	const struct pmm_info* info = pmm_info();
+	struct pmm_extent extent = {0};
+	struct memory* memory = NULL;
+	size_t free_before = 0u;
+	size_t size = 0u;
+	uintptr_t address = 0u;
+
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, info != NULL, cleanup);
+	free_before = pmm_free_size();
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+			pmm_alloc(
+					&(const struct pmm_alloc_request){
+						.size = 2u * info->allocation_granule,
+						.alignment = 2u * info->allocation_granule,
+					},
+					&extent),
+			"fixed-memory test extent allocation failed",
+			cleanup);
+	address = extent.address;
+	size = extent.size;
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx, pmm_free(extent), cleanup);
+	extent = (struct pmm_extent){0};
+	KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
+			memory_create_physical(
+					&(const struct memory_physical_request){
+						.physical_address = address,
+						.size = size,
+						.memory_type = MEMORY_TYPE_NORMAL,
+					},
+					&memory),
+			"fixed-memory creation failed",
+			cleanup);
+
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx,
+			memory_materialize(memory,
+					&(const struct memory_materialize_request){
+						.size = size,
+						.alignment = 2u * info->allocation_granule,
+						.minimum_address = address,
+						.maximum_address = address + size,
+						.require_contiguous = true,
+					}),
+			cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx,
+			!memory_materialize(memory,
+					&(const struct memory_materialize_request){
+						.size = size,
+						.alignment = info->allocation_granule,
+						.minimum_address = address + info->allocation_granule,
+					}),
+			cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx,
+			!memory_materialize(memory,
+					&(const struct memory_materialize_request){
+						.size = size,
+						.alignment = info->allocation_granule,
+						.maximum_address = address + size - info->allocation_granule,
+					}),
+			cleanup);
+	KERNEL_SELFTEST_ASSERT_GOTO(ctx,
+			!memory_materialize(memory,
+					&(const struct memory_materialize_request){
+						.offset = info->allocation_granule,
+						.size = info->allocation_granule,
+						.alignment = 2u * info->allocation_granule,
+					}),
+			cleanup);
+
+cleanup:
+	if (memory != NULL) memory_release(memory);
+	else if (extent.size != 0u) (void)pmm_free(extent);
+	if (ctx->failure_expr == NULL) KERNEL_SELFTEST_ASSERT(ctx, pmm_free_size() == free_before);
+}
+
 static const struct kernel_selftest_case kernel_pmm_selftests[] = {
 	{.name = "allocates_contiguous_extents_and_restores_state",
 		.run = kernel_selftest_pmm_allocates_contiguous_extents_and_restores_state},
 	{.name = "reuses_freed_extents", .run = kernel_selftest_pmm_reuses_freed_extents},
 	{.name = "rejects_invalid_requests", .run = kernel_selftest_pmm_rejects_invalid_requests},
+	{.name = "fixed_memory_materialization_enforces_constraints",
+		.run = kernel_selftest_pmm_fixed_memory_materialization_enforces_constraints},
 };
 
 const struct kernel_selftest_suite kernel_pmm_selftest_suite = {

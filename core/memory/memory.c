@@ -285,8 +285,36 @@ bool memory_query(struct memory* memory, size_t offset, size_t maximum_size, str
 	return true;
 }
 
+static bool materialized_layout_valid(
+		struct memory* memory, const struct memory_materialize_request* request, size_t alignment) {
+	struct memory_span span;
+	uintptr_t contiguous_base = 0u;
+	size_t done = 0u;
+
+	while (done < request->size) {
+		uintptr_t end;
+
+		if (!memory_query(memory, request->offset + done, request->size - done, &span) ||
+				span.kind != MEMORY_SPAN_PRESENT || span.size == 0u || span.size > request->size - done ||
+				span.physical_address > UINTPTR_MAX - span.size)
+			return false;
+		end = span.physical_address + span.size;
+		if (done == 0u) {
+			contiguous_base = span.physical_address;
+			if ((contiguous_base & (alignment - 1u)) != 0u) return false;
+		}
+		else if (request->require_contiguous &&
+				 (done > UINTPTR_MAX - contiguous_base || span.physical_address != contiguous_base + done))
+			return false;
+		if (span.physical_address < request->minimum_address ||
+				(request->maximum_address != 0u && end > request->maximum_address))
+			return false;
+		done += span.size;
+	}
+	return true;
+}
+
 bool memory_materialize(struct memory* memory, const struct memory_materialize_request* request) {
-	struct memory_backing_span span;
 	size_t absolute_offset;
 	size_t granule = memory_granule();
 	size_t alignment;
@@ -300,18 +328,7 @@ bool memory_materialize(struct memory* memory, const struct memory_materialize_r
 			(request->maximum_address != 0u && request->maximum_address <= request->minimum_address))
 		return false;
 	if (memory_backing_kind(memory->backing) == MEMORY_BACKING_PHYSICAL) {
-		uintptr_t contiguous_base = 0u;
-		for (size_t done = 0u; done < request->size; done += span.size) {
-			if (!memory_backing_query(memory->backing, absolute_offset + done, request->size - done, &span) ||
-					span.kind != MEMORY_BACKING_SPAN_PRESENT)
-				return false;
-			if (request->require_contiguous) {
-				if (done == 0u) contiguous_base = span.physical_address;
-				else if (done > UINTPTR_MAX - contiguous_base || span.physical_address != contiguous_base + done)
-					return false;
-			}
-		}
-		return true;
+		return materialized_layout_valid(memory, request, alignment);
 	}
 	return memory_backing_materialize(memory->backing,
 			&(const struct memory_backing_materialize_request){
