@@ -127,6 +127,40 @@ Test(kernel_capability_memory, mapping_is_whole_memory_and_last_authority_unmaps
 	kernel_capability_test_end(&ctx);
 }
 
+Test(kernel_capability_memory, failed_last_authority_unmap_remains_owned_until_process_cleanup) {
+	struct kernel_capability_test_context ctx;
+	struct memory* memory;
+	struct mapping* mapping;
+	size_t mappings_before;
+
+	kernel_capability_test_begin(&ctx, "kernel-cap/mapping-zero-grants-failure");
+	mappings_before = address_space_mapping_count(process_address_space(ctx.process));
+	cr_assert(memory_create_anonymous(TEST_MAPPING_GRANULE, &memory));
+	cr_assert(address_space_map(process_address_space(ctx.process),
+			&(const struct address_space_mapping_request){
+				.memory = memory,
+				.access = MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE,
+			},
+			&mapping));
+	memory_release(memory);
+	cap_id_t mapping_cap = kernel_mapping_publish(ctx.process,
+			process_pid(ctx.process),
+			mapping,
+			CAP_CALL | CAP_READ | CAP_DESTROY,
+			MEMORY_ACCESS_READ | MEMORY_ACCESS_WRITE);
+	cr_assert_neq(mapping_cap, CAP_ID_INVALID);
+	mapping_release(mapping);
+
+	mock_paging_fail_next_unmap();
+	cr_assert(cap_destroy_by_id(mapping_cap));
+	cr_assert_null(cap_acquire(mapping_cap));
+	cr_assert_eq(address_space_mapping_count(process_address_space(ctx.process)), mappings_before + 1u);
+
+	cap_object_cleanup_for_process(process_pid(ctx.process));
+	cr_assert_eq(address_space_mapping_count(process_address_space(ctx.process)), mappings_before);
+	kernel_capability_test_end(&ctx);
+}
+
 Test(kernel_capability_memory, unaligned_slice_is_content_valid_but_not_mappable) {
 	struct kernel_capability_test_context ctx;
 	cap_id_t allocator;

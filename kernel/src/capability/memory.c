@@ -251,7 +251,7 @@ static void mapping_destroy(uint64_t object_id) {
 
 static void mapping_event(struct cap_object* object, enum cap_object_event event) {
 	if (event != CAP_OBJECT_EVENT_ZERO_GRANTS) return;
-	(void)mapping_unmap_state((const struct mapping_state*)(uintptr_t)object->object_id);
+	if (!mapping_unmap_state((const struct mapping_state*)(uintptr_t)object->object_id)) return;
 	(void)cap_object_destroy_if_unused(object);
 }
 
