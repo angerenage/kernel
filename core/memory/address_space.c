@@ -819,6 +819,7 @@ bool address_space_map(struct address_space* space, const struct address_space_m
 			if ((request->access & MEMORY_ACCESS_EXEC) != 0u ||
 					!direct_materialize_memory(request->memory, size, alignment, &physical))
 				return false;
+			if (request->address != 0u && request->address != physical) return false;
 			mapping = mapping_create(request, size);
 			if (mapping == NULL) return false;
 			state = spinlock_lock_irqsave(&space->lock);
