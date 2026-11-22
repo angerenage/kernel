@@ -271,5 +271,5 @@ struct irq_state irq_save_disable(void);
 /* Restore the interrupt state previously returned by irq_save_disable(). */
 void irq_restore(struct irq_state state);
 
-/* Return true while the current CPU is executing inside a trap/exception handler. */
-bool irq_in_exception(void);
+/* Return true inside a tracked architecture trap path, excluding ordinary IRQ dispatch and syscalls. */
+bool irq_in_trap(void);

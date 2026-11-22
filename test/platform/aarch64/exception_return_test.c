@@ -59,10 +59,10 @@ void cpu_interrupts_set_ready(struct cpu* cpu, bool ready) {
 	(void)ready;
 }
 
-void cpu_enter_exception(void) {
+void cpu_enter_trap(void) {
 }
 
-void cpu_leave_exception(void) {
+void cpu_leave_trap(void) {
 }
 
 bool address_space_handle_current_fault(

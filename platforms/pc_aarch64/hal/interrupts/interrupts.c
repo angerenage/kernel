@@ -172,9 +172,9 @@ void handle_exception(struct exception_frame* frame) {
 	 * with the still-pending one. Synchronous exceptions may still poll. */
 	if (!is_irq) aarch64_cache_poll_sync();
 	if (aarch64_handle_syscall(frame, ec)) return;
-	if (!is_irq) cpu_enter_exception();
+	if (!is_irq) cpu_enter_trap();
 	if (aarch64_gic_handle_irq(frame)) {
-		if (!is_irq) cpu_leave_exception();
+		if (!is_irq) cpu_leave_trap();
 		return;
 	}
 
@@ -184,20 +184,20 @@ void handle_exception(struct exception_frame* frame) {
 	bool fnv = ((iss >> 10) & 1u) != 0;
 
 	if ((is_instruction_abort(ec) || is_data_abort(ec)) && is_page_fault_abort(dfsc)) {
-		if (!is_irq) cpu_leave_exception();
+		if (!is_irq) cpu_leave_trap();
 		if (address_space_handle_current_fault(fnv ? 0u : frame->far,
 					fnv ? ADDRESS_SPACE_FAULT_INVALID : abort_fault_kind(dfsc),
 					abort_fault_access(ec, iss),
 					is_abort_from_lower_el(ec))) {
 			return;
 		}
-		if (!is_irq) cpu_enter_exception();
+		if (!is_irq) cpu_enter_trap();
 	}
 
 	if (!is_irq && aarch64_exception_from_lower_el(frame)) {
-		cpu_leave_exception();
+		cpu_leave_trap();
 		if (aarch64_handle_user_exception(ec, dfsc, frame)) return;
-		cpu_enter_exception();
+		cpu_enter_trap();
 	}
 
 	struct kernel_crash_record* record = kernel_crash_begin(

@@ -312,7 +312,7 @@ void handle_exception(struct exception_frame* frame) {
 	uint64_t code = frame->scause & ~(1ull << 63);
 
 	if (riscv64_handle_syscall(frame, is_interrupt, code)) return;
-	if (!is_interrupt) cpu_enter_exception();
+	if (!is_interrupt) cpu_enter_trap();
 	if (is_interrupt && code == RISCV64_SCAUSE_SUPERVISOR_SOFTWARE) {
 		clear_software_interrupt();
 		riscv64_imsic_sync_local();
@@ -320,7 +320,7 @@ void handle_exception(struct exception_frame* frame) {
 		return;
 	}
 	if (clock_handle_irq(frame)) {
-		if (!is_interrupt) cpu_leave_exception();
+		if (!is_interrupt) cpu_leave_trap();
 		return;
 	}
 	if (is_interrupt && code == RISCV64_SCAUSE_SUPERVISOR_EXTERNAL) {
@@ -332,20 +332,20 @@ void handle_exception(struct exception_frame* frame) {
 	}
 
 	if (!is_interrupt && is_page_fault_exception(code)) {
-		cpu_leave_exception();
+		cpu_leave_trap();
 		if (address_space_handle_current_fault(frame->stval,
 					ADDRESS_SPACE_FAULT_UNCLASSIFIED,
 					page_fault_access(code),
 					was_user_mode(frame->sstatus))) {
 			return;
 		}
-		cpu_enter_exception();
+		cpu_enter_trap();
 	}
 
 	if (!is_interrupt && was_user_mode(frame->sstatus)) {
-		cpu_leave_exception();
+		cpu_leave_trap();
 		if (riscv64_handle_user_exception(code, frame->sstatus)) return;
-		cpu_enter_exception();
+		cpu_enter_trap();
 	}
 
 	struct kernel_crash_record* record = kernel_crash_begin(KERNEL_CRASH_ARCH_RISCV64,

@@ -27,24 +27,24 @@ Test(cpu, irq_save_disable_and_restore_track_depth) {
 	cpu_test_reset();
 }
 
-Test(cpu_irq, exception_nesting_and_irq_restore_follow_current_cpu_and_saved_state) {
+Test(cpu_irq, trap_nesting_and_irq_restore_follow_current_cpu_and_saved_state) {
 	struct irq_state saved_disabled;
 	struct irq_state saved_enabled;
 
 	cpu_test_init_bound_bootstrap();
 
-	cr_assert(!irq_in_exception(), "CPU should not start in an exception");
-	cpu_enter_exception();
-	cpu_enter_exception();
-	cr_assert(irq_in_exception(), "nested exception entry was not tracked");
-	cr_assert_eq(cpu_current()->exception_depth, 2u, "exception depth mismatch after nested entry");
+	cr_assert(!irq_in_trap(), "CPU should not start in a trap");
+	cpu_enter_trap();
+	cpu_enter_trap();
+	cr_assert(irq_in_trap(), "nested trap entry was not tracked");
+	cr_assert_eq(cpu_current()->trap_depth, 2u, "trap depth mismatch after nested entry");
 
-	cpu_leave_exception();
-	cr_assert(irq_in_exception(), "CPU should still be in an exception after one leave");
-	cpu_leave_exception();
-	cpu_leave_exception();
-	cr_assert(!irq_in_exception(), "CPU should have left exception context");
-	cr_assert_eq(cpu_current()->exception_depth, 0u, "exception depth underflowed");
+	cpu_leave_trap();
+	cr_assert(irq_in_trap(), "CPU should still be in a trap after one leave");
+	cpu_leave_trap();
+	cpu_leave_trap();
+	cr_assert(!irq_in_trap(), "CPU should have left trap context");
+	cr_assert_eq(cpu_current()->trap_depth, 0u, "trap depth underflowed");
 
 	irq_disable_local();
 	saved_disabled = irq_save_disable();

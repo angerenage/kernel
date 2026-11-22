@@ -45,7 +45,7 @@ bool cpu_topology_init(const struct cpu_init_info* init_info, size_t cpu_count, 
 			.reschedule_requested = false,
 			.interrupts_ready = false,
 			.irq_disable_depth = 0u,
-			.exception_depth = 0u,
+			.trap_depth = 0u,
 			.boot_stack_base = init_info[i].boot_stack_base,
 			.boot_stack_top = init_info[i].boot_stack_top,
 			.deferred_reap_thread = NULL,
@@ -185,21 +185,21 @@ size_t cpu_online_count(void) {
 	return count;
 }
 
-void cpu_enter_exception(void) {
+void cpu_enter_trap(void) {
 	struct cpu* cpu = cpu_current();
 	if (!cpu) return;
-	cpu->exception_depth++;
+	cpu->trap_depth++;
 }
 
-void cpu_leave_exception(void) {
+void cpu_leave_trap(void) {
 	struct cpu* cpu = cpu_current();
-	if (!cpu || cpu->exception_depth == 0u) return;
-	cpu->exception_depth--;
+	if (!cpu || cpu->trap_depth == 0u) return;
+	cpu->trap_depth--;
 }
 
-bool cpu_irq_in_exception(void) {
+bool cpu_in_trap(void) {
 	struct cpu* cpu = cpu_current();
-	return cpu != NULL && cpu->exception_depth != 0u;
+	return cpu != NULL && cpu->trap_depth != 0u;
 }
 
 enum cpu_state cpu_state_get(const struct cpu* cpu) {

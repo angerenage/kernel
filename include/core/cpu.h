@@ -34,7 +34,7 @@ struct thread;
  * - current_thread: atomically published snapshot of the thread running on this CPU;
  *   access it only through cpu_current_thread_load()/cpu_current_thread_store()
  * - interrupts_ready: becomes true after local interrupt state has been installed
- * - irq_disable_depth / exception_depth: nesting counters for irq-save and trap handling
+ * - irq_disable_depth / trap_depth: nesting counters for irq-save and architecture trap handling
  * - boot_stack_*: stack bounds used during CPU bring-up before normal scheduling exists
  */
 struct cpu {
@@ -49,7 +49,7 @@ struct cpu {
 	bool reschedule_requested;
 	bool interrupts_ready;
 	uint32_t irq_disable_depth;
-	uint32_t exception_depth;
+	uint32_t trap_depth;
 	uintptr_t boot_stack_base;
 	uintptr_t boot_stack_top;
 	struct thread* deferred_reap_thread;
@@ -135,14 +135,14 @@ size_t cpu_count(void);
 /* Return the number of CPUs whose state is currently ONLINE. */
 size_t cpu_online_count(void);
 
-/* Enter one level of exception nesting for the current CPU. */
-void cpu_enter_exception(void);
+/* Enter one level of architecture trap nesting for the current CPU. */
+void cpu_enter_trap(void);
 
-/* Leave one level of exception nesting for the current CPU. */
-void cpu_leave_exception(void);
+/* Leave one level of architecture trap nesting for the current CPU. */
+void cpu_leave_trap(void);
 
-/* Return whether the current CPU is presently executing inside an exception/trap context. */
-bool cpu_irq_in_exception(void);
+/* Return whether the current CPU is presently executing inside a tracked architecture trap path. */
+bool cpu_in_trap(void);
 
 /* Read a CPU state using acquire semantics. NULL is treated as HALTED. */
 enum cpu_state cpu_state_get(const struct cpu* cpu);

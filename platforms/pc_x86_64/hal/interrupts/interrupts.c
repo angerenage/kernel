@@ -672,7 +672,7 @@ void x86_64_handle_interrupt(struct interrupt_frame* frame) {
 	if (x86_64_handle_syscall(frame)) return;
 	/* LAPIC spurious interrupts require neither an EOI nor fatal exception handling. */
 	if (vector == X86_LAPIC_SPURIOUS_VECTOR) return;
-	if (trap_context) cpu_enter_exception();
+	if (trap_context) cpu_enter_trap();
 	if (vector == 2u) {
 		struct cpu* cpu = cpu_current();
 		bool internal = cpu != NULL && apic_sync_nmi_armed(cpu->index);
@@ -684,7 +684,7 @@ void x86_64_handle_interrupt(struct interrupt_frame* frame) {
 			handled |= x86_64_paging_handle_tlb_nmi();
 		}
 		if (internal || handled) {
-			cpu_leave_exception();
+			cpu_leave_trap();
 			return;
 		}
 	}
@@ -722,20 +722,20 @@ void x86_64_handle_interrupt(struct interrupt_frame* frame) {
 
 	fault_addr = vector == 14u ? read_cr2() : 0;
 	if (vector == 14u) {
-		if (trap_context) cpu_leave_exception();
+		if (trap_context) cpu_leave_trap();
 		if (core_handle_exception(x86_page_fault_kind(frame->error_code),
 					x86_page_fault_access(frame->error_code),
 					(uintptr_t)fault_addr,
 					x86_page_fault_from_user(frame->error_code))) {
 			return;
 		}
-		if (trap_context) cpu_enter_exception();
+		if (trap_context) cpu_enter_trap();
 	}
 
 	if (vector < 32u) {
-		if (trap_context) cpu_leave_exception();
+		if (trap_context) cpu_leave_trap();
 		if (x86_handle_user_exception(vector, frame)) return;
-		if (trap_context) cpu_enter_exception();
+		if (trap_context) cpu_enter_trap();
 	}
 
 	struct kernel_crash_record* record = kernel_crash_begin(KERNEL_CRASH_ARCH_X86_64,

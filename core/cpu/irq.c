@@ -19,6 +19,6 @@ void irq_restore(struct irq_state state) {
 	if (state.enabled) irq_enable_local();
 }
 
-bool irq_in_exception(void) {
-	return cpu_irq_in_exception();
+bool irq_in_trap(void) {
+	return cpu_in_trap();
 }

@@ -335,9 +335,9 @@ void handle_exception(struct exception_frame* frame) {
 
 	ecode = (frame->estat >> 16) & 0x3fu;
 	if (loongarch64_handle_syscall(frame, ecode)) return;
-	if (ecode != 0u) cpu_enter_exception();
+	if (ecode != 0u) cpu_enter_trap();
 	if (clock_handle_irq(frame)) {
-		if (ecode != 0u) cpu_leave_exception();
+		if (ecode != 0u) cpu_leave_trap();
 		return;
 	}
 	if (ecode == 0u) {
@@ -364,18 +364,18 @@ void handle_exception(struct exception_frame* frame) {
 	esubcode = (frame->estat >> 22) & 0x1ffu;
 
 	if (is_page_invalid_exception(ecode)) {
-		cpu_leave_exception();
+		cpu_leave_trap();
 		if (address_space_handle_current_fault(
 					frame->badv, ADDRESS_SPACE_FAULT_NOT_PRESENT, loongarch64_fault_access(ecode), was_user_mode())) {
 			return;
 		}
-		cpu_enter_exception();
+		cpu_enter_trap();
 	}
 
 	if (ecode != 0u && was_user_mode()) {
-		cpu_leave_exception();
+		cpu_leave_trap();
 		if (loongarch64_handle_user_exception(ecode, esubcode)) return;
-		cpu_enter_exception();
+		cpu_enter_trap();
 	}
 
 	struct kernel_crash_record* record = kernel_crash_begin(KERNEL_CRASH_ARCH_LOONGARCH64,

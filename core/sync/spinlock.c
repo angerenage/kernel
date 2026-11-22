@@ -101,10 +101,10 @@ static void spinlock_debug_fail(const struct spinlock* lock, enum spinlock_debug
 			lock != NULL ? (unsigned)lock->flags : 0u,
 			lock != NULL ? (unsigned)lock->owner_cpu : 0u);
 	if (cpu != NULL) {
-		printf("kernel: spinlock debug cpu=%zu irq_disable_depth=%u exception_depth=%u lock_depth=%u\n",
+		printf("kernel: spinlock debug cpu=%zu irq_disable_depth=%u trap_depth=%u lock_depth=%u\n",
 				cpu->index,
 				(unsigned)cpu->irq_disable_depth,
-				(unsigned)cpu->exception_depth,
+				(unsigned)cpu->trap_depth,
 				(unsigned)cpu->lock_depth);
 		if (cpu->lock_depth != 0u) {
 			printf("kernel: spinlock debug held orders:");
@@ -144,7 +144,7 @@ enum spinlock_debug_check spinlock_debug_check_acquire(const struct spinlock* lo
 	if ((lock->flags & SPINLOCK_FLAG_IRQSAVE) != 0 && cpu->interrupts_ready && irq_enabled()) {
 		return SPINLOCK_DEBUG_CHECK_IRQSAVE_REQUIRED;
 	}
-	if ((lock->flags & SPINLOCK_FLAG_ALLOW_EXCEPTION) == 0 && irq_in_exception()) {
+	if ((lock->flags & SPINLOCK_FLAG_ALLOW_EXCEPTION) == 0 && irq_in_trap()) {
 		return SPINLOCK_DEBUG_CHECK_EXCEPTION_DISALLOWED;
 	}
 	if (cpu->lock_depth == 0u) return SPINLOCK_DEBUG_CHECK_OK;

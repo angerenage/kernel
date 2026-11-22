@@ -480,8 +480,8 @@ static void kernel_selftest_cpu_current_accessors_match_bound_cpu(struct kernel_
 	KERNEL_SELFTEST_ASSERT(ctx, cpu_arch_id() == current->arch_id);
 	KERNEL_SELFTEST_ASSERT(ctx, current->boot_stack_top > current->boot_stack_base);
 	KERNEL_SELFTEST_ASSERT(ctx, current->irq_disable_depth == 0u);
-	KERNEL_SELFTEST_ASSERT(ctx, current->exception_depth == 0u);
-	KERNEL_SELFTEST_ASSERT(ctx, !cpu_irq_in_exception());
+	KERNEL_SELFTEST_ASSERT(ctx, current->trap_depth == 0u);
+	KERNEL_SELFTEST_ASSERT(ctx, !cpu_in_trap());
 	KERNEL_SELFTEST_ASSERT(ctx, current->interrupts_ready);
 }
 
@@ -577,7 +577,7 @@ struct kernel_selftest_cpu_remote_dispatch_state {
 	struct cpu* expected_cpu;
 	uintptr_t actual_cpu;
 	uintptr_t current_thread;
-	uint32_t exception_depth;
+	uint32_t trap_depth;
 	uint32_t ran;
 #if defined(PLATFORM_PC_AARCH64)
 	uint64_t stack_selection;
@@ -597,7 +597,7 @@ static void kernel_selftest_cpu_remote_dispatch_worker(void* arg) {
 
 	__atomic_store_n(&state->actual_cpu, (uintptr_t)cpu_current(), __ATOMIC_RELEASE);
 	__atomic_store_n(&state->current_thread, (uintptr_t)kthread_current(), __ATOMIC_RELEASE);
-	__atomic_store_n(&state->exception_depth, cpu_current()->exception_depth, __ATOMIC_RELEASE);
+	__atomic_store_n(&state->trap_depth, cpu_current()->trap_depth, __ATOMIC_RELEASE);
 #if defined(PLATFORM_PC_AARCH64)
 	uint64_t stack_selection;
 	__asm__ volatile("mrs %0, spsel" : "=r"(stack_selection));
@@ -669,7 +669,7 @@ static void kernel_selftest_cpu_remote_dispatch_reaches_application_processors(s
 						__ATOMIC_ACQUIRE) == &kernel_selftest_cpu_remote_workers[i]->thread,
 				cleanup);
 		KERNEL_SELFTEST_ASSERT_GOTO(ctx,
-				__atomic_load_n(&kernel_selftest_cpu_remote_states[i].exception_depth, __ATOMIC_ACQUIRE) == 0u,
+				__atomic_load_n(&kernel_selftest_cpu_remote_states[i].trap_depth, __ATOMIC_ACQUIRE) == 0u,
 				cleanup);
 #if defined(PLATFORM_PC_AARCH64)
 		KERNEL_SELFTEST_ASSERT_MSG_GOTO(ctx,
