@@ -242,7 +242,6 @@ static void boot_start_diagnostics_reporter(void) {
 }
 
 static void boot_start_timer_counter(void) {
-	hal_clock_init();
 	if (!hal_clock_start(KERNEL_TIMER_HZ, boot_clock_tick, NULL)) {
 		printf("kernel: boot clock unavailable\n");
 	}
@@ -341,6 +340,7 @@ void kernel_main(void) {
 	if (!sched_init()) {
 		boot_fail("kernel: sched_init failed");
 	}
+	hal_clock_init();
 	if (!kernel_cpu_boot_start_aps()) {
 		boot_fail("kernel: kernel_cpu_boot_start_aps failed");
 	}

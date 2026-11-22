@@ -17,7 +17,7 @@ bool kernel_cpu_boot_init(uintptr_t boot_stack_base, uintptr_t boot_stack_top);
 /* Bind struct cpu to the running hardware thread and record whether cpu_current() resolves correctly afterward. */
 void kernel_cpu_boot_bind_current(struct cpu* cpu);
 
-/* Start every discovered application processor and wait for each one to transition to CPU_STATE_ONLINE. */
+/* Start discovered application processors and exclude any that fail the bounded ONLINE handshake. */
 bool kernel_cpu_boot_start_aps(void);
 
 /* Return whether a CPU successfully observed its own struct cpu pointer through the HAL CPU-local register. */

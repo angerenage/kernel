@@ -17,6 +17,7 @@ enum cpu_state {
 	CPU_STATE_ONLINE,
 	CPU_STATE_PARKED,
 	CPU_STATE_HALTED,
+	CPU_STATE_FAILED,
 };
 
 #if CORE_LOCK_DEBUG
@@ -116,6 +117,12 @@ void cpu_bind_current(struct cpu* cpu);
 
 /* Transition a CPU between lifecycle states and keep the online CPU count consistent. */
 bool cpu_set_state(struct cpu* cpu, enum cpu_state state);
+
+/* Change state only when the installed CPU still has the expected state. */
+bool cpu_transition_state(struct cpu* cpu, enum cpu_state expected, enum cpu_state state);
+
+/* Busy-wait for a CPU state using the continuous monotonic counter and a millisecond timeout. */
+bool cpu_wait_until_state(struct cpu* cpu, enum cpu_state state, uint64_t timeout_ms);
 
 /* Mark whether per-CPU interrupt setup has completed; debug lock checks use this to enforce irqsafe rules. */
 void cpu_interrupts_set_ready(struct cpu* cpu, bool ready);

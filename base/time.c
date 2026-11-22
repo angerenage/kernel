@@ -1,7 +1,7 @@
 #include <base/math.h>
 #include <base/time.h>
 
-bool time_ms_to_ticks(uint64_t ms, uint32_t hz, uint64_t* out_ticks) {
+bool time_ms_to_ticks(uint64_t ms, uint64_t hz, uint64_t* out_ticks) {
 	uint64_t ticks;
 
 	if (out_ticks == NULL || hz == 0u) return false;
@@ -11,7 +11,7 @@ bool time_ms_to_ticks(uint64_t ms, uint32_t hz, uint64_t* out_ticks) {
 		return true;
 	}
 
-	if (mul_overflow_u64(ms, (uint64_t)hz, &ticks) || add_overflow_u64(ticks, 999u, &ticks)) {
+	if (mul_overflow_u64(ms, hz, &ticks) || add_overflow_u64(ticks, 999u, &ticks)) {
 		ticks = UINT64_MAX;
 	}
 	else {

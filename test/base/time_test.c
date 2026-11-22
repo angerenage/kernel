@@ -24,6 +24,13 @@ Test(base_time, ms_to_ticks_handles_zero_and_saturates_on_overflow) {
 	cr_assert_eq(ticks, UINT64_MAX);
 }
 
+Test(base_time, ms_to_ticks_accepts_wide_hardware_counter_frequencies) {
+	uint64_t ticks = 0u;
+
+	cr_assert(time_ms_to_ticks(1u, UINT64_C(5000000000), &ticks));
+	cr_assert_eq(ticks, UINT64_C(5000000));
+}
+
 Test(base_time, deadline_from_ms_adds_relative_timeout_to_current_tick) {
 	uint64_t deadline = 0u;
 

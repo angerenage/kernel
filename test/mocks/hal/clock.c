@@ -5,12 +5,14 @@
 static uint32_t mock_frequency_hz;
 static uint64_t mock_monotonic_frequency_hz;
 static uint64_t mock_monotonic_counter;
+static uint64_t mock_monotonic_step;
 static bool mock_monotonic_readable;
 
 void hal_clock_init(void) {
 	mock_frequency_hz = 0u;
 	mock_monotonic_frequency_hz = 0u;
 	mock_monotonic_counter = 0u;
+	mock_monotonic_step = 0u;
 	mock_monotonic_readable = false;
 }
 
@@ -22,7 +24,7 @@ bool hal_clock_monotonic_counter(uint64_t* out_counter) {
 	if (out_counter == NULL || !__atomic_load_n(&mock_monotonic_readable, __ATOMIC_ACQUIRE) ||
 			hal_clock_monotonic_frequency() == 0u)
 		return false;
-	*out_counter = __atomic_load_n(&mock_monotonic_counter, __ATOMIC_ACQUIRE);
+	*out_counter = __atomic_fetch_add(&mock_monotonic_counter, mock_monotonic_step, __ATOMIC_ACQ_REL);
 	return true;
 }
 
@@ -34,6 +36,10 @@ void hal_clock_mock_set_monotonic(uint64_t frequency_hz, uint64_t counter, bool 
 
 void hal_clock_mock_set_monotonic_counter(uint64_t counter) {
 	__atomic_store_n(&mock_monotonic_counter, counter, __ATOMIC_RELEASE);
+}
+
+void hal_clock_mock_set_monotonic_step(uint64_t step) {
+	__atomic_store_n(&mock_monotonic_step, step, __ATOMIC_RELEASE);
 }
 
 uint64_t hal_clock_mock_advance_monotonic_counter(uint64_t delta) {

@@ -12,12 +12,19 @@
 
 #define CPU_BOOT_MAX_COUNT 64u
 #define CPU_BOOT_STACK_SIZE 0x4000u
-#define CPU_AP_START_SPIN_LIMIT 10000000u
+#define CPU_AP_START_TIMEOUT_MS 1000u
 
 static struct cpu_init_info boot_cpu_init[CPU_BOOT_MAX_COUNT];
 static _Alignas(16) uint8_t ap_boot_stacks[CPU_BOOT_MAX_COUNT][CPU_BOOT_STACK_SIZE];
 static uint8_t cpu_current_ok[CPU_BOOT_MAX_COUNT];
 static uint8_t cpu_boot_stack_ok[CPU_BOOT_MAX_COUNT];
+
+static void kernel_cpu_mp_fail(struct cpu* cpu) {
+	if (cpu != NULL) (void)cpu_transition_state(cpu, CPU_STATE_STARTING, CPU_STATE_FAILED);
+	for (;;) {
+		hal_cpu_park();
+	}
+}
 
 static void kernel_cpu_mp_entry(size_t cpu_index, void* arg) {
 	struct cpu* cpu = (struct cpu*)arg;
@@ -36,19 +43,14 @@ static void kernel_cpu_mp_entry(size_t cpu_index, void* arg) {
 	}
 
 	kernel_cpu_boot_bind_current(cpu);
-	(void)cpu_set_state(cpu, CPU_STATE_STARTING);
 	if (!hal_interrupts_init_local(cpu)) {
-		for (;;) {
-			hal_cpu_park();
-		}
+		kernel_cpu_mp_fail(cpu);
 	}
 	irq_enable_local();
 	if (!sched_start_cpu(cpu)) {
-		for (;;) {
-			hal_cpu_park();
-		}
+		kernel_cpu_mp_fail(cpu);
 	}
-	(void)cpu_set_state(cpu, CPU_STATE_ONLINE);
+	if (!cpu_transition_state(cpu, CPU_STATE_STARTING, CPU_STATE_ONLINE)) kernel_cpu_mp_fail(cpu);
 	sched_enter_idle();
 }
 
@@ -93,20 +95,25 @@ bool kernel_cpu_boot_start_aps(void) {
 
 		if (cpu == NULL || cpu->role != CPU_ROLE_AP) continue;
 
-		(void)cpu_set_state(cpu, CPU_STATE_STARTING);
+		if (!cpu_transition_state(cpu, CPU_STATE_PRESENT, CPU_STATE_STARTING)) {
+			printf("kernel: AP cpu%zu has invalid initial state=%u, excluding it\n",
+					cpu->index,
+					(unsigned)cpu_state_get(cpu));
+			continue;
+		}
 		if (!boot_cpu_start(cpu->index, kernel_cpu_mp_entry, cpu, cpu->boot_stack_top)) {
-			return false;
+			(void)cpu_transition_state(cpu, CPU_STATE_STARTING, CPU_STATE_FAILED);
+			printf("kernel: AP cpu%zu launch failed, excluding it\n", cpu->index);
+			continue;
 		}
 
-		for (size_t spin_count = 0; cpu_state_get(cpu) != CPU_STATE_ONLINE; spin_count++) {
-			if (spin_count >= CPU_AP_START_SPIN_LIMIT) {
-				printf("kernel: AP cpu%zu failed to reach ONLINE (state=%u, bound=%u)\n",
-						cpu->index,
-						(unsigned)cpu_state_get(cpu),
-						kernel_cpu_boot_current_pointer_ok(cpu) ? 1u : 0u);
-				return false;
-			}
-			spinlock_relax();
+		if (!cpu_wait_until_state(cpu, CPU_STATE_ONLINE, CPU_AP_START_TIMEOUT_MS)) {
+			(void)cpu_transition_state(cpu, CPU_STATE_STARTING, CPU_STATE_FAILED);
+			if (cpu_state_get(cpu) == CPU_STATE_ONLINE) continue;
+			printf("kernel: AP cpu%zu failed to reach ONLINE (state=%u, bound=%u), excluding it\n",
+					cpu->index,
+					(unsigned)cpu_state_get(cpu),
+					kernel_cpu_boot_current_pointer_ok(cpu) ? 1u : 0u);
 		}
 	}
 

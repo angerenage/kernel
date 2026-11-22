@@ -1,5 +1,7 @@
+#include <hal/clock.h>
 #include <core/thread.h>
 
+#include "../mocks/hal/clock.h"
 #include "test_support.h"
 
 Test(cpu, current_thread_snapshot_uses_the_explicit_publication_api) {
@@ -94,4 +96,34 @@ Test(cpu, state_changes_reject_descriptors_outside_the_installed_topology) {
 	cr_assert_eq(cpu_online_count(), 1u, "foreign transition must not corrupt an existing online count");
 
 	cpu_test_reset();
+}
+
+Test(cpu, conditional_state_transition_rejects_a_late_online_publication) {
+	struct cpu* ap;
+
+	cr_assert(cpu_topology_init(cpu_test_valid_topology, 2u, 0u), "topology init failed");
+	ap = cpu_by_index(1u);
+	cr_assert(cpu_transition_state(ap, CPU_STATE_PRESENT, CPU_STATE_STARTING), "AP did not enter STARTING");
+	cr_assert(cpu_transition_state(ap, CPU_STATE_STARTING, CPU_STATE_FAILED), "AP did not enter FAILED");
+	cr_assert_not(cpu_transition_state(ap, CPU_STATE_STARTING, CPU_STATE_ONLINE),
+			"late AP publication overwrote the FAILED state");
+	cr_assert_eq(cpu_state_get(ap), CPU_STATE_FAILED, "late AP publication changed the terminal state");
+	cr_assert_eq(cpu_online_count(), 0u, "failed AP changed the online count");
+}
+
+Test(cpu, state_wait_uses_monotonic_deadline_and_leaves_timeout_policy_to_caller) {
+	struct cpu* ap;
+
+	cr_assert(cpu_topology_init(cpu_test_valid_topology, 2u, 0u), "topology init failed");
+	ap = cpu_by_index(1u);
+	cr_assert(cpu_transition_state(ap, CPU_STATE_PRESENT, CPU_STATE_STARTING), "AP did not enter STARTING");
+	hal_clock_init();
+	hal_clock_mock_set_monotonic(1000u, 40u, true);
+	hal_clock_mock_set_monotonic_step(1u);
+
+	cr_assert_not(cpu_wait_until_state(ap, CPU_STATE_ONLINE, 5u), "AP wait ignored its monotonic deadline");
+	cr_assert_eq(cpu_state_get(ap), CPU_STATE_STARTING, "generic wait unexpectedly selected a failure policy");
+	cr_assert(cpu_transition_state(ap, CPU_STATE_STARTING, CPU_STATE_FAILED), "caller could not exclude timed-out AP");
+
+	hal_clock_init();
 }

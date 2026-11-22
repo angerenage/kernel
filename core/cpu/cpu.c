@@ -1,5 +1,7 @@
 #include <stddef.h>
 
+#include <base/time.h>
+#include <hal/clock.h>
 #include <hal/cpu.h>
 #include <hal/interrupts.h>
 #include <core/cpu.h>
@@ -141,6 +143,45 @@ bool cpu_set_state(struct cpu* cpu, enum cpu_state state) {
 	__atomic_store_n((unsigned*)&cpu->state, (unsigned)state, __ATOMIC_RELEASE);
 	spinlock_unlock_irqrestore(&cpu_topology_lock, irq_state);
 	return true;
+}
+
+bool cpu_transition_state(struct cpu* cpu, enum cpu_state expected, enum cpu_state state) {
+	struct irq_state irq_state;
+
+	irq_state = spinlock_lock_irqsave(&cpu_topology_lock);
+	if (!cpu_is_installed_locked(cpu) || cpu->state != expected) {
+		spinlock_unlock_irqrestore(&cpu_topology_lock, irq_state);
+		return false;
+	}
+	if (expected != CPU_STATE_ONLINE && state == CPU_STATE_ONLINE) topology.online_count++;
+	if (expected == CPU_STATE_ONLINE && state != CPU_STATE_ONLINE && topology.online_count != 0u)
+		topology.online_count--;
+	__atomic_store_n((unsigned*)&cpu->state, (unsigned)state, __ATOMIC_RELEASE);
+	spinlock_unlock_irqrestore(&cpu_topology_lock, irq_state);
+	return true;
+}
+
+bool cpu_wait_until_state(struct cpu* cpu, enum cpu_state state, uint64_t timeout_ms) {
+	uint64_t frequency;
+	uint64_t start;
+	uint64_t now;
+	uint64_t timeout_ticks;
+
+	if (cpu == NULL || timeout_ms == 0u) return false;
+	if (cpu_state_get(cpu) == state) return true;
+	frequency = hal_clock_monotonic_frequency();
+	if (!time_ms_to_ticks(timeout_ms, frequency, &timeout_ticks) || timeout_ticks == UINT64_MAX ||
+			!hal_clock_monotonic_counter(&start))
+		return false;
+
+	for (;;) {
+		enum cpu_state current = cpu_state_get(cpu);
+
+		if (current == state) return true;
+		if (current == CPU_STATE_FAILED || current == CPU_STATE_HALTED || current == CPU_STATE_PARKED) return false;
+		if (!hal_clock_monotonic_counter(&now) || now - start >= timeout_ticks) return false;
+		spinlock_relax();
+	}
 }
 
 void cpu_interrupts_set_ready(struct cpu* cpu, bool ready) {
