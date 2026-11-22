@@ -5,6 +5,11 @@
 .extern kernel_main
 
 _start:
+	# Clear CRMD.IE before relying on any bootloader-provided state.
+	csrrd $t0, 0x0
+	bstrins.d $t0, $zero, 2, 2
+	csrwr $t0, 0x0
+
 	la.local $sp, stack_top
 
 	# LoongArch kernels here are built with the hard-float ABI, so FP must be
