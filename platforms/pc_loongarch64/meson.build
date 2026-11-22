@@ -20,6 +20,7 @@ platform_kernel_objects += [
 	files('../paging_transaction.c'),
 	files('../iommu_page_table.c'),
 	clang_loongarch64_elf.process(files('entry.asm')),
+	clang_loongarch64_elf.process(files('../../boot/limine/mp_entry_loongarch64.asm')),
 	clang_loongarch64_elf.process(files('interrupts.asm')),
 	clang_loongarch64_elf.process(files('hal/userspace.asm')),
 	clang_loongarch64_elf.process(files('thread.asm')),

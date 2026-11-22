@@ -17,7 +17,20 @@ struct boot_cpu_launch {
 	boot_cpu_entry_t entry;
 	void* arg;
 	size_t cpu_index;
+	uintptr_t stack_top;
 };
+
+extern void limine_mp_entry(struct limine_mp_info* info);
+
+_Static_assert(offsetof(struct boot_cpu_launch, entry) == 0u, "Limine AP entry offset mismatch");
+_Static_assert(offsetof(struct boot_cpu_launch, arg) == 8u, "Limine AP argument offset mismatch");
+_Static_assert(offsetof(struct boot_cpu_launch, cpu_index) == 16u, "Limine AP index offset mismatch");
+_Static_assert(offsetof(struct boot_cpu_launch, stack_top) == 24u, "Limine AP stack offset mismatch");
+#if defined(PLATFORM_PC_X86_64)
+_Static_assert(offsetof(struct limine_mp_info, extra_argument) == 24u, "Limine x86 AP argument offset mismatch");
+#else
+_Static_assert(offsetof(struct limine_mp_info, extra_argument) == 32u, "Limine AP argument offset mismatch");
+#endif
 
 static struct mem_range boot_memmap[KERNEL_BOOT_MAX_MEM_RANGES];
 static struct boot_module boot_modules[KERNEL_BOOT_MAX_MODULES];
@@ -133,31 +146,6 @@ static uint64_t limine_mp_bsp_arch_id(const struct limine_mp_response* response)
 
 static bool limine_mp_supported(void) {
 	return false;
-}
-#endif
-
-#if defined(PLATFORM_PC_X86_64) || defined(PLATFORM_PC_AARCH64) || defined(PLATFORM_PC_RISCV64) ||                     \
-		defined(PLATFORM_PC_LOONGARCH64)
-static void limine_mp_entry(struct limine_mp_info* info) {
-	struct boot_cpu_launch* launch;
-
-	if (info == NULL) {
-		for (;;) {
-			hal_cpu_park();
-		}
-	}
-
-	launch = (struct boot_cpu_launch*)(uintptr_t)info->extra_argument;
-	if (launch == NULL || launch->entry == NULL) {
-		for (;;) {
-			hal_cpu_park();
-		}
-	}
-
-	launch->entry(launch->cpu_index, launch->arg);
-	for (;;) {
-		hal_cpu_park();
-	}
 }
 #endif
 
@@ -335,12 +323,13 @@ bool boot_cpu_topology(struct cpu_init_info* init_info, size_t max_count, uintpt
 	return true;
 }
 
-bool boot_cpu_start(size_t cpu_index, boot_cpu_entry_t entry, void* arg) {
+bool boot_cpu_start(size_t cpu_index, boot_cpu_entry_t entry, void* arg, uintptr_t stack_top) {
 #if defined(PLATFORM_PC_X86_64) || defined(PLATFORM_PC_AARCH64) || defined(PLATFORM_PC_RISCV64) ||                     \
 		defined(PLATFORM_PC_LOONGARCH64)
 	struct limine_mp_info* info;
 
-	if (!boot_initialized || entry == NULL || cpu_index >= boot_cpu_count || cpu_index >= KERNEL_BOOT_MAX_CPUS)
+	if (!boot_initialized || entry == NULL || stack_top == 0u || (stack_top & 0xfu) != 0u ||
+			cpu_index >= boot_cpu_count || cpu_index >= KERNEL_BOOT_MAX_CPUS)
 		return false;
 
 	info = (struct limine_mp_info*)boot_cpu_private[cpu_index];
@@ -350,6 +339,7 @@ bool boot_cpu_start(size_t cpu_index, boot_cpu_entry_t entry, void* arg) {
 		.entry = entry,
 		.arg = arg,
 		.cpu_index = cpu_index,
+		.stack_top = stack_top,
 	};
 	__atomic_store_n(&info->extra_argument, (uint64_t)(uintptr_t)&boot_cpu_launch[cpu_index], __ATOMIC_SEQ_CST);
 	__atomic_store_n(&info->goto_address, limine_mp_entry, __ATOMIC_SEQ_CST);
@@ -358,6 +348,7 @@ bool boot_cpu_start(size_t cpu_index, boot_cpu_entry_t entry, void* arg) {
 	(void)cpu_index;
 	(void)entry;
 	(void)arg;
+	(void)stack_top;
 	return false;
 #endif
 }

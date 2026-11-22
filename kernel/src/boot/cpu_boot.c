@@ -17,15 +17,22 @@
 static struct cpu_init_info boot_cpu_init[CPU_BOOT_MAX_COUNT];
 static _Alignas(16) uint8_t ap_boot_stacks[CPU_BOOT_MAX_COUNT][CPU_BOOT_STACK_SIZE];
 static uint8_t cpu_current_ok[CPU_BOOT_MAX_COUNT];
+static uint8_t cpu_boot_stack_ok[CPU_BOOT_MAX_COUNT];
 
 static void kernel_cpu_mp_entry(size_t cpu_index, void* arg) {
 	struct cpu* cpu = (struct cpu*)arg;
+	uintptr_t stack_marker = (uintptr_t)&cpu;
 
 	(void)cpu_index;
 	if (cpu == NULL) {
 		for (;;) {
 			hal_cpu_park();
 		}
+	}
+	if (cpu->index < CPU_BOOT_MAX_COUNT) {
+		__atomic_store_n(&cpu_boot_stack_ok[cpu->index],
+				stack_marker >= cpu->boot_stack_base && stack_marker < cpu->boot_stack_top,
+				__ATOMIC_RELEASE);
 	}
 
 	kernel_cpu_boot_bind_current(cpu);
@@ -51,6 +58,7 @@ bool kernel_cpu_boot_init(uintptr_t boot_stack_base, uintptr_t boot_stack_top) {
 
 	for (size_t i = 0; i < CPU_BOOT_MAX_COUNT; i++) {
 		cpu_current_ok[i] = 0u;
+		cpu_boot_stack_ok[i] = 0u;
 	}
 
 	if (!boot_cpu_topology(
@@ -86,7 +94,7 @@ bool kernel_cpu_boot_start_aps(void) {
 		if (cpu == NULL || cpu->role != CPU_ROLE_AP) continue;
 
 		(void)cpu_set_state(cpu, CPU_STATE_STARTING);
-		if (!boot_cpu_start(cpu->index, kernel_cpu_mp_entry, cpu)) {
+		if (!boot_cpu_start(cpu->index, kernel_cpu_mp_entry, cpu, cpu->boot_stack_top)) {
 			return false;
 		}
 
@@ -108,4 +116,9 @@ bool kernel_cpu_boot_start_aps(void) {
 bool kernel_cpu_boot_current_pointer_ok(const struct cpu* cpu) {
 	if (cpu == NULL || cpu->index >= CPU_BOOT_MAX_COUNT) return false;
 	return __atomic_load_n(&cpu_current_ok[cpu->index], __ATOMIC_ACQUIRE) != 0u;
+}
+
+bool kernel_cpu_boot_stack_ok(const struct cpu* cpu) {
+	if (cpu == NULL || cpu->index >= CPU_BOOT_MAX_COUNT) return false;
+	return __atomic_load_n(&cpu_boot_stack_ok[cpu->index], __ATOMIC_ACQUIRE) != 0u;
 }

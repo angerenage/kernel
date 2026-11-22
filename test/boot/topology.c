@@ -29,6 +29,34 @@ Test(boot_topology, valid_mp_response_selects_the_reported_bsp_slot) {
 	cr_assert_eq(init[1].boot_stack_top, 0xa000u);
 }
 
+static void boot_test_ap_entry(size_t cpu_index, void* arg) {
+	(void)cpu_index;
+	(void)arg;
+}
+
+Test(boot_topology, ap_launch_publishes_the_assigned_stack) {
+	struct limine_mp_info bsp = {.processor_id = 20u, .lapic_id = 0x55u};
+	struct limine_mp_info ap = {.processor_id = 21u, .lapic_id = 0x56u};
+	struct limine_mp_info* cpus[] = {&bsp, &ap};
+	struct cpu_init_info init[2];
+	size_t count = 0u;
+	size_t bsp_index = SIZE_MAX;
+	const uintptr_t stack_top = 0x20000u;
+
+	boot_test_configure_valid_base();
+	boot_test_configure_mp(cpus, 2u, 0x55u);
+	cr_assert(boot_init());
+	cr_assert(boot_cpu_topology(init, 2u, 0x8000u, 0xa000u, &count, &bsp_index));
+	cr_assert(boot_cpu_start(1u, boot_test_ap_entry, &ap, stack_top));
+	cr_assert_eq(ap.goto_address, boot_test_mp_entry());
+	cr_assert_eq(boot_test_launch_entry(1u), boot_test_ap_entry);
+	cr_assert_eq(boot_test_launch_arg(1u), &ap);
+	cr_assert_eq(boot_test_launch_index(1u), 1u);
+	cr_assert_eq(boot_test_launch_stack_top(1u), stack_top);
+	cr_assert_neq(ap.extra_argument, 0u);
+	cr_assert_not(boot_cpu_start(1u, boot_test_ap_entry, &ap, stack_top + 1u));
+}
+
 Test(boot_topology, rejects_null_cpu_entries) {
 	struct limine_mp_info bsp = {.processor_id = 20u, .lapic_id = 0x55u};
 	struct limine_mp_info* cpus[] = {&bsp, NULL};

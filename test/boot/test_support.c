@@ -51,8 +51,32 @@ bool dt_node_valid(struct dt_node node) {
 	return dt_initialized && node.id == 0u;
 }
 
+void limine_mp_entry(struct limine_mp_info* info) {
+	(void)info;
+}
+
 #include "../../boot/info.c"
 #include "../../boot/limine/boot.c"
+
+limine_goto_address boot_test_mp_entry(void) {
+	return limine_mp_entry;
+}
+
+boot_cpu_entry_t boot_test_launch_entry(size_t index) {
+	return index < KERNEL_BOOT_MAX_CPUS ? boot_cpu_launch[index].entry : NULL;
+}
+
+void* boot_test_launch_arg(size_t index) {
+	return index < KERNEL_BOOT_MAX_CPUS ? boot_cpu_launch[index].arg : NULL;
+}
+
+size_t boot_test_launch_index(size_t index) {
+	return index < KERNEL_BOOT_MAX_CPUS ? boot_cpu_launch[index].cpu_index : SIZE_MAX;
+}
+
+uintptr_t boot_test_launch_stack_top(size_t index) {
+	return index < KERNEL_BOOT_MAX_CPUS ? boot_cpu_launch[index].stack_top : 0u;
+}
 
 static struct limine_memmap_entry usable_entry;
 static struct limine_memmap_entry* memmap_entries[1];

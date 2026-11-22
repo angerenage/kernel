@@ -22,3 +22,6 @@ bool kernel_cpu_boot_start_aps(void);
 
 /* Return whether a CPU successfully observed its own struct cpu pointer through the HAL CPU-local register. */
 bool kernel_cpu_boot_current_pointer_ok(const struct cpu* cpu);
+
+/* Return whether an application processor entered C on its assigned bootstrap stack. */
+bool kernel_cpu_boot_stack_ok(const struct cpu* cpu);

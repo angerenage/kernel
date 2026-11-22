@@ -463,6 +463,7 @@ static void kernel_selftest_cpu_ids_are_unique_and_bindings_succeeded(struct ker
 
 		KERNEL_SELFTEST_ASSERT(ctx, cpu->index == i);
 		KERNEL_SELFTEST_ASSERT(ctx, kernel_cpu_boot_current_pointer_ok(cpu));
+		if (cpu->role == CPU_ROLE_AP) KERNEL_SELFTEST_ASSERT(ctx, kernel_cpu_boot_stack_ok(cpu));
 
 		for (size_t j = i + 1; j < topology->cpu_count; j++) {
 			KERNEL_SELFTEST_ASSERT_MSG(
