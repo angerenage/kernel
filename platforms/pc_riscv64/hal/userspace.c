@@ -50,7 +50,8 @@ bool hal_userspace_thread_context_init(struct thread_context* context, uintptr_t
 	uintptr_t kernel_sp;
 	uintptr_t user_sp;
 
-	if (context == NULL || kernel_stack_top == 0u || user_entry == 0u || user_stack == 0u) return false;
+	if (context == NULL || kernel_stack_top == 0u || !hal_userspace_entry_valid(user_entry) || user_stack == 0u)
+		return false;
 
 	kernel_sp = kernel_stack_top & ~((uintptr_t)RISCV64_USER_STACK_ALIGNMENT - 1u);
 	user_sp = user_stack & ~((uintptr_t)RISCV64_USER_STACK_ALIGNMENT - 1u);
