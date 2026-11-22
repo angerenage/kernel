@@ -3,7 +3,9 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <hal/paging.h>
 #include <hal/userspace.h>
+#include <core/mm.h>
 
 #include "interrupts/frame.h"
 
@@ -12,6 +14,9 @@
 #else
 #define RISCV64_USER_INSTRUCTION_ALIGNMENT 4u
 #endif
+
+#define RISCV64_SSTATUS_USER_ALLOWED                                                                                   \
+	((1ull << 0) | (1ull << 4) | (1ull << 5) | (3ull << 9) | (3ull << 13) | (3ull << 15) | (3ull << 32) | (1ull << 63))
 
 enum {
 	RISCV64_USER_STACK_ALIGNMENT = 16u,
@@ -69,6 +74,21 @@ bool hal_userspace_thread_context_init(struct thread_context* context, uintptr_t
 
 bool hal_userspace_frame_is_user(const struct hal_userspace_return_frame* frame) {
 	return riscv64_frame_is_user((const struct exception_frame*)frame);
+}
+
+bool hal_userspace_frame_valid(const struct hal_userspace_return_frame* frame) {
+	const struct exception_frame* native = (const struct exception_frame*)frame;
+	const struct hal_paging_info* paging = hal_paging_info();
+	uint64_t user_end;
+
+	if (!riscv64_frame_is_user(native) || paging == NULL ||
+			paging->minimum_leaf_size > UINT64_MAX - MM_USER_ADDRESS_SPACE_SIZE)
+		return false;
+	user_end = paging->minimum_leaf_size + MM_USER_ADDRESS_SPACE_SIZE;
+	return hal_userspace_entry_valid(native->sepc) && native->sepc >= paging->minimum_leaf_size &&
+	       native->sepc < user_end && native->sp >= paging->minimum_leaf_size && native->sp <= user_end &&
+	       (native->sp & (HAL_USERSPACE_STACK_ALIGNMENT - 1u)) == 0u &&
+	       (native->sstatus & ~RISCV64_SSTATUS_USER_ALLOWED) == 0u;
 }
 
 bool hal_userspace_entry_valid(uintptr_t entry) {

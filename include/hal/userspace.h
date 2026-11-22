@@ -42,6 +42,9 @@ bool hal_userspace_thread_context_init(struct thread_context* context, uintptr_t
 /* Return true only when frame represents a final return to userspace. */
 bool hal_userspace_frame_is_user(const struct hal_userspace_return_frame* frame);
 
+/* Validate all privilege, address, alignment, and control state restored by a userspace return. */
+bool hal_userspace_frame_valid(const struct hal_userspace_return_frame* frame);
+
 /* Return whether entry satisfies the architecture instruction-address rules for userspace. */
 bool hal_userspace_entry_valid(uintptr_t entry);
 

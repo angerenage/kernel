@@ -44,4 +44,8 @@ void core_finalize_user_return(struct hal_userspace_return_frame* frame) {
 
 	result = uthread_upcall_deliver(current, frame);
 	core_handle_upcall_delivery_result(current, result);
+	if (!hal_userspace_frame_valid(frame)) {
+		(void)process_terminate(current->process, PROCESS_EXIT_PRIVILEGE_GENERAL_PROTECTION);
+		hcf();
+	}
 }

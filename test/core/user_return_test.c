@@ -20,6 +20,8 @@ struct hal_userspace_return_frame {
 };
 
 static size_t frame_checks;
+static size_t frame_validation_checks;
+static bool frame_valid;
 static size_t current_checks;
 static size_t delivery_checks;
 static enum user_upcall_result delivery_result;
@@ -29,12 +31,18 @@ static size_t terminate_checks;
 static struct process* terminated_process;
 static uintptr_t terminated_exit_code;
 static bool cancel_pending;
+static bool hcf_expected;
 static jmp_buf cancel_return;
 static uintptr_t cancel_exit_code;
 
 bool hal_userspace_frame_is_user(const struct hal_userspace_return_frame* frame) {
 	frame_checks++;
 	return frame != NULL && frame->user;
+}
+
+bool hal_userspace_frame_valid(const struct hal_userspace_return_frame* frame) {
+	frame_validation_checks++;
+	return frame != NULL && frame_valid;
 }
 
 struct uthread* uthread_current(void) {
@@ -69,11 +77,14 @@ void sched_exit_current(uintptr_t exit_code) {
 
 __attribute__((noreturn))
 void hcf(void) {
+	if (hcf_expected) longjmp(cancel_return, 1);
 	abort();
 }
 
 static void user_return_test_reset(void) {
 	frame_checks = 0u;
+	frame_validation_checks = 0u;
+	frame_valid = true;
 	current_checks = 0u;
 	delivery_checks = 0u;
 	delivery_result = USER_UPCALL_IDLE;
@@ -81,6 +92,7 @@ static void user_return_test_reset(void) {
 	terminated_process = NULL;
 	terminated_exit_code = 0u;
 	cancel_pending = false;
+	hcf_expected = false;
 	cancel_exit_code = 0u;
 	fake_current = (struct uthread){0};
 	fake_current.process = (struct process*)(uintptr_t)1u;
@@ -207,4 +219,25 @@ Test(user_return, terminates_the_process_for_an_invalid_upcall_context) {
 	cr_assert_eq(terminated_process, fake_current.process);
 	cr_assert_eq(terminated_exit_code, PROCESS_EXIT_SYSTEM_UPCALL_CONTEXT_INVALID);
 	cr_assert_eq(frame.marker, 0xaabbccddeeff0011ull);
+}
+
+Test(user_return, terminates_before_restoring_an_invalid_final_frame) {
+	struct hal_userspace_return_frame frame = {
+		.user = true,
+		.marker = 0x1234u,
+	};
+
+	user_return_test_reset();
+	frame_valid = false;
+	hcf_expected = true;
+	if (setjmp(cancel_return) == 0) {
+		core_finalize_user_return(&frame);
+		cr_assert_fail("invalid userspace return unexpectedly completed");
+	}
+
+	cr_assert_eq(delivery_checks, 1u);
+	cr_assert_eq(frame_validation_checks, 1u);
+	cr_assert_eq(terminate_checks, 1u);
+	cr_assert_eq(terminated_process, fake_current.process);
+	cr_assert_eq(terminated_exit_code, PROCESS_EXIT_PRIVILEGE_GENERAL_PROTECTION);
 }

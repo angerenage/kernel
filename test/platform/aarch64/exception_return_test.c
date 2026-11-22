@@ -5,6 +5,7 @@
 
 #include <hal/cpu.h>
 #include <hal/hcf.h>
+#include <hal/paging.h>
 #include <hal/userspace.h>
 #include <core/address_space.h>
 #include <core/cpu.h>
@@ -26,6 +27,11 @@ static enum address_space_fault_kind observed_fault_kind;
 static memory_access_t observed_address_space_access;
 static bool observed_address_space_user_mode;
 static bool address_space_fault_result;
+
+const struct hal_paging_info* hal_paging_info(void) {
+	static const struct hal_paging_info info = {.minimum_leaf_size = 0x1000u};
+	return &info;
+}
 
 static size_t observed_core_faults;
 static enum core_exception_kind observed_core_kind;

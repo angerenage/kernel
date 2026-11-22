@@ -3,7 +3,9 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <hal/paging.h>
 #include <hal/userspace.h>
+#include <core/mm.h>
 
 #include "interrupts/frame.h"
 
@@ -12,6 +14,8 @@ enum {
 	LOONGARCH64_USER_INSTRUCTION_ALIGNMENT = 4u,
 	LOONGARCH64_PRMD_PPLV_MASK = 0x3u,
 	LOONGARCH64_PRMD_PPLV_USER = 0x3u,
+	LOONGARCH64_PRMD_PIE = 1u << 2,
+	LOONGARCH64_PRMD_ALLOWED = 0xfu,
 	LOONGARCH64_GPR_RA = 1,
 	LOONGARCH64_GPR_SP = 3,
 	LOONGARCH64_GPR_A0 = 4,
@@ -79,6 +83,22 @@ bool hal_userspace_thread_context_init(struct thread_context* context, uintptr_t
 
 bool hal_userspace_frame_is_user(const struct hal_userspace_return_frame* frame) {
 	return loongarch64_frame_is_user((const struct exception_frame*)frame);
+}
+
+bool hal_userspace_frame_valid(const struct hal_userspace_return_frame* frame) {
+	const struct exception_frame* native = (const struct exception_frame*)frame;
+	const struct hal_paging_info* paging = hal_paging_info();
+	uint64_t user_end;
+
+	if (!loongarch64_frame_is_user(native) || paging == NULL ||
+			paging->minimum_leaf_size > UINT64_MAX - MM_USER_ADDRESS_SPACE_SIZE)
+		return false;
+	user_end = paging->minimum_leaf_size + MM_USER_ADDRESS_SPACE_SIZE;
+	return hal_userspace_entry_valid(native->era) && native->era >= paging->minimum_leaf_size &&
+	       native->era < user_end && native->gpr[LOONGARCH64_GPR_SP] >= paging->minimum_leaf_size &&
+	       native->gpr[LOONGARCH64_GPR_SP] <= user_end &&
+	       (native->gpr[LOONGARCH64_GPR_SP] & (HAL_USERSPACE_STACK_ALIGNMENT - 1u)) == 0u &&
+	       (native->prmd & LOONGARCH64_PRMD_PIE) != 0u && (native->prmd & ~LOONGARCH64_PRMD_ALLOWED) == 0u;
 }
 
 bool hal_userspace_entry_valid(uintptr_t entry) {

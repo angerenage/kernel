@@ -3,7 +3,9 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <hal/paging.h>
 #include <hal/userspace.h>
+#include <core/mm.h>
 
 #include "interrupts/frame.h"
 
@@ -14,6 +16,7 @@ enum {
 	AARCH64_USER_SPSR_EL0T = 0x000u,
 	AARCH64_SPSR_MODE_MASK = 0x1fu,
 	AARCH64_SPSR_MODE_EL0T = 0x00u,
+	AARCH64_SPSR_USER_ALLOWED = 0xf3001c00u,
 	AARCH64_LINK_REGISTER = 30u,
 	AARCH64_THREAD_CTX_X19 = 0,
 	AARCH64_THREAD_CTX_X20,
@@ -69,6 +72,21 @@ bool hal_userspace_thread_context_init(struct thread_context* context, uintptr_t
 
 bool hal_userspace_frame_is_user(const struct hal_userspace_return_frame* frame) {
 	return aarch64_frame_is_user((const struct exception_frame*)frame);
+}
+
+bool hal_userspace_frame_valid(const struct hal_userspace_return_frame* frame) {
+	const struct exception_frame* native = (const struct exception_frame*)frame;
+	const struct hal_paging_info* paging = hal_paging_info();
+	uint64_t user_end;
+
+	if (!aarch64_frame_is_user(native) || paging == NULL ||
+			paging->minimum_leaf_size > UINT64_MAX - MM_USER_ADDRESS_SPACE_SIZE)
+		return false;
+	user_end = paging->minimum_leaf_size + MM_USER_ADDRESS_SPACE_SIZE;
+	return hal_userspace_entry_valid(native->elr) && native->elr >= paging->minimum_leaf_size &&
+	       native->elr < user_end && native->sp_el0 >= paging->minimum_leaf_size && native->sp_el0 <= user_end &&
+	       (native->sp_el0 & (HAL_USERSPACE_STACK_ALIGNMENT - 1u)) == 0u &&
+	       (native->spsr & ~AARCH64_SPSR_USER_ALLOWED) == 0u;
 }
 
 bool hal_userspace_entry_valid(uintptr_t entry) {

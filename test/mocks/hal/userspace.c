@@ -43,6 +43,10 @@ bool hal_userspace_frame_is_user(const struct hal_userspace_return_frame* frame)
 	return frame != NULL && frame->user;
 }
 
+bool hal_userspace_frame_valid(const struct hal_userspace_return_frame* frame) {
+	return hal_userspace_frame_is_user(frame) && hal_userspace_entry_valid(frame->entry) && frame->stack != 0u;
+}
+
 bool hal_userspace_entry_valid(uintptr_t entry) {
 	return entry != 0u;
 }

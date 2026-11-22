@@ -3,13 +3,17 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <hal/paging.h>
 #include <hal/userspace.h>
+#include <core/mm.h>
 
 #include "interrupts/frame.h"
 #include "interrupts/segments.h"
 
 #define X86_USER_RFLAGS 0x202ull
 #define X86_RFLAGS_DIRECTION (1ull << 10)
+#define X86_RFLAGS_RESERVED_ONE (1ull << 1)
+#define X86_USER_RFLAGS_ALLOWED 0x250fd7ull
 
 enum {
 	X86_USER_ENTRY_FRAME_WORDS = 5u,
@@ -79,6 +83,21 @@ bool hal_userspace_thread_context_init(struct thread_context* context, uintptr_t
 
 bool hal_userspace_frame_is_user(const struct hal_userspace_return_frame* frame) {
 	return x86_64_frame_is_user((const struct user_interrupt_frame*)frame);
+}
+
+bool hal_userspace_frame_valid(const struct hal_userspace_return_frame* frame) {
+	const struct user_interrupt_frame* native = (const struct user_interrupt_frame*)frame;
+	const struct hal_paging_info* paging = hal_paging_info();
+	uint64_t user_end;
+
+	if (!x86_64_frame_is_user(native) || paging == NULL ||
+			paging->minimum_leaf_size > UINT64_MAX - MM_USER_ADDRESS_SPACE_SIZE)
+		return false;
+	user_end = paging->minimum_leaf_size + MM_USER_ADDRESS_SPACE_SIZE;
+	return native->frame.rip >= paging->minimum_leaf_size && native->frame.rip < user_end &&
+	       native->rsp >= paging->minimum_leaf_size && native->rsp <= user_end &&
+	       (native->frame.rflags & X86_RFLAGS_RESERVED_ONE) != 0u &&
+	       (native->frame.rflags & ~X86_USER_RFLAGS_ALLOWED) == 0u;
 }
 
 bool hal_userspace_entry_valid(uintptr_t entry) {

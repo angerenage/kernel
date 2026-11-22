@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <hal/paging.h>
 #include <hal/userspace.h>
 
 #include <criterion/criterion.h>
@@ -11,6 +12,11 @@
 #define X86_RFLAGS_DIRECTION (1ull << 10)
 
 static struct hal_cpu_fp_context live_fp_context;
+
+const struct hal_paging_info* hal_paging_info(void) {
+	static const struct hal_paging_info info = {.minimum_leaf_size = 0x1000u};
+	return &info;
+}
 
 bool hal_cpu_fp_init(void) {
 	hal_cpu_fp_context_init(&live_fp_context);
@@ -92,6 +98,26 @@ Test(x86_64_userspace, recognizes_only_complete_user_frames) {
 	frame.ss = 0x10u;
 	cr_assert_not(hal_userspace_frame_is_user(opaque_const_frame(&frame)));
 	cr_assert_not(hal_userspace_frame_is_user(NULL));
+}
+
+Test(x86_64_userspace, validates_final_return_addresses_selectors_and_flags) {
+	struct user_interrupt_frame frame = user_frame();
+
+	cr_assert(hal_userspace_frame_valid(opaque_const_frame(&frame)));
+	frame.frame.rip = 0u;
+	cr_assert_not(hal_userspace_frame_valid(opaque_const_frame(&frame)));
+	frame = user_frame();
+	frame.rsp = 0u;
+	cr_assert_not(hal_userspace_frame_valid(opaque_const_frame(&frame)));
+	frame = user_frame();
+	frame.frame.cs = 0x08u;
+	cr_assert_not(hal_userspace_frame_valid(opaque_const_frame(&frame)));
+	frame = user_frame();
+	frame.frame.rflags = 0u;
+	cr_assert_not(hal_userspace_frame_valid(opaque_const_frame(&frame)));
+	frame = user_frame();
+	frame.frame.rflags |= 1ull << 12;
+	cr_assert_not(hal_userspace_frame_valid(opaque_const_frame(&frame)));
 }
 
 Test(x86_64_userspace, saves_and_restores_the_complete_user_context) {
