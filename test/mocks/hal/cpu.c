@@ -12,6 +12,7 @@ static hal_cpu_mock_context_switch_hook_t hosted_context_switch_hook;
 static hal_cpu_mock_kick_hook_t hosted_kick_hook;
 static bool hosted_thread_context_init_result = true;
 static size_t hosted_kick_count[64];
+static size_t hosted_kick_failures_remaining;
 
 uint64_t hal_cpu_boot_arch_id(void) {
 	return 0u;
@@ -73,11 +74,16 @@ bool hal_cpu_prepare_smp(void) {
 void hal_cpu_park(void) {
 }
 
-void hal_cpu_kick(const struct cpu* cpu) {
-	if (cpu == NULL || cpu->index >= 64u) return;
+bool hal_cpu_kick(const struct cpu* cpu) {
+	if (cpu == NULL || cpu->index >= 64u) return false;
 
 	hosted_kick_count[cpu->index]++;
+	if (hosted_kick_failures_remaining != 0u) {
+		hosted_kick_failures_remaining--;
+		return false;
+	}
 	if (hosted_kick_hook != NULL) hosted_kick_hook(cpu);
+	return true;
 }
 
 void hal_cpu_mock_set_context_switch_hook(hal_cpu_mock_context_switch_hook_t hook) {
@@ -93,9 +99,14 @@ void hal_cpu_mock_set_thread_context_init_result(bool result) {
 }
 
 void hal_cpu_mock_reset_kicks(void) {
+	hosted_kick_failures_remaining = 0u;
 	for (size_t i = 0; i < 64u; i++) {
 		hosted_kick_count[i] = 0u;
 	}
+}
+
+void hal_cpu_mock_fail_next_kicks(size_t count) {
+	hosted_kick_failures_remaining = count;
 }
 
 size_t hal_cpu_mock_kick_count(const struct cpu* cpu) {

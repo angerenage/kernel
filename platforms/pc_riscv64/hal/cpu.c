@@ -133,9 +133,12 @@ void hal_cpu_park(void) {
 	__asm__ volatile("wfi" : : : "memory");
 }
 
-void hal_cpu_kick(const struct cpu* cpu) {
-	if (cpu == NULL) return;
+bool hal_cpu_kick(const struct cpu* cpu) {
+	struct riscv64_sbi_ret result;
+
+	if (cpu == NULL) return false;
 
 	/* A one-bit mask based at the target hart ID selects exactly that hart. */
-	(void)riscv64_sbi_call2(1ul, (unsigned long)cpu->arch_id, RISCV64_SBI_FID_SEND_IPI, RISCV64_SBI_EID_IPI);
+	result = riscv64_sbi_call2(1ul, (unsigned long)cpu->arch_id, RISCV64_SBI_FID_SEND_IPI, RISCV64_SBI_EID_IPI);
+	return result.error == 0;
 }

@@ -116,6 +116,6 @@ void hal_cpu_park(void) {
 	__asm__ volatile("idle 0" : : : "memory");
 }
 
-void hal_cpu_kick(const struct cpu* cpu) {
-	(void)loongarch64_ipi_send(cpu, LOONGARCH64_IPI_VECTOR_WAKE);
+bool hal_cpu_kick(const struct cpu* cpu) {
+	return loongarch64_ipi_send(cpu, LOONGARCH64_IPI_VECTOR_WAKE);
 }

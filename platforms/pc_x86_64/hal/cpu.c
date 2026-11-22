@@ -150,8 +150,8 @@ void hal_cpu_park(void) {
 	__asm__ volatile("hlt" : : : "memory");
 }
 
-void hal_cpu_kick(const struct cpu* cpu) {
-	if (cpu == NULL) return;
+bool hal_cpu_kick(const struct cpu* cpu) {
+	if (cpu == NULL) return false;
 
-	(void)apic_send_ipi((uint32_t)cpu->arch_id, X86_LAPIC_WAKE_VECTOR);
+	return apic_send_ipi((uint32_t)cpu->arch_id, X86_LAPIC_WAKE_VECTOR);
 }

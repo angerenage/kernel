@@ -88,5 +88,5 @@ bool hal_cpu_prepare_smp(void);
 /* Park the current CPU in the architecture's low-level idle instruction until the next external wake event. */
 void hal_cpu_park(void);
 
-/* Best-effort wake request for cpu so it can observe newly queued work. */
-void hal_cpu_kick(const struct cpu* cpu);
+/* Request that cpu observe newly queued work and report whether delivery was accepted. */
+bool hal_cpu_kick(const struct cpu* cpu);

@@ -12,6 +12,7 @@ struct sched_stats {
 	uint64_t context_switch_count;
 	uint64_t timeslice_preempt_count;
 	uint64_t yield_count;
+	uint64_t kick_failure_count;
 };
 
 struct sched_cpu_stats {
@@ -22,6 +23,7 @@ struct sched_cpu_stats {
 	uint64_t context_switch_count;
 	uint64_t timeslice_preempt_count;
 	uint64_t yield_count;
+	uint64_t kick_failure_count;
 };
 
 /* Completion reason returned by an explicitly interruptible blocking operation. */

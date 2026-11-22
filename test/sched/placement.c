@@ -203,3 +203,42 @@ Test(sched, remote_duplicate_enqueue_does_not_duplicate_kicks_or_queue_entries) 
 
 	sched_regression_reset();
 }
+
+Test(sched, remote_enqueue_retries_transient_kick_failures) {
+	struct cpu* bsp;
+	struct cpu* ap;
+	struct thread remote;
+	struct sched_cpu_stats stats;
+
+	sched_regression_init_dual_cpu(&bsp, &ap);
+	hal_cpu_mock_reset_kicks();
+	hal_cpu_mock_fail_next_kicks(2u);
+	sched_regression_init_thread(&remote, "remote", 0x320000u, THREAD_PRIORITY_DEFAULT, ap, NULL);
+
+	cr_assert(sched_make_runnable(&remote), "remote enqueue failed");
+	cr_assert_eq(hal_cpu_mock_kick_count(ap), 3u, "transient failure should succeed on the third kick");
+	cr_assert(sched_get_cpu_stats(ap, &stats), "AP scheduler statistics unavailable");
+	cr_assert_eq(stats.kick_failure_count, 0u, "recovered delivery must not count as a terminal kick failure");
+
+	sched_regression_reset();
+}
+
+Test(sched, remote_enqueue_reports_exhausted_kick_retries) {
+	struct cpu* bsp;
+	struct cpu* ap;
+	struct thread remote;
+	struct sched_cpu_stats stats;
+
+	sched_regression_init_dual_cpu(&bsp, &ap);
+	hal_cpu_mock_reset_kicks();
+	hal_cpu_mock_fail_next_kicks(3u);
+	sched_regression_init_thread(&remote, "remote", 0x324000u, THREAD_PRIORITY_DEFAULT, ap, NULL);
+
+	cr_assert(sched_make_runnable(&remote), "remote enqueue failed");
+	cr_assert(sched_reschedule_pending(ap), "failed delivery must preserve the reschedule request");
+	cr_assert_eq(hal_cpu_mock_kick_count(ap), 3u, "scheduler must stop after its bounded retry count");
+	cr_assert(sched_get_cpu_stats(ap, &stats), "AP scheduler statistics unavailable");
+	cr_assert_eq(stats.kick_failure_count, 1u, "exhausted retries must be reported in scheduler statistics");
+
+	sched_regression_reset();
+}

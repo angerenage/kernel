@@ -16,6 +16,7 @@
 
 #define SCHED_MAX_CPU_COUNT 64u
 #define SCHED_IDLE_NAME_MAX 16u
+#define SCHED_KICK_ATTEMPTS 3u
 
 #define TRACE_SCHED_PHASE(phase, type)                                                                                 \
 	kernel_trace_emit(KERNEL_TRACE_EVENT_SCHED_PHASE, type, kernel_trace_thread_id(sched_current_thread()), phase)
@@ -47,6 +48,17 @@ static struct sched_cpu_state* sched_state_for_cpu(const struct cpu* cpu);
 static void sched_stat_increment(uint64_t* counter) {
 	if (counter == NULL) return;
 	(void)__atomic_fetch_add(counter, 1u, __ATOMIC_RELAXED);
+}
+
+static bool sched_kick_remote(struct cpu* cpu) {
+	struct sched_cpu_state* state = sched_state_for_cpu(cpu);
+
+	if (cpu == NULL || cpu == cpu_current()) return false;
+	for (size_t attempt = 0u; attempt < SCHED_KICK_ATTEMPTS; attempt++) {
+		if (hal_cpu_kick(cpu)) return true;
+	}
+	if (state != NULL) sched_stat_increment(&state->stats.kick_failure_count);
+	return false;
 }
 
 static void sched_clear_reschedule_request(struct cpu* cpu) {
@@ -115,7 +127,7 @@ static void sched_charge_current_timeslice_ticks(struct cpu* cpu, uint64_t tick_
 	if (!sched_run_queue_has_priority_at_least(cpu, sched_effective_priority(current))) return;
 
 	sched_request_reschedule(cpu);
-	if (cpu != cpu_current()) hal_cpu_kick(cpu);
+	if (cpu != cpu_current()) (void)sched_kick_remote(cpu);
 }
 
 static void sched_charge_current_timeslice(struct cpu* cpu) {
@@ -554,7 +566,7 @@ static bool sched_make_runnable_on_cpu(struct cpu* cpu, struct thread* thread, b
 
 	if (cpu != NULL && cpu != cpu_current()) {
 		sched_request_reschedule(cpu);
-		hal_cpu_kick(cpu);
+		(void)sched_kick_remote(cpu);
 	}
 	else if (sched_thread_should_preempt_current(cpu, thread)) {
 		sched_request_reschedule(cpu);
@@ -683,7 +695,7 @@ void sched_set_thread_effective_priority(struct thread* thread, int32_t priority
 		if (run_queue_update_priority(&state->run_queue, thread, normalized_priority)) {
 			if (cpu != NULL && cpu != cpu_current()) {
 				sched_request_reschedule(cpu);
-				hal_cpu_kick(cpu);
+				(void)sched_kick_remote(cpu);
 			}
 			return;
 		}
@@ -696,7 +708,7 @@ void sched_set_thread_effective_priority(struct thread* thread, int32_t priority
 	if (state != NULL && cpu_current_thread_load(cpu) == thread &&
 			sched_run_queue_has_priority_at_least(cpu, normalized_priority + 1)) {
 		sched_request_reschedule(cpu);
-		if (cpu != cpu_current()) hal_cpu_kick(cpu);
+		if (cpu != cpu_current()) (void)sched_kick_remote(cpu);
 	}
 }
 
@@ -928,7 +940,7 @@ void sched_tick_remote(struct cpu* cpu) {
 	if (state == NULL) return;
 
 	(void)__atomic_fetch_add(&state->pending_ticks, 1u, __ATOMIC_RELEASE);
-	hal_cpu_kick(cpu);
+	(void)sched_kick_remote(cpu);
 }
 
 bool sched_block_current_locked(
@@ -1185,7 +1197,7 @@ bool sched_interrupt_thread(struct thread* thread) {
 	if (thread->state == THREAD_STATE_RUNNING) {
 		if (cpu != NULL && cpu != cpu_current()) {
 			sched_request_reschedule(cpu);
-			hal_cpu_kick(cpu);
+			(void)sched_kick_remote(cpu);
 		}
 		return true;
 	}
@@ -1303,6 +1315,8 @@ void sched_get_stats(struct sched_stats* out_stats) {
 		out_stats->timeslice_preempt_count +=
 				__atomic_load_n(&sched_cpu_state[i].stats.timeslice_preempt_count, __ATOMIC_RELAXED);
 		out_stats->yield_count += __atomic_load_n(&sched_cpu_state[i].stats.yield_count, __ATOMIC_RELAXED);
+		out_stats->kick_failure_count +=
+				__atomic_load_n(&sched_cpu_state[i].stats.kick_failure_count, __ATOMIC_RELAXED);
 	}
 }
 
@@ -1318,6 +1332,7 @@ bool sched_get_cpu_stats(const struct cpu* cpu, struct sched_cpu_stats* out_stat
 	out_stats->context_switch_count = __atomic_load_n(&state->stats.context_switch_count, __ATOMIC_RELAXED);
 	out_stats->timeslice_preempt_count = __atomic_load_n(&state->stats.timeslice_preempt_count, __ATOMIC_RELAXED);
 	out_stats->yield_count = __atomic_load_n(&state->stats.yield_count, __ATOMIC_RELAXED);
+	out_stats->kick_failure_count = __atomic_load_n(&state->stats.kick_failure_count, __ATOMIC_RELAXED);
 	return true;
 }
 
@@ -1325,10 +1340,11 @@ void sched_debug_dump(void) {
 	struct sched_stats stats;
 
 	sched_get_stats(&stats);
-	printf("kernel: sched stats: switches=%llu preempts=%llu yields=%llu ticks=%llu\n",
+	printf("kernel: sched stats: switches=%llu preempts=%llu yields=%llu kick-failures=%llu ticks=%llu\n",
 			(unsigned long long)stats.context_switch_count,
 			(unsigned long long)stats.timeslice_preempt_count,
 			(unsigned long long)stats.yield_count,
+			(unsigned long long)stats.kick_failure_count,
 			(unsigned long long)sched_tick_count());
 }
 
