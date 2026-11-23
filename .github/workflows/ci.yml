@@ -162,14 +162,20 @@ jobs:
         run: |
           qemu-system-${{ matrix.arch }} --version
           llvm-readelf -lW "build-${{ matrix.arch }}/kernel/kernel.elf"
+          qemu_args=(
+            -d guest_errors,cpu_reset
+            -D "$PWD/build-${{ matrix.arch }}/qemu-${{ matrix.arch }}-${{ matrix.iommu }}.debug.log"
+          )
+          if [[ "${{ matrix.arch }}" == "x86_64" ]]; then
+            qemu_args+=( -accel tcg,thread=single )
+          fi
           bash scripts/run.sh \
             --kernel-selftest \
             --arch "${{ matrix.arch }}" \
             --iommu "${{ matrix.iommu }}" \
             --timeout 45 \
             -- \
-            -d guest_errors,cpu_reset \
-            -D "$PWD/build-${{ matrix.arch }}/qemu-${{ matrix.arch }}-${{ matrix.iommu }}.debug.log"
+            "${qemu_args[@]}"
 
       - name: Upload kernel selftest logs
         if: always()

@@ -12,6 +12,7 @@
 
 #define CPU_BOOT_MAX_COUNT 64u
 #define CPU_BOOT_STACK_SIZE 0x4000u
+#define CPU_AP_DISPATCH_RELAXATION_LIMIT 10000000u
 #define CPU_AP_START_TIMEOUT_MS 1000u
 
 static struct cpu_init_info boot_cpu_init[CPU_BOOT_MAX_COUNT];
@@ -52,6 +53,15 @@ static void kernel_cpu_mp_entry(size_t cpu_index, void* arg) {
 	}
 	if (!cpu_transition_state(cpu, CPU_STATE_STARTING, CPU_STATE_ONLINE)) kernel_cpu_mp_fail(cpu);
 	sched_enter_idle();
+}
+
+static bool kernel_cpu_wait_until_bound(struct cpu* cpu) {
+	for (size_t count = 0u; count < CPU_AP_DISPATCH_RELAXATION_LIMIT; count++) {
+		if (kernel_cpu_boot_current_pointer_ok(cpu)) return true;
+		if (cpu_state_get(cpu) != CPU_STATE_STARTING) return false;
+		spinlock_relax();
+	}
+	return false;
 }
 
 bool kernel_cpu_boot_init(uintptr_t boot_stack_base, uintptr_t boot_stack_top) {
@@ -107,7 +117,8 @@ bool kernel_cpu_boot_start_aps(void) {
 			continue;
 		}
 
-		if (!cpu_wait_until_state(cpu, CPU_STATE_ONLINE, CPU_AP_START_TIMEOUT_MS)) {
+		if (!kernel_cpu_wait_until_bound(cpu) ||
+				!cpu_wait_until_state(cpu, CPU_STATE_ONLINE, CPU_AP_START_TIMEOUT_MS)) {
 			(void)cpu_transition_state(cpu, CPU_STATE_STARTING, CPU_STATE_FAILED);
 			if (cpu_state_get(cpu) == CPU_STATE_ONLINE) continue;
 			printf("kernel: AP cpu%zu failed to reach ONLINE (state=%u, bound=%u), excluding it\n",
