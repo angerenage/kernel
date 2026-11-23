@@ -18,6 +18,7 @@
 #include "../../paging_range.h"
 #include "../../paging_transaction.h"
 #include "interrupts/apic.h"
+#include "paging_policy.h"
 
 #define X86_PTE_PRESENT (1ull << 0)
 #define X86_PTE_WRITE (1ull << 1)
@@ -43,9 +44,6 @@
 #define X86_CPUID_FEATURE_PAT (1u << 16)
 #define X86_CPUID_EXT_FEATURE_NX (1u << 20)
 #define X86_CPUID_EXT_FEATURE_1G_PAGE (1u << 26)
-#define X86_PAT_UC 0u
-#define X86_PAT_WC 1u
-#define X86_PAT_ENTRY_COUNT 8u
 #define X86_PAT_WC_FALLBACK_INDEX 1u
 
 struct hal_paging_space {
@@ -424,6 +422,8 @@ bool hal_paging_init(void) {
 	uint32_t basic_features;
 	unsigned physical_bits;
 	uint64_t control;
+	uint64_t pat = 0u;
+	bool pat_available;
 	const struct pmm_info* physical_memory = pmm_info();
 
 	initialized = false;
@@ -464,6 +464,12 @@ bool hal_paging_init(void) {
 
 	x86_cpuid(1u, 0u, &eax, &ebx, &ecx, &edx);
 	basic_features = edx;
+	pat_available = (basic_features & X86_CPUID_FEATURE_PAT) != 0u;
+	if (pat_available) pat = x86_read_msr(X86_MSR_PAT);
+	if (!x86_pat_normal_memory_supported(pat_available, pat)) {
+		spinlock_unlock_irqrestore(&paging_lock, state);
+		return false;
+	}
 	control = x86_read_cr0() | X86_CR0_WP;
 	x86_write_cr0(control);
 	if ((x86_read_cr0() & X86_CR0_WP) == 0u) {
@@ -475,9 +481,8 @@ bool hal_paging_init(void) {
 		x86_write_cr4(control);
 		global_pages_supported = (x86_read_cr4() & X86_CR4_PGE) != 0u;
 	}
-	device_memory_supported = (basic_features & X86_CPUID_FEATURE_PAT) != 0u &&
-	                          ((x86_read_msr(X86_MSR_PAT) >> 24u) & 0xffu) == X86_PAT_UC;
-	if ((basic_features & X86_CPUID_FEATURE_PAT) != 0u) {
+	device_memory_supported = pat_available && x86_pat_entry(pat, 3u) == X86_PAT_UC;
+	if (pat_available) {
 		write_combining_supported = x86_pat_find_write_combining(&write_combining_pat_index);
 		if (!write_combining_supported) {
 			write_combining_pat_index = X86_PAT_WC_FALLBACK_INDEX;
