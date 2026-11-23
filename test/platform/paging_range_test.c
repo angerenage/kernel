@@ -30,3 +30,14 @@ Test(paging_range, rejects_empty_overflowing_and_invalid_geometry) {
 	cr_assert_not(paging_virtual_range_end(0x1000u, 0x1000u, 65u, &end));
 	cr_assert_not(paging_virtual_range_end(0x1000u, 0x1000u, 48u, NULL));
 }
+
+Test(paging_range, accepts_aarch64_split_address_spaces) {
+	uintptr_t end = 0u;
+
+	cr_assert(paging_split_virtual_range_end(0x8000000u, 0x1000u, 48u, false, &end));
+	cr_assert_eq(end, 0x8001000u);
+	cr_assert(paging_split_virtual_range_end(UINT64_C(0xffff000008000000), 0x1000u, 48u, true, &end));
+	cr_assert_eq(end, UINT64_C(0xffff000008001000));
+	cr_assert_not(paging_split_virtual_range_end(UINT64_C(0x0000fffffffff000), 0x2000u, 48u, false, &end));
+	cr_assert_not(paging_split_virtual_range_end(UINT64_C(0xffff000008000000), 0x1000u, 48u, false, &end));
+}

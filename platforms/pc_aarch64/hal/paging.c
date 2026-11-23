@@ -659,7 +659,8 @@ static bool aarch64_range_args(struct hal_paging_space* space, uintptr_t virt, s
 	if (space == NULL || !initialized || size == 0u || (virt & (paging_info.minimum_leaf_size - 1u)) != 0u ||
 			(size & (paging_info.minimum_leaf_size - 1u)) != 0u ||
 			!aarch64_walk_params_for_space(space, virt, out_params) ||
-			!paging_virtual_range_end(virt, size, (unsigned)out_params->va_bits, out_end))
+			!paging_split_virtual_range_end(
+					virt, size, (unsigned)out_params->va_bits, aarch64_is_upper_region(virt), out_end))
 		return false;
 	return true;
 }
@@ -840,7 +841,11 @@ bool hal_paging_map(struct hal_paging_space* space, const struct hal_paging_map_
 			((request->physical_address + request->size - 1u) &
 					~(pte_address_mask | ((uint64_t)paging_info.minimum_leaf_size - 1u))) != 0u ||
 			!aarch64_walk_params_for_space(space, request->virtual_address, &params) ||
-			!paging_virtual_range_end(request->virtual_address, request->size, (unsigned)params.va_bits, &end))
+			!paging_split_virtual_range_end(request->virtual_address,
+					request->size,
+					(unsigned)params.va_bits,
+					aarch64_is_upper_region(request->virtual_address),
+					&end))
 		return false;
 	struct irq_state state = spinlock_lock_irqsave(&paging_lock);
 	struct paging_transaction transaction = {0};
