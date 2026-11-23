@@ -605,6 +605,12 @@ test_suites = [
 		'suites': ['unit', 'platform'],
 	},
 	{
+		'name': 'riscv64_paging_policy',
+		'sources': files('platform/riscv64/paging_policy_test.c'),
+		'link_with': base_test_lib,
+		'suites': ['unit', 'platform'],
+	},
+	{
 		'name': 'acpi',
 		'sources': files(
 			'acpi_test.c',

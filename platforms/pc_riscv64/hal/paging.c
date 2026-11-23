@@ -15,6 +15,7 @@
 
 #include "../../paging_range.h"
 #include "../../paging_transaction.h"
+#include "paging_policy.h"
 
 #define RISCV_PTE_V (1ull << 0)
 #define RISCV_PTE_R (1ull << 1)
@@ -360,8 +361,7 @@ static bool riscv_protection_supported(uint64_t flags) {
 }
 
 bool hal_paging_memory_type_supported(enum memory_type memory_type) {
-	return memory_type == MEMORY_TYPE_NORMAL || memory_type == MEMORY_TYPE_DEVICE ||
-	       (memory_type == MEMORY_TYPE_WRITE_COMBINING && svpbmt_available);
+	return riscv_paging_memory_type_supported(memory_type, svpbmt_available);
 }
 
 bool hal_paging_mapping_supported(uint64_t flags, enum memory_type memory_type) {
