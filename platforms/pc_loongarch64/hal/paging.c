@@ -14,6 +14,7 @@
 #include <core/pmm.h>
 #include <core/spinlock.h>
 
+#include "../../paging_range.h"
 #include "../../paging_transaction.h"
 #include "interrupts/ipi.h"
 
@@ -608,14 +609,11 @@ static bool loongarch_change_range(uint64_t* table, unsigned level, uintptr_t st
 }
 
 static bool loongarch_range_args(struct hal_paging_space* space, uintptr_t virt, size_t size, uintptr_t* out_end) {
-	uint64_t end;
 	if (space == NULL || !initialized || size == 0u || !loongarch_virtual_address_valid(virt) ||
 			(virt & (paging_info.minimum_leaf_size - 1u)) != 0u ||
-			(size & (paging_info.minimum_leaf_size - 1u)) != 0u || add_overflow_u64(virt, size, &end) ||
-			!loongarch_virtual_address_valid((uintptr_t)end - 1u) ||
-			loongarch_upper_half(virt) != loongarch_upper_half((uintptr_t)end - 1u))
+			(size & (paging_info.minimum_leaf_size - 1u)) != 0u ||
+			!paging_virtual_range_end(virt, size, valen_bits, out_end))
 		return false;
-	*out_end = (uintptr_t)end;
 	return true;
 }
 
@@ -773,20 +771,16 @@ bool hal_paging_remap(struct hal_paging_space* space, const struct hal_paging_re
 }
 
 bool hal_paging_map(struct hal_paging_space* space, const struct hal_paging_map_request* request) {
-	uint64_t end;
+	uintptr_t end;
 	if (space == NULL || request == NULL || !initialized ||
 			!hal_paging_mapping_supported(request->flags, request->memory_type) || request->size == 0u ||
 			(request->virtual_address & (paging_info.minimum_leaf_size - 1u)) != 0u ||
 			(request->physical_address & (paging_info.minimum_leaf_size - 1u)) != 0u ||
 			(request->size & (paging_info.minimum_leaf_size - 1u)) != 0u ||
-			!loongarch_virtual_address_valid(request->virtual_address) ||
-			request->size > UINTPTR_MAX - request->virtual_address ||
+			!paging_virtual_range_end(request->virtual_address, request->size, valen_bits, &end) ||
 			request->size > UINTPTR_MAX - request->physical_address ||
 			((request->physical_address + request->size - 1u) &
-					~(phys_mask | ((uint64_t)paging_info.minimum_leaf_size - 1u))) != 0u ||
-			add_overflow_u64(request->virtual_address, request->size, &end) ||
-			!loongarch_virtual_address_valid((uintptr_t)end - 1u) ||
-			loongarch_upper_half(request->virtual_address) != loongarch_upper_half((uintptr_t)end - 1u))
+					~(phys_mask | ((uint64_t)paging_info.minimum_leaf_size - 1u))) != 0u)
 		return false;
 	struct irq_state state = spinlock_lock_irqsave(&paging_lock);
 	struct paging_transaction transaction = {0};

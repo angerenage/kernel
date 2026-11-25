@@ -13,6 +13,7 @@
 #include <core/pmm.h>
 #include <core/spinlock.h>
 
+#include "../../paging_range.h"
 #include "../../paging_transaction.h"
 
 #define RISCV_PTE_V (1ull << 0)
@@ -572,13 +573,12 @@ static bool riscv_change_range(uint64_t* table, int level, uintptr_t start, uint
 }
 
 static bool riscv_range_args(struct hal_paging_space* space, uintptr_t virt, size_t size, uintptr_t* out_end) {
-	uint64_t end;
+	unsigned address_bits = minimum_leaf_shift + 9u * (unsigned)paging_levels;
 	if (space == NULL || !initialized || size == 0u || !riscv_virtual_address_valid(virt) ||
 			(virt & (paging_info.minimum_leaf_size - 1u)) != 0u ||
-			(size & (paging_info.minimum_leaf_size - 1u)) != 0u || add_overflow_u64(virt, size, &end))
+			(size & (paging_info.minimum_leaf_size - 1u)) != 0u ||
+			!paging_virtual_range_end(virt, size, address_bits, out_end))
 		return false;
-	if (!riscv_virtual_address_valid((uintptr_t)end - 1u)) return false;
-	*out_end = (uintptr_t)end;
 	return true;
 }
 
@@ -735,19 +735,19 @@ bool hal_paging_remap(struct hal_paging_space* space, const struct hal_paging_re
 }
 
 bool hal_paging_map(struct hal_paging_space* space, const struct hal_paging_map_request* request) {
+	uintptr_t end;
+	unsigned address_bits = minimum_leaf_shift + 9u * (unsigned)paging_levels;
 	if (space == NULL || request == NULL || !initialized ||
 			!hal_paging_mapping_supported(request->flags, request->memory_type) || request->size == 0u ||
 			(request->virtual_address & (paging_info.minimum_leaf_size - 1u)) != 0u ||
 			(request->physical_address & (paging_info.minimum_leaf_size - 1u)) != 0u ||
 			(request->size & (paging_info.minimum_leaf_size - 1u)) != 0u ||
-			!riscv_virtual_address_valid(request->virtual_address) ||
-			request->size > UINTPTR_MAX - request->virtual_address ||
+			!paging_virtual_range_end(request->virtual_address, request->size, address_bits, &end) ||
 			request->size > UINTPTR_MAX - request->physical_address ||
 			((request->physical_address + request->size - 1u) &
 					~((RISCV_PTE_PPN_MASK << (minimum_leaf_shift - 10u)) |
 							((uint64_t)paging_info.minimum_leaf_size - 1u))) != 0u)
 		return false;
-	if (!riscv_virtual_address_valid(request->virtual_address + request->size - 1u)) return false;
 	struct irq_state state = spinlock_lock_irqsave(&paging_lock);
 	struct paging_transaction transaction = {0};
 	size_t mapped = 0u;

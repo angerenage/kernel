@@ -599,6 +599,12 @@ test_suites = [
 		'suites': ['unit', 'memory'],
 	},
 	{
+		'name': 'paging_range',
+		'sources': files('platform/paging_range_test.c'),
+		'link_with': base_test_lib,
+		'suites': ['unit', 'platform'],
+	},
+	{
 		'name': 'acpi',
 		'sources': files(
 			'acpi_test.c',

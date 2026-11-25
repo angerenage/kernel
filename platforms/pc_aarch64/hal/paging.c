@@ -10,6 +10,7 @@
 #include <core/pmm.h>
 #include <core/spinlock.h>
 
+#include "../../paging_range.h"
 #include "../../paging_transaction.h"
 
 #define AARCH64_DESC_VALID (1ull << 0)
@@ -655,13 +656,11 @@ static bool aarch64_change_range(uint64_t* table, unsigned level, uintptr_t star
 
 static bool aarch64_range_args(struct hal_paging_space* space, uintptr_t virt, size_t size, uintptr_t* out_end,
 		struct aarch64_walk_params* out_params) {
-	uint64_t end;
 	if (space == NULL || !initialized || size == 0u || (virt & (paging_info.minimum_leaf_size - 1u)) != 0u ||
-			(size & (paging_info.minimum_leaf_size - 1u)) != 0u || add_overflow_u64(virt, size, &end) ||
+			(size & (paging_info.minimum_leaf_size - 1u)) != 0u ||
 			!aarch64_walk_params_for_space(space, virt, out_params) ||
-			aarch64_is_upper_region(virt) != aarch64_is_upper_region((uintptr_t)end - 1u))
+			!paging_virtual_range_end(virt, size, (unsigned)out_params->va_bits, out_end))
 		return false;
-	*out_end = (uintptr_t)end;
 	return true;
 }
 
@@ -831,19 +830,17 @@ bool hal_paging_remap(struct hal_paging_space* space, const struct hal_paging_re
 
 bool hal_paging_map(struct hal_paging_space* space, const struct hal_paging_map_request* request) {
 	struct aarch64_walk_params params;
-	uint64_t end;
+	uintptr_t end;
 	if (space == NULL || request == NULL || !initialized ||
 			!hal_paging_mapping_supported(request->flags, request->memory_type) || request->size == 0u ||
 			(request->virtual_address & (paging_info.minimum_leaf_size - 1u)) != 0u ||
 			(request->physical_address & (paging_info.minimum_leaf_size - 1u)) != 0u ||
 			(request->size & (paging_info.minimum_leaf_size - 1u)) != 0u ||
-			request->size > UINTPTR_MAX - request->virtual_address ||
 			request->size > UINTPTR_MAX - request->physical_address ||
 			((request->physical_address + request->size - 1u) &
 					~(pte_address_mask | ((uint64_t)paging_info.minimum_leaf_size - 1u))) != 0u ||
-			add_overflow_u64(request->virtual_address, request->size, &end) ||
 			!aarch64_walk_params_for_space(space, request->virtual_address, &params) ||
-			aarch64_is_upper_region(request->virtual_address) != aarch64_is_upper_region((uintptr_t)end - 1u))
+			!paging_virtual_range_end(request->virtual_address, request->size, (unsigned)params.va_bits, &end))
 		return false;
 	struct irq_state state = spinlock_lock_irqsave(&paging_lock);
 	struct paging_transaction transaction = {0};
